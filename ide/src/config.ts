@@ -1,8 +1,8 @@
 
 
 const config = {
-  apiBase:        import.meta.env.VITE_API_BASE         || 'https://g-14445.cicy.de5.net',
-  ttydBase:       import.meta.env.VITE_TTYD_BASE        || 'https://g-14445.cicy.de5.net',
+  apiBase:        import.meta.env.VITE_API_BASE         || 'https://g-14446.cicy.de5.net',
+  ttydBase:       import.meta.env.VITE_TTYD_BASE        || 'https://g-14446.cicy.de5.net',
   ideBase:        import.meta.env.VITE_IDE_BASE          || 'https://ide.cicy.de5.net',
   codeServerBase: import.meta.env.VITE_CODE_SERVER_BASE  || 'https://code.cicy.de5.net',
   desktopBase:    import.meta.env.VITE_DESKTOP_BASE      || 'https://desktop.cicy.de5.net',
