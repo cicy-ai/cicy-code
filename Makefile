@@ -1,20 +1,20 @@
-.PHONY: dev dev-ide dev-backend build-ide build-backend build stop
+.PHONY: dev dev-ide dev-api build-ide build-api build stop
 
 # Development
 dev-ide:
 	cd ide && npm run dev
 
-dev-backend:
-	cd backend && go run manager.go
+dev-api:
+	cd api && go run manager.go
 
 # Build
 build-ide:
 	cd ide && npm ci && npm run build
 
-build-backend:
-	cd backend && go build -o cicy-dev-backend manager.go
+build-api:
+	cd api && go build -o cicy-code-api manager.go
 
-build: build-ide build-backend
+build: build-ide build-api
 
 # Stop
 stop:

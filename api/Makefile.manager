@@ -1,0 +1,13 @@
+.PHONY: build run clean
+
+build:
+	export GOROOT=/usr/lib/go && go build -o cicy-code-api manager.go
+
+run: build
+	./cicy-code-api
+
+clean:
+	rm -f cicy-code-api
+
+install: build
+	cp cicy-code-api /usr/local/bin/

@@ -1,6 +1,6 @@
 services:
   backend:
-    build: ./backend
+    build: ./api
     ports:
       - "14444:14444"
     environment:
