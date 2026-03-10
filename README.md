@@ -15,18 +15,24 @@ cicy-code/
 ## 快速启动
 
 ```bash
-# 生产模式
-make prod
-# 访问: http://localhost:8080
+# 前端开发
+make dev-ide        # http://localhost:6902
 
-# 开发模式 (ide hot-reload)
-make dev
-# IDE: http://localhost:6903
-# API: http://localhost:14444
+# 后端开发
+make dev-backend    # http://localhost:14444
 
-# 停止
-make stop
+# 构建
+make build          # 构建前后端
+make build-backend  # 只构建后端 → backend/ttyd-manager
+make build-ide      # 只构建前端 → ide/dist/
 ```
+
+### 依赖
+
+- Go 1.18+
+- Node.js 20+
+- MySQL
+- tmux
 
 ## 技术栈
 

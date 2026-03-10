@@ -42,8 +42,8 @@ ide/src/
 
 ## 构建
 - 前端: Vite dev server port 6904, HMR 自动刷新，不要 vite build
-- 后端: `cd ~/projects/ai-workers/ttyd-manager && export GOROOT=/usr/lib/go && go build -o ttyd-manager-v2 ./mgr/`
-- 后端重启: `tmux send-keys -t "w-test-mgr:0.0" C-c && sleep 2 && tmux send-keys -t "w-test-mgr:0.0" "./ttyd-manager-v2" Enter`
+- 后端: `cd ~/projects/cicy-code/backend && export GOROOT=/usr/lib/go && go build -o cicy-code ./mgr/`
+- 后端重启: `tmux send-keys -t "w-test-mgr:0.0" C-c && sleep 2 && tmux send-keys -t "w-test-mgr:0.0" "./cicy-code" Enter`
 
 ## 工作原则
 - 最小改动，不写多余代码

@@ -1,12 +1,11 @@
-.PHONY: dev prod build-ide build-backend clean
+.PHONY: dev dev-ide dev-backend build-ide build-backend build stop
 
-# Development: ide hot-reload + backend + mysql
-dev:
-	docker compose --profile dev up ide-dev backend mysql
+# Development
+dev-ide:
+	cd ide && npm run dev
 
-# Production: all services
-prod:
-	docker compose up -d ide backend mysql
+dev-backend:
+	cd backend && go run manager.go
 
 # Build
 build-ide:
@@ -19,7 +18,5 @@ build: build-ide build-backend
 
 # Stop
 stop:
-	docker compose --profile dev down
-
-clean:
-	docker compose --profile dev down -v
+	@pkill -f "vite" 2>/dev/null || true
+	@pkill -f "ttyd-manager" 2>/dev/null || true
