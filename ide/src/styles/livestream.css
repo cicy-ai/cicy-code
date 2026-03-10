@@ -1,0 +1,27 @@
+/* Livestream Theme - 高对比度直播模式 */
+:root[data-theme="livestream"] {
+  --vsc-bg: #0a0a0a;
+  --vsc-bg-secondary: #111111;
+  --vsc-bg-hover: #1a1a1a;
+  --vsc-bg-active: #222222;
+  --vsc-bg-titlebar: #0f0f0f;
+  --vsc-input: #1a1a1a;
+  --vsc-border: #2a2a2a;
+  --vsc-border-subtle: #222222;
+  --vsc-text: #f0f0f0;
+  --vsc-text-secondary: #aaaaaa;
+  --vsc-text-muted: #888888;
+  --vsc-text-disabled: #666666;
+  --vsc-accent: #00ff88;
+  --vsc-accent-hover: #00cc6a;
+  --vsc-button: #00cc6a;
+  --vsc-button-hover: #00ff88;
+  --vsc-link: #00ff88;
+  --vsc-success: #00ff88;
+  --vsc-warning: #ffcc00;
+  --vsc-error: #ff4444;
+  --vsc-selection: #00ff8833;
+  --vsc-font-size: 16px;
+  --vsc-terminal-font-size: 18px;
+  font-size: 16px;
+}

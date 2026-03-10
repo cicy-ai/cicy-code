@@ -1,0 +1,24 @@
+{
+  "name": "ttyd-go",
+  "version": "1.0.0",
+  "description": "[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)",
+  "main": "test-ws.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cicy-dev/ttyd-go.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/cicy-dev/ttyd-go/issues"
+  },
+  "homepage": "https://github.com/cicy-dev/ttyd-go#readme",
+  "dependencies": {
+    "ws": "^8.19.0"
+  }
+}

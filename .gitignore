@@ -1,0 +1,12 @@
+node_modules
+ide/node_modules
+ide/dist
+backend/ttyd-go
+backend/ttyd-manager
+backend/ttyd-manager-v2
+backend/bindata
+backend/js/node_modules
+backend/logs/*
+*.psd
+*.gif
+.env

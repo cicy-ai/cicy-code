@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0d1117; color: #c9d1d9; font-family: -apple-system, 'Segoe UI', sans-serif; font-size: 12px; padding: 20px; }
+.container { width: 1100px; height: 650px; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; display: flex; background: #161b22; }
+
+/* Left sidebar */
+.left { width: 200px; background: #0d1117; border-right: 1px solid #30363d; display: flex; flex-direction: column; }
+.left-header { padding: 10px; border-bottom: 1px solid #30363d; font-weight: 600; font-size: 13px; color: #58a6ff; }
+.agent-item { padding: 8px 10px; border-bottom: 1px solid #21262d; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.agent-item:hover { background: #21262d; }
+.agent-item.active { background: #1f6feb22; border-left: 2px solid #58a6ff; }
+.role-tag { font-size: 10px; padding: 1px 5px; border-radius: 3px; }
+.role-dispatcher { background: #8b5cf622; color: #a78bfa; }
+.role-worker { background: #f59e0b22; color: #fbbf24; }
+.status-dot { width: 6px; height: 6px; border-radius: 50%; }
+.status-idle { background: #3fb950; }
+.status-thinking { background: #f0883e; animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: 0.5; } }
+
+/* Middle */
+.middle { flex: 1; display: flex; flex-direction: column; }
+
+/* Topbar */
+.topbar { height: 36px; background: #161b22; border-bottom: 1px solid #30363d; display: flex; align-items: center; padding: 0 10px; gap: 8px; }
+.topbar-btn { padding: 3px 8px; background: #21262d; border: 1px solid #30363d; border-radius: 4px; color: #8b949e; font-size: 11px; cursor: pointer; }
+.topbar-btn:hover { color: #c9d1d9; border-color: #58a6ff; }
+.topbar-title { font-weight: 600; color: #c9d1d9; font-size: 13px; }
+.topbar-prompt { margin-left: auto; padding: 3px 10px; background: #1f6feb33; border: 1px solid #1f6feb; border-radius: 4px; color: #58a6ff; font-size: 11px; cursor: pointer; }
+
+/* Terminal area */
+.terminals { flex: 1; display: flex; gap: 1px; background: #30363d; }
+.terminal { flex: 1; background: #0d1117; display: flex; flex-direction: column; }
+.terminal-header { height: 24px; background: #161b22; border-bottom: 1px solid #30363d; display: flex; align-items: center; padding: 0 8px; gap: 6px; font-size: 11px; }
+.terminal-body { flex: 1; padding: 8px; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 11px; line-height: 1.6; color: #8b949e; overflow: hidden; }
+.terminal-body .cmd { color: #3fb950; }
+.terminal-body .output { color: #c9d1d9; }
+.terminal-body .prompt { color: #f0883e; }
+.terminal-body .ai { color: #a78bfa; }
+
+/* Drawer */
+.drawer { width: 380px; background: #0d1117; border-left: 1px solid #30363d; display: flex; flex-direction: column; }
+.drawer-tabs { height: 36px; background: #161b22; border-bottom: 1px solid #30363d; display: flex; align-items: center; gap: 2px; padding: 0 4px; overflow-x: auto; }
+.drawer-tab { padding: 4px 10px; font-size: 11px; color: #8b949e; cursor: pointer; border-radius: 4px; white-space: nowrap; }
+.drawer-tab:hover { color: #c9d1d9; background: #21262d; }
+.drawer-tab.active { color: #c9d1d9; background: #21262d; }
+.drawer-content { flex: 1; overflow: auto; padding: 12px; }
+
+/* Dashboard content */
+.file-list { display: flex; gap: 4px; margin-bottom: 12px; }
+.file-tab { padding: 4px 10px; background: #21262d; border-radius: 4px; font-size: 11px; cursor: pointer; color: #8b949e; }
+.file-tab.active { background: #30363d; color: #c9d1d9; }
+.progress-bar { height: 20px; background: #21262d; border-radius: 4px; overflow: hidden; margin-bottom: 12px; position: relative; }
+.progress-fill { height: 100%; background: linear-gradient(90deg, #3fb950, #2ea043); border-radius: 4px; }
+.progress-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; }
+.todo-item { padding: 6px 0; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.todo-check { width: 14px; height: 14px; border: 1px solid #30363d; border-radius: 3px; display: flex; align-items: center; justify-content: center; }
+.todo-check.done { background: #3fb950; border-color: #3fb950; color: #0d1117; font-size: 10px; }
+.todo-text.done { text-decoration: line-through; color: #484f58; }
+.md-preview { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px; margin-top: 10px; font-size: 12px; line-height: 1.7; }
+.md-preview h3 { color: #58a6ff; font-size: 13px; margin-bottom: 6px; }
+.md-preview p { color: #8b949e; margin-bottom: 4px; }
+
+.label { font-size: 10px; color: #484f58; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <!-- Left Sidebar -->
+  <div class="left">
+    <div class="left-header">🤖 Agents</div>
+    <div class="agent-item active">
+      <span class="status-dot status-idle"></span>
+      <span class="role-tag role-dispatcher">📋</span>
+      <span>Dispatcher</span>
+    </div>
+    <div class="agent-item">
+      <span class="status-dot status-thinking"></span>
+      <span class="role-tag role-worker">🔧</span>
+      <span>Worker-1</span>
+    </div>
+    <div class="agent-item">
+      <span class="status-dot status-idle"></span>
+      <span class="role-tag role-worker">🔧</span>
+      <span>Worker-2</span>
+    </div>
+    <div class="agent-item">
+      <span class="status-dot status-idle"></span>
+      <span style="width:18px"></span>
+      <span style="color:#484f58">w-20084</span>
+    </div>
+    <div class="agent-item">
+      <span class="status-dot status-idle"></span>
+      <span style="width:18px"></span>
+      <span style="color:#484f58">w-20085</span>
+    </div>
+  </div>
+
+  <!-- Middle -->
+  <div class="middle">
+    <!-- Topbar -->
+    <div class="topbar">
+      <span class="topbar-btn">☰</span>
+      <span class="topbar-title">📋 Dispatcher + 🔧 Worker-1</span>
+      <span class="topbar-btn">⟷ Split</span>
+      <span class="topbar-btn">↻ Restart</span>
+      <span class="topbar-prompt">⚡ Prompts</span>
+      <span class="topbar-btn" style="color:#58a6ff">☰ Drawer</span>
+    </div>
+
+    <!-- Dual Terminals -->
+    <div class="terminals">
+      <div class="terminal">
+        <div class="terminal-header">
+          <span class="role-tag role-dispatcher">📋</span>
+          <span>Dispatcher</span>
+          <span style="margin-left:auto;color:#3fb950">● idle</span>
+        </div>
+        <div class="terminal-body">
+          <div class="prompt">user:</div>
+          <div class="output">我想做一个登录页面</div>
+          <br>
+          <div class="ai">dispatcher:</div>
+          <div class="output">好的，我已经分析了需求并写好方案：</div>
+          <div class="output">📄 .cicy/todo.md — 6 个子任务</div>
+          <div class="output">📄 .cicy/arch.md — 技术架构</div>
+          <br>
+          <div class="output">请在 Drawer → Dashboard 查看概览</div>
+          <div class="output">或在 Code tab 中审阅详细内容</div>
+          <div class="output" style="color:#f0883e">确认后请说 "ok" 开始执行 ⏸️</div>
+          <br>
+          <div class="prompt">user:</div>
+          <div class="cmd">ok</div>
+          <br>
+          <div class="ai">dispatcher:</div>
+          <div class="output">✅ 已分配 Worker-1 执行第 1 项任务</div>
+        </div>
+      </div>
+      <div class="terminal">
+        <div class="terminal-header">
+          <span class="role-tag role-worker">🔧</span>
+          <span>Worker-1</span>
+          <span style="margin-left:auto;color:#f0883e">● thinking</span>
+        </div>
+        <div class="terminal-body">
+          <div class="ai">worker:</div>
+          <div class="output">收到任务：创建数据库 schema</div>
+          <div class="output">读取 .cicy/arch.md 了解架构...</div>
+          <br>
+          <div class="cmd">$ cat .cicy/arch.md</div>
+          <div class="output" style="color:#484f58">## 技术栈: React + Express + MySQL</div>
+          <br>
+          <div class="cmd">$ vim prisma/schema.prisma</div>
+          <div class="output">Creating User model...</div>
+          <div class="output">Creating Session model...</div>
+          <div class="cmd">$ npx prisma migrate dev</div>
+          <div class="output" style="color:#3fb950">✓ Migration applied</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drawer -->
+  <div class="drawer">
+    <div class="drawer-tabs">
+      <div class="drawer-tab active">Dashboard</div>
+      <div class="drawer-tab">Agents</div>
+      <div class="drawer-tab">Code</div>
+      <div class="drawer-tab">Preview</div>
+      <div class="drawer-tab">Traffic</div>
+      <div class="drawer-tab">Settings</div>
+    </div>
+    <div class="drawer-content">
+      <div class="label">📁 .cicy/ files</div>
+      <div class="file-list">
+        <div class="file-tab active">todo.md</div>
+        <div class="file-tab">arch.md</div>
+        <div class="file-tab">context.md</div>
+      </div>
+
+      <div class="label">Progress</div>
+      <div class="progress-bar">
+        <div class="progress-fill" style="width: 33%"></div>
+        <div class="progress-text">2 / 6 tasks</div>
+      </div>
+
+      <div class="label">Tasks</div>
+      <div class="todo-item">
+        <div class="todo-check done">✓</div>
+        <span class="todo-text done">设计数据库 schema</span>
+      </div>
+      <div class="todo-item">
+        <div class="todo-check done">✓</div>
+        <span class="todo-text done">创建 User / Session 表</span>
+      </div>
+      <div class="todo-item" style="background:#f0883e11; margin: 0 -12px; padding: 6px 12px;">
+        <div class="todo-check" style="border-color:#f0883e">⟳</div>
+        <span class="todo-text" style="color:#f0883e; font-weight:600">实现登录 API (POST /login)</span>
+      </div>
+      <div class="todo-item">
+        <div class="todo-check"></div>
+        <span class="todo-text">实现注册 API (POST /register)</span>
+      </div>
+      <div class="todo-item">
+        <div class="todo-check"></div>
+        <span class="todo-text">前端登录页面 UI</span>
+      </div>
+      <div class="todo-item">
+        <div class="todo-check"></div>
+        <span class="todo-text">前端表单验证 + 错误提示</span>
+      </div>
+
+      <div class="md-preview">
+        <h3>arch.md</h3>
+        <p>技术栈: React + Express + MySQL</p>
+        <p>认证: JWT + bcrypt</p>
+        <p>Session: Redis 存储</p>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

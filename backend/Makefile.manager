@@ -1,0 +1,13 @@
+.PHONY: build run clean
+
+build:
+	export GOROOT=/usr/lib/go && go build -o ttyd-manager manager.go
+
+run: build
+	./ttyd-manager
+
+clean:
+	rm -f ttyd-manager
+
+install: build
+	cp ttyd-manager /usr/local/bin/

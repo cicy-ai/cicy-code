@@ -1,0 +1,36 @@
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "axios": "^1.13.6",
+    "js-yaml": "^4.1.0",
+    "lucide-react": "^0.564.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "react-rnd": "^10.5.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "10.4.20",
+    "gulp": "^5.0.1",
+    "gulp-gzip": "^1.4.2",
+    "gulp-inline-source": "^4.0.0",
+    "gulp-rename": "^2.1.0",
+    "postcss": "8.5.2",
+    "tailwindcss": "3.4.17",
+    "through2": "^4.0.2",
+    "typescript": "^5.2.2",
+    "vite": "^5.0.8"
+  }
+}

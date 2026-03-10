@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --vsc-bg: #1e1e1e;
+    --vsc-bg-secondary: #252526;
+    --vsc-bg-hover: #2a2d2e;
+    --vsc-bg-active: #37373d;
+    --vsc-bg-titlebar: #323233;
+    --vsc-input: #3c3c3c;
+    --vsc-border: #474747;
+    --vsc-border-subtle: #3c3c3c;
+    --vsc-text: #cccccc;
+    --vsc-text-secondary: #858585;
+    --vsc-text-muted: #6a6a6a;
+    --vsc-text-disabled: #5a5a5a;
+    --vsc-accent: #007acc;
+    --vsc-accent-hover: #1177bb;
+    --vsc-button: #0e639c;
+    --vsc-button-hover: #1177bb;
+    --vsc-link: #3794ff;
+    --vsc-success: #4ec9b0;
+    --vsc-warning: #cca700;
+    --vsc-error: #f14c4c;
+    --vsc-selection: #264f78;
+    --vsc-font-size: 13px;
+    --vsc-terminal-font-size: 14px;
+  }
+
+  *, ::before, ::after {
+    border-color: #474747;
+  }
+}
+
+.no-select {
+  user-select: none;
+}
