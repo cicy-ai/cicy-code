@@ -10,5 +10,8 @@ export default defineConfig({
     strictPort: true,
     allowedHosts: true,
     cors: true,
+    hmr: {
+      port: 6902,
+    },
   },
 });
