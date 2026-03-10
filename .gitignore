@@ -4,6 +4,7 @@ ide/dist
 backend/ttyd-go
 backend/ttyd-manager
 backend/ttyd-manager-v2
+backend/cicy-dev-backend
 backend/bindata
 backend/js/node_modules
 backend/logs/*

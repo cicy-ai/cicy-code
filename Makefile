@@ -12,7 +12,7 @@ build-ide:
 	cd ide && npm ci && npm run build
 
 build-backend:
-	cd backend && go build -o ttyd-manager manager.go
+	cd backend && go build -o cicy-dev-backend manager.go
 
 build: build-ide build-backend
 

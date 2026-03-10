@@ -1,13 +1,13 @@
 .PHONY: build run clean
 
 build:
-	export GOROOT=/usr/lib/go && go build -o ttyd-manager manager.go
+	export GOROOT=/usr/lib/go && go build -o cicy-dev-backend manager.go
 
 run: build
-	./ttyd-manager
+	./cicy-dev-backend
 
 clean:
-	rm -f ttyd-manager
+	rm -f cicy-dev-backend
 
 install: build
-	cp ttyd-manager /usr/local/bin/
+	cp cicy-dev-backend /usr/local/bin/
