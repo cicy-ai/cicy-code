@@ -1,7 +1,7 @@
 .PHONY: build run clean
 
 build:
-	export GOROOT=/usr/lib/go && go build -o cicy-code-api manager.go
+	go build -o cicy-code-api manager.go
 
 run: build
 	./cicy-code-api
