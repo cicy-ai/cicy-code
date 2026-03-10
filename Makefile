@@ -12,7 +12,7 @@ build-ide:
 	cd ide && npm ci && npm run build
 
 build-api:
-	cd api && go build -o cicy-code-api manager.go
+	cd api && go build -o cicy-code-api ./mgr/
 
 build: build-ide build-api
 
