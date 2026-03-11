@@ -54,6 +54,8 @@ interface CommandPanelProps {
   onShowCorrection?: (result: [string, string]) => void;
   onCorrectionLoading?: (loading: boolean) => void;
   onShowPromptModal?: () => void;
+  defaultModel?: string;
+  onModelChange?: (model: string) => void;
 }
 
 export interface CommandPanelHandle {
@@ -101,6 +103,8 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
   onShowCorrection,
   onCorrectionLoading,
   onShowPromptModal,
+  defaultModel = '',
+  onModelChange,
 }, ref) => {
   const [selectedPane, setSelectedPane] = useState(paneTarget);
 
@@ -367,6 +371,27 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
               <option value="y">Yes (y)</option>
               <option value="n">No (n)</option>
             </select>
+            <select
+              value={defaultModel}
+              onChange={async (e) => {
+                const v = e.target.value;
+                if (!v) return;
+                onModelChange?.(v);
+                await sendCommandToTmux(`/model ${v}`, selectedPane);
+              }}
+              className="bg-vsc-bg-secondary text-vsc-text text-xs rounded-md border border-vsc-border px-1.5 py-1 outline-none cursor-pointer hover:bg-vsc-bg-active"
+              title="Select model"
+            >
+              <option value="">🧠</option>
+              <option value="claude-opus-4.6">opus-4.6</option>
+              <option value="claude-opus-4.5">opus-4.5</option>
+              <option value="claude-sonnet-4.5">sonnet-4.5</option>
+              <option value="claude-sonnet-4">sonnet-4</option>
+              <option value="claude-haiku-4.5">haiku-4.5</option>
+              <option value="deepseek-3.2">deepseek-3.2</option>
+              <option value="minimax-m2.1">minimax-m2.1</option>
+              <option value="qwen3-coder-next">qwen3-coder</option>
+            </select>
             <button
               type="button"
               onClick={() => {
@@ -374,7 +399,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
                   onShowHistory(commandHistory, handleSelectHistory);
                 }
               }}
-              className="p-1.5 rounded transition-colors text-vsc-text-secondary hover:text-vsc-text hover:bg-vsc-bg-active"
+              className="p-1.5 rounded transition-colors text-vsc-text-secondary hover:text-vsc-text hover:bg-vsc-bg-active hidden"
               title="Command history"
             >
               <History size={14} />
@@ -386,7 +411,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
                   onShowPromptModal();
                 }
               }}
-              className="p-1.5 rounded transition-colors text-vsc-text-secondary hover:text-vsc-text hover:bg-vsc-bg-active"
+              className="p-1.5 rounded transition-colors text-vsc-text-secondary hover:text-vsc-text hover:bg-vsc-bg-active hidden"
               title="Edit common prompts"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>

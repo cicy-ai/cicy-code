@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -254,22 +254,22 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 }
 
 func openInCodeServer(file string) {
-	matches, _ := filepath.Glob("/tmp/vscode-ipc-*.sock")
-	if len(matches) == 0 {
+	// Find IPC socket inside container
+	out, err := exec.Command("docker", "exec", "cicy-code-server", "bash", "-c",
+		`find /tmp -name "vscode-ipc-*.sock" -type s -printf "%T@ %p\n" 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2`).Output()
+	if err != nil || len(out) == 0 {
+		log.Printf("[code-server] no IPC socket found")
 		return
 	}
-	sort.Slice(matches, func(i, j int) bool {
-		fi, _ := os.Stat(matches[i])
-		fj, _ := os.Stat(matches[j])
-		if fi == nil || fj == nil {
-			return false
-		}
-		return fi.ModTime().After(fj.ModTime())
-	})
-	cli := "/usr/lib/code-server/lib/vscode/bin/remote-cli/code-linux.sh"
-	cmd := exec.Command(cli, "--reuse-window", "--goto", file+":1:1")
-	cmd.Env = append(os.Environ(), "VSCODE_IPC_HOOK_CLI="+matches[0])
-	cmd.Run()
+	sock := strings.TrimSpace(string(out))
+	cmd := exec.Command("docker", "exec",
+		"-e", "VSCODE_IPC_HOOK_CLI="+sock,
+		"cicy-code-server",
+		"/usr/lib/code-server/lib/vscode/bin/remote-cli/code-linux.sh",
+		"--reuse-window", "--goto", file+":1:1")
+	if err := cmd.Run(); err != nil {
+		log.Printf("[code-server] open file error: %v", err)
+	}
 }
 
 func handleNotifyStream(w http.ResponseWriter, r *http.Request) {
@@ -281,6 +281,7 @@ func handleNotifyStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", 500)
 		return
 	}
+	filterPane := r.URL.Query().Get("pane")
 	fmt.Fprintf(w, ": connected\n\n")
 	flusher.Flush()
 
@@ -321,6 +322,14 @@ func handleNotifyStream(w http.ResponseWriter, r *http.Request) {
 		lines := strings.Split(string(buf[:n]), "\r\n")
 		for _, line := range lines {
 			if strings.HasPrefix(line, "{") {
+				// Filter by pane if specified
+				if filterPane != "" {
+					var msg struct{ Pane string `json:"pane"` }
+					json.Unmarshal([]byte(line), &msg)
+					if msg.Pane != "" && msg.Pane != filterPane {
+						continue
+					}
+				}
 				fmt.Fprintf(w, "data: %s\n\n", line)
 				flusher.Flush()
 			}

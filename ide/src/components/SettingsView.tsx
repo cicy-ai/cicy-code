@@ -119,12 +119,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
               onChange={e => onChange({ ...pane, default_model: e.target.value })}
               className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent">
               <option value="">无</option>
-              <option value="opus-4.6">opus-4.6</option>
-              <option value="opus-4.5">opus-4.5</option>
-              <option value="sonnet-4.5">sonnet-4.5</option>
-              <option value="sonnet-4">sonnet-4</option>
-              <option value="haiku-4.5">haiku-4.5</option>
+              <option value="claude-opus-4.6">opus-4.6</option>
+              <option value="claude-opus-4.5">opus-4.5</option>
+              <option value="claude-sonnet-4.5">sonnet-4.5</option>
+              <option value="claude-sonnet-4">sonnet-4</option>
+              <option value="claude-haiku-4.5">haiku-4.5</option>
               <option value="deepseek-3.2">deepseek-3.2</option>
+              <option value="minimax-m2.1">minimax-m2.1</option>
+              <option value="qwen3-coder-next">qwen3-coder</option>
             </select>
           </div>
           <div>

@@ -14,19 +14,16 @@ body { margin: 8px !important; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
 ::-webkit-scrollbar-corner { background: transparent; }
+.xterm-helper-textarea ~ div[style*="position: fixed"] { display: none !important; }
+.xterm-overlay { display: none !important; }
 </style>
 <script>
 window.addEventListener('load',function(){
   var i=setInterval(function(){
     if(window.term){
       clearInterval(i);
-      var isMac=/Mac/.test(navigator.platform);
-      var isWin=/Win/.test(navigator.platform);
-      if(isWin){
-        window.term.setOption&&window.term.setOption('letterSpacing',-1);
-      }else if(isMac){
-        window.term.setOption&&window.term.setOption('fontFamily','Menlo, monospace');
-      }
+      window.term.setOption&&window.term.setOption('fontFamily','Menlo, Consolas, monospace');
+      window.term.setOption&&window.term.setOption('letterSpacing',-0.5);
       setTimeout(function(){
         window.term.fit&&window.term.fit();
         window.dispatchEvent(new Event('resize'));

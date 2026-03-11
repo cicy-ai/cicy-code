@@ -92,7 +92,7 @@ services:
       - ${HOST_HOME}/.kiro:${HOST_HOME}/.kiro
       - ${HOST_HOME}/.cicy-code-server/data:/home/coder/.local/share/code-server
       - ${HOST_HOME}/.cicy-code-server/config:/home/coder/.config/code-server
-    command: --bind-addr 0.0.0.0:18080 --auth none
+    command: --bind-addr 0.0.0.0:18080 --auth none --disable-getting-started-override
     logging:
       driver: json-file
       options:

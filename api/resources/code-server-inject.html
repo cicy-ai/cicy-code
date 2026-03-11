@@ -1,0 +1,31 @@
+<script>
+if(navigator.serviceWorker){
+  navigator.serviceWorker.getRegistrations().then(function(regs){
+    regs.forEach(function(r){r.unregister()});
+  });
+}
+(function(){
+  var t=setInterval(function(){
+    try{
+      // Try to close secondary sidebar via keyboard shortcut simulation
+      var parts=document.querySelectorAll('.part.auxiliarybar,.part.sidebar.right');
+      parts.forEach(function(p){
+        if(p.offsetWidth>0){
+          // Find close button
+          var btns=p.querySelectorAll('.codicon-close,.codicon-panel-close,.action-label');
+          btns.forEach(function(b){b.click()});
+        }
+      });
+      // Close Welcome tabs
+      document.querySelectorAll('.tab').forEach(function(tab){
+        var txt=tab.textContent||'';
+        if(txt.includes('Welcome')||txt.includes('Getting Started')||txt.includes('Chat')){
+          var close=tab.querySelector('.codicon-close');
+          if(close)close.click();
+        }
+      });
+    }catch(e){}
+  },1000);
+  setTimeout(function(){clearInterval(t)},15000);
+})();
+</script>

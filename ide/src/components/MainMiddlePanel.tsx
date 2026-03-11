@@ -128,6 +128,9 @@ const MainMiddlePanel: React.FC<MainMiddlePanelProps> = ({ ttydWidth, boundAgent
         correctionData={correctionData} setCorrectionData={setCorrectionData}
         boundAgents={boundAgents}
         onShowPromptModal={() => setShowPromptModal(true)}
+        paneDetail={paneDetail}
+        api={api}
+        setPaneDetail={setPaneDetail}
       />
 
       {showPromptModal && <PromptModal onClose={() => setShowPromptModal(false)} />}
@@ -194,6 +197,9 @@ interface MiddleContentProps {
   correctionData: [string, string] | null; setCorrectionData: (v: [string, string] | null) => void;
   boundAgents: string[];
   onShowPromptModal: () => void;
+  paneDetail: any;
+  api: any;
+  setPaneDetail: (v: any) => void;
 }
 
 const MiddleContent: React.FC<MiddleContentProps> = ({
@@ -202,6 +208,7 @@ const MiddleContent: React.FC<MiddleContentProps> = ({
   showCorrectionResult, setShowCorrectionResult, correctionData, setCorrectionData,
   boundAgents,
   onShowPromptModal,
+  paneDetail, api, setPaneDetail,
 }) => {
   const {
     displayPaneId, displayPaneTitle, token, hasPermission,
@@ -308,6 +315,14 @@ const MiddleContent: React.FC<MiddleContentProps> = ({
             onRestart={handleRestart}
             isRestarting={isRestarting}
             hasEditPermission={hasPermission('agent_manage')}
+            defaultModel={paneDetail?.default_model || ''}
+            onModelChange={(model) => {
+              if (paneDetail) {
+                api.updatePane(displayPaneId, { default_model: model }).then(() => {
+                  setPaneDetail({ ...paneDetail, default_model: model });
+                });
+              }
+            }}
             hasRestartPermission={hasPermission('prompt')}
             hasCapturePermission={hasPermission('ttyd_read')}
             networkLatency={networkLatency}

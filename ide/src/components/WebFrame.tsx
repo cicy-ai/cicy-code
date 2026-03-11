@@ -3,6 +3,51 @@ import { Loader2 } from 'lucide-react';
 
 export const isElectron = navigator.userAgent.includes('Electron');
 
+// Global cicy super object for Electron webview control
+interface CicyWebview { el: HTMLElement; src: string; openDevTools: () => void; getContents: () => any; }
+interface CicyGlobal { webviews: Map<string, CicyWebview>; list: () => CicyWebview[]; devTools: (src?: string) => void; }
+
+function getCicy(): CicyGlobal {
+  if (!(window as any).__cicy) {
+    const wvs = new Map<string, CicyWebview>();
+    (window as any).__cicy = {
+      webviews: wvs,
+      list: () => Array.from(wvs.values()),
+      devTools: (src?: string) => {
+        if (src) {
+          const w = Array.from(wvs.values()).find(v => v.src.includes(src));
+          if (w) w.openDevTools(); else console.log('not found:', src);
+        } else {
+          wvs.forEach(v => console.log(v.src));
+        }
+      }
+    };
+  }
+  return (window as any).__cicy;
+}
+
+function registerWebview(el: HTMLElement) {
+  const wv = el as any;
+  const src = wv.src || '';
+  const entry: CicyWebview = {
+    el, src,
+    openDevTools: () => wv.openDevTools?.(),
+    getContents: () => wv.getWebContents?.()
+  };
+  getCicy().webviews.set(src, entry);
+
+  const onReady = () => {
+    entry.src = wv.src;
+    getCicy().webviews.delete(src);
+    getCicy().webviews.set(wv.src, entry);
+  };
+  wv.addEventListener('dom-ready', onReady);
+  return () => {
+    wv.removeEventListener('dom-ready', onReady);
+    getCicy().webviews.delete(wv.src);
+  };
+}
+
 interface WebFrameProps {
   src: string;
   className?: string;
@@ -33,9 +78,24 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
       const onDomReady = () => {
         setIsLoading(false);
         onLoad?.();
+        if (codeServer) {
+          (wv as any).insertCSS?.('.action-item.agent-status-container{display:none!important}.panel .terminal-wrapper,.panel .terminals-list{display:none!important}');
+          (wv as any).executeJavaScript?.(`
+            setTimeout(function(){
+              setInterval(function(){
+                var btn=document.querySelector(".codicon-auxiliarybar-right-layout-icon");
+                if(btn)btn.click();
+              },1000);
+            },3000);
+          `);
+        }
       };
       wv.addEventListener('dom-ready', onDomReady);
-      return () => wv.removeEventListener('dom-ready', onDomReady);
+      const unregister = registerWebview(wv);
+      return () => {
+        wv.removeEventListener('dom-ready', onDomReady);
+        unregister();
+      };
     }, [useWebview, onLoad]);
 
     // Update webview src when it changes
