@@ -161,14 +161,14 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
         width: disableDrag ? '100%' : size.width,
         height: disableDrag ? '100%' : size.height,
         minHeight: '140px',
-        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
         zIndex: 1,
-        borderRadius: disableDrag ? 0 : '0.5rem',
+        borderRadius: disableDrag ? 0 : '8px',
       }}
     >
       {/* Header / Drag Handle */}
       <div
-        className="h-10 bg-vsc-bg-titlebar border-b border-vsc-border flex items-center justify-between px-3 select-none touch-none shrink-0"
+        className="h-9 bg-vsc-bg-secondary border-b border-vsc-border flex items-center justify-between px-2.5 select-none touch-none shrink-0"
         style={{cursor: disableDrag ? 'default' : 'move'}}
         onMouseDown={handleStartDrag}
         onTouchStart={handleStartDrag}

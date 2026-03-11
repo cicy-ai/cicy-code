@@ -122,7 +122,7 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
 
   return (
     <div id="right-side" className="w-full h-full bg-vsc-bg">
-      <div id="right-side-top" className="absolute top-0 left-0 right-0 h-10 bg-vsc-bg-titlebar border-b border-vsc-border flex items-center gap-1 px-2 z-10">
+      <div id="right-side-top" className="absolute top-0 left-0 right-0 h-9 bg-vsc-bg-secondary border-b border-vsc-border flex items-center gap-0.5 px-2 z-10">
         {([ 'Workers', 'Code', 'Traffic', 'Board', 'Preview', 'ChatView', 'Settings'] as const).map(tab => (
           <button
             key={tab}
@@ -130,7 +130,7 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
               setActiveTab(tab);
               localStorage.setItem('activeTab', tab);
             }}
-            className={`px-4 py-1 rounded text-sm ${activeTab === tab ? 'bg-vsc-bg text-vsc-text' : 'text-vsc-text-secondary hover:text-vsc-text hover:bg-vsc-bg-hover'}`}
+            className={`px-3 py-1 text-xs transition-all duration-150 ${activeTab === tab ? 'text-vsc-text bg-vsc-bg rounded' : 'text-vsc-text-muted hover:text-vsc-text-secondary rounded'}`}
           >
             {tab}
           </button>
@@ -138,23 +138,23 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
       </div>
       {isInteracting && <div className="absolute inset-0 z-20"></div>}
         {paneWorkspace && (
-          <div id="right-side-inner" className="absolute inset-0 flex flex-col" style={{marginTop: '40px', display: activeTab === 'Code' ? 'flex' : 'none'}}>
+          <div id="right-side-inner" className="absolute inset-0 flex flex-col" style={{marginTop: '36px', display: activeTab === 'Code' ? 'flex' : 'none'}}>
             <div  id="right-side-code-server"  className="w-full flex-1 overflow-hidden flex flex-col">
-              <div className=".bg-vsc-bg h-8 border-b border-vsc-border flex items-center px-2 gap-2 flex-shrink-0">
+              <div className="bg-vsc-bg-secondary h-8 border-b border-vsc-border flex items-center px-2 gap-1.5 flex-shrink-0">
                 <button 
                   onClick={() => navigateToPath(paneDetail?.workspace || paneWorkspace, true)}
-                  className="p-1 text-vsc-text-secondary hover:text-vsc-text hover:bg-vsc-bg-hover rounded"
+                  className="cicy-btn"
                   title="Home"
                 >
-                  <Home size={16} />
+                  <Home size={14} />
                 </button>
                 <div className="relative">
                   <button 
                     onClick={() => setShowFavorDirs(!showFavorDirs)}
-                    className="p-1 text-vsc-text-secondary hover:text-vsc-text hover:bg-vsc-bg-hover rounded"
+                    className="cicy-btn"
                     title="Favorite Directories"
                   >
-                    <Folder size={16} />
+                    <Folder size={14} />
                   </button>
                   {showFavorDirs && (
                     <>
@@ -181,7 +181,7 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
                   )}
                 </div>
                 <input 
-                  className="flex-1 bg-vsc-bg text-vsc-text px-2 py-1 text-sm border border-vsc-border rounded" 
+                  className="flex-1 bg-vsc-bg text-vsc-text px-2 py-1 text-xs border border-vsc-border rounded focus:border-vsc-accent/50 outline-none transition-colors" 
                   value={paneWorkspace} 
                   onChange={(e) => setPaneWorkspace(e.target.value)}
                   onKeyDown={(e) => {
@@ -195,19 +195,19 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
           </div>
         )}
       {activeTab === 'Traffic' && (
-        <div className="absolute inset-0" style={{marginTop: '40px'}}>
+        <div className="absolute inset-0" style={{marginTop: '36px'}}>
           <TrafficChart />
         </div>
       )}
       {activeTab === 'Board' && (
-        <div className="absolute inset-0" style={{marginTop: '40px'}}>
+        <div className="absolute inset-0" style={{marginTop: '36px'}}>
           <WebFrame src="https://github.com/users/cicy-dev/projects/4" className="w-full h-full border-0" codeServer />
         </div>
       )}
       {activeTab === 'Preview' && (
         <>
           {!globalVar?.favor?.previewUrls || globalVar.favor.previewUrls.filter((item: any) => item.enable).length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full bg-vsc-bg" style={{marginTop: '40px'}}>
+            <div className="flex flex-col items-center justify-center h-full bg-vsc-bg" style={{marginTop: '36px'}}>
               <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-vsc-text-muted mb-4">
                 <circle cx="11" cy="11" r="8"/>
                 <path d="m21 21-4.35-4.35"/>
@@ -252,7 +252,7 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
         <BindedAgentsTab paneId={displayPaneId} token={token} isDragging={isDragging} setBoundAgents={setBoundAgents} />
       )}
       {activeTab === 'ChatView' && (
-        <div className="absolute inset-0 overflow-y-auto bg-vsc-bg" style={{marginTop: '40px'}}>
+        <div className="absolute inset-0 overflow-y-auto bg-vsc-bg" style={{marginTop: '36px'}}>
           <div style={{maxWidth: 720, margin: '0 auto', padding: '24px 16px'}}>
             {chatData.length === 0 && (
               <div className="text-vsc-text-muted" style={{textAlign: 'center', marginTop: 120}}>
@@ -418,7 +418,7 @@ const SettingsTabWithSub: React.FC<{
   const [sub, setSub] = useState<'Agent'|'Global'|'Tokens'>('Agent');
 
   return (
-    <div style={{marginTop: '40px', height: 'calc(100% - 40px)', display: 'flex'}}>
+    <div style={{marginTop: '36px', height: 'calc(100% - 36px)', display: 'flex'}}>
       {/* Vertical sub-nav */}
       <div className="w-20 flex-shrink-0 border-r border-vsc-border bg-vsc-bg-secondary flex flex-col py-2 gap-1">
         {(['Agent', 'Global', 'Tokens'] as const).map(t => (
@@ -915,7 +915,7 @@ const BindedAgentsTab: React.FC<{paneId: string, token: string | null, isDraggin
   const expandedAgent = agents.find(a => a.id === expandedId);
 
   return (
-    <div ref={containerRef} style={{marginTop: '40px', height: 'calc(100% - 40px)', display: 'flex', flexDirection: 'column'}}>
+    <div ref={containerRef} style={{marginTop: '36px', height: 'calc(100% - 36px)', display: 'flex', flexDirection: 'column'}}>
       {/* Top bar */}
       <div className="flex items-center gap-1 px-2 py-1.5 border-b border-vsc-border flex-shrink-0">
         <SearchSelect
@@ -989,7 +989,7 @@ const PromptTab: React.FC = () => {
   useEffect(() => { setText(globalVar?.common_prompts || ''); }, [globalVar?.common_prompts]);
 
   return (
-    <div style={{marginTop: '40px', height: 'calc(100% - 40px)', display: 'flex', flexDirection: 'column', padding: '12px'}}>
+    <div style={{marginTop: '36px', height: 'calc(100% - 36px)', display: 'flex', flexDirection: 'column', padding: '12px'}}>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}

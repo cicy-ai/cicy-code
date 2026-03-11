@@ -341,7 +341,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
               isCapturing={isCapturing}
             />
             <select
-              className="bg-vsc-bg-secondary text-vsc-text text-xs rounded-md border border-vsc-border px-1.5 py-1 outline-none cursor-pointer hover:bg-vsc-bg-active"
+              className="cicy-select"
               value=""
               onChange={async (e) => {
                 const v = e.target.value;
@@ -379,7 +379,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
                 onModelChange?.(v);
                 await sendCommandToTmux(`/model ${v}`, selectedPane);
               }}
-              className="bg-vsc-bg-secondary text-vsc-text text-xs rounded-md border border-vsc-border px-1.5 py-1 outline-none cursor-pointer hover:bg-vsc-bg-active"
+              className="cicy-select"
               title="Select model"
             >
               <option value="">🧠</option>
@@ -439,7 +439,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
               setEnterToSend(next);
               localStorage.setItem('enter_to_send', String(next));
             }}
-            className="text-[10px] px-1.5 py-0.5 rounded border border-vsc-border text-vsc-text-secondary hover:text-vsc-text hover:bg-vsc-bg-active transition-colors select-none"
+            className="cicy-btn text-[10px] px-1.5 py-0.5 border border-vsc-border select-none"
             title={enterToSend ? 'Enter=Send, Shift+Enter=Newline' : 'Enter=Newline, Shift+Enter=Send'}
           >
             {enterToSend ? '⏎Send' : '⇧⏎Send'}
@@ -447,7 +447,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
           {onToggleVoiceControl && (
             <button
               onClick={onToggleVoiceControl}
-              className={`p-1.5 rounded transition-colors ${showVoiceControl ? 'text-red-400 bg-red-500/20' : 'text-vsc-text-secondary hover:text-vsc-text hover:bg-vsc-bg-active'}`}
+              className={`cicy-btn ${showVoiceControl ? 'text-red-400 bg-red-500/20' : ''}`}
               title={showVoiceControl ? "Hide voice mode" : "Show voice mode"}
             >
               <Mic size={14} />
@@ -456,7 +456,6 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
           {isCorrectingEnglish && (
             <div className="flex items-center gap-1 px-2 py-1 text-purple-400 text-xs">
               <Loader2 size={12} className="animate-spin" />
-              <span>Correcting...</span>
             </div>
           )}
         </>
@@ -469,7 +468,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
               <button
                 type="submit"
                 disabled={!promptText.trim() || isSending}
-                className="p-1.5 bg-vsc-button hover:bg-vsc-button-hover text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                className="p-1.5 bg-vsc-accent hover:bg-vsc-accent-hover text-white rounded-md transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 {isSending ? <Loader2 size={14} className="animate-spin" /> : sendSuccess ? <CheckCircle size={14} className="text-green-400" /> : <ArrowUp size={14} />}
               </button>
@@ -646,7 +645,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
                 }
               }}
               placeholder="Type command..."
-              className="w-full h-full bg-vsc-bg-secondary text-vsc-text rounded-lg border border-vsc-border p-2 focus:ring-2 focus:ring-vsc-accent focus:border-transparent outline-none resize-none text-sm shadow-inner placeholder:text-vsc-text-muted placeholder:opacity-50"
+              className="w-full h-full bg-vsc-bg text-vsc-text rounded-md border border-vsc-border p-2.5 pr-10 focus:border-vsc-accent/50 outline-none resize-none text-sm transition-colors placeholder:text-vsc-text-muted/40"
               style={{paddingRight: '44px'}}
               disabled={isSending}
             />

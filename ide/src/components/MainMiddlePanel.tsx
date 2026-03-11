@@ -54,10 +54,10 @@ const MainMiddlePanel: React.FC<MainMiddlePanelProps> = ({ ttydWidth, boundAgent
         if (target) target.style.display = 'block';
       }}
     >
-      <div className="h-10 bg-vsc-bg-titlebar border-b border-vsc-border flex items-center justify-between px-2">
-        <div id="main-middle-topbar" className="flex items-center gap-2 flex-1 min-w-0">
-          <button onClick={onToggleLeft} className="p-1 rounded text-vsc-text-secondary hover:text-vsc-text hover:bg-vsc-bg-active" title={leftCollapsed ? 'Show sidebar' : 'Hide sidebar'}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+      <div className="h-9 bg-vsc-bg-secondary border-b border-vsc-border flex items-center justify-between px-2">
+        <div id="main-middle-topbar" className="flex items-center gap-1.5 flex-1 min-w-0">
+          <button onClick={onToggleLeft} className="cicy-btn" title={leftCollapsed ? 'Show sidebar' : 'Hide sidebar'}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
           </button>
           <div className="relative group flex items-center gap-1">
             {displayPaneId && (
@@ -88,14 +88,14 @@ const MainMiddlePanel: React.FC<MainMiddlePanelProps> = ({ ttydWidth, boundAgent
             <div className={`w-2 h-2 rounded-full ${networkStatus === 'excellent' ? 'bg-green-500' : networkStatus === 'good' ? 'bg-yellow-500' : networkStatus === 'poor' ? 'bg-orange-500' : 'bg-red-500'}`}></div>
             <span>{networkLatency}ms</span>
           </div>
-          <button onClick={onToggleRight} className={`p-1 rounded hover:bg-vsc-bg-active ${!rightCollapsed ? 'text-vsc-accent' : 'text-vsc-text-secondary hover:text-vsc-text'}`} title={rightCollapsed ? 'Show right panel' : 'Hide right panel'}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+          <button onClick={onToggleRight} className={`cicy-btn ${!rightCollapsed ? 'text-vsc-accent' : ''}`} title={rightCollapsed ? 'Show right panel' : 'Hide right panel'}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
             </button>
           <div className="relative">
             <button 
               type="button" 
               onClick={() => setShowMoreMenu(!showMoreMenu)} 
-              className="p-1 rounded text-vsc-text-secondary hover:text-vsc-text hover:bg-vsc-bg-active transition-colors" 
+              className="cicy-btn" 
               title="More"
             >
               <MoreVertical size={16} />

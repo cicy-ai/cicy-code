@@ -10,8 +10,8 @@
     --vsc-bg-active: #37373d;
     --vsc-bg-titlebar: #323233;
     --vsc-input: #3c3c3c;
-    --vsc-border: #474747;
-    --vsc-border-subtle: #3c3c3c;
+    --vsc-border: #3c3c3c;
+    --vsc-border-subtle: #333;
     --vsc-text: #cccccc;
     --vsc-text-secondary: #858585;
     --vsc-text-muted: #6a6a6a;
@@ -27,11 +27,45 @@
     --vsc-selection: #264f78;
     --vsc-font-size: 13px;
     --vsc-terminal-font-size: 14px;
+    --vsc-radius: 6px;
+    --vsc-radius-sm: 4px;
   }
 
   *, ::before, ::after {
-    border-color: #474747;
+    border-color: var(--vsc-border);
   }
+}
+
+/* Unified component styles */
+@layer components {
+  .cicy-select {
+    @apply bg-vsc-bg-secondary text-vsc-text text-xs border border-vsc-border outline-none cursor-pointer;
+    padding: 4px 6px;
+    border-radius: var(--vsc-radius-sm);
+    transition: background 150ms, border-color 150ms;
+  }
+  .cicy-select:hover { background: var(--vsc-bg-active); }
+  .cicy-select:focus { border-color: var(--vsc-accent); }
+
+  .cicy-btn {
+    @apply text-vsc-text-secondary transition-colors;
+    padding: 4px;
+    border-radius: var(--vsc-radius-sm);
+  }
+  .cicy-btn:hover { color: var(--vsc-text); background: var(--vsc-bg-active); }
+
+  .cicy-badge {
+    @apply text-xs px-1.5 py-0.5 rounded;
+    font-size: 10px;
+    line-height: 1;
+  }
+
+  .cicy-card {
+    border-radius: var(--vsc-radius);
+    border: 1px solid var(--vsc-border-subtle);
+    transition: background 150ms, border-color 150ms;
+  }
+  .cicy-card:hover { border-color: var(--vsc-border); background: var(--vsc-bg-hover); }
 }
 
 .no-select {
