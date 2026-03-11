@@ -42,8 +42,9 @@ var (
 		regexp.MustCompile(`█▀▀█ █▀▀█ █▀▀█`),
 		regexp.MustCompile(`(?i)Ask anything`),
 	}
-	spinnerRe = regexp.MustCompile(`[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]`)
-	ctxRe     = regexp.MustCompile(`(\d+)%?\s*!?>\s*$`)
+	spinnerRe     = regexp.MustCompile(`[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]`)
+	idlePromptRe  = regexp.MustCompile(`\d+%?\s*!?>\s`)
+	ctxRe         = regexp.MustCompile(`(\d+)%?\s*!?>\s*$`)
 	credRe    = regexp.MustCompile(`Credits:\s*([\d.]+)`)
 	elapRe    = regexp.MustCompile(`Time:\s*(\d+)s`)
 )
@@ -51,8 +52,10 @@ var (
 func initWatcher() {
 	pipeLogDir = os.Getenv("PIPE_LOG_DIR")
 	if pipeLogDir == "" {
-		pipeLogDir = filepath.Join(os.Getenv("HOME"), "projects/ai-workers/fast-api/logs")
+		home, _ := os.UserHomeDir()
+		pipeLogDir = filepath.Join(home, "logs")
 	}
+	os.MkdirAll(pipeLogDir, 0755)
 	if v := os.Getenv("COMPACT_THRESHOLD"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			compactThreshold = n
@@ -101,12 +104,18 @@ func pipeMtime(paneID string) *int64 {
 }
 
 func tmuxCmd(args ...string) string {
+	paneID := extractPaneID(args)
+	if paneID != "" {
+		out, _ := nodeTmux(paneID, args...)
+		return out
+	}
 	out, _ := exec.Command("tmux", args...).Output()
 	return strings.TrimSpace(string(out))
 }
 
-func sessExists(sess string) bool {
-	for _, s := range strings.Split(tmuxCmd("list-sessions", "-F", "#{session_name}"), "\n") {
+func sessExists(paneID, sess string) bool {
+	out, _ := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
+	for _, s := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if s == sess {
 			return true
 		}
@@ -174,20 +183,26 @@ func checkPane(paneID string, cfg map[string]string) paneSt {
 	now := time.Now().Unix()
 	sess := strings.Split(paneID, ":")[0]
 
-	if !sessExists(sess) {
+	if !sessExists(paneID, sess) {
 		return paneSt{PaneID: clean, Active: false, CheckT: now}
 	}
 
-	mtime := pipeMtime(paneID)
+	// 分布式: 直接通过 xui capture-pane 获取内容
+	t := paneID
+	if !strings.Contains(t, ":") {
+		t += ":main.0"
+	}
+	// 优先读 pipe-pane log（实时），fallback 到 capture-pane
 	raw := readPipeLog(paneID)
+	ts := now
+	mtime := pipeMtime(paneID)
+	if mtime == nil {
+		mtime = &ts
+	}
 	if raw == "" {
-		t := paneID
-		if !strings.Contains(t, ":") {
-			t += ":main.0"
-		}
-		raw = tmuxCmd("capture-pane", "-t", t, "-p")
-		n := time.Now().Unix()
-		mtime = &n
+		out, _ := exec.Command("tmux", "capture-pane", "-t", t, "-p").Output()
+		raw = strings.TrimSpace(string(out))
+		mtime = &ts
 	}
 	if raw == "" {
 		return paneSt{PaneID: clean, Active: true, LogEx: bp(false), CheckT: now, LastUpd: mtime}
@@ -254,7 +269,7 @@ func parsePane(pid, atype, text, last2 string, lines []string) paneSt {
 	wa := strings.Contains(last2, "Allow this action") || strings.Contains(last2, "[y/n/t]")
 	co := strings.Contains(last2, "Creating summary") || strings.Contains(last2, "/compact")
 	th := spinnerRe.MatchString(last2)
-	idle := strings.HasSuffix(last, ">") || strings.HasSuffix(last, "$")
+	idle := strings.HasSuffix(last, ">") || strings.HasSuffix(last, "$") || idlePromptRe.MatchString(last)
 
 	s := ""
 	if wa {
@@ -265,6 +280,9 @@ func parsePane(pid, atype, text, last2 string, lines []string) paneSt {
 		s = "thinking"
 	} else if idle {
 		s = "idle"
+	} else if atype == "kiro-cli" && !idle {
+		// kiro-cli running but spinner not captured → still thinking
+		s = "thinking"
 	}
 	st.Status = &s
 	st.IsThink = bp(th || co)
@@ -331,20 +349,20 @@ func autoAction(pid string, st paneSt) {
 }
 
 func ensurePipe(paneID string) bool {
-	t := paneID
-	if !strings.Contains(t, ":") {
-		t += ":main.0"
+	target := paneID
+	if !strings.Contains(target, ":") {
+		target += ":main.0"
 	}
-	if tmuxCmd("display-message", "-t", t, "-p", "#{pane_pipe}") == "0" {
-		f := filepath.Join(pipeLogDir, "pipe-"+strings.NewReplacer(":", "_", ".", "_").Replace(t)+".log")
-		tmuxCmd("pipe-pane", "-t", t, "cat >> "+f)
-		return true
+	logFile := filepath.Join(pipeLogDir, "pipe-"+strings.NewReplacer(":", "_", ".", "_").Replace(target)+".log")
+	if info, err := os.Stat(logFile); err == nil && time.Since(info.ModTime()) < 2*fullSyncInterval {
+		return false
 	}
-	return false
+	exec.Command("tmux", "pipe-pane", "-t", target, "-o", "cat >> "+logFile).Run()
+	return true
 }
 
 func refreshCfgCache() {
-	rows, err := db.Query("SELECT pane_id, title, COALESCE(agent_type,''), COALESCE(role,''), COALESCE(default_model,''), COALESCE(trust_level,'') FROM ttyd_config WHERE active=1")
+	rows, err := db.Query("SELECT pane_id, title, COALESCE(agent_type,''), COALESCE(role,''), COALESCE(default_model,''), COALESCE(trust_level,'') FROM agent_config WHERE active=1")
 	if err != nil {
 		return
 	}

@@ -11,7 +11,9 @@ export default defineConfig({
     allowedHosts: true,
     cors: true,
     hmr: {
-      port: 6902,
+      host: 'ide.cicy.de5.net',
+      clientPort: 443,
+      protocol: 'wss',
     },
   },
 });

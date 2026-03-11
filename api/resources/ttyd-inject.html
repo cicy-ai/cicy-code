@@ -1,0 +1,37 @@
+<style>
+html, body, #terminal {
+  background: #000 !important;
+  height: 100% !important;
+  width: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+}
+body { margin: 8px !important; }
+#terminal { font-size: 13px !important; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+::-webkit-scrollbar-corner { background: transparent; }
+</style>
+<script>
+window.addEventListener('load',function(){
+  var i=setInterval(function(){
+    if(window.term){
+      clearInterval(i);
+      var isMac=/Mac/.test(navigator.platform);
+      var isWin=/Win/.test(navigator.platform);
+      if(isWin){
+        window.term.setOption&&window.term.setOption('letterSpacing',-1);
+      }else if(isMac){
+        window.term.setOption&&window.term.setOption('fontFamily','Menlo, monospace');
+      }
+      setTimeout(function(){
+        window.term.fit&&window.term.fit();
+        window.dispatchEvent(new Event('resize'));
+      },200);
+    }
+  },50);
+});
+</script>

@@ -28,7 +28,14 @@ var (
 func main() {
 	dsn := os.Getenv("MYSQL_DSN")
 	if dsn == "" {
-		dsn = "root:@tcp(localhost:3306)/tts_bot"
+		dsn = "root:cicy-code@tcp(localhost:3306)/cicy_code"
+	}
+	if !strings.Contains(dsn, "parseTime") {
+		if strings.Contains(dsn, "?") {
+			dsn += "&parseTime=true"
+		} else {
+			dsn += "?parseTime=true"
+		}
 	}
 	var err error
 	db, err = sql.Open("mysql", dsn)
@@ -90,12 +97,18 @@ func main() {
 	http.HandleFunc("/api/groups", wa(handleGroups))
 	http.HandleFunc("/api/groups/", wa(handleGroupByID))
 
+	// Nodes
+	http.HandleFunc("/api/nodes", wa(handleNodes))
+	http.HandleFunc("/api/nodes/exec", wa(handleNodeExec))
+
 	// Settings
 	http.HandleFunc("/api/settings/global", wa(handleSettings))
 
 	// Stats
 	http.HandleFunc("/api/stats/traffic", wa(handleStatsTraffic))
 	http.HandleFunc("/api/stats/traffic/raw", wa(handleStatsTrafficRaw))
+	http.HandleFunc("/api/stats/chat", wa(handleChatHistory))
+	http.HandleFunc("/api/stats/chat/stream", wa(handleChatStream))
 	http.HandleFunc("/api/stats/traffic/live", corsM(func(w http.ResponseWriter, r *http.Request) {
 		// SSE needs query token since EventSource can't set headers
 		t := r.URL.Query().Get("token")
@@ -120,6 +133,15 @@ func main() {
 	// Utils
 	http.HandleFunc("/api/utils/file/exists", wa(handleFileExists))
 	http.HandleFunc("/api/correctEnglish", wa(handleCorrectEnglish))
+
+	// Code-server proxy (token auth only for root, assets bypass)
+	http.HandleFunc("/code/", corsM(handleCodeServerAuth))
+
+	// Mitmproxy Web UI proxy
+	http.HandleFunc("/mitm/", corsM(handleMitmproxyAuth))
+
+	// XUI proxy: /api/xui/{pane_id}/... → node xui
+	http.HandleFunc("/api/xui/", wa(handleXuiProxy))
 
 	// WebSocket
 	http.HandleFunc("/api/ws/", wa(handleWSProxy))
@@ -155,8 +177,8 @@ func main() {
 						target += ":main.0"
 					}
 					msg := fmt.Sprintf("pane_idle:%s", paneID)
-					exec.Command("tmux", "send-keys", "-t", target, "-l", msg).Run()
-					exec.Command("tmux", "send-keys", "-t", target, "Enter").Run()
+					nodeTmux(target, "send-keys", "-t", target, "-l", msg)
+					nodeTmux(target, "send-keys", "-t", target, "Enter")
 					log.Printf("[hook] notified %s: %s", agent, msg)
 				}
 			}
@@ -164,7 +186,8 @@ func main() {
 	})
 
 	go startWatcher()
-	log.Printf("ttyd-manager starting on :%s", port)
+	initHTTPLogConsumer()
+	log.Printf("cicy-code-api starting on :%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
@@ -177,10 +200,14 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	J(w, M{"service": "ttyd-manager", "version": "0.2.0"})
+	J(w, M{
+		"ping":    "Pong",
+		"data":    "cicy-code-api",
+		"version": "1.0.0",
+	})
 }
 func handleHealth(w http.ResponseWriter, r *http.Request) {
-	J(w, M{"status": "ok", "source": "ttyd-manager"})
+	J(w, M{"status": "ok", "source": "cicy-code-api"})
 }
 func handlePing(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"pong": "ok", "version": "1.0", "server_datetime": time.Now().Format(time.RFC3339)})

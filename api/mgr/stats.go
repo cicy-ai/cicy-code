@@ -17,11 +17,14 @@ import (
 )
 
 type httpLogEntry struct {
-	Type  string  `json:"type"`
-	Pane  string  `json:"pane"`
-	ReqKB float64 `json:"req_kb"`
-	ResKB float64 `json:"res_kb"`
-	TS    int64   `json:"ts"`
+	Type   string  `json:"type"`
+	Pane   string  `json:"pane"`
+	Method string  `json:"method"`
+	URL    string  `json:"url"`
+	ReqKB  float64 `json:"req_kb"`
+	ResKB  float64 `json:"res_kb"`
+	Status int     `json:"status"`
+	TS     int64   `json:"ts"`
 }
 
 type minuteStats struct {
@@ -327,7 +330,7 @@ func handleNotifyStream(w http.ResponseWriter, r *http.Request) {
 
 func paneWorkspace(pane string) string {
 	var ws string
-	db.QueryRow("SELECT workspace FROM ttyd_config WHERE pane_id=?", pane).Scan(&ws)
+	db.QueryRow("SELECT workspace FROM agent_config WHERE pane_id=?", pane).Scan(&ws)
 	if ws == "" {
 		return ""
 	}
@@ -389,12 +392,12 @@ func handlePair(w http.ResponseWriter, r *http.Request) {
 	}
 	var ws sql.NullString
 	var myRole sql.NullString
-	db.QueryRow("SELECT workspace, role FROM ttyd_config WHERE pane_id=?", pane).Scan(&ws, &myRole)
+	db.QueryRow("SELECT workspace, role FROM agent_config WHERE pane_id=?", pane).Scan(&ws, &myRole)
 	if ws.String == "" {
 		httpErr(w, 404, "pane not found")
 		return
 	}
-	rows, err := db.Query(`SELECT pane_id, title, role, default_model FROM ttyd_config WHERE workspace=? AND active=1 AND role IS NOT NULL AND role!=''`, ws.String)
+	rows, err := db.Query(`SELECT pane_id, title, role, default_model FROM agent_config WHERE workspace=? AND active=1 AND role IS NOT NULL AND role!=''`, ws.String)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return

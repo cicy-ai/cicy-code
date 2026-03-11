@@ -7,14 +7,49 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 const gottyInput = '0' // gotty protocol: client→server input message type
+
+// ttyd HTML inject: loaded from resources/ttyd-inject.html, auto-reload on change
+var (
+	ttydInject     string
+	ttydInjectMu   sync.RWMutex
+	ttydInjectPath = "resources/ttyd-inject.html"
+	ttydInjectMod  time.Time
+)
+
+func loadTtydInject() string {
+	info, err := os.Stat(ttydInjectPath)
+	if err != nil {
+		return ""
+	}
+	ttydInjectMu.RLock()
+	cached := ttydInject
+	mod := ttydInjectMod
+	ttydInjectMu.RUnlock()
+	if cached != "" && info.ModTime().Equal(mod) {
+		return cached
+	}
+	data, err := os.ReadFile(ttydInjectPath)
+	if err != nil {
+		return cached
+	}
+	s := string(data)
+	ttydInjectMu.Lock()
+	ttydInject = s
+	ttydInjectMod = info.ModTime()
+	ttydInjectMu.Unlock()
+	log.Printf("[ttyd] reloaded inject from %s", ttydInjectPath)
+	return s
+}
 
 func handleWSProxy(w http.ResponseWriter, r *http.Request) {
 	paneID := strings.TrimPrefix(r.URL.Path, "/api/ws/")
@@ -98,10 +133,10 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Check pane exists in DB
+	// Check pane exists in DB and is active
 	var dbPort int
-	if err := db.QueryRow("SELECT ttyd_port FROM ttyd_config WHERE pane_id=?", paneID).Scan(&dbPort); err != nil {
-		httpErr(w, 404, "pane not found")
+	if err := db.QueryRow("SELECT ttyd_port FROM agent_config WHERE pane_id=? AND active=1", paneID).Scan(&dbPort); err != nil {
+		httpErr(w, 404, "pane not found or inactive")
 		return
 	}
 
@@ -148,9 +183,9 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 	if subPath == "/" && strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
 		body, _ := io.ReadAll(resp.Body)
 		html := string(body)
-		inject := `<style>html,body,#terminal{background:#000;height:100%;width:100%;padding:4px;margin:0;box-sizing:border-box;font-size:12px;}.xterm-viewport{overflow:hidden!important;}</style></head>`
-		html = strings.Replace(html, "</head>", inject, 1)
-		// Use external gotty-bundle.js served by ttyd-manager
+		if inj := loadTtydInject(); inj != "" {
+			html = strings.Replace(html, "</body>", inj+"</body>", 1)
+		}
 		html = strings.Replace(html, `"./js/gotty-bundle.js"`, fmt.Sprintf(`"/static/gotty-bundle.js?v=%d"`, time.Now().Unix()), 1)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(html)))
@@ -236,8 +271,9 @@ func proxyWS(w http.ResponseWriter, r *http.Request, port int) {
 	}
 }
 
-// filterDAQuery removes DA queries and mouse sequences from gotty Input messages.
-var mouseRe = regexp.MustCompile(`\x1b\[<[\d;]*[Mm]|\x1b\[M[\s\S]{3}`)
+// filterDAQuery removes DA queries and click/drag mouse sequences from gotty Input messages.
+// Preserves scroll wheel events (SGR button 64-67) for terminal scrolling.
+var mouseClickRe = regexp.MustCompile(`\x1b\[<(?:0|1|2|3|32|33|34|35);\d+;\d+[Mm]|\x1b\[M[\s\S]{3}`)
 
 func filterDAQuery(data []byte) []byte {
 	if len(data) < 2 || data[0] != gottyInput {
@@ -247,8 +283,8 @@ func filterDAQuery(data []byte) []byte {
 	// Remove DA queries
 	cleaned := bytes.ReplaceAll(raw, []byte("\x1b[c"), nil)
 	cleaned = bytes.ReplaceAll(cleaned, []byte("\x1b[0c"), nil)
-	// Remove mouse sequences (SGR + X10)
-	cleaned = mouseRe.ReplaceAll(cleaned, nil)
+	// Remove click/drag mouse sequences, keep scroll (button 64-67)
+	cleaned = mouseClickRe.ReplaceAll(cleaned, nil)
 	if len(cleaned) == 0 {
 		return nil
 	}

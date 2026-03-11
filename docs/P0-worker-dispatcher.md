@@ -1,5 +1,8 @@
 # P0 — 双 Agent 协同 + Plan Mode
 
+> 隶属：Phase 2 — Worker-Master 协同引擎
+> 详细 TODO：见 P0-todo.md
+
 ## 概述
 
 两个 Agent（Master + Worker）协同工作，通过 `.cicy/` 共享文档协调。采用 Plan → Confirm → Execute 工作流：Master 出方案，用户审阅确认，Worker 执行。

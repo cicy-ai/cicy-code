@@ -1,4 +1,125 @@
 services:
+  api:
+    build: ./api
+    container_name: cicy-code-api
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - MYSQL_DSN=root:pb200898@tcp(localhost:3306)/cicy_code
+      - PORT=14446
+    volumes:
+      - ~/global.json:/root/global.json:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mysql:
+    image: mysql:8.0
+    container_name: cicy-code-mysql
+    restart: always
+    network_mode: host
+    environment:
+      MYSQL_ROOT_PASSWORD: cicy-code
+      MYSQL_DATABASE: cicy_code
+      MYSQL_TCP_PORT: 13306
+    volumes:
+      - mysql-data:/var/lib/mysql
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --innodb-flush-log-at-trx-commit=2
+      --innodb-buffer-pool-size=512M
+      --max-allowed-packet=64M
+      --port=13306
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-P", "13306", "-pcicy-code"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    container_name: cicy-code-redis
+    restart: always
+    network_mode: host
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --port 16379
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "16379", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mitmproxy:
+    build: ./mitmproxy
+    container_name: cicy-code-mitmproxy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./mitmproxy/kiro_monitor.py:/app/kiro_monitor.py:ro
+      - mitmproxy-data:/home/mitmproxy/.mitmproxy
+    command: mitmweb --web-host 0.0.0.0 --web-port 18889 -p 18888 --ssl-insecure --set block_global=false --set proxyauth=any -s /app/kiro_monitor.py
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  code-server:
+    image: codercom/code-server:latest
+    container_name: cicy-code-server
+    restart: unless-stopped
+    network_mode: host
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      - PASSWORD=pwd@200898
+    volumes:
+      - ${HOST_HOME}/projects:${HOST_HOME}/projects
+      - ${HOST_HOME}/workers:${HOST_HOME}/workers
+      - ${HOST_HOME}/skills:${HOST_HOME}/skills
+      - ${HOST_HOME}/.kiro:${HOST_HOME}/.kiro
+      - ${HOST_HOME}/.cicy-code-server/data:/home/coder/.local/share/code-server
+      - ${HOST_HOME}/.cicy-code-server/config:/home/coder/.config/code-server
+    command: --bind-addr 0.0.0.0:18080 --auth none
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: cicy-code-pma
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PMA_HOST: 127.0.0.1
+      PMA_PORT: 13306
+      APACHE_PORT: 12222
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: cicy-code-redis-admin
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - REDIS_HOSTS=local:127.0.0.1:16379
+      - HTTP_USER=admin
+      - HTTP_PASSWORD=cicy-code
+      - PORT=18379
+
   ide-dev:
     image: node:20-alpine
     working_dir: /app
@@ -13,4 +134,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  mysql-data:
+  redis-data:
+  mitmproxy-data:
   ide_modules:

@@ -48,7 +48,13 @@ func corsM(next http.HandlerFunc) http.HandlerFunc {
 func authM(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") || !verifyToken(strings.TrimPrefix(auth, "Bearer ")) {
+		token := ""
+		if strings.HasPrefix(auth, "Bearer ") {
+			token = strings.TrimPrefix(auth, "Bearer ")
+		} else {
+			token = r.URL.Query().Get("token")
+		}
+		if token == "" || !verifyToken(token) {
 			httpErr(w, 401, "Not authenticated")
 			return
 		}

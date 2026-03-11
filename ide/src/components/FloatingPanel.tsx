@@ -162,7 +162,7 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
         height: disableDrag ? '100%' : size.height,
         minHeight: '140px',
         boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-        zIndex: 999999,
+        zIndex: 1,
         borderRadius: disableDrag ? 0 : '0.5rem',
       }}
     >

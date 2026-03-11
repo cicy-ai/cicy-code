@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Loader2, Home, Folder } from 'lucide-react';
-import { urls } from '../config';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import config, { urls } from '../config';
 import apiService from '../services/api';
 import { WebFrame } from './WebFrame';
 import { SettingsView } from './SettingsView';
@@ -26,8 +28,22 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
 
   const [paneWorkspace, setPaneWorkspace] = useState<string>(() => {
     const cached = localStorage.getItem(`codeserver_folder_${displayPaneId}`);
-    return cached || paneDetail?.workspace || '/home/w3c_offical';
+    return cached || (paneDetail?.workspace || '~/').replace('~', config.hostHome);
   });
+  const [chatData, setChatData] = useState<any[]>([]);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const [codeUrl, setCodeUrl] = useState<string|null>(null);
+
+  useEffect(() => {
+    if (!displayPaneId) return;
+    const short = displayPaneId.replace(':main.0', '');
+    apiService.getChatHistory(short).then(({ data }) => setChatData(data.data || [])).catch(() => {});
+    const es = new EventSource(`${config.apiBase}/api/stats/chat/stream?pane=${short}&token=${token}`);
+    es.onmessage = (e) => { try { setChatData(JSON.parse(e.data)); } catch {} };
+    return () => es.close();
+  }, [displayPaneId]);
+
+  useEffect(() => { setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50); }, [chatData]);
   const [showFavorDirs, setShowFavorDirs] = useState(false);
   const [favorDirs, setFavorDirs] = useState<string[]>([]);
   const [tempPaneData, setTempPaneData] = useState<EditPaneData | null>(null);
@@ -45,7 +61,7 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
     try {
       const { data } = await apiService.fileExists(path);
       if (!data.exists) { setToast(`Path not found: ${path}`); setTimeout(() => setToast(null), 3000); return; }
-      const newUrl = urls.codeServer(path);
+      const newUrl = urls.codeServer(path, token || undefined);
       if ((frame as any).stop) (frame as any).stop();
       if ((frame as any).src !== undefined) (frame as any).src = newUrl;
       else frame.setAttribute('src', newUrl);
@@ -67,7 +83,7 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
       setTempPaneData({
         target: paneDetail.pane_id || displayPaneId,
         title: paneDetail.title || '',
-        workspace: paneDetail.workspace || '/home/w3c_offical',
+        workspace: (paneDetail.workspace || '~/').replace('~', config.hostHome),
         agent_duty: paneDetail.agent_duty || '',
         agent_type: paneDetail.agent_type || '',
         init_script: paneDetail.init_script || '',
@@ -107,7 +123,7 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
   return (
     <div id="right-side" className="w-full h-full bg-vsc-bg">
       <div id="right-side-top" className="absolute top-0 left-0 right-0 h-10 bg-vsc-bg-titlebar border-b border-vsc-border flex items-center gap-1 px-2 z-10">
-        {([ 'Workers', 'Code', 'Traffic', 'Board', 'Preview', 'Settings'] as const).map(tab => (
+        {([ 'Workers', 'Code', 'Traffic', 'Board', 'Preview', 'ChatView', 'Settings'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => {
@@ -173,7 +189,7 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
                   }}
                 />
               </div>
-              <WebFrame codeServer loading="lazy" src={urls.codeServer(paneWorkspace)} className="code-server-iframe w-full flex-1" />
+              <WebFrame codeServer loading="lazy" src={urls.codeServer(paneWorkspace, token || undefined)} className="code-server-iframe w-full flex-1" />
             </div>
             {isDragging && <div className="absolute inset-0 z-20"></div>}
           </div>
@@ -234,6 +250,151 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
       )}
       {activeTab === 'Workers' && (
         <BindedAgentsTab paneId={displayPaneId} token={token} isDragging={isDragging} setBoundAgents={setBoundAgents} />
+      )}
+      {activeTab === 'ChatView' && (
+        <div className="absolute inset-0 overflow-y-auto bg-vsc-bg" style={{marginTop: '40px'}}>
+          <div style={{maxWidth: 720, margin: '0 auto', padding: '24px 16px'}}>
+            {chatData.length === 0 && (
+              <div className="text-vsc-text-muted" style={{textAlign: 'center', marginTop: 120}}>
+                <div style={{fontSize: 32, marginBottom: 12}}>💬</div>
+                <div style={{fontSize: 14}}>No conversation yet</div>
+              </div>
+            )}
+            {(() => {
+              const groups: {q: string, rounds: any[], totalCredit: number}[] = [];
+              chatData.forEach((c: any) => {
+                if (c.q) groups.push({q: c.q, rounds: [c], totalCredit: c.credit || 0});
+                else if (groups.length > 0) { const g = groups[groups.length - 1]; g.rounds.push(c); g.totalCredit += c.credit || 0; }
+              });
+              return groups.map((g, gi) => {
+                const lastText = [...g.rounds].reverse().find((r: any) => r.status === 'text');
+                const ranSec = g.rounds.length > 1 ? Math.round(g.rounds[g.rounds.length-1].ts - g.rounds[0].ts) : Math.round((g.rounds[0]?.first_ms || 0) / 1000);
+                const allTools = g.rounds.flatMap((r: any) => r.tools || []);
+                const writeCnt = allTools.filter((t: any) => t.name === 'fs_write').length;
+                const writeFiles = [...new Set(allTools.filter((t: any) => t.name === 'fs_write' && t.arg).map((t: any) => t.arg))];
+                const readCnt = allTools.filter((t: any) => t.name === 'fs_read').length;
+                const readFiles = [...new Set(allTools.filter((t: any) => t.name === 'fs_read' && t.arg).map((t: any) => t.arg))];
+                const bashCnt = allTools.filter((t: any) => t.name === 'execute_bash').length;
+                const bashArgs = allTools.filter((t: any) => t.name === 'execute_bash' && t.arg).map((t: any) => t.arg);
+                const searchOps = allTools.filter((t: any) => ['grep','glob','code','web_search','web_fetch'].includes(t.name));
+                const otherOps = allTools.filter((t: any) => !['fs_write','fs_read','execute_bash','grep','glob','code','web_search','web_fetch'].includes(t.name));
+                const hasTools = allTools.length > 0;
+                const isRunning = !lastText && g.rounds.some((r: any) => r.status === 'tool_use');
+                return (
+                  <div key={gi} style={{marginBottom: 24}}>
+                    {/* User bubble */}
+                    <div style={{display: 'flex', justifyContent: 'flex-end', marginBottom: 12}}>
+                      <div className="bg-vsc-bg-active text-vsc-text" style={{borderRadius: '20px 20px 4px 20px', padding: '10px 16px', maxWidth: '85%', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word'}}>
+                        {g.q.replace(/^-\n/, '')}
+                      </div>
+                    </div>
+                    {/* AI card */}
+                    <div className="bg-vsc-bg-secondary border border-vsc-border" style={{borderRadius: 12, padding: '14px 16px'}}>
+                      {/* Header */}
+                      <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: hasTools ? 10 : 0}}>
+                        <span className="text-vsc-accent" style={{fontSize: 13, fontWeight: 600}}>✦ Kiro CLI</span>
+                        {ranSec > 0 && <span className="text-vsc-text-muted bg-vsc-bg" style={{fontSize: 11, borderRadius: 10, padding: '1px 8px'}}>Ran for {ranSec}s</span>}
+                        <span style={{flex: 1}}/>
+                        {g.totalCredit > 0 && <span className="text-vsc-text-disabled" style={{fontSize: 11}}>${g.totalCredit.toFixed(3)}</span>}
+                      </div>
+                      {/* Tool summary */}
+                      {hasTools && (
+                        <div className="text-vsc-text-secondary" style={{fontSize: 12, lineHeight: 1.8, marginBottom: 8}}>
+                          {readCnt > 0 && (
+                            <div>
+                              <span>📄 Read {readFiles.length || readCnt} file{(readFiles.length || readCnt) > 1 ? 's' : ''}</span>
+                              {readFiles.map((f: string, fi: number) => {
+                                const m = f.match(/^(.+?)\s+(\d+)-(\d+)$/);
+                                const fpath = m ? m[1] : f;
+                                const lineRange = m ? ` ${m[2]}-${m[3]}` : '';
+                                const short = fpath.split('/').slice(-2).join('/');
+                                return (
+                                <div key={fi} className="text-vsc-text-muted hover:text-vsc-text" style={{paddingLeft: 20, fontFamily: 'monospace', fontSize: 11, cursor: 'pointer'}} onClick={() => {
+                                  const csPath = fpath;
+                                  const line = m ? m[2] : '1';
+                                  setCodeUrl(`${config.codeServerBase}/?token=${token}&goto=${encodeURIComponent(csPath + ':' + line + ':1')}`);
+                                }} title={fpath}>
+                                  ✓ {short}{lineRange}
+                                </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {searchOps.length > 0 && (
+                            <div>
+                              <span>🔍 {searchOps.length} search{searchOps.length > 1 ? 'es' : ''}</span>
+                              {searchOps.filter((t: any) => t.arg).slice(0, 3).map((t: any, ti: number) => (
+                                <div key={ti} className="text-vsc-text-muted" style={{paddingLeft: 20, fontFamily: 'monospace', fontSize: 11}}>
+                                  {t.name}: {t.arg}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {writeCnt > 0 && (
+                            <div>
+                              <span>✏️ Edited {writeFiles.length || writeCnt} file{(writeFiles.length || writeCnt) > 1 ? 's' : ''}</span>
+                              {writeFiles.map((f: string, fi: number) => {
+                                const m = f.match(/^(.+?)\s+(\d+)-(\d+)$/);
+                                const fpath = m ? m[1] : f;
+                                const short = fpath.split('/').slice(-2).join('/');
+                                return (
+                                <div key={fi} className="text-vsc-success hover:text-vsc-text" style={{paddingLeft: 20, fontFamily: 'monospace', fontSize: 11, cursor: 'pointer'}} onClick={() => {
+                                  const csPath = fpath;
+                                  setCodeUrl(`${config.codeServerBase}/?token=${token}&goto=${encodeURIComponent(csPath + ':1:1')}`);
+                                }} title={fpath}>
+                                  ✓ {short}
+                                </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {bashCnt > 0 && (
+                            <div>
+                              <span>🔨 Ran {bashCnt} command{bashCnt > 1 ? 's' : ''}</span>
+                              {bashArgs.slice(0, 5).map((a: string, ai: number) => (
+                                <div key={ai} className="text-vsc-text-muted" style={{paddingLeft: 20, fontFamily: 'monospace', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                                  $ {a}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {otherOps.filter((t: any) => t.arg).map((t: any, ti: number) => (
+                            <div key={ti}>✓ {t.name}: {t.arg}</div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Running indicator */}
+                      {isRunning && (
+                        <div className="text-vsc-accent" style={{fontSize: 12, padding: '4px 0'}}>
+                          <span style={{animation: 'pulse 1.5s infinite'}}>● </span>Running...
+                        </div>
+                      )}
+                      {/* Reply */}
+                      {lastText?.a && (
+                        <div className="chat-markdown text-vsc-text" style={{fontSize: 14, lineHeight: 1.8, wordBreak: 'break-word', borderTop: hasTools ? '1px solid var(--vsc-border)' : 'none', paddingTop: hasTools ? 10 : 0}}>
+                          <Markdown remarkPlugins={[remarkGfm]}>{lastText.a}</Markdown>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              });
+            })()}
+            <div ref={chatEndRef} />
+          </div>
+        </div>
+      )}
+      {/* Code-server dialog */}
+      {codeUrl && (
+        <div style={{position: 'fixed', inset: 0, zIndex: 99999999, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center'}} onClick={() => setCodeUrl(null)}>
+          <div className="bg-vsc-bg border border-vsc-border" style={{width: '90vw', height: '85vh', borderRadius: 8, overflow: 'hidden', display: 'flex', flexDirection: 'column'}} onClick={e => e.stopPropagation()}>
+            <div className="bg-vsc-bg-titlebar text-vsc-text-secondary border-b border-vsc-border" style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', fontSize: 12}}>
+              <span>📄 Code Server</span>
+              <span className="text-vsc-text-muted hover:text-vsc-text" style={{cursor: 'pointer', fontSize: 16}} onClick={() => setCodeUrl(null)}>✕</span>
+            </div>
+            <iframe src={codeUrl} style={{flex: 1, border: 'none', width: '100%'}} />
+          </div>
+        </div>
       )}
       {activeTab === 'Settings' && (
         <SettingsTabWithSub
@@ -562,7 +723,7 @@ const BindedAgentsTab: React.FC<{paneId: string, token: string | null, isDraggin
       ]);
       setAllBindings(allB);
       const withTitles = data.map((a: any) => {
-        const info = allPanes.find((p: any) => p.pane_id === a.name);
+        const info = allPanes.find((p: any) => p.pane_id === a.name || p.pane_id === a.name + ':main.0');
         return { ...a, title: info?.title || a.name, role: info?.role || '', model: info?.default_model || '', trust: info?.trust_level || '', status: info?.status || '' };
       });
       setAgents(prev => {
@@ -586,13 +747,17 @@ const BindedAgentsTab: React.FC<{paneId: string, token: string | null, isDraggin
   }, [paneId]);
   useEffect(() => {
     setAgents(prev => prev.map(a => {
-      const info = allPanes.find((p: any) => p.pane_id === a.name);
+      const info = allPanes.find((p: any) => p.pane_id === a.name || p.pane_id === a.name + ':main.0');
       return info ? { ...a, title: info.title || a.name, status: info.status || '', model: info.default_model || '', trust: info.trust_level || '' } : a;
     }));
   }, [allPanes]);
 
   const allBoundNames = new Set(allBindings.map((b: any) => b.name));
-  const unbindable = allPanes.filter((p: any) => p.pane_id !== paneId && !allBoundNames.has(p.pane_id));
+  const unbindable = allPanes.filter((p: any) => {
+    if (p.pane_id === paneId) return false;
+    if (allBoundNames.has(p.pane_id) || allBoundNames.has(p.pane_id.replace(':main.0', ''))) return false;
+    return true;
+  });
 
   const handleBind = async () => {
     if (!selectedAgent) return;
@@ -631,7 +796,36 @@ const BindedAgentsTab: React.FC<{paneId: string, token: string | null, isDraggin
 
   const counts = agents.reduce((acc, a) => { const s = a.status || 'offline'; acc[s] = (acc[s] || 0) + 1; return acc; }, {} as Record<string, number>);
 
-  const renderCard = (agent: any, isStretch = false) => (
+  const [chatCache, setChatCache] = useState<Record<string, any[]>>({});
+  const [cardMode, setCardMode] = useState<Record<string, 'chat'|'term'>>({});
+
+  // Fetch chat history for all agents
+  useEffect(() => {
+    if (!agents.length) return;
+    agents.forEach(a => {
+      const short = a.name.replace(':main.0', '');
+      apiService.getChatHistory(short).then(({ data }) => {
+        setChatCache(prev => ({ ...prev, [short]: data.data || [] }));
+      }).catch(() => {});
+    });
+    const iv = setInterval(() => {
+      agents.forEach(a => {
+        const short = a.name.replace(':main.0', '');
+        apiService.getChatHistory(short).then(({ data }) => {
+          setChatCache(prev => ({ ...prev, [short]: data.data || [] }));
+        }).catch(() => {});
+      });
+    }, 15000);
+    return () => clearInterval(iv);
+  }, [agents.map(a => a.id).join(',')]);
+
+  const renderCard = (agent: any, isStretch = false) => {
+    const short = agent.name.replace(':main.0', '');
+    const chat = chatCache[short] || [];
+    const totalCredit = chat.reduce((s: number, c: any) => s + (c.credit || 0), 0);
+    const mode = cardMode[short] || 'chat';
+
+    return (
     <div
       key={agent.id}
       className="flex flex-col bg-vsc-bg border border-vsc-border rounded overflow-hidden"
@@ -640,20 +834,73 @@ const BindedAgentsTab: React.FC<{paneId: string, token: string | null, isDraggin
         ...(agent.status === 'offline' ? { opacity: 0.5 } : {}),
       }}
     >
-      {/* Card header */}
-      <div className="flex items-center gap-1.5 px-2 py-1 flex-shrink-0" style={{background: statusColor(agent.status), borderBottom: `1px solid ${statusColor(agent.status)}`}}>
-        {statusDot(agent.status)}
-        <span className="text-[10px] text-vsc-text-secondary opacity-70">{agent.name.replace(':main.0','')}</span>
+      {/* Header */}
+      <div className="flex items-center gap-1.5 px-2 py-1 flex-shrink-0 bg-vsc-bg-secondary border-b border-vsc-border">
+        <span style={{width: 7, height: 7, borderRadius: '50%', background: statusColor(agent.status), flexShrink: 0}} />
+        <span className="text-[10px] text-vsc-text-secondary opacity-70">{short}</span>
         <span className="text-[11px] text-vsc-text font-medium truncate flex-1">{(agent.title || agent.name).replace(':main.0','')}</span>
-        {!narrow && agent.model && <span className="text-[10px] text-vsc-text-secondary opacity-60 truncate max-w-[100px]">{agent.model}</span>}
-        <span className="text-[10px] text-vsc-text-secondary">{agent.status || 'offline'}</span>
+        {totalCredit > 0 && <span className="text-[10px] text-yellow-500/80">{totalCredit.toFixed(2)} cr</span>}
+        <button onClick={() => setCardMode(p => ({...p, [short]: mode === 'chat' ? 'term' : 'chat'}))} className="text-[11px] px-0.5 text-vsc-text-secondary hover:text-vsc-text" title={mode === 'chat' ? 'Terminal' : 'Chat'}>{mode === 'chat' ? '🖥' : '💬'}</button>
       </div>
-      {/* WebFrame terminal */}
-      <div className="flex-1 relative min-h-0">
-        <WebFrame src={urls.ttyd(agent.name, token || '', 1)} className="w-full h-full" />
-        {isDragging && <div className="absolute inset-0 z-20" />}
+      {/* Body */}
+      <div className="flex-1 min-h-0 relative overflow-hidden">
+        {mode === 'term' ? (
+          <>
+            <WebFrame src={urls.ttyd(agent.name, token || '', 1)} className="w-full h-full" />
+            {isDragging && <div className="absolute inset-0 z-20" />}
+          </>
+        ) : (
+          <div className="w-full h-full overflow-y-auto p-2 text-[11px]" data-chat={short} ref={el => { if (el) el.scrollTop = el.scrollHeight; }}>
+            {chat.length === 0 && <div className="text-vsc-text-secondary text-center mt-8">No conversation yet</div>}
+            {(() => {
+              const groups: {q: string, rounds: any[], totalCr: number}[] = [];
+              chat.forEach((c: any) => {
+                if (c.q) groups.push({q: c.q, rounds: [c], totalCr: c.credit || 0});
+                else if (groups.length > 0) { const g = groups[groups.length - 1]; g.rounds.push(c); g.totalCr += c.credit || 0; }
+              });
+              return groups.map((g, gi) => {
+                const lastText = [...g.rounds].reverse().find((r: any) => r.status === 'text');
+                const allTools = g.rounds.flatMap((r: any) => r.tools || []);
+                const writeCnt = allTools.filter((t: any) => t.name === 'fs_write').length;
+                const readCnt = allTools.filter((t: any) => t.name === 'fs_read').length;
+                const bashCnt = allTools.filter((t: any) => t.name === 'execute_bash').length;
+                const searchCnt = allTools.filter((t: any) => ['grep','glob','code','web_search','web_fetch'].includes(t.name)).length;
+                const isRunning = !lastText && g.rounds.some((r: any) => r.status === 'tool_use');
+                return (
+                  <div key={gi} style={{marginBottom: 8}}>
+                    <div style={{display: 'flex', justifyContent: 'flex-end', marginBottom: 4}}>
+                      <div className="bg-vsc-bg-active text-vsc-text" style={{borderRadius: '12px 12px 2px 12px', padding: '4px 8px', maxWidth: '90%', fontSize: 11, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word'}}>
+                        {g.q.replace(/^-\n/, '')}
+                      </div>
+                    </div>
+                    <div className="bg-vsc-bg-secondary border border-vsc-border" style={{borderRadius: 8, padding: '6px 8px'}}>
+                      <div style={{display: 'flex', alignItems: 'center', gap: 4, marginBottom: allTools.length ? 4 : 0}}>
+                        <span className="text-vsc-accent" style={{fontSize: 10, fontWeight: 600}}>✦</span>
+                        {g.totalCr > 0 && <span className="text-vsc-text-disabled" style={{fontSize: 9, marginLeft: 'auto'}}>${g.totalCr.toFixed(3)}</span>}
+                      </div>
+                      {allTools.length > 0 && (
+                        <div className="text-vsc-text-muted" style={{fontSize: 10, lineHeight: 1.6, marginBottom: 4}}>
+                          {readCnt > 0 && <span style={{marginRight: 6}}>📄{readCnt}</span>}
+                          {searchCnt > 0 && <span style={{marginRight: 6}}>🔍{searchCnt}</span>}
+                          {writeCnt > 0 && <span style={{marginRight: 6}}>✏️{writeCnt}</span>}
+                          {bashCnt > 0 && <span style={{marginRight: 6}}>🔨{bashCnt}</span>}
+                        </div>
+                      )}
+                      {isRunning && <div className="text-vsc-accent" style={{fontSize: 10}}>● Running...</div>}
+                      {lastText?.a && (
+                        <div className="chat-markdown text-vsc-text" style={{fontSize: 11, lineHeight: 1.6, wordBreak: 'break-word', borderTop: allTools.length ? '1px solid var(--vsc-border)' : 'none', paddingTop: allTools.length ? 4 : 0}}>
+                          <Markdown remarkPlugins={[remarkGfm]}>{lastText.a}</Markdown>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        )}
       </div>
-      {/* Card footer */}
+      {/* Footer */}
       <div className="flex items-center gap-1 px-2 py-0.5 bg-vsc-bg-secondary flex-shrink-0">
         <button onClick={() => setExpandedId(agent.id)} className="text-[10px] px-1 text-vsc-text-secondary hover:text-vsc-text" title="Expand">⛶</button>
         <button onClick={() => window.open(urls.ttydOpen(agent.name, token || ''), '_blank')} className="text-[10px] px-1 text-vsc-text-secondary hover:text-vsc-text" title="Open in new tab">↗</button>
@@ -661,7 +908,8 @@ const BindedAgentsTab: React.FC<{paneId: string, token: string | null, isDraggin
         <button onClick={() => handleUnbind(agent.id, agent.title || agent.name)} className="text-[10px] px-1 text-vsc-text-secondary hover:text-red-400" title="Unbind">✕</button>
       </div>
     </div>
-  );
+    );
+  };
 
   // Expanded modal
   const expandedAgent = agents.find(a => a.id === expandedId);

@@ -9,7 +9,7 @@ import (
 func handleGroups(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		rows, err := db.Query("SELECT id, name, description, created_at, updated_at FROM ttyd_groups ORDER BY id")
+		rows, err := db.Query("SELECT id, name, description, created_at, updated_at FROM agent_groups ORDER BY id")
 		if err != nil {
 			httpErr(w, 500, err.Error())
 			return
@@ -55,7 +55,7 @@ func handleGroups(w http.ResponseWriter, r *http.Request) {
 		readBody(r, &req)
 		name, _ := req["name"].(string)
 		desc, _ := req["description"].(string)
-		res, err := db.Exec("INSERT INTO ttyd_groups (name, description) VALUES (?,?)", name, desc)
+		res, err := db.Exec("INSERT INTO agent_groups (name, description) VALUES (?,?)", name, desc)
 		if err != nil {
 			httpErr(w, 500, err.Error())
 			return
@@ -90,7 +90,7 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 	case "GET":
 		var name, desc string
 		var createdAt, updatedAt sql.NullTime
-		err := db.QueryRow("SELECT name, description, created_at, updated_at FROM ttyd_groups WHERE id=?", groupID).Scan(&name, &desc, &createdAt, &updatedAt)
+		err := db.QueryRow("SELECT name, description, created_at, updated_at FROM agent_groups WHERE id=?", groupID).Scan(&name, &desc, &createdAt, &updatedAt)
 		if err != nil {
 			httpErr(w, 404, "Group not found")
 			return
@@ -148,10 +148,10 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		vals = append(vals, groupID)
-		db.Exec("UPDATE ttyd_groups SET "+strings.Join(sets, ", ")+" WHERE id=?", vals...)
+		db.Exec("UPDATE agent_groups SET "+strings.Join(sets, ", ")+" WHERE id=?", vals...)
 		J(w, M{"success": true, "group_id": groupID, "updated": req})
 	case "DELETE":
-		res, _ := db.Exec("DELETE FROM ttyd_groups WHERE id=?", groupID)
+		res, _ := db.Exec("DELETE FROM agent_groups WHERE id=?", groupID)
 		n, _ := res.RowsAffected()
 		if n == 0 {
 			httpErr(w, 404, "Group not found")

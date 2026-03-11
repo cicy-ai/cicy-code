@@ -18,10 +18,10 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if gid != "" {
 		rows, err = db.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.proxy, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level
-			FROM ttyd_config t INNER JOIN group_windows gp ON t.pane_id=gp.win_id WHERE gp.group_id=? ORDER BY t.created_at DESC`, gid)
+			FROM agent_config t INNER JOIN group_windows gp ON t.pane_id=gp.win_id WHERE gp.group_id=? AND t.active=1 ORDER BY t.created_at DESC`, gid)
 	} else {
 		rows, err = db.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.proxy, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level
-			FROM ttyd_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id ORDER BY t.created_at DESC`)
+			FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.active=1 ORDER BY t.created_at DESC`)
 	}
 	if err != nil {
 		httpErr(w, 500, err.Error())
@@ -110,10 +110,10 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	port := workerIdx
 
 	// Create tmux session
-	exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", wsExpanded).Run()
+	nodeTmux(paneID, "new-session", "-d", "-s", session, "-n", "main", "-c", wsExpanded)
 
 	// Insert DB
-	db.Exec(`INSERT INTO ttyd_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, trust_level, created_at, updated_at)
+	db.Exec(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, trust_level, created_at, updated_at)
 		VALUES (?,?,?,?,?,?,?,?,?,NOW(),NOW())`, paneID, title, port, req.Workspace, req.InitScript, "{}", req.Role, req.DefaultModel, req.TrustLevel)
 
 	// Start ttyd-go instance
@@ -204,7 +204,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	var role, defaultModel, trustLevel sql.NullString
 	err := db.QueryRow(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.proxy,
 		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.agent_duty, t.config, t.common_prompt, t.ttyd_preview, gp.group_id, t.role, t.default_model, t.trust_level
-		FROM ttyd_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.pane_id=?`, paneID).Scan(
+		FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.pane_id=?`, paneID).Scan(
 		&paneID, &title, &port, &workspace, &initScript, &proxy,
 		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &agentDuty, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel)
 	if err != nil {
@@ -244,12 +244,12 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 		vals = append(vals, v)
 	}
 	vals = append(vals, paneID)
-	db.Exec("UPDATE ttyd_config SET "+strings.Join(sets, ", ")+" WHERE pane_id=?", vals...)
+	db.Exec("UPDATE agent_config SET "+strings.Join(sets, ", ")+" WHERE pane_id=?", vals...)
 
 	// Sync agent_duty to workspace/.kiro/steering/duty.md
 	if duty, ok := req["agent_duty"].(string); ok {
 		var ws sql.NullString
-		db.QueryRow("SELECT workspace FROM ttyd_config WHERE pane_id=?", paneID).Scan(&ws)
+		db.QueryRow("SELECT workspace FROM agent_config WHERE pane_id=?", paneID).Scan(&ws)
 		if ws.String != "" {
 			dir := ws.String + "/.kiro/steering"
 			os.MkdirAll(dir, 0755)
@@ -262,7 +262,7 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 	paneID := normPaneID(id)
 	var port sql.NullInt64
-	db.QueryRow("SELECT ttyd_port FROM ttyd_config WHERE pane_id=?", paneID).Scan(&port)
+	db.QueryRow("SELECT ttyd_port FROM agent_config WHERE pane_id=?", paneID).Scan(&port)
 	go func() {
 		defer func() { recover() }()
 		stopInstance(paneID)
@@ -270,9 +270,9 @@ func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 			exec.Command("bash", "-c", fmt.Sprintf("kill -9 $(lsof -ti:%d 2>/dev/null) 2>/dev/null; true", port.Int64)).Run()
 		}
 		session := strings.Split(paneID, ":")[0]
-		exec.Command("tmux", "kill-session", "-t", session).Run()
+		nodeTmux(paneID, "kill-session", "-t", session)
 	}()
-	db.Exec("DELETE FROM ttyd_config WHERE pane_id=?", paneID)
+	db.Exec("DELETE FROM agent_config WHERE pane_id=?", paneID)
 	J(w, M{"success": true, "pane_id": shortPaneID(paneID), "message": "Pane deleted"})
 }
 
@@ -281,7 +281,7 @@ func handleRestartPane(w http.ResponseWriter, r *http.Request, id string) {
 	token := getToken(r)
 	var port sql.NullInt64
 	var workspace, initScript, title, config, agentType, trustLevel sql.NullString
-	err := db.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, trust_level FROM ttyd_config WHERE pane_id=?", paneID).
+	err := db.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, trust_level FROM agent_config WHERE pane_id=?", paneID).
 		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &trustLevel)
 	if err != nil {
 		J(w, M{"success": false, "error": "数据库中未找到该 Pane 配置"})
@@ -297,7 +297,7 @@ func handleRestartPane(w http.ResponseWriter, r *http.Request, id string) {
 
 	// Kill and recreate tmux session
 	session := strings.Split(paneID, ":")[0]
-	exec.Command("tmux", "kill-session", "-t", session).Run()
+	nodeTmux(paneID, "kill-session", "-t", session)
 	time.Sleep(300 * time.Millisecond)
 	home, _ := os.UserHomeDir()
 	ws := workspace.String
@@ -305,7 +305,7 @@ func handleRestartPane(w http.ResponseWriter, r *http.Request, id string) {
 		ws = "~"
 	}
 	wsExpanded := strings.Replace(ws, "~", home, 1)
-	exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", wsExpanded).Run()
+	nodeTmux(paneID, "new-session", "-d", "-s", session, "-n", "main", "-c", wsExpanded)
 
 	// Restart ttyd-go
 	p := int(port.Int64)
@@ -344,7 +344,7 @@ func handleRestartPane(w http.ResponseWriter, r *http.Request, id string) {
 			runTmux("send-keys", "-t", paneID, "/tools "+trustLevel.String, "Enter")
 		}
 	}
-	db.Exec("UPDATE ttyd_config SET updated_at=NOW() WHERE pane_id=?", paneID)
+	db.Exec("UPDATE agent_config SET updated_at=NOW() WHERE pane_id=?", paneID)
 	J(w, M{"success": true, "message": "Pane 软重启完成"})
 }
 
@@ -364,16 +364,16 @@ func applyProxyFromConfig(paneID, configJSON string) {
 	}
 	// Use pane_id as proxy auth user for mitmproxy identification
 	short := strings.Split(paneID, ":")[0]
-	proxyURL := fmt.Sprintf("http://%s:x@127.0.0.1:8888", short)
+	proxyURL := fmt.Sprintf("http://%s:x@127.0.0.1:18888", short)
 	if cfg.Proxy.URL != "" && cfg.Proxy.URL != "https://proxy.example.com" {
 		proxyURL = cfg.Proxy.URL
 	}
-	cmd := fmt.Sprintf("export HTTPS_PROXY='%s' https_proxy='%s' no_proxy=localhost,127.0.0.1", proxyURL, proxyURL)
+	cmd := fmt.Sprintf("export HTTPS_PROXY='%s' && export https_proxy='%s' && export HTTP_PROXY='%s' && export http_proxy='%s' && export no_proxy=localhost,127.0.0.1", proxyURL, proxyURL, proxyURL, proxyURL)
 	runTmux("send-keys", "-t", paneID, cmd, "Enter")
 }
 
 func handleRestartAll(w http.ResponseWriter, r *http.Request) {
-	rows, _ := db.Query("SELECT pane_id FROM ttyd_config WHERE active=1")
+	rows, _ := db.Query("SELECT pane_id FROM agent_config WHERE active=1")
 	defer rows.Close()
 	var results []M
 	for rows.Next() {
@@ -498,7 +498,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fallback to DB if Redis unavailable
-	rows, _ := db.Query("SELECT pane_id, ttyd_port, title FROM ttyd_config")
+	rows, _ := db.Query("SELECT pane_id, ttyd_port, title FROM agent_config")
 	defer rows.Close()
 	result := M{}
 	for rows.Next() {
@@ -531,7 +531,7 @@ func handleSendWait(w http.ResponseWriter, r *http.Request) {
 	paneID := req.Target
 	// Resolve @title
 	if strings.HasPrefix(paneID, "@") {
-		db.QueryRow("SELECT pane_id FROM ttyd_config WHERE title=? LIMIT 1", paneID[1:]).Scan(&paneID)
+		db.QueryRow("SELECT pane_id FROM agent_config WHERE title=? LIMIT 1", paneID[1:]).Scan(&paneID)
 		if paneID == "" {
 			J(w, M{"success": false, "error": fmt.Sprintf("No pane found with title '%s'", req.Target[1:])})
 			return
@@ -597,7 +597,7 @@ func handleMouseStatus(w http.ResponseWriter, r *http.Request) {
 func handleTtydStatus(w http.ResponseWriter, r *http.Request) {
 	paneID := normPaneID(strings.TrimPrefix(r.URL.Path, "/api/tmux/ttyd/status/"))
 	var port sql.NullInt64
-	err := db.QueryRow("SELECT ttyd_port FROM ttyd_config WHERE pane_id=?", paneID).Scan(&port)
+	err := db.QueryRow("SELECT ttyd_port FROM agent_config WHERE pane_id=?", paneID).Scan(&port)
 	if err != nil {
 		httpErr(w, 404, "pane_id not found")
 		return
@@ -643,7 +643,16 @@ func handleUnsplitPane(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func handleClear(w http.ResponseWriter, r *http.Request) {
-	exec.Command("tmux", "kill-server").Run()
+	// kill tmux on all active nodes
+	rows, _ := db.Query("SELECT DISTINCT node_url FROM agent_config WHERE active=1")
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var u string
+			rows.Scan(&u)
+			nodeExec(u, "tmux kill-server")
+		}
+	}
 	J(w, M{"success": true, "message": "All sessions cleared"})
 }
 

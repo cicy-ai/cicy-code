@@ -120,6 +120,21 @@ func waitPort(port int, timeout time.Duration) bool {
 }
 
 func runTmux(args ...string) (string, error) {
+	// 从 args 中提取 pane_id 来确定 node
+	paneID := extractPaneID(args)
+	if paneID != "" {
+		return nodeTmux(paneID, args...)
+	}
 	out, err := exec.Command("tmux", args...).Output()
 	return strings.TrimSpace(string(out)), err
+}
+
+// extractPaneID 从 tmux 命令参数中提取 pane_id（-t 后面的值）
+func extractPaneID(args []string) string {
+	for i, a := range args {
+		if a == "-t" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }

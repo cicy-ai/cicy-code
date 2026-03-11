@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 )
 
 func handleSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 		var val []byte
-		err := db.QueryRow("SELECT `value` FROM global_var WHERE `key`='global_settings'").Scan(&val)
+		err := db.QueryRow("SELECT `value` FROM global_vars WHERE `key_name`='global_settings'").Scan(&val)
 		if err != nil || val == nil {
 			J(w, M{"favor": M{"dir": []string{}, "cmd": []string{}}})
 			return
@@ -22,18 +23,22 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		var req interface{}
 		readBody(r, &req)
 		data, _ := json.Marshal(req)
-		db.Exec("INSERT INTO global_var (`key`, `value`) VALUES ('global_settings', ?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", string(data))
+		db.Exec("INSERT INTO global_vars (`key_name`, `value`) VALUES ('global_settings', ?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", string(data))
 		J(w, M{"success": true})
 	}
 }
 
 func handleFileExists(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
+	if strings.HasPrefix(path, "~/") {
+		home, _ := os.UserHomeDir()
+		path = home + path[1:]
+	}
 	_, err := os.Stat(path)
 	J(w, M{"exists": err == nil, "path": path})
 }
 
 func handleCorrectEnglish(w http.ResponseWriter, r *http.Request) {
 	// Stub - would need Cloudflare AI integration
-	J(w, M{"success": false, "error": "not implemented in ttyd-manager"})
+	J(w, M{"success": false, "error": "not implemented in cicy-code-api"})
 }

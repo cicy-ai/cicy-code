@@ -109,11 +109,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           paneConfig[p.pane_id] = p;
         }
         
-        const panesArray = (Object.entries(statusRes.data as Record<string, Agent>) || []).map(([key, p]) => ({
-          ...p,
-          title: paneConfig[key]?.title || p.title,
-          created_at: paneConfig[key]?.created_at || null,
-        }));
+        const statusMap = (statusRes.data || {}) as Record<string, any>;
+        const panesArray = (panesRes.data?.panes || []).map((p: any) => {
+          const { pane_id: _drop, active: _dropActive, ...st } = statusMap[p.pane_id] || {};
+          return { ...p, ...st, title: p.title || st.title, pane_id: p.pane_id, active: p.active };
+        });
         if (panesArray.length === 0) return;
         setAllPanes(prev => {
           const prevJson = JSON.stringify(prev);

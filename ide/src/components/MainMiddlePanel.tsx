@@ -272,7 +272,7 @@ const MiddleContent: React.FC<MiddleContentProps> = ({
           {showCorrectionResult && correctionData ? (
             <CorrectionPanel correctionData={correctionData} commandPanelHeight={commandPanelHeight} onClose={() => setShowCorrectionResult(false)} commandPanelRef={commandPanelRef} />
           ) : null}
-          <div className="absolute top-0 left-0 right-0 h-1 bg-vsc-border" style={{zIndex: 9999999}}></div>
+          <div className="absolute top-0 left-0 right-0 h-1 bg-vsc-border" style={{zIndex: 1}}></div>
           <CommandPanel
             ref={commandPanelRef}
             paneTarget={displayPaneId}
