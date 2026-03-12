@@ -66,10 +66,12 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
     });
   }, [displayPaneId]);
 
-  // Listen for optimistic UI updates
+  // Listen for optimistic UI updates - add Q immediately to top
   useEffect(() => {
     const handler = (e: any) => {
-      if (e.detail?.pane === displayPaneId) setChatData(prev => [...prev, { q: e.detail.q, status: 'pending', ts: Date.now() / 1000, credit: 0 }]);
+      if (e.detail?.pane === displayPaneId) {
+        setChatData(prev => [...prev, { q: e.detail.q, status: 'pending', ts: Date.now() / 1000, start_ts: Date.now() / 1000, credit: 0 }]);
+      }
     };
     window.addEventListener('chat-q-sent', handler);
     return () => window.removeEventListener('chat-q-sent', handler);
