@@ -150,22 +150,26 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
     return () => window.removeEventListener('toggle-ttyd-drawer', h);
   }, []);
 
+  const [displayCount, setDisplayCount] = useState(2); // Show 2 at a time
+
   const loadMore = async () => {
     if (loadingMore || !hasMore || !displayPaneId) return;
     setLoadingMore(true);
     const short = displayPaneId.replace(':main.0', '');
     try {
       const cached = await getCache(short);
-      if (cached && cached.length > chatData.length) {
-        const n = Math.min(chatData.length + 10, cached.length);
-        setChatData(cached.slice(-n)); setHasMore(cached.length > n);
+      if (cached && cached.length > displayCount) {
+        setDisplayCount(prev => Math.min(prev + 2, cached.length));
+        setHasMore(cached.length > displayCount + 2);
       }
     } catch {} finally { setLoadingMore(false); }
   };
 
-  // Build conversation groups
+  // Build conversation groups - only show displayCount items
   const groups: { q: string; r: any }[] = [];
-  chatData.forEach((c: any) => {
+  const allData = chatData;
+  const startIdx = Math.max(0, allData.length - displayCount);
+  allData.slice(startIdx).forEach((c: any) => {
     if (!c.q) return;
     if ((!c.steps || !c.steps.length) && c.status !== 'tool_use' && c.status !== 'pending') return;
     groups.push({ q: c.q, r: c });
