@@ -158,16 +158,29 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
     groups.push({ q: c.q, r: c });
   });
 
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to top = load more
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      if (el.scrollTop === 0 && chatData.length > displayCount) {
+        setDisplayCount(prev => {
+          const next = Math.min(prev + 2, chatData.length);
+          if (next >= chatData.length) setHasMore(false);
+          return next;
+        });
+      }
+    };
+    el.addEventListener('scroll', onScroll);
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [chatData.length, displayCount]);
+
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <div className="max-w-[720px] mx-auto px-4 py-4">
-          {/* Load more - only show if there are earlier messages */}
-          {hasMore && (
-            <button onClick={loadMore} disabled={loadingMore} className="w-full py-2 mb-4 text-[11px] text-vsc-text-muted hover:text-vsc-accent rounded-lg bg-white/[0.02] hover:bg-white/[0.04] border border-white/[0.04] transition-all disabled:opacity-40">
-              {loadingMore ? '...' : '↑ Load earlier messages'}
-            </button>
-          )}
 
           {loading ? (
             <div className="flex flex-col items-center justify-center pt-20 gap-3">
