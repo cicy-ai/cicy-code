@@ -160,12 +160,12 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to top = load more
+  // Wheel up at top = load more
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const onScroll = () => {
-      if (el.scrollTop === 0 && chatData.length > displayCount) {
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0 && el.scrollTop <= 0 && chatData.length > displayCount) {
         setDisplayCount(prev => {
           const next = Math.min(prev + 2, chatData.length);
           if (next >= chatData.length) setHasMore(false);
@@ -173,8 +173,8 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
         });
       }
     };
-    el.addEventListener('scroll', onScroll);
-    return () => el.removeEventListener('scroll', onScroll);
+    el.addEventListener('wheel', onWheel);
+    return () => el.removeEventListener('wheel', onWheel);
   }, [chatData.length, displayCount]);
 
   return (
