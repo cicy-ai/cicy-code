@@ -52,12 +52,13 @@ const Drawer: React.FC<{ tab: string; onTabChange: (t: string) => void; children
 );
 
 /* ── Resizer ── */
-const Resizer: React.FC<{ width: number; onChange: (w: number) => void }> = ({ width, onChange }) => {
+const Resizer: React.FC<{ width: number; onChange: (w: number) => void; onDragging: (d: boolean) => void }> = ({ width, onChange, onDragging }) => {
   const onDown = (e: React.MouseEvent) => {
     e.preventDefault();
+    onDragging(true);
     const startX = e.clientX, startW = width;
     const onMove = (ev: MouseEvent) => onChange(Math.max(280, Math.min(window.innerWidth * 0.6, startW - (ev.clientX - startX))));
-    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+    const onUp = () => { onDragging(false); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
     document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
   };
   return <div className="w-1 cursor-col-resize hover:bg-white/10 active:bg-white/20 transition-colors shrink-0" onMouseDown={onDown} />;
@@ -74,8 +75,8 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
   const [isRestarting, setIsRestarting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const commandPanelRef = useRef<CommandPanelHandle>(null);
-  const [panelPos, setPanelPos] = useState({ x: 20, y: Math.max(60, window.innerHeight - 280) });
-  const [panelSize, setPanelSize] = useState({ width: 360, height: 220 });
+  const [panelPos, setPanelPos] = useState(() => { try { const c = JSON.parse(localStorage.getItem('agent_panelPos')!); return c && c.x != null ? c : { x: 20, y: Math.max(60, window.innerHeight - 280) }; } catch { return { x: 20, y: Math.max(60, window.innerHeight - 280) }; } });
+  const [panelSize, setPanelSize] = useState(() => { try { const c = JSON.parse(localStorage.getItem('agent_panelSize')!); return c && c.width ? c : { width: 360, height: 220 }; } catch { return { width: 360, height: 220 }; } });
   const [isDragging, setIsDragging] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; appId: string } | null>(null);
   const { apps, addApp, removeApp } = useDesktopApps(paneId);
@@ -88,6 +89,8 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
 
   useEffect(() => { localStorage.setItem('agent_drawerW', drawerW.toString()); }, [drawerW]);
   useEffect(() => { localStorage.setItem('agent_drawerTab', drawerTab); }, [drawerTab]);
+  useEffect(() => { localStorage.setItem('agent_panelPos', JSON.stringify(panelPos)); }, [panelPos]);
+  useEffect(() => { localStorage.setItem('agent_panelSize', JSON.stringify(panelSize)); }, [panelSize]);
 
   // Fetch title
   useEffect(() => { apiService.getPane(fullPaneId).then(({ data }) => { if (data?.title) setTitle(data.title); }).catch(() => {}); }, [fullPaneId]);
@@ -197,15 +200,12 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
             </div>
           )}
 
-          {/* Drag overlay */}
-          {isDragging && <div className="absolute inset-0 z-[99998]" />}
-
           {/* Command panel */}
           <CommandPanel ref={commandPanelRef} paneTarget={paneId} title={title} token={token} panelPosition={panelPos} panelSize={panelSize} readOnly={false} onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}} onChange={(pos, size) => { setPanelPos(pos); setPanelSize(size); }} onDraggingChange={setIsDragging} canSend={true} agentStatus={status} contextUsage={contextUsage} mouseMode={mouseMode} onToggleMouse={handleToggleMouse} onRestart={handleRestart} isRestarting={isRestarting} onCapturePane={handleCapture} hasEditPermission={hasPermission('edit')} hasRestartPermission={hasPermission('restart')} hasCapturePermission={hasPermission('capture')} disableDrag={false} />
         </div>
 
         {/* Right drawer - always open */}
-        <Resizer width={drawerW} onChange={w => setDrawerW(w)} />
+        <Resizer width={drawerW} onChange={w => setDrawerW(w)} onDragging={setIsDragging} />
         <div className="shrink-0" style={{ width: drawerW }}>
           <Drawer tab={drawerTab} onTabChange={setDrawerTab}>
             <ChatView paneId={paneId} token={token!} />
@@ -213,6 +213,9 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
           </Drawer>
         </div>
       </div>
+
+      {/* Drag mask - covers everything including iframes */}
+      {isDragging && <div className="fixed inset-0 z-[99998]" />}
 
       {/* Settings float */}
       {settingsOpen && <SettingsFloat paneId={paneId} fullPaneId={fullPaneId} onClose={() => setSettingsOpen(false)} />}
