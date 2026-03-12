@@ -52,7 +52,17 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
     if (!displayPaneId) return;
     const short = displayPaneId.replace(':main.0', '');
     getCache(short).then(cached => {
-      if (cached?.length) { setChatData(cached.slice(-2)); setHasMore(cached.length > 2); setLoading(false); }
+      if (cached?.length) { 
+        // Find last complete QA (Q with A)
+        let lastQA = [];
+        for (let i = cached.length - 1; i >= 0; i--) {
+          if (cached[i].q && cached[i].steps?.length) { lastQA = cached.slice(i, i + 1); break; }
+        }
+        if (!lastQA.length && cached.length) lastQA = cached.slice(-1);
+        setChatData(lastQA); 
+        setHasMore(cached.length > 1); 
+        setLoading(false); 
+      }
     });
   }, [displayPaneId]);
 
@@ -77,7 +87,18 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
         const json = await res.json();
         if (json.data && Array.isArray(json.data)) {
           const s = JSON.stringify(json.data);
-          if (s !== lastJsonRef.current) { lastJsonRef.current = s; setChatData(prev => prev.length <= 2 ? json.data.slice(-2) : json.data.slice(-10)); setHasMore(json.data.length > 2); setCache(short, json.data); }
+          if (s !== lastJsonRef.current) { 
+            lastJsonRef.current = s; 
+            // Find last complete QA
+            let lastQA = [];
+            for (let i = json.data.length - 1; i >= 0; i--) {
+              if (json.data[i].q && json.data[i].steps?.length) { lastQA = json.data.slice(i, i + 1); break; }
+            }
+            if (!lastQA.length && json.data.length) lastQA = json.data.slice(-1);
+            setChatData(lastQA); 
+            setHasMore(json.data.length > 1); 
+            setCache(short, json.data); 
+          }
           if (json.agentType) setAgentType(json.agentType);
         } else { setChatData([]); setHasMore(false); }
       } catch {} finally { setLoading(false); }
