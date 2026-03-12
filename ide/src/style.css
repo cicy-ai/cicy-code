@@ -77,6 +77,8 @@
 .chat-markdown h1{font-size:18px}.chat-markdown h2{font-size:16px}.chat-markdown h3{font-size:14px}
 .chat-markdown p{margin:4px 0}
 .chat-markdown ul,.chat-markdown ol{margin:4px 0;padding-left:20px}
+.chat-markdown ul{list-style:disc !important}
+.chat-markdown ol{list-style:decimal !important}
 .chat-markdown li{margin:2px 0}
 .chat-markdown code{background:var(--vsc-input);padding:1px 5px;border-radius:3px;font-size:13px;color:var(--vsc-warning)}
 .chat-markdown pre{background:var(--vsc-bg);border:1px solid var(--vsc-border);border-radius:6px;padding:10px;overflow-x:auto;margin:8px 0}
@@ -89,3 +91,10 @@
 .chat-markdown th{background:var(--vsc-bg);color:var(--vsc-text);font-weight:600}
 .chat-markdown td{color:var(--vsc-text-secondary)}
 .chat-markdown tr:hover td{background:var(--vsc-bg-hover)}
+
+/* Tool details collapse */
+details summary::-webkit-details-marker{display:none}
+details summary::marker{display:none}
+details[open] summary .tool-arrow{transform:rotate(90deg)}
+details summary{background:var(--vsc-bg);transition:background 0.15s}
+details summary:hover{background:var(--vsc-bg-hover)}

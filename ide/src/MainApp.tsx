@@ -157,19 +157,18 @@ const App: React.FC = () => {
   }
 
   const leftW = leftCollapsed ? 0 : 240;
-  const rightW = rightCollapsed ? 0 : Math.max(0, window.innerWidth - leftW - midWidth);
+  const tabsW = rightCollapsed ? 0 : midWidth;
 
   const handleRightDrag = (e: React.MouseEvent) => {
     e.preventDefault();
     setIsDragging(true);
     const startX = e.clientX;
-    const startMid = midWidth;
+    const startW = midWidth;
     
     const onMove = (ev: MouseEvent) => {
-      const delta = ev.clientX - startX;
-      const newMid = Math.max(360, startMid + delta);
-      setMidWidth(newMid);
-      localStorage.setItem('midPanelWidth', newMid.toString());
+      const newW = Math.max(200, Math.min(window.innerWidth - 400, startW + (ev.clientX - startX)));
+      setMidWidth(newW);
+      localStorage.setItem('midPanelWidth', newW.toString());
     };
     
     const onUp = () => {
@@ -186,7 +185,7 @@ const App: React.FC = () => {
     <div className="relative w-screen h-screen overflow-hidden font-sans">
       <div id="main" className="fixed inset-0">
         {!leftCollapsed && (
-          <div id="left-side" className="absolute inset-y-0 left-0 bg-vsc-bg-secondary border-r border-vsc-border z-10" style={{width: leftW}}>
+          <div id="agents-side" className="absolute inset-y-0 left-0 bg-vsc-bg-secondary border-r border-vsc-border z-10" style={{width: leftW, display: 'none'}}>
             <LeftSidePanel />
           </div>
         )}
@@ -194,16 +193,16 @@ const App: React.FC = () => {
         {/* Global drag overlay to prevent iframes from stealing events */}
         {(isDragging || floatDragging) && <div className="fixed inset-0 z-[9999] cursor-col-resize" />}
 
-        <MainMiddlePanel ttydWidth={rightCollapsed ? window.innerWidth - leftW : midWidth} boundAgents={boundAgents} mainIframeRef={mainIframeRef} commandPanelRef={commandPanelRef} pinnedPanes={pinnedPanes} setPinnedPanes={setPinnedPanes} leftWidth={leftW} leftCollapsed={leftCollapsed} rightCollapsed={rightCollapsed} onToggleLeft={() => setLeftCollapsed(!leftCollapsed)} onToggleRight={() => setRightCollapsed(!rightCollapsed)} drawerOpen={drawerOpen} onToggleDrawer={() => setDrawerOpen(!drawerOpen)} />
-
         {!rightCollapsed && (
           <>
-            <div id="drag" className="absolute inset-y-0 cursor-col-resize hover:bg-blue-500/50 z-20" style={{left: leftW + midWidth - 2, width: '4px'}} onMouseDown={handleRightDrag} />
-            <div id="right-side" className="absolute inset-y-0 right-0 bg-vsc-bg-secondary border-l border-vsc-border z-10" style={{width: rightW}}>
+            <div id="tabs" className="absolute inset-y-0 left-0 bg-vsc-bg-secondary border-r border-vsc-border z-10" style={{width: tabsW}}>
               <RightSidePanel ttydWidth={0} isDragging={false} setBoundAgents={setBoundAgents} boundAgents={boundAgents} leftWidth={0} onCloseDrawer={() => setRightCollapsed(true)} />
             </div>
+            <div id="drag" className="absolute inset-y-0 cursor-col-resize hover:bg-blue-500/50 z-20" style={{left: tabsW - 2, width: '4px'}} onMouseDown={handleRightDrag} />
           </>
         )}
+
+        <MainMiddlePanel ttydWidth={rightCollapsed ? window.innerWidth : window.innerWidth - tabsW} boundAgents={boundAgents} mainIframeRef={mainIframeRef} commandPanelRef={commandPanelRef} pinnedPanes={pinnedPanes} setPinnedPanes={setPinnedPanes} leftWidth={tabsW} leftCollapsed={leftCollapsed} rightCollapsed={rightCollapsed} onToggleLeft={() => setLeftCollapsed(!leftCollapsed)} onToggleRight={() => setRightCollapsed(!rightCollapsed)} drawerOpen={drawerOpen} onToggleDrawer={() => setDrawerOpen(!drawerOpen)} />
       </div>
 
       {floatWindow && token && (

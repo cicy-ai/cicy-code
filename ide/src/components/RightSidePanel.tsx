@@ -121,9 +121,9 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
   }, [paneDetail]);
 
   return (
-    <div id="right-side" className="w-full h-full bg-vsc-bg">
-      <div id="right-side-top" className="absolute top-0 left-0 right-0 h-9 bg-vsc-bg-secondary border-b border-vsc-border flex items-center gap-0.5 px-2 z-10">
-        {([ 'Workers', 'Code', 'Traffic', 'Preview', 'Settings'] as const).map(tab => (
+    <div id="tabs" className="w-full h-full bg-vsc-bg">
+      <div id="tabs-top" className="absolute top-0 left-0 right-0 h-9 bg-vsc-bg-secondary border-b border-vsc-border flex items-center gap-0.5 px-2 z-10">
+        {([ 'Terminal', 'Workers', 'Code', 'Traffic', 'Preview', 'Settings'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => {
@@ -137,9 +137,14 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
         ))}
       </div>
       {isInteracting && <div className="absolute inset-0 z-20"></div>}
+      {activeTab === 'Terminal' && displayPaneId && token && (
+        <div className="absolute inset-0" style={{marginTop: '36px'}}>
+          <WebFrame loading="lazy" src={urls.ttyd(displayPaneId, token)} className="w-full h-full" />
+        </div>
+      )}
         {paneWorkspace && (
-          <div id="right-side-inner" className="absolute inset-0 flex flex-col" style={{marginTop: '36px', display: activeTab === 'Code' ? 'flex' : 'none'}}>
-            <div  id="right-side-code-server"  className="w-full flex-1 overflow-hidden flex flex-col">
+          <div id="tabs-inner" className="absolute inset-0 flex flex-col" style={{marginTop: '36px', display: activeTab === 'Code' ? 'flex' : 'none'}}>
+            <div  id="tabs-code-server"  className="w-full flex-1 overflow-hidden flex flex-col">
               <div className="bg-vsc-bg-secondary h-8 border-b border-vsc-border flex items-center px-2 gap-1.5 flex-shrink-0">
                 <button 
                   onClick={() => navigateToPath(paneDetail?.workspace || paneWorkspace, true)}

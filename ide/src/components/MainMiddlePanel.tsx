@@ -48,7 +48,7 @@ const MainMiddlePanel: React.FC<MainMiddlePanelProps> = ({ ttydWidth, boundAgent
 
   return (
     <div 
-      id="main-middle" 
+      id="chat-main" 
       className="absolute inset-0 border-r border-vsc-border" 
       style={{width: `${ttydWidth}px`, left: `${leftWidth}px`}}
       onMouseLeave={(e) => {
@@ -57,7 +57,7 @@ const MainMiddlePanel: React.FC<MainMiddlePanelProps> = ({ ttydWidth, boundAgent
       }}
     >
       <div className="h-9 bg-vsc-bg-secondary border-b border-vsc-border flex items-center justify-between px-2">
-        <div id="main-middle-topbar" className="flex items-center gap-1.5 flex-1 min-w-0">
+        <div id="chat-main-topbar" className="flex items-center gap-1.5 flex-1 min-w-0">
           <button onClick={onToggleLeft} className="cicy-btn" title={leftCollapsed ? 'Show sidebar' : 'Hide sidebar'}>
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
           </button>
@@ -239,7 +239,7 @@ const MiddleContent: React.FC<MiddleContentProps> = ({
 
   return (
     <>
-      <div id="main-middle-content" className="relative w-full" style={{height: hasPermission('prompt') ? `calc(100% - 36px - ${commandPanelHeight}px)` : 'calc(100% - 36px)'}}>
+      <div id="chat-main-content" className="relative w-full" style={{height: hasPermission('prompt') ? `calc(100% - 36px - ${commandPanelHeight}px)` : 'calc(100% - 36px)'}}>
         
         {showHistoryOverlay && historyData && (
           <div style={{position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', flexDirection: 'column'}}>

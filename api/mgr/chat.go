@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,23 +11,32 @@ import (
 )
 
 type toolInfo struct {
-	Name string `json:"name"`
-	Arg  string `json:"arg,omitempty"`
+	Name   string `json:"name"`
+	Arg    string `json:"arg,omitempty"`
+	Result string `json:"result,omitempty"`
+}
+
+type step struct {
+	Type   string    `json:"type"`            // "text", "tool"
+	Text   string    `json:"text,omitempty"`   // for type=text
+	Tools  []toolInfo `json:"tools,omitempty"` // for type=tool
 }
 
 type chatTurn struct {
-	Q       string     `json:"q"`
-	A       string     `json:"a,omitempty"`
-	Tools   []toolInfo `json:"tools,omitempty"`
-	Credit  float64    `json:"credit"`
-	FirstMs int        `json:"first_ms"`
-	Status  string     `json:"status"`
-	TS      int64      `json:"ts"`
+	Q       string  `json:"q"`
+	Steps   []step  `json:"steps,omitempty"`
+	Credit  float64 `json:"credit"`
+	FirstMs int     `json:"first_ms"`
+	Status  string  `json:"status"`
+	Model   string  `json:"model,omitempty"`
+	TS      int64   `json:"ts"`
+	StartTS int64   `json:"start_ts"`
 }
 
 var usageRe = regexp.MustCompile(`"usage":([\d.]+)`)
 var contentRe = regexp.MustCompile(`assistantResponseEvent.*?"content":"(.*?)"`)
 var toolNameIdRe = regexp.MustCompile(`"name":"([^"]+)","toolUseId"`)
+var modelRe = regexp.MustCompile(`"modelId":"([^"]+)"`)
 
 func extractArg(inp map[string]interface{}, name string) string {
 	if p, _ := inp["path"].(string); p != "" {
@@ -49,8 +59,8 @@ func extractArg(inp map[string]interface{}, name string) string {
 	}
 	if c, _ := inp["command"].(string); c != "" {
 		c = strings.ReplaceAll(c, "\n", " ")
-		if len([]rune(c)) > 80 {
-			c = string([]rune(c)[:80]) + "..."
+		if len([]rune(c)) > 200 {
+			c = string([]rune(c)[:200]) + "..."
 		}
 		return c
 	}
@@ -69,10 +79,70 @@ func extractArg(inp map[string]interface{}, name string) string {
 	return ""
 }
 
-// Extract toolUses from the last assistantResponseMessage in history
+// Extract toolUses from the last assistantResponseMessage in history,
+// and match toolResults from currentMessage
 func extractHistoryTools(reqParsed map[string]interface{}) []toolInfo {
 	cs, _ := reqParsed["conversationState"].(map[string]interface{})
 	hist, _ := cs["history"].([]interface{})
+
+	// Build toolResult map from currentMessage
+	resultMap := map[string]string{}
+	cm, _ := cs["currentMessage"].(map[string]interface{})
+	um, _ := cm["userInputMessage"].(map[string]interface{})
+	ctx, _ := um["userInputMessageContext"].(map[string]interface{})
+	trs, _ := ctx["toolResults"].([]interface{})
+	for _, tr := range trs {
+		trm, _ := tr.(map[string]interface{})
+		tid, _ := trm["toolUseId"].(string)
+		status, _ := trm["status"].(string)
+		content, _ := trm["content"].([]interface{})
+		summary := ""
+		if status == "error" {
+			summary = "❌ error"
+		}
+		for _, c := range content {
+			cm2, _ := c.(map[string]interface{})
+			if j, ok := cm2["json"].(map[string]interface{}); ok {
+				stderr, _ := j["stderr"].(string)
+				stdout, _ := j["stdout"].(string)
+				exit, _ := j["exit_status"].(string)
+				if exit != "" && exit != "0" {
+					summary = "exit " + exit
+					if stderr != "" {
+						s := strings.TrimSpace(stderr)
+						if len([]rune(s)) > 120 {
+							s = string([]rune(s)[:120]) + "..."
+						}
+						summary += "\n" + s
+					}
+				} else if stdout != "" {
+					s := strings.TrimSpace(stdout)
+					if len([]rune(s)) > 300 {
+						s = string([]rune(s)[:300]) + "..."
+					}
+					summary = s
+				}
+				// grep/glob json results
+				if results, ok := j["results"].([]interface{}); ok {
+					summary = fmt.Sprintf("%d matches", len(results))
+				}
+				if fps, ok := j["filePaths"].([]interface{}); ok {
+					summary = fmt.Sprintf("%d files", len(fps))
+				}
+			}
+			if text, _ := cm2["text"].(string); text != "" {
+				s := strings.TrimSpace(text)
+				if len([]rune(s)) > 300 {
+					s = string([]rune(s)[:300]) + "..."
+				}
+				summary = s
+			}
+		}
+		if tid != "" {
+			resultMap[tid] = summary
+		}
+	}
+
 	for i := len(hist) - 1; i >= 0; i-- {
 		entry, _ := hist[i].(map[string]interface{})
 		arm, _ := entry["assistantResponseMessage"].(map[string]interface{})
@@ -82,8 +152,9 @@ func extractHistoryTools(reqParsed map[string]interface{}) []toolInfo {
 			for _, tu := range tus {
 				tm, _ := tu.(map[string]interface{})
 				name, _ := tm["name"].(string)
+				tid, _ := tm["toolUseId"].(string)
 				inp, _ := tm["input"].(map[string]interface{})
-				tools = append(tools, toolInfo{Name: name, Arg: extractArg(inp, name)})
+				tools = append(tools, toolInfo{Name: name, Arg: extractArg(inp, name), Result: resultMap[tid]})
 			}
 			return tools
 		}
@@ -97,8 +168,38 @@ func handleChatHistory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "pane required", 400)
 		return
 	}
+	agentType := ""
+	// Try to get from DB first
+	var at sql.NullString
+	db.QueryRow("SELECT agent_type FROM agent_config WHERE pane_id=?", pane).Scan(&at)
+	if at.Valid && at.String != "" {
+		agentType = at.String
+	} else {
+		// Fallback: extract from latest request
+		var data []byte
+		err := db.QueryRow(`SELECT data FROM http_log WHERE pane_id=? AND url LIKE '%q.us-east-1%' AND data LIKE '%GenerateAssistantResponse%' ORDER BY id DESC LIMIT 1`, pane).Scan(&data)
+		if err == nil {
+			var full map[string]interface{}
+			if json.Unmarshal(data, &full) == nil {
+				if req, ok := full["request"].(map[string]interface{}); ok {
+					var body map[string]interface{}
+					switch v := req["body"].(type) {
+					case string:
+						json.Unmarshal([]byte(v), &body)
+					case map[string]interface{}:
+						body = v
+					}
+					if cs, ok := body["conversationState"].(map[string]interface{}); ok {
+						if taskType, ok := cs["agentTaskType"].(string); ok {
+							agentType = taskType
+						}
+					}
+				}
+			}
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"data": buildChatTurns(pane)})
+	json.NewEncoder(w).Encode(map[string]interface{}{"data": buildChatTurns(pane), "agentType": agentType})
 }
 
 func buildChatTurns(pane string) []chatTurn {
@@ -145,7 +246,16 @@ func buildChatTurns(pane string) []chatTurn {
 	}
 
 	// Pass 1: build turns with basic info
-	var turns []chatTurn
+	type rawTurn struct {
+		q       string
+		text    string
+		credit  float64
+		status  string
+		model   string
+		ts      int64
+		hasTool bool
+	}
+	var turns []rawTurn
 	for _, rr := range rawRows {
 		q := ""
 		if rr.reqParsed != nil {
@@ -168,61 +278,80 @@ func buildChatTurns(pane string) []chatTurn {
 			json.Unmarshal([]byte(m[1]), &credit)
 		}
 
+		model := ""
+		if m := modelRe.FindStringSubmatch(rr.resStr); len(m) > 1 {
+			model = m[1]
+		}
+
 		hasTool := strings.Contains(rr.resStr, "toolUseEvent")
 		status := "text"
 		if hasTool {
 			status = "tool_use"
 		}
 
-		a := ""
-		if !hasTool {
-			chunks := contentRe.FindAllStringSubmatch(rr.resStr, -1)
-			for _, c := range chunks {
-				a += c[1]
-			}
-			a = strings.ReplaceAll(a, `\n`, "\n")
-			a = strings.ReplaceAll(a, `\t`, "\t")
-			a = strings.ReplaceAll(a, `\"`, `"`)
+		chunks := contentRe.FindAllStringSubmatch(rr.resStr, -1)
+		var buf strings.Builder
+		for _, c := range chunks {
+			buf.WriteString(c[1])
 		}
+		raw := buf.String()
+		raw = strings.ReplaceAll(raw, `\"`, `"`)
+		raw = strings.ReplaceAll(raw, `\n`, "\n")
+		raw = strings.ReplaceAll(raw, `\t`, "\t")
+		raw = strings.ReplaceAll(raw, `\\`, `\`)
+		raw = strings.TrimSpace(raw)
 
-		turns = append(turns, chatTurn{
-			Q: q, A: a, Credit: credit, Status: status, TS: rr.ts,
+		turns = append(turns, rawTurn{
+			q: q, text: raw, credit: credit, status: status, model: model, ts: rr.ts, hasTool: hasTool,
 		})
 	}
 
 	// Pass 2: fill tool args from N+1's history for turn N
+	toolsPerTurn := make([][]toolInfo, len(turns))
 	for i := 0; i < len(turns); i++ {
-		if turns[i].Status != "tool_use" {
+		if !turns[i].hasTool {
 			continue
 		}
-		// Look at next request's history to get this turn's tool details
 		if i+1 < len(rawRows) && rawRows[i+1].reqParsed != nil {
-			turns[i].Tools = extractHistoryTools(rawRows[i+1].reqParsed)
+			toolsPerTurn[i] = extractHistoryTools(rawRows[i+1].reqParsed)
 		} else {
-			// Last turn - only have tool names from response
 			for _, m := range toolNameIdRe.FindAllStringSubmatch(rawRows[i].resStr, -1) {
-				turns[i].Tools = append(turns[i].Tools, toolInfo{Name: m[1]})
+				toolsPerTurn[i] = append(toolsPerTurn[i], toolInfo{Name: m[1]})
 			}
 		}
 	}
 
-	// Pass 3: merge — turns without Q are continuations of previous turn
+	// Pass 3: merge into chatTurns with ordered steps
 	var result []chatTurn
-	for _, t := range turns {
-		if t.Q != "" {
-			result = append(result, t)
+	for i, t := range turns {
+		if t.q != "" {
+			ct := chatTurn{Q: t.q, Credit: t.credit, Status: t.status, Model: t.model, TS: t.ts, StartTS: t.ts}
+			if t.text != "" && t.hasTool {
+				ct.Steps = append(ct.Steps, step{Type: "text", Text: t.text})
+			}
+			if t.hasTool && len(toolsPerTurn[i]) > 0 {
+				ct.Steps = append(ct.Steps, step{Type: "tool", Tools: toolsPerTurn[i]})
+			}
+			if t.text != "" && !t.hasTool {
+				ct.Steps = append(ct.Steps, step{Type: "text", Text: t.text})
+			}
+			result = append(result, ct)
 		} else if len(result) > 0 {
 			last := &result[len(result)-1]
-			last.Credit += t.Credit
-			last.Tools = append(last.Tools, t.Tools...)
-			if t.A != "" {
-				last.A = t.A
-				last.Status = t.Status
+			last.Credit += t.credit
+			last.TS = t.ts
+			if t.text != "" && t.hasTool {
+				last.Steps = append(last.Steps, step{Type: "text", Text: t.text})
 			}
-			if t.Status == "tool_use" && last.A == "" {
+			if t.hasTool && len(toolsPerTurn[i]) > 0 {
+				last.Steps = append(last.Steps, step{Type: "tool", Tools: toolsPerTurn[i]})
+			}
+			if t.text != "" && !t.hasTool {
+				last.Steps = append(last.Steps, step{Type: "text", Text: t.text})
+				last.Status = "text"
+			} else if t.hasTool {
 				last.Status = "tool_use"
 			}
-			last.TS = t.TS
 		}
 	}
 	return result

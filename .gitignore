@@ -11,3 +11,4 @@ api/logs/*
 *.psd
 *.gif
 .env
+mitmproxy/__pycache__/
