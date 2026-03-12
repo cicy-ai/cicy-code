@@ -97,10 +97,10 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
         default_model: paneDetail.default_model || '',
         trust_level: paneDetail.trust_level || '',
       });
+    } else if (!paneDetail) {
+      setTempPaneData(null);
     }
   }, [paneDetail, displayPaneId, isSavingPane]);
-
-  useEffect(() => { setTempPaneData(null); }, [displayPaneId]);
 
   useEffect(() => {
     if (activeTab === 'Settings' && !paneDetail && api && displayPaneId) {
@@ -123,7 +123,7 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
   return (
     <div id="right-side" className="w-full h-full bg-vsc-bg">
       <div id="right-side-top" className="absolute top-0 left-0 right-0 h-9 bg-vsc-bg-secondary border-b border-vsc-border flex items-center gap-0.5 px-2 z-10">
-        {([ 'Workers', 'Code', 'Traffic', 'Board', 'Preview', 'ChatView', 'Settings'] as const).map(tab => (
+        {([ 'Workers', 'Code', 'Traffic', 'Preview', 'Settings'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => {
@@ -199,11 +199,6 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
           <TrafficChart />
         </div>
       )}
-      {activeTab === 'Board' && (
-        <div className="absolute inset-0" style={{marginTop: '36px'}}>
-          <WebFrame src="https://github.com/users/cicy-dev/projects/4" className="w-full h-full border-0" codeServer />
-        </div>
-      )}
       {activeTab === 'Preview' && (
         <>
           {!globalVar?.favor?.previewUrls || globalVar.favor.previewUrls.filter((item: any) => item.enable).length === 0 ? (
@@ -250,139 +245,6 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
       )}
       {activeTab === 'Workers' && (
         <BindedAgentsTab paneId={displayPaneId} token={token} isDragging={isDragging} setBoundAgents={setBoundAgents} />
-      )}
-      {activeTab === 'ChatView' && (
-        <div className="absolute inset-0 overflow-y-auto bg-vsc-bg" style={{marginTop: '36px'}}>
-          <div style={{maxWidth: 720, margin: '0 auto', padding: '24px 16px'}}>
-            {chatData.length === 0 && (
-              <div className="text-vsc-text-muted" style={{textAlign: 'center', marginTop: 120}}>
-                <div style={{fontSize: 32, marginBottom: 12}}>💬</div>
-                <div style={{fontSize: 14}}>No conversation yet</div>
-              </div>
-            )}
-            {(() => {
-              const groups: {q: string, rounds: any[], totalCredit: number}[] = [];
-              chatData.forEach((c: any) => {
-                if (c.q) groups.push({q: c.q, rounds: [c], totalCredit: c.credit || 0});
-                else if (groups.length > 0) { const g = groups[groups.length - 1]; g.rounds.push(c); g.totalCredit += c.credit || 0; }
-              });
-              return groups.map((g, gi) => {
-                const lastText = [...g.rounds].reverse().find((r: any) => r.status === 'text');
-                const ranSec = g.rounds.length > 1 ? Math.round(g.rounds[g.rounds.length-1].ts - g.rounds[0].ts) : Math.round((g.rounds[0]?.first_ms || 0) / 1000);
-                const allTools = g.rounds.flatMap((r: any) => r.tools || []);
-                const writeCnt = allTools.filter((t: any) => t.name === 'fs_write').length;
-                const writeFiles = [...new Set(allTools.filter((t: any) => t.name === 'fs_write' && t.arg).map((t: any) => t.arg))];
-                const readCnt = allTools.filter((t: any) => t.name === 'fs_read').length;
-                const readFiles = [...new Set(allTools.filter((t: any) => t.name === 'fs_read' && t.arg).map((t: any) => t.arg))];
-                const bashCnt = allTools.filter((t: any) => t.name === 'execute_bash').length;
-                const bashArgs = allTools.filter((t: any) => t.name === 'execute_bash' && t.arg).map((t: any) => t.arg);
-                const searchOps = allTools.filter((t: any) => ['grep','glob','code','web_search','web_fetch'].includes(t.name));
-                const otherOps = allTools.filter((t: any) => !['fs_write','fs_read','execute_bash','grep','glob','code','web_search','web_fetch'].includes(t.name));
-                const hasTools = allTools.length > 0;
-                const isRunning = !lastText && g.rounds.some((r: any) => r.status === 'tool_use');
-                return (
-                  <div key={gi} style={{marginBottom: 24}}>
-                    {/* User bubble */}
-                    <div style={{display: 'flex', justifyContent: 'flex-end', marginBottom: 12}}>
-                      <div className="bg-vsc-bg-active text-vsc-text" style={{borderRadius: '20px 20px 4px 20px', padding: '10px 16px', maxWidth: '85%', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word'}}>
-                        {g.q.replace(/^-\n/, '')}
-                      </div>
-                    </div>
-                    {/* AI card */}
-                    <div className="bg-vsc-bg-secondary border border-vsc-border" style={{borderRadius: 12, padding: '14px 16px'}}>
-                      {/* Header */}
-                      <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: hasTools ? 10 : 0}}>
-                        <span className="text-vsc-accent" style={{fontSize: 13, fontWeight: 600}}>✦ Kiro CLI</span>
-                        {ranSec > 0 && <span className="text-vsc-text-muted bg-vsc-bg" style={{fontSize: 11, borderRadius: 10, padding: '1px 8px'}}>Ran for {ranSec}s</span>}
-                        <span style={{flex: 1}}/>
-                        {g.totalCredit > 0 && <span className="text-vsc-text-disabled" style={{fontSize: 11}}>${g.totalCredit.toFixed(3)}</span>}
-                      </div>
-                      {/* Tool summary */}
-                      {hasTools && (
-                        <div className="text-vsc-text-secondary" style={{fontSize: 12, lineHeight: 1.8, marginBottom: 8}}>
-                          {readCnt > 0 && (
-                            <div>
-                              <span>📄 Read {readFiles.length || readCnt} file{(readFiles.length || readCnt) > 1 ? 's' : ''}</span>
-                              {readFiles.map((f: string, fi: number) => {
-                                const m = f.match(/^(.+?)\s+(\d+)-(\d+)$/);
-                                const fpath = m ? m[1] : f;
-                                const lineRange = m ? ` ${m[2]}-${m[3]}` : '';
-                                const short = fpath.split('/').slice(-2).join('/');
-                                return (
-                                <div key={fi} className="text-vsc-text-muted hover:text-vsc-text" style={{paddingLeft: 20, fontFamily: 'monospace', fontSize: 11, cursor: 'pointer'}} onClick={() => {
-                                  const csPath = fpath;
-                                  const line = m ? m[2] : '1';
-                                  setCodeUrl(`${config.codeServerBase}/?token=${token}&goto=${encodeURIComponent(csPath + ':' + line + ':1')}`);
-                                }} title={fpath}>
-                                  ✓ {short}{lineRange}
-                                </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                          {searchOps.length > 0 && (
-                            <div>
-                              <span>🔍 {searchOps.length} search{searchOps.length > 1 ? 'es' : ''}</span>
-                              {searchOps.filter((t: any) => t.arg).slice(0, 3).map((t: any, ti: number) => (
-                                <div key={ti} className="text-vsc-text-muted" style={{paddingLeft: 20, fontFamily: 'monospace', fontSize: 11}}>
-                                  {t.name}: {t.arg}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          {writeCnt > 0 && (
-                            <div>
-                              <span>✏️ Edited {writeFiles.length || writeCnt} file{(writeFiles.length || writeCnt) > 1 ? 's' : ''}</span>
-                              {writeFiles.map((f: string, fi: number) => {
-                                const m = f.match(/^(.+?)\s+(\d+)-(\d+)$/);
-                                const fpath = m ? m[1] : f;
-                                const short = fpath.split('/').slice(-2).join('/');
-                                return (
-                                <div key={fi} className="text-vsc-success hover:text-vsc-text" style={{paddingLeft: 20, fontFamily: 'monospace', fontSize: 11, cursor: 'pointer'}} onClick={() => {
-                                  const csPath = fpath;
-                                  setCodeUrl(`${config.codeServerBase}/?token=${token}&goto=${encodeURIComponent(csPath + ':1:1')}`);
-                                }} title={fpath}>
-                                  ✓ {short}
-                                </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                          {bashCnt > 0 && (
-                            <div>
-                              <span>🔨 Ran {bashCnt} command{bashCnt > 1 ? 's' : ''}</span>
-                              {bashArgs.slice(0, 5).map((a: string, ai: number) => (
-                                <div key={ai} className="text-vsc-text-muted" style={{paddingLeft: 20, fontFamily: 'monospace', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
-                                  $ {a}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          {otherOps.filter((t: any) => t.arg).map((t: any, ti: number) => (
-                            <div key={ti}>✓ {t.name}: {t.arg}</div>
-                          ))}
-                        </div>
-                      )}
-                      {/* Running indicator */}
-                      {isRunning && (
-                        <div className="text-vsc-accent" style={{fontSize: 12, padding: '4px 0'}}>
-                          <span style={{animation: 'pulse 1.5s infinite'}}>● </span>Running...
-                        </div>
-                      )}
-                      {/* Reply */}
-                      {lastText?.a && (
-                        <div className="chat-markdown text-vsc-text" style={{fontSize: 14, lineHeight: 1.8, wordBreak: 'break-word', borderTop: hasTools ? '1px solid var(--vsc-border)' : 'none', paddingTop: hasTools ? 10 : 0}}>
-                          <Markdown remarkPlugins={[remarkGfm]}>{lastText.a}</Markdown>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              });
-            })()}
-            <div ref={chatEndRef} />
-          </div>
-        </div>
       )}
       {/* Code-server dialog */}
       {codeUrl && (

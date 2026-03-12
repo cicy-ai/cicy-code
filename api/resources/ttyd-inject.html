@@ -1,5 +1,5 @@
 <style>
-html, body, #terminal {
+html, body, .terminal {
   background: #000 !important;
   height: 100% !important;
   width: 100% !important;
@@ -8,7 +8,7 @@ html, body, #terminal {
   box-sizing: border-box !important;
 }
 body { margin: 8px !important; }
-#terminal { font-size: 13px !important; }
+.terminal { font-size: 13px !important; color: #b9adad !important; }
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
@@ -20,14 +20,21 @@ body { margin: 8px !important; }
 <script>
 window.addEventListener('load',function(){
   var i=setInterval(function(){
-    if(window.term){
+    if(window.term||window.gotty_term){
       clearInterval(i);
-      window.term.setOption&&window.term.setOption('fontFamily','Menlo, Consolas, monospace');
-      window.term.setOption&&window.term.setOption('letterSpacing',-0.5);
+      var t=window.term||window.gotty_term;
+      t.setOption&&t.setOption('fontFamily','Menlo, Consolas, monospace');
+      t.setOption&&t.setOption('letterSpacing',-0.5);
       setTimeout(function(){
-        window.term.fit&&window.term.fit();
+        t.fit&&t.fit();
         window.dispatchEvent(new Event('resize'));
       },200);
+      setTimeout(function(){
+        window.dispatchEvent(new Event('resize'));
+      },1000);
+      setTimeout(function(){
+        window.dispatchEvent(new Event('resize'));
+      },3000);
     }
   },50);
 });

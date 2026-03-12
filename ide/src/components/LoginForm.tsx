@@ -8,20 +8,24 @@ interface LoginFormProps {
 }
 
 export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
+  const [error, setError] = React.useState('');
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     const input = document.querySelector('#login-token-input') as HTMLInputElement;
     const tokenValue = input?.value?.trim() || '';
     
     if (!tokenValue) return;
 
     try {
+      const { data } = await apiService.verifyAuth(tokenValue);
+      if (!data.valid) throw new Error('invalid');
       TokenManager.saveToken(tokenValue);
-      await apiService.verifyAuth(tokenValue);
       onLogin(tokenValue);
     } catch (err) {
       TokenManager.clearToken();
-      alert('Invalid token or connection failed');
+      setError('Invalid token or connection failed');
     }
   };
 
@@ -54,6 +58,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
           >
             Login
           </button>
+          {error && <p className="text-red-400 text-sm text-center">{error}</p>}
         </form>
 
         <div className="mt-6 text-center text-xs text-vsc-text-muted">

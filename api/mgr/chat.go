@@ -159,6 +159,7 @@ func buildChatTurns(pane string) []chatTurn {
 					m = m[:e]
 				}
 				q = strings.TrimSpace(m)
+				q = strings.TrimPrefix(q, "-\n")
 			}
 		}
 
@@ -205,14 +206,23 @@ func buildChatTurns(pane string) []chatTurn {
 		}
 	}
 
-	// Pass 3: group - mark tool_result continuations (no user q)
+	// Pass 3: merge — turns without Q are continuations of previous turn
 	var result []chatTurn
 	for _, t := range turns {
 		if t.Q != "" {
 			result = append(result, t)
-		} else {
-			t.Q = ""
-			result = append(result, t)
+		} else if len(result) > 0 {
+			last := &result[len(result)-1]
+			last.Credit += t.Credit
+			last.Tools = append(last.Tools, t.Tools...)
+			if t.A != "" {
+				last.A = t.A
+				last.Status = t.Status
+			}
+			if t.Status == "tool_use" && last.A == "" {
+				last.Status = "tool_use"
+			}
+			last.TS = t.TS
 		}
 	}
 	return result

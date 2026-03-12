@@ -109,6 +109,10 @@ func main() {
 	http.HandleFunc("/api/stats/traffic/raw", wa(handleStatsTrafficRaw))
 	http.HandleFunc("/api/stats/chat", wa(handleChatHistory))
 	http.HandleFunc("/api/stats/chat/stream", wa(handleChatStream))
+
+	// Chat V2 — WebSocket
+	http.HandleFunc("/api/chat/ws", handleChatWS)
+	http.HandleFunc("/api/chat/webhook", corsM(handleChatWebhook))
 	http.HandleFunc("/api/stats/traffic/live", corsM(func(w http.ResponseWriter, r *http.Request) {
 		// SSE needs query token since EventSource can't set headers
 		t := r.URL.Query().Get("token")

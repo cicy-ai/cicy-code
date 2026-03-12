@@ -1,7 +1,11 @@
 #!/bin/bash
 cd "$(dirname "$0")"
-pkill -f cicy-code-api 2>/dev/null
-sleep 1
-export MYSQL_DSN="root:pb200898@tcp(localhost:3306)/cicy_code"
+# load .env from project root
+[ -f ../.env ] && export $(grep -v '^#' ../.env | xargs)
+export HOME=${HOST_HOME:-$HOME}
+export TERM=xterm-256color
+export MYSQL_DSN="root:cicy-code@tcp(localhost:13306)/cicy_code"
+export REDIS_HOST="127.0.0.1"
+export REDIS_PORT="16379"
 export PORT=14446
 exec ./cicy-code-api

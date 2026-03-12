@@ -279,13 +279,20 @@ func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 func handleRestartPane(w http.ResponseWriter, r *http.Request, id string) {
 	paneID := normPaneID(id)
 	token := getToken(r)
+	if err := restartPaneCore(paneID, token); err != nil {
+		J(w, M{"success": false, "error": err.Error()})
+		return
+	}
+	J(w, M{"success": true, "message": "Pane 软重启完成"})
+}
+
+func restartPaneCore(paneID, token string) error {
 	var port sql.NullInt64
 	var workspace, initScript, title, config, agentType, trustLevel sql.NullString
 	err := db.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, trust_level FROM agent_config WHERE pane_id=?", paneID).
 		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &trustLevel)
 	if err != nil {
-		J(w, M{"success": false, "error": "数据库中未找到该 Pane 配置"})
-		return
+		return fmt.Errorf("pane %s not found in db", paneID)
 	}
 
 	// Kill old ttyd
@@ -310,8 +317,7 @@ func handleRestartPane(w http.ResponseWriter, r *http.Request, id string) {
 	// Restart ttyd-go
 	p := int(port.Int64)
 	if err := startInstance(paneID, p, token); err != nil {
-		J(w, M{"success": false, "error": err.Error()})
-		return
+		return err
 	}
 	waitPort(p, 10*time.Second)
 
@@ -345,7 +351,7 @@ func handleRestartPane(w http.ResponseWriter, r *http.Request, id string) {
 		}
 	}
 	db.Exec("UPDATE agent_config SET updated_at=NOW() WHERE pane_id=?", paneID)
-	J(w, M{"success": true, "message": "Pane 软重启完成"})
+	return nil
 }
 
 // applyProxyFromConfig parses config JSON and exports proxy env if enabled.

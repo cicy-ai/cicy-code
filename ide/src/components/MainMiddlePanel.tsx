@@ -8,6 +8,8 @@ import { useApp } from '../contexts/AppContext';
 import { useDialog } from '../contexts/DialogContext';
 import { usePane } from '../contexts/PaneContext';
 
+import ChatMiddleView from './ChatMiddleView';
+
 interface MainMiddlePanelProps {
   ttydWidth: number;
   boundAgents: string[];
@@ -128,6 +130,7 @@ const MainMiddlePanel: React.FC<MainMiddlePanelProps> = ({ ttydWidth, boundAgent
         correctionData={correctionData} setCorrectionData={setCorrectionData}
         boundAgents={boundAgents}
         onShowPromptModal={() => setShowPromptModal(true)}
+        onOpenDrawer={onToggleDrawer}
         paneDetail={paneDetail}
         api={api}
         setPaneDetail={setPaneDetail}
@@ -197,6 +200,7 @@ interface MiddleContentProps {
   correctionData: [string, string] | null; setCorrectionData: (v: [string, string] | null) => void;
   boundAgents: string[];
   onShowPromptModal: () => void;
+  onOpenDrawer?: () => void;
   paneDetail: any;
   api: any;
   setPaneDetail: (v: any) => void;
@@ -208,6 +212,7 @@ const MiddleContent: React.FC<MiddleContentProps> = ({
   showCorrectionResult, setShowCorrectionResult, correctionData, setCorrectionData,
   boundAgents,
   onShowPromptModal,
+  onOpenDrawer,
   paneDetail, api, setPaneDetail,
 }) => {
   const {
@@ -234,7 +239,7 @@ const MiddleContent: React.FC<MiddleContentProps> = ({
 
   return (
     <>
-      <div id="main-middle-content" className="relative w-full" style={{height: hasPermission('prompt') ? `calc(100% - 40px - ${commandPanelHeight}px)` : 'calc(100% - 40px)'}}>
+      <div id="main-middle-content" className="relative w-full" style={{height: hasPermission('prompt') ? `calc(100% - 36px - ${commandPanelHeight}px)` : 'calc(100% - 36px)'}}>
         
         {showHistoryOverlay && historyData && (
           <div style={{position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', flexDirection: 'column'}}>
@@ -261,12 +266,7 @@ const MiddleContent: React.FC<MiddleContentProps> = ({
             </div>
           </div>
         )}
-        {visitedPanes.filter(id => id && id !== '' && id !== 'undefined').map((paneId) => (
-          <div key={`terminal-${paneId}`} className="absolute inset-0" style={{ backgroundColor:"#474747", zIndex: paneId === displayPaneId ? 1 : 0, visibility: paneId === displayPaneId ? 'visible' : 'hidden' }}>
-            <WebFrame ref={paneId === displayPaneId ? mainIframeRef : undefined} loading="lazy" src={urls.ttyd(paneId, token)} className="w-full h-full" />
-          </div>
-        ))}
-        <div id="main-middle-mask" className="ttyd-mask absolute inset-0 bg-transparent z-10" style={{display: 'none', pointerEvents: 'auto'}} onClick={(e) => { window.dispatchEvent(new CustomEvent('selectPane', { detail: { paneId: displayPaneId } })); (e.target as HTMLElement).style.display = 'none'; }} />
+        <ChatMiddleView />
         {/* Capture overlay - on top of iframe */}
         {captureOutput !== null && (
           <CaptureOverlay output={captureOutput} paneId={displayPaneId} isRefreshing={isCapturing} onClose={() => setCaptureOutput(null)} onRefresh={(lines) => { setCaptureOutput(''); handleCapturePane(displayPaneId, lines); }} />
@@ -331,6 +331,7 @@ const MiddleContent: React.FC<MiddleContentProps> = ({
             showVoiceControl={settings.showVoiceControl}
             onToggleVoiceControl={() => setSettings(prev => ({ ...prev, showVoiceControl: !prev.showVoiceControl}))}
             onShowPromptModal={onShowPromptModal}
+            onOpenDrawer={onOpenDrawer}
           />
         </div>
       )}

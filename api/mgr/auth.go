@@ -58,7 +58,7 @@ func handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	perms, groupID := getTokenPerms(token)
 	if perms == nil {
-		J(w, M{"valid": true, "token": token[:minInt(8, len(token))] + "..."})
+		J(w, M{"valid": false})
 		return
 	}
 	J(w, M{"valid": true, "token": token[:minInt(8, len(token))] + "...", "perms": perms, "group_id": groupID})

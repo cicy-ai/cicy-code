@@ -706,6 +706,18 @@ func main() {
 	// WebSocket proxy
 	http.HandleFunc("/api/ws/", corsMiddleware(authMiddleware(handleWSProxy)))
 
+	// Chat V2 — real-time event bus
+	http.HandleFunc("/api/chat/send", corsMiddleware(authMiddleware(handleChatV2Send)))
+	http.HandleFunc("/api/chat/webhook", corsMiddleware(handleChatV2Webhook))
+	http.HandleFunc("/api/chat/stream", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		t := r.URL.Query().Get("token")
+		if t == "" || !verifyToken(t) {
+			http.Error(w, "Not authenticated", 401)
+			return
+		}
+		handleChatV2SSE(w, r)
+	}))
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "14444"
@@ -713,4 +725,138 @@ func main() {
 
 	log.Printf("ttyd-manager starting on :%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
+}
+
+// ============================================================
+// Chat V2 — Real-time EventBus
+// ============================================================
+
+type chatEvent struct {
+	Type string      `json:"type"`
+	Data interface{} `json:"data,omitempty"`
+}
+
+type chatBusT struct {
+	mu      sync.RWMutex
+	clients map[string]map[chan chatEvent]struct{}
+}
+
+var chatBus = &chatBusT{clients: make(map[string]map[chan chatEvent]struct{})}
+
+func (b *chatBusT) subscribe(pane string) chan chatEvent {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	ch := make(chan chatEvent, 64)
+	if b.clients[pane] == nil {
+		b.clients[pane] = make(map[chan chatEvent]struct{})
+	}
+	b.clients[pane][ch] = struct{}{}
+	return ch
+}
+
+func (b *chatBusT) unsubscribe(pane string, ch chan chatEvent) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if m, ok := b.clients[pane]; ok {
+		delete(m, ch)
+		if len(m) == 0 {
+			delete(b.clients, pane)
+		}
+	}
+	close(ch)
+}
+
+func (b *chatBusT) publish(pane string, evt chatEvent) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for ch := range b.clients[pane] {
+		select {
+		case ch <- evt:
+		default:
+		}
+	}
+}
+
+func handleChatV2Send(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Pane string `json:"pane"`
+		Text string `json:"text"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil || req.Pane == "" || req.Text == "" {
+		http.Error(w, `{"error":"pane and text required"}`, 400)
+		return
+	}
+	pane := req.Pane
+	if !strings.Contains(pane, ":") {
+		pane += ":main.0"
+	}
+	// Send to tmux
+	text := strings.ReplaceAll(req.Text, "'", "'\\''")
+	exec.Command("tmux", "send-keys", "-t", pane, "-l", text).Run()
+	time.Sleep(50 * time.Millisecond)
+	exec.Command("tmux", "send-keys", "-t", pane, "Enter").Run()
+
+	id := fmt.Sprintf("msg_%d", time.Now().UnixMilli())
+	short := strings.Replace(req.Pane, ":main.0", "", 1)
+
+	chatBus.publish(short, chatEvent{Type: "user_message", Data: map[string]interface{}{"id": id, "text": req.Text, "ts": time.Now().Unix()}})
+	chatBus.publish(short, chatEvent{Type: "status_change", Data: map[string]interface{}{"status": "thinking"}})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "id": id})
+}
+
+func handleChatV2Webhook(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Pane  string      `json:"pane"`
+		Event string      `json:"event"`
+		Data  interface{} `json:"data"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil || req.Pane == "" || req.Event == "" {
+		http.Error(w, `{"error":"pane and event required"}`, 400)
+		return
+	}
+	chatBus.publish(req.Pane, chatEvent{Type: req.Event, Data: req.Data})
+	if req.Event == "ai_done" {
+		chatBus.publish(req.Pane, chatEvent{Type: "status_change", Data: map[string]interface{}{"status": "idle"}})
+	}
+	w.WriteHeader(204)
+}
+
+func handleChatV2SSE(w http.ResponseWriter, r *http.Request) {
+	pane := r.URL.Query().Get("pane")
+	if pane == "" {
+		http.Error(w, "pane required", 400)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", 500)
+		return
+	}
+
+	// Send connected event
+	b, _ := json.Marshal(chatEvent{Type: "connected", Data: map[string]interface{}{"pane": pane}})
+	fmt.Fprintf(w, "data: %s\n\n", b)
+	flusher.Flush()
+
+	ch := chatBus.subscribe(pane)
+	defer chatBus.unsubscribe(pane, ch)
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case evt, ok := <-ch:
+			if !ok {
+				return
+			}
+			b, _ := json.Marshal(evt)
+			fmt.Fprintf(w, "data: %s\n\n", b)
+			flusher.Flush()
+		}
+	}
 }

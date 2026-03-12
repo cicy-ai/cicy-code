@@ -56,6 +56,7 @@ interface CommandPanelProps {
   onShowPromptModal?: () => void;
   defaultModel?: string;
   onModelChange?: (model: string) => void;
+  onOpenDrawer?: () => void;
 }
 
 export interface CommandPanelHandle {
@@ -105,6 +106,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
   onShowPromptModal,
   defaultModel = '',
   onModelChange,
+  onOpenDrawer,
 }, ref) => {
   const [selectedPane, setSelectedPane] = useState(paneTarget);
 
@@ -241,6 +243,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
     setIsSending(true);
     setSendSuccess(false);
     try {
+      window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
       await sendCommandToTmux(cmd, paneTarget);
       setSendSuccess(true);
       setTimeout(() => setSendSuccess(false), 2000);
@@ -466,6 +469,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
           <div className="relative flex-1 flex flex-col min-h-0" style={{paddingBottom: '8px'}}>
             <div className="absolute top-2 right-2 z-10 flex gap-1">
               <button
+                id="chat-send-btn"
                 type="submit"
                 disabled={!promptText.trim() || isSending}
                 className="p-1.5 bg-vsc-accent hover:bg-vsc-accent-hover text-white rounded-md transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
@@ -602,6 +606,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
                         saveDraft('');
                         setIsSending(true);
                         setSendSuccess(false);
+                        window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
                         sendCommandToTmux(cmd, paneTarget)
                           .then(() => { setSendSuccess(true); setTimeout(() => setSendSuccess(false), 2000); })
                           .catch(console.error)
@@ -652,6 +657,16 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
           </div>
         </div>
       </form>
+      {/* Status bar */}
+      <div
+        className="h-6 bg-vsc-bg-secondary border-t border-vsc-border flex items-center px-2.5 gap-2 cursor-pointer select-none shrink-0 hover:bg-vsc-bg-hover transition-colors"
+        onClick={() => onOpenDrawer?.()}
+        title="Open terminal drawer"
+      >
+        <span className={`w-2 h-2 rounded-full ${agentStatus === 'thinking' ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`} />
+        <span className="text-[11px] text-vsc-text-secondary">{agentStatus === 'thinking' ? 'Thinking...' : 'Idle'}</span>
+        {contextUsage != null && <span className="text-[11px] text-vsc-text-muted ml-auto">{contextUsage}%</span>}
+      </div>
     </FloatingPanel>
 
 

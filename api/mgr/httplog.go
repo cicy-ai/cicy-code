@@ -18,17 +18,18 @@ func initHTTPLogConsumer() {
 	go func() {
 		for {
 			consumeHTTPLogs()
-			time.Sleep(2 * time.Second)
+			time.Sleep(200 * time.Millisecond)
 		}
 	}()
 	log.Println("[http-log] consumer started")
 }
 
 func consumeHTTPLogs() {
+	panes := map[string]bool{}
 	for {
 		raw := redisDo("RPOP", "kiro_http_log")
 		if raw == "" {
-			return
+			break
 		}
 		var e struct {
 			Pane       string            `json:"pane"`
@@ -59,5 +60,9 @@ func consumeHTTPLogs() {
 		if err != nil {
 			log.Printf("[http-log] insert error: %v", err)
 		}
+		panes[e.Pane] = true
+	}
+	for p := range panes {
+		hub.broadcast(p, ChatEvent{Type: "http_log"})
 	}
 }

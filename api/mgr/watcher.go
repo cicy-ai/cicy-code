@@ -451,6 +451,12 @@ func fullSyncOnce() {
 	statusMap := map[string]paneSt{}
 	restored := 0
 	for pid, cfg := range cache {
+		// Ensure tmux session exists
+		session := strings.Split(pid, ":")[0]
+		if exec.Command("tmux", "has-session", "-t", session).Run() != nil {
+			log.Printf("[watcher] session %s missing, triggering restart", session)
+			go restartPaneCore(pid, "")
+		}
 		if ensurePipe(pid) {
 			restored++
 		}

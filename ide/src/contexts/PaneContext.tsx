@@ -186,7 +186,8 @@ export const PaneProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const urlToken = new URLSearchParams(window.location.search).get('token');
       if (urlToken) {
         try {
-          await apiService.verifyAuth(urlToken);
+          const { data } = await apiService.verifyAuth(urlToken);
+          if (!data.valid) throw new Error('invalid');
           TokenManager.saveToken(urlToken);
           setToken(urlToken);
         } catch {
@@ -197,7 +198,8 @@ export const PaneProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const savedToken = TokenManager.getToken();
         if (savedToken) {
           try {
-            await apiService.verifyAuth(savedToken);
+            const { data } = await apiService.verifyAuth(savedToken);
+            if (!data.valid) throw new Error('invalid');
             setToken(savedToken);
           } catch {
             TokenManager.clearToken();

@@ -20,7 +20,7 @@ const App: React.FC = () => {
   const { closeDialog, activeDialog } = useDialog();
   const { currentPaneId, allPanes, loading: appLoading } = useApp();
   const {
-    displayPaneId, token, setToken, isCheckingAuth, hasPermission,
+    displayPaneId, displayPaneTitle, token, setToken, isCheckingAuth, hasPermission,
     ttydWidth, setTtydWidth, isDragging, setIsDragging,
     leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed,
     agentTabs, setAgentTabs, setActiveAgentTab, setActiveTab,
@@ -232,8 +232,22 @@ const App: React.FC = () => {
       )}
 
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
-        <div className="p-4 text-vsc-text-secondary">
-          Drawer (reserved for future use)
+        <div className="flex flex-col w-full h-full bg-vsc-bg">
+          <div className="h-9 bg-vsc-bg-secondary border-b border-vsc-border flex items-center justify-between px-3 shrink-0">
+            <span className="text-xs text-vsc-text truncate">{displayPaneTitle} ({displayPaneId?.replace(':main.0', '')})</span>
+            <button onClick={() => setDrawerOpen(false)} className="p-1 rounded text-vsc-text-secondary hover:text-red-400 hover:bg-red-500/20">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          {token && displayPaneId ? (
+            <iframe
+              src={urls.ttydOpen(displayPaneId, token)}
+              className="flex-1 w-full border-0 bg-black"
+              title="ttyd drawer"
+            />
+          ) : (
+            <div className="p-4 text-vsc-text-secondary">No active pane</div>
+          )}
         </div>
       </Drawer>
 
