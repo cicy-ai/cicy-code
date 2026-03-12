@@ -99,6 +99,8 @@ const ChatMiddleView: React.FC = () => {
       fetchTimer = setTimeout(reload, 100);
     }
 
+    let streaming = false;
+
     function connect() {
       if (dead) return;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -109,15 +111,14 @@ const ChatMiddleView: React.FC = () => {
         try {
           const msg = JSON.parse(e.data);
           if (msg.type === 'user_q') {
-            // Immediate Q display
+            streaming = false;
             setChatData(prev => [...prev, { q: msg.data.q, status: 'pending', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0 }]);
           } else if (msg.type === 'ai_chunk') {
-            // Streaming text update — update last turn
+            streaming = true;
             setChatData(prev => {
               if (prev.length === 0) return prev;
               const last = { ...prev[prev.length - 1] };
               const steps = last.steps ? [...last.steps] : [];
-              // Find or create last text step
               if (steps.length === 0 || steps[steps.length - 1].type !== 'text') {
                 steps.push({ type: 'text', text: msg.data.delta });
               } else {
@@ -128,6 +129,7 @@ const ChatMiddleView: React.FC = () => {
               return [...prev.slice(0, -1), last];
             });
           } else if (msg.type === 'tool_start') {
+            streaming = true;
             setChatData(prev => {
               if (prev.length === 0) return prev;
               const last = { ...prev[prev.length - 1] };
@@ -137,13 +139,13 @@ const ChatMiddleView: React.FC = () => {
               last.status = 'tool_use';
               return [...prev.slice(0, -1), last];
             });
-          } else if (msg.type === 'ai_done' || msg.type === 'http_log') {
-            // Full data available — reload from API
+          } else if (msg.type === 'ai_done') {
+            streaming = false;
             debouncedReload();
           } else {
-            debouncedReload();
+            if (!streaming) debouncedReload();
           }
-        } catch { debouncedReload(); }
+        } catch { if (!streaming) debouncedReload(); }
       };
       ws.onclose = () => { if (!dead) timer = setTimeout(connect, 3000); };
       ws.onerror = () => ws?.close();

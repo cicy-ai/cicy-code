@@ -74,6 +74,44 @@ def _parse_aws_events(raw: bytes) -> list:
     return events
 
 
+# ── Streaming state ──
+_stream = {}  # flow.id -> {pane, buf, raw, text, last_t}
+
+
+def _parse_frames(buf):
+    """Parse complete frames from buffer, return (events, remaining)."""
+    events = []
+    pos = 0
+    while pos + 12 <= len(buf):
+        total_len = struct.unpack("!I", buf[pos:pos+4])[0]
+        if total_len < 16 or pos + total_len > len(buf):
+            break
+        header_len = struct.unpack("!I", buf[pos+4:pos+8])[0]
+        hs = pos + 12
+        he = hs + header_len
+        payload = buf[he:pos + total_len - 4]
+        etype = ""
+        hp = hs
+        while hp < he:
+            if hp + 1 > len(buf): break
+            nl = buf[hp]; hp += 1
+            nm = buf[hp:hp+nl].decode("utf-8", errors="ignore"); hp += nl
+            if hp >= len(buf): break
+            vt = buf[hp]; hp += 1
+            if vt == 7:
+                if hp + 2 > len(buf): break
+                vl = struct.unpack("!H", buf[hp:hp+2])[0]; hp += 2
+                v = buf[hp:hp+vl].decode("utf-8", errors="ignore"); hp += vl
+                if nm == ":event-type": etype = v
+            else:
+                break
+        if etype and payload:
+            try: events.append((etype, json.loads(payload)))
+            except: pass
+        pos += total_len
+    return events, buf[pos:]
+
+
 def _extract_and_push_q(pane: str, raw: bytes):
     """Extract user Q from request body and push to webhook."""
     try:
@@ -140,6 +178,47 @@ def _process_ai_response(pane: str, raw: bytes):
     _post_webhook(pane, "ai_done", {"text_length": len(full_text), "tool_count": len(tools)})
 
 
+def responseheaders(flow: http.HTTPFlow):
+    """Enable streaming for Kiro AI responses — push events in real-time."""
+    target = flow.request.headers.get("x-amz-target", "")
+    if target != TARGET_HEADER:
+        return
+    auth = flow.metadata.get("proxyauth")
+    if not auth:
+        return
+    pane = auth[0]
+
+    # Push Q immediately
+    if flow.request.content:
+        threading.Thread(target=_extract_and_push_q, args=(pane, flow.request.content), daemon=True).start()
+
+    _stream[flow.id] = {"pane": pane, "buf": b"", "raw": b"", "text": [], "last_t": time.time()}
+
+    def on_chunk(chunk: bytes) -> bytes:
+        st = _stream.get(flow.id)
+        if not st:
+            return chunk
+        st["buf"] += chunk
+        st["raw"] += chunk
+        events, st["buf"] = _parse_frames(st["buf"])
+        for etype, payload in events:
+            if etype == "assistantResponseEvent":
+                c = payload.get("content", "")
+                if c:
+                    st["text"].append(c)
+                    now = time.time()
+                    if now - st["last_t"] > 0.4:
+                        st["last_t"] = now
+                        _post_webhook(pane, "ai_chunk", {"delta": "".join(st["text"])})
+            elif etype == "toolUseEvent":
+                name = payload.get("name", "")
+                if name:
+                    _post_webhook(pane, "tool_start", {"name": name})
+        return chunk
+
+    flow.response.stream = on_chunk
+
+
 def response(flow: http.HTTPFlow):
     auth = flow.metadata.get("proxyauth")
     if not auth:
@@ -147,10 +226,14 @@ def response(flow: http.HTTPFlow):
     pane_id = auth[0]
 
     ts = int(time.time())
-    req_body = (flow.request.content or b'').decode('utf-8', errors='ignore')
-    res_body = (flow.response.content or b'').decode('utf-8', errors='ignore')
-    req_kb = round(len(flow.request.content or b'') / 1024, 1)
-    res_kb = round(len(flow.response.content or b'') / 1024, 1)
+    req_raw = flow.request.content or b''
+    # Streaming mode: response.content is empty, use collected raw
+    st = _stream.pop(flow.id, None)
+    res_raw = st["raw"] if st else (flow.response.content or b'')
+    req_body = req_raw.decode('utf-8', errors='ignore')
+    res_body = res_raw.decode('utf-8', errors='ignore')
+    req_kb = round(len(req_raw) / 1024, 1)
+    res_kb = round(len(res_raw) / 1024, 1)
     url = flow.request.pretty_url
     method = flow.request.method
     status = flow.response.status_code
@@ -168,14 +251,11 @@ def response(flow: http.HTTPFlow):
     r.ltrim('kiro_http_log', 0, 9999)
     r.publish('kiro_traffic_live', entry)
 
-    # Detect Kiro AI response and push Q + A to chat webhook
+    # Detect Kiro AI response and push final events
     target = flow.request.headers.get("x-amz-target", "")
     if target == TARGET_HEADER:
         from mitmproxy import ctx
-        ctx.log.info(f"[chat-dbg] {pane_id} req={len(flow.request.content or b'')} res={len(flow.response.content or b'')}")
-        # Extract Q from request body
-        if flow.request.content:
-            threading.Thread(target=_extract_and_push_q, args=(pane_id, flow.request.content), daemon=True).start()
-        # Extract A from response body
-        if flow.response.content:
-            threading.Thread(target=_process_ai_response, args=(pane_id, flow.response.content), daemon=True).start()
+        ctx.log.info(f"[chat-dbg] {pane_id} req={len(req_raw)} res={len(res_raw)}")
+        # Push final text + ai_done (Q already pushed in responseheaders)
+        if res_raw:
+            threading.Thread(target=_process_ai_response, args=(pane_id, res_raw), daemon=True).start()
