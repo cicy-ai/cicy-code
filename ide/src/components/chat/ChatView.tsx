@@ -138,7 +138,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
     return () => window.removeEventListener('toggle-ttyd-drawer', h);
   }, []);
 
-  const [displayCount, setDisplayCount] = useState(2);
+  const [displayCount, setDisplayCount] = useState(1);
 
   const loadMore = () => {
     setDisplayCount(prev => {
