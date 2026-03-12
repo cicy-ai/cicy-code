@@ -53,14 +53,8 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
     const short = displayPaneId.replace(':main.0', '');
     getCache(short).then(cached => {
       if (cached?.length) { 
-        // Find last complete QA (Q with A)
-        let lastQA = [];
-        for (let i = cached.length - 1; i >= 0; i--) {
-          if (cached[i].q && cached[i].steps?.length) { lastQA = cached.slice(i, i + 1); break; }
-        }
-        if (!lastQA.length && cached.length) lastQA = cached.slice(-1);
-        setChatData(lastQA); 
-        setHasMore(cached.length > 1); 
+        setChatData(cached); 
+        setHasMore(cached.length > 2); 
         setLoading(false); 
       }
     });
@@ -91,14 +85,8 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
           const s = JSON.stringify(json.data);
           if (s !== lastJsonRef.current) { 
             lastJsonRef.current = s; 
-            // Find last complete QA
-            let lastQA = [];
-            for (let i = json.data.length - 1; i >= 0; i--) {
-              if (json.data[i].q && json.data[i].steps?.length) { lastQA = json.data.slice(i, i + 1); break; }
-            }
-            if (!lastQA.length && json.data.length) lastQA = json.data.slice(-1);
-            setChatData(lastQA); 
-            setHasMore(json.data.length > 1); 
+            setChatData(json.data); 
+            setHasMore(json.data.length > 2); 
             setCache(short, json.data); 
           }
           if (json.agentType) setAgentType(json.agentType);
@@ -150,19 +138,14 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
     return () => window.removeEventListener('toggle-ttyd-drawer', h);
   }, []);
 
-  const [displayCount, setDisplayCount] = useState(2); // Show 2 at a time
+  const [displayCount, setDisplayCount] = useState(2);
 
-  const loadMore = async () => {
-    if (loadingMore || !hasMore || !displayPaneId) return;
-    setLoadingMore(true);
-    const short = displayPaneId.replace(':main.0', '');
-    try {
-      const cached = await getCache(short);
-      if (cached && cached.length > displayCount) {
-        setDisplayCount(prev => Math.min(prev + 2, cached.length));
-        setHasMore(cached.length > displayCount + 2);
-      }
-    } catch {} finally { setLoadingMore(false); }
+  const loadMore = () => {
+    setDisplayCount(prev => {
+      const next = prev + 2;
+      if (next >= chatData.length) setHasMore(false);
+      return Math.min(next, chatData.length);
+    });
   };
 
   // Build conversation groups - only show displayCount items
