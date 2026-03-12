@@ -175,12 +175,6 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-[720px] mx-auto px-4 py-4">
-          {/* Load more */}
-          {hasMore && (
-            <button onClick={loadMore} disabled={loadingMore} className="w-full py-2 mb-4 text-[11px] text-vsc-text-muted hover:text-vsc-accent rounded-lg bg-white/[0.02] hover:bg-white/[0.04] border border-white/[0.04] transition-all disabled:opacity-40">
-              {loadingMore ? '...' : '↑ Load earlier messages'}
-            </button>
-          )}
 
           {loading ? (
             <div className="flex flex-col items-center justify-center pt-20 gap-3">
