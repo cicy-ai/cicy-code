@@ -124,6 +124,19 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
         return;
       }
       
+      // IPC Ping - 测试 electronRPC 连通性
+      if (d.type === 'ipc_ping') {
+        console.log('[AgentPage] ipc_ping, 调用 electronRPC...');
+        (window as any).electronRPC('ping', {}).then((result: any) => {
+          console.log('[AgentPage] electronRPC 返回:', result);
+          window.dispatchEvent(new CustomEvent('ipc-pong', { detail: { requestId: d.requestId, result } }));
+        }).catch((err: any) => {
+          console.error('[AgentPage] electronRPC 失败:', err);
+          window.dispatchEvent(new CustomEvent('ipc-pong', { detail: { requestId: d.requestId, error: err.message } }));
+        });
+        return;
+      }
+      
       if (d.type === 'add_app') { addApp({ id: d.id || `app-${Date.now()}`, label: d.label || 'App', emoji: d.emoji || '📦', url: d.url || 'about:blank' }); if (d.autoOpen !== false) openInElectron(d.url, d.label); }
       else if (d.type === 'open_window' && d.url) openInElectron(d.url, d.title);
       else if (d.type === 'gemini_ask') {

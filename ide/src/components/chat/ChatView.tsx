@@ -144,9 +144,16 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
           ws.send(JSON.stringify({ type: 'pong', data: e.detail }));
         }
       };
+      const ipcPongHandler = (e: CustomEvent) => {
+        console.log('[ChatView] 发送 ipc_pong:', e.detail);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ipc_pong', data: e.detail }));
+        }
+      };
       window.addEventListener('gemini-vision-result', visionHandler as EventListener);
       window.addEventListener('gemini-ask-result', askHandler as EventListener);
       window.addEventListener('agent-pong', pongHandler as EventListener);
+      window.addEventListener('ipc-pong', ipcPongHandler as EventListener);
       
       // Cleanup on disconnect
       const originalClose = ws.onclose;
@@ -154,6 +161,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
         window.removeEventListener('gemini-vision-result', visionHandler as EventListener);
         window.removeEventListener('gemini-ask-result', askHandler as EventListener);
         window.removeEventListener('agent-pong', pongHandler as EventListener);
+        window.removeEventListener('ipc-pong', ipcPongHandler as EventListener);
         if (originalClose) originalClose.call(ws, e);
       };
     }
