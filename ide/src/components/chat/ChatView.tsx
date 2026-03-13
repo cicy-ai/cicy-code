@@ -154,7 +154,6 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
   const startIdx = Math.max(0, allData.length - displayCount);
   allData.slice(startIdx).forEach((c: any) => {
     if (!c.q) return;
-    if ((!c.steps || !c.steps.length) && c.status !== 'tool_use' && c.status !== 'pending') return;
     groups.push({ q: c.q, r: c });
   });
 
