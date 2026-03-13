@@ -106,7 +106,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
       ws.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
-          if (msg.type !== 'http_log' && msg.type !== 'status_change') console.log('[ChatView] WS 收到消息:', msg.type, msg);
+          if (msg.type !== 'http_log' && msg.type !== 'status_change') console.debug('[ChatView] WS:', msg.type);
           if (msg.type === 'user_q') { streaming = false; setChatData(prev => [...prev, { q: msg.data.q, status: 'pending', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0 }]); }
           else if (msg.type === 'ai_chunk') {
             streaming = true;
