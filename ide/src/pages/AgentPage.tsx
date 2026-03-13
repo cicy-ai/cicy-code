@@ -138,7 +138,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
       }
       
       if (d.type === 'add_app') { addApp({ id: d.id || `app-${Date.now()}`, label: d.label || 'App', emoji: d.emoji || '📦', url: d.url || 'about:blank' }); if (d.autoOpen !== false) openInElectron(d.url, d.label); }
-      else if (d.type === 'open_window' && d.url) openInElectron(d.url, d.title, true);
+      else if (d.type === 'open_window' && d.url) openInElectron(d.url, d.title, true, d.width, d.height);
       else if (d.type === 'gemini_ask') {
         // 简单文本问答
         try {

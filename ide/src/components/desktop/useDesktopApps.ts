@@ -37,11 +37,14 @@ export async function electronRPC(tool: string, args: Record<string, any> = {}):
 }
 
 // Open URL: agent apps (*.de5.net/localhost) in Electron, others in system browser
-export function openInElectron(url: string, _title?: string, forceElectron = false) {
+export function openInElectron(url: string, _title?: string, forceElectron = false, width?: number, height?: number) {
   try {
     const u = new URL(url);
     if (forceElectron || u.hostname === 'localhost' || u.hostname.endsWith('.de5.net')) {
-      electronRPC('open_window', { url, reuseWindow: false }).catch(() => window.open(url, '_blank'));
+      const args: any = { url, reuseWindow: false };
+      if (width) args.width = width;
+      if (height) args.height = height;
+      electronRPC('open_window', args).catch(() => window.open(url, '_blank'));
       return;
     }
   } catch {}
