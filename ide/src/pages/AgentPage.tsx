@@ -152,8 +152,8 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
             const s = JSON.parse(status?.content?.[0]?.text || '{}');
             if (!s.isGenerating && i > 2) {
               // 取最后回复
-              const reply = await rpc('exec_js', { win_id: wid, code: `(()=>{const els=document.querySelectorAll('model-response message-content .markdown');return els.length?els[els.length-1].textContent.trim():''})()` });
-              result = typeof reply === 'string' ? reply : (reply?.content?.[0]?.text || reply?.result?.content?.[0]?.text || JSON.stringify(reply));
+              const reply = await rpc('exec_js', { win_id: wid, code: `var els=document.querySelectorAll(".response-container");return els.length?els[els.length-1].innerText.trim():"no reply"` });
+              result = reply?.content?.[0]?.text || (typeof reply === 'string' ? reply : JSON.stringify(reply));
               break;
             }
           }
