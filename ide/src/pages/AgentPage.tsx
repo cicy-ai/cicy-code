@@ -119,6 +119,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
       
       // Ping/Pong
       if (d.type === 'ping') {
+        console.log('[AgentPage] 发送 pong:', d.requestId);
         window.dispatchEvent(new CustomEvent('agent-pong', { detail: { requestId: d.requestId, pong: 'ok' } }));
         return;
       }
