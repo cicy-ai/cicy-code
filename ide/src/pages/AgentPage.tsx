@@ -113,10 +113,20 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
 
   // Agent desktop events
   useEffect(() => {
-    const handler = (e: CustomEvent) => {
+    const handler = async (e: CustomEvent) => {
       const d = e.detail || {};
       if (d.type === 'add_app') { addApp({ id: d.id || `app-${Date.now()}`, label: d.label || 'App', emoji: d.emoji || '📦', url: d.url || 'about:blank' }); if (d.autoOpen !== false) openInElectron(d.url, d.label); }
       else if (d.type === 'open_window' && d.url) openInElectron(d.url, d.title);
+      else if (d.type === 'gemini_vision_request') {
+        // Call electronRPC
+        try {
+          const result = await (window as any).electronRPC('gemini_vision', { image: d.image, prompt: d.prompt || 'Describe this image' });
+          // Send result back via WS
+          window.dispatchEvent(new CustomEvent('gemini-vision-result', { detail: { requestId: d.requestId, result } }));
+        } catch (err: any) {
+          window.dispatchEvent(new CustomEvent('gemini-vision-result', { detail: { requestId: d.requestId, error: err.message } }));
+        }
+      }
     };
     window.addEventListener('agent-desktop-event', handler as EventListener);
     return () => window.removeEventListener('agent-desktop-event', handler as EventListener);

@@ -125,6 +125,21 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
       };
       ws.onclose = () => { if (!dead) timer = setTimeout(connect, 3000); };
       ws.onerror = () => ws?.close();
+      
+      // Listen for gemini-vision-result and send back to Agent
+      const visionHandler = (e: CustomEvent) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'gemini_vision_result', data: e.detail }));
+        }
+      };
+      window.addEventListener('gemini-vision-result', visionHandler as EventListener);
+      
+      // Cleanup on disconnect
+      const originalClose = ws.onclose;
+      ws.onclose = (e) => {
+        window.removeEventListener('gemini-vision-result', visionHandler as EventListener);
+        if (originalClose) originalClose.call(ws, e);
+      };
     }
     connect();
     return () => { dead = true; clearTimeout(timer); clearTimeout(fetchTimer); ws?.close(); };
