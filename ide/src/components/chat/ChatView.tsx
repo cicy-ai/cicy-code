@@ -210,7 +210,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
               <div key={gi} className="mb-5">
                 {/* User message */}
                 <div className="flex justify-end mb-2.5">
-                  <div className="chat-markdown max-w-[85%] px-3.5 py-2 rounded-2xl rounded-br-sm text-[13px] leading-relaxed text-white/90" style={{ background: 'linear-gradient(135deg, rgba(0,122,204,0.8), rgba(17,119,187,0.6))' }}>
+                  <div className="chat-markdown max-w-[85%] px-3.5 py-2 rounded-2xl rounded-br-sm text-[15px] leading-relaxed text-white/90" style={{ background: 'linear-gradient(135deg, rgba(0,122,204,0.8), rgba(17,119,187,0.6))' }}>
                     <Markdown remarkPlugins={[remarkGfm]}>{g.q.replace(/^-\n/, '').replace(/^\d+;\d+;\d+c/i, '')}</Markdown>
                   </div>
                 </div>
@@ -242,7 +242,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
                           );
                         }
                         return (
-                          <div key={si} className={`chat-markdown text-[13px] text-vsc-text leading-[1.7] ${si > 0 ? 'mt-2 pt-2 border-t border-white/[0.04]' : ''}`}>
+                          <div key={si} className={`chat-markdown text-[15px] text-vsc-text leading-[1.7] ${si > 0 ? 'mt-2 pt-2 border-t border-white/[0.04]' : ''}`}>
                             <Markdown remarkPlugins={[remarkGfm]}>{s.text}</Markdown>
                           </div>
                         );
