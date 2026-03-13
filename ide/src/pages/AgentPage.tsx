@@ -117,6 +117,18 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
       const d = e.detail || {};
       if (d.type === 'add_app') { addApp({ id: d.id || `app-${Date.now()}`, label: d.label || 'App', emoji: d.emoji || '📦', url: d.url || 'about:blank' }); if (d.autoOpen !== false) openInElectron(d.url, d.label); }
       else if (d.type === 'open_window' && d.url) openInElectron(d.url, d.title);
+      else if (d.type === 'gemini_ask') {
+        // 简单文本问答
+        try {
+          await (window as any).electronRPC('gemini_web_set_prompt', { win_id: d.win_id || 2, text: d.prompt });
+          await (window as any).electronRPC('gemini_web_click_send', { win_id: d.win_id || 2 });
+          await new Promise(r => setTimeout(r, 3000));
+          const result = await (window as any).electronRPC('gemini_web_get_last_reply', { win_id: d.win_id || 2 });
+          window.dispatchEvent(new CustomEvent('gemini-ask-result', { detail: { requestId: d.requestId, result } }));
+        } catch (err: any) {
+          window.dispatchEvent(new CustomEvent('gemini-ask-result', { detail: { requestId: d.requestId, error: err.message } }));
+        }
+      }
       else if (d.type === 'gemini_vision_request') {
         // Call electronRPC
         try {
