@@ -139,6 +139,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
         }
       };
       const pongHandler = (e: CustomEvent) => {
+        console.log('[ChatView] 发送 pong:', e.detail);
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'pong', data: e.detail }));
         }
