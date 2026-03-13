@@ -42,8 +42,11 @@ export function openInElectron(url: string, _title?: string, forceElectron = fal
     const u = new URL(url);
     if (forceElectron || u.hostname === 'localhost' || u.hostname.endsWith('.de5.net')) {
       const args: any = { url, reuseWindow: false };
-      if (width) args.width = width;
-      if (height) args.height = height;
+      if (width || height) {
+        args.options = {};
+        if (width) args.options.width = width;
+        if (height) args.options.height = height;
+      }
       electronRPC('open_window', args).catch(() => window.open(url, '_blank'));
       return;
     }
