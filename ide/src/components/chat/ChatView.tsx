@@ -236,7 +236,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
                         const isFinal = isLast && r?.status === 'text';
                         if (!isFinal && hasToolStep) {
                           return (
-                            <div key={si} className="chat-markdown text-[12px] text-vsc-text-muted/80 my-2 pl-3 leading-relaxed border-l-2 border-white/[0.06]">
+                            <div key={si} className="chat-markdown text-[14px] text-vsc-text-muted/80 my-2 pl-3 leading-relaxed border-l-2 border-white/[0.06]">
                               <Markdown remarkPlugins={[remarkGfm]}>{s.text}</Markdown>
                             </div>
                           );
