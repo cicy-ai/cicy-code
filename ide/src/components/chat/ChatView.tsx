@@ -138,14 +138,21 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
           ws.send(JSON.stringify({ type: 'gemini_ask_result', data: e.detail }));
         }
       };
+      const pongHandler = (e: CustomEvent) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'pong', data: e.detail }));
+        }
+      };
       window.addEventListener('gemini-vision-result', visionHandler as EventListener);
       window.addEventListener('gemini-ask-result', askHandler as EventListener);
+      window.addEventListener('agent-pong', pongHandler as EventListener);
       
       // Cleanup on disconnect
       const originalClose = ws.onclose;
       ws.onclose = (e) => {
         window.removeEventListener('gemini-vision-result', visionHandler as EventListener);
         window.removeEventListener('gemini-ask-result', askHandler as EventListener);
+        window.removeEventListener('agent-pong', pongHandler as EventListener);
         if (originalClose) originalClose.call(ws, e);
       };
     }
