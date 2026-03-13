@@ -158,14 +158,17 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
     groups.push({ q: c.q, r: c });
   });
 
+  // Reverse: newest first
+  groups.reverse();
+
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Wheel up at top = load more
+  // Scroll to bottom = load more older messages
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      if (e.deltaY < 0 && el.scrollTop <= 0 && chatData.length > displayCount) {
+    const onScroll = () => {
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 10 && chatData.length > displayCount) {
         setDisplayCount(prev => {
           const next = Math.min(prev + 2, chatData.length);
           if (next >= chatData.length) setHasMore(false);
@@ -173,8 +176,8 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
         });
       }
     };
-    el.addEventListener('wheel', onWheel);
-    return () => el.removeEventListener('wheel', onWheel);
+    el.addEventListener('scroll', onScroll);
+    return () => el.removeEventListener('scroll', onScroll);
   }, [chatData.length, displayCount]);
 
   return (
