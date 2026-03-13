@@ -140,23 +140,34 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
       if (d.type === 'add_app') { addApp({ id: d.id || `app-${Date.now()}`, label: d.label || 'App', emoji: d.emoji || '📦', url: d.url || 'about:blank' }); if (d.autoOpen !== false) openInElectron(d.url, d.label); }
       else if (d.type === 'open_window' && d.url) openInElectron(d.url, d.title, true, d.width, d.height);
       else if (d.type === 'gemini_ask') {
-        // 简单文本问答
+        const rpc = (window as any).electronRPC;
+        const wid = d.win_id || 2;
         try {
-          await (window as any).electronRPC('gemini_web_set_prompt', { win_id: d.win_id || 2, text: d.prompt });
-          await (window as any).electronRPC('gemini_web_click_send', { win_id: d.win_id || 2 });
-          await new Promise(r => setTimeout(r, 3000));
-          const result = await (window as any).electronRPC('gemini_web_get_last_reply', { win_id: d.win_id || 2 });
+          await rpc('gemini_web_set_prompt', { win_id: wid, text: d.prompt });
+          await rpc('gemini_web_click_send', { win_id: wid });
+          let result = '';
+          for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 1000));
+            const status = await rpc('gemini_web_status', { win_id: wid });
+            const s = JSON.parse(status?.content?.[0]?.text || '{}');
+            if (!s.isGenerating && i > 2) {
+              // 取最后回复
+              const reply = await rpc('exec_js', { id: wid, code: `(()=>{const els=document.querySelectorAll('model-response message-content .markdown');return els.length?els[els.length-1].textContent.trim():''})()` });
+              result = reply?.content?.[0]?.text || 'no reply';
+              break;
+            }
+          }
           window.dispatchEvent(new CustomEvent('gemini-ask-result', { detail: { requestId: d.requestId, result } }));
         } catch (err: any) {
           window.dispatchEvent(new CustomEvent('gemini-ask-result', { detail: { requestId: d.requestId, error: err.message } }));
         }
       }
       else if (d.type === 'gemini_vision_request') {
-        // Call electronRPC
+        const rpc = (window as any).electronRPC;
+        const wid = d.win_id || 2;
         try {
-          const result = await (window as any).electronRPC('gemini_vision', { image: d.image, prompt: d.prompt || 'Describe this image' });
-          // Send result back via WS
-          window.dispatchEvent(new CustomEvent('gemini-vision-result', { detail: { requestId: d.requestId, result } }));
+          await rpc('gemini_web_image_base64_prompt', { win_id: wid, imageBase64: d.image, prompt: d.prompt || 'Describe this image' });
+          window.dispatchEvent(new CustomEvent('gemini-vision-result', { detail: { requestId: d.requestId, result: 'sent' } }));
         } catch (err: any) {
           window.dispatchEvent(new CustomEvent('gemini-vision-result', { detail: { requestId: d.requestId, error: err.message } }));
         }
