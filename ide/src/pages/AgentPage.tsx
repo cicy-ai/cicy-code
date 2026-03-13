@@ -115,6 +115,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
   useEffect(() => {
     const handler = async (e: CustomEvent) => {
       const d = e.detail || {};
+      console.log('[AgentPage] 收到 desktop event:', d.type, d);
       if (d.type === 'add_app') { addApp({ id: d.id || `app-${Date.now()}`, label: d.label || 'App', emoji: d.emoji || '📦', url: d.url || 'about:blank' }); if (d.autoOpen !== false) openInElectron(d.url, d.label); }
       else if (d.type === 'open_window' && d.url) openInElectron(d.url, d.title);
       else if (d.type === 'gemini_ask') {
