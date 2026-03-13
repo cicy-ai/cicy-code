@@ -151,10 +151,12 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
   // Build conversation groups - take last displayCount items, then reverse (newest on top)
   const groups: { q: string; r: any }[] = [];
   const allData = chatData;
+  console.log('[ChatView] chatData.length:', chatData.length, 'displayCount:', displayCount);
   allData.slice(-displayCount).forEach((c: any) => {
     if (!c.q) return;
     groups.push({ q: c.q, r: c });
   });
+  console.log('[ChatView] groups.length:', groups.length);
 
   // Reverse: newest first
   groups.reverse();
