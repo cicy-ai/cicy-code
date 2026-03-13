@@ -164,10 +164,37 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
       }
       else if (d.type === 'gemini_vision_request') {
         const rpc = (window as any).electronRPC;
-        const wid = d.win_id || 2;
+        const wid = d.win_id || 4;
+        const srcWid = d.src_win_id || 1;
         try {
-          await rpc('gemini_web_image_base64_prompt', { win_id: wid, imageBase64: d.image, prompt: d.prompt || 'Describe this image' });
-          window.dispatchEvent(new CustomEvent('gemini-vision-result', { detail: { requestId: d.requestId, result: 'sent' } }));
+          // 1. 截图到剪贴板
+          await rpc('webpage_screenshot_to_clipboard', { win_id: srcWid });
+          // 2. 聚焦 Gemini 输入框并粘贴
+          await rpc('exec_js', { win_id: wid, code: 'var r=document.querySelector("rich-textarea");if(r){var e=r.querySelector("div.ql-editor");if(e)e.click()};return "ok"' });
+          await rpc('control_electron_WebContents', { win_id: wid, code: 'webContents.paste()' });
+          // 3. 等待图片上传
+          for (let i = 0; i < 20; i++) {
+            await new Promise(r => setTimeout(r, 500));
+            const st = await rpc('gemini_web_status', { win_id: wid });
+            const s = JSON.parse(st?.content?.[0]?.text || '{}');
+            if (s.hasImage && !s.isUploading) break;
+          }
+          // 4. 设置问题并发送
+          await rpc('gemini_web_set_prompt', { win_id: wid, text: d.prompt || 'Describe this image' });
+          await rpc('gemini_web_click_send', { win_id: wid });
+          // 5. 等待回复
+          let result = '';
+          for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 1000));
+            const st = await rpc('gemini_web_status', { win_id: wid });
+            const s = JSON.parse(st?.content?.[0]?.text || '{}');
+            if (!s.isGenerating && i > 3) {
+              const reply = await rpc('exec_js', { win_id: wid, code: 'var els=document.querySelectorAll(".response-container");return els.length?els[els.length-1].innerText.trim():"no reply"' });
+              result = reply?.content?.[0]?.text || (typeof reply === 'string' ? reply : JSON.stringify(reply));
+              break;
+            }
+          }
+          window.dispatchEvent(new CustomEvent('gemini-vision-result', { detail: { requestId: d.requestId, result } }));
         } catch (err: any) {
           window.dispatchEvent(new CustomEvent('gemini-vision-result', { detail: { requestId: d.requestId, error: err.message } }));
         }
