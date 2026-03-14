@@ -235,7 +235,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
         return;
       }
       
-      if (d.type === 'add_app') { addApp({ id: d.id || `app-${Date.now()}`, label: d.label || 'App', emoji: d.emoji || '📦', url: d.url || 'about:blank' }); if (d.autoOpen !== false) openInElectron(d.url, d.label); }
+      if (d.type === 'add_app') { addApp({ id: d.id || `app-${Date.now()}`, type: d.widget ? 'widget' : 'icon', label: d.label || 'App', emoji: d.emoji || '📦', url: d.url || '', size: d.size, srcdoc: d.srcdoc }); if (!d.widget && d.autoOpen !== false) openInElectron(d.url, d.label); }
       else if (d.type === 'open_window' && d.url) openInElectron(d.url, d.title, true, d.width, d.height);
       else if (d.type === 'gemini_ask') {
         const rpc = (window as any).electronRPC;
@@ -350,9 +350,9 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
           <div data-id="desktop-bg" className="absolute inset-0 bg-gradient-to-br from-[#0f0f1a] via-[#111827] to-[#0c1222]" />
           <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '32px 32px' }} />
 
-          {/* App icons - iPhone grid */}
-          <div data-id="app-grid" className="absolute inset-0 z-10 p-6 pt-4 flex flex-wrap content-start gap-5 pointer-events-none overflow-y-auto" onClick={() => editMode && setEditMode(false)}>
-            {/* Code folder icon - always present */}
+          {/* App icons + widgets grid */}
+          <div data-id="app-grid" className="absolute inset-0 z-10 p-6 pt-4 flex flex-wrap content-start gap-4 pointer-events-none overflow-y-auto" onClick={() => editMode && setEditMode(false)}>
+            {/* Code folder icon */}
             <div data-id="code-folder-icon" className="w-[68px] flex flex-col items-center gap-1.5 select-none pointer-events-auto"
               onClick={() => setCodeDrawerOpen(v => !v)}>
               <div className="w-[52px] h-[52px] rounded-[14px] bg-gradient-to-br from-blue-500/20 to-blue-400/10 backdrop-blur-md flex items-center justify-center shadow-lg shadow-black/20 active:scale-95 transition-all duration-150 border border-blue-400/20">
@@ -360,7 +360,33 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
               </div>
               <span className="text-[10px] text-white/60 truncate w-full text-center leading-tight">Code</span>
             </div>
-            {apps.map(app => (
+            {apps.map(app => app.type === 'widget' ? (
+              /* Widget card */
+              <div key={app.id} data-id={`widget-${app.id}`} className="pointer-events-auto select-none relative group"
+                style={{ width: app.size === 'lg' ? 340 : app.size === 'md' ? 340 : 160, height: app.size === 'lg' ? 340 : app.size === 'md' ? 160 : 140 }}
+                onContextMenu={e => { e.preventDefault(); setEditMode(true); }}>
+                {editMode && (
+                  <button onClick={e => { e.stopPropagation(); removeApp(app.id); if (apps.length <= 1) setEditMode(false); }}
+                    className="absolute -top-1.5 -left-1.5 z-20 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center shadow-lg hover:bg-red-400">
+                    <X size={10} className="text-white" />
+                  </button>
+                )}
+                <div className={`w-full h-full rounded-2xl bg-[#1c1c1e]/80 backdrop-blur-xl border border-white/[0.08] shadow-lg overflow-hidden flex flex-col ${editMode ? 'animate-wiggle' : ''}`}>
+                  <div className="h-7 flex items-center justify-between px-2.5 shrink-0">
+                    <span className="text-[10px] text-white/50 truncate flex items-center gap-1">{app.emoji} {app.label}</span>
+                    {app.url && <button onClick={() => openInElectron(app.url, app.label)} className="text-[9px] text-white/30 hover:text-white/60 opacity-0 group-hover:opacity-100 transition-opacity">↗</button>}
+                  </div>
+                  <div className="flex-1 overflow-hidden">
+                    {app.srcdoc ? (
+                      <iframe srcDoc={app.srcdoc} className="w-full h-full border-0" sandbox="allow-scripts allow-same-origin" />
+                    ) : app.url ? (
+                      <iframe src={app.url} className="w-full h-full border-0" sandbox="allow-scripts allow-same-origin" />
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Icon */
               <div key={app.id} className={`w-[68px] flex flex-col items-center gap-1.5 select-none pointer-events-auto relative ${editMode ? 'animate-wiggle' : ''}`}
                 onClick={() => { if (!editMode) openInElectron(app.url, app.label); }}
                 onContextMenu={e => { e.preventDefault(); setEditMode(true); }}>
@@ -370,7 +396,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
                     <X size={10} className="text-white" />
                   </button>
                 )}
-                <div className="w-[52px] h-[52px] rounded-[14px] bg-gradient-to-br from-white/[0.12] to-white/[0.04] backdrop-blur-md flex items-center justify-center text-[28px] shadow-lg shadow-black/20 group-hover:scale-110 active:scale-95 transition-all duration-150 border border-white/[0.06]">
+                <div className="w-[52px] h-[52px] rounded-[14px] bg-gradient-to-br from-white/[0.12] to-white/[0.04] backdrop-blur-md flex items-center justify-center text-[28px] shadow-lg shadow-black/20 active:scale-95 transition-all duration-150 border border-white/[0.06]">
                   {app.emoji}
                 </div>
                 <span className="text-[10px] text-white/60 truncate w-full text-center leading-tight">{app.label}</span>
