@@ -475,9 +475,9 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
       }
     >
       <form onSubmit={handleSendPrompt} className="relative h-full flex flex-col p-2">
-        <div className="absolute top-2 right-2 z-10 flex gap-1">
+        <div className="absolute top-3 right-3 z-10 flex gap-1">
           <button
-            id="chat-send-btn"
+            id="terminal-send-btn"
             type="submit"
             disabled={!promptText.trim() || isSending}
             className="p-1.5 bg-vsc-accent hover:bg-vsc-accent-hover text-white rounded-md transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
