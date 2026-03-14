@@ -12,6 +12,7 @@ import { usePane } from '../contexts/PaneContext';
 import { useDialog } from '../contexts/DialogContext';
 import { QueueView } from './QueueView';
 import { TrafficChart } from './TrafficChart';
+import LeftSidePanel from './LeftSidePanel';
 
 interface RightSidePanelProps {
   ttydWidth: number;
@@ -23,27 +24,16 @@ interface RightSidePanelProps {
 }
 
 const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, setBoundAgents, boundAgents = [], leftWidth, onCloseDrawer }) => {
-  const { paneDetail, api, setPaneDetail, updatePane, globalVar, loadGlobalVar, updateGlobalVar } = useApp();
+  const { paneDetail, api, setPaneDetail, updatePane, globalVar, loadGlobalVar, updateGlobalVar, allPanes, currentPaneId, selectPane } = useApp();
   const { displayPaneId, token, hasPermission, activeTab, setActiveTab, previewTab, setPreviewTab, toast, setToast, isInteracting } = usePane();
+  const [agentSearch, setAgentSearch] = useState('');
 
   const [paneWorkspace, setPaneWorkspace] = useState<string>(() => {
     const cached = localStorage.getItem(`codeserver_folder_${displayPaneId}`);
     return cached || (paneDetail?.workspace || '~/').replace('~', config.hostHome);
   });
-  const [chatData, setChatData] = useState<any[]>([]);
-  const chatEndRef = useRef<HTMLDivElement>(null);
   const [codeUrl, setCodeUrl] = useState<string|null>(null);
 
-  useEffect(() => {
-    if (!displayPaneId) return;
-    const short = displayPaneId.replace(':main.0', '');
-    apiService.getChatHistory(short).then(({ data }) => setChatData(data.data || [])).catch(() => {});
-    const es = new EventSource(`${config.apiBase}/api/stats/chat/stream?pane=${short}&token=${token}`);
-    es.onmessage = (e) => { try { setChatData(JSON.parse(e.data)); } catch {} };
-    return () => es.close();
-  }, [displayPaneId]);
-
-  useEffect(() => { setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50); }, [chatData]);
   const [showFavorDirs, setShowFavorDirs] = useState(false);
   const [favorDirs, setFavorDirs] = useState<string[]>([]);
   const [tempPaneData, setTempPaneData] = useState<EditPaneData | null>(null);
@@ -123,7 +113,7 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
   return (
     <div id="tabs" className="w-full h-full bg-vsc-bg">
       <div id="tabs-top" className="absolute top-0 left-0 right-0 h-9 bg-vsc-bg-secondary border-b border-vsc-border flex items-center gap-0.5 px-2 z-10">
-        {([ 'Terminal', 'Workers', 'Code', 'Traffic', 'Preview', 'Settings'] as const).map(tab => (
+        {([ 'Terminal', 'Workers', 'Code', 'Preview', 'Settings', 'Agents'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => {
@@ -269,6 +259,72 @@ const RightSidePanel: React.FC<RightSidePanelProps> = ({ ttydWidth, isDragging, 
           isSavingPane={isSavingPane} setIsSavingPane={setIsSavingPane}
           globalVar={globalVar} updateGlobalVar={updateGlobalVar}
         />
+      )}
+      {activeTab === 'Agents' && (
+        <div className="absolute top-9 left-0 right-0 bottom-0 overflow-auto">
+          <div className="sticky top-0 bg-vsc-bg border-b border-vsc-border p-3 z-10">
+            <input
+              type="text"
+              placeholder="Search agents..."
+              value={agentSearch}
+              onChange={(e) => setAgentSearch(e.target.value)}
+              className="w-full px-3 py-1.5 text-xs bg-vsc-bg-secondary border border-vsc-border rounded text-vsc-text placeholder-vsc-text-disabled focus:outline-none focus:border-vsc-accent"
+            />
+          </div>
+          <div className="p-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {(allPanes || []).filter(pane => {
+                if (!agentSearch) return true;
+                const query = agentSearch.toLowerCase();
+                return (pane.id || '').toLowerCase().includes(query) ||
+                       (pane.title || '').toLowerCase().includes(query) ||
+                       (pane.agentType || '').toLowerCase().includes(query);
+              }).map((pane, idx) => {
+                const statusInfo = pane.isThinking ? { color: 'bg-yellow-500', label: 'thinking' } :
+                                   pane.isWaitingAuth ? { color: 'bg-red-500', label: 'auth' } :
+                                   pane.isWaitStartup ? { color: 'bg-blue-500', label: 'starting' } :
+                                   pane.isCompacting ? { color: 'bg-purple-500', label: 'compact' } :
+                                   { color: 'bg-green-500', label: 'idle' };
+                const isActive = pane.id === currentPaneId;
+                return (
+                  <div
+                    key={pane.id || `pane-${idx}`}
+                    onClick={() => selectPane(pane.id)}
+                    className={`agent-card relative p-4 rounded-lg border cursor-pointer transition-all ${
+                    isActive 
+                      ? 'border-vsc-accent bg-vsc-bg-secondary shadow-lg' 
+                      : 'border-vsc-border bg-vsc-bg hover:border-vsc-border-hover hover:bg-vsc-bg-secondary'
+                  }`}
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className={`w-2 h-2 rounded-full ${statusInfo.color} ${pane.isThinking || pane.isWaitStartup || pane.isCompacting ? 'animate-pulse' : ''}`} />
+                      <span className="text-sm font-medium text-vsc-text truncate">{pane.title || pane.id}</span>
+                    </div>
+                    {isActive && <span className="text-xs text-vsc-accent">●</span>}
+                  </div>
+                  <div className="text-xs text-vsc-text-muted space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="opacity-60">ID:</span>
+                      <span className="font-mono">{pane.id}</span>
+                    </div>
+                    {pane.agentType && (
+                      <div className="flex items-center gap-2">
+                        <span className="opacity-60">Agent:</span>
+                        <span className="px-1.5 py-0.5 rounded bg-vsc-bg text-vsc-accent text-xs">{pane.agentType}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <span className="opacity-60">Status:</span>
+                      <span className={`px-1.5 py-0.5 rounded text-xs ${statusInfo.color} text-white`}>{statusInfo.label}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            </div>
+          </div>
+        </div>
       )}
       {isDragging && activeTab !== 'Settings' && activeTab !== 'Agents' && <div className="absolute inset-0 z-20"></div>}
     </div>

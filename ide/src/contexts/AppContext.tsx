@@ -96,37 +96,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [api]);
   useEffect(() => {
     if (!api) return;
+    let panesCache: any[] | null = null;
     const fetchAllPanes = async () => {
       const startTime = performance.now();
       try {
-        const [statusRes, panesRes] = await Promise.all([api.getAllStatus(), api.getPanes()]);
-        const latency = Math.round(performance.now() - startTime);
-        window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency } }));
-        
-        // Build title/created_at map from panes config
-        const paneConfig: Record<string, any> = {};
-        for (const p of (panesRes.data?.panes || [])) {
-          paneConfig[p.pane_id] = p;
-        }
-        
-        const statusMap = (statusRes.data || {}) as Record<string, any>;
-        const panesArray = (panesRes.data?.panes || []).map((p: any) => {
-          const { pane_id: _drop, active: _dropActive, ...st } = statusMap[p.pane_id] || {};
-          return { ...p, ...st, title: p.title || st.title, pane_id: p.pane_id, active: p.active };
-        });
-        if (panesArray.length === 0) return;
-        setAllPanes(prev => {
-          const prevJson = JSON.stringify(prev);
-          const nextJson = JSON.stringify(panesArray);
-          return prevJson === nextJson ? prev : panesArray;
-        });
-        setLoading(false);
-        
-        // Auto-select first pane if none selected
-        if (panesArray.length > 0 && !currentPaneId && !PaneManager.getCurrentPane()) {
-          const firstPane = panesArray[0];
-          PaneManager.setCurrentPane(firstPane.pane_id);
-          setCurrentPaneId(firstPane.pane_id);
+        // First load: fetch both. Subsequent: only status (5s poll).
+        if (!panesCache) {
+          const [statusRes, panesRes] = await Promise.all([api.getAllStatus(), api.getPanes()]);
+          panesCache = panesRes.data?.panes || [];
+          const latency = Math.round(performance.now() - startTime);
+          window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency } }));
+          mergePanes(statusRes.data, panesCache!);
+        } else {
+          const statusRes = await api.getAllStatus();
+          const latency = Math.round(performance.now() - startTime);
+          window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency } }));
+          mergePanes(statusRes.data, panesCache!);
         }
       } catch (err) {
         console.error('Failed to fetch panes:', err);
@@ -134,11 +119,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency: null } }));
       }
     };
+    const mergePanes = (statusData: any, panes: any[]) => {
+      const statusMap = (statusData || {}) as Record<string, any>;
+      const panesArray = panes.map((p: any) => {
+        const { pane_id: _drop, active: _dropActive, ...st } = statusMap[p.pane_id] || {};
+        return { ...p, ...st, title: p.title || st.title, pane_id: p.pane_id, active: p.active };
+      });
+      if (panesArray.length === 0) return;
+      setAllPanes(prev => {
+        const prevJson = JSON.stringify(prev);
+        const nextJson = JSON.stringify(panesArray);
+        return prevJson === nextJson ? prev : panesArray;
+      });
+      setLoading(false);
+      if (panesArray.length > 0 && !currentPaneId && !PaneManager.getCurrentPane()) {
+        const firstPane = panesArray[0];
+        PaneManager.setCurrentPane(firstPane.pane_id);
+        setCurrentPaneId(firstPane.pane_id);
+      }
+    };
     fetchAllPanes();
     const id = setInterval(fetchAllPanes, 5000);
-    const onRefresh = () => fetchAllPanes();
+    const onRefresh = () => { panesCache = null; fetchAllPanes(); };
     window.addEventListener('refresh-panes', onRefresh);
-    // Firefox fix: also trigger on visibilitychange
     const onVisible = () => { if (document.visibilityState === 'visible') fetchAllPanes(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => { clearInterval(id); window.removeEventListener('refresh-panes', onRefresh); document.removeEventListener('visibilitychange', onVisible); };

@@ -461,13 +461,13 @@ func fullSyncOnce() {
 			restored++
 		}
 		st := checkPane(pid, cfg)
-		// thinking protection
+		// thinking protection: only keep thinking if new status is non-empty and not a terminal state
 		if prev, ok := prevMap[pid]; ok {
 			var p struct {
 				Status string `json:"status"`
 			}
 			json.Unmarshal(prev, &p)
-			if p.Status == "thinking" && st.Status != nil && *st.Status != "idle" && *st.Status != "wait_auth" && *st.Status != "compacting" {
+			if p.Status == "thinking" && st.Status != nil && *st.Status != "idle" && *st.Status != "wait_auth" && *st.Status != "compacting" && *st.Status != "" {
 				st.Status = sp("thinking")
 			}
 		}
@@ -502,7 +502,8 @@ func processOne(paneID string) {
 			Status string `json:"status"`
 		}
 		json.Unmarshal(prev, &p)
-		if p.Status == "thinking" && st.Status != nil && *st.Status != "idle" && *st.Status != "wait_auth" && *st.Status != "compacting" {
+		// thinking protection: only keep thinking if new status is non-empty and not a terminal state
+		if p.Status == "thinking" && st.Status != nil && *st.Status != "idle" && *st.Status != "wait_auth" && *st.Status != "compacting" && *st.Status != "" {
 			st.Status = sp("thinking")
 		}
 	}
@@ -511,7 +512,14 @@ func processOne(paneID string) {
 	data, _ := json.Marshal(m)
 	redisDo("SET", "pane_status_map", string(data))
 
-	if st.Status != nil && *st.Status != "idle" && *st.Status != "" {
+	// Only log on status change to avoid log spam
+	if oldRaw != nil {
+		var prev struct{ Status string `json:"status"` }
+		json.Unmarshal(oldRaw, &prev)
+		if st.Status != nil && *st.Status != prev.Status {
+			log.Printf("[watcher] %s: %s → %s", paneID, prev.Status, *st.Status)
+		}
+	} else if st.Status != nil && *st.Status != "" {
 		log.Printf("[watcher] %s: %s", paneID, *st.Status)
 	}
 	autoAction(paneID, st)

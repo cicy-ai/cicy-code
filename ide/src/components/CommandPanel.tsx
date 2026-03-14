@@ -35,7 +35,6 @@ interface CommandPanelProps {
   isTogglingMouse?: boolean;
   onToggleMouse?: () => void;
   onEditPane?: () => void;
-  onReload?: () => void;
   onRestart?: (pane_id?: string) => void;
   isRestarting?: boolean;
   hasEditPermission?: boolean;
@@ -46,7 +45,6 @@ interface CommandPanelProps {
   onDraggingChange?: (isDragging: boolean) => void;
   boundAgents?: string[];
   onPaneTargetChange?: (target: string) => void;
-  disableDrag?: boolean;
   showVoiceControl?: boolean;
   onToggleVoiceControl?: () => void;
   mode?: string | null;
@@ -57,6 +55,8 @@ interface CommandPanelProps {
   defaultModel?: string;
   onModelChange?: (model: string) => void;
   onOpenDrawer?: () => void;
+  drawerTab?: string;
+  ttydBounds?: { x: number; y: number; width: number; height: number };
 }
 
 export interface CommandPanelHandle {
@@ -85,7 +85,6 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
   isTogglingMouse = false,
   onToggleMouse,
   onEditPane,
-  onReload,
   onRestart,
   isRestarting = false,
   hasEditPermission = false,
@@ -96,7 +95,6 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
   onDraggingChange,
   boundAgents = [],
   onPaneTargetChange,
-  disableDrag = false,
   showVoiceControl = false,
   onToggleVoiceControl,
   mode = null,
@@ -107,6 +105,8 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
   defaultModel = '',
   onModelChange,
   onOpenDrawer,
+  drawerTab = 'history',
+  ttydBounds,
 }, ref) => {
   const [selectedPane, setSelectedPane] = useState(paneTarget);
 
@@ -122,7 +122,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
     return saved ? JSON.parse(saved) : {};
   });
 
-  const tempPaneId = selectedPane.replace(/[^a-zA-Z0-9]/g, '_');
+  const tempPaneId = (selectedPane || '').replace(/[^a-zA-Z0-9]/g, '_');
 
   const CMD_HISTORY_KEY = `cmd_history_${tempPaneId}`;
 
@@ -432,7 +432,9 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
         onChange(pos, size);
       }}
       onDraggingChange={onDraggingChange}
-      disableDrag={disableDrag}
+      disableDrag={drawerTab === 'terminal'}
+      dragBounds={drawerTab === 'history' ? undefined : ttydBounds}
+      fixedAtBottom={drawerTab === 'history'}
       headerActions={
         <>
           <button
@@ -465,19 +467,17 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
       }
     >
       <form onSubmit={handleSendPrompt} className="relative h-full flex flex-col p-2">
-        <div className="flex-1 flex flex-col min-h-0">
-          <div className="relative flex-1 flex flex-col min-h-0" style={{paddingBottom: '8px'}}>
-            <div className="absolute top-2 right-2 z-10 flex gap-1">
-              <button
-                id="chat-send-btn"
-                type="submit"
-                disabled={!promptText.trim() || isSending}
-                className="p-1.5 bg-vsc-accent hover:bg-vsc-accent-hover text-white rounded-md transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                {isSending ? <Loader2 size={14} className="animate-spin" /> : sendSuccess ? <CheckCircle size={14} className="text-green-400" /> : <ArrowUp size={14} />}
-              </button>
-            </div>
-            <textarea
+        <div className="absolute top-2 right-2 z-10 flex gap-1">
+          <button
+            id="chat-send-btn"
+            type="submit"
+            disabled={!promptText.trim() || isSending}
+            className="p-1.5 bg-vsc-accent hover:bg-vsc-accent-hover text-white rounded-md transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            {isSending ? <Loader2 size={14} className="animate-spin" /> : sendSuccess ? <CheckCircle size={14} className="text-green-400" /> : <ArrowUp size={14} />}
+          </button>
+        </div>
+        <textarea
               id="prompt-textarea"
               ref={textareaRef}
               value={promptText}
@@ -654,19 +654,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
               style={{paddingRight: '44px'}}
               disabled={isSending}
             />
-          </div>
-        </div>
       </form>
-      {/* Status bar */}
-      <div
-        className="h-6 bg-vsc-bg-secondary border-t border-vsc-border flex items-center px-2.5 gap-2 cursor-pointer select-none shrink-0 hover:bg-vsc-bg-hover transition-colors"
-        onClick={() => onOpenDrawer?.()}
-        title="Open terminal drawer"
-      >
-        <span className={`w-2 h-2 rounded-full ${agentStatus === 'thinking' ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`} />
-        <span className="text-[11px] text-vsc-text-secondary">{agentStatus === 'thinking' ? 'Thinking...' : 'Idle'}</span>
-        {contextUsage != null && <span className="text-[11px] text-vsc-text-muted ml-auto">{contextUsage}%</span>}
-      </div>
     </FloatingPanel>
 
 

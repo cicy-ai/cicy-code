@@ -1,11 +1,36 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../../config';
 
+// Collapsible user prompt - auto-collapse if > 200px
+const CollapsibleQ: React.FC<{ text: string }> = ({ text }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const [needsCollapse, setNeedsCollapse] = useState(false);
+  useEffect(() => {
+    if (ref.current && ref.current.scrollHeight > 200) { setNeedsCollapse(true); setCollapsed(true); }
+  }, [text]);
+  return (
+    <div className="flex justify-end mb-2.5">
+      <div className="max-w-[85%] relative">
+        <div ref={ref} className={`chat-markdown px-3.5 py-2 rounded-2xl rounded-br-sm text-[14px] leading-relaxed text-white/90 overflow-hidden transition-all ${collapsed ? 'max-h-[80px]' : ''}`} style={{ background: 'rgba(255,255,255,0.08)' }}>
+          <Markdown remarkPlugins={[remarkGfm]}>{text.replace(/^-\n/, '').replace(/^\d+;\d+;\d+c/i, '')}</Markdown>
+        </div>
+        {needsCollapse && (
+          <button onClick={() => setCollapsed(v => !v)} className="text-[10px] text-white/30 hover:text-white/60 mt-1 float-right">
+            {collapsed ? '展开 ▼' : '收起 ▲'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
 interface ChatViewProps {
   paneId: string;
   token: string;
+  commandPanel?: React.ReactNode;
 }
 
 // IndexedDB cache
@@ -38,7 +63,56 @@ const TOOL_ICONS: Record<string, string> = {
   code: '🧠', web_search: '🌐', web_fetch: '🌐', use_aws: '☁️', use_subagent: '🤖',
 };
 
-const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => {
+const TOOL_LABELS: Record<string, string> = {
+  fs_read: 'Read File', fs_write: 'Write File', execute_bash: 'Command',
+  grep: 'Search', glob: 'Glob', code: 'Code Intel',
+  web_search: 'Web Search', web_fetch: 'Web Fetch', use_aws: 'AWS', use_subagent: 'Subagent',
+};
+
+const ToolCard: React.FC<{ tool: any; running?: boolean }> = ({ tool, running }) => {
+  const [open, setOpen] = useState(false);
+  const icon = TOOL_ICONS[tool.name] || '⚙️';
+  const label = TOOL_LABELS[tool.name] || tool.name;
+  const arg = tool.arg?.replace(/^\/home\/\w+\//, '~/') || '';
+  const isError = tool.result?.startsWith('exit ') || tool.result?.startsWith('❌');
+  const hasDiff = !!tool.diff?.old || !!tool.diff?.new;
+  const hasContent = !!tool.result || hasDiff;
+  const statusIcon = running ? '⏳' : isError ? '✗' : hasContent ? '✓' : '⏳';
+  const statusColor = running ? 'text-yellow-400' : isError ? 'text-red-400' : hasContent ? 'text-emerald-400' : 'text-yellow-400';
+  const borderColor = running ? 'border-yellow-500/20' : isError ? 'border-red-500/15' : 'border-white/[0.06]';
+
+  return (
+    <div className={`rounded-lg bg-[#1a1a2e]/60 border ${borderColor} overflow-hidden`}>
+      <div className="flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none hover:bg-white/[0.03] transition-colors"
+        onClick={() => hasContent && setOpen(p => !p)}>
+        <span className={`text-[11px] ${statusColor}`}>{running ? <span className="inline-block w-3 h-3 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin" /> : statusIcon}</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-vsc-text-muted font-medium">{icon} {label}</span>
+        {!open && <span className="text-[11px] font-mono text-vsc-text/70 truncate flex-1" title={arg}>{arg}</span>}
+        {hasContent && <span className="text-[9px] text-vsc-text-muted/40">{open ? '▼' : '▶'}</span>}
+      </div>
+      {open && (
+        <div className="px-3 py-1.5 text-[11px] font-mono text-vsc-text/60 whitespace-pre-wrap break-all border-b border-white/[0.04]">{arg}</div>
+      )}
+      {open && hasDiff && (
+        <div className="mx-2 mb-2 rounded overflow-hidden border border-white/[0.06] text-[11px] font-mono max-h-[300px] overflow-auto">
+          {tool.diff.old && tool.diff.old.split('\n').map((line: string, i: number) => (
+            <div key={'o'+i} className="px-2 bg-red-500/[0.08] text-red-400/80 whitespace-pre-wrap break-all leading-relaxed">- {line}</div>
+          ))}
+          {tool.diff.new && tool.diff.new.split('\n').map((line: string, i: number) => (
+            <div key={'n'+i} className="px-2 bg-emerald-500/[0.08] text-emerald-400/80 whitespace-pre-wrap break-all leading-relaxed">+ {line}</div>
+          ))}
+        </div>
+      )}
+      {open && !hasDiff && tool.result && (
+        <pre className={`text-[11px] mx-2 mb-2 px-2.5 py-2 rounded font-mono whitespace-pre-wrap break-all max-h-[200px] overflow-auto leading-relaxed ${isError ? 'bg-red-500/[0.06] text-red-400' : 'bg-emerald-500/[0.04] text-emerald-400'}`}>
+          {tool.result}
+        </pre>
+      )}
+    </div>
+  );
+};
+
+const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, commandPanel }) => {
   const [agentType, setAgentType] = useState('AI');
   const [chatData, setChatData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,7 +175,8 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
       if (dead) return;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       const base = config.apiBase.replace(/^https?/, proto);
-      ws = new WebSocket(`${base}/api/chat/ws?pane=${short}&token=${token}`);
+      const isElectron = typeof (window as any).electronRPC === 'function' ? '1' : '0';
+      ws = new WebSocket(`${base}/api/chat/ws?pane=${short}&token=${token}&electron=${isElectron}`);
       ws.onopen = () => reload();
       ws.onmessage = (e) => {
         try {
@@ -119,7 +194,18 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
               last.steps = steps; last.status = 'streaming';
               return [...prev.slice(0, -1), last];
             });
-          } else if (msg.type === 'ai_done') { streaming = false; debouncedReload(); }
+          } else if (msg.type === 'ai_done') {
+            streaming = false; debouncedReload();
+            setChatData(prev => {
+              const last = prev[prev.length - 1];
+              if (last?.a) {
+                const parts = Array.isArray(last.a) ? last.a : [last.a];
+                const textOnly = parts.filter((s: any) => typeof s === 'string').join(' ').trim();
+                if (textOnly) window.dispatchEvent(new CustomEvent('ai-reply-done', { detail: { text: textOnly } }));
+              }
+              return prev;
+            });
+          }
           else if (msg.type === 'desktop_event' && msg.data) { window.dispatchEvent(new CustomEvent('agent-desktop-event', { detail: msg.data })); }
           else { if (!streaming) debouncedReload(); }
         } catch { if (!streaming) debouncedReload(); }
@@ -187,7 +273,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
     });
   };
 
-  // Build conversation groups - take last displayCount items, then reverse (newest on top)
+  // Build conversation groups - oldest first, newest at bottom
   const groups: { q: string; r: any }[] = [];
   const allData = chatData;
   allData.slice(-displayCount).forEach((c: any) => {
@@ -195,17 +281,41 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
     groups.push({ q: c.q, r: c });
   });
 
-  // Reverse: newest first
-  groups.reverse();
-
   const scrollRef = useRef<HTMLDivElement>(null);
+  const latestGroupRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to bottom = load more older messages
+  // Track container height for full-screen Q+A effect
+  const [containerH, setContainerH] = useState(0);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setContainerH(el.clientHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Scroll to latest Q: on new message (smooth) or initial load (instant)
+  const prevLenRef = useRef(chatData.length);
+  const initialScrollDone = useRef(false);
+  useEffect(() => {
+    const container = scrollRef.current;
+    const el = latestGroupRef.current;
+    if (!container || !el) return;
+    if (!initialScrollDone.current) {
+      initialScrollDone.current = true;
+      setTimeout(() => container.scrollTo({ top: el.offsetTop - 12 }), 100);
+    } else if (chatData.length > prevLenRef.current) {
+      setTimeout(() => container.scrollTo({ top: el.offsetTop - 12, behavior: 'smooth' }), 100);
+    }
+    prevLenRef.current = chatData.length;
+  }, [chatData.length]);
+
+  // Load more older messages on scroll up
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onScroll = () => {
-      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 10 && chatData.length > displayCount) {
+      if (el.scrollTop <= 10 && chatData.length > displayCount) {
         setDisplayCount(prev => {
           const next = Math.min(prev + 2, chatData.length);
           if (next >= chatData.length) setHasMore(false);
@@ -245,14 +355,13 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
             const toolCount = steps.filter((s: any) => s.type === 'tool').reduce((n: number, s: any) => n + (s.tools?.filter((t: any) => t.arg)?.length || 0), 0);
             const credit = r?.credit || 0;
 
+            const isLatest = gi === groups.length - 1;
+            const isActive = isPending || isStreaming || isRunning;
+
             return (
-              <div key={gi} className="mb-5">
+              <div key={gi} className="mb-5" ref={isLatest ? latestGroupRef : undefined} style={isLatest ? { minHeight: containerH + 'px' } : undefined}>
                 {/* User message */}
-                <div className="flex justify-end mb-2.5">
-                  <div className="chat-markdown max-w-[85%] px-3.5 py-2 rounded-2xl rounded-br-sm text-[14px] leading-relaxed text-white/90" style={{ background: 'linear-gradient(135deg, rgba(0,122,204,0.8), rgba(17,119,187,0.6))' }}>
-                    <Markdown remarkPlugins={[remarkGfm]}>{g.q.replace(/^-\n/, '').replace(/^\d+;\d+;\d+c/i, '')}</Markdown>
-                  </div>
-                </div>
+                <CollapsibleQ text={g.q} />
 
                 {/* AI response */}
                 <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] overflow-hidden">
@@ -290,34 +399,13 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
                       // Tool step
                       const toolsWithArg = (s.tools || []).filter((t: any) => t.arg);
                       if (!toolsWithArg.length) return null;
-                      const icons = toolsWithArg.map((t: any) => TOOL_ICONS[t.name] || '⚙️').join(' ');
 
                       return (
-                        <details key={si} className="my-2 rounded-lg bg-white/[0.02] border border-white/[0.05] overflow-hidden">
-                          <summary className="flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-[11px] text-vsc-text-muted select-none hover:bg-white/[0.02] transition-colors">
-                            <span className="text-[8px] opacity-30">▶</span>
-                            <span>{icons}</span>
-                            <span className="opacity-40 text-[10px]">{toolsWithArg.length > 1 ? `${toolsWithArg.length} tools` : toolsWithArg[0]?.name}</span>
-                          </summary>
-                          <div className="border-t border-white/[0.04]">
-                            {toolsWithArg.map((t: any, ti: number) => {
-                              const arg = t.arg.replace(/^\/home\/\w+\//, '~/');
-                              const isError = t.result?.startsWith('exit ') || t.result?.startsWith('❌');
-                              const lines = t.result?.split('\n') || [];
-                              const preview = lines.length > 4 ? lines.slice(0, 3).join('\n') + '\n...' : t.result;
-                              return (
-                                <div key={ti} className={`px-3 py-1.5 ${ti < toolsWithArg.length - 1 ? 'border-b border-white/[0.04]' : ''}`}>
-                                  <div className="font-mono text-[11px] text-vsc-text/80 break-all">{arg}</div>
-                                  {t.result && (
-                                    <pre className={`text-[11px] mt-1 px-2 py-1 rounded font-mono whitespace-pre-wrap break-all max-h-[140px] overflow-auto leading-relaxed ${isError ? 'bg-red-500/[0.06] text-red-400 border border-red-500/10' : 'bg-emerald-500/[0.04] text-emerald-400 border border-emerald-500/[0.06]'}`}>
-                                      {preview}
-                                    </pre>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </details>
+                        <div key={si} className="my-2 space-y-1.5">
+                          {toolsWithArg.map((t: any, ti: number) => (
+                            <ToolCard key={ti} tool={t} running={isLast && isRunning && ti === toolsWithArg.length - 1} />
+                          ))}
+                        </div>
                       );
                     })}
 
@@ -351,6 +439,9 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token }) => 
           })}
           <div ref={endRef} />
         </div>
+      </div>
+      <div className="shrink-0 h-[180px] pb-5">
+        {commandPanel}
       </div>
     </div>
   );

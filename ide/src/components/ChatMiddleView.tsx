@@ -4,55 +4,14 @@ import remarkGfm from 'remark-gfm';
 import config from '../config';
 import { usePane } from '../contexts/PaneContext';
 
-const DBNAME = 'cicy_chat';
-const STORE = 'turns';
-
-function openDB(pane: string): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(`${DBNAME}_${pane}`, 1);
-    req.onupgradeneeded = () => { req.result.createObjectStore(STORE, { keyPath: 'ts' }); };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function idbGetAll(db: IDBDatabase): Promise<any[]> {
-  return new Promise((resolve) => {
-    const tx = db.transaction(STORE, 'readonly');
-    const req = tx.objectStore(STORE).getAll();
-    req.onsuccess = () => resolve(req.result || []);
-    req.onerror = () => resolve([]);
-  });
-}
-
-function idbPutAll(db: IDBDatabase, items: any[]) {
-  const tx = db.transaction(STORE, 'readwrite');
-  const store = tx.objectStore(STORE);
-  store.clear();
-  items.forEach(i => store.put(i));
-}
-
-function idbAdd(db: IDBDatabase, item: any) {
-  const tx = db.transaction(STORE, 'readwrite');
-  tx.objectStore(STORE).put(item);
-}
-
 const ChatMiddleView: React.FC = () => {
   const { displayPaneId, token } = usePane();
   const [agentType, setAgentType] = useState('AI');
   const [chatData, setChatData] = useState<any[]>([]);
-  const dbRef = useRef<IDBDatabase | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
-  // 1. Open IndexedDB on mount (don't load data — API is source of truth)
-  useEffect(() => {
-    if (!displayPaneId) return;
-    const short = displayPaneId.replace(':main.0', '');
-    openDB(short).then((db) => { dbRef.current = db; });
-  }, [displayPaneId]);
-
-  // 2. Listen for chat-q-sent (UI send) → optimistic update state only
+  // Listen for chat-q-sent (UI send) → optimistic update state only
   useEffect(() => {
     const handler = (e: any) => {
       if (e.detail?.pane === displayPaneId) {
@@ -85,7 +44,6 @@ const ChatMiddleView: React.FC = () => {
           if (s !== lastJsonRef.current) {
             lastJsonRef.current = s;
             setChatData(json.data);
-            if (dbRef.current) idbPutAll(dbRef.current, json.data);
           }
           if (json.agentType) setAgentType(json.agentType);
         } else {
@@ -126,17 +84,6 @@ const ChatMiddleView: React.FC = () => {
               }
               last.steps = steps;
               last.status = 'streaming';
-              return [...prev.slice(0, -1), last];
-            });
-          } else if (msg.type === 'tool_start') {
-            streaming = true;
-            setChatData(prev => {
-              if (prev.length === 0) return prev;
-              const last = { ...prev[prev.length - 1] };
-              const steps = last.steps ? [...last.steps] : [];
-              steps.push({ type: 'tool', tools: [{ name: msg.data.name, arg: '...' }] });
-              last.steps = steps;
-              last.status = 'tool_use';
               return [...prev.slice(0, -1), last];
             });
           } else if (msg.type === 'ai_done') {

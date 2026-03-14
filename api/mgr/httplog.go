@@ -21,6 +21,18 @@ func initHTTPLogConsumer() {
 			time.Sleep(200 * time.Millisecond)
 		}
 	}()
+	// Auto-cleanup: delete http_log older than 7 days, every hour
+	go func() {
+		for {
+			res, err := db.Exec("DELETE FROM http_log WHERE ts < UNIX_TIMESTAMP(NOW() - INTERVAL 7 DAY)")
+			if err == nil {
+				if n, _ := res.RowsAffected(); n > 0 {
+					log.Printf("[http-log] cleanup: deleted %d old rows", n)
+				}
+			}
+			time.Sleep(1 * time.Hour)
+		}
+	}()
 	log.Println("[http-log] consumer started")
 }
 

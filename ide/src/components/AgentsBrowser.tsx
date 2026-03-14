@@ -37,7 +37,7 @@ export const AgentsBrowser: React.FC<AgentsBrowserProps> = ({ token, onAddAgent,
     // Fetch from API
     apiService.getAllStatus()
       .then(({ data }) => {
-        const agentsList = Object.values(data);
+        const agentsList = Object.values(data || {}) as Agent[];
         setAgents(agentsList);
         localStorage.setItem('agents_cache', JSON.stringify(agentsList));
       })
@@ -57,7 +57,7 @@ export const AgentsBrowser: React.FC<AgentsBrowserProps> = ({ token, onAddAgent,
 
   const handleAgentClick = (agent: Agent) => {
     const url = urls.ttyd(agent.pane_id, token);
-    onAddAgent(agent.pane_id,agent.title, url);
+    onAddAgent(agent.pane_id, agent.title || agent.pane_id, url);
   };
 
   return (
@@ -102,10 +102,7 @@ export const AgentsBrowser: React.FC<AgentsBrowserProps> = ({ token, onAddAgent,
               {filteredAgents.map((agent, idx) => (
                 <div 
                   key={agent.pane_id || idx}
-                  onClick={() => {
-                    const url = urls.idePane(agent.pane_id, token);
-                    window.open(url, '_blank');
-                  }}
+                  onClick={() => handleAgentClick(agent)}
                   className="group relative flex items-center gap-3 bg-vsc-bg-secondary border border-vsc-border rounded-lg p-3 cursor-pointer hover:border-vsc-button hover:bg-vsc-bg-hover transition-all h-[80px]"
                 >
                   <button

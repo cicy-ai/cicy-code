@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // handleQueue routes GET/POST to /api/workers/queue
@@ -165,24 +166,18 @@ func dispatchQueue(paneID string) {
 		return
 	}
 
-	// Send messages (only when idle, no interrupt)
-	if len(messages) == 1 {
-		// Single message
-		msg := messages[0]
-		if types[0] == "command" {
+	// Send messages one by one with small delay to avoid tmux truncation
+	for i, msg := range messages {
+		if types[i] == "command" {
 			runTmux("send-keys", "-t", paneID, msg, "Enter")
-			log.Printf("[queue] sent command to %s: %s", shortPaneID(paneID), msg)
 		} else {
-			// Send message + Enter in one call
 			runTmux("send-keys", "-t", paneID, msg, "Enter")
-			log.Printf("[queue] sent message to %s: %s", shortPaneID(paneID), msg)
 		}
-	} else {
-		// Batch messages - combine with separator, send with Enter in one call
-		combined := strings.Join(messages, "\n\n---\n\n")
-		runTmux("send-keys", "-t", paneID, combined, "Enter")
-		log.Printf("[queue] sent %d messages to %s", len(messages), shortPaneID(paneID))
+		if i < len(messages)-1 {
+			time.Sleep(200 * time.Millisecond)
+		}
 	}
+	log.Printf("[queue] sent %d msg(s) to %s", len(messages), shortPaneID(paneID))
 
 	// Mark all as sent
 	for _, id := range ids {

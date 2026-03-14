@@ -21,9 +21,10 @@ type ChatEvent struct {
 // ── Hub: per-pane pub/sub over WebSocket ──
 
 type chatClient struct {
-	conn *websocket.Conn
-	send chan []byte
-	pane string
+	conn     *websocket.Conn
+	send     chan []byte
+	pane     string
+	electron bool
 }
 
 type chatHub struct {
@@ -65,7 +66,21 @@ func (h *chatHub) broadcast(pane string, evt ChatEvent) {
 		select {
 		case c.send <- b:
 		default:
-			// slow client, skip
+		}
+	}
+}
+
+func (h *chatHub) broadcastElectron(pane string, evt ChatEvent) {
+	b, _ := json.Marshal(evt)
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for c := range h.clients[pane] {
+		if !c.electron {
+			continue
+		}
+		select {
+		case c.send <- b:
+		default:
 		}
 	}
 }
@@ -97,16 +112,21 @@ func (c *chatClient) writePump() {
 
 func (c *chatClient) readPump() {
 	defer hub.unregister(c)
-	c.conn.SetReadLimit(4096)
+	c.conn.SetReadLimit(64 * 1024)
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 		return nil
 	})
 	for {
 		c.conn.SetReadDeadline(time.Now().Add(90 * time.Second))
-		_, _, err := c.conn.ReadMessage()
+		_, msg, err := c.conn.ReadMessage()
 		if err != nil {
 			return
+		}
+		// 广播客户端发来的消息给同 pane 的所有客户端
+		var evt ChatEvent
+		if json.Unmarshal(msg, &evt) == nil && evt.Type != "" {
+			hub.broadcast(c.pane, evt)
 		}
 	}
 }
@@ -128,7 +148,7 @@ func handleChatWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c := &chatClient{conn: conn, send: make(chan []byte, 64), pane: pane}
+	c := &chatClient{conn: conn, send: make(chan []byte, 64), pane: pane, electron: r.URL.Query().Get("electron") == "1"}
 	hub.register(c)
 	go c.writePump()
 	c.readPump()
@@ -150,4 +170,45 @@ func handleChatWebhook(w http.ResponseWriter, r *http.Request) {
 		hub.broadcast(req.Pane, ChatEvent{Type: "status_change", Data: M{"status": "idle"}})
 	}
 	w.WriteHeader(204)
+}
+
+// ── HTTP handler: push event to pane ──
+
+func handleChatPush(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+
+	var req struct {
+		Pane string      `json:"pane"`
+		Type string      `json:"type"`
+		Data interface{} `json:"data"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", 400)
+		return
+	}
+
+	if req.Pane == "" || req.Type == "" {
+		http.Error(w, "pane and type required", 400)
+		return
+	}
+
+	// desktop_event with ipc/gemini types → only electron clients
+	if req.Type == "desktop_event" {
+		if dm, ok := req.Data.(map[string]interface{}); ok {
+			if dt, _ := dm["type"].(string); dt == "gemini_ask" || dt == "gemini_vision_request" || dt == "ipc_ping" {
+				hub.broadcastElectron(req.Pane, ChatEvent{Type: req.Type, Data: req.Data})
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+				return
+			}
+		}
+	}
+
+	hub.broadcast(req.Pane, ChatEvent{Type: req.Type, Data: req.Data})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }

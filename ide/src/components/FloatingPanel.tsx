@@ -15,6 +15,8 @@ interface FloatingPanelProps {
   headerActions?: ReactNode;
   onDraggingChange?: (isDragging: boolean) => void;
   disableDrag?: boolean;
+  dragBounds?: { x: number; y: number; width: number; height: number };
+  fixedAtBottom?: boolean;
 }
 
 export const FloatingPanel: React.FC<FloatingPanelProps> = ({
@@ -29,7 +31,9 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
   onClose,
   headerActions,
   onDraggingChange,
-  disableDrag = false
+  disableDrag = false,
+  dragBounds,
+  fixedAtBottom = false
 }) => {
   const [position, setPosition] = useState<Position>(initialPosition);
   const [size, setSize] = useState<Size>(initialSize);
@@ -99,9 +103,19 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
         const dx = clientPos.x - dragStartPos.current.x;
         const dy = clientPos.y - dragStartPos.current.y;
         
+        let newX = startDims.current.pos.x + dx;
+        let newY = startDims.current.pos.y + dy;
+        
         // Boundary checks
-        const newX = Math.max(0, Math.min(window.innerWidth - size.width, startDims.current.pos.x + dx));
-        const newY = Math.max(0, Math.min(window.innerHeight - size.height, startDims.current.pos.y + dy));
+        if (dragBounds) {
+          // 限制在 dragBounds 内
+          newX = Math.max(dragBounds.x, Math.min(dragBounds.x + dragBounds.width - size.width, newX));
+          newY = Math.max(dragBounds.y, Math.min(dragBounds.y + dragBounds.height - size.height, newY));
+        } else {
+          // 默认限制在窗口内
+          newX = Math.max(0, Math.min(window.innerWidth - size.width, newX));
+          newY = Math.max(0, Math.min(window.innerHeight - size.height, newY));
+        }
 
         setPosition({ x: newX, y: newY });
       }
@@ -155,15 +169,14 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
       ref={panelRef}
       className="flex flex-col bg-vsc-bg/95 backdrop-blur-md border border-vsc-border shadow-2xl overflow-hidden touch-none"
       style={{
-        position: disableDrag ? 'relative' : 'fixed',
-        left: disableDrag ? 'auto' : position.x,
-        top: disableDrag ? 'auto' : position.y,
-        width: disableDrag ? '100%' : size.width,
-        height: disableDrag ? '100%' : size.height,
-        minHeight: '140px',
+        position: 'relative',
+        width: '100%',
+        maxWidth: '688px',
+        margin: '0 auto 30px auto',
+        height: '100%',
         boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
         zIndex: 1,
-        borderRadius: disableDrag ? 0 : '8px',
+        borderRadius: '8px',
       }}
     >
       {/* Header / Drag Handle */}
@@ -196,6 +209,21 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
       <div className="flex-1 overflow-hidden relative flex flex-col">
         {children}
       </div>
+
+      {/* Resize Handle */}
+      {!disableDrag && (
+        <div
+          className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize z-10"
+          style={{ touchAction: 'none' }}
+          onMouseDown={handleStartResize}
+          onTouchStart={handleStartResize}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" className="text-vsc-text-muted opacity-40 hover:opacity-80 transition-opacity">
+            <path d="M14 14L8 14L14 8Z" fill="currentColor" />
+            <path d="M14 14L11 14L14 11Z" fill="currentColor" opacity="0.5" />
+          </svg>
+        </div>
+      )}
     </div>
   );
 };

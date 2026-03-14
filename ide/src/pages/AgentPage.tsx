@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import apiService from '../services/api';
+import { sendCommandToTmux } from '../services/mockApi';
 import TerminalFrame from '../components/terminal/TerminalFrame';
 import { CommandPanel, CommandPanelHandle } from '../components/terminal/CommandPanel';
 import ChatView from '../components/chat/ChatView';
@@ -8,6 +9,7 @@ import { SettingsView } from '../components/SettingsView';
 import { EditPaneData } from '../components/EditPaneDialog';
 import { ArrowLeft, RotateCcw, Zap, Trash2, Settings, MessageSquare, Terminal, X } from 'lucide-react';
 import { useDesktopApps, openInElectron } from '../components/desktop/useDesktopApps';
+import { VoiceFloatingButton } from '../components/VoiceFloatingButton';
 
 /* ── Settings floating window (iPhone style) ── */
 const SettingsFloat: React.FC<{ paneId: string; fullPaneId: string; onClose: () => void }> = ({ paneId, fullPaneId, onClose }) => {
@@ -32,6 +34,58 @@ const SettingsFloat: React.FC<{ paneId: string; fullPaneId: string; onClose: () 
   );
 };
 
+/* ── Draggable box (constrained to parent) ── */
+const DraggableBox: React.FC<{ paneId: string; token: string | null; agentStatus: string; mouseMode: string }> = ({ paneId, token, agentStatus, mouseMode }) => {
+  const W = 420, H = 180;
+  const ref = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [pos, setPos] = useState(() => {
+    try { const c = JSON.parse(localStorage.getItem('terminal_drag_pos')!); if (c?.x != null) return c; } catch {} return { x: -1, y: -1 };
+  });
+  const startRef = useRef({ mx: 0, my: 0, px: 0, py: 0 });
+
+  // 初始位置：中下偏上36px
+  useEffect(() => {
+    if (pos.x >= 0 || !ref.current?.parentElement) return;
+    const pr = ref.current.parentElement.getBoundingClientRect();
+    setPos({ x: (pr.width - W) / 2, y: pr.height - H - 36 });
+  }, [pos]);
+
+  const onDown = (e: React.MouseEvent) => {
+    if (pos.x < 0) return;
+    startRef.current = { mx: e.clientX, my: e.clientY, px: pos.x, py: pos.y };
+    setIsDragging(true);
+    const onMove = (ev: MouseEvent) => {
+      const parent = ref.current?.parentElement;
+      if (!parent) return;
+      const pr = parent.getBoundingClientRect();
+      const nx = Math.max(0, Math.min(pr.width - W, startRef.current.px + ev.clientX - startRef.current.mx));
+      const ny = Math.max(0, Math.min(pr.height - H, startRef.current.py + ev.clientY - startRef.current.my));
+      setPos({ x: nx, y: ny });
+    };
+    const onUp = () => {
+      setIsDragging(false);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      setPos(p => { if (p) localStorage.setItem('terminal_drag_pos', JSON.stringify(p)); return p; });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    e.preventDefault();
+  };
+
+  if (pos.x < 0) return <div ref={ref} style={{ position: 'absolute', opacity: 0 }} />;
+  return (
+    <>
+      {isDragging && <div style={{ position: 'absolute', inset: 0, zIndex: 49 }} />}
+      <div ref={ref} style={{ position: 'absolute', left: pos.x, top: pos.y, width: W, height: H, borderRadius: 8, zIndex: 50 }}>
+        <div onMouseDown={onDown} style={{ position: 'absolute', inset: 0, cursor: 'move', zIndex: -1 }} />
+        <CommandPanel paneTarget={paneId} title="" token={token} panelPosition={{ x: 0, y: 0 }} panelSize={{ width: W, height: H }} readOnly={false} onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}} onChange={() => {}} canSend={true} agentStatus={agentStatus} mouseMode={mouseMode} drawerTab="terminal" />
+      </div>
+    </>
+  );
+};
+
 /* ── Right drawer (History / Terminal) ── */
 const Drawer: React.FC<{ tab: string; onTabChange: (t: string) => void; children: React.ReactNode[] }> = ({ tab, onTabChange, children }) => (
   <div className="h-full flex flex-col bg-[#1c1c1e]/90 backdrop-blur-xl border-l border-white/[0.06]">
@@ -39,7 +93,7 @@ const Drawer: React.FC<{ tab: string; onTabChange: (t: string) => void; children
       <div className="flex gap-0.5">
         {['history', 'terminal'].map(t => (
           <button key={t} onClick={() => onTabChange(t)} className={`px-2.5 py-1 text-[11px] rounded-md transition-all ${tab === t ? 'text-white bg-white/[0.08]' : 'text-white/40 hover:text-white/70'}`}>
-            {t === 'history' ? <span className="flex items-center gap-1"><MessageSquare size={11} />History</span> : <span className="flex items-center gap-1"><Terminal size={11} />Terminal</span>}
+            {t === 'history' ? <span className="flex items-center gap-1"><MessageSquare size={11} />Chat</span> : <span className="flex items-center gap-1"><Terminal size={11} />Terminal</span>}
           </button>
         ))}
       </div>
@@ -86,6 +140,45 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
   const [drawerTab, setDrawerTab] = useState(() => localStorage.getItem('agent_drawerTab') || 'history');
   const [drawerW, setDrawerW] = useState(() => parseInt(localStorage.getItem('agent_drawerW') || '360'));
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showVoiceControl, setShowVoiceControl] = useState(false);
+  const [voiceBtnPos, setVoiceBtnPos] = useState(() => ({ x: 20, y: Math.max(60, window.innerHeight - 400) }));
+  const [voiceReply, setVoiceReply] = useState(() => localStorage.getItem('voice_reply') === 'true');
+  const [voiceLoading, setVoiceLoading] = useState(false);
+  const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
+  const [autoPlayReply, setAutoPlayReply] = useState(() => localStorage.getItem('auto_play_reply') === 'true');
+  const ttydContainerRef = useRef<HTMLDivElement>(null);
+  const [ttydBounds, setTtydBounds] = useState<{ x: number; y: number; width: number; height: number } | undefined>();
+
+  // 计算 ttyd 区域坐标
+  useEffect(() => {
+    if (!ttydContainerRef.current) {
+      setTtydBounds(undefined);
+      return;
+    }
+    const rect = ttydContainerRef.current.getBoundingClientRect();
+    setTtydBounds({
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height
+    });
+  }, [drawerTab, drawerW]);
+
+  // TTS: 语音回复
+  useEffect(() => {
+    if (!voiceReply || !autoPlayReply) return;
+    const handler = (e: Event) => {
+      const text = (e as CustomEvent).detail?.text;
+      if (!text) return;
+      const utterance = new SpeechSynthesisUtterance(text.slice(0, 500));
+      utterance.lang = 'zh-CN';
+      utterance.rate = 1.1;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(utterance);
+    };
+    window.addEventListener('ai-reply-done', handler);
+    return () => window.removeEventListener('ai-reply-done', handler);
+  }, [voiceReply, autoPlayReply]);
 
   useEffect(() => { localStorage.setItem('agent_drawerW', drawerW.toString()); }, [drawerW]);
   useEffect(() => { localStorage.setItem('agent_drawerTab', drawerTab); }, [drawerTab]);
@@ -126,7 +219,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
       
       // IPC Ping - 测试 electronRPC 连通性
       if (d.type === 'ipc_ping') {
-        console.log('[AgentPage] ipc_ping, 调用 electronRPC...');
+        if (typeof (window as any).electronRPC !== 'function') return;
         (window as any).electronRPC('ping', {}).then((result: any) => {
           console.log('[AgentPage] electronRPC 返回:', result);
           window.dispatchEvent(new CustomEvent('ipc-pong', { detail: { requestId: d.requestId, result } }));
@@ -141,29 +234,37 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
       else if (d.type === 'open_window' && d.url) openInElectron(d.url, d.title, true, d.width, d.height);
       else if (d.type === 'gemini_ask') {
         const rpc = (window as any).electronRPC;
+        if (typeof rpc !== 'function') { console.warn('[AgentPage] gemini_ask 跳过: 非 Electron 环境'); return; }
         const wid = d.win_id || 2;
         try {
+          console.log('[AgentPage] 调用 gemini_web_set_prompt...');
           await rpc('gemini_web_set_prompt', { win_id: wid, text: d.prompt });
+          console.log('[AgentPage] 调用 gemini_web_click_send...');
           await rpc('gemini_web_click_send', { win_id: wid });
           let result = '';
           for (let i = 0; i < 30; i++) {
             await new Promise(r => setTimeout(r, 1000));
+            console.log('[AgentPage] 检查状态 #' + i);
             const status = await rpc('gemini_web_status', { win_id: wid });
             const s = JSON.parse(status?.content?.[0]?.text || '{}');
             if (!s.isGenerating && i > 2) {
               // 取最后回复
-              const reply = await rpc('exec_js', { win_id: wid, code: `var els=document.querySelectorAll(".response-container");return els.length?els[els.length-1].innerText.trim():"no reply"` });
-              result = reply?.content?.[0]?.text || (typeof reply === 'string' ? reply : JSON.stringify(reply));
+              const reply = await rpc('exec_js', { win_id: wid, code: `(()=>{const els=document.querySelectorAll(".response-container");return els.length?els[els.length-1].innerText.trim():"no reply"})()` });
+              const rt = reply?.content?.[0]?.text || '';
+              result = rt || (typeof reply === 'string' ? reply : JSON.stringify(reply));
               break;
             }
           }
+          console.log('[AgentPage] gemini_ask 完成，结果:', result);
           window.dispatchEvent(new CustomEvent('gemini-ask-result', { detail: { requestId: d.requestId, result } }));
         } catch (err: any) {
+          console.error('[AgentPage] gemini_ask 错误:', err);
           window.dispatchEvent(new CustomEvent('gemini-ask-result', { detail: { requestId: d.requestId, error: err.message } }));
         }
       }
       else if (d.type === 'gemini_vision_request') {
         const rpc = (window as any).electronRPC;
+        if (typeof rpc !== 'function') { console.warn('[AgentPage] gemini_vision 跳过: 非 Electron 环境'); return; }
         const wid = d.win_id || 4;
         const srcWid = d.src_win_id || 1;
         try {
@@ -188,8 +289,8 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
             await new Promise(r => setTimeout(r, 1000));
             const st = await rpc('gemini_web_status', { win_id: wid });
             const s = JSON.parse(st?.content?.[0]?.text || '{}');
-            if (!s.isGenerating && i > 3) {
-              const reply = await rpc('exec_js', { win_id: wid, code: 'var els=document.querySelectorAll(".response-container");return els.length?els[els.length-1].innerText.trim():"no reply"' });
+            if (!s.isGenerating && i > 8) {
+              const reply = await rpc('exec_js', { win_id: wid, code: '(()=>{const els=document.querySelectorAll(".response-container");return els.length?els[els.length-1].innerText.trim():"no reply"})()' });
               result = reply?.content?.[0]?.text || (typeof reply === 'string' ? reply : JSON.stringify(reply));
               break;
             }
@@ -231,6 +332,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
           )}
           {isThinking && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400/80 animate-pulse mr-1">thinking</span>}
           <button onClick={() => setSettingsOpen(true)} className="p-1.5 rounded-lg text-white/20 hover:text-white/60 hover:bg-white/5"><Settings size={13} /></button>
+          <button onClick={() => setVoiceSettingsOpen(true)} className={`p-1.5 rounded-lg hover:bg-white/5 ${voiceReply ? 'text-green-400' : 'text-white/20 hover:text-white/60'}`} title="Voice settings">🔊</button>
           <button onClick={handleRestart} disabled={isRestarting} className="p-1.5 rounded-lg text-white/20 hover:text-orange-400 hover:bg-white/5 disabled:opacity-20"><RotateCcw size={13} className={isRestarting ? 'animate-spin' : ''} /></button>
         </div>
       </div>
@@ -282,16 +384,63 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
             </div>
           )}
 
-          {/* Command panel */}
-          <CommandPanel ref={commandPanelRef} paneTarget={paneId} title={title} token={token} panelPosition={panelPos} panelSize={panelSize} readOnly={false} onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}} onChange={(pos, size) => { setPanelPos(pos); setPanelSize(size); }} onDraggingChange={setIsDragging} canSend={true} agentStatus={status} contextUsage={contextUsage} mouseMode={mouseMode} onToggleMouse={handleToggleMouse} onRestart={handleRestart} isRestarting={isRestarting} onCapturePane={handleCapture} hasEditPermission={hasPermission('edit')} hasRestartPermission={hasPermission('restart')} hasCapturePermission={hasPermission('capture')} disableDrag={false} />
+
+          {/* Voice floating button */}
+          {showVoiceControl && (
+            <VoiceFloatingButton
+              initialPosition={voiceBtnPos}
+              onPositionChange={setVoiceBtnPos}
+              onRecordStart={() => {
+                const stream = (window as any).__voiceStream;
+                if (stream) { stream.getTracks().forEach((t: any) => t.enabled = true); }
+                navigator.mediaDevices.getUserMedia({ audio: true }).then(s => {
+                  (window as any).__voiceStream = s;
+                  const rec = new MediaRecorder(s, { mimeType: 'audio/webm;codecs=opus' });
+                  (window as any).__voiceChunks = [] as Blob[];
+                  rec.ondataavailable = e => { if (e.data.size > 0) (window as any).__voiceChunks.push(e.data); };
+                  rec.start();
+                  (window as any).__voiceRec = rec;
+                });
+              }}
+              onRecordEnd={(shouldSend) => {
+                const rec = (window as any).__voiceRec as MediaRecorder | undefined;
+                if (rec && rec.state !== 'inactive') {
+                  rec.onstop = async () => {
+                    (window as any).__voiceStream?.getTracks().forEach((t: any) => t.enabled = false);
+                    if (!shouldSend) return;
+                    const blob = new Blob((window as any).__voiceChunks || [], { type: 'audio/webm' });
+                    if (blob.size < 100) return;
+                    const fd = new FormData();
+                    fd.append('file', blob, 'voice.webm');
+                    fd.append('engine', 'google');
+                    setVoiceLoading(true);
+                    try {
+                      const { data } = await apiService.stt(fd);
+                      if (data.text) {
+                        window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneId, q: data.text } }));
+                        sendCommandToTmux(data.text, paneId);
+                      }
+                    } catch (e) { console.error('STT error:', e); }
+                    finally { setVoiceLoading(false); }
+                  };
+                  rec.stop();
+                }
+              }}
+              isRecordingExternal={false}
+              isLoading={voiceLoading}
+            />
+          )}
         </div>
 
         {/* Right drawer - always open */}
         <Resizer width={drawerW} onChange={w => setDrawerW(w)} onDragging={setIsDragging} />
-        <div className="shrink-0" style={{ width: drawerW }}>
+        <div className="shrink-0" style={{ width: drawerW, minWidth: '380px' }} ref={ttydContainerRef}>
           <Drawer tab={drawerTab} onTabChange={setDrawerTab}>
-            <ChatView paneId={paneId} token={token!} />
-            <div className="h-full"><TerminalFrame paneId={paneId} token={token!} /></div>
+            <ChatView paneId={paneId} token={token!} commandPanel={<CommandPanel ref={commandPanelRef} paneTarget={paneId} title={title} token={token} panelPosition={panelPos} panelSize={panelSize} readOnly={false} onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}} onChange={(pos, size) => { setPanelPos(pos); setPanelSize(size); }} onDraggingChange={setIsDragging} canSend={true} agentStatus={status} contextUsage={contextUsage} mouseMode={mouseMode} onToggleMouse={handleToggleMouse} onRestart={handleRestart} isRestarting={isRestarting} onCapturePane={handleCapture} hasEditPermission={hasPermission('edit')} hasRestartPermission={hasPermission('restart')} hasCapturePermission={hasPermission('capture')} showVoiceControl={showVoiceControl} onToggleVoiceControl={() => setShowVoiceControl(v => !v)} drawerTab={drawerTab} ttydBounds={ttydBounds} />} />
+            <div className="h-full relative">
+              <TerminalFrame paneId={paneId} token={token!} />
+              {drawerTab === 'terminal' && <DraggableBox paneId={paneId} token={token} agentStatus={status} mouseMode={mouseMode} />}
+            </div>
           </Drawer>
         </div>
       </div>
@@ -301,6 +450,29 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
 
       {/* Settings float */}
       {settingsOpen && <SettingsFloat paneId={paneId} fullPaneId={fullPaneId} onClose={() => setSettingsOpen(false)} />}
+
+      {/* Voice Settings Dialog */}
+      {voiceSettingsOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={() => setVoiceSettingsOpen(false)}>
+          <div className="bg-[#1e1e2e]/95 backdrop-blur-xl rounded-2xl border border-white/10 p-5 w-72 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="text-[14px] font-semibold text-white mb-4">🔊 Voice Settings</div>
+            <label className="flex items-center justify-between py-2">
+              <span className="text-[13px] text-white/70">语音回复</span>
+              <button onClick={() => { const v = !voiceReply; setVoiceReply(v); localStorage.setItem('voice_reply', String(v)); if (!v) speechSynthesis.cancel(); }}
+                className={`w-10 h-5 rounded-full transition-colors ${voiceReply ? 'bg-green-500' : 'bg-white/20'}`}>
+                <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform mx-0.5 ${voiceReply ? 'translate-x-5' : ''}`} />
+              </button>
+            </label>
+            <label className="flex items-center justify-between py-2">
+              <span className="text-[13px] text-white/70">自动播放</span>
+              <button onClick={() => { const v = !autoPlayReply; setAutoPlayReply(v); localStorage.setItem('auto_play_reply', String(v)); if (!v) speechSynthesis.cancel(); }}
+                className={`w-10 h-5 rounded-full transition-colors ${autoPlayReply ? 'bg-green-500' : 'bg-white/20'}`}>
+                <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform mx-0.5 ${autoPlayReply ? 'translate-x-5' : ''}`} />
+              </button>
+            </label>
+          </div>
+        </div>
+      )}
 
       {/* Toast */}
       {toast && <div className="fixed top-3 left-1/2 -translate-x-1/2 px-4 py-1.5 text-white text-[11px] font-medium rounded-full shadow-2xl bg-white/10 backdrop-blur-xl border border-white/[0.06] z-[999999]">{toast}</div>}
