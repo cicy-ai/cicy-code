@@ -467,7 +467,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
       }
     >
       <form onSubmit={handleSendPrompt} className="relative h-full flex flex-col p-2">
-        <div className="absolute top-2 right-2 z-10 flex gap-1">
+        <div className="absolute top-6 right-6 z-10 flex gap-1">
           <button
             id="chat-send-btn"
             type="submit"

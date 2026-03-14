@@ -37,8 +37,8 @@ const SettingsFloat: React.FC<{ paneId: string; fullPaneId: string; onClose: () 
 };
 
 /* ── Draggable box (constrained to parent) ── */
-const DraggableBox: React.FC<{ paneId: string; token: string | null; agentStatus: string; mouseMode: string }> = ({ paneId, token, agentStatus, mouseMode }) => {
-  const W = 420, H = 180;
+const DraggableBox: React.FC<{ paneId: string; token: string | null; agentStatus: string; mouseMode: string; showVoiceControl?: boolean; onToggleVoiceControl?: () => void }> = ({ paneId, token, agentStatus, mouseMode, showVoiceControl, onToggleVoiceControl }) => {
+  const W = 420, H = 140;
   const ref = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [pos, setPos] = useState(() => {
@@ -80,9 +80,8 @@ const DraggableBox: React.FC<{ paneId: string; token: string | null; agentStatus
   return (
     <>
       {isDragging && <div data-id="drag-overlay" style={{ position: 'absolute', inset: 0, zIndex: 49 }} />}
-      <div data-id="draggable-box" ref={ref} style={{ position: 'absolute', left: pos.x, top: pos.y, width: W, height: H, borderRadius: 8, zIndex: 50 }}>
-        <div data-id="drag-handle" onMouseDown={onDown} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 36, cursor: 'move', zIndex: 10 }} />
-        <CommandPanel paneTarget={paneId} title="" token={token} panelPosition={{ x: 0, y: 0 }} panelSize={{ width: W, height: H }} readOnly={false} onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}} onChange={() => {}} canSend={true} agentStatus={agentStatus} mouseMode={mouseMode} drawerTab="terminal" />
+      <div data-id="draggable-box" ref={ref} onMouseDown={e => { if (e.clientY - ref.current!.getBoundingClientRect().top < 36 && (e.target as HTMLElement).closest('button, select, input, [role="button"]') === null) onDown(e); }} style={{ position: 'absolute', left: pos.x, top: pos.y, width: W, height: H, borderRadius: 8, zIndex: 50 }}>
+        <CommandPanel paneTarget={paneId} title="" token={token} panelPosition={{ x: 0, y: 0 }} panelSize={{ width: W, height: H }} readOnly={false} onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}} onChange={() => {}} canSend={true} agentStatus={agentStatus} mouseMode={mouseMode} drawerTab="terminal" showVoiceControl={showVoiceControl} onToggleVoiceControl={onToggleVoiceControl} />
       </div>
     </>
   );
@@ -490,7 +489,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
             <ChatView paneId={paneId} token={token!} commandPanel={<CommandPanel ref={commandPanelRef} paneTarget={paneId} title={title} token={token} panelPosition={panelPos} panelSize={panelSize} readOnly={false} onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}} onChange={(pos, size) => { setPanelPos(pos); setPanelSize(size); }} onDraggingChange={setIsDragging} canSend={true} agentStatus={status} contextUsage={contextUsage} mouseMode={mouseMode} onToggleMouse={handleToggleMouse} onRestart={handleRestart} isRestarting={isRestarting} onCapturePane={handleCapture} hasEditPermission={hasPermission('edit')} hasRestartPermission={hasPermission('restart')} hasCapturePermission={hasPermission('capture')} showVoiceControl={showVoiceControl} onToggleVoiceControl={() => setShowVoiceControl(v => !v)} drawerTab={drawerTab} ttydBounds={ttydBounds} />} />
             <div className="h-full relative">
               <TerminalFrame paneId={paneId} token={token!} />
-              {drawerTab === 'terminal' && <DraggableBox paneId={paneId} token={token} agentStatus={status} mouseMode={mouseMode} />}
+              {drawerTab === 'terminal' && <DraggableBox paneId={paneId} token={token} agentStatus={status} mouseMode={mouseMode} showVoiceControl={showVoiceControl} onToggleVoiceControl={() => setShowVoiceControl(v => !v)} />}
             </div>
           </Drawer>
         </div>
