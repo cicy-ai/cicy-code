@@ -316,34 +316,33 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
   const isThinking = status === 'thinking';
 
   return (
-    <div data-id="agent-page" className="w-screen h-screen flex flex-col bg-[#0a0a0f] overflow-hidden">
-      {/* ── Top bar: minimal, floating feel ── */}
-      <div data-id="top-bar" className="h-10 flex items-center justify-between px-3 shrink-0 bg-black/40 backdrop-blur-xl border-b border-white/[0.04]">
-        <div className="flex items-center gap-2 min-w-0">
-          <button onClick={() => { window.location.hash = '#/'; }} className="p-1 rounded-lg text-white/30 hover:text-white hover:bg-white/5"><ArrowLeft size={14} /></button>
-          {isThinking && <Zap size={12} className="text-yellow-400 animate-pulse" />}
-          <span className="text-[13px] font-medium text-white/90 truncate">{title}</span>
-          <span className="text-[10px] text-white/20 font-mono">{paneId}</span>
-        </div>
-        <div className="flex items-center gap-0.5">
-          {/* Context bar */}
-          {contextUsage != null && (
-            <div className="flex items-center gap-1.5 mr-1.5 px-2 py-0.5 rounded-full bg-white/[0.04]">
-              <div className="w-12 h-1 rounded-full bg-white/[0.06] overflow-hidden">
-                <div className={`h-full rounded-full ${contextUsage > 80 ? 'bg-red-400' : contextUsage > 50 ? 'bg-yellow-400' : 'bg-emerald-400'}`} style={{ width: `${contextUsage}%` }} />
+    <div data-id="agent-page" className="w-screen h-screen flex bg-[#0a0a0f] overflow-hidden">
+      {/* ── Left: top bar + desktop ── */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        {/* Top bar */}
+        <div data-id="top-bar" className="h-10 flex items-center justify-between px-3 shrink-0 bg-black/40 backdrop-blur-xl border-b border-white/[0.04]">
+          <div className="flex items-center gap-2 min-w-0">
+            <button onClick={() => { window.location.hash = '#/'; }} className="p-1 rounded-lg text-white/30 hover:text-white hover:bg-white/5"><ArrowLeft size={14} /></button>
+            {isThinking && <Zap size={12} className="text-yellow-400 animate-pulse" />}
+            <span className="text-[13px] font-medium text-white/90 truncate">{title}</span>
+            <span className="text-[10px] text-white/20 font-mono">{paneId}</span>
+          </div>
+          <div className="flex items-center gap-0.5">
+            {contextUsage != null && (
+              <div className="flex items-center gap-1.5 mr-1.5 px-2 py-0.5 rounded-full bg-white/[0.04]">
+                <div className="w-12 h-1 rounded-full bg-white/[0.06] overflow-hidden">
+                  <div className={`h-full rounded-full ${contextUsage > 80 ? 'bg-red-400' : contextUsage > 50 ? 'bg-yellow-400' : 'bg-emerald-400'}`} style={{ width: `${contextUsage}%` }} />
+                </div>
+                <span className="text-[9px] text-white/30 font-mono">{contextUsage}%</span>
               </div>
-              <span className="text-[9px] text-white/30 font-mono">{contextUsage}%</span>
-            </div>
-          )}
-          {isThinking && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400/80 animate-pulse mr-1">thinking</span>}
-          <button onClick={() => setSettingsOpen(true)} className="p-1.5 rounded-lg text-white/20 hover:text-white/60 hover:bg-white/5"><Settings size={13} /></button>
-          <button onClick={() => setVoiceSettingsOpen(true)} className={`p-1.5 rounded-lg hover:bg-white/5 ${voiceReply ? 'text-green-400' : 'text-white/20 hover:text-white/60'}`} title="Voice settings">🔊</button>
-          <button onClick={handleRestart} disabled={isRestarting} className="p-1.5 rounded-lg text-white/20 hover:text-orange-400 hover:bg-white/5 disabled:opacity-20"><RotateCcw size={13} className={isRestarting ? 'animate-spin' : ''} /></button>
+            )}
+            {isThinking && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400/80 animate-pulse mr-1">thinking</span>}
+            <button onClick={() => setSettingsOpen(true)} className="p-1.5 rounded-lg text-white/20 hover:text-white/60 hover:bg-white/5"><Settings size={13} /></button>
+            <button onClick={() => setVoiceSettingsOpen(true)} className={`p-1.5 rounded-lg hover:bg-white/5 ${voiceReply ? 'text-green-400' : 'text-white/20 hover:text-white/60'}`} title="Voice settings">🔊</button>
+            <button onClick={handleRestart} disabled={isRestarting} className="p-1.5 rounded-lg text-white/20 hover:text-orange-400 hover:bg-white/5 disabled:opacity-20"><RotateCcw size={13} className={isRestarting ? 'animate-spin' : ''} /></button>
+          </div>
         </div>
-      </div>
 
-      {/* ── Main area ── */}
-      <div className="flex-1 flex overflow-hidden">
         {/* Desktop canvas */}
         <div data-id="desktop-canvas" className="flex-1 min-w-0 relative" onClick={() => { setCtxMenu(null); if (editMode) setEditMode(false); }}>
           {/* Background */}
@@ -474,7 +473,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
         {/* Code-server left drawer */}
         <div
           data-id="code-drawer"
-          className="fixed top-10 left-0 bottom-0 z-[9999] transition-transform duration-300 ease-in-out"
+          className="fixed top-0 left-0 bottom-0 z-[9999] transition-transform duration-300 ease-in-out"
           style={{ width: codeDrawerW, transform: codeDrawerOpen ? 'translateX(0)' : 'translateX(-100%)' }}
         >
           <div className="h-full flex flex-col bg-[#1e1e1e] border-r border-white/[0.08] shadow-2xl">
@@ -507,10 +506,11 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
             }}
           />
         </div>
+      </div>{/* end left column */}
 
-        {/* Right drawer - always open */}
-        <Resizer width={drawerW} onChange={w => setDrawerW(w)} onDragging={setIsDragging} />
-        <div className="shrink-0" style={{ width: drawerW, minWidth: '380px' }} ref={ttydContainerRef}>
+      {/* ── Right drawer - full height ── */}
+      <Resizer width={drawerW} onChange={w => setDrawerW(w)} onDragging={setIsDragging} />
+      <div className="shrink-0" style={{ width: drawerW, minWidth: '380px' }} ref={ttydContainerRef}>
           <Drawer tab={drawerTab} onTabChange={setDrawerTab}>
             <ChatView paneId={paneId} token={token!} commandPanel={<CommandPanel ref={commandPanelRef} paneTarget={paneId} title={title} token={token} panelPosition={panelPos} panelSize={panelSize} readOnly={false} onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}} onChange={(pos, size) => { setPanelPos(pos); setPanelSize(size); }} onDraggingChange={setIsDragging} canSend={true} agentStatus={status} contextUsage={contextUsage} mouseMode={mouseMode} onToggleMouse={handleToggleMouse} onRestart={handleRestart} isRestarting={isRestarting} onCapturePane={handleCapture} hasEditPermission={hasPermission('edit')} hasRestartPermission={hasPermission('restart')} hasCapturePermission={hasPermission('capture')} showVoiceControl={showVoiceControl} onToggleVoiceControl={() => setShowVoiceControl(v => !v)} drawerTab={drawerTab} ttydBounds={ttydBounds} />} />
             <div className="h-full relative">
@@ -519,7 +519,6 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
             </div>
           </Drawer>
         </div>
-      </div>
 
       {/* Drag mask - covers everything including iframes */}
       {isDragging && <div data-id="global-drag-mask" className="fixed inset-0 z-[99998]" />}
