@@ -2,9 +2,12 @@ import { useState, useCallback, useEffect } from 'react';
 
 export interface DesktopApp {
   id: string;
+  type?: 'icon' | 'widget';
   label: string;
   emoji: string;
   url: string;
+  size?: 'sm' | 'md' | 'lg';
+  srcdoc?: string;
 }
 
 const STORAGE_KEY = 'desktop_apps';
