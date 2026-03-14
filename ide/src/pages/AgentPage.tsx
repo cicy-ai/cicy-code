@@ -7,9 +7,11 @@ import { CommandPanel, CommandPanelHandle } from '../components/terminal/Command
 import ChatView from '../components/chat/ChatView';
 import { SettingsView } from '../components/SettingsView';
 import { EditPaneData } from '../components/EditPaneDialog';
-import { ArrowLeft, RotateCcw, Zap, Trash2, Settings, MessageSquare, Terminal, X } from 'lucide-react';
+import { ArrowLeft, RotateCcw, Zap, Trash2, Settings, MessageSquare, Terminal, X, Folder, FolderOpen } from 'lucide-react';
 import { useDesktopApps, openInElectron } from '../components/desktop/useDesktopApps';
 import { VoiceFloatingButton } from '../components/VoiceFloatingButton';
+import { WebFrame } from '../components/WebFrame';
+import config, { urls } from '../config';
 
 /* ── Settings floating window (iPhone style) ── */
 const SettingsFloat: React.FC<{ paneId: string; fullPaneId: string; onClose: () => void }> = ({ paneId, fullPaneId, onClose }) => {
@@ -20,7 +22,7 @@ const SettingsFloat: React.FC<{ paneId: string; fullPaneId: string; onClose: () 
   const save = async () => { setSaving(true); try { await apiService.updatePane(paneId, paneData); setMsg('Saved'); } catch { setMsg('Failed'); } finally { setSaving(false); setTimeout(() => setMsg(''), 1500); } };
   return (
     <div className="fixed inset-0 z-[99999] flex items-start justify-center pt-12" onClick={onClose}>
-      <div className="w-[340px] max-h-[70vh] bg-[#1c1c1e]/95 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/[0.08] overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div data-id="settings-float" className="w-[340px] max-h-[70vh] bg-[#1c1c1e]/95 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/[0.08] overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06]">
           <span className="text-[13px] font-semibold text-white">Settings</span>
           <button onClick={onClose} className="p-1 rounded-full hover:bg-white/10"><X size={14} className="text-white/60" /></button>
@@ -77,9 +79,9 @@ const DraggableBox: React.FC<{ paneId: string; token: string | null; agentStatus
   if (pos.x < 0) return <div ref={ref} style={{ position: 'absolute', opacity: 0 }} />;
   return (
     <>
-      {isDragging && <div style={{ position: 'absolute', inset: 0, zIndex: 49 }} />}
-      <div ref={ref} style={{ position: 'absolute', left: pos.x, top: pos.y, width: W, height: H, borderRadius: 8, zIndex: 50 }}>
-        <div onMouseDown={onDown} style={{ position: 'absolute', inset: 0, cursor: 'move', zIndex: -1 }} />
+      {isDragging && <div data-id="drag-overlay" style={{ position: 'absolute', inset: 0, zIndex: 49 }} />}
+      <div data-id="draggable-box" ref={ref} style={{ position: 'absolute', left: pos.x, top: pos.y, width: W, height: H, borderRadius: 8, zIndex: 50 }}>
+        <div data-id="drag-handle" onMouseDown={onDown} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 36, cursor: 'move', zIndex: 10 }} />
         <CommandPanel paneTarget={paneId} title="" token={token} panelPosition={{ x: 0, y: 0 }} panelSize={{ width: W, height: H }} readOnly={false} onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}} onChange={() => {}} canSend={true} agentStatus={agentStatus} mouseMode={mouseMode} drawerTab="terminal" />
       </div>
     </>
@@ -88,8 +90,8 @@ const DraggableBox: React.FC<{ paneId: string; token: string | null; agentStatus
 
 /* ── Right drawer (History / Terminal) ── */
 const Drawer: React.FC<{ tab: string; onTabChange: (t: string) => void; children: React.ReactNode[] }> = ({ tab, onTabChange, children }) => (
-  <div className="h-full flex flex-col bg-[#1c1c1e]/90 backdrop-blur-xl border-l border-white/[0.06]">
-    <div className="flex items-center px-2 h-9 shrink-0 border-b border-white/[0.04]">
+  <div data-id="drawer" className="h-full flex flex-col bg-[#1c1c1e]/90 backdrop-blur-xl border-l border-white/[0.06]">
+    <div data-id="drawer-tabs" className="flex items-center px-2 h-9 shrink-0 border-b border-white/[0.04]">
       <div className="flex gap-0.5">
         {['history', 'terminal'].map(t => (
           <button key={t} onClick={() => onTabChange(t)} className={`px-2.5 py-1 text-[11px] rounded-md transition-all ${tab === t ? 'text-white bg-white/[0.08]' : 'text-white/40 hover:text-white/70'}`}>
@@ -98,9 +100,9 @@ const Drawer: React.FC<{ tab: string; onTabChange: (t: string) => void; children
         ))}
       </div>
     </div>
-    <div className="flex-1 overflow-hidden relative">
-      <div className="absolute inset-0" style={{ display: tab === 'history' ? 'block' : 'none' }}>{children[0]}</div>
-      <div className="absolute inset-0" style={{ display: tab === 'terminal' ? 'block' : 'none' }}>{children[1]}</div>
+    <div data-id="drawer-content" className="flex-1 overflow-hidden relative">
+      <div data-id="drawer-history" className="absolute inset-0" style={{ display: tab === 'history' ? 'block' : 'none' }}>{children[0]}</div>
+      <div data-id="drawer-terminal" className="absolute inset-0" style={{ display: tab === 'terminal' ? 'block' : 'none' }}>{children[1]}</div>
     </div>
   </div>
 );
@@ -115,7 +117,7 @@ const Resizer: React.FC<{ width: number; onChange: (w: number) => void; onDraggi
     const onUp = () => { onDragging(false); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
     document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
   };
-  return <div className="w-1 cursor-col-resize hover:bg-white/10 active:bg-white/20 transition-colors shrink-0" onMouseDown={onDown} />;
+  return <div data-id="resizer" className="w-1 cursor-col-resize hover:bg-white/10 active:bg-white/20 transition-colors shrink-0" onMouseDown={onDown} />;
 };
 
 /* ── Main ── */
@@ -135,6 +137,9 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; appId: string } | null>(null);
   const { apps, addApp, removeApp } = useDesktopApps(paneId);
   const [editMode, setEditMode] = useState(false);
+  const [codeDrawerOpen, setCodeDrawerOpen] = useState(false);
+  const [workspace, setWorkspace] = useState(`${config.hostHome}/Private/workers/${paneId}`);
+  const [codeDrawerW, setCodeDrawerW] = useState(() => parseInt(localStorage.getItem('code_drawer_w') || '600'));
 
   // Drawer
   const [drawerTab, setDrawerTab] = useState(() => localStorage.getItem('agent_drawerTab') || 'history');
@@ -181,12 +186,13 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
   }, [voiceReply, autoPlayReply]);
 
   useEffect(() => { localStorage.setItem('agent_drawerW', drawerW.toString()); }, [drawerW]);
+  useEffect(() => { localStorage.setItem('code_drawer_w', codeDrawerW.toString()); }, [codeDrawerW]);
   useEffect(() => { localStorage.setItem('agent_drawerTab', drawerTab); }, [drawerTab]);
   useEffect(() => { localStorage.setItem('agent_panelPos', JSON.stringify(panelPos)); }, [panelPos]);
   useEffect(() => { localStorage.setItem('agent_panelSize', JSON.stringify(panelSize)); }, [panelSize]);
 
   // Fetch title
-  useEffect(() => { apiService.getPane(fullPaneId).then(({ data }) => { if (data?.title) setTitle(data.title); }).catch(() => {}); }, [fullPaneId]);
+  useEffect(() => { apiService.getPane(fullPaneId).then(({ data }) => { if (data?.title) setTitle(data.title); if (data?.workspace) setWorkspace((data.workspace as string).replace('~', config.hostHome)); }).catch(() => {}); }, [fullPaneId]);
 
   // Poll status
   useEffect(() => {
@@ -311,9 +317,9 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
   const isThinking = status === 'thinking';
 
   return (
-    <div className="w-screen h-screen flex flex-col bg-[#0a0a0f] overflow-hidden">
+    <div data-id="agent-page" className="w-screen h-screen flex flex-col bg-[#0a0a0f] overflow-hidden">
       {/* ── Top bar: minimal, floating feel ── */}
-      <div className="h-10 flex items-center justify-between px-3 shrink-0 bg-black/40 backdrop-blur-xl border-b border-white/[0.04]">
+      <div data-id="top-bar" className="h-10 flex items-center justify-between px-3 shrink-0 bg-black/40 backdrop-blur-xl border-b border-white/[0.04]">
         <div className="flex items-center gap-2 min-w-0">
           <button onClick={() => { window.location.hash = '#/'; }} className="p-1 rounded-lg text-white/30 hover:text-white hover:bg-white/5"><ArrowLeft size={14} /></button>
           {isThinking && <Zap size={12} className="text-yellow-400 animate-pulse" />}
@@ -340,13 +346,21 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
       {/* ── Main area ── */}
       <div className="flex-1 flex overflow-hidden">
         {/* Desktop canvas */}
-        <div className="flex-1 min-w-0 relative" onClick={() => { setCtxMenu(null); if (editMode) setEditMode(false); }}>
+        <div data-id="desktop-canvas" className="flex-1 min-w-0 relative" onClick={() => { setCtxMenu(null); if (editMode) setEditMode(false); }}>
           {/* Background */}
-          <div className="absolute inset-0 bg-gradient-to-br from-[#0f0f1a] via-[#111827] to-[#0c1222]" />
+          <div data-id="desktop-bg" className="absolute inset-0 bg-gradient-to-br from-[#0f0f1a] via-[#111827] to-[#0c1222]" />
           <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '32px 32px' }} />
 
           {/* App icons - iPhone grid */}
-          <div className="absolute inset-0 z-10 p-6 pt-4 flex flex-wrap content-start gap-5 pointer-events-none overflow-y-auto" onClick={() => editMode && setEditMode(false)}>
+          <div data-id="app-grid" className="absolute inset-0 z-10 p-6 pt-4 flex flex-wrap content-start gap-5 pointer-events-none overflow-y-auto" onClick={() => editMode && setEditMode(false)}>
+            {/* Code folder icon - always present */}
+            <div data-id="code-folder-icon" className="w-[68px] flex flex-col items-center gap-1.5 select-none pointer-events-auto"
+              onClick={() => setCodeDrawerOpen(v => !v)}>
+              <div className="w-[52px] h-[52px] rounded-[14px] bg-gradient-to-br from-blue-500/20 to-blue-400/10 backdrop-blur-md flex items-center justify-center shadow-lg shadow-black/20 active:scale-95 transition-all duration-150 border border-blue-400/20">
+                {codeDrawerOpen ? <FolderOpen size={26} className="text-blue-400" /> : <Folder size={26} className="text-blue-400" />}
+              </div>
+              <span className="text-[10px] text-white/60 truncate w-full text-center leading-tight">Code</span>
+            </div>
             {apps.map(app => (
               <div key={app.id} className={`w-[68px] flex flex-col items-center gap-1.5 select-none pointer-events-auto relative ${editMode ? 'animate-wiggle' : ''}`}
                 onClick={() => { if (!editMode) openInElectron(app.url, app.label); }}
@@ -432,6 +446,43 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
           )}
         </div>
 
+        {/* Code-server left drawer */}
+        <div
+          data-id="code-drawer"
+          className="fixed top-10 left-0 bottom-0 z-[9999] transition-transform duration-300 ease-in-out"
+          style={{ width: codeDrawerW, transform: codeDrawerOpen ? 'translateX(0)' : 'translateX(-100%)' }}
+        >
+          <div className="h-full flex flex-col bg-[#1e1e1e] border-r border-white/[0.08] shadow-2xl">
+            <div data-id="code-drawer-header" className="h-9 flex items-center justify-between px-3 shrink-0 border-b border-white/[0.06] bg-[#1c1c1e]">
+              <span className="text-[12px] text-white/70 flex items-center gap-1.5"><FolderOpen size={12} />Code Server</span>
+              <button onClick={() => setCodeDrawerOpen(false)} className="p-1 rounded hover:bg-white/10"><X size={14} className="text-white/50" /></button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              {workspace && (
+                <WebFrame
+                  src={urls.codeServer(workspace, token || undefined)}
+                  codeServer
+                  className="w-full h-full border-0"
+                  title="code-server"
+                />
+              )}
+            </div>
+          </div>
+          {/* Drag resizer on right edge */}
+          <div
+            data-id="code-drawer-resizer"
+            className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-400/30 active:bg-blue-400/50 transition-colors z-10"
+            onMouseDown={e => {
+              e.preventDefault();
+              setIsDragging(true);
+              const startX = e.clientX, startW = codeDrawerW;
+              const onMove = (ev: MouseEvent) => setCodeDrawerW(Math.max(380, Math.min(window.innerWidth * 0.8, startW + (ev.clientX - startX))));
+              const onUp = () => { setIsDragging(false); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+              document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+            }}
+          />
+        </div>
+
         {/* Right drawer - always open */}
         <Resizer width={drawerW} onChange={w => setDrawerW(w)} onDragging={setIsDragging} />
         <div className="shrink-0" style={{ width: drawerW, minWidth: '380px' }} ref={ttydContainerRef}>
@@ -446,7 +497,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
       </div>
 
       {/* Drag mask - covers everything including iframes */}
-      {isDragging && <div className="fixed inset-0 z-[99998]" />}
+      {isDragging && <div data-id="global-drag-mask" className="fixed inset-0 z-[99998]" />}
 
       {/* Settings float */}
       {settingsOpen && <SettingsFloat paneId={paneId} fullPaneId={fullPaneId} onClose={() => setSettingsOpen(false)} />}
@@ -475,7 +526,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
       )}
 
       {/* Toast */}
-      {toast && <div className="fixed top-3 left-1/2 -translate-x-1/2 px-4 py-1.5 text-white text-[11px] font-medium rounded-full shadow-2xl bg-white/10 backdrop-blur-xl border border-white/[0.06] z-[999999]">{toast}</div>}
+      {toast && <div data-id="toast" className="fixed top-3 left-1/2 -translate-x-1/2 px-4 py-1.5 text-white text-[11px] font-medium rounded-full shadow-2xl bg-white/10 backdrop-blur-xl border border-white/[0.06] z-[999999]">{toast}</div>}
     </div>
   );
 };
