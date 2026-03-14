@@ -211,9 +211,8 @@ def responseheaders(flow: http.HTTPFlow):
                         st["last_t"] = now
                         _post_webhook(pane, "ai_chunk", {"delta": "".join(st["text"])})
             elif etype == "toolUseEvent":
-                name = payload.get("name", "")
-                if name:
-                    _post_webhook(pane, "tool_start", {"name": name})
+                # Don't push tool_start — wait for ai_done to get complete tool data
+                pass
         return chunk
 
     flow.response.stream = on_chunk

@@ -213,10 +213,6 @@ export const AgentsListView: React.FC<AgentsListViewProps> = ({ paneId, token, t
               key={agent.id} 
               className="bg-vsc-bg-secondary border border-vsc-border rounded relative" 
               style={{height: `${heights[agent.name] || 150}px`}}
-              onMouseLeave={(e) => {
-                const target = e.currentTarget.querySelector('.ttyd-mask') as HTMLElement;
-                if (target) target.style.display = 'block';
-              }}
             >
               {resizing !== null && (
                 <div className="absolute inset-0 z-20 bg-transparent" />
@@ -250,14 +246,6 @@ export const AgentsListView: React.FC<AgentsListViewProps> = ({ paneId, token, t
                 src={urls.ttyd(agent.name, token)}
                 className="w-full h-full rounded align-top"
                 style={{verticalAlign: 'top'}}
-              />
-              <div 
-                className="ttyd-mask absolute inset-0 bg-transparent"
-                style={{display: 'none', pointerEvents: 'auto'}}
-                onClick={(e) => {
-                  window.dispatchEvent(new CustomEvent('selectPane', { detail: { paneId: agent.name } }));
-                  (e.target as HTMLElement).style.display = 'none';
-                }}
               />
               {isDragging && <div className="absolute inset-0 z-20"></div>}
               <div

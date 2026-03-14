@@ -107,10 +107,11 @@ const MainMiddlePanel: React.FC<MainMiddlePanelProps> = ({ ttydWidth, boundAgent
                 <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)}></div>
                 <div id="middle-top-dropdown" className="absolute right-0 top-full mt-1 bg-vsc-bg border border-vsc-border rounded shadow-lg z-50 min-w-[180px]">
                   <button type="button" onClick={async () => { const paneId = displayPaneId.replace(':main.0', ''); await apiService.chooseSession(paneId); setShowMoreMenu(false); }} className="w-full px-3 py-2 text-left text-xs text-vsc-text hover:bg-vsc-bg-hover">^bs Choose Session</button>
-                  <div className="border-t border-vsc-border my-1"></div>
-                  <button type="button" onClick={() => { if (confirm('Reload this page?')) { if (mainIframeRef.current) mainIframeRef.current.src = mainIframeRef.current.src; } setShowMoreMenu(false); }} className="w-full px-3 py-2 text-left text-xs text-vsc-text hover:bg-vsc-bg-hover flex items-center gap-2"><RefreshCw size={12} /> Reload</button>
                   {hasPermission('prompt') && (
-                    <button type="button" onClick={() => { handleRestart(); setShowMoreMenu(false); }} className="w-full px-3 py-2 text-left text-xs text-red-400 hover:bg-vsc-bg-hover flex items-center gap-2"><RefreshCw size={12} className={isRestarting ? 'animate-spin' : ''} /> Restart</button>
+                    <>
+                      <div className="border-t border-vsc-border my-1"></div>
+                      <button type="button" onClick={() => { handleRestart(); setShowMoreMenu(false); }} className="w-full px-3 py-2 text-left text-xs text-red-400 hover:bg-vsc-bg-hover flex items-center gap-2"><RefreshCw size={12} className={isRestarting ? 'animate-spin' : ''} /> Restart</button>
+                    </>
                   )}
                   <div className="border-t border-vsc-border my-1"></div>
                   <button type="button" onClick={() => { window.open(urls.ttydOpen(displayPaneId, token), '_blank'); setShowMoreMenu(false); }} className="w-full px-3 py-2 text-left text-xs text-vsc-text hover:bg-vsc-bg-hover flex items-center gap-2"><ExternalLink size={12} /> Open in New Tab</button>
@@ -310,7 +311,6 @@ const MiddleContent: React.FC<MiddleContentProps> = ({
             onDraggingChange={setIsDragging}
             isTogglingMouse={false}
             onToggleMouse={handleToggleMouse}
-            onReload={() => { if (mainIframeRef.current) mainIframeRef.current.src = mainIframeRef.current.src; }}
             boundAgents={boundAgents}
             onRestart={handleRestart}
             isRestarting={isRestarting}

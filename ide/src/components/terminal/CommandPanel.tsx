@@ -1,10 +1,10 @@
 import React, { useEffect ,useState, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { Loader2, CheckCircle, History, Mic, ArrowUp } from 'lucide-react';
-import { FloatingPanel } from './FloatingPanel';
-import { TerminalControls } from './TerminalControls';
-import { Position, Size } from '../types';
-import { sendCommandToTmux } from '../services/mockApi';
-import apiService from '../services/api';
+import { FloatingPanel } from '../FloatingPanel';
+import { TerminalControls } from '../TerminalControls';
+import { Position, Size } from '../../types';
+import { sendCommandToTmux } from '../../services/mockApi';
+import apiService from '../../services/api';
 
 const style = document.createElement('style');
 style.textContent = `
@@ -45,8 +45,11 @@ interface CommandPanelProps {
   onDraggingChange?: (isDragging: boolean) => void;
   boundAgents?: string[];
   onPaneTargetChange?: (target: string) => void;
+  disableDrag?: boolean;
   showVoiceControl?: boolean;
   onToggleVoiceControl?: () => void;
+  voiceReply?: boolean;
+  onToggleVoiceReply?: () => void;
   mode?: string | null;
   onShowHistory?: (history: string[], onSelect: (cmd: string) => void) => void;
   onShowCorrection?: (result: [string, string]) => void;
@@ -55,8 +58,6 @@ interface CommandPanelProps {
   defaultModel?: string;
   onModelChange?: (model: string) => void;
   onOpenDrawer?: () => void;
-  drawerTab?: string;
-  ttydBounds?: { x: number; y: number; width: number; height: number };
 }
 
 export interface CommandPanelHandle {
@@ -95,8 +96,11 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
   onDraggingChange,
   boundAgents = [],
   onPaneTargetChange,
+  disableDrag = false,
   showVoiceControl = false,
   onToggleVoiceControl,
+  voiceReply = false,
+  onToggleVoiceReply,
   mode = null,
   onShowHistory,
   onShowCorrection,
@@ -105,8 +109,6 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
   defaultModel = '',
   onModelChange,
   onOpenDrawer,
-  drawerTab = 'history',
-  ttydBounds,
 }, ref) => {
   const [selectedPane, setSelectedPane] = useState(paneTarget);
 
@@ -194,9 +196,17 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
     setCurrentSize(panelSize);
   }, [panelPosition, panelSize]);
 
+  const sendTextDirect = useCallback(async (text: string) => {
+    const cmd = text.trim();
+    if (!cmd || !paneTarget) return;
+    window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
+    await sendCommandToTmux(cmd, paneTarget);
+  }, [paneTarget]);
+
   useImperativeHandle(ref, () => ({
     focusTextarea: () => { setTimeout(() => textareaRef.current?.focus(), 50); },
     setPrompt: (text: string) => { setPromptText(text); setTimeout(() => textareaRef.current?.focus(), 50); },
+    sendText: sendTextDirect,
     correctedResult: correctedResult,
   }));
 
@@ -432,9 +442,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
         onChange(pos, size);
       }}
       onDraggingChange={onDraggingChange}
-      disableDrag={drawerTab === 'terminal'}
-      dragBounds={drawerTab === 'history' ? undefined : ttydBounds}
-      fixedAtBottom={drawerTab === 'history'}
+      disableDrag={disableDrag}
       headerActions={
         <>
           <button

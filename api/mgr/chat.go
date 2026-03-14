@@ -14,6 +14,12 @@ type toolInfo struct {
 	Name   string `json:"name"`
 	Arg    string `json:"arg,omitempty"`
 	Result string `json:"result,omitempty"`
+	Diff   *diffInfo `json:"diff,omitempty"`
+}
+
+type diffInfo struct {
+	Old string `json:"old,omitempty"`
+	New string `json:"new,omitempty"`
 }
 
 type step struct {
@@ -77,6 +83,15 @@ func extractArg(inp map[string]interface{}, name string) string {
 		return s
 	}
 	return ""
+}
+
+func extractDiff(inp map[string]interface{}) *diffInfo {
+	old, _ := inp["old_str"].(string)
+	new_, _ := inp["new_str"].(string)
+	if old == "" && new_ == "" {
+		return nil
+	}
+	return &diffInfo{Old: old, New: new_}
 }
 
 // Extract toolUses from the last assistantResponseMessage in history,
@@ -154,7 +169,7 @@ func extractHistoryTools(reqParsed map[string]interface{}) []toolInfo {
 				name, _ := tm["name"].(string)
 				tid, _ := tm["toolUseId"].(string)
 				inp, _ := tm["input"].(map[string]interface{})
-				tools = append(tools, toolInfo{Name: name, Arg: extractArg(inp, name), Result: resultMap[tid]})
+				tools = append(tools, toolInfo{Name: name, Arg: extractArg(inp, name), Result: resultMap[tid], Diff: extractDiff(inp)})
 			}
 			return tools
 		}
@@ -203,10 +218,34 @@ func handleChatHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func buildChatTurns(pane string) []chatTurn {
-	rows, err := db.Query(`SELECT id, req_kb, res_kb, ts, data FROM http_log
+	// Step 1: get IDs only (avoid loading huge data column in filter query)
+	idRows, err := db.Query(`SELECT id FROM http_log
 		WHERE pane_id=? AND url LIKE '%q.us-east-1%'
 		AND CAST(data AS CHAR) LIKE '%GenerateAssistantResponse%'
 		ORDER BY id DESC LIMIT 50`, pane)
+	if err != nil {
+		return nil
+	}
+	var ids []int64
+	for idRows.Next() {
+		var id int64
+		idRows.Scan(&id)
+		ids = append(ids, id)
+	}
+	idRows.Close()
+	if len(ids) == 0 {
+		return nil
+	}
+	// Step 2: load data for matched IDs only
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	rows, err := db.Query(`SELECT id, req_kb, res_kb, ts, data FROM http_log
+		WHERE id IN (`+strings.Join(placeholders, ",")+`)
+		ORDER BY id DESC`, args...)
 	if err != nil {
 		return nil
 	}

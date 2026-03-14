@@ -9,6 +9,7 @@ interface VoiceFloatingButtonProps {
   onRecordEnd: (shouldSend: boolean) => void;
   isRecordingExternal: boolean;
   disabled?: boolean;
+  isLoading?: boolean;
 }
 
 export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
@@ -17,7 +18,8 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
   onRecordStart,
   onRecordEnd,
   isRecordingExternal,
-  disabled = false
+  disabled = false,
+  isLoading = false
 }) => {
   const [position, setPosition] = useState<Position>(initialPosition);
   const [isDragging, setIsDragging] = useState(false);
@@ -156,6 +158,8 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
         >
           {dragMode ? (
               <Move size={32} className="text-white" />
+          ) : isLoading ? (
+              <div className="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin" />
           ) : (
               <Mic size={40} className={`transition-all duration-200 ${isPressed ? 'text-white scale-110' : 'text-vsc-text'}`} />
           )}
@@ -163,8 +167,8 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
       </div>
 
       {/* Label/Hint */}
-      <div className={`absolute -bottom-10 left-1/2 -translate-x-1/2 text-sm font-bold whitespace-nowrap px-3 py-1.5 rounded-full bg-black/70 text-white backdrop-blur-sm transition-opacity duration-200 ${isPressed ? 'opacity-100' : 'opacity-0'}`}>
-        {dragMode ? "Positioning..." : "Recording..."}
+      <div className={`absolute -bottom-10 left-1/2 -translate-x-1/2 text-sm font-bold whitespace-nowrap px-3 py-1.5 rounded-full bg-black/70 text-white backdrop-blur-sm transition-opacity duration-200 ${isPressed || isLoading ? 'opacity-100' : 'opacity-0'}`}>
+        {dragMode ? "Positioning..." : isLoading ? "识别中..." : "Recording..."}
       </div>
     </div>
   );

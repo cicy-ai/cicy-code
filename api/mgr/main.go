@@ -51,7 +51,10 @@ func main() {
 	http.HandleFunc("/", handleRoot)
 	http.HandleFunc("/health", w(handleHealth))
 	http.HandleFunc("/api/health", w(handleHealth))
-	http.HandleFunc("/ping", w(handlePing))
+	http.HandleFunc("/api/ping", w(handlePing))
+
+	// Chat
+	http.HandleFunc("/api/chat/push", wa(handleChatPush))
 
 	// Auth
 	http.HandleFunc("/api/auth/verify", w(handleAuthVerify))
@@ -167,7 +170,10 @@ func main() {
 			// Auto-dispatch queued messages
 			go dispatchQueue(paneID)
 
-			rows, err := db.Query("SELECT agent_name FROM pane_agents WHERE pane_id=? AND status='active'", paneID)
+			// Find master panes bound to this worker via role field
+			rows, err := db.Query(`SELECT pa.agent_name FROM pane_agents pa
+				JOIN agent_config ac ON ac.pane_id = pa.agent_name
+				WHERE pa.pane_id=? AND pa.status='active' AND ac.role='master'`, paneID)
 			if err != nil {
 				return
 			}
@@ -175,16 +181,14 @@ func main() {
 			for rows.Next() {
 				var agent string
 				rows.Scan(&agent)
-				if strings.HasPrefix(agent, "master-") {
-					target := agent
-					if !strings.Contains(target, ":") {
-						target += ":main.0"
-					}
-					msg := fmt.Sprintf("pane_idle:%s", paneID)
-					nodeTmux(target, "send-keys", "-t", target, "-l", msg)
-					nodeTmux(target, "send-keys", "-t", target, "Enter")
-					log.Printf("[hook] notified %s: %s", agent, msg)
+				target := agent
+				if !strings.Contains(target, ":") {
+					target += ":main.0"
 				}
+				msg := fmt.Sprintf("pane_idle:%s", paneID)
+				nodeTmux(target, "send-keys", "-t", target, "-l", msg)
+				nodeTmux(target, "send-keys", "-t", target, "Enter")
+				log.Printf("[hook] notified master %s: %s", agent, msg)
 			}
 		}
 	})

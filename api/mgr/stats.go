@@ -68,7 +68,8 @@ func redisLRange(key string) []string {
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(5 * time.Second))
 
-	req := fmt.Sprintf("*4\r\n$6\r\nLRANGE\r\n$%d\r\n%s\r\n$1\r\n0\r\n$2\r\n-1\r\n", len(key), key)
+	// Limit to last 5000 entries to prevent OOM
+	req := fmt.Sprintf("*4\r\n$6\r\nLRANGE\r\n$%d\r\n%s\r\n$5\r\n-5000\r\n$2\r\n-1\r\n", len(key), key)
 	conn.Write([]byte(req))
 
 	buf := make([]byte, 1024*1024)

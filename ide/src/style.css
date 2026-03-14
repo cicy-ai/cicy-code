@@ -96,5 +96,21 @@
 details summary::-webkit-details-marker{display:none}
 details summary::marker{display:none}
 details[open] summary .tool-arrow{transform:rotate(90deg)}
-details summary{background:var(--vsc-bg);transition:background 0.15s}
-details summary:hover{background:var(--vsc-bg-hover)}
+details summary{transition:background 0.15s}
+details summary:hover{background:rgba(255,255,255,0.03)}
+details[open] summary span:first-child{transform:rotate(90deg)}
+
+/* Smooth transitions */
+* { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+/* Scrollbar */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.15)}
+
+@keyframes wiggle {
+  0%, 100% { transform: rotate(-1.5deg); }
+  50% { transform: rotate(1.5deg); }
+}
+.animate-wiggle { animation: wiggle 0.25s ease-in-out infinite; }

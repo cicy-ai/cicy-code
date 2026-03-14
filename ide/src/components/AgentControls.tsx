@@ -20,8 +20,8 @@ export const AgentControls: React.FC<AgentControlsProps> = ({ paneId, token, bou
 
   const fetchAllAgents = async () => {
     try {
-      const { data } = await apiService.getPaneList();
-      setAllAgents(Array.isArray(data) ? data : (data.panes || []));
+      const { data } = await apiService.getAllStatus();
+      setAllAgents(Object.values(data || {}).map((v: any) => ({ pane_id: v.pane_id, title: v.title })));
     } catch (err) {
       console.error('Failed to fetch all agents:', err);
     }
