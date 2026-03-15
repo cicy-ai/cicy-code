@@ -124,7 +124,7 @@ services:
     image: node:20-alpine
     working_dir: /app
     volumes:
-      - ./ide:/app
+      - ./ide-v1:/app
       - ide_modules:/app/node_modules
     ports:
       - "6905:6902"

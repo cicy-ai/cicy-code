@@ -1,0 +1,79 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: cicy-mysql
+    restart: always
+    network_mode: host
+    environment:
+      MYSQL_ROOT_PASSWORD: cicy-code
+      MYSQL_DATABASE: cicy_code
+    volumes:
+      - mysql-data:/var/lib/mysql
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --innodb-flush-log-at-trx-commit=2
+      --innodb-buffer-pool-size=128M
+      --max-allowed-packet=64M
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pcicy-code"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    container_name: cicy-redis
+    restart: always
+    network_mode: host
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mitmproxy:
+    build: ./mitmproxy
+    container_name: cicy-mitmproxy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./mitmproxy/kiro_monitor.py:/app/kiro_monitor.py:ro
+      - mitmproxy-data:/home/mitmproxy/.mitmproxy
+    command: mitmweb --web-host 0.0.0.0 --web-port 8889 -p 8888 --ssl-insecure --set block_global=false --set proxyauth=any -s /app/kiro_monitor.py
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  ide-dev:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./ide:/app
+      - ide_modules:/app/node_modules
+    ports:
+      - "80:6902"
+    command: sh -c "npm install && npm run dev"
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  redis-data:
+  mitmproxy-data:
+  ide_modules:
