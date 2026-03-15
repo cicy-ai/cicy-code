@@ -17,8 +17,8 @@ docker compose up -d  # start all services
 
 Done. Access via browser:
 - IDE: `http://<your-ip>:6902`
-- API: `http://<your-ip>:14446`
-- code-server: `http://<your-ip>:14446/code`
+- API: `http://<your-ip>:8008`
+- code-server: `http://<your-ip>:8008/code`
 
 ## What setup.sh Does
 
@@ -36,7 +36,7 @@ No manual configuration needed.
 | Service | Port | Description |
 |---------|------|-------------|
 | ide-dev | 6902 | React frontend (Vite dev server) |
-| api | 14446 | Go backend (API + WebSocket proxy) |
+| api | 8008 | Go backend (API + WebSocket proxy) |
 | code-server | 18080 | VS Code in browser (proxied via API) |
 | mysql | 13306 | MySQL database |
 | redis | 16379 | Redis cache |
@@ -65,8 +65,8 @@ tunnel: <tunnel-id>
 ingress:
   - hostname: ide.your-domain.com
     service: http://localhost:6902
-  - hostname: g-14446.your-domain.com
-    service: http://localhost:14446
+  - hostname: g-8008.your-domain.com
+    service: http://localhost:8008
   - service: http_status:404
 ```
 

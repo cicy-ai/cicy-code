@@ -362,16 +362,17 @@ func ensurePipe(paneID string) bool {
 }
 
 func refreshCfgCache() {
-	rows, err := db.Query("SELECT pane_id, title, COALESCE(agent_type,''), COALESCE(role,''), COALESCE(default_model,''), COALESCE(trust_level,'') FROM agent_config WHERE active=1")
+	rows, err := db.Query("SELECT pane_id, title, COALESCE(agent_type,''), COALESCE(role,''), COALESCE(default_model,''), COALESCE(trust_level,''), COALESCE(ttyd_port,0), COALESCE(workspace,'') FROM agent_config WHERE active=1")
 	if err != nil {
 		return
 	}
 	defer rows.Close()
 	m := map[string]map[string]string{}
 	for rows.Next() {
-		var pid, title, at, role, model, trust string
-		rows.Scan(&pid, &title, &at, &role, &model, &trust)
-		m[pid] = map[string]string{"title": title, "agent_type": at, "role": role, "default_model": model, "trust_level": trust}
+		var pid, title, at, role, model, trust, ws string
+		var port int
+		rows.Scan(&pid, &title, &at, &role, &model, &trust, &port, &ws)
+		m[pid] = map[string]string{"title": title, "agent_type": at, "role": role, "default_model": model, "trust_level": trust, "ttyd_port": strconv.Itoa(port), "workspace": ws}
 	}
 	watcherMu.Lock()
 	cfgCache = m
@@ -454,8 +455,19 @@ func fullSyncOnce() {
 		// Ensure tmux session exists
 		session := strings.Split(pid, ":")[0]
 		if exec.Command("tmux", "has-session", "-t", session).Run() != nil {
-			log.Printf("[watcher] session %s missing, triggering restart", session)
-			go restartPaneCore(pid, "")
+			log.Printf("[watcher] session %s missing, creating locally", session)
+			ws := cfg["workspace"]
+			if ws == "" { ws = os.Getenv("HOME") }
+			ws = strings.Replace(ws, "~", os.Getenv("HOME"), 1)
+			exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", ws).Run()
+			exec.Command("tmux", "send-keys", "-t", session+":main.0", "export TERM=xterm-256color", "Enter").Run()
+		}
+		// Ensure ttyd instance is running
+		if port, _ := strconv.Atoi(cfg["ttyd_port"]); port > 0 {
+			if !isPortListening(port) {
+				log.Printf("[watcher] ttyd port %d not listening for %s, starting instance", port, pid)
+				startInstance(pid, port, "")
+			}
 		}
 		if ensurePipe(pid) {
 			restored++

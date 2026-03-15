@@ -111,10 +111,19 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 
 	// Create tmux session
 	nodeTmux(paneID, "new-session", "-d", "-s", session, "-n", "main", "-c", wsExpanded)
+	nodeTmux(paneID, "send-keys", "-t", paneID, "export TERM=xterm-256color", "Enter")
 
 	// Insert DB
-	db.Exec(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, trust_level, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,NOW(),NOW())`, paneID, title, port, req.Workspace, req.InitScript, "{}", req.Role, req.DefaultModel, req.TrustLevel)
+	proxy := req.Proxy
+	if proxy == "" {
+		mitmPort := os.Getenv("MITMPROXY_PORT")
+		if mitmPort == "" {
+			mitmPort = "8003"
+		}
+		proxy = fmt.Sprintf("http://%s:x@127.0.0.1:%s", session, mitmPort)
+	}
+	db.Exec(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, trust_level, proxy, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,NOW(),NOW())`, paneID, title, port, req.Workspace, req.InitScript, "{}", req.Role, req.DefaultModel, req.TrustLevel, proxy)
 
 	// Start ttyd-go instance
 	if err := startInstance(paneID, port, token); err != nil {
@@ -129,9 +138,8 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	runTmux("send-keys", "-t", paneID, fmt.Sprintf("export X_PANE_ID='%s'", paneID), "Enter")
 
 	// Proxy
-	if req.Proxy != "" {
-		proxyURL := req.Proxy
-		cmd := fmt.Sprintf("export http_proxy='%s' https_proxy='%s' HTTP_PROXY='%s' HTTPS_PROXY='%s' ALL_PROXY='%s'", proxyURL, proxyURL, proxyURL, proxyURL, proxyURL)
+	{
+		cmd := fmt.Sprintf("export http_proxy='%s' https_proxy='%s' HTTP_PROXY='%s' HTTPS_PROXY='%s' ALL_PROXY='%s'", proxy, proxy, proxy, proxy, proxy)
 		runTmux("send-keys", "-t", paneID, cmd, "Enter")
 	}
 
@@ -304,7 +312,7 @@ func restartPaneCore(paneID, token string) error {
 
 	// Kill and recreate tmux session
 	session := strings.Split(paneID, ":")[0]
-	nodeTmux(paneID, "kill-session", "-t", session)
+	exec.Command("tmux", "kill-session", "-t", session).Run()
 	time.Sleep(300 * time.Millisecond)
 	home, _ := os.UserHomeDir()
 	ws := workspace.String
@@ -312,7 +320,8 @@ func restartPaneCore(paneID, token string) error {
 		ws = "~"
 	}
 	wsExpanded := strings.Replace(ws, "~", home, 1)
-	nodeTmux(paneID, "new-session", "-d", "-s", session, "-n", "main", "-c", wsExpanded)
+	exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", wsExpanded).Run()
+	exec.Command("tmux", "send-keys", "-t", session+":main.0", "export TERM=xterm-256color", "Enter").Run()
 
 	// Restart ttyd-go
 	p := int(port.Int64)

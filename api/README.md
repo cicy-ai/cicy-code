@@ -33,20 +33,20 @@ export MYSQL_DSN="root:@tcp(localhost:3306)/ai_workers"
 TOKEN=$(jq -r '.api_token' ~/global.json)
 
 # 列出 panes
-curl -H "Authorization: Bearer $TOKEN" http://localhost:14444/api/tmux/panes
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8008/api/tmux/panes
 
 # 创建 pane
 curl -X POST -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"win_name":"w-20001"}' \
-  http://localhost:14444/api/tmux/create
+  http://localhost:8008/api/tmux/create
 
 # 重启 pane
 curl -X POST -H "Authorization: Bearer $TOKEN" \
-  http://localhost:14444/api/tmux/panes/w-20001/restart
+  http://localhost:8008/api/tmux/panes/w-20001/restart
 
 # WebSocket 连接
-ws://localhost:14444/api/ws/w-20001
+ws://localhost:8008/api/ws/w-20001
 ```
 
 ## 编译
@@ -57,7 +57,7 @@ go build -o ttyd-manager manager.go
 
 ## 环境变量
 
-- `PORT`: HTTP 端口 (默认 14444)
+- `PORT`: HTTP 端口 (默认 8008)
 - `MYSQL_DSN`: MySQL 连接串 (默认 root:@tcp(localhost:3306)/ai_workers)
 
 ## 对比原架构

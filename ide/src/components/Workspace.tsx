@@ -312,10 +312,13 @@ function FloatCommand({ paneId, token, agentStatus, mouseMode, showVoiceControl,
   const startRef = useRef({ mx: 0, my: 0, px: 0, py: 0 });
 
   useEffect(() => {
-    if (pos.x >= 0 || !ref.current?.parentElement) return;
-    const pr = ref.current.parentElement.getBoundingClientRect();
-    setPos({ x: (pr.width - W) / 2, y: pr.height - H - 36 });
-  }, [pos]);
+    const init = () => {
+      if (!ref.current?.parentElement) return;
+      const pr = ref.current.parentElement.getBoundingClientRect();
+      setPos(p => p.x >= 0 ? p : { x: (pr.width - W) / 2, y: pr.height - H - 36 });
+    };
+    requestAnimationFrame(init);
+  }, []);
 
   const onDown = (e: React.MouseEvent) => {
     if (pos.x < 0) return;

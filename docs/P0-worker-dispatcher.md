@@ -258,13 +258,13 @@ GET /api/notify/stream?token=xxx
 
 Master 写完方案后：
 ```bash
-curl -X POST http://127.0.0.1:14445/api/notify \
+curl -X POST http://127.0.0.1:8008/api/notify \
   -d '{"pane":"w-20083","action":"open_drawer","tab":"Dashboard","message":"方案已写好，请在 Dashboard 确认"}'
 ```
 
 Worker 完成任务后：
 ```bash
-curl -X POST http://127.0.0.1:14445/api/notify \
+curl -X POST http://127.0.0.1:8008/api/notify \
   -d '{"pane":"w-20083","action":"toast","message":"✅ 任务 3/6 已完成"}'
 ```
 

@@ -18,7 +18,7 @@ VSCODE_IPC_HOOK_CLI=/tmp/vscode-ipc-xxx.sock  code-server <file>
 ### 打开文件
 ```bash
 curl -X POST -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:14445/api/notify \
+  http://127.0.0.1:8008/api/notify \
   -d '{"action":"open_file","file":"/path/to/file","message":"📄 打开文件"}'
 ```
 
