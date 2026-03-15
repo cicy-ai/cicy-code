@@ -29,7 +29,7 @@ services:
     command: >
       --default-authentication-plugin=mysql_native_password
       --innodb-flush-log-at-trx-commit=2
-      --innodb-buffer-pool-size=512M
+      --innodb-buffer-pool-size=128M
       --max-allowed-packet=64M
       --port=13306
     healthcheck:

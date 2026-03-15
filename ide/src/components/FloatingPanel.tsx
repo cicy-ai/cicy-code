@@ -171,7 +171,7 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
       style={{
         position: 'relative',
         width: '100%',
-        maxWidth: '688px',
+        maxWidth: '100%',
         margin: '0 auto 30px auto',
         height: '100%',
         boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',

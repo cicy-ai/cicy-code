@@ -24,7 +24,7 @@ const SettingsFloat: React.FC<{ paneId: string; fullPaneId: string; onClose: () 
     <div className="fixed inset-0 z-[99999] flex items-start justify-center pt-12" onClick={onClose}>
       <div data-id="settings-float" className="w-[340px] max-h-[70vh] bg-[#1c1c1e]/95 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/[0.08] overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06]">
-          <span className="text-[13px] font-semibold text-white">Settings</span>
+          <span className="text-base font-semibold text-white">Settings</span>
           <button onClick={onClose} className="p-1 rounded-full hover:bg-white/10"><X size={14} className="text-white/60" /></button>
         </div>
         <div className="p-3 overflow-y-auto max-h-[calc(70vh-48px)]">
@@ -93,7 +93,7 @@ const Drawer: React.FC<{ tab: string; onTabChange: (t: string) => void; children
     <div data-id="drawer-tabs" className="flex items-center px-2 h-9 shrink-0 border-b border-white/[0.04]">
       <div className="flex gap-0.5">
         {['history', 'terminal'].map(t => (
-          <button key={t} onClick={() => onTabChange(t)} className={`px-2.5 py-1 text-[11px] rounded-md transition-all ${tab === t ? 'text-white bg-white/[0.08]' : 'text-white/40 hover:text-white/70'}`}>
+          <button key={t} onClick={() => onTabChange(t)} className={`px-2.5 py-1 text-base rounded-md transition-all ${tab === t ? 'text-white bg-white/[0.08]' : 'text-white/40 hover:text-white/70'}`}>
             {t === 'history' ? <span className="flex items-center gap-1"><MessageSquare size={11} />Chat</span> : <span className="flex items-center gap-1"><Terminal size={11} />Terminal</span>}
           </button>
         ))}
@@ -140,6 +140,9 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
   const [workspace, setWorkspace] = useState(`${config.hostHome}/Private/workers/${paneId}`);
   const [codeDrawerW, setCodeDrawerW] = useState(() => parseInt(localStorage.getItem('code_drawer_w') || '600'));
 
+  // Desktop visibility
+  const [desktopVisible, setDesktopVisible] = useState(() => localStorage.getItem('desktop_visible') === 'true');
+
   // Drawer
   const [drawerTab, setDrawerTab] = useState(() => localStorage.getItem('agent_drawerTab') || 'history');
   const [drawerW, setDrawerW] = useState(() => parseInt(localStorage.getItem('agent_drawerW') || '360'));
@@ -184,6 +187,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
     return () => window.removeEventListener('ai-reply-done', handler);
   }, [voiceReply, autoPlayReply]);
 
+  useEffect(() => { localStorage.setItem('desktop_visible', String(desktopVisible)); }, [desktopVisible]);
   useEffect(() => { localStorage.setItem('agent_drawerW', drawerW.toString()); }, [drawerW]);
   useEffect(() => { localStorage.setItem('code_drawer_w', codeDrawerW.toString()); }, [codeDrawerW]);
   useEffect(() => { localStorage.setItem('agent_drawerTab', drawerTab); }, [drawerTab]);
@@ -318,33 +322,34 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
   return (
     <div data-id="agent-page" className="w-screen h-screen flex bg-[#0a0a0f] overflow-hidden">
       {/* ── Left: top bar + desktop ── */}
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className={`flex flex-col ${desktopVisible ? 'flex-1 min-w-0' : 'w-10'}`}>
         {/* Top bar */}
         <div data-id="top-bar" className="h-10 flex items-center justify-between px-3 shrink-0 bg-black/40 backdrop-blur-xl border-b border-white/[0.04]">
           <div className="flex items-center gap-2 min-w-0">
-            <button onClick={() => { window.location.hash = '#/'; }} className="p-1 rounded-lg text-white/30 hover:text-white hover:bg-white/5"><ArrowLeft size={14} /></button>
+            {desktopVisible && <button onClick={() => { window.location.hash = '#/'; }} className="p-1 rounded-lg text-white/30 hover:text-white hover:bg-white/5"><ArrowLeft size={14} /></button>}
             {isThinking && <Zap size={12} className="text-yellow-400 animate-pulse" />}
-            <span className="text-[13px] font-medium text-white/90 truncate">{title}</span>
-            <span className="text-[10px] text-white/20 font-mono">{paneId}</span>
+            {desktopVisible && <span className="text-base font-medium text-white/90 truncate">{title}</span>}
+            {desktopVisible && <span className="text-base text-white/20 font-mono">{paneId}</span>}
           </div>
           <div className="flex items-center gap-0.5">
-            {contextUsage != null && (
+            {desktopVisible && contextUsage != null && (
               <div className="flex items-center gap-1.5 mr-1.5 px-2 py-0.5 rounded-full bg-white/[0.04]">
                 <div className="w-12 h-1 rounded-full bg-white/[0.06] overflow-hidden">
                   <div className={`h-full rounded-full ${contextUsage > 80 ? 'bg-red-400' : contextUsage > 50 ? 'bg-yellow-400' : 'bg-emerald-400'}`} style={{ width: `${contextUsage}%` }} />
                 </div>
-                <span className="text-[9px] text-white/30 font-mono">{contextUsage}%</span>
+                <span className="text-base text-white/30 font-mono">{contextUsage}%</span>
               </div>
             )}
-            {isThinking && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400/80 animate-pulse mr-1">thinking</span>}
-            <button onClick={() => setSettingsOpen(true)} className="p-1.5 rounded-lg text-white/20 hover:text-white/60 hover:bg-white/5"><Settings size={13} /></button>
-            <button onClick={() => setVoiceSettingsOpen(true)} className={`p-1.5 rounded-lg hover:bg-white/5 ${voiceReply ? 'text-green-400' : 'text-white/20 hover:text-white/60'}`} title="Voice settings">🔊</button>
-            <button onClick={handleRestart} disabled={isRestarting} className="p-1.5 rounded-lg text-white/20 hover:text-orange-400 hover:bg-white/5 disabled:opacity-20"><RotateCcw size={13} className={isRestarting ? 'animate-spin' : ''} /></button>
+            {isThinking && <span className="text-base px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400/80 animate-pulse mr-1">thinking</span>}
+            <button onClick={() => setDesktopVisible(v => !v)} className={`p-1.5 rounded-lg hover:bg-white/5 ${desktopVisible ? 'text-white/60' : 'text-white/20 hover:text-white/60'}`} title="Toggle desktop">🖥️</button>
+            {desktopVisible && <button onClick={() => setSettingsOpen(true)} className="p-1.5 rounded-lg text-white/20 hover:text-white/60 hover:bg-white/5"><Settings size={13} /></button>}
+            {desktopVisible && <button onClick={() => setVoiceSettingsOpen(true)} className={`p-1.5 rounded-lg hover:bg-white/5 ${voiceReply ? 'text-green-400' : 'text-white/20 hover:text-white/60'}`} title="Voice settings">🔊</button>}
+            {desktopVisible && <button onClick={handleRestart} disabled={isRestarting} className="p-1.5 rounded-lg text-white/20 hover:text-orange-400 hover:bg-white/5 disabled:opacity-20"><RotateCcw size={13} className={isRestarting ? 'animate-spin' : ''} /></button>}
           </div>
         </div>
 
         {/* Desktop canvas */}
-        <div data-id="desktop-canvas" className="flex-1 min-w-0 relative" onClick={() => { setCtxMenu(null); if (editMode) setEditMode(false); }}>
+        {desktopVisible && <div data-id="desktop-canvas" className="flex-1 min-w-0 relative" onClick={() => { setCtxMenu(null); if (editMode) setEditMode(false); }}>
           {/* Background */}
           <div data-id="desktop-bg" className="absolute inset-0 bg-gradient-to-br from-[#0f0f1a] via-[#111827] to-[#0c1222]" />
           <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '32px 32px' }} />
@@ -357,7 +362,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
               <div className="w-[52px] h-[52px] rounded-[14px] bg-gradient-to-br from-blue-500/20 to-blue-400/10 backdrop-blur-md flex items-center justify-center shadow-lg shadow-black/20 active:scale-95 transition-all duration-150 border border-blue-400/20">
                 {codeDrawerOpen ? <FolderOpen size={26} className="text-blue-400" /> : <Folder size={26} className="text-blue-400" />}
               </div>
-              <span className="text-[10px] text-white/60 truncate w-full text-center leading-tight">Code</span>
+              <span className="text-base text-white/60 truncate w-full text-center leading-tight">Code</span>
             </div>
             {apps.map(app => app.type === 'widget' ? (
               /* Widget card */
@@ -372,8 +377,8 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
                 )}
                 <div className={`w-full h-full rounded-2xl bg-[#1c1c1e]/80 backdrop-blur-xl border border-white/[0.08] shadow-lg overflow-hidden flex flex-col ${editMode ? 'animate-wiggle' : ''}`}>
                   <div className="h-7 flex items-center justify-between px-2.5 shrink-0">
-                    <span className="text-[10px] text-white/50 truncate flex items-center gap-1">{app.emoji} {app.label}</span>
-                    {app.url && <button onClick={() => openInElectron(app.url, app.label)} className="text-[9px] text-white/30 hover:text-white/60 opacity-0 group-hover:opacity-100 transition-opacity">↗</button>}
+                    <span className="text-base text-white/50 truncate flex items-center gap-1">{app.emoji} {app.label}</span>
+                    {app.url && <button onClick={() => openInElectron(app.url, app.label)} className="text-base text-white/30 hover:text-white/60 opacity-0 group-hover:opacity-100 transition-opacity">↗</button>}
                   </div>
                   <div className="flex-1 overflow-hidden">
                     {app.srcdoc ? (
@@ -398,7 +403,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
                 <div className="w-[52px] h-[52px] rounded-[14px] bg-gradient-to-br from-white/[0.12] to-white/[0.04] backdrop-blur-md flex items-center justify-center text-[28px] shadow-lg shadow-black/20 active:scale-95 transition-all duration-150 border border-white/[0.06]">
                   {app.emoji}
                 </div>
-                <span className="text-[10px] text-white/60 truncate w-full text-center leading-tight">{app.label}</span>
+                <span className="text-base text-white/60 truncate w-full text-center leading-tight">{app.label}</span>
               </div>
             ))}
           </div>
@@ -408,7 +413,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-center">
                 <div className="text-5xl mb-3 opacity-20">✨</div>
-                <div className="text-[11px] text-white/15">Ask your agent to build something</div>
+                <div className="text-base text-white/15">Ask your agent to build something</div>
               </div>
             </div>
           )}
@@ -416,9 +421,9 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
           {/* Context menu */}
           {ctxMenu && (
             <div className="fixed z-[99999] bg-[#2a2a2e]/95 backdrop-blur-xl border border-white/[0.08] rounded-xl shadow-2xl py-1 min-w-[130px]" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={e => e.stopPropagation()}>
-              <button onClick={() => { const a = apps.find(x => x.id === ctxMenu.appId); if (a) openInElectron(a.url, a.label); setCtxMenu(null); }} className="w-full px-3 py-1.5 text-left text-[11px] text-white/80 hover:bg-white/10 rounded-md mx-0.5" style={{ width: 'calc(100% - 4px)' }}>Open</button>
+              <button onClick={() => { const a = apps.find(x => x.id === ctxMenu.appId); if (a) openInElectron(a.url, a.label); setCtxMenu(null); }} className="w-full px-3 py-1.5 text-left text-base text-white/80 hover:bg-white/10 rounded-md mx-0.5" style={{ width: 'calc(100% - 4px)' }}>Open</button>
               <div className="h-px bg-white/[0.06] my-0.5 mx-2" />
-              <button onClick={() => { removeApp(ctxMenu.appId); setCtxMenu(null); }} className="w-full px-3 py-1.5 text-left text-[11px] text-red-400/80 hover:bg-white/10 rounded-md mx-0.5 flex items-center gap-1.5" style={{ width: 'calc(100% - 4px)' }}><Trash2 size={11} />Remove</button>
+              <button onClick={() => { removeApp(ctxMenu.appId); setCtxMenu(null); }} className="w-full px-3 py-1.5 text-left text-base text-red-400/80 hover:bg-white/10 rounded-md mx-0.5 flex items-center gap-1.5" style={{ width: 'calc(100% - 4px)' }}><Trash2 size={11} />Remove</button>
             </div>
           )}
 
@@ -468,7 +473,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
               isLoading={voiceLoading}
             />
           )}
-        </div>
+        </div>}
 
         {/* Code-server left drawer */}
         <div
@@ -478,7 +483,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
         >
           <div className="h-full flex flex-col bg-[#1e1e1e] border-r border-white/[0.08] shadow-2xl">
             <div data-id="code-drawer-header" className="h-9 flex items-center justify-between px-3 shrink-0 border-b border-white/[0.06] bg-[#1c1c1e]">
-              <span className="text-[12px] text-white/70 flex items-center gap-1.5"><FolderOpen size={12} />Code Server</span>
+              <span className="text-base text-white/70 flex items-center gap-1.5"><FolderOpen size={12} />Code Server</span>
               <button onClick={() => setCodeDrawerOpen(false)} className="p-1 rounded hover:bg-white/10"><X size={14} className="text-white/50" /></button>
             </div>
             <div className="flex-1 overflow-hidden">
@@ -508,9 +513,10 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
         </div>
       </div>{/* end left column */}
 
-      {/* ── Right drawer - full height ── */}
-      <Resizer width={drawerW} onChange={w => setDrawerW(w)} onDragging={setIsDragging} />
-      <div className="shrink-0" style={{ width: drawerW, minWidth: '380px' }} ref={ttydContainerRef}>
+      {/* ── Right drawer ── */}
+      {desktopVisible && <Resizer width={drawerW} onChange={w => setDrawerW(w)} onDragging={setIsDragging} />}
+      <div className={desktopVisible ? 'shrink-0' : 'flex-1 flex justify-center'} style={desktopVisible ? { width: drawerW, minWidth: '380px' } : undefined} ref={ttydContainerRef}>
+        <div className={desktopVisible ? 'h-full' : 'h-full w-full max-w-[960px]'}>
           <Drawer tab={drawerTab} onTabChange={setDrawerTab}>
             <ChatView paneId={paneId} token={token!} commandPanel={<CommandPanel ref={commandPanelRef} paneTarget={paneId} title={title} token={token} panelPosition={panelPos} panelSize={panelSize} readOnly={false} onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}} onChange={(pos, size) => { setPanelPos(pos); setPanelSize(size); }} onDraggingChange={setIsDragging} canSend={true} agentStatus={status} contextUsage={contextUsage} mouseMode={mouseMode} onToggleMouse={handleToggleMouse} onRestart={handleRestart} isRestarting={isRestarting} onCapturePane={handleCapture} hasEditPermission={hasPermission('edit')} hasRestartPermission={hasPermission('restart')} hasCapturePermission={hasPermission('capture')} showVoiceControl={showVoiceControl} onToggleVoiceControl={() => setShowVoiceControl(v => !v)} drawerTab={drawerTab} ttydBounds={ttydBounds} />} />
             <div className="h-full relative">
@@ -519,6 +525,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
             </div>
           </Drawer>
         </div>
+      </div>
 
       {/* Drag mask - covers everything including iframes */}
       {isDragging && <div data-id="global-drag-mask" className="fixed inset-0 z-[99998]" />}
@@ -530,16 +537,16 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
       {voiceSettingsOpen && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={() => setVoiceSettingsOpen(false)}>
           <div className="bg-[#1e1e2e]/95 backdrop-blur-xl rounded-2xl border border-white/10 p-5 w-72 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="text-[14px] font-semibold text-white mb-4">🔊 Voice Settings</div>
+            <div className="text-base font-semibold text-white mb-4">🔊 Voice Settings</div>
             <label className="flex items-center justify-between py-2">
-              <span className="text-[13px] text-white/70">语音回复</span>
+              <span className="text-base text-white/70">语音回复</span>
               <button onClick={() => { const v = !voiceReply; setVoiceReply(v); localStorage.setItem('voice_reply', String(v)); if (!v) speechSynthesis.cancel(); }}
                 className={`w-10 h-5 rounded-full transition-colors ${voiceReply ? 'bg-green-500' : 'bg-white/20'}`}>
                 <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform mx-0.5 ${voiceReply ? 'translate-x-5' : ''}`} />
               </button>
             </label>
             <label className="flex items-center justify-between py-2">
-              <span className="text-[13px] text-white/70">自动播放</span>
+              <span className="text-base text-white/70">自动播放</span>
               <button onClick={() => { const v = !autoPlayReply; setAutoPlayReply(v); localStorage.setItem('auto_play_reply', String(v)); if (!v) speechSynthesis.cancel(); }}
                 className={`w-10 h-5 rounded-full transition-colors ${autoPlayReply ? 'bg-green-500' : 'bg-white/20'}`}>
                 <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform mx-0.5 ${autoPlayReply ? 'translate-x-5' : ''}`} />
@@ -550,7 +557,7 @@ const AgentPage: React.FC<{ paneId: string }> = ({ paneId }) => {
       )}
 
       {/* Toast */}
-      {toast && <div data-id="toast" className="fixed top-3 left-1/2 -translate-x-1/2 px-4 py-1.5 text-white text-[11px] font-medium rounded-full shadow-2xl bg-white/10 backdrop-blur-xl border border-white/[0.06] z-[999999]">{toast}</div>}
+      {toast && <div data-id="toast" className="fixed top-3 left-1/2 -translate-x-1/2 px-4 py-1.5 text-white text-base font-medium rounded-full shadow-2xl bg-white/10 backdrop-blur-xl border border-white/[0.06] z-[999999]">{toast}</div>}
     </div>
   );
 };

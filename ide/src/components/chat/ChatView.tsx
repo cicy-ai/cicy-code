@@ -13,12 +13,12 @@ const CollapsibleQ: React.FC<{ text: string }> = ({ text }) => {
   }, [text]);
   return (
     <div className="flex justify-end mb-2.5">
-      <div className="max-w-[85%] relative">
-        <div ref={ref} className={`chat-markdown px-3.5 py-2 rounded-2xl rounded-br-sm text-[14px] leading-relaxed text-white/90 overflow-hidden transition-all ${collapsed ? 'max-h-[80px]' : ''}`} style={{ background: 'rgba(255,255,255,0.08)' }}>
+      <div className="max-w-[95%] relative">
+        <div ref={ref} className={`chat-markdown px-3.5 py-2 rounded-2xl rounded-br-sm text-base leading-relaxed text-white/90 overflow-hidden transition-all ${collapsed ? 'max-h-[80px]' : ''}`} style={{ background: 'rgba(255,255,255,0.08)' }}>
           <Markdown remarkPlugins={[remarkGfm]}>{text.replace(/^-\n/, '').replace(/^\d+;\d+;\d+c/i, '')}</Markdown>
         </div>
         {needsCollapse && (
-          <button onClick={() => setCollapsed(v => !v)} className="text-[10px] text-white/30 hover:text-white/60 mt-1 float-right">
+          <button onClick={() => setCollapsed(v => !v)} className="text-base text-white/30 hover:text-white/60 mt-1 float-right">
             {collapsed ? '展开 ▼' : '收起 ▲'}
           </button>
         )}
@@ -85,16 +85,16 @@ const ToolCard: React.FC<{ tool: any; running?: boolean }> = ({ tool, running })
     <div className={`rounded-lg bg-[#1a1a2e]/60 border ${borderColor} overflow-hidden`}>
       <div className="flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none hover:bg-white/[0.03] transition-colors"
         onClick={() => hasContent && setOpen(p => !p)}>
-        <span className={`text-[11px] ${statusColor}`}>{running ? <span className="inline-block w-3 h-3 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin" /> : statusIcon}</span>
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-vsc-text-muted font-medium">{icon} {label}</span>
-        {!open && <span className="text-[11px] font-mono text-vsc-text/70 truncate flex-1" title={arg}>{arg}</span>}
-        {hasContent && <span className="text-[9px] text-vsc-text-muted/40">{open ? '▼' : '▶'}</span>}
+        <span className={`text-base ${statusColor}`}>{running ? <span className="inline-block w-3 h-3 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin" /> : statusIcon}</span>
+        <span className="text-base px-1.5 py-0.5 rounded bg-white/[0.06] text-vsc-text-muted font-medium">{icon} {label}</span>
+        {!open && <span className="text-base font-mono text-vsc-text/70 truncate flex-1" title={arg}>{arg}</span>}
+        {hasContent && <span className="text-base text-vsc-text-muted/40">{open ? '▼' : '▶'}</span>}
       </div>
       {open && (
-        <div className="px-3 py-1.5 text-[11px] font-mono text-vsc-text/60 whitespace-pre-wrap break-all border-b border-white/[0.04]">{arg}</div>
+        <div className="px-3 py-1.5 text-base font-mono text-vsc-text/60 whitespace-pre-wrap break-all border-b border-white/[0.04]">{arg}</div>
       )}
       {open && hasDiff && (
-        <div className="mx-2 mb-2 rounded overflow-hidden border border-white/[0.06] text-[11px] font-mono max-h-[300px] overflow-auto">
+        <div className="mx-2 mb-2 rounded overflow-hidden border border-white/[0.06] text-base font-mono max-h-[300px] overflow-auto">
           {tool.diff.old && tool.diff.old.split('\n').map((line: string, i: number) => (
             <div key={'o'+i} className="px-2 bg-red-500/[0.08] text-red-400/80 whitespace-pre-wrap break-all leading-relaxed">- {line}</div>
           ))}
@@ -104,7 +104,7 @@ const ToolCard: React.FC<{ tool: any; running?: boolean }> = ({ tool, running })
         </div>
       )}
       {open && !hasDiff && tool.result && (
-        <pre className={`text-[11px] mx-2 mb-2 px-2.5 py-2 rounded font-mono whitespace-pre-wrap break-all max-h-[200px] overflow-auto leading-relaxed ${isError ? 'bg-red-500/[0.06] text-red-400' : 'bg-emerald-500/[0.04] text-emerald-400'}`}>
+        <pre className={`text-base mx-2 mb-2 px-2.5 py-2 rounded font-mono whitespace-pre-wrap break-all max-h-[200px] overflow-auto leading-relaxed ${isError ? 'bg-red-500/[0.06] text-red-400' : 'bg-emerald-500/[0.04] text-emerald-400'}`}>
           {tool.result}
         </pre>
       )}
@@ -330,12 +330,12 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
   return (
     <div className="flex flex-col h-full">
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        <div className="max-w-[720px] mx-auto px-4 py-4">
+        <div className="max-w-full mx-auto px-2 py-4">
 
           {loading ? (
             <div className="flex flex-col items-center justify-center pt-20 gap-3">
               <div className="w-6 h-6 border-2 border-vsc-accent/30 border-t-vsc-accent rounded-full animate-spin" />
-              <span className="text-[11px] text-vsc-text-muted">Loading history...</span>
+              <span className="text-base text-vsc-text-muted">Loading history...</span>
             </div>
           ) : groups.length === 0 ? (
             <div className="text-center pt-20">
@@ -367,12 +367,12 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
                 <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] overflow-hidden">
                   {/* Meta bar */}
                   <div className="flex items-center gap-1.5 px-3.5 py-2 border-b border-white/[0.04] flex-wrap">
-                    <span className="text-vsc-accent text-[11px] font-semibold">✦ {agentType}</span>
-                    {model && <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-white/[0.04] text-vsc-text-muted">{model}</span>}
-                    {timeStr && <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-white/[0.04] text-vsc-text-muted">⏱{timeStr}</span>}
-                    {toolCount > 0 && <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-white/[0.04] text-vsc-text-muted">🔧×{toolCount}</span>}
+                    <span className="text-vsc-accent text-base font-semibold">✦ {agentType}</span>
+                    {model && <span className="text-base px-1.5 py-0.5 rounded-md bg-white/[0.04] text-vsc-text-muted">{model}</span>}
+                    {timeStr && <span className="text-base px-1.5 py-0.5 rounded-md bg-white/[0.04] text-vsc-text-muted">⏱{timeStr}</span>}
+                    {toolCount > 0 && <span className="text-base px-1.5 py-0.5 rounded-md bg-white/[0.04] text-vsc-text-muted">🔧×{toolCount}</span>}
                     <span className="flex-1" />
-                    {credit > 0 && <span className="text-[9px] text-vsc-text-muted/50 font-mono">${credit.toFixed(3)}</span>}
+                    {credit > 0 && <span className="text-base text-vsc-text-muted/50 font-mono">${credit.toFixed(3)}</span>}
                   </div>
 
                   {/* Steps */}
@@ -384,13 +384,13 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
                         const isFinal = isLast && r?.status === 'text';
                         if (!isFinal && hasToolStep) {
                           return (
-                            <div key={si} className="chat-markdown text-[14px] text-vsc-text-muted/80 my-2 pl-3 leading-relaxed border-l-2 border-white/[0.06]">
+                            <div key={si} className="chat-markdown text-base text-vsc-text-muted/80 my-2 pl-3 leading-relaxed border-l-2 border-white/[0.06]">
                               <Markdown remarkPlugins={[remarkGfm]}>{s.text}</Markdown>
                             </div>
                           );
                         }
                         return (
-                          <div key={si} className={`chat-markdown text-[14px] text-vsc-text leading-[1.7] ${si > 0 ? 'mt-2 pt-2 border-t border-white/[0.04]' : ''}`}>
+                          <div key={si} className={`chat-markdown text-base text-vsc-text leading-[1.7] ${si > 0 ? 'mt-2 pt-2 border-t border-white/[0.04]' : ''}`}>
                             <Markdown remarkPlugins={[remarkGfm]}>{s.text}</Markdown>
                           </div>
                         );
@@ -417,19 +417,19 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
                           <div className="w-1.5 h-1.5 rounded-full bg-vsc-accent animate-bounce" style={{ animationDelay: '150ms' }} />
                           <div className="w-1.5 h-1.5 rounded-full bg-vsc-accent animate-bounce" style={{ animationDelay: '300ms' }} />
                         </div>
-                        <span className="text-[11px] text-vsc-accent">Thinking...</span>
+                        <span className="text-base text-vsc-accent">Thinking...</span>
                       </div>
                     )}
                     {isRunning && (
                       <div className="flex items-center gap-2 py-1.5">
                         <div className="w-3 h-3 border border-vsc-accent/40 border-t-vsc-accent rounded-full animate-spin" />
-                        <span className="text-[11px] text-vsc-accent">Running{toolCount > 0 ? ` (${toolCount} tools)` : ''}...</span>
+                        <span className="text-base text-vsc-accent">Running{toolCount > 0 ? ` (${toolCount} tools)` : ''}...</span>
                       </div>
                     )}
                     {isStreaming && (
                       <div className="flex items-center gap-2 py-1.5">
                         <div className="w-1.5 h-1.5 rounded-full bg-vsc-accent animate-pulse" />
-                        <span className="text-[11px] text-vsc-accent">Streaming...</span>
+                        <span className="text-base text-vsc-accent">Streaming...</span>
                       </div>
                     )}
                   </div>
@@ -440,7 +440,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
           <div ref={endRef} />
         </div>
       </div>
-      <div className="shrink-0 h-[180px] pb-5">
+      <div className="shrink-0 h-[180px] pb-2 px-2">
         {commandPanel}
       </div>
     </div>

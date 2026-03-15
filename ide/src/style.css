@@ -12,7 +12,7 @@
     --vsc-input: #3c3c3c;
     --vsc-border: #3c3c3c;
     --vsc-border-subtle: #333;
-    --vsc-text: #cccccc;
+    --vsc-text: #d4d4d4;
     --vsc-text-secondary: #858585;
     --vsc-text-muted: #6a6a6a;
     --vsc-text-disabled: #5a5a5a;
@@ -25,8 +25,8 @@
     --vsc-warning: #cca700;
     --vsc-error: #f14c4c;
     --vsc-selection: #264f78;
-    --vsc-font-size: 13px;
-    --vsc-terminal-font-size: 14px;
+    --vsc-font-size: 15px;
+    --vsc-terminal-font-size: 15px;
     --vsc-radius: 6px;
     --vsc-radius-sm: 4px;
   }
@@ -34,6 +34,25 @@
   *, ::before, ::after {
     border-color: var(--vsc-border);
   }
+
+  html, body {
+    font-size: 15px;
+    line-height: 1.6;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Font size floor — no text smaller than 13px */
+@layer utilities {
+  .text-xs { font-size: 13px !important; line-height: 1.5; }
+  .text-sm { font-size: 14px !important; line-height: 1.5; }
+}
+
+/* Soften pure white — less eye strain on dark bg */
+@layer base {
+  .text-white { color: #e0e0e0 !important; }
 }
 
 /* Unified component styles */
@@ -56,8 +75,8 @@
 
   .cicy-badge {
     @apply text-xs px-1.5 py-0.5 rounded;
-    font-size: 10px;
-    line-height: 1;
+    font-size: 13px;
+    line-height: 1.2;
   }
 
   .cicy-card {

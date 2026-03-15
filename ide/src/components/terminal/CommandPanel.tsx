@@ -433,7 +433,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
         }
         initialPosition={panelPosition}
         initialSize={panelSize}
-      minSize={{ width: 360, height: 180 }}
+      minSize={{ width: 600, height: 180 }}
       onInteractionStart={onInteractionStart}
       onInteractionEnd={onInteractionEnd}
       onChange={(pos, size) => {
@@ -452,7 +452,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
               setEnterToSend(next);
               localStorage.setItem('enter_to_send', String(next));
             }}
-            className="cicy-btn text-[10px] px-1.5 py-0.5 border border-vsc-border select-none"
+            className="cicy-btn text-xs px-1.5 py-0.5 border border-vsc-border select-none"
             title={enterToSend ? 'Enter=Send, Shift+Enter=Newline' : 'Enter=Newline, Shift+Enter=Send'}
           >
             {enterToSend ? '⏎Send' : '⇧⏎Send'}

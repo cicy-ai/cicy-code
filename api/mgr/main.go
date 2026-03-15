@@ -137,6 +137,9 @@ func main() {
 		handleNotifyStream(w, r)
 	}))
 
+	// TTS
+	http.HandleFunc("/api/tts", wa(handleTTS))
+
 	// Utils
 	http.HandleFunc("/api/utils/file/exists", wa(handleFileExists))
 	http.HandleFunc("/api/correctEnglish", wa(handleCorrectEnglish))
