@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -39,15 +40,20 @@ func nodeExec(nodeURL, cmd string) (string, error) {
 func nodeURL(paneID string) string {
 	var u string
 	if err := db.QueryRow("SELECT COALESCE(node_url,'') FROM agent_config WHERE pane_id=?", paneID).Scan(&u); err != nil || u == "" {
-		return "http://localhost:13431"
+		return ""
 	}
 	return u
 }
 
 // nodeTmux 在 pane 所属节点执行 tmux 命令
 func nodeTmux(paneID string, args ...string) (string, error) {
+	u := nodeURL(paneID)
+	if u == "" {
+		out, err := exec.Command("tmux", args...).CombinedOutput()
+		return strings.TrimSpace(string(out)), err
+	}
 	cmd := "tmux " + shellJoin(args)
-	return nodeExec(nodeURL(paneID), cmd)
+	return nodeExec(u, cmd)
 }
 
 // nodeTmuxURL 在指定 node 执行 tmux 命令

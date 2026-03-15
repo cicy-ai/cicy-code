@@ -19,7 +19,7 @@ cicy-code/
 make dev-ide        # http://localhost:6902
 
 # 后端开发
-make dev-api    # http://localhost:14444
+make dev-api    # http://localhost:8008
 
 # 构建
 make build          # 构建前后端

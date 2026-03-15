@@ -90,11 +90,11 @@ CGO_ENABLED=0 go build -o cicy-code-api ./mgr/
 
 # ============ 8. Supervisor ============
 log "配置 Supervisor..."
-sudo tee /etc/supervisor/conf.d/cicy-api.conf > /dev/null << EOF
+sudo tee ${PROJECT_DIR}/cicy-api.supervisor.conf > /dev/null << EOF
 [program:cicy-api]
 command=${PROJECT_DIR}/api/cicy-code-api
 directory=${PROJECT_DIR}/api
-environment=MYSQL_DSN="root:${MYSQL_ROOT_PASSWORD}@tcp(localhost:3306)/cicy_code",REDIS_ADDR="localhost:6379",PORT="8008",HOME="${HOME}"
+environment=TERM="xterm-256color",MYSQL_DSN="root:${MYSQL_ROOT_PASSWORD}@tcp(localhost:${MYSQL_PORT})/cicy_code",REDIS_ADDR="localhost:${REDIS_PORT}",PORT="${API_PORT}",HOME="${HOME}"
 user=$(whoami)
 autostart=true
 autorestart=true
@@ -102,10 +102,30 @@ stdout_logfile=/var/log/cicy-api.log
 stderr_logfile=/var/log/cicy-api.log
 EOF
 
+sudo ln -sf ${PROJECT_DIR}/cicy-api.supervisor.conf /etc/supervisor/conf.d/cicy-api.conf
+
 sudo supervisorctl reread
 sudo supervisorctl update
 
-# ============ 9. 验证 ============
+# ============ 9. mitmproxy CA 证书 ============
+log "安装 mitmproxy CA 证书..."
+for i in $(seq 1 15); do
+  docker exec cicy-mitmproxy cat /home/mitmproxy/.mitmproxy/mitmproxy-ca-cert.pem > /tmp/mitmproxy-ca.crt 2>/dev/null && break
+  sleep 2
+done
+if [ -f /tmp/mitmproxy-ca.crt ]; then
+  sudo cp /tmp/mitmproxy-ca.crt /usr/local/share/ca-certificates/mitmproxy-ca.crt
+  sudo update-ca-certificates
+  sudo bash -c 'cat /usr/local/share/ca-certificates/mitmproxy-ca.crt >> /etc/ssl/certs/ca-certificates.crt'
+  rm /tmp/mitmproxy-ca.crt
+  log "✅ mitmproxy CA 证书已安装"
+else
+  warn "⚠️ mitmproxy CA 证书安装失败，稍后手动运行:"
+  warn "  docker exec cicy-mitmproxy cat /home/mitmproxy/.mitmproxy/mitmproxy-ca-cert.pem | sudo tee /usr/local/share/ca-certificates/mitmproxy-ca.crt"
+  warn "  sudo update-ca-certificates"
+fi
+
+# ============ 10. 验证 ============
 log "验证服务..."
 sleep 3
 echo ""

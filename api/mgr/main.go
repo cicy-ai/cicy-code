@@ -165,7 +165,7 @@ func main() {
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "14444"
+		port = "8008"
 	}
 
 	// 注册默认 hook：thinking→idle 时通知 master

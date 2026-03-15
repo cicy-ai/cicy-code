@@ -5,11 +5,12 @@ import time
 import threading
 import redis
 import urllib.request
+import os
 from mitmproxy import http
 
-r = redis.Redis(host='127.0.0.1', port=16379, decode_responses=True)
+r = redis.Redis(host='127.0.0.1', port=int(os.environ.get('REDIS_PORT', 6379)), decode_responses=True)
 
-WEBHOOK = "http://127.0.0.1:14446/api/chat/webhook"
+WEBHOOK = f"http://127.0.0.1:{os.environ.get('API_PORT', 8008)}/api/chat/webhook"
 TARGET_HEADER = "AmazonCodeWhispererStreamingService.GenerateAssistantResponse"
 
 

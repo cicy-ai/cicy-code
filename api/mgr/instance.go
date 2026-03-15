@@ -119,6 +119,12 @@ func waitPort(port int, timeout time.Duration) bool {
 	return false
 }
 
+func isPortListening(port int) bool {
+	c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
+	if err != nil { return false }
+	c.Close()
+	return true
+}
 func runTmux(args ...string) (string, error) {
 	// 从 args 中提取 pane_id 来确定 node
 	paneID := extractPaneID(args)

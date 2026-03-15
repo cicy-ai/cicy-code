@@ -3,7 +3,7 @@
 ## 架构
 
 ```
-API (Go)          → localhost:14446  → https://g-14446.cicy.de5.net
+API (Go)          → localhost:8008  → https://g-8008.cicy.de5.net
 Frontend (Vite)   → localhost:6905   → https://ide.cicy.de5.net
 MySQL             → localhost:13306  (Docker: cicy-code-mysql)
 Redis             → localhost:16379  (Docker: cicy-code-redis)
@@ -64,7 +64,7 @@ GOROOT=/usr/lib/go CGO_ENABLED=0 go build -o cicy-code-api ./mgr/
 在 tmux 中启动：
 ```bash
 tmux send-keys -t w-10001:cicy-api \
-  "HOME=/home/w3c_offical PORT=14446 \
+  "HOME=/home/w3c_offical PORT=8008 \
    MYSQL_DSN='root:cicy-code@tcp(localhost:13306)/cicy_code' \
    REDIS_ADDR='localhost:16379' \
    ./cicy-code-api" Enter
@@ -73,14 +73,14 @@ tmux send-keys -t w-10001:cicy-api \
 ## 5. 暴露端口 (Cloudflare Tunnel)
 
 ```bash
-bash ~/skills/cf-tunnel.sh add 14446    # API
+bash ~/skills/cf-tunnel.sh add 8008    # API
 bash ~/skills/cf-tunnel.sh add 18379    # Redis Commander
 # 6905 已通过 ide.cicy.de5.net 暴露
 ```
 
 code-server 和 mitmproxy Web UI 通过 API 代理访问，不直接暴露：
-- code-server: `https://g-14446.cicy.de5.net/code/?token=<TOKEN>`
-- mitmproxy:   `https://g-14446.cicy.de5.net/mitm/?token=<TOKEN>`
+- code-server: `https://g-8008.cicy.de5.net/code/?token=<TOKEN>`
+- mitmproxy:   `https://g-8008.cicy.de5.net/mitm/?token=<TOKEN>`
 
 ## 6. 配置 Workers
 
@@ -105,7 +105,7 @@ UPDATE agent_config SET role='master', active=1
 
 ```bash
 curl -s -X POST -H "Authorization: Bearer <TOKEN>" \
-  "http://localhost:14446/api/tmux/panes/w-20147:main.0/restart"
+  "http://localhost:8008/api/tmux/panes/w-20147:main.0/restart"
 ```
 
 重启时会自动：
@@ -119,7 +119,7 @@ curl -s -X POST -H "Authorization: Bearer <TOKEN>" \
 
 | 服务 | 端口 | 容器名 | 说明 |
 |------|------|--------|------|
-| API | 14446 | 本地进程 | Go API 服务 |
+| API | 8008 | 本地进程 | Go API 服务 |
 | Frontend | 6905 | cicy-code-ide-dev-1 | Vite dev server |
 | MySQL | 13306 | cicy-code-mysql | 密码: cicy-code |
 | Redis | 16379 | cicy-code-redis | |
@@ -134,9 +134,9 @@ curl -s -X POST -H "Authorization: Bearer <TOKEN>" \
 | 服务 | URL |
 |------|-----|
 | IDE | https://ide.cicy.de5.net |
-| API | https://g-14446.cicy.de5.net |
-| code-server | https://g-14446.cicy.de5.net/code/?token=TOKEN |
-| mitmproxy | https://g-14446.cicy.de5.net/mitm/?token=TOKEN |
+| API | https://g-8008.cicy.de5.net |
+| code-server | https://g-8008.cicy.de5.net/code/?token=TOKEN |
+| mitmproxy | https://g-8008.cicy.de5.net/mitm/?token=TOKEN |
 | phpMyAdmin | https://g-12222.cicy.de5.net |
 | Redis Commander | https://g-18379.cicy.de5.net |
 
@@ -148,7 +148,7 @@ sleep 1
 cd /home/w3c_offical/projects/cicy-code/api
 GOROOT=/usr/lib/go CGO_ENABLED=0 go build -o cicy-code-api ./mgr/
 tmux send-keys -t w-10001:cicy-api \
-  "HOME=/home/w3c_offical PORT=14446 \
+  "HOME=/home/w3c_offical PORT=8008 \
    MYSQL_DSN='root:cicy-code@tcp(localhost:13306)/cicy_code' \
    REDIS_ADDR='localhost:16379' \
    ./cicy-code-api" Enter
