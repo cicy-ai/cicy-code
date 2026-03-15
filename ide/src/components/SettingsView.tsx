@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { EditPaneData } from './EditPaneDialog';
 import { Loader2 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
+import Select from './ui/Select';
 
 const THEME_KEY = 'app_theme';
 const themes = [
@@ -51,11 +52,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
         {tab === 'General' && (<>
           <div>
             <label className="block text-xs text-vsc-text-secondary mb-1">Theme</label>
-            <select value={theme}
-              onChange={e => handleThemeChange(e.target.value)}
-              className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent">
-              {themes.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
+            <Select value={theme}
+              onChange={handleThemeChange}
+              options={themes.map(t => ({ value: t.value, label: t.label }))}
+              placeholder="Select theme"
+            />
           </div>
           <div>
             <label className="block text-xs text-vsc-text-secondary mb-1">Title</label>
@@ -91,54 +92,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
           </div>
           <div>
             <label className="block text-xs text-vsc-text-secondary mb-1">Agent Type</label>
-            <select value={pane.agent_type || ''}
-              onChange={e => onChange({ ...pane, agent_type: e.target.value })}
-              className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent">
-              <option value="">无</option>
-              <option value="kiro-cli">kiro-cli</option>
-              <option value="opencode">opencode</option>
-              <option value="gemini">gemini</option>
-              <option value="claude">claude</option>
-              <option value="codex">codex</option>
-              <option value="copilot">copilot</option>
-            </select>
+            <Select value={pane.agent_type || ''}
+              onChange={v => onChange({ ...pane, agent_type: v })}
+              options={[{value:'',label:'无'},{value:'kiro-cli',label:'kiro-cli'},{value:'opencode',label:'opencode'},{value:'gemini',label:'gemini'},{value:'claude',label:'claude'},{value:'codex',label:'codex'},{value:'copilot',label:'copilot'}]}
+              searchable
+            />
           </div>
           <div>
             <label className="block text-xs text-vsc-text-secondary mb-1">Role</label>
-            <select value={pane.role || ''}
-              onChange={e => onChange({ ...pane, role: e.target.value })}
-              className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent">
-              <option value="">无</option>
-              <option value="master">master</option>
-              <option value="worker">worker</option>
-            </select>
+            <Select value={pane.role || ''}
+              onChange={v => onChange({ ...pane, role: v })}
+              options={[{value:'',label:'无'},{value:'master',label:'master'},{value:'worker',label:'worker'}]}
+            />
           </div>
           <div>
             <label className="block text-xs text-vsc-text-secondary mb-1">Default Model</label>
-            <select value={pane.default_model || ''}
-              onChange={e => onChange({ ...pane, default_model: e.target.value })}
-              className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent">
-              <option value="">无</option>
-              <option value="claude-opus-4.6">opus-4.6</option>
-              <option value="claude-opus-4.5">opus-4.5</option>
-              <option value="claude-sonnet-4.5">sonnet-4.5</option>
-              <option value="claude-sonnet-4">sonnet-4</option>
-              <option value="claude-haiku-4.5">haiku-4.5</option>
-              <option value="deepseek-3.2">deepseek-3.2</option>
-              <option value="minimax-m2.1">minimax-m2.1</option>
-              <option value="qwen3-coder-next">qwen3-coder</option>
-            </select>
+            <Select value={pane.default_model || ''}
+              onChange={v => onChange({ ...pane, default_model: v })}
+              options={[{value:'',label:'无'},{value:'claude-opus-4.6',label:'opus-4.6'},{value:'claude-opus-4.5',label:'opus-4.5'},{value:'claude-sonnet-4.5',label:'sonnet-4.5'},{value:'claude-sonnet-4',label:'sonnet-4'},{value:'claude-haiku-4.5',label:'haiku-4.5'},{value:'deepseek-3.2',label:'deepseek-3.2'},{value:'minimax-m2.1',label:'minimax-m2.1'},{value:'qwen3-coder-next',label:'qwen3-coder'}]}
+              searchable
+            />
           </div>
           <div>
             <label className="block text-xs text-vsc-text-secondary mb-1">Trust Level</label>
-            <select value={pane.trust_level || ''}
-              onChange={e => onChange({ ...pane, trust_level: e.target.value })}
-              className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent">
-              <option value="">无</option>
-              <option value="trust-all">trust-all</option>
-              <option value="ask">ask</option>
-              <option value="deny">deny</option>
-            </select>
+            <Select value={pane.trust_level || ''}
+              onChange={v => onChange({ ...pane, trust_level: v })}
+              options={[{value:'',label:'无'},{value:'trust-all',label:'trust-all'},{value:'ask',label:'ask'},{value:'deny',label:'deny'}]}
+            />
           </div>
           <div>
             <label className="block text-xs text-vsc-text-secondary mb-1">Agent Duty</label>
