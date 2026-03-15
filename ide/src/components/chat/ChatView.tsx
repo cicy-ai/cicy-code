@@ -158,8 +158,11 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
         if (json.data && Array.isArray(json.data)) {
           const s = JSON.stringify(json.data);
           if (s !== lastJsonRef.current) { 
-            lastJsonRef.current = s; 
-            setChatData(json.data); 
+            lastJsonRef.current = s;
+            setChatData(prev => {
+              const sys = prev.filter((c: any) => c.system);
+              return [...json.data, ...sys];
+            });
             setHasMore(json.data.length > 2); 
             setCache(short, json.data); 
           }
@@ -177,7 +180,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
       const base = config.apiBase.replace(/^https?/, proto);
       const isElectron = typeof (window as any).electronRPC === 'function' ? '1' : '0';
       ws = new WebSocket(`${base}/api/chat/ws?pane=${short}&token=${token}&electron=${isElectron}`);
-      ws.onopen = () => reload();
+      ws.onopen = () => { console.log('[ChatView] WS connected, pane=' + short); reload(); };
       ws.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
@@ -207,6 +210,10 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
             });
           }
           else if (msg.type === 'desktop_event' && msg.data) { window.dispatchEvent(new CustomEvent('agent-desktop-event', { detail: msg.data })); }
+          else if (msg.type === 'worker_idle') {
+            const d = msg.data?.data;
+            if (d) setChatData(prev => [...prev, { q: '', a: `🔔 **${d.worker || msg.data.from}** finished task (idle)`, status: 'done', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0, system: true }]);
+          }
           else { if (!streaming) debouncedReload(); }
         } catch { if (!streaming) debouncedReload(); }
       };
@@ -277,8 +284,8 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
   const groups: { q: string; r: any }[] = [];
   const allData = chatData;
   allData.slice(-displayCount).forEach((c: any) => {
-    if (!c.q) return;
-    groups.push({ q: c.q, r: c });
+    if (!c.q && !c.system) return;
+    groups.push({ q: c.q || '', r: c });
   });
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -344,6 +351,16 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
             </div>
           ) : groups.map((g, gi) => {
             const { r } = g;
+
+            // System notification (e.g. worker_idle)
+            if (r?.system) {
+              return (
+                <div key={gi} className="mb-3 px-3.5 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-sm text-yellow-200/80">
+                  <span className="chat-markdown" dangerouslySetInnerHTML={{ __html: (r.a || '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') }} />
+                </div>
+              );
+            }
+
             const steps: any[] = r?.steps || [];
             const ranSec = r?.ts && r?.start_ts ? Math.round(r.ts - r.start_ts) : 0;
             const isRunning = r?.status === 'tool_use';
@@ -412,24 +429,20 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
                     {/* Live status */}
                     {isPending && (
                       <div className="flex items-center gap-2 py-1.5">
-                        <div className="flex gap-0.5">
-                          <div className="w-1.5 h-1.5 rounded-full bg-vsc-accent animate-bounce" style={{ animationDelay: '0ms' }} />
-                          <div className="w-1.5 h-1.5 rounded-full bg-vsc-accent animate-bounce" style={{ animationDelay: '150ms' }} />
-                          <div className="w-1.5 h-1.5 rounded-full bg-vsc-accent animate-bounce" style={{ animationDelay: '300ms' }} />
-                        </div>
-                        <span className="text-base text-vsc-accent">Thinking...</span>
+                        <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+                        <span className="text-base text-yellow-400/80 animate-pulse">Thinking...</span>
                       </div>
                     )}
                     {isRunning && (
                       <div className="flex items-center gap-2 py-1.5">
-                        <div className="w-3 h-3 border border-vsc-accent/40 border-t-vsc-accent rounded-full animate-spin" />
-                        <span className="text-base text-vsc-accent">Running{toolCount > 0 ? ` (${toolCount} tools)` : ''}...</span>
+                        <div className="w-3 h-3 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin" />
+                        <span className="text-base text-yellow-400/80">Running{toolCount > 0 ? ` (${toolCount} tools)` : ''}...</span>
                       </div>
                     )}
                     {isStreaming && (
                       <div className="flex items-center gap-2 py-1.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-vsc-accent animate-pulse" />
-                        <span className="text-base text-vsc-accent">Streaming...</span>
+                        <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                        <span className="text-base text-blue-400/80">Streaming...</span>
                       </div>
                     )}
                   </div>

@@ -1,19 +1,23 @@
-import { defineConfig } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import path from 'path';
+import {defineConfig, loadEnv} from 'vite';
 
-export default defineConfig({
-  plugins: [react()],
-  base: './',
-  server: {
-    host: '0.0.0.0',
-    port: 6902,
-    strictPort: true,
-    allowedHosts: true,
-    cors: true,
-    hmr: {
-      host: 'ide.cicy.de5.net',
-      clientPort: 443,
-      protocol: 'wss',
+export default defineConfig(({mode}) => {
+  const env = loadEnv(mode, '.', '');
+  return {
+    plugins: [react(), tailwindcss()],
+    define: {
+      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     },
-  },
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, 'src'),
+      },
+    },
+    server: {
+      hmr: process.env.DISABLE_HMR !== 'true',
+      allowedHosts: true,
+    },
+  };
 });

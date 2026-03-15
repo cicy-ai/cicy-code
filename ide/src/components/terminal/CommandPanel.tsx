@@ -243,11 +243,22 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
     
     if (!cmd || !paneTarget) return;
     
+    // @worker dispatch: "@w-20147 do something" → queue to worker
+    const atMatch = cmd.match(/^@(w-\d+)\s+(.+)$/s);
+    if (atMatch) {
+      const [, targetWorker, taskMsg] = atMatch;
+      setPromptText(''); saveDraft('');
+      setIsSending(true);
+      try {
+        window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
+        await apiService.pushQueue({ pane_id: targetWorker, message: taskMsg, type: 'task' });
+        setSendSuccess(true); setTimeout(() => setSendSuccess(false), 2000);
+      } catch (e) { console.error(e); }
+      finally { setIsSending(false); setTimeout(() => textareaRef.current?.focus(), 50); }
+      return;
+    }
+
     const newHistory = [cmd, ...commandHistory.filter(c => c !== cmd)].slice(0, 50);
-    setCommandHistory(newHistory);
-    saveCommandHistory(newHistory);
-    setHistoryIndex(-1);
-    setTempDraft('');
     setPromptText('');
     saveDraft('');
     setIsSending(true);
@@ -370,19 +381,12 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
               }}
             >
               <option value="">⚡</option>
-              <option value="Left">← Left</option>
-              <option value="Down">↓ Down</option>
-              <option value="Up">↑ Up</option>
-              <option value="Right">→ Right</option>
               <option value="C-c">^C</option>
-              <option value="/compact">/compact</option>
-              <option value="/compact --truncate-large-messages true --max-message-length 500">/compact mac</option>
-              <option value="/tools trust-all">/tools trust-all</option>
-              <option value="kiro-cli chat -a">kiro-cli chat -a</option>
               <option value="/chat resume">/chat resume</option>
-              <option value="t">Trust (t)</option>
-              <option value="y">Yes (y)</option>
-              <option value="n">No (n)</option>
+              <option value="/tools trust-all">/tools trust-all</option>
+              <option value="/compact">/compact</option>
+              <option value="/compact --truncate-large-messages true --max-message-length 500">/compact cut</option>
+              <option value="kiro-cli chat -a">kiro-cli chat -a</option>
             </select>
             <select
               value={defaultModel}
