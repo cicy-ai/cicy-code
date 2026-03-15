@@ -63,6 +63,7 @@ services:
     container_name: cicy-code-server
     restart: unless-stopped
     network_mode: host
+    user: "1000:1000"
     environment:
       - TERM=xterm-256color
     volumes:
