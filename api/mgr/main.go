@@ -173,25 +173,33 @@ func main() {
 			// Auto-dispatch queued messages
 			go dispatchQueue(paneID)
 
-			// Find master panes bound to this worker via role field
-			rows, err := db.Query(`SELECT pa.agent_name FROM pane_agents pa
-				JOIN agent_config ac ON ac.pane_id = pa.agent_name
-				WHERE pa.pane_id=? AND pa.status='active' AND ac.role='master'`, paneID)
+			shortPane := shortPaneID(paneID)
+
+			// Find master panes that have this worker bound
+			rows, err := db.Query(`SELECT pa.pane_id FROM pane_agents pa WHERE pa.agent_name=? AND pa.status='active'`, shortPane)
 			if err != nil {
 				return
 			}
 			defer rows.Close()
 			for rows.Next() {
-				var agent string
-				rows.Scan(&agent)
-				target := agent
-				if !strings.Contains(target, ":") {
-					target += ":main.0"
-				}
-				msg := fmt.Sprintf("pane_idle:%s", paneID)
-				nodeTmux(target, "send-keys", "-t", target, "-l", msg)
-				nodeTmux(target, "send-keys", "-t", target, "Enter")
-				log.Printf("[hook] notified master %s: %s", agent, msg)
+				var masterPane string
+				rows.Scan(&masterPane)
+
+				// Push to master's chat via ChatBus
+				hub.broadcast(masterPane, ChatEvent{
+					Type: "worker_idle",
+					Data: M{
+						"protocol": "cicy/v1",
+						"from":     shortPane,
+						"type":     "task_result",
+						"data": M{
+							"worker":  shortPane,
+							"status":  "idle",
+							"message": fmt.Sprintf("Worker %s finished (thinking → idle)", shortPane),
+						},
+					},
+				})
+				log.Printf("[hook] notified master %s via chatbus: worker %s idle", masterPane, shortPane)
 			}
 		}
 	})
