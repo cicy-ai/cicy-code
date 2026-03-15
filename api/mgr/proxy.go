@@ -17,7 +17,7 @@ var codeServerInjectContent []byte
 var codeServerInjectMtime int64
 
 func init() {
-	target, _ := url.Parse("http://127.0.0.1:18080")
+	target, _ := url.Parse("http://127.0.0.1:8002")
 	codeServerProxy = httputil.NewSingleHostReverseProxy(target)
 	codeServerProxy.ModifyResponse = injectCodeServerJS
 	
