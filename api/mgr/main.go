@@ -115,6 +115,7 @@ func main() {
 
 	// Chat V2 — WebSocket
 	http.HandleFunc("/api/chat/ws", handleChatWS)
+	http.HandleFunc("/api/chat/debug", wa(handleChatDebug))
 	http.HandleFunc("/api/chat/webhook", corsM(handleChatWebhook))
 	http.HandleFunc("/api/stats/traffic/live", corsM(func(w http.ResponseWriter, r *http.Request) {
 		// SSE needs query token since EventSource can't set headers
@@ -185,7 +186,11 @@ func main() {
 				var masterPane string
 				rows.Scan(&masterPane)
 
-				// Push to master's chat via ChatBus
+				// 1. Send to master CLI via tmux (core: master CLI handles dispatch/review)
+				tmuxCmd("send-keys", "-t", masterPane+":main.0", "-l", fmt.Sprintf("pane_idle:%s", shortPane))
+				tmuxCmd("send-keys", "-t", masterPane+":main.0", "Enter")
+
+				// 2. Also notify ChatView UI
 				hub.broadcast(masterPane, ChatEvent{
 					Type: "worker_idle",
 					Data: M{
@@ -199,7 +204,7 @@ func main() {
 						},
 					},
 				})
-				log.Printf("[hook] notified master %s via chatbus: worker %s idle", masterPane, shortPane)
+				log.Printf("[hook] notified master %s (tmux+chatbus): worker %s idle", masterPane, shortPane)
 			}
 		}
 	})

@@ -62,6 +62,8 @@ func (h *chatHub) broadcast(pane string, evt ChatEvent) {
 	b, _ := json.Marshal(evt)
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	n := len(h.clients[pane])
+	log.Printf("[chat-ws] broadcast pane=%s type=%s clients=%d", pane, evt.Type, n)
 	for c := range h.clients[pane] {
 		select {
 		case c.send <- b:
@@ -209,6 +211,18 @@ func handleChatPush(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hub.broadcast(req.Pane, ChatEvent{Type: req.Type, Data: req.Data})
+	log.Printf("[chat-push] pane=%s type=%s", req.Pane, req.Type)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+func handleChatDebug(w http.ResponseWriter, r *http.Request) {
+	hub.mu.RLock()
+	defer hub.mu.RUnlock()
+	res := map[string]int{}
+	for pane, clients := range hub.clients {
+		res[pane] = len(clients)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
 }
