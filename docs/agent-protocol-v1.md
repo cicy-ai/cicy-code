@@ -1,23 +1,26 @@
 # CiCy Agent Protocol v1
 
-Master-Worker 通信协议。基于现有 API 基础设施（queue + chatbus + status watcher）。
+Master-Worker 通信协议。基于现有 API 基础设施（queue + chatbus + tmux + status watcher）。
 
 ---
 
 ## 通信通道
 
 ```
-Master ←→ API Server ←→ Worker
-         (HTTP/WS)
+Master CLI ←→ API Server ←→ Worker CLI
+              (HTTP/WS/tmux)
 
-通道 1: Queue（异步指令）
-  Master → POST /api/workers/queue → Worker idle 时自动 dispatch
+通道 1: Queue（Master → Worker 异步指令）
+  Master → POST /api/workers/queue → Worker idle 时自动 dispatch 到 tmux
 
-通道 2: ChatBus（实时事件）
-  POST /api/chat/push → WS 广播 → 前端/Agent 接收
+通道 2: tmux send-keys（Worker → Master CLI 通知）
+  Worker idle → hook → tmux send-keys "pane_idle:w-20147" → Master CLI stdin
 
-通道 3: Status Watcher（状态变化）
-  Worker thinking→idle → 触发 hook → 通知 Master
+通道 3: ChatBus WS（Worker → Master UI 通知）
+  Worker idle → hook → hub.broadcast worker_idle → ChatView 显示通知
+
+通道 4: @worker 语法（Master UI → Worker）
+  ChatView 输入 "@w-20147 做xxx" → POST /api/workers/queue
 ```
 
 ---
@@ -118,77 +121,78 @@ state: `idle` | `thinking` | `running` | `blocked` | `error`
 }
 ```
 
-### 6. query — Master 查询 Worker 状态
-
-```json
-{
-  "type": "query",
-  "data": {
-    "what": "current_task"
-  }
-}
-```
-
-### 7. reply — 通用回复
-
-```json
-{
-  "type": "reply",
-  "data": {
-    "reply_to": "<original_msg_id>",
-    "result": { ... }
-  }
-}
-```
-
 ---
 
 ## 传输方式
 
 ### Master → Worker（派任务）
 
-通过 Queue API，Worker idle 时自动 dispatch 到 tmux：
+**方式 A: Queue API（推荐）**
 
 ```bash
 POST /api/workers/queue
 {
   "pane_id": "w-20147",
-  "message": "<json_msg>",
+  "message": "实现登录页面",
   "type": "task",
   "priority": 0
 }
 ```
 
-Queue dispatch 时，消息通过 `tm msg` 发送到 Worker 的 kiro-cli stdin。
+Worker idle 时自动 dispatch 到 tmux stdin。
 
-### Worker → Master（报告结果）
+**方式 B: @worker 语法（ChatView UI）**
 
-通过 ChatBus push，Master 前端 WS 接收：
+在 CommandPanel 输入 `@w-20147 实现登录页面`，前端拦截后调用 Queue API。
 
-```bash
-POST /api/chat/push
-{
-  "pane": "w-10001",
-  "type": "agent_event",
-  "data": {
-    "protocol": "cicy/v1",
-    "from": "w-20147",
-    "type": "task_result",
-    ...
-  }
-}
-```
+### Worker → Master（完成通知）
 
-### 状态变化通知（自动）
+**自动触发**：Worker thinking→idle 时，hook 同时做两件事：
 
-已有 watcher hook：Worker thinking→idle 时自动通知 Master。
+1. **tmux send-keys** → Master CLI 收到 `pane_idle:w-20147`（Master CLI 可据此验收/派新任务）
+2. **ChatBus broadcast** → Master ChatView 显示黄色通知条 `🔔 w-20147 finished task (idle)`
 
 ```go
-// stats.go — 已有
-RegisterHook(func(paneID string, old, new paneSt) {
-    // Worker idle → dispatch queued messages
-    go dispatchQueue(paneID)
-})
+// main.go hook
+tmuxCmd("send-keys", "-t", masterPane+":main.0", "-l", "pane_idle:"+shortPane)
+tmuxCmd("send-keys", "-t", masterPane+":main.0", "Enter")
+hub.broadcast(masterPane, ChatEvent{Type: "worker_idle", Data: ...})
+```
+
+### 自动 Dispatch
+
+Worker idle 时还会自动 `dispatchQueue(paneID)` — 如果队列里有 pending 任务，直接发给 Worker。
+
+---
+
+## 完整数据流
+
+```
+Master CLI / ChatView
+  │
+  │── @w-20147 做xxx ──▶ POST /api/workers/queue (pending)
+  │                                │
+  │                     Worker idle 时 dispatch
+  │                                │
+  │                                ▼
+  │                        Worker tmux stdin
+  │                                │
+  │                        Worker thinking...
+  │                                │
+  │                        Worker done → idle
+  │                                │
+  │                         Hook 触发
+  │                        ┌───────┴───────┐
+  │                        ▼               ▼
+  │              tmux send-keys      ChatBus broadcast
+  │              "pane_idle:w-20147"  worker_idle event
+  │                        │               │
+  │◀───────────────────────┘               │
+  │  Master CLI 收到                        │
+  │  (验收/派新任务)                         │
+  │                                        ▼
+  │                              ChatView 黄色通知
+  │                              🔔 w-20147 finished
 ```
 
 ---
@@ -196,40 +200,17 @@ RegisterHook(func(paneID string, old, new paneSt) {
 ## 任务生命周期
 
 ```
-Master                    API                     Worker
-  │                        │                        │
-  │── task ──────────────▶│                        │
-  │                        │── queue (pending) ──▶ │
-  │                        │   (wait for idle)      │
-  │                        │── dispatch ──────────▶│
-  │                        │                        │── thinking
-  │                        │                        │── running
-  │◀── status(thinking) ──│◀── watcher ───────────│
-  │                        │                        │
-  │                        │                        │── done
-  │◀── task_result ───────│◀── chat/push ─────────│
-  │                        │                        │
-  │── next task ─────────▶│                        │
-  │                        │                        │
-```
-
----
-
-## 任务状态机
-
-```
-pending → queued → dispatched → running → done
-                                       → failed
-                                       → cancelled
+pending → dispatched → thinking → idle (done)
+                                → failed
+                                → cancelled
 ```
 
 | 状态 | 说明 | 触发 |
 |------|------|------|
-| pending | 在队列中等待 | Master push |
-| queued | 已入队 | API 确认 |
-| dispatched | 已发送到 Worker | Worker idle 触发 |
-| running | Worker 正在执行 | Worker status=thinking |
-| done | 完成 | Worker 报告 task_result |
+| pending | 在队列中等待 | Master push queue |
+| dispatched | 已发送到 Worker tmux | Worker idle 触发 dispatch |
+| thinking | Worker 正在执行 | Status watcher 检测 |
+| idle (done) | 完成 | Hook 触发通知 |
 | failed | 失败 | Worker 报告 error |
 | cancelled | 已取消 | Master 发 cancel |
 
@@ -237,35 +218,51 @@ pending → queued → dispatched → running → done
 
 ## 前端集成
 
-### TeamPanel 显示
+### ChatView
 
-每个 Worker 卡片显示：
-- 当前任务标题 + 进度
+- **接收 `worker_idle` WS 事件** → 显示黄色通知条
+- **system 消息不被 reload 覆盖** → reload 时保留 `system: true` 的消息
+- **`@worker` 语法** → CommandPanel 拦截，走 queue API
+
+### TeamPanel
+
+- 所有绑定 Worker 的 ttyd 终端平铺显示
 - 状态点（thinking/idle/error）
-- ttyd 终端实时输出
-
-### Chat 集成
-
-Master Chat 里显示：
-- Worker 完成通知（task_result）
-- Worker 状态变化
-- 可以直接在 Chat 里给 Worker 下任务
+- 绑定/解绑/新建 Worker
 
 ---
 
-## 实现优先级
+## API 端点
 
-### Phase 1 — 基础通信（用现有设施）
-- [x] Queue API（已有）
-- [x] ChatBus push（已有）
-- [x] Status watcher + hook（已有）
-- [ ] 统一消息格式（JSON wrapper）
-- [ ] TeamPanel 显示当前任务
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/workers/queue` | POST | 推任务到 Worker 队列 |
+| `/api/chat/push` | POST | 推事件到 ChatBus WS |
+| `/api/chat/ws` | WS | ChatView 实时连接 |
+| `/api/chat/debug` | GET | 查看 hub 当前 WS clients |
+| `/api/agents/pane/{id}` | GET | 获取绑定的 agents |
+| `/api/agents/bind` | POST | 绑定 Worker 到 Master |
+| `/api/agents/unbind/{id}` | DELETE | 解绑 |
+| `/api/tmux/status` | GET | 所有 agent 状态 |
+
+---
+
+## 实现状态
+
+### Phase 1 — 基础通信 ✅
+- [x] Queue API（push + dispatch）
+- [x] ChatBus broadcast（worker_idle → ChatView）
+- [x] tmux send-keys（worker_idle → Master CLI）
+- [x] Status watcher + hook（thinking→idle 触发）
+- [x] @worker 语法（CommandPanel 拦截）
+- [x] ChatView 通知渲染（黄色通知条）
+- [x] debug 端点（/api/chat/debug）
 
 ### Phase 2 — 任务管理
 - [ ] 任务状态持久化（agent_queue 表扩展）
+- [ ] Master CLI 验收流程
 - [ ] 任务历史查看
-- [ ] 批量任务派发
+- [ ] TeamPanel 显示当前任务
 
 ### Phase 3 — 智能调度
 - [ ] 自动选择最空闲的 Worker
