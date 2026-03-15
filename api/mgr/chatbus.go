@@ -168,6 +168,9 @@ func handleChatWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hub.broadcast(req.Pane, ChatEvent{Type: req.Event, Data: req.Data})
+	if req.Event == "user_q" {
+		hub.broadcast(req.Pane, ChatEvent{Type: "status_change", Data: M{"status": "thinking"}})
+	}
 	if req.Event == "ai_done" {
 		hub.broadcast(req.Pane, ChatEvent{Type: "status_change", Data: M{"status": "idle"}})
 	}
