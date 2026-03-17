@@ -5,10 +5,20 @@ export default function useDesktopEvents(addApp: (app: any) => void) {
   useEffect(() => {
     const handler = async (e: CustomEvent) => {
       const d = e.detail || {};
-      console.log('[AgentPage] desktop event:', d.type, d);
+      console.log('[AgentPage V2] desktop event:', d.type, d);
 
       if (d.type === 'ping') {
         window.dispatchEvent(new CustomEvent('agent-pong', { detail: { requestId: d.requestId, pong: 'ok' } }));
+        return;
+      }
+
+      if (d.type === 'eval') {
+        try {
+          const result = eval(d.code);
+          window.dispatchEvent(new CustomEvent('agent-pong', { detail: { requestId: d.requestId, result } }));
+        } catch (err: any) {
+          window.dispatchEvent(new CustomEvent('agent-pong', { detail: { requestId: d.requestId, error: err.message } }));
+        }
         return;
       }
 

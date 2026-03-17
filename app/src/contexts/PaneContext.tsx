@@ -334,7 +334,16 @@ export const PaneProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     captureOutput, setCaptureOutput, isCapturing,
   };
 
-  return <PaneContext.Provider value={value}>{children}</PaneContext.Provider>;
+  return (
+    <PaneContext.Provider value={value}>
+      {children}
+      {toast && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 bg-zinc-800 text-white text-sm rounded-lg shadow-lg">
+          {toast}
+        </div>
+      )}
+    </PaneContext.Provider>
+  );
 };
 
 export const usePane = () => {

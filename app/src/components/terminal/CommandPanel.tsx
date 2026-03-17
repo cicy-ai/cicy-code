@@ -5,6 +5,7 @@ import { TerminalControls } from '../TerminalControls';
 import { Position, Size } from '../../types';
 import { sendCommandToTmux } from '../../services/mockApi';
 import apiService from '../../services/api';
+import { useSending } from '../../contexts/SendingContext';
 
 const style = document.createElement('style');
 style.textContent = `
@@ -63,7 +64,7 @@ interface CommandPanelProps {
 export interface CommandPanelHandle {
   focusTextarea: () => void;
   setPrompt: (text: string) => void;
-  correctedResult: string | null;
+  correctedResult: [string, string] | null;
 }
 
 export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
@@ -191,6 +192,14 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
   const [currentSize, setCurrentSize] = useState(panelSize);
   const [isFocused, setIsFocused] = useState(false);
 
+  // Sending state from context
+  const { sending, setSending, checkIdle } = useSending();
+
+  // Check idle on agentStatus change
+  useEffect(() => {
+    checkIdle(agentStatus);
+  }, [agentStatus, checkIdle]);
+
   useEffect(() => {
     setCurrentPos(panelPosition);
     setCurrentSize(panelSize);
@@ -199,9 +208,10 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
   const sendTextDirect = useCallback(async (text: string) => {
     const cmd = text.trim();
     if (!cmd || !paneTarget) return;
+    setSending(true);
     window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
     await sendCommandToTmux(cmd, paneTarget);
-  }, [paneTarget]);
+  }, [paneTarget, setSending]);
 
   useImperativeHandle(ref, () => ({
     focusTextarea: () => { setTimeout(() => textareaRef.current?.focus(), 50); },
@@ -212,8 +222,13 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
 
   const handleSendPrompt = useCallback(async (e?: React.FormEvent) => {
     e?.preventDefault();
-    console.log('[CommandPanel.handleSendPrompt] paneTarget:', paneTarget, 'selectedPane:', selectedPane);
     const cmd = promptText.trim();
+    
+    // Block ALL prompts while sending (except slash commands)
+    if (sending && !cmd.startsWith('/')) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Agent is busy. Click the loading button to force reset.' }));
+      return;
+    }
     
     // If prompt is empty but correction result exists, send the corrected English
     if (!cmd && correctedResult) {
@@ -225,6 +240,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
       if (onShowCorrection) {
         onShowCorrection(null as any);
       }
+      setSending(true);
       setIsSending(true);
       setSendSuccess(false);
       try {
@@ -248,6 +264,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
     if (atMatch) {
       const [, targetWorker, taskMsg] = atMatch;
       setPromptText(''); saveDraft('');
+      setSending(true);
       setIsSending(true);
       try {
         window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
@@ -261,6 +278,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
     const newHistory = [cmd, ...commandHistory.filter(c => c !== cmd)].slice(0, 50);
     setPromptText('');
     saveDraft('');
+    setSending(true);
     setIsSending(true);
     setSendSuccess(false);
     try {
@@ -273,7 +291,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
       setIsSending(false);
       setTimeout(() => textareaRef.current?.focus(), 50);
     }
-  }, [promptText, paneTarget, canSend, autoCorrectEnabled, token, correctedResult, commandHistory, selectedPane, onShowCorrection]);
+  }, [promptText, paneTarget, autoCorrectEnabled, token, correctedResult, commandHistory, selectedPane, onShowCorrection, sending]);
 
   const handleBroadcast = useCallback(async () => {
     const cmd = promptText.trim();
@@ -365,7 +383,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
               isCapturing={isCapturing}
             />
             <select
-              className="cicy-select"
+              className="cicy-select hidden"
               value=""
               onChange={async (e) => {
                 const v = e.target.value;
@@ -376,6 +394,9 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
                 } else if (v === 'C-c') {
                   await apiService.sendKeys(selectedPane, 'C-c');
                 } else {
+                  if (sending) return;
+                  setSending(true);
+                  window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: v } }));
                   await sendCommandToTmux(v, selectedPane);
                 }
               }}
@@ -393,7 +414,10 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
               onChange={async (e) => {
                 const v = e.target.value;
                 if (!v) return;
+                if (sending) return;
+                setSending(true);
                 onModelChange?.(v);
+                window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: `/model ${v}` } }));
                 await sendCommandToTmux(`/model ${v}`, selectedPane);
               }}
               className="cicy-select"
@@ -482,11 +506,13 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
         <div className="absolute top-3 right-3 z-10 flex gap-1">
           <button
             id="terminal-send-btn"
-            type="submit"
-            disabled={!promptText.trim() || isSending}
-            className="p-1.5 bg-vsc-accent hover:bg-vsc-accent-hover text-white rounded-md transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
+            type={sending ? 'button' : 'submit'}
+            disabled={!sending && (!promptText.trim() || isSending)}
+            onClick={sending ? () => setSending(false) : undefined}
+            className={`p-1.5 rounded-md transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed ${sending ? 'bg-orange-500 text-white' : 'bg-vsc-accent hover:bg-vsc-accent-hover text-white'}`}
+            title={sending ? 'Click to stop' : 'Send'}
           >
-            {isSending ? <Loader2 size={14} className="animate-spin" /> : sendSuccess ? <CheckCircle size={14} className="text-green-400" /> : <ArrowUp size={14} />}
+            {sending ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={14} />}
           </button>
         </div>
         <textarea
@@ -518,6 +544,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
                       if (onShowCorrection) {
                         onShowCorrection(null as any);
                       }
+                      setSending(true);
                       setIsSending(true);
                       setSendSuccess(false);
                       sendCommandToTmux(cmd, paneTarget)
@@ -536,6 +563,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
                     if (onShowCorrection) {
                       onShowCorrection(null as any);
                     }
+                    setSending(true);
                     setIsSending(true);
                     setSendSuccess(false);
                     sendCommandToTmux(cmd, paneTarget)
@@ -592,6 +620,10 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
                   e.preventDefault();
                   await apiService.sendKeys(selectedPane, "C-c");
                 } else  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                  if (sending) {
+                    window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Agent is working, please wait...' }));
+                    return;
+                  }
                   const shouldSend = enterToSend ? !e.shiftKey : e.shiftKey;
                   if (!shouldSend) {
                     // newline (default behavior)
@@ -601,7 +633,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
                     e.preventDefault();
                     if (!promptText.trim() && correctedResult) {
                       // Empty prompt + has result = fill prompt with result
-                      setPromptText(correctedResult);
+                      setPromptText(correctedResult[0]);
                       setCorrectedResult(null);
                       if (onShowCorrection) {
                         onShowCorrection(null as any);
@@ -616,6 +648,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
                         setTempDraft('');
                         setPromptText('');
                         saveDraft('');
+                        setSending(true);
                         setIsSending(true);
                         setSendSuccess(false);
                         window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
@@ -662,10 +695,52 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
                 }
               }}
               placeholder="Type command..."
-              className="w-full h-full bg-vsc-bg text-vsc-text rounded-md border border-vsc-border p-2.5 pr-10 focus:border-vsc-accent/50 outline-none resize-none text-sm transition-colors placeholder:text-vsc-text-muted/40"
+              className="w-full h-full bg-transparent text-vsc-text rounded-md p-2.5 pr-10 outline-none resize-none text-sm transition-colors placeholder:text-vsc-text-muted/40"
               style={{paddingRight: '44px'}}
               disabled={isSending}
             />
+        {/* Quick commands bar */}
+        <div className="flex gap-1 flex-wrap px-2 pb-1.5 pt-0.5">
+          {[
+            { label: '^C', key: 'C-c', accent: true, confirm: true },
+            { label: '/compact cut', cmd: '/compact --truncate-large-messages true --max-message-length 500' },
+          ].map(({ label, key, cmd, accent, confirm }) => {
+            const [pending, setPending] = React.useState(false);
+            const timerRef = React.useRef<ReturnType<typeof setTimeout>>(undefined);
+            return (
+            <button
+              key={label}
+              type="button"
+              className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+                pending
+                  ? 'bg-red-500/40 text-red-300 animate-pulse'
+                  : accent 
+                    ? 'bg-red-500/15 text-red-400/70 hover:bg-red-500/25 hover:text-red-400' 
+                    : 'bg-white/[0.04] text-vsc-text-muted/40 hover:bg-white/[0.08] hover:text-vsc-text-secondary'
+              }`}
+              onClick={async () => {
+                if (confirm && !pending) {
+                  setPending(true);
+                  timerRef.current = setTimeout(() => setPending(false), 2000);
+                  return;
+                }
+                if (timerRef.current) clearTimeout(timerRef.current);
+                setPending(false);
+                if (key) {
+                  await apiService.sendKeys(selectedPane, key);
+                } else if (cmd) {
+                  if (sending && !cmd.startsWith('/')) return;
+                  setSending(true);
+                  window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
+                  await sendCommandToTmux(cmd, selectedPane);
+                }
+              }}
+            >
+              {pending ? 'confirm?' : label}
+            </button>
+            );
+          })}
+        </div>
       </form>
     </FloatingPanel>
 

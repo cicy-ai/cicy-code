@@ -413,8 +413,15 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if text, ok := req["text"].(string); ok && text != "" {
-		text = strings.ReplaceAll(text, "'", "'\\''")
-		runTmux("send-keys", "-t", winID, "-l", text)
+		lines := strings.Split(text, "\n")
+		for i, line := range lines {
+			line = strings.ReplaceAll(line, "'", "'\\''")
+			runTmux("send-keys", "-t", winID, "-l", line)
+			if i < len(lines)-1 {
+				time.Sleep(100 * time.Millisecond)
+				runTmux("send-keys", "-t", winID, "Enter")
+			}
+		}
 		time.Sleep(500 * time.Millisecond)
 		runTmux("send-keys", "-t", winID, "Enter")
 	} else if keys, ok := req["keys"].(string); ok && keys != "" {
