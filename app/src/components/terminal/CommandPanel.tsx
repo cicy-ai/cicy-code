@@ -1,5 +1,5 @@
-import React, { useEffect ,useState, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { Loader2, CheckCircle, History, Mic, ArrowUp } from 'lucide-react';
+import React, { useEffect, useState, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { Loader2, ArrowUp, Mic } from 'lucide-react';
 import { FloatingPanel } from '../FloatingPanel';
 import { TerminalControls } from '../TerminalControls';
 import { Position, Size } from '../../types';
@@ -7,14 +7,11 @@ import { sendCommandToTmux } from '../../services/mockApi';
 import apiService from '../../services/api';
 import { useSending } from '../../contexts/SendingContext';
 
-const style = document.createElement('style');
-style.textContent = `
-  @keyframes slideUp {
-    from { transform: translateY(20px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
-  }
-`;
-document.head.appendChild(style);
+(window as any).__CP_VER__ = 'v2';
+
+// ============================================================================
+// Types
+// ============================================================================
 
 interface CommandPanelProps {
   paneTarget: string;
@@ -67,419 +64,348 @@ export interface CommandPanelHandle {
   correctedResult: [string, string] | null;
 }
 
+// ============================================================================
+// Hooks
+// ============================================================================
+
+function useLocalStorage<T>(key: string, initial: T): [T, (v: T) => void] {
+  const [value, setValue] = useState<T>(() => {
+    try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : initial; } catch { return initial; }
+  });
+  const set = useCallback((v: T) => { setValue(v); localStorage.setItem(key, JSON.stringify(v)); }, [key]);
+  return [value, set];
+}
+
+function useCommandHistory(paneId: string) {
+  const key = `cmd_history_${paneId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+  const [history, setHistory] = useLocalStorage<string[]>(key, []);
+  const add = useCallback((cmd: string) => {
+    setHistory([cmd, ...history.filter(c => c !== cmd)].slice(0, 50));
+  }, [history, setHistory]);
+  return { history, add };
+}
+
+function useDraft(paneId: string) {
+  const key = `cmd_draft_${paneId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+  const [draft, setDraft] = useState(() => localStorage.getItem(key) || '');
+  const save = useCallback((v: string) => { setDraft(v); localStorage.setItem(key, v); }, [key]);
+  return [draft, save] as const;
+}
+
+// ============================================================================
+// Send Logic (centralized)
+// ============================================================================
+
+interface SendOptions {
+  paneTarget: string;
+  setSending: (v: boolean) => void;
+  onSuccess?: () => void;
+  onError?: (e: Error) => void;
+}
+
+async function sendPrompt(cmd: string, opts: SendOptions) {
+  const { paneTarget, setSending, onSuccess, onError } = opts;
+  if (!cmd.trim() || !paneTarget) return false;
+  
+  setSending(true);
+  window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
+  
+  try {
+    await sendCommandToTmux(cmd, paneTarget);
+    onSuccess?.();
+    return true;
+  } catch (e) {
+    onError?.(e as Error);
+    return false;
+  }
+}
+
+// ============================================================================
+// Component
+// ============================================================================
+
 export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
   paneTarget,
-  title,
   token,
   panelPosition,
   panelSize,
-  readOnly,
-  onReadOnlyToggle,
   onInteractionStart,
   onInteractionEnd,
   onChange,
   onCapturePane,
   isCapturing,
-  canSend = true,
   agentStatus = 'idle',
-  contextUsage,
   mouseMode = 'off',
   isTogglingMouse = false,
   onToggleMouse,
-  onEditPane,
-  onRestart,
-  isRestarting = false,
-  hasEditPermission = false,
-  hasRestartPermission = false,
   hasCapturePermission = false,
-  networkLatency = null,
-  networkStatus = 'good',
   onDraggingChange,
-  boundAgents = [],
-  onPaneTargetChange,
   disableDrag = false,
   showVoiceControl = false,
   onToggleVoiceControl,
-  voiceReply = false,
-  onToggleVoiceReply,
-  mode = null,
-  onShowHistory,
   onShowCorrection,
   onCorrectionLoading,
-  onShowPromptModal,
   defaultModel = '',
   onModelChange,
-  onOpenDrawer,
 }, ref) => {
+  // ---- State ----
   const [selectedPane, setSelectedPane] = useState(paneTarget);
-
-  // Sync selectedPane when paneTarget changes (switching agents)
-  useEffect(() => { setSelectedPane(paneTarget); }, [paneTarget]);
-
   const [promptText, setPromptText] = useState('');
-  const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [tempDraft, setTempDraft] = useState('');
-  const [paneModes, setPaneModes] = useState<Record<string, 'on' | 'off'>>(() => {
-    const saved = localStorage.getItem('pane_mouse_modes');
-    return saved ? JSON.parse(saved) : {};
-  });
-
-  const tempPaneId = (selectedPane || '').replace(/[^a-zA-Z0-9]/g, '_');
-
-  const CMD_HISTORY_KEY = `cmd_history_${tempPaneId}`;
-
-  // 当切换 pane 时，应用该 pane 的鼠标模式
-  useEffect(() => {
-    const mode = paneModes[selectedPane] || mouseMode;
-    if (mode !== mouseMode && onToggleMouse) {
-      apiService.toggleMouse(mode, selectedPane);
-    }
-  }, [selectedPane]);
-
-  useEffect(() => {
-    const handleSelectPane = (e: CustomEvent) => {
-      const paneId = e.detail?.paneId;
-      console.log('[CommandPanel] Received selectPane event:', paneId);
-      console.log('[CommandPanel] Current boundAgents:', boundAgents);
-      console.log('[CommandPanel] paneTarget:', paneTarget);
-      if (paneId) {
-        setSelectedPane(paneId);
-        console.log('[CommandPanel] Updated selectedPane to:', paneId);
-      }
-    };
-    window.addEventListener('selectPane', handleSelectPane as EventListener);
-    return () => window.removeEventListener('selectPane', handleSelectPane as EventListener);
-  }, [boundAgents, paneTarget]);
-
-  useEffect(() => {
-    const saved = localStorage.getItem(CMD_HISTORY_KEY);
-    try { setCommandHistory(saved ? JSON.parse(saved) : []); } catch { setCommandHistory([]); }
-    setHistoryIndex(-1);
-    setTempDraft('');
-  }, [selectedPane]);
-
-  const saveCommandHistory = (history: string[]) => {
-    localStorage.setItem(CMD_HISTORY_KEY, JSON.stringify(history));
-  };
-
-  const DRAFT_KEY = `cmd_draft_${tempPaneId}`;
-  const saveDraft = (text: string) => {
-    localStorage.setItem(DRAFT_KEY, text);
-  };
-
-  useEffect(() => {
-    const savedDraft = localStorage.getItem(DRAFT_KEY);
-    setPromptText(savedDraft || '');
-  }, [selectedPane]);
-
-  const [isSending, setIsSending] = useState(false);
-  const [sendSuccess, setSendSuccess] = useState(false);
-  const [isBroadcasting, setIsBroadcasting] = useState(false);
-  const [broadcastSuccess, setBroadcastSuccess] = useState(false);
   const [correctedResult, setCorrectedResult] = useState<[string, string] | null>(null);
   const [isCorrectingEnglish, setIsCorrectingEnglish] = useState(false);
-  const [autoCorrectEnabled, setAutoCorrectEnabled] = useState(true);
-  const [showHistory, setShowHistory] = useState(false);
-  const [enterToSend, setEnterToSend] = useState<boolean>(() => {
-    const saved = localStorage.getItem('enter_to_send');
-    return saved === null ? true : saved === 'true';
-  });
-  const sendQueueRef = useRef<string[]>([]);
-  const [queueLen, setQueueLen] = useState(0);
+  const [paneModes, setPaneModes] = useLocalStorage<Record<string, 'on' | 'off'>>('pane_mouse_modes', {});
+  const [enterToSend, setEnterToSend] = useLocalStorage('enter_to_send', true);
+  
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [currentPos, setCurrentPos] = useState(panelPosition);
-  const [currentSize, setCurrentSize] = useState(panelSize);
-  const [isFocused, setIsFocused] = useState(false);
-
-  // Sending state from context
+  const selectedPaneRef = useRef(selectedPane);
+  selectedPaneRef.current = selectedPane;
   const { sending, setSending, checkIdle } = useSending();
+  const { history: commandHistory, add: addToHistory } = useCommandHistory(selectedPane);
+  const [draft, saveDraft] = useDraft(selectedPane);
 
-  // Check idle on agentStatus change
+  // ---- Sync ----
+  useEffect(() => { setSelectedPane(paneTarget); }, [paneTarget]);
+  useEffect(() => { setPromptText(draft); }, [selectedPane]);
+  useEffect(() => { checkIdle(agentStatus); }, [agentStatus, checkIdle]);
+
+  // ---- Event Listeners ----
   useEffect(() => {
-    checkIdle(agentStatus);
-  }, [agentStatus, checkIdle]);
+    const handler = (e: CustomEvent) => e.detail?.paneId && setSelectedPane(e.detail.paneId);
+    window.addEventListener('selectPane', handler as EventListener);
+    return () => window.removeEventListener('selectPane', handler as EventListener);
+  }, []);
 
-  useEffect(() => {
-    setCurrentPos(panelPosition);
-    setCurrentSize(panelSize);
-  }, [panelPosition, panelSize]);
-
-  const sendTextDirect = useCallback(async (text: string) => {
-    const cmd = text.trim();
-    if (!cmd || !paneTarget) return;
-    setSending(true);
-    window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
-    await sendCommandToTmux(cmd, paneTarget);
-  }, [paneTarget, setSending]);
-
+  // ---- Imperative Handle ----
   useImperativeHandle(ref, () => ({
-    focusTextarea: () => { setTimeout(() => textareaRef.current?.focus(), 50); },
+    focusTextarea: () => setTimeout(() => textareaRef.current?.focus(), 50),
     setPrompt: (text: string) => { setPromptText(text); setTimeout(() => textareaRef.current?.focus(), 50); },
-    sendText: sendTextDirect,
-    correctedResult: correctedResult,
+    sendText: async (text: string) => {
+      if (!text.trim() || !paneTarget) return;
+      setSending(true);
+      window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: text } }));
+      await sendCommandToTmux(text, paneTarget);
+    },
+    correctedResult,
   }));
 
-  const handleSendPrompt = useCallback(async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    const cmd = promptText.trim();
+  // ---- Handlers ----
+  const handleSend = useCallback(async (text?: string) => {
+    const cmd = (text ?? promptText).trim();
     
-    // Block ALL prompts while sending (except slash commands)
+    // Block while sending (except slash commands)
     if (sending && !cmd.startsWith('/')) {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Agent is busy. Click the loading button to force reset.' }));
       return;
     }
-    
-    // If prompt is empty but correction result exists, send the corrected English
+
+    // Empty prompt + correction result → send corrected
     if (!cmd && correctedResult) {
-      const correctedCmd = correctedResult[0]; // Use English part
-      const newHistory = [correctedCmd, ...commandHistory.filter(c => c !== correctedCmd)].slice(0, 50);
-      setCommandHistory(newHistory);
-      saveCommandHistory(newHistory);
+      const correctedCmd = correctedResult[0];
+      addToHistory(correctedCmd);
       setCorrectedResult(null);
-      if (onShowCorrection) {
-        onShowCorrection(null as any);
-      }
-      setSending(true);
-      setIsSending(true);
-      setSendSuccess(false);
-      try {
-        await sendCommandToTmux(correctedCmd, paneTarget);
-        setSendSuccess(true);
-        setTimeout(() => setSendSuccess(false), 2000);
-      } catch (e) { 
-        console.error(e);
-      }
-      finally {
-        setIsSending(false);
-        setTimeout(() => textareaRef.current?.focus(), 50);
-      }
+      onShowCorrection?.(null as any);
+      await sendPrompt(correctedCmd, { paneTarget, setSending });
       return;
     }
-    
-    if (!cmd || !paneTarget) return;
-    
-    // @worker dispatch: "@w-20147 do something" → queue to worker
+
+    if (!cmd) return;
+
+    // @worker dispatch
     const atMatch = cmd.match(/^@(w-\d+)\s+(.+)$/s);
     if (atMatch) {
       const [, targetWorker, taskMsg] = atMatch;
       setPromptText(''); saveDraft('');
       setSending(true);
-      setIsSending(true);
-      try {
-        window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
-        await apiService.pushQueue({ pane_id: targetWorker, message: taskMsg, type: 'task' });
-        setSendSuccess(true); setTimeout(() => setSendSuccess(false), 2000);
-      } catch (e) { console.error(e); }
-      finally { setIsSending(false); setTimeout(() => textareaRef.current?.focus(), 50); }
+      window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
+      await apiService.pushQueue({ pane_id: targetWorker, message: taskMsg, type: 'task' });
       return;
     }
 
-    const newHistory = [cmd, ...commandHistory.filter(c => c !== cmd)].slice(0, 50);
+    // Normal send
+    addToHistory(cmd);
+    setHistoryIndex(-1);
+    setTempDraft('');
     setPromptText('');
     saveDraft('');
-    setSending(true);
-    setIsSending(true);
-    setSendSuccess(false);
-    try {
-      window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
-      await sendCommandToTmux(cmd, paneTarget);
-      setSendSuccess(true);
-      setTimeout(() => setSendSuccess(false), 2000);
-    } catch (e) { console.error(e); }
-    finally {
-      setIsSending(false);
-      setTimeout(() => textareaRef.current?.focus(), 50);
-    }
-  }, [promptText, paneTarget, autoCorrectEnabled, token, correctedResult, commandHistory, selectedPane, onShowCorrection, sending]);
+    await sendPrompt(cmd, { paneTarget, setSending });
+  }, [promptText, paneTarget, sending, correctedResult, addToHistory, saveDraft, setSending, onShowCorrection]);
 
-  const handleBroadcast = useCallback(async () => {
-    const cmd = promptText.trim();
-    if (!cmd) return;
+  const handleKeyDown = useCallback(async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const textarea = e.currentTarget;
     
-    const saved = localStorage.getItem('pinnedPanes');
-    const pinnedPanes: string[] = saved ? JSON.parse(saved) : [];
-    
-    if (pinnedPanes.length === 0) return;
-    
-    setIsBroadcasting(true);
-    setBroadcastSuccess(false);
-    
-    try {
-      await Promise.all(pinnedPanes.map(paneId => sendCommandToTmux(cmd, paneId)));
-      setBroadcastSuccess(true);
-      setTimeout(() => setBroadcastSuccess(false), 2000);
-    } catch (e) {
-      console.error('Broadcast error:', e);
-    } finally {
-      setIsBroadcasting(false);
-    }
-  }, [promptText]);
-
-  // 队列自动发送已禁用
-  // useEffect(() => {
-  //   if (!canSend || sendQueueRef.current.length === 0) return;
-  //   const queued = sendQueueRef.current.join('\n');
-  //   sendQueueRef.current = [];
-  //   setQueueLen(0);
-  //   setIsSending(true);
-  //   sendCommandToTmux(queued, paneTarget)
-  //     .then(() => { setSendSuccess(true); setTimeout(() => setSendSuccess(false), 2000); })
-  //     .catch(console.error)
-  //     .finally(() => { setIsSending(false); });
-  // }, [canSend, paneTarget]);
-
-  const handleCorrectEnglish = async () => {
-    if (!promptText.trim() || isCorrectingEnglish || !token) return;
-    setIsCorrectingEnglish(true); if (onCorrectionLoading) onCorrectionLoading(true);
-    setCorrectedResult(null);
-    try {
-      const { data } = await apiService.correctEnglish(promptText);
-      console.log('Correct English result:', data);
-      if (data.success && data.result && Array.isArray(data.result)) {
-        // result is [English, Chinese]
-        setCorrectedResult(data.result);
-        if (onShowCorrection) {
-          onShowCorrection(data.result);
+    // Cmd+Enter = trigger correction
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      
+      // Has correction result → send it
+      if (!promptText.trim() && correctedResult) {
+        const cmd = e.shiftKey ? correctedResult[1] : correctedResult[0];
+        addToHistory(cmd);
+        setCorrectedResult(null);
+        onShowCorrection?.(null as any);
+        await sendPrompt(cmd, { paneTarget, setSending });
+        return;
+      }
+      
+      // Trigger correction
+      const cmd = promptText.trim();
+      if (cmd && token) {
+        addToHistory(cmd);
+        setPromptText('');
+        saveDraft('');
+        setIsCorrectingEnglish(true);
+        onCorrectionLoading?.(true);
+        try {
+          const { data } = await apiService.correctEnglish(cmd);
+          if (data.success && Array.isArray(data.result)) {
+            setCorrectedResult(data.result);
+            onShowCorrection?.(data.result);
+          } else {
+            setPromptText(cmd); saveDraft(cmd);
+            window.dispatchEvent(new CustomEvent('show-toast', { detail: `Error: ${data.error || 'Correction failed'}` }));
+          }
+        } catch (err: any) {
+          setPromptText(cmd); saveDraft(cmd);
+          window.dispatchEvent(new CustomEvent('show-toast', { detail: `Error: ${err.message}` }));
+        } finally {
+          setIsCorrectingEnglish(false);
+          onCorrectionLoading?.(false);
         }
       }
-    } catch (e) { 
-      console.error('Correct English error:', e); 
-    } finally { 
-      setIsCorrectingEnglish(false); if (onCorrectionLoading) onCorrectionLoading(false); 
+      return;
     }
-  };
 
-  const handleAcceptCorrection = () => {
-    if (correctedResult) {
-      setPromptText(correctedResult[0]);
-      setCorrectedResult(null);
-      setTimeout(() => textareaRef.current?.focus(), 50);
+    // Escape/Backspace on empty → send to tmux
+    if ((e.key === 'Escape' || e.key === 'Backspace') && !promptText) {
+      e.preventDefault();
+      const keyMap: Record<string, string> = { backspace: 'BSpace', escape: 'Escape' };
+      await apiService.sendKeys(selectedPane, keyMap[e.key.toLowerCase()]);
+      return;
     }
-  };
 
-  const handleSelectHistory = (cmd: string) => {
-    setPromptText(cmd);
-    setShowHistory(false);
-    setTimeout(() => textareaRef.current?.focus(), 50);
-  };
+    // Ctrl+C on empty → send C-c
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && !promptText) {
+      e.preventDefault();
+      await apiService.sendKeys(selectedPane, 'C-c');
+      return;
+    }
 
-  return (
-    <>
-      <FloatingPanel
-        title={
-          <>
-            <TerminalControls
-              mouseMode={paneModes[selectedPane] || mouseMode}
-              onToggleMouse={() => {
-                const newMode = (paneModes[selectedPane] || mouseMode) === 'on' ? 'off' : 'on';
-                const updated = { ...paneModes, [selectedPane]: newMode };
-                setPaneModes(updated);
-                localStorage.setItem('pane_mouse_modes', JSON.stringify(updated));
-                onToggleMouse?.();
-              }}
-              isTogglingMouse={isTogglingMouse}
-              onCapture={hasCapturePermission ? () => onCapturePane?.(selectedPane) : undefined}
-              isCapturing={isCapturing}
-            />
-            <select
-              className="cicy-select hidden"
-              value=""
-              onChange={async (e) => {
-                const v = e.target.value;
-                if (!v) return;
-                e.target.value = '';
-                if (['Left', 'Down', 'Up', 'Right'].includes(v)) {
-                  await apiService.sendKeys(selectedPane, v);
-                } else if (v === 'C-c') {
-                  await apiService.sendKeys(selectedPane, 'C-c');
-                } else {
-                  if (sending) return;
-                  setSending(true);
-                  window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: v } }));
-                  await sendCommandToTmux(v, selectedPane);
-                }
-              }}
-            >
-              <option value="">⚡</option>
-              <option value="C-c">^C</option>
-              <option value="/chat resume">/chat resume</option>
-              <option value="/tools trust-all">/tools trust-all</option>
-              <option value="/compact">/compact</option>
-              <option value="/compact --truncate-large-messages true --max-message-length 500">/compact cut</option>
-              <option value="kiro-cli chat -a">kiro-cli chat -a</option>
-            </select>
-            <select
-              value={defaultModel}
-              onChange={async (e) => {
-                const v = e.target.value;
-                if (!v) return;
-                if (sending) return;
-                setSending(true);
-                onModelChange?.(v);
-                window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: `/model ${v}` } }));
-                await sendCommandToTmux(`/model ${v}`, selectedPane);
-              }}
-              className="cicy-select"
-              title="Select model"
-            >
-              <option value="">🧠</option>
-              <option value="claude-opus-4.6">opus-4.6</option>
-              <option value="claude-opus-4.5">opus-4.5</option>
-              <option value="claude-sonnet-4.5">sonnet-4.5</option>
-              <option value="claude-sonnet-4">sonnet-4</option>
-              <option value="claude-haiku-4.5">haiku-4.5</option>
-              <option value="deepseek-3.2">deepseek-3.2</option>
-              <option value="minimax-m2.1">minimax-m2.1</option>
-              <option value="qwen3-coder-next">qwen3-coder</option>
-            </select>
-            <button
-              type="button"
-              onClick={() => {
-                if (onShowHistory) {
-                  onShowHistory(commandHistory, handleSelectHistory);
-                }
-              }}
-              className="p-1.5 rounded transition-colors text-vsc-text-secondary hover:text-vsc-text hover:bg-vsc-bg-active hidden"
-              title="Command history"
-            >
-              <History size={14} />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (onShowPromptModal) {
-                  onShowPromptModal();
-                }
-              }}
-              className="p-1.5 rounded transition-colors text-vsc-text-secondary hover:text-vsc-text hover:bg-vsc-bg-active hidden"
-              title="Edit common prompts"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-            </button>
-          </>
+    // Enter = send
+    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+      if (sending) {
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Agent is working, please wait...' }));
+        return;
+      }
+      
+      const shouldSend = enterToSend ? !e.shiftKey : e.shiftKey;
+      if (!shouldSend) return; // newline
+      
+      e.preventDefault();
+      
+      // Empty + correction → fill prompt
+      if (!promptText.trim() && correctedResult) {
+        setPromptText(correctedResult[0]);
+        setCorrectedResult(null);
+        onShowCorrection?.(null as any);
+        return;
+      }
+      
+      // Send or send Enter key
+      if (promptText.trim()) {
+        await handleSend();
+      } else {
+        await apiService.sendKeys(selectedPane, 'Enter');
+      }
+      return;
+    }
+
+    // Arrow Up = history prev
+    if (e.key === 'ArrowUp') {
+      const isOnFirstLine = !textarea.value.substring(0, textarea.selectionStart).includes('\n');
+      if (isOnFirstLine && commandHistory.length > 0) {
+        e.preventDefault();
+        if (historyIndex === -1) {
+          setTempDraft(promptText);
+          setHistoryIndex(0);
+          setPromptText(commandHistory[0]);
+        } else if (historyIndex < commandHistory.length - 1) {
+          const ni = historyIndex + 1;
+          setHistoryIndex(ni);
+          setPromptText(commandHistory[ni]);
         }
-        initialPosition={panelPosition}
-        initialSize={panelSize}
+      }
+      return;
+    }
+
+    // Arrow Down = history next
+    if (e.key === 'ArrowDown') {
+      const isOnLastLine = !textarea.value.substring(textarea.selectionStart).includes('\n');
+      if (isOnLastLine && historyIndex >= 0) {
+        e.preventDefault();
+        if (historyIndex > 0) {
+          const ni = historyIndex - 1;
+          setHistoryIndex(ni);
+          setPromptText(commandHistory[ni]);
+        } else {
+          setHistoryIndex(-1);
+          setPromptText(tempDraft);
+        }
+      }
+    }
+  }, [promptText, correctedResult, token, selectedPane, sending, enterToSend, commandHistory, historyIndex, tempDraft, paneTarget, addToHistory, saveDraft, setSending, onShowCorrection, onCorrectionLoading, handleSend]);
+
+  const handleModelChange = useCallback(async (model: string) => {
+    if (!model || sending) return;
+    setSending(true);
+    onModelChange?.(model);
+    window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: `/model ${model}` } }));
+    await sendCommandToTmux(`/model ${model}`, selectedPane);
+  }, [sending, setSending, onModelChange, paneTarget, selectedPane]);
+
+  const handleQuickCmd = useCallback(async (key?: string, cmd?: string) => {
+    if (key) {
+      await apiService.sendKeys(selectedPaneRef.current, key);
+    } else if (cmd) {
+      setSending(true);
+      window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
+      await sendCommandToTmux(cmd, selectedPaneRef.current);
+    }
+  }, [setSending, paneTarget]);
+
+  // ---- Render ----
+  return (
+    <FloatingPanel
+      title={
+        <>
+          <TerminalControls
+            mouseMode={paneModes[selectedPane] || mouseMode}
+            onToggleMouse={() => {
+              const newMode = (paneModes[selectedPane] || mouseMode) === 'on' ? 'off' : 'on';
+              setPaneModes({ ...paneModes, [selectedPane]: newMode });
+              onToggleMouse?.();
+            }}
+            isTogglingMouse={isTogglingMouse}
+            onCapture={hasCapturePermission ? () => onCapturePane?.(selectedPane) : undefined}
+            isCapturing={isCapturing}
+          />
+          <ModelSelect value={defaultModel} onChange={handleModelChange} />
+        </>
+      }
+      initialPosition={panelPosition}
+      initialSize={panelSize}
       minSize={{ width: 600, height: 180 }}
       onInteractionStart={onInteractionStart}
       onInteractionEnd={onInteractionEnd}
-      onChange={(pos, size) => {
-        setCurrentPos(pos);
-        setCurrentSize(size);
-        onChange(pos, size);
-      }}
+      onChange={onChange}
       onDraggingChange={onDraggingChange}
       disableDrag={disableDrag}
       headerActions={
         <>
           <button
             type="button"
-            onClick={() => {
-              const next = !enterToSend;
-              setEnterToSend(next);
-              localStorage.setItem('enter_to_send', String(next));
-            }}
+            onClick={() => setEnterToSend(!enterToSend)}
             className="cicy-btn text-xs px-1.5 py-0.5 border border-vsc-border select-none"
             title={enterToSend ? 'Enter=Send, Shift+Enter=Newline' : 'Enter=Newline, Shift+Enter=Send'}
           >
@@ -489,7 +415,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
             <button
               onClick={onToggleVoiceControl}
               className={`cicy-btn ${showVoiceControl ? 'text-red-400 bg-red-500/20' : ''}`}
-              title={showVoiceControl ? "Hide voice mode" : "Show voice mode"}
+              title={showVoiceControl ? 'Hide voice mode' : 'Show voice mode'}
             >
               <Mic size={14} />
             </button>
@@ -502,276 +428,127 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
         </>
       }
     >
-      <form onSubmit={handleSendPrompt} className="relative h-full flex flex-col p-2">
+      <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="relative h-full flex flex-col p-2">
+        {/* Send Button */}
         <div className="absolute top-3 right-3 z-10 flex gap-1">
-          <button
-            id="terminal-send-btn"
-            type={sending ? 'button' : 'submit'}
-            disabled={!sending && (!promptText.trim() || isSending)}
-            onClick={sending ? () => setSending(false) : undefined}
-            className={`p-1.5 rounded-md transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed ${sending ? 'bg-orange-500 text-white' : 'bg-vsc-accent hover:bg-vsc-accent-hover text-white'}`}
-            title={sending ? 'Click to stop' : 'Send'}
-          >
-            {sending ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={14} />}
-          </button>
+          <SendButton sending={sending} disabled={!promptText.trim()} onReset={() => setSending(false)} />
         </div>
+
+        {/* Textarea */}
         <textarea
-              id="prompt-textarea"
-              ref={textareaRef}
-              value={promptText}
-              onChange={(e) => {
-                setPromptText(e.target.value);
-                saveDraft(e.target.value);
-                if (historyIndex === -1) setTempDraft(e.target.value);
-              }}
-              onFocus={() => setIsFocused(true)}
-              onBlur={() => setIsFocused(false)}
-              onKeyDown={async (e) => {
-                // Ctrl+Enter = trigger correction or send result
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
-                  console.log('Cmd+Enter pressed', {promptText, correctedResult, token});
-                  e.preventDefault();
-                  
-                  // If no text but has correction result
-                  if (!promptText.trim() && correctedResult) {
-                    // Cmd+Shift+Enter = send Chinese
-                    if (e.shiftKey) {
-                      const cmd = correctedResult[1];
-                      const newHistory = [cmd, ...commandHistory.filter(c => c !== cmd)].slice(0, 50);
-                      setCommandHistory(newHistory);
-                      saveCommandHistory(newHistory);
-                      setCorrectedResult(null);
-                      if (onShowCorrection) {
-                        onShowCorrection(null as any);
-                      }
-                      setSending(true);
-                      setIsSending(true);
-                      setSendSuccess(false);
-                      sendCommandToTmux(cmd, paneTarget)
-                        .then(() => { setSendSuccess(true); setTimeout(() => setSendSuccess(false), 2000); })
-                        .catch(console.error)
-                        .finally(() => { setIsSending(false); setTimeout(() => textareaRef.current?.focus(), 50); });
-                      return;
-                    }
-                    
-                    // Cmd+Enter = send English
-                    const cmd = correctedResult[0];
-                    const newHistory = [cmd, ...commandHistory.filter(c => c !== cmd)].slice(0, 50);
-                    setCommandHistory(newHistory);
-                    saveCommandHistory(newHistory);
-                    setCorrectedResult(null);
-                    if (onShowCorrection) {
-                      onShowCorrection(null as any);
-                    }
-                    setSending(true);
-                    setIsSending(true);
-                    setSendSuccess(false);
-                    sendCommandToTmux(cmd, paneTarget)
-                      .then(() => { setSendSuccess(true); setTimeout(() => setSendSuccess(false), 2000); })
-                      .catch(console.error)
-                      .finally(() => { setIsSending(false); setTimeout(() => textareaRef.current?.focus(), 50); });
-                    return;
-                  }
-                  
-                  // Otherwise, trigger correction
-                  const cmd = promptText.trim();
-                  console.log('Triggering correction', {cmd, token, hasCallback: !!onCorrectionLoading});
-                  if (cmd && token) {
-                    // Add to history before clearing
-                    const newHistory = [cmd, ...commandHistory.filter(c => c !== cmd)].slice(0, 50);
-                    setCommandHistory(newHistory);
-                    saveCommandHistory(newHistory);
-                    
-                    setPromptText('');
-                    saveDraft('');
-                    console.log('Setting loading true');
-                    setIsCorrectingEnglish(true); if (onCorrectionLoading) onCorrectionLoading(true);
-                    apiService.correctEnglish(cmd)
-                      .then(({ data }) => {
-                        if (data.success && data.result && Array.isArray(data.result)) {
-                          setCorrectedResult(data.result);
-                          if (onShowCorrection) {
-                            onShowCorrection(data.result);
-                          }
-                        } else {
-                          setPromptText(cmd); saveDraft(cmd);
-                          window.dispatchEvent(new CustomEvent('show-toast', { detail: `Error: ${data.error || 'Correction failed'}` }));
-                        }
-                      })
-                      .catch(e => { console.error('Correct English error:', e); setPromptText(cmd); saveDraft(cmd); window.dispatchEvent(new CustomEvent('show-toast', { detail: `Error: ${e.message}` })); })
-                      .finally(() => setIsCorrectingEnglish(false));
-                  }
-                  return;
-                }
+          id="prompt-textarea"
+          ref={textareaRef}
+          value={promptText}
+          onChange={(e) => { setPromptText(e.target.value); saveDraft(e.target.value); if (historyIndex === -1) setTempDraft(e.target.value); }}
+          onKeyDown={handleKeyDown}
+          placeholder="Type command..."
+          className="w-full h-full bg-transparent text-vsc-text rounded-md p-2.5 pr-10 outline-none resize-none text-sm transition-colors placeholder:text-vsc-text-muted/40"
+          style={{ paddingRight: '44px' }}
+        />
 
-  
-               if ((
-                  e.key === 'Escape'|| e.key === 'Backspace'
-                ) && !promptText) {
-                  e.preventDefault();
-
-                  const key_map: Record<string, string> = {
-                      "backspace": "BSpace",
-                      "escape": "Escape",
-                      "esc": "Escape",
-                  }
-                  await apiService.sendKeys(selectedPane, key_map[e.key.toLowerCase()]);
-                } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && !promptText) {
-                  e.preventDefault();
-                  await apiService.sendKeys(selectedPane, "C-c");
-                } else  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-                  if (sending) {
-                    window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Agent is working, please wait...' }));
-                    return;
-                  }
-                  const shouldSend = enterToSend ? !e.shiftKey : e.shiftKey;
-                  if (!shouldSend) {
-                    // newline (default behavior)
-                    return;
-                  } else {
-                    // Enter = send directly (no correction)
-                    e.preventDefault();
-                    if (!promptText.trim() && correctedResult) {
-                      // Empty prompt + has result = fill prompt with result
-                      setPromptText(correctedResult[0]);
-                      setCorrectedResult(null);
-                      if (onShowCorrection) {
-                        onShowCorrection(null as any);
-                      }
-                    } else {
-                      const cmd = promptText.trim();
-                      if (cmd) {
-                        const newHistory = [cmd, ...commandHistory.filter(c => c !== cmd)].slice(0, 50);
-                        setCommandHistory(newHistory);
-                        saveCommandHistory(newHistory);
-                        setHistoryIndex(-1);
-                        setTempDraft('');
-                        setPromptText('');
-                        saveDraft('');
-                        setSending(true);
-                        setIsSending(true);
-                        setSendSuccess(false);
-                        window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
-                        sendCommandToTmux(cmd, paneTarget)
-                          .then(() => { setSendSuccess(true); setTimeout(() => setSendSuccess(false), 2000); })
-                          .catch(console.error)
-                          .finally(() => { setIsSending(false); setTimeout(() => textareaRef.current?.focus(), 50); });
-                      } else {
-                        // Empty prompt, no correction result → send Enter to tmux
-                        setPromptText('');
-                        await apiService.sendKeys(selectedPane, "Enter");
-                      }
-                    }
-                  }
-                } else if (e.key === 'ArrowUp') {
-                  const textarea = e.currentTarget;
-                  const isOnFirstLine = !textarea.value.substring(0, textarea.selectionStart).includes('\n');
-                  if (isOnFirstLine && commandHistory.length > 0) {
-                    e.preventDefault();
-                    if (historyIndex === -1) {
-                      setTempDraft(promptText);
-                      setHistoryIndex(0);
-                      setPromptText(commandHistory[0]);
-                    } else if (historyIndex < commandHistory.length - 1) {
-                      const ni = historyIndex + 1;
-                      setHistoryIndex(ni);
-                      setPromptText(commandHistory[ni]);
-                    }
-                  }
-                } else if (e.key === 'ArrowDown') {
-                  const textarea = e.currentTarget;
-                  const isOnLastLine = !textarea.value.substring(textarea.selectionStart).includes('\n');
-                  if (isOnLastLine) {
-                    e.preventDefault();
-                    if (historyIndex > 0) {
-                      const ni = historyIndex - 1;
-                      setHistoryIndex(ni);
-                      setPromptText(commandHistory[ni]);
-                    } else if (historyIndex === 0) {
-                      setHistoryIndex(-1);
-                      setPromptText(tempDraft);
-                    }
-                  }
-                }
-              }}
-              placeholder="Type command..."
-              className="w-full h-full bg-transparent text-vsc-text rounded-md p-2.5 pr-10 outline-none resize-none text-sm transition-colors placeholder:text-vsc-text-muted/40"
-              style={{paddingRight: '44px'}}
-              disabled={isSending}
-            />
-        {/* Quick commands bar */}
-        <div className="flex gap-1 flex-wrap px-2 pb-1.5 pt-0.5">
-          {[
-            { label: '^C', key: 'C-c', accent: true, confirm: true },
-            { label: '/compact cut', cmd: '/compact --truncate-large-messages true --max-message-length 500' },
-          ].map(({ label, key, cmd, accent, confirm }) => {
-            const [pending, setPending] = React.useState(false);
-            const timerRef = React.useRef<ReturnType<typeof setTimeout>>(undefined);
-            return (
-            <button
-              key={label}
-              type="button"
-              className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
-                pending
-                  ? 'bg-red-500/40 text-red-300 animate-pulse'
-                  : accent 
-                    ? 'bg-red-500/15 text-red-400/70 hover:bg-red-500/25 hover:text-red-400' 
-                    : 'bg-white/[0.04] text-vsc-text-muted/40 hover:bg-white/[0.08] hover:text-vsc-text-secondary'
-              }`}
-              onClick={async () => {
-                if (confirm && !pending) {
-                  setPending(true);
-                  timerRef.current = setTimeout(() => setPending(false), 2000);
-                  return;
-                }
-                if (timerRef.current) clearTimeout(timerRef.current);
-                setPending(false);
-                if (key) {
-                  await apiService.sendKeys(selectedPane, key);
-                } else if (cmd) {
-                  if (sending && !cmd.startsWith('/')) return;
-                  setSending(true);
-                  window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
-                  await sendCommandToTmux(cmd, selectedPane);
-                }
-              }}
-            >
-              {pending ? 'confirm?' : label}
-            </button>
-            );
-          })}
-        </div>
+        {/* Quick Commands */}
+        <QuickCommands onCmd={handleQuickCmd} />
       </form>
     </FloatingPanel>
+  );
+});
 
+// ============================================================================
+// Sub-components
+// ============================================================================
 
-    {/* 队列显示面板 */}
-    {queueLen > 0 && (
-      <div 
-        className="fixed bg-vsc-bg/95 border border-orange-500/50 rounded-lg p-2 shadow-xl backdrop-blur-sm z-[50]"
-        style={{ 
-          left: currentPos.x,
-          top: currentPos.y + currentSize.height + 8,
-          width: currentSize.width
-        }}
+function SendButton({ sending, disabled, onReset }: { sending: boolean; disabled: boolean; onReset: () => void }) {
+  return (
+    <button
+      id="terminal-send-btn"
+      type="button"
+      disabled={!sending && disabled}
+      onClick={(e) => {
+        if (sending) {
+          e.preventDefault();
+          onReset();
+        } else {
+          // Trigger form submit
+          (e.currentTarget.closest('form') as HTMLFormElement)?.requestSubmit();
+        }
+      }}
+      className={`p-1.5 rounded-md transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed ${
+        sending ? 'bg-orange-500 text-white' : 'bg-vsc-accent hover:bg-vsc-accent-hover text-white'
+      }`}
+      title={sending ? 'Click to stop' : 'Send'}
+    >
+      {sending ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={14} />}
+    </button>
+  );
+}
+
+function ModelSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => e.target.value && onChange(e.target.value)}
+      className="cicy-select"
+      title="Select model"
+    >
+      <option value="">🧠</option>
+      <option value="claude-opus-4.6">opus-4.6</option>
+      <option value="claude-opus-4.5">opus-4.5</option>
+      <option value="claude-sonnet-4.5">sonnet-4.5</option>
+      <option value="claude-sonnet-4">sonnet-4</option>
+      <option value="claude-haiku-4.5">haiku-4.5</option>
+      <option value="deepseek-3.2">deepseek-3.2</option>
+      <option value="minimax-m2.1">minimax-m2.1</option>
+      <option value="qwen3-coder-next">qwen3-coder</option>
+    </select>
+  );
+}
+
+function useTwiceConfirm(timeout = 2000) {
+  const [pending, setPending] = useState(false);
+  const ref = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const click = useCallback((action: () => void) => {
+    if (!ref.current) {
+      ref.current = true; setPending(true);
+      timer.current = setTimeout(() => { ref.current = false; setPending(false); }, timeout);
+      return;
+    }
+    clearTimeout(timer.current); ref.current = false; setPending(false);
+    action();
+  }, [timeout]);
+  return { pending, click };
+}
+
+const QuickCommands = React.memo(function QuickCommands({ onCmd }: { onCmd: (key?: string, cmd?: string) => void }) {
+  const ctrlC = useTwiceConfirm();
+  const compact = useTwiceConfirm();
+
+  return (
+    <div className="flex gap-1 flex-wrap px-2 pb-1.5 pt-0.5">
+      <button
+        type="button"
+        title="Send Ctrl+C to interrupt (click twice)"
+        className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+          ctrlC.pending
+            ? 'bg-red-500/40 text-red-300 animate-pulse'
+            : 'bg-red-500/15 text-red-400/70 hover:bg-red-500/25 hover:text-red-400'
+        }`}
+        onClick={() => ctrlC.click(() => onCmd('C-c'))}
       >
-        <div className="text-xs text-vsc-text mb-2 max-h-24 overflow-y-auto whitespace-pre-wrap bg-black/30 p-2 rounded">
-          {sendQueueRef.current.join('\n\n')}
-        </div>
-        <button
-          onClick={() => {
-            const merged = sendQueueRef.current.join('\n\n');
-            setPromptText(merged);
-            sendQueueRef.current = [];
-            setQueueLen(0);
-            setTimeout(() => textareaRef.current?.focus(), 50);
-          }}
-          className="w-full text-xs px-2 py-1 bg-vsc-button hover:bg-vsc-button-hover text-white rounded transition-colors"
-        >
-          Edit
-        </button>
-      </div>
-    )}
-  </>
+        {ctrlC.pending ? 'confirm?' : '^C'}
+      </button>
+      <button
+        type="button"
+        title="Compact chat history to save context (click twice)"
+        className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+          compact.pending
+            ? 'bg-purple-500/40 text-purple-300 animate-pulse'
+            : 'bg-white/[0.04] text-vsc-text-muted/40 hover:bg-white/[0.08] hover:text-vsc-text-secondary'
+        }`}
+        onClick={() => compact.click(() => onCmd(undefined, '/compact --truncate-large-messages true --max-message-length 500'))}
+      >
+        {compact.pending ? 'confirm?' : '/compact cut'}
+      </button>
+    </div>
   );
 });

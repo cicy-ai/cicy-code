@@ -9,8 +9,11 @@ const isTrial = slug.endsWith('-free');
 const baseSlug = isTrial ? slug.replace(/-free$/, '') : slug;
 const apiOrigin = isWorkspace ? `https://${baseSlug}-${isTrial ? 'free-api' : 'api'}.cicy-ai.com` : '';
 
+const isDev = typeof window !== 'undefined' && /^(localhost|127\.)/.test(window.location.hostname);
+const isDevProxy = typeof window !== 'undefined' && /^dev-p\d+\.cicy-ai\.com$/.test(window.location.hostname);
+
 const config = {
-  apiBase:        import.meta.env.VITE_API_BASE         || apiOrigin || 'https://api.cicy-ai.com',
+  apiBase:        import.meta.env.VITE_API_BASE         || apiOrigin || (isDevProxy ? 'https://dev-api.cicy-ai.com' : (isDev ? '' : 'https://api.cicy-ai.com')),
   mgrBase:        'https://api.cicy-ai.com',
   ttydBase:       import.meta.env.VITE_TTYD_BASE        || apiOrigin || 'https://dev-api.cicy-ai.com',
   ideBase:        import.meta.env.VITE_IDE_BASE          || apiOrigin || 'https://dev.cicy-ai.com',

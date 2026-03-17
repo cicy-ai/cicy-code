@@ -2,9 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +18,7 @@ import (
 var (
 	pipeLogDir       = ""
 	compactThreshold = 70
-	fullSyncInterval = 30 * time.Second
+	fullSyncInterval = 3 * time.Second
 	actionCooldown   = 3 * time.Second
 	watcherMu        sync.Mutex
 	cooldownMap      = map[string]time.Time{}
@@ -86,11 +84,19 @@ func readPipeLog(paneID string) string {
 	}
 	s := ansiRe.ReplaceAllString(string(out), "")
 	s = strings.ReplaceAll(s, "\r\n", "\n")
-	// Simulate terminal: \r overwrites current line, keep only last segment
+	// Simulate terminal: \r overwrites current line, but keep prompt lines
 	var lines []string
 	for _, line := range strings.Split(s, "\n") {
 		parts := strings.Split(line, "\r")
-		lines = append(lines, parts[len(parts)-1])
+		// Check if any part contains idle prompt pattern
+		best := parts[len(parts)-1]
+		for _, p := range parts {
+			if strings.Contains(p, "% >") || strings.Contains(p, "% λ") {
+				best = p
+				break
+			}
+		}
+		lines = append(lines, best)
 	}
 	s = strings.Join(lines, "\n")
 	return ctrlRe.ReplaceAllString(s, "")
@@ -275,7 +281,7 @@ func parsePane(pid, atype, text, last2 string, lines []string) paneSt {
 	wa := strings.Contains(last2, "Allow this action") || strings.Contains(last2, "[y/n/t]")
 	co := strings.Contains(last2, "Creating summary") || strings.Contains(last2, "/compact")
 	th := spinnerRe.MatchString(last2)
-	idle := strings.HasSuffix(last, ">") || strings.HasSuffix(last, "$") || idlePromptRe.MatchString(last)
+	idle := strings.HasSuffix(last, ">") || strings.HasSuffix(last, "$") || idlePromptRe.MatchString(last) || strings.Contains(last, "% >")
 
 	s := ""
 	if wa {
@@ -383,64 +389,6 @@ func refreshCfgCache() {
 	watcherMu.Lock()
 	cfgCache = m
 	watcherMu.Unlock()
-}
-
-// raw TCP redis GET/SET
-func redisDo(cmds ...string) string {
-	host := os.Getenv("REDIS_HOST")
-	if host == "" {
-		host = "127.0.0.1"
-	}
-	port := os.Getenv("REDIS_PORT")
-	if port == "" {
-		port = "6379"
-	}
-	conn, err := net.DialTimeout("tcp", host+":"+port, 2*time.Second)
-	if err != nil {
-		return ""
-	}
-	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-
-	req := fmt.Sprintf("*%d\r\n", len(cmds))
-	for _, c := range cmds {
-		req += fmt.Sprintf("$%d\r\n%s\r\n", len(c), c)
-	}
-	conn.Write([]byte(req))
-
-	// read full response
-	var all []byte
-	buf := make([]byte, 64*1024)
-	for {
-		n, err := conn.Read(buf)
-		if n > 0 {
-			all = append(all, buf[:n]...)
-		}
-		// check if we have complete RESP response
-		resp := string(all)
-		if strings.HasPrefix(resp, "$") {
-			idx := strings.Index(resp, "\r\n")
-			if idx >= 0 {
-				sz, _ := strconv.Atoi(resp[1:idx])
-				if sz < 0 {
-					return "" // $-1 = nil
-				}
-				need := idx + 2 + sz + 2 // $N\r\n<data>\r\n
-				if len(all) >= need {
-					return resp[idx+2 : idx+2+sz]
-				}
-			}
-		} else if strings.HasPrefix(resp, "+") || strings.HasPrefix(resp, "-") {
-			if strings.Contains(resp, "\r\n") {
-				idx := strings.Index(resp, "\r\n")
-				return resp[1:idx]
-			}
-		}
-		if err != nil {
-			break
-		}
-	}
-	return string(all)
 }
 
 func fullSyncOnce() {

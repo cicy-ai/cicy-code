@@ -40,4 +40,324 @@ window.addEventListener('load',function(){
     }
   },50);
 });
+
+/* ================================================================
+   Injected CommandPanel v2 — full-featured prompt inside gotty
+   ================================================================ */
+(function(){
+  // --- WebSocket capture ---
+  var gottyWs = null;
+  var _origSend = WebSocket.prototype.send;
+  WebSocket.prototype.send = function(data) {
+    if (!gottyWs && typeof data === 'string' && data.length > 0 && '01234'.indexOf(data[0]) >= 0) gottyWs = this;
+    return _origSend.call(this, data);
+  };
+  function sendInput(text) { if (gottyWs && gottyWs.readyState === 1) gottyWs.send('1' + text); }
+  function sendLine(text) { sendInput(text + '\r'); }
+
+  // --- localStorage helpers ---
+  var LS = {
+    get: function(k, d) { try { var v = localStorage.getItem(k); return v !== null ? JSON.parse(v) : d; } catch(e) { return d; } },
+    set: function(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
+  };
+  var paneId = (location.pathname.match(/\/ttyd\/([^\/]+)/) || [])[1] || 'default';
+  var hKey = 'cicy_hist_' + paneId, dKey = 'cicy_draft_' + paneId;
+
+  // --- State ---
+  var history = LS.get(hKey, []);
+  var histIdx = -1, tmpDraft = '';
+  var sending = false;
+  var enterToSend = LS.get('cicy_enter_to_send', true);
+
+  // --- Build UI ---
+  var panel = document.createElement('div'); panel.id = 'cicy-cmd-panel';
+  panel.innerHTML =
+    '<div id="cicy-cmd-header">' +
+      '<div class="cicy-header-left">' +
+        '<span class="cicy-logo">⌘</span>' +
+        '<span class="cicy-title">Prompt</span>' +
+      '</div>' +
+      '<div class="cicy-header-right">' +
+        '<button id="cicy-enter-mode" class="cicy-pill"></button>' +
+        '<div class="cicy-more-wrap">' +
+          '<button id="cicy-btn-more" class="cicy-pill cicy-pill-icon" title="More">⋯</button>' +
+          '<div id="cicy-more-menu" class="cicy-menu">' +
+            '<select id="cicy-model-select" title="Select model">' +
+              '<option value="">Switch Model</option>' +
+              '<option value="claude-opus-4.6">opus-4.6</option>' +
+              '<option value="claude-opus-4.5">opus-4.5</option>' +
+              '<option value="claude-sonnet-4.5">sonnet-4.5</option>' +
+              '<option value="claude-sonnet-4">sonnet-4</option>' +
+              '<option value="claude-haiku-4.5">haiku-4.5</option>' +
+              '<option value="deepseek-3.2">deepseek-3.2</option>' +
+              '<option value="minimax-m2.1">minimax-m2.1</option>' +
+              '<option value="qwen3-coder-next">qwen3-coder</option>' +
+            '</select>' +
+            '<button id="cicy-btn-compact" class="cicy-menu-item">Compact</button>' +
+            '<button id="cicy-btn-restart" class="cicy-menu-item">Restart Pane</button>' +
+          '</div>' +
+        '</div>' +
+        '<button id="cicy-cmd-toggle" class="cicy-pill cicy-pill-icon" title="Collapse">−</button>' +
+      '</div>' +
+    '</div>' +
+    '<div id="cicy-cmd-body">' +
+      '<div class="cicy-input-wrap">' +
+        '<textarea id="cicy-cmd-input" rows="2" placeholder="Ask anything..." spellcheck="false"></textarea>' +
+        '<button id="cicy-btn-send" title="Send">' +
+          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>' +
+        '</button>' +
+      '</div>' +
+    '</div>' +
+    '<div id="cicy-resize-handle"></div>';
+
+  // --- Styles ---
+  var css = document.createElement('style');
+  css.textContent =
+    '#cicy-cmd-panel{position:fixed;width:380px;min-width:260px;background:rgba(20,20,22,0.92);border:1px solid rgba(255,255,255,0.08);border-radius:12px;z-index:9999;-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,0.5),0 0 0 1px rgba(255,255,255,0.05) inset;display:flex;flex-direction:column}' +
+    /* Header */
+    '#cicy-cmd-header{cursor:move;padding:8px 10px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.06);user-select:none}' +
+    '.cicy-header-left{display:flex;align-items:center;gap:6px}' +
+    '.cicy-logo{font-size:12px;opacity:0.5}' +
+    '.cicy-title{font-size:11px;font-weight:500;color:rgba(255,255,255,0.5);letter-spacing:0.3px}' +
+    '.cicy-header-right{display:flex;align-items:center;gap:4px}' +
+    /* Pills */
+    '.cicy-pill{background:rgba(255,255,255,0.06);border:none;color:rgba(255,255,255,0.55);font-size:10px;padding:3px 8px;border-radius:6px;cursor:pointer;font-family:inherit;transition:all .15s}' +
+    '.cicy-pill:hover{background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.8)}' +
+    '.cicy-pill-icon{padding:3px 6px;font-size:12px;line-height:1}' +
+    '#cicy-model-select{background:rgba(255,255,255,0.06);border:none;color:rgba(255,255,255,0.55);font-size:11px;padding:6px 8px;border-radius:6px;cursor:pointer;font-family:inherit;outline:none;width:100%}' +
+    '#cicy-model-select:hover{background:rgba(255,255,255,0.12)}' +
+    '.cicy-more-wrap{position:relative}' +
+    '.cicy-menu{display:none;position:absolute;right:0;top:calc(100% + 6px);background:rgba(28,28,30,0.96);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:6px;min-width:160px;-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);box-shadow:0 8px 30px rgba(0,0,0,0.5);z-index:10000;flex-direction:column;gap:4px}' +
+    '.cicy-menu.open{display:flex}' +
+    '.cicy-menu-item{background:none;border:none;color:rgba(255,255,255,0.6);font-size:11px;padding:6px 8px;border-radius:6px;cursor:pointer;font-family:inherit;text-align:left;transition:all .15s}' +
+    '.cicy-menu-item:hover{background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.9)}' +
+    /* Body */
+    '#cicy-cmd-body{padding:8px;flex:1;display:flex;flex-direction:column;min-height:0}' +
+    '.cicy-input-wrap{position:relative;flex:1;display:flex;min-height:0}' +
+    '#cicy-cmd-input{width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:#e8e8e8;font-size:13px;font-family:"SF Mono",Menlo,Consolas,monospace;padding:10px 44px 10px 12px;resize:none;outline:none;box-sizing:border-box;flex:1;min-height:0;line-height:1.5;transition:border-color .15s}' +
+    '#cicy-cmd-input::placeholder{color:rgba(255,255,255,0.25)}' +
+    '#cicy-cmd-input:focus{border-color:rgba(100,140,255,0.4)}' +
+    /* Send button - bottom right */
+    '#cicy-btn-send{position:absolute;right:8px;bottom:8px;width:28px;height:28px;border-radius:6px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#5b7fff 0%,#8b5cf6 100%);color:#fff;transition:all .15s;box-shadow:0 2px 8px rgba(91,127,255,0.3)}' +
+    '#cicy-btn-send:hover{transform:scale(1.05);box-shadow:0 4px 12px rgba(91,127,255,0.4)}' +
+    '#cicy-btn-send:active{transform:scale(0.95)}' +
+    /* States */
+    '#cicy-cmd-panel.collapsed #cicy-cmd-body,#cicy-cmd-panel.collapsed #cicy-resize-handle{display:none}' +
+    '#cicy-cmd-panel.collapsed{min-height:0!important;height:auto!important}' +
+    '#cicy-cmd-panel.collapsed #cicy-cmd-header{border-bottom:none}' +
+    /* Resize */
+    '#cicy-resize-handle{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;opacity:0.2;transition:opacity .15s}' +
+    '#cicy-resize-handle:hover{opacity:0.5}' +
+    '#cicy-resize-handle::after{content:"";position:absolute;right:4px;bottom:4px;width:6px;height:6px;border-right:2px solid rgba(255,255,255,0.4);border-bottom:2px solid rgba(255,255,255,0.4)}' +
+    /* Animations */
+    '.cicy-confirm{animation:cicy-pulse .5s ease-in-out infinite alternate}' +
+    '.cicy-sending{background:linear-gradient(135deg,#f59e0b 0%,#ef4444 100%)!important;box-shadow:0 2px 8px rgba(245,158,11,0.4)!important}' +
+    '@keyframes cicy-pulse{from{opacity:1}to{opacity:.4}}' +
+    '@keyframes cicy-spin{to{transform:rotate(360deg)}}';
+  document.head.appendChild(css);
+  document.body.appendChild(panel);
+
+  // --- Refs ---
+  var input = document.getElementById('cicy-cmd-input');
+  var sendBtn = document.getElementById('cicy-btn-send');
+  var enterBtn = document.getElementById('cicy-enter-mode');
+  var modelSel = document.getElementById('cicy-model-select');
+
+  // --- Restore draft ---
+  input.value = LS.get(dKey, '');
+
+  // --- Enter mode ---
+  function updateEnterBtn() { enterBtn.textContent = enterToSend ? '⏎ Send' : '⇧⏎ Send'; enterBtn.title = enterToSend ? 'Enter=Send, Shift+Enter=Newline' : 'Enter=Newline, Shift+Enter=Send'; }
+  updateEnterBtn();
+  enterBtn.addEventListener('click', function() { enterToSend = !enterToSend; LS.set('cicy_enter_to_send', enterToSend); updateEnterBtn(); });
+
+  // --- Sending state ---
+  function setSending(v) {
+    sending = v;
+    sendBtn.innerHTML = v
+      ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="animation:cicy-spin .6s linear infinite"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>'
+      : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>';
+    sendBtn.className = v ? 'cicy-sending' : '';
+  }
+  setSending(false);
+
+  // --- History helpers ---
+  function addHistory(cmd) {
+    history = [cmd].concat(history.filter(function(c){return c!==cmd})).slice(0,50);
+    LS.set(hKey, history);
+  }
+
+  // --- Send ---
+  function doSend(text) {
+    var cmd = (text || input.value).trim();
+    if (!cmd) return;
+    if (sending && cmd[0] !== '/') return; // block while busy, allow slash cmds
+    addHistory(cmd);
+    histIdx = -1; tmpDraft = '';
+    input.value = ''; LS.set(dKey, '');
+    setSending(true);
+    sendLine(cmd);
+  }
+
+  // --- Model select ---
+  modelSel.addEventListener('change', function() {
+    if (!this.value || sending) return;
+    setSending(true);
+    sendLine('/model ' + this.value);
+    this.value = '';
+    moreMenu.classList.remove('open');
+  });
+
+  // --- Keyboard ---
+  input.addEventListener('keydown', function(e) {
+    if (e.isComposing) return;
+
+    // Enter logic
+    if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
+      var shouldSend = enterToSend ? !e.shiftKey : e.shiftKey;
+      if (!shouldSend) return; // newline
+      e.preventDefault();
+      if (input.value.trim()) doSend();
+      else sendInput('\r'); // empty → send Enter key
+      return;
+    }
+
+    // Escape on empty
+    if (e.key === 'Escape' && !input.value) { sendInput('\x1b'); return; }
+    // Backspace on empty
+    if (e.key === 'Backspace' && !input.value) { e.preventDefault(); sendInput('\x7f'); return; }
+    // Ctrl+C on empty
+    if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='c' && !input.value) { e.preventDefault(); sendInput('\x03'); return; }
+
+    // ArrowUp = history prev
+    if (e.key === 'ArrowUp' && input.value.substring(0, input.selectionStart).indexOf('\n') === -1) {
+      if (history.length && histIdx < history.length - 1) {
+        e.preventDefault();
+        if (histIdx === -1) tmpDraft = input.value;
+        histIdx++; input.value = history[histIdx];
+      }
+      return;
+    }
+    // ArrowDown = history next
+    if (e.key === 'ArrowDown' && histIdx >= 0 && input.value.substring(input.selectionStart).indexOf('\n') === -1) {
+      e.preventDefault();
+      histIdx--;
+      input.value = histIdx >= 0 ? history[histIdx] : tmpDraft;
+    }
+  });
+
+  // Save draft on input
+  input.addEventListener('input', function() { LS.set(dKey, input.value); });
+
+  // --- Send button (click = send or reset) ---
+  sendBtn.addEventListener('click', function(e) {
+    e.preventDefault();
+    if (sending) { setSending(false); return; }
+    doSend();
+  });
+
+  // --- Twice-click confirm ---
+  function twiceBtn(id, action) {
+    var btn = document.getElementById(id), pending = false, timer, orig = btn.textContent;
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (!pending) { pending = true; btn.textContent = 'confirm?'; btn.classList.add('cicy-confirm'); timer = setTimeout(function(){ pending = false; btn.textContent = orig; btn.classList.remove('cicy-confirm'); }, 2000); }
+      else { clearTimeout(timer); pending = false; btn.textContent = orig; btn.classList.remove('cicy-confirm'); moreMenu.classList.remove('open'); action(); }
+    });
+  }
+  twiceBtn('cicy-btn-compact', function(){ sendLine('/compact --truncate-large-messages true --max-message-length 500'); });
+  twiceBtn('cicy-btn-restart', function(){ sendLine('tm restart ' + paneId); });
+
+  // --- More menu toggle ---
+  var moreBtn = document.getElementById('cicy-btn-more');
+  var moreMenu = document.getElementById('cicy-more-menu');
+  moreBtn.addEventListener('click', function(e) { e.stopPropagation(); moreMenu.classList.toggle('open'); });
+  document.addEventListener('click', function(e) { if (!moreMenu.contains(e.target) && e.target !== moreBtn) moreMenu.classList.remove('open'); });
+
+  // --- Position: cache per paneId + clamp to viewport ---
+  var posKey = 'cicy_panel_pos_' + paneId;
+  function clampPos(x, y) {
+    var r = panel.getBoundingClientRect();
+    var mx = window.innerWidth - r.width, my = window.innerHeight - r.height;
+    return { x: Math.max(0, Math.min(x, Math.max(0, mx))), y: Math.max(0, Math.min(y, Math.max(0, my))) };
+  }
+  function applyPos(x, y, save) {
+    var p = clampPos(x, y);
+    panel.style.left = p.x + 'px'; panel.style.top = p.y + 'px';
+    if (save !== false) LS.set(posKey, { x: p.x, y: p.y });
+  }
+  // Init: restore cached or default to bottom-left
+  var cached = LS.get(posKey, null);
+  // Defer to next frame so panel has layout dimensions
+  requestAnimationFrame(function() {
+    if (cached) { applyPos(cached.x, cached.y); }
+    else { applyPos(12, window.innerHeight - panel.getBoundingClientRect().height - 12); }
+  });
+
+  // Window resize → keep panel inside viewport
+  window.addEventListener('resize', function() {
+    var r = panel.getBoundingClientRect();
+    applyPos(r.left, r.top, false);
+  });
+
+  // --- Drag ---
+  var drag = document.getElementById('cicy-cmd-header');
+  drag.addEventListener('mousedown', function(e) {
+    if (e.target.closest('#cicy-cmd-toggle,#cicy-model-select,#cicy-enter-mode,#cicy-btn-cc,#cicy-btn-compact')) return;
+    var ox = e.clientX, oy = e.clientY, r = panel.getBoundingClientRect(), sx = r.left, sy = r.top;
+    function mv(e){ applyPos(sx + e.clientX - ox, sy + e.clientY - oy); }
+    function up(){ document.removeEventListener('mousemove',mv); document.removeEventListener('mouseup',up); }
+    document.addEventListener('mousemove',mv); document.addEventListener('mouseup',up);
+  });
+
+  // --- Resize handle ---
+  var sizeKey = 'cicy_panel_size_' + paneId;
+  var cachedSize = LS.get(sizeKey, null);
+  if (cachedSize) { panel.style.width = cachedSize.w + 'px'; panel.style.height = cachedSize.h + 'px'; }
+  var resizeHandle = document.getElementById('cicy-resize-handle');
+  resizeHandle.addEventListener('mousedown', function(e) {
+    e.preventDefault(); e.stopPropagation();
+    var r = panel.getBoundingClientRect(), sw = r.width, sh = r.height, ox = e.clientX, oy = e.clientY;
+    function mv(e) {
+      var nw = Math.max(280, sw + e.clientX - ox);
+      var nh = Math.max(120, sh + e.clientY - oy);
+      // clamp to viewport
+      nw = Math.min(nw, window.innerWidth - r.left);
+      nh = Math.min(nh, window.innerHeight - r.top);
+      panel.style.width = nw + 'px'; panel.style.height = nh + 'px';
+    }
+    function up() {
+      document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up);
+      var fr = panel.getBoundingClientRect();
+      LS.set(sizeKey, { w: Math.round(fr.width), h: Math.round(fr.height) });
+    }
+    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+  });
+
+  // --- Collapse ---
+  document.getElementById('cicy-cmd-toggle').addEventListener('click', function(e) {
+    e.stopPropagation();
+    panel.classList.toggle('collapsed');
+    this.textContent = panel.classList.contains('collapsed') ? '+' : '−';
+  });
+
+  // --- Ctrl+/ focus ---
+  document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey||e.metaKey) && e.key === '/') { e.preventDefault(); input.focus(); }
+  });
+
+  // --- Auto-reset sending when terminal outputs after a while ---
+  var lastSendTime = 0;
+  var _origOnMsg = null;
+  function watchOutput() {
+    if (!gottyWs || _origOnMsg) return;
+    _origOnMsg = gottyWs.onmessage;
+    gottyWs.onmessage = function(ev) {
+      if (sending && typeof ev.data === 'string' && ev.data[0] === '1' && Date.now() - lastSendTime > 500) setSending(false);
+      if (_origOnMsg) _origOnMsg.call(this, ev);
+    };
+  }
+  var _doSendOrig = doSend;
+  doSend = function(t) { lastSendTime = Date.now(); watchOutput(); _doSendOrig(t); };
+})();
 </script>
