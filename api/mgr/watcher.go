@@ -86,7 +86,13 @@ func readPipeLog(paneID string) string {
 	}
 	s := ansiRe.ReplaceAllString(string(out), "")
 	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = strings.ReplaceAll(s, "\r", "")
+	// Simulate terminal: \r overwrites current line, keep only last segment
+	var lines []string
+	for _, line := range strings.Split(s, "\n") {
+		parts := strings.Split(line, "\r")
+		lines = append(lines, parts[len(parts)-1])
+	}
+	s = strings.Join(lines, "\n")
 	return ctrlRe.ReplaceAllString(s, "")
 }
 

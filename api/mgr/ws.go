@@ -186,7 +186,12 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 		if inj := loadTtydInject(); inj != "" {
 			html = strings.Replace(html, "</body>", inj+"</body>", 1)
 		}
-		html = strings.Replace(html, `"./js/gotty-bundle.js"`, fmt.Sprintf(`"/static/gotty-bundle.js?v=%d"`, time.Now().Unix()), 1)
+		html = strings.Replace(html, "<html>", `<html style="overflow:hidden">`, 1)
+		cosBase := "https://cicy-1372193042.cos.ap-shanghai.myqcloud.com/static"
+		html = strings.Replace(html, `"./js/gotty-bundle.js"`, fmt.Sprintf(`"%s/gotty-bundle.js?v=%d"`, cosBase, time.Now().Unix()), 1)
+		html = strings.Replace(html, `"./css/index.css"`, fmt.Sprintf(`"%s/css/index.css"`, cosBase), 1)
+		html = strings.Replace(html, `"./css/xterm.css"`, fmt.Sprintf(`"%s/css/xterm.css"`, cosBase), 1)
+		html = strings.Replace(html, `"./css/xterm_customize.css"`, fmt.Sprintf(`"%s/css/xterm_customize.css"`, cosBase), 1)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(html)))
 		w.WriteHeader(resp.StatusCode)
@@ -235,6 +240,9 @@ func proxyWS(w http.ResponseWriter, r *http.Request, port int) {
 				cancel()
 				return
 			}
+			if mt == websocket.TextMessage && bytes.Contains(msg, []byte("0;276;0c")) {
+				log.Printf("[ws-proxy] DA response ttyd→client: %q", msg[:min(len(msg), 120)])
+			}
 			if err := clientConn.WriteMessage(mt, msg); err != nil {
 				cancel()
 				return
@@ -280,6 +288,10 @@ func filterDAQuery(data []byte) []byte {
 		return data
 	}
 	raw := data[1:]
+	// Log DA queries before filtering
+	if bytes.Contains(raw, []byte("\x1b[c")) || bytes.Contains(raw, []byte("\x1b[0c")) || bytes.Contains(raw, []byte("0;276;0c")) {
+		log.Printf("[ws-filter] DA detected in input: %q", raw)
+	}
 	// Remove DA queries
 	cleaned := bytes.ReplaceAll(raw, []byte("\x1b[c"), nil)
 	cleaned = bytes.ReplaceAll(cleaned, []byte("\x1b[0c"), nil)

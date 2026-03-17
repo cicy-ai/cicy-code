@@ -39,7 +39,7 @@ func initHTTPLogConsumer() {
 func consumeHTTPLogs() {
 	panes := map[string]bool{}
 	for {
-		raw := redisDo("RPOP", "kiro_http_log")
+		raw := redisDo("RPOP", redisKey("kiro_http_log"))
 		if raw == "" {
 			break
 		}

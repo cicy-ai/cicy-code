@@ -458,6 +458,107 @@ func handleCapture(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"pane_id": shortPaneID(paneID), "output": out + "\n"})
 }
 
+// handleWindows — CRUD for tmux windows within a session
+// GET    ?session=xxx           → list windows
+// POST   {session, name}        → new-window
+// PATCH  {session, index, name} → rename-window
+// DELETE {session, index}       → kill-window
+func handleWindows(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		s := r.URL.Query().Get("session")
+		if s == "" {
+			httpErr(w, 400, "session required")
+			return
+		}
+		wo, err := runTmux("list-windows", "-t", s, "-F", "#{window_index}|#{window_name}|#{window_active}")
+		if err != nil {
+			J(w, M{"windows": []M{}})
+			return
+		}
+		var wins []M
+		for _, line := range strings.Split(wo, "\n") {
+			parts := strings.SplitN(line, "|", 3)
+			if len(parts) < 3 {
+				continue
+			}
+			wins = append(wins, M{"index": parts[0], "name": parts[1], "active": parts[2] == "1"})
+		}
+		J(w, M{"windows": wins})
+	case "POST":
+		var body struct {
+			Session string `json:"session"`
+			Name    string `json:"name"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if body.Session == "" {
+			httpErr(w, 400, "session required")
+			return
+		}
+		args := []string{"new-window", "-t", body.Session}
+		if body.Name != "" {
+			args = append(args, "-n", body.Name)
+		}
+		_, err := runTmux(args...)
+		if err != nil {
+			httpErr(w, 500, err.Error())
+			return
+		}
+		J(w, M{"success": true})
+	case "PATCH":
+		var body struct {
+			Session string `json:"session"`
+			Index   string `json:"index"`
+			Name    string `json:"name"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if body.Session == "" || body.Index == "" || body.Name == "" {
+			httpErr(w, 400, "session, index, name required")
+			return
+		}
+		_, err := runTmux("rename-window", "-t", body.Session+":"+body.Index, body.Name)
+		if err != nil {
+			httpErr(w, 500, err.Error())
+			return
+		}
+		J(w, M{"success": true})
+	case "DELETE":
+		var body struct {
+			Session string `json:"session"`
+			Index   string `json:"index"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if body.Session == "" || body.Index == "" {
+			httpErr(w, 400, "session, index required")
+			return
+		}
+		_, err := runTmux("kill-window", "-t", body.Session+":"+body.Index)
+		if err != nil {
+			httpErr(w, 500, err.Error())
+			return
+		}
+		J(w, M{"success": true})
+	case "PUT":
+		var body struct {
+			Session string `json:"session"`
+			Index   string `json:"index"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if body.Session == "" || body.Index == "" {
+			httpErr(w, 400, "session, index required")
+			return
+		}
+		_, err := runTmux("select-window", "-t", body.Session+":"+body.Index)
+		if err != nil {
+			httpErr(w, 500, err.Error())
+			return
+		}
+		J(w, M{"success": true})
+	default:
+		httpErr(w, 405, "method not allowed")
+	}
+}
+
 func handleTree(w http.ResponseWriter, r *http.Request) {
 	out, err := runTmux("list-sessions", "-F", "#{session_name}")
 	if err != nil {

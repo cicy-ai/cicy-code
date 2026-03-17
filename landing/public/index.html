@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CiCy | You speak. AI creates.</title>
+    <meta name="description" content="CiCy is an AI-powered operating system. No coding, no deployment. Just speak and create desktop apps, plugins, and workflows instantly." />
+    <meta name="keywords" content="AI, No-code, Operating System, CiCy, App Builder, Automation" />
+    <meta name="author" content="CiCy Team" />
+    
+    <!-- Open Graph / Social -->
+    <meta property="og:title" content="CiCy | You speak. AI creates." />
+    <meta property="og:description" content="CiCy is an AI-powered operating system. No coding, no deployment. Just speak and create instantly." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://cicy-ai.com/" />
+    <meta property="og:image" content="https://cicy-ai.com/og-image.jpg" />
+    
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="CiCy | You speak. AI creates." />
+    <meta name="twitter:description" content="CiCy is an AI-powered operating system. No coding, no deployment. Just speak and create instantly." />
+    <meta name="twitter:image" content="https://cicy-ai.com/twitter-image.jpg" />
+    
+    <link rel="canonical" href="https://cicy-ai.com/" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script type="module" crossorigin src="/assets/index-BXuJpFW2.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CcbdAFVd.css">
+  </head>
+  <body class="bg-black text-white font-sans antialiased selection:bg-emerald-500/30">
+    
+    <!-- Navbar -->
+    <nav class="fixed top-0 w-full z-50 border-b border-white/5 bg-black/50 backdrop-blur-xl">
+      <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <img src="/logo.svg" alt="CiCy Logo" class="w-8 h-8" />
+          <span class="font-bold text-xl tracking-tight">CiCy</span>
+        </div>
+        
+        <div class="hidden md:flex items-center gap-8 text-sm font-medium text-white/60">
+          <a href="#how-it-works" class="hover:text-white transition-colors">
+            <span class="en">How it works</span><span class="zh">工作原理</span>
+          </a>
+          <a href="#comparison" class="hover:text-white transition-colors">
+            <span class="en">Comparison</span><span class="zh">对比</span>
+          </a>
+          <a href="#pricing" class="hover:text-white transition-colors">
+            <span class="en">Pricing</span><span class="zh">价格</span>
+          </a>
+          <a href="#stories" class="hover:text-white transition-colors">
+            <span class="en">Stories</span><span class="zh">用户故事</span>
+          </a>
+        </div>
+
+        <div class="flex items-center gap-4">
+          <button id="lang-toggle" class="flex items-center gap-1 text-sm text-white/60 hover:text-white transition-colors">
+            <i data-lucide="globe" class="w-4 h-4"></i>
+            <span class="en">中文</span><span class="zh">EN</span>
+          </button>
+          <a href="https://github.com/cicy-dev/cicy-api" target="_blank" class="hidden md:flex items-center gap-2 border border-white/20 text-white px-4 py-2 rounded-full text-sm font-semibold hover:bg-white/10 transition-colors">
+            <i data-lucide="github" class="w-4 h-4"></i>
+            <span>Star</span>
+          </a>
+          <a href="https://api.cicy-ai.com/api/auth/github" id="nav-login" class="flex items-center gap-2 bg-emerald-500 text-black px-4 py-2 rounded-full text-sm font-semibold hover:bg-emerald-400 transition-colors">
+            <i data-lucide="github" class="w-4 h-4"></i>
+            <span class="en">Sign in with GitHub</span><span class="zh">GitHub 登录</span>
+          </a>
+          <div id="nav-user" class="hidden">
+            <button id="nav-avatar" class="w-10 h-10 rounded-full bg-white/10 text-white/80 flex items-center justify-center hover:bg-white/20 transition-colors cursor-pointer p-2">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.5 20.118a7.5 7.5 0 0114.998 0A17.9 17.9 0 0112 21.75a17.9 17.9 0 01-7.5-1.632z"/></svg>
+            </button>
+          </div>
+          <div id="nav-dropdown" class="hidden fixed w-56 bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-[100]">
+            <div class="px-4 py-3 border-b border-white/10">
+              <div id="nav-email" class="text-sm text-white truncate"></div>
+              <div id="nav-plan" class="text-xs text-white/40 mt-0.5">Free Plan</div>
+            </div>
+            <button id="nav-logout" class="w-full px-4 py-3 text-sm text-left text-white/60 hover:text-white hover:bg-white/5 transition-colors flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+              Logout
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <main>
+      <!-- Hero -->
+      <section class="relative pt-32 pb-20 overflow-hidden">
+        <div class="max-w-7xl mx-auto px-6 text-center relative z-10">
+          <h1 class="text-5xl md:text-8xl font-bold tracking-tighter mb-6">
+            <span class="en">You speak.</span><span class="zh">你说话。</span> <br />
+            <span class="text-white/40"><span class="en">AI creates.</span><span class="zh">AI 创造。</span></span>
+          </h1>
+          
+          <div class="max-w-2xl mx-auto mb-12 p-4 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm">
+            <div class="flex items-center gap-3 text-white/60 mb-2 text-sm">
+              <i data-lucide="mic" class="w-4 h-4"></i>
+              <span class="en">Voice Input</span><span class="zh">语音输入</span>
+            </div>
+            <div class="text-xl md:text-2xl min-h-[1.5em] flex items-center justify-center">
+              <span class="text-emerald-400 font-mono pr-1"><span id="typing-text"></span><span class="typing-cursor border-r-2 border-emerald-400"></span></span>
+            </div>
+          </div>
+
+          <div class="flex flex-col md:flex-row items-center justify-center gap-4">
+            <a href="https://api.cicy-ai.com/api/auth/github" class="w-full md:w-auto bg-emerald-500 text-black px-8 py-4 rounded-full text-lg font-bold hover:bg-emerald-400 hover:scale-105 transition-all flex items-center justify-center gap-2">
+              <i data-lucide="github" class="w-5 h-5"></i>
+              <span class="en">Try CiCy Free</span><span class="zh">免费试用</span>
+            </a>
+            <a href="https://github.com/cicy-dev/cicy-api" target="_blank" class="w-full md:w-auto bg-white/5 border border-white/10 px-8 py-4 rounded-full text-lg font-bold hover:bg-white/10 transition-colors flex items-center justify-center gap-2">
+              <i data-lucide="github" class="w-5 h-5"></i>
+              <span class="en">Star on GitHub</span><span class="zh">GitHub Star</span>
+            </a>
+          </div>
+
+          <!-- Desktop Mockup -->
+          <div class="mt-20 relative max-w-5xl mx-auto">
+            <div class="aspect-video rounded-3xl bg-gradient-to-br from-white/10 to-transparent border border-white/20 p-4 shadow-2xl relative overflow-hidden">
+              <div class="w-full h-full rounded-2xl bg-black/40 backdrop-blur-md flex items-center justify-center relative">
+                <div class="grid grid-cols-4 gap-8">
+                  <div class="flex flex-col items-center gap-2 animate-float">
+                    <div class="w-16 h-16 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-3xl shadow-lg backdrop-blur-xl">🎵</div>
+                    <span class="text-xs font-medium text-white/60">Music</span>
+                  </div>
+                  <div class="flex flex-col items-center gap-2 animate-float-delayed">
+                    <div class="w-16 h-16 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-3xl shadow-lg backdrop-blur-xl">📹</div>
+                    <span class="text-xs font-medium text-white/60">Video</span>
+                  </div>
+                  <div class="flex flex-col items-center gap-2 animate-float-slow">
+                    <div class="w-16 h-16 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-3xl shadow-lg backdrop-blur-xl">✨</div>
+                    <span class="text-xs font-medium text-white/60">AI</span>
+                  </div>
+                  <div class="flex flex-col items-center gap-2 animate-float">
+                    <div class="w-16 h-16 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-3xl shadow-lg backdrop-blur-xl">💻</div>
+                    <span class="text-xs font-medium text-white/60">Code</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- How It Works -->
+      <section id="how-it-works" class="py-24 relative">
+        <div class="max-w-7xl mx-auto px-6">
+          <div class="text-center mb-16">
+            <h2 class="text-4xl md:text-5xl font-bold mb-4">
+              <span class="en">How CiCy Works</span><span class="zh">CiCy 工作原理</span>
+            </h2>
+            <p class="text-xl text-white/60">
+              <span class="en">From thought to app in seconds.</span><span class="zh">从想法到应用，只需几秒。</span>
+            </p>
+          </div>
+          
+          <div class="grid md:grid-cols-3 gap-8">
+            <div class="p-8 rounded-3xl bg-white/5 border border-white/10">
+              <div class="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center mb-6">
+                <i data-lucide="mic" class="text-emerald-400"></i>
+              </div>
+              <h3 class="text-xl font-bold mb-3"><span class="en">1. Speak</span><span class="zh">1. 说话</span></h3>
+              <p class="text-white/60"><span class="en">Just describe what you want to build using natural language.</span><span class="zh">使用自然语言描述您想要构建的内容。</span></p>
+            </div>
+            <div class="p-8 rounded-3xl bg-white/5 border border-white/10">
+              <div class="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center mb-6">
+                <i data-lucide="zap" class="text-blue-400"></i>
+              </div>
+              <h3 class="text-xl font-bold mb-3"><span class="en">2. AI Processes</span><span class="zh">2. AI 处理</span></h3>
+              <p class="text-white/60"><span class="en">Our engine writes the code, connects APIs, and builds the UI.</span><span class="zh">我们的引擎会自动编写代码、连接 API 并构建 UI。</span></p>
+            </div>
+            <div class="p-8 rounded-3xl bg-white/5 border border-white/10">
+              <div class="w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center mb-6">
+                <i data-lucide="mouse-pointer-2" class="text-purple-400"></i>
+              </div>
+              <h3 class="text-xl font-bold mb-3"><span class="en">3. Ready to Use</span><span class="zh">3. 立即使用</span></h3>
+              <p class="text-white/60"><span class="en">Your app is ready instantly. No deployment required.</span><span class="zh">您的应用立即就绪。无需部署。</span></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Comparison -->
+      <section id="comparison" class="py-24 relative bg-white/5 border-y border-white/10">
+        <div class="max-w-7xl mx-auto px-6">
+          <div class="text-center mb-16">
+            <h2 class="text-4xl md:text-5xl font-bold mb-4">
+              <span class="en">Why CiCy?</span><span class="zh">为什么选择 CiCy？</span>
+            </h2>
+            <p class="text-xl text-white/60">
+              <span class="en">A new paradigm in software creation.</span><span class="zh">软件开发的新范式。</span>
+            </p>
+          </div>
+          
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="border-b border-white/10">
+                  <th class="py-4 px-6 font-medium text-white/60 w-1/4"></th>
+                  <th class="py-4 px-6 font-bold text-xl w-1/4">CiCy</th>
+                  <th class="py-4 px-6 font-medium text-white/60 w-1/4"><span class="en">Cursor / Copilot</span><span class="zh">Cursor / Copilot</span></th>
+                  <th class="py-4 px-6 font-medium text-white/60 w-1/4"><span class="en">Traditional Dev</span><span class="zh">传统开发</span></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-white/5">
+                <tr>
+                  <td class="py-6 px-6 font-medium"><span class="en">Input Method</span><span class="zh">输入方式</span></td>
+                  <td class="py-6 px-6 text-emerald-400 font-medium"><span class="en">Voice / Natural Language</span><span class="zh">语音 / 自然语言</span></td>
+                  <td class="py-6 px-6 text-white/80"><span class="en">Text Prompts + Code</span><span class="zh">文本提示 + 代码</span></td>
+                  <td class="py-6 px-6 text-white/40"><span class="en">Manual Coding</span><span class="zh">手动编码</span></td>
+                </tr>
+                <tr>
+                  <td class="py-6 px-6 font-medium"><span class="en">Deployment</span><span class="zh">部署方式</span></td>
+                  <td class="py-6 px-6 text-emerald-400 font-medium"><span class="en">Instant (Zero Config)</span><span class="zh">即时（零配置）</span></td>
+                  <td class="py-6 px-6 text-white/80"><span class="en">Manual Setup</span><span class="zh">手动配置</span></td>
+                  <td class="py-6 px-6 text-white/40"><span class="en">Complex CI/CD</span><span class="zh">复杂的 CI/CD</span></td>
+                </tr>
+                <tr>
+                  <td class="py-6 px-6 font-medium"><span class="en">Target User</span><span class="zh">目标用户</span></td>
+                  <td class="py-6 px-6 text-emerald-400 font-medium"><span class="en">Everyone</span><span class="zh">所有人</span></td>
+                  <td class="py-6 px-6 text-white/80"><span class="en">Developers</span><span class="zh">开发者</span></td>
+                  <td class="py-6 px-6 text-white/40"><span class="en">Engineers</span><span class="zh">工程师</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Pricing -->
+      <section id="pricing" class="py-24 relative overflow-hidden">
+        <div class="max-w-7xl mx-auto px-6 relative z-10">
+          <div class="text-center mb-12">
+            <h2 class="text-4xl md:text-6xl font-bold mb-4 tracking-tight">
+              <span class="en">Simple, transparent pricing</span><span class="zh">简单透明的定价</span>
+            </h2>
+            <p class="text-xl text-white/60 mb-8">
+              <span class="en">Choose the plan that works best for you.</span><span class="zh">选择最适合您的方案。</span>
+            </p>
+            
+            <div class="flex justify-center">
+              <div class="bg-white/5 border border-white/10 p-1 rounded-full flex items-center relative">
+                <div id="toggle-bg" class="absolute left-1 top-1 bottom-1 w-[100px] bg-white/10 rounded-full transition-all duration-300"></div>
+                <button id="toggle-monthly" class="relative z-10 w-[100px] py-2 rounded-full text-sm font-medium text-white transition-colors">Monthly</button>
+                <button id="toggle-yearly" class="relative z-10 w-[140px] py-2 rounded-full text-sm font-medium text-white/60 hover:text-white transition-colors flex items-center justify-center gap-1">
+                  Yearly <span class="text-emerald-400 text-xs font-bold">-17%</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <div class="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+            <!-- Free -->
+            <div class="relative p-8 rounded-[2rem] bg-white/5 backdrop-blur-xl flex flex-col transition-transform hover:-translate-y-2 border border-white/10">
+              <div class="mb-8">
+                <h3 class="text-xl font-medium text-white/80 mb-2">Free</h3>
+                <div class="flex items-baseline gap-1">
+                  <span class="text-5xl font-bold">$0</span>
+                  <span class="text-white/40 font-medium"></span>
+                </div>
+                <p class="text-white/60 text-sm mt-4"><span class="en">Perfect for trying out CiCy.</span><span class="zh">适合体验 CiCy。</span></p>
+              </div>
+              <ul class="space-y-4 mb-8 flex-1">
+                <li class="flex items-start gap-3 text-white/90">
+                  <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="check" class="w-3 h-3 text-emerald-400"></i></div>
+                  <span><span class="en">3 desktop apps</span><span class="zh">3 个桌面应用</span></span>
+                </li>
+                <li class="flex items-start gap-3 text-white/90">
+                  <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="check" class="w-3 h-3 text-emerald-400"></i></div>
+                  <span><span class="en">5 plugin connections</span><span class="zh">5 个插件连接</span></span>
+                </li>
+                <li class="flex items-start gap-3 text-white/90">
+                  <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="check" class="w-3 h-3 text-emerald-400"></i></div>
+                  <span><span class="en">50 AI calls/day</span><span class="zh">每天 50 次 AI 调用</span></span>
+                </li>
+                <li class="flex items-start gap-3 text-white/90">
+                  <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="check" class="w-3 h-3 text-emerald-400"></i></div>
+                  <span><span class="en">Community support</span><span class="zh">社区支持</span></span>
+                </li>
+              </ul>
+              <a href="#get-started" class="w-full py-4 rounded-xl font-bold transition-all bg-white/10 text-white hover:bg-white/20 text-center">
+                <span class="en">Get Started</span><span class="zh">免费开始</span>
+              </a>
+            </div>
+
+            <!-- Pro -->
+            <div class="relative p-8 rounded-[2rem] bg-white/5 backdrop-blur-xl flex flex-col transition-transform hover:-translate-y-2 border-2 border-emerald-500 shadow-[0_0_40px_-10px_rgba(16,185,129,0.3)]">
+              <div class="absolute -top-4 left-1/2 -translate-x-1/2 bg-emerald-500 text-black text-xs font-bold px-4 py-1.5 rounded-full uppercase tracking-wider">
+                <span class="en">Most Popular</span><span class="zh">最受欢迎</span>
+              </div>
+              <div class="mb-8">
+                <h3 class="text-xl font-medium text-white/80 mb-2">Pro</h3>
+                <div class="flex items-baseline gap-2 flex-wrap">
+                  <span class="text-5xl font-bold price-value" data-monthly="$9.9" data-yearly="$99">$9.9</span>
+                  <span class="text-white/40 font-medium">
+                    <span class="en price-period">/month</span><span class="zh price-period">/月</span>
+                  </span>
+                  <span class="hidden text-emerald-400 text-xs font-bold bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded-full yearly-badge">Save 17%</span>
+                </div>
+                <p class="text-white/60 text-sm mt-4"><span class="en">For power users and creators.</span><span class="zh">适合重度用户和创作者。</span></p>
+              </div>
+              <ul class="space-y-4 mb-8 flex-1">
+                <li class="flex items-start gap-3 text-white/90">
+                  <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="check" class="w-3 h-3 text-emerald-400"></i></div>
+                  <span><span class="en">Unlimited apps</span><span class="zh">无限桌面应用</span></span>
+                </li>
+                <li class="flex items-start gap-3 text-white/90">
+                  <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="check" class="w-3 h-3 text-emerald-400"></i></div>
+                  <span><span class="en">Unlimited plugins</span><span class="zh">无限插件连接</span></span>
+                </li>
+                <li class="flex items-start gap-3 text-white/90">
+                  <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="check" class="w-3 h-3 text-emerald-400"></i></div>
+                  <span><span class="en">500 AI calls/day</span><span class="zh">每天 500 次 AI 调用</span></span>
+                </li>
+                <li class="flex items-start gap-3 text-white/90">
+                  <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="check" class="w-3 h-3 text-emerald-400"></i></div>
+                  <span><span class="en">Priority response</span><span class="zh">优先响应支持</span></span>
+                </li>
+                <li class="flex items-start gap-3 text-white/90">
+                  <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="check" class="w-3 h-3 text-emerald-400"></i></div>
+                  <span><span class="en">Electron desktop app</span><span class="zh">Electron 桌面端应用</span></span>
+                </li>
+              </ul>
+              <a href="#get-started" class="w-full py-4 rounded-xl font-bold transition-all bg-emerald-500 text-black hover:bg-emerald-400 hover:scale-[1.02] text-center">
+                <span class="en">Subscribe</span><span class="zh">立即订阅</span>
+              </a>
+            </div>
+
+            <!-- Team -->
+            <div class="relative p-8 rounded-[2rem] bg-white/5 backdrop-blur-xl flex flex-col transition-transform hover:-translate-y-2 border border-white/10">
+              <div class="mb-8">
+                <h3 class="text-xl font-medium text-white/80 mb-2">Team</h3>
+                <div class="flex items-baseline gap-2 flex-wrap">
+                  <span class="text-5xl font-bold price-value" data-monthly="$29.9" data-yearly="$299">$29.9</span>
+                  <span class="text-white/40 font-medium">
+                    <span class="en price-period">/month per seat</span><span class="zh price-period">/月/席位</span>
+                  </span>
+                  <span class="hidden text-emerald-400 text-xs font-bold bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded-full yearly-badge">Save 17%</span>
+                </div>
+                <p class="text-white/60 text-sm mt-4"><span class="en">For teams building together.</span><span class="zh">适合团队协作构建。</span></p>
+              </div>
+              <ul class="space-y-4 mb-8 flex-1">
+                <li class="flex items-start gap-3 text-white/90">
+                  <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="check" class="w-3 h-3 text-emerald-400"></i></div>
+                  <span><span class="en">Everything in Pro</span><span class="zh">包含 Pro 版所有功能</span></span>
+                </li>
+                <li class="flex items-start gap-3 text-white/90">
+                  <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="check" class="w-3 h-3 text-emerald-400"></i></div>
+                  <span><span class="en">Team collaboration</span><span class="zh">团队协作</span></span>
+                </li>
+                <li class="flex items-start gap-3 text-white/90">
+                  <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="check" class="w-3 h-3 text-emerald-400"></i></div>
+                  <span><span class="en">Admin dashboard</span><span class="zh">管理员控制台</span></span>
+                </li>
+                <li class="flex items-start gap-3 text-white/90">
+                  <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="check" class="w-3 h-3 text-emerald-400"></i></div>
+                  <span><span class="en">SSO/LDAP</span><span class="zh">SSO/LDAP 单点登录</span></span>
+                </li>
+                <li class="flex items-start gap-3 text-white/90">
+                  <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5"><i data-lucide="check" class="w-3 h-3 text-emerald-400"></i></div>
+                  <span><span class="en">Unlimited AI calls</span><span class="zh">无限 AI 调用</span></span>
+                </li>
+              </ul>
+              <a href="#get-started" class="w-full py-4 rounded-xl font-bold transition-all bg-white/10 text-white hover:bg-white/20 text-center">
+                <span class="en">Subscribe</span><span class="zh">立即订阅</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- User Stories -->
+      <section id="stories" class="py-24 relative bg-white/5 border-y border-white/10">
+        <div class="max-w-7xl mx-auto px-6">
+          <div class="text-center mb-16">
+            <h2 class="text-4xl md:text-5xl font-bold mb-4">
+              <span class="en">Built for Everyone</span><span class="zh">为所有人打造</span>
+            </h2>
+            <p class="text-xl text-white/60">
+              <span class="en">See what people are building with CiCy.</span><span class="zh">看看大家都在用 CiCy 构建什么。</span>
+            </p>
+          </div>
+          
+          <div class="grid md:grid-cols-3 gap-8">
+            <div class="p-8 rounded-3xl bg-black/40 border border-white/10">
+              <div class="flex items-center gap-4 mb-6">
+                <div class="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-blue-500"></div>
+                <div>
+                  <h4 class="font-bold">Sarah J.</h4>
+                  <p class="text-sm text-white/60"><span class="en">UI Designer</span><span class="zh">UI 设计师</span></p>
+                </div>
+              </div>
+              <p class="text-white/80 leading-relaxed">
+                <span class="en">"I used to rely on developers to bring my designs to life. With CiCy, I just describe the interactions and it builds the actual app. It's magic."</span>
+                <span class="zh">"以前我需要依赖开发者来实现我的设计。有了 CiCy，我只需描述交互，它就能构建出实际的应用。太神奇了。"</span>
+              </p>
+            </div>
+            
+            <div class="p-8 rounded-3xl bg-black/40 border border-white/10">
+              <div class="flex items-center gap-4 mb-6">
+                <div class="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500"></div>
+                <div>
+                  <h4 class="font-bold">David Chen</h4>
+                  <p class="text-sm text-white/60"><span class="en">Crypto Trader</span><span class="zh">加密货币交易员</span></p>
+                </div>
+              </div>
+              <p class="text-white/80 leading-relaxed">
+                <span class="en">"I needed a custom dashboard to track specific token metrics. I told CiCy what APIs to connect, and I had my personal terminal in 2 minutes."</span>
+                <span class="zh">"我需要一个自定义仪表板来跟踪特定的代币指标。我告诉 CiCy 要连接哪些 API，2 分钟后我就有了自己的个人终端。"</span>
+              </p>
+            </div>
+            
+            <div class="p-8 rounded-3xl bg-black/40 border border-white/10">
+              <div class="flex items-center gap-4 mb-6">
+                <div class="w-12 h-12 rounded-full bg-gradient-to-br from-orange-500 to-red-500"></div>
+                <div>
+                  <h4 class="font-bold">Elena M.</h4>
+                  <p class="text-sm text-white/60"><span class="en">Marketing Manager</span><span class="zh">营销经理</span></p>
+                </div>
+              </div>
+              <p class="text-white/80 leading-relaxed">
+                <span class="en">"I built an automated workflow that connects our CRM to our email tool just by talking to CiCy. Saved our team 10 hours a week."</span>
+                <span class="zh">"我只需和 CiCy 说话，就构建了一个将我们的 CRM 连接到电子邮件工具的自动化工作流。每周为我们的团队节省了 10 个小时。"</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Get Started -->
+      <section id="get-started" class="py-24 relative overflow-hidden">
+        <div class="absolute inset-0 bg-gradient-to-b from-transparent to-white/5"></div>
+        <div class="max-w-7xl mx-auto px-6 relative z-10">
+          <div class="grid md:grid-cols-2 gap-16 items-center">
+            <div>
+              <h2 class="text-4xl md:text-6xl font-bold mb-6 tracking-tight">
+                <span class="en">Ready to build?</span><span class="zh">准备好构建了吗？</span>
+              </h2>
+              <p class="text-xl text-white/60 mb-8">
+                <span class="en">Sign in to get started with CiCy.</span><span class="zh">登录即可开始使用 CiCy。</span>
+              </p>
+              
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
+                <div class="flex items-center gap-3 text-lg">
+                  <div class="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
+                    <i data-lucide="check" class="w-3 h-3 text-emerald-400"></i>
+                  </div>
+                  <span class="whitespace-nowrap font-medium text-white/90"><span class="en">No download needed</span><span class="zh">无需下载</span></span>
+                </div>
+                <div class="flex items-center gap-3 text-lg">
+                  <div class="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
+                    <i data-lucide="check" class="w-3 h-3 text-emerald-400"></i>
+                  </div>
+                  <span class="whitespace-nowrap font-medium text-white/90"><span class="en">No account needed</span><span class="zh">无需注册</span></span>
+                </div>
+                <div class="flex items-center gap-3 text-lg">
+                  <div class="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
+                    <i data-lucide="check" class="w-3 h-3 text-emerald-400"></i>
+                  </div>
+                  <span class="whitespace-nowrap font-medium text-white/90"><span class="en">Works on Mac</span><span class="zh">支持 macOS</span></span>
+                </div>
+              </div>
+
+              <div class="flex flex-col sm:flex-row gap-4">
+                <a href="https://api.cicy-ai.com/api/auth/github" class="bg-emerald-500 text-black px-8 py-4 rounded-xl text-lg font-bold hover:bg-emerald-400 transition-colors whitespace-nowrap flex items-center justify-center gap-2 w-fit">
+                  <i data-lucide="github" class="w-6 h-6"></i>
+                  <span class="en">Sign in with GitHub</span><span class="zh">GitHub 登录</span>
+                </a>
+              </div>
+            </div>
+
+            <div class="bg-black/50 border border-white/10 rounded-2xl p-6 font-mono text-sm shadow-2xl backdrop-blur-xl">
+              <div class="flex gap-2 mb-4">
+                <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
+                <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+                <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+              </div>
+              <div class="text-emerald-400 mb-2">$ npx cicy</div>
+              <div class="text-white/80 mb-4">
+                <span class="text-white/40">❯</span> <span id="terminal-text"></span><span class="typing-cursor border-r border-white/40"></span>
+              </div>
+              <div id="terminal-result" class="hidden flex-col gap-2">
+                <div class="text-white/60"><span class="en">Analyzing request...</span><span class="zh">分析请求...</span></div>
+                <div class="text-white/60"><span class="en">Generating UI components...</span><span class="zh">生成 UI 组件...</span></div>
+                <div class="text-white/60"><span class="en">Connecting weather API...</span><span class="zh">连接天气 API...</span></div>
+                <div class="text-emerald-400 mt-2"><span class="en">✨ App ready at localhost:8101</span><span class="zh">✨ 应用已就绪 localhost:8101</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-white/10 bg-black py-12">
+      <div class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6">
+        <div class="flex items-center gap-2">
+          <img src="/logo.svg" alt="CiCy Logo" class="w-6 h-6" />
+          <span class="font-bold tracking-tight">CiCy</span>
+        </div>
+        
+        <div class="flex items-center gap-6 text-white/40 text-sm">
+          <a href="#" class="hover:text-white transition-colors"><span class="en">Privacy</span><span class="zh">隐私政策</span></a>
+          <a href="#" class="hover:text-white transition-colors"><span class="en">Terms</span><span class="zh">服务条款</span></a>
+          <a href="#" class="hover:text-white transition-colors"><span class="en">Contact</span><span class="zh">联系我们</span></a>
+        </div>
+
+        <div class="flex items-center gap-4 text-white/40">
+          <a href="#" class="hover:text-white transition-colors"><i data-lucide="twitter" class="w-5 h-5"></i></a>
+          <a href="#" class="hover:text-white transition-colors"><i data-lucide="github" class="w-5 h-5"></i></a>
+          <a href="#" class="hover:text-white transition-colors"><i data-lucide="disc" class="w-5 h-5"></i></a>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+    (function(){
+      var API='https://api.cicy-ai.com';
+      var APP='https://app.cicy-ai.com';
+      var p=new URLSearchParams(location.search);
+      var t=p.get('token');
+      if(t){localStorage.setItem('cicy_token',t);location.href=APP}
+      t=localStorage.getItem('cicy_token');
+      if(!t)return;
+      var l=document.getElementById('nav-login');
+      var d=document.getElementById('nav-user');
+      var a=document.getElementById('nav-avatar');
+      if(l)l.classList.add('hidden');
+      if(d){d.classList.remove('hidden');d.style.display='block'}
+      if(a)a.innerHTML='<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>';
+      fetch(API+'/api/auth/me',{headers:{'Authorization':'Bearer '+t}})
+        .then(function(r){return r.ok?r.json():Promise.reject()})
+        .then(function(u){
+          var e=document.getElementById('nav-email');
+          var pl=document.getElementById('nav-plan');
+          if(a)a.innerHTML='<svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.5 20.118a7.5 7.5 0 0114.998 0A17.9 17.9 0 0112 21.75a17.9 17.9 0 01-7.5-1.632z"/></svg>';
+          if(e)e.textContent=u.email;
+          if(pl&&u.plan)pl.textContent=u.plan.charAt(0).toUpperCase()+u.plan.slice(1)+' Plan';
+          document.querySelectorAll('a[href*="/api/auth/github"]').forEach(function(el){
+            el.href=APP;
+            var en=el.querySelector('.en');var zh=el.querySelector('.zh');
+            if(en)en.textContent='Open App';
+            if(zh)zh.textContent='打开应用';
+          });
+        })
+        .catch(function(){
+          localStorage.removeItem('cicy_token');
+          if(l)l.classList.remove('hidden');
+          if(d){d.classList.add('hidden');d.style.display=''}
+        });
+      var dd=document.getElementById('nav-dropdown');
+      if(a&&dd){
+        a.addEventListener('click',function(e){
+          e.stopPropagation();
+          if(!dd.classList.contains('hidden')){dd.classList.add('hidden');return}
+          var r=a.getBoundingClientRect();
+          dd.style.top=(r.bottom+8)+'px';
+          dd.style.right=(window.innerWidth-r.right)+'px';
+          dd.classList.remove('hidden');
+        });
+        document.addEventListener('click',function(){dd.classList.add('hidden')});
+        dd.addEventListener('click',function(e){e.stopPropagation()});
+      }
+      var lo=document.getElementById('nav-logout');
+      if(lo)lo.addEventListener('click',function(){localStorage.removeItem('cicy_token');location.reload()});
+    })();
+    </script>
+  </body>
+</html>
