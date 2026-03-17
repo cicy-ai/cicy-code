@@ -305,10 +305,9 @@ export const PaneProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           await new Promise(r => setTimeout(r, 1000));
           try {
             const { data } = await apiService.getTtydStatus(clean);
-            if (data.status === 'running') { setTimeout(() => location.reload(), 500); return; }
+            if (data.status === 'running') break;
           } catch {}
         }
-        setTimeout(() => location.reload(), 500);
       } catch (e) { console.error(e); alert('Restart failed'); }
       finally { setIsRestarting(false); }
     });

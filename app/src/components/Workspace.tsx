@@ -92,14 +92,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleRestart = () => {
     confirm(`Restart ${paneId}?`, async () => {
       setIsRestarting(true);
-      try { await apiService.restartPane(paneId); for (let i = 0; i < 30; i++) { await new Promise(r => setTimeout(r, 1000)); try { const { data } = await apiService.getTtydStatus(paneId); if (data.status === 'running') { setTimeout(() => location.reload(), 500); return; } } catch {} } setTimeout(() => location.reload(), 500); } catch { alert('Restart failed'); } finally { setIsRestarting(false); }
+      try { await apiService.restartPane(paneId); for (let i = 0; i < 30; i++) { await new Promise(r => setTimeout(r, 1000)); try { const { data } = await apiService.getTtydStatus(paneId); if (data.status === 'running') break; } catch {} } } catch { alert('Restart failed'); } finally { setIsRestarting(false); }
     });
   };
   const handleCapture = async () => { try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
   const handleToggleMouse = async () => { const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
 
   const toggleLeft = (p: 'code' | 'desktop' | 'team') => { setIsAgentDrawerOpen(false); setLeftPanel(prev => prev === p ? null : p); };
-  const isThinking = status === 'thinking';
   const codeServerUrl = token ? urls.codeServer(workspace, token) : '';
 
   const ttydUrl = token ? urls.ttydOpen(paneId, token) : '';
@@ -126,8 +125,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         <div data-id="cli-tab" className="absolute inset-0 flex" style={{ display: mainTab === 'cli' ? 'flex' : 'none' }}>
           <div data-id="cli-terminal-area" className="w-full h-full relative">
             {ttydUrl && <WebFrame src={ttydUrl} className="w-full h-full border-0 bg-black" title={`terminal-${paneId}`} />}
-            {activeWinIdx === '0' && <FloatCommand paneId={paneId} token={token} agentStatus={status} mouseMode={mouseMode}
-              showVoiceControl={showVoiceControl} onToggleVoiceControl={() => setShowVoiceControl(v => !v)} />}
+
           </div>
         </div>
       </div>
@@ -179,10 +177,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 <span data-id="context-pct" className="text-xs text-zinc-600 font-mono">{contextUsage}%</span>
               </div>
             )}
-            <div data-id="status-indicator" className="flex items-center gap-2 text-xs text-zinc-600">
-              <span className={cn("w-1.5 h-1.5 rounded-full", isThinking ? "bg-yellow-500/60 animate-pulse" : "bg-emerald-500/60")} />
-              {isThinking ? 'Thinking' : 'Active'}
-            </div>
             {mainTab === 'cli' && (
               <>
               <WindowManager session={paneId} onActiveChange={w => setActiveWinIdx(w?.index || '0')} />
