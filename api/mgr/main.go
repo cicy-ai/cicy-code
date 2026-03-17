@@ -47,6 +47,15 @@ func main() {
 	db.SetConnMaxLifetime(5 * time.Minute)
 	defer db.Close()
 
+	// SaaS users table
+	db.Exec(`CREATE TABLE IF NOT EXISTS saas_users (
+		id VARCHAR(36) PRIMARY KEY,
+		email VARCHAR(255) UNIQUE NOT NULL,
+		plan VARCHAR(20) DEFAULT 'free',
+		backend_url VARCHAR(255) DEFAULT '',
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`)
+
 	// Health
 	http.HandleFunc("/", handleRoot)
 	http.HandleFunc("/health", w(handleHealth))
@@ -62,6 +71,22 @@ func main() {
 	http.HandleFunc("/api/auth/tokens", wa(handleAuthTokens))
 	http.HandleFunc("/api/auth/tokens/", wa(handleAuthTokenDelete))
 
+	// Provision SSE
+	http.HandleFunc("/api/provision/stream", corsM(handleProvisionStream))
+
+	// Resolve slug → backend_url (for CF Worker)
+	http.HandleFunc("/api/resolve", w(handleResolve))
+	http.HandleFunc("/api/vm-token", w(handleVMToken))
+	http.HandleFunc("/api/auth/exchange", corsM(handleAuthExchange))
+
+	// SaaS OAuth
+	if githubEnabled() {
+		http.HandleFunc("/api/auth/github", w(handleGithubAuth))
+		http.HandleFunc("/api/auth/github/callback", w(handleGithubCallback))
+	}
+	http.HandleFunc("/api/auth/saas/verify", w(handleSaasVerify))
+	http.HandleFunc("/api/auth/saas/me", w(handleSaasMe))
+
 	// Tmux panes
 	http.HandleFunc("/api/tmux/panes", wa(handlePanes))
 	http.HandleFunc("/api/tmux/list", wa(handleTmuxList))
@@ -71,6 +96,7 @@ func main() {
 	http.HandleFunc("/api/tmux/send_wait", wa(handleSendWait))
 	http.HandleFunc("/api/tmux/capture_pane", wa(handleCapture))
 	http.HandleFunc("/api/tmux/tree", wa(handleTree))
+	http.HandleFunc("/api/tmux/windows", wa(handleWindows))
 	http.HandleFunc("/api/tmux/status", wa(handleStatus))
 	http.HandleFunc("/api/tmux/restart_all", wa(handleRestartAll))
 	http.HandleFunc("/api/tmux/clear", wa(handleClear))
@@ -234,7 +260,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"status": "ok", "source": "cicy-code-api"})
 }
 func handlePing(w http.ResponseWriter, r *http.Request) {
-	J(w, M{"pong": "ok", "version": "1.0", "server_datetime": time.Now().Format(time.RFC3339)})
+	J(w, M{"pong": "ok", "version": "2026.0316.1", "server_datetime": time.Now().Format(time.RFC3339)})
 }
 
 // Placeholder to avoid unused import

@@ -55,7 +55,7 @@ api_stop() {
 # === Status ===
 status() {
     echo "=== Services Status ==="
-    for name_port in "cicy-mysql:${MYSQL_PORT}" "cicy-redis:${REDIS_PORT}" "cicy-mitmproxy:${MITMPROXY_PORT}" "cicy-code-server:${CODE_SERVER_PORT}" "cicy-nginx:${NGINX_PORT}" "cicy-ide-dev:${VITE_PORT}"; do
+    for name_port in "cicy-mysql:${MYSQL_PORT}" "cicy-redis:${REDIS_PORT}" "cicy-mitmproxy:${MITMPROXY_PORT}" "cicy-code-server:${CODE_SERVER_PORT}" "cicy-nginx:${NGINX_PORT}" "cicy-app-dev:${VITE_PORT}"; do
         name="${name_port%%:*}"
         port="${name_port##*:}"
         if docker ps --format '{{.Names}}' | grep -q "^${name}$"; then

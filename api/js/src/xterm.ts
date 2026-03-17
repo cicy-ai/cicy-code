@@ -134,8 +134,6 @@ export class Xterm {
         } else {
             overlay.innerHTML = `
                 <div class="xterm-reconnect-spinner"></div>
-                <div>Reconnecting...</div>
-                <div style="margin-top: 8px;">Attempt ${attempt}/${max}</div>
             `;
         }
         

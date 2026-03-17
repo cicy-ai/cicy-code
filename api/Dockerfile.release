@@ -1,0 +1,5 @@
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates tzdata
+COPY cicy-code-api /usr/local/bin/cicy-code-api
+EXPOSE 8008
+CMD ["cicy-code-api"]

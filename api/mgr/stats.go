@@ -34,6 +34,13 @@ type minuteStats struct {
 	Count  int     `json:"count"`
 }
 
+func redisKey(key string) string {
+	if db := os.Getenv("REDIS_DB"); db != "" && db != "0" {
+		return "db" + db + ":" + key
+	}
+	return key
+}
+
 func redisPublish(channel, message string) {
 	host := os.Getenv("REDIS_HOST")
 	if host == "" {
@@ -48,7 +55,7 @@ func redisPublish(channel, message string) {
 		return
 	}
 	defer conn.Close()
-	req := fmt.Sprintf("*3\r\n$7\r\nPUBLISH\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n", len(channel), channel, len(message), message)
+	req := fmt.Sprintf("*3\r\n$7\r\nPUBLISH\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n", len(redisKey(channel)), redisKey(channel), len(message), message)
 	conn.Write([]byte(req))
 }
 
@@ -114,7 +121,7 @@ func handleStatsTraffic(w http.ResponseWriter, r *http.Request) {
 	}
 	paneFilter := r.URL.Query().Get("pane")
 
-	items := redisLRange("kiro_http_log")
+	items := redisLRange(redisKey("kiro_http_log"))
 	if items == nil {
 		J(w, M{"success": true, "data": []minuteStats{}})
 		return
@@ -153,7 +160,7 @@ func handleStatsTraffic(w http.ResponseWriter, r *http.Request) {
 
 func handleStatsTrafficRaw(w http.ResponseWriter, r *http.Request) {
 	paneFilter := r.URL.Query().Get("pane")
-	items := redisLRange("kiro_http_log")
+	items := redisLRange(redisKey("kiro_http_log"))
 	if items == nil {
 		J(w, M{"success": true, "data": []httpLogEntry{}})
 		return
@@ -202,7 +209,8 @@ func handleTrafficLive(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	// SUBSCRIBE kiro_traffic_live
-	conn.Write([]byte("SUBSCRIBE kiro_traffic_live\r\n"))
+	ch := redisKey("kiro_traffic_live")
+	conn.Write([]byte(fmt.Sprintf("SUBSCRIBE %s\r\n", ch)))
 
 	ctx := r.Context()
 	buf := make([]byte, 4096)
@@ -250,7 +258,7 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 		go openInCodeServer(body.File)
 	}
 	data, _ := json.Marshal(body)
-	redisPublish("kiro_notify", string(data))
+	redisPublish(redisKey("kiro_notify"), string(data))
 	J(w, M{"success": true})
 }
 

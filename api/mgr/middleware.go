@@ -34,7 +34,7 @@ func corsM(next http.HandlerFunc) http.HandlerFunc {
 		if o := r.Header.Get("Origin"); o != "" {
 			w.Header().Set("Access-Control-Allow-Origin", o)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept")
 		}
 		if r.Method == "OPTIONS" {
@@ -47,6 +47,11 @@ func corsM(next http.HandlerFunc) http.HandlerFunc {
 
 func authM(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Trust requests from CF Worker via tunnel secret
+		if r.Header.Get("X-Tunnel-Secret") == getTunnelSecret() {
+			next(w, r)
+			return
+		}
 		auth := r.Header.Get("Authorization")
 		token := ""
 		if strings.HasPrefix(auth, "Bearer ") {
@@ -54,7 +59,25 @@ func authM(next http.HandlerFunc) http.HandlerFunc {
 		} else {
 			token = r.URL.Query().Get("token")
 		}
-		if token == "" || !verifyToken(token) {
+		if token == "" {
+			httpErr(w, 401, "Not authenticated")
+			return
+		}
+		// Try JWT (with slug verification), then local token
+		if strings.Count(token, ".") == 2 {
+			sub, slug, err := parseJWT(token)
+			if err == nil {
+				// If VM has SLUG set, verify it matches
+				if mySlug := os.Getenv("SLUG"); mySlug != "" && slug != mySlug {
+					httpErr(w, 403, "Forbidden")
+					return
+				}
+				_ = sub
+				next(w, r)
+				return
+			}
+		}
+		if !verifyToken(token) {
 			httpErr(w, 401, "Not authenticated")
 			return
 		}
@@ -79,6 +102,14 @@ func loadAPIToken() string {
 		return t
 	}
 	return ""
+}
+
+func getTunnelSecret() string {
+	s := os.Getenv("TUNNEL_SECRET")
+	if s == "" {
+		s = "cicy-tunnel-2026"
+	}
+	return s
 }
 
 func normPaneID(id string) string {

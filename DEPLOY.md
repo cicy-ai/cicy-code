@@ -1,171 +1,73 @@
-# cicy-code 部署文档
+# CiCy 部署说明
 
-## 架构
+## 项目结构
 
 ```
-API (Go)          → localhost:8008  → https://g-8008.cicy.de5.net
-Frontend (Vite)   → localhost:6905   → https://ide.cicy.de5.net
-MySQL             → localhost:13306  (Docker: cicy-code-mysql)
-Redis             → localhost:16379  (Docker: cicy-code-redis)
-mitmproxy         → localhost:18888  (proxy) / 18889 (web ui)
-code-server       → localhost:18080  (Docker: cicy-code-server)
-phpMyAdmin        → localhost:12222  (Docker: cicy-code-pma)
-Redis Commander   → localhost:18379  (Docker: cicy-code-redis-admin)
+cicy-code/
+├── api/          # Go 后端 (ttyd-manager)
+├── app/          # React 前端 (IDE)
+├── landing/      # 落地页 (CF Worker + Static Assets)
+│   ├── app-proxy.js      # Worker 代码 (geo 路由 + HTMLRewriter)
+│   ├── wrangler.toml     # Worker 配置
+│   ├── cos-upload.py     # 上传 assets 到腾讯云 COS
+│   ├── deploy.sh         # 一键部署
+│   └── public/           # 静态文件
+│       ├── index.html
+│       ├── assets/       # Vite 构建产物
+│       ├── favicon.svg
+│       ├── logo.svg/png
+│       ├── robots.txt
+│       └── sitemap.xml
+├── docker-compose.yml
+├── setup.sh
+└── ...
 ```
 
-## 前置条件
-
-- Docker & Docker Compose
-- Go 1.21+
-- tmux
-- Cloudflare Tunnel (cloudflared 已运行)
-
-## 1. 启动 Docker 服务
+## 落地页部署
 
 ```bash
-cd /home/w3c_offical/projects/cicy-code
-docker compose up -d mysql redis mitmproxy code-server phpmyadmin redis-commander ide-dev
+cd ~/projects/cicy-code/landing
+bash deploy.sh
 ```
 
-等待 MySQL 初始化完成（约 15s）：
-```bash
-docker exec -i cicy-code-mysql mysql -uroot -p'cicy-code' -e "SELECT 1" 2>/dev/null
+做两件事：
+1. 上传 assets 到腾讯云 COS（国内 CDN）
+2. 部署 Worker + 静态文件到 CF（全球）
+
+### 架构
+
+```
+cicy-ai.com / www / app  →  CF Worker
+  ├── HTML/图片/favicon  →  Worker Static Assets (CF 全球 CDN)
+  ├── /assets/* (国内)   →  HTMLRewriter 改写 URL → 腾讯云 COS 上海
+  ├── /assets/* (海外)   →  Worker Static Assets (CF 全球 CDN)
+  └── /api/* /ws/*       →  Go API (Cloud Run / VM，仅 app.cicy-ai.com)
 ```
 
-## 2. 初始化数据库
+### 版本管理
 
-首次部署需要导入 schema：
-```bash
-docker exec -i cicy-code-mysql mysql -uroot -p'cicy-code' cicy_code < schema.sql
+- Vite 构建产物自带 hash（`index-BXuJpFW2.js`）
+- COS 路径 `/v{VER}/assets/`
+- `VER` 在 `app-proxy.js` 和 `cos-upload.py` 中同步
+
+### 配置依赖
+
+`~/global.json`:
+```json
+{
+  "cf": { "prod": { "account_id": "...", "api_token": "..." } },
+  "tencent": { "secret_id": "...", "secret_key": "...", "bucket": "cicy-1372193042", "region": "ap-shanghai" }
+}
 ```
 
-从 prod-mysql 迁移数据：
-```bash
-docker exec -i prod-mysql mysqldump -uroot -p'cicy-code' cicy_code 2>/dev/null | \
-  docker exec -i cicy-code-mysql mysql -uroot -p'cicy-code' cicy_code
-```
+## API 部署
 
-## 3. 安装 mitmproxy CA 证书
+见 `setup.sh` / `setup-prod.sh`
 
-```bash
-mkdir -p ~/certs
-docker exec cicy-code-mitmproxy cat /home/mitmproxy/.mitmproxy/mitmproxy-ca-cert.pem > ~/certs/mitmproxy-ca.pem
-sudo cp ~/certs/mitmproxy-ca.pem /usr/local/share/ca-certificates/mitmproxy.crt
-sudo update-ca-certificates --fresh
-```
-
-## 4. 编译 & 启动 API
-
-```bash
-cd /home/w3c_offical/projects/cicy-code/api
-GOROOT=/usr/lib/go CGO_ENABLED=0 go build -o cicy-code-api ./mgr/
-```
-
-在 tmux 中启动：
-```bash
-tmux send-keys -t w-10001:cicy-api \
-  "HOME=/home/w3c_offical PORT=8008 \
-   MYSQL_DSN='root:cicy-code@tcp(localhost:13306)/cicy_code' \
-   REDIS_ADDR='localhost:16379' \
-   ./cicy-code-api" Enter
-```
-
-## 5. 暴露端口 (Cloudflare Tunnel)
+## App 前端部署
 
 ```bash
-bash ~/skills/cf-tunnel.sh add 8008    # API
-bash ~/skills/cf-tunnel.sh add 18379    # Redis Commander
-# 6905 已通过 ide.cicy.de5.net 暴露
-```
-
-code-server 和 mitmproxy Web UI 通过 API 代理访问，不直接暴露：
-- code-server: `https://g-8008.cicy.de5.net/code/?token=<TOKEN>`
-- mitmproxy:   `https://g-8008.cicy.de5.net/mitm/?token=<TOKEN>`
-
-## 6. 配置 Workers
-
-### 设置 agent_config
-
-```sql
--- 启用 worker
-UPDATE agent_config SET active=1, agent_type='kiro-cli chat',
-  config='{"proxy":{"enable":true}}'
-  WHERE pane_id='w-20147:main.0';
-
--- 设置模型
-UPDATE agent_config SET default_model='claude-3-5-sonnet-20241022'
-  WHERE pane_id='w-20147:main.0';
-
--- 设置 master
-UPDATE agent_config SET role='master', active=1
-  WHERE pane_id='w-10001:main.0';
-```
-
-### 重启 Workers
-
-```bash
-curl -s -X POST -H "Authorization: Bearer <TOKEN>" \
-  "http://localhost:8008/api/tmux/panes/w-20147:main.0/restart"
-```
-
-重启时会自动：
-1. 设置 `X_PANE_ID` 环境变量
-2. 如果 `config.proxy.enable=true`，设置 `HTTPS_PROXY` 指向 mitmproxy
-3. 切换到 workspace 目录
-4. 执行 init_script
-5. 启动 agent_type（如 `kiro-cli chat`）
-
-## 服务端口一览
-
-| 服务 | 端口 | 容器名 | 说明 |
-|------|------|--------|------|
-| API | 8008 | 本地进程 | Go API 服务 |
-| Frontend | 6905 | cicy-code-ide-dev-1 | Vite dev server |
-| MySQL | 13306 | cicy-code-mysql | 密码: cicy-code |
-| Redis | 16379 | cicy-code-redis | |
-| mitmproxy | 18888 | cicy-code-mitmproxy | 代理端口 (proxyauth=any) |
-| mitmweb | 18889 | cicy-code-mitmproxy | Web UI |
-| code-server | 18080 | cicy-code-server | 通过 API /code/ 代理 |
-| phpMyAdmin | 12222 | cicy-code-pma | |
-| Redis Commander | 18379 | cicy-code-redis-admin | admin/cicy-code |
-
-## 访问地址
-
-| 服务 | URL |
-|------|-----|
-| IDE | https://ide.cicy.de5.net |
-| API | https://g-8008.cicy.de5.net |
-| code-server | https://g-8008.cicy.de5.net/code/?token=TOKEN |
-| mitmproxy | https://g-8008.cicy.de5.net/mitm/?token=TOKEN |
-| phpMyAdmin | https://g-12222.cicy.de5.net |
-| Redis Commander | https://g-18379.cicy.de5.net |
-
-## 重启 API
-
-```bash
-tmux send-keys -t w-10001:cicy-api C-c
-sleep 1
-cd /home/w3c_offical/projects/cicy-code/api
-GOROOT=/usr/lib/go CGO_ENABLED=0 go build -o cicy-code-api ./mgr/
-tmux send-keys -t w-10001:cicy-api \
-  "HOME=/home/w3c_offical PORT=8008 \
-   MYSQL_DSN='root:cicy-code@tcp(localhost:13306)/cicy_code' \
-   REDIS_ADDR='localhost:16379' \
-   ./cicy-code-api" Enter
-```
-
-## mitmproxy 流量监控
-
-Workers 通过代理用户名标识流量来源：
-```
-HTTPS_PROXY=http://w-20147:x@127.0.0.1:18888
-```
-
-addon (`kiro_monitor.py`) 记录到 Redis:
-- Key: `kiro_http_log` (List, 最多 10000 条)
-- Channel: `kiro_traffic_live` (Pub/Sub 实时推送)
-
-查看流量：
-```bash
-redis-cli -p 16379 LRANGE kiro_http_log 0 10
+cd ~/projects/cicy-code/ide
+npm run build
+# 产物在 dist/，通过 Nginx 或 Worker 托管
 ```

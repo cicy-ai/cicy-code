@@ -11,6 +11,7 @@ import (
 )
 
 var mouseRe = regexp.MustCompile(`\x1b\[<[\d;]*[Mm]|\x1b\[M[\s\S]{3}`)
+var daResponseRe = regexp.MustCompile(`\x1b\[[\?>][\d;]*c`)
 
 // WebTTY bridges a PTY slave and its PTY master.
 // To support text-based streams and side channel commands such as
@@ -137,6 +138,11 @@ func (wt *WebTTY) sendInitializeMessage() error {
 }
 
 func (wt *WebTTY) handleSlaveReadEvent(data []byte) error {
+	// Filter DA response sequences (e.g. \x1b[?0;276;0c)
+	data = daResponseRe.ReplaceAll(data, nil)
+	if len(data) == 0 {
+		return nil
+	}
 	safeMessage := base64.StdEncoding.EncodeToString(data)
 	err := wt.masterWrite(append([]byte{Output}, []byte(safeMessage)...))
 	if err != nil {
@@ -176,6 +182,8 @@ func (wt *WebTTY) handleMasterReadEvent(data []byte) error {
 		// Filter mouse sequences (SGR: \e[<...M/m, X10: \e[M...)
 		raw := data[1:]
 		raw = mouseRe.ReplaceAll(raw, nil)
+		// Filter DA responses from xterm.js (e.g. \x1b[?1;2c, \x1b[>0;276;0c)
+		raw = daResponseRe.ReplaceAll(raw, nil)
 		if len(raw) == 0 {
 			return nil
 		}
