@@ -167,7 +167,7 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
   return (
     <div
       ref={panelRef}
-      className="flex flex-col bg-vsc-bg/95 backdrop-blur-md border border-vsc-border shadow-2xl overflow-hidden touch-none"
+      className="flex flex-col bg-vsc-bg/95 backdrop-blur-md border border-white/[0.12] shadow-lg overflow-hidden touch-none"
       style={{
         position: 'relative',
         width: '100%',
@@ -181,7 +181,7 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
     >
       {/* Header / Drag Handle */}
       <div
-        className="h-9 bg-vsc-bg-secondary border-b border-vsc-border flex items-center justify-between px-2.5 select-none touch-none shrink-0"
+        className="h-9 bg-vsc-bg-secondary border-b border-white/[0.06] flex items-center justify-between px-2.5 select-none touch-none shrink-0"
         style={{cursor: disableDrag ? 'default' : 'move'}}
         onMouseDown={handleStartDrag}
         onTouchStart={handleStartDrag}

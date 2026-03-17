@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../../config';
@@ -15,7 +15,7 @@ const CollapsibleQ: React.FC<{ text: string }> = ({ text }) => {
     <div className="flex justify-end mb-2.5">
       <div className="max-w-[95%] relative">
         <div ref={ref} className={`chat-markdown px-3.5 py-2 rounded-2xl rounded-br-sm text-base leading-relaxed text-white/90 overflow-hidden transition-all ${collapsed ? 'max-h-[80px]' : ''}`} style={{ background: 'rgba(255,255,255,0.08)' }}>
-          <Markdown remarkPlugins={[remarkGfm]}>{text.replace(/^-\n/, '').replace(/^\d+;\d+;\d+c/i, '')}</Markdown>
+          <Markdown remarkPlugins={[remarkGfm]}>{text.replace(/^-\n/, '')}</Markdown>
         </div>
         {needsCollapse && (
           <button onClick={() => setCollapsed(v => !v)} className="text-base text-white/30 hover:text-white/60 mt-1 float-right">
@@ -77,24 +77,24 @@ const ToolCard: React.FC<{ tool: any; running?: boolean }> = ({ tool, running })
   const isError = tool.result?.startsWith('exit ') || tool.result?.startsWith('❌');
   const hasDiff = !!tool.diff?.old || !!tool.diff?.new;
   const hasContent = !!tool.result || hasDiff;
-  const statusIcon = running ? '⏳' : isError ? '✗' : hasContent ? '✓' : '⏳';
-  const statusColor = running ? 'text-yellow-400' : isError ? 'text-red-400' : hasContent ? 'text-emerald-400' : 'text-yellow-400';
+  const statusIcon = running ? '⏳' : isError ? '✗' : '✓';
+  const statusColor = running ? 'text-yellow-400' : isError ? 'text-red-400' : 'text-emerald-400';
   const borderColor = running ? 'border-yellow-500/20' : isError ? 'border-red-500/15' : 'border-white/[0.06]';
 
   return (
     <div className={`rounded-lg bg-[#1a1a2e]/60 border ${borderColor} overflow-hidden`}>
       <div className="flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none hover:bg-white/[0.03] transition-colors"
-        onClick={() => hasContent && setOpen(p => !p)}>
-        <span className={`text-base ${statusColor}`}>{running ? <span className="inline-block w-3 h-3 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin" /> : statusIcon}</span>
-        <span className="text-base px-1.5 py-0.5 rounded bg-white/[0.06] text-vsc-text-muted font-medium">{icon} {label}</span>
-        {!open && <span className="text-base font-mono text-vsc-text/70 truncate flex-1" title={arg}>{arg}</span>}
-        {hasContent && <span className="text-base text-vsc-text-muted/40">{open ? '▼' : '▶'}</span>}
+        onClick={() => setOpen(p => !p)}>
+        <span className={`text-xs ${statusColor}`}>{running ? <span className="inline-block w-2.5 h-2.5 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin" /> : statusIcon}</span>
+        <span className="text-xs px-1 py-0.5 rounded bg-white/[0.04] text-vsc-text-muted/50">{label}</span>
+        {!open && <span className="text-xs font-mono text-vsc-text/40 truncate flex-1" title={arg}>{arg}</span>}
+        <span className="text-xs text-vsc-text-muted/30">{open ? '▼' : '▶'}</span>
       </div>
-      {open && (
-        <div className="px-3 py-1.5 text-base font-mono text-vsc-text/60 whitespace-pre-wrap break-all border-b border-white/[0.04]">{arg}</div>
+      {open && arg && (
+        <div className="px-3 py-1.5 text-sm font-mono text-vsc-text/50 whitespace-pre-wrap break-all border-b border-white/[0.04]">{arg}</div>
       )}
       {open && hasDiff && (
-        <div className="mx-2 mb-2 rounded overflow-hidden border border-white/[0.06] text-base font-mono max-h-[300px] overflow-auto">
+        <div className="mx-2 mb-2 rounded overflow-hidden border border-white/[0.06] text-xs font-mono max-h-[300px] overflow-auto">
           {tool.diff.old && tool.diff.old.split('\n').map((line: string, i: number) => (
             <div key={'o'+i} className="px-2 bg-red-500/[0.08] text-red-400/80 whitespace-pre-wrap break-all leading-relaxed">- {line}</div>
           ))}
@@ -104,7 +104,7 @@ const ToolCard: React.FC<{ tool: any; running?: boolean }> = ({ tool, running })
         </div>
       )}
       {open && !hasDiff && tool.result && (
-        <pre className={`text-base mx-2 mb-2 px-2.5 py-2 rounded font-mono whitespace-pre-wrap break-all max-h-[200px] overflow-auto leading-relaxed ${isError ? 'bg-red-500/[0.06] text-red-400' : 'bg-emerald-500/[0.04] text-emerald-400'}`}>
+        <pre className={`text-xs mx-2 mb-2 px-2.5 py-1.5 rounded font-mono whitespace-pre-wrap break-all max-h-[200px] overflow-auto leading-relaxed ${isError ? 'bg-red-500/[0.06] text-red-400' : 'bg-emerald-500/[0.04] text-emerald-400'}`}>
           {tool.result}
         </pre>
       )}
@@ -116,180 +116,15 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
   const [agentType, setAgentType] = useState('AI');
   const [chatData, setChatData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const endRef = useRef<HTMLDivElement>(null);
-  const lastJsonRef = useRef('');
-
-  // Load cache
-  useEffect(() => {
-    if (!displayPaneId) return;
-    const short = displayPaneId.replace(':main.0', '');
-    getCache(short).then(cached => {
-      if (cached?.length) { 
-        setChatData(cached); 
-        setHasMore(cached.length > 2); 
-        setLoading(false); 
-      }
-    });
-  }, [displayPaneId]);
-
-  // Listen for optimistic UI updates - add Q immediately to top
-  useEffect(() => {
-    const handler = (e: any) => {
-      if (e.detail?.pane === displayPaneId) {
-        setChatData(prev => [...prev, { q: e.detail.q, status: 'pending', ts: Date.now() / 1000, start_ts: Date.now() / 1000, credit: 0 }]);
-      }
-    };
-    window.addEventListener('chat-q-sent', handler);
-    return () => window.removeEventListener('chat-q-sent', handler);
-  }, [displayPaneId]);
-
-  // WS + API
-  useEffect(() => {
-    if (!displayPaneId || !token) return;
-    const short = displayPaneId.replace(':main.0', '');
-    let ws: WebSocket | null = null, dead = false, timer: ReturnType<typeof setTimeout>, fetchTimer: ReturnType<typeof setTimeout>;
-
-    async function reload() {
-      try {
-        const res = await fetch(`${config.apiBase}/api/stats/chat?pane=${short}`, { headers: { Authorization: `Bearer ${token}` } });
-        const json = await res.json();
-        if (json.data && Array.isArray(json.data)) {
-          const s = JSON.stringify(json.data);
-          if (s !== lastJsonRef.current) { 
-            lastJsonRef.current = s;
-            setChatData(prev => {
-              const sys = prev.filter((c: any) => c.system);
-              return [...json.data, ...sys];
-            });
-            setHasMore(json.data.length > 2); 
-            setCache(short, json.data); 
-          }
-          if (json.agentType) setAgentType(json.agentType);
-        } else { setChatData([]); setHasMore(false); }
-      } catch {} finally { setLoading(false); }
-    }
-
-    const debouncedReload = () => { clearTimeout(fetchTimer); fetchTimer = setTimeout(reload, 100); };
-    let streaming = false;
-
-    function connect() {
-      if (dead) return;
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const base = config.apiBase.replace(/^https?/, proto);
-      const isElectron = typeof (window as any).electronRPC === 'function' ? '1' : '0';
-      ws = new WebSocket(`${base}/api/chat/ws?pane=${short}&token=${token}&electron=${isElectron}`);
-      ws.onopen = () => { console.log('[ChatView] WS connected, pane=' + short); reload(); };
-      ws.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(e.data);
-          if (msg.type !== 'http_log' && msg.type !== 'status_change') console.debug('[ChatView] WS:', msg.type);
-          if (msg.type === 'user_q') { streaming = false; setChatData(prev => [...prev, { q: msg.data.q, status: 'pending', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0 }]); }
-          else if (msg.type === 'ai_chunk') {
-            streaming = true;
-            setChatData(prev => {
-              if (!prev.length) return prev;
-              const last = { ...prev[prev.length - 1] };
-              const steps = last.steps ? [...last.steps] : [];
-              if (!steps.length || steps[steps.length - 1].type !== 'text') steps.push({ type: 'text', text: msg.data.delta });
-              else steps[steps.length - 1] = { ...steps[steps.length - 1], text: msg.data.delta };
-              last.steps = steps; last.status = 'streaming';
-              return [...prev.slice(0, -1), last];
-            });
-          } else if (msg.type === 'ai_done') {
-            streaming = false; debouncedReload();
-            setChatData(prev => {
-              const last = prev[prev.length - 1];
-              if (last?.a) {
-                const parts = Array.isArray(last.a) ? last.a : [last.a];
-                const textOnly = parts.filter((s: any) => typeof s === 'string').join(' ').trim();
-                if (textOnly) window.dispatchEvent(new CustomEvent('ai-reply-done', { detail: { text: textOnly } }));
-              }
-              return prev;
-            });
-          }
-          else if (msg.type === 'desktop_event' && msg.data) { window.dispatchEvent(new CustomEvent('agent-desktop-event', { detail: msg.data })); }
-          else if (msg.type === 'worker_idle') {
-            const d = msg.data?.data;
-            if (d) setChatData(prev => [...prev, { q: '', a: `🔔 **${d.worker || msg.data.from}** finished task (idle)`, status: 'done', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0, system: true }]);
-          }
-          else { if (!streaming) debouncedReload(); }
-        } catch { if (!streaming) debouncedReload(); }
-      };
-      ws.onclose = () => { if (!dead) timer = setTimeout(connect, 3000); };
-      ws.onerror = () => ws?.close();
-      
-      // Listen for gemini results and send back to Agent
-      const visionHandler = (e: CustomEvent) => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'gemini_vision_result', data: e.detail }));
-        }
-      };
-      const askHandler = (e: CustomEvent) => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'gemini_ask_result', data: e.detail }));
-        }
-      };
-      const pongHandler = (e: CustomEvent) => {
-        console.log('[ChatView] 发送 pong:', e.detail);
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'pong', data: e.detail }));
-        }
-      };
-      const ipcPongHandler = (e: CustomEvent) => {
-        console.log('[ChatView] 发送 ipc_pong:', e.detail);
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ipc_pong', data: e.detail }));
-        }
-      };
-      window.addEventListener('gemini-vision-result', visionHandler as EventListener);
-      window.addEventListener('gemini-ask-result', askHandler as EventListener);
-      window.addEventListener('agent-pong', pongHandler as EventListener);
-      window.addEventListener('ipc-pong', ipcPongHandler as EventListener);
-      
-      // Cleanup on disconnect
-      const originalClose = ws.onclose;
-      ws.onclose = (e) => {
-        window.removeEventListener('gemini-vision-result', visionHandler as EventListener);
-        window.removeEventListener('gemini-ask-result', askHandler as EventListener);
-        window.removeEventListener('agent-pong', pongHandler as EventListener);
-        window.removeEventListener('ipc-pong', ipcPongHandler as EventListener);
-        if (originalClose) originalClose.call(ws, e);
-      };
-    }
-    connect();
-    return () => { dead = true; clearTimeout(timer); clearTimeout(fetchTimer); ws?.close(); };
-  }, [displayPaneId, token]);
-
-  // No auto-scroll to bottom - content starts from top
-
-  useEffect(() => {
-    const h = () => {};
-    window.addEventListener('toggle-ttyd-drawer', h);
-    return () => window.removeEventListener('toggle-ttyd-drawer', h);
-  }, []);
-
-  const [displayCount, setDisplayCount] = useState(5);
-
-  const loadMore = () => {
-    setDisplayCount(prev => {
-      const next = prev + 2;
-      if (next >= chatData.length) setHasMore(false);
-      return Math.min(next, chatData.length);
-    });
-  };
-
-  // Build conversation groups - oldest first, newest at bottom
-  const groups: { q: string; r: any }[] = [];
-  const allData = chatData;
-  allData.slice(-displayCount).forEach((c: any) => {
-    if (!c.q && !c.system) return;
-    groups.push({ q: c.q || '', r: c });
-  });
-
+  const [displayCount, setDisplayCount] = useState(10);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const latestGroupRef = useRef<HTMLDivElement>(null);
+  const latestQRef = useRef<HTMLDivElement>(null);
+  const lastJsonRef = useRef('');
+  const prevCountRef = useRef(0);
+  const initialDone = useRef(false);
+  const streamingRef = useRef(false);
+  const [showTtyd, setShowTtyd] = useState(false);
+  const ttydUrl = token ? `${config.ttydBase}/ttyd/${displayPaneId}/?token=${token}` : '';
 
   // Track container height for full-screen Q+A effect
   const [containerH, setContainerH] = useState(0);
@@ -301,44 +136,206 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
     return () => ro.disconnect();
   }, []);
 
-  // Scroll to latest Q: on new message (smooth) or initial load (instant)
-  const prevLenRef = useRef(chatData.length);
-  const initialScrollDone = useRef(false);
+  // Load cache
   useEffect(() => {
-    const container = scrollRef.current;
-    const el = latestGroupRef.current;
-    if (!container || !el) return;
-    if (!initialScrollDone.current) {
-      initialScrollDone.current = true;
-      setTimeout(() => container.scrollTo({ top: el.offsetTop - 12 }), 100);
-    } else if (chatData.length > prevLenRef.current) {
-      setTimeout(() => container.scrollTo({ top: el.offsetTop - 12, behavior: 'smooth' }), 100);
+    if (!displayPaneId) return;
+    const short = displayPaneId.replace(':main.0', '');
+    getCache(short).then(cached => {
+      if (cached?.length) { setChatData(cached); setLoading(false); }
+    });
+  }, [displayPaneId]);
+
+  // Optimistic Q from CommandPanel
+  useEffect(() => {
+    const handler = (e: any) => {
+      if (e.detail?.pane !== displayPaneId) return;
+      const q: string = e.detail.q;
+      if (q.startsWith('/')) {
+        // Slash command — show as system message, auto-show ttyd for feedback
+        setChatData(prev => [...prev, { q, status: 'done', ts: Date.now() / 1000, start_ts: Date.now() / 1000, credit: 0, system: true }]);
+        setShowTtyd(true);
+      } else {
+        setChatData(prev => [...prev.filter((c: any) => !c.system), { q, status: 'pending', ts: Date.now() / 1000, start_ts: Date.now() / 1000, credit: 0 }]);
+      }
+    };
+    window.addEventListener('chat-q-sent', handler);
+    return () => window.removeEventListener('chat-q-sent', handler);
+  }, [displayPaneId]);
+
+  // Scroll: when a NEW Q appears, scroll so Q is at top of viewport. Never auto-scroll during stream.
+  useEffect(() => {
+    const count = chatData.length;
+    if (count > prevCountRef.current) {
+      const last = chatData[count - 1];
+      // Only scroll for new Q (not for stream updates to existing item)
+      if (last?.q && last.status === 'pending') {
+        requestAnimationFrame(() => {
+          const el = latestQRef.current;
+          const container = scrollRef.current;
+          if (el && container) {
+            container.scrollTo({ top: el.offsetTop - 8, behavior: initialDone.current ? 'smooth' : 'auto' });
+          }
+          initialDone.current = true;
+        });
+      }
     }
-    prevLenRef.current = chatData.length;
+    // Initial load: scroll to last Q
+    if (!initialDone.current && count > 0) {
+      initialDone.current = true;
+      requestAnimationFrame(() => {
+        const el = latestQRef.current;
+        const container = scrollRef.current;
+        if (el && container) container.scrollTo({ top: el.offsetTop - 8 });
+      });
+    }
+    prevCountRef.current = count;
   }, [chatData.length]);
 
-  // Load more older messages on scroll up
+  // WS + API
+  useEffect(() => {
+    if (!displayPaneId || !token) return;
+    const short = displayPaneId.replace(':main.0', '');
+    let ws: WebSocket | null = null, dead = false, reconnectTimer: ReturnType<typeof setTimeout>, fetchTimer: ReturnType<typeof setTimeout>;
+
+    async function reload() {
+      try {
+        const res = await fetch(`${config.apiBase}/api/stats/chat?pane=${short}`, { headers: { Authorization: `Bearer ${token}` } });
+        const json = await res.json();
+        if (json.data && Array.isArray(json.data)) {
+          const s = JSON.stringify(json.data);
+          if (s !== lastJsonRef.current) {
+            lastJsonRef.current = s;
+            setChatData(prev => {
+              const sys = prev.filter((c: any) => c.system);
+              return [...json.data, ...sys];
+            });
+            setCache(short, json.data);
+          }
+          if (json.agentType) setAgentType(json.agentType);
+        } else { setChatData([]); }
+      } catch {} finally { setLoading(false); }
+    }
+
+    const debouncedReload = () => { clearTimeout(fetchTimer); fetchTimer = setTimeout(reload, 300); };
+
+    function connect() {
+      if (dead) return;
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const base = config.apiBase.replace(/^https?/, proto);
+      const isElectron = typeof (window as any).electronRPC === 'function' ? '1' : '0';
+      ws = new WebSocket(`${base}/api/chat/ws?pane=${short}&token=${token}&electron=${isElectron}`);
+
+      const visionHandler = (e: CustomEvent) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'gemini_vision_result', data: e.detail })); };
+      const askHandler = (e: CustomEvent) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'gemini_ask_result', data: e.detail })); };
+      const pongHandler = (e: CustomEvent) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'pong', data: e.detail })); };
+      const ipcPongHandler = (e: CustomEvent) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ipc_pong', data: e.detail })); };
+
+      window.addEventListener('gemini-vision-result', visionHandler as EventListener);
+      window.addEventListener('gemini-ask-result', askHandler as EventListener);
+      window.addEventListener('agent-pong', pongHandler as EventListener);
+      window.addEventListener('ipc-pong', ipcPongHandler as EventListener);
+
+      const cleanup = () => {
+        window.removeEventListener('gemini-vision-result', visionHandler as EventListener);
+        window.removeEventListener('gemini-ask-result', askHandler as EventListener);
+        window.removeEventListener('agent-pong', pongHandler as EventListener);
+        window.removeEventListener('ipc-pong', ipcPongHandler as EventListener);
+      };
+
+      ws.onopen = () => { console.log('[ChatView] WS connected, pane=' + short); reload(); };
+
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          console.log('[ChatView] WS msg:', msg.type, msg);
+          if (msg.type === 'user_q') {
+            streamingRef.current = false;
+            window.dispatchEvent(new CustomEvent('ai-streaming', { detail: false }));
+            setChatData(prev => [...prev.filter((c: any) => !c.system), { q: msg.data.q, status: 'pending', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0 }]);
+          } else if (msg.type === 'ai_chunk') {
+            if (!streamingRef.current) { streamingRef.current = true; window.dispatchEvent(new CustomEvent('ai-streaming', { detail: true })); }
+            setChatData(prev => {
+              if (!prev.length) return prev;
+              const last = { ...prev[prev.length - 1] };
+              const steps = last.steps ? [...last.steps] : [];
+              if (!steps.length || steps[steps.length - 1].type !== 'text') steps.push({ type: 'text', text: msg.data.delta });
+              else steps[steps.length - 1] = { ...steps[steps.length - 1], text: msg.data.delta };
+              last.steps = steps; last.status = 'streaming';
+              return [...prev.slice(0, -1), last];
+            });
+          } else if (msg.type === 'ai_done') {
+            streamingRef.current = false;
+            window.dispatchEvent(new CustomEvent('ai-streaming', { detail: false }));
+            debouncedReload();
+            setChatData(prev => {
+              const last = prev[prev.length - 1];
+              if (last?.a) {
+                const parts = Array.isArray(last.a) ? last.a : [last.a];
+                const textOnly = parts.filter((s: any) => typeof s === 'string').join(' ').trim();
+                if (textOnly) window.dispatchEvent(new CustomEvent('ai-reply-done', { detail: { text: textOnly } }));
+              }
+              return prev;
+            });
+          } else if (msg.type === 'desktop_event' && msg.data) {
+            window.dispatchEvent(new CustomEvent('agent-desktop-event', { detail: msg.data }));
+          } else if (msg.type === 'status_change' && msg.data) {
+            window.dispatchEvent(new CustomEvent('agent-status-change', { detail: msg.data }));
+          } else if (msg.type === 'exec_js' && msg.data?.code) {
+            console.log('[exec_js] received:', msg.data.code);
+            try {
+              const result = eval(msg.data.code);
+              console.log('[exec_js] result:', result);
+              if (msg.data.requestId && ws) ws.send(JSON.stringify({ type: 'exec_js_result', data: { requestId: msg.data.requestId, result: String(result) } }));
+            } catch (e: any) {
+              console.error('[exec_js] error:', e);
+              if (msg.data.requestId && ws) ws.send(JSON.stringify({ type: 'exec_js_result', data: { requestId: msg.data.requestId, error: e.message } }));
+            }
+          } else if (msg.type === 'worker_idle') {
+            const d = msg.data?.data;
+            if (d) setChatData(prev => [...prev, { q: '', a: `🔔 **${d.worker || msg.data.from}** finished task (idle)`, status: 'done', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0, system: true }]);
+          } else {
+            if (!streamingRef.current) debouncedReload();
+          }
+        } catch { if (!streamingRef.current) debouncedReload(); }
+      };
+
+      ws.onclose = () => { cleanup(); if (!dead) reconnectTimer = setTimeout(connect, 3000); };
+      ws.onerror = () => ws?.close();
+    }
+    connect();
+    return () => { dead = true; clearTimeout(reconnectTimer); clearTimeout(fetchTimer); ws?.close(); };
+  }, [displayPaneId, token]);
+
+  // Load more on scroll up
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    let ticking = false;
     const onScroll = () => {
-      if (el.scrollTop <= 10 && chatData.length > displayCount) {
-        setDisplayCount(prev => {
-          const next = Math.min(prev + 2, chatData.length);
-          if (next >= chatData.length) setHasMore(false);
-          return next;
-        });
-      }
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        if (el.scrollTop <= 30 && chatData.length > displayCount) {
+          setDisplayCount(prev => Math.min(prev + 10, chatData.length));
+        }
+        ticking = false;
+      });
     };
-    el.addEventListener('scroll', onScroll);
+    el.addEventListener('scroll', onScroll, { passive: true });
     return () => el.removeEventListener('scroll', onScroll);
   }, [chatData.length, displayCount]);
+
+  // Build groups
+  const groups: { q: string; r: any }[] = [];
+  chatData.slice(-displayCount).forEach((c: any) => {
+    if (!c.q && !c.system) return;
+    groups.push({ q: c.q || '', r: c });
+  });
 
   return (
     <div className="flex flex-col h-full">
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <div className="max-w-full mx-auto px-2 py-4">
-
           {loading ? (
             <div className="flex flex-col items-center justify-center pt-20 gap-3">
               <div className="w-6 h-6 border-2 border-vsc-accent/30 border-t-vsc-accent rounded-full animate-spin" />
@@ -351,15 +348,9 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
             </div>
           ) : groups.map((g, gi) => {
             const { r } = g;
+            const isLatest = gi === groups.length - 1;
 
-            // System notification (e.g. worker_idle)
-            if (r?.system) {
-              return (
-                <div key={gi} className="mb-3 px-3.5 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-sm text-yellow-200/80">
-                  <span className="chat-markdown" dangerouslySetInnerHTML={{ __html: (r.a || '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') }} />
-                </div>
-              );
-            }
+            if (r?.system) return null;
 
             const steps: any[] = r?.steps || [];
             const ranSec = r?.ts && r?.start_ts ? Math.round(r.ts - r.start_ts) : 0;
@@ -372,27 +363,20 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
             const toolCount = steps.filter((s: any) => s.type === 'tool').reduce((n: number, s: any) => n + (s.tools?.filter((t: any) => t.arg)?.length || 0), 0);
             const credit = r?.credit || 0;
 
-            const isLatest = gi === groups.length - 1;
-            const isActive = isPending || isStreaming || isRunning;
-
             return (
-              <div key={gi} className="mb-5" ref={isLatest ? latestGroupRef : undefined} style={isLatest ? { minHeight: containerH + 'px' } : undefined}>
-                {/* User message */}
+              <div key={gi} className="mb-5" ref={isLatest ? latestQRef : undefined} style={isLatest ? { minHeight: containerH + 'px' } : undefined}>
                 <CollapsibleQ text={g.q} />
 
-                {/* AI response */}
                 <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] overflow-hidden">
-                  {/* Meta bar */}
-                  <div className="flex items-center gap-1.5 px-3.5 py-2 border-b border-white/[0.04] flex-wrap">
-                    <span className="text-vsc-accent text-base font-semibold">✦ {agentType}</span>
-                    {model && <span className="text-base px-1.5 py-0.5 rounded-md bg-white/[0.04] text-vsc-text-muted">{model}</span>}
-                    {timeStr && <span className="text-base px-1.5 py-0.5 rounded-md bg-white/[0.04] text-vsc-text-muted">⏱{timeStr}</span>}
-                    {toolCount > 0 && <span className="text-base px-1.5 py-0.5 rounded-md bg-white/[0.04] text-vsc-text-muted">🔧×{toolCount}</span>}
+                  <div className="flex items-center gap-1.5 px-3.5 py-1 border-b border-white/[0.03] flex-wrap">
+                    <span className="text-vsc-accent text-sm font-medium opacity-60">✦ {agentType}</span>
+                    {model && <span className="text-xs px-1 py-0.5 rounded bg-white/[0.03] text-vsc-text-muted/40">{model}</span>}
+                    {timeStr && <span className="text-xs text-vsc-text-muted/30">⏱{timeStr}</span>}
+                    {toolCount > 0 && <span className="text-xs text-vsc-text-muted/30">🔧×{toolCount}</span>}
                     <span className="flex-1" />
-                    {credit > 0 && <span className="text-base text-vsc-text-muted/50 font-mono">${credit.toFixed(3)}</span>}
+                    {credit > 0 && <span className="text-xs text-vsc-text-muted/25 font-mono">${credit.toFixed(3)}</span>}
                   </div>
 
-                  {/* Steps */}
                   <div className="px-3.5 py-2.5">
                     {steps.map((s: any, si: number) => {
                       const isLast = si === steps.length - 1;
@@ -413,10 +397,8 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
                         );
                       }
 
-                      // Tool step
                       const toolsWithArg = (s.tools || []).filter((t: any) => t.arg);
                       if (!toolsWithArg.length) return null;
-
                       return (
                         <div key={si} className="my-2 space-y-1.5">
                           {toolsWithArg.map((t: any, ti: number) => (
@@ -426,7 +408,6 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
                       );
                     })}
 
-                    {/* Live status */}
                     {isPending && (
                       <div className="flex items-center gap-2 py-1.5">
                         <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
@@ -450,9 +431,18 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
               </div>
             );
           })}
-          <div ref={endRef} />
         </div>
       </div>
+      {showTtyd && (
+        <div className="shrink-0 h-[160px] mx-2 mb-1 rounded-lg overflow-hidden border border-white/[0.08] relative">
+          <button onClick={() => setShowTtyd(false)} className="absolute top-1 right-1 z-10 w-5 h-5 flex items-center justify-center rounded bg-black/60 text-white/40 hover:text-white/80 text-xs">✕</button>
+          <iframe
+            src={ttydUrl}
+            className="w-full h-full border-0 bg-black"
+            title="terminal-mini"
+          />
+        </div>
+      )}
       <div className="shrink-0 h-[180px] pb-2 px-2">
         {commandPanel}
       </div>

@@ -208,15 +208,25 @@ def responseheaders(flow: http.HTTPFlow):
                 if c:
                     st["text"].append(c)
                     now = time.time()
-                    if now - st["last_t"] > 0.4:
+                    if now - st["last_t"] > 0.15:
                         st["last_t"] = now
                         _post_webhook(pane, "ai_chunk", {"delta": "".join(st["text"])})
-            elif etype == "toolUseEvent":
-                # Don't push tool_start — wait for ai_done to get complete tool data
-                pass
+            elif etype in ("codeEvent", "endOfTurnEvent"):
+                # End of stream — flush remaining text immediately
+                if st["text"]:
+                    _post_webhook(pane, "ai_chunk", {"delta": "".join(st["text"])})
+                    st["last_t"] = time.time()
         return chunk
 
     flow.response.stream = on_chunk
+
+
+def error(flow: http.HTTPFlow):
+    st = _stream.pop(flow.id, None)
+    if st:
+        if st["text"]:
+            _post_webhook(st["pane"], "ai_chunk", {"delta": "".join(st["text"])})
+        _post_webhook(st["pane"], "ai_done", {"interrupted": True})
 
 
 def response(flow: http.HTTPFlow):

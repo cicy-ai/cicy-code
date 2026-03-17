@@ -1,4 +1,4 @@
-#!/bin/bash
+ters#!/bin/bash
 # cicy-code 一键启动/停止脚本
 set -e
 

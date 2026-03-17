@@ -6,6 +6,7 @@ import {
 import { cn } from '../lib/utils';
 import { Panel, Group, Separator } from 'react-resizable-panels';
 import { useAuth } from '../contexts/AuthContext';
+import { SendingProvider } from '../contexts/SendingContext';
 import ChatView from './chat/ChatView';
 import { CommandPanel } from './terminal/CommandPanel';
 import { WindowManager } from './terminal/WindowManager';
@@ -38,6 +39,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [isAgentDrawerOpen, setIsAgentDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [panelSizes, setPanelSizes] = useState<Record<string, number>>(() => cache.get('ws_panelSizes', { 'left-panel': 50, 'right-panel': 50 }));
+  const [toast, setToast] = useState<string | null>(null);
 
   const [title, setTitle] = useState(paneId);
   const [status, setStatus] = useState('idle');
@@ -70,8 +72,22 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useEffect(() => { apiService.getPane(fullPaneId).then(({ data }) => { if (data?.title) setTitle(data.title); if (data?.workspace) setWorkspace((data.workspace as string).replace('~', config.hostHome)); }).catch(() => {}); }, [fullPaneId]);
   useEffect(() => {
     const poll = async () => { try { const { data } = await apiService.getAllStatus(); const st = data?.[fullPaneId]; if (st?.status) setStatus(st.status); if (st?.title) setTitle(st.title); if (st?.contextUsage != null) setContextUsage(st.contextUsage); } catch {} };
-    poll(); const id = setInterval(poll, 5000); return () => clearInterval(id);
+    poll(); const id = setInterval(poll, 2000); return () => clearInterval(id);
   }, [fullPaneId]);
+
+  // Toast listener
+  useEffect(() => {
+    const handler = (e: CustomEvent) => { setToast(e.detail); setTimeout(() => setToast(null), 5000); };
+    window.addEventListener('show-toast', handler as EventListener);
+    return () => window.removeEventListener('show-toast', handler as EventListener);
+  }, []);
+
+  // Status change listener (from WebSocket)
+  useEffect(() => {
+    const handler = (e: CustomEvent) => { if (e.detail?.status) setStatus(e.detail.status); };
+    window.addEventListener('agent-status-change', handler as EventListener);
+    return () => window.removeEventListener('agent-status-change', handler as EventListener);
+  }, []);
 
   const handleRestart = () => {
     confirm(`Restart ${paneId}?`, async () => {
@@ -98,7 +114,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               panelPosition={panelPos} panelSize={panelSize} readOnly={false}
               onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}}
               onChange={(pos, size) => { setPanelPos(pos); setPanelSize(size); }}
-              canSend={true} agentStatus={status} contextUsage={contextUsage}
+              canSend={status === 'idle'} agentStatus={status} contextUsage={contextUsage}
               mouseMode={mouseMode} onToggleMouse={handleToggleMouse} onRestart={handleRestart}
               isRestarting={isRestarting} onCapturePane={handleCapture}
               hasEditPermission={hasPermission('edit')} hasRestartPermission={hasPermission('restart')}
@@ -119,6 +135,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   );
 
   return (
+    <SendingProvider>
     <div data-id="workspace-root" className="flex h-screen overflow-hidden bg-[#0A0A0A] text-zinc-400 relative">
       {/* Activity Bar */}
       <div data-id="activity-bar" className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
@@ -288,7 +305,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       )}
 
       {settingsOpen && <div data-id="settings-overlay"><SettingsFloat paneId={paneId} fullPaneId={fullPaneId} onClose={() => setSettingsOpen(false)} /></div>}
+      {toast && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 bg-zinc-800 text-white text-sm rounded-lg shadow-lg">{toast}</div>}
     </div>
+    </SendingProvider>
   );
 }
 
@@ -342,7 +361,7 @@ function FloatCommand({ paneId, token, agentStatus, mouseMode, showVoiceControl,
       {isDragging && <div style={{ position: 'absolute', inset: 0, zIndex: 49 }} />}
       <div data-id="float-command" ref={ref} onMouseDown={e => { if (e.clientY - ref.current!.getBoundingClientRect().top < 36 && !(e.target as HTMLElement).closest('button, select, input, [role="button"]')) onDown(e); }}
         style={{ position: 'absolute', left: pos.x, top: pos.y, width: W, height: H, borderRadius: 8, zIndex: 50 }}>
-        <CommandPanel paneTarget={paneId} title="" token={token} panelPosition={{ x: 0, y: 0 }} panelSize={{ width: W, height: H }} readOnly={false} onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}} onChange={() => {}} canSend={true} agentStatus={agentStatus} mouseMode={mouseMode} showVoiceControl={showVoiceControl} onToggleVoiceControl={onToggleVoiceControl} />
+        <CommandPanel paneTarget={paneId} title="" token={token} panelPosition={{ x: 0, y: 0 }} panelSize={{ width: W, height: H }} readOnly={false} onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}} onChange={() => {}} canSend={agentStatus === 'idle'} agentStatus={agentStatus} mouseMode={mouseMode} showVoiceControl={showVoiceControl} onToggleVoiceControl={onToggleVoiceControl} />
       </div>
     </>
   );
