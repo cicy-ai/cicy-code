@@ -2,7 +2,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 const GH_URL = `https://github.com/cicy-ai/cicy-code/releases/download/v${VERSION}`;
 const CN_URL = `https://gh-proxy.com/https://github.com/cicy-ai/cicy-code/releases/download/v${VERSION}`;
 
@@ -28,7 +28,8 @@ const binDir = path.join(__dirname, '..', 'bin');
 const binPath = path.join(binDir, 'cicy-code');
 const url = `${BASE_URL}/${binName}`;
 
-console.log(`Downloading ${binName}${cn ? ' (CN mirror)' : ''}...`);
+console.log(`Downloading ${binName}${cn ? ' (CN mirror: gh-proxy.com)' : ''}...`);
+console.log(`  URL: ${url}`);
 
 function download(url, dest, redirects = 5) {
   return new Promise((resolve, reject) => {

@@ -7,14 +7,24 @@ const https = require('https');
 const pkg = require('../package.json');
 const binPath = path.join(__dirname, 'cicy-code');
 
+const cn = process.argv.includes('--cn') || process.env.CN_MIRROR === '1';
+
 if (process.argv.includes('--cn')) {
   process.env.CN_MIRROR = '1';
 }
 
+if (cn) {
+  console.log('  [mirror] Using Chinese mirrors (npm + GitHub proxy)');
+}
+
 // Check for updates
 function checkUpdate() {
+  const registry = cn
+    ? 'https://registry.npmmirror.com/cicy-code/latest'
+    : 'https://registry.npmjs.org/cicy-code/latest';
+  if (cn) console.log(`  [mirror] Registry: registry.npmmirror.com`);
   return new Promise((resolve) => {
-    https.get('https://registry.npmjs.org/cicy-code/latest', (res) => {
+    https.get(registry, (res) => {
       let data = '';
       res.on('data', (c) => data += c);
       res.on('end', () => {
@@ -42,7 +52,10 @@ async function main() {
     console.log(`\n  Update available: ${pkg.version} → ${latest}`);
     console.log(`  Updating...\n`);
     try {
-      execSync(`npm install -g cicy-code@${latest}`, { stdio: 'inherit' });
+      const npmCmd = cn
+        ? `npm install -g cicy-code@${latest} --registry=https://registry.npmmirror.com`
+        : `npm install -g cicy-code@${latest}`;
+      execSync(npmCmd, { stdio: 'inherit' });
       console.log(`\n  Updated to ${latest}! Restarting...\n`);
       // Re-exec with new version
       const child = spawn('cicy-code', process.argv.slice(2), { stdio: 'inherit', env: process.env });
@@ -59,7 +72,10 @@ async function main() {
   } catch {
     console.log('  Installing cicy-code globally...');
     try {
-      execSync('npm install -g cicy-code', { stdio: 'inherit' });
+      const npmCmd = cn
+        ? 'npm install -g cicy-code --registry=https://registry.npmmirror.com'
+        : 'npm install -g cicy-code';
+      execSync(npmCmd, { stdio: 'inherit' });
       console.log('  Installed! You can now run: cicy-code\n');
     } catch {}
   }
