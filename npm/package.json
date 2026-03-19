@@ -1,0 +1,25 @@
+{
+  "name": "cicy-code",
+  "version": "0.1.0",
+  "description": "CiCy Code - AI-powered development environment",
+  "bin": {
+    "cicy-code": "bin/cicy-code.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "files": [
+    "bin/",
+    "scripts/"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cicy-ai/cicy-code.git"
+  },
+  "homepage": "https://github.com/cicy-ai/cicy-code",
+  "keywords": ["cicy", "code", "ai", "agent", "development"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=14"
+  }
+}

@@ -1,204 +1,150 @@
 # 本地部署指南
 
-本文档介绍如何在本地部署 cicy-code 的 API 和前端应用。
+## 快速开始
+
+```bash
+npx cicy-code
+```
+
+首次运行会自动：
+1. 下载对应平台的二进制
+2. 检测并安装 tmux、code-server（如缺失）
+3. 启动 code-server (端口 18080)
+4. 启动 API 服务 (端口 18008)
+5. 创建数据目录 `~/.cicy/`
+
+访问：`http://localhost:18008/?token=YOUR_TOKEN`
+
+## 获取 Token
+
+首次启动后需要创建 token：
+
+```bash
+sqlite3 ~/.cicy/data.db "INSERT INTO tokens (token, perms, note) VALUES ('$(openssl rand -hex 16)', 'admin', 'default');"
+sqlite3 ~/.cicy/data.db "SELECT token FROM tokens LIMIT 1;"
+```
+
+## 端口说明
+
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| API | 18008 | 主服务，含嵌入式 UI |
+| code-server | 18080 | 代码编辑器 |
+
+自定义端口：
+```bash
+PORT=9000 npx cicy-code  # API 端口改为 9000
+```
+
+## 数据目录
+
+所有数据存储在 `~/.cicy/`：
+
+```
+~/.cicy/
+├── data.db    # SQLite 数据库
+└── kv.json    # 缓存文件
+```
 
 ## 系统要求
 
-- **Go 1.21+** (API 后端)
-- **Node.js 18+** (前端构建)
-- **SQLite** (默认数据库，Go 内置) 或 **MySQL 8.0+** (可选)
-
-## 快速开始
-
-### 1. 克隆项目
-
-```bash
-git clone https://github.com/cicy-dev/cicy-code.git
-cd cicy-code
-```
-
-### 2. 数据库配置
-
-**选项 A: SQLite (推荐)**
-```bash
-# 无需安装，使用默认配置即可
-# 数据库文件会自动创建为 ./cicy.db
-```
-
-**选项 B: MySQL (可选)**
-```bash
-# 创建数据库
-mysql -u root -p -e "CREATE DATABASE cicy_code;"
-
-# 导入表结构
-mysql -u root -p cicy_code < schema.sql
-```
-
-### 3. 配置环境变量
-
-复制配置模板：
-```bash
-cp .env.example .env
-```
-
-编辑 `.env` 文件：
-```bash
-# 数据库配置 (二选一)
-# SQLite (推荐)
-SQLITE_PATH=./cicy.db
-
-# MySQL (可选)
-# MYSQL_DSN=root:password@tcp(localhost:3306)/cicy_code?parseTime=true
-
-# API 配置
-API_PORT=8080
-JWT_SECRET=your_jwt_secret_here
-
-# 前端配置
-VITE_API_URL=http://localhost:8080
-```
-
-### 4. 启动 API 后端
-
-```bash
-cd api
-go mod download
-go run main.go
-```
-
-API 将在 `http://localhost:8080` 启动。
-
-### 5. 启动前端应用
-
-新开终端：
-```bash
-cd app
-npm install
-npm run dev
-```
-
-前端将在 `http://localhost:5173` 启动。
-
-## 平台特定说明
+- **tmux** — 必须，终端复用
+- **code-server** — 必须，代码编辑器（自动安装）
 
 ### macOS
 
-安装依赖：
 ```bash
-# 使用 Homebrew
-brew install go node
-
-# SQLite 已内置在 Go 中，无需额外安装
-# 如需 MySQL: brew install mysql && brew services start mysql
+brew install tmux
 ```
-
-### Windows
-
-1. **Go**: 从 [golang.org](https://golang.org/dl/) 下载安装
-2. **Node.js**: 从 [nodejs.org](https://nodejs.org/) 下载安装  
-3. **SQLite**: Go 内置支持，无需额外安装
-4. **MySQL** (可选): 从 [mysql.com](https://dev.mysql.com/downloads/mysql/) 下载安装
-
-使用 PowerShell 或 Git Bash 执行命令。
 
 ### Linux (Ubuntu/Debian)
 
 ```bash
-# 安装依赖
-sudo apt update
-sudo apt install golang-go nodejs npm
-
-# SQLite 已内置在 Go 中，无需额外安装
-# 如需 MySQL: sudo apt install mysql-server && sudo systemctl start mysql
+sudo apt install tmux
 ```
 
-## 开发模式
+### Windows
 
-### API 热重载
+暂不支持（依赖 pty）
+
+## 手动安装
+
+如果不想用 npx，可以手动下载：
 
 ```bash
-cd api
-go install github.com/cosmtrek/air@latest
-air
+# macOS (Apple Silicon)
+curl -fsSL https://github.com/cicy-dev/cicy-code/releases/latest/download/cicy-code-darwin-arm64 -o cicy-code
+chmod +x cicy-code
+./cicy-code
+
+# macOS (Intel)
+curl -fsSL https://github.com/cicy-dev/cicy-code/releases/latest/download/cicy-code-darwin-amd64 -o cicy-code
+
+# Linux (x64)
+curl -fsSL https://github.com/cicy-dev/cicy-code/releases/latest/download/cicy-code-linux-amd64 -o cicy-code
+
+# Linux (ARM64)
+curl -fsSL https://github.com/cicy-dev/cicy-code/releases/latest/download/cicy-code-linux-arm64 -o cicy-code
 ```
 
-### 前端热重载
+## 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PORT` | 18008 | API 端口 |
+| `SQLITE_PATH` | ~/.cicy/data.db | 数据库路径 |
+| `KV_PATH` | ~/.cicy/kv.json | 缓存文件路径 |
+| `SAAS_MODE` | - | 设为 1 启用 SaaS 模式 |
+| `MYSQL_DSN` | - | MySQL 连接串（SaaS 模式） |
+| `REDIS_HOST` | - | Redis 地址（SaaS 模式） |
+
+## 两种运行模式
+
+### 本地模式（默认）
 
 ```bash
-cd app
-npm run dev
+npx cicy-code
 ```
 
-访问 `http://localhost:5173` 即可看到应用。
+- 端口：18008
+- 数据库：SQLite (`~/.cicy/data.db`)
+- 缓存：文件 (`~/.cicy/kv.json`)
+- 自动启动 code-server
 
-## 生产构建
-
-### 构建前端
+### SaaS 模式
 
 ```bash
-cd app
-npm run build
+MYSQL_DSN=user:pass@tcp(host:3306)/db SAAS_MODE=1 ./cicy-code
 ```
 
-构建产物在 `app/dist/` 目录。
-
-### 构建 API
-
-```bash
-cd api
-go build -o cicy-api main.go
-./cicy-api
-```
+- 端口：8008
+- 数据库：MySQL
+- 缓存：Redis
+- 跳过依赖检查
 
 ## 常见问题
 
-### 端口冲突
+### macOS 安全提示
 
-如果默认端口被占用，修改 `.env` 文件中的端口配置：
+从网上下载的二进制可能被 Gatekeeper 拦截：
+
 ```bash
-API_PORT=8081
+xattr -d com.apple.quarantine ./cicy-code
 ```
 
-前端开发服务器端口在 `app/vite.config.ts` 中修改：
-```typescript
-export default defineConfig({
-  server: {
-    port: 3000
-  }
-})
+或在「系统设置 → 隐私与安全」中允许。
+
+### 端口被占用
+
+```bash
+PORT=9000 ./cicy-code
 ```
 
-### 数据库连接失败
+### 查看日志
 
-**SQLite**:
-1. 确认目录有写权限
-2. 检查 `SQLITE_PATH` 环境变量
-
-**MySQL**:
-1. 确认 MySQL 服务已启动
-2. 检查 `MYSQL_DSN` 连接字符串格式
-3. 确认数据库用户有足够权限
-
-### 跨域问题
-
-开发环境下，前端代理配置在 `app/vite.config.ts`：
-```typescript
-export default defineConfig({
-  server: {
-    proxy: {
-      '/api': 'http://localhost:8080'
-    }
-  }
-})
-```
-
-## 目录结构
-
-```
-cicy-code/
-├── api/           # Go 后端
-├── app/           # React 前端
-├── schema.sql     # 数据库表结构
-├── .env.example   # 环境变量模板
-└── docs/          # 文档
+```bash
+# API 日志直接输出到终端
+# code-server 日志
+tail -f /usr/local/var/log/code-server.log  # macOS
+tail -f ~/.local/share/code-server/logs/    # Linux
 ```
