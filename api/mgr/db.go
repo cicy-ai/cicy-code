@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // DB wraps *sql.DB with dialect-aware helpers.
 type DB struct {
 	*sql.DB
-	Driver string // "mysql" or "sqlite3"
+	Driver string // "mysql" or "sqlite"
 }
 
 var store *DB
@@ -25,7 +26,7 @@ func initDB() {
 
 	if p := os.Getenv("SQLITE_PATH"); p != "" {
 		dsn = p
-		driver = "sqlite3"
+		driver = "sqlite"
 	} else if m := os.Getenv("MYSQL_DSN"); m != "" {
 		dsn = m
 		if !strings.Contains(dsn, "parseTime") {
@@ -37,8 +38,12 @@ func initDB() {
 		}
 		driver = "mysql"
 	} else {
-		dsn = "./cicy.db"
-		driver = "sqlite3"
+		// Default: ~/.cicy/data.db
+		home, _ := os.UserHomeDir()
+		dir := filepath.Join(home, ".cicy")
+		os.MkdirAll(dir, 0755)
+		dsn = filepath.Join(dir, "data.db")
+		driver = "sqlite"
 	}
 
 	raw, err := sql.Open(driver, dsn)
@@ -46,7 +51,7 @@ func initDB() {
 		log.Fatal(err)
 	}
 
-	if driver == "sqlite3" {
+	if driver == "sqlite" {
 		raw.SetMaxOpenConns(1)
 		raw.SetMaxIdleConns(1)
 		// Enable WAL mode for better concurrency
@@ -62,7 +67,7 @@ func initDB() {
 	log.Printf("[db] driver=%s dsn=%s", driver, dsn)
 }
 
-func (d *DB) IsSQLite() bool { return d.Driver == "sqlite3" }
+func (d *DB) IsSQLite() bool { return d.Driver == "sqlite" }
 
 // Now returns SQL expression for current timestamp.
 func (d *DB) Now() string {

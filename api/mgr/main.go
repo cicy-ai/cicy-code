@@ -20,15 +20,79 @@ import (
 
 var (
 	upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	saasMode bool
 )
 
+func isSaasMode() bool {
+	return os.Getenv("SAAS_MODE") == "1" || os.Getenv("MYSQL_DSN") != ""
+}
+
+func checkEnv() {
+	var missing []string
+
+	// tmux required
+	if _, err := exec.LookPath("tmux"); err != nil {
+		missing = append(missing, "tmux")
+	}
+
+	// code-server: check installed, install if missing, start if not running
+	if !saasMode {
+		ensureCodeServer()
+	}
+
+	if len(missing) > 0 {
+		log.Fatalf("[startup] missing required dependencies: %s", strings.Join(missing, ", "))
+	}
+}
+
+func ensureCodeServer() {
+	// Check if installed
+	path, err := exec.LookPath("code-server")
+	if err != nil {
+		log.Println("[code-server] not found, installing...")
+		var cmd *exec.Cmd
+		if _, err := exec.LookPath("brew"); err == nil {
+			cmd = exec.Command("brew", "install", "code-server")
+		} else {
+			cmd = exec.Command("sh", "-c", "curl -fsSL https://code-server.dev/install.sh | sh")
+		}
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			log.Fatalf("[code-server] install failed: %v", err)
+		}
+		path, _ = exec.LookPath("code-server")
+	}
+
+	// Check if running
+	csPort := "18080" // code-server fixed port
+
+	out, _ := exec.Command("sh", "-c", fmt.Sprintf("lsof -i:%s -t 2>/dev/null || pgrep -f 'code-server.*%s'", csPort, csPort)).Output()
+	if len(strings.TrimSpace(string(out))) == 0 {
+		log.Printf("[code-server] starting on port %s...", csPort)
+		cmd := exec.Command(path, "--bind-addr", "127.0.0.1:"+csPort, "--auth", "none")
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+		cmd.Start()
+		time.Sleep(2 * time.Second)
+	}
+	log.Printf("[code-server] ready on port %s", csPort)
+}
+
 func main() {
+	saasMode = isSaasMode()
+
+	if !saasMode {
+		checkEnv()
+	}
+
+	initKV()
+	initRedis()
 	initDB()
 	store.Migrate()
 	defer store.Close()
 
 	// Health
-	http.HandleFunc("/", handleRoot)
 	http.HandleFunc("/health", w(handleHealth))
 	http.HandleFunc("/api/health", w(handleHealth))
 	http.HandleFunc("/api/ping", w(handlePing))
@@ -186,10 +250,42 @@ func main() {
 	// TTYD proxy - serve ttyd-go instances at /ttyd/{pane_id}/
 	http.HandleFunc("/ttyd/", handleTtydProxy)
 
+	// Embedded UI (SPA fallback)
+	uiHandler := serveUI()
+	defaultHandler := http.DefaultServeMux
+	http.DefaultServeMux = http.NewServeMux()
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// API/特殊路径走原有 handler
+		for _, prefix := range []string{"/api/", "/ttyd/", "/code/", "/mitm/", "/pma/", "/static/", "/v1/", "/oauth/", "/stt", "/health"} {
+			if strings.HasPrefix(r.URL.Path, prefix) || r.URL.Path == prefix {
+				defaultHandler.ServeHTTP(w, r)
+				return
+			}
+		}
+		// 其他走嵌入 UI
+		uiHandler.ServeHTTP(w, r)
+	})
+
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8008"
+		if saasMode {
+			port = "8008"
+		} else {
+			port = "18008"
+		}
 	}
+
+	mode := "local"
+	if saasMode {
+		mode = "saas"
+	}
+	kvMode := "memory"
+	if useRedis {
+		kvMode = "redis"
+	} else if kv.file != "" {
+		kvMode = "file:" + kv.file
+	}
+	log.Printf("[startup] mode=%s port=%s db=%s kv=%s", mode, port, store.Driver, kvMode)
 
 	// 注册默认 hook：thinking→idle 时通知 master
 	RegisterHook(func(paneID string, old, new paneSt) {

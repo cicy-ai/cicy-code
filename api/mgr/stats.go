@@ -42,6 +42,10 @@ func redisKey(key string) string {
 }
 
 func redisPublish(channel, message string) {
+	if !useRedis {
+		pubsub.Publish(redisKey(channel), message)
+		return
+	}
 	host := os.Getenv("REDIS_HOST")
 	if host == "" {
 		host = "127.0.0.1"
@@ -60,6 +64,9 @@ func redisPublish(channel, message string) {
 }
 
 func redisLRange(key string) []string {
+	if !useRedis {
+		return kv.LRange(key, -5000, -1)
+	}
 	host := os.Getenv("REDIS_HOST")
 	if host == "" {
 		host = "127.0.0.1"
