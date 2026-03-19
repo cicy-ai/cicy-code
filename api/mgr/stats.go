@@ -348,7 +348,7 @@ func handleNotifyStream(w http.ResponseWriter, r *http.Request) {
 
 func paneWorkspace(pane string) string {
 	var ws string
-	db.QueryRow("SELECT workspace FROM agent_config WHERE pane_id=?", pane).Scan(&ws)
+	store.QueryRow("SELECT workspace FROM agent_config WHERE pane_id=?", pane).Scan(&ws)
 	if ws == "" {
 		return ""
 	}
@@ -410,12 +410,12 @@ func handlePair(w http.ResponseWriter, r *http.Request) {
 	}
 	var ws sql.NullString
 	var myRole sql.NullString
-	db.QueryRow("SELECT workspace, role FROM agent_config WHERE pane_id=?", pane).Scan(&ws, &myRole)
+	store.QueryRow("SELECT workspace, role FROM agent_config WHERE pane_id=?", pane).Scan(&ws, &myRole)
 	if ws.String == "" {
 		httpErr(w, 404, "pane not found")
 		return
 	}
-	rows, err := db.Query(`SELECT pane_id, title, role, default_model FROM agent_config WHERE workspace=? AND active=1 AND role IS NOT NULL AND role!=''`, ws.String)
+	rows, err := store.Query(`SELECT pane_id, title, role, default_model FROM agent_config WHERE workspace=? AND active=1 AND role IS NOT NULL AND role!=''`, ws.String)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return

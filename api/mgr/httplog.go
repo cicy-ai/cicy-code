@@ -24,7 +24,7 @@ func initHTTPLogConsumer() {
 	// Auto-cleanup: delete http_log older than 7 days, every hour
 	go func() {
 		for {
-			res, err := db.Exec("DELETE FROM http_log WHERE ts < UNIX_TIMESTAMP(NOW() - INTERVAL 7 DAY)")
+			res, err := store.Exec(store.DeleteOldLogs())
 			if err == nil {
 				if n, _ := res.RowsAffected(); n > 0 {
 					log.Printf("[http-log] cleanup: deleted %d old rows", n)
@@ -63,7 +63,7 @@ func consumeHTTPLogs() {
 			"request":  map[string]interface{}{"headers": e.ReqHeaders, "body": json.RawMessage(toJSON(e.ReqBody))},
 			"response": map[string]interface{}{"headers": e.ResHeaders, "body": json.RawMessage(toJSON(e.ResBody))},
 		})
-		_, err := db.Exec(
+		_, err := store.Exec(
 			`INSERT INTO http_log (pane_id, method, url, status_code, req_kb, res_kb, data, ts)
 			 VALUES (?,?,?,?,?,?,?,?)`,
 			e.Pane, e.Method, e.URL, e.Status, e.ReqKB, e.ResKB,

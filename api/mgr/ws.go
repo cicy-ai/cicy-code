@@ -173,7 +173,7 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Check pane exists in DB and is active
 	var dbPort int
-	if err := db.QueryRow("SELECT ttyd_port FROM agent_config WHERE pane_id=? AND active=1", paneID).Scan(&dbPort); err != nil {
+	if err := store.QueryRow("SELECT ttyd_port FROM agent_config WHERE pane_id=? AND active=1", paneID).Scan(&dbPort); err != nil {
 		httpErr(w, 404, "pane not found or inactive")
 		return
 	}
@@ -283,7 +283,7 @@ func proxyWS(w http.ResponseWriter, r *http.Request, port int) {
 				return
 			}
 			if mt == websocket.TextMessage && bytes.Contains(msg, []byte("0;276;0c")) {
-				log.Printf("[ws-proxy] DA response ttyd→client: %q", msg[:min(len(msg), 120)])
+				log.Printf("[ws-proxy] DA response ttyd→client: %q", msg[:minInt(len(msg), 120)])
 			}
 			if err := clientConn.WriteMessage(mt, msg); err != nil {
 				cancel()

@@ -6,7 +6,7 @@
 
 - **Go 1.21+** (API 后端)
 - **Node.js 18+** (前端构建)
-- **MySQL 8.0+** (数据库)
+- **SQLite** (默认数据库，Go 内置) 或 **MySQL 8.0+** (可选)
 
 ## 快速开始
 
@@ -17,8 +17,15 @@ git clone https://github.com/cicy-dev/cicy-code.git
 cd cicy-code
 ```
 
-### 2. 数据库初始化
+### 2. 数据库配置
 
+**选项 A: SQLite (推荐)**
+```bash
+# 无需安装，使用默认配置即可
+# 数据库文件会自动创建为 ./cicy.db
+```
+
+**选项 B: MySQL (可选)**
 ```bash
 # 创建数据库
 mysql -u root -p -e "CREATE DATABASE cicy_code;"
@@ -36,12 +43,12 @@ cp .env.example .env
 
 编辑 `.env` 文件：
 ```bash
-# 数据库配置
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=your_password
-DB_NAME=cicy_code
+# 数据库配置 (二选一)
+# SQLite (推荐)
+SQLITE_PATH=./cicy.db
+
+# MySQL (可选)
+# MYSQL_DSN=root:password@tcp(localhost:3306)/cicy_code?parseTime=true
 
 # API 配置
 API_PORT=8080
@@ -79,17 +86,18 @@ npm run dev
 安装依赖：
 ```bash
 # 使用 Homebrew
-brew install go node mysql
+brew install go node
 
-# 启动 MySQL
-brew services start mysql
+# SQLite 已内置在 Go 中，无需额外安装
+# 如需 MySQL: brew install mysql && brew services start mysql
 ```
 
 ### Windows
 
 1. **Go**: 从 [golang.org](https://golang.org/dl/) 下载安装
 2. **Node.js**: 从 [nodejs.org](https://nodejs.org/) 下载安装  
-3. **MySQL**: 从 [mysql.com](https://dev.mysql.com/downloads/mysql/) 下载安装
+3. **SQLite**: Go 内置支持，无需额外安装
+4. **MySQL** (可选): 从 [mysql.com](https://dev.mysql.com/downloads/mysql/) 下载安装
 
 使用 PowerShell 或 Git Bash 执行命令。
 
@@ -98,11 +106,10 @@ brew services start mysql
 ```bash
 # 安装依赖
 sudo apt update
-sudo apt install golang-go nodejs npm mysql-server
+sudo apt install golang-go nodejs npm
 
-# 启动 MySQL
-sudo systemctl start mysql
-sudo systemctl enable mysql
+# SQLite 已内置在 Go 中，无需额外安装
+# 如需 MySQL: sudo apt install mysql-server && sudo systemctl start mysql
 ```
 
 ## 开发模式
@@ -163,8 +170,13 @@ export default defineConfig({
 
 ### 数据库连接失败
 
+**SQLite**:
+1. 确认目录有写权限
+2. 检查 `SQLITE_PATH` 环境变量
+
+**MySQL**:
 1. 确认 MySQL 服务已启动
-2. 检查 `.env` 中的数据库配置
+2. 检查 `MYSQL_DSN` 连接字符串格式
 3. 确认数据库用户有足够权限
 
 ### 跨域问题

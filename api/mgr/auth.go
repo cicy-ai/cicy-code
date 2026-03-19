@@ -15,7 +15,7 @@ func verifyToken(token string) bool {
 		return true
 	}
 	var expiresAt sql.NullTime
-	err := db.QueryRow("SELECT expires_at FROM tokens WHERE token=?", token).Scan(&expiresAt)
+	err := store.QueryRow("SELECT expires_at FROM tokens WHERE token=?", token).Scan(&expiresAt)
 	if err != nil {
 		return false
 	}
@@ -32,7 +32,7 @@ func getTokenPerms(token string) (perms []string, groupID *int) {
 	var permsStr string
 	var gid sql.NullInt64
 	var expiresAt sql.NullTime
-	err := db.QueryRow("SELECT perms, group_id, expires_at FROM tokens WHERE token=?", token).Scan(&permsStr, &gid, &expiresAt)
+	err := store.QueryRow("SELECT perms, group_id, expires_at FROM tokens WHERE token=?", token).Scan(&permsStr, &gid, &expiresAt)
 	if err != nil {
 		return nil, nil
 	}
@@ -63,7 +63,7 @@ func handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 		userID, _, err := parseJWT(token)
 		if err == nil {
 			var email, plan, backend string
-			db.QueryRow("SELECT email,plan,backend_url FROM saas_users WHERE id=?", userID).Scan(&email, &plan, &backend)
+			store.QueryRow("SELECT email,plan,backend_url FROM saas_users WHERE id=?", userID).Scan(&email, &plan, &backend)
 			J(w, M{"valid": true, "auth_type": "saas", "user_id": userID, "email": email, "plan": plan, "backend": backend, "perms": []string{"api_full"}})
 			return
 		}
@@ -97,7 +97,7 @@ func handleAuthVerifyToken(w http.ResponseWriter, r *http.Request) {
 func handleAuthTokens(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		rows, err := db.Query("SELECT id, CONCAT(LEFT(token,8),'...') as token_prefix, group_id, pane_id, perms, note, expires_at, created_at FROM tokens ORDER BY created_at DESC")
+		rows, err := store.Query("SELECT id, "+store.TokenPrefix()+", group_id, pane_id, perms, note, expires_at, created_at FROM tokens ORDER BY created_at DESC")
 		if err != nil {
 			httpErr(w, 500, err.Error())
 			return
@@ -148,7 +148,7 @@ func handleAuthTokens(w http.ResponseWriter, r *http.Request) {
 		if expiresAt != "" {
 			ea = expiresAt
 		}
-		res, err := db.Exec("INSERT INTO tokens (token, group_id, pane_id, perms, note, expires_at) VALUES (?,?,?,?,?,?)",
+		res, err := store.Exec("INSERT INTO tokens (token, group_id, pane_id, perms, note, expires_at) VALUES (?,?,?,?,?,?)",
 			token, gid, paneID, permsStr, note, ea)
 		if err != nil {
 			httpErr(w, 500, err.Error())
@@ -165,7 +165,7 @@ func handleAuthTokenDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/auth/tokens/")
-	res, err := db.Exec("DELETE FROM tokens WHERE id=?", id)
+	res, err := store.Exec("DELETE FROM tokens WHERE id=?", id)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
@@ -178,13 +178,6 @@ func handleAuthTokenDelete(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"success": true, "message": "Token " + id + " deleted"})
 }
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func handleResolve(w http.ResponseWriter, r *http.Request) {
 	slug := r.URL.Query().Get("slug")
 	if slug == "" {
@@ -194,7 +187,7 @@ func handleResolve(w http.ResponseWriter, r *http.Request) {
 	// slug format: u-{id8}, match against id prefix
 	id8 := strings.TrimPrefix(slug, "u-")
 	var url string
-	db.QueryRow("SELECT backend_url FROM saas_users WHERE id LIKE ?", id8+"%").Scan(&url)
+	store.QueryRow("SELECT backend_url FROM saas_users WHERE id LIKE ?", id8+"%").Scan(&url)
 	if url == "" {
 		http.Error(w, "not found", 404)
 		return
@@ -211,7 +204,7 @@ func handleVMToken(w http.ResponseWriter, r *http.Request) {
 	}
 	id8 := strings.TrimPrefix(slug, "u-")
 	var vmToken string
-	db.QueryRow("SELECT vm_token FROM saas_users WHERE id LIKE ?", id8+"%").Scan(&vmToken)
+	store.QueryRow("SELECT vm_token FROM saas_users WHERE id LIKE ?", id8+"%").Scan(&vmToken)
 	if vmToken == "" {
 		httpErr(w, 404, "not found")
 		return
@@ -228,7 +221,7 @@ func handleAuthExchange(w http.ResponseWriter, r *http.Request) {
 
 	var userID, slug, vmToken string
 	var used int
-	err := db.QueryRow("SELECT user_id,slug,vm_token,used FROM auth_codes WHERE code=?", code).Scan(&userID, &slug, &vmToken, &used)
+	err := store.QueryRow("SELECT user_id,slug,vm_token,used FROM auth_codes WHERE code=?", code).Scan(&userID, &slug, &vmToken, &used)
 	if err != nil {
 		httpErr(w, 400, "invalid code")
 		return
@@ -239,7 +232,7 @@ func handleAuthExchange(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Mark as used
-	db.Exec("UPDATE auth_codes SET used=1 WHERE code=?", code)
+	store.Exec("UPDATE auth_codes SET used=1 WHERE code=?", code)
 
 	// Issue JWT with limited perms, never expose vm_token
 	token := signJWT(userID, slug)

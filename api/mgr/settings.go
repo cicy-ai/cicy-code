@@ -11,7 +11,7 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 		var val []byte
-		err := db.QueryRow("SELECT `value` FROM global_vars WHERE `key_name`='global_settings'").Scan(&val)
+		err := store.QueryRow("SELECT `value` FROM global_vars WHERE `key_name`='global_settings'").Scan(&val)
 		if err != nil || val == nil {
 			J(w, M{"favor": M{"dir": []string{}, "cmd": []string{}}})
 			return
@@ -23,7 +23,7 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		var req interface{}
 		readBody(r, &req)
 		data, _ := json.Marshal(req)
-		db.Exec("INSERT INTO global_vars (`key_name`, `value`) VALUES ('global_settings', ?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", string(data))
+		store.Exec(store.Upsert("global_vars", "key_name", []string{"key_name", "value"}, []string{"value"}), "global_settings", string(data))
 		J(w, M{"success": true})
 	}
 }

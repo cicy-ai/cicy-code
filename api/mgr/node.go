@@ -39,7 +39,7 @@ func nodeExec(nodeURL, cmd string) (string, error) {
 // nodeURL 从数据库获取 pane 对应的 node_url
 func nodeURL(paneID string) string {
 	var u string
-	if err := db.QueryRow("SELECT COALESCE(node_url,'') FROM agent_config WHERE pane_id=?", paneID).Scan(&u); err != nil || u == "" {
+	if err := store.QueryRow("SELECT COALESCE(node_url,'') FROM agent_config WHERE pane_id=?", paneID).Scan(&u); err != nil || u == "" {
 		return ""
 	}
 	return u
@@ -89,7 +89,7 @@ func shellJoin(args []string) string {
 
 // API: GET /api/nodes - 列出所有节点及状态
 func handleNodes(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT DISTINCT node_url FROM agent_config WHERE active=1")
+	rows, err := store.Query("SELECT DISTINCT node_url FROM agent_config WHERE active=1")
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return

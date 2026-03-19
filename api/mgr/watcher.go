@@ -374,7 +374,7 @@ func ensurePipe(paneID string) bool {
 }
 
 func refreshCfgCache() {
-	rows, err := db.Query("SELECT pane_id, title, COALESCE(agent_type,''), COALESCE(role,''), COALESCE(default_model,''), COALESCE(trust_level,''), COALESCE(ttyd_port,0), COALESCE(workspace,'') FROM agent_config WHERE active=1")
+	rows, err := store.Query("SELECT pane_id, title, COALESCE(agent_type,''), COALESCE(role,''), COALESCE(default_model,''), COALESCE(trust_level,''), COALESCE(ttyd_port,0), COALESCE(workspace,'') FROM agent_config WHERE active=1")
 	if err != nil {
 		return
 	}

@@ -9,7 +9,7 @@ func handleAgentsByPane(w http.ResponseWriter, r *http.Request) {
 	paneID := strings.TrimPrefix(r.URL.Path, "/api/agents/pane/")
 	if paneID == "" || paneID == "all" {
 		// Return all bindings
-		rows, err := db.Query("SELECT id, pane_id, agent_name, status FROM pane_agents")
+		rows, err := store.Query("SELECT id, pane_id, agent_name, status FROM pane_agents")
 		if err != nil { J(w, []M{}); return }
 		defer rows.Close()
 		var all []M
@@ -22,7 +22,7 @@ func handleAgentsByPane(w http.ResponseWriter, r *http.Request) {
 		J(w, all)
 		return
 	}
-	rows, err := db.Query("SELECT id, pane_id, agent_name as name, status FROM pane_agents WHERE pane_id=?", paneID)
+	rows, err := store.Query("SELECT id, pane_id, agent_name as name, status FROM pane_agents WHERE pane_id=?", paneID)
 	if err != nil {
 		J(w, []M{})
 		return
@@ -51,12 +51,12 @@ func handleAgentBind(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var existing int
-	db.QueryRow("SELECT id FROM pane_agents WHERE pane_id=? AND agent_name=?", paneID, agentName).Scan(&existing)
+	store.QueryRow("SELECT id FROM pane_agents WHERE pane_id=? AND agent_name=?", paneID, agentName).Scan(&existing)
 	if existing > 0 {
 		httpErr(w, 400, "Agent already bound to this pane")
 		return
 	}
-	res, err := db.Exec("INSERT INTO pane_agents (pane_id, agent_name, status) VALUES (?,?,'active')", paneID, agentName)
+	res, err := store.Exec("INSERT INTO pane_agents (pane_id, agent_name, status) VALUES (?,?,'active')", paneID, agentName)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
@@ -71,7 +71,7 @@ func handleAgentUnbind(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/agents/unbind/")
-	res, err := db.Exec("DELETE FROM pane_agents WHERE id=?", id)
+	res, err := store.Exec("DELETE FROM pane_agents WHERE id=?", id)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return

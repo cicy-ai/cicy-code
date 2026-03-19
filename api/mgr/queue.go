@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -55,7 +56,7 @@ func handleQueuePush(w http.ResponseWriter, r *http.Request) {
 		req.Type = "message"
 	}
 	paneID := normPaneID(req.PaneID)
-	res, err := db.Exec("INSERT INTO agent_queue (pane_id, message, type, priority) VALUES (?,?,?,?)", paneID, req.Message, req.Type, req.Priority)
+	res, err := store.Exec("INSERT INTO agent_queue (pane_id, message, type, priority) VALUES (?,?,?,?)", paneID, req.Message, req.Type, req.Priority)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
@@ -81,7 +82,7 @@ func handleQueueList(w http.ResponseWriter, r *http.Request) {
 		args = append(args, status)
 	}
 	query += " ORDER BY priority DESC, id ASC"
-	rows, err := db.Query(query, args...)
+	rows, err := store.Query(query, args...)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
@@ -124,7 +125,7 @@ func handleQueueUpdate(w http.ResponseWriter, r *http.Request, id int) {
 		vals = append(vals, v)
 	}
 	vals = append(vals, id)
-	_, err := db.Exec("UPDATE agent_queue SET "+strings.Join(sets, ", ")+" WHERE id=?", vals...)
+	_, err := store.Exec("UPDATE agent_queue SET "+strings.Join(sets, ", ")+" WHERE id=?", vals...)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
@@ -133,14 +134,14 @@ func handleQueueUpdate(w http.ResponseWriter, r *http.Request, id int) {
 }
 
 func handleQueueDelete(w http.ResponseWriter, r *http.Request, id int) {
-	db.Exec("DELETE FROM agent_queue WHERE id=?", id)
+	store.Exec("DELETE FROM agent_queue WHERE id=?", id)
 	J(w, M{"success": true, "id": id})
 }
 
 // dispatchQueue checks for pending messages and sends to workers.
 // Batches multiple pending messages together to reduce interruptions.
 func dispatchQueue(paneID string) {
-	rows, err := db.Query(
+	rows, err := store.Query(
 		"SELECT id, message, type FROM agent_queue WHERE pane_id=? AND status='pending' ORDER BY priority DESC, id ASC",
 		paneID,
 	)
@@ -181,7 +182,7 @@ func dispatchQueue(paneID string) {
 
 	// Mark all as sent
 	for _, id := range ids {
-		db.Exec("UPDATE agent_queue SET status='sent', sent_at=NOW() WHERE id=?", id)
+		store.Exec(fmt.Sprintf("UPDATE agent_queue SET status='sent', sent_at=%s WHERE id=?", store.Now()), id)
 	}
 
 	log.Printf("[queue] dispatched %d msg(s) to %s", len(ids), shortPaneID(paneID))
