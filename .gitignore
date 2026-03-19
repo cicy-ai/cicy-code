@@ -12,3 +12,4 @@ api/logs/*
 *.gif
 .env
 mitmproxy/__pycache__/
+app/worker/public/
