@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, useRef, ReactNode } from 'react';
+import { useDevRegister } from '../lib/devStore';
 
 interface SendingContextType {
   sending: boolean;
@@ -25,6 +26,8 @@ export function SendingProvider({ children }: { children: ReactNode }) {
       setSendingRaw(false);
     }
   }, []);
+
+  useDevRegister('Sending', { sending });
 
   return <SendingContext.Provider value={{ sending, setSending, checkIdle }}>{children}</SendingContext.Provider>;
 }

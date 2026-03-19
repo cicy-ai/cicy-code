@@ -10,19 +10,14 @@ export interface EditPaneData {
   workspace?: string;
   active?: boolean;
   init_script?: string;
-  proxy?: string;
   tg_enable?: boolean;
   tg_token?: string;
   tg_chat_id?: string;
   url?: string;
-  private_mode?: boolean;
-  allowed_users?: string;
-  proxy_enable?: boolean;
   config?: string;
   ttyd_preview?: string;
   role?: string;
   default_model?: string;
-  trust_level?: string;
 }
 
 interface EditPaneDialogProps {
@@ -36,7 +31,7 @@ interface EditPaneDialogProps {
   onDelete?: () => void;
 }
 
-const tabs = ['General', 'Agent', 'Network', 'Access'] as const;
+const tabs = ['General', 'Agent', 'Network'] as const;
 type Tab = typeof tabs[number];
 
 export const EditPaneDialog: React.FC<EditPaneDialogProps> = ({
@@ -123,24 +118,24 @@ export const EditPaneDialog: React.FC<EditPaneDialogProps> = ({
 
           {/* Network */}
           {isFull && tab === 'Network' && (<>
-            <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-vsc-text">HTTP Proxy</p>
-                <p className="text-xs text-vsc-text-muted">Enable and set proxy URL</p>
+                <label className="block text-xs text-vsc-text-secondary mb-1">Config (JSON)</label>
+                <textarea value={pane.config || '{}'}
+                  onChange={e => onChange({ ...pane, config: e.target.value })}
+                  className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent resize-none"
+                  rows={8} placeholder='{"proxy": {"enable": true, "url": "http://..."}}' />
+                <pre className="text-xs text-vsc-text-muted bg-vsc-bg-secondary border border-vsc-border rounded p-2 mt-2 overflow-x-auto">{`{
+  "proxy": {
+    "enable": true,
+    "url": "http://w-20001:x@127.0.0.1:8003"
+  }
+}`}</pre>
               </div>
-              <div className={`relative w-8 h-4 rounded-full cursor-pointer transition-colors ${pane.proxy_enable ? 'bg-cyan-600' : 'bg-vsc-bg-active'}`}
-                onClick={() => onChange({ ...pane, proxy_enable: !pane.proxy_enable })}>
-                <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${pane.proxy_enable ? 'translate-x-4' : 'translate-x-0.5'}`} />
-              </div>
-            </div>
-            <div className={pane.proxy_enable ? '' : 'opacity-40 pointer-events-none'}>
-              <input type="text" value={pane.proxy || ''}
-                onChange={e => onChange({ ...pane, proxy: e.target.value })}
-                className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2 py-1 focus:outline-none focus:border-vsc-accent"
-                placeholder="http://proxy:8080" />
-            </div>
-            <div className="pt-3 border-t border-vsc-border-subtle">
-              <div className="flex items-center justify-between mb-2">
+            </>)}
+
+          {/* Telegram - hidden from tabs */}
+          {isFull && tab === 'Telegram' as any && (<>
+              <div className="flex items-center justify-between">
                 <span className="text-xs text-vsc-text-secondary">Telegram Notifications</span>
                 <div className={`relative w-8 h-4 rounded-full cursor-pointer transition-colors ${pane.tg_enable ? 'bg-purple-600' : 'bg-vsc-bg-active'}`}
                   onClick={() => onChange({ ...pane, tg_enable: !pane.tg_enable })}>
@@ -157,29 +152,7 @@ export const EditPaneDialog: React.FC<EditPaneDialogProps> = ({
                   className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2 py-1 focus:outline-none focus:border-vsc-accent"
                   placeholder="Chat ID" />
               </div>
-            </div>
-          </>)}
-
-          {/* Access */}
-          {isFull && tab === 'Access' && (<>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-vsc-text">Private Mode</p>
-                <p className="text-xs text-vsc-text-muted">Restrict access to allowed users</p>
-              </div>
-              <div className={`relative w-8 h-4 rounded-full cursor-pointer transition-colors ${pane.private_mode ? 'bg-yellow-600' : 'bg-vsc-bg-active'}`}
-                onClick={() => onChange({ ...pane, private_mode: !pane.private_mode })}>
-                <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${pane.private_mode ? 'translate-x-4' : 'translate-x-0.5'}`} />
-              </div>
-            </div>
-            <div className={pane.private_mode ? '' : 'opacity-40 pointer-events-none'}>
-              <label className="block text-xs text-vsc-text-secondary mb-1">Allowed Users</label>
-              <input type="text" value={pane.allowed_users || ''}
-                onChange={e => onChange({ ...pane, allowed_users: e.target.value })}
-                className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2 py-1 focus:outline-none focus:border-vsc-accent"
-                placeholder="user1, user2" />
-            </div>
-          </>)}
+            </>)}
         </div>
 
         {/* 底部按钮 */}

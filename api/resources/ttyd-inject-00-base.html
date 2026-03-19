@@ -1,0 +1,95 @@
+<style>
+html, body, .terminal {
+  background: #0a0a0b !important;
+  height: 100% !important;
+  width: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+}
+body { margin: 8px !important; }
+.terminal { font-size: 13px !important; color: #b9adad !important; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+::-webkit-scrollbar-corner { background: transparent; }
+.xterm-helper-textarea ~ div[style*="position: fixed"] { display: none !important; }
+.xterm-overlay { display: none !important; }
+.xterm-reconnect-overlay div:not(.xterm-reconnect-spinner) { display: none !important; }
+.xterm-reconnect-overlay button { display: block !important; }
+</style>
+<script>
+/* Terminal setup */
+window.addEventListener('load',function(){
+  var i=setInterval(function(){
+    if(window.term||window.gotty_term){
+      clearInterval(i);
+      var t=window.term||window.gotty_term;
+      t.setOption&&t.setOption('scrollback',10000);
+      t.setOption&&t.setOption('fontFamily','Menlo, Consolas, monospace');
+      t.setOption&&t.setOption('letterSpacing',-0.5);
+      setTimeout(function(){ t.fit&&t.fit(); window.dispatchEvent(new Event('resize')); },200);
+      setTimeout(function(){ window.dispatchEvent(new Event('resize')); },1000);
+      setTimeout(function(){ window.dispatchEvent(new Event('resize')); },3000);
+    }
+  },50);
+});
+
+/* WebSocket capture */
+if (!window.__wsPatched) {
+  window.__wsPatched = true;
+  window.__allWs = [];
+  var _O = window.WebSocket;
+  window.WebSocket = function(u, p) {
+    var ws = p ? new _O(u, p) : new _O(u);
+    window.__allWs.push(ws); window.__cicyWs = ws;
+    if (window.__allWs.length > 10) window.__allWs = window.__allWs.filter(function(w){ return w.readyState <= 1; });
+    return ws;
+  };
+  window.WebSocket.prototype = _O.prototype;
+  window.WebSocket.CONNECTING = _O.CONNECTING;
+  window.WebSocket.OPEN = _O.OPEN;
+  window.WebSocket.CLOSING = _O.CLOSING;
+  window.WebSocket.CLOSED = _O.CLOSED;
+}
+
+/* Shared state: window.__cp */
+window.__cp = (function(){
+  function getWs() {
+    if (window.__cicyWs && window.__cicyWs.readyState === 1) return window.__cicyWs;
+    if (window.__allWs) {
+      for (var i = window.__allWs.length - 1; i >= 0; i--)
+        if (window.__allWs[i].readyState === 1) { window.__cicyWs = window.__allWs[i]; return window.__cicyWs; }
+    }
+    try {
+      if (window.ws && window.ws.readyState === 1) return window.ws;
+      if (window.websocket && window.websocket.readyState === 1) return window.websocket;
+    } catch(e) {}
+    return null;
+  }
+  var sendBtn = null;
+  function sendInput(text) {
+    var ws = getWs();
+    if (ws && ws.readyState === 1) { ws.send('1' + text); return true; }
+    if (sendBtn) { sendBtn.style.background = 'rgba(239,68,68,0.3)'; setTimeout(function(){ sendBtn.style.background = ''; }, 600); }
+    return false;
+  }
+  function sendLine(text) { sendInput(text + '\r'); }
+  var LS = {
+    get: function(k, d) { try { var v = localStorage.getItem(k); return v !== null ? JSON.parse(v) : d; } catch(e) { return d; } },
+    set: function(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
+  };
+  var paneId = (location.pathname.match(/\/ttyd\/([^\/]+)/) || [])[1] || 'default';
+  var token = (location.search.match(/[?&]token=([^&]+)/) || [])[1] || '';
+  var apiH = { 'Content-Type': 'application/json' };
+  if (token) apiH['Authorization'] = 'Bearer ' + token;
+
+  return {
+    getWs: getWs, sendInput: sendInput, sendLine: sendLine, LS: LS,
+    paneId: paneId, token: token, apiH: apiH,
+    setSendBtn: function(b) { sendBtn = b; },
+    doSend: null // set by panel
+  };
+})();
+</script>

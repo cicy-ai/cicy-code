@@ -84,6 +84,10 @@ func main() {
 		http.HandleFunc("/api/auth/github", w(handleGithubAuth))
 		http.HandleFunc("/api/auth/github/callback", w(handleGithubCallback))
 	}
+	if googleEnabled() {
+		http.HandleFunc("/api/auth/google", w(handleGoogleAuth))
+		http.HandleFunc("/api/auth/google/callback", w(handleGoogleCallback))
+	}
 	http.HandleFunc("/api/auth/saas/verify", w(handleSaasVerify))
 	http.HandleFunc("/api/auth/saas/me", w(handleSaasMe))
 
@@ -169,7 +173,22 @@ func main() {
 
 	// Utils
 	http.HandleFunc("/api/utils/file/exists", wa(handleFileExists))
-	http.HandleFunc("/api/correctEnglish", wa(handleCorrectEnglish))
+	http.HandleFunc("/api/correctEnglish", wa(handleAICorrect))
+
+	// AI
+	http.HandleFunc("/api/ai/chat", wa(handleAIChat))
+	http.HandleFunc("/api/ai/chat/stream", corsM(handleAIChatStream))
+	http.HandleFunc("/v1/chat/completions", handleV1ChatCompletions)
+	http.HandleFunc("/v1/models", handleV1Models)
+	http.HandleFunc("/stt", wa(handleSTT))
+	http.HandleFunc("/api/apps/create", corsM(handleCreateApp))
+	http.HandleFunc("/api/apps", corsM(handleListApps))
+	http.HandleFunc("/api/apps/", corsM(handleServeApp))
+	http.HandleFunc("/api/ai/correct", wa(handleAICorrect))
+
+	// Telegram
+	http.HandleFunc("/api/tg/send", wa(handleTGSend))
+	http.HandleFunc("/api/tg/photo", wa(handleTGPhoto))
 
 	// Code-server proxy (token auth only for root, assets bypass)
 	http.HandleFunc("/code/", corsM(handleCodeServerAuth))
@@ -177,8 +196,15 @@ func main() {
 	// Mitmproxy Web UI proxy
 	http.HandleFunc("/mitm/", corsM(handleMitmproxyAuth))
 
+	// phpMyAdmin proxy
+	http.HandleFunc("/pma/", corsM(handlePmaAuth))
+
 	// XUI proxy: /api/xui/{pane_id}/... → node xui
 	http.HandleFunc("/api/xui/", wa(handleXuiProxy))
+
+	// OAuth Google
+	http.HandleFunc("/oauth/start", handleOAuthStart)
+	http.HandleFunc("/oauth/callback", handleOAuthCallback)
 
 	// WebSocket
 	http.HandleFunc("/api/ws/", wa(handleWSProxy))
@@ -236,6 +262,7 @@ func main() {
 	})
 
 	go startWatcher()
+	go startTmuxHealth()
 	initHTTPLogConsumer()
 	log.Printf("cicy-code-api starting on :%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))

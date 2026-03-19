@@ -58,18 +58,15 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./app/dist:/usr/share/nginx/html:ro
 
-  code-server:
-    image: codercom/code-server:latest
-    container_name: cicy-code-server
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: cicy-phpmyadmin
     restart: unless-stopped
     network_mode: host
-    user: "${HOST_UID:-1001}:${HOST_GID:-1002}"
     environment:
-      - TERM=xterm-256color
-    volumes:
-      - ${HOST_HOME:-/home/w3c_offical}:/home/w3c_offical
-      - code-server-data:/home/coder/.local/share/code-server
-    command: --bind-addr 0.0.0.0:${CODE_SERVER_PORT:-8002} --auth none
+      PMA_HOST: 127.0.0.1
+      PMA_PORT: ${MYSQL_PORT:-3306}
+      APACHE_PORT: 8899
 
   mitmproxy:
     build: ./mitmproxy
@@ -88,5 +85,4 @@ volumes:
   mysql-data:
   redis-data:
   app_modules:
-  code-server-data:
   mitmproxy-data:

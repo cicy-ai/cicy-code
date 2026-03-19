@@ -21,14 +21,13 @@ echo "=== App v$VER ==="
 
 # Inject version
 sed -i "s/^const VER = .*/const VER = '$VER';/" app-worker.js
-sed -i "s/^VER = .*/VER = 'v$VER'/" cos-upload.py
 
 echo "=== 1/2 COS Assets ==="
-python3 cos-upload.py
+python3 ../../cos-upload.py app
 
 echo "=== 2/2 Worker ==="
 CLOUDFLARE_ACCOUNT_ID=$CF_ACCOUNT CLOUDFLARE_API_TOKEN=$CF_TOKEN \
 NODE_TLS_REJECT_UNAUTHORIZED=0 \
-npx wrangler deploy
+npx -y wrangler deploy
 
 echo "=== Done: App v$VER ==="

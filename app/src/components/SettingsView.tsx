@@ -26,7 +26,7 @@ interface SettingsViewProps {
   isSaving?: boolean;
 }
 
-const tabs = ['General', 'Config', 'Telegram'] as const;
+const tabs = ['General', 'Agent', 'Network'] as const;
 type Tab = typeof tabs[number];
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSave, isSaving = false }) => {
@@ -114,13 +114,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
             />
           </div>
           <div>
-            <label className="block text-xs text-vsc-text-secondary mb-1">Trust Level</label>
-            <Select value={pane.trust_level || ''}
-              onChange={v => onChange({ ...pane, trust_level: v })}
-              options={[{value:'',label:'无'},{value:'trust-all',label:'trust-all'},{value:'ask',label:'ask'},{value:'deny',label:'deny'}]}
-            />
-          </div>
-          <div>
             <label className="block text-xs text-vsc-text-secondary mb-1">Agent Duty</label>
             <textarea value={pane.agent_duty || ''}
               onChange={e => onChange({ ...pane, agent_duty: e.target.value })}
@@ -130,7 +123,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
           </div>
         </>)}
 
-        {tab === 'Config' && (<>
+        {tab === 'Network' && (<>
           <div>
             <label className="block text-xs text-vsc-text-secondary mb-1">Config (JSON)</label>
             <textarea value={pane.config || '{}'}
@@ -142,37 +135,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
               <pre className="bg-vsc-bg-secondary border border-vsc-border rounded p-2 overflow-x-auto">{`{
   "proxy": {
     "enable": true,
-    "url": "https://proxy.example.com"
+    "url": "http://w-20001:x@127.0.0.1:8003"
   }
 }`}</pre>
             </div>
           </div>
         </>)}
-
-        {tab === 'Telegram' && (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-vsc-text mb-1">Enable Telegram</label>
-              <input type="checkbox" checked={pane.tg_enable || false}
-                onChange={(e) => onChange({ ...pane, tg_enable: e.target.checked })}
-                className="w-4 h-4" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-vsc-text mb-1">Bot Token</label>
-              <input type="text" value={pane.tg_token || ''} 
-                onChange={(e) => onChange({ ...pane, tg_token: e.target.value })}
-                className="w-full bg-vsc-bg-secondary text-vsc-text text-xs px-2 py-1.5 rounded border border-vsc-border focus:border-vsc-accent focus:outline-none" 
-                placeholder="1234567890:ABCdefGHIjklMNOpqrsTUVwxyz" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-vsc-text mb-1">Chat ID</label>
-              <input type="text" value={pane.tg_chat_id || ''} 
-                onChange={(e) => onChange({ ...pane, tg_chat_id: e.target.value })}
-                className="w-full bg-vsc-bg-secondary text-vsc-text text-xs px-2 py-1.5 rounded border border-vsc-border focus:border-vsc-accent focus:outline-none" 
-                placeholder="-1001234567890" />
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="p-4 border-t border-vsc-border flex-shrink-0">

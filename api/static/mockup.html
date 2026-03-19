@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CiCy - User Landing Mockup</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0a; color: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; height: 100vh; overflow: hidden; }
+
+/* Background pattern */
+.bg {
+  position: fixed; inset: 0;
+  background: 
+    radial-gradient(circle at 30% 40%, rgba(59,130,246,0.06) 0%, transparent 50%),
+    radial-gradient(circle at 70% 60%, rgba(168,85,247,0.04) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, rgba(255,255,255,0.01) 0%, transparent 80%);
+}
+.dots {
+  position: fixed; inset: 0;
+  background-image: radial-gradient(rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Top bar */
+.topbar {
+  position: relative; z-index: 10;
+  height: 48px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 20px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  backdrop-filter: blur(20px);
+  background: rgba(10,10,10,0.8);
+}
+.topbar-left { display: flex; align-items: center; gap: 10px; }
+.topbar-logo { font-size: 20px; }
+.topbar-title { font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.8); }
+.topbar-right { display: flex; align-items: center; gap: 12px; }
+.topbar-avatar {
+  width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,0.1);
+  display: flex; align-items: center; justify-content: center; font-size: 12px; color: rgba(255,255,255,0.5);
+}
+.topbar-status {
+  font-size: 11px; color: rgba(255,255,255,0.3); padding: 3px 10px;
+  background: rgba(255,255,255,0.03); border-radius: 20px;
+}
+
+/* Desktop area */
+.desktop {
+  position: relative; z-index: 5;
+  height: calc(100vh - 48px);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 40px;
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center; margin-bottom: 60px;
+}
+.empty-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.6; }
+.empty-title { font-size: 18px; color: rgba(255,255,255,0.5); font-weight: 500; margin-bottom: 8px; }
+.empty-sub { font-size: 13px; color: rgba(255,255,255,0.2); }
+
+/* App grid (when apps exist) */
+.app-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, 80px); gap: 24px;
+  justify-content: center; margin-bottom: 60px; max-width: 600px;
+}
+.app-icon {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer;
+  transition: transform 0.15s;
+}
+.app-icon:hover { transform: scale(1.08); }
+.app-icon-box {
+  width: 56px; height: 56px; border-radius: 16px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  backdrop-filter: blur(10px);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+.app-icon-label { font-size: 11px; color: rgba(255,255,255,0.4); max-width: 72px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Command input */
+.cmd-wrap {
+  position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+  width: 90%; max-width: 560px; z-index: 20;
+}
+.cmd-box {
+  display: flex; align-items: center; gap: 12px;
+  background: rgba(20,20,20,0.9);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  padding: 14px 18px;
+  backdrop-filter: blur(20px);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+  transition: border-color 0.2s;
+}
+.cmd-box:focus-within { border-color: rgba(59,130,246,0.3); }
+.cmd-input {
+  flex: 1; background: none; border: none; outline: none;
+  color: rgba(255,255,255,0.8); font-size: 14px;
+  font-family: inherit;
+}
+.cmd-input::placeholder { color: rgba(255,255,255,0.2); }
+.cmd-send {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: rgba(59,130,246,0.15); border: none;
+  color: rgba(59,130,246,0.8); font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.2s;
+}
+.cmd-send:hover { background: rgba(59,130,246,0.25); }
+.cmd-hint { text-align: center; margin-top: 10px; font-size: 11px; color: rgba(255,255,255,0.15); }
+
+/* Thinking overlay */
+.thinking {
+  position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px; border-radius: 20px;
+  background: rgba(20,20,20,0.9); border: 1px solid rgba(255,255,255,0.06);
+  font-size: 12px; color: rgba(255,255,255,0.4);
+  z-index: 15;
+}
+.thinking-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: rgba(59,130,246,0.6);
+  animation: pulse 1.4s infinite;
+}
+.thinking-dot:nth-child(2) { animation-delay: 0.2s; }
+.thinking-dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes pulse { 0%,80%,100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1.2); } }
+
+/* Tabs for switching views */
+.view-tabs {
+  position: fixed; top: 60px; right: 20px; z-index: 20;
+  display: flex; gap: 2px; background: rgba(255,255,255,0.03); border-radius: 8px; padding: 2px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.view-tab {
+  padding: 6px 14px; border-radius: 6px; border: none; background: none;
+  color: rgba(255,255,255,0.3); font-size: 12px; cursor: pointer; transition: all 0.2s;
+}
+.view-tab.active { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.7); }
+
+/* Page labels */
+.page-label {
+  position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+  font-size: 11px; color: rgba(255,255,255,0.15); letter-spacing: 2px; text-transform: uppercase;
+  z-index: 30; pointer-events: none;
+}
+</style>
+</head>
+<body>
+
+<!-- ==================== PAGE 1: Empty State (新用户) ==================== -->
+<div id="page1" class="page">
+  <div class="bg"></div>
+  <div class="dots"></div>
+  <div class="page-label">— 新用户首次进入 —</div>
+
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="topbar-logo">✨</span>
+      <span class="topbar-title">CiCy</span>
+    </div>
+    <div class="topbar-right">
+      <span class="topbar-status">● idle</span>
+      <div class="topbar-avatar">W</div>
+    </div>
+  </div>
+
+  <div class="desktop">
+    <div class="empty-state">
+      <div class="empty-icon">✨</div>
+      <div class="empty-title">Ask your agent to build something</div>
+      <div class="empty-sub">Describe what you want, AI will create it for you</div>
+    </div>
+  </div>
+
+  <div class="cmd-wrap">
+    <div class="cmd-box">
+      <span style="font-size:18px;opacity:0.3">💬</span>
+      <input class="cmd-input" placeholder="帮我做一个能看比特币价格的工具..." readonly>
+      <button class="cmd-send">↑</button>
+    </div>
+    <div class="cmd-hint">Press Enter to send · AI will build it for you</div>
+  </div>
+</div>
+
+<!-- ==================== PAGE 2: With Apps (有应用后) ==================== -->
+<div id="page2" class="page" style="display:none">
+  <div class="bg"></div>
+  <div class="dots"></div>
+  <div class="page-label">— 用户创建了几个应用后 —</div>
+
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="topbar-logo">✨</span>
+      <span class="topbar-title">CiCy</span>
+    </div>
+    <div class="topbar-right">
+      <span class="topbar-status">● idle</span>
+      <div class="topbar-avatar">W</div>
+    </div>
+  </div>
+
+  <div class="desktop">
+    <div class="app-grid">
+      <div class="app-icon">
+        <div class="app-icon-box">📈</div>
+        <div class="app-icon-label">BTC Price</div>
+      </div>
+      <div class="app-icon">
+        <div class="app-icon-box">🎵</div>
+        <div class="app-icon-label">唱歌练习</div>
+      </div>
+      <div class="app-icon">
+        <div class="app-icon-box">📝</div>
+        <div class="app-icon-label">Todo List</div>
+      </div>
+      <div class="app-icon">
+        <div class="app-icon-box">🌤️</div>
+        <div class="app-icon-label">天气</div>
+      </div>
+      <div class="app-icon">
+        <div class="app-icon-box">🧮</div>
+        <div class="app-icon-label">计算器</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cmd-wrap">
+    <div class="cmd-box">
+      <span style="font-size:18px;opacity:0.3">💬</span>
+      <input class="cmd-input" placeholder="说点什么..." readonly>
+      <button class="cmd-send">↑</button>
+    </div>
+    <div class="cmd-hint">Press Enter to send</div>
+  </div>
+</div>
+
+<!-- ==================== PAGE 3: Thinking State (AI工作中) ==================== -->
+<div id="page3" class="page" style="display:none">
+  <div class="bg"></div>
+  <div class="dots"></div>
+  <div class="page-label">— AI 正在创建应用 —</div>
+
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="topbar-logo">✨</span>
+      <span class="topbar-title">CiCy</span>
+    </div>
+    <div class="topbar-right">
+      <span class="topbar-status" style="color:rgba(59,130,246,0.8)">● thinking</span>
+      <div class="topbar-avatar">W</div>
+    </div>
+  </div>
+
+  <div class="desktop">
+    <div class="app-grid">
+      <div class="app-icon">
+        <div class="app-icon-box">📈</div>
+        <div class="app-icon-label">BTC Price</div>
+      </div>
+      <div class="app-icon">
+        <div class="app-icon-box">🎵</div>
+        <div class="app-icon-label">唱歌练习</div>
+      </div>
+      <div class="app-icon">
+        <div class="app-icon-box" style="border-color:rgba(59,130,246,0.2);animation:pulse 2s infinite">
+          <span style="opacity:0.4">⏳</span>
+        </div>
+        <div class="app-icon-label" style="color:rgba(59,130,246,0.5)">Creating...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="thinking">
+    <div class="thinking-dot"></div>
+    <div class="thinking-dot"></div>
+    <div class="thinking-dot"></div>
+    <span>Building your app...</span>
+  </div>
+
+  <div class="cmd-wrap">
+    <div class="cmd-box" style="opacity:0.5">
+      <span style="font-size:18px;opacity:0.3">💬</span>
+      <input class="cmd-input" placeholder="帮我做一个汇率转换器" readonly disabled>
+      <button class="cmd-send" disabled style="opacity:0.3">↑</button>
+    </div>
+  </div>
+</div>
+
+<!-- View switcher -->
+<div class="view-tabs">
+  <button class="view-tab active" onclick="show(1)">空状态</button>
+  <button class="view-tab" onclick="show(2)">有应用</button>
+  <button class="view-tab" onclick="show(3)">创建中</button>
+</div>
+
+<script>
+function show(n) {
+  document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
+  document.getElementById('page' + n).style.display = 'block';
+  document.querySelectorAll('.view-tab').forEach((t, i) => t.classList.toggle('active', i === n - 1));
+}
+</script>
+</body>
+</html>

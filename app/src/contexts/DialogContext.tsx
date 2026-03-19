@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import ReactDOM from 'react-dom';
+import { useDevRegister } from '../lib/devStore';
 
 type DialogType = 'confirm' | 'createAgent' | 'addAgent' | null;
 
@@ -44,6 +45,8 @@ export const DialogProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   }, []);
 
   const value: DialogContextType = { activeDialog, dialogData, openDialog, closeDialog, confirm };
+
+  useDevRegister('Dialog', { activeDialog, hasData: !!dialogData, hasConfirm: !!confirmState });
 
   return (
     <DialogContext.Provider value={value}>

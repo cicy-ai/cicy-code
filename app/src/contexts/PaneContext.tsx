@@ -5,6 +5,7 @@ import apiService from '../services/api';
 import { TokenManager } from '../services/tokenManager';
 import { useDialog } from './DialogContext';
 import { useApp } from './AppContext';
+import { useDevRegister } from '../lib/devStore';
 
 const CurrentPaneId = decodeURIComponent(window.location.href.split("/")[4] || '');
 const STORAGE_KEY = `ttyd_app_settings_v1_${CurrentPaneId || 'default'}`;
@@ -332,6 +333,17 @@ export const PaneProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     handleRestart, handleCapturePane, handleToggleMouse, handlePanelChange,
     captureOutput, setCaptureOutput, isCapturing,
   };
+
+  useDevRegister('Pane', {
+    displayPaneId, displayPaneTitle, agentStatus, contextUsage, mouseMode, readOnly, isRestarting,
+    activeTab, agentsSubTab, previewTab, ttydWidth, leftCollapsed, rightCollapsed,
+    networkLatency, networkStatus, isCapturing, agentTabsCount: agentTabs.length,
+    visitedPanes, settings: { panelPosition: settings.panelPosition, panelSize: settings.panelSize, forwardEvents: settings.forwardEvents, showPrompt: settings.showPrompt },
+  }, {
+    readOnly: setReadOnly, activeTab: setActiveTab, mouseMode: (v: string) => setMouseMode(v as any),
+    leftCollapsed: (v: boolean) => { setLeftCollapsed(v); localStorage.setItem('leftCollapsed', String(v)); },
+    rightCollapsed: (v: boolean) => { setRightCollapsed(v); localStorage.setItem('rightCollapsed', String(v)); },
+  });
 
   return (
     <PaneContext.Provider value={value}>

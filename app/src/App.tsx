@@ -2,28 +2,43 @@ import { useState, useEffect, useCallback } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DialogProvider } from './contexts/DialogContext';
 import Workspace from './components/Workspace';
+import Desktop from './components/Desktop';
 import Login from './components/Login';
 import ProvisionScreen from './components/ProvisionScreen';
 import { TokenManager } from './services/tokenManager';
+import DevPanel from './components/dev/DevPanel';
+import apiService from './services/api';
 
-function parseHash(): string {
-  const m = window.location.hash.match(/\/agent\/([^/]+)/);
-  return m ? decodeURIComponent(m[1]).replace(/:.*$/, '') : 'w-10001';
+function parseHash(): { view: 'desktop' | 'workspace'; agentId: string } {
+  const hash = window.location.hash;
+  if (hash.startsWith('#/agent/')) {
+    const m = hash.match(/\/agent\/([^/]+)/);
+    return { view: 'workspace', agentId: m ? decodeURIComponent(m[1]).replace(/:.*$/, '') : 'w-10001' };
+  }
+  return { view: 'desktop', agentId: 'w-10001' };
 }
 
 function Main() {
-  const { token, isChecking, provisioning } = useAuth();
-  const [activeAgent, setActiveAgent] = useState(parseHash);
+  const { token, authType, isChecking, provisioning } = useAuth();
+  const [route, setRoute] = useState(parseHash);
 
   useEffect(() => {
-    const onChange = () => setActiveAgent(parseHash());
+    const onChange = () => setRoute(parseHash());
     window.addEventListener('hashchange', onChange);
     return () => window.removeEventListener('hashchange', onChange);
   }, []);
 
+  // Ensure w-10001 exists on login
+  useEffect(() => {
+    if (!token) return;
+    apiService.getPane('w-10001:main.0').catch(() => {
+      apiService.createPane({ win_name: 'w-10001', title: 'Master' }).catch(() => {});
+    });
+  }, [token]);
+
   const selectAgent = (id: string) => {
     const clean = id.replace(/:.*$/, '');
-    setActiveAgent(clean);
+    setRoute({ view: 'workspace', agentId: clean });
     window.location.hash = `#/agent/${encodeURIComponent(clean)}`;
   };
 
@@ -52,7 +67,17 @@ function Main() {
 
   if (provisioning) return <ProvisionScreen onReady={handleProvisionReady} />;
 
-  return <Workspace agentId={activeAgent} onSelectAgent={selectAgent} />;
+  // No hash → redirect to default agent
+  if (route.view !== 'workspace') {
+    window.location.hash = '#/agent/w-10001';
+    return null;
+  }
+
+  // #/agent/xxx → Workspace, default → Desktop
+  if (route.view === 'workspace') {
+    return <Workspace agentId={route.agentId} onSelectAgent={selectAgent} />;
+  }
+  return <Desktop />;
 }
 
 export default function App() {
@@ -60,6 +85,7 @@ export default function App() {
     <AuthProvider>
       <DialogProvider>
         <Main />
+        <DevPanel />
       </DialogProvider>
     </AuthProvider>
   );

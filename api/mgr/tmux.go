@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"strings"
+	"strings"f
 	"time"
 )
 
@@ -17,10 +17,10 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if gid != "" {
-		rows, err = db.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.proxy, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level
+		rows, err = db.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level
 			FROM agent_config t INNER JOIN group_windows gp ON t.pane_id=gp.win_id WHERE gp.group_id=? AND t.active=1 ORDER BY t.created_at DESC`, gid)
 	} else {
-		rows, err = db.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.proxy, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level
+		rows, err = db.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level
 			FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.active=1 ORDER BY t.created_at DESC`)
 	}
 	if err != nil {
@@ -31,17 +31,17 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 	var panes []M
 	for rows.Next() {
 		var paneID, title, workspace sql.NullString
-		var initScript, proxy sql.NullString
+		var initScript sql.NullString
 		var port sql.NullInt64
 		var active sql.NullInt64
 		var createdAt, updatedAt sql.NullTime
 		var groupID sql.NullInt64
 		var role, defaultModel, trustLevel sql.NullString
-		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &proxy, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel)
+		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel)
 		p := M{
 			"pane_id": paneID.String, "title": title.String, "ttyd_port": port.Int64,
 			"workspace": workspace.String, "init_script": initScript.String,
-			"proxy": proxy.String, "active": active.Int64,
+			"active": active.Int64,
 			"role": role.String, "default_model": defaultModel.String,
 			"trust_level": trustLevel.String,
 		}
@@ -70,11 +70,9 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 		Workspace    string  `json:"workspace"`
 		InitScript   string  `json:"init_script"`
 		Title        string  `json:"title"`
-		Proxy        string  `json:"proxy"`
 		AgentType    string  `json:"agent_type"`
 		Role         string  `json:"role"`
 		DefaultModel string  `json:"default_model"`
-		TrustLevel   string  `json:"trust_level"`
 	}
 	readBody(r, &req)
 	token := getToken(r)
@@ -114,16 +112,8 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	nodeTmux(paneID, "send-keys", "-t", paneID, "export TERM=xterm-256color", "Enter")
 
 	// Insert DB
-	proxy := req.Proxy
-	if proxy == "" {
-		mitmPort := os.Getenv("MITMPROXY_PORT")
-		if mitmPort == "" {
-			mitmPort = "8003"
-		}
-		proxy = fmt.Sprintf("http://%s:x@127.0.0.1:%s", session, mitmPort)
-	}
-	db.Exec(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, trust_level, proxy, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,NOW(),NOW())`, paneID, title, port, req.Workspace, req.InitScript, "{}", req.Role, req.DefaultModel, req.TrustLevel, proxy)
+	db.Exec(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,NOW(),NOW())`, paneID, title, port, req.Workspace, req.InitScript, "{}", req.Role, req.DefaultModel)
 
 	// Start ttyd-go instance
 	if err := startInstance(paneID, port, token); err != nil {
@@ -134,40 +124,12 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	// Wait for port
 	waitPort(port, 10*time.Second)
 
-	// Export X_PANE_ID
-	runTmux("send-keys", "-t", paneID, fmt.Sprintf("export X_PANE_ID='%s'", paneID), "Enter")
-
-	// Proxy
-	{
-		cmd := fmt.Sprintf("export http_proxy='%s' https_proxy='%s' HTTP_PROXY='%s' HTTPS_PROXY='%s' ALL_PROXY='%s'", proxy, proxy, proxy, proxy, proxy)
-		runTmux("send-keys", "-t", paneID, cmd, "Enter")
-	}
-
-	// cd workspace
-	if workspace != "" {
-		runTmux("send-keys", "-t", paneID, "cd "+wsExpanded, "Enter")
-	}
-
-	// Init script
-	if req.InitScript != "" {
-		runTmux("send-keys", "-t", paneID, "clear", "Enter")
-		time.Sleep(500 * time.Millisecond)
-		for _, line := range strings.Split(req.InitScript, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			if strings.HasPrefix(line, "sleep:") {
-				// parse sleep duration
-				continue
-			}
-			if strings.HasPrefix(line, "key:") {
-				runTmux("send-keys", "-t", paneID, line[4:])
-			} else {
-				runTmux("send-keys", "-t", paneID, line, "Enter")
-			}
-		}
-	}
+	initPaneEnv(paneEnvOpts{
+		paneID:     paneID,
+		configJSON: "{}",
+		workspace:  wsExpanded,
+		initScript: req.InitScript,
+	})
 
 	J(w, M{
 		"success": true, "session": session, "window": "main",
@@ -203,17 +165,17 @@ func handlePaneByID(w http.ResponseWriter, r *http.Request) {
 
 func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	paneID := normPaneID(id)
-	var title, workspace, initScript, proxy, agentType, agentDuty, config, commonPrompt, ttydPreview sql.NullString
+	var title, workspace, initScript, agentType, agentDuty, config, commonPrompt, ttydPreview sql.NullString
 	var port sql.NullInt64
 	var active sql.NullInt64
 	var tgEnable sql.NullBool
 	var tgToken, tgChatID sql.NullString
 	var groupID sql.NullInt64
 	var role, defaultModel, trustLevel sql.NullString
-	err := db.QueryRow(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.proxy,
+	err := db.QueryRow(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script,
 		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.agent_duty, t.config, t.common_prompt, t.ttyd_preview, gp.group_id, t.role, t.default_model, t.trust_level
 		FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.pane_id=?`, paneID).Scan(
-		&paneID, &title, &port, &workspace, &initScript, &proxy,
+		&paneID, &title, &port, &workspace, &initScript,
 		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &agentDuty, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel)
 	if err != nil {
 		httpErr(w, 404, "Pane "+id+" not found")
@@ -221,7 +183,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	resp := M{
 		"pane_id": shortPaneID(paneID), "title": title.String, "ttyd_port": port.Int64,
-		"workspace": workspace.String, "init_script": initScript.String, "proxy": proxy.String,
+		"workspace": workspace.String, "init_script": initScript.String,
 		"tg_token": tgToken.String, "tg_chat_id": tgChatID.String, "tg_enable": tgEnable.Bool,
 		"active": active.Int64, "agent_type": agentType.String, "agent_duty": agentDuty.String,
 		"config": config.String, "common_prompt": commonPrompt.String, "ttyd_preview": ttydPreview.String,
@@ -280,6 +242,7 @@ func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 		session := strings.Split(paneID, ":")[0]
 		nodeTmux(paneID, "kill-session", "-t", session)
 	}()
+	db.Exec("DELETE FROM group_windows WHERE win_id=?", paneID)
 	db.Exec("DELETE FROM agent_config WHERE pane_id=?", paneID)
 	J(w, M{"success": true, "pane_id": shortPaneID(paneID), "message": "Pane deleted"})
 }
@@ -331,36 +294,66 @@ func restartPaneCore(paneID, token string) error {
 	waitPort(p, 10*time.Second)
 
 	// Re-run init
-	runTmux("send-keys", "-t", paneID, fmt.Sprintf("export X_PANE_ID='%s'", paneID), "Enter")
-	applyProxyFromConfig(paneID, config.String)
-	if ws != "" {
-		runTmux("send-keys", "-t", paneID, "cd "+wsExpanded, "Enter")
+	initPaneEnv(paneEnvOpts{
+		paneID:     paneID,
+		configJSON: config.String,
+		workspace:  wsExpanded,
+		initScript: initScript.String,
+		agentType:  agentType.String,
+	})
+	db.Exec("UPDATE agent_config SET updated_at=NOW() WHERE pane_id=?", paneID)
+	return nil
+}
+
+// initPaneEnv sets up env vars, proxy, workspace, and runs init script in a pane.
+type paneEnvOpts struct {
+	paneID     string
+	configJSON string // JSON config (uses applyProxyFromConfig)
+	workspace  string // expanded workspace path
+	initScript string
+	agentType  string
+}
+
+func initPaneEnv(opts paneEnvOpts) {
+	pid := opts.paneID
+	shortID := strings.Split(pid, ":")[0]
+
+	// Export agent IDs
+	runTmux("send-keys", "-t", pid, fmt.Sprintf("export X_AGENT_ID='%s'", pid), "Enter")
+	runTmux("send-keys", "-t", pid, fmt.Sprintf("export X_AGENT_SHORT_ID='%s'", shortID), "Enter")
+
+	// Proxy (from config JSON)
+	applyProxyFromConfig(pid, opts.configJSON)
+
+	// cd workspace
+	if opts.workspace != "" {
+		runTmux("send-keys", "-t", pid, "cd "+opts.workspace, "Enter")
 	}
-	if initScript.String != "" {
-		runTmux("send-keys", "-t", paneID, "clear", "Enter")
+
+	// Init script
+	if opts.initScript != "" {
+		runTmux("send-keys", "-t", pid, "clear", "Enter")
 		time.Sleep(500 * time.Millisecond)
-		for _, line := range strings.Split(initScript.String, "\n") {
+		for _, line := range strings.Split(opts.initScript, "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" {
 				continue
 			}
+			if strings.HasPrefix(line, "sleep:") {
+				continue
+			}
 			if strings.HasPrefix(line, "key:") {
-				runTmux("send-keys", "-t", paneID, line[4:])
+				runTmux("send-keys", "-t", pid, line[4:])
 			} else {
-				runTmux("send-keys", "-t", paneID, line, "Enter")
+				runTmux("send-keys", "-t", pid, line, "Enter")
 			}
 		}
 	}
-	if agentType.String != "" {
-		runTmux("send-keys", "-t", paneID, agentType.String, "Enter")
-		// Auto-apply trust level after agent starts
-		if trustLevel.String != "" {
-			time.Sleep(3 * time.Second)
-			runTmux("send-keys", "-t", paneID, "/tools "+trustLevel.String, "Enter")
-		}
+
+	// Agent type
+	if opts.agentType != "" {
+		runTmux("send-keys", "-t", pid, opts.agentType, "Enter")
 	}
-	db.Exec("UPDATE agent_config SET updated_at=NOW() WHERE pane_id=?", paneID)
-	return nil
 }
 
 // applyProxyFromConfig parses config JSON and exports proxy env if enabled.
@@ -383,7 +376,7 @@ func applyProxyFromConfig(paneID, configJSON string) {
 	if cfg.Proxy.URL != "" && cfg.Proxy.URL != "https://proxy.example.com" {
 		proxyURL = cfg.Proxy.URL
 	}
-	cmd := fmt.Sprintf("export HTTPS_PROXY='%s' && export https_proxy='%s' && export HTTP_PROXY='%s' && export http_proxy='%s' && export no_proxy=localhost,127.0.0.1", proxyURL, proxyURL, proxyURL, proxyURL)
+	cmd := fmt.Sprintf("export HTTPS_PROXY='%s' && export https_proxy='%s' && export HTTP_PROXY='%s' && export http_proxy='%s' && export ALL_PROXY='%s' && export no_proxy=localhost,127.0.0.1", proxyURL, proxyURL, proxyURL, proxyURL, proxyURL)
 	runTmux("send-keys", "-t", paneID, cmd, "Enter")
 }
 

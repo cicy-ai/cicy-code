@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, ReactNode } from 'react';
 import { GripHorizontal, X } from 'lucide-react';
 import { Position, Size } from '../types';
+import { lockPointer, unlockPointer } from '../lib/pointerLock';
 
 interface FloatingPanelProps {
   children: ReactNode;
@@ -77,6 +78,7 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
     setIsDragging(true);
     onDraggingChange?.(true);
     onInteractionStart();
+    lockPointer();
     const clientPos = getClientPos(e);
     dragStartPos.current = clientPos;
     startDims.current.pos = { ...position };
@@ -89,6 +91,7 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
 
     setIsResizing(true);
     onInteractionStart();
+    lockPointer();
     const clientPos = getClientPos(e);
     resizeStartPos.current = clientPos;
     startDims.current.size = { ...size };
@@ -138,6 +141,7 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
         setIsResizing(false);
         onDraggingChange?.(false);
         onInteractionEnd();
+        unlockPointer();
       }
     };
 

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { useDevRegister } from '../lib/devStore';
 import { TokenManager } from '../services/tokenManager';
 import { PaneManager } from '../services/paneManager';
 import apiService from '../services/api';
@@ -147,6 +148,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return () => { clearInterval(id); window.removeEventListener('refresh-panes', onRefresh); document.removeEventListener('visibilitychange', onVisible); };
   }, [api]);
 
+  // Auto-load paneDetail when currentPaneId changes
+  useEffect(() => {
+    if (!api || !currentPaneId) { setPaneDetail(null); return; }
+    api.getPane(currentPaneId).then(({ data }) => setPaneDetail(data)).catch(() => setPaneDetail(null));
+  }, [api, currentPaneId]);
+
   const login = (newToken: string) => {
     TokenManager.saveToken(newToken);
     setToken(newToken);
@@ -275,6 +282,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       allPanes: allPanes.map(p => ({ pane_id: p.pane_id, title: p.title }))
     });
   }, [currentPaneId, allPanes]);
+
+  useDevRegister('App', {
+    currentPaneId, allPanesCount: allPanes.length, loading, error,
+    paneDetail,
+    agents: agents.map(a => ({ id: a.pane_id, title: a.title, status: a.status })),
+    agentsCount: agents.length,
+    allPanes: allPanes.map(p => ({ pane_id: p.pane_id, title: p.title, status: p.status })),
+    globalVar,
+  }, { currentPaneId: (v: string) => selectPane(v), error: setError });
 
   return (
     <AppContext.Provider value={value}>

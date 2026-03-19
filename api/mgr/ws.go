@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -18,36 +20,72 @@ import (
 
 const gottyInput = '0' // gotty protocol: client→server input message type
 
-// ttyd HTML inject: loaded from resources/ttyd-inject.html, auto-reload on change
+// ttyd COS version: read from versions.json at startup
+var ttydCosVer = "v1"
+
+func init() {
+	data, err := os.ReadFile("../versions.json")
+	if err == nil {
+		var m map[string]string
+		if json.Unmarshal(data, &m) == nil && m["ttyd"] != "" {
+			ttydCosVer = "v" + m["ttyd"]
+		}
+	}
+}
+
+// ttyd HTML inject: loaded from resources/ttyd-inject*.html, auto-reload on change
 var (
 	ttydInject     string
 	ttydInjectMu   sync.RWMutex
-	ttydInjectPath = "resources/ttyd-inject.html"
+	ttydInjectDir  = "resources"
 	ttydInjectMod  time.Time
 )
 
 func loadTtydInject() string {
-	info, err := os.Stat(ttydInjectPath)
+	entries, err := os.ReadDir(ttydInjectDir)
 	if err != nil {
 		return ""
+	}
+	// collect matching files and latest mod time
+	var files []string
+	var latest time.Time
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "ttyd-inject") || !strings.HasSuffix(e.Name(), ".html") {
+			continue
+		}
+		fp := ttydInjectDir + "/" + e.Name()
+		info, err := os.Stat(fp)
+		if err != nil {
+			continue
+		}
+		files = append(files, fp)
+		if info.ModTime().After(latest) {
+			latest = info.ModTime()
+		}
 	}
 	ttydInjectMu.RLock()
 	cached := ttydInject
 	mod := ttydInjectMod
 	ttydInjectMu.RUnlock()
-	if cached != "" && info.ModTime().Equal(mod) {
+	if cached != "" && !latest.After(mod) {
 		return cached
 	}
-	data, err := os.ReadFile(ttydInjectPath)
-	if err != nil {
-		return cached
+	sort.Strings(files)
+	var buf strings.Builder
+	for _, fp := range files {
+		data, err := os.ReadFile(fp)
+		if err != nil {
+			continue
+		}
+		buf.Write(data)
+		buf.WriteByte('\n')
 	}
-	s := string(data)
+	s := buf.String()
 	ttydInjectMu.Lock()
 	ttydInject = s
-	ttydInjectMod = info.ModTime()
+	ttydInjectMod = latest
 	ttydInjectMu.Unlock()
-	log.Printf("[ttyd] reloaded inject from %s", ttydInjectPath)
+	log.Printf("[ttyd] reloaded inject: %d files, %d bytes", len(files), len(s))
 	return s
 }
 
@@ -183,12 +221,16 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 	if subPath == "/" && strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
 		body, _ := io.ReadAll(resp.Body)
 		html := string(body)
+		// WS patch must run in <head> before gotty-bundle.js creates WebSocket
+		wsPatch := `<script>var __cicyWs=null,__origWsSend=WebSocket.prototype.send;WebSocket.prototype.send=function(d){if(typeof d==='string'&&d.length>0&&'01234'.indexOf(d[0])>=0)__cicyWs=this;return __origWsSend.call(this,d)};</script>`
+		html = strings.Replace(html, "</head>", wsPatch+"</head>", 1)
+		// UI + styles inject in </body> so DOM is ready
 		if inj := loadTtydInject(); inj != "" {
 			html = strings.Replace(html, "</body>", inj+"</body>", 1)
 		}
 		html = strings.Replace(html, "<html>", `<html style="overflow:hidden">`, 1)
-		cosBase := "https://cicy-1372193042.cos.ap-shanghai.myqcloud.com/static"
-		html = strings.Replace(html, `"./js/gotty-bundle.js"`, fmt.Sprintf(`"%s/gotty-bundle.js?v=%d"`, cosBase, time.Now().Unix()), 1)
+		cosBase := "https://cicy-1372193042.cos.ap-shanghai.myqcloud.com/ttyd/" + ttydCosVer
+		html = strings.Replace(html, `"./js/gotty-bundle.js"`, fmt.Sprintf(`"%s/gotty-bundle.js"`, cosBase), 1)
 		html = strings.Replace(html, `"./css/index.css"`, fmt.Sprintf(`"%s/css/index.css"`, cosBase), 1)
 		html = strings.Replace(html, `"./css/xterm.css"`, fmt.Sprintf(`"%s/css/xterm.css"`, cosBase), 1)
 		html = strings.Replace(html, `"./css/xterm_customize.css"`, fmt.Sprintf(`"%s/css/xterm_customize.css"`, cosBase), 1)
