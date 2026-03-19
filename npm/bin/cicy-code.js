@@ -68,7 +68,8 @@ async function main() {
 
   // Install globally if not already
   try {
-    execSync('which cicy-code', { stdio: 'ignore' });
+    const globalBin = execSync('npm prefix -g', { encoding: 'utf8' }).trim() + '/bin/cicy-code';
+    if (!fs.existsSync(globalBin)) throw new Error('not installed');
   } catch {
     console.log('  Installing cicy-code globally...');
     try {

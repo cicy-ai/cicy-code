@@ -2,7 +2,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = '0.1.2';
+const VERSION = '0.1.3';
 const GH_URL = `https://github.com/cicy-ai/cicy-code/releases/download/v${VERSION}`;
 const CN_URL = `https://gh-proxy.com/https://github.com/cicy-ai/cicy-code/releases/download/v${VERSION}`;
 
