@@ -37,8 +37,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const fullPaneId = `${paneId}:main.0`;
 
   const mainTab = 'cli' as const;
-  const [leftPanel, setLeftPanel] = useState<'code' | 'team' | null>(() => cache.get('ws_leftPanel', null));
-  const [isAgentDrawerOpen, setIsAgentDrawerOpen] = useState(false);
+  const [leftPanel, setLeftPanel] = useState<'code' | 'team' | 'agents' | null>(() => cache.get('ws_leftPanel', null));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [panelSizes, setPanelSizes] = useState<Record<string, number>>(() => cache.get('ws_panelSizes', { 'left-panel': 50, 'right-panel': 50 }));
   const [toast, setToast] = useState<string | null>(null);
@@ -162,7 +161,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       apiService.updatePane(fullPaneId, { title: v }).catch(() => {});
     }
   };
-  const toggleLeft = (p: 'code' | 'team') => { setIsAgentDrawerOpen(false); setLeftPanel(prev => prev === p ? null : p); };
+  const toggleLeft = (p: 'code' | 'team' | 'agents') => { setLeftPanel(prev => prev === p ? null : p); };
 
   useEffect(() => { if (editingTitle && titleRef.current) { titleRef.current.focus(); titleRef.current.select(); } }, [editingTitle]);
 
@@ -231,12 +230,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {/* Activity Bar */}
       <div data-id="activity-bar" className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
-          <SideBtn dataId="btn-agents" active={isAgentDrawerOpen} icon={<LayoutList className="w-5 h-5" />} title="Agents" onClick={() => setIsAgentDrawerOpen(!isAgentDrawerOpen)} />
+          <SideBtn dataId="btn-agents" active={leftPanel === 'agents'} icon={<LayoutList className="w-5 h-5" />} title="Agents" onClick={() => toggleLeft('agents')} />
           <SideBtn dataId="btn-code" active={leftPanel === 'code'} icon={<Code2 className="w-5 h-5" />} title="Code Server" onClick={() => toggleLeft('code')} />
           <SideBtn dataId="btn-team" active={leftPanel === 'team'} icon={<Users className="w-5 h-5" />} title="Team" onClick={() => toggleLeft('team')} />
         </div>
         <div data-id="activity-bar-bottom" className="flex flex-col gap-4 w-full items-center">
-          <SideBtn dataId="btn-settings" active={settingsOpen} icon={<Menu className="w-5 h-5" />} title="Menu" onClick={() => { setIsAgentDrawerOpen(false); setSettingsOpen(true); }} />
+          <SideBtn dataId="btn-settings" active={settingsOpen} icon={<Menu className="w-5 h-5" />} title="Menu" onClick={() => { setSettingsOpen(true); }} />
         </div>
       </div>
 
@@ -247,7 +246,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <Group id="main-layout" orientation="horizontal" groupRef={groupRef} defaultLayout={leftPanel ? panelSizes : { 'left-panel': 0, 'right-panel': 100 }} onLayoutChanged={onPanelLayout}>
             <Panel id="left-panel" defaultSize={leftPanel ? 50 : 0} minSize={0}>
               <div data-id="left-panel-wrap" className="h-full flex flex-col bg-[#0A0A0A] border-r border-[var(--vsc-border)]" style={{ display: leftPanel ? 'flex' : 'none' }}>
-                <div data-id="left-panel-header" className="h-8 border-b border-[var(--vsc-border)] flex items-center px-2 bg-[#0e0e0e] shrink-0 gap-1">
+                <div data-id="left-panel-header" className="h-12 border-b border-[var(--vsc-border)] flex items-center px-2 bg-[#0e0e0e] shrink-0 gap-1">
                   {leftPanel === 'code' ? <>
                     <button onClick={handleCodeHome} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title={agentDetail?.workspace || `~/workers/${paneId}`}><Home className="w-3.5 h-3.5" /></button>
                     <div className="relative">
@@ -263,9 +262,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     <div className="flex-1 min-w-0">
                       <span className="text-[10px] font-mono text-zinc-600 truncate block">{codeFolder.replace(config.hostHome, '~')}</span>
                     </div>
+                  </> : leftPanel === 'agents' ? <>
+                    <LayoutList className="w-3.5 h-3.5 text-zinc-600" />
+                    <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">Agents</span>
                   </> : <>
                     <Users className="w-3.5 h-3.5 text-zinc-600" />
-                    <span className="text-xs font-medium text-zinc-500 flex-1">Team</span>
+                    <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">Team</span>
                   </>}
                   <button data-id="left-panel-close" onClick={() => setLeftPanel(null)} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"><X className="w-3.5 h-3.5" /></button>
                 </div>
@@ -275,6 +277,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   </div>
                   <div className="absolute inset-0" style={{ display: leftPanel === 'team' ? 'block' : 'none' }}>
                     <TeamPanel paneId={paneId} token={token!} />
+                  </div>
+                  <div className="absolute inset-0 overflow-auto" style={{ display: leftPanel === 'agents' ? 'block' : 'none' }}>
+                    <AgentDrawer agents={agents} paneId={paneId} onClose={() => setLeftPanel(null)}
+                      onSelectAgent={onSelectAgent} onAgentsChange={setAgents} />
                   </div>
                 </div>
               </div>
@@ -321,10 +327,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       )}
 
       {/* Agent Drawer */}
-      {isAgentDrawerOpen && (
-        <AgentDrawer agents={agents} paneId={paneId} onClose={() => setIsAgentDrawerOpen(false)}
-          onSelectAgent={onSelectAgent} onAgentsChange={setAgents} />
-      )}
 
       {settingsOpen && <div data-id="settings-overlay"><SettingsFloat paneId={paneId} fullPaneId={fullPaneId} agentDetail={agentDetail} onAgentDetailChange={setAgentDetail} onClose={() => setSettingsOpen(false)} /></div>}
       {toast && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 bg-zinc-800 text-white text-sm rounded-lg shadow-lg">{toast}</div>}
@@ -409,20 +411,9 @@ function AgentDrawer({ agents, paneId, onClose, onSelectAgent, onAgentsChange }:
   const sorted = [...pinnedAgents, ...unpinnedAgents];
 
   return (
-    <div data-id="agent-drawer-overlay" className="absolute inset-0 z-40 flex justify-start">
-      <div data-id="agent-drawer-backdrop" className="absolute inset-0" onClick={onClose} />
-      <div data-id="agent-drawer" className="relative w-80 max-w-[85vw] h-full bg-[#0e0e0e] border-r border-[var(--vsc-border)] flex flex-col shadow-2xl animate-slide-in-left ml-14">
-        <div data-id="agent-drawer-header" className="p-4 border-b border-[var(--vsc-border)] flex items-center justify-between">
-          <div className="flex items-center gap-2"><Brain className="w-5 h-5 text-blue-500/70" /><span className="font-medium text-zinc-300">Agents</span></div>
-          <div className="flex items-center gap-1">
-            <button data-id="agent-add" onClick={handleAdd} disabled={adding}
-              className="p-1.5 text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.04] rounded-md cursor-pointer disabled:opacity-30"
-              title="Add Agent"><Plus className="w-4 h-4" /></button>
-            <button data-id="agent-drawer-close" onClick={onClose} className="p-1.5 text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.04] rounded-md cursor-pointer"><X className="w-4 h-4" /></button>
-          </div>
-        </div>
-        <div data-id="agent-drawer-body" className="p-4 flex-1 overflow-y-auto">
-          <div data-id="agent-search" className="mb-4 relative">
+    <div data-id="agent-drawer" className="h-full flex flex-col">
+        <div data-id="agent-drawer-body" className="p-3 flex-1 overflow-y-auto">
+          <div data-id="agent-search" className="mb-3 relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
             <input type="text" placeholder="Search id or title..." value={search} onChange={e => setSearch(e.target.value)}
               className="w-full bg-white/[0.02] border border-[var(--vsc-border)] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-white/[0.08] placeholder:text-zinc-700 text-zinc-400" />
@@ -476,7 +467,6 @@ function AgentDrawer({ agents, paneId, onClose, onSelectAgent, onAgentsChange }:
             })}
           </div>
         </div>
-      </div>
     </div>
   );
 }
