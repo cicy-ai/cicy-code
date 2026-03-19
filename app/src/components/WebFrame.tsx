@@ -1,4 +1,4 @@
-import React, { forwardRef, useState, useRef, useEffect } from 'react';
+import React, { forwardRef, useState, useRef, useEffect, useMemo } from 'react';
 import { Loader2 } from 'lucide-react';
 import { usePointerLock } from '../lib/pointerLock';
 
@@ -66,6 +66,8 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
     const webviewRef = useRef<HTMLElement>(null);
     const useWebview = isElectron && codeServer;
     const pointerLocked = usePointerLock();
+    // Freeze initial src so React doesn't re-set webview src on re-render
+    const initialSrc = useMemo(() => src, []);
 
     const handleLoad = () => {
       setIsLoading(false);
@@ -78,36 +80,45 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
       if (!wv) return;
 
       const onDomReady = () => {
+        clearTimeout(fallback);
         setIsLoading(false);
         onLoad?.();
         if (codeServer) {
           (wv as any).insertCSS?.('.action-item.agent-status-container{display:none!important}.panel .terminal-wrapper,.panel .terminals-list{display:none!important}');
-          (wv as any).executeJavaScript?.(`
-            setTimeout(function(){
-              setInterval(function(){
-                var btn=document.querySelector(".codicon-auxiliarybar-right-layout-icon");
-                if(btn)btn.click();
-              },1000);
-            },3000);
-          `);
         }
       };
+      const onConsole = (e: any) => {
+        const msg = e.message ?? '';
+        console.log(`[webview:${title || 'untitled'}]`, msg);
+      };
+      // Fallback: hide spinner after 8s if dom-ready never fires
+      const fallback = setTimeout(() => setIsLoading(false), 8000);
+
       wv.addEventListener('dom-ready', onDomReady);
+      wv.addEventListener('console-message', onConsole);
+      // Suppress ERR_ABORTED from redirects
+      wv.addEventListener('did-fail-load', (e: any) => {
+        if (e.errorCode === -3) return; // ERR_ABORTED is normal during redirects
+        console.warn(`[webview:${title}] load failed:`, e.errorCode, e.errorDescription);
+      });
       const unregister = registerWebview(wv);
       return () => {
+        clearTimeout(fallback);
         wv.removeEventListener('dom-ready', onDomReady);
+        wv.removeEventListener('console-message', onConsole);
         unregister();
       };
     }, [useWebview, onLoad]);
 
-    // Update webview src when it changes
+    // Navigate on src change (initial load handled by webview src attribute)
+    const prevSrc = useRef(src);
     useEffect(() => {
-      if (!useWebview) return;
+      if (!useWebview || src === prevSrc.current) return;
+      prevSrc.current = src;
       const wv = webviewRef.current as any;
-      if (!wv || !src) return;
-      if (wv.src !== src) {
-        wv.src = src;
-      }
+      if (!wv) return;
+      setIsLoading(true);
+      try { wv.loadURL(src); } catch { wv.src = src; }
     }, [src, useWebview]);
 
     if (useWebview) {
@@ -120,7 +131,7 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
           )}
           <webview
             ref={webviewRef as any}
-            src={src}
+            src={initialSrc}
             className={className}
             style={style}
             allowpopups={"" as any}

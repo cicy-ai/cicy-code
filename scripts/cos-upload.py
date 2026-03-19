@@ -12,12 +12,12 @@ conf = json.load(open(os.path.expanduser('~/global.json')))['tencent']
 SID, SKEY = conf['secret_id'], conf['secret_key']
 BUCKET, REGION = conf['bucket'], conf['region']
 HOST = f"{BUCKET}.cos.{REGION}.myqcloud.com"
-versions = json.load(open(os.path.join(ROOT, 'versions.json')))
+versions = json.load(open(os.path.join(ROOT, '..', 'versions.json')))
 
 TARGETS = {
-    'app':     {'src': os.path.join(ROOT, 'app/worker/public/assets'), 'prefix': 'app',  'key': 'app',     'flat': True},
+    'app':     {'src': os.path.join(ROOT, '../app-worker/public/assets'), 'prefix': 'app',  'key': 'app',     'flat': True},
     'ttyd':    {'src': os.path.join(ROOT, 'api/static'),               'prefix': 'ttyd', 'key': 'ttyd',    'flat': False},
-    'landing': {'src': os.path.expanduser('~/projects/cicy-web/assets'), 'prefix': 'landing', 'key': 'landing', 'flat': True},
+    'landing': {'src': os.path.expanduser('~/projects/cicy-landing/public/assets'), 'prefix': 'landing', 'key': 'landing', 'flat': True},
 }
 
 def sign(method, path):

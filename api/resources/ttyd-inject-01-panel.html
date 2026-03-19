@@ -228,8 +228,8 @@
   }
   var cached = LS.get(posKey, null);
   requestAnimationFrame(function() {
-    if (cached) applyPos(cached.x, cached.y);
-    else applyPos(12, window.innerHeight - panel.getBoundingClientRect().height - 12);
+    if (cached) { panel.style.left = cached.x + 'px'; panel.style.top = cached.y + 'px'; }
+    else { requestAnimationFrame(function() { applyPos(12, window.innerHeight - panel.getBoundingClientRect().height - 12); }); }
   });
   window.addEventListener('resize', function() { var r = panel.getBoundingClientRect(); applyPos(r.left, r.top, false); });
 
