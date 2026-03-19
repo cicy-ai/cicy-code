@@ -264,7 +264,7 @@ func handleCreateApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appID := fmt.Sprintf("%d", time.Now().UnixNano())
-	_, err := db.Exec("INSERT INTO user_apps (id, user_id, name, icon, html) VALUES (?,?,?,?,?)",
+	_, err := store.Exec("INSERT INTO user_apps (id, user_id, name, icon, html) VALUES (?,?,?,?,?)",
 		appID, uid, name, icon, html)
 	if err != nil {
 		httpErr(w, 500, "save error: "+err.Error())
@@ -315,7 +315,7 @@ func handleListApps(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 401, "login required")
 		return
 	}
-	rows, err := db.Query("SELECT id, name, icon, created_at FROM user_apps WHERE user_id=? ORDER BY created_at DESC", uid)
+	rows, err := store.Query("SELECT id, name, icon, created_at FROM user_apps WHERE user_id=? ORDER BY created_at DESC", uid)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
@@ -347,7 +347,7 @@ func handleServeApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var html string
-	err := db.QueryRow("SELECT html FROM user_apps WHERE id=?", id).Scan(&html)
+	err := store.QueryRow("SELECT html FROM user_apps WHERE id=?", id).Scan(&html)
 	if err != nil {
 		httpErr(w, 404, "app not found")
 		return

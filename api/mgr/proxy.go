@@ -70,13 +70,6 @@ func injectCodeServerJS(resp *http.Response) error {
 	return nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func handleCodeServer(w http.ResponseWriter, r *http.Request) {
 	r.URL.Path = r.URL.Path[len("/code"):]
 	if r.URL.Path == "" {

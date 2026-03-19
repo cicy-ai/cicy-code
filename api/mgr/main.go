@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/websocket"
 
 	"ttyd-go/backend/localcommand"
@@ -21,40 +19,13 @@ import (
 )
 
 var (
-	db       *sql.DB
 	upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 )
 
 func main() {
-	dsn := os.Getenv("MYSQL_DSN")
-	if dsn == "" {
-		dsn = "root:cicy-code@tcp(localhost:3306)/cicy_code"
-	}
-	if !strings.Contains(dsn, "parseTime") {
-		if strings.Contains(dsn, "?") {
-			dsn += "&parseTime=true"
-		} else {
-			dsn += "?parseTime=true"
-		}
-	}
-	var err error
-	db, err = sql.Open("mysql", dsn)
-	if err != nil {
-		log.Fatal(err)
-	}
-	db.SetMaxOpenConns(20)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
-	defer db.Close()
-
-	// SaaS users table
-	db.Exec(`CREATE TABLE IF NOT EXISTS saas_users (
-		id VARCHAR(36) PRIMARY KEY,
-		email VARCHAR(255) UNIQUE NOT NULL,
-		plan VARCHAR(20) DEFAULT 'free',
-		backend_url VARCHAR(255) DEFAULT '',
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	)`)
+	initDB()
+	store.Migrate()
+	defer store.Close()
 
 	// Health
 	http.HandleFunc("/", handleRoot)
@@ -229,7 +200,7 @@ func main() {
 			shortPane := shortPaneID(paneID)
 
 			// Find master panes that have this worker bound
-			rows, err := db.Query(`SELECT pa.pane_id FROM pane_agents pa WHERE pa.agent_name=? AND pa.status='active'`, shortPane)
+			rows, err := store.Query(`SELECT pa.pane_id FROM pane_agents pa WHERE pa.agent_name=? AND pa.status='active'`, shortPane)
 			if err != nil {
 				return
 			}

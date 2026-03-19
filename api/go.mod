@@ -18,6 +18,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-sql-driver/mysql v1.6.0 // indirect
 	github.com/hashicorp/go-multierror v0.0.0-20150608033521-56912fb08d85 // indirect
+	github.com/mattn/go-sqlite3 v1.14.37 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	golang.org/x/sys v0.13.0 // indirect
 )

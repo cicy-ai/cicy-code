@@ -186,13 +186,13 @@ func handleChatHistory(w http.ResponseWriter, r *http.Request) {
 	agentType := ""
 	// Try to get from DB first
 	var at sql.NullString
-	db.QueryRow("SELECT agent_type FROM agent_config WHERE pane_id=?", pane).Scan(&at)
+	store.QueryRow("SELECT agent_type FROM agent_config WHERE pane_id=?", pane).Scan(&at)
 	if at.Valid && at.String != "" {
 		agentType = at.String
 	} else {
 		// Fallback: extract from latest request
 		var data []byte
-		err := db.QueryRow(`SELECT data FROM http_log WHERE pane_id=? AND url LIKE '%q.us-east-1%' AND data LIKE '%GenerateAssistantResponse%' ORDER BY id DESC LIMIT 1`, pane).Scan(&data)
+		err := store.QueryRow(`SELECT data FROM http_log WHERE pane_id=? AND url LIKE '%q.us-east-1%' AND data LIKE '%GenerateAssistantResponse%' ORDER BY id DESC LIMIT 1`, pane).Scan(&data)
 		if err == nil {
 			var full map[string]interface{}
 			if json.Unmarshal(data, &full) == nil {
@@ -219,10 +219,10 @@ func handleChatHistory(w http.ResponseWriter, r *http.Request) {
 
 func buildChatTurns(pane string) []chatTurn {
 	// Step 1: get IDs only (avoid loading huge data column in filter query)
-	idRows, err := db.Query(`SELECT id FROM http_log
-		WHERE pane_id=? AND url LIKE '%q.us-east-1%'
-		AND CAST(data AS CHAR) LIKE '%GenerateAssistantResponse%'
-		ORDER BY id DESC LIMIT 50`, pane)
+	idRows, err := store.Query(fmt.Sprintf(`SELECT id FROM http_log
+		WHERE pane_id=? AND url LIKE '%%q.us-east-1%%'
+		AND %s LIKE '%%GenerateAssistantResponse%%'
+		ORDER BY id DESC LIMIT 50`, store.CastText("data")), pane)
 	if err != nil {
 		return nil
 	}
@@ -243,7 +243,7 @@ func buildChatTurns(pane string) []chatTurn {
 		placeholders[i] = "?"
 		args[i] = id
 	}
-	rows, err := db.Query(`SELECT id, req_kb, res_kb, ts, data FROM http_log
+	rows, err := store.Query(`SELECT id, req_kb, res_kb, ts, data FROM http_log
 		WHERE id IN (`+strings.Join(placeholders, ",")+`)
 		ORDER BY id DESC`, args...)
 	if err != nil {
@@ -418,7 +418,7 @@ func handleChatStream(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-time.After(2 * time.Second):
 			var count int
-			db.QueryRow(`SELECT COUNT(*) FROM http_log WHERE pane_id=? AND url LIKE '%q.us-east-1%'`, pane).Scan(&count)
+			store.QueryRow(`SELECT COUNT(*) FROM http_log WHERE pane_id=? AND url LIKE '%q.us-east-1%'`, pane).Scan(&count)
 			if count != lastCount {
 				lastCount = count
 				resp := buildChatTurns(pane)

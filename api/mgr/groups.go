@@ -9,7 +9,7 @@ import (
 func handleGroups(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		rows, err := db.Query("SELECT id, name, description, created_at, updated_at FROM agent_groups ORDER BY id")
+		rows, err := store.Query("SELECT id, name, description, created_at, updated_at FROM agent_groups ORDER BY id")
 		if err != nil {
 			httpErr(w, 500, err.Error())
 			return
@@ -29,7 +29,7 @@ func handleGroups(w http.ResponseWriter, r *http.Request) {
 				g["updated_at"] = updatedAt.Time.Format("2006-01-02T15:04:05")
 			}
 			// Get pane_ids
-			wrows, _ := db.Query("SELECT win_id FROM group_windows WHERE group_id=?", id)
+			wrows, _ := store.Query("SELECT win_id FROM group_windows WHERE group_id=?", id)
 			var pids []string
 			if wrows != nil {
 				for wrows.Next() {
@@ -55,7 +55,7 @@ func handleGroups(w http.ResponseWriter, r *http.Request) {
 		readBody(r, &req)
 		name, _ := req["name"].(string)
 		desc, _ := req["description"].(string)
-		res, err := db.Exec("INSERT INTO agent_groups (name, description) VALUES (?,?)", name, desc)
+		res, err := store.Exec("INSERT INTO agent_groups (name, description) VALUES (?,?)", name, desc)
 		if err != nil {
 			httpErr(w, 500, err.Error())
 			return
@@ -90,7 +90,7 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 	case "GET":
 		var name, desc string
 		var createdAt, updatedAt sql.NullTime
-		err := db.QueryRow("SELECT name, description, created_at, updated_at FROM agent_groups WHERE id=?", groupID).Scan(&name, &desc, &createdAt, &updatedAt)
+		err := store.QueryRow("SELECT name, description, created_at, updated_at FROM agent_groups WHERE id=?", groupID).Scan(&name, &desc, &createdAt, &updatedAt)
 		if err != nil {
 			httpErr(w, 404, "Group not found")
 			return
@@ -103,7 +103,7 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 			g["updated_at"] = updatedAt.Time.Format("2006-01-02T15:04:05")
 		}
 		// Windows
-		rows, _ := db.Query("SELECT id, win_id, win_type, ref_id, pos_x, pos_y, width, height, z_index FROM group_windows WHERE group_id=? ORDER BY z_index", groupID)
+		rows, _ := store.Query("SELECT id, win_id, win_type, ref_id, pos_x, pos_y, width, height, z_index FROM group_windows WHERE group_id=? ORDER BY z_index", groupID)
 		var windows, panes []M
 		if rows != nil {
 			for rows.Next() {
@@ -148,10 +148,10 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		vals = append(vals, groupID)
-		db.Exec("UPDATE agent_groups SET "+strings.Join(sets, ", ")+" WHERE id=?", vals...)
+		store.Exec("UPDATE agent_groups SET "+strings.Join(sets, ", ")+" WHERE id=?", vals...)
 		J(w, M{"success": true, "group_id": groupID, "updated": req})
 	case "DELETE":
-		res, _ := db.Exec("DELETE FROM agent_groups WHERE id=?", groupID)
+		res, _ := store.Exec("DELETE FROM agent_groups WHERE id=?", groupID)
 		n, _ := res.RowsAffected()
 		if n == 0 {
 			httpErr(w, 404, "Group not found")
@@ -175,11 +175,11 @@ func handleGroupWindows(w http.ResponseWriter, r *http.Request, groupID, sub str
 		if refID == "" {
 			refID = winID
 		}
-		db.Exec("INSERT IGNORE INTO group_windows (group_id, win_id, win_type, ref_id) VALUES (?,?,?,?)", groupID, winID, winType, refID)
+		store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), groupID, winID, winType, refID)
 		J(w, M{"success": true, "group_id": groupID, "win_id": winID})
 	case "DELETE":
 		winID := strings.TrimPrefix(sub, "/")
-		db.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, winID)
+		store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, winID)
 		J(w, M{"success": true, "group_id": groupID, "win_id": winID})
 	case "PATCH":
 		// Layout update for specific window
@@ -196,7 +196,7 @@ func handleGroupWindows(w http.ResponseWriter, r *http.Request, groupID, sub str
 		}
 		if len(sets) > 0 {
 			vals = append(vals, groupID, winID)
-			db.Exec("UPDATE group_windows SET "+strings.Join(sets, ", ")+" WHERE group_id=? AND win_id=?", vals...)
+			store.Exec("UPDATE group_windows SET "+strings.Join(sets, ", ")+" WHERE group_id=? AND win_id=?", vals...)
 		}
 		J(w, M{"success": true, "group_id": groupID, "win_id": winID})
 	}
@@ -207,10 +207,10 @@ func handleGroupPanesCompat(w http.ResponseWriter, r *http.Request, groupID, sub
 	paneID := strings.TrimSuffix(sub, "/layout")
 	switch r.Method {
 	case "POST":
-		db.Exec("INSERT IGNORE INTO group_windows (group_id, win_id, win_type, ref_id) VALUES (?,?,'agent_ttyd',?)", groupID, paneID, paneID)
+		store.Exec(store.InsertIgnore("group_windows", []string{"group_id", "win_id", "win_type", "ref_id"}), groupID, paneID, "agent_ttyd", paneID)
 		J(w, M{"success": true, "group_id": groupID, "pane_id": paneID})
 	case "DELETE":
-		db.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, paneID)
+		store.Exec("DELETE FROM group_windows WHERE group_id=? AND win_id=?", groupID, paneID)
 		J(w, M{"success": true, "group_id": groupID, "pane_id": paneID})
 	case "PATCH":
 		var req M
@@ -225,7 +225,7 @@ func handleGroupPanesCompat(w http.ResponseWriter, r *http.Request, groupID, sub
 		}
 		if len(sets) > 0 {
 			vals = append(vals, groupID, paneID)
-			db.Exec("UPDATE group_windows SET "+strings.Join(sets, ", ")+" WHERE group_id=? AND win_id=?", vals...)
+			store.Exec("UPDATE group_windows SET "+strings.Join(sets, ", ")+" WHERE group_id=? AND win_id=?", vals...)
 		}
 		J(w, M{"success": true, "group_id": groupID, "pane_id": paneID})
 	}
@@ -244,7 +244,7 @@ func handleGroupBatchLayout(w http.ResponseWriter, r *http.Request, groupID stri
 	}
 	readBody(r, &req)
 	for _, p := range req.Panes {
-		db.Exec("UPDATE group_windows SET pos_x=?, pos_y=?, width=?, height=?, z_index=? WHERE group_id=? AND win_id=?",
+		store.Exec("UPDATE group_windows SET pos_x=?, pos_y=?, width=?, height=?, z_index=? WHERE group_id=? AND win_id=?",
 			p.PosX, p.PosY, p.Width, p.Height, p.ZIndex, groupID, p.WinID)
 	}
 	J(w, M{"success": true, "group_id": groupID, "updated": len(req.Panes)})

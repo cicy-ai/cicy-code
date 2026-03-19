@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"strings"f
+	"strings"
 	"time"
 )
 
@@ -17,10 +17,10 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if gid != "" {
-		rows, err = db.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level
+		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level
 			FROM agent_config t INNER JOIN group_windows gp ON t.pane_id=gp.win_id WHERE gp.group_id=? AND t.active=1 ORDER BY t.created_at DESC`, gid)
 	} else {
-		rows, err = db.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level
+		rows, err = store.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level
 			FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.active=1 ORDER BY t.created_at DESC`)
 	}
 	if err != nil {
@@ -79,13 +79,13 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 
 	// Get next worker index
 	var workerIdx int
-	tx, _ := db.Begin()
+	tx, _ := store.Begin()
 	tx.QueryRow("SELECT value FROM global_vars WHERE key_name='worker_index'").Scan(&workerIdx)
 	if workerIdx == 0 {
 		workerIdx = 20000
 	}
 	workerIdx++
-	tx.Exec("INSERT INTO global_vars (key_name, value) VALUES ('worker_index', ?) ON DUPLICATE KEY UPDATE value=?", workerIdx, workerIdx)
+	tx.Exec(store.Upsert("global_vars", "key_name", []string{"key_name", "value"}, []string{"value"}), "worker_index", workerIdx)
 	tx.Commit()
 
 	session := fmt.Sprintf("w-%d", workerIdx)
@@ -112,8 +112,8 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	nodeTmux(paneID, "send-keys", "-t", paneID, "export TERM=xterm-256color", "Enter")
 
 	// Insert DB
-	db.Exec(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,NOW(),NOW())`, paneID, title, port, req.Workspace, req.InitScript, "{}", req.Role, req.DefaultModel)
+	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()), paneID, title, port, req.Workspace, req.InitScript, "{}", req.Role, req.DefaultModel)
 
 	// Start ttyd-go instance
 	if err := startInstance(paneID, port, token); err != nil {
@@ -172,7 +172,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	var tgToken, tgChatID sql.NullString
 	var groupID sql.NullInt64
 	var role, defaultModel, trustLevel sql.NullString
-	err := db.QueryRow(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script,
+	err := store.QueryRow(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script,
 		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.agent_duty, t.config, t.common_prompt, t.ttyd_preview, gp.group_id, t.role, t.default_model, t.trust_level
 		FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.pane_id=?`, paneID).Scan(
 		&paneID, &title, &port, &workspace, &initScript,
@@ -214,12 +214,12 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 		vals = append(vals, v)
 	}
 	vals = append(vals, paneID)
-	db.Exec("UPDATE agent_config SET "+strings.Join(sets, ", ")+" WHERE pane_id=?", vals...)
+	store.Exec("UPDATE agent_config SET "+strings.Join(sets, ", ")+" WHERE pane_id=?", vals...)
 
 	// Sync agent_duty to workspace/.kiro/steering/duty.md
 	if duty, ok := req["agent_duty"].(string); ok {
 		var ws sql.NullString
-		db.QueryRow("SELECT workspace FROM agent_config WHERE pane_id=?", paneID).Scan(&ws)
+		store.QueryRow("SELECT workspace FROM agent_config WHERE pane_id=?", paneID).Scan(&ws)
 		if ws.String != "" {
 			dir := ws.String + "/.kiro/steering"
 			os.MkdirAll(dir, 0755)
@@ -232,7 +232,7 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 	paneID := normPaneID(id)
 	var port sql.NullInt64
-	db.QueryRow("SELECT ttyd_port FROM agent_config WHERE pane_id=?", paneID).Scan(&port)
+	store.QueryRow("SELECT ttyd_port FROM agent_config WHERE pane_id=?", paneID).Scan(&port)
 	go func() {
 		defer func() { recover() }()
 		stopInstance(paneID)
@@ -242,8 +242,8 @@ func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 		session := strings.Split(paneID, ":")[0]
 		nodeTmux(paneID, "kill-session", "-t", session)
 	}()
-	db.Exec("DELETE FROM group_windows WHERE win_id=?", paneID)
-	db.Exec("DELETE FROM agent_config WHERE pane_id=?", paneID)
+	store.Exec("DELETE FROM group_windows WHERE win_id=?", paneID)
+	store.Exec("DELETE FROM agent_config WHERE pane_id=?", paneID)
 	J(w, M{"success": true, "pane_id": shortPaneID(paneID), "message": "Pane deleted"})
 }
 
@@ -260,7 +260,7 @@ func handleRestartPane(w http.ResponseWriter, r *http.Request, id string) {
 func restartPaneCore(paneID, token string) error {
 	var port sql.NullInt64
 	var workspace, initScript, title, config, agentType, trustLevel sql.NullString
-	err := db.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, trust_level FROM agent_config WHERE pane_id=?", paneID).
+	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, trust_level FROM agent_config WHERE pane_id=?", paneID).
 		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &trustLevel)
 	if err != nil {
 		return fmt.Errorf("pane %s not found in db", paneID)
@@ -301,7 +301,7 @@ func restartPaneCore(paneID, token string) error {
 		initScript: initScript.String,
 		agentType:  agentType.String,
 	})
-	db.Exec("UPDATE agent_config SET updated_at=NOW() WHERE pane_id=?", paneID)
+	store.Exec(fmt.Sprintf("UPDATE agent_config SET updated_at=%s WHERE pane_id=?", store.Now()), paneID)
 	return nil
 }
 
@@ -381,7 +381,7 @@ func applyProxyFromConfig(paneID, configJSON string) {
 }
 
 func handleRestartAll(w http.ResponseWriter, r *http.Request) {
-	rows, _ := db.Query("SELECT pane_id FROM agent_config WHERE active=1")
+	rows, _ := store.Query("SELECT pane_id FROM agent_config WHERE active=1")
 	defer rows.Close()
 	var results []M
 	for rows.Next() {
@@ -614,7 +614,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fallback to DB if Redis unavailable
-	rows, _ := db.Query("SELECT pane_id, ttyd_port, title FROM agent_config")
+	rows, _ := store.Query("SELECT pane_id, ttyd_port, title FROM agent_config")
 	defer rows.Close()
 	result := M{}
 	for rows.Next() {
@@ -647,7 +647,7 @@ func handleSendWait(w http.ResponseWriter, r *http.Request) {
 	paneID := req.Target
 	// Resolve @title
 	if strings.HasPrefix(paneID, "@") {
-		db.QueryRow("SELECT pane_id FROM agent_config WHERE title=? LIMIT 1", paneID[1:]).Scan(&paneID)
+		store.QueryRow("SELECT pane_id FROM agent_config WHERE title=? LIMIT 1", paneID[1:]).Scan(&paneID)
 		if paneID == "" {
 			J(w, M{"success": false, "error": fmt.Sprintf("No pane found with title '%s'", req.Target[1:])})
 			return
@@ -713,7 +713,7 @@ func handleMouseStatus(w http.ResponseWriter, r *http.Request) {
 func handleTtydStatus(w http.ResponseWriter, r *http.Request) {
 	paneID := normPaneID(strings.TrimPrefix(r.URL.Path, "/api/tmux/ttyd/status/"))
 	var port sql.NullInt64
-	err := db.QueryRow("SELECT ttyd_port FROM agent_config WHERE pane_id=?", paneID).Scan(&port)
+	err := store.QueryRow("SELECT ttyd_port FROM agent_config WHERE pane_id=?", paneID).Scan(&port)
 	if err != nil {
 		httpErr(w, 404, "pane_id not found")
 		return
@@ -760,7 +760,7 @@ func handleUnsplitPane(w http.ResponseWriter, r *http.Request, id string) {
 
 func handleClear(w http.ResponseWriter, r *http.Request) {
 	// kill tmux on all active nodes
-	rows, _ := db.Query("SELECT DISTINCT node_url FROM agent_config WHERE active=1")
+	rows, _ := store.Query("SELECT DISTINCT node_url FROM agent_config WHERE active=1")
 	if rows != nil {
 		defer rows.Close()
 		for rows.Next() {

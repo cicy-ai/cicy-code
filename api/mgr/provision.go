@@ -94,7 +94,7 @@ func handleProvisionStream(w http.ResponseWriter, r *http.Request) {
 
 	// Already provisioned?
 	var backendURL string
-	db.QueryRow("SELECT COALESCE(backend_url,'') FROM saas_users WHERE id=?", userID).Scan(&backendURL)
+	store.QueryRow("SELECT COALESCE(backend_url,'') FROM saas_users WHERE id=?", userID).Scan(&backendURL)
 	if backendURL != "" {
 		data, _ := json.Marshal(provStep{5, 5, "done", backendURL})
 		fmt.Fprintf(w, "data: %s\n\n", data)
@@ -104,7 +104,7 @@ func handleProvisionStream(w http.ResponseWriter, r *http.Request) {
 
 	// Not provisioned yet — trigger provision
 	var email string
-	db.QueryRow("SELECT email FROM saas_users WHERE id=?", userID).Scan(&email)
+	store.QueryRow("SELECT email FROM saas_users WHERE id=?", userID).Scan(&email)
 	go provisionBackend(userID, email)
 
 	ch := provSubscribe(userID)
@@ -136,7 +136,7 @@ func provisionBackend(userID, email string) {
 
 	// Lookup plan
 	var plan string
-	db.QueryRow("SELECT COALESCE(plan,'free') FROM saas_users WHERE id=?", userID).Scan(&plan)
+	store.QueryRow("SELECT COALESCE(plan,'free') FROM saas_users WHERE id=?", userID).Scan(&plan)
 
 	log.Printf("[provision] starting %s → %s (plan=%s)", userID, vmName, plan)
 	provSend(userID, provStep{1, 5, "running", "Creating Cloudflare Tunnel..."})
@@ -209,7 +209,7 @@ func provisionBackend(userID, email string) {
 		return
 	}
 
-	db.Exec("UPDATE saas_users SET backend_url=? WHERE id=?", info.APIURL, userID)
+	store.Exec("UPDATE saas_users SET backend_url=? WHERE id=?", info.APIURL, userID)
 	log.Printf("[provision] user %s → %s", userID, info.APIURL)
 	provSend(userID, provStep{5, 5, "done", info.APIURL})
 }

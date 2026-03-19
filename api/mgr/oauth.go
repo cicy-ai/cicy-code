@@ -107,19 +107,19 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Find or create user (same as GitHub flow)
 	var userID string
-	err = db.QueryRow("SELECT id FROM saas_users WHERE email=?", info.Email).Scan(&userID)
+	err = store.QueryRow("SELECT id FROM saas_users WHERE email=?", info.Email).Scan(&userID)
 	if err != nil {
 		userID = fmt.Sprintf("%d", time.Now().UnixNano())
-		db.Exec("INSERT INTO saas_users (id,email) VALUES (?,?)", userID, info.Email)
+		store.Exec("INSERT INTO saas_users (id,email) VALUES (?,?)", userID, info.Email)
 	}
 
 	slug := "u-" + userID[:8]
 
 	var vmToken string
-	db.QueryRow("SELECT vm_token FROM saas_users WHERE id=?", userID).Scan(&vmToken)
+	store.QueryRow("SELECT vm_token FROM saas_users WHERE id=?", userID).Scan(&vmToken)
 
 	authCode := fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s:%d", userID, time.Now().UnixNano()))))[:32]
-	db.Exec("INSERT INTO auth_codes (code,user_id,slug,vm_token) VALUES (?,?,?,?)", authCode, userID, slug, vmToken)
+	store.Exec("INSERT INTO auth_codes (code,user_id,slug,vm_token) VALUES (?,?,?,?)", authCode, userID, slug, vmToken)
 
 	http.Redirect(w, r, "https://app.cicy-ai.com?code="+authCode, 302)
 }
@@ -187,21 +187,21 @@ func handleGithubCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Find or create user
 	var userID string
-	err = db.QueryRow("SELECT id FROM saas_users WHERE email=?", email).Scan(&userID)
+	err = store.QueryRow("SELECT id FROM saas_users WHERE email=?", email).Scan(&userID)
 	if err != nil {
 		userID = fmt.Sprintf("%d", time.Now().UnixNano())
-		db.Exec("INSERT INTO saas_users (id,email) VALUES (?,?)", userID, email)
+		store.Exec("INSERT INTO saas_users (id,email) VALUES (?,?)", userID, email)
 	}
 
 	slug := "u-" + userID[:8]
 
 	// Get VM token
 	var vmToken string
-	db.QueryRow("SELECT vm_token FROM saas_users WHERE id=?", userID).Scan(&vmToken)
+	store.QueryRow("SELECT vm_token FROM saas_users WHERE id=?", userID).Scan(&vmToken)
 
 	// Generate one-time auth code
 	authCode := fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s:%d", userID, time.Now().UnixNano()))))[:32]
-	db.Exec("INSERT INTO auth_codes (code,user_id,slug,vm_token) VALUES (?,?,?,?)", authCode, userID, slug, vmToken)
+	store.Exec("INSERT INTO auth_codes (code,user_id,slug,vm_token) VALUES (?,?,?,?)", authCode, userID, slug, vmToken)
 
 	http.Redirect(w, r, "https://app.cicy-ai.com?code="+authCode, 302)
 }
@@ -224,7 +224,7 @@ func handleSaasVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var email, plan, backend string
-	db.QueryRow("SELECT email,plan,backend_url FROM saas_users WHERE id=?", userID).Scan(&email, &plan, &backend)
+	store.QueryRow("SELECT email,plan,backend_url FROM saas_users WHERE id=?", userID).Scan(&email, &plan, &backend)
 
 	J(w, M{"valid": true, "user_id": userID, "email": email, "plan": plan, "backend": backend})
 }

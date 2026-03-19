@@ -23,6 +23,8 @@ github.com/hashicorp/go-multierror v0.0.0-20150608033521-56912fb08d85 h1:cUIqw6A
 github.com/hashicorp/go-multierror v0.0.0-20150608033521-56912fb08d85/go.mod h1:JMRHfdO9jKNzS/+BTlxCjKNQHg/jZAft8U7LloJvN7I=
 github.com/kr/pty v0.0.0-20150511174710-5cf931ef8f76 h1:i5TIRQpbCg4aJMUtVHIhkQnSw++Z405Z5pzqHqeNkdU=
 github.com/kr/pty v0.0.0-20150511174710-5cf931ef8f76/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=
+github.com/mattn/go-sqlite3 v1.14.37 h1:3DOZp4cXis1cUIpCfXLtmlGolNLp2VEqhiB/PARNBIg=
+github.com/mattn/go-sqlite3 v1.14.37/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
 github.com/pkg/errors v0.8.1-0.20161029093637-248dadf4e906 h1:BKfCEBHnHoXswNe0Btj/zOfiyn40z6qOti8SeLbQgdM=
 github.com/pkg/errors v0.8.1-0.20161029093637-248dadf4e906/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
