@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Mic, Move } from 'lucide-react';
 import { Position } from '../types';
+import { lockPointer, unlockPointer } from '../lib/pointerLock';
 
 interface VoiceFloatingButtonProps {
   initialPosition: Position;
@@ -61,6 +62,7 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
     setIsPressed(true);
     setIsDragging(true);
     setDragMode(false);
+    lockPointer();
     
     // Start recording immediately
     onRecordStart();
@@ -94,6 +96,7 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
       if (isDragging) {
         setIsDragging(false);
         setIsPressed(false);
+        unlockPointer();
         
         if (dragMode) {
             // If we were dragging, we already cancelled the recording logic in handleMove

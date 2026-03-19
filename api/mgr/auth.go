@@ -241,12 +241,7 @@ func handleAuthExchange(w http.ResponseWriter, r *http.Request) {
 	// Mark as used
 	db.Exec("UPDATE auth_codes SET used=1 WHERE code=?", code)
 
-	// If VM not provisioned yet, vm_token is empty
-	if vmToken == "" {
-		// Return pending status, frontend should poll or show provision screen
-		J(w, M{"status": "provisioning", "slug": slug})
-		return
-	}
-
-	J(w, M{"status": "ok", "token": vmToken, "slug": slug})
+	// Issue JWT with limited perms, never expose vm_token
+	token := signJWT(userID, slug)
+	J(w, M{"status": "ok", "token": token, "slug": slug})
 }

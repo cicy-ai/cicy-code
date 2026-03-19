@@ -24,12 +24,104 @@ func getJWTSecret() string {
 }
 
 func githubEnabled() bool { return os.Getenv("GITHUB_CLIENT_ID") != "" }
+func googleEnabled() bool { return os.Getenv("GOOGLE_CLIENT_ID") != "" }
+
+// Email whitelist — only these can login via OAuth
+var allowedEmails = map[string]bool{
+	"w3c.offical@gmail.com": true,
+	"cicybot@icloud.com":    true,
+}
+
+func emailAllowed(email string) bool {
+	return allowedEmails[strings.ToLower(email)]
+}
 
 // GET /api/auth/github
 func handleGithubAuth(w http.ResponseWriter, r *http.Request) {
 	u := fmt.Sprintf("https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&scope=user:email",
 		os.Getenv("GITHUB_CLIENT_ID"), url.QueryEscape(os.Getenv("OAUTH_REDIRECT_BASE")+"/api/auth/github/callback"))
 	http.Redirect(w, r, u, 302)
+}
+
+// GET /api/auth/google
+func handleGoogleAuth(w http.ResponseWriter, r *http.Request) {
+	u := fmt.Sprintf("https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=email+profile&access_type=online",
+		os.Getenv("GOOGLE_CLIENT_ID"), url.QueryEscape(os.Getenv("OAUTH_REDIRECT_BASE")+"/api/auth/google/callback"))
+	http.Redirect(w, r, u, 302)
+}
+
+// GET /api/auth/google/callback
+func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		http.Error(w, "missing code", 400)
+		return
+	}
+
+	// Exchange code for token
+	data := url.Values{
+		"code":          {code},
+		"client_id":     {os.Getenv("GOOGLE_CLIENT_ID")},
+		"client_secret": {os.Getenv("GOOGLE_CLIENT_SECRET")},
+		"redirect_uri":  {os.Getenv("OAUTH_REDIRECT_BASE") + "/api/auth/google/callback"},
+		"grant_type":    {"authorization_code"},
+	}
+	resp, err := http.PostForm("https://oauth2.googleapis.com/token", data)
+	if err != nil {
+		http.Error(w, "token exchange failed", 500)
+		return
+	}
+	defer resp.Body.Close()
+
+	var tok struct {
+		AccessToken string `json:"access_token"`
+	}
+	json.NewDecoder(resp.Body).Decode(&tok)
+	if tok.AccessToken == "" {
+		http.Error(w, "no access token", 500)
+		return
+	}
+
+	// Get user info
+	req, _ := http.NewRequest("GET", "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		http.Error(w, "failed to get user info", 500)
+		return
+	}
+	defer resp2.Body.Close()
+
+	var info struct {
+		Email string `json:"email"`
+	}
+	json.NewDecoder(resp2.Body).Decode(&info)
+	if info.Email == "" {
+		http.Error(w, "no email from google", 500)
+		return
+	}
+	if !emailAllowed(info.Email) {
+		http.Error(w, "access denied", 403)
+		return
+	}
+
+	// Find or create user (same as GitHub flow)
+	var userID string
+	err = db.QueryRow("SELECT id FROM saas_users WHERE email=?", info.Email).Scan(&userID)
+	if err != nil {
+		userID = fmt.Sprintf("%d", time.Now().UnixNano())
+		db.Exec("INSERT INTO saas_users (id,email) VALUES (?,?)", userID, info.Email)
+	}
+
+	slug := "u-" + userID[:8]
+
+	var vmToken string
+	db.QueryRow("SELECT vm_token FROM saas_users WHERE id=?", userID).Scan(&vmToken)
+
+	authCode := fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s:%d", userID, time.Now().UnixNano()))))[:32]
+	db.Exec("INSERT INTO auth_codes (code,user_id,slug,vm_token) VALUES (?,?,?,?)", authCode, userID, slug, vmToken)
+
+	http.Redirect(w, r, "https://app.cicy-ai.com?code="+authCode, 302)
 }
 
 // GET /api/auth/github/callback
@@ -88,6 +180,10 @@ func handleGithubCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no email from github", 500)
 		return
 	}
+	if !emailAllowed(email) {
+		http.Error(w, "access denied", 403)
+		return
+	}
 
 	// Find or create user
 	var userID string
@@ -95,7 +191,6 @@ func handleGithubCallback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		userID = fmt.Sprintf("%d", time.Now().UnixNano())
 		db.Exec("INSERT INTO saas_users (id,email) VALUES (?,?)", userID, email)
-		go provisionBackend(userID, email)
 	}
 
 	slug := "u-" + userID[:8]
@@ -108,7 +203,7 @@ func handleGithubCallback(w http.ResponseWriter, r *http.Request) {
 	authCode := fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s:%d", userID, time.Now().UnixNano()))))[:32]
 	db.Exec("INSERT INTO auth_codes (code,user_id,slug,vm_token) VALUES (?,?,?,?)", authCode, userID, slug, vmToken)
 
-	http.Redirect(w, r, "https://"+slug+"-app.cicy-ai.com?code="+authCode, 302)
+	http.Redirect(w, r, "https://app.cicy-ai.com?code="+authCode, 302)
 }
 
 // GET /api/auth/saas/verify (JWT auth)

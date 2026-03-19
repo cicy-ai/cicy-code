@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { useDevRegister } from '../lib/devStore';
 import { TokenManager } from '../services/tokenManager';
 import apiService, { setBackend } from '../services/api';
 import config from '../config';
@@ -117,6 +118,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     (perm: string) => perms.includes('api_full') || perms.includes(perm),
     [perms]
   );
+
+  useDevRegister('Auth', { hasToken: !!token, authType, plan, provisioning, isChecking, perms });
 
   return (
     <AuthContext.Provider value={{ token, perms, authType, plan, provisioning, isChecking, login, logout, hasPermission }}>

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
 import apiService from '../services/api';
 import { usePane } from './PaneContext';
+import { useDevRegister } from '../lib/devStore';
 
 interface VoiceContextType {
   isListening: boolean;
@@ -88,6 +89,8 @@ export const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setReadOnly(false);
     }
   }, [sendTranscript, setReadOnly]);
+
+  useDevRegister('Voice', { isListening, voiceMode: voiceModeRef.current });
 
   return (
     <VoiceContext.Provider value={{ isListening, voiceMode: voiceModeRef.current, startRecording, stopRecording }}>

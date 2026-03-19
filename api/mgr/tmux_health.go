@@ -13,6 +13,7 @@ import (
 func startTmuxHealth() {
 	interval := 30 * time.Second
 	log.Printf("[tmux-health] started | interval=%s", interval)
+	time.Sleep(2 * time.Second) // wait for watcher to populate cfgCache
 	for {
 		healthCheck()
 		time.Sleep(interval)

@@ -60,6 +60,7 @@ func startInstance(paneID string, port int, token string) error {
 		Address: "127.0.0.1", Port: fmt.Sprintf("%d", port),
 		PermitWrite: true,
 		TitleFormat: "{{ .command }}@{{ .hostname }}",
+		EnableReconnect: true, ReconnectTime: 30,
 		Term: "xterm", WSOrigin: ".*", PermitArguments: true,
 		Preferences: &server.HtermPrefernces{
 			ForegroundColor:           "#c0c0c0",

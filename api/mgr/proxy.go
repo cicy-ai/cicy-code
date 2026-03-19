@@ -13,6 +13,7 @@ import (
 
 var codeServerProxy *httputil.ReverseProxy
 var mitmproxyProxy *httputil.ReverseProxy
+var pmaProxy *httputil.ReverseProxy
 var codeServerInjectContent []byte
 var codeServerInjectMtime int64
 
@@ -27,6 +28,9 @@ func init() {
 	
 	mitmTarget, _ := url.Parse("http://127.0.0.1:18889")
 	mitmproxyProxy = httputil.NewSingleHostReverseProxy(mitmTarget)
+
+	pmaTarget, _ := url.Parse("http://127.0.0.1:8899")
+	pmaProxy = httputil.NewSingleHostReverseProxy(pmaTarget)
 }
 
 func loadCodeServerInject() []byte {
@@ -164,7 +168,6 @@ func handleMitmproxyAuth(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleXuiProxy 代理请求到 pane 所属节点的 xui
-// /api/xui/{pane_id}/... → xui node /api/...
 func handleXuiProxy(w http.ResponseWriter, r *http.Request) {
 	// /api/xui/{pane_id}/rest/of/path
 	path := strings.TrimPrefix(r.URL.Path, "/api/xui/")
@@ -182,4 +185,32 @@ func handleXuiProxy(w http.ResponseWriter, r *http.Request) {
 	r.Host = target.Host
 	r.Header.Del("Authorization")
 	proxy.ServeHTTP(w, r)
+}
+
+func handlePmaAuth(w http.ResponseWriter, r *http.Request) {
+	auth := r.Header.Get("Authorization")
+	token := ""
+	if strings.HasPrefix(auth, "Bearer ") {
+		token = strings.TrimPrefix(auth, "Bearer ")
+	} else {
+		token = r.URL.Query().Get("token")
+	}
+	// fallback to cookie
+	if token == "" {
+		if c, err := r.Cookie("pma_token"); err == nil {
+			token = c.Value
+		}
+	}
+	if token == "" || !verifyToken(token) {
+		httpErr(w, 401, "Not authenticated")
+		return
+	}
+	// set cookie so sub-resources work
+	http.SetCookie(w, &http.Cookie{Name: "pma_token", Value: token, Path: "/pma/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	r.URL.Path = strings.TrimPrefix(r.URL.Path, "/pma")
+	if r.URL.Path == "" {
+		r.URL.Path = "/"
+	}
+	r.Header.Del("Authorization")
+	pmaProxy.ServeHTTP(w, r)
 }

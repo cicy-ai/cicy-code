@@ -1,5 +1,6 @@
 import React, { forwardRef, useState, useRef, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
+import { usePointerLock } from '../lib/pointerLock';
 
 export const isElectron = navigator.userAgent.includes('Electron');
 
@@ -64,6 +65,7 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
     const [isLoading, setIsLoading] = useState(true);
     const webviewRef = useRef<HTMLElement>(null);
     const useWebview = isElectron && codeServer;
+    const pointerLocked = usePointerLock();
 
     const handleLoad = () => {
       setIsLoading(false);
@@ -138,6 +140,7 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
             <Loader2 className="animate-spin" />
           </div>
         )}
+        {pointerLocked && <div className="absolute inset-0 z-20" />}
         <iframe
           ref={ref}
           src={src}
@@ -148,7 +151,7 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
           allowFullScreen={allowFullScreen}
           title={title}
           sandbox="allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts allow-downloads"
-          allow="clipboard-read; clipboard-write"
+          allow="clipboard-read; clipboard-write; microphone"
         />
       </>
     );
