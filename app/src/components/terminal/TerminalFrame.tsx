@@ -1,6 +1,6 @@
 import React from 'react';
 import { urls } from '../../config';
-import { usePointerLock } from '../../lib/pointerLock';
+import { WebFrame } from '../WebFrame';
 
 interface TerminalFrameProps {
   paneId: string;
@@ -8,11 +8,9 @@ interface TerminalFrameProps {
 }
 
 const TerminalFrame: React.FC<TerminalFrameProps> = ({ paneId, token }) => {
-  const locked = usePointerLock();
   return (
     <div className="relative w-full h-full">
-      {locked && <div className="absolute inset-0 z-20" />}
-      <iframe
+      <WebFrame
         src={urls.ttydOpen(paneId, token)}
         className="w-full h-full border-0 bg-black"
         title={`terminal-${paneId}`}

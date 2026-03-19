@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../../config';
+import { WebFrame } from '../WebFrame';
 
 // Collapsible user prompt - auto-collapse if > 200px
 const CollapsibleQ: React.FC<{ text: string }> = ({ text }) => {
@@ -436,7 +437,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
       {showTtyd && (
         <div className="shrink-0 h-[160px] mx-2 mb-1 rounded-lg overflow-hidden border border-white/[0.08] relative">
           <button onClick={() => setShowTtyd(false)} className="absolute top-1 right-1 z-10 w-5 h-5 flex items-center justify-center rounded bg-black/60 text-white/40 hover:text-white/80 text-xs">✕</button>
-          <iframe
+          <WebFrame
             src={ttydUrl}
             className="w-full h-full border-0 bg-black"
             title="terminal-mini"

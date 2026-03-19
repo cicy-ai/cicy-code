@@ -165,7 +165,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
 
   useEffect(() => { if (editingTitle && titleRef.current) { titleRef.current.focus(); titleRef.current.select(); } }, [editingTitle]);
 
-  const ttydUrl = token ? urls.ttydOpen(paneId, token) : '';
+  const [loadedTtyds, setLoadedTtyds] = useState<Set<string>>(() => new Set());
+  useEffect(() => { if (token && paneId) setLoadedTtyds(prev => new Set(prev).add(paneId)); }, [paneId, token]);
 
   const rightContent = (
     <div data-id="right-content" className="h-full flex flex-col relative">
@@ -208,8 +209,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>
         <div data-id="cli-tab" className="absolute inset-0 flex" style={{ display: mainTab === 'cli' ? 'flex' : 'none' }}>
           <div data-id="cli-terminal-area" className="w-full h-full relative">
-            {ttydUrl && <WebFrame src={ttydUrl} className="w-full h-full border-0 bg-black" title={`terminal-${paneId}`} />}
-
+            {[...loadedTtyds].map(id => (
+              <div key={id} className="absolute inset-0" style={{ display: id === paneId ? 'block' : 'none' }}>
+                <WebFrame src={urls.ttydOpen(id, token!)} className="w-full h-full border-0 bg-black" title={`terminal-${id}`} />
+              </div>
+            ))}
           </div>
         </div>
       </div>

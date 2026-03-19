@@ -1,3 +1,0 @@
-User-agent: *
-Allow: /
-Sitemap: https://cicy-ai.com/sitemap.xml
