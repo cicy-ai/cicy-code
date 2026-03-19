@@ -80,6 +80,32 @@ func ensureCodeServer() {
 }
 
 func main() {
+	// Parse flags
+	for _, arg := range os.Args[1:] {
+		switch arg {
+		case "--help", "-h":
+			fmt.Println(`cicy-code - AI-powered development environment
+
+Usage: cicy-code [options]
+
+Options:
+  --help, -h    Show this help
+  --cn          Use Chinese mirrors (npm + GitHub proxy)
+
+Environment:
+  PORT          API port (default: 18008 local, 8008 saas)
+  SQLITE_PATH   SQLite database path (default: ~/.cicy/data.db)
+  KV_PATH       KV cache path (default: ~/.cicy/kv.json)
+  MYSQL_DSN     MySQL connection (enables saas mode)
+  SAAS_MODE=1   Force saas mode
+
+Data directory: ~/.cicy/`)
+			os.Exit(0)
+		case "--cn":
+			os.Setenv("CN_MIRROR", "1")
+		}
+	}
+
 	saasMode = isSaasMode()
 
 	if !saasMode {
@@ -332,7 +358,29 @@ func main() {
 	go startTmuxHealth()
 	initHTTPLogConsumer()
 	log.Printf("cicy-code-api starting on :%s", port)
+
+	// Local mode: auto-open browser with token
+	if !saasMode {
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			token := getFirstToken()
+			url := fmt.Sprintf("http://localhost:%s", port)
+			if token != "" {
+				url += "/?token=" + token
+			}
+			log.Printf("[startup] opening %s", url)
+			exec.Command("open", url).Start()           // macOS
+			exec.Command("xdg-open", url).Start()       // Linux
+		}()
+	}
+
 	log.Fatal(http.ListenAndServe(":"+port, nil))
+}
+
+func getFirstToken() string {
+	var token string
+	store.QueryRow("SELECT token FROM tokens LIMIT 1").Scan(&token)
+	return token
 }
 
 // w = cors only, wa = cors + auth
