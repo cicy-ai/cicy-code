@@ -51,9 +51,9 @@ func checkEnv() {
 	// Always ensure master pane (w-10001)
 	ensureMasterPane()
 
-	// Check if first run (no worker panes in agent_config)
+	// Check if first run (no worker panes with agent_type set)
 	var count int
-	store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE pane_id != 'w-10001:main.0'").Scan(&count)
+	store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE pane_id != 'w-10001:main.0' AND agent_type != ''").Scan(&count)
 	if count == 0 {
 		runSetup()
 	}
