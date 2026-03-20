@@ -20,7 +20,11 @@ const key = `${process.platform}-${process.arch}`;
 const binName = PLATFORMS[key];
 
 if (!binName) {
-  console.error(`Unsupported platform: ${key}`);
+  if (process.platform === 'win32') {
+    console.error('Windows is not supported natively. Please use WSL:\n  wsl --install\n  wsl npx cicy-code');
+  } else {
+    console.error(`Unsupported platform: ${key}`);
+  }
   process.exit(1);
 }
 
