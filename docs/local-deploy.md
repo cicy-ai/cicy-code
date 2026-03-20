@@ -70,6 +70,15 @@ npx cicy-code
 
 推荐使用 Supervisor 管理 cicy-code 进程，实现开机自启和自动重启。
 
+配置文件位于项目 `scripts/` 目录，通过 **符号链接** 部署到 Supervisor 配置目录：
+
+```
+scripts/
+├── cicy-code.supervisor.conf       # 发布模式
+├── cicy-code-dev.supervisor.conf   # 开发模式
+└── code-server.supervisor.conf     # code-server（独立管理时可选）
+```
+
 ### 安装 Supervisor
 
 ```bash
@@ -80,41 +89,39 @@ sudo apt install supervisor
 brew install supervisor
 ```
 
-### 发布模式配置
+### 部署配置（符号链接）
 
-```ini
-; /etc/supervisor/conf.d/cicy-code.conf
-[program:cicy-code]
-command=/usr/local/bin/cicy-code
-directory=/home/%(ENV_USER)s
-user=%(ENV_USER)s
-autostart=true
-autorestart=true
-startsecs=5
-startretries=3
-stderr_logfile=/var/log/cicy-code/error.log
-stdout_logfile=/var/log/cicy-code/output.log
-environment=HOME="/home/%(ENV_USER)s",PATH="/usr/local/bin:/usr/bin:/bin:%(ENV_HOME)s/.local/bin"
+```bash
+# 创建日志目录
+sudo mkdir -p /var/log/cicy-code
+
+# 发布模式 — 链接发布配置
+sudo ln -sf $(pwd)/scripts/cicy-code.supervisor.conf /etc/supervisor/conf.d/cicy-code.conf
+
+# 或 开发模式 — 链接开发配置
+sudo ln -sf $(pwd)/scripts/cicy-code-dev.supervisor.conf /etc/supervisor/conf.d/cicy-code.conf
+
+# 加载并启动
+sudo supervisorctl reread && sudo supervisorctl update
+sudo supervisorctl start cicy-code
 ```
 
-### 开发模式配置
+> **原则**：配置文件始终在项目 `scripts/` 目录维护和版本管理，Supervisor 目录只存符号链接。
+> 修改配置后只需 `supervisorctl reread && update`，无需复制文件。
 
-```ini
-; /etc/supervisor/conf.d/cicy-code-dev.conf
-[program:cicy-code]
-command=/path/to/cicy-code --dev
-directory=/path/to/cicy-code/api
-user=%(ENV_USER)s
-autostart=true
-autorestart=true
-startsecs=5
-startretries=3
-stderr_logfile=/var/log/cicy-code/error.log
-stdout_logfile=/var/log/cicy-code/output.log
-environment=HOME="/home/%(ENV_USER)s",PATH="/usr/local/bin:/usr/bin:/bin:%(ENV_HOME)s/.local/bin"
+### 切换发布/开发模式
+
+```bash
+# 切换到开发模式
+sudo ln -sf $(pwd)/scripts/cicy-code-dev.supervisor.conf /etc/supervisor/conf.d/cicy-code.conf
+sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl restart cicy-code
+
+# 切换回发布模式
+sudo ln -sf $(pwd)/scripts/cicy-code.supervisor.conf /etc/supervisor/conf.d/cicy-code.conf
+sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl restart cicy-code
 ```
 
-> **注意**：开发模式下 `directory` 必须设为 `api/` 目录，这样程序才能从 `mgr/resources/` 读取本地 inject HTML 文件。
+> **注意**：开发模式配置中 `directory` 指向 `api/` 目录，这样 `--dev` 模式才能从 `mgr/resources/` 读取本地 inject HTML 文件。
 
 ### macOS launchd（替代 Supervisor）
 
@@ -168,6 +175,9 @@ sudo supervisorctl status
 
 # 查看日志
 sudo supervisorctl tail -f cicy-code
+
+# 验证符号链接
+ls -la /etc/supervisor/conf.d/cicy-code.conf
 ```
 
 ## 预置 AI Agent
