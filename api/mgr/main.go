@@ -171,7 +171,7 @@ func ensureCodeServer() {
 	log.Printf("[code-server] ready on port %s", csPort)
 }
 
-const version = "0.2.1"
+const version = "0.2.3"
 
 func main() {
 	// Parse flags
