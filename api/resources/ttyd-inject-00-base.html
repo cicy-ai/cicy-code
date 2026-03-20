@@ -62,7 +62,7 @@ window.addEventListener('load',function(){
 /* Loading overlay helpers */
 var _cpLoadingEl = null, _cpLoadingTimer = null;
 function __cpShowLoading(msg) {
-  __cpHideLoading();
+  if (_cpLoadingEl) return;
   _cpLoadingEl = document.createElement('div');
   _cpLoadingEl.id = 'cp-loading-overlay';
   _cpLoadingEl.innerHTML = '<div id="cp-loading-spinner"></div><div id="cp-loading-text">' + (msg || 'Reconnecting…') + '</div>';
@@ -78,7 +78,7 @@ function __cpHideLoading() {
   }
 }
 
-/* WebSocket capture — show loading on close, hide on open */
+/* WebSocket capture */
 if (!window.__wsPatched) {
   window.__wsPatched = true;
   window.__allWs = [];
@@ -87,8 +87,6 @@ if (!window.__wsPatched) {
     var ws = p ? new _O(u, p) : new _O(u);
     window.__allWs.push(ws); window.__cicyWs = ws;
     if (window.__allWs.length > 10) window.__allWs = window.__allWs.filter(function(w){ return w.readyState <= 1; });
-    ws.addEventListener('close', function() { __cpShowLoading(); });
-    ws.addEventListener('open',  function() { __cpHideLoading(); });
     return ws;
   };
   window.WebSocket.prototype = _O.prototype;
@@ -97,6 +95,21 @@ if (!window.__wsPatched) {
   window.WebSocket.CLOSING = _O.CLOSING;
   window.WebSocket.CLOSED = _O.CLOSED;
 }
+
+/* Poll WS state: show loading when connection lost, hide when reconnected */
+(function(){
+  var hadWs = false;
+  setInterval(function(){
+    var open = false;
+    if (window.__allWs) {
+      for (var i = window.__allWs.length - 1; i >= 0; i--) {
+        if (window.__allWs[i].readyState === 1) { open = true; break; }
+      }
+    }
+    if (open) { hadWs = true; __cpHideLoading(); }
+    else if (hadWs) { __cpShowLoading(); }
+  }, 300);
+})();
 
 /* Shared state: window.__cp */
 window.__cp = (function(){

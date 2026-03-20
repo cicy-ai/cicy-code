@@ -2,3 +2,8 @@ gotty
 bindata
 builds
 js/node_modules/*
+mgr/resources
+mgr/ui
+mgr/tmux.conf
+mgr/monitor
+mgr/cicy-code-api

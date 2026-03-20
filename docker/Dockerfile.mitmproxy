@@ -1,4 +1,0 @@
-FROM mitmproxy/mitmproxy:latest
-RUN pip install --no-cache-dir redis
-COPY kiro_monitor.py /app/kiro_monitor.py
-ENTRYPOINT ["mitmdump", "-p", "8003", "--ssl-insecure", "--set", "block_global=false", "--set", "proxyauth=any", "-s", "/app/kiro_monitor.py"]

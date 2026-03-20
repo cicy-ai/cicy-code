@@ -12,5 +12,6 @@ api/logs/*
 *.gif
 .env
 dist
+cicy-code-linux*
 mitmproxy/__pycache__/
 app/worker/public/
