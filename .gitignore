@@ -11,5 +11,6 @@ api/logs/*
 *.psd
 *.gif
 .env
+dist
 mitmproxy/__pycache__/
 app/worker/public/

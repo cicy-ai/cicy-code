@@ -1,3 +1,3 @@
 [submodule "desktop"]
 	path = desktop
-	url = https://github.com/cicy-dev/electron-mcp.git
+	url = https://github.com/cicy-ai/cicy-desktop.git
