@@ -2,10 +2,10 @@
 
 ## 自动发版（推荐）
 
-当 `npm/package.json` 中的 `version` 字段变更并推送到 `master` 分支时，GitHub Actions 自动执行：
+推送 `v*` tag 到 GitHub 时，Actions 自动执行：
 
-1. 读取 `npm/package.json` 中的版本号
-2. 创建 GitHub Release（tag: `v{version}`），上传 `dist/` 下的 4 个二进制
+1. Go 交叉编译 4 平台二进制（darwin/linux × amd64/arm64）
+2. 创建 GitHub Release 并上传二进制
 3. 发布 npm 包
 
 ### 前置配置
@@ -21,22 +21,16 @@
 ### 发版步骤
 
 ```bash
-# 1. 确保 dist/ 下的二进制已更新（go build 交叉编译）
-GOOS=darwin GOARCH=arm64 go build -o dist/cicy-code-darwin-arm64 ./mgr/
-GOOS=darwin GOARCH=amd64 go build -o dist/cicy-code-darwin-amd64 ./mgr/
-GOOS=linux  GOARCH=amd64 go build -o dist/cicy-code-linux-amd64  ./mgr/
-GOOS=linux  GOARCH=arm64 go build -o dist/cicy-code-linux-arm64  ./mgr/
-
-# 2. 更新版本号
-cd npm
-# 编辑 package.json 中的 version 字段
-
-# 3. 提交并推送
+# 1. 更新 npm/package.json 中的 version
+# 2. 提交代码
 git add -A
-git commit -m "chore: release v0.x.x"
-git push
+git commit -m "chore: release v0.3.0"
 
-# GitHub Actions 自动完成 release + npm publish
+# 3. 打 tag 并推送
+git tag v0.3.0
+git push && git push --tags
+
+# GitHub Actions 自动: 编译 → GitHub Release → npm publish
 ```
 
 ## 手动发版

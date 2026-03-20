@@ -2,10 +2,8 @@ name: Release
 
 on:
   push:
-    paths:
-      - 'npm/package.json'
-    branches:
-      - master
+    tags:
+      - 'v*'
 
 jobs:
   release:
@@ -26,26 +24,7 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Get version
-        id: version
-        run: |
-          VERSION=$(node -p "require('./npm/package.json').version")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Check if release exists
-        id: check
-        run: |
-          if gh release view "v${{ steps.version.outputs.version }}" &>/dev/null; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Cross-compile binaries
-        if: steps.check.outputs.exists == 'false'
         working-directory: api
         run: |
           mkdir -p ../dist
@@ -56,20 +35,18 @@ jobs:
           ls -lh ../dist/
 
       - name: Create GitHub Release
-        if: steps.check.outputs.exists == 'false'
         run: |
-          gh release create "${{ steps.version.outputs.tag }}" \
+          gh release create "${{ github.ref_name }}" \
             dist/cicy-code-darwin-amd64 \
             dist/cicy-code-darwin-arm64 \
             dist/cicy-code-linux-amd64 \
             dist/cicy-code-linux-arm64 \
-            --title "${{ steps.version.outputs.tag }}" \
+            --title "${{ github.ref_name }}" \
             --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to npm
-        if: steps.check.outputs.exists == 'false'
         run: |
           cd npm
           npm publish
