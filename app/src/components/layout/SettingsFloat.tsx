@@ -32,7 +32,8 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || '');
   const bodyRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { if (agentDetail) setData(prev => ({ ...prev, ...agentDetail })); }, [agentDetail]);
+  const initRef = useRef(false);
+  useEffect(() => { if (agentDetail && !initRef.current) { initRef.current = true; setData(prev => ({ ...prev, ...agentDetail })); } }, [agentDetail]);
 
   const save = async () => {
     setSaving(true);
@@ -122,8 +123,35 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
             {section === 'agent' && (
               <div className="space-y-5">
                 <Field label="Agent Type">
-                  <Select value={data.agent_type || ''} onChange={v => set({ agent_type: v })} searchable
-                    options={[{value:'',label:'None'},{value:'kiro-cli',label:'kiro-cli'},{value:'opencode',label:'opencode'},{value:'gemini',label:'gemini'},{value:'claude',label:'claude'},{value:'codex',label:'codex'},{value:'copilot',label:'copilot'}]} />
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { value: '', label: 'None', icon: null },
+                      { value: 'kiro-cli', label: 'Kiro CLI', icon: '/assets/logos/kiro.png' },
+                      { value: 'openai', label: 'OpenAI', icon: '/assets/logos/openai.svg' },
+                      { value: 'claude', label: 'Claude', icon: '/assets/logos/claude-symbol.svg' },
+                      { value: 'gemini', label: 'Gemini', icon: '/assets/logos/gemini.svg' },
+                      { value: 'opencode', label: 'OpenCode', icon: '/assets/logos/opencode.svg' },
+                    ].map(option => (
+                      <button
+                        key={option.value}
+                        onClick={() => set({ agent_type: option.value })}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all cursor-pointer ${
+                          data.agent_type === option.value
+                            ? 'bg-blue-500/20 border-blue-500/40 text-blue-300'
+                            : 'bg-white/[0.03] border-white/[0.08] text-zinc-400 hover:bg-white/[0.06] hover:border-white/[0.12]'
+                        }`}
+                      >
+                        {option.icon ? (
+                          <div className="w-5 h-5 bg-zinc-400 rounded flex items-center justify-center">
+                            <img src={option.icon} alt={option.label} className="w-4 h-4" />
+                          </div>
+                        ) : (
+                          <div className="w-4 h-4 rounded border border-white/[0.2]" />
+                        )}
+                        <span className="text-sm">{option.label}</span>
+                      </button>
+                    ))}
+                  </div>
                 </Field>
                 <Field label="Role">
                   <Select value={data.role || ''} onChange={v => set({ role: v })}

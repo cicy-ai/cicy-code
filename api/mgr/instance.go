@@ -81,13 +81,17 @@ func startInstance(paneID string, port int, token string) error {
 		return err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	instances[paneID] = &Instance{PaneID: paneID, Port: port, Cancel: cancel}
+	log.Printf("[instance] started %s on :%d", paneID, port)
 	go func() {
 		if err := srv.Run(ctx); err != nil && err != context.Canceled {
 			log.Printf("[instance] %s error: %v", paneID, err)
+			// Clean up so watcher can retry
+			instancesMu.Lock()
+			delete(instances, paneID)
+			instancesMu.Unlock()
 		}
 	}()
-	instances[paneID] = &Instance{PaneID: paneID, Port: port, Cancel: cancel}
-	log.Printf("[instance] started %s on :%d", paneID, port)
 	return nil
 }
 

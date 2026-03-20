@@ -8,4 +8,4 @@ export REDIS_ADDR="${REDIS_ADDR:-localhost:6379}"
 export PORT="${PORT:-8008}"
 export HOME=/home/w3c_offical
 export TERM=xterm-256color
-/home/w3c_offical/projects/cicy-code/api/cicy-code-api
+/home/w3c_offical/projects/cicy-code/api/cicy-code-api --saas --public

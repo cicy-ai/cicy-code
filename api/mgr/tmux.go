@@ -17,10 +17,10 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if gid != "" {
-		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level
+		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type
 			FROM agent_config t INNER JOIN group_windows gp ON t.pane_id=gp.win_id WHERE gp.group_id=? AND t.active=1 ORDER BY t.created_at DESC`, gid)
 	} else {
-		rows, err = store.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level
+		rows, err = store.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type
 			FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.active=1 ORDER BY t.created_at DESC`)
 	}
 	if err != nil {
@@ -37,13 +37,14 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 		var createdAt, updatedAt sql.NullTime
 		var groupID sql.NullInt64
 		var role, defaultModel, trustLevel sql.NullString
-		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel)
+		var agentType sql.NullString
+		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType)
 		p := M{
 			"pane_id": paneID.String, "title": title.String, "ttyd_port": port.Int64,
 			"workspace": workspace.String, "init_script": initScript.String,
 			"active": active.Int64,
 			"role": role.String, "default_model": defaultModel.String,
-			"trust_level": trustLevel.String,
+			"trust_level": trustLevel.String, "agent_type": agentType.String,
 		}
 		if createdAt.Valid {
 			p["created_at"] = createdAt.Time.Format(time.RFC3339)
@@ -67,7 +68,6 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		WinName      *string `json:"win_name"`
-		Workspace    string  `json:"workspace"`
 		InitScript   string  `json:"init_script"`
 		Title        string  `json:"title"`
 		AgentType    string  `json:"agent_type"`
@@ -77,6 +77,15 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	readBody(r, &req)
 	token := getToken(r)
 
+	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.WinName, token)
+	if err != nil {
+		J(w, M{"success": false, "error": err.Error()})
+		return
+	}
+	J(w, result)
+}
+
+func doCreatePane(title, role, defaultModel, agentType, initScript string, winName *string, token string) (M, error) {
 	// Get next worker index
 	var workerIdx int
 	tx, _ := store.Begin()
@@ -89,36 +98,31 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	tx.Commit()
 
 	session := fmt.Sprintf("w-%d", workerIdx)
-	title := session
-	if req.WinName != nil && *req.WinName != "" {
-		title = *req.WinName
+	t := session
+	if winName != nil && *winName != "" {
+		t = *winName
 	}
-	if req.Title != "" {
-		title = req.Title
+	if title != "" {
+		t = title
 	}
 	home, _ := os.UserHomeDir()
-	workspace := req.Workspace
-	if workspace == "" {
-		workspace = fmt.Sprintf("%s/workers/%s", home, session)
-	}
-	wsExpanded := os.ExpandEnv(strings.Replace(workspace, "~", home, 1))
-	os.MkdirAll(wsExpanded, 0755)
+	workspace := fmt.Sprintf("%s/workers/%s", home, session)
+	os.MkdirAll(workspace, 0755)
 
 	paneID := session + ":main.0"
 	port := workerIdx
 
 	// Create tmux session
-	nodeTmux(paneID, "new-session", "-d", "-s", session, "-n", "main", "-c", wsExpanded)
+	nodeTmux(paneID, "new-session", "-d", "-s", session, "-n", "main", "-c", workspace)
 	nodeTmux(paneID, "send-keys", "-t", paneID, "export TERM=xterm-256color", "Enter")
 
 	// Insert DB
-	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()), paneID, title, port, req.Workspace, req.InitScript, "{}", req.Role, req.DefaultModel)
+	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()), paneID, t, port, workspace, initScript, "{}", role, defaultModel, agentType)
 
 	// Start ttyd-go instance
 	if err := startInstance(paneID, port, token); err != nil {
-		J(w, M{"success": false, "error": err.Error(), "session": session, "pane_id": shortPaneID(paneID)})
-		return
+		return M{"session": session, "pane_id": shortPaneID(paneID)}, err
 	}
 
 	// Wait for port
@@ -127,16 +131,16 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	initPaneEnv(paneEnvOpts{
 		paneID:     paneID,
 		configJSON: "{}",
-		workspace:  wsExpanded,
-		initScript: req.InitScript,
+		workspace:  workspace,
+		initScript: initScript,
 	})
 
-	J(w, M{
+	return M{
 		"success": true, "session": session, "window": "main",
-		"pane_id": shortPaneID(paneID), "title": title,
-		"workspace": req.Workspace, "init_script": req.InitScript,
+		"pane_id": shortPaneID(paneID), "title": t,
+		"workspace": workspace, "init_script": initScript,
 		"ttyd_port": port,
-	})
+	}, nil
 }
 
 func handlePaneByID(w http.ResponseWriter, r *http.Request) {
@@ -203,6 +207,7 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 	var req M
 	readBody(r, &req)
 	delete(req, "pane_id")
+	delete(req, "target")
 	if len(req) == 0 {
 		httpErr(w, 400, "No valid fields to update")
 		return
@@ -236,9 +241,6 @@ func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 	go func() {
 		defer func() { recover() }()
 		stopInstance(paneID)
-		if port.Valid {
-			exec.Command("bash", "-c", fmt.Sprintf("kill -9 $(lsof -ti:%d 2>/dev/null) 2>/dev/null; true", port.Int64)).Run()
-		}
 		session := strings.Split(paneID, ":")[0]
 		nodeTmux(paneID, "kill-session", "-t", session)
 	}()

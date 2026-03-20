@@ -14,13 +14,9 @@
   panel.innerHTML =
     '<div id="cp-bar">' +
       '<div class="cp-bar-l">' +
-        '<div class="cp-win-wrap">' +
-          '<button id="cp-win-btn" class="cp-chip"><span id="cp-win-lbl">0:main</span><svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M4 6l4 4 4-4"/></svg></button>' +
-          '<div id="cp-win-menu" class="cp-drop"></div>' +
-        '</div>' +
+        '<button id="cp-enter" class="cp-chip cp-chip-dim"></button>' +
       '</div>' +
       '<div class="cp-bar-r">' +
-        '<button id="cp-enter" class="cp-chip cp-chip-dim"></button>' +
         '<button id="cp-more" class="cp-chip cp-chip-dim" title="More">⋯</button>' +
         '<div id="cp-more-menu" class="cp-drop">' +
           '<select id="cp-model" title="Model"><option value="">Model</option>' +
@@ -44,6 +40,12 @@
       '<button id="cp-send" title="Send"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>' +
     '</div>' +
     '<div id="cp-grip"></div>';
+
+  // --- Window selector (top-right tab bar) ---
+  var winFloat = document.createElement('div'); winFloat.id = 'cp-win-float';
+  winFloat.innerHTML = '<div id="cp-win-tabs"></div>' +
+    '<button id="cp-win-add" title="New window">+</button>';
+  document.body.appendChild(winFloat);
 
   // --- Styles ---
   var css = document.createElement('style');
@@ -70,7 +72,26 @@
     'backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);' +
     'box-shadow:0 12px 40px rgba(0,0,0,0.6);z-index:10000;flex-direction:column;gap:2px}' +
     '.cp-drop.open{display:flex}' +
-    '#cp-win-menu{left:0}#cp-more-menu{right:0}' +
+    '#cp-win-float{position:fixed;top:0;left:0;right:0;z-index:9998;display:flex;align-items:center;' +
+    'height:28px;background:rgba(30,30,30,0.95);border-bottom:1px solid rgba(255,255,255,0.06);' +
+    'font-family:"SF Mono",Menlo,Consolas,monospace;padding:0 4px;gap:0}' +
+    '#cp-win-tabs{display:flex;align-items:center;height:100%;flex:1;min-width:0;overflow-x:auto}' +
+    '#cp-win-tabs::-webkit-scrollbar{display:none}' +
+    '.cp-wtab{position:relative;background:none;border:none;color:rgba(255,255,255,0.35);' +
+    'font-size:12px;font-family:inherit;height:100%;' +
+    'padding:0 14px;cursor:pointer;transition:all .1s;white-space:nowrap;' +
+    'border-right:1px solid rgba(255,255,255,0.04)}' +
+    '.cp-wtab:hover{color:rgba(255,255,255,0.7);background:rgba(255,255,255,0.04)}' +
+    '.cp-wtab.active{color:rgba(255,255,255,0.9);background:rgba(255,255,255,0.07)}' +
+    '.cp-wtab .cp-wdel{position:absolute;top:1px;right:1px;width:18px;height:18px;' +
+    'border-radius:50%;background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);font-size:11px;line-height:18px;' +
+    'text-align:center;cursor:pointer;display:none;transition:all .1s}' +
+    '.cp-wtab:hover .cp-wdel{display:block}' +
+    '.cp-wtab .cp-wdel:hover{background:rgba(239,68,68,0.8);color:#fff}' +
+    '#cp-win-add{background:none;border:none;color:rgba(255,255,255,0.2);font-size:16px;' +
+    'padding:0 10px;height:100%;cursor:pointer;transition:color .1s}' +
+    '#cp-win-add:hover{color:rgba(255,255,255,0.6)}' +
+    '#cp-more-menu{right:0}' +
     '.cp-drop-item{background:none;border:none;color:rgba(255,255,255,0.6);font-size:11px;' +
     'padding:6px 10px;border-radius:7px;cursor:pointer;font-family:inherit;text-align:left;transition:all .12s}' +
     '.cp-drop-item:hover{background:rgba(255,255,255,0.08);color:#fff}' +
@@ -79,15 +100,6 @@
     'font-size:11px;padding:6px 10px;border-radius:7px;cursor:pointer;font-family:inherit;outline:none;width:100%}' +
     '#cp-model:hover{background:rgba(255,255,255,0.1)}' +
     '.cp-win-wrap,.cp-bar-r{position:relative}' +
-    '.cp-witem{display:flex;align-items:center;gap:4px;padding:5px 10px;border-radius:7px;cursor:pointer;transition:all .12s;font-size:11px;color:rgba(255,255,255,0.6)}' +
-    '.cp-witem:hover{background:rgba(255,255,255,0.08);color:#fff}' +
-    '.cp-widx{color:rgba(255,255,255,0.3);font-family:"SF Mono",Menlo,Consolas,monospace;font-size:10px;min-width:14px}' +
-    '.cp-wdot{color:#34d399;font-size:8px;margin-left:2px}' +
-    '.cp-wdel{display:none;cursor:pointer;color:rgba(255,255,255,0.25);font-size:12px;padding:0 2px;margin-left:auto;transition:color .12s}' +
-    '.cp-wdel:hover{color:#f87171}' +
-    '.cp-witem:hover .cp-wdel{display:block}' +
-    '.cp-wnew{color:rgba(255,255,255,0.35);font-size:11px;padding:6px 10px;border-radius:7px;cursor:pointer;transition:all .12s;text-align:center}' +
-    '.cp-wnew:hover{background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.6)}' +
     '#cp-body{padding:0 8px 8px;flex:1;display:flex;position:relative;min-height:0}' +
     '#cp-input{width:100%;background:rgba(255,255,255,0.03);' +
     'border:1px solid rgba(255,255,255,0.06);border-radius:10px;' +
@@ -269,10 +281,8 @@
     this.textContent = panel.classList.contains('collapsed') ? '+' : '−';
   });
 
-  // --- Windows dropdown ---
-  var winBtn = document.getElementById('cp-win-btn');
-  var winMenu = document.getElementById('cp-win-menu');
-  var winLabel = document.getElementById('cp-win-lbl');
+  // --- Windows tab bar ---
+  var winTabs = document.getElementById('cp-win-tabs');
 
   function apiFetch(method, path, body) {
     var opts = { method: method, headers: apiH };
@@ -280,47 +290,40 @@
     return fetch('/api/tmux/windows' + (path || ''), opts).then(function(r) { return r.json(); });
   }
 
-  function renderWinMenu(wins) {
-    var active = wins.find(function(w) { return w.active; });
-    if (active) winLabel.textContent = active.index + ':' + active.name;
-    winMenu.innerHTML = wins.map(function(w) {
-      return '<div class="cp-witem" data-idx="' + w.index + '">' +
-        '<span class="cp-widx">' + w.index + '</span>' +
-        '<span style="flex:1">' + w.name + (w.active ? '<span class="cp-wdot"> ●</span>' : '') + '</span>' +
+  function renderWinTabs(wins) {
+    winTabs.innerHTML = wins.map(function(w) {
+      return '<button class="cp-wtab' + (w.active ? ' active' : '') + '" data-idx="' + w.index + '">' +
+        w.name + '.' + w.index +
         (w.index === '0' ? '' : '<span class="cp-wdel" data-idx="' + w.index + '">✕</span>') +
-        '</div>';
-    }).join('') +
-    '<div class="cp-wnew">+ New</div>';
+        '</button>';
+    }).join('');
   }
 
   function loadWins() {
-    apiFetch('GET', '?session=' + paneId).then(function(d) { renderWinMenu(d.windows || []); });
+    apiFetch('GET', '?session=' + paneId).then(function(d) { renderWinTabs(d.windows || []); });
   }
   loadWins(); setInterval(loadWins, 5000);
 
-  winBtn.addEventListener('click', function(e) { e.stopPropagation(); winMenu.classList.toggle('open'); });
-  winMenu.addEventListener('click', function(e) {
+  winTabs.addEventListener('click', function(e) {
     var del = e.target.closest('.cp-wdel');
     if (del) {
       e.stopPropagation();
-      if (del.textContent === '?') {
-        apiFetch('DELETE', '', { session: paneId, index: del.dataset.idx }).then(function() { loadWins(); });
+      if (del.dataset.confirm) {
+        apiFetch('DELETE', '', { session: paneId, index: del.dataset.idx }).then(loadWins);
       } else {
-        del.textContent = '?'; del.style.color = '#f87171';
-        setTimeout(function() { del.textContent = '✕'; del.style.color = ''; }, 2000);
+        del.dataset.confirm = '1'; del.textContent = '?';
+        setTimeout(function() { delete del.dataset.confirm; del.textContent = '✕'; }, 2000);
       }
       return;
     }
-    var item = e.target.closest('.cp-witem');
-    if (item) {
-      apiFetch('PUT', '', { session: paneId, index: item.dataset.idx }).then(function() { winMenu.classList.remove('open'); setTimeout(loadWins, 500); });
-      return;
-    }
-    if (e.target.closest('.cp-wnew')) {
-      apiFetch('POST', '', { session: paneId }).then(function() { winMenu.classList.remove('open'); loadWins(); });
+    var tab = e.target.closest('.cp-wtab');
+    if (tab && !tab.classList.contains('active')) {
+      apiFetch('PUT', '', { session: paneId, index: tab.dataset.idx }).then(function() { setTimeout(loadWins, 300); });
     }
   });
-  document.addEventListener('click', function(e) { if (!winMenu.contains(e.target) && e.target !== winBtn) winMenu.classList.remove('open'); });
+  document.getElementById('cp-win-add').addEventListener('click', function() {
+    apiFetch('POST', '', { session: paneId }).then(loadWins);
+  });
 
   // --- Ctrl+/ focus ---
   document.addEventListener('keydown', function(e) {

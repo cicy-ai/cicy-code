@@ -2,14 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -21,29 +25,43 @@ import (
 var (
 	upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 	saasMode bool
+	publicMode bool
 )
 
 func isSaasMode() bool {
-	return os.Getenv("SAAS_MODE") == "1" || os.Getenv("MYSQL_DSN") != ""
+	return os.Getenv("SAAS_MODE") == "1"
 }
 
 func checkEnv() {
-	var missing []string
+	// Ensure tmux is in PATH (macOS Homebrew)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		for _, p := range []string{"/opt/homebrew/bin", "/usr/local/bin"} {
+			if _, e := os.Stat(p + "/tmux"); e == nil {
+				os.Setenv("PATH", p+":"+os.Getenv("PATH"))
+				break
+			}
+		}
+	}
 
 	// tmux required
 	if _, err := exec.LookPath("tmux"); err != nil {
-		missing = append(missing, "tmux")
+		log.Fatalf("[startup] missing required dependency: tmux")
 	}
 
-	// code-server: check installed, install if missing, start if not running
-	if !saasMode {
-		ensureCodeServer()
+	// Always ensure master pane (w-10001)
+	ensureMasterPane()
+
+	// Check if first run (no worker panes in agent_config)
+	var count int
+	store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE pane_id != 'w-10001:main.0'").Scan(&count)
+	if count == 0 {
+		runSetup()
 	}
 
-	if len(missing) > 0 {
-		log.Fatalf("[startup] missing required dependencies: %s", strings.Join(missing, ", "))
-	}
+	ensureCodeServer()
 }
+
+var csCmd *exec.Cmd
 
 func ensureCodeServer() {
 	// Check if installed
@@ -70,19 +88,24 @@ func ensureCodeServer() {
 	out, _ := exec.Command("sh", "-c", fmt.Sprintf("lsof -i:%s -t 2>/dev/null || pgrep -f 'code-server.*%s'", csPort, csPort)).Output()
 	if len(strings.TrimSpace(string(out))) == 0 {
 		log.Printf("[code-server] starting on port %s...", csPort)
-		cmd := exec.Command(path, "--bind-addr", "127.0.0.1:"+csPort, "--auth", "none")
-		cmd.Stdout = nil
-		cmd.Stderr = nil
-		cmd.Start()
+		csCmd = exec.Command(path, "--bind-addr", "127.0.0.1:"+csPort, "--auth", "none")
+		csCmd.Stdout = nil
+		csCmd.Stderr = nil
+		csCmd.Start()
 		time.Sleep(2 * time.Second)
 	}
 	log.Printf("[code-server] ready on port %s", csPort)
 }
 
+const version = "0.2.1"
+
 func main() {
 	// Parse flags
 	for _, arg := range os.Args[1:] {
 		switch arg {
+		case "--version", "-v":
+			fmt.Println("cicy-code " + version)
+			os.Exit(0)
 		case "--help", "-h":
 			fmt.Println(`cicy-code - AI-powered development environment
 
@@ -91,26 +114,30 @@ Usage: cicy-code [options]
 Options:
   --help, -h    Show this help
   --cn          Use Chinese mirrors (npm + GitHub proxy)
+  --saas        Enable SaaS mode (or SAAS_MODE=1)
+  --public      Listen on 0.0.0.0 (default: 127.0.0.1)
+  --audit       Enable mitmproxy audit mode
 
 Environment:
   PORT          API port (default: 18008 local, 8008 saas)
   SQLITE_PATH   SQLite database path (default: ~/.cicy/data.db)
   KV_PATH       KV cache path (default: ~/.cicy/kv.json)
-  MYSQL_DSN     MySQL connection (enables saas mode)
-  SAAS_MODE=1   Force saas mode
+  MYSQL_DSN     MySQL connection string
 
 Data directory: ~/.cicy/`)
 			os.Exit(0)
 		case "--cn":
 			os.Setenv("CN_MIRROR", "1")
+		case "--saas":
+			os.Setenv("SAAS_MODE", "1")
+		case "--public":
+			publicMode = true
+		case "--audit":
+			auditMode = true
 		}
 	}
 
 	saasMode = isSaasMode()
-
-	if !saasMode {
-		checkEnv()
-	}
 
 	initKV()
 	initRedis()
@@ -118,10 +145,26 @@ Data directory: ~/.cicy/`)
 	store.Migrate()
 	defer store.Close()
 
-	// Health
+	if !saasMode {
+		checkEnv()
+		if auditMode {
+			initAudit()
+		}
+		// checkEnv 完成后才启动 watcher，避免和 setup 竞争创建 worker
+		go startWatcher()
+		go startTmuxHealth()
+	} else {
+		// SaaS 模式直接启动
+		if auditMode {
+			initAudit()
+		}
+		go startWatcher()
+		go startTmuxHealth()
+	}
 	http.HandleFunc("/health", w(handleHealth))
 	http.HandleFunc("/api/health", w(handleHealth))
 	http.HandleFunc("/api/ping", w(handlePing))
+	http.HandleFunc("/api/mode", w(handleMode))
 
 	// Chat
 	http.HandleFunc("/api/chat/push", wa(handleChatPush))
@@ -197,6 +240,14 @@ Data directory: ~/.cicy/`)
 
 	// Settings
 	http.HandleFunc("/api/settings/global", wa(handleSettings))
+
+	// Audit (mitmproxy management)
+	http.HandleFunc("/api/audit/status", wa(handleAuditStatus))
+	http.HandleFunc("/api/audit/start", wa(handleAuditStart))
+	http.HandleFunc("/api/audit/stop", wa(handleAuditStop))
+	http.HandleFunc("/api/audit/restart", wa(handleAuditRestart))
+	http.HandleFunc("/api/audit/addons", wa(handleAuditAddons))
+	http.HandleFunc("/api/audit/rules", wa(handleAuditRules))
 
 	// Stats
 	http.HandleFunc("/api/stats/traffic", wa(handleStatsTraffic))
@@ -354,33 +405,127 @@ Data directory: ~/.cicy/`)
 		}
 	})
 
-	go startWatcher()
-	go startTmuxHealth()
 	initHTTPLogConsumer()
-	log.Printf("cicy-code-api starting on :%s", port)
+	bind := "127.0.0.1"
+	if publicMode {
+		bind = "0.0.0.0"
+	}
+	log.Printf("cicy-code-api starting on %s:%s", bind, port)
 
-	// Local mode: auto-open browser with token
+	// Graceful shutdown: stop code-server on exit
+	if !saasMode {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-sigCh
+			log.Println("[shutdown] stopping...")
+			if csCmd != nil && csCmd.Process != nil {
+				log.Println("[shutdown] stopping code-server")
+				csCmd.Process.Kill()
+			}
+			if auditMode {
+				stopMitmproxy()
+			}
+			os.Exit(0)
+		}()
+	}
+
+	// Auto-open browser with token
 	if !saasMode {
 		go func() {
 			time.Sleep(500 * time.Millisecond)
 			token := getFirstToken()
-			url := fmt.Sprintf("http://localhost:%s", port)
+			host := "localhost"
+			if publicMode {
+				host = "0.0.0.0"
+			}
+			url := fmt.Sprintf("http://%s:%s", host, port)
 			if token != "" {
 				url += "/?token=" + token
+				fmt.Printf("\n🔑 Token: %s\n", token)
 			}
-			log.Printf("[startup] opening %s", url)
+			fmt.Printf("🌐 URL: %s\n\n", url)
 			exec.Command("open", url).Start()           // macOS
 			exec.Command("xdg-open", url).Start()       // Linux
 		}()
 	}
 
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Fatal(http.ListenAndServe(bind+":"+port, nil))
 }
 
 func getFirstToken() string {
-	var token string
-	store.QueryRow("SELECT token FROM tokens LIMIT 1").Scan(&token)
+	home, _ := os.UserHomeDir()
+	gpath := filepath.Join(home, "global.json")
+
+	// 读取或创建 global.json
+	cfg := map[string]interface{}{}
+	if data, err := os.ReadFile(gpath); err == nil {
+		json.Unmarshal(data, &cfg)
+	}
+
+	// 有 token 直接返回
+	if t, ok := cfg["api_token"].(string); ok && t != "" {
+		return t
+	}
+
+	// 生成 token 并写入
+	b := make([]byte, 16)
+	rand.Read(b)
+	token := "cicy_" + hex.EncodeToString(b)
+	cfg["api_token"] = token
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	os.WriteFile(gpath, data, 0644)
 	return token
+}
+
+func ensureMasterPane() {
+	session := "w-10001"
+	paneID := session + ":main.0"
+
+	// Check if already in DB
+	var count int
+	store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE pane_id=?", paneID).Scan(&count)
+	if count > 0 {
+		// Exists in DB, ensure tmux session alive
+		if !sessExists(paneID, session) {
+			home, _ := os.UserHomeDir()
+			ws := filepath.Join(home, "workers", session)
+			os.MkdirAll(ws, 0755)
+			exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", ws).Run()
+			exec.Command("tmux", "send-keys", "-t", paneID, "export TERM=xterm-256color", "Enter").Run()
+			log.Printf("[startup] recreated tmux session %s", session)
+		}
+		// Ensure ttyd running
+		if !isPortListening(10001) {
+			if err := startInstance(paneID, 10001, getFirstToken()); err != nil {
+				log.Printf("[startup] master ttyd start error: %v", err)
+			}
+			waitPort(10001, 10*time.Second)
+		}
+		log.Printf("[startup] master pane %s ready (ttyd :10001)", paneID)
+		return
+	}
+
+	// First run: create from scratch
+	home, _ := os.UserHomeDir()
+	ws := filepath.Join(home, "workers", session)
+	os.MkdirAll(ws, 0755)
+	exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", ws).Run()
+	exec.Command("tmux", "send-keys", "-t", paneID, "export TERM=xterm-256color", "Enter").Run()
+
+	// Insert agent_config
+	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()),
+		paneID, "Master", 10001, ws, "", "{}", "master", "")
+
+	// Start ttyd
+	token := getFirstToken()
+	if err := startInstance(paneID, 10001, token); err != nil {
+		log.Printf("[startup] master ttyd start error: %v", err)
+	}
+	waitPort(10001, 10*time.Second)
+
+	log.Printf("[startup] master pane %s created (ttyd :10001)", paneID)
 }
 
 // w = cors only, wa = cors + auth
@@ -400,6 +545,11 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 }
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"status": "ok", "source": "cicy-code-api"})
+}
+func handleMode(w http.ResponseWriter, r *http.Request) {
+	mode := "local"
+	if saasMode { mode = "saas" }
+	J(w, M{"mode": mode})
 }
 func handlePing(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"pong": "ok", "version": "2026.0316.1", "server_datetime": time.Now().Format(time.RFC3339)})

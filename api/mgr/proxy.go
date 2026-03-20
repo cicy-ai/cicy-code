@@ -20,7 +20,11 @@ var codeServerInjectMtime int64
 func init() {
 	csPort := os.Getenv("CS_PORT")
 	if csPort == "" {
-		csPort = "8002"
+		if os.Getenv("SAAS_MODE") != "1" && os.Getenv("MYSQL_DSN") == "" {
+			csPort = "18080"
+		} else {
+			csPort = "8002"
+		}
 	}
 	target, _ := url.Parse("http://127.0.0.1:" + csPort)
 	codeServerProxy = httputil.NewSingleHostReverseProxy(target)
@@ -81,7 +85,11 @@ func handleCodeServer(w http.ResponseWriter, r *http.Request) {
 	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		csPort := os.Getenv("CS_PORT")
 		if csPort == "" {
-			csPort = "8002"
+			if os.Getenv("SAAS_MODE") != "1" && os.Getenv("MYSQL_DSN") == "" {
+				csPort = "18080"
+			} else {
+				csPort = "8002"
+			}
 		}
 		wsProxy(w, r, "127.0.0.1:"+csPort)
 		return
