@@ -141,7 +141,7 @@ func installSelectedAgents(selected []string) {
 	agentConfigs := map[string]Tool{
 		"kiro-cli": {"kiro-cli", "kiro-cli", fmt.Sprintf("curl -fsSL https://cli.kiro.dev/install -o /tmp/kiro-install.sh && yes | bash /tmp/kiro-install.sh && echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> %s && export PATH=\"$HOME/.local/bin:$PATH\"", shellRC()), true, false},
 		"claude": {"claude", "claude", "sudo npm install -g @anthropic-ai/claude-code", true, false},
-		"copilot": {"copilot", "copilot", "curl -fsSL https://gh.io/copilot-install | bash", true, false},
+		"copilot": {"copilot", "copilot", "brew install copilot-cli", true, false},
 		"gemini": {"gemini", "gemini", "sudo npm install -g @google/gemini-cli", true, false},
 		"codex": {"codex", "codex", "sudo npm install -g @openai/codex", true, false},
 		"opencode": {"opencode", "opencode", fmt.Sprintf("curl -fsSL https://opencode.ai/install | bash && echo 'export PATH=\"$HOME/.opencode/bin:$PATH\"' >> %s && export PATH=\"$HOME/.opencode/bin:$PATH\"", shellRC()), true, false},
