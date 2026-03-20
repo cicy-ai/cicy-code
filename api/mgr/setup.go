@@ -193,6 +193,13 @@ func createSelectedWorkers(selected []string) {
 	fmt.Println("\n🚀 创建选中的 Workers...")
 	for _, name := range selected {
 		if config, exists := workerConfigs[name]; exists {
+			// Skip if agent already exists in DB
+			var count int
+			store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE agent_type=?", config.Tool).Scan(&count)
+			if count > 0 {
+				fmt.Printf("  ⏭ %s - 已存在，跳过\n", config.Name)
+				continue
+			}
 			createWorker(0, config.Name, config.Tool, config.Desc, "")
 		}
 	}
