@@ -1,36 +1,73 @@
 # cicy-code
 
-AI Agent 协作开发平台 — 让一个人同时指挥多个 AI Agent 并行干活的云端工作站。
+AI Agent 协作开发平台 — 让一个人同时指挥多个 AI Agent 并行干活的移动 AI 工具包。
 
 ## 架构
 
 ```
 cicy-code/
 ├── app/          # React + Vite 前端 (~4500 行 TypeScript)
-├── api/          # Go 后端 (ttyd-manager)
+├── api/          # Go 后端 (ttyd-manager), 单 binary 编译
+│   └── mgr/      # 主程序 + 嵌入资源 (inject HTML, tmux.conf, UI)
 ├── landing/      # 落地页 (CF Worker + Static Assets)
+├── scripts/      # Supervisor 配置 + 部署脚本
+├── docs/         # 文档
 └── docker-compose.yml
 ```
 
 ## 快速启动
 
 ```bash
+# 一键安装运行（推荐）
+npx cicy-code
+
+# 访问
+open http://localhost:18008/?token=$(jq -r '.api_token' ~/global.json)
+```
+
+### 开发模式
+
+```bash
 # 前端开发
 cd app && npm run dev    # http://localhost:6902
 
-# 后端开发
-cd api && go run .       # http://localhost:8008
+# 后端开发（从文件系统加载资源，支持热重载）
+cd api && go run ./mgr/ --dev   # http://localhost:18008
 
 # 构建
-make build               # 构建前后端
+make build
 ```
 
 ### 依赖
 
-- Go 1.18+
+- Go 1.25+
 - Node.js 20+
-- MySQL + Redis
 - tmux
+- SQLite（本地模式，自动创建）/ MySQL + Redis（SaaS 模式）
+
+## 预置 AI Agent
+
+6 大内置 Agent，固定端口 10001-10006：
+
+| 端口 | Agent | 说明 | 必装 |
+|------|-------|------|------|
+| 10001 | Kiro CLI | 多功能 AI 助手 | ✅ |
+| 10002 | Claude Code | Anthropic 代码助手 | |
+| 10003 | GitHub Copilot CLI | GitHub AI 助手 | |
+| 10004 | Gemini CLI | Google AI 助手 | |
+| 10005 | OpenAI Codex | 代码生成助手 | |
+| 10006 | OpenCode | 开源代码助手 | ✅ |
+
+首次安装时选择需要的 Agent，之后启动自动恢复，不重复创建。用户自建 Worker 从端口 20001+ 动态分配。
+
+## 端口说明
+
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| API | 18008 | 主服务，含嵌入式管理 UI |
+| 内置 Agent | 10001-10006 | 6 大 Agent 终端 (ttyd) |
+| 用户 Worker | 20001+ | 用户自建 Worker，动态分配 |
+| code-server | 18080 | 代码编辑器 |
 
 ## 技术栈
 
@@ -38,12 +75,11 @@ make build               # 构建前后端
 |----|------|
 | 前端 | React 19 + Vite + TailwindCSS |
 | 编辑器 | code-server (VS Code) |
-| 终端 | gotty (魔改) + WebFrame (Electron webview / iframe) |
-| 后端 | Go (ttyd-manager) |
+| 终端 | ttyd-go (内嵌) + WebFrame (Electron webview / iframe) |
+| 后端 | Go (单 binary, `//go:embed` 资源内嵌) |
 | 终端管理 | tmux |
-| 数据库 | MySQL + Redis |
-| 流量监控 | mitmproxy |
-| 外网访问 | CF Tunnel / FRP |
+| 数据库 | SQLite (本地) / MySQL + Redis (SaaS) |
+| 流量监控 | mitmproxy (审计模式) |
 | 桌面 | Electron (可选) |
 
 ## 前端结构
@@ -115,22 +151,41 @@ app/src/
 
 ## 后端 API
 
-单 Go binary (ttyd-manager)，嵌入 gotty，goroutine per pane。
+单 Go binary (ttyd-manager)，内嵌 ttyd-go，goroutine per pane。
 
 - HTTP API: Pane CRUD / Agent 管理 / Chat 历史 / 设置 / 流量统计
 - WebSocket 代理: 路由到对应 ttyd-go 实例
 - SSE 实时推送: Agent 状态变更通知
-- fsnotify: 实时监控 pane 状态写入 Redis
+- `//go:embed`: inject HTML、tmux.conf、管理 UI 全部编译进 binary
 
 ```bash
 TOKEN=$(jq -r '.api_token' ~/global.json)
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8008/api/tmux/panes
+curl -H "Authorization: Bearer $TOKEN" http://localhost:18008/api/tmux/panes
 ```
 
 ## 部署
 
-见 [DEPLOY.md](DEPLOY.md)
+三种部署层级，详见 [部署架构文档](docs/deploy-architecture.md)：
 
-## 路线图
+| 层级 | 模式 | 适用 |
+|------|------|------|
+| 🏠 [本机部署](docs/local-deploy.md) | `npx cicy-code` | 开发者自用 |
+| ☁️ Cloud Run 试用 | `--saas --public` | 新用户体验 |
+| 🚀 PRO VM | 独占 VM + Supervisor | 付费订阅 |
 
-见 [ROADMAP.md](ROADMAP.md)
+### 进程管理
+
+Supervisor 配置位于 `scripts/` 目录，通过符号链接部署：
+
+```bash
+sudo ln -sf $(pwd)/scripts/cicy-code.supervisor.conf /etc/supervisor/conf.d/cicy-code.conf
+sudo supervisorctl reread && sudo supervisorctl update
+```
+
+## 文档索引
+
+- [本地部署指南](docs/local-deploy.md) — 安装、Supervisor、launchd、`--dev` 模式
+- [部署架构](docs/deploy-architecture.md) — 本机 / Cloud Run / PRO VM 三层对比
+- [终端问题排查](docs/terminal-clear-error.md) — "terminal does not support clear" 修复
+- [审计模式](docs/audit.md) — mitmproxy 流量审计
+- [发版流程](docs/release.md) — Tag 触发 CI/CD
