@@ -87,7 +87,7 @@ cicy-code-api --saas --public --audit
 
 ## 内嵌 Addon
 
-二进制内嵌以下默认 addon（编译时通过 `go:embed monitor` 打包）：
+Monitor 脚本源码位于项目根目录 `mitmproxy/`，构建时由 `build.sh` 复制到 `api/mgr/monitor/`，通过 `go:embed monitor` 打包进二进制：
 
 | 文件 | 用途 |
 |------|------|

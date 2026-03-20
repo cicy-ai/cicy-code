@@ -75,10 +75,8 @@ Cloud Run 实例启动（cicy-code --saas --public）
 ```dockerfile
 FROM golang:1.25 AS builder
 WORKDIR /app
-COPY api/go.mod api/go.sum ./
-RUN go mod download
-COPY api/ .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o cicy-code ./mgr/
+COPY . .
+RUN ./build.sh build linux amd64
 
 FROM node:20-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -90,7 +88,7 @@ RUN npm install -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex
 RUN curl -fsSL https://cli.kiro.dev/install -o /tmp/kiro-install.sh && yes | bash /tmp/kiro-install.sh
 RUN curl -fsSL https://opencode.ai/install | bash
 
-COPY --from=builder /app/cicy-code /usr/local/bin/cicy-code
+COPY --from=builder /app/api/cicy-code /usr/local/bin/cicy-code
 
 RUN useradd -m -s /bin/bash cicy
 USER cicy
@@ -273,7 +271,7 @@ server {
 └────────────────────────────────┘
 ```
 
-部署参考：项目根目录 `docker-compose.yml` 包含 MySQL + Redis + Nginx + phpMyAdmin 的完整编排。
+部署参考：项目根目录 `docker-compose.yml` 包含 MySQL + Redis + Nginx + phpMyAdmin 的完整编排（mitmproxy 已嵌入 Go binary，不再需要独立容器）。
 
 ## 环境变量汇总
 
