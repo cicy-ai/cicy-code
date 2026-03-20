@@ -5,12 +5,19 @@ import Workspace from './components/Workspace';
 import Desktop from './components/Desktop';
 import Login from './components/Login';
 import ProvisionScreen from './components/ProvisionScreen';
+import AuditDashboard from './components/audit/AuditDashboard';
 import { TokenManager } from './services/tokenManager';
 import DevPanel from './components/dev/DevPanel';
 import apiService from './services/api';
+import config from './config';
 
-function parseHash(): { view: 'desktop' | 'workspace'; agentId: string } {
+type ViewType = 'desktop' | 'workspace' | 'audit';
+
+function parseHash(): { view: ViewType; agentId: string } {
   const hash = window.location.hash;
+  if (hash.startsWith('#/audit')) {
+    return { view: 'audit', agentId: '' };
+  }
   if (hash.startsWith('#/agent/')) {
     const m = hash.match(/\/agent\/([^/]+)/);
     return { view: 'workspace', agentId: m ? decodeURIComponent(m[1]).replace(/:.*$/, '') : 'w-10001' };
@@ -28,6 +35,11 @@ function Main() {
     return () => window.removeEventListener('hashchange', onChange);
   }, []);
 
+  // On audit.cicy-ai.com, always show audit dashboard
+  if (config.isAudit) {
+    return <AuditDashboard />;
+  }
+
   // Ensure w-10001 exists on login
   useEffect(() => {
     if (!token) return;
@@ -43,8 +55,6 @@ function Main() {
   };
 
   const handleProvisionReady = useCallback((_backend: string) => {
-    // Provision done — redirect to workspace subdomain
-    // Extract user slug from token payload
     const t = TokenManager.getToken();
     if (t) {
       try {
@@ -66,6 +76,11 @@ function Main() {
   if (!token) return <Login />;
 
   if (provisioning) return <ProvisionScreen onReady={handleProvisionReady} />;
+
+  // #/audit → Audit Dashboard
+  if (route.view === 'audit') {
+    return <AuditDashboard onBack={() => { window.location.hash = '#/agent/w-10001'; }} />;
+  }
 
   // No hash → redirect to default agent
   if (route.view !== 'workspace') {

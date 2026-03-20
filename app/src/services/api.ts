@@ -114,6 +114,14 @@ const api = {
   renameWindow:     (session: string, index: string, name: string) => http.patch('/api/tmux/windows', { session, index, name }),
   deleteWindow:     (session: string, index: string)       => http.delete('/api/tmux/windows', { data: { session, index } }),
   selectWindow:     (session: string, index: string)       => http.put('/api/tmux/windows', { session, index }),
+
+  // Audit Dashboard
+  getAuditDashboard: (user: string, days = 7)             => http.get(`/api/audit/dashboard?user=${user}&days=${days}`),
+  getAuditUsage:     (user: string, limit = 100)           => http.get(`/api/audit/usage?user=${user}&limit=${limit}`),
+  getAuditAdminOverview: ()                                => http.get('/api/audit/admin/overview'),
+  getAuditStatus:    ()                                    => http.get('/api/audit/status'),
+  registerAuditToken: (userId: string, plan = 'free')      => http.post('/api/audit/register', { user_id: userId, plan }),
+  getSetupGuide:     ()                                    => http.get('/setup'),
 };
 
 export default api;

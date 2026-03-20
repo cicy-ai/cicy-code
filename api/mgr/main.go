@@ -332,6 +332,25 @@ Data directory: ~/.cicy/`)
 	http.HandleFunc("/api/audit/addons", wa(handleAuditAddons))
 	http.HandleFunc("/api/audit/rules", wa(handleAuditRules))
 
+	// Audit Dashboard (SaaS multi-tenant)
+	http.HandleFunc("/api/audit/register", wa(handleAuditRegister))
+	http.HandleFunc("/api/audit/dashboard", wa(handleAuditDashboard))
+	http.HandleFunc("/api/audit/usage", wa(handleAuditUsage))
+	http.HandleFunc("/api/audit/admin/overview", wa(handleAuditAdminOverview))
+	http.HandleFunc("/api/audit/live", corsM(func(w http.ResponseWriter, r *http.Request) {
+		t := r.URL.Query().Get("token")
+		if t == "" || !verifyToken(t) {
+			httpErr(w, 401, "Not authenticated")
+			return
+		}
+		handleAuditLive(w, r)
+	}))
+
+	// Audit Public (CA cert, install script, setup guide)
+	http.HandleFunc("/ca.pem", corsM(handleCACert))
+	http.HandleFunc("/install-ca", corsM(handleInstallCA))
+	http.HandleFunc("/setup", corsM(handleSetupGuide))
+
 	// Stats
 	http.HandleFunc("/api/stats/traffic", wa(handleStatsTraffic))
 	http.HandleFunc("/api/stats/traffic/raw", wa(handleStatsTrafficRaw))
@@ -420,11 +439,16 @@ Data directory: ~/.cicy/`)
 	http.DefaultServeMux = http.NewServeMux()
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// API/特殊路径走原有 handler
-		for _, prefix := range []string{"/api/", "/ttyd/", "/code/", "/mitm/", "/pma/", "/static/", "/v1/", "/oauth/", "/stt", "/health"} {
+		for _, prefix := range []string{"/api/", "/ttyd/", "/code/", "/mitm/", "/pma/", "/static/", "/v1/", "/oauth/", "/stt", "/health", "/ca.pem", "/install-ca", "/setup"} {
 			if strings.HasPrefix(r.URL.Path, prefix) || r.URL.Path == prefix {
 				defaultHandler.ServeHTTP(w, r)
 				return
 			}
+		}
+		// audit.cicy-ai.com → audit SPA
+		if strings.Contains(r.Host, "audit") {
+			handleAuditSPA(w, r)
+			return
 		}
 		// 其他走嵌入 UI
 		uiHandler.ServeHTTP(w, r)
