@@ -203,10 +203,55 @@ npx cicy-code@latest
 如果仍有残留重复 Worker，可以清理数据库：
 
 ```bash
-sqlite3 ~/.cicy/data.db "SELECT id, name, port FROM panes;"
-# 删除多余的 pane（保留需要的）
-sqlite3 ~/.cicy/data.db "DELETE FROM panes WHERE id = '多余的ID';"
+sqlite3 ~/.cicy/data.db "SELECT pane_id, title, ttyd_port, agent_type FROM agent_config ORDER BY ttyd_port;"
+# 删除多余的记录
+sqlite3 ~/.cicy/data.db "DELETE FROM agent_config WHERE pane_id = 'w-2000x:main.0';"
 ```
+
+### open terminal failed: terminal does not support clear
+
+**现象**：AI Agent（如 Claude、Gemini）启动时报 `open terminal failed: terminal does not support clear` 或终端功能异常。
+
+**根因**：这是一个 **TERM 环境变量竞态问题**。启动流程中：
+
+1. tmux 创建新 session 时，shell 默认 `TERM=screen`（或为空）
+2. 程序通过 `tmux send-keys` 异步发送 `export TERM=xterm-256color`
+3. 紧接着又发送 `clear` 或启动 AI 工具
+4. 但 `export TERM` 命令可能还没执行完，shell 仍在用旧的 TERM 值
+5. 此时 `clear` 或 AI 工具调用 `tput clear` 失败 → 报错
+
+**本质**：`tmux send-keys` 是异步的——只是把按键发到 tmux 输入缓冲区，不等命令实际执行完成。多条 `send-keys` 之间没有同步机制。
+
+**解决方案**：
+
+方式一：在 tmux 配置中全局设置 TERM（推荐）
+```bash
+# ~/.tmux.conf
+set -g default-terminal "xterm-256color"
+```
+```bash
+tmux kill-server  # 重启 tmux 使配置生效
+```
+
+方式二：手动修复（已启动的 session）
+```bash
+# 进入对应的 tmux session
+tmux attach -t w-20001
+# 手动设置
+export TERM=xterm-256color
+# 重新启动 AI 工具
+```
+
+方式三：确保 terminfo 数据库完整（macOS）
+```bash
+# 检查 xterm-256color 是否存在
+infocmp xterm-256color >/dev/null 2>&1 && echo "OK" || echo "MISSING"
+
+# 如果缺失，安装 ncurses
+brew install ncurses
+```
+
+**注意**：macOS 自带的 terminfo 数据库位于 `/usr/share/terminfo/`，Homebrew 安装的 ncurses 位于 `/usr/local/opt/ncurses/share/terminfo/`。如果系统 terminfo 中缺少 `xterm-256color`，需要设置 `TERMINFO_DIRS` 或用方式一全局指定。
 
 ### gotty/终端服务无法启动
 
