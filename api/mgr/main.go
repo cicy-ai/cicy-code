@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -32,6 +35,73 @@ func isSaasMode() bool {
 	return os.Getenv("SAAS_MODE") == "1"
 }
 
+//go:embed tmux.conf
+var embeddedTmuxConf string
+
+// parseTmuxConfVersion extracts version number from "# cicy-code tmux.conf vN" header
+func parseTmuxConfVersion(content string) int {
+	re := regexp.MustCompile(`# cicy-code tmux\.conf v(\d+)`)
+	m := re.FindStringSubmatch(content)
+	if len(m) == 2 {
+		v := 0
+		fmt.Sscanf(m[1], "%d", &v)
+		return v
+	}
+	return 0
+}
+
+// ensureTmuxConf checks ~/.tmux.conf version against bundled version, prompts user to update
+func ensureTmuxConf() {
+	home, _ := os.UserHomeDir()
+	confPath := filepath.Join(home, ".tmux.conf")
+
+	bundledVer := parseTmuxConfVersion(embeddedTmuxConf)
+	if bundledVer == 0 {
+		return
+	}
+
+	existing, err := os.ReadFile(confPath)
+	if err != nil {
+		// No existing file, just write it
+		os.WriteFile(confPath, []byte(embeddedTmuxConf), 0644)
+		log.Printf("[startup] created ~/.tmux.conf (v%d)", bundledVer)
+		reloadTmuxConf(confPath)
+		return
+	}
+
+	existingVer := parseTmuxConfVersion(string(existing))
+	if existingVer >= bundledVer {
+		return // up to date
+	}
+
+	// Prompt user
+	if existingVer == 0 {
+		fmt.Printf("⚠️  检测到已有 ~/.tmux.conf（非 cicy-code 版本），内置版本 v%d 修复了终端兼容性问题。\n", bundledVer)
+	} else {
+		fmt.Printf("⚠️  ~/.tmux.conf 版本 v%d → 内置 v%d，新版修复了终端兼容性问题。\n", existingVer, bundledVer)
+	}
+	fmt.Print("是否更新？(Y/n): ")
+
+	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(strings.ToLower(input))
+
+	if input == "" || input == "y" || input == "yes" {
+		// Backup old config
+		backupPath := confPath + ".bak"
+		os.WriteFile(backupPath, existing, 0644)
+		os.WriteFile(confPath, []byte(embeddedTmuxConf), 0644)
+		log.Printf("[startup] updated ~/.tmux.conf v%d → v%d (backup: %s)", existingVer, bundledVer, backupPath)
+		reloadTmuxConf(confPath)
+	} else {
+		log.Printf("[startup] skipped ~/.tmux.conf update (user declined)")
+	}
+}
+
+func reloadTmuxConf(confPath string) {
+	exec.Command("tmux", "source-file", confPath).Run()
+}
+
 func checkEnv() {
 	// Ensure tmux is in PATH (macOS Homebrew)
 	if _, err := exec.LookPath("tmux"); err != nil {
@@ -47,6 +117,9 @@ func checkEnv() {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		log.Fatalf("[startup] missing required dependency: tmux")
 	}
+
+	// Ensure ~/.tmux.conf is up to date
+	ensureTmuxConf()
 
 	// Always ensure master pane (w-10001)
 	ensureMasterPane()
