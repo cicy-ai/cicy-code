@@ -3,7 +3,7 @@ const VER = '1';
 const COS_BASE = `https://cicy-1372193042.cos.ap-shanghai.myqcloud.com/app/v${VER}`;
 const MGR_API = 'https://api.cicy-ai.com';
 const CN_COUNTRIES = new Set(['CN', 'HK', 'MO', 'TW']);
-const SKIP_SLUGS = new Set(['app', 'api', 'dev', 'dev-api', 'www', 'tn', 'ws']);
+const SKIP_SLUGS = new Set(['app', 'api', 'dev', 'dev-api', 'www', 'tn', 'ws', 'audit', 'audit-api']);
 
 class AssetRewriter {
   constructor(cdn) { this.cdn = cdn; }

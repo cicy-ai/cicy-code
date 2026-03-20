@@ -15,3 +15,6 @@ dist
 cicy-code-linux*
 mitmproxy/__pycache__/
 app/worker/public/
+api/cicy-code
+api/global.json
+audit-worker/.wrangler/

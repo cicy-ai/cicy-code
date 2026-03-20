@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CiCy Audit — AI Traffic Audit Service</title>
+  <meta name="description" content="Monitor every AI API call — tokens, costs, models. One proxy line, all providers." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+          colors: {
+            vsc: { bg: '#0f0f0f', bg2: '#181818', bg3: '#222', hover: '#2a2a2e', border: '#2a2a2e', text: '#a0a0a0', muted: '#555', accent: '#3b82f6' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0f0f0f; color: #e5e5e5; font-family: 'Inter', system-ui, sans-serif; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 999px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.2); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.5} }
+    .spin { animation: spin 1s linear infinite; }
+    .pulse { animation: pulse 2s ease-in-out infinite; }
+    .fade-in { animation: fadeIn .3s ease; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none} }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@19",
+      "react-dom/client": "https://esm.sh/react-dom@19/client",
+      "react/jsx-runtime": "https://esm.sh/react@19/jsx-runtime"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import React from 'react';
+    import { createRoot } from 'react-dom/client';
+    const { useState, useEffect, useRef, useCallback, createElement: h } = React;
+
+    // ── API ──
+    const API = '';
+    const token = () => localStorage.getItem('audit_token') || '';
+    const headers = () => ({ 'Content-Type': 'application/json', ...(token() ? { Authorization: `Bearer ${token()}` } : {}) });
+    const api = {
+      get: (p) => fetch(API + p, { headers: headers() }).then(r => r.json()),
+      post: (p, b) => fetch(API + p, { method: 'POST', headers: headers(), body: JSON.stringify(b) }).then(r => r.json()),
+    };
+
+    // ── Helpers ──
+    const fmtCost = v => v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
+    const fmtTokens = v => v >= 1e6 ? `${(v/1e6).toFixed(1)}M` : v >= 1e3 ? `${(v/1e3).toFixed(1)}K` : `${v}`;
+    const fmtTime = ts => new Date(ts * 1000).toLocaleTimeString('en-US', { hour12: false });
+    const relTime = ts => { const d = Date.now()/1000 - ts; return d < 60 ? `${~~d}s` : d < 3600 ? `${~~(d/60)}m` : `${~~(d/3600)}h`; };
+
+    // ── Icons (inline SVG) ──
+    const Icon = ({ d, size = 16, cls = '' }) => h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', className: cls },
+      Array.isArray(d) ? d.map((p, i) => h('path', { key: i, d: p })) : h('path', { d }));
+    const icons = {
+      chart: ['M18 20V10', 'M12 20V4', 'M6 20v-6'],
+      activity: ['M22 12h-4l-3 9L9 3l-3 9H2'],
+      zap: ['M13 2L3 14h9l-1 10 10-12h-9l1-10'],
+      settings: ['M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z', 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z'],
+      clock: ['M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z', 'M12 6v6l4 2'],
+      dollar: ['M12 2v20', 'M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6'],
+      hash: ['M4 9h16', 'M4 15h16', 'M10 3l-2 18', 'M16 3l-2 18'],
+      cpu: ['M4 4h16v16H4z', 'M9 9h6v6H9z', 'M9 1v3', 'M15 1v3', 'M9 20v3', 'M15 20v3', 'M20 9h3', 'M20 14h3', 'M1 9h3', 'M1 14h3'],
+      trend: ['M23 6l-9.5 9.5-5-5L1 18'],
+      copy: ['M20 9h-9a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2z', 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'],
+      check: ['M20 6L9 17l-5-5'],
+      download: ['M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3'],
+      arrowLeft: ['M19 12H5', 'M12 19l-7-7 7-7'],
+      refresh: ['M23 4v6h-6', 'M1 20v-6h6', 'M3.51 9a9 9 0 0 1 14.85-3.36L23 10', 'M20.49 15a9 9 0 0 1-14.85 3.36L1 14'],
+    };
+
+    // ── CopyBtn ──
+    function CopyBtn({ text }) {
+      const [ok, setOk] = useState(false);
+      return h('button', { onClick: () => { navigator.clipboard.writeText(text); setOk(true); setTimeout(() => setOk(false), 2000); },
+        className: 'ml-2 p-1 rounded hover:bg-white/10 text-vsc-muted hover:text-white transition-colors shrink-0' },
+        ok ? h(Icon, { d: icons.check, size: 14, cls: 'text-emerald-400' }) : h(Icon, { d: icons.copy, size: 14 }));
+    }
+
+    // ── StatCard ──
+    function StatCard({ icon, label, value, sub, color = 'text-blue-400' }) {
+      return h('div', { className: 'bg-vsc-bg2 rounded-xl p-4 border border-vsc-border' },
+        h('div', { className: 'flex items-center gap-2 mb-2' },
+          h(Icon, { d: icon, size: 16, cls: color }),
+          h('span', { className: 'text-xs text-vsc-text' }, label)),
+        h('div', { className: 'text-2xl font-bold text-white tracking-tight' }, value),
+        sub && h('div', { className: 'text-xs text-vsc-muted mt-1' }, sub));
+    }
+
+    // ── BarChart ──
+    function BarChart({ data, maxVal }) {
+      const mx = maxVal || Math.max(...data.map(d => d.v), 1);
+      return h('div', { className: 'flex items-end gap-[3px] h-28' },
+        data.map((d, i) => h('div', { key: i, className: 'flex-1 flex flex-col items-center gap-1 group' },
+          h('div', { className: 'text-[9px] text-vsc-muted opacity-0 group-hover:opacity-100 transition-opacity' }, typeof d.v === 'number' && d.v > 0 ? (d.v < 1 ? d.v.toFixed(3) : d.v.toFixed(0)) : ''),
+          h('div', { className: 'w-full rounded-t bg-blue-500/10 relative', style: { height: `${Math.max(2, (d.v / mx) * 80)}px` } },
+            h('div', { className: 'absolute bottom-0 w-full h-full rounded-t bg-gradient-to-t from-blue-600 to-blue-400 opacity-80 group-hover:opacity-100 transition-opacity' })),
+          h('span', { className: 'text-[9px] text-vsc-muted truncate w-full text-center' }, d.l))));
+    }
+
+    // ── Login ──
+    function LoginPage({ onLogin }) {
+      const [tok, setTok] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [err, setErr] = useState('');
+      const tryLogin = async () => {
+        if (!tok.trim()) return;
+        setLoading(true); setErr('');
+        localStorage.setItem('audit_token', tok.trim());
+        try {
+          const r = await api.get('/api/audit/status');
+          if (r.success) { onLogin(); return; }
+        } catch {}
+        setErr('Invalid token or server unreachable');
+        localStorage.removeItem('audit_token');
+        setLoading(false);
+      };
+      return h('div', { className: 'min-h-screen flex items-center justify-center bg-vsc-bg p-4' },
+        h('div', { className: 'w-full max-w-md space-y-6' },
+          h('div', { className: 'text-center' },
+            h('div', { className: 'text-4xl mb-3' }, '⚡'),
+            h('h1', { className: 'text-2xl font-bold text-white' }, 'CiCy Audit'),
+            h('p', { className: 'text-vsc-text mt-1' }, 'AI Traffic Audit Service')),
+          h('div', { className: 'bg-vsc-bg2 rounded-xl p-6 border border-vsc-border space-y-4' },
+            h('div', null,
+              h('label', { className: 'text-xs text-vsc-text mb-1 block' }, 'API Token'),
+              h('input', { type: 'password', value: tok, onChange: e => setTok(e.target.value),
+                onKeyDown: e => e.key === 'Enter' && tryLogin(),
+                placeholder: 'Paste your token here...',
+                className: 'w-full px-3 py-2 bg-vsc-bg rounded-lg border border-vsc-border text-white text-sm outline-none focus:border-blue-500 transition-colors' })),
+            err && h('p', { className: 'text-red-400 text-xs' }, err),
+            h('button', { onClick: tryLogin, disabled: loading,
+              className: 'w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50' },
+              loading ? 'Connecting...' : 'Sign In')),
+          h('p', { className: 'text-center text-xs text-vsc-muted' },
+            "Don't have a token? Ask your admin or ", h('a', { href: 'https://cicy-ai.com', className: 'text-blue-400 hover:underline' }, 'register here'), '.')));
+    }
+
+    // ── Overview ──
+    function Overview({ userId, days, setDays }) {
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(true);
+      useEffect(() => {
+        setLoading(true);
+        api.get(`/api/audit/dashboard?user=${userId}&days=${days}`)
+          .then(r => setData(r.data)).catch(() => {}).finally(() => setLoading(false));
+      }, [userId, days]);
+
+      if (loading) return h('div', { className: 'flex items-center justify-center h-64 text-vsc-text' },
+        h('div', { className: 'w-5 h-5 border-2 border-white/20 border-t-white rounded-full spin mr-2' }), 'Loading...');
+      if (!data) return h('div', { className: 'text-center text-vsc-muted py-16' }, 'No data available');
+
+      const daily = [...data.daily].reverse();
+      const maxCalls = Math.max(...daily.map(d => d.calls), 1);
+      const maxCost = Math.max(...daily.map(d => d.cost_usd), 0.01);
+      const models = Object.entries(data.model_breakdown || {}).sort((a, b) => (b[1].cost || 0) - (a[1].cost || 0));
+
+      return h('div', { className: 'space-y-6 fade-in' },
+        // Period selector
+        h('div', { className: 'flex items-center gap-2' },
+          [7, 14, 30].map(d => h('button', { key: d, onClick: () => setDays(d),
+            className: `px-3 py-1 text-xs rounded-lg transition-all ${days === d ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'bg-vsc-bg3 text-vsc-text hover:text-white'}` }, `${d}d`))),
+        // Cards
+        h('div', { className: 'grid grid-cols-2 lg:grid-cols-4 gap-3' },
+          h(StatCard, { icon: icons.dollar, label: 'Total Cost', value: fmtCost(data.total_cost_usd), sub: `${days}-day period`, color: 'text-emerald-400' }),
+          h(StatCard, { icon: icons.hash, label: 'API Calls', value: data.total_calls.toLocaleString(), sub: `${data.monthly_calls.toLocaleString()} this month`, color: 'text-blue-400' }),
+          h(StatCard, { icon: icons.trend, label: 'Input Tokens', value: fmtTokens(data.total_input), color: 'text-purple-400' }),
+          h(StatCard, { icon: icons.cpu, label: 'Output Tokens', value: fmtTokens(data.total_output), color: 'text-amber-400' })),
+        // Charts
+        h('div', { className: 'grid grid-cols-1 lg:grid-cols-2 gap-4' },
+          h('div', { className: 'bg-vsc-bg2 rounded-xl p-5 border border-vsc-border' },
+            h('h3', { className: 'text-xs font-medium text-vsc-text mb-4' }, 'Daily API Calls'),
+            h(BarChart, { data: daily.map(d => ({ l: d.date.slice(5), v: d.calls })), maxVal: maxCalls })),
+          h('div', { className: 'bg-vsc-bg2 rounded-xl p-5 border border-vsc-border' },
+            h('h3', { className: 'text-xs font-medium text-vsc-text mb-4' }, 'Daily Cost (USD)'),
+            h(BarChart, { data: daily.map(d => ({ l: d.date.slice(5), v: d.cost_usd })), maxVal: maxCost }))),
+        // Model breakdown
+        h('div', { className: 'bg-vsc-bg2 rounded-xl p-5 border border-vsc-border' },
+          h('h3', { className: 'text-xs font-medium text-vsc-text mb-4' }, 'Model Breakdown'),
+          models.length === 0
+            ? h('p', { className: 'text-vsc-muted text-sm' }, 'No AI usage recorded yet')
+            : h('div', { className: 'space-y-2.5' },
+                models.map(([model, s]) => {
+                  const pct = data.total_cost_usd > 0 ? ((s.cost || 0) / data.total_cost_usd) * 100 : 0;
+                  return h('div', { key: model, className: 'flex items-center gap-3 text-sm' },
+                    h('span', { className: 'flex-1 truncate font-mono text-xs text-vsc-text' }, model),
+                    h('span', { className: 'text-vsc-muted text-xs w-16 text-right shrink-0' }, `${s.calls}`),
+                    h('span', { className: 'text-vsc-muted text-xs w-20 text-right shrink-0' }, fmtTokens(s.input_tokens + s.output_tokens)),
+                    h('div', { className: 'w-24 h-1.5 bg-vsc-hover rounded-full overflow-hidden shrink-0' },
+                      h('div', { className: 'h-full bg-gradient-to-r from-blue-500 to-blue-400 rounded-full', style: { width: `${Math.max(2, pct)}%` } })),
+                    h('span', { className: 'text-white text-xs w-16 text-right font-semibold shrink-0' }, fmtCost(s.cost || 0)));
+                }))));
+    }
+
+    // ── Usage Log ──
+    function UsageLog({ userId }) {
+      const [entries, setEntries] = useState([]);
+      const [loading, setLoading] = useState(true);
+      useEffect(() => {
+        api.get(`/api/audit/usage?user=${userId}&limit=200`)
+          .then(r => setEntries(r.data || [])).catch(() => {}).finally(() => setLoading(false));
+      }, [userId]);
+
+      const exportCSV = () => {
+        const hdr = 'time,method,host,provider,model,input_tokens,output_tokens,cost_usd,status\n';
+        const rows = entries.map(e => {
+          const u = e.ai_usage;
+          return `${new Date(e.ts*1000).toISOString()},${e.method},${e.host},${u?.provider||''},${u?.model||''},${u?.input_tokens||0},${u?.output_tokens||0},${u?.cost_usd||0},${e.status}`;
+        }).join('\n');
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([hdr + rows], { type: 'text/csv' }));
+        a.download = `audit-${userId}-${new Date().toISOString().slice(0,10)}.csv`;
+        a.click();
+      };
+
+      if (loading) return h('div', { className: 'flex items-center justify-center h-64 text-vsc-text' },
+        h('div', { className: 'w-5 h-5 border-2 border-white/20 border-t-white rounded-full spin mr-2' }), 'Loading...');
+
+      return h('div', { className: 'space-y-3 fade-in' },
+        h('div', { className: 'flex items-center justify-between' },
+          h('span', { className: 'text-xs text-vsc-text' }, `${entries.length} entries`),
+          h('button', { onClick: exportCSV, className: 'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-vsc-bg3 text-vsc-text hover:text-white transition-colors' },
+            h(Icon, { d: icons.download, size: 12 }), 'Export CSV')),
+        h('div', { className: 'overflow-auto max-h-[calc(100vh-240px)] rounded-xl border border-vsc-border' },
+          h('table', { className: 'w-full text-xs' },
+            h('thead', { className: 'sticky top-0 bg-vsc-bg2' },
+              h('tr', { className: 'text-vsc-text border-b border-vsc-border' },
+                ['Time', 'Provider', 'Model', 'Input', 'Output', 'Cost', ''].map((t, i) =>
+                  h('th', { key: i, className: `py-2.5 px-3 font-medium ${i >= 3 && i <= 5 ? 'text-right' : 'text-left'}` }, t)))),
+            h('tbody', null,
+              entries.map((e, i) => h('tr', { key: i, className: 'border-b border-white/[.04] hover:bg-vsc-hover transition-colors' },
+                h('td', { className: 'py-2 px-3 text-vsc-muted whitespace-nowrap', title: new Date(e.ts*1000).toLocaleString() }, relTime(e.ts)),
+                h('td', { className: 'py-2 px-3' }, e.ai_usage
+                  ? h('span', { className: 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-400' }, e.ai_usage.provider)
+                  : h('span', { className: 'text-vsc-muted' }, e.host)),
+                h('td', { className: 'py-2 px-3 font-mono text-vsc-text truncate max-w-[220px]' }, e.ai_usage?.model || '-'),
+                h('td', { className: 'py-2 px-3 text-right text-vsc-text' }, e.ai_usage ? fmtTokens(e.ai_usage.input_tokens) : '-'),
+                h('td', { className: 'py-2 px-3 text-right text-vsc-text' }, e.ai_usage ? fmtTokens(e.ai_usage.output_tokens) : '-'),
+                h('td', { className: 'py-2 px-3 text-right font-semibold text-white' }, e.ai_usage ? fmtCost(e.ai_usage.cost_usd) : '-'),
+                h('td', { className: 'py-2 px-3 text-center' },
+                  h('span', { className: `inline-block w-2 h-2 rounded-full ${e.status >= 200 && e.status < 300 ? 'bg-emerald-400' : e.status >= 400 ? 'bg-red-400' : 'bg-yellow-400'}` }))))),
+              entries.length === 0 && h('tr', null, h('td', { colSpan: 7, className: 'py-16 text-center text-vsc-muted' }, 'No traffic recorded yet.'))))));
+    }
+
+    // ── Live Stream ──
+    function LiveStream() {
+      const [events, setEvents] = useState([]);
+      const [connected, setConnected] = useState(false);
+      useEffect(() => {
+        const t = token();
+        if (!t) return;
+        const es = new EventSource(`${API}/api/audit/live?token=${t}`);
+        es.onopen = () => setConnected(true);
+        es.onmessage = ev => {
+          try { const e = JSON.parse(ev.data); setEvents(p => [e, ...p].slice(0, 200)); } catch {}
+        };
+        es.onerror = () => setConnected(false);
+        return () => es.close();
+      }, []);
+
+      return h('div', { className: 'space-y-3 fade-in' },
+        h('div', { className: 'flex items-center gap-3' },
+          h('div', { className: `flex items-center gap-1.5 text-xs ${connected ? 'text-emerald-400' : 'text-red-400'}` },
+            h('div', { className: `w-2 h-2 rounded-full ${connected ? 'bg-emerald-400 pulse' : 'bg-red-400'}` }),
+            connected ? 'Connected' : 'Disconnected'),
+          h('span', { className: 'text-xs text-vsc-muted' }, `${events.length} events`)),
+        h('div', { className: 'space-y-1.5 overflow-auto max-h-[calc(100vh-240px)]' },
+          events.map((e, i) => h('div', { key: i, className: 'flex items-center gap-3 px-3 py-2.5 rounded-lg bg-vsc-bg2 border border-white/[.04] text-xs hover:border-vsc-border transition-colors fade-in' },
+            h('span', { className: 'text-vsc-muted w-14 shrink-0 font-mono' }, fmtTime(e.ts)),
+            h('span', { className: `w-2 h-2 rounded-full shrink-0 ${e.status >= 200 && e.status < 300 ? 'bg-emerald-400' : 'bg-red-400'}` }),
+            e.ai_usage ? [
+              h('span', { key: 'p', className: 'px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 text-[10px] font-medium shrink-0' }, e.ai_usage.provider),
+              h('span', { key: 'm', className: 'font-mono text-vsc-text truncate' }, e.ai_usage.model),
+              h('span', { key: 't', className: 'ml-auto shrink-0 text-purple-300' }, `${fmtTokens(e.ai_usage.input_tokens)}→${fmtTokens(e.ai_usage.output_tokens)}`),
+              h('span', { key: 'c', className: 'shrink-0 text-white font-semibold' }, fmtCost(e.ai_usage.cost_usd)),
+            ] : [
+              h('span', { key: 'u', className: 'text-vsc-text truncate flex-1' }, `${e.method} ${e.host}`),
+              h('span', { key: 's', className: 'ml-auto shrink-0 text-vsc-muted' }, `${e.req_kb}KB`),
+            ],
+            h('span', { className: 'shrink-0 text-vsc-muted font-mono text-[10px]' }, e.user_id))),
+          events.length === 0 && h('div', { className: 'text-center py-20 text-vsc-muted' },
+            h('div', { className: 'text-3xl mb-3 opacity-30' }, '📡'),
+            h('p', null, 'Waiting for traffic...'),
+            h('p', { className: 'text-[10px] mt-1' }, 'Events appear here in real-time'))));
+    }
+
+    // ── Setup ──
+    function Setup({ proxyToken, onRegister }) {
+      const [guide, setGuide] = useState(null);
+      useEffect(() => { api.get('/setup').then(r => setGuide(r.data)).catch(() => {}); }, []);
+      const host = guide?.proxy_host || 'audit.cicy-ai.com';
+      const port = guide?.proxy_port || '8003';
+      const proxyUrl = proxyToken ? `https://${proxyToken}:x@${host}:${port}` : `https://YOUR_TOKEN:x@${host}:${port}`;
+
+      const platforms = guide?.platforms || [
+        { name: 'macOS / Linux (CLI)', steps: ['curl -fsSL https://audit.cicy-ai.com/install-ca | bash', `export https_proxy="${proxyUrl}"`] },
+        { name: 'Cursor / VS Code', steps: ['Install CA certificate first', `Add to settings.json: "http.proxy": "${proxyUrl}"`] },
+        { name: 'Claude Code / Kiro CLI', steps: ['Install CA certificate first', `export https_proxy="${proxyUrl}"`, 'Run your AI tool normally'] },
+      ];
+
+      return h('div', { className: 'space-y-5 max-w-2xl fade-in' },
+        // Token
+        h('div', { className: 'bg-vsc-bg2 rounded-xl p-5 border border-vsc-border' },
+          h('h3', { className: 'text-sm font-semibold text-white mb-3' }, 'Your Proxy Token'),
+          proxyToken
+            ? h('div', { className: 'space-y-3' },
+                h('div', { className: 'flex items-center bg-black/30 rounded-lg px-3 py-2.5 font-mono text-xs text-emerald-400' },
+                  h('span', { className: 'truncate' }, proxyToken), h(CopyBtn, { text: proxyToken })),
+                h('div', { className: 'flex items-center bg-black/30 rounded-lg px-3 py-2.5 font-mono text-xs text-vsc-text overflow-x-auto' },
+                  h('span', null, `export https_proxy="${proxyUrl}"`), h(CopyBtn, { text: `export https_proxy="${proxyUrl}"` })))
+            : h('div', { className: 'space-y-3' },
+                h('p', { className: 'text-sm text-vsc-text' }, 'Generate a proxy token to start auditing your AI traffic.'),
+                h('button', { onClick: onRegister, className: 'px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors' }, 'Generate Token'))),
+        // CA install
+        h('div', { className: 'bg-vsc-bg2 rounded-xl p-5 border border-vsc-border' },
+          h('h3', { className: 'text-sm font-semibold text-white mb-1' }, 'Step 1: Install CA Certificate'),
+          h('p', { className: 'text-xs text-vsc-text mb-3' }, 'Required for HTTPS traffic inspection.'),
+          h('div', { className: 'flex items-center bg-black/30 rounded-lg px-3 py-2.5 font-mono text-xs text-vsc-text' },
+            h('span', null, 'curl -fsSL https://audit.cicy-ai.com/install-ca | bash'),
+            h(CopyBtn, { text: 'curl -fsSL https://audit.cicy-ai.com/install-ca | bash' })),
+          h('div', { className: 'mt-2' }, h('a', { href: '/ca.pem', className: 'text-xs text-blue-400 hover:underline' }, 'Download CA cert manually'))),
+        // Platforms
+        h('div', { className: 'bg-vsc-bg2 rounded-xl p-5 border border-vsc-border' },
+          h('h3', { className: 'text-sm font-semibold text-white mb-3' }, 'Step 2: Configure Your Tools'),
+          h('div', { className: 'space-y-4' },
+            platforms.map((p, i) => h('div', { key: i },
+              h('h4', { className: 'text-xs font-medium text-vsc-text mb-1.5' }, p.name),
+              h('div', { className: 'space-y-1.5' },
+                p.steps.map((s, j) => h('div', { key: j, className: 'flex items-start gap-2 text-xs' },
+                  h('span', { className: 'text-vsc-muted shrink-0' }, `${j + 1}.`),
+                  h('code', { className: 'bg-black/20 rounded px-2 py-1 text-vsc-text flex-1 break-all' },
+                    s.replace(/YOUR_TOKEN/g, proxyToken || 'YOUR_TOKEN')),
+                  s.includes('export') && h(CopyBtn, { text: s.replace(/YOUR_TOKEN/g, proxyToken || 'YOUR_TOKEN') })))))))),
+        // How it works
+        h('div', { className: 'bg-vsc-bg2 rounded-xl p-5 border border-vsc-border' },
+          h('h3', { className: 'text-sm font-semibold text-white mb-3' }, 'How It Works'),
+          h('div', { className: 'text-xs text-vsc-text space-y-2 leading-relaxed' },
+            h('p', null, 'CiCy Audit is a transparent HTTPS proxy between your AI tools and their API providers.'),
+            h('pre', { className: 'bg-black/20 rounded-lg p-3 font-mono text-[10px] text-vsc-muted leading-loose overflow-x-auto' },
+              'Your AI Tool → CiCy Audit Proxy → AI Provider\n         ↓ parse tokens, model, cost\n         ↓\n    Dashboard (you are here)'),
+            h('p', null, 'Supported: OpenAI, Anthropic, Google Gemini, DeepSeek, Qwen, Groq, Mistral, OpenRouter, Azure OpenAI, AWS Bedrock.'))));
+    }
+
+    // ── Main App ──
+    function App() {
+      const [authed, setAuthed] = useState(!!token());
+      const [tab, setTab] = useState('overview');
+      const [userId, setUserId] = useState('admin');
+      const [days, setDays] = useState(7);
+      const [proxyToken, setPT] = useState(localStorage.getItem('audit_proxy_token') || '');
+
+      useEffect(() => {
+        const t = token();
+        if (t && t.includes('.')) {
+          try { const p = JSON.parse(atob(t.split('.')[1])); setUserId(p.sub || 'admin'); } catch {}
+        }
+      }, [authed]);
+
+      const handleRegister = async () => {
+        try {
+          const r = await api.post('/api/audit/register', { user_id: userId, plan: 'free' });
+          const t = r.data?.token;
+          if (t) { setPT(t); localStorage.setItem('audit_proxy_token', t); }
+        } catch (e) { console.error(e); }
+      };
+
+      if (!authed) return h(LoginPage, { onLogin: () => setAuthed(true) });
+
+      const tabs = [
+        { id: 'overview', icon: icons.chart, label: 'Overview' },
+        { id: 'usage', icon: icons.clock, label: 'Usage Log' },
+        { id: 'live', icon: icons.activity, label: 'Live' },
+        { id: 'setup', icon: icons.settings, label: 'Setup' },
+      ];
+
+      return h('div', { className: 'h-screen flex flex-col' },
+        // Header
+        h('header', { className: 'flex items-center gap-3 px-5 py-3 border-b border-vsc-border bg-vsc-bg2/80 backdrop-blur-md shrink-0' },
+          h('div', { className: 'flex items-center gap-2' },
+            h(Icon, { d: icons.zap, size: 20, cls: 'text-blue-400' }),
+            h('span', { className: 'font-bold text-white' }, 'CiCy Audit'),
+            h('span', { className: 'text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-medium' }, 'Beta')),
+          h('div', { className: 'flex-1' }),
+          h('span', { className: 'text-xs text-vsc-muted' }, userId),
+          h('button', { onClick: () => { localStorage.removeItem('audit_token'); setAuthed(false); },
+            className: 'text-xs text-vsc-muted hover:text-white ml-3 transition-colors' }, 'Logout')),
+        // Tabs
+        h('nav', { className: 'flex items-center gap-1 px-5 py-1.5 border-b border-vsc-border shrink-0' },
+          tabs.map(t => h('button', { key: t.id, onClick: () => setTab(t.id),
+            className: `flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-all ${tab === t.id ? 'bg-vsc-bg3 text-white shadow-sm' : 'text-vsc-text hover:text-white hover:bg-vsc-hover'}` },
+            h(Icon, { d: t.icon, size: 14 }), t.label))),
+        // Content
+        h('main', { className: 'flex-1 overflow-auto p-5' },
+          tab === 'overview' && h(Overview, { userId, days, setDays }),
+          tab === 'usage' && h(UsageLog, { userId }),
+          tab === 'live' && h(LiveStream),
+          tab === 'setup' && h(Setup, { proxyToken, onRegister: handleRegister })));
+    }
+
+    createRoot(document.getElementById('root')).render(h(App));
+  </script>
+</body>
+</html>
