@@ -76,7 +76,6 @@ const api = {
   updateGlobalSettings: (data: any)                        => http.post('/api/settings/global', data),
 
   // Tokens
-  listTokens:       ()                                     => http.get('/api/auth/tokens'),
   createToken:      (data: any)                            => http.post('/api/auth/tokens', data),
   deleteToken:      (id: number)                           => http.delete(`/api/auth/tokens/${id}`),
 
@@ -103,7 +102,11 @@ const api = {
 
   // Pane list (legacy)
   getPaneList:      ()                                     => http.get('/api/tmux/panes'),
-  listPanes:        ()                                     => http.get('/api/tmux/list'),
+
+  // Tokens
+  getTokens:        ()                                     => http.get('/api/auth/tokens'),
+  createToken:      (data: any)                            => http.post('/api/auth/tokens', data),
+  deleteToken:      (id: number)                           => http.delete(`/api/auth/tokens/${id}`),
 
   // Windows
   listWindows:      (session: string)                      => http.get(`/api/tmux/windows?session=${session}`),

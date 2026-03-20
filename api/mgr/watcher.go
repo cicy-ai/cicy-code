@@ -403,6 +403,7 @@ func fullSyncOnce() {
 		json.Unmarshal([]byte(prevRaw), &prevMap)
 	}
 
+	token := getFirstToken()
 	statusMap := map[string]paneSt{}
 	restored := 0
 	for pid, cfg := range cache {
@@ -420,7 +421,7 @@ func fullSyncOnce() {
 		if port, _ := strconv.Atoi(cfg["ttyd_port"]); port > 0 {
 			if !isPortListening(port) {
 				log.Printf("[watcher] ttyd port %d not listening for %s, starting instance", port, pid)
-				startInstance(pid, port, "")
+				startInstance(pid, port, token)
 			}
 		}
 		if ensurePipe(pid) {
@@ -446,7 +447,9 @@ func fullSyncOnce() {
 	data, _ := json.Marshal(statusMap)
 	redisDo("SET", "pane_status_map", string(data))
 	if restored > 0 {
-		log.Printf("[watcher] full sync: %d panes, restored %d pipe-pane", len(statusMap), restored)
+		if os.Getenv("DEBUG") != "" {
+			log.Printf("[watcher] full sync: %d panes, restored %d pipe-pane", len(statusMap), restored)
+		}
 	}
 }
 

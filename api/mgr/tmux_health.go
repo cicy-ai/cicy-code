@@ -25,6 +25,7 @@ func healthCheck() {
 	cache := cfgCache
 	watcherMu.Unlock()
 
+	token := getFirstToken()
 	for pid, cfg := range cache {
 		sess := strings.Split(pid, ":")[0]
 
@@ -43,7 +44,7 @@ func healthCheck() {
 		// 2. ttyd not listening → start
 		if port, _ := strconv.Atoi(cfg["ttyd_port"]); port > 0 && !isPortListening(port) {
 			log.Printf("[tmux-health] ttyd port %d down for %s, starting", port, pid)
-			startInstance(pid, port, "")
+			startInstance(pid, port, token)
 		}
 
 		// 3. pipe-pane restore
