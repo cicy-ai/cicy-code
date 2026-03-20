@@ -126,6 +126,7 @@ function waitForServer(port, timeout) {
 
 async function launchDesktop() {
   const port = process.env.PORT || 18008;
+  const electronPort = 18101;
 
   // 1. Start API server in background
   const serverArgs = process.argv.slice(2).filter(a => a !== '--desktop');
@@ -150,48 +151,65 @@ async function launchDesktop() {
   const token = getToken();
   const url = `http://127.0.0.1:${port}/?token=${token}`;
 
-  // 4. Find and launch Electron (electron-mcp)
+  // 4. Launch Electron via global 'electron' binary (no signing needed)
+  //    electron-mcp uses official Electron binary + our JS code
+  //    RPC/MCP server starts on electronPort (18101)
   let electronBin = null;
-
-  // Check if 'cicy' (electron-mcp) is globally installed
   try {
-    electronBin = execSync('which cicy 2>/dev/null || where cicy 2>nul', { encoding: 'utf8' }).trim();
+    electronBin = execSync('which electron 2>/dev/null', { encoding: 'utf8' }).trim();
   } catch {}
 
-  // Check bundled desktop/ submodule
   if (!electronBin) {
-    const desktopDir = path.join(__dirname, '..', '..', 'desktop');
-    const desktopBin = path.join(desktopDir, 'node_modules', '.bin', 'electron');
-    if (fs.existsSync(desktopBin)) {
-      electronBin = desktopBin;
-      // Launch via electron directly with desktop/src/main.js
-      const desktop = spawn(electronBin, [path.join(desktopDir, 'src', 'main.js'), `--url=${url}`], {
-        stdio: 'inherit',
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '' }
-      });
-      desktop.on('exit', (code) => {
-        try { process.kill(server.pid); } catch {}
-        process.exit(code || 0);
-      });
+    console.log('  ⚠️  Electron not found. Installing...');
+    try {
+      execSync('npm install -g electron', { stdio: 'inherit' });
+      electronBin = execSync('which electron', { encoding: 'utf8' }).trim();
+    } catch {
+      console.error('  ❌ Failed to install Electron. Install manually: npm install -g electron');
+      console.log(`  📱 Fallback: open browser → ${url}`);
       return;
     }
   }
 
-  if (electronBin) {
-    // Launch via globally installed 'cicy' CLI
-    console.log(`  🖥️  Opening desktop: ${url}`);
-    const desktop = spawn(electronBin, [`--url=${url}`], { stdio: 'inherit' });
-    desktop.on('exit', (code) => {
-      try { process.kill(server.pid); } catch {}
-      process.exit(code || 0);
-    });
-    return;
+  // Find electron-mcp package (global cicy or bundled desktop/)
+  let electronMcpDir = null;
+
+  // Check global 'cicy' package
+  try {
+    const cicyBin = execSync('which cicy 2>/dev/null', { encoding: 'utf8' }).trim();
+    electronMcpDir = path.resolve(path.dirname(cicyBin), '..', 'lib', 'node_modules', 'cicy');
+    if (!fs.existsSync(path.join(electronMcpDir, 'src', 'main.js'))) electronMcpDir = null;
+  } catch {}
+
+  // Fallback: bundled desktop/ submodule
+  if (!electronMcpDir) {
+    const bundled = path.join(__dirname, '..', '..', 'desktop');
+    if (fs.existsSync(path.join(bundled, 'src', 'main.js'))) {
+      electronMcpDir = bundled;
+    }
   }
 
-  // Fallback: try npx cicy
-  console.log(`  🖥️  Launching desktop via npx cicy...`);
-  const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  const desktop = spawn(npxCmd, ['cicy', `--url=${url}`], { stdio: 'inherit' });
+  if (!electronMcpDir) {
+    console.log('  ⚠️  electron-mcp not found. Installing...');
+    try {
+      execSync('npm install -g cicy', { stdio: 'inherit' });
+      const cicyBin = execSync('which cicy', { encoding: 'utf8' }).trim();
+      electronMcpDir = path.resolve(path.dirname(cicyBin), '..', 'lib', 'node_modules', 'cicy');
+    } catch {
+      console.error('  ❌ Failed to install cicy. Install manually: npm install -g cicy');
+      console.log(`  📱 Fallback: open browser → ${url}`);
+      return;
+    }
+  }
+
+  console.log(`  🖥️  Opening desktop: ${url}`);
+  console.log(`  🔧 RPC/MCP server: http://127.0.0.1:${electronPort}`);
+
+  const desktop = spawn(electronBin, [electronMcpDir, `--url=${url}`, `--port=${electronPort}`], {
+    stdio: 'inherit',
+    env: { ...process.env, PORT: String(electronPort) }
+  });
+
   desktop.on('exit', (code) => {
     try { process.kill(server.pid); } catch {}
     process.exit(code || 0);
