@@ -27,9 +27,11 @@ import (
 
 var (
 	upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-	saasMode   bool
-	publicMode bool
-	devMode    bool
+	saasMode    bool
+	publicMode  bool
+	devMode     bool
+	desktopMode bool
+	desktopCmd  *exec.Cmd
 )
 
 func isSaasMode() bool {
@@ -189,6 +191,7 @@ Options:
   --help, -h    Show this help
   --cn          Use Chinese mirrors (npm + GitHub proxy)
   --dev         Development mode (load resources from filesystem, use COS)
+  --desktop     Desktop mode (Electron + RPC/MCP on port 18101)
   --saas        Enable SaaS mode (or SAAS_MODE=1)
   --public      Listen on 0.0.0.0 (default: 127.0.0.1)
   --audit       Enable mitmproxy audit mode
@@ -211,6 +214,8 @@ Data directory: ~/.cicy/`)
 			publicMode = true
 		case "--audit":
 			auditMode = true
+		case "--desktop":
+			desktopMode = true
 		}
 	}
 
@@ -230,6 +235,7 @@ Data directory: ~/.cicy/`)
 		// checkEnv 完成后才启动 watcher，避免和 setup 竞争创建 worker
 		go startWatcher()
 		go startTmuxHealth()
+		ensureDesktop()
 	} else {
 		// SaaS 模式直接启动
 		if auditMode {
@@ -387,6 +393,10 @@ Data directory: ~/.cicy/`)
 
 	// phpMyAdmin proxy
 	http.HandleFunc("/pma/", corsM(handlePmaAuth))
+
+	// Desktop (electron-mcp) RPC proxy: /api/desktop/* → 127.0.0.1:18101
+	http.HandleFunc("/api/desktop/", wa(handleDesktopProxy))
+	http.HandleFunc("/api/desktop/status", wa(handleDesktopStatus))
 
 	// XUI proxy: /api/xui/{pane_id}/... → node xui
 	http.HandleFunc("/api/xui/", wa(handleXuiProxy))
