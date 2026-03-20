@@ -114,8 +114,6 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, winNa
 
 	// Create tmux session
 	nodeTmux(paneID, "new-session", "-d", "-s", session, "-n", "main", "-c", workspace)
-	nodeTmux(paneID, "send-keys", "-t", paneID, "export TERM=xterm-256color", "Enter")
-
 	// Insert DB
 	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, created_at, updated_at)
 		VALUES (?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()), paneID, t, port, workspace, initScript, "{}", role, defaultModel, agentType)
@@ -286,7 +284,6 @@ func restartPaneCore(paneID, token string) error {
 	}
 	wsExpanded := strings.Replace(ws, "~", home, 1)
 	exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", wsExpanded).Run()
-	exec.Command("tmux", "send-keys", "-t", session+":main.0", "export TERM=xterm-256color", "Enter").Run()
 
 	// Restart ttyd-go
 	p := int(port.Int64)

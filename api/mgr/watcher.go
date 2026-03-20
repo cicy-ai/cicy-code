@@ -415,7 +415,6 @@ func fullSyncOnce() {
 			if ws == "" { ws = os.Getenv("HOME") }
 			ws = strings.Replace(ws, "~", os.Getenv("HOME"), 1)
 			exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", ws).Run()
-			exec.Command("tmux", "send-keys", "-t", session+":main.0", "export TERM=xterm-256color", "Enter").Run()
 		}
 		// Ensure ttyd instance is running
 		if port, _ := strconv.Atoi(cfg["ttyd_port"]); port > 0 {
