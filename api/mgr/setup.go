@@ -226,7 +226,6 @@ func createBuiltinWorker(port int, agentType, title string) {
 
 	// Create tmux session
 	exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", workspace).Run()
-	exec.Command("tmux", "send-keys", "-t", paneID, "export TERM=xterm-256color", "Enter").Run()
 
 	// Insert DB
 	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, created_at, updated_at)

@@ -577,7 +577,6 @@ func ensureBuiltinAgents() {
 			}
 			os.MkdirAll(workspace, 0755)
 			exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", workspace).Run()
-			exec.Command("tmux", "send-keys", "-t", paneID, "export TERM=xterm-256color", "Enter").Run()
 			log.Printf("[startup] recreated tmux session %s", session)
 		}
 
