@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type Tool struct {
@@ -96,6 +97,7 @@ func installMissing(tools []Tool) {
 }
 
 func selectAgents() []string {
+	// Optional agents (user picks from these)
 	agents := []struct {
 		Name string
 		Desc string
@@ -104,11 +106,11 @@ func selectAgents() []string {
 		{"copilot", "GitHub Copilot CLI - GitHub AI 助手"},
 		{"gemini", "Gemini CLI - Google AI 助手"},
 		{"codex", "OpenAI Codex - 代码生成助手"},
-		{"opencode", "OpenCode - 开源代码助手"},
 	}
 
-	fmt.Println("\n🤖 选择要安装的 AI 工具 (kiro-cli 默认安装):")
+	fmt.Println("\n🤖 选择要安装的 AI 工具:")
 	fmt.Println("  ✅ Kiro CLI Assistant - 多功能 AI 助手 (必装)")
+	fmt.Println("  ✅ OpenCode - 开源代码助手 (必装)")
 	for i, agent := range agents {
 		fmt.Printf("  %d. %s\n", i+1, agent.Desc)
 	}
@@ -119,7 +121,8 @@ func selectAgents() []string {
 	input, _ := reader.ReadString('\n')
 	input = strings.TrimSpace(input)
 
-	selected := []string{"kiro-cli"} // kiro-cli 必装
+	// kiro-cli and opencode are mandatory
+	selected := []string{"kiro-cli", "opencode"}
 
 	if input == "" || input == "a" || input == "A" {
 		return []string{"kiro-cli", "claude", "copilot", "gemini", "codex", "opencode"}
@@ -176,43 +179,68 @@ func installSelectedAgents(selected []string) {
 	}
 }
 
-func createSelectedWorkers(selected []string) {
-	workerConfigs := map[string]struct {
-		Name    string
-		Tool    string
-		Desc    string
-	}{
-		"kiro-cli": {"kiro", "kiro-cli", "Kiro CLI Assistant"},
-		"claude":   {"claude", "claude", "Claude Code Assistant"},
-		"copilot":  {"copilot", "copilot", "GitHub Copilot CLI"},
-		"gemini":   {"gemini", "gemini", "Gemini AI Assistant"},
-		"codex":    {"codex", "codex", "OpenAI Codex Assistant"},
-		"opencode": {"opencode", "opencode", "OpenCode Assistant"},
-	}
+// builtinAgents defines the 6 built-in agents with fixed ports 10001-10006.
+var builtinAgents = []struct {
+	Port      int
+	AgentType string
+	Title     string
+}{
+	{10001, "kiro-cli", "Kiro CLI Assistant"},
+	{10002, "claude", "Claude Code Assistant"},
+	{10003, "copilot", "GitHub Copilot CLI"},
+	{10004, "gemini", "Gemini AI Assistant"},
+	{10005, "codex", "OpenAI Codex Assistant"},
+	{10006, "opencode", "OpenCode Assistant"},
+}
 
+func createSelectedWorkers(selected []string) {
 	fmt.Println("\n🚀 创建选中的 Workers...")
-	for _, name := range selected {
-		if config, exists := workerConfigs[name]; exists {
-			// Skip if agent already exists in DB
-			var count int
-			store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE agent_type=?", config.Tool).Scan(&count)
-			if count > 0 {
-				fmt.Printf("  ⏭ %s - 已存在，跳过\n", config.Name)
-				continue
+	for _, ba := range builtinAgents {
+		found := false
+		for _, s := range selected {
+			if s == ba.AgentType {
+				found = true
+				break
 			}
-			createWorker(0, config.Name, config.Tool, config.Desc, "")
 		}
+		if !found {
+			continue
+		}
+		// Skip if already in DB
+		var count int
+		store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE agent_type=?", ba.AgentType).Scan(&count)
+		if count > 0 {
+			fmt.Printf("  ⏭ %s - 已存在，跳过\n", ba.Title)
+			continue
+		}
+		createBuiltinWorker(ba.Port, ba.AgentType, ba.Title)
 	}
 }
 
-func createWorker(_ int, name, tool, desc, _ string) {
+func createBuiltinWorker(port int, agentType, title string) {
+	session := fmt.Sprintf("w-%d", port)
+	paneID := session + ":main.0"
+	home, _ := os.UserHomeDir()
+	workspace := filepath.Join(home, "workers", session)
+	os.MkdirAll(workspace, 0755)
+
+	// Create tmux session
+	exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", workspace).Run()
+	exec.Command("tmux", "send-keys", "-t", paneID, "export TERM=xterm-256color", "Enter").Run()
+
+	// Insert DB
+	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()),
+		paneID, title, port, workspace, "", "{}", "master", "", agentType)
+
+	// Start ttyd
 	token := getFirstToken()
-	_, err := doCreatePane(desc, tool, "", tool, "", nil, token)
-	if err != nil {
-		fmt.Printf("  ❌ %s 创建失败: %v\n", name, err)
+	if err := startInstance(paneID, port, token); err != nil {
+		fmt.Printf("  ❌ %s 创建失败: %v\n", title, err)
 		return
 	}
-	fmt.Printf("  ✅ %s - %s\n", name, desc)
+	waitPort(port, 10*time.Second)
+	fmt.Printf("  ✅ %s (w-%d, port %d)\n", title, port, port)
 }
 
 func runSetup() {
@@ -256,3 +284,6 @@ func runSetup() {
 	fmt.Println("=" + strings.Repeat("=", 30))
 	fmt.Println("🎉 环境初始化完成！")
 }
+
+// ensureMissingAgents is no longer needed — builtin agents use fixed ports
+// and are created during first-run setup. Watcher handles restart.
