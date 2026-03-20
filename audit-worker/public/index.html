@@ -259,7 +259,7 @@
                 h('td', { className: 'py-2 px-3 text-right text-vsc-text' }, e.ai_usage ? fmtTokens(e.ai_usage.output_tokens) : '-'),
                 h('td', { className: 'py-2 px-3 text-right font-semibold text-white' }, e.ai_usage ? fmtCost(e.ai_usage.cost_usd) : '-'),
                 h('td', { className: 'py-2 px-3 text-center' },
-                  h('span', { className: `inline-block w-2 h-2 rounded-full ${e.status >= 200 && e.status < 300 ? 'bg-emerald-400' : e.status >= 400 ? 'bg-red-400' : 'bg-yellow-400'}` }))))),
+                  h('span', { className: `inline-block w-2 h-2 rounded-full ${e.status >= 200 && e.status < 300 ? 'bg-emerald-400' : e.status >= 400 ? 'bg-red-400' : 'bg-yellow-400'}` })))),
               entries.length === 0 && h('tr', null, h('td', { colSpan: 7, className: 'py-16 text-center text-vsc-muted' }, 'No traffic recorded yet.'))))));
     }
 
