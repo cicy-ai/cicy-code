@@ -15,7 +15,7 @@ import (
 
 const desktopPort = 18101
 
-// handleDesktopStatus returns the status of the electron-mcp RPC server
+// handleDesktopStatus returns the status of the cicy-desktop RPC server
 func handleDesktopStatus(w http.ResponseWriter, r *http.Request) {
 	status := M{
 		"desktop_mode": desktopMode,
@@ -43,7 +43,7 @@ func handleDesktopStatus(w http.ResponseWriter, r *http.Request) {
 // handleDesktopProxy proxies /api/desktop/* → 127.0.0.1:18101/*
 func handleDesktopProxy(w http.ResponseWriter, r *http.Request) {
 	if !isPortListening(desktopPort) {
-		httpErr(w, 503, "Desktop (electron-mcp) not running")
+		httpErr(w, 503, "Desktop (cicy-desktop) not running")
 		return
 	}
 
@@ -59,14 +59,14 @@ func handleDesktopProxy(w http.ResponseWriter, r *http.Request) {
 	proxy.ServeHTTP(w, r)
 }
 
-// ensureDesktop starts electron-mcp if --desktop mode is active
+// ensureDesktop starts cicy-desktop if --desktop mode is active
 func ensureDesktop() {
 	if !desktopMode {
 		return
 	}
 
 	if isPortListening(desktopPort) {
-		log.Printf("[desktop] electron-mcp already running on port %d", desktopPort)
+		log.Printf("[desktop] cicy-desktop already running on port %d", desktopPort)
 		return
 	}
 
@@ -76,7 +76,7 @@ func ensureDesktop() {
 		return
 	}
 
-	// Find electron-mcp package via node resolve
+	// Find cicy-desktop package via node resolve
 	var mcpDir string
 	out, err := exec.Command("node", "-e", "try{console.log(require.resolve('cicy/package.json'))}catch(e){}").Output()
 	if err == nil && len(strings.TrimSpace(string(out))) > 0 {
@@ -84,7 +84,7 @@ func ensureDesktop() {
 	}
 
 	if mcpDir == "" {
-		log.Printf("[desktop] electron-mcp (cicy) not found, install: npm install -g cicy")
+		log.Printf("[desktop] cicy-desktop (cicy) not found, install: npm install -g cicy-desktop")
 		return
 	}
 
@@ -105,7 +105,7 @@ func ensureDesktop() {
 		return
 	}
 
-	log.Printf("[desktop] electron-mcp started (PID: %d, RPC port: %d)", desktopCmd.Process.Pid, desktopPort)
+	log.Printf("[desktop] cicy-desktop started (PID: %d, RPC port: %d)", desktopCmd.Process.Pid, desktopPort)
 
 	go func() {
 		for i := 0; i < 30; i++ {

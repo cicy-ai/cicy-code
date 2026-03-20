@@ -126,7 +126,7 @@ function waitForServer(port, timeout) {
 
 async function launchDesktop() {
   const port = process.env.PORT || 18008;
-  const electronPort = 18101;
+  const desktopPort = 18101;
 
   // 1. Start API server in background
   const serverArgs = process.argv.slice(2).filter(a => a !== '--desktop');
@@ -152,18 +152,18 @@ async function launchDesktop() {
   const url = `http://127.0.0.1:${port}/?token=${token}`;
 
   // 4. Launch Electron via global 'electron' binary (no signing needed)
-  //    electron-mcp uses official Electron binary + our JS code
-  //    RPC/MCP server starts on electronPort (18101)
-  let electronBin = null;
+  //    cicy-desktop uses official Electron binary + our JS code
+  //    RPC/MCP server starts on desktopPort (18101)
+  let electronBinary = null;
   try {
-    electronBin = execSync('which electron 2>/dev/null', { encoding: 'utf8' }).trim();
+    electronBinary = execSync('which electron 2>/dev/null', { encoding: 'utf8' }).trim();
   } catch {}
 
-  if (!electronBin) {
+  if (!electronBinary) {
     console.log('  ⚠️  Electron not found. Installing...');
     try {
       execSync('npm install -g electron', { stdio: 'inherit' });
-      electronBin = execSync('which electron', { encoding: 'utf8' }).trim();
+      electronBinary = execSync('which electron', { encoding: 'utf8' }).trim();
     } catch {
       console.error('  ❌ Failed to install Electron. Install manually: npm install -g electron');
       console.log(`  📱 Fallback: open browser → ${url}`);
@@ -171,43 +171,43 @@ async function launchDesktop() {
     }
   }
 
-  // Find electron-mcp package (global cicy or bundled desktop/)
-  let electronMcpDir = null;
+  // Find cicy-desktop package (global cicy or bundled desktop/)
+  let desktopDir = null;
 
-  // Check global 'cicy' package
+  // Check global 'cicy-desktop' package
   try {
     const cicyBin = execSync('which cicy 2>/dev/null', { encoding: 'utf8' }).trim();
-    electronMcpDir = path.resolve(path.dirname(cicyBin), '..', 'lib', 'node_modules', 'cicy');
-    if (!fs.existsSync(path.join(electronMcpDir, 'src', 'main.js'))) electronMcpDir = null;
+    desktopDir = path.resolve(path.dirname(cicyBin), '..', 'lib', 'node_modules', 'cicy-desktop');
+    if (!fs.existsSync(path.join(desktopDir, 'src', 'main.js'))) desktopDir = null;
   } catch {}
 
   // Fallback: bundled desktop/ submodule
-  if (!electronMcpDir) {
+  if (!desktopDir) {
     const bundled = path.join(__dirname, '..', '..', 'desktop');
     if (fs.existsSync(path.join(bundled, 'src', 'main.js'))) {
-      electronMcpDir = bundled;
+      desktopDir = bundled;
     }
   }
 
-  if (!electronMcpDir) {
-    console.log('  ⚠️  electron-mcp not found. Installing...');
+  if (!desktopDir) {
+    console.log('  ⚠️  cicy-desktop not found. Installing...');
     try {
-      execSync('npm install -g cicy', { stdio: 'inherit' });
+      execSync('npm install -g cicy-desktop', { stdio: 'inherit' });
       const cicyBin = execSync('which cicy', { encoding: 'utf8' }).trim();
-      electronMcpDir = path.resolve(path.dirname(cicyBin), '..', 'lib', 'node_modules', 'cicy');
+      desktopDir = path.resolve(path.dirname(cicyBin), '..', 'lib', 'node_modules', 'cicy-desktop');
     } catch {
-      console.error('  ❌ Failed to install cicy. Install manually: npm install -g cicy');
+      console.error('  ❌ Failed to install cicy. Install manually: npm install -g cicy-desktop');
       console.log(`  📱 Fallback: open browser → ${url}`);
       return;
     }
   }
 
   console.log(`  🖥️  Opening desktop: ${url}`);
-  console.log(`  🔧 RPC/MCP server: http://127.0.0.1:${electronPort}`);
+  console.log(`  🔧 RPC/MCP server: http://127.0.0.1:${desktopPort}`);
 
-  const desktop = spawn(electronBin, [electronMcpDir, `--url=${url}`, `--port=${electronPort}`], {
+  const desktop = spawn(electronBinary, [desktopDir, `--url=${url}`, `--port=${desktopPort}`], {
     stdio: 'inherit',
-    env: { ...process.env, PORT: String(electronPort) }
+    env: { ...process.env, PORT: String(desktopPort) }
   });
 
   desktop.on('exit', (code) => {
