@@ -121,15 +121,15 @@ func checkEnv() {
 	// Ensure ~/.tmux.conf is up to date
 	ensureTmuxConf()
 
-	// Always ensure master pane (w-10001)
-	ensureMasterPane()
-
-	// Check if first run (no worker panes with agent_type set)
+	// Check if first run (no agent workers in DB)
 	var count int
-	store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE pane_id != 'w-10001:main.0' AND agent_type != ''").Scan(&count)
+	store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE agent_type != ''").Scan(&count)
 	if count == 0 {
 		runSetup()
 	}
+
+	// Ensure all builtin agents are running
+	ensureBuiltinAgents()
 
 	ensureCodeServer()
 }
@@ -551,54 +551,42 @@ func getFirstToken() string {
 	return token
 }
 
-func ensureMasterPane() {
-	session := "w-10001"
-	paneID := session + ":main.0"
+func ensureBuiltinAgents() {
+	token := getFirstToken()
+	// Ensure all builtin agents in DB have tmux sessions and ttyd running
+	rows, err := store.Query("SELECT pane_id, ttyd_port, workspace FROM agent_config WHERE ttyd_port >= 10001 AND ttyd_port <= 10006")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var paneID, workspace string
+		var port int
+		rows.Scan(&paneID, &port, &workspace)
+		session := strings.Split(paneID, ":")[0]
 
-	// Check if already in DB
-	var count int
-	store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE pane_id=?", paneID).Scan(&count)
-	if count > 0 {
-		// Exists in DB, ensure tmux session alive
-		if !sessExists(paneID, session) {
-			home, _ := os.UserHomeDir()
-			ws := filepath.Join(home, "workers", session)
-			os.MkdirAll(ws, 0755)
-			exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", ws).Run()
+		// Ensure tmux session
+		if exec.Command("tmux", "has-session", "-t", session).Run() != nil {
+			if workspace == "" {
+				home, _ := os.UserHomeDir()
+				workspace = filepath.Join(home, "workers", session)
+			}
+			os.MkdirAll(workspace, 0755)
+			exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", workspace).Run()
 			exec.Command("tmux", "send-keys", "-t", paneID, "export TERM=xterm-256color", "Enter").Run()
 			log.Printf("[startup] recreated tmux session %s", session)
 		}
-		// Ensure ttyd running
-		if !isPortListening(10001) {
-			if err := startInstance(paneID, 10001, getFirstToken()); err != nil {
-				log.Printf("[startup] master ttyd start error: %v", err)
+
+		// Ensure ttyd
+		if !isPortListening(port) {
+			if err := startInstance(paneID, port, token); err != nil {
+				log.Printf("[startup] ttyd start error for %s: %v", paneID, err)
+				continue
 			}
-			waitPort(10001, 10*time.Second)
+			waitPort(port, 10*time.Second)
 		}
-		log.Printf("[startup] master pane %s ready (ttyd :10001)", paneID)
-		return
+		log.Printf("[startup] agent %s ready (ttyd :%d)", paneID, port)
 	}
-
-	// First run: create from scratch
-	home, _ := os.UserHomeDir()
-	ws := filepath.Join(home, "workers", session)
-	os.MkdirAll(ws, 0755)
-	exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", ws).Run()
-	exec.Command("tmux", "send-keys", "-t", paneID, "export TERM=xterm-256color", "Enter").Run()
-
-	// Insert agent_config
-	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()),
-		paneID, "Master", 10001, ws, "", "{}", "master", "")
-
-	// Start ttyd
-	token := getFirstToken()
-	if err := startInstance(paneID, 10001, token); err != nil {
-		log.Printf("[startup] master ttyd start error: %v", err)
-	}
-	waitPort(10001, 10*time.Second)
-
-	log.Printf("[startup] master pane %s created (ttyd :10001)", paneID)
 }
 
 // w = cors only, wa = cors + auth
