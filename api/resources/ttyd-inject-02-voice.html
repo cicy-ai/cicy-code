@@ -1,0 +1,221 @@
+<script>
+/* Voice Mode — mic button, overlay, hold-to-record, STT */
+(function(){
+  var C = window.__cp;
+  var LS = C.LS, token = C.token, doSend = C.doSend;
+  var input = C.input, panel = C.panel;
+
+  // Mic button in topbar
+  var micBtn = document.createElement('button');
+  micBtn.id = 'cp-mic';
+  micBtn.className = 'cp-chip cp-chip-dim';
+  micBtn.title = 'Voice Mode';
+  micBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>';
+  document.querySelector('#cp .cp-bar-l').appendChild(micBtn);
+
+  // Overlay
+  var voiceOverlay = document.createElement('div'); voiceOverlay.id = 'vm-overlay';
+  voiceOverlay.innerHTML =
+    '<div id="vm-center">' +
+      '<div id="vm-ripple1"></div><div id="vm-ripple2"></div>' +
+      '<div id="vm-btn">' +
+        '<svg id="vm-icon" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+          '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>' +
+          '<path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>' +
+        '</svg>' +
+      '</div>' +
+      '<div id="vm-hint"></div>' +
+      '<div id="vm-status"></div>' +
+    '</div>';
+  document.body.appendChild(voiceOverlay);
+
+  // CSS
+  var vcss = document.createElement('style');
+  vcss.textContent =
+    '#cp-mic.active{background:rgba(220,38,38,0.2);color:#f87171}' +
+    '#cp-mic.active:hover{background:rgba(220,38,38,0.3)}' +
+    '#vm-overlay{display:none;position:fixed;inset:0;z-index:9998;pointer-events:none;' +
+    'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;' +
+    'background:transparent;transition:background .3s}' +
+    '#vm-overlay.open{display:block;pointer-events:auto}' +
+    '#vm-center{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);' +
+    'display:flex;flex-direction:column;align-items:center;gap:16px;pointer-events:auto}' +
+    '#vm-btn{width:110px;height:110px;border-radius:50%;' +
+    'background:rgba(24,24,30,0.92);border:2px solid rgba(255,255,255,0.1);' +
+    'backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);' +
+    'display:flex;align-items:center;justify-content:center;cursor:pointer;' +
+    'transition:all .2s;user-select:none;touch-action:none;position:relative;z-index:2;' +
+    'box-shadow:0 8px 32px rgba(0,0,0,0.5)}' +
+    '#vm-btn:hover{background:rgba(32,32,40,0.95);border-color:rgba(255,255,255,0.15)}' +
+    '#vm-icon{color:rgba(255,255,255,0.5);transition:all .2s}' +
+    '#vm-overlay.rec #vm-btn{background:rgba(220,38,38,0.85);border-color:rgba(255,255,255,0.2);' +
+    'box-shadow:0 0 60px rgba(220,38,38,0.4);transform:scale(1.05)}' +
+    '#vm-overlay.rec #vm-icon{color:#fff;transform:scale(1.15)}' +
+    '#vm-ripple1,#vm-ripple2{position:absolute;border-radius:50%;pointer-events:none;opacity:0;' +
+    'left:50%;top:50%;transform:translate(-50%,-50%)}' +
+    '#vm-ripple1{width:150px;height:150px;border:2px solid rgba(220,38,38,0.3)}' +
+    '#vm-ripple2{width:190px;height:190px;border:1.5px solid rgba(220,38,38,0.15)}' +
+    '#vm-overlay.rec #vm-ripple1{animation:vm-ping 1.5s cubic-bezier(0,0,0.2,1) infinite}' +
+    '#vm-overlay.rec #vm-ripple2{animation:vm-ping 2s cubic-bezier(0,0,0.2,1) infinite .4s}' +
+    '@keyframes vm-ping{0%{transform:translate(-50%,-50%) scale(0.85);opacity:1}100%{transform:translate(-50%,-50%) scale(1.3);opacity:0}}' +
+    '#vm-hint,#vm-status{display:none!important}' +
+    '#vm-overlay.processing #vm-btn{background:rgba(99,102,241,0.3);border-color:rgba(99,102,241,0.3);' +
+    'box-shadow:0 0 40px rgba(99,102,241,0.2)}' +
+    '#vm-overlay.processing #vm-icon{color:rgba(129,140,248,0.8);animation:vm-spin 1.5s linear infinite}' +
+    '@keyframes vm-spin{to{transform:rotate(360deg)}}' +
+    '#cp.voice-mode{top:8px!important;right:8px!important;left:auto!important;width:auto!important;' +
+    'height:auto!important;min-width:0!important}' +
+    '#cp.voice-mode #cp-body,#cp.voice-mode #cp-grip{display:none}' +
+    '#cp.voice-mode #cp-bar{border-bottom:none}';
+  document.head.appendChild(vcss);
+
+  // State
+  var voiceActive = false, vmRecording = false, vmRecorder = null, vmStream = null, vmChunks = [];
+  var vmProcessing = false, savedPanelPos = null;
+  var vmBtn = document.getElementById('vm-btn');
+  var vmHint = document.getElementById('vm-hint');
+  var vmStatus = document.getElementById('vm-status');
+  var vmCenter = document.getElementById('vm-center');
+
+  // Restore voice mode state from cache
+  var vmStateKey = 'cicy_vm_active';
+  if (LS.get(vmStateKey, false)) {
+    requestAnimationFrame(function(){ requestAnimationFrame(function(){ toggleVoice(); }); });
+  }
+
+  function toggleVoice() {
+    voiceActive = !voiceActive;
+    micBtn.classList.toggle('active', voiceActive);
+    voiceOverlay.classList.toggle('open', voiceActive);
+    if (!voiceActive) voiceOverlay.className = '';
+    input.disabled = voiceActive;
+    LS.set(vmStateKey, voiceActive);
+    if (voiceActive) {
+      savedPanelPos = { left: panel.style.left, top: panel.style.top, width: panel.style.width, height: panel.style.height };
+      panel.classList.add('voice-mode');
+      // Pre-request mic permission
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(function(s) {
+        s.getTracks().forEach(function(t) { t.stop(); });
+      }).catch(function(){});
+    } else {
+      if (vmRecording) stopVmRec(false);
+      if (vmProcessing) vmProcessing = false;
+      voiceOverlay.className = '';
+      panel.classList.remove('voice-mode');
+      if (savedPanelPos) {
+        panel.style.left = savedPanelPos.left;
+        panel.style.top = savedPanelPos.top;
+        if (savedPanelPos.width) panel.style.width = savedPanelPos.width;
+        if (savedPanelPos.height) panel.style.height = savedPanelPos.height;
+      }
+    }
+  }
+
+  micBtn.addEventListener('click', function(e) { e.stopPropagation(); toggleVoice(); });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && voiceActive) { e.preventDefault(); toggleVoice(); }
+  });
+  document.getElementById('cp-collapse').addEventListener('click', function() {
+    if (voiceActive) toggleVoice();
+  });
+
+  function startVmRec() {
+    voiceOverlay.className = 'open rec';
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+      vmStream = stream; vmChunks = [];
+      var mime = MediaRecorder.isTypeSupported('audio/ogg;codecs=opus') ? 'audio/ogg;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : '';
+      vmRecorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      vmRecorder.ondataavailable = function(e) { if (e.data.size > 0) vmChunks.push(e.data); };
+      vmRecorder.start(200);
+      vmRecording = true;
+    }).catch(function() {
+      voiceOverlay.className = 'open';
+    });
+  }
+
+  function stopVmRec(shouldSend) {
+    if (!vmRecording) return;
+    vmRecording = false;
+    if (!vmRecorder || vmRecorder.state === 'inactive') { if (voiceActive) voiceOverlay.className = 'open'; return; }
+    vmRecorder.onstop = function() {
+      if (vmStream) vmStream.getTracks().forEach(function(t) { t.stop(); });
+      if (!voiceActive) return; // exited voice mode during stop
+      if (!shouldSend || vmChunks.length === 0) { voiceOverlay.className = 'open'; return; }
+      voiceOverlay.className = 'open processing';
+      vmProcessing = true;
+      var blob = new Blob(vmChunks, { type: vmRecorder.mimeType || 'audio/webm' });
+      if (blob.size < 100) { voiceOverlay.className = 'open'; vmProcessing = false; return; }
+      var fd = new FormData();
+      fd.append('file', blob, 'voice.webm');
+      fd.append('engine', 'google');
+      fd.append('mime', vmRecorder.mimeType || 'audio/webm');
+      fetch('/stt?token=' + encodeURIComponent(token), { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d.text) doSend(d.text);
+          voiceOverlay.className = 'open';
+          vmProcessing = false;
+        })
+        .catch(function() { voiceOverlay.className = 'open'; vmProcessing = false; });
+    };
+    vmRecorder.stop();
+  }
+
+  // Drag + tap-to-record
+  var vmDragging = false, vmDragX = 0, vmDragY = 0, vmMoved = false;
+  var vmPosKey = 'cicy_vm_pos';
+  var vmSavedPos = LS.get(vmPosKey, null);
+  if (vmSavedPos) {
+    try {
+      vmCenter.style.position = 'fixed';
+      vmCenter.style.left = vmSavedPos.x + 'px'; vmCenter.style.top = vmSavedPos.y + 'px';
+      vmCenter.style.transform = 'none';
+    } catch(e) {}
+  }
+
+  function vmPointerDown(e) {
+    if (vmProcessing) return;
+    e.preventDefault();
+    var t = e.touches ? e.touches[0] : e;
+    vmDragX = t.clientX; vmDragY = t.clientY; vmMoved = false; vmDragging = true;
+  }
+  function vmPointerMove(e) {
+    if (!vmDragging) return;
+    var t = e.touches ? e.touches[0] : e;
+    var dx = t.clientX - vmDragX, dy = t.clientY - vmDragY;
+    if (!vmMoved && Math.abs(dx) + Math.abs(dy) > 10) vmMoved = true;
+    if (vmMoved) {
+      if (vmRecording) stopVmRec(false);
+      var r = vmCenter.getBoundingClientRect();
+      vmCenter.style.position = 'fixed';
+      vmCenter.style.left = (r.left + dx) + 'px';
+      vmCenter.style.top = (r.top + dy) + 'px';
+      vmCenter.style.transform = 'none';
+      vmDragX = t.clientX; vmDragY = t.clientY;
+    }
+  }
+  function vmPointerUp() {
+    if (!vmDragging) return;
+    var wasMoved = vmMoved;
+    vmDragging = false;
+    if (wasMoved) {
+      var r = vmCenter.getBoundingClientRect();
+      LS.set(vmPosKey, { x: Math.round(r.left), y: Math.round(r.top) });
+      return;
+    }
+    if (vmRecording) {
+      setTimeout(function() { stopVmRec(true); }, 500);
+    } else if (!vmProcessing) {
+      startVmRec();
+    }
+  }
+
+  vmBtn.addEventListener('mousedown', vmPointerDown);
+  vmBtn.addEventListener('touchstart', vmPointerDown, { passive: false });
+  window.addEventListener('mousemove', vmPointerMove);
+  window.addEventListener('touchmove', vmPointerMove, { passive: false });
+  window.addEventListener('mouseup', vmPointerUp);
+  window.addEventListener('touchend', vmPointerUp);
+})();
+</script>
