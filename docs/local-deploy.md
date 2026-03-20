@@ -35,6 +35,7 @@ cicy-code [options]
 
 | 参数 | 说明 |
 |------|------|
+| `--desktop` | 桌面模式：启动 API 后自动打开 Electron 桌面客户端 |
 | `--dev` | 开发模式：从文件系统加载资源，使用 COS CDN |
 | `--saas` | SaaS 模式（或 `SAAS_MODE=1`） |
 | `--public` | 监听 0.0.0.0（默认仅 127.0.0.1） |
