@@ -27,8 +27,9 @@ import (
 
 var (
 	upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-	saasMode bool
+	saasMode   bool
 	publicMode bool
+	devMode    bool
 )
 
 func isSaasMode() bool {
@@ -187,6 +188,7 @@ Usage: cicy-code [options]
 Options:
   --help, -h    Show this help
   --cn          Use Chinese mirrors (npm + GitHub proxy)
+  --dev         Development mode (load resources from filesystem, use COS)
   --saas        Enable SaaS mode (or SAAS_MODE=1)
   --public      Listen on 0.0.0.0 (default: 127.0.0.1)
   --audit       Enable mitmproxy audit mode
@@ -201,6 +203,8 @@ Data directory: ~/.cicy/`)
 			os.Exit(0)
 		case "--cn":
 			os.Setenv("CN_MIRROR", "1")
+		case "--dev":
+			devMode = true
 		case "--saas":
 			os.Setenv("SAAS_MODE", "1")
 		case "--public":

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,7 +21,23 @@ import (
 
 const gottyInput = '0' // gotty protocol: client→server input message type
 
-// ttyd COS version: read from versions.json at startup
+//go:embed resources/ttyd-inject-00-base.html
+var embedInject00 string
+
+//go:embed resources/ttyd-inject-01-panel.html
+var embedInject01 string
+
+//go:embed resources/ttyd-inject-02-voice.html
+var embedInject02 string
+
+// Embedded inject HTML (concatenated at compile time)
+var embedInjectAll string
+
+func init() {
+	embedInjectAll = embedInject00 + "\n" + embedInject01 + "\n" + embedInject02
+}
+
+// ttyd COS version: only used in dev mode
 var ttydCosVer = "v1"
 
 func init() {
@@ -33,18 +50,24 @@ func init() {
 	}
 }
 
-// ttyd HTML inject: loaded from resources/ttyd-inject*.html, auto-reload on change
+// ttyd HTML inject: dev mode reads from filesystem (hot-reload), release mode uses embedded
 var (
 	ttydInject     string
 	ttydInjectMu   sync.RWMutex
-	ttydInjectDir  = "resources"
+	ttydInjectDir  = "mgr/resources"
 	ttydInjectMod  time.Time
 )
 
 func loadTtydInject() string {
+	// Release mode: return embedded content directly
+	if !devMode {
+		return embedInjectAll
+	}
+
+	// Dev mode: read from filesystem with hot-reload
 	entries, err := os.ReadDir(ttydInjectDir)
 	if err != nil {
-		return ""
+		return embedInjectAll // fallback to embedded
 	}
 	// collect matching files and latest mod time
 	var files []string
@@ -229,11 +252,15 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 			html = strings.Replace(html, "</body>", inj+"</body>", 1)
 		}
 		html = strings.Replace(html, "<html>", `<html style="overflow:hidden">`, 1)
-		cosBase := "https://cicy-1372193042.cos.ap-shanghai.myqcloud.com/ttyd/" + ttydCosVer
-		html = strings.Replace(html, `"./js/gotty-bundle.js"`, fmt.Sprintf(`"%s/gotty-bundle.js"`, cosBase), 1)
-		html = strings.Replace(html, `"./css/index.css"`, fmt.Sprintf(`"%s/css/index.css"`, cosBase), 1)
-		html = strings.Replace(html, `"./css/xterm.css"`, fmt.Sprintf(`"%s/css/xterm.css"`, cosBase), 1)
-		html = strings.Replace(html, `"./css/xterm_customize.css"`, fmt.Sprintf(`"%s/css/xterm_customize.css"`, cosBase), 1)
+		// Dev mode: replace local asset paths with COS CDN
+		// Release mode: keep local paths (assets served from embedded binary)
+		if devMode {
+			cosBase := "https://cicy-1372193042.cos.ap-shanghai.myqcloud.com/ttyd/" + ttydCosVer
+			html = strings.Replace(html, `"./js/gotty-bundle.js"`, fmt.Sprintf(`"%s/gotty-bundle.js"`, cosBase), 1)
+			html = strings.Replace(html, `"./css/index.css"`, fmt.Sprintf(`"%s/css/index.css"`, cosBase), 1)
+			html = strings.Replace(html, `"./css/xterm.css"`, fmt.Sprintf(`"%s/css/xterm.css"`, cosBase), 1)
+			html = strings.Replace(html, `"./css/xterm_customize.css"`, fmt.Sprintf(`"%s/css/xterm_customize.css"`, cosBase), 1)
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(html)))
 		w.WriteHeader(resp.StatusCode)
