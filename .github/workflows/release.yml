@@ -15,14 +15,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Get version from package.json
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Get version
         id: version
         run: |
           VERSION=$(node -p "require('./npm/package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Check if release already exists
+      - name: Check if release exists
         id: check
         run: |
           if gh release view "v${{ steps.version.outputs.version }}" &>/dev/null; then
@@ -32,6 +43,17 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cross-compile binaries
+        if: steps.check.outputs.exists == 'false'
+        working-directory: api
+        run: |
+          mkdir -p ../dist
+          GOOS=darwin GOARCH=arm64 go build -o ../dist/cicy-code-darwin-arm64 ./mgr/
+          GOOS=darwin GOARCH=amd64 go build -o ../dist/cicy-code-darwin-amd64 ./mgr/
+          GOOS=linux  GOARCH=amd64 go build -o ../dist/cicy-code-linux-amd64  ./mgr/
+          GOOS=linux  GOARCH=arm64 go build -o ../dist/cicy-code-linux-arm64  ./mgr/
+          ls -lh ../dist/
 
       - name: Create GitHub Release
         if: steps.check.outputs.exists == 'false'
