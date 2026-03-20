@@ -273,6 +273,38 @@ brew install tmux
 sudo apt install tmux
 ```
 
+### Windows (通过 WSL2)
+
+cicy-code 依赖 tmux 和 Unix PTY，Windows 需通过 WSL2 运行。
+
+**首次安装 WSL2**（管理员 PowerShell）：
+
+```powershell
+# 安装 WSL2 + Ubuntu（需重启电脑）
+wsl --install
+```
+
+重启后打开 "Ubuntu" 应用，设置用户名密码，然后：
+
+```bash
+# 安装依赖
+sudo apt update && sudo apt install -y tmux curl
+
+# 安装 Node.js 20
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+
+# 一键启动
+npx cicy-code
+```
+
+Windows 浏览器直接访问 `http://localhost:18008` ，WSL2 网络自动映射到 Windows 宿主机。
+
+> **提示**：
+> - WSL2 文件系统在 Windows 资源管理器中可通过 `\\wsl$\Ubuntu` 访问
+> - VS Code 可通过 "Remote - WSL" 插件直接编辑 WSL 中的项目
+> - WSL2 重启后 cicy-code 需要重新启动（推荐配合 Supervisor 管理）
+
 ## 手动安装
 
 如果不想用 npx，可以手动下载：

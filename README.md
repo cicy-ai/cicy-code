@@ -45,6 +45,8 @@ make build
 - tmux
 - SQLite（本地模式，自动创建）/ MySQL + Redis（SaaS 模式）
 
+> **Windows 用户**：需通过 [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) 运行，详见 [本地部署指南](docs/local-deploy.md#windows-通过-wsl2)
+
 ## 预置 AI Agent
 
 6 大内置 Agent，固定端口 10001-10006：
