@@ -75,8 +75,7 @@ npx cicy-code
 
 ```
 scripts/
-├── cicy-code.supervisor.conf       # 发布模式
-├── cicy-code-dev.supervisor.conf   # 开发模式
+├── cicy-code.supervisor.conf       # 统一配置（发布模式）
 └── code-server.supervisor.conf     # code-server（独立管理时可选）
 ```
 
@@ -93,36 +92,18 @@ brew install supervisor
 ### 部署配置（符号链接）
 
 ```bash
-# 创建日志目录
-sudo mkdir -p /var/log/cicy-code
-
-# 发布模式 — 链接发布配置
+# 链接配置
 sudo ln -sf $(pwd)/scripts/cicy-code.supervisor.conf /etc/supervisor/conf.d/cicy-code.conf
-
-# 或 开发模式 — 链接开发配置
-sudo ln -sf $(pwd)/scripts/cicy-code-dev.supervisor.conf /etc/supervisor/conf.d/cicy-code.conf
 
 # 加载并启动
 sudo supervisorctl reread && sudo supervisorctl update
-sudo supervisorctl start cicy-code
+sudo supervisorctl start cicy-api
 ```
 
 > **原则**：配置文件始终在项目 `scripts/` 目录维护和版本管理，Supervisor 目录只存符号链接。
 > 修改配置后只需 `supervisorctl reread && update`，无需复制文件。
 
-### 切换发布/开发模式
-
-```bash
-# 切换到开发模式
-sudo ln -sf $(pwd)/scripts/cicy-code-dev.supervisor.conf /etc/supervisor/conf.d/cicy-code.conf
-sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl restart cicy-code
-
-# 切换回发布模式
-sudo ln -sf $(pwd)/scripts/cicy-code.supervisor.conf /etc/supervisor/conf.d/cicy-code.conf
-sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl restart cicy-code
-```
-
-> **注意**：开发模式配置中 `directory` 指向 `api/` 目录，这样 `--dev` 模式才能从 `mgr/resources/` 读取本地 inject HTML 文件。
+> **开发模式**：如需 `--dev` 模式运行，修改 supervisor conf 中的 command 添加 `--dev` 参数，然后 `supervisorctl reread && update && restart cicy-api`。
 
 ### macOS launchd（替代 Supervisor）
 
@@ -167,15 +148,15 @@ launchctl unload ~/Library/LaunchAgents/com.cicy.code.plist
 sudo supervisorctl reread && sudo supervisorctl update
 
 # 启动/停止/重启
-sudo supervisorctl start cicy-code
-sudo supervisorctl stop cicy-code
-sudo supervisorctl restart cicy-code
+sudo supervisorctl start cicy-api
+sudo supervisorctl stop cicy-api
+sudo supervisorctl restart cicy-api
 
 # 查看状态
 sudo supervisorctl status
 
 # 查看日志
-sudo supervisorctl tail -f cicy-code
+sudo supervisorctl tail -f cicy-api
 
 # 验证符号链接
 ls -la /etc/supervisor/conf.d/cicy-code.conf
@@ -276,7 +257,9 @@ sudo apt install tmux
 
 ### Windows (通过 WSL2)
 
-cicy-code 依赖 tmux 和 Unix PTY，Windows 需通过 WSL2 运行。
+cicy-code 依赖 tmux 和 Unix PTY，**不提供 Windows 原生二进制**，Windows 需通过 WSL2 运行 linux-amd64 版本。
+
+> **npm 安装时** (`npx cicy-code`) 会自动提示：`Please use WSL: wsl --install && wsl npx cicy-code`
 
 **首次安装 WSL2**（管理员 PowerShell）：
 
@@ -356,7 +339,7 @@ PORT=9000 ./cicy-code
 ```bash
 # 直接运行时日志输出到终端
 # Supervisor 模式
-tail -f /var/log/cicy-code/output.log
+tail -f /var/log/cicy-api.log
 
 # macOS launchd 模式
 tail -f /tmp/cicy-code.log

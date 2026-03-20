@@ -4,7 +4,7 @@
 
 推送 `v*` tag 到 GitHub 时，Actions 自动执行：
 
-1. Go 交叉编译 4 平台二进制（darwin/linux × amd64/arm64）
+1. Go 交叉编译 4 平台二进制（linux/darwin × amd64/arm64，不含 Windows，Windows 用户请使用 WSL）
 2. 创建 GitHub Release 并上传二进制
 3. 发布 npm 包
 
