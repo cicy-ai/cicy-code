@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,13 +25,23 @@ type Instance struct {
 var (
 	instances   = make(map[string]*Instance)
 	instancesMu sync.RWMutex
-	portPool    = &PortPool{start: 15100, end: 15300, used: make(map[int]bool)}
+	portPool    = initPortPool()
 )
 
 type PortPool struct {
 	start, end int
 	used       map[int]bool
 	mu         sync.Mutex
+}
+
+func initPortPool() *PortPool {
+	start := 20000
+	if s := os.Getenv("TTYD_PORT_START"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil {
+			start = v
+		}
+	}
+	return &PortPool{start: start, end: 65535, used: make(map[int]bool)}
 }
 
 func (p *PortPool) Allocate() int {
