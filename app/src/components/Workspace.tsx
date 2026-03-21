@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Terminal, MessageSquare, Code2, X, Settings, Brain, Search,
-  Monitor, LayoutList, Users, RotateCcw, Plus, Pin, PinOff, Menu, ExternalLink, Home, ChevronDown, Key
+  Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
+  LayoutList, Users, RotateCcw, Plus, Pin, PinOff, Menu, ExternalLink, Key, Bug
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { lockPointer, unlockPointer } from '../lib/pointerLock';
@@ -14,6 +14,7 @@ import { CommandPanel } from './terminal/CommandPanel';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
 import { WebFrame } from './WebFrame';
+import FloatingCodeWindow from './FloatingCodeWindow';
 import DesktopCanvas from './layout/DesktopCanvas';
 import TeamPanel from './layout/TeamPanel';
 import SettingsFloat from './layout/SettingsFloat';
@@ -29,29 +30,23 @@ const cache = {
   set: (k: string, v: any) => localStorage.setItem(k, JSON.stringify(v)),
 };
 
-interface Props { agentId: string; onSelectAgent: (id: string) => void; }
+const getFloatingOpenKey = (paneId: string) => `ws_floatingCodeOpen:${paneId}`;
 
-const AGENT_LOGOS: Record<string, string> = {
-  'kiro-cli': 'kiro.png', 'kiro-cli chat': 'kiro.png',
-  'openai': 'openai.svg', 'claude': 'claude-symbol.svg',
-  'gemini': 'gemini.svg', 'opencode': 'opencode.svg',
-};
-function AgentLogo({ type, size = 'md' }: { type?: string; size?: 'sm' | 'md' }) {
-  const file = type ? (AGENT_LOGOS[type] || 'kiro.png') : null;
-  const s = size === 'sm' ? 'w-5 h-5' : 'w-8 h-8';
-  const img = size === 'sm' ? 'w-4 h-4' : 'w-7 h-7';
-  if (!file) return null;
-  return <div className={`${s} bg-zinc-400 rounded flex items-center justify-center shrink-0`}><img src={`/assets/logos/${file}`} alt={type} className={img} /></div>;
-}
+interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 
 export default function Workspace({ agentId, onSelectAgent }: Props) {
   const { token, hasPermission } = useAuth();
   const { confirm } = useDialog();
   const paneId = agentId || 'w-10001';
   const fullPaneId = `${paneId}:main.0`;
+  const initialPaneIdRef = useRef(paneId);
+  const floatingOpenKey = getFloatingOpenKey(initialPaneIdRef.current);
 
   const mainTab = 'cli' as const;
-  const [leftPanel, setLeftPanel] = useState<'code' | 'team' | null>(() => { const v = cache.get('ws_leftPanel', null); return v === 'agents' ? null : v; });
+  const [leftPanel, setLeftPanel] = useState<'team' | null>(() => {
+    const v = cache.get('ws_leftPanel', null);
+    return v === 'team' ? 'team' : null;
+  });
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
@@ -63,22 +58,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [mouseMode, setMouseMode] = useState<'on' | 'off'>('off');
   const [isRestarting, setIsRestarting] = useState(false);
   const [agents, setAgents] = useState<any[]>([]);
-  const [codeServerSrc, setCodeServerSrc] = useState(() => token ? urls.codeServer(`${config.hostHome}/Private/workers/${paneId}`, token) : '');
-  const [showFavorites, setShowFavorites] = useState(false);
-  const [initialCodeUrl, setInitialCodeUrl] = useState<string>('');
-
-  useEffect(() => {
-    const handleClick = () => setShowFavorites(false);
-    if (showFavorites) {
-      document.addEventListener('click', handleClick);
-      return () => document.removeEventListener('click', handleClick);
-    }
-  }, [showFavorites]);
-
-  const [codeFolder, setCodeFolder] = useState(`~/Private/workers/${paneId}`);
+  const [codeServerSrc, setCodeServerSrc] = useState('');
+  const [floatingCodeOpen, setFloatingCodeOpen] = useState(() => cache.get(floatingOpenKey, false));
+  const [codeFolder, setCodeFolder] = useState('');
+  const codeWindowInitializedRef = useRef(false);
+  const agentWorkspaceRef = useRef(`~/workers/${paneId}`);
 
   const handleCodeHome = () => {
-    const ws = agentDetail?.workspace || `~/workers/${paneId}`;
+    const ws = agentWorkspaceRef.current || agentDetail?.workspace || `~/workers/${paneId}`;
     const next = urls.codeServer(ws, token!);
     if (next !== codeServerSrc) { setCodeServerSrc(next); setCodeFolder(ws); }
   };
@@ -86,7 +73,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const navigateToFolder = (folder: string) => {
     const next = urls.codeServer(folder, token!);
     if (next !== codeServerSrc) { setCodeServerSrc(next); setCodeFolder(folder); }
-    setShowFavorites(false);
   };
   const [agentDetail, setAgentDetail] = useState<any>(null);
   const title = agentDetail?.title || '-';
@@ -107,6 +93,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const leftActive = leftPanel || (agentsOpen && !leftPanel ? 'agents' : null);
 
   useEffect(() => { cache.set('ws_leftPanel', leftPanel); if (groupRef.current) { groupRef.current.setLayout(leftActive ? { 'left-panel': panelSizes['left-panel'] || 50, 'right-panel': panelSizes['right-panel'] || 50 } : { 'left-panel': 0, 'right-panel': 100 }); } }, [leftPanel, agentsOpen]);
+  useEffect(() => { cache.set(floatingOpenKey, floatingCodeOpen); }, [floatingCodeOpen, floatingOpenKey]);
   useEffect(() => { cache.set('ws_voiceBtnPos', voiceBtnPos); }, [voiceBtnPos]);
   useEffect(() => { cache.set('agent_panelPos', panelPos); }, [panelPos]);
   useEffect(() => { cache.set('agent_panelSize', panelSize); }, [panelSize]);
@@ -117,18 +104,25 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useEffect(() => { 
     apiService.getPane(fullPaneId).then(({ data }) => { 
       setAgentDetail(data);
-      if (data?.workspace) setCodeFolder(data.workspace);
       const workspace = data?.workspace || `~/workers/${paneId}`;
-      setCodeServerSrc(urls.codeServer(workspace, token!));
+      agentWorkspaceRef.current = workspace;
+      if (!codeWindowInitializedRef.current && token) {
+        setCodeFolder(workspace);
+        setCodeServerSrc(urls.codeServer(workspace, token));
+        codeWindowInitializedRef.current = true;
+      }
     }).catch(() => {}); 
-  }, [fullPaneId, paneId]);
+  }, [fullPaneId, paneId, token]);
   const prevPaneId = useRef(paneId);
   useEffect(() => {
     if (prevPaneId.current !== paneId) {
-      setAgentDetail(null); setStatus('idle'); setContextUsage(null); setCodeServerSrc('');
+      setAgentDetail(null); setStatus('idle'); setContextUsage(null);
       prevPaneId.current = paneId;
     }
   }, [paneId]);
+  useEffect(() => {
+    document.title = `${title} (${paneId}) | CiCy Code`;
+  }, [title, paneId]);
   useEffect(() => {
     const poll = async () => {
       const t0 = performance.now();
@@ -179,7 +173,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       apiService.updatePane(fullPaneId, { title: v }).catch(() => {});
     }
   };
-  const toggleLeft = (p: 'code' | 'team') => { setLeftPanel(prev => prev === p ? null : p); };
+  const toggleLeft = (p: 'team') => { setLeftPanel(prev => prev === p ? null : p); };
 
   useEffect(() => { if (editingTitle && titleRef.current) { titleRef.current.focus(); titleRef.current.select(); } }, [editingTitle]);
 
@@ -193,11 +187,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <span data-id="agent-title" className="text-sm text-zinc-100 font-medium truncate max-w-[160px] bg-white/[0.12] px-2 py-0.5 rounded" onDoubleClick={() => setEditingTitle(true)} style={{ display: editingTitle ? 'none' : undefined, cursor: 'default' }}>{title}</span>
           {editingTitle && <input ref={titleRef} data-id="agent-title-input" defaultValue={title} className="text-sm text-zinc-300 bg-white/[0.04] border border-white/[0.1] rounded px-2 py-0.5 max-w-[160px] outline-none" onBlur={commitTitle} onKeyDown={e => { if (e.key === 'Enter') commitTitle(); if (e.key === 'Escape') setEditingTitle(false); }} />}
           <span data-id="pane-id-badge" className="text-xs font-mono text-zinc-600 bg-white/[0.03] px-2 py-1 rounded shrink-0">{paneId}</span>
+          <button onClick={() => setFloatingCodeOpen(v => !v)} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0" title="Code Server">
+            {floatingCodeOpen ? <FolderOpen className="w-3.5 h-3.5" /> : <Folder className="w-3.5 h-3.5" />}
+          </button>
         </div>
         <div data-id="top-bar-center" className="flex items-center justify-center w-1/3" />
         <div data-id="top-bar-right" className="flex items-center justify-end w-1/3 gap-3">
           <NetworkSignal latency={netLatency} />
           <button onClick={() => setTokenOpen(true)} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API Tokens"><Key className="w-3.5 h-3.5" /></button>
+          <button onClick={() => window.dispatchEvent(new Event('open-devtools-panel'))} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="DevTools"><Bug className="w-3.5 h-3.5" /></button>
           <span id="version" className="text-[10px] font-mono text-zinc-600">v1.0.1</span>
           {contextUsage != null && (
             <div data-id="context-usage" className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/[0.02]">
@@ -244,7 +242,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     agentDetail, netLatency,
     agentsCount: agents.length,
     agents: agents.map((a: any) => ({ pane_id: a.pane_id, title: a.title, status: a.status, active: a.active })),
-    leftPanel, activeWinIdx,
+    leftPanel, floatingCodeOpen, activeWinIdx,
   });
 
   return (
@@ -254,7 +252,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <div data-id="activity-bar" className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
           <SideBtn dataId="btn-agents" active={agentsOpen} icon={<LayoutList className="w-5 h-5" />} title="Agents" onClick={() => setAgentsOpen(v => !v)} />
-          <SideBtn dataId="btn-code" active={leftPanel === 'code'} icon={<Code2 className="w-5 h-5" />} title="Code Server" onClick={() => toggleLeft('code')} />
           <SideBtn dataId="btn-team" active={leftPanel === 'team'} icon={<Users className="w-5 h-5" />} title="Team" onClick={() => toggleLeft('team')} />
         </div>
         <div data-id="activity-bar-bottom" className="flex flex-col gap-4 w-full items-center">
@@ -288,21 +285,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   {leftActive === 'agents' ? <>
                     <LayoutList className="w-3.5 h-3.5 text-zinc-600" />
                     <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">Agents</span>
-                  </> : leftPanel === 'code' ? <>
-                    <button onClick={handleCodeHome} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title={agentDetail?.workspace || `~/workers/${paneId}`}><Home className="w-3.5 h-3.5" /></button>
-                    <div className="relative">
-                      <button onClick={(e) => { e.stopPropagation(); setShowFavorites(!showFavorites); }} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"><ChevronDown className="w-3 h-3" /></button>
-                      {showFavorites && (
-                        <div className="absolute left-0 top-full mt-1 bg-[#1e1e1e] border border-[var(--vsc-border)] rounded shadow-lg py-1 z-[9999] min-w-32">
-                          {['~/', '~/.ssh', '~/projects', '~/skills', '~/Private'].map(folder => (
-                            <button key={folder} onClick={() => navigateToFolder(folder)} className="w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-700/50 hover:text-zinc-200 transition-colors">{folder}</button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <span className="text-[10px] font-mono text-zinc-600 truncate block">{codeFolder.replace(config.hostHome, '~')}</span>
-                    </div>
                   </> : <>
                     <Users className="w-3.5 h-3.5 text-zinc-600" />
                     <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">Team</span>
@@ -313,9 +295,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   <div className="absolute inset-0 overflow-auto" style={{ display: leftActive === 'agents' ? 'block' : 'none' }}>
                     <AgentDrawer agents={agents} paneId={paneId} onClose={() => setAgentsOpen(false)}
                       onSelectAgent={onSelectAgent} onAgentsChange={setAgents} />
-                  </div>
-                  <div className="absolute inset-0" style={{ display: leftPanel === 'code' ? 'block' : 'none' }}>
-                    {codeServerSrc && <WebFrame src={codeServerSrc} codeServer className="w-full h-full border-0" title="Code Server" />}
                   </div>
                   <div className="absolute inset-0" style={{ display: leftPanel === 'team' ? 'block' : 'none' }}>
                     <TeamPanel paneId={paneId} token={token!} />
@@ -363,6 +342,17 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           />
         </div>
       )}
+
+      <FloatingCodeWindow
+        open={floatingCodeOpen}
+        src={codeServerSrc}
+        folderLabel={codeFolder.replace(config.hostHome, '~')}
+        homeTitle={agentDetail?.workspace || `~/workers/${paneId}`}
+        storageScopeId={initialPaneIdRef.current}
+        onHome={handleCodeHome}
+        onNavigate={navigateToFolder}
+        onClose={() => setFloatingCodeOpen(false)}
+      />
 
       {/* Agent Drawer */}
 
@@ -480,11 +470,13 @@ function AgentDrawer({ agents, paneId, onClose, onSelectAgent, onAgentsChange }:
           <div data-id="agent-list" className="space-y-2">
             {sorted.map((agent: any) => {
               const id = agent.pane_id || agent.id;
+              const shortId = id?.replace(':main.0', '') || id;
               const isMaster = id?.includes('10001');
               const isActive = id === paneId || id?.startsWith(paneId + ':') || paneId?.startsWith(id + ':');
               const isPinned = pinned.includes(id);
               return (
                 <div key={id} data-id={`agent-${id}`}
+                  onClick={() => onSelectAgent(id)}
                   className={cn("w-full flex items-center gap-3 border p-3 rounded-xl transition-all group relative",
                     isActive ? "border-blue-500/50 bg-blue-500/[0.08] ring-1 ring-blue-500/20" : "bg-white/[0.02] border-[var(--vsc-border)] hover:border-white/[0.08]")}>
                   {!isMaster && (
@@ -494,24 +486,15 @@ function AgentDrawer({ agents, paneId, onClose, onSelectAgent, onAgentsChange }:
                       <X className="w-3 h-3 text-white" />
                     </button>
                   )}
-                  <button className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer" onClick={() => onSelectAgent(id)}>
-                    <div className="relative shrink-0">
-                      <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center font-mono font-bold text-sm",
-                        isActive ? "bg-blue-500/20 text-blue-400" : isMaster ? "bg-emerald-500/[0.08] text-emerald-500/70" : "bg-amber-500/[0.08] text-amber-500/70")}>
-                        {agent.agent_type ? <AgentLogo type={agent.agent_type} /> : (isMaster ? 'M' : 'W')}
-                      </div>
-                      <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#0e0e0e] rounded-full flex items-center justify-center">
-                        <div className={cn("w-1.5 h-1.5 rounded-full", agent.active ? "bg-emerald-500/60" : "bg-zinc-700")} />
-                      </div>
-                    </div>
+                  <div className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <h3 className={cn("text-sm font-medium truncate", isActive ? "text-blue-300" : "text-zinc-300")}>{agent.title || id}</h3>
-                        {isActive && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/25 text-blue-300 font-medium shrink-0">current</span>}
+                        <h3 className={cn("text-sm font-medium truncate", isActive ? "text-blue-300" : "text-zinc-300")}>{agent.title || shortId}</h3>
+                        <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", agent.active ? "bg-emerald-500/60" : "bg-zinc-700")} />
                       </div>
-                      <p className={cn("text-xs font-mono mt-0.5 truncate", isActive ? "text-blue-400/50" : "text-zinc-600")}>{id}</p>
+                      <p className={cn("text-xs font-mono mt-0.5 truncate", isActive ? "text-blue-400/50" : "text-zinc-600")}>{shortId}</p>
                     </div>
-                  </button>
+                  </div>
                   <button onClick={e => { e.stopPropagation(); window.open(`#/agent/${id.split(':')[0]}`, '_blank'); }}
                     className="p-1 rounded transition-colors shrink-0 cursor-pointer text-zinc-700 opacity-0 group-hover:opacity-100 hover:text-zinc-400"
                     title="Open in new window">

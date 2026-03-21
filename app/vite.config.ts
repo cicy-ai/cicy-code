@@ -5,10 +5,13 @@ import {defineConfig, loadEnv} from 'vite';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
+  const isDev = mode === 'development';
   return {
     plugins: [react(), tailwindcss()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+      'import.meta.env.VITE_API_BASE': JSON.stringify(isDev ? 'https://dev-api.cicy-ai.com' : ''),
+      'import.meta.env.VITE_HOST_HOME': JSON.stringify('/home/w3c_offical'),
     },
     resolve: {
       alias: {

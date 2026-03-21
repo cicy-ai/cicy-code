@@ -55,7 +55,7 @@ make build
 
 ## 预置 AI Agent
 
-6 大内置 Agent，固定端口 10001-10006：
+7 大内置 Agent，固定端口 10001-10007：
 
 | 端口 | Agent | 说明 | 必装 |
 |------|-------|------|------|
@@ -65,6 +65,7 @@ make build
 | 10004 | Gemini CLI | Google AI 助手 | |
 | 10005 | OpenAI Codex | 代码生成助手 | |
 | 10006 | OpenCode | 开源代码助手 | ✅ |
+| 10007 | Cursor Agent | Cursor AI 助手 | |
 
 首次安装时选择需要的 Agent，之后启动自动恢复，不重复创建。用户自建 Worker 从端口 20001+ 动态分配。
 
@@ -72,10 +73,11 @@ make build
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
-| API | 18008 | 主服务，含嵌入式管理 UI |
-| 内置 Agent | 10001-10006 | 6 大 Agent 终端 (ttyd) |
+| API | 8008 | 主服务，含嵌入式管理 UI |
+| code-server | 8002 | 代码编辑器 |
+| Vite 前端 | 8001 | 前端开发服务 |
+| 内置 Agent | 10001-10007 | 7 大 Agent 终端 (ttyd) |
 | 用户 Worker | 20001+ | 用户自建 Worker，动态分配 |
-| code-server | 18080 | 代码编辑器 |
 
 ## 技术栈
 

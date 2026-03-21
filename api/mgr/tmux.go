@@ -39,7 +39,7 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 		var initScript sql.NullString
 		var port sql.NullInt64
 		var active sql.NullInt64
-		var createdAt, updatedAt sql.NullTime
+		var createdAt, updatedAt sql.NullString
 		var groupID sql.NullInt64
 		var role, defaultModel, trustLevel sql.NullString
 		var agentType sql.NullString
@@ -52,10 +52,10 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 			"trust_level": trustLevel.String, "agent_type": agentType.String,
 		}
 		if createdAt.Valid {
-			p["created_at"] = createdAt.Time.Format(time.RFC3339)
+			p["created_at"] = createdAt.String
 		}
 		if updatedAt.Valid {
-			p["updated_at"] = updatedAt.Time.Format(time.RFC3339)
+			p["updated_at"] = updatedAt.String
 		}
 		if groupID.Valid {
 			p["group_id"] = groupID.Int64

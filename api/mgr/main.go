@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -21,6 +22,8 @@ var (
 	publicMode  bool
 	devMode     bool
 	desktopMode bool
+	auditMode   bool
+	cnMirror    bool
 	desktopCmd  *exec.Cmd
 )
 
@@ -42,23 +45,41 @@ Usage: cicy-code [options]
 
 Options:
   --help, -h              Show this help
+  --version, -v           Show version
+  --desktop               Start in desktop mode
   --dev                   Development mode
   --public                Listen on 0.0.0.0 (default: 127.0.0.1)
+  --audit                 Enable audit mode
+  --cn                    Use Chinese mirrors
   --agents=LIST           Comma-separated agents to install (skip interactive)
                           e.g. --agents=kiro-cli,claude,copilot
                           Use --agents=all for all agents
 
 Environment:
   PORT          API port (default: 8008)
+  CS_PORT       code-server port (default: 8002)
   SQLITE_PATH   SQLite database file (default: ~/.cicy/data.db)`)
 			os.Exit(0)
+		case arg == "--desktop":
+			desktopMode = true
 		case arg == "--dev":
 			devMode = true
 		case arg == "--public":
 			publicMode = true
+		case arg == "--audit":
+			auditMode = true
+			os.Setenv("AUDIT_MODE", "1")
+		case arg == "--cn":
+			cnMirror = true
+			os.Setenv("CN_MIRROR", "1")
 		case strings.HasPrefix(arg, "--agents="):
 			agentsFlag = strings.TrimPrefix(arg, "--agents=")
 		}
+	}
+
+	// --dev without explicit --agents defaults to core set
+	if devMode && agentsFlag == "" {
+		agentsFlag = "kiro-cli,opencode,copilot"
 	}
 
 	initKV()
@@ -67,8 +88,7 @@ Environment:
 	store.Migrate()
 	defer store.Close()
 
-	// First-run setup: check env + install agents
-	checkEnvAndSetup()
+	checkEnv()
 
 	go startWatcher()
 	go startTmuxHealth()
@@ -178,13 +198,15 @@ Environment:
 	// Code-server proxy
 	http.HandleFunc("/code/", handleCodeServer)
 	http.HandleFunc("/code/auth", handleCodeServerAuth)
+	http.HandleFunc("/mitm/", handleMitmproxyAuth)
+	http.HandleFunc("/mitm", handleMitmproxyAuth)
 
 	// WebSocket terminal proxy
 	http.HandleFunc("/ws", handleWSProxy)
-	http.HandleFunc("/ws/ttyd/", handleTtydProxy)
+	http.HandleFunc("/ttyd/", handleTtydProxy)
 
 	// UI (SPA)
-	http.Handle("/ui/", http.StripPrefix("/ui", serveUI()))
+	http.Handle("/", serveUI())
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -238,6 +260,12 @@ Environment:
 		bind = "0.0.0.0"
 	}
 	log.Printf("cicy-code starting on %s:%s", bind, port)
+	if auditMode {
+		log.Printf("[startup] audit mode enabled")
+	}
+	if cnMirror {
+		log.Printf("[startup] CN mirror enabled")
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
@@ -247,26 +275,14 @@ Environment:
 		os.Exit(0)
 	}()
 
-	log.Fatal(http.ListenAndServe(bind+":"+port, nil))
-}
+	if desktopMode {
+		go func() {
+			time.Sleep(2 * time.Second)
+			ensureDesktop()
+		}()
+	}
 
-// checkEnvAndSetup runs first-time setup if no agents exist in DB.
-func checkEnvAndSetup() {
-	var count int
-	store.QueryRow("SELECT COUNT(*) FROM agent_config").Scan(&count)
-	if count > 0 {
-		// Already set up — ensure existing agents are running
-		ensureBuiltinAgents()
-		return
-	}
-	// First run
-	if agentsFlag != "" {
-		// Non-interactive: --agents=kiro-cli,claude or --agents=all
-		runSetupWithAgents(agentsFlag)
-	} else {
-		// Interactive prompt
-		runSetup()
-	}
+	log.Fatal(http.ListenAndServe(bind+":"+port, globalCORS(http.DefaultServeMux)))
 }
 
 func getFirstToken() string {
@@ -286,6 +302,22 @@ func getFirstToken() string {
 	data, _ := json.MarshalIndent(cfg, "", "  ")
 	os.WriteFile(gpath, data, 0644)
 	return token
+}
+
+func globalCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if o := r.Header.Get("Origin"); o != "" {
+			w.Header().Set("Access-Control-Allow-Origin", o)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept")
+		}
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(204)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func w(h http.HandlerFunc) http.HandlerFunc  { return corsM(h) }

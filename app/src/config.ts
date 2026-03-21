@@ -13,15 +13,18 @@ const isDev = typeof window !== 'undefined' && /^(localhost|127\.)/.test(window.
 const isDevProxy = typeof window !== 'undefined' && /^dev-p\d+\.cicy-ai\.com$/.test(window.location.hostname);
 const isAudit = typeof window !== 'undefined' && /^audit\./.test(window.location.hostname);
 
+// dev-api for dev/devProxy, empty (same origin) for localhost, apiOrigin for workspace
+const base = import.meta.env.VITE_API_BASE || '';
+
 const config = {
-  apiBase:        import.meta.env.VITE_API_BASE         || apiOrigin || (isAudit ? '' : (isDevProxy ? 'https://dev-api.cicy-ai.com' : (isDev ? '' : 'https://api.cicy-ai.com'))),
-  mgrBase:        isDev || isAudit ? '' : 'https://api.cicy-ai.com',
-  ttydBase:       import.meta.env.VITE_TTYD_BASE        || apiOrigin || (isDev ? '' : 'https://dev-api.cicy-ai.com'),
-  ideBase:        import.meta.env.VITE_IDE_BASE          || apiOrigin || (isDev ? '' : 'https://dev.cicy-ai.com'),
-  codeServerBase: import.meta.env.VITE_CODE_SERVER_BASE  || (apiOrigin ? apiOrigin + '/code' : (isDev ? '/code' : 'https://dev-api.cicy-ai.com/code')),
-  hostHome:       import.meta.env.VITE_HOST_HOME         || '/home/w3c_offical',
-  desktopBase:    import.meta.env.VITE_DESKTOP_BASE      || apiOrigin || (isDev ? '' : 'https://dev.cicy-ai.com'),
-  sttBase:        import.meta.env.VITE_STT_BASE          || apiOrigin || (isDev ? '' : 'https://dev-api.cicy-ai.com'),
+  apiBase:        base,
+  mgrBase:        base,
+  ttydBase:       base,
+  ideBase:        base,
+  codeServerBase: base ? base + '/code' : '/code',
+  hostHome:       import.meta.env.VITE_HOST_HOME || '/home/w3c_offical',
+  desktopBase:    base,
+  sttBase:        base,
   pollInterval:   5000,
   version:        '1.0.0-cicy-code',
   isWorkspace,
