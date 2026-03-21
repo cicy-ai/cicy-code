@@ -30,7 +30,6 @@
             '<option value="qwen3-coder-next">qwen3-coder</option>' +
           '</select>' +
           '<button id="cp-compact" class="cp-drop-item">Compact</button>' +
-          '<button id="cp-restart" class="cp-drop-item cp-drop-danger">Restart</button>' +
         '</div>' +
         '<button id="cp-collapse" class="cp-chip cp-chip-dim" title="Collapse">−</button>' +
       '</div>' +
@@ -44,7 +43,8 @@
   // --- Window selector (top-right tab bar) ---
   var winFloat = document.createElement('div'); winFloat.id = 'cp-win-float';
   winFloat.innerHTML = '<div id="cp-win-tabs"></div>' +
-    '<button id="cp-win-add" title="New window">+</button>';
+    '<button id="cp-win-add" title="New window">+</button>' +
+    '<button id="cp-win-restart" title="Restart pane">↻</button>';
   document.body.appendChild(winFloat);
 
   // --- Styles ---
@@ -79,7 +79,7 @@
     '#cp-win-tabs::-webkit-scrollbar{display:none}' +
     '.cp-wtab{position:relative;background:none;border:none;color:rgba(255,255,255,0.35);' +
     'font-size:12px;font-family:inherit;height:100%;min-width:100px;' +
-    'padding:0 14px;cursor:pointer;transition:all .1s;white-space:nowrap;' +
+    'padding:0 36px;cursor:pointer;transition:all .1s;white-space:nowrap;' +
     'border-right:1px solid rgba(255,255,255,0.04)}' +
     '.cp-wtab:hover{color:rgba(255,255,255,0.7);background:rgba(255,255,255,0.04)}' +
     '.cp-wtab.active{color:rgba(255,255,255,0.9);background:rgba(255,255,255,0.07)}' +
@@ -91,6 +91,11 @@
     '#cp-win-add{background:none;border:none;color:rgba(255,255,255,0.2);font-size:16px;' +
     'padding:0 10px;height:100%;cursor:pointer;transition:color .1s}' +
     '#cp-win-add:hover{color:rgba(255,255,255,0.6)}' +
+    '#cp-win-restart{background:none;border:none;color:rgba(255,255,255,0.2);font-size:14px;' +
+    'padding:0 8px;height:100%;cursor:pointer;transition:all .15s}' +
+    '#cp-win-restart:hover{color:rgba(255,255,255,0.6)}' +
+    '#cp-win-restart.restarting{color:rgba(59,130,246,0.8);animation:cp-spin .8s linear infinite}' +
+    '@keyframes cp-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}' +
     '#cp-more-menu{right:0}' +
     '.cp-drop-item{background:none;border:none;color:rgba(255,255,255,0.6);font-size:11px;' +
     'padding:6px 10px;border-radius:7px;cursor:pointer;font-family:inherit;text-align:left;transition:all .12s}' +
@@ -216,9 +221,6 @@
     sendLine('/model claude-sonnet-4');
     setTimeout(function(){ sendLine('/compact --truncate-large-messages true --max-message-length 500'); }, 800);
   });
-  twiceBtn('cp-restart', function(){
-    fetch('/api/tmux/panes/' + paneId + '/restart', { method: 'POST', headers: apiH });
-  });
 
   // --- More menu ---
   var moreBtn = document.getElementById('cp-more');
@@ -247,7 +249,7 @@
 
   // --- Drag ---
   document.getElementById('cp-bar').addEventListener('mousedown', function(e) {
-    if (e.target.closest('#cp-collapse,#cp-model,#cp-enter,#cp-more,#cp-compact,#cp-restart,#cp-win-btn,#cp-mic')) return;
+    if (e.target.closest('#cp-collapse,#cp-model,#cp-enter,#cp-more,#cp-compact,#cp-win-btn,#cp-mic')) return;
     var ox = e.clientX, oy = e.clientY, r = panel.getBoundingClientRect(), sx = r.left, sy = r.top;
     function mv(e){ applyPos(sx + e.clientX - ox, sy + e.clientY - oy); }
     function up(){ document.removeEventListener('mousemove',mv); document.removeEventListener('mouseup',up); }
@@ -323,6 +325,42 @@
   });
   document.getElementById('cp-win-add').addEventListener('click', function() {
     apiFetch('POST', '', { session: paneId }).then(loadWins);
+  });
+
+  // Restart button in top bar (twice-confirm)
+  var restartBtn = document.getElementById('cp-win-restart');
+  var rstPending = false, rstTimer;
+  restartBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (!rstPending) {
+      rstPending = true;
+      restartBtn.textContent = '⚠';
+      restartBtn.style.color = 'rgba(239,68,68,0.9)';
+      rstTimer = setTimeout(function() { rstPending = false; restartBtn.textContent = '↻'; restartBtn.style.color = ''; }, 2000);
+      return;
+    }
+    clearTimeout(rstTimer);
+    rstPending = false;
+    restartBtn.textContent = '↻';
+    restartBtn.style.color = '';
+    restartBtn.classList.add('restarting');
+    __cpShowLoading('Restarting…');
+    fetch('/api/tmux/panes/' + paneId + '/restart', { method: 'POST', headers: apiH })
+      .then(function(r) { return r.json(); })
+      .catch(function() { restartBtn.classList.remove('restarting'); });
+    var spinCheck = setInterval(function() {
+      var open = false;
+      if (window.__allWs) {
+        for (var i = window.__allWs.length - 1; i >= 0; i--) {
+          if (window.__allWs[i].readyState === 1) { open = true; break; }
+        }
+      }
+      if (open && restartBtn.classList.contains('restarting')) {
+        restartBtn.classList.remove('restarting');
+        clearInterval(spinCheck);
+      }
+    }, 300);
+    setTimeout(function() { restartBtn.classList.remove('restarting'); clearInterval(spinCheck); }, 30000);
   });
 
   // --- Ctrl+/ focus ---

@@ -12,6 +12,11 @@ import (
 	"time"
 )
 
+// enterDelay is the pause between sending text and pressing Enter.
+// Heavy TUIs (Copilot, OpenCode) need time to render text in the input buffer.
+// TODO: make this per-agent-type once agent detection is reliable.
+const enterDelay = 600 * time.Millisecond
+
 func handlePanes(w http.ResponseWriter, r *http.Request) {
 	gid := r.URL.Query().Get("group_id")
 	var rows *sql.Rows
@@ -131,6 +136,7 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, winNa
 		configJSON: "{}",
 		workspace:  workspace,
 		initScript: initScript,
+		agentType:  agentType,
 	})
 
 	return M{
@@ -200,27 +206,47 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	J(w, resp)
 }
 
+// columns allowed in agent_config UPDATE
+var paneUpdateCols = map[string]bool{
+	"title": true, "ttyd_port": true, "workspace": true, "init_script": true,
+	"tg_token": true, "tg_chat_id": true, "tg_enable": true, "active": true,
+	"agent_type": true, "agent_duty": true, "config": true, "common_prompt": true,
+	"ttyd_preview": true, "role": true, "default_model": true, "trust_level": true,
+	"proxy": true, "proxy_enable": true, "private_mode": true, "allowed_users": true,
+	"node_url": true, "preview": true,
+}
+
 func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 	paneID := normPaneID(id)
 	var req M
 	readBody(r, &req)
-	delete(req, "pane_id")
-	delete(req, "target")
-	if len(req) == 0 {
+	// filter to allowed columns only
+	filtered := M{}
+	for k, v := range req {
+		if paneUpdateCols[k] {
+			filtered[k] = v
+		}
+	}
+	if len(filtered) == 0 {
 		httpErr(w, 400, "No valid fields to update")
 		return
 	}
 	var sets []string
 	var vals []interface{}
-	for k, v := range req {
+	for k, v := range filtered {
 		sets = append(sets, k+"=?")
 		vals = append(vals, v)
 	}
 	vals = append(vals, paneID)
-	store.Exec("UPDATE agent_config SET "+strings.Join(sets, ", ")+" WHERE pane_id=?", vals...)
+	res, err := store.Exec("UPDATE agent_config SET "+strings.Join(sets, ", ")+" WHERE pane_id=?", vals...)
+	if err != nil {
+		httpErr(w, 500, "update failed: "+err.Error())
+		return
+	}
+	_ = res
 
 	// Sync agent_duty to workspace/.kiro/steering/duty.md
-	if duty, ok := req["agent_duty"].(string); ok {
+	if duty, ok := filtered["agent_duty"].(string); ok {
 		var ws sql.NullString
 		store.QueryRow("SELECT workspace FROM agent_config WHERE pane_id=?", paneID).Scan(&ws)
 		if ws.String != "" {
@@ -229,7 +255,7 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 			os.WriteFile(dir+"/duty.md", []byte("---\ninclusion: always\n---\n\n"+duty), 0644)
 		}
 	}
-	J(w, M{"success": true, "pane_id": shortPaneID(paneID), "updated": req})
+	J(w, M{"success": true, "pane_id": shortPaneID(paneID), "updated": filtered})
 }
 
 func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
@@ -414,7 +440,7 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 				runTmux("send-keys", "-t", winID, "Enter")
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(enterDelay)
 		runTmux("send-keys", "-t", winID, "Enter")
 	} else if keys, ok := req["keys"].(string); ok && keys != "" {
 		runTmux("send-keys", "-t", winID, keys)
@@ -672,6 +698,7 @@ func handleSendWait(w http.ResponseWriter, r *http.Request) {
 	// Send
 	text := strings.ReplaceAll(req.Text, "'", "'\\''")
 	runTmux("send-keys", "-t", paneID, "-l", text)
+	time.Sleep(enterDelay)
 	runTmux("send-keys", "-t", paneID, "Enter")
 
 	// Poll

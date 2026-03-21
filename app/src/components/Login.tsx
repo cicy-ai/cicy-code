@@ -8,9 +8,10 @@ export default function Login() {
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isLocalMode, setIsLocalMode] = useState(false);
+  const [isLocalMode, setIsLocalMode] = useState(config.isAudit);
 
   useEffect(() => {
+    if (config.isAudit) return;
     fetch(`${config.mgrBase}/api/mode`).then(r => r.json())
       .then(d => setIsLocalMode(d.mode !== 'saas'))
       .catch(() => setIsLocalMode(true));
@@ -48,9 +49,9 @@ export default function Login() {
     <div className="h-screen bg-[#0A0A0A] flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="text-4xl mb-3">✨</div>
-          <h1 className="text-xl font-semibold text-white">CiCy Code</h1>
-          <p className="text-sm text-zinc-500 mt-1">Sign in to get started</p>
+          <div className="text-4xl mb-3">{config.isAudit ? '🔍' : '✨'}</div>
+          <h1 className="text-xl font-semibold text-white">{config.isAudit ? 'CiCy Audit' : 'CiCy Code'}</h1>
+          <p className="text-sm text-zinc-500 mt-1">{config.isAudit ? 'Sign in to view your AI usage dashboard' : 'Sign in to get started'}</p>
         </div>
 
         {/* OAuth 按钮 - 仅在 SaaS 模式显示 */}
