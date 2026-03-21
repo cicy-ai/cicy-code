@@ -345,7 +345,7 @@ func autoAction(pid string, st paneSt) {
 		cooldownMap[pid] = now
 		watcherMu.Unlock()
 		tmuxCmd("send-keys", "-t", target, "t")
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(enterDelay)
 		tmuxCmd("send-keys", "-t", target, "Enter")
 	case "idle":
 		if st.CtxUsage != nil && *st.CtxUsage > compactThreshold {
@@ -354,7 +354,7 @@ func autoAction(pid string, st paneSt) {
 			cooldownMap[pid] = now
 			watcherMu.Unlock()
 			tmuxCmd("send-keys", "-t", target, "-l", "/compact")
-			time.Sleep(300 * time.Millisecond)
+			time.Sleep(enterDelay)
 			tmuxCmd("send-keys", "-t", target, "Enter")
 		}
 	}

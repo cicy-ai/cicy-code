@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
@@ -57,25 +56,12 @@ func handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 		J(w, M{"valid": false})
 		return
 	}
-
-	// Try JWT first (SaaS users — each has their own backend)
-	if strings.Count(token, ".") == 2 {
-		userID, _, err := parseJWT(token)
-		if err == nil {
-			var email, plan, backend string
-			store.QueryRow("SELECT email,plan,backend_url FROM saas_users WHERE id=?", userID).Scan(&email, &plan, &backend)
-			J(w, M{"valid": true, "auth_type": "saas", "user_id": userID, "email": email, "plan": plan, "backend": backend, "perms": []string{"api_full"}})
-			return
-		}
-	}
-
-	// Fall back to local token
 	perms, groupID := getTokenPerms(token)
 	if perms == nil {
 		J(w, M{"valid": false})
 		return
 	}
-	J(w, M{"valid": true, "auth_type": "token", "token": token[:minInt(8, len(token))] + "...", "perms": perms, "group_id": groupID, "home": os.Getenv("HOME")})
+	J(w, M{"valid": true, "auth_type": "token", "token": token[:minInt(8, len(token))] + "...", "perms": perms, "group_id": groupID})
 }
 
 func handleAuthVerifyToken(w http.ResponseWriter, r *http.Request) {
@@ -91,13 +77,13 @@ func handleAuthVerifyToken(w http.ResponseWriter, r *http.Request) {
 		J(w, M{"valid": false})
 		return
 	}
-	J(w, M{"valid": true, "perms": perms, "token": token, "group_id": groupID, "pane_id": nil, "expires_at": nil})
+	J(w, M{"valid": true, "perms": perms, "token": token, "group_id": groupID})
 }
 
 func handleAuthTokens(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		rows, err := store.Query("SELECT id, "+store.TokenPrefix()+", group_id, pane_id, perms, note, expires_at, created_at FROM tokens ORDER BY created_at DESC")
+		rows, err := store.Query("SELECT id, " + store.TokenPrefix() + ", group_id, pane_id, perms, note, expires_at, created_at FROM tokens ORDER BY created_at DESC")
 		if err != nil {
 			httpErr(w, 500, err.Error())
 			return
@@ -176,65 +162,4 @@ func handleAuthTokenDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	J(w, M{"success": true, "message": "Token " + id + " deleted"})
-}
-
-func handleResolve(w http.ResponseWriter, r *http.Request) {
-	slug := r.URL.Query().Get("slug")
-	if slug == "" {
-		http.Error(w, "missing slug", 400)
-		return
-	}
-	// slug format: u-{id8}, match against id prefix
-	id8 := strings.TrimPrefix(slug, "u-")
-	var url string
-	store.QueryRow("SELECT backend_url FROM saas_users WHERE id LIKE ?", id8+"%").Scan(&url)
-	if url == "" {
-		http.Error(w, "not found", 404)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"backend_url":"` + url + `"}`))
-}
-
-func handleVMToken(w http.ResponseWriter, r *http.Request) {
-	slug := r.URL.Query().Get("slug")
-	if slug == "" {
-		httpErr(w, 400, "missing slug")
-		return
-	}
-	id8 := strings.TrimPrefix(slug, "u-")
-	var vmToken string
-	store.QueryRow("SELECT vm_token FROM saas_users WHERE id LIKE ?", id8+"%").Scan(&vmToken)
-	if vmToken == "" {
-		httpErr(w, 404, "not found")
-		return
-	}
-	J(w, M{"vm_token": vmToken})
-}
-
-func handleAuthExchange(w http.ResponseWriter, r *http.Request) {
-	code := r.URL.Query().Get("code")
-	if code == "" {
-		httpErr(w, 400, "missing code")
-		return
-	}
-
-	var userID, slug, vmToken string
-	var used int
-	err := store.QueryRow("SELECT user_id,slug,vm_token,used FROM auth_codes WHERE code=?", code).Scan(&userID, &slug, &vmToken, &used)
-	if err != nil {
-		httpErr(w, 400, "invalid code")
-		return
-	}
-	if used == 1 {
-		httpErr(w, 400, "code already used")
-		return
-	}
-
-	// Mark as used
-	store.Exec("UPDATE auth_codes SET used=1 WHERE code=?", code)
-
-	// Issue JWT with limited perms, never expose vm_token
-	token := signJWT(userID, slug)
-	J(w, M{"status": "ok", "token": token, "slug": slug})
 }

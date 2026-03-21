@@ -54,7 +54,7 @@ func init() {
 var (
 	ttydInject     string
 	ttydInjectMu   sync.RWMutex
-	ttydInjectDir  = "mgr/resources"
+	ttydInjectDir  = "resources"
 	ttydInjectMod  time.Time
 )
 

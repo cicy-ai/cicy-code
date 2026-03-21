@@ -47,37 +47,11 @@ func corsM(next http.HandlerFunc) http.HandlerFunc {
 
 func authM(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Trust requests from CF Worker via tunnel secret
-		if r.Header.Get("X-Tunnel-Secret") == getTunnelSecret() {
-			next(w, r)
-			return
-		}
-		auth := r.Header.Get("Authorization")
-		token := ""
-		if strings.HasPrefix(auth, "Bearer ") {
-			token = strings.TrimPrefix(auth, "Bearer ")
-		} else {
+		token := getToken(r)
+		if token == "" {
 			token = r.URL.Query().Get("token")
 		}
-		if token == "" {
-			httpErr(w, 401, "Not authenticated")
-			return
-		}
-		// Try JWT (with slug verification), then local token
-		if strings.Count(token, ".") == 2 {
-			sub, slug, err := parseJWT(token)
-			if err == nil {
-				// If VM has SLUG set, verify it matches
-				if mySlug := os.Getenv("SLUG"); mySlug != "" && slug != mySlug {
-					httpErr(w, 403, "Forbidden")
-					return
-				}
-				_ = sub
-				next(w, r)
-				return
-			}
-		}
-		if !verifyToken(token) {
+		if token == "" || !verifyToken(token) {
 			httpErr(w, 401, "Not authenticated")
 			return
 		}
@@ -104,14 +78,6 @@ func loadAPIToken() string {
 	return ""
 }
 
-func getTunnelSecret() string {
-	s := os.Getenv("TUNNEL_SECRET")
-	if s == "" {
-		s = "cicy-tunnel-2026"
-	}
-	return s
-}
-
 func normPaneID(id string) string {
 	if id != "" && !strings.Contains(id, ":") {
 		return id + ":main.0"
@@ -123,7 +89,6 @@ func shortPaneID(id string) string {
 	return strings.Replace(id, ":main.0", "", 1)
 }
 
-// redisGetJSON reads a key from Redis and returns parsed JSON map
 func redisGetJSON(key string) map[string]interface{} {
 	host := os.Getenv("REDIS_HOST")
 	if host == "" {

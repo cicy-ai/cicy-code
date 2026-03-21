@@ -35,8 +35,15 @@ function Main() {
     return () => window.removeEventListener('hashchange', onChange);
   }, []);
 
-  // On audit.cicy-ai.com, always show audit dashboard
+  // On audit.cicy-ai.com, show audit dashboard (but require login first)
   if (config.isAudit) {
+    document.title = 'CiCy Audit';
+    if (isChecking) return (
+      <div className="h-screen bg-[#0A0A0A] flex items-center justify-center">
+        <div className="w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
+      </div>
+    );
+    if (!token) return <Login />;
     return <AuditDashboard />;
   }
 

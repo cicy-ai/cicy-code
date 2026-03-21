@@ -167,12 +167,14 @@ func dispatchQueue(paneID string) {
 		return
 	}
 
-	// Send messages one by one with small delay to avoid tmux truncation
+	// Send messages one by one with enterDelay before Enter for TUI compatibility
 	for i, msg := range messages {
 		if types[i] == "command" {
 			runTmux("send-keys", "-t", paneID, msg, "Enter")
 		} else {
-			runTmux("send-keys", "-t", paneID, msg, "Enter")
+			runTmux("send-keys", "-t", paneID, "-l", msg)
+			time.Sleep(enterDelay)
+			runTmux("send-keys", "-t", paneID, "Enter")
 		}
 		if i < len(messages)-1 {
 			time.Sleep(200 * time.Millisecond)
