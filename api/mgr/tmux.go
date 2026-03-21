@@ -148,7 +148,13 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, winNa
 }
 
 func handlePaneByID(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api/tmux/panes/")
+	path := r.URL.Path
+	switch {
+	case strings.HasPrefix(path, "/api/tmux/panes/"):
+		path = strings.TrimPrefix(path, "/api/tmux/panes/")
+	case strings.HasPrefix(path, "/api/panes/"):
+		path = strings.TrimPrefix(path, "/api/panes/")
+	}
 	switch {
 	case strings.HasSuffix(path, "/restart") && r.Method == "POST":
 		handleRestartPane(w, r, strings.TrimSuffix(path, "/restart"))

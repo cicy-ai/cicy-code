@@ -117,13 +117,13 @@ export default function FloatingCodeWindow({
     const syncToViewport = () => {
       if (maximized) {
         const next = getMaximizedRect();
-        setPosition(next.pos);
-        setSize(next.size);
+        setPosition(prev => (prev.x === next.pos.x && prev.y === next.pos.y ? prev : next.pos));
+        setSize(prev => (prev.width === next.size.width && prev.height === next.size.height ? prev : next.size));
         return;
       }
       const next = clampRect(position, size, collapsed);
-      setPosition(next.pos);
-      setSize(next.size);
+      setPosition(prev => (prev.x === next.pos.x && prev.y === next.pos.y ? prev : next.pos));
+      setSize(prev => (prev.width === next.size.width && prev.height === next.size.height ? prev : next.size));
     };
     syncToViewport();
     window.addEventListener('resize', syncToViewport);
