@@ -13,16 +13,14 @@ export default function DevPanel() {
   const stores = useDevStore();
 
   useEffect(() => { localStorage.setItem(OPEN_KEY, open ? '1' : '0'); }, [open]);
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener('open-devtools-panel', onOpen);
+    return () => window.removeEventListener('open-devtools-panel', onOpen);
+  }, []);
 
   return (
     <>
-      {/* Floating trigger */}
-      {!open && (
-        <button onClick={() => setOpen(true)} title="DevTools"
-          className="fixed bottom-4 right-4 z-[999999] w-9 h-9 rounded-full bg-purple-600/90 hover:bg-purple-500 text-white flex items-center justify-center shadow-lg transition-all cursor-pointer backdrop-blur-sm">
-          <Bug className="w-4 h-4" />
-        </button>
-      )}
       {open && createPortal(<Panel stores={stores} onClose={() => setOpen(false)} />, document.body)}
     </>
   );
