@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -284,5 +285,94 @@ func runSetup() {
 	fmt.Println("🎉 环境初始化完成！")
 }
 
-// ensureMissingAgents is no longer needed — builtin agents use fixed ports
-// and are created during first-run setup. Watcher handles restart.
+// runSetupWithAgents runs setup non-interactively with specified agents.
+// agentList is comma-separated, e.g. "kiro-cli,claude" or "all".
+func runSetupWithAgents(agentList string) {
+	fmt.Println("🎯 Cicy Code 环境初始化 (non-interactive)")
+	fmt.Println("=" + strings.Repeat("=", 30))
+
+	// 1. Check & install base tools
+	baseTools := []Tool{
+		{"unzip", "unzip", "sudo apt-get update && sudo apt-get install -y unzip", true, false},
+		{"tmux", "tmux", "sudo apt-get update && sudo apt-get install -y tmux", true, false},
+		{"git", "git", "sudo apt-get update && sudo apt-get install -y git", true, false},
+		{"node", "node", "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs", true, false},
+	}
+	fmt.Println("🔍 检查基础环境...")
+	for i := range baseTools {
+		_, err := exec.LookPath(baseTools[i].Command)
+		baseTools[i].Installed = err == nil
+		status := "❌"
+		if baseTools[i].Installed {
+			status = "✅"
+		}
+		fmt.Printf("  %s %s\n", status, baseTools[i].Name)
+	}
+	installMissing(baseTools)
+
+	os.Setenv("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:"+os.Getenv("PATH"))
+
+	// 2. Parse agent list
+	var selected []string
+	if agentList == "all" || agentList == "ALL" {
+		selected = []string{"kiro-cli", "claude", "copilot", "gemini", "codex", "opencode"}
+	} else {
+		// Always include mandatory agents
+		has := map[string]bool{}
+		for _, a := range strings.Split(agentList, ",") {
+			a = strings.TrimSpace(a)
+			if a != "" {
+				has[a] = true
+			}
+		}
+		has["kiro-cli"] = true
+		has["opencode"] = true
+		for a := range has {
+			selected = append(selected, a)
+		}
+	}
+
+	fmt.Printf("📦 安装 agents: %v\n", selected)
+	installSelectedAgents(selected)
+	createSelectedWorkers(selected)
+
+	fmt.Println("=" + strings.Repeat("=", 30))
+	fmt.Println("🎉 环境初始化完成！")
+}
+
+// ensureBuiltinAgents restores tmux sessions and ttyd for agents already in DB.
+func ensureBuiltinAgents() {
+	rows, err := store.Query("SELECT pane_id, ttyd_port, workspace FROM agent_config WHERE active=1")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	token := getFirstToken()
+	for rows.Next() {
+		var paneID, workspace string
+		var port int
+		rows.Scan(&paneID, &port, &workspace)
+		if paneID == "" || port == 0 {
+			continue
+		}
+
+		// Ensure tmux session
+		sess := strings.Split(paneID, ":")[0]
+		if exec.Command("tmux", "has-session", "-t", sess).Run() != nil {
+			if workspace == "" {
+				home, _ := os.UserHomeDir()
+				workspace = filepath.Join(home, "workers", sess)
+			}
+			os.MkdirAll(workspace, 0755)
+			exec.Command("tmux", "new-session", "-d", "-s", sess, "-n", "main", "-c", workspace).Run()
+			log.Printf("[startup] created session %s", sess)
+		}
+
+		// Ensure ttyd
+		if !isPortListening(port) {
+			startInstance(paneID, port, token)
+			log.Printf("[startup] started %s on :%d", paneID, port)
+		}
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/gorilla/websocket"
@@ -25,30 +26,38 @@ var (
 
 const version = "0.1.0"
 
+// agentsFlag holds --agents=kiro-cli,claude,... for non-interactive setup
+var agentsFlag string
+
 func main() {
 	for _, arg := range os.Args[1:] {
-		switch arg {
-		case "--version", "-v":
+		switch {
+		case arg == "--version" || arg == "-v":
 			fmt.Println("cicy-code " + version)
 			os.Exit(0)
-		case "--help", "-h":
+		case arg == "--help" || arg == "-h":
 			fmt.Println(`cicy-code - AI agent collaboration tool (local, SQLite)
 
 Usage: cicy-code [options]
 
 Options:
-  --help, -h    Show this help
-  --dev         Development mode
-  --public      Listen on 0.0.0.0 (default: 127.0.0.1)
+  --help, -h              Show this help
+  --dev                   Development mode
+  --public                Listen on 0.0.0.0 (default: 127.0.0.1)
+  --agents=LIST           Comma-separated agents to install (skip interactive)
+                          e.g. --agents=kiro-cli,claude,copilot
+                          Use --agents=all for all agents
 
 Environment:
   PORT          API port (default: 8008)
   SQLITE_PATH   SQLite database file (default: ~/.cicy/data.db)`)
 			os.Exit(0)
-		case "--dev":
+		case arg == "--dev":
 			devMode = true
-		case "--public":
+		case arg == "--public":
 			publicMode = true
+		case strings.HasPrefix(arg, "--agents="):
+			agentsFlag = strings.TrimPrefix(arg, "--agents=")
 		}
 	}
 
@@ -57,6 +66,9 @@ Environment:
 	initDB()
 	store.Migrate()
 	defer store.Close()
+
+	// First-run setup: check env + install agents
+	checkEnvAndSetup()
 
 	go startWatcher()
 	go startTmuxHealth()
@@ -236,6 +248,25 @@ Environment:
 	}()
 
 	log.Fatal(http.ListenAndServe(bind+":"+port, nil))
+}
+
+// checkEnvAndSetup runs first-time setup if no agents exist in DB.
+func checkEnvAndSetup() {
+	var count int
+	store.QueryRow("SELECT COUNT(*) FROM agent_config").Scan(&count)
+	if count > 0 {
+		// Already set up — ensure existing agents are running
+		ensureBuiltinAgents()
+		return
+	}
+	// First run
+	if agentsFlag != "" {
+		// Non-interactive: --agents=kiro-cli,claude or --agents=all
+		runSetupWithAgents(agentsFlag)
+	} else {
+		// Interactive prompt
+		runSetup()
+	}
 }
 
 func getFirstToken() string {
