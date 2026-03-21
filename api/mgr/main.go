@@ -109,6 +109,11 @@ Environment:
 	http.HandleFunc("/api/panes/create", wa(handleCreatePane))
 	http.HandleFunc("/api/panes/", wa(handlePaneByID))
 	http.HandleFunc("/api/panes/restart-all", wa(handleRestartAll))
+	// Legacy panes routes (frontend compatibility)
+	http.HandleFunc("/api/tmux/panes", wa(handlePanes))
+	http.HandleFunc("/api/tmux/panes/", wa(handlePaneByID))
+	http.HandleFunc("/api/tmux/create", wa(handleCreatePane))
+	http.HandleFunc("/api/tmux/restart_all", wa(handleRestartAll))
 
 	// Tmux
 	http.HandleFunc("/api/tmux/send", wa(handleSend))
@@ -119,10 +124,14 @@ Environment:
 	http.HandleFunc("/api/tmux/tree", wa(handleTree))
 	http.HandleFunc("/api/tmux/status", wa(handleStatus))
 	http.HandleFunc("/api/tmux/mouse", wa(handleMouseToggle))
+	http.HandleFunc("/api/tmux/mouse/on", wa(handleMouseToggle))
+	http.HandleFunc("/api/tmux/mouse/off", wa(handleMouseToggle))
 	http.HandleFunc("/api/tmux/mouse/status", wa(handleMouseStatus))
 	http.HandleFunc("/api/tmux/ttyd/status", wa(handleTtydStatus))
+	http.HandleFunc("/api/tmux/ttyd/status/", wa(handleTtydStatus))
 	http.HandleFunc("/api/tmux/list", wa(handleTmuxList))
 	http.HandleFunc("/api/tmux/clear", wa(handleClear))
+	http.HandleFunc("/api/tmux/capture_pane", wa(handleCapture))
 
 	// Chat
 	http.HandleFunc("/api/chat/push", wa(handleChatPush))
@@ -162,11 +171,17 @@ Environment:
 	http.HandleFunc("/api/queue/push", wa(handleQueuePush))
 	http.HandleFunc("/api/queue/list", wa(handleQueueList))
 	http.HandleFunc("/api/queue/", wa(handleQueueByID))
+	// Legacy queue routes
+	http.HandleFunc("/api/workers/queue", wa(handleQueue))
+	http.HandleFunc("/api/workers/queue/", wa(handleQueueByID))
 
 	// Agents
 	http.HandleFunc("/api/agents/by-pane", wa(handleAgentsByPane))
+	http.HandleFunc("/api/agents/by-pane/", wa(handleAgentsByPane))
+	http.HandleFunc("/api/agents/pane/", wa(handleAgentsByPane))
 	http.HandleFunc("/api/agents/bind", wa(handleAgentBind))
 	http.HandleFunc("/api/agents/unbind", wa(handleAgentUnbind))
+	http.HandleFunc("/api/agents/unbind/", wa(handleAgentUnbind))
 
 	// Groups
 	http.HandleFunc("/api/groups", wa(handleGroups))
@@ -178,7 +193,9 @@ Environment:
 
 	// Settings
 	http.HandleFunc("/api/settings", wa(handleSettings))
+	http.HandleFunc("/api/settings/global", wa(handleSettings))
 	http.HandleFunc("/api/file-exists", wa(handleFileExists))
+	http.HandleFunc("/api/utils/file/exists", wa(handleFileExists))
 	http.HandleFunc("/api/correctEnglish", wa(handleCorrectEnglish))
 
 	// TTS
@@ -190,6 +207,7 @@ Environment:
 
 	// Pair
 	http.HandleFunc("/api/pair", wa(handlePair))
+	http.HandleFunc("/api/tmux/pair", wa(handlePair))
 
 	// Desktop
 	http.HandleFunc("/api/desktop/status", wa(handleDesktopStatus))

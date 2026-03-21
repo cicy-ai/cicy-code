@@ -6,7 +6,17 @@ import (
 )
 
 func handleAgentsByPane(w http.ResponseWriter, r *http.Request) {
-	paneID := strings.TrimPrefix(r.URL.Path, "/api/agents/pane/")
+	paneID := r.URL.Query().Get("pane_id")
+	if paneID == "" {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/api/agents/pane/"):
+			paneID = strings.TrimPrefix(r.URL.Path, "/api/agents/pane/")
+		case strings.HasPrefix(r.URL.Path, "/api/agents/by-pane/"):
+			paneID = strings.TrimPrefix(r.URL.Path, "/api/agents/by-pane/")
+		case strings.HasPrefix(r.URL.Path, "/api/agents/by-pane"):
+			// no path id, keep empty to return all
+		}
+	}
 	if paneID == "" || paneID == "all" {
 		// Return all bindings
 		rows, err := store.Query("SELECT id, pane_id, agent_name, status FROM pane_agents")

@@ -24,7 +24,13 @@ func handleQueue(w http.ResponseWriter, r *http.Request) {
 
 // handleQueueByID routes PATCH/DELETE to /api/workers/queue/{id}
 func handleQueueByID(w http.ResponseWriter, r *http.Request) {
-	idStr := strings.TrimPrefix(r.URL.Path, "/api/workers/queue/")
+	idStr := r.URL.Path
+	switch {
+	case strings.HasPrefix(idStr, "/api/workers/queue/"):
+		idStr = strings.TrimPrefix(idStr, "/api/workers/queue/")
+	case strings.HasPrefix(idStr, "/api/queue/"):
+		idStr = strings.TrimPrefix(idStr, "/api/queue/")
+	}
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		httpErr(w, 400, "invalid id")
