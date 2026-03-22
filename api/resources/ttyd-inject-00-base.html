@@ -49,7 +49,7 @@ window.addEventListener('load',function(){
     if(window.term||window.gotty_term){
       clearInterval(i);
       var t=window.term||window.gotty_term;
-      t.setOption&&t.setOption('scrollback',10000);
+      t.setOption&&t.setOption('scrollback',1000);
       t.setOption&&t.setOption('fontFamily','Menlo, Consolas, monospace');
       t.setOption&&t.setOption('letterSpacing',-0.5);
       setTimeout(function(){ t.fit&&t.fit(); window.dispatchEvent(new Event('resize')); },200);
