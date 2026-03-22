@@ -28,7 +28,7 @@ var (
 	desktopCmd  *exec.Cmd
 )
 
-const version = "0.2.9"
+const version = "0.2.10"
 
 // agentsFlag holds --agents=kiro-cli,claude,... for non-interactive setup
 var agentsFlag string

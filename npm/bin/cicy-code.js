@@ -141,6 +141,7 @@ async function launchDesktop() {
     detached: true,
     env: { ...process.env, CICY_NO_BROWSER: '1' }
   });
+  server.on('exit', (code, signal) => console.error(`  ⚠️  Server exited code=${code} signal=${signal}`));
   server.unref();
   console.log(`  🚀 Starting cicy-code server (PID: ${server.pid})...`);
 
