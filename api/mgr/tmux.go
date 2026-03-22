@@ -618,43 +618,7 @@ func handleTree(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleStatus(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-
-	// Read from Redis pane_status_map (maintained by cron_pane_watcher)
-	statusMap := redisGetJSON("pane_status_map")
-
-	if id != "" {
-		paneID := normPaneID(id)
-		target := paneID
-		if !strings.Contains(paneID, ":") {
-			target = paneID + ":main.0"
-		}
-		if statusMap != nil {
-			if v, ok := statusMap[target]; ok {
-				J(w, v)
-				return
-			}
-		}
-		J(w, M{"error": "not found", "pane_id": id})
-		return
-	}
-
-	if statusMap != nil {
-		J(w, statusMap)
-		return
-	}
-
-	// Fallback to DB if Redis unavailable
-	rows, _ := store.Query("SELECT pane_id, ttyd_port, title FROM agent_config")
-	defer rows.Close()
-	result := M{}
-	for rows.Next() {
-		var pid, title string
-		var port int
-		rows.Scan(&pid, &port, &title)
-		result[pid] = M{"pane_id": shortPaneID(pid), "title": title, "port": port}
-	}
-	J(w, result)
+	J(w, M{})
 }
 
 func handleSendWait(w http.ResponseWriter, r *http.Request) {
