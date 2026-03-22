@@ -12,6 +12,7 @@ export default defineConfig(({mode}) => {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       'import.meta.env.VITE_API_BASE': JSON.stringify(isDev ? 'https://dev-api.cicy-ai.com' : ''),
       'import.meta.env.VITE_HOST_HOME': JSON.stringify('/home/w3c_offical'),
+      'import.meta.env.VITE_APP_VERSION': JSON.stringify(process.env.npm_package_version || '0.1.0'),
     },
     resolve: {
       alias: {

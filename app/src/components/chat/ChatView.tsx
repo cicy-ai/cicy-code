@@ -226,10 +226,16 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
       const isElectron = typeof (window as any).electronRPC === 'function' ? '1' : '0';
       ws = new WebSocket(`${base}/api/chat/ws?pane=${short}&token=${token}&electron=${isElectron}`);
 
-      const visionHandler = (e: CustomEvent) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'gemini_vision_result', data: e.detail })); };
-      const askHandler = (e: CustomEvent) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'gemini_ask_result', data: e.detail })); };
-      const pongHandler = (e: CustomEvent) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'pong', data: e.detail })); };
-      const ipcPongHandler = (e: CustomEvent) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ipc_pong', data: e.detail })); };
+      const wsSend = (data: object) => {
+        if (ws?.readyState === WebSocket.OPEN) {
+          console.log('[ChatView] WS send:', (data as any).type, data);
+          ws.send(JSON.stringify(data));
+        }
+      };
+      const visionHandler = (e: CustomEvent) => { wsSend({ type: 'gemini_vision_result', data: e.detail }); };
+      const askHandler = (e: CustomEvent) => { wsSend({ type: 'gemini_ask_result', data: e.detail }); };
+      const pongHandler = (e: CustomEvent) => { wsSend({ type: 'pong', data: e.detail }); };
+      const ipcPongHandler = (e: CustomEvent) => { wsSend({ type: 'ipc_pong', data: e.detail }); };
 
       window.addEventListener('gemini-vision-result', visionHandler as EventListener);
       window.addEventListener('gemini-ask-result', askHandler as EventListener);
@@ -286,11 +292,13 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
             try {
               const result = eval(msg.data.code);
               console.log('[exec_js] result:', result);
-              if (msg.data.requestId && ws) ws.send(JSON.stringify({ type: 'exec_js_result', data: { requestId: msg.data.requestId, result: String(result) } }));
+              if (msg.data.requestId && ws) wsSend({ type: 'exec_js_result', data: { requestId: msg.data.requestId, result: String(result) } });
             } catch (e: any) {
               console.error('[exec_js] error:', e);
-              if (msg.data.requestId && ws) ws.send(JSON.stringify({ type: 'exec_js_result', data: { requestId: msg.data.requestId, error: e.message } }));
+              if (msg.data.requestId && ws) wsSend({ type: 'exec_js_result', data: { requestId: msg.data.requestId, error: e.message } });
             }
+          } else if (msg.type === 'webpage_ping') {
+            wsSend({ type: 'webpage_pong', data: { requestId: msg.data?.requestId, version: import.meta.env.VITE_APP_VERSION } });
           } else if (msg.type === 'worker_idle') {
             const d = msg.data?.data;
             if (d) setChatData(prev => [...prev, { q: '', a: `🔔 **${d.worker || msg.data.from}** finished task (idle)`, status: 'done', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0, system: true }]);

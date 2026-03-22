@@ -21,10 +21,12 @@ type ChatEvent struct {
 // ── Hub: per-pane pub/sub over WebSocket ──
 
 type chatClient struct {
-	conn     *websocket.Conn
-	send     chan []byte
-	pane     string
-	electron bool
+	conn        *websocket.Conn
+	send        chan []byte
+	pane        string
+	electron    bool
+	connectedAt time.Time
+	remoteAddr  string
 }
 
 type chatHub struct {
@@ -33,6 +35,33 @@ type chatHub struct {
 }
 
 var hub = &chatHub{clients: make(map[string]map[*chatClient]struct{})}
+
+func (h *chatHub) stats() interface{} {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	type clientInfo struct {
+		Electron    bool   `json:"electron"`
+		RemoteAddr  string `json:"remote_addr"`
+		ConnectedAt string `json:"connected_at"`
+		UptimeSec   int    `json:"uptime_sec"`
+	}
+	out := map[string][]clientInfo{}
+	for pane, m := range h.clients {
+		for c := range m {
+			out[pane] = append(out[pane], clientInfo{
+				Electron:    c.electron,
+				RemoteAddr:  c.remoteAddr,
+				ConnectedAt: c.connectedAt.Format(time.RFC3339),
+				UptimeSec:   int(time.Since(c.connectedAt).Seconds()),
+			})
+		}
+	}
+	return out
+}
+
+func handleWsClients(w http.ResponseWriter, r *http.Request) {
+	json.NewEncoder(w).Encode(hub.stats())
+}
 
 func (h *chatHub) register(c *chatClient) {
 	h.mu.Lock()
@@ -59,12 +88,19 @@ func (h *chatHub) unregister(c *chatClient) {
 }
 
 func (h *chatHub) broadcast(pane string, evt ChatEvent) {
+	h.broadcastExcept(pane, evt, nil)
+}
+
+func (h *chatHub) broadcastExcept(pane string, evt ChatEvent, except *chatClient) {
 	b, _ := json.Marshal(evt)
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	n := len(h.clients[pane])
 	log.Printf("[chat-ws] broadcast pane=%s type=%s clients=%d", pane, evt.Type, n)
 	for c := range h.clients[pane] {
+		if c == except {
+			continue
+		}
 		select {
 		case c.send <- b:
 		default:
@@ -128,7 +164,7 @@ func (c *chatClient) readPump() {
 		// 广播客户端发来的消息给同 pane 的所有客户端
 		var evt ChatEvent
 		if json.Unmarshal(msg, &evt) == nil && evt.Type != "" {
-			hub.broadcast(c.pane, evt)
+			hub.broadcastExcept(c.pane, evt, c)
 		}
 	}
 }
@@ -150,7 +186,17 @@ func handleChatWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c := &chatClient{conn: conn, send: make(chan []byte, 64), pane: pane, electron: r.URL.Query().Get("electron") == "1"}
+	remoteAddr := r.Header.Get("CF-Connecting-IP")
+	if remoteAddr == "" {
+		remoteAddr = r.Header.Get("X-Real-IP")
+	}
+	if remoteAddr == "" {
+		remoteAddr = r.Header.Get("X-Forwarded-For")
+	}
+	if remoteAddr == "" {
+		remoteAddr = r.RemoteAddr
+	}
+	c := &chatClient{conn: conn, send: make(chan []byte, 64), pane: pane, electron: r.URL.Query().Get("electron") == "1", connectedAt: time.Now(), remoteAddr: remoteAddr}
 	hub.register(c)
 	go c.writePump()
 	c.readPump()
@@ -220,12 +266,6 @@ func handleChatPush(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleChatDebug(w http.ResponseWriter, r *http.Request) {
-	hub.mu.RLock()
-	defer hub.mu.RUnlock()
-	res := map[string]int{}
-	for pane, clients := range hub.clients {
-		res[pane] = len(clients)
-	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(res)
+	json.NewEncoder(w).Encode(r.Header)
 }

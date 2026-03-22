@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
-  LayoutList, Users, RotateCcw, Plus, Pin, PinOff, Menu, ExternalLink, Key, Bug
+  LayoutList, Users, RotateCcw, Plus, Pin, PinOff, Menu, ExternalLink, Key, Bug, Server
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { lockPointer, unlockPointer } from '../lib/pointerLock';
@@ -25,6 +25,7 @@ import { useDialog } from '../contexts/DialogContext';
 import config, { urls } from '../config';
 import apiService from '../services/api';
 import { sendCommandToTmux } from '../services/mockApi';
+import { ApiSwitchDialog } from './layout/ApiSwitchDialog';
 
 const cache = {
   get: (k: string, def: any) => { try { const v = JSON.parse(localStorage.getItem(k)!); return v ?? def; } catch { return def; } },
@@ -51,6 +52,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
+  const [apiOpen, setApiOpen] = useState(false);
   const [panelSizes, setPanelSizes] = useState<Record<string, number>>(() => cache.get('ws_panelSizes', { 'left-panel': 50, 'right-panel': 50 }));
   const [toast, setToast] = useState<string | null>(null);
 
@@ -199,21 +201,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleCapture = async () => { try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
   const handleToggleMouse = async () => { const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
 
-  const [editingTitle, setEditingTitle] = useState(false);
-  const titleRef = useRef<HTMLInputElement>(null);
-
-  const commitTitle = () => {
-    setEditingTitle(false);
-    const v = titleRef.current?.value.trim();
-    if (v && v !== title) {
-      setAgentDetail((prev: any) => prev ? { ...prev, title: v } : { title: v });
-      setAgents((prev: any[]) => prev.map(a => (a.pane_id || a.id)?.startsWith(paneId) ? { ...a, title: v } : a));
-      apiService.updatePane(fullPaneId, { title: v }).catch(() => {});
-    }
-  };
   const toggleLeft = (p: 'team') => { setLeftPanel(prev => prev === p ? null : p); };
-
-  useEffect(() => { if (editingTitle && titleRef.current) { titleRef.current.focus(); titleRef.current.select(); } }, [editingTitle]);
 
   const [loadedTtyds, setLoadedTtyds] = useState<Set<string>>(() => new Set());
   useEffect(() => { if (token && paneId) setLoadedTtyds(prev => new Set(prev).add(paneId)); }, [paneId, token]);
@@ -222,8 +210,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     <div data-id="right-content" className="h-full flex flex-col relative">
       <header data-id="top-bar" className="h-12 border-b border-[var(--vsc-border)] bg-[#0A0A0A] flex items-center justify-between px-4 shrink-0 z-10">
         <div data-id="top-bar-left" className="flex items-center gap-3 w-1/3 min-w-0">
-          <span data-id="agent-title" className="text-sm text-zinc-100 font-medium truncate max-w-[160px] bg-white/[0.12] px-2 py-0.5 rounded" onDoubleClick={() => setEditingTitle(true)} style={{ display: editingTitle ? 'none' : undefined, cursor: 'default' }}>{title}</span>
-          {editingTitle && <input ref={titleRef} data-id="agent-title-input" defaultValue={title} className="text-sm text-zinc-300 bg-white/[0.04] border border-white/[0.1] rounded px-2 py-0.5 max-w-[160px] outline-none" onBlur={commitTitle} onKeyDown={e => { if (e.key === 'Enter') commitTitle(); if (e.key === 'Escape') setEditingTitle(false); }} />}
+          <span data-id="agent-title" className="text-sm text-zinc-100 font-medium truncate max-w-[160px] bg-white/[0.12] px-2 py-0.5 rounded">{title}</span>
           <span data-id="pane-id-badge" className="text-xs font-mono text-zinc-600 bg-white/[0.03] px-2 py-1 rounded shrink-0">{paneId}</span>
           <button onClick={() => setFloatingCodeOpen(v => !v)} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0" title="Code Server">
             {floatingCodeOpen ? <FolderOpen className="w-3.5 h-3.5" /> : <Folder className="w-3.5 h-3.5" />}
@@ -233,6 +220,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         <div data-id="top-bar-right" className="flex items-center justify-end w-1/3 gap-3">
           <NetworkSignal latency={netLatency} />
           <button onClick={() => setTokenOpen(true)} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API Tokens"><Key className="w-3.5 h-3.5" /></button>
+          <button onClick={() => setApiOpen(true)} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 服务器"><Server className="w-3.5 h-3.5" /></button>
           <button onClick={() => window.dispatchEvent(new Event('open-devtools-panel'))} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="DevTools"><Bug className="w-3.5 h-3.5" /></button>
           <span id="version" className="text-[10px] font-mono text-zinc-600">v1.0.1</span>
           {contextUsage != null && (
@@ -418,6 +406,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
 
       {settingsOpen && <div data-id="settings-overlay"><SettingsFloat paneId={paneId} fullPaneId={fullPaneId} agentDetail={agentDetail} onAgentDetailChange={(d) => { setAgentDetail(d); setAgents(prev => prev.map(a => (a.pane_id || a.id)?.startsWith(paneId) ? { ...a, ...d } : a)); }} onClose={() => setSettingsOpen(false)} /></div>}
       {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
+      {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
       {toast && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 bg-zinc-800 text-white text-sm rounded-lg shadow-lg">{toast}</div>}
     </div>
     </SendingProvider>
