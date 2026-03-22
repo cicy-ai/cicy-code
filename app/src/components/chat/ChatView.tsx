@@ -221,7 +221,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
 
     function connect() {
       if (dead) return;
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const proto = config.apiBase.startsWith('https') ? 'wss' : (location.protocol === 'https:' ? 'wss' : 'ws');
       const base = config.apiBase.replace(/^https?/, proto);
       const isElectron = typeof (window as any).electronRPC === 'function' ? '1' : '0';
       ws = new WebSocket(`${base}/api/chat/ws?pane=${short}&token=${token}&electron=${isElectron}`);
