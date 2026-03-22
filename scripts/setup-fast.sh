@@ -46,6 +46,16 @@ echo "[5/6] tmux"
 sudo -u "$USER" tmux kill-session -t w-10001 2>/dev/null || true
 sudo -u "$USER" tmux new-session -d -s w-10001 -n main -c "$HOME_DIR"
 
+echo "[5.5/6] gstack skills"
+sudo -u "$USER" bash -c "
+  mkdir -p $HOME_DIR/.codex/skills
+  if [ ! -d $HOME_DIR/.codex/skills/gstack ]; then
+    git clone https://github.com/cicy-ai/gstack $HOME_DIR/.codex/skills/gstack --depth 1 -q
+  fi
+  mkdir -p $HOME_DIR/.kiro/agents
+  ln -sf $HOME_DIR/.codex/skills/gstack/.agents/skills/* $HOME_DIR/.kiro/agents/ 2>/dev/null || true
+"
+
 echo "[6/6] MySQL 初始化"
 for i in {1..30}; do
     docker exec cicy-mysql mysql -u root -p'cicy-code' -e "SELECT 1" &>/dev/null && break
