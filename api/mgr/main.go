@@ -295,6 +295,9 @@ Environment:
 	log.Printf("============================================================")
 	log.Printf("")
 	go func() {
+		if os.Getenv("CICY_NO_BROWSER") == "1" {
+			return
+		}
 		if err := openDefaultBrowser(openURL); err != nil {
 			log.Printf("[startup] open browser failed: %v", err)
 		} else {

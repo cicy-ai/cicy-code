@@ -6,6 +6,13 @@ API_DIR="$ROOT_DIR/api"
 APP_DIR="$ROOT_DIR/app"
 DIST_DIR="$ROOT_DIR/dist"
 
+# ── Sync version from npm/package.json → api/mgr/main.go ──
+sync_version() {
+  local ver=$(node -p "require('./npm/package.json').version")
+  sed -i "s/const version = \".*\"/const version = \"$ver\"/" $API_DIR/mgr/main.go
+  echo "  version: $ver"
+}
+
 # ── Embed assets into api/mgr/ for go:embed ──
 prepare_embed() {
   rm -rf $API_DIR/mgr/resources $API_DIR/mgr/ui $API_DIR/mgr/tmux.conf $API_DIR/mgr/monitor
@@ -42,10 +49,12 @@ build_all() {
 # ── Main ──
 case "${1:-build}" in
   build)
+    sync_version
     prepare_embed
     build_one "${2:-linux}" "${3:-amd64}"
     ;;
   all)
+    sync_version
     prepare_embed
     build_all
     ;;
