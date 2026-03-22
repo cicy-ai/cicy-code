@@ -50,7 +50,7 @@ async function main() {
     new Promise(r => setTimeout(() => r(null), 3000))
   ]);
 
-  if (latest) {
+  if (latest && !process.env.CICY_SKIP_UPDATE) {
     console.log(`\n  Update available: ${pkg.version} → ${latest}`);
     console.log(`  Updating...\n`);
     try {
@@ -125,15 +125,22 @@ function waitForServer(port, timeout) {
 }
 
 async function launchDesktop() {
-  const port = process.env.PORT || 18008;
+  const port = process.env.PORT || 8008;
   const desktopPort = 18101;
+
+  // 0. Kill existing electron/cicy-code and free ports
+  try { execSync(`pkill -f 'electron' 2>/dev/null || true`, { shell: true }); } catch {}
+  try { execSync(`pkill -f 'cicy-code' 2>/dev/null || true`, { shell: true }); } catch {}
+  try { execSync(`lsof -ti:${desktopPort} | xargs kill -9 2>/dev/null || true`, { shell: true }); } catch {}
+  try { execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null || true`, { shell: true }); } catch {}
+  await new Promise(resolve => setTimeout(resolve, 500));
 
   // 1. Start API server in background
   const serverArgs = process.argv.slice(2).filter(a => a !== '--desktop');
   const server = spawn(binPath, serverArgs, {
     stdio: 'ignore',
     detached: true,
-    env: process.env
+    env: { ...process.env, CICY_NO_BROWSER: '1' }
   });
   server.unref();
   console.log(`  🚀 Starting cicy-code server (PID: ${server.pid})...`);
