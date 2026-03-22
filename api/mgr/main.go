@@ -28,7 +28,7 @@ var (
 	desktopCmd  *exec.Cmd
 )
 
-const version = "0.2.8"
+const version = "0.2.9"
 
 // agentsFlag holds --agents=kiro-cli,claude,... for non-interactive setup
 var agentsFlag string
@@ -137,6 +137,7 @@ Environment:
 	// Chat
 	http.HandleFunc("/api/chat/push", wa(handleChatPush))
 	http.HandleFunc("/api/chat/ws", handleChatWS)
+	http.HandleFunc("/api/chat/clients", wa(handleWsClients))
 	http.HandleFunc("/api/chat/debug", wa(handleChatDebug))
 	http.HandleFunc("/api/chat/webhook", corsM(handleChatWebhook))
 
