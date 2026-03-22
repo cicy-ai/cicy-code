@@ -22,6 +22,7 @@ function savePresets(p: Preset[]) {
   localStorage.setItem(LS_PRESETS, JSON.stringify(p));
 }
 
+const DEFAULT_URL = import.meta.env.VITE_API_BASE || '';
 const LOCAL_TOKEN_BACKUP = 'api_token_local';
 
 
