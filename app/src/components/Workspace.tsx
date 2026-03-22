@@ -322,7 +322,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     <TeamPanel paneId={paneId} token={token!} />
                   </div>
                   <div className="absolute inset-0 overflow-auto" style={{ display: leftPanel === 'skills' ? 'block' : 'none' }}>
-                    <SkillPanel paneId={paneId} />
+                    <SkillPanel paneId={fullPaneId} />
                   </div>
                 </div>
               </div>
