@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type M = map[string]interface{}
@@ -103,6 +104,7 @@ func redisGetJSON(key string) map[string]interface{} {
 		return nil
 	}
 	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(2 * time.Second))
 	fmt.Fprintf(conn, "*2\r\n$3\r\nGET\r\n$%d\r\n%s\r\n", len(key), key)
 	reader := bufio.NewReader(conn)
 	line, _ := reader.ReadString('\n')
