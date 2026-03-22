@@ -120,6 +120,17 @@ echo "✅ supervisor cicy-api-${USER}"
 sudo -u "$USER" tmux new-session -d -s "$WORKSPACE" -c "${HOME_DIR}/workers/${WORKSPACE}" 2>/dev/null || true
 echo "✅ tmux ${WORKSPACE}"
 
+# ── 9.5. gstack skills ──
+sudo -u "$USER" bash -c "
+  mkdir -p ${HOME_DIR}/.codex/skills
+  if [ ! -d ${HOME_DIR}/.codex/skills/gstack ]; then
+    git clone https://github.com/cicy-ai/gstack ${HOME_DIR}/.codex/skills/gstack --depth 1 -q
+  fi
+  mkdir -p ${HOME_DIR}/.kiro/agents
+  ln -sf ${HOME_DIR}/.codex/skills/gstack/.agents/skills/* ${HOME_DIR}/.kiro/agents/ 2>/dev/null || true
+"
+echo "✅ gstack skills"
+
 # ── 10. CF DNS ──
 EXISTING=$(curl -s "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records?name=${DOMAIN_PREFIX}-api.cicy-ai.com" \
   -H "Authorization: Bearer ${CF_TOKEN}" | jq -r '.result[0].id // empty')
