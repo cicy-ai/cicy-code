@@ -122,12 +122,10 @@ echo "✅ tmux ${WORKSPACE}"
 
 # ── 9.5. gstack skills ──
 sudo -u "$USER" bash -c "
-  mkdir -p ${HOME_DIR}/.codex/skills
-  if [ ! -d ${HOME_DIR}/.codex/skills/gstack ]; then
-    git clone https://github.com/cicy-ai/gstack ${HOME_DIR}/.codex/skills/gstack --depth 1 -q
-  fi
   mkdir -p ${HOME_DIR}/.kiro/agents
-  ln -sf ${HOME_DIR}/.codex/skills/gstack/.agents/skills/* ${HOME_DIR}/.kiro/agents/ 2>/dev/null || true
+  if [ ! -d ${HOME_DIR}/.kiro/agents/gstack ]; then
+    git clone https://github.com/cicy-ai/gstack ${HOME_DIR}/.kiro/agents/gstack --depth 1 -q
+  fi
 "
 echo "✅ gstack skills"
 
