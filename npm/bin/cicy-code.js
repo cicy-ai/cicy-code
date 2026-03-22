@@ -136,10 +136,11 @@ async function launchDesktop() {
 
   // 1. Start API server in background
   const serverArgs = process.argv.slice(2).filter(a => a !== '--desktop');
-  const server = spawn(binPath, serverArgs, {
+  const isWin = process.platform === 'win32';
+  const server = spawn(isWin ? binPath : 'nohup', isWin ? serverArgs : [binPath, ...serverArgs], {
     stdio: 'ignore',
     detached: true,
-    env: { ...process.env, CICY_NO_BROWSER: '1' }
+    env: { ...process.env, CICY_NO_BROWSER: '1', TERM: process.env.TERM || 'xterm-256color' }
   });
   server.on('exit', (code, signal) => console.error(`  ⚠️  Server exited code=${code} signal=${signal}`));
   server.unref();
