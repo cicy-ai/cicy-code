@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, RotateCcw, Plus, Pin, PinOff, Menu, ExternalLink, Key, Bug
@@ -60,6 +61,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [agents, setAgents] = useState<any[]>([]);
   const [codeServerSrc, setCodeServerSrc] = useState('');
   const [floatingCodeOpen, setFloatingCodeOpen] = useState(() => cache.get(floatingOpenKey, false));
+  const [windowsDrawerOpen, setWindowsDrawerOpen] = useState(false);
   const [codeFolder, setCodeFolder] = useState('');
   const codeWindowInitializedRef = useRef(false);
   const agentWorkspaceRef = useRef(`~/workers/${paneId}`);
@@ -86,19 +88,55 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [panelSize, setPanelSize] = useState(() => cache.get('agent_panelSize', { width: 360, height: 220 }));
   const [activeWinIdx, setActiveWinIdx] = useState('0');
   const groupRef = useRef<any>(null);
+  const mainAreaRef = useRef<HTMLDivElement>(null);
+  const activityBarRef = useRef<HTMLDivElement>(null);
 
   const addApp = (window as any).__desktopAddApp || (() => {});
   useDesktopEvents(addApp);
 
-  const leftActive = leftPanel || (agentsOpen && !leftPanel ? 'agents' : null);
+  const leftActive = agentsOpen ? 'agents' : leftPanel;
 
-  useEffect(() => { cache.set('ws_leftPanel', leftPanel); if (groupRef.current) { groupRef.current.setLayout(leftActive ? { 'left-panel': panelSizes['left-panel'] || 50, 'right-panel': panelSizes['right-panel'] || 50 } : { 'left-panel': 0, 'right-panel': 100 }); } }, [leftPanel, agentsOpen]);
+  useEffect(() => { cache.set('ws_leftPanel', leftPanel); if (groupRef.current) { groupRef.current.setLayout(leftActive ? { 'left-panel': panelSizes['left-panel'] || 50, 'right-panel': panelSizes['right-panel'] || 50 } : { 'left-panel': 0, 'right-panel': 100 }); } }, [leftActive, leftPanel, panelSizes]);
   useEffect(() => { cache.set(floatingOpenKey, floatingCodeOpen); }, [floatingCodeOpen, floatingOpenKey]);
   useEffect(() => { cache.set('ws_voiceBtnPos', voiceBtnPos); }, [voiceBtnPos]);
   useEffect(() => { cache.set('agent_panelPos', panelPos); }, [panelPos]);
   useEffect(() => { cache.set('agent_panelSize', panelSize); }, [panelSize]);
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, []);
+  useEffect(() => {
+    const el = mainAreaRef.current;
+    if (!el) return;
+    el.style.transition = 'transform 300ms ease-out';
+    el.style.transform = windowsDrawerOpen ? 'translateX(460px)' : 'translateX(0)';
+    return () => {
+      el.style.transform = 'translateX(0)';
+      el.style.transition = '';
+    };
+  }, [windowsDrawerOpen]);
+  useEffect(() => {
+    const el = activityBarRef.current;
+    if (!el) return;
+    el.style.transition = 'transform 300ms ease-out';
+    el.style.transform = windowsDrawerOpen ? 'translateX(460px)' : 'translateX(0)';
+    return () => {
+      el.style.transform = 'translateX(0)';
+      el.style.transition = '';
+    };
+  }, [windowsDrawerOpen]);
 
-  const onPanelLayout = useCallback((layout: Record<string, number>) => { setPanelSizes(layout); cache.set('ws_panelSizes', layout); if (layout['left-panel'] < 5) { setLeftPanel(null); setAgentsOpen(false); } }, []);
+  const onPanelLayout = useCallback((layout: Record<string, number>) => {
+    setPanelSizes(layout);
+    cache.set('ws_panelSizes', layout);
+    if (layout['left-panel'] < 5) {
+      if (leftActive === 'agents') setAgentsOpen(false);
+      else setLeftPanel(null);
+    }
+  }, [leftActive]);
 
   useEffect(() => { if (!token) return; apiService.getPanes().then(({ data }) => setAgents(Array.isArray(data) ? data : data?.panes || [])).catch(() => {}); }, [token]);
   useEffect(() => { 
@@ -249,9 +287,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     <SendingProvider>
     <div data-id="workspace-root" className="flex h-screen overflow-hidden bg-[#0A0A0A] text-zinc-400 relative">
       {/* Activity Bar */}
-      <div data-id="activity-bar" className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
+      <div data-id="activity-bar" ref={activityBarRef} className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
-          <SideBtn dataId="btn-agents" active={agentsOpen} icon={<LayoutList className="w-5 h-5" />} title="Agents" onClick={() => setAgentsOpen(v => !v)} />
+          <SideBtn
+            dataId="btn-code-window"
+            active={windowsDrawerOpen}
+            icon={<LayoutList className="w-5 h-5" />}
+            title="Agents"
+            onClick={() => setWindowsDrawerOpen(v => !v)}
+          />
           <SideBtn dataId="btn-team" active={leftPanel === 'team'} icon={<Users className="w-5 h-5" />} title="Team" onClick={() => toggleLeft('team')} />
         </div>
         <div data-id="activity-bar-bottom" className="flex flex-col gap-4 w-full items-center">
@@ -259,28 +303,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>
       </div>
 
-      {/* Agents Drawer - only when left panel is also open */}
-      {agentsOpen && leftPanel && (
-        <div data-id="agents-drawer" className="w-[240px] shrink-0 border-r border-[var(--vsc-border)] bg-[#0A0A0A] flex flex-col overflow-hidden">
-          <div className="h-12 border-b border-[var(--vsc-border)] flex items-center px-2 bg-[#0e0e0e] shrink-0 gap-1">
-            <LayoutList className="w-3.5 h-3.5 text-zinc-600" />
-            <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">Agents</span>
-            <button onClick={() => setAgentsOpen(false)} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"><X className="w-3.5 h-3.5" /></button>
-          </div>
-          <div className="flex-1 overflow-auto">
-            <AgentDrawer agents={agents} paneId={paneId} onClose={() => setAgentsOpen(false)}
-              onSelectAgent={onSelectAgent} onAgentsChange={setAgents} />
-          </div>
-        </div>
-      )}
-
       {/* Main */}
-      <div data-id="main-area" className="flex-1 flex flex-col min-w-0">
+      <div data-id="main-area" ref={mainAreaRef} className="flex-1 flex flex-col min-w-0">
         {/* Content */}
         <main data-id="content-area" className="flex-1 relative overflow-hidden">
           <Group id="main-layout" orientation="horizontal" groupRef={groupRef} defaultLayout={leftActive ? panelSizes : { 'left-panel': 0, 'right-panel': 100 }} onLayoutChanged={onPanelLayout}>
             <Panel id="left-panel" defaultSize={leftActive ? 50 : 0} minSize={0}>
-              <div data-id="left-panel-wrap" className="h-full flex flex-col bg-[#0A0A0A] border-r border-[var(--vsc-border)]" style={{ display: leftActive ? 'flex' : 'none' }}>
+              <div data-id="left-panel-wrap" className="h-full flex flex-col bg-[#0A0A0A] border-r border-[var(--vsc-border)] relative z-[130]" style={{ display: leftActive ? 'flex' : 'none' }}>
                 <div data-id="left-panel-header" className="h-12 border-b border-[var(--vsc-border)] flex items-center px-2 bg-[#0e0e0e] shrink-0 gap-1">
                   {leftActive === 'agents' ? <>
                     <LayoutList className="w-3.5 h-3.5 text-zinc-600" />
@@ -291,9 +320,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   </>}
                   <button data-id="left-panel-close" onClick={() => { if (leftActive === 'agents') setAgentsOpen(false); else setLeftPanel(null); }} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"><X className="w-3.5 h-3.5" /></button>
                 </div>
-                <div data-id="left-panel-body" className="flex-1 relative overflow-hidden">
+                <div data-id="left-panel-body" className="flex-1 relative overflow-hidden bg-[#0A0A0A] z-[131]">
                   <div className="absolute inset-0 overflow-auto" style={{ display: leftActive === 'agents' ? 'block' : 'none' }}>
-                    <AgentDrawer agents={agents} paneId={paneId} onClose={() => setAgentsOpen(false)}
+                    <AgentDrawer agents={agents} paneId={paneId}
                       onSelectAgent={onSelectAgent} onAgentsChange={setAgents} />
                   </div>
                   <div className="absolute inset-0" style={{ display: leftPanel === 'team' ? 'block' : 'none' }}>
@@ -354,6 +383,37 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         onClose={() => setFloatingCodeOpen(false)}
       />
 
+      {createPortal(
+        <div
+          data-id="windows-drawer"
+          className={cn(
+            "fixed left-0 top-0 bottom-0 w-[460px] bg-[#0A0A0A] border-r border-[var(--vsc-border)] z-[220] transition-transform duration-300 ease-out",
+            windowsDrawerOpen ? "translate-x-0" : "-translate-x-full"
+          )}
+        >
+          <div className="h-12 border-b border-[var(--vsc-border)] flex items-center px-3 bg-[#0e0e0e]">
+            <LayoutList className="w-3.5 h-3.5 text-zinc-600" />
+            <span className="text-xs font-medium text-zinc-500 ml-1">Agents</span>
+            <button
+              onClick={() => setWindowsDrawerOpen(false)}
+              className="ml-auto p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"
+              title="Close"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="h-[calc(100%-3rem)] overflow-auto">
+            <AgentDrawer
+              agents={agents}
+              paneId={paneId}
+              onSelectAgent={onSelectAgent}
+              onAgentsChange={setAgents}
+            />
+          </div>
+        </div>,
+        document.documentElement
+      )}
+
       {/* Agent Drawer */}
 
       {settingsOpen && <div data-id="settings-overlay"><SettingsFloat paneId={paneId} fullPaneId={fullPaneId} agentDetail={agentDetail} onAgentDetailChange={(d) => { setAgentDetail(d); setAgents(prev => prev.map(a => (a.pane_id || a.id)?.startsWith(paneId) ? { ...a, ...d } : a)); }} onClose={() => setSettingsOpen(false)} /></div>}
@@ -381,8 +441,8 @@ const PINNED_KEY = 'agent_pinned';
 function getPinned(): string[] { try { return JSON.parse(localStorage.getItem(PINNED_KEY)!) || []; } catch { return []; } }
 function setPinnedStorage(ids: string[]) { localStorage.setItem(PINNED_KEY, JSON.stringify(ids)); }
 
-function AgentDrawer({ agents, paneId, onClose, onSelectAgent, onAgentsChange }: {
-  agents: any[]; paneId: string; onClose: () => void;
+function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange }: {
+  agents: any[]; paneId: string;
   onSelectAgent: (id: string) => void; onAgentsChange: (a: any[]) => void;
 }) {
   const [search, setSearch] = useState('');
@@ -453,8 +513,8 @@ function AgentDrawer({ agents, paneId, onClose, onSelectAgent, onAgentsChange }:
   const sorted = [...pinnedAgents, ...unpinnedAgents];
 
   return (
-    <div data-id="agent-drawer" className="h-full flex flex-col">
-        <div data-id="agent-drawer-body" className="p-3 flex-1 overflow-y-auto">
+    <div data-id="agent-drawer" className="h-full flex flex-col bg-[#0A0A0A]">
+        <div data-id="agent-drawer-body" className="p-3 flex-1 overflow-y-auto bg-[#0A0A0A]">
           <div data-id="agent-search" className="mb-3 relative flex gap-2">
             <div className="relative flex-1">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
@@ -477,7 +537,7 @@ function AgentDrawer({ agents, paneId, onClose, onSelectAgent, onAgentsChange }:
               return (
                 <div key={id} data-id={`agent-${id}`}
                   onClick={() => onSelectAgent(id)}
-                  className={cn("w-full flex items-center gap-3 border p-3 rounded-xl transition-all group relative",
+                  className={cn("w-full flex items-center gap-3 border p-3 rounded-xl transition-all group relative cursor-pointer",
                     isActive ? "border-blue-500/50 bg-blue-500/[0.08] ring-1 ring-blue-500/20" : "bg-white/[0.02] border-[var(--vsc-border)] hover:border-white/[0.08]")}>
                   {!isMaster && (
                     <button onClick={e => { e.stopPropagation(); handleDelete(id); }}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -27,7 +28,7 @@ var (
 	desktopCmd  *exec.Cmd
 )
 
-const version = "0.1.0"
+const version = "0.2.7"
 
 // agentsFlag holds --agents=kiro-cli,claude,... for non-interactive setup
 var agentsFlag string
@@ -278,6 +279,28 @@ Environment:
 		bind = "0.0.0.0"
 	}
 	log.Printf("cicy-code starting on %s:%s", bind, port)
+	token := getFirstToken()
+	openHost := bind
+	if openHost == "0.0.0.0" {
+		openHost = "127.0.0.1"
+	}
+	openURL := fmt.Sprintf("http://%s:%s/?token=%s", openHost, port, token)
+	log.Printf("")
+	log.Printf("============================================================")
+	log.Printf("")
+	log.Printf("  >>> CICY CODE <<<")
+	log.Printf("============================================================")
+	log.Printf("  Token: %s", token)
+	log.Printf("  URL:   %s", openURL)
+	log.Printf("============================================================")
+	log.Printf("")
+	go func() {
+		if err := openDefaultBrowser(openURL); err != nil {
+			log.Printf("[startup] open browser failed: %v", err)
+		} else {
+			log.Printf("[startup] browser opened")
+		}
+	}()
 	if auditMode {
 		log.Printf("[startup] audit mode enabled")
 	}
@@ -347,4 +370,17 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func handlePing(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"status": "ok", "version": version, "source": "cicy-code"})
+}
+
+func openDefaultBrowser(url string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	return cmd.Start()
 }

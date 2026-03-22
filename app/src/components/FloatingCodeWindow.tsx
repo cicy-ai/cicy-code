@@ -106,12 +106,19 @@ export default function FloatingCodeWindow({
   const dragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number } | null>(null);
   const resizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
   const restoreRectRef = useRef<{ pos: { x: number; y: number }; size: { width: number; height: number } } | null>(null);
+  const prevOpenRef = useRef(open);
 
   useEffect(() => { setMounted(true); }, []);
   useEffect(() => { localStorage.setItem(storageKeys.pos, JSON.stringify(position)); }, [position, storageKeys.pos]);
   useEffect(() => { localStorage.setItem(storageKeys.size, JSON.stringify(size)); }, [size, storageKeys.size]);
   useEffect(() => { localStorage.setItem(storageKeys.collapsed, collapsed ? '1' : '0'); }, [collapsed, storageKeys.collapsed]);
   useEffect(() => { localStorage.setItem(storageKeys.maximized, maximized ? '1' : '0'); }, [maximized, storageKeys.maximized]);
+  useEffect(() => {
+    if (!prevOpenRef.current && open && collapsed) {
+      setCollapsed(false);
+    }
+    prevOpenRef.current = open;
+  }, [open, collapsed]);
 
   useEffect(() => {
     const syncToViewport = () => {
