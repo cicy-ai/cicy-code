@@ -79,7 +79,9 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
     } finally { setTesting(false); }
 
     const label = newLabel.trim() || (() => { try { return new URL(baseUrl).hostname; } catch { return baseUrl; } })();
-    const p = [...presets, { label, value: newUrl.trim() }];
+    // 自动升级到 https（非 localhost）
+    const finalUrl = newUrl.trim().replace(/^http:\/\/(?!localhost|127\.)/, 'https://');
+    const p = [...presets, { label, value: finalUrl }];
     setPresets(p); savePresets(p);
     setNewLabel(''); setNewUrl(''); setError('');
   }
