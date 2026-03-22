@@ -22,7 +22,8 @@ function savePresets(p: Preset[]) {
   localStorage.setItem(LS_PRESETS, JSON.stringify(p));
 }
 
-const DEFAULT_URL = import.meta.env.VITE_API_BASE || '';
+const LOCAL_TOKEN_BACKUP = 'api_token_local';
+
 
 export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
   const [presets, setPresets] = useState(loadPresets);
@@ -30,6 +31,8 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
   const [newLabel, setNewLabel] = useState('');
   const [newUrl, setNewUrl] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [testing, setTesting] = useState(false);
 
   function copy(text: string, key: string) {
     navigator.clipboard.writeText(text);
@@ -39,16 +42,45 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
 
   function select(value: string) {
     const { url, token } = parseValue(value);
-    setApiBase(url);
-    setCurrent(url);
-    if (token) localStorage.setItem(TOKEN_KEY, token);
+    const isDefault = !url || url === DEFAULT_URL;
+    if (isDefault) {
+      // restore local token
+      const local = localStorage.getItem(LOCAL_TOKEN_BACKUP);
+      if (local) localStorage.setItem(TOKEN_KEY, local);
+    } else {
+      // backup local token before switching
+      const cur = localStorage.getItem(TOKEN_KEY);
+      if (cur) localStorage.setItem(LOCAL_TOKEN_BACKUP, cur);
+      if (token) localStorage.setItem(TOKEN_KEY, token);
+    }
+    setApiBase(isDefault ? '' : url);
+    setCurrent(isDefault ? DEFAULT_URL : url);
   }
 
-  function add() {
-    if (!newLabel || !newUrl) return;
-    const p = [...presets, { label: newLabel, value: newUrl }];
+  async function add() {
+    if (!newUrl.trim()) { setError('请输入 URL'); return; }
+    const { url: baseUrl, token } = parseValue(newUrl.trim());
+    try { new URL(baseUrl); } catch { setError('URL 格式不正确'); return; }
+    if (!token) { setError('请在 URL 中包含 ?token=xxx'); return; }
+
+    setTesting(true); setError('');
+    try {
+      const res = await fetch(`${baseUrl.replace(/\/$/, '')}/api/auth/verify-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await res.json();
+      if (!data.valid) { setError('Token 无效'); return; }
+    } catch (e: any) {
+      setError(`连接失败: ${e.message || '无法访问'}`); return;
+    } finally { setTesting(false); }
+
+    const label = newLabel.trim() || (() => { try { return new URL(baseUrl).hostname; } catch { return baseUrl; } })();
+    const p = [...presets, { label, value: newUrl.trim() }];
     setPresets(p); savePresets(p);
-    setNewLabel(''); setNewUrl('');
+    setNewLabel(''); setNewUrl(''); setError('');
   }
 
   function remove(i: number) {
@@ -69,7 +101,7 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
         <div className="space-y-1 mb-4">
           {/* 默认不可删 */}
           <div className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer group ${current === DEFAULT_URL ? 'bg-white/10' : 'hover:bg-white/5'}`}
-            onClick={() => { setApiBase(DEFAULT_URL); setCurrent(DEFAULT_URL); }}>
+            onClick={() => select(DEFAULT_URL)}>
             <Check className={`w-3.5 h-3.5 shrink-0 ${current === DEFAULT_URL ? 'text-emerald-400' : 'text-transparent'}`} />
             <span className="text-xs text-zinc-300 w-16 shrink-0">默认</span>
             <span className="text-xs text-zinc-500 font-mono truncate flex-1">{defaultVal || '(同源)'}</span>
@@ -105,12 +137,13 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
           <div className="flex gap-2">
             <input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="名称"
               className="w-20 bg-white/5 border border-white/10 rounded px-2 py-1.5 text-xs text-zinc-300 outline-none focus:border-white/20" />
-            <input value={newUrl} onChange={e => setNewUrl(e.target.value)} placeholder="https://...?token=xxx"
-              className="flex-1 bg-white/5 border border-white/10 rounded px-2 py-1.5 text-xs text-zinc-300 font-mono outline-none focus:border-white/20" />
-            <button onClick={add} className="px-3 bg-white/5 hover:bg-white/10 rounded text-zinc-300 text-xs flex items-center gap-1">
-              <Plus className="w-3.5 h-3.5" /> 添加
+            <input value={newUrl} onChange={e => { setNewUrl(e.target.value); setError(''); }} placeholder="https://...?token=xxx"
+              className={`flex-1 bg-white/5 border rounded px-2 py-1.5 text-xs text-zinc-300 font-mono outline-none focus:border-white/20 ${error ? 'border-red-500/60' : 'border-white/10'}`} />
+            <button onClick={add} disabled={testing} className="px-3 bg-white/5 hover:bg-white/10 disabled:opacity-50 rounded text-zinc-300 text-xs flex items-center gap-1">
+              <Plus className="w-3.5 h-3.5" /> {testing ? '验证中...' : '添加'}
             </button>
           </div>
+          {error && <p className="text-red-400 text-[11px] mt-1.5">{error}</p>}
         </div>
 
         <div className="flex justify-end">
