@@ -18,6 +18,7 @@ import { WebFrame } from './WebFrame';
 import FloatingCodeWindow from './FloatingCodeWindow';
 import DesktopCanvas from './layout/DesktopCanvas';
 import TeamPanel from './layout/TeamPanel';
+import SkillPanel from './layout/SkillPanel';
 import SettingsFloat from './layout/SettingsFloat';
 import TokenDialog from './layout/TokenDialog';
 import useDesktopEvents from './layout/useDesktopEvents';
@@ -45,7 +46,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const floatingOpenKey = getFloatingOpenKey(initialPaneIdRef.current);
 
   const mainTab = 'cli' as const;
-  const [leftPanel, setLeftPanel] = useState<'team' | null>(() => {
+  const [leftPanel, setLeftPanel] = useState<'team' | 'skills' | null>(() => {
     const v = cache.get('ws_leftPanel', null);
     return v === 'team' ? 'team' : null;
   });
@@ -201,7 +202,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleCapture = async () => { try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
   const handleToggleMouse = async () => { const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
 
-  const toggleLeft = (p: 'team') => { setLeftPanel(prev => prev === p ? null : p); };
+  const toggleLeft = (p: 'team' | 'skills') => { setLeftPanel(prev => prev === p ? null : p); };
 
   const [loadedTtyds, setLoadedTtyds] = useState<Set<string>>(() => new Set());
   useEffect(() => { if (token && paneId) setLoadedTtyds(prev => new Set(prev).add(paneId)); }, [paneId, token]);
@@ -285,6 +286,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             onClick={() => setWindowsDrawerOpen(v => !v)}
           />
           <SideBtn dataId="btn-team" active={leftPanel === 'team'} icon={<Users className="w-5 h-5" />} title="Team" onClick={() => toggleLeft('team')} />
+          <SideBtn dataId="btn-skills" active={leftPanel === 'skills'} icon={<Brain className="w-5 h-5" />} title="召唤员工" onClick={() => toggleLeft('skills')} />
         </div>
         <div data-id="activity-bar-bottom" className="flex flex-col gap-4 w-full items-center">
           <SideBtn dataId="btn-settings" active={settingsOpen} icon={<Menu className="w-5 h-5" />} title="Menu" onClick={() => { setSettingsOpen(true); }} />
@@ -302,6 +304,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   {leftActive === 'agents' ? <>
                     <LayoutList className="w-3.5 h-3.5 text-zinc-600" />
                     <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">Agents</span>
+                  </> : leftPanel === 'skills' ? <>
+                    <Brain className="w-3.5 h-3.5 text-zinc-600" />
+                    <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">召唤员工</span>
                   </> : <>
                     <Users className="w-3.5 h-3.5 text-zinc-600" />
                     <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">Team</span>
@@ -315,6 +320,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   </div>
                   <div className="absolute inset-0" style={{ display: leftPanel === 'team' ? 'block' : 'none' }}>
                     <TeamPanel paneId={paneId} token={token!} />
+                  </div>
+                  <div className="absolute inset-0 overflow-auto" style={{ display: leftPanel === 'skills' ? 'block' : 'none' }}>
+                    <SkillPanel paneId={paneId} />
                   </div>
                 </div>
               </div>
