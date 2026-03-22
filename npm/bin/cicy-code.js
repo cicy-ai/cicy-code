@@ -130,7 +130,6 @@ async function launchDesktop() {
 
   // 0. Kill existing electron/cicy-code and free ports
   try { execSync(`pkill -f 'electron' 2>/dev/null || true`, { shell: true }); } catch {}
-  try { execSync(`pkill -f 'cicy-code' 2>/dev/null || true`, { shell: true }); } catch {}
   try { execSync(`lsof -ti:${desktopPort} | xargs kill -9 2>/dev/null || true`, { shell: true }); } catch {}
   try { execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null || true`, { shell: true }); } catch {}
   await new Promise(resolve => setTimeout(resolve, 500));
