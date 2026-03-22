@@ -103,13 +103,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       try {
         // First load: fetch both. Subsequent: only status (5s poll).
         if (!panesCache) {
-          const [statusRes, panesRes] = await Promise.all([api.getAllStatus(), api.getPanes()]);
+          const [statusRes, panesRes] = await Promise.all([api.getAllStatus({ timeout: 3000 }), api.getPanes()]);
           panesCache = panesRes.data?.panes || [];
           const latency = Math.round(performance.now() - startTime);
           window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency } }));
           mergePanes(statusRes.data, panesCache!);
         } else {
-          const statusRes = await api.getAllStatus();
+          const statusRes = await api.getAllStatus({ timeout: 3000 });
           const latency = Math.round(performance.now() - startTime);
           window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency } }));
           mergePanes(statusRes.data, panesCache!);

@@ -1,16 +1,19 @@
 import { sendCommandToTmux } from '../../services/mockApi';
 
 const SKILLS = [
-  { icon: '🔍', label: '代码审查', cmd: '/review' },
-  { icon: '🧪', label: 'QA 测试', cmd: '/qa' },
-  { icon: '🚀', label: '发布', cmd: '/ship' },
-  { icon: '🔧', label: '调试', cmd: '/investigate' },
-  { icon: '🧠', label: 'CEO 顾问', cmd: '/office-hours' },
-  { icon: '📄', label: '更新文档', cmd: '/document-release' },
+  { icon: '🔍', label: '代码审查', cmd: 'Use the /review skill from gstack to do a pre-landing code review on the current branch' },
+  { icon: '🧪', label: 'QA 测试', cmd: 'Use the /qa skill from gstack to QA test the app' },
+  { icon: '🚀', label: '发布', cmd: 'Use the /ship skill from gstack to run tests, review, and create a PR' },
+  { icon: '🔧', label: '调试', cmd: 'Use the /investigate skill from gstack to systematically debug the current issue' },
+  { icon: '🧠', label: 'CEO 顾问', cmd: 'Use the /office-hours skill from gstack' },
+  { icon: '📄', label: '更新文档', cmd: 'Use the /document-release skill from gstack to update all docs after shipping' },
 ];
 
 export default function SkillPanel({ paneId }: { paneId: string }) {
-  const invoke = (cmd: string) => sendCommandToTmux(cmd, paneId);
+  const invoke = (cmd: string) => {
+    window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneId, q: cmd } }));
+    sendCommandToTmux(cmd, paneId);
+  };
 
   return (
     <div className="p-3 space-y-1">
