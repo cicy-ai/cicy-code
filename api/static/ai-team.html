@@ -42,7 +42,6 @@
       </div>
       <span class="font-semibold text-white tracking-tight">CiCy</span>
       <span class="px-2 py-0.5 rounded-full bg-white/10 text-[10px] font-medium text-gray-400 ml-2 uppercase tracking-wider">测试版</span>
-      <span id="ws-dot" class="w-2 h-2 rounded-full bg-gray-600 ml-2" title="WS connecting..."></span>
     </div>
     <div class="flex items-center gap-4">
       <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-colors cursor-pointer">
@@ -142,14 +141,9 @@
     let balance = 1250.00;
     let selectedAgentId = null;
     let isThinking = false;
-    let streamingMsgId = null;
 
-    // API config
-    const API_BASE = '';
-    const AGENT_PANES = { 'agent-0': 'w-20160:main.0' };
-    const PANE_AGENT = Object.fromEntries(Object.entries(AGENT_PANES).map(([a,p])=>[p.split(':')[0],a]));
-
-    const isPro = false;
+    // true = free, false = requires payment
+    const isPro = false; // TODO: set from auth/payment status
 
     const agents = [
       { id: 'agent-0', name: '艾丽丝', role: 'CEO顾问', icon: 'bot', color: 'text-blue-400', bgColor: 'bg-blue-500/10', status: 'idle', tokens: 0, sessionTime: '00:00', currentActivity: '等待指令', locked: false },
@@ -283,7 +277,6 @@
 
         const nameHtml = isUser ? '你' : agent.name;
         const roleHtml = !isUser ? `<span class="text-xs text-gray-500">${agent.role}</span>` : '';
-        const modelBadgeHtml = isUser && msg.modelBadge ? msg.modelBadge : '';
         
         const bubbleClass = isUser 
           ? 'bg-white text-black rounded-tr-sm' 
@@ -300,12 +293,10 @@
               <div class="flex items-baseline gap-2 mb-1.5 mx-1">
                 <span class="text-sm font-medium text-gray-300">${nameHtml}</span>
                 ${roleHtml}
-                ${modelBadgeHtml}
                 <span class="text-[10px] text-gray-600 font-mono">${timeString}</span>
               </div>
               <div class="px-5 py-3.5 rounded-2xl text-sm leading-relaxed ${bubbleClass}">
                 <div class="prose prose-sm max-w-none">${parsedText}</div>
-                ${msg.meta ? `<div class="text-[10px] text-gray-600 font-mono mt-2 pt-2 border-t border-white/5">${msg.meta}</div>` : ''}
               </div>
             </div>
           </div>
@@ -420,17 +411,25 @@
       const text = chatInputEl.value.trim();
       if (!text || isThinking) return;
 
+      // Add user message
+      messages.push({
+        id: 'msg-' + Date.now(),
+        senderId: 'user',
+        text: text,
+        timestamp: new Date()
+      });
+      
       chatInputEl.value = '';
       updateSendButton();
-
+      
       // Find target agent
       let targetAgent = agents[0];
       for (const a of agents) {
-        if (text.includes('@' + a.name)) { targetAgent = a; break; }
+        if (text.includes('@' + a.name)) {
+          targetAgent = a;
+          break;
+        }
       }
-
-      // Immediately show user message locally
-      messages.push({ id: 'msg-' + Date.now(), senderId: 'user', text, timestamp: new Date() });
 
       // Set thinking state
       isThinking = true;
@@ -439,83 +438,40 @@
       renderAgents();
       renderMessages();
 
-      // Send to pane
-      const paneId = AGENT_PANES[targetAgent.id];
-      if (paneId) {
-        fetch(`${API_BASE}/api/send`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pane_id: paneId, text })
-        }).catch(console.error);
-      }
-
-      // Safety timeout: unlock after 60s if no ai_done received
+      // Simulate reply
       setTimeout(() => {
-        if (isThinking) {
-          isThinking = false;
-          targetAgent.status = 'idle';
-          targetAgent.currentActivity = '空闲';
-          renderAgents();
-          updateSendButton();
+        let replyText = '明白。我会将其纳入我们当前的开发阶段。';
+        if (targetAgent.role === '工程师') {
+          replyText = '我已经评估了需求。这是建议的技术方案：\n\n```typescript\ninterface Feature {\n  id: string;\n  name: string;\n}\n```\n\n请确认这是否符合你的预期。';
+        } else if (targetAgent.role === 'QA测试员') {
+          replyText = '我正在为这个功能准备测试用例。我们需要确保覆盖所有的边界情况。';
         }
-      }, 60000);
+
+        messages.push({
+          id: 'msg-' + (Date.now() + 1),
+          senderId: targetAgent.id,
+          text: replyText,
+          timestamp: new Date()
+        });
+
+        isThinking = false;
+        targetAgent.status = 'idle';
+        targetAgent.currentActivity = '空闲';
+        targetAgent.tokens += Math.floor(Math.random() * 50) + 10;
+        
+        balance = Math.max(0, balance - 0.05);
+        balanceDisplayEl.textContent = '$' + balance.toFixed(2);
+
+        renderAgents();
+        renderMessages();
+      }, 2000);
     });
-
-    // WebSocket
-    function connectWS() {
-      const ws = new WebSocket(`ws://${location.host}/api/ws`);
-      const dot = document.getElementById('ws-dot');
-
-      ws.onopen = () => { if (dot) { dot.className = 'w-2 h-2 rounded-full bg-emerald-500'; dot.title = 'WS connected'; } };
-
-      ws.onmessage = (e) => {
-        let msg;
-        try { msg = JSON.parse(e.data); } catch { return; }
-        const { pane, event, data } = msg;
-        const agentId = PANE_AGENT[pane] || 'agent-0';
-        const agent = agents.find(a => a.id === agentId);
-
-        if (event === 'user_q') {
-          // Update last user message with model badge
-          const last = [...messages].reverse().find(m => m.senderId === 'user');
-          if (last && data.model) {
-            last.modelBadge = `<span class="text-[10px] font-mono text-gray-500 bg-white/5 px-1.5 py-0.5 rounded ml-1">${data.model}</span>`;
-            renderMessages();
-          }
-        } else if (event === 'ai_chunk') {
-          if (!streamingMsgId) {
-            streamingMsgId = 'msg-stream-' + Date.now();
-            messages.push({ id: streamingMsgId, senderId: agentId, text: data.delta, streaming: true, timestamp: new Date() });
-          } else {
-            const m = messages.find(m => m.id === streamingMsgId);
-            if (m) m.text = data.delta;
-          }
-          renderMessages();
-        } else if (event === 'ai_done') {
-          if (streamingMsgId) {
-            const m = messages.find(m => m.id === streamingMsgId);
-            if (m) {
-              m.streaming = false;
-              m.meta = `credits: ${data.credits ?? ''}  ctx: ${data.context_pct ?? ''}%`;
-            }
-            streamingMsgId = null;
-          }
-          isThinking = false;
-          if (agent) { agent.status = 'idle'; agent.currentActivity = '空闲'; }
-          renderAgents();
-          renderMessages();
-          updateSendButton();
-        }
-      };
-
-      ws.onclose = () => { if (dot) { dot.className = 'w-2 h-2 rounded-full bg-red-500'; dot.title = 'WS disconnected'; } setTimeout(connectWS, 2000); };
-    }
-    connectWS();
 
     // Initial Render
     renderAgents();
     renderMessages();
     renderStages();
     renderMentions();
+  </script>
 </body>
 </html>

@@ -140,12 +140,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     };
     fetchAllPanes();
-    const id = setInterval(fetchAllPanes, 5000);
+    // Polling disabled - will be replaced with WebSocket push
+    // const id = setInterval(fetchAllPanes, 5000);
     const onRefresh = () => { panesCache = null; fetchAllPanes(); };
     window.addEventListener('refresh-panes', onRefresh);
     const onVisible = () => { if (document.visibilityState === 'visible') fetchAllPanes(); };
     document.addEventListener('visibilitychange', onVisible);
-    return () => { clearInterval(id); window.removeEventListener('refresh-panes', onRefresh); document.removeEventListener('visibilitychange', onVisible); };
+    return () => { window.removeEventListener('refresh-panes', onRefresh); document.removeEventListener('visibilitychange', onVisible); };
   }, [api]);
 
   // Auto-load paneDetail when currentPaneId changes

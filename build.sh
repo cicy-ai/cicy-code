@@ -19,8 +19,10 @@ prepare_embed() {
   cp -r $API_DIR/resources $API_DIR/mgr/resources
   cp $ROOT_DIR/.tmux.conf $API_DIR/mgr/tmux.conf
   cp -r $ROOT_DIR/mitmproxy $API_DIR/mgr/monitor
-  # Build frontend
-  cd $APP_DIR && npm ci --silent && npm run build --silent && cd "$ROOT_DIR"
+  if [ "${SKIP_NPM:-0}" != "1" ]; then
+    # Build frontend
+    cd $APP_DIR && npm ci --silent && npm run build --silent && cd "$ROOT_DIR"
+  fi
   cp -r $APP_DIR/dist $API_DIR/mgr/ui
 }
 
@@ -62,6 +64,9 @@ case "${1:-build}" in
     echo "Usage: ./build.sh [build|all] [os] [arch]"
     echo "  build          Build for current/specified platform (default: linux/amd64)"
     echo "  all            Cross-compile all platforms to dist/"
+    echo ""
+    echo "Env vars:"
+    echo "  SKIP_NPM=1     Skip npm ci + npm run build (reuse existing app/dist)"
     exit 1
     ;;
 esac
