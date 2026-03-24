@@ -2,10 +2,10 @@
 const LS_API_BASE = 'cicy_api_base';
 
 export function getApiBase(): string {
-  if (typeof window !== 'undefined') {
-    const saved = localStorage.getItem(LS_API_BASE);
-    if (saved) return saved;
-  }
+  // if (typeof window !== 'undefined') {
+  //   const saved = localStorage.getItem(LS_API_BASE);
+  //   if (saved) return saved;
+  // }
   return import.meta.env.VITE_API_BASE || '';
 }
 
@@ -18,14 +18,7 @@ export function setApiBase(base: string) {
 const host = typeof window !== 'undefined' ? window.location.hostname : '';
 const appMatch = host.match(/^(u-.+)-app\.cicy-ai\.com$/);
 const isWorkspace = appMatch !== null;
-const slug = appMatch ? appMatch[1] : '';
-const origin = isWorkspace ? window.location.origin : '';
-const isTrial = slug.endsWith('-free');
-const baseSlug = isTrial ? slug.replace(/-free$/, '') : slug;
-const apiOrigin = isWorkspace ? `https://${baseSlug}-${isTrial ? 'free-api' : 'api'}.cicy-ai.com` : '';
 
-const isDev = typeof window !== 'undefined' && /^(localhost|127\.)/.test(window.location.hostname);
-const isDevProxy = typeof window !== 'undefined' && /^dev-p\d+\.cicy-ai\.com$/.test(window.location.hostname);
 const isAudit = typeof window !== 'undefined' && /^audit\./.test(window.location.hostname);
 
 // dev-api for dev/devProxy, empty (same origin) for localhost, apiOrigin for workspace
