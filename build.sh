@@ -9,7 +9,11 @@ DIST_DIR="$ROOT_DIR/dist"
 # ── Sync version from npm/package.json → api/mgr/main.go ──
 sync_version() {
   local ver=$(node -p "require('./npm/package.json').version")
-  sed -i "s/const version = \".*\"/const version = \"$ver\"/" $API_DIR/mgr/main.go
+  if [[ "$(uname)" == "Darwin" ]]; then
+    sed -i '' "s/const version = \".*\"/const version = \"$ver\"/" $API_DIR/mgr/main.go
+  else
+    sed -i "s/const version = \".*\"/const version = \"$ver\"/" $API_DIR/mgr/main.go
+  fi
   echo "  version: $ver"
 }
 
@@ -18,7 +22,9 @@ prepare_embed() {
   rm -rf $API_DIR/mgr/resources $API_DIR/mgr/ui $API_DIR/mgr/tmux.conf $API_DIR/mgr/monitor
   cp -r $API_DIR/resources $API_DIR/mgr/resources
   cp $ROOT_DIR/.tmux.conf $API_DIR/mgr/tmux.conf
-  cp -r $ROOT_DIR/mitmproxy $API_DIR/mgr/monitor
+  if [ -d "$ROOT_DIR/mitmproxy" ]; then
+    cp -r $ROOT_DIR/mitmproxy $API_DIR/mgr/monitor
+  fi
   if [ "${SKIP_NPM:-0}" != "1" ]; then
     # Build frontend
     cd $APP_DIR && npm ci --silent && npm run build --silent && cd "$ROOT_DIR"
