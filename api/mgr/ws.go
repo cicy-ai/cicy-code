@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -54,17 +55,21 @@ func init() {
 var (
 	ttydInject    string
 	ttydInjectMu  sync.RWMutex
-	ttydInjectDir = "api/resources"
+	ttydInjectDir = "resources" // dev: relative to working dir (api/), matches go:embed path
 	ttydInjectMod time.Time
 )
 
 func loadTtydInject() string {
 	// Release mode: return embedded content directly
 	if !devMode {
+		log.Printf("[ttyd] using embedded inject (release mode)")
 		return embedInjectAll
 	}
 
 	// Dev mode: read from filesystem with hot-reload
+	log.Printf("[ttyd] dev mode: loading inject from filesystem")
+	absPath, _ := filepath.Abs(ttydInjectDir)
+	log.Printf("[ttyd] inject dir absolute path: %s", absPath)
 	entries, err := os.ReadDir(ttydInjectDir)
 	if err != nil {
 		return embedInjectAll // fallback to embedded

@@ -262,7 +262,7 @@ export default function FloatingCodeWindow({
   return createPortal(
     <div
       data-id="floating-code-window"
-      className="fixed z-[140] overflow-hidden rounded-xl border border-white/[0.14] bg-[#0a0a0a]/95 backdrop-blur-md shadow-[0_28px_90px_rgba(0,0,0,0.62),0_10px_30px_rgba(15,23,42,0.34),0_0_0_1px_rgba(255,255,255,0.03),inset_0_1px_0_rgba(255,255,255,0.05)]"
+      className="fixed z-[230] overflow-hidden rounded-xl border border-white/[0.14] bg-[#0a0a0a]/95 backdrop-blur-md shadow-[0_28px_90px_rgba(0,0,0,0.62),0_10px_30px_rgba(15,23,42,0.34),0_0_0_1px_rgba(255,255,255,0.03),inset_0_1px_0_rgba(255,255,255,0.05)]"
       style={{
         left: position.x,
         top: Math.max(0, position.y),

@@ -299,11 +299,11 @@ Environment:
 		if os.Getenv("CICY_NO_BROWSER") == "1" {
 			return
 		}
-		if err := openDefaultBrowser(openURL); err != nil {
-			log.Printf("[startup] open browser failed: %v", err)
-		} else {
-			log.Printf("[startup] browser opened")
-		}
+		// if err := openDefaultBrowser(openURL); err != nil {
+		// 	log.Printf("[startup] open browser failed: %v", err)
+		// } else {
+		// 	log.Printf("[startup] browser opened")
+		// }
 	}()
 	if auditMode {
 		log.Printf("[startup] audit mode enabled")

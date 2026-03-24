@@ -107,7 +107,7 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 	}
 
 	if server.options.PermitWrite {
-		log.Printf("Permitting clients to write input to the PTY.")
+		//log.Printf("Permitting clients to write input to the PTY.")
 	}
 	if server.options.Once {
 		log.Printf("Once option is provided, accepting only one client")

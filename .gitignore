@@ -18,3 +18,4 @@ app/worker/public/
 api/cicy-code
 api/global.json
 audit-worker/.wrangler/
+api/mgr/*.conf
