@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -26,6 +27,15 @@ type SkillStat struct {
 type GStackSkill struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
+}
+
+func jsonResp(w http.ResponseWriter, v interface{}) {
+	J(w, v)
+}
+
+func tmuxSendKeys(paneID, cmd string) error {
+	_, err := exec.Command("tmux", "send-keys", "-t", paneID, cmd, "Enter").Output()
+	return err
 }
 
 // GET /api/gstack/skills — list available skills from ~/.gstack/projects or gstack install dir

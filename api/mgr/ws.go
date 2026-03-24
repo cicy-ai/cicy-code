@@ -52,10 +52,10 @@ func init() {
 
 // ttyd HTML inject: dev mode reads from filesystem (hot-reload), release mode uses embedded
 var (
-	ttydInject     string
-	ttydInjectMu   sync.RWMutex
-	ttydInjectDir  = "resources"
-	ttydInjectMod  time.Time
+	ttydInject    string
+	ttydInjectMu  sync.RWMutex
+	ttydInjectDir = "api/resources"
+	ttydInjectMod time.Time
 )
 
 func loadTtydInject() string {
@@ -239,7 +239,7 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-	
+
 	// Inject CSS + JS for root HTML page
 	if subPath == "/" && strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
 		body, _ := io.ReadAll(resp.Body)
@@ -267,7 +267,7 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(html))
 		return
 	}
-	
+
 	for k, vs := range resp.Header {
 		for _, v := range vs {
 			w.Header().Add(k, v)

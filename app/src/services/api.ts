@@ -73,7 +73,7 @@ const api = {
 
   // Global settings
   getGlobalSettings:    ()                                 => http.get('/api/settings/global'),
-  updateGlobalSettings: (data: any)                        => http.post('/api/settings/global', data),
+  updateGlobalSettings: (data: any)                        => http.post('/api/settings/global', data), 
 
   // Tokens
   createToken:      (data: any)                            => http.post('/api/auth/tokens', data),
