@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT_DIR"
 API_DIR="$ROOT_DIR/api"
@@ -21,7 +21,8 @@ sync_version() {
 prepare_embed() {
   rm -rf $API_DIR/mgr/resources $API_DIR/mgr/ui $API_DIR/mgr/tmux.conf $API_DIR/mgr/monitor
   cp -r $API_DIR/resources $API_DIR/mgr/resources
-  cp $ROOT_DIR/.tmux.conf $API_DIR/mgr/tmux.conf
+  cp $ROOT_DIR/.tmux.conf $API_DIR/mgr/.tmux.conf
+  cp $ROOT_DIR/.cicy_tmux.conf $API_DIR/mgr/.cicy_tmux.conf
   if [ -d "$ROOT_DIR/mitmproxy" ]; then
     cp -r $ROOT_DIR/mitmproxy $API_DIR/mgr/monitor
   fi

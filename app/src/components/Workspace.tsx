@@ -286,7 +286,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             onClick={() => setWindowsDrawerOpen(v => !v)}
           />
           <SideBtn dataId="btn-team" active={leftPanel === 'team'} icon={<Users className="w-5 h-5" />} title="Team" onClick={() => toggleLeft('team')} />
-          <SideBtn dataId="btn-skills" active={leftPanel === 'skills'} icon={<Brain className="w-5 h-5" />} title="召唤员工" onClick={() => toggleLeft('skills')} />
         </div>
         <div data-id="activity-bar-bottom" className="flex flex-col gap-4 w-full items-center">
           <SideBtn dataId="btn-settings" active={settingsOpen} icon={<Menu className="w-5 h-5" />} title="Menu" onClick={() => { setSettingsOpen(true); }} />

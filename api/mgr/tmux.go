@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -48,7 +49,7 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 			"pane_id": paneID.String, "title": title.String, "ttyd_port": port.Int64,
 			"workspace": workspace.String, "init_script": initScript.String,
 			"active": active.Int64,
-			"role": role.String, "default_model": defaultModel.String,
+			"role":   role.String, "default_model": defaultModel.String,
 			"trust_level": trustLevel.String, "agent_type": agentType.String,
 		}
 		if createdAt.Valid {
@@ -118,7 +119,7 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, winNa
 	port := workerIdx
 
 	// Create tmux session
-	nodeTmux(paneID, "new-session", "-d", "-s", session, "-n", "main", "-c", workspace)
+	runTmux("new-session", "-d", "-s", session, "-n", "main", "-c", workspace)
 	// Insert DB
 	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, created_at, updated_at)
 		VALUES (?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()), paneID, t, port, workspace, initScript, "{}", role, defaultModel, agentType)
@@ -272,7 +273,7 @@ func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 		defer func() { recover() }()
 		stopInstance(paneID)
 		session := strings.Split(paneID, ":")[0]
-		nodeTmux(paneID, "kill-session", "-t", session)
+		runTmux("kill-session", "-t", session)
 	}()
 	store.Exec("DELETE FROM group_windows WHERE win_id=?", paneID)
 	store.Exec("DELETE FROM agent_config WHERE pane_id=?", paneID)
@@ -349,42 +350,69 @@ func initPaneEnv(opts paneEnvOpts) {
 	pid := opts.paneID
 	shortID := strings.Split(pid, ":")[0]
 
-	// Export agent IDs
-	runTmux("send-keys", "-t", pid, fmt.Sprintf("export X_AGENT_ID='%s'", pid), "Enter")
-	runTmux("send-keys", "-t", pid, fmt.Sprintf("export X_AGENT_SHORT_ID='%s'", shortID), "Enter")
 
-	// Proxy (from config JSON)
-	applyProxyFromConfig(pid, opts.configJSON)
+	var lines []string
+
+	// source ~/.cicy_tmux if exists, else create it
+	lines = append(lines, "[ -f ~/.cicy_tmux.conf ] || touch ~/.cicy_tmux.conf && source ~/.cicy_tmux.conf")
+
+	// Export agent IDs
+	lines = append(lines, fmt.Sprintf("export X_AGENT_ID='%s'", pid))
+	lines = append(lines, fmt.Sprintf("export X_AGENT_SHORT_ID='%s'", shortID))
 
 	// cd workspace
 	if opts.workspace != "" {
-		runTmux("send-keys", "-t", pid, "cd "+opts.workspace, "Enter")
+		lines = append(lines, "cd "+opts.workspace)
+		lines = append(lines, fmt.Sprintf("export WORKSPACE='%s'", opts.workspace))
+		lines = append(lines, "mkdir -p ./skills ./projects")
 	}
 
-	// Init script
-	if opts.initScript != "" {
-		runTmux("send-keys", "-t", pid, "clear", "Enter")
-		time.Sleep(500 * time.Millisecond)
-		for _, line := range strings.Split(opts.initScript, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
+	// Proxy + Projects
+	if opts.configJSON != "" && opts.configJSON != "{}" {
+		var cfg struct {
+			Proxy struct {
+				Enable bool   `json:"enable"`
+				URL    string `json:"url"`
+			} `json:"proxy"`
+			Projects []string `json:"projects"`
+		}
+		if json.Unmarshal([]byte(opts.configJSON), &cfg) == nil {
+			if cfg.Proxy.Enable {
+				proxyURL := fmt.Sprintf("http://%s:x@127.0.0.1:18888", shortID)
+				if cfg.Proxy.URL != "" && cfg.Proxy.URL != "https://proxy.example.com" {
+					proxyURL = cfg.Proxy.URL
+				}
+				lines = append(lines, fmt.Sprintf("export HTTPS_PROXY='%s' HTTP_PROXY='%s' https_proxy='%s' http_proxy='%s' ALL_PROXY='%s' no_proxy=localhost,127.0.0.1", proxyURL, proxyURL, proxyURL, proxyURL, proxyURL))
 			}
-			if strings.HasPrefix(line, "sleep:") {
-				continue
-			}
-			if strings.HasPrefix(line, "key:") {
-				runTmux("send-keys", "-t", pid, line[4:])
-			} else {
-				runTmux("send-keys", "-t", pid, line, "Enter")
+			for _, p := range cfg.Projects {
+				p = strings.TrimRight(p, "/")
+				lines = append(lines, fmt.Sprintf("ln -sf %s ./projects/", p))
 			}
 		}
 	}
+	lines = append(lines, opts.initScript)
 
-	// Agent type
-	if opts.agentType != "" {
-		runTmux("send-keys", "-t", pid, opts.agentType, "Enter")
+	// 写临时脚本，执行后删除
+	script := "\n" + strings.Join(lines, "\n") + "\nclear\n"
+	tmpFile := fmt.Sprintf("/tmp/init_pane_%s.sh", strings.ReplaceAll(pid, ":", "_"))
+	if err := os.WriteFile(tmpFile, []byte(script), 0700); err != nil {
+		log.Printf("[init] failed to write script: %v", err)
+		return
 	}
+	log.Printf("[init] pane %s script:\n%s", pid, script)
+
+	// 轮询等待 shell 就绪（发 echo 检测响应）
+	for i := 0; i < 20; i++ {
+		time.Sleep(300 * time.Millisecond)
+		out, err := exec.Command("tmux", "capture-pane", "-t", pid, "-p").Output()
+		if err == nil && strings.Contains(string(out), shortID) {
+			log.Printf("[init] shell ready after %d attempts", i+1)
+			break
+		}
+	}
+	log.Printf("[init] shell ready!!!\n")
+
+	runTmux("send-keys", "-t", pid, fmt.Sprintf("source %s", tmpFile), "Enter")
 }
 
 // applyProxyFromConfig parses config JSON and exports proxy env if enabled.

@@ -56,11 +56,6 @@ func nodeTmux(paneID string, args ...string) (string, error) {
 	return nodeExec(u, cmd)
 }
 
-// nodeTmuxURL 在指定 node 执行 tmux 命令
-func nodeTmuxURL(nodeURL string, args ...string) (string, error) {
-	cmd := "tmux " + shellJoin(args)
-	return nodeExec(nodeURL, cmd)
-}
 
 // nodePing 检查节点是否在线
 func nodePing(nodeURL string) bool {

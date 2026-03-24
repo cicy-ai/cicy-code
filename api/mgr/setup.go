@@ -23,8 +23,11 @@ type Tool struct {
 	Installed  bool
 }
 
-//go:embed tmux.conf
+//go:embed .tmux.conf
 var embeddedTmuxConf string
+
+//go:embed .cicy_tmux.conf
+var embeddedCicyTmuxConf string
 
 // 获取用户 shell 的 rc 文件路径
 func shellRC() string {
@@ -417,6 +420,7 @@ func checkEnv() {
 	}
 	installMissing(base)
 	ensureTmuxConf()
+	ensureCicyTmuxConf()
 
 	var count int
 	if err := store.QueryRow("SELECT COUNT(*) FROM agent_config").Scan(&count); err != nil {
@@ -437,7 +441,7 @@ func checkEnv() {
 func ensureTmuxConf() {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		log.Fatalf("[startup] failed to resolve home dir for tmux.conf: %v", err)
+		log.Fatalf("[startup] failed to resolve home dir for .tmux.conf: %v", err)
 	}
 	dst := filepath.Join(home, ".tmux.conf")
 
@@ -459,6 +463,31 @@ func ensureTmuxConf() {
 	}
 }
 
+
+func ensureCicyTmuxConf() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("[startup] failed to resolve home dir for .cicy_tmux.conf: %v", err)
+	}
+	dst := filepath.Join(home, ".cicy_tmux.conf")
+
+	current, err := os.ReadFile(dst)
+	if err == nil && string(current) == embeddedCicyTmuxConf {
+		return
+	}
+	if err == nil && len(current) > 0 {
+		backup := dst + ".bak"
+		if writeErr := os.WriteFile(backup, current, 0644); writeErr != nil {
+			log.Fatalf("[startup] failed to back up %s: %v", dst, writeErr)
+		}
+		log.Printf("[startup] updated %s (backup: %s)", dst, backup)
+	} else {
+		log.Printf("[startup] installing %s", dst)
+	}
+	if writeErr := os.WriteFile(dst, []byte(embeddedCicyTmuxConf), 0644); writeErr != nil {
+		log.Fatalf("[startup] failed to write %s: %v", dst, writeErr)
+	}
+}
 func ensureCodeServer() {
 	extendPATH()
 	if _, err := exec.LookPath("code-server"); err != nil {
@@ -565,7 +594,7 @@ func ensureBuiltinAgents() {
 		// Ensure ttyd
 		if !isPortListening(port) {
 			startInstance(paneID, port, token)
-			log.Printf("[startup] started %s on :%d", paneID, port)
+			//log.Printf("[startup] started %s on :%d", paneID, port)
 		}
 	}
 }

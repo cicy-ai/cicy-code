@@ -94,7 +94,7 @@ func startInstance(paneID string, port int, token string) error {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	instances[paneID] = &Instance{PaneID: paneID, Port: port, Cancel: cancel}
-	log.Printf("[instance] started %s on :%d", paneID, port)
+	//log.Printf("[instance] started %s on :%d", paneID, port)
 	go func() {
 		if err := srv.Run(ctx); err != nil && err != context.Canceled {
 			log.Printf("[instance] %s error: %v", paneID, err)
@@ -143,11 +143,7 @@ func isPortListening(port int) bool {
 	return true
 }
 func runTmux(args ...string) (string, error) {
-	// 从 args 中提取 pane_id 来确定 node
-	paneID := extractPaneID(args)
-	if paneID != "" {
-		return nodeTmux(paneID, args...)
-	}
+	//log.Printf("[tmux] args=%v", args)
 	out, err := exec.Command("tmux", args...).Output()
 	return strings.TrimSpace(string(out)), err
 }

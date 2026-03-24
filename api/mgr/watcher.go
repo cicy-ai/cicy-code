@@ -116,11 +116,11 @@ func pipeMtime(paneID string) *int64 {
 }
 
 func tmuxCmd(args ...string) string {
-	paneID := extractPaneID(args)
-	if paneID != "" {
-		out, _ := nodeTmux(paneID, args...)
-		return out
-	}
+	// paneID := extractPaneID(args)
+	// if paneID != "" {
+	// 	out, _ := nodeTmux(paneID, args...)
+	// 	return out
+	// }
 	out, _ := exec.Command("tmux", args...).Output()
 	return strings.TrimSpace(string(out))
 }

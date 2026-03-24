@@ -42,7 +42,7 @@
 
   // --- Window selector (top-right tab bar) ---
   var winFloat = document.createElement('div'); winFloat.id = 'cp-win-float';
-  winFloat.innerHTML = '<div id="cp-win-tabs"></div>' +
+  winFloat.innerHTML = '<div id="cp-win-tabs"></div><button id="cp-keyboard-toggle" title="Toggle panel">⌨</button>' +
     '<button id="cp-win-add" title="New window">+</button>' +
     '<button id="cp-win-restart" title="Restart pane">↻</button>';
   document.body.appendChild(winFloat);
@@ -91,6 +91,9 @@
     '#cp-win-add{background:none;border:none;color:rgba(255,255,255,0.2);font-size:16px;' +
     'padding:0 10px;height:100%;cursor:pointer;transition:color .1s}' +
     '#cp-win-add:hover{color:rgba(255,255,255,0.6)}' +
+    '#cp-keyboard-toggle{background:none;border:none;color:rgba(255,255,255,0.2);font-size:14px;' +
+    'padding:0 8px;height:100%;cursor:pointer;transition:color .1s}' +
+    '#cp-keyboard-toggle:hover{color:rgba(255,255,255,0.6)}' +
     '#cp-win-restart{background:none;border:none;color:rgba(255,255,255,0.2);font-size:14px;' +
     'padding:0 8px;height:100%;cursor:pointer;transition:all .15s}' +
     '#cp-win-restart:hover{color:rgba(255,255,255,0.6)}' +
@@ -325,6 +328,17 @@
   });
   document.getElementById('cp-win-add').addEventListener('click', function() {
     apiFetch('POST', '', { session: paneId }).then(loadWins);
+  });
+
+  var hideKey = 'cicy_panel_hide_' + paneId;
+  var isHidden = LS.get(hideKey, false);
+  if (isHidden) panel.style.display = 'none';
+
+  document.getElementById('cp-keyboard-toggle').addEventListener('click', function() {
+    var panel = document.getElementById('cp');
+    var hidden = panel.style.display === 'none';
+    panel.style.display = hidden ? '' : 'none';
+    LS.set(hideKey, !hidden);
   });
 
   // Restart button in top bar (twice-confirm)
