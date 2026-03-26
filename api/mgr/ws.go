@@ -267,7 +267,7 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 		html = strings.Replace(html, "<html>", `<html style="overflow:hidden">`, 1)
 		// Dev mode: replace local asset paths with COS CDN
 		// Release mode: keep local paths (assets served from embedded binary)
-		if devMode {
+		if false && devMode {
 			cosBase := "https://cicy-1372193042.cos.ap-shanghai.myqcloud.com/ttyd/" + ttydCosVer
 			html = strings.Replace(html, `"./js/gotty-bundle.js"`, fmt.Sprintf(`"%s/gotty-bundle.js"`, cosBase), 1)
 			html = strings.Replace(html, `"./css/index.css"`, fmt.Sprintf(`"%s/css/index.css"`, cosBase), 1)
