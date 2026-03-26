@@ -187,11 +187,18 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	var tgToken, tgChatID sql.NullString
 	var groupID sql.NullInt64
 	var role, defaultModel, trustLevel sql.NullString
+	var machineID sql.NullInt64
+	var machineLabel, machineURL, runtimeKind, capabilitiesJSON sql.NullString
 	err := store.QueryRow(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script,
-		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.agent_duty, t.config, t.common_prompt, t.ttyd_preview, gp.group_id, t.role, t.default_model, t.trust_level
-		FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.pane_id=?`, paneID).Scan(
+		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.agent_duty, t.config, t.common_prompt, t.ttyd_preview, gp.group_id, t.role, t.default_model, t.trust_level,
+		COALESCE(t.machine_id, 0), COALESCE(m.label, ''), COALESCE(m.url, ''), COALESCE(json_extract(m.capabilities_json, '$.runtime_kind'), ''), COALESCE(m.capabilities_json, '{}')
+		FROM agent_config t
+		LEFT JOIN group_windows gp ON t.pane_id=gp.win_id
+		LEFT JOIN machines m ON t.machine_id=m.id
+		WHERE t.pane_id=?`, paneID).Scan(
 		&paneID, &title, &port, &workspace, &initScript,
-		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &agentDuty, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel)
+		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &agentDuty, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel,
+		&machineID, &machineLabel, &machineURL, &runtimeKind, &capabilitiesJSON)
 	if err != nil {
 		httpErr(w, 404, "Pane "+id+" not found")
 		return
@@ -204,7 +211,20 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		"config": config.String, "common_prompt": commonPrompt.String, "ttyd_preview": ttydPreview.String,
 		"role": role.String, "default_model": defaultModel.String,
 		"trust_level": trustLevel.String,
+		"machine_label": machineLabel.String,
+		"machine_url": machineURL.String,
+		"runtime_kind": runtimeKind.String,
 	}
+	if machineID.Valid && machineID.Int64 > 0 {
+		resp["machine_id"] = machineID.Int64
+	} else {
+		resp["machine_id"] = nil
+	}
+	capabilities := M{}
+	if strings.TrimSpace(capabilitiesJSON.String) != "" {
+		_ = json.Unmarshal([]byte(capabilitiesJSON.String), &capabilities)
+	}
+	resp["capabilities"] = capabilities
 	if groupID.Valid {
 		resp["group_id"] = groupID.Int64
 	} else {
@@ -350,7 +370,6 @@ func initPaneEnv(opts paneEnvOpts) {
 	pid := opts.paneID
 	shortID := strings.Split(pid, ":")[0]
 
-
 	var lines []string
 
 	// source ~/.cicy_tmux if exists, else create it
@@ -393,7 +412,7 @@ func initPaneEnv(opts paneEnvOpts) {
 	lines = append(lines, opts.initScript)
 
 	// 写临时脚本，执行后删除
-	script := "\n" + strings.Join(lines, "\n") + "\nclear\n"
+	script := "\n" + strings.Join(lines, "\n") + "\n"
 	tmpFile := fmt.Sprintf("/tmp/init_pane_%s.sh", strings.ReplaceAll(pid, ":", "_"))
 	if err := os.WriteFile(tmpFile, []byte(script), 0700); err != nil {
 		log.Printf("[init] failed to write script: %v", err)
@@ -512,6 +531,13 @@ func handleCapture(w http.ResponseWriter, r *http.Request) {
 	lines := 100
 	if l, ok := req["lines"].(float64); ok && l > 0 {
 		lines = int(l)
+	}
+	if nodeURL := nodeURL(paneID); nodeURL != "" {
+		out, err := remoteCapture(nodeURL, nodeToken(paneID), shortPaneID(paneID), lines)
+		if err == nil {
+			J(w, M{"pane_id": shortPaneID(paneID), "output": out})
+			return
+		}
 	}
 	out, _ := runTmux("capture-pane", "-t", paneID, "-p", "-S", fmt.Sprintf("-%d", lines))
 	J(w, M{"pane_id": shortPaneID(paneID), "output": out + "\n"})

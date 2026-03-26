@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DialogProvider } from './contexts/DialogContext';
+import { AppProvider } from './contexts/AppContext';
 import Workspace from './components/Workspace';
 import Desktop from './components/Desktop';
 import Login from './components/Login';
@@ -105,10 +106,12 @@ function Main() {
 export default function App() {
   return (
     <AuthProvider>
-      <DialogProvider>
-        <Main />
-        <DevPanel />
-      </DialogProvider>
+      <AppProvider>
+        <DialogProvider>
+          <Main />
+          <DevPanel />
+        </DialogProvider>
+      </AppProvider>
     </AuthProvider>
   );
 }

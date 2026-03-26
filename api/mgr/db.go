@@ -36,8 +36,8 @@ func initDB() {
 		log.Fatal(err)
 	}
 
-	raw.SetMaxOpenConns(1)
-	raw.SetMaxIdleConns(1)
+	raw.SetMaxOpenConns(4)
+	raw.SetMaxIdleConns(4)
 	raw.Exec("PRAGMA journal_mode=WAL")
 	raw.Exec("PRAGMA foreign_keys=ON")
 
@@ -83,6 +83,30 @@ func (d *DB) CastText(col string) string { return col }
 
 func (d *DB) Migrate() {
 	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS machines (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			machine_key TEXT NOT NULL UNIQUE,
+			label TEXT DEFAULT '',
+			host TEXT DEFAULT '',
+			port INTEGER DEFAULT 8008,
+			url TEXT NOT NULL DEFAULT '',
+			token TEXT DEFAULT '',
+			status TEXT DEFAULT 'unknown',
+			last_seen_at TEXT,
+			capabilities_json TEXT DEFAULT '{}',
+			created_at TEXT DEFAULT (datetime('now')),
+			updated_at TEXT DEFAULT (datetime('now'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS workflows (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			title TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			status TEXT DEFAULT 'pending',
+			created_by TEXT DEFAULT '',
+			created_at TEXT DEFAULT (datetime('now')),
+			updated_at TEXT DEFAULT (datetime('now')),
+			completed_at TEXT
+		)`,
 		`CREATE TABLE IF NOT EXISTS agent_config (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			pane_id TEXT NOT NULL UNIQUE,
@@ -97,7 +121,10 @@ func (d *DB) Migrate() {
 			proxy_enable INTEGER DEFAULT 0, agent_duty TEXT,
 			preview TEXT, config TEXT, ttyd_preview TEXT,
 			agent_type TEXT DEFAULT '', common_prompt TEXT,
-			role TEXT, default_model TEXT, trust_level TEXT
+			role TEXT, default_model TEXT, trust_level TEXT,
+			machine_id INTEGER,
+			source_kind TEXT DEFAULT 'local',
+			source_ref TEXT DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS agent_groups (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -112,7 +139,23 @@ func (d *DB) Migrate() {
 			status TEXT DEFAULT 'pending',
 			priority INTEGER DEFAULT 0,
 			created_at TEXT DEFAULT (datetime('now')),
-			sent_at TEXT
+			sent_at TEXT,
+			step_kind TEXT DEFAULT 'message',
+			workflow_id INTEGER,
+			parent_id INTEGER,
+			step_index INTEGER DEFAULT 0,
+			title TEXT DEFAULT '',
+			result_summary TEXT DEFAULT '',
+			result_payload TEXT DEFAULT '',
+			target_machine_id INTEGER,
+			target_pane_id TEXT DEFAULT '',
+			created_by TEXT DEFAULT '',
+			completed_at TEXT,
+			workspace_id TEXT DEFAULT '',
+			work_item_id TEXT DEFAULT '',
+			artifact_id TEXT DEFAULT '',
+			handoff_id TEXT DEFAULT '',
+			employee_id TEXT DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS global_vars (
 			key_name TEXT PRIMARY KEY, value TEXT
@@ -160,6 +203,47 @@ func (d *DB) Migrate() {
 		if _, err := d.Exec(s); err != nil {
 			log.Printf("[db] migrate error: %v\nSQL: %s", err, s[:minInt(len(s), 100)])
 		}
+	}
+
+	d.ensureColumn("agent_config", "machine_id", "INTEGER")
+	d.ensureColumn("agent_config", "source_kind", "TEXT DEFAULT 'local'")
+	d.ensureColumn("agent_config", "source_ref", "TEXT DEFAULT ''")
+	d.ensureColumn("agent_queue", "step_kind", "TEXT DEFAULT 'message'")
+	d.ensureColumn("agent_queue", "workflow_id", "INTEGER")
+	d.ensureColumn("agent_queue", "parent_id", "INTEGER")
+	d.ensureColumn("agent_queue", "step_index", "INTEGER DEFAULT 0")
+	d.ensureColumn("agent_queue", "title", "TEXT DEFAULT ''")
+	d.ensureColumn("agent_queue", "result_summary", "TEXT DEFAULT ''")
+	d.ensureColumn("agent_queue", "result_payload", "TEXT DEFAULT ''")
+	d.ensureColumn("agent_queue", "target_machine_id", "INTEGER")
+	d.ensureColumn("agent_queue", "target_pane_id", "TEXT DEFAULT ''")
+	d.ensureColumn("agent_queue", "created_by", "TEXT DEFAULT ''")
+	d.ensureColumn("agent_queue", "completed_at", "TEXT")
+	d.ensureColumn("agent_queue", "workspace_id", "TEXT DEFAULT ''")
+	d.ensureColumn("agent_queue", "work_item_id", "TEXT DEFAULT ''")
+	d.ensureColumn("agent_queue", "artifact_id", "TEXT DEFAULT ''")
+	d.ensureColumn("agent_queue", "handoff_id", "TEXT DEFAULT ''")
+	d.ensureColumn("agent_queue", "employee_id", "TEXT DEFAULT ''")
+}
+
+func (d *DB) ensureColumn(table, col, def string) {
+	rows, err := d.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &defaultValue, &pk); err == nil && name == col {
+			return
+		}
+	}
+	stmt := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, col, def)
+	if _, err := d.Exec(stmt); err != nil {
+		log.Printf("[db] ensure column error: %v SQL: %s", err, stmt)
 	}
 }
 

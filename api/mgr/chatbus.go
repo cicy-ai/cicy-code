@@ -88,6 +88,7 @@ func (h *chatHub) unregister(c *chatClient) {
 }
 
 func (h *chatHub) broadcast(pane string, evt ChatEvent) {
+	appendRuntimeEvent(pane, evt.Type, evt.Data)
 	h.broadcastExcept(pane, evt, nil)
 }
 

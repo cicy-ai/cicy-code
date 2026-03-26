@@ -97,8 +97,7 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div className="bg-[#1a1a1a] border border-white/10 rounded-xl w-[460px] p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <span className="text-sm font-medium text-zinc-200">API 服务器</span>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-4 h-4" /></button>
+          <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-300"><X className="w-4 h-4" /></button>
         </div>
 
         <div className="space-y-1 mb-4">

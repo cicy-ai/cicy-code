@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronUp, Maximize2, Minimize2, Minus, X } from 'lucide-react';
+import { ChevronUp, ExternalLink, Maximize2, Minimize2, Minus, X } from 'lucide-react';
 import { lockPointer, unlockPointer } from '../lib/pointerLock';
 import CodeServerPane from './CodeServerPane';
+import { useApp } from '../contexts/AppContext';
 
 const MIN_WIDTH = 720;
 const MIN_HEIGHT = 420;
@@ -79,6 +80,7 @@ export default function FloatingCodeWindow({
   onNavigate,
   onClose,
 }: FloatingCodeWindowProps) {
+  const { globalVar } = useApp();
   const [mounted, setMounted] = useState(false);
   const storageKeys = useMemo(() => ({
     pos: getStorageKey(storageScopeId, 'pos'),
@@ -161,6 +163,7 @@ export default function FloatingCodeWindow({
         collapsed
       );
       setPosition(next.pos);
+      window.dispatchEvent(new Event('floating-window-move'));
     };
 
     const onUp = () => {
@@ -240,7 +243,15 @@ export default function FloatingCodeWindow({
       </button>
       <button
         type="button"
-        onClick={onClose}
+        onClick={() => window.open(src, '_blank')}
+        className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"
+        title="Open in new window"
+      >
+        <ExternalLink className="w-3.5 h-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => { window.dispatchEvent(new Event('floating-window-close')); onClose(); }}
         className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"
         title="Minimize"
       >
@@ -248,7 +259,7 @@ export default function FloatingCodeWindow({
       </button>
       <button
         type="button"
-        onClick={onClose}
+        onClick={() => { window.dispatchEvent(new Event('floating-window-close')); onClose(); }}
         className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"
         title="Hide"
       >
@@ -280,6 +291,7 @@ export default function FloatingCodeWindow({
         onHeaderMouseDown={startDrag}
         rightControls={rightControls}
         bodyHidden={collapsed}
+        favoriteDirs={globalVar?.favor?.dir || []}
       />
       {!collapsed && !maximized && (
         <div className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize z-10" onMouseDown={startResize} title="Resize">

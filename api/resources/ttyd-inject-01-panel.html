@@ -17,20 +17,6 @@
         '<button id="cp-enter" class="cp-chip cp-chip-dim"></button>' +
       '</div>' +
       '<div class="cp-bar-r">' +
-        '<button id="cp-more" class="cp-chip cp-chip-dim" title="More">⋯</button>' +
-        '<div id="cp-more-menu" class="cp-drop">' +
-          '<select id="cp-model" title="Model"><option value="">Model</option>' +
-            '<option value="claude-opus-4.6">opus-4.6</option>' +
-            '<option value="claude-opus-4.5">opus-4.5</option>' +
-            '<option value="claude-sonnet-4.5">sonnet-4.5</option>' +
-            '<option value="claude-sonnet-4">sonnet-4</option>' +
-            '<option value="claude-haiku-4.5">haiku-4.5</option>' +
-            '<option value="deepseek-3.2">deepseek-3.2</option>' +
-            '<option value="minimax-m2.1">minimax-m2.1</option>' +
-            '<option value="qwen3-coder-next">qwen3-coder</option>' +
-          '</select>' +
-          '<button id="cp-compact" class="cp-drop-item">Compact</button>' +
-        '</div>' +
         '<button id="cp-collapse" class="cp-chip cp-chip-dim" title="Collapse">−</button>' +
       '</div>' +
     '</div>' +
@@ -42,10 +28,29 @@
 
   // --- Window selector (top-right tab bar) ---
   var winFloat = document.createElement('div'); winFloat.id = 'cp-win-float';
-  winFloat.innerHTML = '<div id="cp-win-tabs"></div><button id="cp-keyboard-toggle" title="Toggle panel">⌨</button>' +
-    '<button id="cp-win-add" title="New window">+</button>' +
-    '<button id="cp-win-restart" title="Restart pane">↻</button>';
+  winFloat.innerHTML = '<div id="cp-win-tabs"></div>';
   document.body.appendChild(winFloat);
+
+  // --- Fixed top-right action buttons ---
+  var fixedTop = document.createElement('div'); fixedTop.id = 'fixed-top-action';
+  fixedTop.innerHTML = '<button id="cp-keyboard-toggle" class="fta-btn" title="Toggle panel">⌨</button>' +
+    '<button id="cp-win-add" class="fta-btn" title="New window">+</button>' +
+    '<button id="cp-win-restart" class="fta-btn" title="Restart pane">↻</button>' +
+    '<button id="cp-more" class="fta-btn" title="More">⋯</button>' +
+    '<div id="cp-more-menu" class="cp-drop">' +
+      '<select id="cp-model" title="Model"><option value="">Model</option>' +
+        '<option value="claude-opus-4.6">opus-4.6</option>' +
+        '<option value="claude-opus-4.5">opus-4.5</option>' +
+        '<option value="claude-sonnet-4.5">sonnet-4.5</option>' +
+        '<option value="claude-sonnet-4">sonnet-4</option>' +
+        '<option value="claude-haiku-4.5">haiku-4.5</option>' +
+        '<option value="deepseek-3.2">deepseek-3.2</option>' +
+        '<option value="minimax-m2.1">minimax-m2.1</option>' +
+        '<option value="qwen3-coder-next">qwen3-coder</option>' +
+      '</select>' +
+      '<button id="cp-compact" class="cp-drop-item">Compact</button>' +
+    '</div>';
+  document.body.appendChild(fixedTop);
 
   // --- Styles ---
   var css = document.createElement('style');
@@ -75,6 +80,10 @@
     '#cp-win-float{position:fixed;top:0;left:0;right:0;z-index:9998;display:flex;align-items:center;' +
     'height:28px;background:rgba(30,30,30,0.95);border-bottom:1px solid rgba(255,255,255,0.06);' +
     'font-family:"SF Mono",Menlo,Consolas,monospace;padding:0 4px;gap:0}' +
+    '#fixed-top-action{position:fixed;top:64px;left:0;z-index:9999;display:flex;flex-direction:column;' +
+    'align-items:center;gap:2px;padding:4px 2px;overflow:visible;' +
+    'background:rgba(30,30,30,0.95);border:1px solid rgba(255,255,255,0.06);' +
+    'border-left:none;border-radius:0 8px 8px 0}' +
     '#cp-win-tabs{display:flex;align-items:center;height:100%;flex:1;min-width:0;overflow-x:auto}' +
     '#cp-win-tabs::-webkit-scrollbar{display:none}' +
     '.cp-wtab{position:relative;background:none;border:none;color:rgba(255,255,255,0.35);' +
@@ -88,18 +97,12 @@
     'text-align:center;cursor:pointer;display:none;transition:all .1s}' +
     '.cp-wtab:hover .cp-wdel{display:block}' +
     '.cp-wtab .cp-wdel:hover{background:rgba(239,68,68,0.8);color:#fff}' +
-    '#cp-win-add{background:none;border:none;color:rgba(255,255,255,0.2);font-size:16px;' +
-    'padding:0 10px;height:100%;cursor:pointer;transition:color .1s}' +
-    '#cp-win-add:hover{color:rgba(255,255,255,0.6)}' +
-    '#cp-keyboard-toggle{background:none;border:none;color:rgba(255,255,255,0.2);font-size:14px;' +
-    'padding:0 8px;height:100%;cursor:pointer;transition:color .1s}' +
-    '#cp-keyboard-toggle:hover{color:rgba(255,255,255,0.6)}' +
-    '#cp-win-restart{background:none;border:none;color:rgba(255,255,255,0.2);font-size:14px;' +
-    'padding:0 8px;height:100%;cursor:pointer;transition:all .15s}' +
-    '#cp-win-restart:hover{color:rgba(255,255,255,0.6)}' +
+    '.fta-btn{background:none;border:none;color:rgba(255,255,255,0.3);font-size:14px;' +
+    'padding:6px 8px;width:100%;cursor:pointer;transition:color .1s;font-family:inherit}' +
+    '.fta-btn:hover{color:rgba(255,255,255,0.7)}' +
     '#cp-win-restart.restarting{color:rgba(59,130,246,0.8);animation:cp-spin .8s linear infinite}' +
     '@keyframes cp-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}' +
-    '#cp-more-menu{right:0}' +
+    '#cp-more-menu{z-index:10001}' +
     '.cp-drop-item{background:none;border:none;color:rgba(255,255,255,0.6);font-size:11px;' +
     'padding:6px 10px;border-radius:7px;cursor:pointer;font-family:inherit;text-align:left;transition:all .12s}' +
     '.cp-drop-item:hover{background:rgba(255,255,255,0.08);color:#fff}' +
@@ -221,14 +224,28 @@
     });
   }
   twiceBtn('cp-compact', function(){
-    sendLine('/model claude-sonnet-4');
-    setTimeout(function(){ sendLine('/compact --truncate-large-messages true --max-message-length 500'); }, 800);
+    sendLine('/model auto');
+    setTimeout(function(){ sendLine('/model claude-sonnet-4'); }, 400);
+    setTimeout(function(){ sendLine('/compact --truncate-large-messages true --max-message-length 500'); }, 1200);
   });
 
   // --- More menu ---
   var moreBtn = document.getElementById('cp-more');
   var moreMenu = document.getElementById('cp-more-menu');
-  moreBtn.addEventListener('click', function(e) { e.stopPropagation(); moreMenu.classList.toggle('open'); });
+  document.body.appendChild(moreMenu); // 移到 body 避免 overflow 裁剪
+  moreBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    var isOpen = moreMenu.classList.contains('open');
+    moreMenu.classList.remove('open');
+    if (!isOpen) {
+      var r = moreBtn.getBoundingClientRect();
+      moreMenu.style.position = 'fixed';
+      moreMenu.style.top = r.top + 'px';
+      moreMenu.style.left = (r.right + 4) + 'px';
+      moreMenu.style.right = 'auto';
+      moreMenu.classList.add('open');
+    }
+  });
   document.addEventListener('click', function(e) { if (!moreMenu.contains(e.target) && e.target !== moreBtn) moreMenu.classList.remove('open'); });
 
   // --- Position ---

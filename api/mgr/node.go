@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -39,10 +40,18 @@ func nodeExec(nodeURL, cmd string) (string, error) {
 // nodeURL 从数据库获取 pane 对应的 node_url
 func nodeURL(paneID string) string {
 	var u string
-	if err := store.QueryRow("SELECT COALESCE(node_url,'') FROM agent_config WHERE pane_id=?", paneID).Scan(&u); err != nil || u == "" {
-		return ""
+	if err := store.QueryRow("SELECT COALESCE(node_url,'') FROM agent_config WHERE pane_id=?", paneID).Scan(&u); err == nil && u != "" {
+		return u
 	}
-	return u
+	var machineURL string
+	store.QueryRow(`SELECT COALESCE(m.url, '') FROM agent_config ac LEFT JOIN machines m ON ac.machine_id = m.id WHERE ac.pane_id=?`, paneID).Scan(&machineURL)
+	return machineURL
+}
+
+func nodeToken(paneID string) string {
+	var token string
+	store.QueryRow(`SELECT COALESCE(m.token, '') FROM agent_config ac LEFT JOIN machines m ON ac.machine_id = m.id WHERE ac.pane_id=?`, paneID).Scan(&token)
+	return token
 }
 
 // nodeTmux 在 pane 所属节点执行 tmux 命令
@@ -56,7 +65,6 @@ func nodeTmux(paneID string, args ...string) (string, error) {
 	return nodeExec(u, cmd)
 }
 
-
 // nodePing 检查节点是否在线
 func nodePing(nodeURL string) bool {
 	u := strings.TrimRight(nodeURL, "/") + "/api/ping"
@@ -67,6 +75,54 @@ func nodePing(nodeURL string) bool {
 	}
 	resp.Body.Close()
 	return resp.StatusCode == 200
+}
+
+func remoteQueuePush(nodeURL, token, paneID, message, msgType string) error {
+	payload, _ := json.Marshal(M{"pane_id": paneID, "message": message, "type": msgType})
+	req, err := http.NewRequest("POST", strings.TrimRight(nodeURL, "/")+"/api/workers/queue", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("remote queue push failed: %s", strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func remoteCapture(nodeURL, token, paneID string, lines int) (string, error) {
+	payload, _ := json.Marshal(M{"pane_id": paneID, "lines": lines})
+	req, err := http.NewRequest("POST", strings.TrimRight(nodeURL, "/")+"/api/tmux/capture", bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Output string `json:"output"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", err
+	}
+	return body.Output, nil
 }
 
 // shellJoin 简单拼接 shell 参数
@@ -84,28 +140,12 @@ func shellJoin(args []string) string {
 
 // API: GET /api/nodes - 列出所有节点及状态
 func handleNodes(w http.ResponseWriter, r *http.Request) {
-	rows, err := store.Query("SELECT DISTINCT node_url FROM agent_config WHERE active=1")
+	machines, err := listMachines()
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
 	}
-	defer rows.Close()
-	type node struct {
-		URL    string `json:"url"`
-		Online bool   `json:"online"`
-	}
-	var nodes []node
-	seen := map[string]bool{}
-	for rows.Next() {
-		var u string
-		rows.Scan(&u)
-		if seen[u] {
-			continue
-		}
-		seen[u] = true
-		nodes = append(nodes, node{URL: u, Online: nodePing(u)})
-	}
-	J(w, nodes)
+	J(w, machines)
 }
 
 // API: POST /api/nodes/exec - 在指定节点执行命令

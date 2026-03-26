@@ -32,6 +32,7 @@ interface ChatViewProps {
   paneId: string;
   token: string;
   commandPanel?: React.ReactNode;
+  apiOnly?: boolean;
 }
 
 // IndexedDB cache
@@ -113,7 +114,7 @@ const ToolCard: React.FC<{ tool: any; running?: boolean }> = ({ tool, running })
   );
 };
 
-const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, commandPanel }) => {
+const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, commandPanel, apiOnly = false }) => {
   const [agentType, setAgentType] = useState('AI');
   const [chatData, setChatData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -154,14 +155,14 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
       if (q.startsWith('/')) {
         // Slash command — show as system message, auto-show ttyd for feedback
         setChatData(prev => [...prev, { q, status: 'done', ts: Date.now() / 1000, start_ts: Date.now() / 1000, credit: 0, system: true }]);
-        setShowTtyd(true);
+        if (!apiOnly) setShowTtyd(true);
       } else {
         setChatData(prev => [...prev.filter((c: any) => !c.system), { q, status: 'pending', ts: Date.now() / 1000, start_ts: Date.now() / 1000, credit: 0 }]);
       }
     };
     window.addEventListener('chat-q-sent', handler);
     return () => window.removeEventListener('chat-q-sent', handler);
-  }, [displayPaneId]);
+  }, [displayPaneId, apiOnly]);
 
   // Scroll: when a NEW Q appears, scroll so Q is at top of viewport. Never auto-scroll during stream.
   useEffect(() => {
@@ -442,7 +443,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
           })}
         </div>
       </div>
-      {showTtyd && (
+      {showTtyd && !apiOnly && (
         <div className="shrink-0 h-[160px] mx-2 mb-1 rounded-lg overflow-hidden border border-white/[0.08] relative">
           <button onClick={() => setShowTtyd(false)} className="absolute top-1 right-1 z-10 w-5 h-5 flex items-center justify-center rounded bg-black/60 text-white/40 hover:text-white/80 text-xs">✕</button>
           <WebFrame

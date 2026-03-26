@@ -19,13 +19,14 @@ import (
 )
 
 var (
-	upgrader    = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-	publicMode  bool
-	devMode     bool
-	desktopMode bool
-	auditMode   bool
-	cnMirror    bool
-	desktopCmd  *exec.Cmd
+	upgrader     = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	publicMode   bool
+	devMode      bool
+	desktopMode  bool
+	auditMode    bool
+	cnMirror     bool
+	cloudRunMode bool
+	desktopCmd   *exec.Cmd
 )
 
 const version = "0.2.14"
@@ -89,10 +90,23 @@ Environment:
 	store.Migrate()
 	defer store.Close()
 
+	cloudRunMode = isCloudRunRuntime()
+	if cloudRunMode {
+		publicMode = true
+	}
+
 	checkEnv()
 
-	go startWatcher()
-	go startTmuxHealth()
+	if cloudRunMode {
+		log.Printf("[startup] cloudrun mode enabled: watcher/tmux-health/machine-sync disabled")
+		startCloudRunRegisterLoop()
+	} else {
+		go startWatcher()
+		go startTmuxHealth()
+		if _, err := syncMachinesFromConfig(); err != nil {
+			log.Printf("[machines] initial sync error: %v", err)
+		}
+	}
 
 	// Health
 	http.HandleFunc("/health", w(handleHealth))
@@ -106,33 +120,33 @@ Environment:
 	http.HandleFunc("/api/auth/tokens/", wa(handleAuthTokenDelete))
 
 	// Panes
-	http.HandleFunc("/api/panes", wa(handlePanes))
-	http.HandleFunc("/api/panes/create", wa(handleCreatePane))
-	http.HandleFunc("/api/panes/", wa(handlePaneByID))
-	http.HandleFunc("/api/panes/restart-all", wa(handleRestartAll))
+	http.HandleFunc("/api/panes", cloudRunUnsupported(handlePanes))
+	http.HandleFunc("/api/panes/create", cloudRunUnsupported(handleCreatePane))
+	http.HandleFunc("/api/panes/", cloudRunUnsupported(handlePaneByID))
+	http.HandleFunc("/api/panes/restart-all", cloudRunUnsupported(handleRestartAll))
 	// Legacy panes routes (frontend compatibility)
-	http.HandleFunc("/api/tmux/panes", wa(handlePanes))
-	http.HandleFunc("/api/tmux/panes/", wa(handlePaneByID))
-	http.HandleFunc("/api/tmux/create", wa(handleCreatePane))
-	http.HandleFunc("/api/tmux/restart_all", wa(handleRestartAll))
+	http.HandleFunc("/api/tmux/panes", cloudRunUnsupported(handlePanes))
+	http.HandleFunc("/api/tmux/panes/", cloudRunUnsupported(handlePaneByID))
+	http.HandleFunc("/api/tmux/create", cloudRunUnsupported(handleCreatePane))
+	http.HandleFunc("/api/tmux/restart_all", cloudRunUnsupported(handleRestartAll))
 
 	// Tmux
-	http.HandleFunc("/api/tmux/send", wa(handleSend))
-	http.HandleFunc("/api/tmux/send-keys", wa(handleSendKeys))
-	http.HandleFunc("/api/tmux/send_wait", wa(handleSendWait))
-	http.HandleFunc("/api/tmux/capture", wa(handleCapture))
-	http.HandleFunc("/api/tmux/windows", wa(handleWindows))
-	http.HandleFunc("/api/tmux/tree", wa(handleTree))
-	http.HandleFunc("/api/tmux/status", wa(handleStatus))
-	http.HandleFunc("/api/tmux/mouse", wa(handleMouseToggle))
-	http.HandleFunc("/api/tmux/mouse/on", wa(handleMouseToggle))
-	http.HandleFunc("/api/tmux/mouse/off", wa(handleMouseToggle))
-	http.HandleFunc("/api/tmux/mouse/status", wa(handleMouseStatus))
-	http.HandleFunc("/api/tmux/ttyd/status", wa(handleTtydStatus))
-	http.HandleFunc("/api/tmux/ttyd/status/", wa(handleTtydStatus))
-	http.HandleFunc("/api/tmux/list", wa(handleTmuxList))
-	http.HandleFunc("/api/tmux/clear", wa(handleClear))
-	http.HandleFunc("/api/tmux/capture_pane", wa(handleCapture))
+	http.HandleFunc("/api/tmux/send", cloudRunUnsupported(handleSend))
+	http.HandleFunc("/api/tmux/send-keys", cloudRunUnsupported(handleSendKeys))
+	http.HandleFunc("/api/tmux/send_wait", cloudRunUnsupported(handleSendWait))
+	http.HandleFunc("/api/tmux/capture", cloudRunUnsupported(handleCapture))
+	http.HandleFunc("/api/tmux/windows", cloudRunUnsupported(handleWindows))
+	http.HandleFunc("/api/tmux/tree", cloudRunUnsupported(handleTree))
+	http.HandleFunc("/api/tmux/status", cloudRunUnsupported(handleStatus))
+	http.HandleFunc("/api/tmux/mouse", cloudRunUnsupported(handleMouseToggle))
+	http.HandleFunc("/api/tmux/mouse/on", cloudRunUnsupported(handleMouseToggle))
+	http.HandleFunc("/api/tmux/mouse/off", cloudRunUnsupported(handleMouseToggle))
+	http.HandleFunc("/api/tmux/mouse/status", cloudRunUnsupported(handleMouseStatus))
+	http.HandleFunc("/api/tmux/ttyd/status", cloudRunUnsupported(handleTtydStatus))
+	http.HandleFunc("/api/tmux/ttyd/status/", cloudRunUnsupported(handleTtydStatus))
+	http.HandleFunc("/api/tmux/list", cloudRunUnsupported(handleTmuxList))
+	http.HandleFunc("/api/tmux/clear", cloudRunUnsupported(handleClear))
+	http.HandleFunc("/api/tmux/capture_pane", cloudRunUnsupported(handleCapture))
 
 	// Chat
 	http.HandleFunc("/api/chat/push", wa(handleChatPush))
@@ -189,9 +203,40 @@ Environment:
 	http.HandleFunc("/api/groups", wa(handleGroups))
 	http.HandleFunc("/api/groups/", wa(handleGroupByID))
 
-	// Nodes
+	// Nodes / Machines
 	http.HandleFunc("/api/nodes", wa(handleNodes))
 	http.HandleFunc("/api/nodes/exec", wa(handleNodeExec))
+	http.HandleFunc("/api/machines", wa(handleMachines))
+	http.HandleFunc("/api/machines/register", wa(handleMachineRegister))
+	http.HandleFunc("/api/machines/sync", wa(handleMachineSync))
+	http.HandleFunc("/api/machines/", wa(handleMachinePanes))
+
+	// Collab / Skills
+	http.HandleFunc("/api/collab/steps", wa(handleCollabSteps))
+	http.HandleFunc("/api/collab/steps/", wa(handleCollabStepByID))
+	http.HandleFunc("/api/collab/workflows", wa(handleCollabWorkflows))
+	http.HandleFunc("/api/collab/workflows/", wa(handleCollabWorkflowByID))
+	http.HandleFunc("/api/skills", wa(handleSkills))
+	http.HandleFunc("/api/skills/run", wa(handleSkillRun))
+
+	// Runtime aliases
+	http.HandleFunc("/api/runtime/instances", wa(handleRuntimeInstances))
+	http.HandleFunc("/api/runtime/instances/register", wa(handleRuntimeInstanceRegister))
+	http.HandleFunc("/api/runtime/instances/", wa(handleRuntimeInstanceSessions))
+	http.HandleFunc("/api/runtime/sessions/", wa(handleRuntimeSessionEvents))
+	http.HandleFunc("/api/runtime/tasks", wa(handleRuntimeTasks))
+	http.HandleFunc("/api/runtime/tasks/", wa(handleRuntimeTaskByID))
+	http.HandleFunc("/api/runtime/artifacts", wa(handleRuntimeArtifacts))
+
+	// Shared workspace bridge
+	http.HandleFunc("/api/shared-workspace", wa(handleSharedWorkspace))
+	http.HandleFunc("/api/shared-workspace/work-items", wa(handleSharedWorkItems))
+	http.HandleFunc("/api/shared-workspace/work-items/", wa(handleSharedWorkItems))
+	http.HandleFunc("/api/shared-workspace/artifacts", wa(handleSharedArtifacts))
+	http.HandleFunc("/api/shared-workspace/artifacts/", wa(handleSharedArtifacts))
+	http.HandleFunc("/api/shared-workspace/handoffs", wa(handleSharedHandoffs))
+	http.HandleFunc("/api/shared-workspace/handoffs/", wa(handleSharedHandoffs))
+	http.HandleFunc("/api/shared-workspace/events", wa(handleSharedEvents))
 
 	// Settings
 	http.HandleFunc("/api/settings", wa(handleSettings))
@@ -208,12 +253,12 @@ Environment:
 	http.HandleFunc("/api/tg/photo", wa(handleTGPhoto))
 
 	// Pair
-	http.HandleFunc("/api/pair", wa(handlePair))
-	http.HandleFunc("/api/tmux/pair", wa(handlePair))
+	http.HandleFunc("/api/pair", cloudRunUnsupported(handlePair))
+	http.HandleFunc("/api/tmux/pair", cloudRunUnsupported(handlePair))
 
 	// Desktop
-	http.HandleFunc("/api/desktop/status", wa(handleDesktopStatus))
-	http.HandleFunc("/api/desktop/proxy/", wa(handleDesktopProxy))
+	http.HandleFunc("/api/desktop/status", cloudRunUnsupported(handleDesktopStatus))
+	http.HandleFunc("/api/desktop/proxy/", cloudRunUnsupported(handleDesktopProxy))
 
 	// Code-server proxy
 	http.HandleFunc("/code/", handleCodeServer)
@@ -239,7 +284,11 @@ Environment:
 	} else if kv.file != "" {
 		kvMode = "file:" + kv.file
 	}
-	log.Printf("[startup] mode=local port=%s db=%s kv=%s", port, store.Driver, kvMode)
+	runtimeMode := "local"
+	if cloudRunMode {
+		runtimeMode = "cloudrun"
+	}
+	log.Printf("[startup] mode=%s port=%s db=%s kv=%s", runtimeMode, port, store.Driver, kvMode)
 
 	// Hook: thinking → idle
 	RegisterHook(func(paneID string, old, new paneSt) {
@@ -282,10 +331,15 @@ Environment:
 	log.Printf("cicy-code starting on %s:%s", bind, port)
 	token := getFirstToken()
 	openHost := bind
-	if openHost == "0.0.0.0" {
-		openHost = "127.0.0.1"
+	openURL := ""
+	if publicMode && os.Getenv("CICY_PUBLIC_URL") != "" {
+		openURL = os.Getenv("CICY_PUBLIC_URL")
+	} else {
+		if openHost == "0.0.0.0" {
+			openHost = "127.0.0.1"
+		}
+		openURL = fmt.Sprintf("http://%s:%s/?token=%s", openHost, port, token)
 	}
-	openURL := fmt.Sprintf("http://%s:%s/?token=%s", openHost, port, token)
 	log.Printf("")
 	log.Printf("============================================================")
 	log.Printf("")
@@ -332,6 +386,9 @@ Environment:
 }
 
 func getFirstToken() string {
+	if token := strings.TrimSpace(loadAPIToken()); token != "" {
+		return token
+	}
 	home, _ := os.UserHomeDir()
 	gpath := home + "/global.json"
 	cfg := map[string]interface{}{}
@@ -348,6 +405,11 @@ func getFirstToken() string {
 	data, _ := json.MarshalIndent(cfg, "", "  ")
 	os.WriteFile(gpath, data, 0644)
 	return token
+}
+
+func isCloudRunRuntime() bool {
+	kind := strings.ToLower(strings.TrimSpace(os.Getenv("CICY_RUNTIME_KIND")))
+	return kind == "cloudrun"
 }
 
 func globalCORS(next http.Handler) http.Handler {
