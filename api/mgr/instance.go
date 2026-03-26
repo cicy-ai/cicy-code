@@ -73,7 +73,7 @@ func startInstance(paneID string, port int, token string) error {
 		PermitWrite: true,
 		TitleFormat: "{{ .command }}@{{ .hostname }}",
 		EnableReconnect: true, ReconnectTime: 30,
-		Term: "xterm", WSOrigin: ".*", PermitArguments: true,
+		Term: "xterm-256color", WSOrigin: ".*", PermitArguments: true,
 		Preferences: &server.HtermPrefernces{
 			ForegroundColor:           "#c0c0c0",
 			FontSize:                  10,
