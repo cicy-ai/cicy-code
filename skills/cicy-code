@@ -1,0 +1,463 @@
+#!/bin/bash
+# cicy-code - 分布式 cicy-code API CLI client
+# Usage: cicy-code [-n <node>] <command> [args]
+set -euo pipefail
+
+NODES_FILE="${CICY_NODES_FILE:-$HOME/Private/cicy-node.json}"
+LEGACY_NODES_FILE="$HOME/Private/cicy-nodes.json"
+REGISTRY="${CICY_REGISTRY:-}"
+REGISTRY_SECRET="${CICY_REGISTRY_SECRET:-}"
+
+ensure_nodes_file() {
+  if [ -f "$NODES_FILE" ]; then
+    return
+  fi
+  if [ -f "$LEGACY_NODES_FILE" ]; then
+    python3 - "$LEGACY_NODES_FILE" "$NODES_FILE" <<'PY'
+import json, os, sys
+src, dst = sys.argv[1], sys.argv[2]
+d = json.load(open(src))
+out = {'default': d.get('default', ''), 'machines': []}
+for key, node in d.get('nodes', {}).items():
+    out['machines'].append({
+        'id': key,
+        'machine_key': key,
+        'label': node.get('label', key),
+        'host': node.get('host', ''),
+        'port': node.get('port', 8008),
+        'url': node.get('url', ''),
+        'token': node.get('token', ''),
+        'status': node.get('status', ''),
+        'capabilities': {'runtime_kind': 'container', **(node.get('capabilities', {}) or {})},
+    })
+os.makedirs(os.path.dirname(dst), exist_ok=True)
+json.dump(out, open(dst, 'w'), indent=2, ensure_ascii=False)
+PY
+  fi
+}
+
+ensure_nodes_file
+
+NODE=""
+if [ "${1:-}" = "-n" ]; then
+  NODE="$2"; shift 2
+fi
+
+_node_get() {
+  local key="$1"
+  if [ -n "$REGISTRY" ]; then
+    NODE_ENV_VAL="$NODE" REGISTRY_ENV_VAL="$REGISTRY" REGISTRY_SECRET_ENV_VAL="$REGISTRY_SECRET" KEY_ENV_VAL="$key" python3 - <<'PY' 2>/dev/null && return
+import json, os, sys, urllib.request
+node = os.environ.get('NODE_ENV_VAL', '')
+url = os.environ.get('REGISTRY_ENV_VAL', '') + '/nodes'
+secret = os.environ.get('REGISTRY_SECRET_ENV_VAL', '')
+key = os.environ.get('KEY_ENV_VAL', '')
+headers = {'Authorization': 'Bearer ' + secret} if secret else {}
+req = urllib.request.Request(url, headers=headers)
+try:
+    data = json.loads(urllib.request.urlopen(req, timeout=3).read())
+    items = data.get('instances') or data.get('nodes', [])
+    target = next((n for n in items if n.get('instance_key') == node or n.get('machine_key') == node or n.get('id') == node or n.get('label') == node), None)
+    if not target:
+        sys.exit(1)
+    print(target.get(key, ''))
+except Exception:
+    sys.exit(1)
+PY
+  fi
+  [ -f "$NODES_FILE" ] || { echo ""; return; }
+  NODE_ENV_VAL="$NODE" NODES_FILE_ENV_VAL="$NODES_FILE" KEY_ENV_VAL="$key" python3 - <<'PY' 2>/dev/null
+import json, os, sys
+f = os.environ.get('NODES_FILE_ENV_VAL', '')
+d = json.load(open(f)) if f else {}
+node = os.environ.get('NODE_ENV_VAL', '') or d.get('default', '')
+key = os.environ.get('KEY_ENV_VAL', '')
+items = d.get('machines', [])
+target = next((n for n in items if n.get('machine_key') == node or n.get('id') == node or n.get('label') == node), None)
+if not target:
+    sys.exit(1)
+lookup = {
+    'instance_key': target.get('machine_key') or target.get('id'),
+    'instance_id': target.get('id') or target.get('machine_key'),
+    'instance_label': target.get('label') or target.get('machine_key'),
+    **target,
+}
+print(lookup.get(key, ''))
+PY
+}
+
+if [ -n "$NODE" ] || [ -f "$NODES_FILE" ]; then
+  _URL=$(_node_get url) || { echo "❌ 实例 '${NODE:-default}' 不存在，用 cicy-code instances 查看"; exit 1; }
+  _TOKEN=$(_node_get token)
+  API="${_URL}"
+  TOKEN="${_TOKEN}"
+else
+  API="http://127.0.0.1:${API_PORT:-8008}"
+  TOKEN=$(jq -r '.api_token' ~/global.json 2>/dev/null || echo "")
+fi
+
+AUTH=(-H "Authorization: Bearer $TOKEN")
+json_headers=(-H "Content-Type: application/json")
+RUNTIME_KIND="$(_node_get runtime_kind 2>/dev/null || true)"
+SUPPORTS_TMUX="$(_node_get supports_tmux 2>/dev/null || true)"
+
+is_cloudrun_node() {
+  [ "$RUNTIME_KIND" = "cloudrun" ] || [ "$SUPPORTS_TMUX" = "False" ] || [ "$SUPPORTS_TMUX" = "false" ]
+}
+
+require_tmux_support() {
+  if is_cloudrun_node; then
+    echo "❌ 实例 '${NODE:-default}' 是 cloudrun/API-only 节点，不支持 tmux/ttyd/code-server 接口"
+    exit 1
+  fi
+}
+
+request() {
+  local method="$1"
+  local path="$2"
+  local body="${3-}"
+  if [[ "$path" != /* ]]; then
+    path="/$path"
+  fi
+  if [ -n "$body" ]; then
+    curl -sf "${AUTH[@]}" "${json_headers[@]}" -X "$method" "$API$path" -d "$body"
+  else
+    curl -sf "${AUTH[@]}" -X "$method" "$API$path"
+  fi
+}
+
+get()   { request GET "$1"; }
+post()  { request POST "$1" "${2:-}"; }
+patch() { request PATCH "$1" "${2:-}"; }
+put()   { request PUT "$1" "${2:-}"; }
+del()   { request DELETE "$1" "${2:-}"; }
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  api)
+    METHOD="${1:?method required}"; shift
+    PATH_ARG="${1:?path required}"; shift || true
+    BODY_ARG="${1:-}"
+    request "${METHOD^^}" "$PATH_ARG" "$BODY_ARG"
+    ;;
+  get)
+    get "${1:?path required}"
+    ;;
+  post)
+    post "${1:?path required}" "${2:-}"
+    ;;
+  patch)
+    patch "${1:?path required}" "${2:-}"
+    ;;
+  put)
+    put "${1:?path required}" "${2:-}"
+    ;;
+  delete|del)
+    del "${1:?path required}" "${2:-}"
+    ;;
+
+  instances|instance-ls|node-ls|machines)
+    get /api/runtime/instances
+    ;;
+  instance-sync|machine-sync)
+    post /api/machines/sync "${1:-{}}"
+    ;;
+  instance-register|node-register|machine-register)
+    post /api/runtime/instances/register "${1:?json required}"
+    ;;
+  instance-sessions)
+    get "/api/runtime/instances/${1:?instance_id required}/sessions"
+    ;;
+  session-events)
+    get "/api/runtime/sessions/${1:?session_id required}/events"
+    ;;
+  session-event-push)
+    post "/api/runtime/sessions/${1:?session_id required}/events" "${2:?json required}"
+    ;;
+
+  runtime-instances)
+    get /api/runtime/instances
+    ;;
+  runtime-sessions)
+    get /api/runtime/sessions
+    ;;
+  runtime-tasks)
+    get "/api/runtime/tasks${1:+?pane=$1}"
+    ;;
+  runtime-task)
+    get "/api/runtime/tasks/${1:?task_id required}"
+    ;;
+  runtime-task-create)
+    post /api/runtime/tasks "${1:?json required}"
+    ;;
+  runtime-task-update)
+    patch "/api/runtime/tasks/${1:?task_id required}" "${2:?json required}"
+    ;;
+  runtime-artifacts)
+    get "/api/runtime/artifacts?task_id=${1:?task_id required}"
+    ;;
+  runtime-artifact-create)
+    post /api/runtime/artifacts "${1:?json required}"
+    ;;
+
+  shared)
+    get /api/shared-workspace
+    ;;
+  shared-workspace)
+    get /api/shared-workspace
+    ;;
+  shared-work-items)
+    if [ -n "${1:-}" ]; then get "/api/shared-workspace/work-items/$1"; else get /api/shared-workspace/work-items; fi
+    ;;
+  shared-work-item-save)
+    post /api/shared-workspace/work-items "${1:?json required}"
+    ;;
+  shared-work-item-update)
+    patch "/api/shared-workspace/work-items/${1:?id required}" "${2:?json required}"
+    ;;
+  shared-handoffs)
+    if [ -n "${1:-}" ]; then get "/api/shared-workspace/handoffs/$1"; else get /api/shared-workspace/handoffs; fi
+    ;;
+  shared-handoff-save)
+    post /api/shared-workspace/handoffs "${1:?json required}"
+    ;;
+  shared-handoff-update)
+    patch "/api/shared-workspace/handoffs/${1:?id required}" "${2:?json required}"
+    ;;
+  shared-artifacts)
+    if [ -n "${1:-}" ]; then get "/api/shared-workspace/artifacts/$1"; else get /api/shared-workspace/artifacts; fi
+    ;;
+  shared-artifact-save)
+    post /api/shared-workspace/artifacts "${1:?json required}"
+    ;;
+  shared-artifact-update)
+    patch "/api/shared-workspace/artifacts/${1:?id required}" "${2:?json required}"
+    ;;
+  shared-events)
+    get /api/shared-workspace/events
+    ;;
+  shared-event-append)
+    post /api/shared-workspace/events "${1:?json required}"
+    ;;
+
+  panes|ls)
+    require_tmux_support
+    get /api/tmux/panes
+    ;;
+  pane)
+    require_tmux_support
+    get "/api/tmux/panes/${1:?pane_id required}"
+    ;;
+  create-pane)
+    require_tmux_support
+    post /api/tmux/create "${1:?json required}"
+    ;;
+  update-pane)
+    require_tmux_support
+    patch "/api/tmux/panes/${1:?pane_id required}" "${2:?json required}"
+    ;;
+  delete-pane)
+    require_tmux_support
+    del "/api/tmux/panes/${1:?pane_id required}"
+    ;;
+  restart-pane)
+    require_tmux_support
+    post "/api/tmux/panes/${1:?pane_id required}/restart"
+    ;;
+  restart-all)
+    require_tmux_support
+    post /api/tmux/restart_all '{}'
+    ;;
+  status)
+    require_tmux_support
+    get "/api/tmux/status${1:+?pane=$1}"
+    ;;
+  send)
+    require_tmux_support
+    post /api/tmux/send "{\"pane_id\":\"${1:?pane_id required}\",\"text\":\"${*:2}\"}"
+    ;;
+  send-keys)
+    require_tmux_support
+    post /api/tmux/send-keys "{\"pane_id\":\"${1:?pane_id required}\",\"keys\":\"${*:2}\"}"
+    ;;
+  send-wait)
+    require_tmux_support
+    post /api/tmux/send_wait "{\"pane_id\":\"${1:?pane_id required}\",\"text\":\"${2:?text required}\",\"timeout\":${3:-60},\"prompt_type\":\"${4:-bash}\"}"
+    ;;
+  capture)
+    require_tmux_support
+    post /api/tmux/capture_pane "{\"pane_id\":\"${1:?pane_id required}\",\"lines\":${2:-100}}"
+    ;;
+  clear)
+    require_tmux_support
+    post /api/tmux/clear "{\"pane\":\"${1:?pane_id required}\"}"
+    ;;
+  tree)
+    require_tmux_support
+    get /api/tmux/tree
+    ;;
+  windows)
+    require_tmux_support
+    get "/api/tmux/windows${1:+?session=$1}"
+    ;;
+  new-window)
+    require_tmux_support
+    post /api/tmux/windows "{\"session\":\"${1:?session required}\"${2:+,\"name\":\"$2\"}}"
+    ;;
+  rename-window)
+    require_tmux_support
+    patch /api/tmux/windows "{\"session\":\"${1:?session required}\",\"index\":\"${2:?index required}\",\"name\":\"${3:?name required}\"}"
+    ;;
+  delete-window)
+    require_tmux_support
+    del /api/tmux/windows "{\"session\":\"${1:?session required}\",\"index\":\"${2:?index required}\"}"
+    ;;
+  select-window)
+    require_tmux_support
+    put /api/tmux/windows "{\"session\":\"${1:?session required}\",\"index\":\"${2:?index required}\"}"
+    ;;
+  push)
+    post /api/chat/push "{\"pane\":\"${1:?pane required}\",\"type\":\"${2:?type required}\",\"data\":${3:-{}}}"
+    ;;
+  chat-history)
+    get "/api/stats/chat?pane=${1:?pane required}"
+    ;;
+  ws-clients)
+    get /api/chat/clients
+    ;;
+  queue)
+    get "/api/workers/queue${1:+?pane=$1}"
+    ;;
+  queue-push)
+    post /api/workers/queue "${1:?json required}"
+    ;;
+  queue-update)
+    patch "/api/workers/queue/${1:?id required}" "${2:?json required}"
+    ;;
+  queue-delete)
+    del "/api/workers/queue/${1:?id required}"
+    ;;
+  steps)
+    get "/api/collab/steps${1:+?pane=$1}"
+    ;;
+  step-create)
+    post /api/collab/steps "${1:?json required}"
+    ;;
+  step-update)
+    patch "/api/collab/steps/${1:?id required}" "${2:?json required}"
+    ;;
+  workflow-create)
+    post /api/collab/workflows "${1:?json required}"
+    ;;
+  workflow)
+    get "/api/collab/workflows/${1:?workflow_id required}"
+    ;;
+  skills)
+    get /api/skills
+    ;;
+  skill-run)
+    post /api/skills/run "${1:?json required}"
+    ;;
+  agents)
+    get "/api/agents/pane/${1:?pane_id required}"
+    ;;
+  bind-agent)
+    post /api/agents/bind "${1:?json required}"
+    ;;
+  unbind-agent)
+    del "/api/agents/unbind/${1:?agent_id required}"
+    ;;
+  groups)
+    get /api/groups
+    ;;
+  group)
+    get "/api/groups/${1:?group_id required}"
+    ;;
+  settings)
+    get /api/settings/global
+    ;;
+  set-settings)
+    post /api/settings/global "${1:?json required}"
+    ;;
+  notify)
+    post /api/notify "{\"action\":\"${1:?action required}\"${2:+,\"file\":\"$2\"}${3:+,\"message\":\"$3\"}}"
+    ;;
+  open-file)
+    post /api/notify "{\"action\":\"open_file\",\"file\":\"${1:?file required}\",\"message\":\"📄 打开文件\"}"
+    ;;
+  traffic)
+    get "/api/stats/traffic?pane=${1:?pane required}&minutes=${2:-60}&interval=${3:-1}"
+    ;;
+  tokens)
+    get /api/auth/tokens
+    ;;
+  create-token)
+    post /api/auth/tokens "${1:-{}}"
+    ;;
+  delete-token)
+    del "/api/auth/tokens/${1:?token_id required}"
+    ;;
+  ping)
+    get /api/ping
+    ;;
+  health)
+    get /api/health
+    ;;
+  file-exists)
+    get "/api/utils/file/exists?path=${1:?path required}"
+    ;;
+  help|*)
+    cat <<HELP
+Usage: cicy-code [-n <instance>] <command> [args]
+
+Generic API:
+  api <METHOD> <path> [json]         通用 API 调用
+  get <path>
+  post <path> [json]
+  patch <path> [json]
+  put <path> [json]
+  delete <path> [json]
+
+Runtime / Shared:
+  runtime-instances
+  runtime-sessions
+  instance-sessions <instance_id>
+  session-events <session_id>
+  session-event-push <session_id> <json>
+  runtime-tasks [pane]
+  runtime-task <task_id>
+  runtime-task-create <json>
+  runtime-task-update <task_id> <json>
+  runtime-artifacts <task_id>
+  runtime-artifact-create <json>
+  shared
+  shared-work-items [id]
+  shared-work-item-save <json>
+  shared-work-item-update <id> <json>
+  shared-handoffs [id]
+  shared-handoff-save <json>
+  shared-handoff-update <id> <json>
+  shared-artifacts [id]
+  shared-artifact-save <json>
+  shared-artifact-update <id> <json>
+  shared-events
+  shared-event-append <json>
+
+Instances:
+  instances | instance-ls
+  instance-sync [json]
+  instance-register <json>
+  instance-add <name> <url> <token>
+  instance-rm <name>
+  instance-use <name>
+  instance-ping [name]
+
+Other convenience commands remain available.
+Config: $NODES_FILE
+HELP
+    ;;
+esac
+
+echo

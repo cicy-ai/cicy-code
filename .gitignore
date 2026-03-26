@@ -18,4 +18,10 @@ app/worker/public/
 api/cicy-code
 api/global.json
 audit-worker/.wrangler/
-api/mgr/*.conf
+
+# macOS
+.DS_Store
+
+# local tmux configs
+api/mgr/.tmux.conf
+api/mgr/.cicy_tmux.conf
