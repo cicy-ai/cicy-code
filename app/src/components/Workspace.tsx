@@ -82,6 +82,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [agentDetail, setAgentDetail] = useState<any>(null);
   const title = agentDetail?.title || '-';
   const [netLatency, setNetLatency] = useState<number | null>(null);
+  const isApiOnlyRuntime = !!(agentDetail && (agentDetail.runtime_kind === 'cloudrun' || agentDetail.capabilities?.supports_tmux === false));
 
   const [showVoiceControl, setShowVoiceControl] = useState(false);
   const [voiceLoading, setVoiceLoading] = useState(false);
@@ -147,7 +148,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       setAgentDetail(data);
       const workspace = data?.workspace || `~/workers/${paneId}`;
       agentWorkspaceRef.current = workspace;
-      if (!codeWindowInitializedRef.current && token) {
+      if (!codeWindowInitializedRef.current && token && !(data?.runtime_kind === 'cloudrun' || data?.capabilities?.supports_code_server === false || data?.capabilities?.supports_tmux === false)) {
         setCodeFolder(workspace);
         setCodeServerSrc(urls.codeServer(workspace, token));
         codeWindowInitializedRef.current = true;
@@ -194,18 +195,21 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }, []);
 
   const handleRestart = () => {
+    if (isApiOnlyRuntime) return;
     confirm(`Restart ${paneId}?`, async () => {
       setIsRestarting(true);
       try { await apiService.restartPane(paneId); for (let i = 0; i < 30; i++) { await new Promise(r => setTimeout(r, 1000)); try { const { data } = await apiService.getTtydStatus(paneId); if (data.status === 'running') break; } catch {} } } catch { alert('Restart failed'); } finally { setIsRestarting(false); }
     });
   };
-  const handleCapture = async () => { try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
-  const handleToggleMouse = async () => { const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
+  const handleCapture = async () => { if (isApiOnlyRuntime) return; try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
+  const handleToggleMouse = async () => { if (isApiOnlyRuntime) return; const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
 
   const toggleLeft = (p: 'team' | 'skills') => { setLeftPanel(prev => prev === p ? null : p); };
 
   const [loadedTtyds, setLoadedTtyds] = useState<Set<string>>(() => new Set());
-  useEffect(() => { if (token && paneId) setLoadedTtyds(prev => new Set(prev).add(paneId)); }, [paneId, token]);
+  useEffect(() => {
+    if (token && paneId && !isApiOnlyRuntime) setLoadedTtyds(prev => new Set(prev).add(paneId));
+  }, [paneId, token, isApiOnlyRuntime]);
 
   const rightContent = (
     <div data-id="right-content" className="h-full flex flex-col relative">
@@ -213,15 +217,17 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         <div data-id="top-bar-left" className="flex items-center gap-3 w-1/3 min-w-0">
           <span data-id="agent-title" className="text-sm text-zinc-100 font-medium truncate max-w-[160px] bg-white/[0.12] px-2 py-0.5 rounded">{title}</span>
           <span data-id="pane-id-badge" className="text-xs font-mono text-zinc-600 bg-white/[0.03] px-2 py-1 rounded shrink-0">{paneId}</span>
-          <button onClick={() => setFloatingCodeOpen(v => !v)} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0" title="Code Server">
-            {floatingCodeOpen ? <FolderOpen className="w-3.5 h-3.5" /> : <Folder className="w-3.5 h-3.5" />}
-          </button>
+          {!isApiOnlyRuntime && (
+            <button onClick={() => setFloatingCodeOpen(v => !v)} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0" title="Code Server">
+              {floatingCodeOpen ? <FolderOpen className="w-3.5 h-3.5" /> : <Folder className="w-3.5 h-3.5" />}
+            </button>
+          )}
         </div>
         <div data-id="top-bar-center" className="flex items-center justify-center w-1/3" />
         <div data-id="top-bar-right" className="flex items-center justify-end w-1/3 gap-3">
           <NetworkSignal latency={netLatency} />
           <button onClick={() => setTokenOpen(true)} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API Tokens"><Key className="w-3.5 h-3.5" /></button>
-          <button onClick={() => setApiOpen(true)} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 服务器"><Server className="w-3.5 h-3.5" /></button>
+          <button onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 服务器"><Server className="w-3.5 h-3.5" /></button>
           <button onClick={() => window.dispatchEvent(new Event('open-devtools-panel'))} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="DevTools"><Bug className="w-3.5 h-3.5" /></button>
           <span id="version" className="text-[10px] font-mono text-zinc-600">v1.0.1</span>
           {contextUsage != null && (
@@ -237,8 +243,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <div data-id="right-tabs" className="flex-1 relative overflow-hidden">
         <div data-id="chat-tab" className="absolute inset-0 flex justify-center" style={{ display: mainTab === 'chat' ? 'flex' : 'none' }}>
           <div className="w-full max-w-5xl h-full">
-            <ChatView paneId={paneId} token={token!} commandPanel={
-            <CommandPanel paneTarget={paneId} title={title} token={token}
+            <ChatView paneId={paneId} token={token!} apiOnly={isApiOnlyRuntime} commandPanel={
+            !isApiOnlyRuntime ? <CommandPanel paneTarget={paneId} title={title} token={token}
               panelPosition={panelPos} panelSize={panelSize} readOnly={false}
               onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}}
               onChange={(pos, size) => { setPanelPos(pos); setPanelSize(size); }}
@@ -247,17 +253,21 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               isRestarting={isRestarting} onCapturePane={handleCapture}
               hasEditPermission={hasPermission('edit')} hasRestartPermission={hasPermission('restart')}
               hasCapturePermission={hasPermission('capture')} showVoiceControl={showVoiceControl}
-              onToggleVoiceControl={() => setShowVoiceControl(v => !v)} />
+              onToggleVoiceControl={() => setShowVoiceControl(v => !v)} /> : null
           } />
           </div>
         </div>
         <div data-id="cli-tab" className="absolute inset-0 flex" style={{ display: mainTab === 'cli' ? 'flex' : 'none' }}>
           <div data-id="cli-terminal-area" className="w-full h-full relative">
-            {[...loadedTtyds].map(id => (
+            {!isApiOnlyRuntime ? [...loadedTtyds].map(id => (
               <div key={id} className="absolute inset-0" style={{ display: id === paneId ? 'block' : 'none' }}>
                 <WebFrame src={urls.ttydOpen(id, token!)} className="w-full h-full border-0 bg-black" title={`terminal-${id}`} />
               </div>
-            ))}
+            )) : (
+              <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500" data-id="workspace-api-only-terminal-empty">
+                Cloud Run / API-only node does not support ttyd terminal
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -367,16 +377,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>
       )}
 
-      <FloatingCodeWindow
-        open={floatingCodeOpen}
-        src={codeServerSrc}
-        folderLabel={codeFolder.replace(config.hostHome, '~')}
-        homeTitle={agentDetail?.workspace || `~/workers/${paneId}`}
-        storageScopeId={initialPaneIdRef.current}
-        onHome={handleCodeHome}
-        onNavigate={navigateToFolder}
-        onClose={() => setFloatingCodeOpen(false)}
-      />
+      {!isApiOnlyRuntime && (
+        <FloatingCodeWindow
+          open={floatingCodeOpen}
+          src={codeServerSrc}
+          folderLabel={codeFolder.replace(config.hostHome, '~')}
+          homeTitle={agentDetail?.workspace || `~/workers/${paneId}`}
+          storageScopeId={initialPaneIdRef.current}
+          onHome={handleCodeHome}
+          onNavigate={navigateToFolder}
+          onClose={() => setFloatingCodeOpen(false)}
+        />
+      )}
 
       {createPortal(
         <div

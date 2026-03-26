@@ -118,6 +118,10 @@ func loadTtydInject() string {
 }
 
 func handleWSProxy(w http.ResponseWriter, r *http.Request) {
+	if isCloudRunRuntime() {
+		httpNotSupportedInCloudRun(w)
+		return
+	}
 	paneID := strings.TrimPrefix(r.URL.Path, "/api/ws/")
 	inst := getInstance(paneID)
 	if inst == nil {
@@ -178,6 +182,10 @@ func handleWSProxy(w http.ResponseWriter, r *http.Request) {
 
 // handleTtydProxy proxies /ttyd/{pane_id}/* to the embedded ttyd-go instance
 func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
+	if isCloudRunRuntime() {
+		httpNotSupportedInCloudRun(w)
+		return
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/ttyd/")
 	parts := strings.SplitN(path, "/", 2)
 	paneID := normPaneID(parts[0])

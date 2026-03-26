@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Save, Settings, Zap, Globe, MessageSquare, Loader2, ChevronRight, LogOut } from 'lucide-react';
+import { X, Save, Settings, Zap, Globe, Loader2, LogOut } from 'lucide-react';
 import { EditPaneData } from '../EditPaneDialog';
 import Select from '../ui/Select';
 import apiService from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { useApp } from '../../contexts/AppContext';
 
 const THEME_KEY = 'app_theme';
 const themes = [
@@ -19,18 +20,25 @@ function applyTheme(t: string) {
 const sections = [
   { id: 'general', label: 'General', icon: Settings },
   { id: 'agent', label: 'Agent', icon: Zap },
-  { id: 'network', label: 'Network', icon: Globe },
+  { id: 'config', label: 'Config', icon: Settings },
+  { id: 'global', label: 'Global', icon: Globe },
 ] as const;
 type SectionId = typeof sections[number]['id'];
 
 export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgentDetailChange, onClose }: { paneId: string; fullPaneId: string; agentDetail: any; onAgentDetailChange: (d: any) => void; onClose: () => void }) {
   const { logout } = useAuth();
+  const { globalVar, updateGlobalVar } = useApp();
   const [data, setData] = useState<EditPaneData>({ target: fullPaneId, title: paneId, ...agentDetail });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [section, setSection] = useState<SectionId>('general');
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || '');
+  const [globalJson, setGlobalJson] = useState('');
+  const [globalSaving, setGlobalSaving] = useState(false);
+  const [globalSaved, setGlobalSaved] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setGlobalJson(JSON.stringify(globalVar, null, 2)); }, [globalVar]);
 
   const initRef = useRef(false);
   useEffect(() => { if (agentDetail && !initRef.current) { initRef.current = true; setData(prev => ({ ...prev, ...agentDetail })); } }, [agentDetail]);
@@ -39,6 +47,12 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
     setSaving(true);
     try { await apiService.updatePane(paneId, data); onAgentDetailChange(data); setSaved(true); setTimeout(() => setSaved(false), 2000); } catch {}
     finally { setSaving(false); }
+  };
+
+  const saveGlobal = async () => {
+    setGlobalSaving(true);
+    try { await updateGlobalVar(JSON.parse(globalJson)); setGlobalSaved(true); setTimeout(() => setGlobalSaved(false), 2000); } catch {}
+    finally { setGlobalSaving(false); }
   };
 
   const handleTheme = (v: string) => { setTheme(v); applyTheme(v); };
@@ -73,15 +87,8 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
           </div>
           {/* Save */}
           <div className="p-3 border-t border-white/[0.06]">
-            <button onClick={save} disabled={saving}
-              className={`w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer ${
-                saved ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/[0.06] text-zinc-300 hover:bg-white/[0.1]'
-              } disabled:opacity-50`}>
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              {saving ? 'Saving...' : saved ? 'Saved!' : 'Save'}
-            </button>
             <button onClick={logout}
-              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer text-zinc-500 hover:text-red-400 hover:bg-red-500/10 mt-2">
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer text-zinc-500 hover:text-red-400 hover:bg-red-500/10">
               <LogOut className="w-4 h-4" /> Logout
             </button>
           </div>
@@ -95,7 +102,8 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
               <p className="text-[11px] text-zinc-600 mt-0.5">
                 {section === 'general' && 'Basic pane configuration'}
                 {section === 'agent' && 'AI agent behavior and model'}
-                {section === 'network' && 'Proxy and connectivity'}
+                {section === 'config' && 'Proxy and connectivity'}
+                {section === 'global' && 'Shared settings across all agents'}
                 {section === 'telegram' && 'Notification integration'}
               </p>
             </div>
@@ -157,17 +165,13 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
                   <Select value={data.role || ''} onChange={v => set({ role: v })}
                     options={[{value:'',label:'None'},{value:'master',label:'Master'},{value:'worker',label:'Worker'}]} />
                 </Field>
-                <Field label="Default Model">
-                  <Select value={data.default_model || ''} onChange={v => set({ default_model: v })} searchable
-                    options={[{value:'',label:'None'},{value:'claude-opus-4.6',label:'opus-4.6'},{value:'claude-opus-4.5',label:'opus-4.5'},{value:'claude-sonnet-4.5',label:'sonnet-4.5'},{value:'claude-sonnet-4',label:'sonnet-4'},{value:'claude-haiku-4.5',label:'haiku-4.5'},{value:'deepseek-3.2',label:'deepseek-3.2'},{value:'minimax-m2.1',label:'minimax-m2.1'},{value:'qwen3-coder-next',label:'qwen3-coder'}]} />
-                </Field>
                 <Field label="Agent Duty">
                   <Textarea value={data.agent_duty || ''} onChange={v => set({ agent_duty: v })} rows={5} placeholder="Describe agent's role and responsibilities..." />
                 </Field>
               </div>
             )}
 
-            {section === 'network' && (
+            {section === 'config' && (
               <div className="space-y-5">
                 <Field label="Config (JSON)">
                   <Textarea value={data.config || '{}'} onChange={v => set({ config: v })} rows={8} mono placeholder='{"proxy": {"enable": true, "url": "http://..."}}' />
@@ -178,6 +182,14 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
     "url": "http://w-20001:x@127.0.0.1:8003"
   }
 }`}</pre>
+              </div>
+            )}
+
+            {section === 'global' && (
+              <div className="space-y-5">
+                <Field label="Global Settings (JSON)" desc="Shared across all agents">
+                  <Textarea value={globalJson} onChange={setGlobalJson} rows={16} mono placeholder="{}" />
+                </Field>
               </div>
             )}
 
@@ -193,6 +205,25 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
                   </Field>
                 </>)}
               </div>
+            )}
+          </div>
+          <div className="px-6 py-3 border-t border-white/[0.06] flex justify-end shrink-0">
+            {section === 'global' ? (
+              <button onClick={saveGlobal} disabled={globalSaving}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+                  globalSaved ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/[0.06] text-zinc-300 hover:bg-white/[0.1]'
+                } disabled:opacity-50`}>
+                {globalSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {globalSaving ? 'Saving...' : globalSaved ? 'Saved!' : 'Save'}
+              </button>
+            ) : (
+              <button onClick={save} disabled={saving}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+                  saved ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/[0.06] text-zinc-300 hover:bg-white/[0.1]'
+                } disabled:opacity-50`}>
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {saving ? 'Saving...' : saved ? 'Saved!' : 'Save'}
+              </button>
             )}
           </div>
         </div>

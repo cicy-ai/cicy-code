@@ -1,0 +1,29 @@
+FROM node:20-bookworm AS ui-builder
+WORKDIR /app
+COPY app/package*.json ./
+RUN npm ci --silent
+COPY app/ ./
+RUN npm run build --silent
+
+FROM golang:1.24-bookworm AS go-builder
+WORKDIR /src
+COPY api/go.mod api/go.sum ./api/
+WORKDIR /src/api
+RUN go mod download
+WORKDIR /src
+COPY api/ ./api/
+COPY .tmux.conf /src/.tmux.conf
+COPY .cicy_tmux.conf /src/.cicy_tmux.conf
+COPY --from=ui-builder /app/dist /src/api/mgr/ui
+COPY api/resources /src/api/mgr/resources
+WORKDIR /src/api
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o /out/cicy-code ./mgr/
+
+FROM gcr.io/distroless/base-debian12:nonroot
+ENV PORT=8080
+ENV CICY_RUNTIME_KIND=cloudrun
+ENV CICY_NO_BROWSER=1
+WORKDIR /app
+COPY --from=go-builder /out/cicy-code /app/cicy-code
+EXPOSE 8080
+ENTRYPOINT ["/app/cicy-code", "--public"]

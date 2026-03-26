@@ -106,14 +106,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
             />
           </div>
           <div>
-            <label className="block text-xs text-vsc-text-secondary mb-1">Default Model</label>
-            <Select value={pane.default_model || ''}
-              onChange={v => onChange({ ...pane, default_model: v })}
-              options={[{value:'',label:'无'},{value:'claude-opus-4.6',label:'opus-4.6'},{value:'claude-opus-4.5',label:'opus-4.5'},{value:'claude-sonnet-4.5',label:'sonnet-4.5'},{value:'claude-sonnet-4',label:'sonnet-4'},{value:'claude-haiku-4.5',label:'haiku-4.5'},{value:'deepseek-3.2',label:'deepseek-3.2'},{value:'minimax-m2.1',label:'minimax-m2.1'},{value:'qwen3-coder-next',label:'qwen3-coder'}]}
-              searchable
-            />
-          </div>
-          <div>
             <label className="block text-xs text-vsc-text-secondary mb-1">Agent Duty</label>
             <textarea value={pane.agent_duty || ''}
               onChange={e => onChange({ ...pane, agent_duty: e.target.value })}

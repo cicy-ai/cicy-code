@@ -1,4 +1,4 @@
-// Unified Worker: app.cicy-ai.com + u-*-app.cicy-ai.com
+// Unified Worker: app.cicy-ai.com + u-*-app.cicy-ai.com + u-*-free-api.cicy-ai.com
 const VER = '1';
 const COS_BASE = `https://cicy-1372193042.cos.ap-shanghai.myqcloud.com/app/v${VER}`;
 const MGR_API = 'https://api.cicy-ai.com';
@@ -24,9 +24,41 @@ function proxyTo(request, url, backend) {
   return fetch(req);
 }
 
+function normalizeBackend(raw) {
+  const backend = String(raw || '').trim();
+  return backend.replace(/\/$/, '');
+}
+
+function freeApiBackendForHost(hostname, env) {
+  const sub = hostname.split('.')[0] || '';
+  const match = sub.match(/^(u-.+)-free-api$/);
+  if (!match) return '';
+
+  const slug = match[1];
+  const exactKey = `FREE_API_BACKEND_${sub.replace(/-/g, '_').toUpperCase()}`;
+  const slugKey = `FREE_API_BACKEND_${slug.replace(/-/g, '_').toUpperCase()}`;
+  const direct = normalizeBackend(env?.[exactKey] || env?.[slugKey]);
+  if (direct) return direct;
+
+  const mappingRaw = String(env?.FREE_API_BACKENDS || '').trim();
+  if (mappingRaw) {
+    try {
+      const mapping = JSON.parse(mappingRaw);
+      const mapped = normalizeBackend(mapping[sub] || mapping[slug]);
+      if (mapped) return mapped;
+    } catch {}
+  }
+
+  if (sub === 'u-cicy-trial-free-api' || slug === 'u-cicy-trial') {
+    return DEFAULT_TRIAL_BACKEND;
+  }
+
+  return normalizeBackend(env?.FREE_API_BACKEND_DEFAULT) || DEFAULT_TRIAL_BACKEND;
+}
+
 const PROXY_PREFIXES = ['/api/', '/ws/', '/code/', '/ttyd/', '/mitm/', '/stt/'];
 
-const TRIAL_BACKEND = 'https://cicy-trial-944897035502.asia-east1.run.app';
+const DEFAULT_TRIAL_BACKEND = 'https://cicy-trial-944897035502.asia-east1.run.app';
 
 async function proxyWs(request, url, backend) {
   const target = backend + url.pathname + url.search;
@@ -51,10 +83,18 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const sub = url.hostname.split('.')[0];
+    const freeApiBackend = freeApiBackendForHost(url.hostname, env);
 
     // u-xxx-api.cicy-ai.com → passthrough to CF Tunnel (Pro)
-    // u-xxx-free-api.cicy-ai.com → passthrough to CF Tunnel → nginx → Cloud Run (Trial)
     if (sub.match(/^u-.+-api$/)) return fetch(request);
+
+    // u-xxx-free-api.cicy-ai.com → Worker 代理到 Cloud Run (Trial)
+    if (freeApiBackend) {
+      if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+        return proxyWs(request, url, freeApiBackend);
+      }
+      return proxyTo(request, url, freeApiBackend);
+    }
 
     // u-xxx-app.cicy-ai.com → workspace
     const appMatch = sub.match(/^(u-.+)-app$/);

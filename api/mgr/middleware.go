@@ -69,6 +69,9 @@ func getToken(r *http.Request) string {
 }
 
 func loadAPIToken() string {
+	if token := strings.TrimSpace(os.Getenv("CICY_API_TOKEN")); token != "" {
+		return token
+	}
 	home, _ := os.UserHomeDir()
 	data, _ := os.ReadFile(filepath.Join(home, "global.json"))
 	var cfg M
@@ -77,6 +80,24 @@ func loadAPIToken() string {
 		return t
 	}
 	return ""
+}
+
+func httpNotSupportedInCloudRun(w http.ResponseWriter) {
+	httpErr(w, 501, "not_supported_in_cloudrun")
+}
+
+func cloudRunUnsupportedM(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if isCloudRunRuntime() {
+			httpNotSupportedInCloudRun(w)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func cloudRunUnsupported(next http.HandlerFunc) http.HandlerFunc {
+	return corsM(authM(cloudRunUnsupportedM(next)))
 }
 
 func normPaneID(id string) string {

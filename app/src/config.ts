@@ -1,12 +1,31 @@
 
 const LS_API_BASE = 'cicy_api_base';
 
+function inferApiBase(): string {
+  const envBase = import.meta.env.VITE_API_BASE || '';
+  if (typeof window === 'undefined') return envBase;
+
+  const saved = localStorage.getItem(LS_API_BASE);
+  if (saved) return saved;
+
+  const { hostname, host, origin } = window.location;
+
+  if (hostname === 'dev.cicy-ai.com') return 'https://dev-api.cicy-ai.com';
+  if (hostname === 'app.cicy-ai.com' || hostname === 'api.cicy-ai.com' || /^audit\./.test(hostname)) return origin;
+
+  const proMatch = hostname.match(/^(u-.+)-app\.cicy-ai\.com$/);
+  if (proMatch) return `https://${proMatch[1]}-api.cicy-ai.com`;
+
+  const freeMatch = hostname.match(/^(u-.+)-free-app\.cicy-ai\.com$/);
+  if (freeMatch) return `https://${freeMatch[1]}-free-api.cicy-ai.com`;
+
+  if (host.startsWith('localhost:') || host.startsWith('127.0.0.1:')) return envBase || '';
+
+  return envBase || origin;
+}
+
 export function getApiBase(): string {
-  // if (typeof window !== 'undefined') {
-  //   const saved = localStorage.getItem(LS_API_BASE);
-  //   if (saved) return saved;
-  // }
-  return import.meta.env.VITE_API_BASE || '';
+  return inferApiBase();
 }
 
 export function setApiBase(base: string) {
@@ -16,12 +35,11 @@ export function setApiBase(base: string) {
 
 // Workspace: Pro → u-xxx-api, Trial → u-xxx-free-api
 const host = typeof window !== 'undefined' ? window.location.hostname : '';
-const appMatch = host.match(/^(u-.+)-app\.cicy-ai\.com$/);
-const isWorkspace = appMatch !== null;
+const isWorkspace = /^(u-.+)-(app|free-app)\.cicy-ai\.com$/.test(host);
 
 const isAudit = typeof window !== 'undefined' && /^audit\./.test(window.location.hostname);
 
-// dev-api for dev/devProxy, empty (same origin) for localhost, apiOrigin for workspace
+// prod uses same-origin or inferred workspace api domain; localhost/dev can still use VITE_API_BASE
 const base = getApiBase();
 
 const config = {
