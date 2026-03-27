@@ -407,11 +407,6 @@ func runSetupWithAgents(agentList string) {
 func checkEnv() {
 	extendPATH()
 
-	if isCloudRunRuntime() {
-		log.Printf("[startup] skipping local setup in cloudrun mode")
-		return
-	}
-
 	fmt.Println("🔍 检查基础环境...")
 	base := baseTools()
 	for i := range base {
