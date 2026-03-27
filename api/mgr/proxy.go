@@ -71,10 +71,6 @@ func injectCodeServerJS(resp *http.Response) error {
 }
 
 func handleCodeServer(w http.ResponseWriter, r *http.Request) {
-	if isCloudRunRuntime() {
-		httpNotSupportedInCloudRun(w)
-		return
-	}
 	r.URL.Path = r.URL.Path[len("/code"):]
 	if r.URL.Path == "" {
 		r.URL.Path = "/"
@@ -147,10 +143,6 @@ func handleMitmproxy(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleMitmproxyAuth(w http.ResponseWriter, r *http.Request) {
-	if isCloudRunRuntime() {
-		httpNotSupportedInCloudRun(w)
-		return
-	}
 	// Only verify token for root path
 	if r.URL.Path == "/mitm/" || r.URL.Path == "/mitm" {
 		auth := r.Header.Get("Authorization")
