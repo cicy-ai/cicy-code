@@ -427,7 +427,11 @@ func checkEnv() {
 		log.Fatalf("[startup] failed to query agent_config: %v", err)
 	}
 	if count == 0 {
-		if agentsFlag != "" {
+		if isCloudRunRuntime() {
+			// Cloud Run must never block on interactive setup.
+			// Create a minimal builtin worker so tmux/ttyd works immediately.
+			createBuiltinWorker(10001, "kiro-cli", "Kiro CLI Assistant")
+		} else if agentsFlag != "" {
 			runSetupWithAgents(agentsFlag)
 		} else {
 			runSetup()
