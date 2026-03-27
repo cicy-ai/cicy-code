@@ -93,20 +93,18 @@ Environment:
 	cloudRunMode = isCloudRunRuntime()
 	if cloudRunMode {
 		publicMode = true
+		// Optional: only runs when master env vars are provided
+		startCloudRunRegisterLoop()
 	}
 
 	checkEnv()
 
-	if cloudRunMode {
-		log.Printf("[startup] cloudrun mode enabled: watcher/tmux-health/machine-sync disabled")
-		startCloudRunRegisterLoop()
-	} else {
-		go startWatcher()
-		go startTmuxHealth()
-		if _, err := syncMachinesFromConfig(); err != nil {
-			log.Printf("[machines] initial sync error: %v", err)
-		}
+	go startWatcher()
+	go startTmuxHealth()
+	if _, err := syncMachinesFromConfig(); err != nil {
+		log.Printf("[machines] initial sync error: %v", err)
 	}
+
 
 	// Health
 	http.HandleFunc("/health", w(handleHealth))
