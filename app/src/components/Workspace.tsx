@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { createPortal } from 'react-dom';
 import {
-  Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
+  Terminal, MessageSquare, Home, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, RotateCcw, Plus, Pin, PinOff, Menu, ExternalLink, Key, Bug, Server
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -34,6 +33,7 @@ const cache = {
 };
 
 const getFloatingOpenKey = (paneId: string) => `ws_floatingCodeOpen:${paneId}`;
+const TEAM_TERMINAL_CHILDREN_KEY = 'ws_teamTerminalChildren';
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 
@@ -64,15 +64,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [agents, setAgents] = useState<any[]>([]);
   const [codeServerSrc, setCodeServerSrc] = useState('');
   const [floatingCodeOpen, setFloatingCodeOpen] = useState(() => cache.get(floatingOpenKey, false));
-  const [windowsDrawerOpen, setWindowsDrawerOpen] = useState(false);
   const [codeFolder, setCodeFolder] = useState('');
+  const [teamTerminalChildren, setTeamTerminalChildren] = useState<Record<string, string[]>>(() => cache.get(TEAM_TERMINAL_CHILDREN_KEY, {}));
   const codeWindowInitializedRef = useRef(false);
   const agentWorkspaceRef = useRef(`~/workers/${paneId}`);
 
   const handleCodeHome = () => {
-    const ws = agentWorkspaceRef.current || agentDetail?.workspace || `~/workers/${paneId}`;
-    const next = urls.codeServer(ws, token!);
-    if (next !== codeServerSrc) { setCodeServerSrc(next); setCodeFolder(ws); }
+    const next = urls.codeServer(config.hostHome, token!);
+    window.open(next, '_blank');
+    if (next !== codeServerSrc) { setCodeServerSrc(next); setCodeFolder(config.hostHome); }
   };
 
   const navigateToFolder = (folder: string) => {
@@ -102,6 +102,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
 
   useEffect(() => { cache.set('ws_leftPanel', leftPanel); if (groupRef.current) { groupRef.current.setLayout(leftActive ? { 'left-panel': panelSizes['left-panel'] || 50, 'right-panel': panelSizes['right-panel'] || 50 } : { 'left-panel': 0, 'right-panel': 100 }); } }, [leftActive, leftPanel, panelSizes]);
   useEffect(() => { cache.set(floatingOpenKey, floatingCodeOpen); }, [floatingCodeOpen, floatingOpenKey]);
+  useEffect(() => { cache.set(TEAM_TERMINAL_CHILDREN_KEY, teamTerminalChildren); }, [teamTerminalChildren]);
   useEffect(() => { cache.set('ws_voiceBtnPos', voiceBtnPos); }, [voiceBtnPos]);
   useEffect(() => { cache.set('agent_panelPos', panelPos); }, [panelPos]);
   useEffect(() => { cache.set('agent_panelSize', panelSize); }, [panelSize]);
@@ -112,27 +113,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       document.body.style.overflow = prevOverflow;
     };
   }, []);
-  useEffect(() => {
-    const el = mainAreaRef.current;
-    if (!el) return;
-    el.style.transition = 'transform 300ms ease-out';
-    el.style.transform = windowsDrawerOpen ? 'translateX(460px)' : 'translateX(0)';
-    return () => {
-      el.style.transform = 'translateX(0)';
-      el.style.transition = '';
-    };
-  }, [windowsDrawerOpen]);
-  useEffect(() => {
-    const el = activityBarRef.current;
-    if (!el) return;
-    el.style.transition = 'transform 300ms ease-out';
-    el.style.transform = windowsDrawerOpen ? 'translateX(460px)' : 'translateX(0)';
-    return () => {
-      el.style.transform = 'translateX(0)';
-      el.style.transition = '';
-    };
-  }, [windowsDrawerOpen]);
-
   const onPanelLayout = useCallback((layout: Record<string, number>) => {
     setPanelSizes(layout);
     cache.set('ws_panelSizes', layout);
@@ -204,21 +184,85 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleCapture = async () => { if (isApiOnlyRuntime) return; try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
   const handleToggleMouse = async () => { if (isApiOnlyRuntime) return; const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
 
-  const toggleLeft = (p: 'team' | 'skills') => { setLeftPanel(prev => prev === p ? null : p); };
+  const toggleLeft = (p: 'team' | 'skills') => {
+    setAgentsOpen(false);
+    setLeftPanel(prev => prev === p ? null : p);
+  };
+
+  const toggleAgents = () => {
+    if (agentsOpen) {
+      setAgentsOpen(false);
+      return;
+    }
+    setLeftPanel(null);
+    setAgentsOpen(true);
+  };
 
   const [loadedTtyds, setLoadedTtyds] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     if (token && paneId && !isApiOnlyRuntime) setLoadedTtyds(prev => new Set(prev).add(paneId));
   }, [paneId, token, isApiOnlyRuntime]);
+  const currentTeamChildren = teamTerminalChildren[paneId] || [];
+  const getPaneTitle = useCallback((id: string) => {
+    const clean = id.replace(/:.*$/, '');
+    const agent = agents.find((item: any) => {
+      const agentId = (item.pane_id || item.id || '').replace(/:.*$/, '');
+      return agentId === clean;
+    });
+    return agent?.title || clean;
+  }, [agents]);
+  const openPaneInCurrentTerminal = useCallback((targetPaneId: string) => {
+    const clean = targetPaneId.replace(/:.*$/, '');
+    if (!clean || clean === paneId) return;
+    setLoadedTtyds(prev => {
+      const next = new Set(prev);
+      next.add(clean);
+      return next;
+    });
+    setTeamTerminalChildren(prev => {
+      const current = prev[paneId] || [];
+      if (current.includes(clean)) return prev;
+      return { ...prev, [paneId]: [...current, clean] };
+    });
+  }, [paneId]);
+  const closePaneInCurrentTerminal = useCallback((targetPaneId: string) => {
+    const clean = targetPaneId.replace(/:.*$/, '');
+    setTeamTerminalChildren(prev => {
+      const current = prev[paneId] || [];
+      if (!current.includes(clean)) return prev;
+      const nextChildren = current.filter(id => id !== clean);
+      if (nextChildren.length === 0) {
+        const next = { ...prev };
+        delete next[paneId];
+        return next;
+      }
+      return { ...prev, [paneId]: nextChildren };
+    });
+  }, [paneId]);
 
   const rightContent = (
     <div data-id="right-content" className="h-full flex flex-col relative">
       <header data-id="top-bar" className="h-12 border-b border-[var(--vsc-border)] bg-[#0A0A0A] flex items-center justify-between px-4 shrink-0 z-10">
         <div data-id="top-bar-left" className="flex items-center gap-3 w-1/3 min-w-0">
+          {!isApiOnlyRuntime && (
+            <button
+              type="button"
+              onClick={handleCodeHome}
+              className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0"
+              title={agentDetail?.workspace || `~/workers/${paneId}`}
+            >
+              <Home className="w-3.5 h-3.5" />
+            </button>
+          )}
           <span data-id="agent-title" className="text-sm text-zinc-100 font-medium truncate max-w-[160px] bg-white/[0.12] px-2 py-0.5 rounded">{title}</span>
           <span data-id="pane-id-badge" className="text-xs font-mono text-zinc-600 bg-white/[0.03] px-2 py-1 rounded shrink-0">{paneId}</span>
           {!isApiOnlyRuntime && (
-            <button onClick={() => setFloatingCodeOpen(v => !v)} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0" title="Code Server">
+            <button
+              type="button"
+              onClick={() => { if (codeServerSrc) window.open(codeServerSrc, '_blank'); }}
+              className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0"
+              title="Code Server"
+            >
               {floatingCodeOpen ? <FolderOpen className="w-3.5 h-3.5" /> : <Folder className="w-3.5 h-3.5" />}
             </button>
           )}
@@ -226,10 +270,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         <div data-id="top-bar-center" className="flex items-center justify-center w-1/3" />
         <div data-id="top-bar-right" className="flex items-center justify-end w-1/3 gap-3">
           <NetworkSignal latency={netLatency} />
-          <button onClick={() => setTokenOpen(true)} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API Tokens"><Key className="w-3.5 h-3.5" /></button>
+          <button onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API Tokens"><Key className="w-3.5 h-3.5" /></button>
           <button onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 服务器"><Server className="w-3.5 h-3.5" /></button>
           <button onClick={() => window.dispatchEvent(new Event('open-devtools-panel'))} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="DevTools"><Bug className="w-3.5 h-3.5" /></button>
-          <span id="version" className="text-[10px] font-mono text-zinc-600">v1.0.1</span>
+          <span id="version" className="text-[10px] font-mono text-zinc-600">v1.0.2</span>
           {contextUsage != null && (
             <div data-id="context-usage" className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/[0.02]">
               <div data-id="context-bar" className="w-12 h-1 rounded-full bg-white/[0.04] overflow-hidden">
@@ -258,8 +302,30 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           </div>
         </div>
         <div data-id="cli-tab" className="absolute inset-0 flex" style={{ display: mainTab === 'cli' ? 'flex' : 'none' }}>
-          <div data-id="cli-terminal-area" className="w-full h-full relative">
-            {!isApiOnlyRuntime ? [...loadedTtyds].map(id => (
+          <div data-id="cli-terminal-area" className={cn("w-full h-full relative", currentTeamChildren.length > 0 && "overflow-auto bg-[#050505]")}>
+            {!isApiOnlyRuntime ? currentTeamChildren.length > 0 ? (
+              <div data-id="cli-terminal-stack" className="min-h-full px-3 py-3">
+                <div className="flex flex-col gap-3">
+                  <TerminalFrameCard
+                    paneId={paneId}
+                    title={title || getPaneTitle(paneId)}
+                    subtitle="Current pane"
+                    src={urls.ttydOpen(paneId, token!)}
+                    minHeightClass="min-h-[70vh]"
+                  />
+                  {currentTeamChildren.map(id => (
+                    <TerminalFrameCard
+                      key={id}
+                      paneId={id}
+                      title={getPaneTitle(id)}
+                      subtitle={`Attached to ${paneId}`}
+                      src={urls.ttydOpen(id, token!)}
+                      onClose={() => closePaneInCurrentTerminal(id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : [...loadedTtyds].map(id => (
               <div key={id} className="absolute inset-0" style={{ display: id === paneId ? 'block' : 'none' }}>
                 <WebFrame src={urls.ttydOpen(id, token!)} className="w-full h-full border-0 bg-black" title={`terminal-${id}`} />
               </div>
@@ -290,10 +356,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
           <SideBtn
             dataId="btn-code-window"
-            active={windowsDrawerOpen}
+            active={leftActive === 'agents'}
             icon={<LayoutList className="w-5 h-5" />}
             title="Agents"
-            onClick={() => setWindowsDrawerOpen(v => !v)}
+            onClick={toggleAgents}
           />
           <SideBtn dataId="btn-team" active={leftPanel === 'team'} icon={<Users className="w-5 h-5" />} title="Team" onClick={() => toggleLeft('team')} />
         </div>
@@ -328,7 +394,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       onSelectAgent={onSelectAgent} onAgentsChange={setAgents} />
                   </div>
                   <div className="absolute inset-0" style={{ display: leftPanel === 'team' ? 'block' : 'none' }}>
-                    <TeamPanel paneId={paneId} token={token!} />
+                    <TeamPanel paneId={paneId} onOpenInCurrentPane={openPaneInCurrentTerminal} openedPaneIds={currentTeamChildren} />
                   </div>
                   <div className="absolute inset-0 overflow-auto" style={{ display: leftPanel === 'skills' ? 'block' : 'none' }}>
                     <SkillPanel paneId={fullPaneId} />
@@ -382,46 +448,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           open={floatingCodeOpen}
           src={codeServerSrc}
           folderLabel={codeFolder.replace(config.hostHome, '~')}
-          homeTitle={agentDetail?.workspace || `~/workers/${paneId}`}
           storageScopeId={initialPaneIdRef.current}
-          onHome={handleCodeHome}
           onNavigate={navigateToFolder}
           onClose={() => setFloatingCodeOpen(false)}
         />
       )}
-
-      {createPortal(
-        <div
-          data-id="windows-drawer"
-          className={cn(
-            "fixed left-0 top-0 bottom-0 w-[460px] bg-[#0A0A0A] border-r border-[var(--vsc-border)] z-[220] transition-transform duration-300 ease-out",
-            windowsDrawerOpen ? "translate-x-0" : "-translate-x-full"
-          )}
-        >
-          <div className="h-12 border-b border-[var(--vsc-border)] flex items-center px-3 bg-[#0e0e0e]">
-            <LayoutList className="w-3.5 h-3.5 text-zinc-600" />
-            <span className="text-xs font-medium text-zinc-500 ml-1">Agents</span>
-            <button
-              onClick={() => setWindowsDrawerOpen(false)}
-              className="ml-auto p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"
-              title="Close"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          <div className="h-[calc(100%-3rem)] overflow-auto">
-            <AgentDrawer
-              agents={agents}
-              paneId={paneId}
-              onSelectAgent={onSelectAgent}
-              onAgentsChange={setAgents}
-            />
-          </div>
-        </div>,
-        document.documentElement
-      )}
-
-      {/* Agent Drawer */}
 
       {settingsOpen && <div data-id="settings-overlay"><SettingsFloat paneId={paneId} fullPaneId={fullPaneId} agentDetail={agentDetail} onAgentDetailChange={(d) => { setAgentDetail(d); setAgents(prev => prev.map(a => (a.pane_id || a.id)?.startsWith(paneId) ? { ...a, ...d } : a)); }} onClose={() => setSettingsOpen(false)} /></div>}
       {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
@@ -429,6 +460,46 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {toast && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 bg-zinc-800 text-white text-sm rounded-lg shadow-lg">{toast}</div>}
     </div>
     </SendingProvider>
+  );
+}
+
+function TerminalFrameCard({
+  paneId,
+  title,
+  subtitle,
+  src,
+  onClose,
+  minHeightClass = 'min-h-[55vh]',
+}: {
+  paneId: string;
+  title: string;
+  subtitle: string;
+  src: string;
+  onClose?: () => void;
+  minHeightClass?: string;
+}) {
+  return (
+    <section data-id={`cli-terminal-card-${paneId}`} className="rounded-2xl border border-white/[0.08] bg-[#090909] shadow-[0_16px_40px_rgba(0,0,0,0.28)] overflow-hidden">
+      <header className="flex items-center justify-between gap-3 px-4 py-3 border-b border-white/[0.08] bg-[#0d0d0d]">
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-zinc-200 truncate">{title}</div>
+          <div className="text-[11px] font-mono text-zinc-600 truncate">{paneId} · {subtitle}</div>
+        </div>
+        {onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0"
+            title="Remove from current terminal stack"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        ) : null}
+      </header>
+      <div className={cn("relative h-[55vh] bg-black", minHeightClass)}>
+        <WebFrame src={src} className="w-full h-full border-0 bg-black" title={`terminal-stack-${paneId}`} />
+      </div>
+    </section>
   );
 }
 
@@ -461,7 +532,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange }: {
   const handleQuickAddMaster = async () => {
     setAdding(true);
     try {
-      const { data } = await apiService.createPane({ role: 'master', agent_type: 'kiro-cli', title: 'Worker' });
+      const { data } = await apiService.createPane({ role: 'master', agent_type: 'codex', title: 'Worker' });
       const id = data?.pane_id || data?.id;
       if (id) {
         const { data: fresh } = await apiService.getPanes();
@@ -480,7 +551,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange }: {
   const handleAdd = async () => {
     setAdding(true);
     try {
-      const { data } = await apiService.createPane({ role: 'worker', agent_type: 'kiro-cli' });
+      const { data } = await apiService.createPane({ role: 'worker', agent_type: 'codex' });
       const id = data?.pane_id || data?.id;
       if (id) {
         const { data: fresh } = await apiService.getPanes();
@@ -526,8 +597,13 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange }: {
           <div data-id="agent-search" className="mb-3 relative flex gap-2">
             <div className="relative flex-1">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
-              <input type="text" placeholder="Search id or title..." value={search} onChange={e => setSearch(e.target.value)}
-                className="w-full bg-white/[0.02] border border-[var(--vsc-border)] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-white/[0.08] placeholder:text-zinc-700 text-zinc-400" />
+              <input
+                type="search"
+                placeholder="Search id or title..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full bg-white/[0.02] border border-[var(--vsc-border)] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-white/[0.08] placeholder:text-zinc-700 text-zinc-400"
+              />
             </div>
             <button onClick={handleQuickAddMaster} disabled={adding}
               className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-[var(--vsc-border)] text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
