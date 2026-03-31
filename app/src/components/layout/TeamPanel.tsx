@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Users, Plus, X, Loader2, ExternalLink, Box, RefreshCw } from 'lucide-react';
 import apiService from '../../services/api';
-import { urls } from '../../config';
-import { WebFrame } from '../WebFrame';
 import { useDialog } from '../../contexts/DialogContext';
 import Select from '../ui/Select';
 
@@ -51,9 +49,13 @@ interface Step {
   result_summary?: string;
 }
 
-interface Props { paneId: string; token: string; }
+interface Props {
+  paneId: string;
+  onOpenInCurrentPane?: (paneId: string) => void;
+  openedPaneIds?: string[];
+}
 
-export default function TeamPanel({ paneId, token }: Props) {
+export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds = [] }: Props) {
   const [allAgents, setAllAgents] = useState<Agent[]>([]);
   const [bindings, setBindings] = useState<Binding[]>([]);
   const [statuses, setStatuses] = useState<Record<string, StatusInfo>>({});
@@ -112,7 +114,7 @@ export default function TeamPanel({ paneId, token }: Props) {
   const createAndBind = async () => {
     setCreating(true);
     try {
-      const { data } = await apiService.createPane({ role: 'worker', agent_type: 'kiro-cli chat' });
+      const { data } = await apiService.createPane({ role: 'worker', agent_type: 'codex' });
       const newId = data?.pane_id || data?.session;
       if (newId) {
         await apiService.bindAgent({ pane_id: paneId, agent_name: shortId(newId) });
@@ -146,7 +148,7 @@ export default function TeamPanel({ paneId, token }: Props) {
     if (s.isThinking || s.status === 'thinking') return 'Thinking';
     if (s.status === 'tool_use') return 'Running';
     if (s.status === 'idle' || s.status === 'text') return 'Idle';
-    return 'Offline';
+    return '';
   };
 
   const getName = (binding: Binding) => {
@@ -181,6 +183,98 @@ export default function TeamPanel({ paneId, token }: Props) {
     return Array.from(groups.values());
   }, [bindings, instanceMap]);
 
+  const currentAgent = useMemo(() => {
+    const agent = allAgents.find(a => shortId(a.pane_id) === paneId);
+    const machine = agent?.machine_id ? instanceMap.get(agent.machine_id) : undefined;
+    const step = latestStepMap.get(`${agent?.machine_id || 0}:${paneId}`);
+    const status = getStatus(paneId);
+    const subtitleParts = [paneId, statusLabel(status)];
+    if (machine?.instance_label || machine?.label) subtitleParts.push(machine?.instance_label || machine?.label || '');
+    if (step?.title) subtitleParts.push(`${step.title}${step.status ? ` [${step.status}]` : ''}`);
+    return {
+      title: agent?.title || status.title || paneId,
+      status,
+      subtitle: subtitleParts.join(' · '),
+      resultSummary: step?.result_summary || '',
+    };
+  }, [allAgents, instanceMap, latestStepMap, paneId, statuses]);
+
+  const renderAgentCard = ({
+    wid,
+    title,
+    status,
+    subtitle,
+    resultSummary,
+    active = false,
+    opened = false,
+    onClick,
+    onRemove,
+  }: {
+    wid: string;
+    title: string;
+    status: StatusInfo;
+    subtitle: string;
+    resultSummary?: string;
+    active?: boolean;
+    opened?: boolean;
+    onClick: () => void;
+    onRemove?: () => void;
+  }) => (
+    <div
+      key={wid}
+      data-id={`team-panel-worker-${wid}`}
+      onClick={onClick}
+      className={`w-full flex items-center gap-3 border p-3 rounded-xl transition-all group relative cursor-pointer ${
+        active
+          ? 'border-blue-500/50 bg-blue-500/[0.08] ring-1 ring-blue-500/20'
+          : opened
+            ? 'border-cyan-500/40 bg-cyan-500/[0.06] ring-1 ring-cyan-500/10'
+          : 'bg-white/[0.02] border-[var(--vsc-border)] hover:border-white/[0.08]'
+      }`}
+    >
+      {onRemove ? (
+        <button
+          data-id="team-panel-worker-unbind"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          className="absolute right-0 top-0 w-5 h-5 rounded-full bg-red-500/80 flex items-center justify-center transition-colors cursor-pointer opacity-0 group-hover:opacity-100 hover:bg-red-500 z-10"
+          title="Unbind"
+        >
+          <X className="w-3 h-3 text-white" />
+        </button>
+      ) : null}
+      <div className="flex items-center gap-3 flex-1 min-w-0 text-left">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <h3 className={`text-sm font-medium truncate ${active ? 'text-blue-300' : opened ? 'text-cyan-200' : 'text-zinc-300'}`}>{title}</h3>
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDot(status)}`} />
+          </div>
+          <p className={`text-xs font-mono mt-0.5 truncate ${active ? 'text-blue-400/50' : opened ? 'text-cyan-400/60' : 'text-zinc-600'}`}>
+            {subtitle}
+          </p>
+          {resultSummary ? (
+            <p className="text-xs text-zinc-500 mt-1 truncate" data-id="team-panel-worker-step-summary">
+              {resultSummary}
+            </p>
+          ) : null}
+        </div>
+      </div>
+      <button
+        data-id="team-panel-worker-open"
+        onClick={(e) => {
+          e.stopPropagation();
+          window.open(`#/agent/${wid}`, '_blank');
+        }}
+        className="p-1 rounded transition-colors shrink-0 cursor-pointer text-zinc-700 opacity-0 group-hover:opacity-100 hover:text-zinc-400"
+        title="Open in new window"
+      >
+        <ExternalLink className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+
   return (
     <div className="h-full flex flex-col" data-id="team-panel-root">
       <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-center gap-2 flex-shrink-0" data-id="team-panel-toolbar">
@@ -211,82 +305,48 @@ export default function TeamPanel({ paneId, token }: Props) {
         </button>
       </div>
 
-      <div className="px-3 py-2 border-b border-[var(--vsc-border)] text-xs text-zinc-500 flex items-center gap-2" data-id="team-panel-instance-summary">
-        <Box className="w-3 h-3" />
-        <span>{instances.length} instances</span>
-        {instances.map(instance => (
-          <span key={instance.id} className="text-[11px] text-zinc-600">
-            {(instance.instance_label || instance.label || instance.instance_key || instance.machine_key)}
-            {instance.runtime_kind ? ` · ${instance.runtime_kind}` : ''} · {instance.status}
-          </span>
-        ))}
-      </div>
+    
 
       <div className="flex-1 overflow-y-auto" data-id="team-panel-worker-list">
+        <div className="p-1.5 border-b border-[var(--vsc-border)]" data-id="team-panel-current-agent">
+          {renderAgentCard({
+            wid: paneId,
+            title: currentAgent.title,
+            status: currentAgent.status,
+            subtitle: currentAgent.subtitle,
+            resultSummary: currentAgent.resultSummary,
+            active: true,
+            onClick: () => { window.location.hash = `#/agent/${paneId}`; },
+          })}
+        </div>
         {bindings.length > 0 ? (
           <div className="flex flex-col h-full" data-id="team-panel-groups">
             {groupedBindings.map(group => (
-              <div key={group.instance?.id || 'local'} className="border-b border-[var(--vsc-border)]" data-id={`team-panel-group-${group.instance?.instance_key || group.instance?.machine_key || 'local'}`}>
-                <div className="px-3 py-2 text-xs text-zinc-500 bg-black/20 flex items-center gap-2" data-id="team-panel-group-header">
-                  <Box className="w-3 h-3" />
-                  <span>{group.instance?.instance_label || group.instance?.label || 'Local runtime'}</span>
-                  <span className="text-zinc-600">{group.instance?.status || 'local'}</span>
-                  {isApiOnlyInstance(group.instance) ? <span className="text-amber-500">API-only</span> : null}
-                </div>
+              <div key={group.instance?.id || 'local'} style={{padding:4}} className="border-b border-[var(--vsc-border)]" data-id={`team-panel-group-${group.instance?.instance_key || group.instance?.machine_key || 'local'}`}>
+                
                 {group.items.map(b => {
                   const wid = shortId(b.name);
                   const s = getStatus(wid);
                   const step = latestStepMap.get(`${b.machine_id || 0}:${wid}`);
-                  return (
-                    <div key={b.id} className="flex flex-col min-h-[220px]" style={{ flex: '1 1 0' }} data-id={`team-panel-worker-${wid}`}>
-                      <div className="flex items-center gap-2 px-3 py-1 bg-black/40 border-b border-[var(--vsc-border)] flex-shrink-0" data-id="team-panel-worker-header">
-                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot(s)}`} />
-                        <span className="text-sm text-zinc-300 font-medium truncate">{getName(b)}</span>
-                        <span className="text-sm text-zinc-600 font-mono">{wid}</span>
-                        <span className="text-sm text-zinc-600">·</span>
-                        <span className="text-sm text-zinc-500">{statusLabel(s)}</span>
-                        {(b.instance_label || b.machine_label) && <span className="text-xs text-zinc-600">· {b.instance_label || b.machine_label}</span>}
-                        {step?.title && <span className="text-xs text-zinc-500 truncate">· {step.title} [{step.status}]</span>}
-                        <div className="flex-1" />
-                        {!isApiOnlyInstance(group.instance) ? (
-                          <button
-                            data-id="team-panel-worker-open"
-                            onClick={() => window.open(`#/agent/${wid}`, '_blank')}
-                            className="text-zinc-600 hover:text-zinc-300 transition-colors"
-                            title="Open in new window"
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                          </button>
-                        ) : null}
-                        <button
-                          data-id="team-panel-worker-unbind"
-                          onClick={() => confirm(<>Unbind <span className="text-zinc-100 font-medium">{getName(b)}</span>?</>, () => unbind(b))}
-                          className="text-zinc-600 hover:text-red-400 transition-colors"
-                          title="Unbind"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                      {step?.result_summary ? (
-                        <div className="px-3 py-2 text-xs text-zinc-400 border-b border-[var(--vsc-border)]" data-id="team-panel-worker-step-summary">
-                          {step.result_summary}
-                        </div>
-                      ) : null}
-                      <div className="flex-1 relative" data-id="team-panel-worker-terminal">
-                        {!isApiOnlyInstance(group.instance) ? (
-                          <WebFrame
-                            src={urls.ttydOpen(wid, token)}
-                            className="w-full h-full border-0 bg-black"
-                            title={`worker-${wid}`}
-                          />
-                        ) : (
-                          <div className="h-full flex items-center justify-center text-xs text-zinc-500" data-id="team-panel-worker-api-only-empty">
-                            Cloud Run / API-only node does not support ttyd terminal
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
+                  const subtitleParts = [wid, statusLabel(s)];
+                  if (b.instance_label || b.machine_label) subtitleParts.push(b.instance_label || b.machine_label || '');
+                  if (step?.title) subtitleParts.push(`${step.title}${step.status ? ` [${step.status}]` : ''}`);
+                  return renderAgentCard({
+                    wid,
+                    title: getName(b),
+                    status: s,
+                    subtitle: subtitleParts.join(' · '),
+                    resultSummary: step?.result_summary,
+                    opened: openedPaneIds.includes(wid),
+                    onClick: () => {
+                      if (onOpenInCurrentPane) {
+                        onOpenInCurrentPane(wid);
+                        return;
+                      }
+                      window.location.hash = `#/agent/${wid}`;
+                    },
+                    onRemove: () => confirm(<>Unbind <span className="text-zinc-100 font-medium">{getName(b)}</span>?</>, () => unbind(b)),
+                  });
                 })}
               </div>
             ))}
