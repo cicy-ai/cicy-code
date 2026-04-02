@@ -35,7 +35,7 @@ export const TerminalControls: React.FC<TerminalControlsProps> = ({
           onClick={onCapture}
           disabled={isCapturing}
           className="p-1 rounded text-yellow-400 hover:text-yellow-300 hover:bg-vsc-bg-active disabled:opacity-40"
-          title="Capture pane"
+          title="捕获窗格"
         >
           {isCapturing ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
         </button>

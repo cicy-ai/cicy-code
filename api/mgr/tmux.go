@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -23,10 +24,10 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if gid != "" {
-		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type
+		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0)
 			FROM agent_config t INNER JOIN group_windows gp ON t.pane_id=gp.win_id WHERE gp.group_id=? AND t.active=1 ORDER BY t.created_at DESC`, gid)
 	} else {
-		rows, err = store.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type
+		rows, err = store.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0)
 			FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.active=1 ORDER BY t.created_at DESC`)
 	}
 	if err != nil {
@@ -44,13 +45,15 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 		var groupID sql.NullInt64
 		var role, defaultModel, trustLevel sql.NullString
 		var agentType sql.NullString
-		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType)
+		var allowAllActions sql.NullBool
+		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType, &allowAllActions)
 		p := M{
 			"pane_id": paneID.String, "title": title.String, "ttyd_port": port.Int64,
 			"workspace": workspace.String, "init_script": initScript.String,
 			"active": active.Int64,
 			"role":   role.String, "default_model": defaultModel.String,
 			"trust_level": trustLevel.String, "agent_type": agentType.String,
+			"allow_all_actions": allowAllActions.Bool,
 		}
 		if createdAt.Valid {
 			p["created_at"] = createdAt.String
@@ -73,17 +76,18 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 
 func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WinName      *string `json:"win_name"`
-		InitScript   string  `json:"init_script"`
-		Title        string  `json:"title"`
-		AgentType    string  `json:"agent_type"`
-		Role         string  `json:"role"`
-		DefaultModel string  `json:"default_model"`
+		WinName         *string `json:"win_name"`
+		InitScript      string  `json:"init_script"`
+		Title           string  `json:"title"`
+		AgentType       string  `json:"agent_type"`
+		Role            string  `json:"role"`
+		DefaultModel    string  `json:"default_model"`
+		AllowAllActions bool    `json:"allow_all_actions"`
 	}
 	readBody(r, &req)
 	token := getToken(r)
 
-	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.WinName, token)
+	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.WinName, token)
 	if err != nil {
 		J(w, M{"success": false, "error": err.Error()})
 		return
@@ -91,7 +95,7 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	J(w, result)
 }
 
-func doCreatePane(title, role, defaultModel, agentType, initScript string, winName *string, token string) (M, error) {
+func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, winName *string, token string) (M, error) {
 	// Get next worker index
 	var workerIdx int
 	tx, _ := store.Begin()
@@ -121,8 +125,8 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, winNa
 	// Create tmux session
 	runTmux("new-session", "-d", "-s", session, "-n", "main", "-c", workspace)
 	// Insert DB
-	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()), paneID, t, port, workspace, initScript, "{}", role, defaultModel, agentType)
+	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()), paneID, t, port, workspace, initScript, "{}", role, defaultModel, agentType, allowAllActions)
 
 	// Start ttyd-go instance
 	if err := startInstance(paneID, port, token); err != nil {
@@ -133,11 +137,12 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, winNa
 	waitPort(port, 10*time.Second)
 
 	initPaneEnv(paneEnvOpts{
-		paneID:     paneID,
-		configJSON: "{}",
-		workspace:  workspace,
-		initScript: initScript,
-		agentType:  agentType,
+		paneID:          paneID,
+		configJSON:      "{}",
+		workspace:       workspace,
+		initScript:      initScript,
+		agentType:       agentType,
+		allowAllActions: allowAllActions,
 	})
 
 	return M{
@@ -183,6 +188,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	var title, workspace, initScript, agentType, agentDuty, config, commonPrompt, ttydPreview sql.NullString
 	var port sql.NullInt64
 	var active sql.NullInt64
+	var allowAllActions sql.NullBool
 	var tgEnable sql.NullBool
 	var tgToken, tgChatID sql.NullString
 	var groupID sql.NullInt64
@@ -191,13 +197,14 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	var machineLabel, machineURL, runtimeKind, capabilitiesJSON sql.NullString
 	err := store.QueryRow(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script,
 		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.agent_duty, t.config, t.common_prompt, t.ttyd_preview, gp.group_id, t.role, t.default_model, t.trust_level,
+		COALESCE(t.allow_all_actions, 0),
 		COALESCE(t.machine_id, 0), COALESCE(m.label, ''), COALESCE(m.url, ''), COALESCE(json_extract(m.capabilities_json, '$.runtime_kind'), ''), COALESCE(m.capabilities_json, '{}')
 		FROM agent_config t
 		LEFT JOIN group_windows gp ON t.pane_id=gp.win_id
 		LEFT JOIN machines m ON t.machine_id=m.id
 		WHERE t.pane_id=?`, paneID).Scan(
 		&paneID, &title, &port, &workspace, &initScript,
-		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &agentDuty, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel,
+		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &agentDuty, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel, &allowAllActions,
 		&machineID, &machineLabel, &machineURL, &runtimeKind, &capabilitiesJSON)
 	if err != nil {
 		httpErr(w, 404, "Pane "+id+" not found")
@@ -209,11 +216,12 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		"tg_token": tgToken.String, "tg_chat_id": tgChatID.String, "tg_enable": tgEnable.Bool,
 		"active": active.Int64, "agent_type": agentType.String, "agent_duty": agentDuty.String,
 		"config": config.String, "common_prompt": commonPrompt.String, "ttyd_preview": ttydPreview.String,
-		"role": role.String, "default_model": defaultModel.String,
-		"trust_level": trustLevel.String,
+		"allow_all_actions": allowAllActions.Bool,
+		"role":              role.String, "default_model": defaultModel.String,
+		"trust_level":   trustLevel.String,
 		"machine_label": machineLabel.String,
-		"machine_url": machineURL.String,
-		"runtime_kind": runtimeKind.String,
+		"machine_url":   machineURL.String,
+		"runtime_kind":  runtimeKind.String,
 	}
 	if machineID.Valid && machineID.Int64 > 0 {
 		resp["machine_id"] = machineID.Int64
@@ -239,7 +247,8 @@ var paneUpdateCols = map[string]bool{
 	"tg_token": true, "tg_chat_id": true, "tg_enable": true, "active": true,
 	"agent_type": true, "agent_duty": true, "config": true, "common_prompt": true,
 	"ttyd_preview": true, "role": true, "default_model": true, "trust_level": true,
-	"proxy": true, "proxy_enable": true, "private_mode": true, "allowed_users": true,
+	"allow_all_actions": true,
+	"private_mode":      true, "allowed_users": true,
 	"node_url": true, "preview": true,
 }
 
@@ -313,8 +322,9 @@ func handleRestartPane(w http.ResponseWriter, r *http.Request, id string) {
 func restartPaneCore(paneID, token string) error {
 	var port sql.NullInt64
 	var workspace, initScript, title, config, agentType, trustLevel sql.NullString
-	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, trust_level FROM agent_config WHERE pane_id=?", paneID).
-		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &trustLevel)
+	var allowAllActions sql.NullBool
+	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, trust_level, COALESCE(allow_all_actions, 0) FROM agent_config WHERE pane_id=?", paneID).
+		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &trustLevel, &allowAllActions)
 	if err != nil {
 		return fmt.Errorf("pane %s not found in db", paneID)
 	}
@@ -347,11 +357,12 @@ func restartPaneCore(paneID, token string) error {
 
 	// Re-run init
 	initPaneEnv(paneEnvOpts{
-		paneID:     paneID,
-		configJSON: config.String,
-		workspace:  wsExpanded,
-		initScript: initScript.String,
-		agentType:  agentType.String,
+		paneID:          paneID,
+		configJSON:      config.String,
+		workspace:       wsExpanded,
+		initScript:      initScript.String,
+		agentType:       agentType.String,
+		allowAllActions: allowAllActions.Bool,
 	})
 	store.Exec(fmt.Sprintf("UPDATE agent_config SET updated_at=%s WHERE pane_id=?", store.Now()), paneID)
 	return nil
@@ -359,103 +370,376 @@ func restartPaneCore(paneID, token string) error {
 
 // initPaneEnv sets up env vars, proxy, workspace, and runs init script in a pane.
 type paneEnvOpts struct {
-	paneID     string
-	configJSON string // JSON config (uses applyProxyFromConfig)
-	workspace  string // expanded workspace path
-	initScript string
-	agentType  string
+	paneID          string
+	configJSON      string // JSON config (projects only)
+	workspace       string // expanded workspace path
+	initScript      string
+	agentType       string
+	allowAllActions bool
+}
+
+func tmuxShellQuote(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", "'\\''") + "'"
+}
+
+func normalizeAgentType(agentType string) string {
+	switch strings.ToLower(strings.TrimSpace(agentType)) {
+	case "openclaw", "opencraw":
+		return "openclaw"
+	case "codex", "openai", "kiro-cli", "kiro-cli chat", "gemini", "copilot":
+		return "codex"
+	case "claude", "claude code", "claude-code":
+		return "claude"
+	case "opencode", "open code", "open-code":
+		return "opencode"
+	default:
+		return ""
+	}
+}
+
+func visibleAgentInstallLine(commandName, label, installCmd, logPath string) string {
+	return fmt.Sprintf(`if ! command -v %s >/dev/null 2>&1; then
+  echo '[cicy] =================================================='
+  echo '[cicy] %s is not installed. Installing now...'
+  echo '[cicy] This may take 1-5 minutes depending on network.'
+  echo '[cicy] =================================================='
+  install_log=%s
+  ( %s ) >"$install_log" 2>&1 &
+  install_pid=$!
+  elapsed=0
+  while kill -0 "$install_pid" 2>/dev/null; do
+    elapsed=$((elapsed + 1))
+    filled=$(((elapsed %% 20) + 1))
+    bar=$(printf '%%-*s' "$filled" '' | tr ' ' '#')
+    pad=$(printf '%%-*s' $((20 - filled)) '')
+    printf '\r[cicy] [%%s%%s] installing %s... %%3ss' "$bar" "$pad" "$elapsed"
+    sleep 1
+  done
+  wait "$install_pid"
+  install_status=$?
+  printf '\n'
+  if [ "$install_status" -ne 0 ]; then
+    echo '[cicy] %s install failed. Recent log:'
+    tail -100 "$install_log"
+    return 1
+  fi
+  echo '[cicy] %s install completed.'
+fi`, commandName, label, tmuxShellQuote(logPath), installCmd, strings.ToLower(label), strings.ToLower(label), strings.ToLower(label))
+}
+
+func agentBootLines(agentType string, allowAllActions bool, shortID string) []string {
+	switch normalizeAgentType(agentType) {
+	case "openclaw":
+		home, _ := os.UserHomeDir()
+		baseStateDir := filepath.Join(home, ".openclaw")
+		stateDir := filepath.Join(home, ".openclaw-"+shortID)
+		installLog := filepath.Join(stateDir, "openclaw-install.log")
+		sessionName := strings.ReplaceAll(shortID, "-", "")
+		lines := []string{
+			fmt.Sprintf("export OPENCLAW_CONFIG_PATH=%s", tmuxShellQuote(filepath.Join(baseStateDir, "openclaw.json"))),
+			fmt.Sprintf("export OPENCLAW_STATE_DIR=%s", tmuxShellQuote(stateDir)),
+			fmt.Sprintf("export OPENCLAW_SESSION_KEY=%s", tmuxShellQuote("agent:main:"+sessionName)),
+			fmt.Sprintf("export OPENCLAW_SESSION_STORE=%s", tmuxShellQuote(filepath.Join(baseStateDir, "agents", "main", "sessions", "sessions.json"))),
+			fmt.Sprintf("export OPENAI_API_KEY=%s", tmuxShellQuote(os.Getenv("CICY_API_KEY"))),
+			fmt.Sprintf("export OPENAI_BASE_URL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_API_URL")))),
+			fmt.Sprintf("mkdir -p %s", tmuxShellQuote(stateDir)),
+			fmt.Sprintf("mkdir -p %s %s %s", tmuxShellQuote(filepath.Join(stateDir, "identity")), tmuxShellQuote(filepath.Join(stateDir, "devices")), tmuxShellQuote(filepath.Join(stateDir, "agents", "main", "agent"))),
+			fmt.Sprintf("if [ -d %s ]; then cp -a %s/. %s/; fi", tmuxShellQuote(filepath.Join(baseStateDir, "identity")), tmuxShellQuote(filepath.Join(baseStateDir, "identity")), tmuxShellQuote(filepath.Join(stateDir, "identity"))),
+			fmt.Sprintf("if [ -d %s ]; then cp -a %s/. %s/; fi", tmuxShellQuote(filepath.Join(baseStateDir, "devices")), tmuxShellQuote(filepath.Join(baseStateDir, "devices")), tmuxShellQuote(filepath.Join(stateDir, "devices"))),
+			fmt.Sprintf("rm -f %s", tmuxShellQuote(filepath.Join(stateDir, "agents", "main", "agent", "auth-profiles.json"))),
+			`node - <<'EOF'
+const fs = require("fs");
+const storePath = process.env.OPENCLAW_SESSION_STORE;
+const sessionKey = process.env.OPENCLAW_SESSION_KEY;
+if (!storePath || !sessionKey) process.exit(0);
+try {
+  const raw = JSON.parse(fs.readFileSync(storePath, "utf8"));
+  const entry = raw[sessionKey];
+  if (!entry) process.exit(0);
+  if (entry.sessionFile) {
+    try { fs.rmSync(entry.sessionFile, { force: true }); } catch (_) {}
+  }
+  delete raw[sessionKey];
+  fs.writeFileSync(storePath, JSON.stringify(raw, null, 2));
+} catch (_) {}
+EOF`,
+			`export OPENCLAW_GATEWAY_TOKEN="$(node -e 'const fs=require("fs"); const p=process.env.OPENCLAW_CONFIG_PATH; try { const data=JSON.parse(fs.readFileSync(p, "utf8")); process.stdout.write((((data.gateway || {}).auth || {}).token || "")); } catch (_) {}')"`,
+		}
+		if installCmd := openClawInstallCmd(); installCmd != "" {
+			lines = append(lines, visibleAgentInstallLine("openclaw", "OpenClaw", installCmd, installLog))
+		}
+		if allowAllActions {
+			approvalsPath := fmt.Sprintf("%s/exec-approvals.json", stateDir)
+			lines = append(lines, fmt.Sprintf(`cat > %s <<'EOF'
+{
+  "version": 1,
+  "defaults": {
+    "security": "full",
+    "ask": "off",
+    "askFallback": "full",
+    "autoAllowSkills": true
+  },
+  "agents": {
+    "main": {
+      "security": "full",
+      "ask": "off",
+      "askFallback": "full",
+      "autoAllowSkills": true
+    }
+  }
+}
+EOF`, tmuxShellQuote(approvalsPath)))
+		}
+		gatewayLog := filepath.Join(stateDir, "openclaw-gateway.log")
+		tmpGatewayLog := filepath.Join("/tmp", fmt.Sprintf("openclaw-gateway-%s.log", shortID))
+		lines = append(lines,
+			fmt.Sprintf(`openclaw_gateway_ready() {
+  timeout 2s bash <<'EOF' >/dev/null 2>&1
+exec 3<>/dev/tcp/127.0.0.1/%s || exit 1
+printf 'GET / HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n' >&3
+IFS= read -r status <&3 || exit 1
+case "$status" in
+  HTTP/*) exit 0 ;;
+  *) exit 1 ;;
+esac
+EOF
+}`, openClawPort()),
+			fmt.Sprintf(`gateway_log=%s`, tmuxShellQuote(tmpGatewayLog)),
+			`openclaw_gateway_running() {
+  pidof openclaw-gateway >/dev/null 2>&1 || pgrep -A -f 'openclaw gateway run' >/dev/null 2>&1
+}`,
+			fmt.Sprintf(`openclaw_gateway_started() {
+  [ -s "$gateway_log" ] || return 1
+  grep -Eq %s "$gateway_log"
+}`, tmuxShellQuote(`host mounted at http://127\.0\.0\.1:`+openClawPort()+`/__openclaw__/canvas/|\[gateway\].*listening on ws://127\.0\.0\.1:`+openClawPort()+`|\[gateway\]`)),
+			`if ! openclaw_gateway_ready; then`,
+			fmt.Sprintf("  echo %s", tmuxShellQuote("[cicy] preparing OpenClaw gateway ...")),
+			"  if ! pidof openclaw-gateway >/dev/null 2>&1 && ! pgrep -A -f 'openclaw gateway run' >/dev/null 2>&1; then",
+			fmt.Sprintf("    echo %s", tmuxShellQuote("[cicy] starting gateway process ...")),
+			"    rm -f \"$gateway_log\"",
+			"    : > \"$gateway_log\"",
+			"    rm -f "+tmuxShellQuote(gatewayLog),
+			"    nohup openclaw gateway run --verbose >\"$gateway_log\" 2>&1 </dev/null &",
+			"  else",
+			fmt.Sprintf("    echo %s", tmuxShellQuote("[cicy] gateway process already exists, waiting for readiness ...")),
+			"  fi",
+			"  gateway_ready=0",
+			"  gateway_started=0",
+			"  gateway_restarted=0",
+			"  last_log_seen=''",
+			"  for i in $(seq 1 60); do",
+			"    if openclaw_gateway_ready; then",
+			"      gateway_ready=1",
+			"      if [ \"$gateway_started\" -ne 1 ]; then",
+			fmt.Sprintf("        echo %s", tmuxShellQuote("[cicy] gateway endpoint is up before startup marker, continuing ...")),
+			"      fi",
+			fmt.Sprintf("      echo %s", tmuxShellQuote("[cicy] OpenClaw gateway ready.")),
+			"      break",
+			"    fi",
+			"    if [ \"$gateway_started\" -ne 1 ] && openclaw_gateway_started; then",
+			"      gateway_started=1",
+			fmt.Sprintf("      echo %s", tmuxShellQuote("[cicy] gateway log detected, checking endpoint ...")),
+			"    fi",
+			"    if [ -s \"$gateway_log\" ]; then",
+			"      last_log=$(tail -1 \"$gateway_log\" 2>/dev/null | sed 's/[^[:print:]\t]//g')",
+			"      if [ -n \"$last_log\" ] && [ \"$last_log\" != \"$last_log_seen\" ] && [ \"$gateway_started\" -ne 1 ]; then",
+			"        echo \"[cicy] gateway log :: $last_log\"",
+			"        last_log_seen=\"$last_log\"",
+			"      fi",
+			"    fi",
+			"    if [ \"$gateway_restarted\" -ne 1 ] && ! openclaw_gateway_running; then",
+			"      nohup openclaw gateway run --verbose >\"$gateway_log\" 2>&1 </dev/null &",
+			"      gateway_restarted=1",
+			"    fi",
+			"    if [ $((i % 5)) -eq 0 ]; then",
+			"      if [ \"$gateway_started\" -eq 1 ]; then",
+			"        echo \"[cicy] waiting for gateway endpoint ${i}s/60s ...\"",
+			"      else",
+			"        echo \"[cicy] waiting for gateway startup ${i}s/60s ...\"",
+			"      fi",
+			"    fi",
+			"    sleep 1",
+			"  done",
+			"  if [ \"$gateway_ready\" -ne 1 ]; then",
+			fmt.Sprintf("    echo %s", tmuxShellQuote("[cicy] OpenClaw gateway failed to start. Recent log:")),
+			"    tail -80 \"$gateway_log\"",
+			"    return 1",
+			"  fi",
+			"fi",
+			fmt.Sprintf("openclaw tui --session %s || true", tmuxShellQuote(sessionName)),
+			"echo '[cicy] OpenClaw TUI exited. Shell is still active.'",
+		)
+		return lines
+	case "codex":
+		home, _ := os.UserHomeDir()
+		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("codex-install-%s.log", shortID))
+		lines := []string{
+			"mkdir -p ~/.cicy",
+			visibleAgentInstallLine("codex", "Codex", npmGlobalInstallCmd("@openai/codex"), installLog),
+		}
+		if allowAllActions {
+			lines = append(lines, "codex --dangerously-bypass-approvals-and-sandbox")
+			return lines
+		}
+		lines = append(lines, "codex")
+		return lines
+	case "claude":
+		home, _ := os.UserHomeDir()
+		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("claude-install-%s.log", shortID))
+		lines := []string{
+			"mkdir -p ~/.cicy",
+			visibleAgentInstallLine("claude", "Claude Code", npmGlobalInstallCmd("@anthropic-ai/claude-code"), installLog),
+		}
+		if allowAllActions {
+			lines = append(lines, "claude --dangerously-skip-permissions")
+			return lines
+		}
+		lines = append(lines, "claude")
+		return lines
+	case "opencode":
+		home, _ := os.UserHomeDir()
+		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("opencode-install-%s.log", shortID))
+		lines := []string{
+			"mkdir -p ~/.cicy",
+			visibleAgentInstallLine("opencode", "OpenCode", "curl -fsSL https://opencode.ai/install | bash", installLog),
+		}
+		if allowAllActions {
+			configPath := fmt.Sprintf("/tmp/opencode_allow_%s.json", shortID)
+			lines = append(lines,
+				fmt.Sprintf("cat > %s <<'EOF'\n{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"permission\": \"allow\"\n}\nEOF", tmuxShellQuote(configPath)),
+				fmt.Sprintf("export OPENCODE_CONFIG=%s", tmuxShellQuote(configPath)),
+				"opencode",
+			)
+			return lines
+		}
+		lines = append(lines, "opencode")
+		return lines
+	default:
+		return nil
+	}
+}
+
+func isClaudeInputReady(out string) bool {
+	return strings.Contains(out, "Claude Code v") &&
+		(strings.Contains(out, "? for shortcuts") ||
+			strings.Contains(out, " /effort") ||
+			strings.Contains(out, "Welcome back!") ||
+			strings.Contains(out, "Recent activity"))
+}
+
+func autoConfirmClaudeDanger(paneID string) {
+	go func() {
+		var lastAction time.Time
+		for i := 0; i < 60; i++ {
+			time.Sleep(500 * time.Millisecond)
+			out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", "-160")
+			if err != nil {
+				continue
+			}
+			if isClaudeInputReady(out) {
+				log.Printf("[claude-auto-confirm] %s ready", paneID)
+				return
+			}
+			if time.Since(lastAction) < 900*time.Millisecond {
+				continue
+			}
+			switch {
+			case strings.Contains(out, "Quick safety check") && strings.Contains(out, "Yes, I trust this folder"):
+				log.Printf("[claude-auto-confirm] %s trust workspace", paneID)
+				runTmux("send-keys", "-t", paneID, "Enter")
+				lastAction = time.Now()
+			case strings.Contains(out, "Bypass Permissions mode") && strings.Contains(out, "Yes, I accept"):
+				log.Printf("[claude-auto-confirm] %s accept bypass mode", paneID)
+				runTmux("send-keys", "-t", paneID, "Down")
+				time.Sleep(150 * time.Millisecond)
+				runTmux("send-keys", "-t", paneID, "Enter")
+				lastAction = time.Now()
+			case strings.Contains(out, "Bypass Permissions mode") && strings.Contains(out, "Enter to confirm"):
+				log.Printf("[claude-auto-confirm] %s confirm bypass mode", paneID)
+				runTmux("send-keys", "-t", paneID, "Enter")
+				lastAction = time.Now()
+			}
+		}
+		log.Printf("[claude-auto-confirm] %s timeout", paneID)
+	}()
 }
 
 func initPaneEnv(opts paneEnvOpts) {
 	pid := opts.paneID
 	shortID := strings.Split(pid, ":")[0]
+	// proxyURL := fmt.Sprintf("http://%s:x@127.0.0.1:17080", shortID)
 
-	var lines []string
-
-	// source ~/.cicy_tmux if exists, else create it
-	lines = append(lines, "[ -f ~/.cicy_tmux.conf ] || touch ~/.cicy_tmux.conf && source ~/.cicy_tmux.conf")
-
-	// Export agent IDs
-	lines = append(lines, fmt.Sprintf("export X_AGENT_ID='%s'", pid))
-	lines = append(lines, fmt.Sprintf("export X_AGENT_SHORT_ID='%s'", shortID))
-
-	// cd workspace
-	if opts.workspace != "" {
-		lines = append(lines, "cd "+opts.workspace)
-		lines = append(lines, fmt.Sprintf("export WORKSPACE='%s'", opts.workspace))
-		lines = append(lines, "mkdir -p ./skills ./projects")
+	lines := []string{
+		"touch ~/.cicy_tmux.conf",
+		"source ~/.cicy_tmux.conf",
+		`export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"`,
+		fmt.Sprintf("export X_AGENT_ID=%s", tmuxShellQuote(pid)),
+		fmt.Sprintf("export X_AGENT_SHORT_ID=%s", tmuxShellQuote(shortID)),
+		//fmt.Sprintf("export HTTP_PROXY=%s", tmuxShellQuote(proxyURL)),
+		// "export HTTPS_PROXY=\"$HTTP_PROXY\"",
+		// "export ALL_PROXY=\"$HTTP_PROXY\"",
+		// "export http_proxy=\"$HTTP_PROXY\"",
+		// "export https_proxy=\"$HTTP_PROXY\"",
+		// "export all_proxy=\"$HTTP_PROXY\"",
+		// "export NO_PROXY='localhost,127.0.0.1'",
+		// "export no_proxy=\"$NO_PROXY\"",
 	}
 
-	// Proxy + Projects
+	if opts.workspace != "" {
+		lines = append(lines,
+			"cd "+tmuxShellQuote(opts.workspace),
+			fmt.Sprintf("export WORKSPACE=%s", tmuxShellQuote(opts.workspace)),
+			"mkdir -p ./skills ./projects",
+		)
+	}
+
 	if opts.configJSON != "" && opts.configJSON != "{}" {
 		var cfg struct {
-			Proxy struct {
-				Enable bool   `json:"enable"`
-				URL    string `json:"url"`
-			} `json:"proxy"`
 			Projects []string `json:"projects"`
 		}
 		if json.Unmarshal([]byte(opts.configJSON), &cfg) == nil {
-			if cfg.Proxy.Enable {
-				proxyURL := fmt.Sprintf("http://%s:x@127.0.0.1:18888", shortID)
-				if cfg.Proxy.URL != "" && cfg.Proxy.URL != "https://proxy.example.com" {
-					proxyURL = cfg.Proxy.URL
-				}
-				lines = append(lines, fmt.Sprintf("export HTTPS_PROXY='%s' HTTP_PROXY='%s' https_proxy='%s' http_proxy='%s' ALL_PROXY='%s' no_proxy=localhost,127.0.0.1", proxyURL, proxyURL, proxyURL, proxyURL, proxyURL))
-			}
 			for _, p := range cfg.Projects {
-				p = strings.TrimRight(p, "/")
-				lines = append(lines, fmt.Sprintf("ln -sf %s ./projects/", p))
+				p = strings.TrimSpace(strings.TrimRight(p, "/"))
+				if p == "" {
+					continue
+				}
+				lines = append(lines, fmt.Sprintf("ln -sfn -- %s ./projects/", tmuxShellQuote(p)))
 			}
 		}
 	}
-	lines = append(lines, opts.initScript)
+
+	if strings.TrimSpace(opts.initScript) != "" {
+		lines = append(lines, opts.initScript)
+	}
+	lines = append(lines, agentBootLines(opts.agentType, opts.allowAllActions, shortID)...)
 
 	// 写临时脚本，执行后删除
-	script := "\n" + strings.Join(lines, "\n") + "\n"
+	script := "#!/usr/bin/env bash\n\n" + strings.Join(lines, "\n") + "\n"
 	tmpFile := fmt.Sprintf("/tmp/init_pane_%s.sh", strings.ReplaceAll(pid, ":", "_"))
 	if err := os.WriteFile(tmpFile, []byte(script), 0700); err != nil {
 		log.Printf("[init] failed to write script: %v", err)
 		return
 	}
-	log.Printf("[init] pane %s script:\n%s", pid, script)
+	log.Printf("[init] v1 pane %s script:\n%s", pid, script)
 
 	// 轮询等待 shell 就绪（发 echo 检测响应）
+	ready := false
 	for i := 0; i < 20; i++ {
-		time.Sleep(300 * time.Millisecond)
-		out, err := exec.Command("tmux", "capture-pane", "-t", pid, "-p").Output()
-		if err == nil && strings.Contains(string(out), shortID) {
+		time.Sleep(200 * time.Millisecond)
+		if _, err := exec.Command("tmux", "capture-pane", "-t", pid, "-p", "-S", "-1").Output(); err == nil {
 			log.Printf("[init] shell ready after %d attempts", i+1)
+			ready = true
 			break
 		}
 	}
-	log.Printf("[init] shell ready!!!\n")
+	if !ready {
+		log.Printf("[init] shell not confirmed, continue anyway")
+	}
 
-	runTmux("send-keys", "-t", pid, fmt.Sprintf("source %s", tmpFile), "Enter")
-}
-
-// applyProxyFromConfig parses config JSON and exports proxy env if enabled.
-func applyProxyFromConfig(paneID, configJSON string) {
-	if configJSON == "" || configJSON == "{}" {
-		return
+	runTmux("send-keys", "-t", pid, fmt.Sprintf("source %s", tmuxShellQuote(tmpFile)), "Enter")
+	if normalizeAgentType(opts.agentType) == "claude" && opts.allowAllActions {
+		autoConfirmClaudeDanger(pid)
 	}
-	var cfg struct {
-		Proxy struct {
-			Enable bool   `json:"enable"`
-			URL    string `json:"url"`
-		} `json:"proxy"`
-	}
-	if json.Unmarshal([]byte(configJSON), &cfg) != nil || !cfg.Proxy.Enable {
-		return
-	}
-	// Use pane_id as proxy auth user for mitmproxy identification
-	short := strings.Split(paneID, ":")[0]
-	proxyURL := fmt.Sprintf("http://%s:x@127.0.0.1:18888", short)
-	if cfg.Proxy.URL != "" && cfg.Proxy.URL != "https://proxy.example.com" {
-		proxyURL = cfg.Proxy.URL
-	}
-	cmd := fmt.Sprintf("export HTTPS_PROXY='%s' && export https_proxy='%s' && export HTTP_PROXY='%s' && export http_proxy='%s' && export ALL_PROXY='%s' && export no_proxy=localhost,127.0.0.1", proxyURL, proxyURL, proxyURL, proxyURL, proxyURL)
-	runTmux("send-keys", "-t", paneID, cmd, "Enter")
 }
 
 func handleRestartAll(w http.ResponseWriter, r *http.Request) {
@@ -580,7 +864,10 @@ func handleWindows(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, 400, "session required")
 			return
 		}
-		args := []string{"new-window", "-t", body.Session}
+		home, _ := os.UserHomeDir()
+		workersDir := filepath.Join(home, "workers", body.Session)
+		_ = os.MkdirAll(workersDir, 0755)
+		args := []string{"new-window", "-c", workersDir, "-t", body.Session}
 		if body.Name != "" {
 			args = append(args, "-n", body.Name)
 		}

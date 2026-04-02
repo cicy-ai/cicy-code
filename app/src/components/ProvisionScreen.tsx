@@ -10,10 +10,10 @@ interface Step {
 }
 
 const LABELS = [
-  'Creating Cloudflare Tunnel',
-  'Creating server',
-  'Uploading deploy script',
-  'Deploying services',
+  '正在创建 Cloudflare Tunnel',
+  '正在创建服务器',
+  '正在上传部署脚本',
+  '正在部署服务',
   'Verifying',
 ];
 
@@ -70,12 +70,12 @@ export default function ProvisionScreen({ onReady }: { onReady: (backend: string
 
       es.onerror = () => {
         es.close();
-        setLogs(prev => [...prev, '⚠ Connection lost, retrying...']);
+        setLogs(prev => [...prev, '⚠ 连接已断开, retrying...']);
         if (retryRef.current < 3) {
           retryRef.current++;
           setTimeout(connect, 2000);
         } else {
-          setError('Connection lost');
+          setError('连接已断开');
         }
       };
 

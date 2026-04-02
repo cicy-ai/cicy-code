@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	_ "embed"
 	"fmt"
 	"log"
@@ -77,6 +76,13 @@ func npmGlobalInstallCmd(pkg string) string {
 	return sudoPrefix() + "npm install -g " + pkg
 }
 
+func openClawInstallCmd() string {
+	if isCloudRunRuntime() {
+		return ""
+	}
+	return npmGlobalInstallCmd("openclaw@latest")
+}
+
 func packageInstallCmd(pkg string) string {
 	if runtime.GOOS == "darwin" {
 		return "brew install " + pkg
@@ -110,7 +116,7 @@ func copilotInstallCmd() string {
 func baseTools() []Tool {
 	return []Tool{
 		{"curl", "curl", packageInstallCmd("curl"), true, false},
-		{"unzip", "unzip", packageInstallCmd("unzip"), true, false},
+		// {"unzip", "unzip", packageInstallCmd("unzip"), true, false},
 		{"tmux", "tmux", packageInstallCmd("tmux"), true, false},
 		{"git", "git", packageInstallCmd("git"), true, false},
 		{"node", "node", nodeInstallCmd(), true, false},
@@ -120,9 +126,8 @@ func baseTools() []Tool {
 func checkEnvironment() []Tool {
 	extendPATH()
 	tools := append(baseTools(), []Tool{
-		{"kiro-cli", "kiro-cli", "curl -fsSL https://cli.kiro.dev/install -o /tmp/kiro-install.sh && yes | bash /tmp/kiro-install.sh && echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> " + shellRC() + " && export PATH=\"$HOME/.local/bin:$PATH\"", true, false},
+		{"openclaw", "openclaw", openClawInstallCmd(), true, false},
 		{"claude", "claude", npmGlobalInstallCmd("@anthropic-ai/claude-code"), true, false},
-		{"gemini", "gemini", npmGlobalInstallCmd("@google/gemini-cli"), true, false},
 		{"codex", "codex", npmGlobalInstallCmd("@openai/codex"), true, false},
 		{"opencode", "opencode", "curl -fsSL https://opencode.ai/install | bash && echo 'export PATH=\"$HOME/.opencode/bin:$PATH\"' >> " + shellRC() + " && export PATH=\"$HOME/.opencode/bin:$PATH\"", true, false},
 	}...)
@@ -159,6 +164,11 @@ func installMissing(tools []Tool) {
 
 	// 必须全部安装成功才能继续
 	for _, tool := range missing {
+		if tool.InstallCmd == "" {
+			fmt.Printf("  %s ❌ 缺失且当前环境禁止自动安装\n", tool.Name)
+			fmt.Printf("❌ 环境初始化失败，请检查镜像预装内容\n")
+			os.Exit(1)
+		}
 		fmt.Printf("  安装 %s...", tool.Name)
 
 		cmd := exec.Command("sh", "-c", tool.InstallCmd)
@@ -175,105 +185,111 @@ func installMissing(tools []Tool) {
 }
 
 func selectAgents() []string {
-	// Optional agents (user picks from these)
-	agents := []struct {
-		Name string
-		Desc string
-	}{
-		{"claude", "Claude Code - Anthropic 代码助手"},
-		{"copilot", "GitHub Copilot CLI - GitHub AI 助手"},
-		{"gemini", "Gemini CLI - Google AI 助手"},
-		{"codex", "OpenAI Codex - 代码生成助手"},
-		{"cursor", "Cursor Agent - Cursor AI 助手"},
-	}
-
-	fmt.Println("\n🤖 选择要安装的 AI 工具:")
-	fmt.Println("  ✅ Kiro CLI Assistant - 多功能 AI 助手 (必装)")
-	fmt.Println("  ✅ OpenCode - 开源代码助手 (必装)")
-	for i, agent := range agents {
-		fmt.Printf("  %d. %s\n", i+1, agent.Desc)
-	}
-	fmt.Println("  a. 全选 (安装所有工具)")
-	fmt.Print("\n请输入要安装的工具编号 (用空格分隔，如: 1 2 3，或输入 a 全选): ")
-
-	reader := bufio.NewReader(os.Stdin)
-	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(input)
-
-	// kiro-cli and opencode are mandatory
-	selected := []string{"kiro-cli", "opencode"}
-
-	if input == "" || input == "a" || input == "A" {
-		return []string{"kiro-cli", "claude", "copilot", "gemini", "codex", "opencode", "cursor"}
-	}
-
-	parts := strings.Fields(input)
-	for _, part := range parts {
-		if len(part) == 1 && part[0] >= '1' && int(part[0]-'0') <= len(agents) {
-			idx := int(part[0] - '1')
-			selected = append(selected, agents[idx].Name)
-		}
-	}
-
+	selected := []string{"openclaw", "codex", "claude"}
+	fmt.Println("\n🤖 默认预装 AI 工具:")
+	fmt.Println("  ✅ OpenClaw")
+	fmt.Println("  ✅ OpenAI Codex")
+	fmt.Println("  ✅ Claude Code")
 	fmt.Printf("✅ 已选择: %v\n", selected)
 	return selected
 }
 
-func installSelectedAgents(selected []string) {
-	agentConfigs := map[string]Tool{
-		"kiro-cli": {"kiro-cli", "kiro-cli", fmt.Sprintf("curl -fsSL https://cli.kiro.dev/install -o /tmp/kiro-install.sh && yes | bash /tmp/kiro-install.sh && echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> %s && export PATH=\"$HOME/.local/bin:$PATH\"", shellRC()), true, false},
+func selectedAgentConfigs() map[string]Tool {
+	return map[string]Tool{
+		"openclaw": {"openclaw", "openclaw", openClawInstallCmd(), true, false},
 		"claude":   {"claude", "claude", npmGlobalInstallCmd("@anthropic-ai/claude-code"), true, false},
-		"copilot":  {"copilot", "copilot", copilotInstallCmd(), true, false},
-		"gemini":   {"gemini", "gemini", npmGlobalInstallCmd("@google/gemini-cli"), true, false},
 		"codex":    {"codex", "codex", npmGlobalInstallCmd("@openai/codex"), true, false},
 		"opencode": {"opencode", "opencode", fmt.Sprintf("curl -fsSL https://opencode.ai/install | bash && echo 'export PATH=\"$HOME/.opencode/bin:$PATH\"' >> %s && export PATH=\"$HOME/.opencode/bin:$PATH\"", shellRC()), true, false},
-		"cursor":   {"cursor-agent", "cursor-agent", fmt.Sprintf("curl https://cursor.com/install -fsS | bash && echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> %s && export PATH=\"$HOME/.local/bin:$PATH\"", shellRC()), true, false},
-	}
-
-	fmt.Printf("\n📦 安装选中的 AI 工具 (%d 个)...\n", len(selected))
-
-	extendPATH()
-
-	for _, name := range selected {
-		if config, exists := agentConfigs[name]; exists {
-			// 已安装则跳过
-			if _, err := exec.LookPath(config.Command); err == nil {
-				fmt.Printf("  ✅ %s (已安装)\n", config.Name)
-				continue
-			}
-			fmt.Printf("  安装 %s...", config.Name)
-
-			cmd := exec.Command("sh", "-c", config.InstallCmd)
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
-				fmt.Printf(" ❌ 失败: %v\n", err)
-				fmt.Printf("❌ %s 安装失败，请检查网络连接\n", config.Name)
-				os.Exit(1)
-			} else {
-				fmt.Printf(" ✅ 完成\n")
-			}
-		}
 	}
 }
 
-// builtinAgents defines the built-in agents with fixed ports 10001-10007.
+func ensureAgentToolInstalled(agentType string) {
+	agentType = strings.TrimSpace(strings.ToLower(agentType))
+	if agentType == "" {
+		return
+	}
+	switch normalizeAgentType(agentType) {
+	case "openclaw", "claude", "codex", "opencode":
+		return
+	}
+	config, exists := selectedAgentConfigs()[agentType]
+	if !exists {
+		return
+	}
+	extendPATH()
+	if _, err := exec.LookPath(config.Command); err == nil {
+		return
+	}
+	if config.InstallCmd == "" {
+		log.Printf("[startup] missing agent tool in current runtime and auto-install disabled: %s", config.Name)
+		return
+	}
+	log.Printf("[startup] installing missing agent tool: %s", config.Name)
+	cmd := exec.Command("sh", "-c", config.InstallCmd)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		log.Printf("[startup] failed to install %s: %v", config.Name, err)
+		return
+	}
+	extendPATH()
+	log.Printf("[startup] installed missing agent tool: %s", config.Name)
+}
+
+func installSelectedAgents(selected []string) {
+	if len(selected) == 0 {
+		return
+	}
+	fmt.Printf("\n📦 AI 工具将在 tmux pane 启动时按需安装: %v\n", selected)
+}
+
+// builtinAgents defines the built-in agents with fixed ports 10001-10004.
 var builtinAgents = []struct {
 	Port      int
 	AgentType string
 	Title     string
 }{
-	{10001, "kiro-cli", "Kiro CLI Assistant"},
-	{10002, "claude", "Claude Code Assistant"},
-	{10003, "copilot", "GitHub Copilot CLI"},
-	{10004, "gemini", "Gemini AI Assistant"},
-	{10005, "codex", "OpenAI Codex Assistant"},
-	{10006, "opencode", "OpenCode Assistant"},
-	{10007, "cursor", "Cursor Agent"},
+	{10001, "openclaw", "OpenClaw"},
+	{10002, "codex", "Codex"},
+	{10003, "claude", "Claude"},
+	{10004, "opencode", "OpenCode"},
+}
+
+func ensureWorkerIndexAtLeast(n int) {
+	if n <= 0 {
+		return
+	}
+	var current int
+	_ = store.QueryRow("SELECT value FROM global_vars WHERE key_name='worker_index'").Scan(&current)
+	if current >= n {
+		return
+	}
+	if _, err := store.Exec(
+		store.Upsert("global_vars", "key_name", []string{"key_name", "value"}, []string{"value"}),
+		"worker_index", n,
+	); err != nil {
+		log.Printf("[startup] failed to update worker_index to %d: %v", n, err)
+	}
+}
+
+func syncWorkerIndexToBuiltinAgents() {
+	maxPort := 0
+	for _, ba := range builtinAgents {
+		var count int
+		if err := store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE agent_type=?", ba.AgentType).Scan(&count); err != nil {
+			log.Printf("[startup] failed to inspect builtin agent %s: %v", ba.AgentType, err)
+			continue
+		}
+		if count > 0 && ba.Port > maxPort {
+			maxPort = ba.Port
+		}
+	}
+	ensureWorkerIndexAtLeast(maxPort)
 }
 
 func createSelectedWorkers(selected []string) {
 	fmt.Println("\n🚀 创建选中的 Workers...")
+	maxPort := 0
 	for _, ba := range builtinAgents {
 		found := false
 		for _, s := range selected {
@@ -285,6 +301,9 @@ func createSelectedWorkers(selected []string) {
 		if !found {
 			continue
 		}
+		if ba.Port > maxPort {
+			maxPort = ba.Port
+		}
 		// Skip if already in DB
 		var count int
 		store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE agent_type=?", ba.AgentType).Scan(&count)
@@ -294,6 +313,8 @@ func createSelectedWorkers(selected []string) {
 		}
 		createBuiltinWorker(ba.Port, ba.AgentType, ba.Title)
 	}
+	ensureWorkerIndexAtLeast(maxPort)
+	syncWorkerIndexToBuiltinAgents()
 }
 
 func createBuiltinWorker(port int, agentType, title string) {
@@ -318,6 +339,14 @@ func createBuiltinWorker(port int, agentType, title string) {
 		return
 	}
 	waitPort(port, 10*time.Second)
+	initPaneEnv(paneEnvOpts{
+		paneID:          paneID,
+		configJSON:      "{}",
+		workspace:       workspace,
+		initScript:      "",
+		agentType:       agentType,
+		allowAllActions: false,
+	})
 	fmt.Printf("  ✅ %s (w-%d, port %d)\n", title, port, port)
 }
 
@@ -356,7 +385,7 @@ func runSetup() {
 }
 
 // runSetupWithAgents runs setup non-interactively with specified agents.
-// agentList is comma-separated, e.g. "kiro-cli,claude" or "all".
+// agentList is comma-separated, e.g. "codex,claude" or "all".
 func runSetupWithAgents(agentList string) {
 	fmt.Println("🎯 Cicy Code 环境初始化 (non-interactive)")
 	fmt.Println("=" + strings.Repeat("=", 30))
@@ -378,9 +407,8 @@ func runSetupWithAgents(agentList string) {
 	// 2. Parse agent list
 	var selected []string
 	if agentList == "all" || agentList == "ALL" {
-		selected = []string{"kiro-cli", "claude", "copilot", "gemini", "codex", "opencode", "cursor"}
+		selected = []string{"openclaw", "codex", "claude", "opencode"}
 	} else {
-		// Always include mandatory agents
 		has := map[string]bool{}
 		for _, a := range strings.Split(agentList, ",") {
 			a = strings.TrimSpace(a)
@@ -388,8 +416,9 @@ func runSetupWithAgents(agentList string) {
 				has[a] = true
 			}
 		}
-		has["kiro-cli"] = true
-		has["opencode"] = true
+		has["openclaw"] = true
+		has["codex"] = true
+		has["claude"] = true
 		for a := range has {
 			selected = append(selected, a)
 		}
@@ -422,24 +451,111 @@ func checkEnv() {
 	ensureTmuxConf()
 	ensureCicyTmuxConf()
 
+	setupAIConfigs()
+
 	var count int
 	if err := store.QueryRow("SELECT COUNT(*) FROM agent_config").Scan(&count); err != nil {
 		log.Fatalf("[startup] failed to query agent_config: %v", err)
 	}
-	if count == 0 {
-		if isCloudRunRuntime() {
-			// Cloud Run must never block on interactive setup.
-			// Create a minimal builtin worker so tmux/ttyd works immediately.
-			createBuiltinWorker(10001, "kiro-cli", "Kiro CLI Assistant")
-		} else if agentsFlag != "" {
-			runSetupWithAgents(agentsFlag)
-		} else {
+		if count == 0 {
+			if isCloudRunRuntime() {
+				// Cloud Run must never block on interactive setup.
+				// Keep the default footprint minimal: only bootstrap w-10001 OpenClaw.
+				createSelectedWorkers([]string{"openclaw"})
+			} else if agentsFlag != "" {
+				runSetupWithAgents(agentsFlag)
+			} else {
 			runSetup()
 		}
 	}
 
 	ensureBuiltinAgents()
 	ensureCodeServer()
+}
+
+func setupAIConfigs() {
+	apiKey := os.Getenv("CICY_API_KEY")
+	apiUrl := os.Getenv("CICY_API_URL")
+	anthropicUrl := os.Getenv("CICY_ANTHROPIC_URL")
+	defaultModel := os.Getenv("CICY_DEFAULT_MODEL")
+	claudeModel := os.Getenv("CICY_CLAUDE_MODEL")
+	codexModel := os.Getenv("CICY_CODEX_MODEL")
+
+	if apiKey == "" {
+		return
+	}
+
+	if apiUrl == "" {
+		apiUrl = "http://2000.run:6543/v1"
+	}
+	if anthropicUrl == "" {
+		anthropicUrl = "http://2000.run:6543"
+	}
+	if defaultModel == "" {
+		defaultModel = "shibacc/claude-sonnet-4-6"
+	}
+	if claudeModel == "" {
+		claudeModel = "opus[1m]"
+	}
+	if codexModel == "" {
+		codexModel = "gpt-5.4"
+	}
+
+	home, _ := os.UserHomeDir()
+	log.Printf("[setup] configuring AI tools with API URL: %s", apiUrl)
+
+	scriptPath := findSetupAgentScript()
+	if scriptPath == "" {
+		log.Printf("[setup] setup-agent.sh not found")
+	} else {
+		cmd := exec.Command(scriptPath, apiKey, apiUrl, anthropicUrl, defaultModel, claudeModel, codexModel)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			log.Printf("[setup] setup-agent.sh failed: %v", err)
+		}
+	}
+
+	// Set env vars for OpenClaw worker (available via agentBootLines)
+	os.Setenv("OPENCLAW_CONFIG_PATH", filepath.Join(home, ".openclaw", "openclaw.json"))
+	os.Setenv("OPENAI_API_KEY", apiKey)
+	os.Setenv("OPENAI_BASE_URL", apiUrl)
+	os.Setenv("OPENAI_MODEL", defaultModel)
+	if openClawToken := strings.TrimSpace(readOpenClawTokenFromGlobalJSON()); openClawToken != "" {
+		os.Setenv("OPENCLAW_GATEWAY_TOKEN", openClawToken)
+	} else if openClawToken := strings.TrimSpace(readOpenClawTokenFromConfig()); openClawToken != "" {
+		os.Setenv("OPENCLAW_GATEWAY_TOKEN", openClawToken)
+	}
+}
+
+func findSetupAgentScript() string {
+	candidates := []string{
+		"/usr/local/bin/setup-agent.sh",
+	}
+	if exePath, err := os.Executable(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(filepath.Dir(exePath), "setup-agent.sh"),
+			filepath.Join(filepath.Dir(exePath), "..", "setup-agent.sh"),
+		)
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(cwd, "setup-agent.sh"),
+			filepath.Join(cwd, "api", "setup-agent.sh"),
+		)
+	}
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		candidate = filepath.Clean(candidate)
+		if seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func ensureTmuxConf() {
@@ -492,15 +608,21 @@ func ensureCicyTmuxConf() {
 	}
 }
 func ensureCodeServer() {
+	go ensureCodeServerAsync()
+}
+
+func ensureCodeServerAsync() {
 	extendPATH()
 	if _, err := exec.LookPath("code-server"); err != nil {
-		fmt.Println("📦 安装 code-server...")
+		fmt.Println("📦 后台安装 code-server...")
 		cmd := exec.Command("sh", "-c", codeServerInstallCmd())
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if runErr := cmd.Run(); runErr != nil {
-			log.Fatalf("[startup] failed to install code-server: %v", runErr)
+			log.Printf("[startup] failed to install code-server: %v", runErr)
+			return
 		}
+		extendPATH()
 	}
 
 	csPort := os.Getenv("CS_PORT")
@@ -514,17 +636,20 @@ func ensureCodeServer() {
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		log.Fatalf("[startup] failed to resolve home dir for code-server: %v", err)
+		log.Printf("[startup] failed to resolve home dir for code-server: %v", err)
+		return
 	}
 	_ = os.Remove(filepath.Join(home, ".local", "share", "code-server", "coder.json"))
 	if mkErr := os.MkdirAll(filepath.Join(home, ".cicy"), 0755); mkErr != nil {
-		log.Fatalf("[startup] failed to create ~/.cicy: %v", mkErr)
+		log.Printf("[startup] failed to create ~/.cicy: %v", mkErr)
+		return
 	}
 
 	logPath := filepath.Join(home, ".cicy", "code-server.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		log.Fatalf("[startup] failed to open code-server log: %v", err)
+		log.Printf("[startup] failed to open code-server log: %v", err)
+		return
 	}
 
 	cmd := exec.Command("code-server", "--bind-addr", "127.0.0.1:"+csPort, "--auth", "none", home)
@@ -542,7 +667,8 @@ func ensureCodeServer() {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if startErr := cmd.Start(); startErr != nil {
 		_ = logFile.Close()
-		log.Fatalf("[startup] failed to start code-server: %v", startErr)
+		log.Printf("[startup] failed to start code-server: %v", startErr)
+		return
 	}
 	go func() {
 		defer logFile.Close()
@@ -552,7 +678,8 @@ func ensureCodeServer() {
 	}()
 
 	if !waitPort(mustAtoi(csPort), 20*time.Second) {
-		log.Fatalf("[startup] code-server did not become ready on :%s", csPort)
+		log.Printf("[startup] code-server did not become ready on :%s", csPort)
+		return
 	}
 	log.Printf("[startup] code-server ready on :%s", csPort)
 }
@@ -567,7 +694,7 @@ func mustAtoi(s string) int {
 
 // ensureBuiltinAgents restores tmux sessions and ttyd for agents already in DB.
 func ensureBuiltinAgents() {
-	rows, err := store.Query("SELECT pane_id, ttyd_port, workspace FROM agent_config WHERE active=1")
+	rows, err := store.Query("SELECT pane_id, ttyd_port, workspace, COALESCE(init_script,''), COALESCE(config,'{}'), COALESCE(agent_type,''), COALESCE(allow_all_actions,0) FROM agent_config WHERE active=1")
 	if err != nil {
 		return
 	}
@@ -575,29 +702,43 @@ func ensureBuiltinAgents() {
 
 	token := getFirstToken()
 	for rows.Next() {
-		var paneID, workspace string
+		var paneID, workspace, initScript, configJSON, agentType string
+		var allowAllActions bool
 		var port int
-		rows.Scan(&paneID, &port, &workspace)
+		rows.Scan(&paneID, &port, &workspace, &initScript, &configJSON, &agentType, &allowAllActions)
 		if paneID == "" || port == 0 {
 			continue
 		}
 
 		// Ensure tmux session
 		sess := strings.Split(paneID, ":")[0]
+		sessionCreated := false
 		if exec.Command("tmux", "has-session", "-t", sess).Run() != nil {
 			if workspace == "" {
 				home, _ := os.UserHomeDir()
 				workspace = filepath.Join(home, "workers", sess)
 			}
+			ensureAgentToolInstalled(agentType)
 			os.MkdirAll(workspace, 0755)
 			exec.Command("tmux", "new-session", "-d", "-s", sess, "-n", "main", "-c", workspace).Run()
 			log.Printf("[startup] created session %s", sess)
+			sessionCreated = true
 		}
 
 		// Ensure ttyd
 		if !isPortListening(port) {
 			startInstance(paneID, port, token)
 			//log.Printf("[startup] started %s on :%d", paneID, port)
+		}
+		if sessionCreated {
+			initPaneEnv(paneEnvOpts{
+				paneID:          paneID,
+				configJSON:      configJSON,
+				workspace:       workspace,
+				initScript:      initScript,
+				agentType:       agentType,
+				allowAllActions: allowAllActions,
+			})
 		}
 	}
 }

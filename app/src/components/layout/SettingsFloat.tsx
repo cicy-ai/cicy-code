@@ -8,7 +8,7 @@ import { useApp } from '../../contexts/AppContext';
 
 const THEME_KEY = 'app_theme';
 const themes = [
-  { value: '', label: 'Default Dark' },
+  { value: '', label: '默认深色' },
   { value: 'livestream', label: 'Livestream' },
 ];
 
@@ -20,8 +20,8 @@ function applyTheme(t: string) {
 const sections = [
   { id: 'general', label: 'General', icon: Settings },
   { id: 'agent', label: 'Agent', icon: Zap },
-  { id: 'config', label: 'Config', icon: Settings },
-  { id: 'global', label: 'Global', icon: Globe },
+  // { id: 'config', label: 'Config', icon: Settings },
+  // { id: 'global', label: 'Global', icon: Globe },
 ] as const;
 type SectionId = typeof sections[number]['id'];
 
@@ -100,11 +100,11 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
             <div>
               <h3 className="text-[15px] font-semibold text-white">{sections.find(s => s.id === section)?.label}</h3>
               <p className="text-[11px] text-zinc-600 mt-0.5">
-                {section === 'general' && 'Basic pane configuration'}
-                {section === 'agent' && 'AI agent behavior and model'}
-                {section === 'config' && 'Proxy and connectivity'}
-                {section === 'global' && 'Shared settings across all agents'}
-                {section === 'telegram' && 'Notification integration'}
+                {section === 'general' && '基础窗格配置'}
+                {section === 'agent' && 'AI 智能体行为与模型'}
+                {section === 'config' && '项目与高级配置'}
+                {section === 'global' && '所有智能体共享设置'}
+                {section === 'telegram' && '通知集成'}
               </p>
             </div>
             <button onClick={onClose} className="p-1.5 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors cursor-pointer">
@@ -116,13 +116,13 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
             {section === 'general' && (
               <div className="space-y-5">
                 <Field label="Title">
-                  <Input value={data.title} onChange={v => set({ title: v })} placeholder="Pane title" />
+                  <Input value={data.title} onChange={v => set({ title: v })} placeholder="窗格标题" />
                 </Field>
                 <Field label="Workspace" mono>
                   <Input value={data.workspace || ''} onChange={v => set({ workspace: v })} placeholder="/home/user/project" mono />
                 </Field>
-                <Toggle label="Auto-start" desc="Restore on server restart" checked={data.active !== false} onChange={v => set({ active: v })} />
-                <Field label="Init Script" desc="sleep:N waits, key:X sends key">
+                <Toggle label="Auto-start" desc="服务重启后恢复" checked={data.active !== false} onChange={v => set({ active: v })} />
+                <Field label="初始化脚本" desc="sleep:N 表示等待，key:X 表示发送按键">
                   <Textarea value={data.init_script || ''} onChange={v => set({ init_script: v })} rows={3} mono placeholder={"pwd\n# sleep:2\n# key:t"} />
                 </Field>
               </div>
@@ -130,14 +130,13 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
 
             {section === 'agent' && (
               <div className="space-y-5">
-                <Field label="Agent Type">
+                <Field label="智能体类型">
                   <div className="flex flex-wrap gap-2">
                     {[
                       { value: '', label: 'None', icon: null },
-                      { value: 'kiro-cli', label: 'Kiro CLI', icon: '/assets/logos/kiro.png' },
-                      { value: 'openai', label: 'OpenAI', icon: '/assets/logos/openai.svg' },
+                      { value: 'openclaw', label: 'OpenClaw', icon: null },
+                      { value: 'codex', label: 'Codex', icon: '/assets/logos/openai.svg' },
                       { value: 'claude', label: 'Claude', icon: '/assets/logos/claude-symbol.svg' },
-                      { value: 'gemini', label: 'Gemini', icon: '/assets/logos/gemini.svg' },
                       { value: 'opencode', label: 'OpenCode', icon: '/assets/logos/opencode.svg' },
                     ].map(option => (
                       <button
@@ -161,33 +160,39 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
                     ))}
                   </div>
                 </Field>
-                <Field label="Role">
+                {/* <Field label="Role">
                   <Select value={data.role || ''} onChange={v => set({ role: v })}
                     options={[{value:'',label:'None'},{value:'master',label:'Master'},{value:'worker',label:'Worker'}]} />
-                </Field>
-                <Field label="Agent Duty">
+                </Field> */}
+                <Toggle
+                  label="启动时允许所有操作"
+                  desc="Codex/Claude 追加危险参数，OpenCode 使用 allow 权限配置"
+                  checked={!!data.allow_all_actions}
+                  onChange={v => set({ allow_all_actions: v })}
+                />
+                {/* <Field label="智能体职责">
                   <Textarea value={data.agent_duty || ''} onChange={v => set({ agent_duty: v })} rows={5} placeholder="Describe agent's role and responsibilities..." />
-                </Field>
+                </Field> */}
               </div>
             )}
 
             {section === 'config' && (
               <div className="space-y-5">
-                <Field label="Config (JSON)">
-                  <Textarea value={data.config || '{}'} onChange={v => set({ config: v })} rows={8} mono placeholder='{"proxy": {"enable": true, "url": "http://..."}}' />
+                <Field label="配置（JSON）">
+                  <Textarea value={data.config || '{}'} onChange={v => set({ config: v })} rows={8} mono placeholder='{"projects": ["/home/user/project"]}' />
                 </Field>
                 <pre className="text-[11px] text-zinc-600 bg-white/[0.02] border border-white/[0.06] rounded-lg p-3 font-mono overflow-x-auto">{`{
-  "proxy": {
-    "enable": true,
-    "url": "http://w-20001:x@127.0.0.1:8003"
-  }
+  "projects": [
+    "/home/user/project-a",
+    "/home/user/project-b"
+  ]
 }`}</pre>
               </div>
             )}
 
             {section === 'global' && (
               <div className="space-y-5">
-                <Field label="Global Settings (JSON)" desc="Shared across all agents">
+                <Field label="全局设置（JSON）" desc="所有智能体共享">
                   <Textarea value={globalJson} onChange={setGlobalJson} rows={16} mono placeholder="{}" />
                 </Field>
               </div>
@@ -195,12 +200,12 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
 
             {section === 'telegram' && (
               <div className="space-y-5">
-                <Toggle label="Enable Telegram" desc="Send notifications via Telegram bot" checked={!!data.tg_enable} onChange={v => set({ tg_enable: v })} />
+                <Toggle label="启用 Telegram" desc="通过 Telegram 机器人发送通知" checked={!!data.tg_enable} onChange={v => set({ tg_enable: v })} />
                 {data.tg_enable && (<>
-                  <Field label="Bot Token">
+                  <Field label="机器人令牌">
                     <Input value={data.tg_token || ''} onChange={v => set({ tg_token: v })} mono placeholder="1234567890:ABCdef..." />
                   </Field>
-                  <Field label="Chat ID">
+                  <Field label="聊天 ID">
                     <Input value={data.tg_chat_id || ''} onChange={v => set({ tg_chat_id: v })} mono placeholder="-1001234567890" />
                   </Field>
                 </>)}

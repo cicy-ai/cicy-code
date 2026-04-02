@@ -16,11 +16,11 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
   });
   const [histIdx, setHistIdx] = useState(-1);
   const [tmpDraft, setTmpDraft] = useState('');
-  const [sending, setSending] = useState(false);
+  const [sending, set发送ing] = useState(false);
   const [sent, setSent] = useState(false);
   const [correcting, setCorrecting] = useState(false);
   const [correction, setCorrection] = useState<[string, string] | null>(null);
-  const [enterToSend, setEnterToSend] = useState(() => localStorage.getItem('enter_to_send') !== 'false');
+  const [enterTo发送, setEnterTo发送] = useState(() => localStorage.getItem('enter_to_send') !== 'false');
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const saveHist = (h: string[]) => { setHistory(h); localStorage.setItem(`v2_hist_${paneId}`, JSON.stringify(h)); };
@@ -31,13 +31,13 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
     const c = cmd.trim();
     saveHist([c, ...history.filter(x => x !== c)].slice(0, 50));
     setHistIdx(-1); setTmpDraft(''); saveDraft('');
-    setSending(true); setSent(false);
+    set发送ing(true); setSent(false);
     try {
       window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneId, q: c } }));
       await apiService.sendCommand(paneId, c);
       setSent(true); setTimeout(() => setSent(false), 2000);
     } catch (e) { console.error(e); }
-    finally { setSending(false); setTimeout(() => ref.current?.focus(), 50); }
+    finally { set发送ing(false); setTimeout(() => ref.current?.focus(), 50); }
   }, [paneId, history]);
 
   const onKey = async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -45,7 +45,7 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (!text.trim() && correction) {
-        // Send correction: Shift=Chinese, else English
+        // 发送 correction: Shift=Chinese, else English
         const cmd = e.shiftKey ? correction[1] : correction[0];
         setCorrection(null);
         await send(cmd);
@@ -86,8 +86,8 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
 
     // Enter → send
     if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-      const shouldSend = enterToSend ? !e.shiftKey : e.shiftKey;
-      if (shouldSend) {
+      const should发送 = enterTo发送 ? !e.shiftKey : e.shiftKey;
+      if (should发送) {
         e.preventDefault();
         if (!text.trim() && correction) {
           saveDraft(correction[0]);
@@ -136,7 +136,7 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
           value={text}
           onChange={e => { saveDraft(e.target.value); if (histIdx === -1) setTmpDraft(e.target.value); }}
           onKeyDown={onKey}
-          placeholder="Type command..."
+          placeholder="输入命令..."
           disabled={sending}
           className="w-full bg-vsc-bg text-vsc-text rounded-md border border-vsc-border p-2.5 pr-10 focus:border-vsc-accent/50 outline-none resize-none text-sm placeholder:text-vsc-text-muted/40"
           rows={3}
@@ -155,10 +155,10 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
         <span className="text-[11px] text-vsc-text-secondary">{agentStatus === 'thinking' ? 'Thinking...' : 'Idle'}</span>
         {correcting && <Loader2 size={12} className="text-purple-400 animate-spin" />}
         <button
-          onClick={() => { const n = !enterToSend; setEnterToSend(n); localStorage.setItem('enter_to_send', String(n)); }}
+          onClick={() => { const n = !enterTo发送; setEnterTo发送(n); localStorage.setItem('enter_to_send', String(n)); }}
           className="text-[10px] text-vsc-text-muted px-1.5 py-0.5 border border-vsc-border rounded hover:text-white ml-auto"
         >
-          {enterToSend ? '⏎Send' : '⇧⏎Send'}
+          {enterTo发送 ? '⏎发送' : '⇧⏎发送'}
         </button>
         {contextUsage != null && <span className="text-[11px] text-vsc-text-muted">{contextUsage}%</span>}
       </div>

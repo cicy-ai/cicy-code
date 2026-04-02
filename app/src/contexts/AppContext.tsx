@@ -34,9 +34,9 @@ interface AppContextType {
   // API Client
   api: typeof apiService | null;
 
-  // Agents
+  // 智能体
   agents: Agent[];
-  loadAgents: () => Promise<void>;
+  load智能体: () => Promise<void>;
   removeAgent: (paneId: string, agentId?: number) => Promise<void>;
   
   // All Panes
@@ -63,7 +63,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   });
   const [paneDetail, setPaneDetail] = useState<any | null>(null);
   const [api, setApi] = useState<typeof apiService | null>(null);
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agents, set智能体] = useState<Agent[]>([]);
   const [allPanes, setAllPanes] = useState<Agent[]>([]);
   const [globalVar, setGlobalVar] = useState<any>({});
   const [loading, setLoading] = useState(true);
@@ -115,7 +115,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           mergePanes(statusRes.data, panesCache!);
         }
       } catch (err) {
-        console.error('Failed to fetch panes:', err);
+        console.error('获取窗格失败：', err);
         setLoading(false);
         window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency: null } }));
       }
@@ -167,7 +167,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setToken(null);
     setCurrentPaneId(null);
     setApi(null);
-    setAgents([]);
+    set智能体([]);
   };
 
   const selectPane = async (paneId: string) => {
@@ -180,7 +180,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const { data: detail } = await api.getPane(paneId);
         setPaneDetail(detail);
       } catch (err) {
-        console.error('Failed to fetch pane detail:', err);
+        console.error('获取窗格详情失败：', err);
         setPaneDetail(null);
       }
     }
@@ -197,12 +197,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     ));
   };
 
-  const loadAgents = async () => {
+  const load智能体 = async () => {
     if (!api) return;
     try {
       setLoading(true);
       const { data } = await api.getAllStatus();
-      setAgents(Object.values(data as Record<string, Agent>));
+      set智能体(Object.values(data as Record<string, Agent>));
       setError(null);
     } catch (err: any) {
       setError(err.message);
@@ -220,7 +220,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
       await api.deleteAgent(paneId);
       // Update local state
-      setAgents(agents.filter(a => a.pane_id !== paneId));
+      set智能体(agents.filter(a => a.pane_id !== paneId));
       setError(null);
     } catch (err: any) {
       setError(err.message);
@@ -234,7 +234,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const { data } = await apiService.getGlobalSettings();
       setGlobalVar(data);
     } catch (err: any) {
-      console.error('Failed to load global settings:', err);
+      console.error('加载全局设置失败：', err);
     }
   }, [api]);
 
@@ -244,7 +244,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       await apiService.updateGlobalSettings(data);
       setGlobalVar(data);
     } catch (err: any) {
-      console.error('Failed to update global settings:', err);
+      console.error('更新全局设置失败：', err);
       throw err;
     }
   }, [api]);
@@ -262,7 +262,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     clearPane,
     api,
     agents,
-    loadAgents,
+    load智能体,
     removeAgent,
     allPanes,
     updatePane,

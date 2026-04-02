@@ -27,7 +27,7 @@ export function SendingProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  useDevRegister('Sending', { sending });
+  useDevRegister('sending', { sending });
 
   return <SendingContext.Provider value={{ sending, setSending, checkIdle }}>{children}</SendingContext.Provider>;
 }

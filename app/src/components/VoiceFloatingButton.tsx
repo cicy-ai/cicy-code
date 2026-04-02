@@ -7,7 +7,7 @@ interface VoiceFloatingButtonProps {
   initialPosition: Position;
   onPositionChange: (pos: Position) => void;
   onRecordStart: () => void;
-  onRecordEnd: (shouldSend: boolean) => void;
+  onRecordEnd: (should发送: boolean) => void;
   isRecordingExternal: boolean;
   disabled?: boolean;
   isLoading?: boolean;

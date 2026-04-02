@@ -5,13 +5,24 @@ function inferApiBase(): string {
   const envBase = import.meta.env.VITE_API_BASE || '';
   if (typeof window === 'undefined') return envBase;
 
-  const saved = localStorage.getItem(LS_API_BASE);
-  if (saved) return saved;
-
   const { hostname, host, origin } = window.location;
+  const isTunnelHost = /^g-\d+\.cicy-ai\.com$/.test(hostname);
+  const managedBase = envBase || 'https://api.cicy-ai.com';
+
+  const saved = localStorage.getItem(LS_API_BASE);
+  if (saved) {
+    if (!isTunnelHost) return saved;
+    try {
+      const savedHost = new URL(saved).hostname;
+      if (!/^g-\d+\.cicy-ai\.com$/.test(savedHost)) return saved;
+    } catch {
+      return saved;
+    }
+  }
 
   if (hostname === 'dev.cicy-ai.com') return 'https://dev-api.cicy-ai.com';
   if (hostname === 'app.cicy-ai.com' || hostname === 'api.cicy-ai.com' || /^audit\./.test(hostname)) return origin;
+  if (isTunnelHost) return managedBase;
 
   const proMatch = hostname.match(/^(u-.+)-app\.cicy-ai\.com$/);
   if (proMatch) return `https://${proMatch[1]}-api.cicy-ai.com`;
@@ -24,8 +35,11 @@ function inferApiBase(): string {
   return envBase || origin;
 }
 
+
 export function getApiBase(): string {
-  return inferApiBase();
+  const envBase = import.meta.env.VITE_API_BASE || '';
+  console.log("envBase:",envBase)
+      	return envBase;
 }
 
 export function setApiBase(base: string) {
@@ -48,6 +62,7 @@ const config = {
   ttydBase:       base,
   ideBase:        base,
   codeServerBase: base ? base + '/code' : '/code',
+  openClawBase:   base ? base + '/openclaw' : '/openclaw',
   hostHome:       import.meta.env.VITE_HOST_HOME || '/home/w3c_offical',
   desktopBase:    base,
   sttBase:        base,
@@ -57,6 +72,8 @@ const config = {
   isAudit,
 };
 
+console.log('[config] version', config.version);
+
 export const urls = {
   ttyd:       (paneId: string, token: string, mode = 1) => `${config.ttydBase}/ttyd/${paneId}/?token=${token}&mode=${mode}`,
   ttydOpen:   (paneId: string, token: string)            => `${config.ttydBase}/ttyd/${paneId}/?token=${token}`,
@@ -64,6 +81,7 @@ export const urls = {
     const f = folder.replace('~', config.hostHome);
     return `${config.codeServerBase}/?folder=${encodeURIComponent(f)}${token ? '&token=' + token : ''}`;
   },
+  openClaw:   (token?: string)                           => `${config.openClawBase}${token ? `?token=${encodeURIComponent(token)}` : ''}`,
   desktop:    (token: string)                            => `${config.desktopBase}/?token=${token}`,
   idePane:    (paneId: string, token: string)            => `${config.ideBase}/ttyd/${paneId}/?token=${token}`,
   stt:        ()                                         => `${config.sttBase}/stt`,

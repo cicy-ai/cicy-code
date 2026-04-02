@@ -17,7 +17,7 @@
         '<button id="cp-enter" class="cp-chip cp-chip-dim"></button>' +
       '</div>' +
       '<div class="cp-bar-r">' +
-        '<button id="cp-collapse" class="cp-chip cp-chip-dim" title="Collapse">−</button>' +
+        '<button id="cp-collapse" style="display:none" class="cp-chip cp-chip-dim" title="Collapse">−</button>' +
       '</div>' +
     '</div>' +
     '<div id="cp-body">' +
@@ -33,10 +33,10 @@
 
   // --- Fixed top-right action buttons ---
   var fixedTop = document.createElement('div'); fixedTop.id = 'fixed-top-action';
-  fixedTop.innerHTML = '<button id="cp-keyboard-toggle" class="fta-btn" title="Toggle panel">⌨</button>' +
+  fixedTop.innerHTML = '' +
     '<button id="cp-win-add" class="fta-btn" title="New window">+</button>' +
     '<button id="cp-win-restart" class="fta-btn" title="Restart pane">↻</button>' +
-    '<button id="cp-more" class="fta-btn" title="More">⋯</button>' +
+    '<button style="display:none" id="cp-more" class="fta-btn" title="More">⋯</button>' +
     '<div id="cp-more-menu" class="cp-drop">' +
       '<select id="cp-model" title="Model"><option value="">Model</option>' +
         '<option value="claude-opus-4.6">opus-4.6</option>' +
@@ -55,7 +55,7 @@
   // --- Styles ---
   var css = document.createElement('style');
   css.textContent =
-    '#cp{position:fixed;width:380px;min-width:260px;' +
+    '#cp{position:fixed;left:8px;right:8px;bottom:8px;height:200px;min-width:0;' +
     'background:rgba(16,16,20,0.88);' +
     'border:1px solid rgba(255,255,255,0.07);border-radius:14px;' +
     'z-index:9999;backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);' +
@@ -63,7 +63,7 @@
     'box-shadow:0 8px 32px rgba(0,0,0,0.55),0 0 0 0.5px rgba(255,255,255,0.08) inset;' +
     'display:flex;flex-direction:column;transition:box-shadow .2s}' +
     '#cp:hover{box-shadow:0 12px 48px rgba(0,0,0,0.65),0 0 0 0.5px rgba(255,255,255,0.1) inset}' +
-    '#cp-bar{cursor:move;padding:7px 10px;display:flex;justify-content:space-between;align-items:center;' +
+    '#cp-bar{cursor:default;padding:7px 10px;display:flex;justify-content:space-between;align-items:center;' +
     'border-bottom:1px solid rgba(255,255,255,0.05);user-select:none;min-height:32px}' +
     '.cp-bar-l,.cp-bar-r{display:flex;align-items:center;gap:4px}' +
     '.cp-chip{background:rgba(255,255,255,0.06);border:none;color:rgba(255,255,255,0.6);' +
@@ -80,8 +80,8 @@
     '#cp-win-float{position:fixed;top:0;left:0;right:0;z-index:9998;display:flex;align-items:center;' +
     'height:28px;background:rgba(30,30,30,0.95);border-bottom:1px solid rgba(255,255,255,0.06);' +
     'font-family:"SF Mono",Menlo,Consolas,monospace;padding:0 4px;gap:0}' +
-    '#fixed-top-action{position:fixed;top:64px;left:0;z-index:9999;display:flex;flex-direction:column;' +
-    'align-items:center;gap:2px;padding:4px 2px;overflow:visible;' +
+    '#fixed-top-action{position:fixed;top:-5px;right:0;z-index:9999;display:flex;flex-direction:row;' +
+    'align-items:center;overflow:visible;' +
     'background:rgba(30,30,30,0.95);border:1px solid rgba(255,255,255,0.06);' +
     'border-left:none;border-radius:0 8px 8px 0}' +
     '#cp-win-tabs{display:flex;align-items:center;height:100%;flex:1;min-width:0;overflow-x:auto}' +
@@ -127,9 +127,9 @@
     '#cp.collapsed #cp-body,#cp.collapsed #cp-grip{display:none}' +
     '#cp.collapsed{min-height:0!important;height:auto!important}' +
     '#cp.collapsed #cp-bar{border-bottom:none}' +
-    '#cp-grip{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;opacity:0;transition:opacity .15s}' +
-    '#cp:hover #cp-grip{opacity:0.3}' +
-    '#cp-grip:hover{opacity:0.6!important}' +
+    '#cp-grip{display:none}' +
+    '#cp:hover #cp-grip{opacity:0}' +
+    '#cp-grip:hover{opacity:0!important}' +
     '#cp-grip::after{content:"";position:absolute;right:4px;bottom:4px;width:6px;height:6px;' +
     'border-right:1.5px solid rgba(255,255,255,0.4);border-bottom:1.5px solid rgba(255,255,255,0.4)}' +
     '.cp-confirm{animation:cp-pulse .5s ease-in-out infinite alternate}' +
@@ -248,53 +248,11 @@
   });
   document.addEventListener('click', function(e) { if (!moreMenu.contains(e.target) && e.target !== moreBtn) moreMenu.classList.remove('open'); });
 
-  // --- Position ---
-  var posKey = 'cicy_panel_pos_' + paneId;
-  function clampPos(x, y) {
-    var r = panel.getBoundingClientRect();
-    var mx = window.innerWidth - r.width, my = window.innerHeight - r.height;
-    return { x: Math.max(0, Math.min(x, Math.max(0, mx))), y: Math.max(0, Math.min(y, Math.max(0, my))) };
-  }
-  function applyPos(x, y, save) {
-    var p = clampPos(x, y);
-    panel.style.left = p.x + 'px'; panel.style.top = p.y + 'px';
-    if (save !== false) LS.set(posKey, { x: p.x, y: p.y });
-  }
-  var cached = LS.get(posKey, null);
-  requestAnimationFrame(function() {
-    if (cached) { panel.style.left = cached.x + 'px'; panel.style.top = cached.y + 'px'; }
-    else { requestAnimationFrame(function() { applyPos(12, window.innerHeight - panel.getBoundingClientRect().height - 12); }); }
-  });
-  window.addEventListener('resize', function() { var r = panel.getBoundingClientRect(); applyPos(r.left, r.top, false); });
-
-  // --- Drag ---
-  document.getElementById('cp-bar').addEventListener('mousedown', function(e) {
-    if (e.target.closest('#cp-collapse,#cp-model,#cp-enter,#cp-more,#cp-compact,#cp-win-btn,#cp-mic')) return;
-    var ox = e.clientX, oy = e.clientY, r = panel.getBoundingClientRect(), sx = r.left, sy = r.top;
-    function mv(e){ applyPos(sx + e.clientX - ox, sy + e.clientY - oy); }
-    function up(){ document.removeEventListener('mousemove',mv); document.removeEventListener('mouseup',up); }
-    document.addEventListener('mousemove',mv); document.addEventListener('mouseup',up);
-  });
-
-  // --- Resize ---
-  var sizeKey = 'cicy_panel_size_' + paneId;
-  var cachedSize = LS.get(sizeKey, null);
-  if (cachedSize) { panel.style.width = cachedSize.w + 'px'; panel.style.height = cachedSize.h + 'px'; }
-  document.getElementById('cp-grip').addEventListener('mousedown', function(e) {
-    e.preventDefault(); e.stopPropagation();
-    var r = panel.getBoundingClientRect(), sw = r.width, sh = r.height, ox = e.clientX, oy = e.clientY;
-    function mv(e) {
-      var nw = Math.max(280, Math.min(sw + e.clientX - ox, window.innerWidth - r.left));
-      var nh = Math.max(120, Math.min(sh + e.clientY - oy, window.innerHeight - r.top));
-      panel.style.width = nw + 'px'; panel.style.height = nh + 'px';
-    }
-    function up() {
-      document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up);
-      var fr = panel.getBoundingClientRect();
-      LS.set(sizeKey, { w: Math.round(fr.width), h: Math.round(fr.height) });
-    }
-    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
-  });
+  // --- Docked layout ---
+  panel.style.left = '8px';
+  panel.style.right = '8px';
+  panel.style.bottom = '8px';
+  panel.style.height = '140px';
 
   // --- Collapse ---
   document.getElementById('cp-collapse').addEventListener('click', function(e) {
@@ -351,12 +309,15 @@
   var isHidden = LS.get(hideKey, false);
   if (isHidden) panel.style.display = 'none';
 
-  document.getElementById('cp-keyboard-toggle').addEventListener('click', function() {
-    var panel = document.getElementById('cp');
-    var hidden = panel.style.display === 'none';
-    panel.style.display = hidden ? '' : 'none';
-    LS.set(hideKey, !hidden);
-  });
+  var keyboardToggleBtn = document.getElementById('cp-keyboard-toggle');
+  if (keyboardToggleBtn) {
+    keyboardToggleBtn.addEventListener('click', function() {
+      var panel = document.getElementById('cp');
+      var hidden = panel.style.display === 'none';
+      panel.style.display = hidden ? '' : 'none';
+      LS.set(hideKey, !hidden);
+    });
+  }
 
   // Restart button in top bar (twice-confirm)
   var restartBtn = document.getElementById('cp-win-restart');

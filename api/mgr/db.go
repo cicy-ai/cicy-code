@@ -28,7 +28,7 @@ func initDB() {
 		home, _ := os.UserHomeDir()
 		dir := filepath.Join(home, ".cicy")
 		os.MkdirAll(dir, 0755)
-		dsn = filepath.Join(dir, "data.db")
+		dsn = filepath.Join(dir, "data-v1.db")
 	}
 
 	raw, err := sql.Open("sqlite", dsn)
@@ -88,7 +88,7 @@ func (d *DB) Migrate() {
 			machine_key TEXT NOT NULL UNIQUE,
 			label TEXT DEFAULT '',
 			host TEXT DEFAULT '',
-			port INTEGER DEFAULT 8008,
+			port INTEGER DEFAULT 8021,
 			url TEXT NOT NULL DEFAULT '',
 			token TEXT DEFAULT '',
 			status TEXT DEFAULT 'unknown',
@@ -122,6 +122,7 @@ func (d *DB) Migrate() {
 			preview TEXT, config TEXT, ttyd_preview TEXT,
 			agent_type TEXT DEFAULT '', common_prompt TEXT,
 			role TEXT, default_model TEXT, trust_level TEXT,
+			allow_all_actions INTEGER DEFAULT 0,
 			machine_id INTEGER,
 			source_kind TEXT DEFAULT 'local',
 			source_ref TEXT DEFAULT ''
@@ -208,6 +209,7 @@ func (d *DB) Migrate() {
 	d.ensureColumn("agent_config", "machine_id", "INTEGER")
 	d.ensureColumn("agent_config", "source_kind", "TEXT DEFAULT 'local'")
 	d.ensureColumn("agent_config", "source_ref", "TEXT DEFAULT ''")
+	d.ensureColumn("agent_config", "allow_all_actions", "INTEGER DEFAULT 0")
 	d.ensureColumn("agent_queue", "step_kind", "TEXT DEFAULT 'message'")
 	d.ensureColumn("agent_queue", "workflow_id", "INTEGER")
 	d.ensureColumn("agent_queue", "parent_id", "INTEGER")

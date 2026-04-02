@@ -7,7 +7,7 @@ interface VoiceContextType {
   isListening: boolean;
   voiceMode: 'append' | 'direct';
   startRecording: (mode: 'append' | 'direct') => Promise<void>;
-  stopRecording: (shouldSend: boolean) => void;
+  stopRecording: (should发送: boolean) => void;
 }
 
 const VoiceContext = createContext<VoiceContextType | undefined>(undefined);
@@ -16,7 +16,7 @@ export const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const { displayPaneId, settings, setReadOnly } = usePane();
   const [isListening, setIsListening] = useState(false);
   const voiceModeRef = useRef<'append' | 'direct'>('append');
-  const voiceShouldSendRef = useRef(false);
+  const voiceShould发送Ref = useRef(false);
   const voiceTranscriptRef = useRef('');
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -36,13 +36,13 @@ export const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const text = voiceTranscriptRef.current.trim();
     voiceTranscriptRef.current = '';
     if (!text) return;
-    try { await apiService.sendCommand(displayPaneId, text); } catch (e) { console.error('Failed to send voice command:', e); }
+    try { await apiService.sendCommand(displayPaneId, text); } catch (e) { console.error('发送语音命令失败：', e); }
   }, [displayPaneId]);
 
   const startRecording = useCallback(async (mode: 'append' | 'direct') => {
     voiceModeRef.current = mode;
     voiceTranscriptRef.current = '';
-    voiceShouldSendRef.current = false;
+    voiceShould发送Ref.current = false;
     try {
       let stream = mediaStreamRef.current;
       if (!stream || stream.getTracks().every(t => t.readyState === 'ended')) {
@@ -58,21 +58,21 @@ export const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setIsListening(true);
       setReadOnly(true);
     } catch (e) {
-      console.error('Mic error:', e);
+      console.error('麦克风错误：', e);
       setIsListening(false);
       setReadOnly(false);
     }
   }, [setReadOnly]);
 
-  const stopRecording = useCallback((shouldSend: boolean) => {
-    voiceShouldSendRef.current = shouldSend;
+  const stopRecording = useCallback((should发送: boolean) => {
+    voiceShould发送Ref.current = should发送;
     const recorder = mediaRecorderRef.current;
     if (recorder && recorder.state !== 'inactive') {
       recorder.onstop = async () => {
         setIsListening(false);
         mediaStreamRef.current?.getTracks().forEach(t => t.enabled = false);
         try {
-          if (!voiceShouldSendRef.current) return;
+          if (!voiceShould发送Ref.current) return;
           const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
           if (blob.size < 100) return;
           const fd = new FormData();
@@ -80,7 +80,7 @@ export const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           fd.append('engine', 'google');
           const { data: d } = await apiService.stt(fd);
           if (d.text) { voiceTranscriptRef.current = d.text; sendTranscript(); }
-        } catch (e) { console.error('STT error:', e); }
+        } catch (e) { console.error('语音转文字错误：', e); }
         finally { setReadOnly(false); }
       };
       recorder.stop();

@@ -1,14 +1,12 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, Home } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { WebFrame } from './WebFrame';
 const BTN_CLS = 'p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer';
 
 interface CodeServerPaneProps {
   src: string;
   folderLabel: string;
-  homeTitle: string;
-  onHome: () => void;
   onNavigate: (folder: string) => void;
   favoriteDirs?: string[];
   rightControls?: ReactNode;
@@ -20,8 +18,6 @@ interface CodeServerPaneProps {
 export default function CodeServerPane({
   src,
   folderLabel,
-  homeTitle,
-  onHome,
   onNavigate,
   favoriteDirs,
   rightControls,
@@ -58,9 +54,6 @@ export default function CodeServerPane({
         onMouseDown={onHeaderMouseDown}
         style={{ cursor: onHeaderMouseDown ? 'move' : 'default' }}
       >
-        <button onClick={onHome} className={BTN_CLS} title={homeTitle}>
-          <Home className="w-3.5 h-3.5" />
-        </button>
         <div className="relative">
           {FAVORITE_FOLDERS.length > 0 && <button
             ref={favBtnRef}
@@ -71,7 +64,7 @@ export default function CodeServerPane({
               setShowFavorites(v => !v);
             }}
             className={BTN_CLS}
-            title="Favorite folders"
+            title="常用文件夹"
           >
             <ChevronDown className="w-3 h-3" />
           </button>}
@@ -114,7 +107,7 @@ export default function CodeServerPane({
       </div>
 
       <div data-id="code-server-body" className="flex-1 relative overflow-hidden" style={{ display: bodyHidden ? 'none' : 'block' }}>
-        <WebFrame src={src} codeServer className="w-full h-full border-0 bg-[#0A0A0A]" title="Code Server" />
+        <WebFrame src={src} codeServer className="w-full h-full border-0 bg-[#0A0A0A]" title="代码服务" />
       </div>
     </div>
   );

@@ -48,7 +48,7 @@ const api = {
   unsplitPane: (id: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/unsplit`),
 
   deleteAgent: (id: string) => http.delete(`/api/agents/${encodeURIComponent(id)}`),
-  getAgentsByPane: (id: string) => http.get(`/api/agents/pane/${encodeURIComponent(id)}`),
+  get智能体ByPane: (id: string) => http.get(`/api/agents/pane/${encodeURIComponent(id)}`),
   bindAgent: (data: any) => http.post('/api/agents/bind', data),
   unbindAgent: (agentId: number) => http.delete(`/api/agents/unbind/${agentId}`),
 
