@@ -29,9 +29,9 @@ var (
 	desktopCmd   *exec.Cmd
 )
 
-const version = "0.2.16"
+const version = "0.2.17"
 
-// agentsFlag holds --agents=kiro-cli,claude,... for non-interactive setup
+// agentsFlag holds --agents=openclaw,codex,claude,opencode,... for non-interactive setup
 var agentsFlag string
 
 func main() {
@@ -54,13 +54,13 @@ Options:
   --audit                 Enable audit mode
   --cn                    Use Chinese mirrors
   --agents=LIST           Comma-separated agents to install (skip interactive)
-                          e.g. --agents=kiro-cli,claude,copilot
+                          e.g. --agents=openclaw,codex,claude
                           Use --agents=all for all agents
 
 Environment:
-  PORT          API port (default: 8008)
+  PORT          API port (default: 8021)
   CS_PORT       code-server port (default: 8002)
-  SQLITE_PATH   SQLite database file (default: ~/.cicy/data.db)`)
+  SQLITE_PATH   SQLite database file (default: ~/.cicy/data-v1.db)`)
 			os.Exit(0)
 		case arg == "--desktop":
 			desktopMode = true
@@ -79,9 +79,9 @@ Environment:
 		}
 	}
 
-	// --dev without explicit --agents defaults to core set
+	// --dev without explicit --agents defaults to the supported builtin set
 	if devMode && agentsFlag == "" {
-		agentsFlag = "kiro-cli,opencode,copilot"
+		agentsFlag = "openclaw,codex,claude,opencode"
 	}
 
 	initKV()
@@ -104,7 +104,6 @@ Environment:
 	if _, err := syncMachinesFromConfig(); err != nil {
 		log.Printf("[machines] initial sync error: %v", err)
 	}
-
 
 	// Health
 	http.HandleFunc("/health", w(handleHealth))
@@ -263,6 +262,8 @@ Environment:
 	http.HandleFunc("/code/auth", handleCodeServerAuth)
 	http.HandleFunc("/mitm/", handleMitmproxyAuth)
 	http.HandleFunc("/mitm", handleMitmproxyAuth)
+	http.HandleFunc("/openclaw/", handleOpenClawAuth)
+	http.HandleFunc("/openclaw", handleOpenClawAuth)
 
 	// WebSocket terminal proxy
 	http.HandleFunc("/ws", handleWSProxy)
@@ -273,7 +274,7 @@ Environment:
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8008"
+		port = "8021"
 	}
 
 	kvMode := "memory"

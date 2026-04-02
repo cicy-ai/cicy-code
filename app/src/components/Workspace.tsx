@@ -34,6 +34,7 @@ const cache = {
 
 const getFloatingOpenKey = (paneId: string) => `ws_floatingCodeOpen:${paneId}`;
 const TEAM_TERMINAL_CHILDREN_KEY = 'ws_teamTerminalChildren';
+const TEAM_TERMINAL_ACTIVE_KEY = 'ws_teamTerminalActive';
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 
@@ -48,9 +49,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const mainTab = 'cli' as const;
   const [leftPanel, setLeftPanel] = useState<'team' | 'skills' | null>(() => {
     const v = cache.get('ws_leftPanel', null);
-    return v === 'team' ? 'team' : null;
+    if (v === 'team' || v === 'skills') return v;
+    return 'team';
   });
-  const [agentsOpen, setAgentsOpen] = useState(false);
+  const [agentsOpen, set智能体Open] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
@@ -61,11 +63,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [contextUsage, setContextUsage] = useState<number | null>(null);
   const [mouseMode, setMouseMode] = useState<'on' | 'off'>('off');
   const [isRestarting, setIsRestarting] = useState(false);
-  const [agents, setAgents] = useState<any[]>([]);
+  const [agents, set智能体] = useState<any[]>([]);
+  const [paneDetails, setPaneDetails] = useState<Record<string, any>>({});
   const [codeServerSrc, setCodeServerSrc] = useState('');
   const [floatingCodeOpen, setFloatingCodeOpen] = useState(() => cache.get(floatingOpenKey, false));
   const [codeFolder, setCodeFolder] = useState('');
-  const [teamTerminalChildren, setTeamTerminalChildren] = useState<Record<string, string[]>>(() => cache.get(TEAM_TERMINAL_CHILDREN_KEY, {}));
+  const [teamTerminalChildren, set团队TerminalChildren] = useState<Record<string, string[]>>(() => cache.get(TEAM_TERMINAL_CHILDREN_KEY, {}));
+  const [teamTerminalActive, set团队TerminalActive] = useState<Record<string, string>>(() => cache.get(TEAM_TERMINAL_ACTIVE_KEY, {}));
   const codeWindowInitializedRef = useRef(false);
   const agentWorkspaceRef = useRef(`~/workers/${paneId}`);
 
@@ -73,6 +77,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const next = urls.codeServer(config.hostHome, token!);
     window.open(next, '_blank');
     if (next !== codeServerSrc) { setCodeServerSrc(next); setCodeFolder(config.hostHome); }
+  };
+  const isOpenClawPane = paneId === 'w-10001';
+  const handleCodeServiceOpen = () => {
+    if (codeServerSrc) window.open(codeServerSrc, '_blank');
+  };
+  const handleOpenClawOpen = () => {
+    if (!token) return;
+    window.open(urls.openClaw(token), '_blank');
   };
 
   const navigateToFolder = (folder: string) => {
@@ -103,6 +115,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useEffect(() => { cache.set('ws_leftPanel', leftPanel); if (groupRef.current) { groupRef.current.setLayout(leftActive ? { 'left-panel': panelSizes['left-panel'] || 50, 'right-panel': panelSizes['right-panel'] || 50 } : { 'left-panel': 0, 'right-panel': 100 }); } }, [leftActive, leftPanel, panelSizes]);
   useEffect(() => { cache.set(floatingOpenKey, floatingCodeOpen); }, [floatingCodeOpen, floatingOpenKey]);
   useEffect(() => { cache.set(TEAM_TERMINAL_CHILDREN_KEY, teamTerminalChildren); }, [teamTerminalChildren]);
+  useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, teamTerminalActive); }, [teamTerminalActive]);
   useEffect(() => { cache.set('ws_voiceBtnPos', voiceBtnPos); }, [voiceBtnPos]);
   useEffect(() => { cache.set('agent_panelPos', panelPos); }, [panelPos]);
   useEffect(() => { cache.set('agent_panelSize', panelSize); }, [panelSize]);
@@ -117,15 +130,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setPanelSizes(layout);
     cache.set('ws_panelSizes', layout);
     if (layout['left-panel'] < 5) {
-      if (leftActive === 'agents') setAgentsOpen(false);
+      if (leftActive === 'agents') set智能体Open(false);
       else setLeftPanel(null);
     }
   }, [leftActive]);
 
-  useEffect(() => { if (!token) return; apiService.getPanes().then(({ data }) => setAgents(Array.isArray(data) ? data : data?.panes || [])).catch(() => {}); }, [token]);
+  useEffect(() => { if (!token) return; apiService.getPanes().then(({ data }) => set智能体(Array.isArray(data) ? data : data?.panes || [])).catch(() => {}); }, [token]);
   useEffect(() => { 
     apiService.getPane(fullPaneId).then(({ data }) => { 
       setAgentDetail(data);
+      setPaneDetails(prev => ({ ...prev, [paneId]: data }));
       const workspace = data?.workspace || `~/workers/${paneId}`;
       agentWorkspaceRef.current = workspace;
       if (!codeWindowInitializedRef.current && token && !(data?.runtime_kind === 'cloudrun' || data?.capabilities?.supports_code_server === false || data?.capabilities?.supports_tmux === false)) {
@@ -178,31 +192,36 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     if (isApiOnlyRuntime) return;
     confirm(`Restart ${paneId}?`, async () => {
       setIsRestarting(true);
-      try { await apiService.restartPane(paneId); for (let i = 0; i < 30; i++) { await new Promise(r => setTimeout(r, 1000)); try { const { data } = await apiService.getTtydStatus(paneId); if (data.status === 'running') break; } catch {} } } catch { alert('Restart failed'); } finally { setIsRestarting(false); }
+      try { await apiService.restartPane(paneId); for (let i = 0; i < 30; i++) { await new Promise(r => setTimeout(r, 1000)); try { const { data } = await apiService.getTtydStatus(paneId); if (data.status === 'running') break; } catch {} } } catch { alert('重启失败'); } finally { setIsRestarting(false); }
     });
   };
   const handleCapture = async () => { if (isApiOnlyRuntime) return; try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
   const handleToggleMouse = async () => { if (isApiOnlyRuntime) return; const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
 
   const toggleLeft = (p: 'team' | 'skills') => {
-    setAgentsOpen(false);
+    set智能体Open(false);
     setLeftPanel(prev => prev === p ? null : p);
   };
 
-  const toggleAgents = () => {
+  const toggle智能体 = () => {
     if (agentsOpen) {
-      setAgentsOpen(false);
+      set智能体Open(false);
       return;
     }
     setLeftPanel(null);
-    setAgentsOpen(true);
+    set智能体Open(true);
   };
 
   const [loadedTtyds, setLoadedTtyds] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     if (token && paneId && !isApiOnlyRuntime) setLoadedTtyds(prev => new Set(prev).add(paneId));
   }, [paneId, token, isApiOnlyRuntime]);
-  const currentTeamChildren = teamTerminalChildren[paneId] || [];
+  const current团队Children = teamTerminalChildren[paneId] || [];
+  const currentTerminalTabs = [paneId, ...current团队Children];
+  const current团队Active = currentTerminalTabs.includes(teamTerminalActive[paneId]) ? teamTerminalActive[paneId] : paneId;
+  const settingsTargetPaneId = current团队Active || paneId;
+  const settingsTargetFullPaneId = `${settingsTargetPaneId}:main.0`;
+  const settingsTargetDetail = paneDetails[settingsTargetPaneId] || (settingsTargetPaneId === paneId ? agentDetail : null);
   const getPaneTitle = useCallback((id: string) => {
     const clean = id.replace(/:.*$/, '');
     const agent = agents.find((item: any) => {
@@ -213,21 +232,31 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }, [agents]);
   const openPaneInCurrentTerminal = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
-    if (!clean || clean === paneId) return;
+    if (!clean) return;
+    if (clean === paneId) {
+      set团队TerminalActive(prev => ({ ...prev, [paneId]: clean }));
+      return;
+    }
     setLoadedTtyds(prev => {
       const next = new Set(prev);
       next.add(clean);
       return next;
     });
-    setTeamTerminalChildren(prev => {
+    set团队TerminalChildren(prev => {
       const current = prev[paneId] || [];
       if (current.includes(clean)) return prev;
       return { ...prev, [paneId]: [...current, clean] };
     });
+    set团队TerminalActive(prev => ({ ...prev, [paneId]: clean }));
+  }, [paneId]);
+  const selectPaneInCurrentTerminal = useCallback((targetPaneId: string) => {
+    const clean = targetPaneId.replace(/:.*$/, '');
+    if (!clean) return;
+    set团队TerminalActive(prev => ({ ...prev, [paneId]: clean }));
   }, [paneId]);
   const closePaneInCurrentTerminal = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
-    setTeamTerminalChildren(prev => {
+    set团队TerminalChildren(prev => {
       const current = prev[paneId] || [];
       if (!current.includes(clean)) return prev;
       const nextChildren = current.filter(id => id !== clean);
@@ -238,7 +267,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       }
       return { ...prev, [paneId]: nextChildren };
     });
-  }, [paneId]);
+    set团队TerminalActive(prev => {
+      if (prev[paneId] !== clean) return prev;
+      const remaining = (teamTerminalChildren[paneId] || []).filter(id => id !== clean);
+      return { ...prev, [paneId]: remaining[0] || paneId };
+    });
+  }, [paneId, teamTerminalChildren]);
+  useEffect(() => {
+    if (!token || !settingsTargetPaneId || settingsTargetPaneId === paneId || paneDetails[settingsTargetPaneId]) return;
+    apiService.getPane(`${settingsTargetPaneId}:main.0`).then(({ data }) => {
+      setPaneDetails(prev => ({ ...prev, [settingsTargetPaneId]: data }));
+    }).catch(() => {});
+  }, [paneId, paneDetails, settingsTargetPaneId, token]);
 
   const rightContent = (
     <div data-id="right-content" className="h-full flex flex-col relative">
@@ -259,21 +299,35 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           {!isApiOnlyRuntime && (
             <button
               type="button"
-              onClick={() => { if (codeServerSrc) window.open(codeServerSrc, '_blank'); }}
+              onClick={handleCodeServiceOpen}
               className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0"
-              title="Code Server"
+              title="代码服务"
             >
-              {floatingCodeOpen ? <FolderOpen className="w-3.5 h-3.5" /> : <Folder className="w-3.5 h-3.5" />}
+              {floatingCodeOpen ? (
+                <FolderOpen className="w-3.5 h-3.5" />
+              ) : (
+                <Folder className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
+          {!isApiOnlyRuntime && isOpenClawPane && (
+            <button
+              type="button"
+              onClick={handleOpenClawOpen}
+              className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0"
+              title="OpenClaw"
+            >
+              <span className="text-[13px] leading-none" aria-label="OpenClaw">🦞</span>
             </button>
           )}
         </div>
         <div data-id="top-bar-center" className="flex items-center justify-center w-1/3" />
         <div data-id="top-bar-right" className="flex items-center justify-end w-1/3 gap-3">
           <NetworkSignal latency={netLatency} />
-          <button onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API Tokens"><Key className="w-3.5 h-3.5" /></button>
+          <button onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 令牌"><Key className="w-3.5 h-3.5" /></button>
           <button onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 服务器"><Server className="w-3.5 h-3.5" /></button>
-          <button onClick={() => window.dispatchEvent(new Event('open-devtools-panel'))} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="DevTools"><Bug className="w-3.5 h-3.5" /></button>
-          <span id="version" className="text-[10px] font-mono text-zinc-600">v1.0.2</span>
+          <button onClick={() => window.dispatchEvent(new Event('open-devtools-panel'))} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="开发工具"><Bug className="w-3.5 h-3.5" /></button>
+          <span id="version" className="text-[10px] font-mono text-zinc-600">0.2.17</span>
           {contextUsage != null && (
             <div data-id="context-usage" className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/[0.02]">
               <div data-id="context-bar" className="w-12 h-1 rounded-full bg-white/[0.04] overflow-hidden">
@@ -302,26 +356,51 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           </div>
         </div>
         <div data-id="cli-tab" className="absolute inset-0 flex" style={{ display: mainTab === 'cli' ? 'flex' : 'none' }}>
-          <div data-id="cli-terminal-area" className={cn("w-full h-full relative", currentTeamChildren.length > 0 && "overflow-auto bg-[#050505]")}>
-            {!isApiOnlyRuntime ? currentTeamChildren.length > 0 ? (
-              <div data-id="cli-terminal-stack" className="min-h-full px-3 py-3">
-                <div className="flex flex-col gap-3">
-                  <TerminalFrameCard
-                    paneId={paneId}
-                    title={title || getPaneTitle(paneId)}
-                    subtitle="Current pane"
-                    src={urls.ttydOpen(paneId, token!)}
-                    minHeightClass="min-h-[70vh]"
-                  />
-                  {currentTeamChildren.map(id => (
-                    <TerminalFrameCard
-                      key={id}
-                      paneId={id}
-                      title={getPaneTitle(id)}
-                      subtitle={`Attached to ${paneId}`}
-                      src={urls.ttydOpen(id, token!)}
-                      onClose={() => closePaneInCurrentTerminal(id)}
-                    />
+          <div data-id="cli-terminal-area" className="w-full h-full relative bg-black">
+            {!isApiOnlyRuntime ? current团队Children.length > 0 ? (
+              <div className="absolute inset-0 flex flex-col">
+                <div data-id="cli-terminal-tabs" className="h-11 shrink-0 border-b border-white/[0.08] bg-[#0b0b0b] px-3 flex items-center gap-2 overflow-x-auto">
+                  {currentTerminalTabs.map(id => {
+                    const isRoot = id === paneId;
+                    const isActive = current团队Active === id;
+                    return (
+                      <button
+                        type="button"
+                        key={id}
+                        className={cn(
+                          "group flex items-center gap-2 min-w-0 max-w-[240px] px-3 py-1.5 rounded-lg border transition-colors cursor-pointer",
+                          isActive
+                            ? "border-blue-500/50 bg-blue-500/[0.08] text-blue-300 ring-1 ring-blue-500/20"
+                            : "border-white/[0.08] bg-white/[0.03] text-zinc-400 hover:text-zinc-200 hover:border-white/[0.14]"
+                        )}
+                        onMouseDown={() => selectPaneInCurrentTerminal(id)}
+                        onClick={() => selectPaneInCurrentTerminal(id)}
+                        title={id}
+                      >
+                        <span className="text-[11px] font-medium truncate">{isRoot ? (title || getPaneTitle(id)) : getPaneTitle(id)}</span>
+                        <span className="text-[10px] font-mono text-zinc-600 truncate">{id}</span>
+                        {!isRoot ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              closePaneInCurrentTerminal(id);
+                            }}
+                            className="p-0.5 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0"
+                            title="Remove from current pane"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="relative flex-1 bg-black">
+                  {[...loadedTtyds].map(id => (
+                    <div key={id} className="absolute inset-0" style={{ display: currentTerminalTabs.includes(id) && id === current团队Active ? 'block' : 'none' }}>
+                      <WebFrame src={urls.ttydOpen(id, token!)} className="w-full h-full border-0 bg-black" title={`terminal-${id}`} />
+                    </div>
                   ))}
                 </div>
               </div>
@@ -354,14 +433,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {/* Activity Bar */}
       <div data-id="activity-bar" ref={activityBarRef} className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
+          <SideBtn dataId="btn-team" active={leftPanel === 'team'} icon={<Users className="w-5 h-5" />} title="团队" onClick={() => toggleLeft('team')} />
           <SideBtn
             dataId="btn-code-window"
             active={leftActive === 'agents'}
             icon={<LayoutList className="w-5 h-5" />}
-            title="Agents"
-            onClick={toggleAgents}
+            title="智能体"
+            onClick={toggle智能体}
           />
-          <SideBtn dataId="btn-team" active={leftPanel === 'team'} icon={<Users className="w-5 h-5" />} title="Team" onClick={() => toggleLeft('team')} />
         </div>
         <div data-id="activity-bar-bottom" className="flex flex-col gap-4 w-full items-center">
           <SideBtn dataId="btn-settings" active={settingsOpen} icon={<Menu className="w-5 h-5" />} title="Menu" onClick={() => { setSettingsOpen(true); }} />
@@ -378,23 +457,28 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 <div data-id="left-panel-header" className="h-12 border-b border-[var(--vsc-border)] flex items-center px-2 bg-[#0e0e0e] shrink-0 gap-1">
                   {leftActive === 'agents' ? <>
                     <LayoutList className="w-3.5 h-3.5 text-zinc-600" />
-                    <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">Agents</span>
+                    <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">智能体</span>
                   </> : leftPanel === 'skills' ? <>
                     <Brain className="w-3.5 h-3.5 text-zinc-600" />
-                    <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">召唤员工</span>
+                    <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">技能</span>
                   </> : <>
                     <Users className="w-3.5 h-3.5 text-zinc-600" />
-                    <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">Team</span>
+                    <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">团队</span>
                   </>}
-                  <button data-id="left-panel-close" onClick={() => { if (leftActive === 'agents') setAgentsOpen(false); else setLeftPanel(null); }} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                  <button data-id="left-panel-close" onClick={() => { if (leftActive === 'agents') set智能体Open(false); else setLeftPanel(null); }} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"><X className="w-3.5 h-3.5" /></button>
                 </div>
                 <div data-id="left-panel-body" className="flex-1 relative overflow-hidden bg-[#0A0A0A] z-[131]">
                   <div className="absolute inset-0 overflow-auto" style={{ display: leftActive === 'agents' ? 'block' : 'none' }}>
                     <AgentDrawer agents={agents} paneId={paneId}
-                      onSelectAgent={onSelectAgent} onAgentsChange={setAgents} />
+                      onSelectAgent={onSelectAgent} on智能体Change={set智能体} />
                   </div>
                   <div className="absolute inset-0" style={{ display: leftPanel === 'team' ? 'block' : 'none' }}>
-                    <TeamPanel paneId={paneId} onOpenInCurrentPane={openPaneInCurrentTerminal} openedPaneIds={currentTeamChildren} />
+                    <TeamPanel
+                      paneId={paneId}
+                      onOpenInCurrentPane={openPaneInCurrentTerminal}
+                      openedPaneIds={current团队Children}
+                      activePaneId={current团队Active}
+                    />
                   </div>
                   <div className="absolute inset-0 overflow-auto" style={{ display: leftPanel === 'skills' ? 'block' : 'none' }}>
                     <SkillPanel paneId={fullPaneId} />
@@ -423,12 +507,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 rec.start(); (window as any).__voiceRec = rec;
               });
             }}
-            onRecordEnd={(shouldSend) => {
+            onRecordEnd={(should发送) => {
               const rec = (window as any).__voiceRec as MediaRecorder | undefined;
               if (rec && rec.state !== 'inactive') {
                 rec.onstop = async () => {
                   (window as any).__voiceStream?.getTracks().forEach((t: any) => t.enabled = false);
-                  if (!shouldSend) return;
+                  if (!should发送) return;
                   const blob = new Blob((window as any).__voiceChunks || [], { type: 'audio/webm' });
                   if (blob.size < 100) return;
                   const fd = new FormData(); fd.append('file', blob, 'voice.webm'); fd.append('engine', 'google');
@@ -454,52 +538,29 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         />
       )}
 
-      {settingsOpen && <div data-id="settings-overlay"><SettingsFloat paneId={paneId} fullPaneId={fullPaneId} agentDetail={agentDetail} onAgentDetailChange={(d) => { setAgentDetail(d); setAgents(prev => prev.map(a => (a.pane_id || a.id)?.startsWith(paneId) ? { ...a, ...d } : a)); }} onClose={() => setSettingsOpen(false)} /></div>}
+      {settingsOpen && (
+        <div data-id="settings-overlay">
+          <SettingsFloat
+            paneId={settingsTargetPaneId}
+            fullPaneId={settingsTargetFullPaneId}
+            agentDetail={settingsTargetDetail}
+            onAgentDetailChange={(d) => {
+              setPaneDetails(prev => ({ ...prev, [settingsTargetPaneId]: { ...(prev[settingsTargetPaneId] || {}), ...d } }));
+              if (settingsTargetPaneId === paneId) setAgentDetail((prev: any) => ({ ...(prev || {}), ...d }));
+              set智能体(prev => prev.map(a => {
+                const id = (a.pane_id || a.id || '').split(':')[0];
+                return id === settingsTargetPaneId ? { ...a, ...d } : a;
+              }));
+            }}
+            onClose={() => setSettingsOpen(false)}
+          />
+        </div>
+      )}
       {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
       {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
       {toast && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 bg-zinc-800 text-white text-sm rounded-lg shadow-lg">{toast}</div>}
     </div>
     </SendingProvider>
-  );
-}
-
-function TerminalFrameCard({
-  paneId,
-  title,
-  subtitle,
-  src,
-  onClose,
-  minHeightClass = 'min-h-[55vh]',
-}: {
-  paneId: string;
-  title: string;
-  subtitle: string;
-  src: string;
-  onClose?: () => void;
-  minHeightClass?: string;
-}) {
-  return (
-    <section data-id={`cli-terminal-card-${paneId}`} className="rounded-2xl border border-white/[0.08] bg-[#090909] shadow-[0_16px_40px_rgba(0,0,0,0.28)] overflow-hidden">
-      <header className="flex items-center justify-between gap-3 px-4 py-3 border-b border-white/[0.08] bg-[#0d0d0d]">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-zinc-200 truncate">{title}</div>
-          <div className="text-[11px] font-mono text-zinc-600 truncate">{paneId} · {subtitle}</div>
-        </div>
-        {onClose ? (
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0"
-            title="Remove from current terminal stack"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        ) : null}
-      </header>
-      <div className={cn("relative h-[55vh] bg-black", minHeightClass)}>
-        <WebFrame src={src} className="w-full h-full border-0 bg-black" title={`terminal-stack-${paneId}`} />
-      </div>
-    </section>
   );
 }
 
@@ -520,9 +581,9 @@ const PINNED_KEY = 'agent_pinned';
 function getPinned(): string[] { try { return JSON.parse(localStorage.getItem(PINNED_KEY)!) || []; } catch { return []; } }
 function setPinnedStorage(ids: string[]) { localStorage.setItem(PINNED_KEY, JSON.stringify(ids)); }
 
-function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange }: {
+function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change }: {
   agents: any[]; paneId: string;
-  onSelectAgent: (id: string) => void; onAgentsChange: (a: any[]) => void;
+  onSelectAgent: (id: string) => void; on智能体Change: (a: any[]) => void;
 }) {
   const [search, setSearch] = useState('');
   const [pinned, setPinned] = useState<string[]>(getPinned);
@@ -532,11 +593,11 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange }: {
   const handleQuickAddMaster = async () => {
     setAdding(true);
     try {
-      const { data } = await apiService.createPane({ role: 'master', agent_type: 'codex', title: 'Worker' });
+      const { data } = await apiService.createPane({ role: 'worker', agent_type: 'codex' });
       const id = data?.pane_id || data?.id;
       if (id) {
         const { data: fresh } = await apiService.getPanes();
-        onAgentsChange(Array.isArray(fresh) ? fresh : fresh?.panes || []);
+        on智能体Change(Array.isArray(fresh) ? fresh : fresh?.panes || []);
         onSelectAgent(id.split(':')[0]);
       }
     } catch {} finally { setAdding(false); }
@@ -555,7 +616,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange }: {
       const id = data?.pane_id || data?.id;
       if (id) {
         const { data: fresh } = await apiService.getPanes();
-        onAgentsChange(Array.isArray(fresh) ? fresh : fresh?.panes || []);
+        on智能体Change(Array.isArray(fresh) ? fresh : fresh?.panes || []);
         onSelectAgent(id.split(':')[0]);
       }
     } catch {} finally { setAdding(false); }
@@ -569,7 +630,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange }: {
         await apiService.deletePane(id);
         const { data: fresh } = await apiService.getPanes();
         const list = Array.isArray(fresh) ? fresh : fresh?.panes || [];
-        onAgentsChange(list);
+        on智能体Change(list);
         if (sid === paneId) {
           const idx = agents.findIndex(a => (a.pane_id || a.id) === id);
           const next = agents[idx + 1] || agents[idx - 1];
@@ -587,9 +648,9 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange }: {
     return id.includes(q) || title.includes(q);
   });
 
-  const pinnedAgents = filtered.filter(a => pinned.includes(a.pane_id || a.id));
-  const unpinnedAgents = filtered.filter(a => !pinned.includes(a.pane_id || a.id));
-  const sorted = [...pinnedAgents, ...unpinnedAgents];
+  const pinned智能体 = filtered.filter(a => pinned.includes(a.pane_id || a.id));
+  const unpinned智能体 = filtered.filter(a => !pinned.includes(a.pane_id || a.id));
+  const sorted = [...pinned智能体, ...unpinned智能体];
 
   return (
     <div data-id="agent-drawer" className="h-full flex flex-col bg-[#0A0A0A]">
@@ -599,7 +660,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange }: {
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
               <input
                 type="search"
-                placeholder="Search id or title..."
+                placeholder="搜索 ID 或标题..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 className="w-full bg-white/[0.02] border border-[var(--vsc-border)] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-white/[0.08] placeholder:text-zinc-700 text-zinc-400"
@@ -607,7 +668,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange }: {
             </div>
             <button onClick={handleQuickAddMaster} disabled={adding}
               className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-[var(--vsc-border)] text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-              title="Add Master">
+              title="添加工作实例">
               <Plus className="w-4 h-4" />
             </button>
           </div>
@@ -641,7 +702,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange }: {
                   </div>
                   <button onClick={e => { e.stopPropagation(); window.open(`#/agent/${id.split(':')[0]}`, '_blank'); }}
                     className="p-1 rounded transition-colors shrink-0 cursor-pointer text-zinc-700 opacity-0 group-hover:opacity-100 hover:text-zinc-400"
-                    title="Open in new window">
+                    title="在新窗口打开">
                     <ExternalLink className="w-3.5 h-3.5" />
                   </button>
                   <button onClick={e => { e.stopPropagation(); togglePin(id); }}
