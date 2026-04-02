@@ -53,10 +53,11 @@ interface Props {
   paneId: string;
   onOpenInCurrentPane?: (paneId: string) => void;
   openedPaneIds?: string[];
+  activePaneId?: string;
 }
 
-export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds = [] }: Props) {
-  const [allAgents, setAllAgents] = useState<Agent[]>([]);
+export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds = [], activePaneId }: Props) {
+  const [all智能体, setAll智能体] = useState<Agent[]>([]);
   const [bindings, setBindings] = useState<Binding[]>([]);
   const [statuses, setStatuses] = useState<Record<string, StatusInfo>>({});
   const [instances, setInstances] = useState<Machine[]>([]);
@@ -72,12 +73,12 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
     try {
       const [pRes, bRes, sRes, mRes, qRes] = await Promise.all([
         apiService.getPanes(),
-        apiService.getAgentsByPane(paneId),
+        apiService.get智能体ByPane(paneId),
         apiService.getAllStatus(),
         apiService.getMachines(),
         apiService.getCollabSteps(),
       ]);
-      setAllAgents(Array.isArray(pRes.data) ? pRes.data : pRes.data?.panes || []);
+      setAll智能体(Array.isArray(pRes.data) ? pRes.data : pRes.data?.panes || []);
       setBindings(Array.isArray(bRes.data) ? bRes.data : []);
       if (sRes.data) setStatuses(sRes.data);
       setInstances(Array.isArray(mRes.data?.instances) ? mRes.data.instances : (Array.isArray(mRes.data?.machines) ? mRes.data.machines : []));
@@ -92,7 +93,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
   }, [load]);
 
   const boundIds = new Set(bindings.map(b => shortId(b.name)));
-  const available = allAgents.filter(a => {
+  const available = all智能体.filter(a => {
     const sid = shortId(a.pane_id);
     return sid !== paneId && !boundIds.has(sid);
   });
@@ -154,7 +155,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
   const getName = (binding: Binding) => {
     const wid = shortId(binding.name);
     const s = getStatus(wid);
-    return binding.title || s.title || allAgents.find(a => shortId(a.pane_id) === wid)?.title || wid;
+    return binding.title || s.title || all智能体.find(a => shortId(a.pane_id) === wid)?.title || wid;
   };
 
   const instanceMap = useMemo(() => new Map(instances.map(m => [m.id, m])), [instances]);
@@ -184,7 +185,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
   }, [bindings, instanceMap]);
 
   const currentAgent = useMemo(() => {
-    const agent = allAgents.find(a => shortId(a.pane_id) === paneId);
+    const agent = all智能体.find(a => shortId(a.pane_id) === paneId);
     const machine = agent?.machine_id ? instanceMap.get(agent.machine_id) : undefined;
     const step = latestStepMap.get(`${agent?.machine_id || 0}:${paneId}`);
     const status = getStatus(paneId);
@@ -197,7 +198,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
       subtitle: subtitleParts.join(' · '),
       resultSummary: step?.result_summary || '',
     };
-  }, [allAgents, instanceMap, latestStepMap, paneId, statuses]);
+  }, [all智能体, instanceMap, latestStepMap, paneId, statuses]);
 
   const renderAgentCard = ({
     wid,
@@ -224,11 +225,9 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
       key={wid}
       data-id={`team-panel-worker-${wid}`}
       onClick={onClick}
-      className={`w-full flex items-center gap-3 border p-3 rounded-xl transition-all group relative cursor-pointer ${
+      className={`w-full mb-2 flex items-center gap-3 border p-3 rounded-xl transition-all group relative cursor-pointer ${
         active
           ? 'border-blue-500/50 bg-blue-500/[0.08] ring-1 ring-blue-500/20'
-          : opened
-            ? 'border-cyan-500/40 bg-cyan-500/[0.06] ring-1 ring-cyan-500/10'
           : 'bg-white/[0.02] border-[var(--vsc-border)] hover:border-white/[0.08]'
       }`}
     >
@@ -248,10 +247,10 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
       <div className="flex items-center gap-3 flex-1 min-w-0 text-left">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <h3 className={`text-sm font-medium truncate ${active ? 'text-blue-300' : opened ? 'text-cyan-200' : 'text-zinc-300'}`}>{title}</h3>
+            <h3 className={`text-sm font-medium truncate ${active ? 'text-blue-300' : 'text-zinc-300'}`}>{title}</h3>
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDot(status)}`} />
           </div>
-          <p className={`text-xs font-mono mt-0.5 truncate ${active ? 'text-blue-400/50' : opened ? 'text-cyan-400/60' : 'text-zinc-600'}`}>
+          <p className={`text-xs font-mono mt-0.5 truncate ${active ? 'text-blue-400/50' : 'text-zinc-600'}`}>
             {subtitle}
           </p>
           {resultSummary ? (
@@ -268,7 +267,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
           window.open(`#/agent/${wid}`, '_blank');
         }}
         className="p-1 rounded transition-colors shrink-0 cursor-pointer text-zinc-700 opacity-0 group-hover:opacity-100 hover:text-zinc-400"
-        title="Open in new window"
+        title="在新窗口打开"
       >
         <ExternalLink className="w-3.5 h-3.5" />
       </button>
@@ -290,7 +289,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
           onClick={syncInstances}
           disabled={syncingInstances}
           className="flex items-center text-sm px-2 py-1.5 rounded border border-[var(--vsc-border)] text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors cursor-pointer disabled:opacity-50"
-          title="Sync instances"
+          title="同步实例"
         >
           {syncingInstances ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
         </button>
@@ -299,7 +298,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
           onClick={createAndBind}
           disabled={creating}
           className="flex items-center text-sm px-2 py-1.5 rounded border border-[var(--vsc-border)] text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors cursor-pointer disabled:opacity-50"
-          title="Create new worker & bind"
+          title="创建并绑定新工作实例"
         >
           {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
         </button>
@@ -315,8 +314,14 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
             status: currentAgent.status,
             subtitle: currentAgent.subtitle,
             resultSummary: currentAgent.resultSummary,
-            active: true,
-            onClick: () => { window.location.hash = `#/agent/${paneId}`; },
+            active: (activePaneId || paneId) === paneId,
+            onClick: () => {
+              if (onOpenInCurrentPane) {
+                onOpenInCurrentPane(paneId);
+                return;
+              }
+              window.location.hash = `#/agent/${paneId}`;
+            },
           })}
         </div>
         {bindings.length > 0 ? (
@@ -337,6 +342,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
                     status: s,
                     subtitle: subtitleParts.join(' · '),
                     resultSummary: step?.result_summary,
+                    active: activePaneId === wid,
                     opened: openedPaneIds.includes(wid),
                     onClick: () => {
                       if (onOpenInCurrentPane) {

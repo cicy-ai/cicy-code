@@ -7,6 +7,7 @@ export interface EditPaneData {
   title: string;
   agent_duty?: string;
   agent_type?: string;
+  allow_all_actions?: boolean;
   workspace?: string;
   active?: boolean;
   init_script?: string;
@@ -74,7 +75,7 @@ export const EditPaneDialog: React.FC<EditPaneDialogProps> = ({
               <input type="text" value={pane.title}
                 onChange={e => onChange({ ...pane, title: e.target.value })}
                 className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent"
-                placeholder="Enter pane title" autoFocus={!isFull} />
+                placeholder="输入窗格标题" autoFocus={!isFull} />
             </div>
             {isFull && (<>
               <div className="flex items-center justify-between">
@@ -95,7 +96,7 @@ export const EditPaneDialog: React.FC<EditPaneDialogProps> = ({
                   placeholder="/home/user/project" />
               </div>
               <div>
-                <label className="block text-xs text-vsc-text-secondary mb-1">Init Script</label>
+                <label className="block text-xs text-vsc-text-secondary mb-1">初始化脚本</label>
                 <textarea value={pane.init_script || ''}
                   onChange={e => onChange({ ...pane, init_script: e.target.value })}
                   className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent resize-none"
@@ -108,7 +109,7 @@ export const EditPaneDialog: React.FC<EditPaneDialogProps> = ({
           {/* Agent */}
           {isFull && tab === 'Agent' && (<>
             <div>
-              <label className="block text-xs text-vsc-text-secondary mb-1">Agent Duty</label>
+              <label className="block text-xs text-vsc-text-secondary mb-1">智能体职责</label>
               <textarea value={pane.agent_duty || ''}
                 onChange={e => onChange({ ...pane, agent_duty: e.target.value })}
                 className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent resize-none"
@@ -119,16 +120,16 @@ export const EditPaneDialog: React.FC<EditPaneDialogProps> = ({
           {/* Network */}
           {isFull && tab === 'Network' && (<>
               <div>
-                <label className="block text-xs text-vsc-text-secondary mb-1">Config (JSON)</label>
+                <label className="block text-xs text-vsc-text-secondary mb-1">配置（JSON）</label>
                 <textarea value={pane.config || '{}'}
                   onChange={e => onChange({ ...pane, config: e.target.value })}
                   className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent resize-none"
-                  rows={8} placeholder='{"proxy": {"enable": true, "url": "http://..."}}' />
+                  rows={8} placeholder='{"projects": ["/home/user/project"]}' />
                 <pre className="text-xs text-vsc-text-muted bg-vsc-bg-secondary border border-vsc-border rounded p-2 mt-2 overflow-x-auto">{`{
-  "proxy": {
-    "enable": true,
-    "url": "http://w-20001:x@127.0.0.1:8003"
-  }
+  "projects": [
+    "/home/user/project-a",
+    "/home/user/project-b"
+  ]
 }`}</pre>
               </div>
             </>)}
@@ -146,11 +147,11 @@ export const EditPaneDialog: React.FC<EditPaneDialogProps> = ({
                 <input type="text" value={pane.tg_token || ''}
                   onChange={e => onChange({ ...pane, tg_token: e.target.value })}
                   className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2 py-1 focus:outline-none focus:border-vsc-accent"
-                  placeholder="Bot Token" />
+                  placeholder="机器人令牌" />
                 <input type="text" value={pane.tg_chat_id || ''}
                   onChange={e => onChange({ ...pane, tg_chat_id: e.target.value })}
                   className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2 py-1 focus:outline-none focus:border-vsc-accent"
-                  placeholder="Chat ID" />
+                  placeholder="聊天 ID" />
               </div>
             </>)}
         </div>

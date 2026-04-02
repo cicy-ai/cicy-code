@@ -6,7 +6,7 @@ import Select from './ui/Select';
 
 const THEME_KEY = 'app_theme';
 const themes = [
-  { value: '', label: 'Default (VS Code Dark)' },
+  { value: '', label: '默认（VS Code 深色）' },
   { value: 'livestream', label: 'Livestream' },
 ] as const;
 
@@ -55,7 +55,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
             <Select value={theme}
               onChange={handleThemeChange}
               options={themes.map(t => ({ value: t.value, label: t.label }))}
-              placeholder="Select theme"
+              placeholder="选择主题"
             />
           </div>
           <div>
@@ -63,7 +63,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
             <input type="text" value={pane.title}
               onChange={e => onChange({ ...pane, title: e.target.value })}
               className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent"
-              placeholder="Enter pane title" />
+              placeholder="输入窗格标题" />
           </div>
           <div className="flex items-center justify-between">
             <div>
@@ -83,7 +83,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
               placeholder="/home/user/project" />
           </div>
           <div>
-            <label className="block text-xs text-vsc-text-secondary mb-1">Init Script</label>
+            <label className="block text-xs text-vsc-text-secondary mb-1">初始化脚本</label>
             <textarea value={pane.init_script || ''}
               onChange={e => onChange({ ...pane, init_script: e.target.value })}
               className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent resize-none"
@@ -91,22 +91,32 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
             <p className="text-xs text-vsc-text-muted mt-1">sleep:N waits Ns, key:X sends key</p>
           </div>
           <div>
-            <label className="block text-xs text-vsc-text-secondary mb-1">Agent Type</label>
+            <label className="block text-xs text-vsc-text-secondary mb-1">智能体类型</label>
             <Select value={pane.agent_type || ''}
               onChange={v => onChange({ ...pane, agent_type: v })}
-              options={[{value:'',label:'无'},{value:'kiro-cli',label:'kiro-cli'},{value:'opencode',label:'opencode'},{value:'gemini',label:'gemini'},{value:'claude',label:'claude'},{value:'codex',label:'codex'},{value:'copilot',label:'copilot'}]}
+              options={[{value:'',label:'无'},{value:'openclaw',label:'openclaw'},{value:'codex',label:'codex'},{value:'claude',label:'claude'},{value:'opencode',label:'opencode'}]}
               searchable
             />
           </div>
-          <div>
+          {/* <div>
             <label className="block text-xs text-vsc-text-secondary mb-1">Role</label>
             <Select value={pane.role || ''}
               onChange={v => onChange({ ...pane, role: v })}
               options={[{value:'',label:'无'},{value:'master',label:'master'},{value:'worker',label:'worker'}]}
             />
+          </div> */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-vsc-text">启动时允许所有操作</p>
+              <p className="text-xs text-vsc-text-muted">Codex/Claude 追加危险参数，OpenCode 使用 allow 权限配置</p>
+            </div>
+            <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-colors ${pane.allow_all_actions ? 'bg-orange-600' : 'bg-vsc-bg-active'}`}
+              onClick={() => onChange({ ...pane, allow_all_actions: !pane.allow_all_actions })}>
+              <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${pane.allow_all_actions ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs text-vsc-text-secondary mb-1">Agent Duty</label>
+          <div style={{"display":"none"}}>
+            <label className="block text-xs text-vsc-text-secondary mb-1">智能体职责</label>
             <textarea value={pane.agent_duty || ''}
               onChange={e => onChange({ ...pane, agent_duty: e.target.value })}
               className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent resize-none"
@@ -117,18 +127,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
 
         {tab === 'Network' && (<>
           <div>
-            <label className="block text-xs text-vsc-text-secondary mb-1">Config (JSON)</label>
+            <label className="block text-xs text-vsc-text-secondary mb-1">配置（JSON）</label>
             <textarea value={pane.config || '{}'}
               onChange={e => onChange({ ...pane, config: e.target.value })}
               className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent resize-none"
-              rows={12} placeholder='{"proxy": {"enable": true}}' />
+              rows={12} placeholder='{"projects": ["/home/user/project"]}' />
             <div className="text-xs text-vsc-text-muted mt-2 space-y-1">
               <p className="font-medium text-vsc-text-secondary">Example:</p>
               <pre className="bg-vsc-bg-secondary border border-vsc-border rounded p-2 overflow-x-auto">{`{
-  "proxy": {
-    "enable": true,
-    "url": "http://w-20001:x@127.0.0.1:8003"
-  }
+  "projects": [
+    "/home/user/project-a",
+    "/home/user/project-b"
+  ]
 }`}</pre>
             </div>
           </div>
@@ -139,7 +149,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
         <button onClick={onSave} disabled={isSaving}
           className="w-full bg-vsc-button hover:bg-vsc-button-hover disabled:bg-vsc-border disabled:cursor-not-allowed text-white text-sm font-medium py-2 rounded transition-colors flex items-center justify-center gap-2">
           {isSaving && <Loader2 size={16} className="animate-spin" />}
-          {isSaving ? 'Saving...' : 'Save Changes'}
+          {isSaving ? 'Saving...' : '保存更改'}
         </button>
       </div>
     </div>

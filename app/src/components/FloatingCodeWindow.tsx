@@ -63,9 +63,7 @@ interface FloatingCodeWindowProps {
   open: boolean;
   src: string;
   folderLabel: string;
-  homeTitle: string;
   storageScopeId: string;
-  onHome: () => void;
   onNavigate: (folder: string) => void;
   onClose: () => void;
 }
@@ -74,9 +72,7 @@ export default function FloatingCodeWindow({
   open,
   src,
   folderLabel,
-  homeTitle,
   storageScopeId,
-  onHome,
   onNavigate,
   onClose,
 }: FloatingCodeWindowProps) {
@@ -245,7 +241,7 @@ export default function FloatingCodeWindow({
         type="button"
         onClick={() => window.open(src, '_blank')}
         className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"
-        title="Open in new window"
+        title="在新窗口打开"
       >
         <ExternalLink className="w-3.5 h-3.5" />
       </button>
@@ -285,8 +281,6 @@ export default function FloatingCodeWindow({
       <CodeServerPane
         src={src}
         folderLabel={folderLabel}
-        homeTitle={homeTitle}
-        onHome={onHome}
         onNavigate={onNavigate}
         onHeaderMouseDown={startDrag}
         rightControls={rightControls}

@@ -9,7 +9,8 @@ fi
 export HOME="$(eval echo ~$(whoami))"
 export MYSQL_DSN="${MYSQL_DSN:-root:cicy-code@tcp(localhost:3306)/cicy_code}"
 export REDIS_ADDR="${REDIS_ADDR:-localhost:6379}"
-export PORT="${PORT:-8008}"
+export PORT="${PORT:-8021}"
+export SQLITE_PATH="${SQLITE_PATH:-$HOME/.cicy/data-v1.db}"
 export TERM=xterm-256color
 BIN="$SCRIPT_DIR/cicy-code-api"
 [ -f "$BIN" ] || BIN="$SCRIPT_DIR/cicy-code"

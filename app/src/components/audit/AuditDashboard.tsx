@@ -138,16 +138,16 @@ function OverviewTab({ userId, days, setDays }: { userId: string; days: number; 
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard icon={DollarSign} label="Total Cost" value={formatCost(data.total_cost_usd)} sub={`${days} day period`} color="text-emerald-400" />
-        <StatCard icon={Hash} label="API Calls" value={data.total_calls.toLocaleString()} sub={`${data.monthly_calls.toLocaleString()} this month`} color="text-blue-400" />
-        <StatCard icon={TrendingUp} label="Input Tokens" value={formatTokens(data.total_input)} color="text-purple-400" />
-        <StatCard icon={Cpu} label="Output Tokens" value={formatTokens(data.total_output)} color="text-amber-400" />
+        <StatCard icon={DollarSign} label="总费用" value={formatCost(data.total_cost_usd)} sub={`${days} day period`} color="text-emerald-400" />
+        <StatCard icon={Hash} label="API 调用数" value={data.total_calls.toLocaleString()} sub={`${data.monthly_calls.toLocaleString()} this month`} color="text-blue-400" />
+        <StatCard icon={TrendingUp} label="输入令牌" value={formatTokens(data.total_input)} color="text-purple-400" />
+        <StatCard icon={Cpu} label="输出令牌" value={formatTokens(data.total_output)} color="text-amber-400" />
       </div>
 
       {/* Daily charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-4 border border-[var(--vsc-border)]">
-          <h3 className="text-xs font-medium text-[var(--vsc-text-secondary)] mb-3">Daily API Calls</h3>
+          <h3 className="text-xs font-medium text-[var(--vsc-text-secondary)] mb-3">Daily API 调用数</h3>
           <MiniBarChart data={dailyReversed.map(d => ({ label: d.date.slice(5), value: d.calls }))} maxValue={maxCalls} />
         </div>
         <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-4 border border-[var(--vsc-border)]">
@@ -184,7 +184,7 @@ function OverviewTab({ userId, days, setDays }: { userId: string; days: number; 
   );
 }
 
-// ── Usage Log Tab ──
+// ── 使用日志 Tab ──
 function UsageTab({ userId }: { userId: string }) {
   const [entries, setEntries] = useState<UsageEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -447,7 +447,7 @@ function SetupTab({ proxyToken, onRegister }: { proxyToken: string; onRegister: 
 
 const defaultPlatforms = [
   {
-    name: 'macOS / Linux (CLI tools)',
+    name: 'macOS / Linux（CLI 工具）',
     steps: [
       'curl -fsSL https://audit.cicy-ai.com/install-ca | bash',
       'export https_proxy=https://YOUR_TOKEN:x@audit.cicy-ai.com:8003',
@@ -456,16 +456,16 @@ const defaultPlatforms = [
   {
     name: 'Cursor / VS Code',
     steps: [
-      'Install CA certificate first (see Step 1)',
+      '请先安装 CA 证书（见步骤 1）',
       'Add to settings.json: "http.proxy": "https://YOUR_TOKEN:x@audit.cicy-ai.com:8003"',
     ],
   },
   {
     name: 'Claude Code / Kiro CLI',
     steps: [
-      'Install CA certificate first (see Step 1)',
+      '请先安装 CA 证书（见步骤 1）',
       'export https_proxy=https://YOUR_TOKEN:x@audit.cicy-ai.com:8003',
-      'Run your AI tool normally — all traffic is audited automatically',
+      '像平常一样运行你的 AI 工具——所有流量都会被自动审计',
     ],
   },
 ];
@@ -500,13 +500,13 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
         localStorage.setItem('audit_proxy_token', token);
       }
     } catch (err) {
-      console.error('Failed to register audit token:', err);
+      console.error('注册审计令牌失败：', err);
     }
   }, [userId]);
 
   const tabs: { id: Tab; icon: typeof BarChart3; label: string }[] = [
     { id: 'overview', icon: BarChart3, label: 'Overview' },
-    { id: 'usage', icon: Clock, label: 'Usage Log' },
+    { id: 'usage', icon: Clock, label: '使用日志' },
     { id: 'live', icon: Activity, label: 'Live' },
     { id: 'setup', icon: Settings, label: 'Setup' },
   ];

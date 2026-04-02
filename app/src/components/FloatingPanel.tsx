@@ -201,7 +201,7 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
                 <button 
                     onClick={(e) => { e.stopPropagation(); onClose(); }}
                     className="p-2 hover:bg-red-500/20 hover:text-red-400 rounded-lg text-vsc-text-secondary transition-colors ml-1 md:ml-2"
-                    title="Close Panel"
+                    title="关闭面板"
                 >
                     <X size={18} />
                 </button>

@@ -5,8 +5,6 @@ set -euo pipefail
 
 NODES_FILE="${CICY_NODES_FILE:-$HOME/Private/cicy-node.json}"
 LEGACY_NODES_FILE="$HOME/Private/cicy-nodes.json"
-REGISTRY="${CICY_REGISTRY:-}"
-REGISTRY_SECRET="${CICY_REGISTRY_SECRET:-}"
 
 ensure_nodes_file() {
   if [ -f "$NODES_FILE" ]; then
@@ -45,26 +43,6 @@ fi
 
 _node_get() {
   local key="$1"
-  if [ -n "$REGISTRY" ]; then
-    NODE_ENV_VAL="$NODE" REGISTRY_ENV_VAL="$REGISTRY" REGISTRY_SECRET_ENV_VAL="$REGISTRY_SECRET" KEY_ENV_VAL="$key" python3 - <<'PY' 2>/dev/null && return
-import json, os, sys, urllib.request
-node = os.environ.get('NODE_ENV_VAL', '')
-url = os.environ.get('REGISTRY_ENV_VAL', '') + '/nodes'
-secret = os.environ.get('REGISTRY_SECRET_ENV_VAL', '')
-key = os.environ.get('KEY_ENV_VAL', '')
-headers = {'Authorization': 'Bearer ' + secret} if secret else {}
-req = urllib.request.Request(url, headers=headers)
-try:
-    data = json.loads(urllib.request.urlopen(req, timeout=3).read())
-    items = data.get('instances') or data.get('nodes', [])
-    target = next((n for n in items if n.get('instance_key') == node or n.get('machine_key') == node or n.get('id') == node or n.get('label') == node), None)
-    if not target:
-        sys.exit(1)
-    print(target.get(key, ''))
-except Exception:
-    sys.exit(1)
-PY
-  fi
   [ -f "$NODES_FILE" ] || { echo ""; return; }
   NODE_ENV_VAL="$NODE" NODES_FILE_ENV_VAL="$NODES_FILE" KEY_ENV_VAL="$key" python3 - <<'PY' 2>/dev/null
 import json, os, sys
@@ -82,6 +60,12 @@ lookup = {
     'instance_label': target.get('label') or target.get('machine_key'),
     **target,
 }
+# flatten capabilities for convenience keys like supports_tmux
+caps = target.get('capabilities') or {}
+if isinstance(caps, dict):
+    for k2, v2 in caps.items():
+        if k2 not in lookup:
+            lookup[k2] = v2
 print(lookup.get(key, ''))
 PY
 }
@@ -98,16 +82,17 @@ fi
 
 AUTH=(-H "Authorization: Bearer $TOKEN")
 json_headers=(-H "Content-Type: application/json")
-RUNTIME_KIND="$(_node_get runtime_kind 2>/dev/null || true)"
 SUPPORTS_TMUX="$(_node_get supports_tmux 2>/dev/null || true)"
+SUPPORTS_TTYD="$(_node_get supports_ttyd 2>/dev/null || true)"
+SUPPORTS_CODE_SERVER="$(_node_get supports_code_server 2>/dev/null || true)"
 
-is_cloudrun_node() {
-  [ "$RUNTIME_KIND" = "cloudrun" ] || [ "$SUPPORTS_TMUX" = "False" ] || [ "$SUPPORTS_TMUX" = "false" ]
+has_false_capability() {
+  [ "$1" = "False" ] || [ "$1" = "false" ] || [ "$1" = "0" ]
 }
 
 require_tmux_support() {
-  if is_cloudrun_node; then
-    echo "❌ 实例 '${NODE:-default}' 是 cloudrun/API-only 节点，不支持 tmux/ttyd/code-server 接口"
+  if has_false_capability "$SUPPORTS_TMUX" || has_false_capability "$SUPPORTS_TTYD" || has_false_capability "$SUPPORTS_CODE_SERVER"; then
+    echo "❌ 实例 '${NODE:-default}' 显式声明不支持 tmux/ttyd/code-server 接口"
     exit 1
   fi
 }
@@ -449,11 +434,8 @@ Instances:
   instances | instance-ls
   instance-sync [json]
   instance-register <json>
-  instance-add <name> <url> <token>
-  instance-rm <name>
-  instance-use <name>
-  instance-ping [name]
 
+Use `cicy-master` to add/remove/select nodes in the local registry.
 Other convenience commands remain available.
 Config: $NODES_FILE
 HELP

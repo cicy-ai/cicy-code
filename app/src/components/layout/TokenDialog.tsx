@@ -60,7 +60,7 @@ export default function TokenDialog({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06] shrink-0">
           <div className="flex items-center gap-2">
             <Key className="w-4 h-4 text-zinc-400" />
-            <h2 className="text-[15px] font-semibold text-white">API Tokens</h2>
+            <h2 className="text-[15px] font-semibold text-white">API 令牌</h2>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors cursor-pointer">
             <X className="w-4 h-4" />
@@ -70,7 +70,7 @@ export default function TokenDialog({ onClose }: { onClose: () => void }) {
         {/* Create */}
         <div className="px-5 py-4 border-b border-white/[0.06] space-y-3 shrink-0">
           <div className="flex gap-2">
-            <input value={note} onChange={e => setNote(e.target.value)} placeholder="Token note..."
+            <input value={note} onChange={e => setNote(e.target.value)} placeholder="令牌备注..."
               className="flex-1 bg-white/[0.03] border border-white/[0.08] text-zinc-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500/40 placeholder:text-zinc-700" />
             <button onClick={create} disabled={creating || !note.trim()}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium disabled:opacity-40 cursor-pointer transition-colors">

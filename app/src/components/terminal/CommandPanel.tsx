@@ -41,7 +41,7 @@ interface CommandPanelProps {
   networkLatency?: number | null;
   networkStatus?: 'excellent' | 'good' | 'poor' | 'offline';
   onDraggingChange?: (isDragging: boolean) => void;
-  boundAgents?: string[];
+  bound智能体?: string[];
   onPaneTargetChange?: (target: string) => void;
   disableDrag?: boolean;
   showVoiceControl?: boolean;
@@ -93,17 +93,17 @@ function useDraft(paneId: string) {
 }
 
 // ============================================================================
-// Send Logic (centralized)
+// 发送 Logic (centralized)
 // ============================================================================
 
-interface SendOptions {
+interface 发送Options {
   paneTarget: string;
   setSending: (v: boolean) => void;
   onSuccess?: () => void;
   onError?: (e: Error) => void;
 }
 
-async function sendPrompt(cmd: string, opts: SendOptions) {
+async function sendPrompt(cmd: string, opts: 发送Options) {
   const { paneTarget, setSending, onSuccess, onError } = opts;
   if (!cmd.trim() || !paneTarget) return false;
   
@@ -156,7 +156,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
   const [correctedResult, setCorrectedResult] = useState<[string, string] | null>(null);
   const [isCorrectingEnglish, setIsCorrectingEnglish] = useState(false);
   const [paneModes, setPaneModes] = useLocalStorage<Record<string, 'on' | 'off'>>('pane_mouse_modes', {});
-  const [enterToSend, setEnterToSend] = useLocalStorage('enter_to_send', true);
+  const [enterTo发送, setEnterTo发送] = useLocalStorage('enter_to_send', true);
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const selectedPaneRef = useRef(selectedPane);
@@ -191,7 +191,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
   }));
 
   // ---- Handlers ----
-  const handleSend = useCallback(async (text?: string) => {
+  const handle发送 = useCallback(async (text?: string) => {
     const cmd = (text ?? promptText).trim();
     
     // Block while sending (except slash commands)
@@ -264,7 +264,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
             onShowCorrection?.(data.result);
           } else {
             setPromptText(cmd); saveDraft(cmd);
-            window.dispatchEvent(new CustomEvent('show-toast', { detail: `Error: ${data.error || 'Correction failed'}` }));
+            window.dispatchEvent(new CustomEvent('show-toast', { detail: `Error: ${data.error || '修正失败'}` }));
           }
         } catch (err: any) {
           setPromptText(cmd); saveDraft(cmd);
@@ -295,12 +295,12 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
     // Enter = send
     if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
       if (sending) {
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Agent is working, please wait...' }));
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: '智能体正在工作，请稍候...' }));
         return;
       }
       
-      const shouldSend = enterToSend ? !e.shiftKey : e.shiftKey;
-      if (!shouldSend) return; // newline
+      const should发送 = enterTo发送 ? !e.shiftKey : e.shiftKey;
+      if (!should发送) return; // newline
       
       e.preventDefault();
       
@@ -312,9 +312,9 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
         return;
       }
       
-      // Send or send Enter key
+      // 发送 or send Enter key
       if (promptText.trim()) {
-        await handleSend();
+        await handle发送();
       } else {
         await apiService.sendKeys(selectedPane, 'Enter');
       }
@@ -354,7 +354,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
         }
       }
     }
-  }, [promptText, correctedResult, token, selectedPane, sending, enterToSend, commandHistory, historyIndex, tempDraft, paneTarget, addToHistory, saveDraft, setSending, onShowCorrection, onCorrectionLoading, handleSend]);
+  }, [promptText, correctedResult, token, selectedPane, sending, enterTo发送, commandHistory, historyIndex, tempDraft, paneTarget, addToHistory, saveDraft, setSending, onShowCorrection, onCorrectionLoading, handle发送]);
 
   const handleModelChange = useCallback(async (model: string) => {
     if (!model || sending) return;
@@ -405,17 +405,17 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
         <>
           <button
             type="button"
-            onClick={() => setEnterToSend(!enterToSend)}
+            onClick={() => setEnterTo发送(!enterTo发送)}
             className="cicy-btn text-xs px-1.5 py-0.5 border border-vsc-border select-none"
-            title={enterToSend ? 'Enter=Send, Shift+Enter=Newline' : 'Enter=Newline, Shift+Enter=Send'}
+            title={enterTo发送 ? 'Enter=发送，Shift+Enter=换行' : 'Enter=换行，Shift+Enter=发送'}
           >
-            {enterToSend ? '⏎Send' : '⇧⏎Send'}
+            {enterTo发送 ? '⏎发送' : '⇧⏎发送'}
           </button>
           {onToggleVoiceControl && (
             <button
               onClick={onToggleVoiceControl}
               className={`cicy-btn ${showVoiceControl ? 'text-red-400 bg-red-500/20' : ''}`}
-              title={showVoiceControl ? 'Hide voice mode' : 'Show voice mode'}
+              title={showVoiceControl ? '隐藏语音模式' : '显示语音模式'}
             >
               <Mic size={14} />
             </button>
@@ -428,10 +428,10 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
         </>
       }
     >
-      <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="relative h-full flex flex-col p-2">
-        {/* Send Button */}
+      <form onSubmit={(e) => { e.preventDefault(); handle发送(); }} className="relative h-full flex flex-col p-2">
+        {/* 发送 Button */}
         <div className="absolute top-3 right-3 z-10 flex gap-1">
-          <SendButton sending={sending} disabled={!promptText.trim()} onReset={() => setSending(false)} />
+          <发送Button sending={sending} disabled={!promptText.trim()} onReset={() => setSending(false)} />
         </div>
 
         {/* Textarea */}
@@ -441,7 +441,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
           value={promptText}
           onChange={(e) => { setPromptText(e.target.value); saveDraft(e.target.value); if (historyIndex === -1) setTempDraft(e.target.value); }}
           onKeyDown={handleKeyDown}
-          placeholder="Type command..."
+          placeholder="输入命令..."
           className="w-full h-full bg-transparent text-vsc-text rounded-md p-2.5 pr-10 outline-none resize-none text-sm transition-colors placeholder:text-vsc-text-muted/40"
           style={{ paddingRight: '44px' }}
         />
@@ -457,7 +457,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
 // Sub-components
 // ============================================================================
 
-function SendButton({ sending, disabled, onReset }: { sending: boolean; disabled: boolean; onReset: () => void }) {
+function 发送Button({ sending, disabled, onReset }: { sending: boolean; disabled: boolean; onReset: () => void }) {
   return (
     <button
       id="terminal-send-btn"
@@ -475,7 +475,7 @@ function SendButton({ sending, disabled, onReset }: { sending: boolean; disabled
       className={`p-1.5 rounded-md transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed ${
         sending ? 'bg-orange-500 text-white' : 'bg-vsc-accent hover:bg-vsc-accent-hover text-white'
       }`}
-      title={sending ? 'Click to stop' : 'Send'}
+      title={sending ? '点击停止' : '发送'}
     >
       {sending ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={14} />}
     </button>
@@ -488,7 +488,7 @@ function ModelSelect({ value, onChange }: { value: string; onChange: (v: string)
       value={value}
       onChange={(e) => e.target.value && onChange(e.target.value)}
       className="cicy-select"
-      title="Select model"
+      title="选择模型"
     >
       <option value="">🧠</option>
       <option value="claude-opus-4.6">opus-4.6</option>
@@ -527,7 +527,7 @@ const QuickCommands = React.memo(function QuickCommands({ onCmd }: { onCmd: (key
     <div className="flex gap-1 flex-wrap px-2 pb-1.5 pt-0.5">
       <button
         type="button"
-        title="Send Ctrl+C to interrupt (click twice)"
+        title="发送 Ctrl+C 中断（点击两次）"
         className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
           ctrlC.pending
             ? 'bg-red-500/40 text-red-300 animate-pulse'
@@ -535,11 +535,11 @@ const QuickCommands = React.memo(function QuickCommands({ onCmd }: { onCmd: (key
         }`}
         onClick={() => ctrlC.click(() => onCmd('C-c'))}
       >
-        {ctrlC.pending ? 'confirm?' : '^C'}
+        {ctrlC.pending ? '确认？' : '^C'}
       </button>
       <button
         type="button"
-        title="Compact chat history to save context (click twice)"
+        title="压缩聊天历史以节省上下文（点击两次）"
         className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
           compact.pending
             ? 'bg-purple-500/40 text-purple-300 animate-pulse'
@@ -547,7 +547,7 @@ const QuickCommands = React.memo(function QuickCommands({ onCmd }: { onCmd: (key
         }`}
         onClick={() => compact.click(() => onCmd(undefined, '/compact --truncate-large-messages true --max-message-length 500'))}
       >
-        {compact.pending ? 'confirm?' : '/compact cut'}
+        {compact.pending ? '确认？' : '/compact cut'}
       </button>
     </div>
   );

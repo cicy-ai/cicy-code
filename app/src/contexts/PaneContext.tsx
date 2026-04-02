@@ -58,7 +58,7 @@ interface PaneContextType {
   activeTab: string;
   setActiveTab: (tab: any) => void;
   agentsSubTab: 'All' | 'Binded';
-  setAgentsSubTab: (t: 'All' | 'Binded') => void;
+  set智能体SubTab: (t: 'All' | 'Binded') => void;
   previewTab: number;
   setPreviewTab: (t: number) => void;
 
@@ -126,9 +126,9 @@ export const PaneProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Tabs
   const [activeTab, setActiveTab] = useState<string>(() => {
-    return localStorage.getItem('activeTab') || 'Agents';
+    return localStorage.getItem('activeTab') || '智能体';
   });
-  const [agentsSubTab, setAgentsSubTab] = useState<'All' | 'Binded'>('All');
+  const [agentsSubTab, set智能体SubTab] = useState<'All' | 'Binded'>('All');
   const [previewTab, setPreviewTab] = useState<number>(() => {
     const saved = localStorage.getItem(`${CurrentPaneId}_previewTab`);
     return saved ? parseInt(saved) : 0;
@@ -164,7 +164,7 @@ export const PaneProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Derived
   const displayPaneId = currentPaneId!;
-  const displayPaneTitle = paneDetail?.title || currentPane?.title || displayPaneId || 'No pane selected';
+  const displayPaneTitle = paneDetail?.title || currentPane?.title || displayPaneId || '未选择窗格';
   const hasPermission = useCallback((perm: string) => userPerms.includes('api_full') || userPerms.includes(perm), [userPerms]);
 
   // Track visited panes
@@ -179,7 +179,7 @@ export const PaneProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Update document title
   useEffect(() => {
-    document.title = displayPaneTitle && displayPaneTitle !== 'No pane selected'
+    document.title = displayPaneTitle && displayPaneTitle !== '未选择窗格'
       ? `${displayPaneTitle} - CiCy` : 'CiCy IDE';
   }, [displayPaneTitle]);
 
@@ -309,7 +309,7 @@ export const PaneProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (data.status === 'running') break;
           } catch {}
         }
-      } catch (e) { console.error(e); alert('Restart failed'); }
+      } catch (e) { console.error(e); alert('重启失败'); }
       finally { setIsRestarting(false); }
     });
   }, [displayPaneId, confirm]);
@@ -324,7 +324,7 @@ export const PaneProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     ttydWidth, setTtydWidth, isDragging, setIsDragging, isInteracting, setIsInteracting, commandPanelHeight,
     leftCollapsed, setLeftCollapsed: (v: boolean) => { setLeftCollapsed(v); localStorage.setItem('leftCollapsed', String(v)); },
     rightCollapsed, setRightCollapsed: (v: boolean) => { setRightCollapsed(v); localStorage.setItem('rightCollapsed', String(v)); },
-    activeTab, setActiveTab, agentsSubTab, setAgentsSubTab, previewTab, setPreviewTab,
+    activeTab, setActiveTab, agentsSubTab, set智能体SubTab, previewTab, setPreviewTab,
     agentStatus, contextUsage, mouseMode, readOnly, setReadOnly, isRestarting,
     agentTabs, setAgentTabs, activeAgentTab, setActiveAgentTab,
     visitedPanes,

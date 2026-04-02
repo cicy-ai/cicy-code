@@ -4,6 +4,8 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 )
 
@@ -13,6 +15,12 @@ var uiFS embed.FS
 func serveUI() http.Handler {
 	sub, _ := fs.Sub(uiFS, "ui")
 	fileServer := http.FileServer(http.FS(sub))
+	var devProxy *httputil.ReverseProxy
+	if devMode {
+		if target, err := url.Parse("http://127.0.0.1:8022"); err == nil {
+			devProxy = httputil.NewSingleHostReverseProxy(target)
+		}
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// API 请求不走这里
@@ -26,6 +34,11 @@ func serveUI() http.Handler {
 			strings.HasPrefix(r.URL.Path, "/oauth/") ||
 			strings.HasPrefix(r.URL.Path, "/stt") {
 			http.NotFound(w, r)
+			return
+		}
+
+		if devProxy != nil {
+			devProxy.ServeHTTP(w, r)
 			return
 		}
 

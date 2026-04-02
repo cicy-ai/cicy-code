@@ -70,18 +70,18 @@ func startInstance(paneID string, port int, token string) error {
 	}
 	opts := &server.Options{
 		Address: "127.0.0.1", Port: fmt.Sprintf("%d", port),
-		PermitWrite: true,
-		TitleFormat: "{{ .command }}@{{ .hostname }}",
+		PermitWrite:     true,
+		TitleFormat:     "w-1000x@{{ .hostname }}",
 		EnableReconnect: true, ReconnectTime: 30,
 		Term: "xterm-256color", WSOrigin: ".*", PermitArguments: true,
 		Preferences: &server.HtermPrefernces{
-			ForegroundColor:           "#c0c0c0",
-			FontSize:                  10,
-			CopyOnSelect:              true,
-			CtrlCCopy:                 true,
-			CtrlVPaste:                true,
-			UseDefaultWindowCopy:      true,
-			ClearSelectionAfterCopy:   false,
+			ForegroundColor:         "#c0c0c0",
+			FontSize:                10,
+			CopyOnSelect:            true,
+			CtrlCCopy:               true,
+			CtrlVPaste:              true,
+			UseDefaultWindowCopy:    true,
+			ClearSelectionAfterCopy: false,
 		},
 	}
 	factory, err := localcommand.NewFactory("tmux", []string{"attach", "-t", paneID}, &localcommand.Options{CloseSignal: 1, CloseTimeout: -1})
@@ -138,7 +138,9 @@ func waitPort(port int, timeout time.Duration) bool {
 
 func isPortListening(port int) bool {
 	c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
-	if err != nil { return false }
+	if err != nil {
+		return false
+	}
 	c.Close()
 	return true
 }

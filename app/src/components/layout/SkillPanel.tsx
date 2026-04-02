@@ -36,7 +36,7 @@ export default function SkillPanel({ paneId }: { paneId: string }) {
   useEffect(() => {
     Promise.all([
       apiService.getSkills(),
-      apiService.getAgentsByPane(paneId),
+      apiService.get智能体ByPane(paneId),
       apiService.getMachines(),
     ]).then(([sRes, bRes, mRes]) => {
       setSkills(Array.isArray(sRes.data?.skills) ? sRes.data.skills : []);

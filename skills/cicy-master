@@ -1,0 +1,680 @@
+#!/usr/bin/env python3
+
+import argparse
+import copy
+import fcntl
+import json
+import os
+import sys
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List
+
+
+DEFAULT_PORT = 8008
+
+
+def now_rfc3339() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def first_non_empty(*values: Any) -> str:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def bool_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "online"}
+    return False
+
+
+def int_value(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return 0
+        try:
+            return int(text)
+        except ValueError:
+            return 0
+    return 0
+
+
+def nodes_file_path() -> Path:
+    override = os.environ.get("CICY_NODES_FILE", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / "Private" / "cicy-node.json"
+
+
+def legacy_nodes_file_path() -> Path:
+    return Path.home() / "Private" / "cicy-nodes.json"
+
+
+def make_instance_view(item: Dict[str, Any]) -> Dict[str, Any]:
+    view = copy.deepcopy(item)
+    view["instance_key"] = item.get("machine_key", "")
+    view["instance_id"] = first_non_empty(item.get("instance_id"), item.get("machine_key"), item.get("id"))
+    view["instance_label"] = first_non_empty(item.get("label"), item.get("machine_key"))
+    caps = item.get("capabilities")
+    runtime_kind = "container"
+    if isinstance(caps, dict):
+        runtime_kind = first_non_empty(caps.get("runtime_kind"), runtime_kind)
+    view["runtime_kind"] = runtime_kind
+    return view
+
+
+def normalize_machine(node: Dict[str, Any], *, current_time: str | None = None) -> Dict[str, Any]:
+    normalized = copy.deepcopy(node) if isinstance(node, dict) else {}
+
+    url = first_non_empty(normalized.get("url"), normalized.get("endpoint"))
+    machine_key = first_non_empty(
+        normalized.get("machine_key"),
+        normalized.get("instance_key"),
+        normalized.get("instance_id"),
+        normalized.get("id"),
+    )
+    machine_id = first_non_empty(
+        normalized.get("id"),
+        normalized.get("instance_id"),
+        normalized.get("machine_key"),
+    )
+
+    if not machine_key:
+        machine_key = machine_id
+    if not machine_id:
+        machine_id = machine_key
+    if not machine_key:
+        machine_key = url
+    if not machine_id:
+        machine_id = machine_key
+
+    label = first_non_empty(normalized.get("label"), normalized.get("instance_label"))
+    if not label:
+        label = first_non_empty(machine_key, machine_id, url)
+
+    port = int_value(normalized.get("port"))
+    if port == 0:
+        port = DEFAULT_PORT
+
+    online = bool_value(normalized.get("online"))
+    status = first_non_empty(normalized.get("status"))
+    if online:
+        status = "online"
+    elif not status:
+        status = "offline"
+
+    last_seen_at = first_non_empty(normalized.get("last_seen_at"))
+    if online and not last_seen_at:
+        last_seen_at = current_time or now_rfc3339()
+
+    capabilities = normalized.get("capabilities")
+    if not isinstance(capabilities, dict):
+        capabilities = {}
+    else:
+        capabilities = copy.deepcopy(capabilities)
+    if "runtime_kind" not in capabilities:
+        capabilities["runtime_kind"] = "container"
+
+    return {
+        "id": machine_id,
+        "machine_key": machine_key,
+        "label": label,
+        "host": first_non_empty(normalized.get("host")),
+        "port": port,
+        "url": url,
+        "token": first_non_empty(normalized.get("token")),
+        "status": status,
+        "online": online,
+        "last_seen_at": last_seen_at,
+        "capabilities": capabilities,
+    }
+
+
+def normalize_registry(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    raw_machines = cfg.get("machines")
+    if not isinstance(raw_machines, list):
+        raw_machines = []
+
+    seen = set()
+    machines: List[Dict[str, Any]] = []
+    for raw in raw_machines:
+        normalized = normalize_machine(raw)
+        key = normalized.get("machine_key", "")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        machines.append(normalized)
+
+    machines.sort(key=lambda item: item.get("machine_key", ""))
+
+    default_key = first_non_empty(cfg.get("default"))
+    valid_keys = {item["machine_key"] for item in machines}
+    if default_key and default_key not in valid_keys:
+        default_key = ""
+    if not default_key and machines:
+        default_key = machines[0]["machine_key"]
+
+    return {
+        "default": default_key,
+        "machines": machines,
+    }
+
+
+def load_registry_unlocked(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {"default": "", "machines": []}
+    with path.open("r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    if not isinstance(data, dict):
+        return {"default": "", "machines": []}
+    return normalize_registry(data)
+
+
+def write_registry_unlocked(path: Path, cfg: Dict[str, Any]) -> None:
+    cfg = normalize_registry(cfg)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(cfg, fh, indent=2, ensure_ascii=False)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+
+
+class RegistryLock:
+    def __init__(self, path: Path):
+        self.path = path
+        self.lock_path = Path(f"{path}.lock")
+        self.lock_fh = None
+
+    def __enter__(self):
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_fh = self.lock_path.open("a+")
+        fcntl.flock(self.lock_fh.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.lock_fh is not None:
+            fcntl.flock(self.lock_fh.fileno(), fcntl.LOCK_UN)
+            self.lock_fh.close()
+        return False
+
+
+def legacy_to_registry(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {"default": "", "machines": []}
+    with path.open("r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    default_key = first_non_empty(data.get("default")) if isinstance(data, dict) else ""
+    nodes = data.get("nodes") if isinstance(data, dict) else {}
+    machines: List[Dict[str, Any]] = []
+    if isinstance(nodes, dict):
+        for key, item in nodes.items():
+            source = item if isinstance(item, dict) else {}
+            machines.append(
+                normalize_machine(
+                    {
+                        "id": key,
+                        "machine_key": key,
+                        "label": source.get("label"),
+                        "host": source.get("host"),
+                        "port": source.get("port"),
+                        "url": source.get("url"),
+                        "token": source.get("token"),
+                        "status": source.get("status"),
+                        "online": source.get("online"),
+                        "last_seen_at": source.get("last_seen_at"),
+                        "capabilities": source.get("capabilities"),
+                    }
+                )
+            )
+    return normalize_registry({"default": default_key, "machines": machines})
+
+
+def merge_machine_records(existing: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
+    existing = normalize_machine(existing)
+    updates = copy.deepcopy(updates) if isinstance(updates, dict) else {}
+
+    merged = copy.deepcopy(existing)
+    explicit_keys = ["id", "machine_key", "label", "host", "port", "url", "token", "status", "online", "last_seen_at"]
+    for key in explicit_keys:
+        if key in updates and updates[key] is not None:
+            merged[key] = updates[key]
+
+    if "endpoint" in updates and updates["endpoint"] is not None:
+        merged["url"] = updates["endpoint"]
+    if "instance_key" in updates and updates["instance_key"] is not None and "machine_key" not in updates:
+        merged["machine_key"] = updates["instance_key"]
+    if "instance_id" in updates and updates["instance_id"] is not None and "id" not in updates:
+        merged["id"] = updates["instance_id"]
+    if "instance_label" in updates and updates["instance_label"] is not None and "label" not in updates:
+        merged["label"] = updates["instance_label"]
+
+    capabilities = copy.deepcopy(existing.get("capabilities") if isinstance(existing.get("capabilities"), dict) else {})
+    incoming_caps = updates.get("capabilities")
+    if isinstance(incoming_caps, dict):
+        capabilities.update(incoming_caps)
+    merged["capabilities"] = capabilities
+
+    return normalize_machine(merged)
+
+
+def merge_registries(base: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+    base = normalize_registry(base)
+    incoming = normalize_registry(incoming)
+    merged = {"default": base.get("default", ""), "machines": list(base.get("machines", []))}
+    seen = {item["machine_key"] for item in merged["machines"]}
+    for item in incoming.get("machines", []):
+        key = item["machine_key"]
+        if key in seen:
+            continue
+        merged["machines"].append(item)
+        seen.add(key)
+    if not merged["default"]:
+        candidate = first_non_empty(incoming.get("default"))
+        if candidate in seen:
+            merged["default"] = candidate
+    return normalize_registry(merged)
+
+
+def fetch_registry_file(registry_url: str, registry_secret: str) -> Dict[str, Any]:
+    url = registry_url.strip()
+    if not url:
+        return {"default": "", "machines": []}
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme in {"http", "https"}:
+        fetch_url = url.rstrip("/")
+        if not parsed.path or parsed.path == "/":
+            fetch_url = fetch_url + "/nodes"
+        headers = {"Accept": "application/json"}
+        if registry_secret:
+            headers["Authorization"] = f"Bearer {registry_secret}"
+        req = urllib.request.Request(fetch_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(payload, dict):
+            return {"default": "", "machines": []}
+        if isinstance(payload.get("machines"), list):
+            return normalize_registry(payload)
+        items = payload.get("instances") or payload.get("nodes") or []
+        return normalize_registry({"default": payload.get("default", ""), "machines": items})
+    return load_registry_unlocked(Path(url).expanduser())
+
+
+def request_node(machine: Dict[str, Any], endpoint: str) -> Dict[str, Any]:
+    url = machine.get("url", "").rstrip("/") + endpoint
+    headers = {"Accept": "application/json"}
+    token = machine.get("token", "")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            parsed: Any = None
+            try:
+                parsed = json.loads(body) if body else None
+            except json.JSONDecodeError:
+                parsed = body
+            return {
+                "ok": 200 <= resp.status < 300,
+                "status_code": resp.status,
+                "endpoint": endpoint,
+                "url": url,
+                "body": parsed,
+                "error": "",
+            }
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        return {
+            "ok": False,
+            "status_code": exc.code,
+            "endpoint": endpoint,
+            "url": url,
+            "body": body,
+            "error": f"HTTP {exc.code}",
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "status_code": 0,
+            "endpoint": endpoint,
+            "url": url,
+            "body": "",
+            "error": str(exc),
+        }
+
+
+def print_registry_table(cfg: Dict[str, Any]) -> None:
+    machines = cfg.get("machines", [])
+    if not machines:
+        print("(no machines)")
+        return
+    default_key = cfg.get("default", "")
+    headers = ["default", "machine_key", "label", "status", "online", "runtime_kind", "url"]
+    rows: List[List[str]] = []
+    for item in machines:
+        caps = item.get("capabilities") if isinstance(item.get("capabilities"), dict) else {}
+        rows.append(
+            [
+                "*" if item.get("machine_key") == default_key else "",
+                str(item.get("machine_key", "")),
+                str(item.get("label", "")),
+                str(item.get("status", "")),
+                "true" if bool(item.get("online")) else "false",
+                str(caps.get("runtime_kind", "container")),
+                str(item.get("url", "")),
+            ]
+        )
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for idx, cell in enumerate(row):
+            widths[idx] = max(widths[idx], len(cell))
+    fmt = "  ".join("{:<" + str(width) + "}" for width in widths)
+    print(fmt.format(*headers))
+    for row in rows:
+        print(fmt.format(*row))
+
+
+def print_json(payload: Dict[str, Any]) -> None:
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def command_list(args: argparse.Namespace) -> int:
+    cfg = load_registry_unlocked(nodes_file_path())
+    payload = {
+        "default": cfg.get("default", ""),
+        "config_path": str(nodes_file_path()),
+        "machines": cfg.get("machines", []),
+        "instances": [make_instance_view(item) for item in cfg.get("machines", [])],
+    }
+    if args.json:
+        print_json(payload)
+    else:
+        print_registry_table(cfg)
+    return 0
+
+
+def parse_capabilities(items: List[str]) -> Dict[str, Any]:
+    caps: Dict[str, Any] = {}
+    for item in items:
+        if "=" not in item:
+            raise SystemExit(f"invalid --capability '{item}', expected KEY=VALUE")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise SystemExit("capability key must not be empty")
+        text = value.strip()
+        if text.lower() in {"true", "false"}:
+            caps[key] = text.lower() == "true"
+        else:
+            try:
+                caps[key] = json.loads(text)
+            except json.JSONDecodeError:
+                caps[key] = text
+    return caps
+
+
+def command_register(args: argparse.Namespace) -> int:
+    machine_key = first_non_empty(args.machine_key, args.instance_key, args.instance_id, args.id)
+    url = first_non_empty(args.url, args.endpoint)
+
+    if not machine_key:
+        raise SystemExit("register requires machine_key (or instance-style alias)")
+    if not url:
+        raise SystemExit("register requires url")
+
+    incoming: Dict[str, Any] = {
+        "machine_key": machine_key,
+        "url": url,
+        # optional fields only included when provided
+        "id": args.id if args.id is not None else None,
+        "label": args.label if args.label is not None else None,
+        "host": args.host if args.host is not None else None,
+        "port": args.port if args.port is not None else None,
+        "token": args.token if args.token is not None else None,
+        "status": args.status if args.status is not None else None,
+        "online": True if args.online else (None),
+        "last_seen_at": args.last_seen_at if args.last_seen_at is not None else None,
+        "instance_key": args.instance_key if args.instance_key is not None else None,
+        "instance_id": args.instance_id if args.instance_id is not None else None,
+        "instance_label": args.instance_label if args.instance_label is not None else None,
+        "capabilities": {**parse_capabilities(args.capability), **({"runtime_kind": args.runtime_kind} if args.runtime_kind else {})},
+    }
+
+    path = nodes_file_path()
+    with RegistryLock(path):
+        cfg = load_registry_unlocked(path)
+
+        existing = next((m for m in cfg.get("machines", []) if m.get("machine_key") == machine_key), None)
+        if existing:
+            machine = merge_machine_records(existing, incoming)
+            for idx, item in enumerate(cfg["machines"]):
+                if item.get("machine_key") == machine_key:
+                    cfg["machines"][idx] = machine
+                    break
+        else:
+            machine = normalize_machine(incoming)
+            cfg["machines"].append(machine)
+
+        if args.set_default or not cfg.get("default"):
+            cfg["default"] = machine["machine_key"]
+        cfg = normalize_registry(cfg)
+        write_registry_unlocked(path, cfg)
+
+    payload = {
+        "success": True,
+        "config_path": str(path),
+        "machine": machine,
+        "instance": make_instance_view(machine),
+    }
+    if args.json:
+        print_json(payload)
+    else:
+        print(f"registered {machine['machine_key']} -> {machine['url']}")
+    return 0
+
+
+def command_sync(args: argparse.Namespace) -> int:
+    path = nodes_file_path()
+    with RegistryLock(path):
+        cfg = load_registry_unlocked(path)
+        if args.from_registry:
+            cfg = merge_registries(cfg, fetch_registry_file(args.from_registry, args.registry_secret or ""))
+        if args.migrate_legacy:
+            cfg = merge_registries(cfg, legacy_to_registry(legacy_nodes_file_path()))
+        if args.merge_file:
+            merge_path = Path(args.merge_file).expanduser()
+            cfg = merge_registries(cfg, load_registry_unlocked(merge_path))
+        cfg = normalize_registry(cfg)
+        write_registry_unlocked(path, cfg)
+
+    payload = {
+        "success": True,
+        "config_path": str(path),
+        "default": cfg.get("default", ""),
+        "machines": cfg.get("machines", []),
+        "instances": [make_instance_view(item) for item in cfg.get("machines", [])],
+    }
+    if args.json:
+        print_json(payload)
+    else:
+        print(f"synced {len(cfg.get('machines', []))} machine(s)")
+    return 0
+
+
+def select_targets(cfg: Dict[str, Any], key: str | None, all_nodes: bool) -> List[Dict[str, Any]]:
+    machines = cfg.get("machines", [])
+    if all_nodes:
+        return list(machines)
+    target_key = first_non_empty(key, cfg.get("default"))
+    if not target_key:
+        raise SystemExit("no target specified and no default machine configured")
+    for item in machines:
+        if item.get("machine_key") == target_key or item.get("id") == target_key or item.get("label") == target_key:
+            return [item]
+    raise SystemExit(f"machine '{target_key}' not found")
+
+
+def command_probe(args: argparse.Namespace, endpoint: str) -> int:
+    path = nodes_file_path()
+    cfg = load_registry_unlocked(path)
+    targets = select_targets(cfg, args.machine, args.all)
+    now = now_rfc3339()
+    results: List[Dict[str, Any]] = []
+    updates: Dict[str, Dict[str, Any]] = {}
+
+    for item in targets:
+        result = request_node(item, endpoint)
+        enriched = {
+            "machine_key": item.get("machine_key", ""),
+            "label": item.get("label", ""),
+            **result,
+        }
+        results.append(enriched)
+        if args.write:
+            updated = copy.deepcopy(item)
+            if result["ok"]:
+                updated["online"] = True
+                updated["status"] = "online"
+                updated["last_seen_at"] = now
+            else:
+                updated["online"] = False
+                updated["status"] = "offline"
+            updates[item["machine_key"]] = normalize_machine(updated, current_time=now)
+
+    if args.write:
+        with RegistryLock(path):
+            latest = load_registry_unlocked(path)
+            latest_machines = []
+            for item in latest.get("machines", []):
+                replacement = updates.get(item["machine_key"])
+                latest_machines.append(replacement if replacement else item)
+            latest["machines"] = latest_machines
+            latest = normalize_registry(latest)
+            write_registry_unlocked(path, latest)
+
+    payload = {
+        "success": all(item["ok"] for item in results),
+        "config_path": str(path),
+        "results": results,
+    }
+    print_json(payload)
+    return 0 if payload["success"] else 1
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="cicy-master",
+        description="Manage cicy-code node registry from the local canonical registry file.",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    list_parser = sub.add_parser("list", help="List machines from the local registry")
+    list_parser.add_argument("--json", action="store_true", help="Print JSON output")
+    list_parser.set_defaults(func=command_list)
+
+    register_parser = sub.add_parser("register", help="Register or update one machine by machine_key")
+    register_parser.add_argument("machine_key", nargs="?", help="Canonical machine key")
+    register_parser.add_argument("url", nargs="?", help="Canonical node URL")
+    register_parser.add_argument("--id", dest="id", help="Canonical id")
+    register_parser.add_argument("--label", help="Canonical label")
+    register_parser.add_argument("--host", help="Host value to persist")
+    register_parser.add_argument("--port", type=int, help="Port value to persist")
+    register_parser.add_argument("--token", help="Long-lived per-node API token")
+    register_parser.add_argument("--status", help="Initial status")
+    register_parser.add_argument("--online", action="store_true", help="Mark node online")
+    register_parser.add_argument("--last-seen-at", help="Explicit last_seen_at value")
+    register_parser.add_argument("--runtime-kind", help="Set capabilities.runtime_kind")
+    register_parser.add_argument("--capability", action="append", default=[], help="Additional capability KEY=VALUE")
+    register_parser.add_argument("--set-default", action="store_true", help="Set this node as default")
+    register_parser.add_argument("--json", action="store_true", help="Print JSON output")
+    register_parser.add_argument("--instance-key", help="Alias for machine_key")
+    register_parser.add_argument("--instance-id", help="Alias for id/machine_key")
+    register_parser.add_argument("--instance-label", help="Alias for label")
+    register_parser.add_argument("--endpoint", help="Alias for url")
+    register_parser.set_defaults(
+        func=lambda args: command_register(
+            argparse.Namespace(
+                machine_key=first_non_empty(args.machine_key, args.instance_key),
+                url=first_non_empty(args.url, args.endpoint),
+                id=args.id,
+                label=args.label,
+                host=args.host,
+                port=args.port,
+                token=args.token,
+                status=args.status,
+                online=args.online,
+                last_seen_at=args.last_seen_at,
+                runtime_kind=args.runtime_kind,
+                capability=args.capability,
+                set_default=args.set_default,
+                json=args.json,
+                instance_key=args.instance_key,
+                instance_id=args.instance_id,
+                instance_label=args.instance_label,
+                endpoint=args.endpoint,
+            )
+        )
+    )
+
+    sync_parser = sub.add_parser("sync", help="Normalize, dedupe, sort, and optionally merge registry inputs")
+    sync_parser.add_argument("--from-registry", help="Fetch registry data from a URL/path and merge it while local remains authoritative")
+    sync_parser.add_argument("--registry-secret", help="Bearer token for --from-registry HTTP fetch")
+    sync_parser.add_argument("--migrate-legacy", action="store_true", help="Import missing entries from legacy ~/Private/cicy-nodes.json")
+    sync_parser.add_argument("--merge-file", help="Additional canonical registry file to merge; local file remains authoritative")
+    sync_parser.add_argument("--json", action="store_true", help="Print JSON output")
+    sync_parser.set_defaults(func=command_sync)
+
+    for name in ("ping", "health"):
+        probe_parser = sub.add_parser(name, help=f"Probe /api/{name} on one or more nodes")
+        probe_parser.add_argument("machine", nargs="?", help="Machine key/label/id; defaults to registry default")
+        probe_parser.add_argument("--all", action="store_true", help="Probe all machines")
+        probe_parser.add_argument("--write", action="store_true", help="Persist online/status/last_seen_at to registry")
+        probe_parser.set_defaults(func=(lambda endpoint: (lambda args: command_probe(args, endpoint)))(f"/api/{name}"))
+
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except BrokenPipeError:
+        raise SystemExit(1)
