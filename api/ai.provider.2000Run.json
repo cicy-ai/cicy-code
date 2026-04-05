@@ -1,0 +1,11 @@
+{
+  "2000Run": {
+    "apiKey": "",
+    "apiUrl": "http://2000.run:6543/v1",
+    "anthropicUrl": "http://2000.run:6543",
+    "defaultModel": "shibacc/claude-sonnet-4-6",
+    "claudeModel": "opus[1m]",
+    "codexModel": "gpt-5.4",
+    "openclawModel": "gpt-5.4"
+  }
+}
