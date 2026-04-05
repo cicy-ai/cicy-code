@@ -484,6 +484,7 @@ def run_docker(ports):
         "-e", f"CICY_CLAUDE_MODEL={os.environ.get('CICY_CLAUDE_MODEL', 'opus[1m]')}",
         "-e", f"CICY_CODEX_MODEL={os.environ.get('CICY_CODEX_MODEL', 'gpt-5.4')}",
         "-e", f"CICY_OPENCLAW_MODEL={os.environ.get('CICY_OPENCLAW_MODEL', 'gpt-5.4')}",
+        "-e", "CICY_RUNTIME_KIND=local",
     ]
     
     run_cmd = [
@@ -491,7 +492,7 @@ def run_docker(ports):
         "--name", container_name,
     ] + env_vars + [
         "-p", f"{ports}:8008",
-        "cicy-code:latest", "--public"
+        "cicy-code:latest", "--public", "--agents=all"
     ]
     print(f"[dev] docker run: {' '.join(run_cmd)}")
     docker_run_started_at = time.time()
