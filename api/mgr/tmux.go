@@ -494,27 +494,15 @@ EOF`, tmuxShellQuote(approvalsPath)))
 		tmpGatewayLog := filepath.Join("/tmp", fmt.Sprintf("openclaw-gateway-%s.log", shortID))
 		lines = append(lines,
 			fmt.Sprintf(`openclaw_gateway_ready() {
-  timeout 2s bash <<'EOF' >/dev/null 2>&1
-exec 3<>/dev/tcp/127.0.0.1/%s || exit 1
-printf 'GET / HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n' >&3
-IFS= read -r status <&3 || exit 1
-case "$status" in
-  HTTP/*) exit 0 ;;
-  *) exit 1 ;;
-esac
-EOF
+  curl -fsS --max-time 2 http://127.0.0.1:%s/ >/dev/null 2>&1
 }`, openClawPort()),
 			fmt.Sprintf(`gateway_log=%s`, tmuxShellQuote(tmpGatewayLog)),
 			`openclaw_gateway_running() {
-  pidof openclaw-gateway >/dev/null 2>&1 || pgrep -A -f 'openclaw gateway run' >/dev/null 2>&1
+  pidof openclaw-gateway >/dev/null 2>&1 || pgrep -A -f 'openclaw-gateway|openclaw gateway run' >/dev/null 2>&1
 }`,
-			fmt.Sprintf(`openclaw_gateway_started() {
-  [ -s "$gateway_log" ] || return 1
-  grep -Eq %s "$gateway_log"
-}`, tmuxShellQuote(`host mounted at http://127\.0\.0\.1:`+openClawPort()+`/__openclaw__/canvas/|\[gateway\].*listening on ws://127\.0\.0\.1:`+openClawPort()+`|\[gateway\]`)),
 			`if ! openclaw_gateway_ready; then`,
 			fmt.Sprintf("  echo %s", tmuxShellQuote("[cicy] preparing OpenClaw gateway ...")),
-			"  if ! pidof openclaw-gateway >/dev/null 2>&1 && ! pgrep -A -f 'openclaw gateway run' >/dev/null 2>&1; then",
+			"  if ! openclaw_gateway_running; then",
 			fmt.Sprintf("    echo %s", tmuxShellQuote("[cicy] starting gateway process ...")),
 			"    rm -f \"$gateway_log\"",
 			"    : > \"$gateway_log\"",
@@ -524,39 +512,27 @@ EOF
 			fmt.Sprintf("    echo %s", tmuxShellQuote("[cicy] gateway process already exists, waiting for readiness ...")),
 			"  fi",
 			"  gateway_ready=0",
-			"  gateway_started=0",
-			"  gateway_restarted=0",
+			"  gateway_conflict_seen=0",
 			"  last_log_seen=''",
 			"  for i in $(seq 1 60); do",
 			"    if openclaw_gateway_ready; then",
 			"      gateway_ready=1",
-			"      if [ \"$gateway_started\" -ne 1 ]; then",
-			fmt.Sprintf("        echo %s", tmuxShellQuote("[cicy] gateway endpoint is up before startup marker, continuing ...")),
-			"      fi",
 			fmt.Sprintf("      echo %s", tmuxShellQuote("[cicy] OpenClaw gateway ready.")),
 			"      break",
 			"    fi",
-			"    if [ \"$gateway_started\" -ne 1 ] && openclaw_gateway_started; then",
-			"      gateway_started=1",
-			fmt.Sprintf("      echo %s", tmuxShellQuote("[cicy] gateway log detected, checking endpoint ...")),
-			"    fi",
 			"    if [ -s \"$gateway_log\" ]; then",
 			"      last_log=$(tail -1 \"$gateway_log\" 2>/dev/null | sed 's/[^[:print:]\t]//g')",
-			"      if [ -n \"$last_log\" ] && [ \"$last_log\" != \"$last_log_seen\" ] && [ \"$gateway_started\" -ne 1 ]; then",
+			"      if [ -n \"$last_log\" ] && [ \"$last_log\" != \"$last_log_seen\" ]; then",
 			"        echo \"[cicy] gateway log :: $last_log\"",
 			"        last_log_seen=\"$last_log\"",
 			"      fi",
-			"    fi",
-			"    if [ \"$gateway_restarted\" -ne 1 ] && ! openclaw_gateway_running; then",
-			"      nohup openclaw gateway run --verbose >\"$gateway_log\" 2>&1 </dev/null &",
-			"      gateway_restarted=1",
+			fmt.Sprintf("      if [ \"$gateway_conflict_seen\" -ne 1 ] && grep -Eq %s \"$gateway_log\"; then", tmuxShellQuote(`another gateway instance is already listening on ws://127\.0\.0\.1:`+openClawPort()+`|Port `+openClawPort()+` is already in use`)),
+			fmt.Sprintf("        echo %s", tmuxShellQuote("[cicy] gateway port already in use; waiting for the existing instance ...")),
+			"        gateway_conflict_seen=1",
+			"      fi",
 			"    fi",
 			"    if [ $((i % 5)) -eq 0 ]; then",
-			"      if [ \"$gateway_started\" -eq 1 ]; then",
-			"        echo \"[cicy] waiting for gateway endpoint ${i}s/60s ...\"",
-			"      else",
-			"        echo \"[cicy] waiting for gateway startup ${i}s/60s ...\"",
-			"      fi",
+			"      echo \"[cicy] waiting for gateway startup ${i}s/60s ...\"",
 			"    fi",
 			"    sleep 1",
 			"  done",

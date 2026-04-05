@@ -255,6 +255,55 @@ var builtinAgents = []struct {
 	{10004, "opencode", "OpenCode"},
 }
 
+func isBuiltinAgentType(agentType string) bool {
+	for _, ba := range builtinAgents {
+		if ba.AgentType == agentType {
+			return true
+		}
+	}
+	return false
+}
+
+func parseSelectedAgents(agentList string) ([]string, error) {
+	agentList = strings.TrimSpace(agentList)
+	if agentList == "" {
+		return nil, fmt.Errorf("empty agent list")
+	}
+
+	if strings.EqualFold(agentList, "all") {
+		selected := make([]string, 0, len(builtinAgents))
+		for _, ba := range builtinAgents {
+			selected = append(selected, ba.AgentType)
+		}
+		sort.Strings(selected)
+		return selected, nil
+	}
+
+	seen := map[string]bool{}
+	var selected []string
+	for _, raw := range strings.Split(agentList, ",") {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		agentType := normalizeAgentType(raw)
+		if !isBuiltinAgentType(agentType) {
+			return nil, fmt.Errorf("unsupported agent: %s", raw)
+		}
+		if seen[agentType] {
+			continue
+		}
+		seen[agentType] = true
+		selected = append(selected, agentType)
+	}
+
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("no valid agents selected")
+	}
+	sort.Strings(selected)
+	return selected, nil
+}
+
 func ensureWorkerIndexAtLeast(n int) {
 	if n <= 0 {
 		return
@@ -405,25 +454,11 @@ func runSetupWithAgents(agentList string) {
 	installMissing(baseTools)
 
 	// 2. Parse agent list
-	var selected []string
-	if agentList == "all" || agentList == "ALL" {
-		selected = []string{"openclaw", "codex", "claude", "opencode"}
-	} else {
-		has := map[string]bool{}
-		for _, a := range strings.Split(agentList, ",") {
-			a = strings.TrimSpace(a)
-			if a != "" {
-				has[a] = true
-			}
-		}
-		has["openclaw"] = true
-		has["codex"] = true
-		has["claude"] = true
-		for a := range has {
-			selected = append(selected, a)
-		}
+	selected, err := parseSelectedAgents(agentList)
+	if err != nil {
+		fmt.Printf("❌ 无效的 --agents 参数: %v\n", err)
+		os.Exit(1)
 	}
-	sort.Strings(selected)
 
 	fmt.Printf("📦 安装 agents: %v\n", selected)
 	installSelectedAgents(selected)
@@ -457,14 +492,14 @@ func checkEnv() {
 	if err := store.QueryRow("SELECT COUNT(*) FROM agent_config").Scan(&count); err != nil {
 		log.Fatalf("[startup] failed to query agent_config: %v", err)
 	}
-		if count == 0 {
-			if isCloudRunRuntime() {
-				// Cloud Run must never block on interactive setup.
-				// Keep the default footprint minimal: only bootstrap w-10001 OpenClaw.
-				createSelectedWorkers([]string{"openclaw"})
-			} else if agentsFlag != "" {
-				runSetupWithAgents(agentsFlag)
-			} else {
+	if count == 0 {
+		if isCloudRunRuntime() {
+			// Cloud Run must never block on interactive setup.
+			// Keep the default footprint minimal: only bootstrap w-10001 OpenClaw.
+			createSelectedWorkers([]string{"openclaw"})
+		} else if agentsFlag != "" {
+			runSetupWithAgents(agentsFlag)
+		} else {
 			runSetup()
 		}
 	}
