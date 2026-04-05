@@ -29,7 +29,7 @@ var (
 	desktopCmd   *exec.Cmd
 )
 
-const version = "0.2.17"
+const version = "0.2.18"
 
 // agentsFlag holds --agents=openclaw,codex,claude,opencode,... for non-interactive setup
 var agentsFlag string

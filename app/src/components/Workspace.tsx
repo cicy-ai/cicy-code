@@ -327,7 +327,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <button onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 令牌"><Key className="w-3.5 h-3.5" /></button>
           <button onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 服务器"><Server className="w-3.5 h-3.5" /></button>
           <button onClick={() => window.dispatchEvent(new Event('open-devtools-panel'))} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="开发工具"><Bug className="w-3.5 h-3.5" /></button>
-          <span id="version" className="text-[10px] font-mono text-zinc-600">0.2.17</span>
+          <span id="version" className="text-[10px] font-mono text-zinc-600">0.2.18</span>
           {contextUsage != null && (
             <div data-id="context-usage" className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/[0.02]">
               <div data-id="context-bar" className="w-12 h-1 rounded-full bg-white/[0.04] overflow-hidden">
