@@ -9,6 +9,25 @@ export declare const msgPong = "2";
 export declare const msgSetWindowTitle = "3";
 export declare const msgSetPreferences = "4";
 export declare const msgSetReconnect = "5";
+export declare const msgAPI = "6";
+export interface APIRequestMessage {
+    id: string;
+    method: string;
+    path: string;
+    body?: object;
+    headers?: {
+        [key: string]: string;
+    };
+    bodyBase64?: string;
+    contentType?: string;
+}
+export interface APIResponseMessage {
+    id: string;
+    ok: boolean;
+    status: number;
+    body?: any;
+    error?: string;
+}
 export interface Terminal {
     info(): {
         columns: number;
@@ -39,15 +58,36 @@ export interface Connection {
 export interface ConnectionFactory {
     create(): Connection;
 }
+export interface ConnectionStateListener {
+    (isOpen: boolean): void;
+}
 export declare class WebTTY {
     term: Terminal;
     connectionFactory: ConnectionFactory;
+    connection: Connection | null;
     args: string;
     authToken: string;
     reconnect: number;
     reconnectAttempts: number;
     maxReconnectAttempts: number;
     reconnectDelay: number;
+    connectionStateListeners: ConnectionStateListener[];
+    apiRequestSeq: number;
+    apiPendingRequests: {
+        [key: string]: {
+            resolve: (value: any) => void;
+            reject: (reason?: any) => void;
+        };
+    };
     constructor(term: Terminal, connectionFactory: ConnectionFactory, args: string, authToken: string);
+    onConnectionStateChange(callback: ConnectionStateListener): void;
+    emitConnectionState(isOpen: boolean): void;
+    isConnectionOpen(): boolean;
+    sendInput(input: string): boolean;
+    sendLine(input: string): boolean;
+    requestAPI(method: string, path: string, body?: object, headers?: {
+        [key: string]: string;
+    }, bodyBase64?: string, contentType?: string): Promise<any>;
+    handleAPIResponse(payload: string): void;
     open(): () => void;
 }

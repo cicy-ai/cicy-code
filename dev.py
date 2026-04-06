@@ -260,6 +260,51 @@ def get_image_tag(image_ref):
         return image_ref[colon + 1:]
     return ""
 
+def load_versions_json():
+    path = os.path.join(ROOT_DIR, "versions.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def local_default_base_tag():
+    return str(load_versions_json().get("base", "") or "").strip() or "latest"
+
+def local_default_base_image():
+    data = load_global_json()
+    images = data.get("images", {}) if isinstance(data, dict) else {}
+    if isinstance(images, dict):
+        explicit = str(images.get("base", "") or "").strip()
+        if explicit:
+            return explicit
+        repo = str(images.get("base_repository", "") or "").strip()
+        tag = str(images.get("base_tag", "") or "").strip()
+        if repo and tag:
+            return f"{repo}:{tag}"
+    cluster = data.get("cicy-cluster", {}) if isinstance(data, dict) else {}
+    if isinstance(cluster, dict):
+        explicit = str(cluster.get("base_image", "") or "").strip()
+        if explicit:
+            return explicit
+    return f"cicy-code-base:{local_default_base_tag()}"
+
+def ensure_local_base_image_available():
+    base_image = os.environ.get("BASE_IMAGE", "").strip() or local_default_base_image()
+    if not base_image.startswith("cicy-code-base:"):
+        return
+    inspect = subprocess.run(["docker", "image", "inspect", base_image], capture_output=True, text=True)
+    if inspect.returncode == 0:
+        return
+    tag = get_image_tag(base_image) or local_default_base_tag()
+    print(f"[dev] Base image missing, building {base_image} ...")
+    result = subprocess.run(["./build.sh", "docker-base", tag], cwd=ROOT_DIR)
+    if result.returncode != 0:
+        print("[dev] docker base build failed")
+        sys.exit(1)
+    return ""
+
 def get_dockerhub_username():
     config_path = os.path.expanduser("~/.docker/config.json")
     try:
@@ -542,6 +587,7 @@ def run_docker_build(version_override=""):
 def run_docker(ports):
     run_version_sync()
     print(f"[dev] Building and running Docker...")
+    ensure_local_base_image_available()
     result = subprocess.run(["./build.sh", "docker", "latest"], cwd=ROOT_DIR)
     if result.returncode != 0:
         print("[dev] docker build failed")

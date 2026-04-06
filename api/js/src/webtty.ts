@@ -11,6 +11,25 @@ export const msgPong = '2';
 export const msgSetWindowTitle = '3';
 export const msgSetPreferences = '4';
 export const msgSetReconnect = '5';
+export const msgAPI = '6';
+
+export interface APIRequestMessage {
+    id: string;
+    method: string;
+    path: string;
+    body?: object;
+    headers?: { [key: string]: string };
+    bodyBase64?: string;
+    contentType?: string;
+}
+
+export interface APIResponseMessage {
+    id: string;
+    ok: boolean;
+    status: number;
+    body?: any;
+    error?: string;
+}
 
 
 export interface Terminal {
@@ -43,43 +62,130 @@ export interface ConnectionFactory {
     create(): Connection;
 }
 
+export interface ConnectionStateListener {
+    (isOpen: boolean): void;
+}
 
 export class WebTTY {
     term: Terminal;
     connectionFactory: ConnectionFactory;
+    connection: Connection | null;
     args: string;
     authToken: string;
     reconnect: number;
     reconnectAttempts: number;
     maxReconnectAttempts: number;
     reconnectDelay: number;
+    connectionStateListeners: ConnectionStateListener[];
+    apiRequestSeq: number;
+    apiPendingRequests: { [key: string]: { resolve: (value: any) => void, reject: (reason?: any) => void } };
 
     constructor(term: Terminal, connectionFactory: ConnectionFactory, args: string, authToken: string) {
         this.term = term;
         this.connectionFactory = connectionFactory;
+        this.connection = null;
         this.args = args;
         this.authToken = authToken;
         this.reconnect = -1;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 10;
         this.reconnectDelay = 2000;
+        this.connectionStateListeners = [];
+        this.apiRequestSeq = 0;
+        this.apiPendingRequests = {};
+    };
+
+    onConnectionStateChange(callback: ConnectionStateListener) {
+        this.connectionStateListeners.push(callback);
+    };
+
+    emitConnectionState(isOpen: boolean) {
+        this.connectionStateListeners.forEach((callback) => {
+            callback(isOpen);
+        });
+    };
+
+    isConnectionOpen(): boolean {
+        return this.connection !== null && this.connection.isOpen();
+    };
+
+    sendInput(input: string): boolean {
+        if (!this.isConnectionOpen() || this.connection === null) {
+            return false;
+        }
+        this.connection.send(msgInput + input);
+        return true;
+    };
+
+    sendLine(input: string): boolean {
+        return this.sendInput(input + "\r");
+    };
+
+    requestAPI(method: string, path: string, body?: object, headers?: { [key: string]: string }, bodyBase64?: string, contentType?: string): Promise<any> {
+        var PromiseCtor = (window as any).Promise;
+        if (!this.isConnectionOpen() || this.connection === null) {
+            return PromiseCtor.reject(new Error("webtty connection is not open"));
+        }
+
+        this.apiRequestSeq += 1;
+        const id = "req-" + String(this.apiRequestSeq);
+        const message: APIRequestMessage = {
+            id: id,
+            method: method,
+            path: path,
+        };
+        if (body !== undefined) {
+            message.body = body;
+        }
+        if (headers !== undefined) {
+            message.headers = headers;
+        }
+        if (bodyBase64 !== undefined) {
+            message.bodyBase64 = bodyBase64;
+        }
+        if (contentType !== undefined) {
+            message.contentType = contentType;
+        }
+
+        return new PromiseCtor((resolve: (value?: any) => void, reject: (reason?: any) => void): void => {
+            this.apiPendingRequests[id] = { resolve: resolve, reject: reject };
+            this.connection!.send(msgAPI + JSON.stringify(message));
+        });
+    };
+
+    handleAPIResponse(payload: string) {
+        const message = JSON.parse(payload) as APIResponseMessage;
+        const pending = this.apiPendingRequests[message.id];
+        if (!pending) {
+            return;
+        }
+        delete this.apiPendingRequests[message.id];
+        if (message.ok) {
+            pending.resolve(message.body);
+            return;
+        }
+        pending.reject(new Error(message.error || ("request failed with status " + String(message.status))));
     };
 
     open() {
         let connection = this.connectionFactory.create();
+        this.connection = connection;
         let pingTimer: number;
         let reconnectTimeout: number;
 
         const doReconnect = () => {
             this.reconnectAttempts = 0;
             connection = this.connectionFactory.create();
+            this.connection = connection;
             setup();
         };
 
         const setup = () => {
             connection.onOpen(() => {
+                this.connection = connection;
                 this.reconnectAttempts = 0;
                 this.term.hideReconnecting();
+                this.emitConnectionState(true);
                 
                 const termInfo = this.term.info();
 
@@ -137,12 +243,20 @@ export class WebTTY {
                         console.log("Enabling reconnect: " + autoReconnect + " seconds")
                         this.reconnect = autoReconnect;
                         break;
+                    case msgAPI:
+                        this.handleAPIResponse(payload);
+                        break;
                 }
             });
 
             connection.onClose(() => {
                 clearInterval(pingTimer);
                 this.term.deactivate();
+                Object.keys(this.apiPendingRequests).forEach((id) => {
+                    this.apiPendingRequests[id].reject(new Error("webtty connection closed"));
+                    delete this.apiPendingRequests[id];
+                });
+                this.emitConnectionState(false);
                 
                 if (this.reconnectAttempts < this.maxReconnectAttempts) {
                     this.reconnectAttempts++;
@@ -151,6 +265,7 @@ export class WebTTY {
                     
                     reconnectTimeout = setTimeout(() => {
                         connection = this.connectionFactory.create();
+                        this.connection = connection;
                         setup();
                     }, delay);
                 } else {
@@ -164,6 +279,7 @@ export class WebTTY {
         setup();
         return () => {
             clearTimeout(reconnectTimeout);
+            this.connection = null;
             connection.close();
         }
     };

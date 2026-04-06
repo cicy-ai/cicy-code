@@ -2,6 +2,7 @@ import { Hterm } from "./hterm";
 import { Xterm } from "./xterm";
 import { Terminal, WebTTY, protocols } from "./webtty";
 import { ConnectionFactory } from "./websocket";
+import { mountCicyTTYUI } from "./cicy_ui";
 
 // @TODO remove these
 declare var gotty_auth_token: string;
@@ -25,6 +26,7 @@ if (elem !== null) {
     const args = window.location.search;
     const factory = new ConnectionFactory(url, protocols);
     const wt = new WebTTY(term, factory, args, gotty_auth_token);
+    mountCicyTTYUI(term, wt);
     const closer = wt.open();
 
     window.addEventListener("unload", () => {

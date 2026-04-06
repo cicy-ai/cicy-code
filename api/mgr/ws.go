@@ -3,16 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
-	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
+	"net/http/httptest"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,99 +20,22 @@ import (
 
 const gottyInput = '0' // gotty protocol: client→server input message type
 
-//go:embed resources/ttyd-inject-00-base.html
-var embedInject00 string
-
-//go:embed resources/ttyd-inject-01-panel.html
-var embedInject01 string
-
-//go:embed resources/ttyd-inject-02-voice.html
-var embedInject02 string
-
-// Embedded inject HTML (concatenated at compile time)
-var embedInjectAll string
-
-func init() {
-	embedInjectAll = embedInject00 + "\n" + embedInject01 + "\n" + embedInject02
+type wsAPIRequest struct {
+	ID          string            `json:"id"`
+	Method      string            `json:"method"`
+	Path        string            `json:"path"`
+	Body        json.RawMessage   `json:"body"`
+	Headers     map[string]string `json:"headers"`
+	BodyBase64  string            `json:"bodyBase64"`
+	ContentType string            `json:"contentType"`
 }
 
-// ttyd COS version: only used in dev mode
-var ttydCosVer = "v1"
-
-func init() {
-	data, err := os.ReadFile("../versions.json")
-	if err == nil {
-		var m map[string]string
-		if json.Unmarshal(data, &m) == nil && m["ttyd"] != "" {
-			ttydCosVer = "v" + m["ttyd"]
-		}
-	}
-}
-
-// ttyd HTML inject: dev mode reads from filesystem (hot-reload), release mode uses embedded
-var (
-	ttydInject    string
-	ttydInjectMu  sync.RWMutex
-	ttydInjectDir = "resources" // dev: relative to working dir (api/), matches go:embed path
-	ttydInjectMod time.Time
-)
-
-func loadTtydInject() string {
-	// Release mode: return embedded content directly
-	if !devMode {
-		log.Printf("[ttyd] using embedded inject (release mode)")
-		return embedInjectAll
-	}
-
-	// Dev mode: read from filesystem with hot-reload
-	log.Printf("[ttyd] dev mode: loading inject from filesystem")
-	absPath, _ := filepath.Abs(ttydInjectDir)
-	log.Printf("[ttyd] inject dir absolute path: %s", absPath)
-	entries, err := os.ReadDir(ttydInjectDir)
-	if err != nil {
-		return embedInjectAll // fallback to embedded
-	}
-	// collect matching files and latest mod time
-	var files []string
-	var latest time.Time
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), "ttyd-inject") || !strings.HasSuffix(e.Name(), ".html") {
-			continue
-		}
-		fp := ttydInjectDir + "/" + e.Name()
-		info, err := os.Stat(fp)
-		if err != nil {
-			continue
-		}
-		files = append(files, fp)
-		if info.ModTime().After(latest) {
-			latest = info.ModTime()
-		}
-	}
-	ttydInjectMu.RLock()
-	cached := ttydInject
-	mod := ttydInjectMod
-	ttydInjectMu.RUnlock()
-	if cached != "" && !latest.After(mod) {
-		return cached
-	}
-	sort.Strings(files)
-	var buf strings.Builder
-	for _, fp := range files {
-		data, err := os.ReadFile(fp)
-		if err != nil {
-			continue
-		}
-		buf.Write(data)
-		buf.WriteByte('\n')
-	}
-	s := buf.String()
-	ttydInjectMu.Lock()
-	ttydInject = s
-	ttydInjectMod = latest
-	ttydInjectMu.Unlock()
-	log.Printf("[ttyd] reloaded inject: %d files, %d bytes", len(files), len(s))
-	return s
+type wsAPIResponse struct {
+	ID     string      `json:"id"`
+	Ok     bool        `json:"ok"`
+	Status int         `json:"status"`
+	Body   interface{} `json:"body,omitempty"`
+	Error  string      `json:"error,omitempty"`
 }
 
 func handleWSProxy(w http.ResponseWriter, r *http.Request) {
@@ -232,7 +153,7 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 
 	// WebSocket upgrade
 	if subPath == "/ws" {
-		proxyWS(w, r, inst.Port)
+		proxyWS(w, r, paneID, inst.Port)
 		return
 	}
 
@@ -245,34 +166,6 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	// Inject CSS + JS for root HTML page
-	if subPath == "/" && strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
-		body, _ := io.ReadAll(resp.Body)
-		html := string(body)
-		// WS patch must run in <head> before gotty-bundle.js creates WebSocket
-		wsPatch := `<script>var __cicyWs=null,__origWsSend=WebSocket.prototype.send;WebSocket.prototype.send=function(d){if(typeof d==='string'&&d.length>0&&'01234'.indexOf(d[0])>=0)__cicyWs=this;return __origWsSend.call(this,d)};</script>`
-		html = strings.Replace(html, "</head>", wsPatch+"</head>", 1)
-		// UI + styles inject in </body> so DOM is ready
-		if inj := loadTtydInject(); inj != "" {
-			html = strings.Replace(html, "</body>", inj+"</body>", 1)
-		}
-		html = strings.Replace(html, "<html>", `<html style="overflow:hidden">`, 1)
-		// Dev mode: replace local asset paths with COS CDN
-		// Release mode: keep local paths (assets served from embedded binary)
-		if false && devMode {
-			cosBase := "https://cicy-1372193042.cos.ap-shanghai.myqcloud.com/ttyd/" + ttydCosVer
-			html = strings.Replace(html, `"./js/gotty-bundle.js"`, fmt.Sprintf(`"%s/gotty-bundle.js"`, cosBase), 1)
-			html = strings.Replace(html, `"./css/index.css"`, fmt.Sprintf(`"%s/css/index.css"`, cosBase), 1)
-			html = strings.Replace(html, `"./css/xterm.css"`, fmt.Sprintf(`"%s/css/xterm.css"`, cosBase), 1)
-			html = strings.Replace(html, `"./css/xterm_customize.css"`, fmt.Sprintf(`"%s/css/xterm_customize.css"`, cosBase), 1)
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(html)))
-		w.WriteHeader(resp.StatusCode)
-		w.Write([]byte(html))
-		return
-	}
-
 	for k, vs := range resp.Header {
 		for _, v := range vs {
 			w.Header().Add(k, v)
@@ -282,7 +175,7 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, resp.Body)
 }
 
-func proxyWS(w http.ResponseWriter, r *http.Request, port int) {
+func proxyWS(w http.ResponseWriter, r *http.Request, paneID string, port int) {
 	// Must pass through subprotocol ("webtty") from client to ttyd-go
 	respHeader := http.Header{}
 	if protos := websocket.Subprotocols(r); len(protos) > 0 {
@@ -306,6 +199,12 @@ func proxyWS(w http.ResponseWriter, r *http.Request, port int) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	var clientWriteMu sync.Mutex
+	writeClient := func(mt int, data []byte) error {
+		clientWriteMu.Lock()
+		defer clientWriteMu.Unlock()
+		return clientConn.WriteMessage(mt, data)
+	}
 
 	go func() {
 		for {
@@ -317,7 +216,7 @@ func proxyWS(w http.ResponseWriter, r *http.Request, port int) {
 			if mt == websocket.TextMessage && bytes.Contains(msg, []byte("0;276;0c")) {
 				log.Printf("[ws-proxy] DA response ttyd→client: %q", msg[:minInt(len(msg), 120)])
 			}
-			if err := clientConn.WriteMessage(mt, msg); err != nil {
+			if err := writeClient(mt, msg); err != nil {
 				cancel()
 				return
 			}
@@ -334,6 +233,12 @@ func proxyWS(w http.ResponseWriter, r *http.Request, port int) {
 				return
 			}
 			if mt == websocket.TextMessage {
+				if len(msg) > 1 && msg[0] == '6' {
+					if err := handleWSAPIRequest(writeClient, paneID, msg[1:]); err != nil {
+						log.Printf("[ws-proxy] ws api error: %v", err)
+					}
+					continue
+				}
 				msg = filterDAQuery(msg)
 				if msg == nil {
 					continue
@@ -351,6 +256,109 @@ func proxyWS(w http.ResponseWriter, r *http.Request, port int) {
 			}
 		}
 	}
+}
+
+func handleWSAPIRequest(writeClient func(int, []byte) error, paneID string, payload []byte) error {
+	var req wsAPIRequest
+	if err := json.Unmarshal(payload, &req); err != nil {
+		return writeWSAPIResponse(writeClient, wsAPIResponse{
+			Ok:     false,
+			Status: 400,
+			Error:  "invalid ws api request: " + err.Error(),
+		})
+	}
+
+	if req.ID == "" {
+		req.ID = fmt.Sprintf("req-%d", time.Now().UnixNano())
+	}
+	if req.Method == "" || req.Path == "" {
+		return writeWSAPIResponse(writeClient, wsAPIResponse{
+			ID:     req.ID,
+			Ok:     false,
+			Status: 400,
+			Error:  "ws api request requires method and path",
+		})
+	}
+
+	bodyBytes := []byte{}
+	if req.BodyBase64 != "" {
+		decoded, err := base64.StdEncoding.DecodeString(req.BodyBase64)
+		if err != nil {
+			return writeWSAPIResponse(writeClient, wsAPIResponse{
+				ID:     req.ID,
+				Ok:     false,
+				Status: 400,
+				Error:  "invalid base64 body: " + err.Error(),
+			})
+		}
+		bodyBytes = decoded
+	} else if len(req.Body) > 0 {
+		bodyBytes = req.Body
+	}
+
+	requestURL := req.Path
+	if !strings.HasPrefix(requestURL, "/") {
+		requestURL = "/" + requestURL
+	}
+	httpReq, err := http.NewRequest(req.Method, "http://ws.local"+requestURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return writeWSAPIResponse(writeClient, wsAPIResponse{
+			ID:     req.ID,
+			Ok:     false,
+			Status: 400,
+			Error:  "failed to create request: " + err.Error(),
+		})
+	}
+	httpReq.RemoteAddr = "ttyd-ws:" + paneID
+	for key, value := range req.Headers {
+		httpReq.Header.Set(key, value)
+	}
+	if req.ContentType != "" && httpReq.Header.Get("Content-Type") == "" {
+		httpReq.Header.Set("Content-Type", req.ContentType)
+	}
+	if len(req.Body) > 0 && req.ContentType == "" && httpReq.Header.Get("Content-Type") == "" {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
+
+	recorder := httptest.NewRecorder()
+	http.DefaultServeMux.ServeHTTP(recorder, httpReq)
+
+	resp := wsAPIResponse{
+		ID:     req.ID,
+		Ok:     recorder.Code < 400,
+		Status: recorder.Code,
+	}
+	respBytes := recorder.Body.Bytes()
+	if len(respBytes) > 0 {
+		contentType := recorder.Header().Get("Content-Type")
+		if strings.Contains(contentType, "application/json") {
+			var decoded interface{}
+			if err := json.Unmarshal(respBytes, &decoded); err == nil {
+				resp.Body = decoded
+			} else {
+				resp.Body = string(respBytes)
+			}
+		} else {
+			resp.Body = string(respBytes)
+		}
+	}
+	if !resp.Ok && resp.Error == "" {
+		if body, ok := resp.Body.(string); ok && body != "" {
+			resp.Error = body
+		} else {
+			resp.Error = fmt.Sprintf("request failed with status %d", resp.Status)
+		}
+	}
+
+	return writeWSAPIResponse(writeClient, resp)
+}
+
+func writeWSAPIResponse(writeClient func(int, []byte) error, resp wsAPIResponse) error {
+	payload, err := json.Marshal(resp)
+	if err != nil {
+		return err
+	}
+	return writeClient(websocket.TextMessage, append([]byte{'6'}, payload...))
 }
 
 // filterDAQuery removes DA queries and click/drag mouse sequences from gotty Input messages.
