@@ -126,7 +126,7 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
         <div className="px-3 py-2 border-b border-vsc-border bg-vsc-bg text-xs space-y-1">
           <div className="text-emerald-400 cursor-pointer hover:underline" onClick={() => send(correction[0])}>{correction[0]}</div>
           <div className="text-vsc-text-muted cursor-pointer hover:underline" onClick={() => send(correction[1])}>{correction[1]}</div>
-          <div className="text-vsc-text-muted opacity-50">⌘↵ send EN · ⌘⇧↵ send CN · Esc dismiss</div>
+          <div className="text-vsc-text-muted opacity-50">⌘↵ 发送英文 · ⌘⇧↵ 发送中文 · Esc 关闭</div>
         </div>
       )}
       {/* Input */}
@@ -152,7 +152,7 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
       {/* Status bar */}
       <div className="h-6 border-t border-vsc-border flex items-center px-2.5 gap-2 shrink-0">
         <span className={`w-2 h-2 rounded-full ${agentStatus === 'thinking' ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`} />
-        <span className="text-[11px] text-vsc-text-secondary">{agentStatus === 'thinking' ? 'Thinking...' : 'Idle'}</span>
+        <span className="text-[11px] text-vsc-text-secondary">{agentStatus === 'thinking' ? '思考中...' : '空闲'}</span>
         {correcting && <Loader2 size={12} className="text-purple-400 animate-spin" />}
         <button
           onClick={() => { const n = !enterTo发送; setEnterTo发送(n); localStorage.setItem('enter_to_send', String(n)); }}

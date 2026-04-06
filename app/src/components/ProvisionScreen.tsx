@@ -14,7 +14,7 @@ const LABELS = [
   '正在创建服务器',
   '正在上传部署脚本',
   '正在部署服务',
-  'Verifying',
+  '正在验证',
 ];
 
 export default function ProvisionScreen({ onReady }: { onReady: (backend: string) => void }) {
@@ -70,7 +70,7 @@ export default function ProvisionScreen({ onReady }: { onReady: (backend: string
 
       es.onerror = () => {
         es.close();
-        setLogs(prev => [...prev, '⚠ 连接已断开, retrying...']);
+        setLogs(prev => [...prev, '⚠ 连接已断开，正在重试...']);
         if (retryRef.current < 3) {
           retryRef.current++;
           setTimeout(connect, 2000);
@@ -94,8 +94,8 @@ export default function ProvisionScreen({ onReady }: { onReady: (backend: string
       <div className="w-full max-w-md">
         <div className="text-center mb-6">
           <div className="text-4xl mb-3">🚀</div>
-          <h2 className="text-white text-lg font-medium">Setting up your workspace</h2>
-          <p className="text-zinc-500 text-sm mt-1">{elapsed}s elapsed</p>
+          <h2 className="text-white text-lg font-medium">正在配置你的工作区</h2>
+          <p className="text-zinc-500 text-sm mt-1">已耗时 {elapsed}s</p>
         </div>
 
         {/* Progress bar */}
@@ -135,7 +135,7 @@ export default function ProvisionScreen({ onReady }: { onReady: (backend: string
         {/* Log output */}
         <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-3 max-h-32 overflow-y-auto font-mono text-xs">
           {logs.length === 0 ? (
-            <span className="text-zinc-600">Connecting...</span>
+            <span className="text-zinc-600">正在连接...</span>
           ) : (
             logs.map((l, i) => (
               <div key={i} className="text-zinc-500 leading-5">{l}</div>

@@ -26,11 +26,11 @@ interface SettingsViewProps {
   isSaving?: boolean;
 }
 
-const tabs = ['General', 'Agent', 'Network'] as const;
+const tabs = ['常规', '智能体', '网络'] as const;
 type Tab = typeof tabs[number];
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSave, isSaving = false }) => {
-  const [tab, setTab] = useState<Tab>('General');
+  const [tab, setTab] = useState<Tab>('常规');
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || '');
 
   const handleThemeChange = (value: string) => {
@@ -49,9 +49,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
       </div>
 
       <div className="p-4 space-y-3 overflow-y-auto flex-1">
-        {tab === 'General' && (<>
+        {tab === '常规' && (<>
           <div>
-            <label className="block text-xs text-vsc-text-secondary mb-1">Theme</label>
+            <label className="block text-xs text-vsc-text-secondary mb-1">主题</label>
             <Select value={theme}
               onChange={handleThemeChange}
               options={themes.map(t => ({ value: t.value, label: t.label }))}
@@ -59,7 +59,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
             />
           </div>
           <div>
-            <label className="block text-xs text-vsc-text-secondary mb-1">Title</label>
+            <label className="block text-xs text-vsc-text-secondary mb-1">标题</label>
             <input type="text" value={pane.title}
               onChange={e => onChange({ ...pane, title: e.target.value })}
               className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent"
@@ -67,8 +67,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
           </div>
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-vsc-text">Auto-start</p>
-              <p className="text-xs text-vsc-text-muted">Auto restore on server restart</p>
+              <p className="text-sm text-vsc-text">自动启动</p>
+              <p className="text-xs text-vsc-text-muted">服务重启后自动恢复</p>
             </div>
             <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-colors ${pane.active !== false ? 'bg-green-600' : 'bg-vsc-bg-active'}`}
               onClick={() => onChange({ ...pane, active: pane.active === false ? true : false })}>
@@ -76,7 +76,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
             </div>
           </div>
           <div>
-            <label className="block text-xs text-vsc-text-secondary mb-1">Workspace</label>
+            <label className="block text-xs text-vsc-text-secondary mb-1">工作目录</label>
             <input type="text" value={pane.workspace || ''}
               onChange={e => onChange({ ...pane, workspace: e.target.value })}
               className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent"
@@ -88,7 +88,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
               onChange={e => onChange({ ...pane, init_script: e.target.value })}
               className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent resize-none"
               rows={4} placeholder={"pwd\n# sleep:2\n# key:t"} />
-            <p className="text-xs text-vsc-text-muted mt-1">sleep:N waits Ns, key:X sends key</p>
+            <p className="text-xs text-vsc-text-muted mt-1">sleep:N 表示等待 N 秒，key:X 表示发送按键</p>
           </div>
           <div>
             <label className="block text-xs text-vsc-text-secondary mb-1">智能体类型</label>
@@ -121,11 +121,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
               onChange={e => onChange({ ...pane, agent_duty: e.target.value })}
               className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent resize-none"
               style={{paddingRight: '44px'}}
-              rows={6} placeholder="Describe agent's role and responsibilities..." />
+              rows={6} placeholder="描述智能体的角色与职责..." />
           </div>
         </>)}
 
-        {tab === 'Network' && (<>
+        {tab === '网络' && (<>
           <div>
             <label className="block text-xs text-vsc-text-secondary mb-1">配置（JSON）</label>
             <textarea value={pane.config || '{}'}
@@ -133,7 +133,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
               className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent resize-none"
               rows={12} placeholder='{"projects": ["/home/user/project"]}' />
             <div className="text-xs text-vsc-text-muted mt-2 space-y-1">
-              <p className="font-medium text-vsc-text-secondary">Example:</p>
+              <p className="font-medium text-vsc-text-secondary">示例：</p>
               <pre className="bg-vsc-bg-secondary border border-vsc-border rounded p-2 overflow-x-auto">{`{
   "projects": [
     "/home/user/project-a",
@@ -149,7 +149,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
         <button onClick={onSave} disabled={isSaving}
           className="w-full bg-vsc-button hover:bg-vsc-button-hover disabled:bg-vsc-border disabled:cursor-not-allowed text-white text-sm font-medium py-2 rounded transition-colors flex items-center justify-center gap-2">
           {isSaving && <Loader2 size={16} className="animate-spin" />}
-          {isSaving ? 'Saving...' : '保存更改'}
+          {isSaving ? '保存中...' : '保存更改'}
         </button>
       </div>
     </div>

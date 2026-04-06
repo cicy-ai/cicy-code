@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Terminal, MessageSquare, Home, Folder, FolderOpen, X, Settings, Brain, Search,
-  LayoutList, Users, RotateCcw, Plus, Menu, ExternalLink, Key, Bug, Server, MoreHorizontal
+  LayoutList, Users, RotateCcw, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, Pencil
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { lockPointer, unlockPointer } from '../lib/pointerLock';
@@ -26,6 +26,7 @@ import config, { urls } from '../config';
 import apiService from '../services/api';
 import { sendCommandToTmux } from '../services/mockApi';
 import { ApiSwitchDialog } from './layout/ApiSwitchDialog';
+import CreateAgentDialog, { CreateAgentValues } from './CreateAgentDialog';
 
 const cache = {
   get: (k: string, def: any) => { try { const v = JSON.parse(localStorage.getItem(k)!); return v ?? def; } catch { return def; } },
@@ -38,6 +39,7 @@ const TEAM_TERMINAL_CHILDREN_KEY = 'ws_teamTerminalChildren';
 const TEAM_TERMINAL_ACTIVE_KEY = 'ws_teamTerminalActive';
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
+type LeftPanelView = 'team' | 'skills' | 'agents' | null;
 
 export default function Workspace({ agentId, onSelectAgent }: Props) {
   const { token, hasPermission } = useAuth();
@@ -57,12 +59,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }, []);
 
   const mainTab = 'cli' as const;
-  const [leftPanel, setLeftPanel] = useState<'team' | 'skills' | null>(() => {
+  const [leftPanelView, setLeftPanelView] = useState<LeftPanelView>(() => {
     const v = cache.get('ws_leftPanel', null);
     if (v === 'team' || v === 'skills') return v;
     return 'team';
   });
-  const [agentsOpen, set智能体Open] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
@@ -141,13 +142,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const addApp = (window as any).__desktopAddApp || (() => {});
   useDesktopEvents(addApp);
 
-  const leftActive = agentsOpen ? 'agents' : leftPanel;
+  const leftActive = leftPanelView;
+  const closeLeftPanel = useCallback(() => {
+    setLeftPanelView(null);
+  }, []);
 
   useEffect(() => {
-    cache.set('ws_leftPanel', leftPanel);
+    cache.set('ws_leftPanel', leftActive === 'team' || leftActive === 'skills' ? leftActive : null);
     if (!groupRef.current) return;
-    groupRef.current.setLayout(leftActive ? (panelSizes ?? getOpenPanelLayout()) : { 'left-panel': 0, 'right-panel': 100 });
-  }, [getOpenPanelLayout, leftActive, leftPanel, panelSizes]);
+    if (leftActive) {
+      groupRef.current.setLayout(panelSizes ?? getOpenPanelLayout());
+    }
+  }, [getOpenPanelLayout, leftActive, panelSizes]);
   useEffect(() => { cache.set(floatingOpenKey, floatingCodeOpen); }, [floatingCodeOpen, floatingOpenKey]);
   useEffect(() => { cache.set(TEAM_TERMINAL_CHILDREN_KEY, teamTerminalChildren); }, [teamTerminalChildren]);
   useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, teamTerminalActive); }, [teamTerminalActive]);
@@ -163,13 +169,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }, []);
   const onPanelLayout = useCallback((layout: Record<string, number>) => {
     if (layout['left-panel'] < 5) {
-      if (leftActive === 'agents') set智能体Open(false);
-      else setLeftPanel(null);
+      closeLeftPanel();
       return;
     }
     setPanelSizes(layout);
     cache.set('ws_panelSizes', layout);
-  }, [leftActive]);
+  }, [closeLeftPanel]);
   const applyPanePatch = useCallback((targetPaneId: string, patch: any) => {
     setPaneDetails(prev => ({ ...prev, [targetPaneId]: { ...(prev[targetPaneId] || {}), ...patch } }));
     if (targetPaneId === paneId) setAgentDetail((prev: any) => ({ ...(prev || {}), ...patch }));
@@ -243,26 +248,31 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleToggleMouse = async () => { if (isApiOnlyRuntime) return; const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
 
   const toggleLeft = (p: 'team' | 'skills') => {
-    set智能体Open(false);
-    setLeftPanel(prev => prev === p ? null : p);
+    setLeftPanelView(prev => prev === p ? null : p);
   };
 
   const toggle智能体 = () => {
-    if (agentsOpen) {
-      set智能体Open(false);
-      return;
-    }
-    setLeftPanel(null);
-    set智能体Open(true);
+    setLeftPanelView(prev => prev === 'agents' ? null : 'agents');
   };
 
+  const current团队Children = teamTerminalChildren[paneId] || [];
+  const currentTerminalTabs = useMemo(() => [paneId, ...current团队Children], [paneId, current团队Children]);
+  const current团队Active = currentTerminalTabs.includes(teamTerminalActive[paneId]) ? teamTerminalActive[paneId] : paneId;
   const [loadedTtyds, setLoadedTtyds] = useState<Set<string>>(() => new Set());
   useEffect(() => {
-    if (token && paneId && !isApiOnlyRuntime) setLoadedTtyds(prev => new Set(prev).add(paneId));
-  }, [paneId, token, isApiOnlyRuntime]);
-  const current团队Children = teamTerminalChildren[paneId] || [];
-  const currentTerminalTabs = [paneId, ...current团队Children];
-  const current团队Active = currentTerminalTabs.includes(teamTerminalActive[paneId]) ? teamTerminalActive[paneId] : paneId;
+    if (!token || isApiOnlyRuntime) return;
+    setLoadedTtyds(prev => {
+      const next = new Set(prev);
+      let changed = false;
+      currentTerminalTabs.forEach(id => {
+        if (id && !next.has(id)) {
+          next.add(id);
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [currentTerminalTabs, isApiOnlyRuntime, token]);
   const settingsTargetPaneId = current团队Active || paneId;
   const settingsTargetFullPaneId = `${settingsTargetPaneId}:main.0`;
   const settingsTargetDetail = paneDetails[settingsTargetPaneId] || (settingsTargetPaneId === paneId ? agentDetail : null);
@@ -323,6 +333,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setTopBarTitleDraft(topBarTitle);
   }, [savingTopBarTitle, topBarTitle]);
 
+  const startTopBarTitleEdit = useCallback(() => {
+    if (savingTopBarTitle) return;
+    setTopBarTitleDraft(topBarTitle);
+    setIsEditingTopBarTitle(true);
+  }, [savingTopBarTitle, topBarTitle]);
+
   const commitTopBarTitle = useCallback(async () => {
     if (!isEditingTopBarTitle || topBarTitleCommitRef.current) return;
     const nextTitle = topBarTitleDraft.trim();
@@ -337,7 +353,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       await apiService.updatePane(topBarPaneId, { title: nextTitle });
       applyPanePatch(topBarPaneId, { title: nextTitle });
     } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Error: 标题修改失败' }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '错误：标题修改失败' }));
       setTopBarTitleDraft(topBarTitle);
     } finally {
       topBarTitleCommitRef.current = false;
@@ -380,17 +396,25 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               className="h-7 w-[180px] max-w-[180px] rounded border border-blue-500/40 bg-white/[0.08] px-2 text-sm font-medium text-zinc-100 outline-none"
             />
           ) : (
-            <span
-              data-id="agent-title"
-              onDoubleClick={() => {
-                setTopBarTitleDraft(topBarTitle);
-                setIsEditingTopBarTitle(true);
-              }}
-              className="text-sm text-zinc-100 font-medium truncate max-w-[160px] bg-white/[0.12] px-2 py-0.5 rounded cursor-text"
-              title="Double click to rename"
-            >
-              {topBarTitle}
-            </span>
+            <div className="relative max-w-[180px] min-w-0 shrink-0 group">
+              <span
+                data-id="agent-title"
+                onDoubleClick={startTopBarTitleEdit}
+                className="block truncate rounded bg-white/[0.12] px-2 py-0.5 pr-7 text-sm font-medium text-zinc-100 cursor-text"
+                title="双击重命名"
+              >
+                {topBarTitle}
+              </span>
+              <button
+                type="button"
+                data-id="agent-title-edit"
+                onClick={startTopBarTitleEdit}
+                className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-zinc-500 opacity-0 transition-opacity cursor-pointer hover:text-zinc-200 group-hover:opacity-100"
+                title="编辑标题"
+              >
+                <Pencil className="w-3 h-3" />
+              </button>
+            </div>
           )}
           <span data-id="pane-id-badge" className="text-xs font-mono text-zinc-600 bg-white/[0.03] px-2 py-1 rounded shrink-0">{topBarPaneId}</span>
           {!topBarIsApiOnlyRuntime && (
@@ -424,7 +448,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <button onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 令牌"><Key className="w-3.5 h-3.5" /></button>
           <button onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 服务器"><Server className="w-3.5 h-3.5" /></button>
           <button onClick={() => window.dispatchEvent(new Event('open-devtools-panel'))} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="开发工具"><Bug className="w-3.5 h-3.5" /></button>
-          <span id="version" className="text-[10px] font-mono text-zinc-600">1.0.4</span>
+          <span id="version" className="text-[10px] font-mono text-zinc-600">1.0.5</span>
           {contextUsage != null && (
             <div data-id="context-usage" className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/[0.02]">
               <div data-id="context-bar" className="w-12 h-1 rounded-full bg-white/[0.04] overflow-hidden">
@@ -468,7 +492,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               </div>
             )) : (
               <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500" data-id="workspace-api-only-terminal-empty">
-                Cloud Run / API-only node does not support ttyd terminal
+                Cloud Run / 仅 API 节点不支持 ttyd 终端
               </div>
             )}
           </div>
@@ -482,7 +506,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     agentDetail, netLatency,
     agentsCount: agents.length,
     agents: agents.map((a: any) => ({ pane_id: a.pane_id, title: a.title, status: a.status, active: a.active })),
-    leftPanel, floatingCodeOpen, activeWinIdx,
+    leftPanel: leftActive, floatingCodeOpen, activeWinIdx,
   });
 
   return (
@@ -491,7 +515,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {/* Activity Bar */}
       <div data-id="activity-bar" ref={activityBarRef} className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
-          <SideBtn dataId="btn-team" active={leftPanel === 'team'} icon={<Users className="w-5 h-5" />} title="团队" onClick={() => toggleLeft('team')} />
+          <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title="团队" onClick={() => toggleLeft('team')} />
           <SideBtn
             dataId="btn-code-window"
             active={leftActive === 'agents'}
@@ -500,61 +524,66 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             onClick={toggle智能体}
           />
         </div>
-        <div data-id="activity-bar-bottom" className="flex flex-col gap-4 w-full items-center">
-          <SideBtn dataId="btn-settings" active={settingsOpen} icon={<Menu className="w-5 h-5" />} title="Menu" onClick={() => { setSettingsOpen(true); }} />
-        </div>
       </div>
 
       {/* Main */}
       <div data-id="main-area" ref={mainAreaRef} className="flex-1 flex flex-col min-w-0">
         {/* Content */}
         <main data-id="content-area" className="flex-1 relative overflow-hidden">
-          <Group id="main-layout" orientation="horizontal" groupRef={groupRef} defaultLayout={leftActive ? (panelSizes ?? undefined) : { 'left-panel': 0, 'right-panel': 100 }} onLayoutChanged={onPanelLayout}>
-            <Panel id="left-panel" defaultSize={leftActive ? `${LEFT_PANEL_WIDTH}px` : 0} minSize={leftActive ? `${LEFT_PANEL_WIDTH}px` : 0} groupResizeBehavior="preserve-pixel-size">
-              <div data-id="left-panel-wrap" className="h-full flex flex-col bg-[#0A0A0A] border-r border-[var(--vsc-border)] relative z-[130]" style={{ display: leftActive ? 'flex' : 'none' }}>
-                <div data-id="left-panel-header" className="h-12 border-b border-[var(--vsc-border)] flex items-center px-2 bg-[#0e0e0e] shrink-0 gap-1">
-                  {leftActive === 'agents' ? <>
-                    <LayoutList className="w-3.5 h-3.5 text-zinc-600" />
-                    <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">智能体</span>
-                  </> : leftPanel === 'skills' ? <>
-                    <Brain className="w-3.5 h-3.5 text-zinc-600" />
-                    <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">技能</span>
-                  </> : <>
-                    <Users className="w-3.5 h-3.5 text-zinc-600" />
-                    <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">团队</span>
-                  </>}
-                  <button data-id="left-panel-close" onClick={() => { if (leftActive === 'agents') set智能体Open(false); else setLeftPanel(null); }} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+          <Group id="main-layout" orientation="horizontal" groupRef={groupRef} defaultLayout={leftActive ? (panelSizes ?? undefined) : { 'right-panel': 100 }} onLayoutChanged={onPanelLayout}>
+            {leftActive ? (
+              <>
+                <Panel id="left-panel" defaultSize={`${LEFT_PANEL_WIDTH}px`} minSize={`${LEFT_PANEL_WIDTH}px`} groupResizeBehavior="preserve-pixel-size">
+                <div data-id="left-panel-wrap" className="h-full flex flex-col bg-[#0A0A0A] border-r border-[var(--vsc-border)] relative z-[130]">
+                  <div data-id="left-panel-header" className="h-12 border-b border-[var(--vsc-border)] flex items-center px-2 bg-[#0e0e0e] shrink-0 gap-1">
+                    {leftActive === 'agents' ? <>
+                      <LayoutList className="w-3.5 h-3.5 text-zinc-600" />
+                      <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">智能体</span>
+                    </> : leftActive === 'skills' ? <>
+                      <Brain className="w-3.5 h-3.5 text-zinc-600" />
+                      <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">技能</span>
+                    </> : <>
+                      <Users className="w-3.5 h-3.5 text-zinc-600" />
+                      <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">团队</span>
+                    </>}
+                    <button data-id="left-panel-close" onClick={closeLeftPanel} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                  </div>
+                  <div data-id="left-panel-body" className="flex-1 relative overflow-hidden bg-[#0A0A0A] z-[131]">
+                    {leftActive === 'agents' ? (
+                      <div className="absolute inset-0 overflow-auto">
+                        <AgentDrawer agents={agents} paneId={paneId}
+                          onSelectAgent={onSelectAgent}
+                          on智能体Change={set智能体}
+                          onOpenSettings={(targetPaneId) => {
+                            onSelectAgent(targetPaneId);
+                            setSettingsOpen(true);
+                          }}
+                        />
+                      </div>
+                    ) : leftActive === 'team' ? (
+                      <div className="absolute inset-0">
+                        <TeamPanel
+                          paneId={paneId}
+                          onOpenInCurrentPane={openPaneInCurrentTerminal}
+                          openedPaneIds={current团队Children}
+                          activePaneId={current团队Active}
+                          onOpenSettingsPane={(targetPaneId) => {
+                            openPaneInCurrentTerminal(targetPaneId);
+                            setSettingsOpen(true);
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="absolute inset-0 overflow-auto">
+                        <SkillPanel paneId={fullPaneId} />
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div data-id="left-panel-body" className="flex-1 relative overflow-hidden bg-[#0A0A0A] z-[131]">
-                  <div className="absolute inset-0 overflow-auto" style={{ display: leftActive === 'agents' ? 'block' : 'none' }}>
-                    <AgentDrawer agents={agents} paneId={paneId}
-                      onSelectAgent={onSelectAgent}
-                      on智能体Change={set智能体}
-                      onOpenSettings={(targetPaneId) => {
-                        onSelectAgent(targetPaneId);
-                        setSettingsOpen(true);
-                      }}
-                    />
-                  </div>
-                  <div className="absolute inset-0" style={{ display: leftPanel === 'team' ? 'block' : 'none' }}>
-                    <TeamPanel
-                      paneId={paneId}
-                      onOpenInCurrentPane={openPaneInCurrentTerminal}
-                      openedPaneIds={current团队Children}
-                      activePaneId={current团队Active}
-                      onOpenSettingsPane={(targetPaneId) => {
-                        openPaneInCurrentTerminal(targetPaneId);
-                        setSettingsOpen(true);
-                      }}
-                    />
-                  </div>
-                  <div className="absolute inset-0 overflow-auto" style={{ display: leftPanel === 'skills' ? 'block' : 'none' }}>
-                    <SkillPanel paneId={fullPaneId} />
-                  </div>
-                </div>
-              </div>
-            </Panel>
-            {leftActive && <Separator className="w-1 bg-white/[0.02] hover:bg-blue-500/30 active:bg-blue-500/50 transition-colors cursor-col-resize" />}
+                </Panel>
+                <Separator className="w-1 bg-white/[0.02] hover:bg-blue-500/30 active:bg-blue-500/50 transition-colors cursor-col-resize" />
+              </>
+            ) : null}
             <Panel id="right-panel" defaultSize={leftActive ? undefined : 100} minSize={30}>
               {rightContent}
             </Panel>
@@ -719,6 +748,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
 }) {
   const [search, setSearch] = useState('');
   const [adding, setAdding] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const { confirm } = useDialog();
 
@@ -728,23 +758,31 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
     return () => document.removeEventListener('pointerdown', closeMenu);
   }, []);
 
-  const handleQuickAddMaster = async () => {
+  const handleQuickAddMaster = async (values: CreateAgentValues) => {
     setAdding(true);
     try {
-      const { data } = await apiService.createPane({ role: 'worker', agent_type: 'codex' });
+      const { data } = await apiService.createPane({
+        role: 'worker',
+        title: values.title,
+        agent_type: values.agent_type,
+        allow_all_actions: values.allow_all_actions,
+      });
       const id = data?.pane_id || data?.id;
       if (id) {
         const { data: fresh } = await apiService.getPanes();
         on智能体Change(Array.isArray(fresh) ? fresh : fresh?.panes || []);
+        setCreateDialogOpen(false);
         onSelectAgent(id.split(':')[0]);
       }
-    } catch {} finally { setAdding(false); }
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '创建工作实例失败' }));
+    } finally { setAdding(false); }
   };
 
   const handleDelete = (id: string) => {
     const sid = id.split(':')[0];
     if (sid === 'w-10001') return;
-    confirm(<>Delete <span className="text-zinc-100 font-medium">{sid}</span>?</>, async () => {
+    confirm(<>删除 <span className="text-zinc-100 font-medium">{sid}</span>？</>, async () => {
       try {
         await apiService.deletePane(id);
         const { data: fresh } = await apiService.getPanes();
@@ -761,12 +799,12 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
 
   const handleRestart = (id: string, title: string) => {
     const sid = id.split(':')[0];
-    confirm(<>Restart <span className="text-zinc-100 font-medium">{title || sid}</span>?</>, async () => {
+    confirm(<>重启 <span className="text-zinc-100 font-medium">{title || sid}</span>？</>, async () => {
       try {
         await apiService.restartPane(sid);
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: `${title || sid} restarting...` }));
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: `${title || sid} 正在重启...` }));
       } catch {
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: `Error: ${title || sid} 重启失败` }));
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: `错误：${title || sid} 重启失败` }));
       }
     });
   };
@@ -780,7 +818,8 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
   });
 
   return (
-    <div data-id="agent-drawer" className="h-full flex flex-col bg-[#0A0A0A]">
+    <>
+      <div data-id="agent-drawer" className="h-full flex flex-col bg-[#0A0A0A]">
         <div data-id="agent-drawer-body" className="p-3 flex-1 overflow-y-auto bg-[#0A0A0A]">
           <div data-id="agent-search" className="mb-3 relative flex gap-2">
             <div className="relative flex-1">
@@ -793,7 +832,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
                 className="w-full bg-white/[0.02] border border-[var(--vsc-border)] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-white/[0.08] placeholder:text-zinc-700 text-zinc-400"
               />
             </div>
-            <button onClick={handleQuickAddMaster} disabled={adding}
+            <button onClick={() => setCreateDialogOpen(true)} disabled={adding}
               className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-[var(--vsc-border)] text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
               title="添加工作实例">
               <Plus className="w-4 h-4" />
@@ -843,7 +882,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
                           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
                         >
                           <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                          <span>Open</span>
+                          <span>打开</span>
                         </button>
                         <button
                           type="button"
@@ -855,7 +894,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
                           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
                         >
                           <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-                          <span>Restart</span>
+                          <span>重启</span>
                         </button>
                         <button
                           type="button"
@@ -867,7 +906,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
                           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
                         >
                           <Settings className="w-3.5 h-3.5 shrink-0" />
-                          <span>Settings</span>
+                          <span>设置</span>
                         </button>
                         {!isMaster ? (
                           <button
@@ -880,7 +919,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
                             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-red-300 transition-colors cursor-pointer hover:bg-red-500/10 hover:text-red-200"
                           >
                             <X className="w-3.5 h-3.5 shrink-0" />
-                            <span>Delete</span>
+                            <span>删除</span>
                           </button>
                         ) : null}
                       </div>
@@ -901,7 +940,16 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
             })}
           </div>
         </div>
-    </div>
+      </div>
+      <CreateAgentDialog
+        open={createDialogOpen}
+        submitting={adding}
+        onClose={() => setCreateDialogOpen(false)}
+        onSubmit={handleQuickAddMaster}
+        title="创建工作实例"
+        submitLabel="创建"
+      />
+    </>
   );
 }
 

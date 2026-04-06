@@ -282,15 +282,15 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 	_ = res
 
 	// Sync agent_duty to workspace/.kiro/steering/duty.md
-	if duty, ok := filtered["agent_duty"].(string); ok {
-		var ws sql.NullString
-		store.QueryRow("SELECT workspace FROM agent_config WHERE pane_id=?", paneID).Scan(&ws)
-		if ws.String != "" {
-			dir := ws.String + "/.kiro/steering"
-			os.MkdirAll(dir, 0755)
-			os.WriteFile(dir+"/duty.md", []byte("---\ninclusion: always\n---\n\n"+duty), 0644)
-		}
-	}
+	// if duty, ok := filtered["agent_duty"].(string); ok {
+	// 	var ws sql.NullString
+	// 	store.QueryRow("SELECT workspace FROM agent_config WHERE pane_id=?", paneID).Scan(&ws)
+	// 	if ws.String != "" {
+	// 		dir := ws.String + "/.kiro/steering"
+	// 		os.MkdirAll(dir, 0755)
+	// 		os.WriteFile(dir+"/duty.md", []byte("---\ninclusion: always\n---\n\n"+duty), 0644)
+	// 	}
+	// }
 	J(w, M{"success": true, "pane_id": shortPaneID(paneID), "updated": filtered})
 }
 
@@ -697,7 +697,19 @@ fs.writeFileSync(path, JSON.stringify(config, null, 2));
 EOF`,
 		}
 		if allowAllActions {
-			lines = append(lines, "claude --settings \"$CLAUDE_SETTINGS_PATH\" --dangerously-skip-permissions")
+			lines = append(lines, `ensure_claude_bypass_user() {
+  if ! id -u node >/dev/null 2>&1; then
+    echo '[cicy] node user missing; cannot start Claude bypass mode.'
+    return 1
+  fi
+  chmod 711 /root 2>/dev/null || true
+  mkdir -p /home/node/.claude /home/node/.config /home/node/.cache
+  chown -R node:node "$WORKSPACE" /home/node/.claude /home/node/.config /home/node/.cache
+}`)
+			lines = append(lines,
+				"ensure_claude_bypass_user || return 1",
+				`runuser -u node -- env HOME=/home/node USER=node LOGNAME=node SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" CICY_API_KEY="$CICY_API_KEY" sh -lc 'cd "$WORKSPACE" && exec claude --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'`,
+			)
 			return lines
 		}
 		lines = append(lines, "claude --settings \"$CLAUDE_SETTINGS_PATH\"")
@@ -780,10 +792,56 @@ func isClaudeInputReady(out string) bool {
 			strings.Contains(out, "Recent activity"))
 }
 
-func autoConfirmClaudeDanger(paneID string) {
+func isClaudeThemePrompt(out string) bool {
+	return strings.Contains(out, "Choose the text style that looks best with your terminal") &&
+		strings.Contains(out, "Dark mode")
+}
+
+func isClaudeSecurityNotesPrompt(out string) bool {
+	return strings.Contains(out, "Security notes:") &&
+		strings.Contains(out, "Press Enter to continue")
+}
+
+func isClaudeTrustPrompt(out string) bool {
+	return strings.Contains(out, "Quick safety check") &&
+		strings.Contains(out, "Yes, I trust this folder") &&
+		strings.Contains(out, "Enter to confirm")
+}
+
+func isClaudeBypassChoicePrompt(out string) bool {
+	return strings.Contains(out, "Bypass Permissions mode") &&
+		strings.Contains(out, "Yes, I accept")
+}
+
+func isClaudeBypassConfirmPrompt(out string) bool {
+	return strings.Contains(out, "Bypass Permissions mode") &&
+		strings.Contains(out, "Enter to confirm")
+}
+
+func isCodexTrustPrompt(out string) bool {
+	return strings.Contains(out, "Do you trust the contents of this directory?") &&
+		strings.Contains(out, "1. Yes, continue") &&
+		strings.Contains(out, "Press enter to continue")
+}
+
+func isCodexInputReady(out string) bool {
+	if isCodexTrustPrompt(out) {
+		return false
+	}
+	return strings.Contains(out, "OpenAI Codex (v") &&
+		(strings.Contains(out, "directory:") ||
+			strings.Contains(out, "~/workers/") ||
+			strings.Contains(out, "model:")) &&
+		(strings.Contains(out, "/model to change") ||
+			strings.Contains(out, "Use /skills to list available skills") ||
+			strings.Contains(out, "100% left") ||
+			strings.Contains(out, "› "))
+}
+
+func autoConfirmClaudeStartup(paneID string, allowAllActions bool) {
 	go func() {
 		var lastAction time.Time
-		for i := 0; i < 60; i++ {
+		for i := 0; i < 120; i++ {
 			time.Sleep(500 * time.Millisecond)
 			out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", "-160")
 			if err != nil {
@@ -797,23 +855,60 @@ func autoConfirmClaudeDanger(paneID string) {
 				continue
 			}
 			switch {
-			case strings.Contains(out, "Quick safety check") && strings.Contains(out, "Yes, I trust this folder"):
+			case isClaudeThemePrompt(out):
+				log.Printf("[claude-auto-confirm] %s theme selected", paneID)
+				runTmux("send-keys", "-t", paneID, "Enter")
+				lastAction = time.Now()
+			case isClaudeSecurityNotesPrompt(out):
+				log.Printf("[claude-auto-confirm] %s security notes continue", paneID)
+				runTmux("send-keys", "-t", paneID, "Enter")
+				lastAction = time.Now()
+			case isClaudeTrustPrompt(out):
 				log.Printf("[claude-auto-confirm] %s trust workspace", paneID)
 				runTmux("send-keys", "-t", paneID, "Enter")
 				lastAction = time.Now()
-			case strings.Contains(out, "Bypass Permissions mode") && strings.Contains(out, "Yes, I accept"):
+			case allowAllActions && isClaudeBypassChoicePrompt(out):
 				log.Printf("[claude-auto-confirm] %s accept bypass mode", paneID)
 				runTmux("send-keys", "-t", paneID, "Down")
 				time.Sleep(150 * time.Millisecond)
 				runTmux("send-keys", "-t", paneID, "Enter")
 				lastAction = time.Now()
-			case strings.Contains(out, "Bypass Permissions mode") && strings.Contains(out, "Enter to confirm"):
+			case allowAllActions && isClaudeBypassConfirmPrompt(out):
 				log.Printf("[claude-auto-confirm] %s confirm bypass mode", paneID)
 				runTmux("send-keys", "-t", paneID, "Enter")
 				lastAction = time.Now()
 			}
 		}
 		log.Printf("[claude-auto-confirm] %s timeout", paneID)
+	}()
+}
+
+func autoConfirmCodexTrust(paneID string) {
+	go func() {
+		var lastAction time.Time
+		enterCount := 0
+		for i := 0; i < 120; i++ {
+			time.Sleep(500 * time.Millisecond)
+			out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", "-200")
+			if err != nil {
+				continue
+			}
+			if isCodexInputReady(out) {
+				log.Printf("[codex-auto-confirm] %s ready", paneID)
+				return
+			}
+			if !isCodexTrustPrompt(out) {
+				continue
+			}
+			if enterCount >= 3 || time.Since(lastAction) < 1500*time.Millisecond {
+				continue
+			}
+			log.Printf("[codex-auto-confirm] %s trust workspace enter #%d", paneID, enterCount+1)
+			runTmux("send-keys", "-t", paneID, "Enter")
+			lastAction = time.Now()
+			enterCount++
+		}
+		log.Printf("[codex-auto-confirm] %s timeout", paneID)
 	}()
 }
 
@@ -844,7 +939,7 @@ func initPaneEnv(opts paneEnvOpts) {
 		lines = append(lines,
 			"cd "+tmuxShellQuote(opts.workspace),
 			fmt.Sprintf("export WORKSPACE=%s", tmuxShellQuote(opts.workspace)),
-			"mkdir -p ./skills ./projects",
+			// "mkdir -p ./skills ./projects",
 		)
 	}
 
@@ -892,8 +987,12 @@ func initPaneEnv(opts paneEnvOpts) {
 	}
 
 	runTmux("send-keys", "-t", pid, fmt.Sprintf("source %s", tmuxShellQuote(tmpFile)), "Enter")
-	if normalizeAgentType(opts.agentType) == "claude" && opts.allowAllActions {
-		autoConfirmClaudeDanger(pid)
+	if normalizeAgentType(opts.agentType) == "claude" {
+		autoConfirmClaudeStartup(pid, opts.allowAllActions)
+		return
+	}
+	if normalizeAgentType(opts.agentType) == "codex" {
+		autoConfirmCodexTrust(pid)
 	}
 }
 

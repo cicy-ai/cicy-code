@@ -13,6 +13,8 @@ api/logs/*
 .env
 dist
 cicy-code-linux*
+__pycache__/
+*.pyc
 mitmproxy/__pycache__/
 app/worker/public/
 api/cicy-code

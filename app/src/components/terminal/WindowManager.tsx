@@ -29,7 +29,7 @@ export function WindowManager({ session, onActiveChange }: { session: string; on
   const select = async (idx: string) => { await apiService.selectWindow(session, idx); setOpen(false); setTimeout(load, 500); };
   const create = async () => { await apiService.createWindow(session); load(); };
   const rename = async (idx: string) => { if (!editName.trim()) return; await apiService.renameWindow(session, idx, editName.trim()); setEditing(null); load(); };
-  const del = (idx: string) => { confirm(`Delete window ${idx}?`, async () => { await apiService.deleteWindow(session, idx); load(); }); };
+  const del = (idx: string) => { confirm(`删除窗口 ${idx}？`, async () => { await apiService.deleteWindow(session, idx); load(); }); };
 
   return (
     <div ref={ref} className="relative z-50">
@@ -67,7 +67,7 @@ export function WindowManager({ session, onActiveChange }: { session: string; on
           </div>
           <div className="border-t border-white/[0.08]">
             <button onClick={create} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] cursor-pointer">
-              <Plus size={12} /> New Window
+              <Plus size={12} /> 新建窗口
             </button>
           </div>
         </div>

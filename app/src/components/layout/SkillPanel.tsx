@@ -83,10 +83,10 @@ export default function SkillPanel({ paneId }: { paneId: string }) {
         </button>
       ))}
       <div className="pt-2 px-1 text-[11px] text-zinc-500" data-id="skill-panel-target-summary">
-        target: {defaultTarget}
-        {defaultMachineId ? ` · machine ${defaultMachine?.label || defaultMachineId}` : ''}
+        目标: {defaultTarget}
+        {defaultMachineId ? ` · 节点 ${defaultMachine?.label || defaultMachineId}` : ''}
         {defaultMachine?.runtime_kind ? ` · ${defaultMachine.runtime_kind}` : ''}
-        {defaultMachineApiOnly ? ' · API-only' : ''}
+        {defaultMachineApiOnly ? ' · 仅 API' : ''}
       </div>
     </div>
   );

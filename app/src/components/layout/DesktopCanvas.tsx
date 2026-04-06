@@ -53,16 +53,16 @@ export default function DesktopCanvas({ paneId, codeDrawerOpen, onToggleCodeDraw
       {/* Empty state */}
       {apps.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="text-center"><div className="text-5xl mb-3 opacity-20">✨</div><div className="text-base text-white/15">Ask your agent to build something</div></div>
+          <div className="text-center"><div className="text-5xl mb-3 opacity-20">✨</div><div className="text-base text-white/15">让你的智能体帮你构建点东西</div></div>
         </div>
       )}
 
       {/* Context menu */}
       {ctxMenu && (
         <div className="fixed z-[99999] bg-[#2a2a2e]/95 backdrop-blur-xl border border-white/[0.08] rounded-xl shadow-2xl py-1 min-w-[130px]" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={e => e.stopPropagation()}>
-          <button onClick={() => { const a = apps.find(x => x.id === ctxMenu.appId); if (a) openInElectron(a.url, a.label); setCtxMenu(null); }} className="w-full px-3 py-1.5 text-left text-base text-white/80 hover:bg-white/10 rounded-md mx-0.5" style={{ width: 'calc(100% - 4px)' }}>Open</button>
+          <button onClick={() => { const a = apps.find(x => x.id === ctxMenu.appId); if (a) openInElectron(a.url, a.label); setCtxMenu(null); }} className="w-full px-3 py-1.5 text-left text-base text-white/80 hover:bg-white/10 rounded-md mx-0.5" style={{ width: 'calc(100% - 4px)' }}>打开</button>
           <div className="h-px bg-white/[0.06] my-0.5 mx-2" />
-          <button onClick={() => { removeApp(ctxMenu.appId); setCtxMenu(null); }} className="w-full px-3 py-1.5 text-left text-base text-red-400/80 hover:bg-white/10 rounded-md mx-0.5 flex items-center gap-1.5" style={{ width: 'calc(100% - 4px)' }}><Trash2 size={11} />Remove</button>
+          <button onClick={() => { removeApp(ctxMenu.appId); setCtxMenu(null); }} className="w-full px-3 py-1.5 text-left text-base text-red-400/80 hover:bg-white/10 rounded-md mx-0.5 flex items-center gap-1.5" style={{ width: 'calc(100% - 4px)' }}><Trash2 size={11} />移除</button>
         </div>
       )}
     </div>

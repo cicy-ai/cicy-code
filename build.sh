@@ -35,10 +35,27 @@ PY
 }
 
 default_base_image() {
+  local images_base
+  images_base="$(global_json_value images.base)"
+  if [ -n "$images_base" ]; then
+    printf '%s' "$images_base"
+    return
+  fi
+  local images_base_repo images_base_tag
+  images_base_repo="$(global_json_value images.base_repository)"
+  images_base_tag="$(global_json_value images.base_tag)"
+  if [ -n "$images_base_repo" ] && [ -n "$images_base_tag" ]; then
+    printf '%s:%s' "$images_base_repo" "$images_base_tag"
+    return
+  fi
   local explicit
   explicit="$(global_json_value cicy-cluster.base_image)"
   if [ -n "$explicit" ]; then
     printf '%s' "$explicit"
+    return
+  fi
+  if docker image inspect cicy-code-base:latest >/dev/null 2>&1; then
+    printf 'cicy-code-base:latest'
     return
   fi
   local project
@@ -88,6 +105,7 @@ build_docker() {
     docker_args+=(--no-cache)
   fi
   echo "📦 Building Docker image cicy-code:${tag}..."
+  echo "   BASE_IMAGE=${base_image}"
   if [ ! -f "$API_DIR/cicy-code" ]; then
     echo "❌ Missing $API_DIR/cicy-code. Run ./build.sh build linux amd64 first."
     exit 1
