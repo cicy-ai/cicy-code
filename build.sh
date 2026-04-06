@@ -6,6 +6,7 @@ API_DIR="$ROOT_DIR/api"
 APP_DIR="$ROOT_DIR/app"
 DIST_DIR="$ROOT_DIR/dist"
 GLOBAL_JSON="$HOME/global.json"
+VERSIONS_JSON="$ROOT_DIR/versions.json"
 
 global_json_value() {
   local expr="$1"
@@ -34,6 +35,43 @@ PY
   fi
 }
 
+versions_json_value() {
+  local expr="$1"
+  if [ -f "$VERSIONS_JSON" ]; then
+    python3 - "$VERSIONS_JSON" "$expr" <<'PY'
+import json, sys
+path, expr = sys.argv[1], sys.argv[2]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    value = data
+    for part in expr.split('.'):
+        if not part:
+            continue
+        if isinstance(value, dict):
+            value = value.get(part, "")
+        else:
+            value = ""
+            break
+    if value is None:
+        value = ""
+    print(value, end="")
+except Exception:
+    pass
+PY
+  fi
+}
+
+default_base_tag() {
+  local versioned
+  versioned="$(versions_json_value base)"
+  if [ -n "$versioned" ]; then
+    printf '%s' "$versioned"
+    return
+  fi
+  printf 'latest'
+}
+
 default_base_image() {
   local images_base
   images_base="$(global_json_value images.base)"
@@ -54,17 +92,16 @@ default_base_image() {
     printf '%s' "$explicit"
     return
   fi
-  if docker image inspect cicy-code-base:latest >/dev/null 2>&1; then
-    printf 'cicy-code-base:latest'
+  printf 'cicy-code-base:%s' "$(default_base_tag)"
+}
+
+file_hash() {
+  local path="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$path" | awk '{print $1}'
     return
   fi
-  local project
-  project="$(global_json_value cicy-cluster.project_id)"
-  if [ -n "$project" ]; then
-    printf 'gcr.io/%s/cicy-code-base:latest' "$project"
-    return
-  fi
-  printf 'cicy-code-base:latest'
+  shasum -a 256 "$path" | awk '{print $1}'
 }
 
 # ── Sync version from npm/package.json → runtime/UI/tmux targets ──
@@ -101,6 +138,7 @@ build_docker() {
   local tag="${1:-latest}"
   local base_image="${BASE_IMAGE:-$(default_base_image)}"
   local docker_args=()
+  local setup_agent_hash app_binary_hash
   if [ "${NO_CACHE:-0}" = "1" ]; then
     docker_args+=(--no-cache)
   fi
@@ -111,19 +149,32 @@ build_docker() {
     exit 1
   fi
   cp  $API_DIR/cicy-code  $API_DIR/cicy-code-docker
-  cd $API_DIR && docker build -f Dockerfile.cloudrun --build-arg BASE_IMAGE="$base_image" -t cicy-code:${tag} . "${docker_args[@]}" && cd "$ROOT_DIR"
+  setup_agent_hash="$(file_hash "$API_DIR/setup-agent.sh")"
+  app_binary_hash="$(file_hash "$API_DIR/cicy-code-docker")"
+  echo "   SETUP_AGENT_HASH=${setup_agent_hash:0:12}"
+  echo "   APP_BINARY_HASH=${app_binary_hash:0:12}"
+  cd $API_DIR && docker build -f Dockerfile.cloudrun \
+    --build-arg BASE_IMAGE="$base_image" \
+    --build-arg SETUP_AGENT_HASH="$setup_agent_hash" \
+    --build-arg APP_BINARY_HASH="$app_binary_hash" \
+    -t cicy-code:${tag} . "${docker_args[@]}" && cd "$ROOT_DIR"
   rm -f $API_DIR/cicy-code-docker
   echo "✅ Docker image built: cicy-code:${tag}"
 }
 
 build_docker_base() {
-  local tag="${1:-latest}"
+  local tag="${1:-$(default_base_tag)}"
   local docker_args=()
+  local base_dockerfile_hash
   if [ "${NO_CACHE:-0}" = "1" ]; then
     docker_args+=(--no-cache)
   fi
+  base_dockerfile_hash="$(file_hash "$API_DIR/Dockerfile.cloudrun.base")"
   echo "📦 Building base Docker image cicy-code-base:${tag}..."
-  cd $API_DIR && docker build -f Dockerfile.cloudrun.base -t cicy-code-base:${tag} . "${docker_args[@]}" && cd "$ROOT_DIR"
+  echo "   BASE_DOCKERFILE_HASH=${base_dockerfile_hash:0:12}"
+  cd $API_DIR && docker build -f Dockerfile.cloudrun.base \
+    --build-arg BASE_DOCKERFILE_HASH="$base_dockerfile_hash" \
+    -t cicy-code-base:${tag} . "${docker_args[@]}" && cd "$ROOT_DIR"
   echo "✅ Base Docker image built: cicy-code-base:${tag}"
 }
 
@@ -172,9 +223,10 @@ case "${1:-build}" in
     echo "  build          Build for current/specified platform (default: linux/amd64)"
     echo "  all            Cross-compile all platforms to dist/"
     echo "  docker [tag]       Build app Docker image using BASE_IMAGE"
-    echo "                     default BASE_IMAGE: ~/global.json cicy-cluster.base_image"
-    echo "                     fallback: gcr.io/<project_id>/cicy-code-base:latest"
-    echo "  docker-base [tag]  Build reusable base Docker image (default tag: latest)"
+    echo "                     default BASE_IMAGE: ~/global.json images.base / cicy-cluster.base_image"
+    echo "                     fallback: cicy-code-base:\$(versions.json.base)"
+    echo "  docker-base [tag]  Build reusable base Docker image"
+    echo "                     default tag: versions.json base (fallback: latest)"
     echo "  -h, --help     Show this help message"
     echo ""
     echo "Arguments:"
@@ -183,7 +235,7 @@ case "${1:-build}" in
     echo ""
     echo "Environment variables:"
     echo "  SKIP_NPM=1     Skip npm ci + npm run build (reuse existing app/dist)"
-    echo "  BASE_IMAGE     Base image for docker command (default: cicy-code-base:latest)"
+    echo "  BASE_IMAGE     Base image for docker command"
     echo "  NO_CACHE=1     Disable Docker layer cache"
     exit 0
     ;;

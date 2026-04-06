@@ -5,20 +5,73 @@ Usage:
   python3 cos-upload.py <target>       # target: app, ttyd, landing, or all
   python3 cos-upload.py all            # upload all targets
 """
-import os, sys, json, hashlib, hmac, time, mimetypes, requests
+import os, sys, json, hashlib, hmac, time, mimetypes, shutil, tempfile, requests
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.abspath(os.path.join(ROOT, '..'))
 conf = json.load(open(os.path.expanduser('~/global.json')))['tencent']
 SID, SKEY = conf['secret_id'], conf['secret_key']
 BUCKET, REGION = conf['bucket'], conf['region']
 HOST = f"{BUCKET}.cos.{REGION}.myqcloud.com"
-versions = json.load(open(os.path.join(ROOT, '..', 'versions.json')))
+versions = json.load(open(os.path.join(REPO_ROOT, 'versions.json')))
 
 TARGETS = {
-    'app':     {'src': os.path.join(ROOT, '../app-worker/public/assets'), 'prefix': 'app',  'key': 'app',     'flat': True},
-    'ttyd':    {'src': os.path.join(ROOT, 'api/static'),               'prefix': 'ttyd', 'key': 'ttyd',    'flat': False},
+    'app':     {'src': os.path.join(REPO_ROOT, 'app-worker/public/assets'), 'prefix': 'app',  'key': 'app',     'flat': True},
+    'ttyd':    {'prefix': 'ttyd', 'key': 'ttyd', 'flat': False},
     'landing': {'src': os.path.expanduser('~/projects/cicy-landing/public/assets'), 'prefix': 'landing', 'key': 'landing', 'flat': True},
 }
+
+
+def first_existing(paths):
+    for path in paths:
+        if path and os.path.isfile(path):
+            return path
+    return None
+
+
+def prepare_ttyd_assets():
+    bundle = first_existing([
+        os.path.join(REPO_ROOT, 'api/js/dist/gotty-bundle.js'),
+        os.path.join(REPO_ROOT, 'api/bindata/static/js/gotty-bundle.js'),
+    ])
+    xterm_css = first_existing([
+        os.path.join(REPO_ROOT, 'api/js/node_modules/xterm/dist/xterm.css'),
+        os.path.join(REPO_ROOT, 'api/bindata/static/css/xterm.css'),
+    ])
+
+    required = {
+        'index.html': os.path.join(REPO_ROOT, 'api/resources/index.html'),
+        'favicon.png': os.path.join(REPO_ROOT, 'api/resources/favicon.png'),
+        'css/index.css': os.path.join(REPO_ROOT, 'api/resources/index.css'),
+        'css/xterm_customize.css': os.path.join(REPO_ROOT, 'api/resources/xterm_customize.css'),
+        'css/xterm.css': xterm_css,
+        'gotty-bundle.js': bundle,
+    }
+    missing = [name for name, path in required.items() if not path or not os.path.isfile(path)]
+    if missing:
+        raise FileNotFoundError(
+            "missing ttyd assets: "
+            + ", ".join(missing)
+            + " (run api JS build / asset build first)"
+        )
+
+    temp_dir = tempfile.TemporaryDirectory(prefix='cicy-ttyd-assets-')
+    asset_root = temp_dir.name
+    copies = [
+        (required['index.html'], 'index.html'),
+        (required['favicon.png'], 'favicon.png'),
+        (required['css/index.css'], 'css/index.css'),
+        (required['css/xterm.css'], 'css/xterm.css'),
+        (required['css/xterm_customize.css'], 'css/xterm_customize.css'),
+        (required['gotty-bundle.js'], 'gotty-bundle.js'),
+        (required['gotty-bundle.js'], 'js/gotty-bundle.js'),
+    ]
+    for src, rel in copies:
+        dst = os.path.join(asset_root, rel)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(src, dst)
+
+    return temp_dir, asset_root
 
 def sign(method, path):
     now = int(time.time())
@@ -33,31 +86,45 @@ def sign(method, path):
 
 def upload(target):
     t = TARGETS[target]
-    src, prefix = t['src'], t['prefix']
+    temp_dir = None
+    if target == 'ttyd':
+        temp_dir, src = prepare_ttyd_assets()
+    else:
+        src = t['src']
+    prefix = t['prefix']
     ver = 'v' + versions.get(t['key'], '1')
-    if not os.path.isdir(src):
-        print(f"✗ {target}: {src} not found")
-        return 0
+    try:
+        if not os.path.isdir(src):
+            print(f"✗ {target}: {src} not found")
+            return 0
 
-    print(f"=== {target} {ver} ===")
-    ok = 0
-    for root, dirs, files in os.walk(src):
-        for f in files:
-            local = os.path.join(root, f)
-            if t['flat']:
-                key = f"/{prefix}/{ver}/assets/{f}"
-            else:
-                rel = os.path.relpath(local, src)
-                key = f"/{prefix}/{ver}/{rel}"
-            ct = mimetypes.guess_type(f)[0] or 'application/octet-stream'
-            data = open(local, 'rb').read()
-            r = requests.put(f"https://{HOST}{key}", data=data,
-                headers={'Host': HOST, 'Content-Type': ct, 'Authorization': sign('put', key)})
-            s = '✓' if r.status_code in (200, 204) else f'✗ {r.status_code}'
-            print(f"  {s} {key}")
-            if r.status_code in (200, 204): ok += 1
-    print(f"  {ok} files → https://{HOST}/{prefix}/{ver}/\n")
-    return ok
+        print(f"=== {target} {ver} ===")
+        ok = 0
+        for root, dirs, files in os.walk(src):
+            for f in files:
+                local = os.path.join(root, f)
+                if t['flat']:
+                    key = f"/{prefix}/{ver}/assets/{f}"
+                else:
+                    rel = os.path.relpath(local, src)
+                    key = f"/{prefix}/{ver}/{rel}"
+                ct = mimetypes.guess_type(f)[0] or 'application/octet-stream'
+                with open(local, 'rb') as fh:
+                    data = fh.read()
+                r = requests.put(
+                    f"https://{HOST}{key}",
+                    data=data,
+                    headers={'Host': HOST, 'Content-Type': ct, 'Authorization': sign('put', key)},
+                )
+                s = '✓' if r.status_code in (200, 204) else f'✗ {r.status_code}'
+                print(f"  {s} {key}")
+                if r.status_code in (200, 204):
+                    ok += 1
+        print(f"  {ok} files → https://{HOST}/{prefix}/{ver}/\n")
+        return ok
+    finally:
+        if temp_dir is not None:
+            temp_dir.cleanup()
 
 if __name__ == '__main__':
     if len(sys.argv) < 2 or sys.argv[1] not in list(TARGETS) + ['all']:

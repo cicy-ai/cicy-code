@@ -124,7 +124,7 @@ export class WebTTY {
     requestAPI(method: string, path: string, body?: object, headers?: { [key: string]: string }, bodyBase64?: string, contentType?: string): Promise<any> {
         var PromiseCtor = (window as any).Promise;
         if (!this.isConnectionOpen() || this.connection === null) {
-            return PromiseCtor.reject(new Error("webtty connection is not open"));
+            return PromiseCtor.resolve(null);
         }
 
         this.apiRequestSeq += 1;

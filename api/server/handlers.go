@@ -41,10 +41,12 @@ func (server *Server) generateHandleWS(ctx context.Context, cancel context.Cance
 
 		defer func() {
 			num := counter.done()
-			log.Printf(
-				"Connection closed by %s: %s, connections: %d/%d",
-				closeReason, r.RemoteAddr, num, server.options.MaxConnection,
-			)
+			if ttyDebugEnabled() {
+				log.Printf(
+					"Connection closed by %s: %s, connections: %d/%d",
+					closeReason, r.RemoteAddr, num, server.options.MaxConnection,
+				)
+			}
 
 			if server.options.Once {
 				cancel()
@@ -58,7 +60,9 @@ func (server *Server) generateHandleWS(ctx context.Context, cancel context.Cance
 			}
 		}
 
-		log.Printf("New client connected: %s, connections: %d/%d", r.RemoteAddr, num, server.options.MaxConnection)
+		if ttyDebugEnabled() {
+			log.Printf("New client connected: %s, connections: %d/%d", r.RemoteAddr, num, server.options.MaxConnection)
+		}
 
 		if r.Method != "GET" {
 			http.Error(w, "Method not allowed", 405)

@@ -13,6 +13,11 @@ import (
 	"time"
 )
 
+func machinesDebugEnabled() bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv("CICY_DEBUG_MACHINES")))
+	return value == "1" || value == "true" || value == "yes" || value == "on"
+}
+
 type machineRecord struct {
 	ID               int            `json:"id"`
 	MachineKey       string         `json:"machine_key"`
@@ -232,7 +237,9 @@ func syncMachinesFromConfig() ([]M, error) {
 }
 
 func listMachines() ([]M, error) {
-	log.Printf("[machines] list start")
+	if machinesDebugEnabled() {
+		log.Printf("[machines] list start")
+	}
 	rows, err := store.Query("SELECT id, machine_key, label, host, port, url, token, status, last_seen_at, capabilities_json, created_at, updated_at FROM machines ORDER BY updated_at DESC, id DESC")
 	if err != nil {
 		log.Printf("[machines] query error: %v", err)
@@ -280,7 +287,9 @@ func listMachines() ([]M, error) {
 	if machines == nil {
 		machines = []M{}
 	}
-	log.Printf("[machines] list done count=%d", len(machines))
+	if machinesDebugEnabled() {
+		log.Printf("[machines] list done count=%d", len(machines))
+	}
 	return machines, nil
 }
 

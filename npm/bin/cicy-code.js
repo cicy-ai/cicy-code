@@ -179,7 +179,7 @@ async function launchDesktop() {
     }
   }
 
-  // Find cicy-desktop package (global cicy or bundled desktop/)
+  // Find cicy-desktop package from the global install
   let desktopDir = null;
 
   // Check global 'cicy-desktop' package
@@ -189,14 +189,6 @@ async function launchDesktop() {
     if (!fs.existsSync(path.join(desktopDir, 'src', 'main.js'))) desktopDir = null;
   } catch {}
 
-  // Fallback: bundled desktop/ submodule
-  if (!desktopDir) {
-    const bundled = path.join(__dirname, '..', '..', 'desktop');
-    if (fs.existsSync(path.join(bundled, 'src', 'main.js'))) {
-      desktopDir = bundled;
-    }
-  }
-
   if (!desktopDir) {
     console.log('  ⚠️  cicy-desktop not found. Installing...');
     try {
@@ -204,7 +196,7 @@ async function launchDesktop() {
       const cicyBin = execSync('which cicy', { encoding: 'utf8' }).trim();
       desktopDir = path.resolve(path.dirname(cicyBin), '..', 'lib', 'node_modules', 'cicy-desktop');
     } catch {
-      console.error('  ❌ Failed to install cicy. Install manually: npm install -g cicy-desktop');
+      console.error('  ❌ Failed to install cicy-desktop. Install manually: npm install -g cicy-desktop');
       console.log(`  📱 Fallback: open browser → ${url}`);
       return;
     }

@@ -8,6 +8,7 @@ export interface EditPaneData {
   agent_duty?: string;
   agent_type?: string;
   allow_all_actions?: boolean;
+  reply_in_chinese?: boolean;
   workspace?: string;
   active?: boolean;
   init_script?: string;
@@ -108,6 +109,16 @@ export const EditPaneDialog: React.FC<EditPaneDialogProps> = ({
 
           {/* Agent */}
           {isFull && tab === '智能体' && (<>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-vsc-text">默认中文回复</p>
+                <p className="text-xs text-vsc-text-muted">启动完成后自动发送 reply in chinese</p>
+              </div>
+              <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-colors ${pane.reply_in_chinese ? 'bg-green-600' : 'bg-vsc-bg-active'}`}
+                onClick={() => onChange({ ...pane, reply_in_chinese: !pane.reply_in_chinese })}>
+                <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${pane.reply_in_chinese ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </div>
+            </div>
             <div>
               <label className="block text-xs text-vsc-text-secondary mb-1">智能体职责</label>
               <textarea value={pane.agent_duty || ''}
