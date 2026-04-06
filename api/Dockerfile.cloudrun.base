@@ -23,9 +23,14 @@ RUN set -eux; \
         curl \
         git \
         tmux \
+        vim \
         procps \
         fonts-wqy-microhei \
     ; \
+    curl -fsSL https://code-server.dev/install.sh | sh; \
+    curl -fsSL https://opencode.ai/install | bash; \
     npm install -g openclaw@latest; \
+    npm install -g @anthropic-ai/claude-code; \
+    npm install -g @openai/codex; \
     npm cache clean --force; \
     rm -rf /var/lib/apt/lists/* /tmp/npm-cache /root/.npm /root/.cache /tmp/* /var/tmp/*

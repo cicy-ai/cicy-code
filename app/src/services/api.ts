@@ -73,6 +73,7 @@ const api = {
 
   getGlobalSettings: () => http.get('/api/settings/global'),
   updateGlobalSettings: (data: any) => http.post('/api/settings/global', data),
+  getOpenClawGateway: () => http.get('/api/openclaw/gateway'),
 
   getTokens: () => http.get('/api/auth/tokens'),
   createToken: (data: any) => http.post('/api/auth/tokens', data),

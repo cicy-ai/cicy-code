@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 配置 Claude Code、Codex、OpenCode 的 API Key、API URL 和默认模型
-# 用法: ./setup_opencode.sh <apiKey> <apiUrl> [defaultModel]
+# 用法: ./setup_opencode.sh <apiKey> <apiUrl> [defaultOpencodeModel]
 
 set -e
 
@@ -15,15 +15,33 @@ PY
 fi
 
 API_KEY="${1}"
-API_URL="${2:-http://2000.run:6543/v1}"
-ANTHROPIC_URL="${3:-http://2000.run:6543}"
-DEFAULT_MODEL="${4:-shibacc/claude-sonnet-4-6}"
-CLAUDE_MODEL="${5:-opus[1m]}"
+API_URL="${2:-http://cicy-ai.com/v1}"
+ANTHROPIC_URL="${3:-http://cicy-ai.com}"
+DEFAULT_OPENCODE_MODEL="${4:-gpt-5.4}"
+DEFAULT_CLAUDE_MODEL="${5:-opus[1m]}"
 CODEX_MODEL="${6:-gpt-5.4}"
 
+normalize_openclaw_model() {
+  case "$1" in
+    gpt5.4) echo "gpt-5.4" ;;
+    cicyai/claude-opus-4-6) echo "claude-opus-4-6" ;;
+    cicyai/claude-sonnet-4-6) echo "claude-sonnet-4-6" ;;
+    cicyai/claude-haiku-4-5-20251001) echo "claude-haiku-4-5-20251001" ;;
+    shibacc/claude-opus-4-6) echo "claude-opus-4-6" ;;
+    shibacc/claude-sonnet-4-6) echo "claude-sonnet-4-6" ;;
+    shibacc/claude-haiku-4-5-20251001) echo "claude-haiku-4-5-20251001" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+default_openclaw_runtime_base_url() {
+  local mgr_port="${PORT:-8021}"
+  echo "http://127.0.0.1:${mgr_port}/api/openclaw/provider"
+}
+
 if [ -z "$API_KEY" ]; then
-    echo "用法: $0 <apiKey> [apiUrl] [anthropicUrl] [defaultModel] [claudeModel] [codexModel]"
-    echo "示例: $0 sk-xxx http://2000.run:6543/v1 http://2000.run:6543 shibacc/claude-sonnet-4-6 opus[1m] gpt-5.4"
+    echo "用法: $0 <apiKey> [apiUrl] [anthropicUrl] [defaultOpencodeModel] [defaultClaudeModel] [codexModel]"
+    echo "示例: $0 sk-xxx http://2000.run:6543/v1 http://2000.run:6543 gpt-5.4 opus[1m] gpt-5.4"
     exit 1
 fi
 
@@ -39,14 +57,14 @@ cat > "$CLAUDE_CONFIG" << EOF
     "ANTHROPIC_AUTH_TOKEN": "$API_KEY",
     "ANTHROPIC_BASE_URL": "$ANTHROPIC_URL"
   },
-  "model": "$CLAUDE_MODEL",
+  "model": "$DEFAULT_CLAUDE_MODEL",
   "permissions": {
     "allow": ["*"]
   },
   "skipDangerousModePermissionPrompt": true
 }
 EOF
-echo "✓ Claude Code 配置完成 (Base URL: $ANTHROPIC_URL, Model: $CLAUDE_MODEL)"
+echo "✓ Claude Code 配置完成 (Base URL: $ANTHROPIC_URL, Model: $DEFAULT_CLAUDE_MODEL)"
 
 # ===== Codex =====
 CODEX_DIR="$HOME_DIR/.codex"
@@ -98,9 +116,10 @@ mkdir -p "$OPENCODE_DIR"
 cat > "$OPENCODE_CONFIG" << EOF
 {
   "\$schema": "https://opencode.ai/config.json",
-  "model": "$DEFAULT_MODEL",
+  "model": "cicyai/$DEFAULT_OPENCODE_MODEL",
   "provider": {
-    "shibacc": {
+    "cicyai": {
+      "npm": "@ai-sdk/openai-compatible",
       "api": "openai",
       "models": {
         "claude-haiku-4-5-20251001": {
@@ -131,17 +150,17 @@ cat > "$OPENCODE_CONFIG" << EOF
           "name": "gpt-5.4"
         }
       },
-      "name": "柴犬 CC",
+      "name": "cicyAi",
       "options": {
         "apiKey": "$API_KEY",
         "baseURL": "$API_URL"
       }
     }
   },
-  "small_model": "shibacc/claude-haiku-4-5-20251001"
+  "small_model": "cicyai/claude-haiku-4-5-20251001"
 }
 EOF
-echo "✓ OpenCode 配置完成 (Base URL: $API_URL, Model: $DEFAULT_MODEL)"
+echo "✓ OpenCode 配置完成 (Base URL: $API_URL, Model: $DEFAULT_OPENCODE_MODEL)"
 
 # ===== OpenClaw =====
 OPENCLAW_DIR="$HOME_DIR/.openclaw"
@@ -149,7 +168,19 @@ OPENCLAW_CONFIG="$OPENCLAW_DIR/openclaw.json"
 OPENCLAW_ENV="$OPENCLAW_DIR/.env"
 OPENCLAW_AGENT_DIR="$OPENCLAW_DIR/agents/main/agent"
 OPENCLAW_AUTH_STORE="$OPENCLAW_AGENT_DIR/auth-profiles.json"
-OPENCLAW_PRIMARY_MODEL="${OPENCLAW_PRIMARY_MODEL:-${CICY_OPENCLAW_MODEL:-gpt-5.4}}"
+OPENCLAW_PRIMARY_MODEL="$(normalize_openclaw_model "${OPENCLAW_PRIMARY_MODEL:-${CICY_OPENCLAW_MODEL:-claude-sonnet-4-6}}")"
+OPENCLAW_PROVIDER_API="openai-completions"
+OPENCLAW_PROVIDER_COMPAT="openai"
+OPENCLAW_PROVIDER_BASE_URL="$API_URL"
+OPENCLAW_PROVIDER_RUNTIME_BASE_URL="$API_URL"
+if [[ "$OPENCLAW_PRIMARY_MODEL" == claude-* ]]; then
+  OPENCLAW_PROVIDER_API="anthropic-messages"
+  OPENCLAW_PROVIDER_COMPAT="anthropic"
+  OPENCLAW_PROVIDER_BASE_URL="$ANTHROPIC_URL"
+  OPENCLAW_PROVIDER_RUNTIME_BASE_URL="$ANTHROPIC_URL"
+else
+  OPENCLAW_PROVIDER_RUNTIME_BASE_URL="${OPENCLAW_OPENAI_RUNTIME_BASE_URL:-$(default_openclaw_runtime_base_url)}"
+fi
 mkdir -p "$OPENCLAW_DIR"
 if [ -f "$OPENCLAW_CONFIG" ]; then
   OPENCLAW_TOKEN="$(node -e '
@@ -170,7 +201,9 @@ if [ -z "${OPENCLAW_TOKEN:-}" ]; then
 fi
 cat > "$OPENCLAW_ENV" << EOF
 OPENAI_API_KEY=$API_KEY
-OPENAI_BASE_URL=$API_URL
+OPENAI_BASE_URL=$OPENCLAW_PROVIDER_RUNTIME_BASE_URL
+ANTHROPIC_API_KEY=$API_KEY
+ANTHROPIC_BASE_URL=$ANTHROPIC_URL
 CICY_API_KEY=$API_KEY
 OPENCLAW_GATEWAY_TOKEN=$OPENCLAW_TOKEN
 EOF
@@ -178,40 +211,49 @@ chmod 600 "$OPENCLAW_ENV"
 mkdir -p "$OPENCLAW_AGENT_DIR"
 rm -f "$OPENCLAW_AUTH_STORE"
 patch_openclaw_models() {
-  node - "$OPENCLAW_CONFIG" "$API_URL" "$API_KEY" "$OPENCLAW_PRIMARY_MODEL" <<'NODE'
+  node - "$OPENCLAW_CONFIG" "$OPENCLAW_PROVIDER_RUNTIME_BASE_URL" "$API_KEY" "$OPENCLAW_PRIMARY_MODEL" "$OPENCLAW_PROVIDER_API" <<'NODE'
 const fs = require("fs");
-const [configPath, apiUrl, apiKey, primaryModel] = process.argv.slice(2);
+const [configPath, baseUrl, apiKey, primaryModel, providerApi] = process.argv.slice(2);
 const cfg = JSON.parse(fs.readFileSync(configPath, "utf8"));
+
+const claudeModels = [
+  { id: "claude-opus-4-6", name: "Claude Opus 4.6", reasoning: true, input: ["text", "image"], contextWindow: 200000, maxTokens: 8192 },
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", reasoning: true, input: ["text", "image"], contextWindow: 200000, maxTokens: 8192 },
+  { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", reasoning: false, input: ["text", "image"], contextWindow: 200000, maxTokens: 8192 },
+];
+const openaiModels = [
+  { id: "gpt-5.4", name: "gpt-5.4", reasoning: true, input: ["text", "image"], contextWindow: 16000, maxTokens: 4096 },
+  { id: "gpt-5.3-codex", name: "gpt-5.3-codex", reasoning: true, input: ["text", "image"], contextWindow: 16000, maxTokens: 4096 },
+];
+const wanted = providerApi === "anthropic-messages" ? claudeModels : openaiModels;
 
 cfg.agents ||= {};
 cfg.agents.defaults ||= {};
 cfg.agents.defaults.model ||= {};
 cfg.agents.defaults.model.primary = `cicy/${primaryModel}`;
 cfg.agents.defaults.models ||= {};
-cfg.agents.defaults.models["cicy/gpt-5.4"] = { alias: "GPT-5.4" };
-cfg.agents.defaults.models["cicy/shibacc/claude-opus-4-6"] = { alias: "Claude Opus 4.6" };
-cfg.agents.defaults.models["cicy/shibacc/claude-sonnet-4-6"] = { alias: "Claude Sonnet 4.6" };
-cfg.agents.defaults.models["cicy/shibacc/claude-haiku-4-5-20251001"] = { alias: "Claude Haiku 4.5" };
+cfg.agents.defaults.models = {};
+for (const model of wanted) {
+  cfg.agents.defaults.models[`cicy/${model.id}`] = { alias: model.name };
+}
 
 cfg.models ||= {};
 cfg.models.mode = "merge";
 cfg.models.providers ||= {};
 cfg.models.providers.cicy ||= {};
-cfg.models.providers.cicy.baseUrl = apiUrl;
+cfg.models.providers.cicy.baseUrl = baseUrl;
 cfg.models.providers.cicy.apiKey = apiKey;
-cfg.models.providers.cicy.api = "openai-completions";
-
-const wanted = [
-  { id: "gpt-5.4", name: "gpt-5.4", reasoning: true, input: ["text", "image"] },
-  { id: "shibacc/claude-opus-4-6", name: "Claude Opus 4.6", reasoning: true, input: ["text", "image"] },
-  { id: "shibacc/claude-sonnet-4-6", name: "Claude Sonnet 4.6", reasoning: true, input: ["text", "image"] },
-  { id: "shibacc/claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", input: ["text", "image"] }
-];
+cfg.models.providers.cicy.api = providerApi;
 
 const existing = Array.isArray(cfg.models.providers.cicy.models) ? cfg.models.providers.cicy.models : [];
 const byId = new Map(existing.map((item) => [item && item.id, item]));
 for (const model of wanted) {
-  byId.set(model.id, { ...(byId.get(model.id) || {}), ...model });
+  byId.set(model.id, {
+    ...(byId.get(model.id) || {}),
+    ...model,
+    api: providerApi,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  });
 }
 cfg.models.providers.cicy.models = wanted.map((model) => byId.get(model.id));
 
@@ -230,8 +272,8 @@ if command -v openclaw >/dev/null 2>&1; then
     --non-interactive \
     --auth-choice custom-api-key \
     --custom-provider-id cicy \
-    --custom-compatibility openai \
-    --custom-base-url "$API_URL" \
+    --custom-compatibility "$OPENCLAW_PROVIDER_COMPAT" \
+    --custom-base-url "$OPENCLAW_PROVIDER_BASE_URL" \
     --custom-model-id "$OPENCLAW_PRIMARY_MODEL" \
     --custom-api-key "$API_KEY" \
     --secret-input-mode plaintext \
@@ -271,15 +313,16 @@ else
     "mode": "merge",
     "providers": {
       "cicy": {
-        "baseUrl": "$API_URL",
+        "baseUrl": "$OPENCLAW_PROVIDER_RUNTIME_BASE_URL",
         "apiKey": "$API_KEY",
-        "api": "openai-completions",
+        "api": "$OPENCLAW_PROVIDER_API",
         "models": [
           {
             "id": "$OPENCLAW_PRIMARY_MODEL",
             "name": "$OPENCLAW_PRIMARY_MODEL",
             "reasoning": true,
-            "input": ["text", "image"]
+            "input": ["text", "image"],
+            "api": "$OPENCLAW_PROVIDER_API"
           }
         ]
       }
@@ -306,8 +349,8 @@ fi
 
 echo ""
 echo "=== 配置完成 ==="
-echo "Claude Code: $ANTHROPIC_URL | $CLAUDE_MODEL"
+echo "Claude Code: $ANTHROPIC_URL | $DEFAULT_CLAUDE_MODEL"
 echo "Codex:       $API_URL | $CODEX_MODEL"
-echo "OpenCode:    $API_URL | $DEFAULT_MODEL"
+echo "OpenCode:    $API_URL | $DEFAULT_OPENCODE_MODEL"
 echo "OpenClaw:    $OPENCLAW_CONFIG"
 echo "OpenClaw Model: cicy/$OPENCLAW_PRIMARY_MODEL"

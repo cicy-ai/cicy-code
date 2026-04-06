@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Terminal, MessageSquare, Home, Folder, FolderOpen, X, Settings, Brain, Search,
-  LayoutList, Users, RotateCcw, Plus, Pin, PinOff, Menu, ExternalLink, Key, Bug, Server
+  LayoutList, Users, RotateCcw, Plus, Menu, ExternalLink, Key, Bug, Server, MoreHorizontal
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { lockPointer, unlockPointer } from '../lib/pointerLock';
@@ -32,6 +32,7 @@ const cache = {
   set: (k: string, v: any) => localStorage.setItem(k, JSON.stringify(v)),
 };
 
+const LEFT_PANEL_WIDTH = 260;
 const getFloatingOpenKey = (paneId: string) => `ws_floatingCodeOpen:${paneId}`;
 const TEAM_TERMINAL_CHILDREN_KEY = 'ws_teamTerminalChildren';
 const TEAM_TERMINAL_ACTIVE_KEY = 'ws_teamTerminalActive';
@@ -46,6 +47,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const initialPaneIdRef = useRef(paneId);
   const floatingOpenKey = getFloatingOpenKey(initialPaneIdRef.current);
 
+  const getOpenPanelLayout = useCallback(() => {
+    const containerWidth = Math.max(mainAreaRef.current?.clientWidth || window.innerWidth || 1, 1);
+    const leftPercent = Math.min(100, Math.max(0, (LEFT_PANEL_WIDTH / containerWidth) * 100));
+    return {
+      'left-panel': leftPercent,
+      'right-panel': 100 - leftPercent,
+    };
+  }, []);
+
   const mainTab = 'cli' as const;
   const [leftPanel, setLeftPanel] = useState<'team' | 'skills' | null>(() => {
     const v = cache.get('ws_leftPanel', null);
@@ -56,7 +66,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
-  const [panelSizes, setPanelSizes] = useState<Record<string, number>>(() => cache.get('ws_panelSizes', { 'left-panel': 50, 'right-panel': 50 }));
+  const [panelSizes, setPanelSizes] = useState<Record<string, number> | null>(() => {
+    const saved = cache.get('ws_panelSizes', null);
+    if (!saved || typeof saved !== 'object') return null;
+    const left = Number(saved['left-panel']);
+    const right = Number(saved['right-panel']);
+    if (!Number.isFinite(left) || !Number.isFinite(right)) return null;
+    if (left < 5 || right < 5) return null;
+    if (left === 50 && right === 50) return null;
+    return { 'left-panel': left, 'right-panel': right };
+  });
   const [toast, setToast] = useState<string | null>(null);
 
   const [status, setStatus] = useState('idle');
@@ -79,8 +98,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     if (next !== codeServerSrc) { setCodeServerSrc(next); setCodeFolder(config.hostHome); }
   };
   const isOpenClawPane = paneId === 'w-10001';
-  const handleCodeServiceOpen = () => {
-    if (codeServerSrc) window.open(codeServerSrc, '_blank');
+  const handleCodeServiceOpen = (folder?: string) => {
+    const nextFolder = folder || codeFolder;
+    if (!nextFolder || !token) return;
+    const next = urls.codeServer(nextFolder, token);
+    window.open(next, '_blank');
+    if (next !== codeServerSrc || nextFolder !== codeFolder) {
+      setCodeServerSrc(next);
+      setCodeFolder(nextFolder);
+    }
   };
   const handleOpenClawOpen = () => {
     if (!token) return;
@@ -103,16 +129,25 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [panelPos, setPanelPos] = useState(() => cache.get('agent_panelPos', { x: 20, y: Math.max(60, window.innerHeight - 280) }));
   const [panelSize, setPanelSize] = useState(() => cache.get('agent_panelSize', { width: 360, height: 220 }));
   const [activeWinIdx, setActiveWinIdx] = useState('0');
+  const [isEditingTopBarTitle, setIsEditingTopBarTitle] = useState(false);
+  const [topBarTitleDraft, setTopBarTitleDraft] = useState('');
+  const [savingTopBarTitle, setSavingTopBarTitle] = useState(false);
   const groupRef = useRef<any>(null);
   const mainAreaRef = useRef<HTMLDivElement>(null);
   const activityBarRef = useRef<HTMLDivElement>(null);
+  const topBarTitleInputRef = useRef<HTMLInputElement>(null);
+  const topBarTitleCommitRef = useRef(false);
 
   const addApp = (window as any).__desktopAddApp || (() => {});
   useDesktopEvents(addApp);
 
   const leftActive = agentsOpen ? 'agents' : leftPanel;
 
-  useEffect(() => { cache.set('ws_leftPanel', leftPanel); if (groupRef.current) { groupRef.current.setLayout(leftActive ? { 'left-panel': panelSizes['left-panel'] || 50, 'right-panel': panelSizes['right-panel'] || 50 } : { 'left-panel': 0, 'right-panel': 100 }); } }, [leftActive, leftPanel, panelSizes]);
+  useEffect(() => {
+    cache.set('ws_leftPanel', leftPanel);
+    if (!groupRef.current) return;
+    groupRef.current.setLayout(leftActive ? (panelSizes ?? getOpenPanelLayout()) : { 'left-panel': 0, 'right-panel': 100 });
+  }, [getOpenPanelLayout, leftActive, leftPanel, panelSizes]);
   useEffect(() => { cache.set(floatingOpenKey, floatingCodeOpen); }, [floatingCodeOpen, floatingOpenKey]);
   useEffect(() => { cache.set(TEAM_TERMINAL_CHILDREN_KEY, teamTerminalChildren); }, [teamTerminalChildren]);
   useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, teamTerminalActive); }, [teamTerminalActive]);
@@ -127,13 +162,22 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     };
   }, []);
   const onPanelLayout = useCallback((layout: Record<string, number>) => {
-    setPanelSizes(layout);
-    cache.set('ws_panelSizes', layout);
     if (layout['left-panel'] < 5) {
       if (leftActive === 'agents') set智能体Open(false);
       else setLeftPanel(null);
+      return;
     }
+    setPanelSizes(layout);
+    cache.set('ws_panelSizes', layout);
   }, [leftActive]);
+  const applyPanePatch = useCallback((targetPaneId: string, patch: any) => {
+    setPaneDetails(prev => ({ ...prev, [targetPaneId]: { ...(prev[targetPaneId] || {}), ...patch } }));
+    if (targetPaneId === paneId) setAgentDetail((prev: any) => ({ ...(prev || {}), ...patch }));
+    set智能体(prev => prev.map(a => {
+      const id = (a.pane_id || a.id || '').split(':')[0];
+      return id === targetPaneId ? { ...a, ...patch } : a;
+    }));
+  }, [paneId]);
 
   useEffect(() => { if (!token) return; apiService.getPanes().then(({ data }) => set智能体(Array.isArray(data) ? data : data?.panes || [])).catch(() => {}); }, [token]);
   useEffect(() => { 
@@ -222,14 +266,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const settingsTargetPaneId = current团队Active || paneId;
   const settingsTargetFullPaneId = `${settingsTargetPaneId}:main.0`;
   const settingsTargetDetail = paneDetails[settingsTargetPaneId] || (settingsTargetPaneId === paneId ? agentDetail : null);
-  const getPaneTitle = useCallback((id: string) => {
-    const clean = id.replace(/:.*$/, '');
-    const agent = agents.find((item: any) => {
-      const agentId = (item.pane_id || item.id || '').replace(/:.*$/, '');
-      return agentId === clean;
-    });
-    return agent?.title || clean;
-  }, [agents]);
+  const topBarPaneId = settingsTargetPaneId;
+  const topBarDetail = settingsTargetDetail;
+  const topBarTitle = topBarDetail?.title
+    || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === topBarPaneId)?.title
+    || (topBarPaneId === paneId ? title : topBarPaneId);
+  const topBarWorkspace = topBarDetail?.workspace || `~/workers/${topBarPaneId}`;
+  const topBarIsApiOnlyRuntime = !!(
+    topBarDetail
+    && (topBarDetail.runtime_kind === 'cloudrun' || topBarDetail.capabilities?.supports_tmux === false)
+  );
   const openPaneInCurrentTerminal = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
@@ -249,57 +295,108 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     });
     set团队TerminalActive(prev => ({ ...prev, [paneId]: clean }));
   }, [paneId]);
-  const selectPaneInCurrentTerminal = useCallback((targetPaneId: string) => {
-    const clean = targetPaneId.replace(/:.*$/, '');
-    if (!clean) return;
-    set团队TerminalActive(prev => ({ ...prev, [paneId]: clean }));
-  }, [paneId]);
-  const closePaneInCurrentTerminal = useCallback((targetPaneId: string) => {
-    const clean = targetPaneId.replace(/:.*$/, '');
-    set团队TerminalChildren(prev => {
-      const current = prev[paneId] || [];
-      if (!current.includes(clean)) return prev;
-      const nextChildren = current.filter(id => id !== clean);
-      if (nextChildren.length === 0) {
-        const next = { ...prev };
-        delete next[paneId];
-        return next;
-      }
-      return { ...prev, [paneId]: nextChildren };
-    });
-    set团队TerminalActive(prev => {
-      if (prev[paneId] !== clean) return prev;
-      const remaining = (teamTerminalChildren[paneId] || []).filter(id => id !== clean);
-      return { ...prev, [paneId]: remaining[0] || paneId };
-    });
-  }, [paneId, teamTerminalChildren]);
   useEffect(() => {
     if (!token || !settingsTargetPaneId || settingsTargetPaneId === paneId || paneDetails[settingsTargetPaneId]) return;
     apiService.getPane(`${settingsTargetPaneId}:main.0`).then(({ data }) => {
       setPaneDetails(prev => ({ ...prev, [settingsTargetPaneId]: data }));
     }).catch(() => {});
   }, [paneId, paneDetails, settingsTargetPaneId, token]);
+  useEffect(() => {
+    if (!isEditingTopBarTitle) setTopBarTitleDraft(topBarTitle);
+  }, [isEditingTopBarTitle, topBarTitle]);
+  useEffect(() => {
+    setIsEditingTopBarTitle(false);
+    setSavingTopBarTitle(false);
+    setTopBarTitleDraft(topBarTitle);
+  }, [topBarPaneId, topBarTitle]);
+  useEffect(() => {
+    if (!isEditingTopBarTitle) return;
+    requestAnimationFrame(() => {
+      topBarTitleInputRef.current?.focus();
+      topBarTitleInputRef.current?.select();
+    });
+  }, [isEditingTopBarTitle, topBarPaneId]);
+
+  const cancelTopBarTitleEdit = useCallback(() => {
+    if (savingTopBarTitle) return;
+    setIsEditingTopBarTitle(false);
+    setTopBarTitleDraft(topBarTitle);
+  }, [savingTopBarTitle, topBarTitle]);
+
+  const commitTopBarTitle = useCallback(async () => {
+    if (!isEditingTopBarTitle || topBarTitleCommitRef.current) return;
+    const nextTitle = topBarTitleDraft.trim();
+    if (!nextTitle || nextTitle === topBarTitle) {
+      setTopBarTitleDraft(topBarTitle);
+      setIsEditingTopBarTitle(false);
+      return;
+    }
+    topBarTitleCommitRef.current = true;
+    setSavingTopBarTitle(true);
+    try {
+      await apiService.updatePane(topBarPaneId, { title: nextTitle });
+      applyPanePatch(topBarPaneId, { title: nextTitle });
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Error: 标题修改失败' }));
+      setTopBarTitleDraft(topBarTitle);
+    } finally {
+      topBarTitleCommitRef.current = false;
+      setSavingTopBarTitle(false);
+      setIsEditingTopBarTitle(false);
+    }
+  }, [applyPanePatch, isEditingTopBarTitle, topBarPaneId, topBarTitle, topBarTitleDraft]);
 
   const rightContent = (
     <div data-id="right-content" className="h-full flex flex-col relative">
       <header data-id="top-bar" className="h-12 border-b border-[var(--vsc-border)] bg-[#0A0A0A] flex items-center justify-between px-4 shrink-0 z-10">
         <div data-id="top-bar-left" className="flex items-center gap-3 w-1/3 min-w-0">
-          {!isApiOnlyRuntime && (
+          {!topBarIsApiOnlyRuntime && (
             <button
               type="button"
               onClick={handleCodeHome}
               className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0"
-              title={agentDetail?.workspace || `~/workers/${paneId}`}
+              title={topBarWorkspace}
             >
               <Home className="w-3.5 h-3.5" />
             </button>
           )}
-          <span data-id="agent-title" className="text-sm text-zinc-100 font-medium truncate max-w-[160px] bg-white/[0.12] px-2 py-0.5 rounded">{title}</span>
-          <span data-id="pane-id-badge" className="text-xs font-mono text-zinc-600 bg-white/[0.03] px-2 py-1 rounded shrink-0">{paneId}</span>
-          {!isApiOnlyRuntime && (
+          {isEditingTopBarTitle ? (
+            <input
+              ref={topBarTitleInputRef}
+              data-id="agent-title-input"
+              value={topBarTitleDraft}
+              onChange={(e) => setTopBarTitleDraft(e.target.value)}
+              onBlur={() => { void commitTopBarTitle(); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void commitTopBarTitle();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  cancelTopBarTitleEdit();
+                }
+              }}
+              disabled={savingTopBarTitle}
+              className="h-7 w-[180px] max-w-[180px] rounded border border-blue-500/40 bg-white/[0.08] px-2 text-sm font-medium text-zinc-100 outline-none"
+            />
+          ) : (
+            <span
+              data-id="agent-title"
+              onDoubleClick={() => {
+                setTopBarTitleDraft(topBarTitle);
+                setIsEditingTopBarTitle(true);
+              }}
+              className="text-sm text-zinc-100 font-medium truncate max-w-[160px] bg-white/[0.12] px-2 py-0.5 rounded cursor-text"
+              title="Double click to rename"
+            >
+              {topBarTitle}
+            </span>
+          )}
+          <span data-id="pane-id-badge" className="text-xs font-mono text-zinc-600 bg-white/[0.03] px-2 py-1 rounded shrink-0">{topBarPaneId}</span>
+          {!topBarIsApiOnlyRuntime && (
             <button
               type="button"
-              onClick={handleCodeServiceOpen}
+              onClick={() => handleCodeServiceOpen(topBarWorkspace)}
               className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0"
               title="代码服务"
             >
@@ -327,7 +424,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <button onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 令牌"><Key className="w-3.5 h-3.5" /></button>
           <button onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 服务器"><Server className="w-3.5 h-3.5" /></button>
           <button onClick={() => window.dispatchEvent(new Event('open-devtools-panel'))} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="开发工具"><Bug className="w-3.5 h-3.5" /></button>
-          <span id="version" className="text-[10px] font-mono text-zinc-600">0.2.18</span>
+          <span id="version" className="text-[10px] font-mono text-zinc-600">1.0.4</span>
           {contextUsage != null && (
             <div data-id="context-usage" className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/[0.02]">
               <div data-id="context-bar" className="w-12 h-1 rounded-full bg-white/[0.04] overflow-hidden">
@@ -358,51 +455,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         <div data-id="cli-tab" className="absolute inset-0 flex" style={{ display: mainTab === 'cli' ? 'flex' : 'none' }}>
           <div data-id="cli-terminal-area" className="w-full h-full relative bg-black">
             {!isApiOnlyRuntime ? current团队Children.length > 0 ? (
-              <div className="absolute inset-0 flex flex-col">
-                <div data-id="cli-terminal-tabs" className="h-11 shrink-0 border-b border-white/[0.08] bg-[#0b0b0b] px-3 flex items-center gap-2 overflow-x-auto">
-                  {currentTerminalTabs.map(id => {
-                    const isRoot = id === paneId;
-                    const isActive = current团队Active === id;
-                    return (
-                      <button
-                        type="button"
-                        key={id}
-                        className={cn(
-                          "group flex items-center gap-2 min-w-0 max-w-[240px] px-3 py-1.5 rounded-lg border transition-colors cursor-pointer",
-                          isActive
-                            ? "border-blue-500/50 bg-blue-500/[0.08] text-blue-300 ring-1 ring-blue-500/20"
-                            : "border-white/[0.08] bg-white/[0.03] text-zinc-400 hover:text-zinc-200 hover:border-white/[0.14]"
-                        )}
-                        onMouseDown={() => selectPaneInCurrentTerminal(id)}
-                        onClick={() => selectPaneInCurrentTerminal(id)}
-                        title={id}
-                      >
-                        <span className="text-[11px] font-medium truncate">{isRoot ? (title || getPaneTitle(id)) : getPaneTitle(id)}</span>
-                        <span className="text-[10px] font-mono text-zinc-600 truncate">{id}</span>
-                        {!isRoot ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              closePaneInCurrentTerminal(id);
-                            }}
-                            className="p-0.5 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0"
-                            title="Remove from current pane"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        ) : null}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="relative flex-1 bg-black">
-                  {[...loadedTtyds].map(id => (
-                    <div key={id} className="absolute inset-0" style={{ display: currentTerminalTabs.includes(id) && id === current团队Active ? 'block' : 'none' }}>
-                      <WebFrame src={urls.ttydOpen(id, token!)} className="w-full h-full border-0 bg-black" title={`terminal-${id}`} />
-                    </div>
-                  ))}
-                </div>
+              <div className="absolute inset-0 bg-black">
+                {[...loadedTtyds].map(id => (
+                  <div key={id} className="absolute inset-0" style={{ display: currentTerminalTabs.includes(id) && id === current团队Active ? 'block' : 'none' }}>
+                    <WebFrame src={urls.ttydOpen(id, token!)} className="w-full h-full border-0 bg-black" title={`terminal-${id}`} />
+                  </div>
+                ))}
               </div>
             ) : [...loadedTtyds].map(id => (
               <div key={id} className="absolute inset-0" style={{ display: id === paneId ? 'block' : 'none' }}>
@@ -451,8 +509,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <div data-id="main-area" ref={mainAreaRef} className="flex-1 flex flex-col min-w-0">
         {/* Content */}
         <main data-id="content-area" className="flex-1 relative overflow-hidden">
-          <Group id="main-layout" orientation="horizontal" groupRef={groupRef} defaultLayout={leftActive ? panelSizes : { 'left-panel': 0, 'right-panel': 100 }} onLayoutChanged={onPanelLayout}>
-            <Panel id="left-panel" defaultSize={leftActive ? 50 : 0} minSize={0}>
+          <Group id="main-layout" orientation="horizontal" groupRef={groupRef} defaultLayout={leftActive ? (panelSizes ?? undefined) : { 'left-panel': 0, 'right-panel': 100 }} onLayoutChanged={onPanelLayout}>
+            <Panel id="left-panel" defaultSize={leftActive ? `${LEFT_PANEL_WIDTH}px` : 0} minSize={leftActive ? `${LEFT_PANEL_WIDTH}px` : 0} groupResizeBehavior="preserve-pixel-size">
               <div data-id="left-panel-wrap" className="h-full flex flex-col bg-[#0A0A0A] border-r border-[var(--vsc-border)] relative z-[130]" style={{ display: leftActive ? 'flex' : 'none' }}>
                 <div data-id="left-panel-header" className="h-12 border-b border-[var(--vsc-border)] flex items-center px-2 bg-[#0e0e0e] shrink-0 gap-1">
                   {leftActive === 'agents' ? <>
@@ -470,7 +528,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 <div data-id="left-panel-body" className="flex-1 relative overflow-hidden bg-[#0A0A0A] z-[131]">
                   <div className="absolute inset-0 overflow-auto" style={{ display: leftActive === 'agents' ? 'block' : 'none' }}>
                     <AgentDrawer agents={agents} paneId={paneId}
-                      onSelectAgent={onSelectAgent} on智能体Change={set智能体} />
+                      onSelectAgent={onSelectAgent}
+                      on智能体Change={set智能体}
+                      onOpenSettings={(targetPaneId) => {
+                        onSelectAgent(targetPaneId);
+                        setSettingsOpen(true);
+                      }}
+                    />
                   </div>
                   <div className="absolute inset-0" style={{ display: leftPanel === 'team' ? 'block' : 'none' }}>
                     <TeamPanel
@@ -478,6 +542,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       onOpenInCurrentPane={openPaneInCurrentTerminal}
                       openedPaneIds={current团队Children}
                       activePaneId={current团队Active}
+                      onOpenSettingsPane={(targetPaneId) => {
+                        openPaneInCurrentTerminal(targetPaneId);
+                        setSettingsOpen(true);
+                      }}
                     />
                   </div>
                   <div className="absolute inset-0 overflow-auto" style={{ display: leftPanel === 'skills' ? 'block' : 'none' }}>
@@ -487,7 +555,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               </div>
             </Panel>
             {leftActive && <Separator className="w-1 bg-white/[0.02] hover:bg-blue-500/30 active:bg-blue-500/50 transition-colors cursor-col-resize" />}
-            <Panel id="right-panel" defaultSize={leftActive ? 50 : 100} minSize={30}>
+            <Panel id="right-panel" defaultSize={leftActive ? undefined : 100} minSize={30}>
               {rightContent}
             </Panel>
           </Group>
@@ -545,12 +613,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             fullPaneId={settingsTargetFullPaneId}
             agentDetail={settingsTargetDetail}
             onAgentDetailChange={(d) => {
-              setPaneDetails(prev => ({ ...prev, [settingsTargetPaneId]: { ...(prev[settingsTargetPaneId] || {}), ...d } }));
-              if (settingsTargetPaneId === paneId) setAgentDetail((prev: any) => ({ ...(prev || {}), ...d }));
-              set智能体(prev => prev.map(a => {
-                const id = (a.pane_id || a.id || '').split(':')[0];
-                return id === settingsTargetPaneId ? { ...a, ...d } : a;
-              }));
+              applyPanePatch(settingsTargetPaneId, d);
             }}
             onClose={() => setSettingsOpen(false)}
           />
@@ -577,39 +640,95 @@ function Placeholder({ icon, text }: { icon: React.ReactNode; text: string }) {
   return <div data-id="placeholder" className="absolute inset-0 flex items-center justify-center text-zinc-600 flex-col gap-4 pointer-events-none">{icon}<p className="text-sm">{text}</p></div>;
 }
 
-const PINNED_KEY = 'agent_pinned';
-function getPinned(): string[] { try { return JSON.parse(localStorage.getItem(PINNED_KEY)!) || []; } catch { return []; } }
-function setPinnedStorage(ids: string[]) { localStorage.setItem(PINNED_KEY, JSON.stringify(ids)); }
+function normalizeAgentType(agentType?: string) {
+  switch ((agentType || '').trim().toLowerCase()) {
+    case 'openclaw':
+    case 'opencraw':
+      return 'openclaw';
+    case 'codex':
+    case 'openai':
+    case 'kiro-cli':
+    case 'kiro-cli chat':
+    case 'gemini':
+    case 'copilot':
+      return 'codex';
+    case 'claude':
+    case 'claude code':
+    case 'claude-code':
+      return 'claude';
+    case 'opencode':
+    case 'open code':
+    case 'open-code':
+      return 'opencode';
+    default:
+      return '';
+  }
+}
 
-function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change }: {
+function AgentListAvatar({ agentType, title }: { agentType?: string; title: string }) {
+  const normalizedAgentType = normalizeAgentType(agentType);
+  const baseClassName = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border shadow-sm';
+
+  if (!normalizedAgentType) {
+    return (
+      <div
+        data-id="agent-avatar"
+        className={`${baseClassName} border-white/[0.08] bg-white/[0.03] text-zinc-400`}
+        title={title}
+      >
+        <span className="text-xs font-semibold uppercase">{title.slice(0, 1) || '?'}</span>
+      </div>
+    );
+  }
+
+  if (normalizedAgentType === 'openclaw') {
+    return (
+      <div
+        data-id="agent-avatar"
+        className={`${baseClassName} border-zinc-500/40 bg-zinc-300 text-zinc-950`}
+        title="OpenClaw"
+      >
+        <span className="text-[20px] leading-none" aria-label="OpenClaw">🦞</span>
+      </div>
+    );
+  }
+
+  const iconMap: Record<string, { label: string; src: string; className?: string }> = {
+    codex: { label: 'Codex', src: '/assets/logos/openai.svg' },
+    claude: { label: 'Claude', src: '/assets/logos/claude-symbol.svg' },
+    opencode: { label: 'OpenCode', src: '/assets/logos/opencode.svg', className: 'h-7 w-7' },
+  };
+  const icon = iconMap[normalizedAgentType];
+  if (!icon) return null;
+
+  return (
+    <div
+      data-id="agent-avatar"
+      className={`${baseClassName} border-zinc-500/40 bg-zinc-300`}
+      title={icon.label}
+    >
+      <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-6 w-6'} object-contain`} />
+    </div>
+  );
+}
+
+function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenSettings }: {
   agents: any[]; paneId: string;
   onSelectAgent: (id: string) => void; on智能体Change: (a: any[]) => void;
+  onOpenSettings: (id: string) => void;
 }) {
   const [search, setSearch] = useState('');
-  const [pinned, setPinned] = useState<string[]>(getPinned);
   const [adding, setAdding] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const { confirm } = useDialog();
 
+  useEffect(() => {
+    const closeMenu = () => setOpenMenuId(null);
+    document.addEventListener('pointerdown', closeMenu);
+    return () => document.removeEventListener('pointerdown', closeMenu);
+  }, []);
+
   const handleQuickAddMaster = async () => {
-    setAdding(true);
-    try {
-      const { data } = await apiService.createPane({ role: 'worker', agent_type: 'codex' });
-      const id = data?.pane_id || data?.id;
-      if (id) {
-        const { data: fresh } = await apiService.getPanes();
-        on智能体Change(Array.isArray(fresh) ? fresh : fresh?.panes || []);
-        onSelectAgent(id.split(':')[0]);
-      }
-    } catch {} finally { setAdding(false); }
-  };
-
-  const togglePin = (id: string) => {
-    const next = pinned.includes(id) ? pinned.filter(p => p !== id) : [...pinned, id];
-    setPinned(next);
-    setPinnedStorage(next);
-  };
-
-  const handleAdd = async () => {
     setAdding(true);
     try {
       const { data } = await apiService.createPane({ role: 'worker', agent_type: 'codex' });
@@ -640,6 +759,18 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change }: {
     });
   };
 
+  const handleRestart = (id: string, title: string) => {
+    const sid = id.split(':')[0];
+    confirm(<>Restart <span className="text-zinc-100 font-medium">{title || sid}</span>?</>, async () => {
+      try {
+        await apiService.restartPane(sid);
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: `${title || sid} restarting...` }));
+      } catch {
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: `Error: ${title || sid} 重启失败` }));
+      }
+    });
+  };
+
   const q = search.toLowerCase();
   const filtered = agents.filter(a => {
     if (!q) return true;
@@ -647,10 +778,6 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change }: {
     const title = (a.title || '').toLowerCase();
     return id.includes(q) || title.includes(q);
   });
-
-  const pinned智能体 = filtered.filter(a => pinned.includes(a.pane_id || a.id));
-  const unpinned智能体 = filtered.filter(a => !pinned.includes(a.pane_id || a.id));
-  const sorted = [...pinned智能体, ...unpinned智能体];
 
   return (
     <div data-id="agent-drawer" className="h-full flex flex-col bg-[#0A0A0A]">
@@ -673,26 +800,95 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change }: {
             </button>
           </div>
           <div data-id="agent-list" className="space-y-2">
-            {sorted.map((agent: any) => {
+            {filtered.map((agent: any) => {
               const id = agent.pane_id || agent.id;
               const shortId = id?.replace(':main.0', '') || id;
               const isMaster = id?.includes('10001');
               const isActive = id === paneId || id?.startsWith(paneId + ':') || paneId?.startsWith(id + ':');
-              const isPinned = pinned.includes(id);
               return (
                 <div key={id} data-id={`agent-${id}`}
-                  onClick={() => onSelectAgent(id)}
-                  className={cn("w-full flex items-center gap-3 border p-3 rounded-xl transition-all group relative cursor-pointer",
+                  className={cn("w-full flex items-center gap-3 border p-3 rounded-xl transition-all group relative",
                     isActive ? "border-blue-500/50 bg-blue-500/[0.08] ring-1 ring-blue-500/20" : "bg-white/[0.02] border-[var(--vsc-border)] hover:border-white/[0.08]")}>
-                  {!isMaster && (
-                    <button onClick={e => { e.stopPropagation(); handleDelete(id); }}
-                      className="absolute right-0 top-0 w-5 h-5 rounded-full bg-red-500/80 flex items-center justify-center transition-colors cursor-pointer opacity-0 group-hover:opacity-100 hover:bg-red-500 z-10"
-                      title="Delete">
-                      <X className="w-3 h-3 text-white" />
+                  <div
+                    data-id={`agent-menu-${shortId}`}
+                    className="absolute right-2 top-2 z-20"
+                    onPointerDown={e => e.stopPropagation()}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      data-id="agent-menu-button"
+                      onClick={() => setOpenMenuId(prev => prev === id ? null : id)}
+                      className={cn(
+                        "flex h-7 w-7 items-center justify-center rounded-lg transition-all cursor-pointer",
+                        openMenuId === id
+                          ? "bg-white/[0.08] text-zinc-200"
+                          : "text-zinc-700 opacity-0 group-hover:opacity-100 hover:bg-white/[0.05] hover:text-zinc-300"
+                      )}
+                      title="菜单">
+                      <MoreHorizontal className="w-3.5 h-3.5" />
                     </button>
-                  )}
-                  <div className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer">
-                    <div className="flex-1 min-w-0">
+                    {openMenuId === id ? (
+                      <div
+                        data-id="agent-menu-dropdown"
+                        className="absolute right-0 top-9 min-w-[190px] overflow-hidden rounded-xl border border-white/[0.08] bg-[#111113]/98 p-1.5 shadow-2xl backdrop-blur-xl"
+                      >
+                        <button
+                          type="button"
+                          data-id="agent-menu-open"
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            window.open(`#/agent/${id.split(':')[0]}`, '_blank');
+                          }}
+                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                          <span>Open</span>
+                        </button>
+                        <button
+                          type="button"
+                          data-id="agent-menu-restart"
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            handleRestart(id, agent.title || shortId);
+                          }}
+                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                          <span>Restart</span>
+                        </button>
+                        <button
+                          type="button"
+                          data-id="agent-menu-settings"
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            onOpenSettings(id);
+                          }}
+                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
+                        >
+                          <Settings className="w-3.5 h-3.5 shrink-0" />
+                          <span>Settings</span>
+                        </button>
+                        {!isMaster ? (
+                          <button
+                            type="button"
+                            data-id="agent-menu-delete"
+                            onClick={() => {
+                              setOpenMenuId(null);
+                              handleDelete(id);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-red-300 transition-colors cursor-pointer hover:bg-red-500/10 hover:text-red-200"
+                          >
+                            <X className="w-3.5 h-3.5 shrink-0" />
+                            <span>Delete</span>
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center gap-3 flex-1 min-w-0 text-left">
+                    <AgentListAvatar agentType={agent.agent_type} title={agent.title || shortId} />
+                    <div className="flex-1 min-w-0 pr-7">
                       <div className="flex items-center gap-1.5">
                         <h3 className={cn("text-sm font-medium truncate", isActive ? "text-blue-300" : "text-zinc-300")}>{agent.title || shortId}</h3>
                         <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", agent.active ? "bg-emerald-500/60" : "bg-zinc-700")} />
@@ -700,17 +896,6 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change }: {
                       <p className={cn("text-xs font-mono mt-0.5 truncate", isActive ? "text-blue-400/50" : "text-zinc-600")}>{shortId}</p>
                     </div>
                   </div>
-                  <button onClick={e => { e.stopPropagation(); window.open(`#/agent/${id.split(':')[0]}`, '_blank'); }}
-                    className="p-1 rounded transition-colors shrink-0 cursor-pointer text-zinc-700 opacity-0 group-hover:opacity-100 hover:text-zinc-400"
-                    title="在新窗口打开">
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </button>
-                  <button onClick={e => { e.stopPropagation(); togglePin(id); }}
-                    className={cn("p-1 rounded transition-colors shrink-0 cursor-pointer",
-                      isPinned ? "text-amber-500/70 hover:text-amber-400" : "text-zinc-700 opacity-0 group-hover:opacity-100 hover:text-zinc-400")}
-                    title={isPinned ? "Unpin" : "Pin"}>
-                    {isPinned ? <Pin className="w-3.5 h-3.5" /> : <PinOff className="w-3.5 h-3.5" />}
-                  </button>
                 </div>
               );
             })}

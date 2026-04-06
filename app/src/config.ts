@@ -67,7 +67,7 @@ const config = {
   desktopBase:    base,
   sttBase:        base,
   pollInterval:   5000,
-  version:        '1.0.0-cicy-code',
+  version:        '1.0.0',
   isWorkspace,
   isAudit,
 };

@@ -1,6 +1,6 @@
 .PHONY: dev dev-app dev-api build build-all clean release npm-publish stop
 
-VERSION ?= 0.1.0
+VERSION ?= 1.0.0
 
 # Development
 dev-app:

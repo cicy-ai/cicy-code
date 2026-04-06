@@ -3,25 +3,56 @@
 # 测试 API Provider
 # 用法: ./test-provider.sh [provider]
 
-PROVIDER="${1:-FHL}"
+PROVIDER="${1:-}"
 GLOBAL_JSON="$HOME/global.json"
-
-echo "=== 测试 Provider: $PROVIDER ==="
-echo ""
 
 # 读取配置
 CONFIG=$(python3 - "$PROVIDER" "$GLOBAL_JSON" <<'PY'
 import json, sys
-provider = sys.argv[1]
+requested = (sys.argv[1] or "").strip()
 with open(sys.argv[2]) as f:
     data = json.load(f)
-p = data.get("ai", {}).get("provider", {}).get(provider, {})
-if not p:
+
+aliases = {
+    "200run": "2000Run",
+    "2000run": "2000Run",
+    "cicyai": "cicyAi",
+}
+
+def canonical(name):
+    value = str(name or "").strip()
+    if not value:
+        return ""
+    return aliases.get(value.lower(), value)
+
+ai = data.get("ai", {}) if isinstance(data.get("ai", {}), dict) else {}
+provider_map = ai.get("provider", {}) if isinstance(ai.get("provider", {}), dict) else {}
+provider = canonical(requested or ai.get("currentProvider") or "cicyAi") or "cicyAi"
+
+cicy_ai_base = str(data.get("cicyAiUrl", "") or "").strip().rstrip("/")
+defaults = {
+    "2000Run": {
+        "apiKey": data.get("2000RunApikey", ""),
+        "apiUrl": "http://2000.run:6543/v1",
+    },
+    "cicyAi": {
+        "apiKey": data.get("cicyAiapikey", ""),
+        "apiUrl": (cicy_ai_base + "/v1") if cicy_ai_base else "https://cicy-ai.com/v1",
+    },
+}
+
+config = dict(defaults.get(provider, {}))
+for key, value in provider_map.items():
+    if canonical(key) == provider and isinstance(value, dict):
+        config.update({k: v for k, v in value.items() if v not in ("", None)})
+
+if not config:
     print("error: provider not found")
     sys.exit(1)
-api_key = p.get("apiKey", "")
-api_url = p.get("apiUrl", "")
-print(api_key + "|" + api_url)
+
+api_key = config.get("apiKey", "")
+api_url = config.get("apiUrl", "")
+print(api_key + "|" + api_url + "|" + provider)
 PY
 )
 
@@ -30,7 +61,20 @@ if [[ "$CONFIG" == "error: provider not found" ]]; then
     exit 1
 fi
 
-IFS='|' read -r API_KEY API_URL <<< "$CONFIG"
+IFS='|' read -r API_KEY API_URL PROVIDER_LABEL <<< "$CONFIG"
+
+PROVIDER="${PROVIDER_LABEL:-$PROVIDER}"
+API_BASE="${API_URL%/}"
+if [[ "$API_BASE" == */v1 ]]; then
+    MODELS_URL="$API_BASE/models"
+    RESPONSES_URL="$API_BASE/responses"
+else
+    MODELS_URL="$API_BASE/v1/models"
+    RESPONSES_URL="$API_BASE/v1/responses"
+fi
+
+echo "=== 测试 Provider: $PROVIDER ==="
+echo ""
 
 echo "API Key: ${API_KEY:0:10}..."
 echo "API URL: $API_URL"
@@ -38,7 +82,7 @@ echo ""
 
 # 测试 1: GET /v1/models
 echo "1. 测试 /v1/models..."
-RESPONSE=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_KEY" "$API_URL/v1/models" 2>&1)
+RESPONSE=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_KEY" "$MODELS_URL" 2>&1)
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | head -n -1)
 
@@ -54,7 +98,7 @@ echo ""
 
 # 测试 2: POST /v1/responses
 echo "2. 测试 /v1/responses..."
-RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_URL/v1/responses" \
+RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$RESPONSES_URL" \
     -H "Authorization: Bearer $API_KEY" \
     -H "Content-Type: application/json" \
     -d '{"model":"gpt-5.4","messages":[{"role":"user","content":"hi"}],"max_tokens":10}' 2>&1)
