@@ -3,9 +3,9 @@
     "apiKey": "",
     "apiUrl": "http://2000.run:6543/v1",
     "anthropicUrl": "http://2000.run:6543",
-    "defaultModel": "shibacc/claude-sonnet-4-6",
-    "claudeModel": "opus[1m]",
+    "defaultOpencodeModel": "gpt-5.4",
+    "defaultClaudeModel": "opus[1m]",
     "codexModel": "gpt-5.4",
-    "openclawModel": "gpt-5.4"
+    "openclawModel": "claude-sonnet-4-6"
   }
 }

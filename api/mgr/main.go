@@ -29,7 +29,7 @@ var (
 	desktopCmd   *exec.Cmd
 )
 
-const version = "0.2.18"
+const version = "1.0.4"
 
 // agentsFlag holds --agents=openclaw,codex,claude,opencode,... for non-interactive setup
 var agentsFlag string
@@ -258,6 +258,9 @@ Environment:
 	http.HandleFunc("/api/desktop/proxy/", cloudRunUnsupported(handleDesktopProxy))
 
 	// Code-server proxy
+	http.HandleFunc("/api/openclaw/gateway", wa(handleOpenClawGatewayInfo))
+	http.HandleFunc("/api/openclaw/provider/", handleOpenClawProviderProxy)
+	http.HandleFunc("/api/ai-gateway/", handleAIGatewayProxy)
 	http.HandleFunc("/code/", handleCodeServer)
 	http.HandleFunc("/code/auth", handleCodeServerAuth)
 	http.HandleFunc("/mitm/", handleMitmproxyAuth)

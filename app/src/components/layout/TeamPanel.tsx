@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Users, Plus, X, Loader2, ExternalLink, Box, RefreshCw } from 'lucide-react';
+import { Users, Plus, X, Loader2, ExternalLink, RefreshCw, Settings, MoreHorizontal } from 'lucide-react';
 import apiService from '../../services/api';
 import { useDialog } from '../../contexts/DialogContext';
 import Select from '../ui/Select';
@@ -7,6 +7,7 @@ import Select from '../ui/Select';
 interface Agent {
   pane_id: string;
   title?: string;
+  agent_type?: string;
   role?: string;
   ttyd_port?: number;
   active?: number;
@@ -54,9 +55,82 @@ interface Props {
   onOpenInCurrentPane?: (paneId: string) => void;
   openedPaneIds?: string[];
   activePaneId?: string;
+  onOpenSettingsPane?: (paneId: string) => void;
 }
 
-export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds = [], activePaneId }: Props) {
+function normalizeAgentType(agentType?: string) {
+  switch ((agentType || '').trim().toLowerCase()) {
+    case 'openclaw':
+    case 'opencraw':
+      return 'openclaw';
+    case 'codex':
+    case 'openai':
+    case 'kiro-cli':
+    case 'kiro-cli chat':
+    case 'gemini':
+    case 'copilot':
+      return 'codex';
+    case 'claude':
+    case 'claude code':
+    case 'claude-code':
+      return 'claude';
+    case 'opencode':
+    case 'open code':
+    case 'open-code':
+      return 'opencode';
+    default:
+      return '';
+  }
+}
+
+function AgentTypeAvatar({ agentType, title }: { agentType?: string; title: string }) {
+  const normalizedAgentType = normalizeAgentType(agentType);
+  const baseClassName = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border shadow-sm';
+
+  if (!normalizedAgentType) {
+    return (
+      <div
+        data-id="team-panel-worker-agent-avatar"
+        className={`${baseClassName} border-white/[0.08] bg-white/[0.03] text-zinc-400`}
+        title={title}
+      >
+        <span className="text-xs font-semibold uppercase">{title.slice(0, 1) || '?'}</span>
+      </div>
+    );
+  }
+
+  if (normalizedAgentType === 'openclaw') {
+    return (
+      <div
+        data-id="team-panel-worker-agent-avatar"
+        className={`${baseClassName} border-zinc-500/40 bg-zinc-300 text-zinc-950`}
+        title="OpenClaw"
+      >
+        <span className="text-[20px] leading-none" aria-label="OpenClaw">🦞</span>
+      </div>
+    );
+  }
+
+  const iconMap: Record<string, { label: string; src: string; className?: string }> = {
+    codex: { label: 'Codex', src: '/assets/logos/openai.svg' },
+    claude: { label: 'Claude', src: '/assets/logos/claude-symbol.svg' },
+    opencode: { label: 'OpenCode', src: '/assets/logos/opencode.svg', className: 'h-7 w-7' },
+  };
+  const icon = iconMap[normalizedAgentType];
+  if (!icon) return null;
+
+  return (
+    <div
+      data-id="team-panel-worker-agent-avatar"
+      className={`${baseClassName} border-zinc-500/40 bg-zinc-300`}
+      title={icon.label}
+    >
+      <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-6 w-6'} object-contain`} />
+    </div>
+  );
+}
+
+export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds = [], activePaneId, onOpenSettingsPane }: Props) {
   const [all智能体, setAll智能体] = useState<Agent[]>([]);
   const [bindings, setBindings] = useState<Binding[]>([]);
   const [statuses, setStatuses] = useState<Record<string, StatusInfo>>({});
@@ -64,6 +138,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
   const [steps, setSteps] = useState<Step[]>([]);
   const [creating, setCreating] = useState(false);
   const [syncingInstances, setSyncingInstances] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const { confirm } = useDialog();
 
   const shortId = (id: string) => (id || '').replace(/:.*$/, '');
@@ -91,6 +166,12 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
     const id = setInterval(load, 5000);
     return () => clearInterval(id);
   }, [load]);
+
+  useEffect(() => {
+    const closeMenu = () => setOpenMenuId(null);
+    document.addEventListener('pointerdown', closeMenu);
+    return () => document.removeEventListener('pointerdown', closeMenu);
+  }, []);
 
   const boundIds = new Set(bindings.map(b => shortId(b.name)));
   const available = all智能体.filter(a => {
@@ -158,12 +239,34 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
     return binding.title || s.title || all智能体.find(a => shortId(a.pane_id) === wid)?.title || wid;
   };
 
+  const showToast = useCallback((detail: string) => {
+    window.dispatchEvent(new CustomEvent('show-toast', { detail }));
+  }, []);
+
   const instanceMap = useMemo(() => new Map(instances.map(m => [m.id, m])), [instances]);
   const isApiOnlyInstance = useCallback((instance?: Machine) => {
     if (!instance) return false;
     if (instance.runtime_kind === 'cloudrun') return true;
     return instance.capabilities?.supports_tmux === false;
   }, []);
+  const restartPane = useCallback((wid: string, title: string, disabled?: boolean) => {
+    if (disabled) {
+      showToast(`${title} 当前运行时不支持重启`);
+      return;
+    }
+    confirm(
+      <>Restart <span className="text-zinc-100 font-medium">{title}</span>?</>,
+      async () => {
+        try {
+          await apiService.restartPane(wid);
+          showToast(`${title} restarting...`);
+          load();
+        } catch {
+          showToast(`Error: ${title} 重启失败`);
+        }
+      }
+    );
+  }, [confirm, load, showToast]);
   const latestStepMap = useMemo(() => {
     const map = new Map<string, Step>();
     for (const step of steps) {
@@ -184,6 +287,11 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
     return Array.from(groups.values());
   }, [bindings, instanceMap]);
 
+  const agentTypeById = useMemo(
+    () => new Map(all智能体.map(agent => [shortId(agent.pane_id), normalizeAgentType(agent.agent_type)])),
+    [all智能体]
+  );
+
   const currentAgent = useMemo(() => {
     const agent = all智能体.find(a => shortId(a.pane_id) === paneId);
     const machine = agent?.machine_id ? instanceMap.get(agent.machine_id) : undefined;
@@ -194,6 +302,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
     if (step?.title) subtitleParts.push(`${step.title}${step.status ? ` [${step.status}]` : ''}`);
     return {
       title: agent?.title || status.title || paneId,
+      agentType: normalizeAgentType(agent?.agent_type),
       status,
       subtitle: subtitleParts.join(' · '),
       resultSummary: step?.result_summary || '',
@@ -203,6 +312,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
   const renderAgentCard = ({
     wid,
     title,
+    agentType,
     status,
     subtitle,
     resultSummary,
@@ -210,9 +320,13 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
     opened = false,
     onClick,
     onRemove,
+    onRestart,
+    onOpenSettings,
+    canRestart = true,
   }: {
     wid: string;
     title: string;
+    agentType?: string;
     status: StatusInfo;
     subtitle: string;
     resultSummary?: string;
@@ -220,6 +334,9 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
     opened?: boolean;
     onClick: () => void;
     onRemove?: () => void;
+    onRestart?: () => void;
+    onOpenSettings?: () => void;
+    canRestart?: boolean;
   }) => (
     <div
       key={wid}
@@ -231,21 +348,98 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
           : 'bg-white/[0.02] border-[var(--vsc-border)] hover:border-white/[0.08]'
       }`}
     >
-      {onRemove ? (
+      <div
+        data-id={`team-panel-worker-menu-${wid}`}
+        className="absolute right-2 top-2 z-20"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+      >
         <button
-          data-id="team-panel-worker-unbind"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          className="absolute right-0 top-0 w-5 h-5 rounded-full bg-red-500/80 flex items-center justify-center transition-colors cursor-pointer opacity-0 group-hover:opacity-100 hover:bg-red-500 z-10"
-          title="Unbind"
+          type="button"
+          data-id="team-panel-worker-menu-button"
+          onClick={() => setOpenMenuId(prev => prev === wid ? null : wid)}
+          className={`flex h-7 w-7 items-center justify-center rounded-lg transition-all cursor-pointer ${
+            openMenuId === wid
+              ? 'bg-white/[0.08] text-zinc-200'
+              : 'text-zinc-700 opacity-0 group-hover:opacity-100 hover:bg-white/[0.05] hover:text-zinc-300'
+          }`}
+          title="菜单"
         >
-          <X className="w-3 h-3 text-white" />
+          <MoreHorizontal className="w-3.5 h-3.5" />
         </button>
-      ) : null}
+        {openMenuId === wid ? (
+          <div
+            data-id="team-panel-worker-menu-dropdown"
+            className="absolute right-0 top-9 min-w-[190px] overflow-hidden rounded-xl border border-white/[0.08] bg-[#111113]/98 p-1.5 shadow-2xl backdrop-blur-xl"
+          >
+            <button
+              type="button"
+              data-id="team-panel-worker-menu-open"
+              onClick={() => {
+                setOpenMenuId(null);
+                window.open(`#/agent/${wid}`, '_blank');
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
+            >
+              <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+              <span>Open</span>
+            </button>
+            {onRemove ? (
+              <button
+                type="button"
+                data-id="team-panel-worker-menu-unbind"
+                onClick={() => {
+                  setOpenMenuId(null);
+                  onRemove();
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors cursor-pointer text-zinc-300 hover:bg-red-500/10 hover:text-red-300"
+              >
+                <X className="w-3.5 h-3.5 shrink-0" />
+                <span>Unbind</span>
+              </button>
+            ) : null}
+            <button
+              type="button"
+              data-id="team-panel-worker-menu-restart"
+              disabled={!onRestart || !canRestart}
+              onClick={() => {
+                if (!onRestart || !canRestart) return;
+                setOpenMenuId(null);
+                onRestart();
+              }}
+              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
+                onRestart && canRestart
+                  ? 'cursor-pointer text-zinc-300 hover:bg-white/[0.06]'
+                  : 'cursor-not-allowed text-zinc-600'
+              }`}
+            >
+              <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+              <span>Restart</span>
+            </button>
+            <button
+              type="button"
+              data-id="team-panel-worker-menu-settings"
+              disabled={!onOpenSettings}
+              onClick={() => {
+                if (!onOpenSettings) return;
+                setOpenMenuId(null);
+                onOpenSettings();
+              }}
+              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
+                onOpenSettings
+                  ? 'cursor-pointer text-zinc-300 hover:bg-white/[0.06]'
+                  : 'cursor-not-allowed text-zinc-600'
+              }`}
+            >
+              <Settings className="w-3.5 h-3.5 shrink-0" />
+              <span>Settings</span>
+            </button>
+          </div>
+        ) : null}
+      </div>
       <div className="flex items-center gap-3 flex-1 min-w-0 text-left">
-        <div className="flex-1 min-w-0">
+        <AgentTypeAvatar agentType={agentType} title={title} />
+        <div className="flex-1 min-w-0 pr-7">
           <div className="flex items-center gap-1.5">
             <h3 className={`text-sm font-medium truncate ${active ? 'text-blue-300' : 'text-zinc-300'}`}>{title}</h3>
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDot(status)}`} />
@@ -260,22 +454,11 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
           ) : null}
         </div>
       </div>
-      <button
-        data-id="team-panel-worker-open"
-        onClick={(e) => {
-          e.stopPropagation();
-          window.open(`#/agent/${wid}`, '_blank');
-        }}
-        className="p-1 rounded transition-colors shrink-0 cursor-pointer text-zinc-700 opacity-0 group-hover:opacity-100 hover:text-zinc-400"
-        title="在新窗口打开"
-      >
-        <ExternalLink className="w-3.5 h-3.5" />
-      </button>
     </div>
   );
 
   return (
-    <div className="h-full flex flex-col" data-id="team-panel-root">
+    <div className="h-full w-full min-w-0 flex flex-col overflow-hidden" data-id="team-panel-root">
       <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-center gap-2 flex-shrink-0" data-id="team-panel-toolbar">
         <Select
           options={available.map(a => ({ value: a.pane_id, label: a.title || shortId(a.pane_id), sub: shortId(a.pane_id) }))}
@@ -306,11 +489,12 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
 
     
 
-      <div className="flex-1 overflow-y-auto" data-id="team-panel-worker-list">
+      <div className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto hide-scrollbar" data-id="team-panel-worker-list">
         <div className="p-1.5 border-b border-[var(--vsc-border)]" data-id="team-panel-current-agent">
           {renderAgentCard({
             wid: paneId,
             title: currentAgent.title,
+            agentType: currentAgent.agentType,
             status: currentAgent.status,
             subtitle: currentAgent.subtitle,
             resultSummary: currentAgent.resultSummary,
@@ -322,12 +506,20 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
               }
               window.location.hash = `#/agent/${paneId}`;
             },
+            onRestart: () => restartPane(paneId, currentAgent.title),
+            onOpenSettings: () => onOpenSettingsPane?.(paneId),
+            canRestart: true,
           })}
         </div>
         {bindings.length > 0 ? (
-          <div className="flex flex-col h-full" data-id="team-panel-groups">
+          <div className="flex h-full w-full min-w-0 flex-col" data-id="team-panel-groups">
             {groupedBindings.map(group => (
-              <div key={group.instance?.id || 'local'} style={{padding:4}} className="border-b border-[var(--vsc-border)]" data-id={`team-panel-group-${group.instance?.instance_key || group.instance?.machine_key || 'local'}`}>
+              <div
+                key={group.instance?.id || 'local'}
+                style={{ padding: 4 }}
+                className={group.instance ? 'border-b border-[var(--vsc-border)]' : ''}
+                data-id={`team-panel-group-${group.instance?.instance_key || group.instance?.machine_key || 'local'}`}
+              >
                 
                 {group.items.map(b => {
                   const wid = shortId(b.name);
@@ -339,6 +531,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
                   return renderAgentCard({
                     wid,
                     title: getName(b),
+                    agentType: agentTypeById.get(wid) || '',
                     status: s,
                     subtitle: subtitleParts.join(' · '),
                     resultSummary: step?.result_summary,
@@ -351,6 +544,9 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
                       }
                       window.location.hash = `#/agent/${wid}`;
                     },
+                    onRestart: () => restartPane(wid, getName(b), isApiOnlyInstance(b.machine_id ? instanceMap.get(b.machine_id) : undefined)),
+                    onOpenSettings: () => onOpenSettingsPane?.(wid),
+                    canRestart: !isApiOnlyInstance(b.machine_id ? instanceMap.get(b.machine_id) : undefined),
                     onRemove: () => confirm(<>Unbind <span className="text-zinc-100 font-medium">{getName(b)}</span>?</>, () => unbind(b)),
                   });
                 })}

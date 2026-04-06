@@ -17,6 +17,12 @@ API_DIR = os.path.join(ROOT_DIR, "api")
 GLOBAL_JSON_PATH = os.path.expanduser("~/global.json")
 VERSION_SYNC_SCRIPT = os.path.join(ROOT_DIR, "scripts", "sync-version.py")
 
+AI_PROVIDER_ALIASES = {
+    "2000run": "2000Run",
+    "200run": "2000Run",
+    "cicyai": "cicyAi",
+}
+
 def load_global_json():
     try:
         with open(GLOBAL_JSON_PATH, "r", encoding="utf-8") as f:
@@ -24,8 +30,82 @@ def load_global_json():
     except Exception:
         return {}
 
+def canonical_ai_provider_name(name):
+    value = str(name or "").strip()
+    if not value:
+        return ""
+    return AI_PROVIDER_ALIASES.get(value.lower(), value)
+
+def default_ai_provider_config(name, data):
+    canonical = canonical_ai_provider_name(name)
+    cicy_ai_base = str(data.get("cicyAiUrl", "") or "").strip().rstrip("/")
+    cicy_ai_api = f"{cicy_ai_base}/v1" if cicy_ai_base else ""
+    defaults = {
+        "2000Run": {
+            "apiKey": data.get("2000RunApikey", ""),
+            "apiUrl": "http://2000.run:6543/v1",
+            "anthropicUrl": "http://2000.run:6543",
+            "defaultOpencodeModel": "gpt-5.4",
+            "defaultClaudeModel": "opus[1m]",
+            "codexModel": "gpt-5.4",
+            "openclawModel": "claude-sonnet-4-6",
+        },
+        "cicyAi": {
+            "apiKey": data.get("cicyAiapikey", ""),
+            "apiUrl": cicy_ai_api or "https://cicy-ai.com/v1",
+            "anthropicUrl": cicy_ai_base or "https://cicy-ai.com",
+            "defaultOpencodeModel": "gpt-5.4",
+            "defaultClaudeModel": "opus[1m]",
+            "codexModel": "gpt-5.4",
+            "openclawModel": "claude-sonnet-4-6",
+        },
+    }
+    return defaults.get(canonical, {})
+
+def get_ai_provider_config(provider_name=""):
+    data = load_global_json()
+    ai = data.get("ai", {})
+    provider_map = ai.get("provider", {}) if isinstance(ai, dict) else {}
+
+    selected = canonical_ai_provider_name(
+        provider_name
+        or os.environ.get("CICY_AI_PROVIDER")
+        or (ai.get("currentProvider", "") if isinstance(ai, dict) else "")
+        or "cicyAi"
+    ) or "cicyAi"
+
+    config = dict(default_ai_provider_config(selected, data))
+    for key, value in provider_map.items() if isinstance(provider_map, dict) else []:
+        if canonical_ai_provider_name(key) != selected or not isinstance(value, dict):
+            continue
+        config.update({k: v for k, v in value.items() if v not in ("", None)})
+
+    if not config.get("apiUrl") and config.get("baseUrl"):
+        config["apiUrl"] = config["baseUrl"]
+    return selected, config
+
+def get_ai_env_defaults(provider_name=""):
+    selected, config = get_ai_provider_config(provider_name)
+    return {
+        "CICY_AI_PROVIDER": selected,
+        "CICY_API_KEY": os.environ.get("CICY_API_KEY") or config.get("apiKey", ""),
+        "CICY_API_URL": os.environ.get("CICY_API_URL") or config.get("apiUrl", "http://2000.run:6543/v1"),
+        "CICY_ANTHROPIC_URL": os.environ.get("CICY_ANTHROPIC_URL") or config.get("anthropicUrl", "http://2000.run:6543"),
+        "CICY_DEFAULT_OPENCODE_MODEL": os.environ.get("CICY_DEFAULT_OPENCODE_MODEL") or os.environ.get("CICY_DEFAULT_MODEL") or config.get("defaultOpencodeModel") or config.get("defaultModel", "gpt-5.4"),
+        "CICY_DEFAULT_CLAUDE_MODEL": os.environ.get("CICY_DEFAULT_CLAUDE_MODEL") or os.environ.get("CICY_CLAUDE_MODEL") or config.get("defaultClaudeModel") or config.get("claudeModel", "opus[1m]"),
+        "CICY_CODEX_MODEL": os.environ.get("CICY_CODEX_MODEL") or config.get("codexModel", "gpt-5.4"),
+        "CICY_OPENCLAW_MODEL": os.environ.get("CICY_OPENCLAW_MODEL") or config.get("openclawModel", "claude-sonnet-4-6"),
+    }
+
 def get_cicy_api_key():
-    return os.environ.get("CICY_API_KEY") or load_global_json().get("2000RunApikey", "")
+    return get_ai_env_defaults().get("CICY_API_KEY", "")
+
+def get_local_api_token():
+    value = os.environ.get("CICY_API_TOKEN", "").strip()
+    if value:
+        return value
+    data = load_global_json()
+    return str(data.get("api_token", "") or "").strip()
 
 def get_cicy_cluster():
     data = load_global_json().get("cicy-cluster", {})
@@ -39,6 +119,7 @@ def get_cloudrun_env():
     cluster = get_cicy_cluster()
     env = os.environ.copy()
     cloudrun_image = cluster.get("image", "") or cluster.get("image_repository", "")
+    ai_env = get_ai_env_defaults()
     defaults = {
         "PROJECT": cluster.get("project_id", ""),
         "SERVICE": cluster.get("service", ""),
@@ -52,13 +133,7 @@ def get_cloudrun_env():
         "CICY_API_TOKEN": cluster.get("api_token", ""),
         "CICY_INSTANCE_KEY": cluster.get("instance_key", ""),
         "CICY_INSTANCE_LABEL": cluster.get("instance_label", ""),
-        "CICY_API_KEY": get_cicy_api_key(),
-        "CICY_API_URL": os.environ.get("CICY_API_URL", "http://2000.run:6543/v1"),
-        "CICY_ANTHROPIC_URL": os.environ.get("CICY_ANTHROPIC_URL", "http://2000.run:6543"),
-        "CICY_DEFAULT_MODEL": os.environ.get("CICY_DEFAULT_MODEL", "shibacc/claude-sonnet-4-6"),
-        "CICY_CLAUDE_MODEL": os.environ.get("CICY_CLAUDE_MODEL", "opus[1m]"),
-        "CICY_CODEX_MODEL": os.environ.get("CICY_CODEX_MODEL", "gpt-5.4"),
-        "CICY_OPENCLAW_MODEL": os.environ.get("CICY_OPENCLAW_MODEL", "gpt-5.4"),
+        **ai_env,
     }
     for key, value in defaults.items():
         if value and not env.get(key):
@@ -476,16 +551,12 @@ def run_docker(ports):
     subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
     
     # Pass AI config env vars to docker
-    env_vars = [
-        "-e", f"CICY_API_KEY={get_cicy_api_key()}",
-        "-e", f"CICY_API_URL={os.environ.get('CICY_API_URL', 'http://2000.run:6543/v1')}",
-        "-e", f"CICY_ANTHROPIC_URL={os.environ.get('CICY_ANTHROPIC_URL', 'http://2000.run:6543')}",
-        "-e", f"CICY_DEFAULT_MODEL={os.environ.get('CICY_DEFAULT_MODEL', 'shibacc/claude-sonnet-4-6')}",
-        "-e", f"CICY_CLAUDE_MODEL={os.environ.get('CICY_CLAUDE_MODEL', 'opus[1m]')}",
-        "-e", f"CICY_CODEX_MODEL={os.environ.get('CICY_CODEX_MODEL', 'gpt-5.4')}",
-        "-e", f"CICY_OPENCLAW_MODEL={os.environ.get('CICY_OPENCLAW_MODEL', 'gpt-5.4')}",
-        "-e", "CICY_RUNTIME_KIND=local",
-    ]
+    env_vars = []
+    for key, value in get_ai_env_defaults().items():
+        env_vars.extend(["-e", f"{key}={value}"])
+    local_api_token = get_local_api_token()
+    if local_api_token:
+        env_vars.extend(["-e", f"CICY_API_TOKEN={local_api_token}"])
     
     run_cmd = [
         "docker", "run", "-d",
@@ -533,25 +604,27 @@ def run_docker(ports):
         pass
 
     # Get and display the API token
-    result = subprocess.run(
-        ["docker", "exec", container_name, "cat", "/root/global.json"],
-        capture_output=True, text=True
-    )
-    if result.returncode == 0:
-        import json
-        try:
-            config = json.loads(result.stdout)
-            token = config.get("api_token", "")
-            if token:
-                print(f"[dev] API Token: {token}")
-                print(f"[dev] URL: http://{pub_ip}:{ports}/?token={token}")
-                print(f"[dev] Token available in {time.time() - docker_run_started_at:.1f}s (since docker run)")
+    token = local_api_token
+    if not token:
+        result = subprocess.run(
+            ["docker", "exec", container_name, "cat", "/root/global.json"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            import json
+            try:
+                config = json.loads(result.stdout)
+                token = config.get("api_token", "")
+            except Exception as e:
+                print(f"Error: {e}")
+    if token:
+        print(f"[dev] API Token: {token}")
+        print(f"[dev] URL: http://{pub_ip}:{ports}/?token={token}")
+        print(f"[dev] Token available in {time.time() - docker_run_started_at:.1f}s (since docker run)")
 
-                # Test agents
-                print("[dev] Testing agents...")
-                test_agents(container_name, token, ports)
-        except Exception as e:
-            print(f"Error: {e}")
+        # Test agents
+        print("[dev] Testing agents...")
+        test_agents(container_name, token, ports)
     
     sys.exit(0)
 
@@ -692,7 +765,8 @@ def main():
     platform = "darwin" if sys.platform == "darwin" else "linux"
     os.environ["SKIP_NPM"] = "1"
     os.environ["SQLITE_PATH"] = SQLITE_PATH
-    os.environ["CICY_API_KEY"] = get_cicy_api_key()
+    for key, value in get_ai_env_defaults().items():
+        os.environ[key] = value
     run_version_sync()
 
     result = subprocess.run(["./build.sh", "build", platform], cwd=ROOT_DIR)

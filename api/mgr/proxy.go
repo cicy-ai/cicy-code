@@ -26,8 +26,6 @@ var codeServerInjectContent []byte
 var codeServerInjectMtime int64
 var openClawStartMu sync.Mutex
 
-const openClawGlobalTokenKey = "openclaw_token"
-
 func init() {
 	csPort := os.Getenv("CS_PORT")
 	if csPort == "" {
@@ -259,63 +257,6 @@ func extractBearerOrQueryToken(r *http.Request) string {
 	return r.URL.Query().Get("token")
 }
 
-func globalJSONPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, "global.json")
-}
-
-func loadGlobalJSONMap() map[string]interface{} {
-	gpath := globalJSONPath()
-	if gpath == "" {
-		return map[string]interface{}{}
-	}
-	data, err := os.ReadFile(gpath)
-	if err != nil {
-		return map[string]interface{}{}
-	}
-	cfg := map[string]interface{}{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return map[string]interface{}{}
-	}
-	return cfg
-}
-
-func saveGlobalJSONMap(cfg map[string]interface{}) {
-	gpath := globalJSONPath()
-	if gpath == "" {
-		return
-	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return
-	}
-	_ = os.WriteFile(gpath, data, 0600)
-}
-
-func readOpenClawTokenFromGlobalJSON() string {
-	cfg := loadGlobalJSONMap()
-	if token, _ := cfg[openClawGlobalTokenKey].(string); token != "" {
-		return strings.TrimSpace(token)
-	}
-	return ""
-}
-
-func writeOpenClawTokenToGlobalJSON(token string) {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return
-	}
-	cfg := loadGlobalJSONMap()
-	if current, _ := cfg[openClawGlobalTokenKey].(string); strings.TrimSpace(current) == token {
-		return
-	}
-	cfg[openClawGlobalTokenKey] = token
-	saveGlobalJSONMap(cfg)
-}
-
 func readOpenClawTokenFromConfig() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -363,24 +304,19 @@ func readOpenClawTokenFromDashboard() string {
 	return strings.TrimSpace(token)
 }
 
+// Backward-compatible no-op shim. OpenClaw token resolution no longer reads global.json.
+func readOpenClawTokenFromGlobalJSON() string {
+	return ""
+}
+
 func resolveOpenClawGatewayToken() string {
-	if token := readOpenClawTokenFromConfig(); token != "" {
-		writeOpenClawTokenToGlobalJSON(token)
+	if token := strings.TrimSpace(os.Getenv("OPENCLAW_GATEWAY_TOKEN")); token != "" {
 		return token
 	}
-	if token := readOpenClawTokenFromGlobalJSON(); token != "" {
+	if token := readOpenClawTokenFromConfig(); token != "" {
 		return token
 	}
 	if token := readOpenClawTokenFromDashboard(); token != "" {
-		writeOpenClawTokenToGlobalJSON(token)
-		return token
-	}
-	if token := strings.TrimSpace(os.Getenv("OPENCLAW_GATEWAY_TOKEN")); token != "" {
-		writeOpenClawTokenToGlobalJSON(token)
-		return token
-	}
-	if token := readOpenClawTokenFromConfig(); token != "" {
-		writeOpenClawTokenToGlobalJSON(token)
 		return token
 	}
 	return ""

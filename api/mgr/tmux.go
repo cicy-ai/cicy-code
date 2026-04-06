@@ -397,6 +397,57 @@ func normalizeAgentType(agentType string) string {
 	}
 }
 
+func normalizedOpenClawPrimaryModel() string {
+	model := strings.ToLower(strings.TrimSpace(os.Getenv("CICY_OPENCLAW_MODEL")))
+	switch model {
+	case "":
+		return "claude-sonnet-4-6"
+	case "gpt5.4":
+		return "gpt-5.4"
+	case "cicyai/claude-opus-4-6":
+		return "claude-opus-4-6"
+	case "cicyai/claude-sonnet-4-6":
+		return "claude-sonnet-4-6"
+	case "cicyai/claude-haiku-4-5-20251001":
+		return "claude-haiku-4-5-20251001"
+	case "shibacc/claude-opus-4-6":
+		return "claude-opus-4-6"
+	case "shibacc/claude-sonnet-4-6":
+		return "claude-sonnet-4-6"
+	case "shibacc/claude-haiku-4-5-20251001":
+		return "claude-haiku-4-5-20251001"
+	}
+	model = strings.TrimPrefix(model, "cicyai/")
+	return strings.TrimPrefix(model, "shibacc/")
+}
+
+func runtimeAPIBasePort() string {
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		port = "8021"
+	}
+	return port
+}
+
+func localAIGatewayBaseURL(provider string, agentID string) string {
+	return "http://127.0.0.1:" + runtimeAPIBasePort() + "/api/ai-gateway/" + provider + "/" + agentID
+}
+
+func openAIRuntimeBaseURL(agentID string) string {
+	return localAIGatewayBaseURL("openai", agentID)
+}
+
+func anthropicRuntimeBaseURL(agentID string) string {
+	return localAIGatewayBaseURL("anthropic", agentID)
+}
+
+func openClawRuntimeBaseURL(agentID string) string {
+	if strings.HasPrefix(normalizedOpenClawPrimaryModel(), "claude-") {
+		return anthropicRuntimeBaseURL(agentID)
+	}
+	return openAIRuntimeBaseURL(agentID)
+}
+
 func visibleAgentInstallLine(commandName, label, installCmd, logPath string) string {
 	return fmt.Sprintf(`if ! command -v %s >/dev/null 2>&1; then
   echo '[cicy] =================================================='
@@ -427,25 +478,89 @@ func visibleAgentInstallLine(commandName, label, installCmd, logPath string) str
 fi`, commandName, label, tmuxShellQuote(logPath), installCmd, strings.ToLower(label), strings.ToLower(label), strings.ToLower(label))
 }
 
+func ensureAgentCommandLine(commandName, label, installCmd, logPath string) string {
+	if strings.TrimSpace(installCmd) == "" {
+		return fmt.Sprintf(`if ! command -v %s >/dev/null 2>&1; then
+  echo '[cicy] =================================================='
+  echo '[cicy] %s is missing from the preinstalled runtime image.'
+  echo '[cicy] Rebuild or update the base image, then restart this pane.'
+  echo '[cicy] =================================================='
+  return 1
+fi`, commandName, label)
+	}
+	return visibleAgentInstallLine(commandName, label, installCmd, logPath)
+}
+
 func agentBootLines(agentType string, allowAllActions bool, shortID string) []string {
 	switch normalizeAgentType(agentType) {
 	case "openclaw":
 		home, _ := os.UserHomeDir()
 		baseStateDir := filepath.Join(home, ".openclaw")
 		stateDir := filepath.Join(home, ".openclaw-"+shortID)
+		baseConfigPath := filepath.Join(baseStateDir, "openclaw.json")
+		stateConfigPath := filepath.Join(stateDir, "openclaw.json")
 		installLog := filepath.Join(stateDir, "openclaw-install.log")
 		sessionName := strings.ReplaceAll(shortID, "-", "")
 		lines := []string{
-			fmt.Sprintf("export OPENCLAW_CONFIG_PATH=%s", tmuxShellQuote(filepath.Join(baseStateDir, "openclaw.json"))),
+			fmt.Sprintf("export OPENCLAW_BASE_CONFIG_PATH=%s", tmuxShellQuote(baseConfigPath)),
+			fmt.Sprintf("export OPENCLAW_CONFIG_PATH=%s", tmuxShellQuote(stateConfigPath)),
 			fmt.Sprintf("export OPENCLAW_STATE_DIR=%s", tmuxShellQuote(stateDir)),
 			fmt.Sprintf("export OPENCLAW_SESSION_KEY=%s", tmuxShellQuote("agent:main:"+sessionName)),
 			fmt.Sprintf("export OPENCLAW_SESSION_STORE=%s", tmuxShellQuote(filepath.Join(baseStateDir, "agents", "main", "sessions", "sessions.json"))),
 			fmt.Sprintf("export OPENAI_API_KEY=%s", tmuxShellQuote(os.Getenv("CICY_API_KEY"))),
-			fmt.Sprintf("export OPENAI_BASE_URL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_API_URL")))),
+			fmt.Sprintf("export OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
+			fmt.Sprintf("export ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
 			fmt.Sprintf("mkdir -p %s", tmuxShellQuote(stateDir)),
 			fmt.Sprintf("mkdir -p %s %s %s", tmuxShellQuote(filepath.Join(stateDir, "identity")), tmuxShellQuote(filepath.Join(stateDir, "devices")), tmuxShellQuote(filepath.Join(stateDir, "agents", "main", "agent"))),
 			fmt.Sprintf("if [ -d %s ]; then cp -a %s/. %s/; fi", tmuxShellQuote(filepath.Join(baseStateDir, "identity")), tmuxShellQuote(filepath.Join(baseStateDir, "identity")), tmuxShellQuote(filepath.Join(stateDir, "identity"))),
 			fmt.Sprintf("if [ -d %s ]; then cp -a %s/. %s/; fi", tmuxShellQuote(filepath.Join(baseStateDir, "devices")), tmuxShellQuote(filepath.Join(baseStateDir, "devices")), tmuxShellQuote(filepath.Join(stateDir, "devices"))),
+			`node - <<'EOF'
+const fs = require("fs");
+const src = process.env.OPENCLAW_BASE_CONFIG_PATH;
+const dst = process.env.OPENCLAW_CONFIG_PATH;
+if (!src || !dst) process.exit(0);
+const cfg = JSON.parse(fs.readFileSync(src, "utf8"));
+const rawModel = String(process.env.CICY_OPENCLAW_MODEL || "").trim().toLowerCase();
+let model = rawModel || "claude-sonnet-4-6";
+switch (model) {
+  case "gpt5.4":
+    model = "gpt-5.4";
+    break;
+  case "cicyai/claude-opus-4-6":
+    model = "claude-opus-4-6";
+    break;
+  case "cicyai/claude-sonnet-4-6":
+    model = "claude-sonnet-4-6";
+    break;
+  case "cicyai/claude-haiku-4-5-20251001":
+    model = "claude-haiku-4-5-20251001";
+    break;
+  case "shibacc/claude-opus-4-6":
+    model = "claude-opus-4-6";
+    break;
+  case "shibacc/claude-sonnet-4-6":
+    model = "claude-sonnet-4-6";
+    break;
+  case "shibacc/claude-haiku-4-5-20251001":
+    model = "claude-haiku-4-5-20251001";
+    break;
+  default:
+    model = model.replace(/^cicyai\//, "");
+    model = model.replace(/^shibacc\//, "");
+    break;
+}
+const providerApi = model.startsWith("claude-") ? "anthropic-messages" : "openai-completions";
+const baseUrl = providerApi === "anthropic-messages" ? process.env.ANTHROPIC_BASE_URL : process.env.OPENAI_BASE_URL;
+cfg.models ||= {};
+cfg.models.providers ||= {};
+cfg.models.providers.cicy ||= {};
+cfg.models.providers.cicy.baseUrl = baseUrl;
+cfg.models.providers.cicy.api = providerApi;
+if (Array.isArray(cfg.models.providers.cicy.models)) {
+  cfg.models.providers.cicy.models = cfg.models.providers.cicy.models.map((entry) => ({ ...entry, api: providerApi }));
+}
+fs.writeFileSync(dst, JSON.stringify(cfg, null, 2));
+EOF`,
 			fmt.Sprintf("rm -f %s", tmuxShellQuote(filepath.Join(stateDir, "agents", "main", "agent", "auth-profiles.json"))),
 			`node - <<'EOF'
 const fs = require("fs");
@@ -465,9 +580,7 @@ try {
 EOF`,
 			`export OPENCLAW_GATEWAY_TOKEN="$(node -e 'const fs=require("fs"); const p=process.env.OPENCLAW_CONFIG_PATH; try { const data=JSON.parse(fs.readFileSync(p, "utf8")); process.stdout.write((((data.gateway || {}).auth || {}).token || "")); } catch (_) {}')"`,
 		}
-		if installCmd := openClawInstallCmd(); installCmd != "" {
-			lines = append(lines, visibleAgentInstallLine("openclaw", "OpenClaw", installCmd, installLog))
-		}
+		lines = append(lines, ensureAgentCommandLine("openclaw", "OpenClaw", openClawInstallCmd(), installLog))
 		if allowAllActions {
 			approvalsPath := fmt.Sprintf("%s/exec-approvals.json", stateDir)
 			lines = append(lines, fmt.Sprintf(`cat > %s <<'EOF'
@@ -549,45 +662,109 @@ EOF`, tmuxShellQuote(approvalsPath)))
 	case "codex":
 		home, _ := os.UserHomeDir()
 		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("codex-install-%s.log", shortID))
+		baseURL := openAIRuntimeBaseURL(shortID)
+		baseURLOverride := tmuxShellQuote(`model_providers.custom.base_url="` + baseURL + `"`)
 		lines := []string{
 			"mkdir -p ~/.cicy",
-			visibleAgentInstallLine("codex", "Codex", npmGlobalInstallCmd("@openai/codex"), installLog),
+			ensureAgentCommandLine("codex", "Codex", codexInstallCmd(), installLog),
 		}
 		if allowAllActions {
-			lines = append(lines, "codex --dangerously-bypass-approvals-and-sandbox")
+			lines = append(lines, fmt.Sprintf("codex -c %s --dangerously-bypass-approvals-and-sandbox", baseURLOverride))
 			return lines
 		}
-		lines = append(lines, "codex")
+		lines = append(lines, fmt.Sprintf("codex -c %s", baseURLOverride))
 		return lines
 	case "claude":
 		home, _ := os.UserHomeDir()
 		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("claude-install-%s.log", shortID))
+		settingsPath := fmt.Sprintf("/tmp/claude-settings-%s.json", shortID)
 		lines := []string{
 			"mkdir -p ~/.cicy",
-			visibleAgentInstallLine("claude", "Claude Code", npmGlobalInstallCmd("@anthropic-ai/claude-code"), installLog),
+			ensureAgentCommandLine("claude", "Claude Code", claudeInstallCmd(), installLog),
+			fmt.Sprintf("export ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
+			fmt.Sprintf("export CLAUDE_SETTINGS_PATH=%s", tmuxShellQuote(settingsPath)),
+			`node - <<'EOF'
+const fs = require("fs");
+const path = process.env.CLAUDE_SETTINGS_PATH;
+if (!path) process.exit(0);
+const config = {
+  env: {
+    ANTHROPIC_AUTH_TOKEN: process.env.CICY_API_KEY || "",
+    ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL || "",
+  },
+};
+fs.writeFileSync(path, JSON.stringify(config, null, 2));
+EOF`,
 		}
 		if allowAllActions {
-			lines = append(lines, "claude --dangerously-skip-permissions")
+			lines = append(lines, "claude --settings \"$CLAUDE_SETTINGS_PATH\" --dangerously-skip-permissions")
 			return lines
 		}
-		lines = append(lines, "claude")
+		lines = append(lines, "claude --settings \"$CLAUDE_SETTINGS_PATH\"")
 		return lines
 	case "opencode":
 		home, _ := os.UserHomeDir()
 		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("opencode-install-%s.log", shortID))
+		baseConfigPath := filepath.Join(home, ".config", "opencode", "opencode.json")
+		configPath := fmt.Sprintf("/tmp/opencode-%s.json", shortID)
 		lines := []string{
 			"mkdir -p ~/.cicy",
-			visibleAgentInstallLine("opencode", "OpenCode", "curl -fsSL https://opencode.ai/install | bash", installLog),
+			ensureAgentCommandLine("opencode", "OpenCode", opencodeInstallCmd(), installLog),
+			fmt.Sprintf("export OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
+			fmt.Sprintf("export OPENCODE_BASE_CONFIG=%s", tmuxShellQuote(baseConfigPath)),
+			fmt.Sprintf("export OPENCODE_CONFIG=%s", tmuxShellQuote(configPath)),
 		}
 		if allowAllActions {
-			configPath := fmt.Sprintf("/tmp/opencode_allow_%s.json", shortID)
-			lines = append(lines,
-				fmt.Sprintf("cat > %s <<'EOF'\n{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"permission\": \"allow\"\n}\nEOF", tmuxShellQuote(configPath)),
-				fmt.Sprintf("export OPENCODE_CONFIG=%s", tmuxShellQuote(configPath)),
-				"opencode",
-			)
+			lines = append(lines, `node - <<'EOF'
+const fs = require("fs");
+const src = process.env.OPENCODE_BASE_CONFIG;
+const dst = process.env.OPENCODE_CONFIG;
+if (!src || !dst) process.exit(0);
+const cfg = JSON.parse(fs.readFileSync(src, "utf8"));
+cfg.provider ||= {};
+const provider = cfg.provider.cicyai || cfg.provider.shibacc || {};
+provider.npm ||= "@ai-sdk/openai-compatible";
+provider.options ||= {};
+provider.options.baseURL = process.env.OPENAI_BASE_URL || provider.options.baseURL;
+cfg.provider.cicyai = provider;
+delete cfg.provider.shibacc;
+	if (typeof cfg.model === "string") {
+	  cfg.model = cfg.model.replace(/^shibacc\//, "cicyai/");
+	  if (!cfg.model.includes("/")) cfg.model = "cicyai/" + cfg.model;
+	}
+	if (typeof cfg.small_model === "string") {
+	  cfg.small_model = cfg.small_model.replace(/^shibacc\//, "cicyai/");
+	  if (!cfg.small_model.includes("/")) cfg.small_model = "cicyai/" + cfg.small_model;
+	}
+cfg.permission = "allow";
+fs.writeFileSync(dst, JSON.stringify(cfg, null, 2));
+EOF`)
+			lines = append(lines, "opencode")
 			return lines
 		}
+		lines = append(lines, `node - <<'EOF'
+const fs = require("fs");
+const src = process.env.OPENCODE_BASE_CONFIG;
+const dst = process.env.OPENCODE_CONFIG;
+if (!src || !dst) process.exit(0);
+const cfg = JSON.parse(fs.readFileSync(src, "utf8"));
+cfg.provider ||= {};
+const provider = cfg.provider.cicyai || cfg.provider.shibacc || {};
+provider.npm ||= "@ai-sdk/openai-compatible";
+provider.options ||= {};
+provider.options.baseURL = process.env.OPENAI_BASE_URL || provider.options.baseURL;
+cfg.provider.cicyai = provider;
+delete cfg.provider.shibacc;
+	if (typeof cfg.model === "string") {
+	  cfg.model = cfg.model.replace(/^shibacc\//, "cicyai/");
+	  if (!cfg.model.includes("/")) cfg.model = "cicyai/" + cfg.model;
+	}
+	if (typeof cfg.small_model === "string") {
+	  cfg.small_model = cfg.small_model.replace(/^shibacc\//, "cicyai/");
+	  if (!cfg.small_model.includes("/")) cfg.small_model = "cicyai/" + cfg.small_model;
+	}
+fs.writeFileSync(dst, JSON.stringify(cfg, null, 2));
+EOF`)
 		lines = append(lines, "opencode")
 		return lines
 	default:
@@ -651,6 +828,8 @@ func initPaneEnv(opts paneEnvOpts) {
 		`export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"`,
 		fmt.Sprintf("export X_AGENT_ID=%s", tmuxShellQuote(pid)),
 		fmt.Sprintf("export X_AGENT_SHORT_ID=%s", tmuxShellQuote(shortID)),
+		fmt.Sprintf("export CICY_OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
+		fmt.Sprintf("export CICY_ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
 		//fmt.Sprintf("export HTTP_PROXY=%s", tmuxShellQuote(proxyURL)),
 		// "export HTTPS_PROXY=\"$HTTP_PROXY\"",
 		// "export ALL_PROXY=\"$HTTP_PROXY\"",

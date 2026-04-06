@@ -48,7 +48,7 @@ if [ "$ACTION" = "show" ]; then
     exit 0
 fi
 
-PROVIDER="${1:-2000Run}"
+PROVIDER="${1:-}"
 
 if [ ! -f "$GLOBAL_JSON" ]; then
     echo "错误: 找不到 $GLOBAL_JSON"
@@ -58,20 +58,57 @@ fi
 # 读取配置
 CONFIG=$(python3 - "$PROVIDER" "$GLOBAL_JSON" <<'PY'
 import json, sys
-provider = sys.argv[1]
+requested = (sys.argv[1] or "").strip()
 with open(sys.argv[2]) as f:
     data = json.load(f)
-p = data.get("ai", {}).get("provider", {}).get(provider, {})
-if not p:
+
+aliases = {
+    "200run": "2000Run",
+    "2000run": "2000Run",
+    "cicyai": "cicyAi",
+}
+
+def canonical(name):
+    value = str(name or "").strip()
+    if not value:
+        return ""
+    return aliases.get(value.lower(), value)
+
+ai = data.get("ai", {}) if isinstance(data.get("ai", {}), dict) else {}
+provider_map = ai.get("provider", {}) if isinstance(ai.get("provider", {}), dict) else {}
+provider = canonical(requested or ai.get("currentProvider") or "cicyAi") or "cicyAi"
+
+cicy_ai_base = str(data.get("cicyAiUrl", "") or "").strip().rstrip("/")
+defaults = {
+    "2000Run": {
+        "apiKey": data.get("2000RunApikey", ""),
+        "apiUrl": "http://2000.run:6543/v1",
+        "codexModel": "gpt-5.4",
+        "codexReasoning": "xhigh",
+    },
+    "cicyAi": {
+        "apiKey": data.get("cicyAiapikey", ""),
+        "apiUrl": (cicy_ai_base + "/v1") if cicy_ai_base else "https://cicy-ai.com/v1",
+        "codexModel": "gpt-5.4",
+        "codexReasoning": "xhigh",
+    },
+}
+
+config = dict(defaults.get(provider, {}))
+for key, value in provider_map.items():
+    if canonical(key) == provider and isinstance(value, dict):
+        config.update({k: v for k, v in value.items() if v not in ("", None)})
+
+if not config:
     print("error: provider not found")
     sys.exit(1)
-api_key = p.get("apiKey", "")
-api_url = p.get("apiUrl", "")
-model = p.get("codexModel", "gpt-5.4")
-reasoning = p.get("codexReasoning", "xhigh")
-# provider name (lowercase for config)
+
+api_key = config.get("apiKey", "")
+api_url = config.get("apiUrl", "")
+model = config.get("codexModel", "gpt-5.4")
+reasoning = config.get("codexReasoning", "xhigh")
 provider_name = provider.lower()
-print(api_key + "|" + api_url + "|" + model + "|" + reasoning + "|" + provider_name)
+print(api_key + "|" + api_url + "|" + model + "|" + reasoning + "|" + provider_name + "|" + provider)
 PY
 )
 
@@ -80,14 +117,14 @@ if [[ "$CONFIG" == "error: provider not found" ]]; then
     exit 1
 fi
 
-IFS='|' read -r API_KEY API_URL CODEX_MODEL REASONING PROVIDER_NAME <<< "$CONFIG"
+IFS='|' read -r API_KEY API_URL CODEX_MODEL REASONING PROVIDER_NAME PROVIDER_LABEL <<< "$CONFIG"
 
 if [ -z "$API_KEY" ]; then
     echo "错误: apiKey 未配置"
     exit 1
 fi
 
-echo "配置 Codex (Provider: $PROVIDER)..."
+echo "配置 Codex (Provider: ${PROVIDER_LABEL:-$PROVIDER_NAME})..."
 
 HOME_DIR="${HOME:-$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)}"
 CODEX_DIR="$HOME_DIR/.codex"

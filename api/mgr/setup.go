@@ -76,11 +76,27 @@ func npmGlobalInstallCmd(pkg string) string {
 	return sudoPrefix() + "npm install -g " + pkg
 }
 
-func openClawInstallCmd() string {
+func preinstalledRuntimeInstallCmd(cmd string) string {
 	if isCloudRunRuntime() {
 		return ""
 	}
-	return npmGlobalInstallCmd("openclaw@latest")
+	return cmd
+}
+
+func openClawInstallCmd() string {
+	return preinstalledRuntimeInstallCmd(npmGlobalInstallCmd("openclaw@latest"))
+}
+
+func claudeInstallCmd() string {
+	return preinstalledRuntimeInstallCmd(npmGlobalInstallCmd("@anthropic-ai/claude-code"))
+}
+
+func codexInstallCmd() string {
+	return preinstalledRuntimeInstallCmd(npmGlobalInstallCmd("@openai/codex"))
+}
+
+func opencodeInstallCmd() string {
+	return preinstalledRuntimeInstallCmd("curl -fsSL https://opencode.ai/install | bash && echo 'export PATH=\"$HOME/.opencode/bin:$PATH\"' >> " + shellRC() + " && export PATH=\"$HOME/.opencode/bin:$PATH\"")
 }
 
 func packageInstallCmd(pkg string) string {
@@ -100,6 +116,9 @@ func nodeInstallCmd() string {
 }
 
 func codeServerInstallCmd() string {
+	if isCloudRunRuntime() {
+		return ""
+	}
 	if runtime.GOOS == "darwin" {
 		return "brew install code-server"
 	}
@@ -127,9 +146,10 @@ func checkEnvironment() []Tool {
 	extendPATH()
 	tools := append(baseTools(), []Tool{
 		{"openclaw", "openclaw", openClawInstallCmd(), true, false},
-		{"claude", "claude", npmGlobalInstallCmd("@anthropic-ai/claude-code"), true, false},
-		{"codex", "codex", npmGlobalInstallCmd("@openai/codex"), true, false},
-		{"opencode", "opencode", "curl -fsSL https://opencode.ai/install | bash && echo 'export PATH=\"$HOME/.opencode/bin:$PATH\"' >> " + shellRC() + " && export PATH=\"$HOME/.opencode/bin:$PATH\"", true, false},
+		{"claude", "claude", claudeInstallCmd(), true, false},
+		{"codex", "codex", codexInstallCmd(), true, false},
+		{"opencode", "opencode", opencodeInstallCmd(), true, false},
+		{"code-server", "code-server", codeServerInstallCmd(), true, false},
 	}...)
 
 	fmt.Println("🔍 检查环境依赖...")
@@ -197,9 +217,9 @@ func selectAgents() []string {
 func selectedAgentConfigs() map[string]Tool {
 	return map[string]Tool{
 		"openclaw": {"openclaw", "openclaw", openClawInstallCmd(), true, false},
-		"claude":   {"claude", "claude", npmGlobalInstallCmd("@anthropic-ai/claude-code"), true, false},
-		"codex":    {"codex", "codex", npmGlobalInstallCmd("@openai/codex"), true, false},
-		"opencode": {"opencode", "opencode", fmt.Sprintf("curl -fsSL https://opencode.ai/install | bash && echo 'export PATH=\"$HOME/.opencode/bin:$PATH\"' >> %s && export PATH=\"$HOME/.opencode/bin:$PATH\"", shellRC()), true, false},
+		"claude":   {"claude", "claude", claudeInstallCmd(), true, false},
+		"codex":    {"codex", "codex", codexInstallCmd(), true, false},
+		"opencode": {"opencode", "opencode", opencodeInstallCmd(), true, false},
 	}
 }
 
@@ -495,8 +515,13 @@ func checkEnv() {
 	if count == 0 {
 		if isCloudRunRuntime() {
 			// Cloud Run must never block on interactive setup.
-			// Keep the default footprint minimal: only bootstrap w-10001 OpenClaw.
-			createSelectedWorkers([]string{"openclaw"})
+			// Respect explicit --agents=... when provided; otherwise keep the default
+			// footprint minimal with only w-10001 OpenClaw.
+			if agentsFlag != "" {
+				runSetupWithAgents(agentsFlag)
+			} else {
+				createSelectedWorkers([]string{"openclaw"})
+			}
 		} else if agentsFlag != "" {
 			runSetupWithAgents(agentsFlag)
 		} else {
@@ -512,8 +537,14 @@ func setupAIConfigs() {
 	apiKey := os.Getenv("CICY_API_KEY")
 	apiUrl := os.Getenv("CICY_API_URL")
 	anthropicUrl := os.Getenv("CICY_ANTHROPIC_URL")
-	defaultModel := os.Getenv("CICY_DEFAULT_MODEL")
-	claudeModel := os.Getenv("CICY_CLAUDE_MODEL")
+	defaultOpencodeModel := os.Getenv("CICY_DEFAULT_OPENCODE_MODEL")
+	if defaultOpencodeModel == "" {
+		defaultOpencodeModel = os.Getenv("CICY_DEFAULT_MODEL")
+	}
+	defaultClaudeModel := os.Getenv("CICY_DEFAULT_CLAUDE_MODEL")
+	if defaultClaudeModel == "" {
+		defaultClaudeModel = os.Getenv("CICY_CLAUDE_MODEL")
+	}
 	codexModel := os.Getenv("CICY_CODEX_MODEL")
 
 	if apiKey == "" {
@@ -526,11 +557,11 @@ func setupAIConfigs() {
 	if anthropicUrl == "" {
 		anthropicUrl = "http://2000.run:6543"
 	}
-	if defaultModel == "" {
-		defaultModel = "shibacc/claude-sonnet-4-6"
+	if defaultOpencodeModel == "" {
+		defaultOpencodeModel = "gpt-5.4"
 	}
-	if claudeModel == "" {
-		claudeModel = "opus[1m]"
+	if defaultClaudeModel == "" {
+		defaultClaudeModel = "opus[1m]"
 	}
 	if codexModel == "" {
 		codexModel = "gpt-5.4"
@@ -543,7 +574,7 @@ func setupAIConfigs() {
 	if scriptPath == "" {
 		log.Printf("[setup] setup-agent.sh not found")
 	} else {
-		cmd := exec.Command(scriptPath, apiKey, apiUrl, anthropicUrl, defaultModel, claudeModel, codexModel)
+		cmd := exec.Command(scriptPath, apiKey, apiUrl, anthropicUrl, defaultOpencodeModel, defaultClaudeModel, codexModel)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -554,8 +585,7 @@ func setupAIConfigs() {
 	// Set env vars for OpenClaw worker (available via agentBootLines)
 	os.Setenv("OPENCLAW_CONFIG_PATH", filepath.Join(home, ".openclaw", "openclaw.json"))
 	os.Setenv("OPENAI_API_KEY", apiKey)
-	os.Setenv("OPENAI_BASE_URL", apiUrl)
-	os.Setenv("OPENAI_MODEL", defaultModel)
+	os.Setenv("OPENAI_MODEL", defaultOpencodeModel)
 	if openClawToken := strings.TrimSpace(readOpenClawTokenFromGlobalJSON()); openClawToken != "" {
 		os.Setenv("OPENCLAW_GATEWAY_TOKEN", openClawToken)
 	} else if openClawToken := strings.TrimSpace(readOpenClawTokenFromConfig()); openClawToken != "" {
@@ -649,8 +679,13 @@ func ensureCodeServer() {
 func ensureCodeServerAsync() {
 	extendPATH()
 	if _, err := exec.LookPath("code-server"); err != nil {
+		installCmd := codeServerInstallCmd()
+		if installCmd == "" {
+			log.Printf("[startup] code-server missing in preinstalled runtime; rebuild the base image")
+			return
+		}
 		fmt.Println("📦 后台安装 code-server...")
-		cmd := exec.Command("sh", "-c", codeServerInstallCmd())
+		cmd := exec.Command("sh", "-c", installCmd)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if runErr := cmd.Run(); runErr != nil {
