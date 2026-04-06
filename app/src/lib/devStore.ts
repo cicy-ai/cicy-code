@@ -11,6 +11,42 @@ let stores: Record<string, StoreEntry> = {};
 let listeners: Set<Listener> = new Set();
 let snapshot = { ...stores };
 
+function isPlainObject(value: any): value is Record<string, any> {
+  if (!value || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function isEqual(a: any, b: any, seen = new WeakMap<object, object>()): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== typeof b || a == null || b == null) return false;
+  if (typeof a !== 'object') return false;
+
+  if (seen.get(a) === b) return true;
+  seen.set(a, b);
+
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (!isEqual(a[i], b[i], seen)) return false;
+    }
+    return true;
+  }
+
+  if (!isPlainObject(a) || !isPlainObject(b)) return false;
+
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+
+  for (const key of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+    if (!isEqual(a[key], b[key], seen)) return false;
+  }
+
+  return true;
+}
+
 function notify() {
   snapshot = { ...stores };
   listeners.forEach(fn => fn());
@@ -18,10 +54,17 @@ function notify() {
 
 export const devStore = {
   register(name: string, state: Record<string, any>, setter?: Setter) {
+    const prev = stores[name];
+    const sameState = !!prev && isEqual(prev.state, state);
+    const sameSetter = prev?.setter === setter;
+
+    if (prev && sameState && sameSetter) return;
+
     stores[name] = { state, setter };
-    notify();
+    if (!prev || !sameState) notify();
   },
   unregister(name: string) {
+    if (!stores[name]) return;
     delete stores[name];
     notify();
   },

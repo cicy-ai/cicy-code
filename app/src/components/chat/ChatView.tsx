@@ -302,7 +302,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
             ws发送({ type: 'webpage_pong', data: { requestId: msg.data?.requestId, version: import.meta.env.VITE_APP_VERSION } });
           } else if (msg.type === 'worker_idle') {
             const d = msg.data?.data;
-            if (d) setChatData(prev => [...prev, { q: '', a: `🔔 **${d.worker || msg.data.from}** finished task (idle)`, status: 'done', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0, system: true }]);
+            if (d) setChatData(prev => [...prev, { q: '', a: `🔔 **${d.worker || msg.data.from}** 已完成任务（空闲）`, status: 'done', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0, system: true }]);
           } else {
             if (!streamingRef.current) debouncedReload();
           }
@@ -349,12 +349,12 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
           {loading ? (
             <div className="flex flex-col items-center justify-center pt-20 gap-3">
               <div className="w-6 h-6 border-2 border-vsc-accent/30 border-t-vsc-accent rounded-full animate-spin" />
-              <span className="text-base text-vsc-text-muted">Loading history...</span>
+              <span className="text-base text-vsc-text-muted">正在加载历史记录...</span>
             </div>
           ) : groups.length === 0 ? (
             <div className="text-center pt-20">
               <div className="text-2xl mb-2 opacity-20">✦</div>
-              <p className="text-xs text-vsc-text-muted">Waiting for conversation</p>
+              <p className="text-xs text-vsc-text-muted">等待对话开始</p>
             </div>
           ) : groups.map((g, gi) => {
             const { r } = g;
@@ -421,19 +421,19 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
                     {isPending && (
                       <div className="flex items-center gap-2 py-1.5">
                         <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
-                        <span className="text-base text-yellow-400/80 animate-pulse">Thinking...</span>
+                        <span className="text-base text-yellow-400/80 animate-pulse">思考中...</span>
                       </div>
                     )}
                     {isRunning && (
                       <div className="flex items-center gap-2 py-1.5">
                         <div className="w-3 h-3 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin" />
-                        <span className="text-base text-yellow-400/80">Running{toolCount > 0 ? ` (${toolCount} tools)` : ''}...</span>
+                        <span className="text-base text-yellow-400/80">执行中{toolCount > 0 ? `（${toolCount} 个工具）` : ''}...</span>
                       </div>
                     )}
                     {isStreaming && (
                       <div className="flex items-center gap-2 py-1.5">
                         <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                        <span className="text-base text-blue-400/80">Streaming...</span>
+                        <span className="text-base text-blue-400/80">输出中...</span>
                       </div>
                     )}
                   </div>

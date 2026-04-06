@@ -142,9 +142,9 @@ export default function Desktop() {
           <span className="text-sm font-semibold text-white/80">CiCy</span>
         </div>
         <div className="flex items-center gap-3">
-          {creating && <span className="text-xs text-amber-400/80">● creating</span>}
-          {streaming && !creating && <span className="text-xs text-blue-400/80">● thinking</span>}
-          {!busy && <span className="text-xs text-white/30">● idle</span>}
+          {creating && <span className="text-xs text-amber-400/80">● 创建中</span>}
+          {streaming && !creating && <span className="text-xs text-blue-400/80">● 思考中</span>}
+          {!busy && <span className="text-xs text-white/30">● 空闲</span>}
           <button onClick={logout} className="w-7 h-7 rounded-full bg-white/[0.06] flex items-center justify-center text-xs text-white/40 hover:text-white/60 transition-colors cursor-pointer">✕</button>
         </div>
       </header>
@@ -169,8 +169,8 @@ export default function Desktop() {
         {apps.length === 0 && !hasChat && (
           <div className="flex-1 flex flex-col items-center justify-center">
             <div className="text-5xl mb-4 opacity-60">✨</div>
-            <div className="text-lg text-white/50 font-medium mb-2">Ask your agent to build something</div>
-            <div className="text-sm text-white/20">Describe what you want, AI will create it for you</div>
+            <div className="text-lg text-white/50 font-medium mb-2">让你的智能体帮你构建点什么</div>
+            <div className="text-sm text-white/20">描述你的需求，AI 会为你创建出来</div>
           </div>
         )}
 
@@ -220,7 +220,7 @@ export default function Desktop() {
               className="w-9 h-9 rounded-xl bg-blue-500/15 text-blue-400/80 flex items-center justify-center text-base hover:bg-blue-500/25 disabled:opacity-30 transition-colors cursor-pointer"
             >↑</button>
           </div>
-          <div className="text-center mt-2.5 text-xs text-white/[0.12]">Press Enter to send · Powered by AI</div>
+          <div className="text-center mt-2.5 text-xs text-white/[0.12]">按 Enter 发送 · AI 驱动</div>
         </div>
       </div>
     </div>

@@ -39,7 +39,7 @@ export default function Login() {
         </div>
 
         <div className="text-center mb-6">
-          <p className="text-sm text-zinc-400">API Token</p>
+          <p className="text-sm text-zinc-400">API 令牌</p>
           <p className="text-xs text-zinc-600 mt-1">粘贴有效令牌以继续</p>
         </div>
 
@@ -63,7 +63,7 @@ export default function Login() {
             {loading ? (
               <span className="flex items-center justify-center gap-2">
                 <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Verifying...
+                验证中...
               </span>
             ) : '使用令牌登录'}
           </button>

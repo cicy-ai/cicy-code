@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -153,7 +156,7 @@ func stripOpenAIFingerprintHeaders(req *http.Request) {
 	}
 }
 
-func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider string, agentID string) *httputil.ReverseProxy {
+func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider string, agentID string, audit *aiGatewayAuditSession) *httputil.ReverseProxy {
 	target := &url.URL{Scheme: targetBase.Scheme, Host: targetBase.Host}
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	baseDirector := proxy.Director
@@ -176,6 +179,23 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 				req.Header.Set("x-api-key", apiKey)
 			}
 		}
+		if audit != nil {
+			audit.recordOutboundRequest(req)
+		}
+	}
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if audit == nil || resp == nil || resp.Body == nil {
+			return nil
+		}
+		audit.recordOutboundRequest(resp.Request)
+		resp.Body = newAIGatewayAuditReadCloser(resp.Body, audit, resp.StatusCode, resp.Header.Clone(), resp.ContentLength)
+		return nil
+	}
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		if audit != nil {
+			audit.completeFromError(err)
+		}
+		httpErr(w, 502, "ai_gateway_proxy_upstream_error")
 	}
 	return proxy
 }
@@ -198,7 +218,19 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	proxy := newAIGatewayReverseProxy(targetBase, suffix, provider, agentID)
+	requestBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		httpErr(w, 400, "ai_gateway_proxy_read_body_failed")
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(requestBody))
+
+	audit := newAIGatewayAuditSession(provider, agentID, targetBase, suffix, r.Method, requestBody)
+	if err := audit.writeStartSnapshots(); err != nil {
+		log.Printf("[ai-gateway] write current snapshot failed for %s: %v", agentID, err)
+	}
+
+	proxy := newAIGatewayReverseProxy(targetBase, suffix, provider, agentID, audit)
 	proxy.ServeHTTP(w, r)
 }
 
@@ -224,6 +256,6 @@ func handleOpenClawProviderProxy(w http.ResponseWriter, r *http.Request) {
 		suffix = "/"
 	}
 
-	proxy := newAIGatewayReverseProxy(targetBase, suffix, "openai", "openclaw")
+	proxy := newAIGatewayReverseProxy(targetBase, suffix, "openai", "openclaw", nil)
 	proxy.ServeHTTP(w, r)
 }

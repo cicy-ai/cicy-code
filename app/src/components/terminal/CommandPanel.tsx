@@ -196,7 +196,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
     
     // Block while sending (except slash commands)
     if (sending && !cmd.startsWith('/')) {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Agent is busy. Click the loading button to force reset.' }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '智能体正忙，请点击加载按钮强制重置。' }));
       return;
     }
 
@@ -264,11 +264,11 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
             onShowCorrection?.(data.result);
           } else {
             setPromptText(cmd); saveDraft(cmd);
-            window.dispatchEvent(new CustomEvent('show-toast', { detail: `Error: ${data.error || '修正失败'}` }));
+            window.dispatchEvent(new CustomEvent('show-toast', { detail: `错误：${data.error || '修正失败'}` }));
           }
         } catch (err: any) {
           setPromptText(cmd); saveDraft(cmd);
-          window.dispatchEvent(new CustomEvent('show-toast', { detail: `Error: ${err.message}` }));
+          window.dispatchEvent(new CustomEvent('show-toast', { detail: `错误：${err.message}` }));
         } finally {
           setIsCorrectingEnglish(false);
           onCorrectionLoading?.(false);

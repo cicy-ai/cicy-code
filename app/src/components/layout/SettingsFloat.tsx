@@ -17,8 +17,8 @@ function applyTheme(t: string) {
 }
 
 const sections = [
-  { id: 'general', label: 'General', icon: Settings },
-  { id: 'agent', label: 'Agent', icon: Zap },
+  { id: 'general', label: '常规', icon: Settings },
+  { id: 'agent', label: '智能体', icon: Zap },
   // { id: 'config', label: 'Config', icon: Settings },
   // { id: 'global', label: 'Global', icon: Globe },
 ] as const;
@@ -65,7 +65,7 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
         {/* Sidebar */}
         <nav className="w-[180px] bg-[#111113] border-r border-white/[0.06] flex flex-col shrink-0">
           <div className="px-4 py-4 border-b border-white/[0.06]">
-            <h2 className="text-sm font-semibold text-white">Settings</h2>
+            <h2 className="text-sm font-semibold text-white">设置</h2>
             <p className="text-[11px] text-zinc-500 font-mono mt-0.5 truncate">{paneId}</p>
           </div>
           <div className="flex-1 py-2 px-2 space-y-0.5 overflow-y-auto">
@@ -106,13 +106,13 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
           <div ref={bodyRef} className="flex-1 overflow-y-auto px-6 py-5">
             {section === 'general' && (
               <div className="space-y-5">
-                <Field label="Title">
+                <Field label="标题">
                   <Input value={data.title} onChange={v => set({ title: v })} placeholder="窗格标题" />
                 </Field>
-                <Field label="Workspace" mono>
+                <Field label="工作目录" mono>
                   <Input value={data.workspace || ''} onChange={v => set({ workspace: v })} placeholder="/home/user/project" mono />
                 </Field>
-                <Toggle label="Auto-start" desc="服务重启后恢复" checked={data.active !== false} onChange={v => set({ active: v })} />
+                <Toggle label="自动启动" desc="服务重启后恢复" checked={data.active !== false} onChange={v => set({ active: v })} />
                 <Field label="初始化脚本" desc="sleep:N 表示等待，key:X 表示发送按键">
                   <Textarea value={data.init_script || ''} onChange={v => set({ init_script: v })} rows={3} mono placeholder={"pwd\n# sleep:2\n# key:t"} />
                 </Field>
@@ -124,7 +124,7 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
                 <Field label="智能体类型">
                   <div className="flex flex-wrap gap-2">
                     {[
-                      { value: '', label: 'None', icon: null },
+                      { value: '', label: '无', icon: null },
                       { value: 'openclaw', label: 'OpenClaw', icon: null },
                       { value: 'codex', label: 'Codex', icon: '/assets/logos/openai.svg' },
                       { value: 'claude', label: 'Claude', icon: '/assets/logos/claude-symbol.svg' },
@@ -218,7 +218,7 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
                   globalSaved ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/[0.06] text-zinc-300 hover:bg-white/[0.1]'
                 } disabled:opacity-50`}>
                 {globalSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {globalSaving ? 'Saving...' : globalSaved ? 'Saved!' : 'Save'}
+                {globalSaving ? '保存中...' : globalSaved ? '已保存' : '保存'}
               </button>
             ) : (
               <button onClick={save} disabled={saving}
@@ -226,7 +226,7 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
                   saved ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/[0.06] text-zinc-300 hover:bg-white/[0.1]'
                 } disabled:opacity-50`}>
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {saving ? 'Saving...' : saved ? 'Saved!' : 'Save'}
+                {saving ? '保存中...' : saved ? '已保存' : '保存'}
               </button>
             )}
           </div>

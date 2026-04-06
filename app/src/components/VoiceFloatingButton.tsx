@@ -171,7 +171,7 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
 
       {/* Label/Hint */}
       <div className={`absolute -bottom-10 left-1/2 -translate-x-1/2 text-sm font-bold whitespace-nowrap px-3 py-1.5 rounded-full bg-black/70 text-white backdrop-blur-sm transition-opacity duration-200 ${isPressed || isLoading ? 'opacity-100' : 'opacity-0'}`}>
-        {dragMode ? "Positioning..." : isLoading ? "识别中..." : "Recording..."}
+        {dragMode ? "定位中..." : isLoading ? "识别中..." : "录音中..."}
       </div>
     </div>
   );

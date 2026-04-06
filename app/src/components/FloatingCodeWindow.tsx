@@ -233,7 +233,7 @@ export default function FloatingCodeWindow({
         type="button"
         onClick={toggleMaximized}
         className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"
-        title={maximized ? 'Restore' : 'Maximize'}
+        title={maximized ? '还原' : '最大化'}
       >
         {maximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
       </button>
@@ -249,7 +249,7 @@ export default function FloatingCodeWindow({
         type="button"
         onClick={() => { window.dispatchEvent(new Event('floating-window-close')); onClose(); }}
         className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"
-        title="Minimize"
+        title="最小化"
       >
         <Minus className="w-3.5 h-3.5" />
       </button>
@@ -257,7 +257,7 @@ export default function FloatingCodeWindow({
         type="button"
         onClick={() => { window.dispatchEvent(new Event('floating-window-close')); onClose(); }}
         className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"
-        title="Hide"
+        title="关闭"
       >
         <X className="w-3.5 h-3.5" />
       </button>
@@ -288,7 +288,7 @@ export default function FloatingCodeWindow({
         favoriteDirs={globalVar?.favor?.dir || []}
       />
       {!collapsed && !maximized && (
-        <div className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize z-10" onMouseDown={startResize} title="Resize">
+        <div className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize z-10" onMouseDown={startResize} title="调整大小">
           <svg className="w-3 h-3 text-zinc-600 absolute bottom-0.5 right-0.5" viewBox="0 0 10 10">
             <path d="M9 1v8H1" fill="none" stroke="currentColor" strokeWidth="1.5" />
             <path d="M9 5v4H5" fill="none" stroke="currentColor" strokeWidth="1.5" />

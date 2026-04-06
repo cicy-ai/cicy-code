@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=gcr.io/project-28447ebb-8b5a-4c03-9ac/cicy-code-base:latest
+ARG BASE_IMAGE=cicy-code-base:latest
 FROM ${BASE_IMAGE}
 
 COPY setup-agent.sh /usr/local/bin/setup-agent.sh

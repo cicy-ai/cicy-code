@@ -58,7 +58,7 @@ function errorToString(error: unknown): string {
   if (typeof error === 'string') {
     return error;
   }
-  return 'unknown error';
+  return '未知错误';
 }
 
 function formatTime(timestamp: number): string {
@@ -104,7 +104,7 @@ function extractMessageText(message: any): string {
         return entry.text;
       }
       if (entry.type === 'toolcall' && typeof entry.name === 'string') {
-        return `[Tool: ${entry.name}]`;
+        return `[工具：${entry.name}]`;
       }
       return '';
     })
@@ -131,7 +131,7 @@ function senderLabelForMessage(message: any, role: HomeMessageRole, assistantFal
     if (typeof message?.senderLabel === 'string' && message.senderLabel.trim()) {
       return message.senderLabel.trim();
     }
-    return 'You';
+    return '你';
   }
   if (role === 'assistant') {
     if (typeof message?.senderLabel === 'string' && message.senderLabel.trim()) {
@@ -140,9 +140,9 @@ function senderLabelForMessage(message: any, role: HomeMessageRole, assistantFal
     return assistantFallback;
   }
   if (role === 'tool') {
-    return 'Tool';
+    return '工具';
   }
-  return 'System';
+  return '系统';
 }
 
 function messageTimestamp(message: any): number {
@@ -348,7 +348,7 @@ export default function HomeChatView({ hasToken, onOpenWorkspace }: Props) {
     hasToken ? 'connecting' : 'idle',
   );
   const [statusText, setStatusText] = useState(
-    hasToken ? '正在连接 OpenClaw gateway...' : '登录后可连接 OpenClaw',
+    hasToken ? '正在连接 OpenClaw 网关...' : '登录后可连接 OpenClaw',
   );
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [members, setMembers] = useState<TeamMember[]>(fallbackMembers(hasToken));
@@ -524,7 +524,7 @@ export default function HomeChatView({ hasToken, onOpenWorkspace }: Props) {
       }
 
       setConnectionState('connecting');
-      setStatusText('正在连接 OpenClaw gateway...');
+      setStatusText('正在连接 OpenClaw 网关...');
 
       try {
         const response = await apiService.getOpenClawGateway();
@@ -606,7 +606,7 @@ export default function HomeChatView({ hasToken, onOpenWorkspace }: Props) {
       appendMessage(prev, {
         id: `local:${createOpenClawId()}`,
         role: 'user',
-        sender: 'You',
+        sender: '你',
         content: text,
         timestamp: Date.now(),
         isMe: true,
@@ -633,7 +633,7 @@ export default function HomeChatView({ hasToken, onOpenWorkspace }: Props) {
         appendMessage(prev, {
           id: `error:${createOpenClawId()}`,
           role: 'system',
-          sender: 'System',
+          sender: '系统',
           content: `发送失败: ${detail}`,
           timestamp: Date.now(),
         }),
@@ -749,7 +749,7 @@ export default function HomeChatView({ hasToken, onOpenWorkspace }: Props) {
                         <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
                           {activeMemberLabel}
                         </span>
-                        <span className="text-[9px] text-gray-600">live</span>
+                        <span className="text-[9px] text-gray-600">实时</span>
                       </div>
                       <div className="p-4 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words bg-zinc-900 text-gray-300 border border-white/5">
                         {chatStream}
@@ -801,7 +801,7 @@ export default function HomeChatView({ hasToken, onOpenWorkspace }: Props) {
           <aside className="w-72 border-l border-white/10 bg-zinc-950 hidden lg:flex flex-col shrink-0">
             <div className="p-6 border-b border-white/5">
               <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-4">
-                军团成员 (Channels)
+                军团成员（通道）
               </h3>
               <div className="space-y-4">
                 {members.map(member => {

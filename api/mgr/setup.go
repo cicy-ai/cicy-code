@@ -275,6 +275,11 @@ var builtinAgents = []struct {
 	{10004, "opencode", "OpenCode"},
 }
 
+const (
+	primaryWorkerSession = "w-10001"
+	primaryWorkerPaneID  = "w-10001:main.0"
+)
+
 func isBuiltinAgentType(agentType string) bool {
 	for _, ba := range builtinAgents {
 		if ba.AgentType == agentType {
@@ -356,8 +361,75 @@ func syncWorkerIndexToBuiltinAgents() {
 	ensureWorkerIndexAtLeast(maxPort)
 }
 
+func hasSelectedAgentType(selected []string, agentType string) bool {
+	for _, selectedAgentType := range selected {
+		if selectedAgentType == agentType {
+			return true
+		}
+	}
+	return false
+}
+
+func builtinWorkerSession(port int) string {
+	return fmt.Sprintf("w-%d", port)
+}
+
+func ensurePrimaryWorkerForBindings(selected []string) {
+	if hasSelectedAgentType(selected, "openclaw") {
+		return
+	}
+	needsBindingTarget := false
+	for _, agentType := range selected {
+		if agentType != "openclaw" {
+			needsBindingTarget = true
+			break
+		}
+	}
+	if !needsBindingTarget {
+		return
+	}
+
+	var count int
+	if err := store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE pane_id=?", primaryWorkerPaneID).Scan(&count); err != nil {
+		log.Printf("[startup] failed to inspect primary worker %s: %v", primaryWorkerSession, err)
+		return
+	}
+	if count > 0 {
+		return
+	}
+
+	log.Printf("[startup] primary worker %s missing; creating it for agent bindings", primaryWorkerSession)
+	createBuiltinWorker(10001, "openclaw", "OpenClaw")
+}
+
+func ensureWorkerBoundToPrimary(workerSession string) {
+	workerSession = strings.TrimSpace(workerSession)
+	if workerSession == "" || workerSession == primaryWorkerSession {
+		return
+	}
+
+	var primaryCount int
+	if err := store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE pane_id=?", primaryWorkerPaneID).Scan(&primaryCount); err != nil {
+		log.Printf("[startup] failed to inspect primary binding target %s: %v", primaryWorkerSession, err)
+		return
+	}
+	if primaryCount == 0 {
+		log.Printf("[startup] skip binding %s to %s: primary worker missing", workerSession, primaryWorkerSession)
+		return
+	}
+
+	query := fmt.Sprintf(`INSERT INTO pane_agents (pane_id, agent_name, status, created_at, updated_at)
+		VALUES (?, ?, 'active', %s, %s)
+		ON CONFLICT(pane_id, agent_name) DO UPDATE SET status='active', updated_at=%s`, store.Now(), store.Now(), store.Now())
+	if _, err := store.Exec(query, primaryWorkerSession, workerSession); err != nil {
+		log.Printf("[startup] failed to bind %s to %s: %v", workerSession, primaryWorkerSession, err)
+		return
+	}
+}
+
 func createSelectedWorkers(selected []string) {
 	fmt.Println("\n🚀 创建选中的 Workers...")
+	ensurePrimaryWorkerForBindings(selected)
 	maxPort := 0
 	for _, ba := range builtinAgents {
 		found := false
@@ -378,9 +450,11 @@ func createSelectedWorkers(selected []string) {
 		store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE agent_type=?", ba.AgentType).Scan(&count)
 		if count > 0 {
 			fmt.Printf("  ⏭ %s - 已存在，跳过\n", ba.Title)
+			ensureWorkerBoundToPrimary(builtinWorkerSession(ba.Port))
 			continue
 		}
 		createBuiltinWorker(ba.Port, ba.AgentType, ba.Title)
+		ensureWorkerBoundToPrimary(builtinWorkerSession(ba.Port))
 	}
 	ensureWorkerIndexAtLeast(maxPort)
 	syncWorkerIndexToBuiltinAgents()

@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Users, Plus, X, Loader2, ExternalLink, RefreshCw, Settings, MoreHorizontal } from 'lucide-react';
+import { Users, Plus, X, Loader2, ExternalLink, RefreshCw, Settings, MoreHorizontal, Trash2 } from 'lucide-react';
 import apiService from '../../services/api';
 import { useDialog } from '../../contexts/DialogContext';
 import Select from '../ui/Select';
+import CreateAgentDialog, { CreateAgentValues } from '../CreateAgentDialog';
 
 interface Agent {
   pane_id: string;
@@ -130,6 +131,50 @@ function AgentTypeAvatar({ agentType, title }: { agentType?: string; title: stri
   );
 }
 
+function AgentTypeMiniAvatar({ agentType, title }: { agentType?: string; title: string }) {
+  const normalizedAgentType = normalizeAgentType(agentType);
+  const baseClassName = 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border';
+
+  if (!normalizedAgentType) {
+    return (
+      <div
+        className={`${baseClassName} border-white/[0.08] bg-white/[0.03] text-zinc-400`}
+        title={title}
+      >
+        <span className="text-[10px] font-semibold uppercase">{title.slice(0, 1) || '?'}</span>
+      </div>
+    );
+  }
+
+  if (normalizedAgentType === 'openclaw') {
+    return (
+      <div
+        className={`${baseClassName} border-zinc-500/30 bg-zinc-200 text-zinc-950`}
+        title="OpenClaw"
+      >
+        <span className="text-[15px] leading-none" aria-label="OpenClaw">🦞</span>
+      </div>
+    );
+  }
+
+  const iconMap: Record<string, { label: string; src: string; className?: string }> = {
+    codex: { label: 'Codex', src: '/assets/logos/openai.svg', className: 'h-4.5 w-4.5' },
+    claude: { label: 'Claude', src: '/assets/logos/claude-symbol.svg', className: 'h-4.5 w-4.5' },
+    opencode: { label: 'OpenCode', src: '/assets/logos/opencode.svg', className: 'h-5 w-5' },
+  };
+  const icon = iconMap[normalizedAgentType];
+  if (!icon) return null;
+
+  return (
+    <div
+      className={`${baseClassName} border-zinc-500/30 bg-zinc-200`}
+      title={icon.label}
+    >
+      <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-4.5 w-4.5'} object-contain`} />
+    </div>
+  );
+}
+
 export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds = [], activePaneId, onOpenSettingsPane }: Props) {
   const [all智能体, setAll智能体] = useState<Agent[]>([]);
   const [bindings, setBindings] = useState<Binding[]>([]);
@@ -137,6 +182,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
   const [instances, setInstances] = useState<Machine[]>([]);
   const [steps, setSteps] = useState<Step[]>([]);
   const [creating, setCreating] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [syncingInstances, setSyncingInstances] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const { confirm } = useDialog();
@@ -189,20 +235,29 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
   const unbind = async (binding: Binding) => {
     try {
       await apiService.unbindAgent(binding.id);
+      onOpenInCurrentPane?.(paneId);
       load();
     } catch {}
   };
 
-  const createAndBind = async () => {
+  const createAndBind = async (values: CreateAgentValues) => {
     setCreating(true);
     try {
-      const { data } = await apiService.createPane({ role: 'worker', agent_type: 'codex' });
+      const { data } = await apiService.createPane({
+        role: 'worker',
+        title: values.title,
+        agent_type: values.agent_type,
+        allow_all_actions: values.allow_all_actions,
+      });
       const newId = data?.pane_id || data?.session;
       if (newId) {
         await apiService.bindAgent({ pane_id: paneId, agent_name: shortId(newId) });
+        setCreateDialogOpen(false);
         load();
       }
-    } catch {} finally {
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '创建并绑定工作实例失败' }));
+    } finally {
       setCreating(false);
     }
   };
@@ -227,9 +282,9 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
   };
 
   const statusLabel = (s: StatusInfo) => {
-    if (s.isThinking || s.status === 'thinking') return 'Thinking';
-    if (s.status === 'tool_use') return 'Running';
-    if (s.status === 'idle' || s.status === 'text') return 'Idle';
+    if (s.isThinking || s.status === 'thinking') return '思考中';
+    if (s.status === 'tool_use') return '执行中';
+    if (s.status === 'idle' || s.status === 'text') return '空闲';
     return '';
   };
 
@@ -255,18 +310,34 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
       return;
     }
     confirm(
-      <>Restart <span className="text-zinc-100 font-medium">{title}</span>?</>,
+      <>重启 <span className="text-zinc-100 font-medium">{title}</span>？</>,
       async () => {
         try {
           await apiService.restartPane(wid);
-          showToast(`${title} restarting...`);
+          showToast(`${title} 正在重启...`);
           load();
         } catch {
-          showToast(`Error: ${title} 重启失败`);
+          showToast(`错误：${title} 重启失败`);
         }
       }
     );
   }, [confirm, load, showToast]);
+  const deletePane = useCallback((binding: Binding, title: string) => {
+    const wid = shortId(binding.name);
+    confirm(
+      <>删除 <span className="text-zinc-100 font-medium">{title}</span>？</>,
+      async () => {
+        try {
+          await apiService.unbindAgent(binding.id);
+          await apiService.deletePane(wid);
+          onOpenInCurrentPane?.(paneId);
+          load();
+        } catch {
+          showToast(`错误：${title} 删除失败`);
+        }
+      }
+    );
+  }, [confirm, load, onOpenInCurrentPane, paneId, showToast]);
   const latestStepMap = useMemo(() => {
     const map = new Map<string, Step>();
     for (const step of steps) {
@@ -320,6 +391,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
     opened = false,
     onClick,
     onRemove,
+    onDelete,
     onRestart,
     onOpenSettings,
     canRestart = true,
@@ -334,6 +406,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
     opened?: boolean;
     onClick: () => void;
     onRemove?: () => void;
+    onDelete?: () => void;
     onRestart?: () => void;
     onOpenSettings?: () => void;
     canRestart?: boolean;
@@ -382,7 +455,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
             >
               <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-              <span>Open</span>
+              <span>打开</span>
             </button>
             {onRemove ? (
               <button
@@ -395,7 +468,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors cursor-pointer text-zinc-300 hover:bg-red-500/10 hover:text-red-300"
               >
                 <X className="w-3.5 h-3.5 shrink-0" />
-                <span>Unbind</span>
+                <span>解绑</span>
               </button>
             ) : null}
             <button
@@ -414,7 +487,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
               }`}
             >
               <RefreshCw className="w-3.5 h-3.5 shrink-0" />
-              <span>Restart</span>
+              <span>重启</span>
             </button>
             <button
               type="button"
@@ -432,8 +505,22 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
               }`}
             >
               <Settings className="w-3.5 h-3.5 shrink-0" />
-              <span>Settings</span>
+              <span>设置</span>
             </button>
+            {onDelete ? (
+              <button
+                type="button"
+                data-id="team-panel-worker-menu-delete"
+                onClick={() => {
+                  setOpenMenuId(null);
+                  onDelete();
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-red-300 transition-colors cursor-pointer hover:bg-red-500/10 hover:text-red-200"
+              >
+                <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                <span>删除</span>
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -461,9 +548,14 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
     <div className="h-full w-full min-w-0 flex flex-col overflow-hidden" data-id="team-panel-root">
       <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-center gap-2 flex-shrink-0" data-id="team-panel-toolbar">
         <Select
-          options={available.map(a => ({ value: a.pane_id, label: a.title || shortId(a.pane_id), sub: shortId(a.pane_id) }))}
+          options={available.map(a => ({
+            value: a.pane_id,
+            label: a.title || shortId(a.pane_id),
+            sub: shortId(a.pane_id),
+            icon: <AgentTypeMiniAvatar agentType={a.agent_type} title={a.title || shortId(a.pane_id)} />,
+          }))}
           onChange={v => bind(v)}
-          placeholder="+ Bind worker..."
+          placeholder="+ 绑定工作实例..."
           searchable
           className="flex-1"
         />
@@ -478,7 +570,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
         </button>
         <button
           data-id="team-panel-create-worker"
-          onClick={createAndBind}
+          onClick={() => setCreateDialogOpen(true)}
           disabled={creating}
           className="flex items-center text-sm px-2 py-1.5 rounded border border-[var(--vsc-border)] text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors cursor-pointer disabled:opacity-50"
           title="创建并绑定新工作实例"
@@ -487,7 +579,15 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
         </button>
       </div>
 
-    
+      <CreateAgentDialog
+        open={createDialogOpen}
+        submitting={creating}
+        onClose={() => setCreateDialogOpen(false)}
+        onSubmit={createAndBind}
+        title="创建并绑定工作实例"
+        submitLabel="创建并绑定"
+      />
+
 
       <div className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto hide-scrollbar" data-id="team-panel-worker-list">
         <div className="p-1.5 border-b border-[var(--vsc-border)]" data-id="team-panel-current-agent">
@@ -547,7 +647,8 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
                     onRestart: () => restartPane(wid, getName(b), isApiOnlyInstance(b.machine_id ? instanceMap.get(b.machine_id) : undefined)),
                     onOpenSettings: () => onOpenSettingsPane?.(wid),
                     canRestart: !isApiOnlyInstance(b.machine_id ? instanceMap.get(b.machine_id) : undefined),
-                    onRemove: () => confirm(<>Unbind <span className="text-zinc-100 font-medium">{getName(b)}</span>?</>, () => unbind(b)),
+                    onRemove: () => confirm(<>解绑 <span className="text-zinc-100 font-medium">{getName(b)}</span>？</>, () => unbind(b)),
+                    onDelete: () => deletePane(b, getName(b)),
                   });
                 })}
               </div>
@@ -556,7 +657,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-zinc-600" data-id="team-panel-empty">
             <Users className="w-8 h-8 mb-2 opacity-20" />
-            <p className="text-sm">Bind a worker to start</p>
+            <p className="text-sm">先绑定一个工作实例开始</p>
           </div>
         )}
       </div>

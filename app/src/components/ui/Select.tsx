@@ -5,6 +5,7 @@ export interface SelectOption {
   value: string;
   label: string;
   sub?: string;
+  icon?: React.ReactNode;
 }
 
 interface Props {
@@ -14,9 +15,10 @@ interface Props {
   placeholder?: string;
   searchable?: boolean;
   className?: string;
+  dropdownClassName?: string;
 }
 
-export default function Select({ options, value, onChange, placeholder = 'Select...', searchable = false, className = '' }: Props) {
+export default function Select({ options, value, onChange, placeholder = '请选择...', searchable = false, className = '', dropdownClassName = '' }: Props) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
@@ -46,7 +48,7 @@ export default function Select({ options, value, onChange, placeholder = 'Select
       </button>
 
       {open && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-[#1e1e1e] border border-[var(--vsc-border)] rounded-md shadow-xl overflow-hidden">
+        <div data-id="select-dropdown" className={`absolute z-50 top-full left-0 right-0 mt-1 min-w-full bg-[#1e1e1e] border border-[var(--vsc-border)] rounded-md shadow-xl overflow-hidden ${dropdownClassName}`}>
           {searchable && (
             <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[var(--vsc-border)]">
               <Search className="w-3 h-3 text-zinc-500" />
@@ -55,7 +57,7 @@ export default function Select({ options, value, onChange, placeholder = 'Select
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 className="flex-1 text-sm bg-transparent text-zinc-300 outline-none placeholder-zinc-600"
-                placeholder="Search..."
+                placeholder="搜索..."
               />
             </div>
           )}
@@ -64,13 +66,20 @@ export default function Select({ options, value, onChange, placeholder = 'Select
               <div
                 key={o.value}
                 onClick={() => { onChange(o.value); setOpen(false); setSearch(''); }}
-                className={`flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer transition-colors ${o.value === value ? 'bg-blue-500/10 text-blue-400' : 'text-zinc-300 hover:bg-white/[0.06]'}`}
+                className={`flex items-center gap-2.5 px-2.5 py-1.5 text-sm cursor-pointer transition-colors ${o.value === value ? 'bg-blue-500/10' : 'hover:bg-white/[0.05]'}`}
               >
-                <span className="truncate">{o.label}</span>
-                {o.sub && <span className="text-zinc-600 text-[10px] ml-auto">{o.sub}</span>}
+                {o.icon ? <span className="shrink-0">{o.icon}</span> : null}
+                <div className="min-w-0 flex-1">
+                  <span className={`block truncate text-[13px] leading-4 ${o.value === value ? 'text-blue-400' : 'text-zinc-200'}`}>{o.label}</span>
+                  {o.sub ? (
+                    <span className={`mt-0.5 block truncate text-[10px] leading-3.5 ${o.value === value ? 'text-blue-300/70' : 'text-zinc-500'}`}>
+                      {o.sub}
+                    </span>
+                  ) : null}
+                </div>
               </div>
             )) : (
-              <div className="px-2 py-3 text-sm text-zinc-600 text-center">No results</div>
+              <div className="px-2 py-3 text-sm text-zinc-600 text-center">无结果</div>
             )}
           </div>
         </div>
