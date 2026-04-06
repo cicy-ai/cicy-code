@@ -8,7 +8,7 @@ gotty: main.go server/*.go webtty/*.go backend/*.go Makefile
 
 .PHONY: asset
 asset: bindata/static/js/gotty-bundle.js bindata/static/index.html bindata/static/favicon.png bindata/static/css/index.css bindata/static/css/xterm.css bindata/static/css/xterm_customize.css
-	go-bindata -prefix bindata -pkg server -ignore=\\.gitkeep -o server/asset.go bindata/...
+	go run github.com/go-bindata/go-bindata/go-bindata@latest -prefix bindata -pkg server -ignore=\\.gitkeep -o server/asset.go bindata/...
 	gofmt -w server/asset.go
 
 .PHONY: all
@@ -51,7 +51,7 @@ js/node_modules/xterm/dist/xterm.css:
 
 js/dist/gotty-bundle.js: js/src/* js/node_modules/webpack
 	cd js && \
-	`npm bin`/webpack
+	./node_modules/.bin/webpack
 
 js/node_modules/webpack:
 	cd js && \
