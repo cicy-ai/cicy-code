@@ -10,6 +10,10 @@ declare var gotty_term: string;
 const elem = document.getElementById("terminal")
 
 if (elem !== null) {
+    console.log("[ttyd-test] gotty bundle loaded", {
+        path: window.location.pathname,
+    });
+
     var term: Terminal;
     if (gotty_term == "hterm") {
         term = new Hterm(elem);

@@ -716,6 +716,12 @@ def run_cloudrun():
         print_access_urls(public_url, token, service_url)
     sys.exit(result.returncode)
 
+def run_ttyd_assets():
+    print("[dev] Rebuilding ttyd embedded assets via `make asset`...")
+    run_checked(["make", "asset"], cwd=API_DIR)
+    print("[dev] ttyd assets rebuilt.")
+    sys.exit(0)
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--docker", action="store_true", help="Build and run Docker container")
@@ -726,6 +732,7 @@ def main():
     parser.add_argument("--bumpVersion", "--bump-version", dest="bumpVersion", default="", help="Set runtime version and sync all version targets")
     parser.add_argument("--cloudRun", "--cloudrun", dest="cloudRun", action="store_true", help="Deploy to Cloud Run using scripts/deploy-cloudrun.sh")
     parser.add_argument("--cloudRunList", "--cloudrun-list", dest="cloudRunList", action="store_true", help="List Cloud Run services for current project/region")
+    parser.add_argument("--ttydAssets", "--ttyd-assets", dest="ttydAssets", action="store_true", help="Rebuild embedded ttyd/goTTY static assets via api/Makefile `make asset`")
     parser.add_argument("--port", type=int, default=8026, help="Base port for Docker (default: 8026)")
     args = parser.parse_args()
 
@@ -743,6 +750,8 @@ def main():
         run_cloudrun()
     if args.cloudRunList:
         run_cloudrun_list()
+    if args.ttydAssets:
+        run_ttyd_assets()
 
     existing_pid = get_pid_on_port(PORT)
     if existing_pid:
