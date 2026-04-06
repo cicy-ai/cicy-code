@@ -5,6 +5,7 @@ export interface CreateAgentValues {
   title: string;
   agent_type: string;
   allow_all_actions: boolean;
+  reply_in_chinese: boolean;
 }
 
 interface Props {
@@ -27,6 +28,7 @@ const DEFAULT_VALUES: CreateAgentValues = {
   title: '',
   agent_type: 'codex',
   allow_all_actions: false,
+  reply_in_chinese: true,
 };
 
 export default function CreateAgentDialog({
@@ -142,6 +144,20 @@ export default function CreateAgentDialog({
               className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${values.allow_all_actions ? 'bg-blue-600' : 'bg-white/[0.08]'}`}
             >
               <div className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-md transition-transform ${values.allow_all_actions ? 'translate-x-[22px]' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between py-1">
+            <div>
+              <p className="text-[13px] font-medium text-zinc-300">默认中文回复</p>
+              <p className="mt-0.5 text-[11px] text-zinc-600">启动完成后自动发送 <code>reply in chinese</code></p>
+            </div>
+            <button
+              type="button"
+              onClick={() => set({ reply_in_chinese: !values.reply_in_chinese })}
+              className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${values.reply_in_chinese ? 'bg-blue-600' : 'bg-white/[0.08]'}`}
+            >
+              <div className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-md transition-transform ${values.reply_in_chinese ? 'translate-x-[22px]' : 'translate-x-1'}`} />
             </button>
           </div>
         </div>

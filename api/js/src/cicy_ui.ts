@@ -55,12 +55,14 @@ function installStyles(): void {
     style.id = "cicy-ttyd-source-style";
     style.textContent = `
 html, body, #terminal, .terminal {
-  background: #0a0a0b !important;
   height: 100% !important;
   width: 100% !important;
   padding: 0 !important;
   margin: 0 !important;
   box-sizing: border-box !important;
+}
+html {
+  overflow: hidden !important;
 }
 body {
   margin: 8px !important;
@@ -441,9 +443,24 @@ function configureTerminal(term: Terminal): void {
     var anyTerm = term as any;
     var inner = anyTerm.term;
     if (inner && typeof inner.setOption === "function") {
-        inner.setOption("scrollback", 1000);
-        inner.setOption("fontFamily", "Menlo, Consolas, monospace");
-        inner.setOption("letterSpacing", -0.5);
+        try {
+            inner.setOption("scrollback", 1000);
+        } catch (_error) {
+        }
+        try {
+            inner.setOption("fontFamily", "Menlo, Consolas, monospace");
+        } catch (_error) {
+        }
+        try {
+            inner.setOption("letterSpacing", -0.5);
+        } catch (_error) {
+        }
+    }
+
+    if (inner && typeof inner.fit === "function") {
+        setTimeout(function(): void {
+            inner.fit();
+        }, 200);
     }
 
     setTimeout(function() {
@@ -721,6 +738,10 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     }
 
     function apiFetch(method: string, path: string, body?: object): Promise<any> {
+        if (!webtty.isConnectionOpen()) {
+            var PromiseCtor = (window as any).Promise;
+            return PromiseCtor.resolve(null);
+        }
         return webtty.requestAPI(method, "/api/tmux/windows" + path, body, apiHeaders);
     }
 
@@ -732,9 +753,17 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         }).join("");
     }
 
+    var windowsLoadPending = false;
     function loadWindows(): void {
+        if (!webtty.isConnectionOpen() || windowsLoadPending) {
+            return;
+        }
+        windowsLoadPending = true;
         apiFetch("GET", "?session=" + paneId).then(function(data: any): void {
             renderWindowTabs((data && data.windows) || []);
+            windowsLoadPending = false;
+        }).catch(function(): void {
+            windowsLoadPending = false;
         });
     }
 
@@ -904,6 +933,10 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         restartPending = false;
         restartBtn.textContent = "↻";
         restartBtn.style.color = "";
+        if (!webtty.isConnectionOpen()) {
+            flashButton(restartBtn);
+            return;
+        }
         restartBtn.classList.add("restarting");
         loading.show("Restarting...");
         webtty.requestAPI("POST", "/api/tmux/panes/" + paneId + "/restart", undefined, apiHeaders).catch(function(): void {
@@ -1196,6 +1229,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             hadOpen = true;
             restartBtn.classList.remove("restarting");
             loading.hide();
+            loadWindows();
         } else if (hadOpen) {
             loading.show("Reconnecting...");
         }

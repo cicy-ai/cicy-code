@@ -248,6 +248,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
         title: values.title,
         agent_type: values.agent_type,
         allow_all_actions: values.allow_all_actions,
+        reply_in_chinese: values.reply_in_chinese,
       });
       const newId = data?.pane_id || data?.session;
       if (newId) {

@@ -169,6 +169,12 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
                   checked={!!data.allow_all_actions}
                   onChange={v => set({ allow_all_actions: v })}
                 />
+                <Toggle
+                  label="默认中文回复"
+                  desc="启动完成后自动发送 reply in chinese"
+                  checked={!!data.reply_in_chinese}
+                  onChange={v => set({ reply_in_chinese: v })}
+                />
                 {/* <Field label="智能体职责">
                   <Textarea value={data.agent_duty || ''} onChange={v => set({ agent_duty: v })} rows={5} placeholder="Describe agent's role and responsibilities..." />
                 </Field> */}

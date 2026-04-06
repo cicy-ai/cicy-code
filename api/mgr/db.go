@@ -123,6 +123,7 @@ func (d *DB) Migrate() {
 			agent_type TEXT DEFAULT '', common_prompt TEXT,
 			role TEXT, default_model TEXT, trust_level TEXT,
 			allow_all_actions INTEGER DEFAULT 0,
+			reply_in_chinese INTEGER DEFAULT 0,
 			machine_id INTEGER,
 			source_kind TEXT DEFAULT 'local',
 			source_ref TEXT DEFAULT ''
@@ -210,6 +211,7 @@ func (d *DB) Migrate() {
 	d.ensureColumn("agent_config", "source_kind", "TEXT DEFAULT 'local'")
 	d.ensureColumn("agent_config", "source_ref", "TEXT DEFAULT ''")
 	d.ensureColumn("agent_config", "allow_all_actions", "INTEGER DEFAULT 0")
+	d.ensureColumn("agent_config", "reply_in_chinese", "INTEGER DEFAULT 0")
 	d.ensureColumn("agent_queue", "step_kind", "TEXT DEFAULT 'message'")
 	d.ensureColumn("agent_queue", "workflow_id", "INTEGER")
 	d.ensureColumn("agent_queue", "parent_id", "INTEGER")

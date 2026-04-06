@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,16 +19,161 @@ import (
 // Heavy TUIs (Copilot, OpenCode) need time to render text in the input buffer.
 // TODO: make this per-agent-type once agent detection is reliable.
 const enterDelay = 600 * time.Millisecond
+const startupPromptBatchWindow = 5 * time.Second
+const startupPromptCooldown = 15 * time.Second
+
+type startupPromptTask struct {
+	paneID    string
+	agentType string
+	seq       int64
+}
+
+type startupPromptQueue struct {
+	mu        sync.Mutex
+	cond      *sync.Cond
+	once      sync.Once
+	pending   map[string]startupPromptTask
+	seqByPane map[string]int64
+}
+
+var replyInChineseStartupQueue = func() *startupPromptQueue {
+	q := &startupPromptQueue{
+		pending:   map[string]startupPromptTask{},
+		seqByPane: map[string]int64{},
+	}
+	q.cond = sync.NewCond(&q.mu)
+	return q
+}()
+
+func paneStartupPromptOrder(paneID string) int {
+	shortID := shortPaneID(paneID)
+	var n int
+	if _, err := fmt.Sscanf(shortID, "w-%d", &n); err == nil {
+		return n
+	}
+	return 1 << 30
+}
+
+func startupPromptLess(a, b startupPromptTask) bool {
+	ao := paneStartupPromptOrder(a.paneID)
+	bo := paneStartupPromptOrder(b.paneID)
+	if ao != bo {
+		return ao < bo
+	}
+	return a.paneID < b.paneID
+}
+
+func (q *startupPromptQueue) start() {
+	q.once.Do(func() {
+		go q.run()
+	})
+}
+
+func (q *startupPromptQueue) enqueue(paneID, agentType string) {
+	q.start()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.seqByPane[paneID]++
+	q.pending[paneID] = startupPromptTask{
+		paneID:    paneID,
+		agentType: agentType,
+		seq:       q.seqByPane[paneID],
+	}
+	q.cond.Signal()
+}
+
+func (q *startupPromptQueue) isCurrent(task startupPromptTask) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.seqByPane[task.paneID] == task.seq
+}
+
+func (q *startupPromptQueue) waitForPending() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for len(q.pending) == 0 {
+		q.cond.Wait()
+	}
+}
+
+func (q *startupPromptQueue) popNext() (startupPromptTask, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.pending) == 0 {
+		return startupPromptTask{}, false
+	}
+	var chosen startupPromptTask
+	first := true
+	for _, task := range q.pending {
+		if first || startupPromptLess(task, chosen) {
+			chosen = task
+			first = false
+		}
+	}
+	delete(q.pending, chosen.paneID)
+	return chosen, true
+}
+
+func (q *startupPromptQueue) run() {
+	for {
+		q.waitForPending()
+		log.Printf("[startup-prompt] batch window %s collecting pending panes", startupPromptBatchWindow)
+		time.Sleep(startupPromptBatchWindow)
+		for {
+			task, ok := q.popNext()
+			if !ok {
+				break
+			}
+			if q.process(task) {
+				log.Printf("[startup-prompt] %s cooldown %s before next pane", task.paneID, startupPromptCooldown)
+				time.Sleep(startupPromptCooldown)
+			}
+		}
+	}
+}
+
+func (q *startupPromptQueue) process(task startupPromptTask) bool {
+	for i := 0; i < 180; i++ {
+		if !q.isCurrent(task) {
+			log.Printf("[startup-prompt] %s superseded before ready", task.paneID)
+			return false
+		}
+		time.Sleep(500 * time.Millisecond)
+		out, err := runTmux("capture-pane", "-t", task.paneID, "-p")
+		if err != nil {
+			continue
+		}
+		if !isAgentInputReady(task.agentType, out) {
+			continue
+		}
+		if !q.isCurrent(task) {
+			log.Printf("[startup-prompt] %s superseded before send", task.paneID)
+			return false
+		}
+		time.Sleep(800 * time.Millisecond)
+		if !q.isCurrent(task) {
+			log.Printf("[startup-prompt] %s superseded during final wait", task.paneID)
+			return false
+		}
+		log.Printf("[startup-prompt] %s send reply_in_chinese", task.paneID)
+		sendPaneText(task.paneID, "reply in chinese")
+		return true
+	}
+	if q.isCurrent(task) {
+		log.Printf("[startup-prompt] %s timeout waiting for %s", task.paneID, normalizeAgentType(task.agentType))
+	}
+	return false
+}
 
 func handlePanes(w http.ResponseWriter, r *http.Request) {
 	gid := r.URL.Query().Get("group_id")
 	var rows *sql.Rows
 	var err error
 	if gid != "" {
-		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0)
+		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0)
 			FROM agent_config t INNER JOIN group_windows gp ON t.pane_id=gp.win_id WHERE gp.group_id=? AND t.active=1 ORDER BY t.created_at DESC`, gid)
 	} else {
-		rows, err = store.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0)
+		rows, err = store.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0)
 			FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.active=1 ORDER BY t.created_at DESC`)
 	}
 	if err != nil {
@@ -46,7 +192,8 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 		var role, defaultModel, trustLevel sql.NullString
 		var agentType sql.NullString
 		var allowAllActions sql.NullBool
-		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType, &allowAllActions)
+		var replyInChinese sql.NullBool
+		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType, &allowAllActions, &replyInChinese)
 		p := M{
 			"pane_id": paneID.String, "title": title.String, "ttyd_port": port.Int64,
 			"workspace": workspace.String, "init_script": initScript.String,
@@ -54,6 +201,7 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 			"role":   role.String, "default_model": defaultModel.String,
 			"trust_level": trustLevel.String, "agent_type": agentType.String,
 			"allow_all_actions": allowAllActions.Bool,
+			"reply_in_chinese":  replyInChinese.Bool,
 		}
 		if createdAt.Valid {
 			p["created_at"] = createdAt.String
@@ -83,11 +231,12 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 		Role            string  `json:"role"`
 		DefaultModel    string  `json:"default_model"`
 		AllowAllActions bool    `json:"allow_all_actions"`
+		ReplyInChinese  bool    `json:"reply_in_chinese"`
 	}
 	readBody(r, &req)
 	token := getToken(r)
 
-	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.WinName, token)
+	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.ReplyInChinese, req.WinName, token)
 	if err != nil {
 		J(w, M{"success": false, "error": err.Error()})
 		return
@@ -95,7 +244,7 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	J(w, result)
 }
 
-func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, winName *string, token string) (M, error) {
+func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, winName *string, token string) (M, error) {
 	// Get next worker index
 	var workerIdx int
 	tx, _ := store.Begin()
@@ -125,8 +274,8 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 	// Create tmux session
 	runTmux("new-session", "-d", "-s", session, "-n", "main", "-c", workspace)
 	// Insert DB
-	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()), paneID, t, port, workspace, initScript, "{}", role, defaultModel, agentType, allowAllActions)
+	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()), paneID, t, port, workspace, initScript, "{}", role, defaultModel, agentType, allowAllActions, replyInChinese)
 
 	// Start ttyd-go instance
 	if err := startInstance(paneID, port, token); err != nil {
@@ -143,13 +292,15 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 		initScript:      initScript,
 		agentType:       agentType,
 		allowAllActions: allowAllActions,
+		replyInChinese:  replyInChinese,
 	})
 
 	return M{
 		"success": true, "session": session, "window": "main",
 		"pane_id": shortPaneID(paneID), "title": t,
 		"workspace": workspace, "init_script": initScript,
-		"ttyd_port": port,
+		"ttyd_port":        port,
+		"reply_in_chinese": replyInChinese,
 	}, nil
 }
 
@@ -189,6 +340,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	var port sql.NullInt64
 	var active sql.NullInt64
 	var allowAllActions sql.NullBool
+	var replyInChinese sql.NullBool
 	var tgEnable sql.NullBool
 	var tgToken, tgChatID sql.NullString
 	var groupID sql.NullInt64
@@ -198,6 +350,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	err := store.QueryRow(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script,
 		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.agent_duty, t.config, t.common_prompt, t.ttyd_preview, gp.group_id, t.role, t.default_model, t.trust_level,
 		COALESCE(t.allow_all_actions, 0),
+		COALESCE(t.reply_in_chinese, 0),
 		COALESCE(t.machine_id, 0), COALESCE(m.label, ''), COALESCE(m.url, ''), COALESCE(json_extract(m.capabilities_json, '$.runtime_kind'), ''), COALESCE(m.capabilities_json, '{}')
 		FROM agent_config t
 		LEFT JOIN group_windows gp ON t.pane_id=gp.win_id
@@ -205,6 +358,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		WHERE t.pane_id=?`, paneID).Scan(
 		&paneID, &title, &port, &workspace, &initScript,
 		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &agentDuty, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel, &allowAllActions,
+		&replyInChinese,
 		&machineID, &machineLabel, &machineURL, &runtimeKind, &capabilitiesJSON)
 	if err != nil {
 		httpErr(w, 404, "Pane "+id+" not found")
@@ -217,6 +371,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		"active": active.Int64, "agent_type": agentType.String, "agent_duty": agentDuty.String,
 		"config": config.String, "common_prompt": commonPrompt.String, "ttyd_preview": ttydPreview.String,
 		"allow_all_actions": allowAllActions.Bool,
+		"reply_in_chinese":  replyInChinese.Bool,
 		"role":              role.String, "default_model": defaultModel.String,
 		"trust_level":   trustLevel.String,
 		"machine_label": machineLabel.String,
@@ -248,6 +403,7 @@ var paneUpdateCols = map[string]bool{
 	"agent_type": true, "agent_duty": true, "config": true, "common_prompt": true,
 	"ttyd_preview": true, "role": true, "default_model": true, "trust_level": true,
 	"allow_all_actions": true,
+	"reply_in_chinese":  true,
 	"private_mode":      true, "allowed_users": true,
 	"node_url": true, "preview": true,
 }
@@ -323,8 +479,9 @@ func restartPaneCore(paneID, token string) error {
 	var port sql.NullInt64
 	var workspace, initScript, title, config, agentType, trustLevel sql.NullString
 	var allowAllActions sql.NullBool
-	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, trust_level, COALESCE(allow_all_actions, 0) FROM agent_config WHERE pane_id=?", paneID).
-		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &trustLevel, &allowAllActions)
+	var replyInChinese sql.NullBool
+	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, trust_level, COALESCE(allow_all_actions, 0), COALESCE(reply_in_chinese, 0) FROM agent_config WHERE pane_id=?", paneID).
+		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &trustLevel, &allowAllActions, &replyInChinese)
 	if err != nil {
 		return fmt.Errorf("pane %s not found in db", paneID)
 	}
@@ -363,6 +520,7 @@ func restartPaneCore(paneID, token string) error {
 		initScript:      initScript.String,
 		agentType:       agentType.String,
 		allowAllActions: allowAllActions.Bool,
+		replyInChinese:  replyInChinese.Bool,
 	})
 	store.Exec(fmt.Sprintf("UPDATE agent_config SET updated_at=%s WHERE pane_id=?", store.Now()), paneID)
 	return nil
@@ -376,6 +534,7 @@ type paneEnvOpts struct {
 	initScript      string
 	agentType       string
 	allowAllActions bool
+	replyInChinese  bool
 }
 
 func tmuxShellQuote(v string) string {
@@ -818,6 +977,34 @@ func isClaudeBypassConfirmPrompt(out string) bool {
 		strings.Contains(out, "Enter to confirm")
 }
 
+type claudePromptStage string
+
+const (
+	claudeStageNone          claudePromptStage = ""
+	claudeStageTheme         claudePromptStage = "theme"
+	claudeStageSecurityNotes claudePromptStage = "security_notes"
+	claudeStageTrust         claudePromptStage = "trust"
+	claudeStageBypassChoice  claudePromptStage = "bypass_choice"
+	claudeStageBypassConfirm claudePromptStage = "bypass_confirm"
+)
+
+func detectClaudePromptStage(out string, allowAllActions bool) claudePromptStage {
+	switch {
+	case isClaudeThemePrompt(out):
+		return claudeStageTheme
+	case isClaudeSecurityNotesPrompt(out):
+		return claudeStageSecurityNotes
+	case isClaudeTrustPrompt(out):
+		return claudeStageTrust
+	case allowAllActions && isClaudeBypassChoicePrompt(out):
+		return claudeStageBypassChoice
+	case allowAllActions && isClaudeBypassConfirmPrompt(out):
+		return claudeStageBypassConfirm
+	default:
+		return claudeStageNone
+	}
+}
+
 func isCodexTrustPrompt(out string) bool {
 	return strings.Contains(out, "Do you trust the contents of this directory?") &&
 		strings.Contains(out, "1. Yes, continue") &&
@@ -838,9 +1025,61 @@ func isCodexInputReady(out string) bool {
 			strings.Contains(out, "› "))
 }
 
+func isOpenCodeInputReady(out string) bool {
+	return strings.Contains(out, "OpenCode ") &&
+		(strings.Contains(out, "ctrl+p commands") ||
+			strings.Contains(out, "Ask anything") ||
+			strings.Contains(out, "Build  ") ||
+			strings.Contains(out, "~/workers/"))
+}
+
+func isOpenClawInputReady(out string) bool {
+	return strings.Contains(out, "OpenClaw ") &&
+		strings.Contains(out, "connected |") &&
+		strings.Contains(out, "session ")
+}
+
+func isAgentInputReady(agentType, out string) bool {
+	switch normalizeAgentType(agentType) {
+	case "claude":
+		return isClaudeInputReady(out)
+	case "codex":
+		return isCodexInputReady(out)
+	case "opencode":
+		return isOpenCodeInputReady(out)
+	case "openclaw":
+		return isOpenClawInputReady(out)
+	default:
+		return false
+	}
+}
+
+func sendPaneText(paneID, text string) {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		runTmux("send-keys", "-t", paneID, "-l", line)
+		if i < len(lines)-1 {
+			time.Sleep(100 * time.Millisecond)
+			runTmux("send-keys", "-t", paneID, "Enter")
+		}
+	}
+	time.Sleep(enterDelay)
+	runTmux("send-keys", "-t", paneID, "Enter")
+}
+
+func autoSendReplyInChinese(paneID, agentType string, enabled bool) {
+	if !enabled {
+		return
+	}
+	replyInChineseStartupQueue.enqueue(paneID, agentType)
+}
+
 func autoConfirmClaudeStartup(paneID string, allowAllActions bool) {
 	go func() {
 		var lastAction time.Time
+		var currentStage claudePromptStage
+		var stageSince time.Time
+		stageAttempts := 0
 		for i := 0; i < 120; i++ {
 			time.Sleep(500 * time.Millisecond)
 			out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", "-160")
@@ -851,33 +1090,48 @@ func autoConfirmClaudeStartup(paneID string, allowAllActions bool) {
 				log.Printf("[claude-auto-confirm] %s ready", paneID)
 				return
 			}
-			if time.Since(lastAction) < 900*time.Millisecond {
+			stage := detectClaudePromptStage(out, allowAllActions)
+			if stage == claudeStageNone {
+				currentStage = claudeStageNone
+				stageAttempts = 0
+				stageSince = time.Time{}
 				continue
 			}
-			switch {
-			case isClaudeThemePrompt(out):
+			if stage != currentStage {
+				currentStage = stage
+				stageSince = time.Now()
+				stageAttempts = 0
+			}
+			if time.Since(lastAction) < 1200*time.Millisecond {
+				continue
+			}
+			if stageAttempts >= 1 && time.Since(stageSince) < 4*time.Second {
+				continue
+			}
+			if stageAttempts >= 2 {
+				continue
+			}
+			switch stage {
+			case claudeStageTheme:
 				log.Printf("[claude-auto-confirm] %s theme selected", paneID)
 				runTmux("send-keys", "-t", paneID, "Enter")
-				lastAction = time.Now()
-			case isClaudeSecurityNotesPrompt(out):
+			case claudeStageSecurityNotes:
 				log.Printf("[claude-auto-confirm] %s security notes continue", paneID)
 				runTmux("send-keys", "-t", paneID, "Enter")
-				lastAction = time.Now()
-			case isClaudeTrustPrompt(out):
+			case claudeStageTrust:
 				log.Printf("[claude-auto-confirm] %s trust workspace", paneID)
 				runTmux("send-keys", "-t", paneID, "Enter")
-				lastAction = time.Now()
-			case allowAllActions && isClaudeBypassChoicePrompt(out):
+			case claudeStageBypassChoice:
 				log.Printf("[claude-auto-confirm] %s accept bypass mode", paneID)
 				runTmux("send-keys", "-t", paneID, "Down")
 				time.Sleep(150 * time.Millisecond)
 				runTmux("send-keys", "-t", paneID, "Enter")
-				lastAction = time.Now()
-			case allowAllActions && isClaudeBypassConfirmPrompt(out):
+			case claudeStageBypassConfirm:
 				log.Printf("[claude-auto-confirm] %s confirm bypass mode", paneID)
 				runTmux("send-keys", "-t", paneID, "Enter")
-				lastAction = time.Now()
 			}
+			lastAction = time.Now()
+			stageAttempts++
 		}
 		log.Printf("[claude-auto-confirm] %s timeout", paneID)
 	}()
@@ -889,7 +1143,7 @@ func autoConfirmCodexTrust(paneID string) {
 		enterCount := 0
 		for i := 0; i < 120; i++ {
 			time.Sleep(500 * time.Millisecond)
-			out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", "-200")
+			out, err := runTmux("capture-pane", "-t", paneID, "-p")
 			if err != nil {
 				continue
 			}
@@ -989,11 +1243,10 @@ func initPaneEnv(opts paneEnvOpts) {
 	runTmux("send-keys", "-t", pid, fmt.Sprintf("source %s", tmuxShellQuote(tmpFile)), "Enter")
 	if normalizeAgentType(opts.agentType) == "claude" {
 		autoConfirmClaudeStartup(pid, opts.allowAllActions)
-		return
-	}
-	if normalizeAgentType(opts.agentType) == "codex" {
+	} else if normalizeAgentType(opts.agentType) == "codex" {
 		autoConfirmCodexTrust(pid)
 	}
+	autoSendReplyInChinese(pid, opts.agentType, opts.replyInChinese)
 }
 
 func handleRestartAll(w http.ResponseWriter, r *http.Request) {

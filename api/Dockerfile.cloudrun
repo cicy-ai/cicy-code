@@ -1,6 +1,12 @@
 ARG BASE_IMAGE=cicy-code-base:latest
 FROM ${BASE_IMAGE}
 
+ARG SETUP_AGENT_HASH=unknown
+ARG APP_BINARY_HASH=unknown
+
+LABEL cicy.setup_agent_hash="${SETUP_AGENT_HASH}" \
+      cicy.app_binary_hash="${APP_BINARY_HASH}"
+
 COPY setup-agent.sh /usr/local/bin/setup-agent.sh
 RUN chmod +x /usr/local/bin/setup-agent.sh
 

@@ -21,6 +21,14 @@ DEFAULT_OPENCODE_MODEL="${4:-gpt-5.4}"
 DEFAULT_CLAUDE_MODEL="${5:-opus[1m]}"
 CODEX_MODEL="${6:-gpt-5.4}"
 
+timestamp() {
+  date '+%Y/%m/%d %H:%M:%S'
+}
+
+log() {
+  printf '%s %s\n' "$(timestamp)" "$*"
+}
+
 normalize_openclaw_model() {
   case "$1" in
     gpt5.4) echo "gpt-5.4" ;;
@@ -40,14 +48,15 @@ default_openclaw_runtime_base_url() {
 }
 
 if [ -z "$API_KEY" ]; then
-    echo "用法: $0 <apiKey> [apiUrl] [anthropicUrl] [defaultOpencodeModel] [defaultClaudeModel] [codexModel]"
-    echo "示例: $0 sk-xxx http://2000.run:6543/v1 http://2000.run:6543 gpt-5.4 opus[1m] gpt-5.4"
+    log "用法: $0 <apiKey> [apiUrl] [anthropicUrl] [defaultOpencodeModel] [defaultClaudeModel] [codexModel]"
+    log "示例: $0 sk-xxx http://2000.run:6543/v1 http://2000.run:6543 gpt-5.4 opus[1m] gpt-5.4"
     exit 1
 fi
 
-echo "开始配置 AI 工具..."
+log "开始配置 AI 工具..."
 
 # ===== Claude Code =====
+log "开始配置 Claude Code..."
 CLAUDE_DIR="$HOME_DIR/.claude"
 CLAUDE_CONFIG="$CLAUDE_DIR/settings.json"
 mkdir -p "$CLAUDE_DIR"
@@ -64,9 +73,10 @@ cat > "$CLAUDE_CONFIG" << EOF
   "skipDangerousModePermissionPrompt": true
 }
 EOF
-echo "✓ Claude Code 配置完成 (Base URL: $ANTHROPIC_URL, Model: $DEFAULT_CLAUDE_MODEL)"
+log "✓ Claude Code 配置完成 (Base URL: $ANTHROPIC_URL, Model: $DEFAULT_CLAUDE_MODEL)"
 
 # ===== Codex =====
+log "开始配置 Codex..."
 CODEX_DIR="$HOME_DIR/.codex"
 CODEX_CONFIG="$CODEX_DIR/config.toml"
 CODEX_AUTH="$CODEX_DIR/auth.json"
@@ -107,9 +117,10 @@ cat > "$CODEX_AUTH" << EOF
 }
 EOF
 chmod 600 "$CODEX_AUTH"
-echo "✓ Codex 配置完成 (Base URL: $API_URL, Model: $CODEX_MODEL)"
+log "✓ Codex 配置完成 (Base URL: $API_URL, Model: $CODEX_MODEL)"
 
 # ===== OpenCode =====
+log "开始配置 OpenCode..."
 OPENCODE_DIR="$HOME_DIR/.config/opencode"
 OPENCODE_CONFIG="$OPENCODE_DIR/opencode.json"
 mkdir -p "$OPENCODE_DIR"
@@ -160,9 +171,10 @@ cat > "$OPENCODE_CONFIG" << EOF
   "small_model": "cicyai/claude-haiku-4-5-20251001"
 }
 EOF
-echo "✓ OpenCode 配置完成 (Base URL: $API_URL, Model: $DEFAULT_OPENCODE_MODEL)"
+log "✓ OpenCode 配置完成 (Base URL: $API_URL, Model: $DEFAULT_OPENCODE_MODEL)"
 
 # ===== OpenClaw =====
+log "开始配置 OpenClaw..."
 OPENCLAW_DIR="$HOME_DIR/.openclaw"
 OPENCLAW_CONFIG="$OPENCLAW_DIR/openclaw.json"
 OPENCLAW_ENV="$OPENCLAW_DIR/.env"
@@ -257,10 +269,49 @@ for (const model of wanted) {
 }
 cfg.models.providers.cicy.models = wanted.map((model) => byId.get(model.id));
 
-fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+cfg.gateway ||= {};
+cfg.gateway.controlUi ||= {};
+cfg.gateway.controlUi.allowInsecureAuth = true;
+cfg.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
+cfg.gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback = true;
+cfg.gateway.controlUi.allowedOrigins = ["*"];
+
+const next = JSON.stringify(cfg, null, 2);
+const prev = fs.readFileSync(configPath, "utf8");
+if (prev !== next) {
+  fs.writeFileSync(configPath, next);
+}
 NODE
 }
-if command -v openclaw >/dev/null 2>&1; then
+openclaw_config_ready() {
+  [ -f "$OPENCLAW_CONFIG" ] || return 1
+  node - "$OPENCLAW_CONFIG" "$OPENCLAW_PROVIDER_RUNTIME_BASE_URL" "$OPENCLAW_PRIMARY_MODEL" "$OPENCLAW_PROVIDER_API" "$OPENCLAW_TOKEN" <<'NODE'
+const fs = require("fs");
+const [configPath, baseUrl, primaryModel, providerApi, token] = process.argv.slice(2);
+try {
+  const cfg = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  const provider = cfg.models?.providers?.cicy;
+  const ok =
+    !!provider &&
+    provider.baseUrl === baseUrl &&
+    provider.api === providerApi &&
+    cfg.agents?.defaults?.model?.primary === `cicy/${primaryModel}` &&
+    cfg.gateway?.mode === "local" &&
+    cfg.gateway?.auth?.mode === "token" &&
+    cfg.gateway?.auth?.token === token &&
+    Number(cfg.gateway?.port || 0) === 18789 &&
+    cfg.gateway?.bind === "loopback";
+  process.exit(ok ? 0 : 1);
+} catch (_) {
+  process.exit(1);
+}
+NODE
+}
+if openclaw_config_ready; then
+  patch_openclaw_models
+  log "✓ OpenClaw 配置完成 (cached config)"
+elif command -v openclaw >/dev/null 2>&1; then
+  log "OpenClaw 正在执行 official onboard flow..."
   OPENCLAW_RESET_FLAGS=()
   if [ -f "$OPENCLAW_CONFIG" ] && grep -Eq '"provider"[[:space:]]*:[[:space:]]*"anthropic"|"api"[[:space:]]*:[[:space:]]*"openai-responses"|"providers"[[:space:]]*:[[:space:]]*\{[[:space:]]*"openai"' "$OPENCLAW_CONFIG"; then
     OPENCLAW_RESET_FLAGS=(--reset --reset-scope config+creds+sessions)
@@ -289,16 +340,12 @@ if command -v openclaw >/dev/null 2>&1; then
     --skip-ui \
     "${OPENCLAW_RESET_FLAGS[@]}" \
     >/tmp/openclaw-onboard.log 2>&1 || {
-      echo "OpenClaw onboard failed:"
+      log "OpenClaw onboard failed:"
       sed -n '1,160p' /tmp/openclaw-onboard.log
       exit 1
     }
   patch_openclaw_models
-  openclaw config set gateway.controlUi.allowInsecureAuth true >/dev/null
-  openclaw config set gateway.controlUi.dangerouslyDisableDeviceAuth true >/dev/null
-  openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true >/dev/null
-  openclaw config set gateway.controlUi.allowedOrigins '["*"]' --strict-json >/dev/null
-  echo "✓ OpenClaw 配置完成 (official onboard flow)"
+  log "✓ OpenClaw 配置完成 (official onboard flow)"
 else
   cat > "$OPENCLAW_CONFIG" << EOF
 {
@@ -344,13 +391,13 @@ else
 }
 EOF
   patch_openclaw_models
-  echo "✓ OpenClaw 配置完成 (fallback custom provider)"
+  log "✓ OpenClaw 配置完成 (fallback custom provider)"
 fi
 
-echo ""
-echo "=== 配置完成 ==="
-echo "Claude Code: $ANTHROPIC_URL | $DEFAULT_CLAUDE_MODEL"
-echo "Codex:       $API_URL | $CODEX_MODEL"
-echo "OpenCode:    $API_URL | $DEFAULT_OPENCODE_MODEL"
-echo "OpenClaw:    $OPENCLAW_CONFIG"
-echo "OpenClaw Model: cicy/$OPENCLAW_PRIMARY_MODEL"
+printf '\n'
+log "=== 配置完成 ==="
+log "Claude Code: $ANTHROPIC_URL | $DEFAULT_CLAUDE_MODEL"
+log "Codex:       $API_URL | $CODEX_MODEL"
+log "OpenCode:    $API_URL | $DEFAULT_OPENCODE_MODEL"
+log "OpenClaw:    $OPENCLAW_CONFIG"
+log "OpenClaw Model: cicy/$OPENCLAW_PRIMARY_MODEL"

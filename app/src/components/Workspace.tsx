@@ -766,6 +766,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
         title: values.title,
         agent_type: values.agent_type,
         allow_all_actions: values.allow_all_actions,
+        reply_in_chinese: values.reply_in_chinese,
       });
       const id = data?.pane_id || data?.id;
       if (id) {

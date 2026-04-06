@@ -838,7 +838,7 @@ func mustAtoi(s string) int {
 
 // ensureBuiltinAgents restores tmux sessions and ttyd for agents already in DB.
 func ensureBuiltinAgents() {
-	rows, err := store.Query("SELECT pane_id, ttyd_port, workspace, COALESCE(init_script,''), COALESCE(config,'{}'), COALESCE(agent_type,''), COALESCE(allow_all_actions,0) FROM agent_config WHERE active=1")
+	rows, err := store.Query("SELECT pane_id, ttyd_port, workspace, COALESCE(init_script,''), COALESCE(config,'{}'), COALESCE(agent_type,''), COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0) FROM agent_config WHERE active=1 ORDER BY ttyd_port ASC, pane_id ASC")
 	if err != nil {
 		return
 	}
@@ -848,8 +848,9 @@ func ensureBuiltinAgents() {
 	for rows.Next() {
 		var paneID, workspace, initScript, configJSON, agentType string
 		var allowAllActions bool
+		var replyInChinese bool
 		var port int
-		rows.Scan(&paneID, &port, &workspace, &initScript, &configJSON, &agentType, &allowAllActions)
+		rows.Scan(&paneID, &port, &workspace, &initScript, &configJSON, &agentType, &allowAllActions, &replyInChinese)
 		if paneID == "" || port == 0 {
 			continue
 		}
@@ -882,6 +883,7 @@ func ensureBuiltinAgents() {
 				initScript:      initScript,
 				agentType:       agentType,
 				allowAllActions: allowAllActions,
+				replyInChinese:  replyInChinese,
 			})
 		}
 	}
