@@ -263,16 +263,15 @@ func installSelectedAgents(selected []string) {
 	fmt.Printf("\n📦 AI 工具将在 tmux pane 启动时按需安装: %v\n", selected)
 }
 
-// builtinAgents defines the built-in agents with fixed ports 10001-10004.
+// builtinAgents defines the built-in agents with fixed ports 10001-10003.
 var builtinAgents = []struct {
 	Port      int
 	AgentType string
 	Title     string
 }{
-	{10001, "openclaw", "OpenClaw"},
-	{10002, "codex", "Codex"},
-	{10003, "claude", "Claude"},
-	{10004, "opencode", "OpenCode"},
+	{10001, "openclaw", "商业顾问"},
+	{10002, "codex", "软件工程师"},
+	{10003, "claude", "架构师"},
 }
 
 const (
@@ -346,19 +345,39 @@ func ensureWorkerIndexAtLeast(n int) {
 	}
 }
 
-func syncWorkerIndexToBuiltinAgents() {
-	maxPort := 0
+func setWorkerIndex(n int) {
+	if n <= 0 {
+		return
+	}
+	if _, err := store.Exec(
+		store.Upsert("global_vars", "key_name", []string{"key_name", "value"}, []string{"value"}),
+		"worker_index", n,
+	); err != nil {
+		log.Printf("[startup] failed to set worker_index to %d: %v", n, err)
+	}
+}
+
+func syncWorkerIndexToExistingAgents() {
+	var maxPort int
+	if err := store.QueryRow("SELECT COALESCE(MAX(ttyd_port), 0) FROM agent_config WHERE active=1").Scan(&maxPort); err != nil {
+		log.Printf("[startup] failed to sync worker_index from agent_config: %v", err)
+		return
+	}
+	if maxPort > 0 {
+		setWorkerIndex(maxPort)
+	}
+}
+
+func syncBuiltinAgentTitles() {
 	for _, ba := range builtinAgents {
-		var count int
-		if err := store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE agent_type=?", ba.AgentType).Scan(&count); err != nil {
-			log.Printf("[startup] failed to inspect builtin agent %s: %v", ba.AgentType, err)
-			continue
-		}
-		if count > 0 && ba.Port > maxPort {
-			maxPort = ba.Port
+		paneID := builtinWorkerSession(ba.Port) + ":main.0"
+		if _, err := store.Exec(
+			fmt.Sprintf("UPDATE agent_config SET title=?, updated_at=%s WHERE pane_id=?", store.Now()),
+			ba.Title, paneID,
+		); err != nil {
+			log.Printf("[startup] failed to sync builtin title for %s: %v", paneID, err)
 		}
 	}
-	ensureWorkerIndexAtLeast(maxPort)
 }
 
 func hasSelectedAgentType(selected []string, agentType string) bool {
@@ -399,7 +418,7 @@ func ensurePrimaryWorkerForBindings(selected []string) {
 	}
 
 	log.Printf("[startup] primary worker %s missing; creating it for agent bindings", primaryWorkerSession)
-	createBuiltinWorker(10001, "openclaw", "OpenClaw")
+	createBuiltinWorker(10001, "openclaw", "商业顾问")
 }
 
 func ensureWorkerBoundToPrimary(workerSession string) {
@@ -457,7 +476,8 @@ func createSelectedWorkers(selected []string) {
 		ensureWorkerBoundToPrimary(builtinWorkerSession(ba.Port))
 	}
 	ensureWorkerIndexAtLeast(maxPort)
-	syncWorkerIndexToBuiltinAgents()
+	syncWorkerIndexToExistingAgents()
+	syncBuiltinAgentTitles()
 }
 
 func createBuiltinWorker(port int, agentType, title string) {
@@ -471,9 +491,9 @@ func createBuiltinWorker(port int, agentType, title string) {
 	exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", workspace).Run()
 
 	// Insert DB
-	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()),
-		paneID, title, port, workspace, "", "{}", "master", "", agentType)
+	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()),
+		paneID, title, port, workspace, "", "{}", "master", "", agentType, true, true)
 
 	// Start ttyd
 	token := getFirstToken()
@@ -488,7 +508,8 @@ func createBuiltinWorker(port int, agentType, title string) {
 		workspace:       workspace,
 		initScript:      "",
 		agentType:       agentType,
-		allowAllActions: false,
+		allowAllActions: true,
+		replyInChinese:  true,
 	})
 	fmt.Printf("  ✅ %s (w-%d, port %d)\n", title, port, port)
 }
@@ -604,6 +625,8 @@ func checkEnv() {
 	}
 
 	ensureBuiltinAgents()
+	syncWorkerIndexToExistingAgents()
+	syncBuiltinAgentTitles()
 	ensureCodeServer()
 }
 

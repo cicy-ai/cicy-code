@@ -94,7 +94,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
             <label className="block text-xs text-vsc-text-secondary mb-1">智能体类型</label>
             <Select value={pane.agent_type || ''}
               onChange={v => onChange({ ...pane, agent_type: v })}
-              options={[{value:'',label:'无'},{value:'openclaw',label:'openclaw'},{value:'codex',label:'codex'},{value:'claude',label:'claude'},{value:'opencode',label:'opencode'}]}
+              options={[{value:'openclaw',label:'openclaw'},{value:'codex',label:'codex'},{value:'claude',label:'claude'}]}
               searchable
             />
           </div>
@@ -108,7 +108,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-vsc-text">启动时允许所有操作</p>
-              <p className="text-xs text-vsc-text-muted">Codex/Claude 追加危险参数，OpenCode 使用 allow 权限配置</p>
+              <p className="text-xs text-vsc-text-muted">Codex/Claude 追加危险参数</p>
             </div>
             <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-colors ${pane.allow_all_actions ? 'bg-orange-600' : 'bg-vsc-bg-active'}`}
               onClick={() => onChange({ ...pane, allow_all_actions: !pane.allow_all_actions })}>

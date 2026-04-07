@@ -192,16 +192,17 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
 
   // ---- Handlers ----
   const handle发送 = useCallback(async (text?: string) => {
-    const cmd = (text ?? promptText).trim();
+    const cmd = text ?? promptText;
+    const trimmedCmd = cmd.trim();
     
     // Block while sending (except slash commands)
-    if (sending && !cmd.startsWith('/')) {
+    if (sending && !trimmedCmd.startsWith('/')) {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: '智能体正忙，请点击加载按钮强制重置。' }));
       return;
     }
 
     // Empty prompt + correction result → send corrected
-    if (!cmd && correctedResult) {
+    if (!trimmedCmd && correctedResult) {
       const correctedCmd = correctedResult[0];
       addToHistory(correctedCmd);
       setCorrectedResult(null);
@@ -210,10 +211,10 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
       return;
     }
 
-    if (!cmd) return;
+    if (!trimmedCmd) return;
 
     // @worker dispatch
-    const atMatch = cmd.match(/^@(w-\d+)\s+(.+)$/s);
+    const atMatch = trimmedCmd.match(/^@(w-\d+)\s+(.+)$/s);
     if (atMatch) {
       const [, targetWorker, taskMsg] = atMatch;
       setPromptText(''); saveDraft('');

@@ -13,6 +13,7 @@ interface Agent {
   ttyd_port?: number;
   active?: number;
   machine_id?: number;
+  machine_label?: string;
   source_kind?: string;
   source_ref?: string;
 }
@@ -30,33 +31,17 @@ interface Binding {
   source_kind?: string;
   source_ref?: string;
 }
-interface Machine {
-  id: number;
-  machine_key: string;
-  instance_key?: string;
-  label: string;
-  instance_label?: string;
-  url: string;
-  status: string;
-  runtime_kind?: string;
-  capabilities?: Record<string, any>;
-}
-interface Step {
-  id: number;
-  status?: string;
-  target_pane_id?: string;
-  target_machine_id?: number;
-  title?: string;
-  step_kind?: string;
-  result_summary?: string;
-}
-
 interface Props {
   paneId: string;
+  panes: Agent[];
+  bindings: Binding[];
+  statuses?: Record<string, StatusInfo>;
   onOpenInCurrentPane?: (paneId: string) => void;
   openedPaneIds?: string[];
   activePaneId?: string;
   onOpenSettingsPane?: (paneId: string) => void;
+  onRefreshPanes: () => Promise<void>;
+  onRefreshPoll: () => Promise<void>;
 }
 
 function normalizeAgentType(agentType?: string) {
@@ -175,12 +160,7 @@ function AgentTypeMiniAvatar({ agentType, title }: { agentType?: string; title: 
   );
 }
 
-export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds = [], activePaneId, onOpenSettingsPane }: Props) {
-  const [all智能体, setAll智能体] = useState<Agent[]>([]);
-  const [bindings, setBindings] = useState<Binding[]>([]);
-  const [statuses, setStatuses] = useState<Record<string, StatusInfo>>({});
-  const [instances, setInstances] = useState<Machine[]>([]);
-  const [steps, setSteps] = useState<Step[]>([]);
+export default function TeamPanel({ paneId, panes = [], bindings = [], statuses = {}, onOpenInCurrentPane, openedPaneIds = [], activePaneId, onOpenSettingsPane, onRefreshPanes, onRefreshPoll }: Props) {
   const [creating, setCreating] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [syncingInstances, setSyncingInstances] = useState(false);
@@ -190,29 +170,6 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
   const shortId = (id: string) => (id || '').replace(/:.*$/, '');
   const fullId = (id: string) => id.includes(':') ? id : `${id}:main.0`;
 
-  const load = useCallback(async () => {
-    try {
-      const [pRes, bRes, sRes, mRes, qRes] = await Promise.all([
-        apiService.getPanes(),
-        apiService.get智能体ByPane(paneId),
-        apiService.getAllStatus(),
-        apiService.getMachines(),
-        apiService.getCollabSteps(),
-      ]);
-      setAll智能体(Array.isArray(pRes.data) ? pRes.data : pRes.data?.panes || []);
-      setBindings(Array.isArray(bRes.data) ? bRes.data : []);
-      if (sRes.data) setStatuses(sRes.data);
-      setInstances(Array.isArray(mRes.data?.instances) ? mRes.data.instances : (Array.isArray(mRes.data?.machines) ? mRes.data.machines : []));
-      setSteps(Array.isArray(qRes.data?.steps) ? qRes.data.steps : []);
-    } catch {}
-  }, [paneId]);
-
-  useEffect(() => {
-    load();
-    const id = setInterval(load, 5000);
-    return () => clearInterval(id);
-  }, [load]);
-
   useEffect(() => {
     const closeMenu = () => setOpenMenuId(null);
     document.addEventListener('pointerdown', closeMenu);
@@ -220,7 +177,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
   }, []);
 
   const boundIds = new Set(bindings.map(b => shortId(b.name)));
-  const available = all智能体.filter(a => {
+  const available = panes.filter(a => {
     const sid = shortId(a.pane_id);
     return sid !== paneId && !boundIds.has(sid);
   });
@@ -228,7 +185,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
   const bind = async (agentPaneId: string) => {
     try {
       await apiService.bindAgent({ pane_id: paneId, agent_name: shortId(agentPaneId) });
-      load();
+      await onRefreshPoll();
     } catch {}
   };
 
@@ -236,7 +193,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
     try {
       await apiService.unbindAgent(binding.id);
       onOpenInCurrentPane?.(paneId);
-      load();
+      await onRefreshPoll();
     } catch {}
   };
 
@@ -254,10 +211,11 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
       if (newId) {
         await apiService.bindAgent({ pane_id: paneId, agent_name: shortId(newId) });
         setCreateDialogOpen(false);
-        load();
+        await onRefreshPanes();
+        await onRefreshPoll();
       }
     } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '创建并绑定工作实例失败' }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '创建并绑定员工失败' }));
     } finally {
       setCreating(false);
     }
@@ -267,7 +225,8 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
     setSyncingInstances(true);
     try {
       await apiService.syncMachines();
-      load();
+      await onRefreshPanes();
+      await onRefreshPoll();
     } catch {} finally {
       setSyncingInstances(false);
     }
@@ -292,19 +251,13 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
   const getName = (binding: Binding) => {
     const wid = shortId(binding.name);
     const s = getStatus(wid);
-    return binding.title || s.title || all智能体.find(a => shortId(a.pane_id) === wid)?.title || wid;
+    return binding.title || s.title || panes.find(a => shortId(a.pane_id) === wid)?.title || wid;
   };
 
   const showToast = useCallback((detail: string) => {
     window.dispatchEvent(new CustomEvent('show-toast', { detail }));
   }, []);
 
-  const instanceMap = useMemo(() => new Map(instances.map(m => [m.id, m])), [instances]);
-  const isApiOnlyInstance = useCallback((instance?: Machine) => {
-    if (!instance) return false;
-    if (instance.runtime_kind === 'cloudrun') return true;
-    return instance.capabilities?.supports_tmux === false;
-  }, []);
   const restartPane = useCallback((wid: string, title: string, disabled?: boolean) => {
     if (disabled) {
       showToast(`${title} 当前运行时不支持重启`);
@@ -316,13 +269,14 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
         try {
           await apiService.restartPane(wid);
           showToast(`${title} 正在重启...`);
-          load();
+          onRefreshPanes();
+          onRefreshPoll();
         } catch {
           showToast(`错误：${title} 重启失败`);
         }
       }
     );
-  }, [confirm, load, showToast]);
+  }, [confirm, onRefreshPanes, onRefreshPoll, showToast]);
   const deletePane = useCallback((binding: Binding, title: string) => {
     const wid = shortId(binding.name);
     confirm(
@@ -332,54 +286,41 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
           await apiService.unbindAgent(binding.id);
           await apiService.deletePane(wid);
           onOpenInCurrentPane?.(paneId);
-          load();
+          await onRefreshPanes();
+          await onRefreshPoll();
         } catch {
           showToast(`错误：${title} 删除失败`);
         }
       }
     );
-  }, [confirm, load, onOpenInCurrentPane, paneId, showToast]);
-  const latestStepMap = useMemo(() => {
-    const map = new Map<string, Step>();
-    for (const step of steps) {
-      const key = `${step.target_machine_id || 0}:${step.target_pane_id || ''}`;
-      if (!map.has(key)) map.set(key, step);
-    }
-    return map;
-  }, [steps]);
-
+  }, [confirm, onOpenInCurrentPane, onRefreshPanes, onRefreshPoll, paneId, showToast]);
   const groupedBindings = useMemo(() => {
-    const groups = new Map<string, { instance?: Machine; items: Binding[] }>();
+    const groups = new Map<string, { machineId?: number; machineLabel?: string; items: Binding[] }>();
     for (const binding of bindings) {
-      const instance = binding.machine_id ? instanceMap.get(binding.machine_id) : undefined;
-      const key = instance ? String(instance.id) : 'local';
-      if (!groups.has(key)) groups.set(key, { instance, items: [] });
+      const key = binding.machine_id ? String(binding.machine_id) : 'local';
+      if (!groups.has(key)) groups.set(key, { machineId: binding.machine_id, machineLabel: binding.instance_label || binding.machine_label, items: [] });
       groups.get(key)!.items.push(binding);
     }
     return Array.from(groups.values());
-  }, [bindings, instanceMap]);
+  }, [bindings]);
 
   const agentTypeById = useMemo(
-    () => new Map(all智能体.map(agent => [shortId(agent.pane_id), normalizeAgentType(agent.agent_type)])),
-    [all智能体]
+    () => new Map(panes.map(agent => [shortId(agent.pane_id), normalizeAgentType(agent.agent_type)])),
+    [panes]
   );
 
   const currentAgent = useMemo(() => {
-    const agent = all智能体.find(a => shortId(a.pane_id) === paneId);
-    const machine = agent?.machine_id ? instanceMap.get(agent.machine_id) : undefined;
-    const step = latestStepMap.get(`${agent?.machine_id || 0}:${paneId}`);
+    const agent = panes.find(a => shortId(a.pane_id) === paneId);
     const status = getStatus(paneId);
     const subtitleParts = [paneId, statusLabel(status)];
-    if (machine?.instance_label || machine?.label) subtitleParts.push(machine?.instance_label || machine?.label || '');
-    if (step?.title) subtitleParts.push(`${step.title}${step.status ? ` [${step.status}]` : ''}`);
+    if (agent?.machine_label) subtitleParts.push(agent.machine_label);
     return {
       title: agent?.title || status.title || paneId,
       agentType: normalizeAgentType(agent?.agent_type),
       status,
       subtitle: subtitleParts.join(' · '),
-      resultSummary: step?.result_summary || '',
     };
-  }, [all智能体, instanceMap, latestStepMap, paneId, statuses]);
+  }, [paneId, panes, statuses]);
 
   const renderAgentCard = ({
     wid,
@@ -387,7 +328,6 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
     agentType,
     status,
     subtitle,
-    resultSummary,
     active = false,
     opened = false,
     onClick,
@@ -402,7 +342,6 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
     agentType?: string;
     status: StatusInfo;
     subtitle: string;
-    resultSummary?: string;
     active?: boolean;
     opened?: boolean;
     onClick: () => void;
@@ -527,19 +466,13 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
       </div>
       <div className="flex items-center gap-3 flex-1 min-w-0 text-left">
         <AgentTypeAvatar agentType={agentType} title={title} />
-        <div className="flex-1 min-w-0 pr-7">
-          <div className="flex items-center gap-1.5">
-            <h3 className={`text-sm font-medium truncate ${active ? 'text-blue-300' : 'text-zinc-300'}`}>{title}</h3>
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDot(status)}`} />
-          </div>
-          <p className={`text-xs font-mono mt-0.5 truncate ${active ? 'text-blue-400/50' : 'text-zinc-600'}`}>
-            {subtitle}
+	        <div className="flex-1 min-w-0 pr-7">
+	          <div className="flex items-center gap-1.5">
+	            <h3 className={`text-sm font-medium truncate ${active ? 'text-blue-300' : 'text-zinc-300'}`}>{title}</h3>
+	          </div>
+	          <p className={`text-xs font-mono mt-0.5 truncate ${active ? 'text-blue-400/50' : 'text-zinc-600'}`}>
+	            {subtitle}
           </p>
-          {resultSummary ? (
-            <p className="text-xs text-zinc-500 mt-1 truncate" data-id="team-panel-worker-step-summary">
-              {resultSummary}
-            </p>
-          ) : null}
         </div>
       </div>
     </div>
@@ -556,7 +489,8 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
             icon: <AgentTypeMiniAvatar agentType={a.agent_type} title={a.title || shortId(a.pane_id)} />,
           }))}
           onChange={v => bind(v)}
-          placeholder="+ 绑定工作实例..."
+          onOpenChange={open => { if (open) void onRefreshPanes(); }}
+          placeholder="+ 绑定团队成员..."
           searchable
           className="flex-1"
         />
@@ -574,7 +508,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
           onClick={() => setCreateDialogOpen(true)}
           disabled={creating}
           className="flex items-center text-sm px-2 py-1.5 rounded border border-[var(--vsc-border)] text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors cursor-pointer disabled:opacity-50"
-          title="创建并绑定新工作实例"
+          title="创建并绑定新员工"
         >
           {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
         </button>
@@ -585,7 +519,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
         submitting={creating}
         onClose={() => setCreateDialogOpen(false)}
         onSubmit={createAndBind}
-        title="创建并绑定工作实例"
+        title="创建并绑定新员工"
         submitLabel="创建并绑定"
       />
 
@@ -598,7 +532,6 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
             agentType: currentAgent.agentType,
             status: currentAgent.status,
             subtitle: currentAgent.subtitle,
-            resultSummary: currentAgent.resultSummary,
             active: (activePaneId || paneId) === paneId,
             onClick: () => {
               if (onOpenInCurrentPane) {
@@ -616,26 +549,23 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
           <div className="flex h-full w-full min-w-0 flex-col" data-id="team-panel-groups">
             {groupedBindings.map(group => (
               <div
-                key={group.instance?.id || 'local'}
+                key={group.machineId || 'local'}
                 style={{ padding: 4 }}
-                className={group.instance ? 'border-b border-[var(--vsc-border)]' : ''}
-                data-id={`team-panel-group-${group.instance?.instance_key || group.instance?.machine_key || 'local'}`}
+                className={group.machineId ? 'border-b border-[var(--vsc-border)]' : ''}
+                data-id={`team-panel-group-${group.machineLabel || group.machineId || 'local'}`}
               >
                 
                 {group.items.map(b => {
                   const wid = shortId(b.name);
                   const s = getStatus(wid);
-                  const step = latestStepMap.get(`${b.machine_id || 0}:${wid}`);
                   const subtitleParts = [wid, statusLabel(s)];
                   if (b.instance_label || b.machine_label) subtitleParts.push(b.instance_label || b.machine_label || '');
-                  if (step?.title) subtitleParts.push(`${step.title}${step.status ? ` [${step.status}]` : ''}`);
                   return renderAgentCard({
                     wid,
                     title: getName(b),
                     agentType: agentTypeById.get(wid) || '',
                     status: s,
                     subtitle: subtitleParts.join(' · '),
-                    resultSummary: step?.result_summary,
                     active: activePaneId === wid,
                     opened: openedPaneIds.includes(wid),
                     onClick: () => {
@@ -645,9 +575,9 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
                       }
                       window.location.hash = `#/agent/${wid}`;
                     },
-                    onRestart: () => restartPane(wid, getName(b), isApiOnlyInstance(b.machine_id ? instanceMap.get(b.machine_id) : undefined)),
+                    onRestart: () => restartPane(wid, getName(b)),
                     onOpenSettings: () => onOpenSettingsPane?.(wid),
-                    canRestart: !isApiOnlyInstance(b.machine_id ? instanceMap.get(b.machine_id) : undefined),
+                    canRestart: true,
                     onRemove: () => confirm(<>解绑 <span className="text-zinc-100 font-medium">{getName(b)}</span>？</>, () => unbind(b)),
                     onDelete: () => deletePane(b, getName(b)),
                   });
@@ -658,7 +588,7 @@ export default function TeamPanel({ paneId, onOpenInCurrentPane, openedPaneIds =
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-zinc-600" data-id="team-panel-empty">
             <Users className="w-8 h-8 mb-2 opacity-20" />
-            <p className="text-sm">先绑定一个工作实例开始</p>
+            <p className="text-sm">先绑定一个团队成员开始</p>
           </div>
         )}
       </div>

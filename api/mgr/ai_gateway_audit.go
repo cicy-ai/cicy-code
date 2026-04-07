@@ -62,18 +62,27 @@ type aiGatewayRequestSpan struct {
 }
 
 type aiGatewayCurrentSnapshot struct {
-	TurnID           string   `json:"turn_id"`
-	AgentID          string   `json:"agent_id"`
-	Question         string   `json:"question"`
-	QuestionPreview  string   `json:"question_preview"`
-	Provider         string   `json:"provider"`
-	Model            string   `json:"model"`
-	Status           string   `json:"status"`
-	StartedAt        string   `json:"started_at"`
-	UpdatedAt        string   `json:"updated_at"`
-	RequestIDs       []string `json:"request_ids"`
-	ActiveRequestIDs []string `json:"active_request_ids"`
-	ConversationIDs  []string `json:"conversation_ids"`
+	TurnID           string              `json:"turn_id"`
+	AgentID          string              `json:"agent_id"`
+	ConversationID   string              `json:"conversation_id"`
+	RequestID        string              `json:"request_id"`
+	Question         string              `json:"question"`
+	QuestionPreview  string              `json:"question_preview"`
+	Provider         string              `json:"provider"`
+	Model            string              `json:"model"`
+	URL              string              `json:"url"`
+	Method           string              `json:"method"`
+	Headers          map[string][]string `json:"headers"`
+	Body             interface{}         `json:"body"`
+	History          interface{}         `json:"history"`
+	HistorySource    string              `json:"history_source"`
+	Timestamp        string              `json:"timestamp"`
+	Status           string              `json:"status"`
+	StartedAt        string              `json:"started_at"`
+	UpdatedAt        string              `json:"updated_at"`
+	RequestIDs       []string            `json:"request_ids"`
+	ActiveRequestIDs []string            `json:"active_request_ids"`
+	ConversationIDs  []string            `json:"conversation_ids"`
 }
 
 type aiGatewayReplySnapshot struct {
@@ -108,18 +117,19 @@ type aiGatewayStreamDelta struct {
 }
 
 type aiGatewayAuditSession struct {
-	mu             sync.Mutex
-	finalized      bool
-	agentID        string
-	provider       string
-	model          string
-	turnID         string
-	requestID      string
-	conversationID string
-	question       string
-	startedAt      time.Time
-	current        aiGatewayCurrentSnapshot
-	reply          aiGatewayReplySnapshot
+	mu              sync.Mutex
+	finalized       bool
+	agentID         string
+	provider        string
+	model           string
+	turnID          string
+	requestID       string
+	conversationID  string
+	question        string
+	startedAt       time.Time
+	replyEventIndex int
+	current         aiGatewayCurrentSnapshot
+	reply           aiGatewayReplySnapshot
 }
 
 type aiGatewayAuditReadCloser struct {
@@ -128,6 +138,8 @@ type aiGatewayAuditReadCloser struct {
 	statusCode int
 	headers    http.Header
 	buf        bytes.Buffer
+	ssePending string
+	isStream   bool
 	once       sync.Once
 }
 
@@ -140,7 +152,7 @@ type aiGatewayStreamAccumulator struct {
 	autoIndex     int
 }
 
-func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suffix string, method string, requestBody []byte) *aiGatewayAuditSession {
+func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suffix string, method string, requestHeaders http.Header, requestBody []byte) *aiGatewayAuditSession {
 	startedAt := time.Now().UTC()
 	startedAtISO := startedAt.Format(time.RFC3339)
 	payloadValue := interface{}(M{})
@@ -158,6 +170,7 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	model := aiGatewayString(payloadMap["model"])
 	conversationID := aiGatewayExtractConversationID(payloadMap)
 	requestID := aiGatewayFirstNonEmpty(aiGatewayString(payloadMap["request_id"]), aiGatewayString(payloadMap["id"]), aiGatewayShortID())
+	historySource, requestHistory := aiGatewayExtractRequestHistory(payloadMap)
 	turnID := aiGatewayShortID()
 	targetURL := *targetBase
 	targetURL.Path = resolveOpenClawProviderTargetPath(targetBase.Path, suffix)
@@ -191,10 +204,19 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	current := aiGatewayCurrentSnapshot{
 		TurnID:           turnID,
 		AgentID:          agentID,
+		ConversationID:   conversationID,
+		RequestID:        requestID,
 		Question:         question,
 		QuestionPreview:  aiGatewayPreviewText(question, 140),
 		Provider:         provider,
 		Model:            model,
+		URL:              targetURL.String(),
+		Method:           method,
+		Headers:          aiGatewayCloneHeader(requestHeaders),
+		Body:             aiGatewayCloneJSONValue(payloadValue),
+		History:          aiGatewayCloneJSONValue(requestHistory),
+		HistorySource:    historySource,
+		Timestamp:        startedAtISO,
 		Status:           "thinking",
 		StartedAt:        startedAtISO,
 		UpdatedAt:        startedAtISO,
@@ -245,6 +267,7 @@ func newAIGatewayAuditReadCloser(inner io.ReadCloser, audit *aiGatewayAuditSessi
 		audit:      audit,
 		statusCode: statusCode,
 		headers:    headers,
+		isStream:   strings.Contains(strings.ToLower(strings.TrimSpace(headers.Get("Content-Type"))), "text/event-stream"),
 	}
 	if contentLength > 0 && contentLength <= 8*1024*1024 {
 		rc.buf.Grow(int(contentLength))
@@ -256,8 +279,15 @@ func (r *aiGatewayAuditReadCloser) Read(p []byte) (int, error) {
 	n, err := r.inner.Read(p)
 	if n > 0 {
 		_, _ = r.buf.Write(p[:n])
+		if r.isStream {
+			r.ssePending += string(p[:n])
+			r.flushSSEEvents(err == io.EOF)
+		}
 	}
 	if err == io.EOF {
+		if r.isStream {
+			r.flushSSEEvents(true)
+		}
 		r.finish(nil)
 	}
 	return n, err
@@ -278,6 +308,33 @@ func (r *aiGatewayAuditReadCloser) finish(closeErr error) {
 	})
 }
 
+func (r *aiGatewayAuditReadCloser) flushSSEEvents(flushAll bool) {
+	for {
+		idx := strings.IndexByte(r.ssePending, '\n')
+		if idx < 0 {
+			break
+		}
+		line := r.ssePending[:idx]
+		r.ssePending = r.ssePending[idx+1:]
+		r.handleSSELine(line)
+	}
+	if flushAll && strings.TrimSpace(r.ssePending) != "" {
+		r.handleSSELine(r.ssePending)
+		r.ssePending = ""
+	}
+}
+
+func (r *aiGatewayAuditReadCloser) handleSSELine(line string) {
+	if r.audit == nil {
+		return
+	}
+	eventType, payload := aiGatewayParseSSELine(line)
+	if eventType != "data" || payload == nil {
+		return
+	}
+	r.audit.emitReplyStreamPayload(payload)
+}
+
 func (s *aiGatewayAuditSession) recordOutboundRequest(req *http.Request) {
 	if s == nil || req == nil {
 		return
@@ -287,9 +344,22 @@ func (s *aiGatewayAuditSession) recordOutboundRequest(req *http.Request) {
 	if len(s.reply.HTTPRequests) == 0 {
 		return
 	}
+	s.current.URL = req.URL.String()
+	s.current.Method = req.Method
+	s.current.Headers = aiGatewayCloneHeader(req.Header)
 	s.reply.HTTPRequests[0].URL = req.URL.String()
 	s.reply.HTTPRequests[0].Method = req.Method
 	s.reply.HTTPRequests[0].RequestHeaders = aiGatewayCloneHeader(req.Header)
+	_ = s.writeReplyEventLocked("request", M{
+		"url":             s.current.URL,
+		"method":          s.current.Method,
+		"headers":         aiGatewayCloneHeader(req.Header),
+		"body":            aiGatewayCloneJSONValue(s.current.Body),
+		"history":         aiGatewayCloneJSONValue(s.current.History),
+		"source":          s.current.HistorySource,
+		"request_id":      s.current.RequestID,
+		"conversation_id": s.current.ConversationID,
+	})
 }
 
 func (s *aiGatewayAuditSession) writeStartSnapshots() error {
@@ -298,6 +368,9 @@ func (s *aiGatewayAuditSession) writeStartSnapshots() error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.resetReplyDirLocked(); err != nil {
+		return err
+	}
 	return s.writeSnapshotsLocked()
 }
 
@@ -359,6 +432,7 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	s.reply.Usage = aiGatewayCloneAnyMap(parsed.Usage)
 	s.reply.CostCredit = requestSpan.CostCredit
 	s.reply.RequestCount = len(aiGatewayFilterPrimaryRequests(s.reply.HTTPRequests))
+	_ = s.writeReplyEventLocked("request_complete", aiGatewayCloneJSONValue(requestSpan))
 
 	if failed {
 		errorText := aiGatewayExtractErrorText(responseBody, responseErr)
@@ -380,12 +454,16 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 }
 
 func (s *aiGatewayAuditSession) writeSnapshotsLocked() error {
-	currentPath := filepath.Join(aiGatewayHistoryDir(s.agentID), "current.json")
-	replyPath := filepath.Join(aiGatewayHistoryDir(s.agentID), "reply.json")
+	historyDir := aiGatewayHistoryDir(s.agentID)
+	currentPath := filepath.Join(historyDir, "current.json")
+	replyPath := filepath.Join(historyDir, "reply.json")
 	if err := aiGatewayWriteJSONAtomic(currentPath, s.current); err != nil {
 		return err
 	}
-	return aiGatewayWriteJSONAtomic(replyPath, s.reply)
+	if err := aiGatewayWriteJSONAtomic(replyPath, s.reply); err != nil {
+		return err
+	}
+	return aiGatewayWriteJSONAtomic(filepath.Join(aiGatewayReplyDir(s.agentID), "summary.json"), s.reply)
 }
 
 func aiGatewayHistoryDir(agentID string) string {
@@ -393,7 +471,36 @@ func aiGatewayHistoryDir(agentID string) string {
 	if err != nil || strings.TrimSpace(home) == "" {
 		home = "/root"
 	}
-	return filepath.Join(home, "workers", agentID, ".history")
+	baseDir := filepath.Join(home, "workers", agentID)
+	newDir := filepath.Join(baseDir, "history")
+	oldDir := filepath.Join(baseDir, ".history")
+	if oldDir == newDir {
+		return newDir
+	}
+	if _, err := os.Stat(oldDir); err == nil {
+		if _, err := os.Stat(newDir); os.IsNotExist(err) {
+			if renameErr := os.Rename(oldDir, newDir); renameErr == nil {
+				return newDir
+			}
+		}
+		for _, name := range []string{"current.json", "reply.json"} {
+			oldPath := filepath.Join(oldDir, name)
+			newPath := filepath.Join(newDir, name)
+			if _, err := os.Stat(oldPath); err != nil {
+				continue
+			}
+			if _, err := os.Stat(newPath); err == nil {
+				continue
+			}
+			if err := os.MkdirAll(newDir, 0755); err != nil {
+				break
+			}
+			if body, err := os.ReadFile(oldPath); err == nil {
+				_ = os.WriteFile(newPath, body, 0644)
+			}
+		}
+	}
+	return newDir
 }
 
 func aiGatewayWriteJSONAtomic(path string, value interface{}) error {
@@ -410,6 +517,120 @@ func aiGatewayWriteJSONAtomic(path string, value interface{}) error {
 		return err
 	}
 	return os.Rename(tmpPath, path)
+}
+
+func (s *aiGatewayAuditSession) resetReplyDirLocked() error {
+	if s == nil {
+		return nil
+	}
+	replyDir := aiGatewayReplyDir(s.agentID)
+	if err := os.RemoveAll(replyDir); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(replyDir, 0755); err != nil {
+		return err
+	}
+	s.replyEventIndex = 0
+	return nil
+}
+
+func (s *aiGatewayAuditSession) writeReplyEventLocked(kind string, payload interface{}) error {
+	if s == nil {
+		return nil
+	}
+	s.replyEventIndex++
+	event := M{
+		"index":     s.replyEventIndex,
+		"kind":      kind,
+		"turn_id":   s.turnID,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"payload":   aiGatewayCloneJSONValue(payload),
+	}
+	name := fmt.Sprintf("%04d.json", s.replyEventIndex)
+	return aiGatewayWriteJSONAtomic(filepath.Join(aiGatewayReplyDir(s.agentID), name), event)
+}
+
+func (s *aiGatewayAuditSession) emitReplyStreamPayload(payload map[string]interface{}) {
+	if s == nil || len(payload) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, event := range aiGatewayReplyEventsFromStreamPayload(payload) {
+		_ = s.writeReplyEventLocked(event.Kind, event.Payload)
+	}
+}
+
+type aiGatewayReplyEvent struct {
+	Kind    string
+	Payload interface{}
+}
+
+func aiGatewayReplyEventsFromStreamPayload(payload map[string]interface{}) []aiGatewayReplyEvent {
+	events := []aiGatewayReplyEvent{}
+	payloadType := aiGatewayString(payload["type"])
+	if strings.HasPrefix(payloadType, "response.web_search_call.") {
+		events = append(events, aiGatewayReplyEvent{
+			Kind: "web_search",
+			Payload: M{
+				"type":    payloadType,
+				"item_id": aiGatewayFirstNonEmpty(aiGatewayString(payload["item_id"]), aiGatewayString(payload["call_id"])),
+				"status":  payloadType[strings.LastIndex(payloadType, ".")+1:],
+				"payload": aiGatewayCloneJSONValue(payload),
+			},
+		})
+	}
+	if payloadType == "response.function_call_arguments.done" || payloadType == "response.custom_tool_call_input.done" {
+		toolName := aiGatewayString(payload["name"])
+		if payloadType == "response.custom_tool_call_input.done" && toolName == "" {
+			toolName = "custom_tool_call"
+		}
+		arguments := aiGatewayString(payload["arguments"])
+		if arguments == "" {
+			arguments = aiGatewayJSONOrString(payload["input"])
+		}
+		events = append(events, aiGatewayReplyEvent{
+			Kind: "tool_call",
+			Payload: M{
+				"type":      payloadType,
+				"tool_id":   aiGatewayFirstNonEmpty(aiGatewayString(payload["item_id"]), aiGatewayString(payload["call_id"])),
+				"tool_name": toolName,
+				"arguments": arguments,
+			},
+		})
+	}
+	for _, delta := range aiGatewayExtractStreamDeltas(payload) {
+		switch delta.Kind {
+		case "thinking", "answer":
+			events = append(events, aiGatewayReplyEvent{
+				Kind: "sse",
+				Payload: M{
+					"type":        payloadType,
+					"stream_kind": delta.Kind,
+					"content":     delta.Content,
+				},
+			})
+		case "tool_call":
+			kind := "tool_call"
+			if delta.ToolName == "web_search_call" {
+				kind = "web_search"
+			}
+			events = append(events, aiGatewayReplyEvent{
+				Kind: kind,
+				Payload: M{
+					"type":      payloadType,
+					"tool_id":   delta.ToolID,
+					"tool_name": delta.ToolName,
+					"arguments": delta.Content,
+				},
+			})
+		}
+	}
+	return events
+}
+
+func aiGatewayReplyDir(agentID string) string {
+	return filepath.Join(aiGatewayHistoryDir(agentID), "reply")
 }
 
 func aiGatewayOptionalStringList(value string) []string {
@@ -990,6 +1211,26 @@ func aiGatewayExtractQuestion(body map[string]interface{}) string {
 	return strings.Join(textParts, "\n")
 }
 
+func aiGatewayExtractRequestHistory(body map[string]interface{}) (string, interface{}) {
+	if body == nil {
+		return "", nil
+	}
+	if messages, ok := body["messages"]; ok {
+		if list := aiGatewaySlice(messages); len(list) > 0 {
+			return "messages", messages
+		}
+	}
+	if inputItems, ok := body["input"]; ok {
+		if list := aiGatewaySlice(inputItems); len(list) > 0 {
+			return "input", inputItems
+		}
+		if inputItems != nil {
+			return "input", inputItems
+		}
+	}
+	return "", nil
+}
+
 func aiGatewayExtractMessages(body map[string]interface{}) []map[string]interface{} {
 	items := aiGatewaySlice(body["messages"])
 	out := make([]map[string]interface{}, 0, len(items))
@@ -1201,6 +1442,21 @@ func aiGatewayCloneAnyMap(value map[string]interface{}) map[string]interface{} {
 	cloned := make(map[string]interface{}, len(value))
 	for key, item := range value {
 		cloned[key] = item
+	}
+	return cloned
+}
+
+func aiGatewayCloneJSONValue(value interface{}) interface{} {
+	if value == nil {
+		return nil
+	}
+	body, err := json.Marshal(value)
+	if err != nil {
+		return value
+	}
+	var cloned interface{}
+	if err := json.Unmarshal(body, &cloned); err != nil {
+		return value
 	}
 	return cloned
 }

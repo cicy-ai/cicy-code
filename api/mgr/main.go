@@ -29,9 +29,9 @@ var (
 	desktopCmd   *exec.Cmd
 )
 
-const version = "1.0.5"
+const version = "1.0.7"
 
-// agentsFlag holds --agents=openclaw,codex,claude,opencode,... for non-interactive setup
+// agentsFlag holds --agents=openclaw,codex,claude,... for non-interactive setup
 var agentsFlag string
 
 func main() {
@@ -81,7 +81,7 @@ Environment:
 
 	// --dev without explicit --agents defaults to the supported builtin set
 	if devMode && agentsFlag == "" {
-		agentsFlag = "openclaw,codex,claude,opencode"
+		agentsFlag = "openclaw,codex,claude"
 	}
 
 	initKV()
@@ -109,6 +109,7 @@ Environment:
 	http.HandleFunc("/health", w(handleHealth))
 	http.HandleFunc("/api/health", w(handleHealth))
 	http.HandleFunc("/api/ping", w(handlePing))
+	http.HandleFunc("/api/poll", authM(handlePoll))
 
 	// Auth — local token management
 	http.HandleFunc("/api/auth/verify", w(handleAuthVerify))

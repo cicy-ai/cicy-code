@@ -12,23 +12,29 @@ interface Props {
   options: SelectOption[];
   value?: string;
   onChange: (value: string) => void;
+  onOpenChange?: (open: boolean) => void;
   placeholder?: string;
   searchable?: boolean;
   className?: string;
   dropdownClassName?: string;
 }
 
-export default function Select({ options, value, onChange, placeholder = '请选择...', searchable = false, className = '', dropdownClassName = '' }: Props) {
+export default function Select({ options, value, onChange, onOpenChange, placeholder = '请选择...', searchable = false, className = '', dropdownClassName = '' }: Props) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const setDropdownOpen = (next: boolean) => {
+    setOpen(next);
+    onOpenChange?.(next);
+  };
+
   useEffect(() => {
-    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setDropdownOpen(false); };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, []);
+  }, [onOpenChange]);
 
   useEffect(() => { if (open && searchable) setTimeout(() => inputRef.current?.focus(), 0); }, [open, searchable]);
 
@@ -38,7 +44,7 @@ export default function Select({ options, value, onChange, placeholder = '请选
   return (
     <div ref={ref} className={`relative ${className}`}>
       <button
-        onClick={() => { setOpen(!open); setSearch(''); }}
+        onClick={() => { setDropdownOpen(!open); setSearch(''); }}
         className="w-full flex items-center gap-2 text-sm bg-[var(--vsc-bg)] border border-[var(--vsc-border)] rounded px-2 py-1.5 text-left hover:border-zinc-500 transition-colors cursor-pointer"
       >
         <span className={`flex-1 truncate ${selected ? 'text-zinc-300' : 'text-zinc-500'}`}>
@@ -65,7 +71,7 @@ export default function Select({ options, value, onChange, placeholder = '请选
             {filtered.length ? filtered.map(o => (
               <div
                 key={o.value}
-                onClick={() => { onChange(o.value); setOpen(false); setSearch(''); }}
+                onClick={() => { onChange(o.value); setDropdownOpen(false); setSearch(''); }}
                 className={`flex items-center gap-2.5 px-2.5 py-1.5 text-sm cursor-pointer transition-colors ${o.value === value ? 'bg-blue-500/10' : 'hover:bg-white/[0.05]'}`}
               >
                 {o.icon ? <span className="shrink-0">{o.icon}</span> : null}

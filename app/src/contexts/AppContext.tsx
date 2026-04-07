@@ -97,35 +97,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [api]);
   useEffect(() => {
     if (!api) return;
-    let panesCache: any[] | null = null;
     const fetchAllPanes = async () => {
-      const startTime = performance.now();
       try {
-        // First load: fetch both. Subsequent: only status (5s poll).
-        if (!panesCache) {
-          const [statusRes, panesRes] = await Promise.all([api.getAllStatus({ timeout: 3000 }), api.getPanes()]);
-          panesCache = panesRes.data?.panes || [];
-          const latency = Math.round(performance.now() - startTime);
-          window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency } }));
-          mergePanes(statusRes.data, panesCache!);
-        } else {
-          const statusRes = await api.getAllStatus({ timeout: 3000 });
-          const latency = Math.round(performance.now() - startTime);
-          window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency } }));
-          mergePanes(statusRes.data, panesCache!);
-        }
+        const panesRes = await api.getPanes();
+        mergePanes(panesRes.data?.panes || []);
       } catch (err) {
         console.error('获取窗格失败：', err);
         setLoading(false);
-        window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency: null } }));
       }
     };
-    const mergePanes = (statusData: any, panes: any[]) => {
-      const statusMap = (statusData || {}) as Record<string, any>;
-      const panesArray = panes.map((p: any) => {
-        const { pane_id: _drop, active: _dropActive, ...st } = statusMap[p.pane_id] || {};
-        return { ...p, ...st, title: p.title || st.title, pane_id: p.pane_id, active: p.active };
-      });
+    const mergePanes = (panes: any[]) => {
+      const panesArray = panes.map((p: any) => ({ ...p, pane_id: p.pane_id, active: p.active }));
       if (panesArray.length === 0) return;
       setAllPanes(prev => {
         const prevJson = JSON.stringify(prev);
@@ -140,9 +122,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     };
     fetchAllPanes();
-    // Polling disabled - will be replaced with WebSocket push
-    // const id = setInterval(fetchAllPanes, 5000);
-    const onRefresh = () => { panesCache = null; fetchAllPanes(); };
+    const onRefresh = () => { fetchAllPanes(); };
     window.addEventListener('refresh-panes', onRefresh);
     const onVisible = () => { if (document.visibilityState === 'visible') fetchAllPanes(); };
     document.addEventListener('visibilitychange', onVisible);
@@ -173,6 +153,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const selectPane = async (paneId: string) => {
     PaneManager.setCurrentPane(paneId);
     setCurrentPaneId(paneId);
+    window.dispatchEvent(new CustomEvent('refresh-panes'));
     
     // Fetch detailed pane config
     if (api) {
@@ -201,8 +182,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (!api) return;
     try {
       setLoading(true);
-      const { data } = await api.getAllStatus();
-      set智能体(Object.values(data as Record<string, Agent>));
+      const { data } = await api.getPanes();
+      set智能体(Array.isArray(data) ? data : data?.panes || []);
       setError(null);
     } catch (err: any) {
       setError(err.message);

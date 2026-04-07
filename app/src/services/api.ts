@@ -32,6 +32,7 @@ const api = {
   verifyAuth: (token: string) => http.get('/api/auth/verify', { baseURL: config.isWorkspace ? config.apiBase : config.mgrBase, headers: { Authorization: `Bearer ${token}` } }),
 
   getPanes: () => http.get('/api/tmux/panes'),
+  poll: (paneId?: string, cfg?: any) => http.get('/api/poll', { ...cfg, params: { ...(cfg?.params || {}), ...(paneId ? { pane_id: paneId } : {}) } }),
   getAllStatus: (cfg?: any) => http.get('/api/tmux/status', cfg),
   getPane: (id: string) => http.get(`/api/tmux/panes/${encodeURIComponent(id)}`),
   updatePane: (id: string, data: any) => http.patch(`/api/tmux/panes/${encodeURIComponent(id)}`, data),
@@ -48,23 +49,16 @@ const api = {
   unsplitPane: (id: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/unsplit`),
 
   deleteAgent: (id: string) => http.delete(`/api/agents/${encodeURIComponent(id)}`),
-  get智能体ByPane: (id: string) => http.get(`/api/agents/pane/${encodeURIComponent(id)}`),
+  getAgentsByPane: (id: string) => http.get(`/api/agents/pane/${encodeURIComponent(id)}`),
   bindAgent: (data: any) => http.post('/api/agents/bind', data),
   unbindAgent: (agentId: number) => http.delete(`/api/agents/unbind/${agentId}`),
 
-  getMachines: () => http.get('/api/machines'),
   registerMachine: (data: any) => http.post('/api/machines/register', data),
   syncMachines: (data?: any) => http.post('/api/machines/sync', data || {}),
   getMachinePanes: (id: number | string) => http.get(`/api/machines/${id}/panes`),
 
   getSkills: () => http.get('/api/skills'),
   runSkill: (data: any) => http.post('/api/skills/run', data),
-
-  getCollabSteps: (params?: any) => http.get('/api/collab/steps', { params }),
-  createCollabStep: (data: any) => http.post('/api/collab/steps', data),
-  updateCollabStep: (id: number, data: any) => http.patch(`/api/collab/steps/${id}`, data),
-  createWorkflow: (data: any) => http.post('/api/collab/workflows', data),
-  getWorkflow: (id: number | string) => http.get(`/api/collab/workflows/${id}`),
 
   getTtydStatus: (id: string) => http.get(`/api/tmux/ttyd/status/${encodeURIComponent(id)}`),
   correctEnglish: (text: string) => http.post('/api/correctEnglish', { text }),
