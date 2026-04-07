@@ -9,7 +9,13 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"time"
+)
+
+const (
+	aiGatewayMaxAttempts = 3
 )
 
 func firstForwardedHeaderValue(value string) string {
@@ -156,9 +162,127 @@ func stripOpenAIFingerprintHeaders(req *http.Request) {
 	}
 }
 
+type aiGatewayRetryTransport struct {
+	base     http.RoundTripper
+	provider string
+	agentID  string
+}
+
+func (t *aiGatewayRetryTransport) roundTripper() http.RoundTripper {
+	if t != nil && t.base != nil {
+		return t.base
+	}
+	return http.DefaultTransport
+}
+
+func aiGatewayShouldRetryStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+func aiGatewayRetryDelay(resp *http.Response, attempt int) time.Duration {
+	if resp != nil {
+		if value := strings.TrimSpace(resp.Header.Get("Retry-After")); value != "" {
+			if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
+				return time.Duration(seconds) * time.Second
+			}
+			if retryAt, err := http.ParseTime(value); err == nil {
+				if delay := time.Until(retryAt); delay > 0 {
+					return delay
+				}
+			}
+		}
+	}
+	switch attempt {
+	case 1:
+		return 350 * time.Millisecond
+	case 2:
+		return 1100 * time.Millisecond
+	default:
+		return 2 * time.Second
+	}
+}
+
+func aiGatewaySleep(ctxDone <-chan struct{}, delay time.Duration) bool {
+	if delay <= 0 {
+		return true
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctxDone:
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func cloneRetryableRequest(req *http.Request) (*http.Request, error) {
+	cloned := req.Clone(req.Context())
+	if req.Body == nil {
+		return cloned, nil
+	}
+	if req.GetBody == nil {
+		return nil, http.ErrNotSupported
+	}
+	body, err := req.GetBody()
+	if err != nil {
+		return nil, err
+	}
+	cloned.Body = body
+	return cloned, nil
+}
+
+func (t *aiGatewayRetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt := t.roundTripper()
+	var lastErr error
+	for attempt := 1; attempt <= aiGatewayMaxAttempts; attempt++ {
+		attemptReq, err := cloneRetryableRequest(req)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := rt.RoundTrip(attemptReq)
+		if err != nil {
+			lastErr = err
+			if attempt >= aiGatewayMaxAttempts {
+				return nil, err
+			}
+			delay := aiGatewayRetryDelay(nil, attempt)
+			log.Printf("[ai-gateway] retrying provider=%s agent=%s path=%s after transport error: %v (attempt %d/%d, wait=%s)", t.provider, t.agentID, req.URL.Path, err, attempt+1, aiGatewayMaxAttempts, delay)
+			if !aiGatewaySleep(req.Context().Done(), delay) {
+				return nil, req.Context().Err()
+			}
+			continue
+		}
+		if !aiGatewayShouldRetryStatus(resp.StatusCode) || attempt >= aiGatewayMaxAttempts {
+			return resp, nil
+		}
+		delay := aiGatewayRetryDelay(resp, attempt)
+		log.Printf("[ai-gateway] retrying provider=%s agent=%s path=%s after upstream status=%d (attempt %d/%d, wait=%s)", t.provider, t.agentID, req.URL.Path, resp.StatusCode, attempt+1, aiGatewayMaxAttempts, delay)
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if !aiGatewaySleep(req.Context().Done(), delay) {
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, req.Context().Err()
+		}
+	}
+	return nil, lastErr
+}
+
 func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider string, agentID string, audit *aiGatewayAuditSession) *httputil.ReverseProxy {
 	target := &url.URL{Scheme: targetBase.Scheme, Host: targetBase.Host}
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.Transport = &aiGatewayRetryTransport{
+		base:     http.DefaultTransport,
+		provider: provider,
+		agentID:  agentID,
+	}
 	baseDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		baseDirector(req)
@@ -224,8 +348,12 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Body = io.NopCloser(bytes.NewReader(requestBody))
+	r.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(requestBody)), nil
+	}
+	r.ContentLength = int64(len(requestBody))
 
-	audit := newAIGatewayAuditSession(provider, agentID, targetBase, suffix, r.Method, requestBody)
+	audit := newAIGatewayAuditSession(provider, agentID, targetBase, suffix, r.Method, r.Header.Clone(), requestBody)
 	if err := audit.writeStartSnapshots(); err != nil {
 		log.Printf("[ai-gateway] write current snapshot failed for %s: %v", agentID, err)
 	}

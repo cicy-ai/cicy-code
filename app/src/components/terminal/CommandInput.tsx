@@ -28,7 +28,7 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
 
   const send = useCallback(async (cmd: string) => {
     if (!cmd.trim()) return;
-    const c = cmd.trim();
+    const c = cmd;
     saveHist([c, ...history.filter(x => x !== c)].slice(0, 50));
     setHistIdx(-1); setTmpDraft(''); saveDraft('');
     set发送ing(true); setSent(false);

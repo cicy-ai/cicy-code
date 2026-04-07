@@ -18,37 +18,19 @@ interface Binding {
   machine_label?: string;
 }
 
-interface Machine {
-  id: number;
-  machine_key: string;
-  label: string;
-  status: string;
-  runtime_kind?: string;
-  capabilities?: Record<string, any>;
-}
-
-export default function SkillPanel({ paneId }: { paneId: string }) {
+export default function SkillPanel({ paneId, bindings }: { paneId: string; bindings: Binding[] }) {
   const [skills, setSkills] = useState<SkillDef[]>([]);
-  const [bindings, setBindings] = useState<Binding[]>([]);
-  const [machines, setMachines] = useState<Machine[]>([]);
   const [runningId, setRunningId] = useState<string>('');
 
   useEffect(() => {
-    Promise.all([
-      apiService.getSkills(),
-      apiService.get智能体ByPane(paneId),
-      apiService.getMachines(),
-    ]).then(([sRes, bRes, mRes]) => {
+    apiService.getSkills().then((sRes) => {
       setSkills(Array.isArray(sRes.data?.skills) ? sRes.data.skills : []);
-      setBindings(Array.isArray(bRes.data) ? bRes.data : []);
-      setMachines(Array.isArray(mRes.data?.machines) ? mRes.data.machines : []);
     }).catch(() => {});
-  }, [paneId]);
+  }, []);
 
   const defaultTarget = useMemo(() => bindings[0]?.name || paneId, [bindings, paneId]);
-  const defaultMachineId = useMemo(() => bindings[0]?.machine_id || machines[0]?.id || 0, [bindings, machines]);
-  const defaultMachine = useMemo(() => machines.find(m => m.id === defaultMachineId), [machines, defaultMachineId]);
-  const defaultMachineApiOnly = !!(defaultMachine && (defaultMachine.runtime_kind === 'cloudrun' || defaultMachine.capabilities?.supports_tmux === false));
+  const defaultMachineId = useMemo(() => bindings[0]?.machine_id || 0, [bindings]);
+  const defaultMachineLabel = useMemo(() => bindings[0]?.machine_label || '', [bindings]);
 
   const runSkill = async (skill: SkillDef) => {
     setRunningId(skill.id);
@@ -84,9 +66,7 @@ export default function SkillPanel({ paneId }: { paneId: string }) {
       ))}
       <div className="pt-2 px-1 text-[11px] text-zinc-500" data-id="skill-panel-target-summary">
         目标: {defaultTarget}
-        {defaultMachineId ? ` · 节点 ${defaultMachine?.label || defaultMachineId}` : ''}
-        {defaultMachine?.runtime_kind ? ` · ${defaultMachine.runtime_kind}` : ''}
-        {defaultMachineApiOnly ? ' · 仅 API' : ''}
+        {defaultMachineId ? ` · 节点 ${defaultMachineLabel || defaultMachineId}` : ''}
       </div>
     </div>
   );

@@ -1,22 +1,12 @@
 package main
 
 import (
+	"database/sql"
 	"net/http"
 	"strings"
 )
 
-func handleAgentsByPane(w http.ResponseWriter, r *http.Request) {
-	paneID := r.URL.Query().Get("pane_id")
-	if paneID == "" {
-		switch {
-		case strings.HasPrefix(r.URL.Path, "/api/agents/pane/"):
-			paneID = strings.TrimPrefix(r.URL.Path, "/api/agents/pane/")
-		case strings.HasPrefix(r.URL.Path, "/api/agents/by-pane/"):
-			paneID = strings.TrimPrefix(r.URL.Path, "/api/agents/by-pane/")
-		case strings.HasPrefix(r.URL.Path, "/api/agents/by-pane"):
-			// no path id, keep empty to return all
-		}
-	}
+func listAgentsByPane(paneID string) ([]M, error) {
 	query := `SELECT pa.id, pa.pane_id, pa.agent_name, pa.status,
 		COALESCE(ac.title, pa.agent_name) as title,
 		COALESCE(ac.machine_id, 0) as machine_id,
@@ -29,12 +19,11 @@ func handleAgentsByPane(w http.ResponseWriter, r *http.Request) {
 	var args []interface{}
 	if paneID != "" && paneID != "all" {
 		query += " WHERE pa.pane_id=?"
-		args = append(args, paneID)
+		args = append(args, shortPaneID(normPaneID(paneID)))
 	}
 	rows, err := store.Query(query, args...)
 	if err != nil {
-		J(w, []M{})
-		return
+		return nil, err
 	}
 	defer rows.Close()
 	var agents []M
@@ -48,33 +37,71 @@ func handleAgentsByPane(w http.ResponseWriter, r *http.Request) {
 	if agents == nil {
 		agents = []M{}
 	}
+	return agents, nil
+}
+
+func handleAgentsByPane(w http.ResponseWriter, r *http.Request) {
+	paneID := r.URL.Query().Get("pane_id")
+	if paneID == "" {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/api/agents/pane/"):
+			paneID = strings.TrimPrefix(r.URL.Path, "/api/agents/pane/")
+		case strings.HasPrefix(r.URL.Path, "/api/agents/by-pane/"):
+			paneID = strings.TrimPrefix(r.URL.Path, "/api/agents/by-pane/")
+		case strings.HasPrefix(r.URL.Path, "/api/agents/by-pane"):
+			// no path id, keep empty to return all
+		}
+	}
+	agents, err := listAgentsByPane(paneID)
+	if err != nil {
+		J(w, []M{})
+		return
+	}
 	J(w, agents)
 }
 
 func handleAgentBind(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
 	var req M
-	readBody(r, &req)
+	if err := readBody(r, &req); err != nil {
+		httpErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
 	paneID, _ := req["pane_id"].(string)
 	agentName, _ := req["agent_name"].(string)
+	paneID = shortPaneID(normPaneID(strings.TrimSpace(paneID)))
+	agentName = strings.TrimSpace(agentName)
 	if paneID == "" || agentName == "" {
-		httpErr(w, 400, "pane_id and agent_name required")
+		httpErr(w, http.StatusBadRequest, "pane_id and agent_name required")
 		return
 	}
+
 	fullAgentName := normPaneID(agentName)
 	shortName := shortPaneID(fullAgentName)
-	var existing int
-	store.QueryRow("SELECT id FROM pane_agents WHERE pane_id=? AND agent_name=?", paneID, shortName).Scan(&existing)
-	if existing > 0 {
-		httpErr(w, 400, "Agent already bound to this pane")
+
+	var existingID int
+	err := store.QueryRow("SELECT id FROM pane_agents WHERE pane_id=? AND agent_name=?", paneID, shortName).Scan(&existingID)
+	switch {
+	case err == nil && existingID > 0:
+		J(w, M{"success": true, "id": existingID, "pane_id": paneID, "agent_name": shortName, "already_bound": true})
+		return
+	case err != nil && err != sql.ErrNoRows:
+		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	res, err := store.Exec("INSERT INTO pane_agents (pane_id, agent_name, status) VALUES (?,?,'active')", paneID, shortName)
 	if err != nil {
-		httpErr(w, 500, err.Error())
+		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	id, _ := res.LastInsertId()
-	J(w, M{"success": true, "id": id, "agent_name": shortName})
+	J(w, M{"success": true, "id": id, "pane_id": paneID, "agent_name": shortName})
 }
 
 func handleAgentUnbind(w http.ResponseWriter, r *http.Request) {

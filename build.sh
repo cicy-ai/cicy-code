@@ -113,6 +113,27 @@ sync_version() {
 }
 
 # ── Embed assets into api/mgr/ for go:embed ──
+restore_ui_placeholder() {
+  mkdir -p "$API_DIR/mgr/ui"
+  cat > "$API_DIR/mgr/ui/index.html" <<'EOF'
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CiCy Code</title>
+  </head>
+  <body>
+    <main style="font-family: sans-serif; padding: 24px;">
+      <h1>CiCy Code UI placeholder</h1>
+      <p>This placeholder exists so Go embed can compile during tests.</p>
+      <p>Production builds replace <code>api/mgr/ui</code> with <code>app/dist</code>.</p>
+    </main>
+  </body>
+</html>
+EOF
+}
+
 prepare_embed() {
   rm -rf $API_DIR/mgr/resources $API_DIR/mgr/ui $API_DIR/mgr/tmux.conf $API_DIR/mgr/monitor
   cp -r $API_DIR/resources $API_DIR/mgr/resources
@@ -130,6 +151,7 @@ prepare_embed() {
 
 cleanup_embed() {
   rm -rf $API_DIR/mgr/resources $API_DIR/mgr/ui $API_DIR/mgr/tmux.conf $API_DIR/mgr/monitor
+  restore_ui_placeholder
 }
 trap cleanup_embed EXIT
 

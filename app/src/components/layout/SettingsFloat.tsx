@@ -124,11 +124,9 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
                 <Field label="智能体类型">
                   <div className="flex flex-wrap gap-2">
                     {[
-                      { value: '', label: '无', icon: null },
                       { value: 'openclaw', label: 'OpenClaw', icon: null },
                       { value: 'codex', label: 'Codex', icon: '/assets/logos/openai.svg' },
                       { value: 'claude', label: 'Claude', icon: '/assets/logos/claude-symbol.svg' },
-                      { value: 'opencode', label: 'OpenCode', icon: '/assets/logos/opencode.svg' },
                     ].map(option => (
                       <button
                         key={option.value}
@@ -140,11 +138,11 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
                         }`}
                       >
                         {option.icon ? (
-                          <div className={`rounded flex items-center justify-center ${option.value === 'opencode' ? 'w-6 h-6 bg-transparent' : 'w-5 h-5 bg-zinc-400'}`}>
+                          <div className="w-5 h-5 rounded flex items-center justify-center bg-zinc-400">
                             <img
                               src={option.icon}
                               alt={option.label}
-                              className={option.value === 'opencode' ? 'w-6 h-6 object-contain' : 'w-4 h-4'}
+                              className="w-4 h-4"
                             />
                           </div>
                         ) : option.value === 'openclaw' ? (
@@ -165,7 +163,7 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
                 </Field> */}
                 <Toggle
                   label="启动时允许所有操作"
-                  desc="Codex/Claude 追加危险参数，OpenCode 使用 allow 权限配置"
+                  desc="Codex/Claude 追加危险参数"
                   checked={!!data.allow_all_actions}
                   onChange={v => set({ allow_all_actions: v })}
                 />

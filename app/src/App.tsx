@@ -6,7 +6,6 @@ import Workspace from './components/Workspace';
 import Login from './components/Login';
 import ProvisionScreen from './components/ProvisionScreen';
 import AuditDashboard from './components/audit/AuditDashboard';
-import HomeChatView from './components/HomeChatView';
 import { TokenManager } from './services/tokenManager';
 import DevPanel from './components/dev/DevPanel';
 import apiService from './services/api';
@@ -89,9 +88,10 @@ function Main() {
     return <AuditDashboard onBack={() => { window.location.hash = '#/agent/w-10001'; }} />;
   }
 
-  // No hash or non-workspace hash → chat-style homepage preview
+  // No hash or non-workspace hash → original workspace UI
   if (route.view === 'desktop') {
-    return <HomeChatView hasToken={!!token} onOpenWorkspace={() => selectAgent('w-10001')} />;
+    if (!token) return <Login />;
+    return <Workspace agentId="w-10001" onSelectAgent={selectAgent} />;
   }
 
   if (!token) return <Login />;
@@ -100,7 +100,8 @@ function Main() {
   if (route.view === 'workspace') {
     return <Workspace agentId={route.agentId} onSelectAgent={selectAgent} />;
   }
-  return <HomeChatView hasToken={!!token} onOpenWorkspace={() => selectAgent('w-10001')} />;
+  if (!token) return <Login />;
+  return <Workspace agentId="w-10001" onSelectAgent={selectAgent} />;
 }
 
 export default function App() {

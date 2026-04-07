@@ -7,6 +7,14 @@ ARG APP_BINARY_HASH=unknown
 LABEL cicy.setup_agent_hash="${SETUP_AGENT_HASH}" \
       cicy.app_binary_hash="${APP_BINARY_HASH}"
 
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends sudo; \
+    rm -rf /var/lib/apt/lists/*; \
+    if ! id -u cicy >/dev/null 2>&1; then useradd -m -s /bin/bash cicy; fi; \
+    echo 'cicy ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/cicy; \
+    chmod 0440 /etc/sudoers.d/cicy
+
 COPY setup-agent.sh /usr/local/bin/setup-agent.sh
 RUN chmod +x /usr/local/bin/setup-agent.sh
 

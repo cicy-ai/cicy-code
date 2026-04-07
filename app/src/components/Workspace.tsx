@@ -33,7 +33,7 @@ const cache = {
   set: (k: string, v: any) => localStorage.setItem(k, JSON.stringify(v)),
 };
 
-const LEFT_PANEL_WIDTH = 260;
+const LEFT_PANEL_WIDTH = 320;
 const getFloatingOpenKey = (paneId: string) => `ws_floatingCodeOpen:${paneId}`;
 const TEAM_TERMINAL_CHILDREN_KEY = 'ws_teamTerminalChildren';
 const TEAM_TERMINAL_ACTIVE_KEY = 'ws_teamTerminalActive';
@@ -84,6 +84,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [mouseMode, setMouseMode] = useState<'on' | 'off'>('off');
   const [isRestarting, setIsRestarting] = useState(false);
   const [agents, set智能体] = useState<any[]>([]);
+  const [boundAgents, setBoundAgents] = useState<any[]>([]);
+  const [pollStatuses, setPollStatuses] = useState<Record<string, any>>({});
   const [paneDetails, setPaneDetails] = useState<Record<string, any>>({});
   const [codeServerSrc, setCodeServerSrc] = useState('');
   const [floatingCodeOpen, setFloatingCodeOpen] = useState(() => cache.get(floatingOpenKey, false));
@@ -98,7 +100,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     window.open(next, '_blank');
     if (next !== codeServerSrc) { setCodeServerSrc(next); setCodeFolder(config.hostHome); }
   };
-  const isOpenClawPane = paneId === 'w-10001';
   const handleCodeServiceOpen = (folder?: string) => {
     const nextFolder = folder || codeFolder;
     if (!nextFolder || !token) return;
@@ -120,6 +121,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   };
   const [agentDetail, setAgentDetail] = useState<any>(null);
   const title = agentDetail?.title || '-';
+  const currentAgentType = normalizeAgentType(
+    agentDetail?.agent_type || paneDetails[paneId]?.agent_type || agents.find((a) => (a.pane_id || a.id || '').split(':')[0] === paneId)?.agent_type
+  );
+  const isOpenClawPane = currentAgentType === 'openclaw';
   const [netLatency, setNetLatency] = useState<number | null>(null);
   const isApiOnlyRuntime = !!(agentDetail && (agentDetail.runtime_kind === 'cloudrun' || agentDetail.capabilities?.supports_tmux === false));
 
@@ -184,7 +189,33 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }));
   }, [paneId]);
 
-  useEffect(() => { if (!token) return; apiService.getPanes().then(({ data }) => set智能体(Array.isArray(data) ? data : data?.panes || [])).catch(() => {}); }, [token]);
+  const refreshPanes = useCallback(async () => {
+    if (!token) return;
+    try {
+      const { data } = await apiService.getPanes();
+      set智能体(Array.isArray(data) ? data : data?.panes || []);
+      window.dispatchEvent(new CustomEvent('refresh-panes'));
+    } catch {}
+  }, [token]);
+  const refreshPoll = useCallback(async () => {
+    const t0 = performance.now();
+    try {
+      const { data } = await apiService.poll(paneId, { timeout: 1000 });
+      const latency = Math.round(performance.now() - t0);
+      setNetLatency(latency);
+      window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency } }));
+      setBoundAgents(Array.isArray(data?.agents) ? data.agents : []);
+      setPollStatuses(data?.statuses && typeof data.statuses === 'object' ? data.statuses : {});
+      const st = data?.statuses?.[fullPaneId] || data?.statuses?.[paneId];
+      if (st?.status) setStatus(st.status);
+      if (st?.title) setAgentDetail((prev: any) => prev ? { ...prev, title: st.title } : { title: st.title });
+      if (st?.contextUsage != null) setContextUsage(st.contextUsage);
+    } catch {
+      setNetLatency(null);
+      window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency: null } }));
+    }
+  }, [fullPaneId, paneId]);
+  useEffect(() => { void refreshPanes(); }, [refreshPanes, paneId]);
   useEffect(() => { 
     apiService.getPane(fullPaneId).then(({ data }) => { 
       setAgentDetail(data);
@@ -206,22 +237,19 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }
   }, [paneId]);
   useEffect(() => {
-    document.title = `${title} (${paneId}) | CiCy Code`;
-  }, [title, paneId]);
-  useEffect(() => {
+    let timer: number | null = null;
+    let cancelled = false;
     const poll = async () => {
-      const t0 = performance.now();
-      try {
-        const { data } = await apiService.getAllStatus({ timeout: 1000 });
-        setNetLatency(Math.round(performance.now() - t0));
-        const st = data?.[fullPaneId];
-        if (st?.status) setStatus(st.status);
-        if (st?.title) setAgentDetail((prev: any) => prev ? { ...prev, title: st.title } : { title: st.title });
-        if (st?.contextUsage != null) setContextUsage(st.contextUsage);
-      } catch { setNetLatency(null); }
+      await refreshPoll();
+      if (cancelled) return;
+      timer = window.setTimeout(poll, 1000);
     };
-    poll(); const id = setInterval(poll, 2000); return () => clearInterval(id);
-  }, [fullPaneId]);
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [refreshPoll]);
 
   // Toast listener
   useEffect(() => {
@@ -311,6 +339,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       setPaneDetails(prev => ({ ...prev, [settingsTargetPaneId]: data }));
     }).catch(() => {});
   }, [paneId, paneDetails, settingsTargetPaneId, token]);
+  useEffect(() => {
+    document.title = `${topBarTitle} (${topBarPaneId}) | CiCy Code`;
+  }, [topBarPaneId, topBarTitle]);
   useEffect(() => {
     if (!isEditingTopBarTitle) setTopBarTitleDraft(topBarTitle);
   }, [isEditingTopBarTitle, topBarTitle]);
@@ -448,7 +479,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <button onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 令牌"><Key className="w-3.5 h-3.5" /></button>
           <button onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 服务器"><Server className="w-3.5 h-3.5" /></button>
           <button onClick={() => window.dispatchEvent(new Event('open-devtools-panel'))} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="开发工具"><Bug className="w-3.5 h-3.5" /></button>
-          <span id="version" className="text-[10px] font-mono text-zinc-600">1.0.5</span>
+          <span id="version" className="text-[10px] font-mono text-zinc-600">1.0.7</span>
           {contextUsage != null && (
             <div data-id="context-usage" className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/[0.02]">
               <div data-id="context-bar" className="w-12 h-1 rounded-full bg-white/[0.04] overflow-hidden">
@@ -564,9 +595,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       <div className="absolute inset-0">
                         <TeamPanel
                           paneId={paneId}
+                          panes={agents}
+                          bindings={boundAgents}
+                          statuses={pollStatuses}
                           onOpenInCurrentPane={openPaneInCurrentTerminal}
                           openedPaneIds={current团队Children}
                           activePaneId={current团队Active}
+                          onRefreshPanes={refreshPanes}
+                          onRefreshPoll={refreshPoll}
                           onOpenSettingsPane={(targetPaneId) => {
                             openPaneInCurrentTerminal(targetPaneId);
                             setSettingsOpen(true);
@@ -575,7 +611,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       </div>
                     ) : (
                       <div className="absolute inset-0 overflow-auto">
-                        <SkillPanel paneId={fullPaneId} />
+                        <SkillPanel paneId={paneId} bindings={boundAgents} />
                       </div>
                     )}
                   </div>
@@ -776,7 +812,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
         onSelectAgent(id.split(':')[0]);
       }
     } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '创建工作实例失败' }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '创建员工失败' }));
     } finally { setAdding(false); }
   };
 
@@ -835,7 +871,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
             </div>
             <button onClick={() => setCreateDialogOpen(true)} disabled={adding}
               className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-[var(--vsc-border)] text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-              title="添加工作实例">
+              title="添加员工">
               <Plus className="w-4 h-4" />
             </button>
           </div>
@@ -928,13 +964,12 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
                   </div>
                   <div className="flex items-center gap-3 flex-1 min-w-0 text-left">
                     <AgentListAvatar agentType={agent.agent_type} title={agent.title || shortId} />
-                    <div className="flex-1 min-w-0 pr-7">
-                      <div className="flex items-center gap-1.5">
-                        <h3 className={cn("text-sm font-medium truncate", isActive ? "text-blue-300" : "text-zinc-300")}>{agent.title || shortId}</h3>
-                        <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", agent.active ? "bg-emerald-500/60" : "bg-zinc-700")} />
-                      </div>
-                      <p className={cn("text-xs font-mono mt-0.5 truncate", isActive ? "text-blue-400/50" : "text-zinc-600")}>{shortId}</p>
-                    </div>
+	                    <div className="flex-1 min-w-0 pr-7">
+	                      <div className="flex items-center gap-1.5">
+	                        <h3 className={cn("text-sm font-medium truncate", isActive ? "text-blue-300" : "text-zinc-300")}>{agent.title || shortId}</h3>
+	                      </div>
+	                      <p className={cn("text-xs font-mono mt-0.5 truncate", isActive ? "text-blue-400/50" : "text-zinc-600")}>{shortId}</p>
+	                    </div>
                   </div>
                 </div>
               );
@@ -947,7 +982,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
         submitting={adding}
         onClose={() => setCreateDialogOpen(false)}
         onSubmit={handleQuickAddMaster}
-        title="创建工作实例"
+        title="创建员工"
         submitLabel="创建"
       />
     </>

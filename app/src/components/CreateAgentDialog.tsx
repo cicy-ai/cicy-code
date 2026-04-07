@@ -21,13 +21,12 @@ const AGENT_TYPE_OPTIONS = [
   { value: 'openclaw', label: 'OpenClaw', icon: null },
   { value: 'codex', label: 'Codex', icon: '/assets/logos/openai.svg' },
   { value: 'claude', label: 'Claude', icon: '/assets/logos/claude-symbol.svg' },
-  { value: 'opencode', label: 'OpenCode', icon: '/assets/logos/opencode.svg' },
 ] as const;
 
 const DEFAULT_VALUES: CreateAgentValues = {
   title: '',
   agent_type: 'codex',
-  allow_all_actions: false,
+  allow_all_actions: true,
   reply_in_chinese: true,
 };
 
@@ -36,7 +35,7 @@ export default function CreateAgentDialog({
   submitting = false,
   onClose,
   onSubmit,
-  title = '新建工作实例',
+  title = '新建员工',
   submitLabel = '创建',
 }: Props) {
   const [values, setValues] = useState<CreateAgentValues>(DEFAULT_VALUES);
@@ -74,7 +73,7 @@ export default function CreateAgentDialog({
         <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
           <div>
             <h2 className="text-[15px] font-semibold text-white">{title}</h2>
-            <p className="mt-0.5 text-[11px] text-zinc-600">设置标题、智能体类型和权限</p>
+            <p className="mt-0.5 text-[11px] text-zinc-600">设置员工名称、智能体类型和权限</p>
           </div>
           <button
             type="button"
@@ -89,13 +88,13 @@ export default function CreateAgentDialog({
 
         <div className="space-y-5 px-5 py-5">
           <div>
-            <label className="mb-1.5 block text-[13px] font-medium text-zinc-300">标题</label>
+            <label className="mb-1.5 block text-[13px] font-medium text-zinc-300">员工名称</label>
             <input
               autoFocus
               type="text"
               value={values.title}
               onChange={(e) => set({ title: e.target.value })}
-              placeholder="输入工作实例标题"
+              placeholder="输入员工名称，如：营销经理"
               className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 outline-none transition-all placeholder:text-zinc-700 focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/20"
             />
           </div>
@@ -115,11 +114,11 @@ export default function CreateAgentDialog({
                   }`}
                 >
                   {option.icon ? (
-                    <div className={`flex items-center justify-center rounded ${option.value === 'opencode' ? 'h-6 w-6 bg-transparent' : 'h-5 w-5 bg-zinc-400'}`}>
+                    <div className="flex h-5 w-5 items-center justify-center rounded bg-zinc-400">
                       <img
                         src={option.icon}
                         alt={option.label}
-                        className={option.value === 'opencode' ? 'h-6 w-6 object-contain' : 'h-4 w-4'}
+                        className="h-4 w-4"
                       />
                     </div>
                   ) : (
@@ -136,7 +135,7 @@ export default function CreateAgentDialog({
           <div className="flex items-center justify-between py-1">
             <div>
               <p className="text-[13px] font-medium text-zinc-300">启动时允许所有操作</p>
-              <p className="mt-0.5 text-[11px] text-zinc-600">Codex/Claude 追加危险参数，OpenCode 使用 allow 权限配置</p>
+              <p className="mt-0.5 text-[11px] text-zinc-600">Codex/Claude 追加危险参数</p>
             </div>
             <button
               type="button"

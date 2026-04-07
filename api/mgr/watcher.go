@@ -40,11 +40,11 @@ var (
 		regexp.MustCompile(`█▀▀█ █▀▀█ █▀▀█`),
 		regexp.MustCompile(`(?i)Ask anything`),
 	}
-	spinnerRe     = regexp.MustCompile(`[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]`)
-	idlePromptRe  = regexp.MustCompile(`\d+%?\s*!?>\s`)
-	ctxRe         = regexp.MustCompile(`(\d+)%?\s*!?>\s*$`)
-	credRe    = regexp.MustCompile(`Credits:\s*([\d.]+)`)
-	elapRe    = regexp.MustCompile(`Time:\s*(\d+)s`)
+	spinnerRe    = regexp.MustCompile(`[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]`)
+	idlePromptRe = regexp.MustCompile(`\d+%?\s*!?>\s`)
+	ctxRe        = regexp.MustCompile(`(\d+)%?\s*!?>\s*$`)
+	credRe       = regexp.MustCompile(`Credits:\s*([\d.]+)`)
+	elapRe       = regexp.MustCompile(`Time:\s*(\d+)s`)
 )
 
 func initWatcher() {
@@ -360,6 +360,20 @@ func autoAction(pid string, st paneSt) {
 	}
 }
 
+func shouldLogWatcherStatus(prev, next string) bool {
+	prev = strings.TrimSpace(prev)
+	next = strings.TrimSpace(next)
+	if prev == next {
+		return false
+	}
+	// Suppress noisy spinner transitions like:
+	// thinking -> "", "" -> thinking, thinking -> idle, idle -> thinking.
+	if prev == "thinking" || next == "thinking" {
+		return false
+	}
+	return next != ""
+}
+
 func ensurePipe(paneID string) bool {
 	target := paneID
 	if !strings.Contains(target, ":") {
@@ -412,7 +426,9 @@ func fullSyncOnce() {
 		if exec.Command("tmux", "has-session", "-t", session).Run() != nil {
 			log.Printf("[watcher] session %s missing, creating locally", session)
 			ws := cfg["workspace"]
-			if ws == "" { ws = os.Getenv("HOME") }
+			if ws == "" {
+				ws = os.Getenv("HOME")
+			}
 			ws = strings.Replace(ws, "~", os.Getenv("HOME"), 1)
 			exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", ws).Run()
 		}
@@ -482,12 +498,14 @@ func processOne(paneID string) {
 
 	// Only log on status change to avoid log spam
 	if oldRaw != nil {
-		var prev struct{ Status string `json:"status"` }
+		var prev struct {
+			Status string `json:"status"`
+		}
 		json.Unmarshal(oldRaw, &prev)
-		if st.Status != nil && *st.Status != prev.Status {
+		if st.Status != nil && shouldLogWatcherStatus(prev.Status, *st.Status) {
 			log.Printf("[watcher] %s: %s → %s", paneID, prev.Status, *st.Status)
 		}
-	} else if st.Status != nil && *st.Status != "" {
+	} else if st.Status != nil && shouldLogWatcherStatus("", *st.Status) {
 		log.Printf("[watcher] %s: %s", paneID, *st.Status)
 	}
 	autoAction(paneID, st)
