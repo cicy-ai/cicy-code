@@ -433,7 +433,7 @@ def run_checked(cmd, cwd=None, env=None):
 def get_pid_on_port(port):
     try:
         result = subprocess.run(
-            ["lsof", "-ti", f"TCP:{port}"],
+            ["lsof", "-ti", f"TCP:{port}", "-sTCP:LISTEN"],
             capture_output=True, text=True
         )
         return result.stdout.strip().split("\n")[0] if result.stdout.strip() else None

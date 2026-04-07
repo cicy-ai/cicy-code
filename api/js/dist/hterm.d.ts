@@ -6,6 +6,8 @@ export declare class Hterm {
     columns: number;
     rows: number;
     message: string;
+    suppressNextSigintFromCopy: boolean;
+    copyShortcutListener: (event: KeyboardEvent) => void;
     constructor(elem: HTMLElement);
     info(): {
         columns: number;
