@@ -13,14 +13,31 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // enterDelay is the pause between sending text and pressing Enter.
 // Heavy TUIs (Copilot, OpenCode) need time to render text in the input buffer.
 // TODO: make this per-agent-type once agent detection is reliable.
 const enterDelay = 600 * time.Millisecond
+const chunkedPromptRuneSize = 80
+const chunkedPromptChunkDelay = 30 * time.Millisecond
+const chunkedPromptEnterDelay = 1 * time.Second
+const promptConfirmPollInterval = 150 * time.Millisecond
+const codexPromptConfirmPollInterval = 60 * time.Millisecond
+const codexPromptConfirmStabilizeDelay = 40 * time.Millisecond
+const promptConfirmTimeout = 5 * time.Second
+const promptConfirmCaptureStart = "-160"
+const agentReadyPollInterval = 500 * time.Millisecond
+const codexAgentReadyPollInterval = 120 * time.Millisecond
+const agentReadyTimeout = 90 * time.Second
+const submitConfirmPollInterval = 200 * time.Millisecond
+const codexSubmitConfirmPollInterval = 80 * time.Millisecond
+const submitConfirmTimeout = 4 * time.Second
+const submitEnterRetryLimit = 2
 const startupPromptBatchWindow = 5 * time.Second
 const startupPromptCooldown = 15 * time.Second
+const directPromptRuneThreshold = 600
 
 type startupPromptTask struct {
 	paneID    string
@@ -36,6 +53,12 @@ type startupPromptQueue struct {
 	seqByPane map[string]int64
 }
 
+type tmuxSendTrace struct {
+	ID        string
+	PaneID    string
+	AgentType string
+}
+
 var replyInChineseStartupQueue = func() *startupPromptQueue {
 	q := &startupPromptQueue{
 		pending:   map[string]startupPromptTask{},
@@ -44,6 +67,67 @@ var replyInChineseStartupQueue = func() *startupPromptQueue {
 	q.cond = sync.NewCond(&q.mu)
 	return q
 }()
+
+var tmuxSendTraceMu sync.Mutex
+
+func newTmuxSendTrace(paneID, agentType string) *tmuxSendTrace {
+	return &tmuxSendTrace{
+		ID:        fmt.Sprintf("%d-%s", time.Now().UTC().UnixNano(), strings.ReplaceAll(shortPaneID(paneID), ":", "_")),
+		PaneID:    normPaneID(paneID),
+		AgentType: normalizeAgentType(agentType),
+	}
+}
+
+func tmuxSendTraceLogPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join(os.TempDir(), "cicy-tmux-send.log")
+	}
+	return filepath.Join(home, ".cicy", "tmux-send.log")
+}
+
+func (t *tmuxSendTrace) logStep(step string, meta map[string]any, body string) {
+	if t == nil {
+		return
+	}
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta["trace_id"] = t.ID
+	meta["pane_id"] = shortPaneID(t.PaneID)
+	meta["agent_type"] = t.AgentType
+	meta["step"] = step
+	meta["ts"] = time.Now().UTC().Format(time.RFC3339Nano)
+	metaJSON, _ := json.Marshal(meta)
+
+	var b strings.Builder
+	b.Write(metaJSON)
+	b.WriteByte('\n')
+	if body != "" {
+		b.WriteString("<<<\n")
+		b.WriteString(body)
+		if !strings.HasSuffix(body, "\n") {
+			b.WriteByte('\n')
+		}
+		b.WriteString(">>>\n")
+	}
+
+	path := tmuxSendTraceLogPath()
+	_ = os.MkdirAll(filepath.Dir(path), 0755)
+	tmuxSendTraceMu.Lock()
+	defer tmuxSendTraceMu.Unlock()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.Printf("[tmux-send-trace] id=%s step=%s log-open-error=%v", t.ID, step, err)
+		return
+	}
+	defer f.Close()
+	if _, err := f.WriteString(b.String()); err != nil {
+		log.Printf("[tmux-send-trace] id=%s step=%s log-write-error=%v", t.ID, step, err)
+		return
+	}
+	log.Printf("[tmux-send-trace] id=%s pane=%s step=%s", t.ID, shortPaneID(t.PaneID), step)
+}
 
 func paneStartupPromptOrder(paneID string) int {
 	shortID := shortPaneID(paneID)
@@ -233,6 +317,8 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 		AllowAllActions bool    `json:"allow_all_actions"`
 		ReplyInChinese  bool    `json:"reply_in_chinese"`
 	}
+	req.AllowAllActions = true
+	req.ReplyInChinese = true
 	readBody(r, &req)
 	token := getToken(r)
 
@@ -842,6 +928,7 @@ EOF`, tmuxShellQuote(approvalsPath)))
 			ensureAgentCommandLine("claude", "Claude Code", claudeInstallCmd(), installLog),
 			fmt.Sprintf("export ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
 			fmt.Sprintf("export CLAUDE_SETTINGS_PATH=%s", tmuxShellQuote(settingsPath)),
+			fmt.Sprintf("export CICY_DEFAULT_CLAUDE_MODEL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_DEFAULT_CLAUDE_MODEL")))),
 			`node - <<'EOF'
 const fs = require("fs");
 const path = process.env.CLAUDE_SETTINGS_PATH;
@@ -852,22 +939,40 @@ const config = {
     ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL || "",
   },
 };
+const model = String(process.env.CICY_DEFAULT_CLAUDE_MODEL || "").trim();
+if (model) {
+  config.model = model;
+}
 fs.writeFileSync(path, JSON.stringify(config, null, 2));
 EOF`,
 		}
 		if allowAllActions {
-			lines = append(lines, `ensure_claude_bypass_user() {
-  if ! id -u node >/dev/null 2>&1; then
-    echo '[cicy] node user missing; cannot start Claude bypass mode.'
-    return 1
+			lines = append(lines, `resolve_claude_bypass_user() {
+  if [ "$(id -u)" -ne 0 ]; then
+    export CLAUDE_BYPASS_USER="$(id -un)"
+    export CLAUDE_BYPASS_HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"
+    return 0
   fi
-  chmod 711 /root 2>/dev/null || true
-  mkdir -p /home/node/.claude /home/node/.config /home/node/.cache
-  chown -R node:node "$WORKSPACE" /home/node/.claude /home/node/.config /home/node/.cache
+  for candidate in cicy node; do
+    if id -u "$candidate" >/dev/null 2>&1; then
+      export CLAUDE_BYPASS_USER="$candidate"
+      export CLAUDE_BYPASS_HOME="$(getent passwd "$candidate" | cut -d: -f6)"
+      chmod 711 /root 2>/dev/null || true
+      mkdir -p "$CLAUDE_BYPASS_HOME/.claude" "$CLAUDE_BYPASS_HOME/.config" "$CLAUDE_BYPASS_HOME/.cache"
+      chown -R "$candidate:$candidate" "$WORKSPACE" "$CLAUDE_BYPASS_HOME/.claude" "$CLAUDE_BYPASS_HOME/.config" "$CLAUDE_BYPASS_HOME/.cache"
+      return 0
+    fi
+  done
+  export CLAUDE_BYPASS_USER=root
+  export CLAUDE_BYPASS_HOME=/root
 }`)
 			lines = append(lines,
-				"ensure_claude_bypass_user || return 1",
-				`runuser -u node -- env HOME=/home/node USER=node LOGNAME=node SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" CICY_API_KEY="$CICY_API_KEY" sh -lc 'cd "$WORKSPACE" && exec claude --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'`,
+				"resolve_claude_bypass_user || return 1",
+				`if [ "$CLAUDE_BYPASS_USER" = "$(id -un)" ]; then
+  env HOME="$CLAUDE_BYPASS_HOME" USER="$CLAUDE_BYPASS_USER" LOGNAME="$CLAUDE_BYPASS_USER" SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" CICY_API_KEY="$CICY_API_KEY" sh -lc 'cd "$WORKSPACE" && exec claude --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'
+else
+  runuser -u "$CLAUDE_BYPASS_USER" -- env HOME="$CLAUDE_BYPASS_HOME" USER="$CLAUDE_BYPASS_USER" LOGNAME="$CLAUDE_BYPASS_USER" SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" CICY_API_KEY="$CICY_API_KEY" sh -lc 'cd "$WORKSPACE" && exec claude --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'
+fi`,
 			)
 			return lines
 		}
@@ -878,12 +983,15 @@ EOF`,
 		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("opencode-install-%s.log", shortID))
 		baseConfigPath := filepath.Join(home, ".config", "opencode", "opencode.json")
 		configPath := fmt.Sprintf("/tmp/opencode-%s.json", shortID)
+		markerPath := lazyAgentMarkerPath("opencode", shortID)
 		lines := []string{
 			"mkdir -p ~/.cicy",
 			ensureAgentCommandLine("opencode", "OpenCode", opencodeInstallCmd(), installLog),
 			fmt.Sprintf("export OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
 			fmt.Sprintf("export OPENCODE_BASE_CONFIG=%s", tmuxShellQuote(baseConfigPath)),
 			fmt.Sprintf("export OPENCODE_CONFIG=%s", tmuxShellQuote(configPath)),
+			fmt.Sprintf("export CICY_OPENCODE_MARKER=%s", tmuxShellQuote(markerPath)),
+			`rm -f "$CICY_OPENCODE_MARKER"`,
 		}
 		if allowAllActions {
 			lines = append(lines, `node - <<'EOF'
@@ -910,7 +1018,22 @@ delete cfg.provider.shibacc;
 cfg.permission = "allow";
 fs.writeFileSync(dst, JSON.stringify(cfg, null, 2));
 EOF`)
-			lines = append(lines, "opencode")
+			lines = append(lines, `cicy_start_opencode() {
+  if [ -f "$CICY_OPENCODE_MARKER" ]; then
+    echo '[cicy] OpenCode is already starting or running.'
+    return 0
+  fi
+  : > "$CICY_OPENCODE_MARKER"
+  opencode
+  status=$?
+  rm -f "$CICY_OPENCODE_MARKER"
+  echo '[cicy] OpenCode exited. Run cicy_start_opencode to relaunch.'
+  return "$status"
+}`)
+			lines = append(lines,
+				`echo '[cicy] OpenCode is installed but not auto-started to save resources.'`,
+				`echo '[cicy] Send a message from the UI or run cicy_start_opencode to launch it.'`,
+			)
 			return lines
 		}
 		lines = append(lines, `node - <<'EOF'
@@ -936,7 +1059,22 @@ delete cfg.provider.shibacc;
 	}
 fs.writeFileSync(dst, JSON.stringify(cfg, null, 2));
 EOF`)
-		lines = append(lines, "opencode")
+		lines = append(lines, `cicy_start_opencode() {
+  if [ -f "$CICY_OPENCODE_MARKER" ]; then
+    echo '[cicy] OpenCode is already starting or running.'
+    return 0
+  fi
+  : > "$CICY_OPENCODE_MARKER"
+  opencode
+  status=$?
+  rm -f "$CICY_OPENCODE_MARKER"
+  echo '[cicy] OpenCode exited. Run cicy_start_opencode to relaunch.'
+  return "$status"
+}`)
+		lines = append(lines,
+			`echo '[cicy] OpenCode is installed but not auto-started to save resources.'`,
+			`echo '[cicy] Send a message from the UI or run cicy_start_opencode to launch it.'`,
+		)
 		return lines
 	default:
 		return nil
@@ -1012,31 +1150,44 @@ func isCodexTrustPrompt(out string) bool {
 }
 
 func isCodexInputReady(out string) bool {
-	if isCodexTrustPrompt(out) {
-		return false
+	// Newer Codex UI often no longer keeps the initial "OpenAI Codex (v...)"
+	// header in the visible capture. Treat the active prompt + status footer as ready.
+	if strings.Contains(out, "› ") &&
+		strings.Contains(out, "· ") &&
+		strings.Contains(out, "% left") &&
+		(strings.Contains(out, "~/") || strings.Contains(out, "/workers/")) {
+		return true
 	}
-	return strings.Contains(out, "OpenAI Codex (v") &&
+	if strings.Contains(out, "OpenAI Codex (v") &&
 		(strings.Contains(out, "directory:") ||
 			strings.Contains(out, "~/workers/") ||
 			strings.Contains(out, "model:")) &&
 		(strings.Contains(out, "/model to change") ||
 			strings.Contains(out, "Use /skills to list available skills") ||
 			strings.Contains(out, "100% left") ||
-			strings.Contains(out, "› "))
+			strings.Contains(out, "› ")) {
+		return true
+	}
+	if isCodexTrustPrompt(out) {
+		return false
+	}
+	return false
 }
 
 func isOpenCodeInputReady(out string) bool {
 	return strings.Contains(out, "OpenCode ") &&
 		(strings.Contains(out, "ctrl+p commands") ||
 			strings.Contains(out, "Ask anything") ||
-			strings.Contains(out, "Build  ") ||
-			strings.Contains(out, "~/workers/"))
+			strings.Contains(out, "Build  "))
 }
 
 func isOpenClawInputReady(out string) bool {
-	return strings.Contains(out, "OpenClaw ") &&
-		strings.Contains(out, "connected |") &&
-		strings.Contains(out, "session ")
+	lower := strings.ToLower(out)
+	return strings.Contains(lower, "openclaw tui") &&
+		(strings.Contains(lower, "session agent:main:") ||
+			strings.Contains(lower, "agent main | session ")) &&
+		(strings.Contains(lower, "connected |") ||
+			strings.Contains(lower, "connecting |"))
 }
 
 func isAgentInputReady(agentType, out string) bool {
@@ -1054,6 +1205,159 @@ func isAgentInputReady(agentType, out string) bool {
 	}
 }
 
+func hasLazyStartup(agentType string) bool {
+	switch normalizeAgentType(agentType) {
+	case "opencode":
+		return true
+	default:
+		return false
+	}
+}
+
+func lazyAgentMarkerPath(agentType, paneID string) string {
+	shortID := strings.Split(normPaneID(paneID), ":")[0]
+	switch normalizeAgentType(agentType) {
+	case "opencode":
+		return filepath.Join(os.TempDir(), fmt.Sprintf("opencode-running-%s", shortID))
+	default:
+		return ""
+	}
+}
+
+func ensurePaneReadyForSend(paneID string, trace *tmuxSendTrace) error {
+	paneID = normPaneID(paneID)
+	var agentType string
+	var replyInChinese int
+	if err := store.QueryRow("SELECT COALESCE(agent_type,''), COALESCE(reply_in_chinese,0) FROM agent_config WHERE pane_id=?", paneID).
+		Scan(&agentType, &replyInChinese); err != nil {
+		log.Printf("[lazy-agent] %s lookup skipped: %v", paneID, err)
+		if trace != nil {
+			trace.logStep("lookup-skipped", map[string]any{"error": err.Error()}, "")
+		}
+		return nil
+	}
+	if trace != nil && trace.AgentType == "" {
+		trace.AgentType = normalizeAgentType(agentType)
+	}
+	if err := ensureLazyAgentReady(paneID, agentType, replyInChinese != 0); err != nil {
+		if trace != nil {
+			trace.logStep("lazy-ready-error", map[string]any{"error": err.Error()}, "")
+		}
+		return err
+	}
+	return waitForAgentInputReady(paneID, agentType, trace)
+}
+
+func ensureLazyAgentReady(paneID, agentType string, replyInChinese bool) error {
+	switch normalizeAgentType(agentType) {
+	case "opencode":
+		return ensureLazyOpenCodeReady(paneID, replyInChinese)
+	default:
+		return nil
+	}
+}
+
+func ensureLazyOpenCodeReady(paneID string, replyInChinese bool) error {
+	out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", "-160")
+	if err == nil && isOpenCodeInputReady(out) {
+		return nil
+	}
+
+	markerPath := lazyAgentMarkerPath("opencode", paneID)
+	startedNow := false
+	if markerPath != "" {
+		if _, statErr := os.Stat(markerPath); os.IsNotExist(statErr) {
+			log.Printf("[lazy-agent] %s starting opencode", paneID)
+			sendPaneText(paneID, "cicy_start_opencode")
+			startedNow = true
+		}
+	}
+
+	for i := 0; i < 120; i++ {
+		time.Sleep(500 * time.Millisecond)
+		out, err = runTmux("capture-pane", "-t", paneID, "-p", "-S", "-160")
+		if err != nil {
+			continue
+		}
+		if !isOpenCodeInputReady(out) {
+			continue
+		}
+		if startedNow && replyInChinese {
+			log.Printf("[lazy-agent] %s send reply_in_chinese after opencode start", paneID)
+			sendPaneText(paneID, "reply in chinese")
+			time.Sleep(800 * time.Millisecond)
+		}
+		return nil
+	}
+
+	return fmt.Errorf("pane %s opencode did not become ready in time", shortPaneID(paneID))
+}
+
+func waitForAgentInputReady(paneID, agentType string, trace *tmuxSendTrace) error {
+	agentType = normalizeAgentType(agentType)
+	if agentType == "" || agentType == "opencode" {
+		return nil
+	}
+	if trace != nil {
+		trace.logStep("ready-wait-start", map[string]any{}, "")
+	}
+	deadline := time.Now().Add(agentReadyTimeout)
+	var lastCapture string
+	for time.Now().Before(deadline) {
+		out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", promptConfirmCaptureStart)
+		if err == nil {
+			lastCapture = out
+		}
+		if err == nil && isAgentInputReady(agentType, out) {
+			if trace != nil {
+				trace.logStep("ready-wait-confirmed", map[string]any{}, out)
+			}
+			return nil
+		}
+		time.Sleep(agentReadyPollIntervalForAgent(agentType))
+	}
+	if trace != nil {
+		trace.logStep("ready-wait-timeout", map[string]any{}, lastCapture)
+	}
+	return fmt.Errorf("pane %s %s not ready for send", shortPaneID(paneID), agentType)
+}
+
+func agentReadyPollIntervalForAgent(agentType string) time.Duration {
+	switch normalizeAgentType(agentType) {
+	case "codex":
+		return codexAgentReadyPollInterval
+	default:
+		return agentReadyPollInterval
+	}
+}
+
+func promptConfirmPollIntervalForAgent(agentType string) time.Duration {
+	switch normalizeAgentType(agentType) {
+	case "codex":
+		return codexPromptConfirmPollInterval
+	default:
+		return promptConfirmPollInterval
+	}
+}
+
+func promptConfirmStabilizeDelayForAgent(agentType string) time.Duration {
+	switch normalizeAgentType(agentType) {
+	case "codex":
+		return codexPromptConfirmStabilizeDelay
+	default:
+		return promptConfirmPollIntervalForAgent(agentType)
+	}
+}
+
+func submitConfirmPollIntervalForAgent(agentType string) time.Duration {
+	switch normalizeAgentType(agentType) {
+	case "codex":
+		return codexSubmitConfirmPollInterval
+	default:
+		return submitConfirmPollInterval
+	}
+}
+
 func sendPaneText(paneID, text string) {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
@@ -1067,8 +1371,487 @@ func sendPaneText(paneID, text string) {
 	runTmux("send-keys", "-t", paneID, "Enter")
 }
 
+func promptPreview(text string) string {
+	line := text
+	if idx := strings.Index(line, "\n"); idx >= 0 {
+		line = line[:idx]
+	}
+	line = strings.TrimSpace(line)
+	runes := []rune(line)
+	if len(runes) > 80 {
+		return string(runes[:80]) + "..."
+	}
+	return line
+}
+
+func promptLineCount(text string) int {
+	if text == "" {
+		return 0
+	}
+	return strings.Count(text, "\n") + 1
+}
+
+func logPromptSend(paneID, mode, text string) {
+	log.Printf("[tmux-send] pane=%s mode=%s lines=%d runes=%d preview=%q",
+		shortPaneID(paneID),
+		mode,
+		promptLineCount(text),
+		utf8.RuneCountInString(text),
+		promptPreview(text),
+	)
+}
+
+func shouldPastePromptText(text string) bool {
+	return utf8.RuneCountInString(text) > directPromptRuneThreshold
+}
+
+func splitTextByRunes(text string, size int) []string {
+	if size <= 0 || text == "" {
+		return []string{text}
+	}
+	runes := []rune(text)
+	if len(runes) <= size {
+		return []string{text}
+	}
+	parts := make([]string, 0, (len(runes)+size-1)/size)
+	for start := 0; start < len(runes); start += size {
+		end := start + size
+		if end > len(runes) {
+			end = len(runes)
+		}
+		parts = append(parts, string(runes[start:end]))
+	}
+	return parts
+}
+
+func sendPromptChunked(paneID, text string) error {
+	parts := splitTextByRunes(text, chunkedPromptRuneSize)
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		if _, err := runTmux("send-keys", "-t", paneID, "-l", part); err != nil {
+			return err
+		}
+		if i < len(parts)-1 {
+			time.Sleep(chunkedPromptChunkDelay)
+		}
+	}
+	return nil
+}
+
+func sendPromptText(paneID, text string, trace *tmuxSendTrace) (string, error) {
+	mode := "literal"
+	if shouldPastePromptText(text) {
+		mode = "chunked"
+	}
+	logPromptSend(paneID, mode, text)
+	if trace != nil {
+		trace.logStep("send-text", map[string]any{
+			"mode":       mode,
+			"line_count": promptLineCount(text),
+			"rune_count": utf8.RuneCountInString(text),
+			"chunks":     len(splitTextByRunes(text, chunkedPromptRuneSize)),
+		}, text)
+	}
+	if mode == "chunked" {
+		return mode, sendPromptChunked(paneID, text)
+	}
+	_, err := runTmux("send-keys", "-t", paneID, "-l", text)
+	return mode, err
+}
+
+func sendPromptEnter(paneID string) error {
+	_, err := runTmux("send-keys", "-t", paneID, "Enter")
+	return err
+}
+
+func paneAgentType(paneID string) string {
+	var agentType string
+	if err := store.QueryRow("SELECT COALESCE(agent_type,'') FROM agent_config WHERE pane_id=?", normPaneID(paneID)).Scan(&agentType); err != nil {
+		return ""
+	}
+	return normalizeAgentType(agentType)
+}
+
+func shouldConfirmPromptBeforeEnter(paneID, agentType string) bool {
+	if !strings.HasSuffix(normPaneID(paneID), ":main.0") {
+		return false
+	}
+	switch normalizeAgentType(agentType) {
+	case "codex", "claude", "openclaw":
+		return true
+	default:
+		return false
+	}
+}
+
+func capturePromptConfirmPane(paneID string) (string, error) {
+	return runTmux("capture-pane", "-t", paneID, "-p", "-J", "-S", promptConfirmCaptureStart)
+}
+
+func normalizePromptEchoText(s string) string {
+	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(s))), " ")
+}
+
+func trimPromptFragmentRunes(s string, max int, fromEnd bool) string {
+	runes := []rune(strings.TrimSpace(s))
+	if max <= 0 || len(runes) <= max {
+		return string(runes)
+	}
+	if fromEnd {
+		return string(runes[len(runes)-max:])
+	}
+	return string(runes[:max])
+}
+
+func promptEchoFragments(text string) []string {
+	add := func(dst []string, seen map[string]struct{}, s string) []string {
+		s = normalizePromptEchoText(s)
+		if s == "" {
+			return dst
+		}
+		if _, ok := seen[s]; ok {
+			return dst
+		}
+		seen[s] = struct{}{}
+		return append(dst, s)
+	}
+
+	seen := map[string]struct{}{}
+	var fragments []string
+	normalized := normalizePromptEchoText(text)
+	if normalized == "" {
+		return nil
+	}
+
+	fragments = add(fragments, seen, normalized)
+	fragments = add(fragments, seen, trimPromptFragmentRunes(normalized, 96, false))
+	fragments = add(fragments, seen, trimPromptFragmentRunes(normalized, 96, true))
+
+	var nonEmptyLines []string
+	for _, line := range strings.Split(text, "\n") {
+		line = normalizePromptEchoText(line)
+		if line != "" {
+			nonEmptyLines = append(nonEmptyLines, line)
+		}
+	}
+	if len(nonEmptyLines) > 0 {
+		fragments = add(fragments, seen, nonEmptyLines[0])
+		fragments = add(fragments, seen, trimPromptFragmentRunes(nonEmptyLines[0], 96, false))
+	}
+	if len(nonEmptyLines) > 1 {
+		last := nonEmptyLines[len(nonEmptyLines)-1]
+		fragments = add(fragments, seen, last)
+		fragments = add(fragments, seen, trimPromptFragmentRunes(last, 96, true))
+	}
+	return fragments
+}
+
+func promptEchoVisible(before, after, text string) bool {
+	normBefore := normalizePromptEchoText(before)
+	normAfter := normalizePromptEchoText(after)
+	if normAfter == "" {
+		return false
+	}
+	for _, fragment := range promptEchoFragments(text) {
+		if fragment == "" {
+			continue
+		}
+		if strings.Count(normAfter, fragment) > strings.Count(normBefore, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+func pasteIndicatorCount(out, agentType string) int {
+	switch normalizeAgentType(agentType) {
+	case "codex":
+		return strings.Count(out, "[Pasted Content ")
+	case "claude", "openclaw":
+		return strings.Count(strings.ToLower(out), "pasted content")
+	default:
+		return 0
+	}
+}
+
+func promptEchoConfirmed(before, after, text, mode, agentType string) (string, bool) {
+	if promptEchoVisible(before, after, text) {
+		return "matched-text", true
+	}
+	if mode == "chunked" {
+		beforePasteCount := pasteIndicatorCount(before, agentType)
+		afterPasteCount := pasteIndicatorCount(after, agentType)
+		if afterPasteCount > beforePasteCount {
+			return "matched-paste-indicator", true
+		}
+	}
+	return "", false
+}
+
+func normalizeNonEmptyMeaningfulLines(lines []string) []string {
+	var out []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.Trim(trimmed, "─━═- ") == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func openClawInputBoxContainsText(out, text string) bool {
+	lines := strings.Split(out, "\n")
+	var separators []int
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.Trim(trimmed, "─━═- ") == "" {
+			separators = append(separators, i)
+		}
+	}
+	if len(separators) < 2 {
+		return false
+	}
+	start := separators[len(separators)-2] + 1
+	end := separators[len(separators)-1]
+	if start >= end || start < 0 || end > len(lines) {
+		return false
+	}
+	box := normalizePromptEchoText(strings.Join(lines[start:end], "\n"))
+	if box == "" {
+		return false
+	}
+	for _, fragment := range promptEchoFragments(text) {
+		if fragment != "" && strings.Contains(box, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+func lineContainsPromptFragment(line string, text string) bool {
+	normLine := normalizePromptEchoText(line)
+	if normLine == "" {
+		return false
+	}
+	for _, fragment := range promptEchoFragments(text) {
+		if fragment != "" && strings.Contains(normLine, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+func codexSubmitConfirmed(out, text string) bool {
+	lines := strings.Split(out, "\n")
+	lastPromptLine := -1
+	for i, line := range lines {
+		if lineContainsPromptFragment(line, text) {
+			lastPromptLine = i
+		}
+	}
+	if lastPromptLine < 0 {
+		return false
+	}
+	for _, line := range lines[lastPromptLine+1:] {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "• ") {
+			return true
+		}
+		if strings.HasPrefix(trimmed, "›") && !lineContainsPromptFragment(line, text) {
+			return true
+		}
+	}
+	return false
+}
+
+func claudeSubmitConfirmed(out, text string) bool {
+	lines := strings.Split(out, "\n")
+	lastPromptLine := -1
+	for i, line := range lines {
+		if lineContainsPromptFragment(line, text) {
+			lastPromptLine = i
+		}
+	}
+	if lastPromptLine < 0 {
+		return false
+	}
+	for _, line := range lines[lastPromptLine+1:] {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "● ") {
+			return true
+		}
+		if strings.HasPrefix(trimmed, "❯") && !lineContainsPromptFragment(line, text) {
+			return true
+		}
+	}
+	return false
+}
+
+func openClawIdleStatusVisible(out string) bool {
+	lower := strings.ToLower(out)
+	return strings.Contains(lower, "connected | idle") &&
+		strings.Contains(lower, "agent main | session")
+}
+
+func openClawSubmitConfirmed(out, text string) bool {
+	if openClawInputBoxContainsText(out, text) {
+		return false
+	}
+	if openClawIdleStatusVisible(out) {
+		return true
+	}
+	lines := normalizeNonEmptyMeaningfulLines(strings.Split(out, "\n"))
+	lastPromptLine := -1
+	for i, line := range lines {
+		if lineContainsPromptFragment(line, text) {
+			lastPromptLine = i
+		}
+	}
+	return lastPromptLine >= 0 && lastPromptLine < len(lines)-1
+}
+
+func promptSubmitConfirmed(after, text, agentType string) bool {
+	switch normalizeAgentType(agentType) {
+	case "codex":
+		return codexSubmitConfirmed(after, text)
+	case "claude":
+		return claudeSubmitConfirmed(after, text)
+	case "openclaw":
+		return openClawSubmitConfirmed(after, text)
+	default:
+		return false
+	}
+}
+
+func waitForPromptEchoBeforeEnter(paneID, agentType, text, mode, baseline string, trace *tmuxSendTrace) (string, error) {
+	pollInterval := promptConfirmPollIntervalForAgent(agentType)
+	stabilizeDelay := promptConfirmStabilizeDelayForAgent(agentType)
+	deadline := time.Now().Add(promptConfirmTimeout)
+	var lastCapture string
+	var lastErr error
+	attempt := 0
+	for time.Now().Before(deadline) {
+		attempt++
+		out, err := capturePromptConfirmPane(paneID)
+		if err != nil {
+			lastErr = err
+			if trace != nil {
+				trace.logStep("pre-submit-capture-error", map[string]any{"attempt": attempt, "error": err.Error()}, "")
+			}
+			time.Sleep(pollInterval)
+			continue
+		}
+		lastCapture = out
+		if trace != nil {
+			match, ok := promptEchoConfirmed(baseline, out, text, mode, agentType)
+			trace.logStep("pre-submit-capture", map[string]any{"attempt": attempt, "matched": ok, "match_kind": match}, out)
+		}
+		if match, ok := promptEchoConfirmed(baseline, out, text, mode, agentType); ok {
+			time.Sleep(stabilizeDelay)
+			out2, err := capturePromptConfirmPane(paneID)
+			if err != nil {
+				lastErr = err
+				if trace != nil {
+					trace.logStep("pre-submit-capture2-error", map[string]any{"attempt": attempt, "error": err.Error()}, "")
+				}
+				continue
+			}
+			lastCapture = out2
+			if trace != nil {
+				_, ok2 := promptEchoConfirmed(baseline, out2, text, mode, agentType)
+				trace.logStep("pre-submit-capture2", map[string]any{"attempt": attempt, "matched": ok2, "match_kind": match}, out2)
+			}
+			if _, ok := promptEchoConfirmed(baseline, out2, text, mode, agentType); ok {
+				log.Printf("[tmux-send] pane=%s confirm=%s confirm2=matched agent=%s mode=%s preview=%q",
+					shortPaneID(paneID), match, normalizeAgentType(agentType), mode, promptPreview(text))
+				return match, nil
+			}
+			log.Printf("[tmux-send] pane=%s confirm=%s confirm2=miss agent=%s mode=%s preview=%q",
+				shortPaneID(paneID), match, normalizeAgentType(agentType), mode, promptPreview(text))
+		}
+		time.Sleep(pollInterval)
+	}
+	if lastErr != nil {
+		return "", fmt.Errorf("prompt echo confirm failed for %s: %w", shortPaneID(paneID), lastErr)
+	}
+	if lastCapture != "" {
+		log.Printf("[tmux-send] pane=%s confirm=timeout agent=%s mode=%s preview=%q tail=%q",
+			shortPaneID(paneID), normalizeAgentType(agentType), mode, promptPreview(text), promptPreview(lastCapture))
+	}
+	return "", fmt.Errorf("prompt echo not confirmed for %s", shortPaneID(paneID))
+}
+
+func submitPromptWithConfirmation(paneID, agentType, text string, trace *tmuxSendTrace) error {
+	pollInterval := submitConfirmPollIntervalForAgent(agentType)
+	var lastCapture string
+	var lastErr error
+	for attempt := 0; attempt <= submitEnterRetryLimit; attempt++ {
+		if attempt > 0 {
+			log.Printf("[tmux-send] pane=%s submit=retry attempt=%d agent=%s preview=%q",
+				shortPaneID(paneID), attempt+1, normalizeAgentType(agentType), promptPreview(text))
+		}
+		if trace != nil {
+			trace.logStep("submit-enter", map[string]any{"attempt": attempt + 1}, "")
+		}
+		if err := sendPromptEnter(paneID); err != nil {
+			if trace != nil {
+				trace.logStep("submit-enter-error", map[string]any{"attempt": attempt + 1, "error": err.Error()}, "")
+			}
+			return fmt.Errorf("failed to submit text: %w", err)
+		}
+		deadline := time.Now().Add(submitConfirmTimeout)
+		captureAttempt := 0
+		for time.Now().Before(deadline) {
+			captureAttempt++
+			out, err := capturePromptConfirmPane(paneID)
+			if err != nil {
+				lastErr = err
+				if trace != nil {
+					trace.logStep("post-submit-capture-error", map[string]any{"attempt": attempt + 1, "capture_attempt": captureAttempt, "error": err.Error()}, "")
+				}
+				time.Sleep(pollInterval)
+				continue
+			}
+			lastCapture = out
+			if trace != nil {
+				trace.logStep("post-submit-capture", map[string]any{
+					"attempt":         attempt + 1,
+					"capture_attempt": captureAttempt,
+					"confirmed":       promptSubmitConfirmed(out, text, agentType),
+				}, out)
+			}
+			if promptSubmitConfirmed(out, text, agentType) {
+				log.Printf("[tmux-send] pane=%s submit=confirmed agent=%s preview=%q",
+					shortPaneID(paneID), normalizeAgentType(agentType), promptPreview(text))
+				return nil
+			}
+			time.Sleep(pollInterval)
+		}
+	}
+	if lastErr != nil {
+		return fmt.Errorf("submit confirm failed for %s: %w", shortPaneID(paneID), lastErr)
+	}
+	if lastCapture != "" {
+		log.Printf("[tmux-send] pane=%s submit=timeout agent=%s preview=%q tail=%q",
+			shortPaneID(paneID), normalizeAgentType(agentType), promptPreview(text), promptPreview(lastCapture))
+	}
+	return fmt.Errorf("submit not confirmed for %s", shortPaneID(paneID))
+}
+
 func autoSendReplyInChinese(paneID, agentType string, enabled bool) {
 	if !enabled {
+		return
+	}
+	if hasLazyStartup(agentType) {
 		return
 	}
 	replyInChineseStartupQueue.enqueue(paneID, agentType)
@@ -1171,12 +1954,39 @@ func initPaneEnv(opts paneEnvOpts) {
 	shortID := strings.Split(pid, ":")[0]
 	// proxyURL := fmt.Sprintf("http://%s:x@127.0.0.1:17080", shortID)
 
+	// tmux panes inherit environment from the tmux server, not from the current
+	// cicy-code process. Sync runtime auth/config into the target session before
+	// sourcing the init script so agent boot code can see current values.
+	sessionEnv := map[string]string{
+		"CICY_API_KEY":                strings.TrimSpace(os.Getenv("CICY_API_KEY")),
+		"CICY_API_URL":                strings.TrimSpace(os.Getenv("CICY_API_URL")),
+		"CICY_ANTHROPIC_URL":          strings.TrimSpace(os.Getenv("CICY_ANTHROPIC_URL")),
+		"CICY_DEFAULT_CLAUDE_MODEL":   strings.TrimSpace(os.Getenv("CICY_DEFAULT_CLAUDE_MODEL")),
+		"CICY_DEFAULT_OPENCODE_MODEL": strings.TrimSpace(os.Getenv("CICY_DEFAULT_OPENCODE_MODEL")),
+		"CICY_CODEX_MODEL":            strings.TrimSpace(os.Getenv("CICY_CODEX_MODEL")),
+		"CICY_OPENCLAW_MODEL":         strings.TrimSpace(os.Getenv("CICY_OPENCLAW_MODEL")),
+	}
+	for key, value := range sessionEnv {
+		if value == "" {
+			_, _ = runTmux("set-environment", "-r", "-t", shortID, key)
+			continue
+		}
+		_, _ = runTmux("set-environment", "-t", shortID, key, value)
+	}
+
 	lines := []string{
 		"touch ~/.cicy_tmux.conf",
 		"source ~/.cicy_tmux.conf",
 		`export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"`,
 		fmt.Sprintf("export X_AGENT_ID=%s", tmuxShellQuote(pid)),
 		fmt.Sprintf("export X_AGENT_SHORT_ID=%s", tmuxShellQuote(shortID)),
+		fmt.Sprintf("export CICY_API_KEY=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_API_KEY")))),
+		fmt.Sprintf("export CICY_API_URL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_API_URL")))),
+		fmt.Sprintf("export CICY_ANTHROPIC_URL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_ANTHROPIC_URL")))),
+		fmt.Sprintf("export CICY_DEFAULT_CLAUDE_MODEL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_DEFAULT_CLAUDE_MODEL")))),
+		fmt.Sprintf("export CICY_DEFAULT_OPENCODE_MODEL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_DEFAULT_OPENCODE_MODEL")))),
+		fmt.Sprintf("export CICY_CODEX_MODEL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_CODEX_MODEL")))),
+		fmt.Sprintf("export CICY_OPENCLAW_MODEL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_OPENCLAW_MODEL")))),
 		fmt.Sprintf("export CICY_OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
 		fmt.Sprintf("export CICY_ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
 		//fmt.Sprintf("export HTTP_PROXY=%s", tmuxShellQuote(proxyURL)),
@@ -1275,19 +2085,71 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if text, ok := req["text"].(string); ok && text != "" {
-		lines := strings.Split(text, "\n")
-		for i, line := range lines {
-			line = strings.ReplaceAll(line, "'", "'\\''")
-			runTmux("send-keys", "-t", winID, "-l", line)
-			if i < len(lines)-1 {
-				time.Sleep(100 * time.Millisecond)
-				runTmux("send-keys", "-t", winID, "Enter")
+		text = strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+		if text == "" {
+			J(w, M{"error": "text required"})
+			return
+		}
+		agentType := paneAgentType(winID)
+		trace := newTmuxSendTrace(winID, agentType)
+		trace.logStep("request", map[string]any{
+			"line_count": promptLineCount(text),
+			"rune_count": utf8.RuneCountInString(text),
+		}, text)
+		if err := ensurePaneReadyForSend(winID, trace); err != nil {
+			trace.logStep("request-error", map[string]any{"error": err.Error()}, "")
+			J(w, M{"error": err.Error()})
+			return
+		}
+		confirmBeforeEnter := shouldConfirmPromptBeforeEnter(winID, agentType)
+		baseline := ""
+		if confirmBeforeEnter {
+			out, err := capturePromptConfirmPane(winID)
+			if err != nil {
+				log.Printf("[tmux-send] pane=%s confirm=baseline-capture-failed agent=%s err=%v",
+					shortPaneID(winID), agentType, err)
+				trace.logStep("baseline-capture-error", map[string]any{"error": err.Error()}, "")
+			} else {
+				baseline = out
+				trace.logStep("baseline-capture", map[string]any{}, out)
 			}
 		}
-		time.Sleep(enterDelay)
-		runTmux("send-keys", "-t", winID, "Enter")
+		mode, err := sendPromptText(winID, text, trace)
+		if err != nil {
+			trace.logStep("send-text-error", map[string]any{"error": err.Error()}, "")
+			J(w, M{"error": "failed to send text: " + err.Error()})
+			return
+		}
+		if confirmBeforeEnter {
+			if _, err := waitForPromptEchoBeforeEnter(winID, agentType, text, mode, baseline, trace); err != nil {
+				trace.logStep("pre-submit-failed", map[string]any{"error": err.Error()}, "")
+				J(w, M{"error": "failed to confirm text before submit: " + err.Error()})
+				return
+			}
+			if err := submitPromptWithConfirmation(winID, agentType, text, trace); err != nil {
+				trace.logStep("submit-failed", map[string]any{"error": err.Error()}, "")
+				J(w, M{"error": err.Error()})
+				return
+			}
+		} else {
+			delay := enterDelay
+			if mode == "chunked" {
+				delay = chunkedPromptEnterDelay
+			}
+			time.Sleep(delay)
+			if err := sendPromptEnter(winID); err != nil {
+				trace.logStep("submit-enter-error", map[string]any{"error": err.Error()}, "")
+				J(w, M{"error": "failed to submit text: " + err.Error()})
+				return
+			}
+		}
+		trace.logStep("request-complete", map[string]any{"mode": mode, "confirm_before_enter": confirmBeforeEnter}, "")
 	} else if keys, ok := req["keys"].(string); ok && keys != "" {
-		runTmux("send-keys", "-t", winID, keys)
+		log.Printf("[tmux-send] pane=%s mode=keys keys=%q", shortPaneID(winID), keys)
+		if _, err := runTmux("send-keys", "-t", winID, keys); err != nil {
+			J(w, M{"error": "failed to send keys: " + err.Error()})
+			return
+		}
 	}
 	J(w, M{"success": true, "win_id": shortPaneID(winID)})
 }

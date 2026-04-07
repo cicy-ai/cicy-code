@@ -78,6 +78,12 @@ export class Xterm {
         });
 
         this.term.open(elem, true);
+        this.term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+            if ((event.ctrlKey || event.metaKey) && !event.altKey && String(event.key).toLowerCase() === "c") {
+                return false;
+            }
+            return true;
+        });
 
         // Prevent tmux mouse mode from disabling text selection.
         // tmux sends \x1b[?1000h which makes xterm.js call selectionManager.disable().

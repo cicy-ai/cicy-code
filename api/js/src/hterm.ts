@@ -11,9 +11,12 @@ export class Hterm {
 
     // to "show" the current message when removeMessage() is called
     message: string;
+    suppressNextSigintFromCopy: boolean;
+    copyShortcutListener: (event: KeyboardEvent) => void;
 
     constructor(elem: HTMLElement) {
         this.elem = elem;
+        this.suppressNextSigintFromCopy = false;
         bare.hterm.defaultStorage = new bare.lib.Storage.Memory();
         this.term = new bare.hterm.Terminal();
         this.term.getPrefs().set("send-encoding", "raw");
@@ -21,6 +24,16 @@ export class Hterm {
 
         this.io = this.term.io.push();
         this.term.installKeyboard();
+
+        this.copyShortcutListener = (event: KeyboardEvent) => {
+            if ((event.ctrlKey || event.metaKey) && !event.altKey && String(event.key).toLowerCase() === "c") {
+                this.suppressNextSigintFromCopy = true;
+                setTimeout(() => {
+                    this.suppressNextSigintFromCopy = false;
+                }, 0);
+            }
+        };
+        this.elem.addEventListener("keydown", this.copyShortcutListener, true);
     };
 
     info(): { columns: number, rows: number } {
@@ -71,9 +84,17 @@ export class Hterm {
 
     onInput(callback: (input: string) => void) {
         this.io.onVTKeystroke = (data) => {
+            if (this.suppressNextSigintFromCopy && data === "\x03") {
+                this.suppressNextSigintFromCopy = false;
+                return;
+            }
             callback(data);
         };
         this.io.sendString = (data) => {
+            if (this.suppressNextSigintFromCopy && data === "\x03") {
+                this.suppressNextSigintFromCopy = false;
+                return;
+            }
             callback(data);
         };
     };
@@ -99,6 +120,7 @@ export class Hterm {
     }
 
     close(): void {
+        this.elem.removeEventListener("keydown", this.copyShortcutListener, true);
         this.term.uninstallKeyboard();
     }
 }
