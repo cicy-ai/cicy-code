@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -19,17 +20,17 @@ import (
 )
 
 var (
-	upgrader     = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-	publicMode   bool
-	devMode      bool
-	desktopMode  bool
-	auditMode    bool
-	cnMirror     bool
-	cloudRunMode bool
-	desktopCmd   *exec.Cmd
+	upgrader      = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	publicMode    bool
+	devMode       bool
+	desktopMode   bool
+	auditMode     bool
+	cnMirror      bool
+	containerMode bool
+	desktopCmd    *exec.Cmd
 )
 
-const version = "1.0.7"
+const version = "1.0.18"
 
 // agentsFlag holds --agents=openclaw,codex,claude,... for non-interactive setup
 var agentsFlag string
@@ -90,17 +91,18 @@ Environment:
 	store.Migrate()
 	defer store.Close()
 
-	cloudRunMode = isCloudRunRuntime()
-	if cloudRunMode {
+	containerMode = isContainerRuntime()
+	if containerMode {
 		publicMode = true
-		// Optional: only runs when master env vars are provided
-		startCloudRunRegisterLoop()
 	}
+	// Any managed runtime with master envs should self-register.
+	startContainerRegisterLoop()
 
 	checkEnv()
 
 	go startWatcher()
 	go startTmuxHealth()
+	startSystemResourceMonitor()
 	if _, err := syncMachinesFromConfig(); err != nil {
 		log.Printf("[machines] initial sync error: %v", err)
 	}
@@ -152,6 +154,7 @@ Environment:
 	http.HandleFunc("/api/chat/clients", wa(handleWsClients))
 	http.HandleFunc("/api/chat/debug", wa(handleChatDebug))
 	http.HandleFunc("/api/chat/webhook", corsM(handleChatWebhook))
+	http.HandleFunc("/api/openclaw/message/send", wa(handleOpenClawMessageSend))
 
 	// Stats
 	http.HandleFunc("/api/stats/traffic", wa(handleStatsTraffic))
@@ -166,6 +169,8 @@ Environment:
 		}
 		handleTrafficLive(w, r)
 	}))
+	http.HandleFunc("/api/system/resources", wa(handleSystemResources))
+	http.HandleFunc("/api/system/resources/ws", handleSystemResourcesWS)
 
 	// Notifications
 	http.HandleFunc("/api/notify", wa(handleNotify))
@@ -251,12 +256,12 @@ Environment:
 	http.HandleFunc("/api/tg/photo", wa(handleTGPhoto))
 
 	// Pair
-	http.HandleFunc("/api/pair", cloudRunUnsupported(handlePair))
-	http.HandleFunc("/api/tmux/pair", cloudRunUnsupported(handlePair))
+	http.HandleFunc("/api/pair", apiOnlyUnsupported(handlePair))
+	http.HandleFunc("/api/tmux/pair", apiOnlyUnsupported(handlePair))
 
 	// Desktop
-	http.HandleFunc("/api/desktop/status", cloudRunUnsupported(handleDesktopStatus))
-	http.HandleFunc("/api/desktop/proxy/", cloudRunUnsupported(handleDesktopProxy))
+	http.HandleFunc("/api/desktop/status", apiOnlyUnsupported(handleDesktopStatus))
+	http.HandleFunc("/api/desktop/proxy/", apiOnlyUnsupported(handleDesktopProxy))
 
 	// Code-server proxy
 	http.HandleFunc("/api/openclaw/gateway", wa(handleOpenClawGatewayInfo))
@@ -288,8 +293,8 @@ Environment:
 		kvMode = "file:" + kv.file
 	}
 	runtimeMode := "local"
-	if cloudRunMode {
-		runtimeMode = "cloudrun"
+	if containerMode {
+		runtimeMode = "container"
 	}
 	log.Printf("[startup] mode=%s port=%s db=%s kv=%s", runtimeMode, port, store.Driver, kvMode)
 
@@ -326,6 +331,7 @@ Environment:
 	})
 
 	initHTTPLogConsumer()
+	go syncTelegramPollers()
 
 	bind := "127.0.0.1"
 	if publicMode {
@@ -389,30 +395,99 @@ Environment:
 }
 
 func getFirstToken() string {
-	if token := strings.TrimSpace(loadAPIToken()); token != "" {
-		return token
-	}
 	home, _ := os.UserHomeDir()
 	gpath := home + "/global.json"
-	cfg := map[string]interface{}{}
-	if data, err := os.ReadFile(gpath); err == nil {
-		json.Unmarshal(data, &cfg)
+	if token := strings.TrimSpace(loadAPIToken()); token != "" {
+		_, _ = ensureGlobalAPIToken(gpath, token)
+		return token
 	}
-	if t, ok := cfg["api_token"].(string); ok && t != "" {
-		return t
+	token, err := ensureGlobalAPIToken(gpath)
+	if err == nil && strings.TrimSpace(token) != "" {
+		return token
 	}
 	b := make([]byte, 16)
 	rand.Read(b)
-	token := "cicy_" + hex.EncodeToString(b)
-	cfg["api_token"] = token
-	data, _ := json.MarshalIndent(cfg, "", "  ")
-	os.WriteFile(gpath, data, 0644)
+	token = "cicy_" + hex.EncodeToString(b)
+	_, _ = ensureGlobalAPIToken(gpath, token)
 	return token
 }
 
-func isCloudRunRuntime() bool {
+func ensureGlobalAPIToken(globalPath string, preferredToken ...string) (string, error) {
+	lockPath := globalPath + ".lock"
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return "", err
+	}
+	defer lockFile.Close()
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		return "", err
+	}
+	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+
+	cfg := map[string]interface{}{}
+	if data, err := os.ReadFile(globalPath); err == nil {
+		if strings.TrimSpace(string(data)) != "" {
+			if err := json.Unmarshal(data, &cfg); err != nil {
+				return "", err
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+
+	currentToken := ""
+	if t, ok := cfg["api_token"].(string); ok && strings.TrimSpace(t) != "" {
+		currentToken = strings.TrimSpace(t)
+	}
+
+	token := ""
+	if len(preferredToken) > 0 {
+		token = strings.TrimSpace(preferredToken[0])
+	}
+	if token == "" {
+		token = currentToken
+	}
+	if token == "" {
+		b := make([]byte, 16)
+		rand.Read(b)
+		token = "cicy_" + hex.EncodeToString(b)
+	}
+	cfg["api_token"] = token
+
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0755); err != nil {
+		return "", err
+	}
+	if currentToken == token {
+		return token, nil
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	data = append(data, '\n')
+	tmpPath := globalPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmpPath, globalPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	return token, nil
+}
+
+func isContainerRuntime() bool {
 	kind := strings.ToLower(strings.TrimSpace(os.Getenv("CICY_RUNTIME_KIND")))
-	return kind == "cloudrun"
+	return kind == "container"
+}
+
+func shouldSelfRegisterRuntime() bool {
+	if isContainerRuntime() {
+		return true
+	}
+	return strings.TrimSpace(os.Getenv("CICY_MASTER_URL")) != "" &&
+		strings.TrimSpace(os.Getenv("CICY_MASTER_TOKEN")) != "" &&
+		strings.TrimSpace(os.Getenv("CICY_PUBLIC_URL")) != ""
 }
 
 func globalCORS(next http.Handler) http.Handler {

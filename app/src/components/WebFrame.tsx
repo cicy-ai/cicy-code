@@ -1,6 +1,8 @@
-import React, { forwardRef, useState, useRef, useEffect, useMemo } from 'react';
+import React, { forwardRef, useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Loader2 } from 'lucide-react';
+import { useDevRegister } from '../lib/devStore';
 import { usePointerLock } from '../lib/pointerLock';
+import { WEB_FRAME_MASK_EVENT, WebFrameMaskEventDetail } from '../lib/webFrameMask';
 
 export const isElectron = navigator.userAgent.includes('Electron');
 
@@ -49,6 +51,17 @@ function registerWebview(el: HTMLElement) {
   };
 }
 
+function blurActiveEditableElement() {
+  const active = document.activeElement as HTMLElement | null;
+  if (!active) return;
+  const tagName = active.tagName;
+  const isEditable = active.isContentEditable || tagName === 'TEXTAREA' || tagName === 'INPUT';
+  if (!isEditable) return;
+  try {
+    active.blur();
+  } catch {}
+}
+
 interface WebFrameProps {
   src: string;
   className?: string;
@@ -63,16 +76,67 @@ interface WebFrameProps {
 export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
   ({ src, className, style, onLoad, loading, allowFullScreen, title, codeServer }, ref) => {
     const [isLoading, setIsLoading] = useState(true);
+    const [maskActive, setMaskActive] = useState(false);
     const webviewRef = useRef<HTMLElement>(null);
+    const iframeRef = useRef<HTMLIFrameElement>(null);
     const useWebview = isElectron && codeServer;
     const pointerLocked = usePointerLock();
+    const activeMaskKeysRef = useRef<Set<string>>(new Set());
     // Freeze initial src so React doesn't re-set webview src on re-render
     const initialSrc = useMemo(() => src, []);
+    useDevRegister(`WebFrame:${title || src}`, {
+      src,
+      title: title || '',
+      codeServer: !!codeServer,
+      useWebview,
+      isLoading,
+      pointerLocked,
+      maskActive,
+    });
 
     const handleLoad = () => {
       setIsLoading(false);
       onLoad?.();
     };
+
+    const setIframeRef = useCallback((node: HTMLIFrameElement | null) => {
+      iframeRef.current = node;
+      if (!ref) return;
+      if (typeof ref === 'function') {
+        ref(node);
+        return;
+      }
+      ref.current = node;
+    }, [ref]);
+
+    const focusEmbeddedFrame = useCallback(() => {
+      if (pointerLocked || maskActive) return;
+      blurActiveEditableElement();
+      try {
+        if (useWebview) {
+          window.requestAnimationFrame(() => {
+            (webviewRef.current as any)?.focus?.();
+          });
+          return;
+        }
+        window.requestAnimationFrame(() => {
+          iframeRef.current?.focus();
+          iframeRef.current?.contentWindow?.focus?.();
+        });
+      } catch {}
+    }, [maskActive, pointerLocked, useWebview]);
+
+    useEffect(() => {
+      const handleMaskEvent = (event: Event) => {
+        const detail = (event as CustomEvent<WebFrameMaskEventDetail>).detail;
+        if (!detail?.key) return;
+        if (detail.action === 'start') activeMaskKeysRef.current.add(detail.key);
+        else activeMaskKeysRef.current.delete(detail.key);
+        setMaskActive(activeMaskKeysRef.current.size > 0);
+      };
+      window.addEventListener(WEB_FRAME_MASK_EVENT, handleMaskEvent as EventListener);
+      return () => window.removeEventListener(WEB_FRAME_MASK_EVENT, handleMaskEvent as EventListener);
+    }, []);
 
     useEffect(() => {
       if (!useWebview) return;
@@ -125,15 +189,18 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
       return (
         <>
           {isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-vsc-bg z-10">
+            <div data-id="web-frame-loading" className="absolute inset-0 flex items-center justify-center bg-vsc-bg z-10">
               <Loader2 className="animate-spin" />
             </div>
           )}
+          {(pointerLocked || maskActive) && <div data-id="web-frame-interaction-mask" className="absolute inset-0 z-20" />}
           <webview
             ref={webviewRef as any}
             src={initialSrc}
             className={className}
             style={style}
+            onPointerDownCapture={focusEmbeddedFrame as any}
+            onMouseDownCapture={focusEmbeddedFrame as any}
             allowpopups={"" as any}
             partition={`persist:sandbox-0`}
             webpreferences="allowRunningInsecureContent=true"
@@ -145,22 +212,26 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
     }
 
     return (
-      <>
+        <>
         {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-vsc-bg z-10">
+          <div data-id="web-frame-loading" className="absolute inset-0 flex items-center justify-center bg-vsc-bg z-10">
             <Loader2 className="animate-spin" />
           </div>
         )}
-        {pointerLocked && <div className="absolute inset-0 z-20" />}
+        {(pointerLocked || maskActive) && <div data-id="web-frame-interaction-mask" className="absolute inset-0 z-20" />}
         <iframe
-          ref={ref}
+          data-id="web-frame-iframe"
+          ref={setIframeRef}
           src={src}
           className={className}
           style={style}
+          onPointerDownCapture={focusEmbeddedFrame}
+          onMouseDownCapture={focusEmbeddedFrame}
           onLoad={handleLoad}
           loading={loading}
           allowFullScreen={allowFullScreen}
           title={title}
+          tabIndex={-1}
           sandbox="allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts allow-downloads"
           allow="clipboard-read; clipboard-write; microphone"
         />

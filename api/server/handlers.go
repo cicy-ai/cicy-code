@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync/atomic"
 
 	"github.com/gorilla/websocket"
@@ -15,6 +16,8 @@ import (
 
 	"ttyd-go/webtty"
 )
+
+var BuiltTTYDCDNPrefix string
 
 func (server *Server) generateHandleWS(ctx context.Context, cancel context.CancelFunc, counter *counter) http.HandlerFunc {
 	once := new(int64)
@@ -191,7 +194,8 @@ func (server *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	indexVars := map[string]interface{}{
-		"title": titleBuf.String(),
+		"title":         titleBuf.String(),
+		"static_prefix": ttydStaticPrefix(),
 	}
 
 	indexBuf := new(bytes.Buffer)
@@ -213,6 +217,14 @@ func (server *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/javascript")
 	w.Write([]byte("var gotty_term = '" + server.options.Term + "';"))
+}
+
+func ttydStaticPrefix() string {
+	prefix := strings.TrimRight(BuiltTTYDCDNPrefix, "/")
+	if prefix == "" {
+		return "."
+	}
+	return prefix
 }
 
 // titleVariables merges maps in a specified order.

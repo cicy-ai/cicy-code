@@ -94,7 +94,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
             <label className="block text-xs text-vsc-text-secondary mb-1">智能体类型</label>
             <Select value={pane.agent_type || ''}
               onChange={v => onChange({ ...pane, agent_type: v })}
-              options={[{value:'openclaw',label:'openclaw'},{value:'codex',label:'codex'},{value:'claude',label:'claude'}]}
+              options={[{value:'openclaw',label:'openclaw'},{value:'codex',label:'codex'},{value:'claude',label:'claude'},{value:'cicy',label:'cicy'}]}
               searchable
             />
           </div>

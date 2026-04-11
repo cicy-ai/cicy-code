@@ -1,0 +1,268 @@
+#!/bin/bash
+
+set -euo pipefail
+
+HOME_DIR="${HOME:-/home/cicy}"
+STATE_DIR="${CICY_STATE_DIR:-$HOME_DIR/.cicy}"
+GLOBAL_JSON_PATH="${GLOBAL_JSON_PATH:-$HOME_DIR/global.json}"
+mkdir -p "$STATE_DIR"
+
+log() {
+  printf '[entrypoint] %s\n' "$*"
+}
+
+node_eval() {
+  node -e "$1" "${@:2}"
+}
+
+ensure_api_token() {
+  export CICY_API_TOKEN
+  CICY_API_TOKEN="$(
+    node - "$GLOBAL_JSON_PATH" "${CICY_API_TOKEN:-}" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const file = process.argv[2];
+const envToken = String(process.argv[3] || '').trim();
+const dir = path.dirname(file);
+const lockDir = `${file}.lock`;
+const tmpFile = path.join(dir, `.${path.basename(file)}.tmp-${process.pid}`);
+
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function acquireLock() {
+  for (let i = 0; i < 100; i += 1) {
+    try {
+      fs.mkdirSync(lockDir);
+      return;
+    } catch (error) {
+      if (error && error.code === 'EEXIST') {
+        sleep(50);
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error(`lock timeout: ${lockDir}`);
+}
+
+fs.mkdirSync(dir, { recursive: true });
+acquireLock();
+
+try {
+  let config = {};
+  if (fs.existsSync(file)) {
+    const raw = fs.readFileSync(file, 'utf8');
+    if (raw.trim()) {
+      config = JSON.parse(raw);
+    }
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error(`invalid global json root: ${file}`);
+  }
+  const currentToken = typeof config.api_token === 'string' ? config.api_token.trim() : '';
+  const nextToken = envToken || currentToken || `cicy_${crypto.randomBytes(16).toString('hex')}`;
+  if (currentToken !== nextToken) {
+    config.api_token = nextToken;
+    fs.writeFileSync(tmpFile, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+    fs.renameSync(tmpFile, file);
+  }
+  process.stdout.write(nextToken);
+} finally {
+  try { fs.rmSync(tmpFile, { force: true }); } catch (_) {}
+  try { fs.rmdirSync(lockDir); } catch (_) {}
+}
+NODE
+  )"
+}
+
+default_teamcenter_url() {
+  if [ -n "${CICY_TEAMCENTER_URL:-}" ]; then
+    printf '%s' "${CICY_TEAMCENTER_URL%/}"
+    return 0
+  fi
+
+  if [ -n "${CICY_API_URL:-}" ]; then
+    node - "${CICY_API_URL}" <<'NODE'
+const raw = String(process.argv[2] || '').trim().replace(/\/+$/, '');
+if (!raw) process.exit(1);
+if (/\/v1$/i.test(raw)) {
+  process.stdout.write(raw.replace(/\/v1$/i, ''));
+} else {
+  process.stdout.write(raw);
+}
+NODE
+    return 0
+  fi
+
+  printf '%s' "https://cicy-ai.com"
+}
+
+bootstrap_team_runtime() {
+  local team_token="${CICY_TEAM_TOKEN:-}"
+  local teamcenter_url
+  local bootstrap_path="${CICY_TEAMCENTER_BOOTSTRAP_PATH:-/api/runtime/team/bootstrap}"
+  local instance_key="${CICY_INSTANCE_KEY:-$(hostname)}"
+  local instance_label="${CICY_INSTANCE_LABEL:-$instance_key}"
+  local bootstrap_url payload response_file status
+
+  if [ -z "$team_token" ]; then
+    return 0
+  fi
+
+  teamcenter_url="$(default_teamcenter_url)"
+  export CICY_TEAMCENTER_URL="$teamcenter_url"
+  if [ -z "${CICY_RUNTIME_KIND:-}" ]; then
+    export CICY_RUNTIME_KIND="container"
+  fi
+  bootstrap_url="${teamcenter_url%/}${bootstrap_path}"
+  payload="$(
+    node - "$instance_key" "$instance_label" "${PORT:-8008}" "${CICY_API_TOKEN:-}" "${CICY_RUNTIME_KIND:-container}" <<'NODE'
+const [instanceKey, instanceLabel, port, apiToken, runtimeKind] = process.argv.slice(2);
+process.stdout.write(JSON.stringify({
+  instance_key: instanceKey,
+  instance_label: instanceLabel,
+  port: Number(port || 8008),
+  api_token: apiToken || '',
+  runtime_kind: runtimeKind || 'container'
+}));
+NODE
+  )"
+  response_file="$(mktemp)"
+  status="$(
+    curl -sS -o "$response_file" -w '%{http_code}' \
+      -X POST "$bootstrap_url" \
+      -H "Authorization: Bearer $team_token" \
+      -H "Content-Type: application/json" \
+      --data "$payload"
+  )"
+  if [ "${status#2}" = "$status" ]; then
+    log "team bootstrap failed: ${status}"
+    cat "$response_file" >&2 || true
+    rm -f "$response_file"
+    exit 1
+  fi
+
+  eval "$(
+    node - "$response_file" <<'NODE'
+const fs = require('fs');
+const file = process.argv[2];
+const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+const data = raw && typeof raw.data === 'object' ? raw.data : raw;
+function pick(...keys) {
+  for (const key of keys) {
+    const value = data?.[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number') return String(value);
+  }
+  return '';
+}
+function bool(...keys) {
+  for (const key of keys) {
+    if (typeof data?.[key] === 'boolean') return data[key] ? 'true' : 'false';
+  }
+  return '';
+}
+const env = {
+  CICY_RUNTIME_KIND: pick('runtime_kind'),
+  CICY_MASTER_URL: pick('master_url', 'teamcenter_url', 'register_url'),
+  CICY_MASTER_TOKEN: pick('master_token', 'register_token'),
+  CICY_PUBLIC_URL: pick('public_url', 'workspace_url', 'endpoint', 'url'),
+  CICY_API_TOKEN: pick('api_token', 'workspace_token'),
+  CICY_API_KEY: pick('api_key', 'newapi_token'),
+  CICY_API_URL: pick('api_url'),
+  CICY_ANTHROPIC_URL: pick('anthropic_url'),
+  CICY_AI_PROVIDER: pick('ai_provider'),
+  CICY_DEFAULT_OPENCODE_MODEL: pick('default_opencode_model', 'default_model'),
+  CICY_DEFAULT_MODEL: pick('default_model', 'default_opencode_model'),
+  CICY_DEFAULT_CLAUDE_MODEL: pick('default_claude_model', 'claude_model'),
+  CICY_CLAUDE_MODEL: pick('claude_model', 'default_claude_model'),
+  CICY_CODEX_MODEL: pick('codex_model'),
+  CICY_OPENCLAW_MODEL: pick('openclaw_model'),
+  CICY_CLOUDFLARED_TOKEN: pick('cloudflared_token', 'cf_tunnel_token', 'tunnel_token'),
+  CICY_INSTANCE_KEY: pick('instance_key'),
+  CICY_INSTANCE_LABEL: pick('instance_label'),
+  CICY_TEAM_ID: pick('team_id'),
+  CICY_ALREADY_REGISTERED: bool('already_registered', 'registered'),
+};
+for (const [key, value] of Object.entries(env)) {
+  if (!value) continue;
+  process.stdout.write(`export ${key}=${JSON.stringify(value)}\n`);
+}
+NODE
+  )"
+  rm -f "$response_file"
+
+  if [ -z "${CICY_MASTER_URL:-}" ]; then
+    export CICY_MASTER_URL="$teamcenter_url"
+  fi
+  if [ -z "${CICY_RUNTIME_KIND:-}" ]; then
+    export CICY_RUNTIME_KIND="container"
+  fi
+  if [ -z "${CICY_MASTER_TOKEN:-}" ]; then
+    export CICY_MASTER_TOKEN="$team_token"
+  fi
+  if [ -n "${CICY_TEAM_ID:-}" ] && [ -z "${CICY_INSTANCE_KEY:-}" ]; then
+    export CICY_INSTANCE_KEY="team-${CICY_TEAM_ID}"
+  fi
+
+  log "team bootstrap ok"
+  if [ "${CICY_ALREADY_REGISTERED:-}" = "true" ]; then
+    log "runtime already registered"
+  fi
+}
+
+start_cloudflared() {
+  local tunnel_token="${CICY_CLOUDFLARED_TOKEN:-${CF_TUNNEL_TOKEN:-${CLOUDFLARED_TOKEN:-}}}"
+  local log_file="$STATE_DIR/cloudflared.log"
+
+  if [ -z "$tunnel_token" ]; then
+    return 0
+  fi
+
+  if ! command -v cloudflared >/dev/null 2>&1; then
+    log "cloudflared not found"
+    exit 1
+  fi
+
+  log "starting cloudflared"
+  nohup cloudflared tunnel run --token "$tunnel_token" >"$log_file" 2>&1 &
+  export CICY_CLOUDFLARED_PID="$!"
+  sleep 2
+  if ! kill -0 "$CICY_CLOUDFLARED_PID" >/dev/null 2>&1; then
+    log "cloudflared exited early"
+    tail -n 50 "$log_file" >&2 || true
+    exit 1
+  fi
+}
+
+build_app_argv() {
+  if [ "$#" -eq 0 ]; then
+    set -- --public
+  fi
+  case " $* " in
+    *" --public "*) ;;
+    *) set -- --public "$@" ;;
+  esac
+  if [ -n "${CICY_TEAM_TOKEN:-}" ]; then
+    case " $* " in
+      *" --agents="*) ;;
+      *) set -- --agents=all "$@" ;;
+    esac
+  fi
+  printf '%s\0' "$@"
+}
+
+main() {
+  bootstrap_team_runtime
+  ensure_api_token
+  start_cloudflared
+
+  mapfile -d '' app_argv < <(build_app_argv "$@")
+  log "starting cicy-code"
+  exec /app/cicy-code "${app_argv[@]}"
+}
+
+main "$@"

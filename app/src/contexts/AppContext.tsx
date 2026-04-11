@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { useDevRegister } from '../lib/devStore';
-import { TokenManager } from '../services/tokenManager';
 import { PaneManager } from '../services/paneManager';
 import apiService from '../services/api';
 import config from '../config';
+import { useAuth } from './AuthContext';
 
 const APP_VERSION = config.version;
 const URL_PANE_ID = window.location.href.split("/")[4] ? decodeURIComponent(window.location.href.split("/")[4]) : null;
@@ -57,7 +57,7 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [token, setToken] = useState<string | null>(null);
+  const { token, isChecking, login: authLogin, logout: authLogout } = useAuth();
   const [currentPaneId, setCurrentPaneId] = useState<string | null>(() => {
     return PaneManager.getCurrentPane() || URL_PANE_ID;
   });
@@ -69,34 +69,47 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Initialize token, pane, and API client
+  // Keep API client lifecycle aligned with AuthContext to avoid unauthenticated
+  // requests racing ahead of token verification.
   useEffect(() => {
-    const cachedToken = TokenManager.init();
     const cachedPane = PaneManager.getCurrentPane();
-    
-    if (cachedToken) {
-      setToken(cachedToken);
-      setApi(apiService);
-    }
-    
+
     if (cachedPane) {
       setCurrentPaneId(cachedPane);
     }
-    
-    // If no token, stop loading immediately; otherwise wait for fetchAllPanes
-    if (!cachedToken) {
+
+    if (isChecking) {
+      return;
+    }
+
+    if (token) {
+      setApi(apiService);
+      return;
+    }
+
+    setApi(null);
+    setAllPanes([]);
+    setPaneDetail(null);
+    setGlobalVar({});
+    set智能体([]);
+    setError(null);
+    setLoading(false);
+  }, [isChecking, token]);
+
+  useEffect(() => {
+    if (!isChecking && !token) {
       setLoading(false);
     }
-  }, []);
+  }, [isChecking, token]);
 
   // Load global settings when api is ready
   useEffect(() => {
-    if (api) {
+    if (!isChecking && api && token) {
       loadGlobalVar();
     }
-  }, [api]);
+  }, [api, isChecking, token]);
   useEffect(() => {
-    if (!api) return;
+    if (isChecking || !api || !token) return;
     const fetchAllPanes = async () => {
       try {
         const panesRes = await api.getPanes();
@@ -127,24 +140,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const onVisible = () => { if (document.visibilityState === 'visible') fetchAllPanes(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => { window.removeEventListener('refresh-panes', onRefresh); document.removeEventListener('visibilitychange', onVisible); };
-  }, [api]);
+  }, [api, currentPaneId, isChecking, token]);
 
   // Auto-load paneDetail when currentPaneId changes
   useEffect(() => {
-    if (!api || !currentPaneId) { setPaneDetail(null); return; }
+    if (isChecking || !api || !token || !currentPaneId) { setPaneDetail(null); return; }
     api.getPane(currentPaneId).then(({ data }) => setPaneDetail(data)).catch(() => setPaneDetail(null));
-  }, [api, currentPaneId]);
+  }, [api, currentPaneId, isChecking, token]);
 
   const login = (newToken: string) => {
-    TokenManager.saveToken(newToken);
-    setToken(newToken);
-    setApi(apiService);
+    authLogin(newToken);
   };
 
   const logout = () => {
-    TokenManager.clearToken();
+    authLogout();
     PaneManager.clearCurrentPane();
-    setToken(null);
     setCurrentPaneId(null);
     setApi(null);
     set智能体([]);
@@ -179,7 +189,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const load智能体 = async () => {
-    if (!api) return;
+    if (!api || !token) return;
     try {
       setLoading(true);
       const { data } = await api.getPanes();
@@ -193,7 +203,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const removeAgent = async (paneId: string, agentId?: number) => {
-    if (!api) return;
+    if (!api || !token) return;
     try {
       // Unbind if has agent ID
       if (agentId) {
@@ -210,17 +220,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const loadGlobalVar = useCallback(async () => {
-    if (!api) return;
+    if (!api || !token) return;
     try {
       const { data } = await apiService.getGlobalSettings();
       setGlobalVar(data);
     } catch (err: any) {
       console.error('加载全局设置失败：', err);
     }
-  }, [api]);
+  }, [api, token]);
 
   const updateGlobalVar = useCallback(async (data: any) => {
-    if (!api) return;
+    if (!api || !token) return;
     try {
       await apiService.updateGlobalSettings(data);
       setGlobalVar(data);
@@ -228,7 +238,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       console.error('更新全局设置失败：', err);
       throw err;
     }
-  }, [api]);
+  }, [api, token]);
 
   const value: AppContextType = {
     token,

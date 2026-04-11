@@ -82,22 +82,36 @@ func loadAPIToken() string {
 	return ""
 }
 
-func httpNotSupportedInCloudRun(w http.ResponseWriter) {
-	httpErr(w, 501, "not_supported_in_cloudrun")
+func httpNotSupportedInAPIOnlyRuntime(w http.ResponseWriter) {
+	httpErr(w, 501, "not_supported_in_api_only_runtime")
 }
 
-func cloudRunUnsupportedM(next http.HandlerFunc) http.HandlerFunc {
+func apiOnlyUnsupportedM(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if isCloudRunRuntime() {
-			httpNotSupportedInCloudRun(w)
+		if isAPIOnlyRuntime() {
+			httpNotSupportedInAPIOnlyRuntime(w)
 			return
 		}
 		next(w, r)
 	}
 }
 
-func cloudRunUnsupported(next http.HandlerFunc) http.HandlerFunc {
-	return corsM(authM(cloudRunUnsupportedM(next)))
+func apiOnlyUnsupported(next http.HandlerFunc) http.HandlerFunc {
+	return corsM(authM(apiOnlyUnsupportedM(next)))
+}
+
+func isAPIOnlyRuntime() bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv("CICY_RUNTIME_MODE")))
+	switch raw {
+	case "api-only", "apionly", "gateway-only":
+		return true
+	}
+	raw = strings.ToLower(strings.TrimSpace(os.Getenv("CICY_RUNTIME_API_ONLY")))
+	switch raw {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 func normPaneID(id string) string {

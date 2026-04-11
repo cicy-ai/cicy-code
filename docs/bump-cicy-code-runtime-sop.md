@@ -11,6 +11,19 @@
 3. 自动更新 `~/global.json -> images.runtime`
 4. 后续 trial deploy / runtime deploy 默认走新镜像
 
+## 完成定义
+
+`bump cicy-code version` 不等于只改版本号。
+
+这件事只有在下面几件事全部完成后，才算结束：
+
+1. `python3 dev.py --bumpVersion <version>` 已执行
+2. `python3 dev.py --dockerBuild --dockerBuildVersion <version>` 已执行
+3. Docker Hub 已存在 `cicybot/cicy-code-runtime:<version>`
+4. `~/global.json -> images.runtime_tag` 已切到这个新版本
+
+如果只做了 `--bumpVersion`，没有 push Docker Hub，这一轮不算完成，不能对外说“已经 bump 完”。
+
 ## 标准工作目录
 
 统一在：
@@ -82,6 +95,12 @@ python3 dev.py --bumpVersion 1.0.7
 [dev] ui_version=1.0.7
 [dev] tmux_version=1.0.7
 ```
+
+注意：
+
+- 到这一步还不算结束
+- 这只是把版本号同步到代码
+- 只有下一步 Docker Hub push 成功后，整个 bump 流程才算完成
 
 ### 4. 构建并推送 Docker Hub
 
@@ -160,6 +179,8 @@ cicybot/cicy-code-runtime:1.0.7
 3. `~/global.json images.runtime` 已变成新 tag
 4. 新开出来的 trial runtime 确实跑的是新镜像
 5. workspace 可正常打开，`/api/health` 正常
+
+只有上面 5 条都满足，才能说这次 `bump cicy-code version` 已完成。
 
 ## 回滚 SOP
 

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Mic, Move } from 'lucide-react';
 import { Position } from '../types';
 import { lockPointer, unlockPointer } from '../lib/pointerLock';
+import { useDevRegister } from '../lib/devStore';
 
 interface VoiceFloatingButtonProps {
   initialPosition: Position;
@@ -35,6 +36,15 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
   useEffect(() => {
     setPosition(initialPosition);
   }, [initialPosition.x, initialPosition.y]);
+  useDevRegister('VoiceFloatingButton', {
+    position,
+    isDragging,
+    isPressed,
+    dragMode,
+    isRecordingExternal,
+    disabled,
+    isLoading,
+  });
 
   const getClientPos = (e: MouseEvent | TouchEvent | React.MouseEvent | React.TouchEvent) => {
     if ('touches' in e && e.touches.length > 0) {
@@ -129,6 +139,7 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
 
   return (
     <div
+      data-id="voice-floating-button"
       className="fixed z-[50] touch-none select-none"
       style={{
         left: position.x,
@@ -138,7 +149,7 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
       onTouchStart={handleStart}
     >
       {/* Visual Ripple Effect Container */}
-      <div className="relative w-24 h-24 flex items-center justify-center">
+      <div data-id="voice-floating-button-shell" className="relative w-24 h-24 flex items-center justify-center">
         
         {/* Outer Ripple Rings (Visible when pressed and not dragging) */}
         {isPressed && !dragMode && (
@@ -150,7 +161,8 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
         )}
 
         {/* Main Button Circle */}
-        <div 
+        <div
+          data-id="voice-floating-button-main"
           className={`relative z-10 w-24 h-24 rounded-full flex items-center justify-center shadow-2xl backdrop-blur-md border border-white/10 transition-all duration-300 ease-out ${
             dragMode 
               ? 'bg-vsc-button/80 scale-90 cursor-move' 
@@ -170,7 +182,7 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
       </div>
 
       {/* Label/Hint */}
-      <div className={`absolute -bottom-10 left-1/2 -translate-x-1/2 text-sm font-bold whitespace-nowrap px-3 py-1.5 rounded-full bg-black/70 text-white backdrop-blur-sm transition-opacity duration-200 ${isPressed || isLoading ? 'opacity-100' : 'opacity-0'}`}>
+      <div data-id="voice-floating-button-label" className={`absolute -bottom-10 left-1/2 -translate-x-1/2 text-sm font-bold whitespace-nowrap px-3 py-1.5 rounded-full bg-black/70 text-white backdrop-blur-sm transition-opacity duration-200 ${isPressed || isLoading ? 'opacity-100' : 'opacity-0'}`}>
         {dragMode ? "定位中..." : isLoading ? "识别中..." : "录音中..."}
       </div>
     </div>

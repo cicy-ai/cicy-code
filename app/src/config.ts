@@ -1,5 +1,7 @@
 
 const LS_API_BASE = 'cicy_api_base';
+const SS_HOST_HOME = 'cicy_host_home';
+const DEFAULT_HOST_HOME = import.meta.env.VITE_HOST_HOME || '/home/w3c_offical';
 
 function inferApiBase(): string {
   const envBase = import.meta.env.VITE_API_BASE || '';
@@ -47,6 +49,53 @@ export function setApiBase(base: string) {
   else localStorage.removeItem(LS_API_BASE);
 }
 
+export function getHostHome(): string {
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = sessionStorage.getItem(SS_HOST_HOME);
+      if (saved) {
+        config.hostHome = saved;
+        return saved;
+      }
+    } catch {}
+  }
+  return config.hostHome || DEFAULT_HOST_HOME;
+}
+
+export function setHostHome(home: string) {
+  const next = (home || '').trim();
+  if (!next) return;
+  config.hostHome = next;
+  if (typeof window !== 'undefined') {
+    try {
+      sessionStorage.setItem(SS_HOST_HOME, next);
+    } catch {}
+  }
+}
+
+export function inferHostHomeFromPath(path: string | null | undefined): string | null {
+  const value = (path || '').trim();
+  if (!value || value.startsWith('~')) return null;
+  const match = value.match(/^(\/(?:home\/[^/]+|root))(?:\/|$)/);
+  return match ? match[1] : null;
+}
+
+export function syncHostHomeFromPath(path: string | null | undefined): string | null {
+  const inferred = inferHostHomeFromPath(path);
+  if (inferred) setHostHome(inferred);
+  return inferred;
+}
+
+export function toRuntimeAbsolutePath(path: string): string {
+  return path.replace(/^~(?=\/|$)/, getHostHome());
+}
+
+export function toTildePath(path: string): string {
+  const home = getHostHome();
+  if (path === home) return '~';
+  return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+}
+
 // Workspace: Pro → u-xxx-api, Trial → u-xxx-free-api
 const host = typeof window !== 'undefined' ? window.location.hostname : '';
 const isWorkspace = /^(u-.+)-(app|free-app)\.cicy-ai\.com$/.test(host);
@@ -63,10 +112,11 @@ const config = {
   ideBase:        base,
   codeServerBase: base ? base + '/code' : '/code',
   openClawBase:   base ? base + '/openclaw' : '/openclaw',
-  hostHome:       import.meta.env.VITE_HOST_HOME || '/home/w3c_offical',
+  hostHome:       DEFAULT_HOST_HOME,
   desktopBase:    base,
   sttBase:        base,
-  pollInterval:   5000,
+  pollInterval:   1000,
+  maxLiveTtydWindows: 5,
   version:        '1.0.0',
   isWorkspace,
   isAudit,
@@ -78,7 +128,7 @@ export const urls = {
   ttyd:       (paneId: string, token: string, mode = 1) => `${config.ttydBase}/ttyd/${paneId}/?token=${token}&mode=${mode}`,
   ttydOpen:   (paneId: string, token: string)            => `${config.ttydBase}/ttyd/${paneId}/?token=${token}`,
   codeServer: (folder: string, token?: string) => {
-    const f = folder.replace('~', config.hostHome);
+    const f = toRuntimeAbsolutePath(folder);
     return `${config.codeServerBase}/?folder=${encodeURIComponent(f)}${token ? '&token=' + token : ''}`;
   },
   openClaw:   (token?: string)                           => `${config.openClawBase}${token ? `?token=${encodeURIComponent(token)}` : ''}`,

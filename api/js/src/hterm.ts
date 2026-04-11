@@ -1,4 +1,5 @@
 import * as bare from "libapps";
+import { openExternalLinkWithConfirm } from "./link_confirm";
 
 export class Hterm {
     elem: HTMLElement;
@@ -21,6 +22,9 @@ export class Hterm {
         this.term = new bare.hterm.Terminal();
         this.term.getPrefs().set("send-encoding", "raw");
         this.term.decorate(this.elem);
+        this.term.openUrl = (url: string) => {
+            openExternalLinkWithConfirm(this.elem.ownerDocument, url);
+        };
 
         this.io = this.term.io.push();
         this.term.installKeyboard();
@@ -64,7 +68,7 @@ export class Hterm {
         if (attempt > max) {
             this.showMessage("Connection lost. Refresh to reconnect.", 0);
         } else {
-            this.showMessage(`Reconnecting... Attempt ${attempt}/${max}`, 0);
+            this.removeMessage();
         }
     };
 

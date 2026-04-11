@@ -78,6 +78,7 @@ const api = {
   getTrafficStats: (pane: string, minutes = 60, interval = 1) => http.get(`/api/stats/traffic?pane=${pane}&minutes=${minutes}&interval=${interval}`),
   getTrafficRaw: (pane: string) => http.get(`/api/stats/traffic/raw?pane=${pane}`),
   getChatHistory: (pane: string) => http.get(`/api/stats/chat?pane=${pane}`),
+  getSystemResources: (cfg?: any) => http.get('/api/system/resources', cfg),
 
   getCicyFiles: (pane: string) => http.get(`/api/cicy/files?pane=${pane}`),
   getCicyFile: (pane: string, name: string) => http.get(`/api/cicy/file?pane=${pane}&name=${name}`, { transformResponse: [(d: any) => d] }),

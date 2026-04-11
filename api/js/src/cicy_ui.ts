@@ -67,7 +67,7 @@ html {
 body {
   margin: 8px !important;
   padding-top: 28px !important;
-  padding-bottom: 160px !important;
+  padding-bottom: 122px !important;
   padding-left: 8px !important;
 }
 .terminal {
@@ -121,7 +121,7 @@ body {
   left: 8px;
   right: 8px;
   bottom: 8px;
-  height: 140px;
+  height: 104px;
   min-width: 0;
   background: rgba(16,16,20,0.88);
   border: 1px solid rgba(255,255,255,0.07);
@@ -138,12 +138,12 @@ body {
 #cp:hover { box-shadow: 0 12px 48px rgba(0,0,0,0.65), 0 0 0 0.5px rgba(255,255,255,0.1) inset; }
 #cp-bar {
   cursor: default;
-  padding: 7px 10px;
+  padding: 4px 10px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   user-select: none;
-  min-height: 32px;
+  min-height: 24px;
 }
 .cp-bar-l, .cp-bar-r { display: flex; align-items: center; gap: 4px; }
 .cp-chip {
@@ -198,17 +198,13 @@ body {
 }
 #fixed-top-action {
   position: fixed;
-  top: -5px;
+  top: -2px;
   right: 0;
   z-index: 9999;
   display: flex;
   flex-direction: row;
   align-items: center;
   overflow: visible;
-  background: rgba(30,30,30,0.95);
-  border: 1px solid rgba(255,255,255,0.06);
-  border-left: none;
-  border-radius: 0 8px 8px 0;
 }
 #cp-win-tabs {
   display: flex;
@@ -296,7 +292,7 @@ body {
 }
 #cp-model:hover { background: rgba(255,255,255,0.1); }
 .cp-win-wrap, .cp-bar-r { position: relative; }
-#cp-body { padding: 0 8px 8px; flex: 1; display: flex; position: relative; min-height: 0; }
+#cp-body { padding: 0 8px 8px; height: 64px; display: flex; position: relative; min-height: 0; box-sizing: border-box; }
 #cp-input {
   width: 100%;
   background: rgba(255,255,255,0.03);
@@ -305,23 +301,23 @@ body {
   color: #e4e4e7;
   font-size: 13px;
   font-family: "SF Mono", Menlo, Consolas, monospace;
-  padding: 10px 42px 10px 14px;
+  padding: 8px 40px 8px 12px;
   resize: none;
   outline: none;
   box-sizing: border-box;
   flex: 1;
   min-height: 0;
-  line-height: 1.5;
+  line-height: 1.35;
   transition: border-color .15s, background .15s;
 }
 #cp-input::placeholder { color: rgba(255,255,255,0.2); }
 #cp-input:focus { border-color: rgba(99,102,241,0.4); background: rgba(255,255,255,0.04); }
 #cp-send {
   position: absolute;
-  right: 14px;
-  bottom: 14px;
-  width: 28px;
-  height: 28px;
+  right: 12px;
+  bottom: 12px;
+  width: 26px;
+  height: 26px;
   border-radius: 8px;
   border: none;
   cursor: pointer;
@@ -488,7 +484,7 @@ function createLoadingOverlay(): LoadingOverlayController {
             }
             currentEl = document.createElement("div");
             currentEl.id = "cp-loading-overlay";
-            currentEl.innerHTML = '<div id="cp-loading-spinner"></div><div id="cp-loading-text">' + (message || "Reconnecting...") + "</div>";
+            currentEl.innerHTML = '<div id="cp-loading-spinner"></div>' + (message ? '<div id="cp-loading-text">' + message + "</div>" : "");
             document.body.appendChild(currentEl);
             timer = window.setTimeout(function() {
                 if (currentEl !== null) {
@@ -621,7 +617,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             "</div>" +
         "</div>" +
         '<div id="cp-body">' +
-            '<textarea id="cp-input" rows="2" placeholder="Ask anything..." spellcheck="false"></textarea>' +
+            '<textarea id="cp-input" rows="2" placeholder="请输入关键词..." spellcheck="false"></textarea>' +
             '<button id="cp-send" title="Send"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg></button>' +
         "</div>" +
         '<div id="cp-grip"></div>';
@@ -696,10 +692,30 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             var PromiseCtor = (window as any).Promise;
             return PromiseCtor.resolve(null);
         }
-        return webtty.requestAPI("POST", "/api/tmux/send", {
-            pane_id: paneId,
-            text: command
-        }, apiHeaders);
+        var fetchImpl = (window as any).fetch;
+        if (typeof fetchImpl !== "function") {
+            return webtty.requestAPI("POST", "/api/tmux/send", {
+                pane_id: paneId,
+                text: command
+            }, apiHeaders);
+        }
+        return fetchImpl("/api/tmux/send", {
+            method: "POST",
+            headers: apiHeaders,
+            body: JSON.stringify({
+                pane_id: paneId,
+                text: command
+            })
+        }).then(function(response: any): Promise<any> {
+            if (!response || !response.ok) {
+                throw new Error("request failed");
+            }
+            var contentType = response.headers && response.headers.get ? response.headers.get("content-type") : "";
+            if (contentType && contentType.indexOf("application/json") >= 0) {
+                return response.json();
+            }
+            return response.text();
+        });
     }
 
     function updateEnterButton(): void {
@@ -767,10 +783,29 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         return webtty.requestAPI(method, "/api/tmux/windows" + path, body, apiHeaders);
     }
 
+    var latestWindows: any[] = [];
+    var optimisticActiveIndex = "";
     function renderWindowTabs(windows: any[]): void {
+        latestWindows = windows.slice();
+        var pendingExists = optimisticActiveIndex !== "" && windows.some(function(win: any): boolean {
+            return String(win.index) === optimisticActiveIndex;
+        });
+        var serverActiveIndex = "";
+        windows.some(function(win: any): boolean {
+            if (win.active) {
+                serverActiveIndex = String(win.index);
+                return true;
+            }
+            return false;
+        });
+        if (optimisticActiveIndex !== "" && optimisticActiveIndex === serverActiveIndex) {
+            optimisticActiveIndex = "";
+            pendingExists = false;
+        }
+        var activeIndex = pendingExists ? optimisticActiveIndex : serverActiveIndex;
         winTabs.innerHTML = windows.map(function(win: any): string {
             var close = win.index === "0" ? "" : '<span class="cp-wdel" data-idx="' + win.index + '">✕</span>';
-            var active = win.active ? " active" : "";
+            var active = String(win.index) === activeIndex ? " active" : "";
             return '<button class="cp-wtab' + active + '" data-idx="' + win.index + '">' + win.name + "." + win.index + close + "</button>";
         }).join("");
     }
@@ -920,8 +955,19 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
 
         var tab = target.closest(".cp-wtab") as HTMLElement | null;
         if (tab !== null && !tab.classList.contains("active")) {
+            optimisticActiveIndex = String(tab.dataset.idx || "");
+            if (latestWindows.length) {
+                renderWindowTabs(latestWindows);
+            } else {
+                Array.prototype.forEach.call(winTabs.querySelectorAll(".cp-wtab"), function(node: Element): void {
+                    node.classList.toggle("active", node === tab);
+                });
+            }
             apiFetch("PUT", "", { session: paneId, index: tab.dataset.idx }).then(function(): void {
-                setTimeout(loadWindows, 300);
+                loadWindows();
+            }).catch(function(): void {
+                optimisticActiveIndex = "";
+                loadWindows();
             });
         }
     });
@@ -1274,7 +1320,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             loading.hide();
             loadWindows();
         } else if (hadOpen) {
-            loading.show("Reconnecting...");
+            loading.show();
         }
     });
 }

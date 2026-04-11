@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Save, Settings, Zap, Loader2 } from 'lucide-react';
+import { X, Save, Settings, Zap, Loader2, Send } from 'lucide-react';
 import { EditPaneData } from '../EditPaneDialog';
 import Select from '../ui/Select';
 import apiService from '../../services/api';
 import { useApp } from '../../contexts/AppContext';
+import { assetUrl } from '../../lib/assets';
 
 const THEME_KEY = 'app_theme';
 const themes = [
@@ -19,6 +20,7 @@ function applyTheme(t: string) {
 const sections = [
   { id: 'general', label: '常规', icon: Settings },
   { id: 'agent', label: '智能体', icon: Zap },
+  { id: 'telegram', label: 'Telegram', icon: Send },
   // { id: 'config', label: 'Config', icon: Settings },
   // { id: 'global', label: 'Global', icon: Globe },
 ] as const;
@@ -41,9 +43,49 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
   const initRef = useRef(false);
   useEffect(() => { if (agentDetail && !initRef.current) { initRef.current = true; setData(prev => ({ ...prev, ...agentDetail })); } }, [agentDetail]);
 
+  const showToast = (detail: string) => {
+    window.dispatchEvent(new CustomEvent('show-toast', { detail }));
+  };
+
+  const hasDuplicateTelegramToken = async () => {
+    const token = (data.tg_token || '').trim();
+    if (!token) return false;
+    try {
+      const { data: panesData } = await apiService.getPanes();
+      const panes = Array.isArray(panesData) ? panesData : panesData?.panes || [];
+      const otherPaneIds = panes
+        .map((pane: any) => String(pane?.pane_id || ''))
+        .filter((id: string) => id && id !== fullPaneId && id !== paneId && id !== `${paneId}:main.0`);
+      const details = await Promise.all(
+        otherPaneIds.map(async (id: string) => {
+          try {
+            const { data: detail } = await apiService.getPane(id);
+            return detail;
+          } catch {
+            return null;
+          }
+        })
+      );
+      return details.some((detail: any) => (detail?.tg_token || '').trim() === token);
+    } catch {
+      return false;
+    }
+  };
+
   const save = async () => {
     setSaving(true);
-    try { await apiService.updatePane(paneId, data); onAgentDetailChange(data); setSaved(true); setTimeout(() => setSaved(false), 2000); } catch {}
+    try {
+      if (await hasDuplicateTelegramToken()) {
+        showToast('这个 token 已绑，请更换其他 token');
+        return;
+      }
+      await apiService.updatePane(paneId, data);
+      onAgentDetailChange(data);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      showToast('保存失败');
+    }
     finally { setSaving(false); }
   };
 
@@ -125,8 +167,9 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
                   <div className="flex flex-wrap gap-2">
                     {[
                       { value: 'openclaw', label: 'OpenClaw', icon: null },
-                      { value: 'codex', label: 'Codex', icon: '/assets/logos/openai.svg' },
-                      { value: 'claude', label: 'Claude', icon: '/assets/logos/claude-symbol.svg' },
+                      { value: 'codex', label: 'Codex', icon: assetUrl('/assets/logos/openai.svg') },
+                      { value: 'claude', label: 'Claude', icon: assetUrl('/assets/logos/claude-symbol.svg') },
+                      { value: 'cicy', label: 'CiCy', icon: 'https://cicy-ai.com/logo.svg' },
                     ].map(option => (
                       <button
                         key={option.value}
@@ -202,16 +245,14 @@ export default function SettingsFloat({ paneId, fullPaneId, agentDetail, onAgent
             )}
 
             {section === 'telegram' && (
-              <div className="space-y-5">
+              <div data-id="settings-float-telegram-section" className="space-y-5">
                 <Toggle label="启用 Telegram" desc="通过 Telegram 机器人发送通知" checked={!!data.tg_enable} onChange={v => set({ tg_enable: v })} />
-                {data.tg_enable && (<>
-                  <Field label="机器人令牌">
-                    <Input value={data.tg_token || ''} onChange={v => set({ tg_token: v })} mono placeholder="1234567890:ABCdef..." />
-                  </Field>
-                  <Field label="聊天 ID">
-                    <Input value={data.tg_chat_id || ''} onChange={v => set({ tg_chat_id: v })} mono placeholder="-1001234567890" />
-                  </Field>
-                </>)}
+                <Field label="机器人令牌" desc="保存时会检查这个 token 是否已绑定到其他 agent">
+                  <Input value={data.tg_token || ''} onChange={v => set({ tg_token: v, tg_chat_id: '' })} mono placeholder="1234567890:ABCdef..." />
+                </Field>
+                <Field label="聊天 ID" desc="只读。配置好 token 后，在 bot 里发一条消息，chat_id 会自动获取。">
+                  <Input value={data.tg_chat_id || ''} onChange={() => {}} mono readOnly placeholder="等待 bot 首条消息后自动绑定" />
+                </Field>
               </div>
             )}
           </div>
@@ -252,10 +293,10 @@ function Field({ label, desc, mono, children }: { label: string; desc?: string; 
   );
 }
 
-function Input({ value, onChange, placeholder, mono }: { value: string; onChange: (v: string) => void; placeholder?: string; mono?: boolean }) {
+function Input({ value, onChange, placeholder, mono, readOnly }: { value: string; onChange: (v: string) => void; placeholder?: string; mono?: boolean; readOnly?: boolean }) {
   return (
-    <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-      className={`w-full bg-white/[0.03] border border-white/[0.08] text-zinc-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/20 placeholder:text-zinc-700 transition-all ${mono ? 'font-mono' : ''}`} />
+    <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} readOnly={readOnly}
+      className={`w-full bg-white/[0.03] border border-white/[0.08] text-zinc-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/20 placeholder:text-zinc-700 transition-all ${mono ? 'font-mono' : ''} ${readOnly ? 'cursor-not-allowed opacity-70' : ''}`} />
   );
 }
 

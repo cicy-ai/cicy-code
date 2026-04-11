@@ -571,7 +571,16 @@ def run_docker_build(version_override=""):
     print(f"[dev] Push target image: {target_image}")
     print(f"[dev] Push latest image: {latest_image}")
 
-    run_checked(["./build.sh", "docker", version], cwd=ROOT_DIR)
+    build_env = os.environ.copy()
+    build_env["CDN"] = "1"
+    build_env["SKIP_NPM"] = "0"
+    build_env["SKIP_TTYD_ASSET"] = "0"
+    run_checked(["./build.sh", "assets"], cwd=ROOT_DIR, env=build_env)
+    run_checked(["python3", "./scripts/cos-upload.py", "app"], cwd=ROOT_DIR, env=build_env)
+    run_checked(["python3", "./scripts/cos-upload.py", "ttyd"], cwd=ROOT_DIR, env=build_env)
+    build_env["SKIP_NPM"] = "1"
+    build_env["SKIP_TTYD_ASSET"] = "1"
+    run_checked(["./build.sh", "docker", version], cwd=ROOT_DIR, env=build_env)
     run_checked(["docker", "tag", f"cicy-code:{version}", target_image], cwd=ROOT_DIR)
     run_checked(["docker", "tag", f"cicy-code:{version}", latest_image], cwd=ROOT_DIR)
     run_checked(["docker", "push", target_image], cwd=ROOT_DIR)
@@ -603,6 +612,27 @@ def run_docker(ports):
     local_api_token = get_local_api_token()
     if local_api_token:
         env_vars.extend(["-e", f"CICY_API_TOKEN={local_api_token}"])
+    passthrough_env_keys = [
+        "CICY_TEAM_TOKEN",
+        "CICY_TEAMCENTER_URL",
+        "CICY_TEAMCENTER_BOOTSTRAP_PATH",
+        "CICY_MASTER_URL",
+        "CICY_MASTER_TOKEN",
+        "CICY_PUBLIC_URL",
+        "CICY_CLOUDFLARED_TOKEN",
+        "CF_TUNNEL_TOKEN",
+        "CLOUDFLARED_TOKEN",
+        "CICY_INSTANCE_KEY",
+        "CICY_INSTANCE_LABEL",
+    ]
+    for key in passthrough_env_keys:
+        value = os.environ.get(key, "").strip()
+        if value:
+            env_vars.extend(["-e", f"{key}={value}"])
+    trial_expires_at = str(int(time.time()) + 6 * 3600)
+    env_vars.extend(["-e", f"CLOUD_TRIAL_RUNTIME_EXPIRES_AT={trial_expires_at}"])
+    is_pro = "true"
+    env_vars.extend(["-e", f"CICY_IS_PRO={is_pro}"])
     
     run_cmd = [
         "docker", "run", "-d",
@@ -768,6 +798,11 @@ def run_ttyd_assets():
     print("[dev] ttyd assets rebuilt.")
     sys.exit(0)
 
+def rebuild_ttyd_assets_for_local_dev():
+    print("[dev] Refreshing ttyd embedded assets for local dev...")
+    run_checked(["make", "asset"], cwd=API_DIR)
+    print("[dev] ttyd embedded assets refreshed.")
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--docker", action="store_true", help="Build and run Docker container")
@@ -822,6 +857,7 @@ def main():
     os.environ["SQLITE_PATH"] = SQLITE_PATH
     for key, value in get_ai_env_defaults().items():
         os.environ[key] = value
+    rebuild_ttyd_assets_for_local_dev()
     run_version_sync()
 
     result = subprocess.run(["./build.sh", "build", platform], cwd=ROOT_DIR)

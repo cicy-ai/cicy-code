@@ -7,6 +7,8 @@ APP_DIR="$ROOT_DIR/app"
 DIST_DIR="$ROOT_DIR/dist"
 GLOBAL_JSON="$HOME/global.json"
 VERSIONS_JSON="$ROOT_DIR/versions.json"
+BUILD_EMBED_LOCK_DIR="$ROOT_DIR/.build-embed.lock"
+BUILD_EMBED_LOCK_HELD=0
 
 global_json_value() {
   local expr="$1"
@@ -95,6 +97,72 @@ default_base_image() {
   printf 'cicy-code-base:%s' "$(default_base_tag)"
 }
 
+cos_base_url() {
+  local bucket region
+  bucket="$(global_json_value tencent.bucket)"
+  region="$(global_json_value tencent.region)"
+  if [ -z "$bucket" ] || [ -z "$region" ]; then
+    echo "❌ CDN=1 requires ~/global.json.tencent.bucket and ~/global.json.tencent.region" >&2
+    exit 1
+  fi
+  printf 'https://%s.cos.%s.myqcloud.com' "$bucket" "$region"
+}
+
+configure_cdn_env() {
+  export CICY_APP_CDN_PREFIX=""
+  export CICY_TTYD_CDN_PREFIX=""
+
+  if [ "${CDN:-0}" != "1" ]; then
+    return
+  fi
+
+  local cos_base app_version ttyd_version
+  cos_base="$(cos_base_url)"
+  app_version="$(versions_json_value app)"
+  ttyd_version="$(versions_json_value ttyd)"
+
+  if [ -z "$app_version" ] || [ -z "$ttyd_version" ]; then
+    echo "❌ CDN=1 requires versions.json to define app and ttyd versions" >&2
+    exit 1
+  fi
+
+  export CICY_APP_CDN_PREFIX="${cos_base}/app/v${app_version}"
+  export CICY_TTYD_CDN_PREFIX="${cos_base}/ttyd/v${ttyd_version}"
+
+  echo "🌐 CDN=1"
+  echo "   APP_CDN_PREFIX=${CICY_APP_CDN_PREFIX}"
+  echo "   TTYD_CDN_PREFIX=${CICY_TTYD_CDN_PREFIX}"
+}
+
+acquire_build_embed_lock() {
+  if [ "$BUILD_EMBED_LOCK_HELD" = "1" ]; then
+    return
+  fi
+  while ! mkdir "$BUILD_EMBED_LOCK_DIR" 2>/dev/null; do
+    local lock_pid=""
+    if [ -f "$BUILD_EMBED_LOCK_DIR/pid" ]; then
+      lock_pid="$(cat "$BUILD_EMBED_LOCK_DIR/pid" 2>/dev/null || true)"
+    fi
+    if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+      echo "⚠️  Removing stale build embed lock from pid $lock_pid"
+      rm -rf "$BUILD_EMBED_LOCK_DIR"
+      continue
+    fi
+    echo "⏳ Waiting for build embed lock..."
+    sleep 0.2
+  done
+  printf '%s\n' "$$" > "$BUILD_EMBED_LOCK_DIR/pid"
+  BUILD_EMBED_LOCK_HELD=1
+}
+
+release_build_embed_lock() {
+  if [ "$BUILD_EMBED_LOCK_HELD" != "1" ]; then
+    return
+  fi
+  rm -rf "$BUILD_EMBED_LOCK_DIR"
+  BUILD_EMBED_LOCK_HELD=0
+}
+
 file_hash() {
   local path="$1"
   if command -v sha256sum >/dev/null 2>&1; then
@@ -135,6 +203,7 @@ EOF
 }
 
 prepare_embed() {
+  acquire_build_embed_lock
   rm -rf $API_DIR/mgr/resources $API_DIR/mgr/ui $API_DIR/mgr/tmux.conf $API_DIR/mgr/monitor
   cp -r $API_DIR/resources $API_DIR/mgr/resources
   cp $ROOT_DIR/.tmux.conf $API_DIR/mgr/.tmux.conf
@@ -146,16 +215,20 @@ prepare_embed() {
     # Build frontend
     cd $APP_DIR && npm ci --silent && npm run build --silent && cd "$ROOT_DIR"
   fi
+  if [ "${SKIP_TTYD_ASSET:-0}" != "1" ]; then
+    cd "$API_DIR" && make asset >/dev/null && cd "$ROOT_DIR"
+  fi
   cp -r $APP_DIR/dist $API_DIR/mgr/ui
 }
 
 cleanup_embed() {
   rm -rf $API_DIR/mgr/resources $API_DIR/mgr/ui $API_DIR/mgr/tmux.conf $API_DIR/mgr/monitor
   restore_ui_placeholder
+  release_build_embed_lock
 }
 trap cleanup_embed EXIT
 
-# ── Build Docker image for Cloud Run ──
+# ── Build Docker image for container runtime ──
 build_docker() {
   local tag="${1:-latest}"
   local base_image="${BASE_IMAGE:-$(default_base_image)}"
@@ -175,7 +248,7 @@ build_docker() {
   app_binary_hash="$(file_hash "$API_DIR/cicy-code-docker")"
   echo "   SETUP_AGENT_HASH=${setup_agent_hash:0:12}"
   echo "   APP_BINARY_HASH=${app_binary_hash:0:12}"
-  cd $API_DIR && docker build -f Dockerfile.cloudrun \
+  cd $API_DIR && docker build -f Dockerfile.runtime \
     --build-arg BASE_IMAGE="$base_image" \
     --build-arg SETUP_AGENT_HASH="$setup_agent_hash" \
     --build-arg APP_BINARY_HASH="$app_binary_hash" \
@@ -191,10 +264,10 @@ build_docker_base() {
   if [ "${NO_CACHE:-0}" = "1" ]; then
     docker_args+=(--no-cache)
   fi
-  base_dockerfile_hash="$(file_hash "$API_DIR/Dockerfile.cloudrun.base")"
+  base_dockerfile_hash="$(file_hash "$API_DIR/Dockerfile.runtime.base")"
   echo "📦 Building base Docker image cicy-code-base:${tag}..."
   echo "   BASE_DOCKERFILE_HASH=${base_dockerfile_hash:0:12}"
-  cd $API_DIR && docker build -f Dockerfile.cloudrun.base \
+  cd $API_DIR && docker build -f Dockerfile.runtime.base \
     --build-arg BASE_DOCKERFILE_HASH="$base_dockerfile_hash" \
     -t cicy-code-base:${tag} . "${docker_args[@]}" && cd "$ROOT_DIR"
   echo "✅ Base Docker image built: cicy-code-base:${tag}"
@@ -203,7 +276,11 @@ build_docker_base() {
 # ── Build single binary ──
 build_one() {
   local os=${1:-linux} arch=${2:-amd64} out=${3:-$API_DIR/cicy-code}
-  cd $API_DIR && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags="-s -w" -o "$out" ./mgr/ && cd "$ROOT_DIR"
+  local ldflags="-s -w"
+  if [ -n "${CICY_TTYD_CDN_PREFIX:-}" ]; then
+    ldflags="$ldflags -X ttyd-go/server.BuiltTTYDCDNPrefix=${CICY_TTYD_CDN_PREFIX}"
+  fi
+  cd $API_DIR && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags="$ldflags" -o "$out" ./mgr/ && cd "$ROOT_DIR"
   echo "✅ $out (${os}/${arch})"
 }
 
@@ -217,20 +294,37 @@ build_all() {
   echo ""; ls -lh $DIST_DIR/
 }
 
+build_assets() {
+  SKIP_NPM=0
+  SKIP_TTYD_ASSET=0
+  prepare_embed
+  echo "✅ Assets prepared"
+  echo "   app_dist=$APP_DIR/dist"
+  echo "   ttyd_assets_refreshed=1"
+}
+
 # ── Main ──
 case "${1:-build}" in
+  assets)
+    sync_version
+    configure_cdn_env
+    build_assets
+    ;;
   build)
     sync_version
+    configure_cdn_env
     prepare_embed
     build_one "${2:-linux}" "${3:-amd64}"
     ;;
   all)
     sync_version
+    configure_cdn_env
     prepare_embed
     build_all
     ;;
   docker)
     sync_version
+    configure_cdn_env
     prepare_embed
     build_one linux amd64
     build_docker "${2:-latest}"
@@ -242,6 +336,7 @@ case "${1:-build}" in
     echo "Usage: ./build.sh [command] [os] [arch]"
     echo ""
     echo "Commands:"
+    echo "  assets         Build app dist and ttyd static assets only"
     echo "  build          Build for current/specified platform (default: linux/amd64)"
     echo "  all            Cross-compile all platforms to dist/"
     echo "  docker [tag]       Build app Docker image using BASE_IMAGE"
@@ -257,12 +352,15 @@ case "${1:-build}" in
     echo ""
     echo "Environment variables:"
     echo "  SKIP_NPM=1     Skip npm ci + npm run build (reuse existing app/dist)"
+    echo "  SKIP_TTYD_ASSET=1  Skip ttyd bindata refresh (reuse existing api/server/asset.go)"
+    echo "  CDN=1          Build app/ttyd asset URLs with COS CDN prefix from ~/global.json.tencent"
     echo "  BASE_IMAGE     Base image for docker command"
     echo "  NO_CACHE=1     Disable Docker layer cache"
     exit 0
     ;;
   *)
     echo "Usage: ./build.sh [build|all|docker|docker-base] [os] [arch]"
+    echo "  assets         Build app dist and ttyd static assets only"
     echo "  build          Build for current/specified platform (default: linux/amd64)"
     echo "  all            Cross-compile all platforms to dist/"
     echo "  docker [tag]       Build app Docker image"
@@ -270,6 +368,8 @@ case "${1:-build}" in
     echo ""
     echo "Env vars:"
     echo "  SKIP_NPM=1     Skip npm ci + npm run build (reuse existing app/dist)"
+    echo "  SKIP_TTYD_ASSET=1  Skip ttyd bindata refresh (reuse existing api/server/asset.go)"
+    echo "  CDN=1          Build app/ttyd asset URLs with COS CDN prefix from ~/global.json.tencent"
     echo "  BASE_IMAGE     Base image for docker command"
     echo "  NO_CACHE=1     Disable Docker layer cache"
     exit 1
