@@ -42,9 +42,25 @@ interface OpenClawHelloPayload {
   };
 }
 
+interface OpenClawSessionSummary {
+  key?: string;
+  updatedAt?: number;
+  kind?: string;
+  channel?: string;
+  lastChannel?: string;
+  origin?: {
+    provider?: string;
+  };
+}
+
+interface OpenClawSessionsListPayload {
+  sessions?: OpenClawSessionSummary[];
+}
+
 interface ResolvedGatewayInfo extends OpenClawGatewayInfo {
   main_session_key: string;
   session_prefix: string;
+  preferred_session_keys: Record<string, string>;
 }
 
 function isPlainObject(value: unknown): value is Record<string, any> {
@@ -300,6 +316,7 @@ function buildSessionPrefix(mainSessionKey: string): string {
 function buildResolvedGatewayInfo(
   info: OpenClawGatewayInfo,
   hello: OpenClawHelloPayload | null,
+  sessionsPayload?: OpenClawSessionsListPayload | null,
 ): ResolvedGatewayInfo {
   const mainSessionKey = resolveCanonicalSessionKey(info, hello);
   return {
@@ -307,12 +324,65 @@ function buildResolvedGatewayInfo(
     session_key: mainSessionKey,
     main_session_key: mainSessionKey,
     session_prefix: buildSessionPrefix(mainSessionKey),
+    preferred_session_keys: buildPreferredSessionKeys(mainSessionKey, sessionsPayload),
   };
+}
+
+function buildPreferredSessionKeys(
+  mainSessionKey: string,
+  sessionsPayload?: OpenClawSessionsListPayload | null,
+): Record<string, string> {
+  const preferred: Record<string, string> = { main: mainSessionKey };
+  const latestByMember = new Map<string, { key: string; updatedAt: number; directRank: number }>();
+  const sessions = Array.isArray(sessionsPayload?.sessions) ? sessionsPayload.sessions : [];
+
+  for (const session of sessions) {
+    const key = typeof session?.key === 'string' ? session.key.trim() : '';
+    if (!key) {
+      continue;
+    }
+    if (key === mainSessionKey) {
+      preferred.main = key;
+      continue;
+    }
+
+    const memberId =
+      (typeof session?.lastChannel === 'string' && session.lastChannel.trim()) ||
+      (typeof session?.channel === 'string' && session.channel.trim()) ||
+      (typeof session?.origin?.provider === 'string' && session.origin.provider.trim()) ||
+      '';
+    if (!memberId) {
+      continue;
+    }
+
+    const candidate = {
+      key,
+      updatedAt: typeof session?.updatedAt === 'number' ? session.updatedAt : 0,
+      directRank: session?.kind === 'direct' ? 1 : 0,
+    };
+    const current = latestByMember.get(memberId);
+    if (
+      !current ||
+      candidate.updatedAt > current.updatedAt ||
+      (candidate.updatedAt === current.updatedAt && candidate.directRank > current.directRank)
+    ) {
+      latestByMember.set(memberId, candidate);
+    }
+  }
+
+  for (const [memberId, candidate] of latestByMember.entries()) {
+    preferred[memberId] = candidate.key;
+  }
+  return preferred;
 }
 
 function buildMemberSessionKey(info: ResolvedGatewayInfo | null, memberId: string): string {
   if (!info) {
     return memberId;
+  }
+  const preferred = info.preferred_session_keys[memberId];
+  if (typeof preferred === 'string' && preferred.trim()) {
+    return preferred;
   }
   if (memberId === 'main') {
     return info.main_session_key;
@@ -359,6 +429,7 @@ export default function HomeChatView({ hasToken, onOpenWorkspace }: Props) {
   const clientRef = useRef<OpenClawGatewayClient | null>(null);
   const gatewayInfoRef = useRef<ResolvedGatewayInfo | null>(null);
   const activeSessionKeyRef = useRef('main');
+  const activeMemberIdRef = useRef('main');
   const activeMemberLabelRef = useRef('OpenClaw');
   const chatStreamRef = useRef('');
   const historyRequestRef = useRef(0);
@@ -411,6 +482,7 @@ export default function HomeChatView({ hasToken, onOpenWorkspace }: Props) {
 
   const selectMember = (member: TeamMember) => {
     setActiveMemberId(member.id);
+    activeMemberIdRef.current = member.id;
     setActiveMemberLabel(member.label);
     activeMemberLabelRef.current = member.label;
 
@@ -433,6 +505,7 @@ export default function HomeChatView({ hasToken, onOpenWorkspace }: Props) {
       setChatMessages([]);
       setMembers(fallbackMembers(hasToken));
       setActiveMemberId('main');
+      activeMemberIdRef.current = 'main';
       setActiveMemberLabel('OpenClaw');
       activeMemberLabelRef.current = 'OpenClaw';
       activeSessionKeyRef.current = 'main';
@@ -510,6 +583,34 @@ export default function HomeChatView({ hasToken, onOpenWorkspace }: Props) {
       }
     };
 
+    const refreshSessionKeys = async (reason: 'connect' | 'sessions.changed' = 'connect') => {
+      if (!clientRef.current || !gatewayInfoRef.current) {
+        return;
+      }
+      try {
+        const sessionsPayload = (await clientRef.current.request('sessions.list', {})) as OpenClawSessionsListPayload;
+        if (cancelled || !gatewayInfoRef.current) {
+          return;
+        }
+        const nextInfo = buildResolvedGatewayInfo(
+          gatewayInfoRef.current,
+          { snapshot: { sessionDefaults: { mainSessionKey: gatewayInfoRef.current.main_session_key } } },
+          sessionsPayload,
+        );
+        gatewayInfoRef.current = nextInfo;
+
+        const nextSessionKey = buildMemberSessionKey(nextInfo, activeMemberIdRef.current);
+        if (nextSessionKey !== activeSessionKeyRef.current) {
+          activeSessionKeyRef.current = nextSessionKey;
+          if (reason === 'sessions.changed') {
+            void loadSessionHistory(nextSessionKey, activeMemberLabelRef.current);
+          }
+        }
+      } catch {
+        // Ignore session refresh failures and keep the last known mapping.
+      }
+    };
+
     const connectGateway = async () => {
       clientRef.current?.close();
       clientRef.current = null;
@@ -543,6 +644,10 @@ export default function HomeChatView({ hasToken, onOpenWorkspace }: Props) {
             }
             if (event.event === 'chat') {
               handleChatEvent(event.payload);
+              return;
+            }
+            if (event.event === 'sessions.changed') {
+              void refreshSessionKeys('sessions.changed');
             }
           },
           onClose: () => {
@@ -556,7 +661,8 @@ export default function HomeChatView({ hasToken, onOpenWorkspace }: Props) {
 
         clientRef.current = client;
         const hello = (await client.connect()) as OpenClawHelloPayload | null;
-        const resolvedInfo = buildResolvedGatewayInfo(info, hello);
+        const sessionsPayload = (await client.request('sessions.list', {})) as OpenClawSessionsListPayload;
+        const resolvedInfo = buildResolvedGatewayInfo(info, hello, sessionsPayload);
         gatewayInfoRef.current = resolvedInfo;
         if (cancelled) {
           client.close();

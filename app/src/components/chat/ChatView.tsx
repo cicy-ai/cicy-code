@@ -141,8 +141,8 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
   // Load cache
   useEffect(() => {
     if (!displayPaneId) return;
-    const short = displayPaneId.replace(':main.0', '');
-    getCache(short).then(cached => {
+    const agentId = displayPaneId.replace(':main.0', '');
+    getCache(agentId).then(cached => {
       if (cached?.length) { setChatData(cached); setLoading(false); }
     });
   }, [displayPaneId]);
@@ -196,12 +196,24 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
   // WS + API
   useEffect(() => {
     if (!displayPaneId || !token) return;
-    const short = displayPaneId.replace(':main.0', '');
+    const agentId = displayPaneId.replace(':main.0', '');
+    const clientId = (() => {
+      const key = 'cicy_chat_client_id';
+      try {
+        const current = sessionStorage.getItem(key);
+        if (current) return current;
+        const next = `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+        sessionStorage.setItem(key, next);
+        return next;
+      } catch {
+        return `web-${Date.now().toString(36)}`;
+      }
+    })();
     let ws: WebSocket | null = null, dead = false, reconnectTimer: ReturnType<typeof setTimeout>, fetchTimer: ReturnType<typeof setTimeout>;
 
     async function reload() {
       try {
-        const res = await fetch(`${config.apiBase}/api/stats/chat?pane=${short}`, { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(`${config.apiBase}/api/stats/chat?agent_id=${encodeURIComponent(agentId)}`, { headers: { Authorization: `Bearer ${token}` } });
         const json = await res.json();
         if (json.data && Array.isArray(json.data)) {
           const s = JSON.stringify(json.data);
@@ -211,7 +223,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
               const sys = prev.filter((c: any) => c.system);
               return [...json.data, ...sys];
             });
-            setCache(short, json.data);
+            setCache(agentId, json.data);
           }
           if (json.agentType) setAgentType(json.agentType);
         } else { setChatData([]); }
@@ -225,7 +237,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
       const proto = config.apiBase.startsWith('https') ? 'wss' : (location.protocol === 'https:' ? 'wss' : 'ws');
       const base = config.apiBase.replace(/^https?/, proto);
       const isElectron = typeof (window as any).electronRPC === 'function' ? '1' : '0';
-      ws = new WebSocket(`${base}/api/chat/ws?pane=${short}&token=${token}&electron=${isElectron}`);
+      ws = new WebSocket(`${base}/api/chat/ws?agent_id=${encodeURIComponent(agentId)}&token=${token}&electron=${isElectron}&client_id=${encodeURIComponent(clientId)}`);
 
       const ws发送 = (data: object) => {
         if (ws?.readyState === WebSocket.OPEN) {
@@ -250,7 +262,11 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
         window.removeEventListener('ipc-pong', ipcPongHandler as EventListener);
       };
 
-      ws.onopen = () => { console.log('[ChatView] WS connected, pane=' + short); reload(); };
+      ws.onopen = () => {
+        console.log('[ChatView] WS connected, agent_id=' + agentId + ', client_id=' + clientId);
+        window.dispatchEvent(new CustomEvent('chat-ws-connection', { detail: { agentId, connected: true } }));
+        reload();
+      };
 
       ws.onmessage = (e) => {
         try {
@@ -299,7 +315,8 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
               if (msg.data.requestId && ws) ws发送({ type: 'exec_js_result', data: { requestId: msg.data.requestId, error: e.message } });
             }
           } else if (msg.type === 'webpage_ping') {
-            ws发送({ type: 'webpage_pong', data: { requestId: msg.data?.requestId, version: import.meta.env.VITE_APP_VERSION } });
+            const versionText = document.getElementById('version')?.textContent?.trim() || import.meta.env.VITE_APP_VERSION;
+            ws发送({ type: 'webpage_pong', data: { requestId: msg.data?.requestId, version: versionText } });
           } else if (msg.type === 'worker_idle') {
             const d = msg.data?.data;
             if (d) setChatData(prev => [...prev, { q: '', a: `🔔 **${d.worker || msg.data.from}** 已完成任务（空闲）`, status: 'done', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0, system: true }]);
@@ -309,11 +326,21 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
         } catch { if (!streamingRef.current) debouncedReload(); }
       };
 
-      ws.onclose = () => { cleanup(); if (!dead) reconnectTimer = setTimeout(connect, 3000); };
+      ws.onclose = () => {
+        cleanup();
+        window.dispatchEvent(new CustomEvent('chat-ws-connection', { detail: { agentId, connected: false } }));
+        if (!dead) reconnectTimer = setTimeout(connect, 3000);
+      };
       ws.onerror = () => ws?.close();
     }
     connect();
-    return () => { dead = true; clearTimeout(reconnectTimer); clearTimeout(fetchTimer); ws?.close(); };
+    return () => {
+      dead = true;
+      window.dispatchEvent(new CustomEvent('chat-ws-connection', { detail: { agentId, connected: false } }));
+      clearTimeout(reconnectTimer);
+      clearTimeout(fetchTimer);
+      ws?.close();
+    };
   }, [displayPaneId, token]);
 
   // Load more on scroll up

@@ -2,12 +2,22 @@
 let count = 0;
 const listeners = new Set<(v: boolean) => void>();
 
+function notifyPointerLock(locked: boolean) {
+  listeners.forEach(fn => fn(locked));
+}
+
 export function lockPointer() {
-  if (++count === 1) listeners.forEach(fn => fn(true));
+  if (++count === 1) notifyPointerLock(true);
 }
 
 export function unlockPointer() {
-  if (--count <= 0) { count = 0; listeners.forEach(fn => fn(false)); }
+  if (--count <= 0) { count = 0; notifyPointerLock(false); }
+}
+
+export function clearPointerLock() {
+  if (count === 0) return;
+  count = 0;
+  notifyPointerLock(false);
 }
 
 export function onPointerLockChange(fn: (locked: boolean) => void) {
@@ -33,6 +43,10 @@ export function usePointerLock() {
 // Auto-detect: lock when dragging react-resizable-panels separators
 if (typeof window !== 'undefined') {
   let separatorLocked = false;
+  const forceRelease = () => {
+    separatorLocked = false;
+    clearPointerLock();
+  };
   window.addEventListener('pointerdown', (e) => {
     if ((e.target as HTMLElement)?.closest?.('[role="separator"]')) {
       lockPointer();
@@ -42,4 +56,8 @@ if (typeof window !== 'undefined') {
   window.addEventListener('pointerup', () => {
     if (separatorLocked) { unlockPointer(); separatorLocked = false; }
   }, true);
+  window.addEventListener('blur', forceRelease);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') forceRelease();
+  });
 }

@@ -16,10 +16,13 @@ HOST = f"{BUCKET}.cos.{REGION}.myqcloud.com"
 versions = json.load(open(os.path.join(REPO_ROOT, 'versions.json')))
 
 TARGETS = {
-    'app':     {'src': os.path.join(REPO_ROOT, 'app-worker/public/assets'), 'prefix': 'app',  'key': 'app',     'flat': True},
-    'ttyd':    {'prefix': 'ttyd', 'key': 'ttyd', 'flat': False},
-    'landing': {'src': os.path.expanduser('~/projects/cicy-landing/public/assets'), 'prefix': 'landing', 'key': 'landing', 'flat': True},
+    'app':     {'src': os.path.join(REPO_ROOT, 'app', 'dist', 'assets'), 'prefix': 'app',  'key': 'app',     'flat': False, 'base_dir': 'assets'},
+    'ttyd':    {'prefix': 'ttyd', 'key': 'ttyd', 'flat': False, 'base_dir': ''},
+    'landing': {'src': os.path.expanduser('~/projects/cicy-landing/public/assets'), 'prefix': 'landing', 'key': 'landing', 'flat': True, 'base_dir': 'assets'},
 }
+
+SESSION = requests.Session()
+SESSION.trust_env = False
 
 
 def first_existing(paths):
@@ -107,15 +110,32 @@ def upload(target):
                     key = f"/{prefix}/{ver}/assets/{f}"
                 else:
                     rel = os.path.relpath(local, src)
-                    key = f"/{prefix}/{ver}/{rel}"
+                    base_dir = t.get('base_dir', '').strip('/')
+                    key_rel = f"{base_dir}/{rel}" if base_dir else rel
+                    key = f"/{prefix}/{ver}/{key_rel}"
                 ct = mimetypes.guess_type(f)[0] or 'application/octet-stream'
                 with open(local, 'rb') as fh:
                     data = fh.read()
-                r = requests.put(
-                    f"https://{HOST}{key}",
-                    data=data,
-                    headers={'Host': HOST, 'Content-Type': ct, 'Authorization': sign('put', key)},
-                )
+                r = None
+                last_err = ""
+                for attempt in range(3):
+                    try:
+                        r = SESSION.put(
+                            f"https://{HOST}{key}",
+                            data=data,
+                            headers={'Host': HOST, 'Content-Type': ct, 'Authorization': sign('put', key)},
+                            timeout=(10, 180),
+                        )
+                        if r.status_code in (200, 204):
+                            break
+                        last_err = f"{r.status_code}"
+                    except Exception as e:
+                        last_err = str(e)
+                    if attempt < 2:
+                        time.sleep(1.5 * (attempt + 1))
+                if r is None:
+                    print(f"  ✗ {key} ({last_err})")
+                    continue
                 s = '✓' if r.status_code in (200, 204) else f'✗ {r.status_code}'
                 print(f"  {s} {key}")
                 if r.status_code in (200, 204):

@@ -1,6 +1,7 @@
 FROM node:22-bookworm-slim
 
 ARG BASE_DOCKERFILE_HASH=unknown
+ARG FEISHU_PLUGIN_INSTALL_SPEC=https://sf3-cn.feishucdn.com/obj/open-platform-opendoc/8ab6e7a04c17db1becfcbda8ca35f091_1rCCFRWlRV.tgz
 
 LABEL cicy.base_dockerfile_hash="${BASE_DOCKERFILE_HASH}"
 
@@ -17,7 +18,6 @@ ENV LANG=C.UTF-8 \
     PATH="/root/.npm-global/bin:/root/.opencode/bin:${PATH}" \
     PORT=8008 \
     CS_PORT=8002 \
-    CICY_RUNTIME_KIND=cloudrun \
     CICY_NO_BROWSER=1
 
 RUN set -eux; \
@@ -26,11 +26,19 @@ RUN set -eux; \
         ca-certificates \
         curl \
         git \
+        python3 \
+        sudo \
         tmux \
         vim \
         procps \
         fonts-wqy-microhei \
     ; \
+    curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o /tmp/cloudflared.deb; \
+    apt-get install -y /tmp/cloudflared.deb; \
+    rm -f /tmp/cloudflared.deb; \
+    if ! id -u cicy >/dev/null 2>&1; then useradd -m -s /bin/bash cicy; fi; \
+    echo 'cicy ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/cicy; \
+    chmod 0440 /etc/sudoers.d/cicy; \
     curl -fsSL https://code-server.dev/install.sh | sh; \
     curl -fsSL https://opencode.ai/install | bash; \
     npm install -g openclaw@latest; \
@@ -38,3 +46,14 @@ RUN set -eux; \
     npm install -g @openai/codex; \
     npm cache clean --force; \
     rm -rf /var/lib/apt/lists/* /tmp/npm-cache /root/.npm /root/.cache /tmp/* /var/tmp/*
+
+USER cicy
+RUN set -eux; \
+    export HOME=/home/cicy; \
+    export OPENCLAW_STATE_DIR="$HOME/.openclaw"; \
+    export OPENCLAW_CONFIG_PATH="$OPENCLAW_STATE_DIR/openclaw.json"; \
+    mkdir -p "$OPENCLAW_STATE_DIR"; \
+    openclaw plugins install "@tencent-weixin/openclaw-weixin@latest"; \
+    npx -y "${FEISHU_PLUGIN_INSTALL_SPEC}" install
+
+USER root

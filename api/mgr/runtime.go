@@ -73,7 +73,7 @@ func handleRuntimeInstanceRegister(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 500, err.Error())
 		return
 	}
-	if !isCloudRunRuntime() {
+	if !isContainerRuntime() {
 		cfg := loadMachineConfig()
 		updated := false
 		for i := range cfg.Machines {
@@ -98,24 +98,28 @@ func handleRuntimeInstanceRegister(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"success": true, "instance": instance})
 }
 
-func cloudRunCapabilities() map[string]interface{} {
+func containerRuntimeCapabilities() map[string]interface{} {
 	return map[string]interface{}{
-		"runtime_kind":             "cloudrun",
-		"supports_tmux":            false,
-		"supports_ttyd":            false,
-		"supports_code_server":     false,
-		"supports_local_workspace": false,
+		"runtime_kind":             "container",
+		"supports_tmux":            true,
+		"supports_ttyd":            true,
+		"supports_code_server":     true,
+		"supports_local_workspace": true,
 		"supports_remote_api":      true,
 	}
 }
 
-func cloudRunRegisterPayload() M {
-	instanceKey := firstNonEmpty(strings.TrimSpace(os.Getenv("CICY_INSTANCE_KEY")), strings.TrimSpace(os.Getenv("K_SERVICE")), "cloudrun")
+func containerRegisterPayload() M {
+	instanceKey := firstNonEmpty(strings.TrimSpace(os.Getenv("CICY_INSTANCE_KEY")), strings.TrimSpace(os.Getenv("K_SERVICE")), "container")
 	instanceLabel := firstNonEmpty(strings.TrimSpace(os.Getenv("CICY_INSTANCE_LABEL")), instanceKey)
+	runtimeKind := strings.ToLower(strings.TrimSpace(os.Getenv("CICY_RUNTIME_KIND")))
+	if runtimeKind == "" {
+		runtimeKind = "container"
+	}
 	publicURL := strings.TrimSpace(os.Getenv("CICY_PUBLIC_URL"))
 	apiToken := strings.TrimSpace(loadAPIToken())
 	lastSeenAt := time.Now().Format(time.RFC3339)
-	caps := cloudRunCapabilities()
+	caps := containerRuntimeCapabilities()
 	endpointHost := ""
 	endpointPort := 443
 	if publicURL != "" {
@@ -132,7 +136,7 @@ func cloudRunRegisterPayload() M {
 		"instance_id":    instanceKey,
 		"instance_key":   instanceKey,
 		"instance_label": instanceLabel,
-		"runtime_kind":   "cloudrun",
+		"runtime_kind":   runtimeKind,
 		"endpoint":       publicURL,
 		"token":          apiToken,
 		"status":         "online",
@@ -143,14 +147,14 @@ func cloudRunRegisterPayload() M {
 	}
 }
 
-func registerCloudRunInstanceOnce() error {
+func registerContainerInstanceOnce() error {
 	masterURL := strings.TrimRight(strings.TrimSpace(os.Getenv("CICY_MASTER_URL")), "/")
 	masterToken := strings.TrimSpace(os.Getenv("CICY_MASTER_TOKEN"))
 	publicURL := strings.TrimSpace(os.Getenv("CICY_PUBLIC_URL"))
 	if masterURL == "" || masterToken == "" || publicURL == "" {
 		return nil
 	}
-	payload := cloudRunRegisterPayload()
+	payload := containerRegisterPayload()
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -173,28 +177,28 @@ func registerCloudRunInstanceOnce() error {
 	return nil
 }
 
-func startCloudRunRegisterLoop() {
-	if !isCloudRunRuntime() {
+func startContainerRegisterLoop() {
+	if !shouldSelfRegisterRuntime() {
 		return
 	}
 	masterURL := strings.TrimSpace(os.Getenv("CICY_MASTER_URL"))
 	masterToken := strings.TrimSpace(os.Getenv("CICY_MASTER_TOKEN"))
 	publicURL := strings.TrimSpace(os.Getenv("CICY_PUBLIC_URL"))
 	if masterURL == "" || masterToken == "" || publicURL == "" {
-		log.Printf("[cloudrun] self-register skipped: CICY_MASTER_URL/CICY_MASTER_TOKEN/CICY_PUBLIC_URL required")
+		log.Printf("[container] self-register skipped: CICY_MASTER_URL/CICY_MASTER_TOKEN/CICY_PUBLIC_URL required")
 		return
 	}
-	if err := registerCloudRunInstanceOnce(); err != nil {
-		log.Printf("[cloudrun] initial register error: %v", err)
+	if err := registerContainerInstanceOnce(); err != nil {
+		log.Printf("[container] initial register error: %v", err)
 	} else {
-		log.Printf("[cloudrun] registered runtime instance to master")
+		log.Printf("[container] registered runtime instance to master")
 	}
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
-			if err := registerCloudRunInstanceOnce(); err != nil {
-				log.Printf("[cloudrun] register heartbeat error: %v", err)
+			if err := registerContainerInstanceOnce(); err != nil {
+				log.Printf("[container] register heartbeat error: %v", err)
 			}
 		}
 	}()

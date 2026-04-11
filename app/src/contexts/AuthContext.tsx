@@ -9,7 +9,7 @@ import React, {
 import { useDevRegister } from "../lib/devStore";
 import { TokenManager } from "../services/tokenManager";
 import apiService, { setBackend } from "../services/api";
-import config from "../config";
+import config, { setHostHome } from "../config";
 
 interface AuthContextType {
   token: string | null;
@@ -42,7 +42,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     setPerms(data.perms || []);
     setAuthType(data.auth_type || "token");
     setPlan(data.plan || null);
-    if (data.home) config.hostHome = data.home;
+    if (data.home) setHostHome(data.home);
     if (data.auth_type === "saas" && data.backend) {
       setBackend(data.backend);
     } else if (data.auth_type === "saas" && !data.backend) {

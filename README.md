@@ -22,7 +22,7 @@
 - React 工作区 UI，内含终端、聊天、队列、技能、团队面板、设置面板
 - 内嵌式 code-server 代理
 - 自带 WebTTY / ttyd-go 前后端协议实现，不依赖外部终端网关
-- 本地 SQLite 默认模式，也支持 Redis / Cloud Run 风格运行时
+- 本地 SQLite 默认模式，也支持 Redis / 容器运行时
 - 多节点 registry，配置文件默认在 `~/Private/cicy-node.json`
 - shared workspace API，用 JSON / Markdown 文件做跨 worker 协作桥接
 - npm launcher，支持 `npx cicy-code`
@@ -101,7 +101,7 @@ cicy-code/
 - `opencode`
 - `code-server`
 
-Cloud Run 风格 runtime 下则假设这些工具已经预装在镜像中。
+容器 runtime 下则假设这些工具已经预装在镜像中。
 
 ## 快速开始
 
@@ -185,7 +185,7 @@ make build-all
 # 等价于
 ./build.sh all
 
-# 构建 Cloud Run 运行镜像
+# 构建容器运行镜像
 ./build.sh docker <tag>
 
 # 构建基础镜像
@@ -232,6 +232,25 @@ SKIP_NPM=1 ./build.sh build
 - `CICY_OPENCLAW_MODEL`
 - `CICY_API_TOKEN`
 - `CICY_RUNTIME_KIND`
+- `CICY_TEAM_TOKEN`
+- `CICY_TEAMCENTER_URL`
+- `CICY_TEAMCENTER_BOOTSTRAP_PATH`
+- `CICY_MASTER_URL`
+- `CICY_MASTER_TOKEN`
+- `CICY_PUBLIC_URL`
+- `CICY_CLOUDFLARED_TOKEN`
+
+其中 runtime / docker 的环境约定是：
+
+- dev 和 prod 走同一套容器启动流程
+- 容器先用 `CICY_TEAM_TOKEN` 调 `CICY_TEAMCENTER_URL + CICY_TEAMCENTER_BOOTSTRAP_PATH`
+- 服务端返回 `CICY_PUBLIC_URL`、`CICY_MASTER_URL`、`CICY_MASTER_TOKEN`、`CICY_CLOUDFLARED_TOKEN`
+- 容器内再启动 `cloudflared`，并把自己注册回 teamcenter
+
+也就是说：
+
+- VM / docker / cloudflared 流程不分 dev / prod
+- 只通过 teamcenter 地址和回填域名区分环境
 
 ### 2. `~/global.json`
 
@@ -377,12 +396,12 @@ cicy-code --desktop
 
 桌面模式现在依赖全局安装的 `cicy-desktop`，仓库内部已经不再内置 desktop submodule。
 
-## Docker / Cloud Run
+## Docker / Container Runtime
 
 当前仓库仍然保留了这部分底层能力：
 
-- `api/Dockerfile.cloudrun.base`
-- `api/Dockerfile.cloudrun`
+- `api/Dockerfile.runtime.base`
+- `api/Dockerfile.runtime`
 - `build.sh docker`
 - `build.sh docker-base`
 - `dev.py --docker`

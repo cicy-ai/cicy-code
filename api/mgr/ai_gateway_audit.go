@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -101,6 +103,26 @@ type aiGatewayReplySnapshot struct {
 	StatusMap    aiGatewayStatusMap     `json:"status_map"`
 }
 
+type aiGatewayMessageRecord struct {
+	Q         string                     `json:"q,omitempty"`
+	A         string                     `json:"a,omitempty"`
+	QTime     string                     `json:"qTime,omitempty"`
+	ATime     string                     `json:"aTime,omitempty"`
+	Model     string                     `json:"model,omitempty"`
+	Thinking  string                     `json:"thinking,omitempty"`
+	ToolCalls []aiGatewayMessageToolCall `json:"tool_calls,omitempty"`
+}
+
+type aiGatewayMessageToolCall struct {
+	Name   string `json:"name,omitempty"`
+	Input  string `json:"input,omitempty"`
+	Output string `json:"output,omitempty"`
+}
+
+type aiGatewayMessagesFile struct {
+	Messages     []aiGatewayMessageRecord `json:"messages"`
+}
+
 type aiGatewayParsedResponse struct {
 	Thinking  string
 	Answer    string
@@ -130,6 +152,7 @@ type aiGatewayAuditSession struct {
 	replyEventIndex int
 	current         aiGatewayCurrentSnapshot
 	reply           aiGatewayReplySnapshot
+	tgHook          *tgReplyPushHook
 }
 
 type aiGatewayAuditReadCloser struct {
@@ -152,6 +175,12 @@ type aiGatewayStreamAccumulator struct {
 	autoIndex     int
 }
 
+var (
+	systemReminderBlockRe      = regexp.MustCompile(`(?s)<system-reminder>.*?</system-reminder>`)
+	openClawForwardedHeaderRe  = regexp.MustCompile("(?s)^Sender \\(untrusted metadata\\):\\s*```json\\s*.*?```\\s*")
+	openClawLeadingTimestampRe = regexp.MustCompile(`^\[[^\]\n]+\]\s*`)
+)
+
 func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suffix string, method string, requestHeaders http.Header, requestBody []byte) *aiGatewayAuditSession {
 	startedAt := time.Now().UTC()
 	startedAtISO := startedAt.Format(time.RFC3339)
@@ -166,11 +195,14 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 			payloadMap = m
 		}
 	}
-	question := aiGatewayExtractQuestion(payloadMap)
 	model := aiGatewayString(payloadMap["model"])
 	conversationID := aiGatewayExtractConversationID(payloadMap)
 	requestID := aiGatewayFirstNonEmpty(aiGatewayString(payloadMap["request_id"]), aiGatewayString(payloadMap["id"]), aiGatewayShortID())
 	historySource, requestHistory := aiGatewayExtractRequestHistory(payloadMap)
+	question := aiGatewayExtractQuestion(payloadMap)
+	if question == "" {
+		question = aiGatewayQuestionFromHistoryValue(requestHistory)
+	}
 	turnID := aiGatewayShortID()
 	targetURL := *targetBase
 	targetURL.Path = resolveOpenClawProviderTargetPath(targetBase.Path, suffix)
@@ -258,6 +290,7 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		startedAt:      startedAt,
 		current:        current,
 		reply:          reply,
+		tgHook:         newTGReplyPushHook(agentID),
 	}
 }
 
@@ -386,8 +419,8 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.finalized {
+		s.mu.Unlock()
 		return
 	}
 	s.finalized = true
@@ -450,6 +483,17 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 
 	if err := s.writeSnapshotsLocked(); err != nil {
 		log.Printf("[ai-gateway] write reply snapshot failed for %s: %v", s.agentID, err)
+	}
+	if err := aiGatewayAppendMessageRecord(s.agentID, s.current, s.question, s.reply); err != nil {
+		log.Printf("[ai-gateway] write messages failed for %s: %v", s.agentID, err)
+	}
+	replySnapshot := s.reply
+	tgHook := s.tgHook
+	log.Printf("[ai-gateway] complete agent=%s status=%s status_code=%d answer_len=%d thinking_len=%d tools=%d tg_hook=%t",
+		s.agentID, replySnapshot.Status, statusCode, len([]rune(replySnapshot.Answer)), len([]rune(replySnapshot.Thinking)), len(replySnapshot.ToolCalls), tgHook != nil)
+	s.mu.Unlock()
+	if tgHook != nil {
+		tgHook.finalize(replySnapshot)
 	}
 }
 
@@ -519,6 +563,1330 @@ func aiGatewayWriteJSONAtomic(path string, value interface{}) error {
 	return os.Rename(tmpPath, path)
 }
 
+func aiGatewayMessagesPath(agentID string) string {
+	return filepath.Join(aiGatewayHistoryDir(agentID), "messages.json")
+}
+
+func aiGatewaySystemPromptPath(agentID string) string {
+	return filepath.Join(aiGatewayHistoryDir(agentID), "system_prompt.txt")
+}
+
+func aiGatewayWriteTextAtomic(path string, text string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	if !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	tmpPath := fmt.Sprintf("%s.tmp.%d", path, time.Now().UnixNano())
+	if err := os.WriteFile(tmpPath, []byte(text), 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
+func aiGatewayAppendMessageRecord(agentID string, current aiGatewayCurrentSnapshot, question string, reply aiGatewayReplySnapshot) error {
+	path := aiGatewayMessagesPath(agentID)
+	file := aiGatewayMessagesFile{Messages: []aiGatewayMessageRecord{}}
+	if body, err := os.ReadFile(path); err == nil && len(bytes.TrimSpace(body)) > 0 {
+		if err := json.Unmarshal(body, &file); err != nil {
+			var legacy []aiGatewayMessageRecord
+			if err := json.Unmarshal(body, &legacy); err != nil {
+				return err
+			}
+			file = aiGatewayMigrateLegacyMessagesFile(legacy)
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	events, err := aiGatewayReadReplyEvents(agentID)
+	if err != nil {
+		return err
+	}
+	turnEvents := aiGatewayFilterEventsByTurn(events, reply.TurnID)
+	sanitizedQuestion := aiGatewaySanitizeUserQuestion(question)
+	if sanitizedQuestion == "" {
+		if strings.TrimSpace(current.TurnID) == strings.TrimSpace(reply.TurnID) {
+			sanitizedQuestion = aiGatewaySanitizeUserQuestion(current.Question)
+		}
+	}
+	classifiedQuestion := sanitizedQuestion
+	if classifiedQuestion == "" {
+		classifiedQuestion = question
+	}
+	source, kind := aiGatewayClassifyQuestion(classifiedQuestion)
+	if aiGatewayShouldSkipMessageRecord(current, sanitizedQuestion, source, kind, reply, reply.HTTPRequests) {
+		return nil
+	}
+	if prompt := aiGatewayExtractMessageSystemPrompt(current, reply.TurnID, turnEvents); prompt != "" {
+		if err := aiGatewayWriteTextAtomic(aiGatewaySystemPromptPath(agentID), prompt); err != nil {
+			return err
+		}
+	}
+	file.Messages = append(file.Messages, aiGatewayMessageRecord{
+		Q:         sanitizedQuestion,
+		A:         aiGatewaySanitizeMessageAnswer(reply.Answer),
+		QTime:     aiGatewayMessageQuestionTime(current, reply),
+		ATime:     aiGatewayMessageAnswerTime(reply),
+		Model:     aiGatewayFirstNonEmpty(aiGatewayReplyPrimaryModel(reply), strings.TrimSpace(current.Model)),
+		Thinking:  strings.TrimSpace(reply.Thinking),
+		ToolCalls: aiGatewayBuildMessageToolCalls(turnEvents, reply),
+	})
+	return aiGatewayWriteJSONAtomic(path, file)
+}
+
+func aiGatewayMessageQuestionTime(current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot) string {
+	if strings.TrimSpace(current.TurnID) == strings.TrimSpace(reply.TurnID) {
+		if ts := strings.TrimSpace(current.Timestamp); ts != "" {
+			return ts
+		}
+		if ts := strings.TrimSpace(current.StartedAt); ts != "" {
+			return ts
+		}
+	}
+	return strings.TrimSpace(reply.StartedAt)
+}
+
+func aiGatewayMessageAnswerTime(reply aiGatewayReplySnapshot) string {
+	if ts := strings.TrimSpace(reply.UpdatedAt); ts != "" {
+		return ts
+	}
+	return strings.TrimSpace(reply.StartedAt)
+}
+
+func aiGatewayFilterEventsByTurn(events []map[string]interface{}, turnID string) []map[string]interface{} {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" || len(events) == 0 {
+		return events
+	}
+	filtered := make([]map[string]interface{}, 0, len(events))
+	for _, event := range events {
+		eventTurnID := strings.TrimSpace(aiGatewayString(event["turn_id"]))
+		if eventTurnID != "" && eventTurnID != turnID {
+			continue
+		}
+		filtered = append(filtered, event)
+	}
+	return filtered
+}
+
+func aiGatewayMigrateLegacyMessagesFile(legacy []aiGatewayMessageRecord) aiGatewayMessagesFile {
+	file := aiGatewayMessagesFile{Messages: make([]aiGatewayMessageRecord, 0, len(legacy))}
+	for _, item := range legacy {
+		file.Messages = append(file.Messages, aiGatewayMessageRecord{
+			Q:         item.Q,
+			A:         item.A,
+			Thinking:  item.Thinking,
+			ToolCalls: append([]aiGatewayMessageToolCall(nil), item.ToolCalls...),
+		})
+	}
+	return file
+}
+
+func aiGatewayShouldSkipInternalPrompt(prompt string) bool {
+	lower := strings.ToLower(strings.TrimSpace(prompt))
+	switch {
+	case lower == "":
+		return false
+	case strings.Contains(lower, "generate a concise, sentence-case title"):
+		return true
+	case strings.Contains(lower, "return json with a single \"title\" field"):
+		return true
+	case strings.Contains(lower, "the messages above are a conversation to summarize"):
+		return true
+	case strings.Contains(lower, "<previous-summary>"):
+		return true
+	default:
+		return false
+	}
+}
+
+func aiGatewayShouldSkipMessageRecord(current aiGatewayCurrentSnapshot, question, source, kind string, reply aiGatewayReplySnapshot, requests []aiGatewayRequestSpan) bool {
+	if source != "user" {
+		return true
+	}
+	if strings.TrimSpace(question) == "" {
+		return true
+	}
+	if strings.TrimSpace(aiGatewaySanitizeMessageAnswer(reply.Answer)) == "" {
+		return true
+	}
+	if body := aiGatewayMap(current.Body); len(body) > 0 {
+		if aiGatewayShouldSkipInternalPrompt(aiGatewayBuildSystemPrompt(body)) {
+			return true
+		}
+	}
+	_ = kind
+	_ = reply
+	_ = requests
+	return false
+}
+
+func aiGatewayClassifyQuestion(question string) (string, string) {
+	trimmed := strings.TrimSpace(question)
+	lower := strings.ToLower(trimmed)
+	switch {
+	case trimmed == "":
+		return "internal", "empty"
+	case strings.Contains(trimmed, "Sender (untrusted metadata):"):
+		return "user", "forwarded_user"
+	case strings.Contains(lower, "the messages above are a conversation to summarize"):
+		return "internal", "summary"
+	case strings.Contains(lower, "<previous-summary>"):
+		return "internal", "summary_update"
+	case strings.Contains(lower, "system-reminder"):
+		return "system", "system_prompt"
+	case strings.TrimSpace(lower) == "reply in chinese":
+		return "auto", "bootstrap"
+	default:
+		return "user", "prompt"
+	}
+}
+
+func aiGatewayReadReplyEvents(agentID string) ([]map[string]interface{}, error) {
+	dir := aiGatewayReplyDir(agentID)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []map[string]interface{}{}, nil
+		}
+		return nil, err
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name() < entries[j].Name()
+	})
+	events := make([]map[string]interface{}, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Name() == "summary.json" || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return nil, err
+		}
+		event := map[string]interface{}{}
+		if err := json.Unmarshal(body, &event); err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, nil
+}
+
+func aiGatewayExtractThinkingSteps(events []map[string]interface{}) []string {
+	steps := []string{}
+	for _, event := range events {
+		if aiGatewayString(event["kind"]) != "sse" {
+			continue
+		}
+		payload := aiGatewayMap(event["payload"])
+		if aiGatewayString(payload["stream_kind"]) != "thinking" {
+			continue
+		}
+		text := strings.TrimSpace(aiGatewayString(payload["content"]))
+		if text != "" {
+			steps = append(steps, text)
+		}
+	}
+	return steps
+}
+
+func aiGatewayExtractToolSteps(events []map[string]interface{}) []map[string]interface{} {
+	steps := []map[string]interface{}{}
+	for _, event := range events {
+		kind := aiGatewayString(event["kind"])
+		switch kind {
+		case "tool_call", "web_search", "request", "request_complete":
+			steps = append(steps, aiGatewayCloneAnyMap(event))
+		}
+	}
+	return steps
+}
+
+func aiGatewayExtractSystemPrompt(events []map[string]interface{}) string {
+	best := ""
+	for _, event := range events {
+		if aiGatewayString(event["kind"]) != "request" {
+			continue
+		}
+		payload := aiGatewayMap(event["payload"])
+		body := aiGatewayMap(payload["body"])
+		if len(body) == 0 {
+			continue
+		}
+		if prompt := aiGatewayBuildSystemPrompt(body); prompt != "" {
+			if len([]rune(prompt)) > len([]rune(best)) {
+				best = prompt
+			}
+		}
+	}
+	return best
+}
+
+func aiGatewayBuildSystemPrompt(body map[string]interface{}) string {
+	parts := []string{}
+	if instructions := strings.TrimSpace(aiGatewayString(body["instructions"])); instructions != "" {
+		parts = append(parts, instructions)
+	}
+	if system := body["system"]; system != nil {
+		if text := strings.TrimSpace(aiGatewayFlattenPromptValue(system)); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	for _, item := range aiGatewayExtractMessages(body) {
+		role := aiGatewayString(item["role"])
+		if role != "system" && role != "developer" {
+			continue
+		}
+		if text := strings.TrimSpace(aiGatewayFlattenPromptValue(item["content"])); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	for _, raw := range aiGatewayExtractInputItems(body) {
+		item := aiGatewayMap(raw)
+		if len(item) == 0 {
+			continue
+		}
+		role := aiGatewayString(item["role"])
+		if role != "system" && role != "developer" {
+			continue
+		}
+		if text := strings.TrimSpace(aiGatewayFlattenPromptValue(item["content"])); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return aiGatewayCompactText(aiGatewayJoinUniqueText(parts), 24000)
+}
+
+func aiGatewayExtractToolTimeline(events []map[string]interface{}) []map[string]interface{} {
+	steps := []map[string]interface{}{}
+	for _, event := range events {
+		kind := aiGatewayString(event["kind"])
+		payload := aiGatewayMap(event["payload"])
+		switch kind {
+		case "tool_call":
+			step := M{
+				"kind":      "tool_call",
+				"tool_id":   aiGatewayString(payload["tool_id"]),
+				"tool_name": aiGatewayString(payload["tool_name"]),
+				"input":     aiGatewayCompactText(aiGatewayString(payload["arguments"]), 12000),
+			}
+			if index := aiGatewayInt(event["index"]); index > 0 {
+				step["index"] = index
+			}
+			if ts := aiGatewayString(event["timestamp"]); ts != "" {
+				step["timestamp"] = ts
+			}
+			steps = append(steps, step)
+		case "web_search":
+			step := M{
+				"kind":      "tool_call",
+				"tool_id":   aiGatewayFirstNonEmpty(aiGatewayString(payload["item_id"]), aiGatewayString(payload["tool_id"])),
+				"tool_name": aiGatewayFirstNonEmpty(aiGatewayString(payload["tool_name"]), "web_search_call"),
+				"input":     aiGatewayCompactText(aiGatewayWebSearchQuery(aiGatewayMap(payload["payload"])), 12000),
+			}
+			if status := aiGatewayString(payload["status"]); status != "" {
+				step["status"] = status
+			}
+			if index := aiGatewayInt(event["index"]); index > 0 {
+				step["index"] = index
+			}
+			if ts := aiGatewayString(event["timestamp"]); ts != "" {
+				step["timestamp"] = ts
+			}
+			steps = append(steps, step)
+		case "request":
+			steps = append(steps, aiGatewayExtractToolResultsFromRequest(payload)...)
+		}
+	}
+	return aiGatewayDedupToolTimeline(steps)
+}
+
+func aiGatewayExtractToolResultsFromRequest(payload map[string]interface{}) []map[string]interface{} {
+	body := aiGatewayMap(payload["body"])
+	if len(body) == 0 {
+		return nil
+	}
+	steps := []map[string]interface{}{}
+	appendStep := func(step map[string]interface{}) {
+		if len(step) == 0 {
+			return
+		}
+		if requestID := aiGatewayString(payload["request_id"]); requestID != "" {
+			step["request_id"] = requestID
+		}
+		if ts := aiGatewayString(payload["timestamp"]); ts != "" {
+			step["timestamp"] = ts
+		}
+		steps = append(steps, step)
+	}
+	for _, item := range aiGatewayCurrentTurnMessages(aiGatewayExtractMessages(body)) {
+		for _, step := range aiGatewayToolCallsFromMessage(item) {
+			appendStep(step)
+		}
+		for _, step := range aiGatewayToolResultsFromMessage(item) {
+			appendStep(step)
+		}
+	}
+	for _, raw := range aiGatewayCurrentTurnInputItems(aiGatewayExtractInputItems(body)) {
+		item := aiGatewayMap(raw)
+		if len(item) == 0 {
+			continue
+		}
+		for _, step := range aiGatewayToolCallsFromInputItem(item) {
+			appendStep(step)
+		}
+		for _, step := range aiGatewayToolResultsFromInputItem(item) {
+			appendStep(step)
+		}
+	}
+	return steps
+}
+
+func aiGatewayToolCallsFromMessage(item map[string]interface{}) []map[string]interface{} {
+	if aiGatewayString(item["role"]) != "assistant" {
+		return nil
+	}
+	steps := []map[string]interface{}{}
+	for _, raw := range aiGatewaySlice(item["content"]) {
+		part := aiGatewayMap(raw)
+		if len(part) == 0 {
+			continue
+		}
+		switch aiGatewayString(part["type"]) {
+		case "tool_use":
+			steps = append(steps, M{
+				"kind":      "tool_call",
+				"tool_id":   aiGatewayString(part["id"]),
+				"tool_name": aiGatewayString(part["name"]),
+				"input":     aiGatewayCompactText(aiGatewayJSONString(part["input"]), 12000),
+			})
+		case "function_call", "tool_call":
+			steps = append(steps, M{
+				"kind":      "tool_call",
+				"tool_id":   aiGatewayFirstNonEmpty(aiGatewayString(part["call_id"]), aiGatewayString(part["id"])),
+				"tool_name": aiGatewayString(part["name"]),
+				"input":     aiGatewayCompactText(aiGatewayFirstNonEmpty(aiGatewayString(part["arguments"]), aiGatewayJSONString(part["arguments"])), 12000),
+			})
+		case "custom_tool_call", "web_search_call", "shell_call", "apply_patch_call":
+			input := part["arguments"]
+			if input == nil {
+				input = part["input"]
+			}
+			if input == nil {
+				input = part["action"]
+			}
+			if input == nil {
+				input = part["operation"]
+			}
+			steps = append(steps, M{
+				"kind":      "tool_call",
+				"tool_id":   aiGatewayFirstNonEmpty(aiGatewayString(part["call_id"]), aiGatewayString(part["id"])),
+				"tool_name": aiGatewayFirstNonEmpty(aiGatewayString(part["name"]), aiGatewayString(part["type"])),
+				"input":     aiGatewayCompactText(aiGatewayFlattenPromptValue(input), 12000),
+			})
+		}
+	}
+	return steps
+}
+
+func aiGatewayToolResultsFromMessage(item map[string]interface{}) []map[string]interface{} {
+	results := []map[string]interface{}{}
+	role := aiGatewayString(item["role"])
+	if role == "tool" || role == "function" {
+		return []map[string]interface{}{M{
+			"kind":      "tool_result",
+			"tool_id":   aiGatewayFirstNonEmpty(aiGatewayString(item["tool_call_id"]), aiGatewayString(item["call_id"])),
+			"tool_name": aiGatewayFirstNonEmpty(aiGatewayString(item["name"]), aiGatewayString(item["tool_name"])),
+			"output":    aiGatewayCompactText(aiGatewayFlattenPromptValue(item["content"]), 12000),
+		}}
+	}
+	for _, raw := range aiGatewaySlice(item["content"]) {
+		part := aiGatewayMap(raw)
+		if len(part) == 0 {
+			continue
+		}
+		if aiGatewayString(part["type"]) != "tool_result" {
+			continue
+		}
+		results = append(results, M{
+			"kind":      "tool_result",
+			"tool_id":   aiGatewayFirstNonEmpty(aiGatewayString(part["tool_use_id"]), aiGatewayString(part["tool_id"])),
+			"tool_name": aiGatewayFirstNonEmpty(aiGatewayString(part["name"]), aiGatewayString(part["tool_name"])),
+			"output":    aiGatewayCompactText(aiGatewayFlattenPromptValue(part["content"]), 12000),
+		})
+	}
+	return results
+}
+
+func aiGatewayToolCallsFromInputItem(item map[string]interface{}) []map[string]interface{} {
+	switch aiGatewayString(item["type"]) {
+	case "function_call", "tool_call":
+		return []map[string]interface{}{M{
+			"kind":      "tool_call",
+			"tool_id":   aiGatewayFirstNonEmpty(aiGatewayString(item["call_id"]), aiGatewayString(item["id"])),
+			"tool_name": aiGatewayString(item["name"]),
+			"input":     aiGatewayCompactText(aiGatewayFirstNonEmpty(aiGatewayString(item["arguments"]), aiGatewayJSONString(item["arguments"])), 12000),
+		}}
+	case "custom_tool_call", "web_search_call", "shell_call", "apply_patch_call":
+		input := item["arguments"]
+		if input == nil {
+			input = item["input"]
+		}
+		if input == nil {
+			input = item["action"]
+		}
+		if input == nil {
+			input = item["operation"]
+		}
+		return []map[string]interface{}{M{
+			"kind":      "tool_call",
+			"tool_id":   aiGatewayFirstNonEmpty(aiGatewayString(item["call_id"]), aiGatewayString(item["id"])),
+			"tool_name": aiGatewayFirstNonEmpty(aiGatewayString(item["name"]), aiGatewayString(item["type"])),
+			"input":     aiGatewayCompactText(aiGatewayFlattenPromptValue(input), 12000),
+		}}
+	}
+	return nil
+}
+
+func aiGatewayToolResultsFromInputItem(item map[string]interface{}) []map[string]interface{} {
+	itemType := aiGatewayString(item["type"])
+	switch itemType {
+	case "function_call_output":
+		return []map[string]interface{}{M{
+			"kind":      "tool_result",
+			"tool_id":   aiGatewayFirstNonEmpty(aiGatewayString(item["call_id"]), aiGatewayString(item["tool_call_id"])),
+			"tool_name": aiGatewayFirstNonEmpty(aiGatewayString(item["name"]), aiGatewayString(item["tool_name"])),
+			"output":    aiGatewayCompactText(aiGatewayFlattenPromptValue(item["output"]), 12000),
+		}}
+	case "tool_result":
+		return []map[string]interface{}{M{
+			"kind":      "tool_result",
+			"tool_id":   aiGatewayFirstNonEmpty(aiGatewayString(item["tool_use_id"]), aiGatewayString(item["tool_id"])),
+			"tool_name": aiGatewayFirstNonEmpty(aiGatewayString(item["name"]), aiGatewayString(item["tool_name"])),
+			"output":    aiGatewayCompactText(aiGatewayFlattenPromptValue(item["content"]), 12000),
+		}}
+	}
+	if role := aiGatewayString(item["role"]); role == "tool" || role == "function" {
+		return []map[string]interface{}{M{
+			"kind":      "tool_result",
+			"tool_id":   aiGatewayFirstNonEmpty(aiGatewayString(item["tool_call_id"]), aiGatewayString(item["call_id"])),
+			"tool_name": aiGatewayFirstNonEmpty(aiGatewayString(item["name"]), aiGatewayString(item["tool_name"])),
+			"output":    aiGatewayCompactText(aiGatewayFlattenPromptValue(item["content"]), 12000),
+		}}
+	}
+	return nil
+}
+
+func aiGatewayCurrentTurnMessages(messages []map[string]interface{}) []map[string]interface{} {
+	start := aiGatewayLastUserPromptIndexMessages(messages)
+	if start < 0 {
+		return messages
+	}
+	return messages[start:]
+}
+
+func aiGatewayCurrentTurnInputItems(items []interface{}) []interface{} {
+	start := aiGatewayLastUserPromptIndexItems(items)
+	if start < 0 {
+		return items
+	}
+	return items[start:]
+}
+
+func aiGatewayLastUserPromptIndexMessages(messages []map[string]interface{}) int {
+	for i := len(messages) - 1; i >= 0; i-- {
+		item := messages[i]
+		if len(item) == 0 || aiGatewayString(item["role"]) != "user" {
+			continue
+		}
+		if aiGatewayItemIsToolResult(item) {
+			continue
+		}
+		if strings.TrimSpace(aiGatewayFlattenPromptValue(item["content"])) == "" {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
+func aiGatewayLastUserPromptIndexItems(items []interface{}) int {
+	for i := len(items) - 1; i >= 0; i-- {
+		item := aiGatewayMap(items[i])
+		if len(item) == 0 || aiGatewayString(item["role"]) != "user" {
+			continue
+		}
+		if aiGatewayItemIsToolResult(item) {
+			continue
+		}
+		if strings.TrimSpace(aiGatewayFlattenPromptValue(item["content"])) == "" && strings.TrimSpace(aiGatewayContentPartToText(item)) == "" {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
+func aiGatewayDedupToolTimeline(steps []map[string]interface{}) []map[string]interface{} {
+	if len(steps) == 0 {
+		return nil
+	}
+	out := make([]map[string]interface{}, 0, len(steps))
+	seen := map[string]struct{}{}
+	for _, step := range steps {
+		key := strings.Join([]string{
+			aiGatewayString(step["kind"]),
+			aiGatewayString(step["tool_id"]),
+			aiGatewayString(step["tool_name"]),
+			aiGatewayCompactText(aiGatewayString(step["input"]), 256),
+			aiGatewayCompactText(aiGatewayString(step["output"]), 256),
+		}, "|")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, step)
+	}
+	return out
+}
+
+func aiGatewayFlattenPromptValue(value interface{}) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case []interface{}:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			if text := strings.TrimSpace(aiGatewayFlattenPromptValue(item)); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	case map[string]interface{}:
+		if text := strings.TrimSpace(aiGatewayContentPartToText(v)); text != "" {
+			return text
+		}
+		parts := []string{}
+		for _, key := range []string{"text", "content", "input", "output", "thinking"} {
+			if text := strings.TrimSpace(aiGatewayFlattenPromptValue(v[key])); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	default:
+		return aiGatewayJSONOrString(value)
+	}
+}
+
+func aiGatewayJoinUniqueText(items []string) string {
+	out := make([]string, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return strings.Join(out, "\n\n")
+}
+
+func aiGatewayCompactToolCalls(items []aiGatewayToolCall) []aiGatewayToolCall {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]aiGatewayToolCall, 0, len(items))
+	for _, item := range items {
+		out = append(out, aiGatewayToolCall{
+			ToolID:    strings.TrimSpace(item.ToolID),
+			ToolName:  strings.TrimSpace(item.ToolName),
+			Arguments: aiGatewayCompactText(item.Arguments, 8000),
+		})
+	}
+	return out
+}
+
+func aiGatewayCompactRequestSpans(items []aiGatewayRequestSpan) []aiGatewayRequestSpan {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]aiGatewayRequestSpan, 0, len(items))
+	for _, item := range items {
+		next := item
+		next.RequestHeaders = aiGatewaySanitizeHeaders(item.RequestHeaders)
+		next.RequestBody = aiGatewaySummarizeRequestBody(item.RequestBody)
+		next.ThinkingPreview = aiGatewayCompactText(item.ThinkingPreview, 240)
+		next.AnswerPreview = aiGatewayCompactText(item.AnswerPreview, 320)
+		next.Usage = aiGatewayCloneAnyMap(item.Usage)
+		out = append(out, next)
+	}
+	return out
+}
+
+func aiGatewayNormalizeMessageEvents(events []map[string]interface{}) []map[string]interface{} {
+	if len(events) == 0 {
+		return nil
+	}
+	out := make([]map[string]interface{}, 0, len(events))
+	for _, event := range events {
+		if normalized := aiGatewayNormalizeMessageEvent(event); len(normalized) > 0 {
+			if aiGatewayReplaceDuplicateEvent(out, normalized) {
+				continue
+			}
+			out = append(out, normalized)
+		}
+	}
+	return out
+}
+
+func aiGatewayReplaceDuplicateEvent(events []map[string]interface{}, normalized map[string]interface{}) bool {
+	kind := aiGatewayString(normalized["kind"])
+	if kind != "request" && kind != "request_complete" {
+		return false
+	}
+	payload := aiGatewayMap(normalized["payload"])
+	key := strings.Join([]string{
+		kind,
+		aiGatewayString(payload["request_id"]),
+		aiGatewayString(payload["method"]),
+		aiGatewayString(payload["url"]),
+	}, "|")
+	if key == "|||" {
+		return false
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		prev := events[i]
+		if aiGatewayString(prev["kind"]) != kind {
+			continue
+		}
+		prevPayload := aiGatewayMap(prev["payload"])
+		prevKey := strings.Join([]string{
+			kind,
+			aiGatewayString(prevPayload["request_id"]),
+			aiGatewayString(prevPayload["method"]),
+			aiGatewayString(prevPayload["url"]),
+		}, "|")
+		if prevKey != key {
+			continue
+		}
+		events[i] = normalized
+		return true
+	}
+	return false
+}
+
+func aiGatewayNormalizeMessageEvent(event map[string]interface{}) map[string]interface{} {
+	if len(event) == 0 {
+		return nil
+	}
+	kind := aiGatewayString(event["kind"])
+	payload := aiGatewayMap(event["payload"])
+	item := M{
+		"kind": kind,
+	}
+	if index := aiGatewayInt(event["index"]); index > 0 {
+		item["index"] = index
+	}
+	if turnID := aiGatewayString(event["turn_id"]); turnID != "" {
+		item["turn_id"] = turnID
+	}
+	if ts := aiGatewayString(event["timestamp"]); ts != "" {
+		item["timestamp"] = ts
+	}
+
+	switch kind {
+	case "request":
+		bodySummary := aiGatewaySummarizeRequestBody(payload["body"])
+		historySummary := aiGatewaySummarizeRequestHistory(payload["history"])
+		nextPayload := M{
+			"request_id":      aiGatewayString(payload["request_id"]),
+			"conversation_id": aiGatewayString(payload["conversation_id"]),
+			"method":          aiGatewayString(payload["method"]),
+			"url":             aiGatewayString(payload["url"]),
+			"source":          aiGatewayString(payload["source"]),
+			"headers":         aiGatewaySanitizeHeaders(aiGatewayHeaderMap(payload["headers"])),
+		}
+		if bodySummary != nil {
+			nextPayload["body"] = bodySummary
+		}
+		if historySummary != nil {
+			nextPayload["history"] = historySummary
+		}
+		item["payload"] = nextPayload
+	case "request_complete":
+		nextPayload := M{
+			"request_id":       aiGatewayString(payload["request_id"]),
+			"conversation_id":  aiGatewayString(payload["conversation_id"]),
+			"provider":         aiGatewayString(payload["provider"]),
+			"model":            aiGatewayString(payload["model"]),
+			"method":           aiGatewayString(payload["method"]),
+			"url":              aiGatewayString(payload["url"]),
+			"status":           aiGatewayString(payload["status"]),
+			"status_code":      aiGatewayInt(payload["status_code"]),
+			"latency_ms":       aiGatewayInt(payload["latency_ms"]),
+			"tool_call_count":  aiGatewayInt(payload["tool_call_count"]),
+			"input_tokens":     aiGatewayInt(payload["input_tokens"]),
+			"output_tokens":    aiGatewayInt(payload["output_tokens"]),
+			"total_tokens":     aiGatewayInt(payload["total_tokens"]),
+			"cost_credit":      aiGatewayFloat(payload["cost_credit"]),
+			"thinking_preview": aiGatewayCompactText(aiGatewayString(payload["thinking_preview"]), 240),
+			"answer_preview":   aiGatewayCompactText(aiGatewayString(payload["answer_preview"]), 320),
+		}
+		usage := aiGatewayCloneAnyMap(aiGatewayMap(payload["usage"]))
+		if len(usage) > 0 {
+			nextPayload["usage"] = usage
+		}
+		item["payload"] = nextPayload
+	case "tool_call":
+		item["payload"] = M{
+			"tool_id":   aiGatewayString(payload["tool_id"]),
+			"tool_name": aiGatewayString(payload["tool_name"]),
+			"arguments": aiGatewayCompactText(aiGatewayString(payload["arguments"]), 8000),
+		}
+	case "web_search":
+		nextPayload := M{
+			"item_id":   aiGatewayFirstNonEmpty(aiGatewayString(payload["item_id"]), aiGatewayString(payload["tool_id"])),
+			"tool_name": aiGatewayFirstNonEmpty(aiGatewayString(payload["tool_name"]), "web_search_call"),
+			"status":    aiGatewayString(payload["status"]),
+			"type":      aiGatewayString(payload["type"]),
+		}
+		raw := aiGatewayMap(payload["payload"])
+		if query := aiGatewayCompactText(aiGatewayWebSearchQuery(raw), 320); query != "" {
+			nextPayload["query"] = query
+		}
+		item["payload"] = nextPayload
+	default:
+		return nil
+	}
+	return item
+}
+
+func aiGatewaySummarizeRequestBody(value interface{}) interface{} {
+	body := aiGatewayMap(value)
+	if len(body) == 0 {
+		if value == nil {
+			return nil
+		}
+		return aiGatewayCompactValue(value, 320)
+	}
+	summary := M{}
+	for _, key := range []string{"model", "stream", "temperature", "tool_choice", "parallel_tool_calls", "store"} {
+		if body[key] != nil {
+			summary[key] = aiGatewayCompactScalar(body[key])
+		}
+	}
+	if maxTokens := aiGatewayInt(body["max_tokens"]); maxTokens > 0 {
+		summary["max_tokens"] = maxTokens
+	}
+	if maxOutputTokens := aiGatewayInt(body["max_output_tokens"]); maxOutputTokens > 0 {
+		summary["max_output_tokens"] = maxOutputTokens
+	}
+	if instructions := aiGatewayString(body["instructions"]); instructions != "" {
+		summary["instructions_preview"] = aiGatewayCompactText(instructions, 240)
+	}
+	if inputItems := aiGatewayExtractInputItems(body); len(inputItems) > 0 {
+		summary["input_count"] = len(inputItems)
+		if roles := aiGatewayRolesFromItems(inputItems); len(roles) > 0 {
+			summary["roles"] = roles
+		}
+	}
+	if messages := aiGatewayExtractMessages(body); len(messages) > 0 {
+		summary["message_count"] = len(messages)
+	}
+	if lastUser := aiGatewayCompactText(aiGatewayExtractQuestion(body), 240); lastUser != "" {
+		summary["last_user_preview"] = lastUser
+	}
+	if tools := aiGatewaySlice(body["tools"]); len(tools) > 0 {
+		summary["tool_count"] = len(tools)
+		if names := aiGatewayToolNames(tools); len(names) > 0 {
+			summary["tool_names"] = names
+		}
+	}
+	if include := aiGatewayStringList(aiGatewaySlice(body["include"]), 8); len(include) > 0 {
+		summary["include"] = include
+	}
+	if len(summary) == 0 {
+		return aiGatewayCompactValue(value, 320)
+	}
+	return summary
+}
+
+func aiGatewaySummarizeRequestHistory(value interface{}) interface{} {
+	if value == nil {
+		return nil
+	}
+	items := aiGatewaySlice(value)
+	if len(items) == 0 {
+		return aiGatewayCompactValue(value, 240)
+	}
+	summary := M{
+		"count": len(items),
+	}
+	if roles := aiGatewayRolesFromItems(items); len(roles) > 0 {
+		summary["roles"] = roles
+	}
+	if lastUser := aiGatewayCompactText(aiGatewayQuestionFromItems(items), 240); lastUser != "" {
+		summary["last_user_preview"] = lastUser
+	}
+	return summary
+}
+
+func aiGatewaySanitizeHeaders(header map[string][]string) map[string][]string {
+	if len(header) == 0 {
+		return map[string][]string{}
+	}
+	out := map[string][]string{}
+	keys := make([]string, 0, len(header))
+	for key := range header {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		values := header[key]
+		lower := strings.ToLower(strings.TrimSpace(key))
+		switch {
+		case strings.Contains(lower, "authorization"),
+			strings.Contains(lower, "api-key"),
+			strings.Contains(lower, "token"),
+			strings.Contains(lower, "cookie"):
+			out[key] = []string{"[REDACTED]"}
+		default:
+			next := make([]string, 0, len(values))
+			for _, value := range values {
+				next = append(next, aiGatewayCompactText(value, 160))
+			}
+			out[key] = next
+		}
+	}
+	return out
+}
+
+func aiGatewayHeaderMap(value interface{}) map[string][]string {
+	switch header := value.(type) {
+	case map[string][]string:
+		return aiGatewayCloneHeader(header)
+	case map[string]interface{}:
+		out := map[string][]string{}
+		for key, raw := range header {
+			if list := aiGatewaySlice(raw); len(list) > 0 {
+				values := make([]string, 0, len(list))
+				for _, item := range list {
+					if text := aiGatewayCompactText(aiGatewayJSONOrString(item), 160); text != "" {
+						values = append(values, text)
+					}
+				}
+				if len(values) > 0 {
+					out[key] = values
+				}
+				continue
+			}
+			if text := aiGatewayCompactText(aiGatewayJSONOrString(raw), 160); text != "" {
+				out[key] = []string{text}
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func aiGatewayRolesFromItems(items []interface{}) []string {
+	seen := map[string]struct{}{}
+	roles := []string{}
+	for _, raw := range items {
+		role := ""
+		if item := aiGatewayMap(raw); len(item) > 0 {
+			role = aiGatewayString(item["role"])
+		}
+		if role == "" {
+			continue
+		}
+		if _, ok := seen[role]; ok {
+			continue
+		}
+		seen[role] = struct{}{}
+		roles = append(roles, role)
+	}
+	return roles
+}
+
+func aiGatewayQuestionFromItems(items []interface{}) string {
+	for i := len(items) - 1; i >= 0; i-- {
+		item := aiGatewayMap(items[i])
+		if len(item) == 0 || aiGatewayString(item["role"]) != "user" {
+			continue
+		}
+		if aiGatewayItemIsToolResult(item) {
+			continue
+		}
+		if content := aiGatewayString(item["content"]); content != "" {
+			return strings.TrimSpace(content)
+		}
+		if contentParts := aiGatewaySlice(item["content"]); len(contentParts) > 0 {
+			textParts := []string{}
+			for _, part := range contentParts {
+				if text := strings.TrimSpace(aiGatewayContentPartToText(part)); text != "" {
+					textParts = append(textParts, text)
+				}
+			}
+			if len(textParts) > 0 {
+				return strings.Join(textParts, "\n")
+			}
+		}
+		if text := strings.TrimSpace(aiGatewayContentPartToText(item)); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func aiGatewayItemIsToolResult(item map[string]interface{}) bool {
+	if len(item) == 0 {
+		return false
+	}
+	itemType := aiGatewayString(item["type"])
+	if itemType == "tool_result" || itemType == "function_call_output" {
+		return true
+	}
+	if aiGatewayString(item["tool_use_id"]) != "" || aiGatewayString(item["tool_call_id"]) != "" || aiGatewayString(item["call_id"]) != "" {
+		return true
+	}
+	contentParts := aiGatewaySlice(item["content"])
+	if len(contentParts) == 0 {
+		return false
+	}
+	hasPlainText := false
+	for _, raw := range contentParts {
+		part := aiGatewayMap(raw)
+		if len(part) == 0 {
+			if strings.TrimSpace(aiGatewayJSONOrString(raw)) != "" {
+				hasPlainText = true
+			}
+			continue
+		}
+		partType := aiGatewayString(part["type"])
+		if partType == "tool_result" || partType == "function_call_output" {
+			return true
+		}
+		if aiGatewayString(part["tool_use_id"]) != "" || aiGatewayString(part["tool_call_id"]) != "" || aiGatewayString(part["call_id"]) != "" {
+			return true
+		}
+		if strings.TrimSpace(aiGatewayContentPartToText(part)) != "" {
+			hasPlainText = true
+		}
+	}
+	return !hasPlainText
+}
+
+func aiGatewayQuestionFromHistoryValue(value interface{}) string {
+	if text := strings.TrimSpace(aiGatewayString(value)); text != "" {
+		return text
+	}
+	items := aiGatewaySlice(value)
+	if len(items) == 0 {
+		return ""
+	}
+	return aiGatewayQuestionFromItems(items)
+}
+
+func aiGatewayQuestionFromMessages(messages []map[string]interface{}) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		item := messages[i]
+		if len(item) == 0 || aiGatewayString(item["role"]) != "user" {
+			continue
+		}
+		if aiGatewayItemIsToolResult(item) {
+			continue
+		}
+		if content := aiGatewayString(item["content"]); content != "" {
+			return strings.TrimSpace(content)
+		}
+		if contentParts := aiGatewaySlice(item["content"]); len(contentParts) > 0 {
+			textParts := []string{}
+			for _, part := range contentParts {
+				if text := strings.TrimSpace(aiGatewayContentPartToText(part)); text != "" {
+					textParts = append(textParts, text)
+				}
+			}
+			if len(textParts) > 0 {
+				return strings.Join(textParts, "\n")
+			}
+		}
+		if text := strings.TrimSpace(aiGatewayContentPartToText(item)); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func aiGatewaySanitizeUserQuestion(question string) string {
+	question = systemReminderBlockRe.ReplaceAllString(question, "")
+	question = strings.ReplaceAll(question, "<system-reminder>", "")
+	question = strings.ReplaceAll(question, "</system-reminder>", "")
+	question = strings.TrimSpace(question)
+	if strings.HasPrefix(question, "Sender (untrusted metadata):") {
+		question = openClawForwardedHeaderRe.ReplaceAllString(question, "")
+		question = strings.TrimSpace(question)
+		question = openClawLeadingTimestampRe.ReplaceAllString(question, "")
+	}
+	return strings.TrimSpace(question)
+}
+
+func aiGatewayReplyPrimaryModel(reply aiGatewayReplySnapshot) string {
+	if len(reply.Models) > 0 && strings.TrimSpace(reply.Models[0]) != "" {
+		return strings.TrimSpace(reply.Models[0])
+	}
+	for _, req := range reply.HTTPRequests {
+		if strings.TrimSpace(req.Model) != "" {
+			return strings.TrimSpace(req.Model)
+		}
+	}
+	return ""
+}
+
+func aiGatewayToolNames(items []interface{}) []string {
+	names := []string{}
+	seen := map[string]struct{}{}
+	for _, raw := range items {
+		item := aiGatewayMap(raw)
+		if len(item) == 0 {
+			continue
+		}
+		name := aiGatewayString(item["name"])
+		if name == "" {
+			if fn := aiGatewayMap(item["function"]); len(fn) > 0 {
+				name = aiGatewayString(fn["name"])
+			}
+		}
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+		if len(names) >= 12 {
+			break
+		}
+	}
+	return names
+}
+
+func aiGatewayStringList(items []interface{}, limit int) []string {
+	out := []string{}
+	for _, raw := range items {
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+		if text := aiGatewayCompactText(aiGatewayJSONOrString(raw), 120); text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
+func aiGatewayCompactValue(value interface{}, limit int) interface{} {
+	if value == nil {
+		return nil
+	}
+	switch v := value.(type) {
+	case string:
+		return aiGatewayCompactText(v, limit)
+	case bool, int, int64, float64, float32:
+		return v
+	default:
+		return aiGatewayCompactText(aiGatewayJSONOrString(value), limit)
+	}
+}
+
+func aiGatewayCompactScalar(value interface{}) interface{} {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case string:
+		return aiGatewayCompactText(v, 120)
+	case bool, int, int64, float64, float32:
+		return v
+	default:
+		return aiGatewayCompactText(aiGatewayJSONOrString(value), 120)
+	}
+}
+
+func aiGatewayCompactText(value string, limit int) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	if limit <= 0 {
+		return trimmed
+	}
+	runes := []rune(trimmed)
+	if len(runes) <= limit {
+		return trimmed
+	}
+	return strings.TrimSpace(string(runes[:limit])) + "... [truncated]"
+}
+
+func aiGatewayWebSearchQuery(payload map[string]interface{}) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	for _, key := range []string{"query", "search_query", "q"} {
+		if value := aiGatewayString(payload[key]); value != "" {
+			return value
+		}
+	}
+	if action := aiGatewayMap(payload["action"]); len(action) > 0 {
+		for _, key := range []string{"query", "search_query", "q"} {
+			if value := aiGatewayString(action[key]); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+func aiGatewayConversationIDForTurn(agentID, turnID string) string {
+	body, err := os.ReadFile(filepath.Join(aiGatewayHistoryDir(agentID), "current.json"))
+	if err != nil || len(bytes.TrimSpace(body)) == 0 {
+		return ""
+	}
+	var current aiGatewayCurrentSnapshot
+	if err := json.Unmarshal(body, &current); err != nil {
+		return ""
+	}
+	if strings.TrimSpace(current.TurnID) != strings.TrimSpace(turnID) {
+		return ""
+	}
+	return strings.TrimSpace(current.ConversationID)
+}
+
+func aiGatewayReadCurrentSnapshot(agentID string) (aiGatewayCurrentSnapshot, error) {
+	current := aiGatewayCurrentSnapshot{}
+	body, err := os.ReadFile(filepath.Join(aiGatewayHistoryDir(agentID), "current.json"))
+	if err != nil {
+		return current, err
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return current, nil
+	}
+	if err := json.Unmarshal(body, &current); err != nil {
+		return aiGatewayCurrentSnapshot{}, err
+	}
+	return current, nil
+}
+
+func aiGatewayExtractMessageSystemPrompt(current aiGatewayCurrentSnapshot, turnID string, events []map[string]interface{}) string {
+	if prompt := aiGatewayExtractSystemPrompt(events); prompt != "" {
+		return prompt
+	}
+	if strings.TrimSpace(current.TurnID) != strings.TrimSpace(turnID) {
+		return ""
+	}
+	if body := aiGatewayMap(current.Body); len(body) > 0 {
+		return aiGatewayBuildSystemPrompt(body)
+	}
+	return ""
+}
+
+func aiGatewaySanitizeMessageAnswer(answer string) string {
+	answer = strings.TrimSpace(answer)
+	answer = strings.TrimPrefix(answer, "[[reply_to_current]]")
+	return strings.TrimSpace(answer)
+}
+
+func aiGatewayBuildMessageToolCalls(events []map[string]interface{}, reply aiGatewayReplySnapshot) []aiGatewayMessageToolCall {
+	steps := aiGatewayExtractToolTimeline(events)
+	if len(steps) == 0 && len(reply.ToolCalls) == 0 {
+		return nil
+	}
+
+	out := make([]aiGatewayMessageToolCall, 0, len(steps)+len(reply.ToolCalls))
+	byID := map[string]*aiGatewayMessageToolCall{}
+	appendCall := func(id, name string) *aiGatewayMessageToolCall {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			if existing := byID[id]; existing != nil {
+				if existing.Name == "" {
+					existing.Name = strings.TrimSpace(name)
+				}
+				return existing
+			}
+		}
+		out = append(out, aiGatewayMessageToolCall{Name: strings.TrimSpace(name)})
+		call := &out[len(out)-1]
+		if id != "" {
+			byID[id] = call
+		}
+		return call
+	}
+
+	for _, step := range steps {
+		id := aiGatewayString(step["tool_id"])
+		name := aiGatewayString(step["tool_name"])
+		call := appendCall(id, name)
+		if input := strings.TrimSpace(aiGatewayString(step["input"])); input != "" && call.Input == "" {
+			call.Input = input
+		}
+		if output := strings.TrimSpace(aiGatewayString(step["output"])); output != "" && call.Output == "" {
+			call.Output = output
+		}
+	}
+
+	for _, item := range reply.ToolCalls {
+		call := appendCall(item.ToolID, item.ToolName)
+		if input := strings.TrimSpace(aiGatewayCompactText(item.Arguments, 12000)); input != "" && call.Input == "" {
+			call.Input = input
+		}
+	}
+
+	clean := make([]aiGatewayMessageToolCall, 0, len(out))
+	seen := map[string]struct{}{}
+	for _, item := range out {
+		item.Name = strings.TrimSpace(item.Name)
+		item.Input = strings.TrimSpace(item.Input)
+		item.Output = strings.TrimSpace(item.Output)
+		if item.Name == "" && item.Input == "" && item.Output == "" {
+			continue
+		}
+		key := strings.Join([]string{item.Name, aiGatewayCompactText(item.Input, 256), aiGatewayCompactText(item.Output, 256)}, "|")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		clean = append(clean, item)
+	}
+	if len(clean) == 0 {
+		return nil
+	}
+	return clean
+}
+
+func aiGatewayRequestIDsFromReply(reply aiGatewayReplySnapshot) []string {
+	seen := map[string]struct{}{}
+	ids := []string{}
+	for _, item := range reply.HTTPRequests {
+		id := strings.TrimSpace(item.RequestID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 func (s *aiGatewayAuditSession) resetReplyDirLocked() error {
 	if s == nil {
 		return nil
@@ -554,10 +1922,18 @@ func (s *aiGatewayAuditSession) emitReplyStreamPayload(payload map[string]interf
 	if s == nil || len(payload) == 0 {
 		return
 	}
+	events := aiGatewayReplyEventsFromStreamPayload(payload)
+	if len(events) > 0 {
+		log.Printf("[ai-gateway] stream agent=%s payload_type=%s events=%d tg_hook=%t", s.agentID, aiGatewayString(payload["type"]), len(events), s.tgHook != nil)
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, event := range aiGatewayReplyEventsFromStreamPayload(payload) {
+	for _, event := range events {
 		_ = s.writeReplyEventLocked(event.Kind, event.Payload)
+	}
+	tgHook := s.tgHook
+	s.mu.Unlock()
+	if tgHook != nil {
+		tgHook.handleEvents(events)
 	}
 }
 
@@ -1135,80 +2511,26 @@ func aiGatewayContentPartToText(part interface{}) string {
 
 func aiGatewayExtractQuestion(body map[string]interface{}) string {
 	messages := aiGatewayExtractMessages(body)
-	if len(messages) > 0 {
-		lastMessage := messages[len(messages)-1]
-		if aiGatewayString(lastMessage["role"]) == "user" {
-			if content := aiGatewayString(lastMessage["content"]); content != "" {
-				return strings.TrimSpace(content)
-			}
-			if contentParts := aiGatewaySlice(lastMessage["content"]); len(contentParts) > 0 {
-				textParts := []string{}
-				for _, part := range contentParts {
-					if text := strings.TrimSpace(aiGatewayContentPartToText(part)); text != "" {
-						textParts = append(textParts, text)
-					}
-				}
-				if len(textParts) > 0 {
-					return strings.Join(textParts, "\n")
-				}
-			}
-		}
+	if question := aiGatewayQuestionFromMessages(messages); question != "" {
+		return aiGatewaySanitizeUserQuestion(question)
 	}
 
 	inputItems := aiGatewayExtractInputItems(body)
-	for i := len(inputItems) - 1; i >= 0; i-- {
-		item := aiGatewayMap(inputItems[i])
-		if len(item) == 0 || aiGatewayString(item["role"]) != "user" {
-			continue
-		}
-		if content := aiGatewayString(item["content"]); content != "" {
-			return strings.TrimSpace(content)
-		}
-		if contentParts := aiGatewaySlice(item["content"]); len(contentParts) > 0 {
-			textParts := []string{}
-			for _, part := range contentParts {
-				if text := strings.TrimSpace(aiGatewayContentPartToText(part)); text != "" {
-					textParts = append(textParts, text)
-				}
-			}
-			if len(textParts) > 0 {
-				return strings.Join(textParts, "\n")
-			}
-		}
-		if text := strings.TrimSpace(aiGatewayContentPartToText(item)); text != "" {
-			return text
-		}
+	if question := aiGatewayQuestionFromItems(inputItems); question != "" {
+		return aiGatewaySanitizeUserQuestion(question)
 	}
 
-	textParts := []string{}
-	for _, rawItem := range inputItems {
-		switch item := rawItem.(type) {
-		case string:
-			if text := strings.TrimSpace(item); text != "" {
-				textParts = append(textParts, text)
-			}
-		case map[string]interface{}:
-			if role := aiGatewayString(item["role"]); role != "" && role != "user" {
-				continue
-			}
-			if content := aiGatewayString(item["content"]); content != "" {
-				textParts = append(textParts, strings.TrimSpace(content))
-				continue
-			}
-			if contentParts := aiGatewaySlice(item["content"]); len(contentParts) > 0 {
-				for _, part := range contentParts {
-					if text := strings.TrimSpace(aiGatewayContentPartToText(part)); text != "" {
-						textParts = append(textParts, text)
-					}
-				}
-				continue
-			}
-			if text := strings.TrimSpace(aiGatewayContentPartToText(item)); text != "" {
-				textParts = append(textParts, text)
-			}
+	if rawInput := body["input"]; rawInput != nil {
+		if text := strings.TrimSpace(aiGatewayString(rawInput)); text != "" {
+			return aiGatewaySanitizeUserQuestion(text)
 		}
 	}
-	return strings.Join(textParts, "\n")
+	for _, key := range []string{"prompt", "question", "query", "message"} {
+		if text := strings.TrimSpace(aiGatewayString(body[key])); text != "" {
+			return aiGatewaySanitizeUserQuestion(text)
+		}
+	}
+	return ""
 }
 
 func aiGatewayExtractRequestHistory(body map[string]interface{}) (string, interface{}) {
@@ -1394,6 +2716,24 @@ func aiGatewayInt(value interface{}) int {
 	case json.Number:
 		i, _ := v.Int64()
 		return int(i)
+	default:
+		return 0
+	}
+}
+
+func aiGatewayFloat(value interface{}) float64 {
+	switch v := value.(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	case json.Number:
+		f, _ := v.Float64()
+		return f
 	default:
 		return 0
 	}

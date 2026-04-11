@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	_ "embed"
 	"fmt"
 	"log"
@@ -43,6 +44,7 @@ func extendPATH() {
 		"/opt/homebrew/bin",
 		"/usr/local/bin",
 		"/usr/bin",
+		filepath.Join(home, ".npm-global", "bin"),
 		filepath.Join(home, ".local", "bin"),
 		filepath.Join(home, ".opencode", "bin"),
 	}
@@ -77,7 +79,7 @@ func npmGlobalInstallCmd(pkg string) string {
 }
 
 func preinstalledRuntimeInstallCmd(cmd string) string {
-	if isCloudRunRuntime() {
+	if isContainerRuntime() {
 		return ""
 	}
 	return cmd
@@ -99,6 +101,10 @@ func opencodeInstallCmd() string {
 	return preinstalledRuntimeInstallCmd("curl -fsSL https://opencode.ai/install | bash && echo 'export PATH=\"$HOME/.opencode/bin:$PATH\"' >> " + shellRC() + " && export PATH=\"$HOME/.opencode/bin:$PATH\"")
 }
 
+func cicyInstallCmd() string {
+	return ""
+}
+
 func packageInstallCmd(pkg string) string {
 	if runtime.GOOS == "darwin" {
 		return "brew install " + pkg
@@ -116,7 +122,7 @@ func nodeInstallCmd() string {
 }
 
 func codeServerInstallCmd() string {
-	if isCloudRunRuntime() {
+	if isContainerRuntime() {
 		return ""
 	}
 	if runtime.GOOS == "darwin" {
@@ -218,6 +224,7 @@ func selectedAgentConfigs() map[string]Tool {
 	return map[string]Tool{
 		"openclaw": {"openclaw", "openclaw", openClawInstallCmd(), true, false},
 		"claude":   {"claude", "claude", claudeInstallCmd(), true, false},
+		"cicy":     {"cicy", "cicy", cicyInstallCmd(), true, false},
 		"codex":    {"codex", "codex", codexInstallCmd(), true, false},
 		"opencode": {"opencode", "opencode", opencodeInstallCmd(), true, false},
 	}
@@ -229,7 +236,7 @@ func ensureAgentToolInstalled(agentType string) {
 		return
 	}
 	switch normalizeAgentType(agentType) {
-	case "openclaw", "claude", "codex", "opencode":
+	case "openclaw", "claude", "cicy", "codex", "opencode":
 		return
 	}
 	config, exists := selectedAgentConfigs()[agentType]
@@ -269,7 +276,7 @@ var builtinAgents = []struct {
 	AgentType string
 	Title     string
 }{
-	{10001, "openclaw", "商业顾问"},
+	{10001, "openclaw", "小龙虾管家"},
 	{10002, "codex", "软件工程师"},
 	{10003, "claude", "架构师"},
 }
@@ -358,6 +365,12 @@ func setWorkerIndex(n int) {
 }
 
 func syncWorkerIndexToExistingAgents() {
+	var current sql.NullInt64
+	if err := store.QueryRow("SELECT value FROM global_vars WHERE key_name='worker_index'").Scan(&current); err == nil {
+		if current.Valid && current.Int64 > 0 {
+			return
+		}
+	}
 	var maxPort int
 	if err := store.QueryRow("SELECT COALESCE(MAX(ttyd_port), 0) FROM agent_config WHERE active=1").Scan(&maxPort); err != nil {
 		log.Printf("[startup] failed to sync worker_index from agent_config: %v", err)
@@ -371,10 +384,12 @@ func syncWorkerIndexToExistingAgents() {
 func syncBuiltinAgentTitles() {
 	for _, ba := range builtinAgents {
 		paneID := builtinWorkerSession(ba.Port) + ":main.0"
-		if _, err := store.Exec(
-			fmt.Sprintf("UPDATE agent_config SET title=?, updated_at=%s WHERE pane_id=?", store.Now()),
-			ba.Title, paneID,
-		); err != nil {
+		query := fmt.Sprintf("UPDATE agent_config SET title=?, updated_at=%s WHERE pane_id=? AND (COALESCE(TRIM(title), '')='' OR title=?)", store.Now())
+		legacyTitle := ""
+		if paneID == primaryWorkerPaneID {
+			legacyTitle = "商业顾问"
+		}
+		if _, err := store.Exec(query, ba.Title, paneID, legacyTitle); err != nil {
 			log.Printf("[startup] failed to sync builtin title for %s: %v", paneID, err)
 		}
 	}
@@ -418,7 +433,7 @@ func ensurePrimaryWorkerForBindings(selected []string) {
 	}
 
 	log.Printf("[startup] primary worker %s missing; creating it for agent bindings", primaryWorkerSession)
-	createBuiltinWorker(10001, "openclaw", "商业顾问")
+	createBuiltinWorker(10001, "openclaw", "小龙虾管家")
 }
 
 func ensureWorkerBoundToPrimary(workerSession string) {
@@ -608,8 +623,8 @@ func checkEnv() {
 		log.Fatalf("[startup] failed to query agent_config: %v", err)
 	}
 	if count == 0 {
-		if isCloudRunRuntime() {
-			// Cloud Run must never block on interactive setup.
+		if isContainerRuntime() {
+			// Preinstalled container runtime must never block on interactive setup.
 			// Respect explicit --agents=... when provided; otherwise keep the default
 			// footprint minimal with only w-10001 OpenClaw.
 			if agentsFlag != "" {

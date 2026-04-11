@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Loader2, X, Zap } from 'lucide-react';
+import { assetUrl } from '../lib/assets';
+import { useDevRegister } from '../lib/devStore';
 
 export interface CreateAgentValues {
   title: string;
@@ -19,8 +21,9 @@ interface Props {
 
 const AGENT_TYPE_OPTIONS = [
   { value: 'openclaw', label: 'OpenClaw', icon: null },
-  { value: 'codex', label: 'Codex', icon: '/assets/logos/openai.svg' },
-  { value: 'claude', label: 'Claude', icon: '/assets/logos/claude-symbol.svg' },
+  { value: 'codex', label: 'Codex', icon: assetUrl('/assets/logos/openai.svg') },
+  { value: 'claude', label: 'Claude', icon: assetUrl('/assets/logos/claude-symbol.svg') },
+  { value: 'cicy', label: 'CiCy', icon: 'https://cicy-ai.com/logo.svg' },
 ] as const;
 
 const DEFAULT_VALUES: CreateAgentValues = {
@@ -43,6 +46,12 @@ export default function CreateAgentDialog({
   useEffect(() => {
     if (open) setValues(DEFAULT_VALUES);
   }, [open]);
+  useDevRegister('CreateAgentDialog', {
+    open,
+    submitting,
+    values,
+    canSubmit: values.title.trim().length > 0 && values.agent_type.trim().length > 0 && !submitting,
+  });
 
   if (!open) return null;
 
@@ -62,8 +71,8 @@ export default function CreateAgentDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-[100000] flex items-center justify-center" onClick={submitting ? undefined : onClose}>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+    <div data-id="create-agent-dialog-overlay" className="fixed inset-0 z-[100000] flex items-center justify-center" onClick={submitting ? undefined : onClose}>
+      <div data-id="create-agent-dialog-backdrop" className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <form
         data-id="create-agent-dialog"
         className="relative w-[560px] max-w-[92vw] rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl overflow-hidden"
@@ -88,8 +97,9 @@ export default function CreateAgentDialog({
 
         <div className="space-y-5 px-5 py-5">
           <div>
-            <label className="mb-1.5 block text-[13px] font-medium text-zinc-300">员工名称</label>
+            <label data-id="create-agent-dialog-title-label" className="mb-1.5 block text-[13px] font-medium text-zinc-300">员工名称</label>
             <input
+              data-id="create-agent-dialog-title-input"
               autoFocus
               type="text"
               value={values.title}
@@ -100,10 +110,11 @@ export default function CreateAgentDialog({
           </div>
 
           <div>
-            <label className="mb-1.5 block text-[13px] font-medium text-zinc-300">智能体类型</label>
-            <div className="flex flex-wrap gap-2">
+            <label data-id="create-agent-dialog-agent-type-label" className="mb-1.5 block text-[13px] font-medium text-zinc-300">智能体类型</label>
+            <div data-id="create-agent-dialog-agent-type-options" className="flex flex-wrap gap-2">
               {AGENT_TYPE_OPTIONS.map((option) => (
                 <button
+                  data-id={`create-agent-dialog-agent-type-${option.value}`}
                   key={option.value}
                   type="button"
                   onClick={() => set({ agent_type: option.value })}
@@ -132,7 +143,7 @@ export default function CreateAgentDialog({
             </div>
           </div>
 
-          <div className="flex items-center justify-between py-1">
+          <div data-id="create-agent-dialog-allow-all-actions" className="flex items-center justify-between py-1">
             <div>
               <p className="text-[13px] font-medium text-zinc-300">启动时允许所有操作</p>
               <p className="mt-0.5 text-[11px] text-zinc-600">Codex/Claude 追加危险参数</p>
@@ -146,7 +157,7 @@ export default function CreateAgentDialog({
             </button>
           </div>
 
-          <div className="flex items-center justify-between py-1">
+          <div data-id="create-agent-dialog-reply-in-chinese" className="flex items-center justify-between py-1">
             <div>
               <p className="text-[13px] font-medium text-zinc-300">默认中文回复</p>
               <p className="mt-0.5 text-[11px] text-zinc-600">启动完成后自动发送 <code>reply in chinese</code></p>
@@ -161,8 +172,9 @@ export default function CreateAgentDialog({
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-white/[0.06] px-5 py-3">
+        <div data-id="create-agent-dialog-actions" className="flex justify-end gap-2 border-t border-white/[0.06] px-5 py-3">
           <button
+            data-id="create-agent-dialog-cancel"
             type="button"
             onClick={onClose}
             disabled={submitting}
@@ -171,6 +183,7 @@ export default function CreateAgentDialog({
             取消
           </button>
           <button
+            data-id="create-agent-dialog-submit"
             type="submit"
             disabled={!canSubmit}
             className="flex cursor-pointer items-center gap-2 rounded-lg bg-blue-500/20 px-4 py-2 text-sm font-medium text-blue-300 transition-all hover:bg-blue-500/25 disabled:cursor-not-allowed disabled:opacity-50"

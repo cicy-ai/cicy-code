@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,42 +19,56 @@ type ChatEvent struct {
 	Data interface{} `json:"data,omitempty"`
 }
 
-// ── Hub: per-pane pub/sub over WebSocket ──
+// ── Hub: per-agent pub/sub over WebSocket ──
 
 type chatClient struct {
 	conn        *websocket.Conn
 	send        chan []byte
-	pane        string
+	agentID     string
+	clientID    string
 	electron    bool
 	connectedAt time.Time
 	remoteAddr  string
+	closeOnce   sync.Once
 }
 
 type chatHub struct {
 	mu      sync.RWMutex
-	clients map[string]map[*chatClient]struct{} // pane -> clients
+	clients map[string]map[string]*chatClient // agent_id -> client_id -> client
 }
 
-var hub = &chatHub{clients: make(map[string]map[*chatClient]struct{})}
+var hub = &chatHub{clients: make(map[string]map[string]*chatClient)}
+
+func (c *chatClient) close() {
+	c.closeOnce.Do(func() {
+		close(c.send)
+		_ = c.conn.Close()
+	})
+}
 
 func (h *chatHub) stats() interface{} {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	type clientInfo struct {
+		ClientID    string `json:"client_id"`
 		Electron    bool   `json:"electron"`
 		RemoteAddr  string `json:"remote_addr"`
 		ConnectedAt string `json:"connected_at"`
 		UptimeSec   int    `json:"uptime_sec"`
 	}
-	out := map[string][]clientInfo{}
-	for pane, m := range h.clients {
-		for c := range m {
-			out[pane] = append(out[pane], clientInfo{
+	out := map[string]map[string]clientInfo{}
+	for agentID, m := range h.clients {
+		if out[agentID] == nil {
+			out[agentID] = make(map[string]clientInfo)
+		}
+		for clientID, c := range m {
+			out[agentID][clientID] = clientInfo{
+				ClientID:    clientID,
 				Electron:    c.electron,
 				RemoteAddr:  c.remoteAddr,
 				ConnectedAt: c.connectedAt.Format(time.RFC3339),
 				UptimeSec:   int(time.Since(c.connectedAt).Seconds()),
-			})
+			}
 		}
 	}
 	return out
@@ -65,40 +80,49 @@ func handleWsClients(w http.ResponseWriter, r *http.Request) {
 
 func (h *chatHub) register(c *chatClient) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.clients[c.pane] == nil {
-		h.clients[c.pane] = make(map[*chatClient]struct{})
+	var replaced *chatClient
+	if h.clients[c.agentID] == nil {
+		h.clients[c.agentID] = make(map[string]*chatClient)
 	}
-	h.clients[c.pane][c] = struct{}{}
-	log.Printf("[chat-ws] connect pane=%s clients=%d", c.pane, len(h.clients[c.pane]))
+	if existing := h.clients[c.agentID][c.clientID]; existing != nil && existing != c {
+		replaced = existing
+	}
+	h.clients[c.agentID][c.clientID] = c
+	count := len(h.clients[c.agentID])
+	h.mu.Unlock()
+	if replaced != nil {
+		replaced.close()
+	}
+	log.Printf("[chat-ws] connect agent_id=%s client_id=%s clients=%d", c.agentID, c.clientID, count)
 }
 
 func (h *chatHub) unregister(c *chatClient) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	if m, ok := h.clients[c.pane]; ok {
-		delete(m, c)
+	if m, ok := h.clients[c.agentID]; ok {
+		if current, ok := m[c.clientID]; ok && current == c {
+			delete(m, c.clientID)
+		}
 		if len(m) == 0 {
-			delete(h.clients, c.pane)
+			delete(h.clients, c.agentID)
 		}
 	}
-	close(c.send)
-	c.conn.Close()
-	log.Printf("[chat-ws] disconnect pane=%s", c.pane)
+	h.mu.Unlock()
+	c.close()
+	log.Printf("[chat-ws] disconnect agent_id=%s client_id=%s", c.agentID, c.clientID)
 }
 
-func (h *chatHub) broadcast(pane string, evt ChatEvent) {
-	appendRuntimeEvent(pane, evt.Type, evt.Data)
-	h.broadcastExcept(pane, evt, nil)
+func (h *chatHub) broadcast(agentID string, evt ChatEvent) {
+	appendRuntimeEvent(agentID, evt.Type, evt.Data)
+	h.broadcastExcept(agentID, evt, nil)
 }
 
-func (h *chatHub) broadcastExcept(pane string, evt ChatEvent, except *chatClient) {
+func (h *chatHub) broadcastExcept(agentID string, evt ChatEvent, except *chatClient) {
 	b, _ := json.Marshal(evt)
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	n := len(h.clients[pane])
-	log.Printf("[chat-ws] broadcast pane=%s type=%s clients=%d", pane, evt.Type, n)
-	for c := range h.clients[pane] {
+	n := len(h.clients[agentID])
+	log.Printf("[chat-ws] broadcast agent_id=%s type=%s clients=%d", agentID, evt.Type, n)
+	for _, c := range h.clients[agentID] {
 		if c == except {
 			continue
 		}
@@ -109,11 +133,11 @@ func (h *chatHub) broadcastExcept(pane string, evt ChatEvent, except *chatClient
 	}
 }
 
-func (h *chatHub) broadcastElectron(pane string, evt ChatEvent) {
+func (h *chatHub) broadcastElectron(agentID string, evt ChatEvent) {
 	b, _ := json.Marshal(evt)
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for c := range h.clients[pane] {
+	for _, c := range h.clients[agentID] {
 		if !c.electron {
 			continue
 		}
@@ -121,6 +145,22 @@ func (h *chatHub) broadcastElectron(pane string, evt ChatEvent) {
 		case c.send <- b:
 		default:
 		}
+	}
+}
+
+func (h *chatHub) sendToClient(agentID, clientID string, evt ChatEvent) bool {
+	b, _ := json.Marshal(evt)
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	c := h.clients[agentID][clientID]
+	if c == nil {
+		return false
+	}
+	select {
+	case c.send <- b:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -162,25 +202,44 @@ func (c *chatClient) readPump() {
 		if err != nil {
 			return
 		}
-		// 广播客户端发来的消息给同 pane 的所有客户端
+		// 广播客户端发来的消息给同 agent 的其他客户端
 		var evt ChatEvent
 		if json.Unmarshal(msg, &evt) == nil && evt.Type != "" {
-			hub.broadcastExcept(c.pane, evt, c)
+			hub.broadcastExcept(c.agentID, evt, c)
 		}
 	}
 }
 
 // ── HTTP handlers ──
 
-// GET /api/chat/ws?pane=xxx&token=xxx — WebSocket upgrade
+func normalizeChatAgentValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return shortPaneID(normPaneID(value))
+}
+
+func normalizeChatAgentID(r *http.Request) string {
+	value := strings.TrimSpace(r.URL.Query().Get("agent_id"))
+	if value == "" {
+		value = strings.TrimSpace(r.URL.Query().Get("pane"))
+	}
+	return normalizeChatAgentValue(value)
+}
+
+// GET /api/chat/ws?agent_id=xxx&token=xxx — WebSocket upgrade
 func handleChatWS(w http.ResponseWriter, r *http.Request) {
-	pane := r.URL.Query().Get("pane")
+	agentID := normalizeChatAgentID(r)
 	t := r.URL.Query().Get("token")
-	if pane == "" || t == "" || !verifyToken(t) {
+	if agentID == "" || t == "" || !verifyToken(t) {
 		httpErr(w, 401, "unauthorized")
 		return
 	}
-	pane = strings.Replace(pane, ":main.0", "", 1)
+	clientID := strings.TrimSpace(r.URL.Query().Get("client_id"))
+	if clientID == "" {
+		clientID = "ws-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -197,7 +256,7 @@ func handleChatWS(w http.ResponseWriter, r *http.Request) {
 	if remoteAddr == "" {
 		remoteAddr = r.RemoteAddr
 	}
-	c := &chatClient{conn: conn, send: make(chan []byte, 64), pane: pane, electron: r.URL.Query().Get("electron") == "1", connectedAt: time.Now(), remoteAddr: remoteAddr}
+	c := &chatClient{conn: conn, send: make(chan []byte, 64), agentID: agentID, clientID: clientID, electron: r.URL.Query().Get("electron") == "1", connectedAt: time.Now(), remoteAddr: remoteAddr}
 	hub.register(c)
 	go c.writePump()
 	c.readPump()
@@ -206,25 +265,41 @@ func handleChatWS(w http.ResponseWriter, r *http.Request) {
 // POST /api/chat/webhook — mitmproxy pushes events
 func handleChatWebhook(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Pane  string      `json:"pane"`
-		Event string      `json:"event"`
-		Data  interface{} `json:"data"`
+		ClientID string      `json:"client_id"`
+		AgentID  string      `json:"agent_id"`
+		Pane     string      `json:"pane"`
+		Event    string      `json:"event"`
+		Data     interface{} `json:"data"`
 	}
-	if readBody(r, &req) != nil || req.Pane == "" || req.Event == "" {
-		httpErr(w, 400, "pane and event required")
+	if readBody(r, &req) != nil || (req.AgentID == "" && req.Pane == "") || req.Event == "" {
+		httpErr(w, 400, "agent_id and event required")
 		return
 	}
-	hub.broadcast(req.Pane, ChatEvent{Type: req.Event, Data: req.Data})
+	agentID := normalizeChatAgentValue(req.AgentID)
+	if agentID == "" {
+		agentID = normalizeChatAgentValue(req.Pane)
+	}
+	evt := ChatEvent{Type: req.Event, Data: req.Data}
+	if req.ClientID != "" {
+		if !hub.sendToClient(agentID, req.ClientID, evt) {
+			httpErr(w, 404, "client not found")
+			return
+		}
+		log.Printf("[chat-webhook] agent_id=%s client_id=%s type=%s mode=direct", agentID, req.ClientID, req.Event)
+		w.WriteHeader(204)
+		return
+	}
+	hub.broadcast(agentID, evt)
 	if req.Event == "user_q" {
-		hub.broadcast(req.Pane, ChatEvent{Type: "status_change", Data: M{"status": "thinking"}})
+		hub.broadcast(agentID, ChatEvent{Type: "status_change", Data: M{"status": "thinking"}})
 	}
 	if req.Event == "ai_done" {
-		hub.broadcast(req.Pane, ChatEvent{Type: "status_change", Data: M{"status": "idle"}})
+		hub.broadcast(agentID, ChatEvent{Type: "status_change", Data: M{"status": "idle"}})
 	}
 	w.WriteHeader(204)
 }
 
-// ── HTTP handler: push event to pane ──
+// ── HTTP handler: push event to agent/client ──
 
 func handleChatPush(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
@@ -233,9 +308,11 @@ func handleChatPush(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Pane string      `json:"pane"`
-		Type string      `json:"type"`
-		Data interface{} `json:"data"`
+		ClientID string      `json:"client_id"`
+		AgentID  string      `json:"agent_id"`
+		Pane     string      `json:"pane"`
+		Type     string      `json:"type"`
+		Data     interface{} `json:"data"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -243,8 +320,24 @@ func handleChatPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Pane == "" || req.Type == "" {
-		http.Error(w, "pane and type required", 400)
+	if (req.AgentID == "" && req.Pane == "") || req.Type == "" {
+		http.Error(w, "agent_id and type required", 400)
+		return
+	}
+	agentID := normalizeChatAgentValue(req.AgentID)
+	if agentID == "" {
+		agentID = normalizeChatAgentValue(req.Pane)
+	}
+
+	if req.ClientID != "" {
+		ok := hub.sendToClient(agentID, req.ClientID, ChatEvent{Type: req.Type, Data: req.Data})
+		if !ok {
+			http.Error(w, "client not found", 404)
+			return
+		}
+		log.Printf("[chat-push] agent_id=%s client_id=%s type=%s mode=direct", agentID, req.ClientID, req.Type)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "mode": "direct"})
 		return
 	}
 
@@ -252,7 +345,7 @@ func handleChatPush(w http.ResponseWriter, r *http.Request) {
 	if req.Type == "desktop_event" {
 		if dm, ok := req.Data.(map[string]interface{}); ok {
 			if dt, _ := dm["type"].(string); dt == "gemini_ask" || dt == "gemini_vision_request" || dt == "ipc_ping" {
-				hub.broadcastElectron(req.Pane, ChatEvent{Type: req.Type, Data: req.Data})
+				hub.broadcastElectron(agentID, ChatEvent{Type: req.Type, Data: req.Data})
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 				return
@@ -260,10 +353,10 @@ func handleChatPush(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	hub.broadcast(req.Pane, ChatEvent{Type: req.Type, Data: req.Data})
-	log.Printf("[chat-push] pane=%s type=%s", req.Pane, req.Type)
+	hub.broadcast(agentID, ChatEvent{Type: req.Type, Data: req.Data})
+	log.Printf("[chat-push] agent_id=%s type=%s", agentID, req.Type)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "mode": "broadcast"})
 }
 
 func handleChatDebug(w http.ResponseWriter, r *http.Request) {

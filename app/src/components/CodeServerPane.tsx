@@ -1,6 +1,8 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
+import { useDevRegister } from '../lib/devStore';
+import { toRuntimeAbsolutePath } from '../config';
 import { WebFrame } from './WebFrame';
 const BTN_CLS = 'p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer';
 
@@ -45,9 +47,16 @@ export default function CodeServerPane({
   }, [showFavorites]);
 
   useEffect(() => { setShowFavorites(false); }, [bodyHidden]);
+  useDevRegister('CodeServerPane', {
+    showFavorites,
+    hasFavoriteFolders: FAVORITE_FOLDERS.length > 0,
+    favoriteCount: FAVORITE_FOLDERS.length,
+    bodyHidden,
+    folderLabel,
+  });
 
   return (
-    <div ref={rootRef} className={`h-full flex flex-col bg-[#0A0A0A] ${className}`}>
+    <div ref={rootRef} data-id="code-server-pane" className={`h-full flex flex-col bg-[#0A0A0A] ${className}`}>
       <div
         data-id="code-server-topbar"
         className="h-12 border-b border-white/[0.08] flex items-center px-2 shrink-0 gap-1 bg-gradient-to-r from-[#151925] via-[#121621] to-[#10131c] shadow-[inset_0_-1px_0_rgba(255,255,255,0.04),0_8px_24px_rgba(0,0,0,0.18)]"
@@ -57,6 +66,7 @@ export default function CodeServerPane({
         <div className="relative">
           {FAVORITE_FOLDERS.length > 0 && <button
             ref={favBtnRef}
+            data-id="code-server-favorites-toggle"
             onClick={(e) => {
               e.stopPropagation();
               const r = favBtnRef.current?.getBoundingClientRect();
@@ -69,24 +79,26 @@ export default function CodeServerPane({
             <ChevronDown className="w-3 h-3" />
           </button>}
           {showFavorites && favPos && createPortal(
-            <div className="fixed bg-[#1e1e1e] border border-[var(--vsc-border)] rounded shadow-lg py-1 z-[9999] min-w-32" style={{ left: favPos.x, top: favPos.y }}>
+            <div data-id="code-server-favorites-menu" className="fixed bg-[#1e1e1e] border border-[var(--vsc-border)] rounded shadow-lg py-1 z-[9999] min-w-32" style={{ left: favPos.x, top: favPos.y }}>
               {FAVORITE_FOLDERS.map(folder => {
                 const newWinUrl = (() => {
                   try {
                     const u = new URL(src);
-                    u.searchParams.set('folder', folder.replace('~', import.meta.env.VITE_HOST_HOME || '/home/w3c_offical'));
+                    u.searchParams.set('folder', toRuntimeAbsolutePath(folder));
                     return u.toString();
                   } catch { return src; }
                 })();
                 return (
                   <div key={folder} className="flex items-center group">
                     <button
+                      data-id={`code-server-favorite-${folder}`}
                       onClick={() => { onNavigate(folder); setShowFavorites(false); }}
                       className="flex-1 text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-700/50 hover:text-zinc-200 transition-colors cursor-pointer"
                     >
                       {folder}
                     </button>
                     <button
+                      data-id={`code-server-favorite-open-${folder}`}
                       onClick={(e) => { e.stopPropagation(); window.open(newWinUrl, '_blank'); setShowFavorites(false); }}
                       className="px-2 py-1.5 text-zinc-600 hover:text-zinc-200 hover:bg-zinc-700/50 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
                       title="在新窗口打开"
@@ -101,7 +113,7 @@ export default function CodeServerPane({
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <span className="text-[10px] font-mono text-zinc-600 truncate block">{folderLabel}</span>
+          <span data-id="code-server-folder-label" className="text-[10px] font-mono text-zinc-600 truncate block">{folderLabel}</span>
         </div>
         {rightControls}
       </div>

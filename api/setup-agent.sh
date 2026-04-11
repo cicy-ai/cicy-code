@@ -223,10 +223,34 @@ chmod 600 "$OPENCLAW_ENV"
 mkdir -p "$OPENCLAW_AGENT_DIR"
 rm -f "$OPENCLAW_AUTH_STORE"
 patch_openclaw_models() {
-  node - "$OPENCLAW_CONFIG" "$OPENCLAW_PROVIDER_RUNTIME_BASE_URL" "$API_KEY" "$OPENCLAW_PRIMARY_MODEL" "$OPENCLAW_PROVIDER_API" <<'NODE'
+  local merge_source="${OPENCLAW_CONFIG_MERGE_SOURCE:-$OPENCLAW_CONFIG}"
+  node - "$OPENCLAW_CONFIG" "$OPENCLAW_PROVIDER_RUNTIME_BASE_URL" "$API_KEY" "$OPENCLAW_PRIMARY_MODEL" "$OPENCLAW_PROVIDER_API" "$merge_source" <<'NODE'
 const fs = require("fs");
-const [configPath, baseUrl, apiKey, primaryModel, providerApi] = process.argv.slice(2);
+const [configPath, baseUrl, apiKey, primaryModel, providerApi, mergeSourcePath] = process.argv.slice(2);
 const cfg = JSON.parse(fs.readFileSync(configPath, "utf8"));
+let mergeSourceCfg = null;
+try {
+  if (mergeSourcePath && fs.existsSync(mergeSourcePath)) {
+    mergeSourceCfg = JSON.parse(fs.readFileSync(mergeSourcePath, "utf8"));
+  }
+} catch (_) {}
+function mergeWeixinChannelConfig(targetCfg, sourceCfg) {
+  const existingChannel = sourceCfg?.channels?.["openclaw-weixin"];
+  if (!existingChannel || typeof existingChannel !== "object") return;
+  targetCfg.channels ||= {};
+  const currentChannel = targetCfg.channels["openclaw-weixin"];
+  if (!currentChannel || typeof currentChannel !== "object") {
+    targetCfg.channels["openclaw-weixin"] = existingChannel;
+    return;
+  }
+  const nextChannel = { ...currentChannel, ...existingChannel };
+  const currentAccounts = currentChannel.accounts && typeof currentChannel.accounts === "object" ? currentChannel.accounts : {};
+  const existingAccounts = existingChannel.accounts && typeof existingChannel.accounts === "object" ? existingChannel.accounts : {};
+  if (Object.keys(currentAccounts).length || Object.keys(existingAccounts).length) {
+    nextChannel.accounts = { ...currentAccounts, ...existingAccounts };
+  }
+  targetCfg.channels["openclaw-weixin"] = nextChannel;
+}
 
 const claudeModels = [
   { id: "claude-opus-4-6", name: "Claude Opus 4.6", reasoning: true, input: ["text", "image"], contextWindow: 200000, maxTokens: 8192 },
@@ -234,8 +258,8 @@ const claudeModels = [
   { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", reasoning: false, input: ["text", "image"], contextWindow: 200000, maxTokens: 8192 },
 ];
 const openaiModels = [
-  { id: "gpt-5.4", name: "gpt-5.4", reasoning: true, input: ["text", "image"], contextWindow: 16000, maxTokens: 4096 },
-  { id: "gpt-5.3-codex", name: "gpt-5.3-codex", reasoning: true, input: ["text", "image"], contextWindow: 16000, maxTokens: 4096 },
+  { id: "gpt-5.4", name: "gpt-5.4", reasoning: true, input: ["text", "image"], contextWindow: 272000, maxTokens: 4096 },
+  { id: "gpt-5.3-codex", name: "gpt-5.3-codex", reasoning: true, input: ["text", "image"], contextWindow: 272000, maxTokens: 4096 },
 ];
 const wanted = providerApi === "anthropic-messages" ? claudeModels : openaiModels;
 
@@ -245,6 +269,10 @@ cfg.agents.defaults.model ||= {};
 cfg.agents.defaults.model.primary = `cicy/${primaryModel}`;
 cfg.agents.defaults.models ||= {};
 cfg.agents.defaults.models = {};
+cfg.agents.defaults.contextTokens = providerApi === "anthropic-messages" ? 200000 : 272000;
+cfg.agents.defaults.compaction ||= {};
+cfg.agents.defaults.compaction.mode = "safeguard";
+cfg.agents.defaults.compaction.reserveTokensFloor = 20000;
 for (const model of wanted) {
   cfg.agents.defaults.models[`cicy/${model.id}`] = { alias: model.name };
 }
@@ -275,6 +303,7 @@ cfg.gateway.controlUi.allowInsecureAuth = true;
 cfg.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
 cfg.gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback = true;
 cfg.gateway.controlUi.allowedOrigins = ["*"];
+mergeWeixinChannelConfig(cfg, mergeSourceCfg);
 
 const next = JSON.stringify(cfg, null, 2);
 const prev = fs.readFileSync(configPath, "utf8");
@@ -307,6 +336,12 @@ try {
 }
 NODE
 }
+OPENCLAW_CONFIG_BACKUP=""
+if [ -f "$OPENCLAW_CONFIG" ]; then
+  OPENCLAW_CONFIG_BACKUP=$(mktemp)
+  cp "$OPENCLAW_CONFIG" "$OPENCLAW_CONFIG_BACKUP"
+fi
+OPENCLAW_CONFIG_MERGE_SOURCE="${OPENCLAW_CONFIG_BACKUP:-$OPENCLAW_CONFIG}"
 if openclaw_config_ready; then
   patch_openclaw_models
   log "✓ OpenClaw 配置完成 (cached config)"
@@ -392,6 +427,9 @@ else
 EOF
   patch_openclaw_models
   log "✓ OpenClaw 配置完成 (fallback custom provider)"
+fi
+if [ -n "$OPENCLAW_CONFIG_BACKUP" ]; then
+  rm -f "$OPENCLAW_CONFIG_BACKUP"
 fi
 
 printf '\n'

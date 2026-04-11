@@ -1,9 +1,11 @@
 package webtty
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"regexp"
 	"sync"
 
@@ -186,6 +188,9 @@ func (wt *WebTTY) handleMasterReadEvent(data []byte) error {
 		raw = daResponseRe.ReplaceAll(raw, nil)
 		if len(raw) == 0 {
 			return nil
+		}
+		if bytes.IndexByte(raw, '\r') >= 0 || bytes.IndexByte(raw, '\n') >= 0 {
+			log.Printf("[webtty-input] len=%d raw=%q", len(raw), raw)
 		}
 
 		_, err := wt.slave.Write(raw)

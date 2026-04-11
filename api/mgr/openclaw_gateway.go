@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"log"
 	"net"
@@ -9,6 +10,8 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -40,6 +43,98 @@ func openClawProxyWebSocketURL(r *http.Request) string {
 	return scheme + "://" + host + "/openclaw/"
 }
 
+type openClawSessionStoreEntry struct {
+	UpdatedAt int64 `json:"updatedAt"`
+}
+
+func resolvePreferredOpenClawSessionKey() string {
+	const fallback = "main"
+	const prefix = "agent:main:openclaw-weixin:direct:"
+
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return fallback
+	}
+
+	stateDir := filepath.Join(home, ".openclaw-"+primaryWorkerSession)
+	storePath := filepath.Join(stateDir, "agents", "main", "sessions", "sessions.json")
+	accountsDir := filepath.Join(stateDir, "openclaw-weixin", "accounts")
+
+	latestAccountSession := func() string {
+		entries, err := os.ReadDir(accountsDir)
+		if err != nil || len(entries) == 0 {
+			return ""
+		}
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if !strings.HasSuffix(name, ".json") ||
+				strings.HasSuffix(name, ".sync.json") ||
+				strings.HasSuffix(name, ".context-tokens.json") {
+				continue
+			}
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		if len(names) == 0 {
+			return ""
+		}
+		body, err := os.ReadFile(filepath.Join(accountsDir, names[len(names)-1]))
+		if err != nil {
+			return ""
+		}
+		var payload struct {
+			UserID string `json:"userId"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return ""
+		}
+		userID := strings.ToLower(strings.TrimSpace(payload.UserID))
+		if userID == "" {
+			return ""
+		}
+		return prefix + userID
+	}
+
+	body, err := os.ReadFile(storePath)
+	if err != nil {
+		if sessionKey := latestAccountSession(); sessionKey != "" {
+			return sessionKey
+		}
+		return fallback
+	}
+
+	store := map[string]openClawSessionStoreEntry{}
+	if err := json.Unmarshal(body, &store); err != nil {
+		if sessionKey := latestAccountSession(); sessionKey != "" {
+			return sessionKey
+		}
+		return fallback
+	}
+
+	bestKey := ""
+	bestUpdatedAt := int64(0)
+	for key, entry := range store {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if bestKey == "" || entry.UpdatedAt > bestUpdatedAt || (entry.UpdatedAt == bestUpdatedAt && key < bestKey) {
+			bestKey = key
+			bestUpdatedAt = entry.UpdatedAt
+		}
+	}
+	if bestKey != "" {
+		return bestKey
+	}
+	if sessionKey := latestAccountSession(); sessionKey != "" {
+		return sessionKey
+	}
+	return fallback
+}
+
 func handleOpenClawGatewayInfo(w http.ResponseWriter, r *http.Request) {
 	if !ensureOpenClawGatewayReady() {
 		httpErr(w, 503, "openclaw_gateway_not_ready")
@@ -55,7 +150,7 @@ func handleOpenClawGatewayInfo(w http.ResponseWriter, r *http.Request) {
 	J(w, M{
 		"ws_url":      openClawProxyWebSocketURL(r),
 		"token":       token,
-		"session_key": "main",
+		"session_key": resolvePreferredOpenClawSessionKey(),
 	})
 }
 

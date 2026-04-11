@@ -11,9 +11,9 @@ import (
 )
 
 type toolInfo struct {
-	Name   string `json:"name"`
-	Arg    string `json:"arg,omitempty"`
-	Result string `json:"result,omitempty"`
+	Name   string    `json:"name"`
+	Arg    string    `json:"arg,omitempty"`
+	Result string    `json:"result,omitempty"`
 	Diff   *diffInfo `json:"diff,omitempty"`
 }
 
@@ -23,9 +23,9 @@ type diffInfo struct {
 }
 
 type step struct {
-	Type   string    `json:"type"`            // "text", "tool"
-	Text   string    `json:"text,omitempty"`   // for type=text
-	Tools  []toolInfo `json:"tools,omitempty"` // for type=tool
+	Type  string     `json:"type"`            // "text", "tool"
+	Text  string     `json:"text,omitempty"`  // for type=text
+	Tools []toolInfo `json:"tools,omitempty"` // for type=tool
 }
 
 type chatTurn struct {
@@ -178,21 +178,24 @@ func extractHistoryTools(reqParsed map[string]interface{}) []toolInfo {
 }
 
 func handleChatHistory(w http.ResponseWriter, r *http.Request) {
-	pane := r.URL.Query().Get("pane")
-	if pane == "" {
-		http.Error(w, "pane required", 400)
+	agentID := normalizeChatAgentValue(r.URL.Query().Get("agent_id"))
+	if agentID == "" {
+		agentID = normalizeChatAgentValue(r.URL.Query().Get("pane"))
+	}
+	if agentID == "" {
+		http.Error(w, "agent_id required", 400)
 		return
 	}
 	agentType := ""
 	// Try to get from DB first
 	var at sql.NullString
-	store.QueryRow("SELECT agent_type FROM agent_config WHERE pane_id=?", pane).Scan(&at)
+	store.QueryRow("SELECT agent_type FROM agent_config WHERE pane_id=?", agentID).Scan(&at)
 	if at.Valid && at.String != "" {
 		agentType = at.String
 	} else {
 		// Fallback: extract from latest request
 		var data []byte
-		err := store.QueryRow(`SELECT data FROM http_log WHERE pane_id=? AND url LIKE '%q.us-east-1%' AND data LIKE '%GenerateAssistantResponse%' ORDER BY id DESC LIMIT 1`, pane).Scan(&data)
+		err := store.QueryRow(`SELECT data FROM http_log WHERE pane_id=? AND url LIKE '%q.us-east-1%' AND data LIKE '%GenerateAssistantResponse%' ORDER BY id DESC LIMIT 1`, agentID).Scan(&data)
 		if err == nil {
 			var full map[string]interface{}
 			if json.Unmarshal(data, &full) == nil {
@@ -214,7 +217,7 @@ func handleChatHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"data": buildChatTurns(pane), "agentType": agentType})
+	json.NewEncoder(w).Encode(map[string]interface{}{"data": buildChatTurns(agentID), "agentType": agentType})
 }
 
 func buildChatTurns(pane string) []chatTurn {

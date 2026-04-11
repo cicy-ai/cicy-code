@@ -1,5 +1,6 @@
 import * as bare from "xterm";
 import { lib } from "libapps"
+import { openExternalLinkWithConfirm } from "./link_confirm";
 
 
 bare.loadAddon("fit");
@@ -84,6 +85,16 @@ export class Xterm {
             }
             return true;
         });
+        if ((this.term as any).setHypertextLinkHandler) {
+            (this.term as any).setHypertextLinkHandler((event: MouseEvent, uri: string) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if ((event as any).stopImmediatePropagation) {
+                    (event as any).stopImmediatePropagation();
+                }
+                openExternalLinkWithConfirm(this.elem.ownerDocument, uri);
+            });
+        }
 
         // Prevent tmux mouse mode from disabling text selection.
         // tmux sends \x1b[?1000h which makes xterm.js call selectionManager.disable().

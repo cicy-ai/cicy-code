@@ -184,9 +184,10 @@ func dispatchQueue(paneID string) {
 		if types[i] == "command" {
 			runTmux("send-keys", "-t", paneID, msg, "Enter")
 		} else {
-			runTmux("send-keys", "-t", paneID, "-l", msg)
-			time.Sleep(enterDelay)
-			runTmux("send-keys", "-t", paneID, "Enter")
+			if err := sendTextToPane(paneID, msg); err != nil {
+				log.Printf("[queue] failed to dispatch msg id=%d to %s: %v", ids[i], shortPaneID(paneID), err)
+				continue
+			}
 		}
 		store.Exec(fmt.Sprintf("UPDATE agent_queue SET status='sent', sent_at=%s WHERE id=?", store.Now()), ids[i])
 		if i < len(messages)-1 {

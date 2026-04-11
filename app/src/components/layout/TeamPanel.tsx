@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Users, Plus, X, Loader2, ExternalLink, RefreshCw, Settings, MoreHorizontal, Trash2 } from 'lucide-react';
+import { Users, Plus, X, Loader2, ExternalLink, Settings, MoreHorizontal, Trash2, RefreshCw } from 'lucide-react';
 import apiService from '../../services/api';
 import { useDialog } from '../../contexts/DialogContext';
+import { assetUrl } from '../../lib/assets';
+import { useDevRegister } from '../../lib/devStore';
 import Select from '../ui/Select';
 import CreateAgentDialog, { CreateAgentValues } from '../CreateAgentDialog';
 
@@ -37,6 +39,7 @@ interface Props {
   bindings: Binding[];
   statuses?: Record<string, StatusInfo>;
   onOpenInCurrentPane?: (paneId: string) => void;
+  onLocatePane?: (paneId: string) => void;
   openedPaneIds?: string[];
   activePaneId?: string;
   onOpenSettingsPane?: (paneId: string) => void;
@@ -60,6 +63,8 @@ function normalizeAgentType(agentType?: string) {
     case 'claude code':
     case 'claude-code':
       return 'claude';
+    case 'cicy':
+      return 'cicy';
     case 'opencode':
     case 'open code':
     case 'open-code':
@@ -98,9 +103,10 @@ function AgentTypeAvatar({ agentType, title }: { agentType?: string; title: stri
   }
 
   const iconMap: Record<string, { label: string; src: string; className?: string }> = {
-    codex: { label: 'Codex', src: '/assets/logos/openai.svg' },
-    claude: { label: 'Claude', src: '/assets/logos/claude-symbol.svg' },
-    opencode: { label: 'OpenCode', src: '/assets/logos/opencode.svg', className: 'h-7 w-7' },
+    codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg') },
+    claude: { label: 'Claude', src: assetUrl('/assets/logos/claude-symbol.svg') },
+    cicy: { label: 'CiCy', src: 'https://cicy-ai.com/logo.svg' },
+    opencode: { label: 'OpenCode', src: assetUrl('/assets/logos/opencode.svg'), className: 'h-7 w-7' },
   };
   const icon = iconMap[normalizedAgentType];
   if (!icon) return null;
@@ -143,9 +149,10 @@ function AgentTypeMiniAvatar({ agentType, title }: { agentType?: string; title: 
   }
 
   const iconMap: Record<string, { label: string; src: string; className?: string }> = {
-    codex: { label: 'Codex', src: '/assets/logos/openai.svg', className: 'h-4.5 w-4.5' },
-    claude: { label: 'Claude', src: '/assets/logos/claude-symbol.svg', className: 'h-4.5 w-4.5' },
-    opencode: { label: 'OpenCode', src: '/assets/logos/opencode.svg', className: 'h-5 w-5' },
+    codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg'), className: 'h-4.5 w-4.5' },
+    claude: { label: 'Claude', src: assetUrl('/assets/logos/claude-symbol.svg'), className: 'h-4.5 w-4.5' },
+    cicy: { label: 'CiCy', src: 'https://cicy-ai.com/logo.svg', className: 'h-4.5 w-4.5' },
+    opencode: { label: 'OpenCode', src: assetUrl('/assets/logos/opencode.svg'), className: 'h-5 w-5' },
   };
   const icon = iconMap[normalizedAgentType];
   if (!icon) return null;
@@ -160,10 +167,9 @@ function AgentTypeMiniAvatar({ agentType, title }: { agentType?: string; title: 
   );
 }
 
-export default function TeamPanel({ paneId, panes = [], bindings = [], statuses = {}, onOpenInCurrentPane, openedPaneIds = [], activePaneId, onOpenSettingsPane, onRefreshPanes, onRefreshPoll }: Props) {
+export default function TeamPanel({ paneId, panes = [], bindings = [], statuses = {}, onOpenInCurrentPane, onLocatePane, openedPaneIds = [], activePaneId, onOpenSettingsPane, onRefreshPanes, onRefreshPoll }: Props) {
   const [creating, setCreating] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [syncingInstances, setSyncingInstances] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const { confirm } = useDialog();
 
@@ -175,6 +181,15 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     document.addEventListener('pointerdown', closeMenu);
     return () => document.removeEventListener('pointerdown', closeMenu);
   }, []);
+  useDevRegister(`TeamPanel:${paneId}`, {
+    paneId,
+    creating,
+    createDialogOpen,
+    openMenuId,
+    boundCount: bindings.length,
+    availableCount: panes.length,
+    activePaneId: activePaneId || paneId,
+  });
 
   const boundIds = new Set(bindings.map(b => shortId(b.name)));
   const available = panes.filter(a => {
@@ -190,9 +205,17 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   };
 
   const unbind = async (binding: Binding) => {
+    const removedPaneId = shortId(binding.name);
+    const nextSelectedPaneId = (
+      activePaneId && activePaneId !== removedPaneId
+        ? activePaneId
+        : bindings
+            .map((item) => shortId(item.name))
+            .find((id) => id && id !== removedPaneId)
+    ) || paneId;
     try {
       await apiService.unbindAgent(binding.id);
-      onOpenInCurrentPane?.(paneId);
+      onOpenInCurrentPane?.(nextSelectedPaneId);
       await onRefreshPoll();
     } catch {}
   };
@@ -218,17 +241,6 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
       window.dispatchEvent(new CustomEvent('show-toast', { detail: '创建并绑定员工失败' }));
     } finally {
       setCreating(false);
-    }
-  };
-
-  const syncInstances = async () => {
-    setSyncingInstances(true);
-    try {
-      await apiService.syncMachines();
-      await onRefreshPanes();
-      await onRefreshPoll();
-    } catch {} finally {
-      setSyncingInstances(false);
     }
   };
 
@@ -312,7 +324,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   const currentAgent = useMemo(() => {
     const agent = panes.find(a => shortId(a.pane_id) === paneId);
     const status = getStatus(paneId);
-    const subtitleParts = [paneId, statusLabel(status)];
+    const subtitleParts = [paneId, statusLabel(status)].filter(Boolean);
     if (agent?.machine_label) subtitleParts.push(agent.machine_label);
     return {
       title: agent?.title || status.title || paneId,
@@ -495,15 +507,6 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
           className="flex-1"
         />
         <button
-          data-id="team-panel-sync-instances"
-          onClick={syncInstances}
-          disabled={syncingInstances}
-          className="flex items-center text-sm px-2 py-1.5 rounded border border-[var(--vsc-border)] text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors cursor-pointer disabled:opacity-50"
-          title="同步实例"
-        >
-          {syncingInstances ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-        </button>
-        <button
           data-id="team-panel-create-worker"
           onClick={() => setCreateDialogOpen(true)}
           disabled={creating}
@@ -534,6 +537,10 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
             subtitle: currentAgent.subtitle,
             active: (activePaneId || paneId) === paneId,
             onClick: () => {
+              if (onLocatePane) {
+                onLocatePane(paneId);
+                return;
+              }
               if (onOpenInCurrentPane) {
                 onOpenInCurrentPane(paneId);
                 return;
@@ -546,7 +553,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
           })}
         </div>
         {bindings.length > 0 ? (
-          <div className="flex h-full w-full min-w-0 flex-col" data-id="team-panel-groups">
+          <div className="flex w-full min-w-0 flex-col" data-id="team-panel-groups">
             {groupedBindings.map(group => (
               <div
                 key={group.machineId || 'local'}
@@ -558,7 +565,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                 {group.items.map(b => {
                   const wid = shortId(b.name);
                   const s = getStatus(wid);
-                  const subtitleParts = [wid, statusLabel(s)];
+                  const subtitleParts = [wid, statusLabel(s)].filter(Boolean);
                   if (b.instance_label || b.machine_label) subtitleParts.push(b.instance_label || b.machine_label || '');
                   return renderAgentCard({
                     wid,
@@ -569,6 +576,10 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                     active: activePaneId === wid,
                     opened: openedPaneIds.includes(wid),
                     onClick: () => {
+                      if (onLocatePane) {
+                        onLocatePane(wid);
+                        return;
+                      }
                       if (onOpenInCurrentPane) {
                         onOpenInCurrentPane(wid);
                         return;

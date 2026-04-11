@@ -1,28 +1,26 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Terminal, MessageSquare, Home, Folder, FolderOpen, X, Settings, Brain, Search,
-  LayoutList, Users, RotateCcw, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, Pencil
+  LayoutList, Users, RotateCcw, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github
 } from 'lucide-react';
+import { assetUrl } from '../lib/assets';
 import { cn } from '../lib/utils';
-import { lockPointer, unlockPointer } from '../lib/pointerLock';
 import { useDevRegister } from '../lib/devStore';
-import { Panel, Group, Separator } from 'react-resizable-panels';
 import { useAuth } from '../contexts/AuthContext';
 import { SendingProvider } from '../contexts/SendingContext';
 import ChatView from './chat/ChatView';
 import { CommandPanel } from './terminal/CommandPanel';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
-import { WebFrame } from './WebFrame';
 import FloatingCodeWindow from './FloatingCodeWindow';
-import DesktopCanvas from './layout/DesktopCanvas';
 import TeamPanel from './layout/TeamPanel';
 import SkillPanel from './layout/SkillPanel';
 import SettingsFloat from './layout/SettingsFloat';
 import TokenDialog from './layout/TokenDialog';
 import useDesktopEvents from './layout/useDesktopEvents';
+import AgentCanvas, { AgentCanvasItem } from './layout/AgentCanvas';
 import { useDialog } from '../contexts/DialogContext';
-import config, { urls } from '../config';
+import config, { getHostHome, syncHostHomeFromPath, toTildePath, urls } from '../config';
 import apiService from '../services/api';
 import { sendCommandToTmux } from '../services/mockApi';
 import { ApiSwitchDialog } from './layout/ApiSwitchDialog';
@@ -35,8 +33,45 @@ const cache = {
 
 const LEFT_PANEL_WIDTH = 320;
 const getFloatingOpenKey = (paneId: string) => `ws_floatingCodeOpen:${paneId}`;
-const TEAM_TERMINAL_CHILDREN_KEY = 'ws_teamTerminalChildren';
 const TEAM_TERMINAL_ACTIVE_KEY = 'ws_teamTerminalActive';
+const GITHUB_ISSUES_URL = 'https://github.com/cicy-ai/cicy-code/issues';
+const UPGRADE_URL = 'https://cicy-ai.com/team/dashbaord#upgrade';
+
+function parseIsPro(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return null;
+  }
+  if (typeof value !== 'string') return null;
+  const raw = value.trim().toLowerCase();
+  if (!raw) return null;
+  if (['1', 'true', 'yes', 'on', 'pro'].includes(raw)) return true;
+  if (['0', 'false', 'no', 'off', 'trial', 'free'].includes(raw)) return false;
+  return null;
+}
+
+function resolveTrialExpiresMs(epoch: number | null, expiresAt: string | null): number | null {
+  if (typeof epoch === 'number' && Number.isFinite(epoch) && epoch > 0) {
+    return epoch * 1000;
+  }
+  if (!expiresAt) return null;
+  const parsed = Date.parse(expiresAt);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function formatDateTime(ms: number): string {
+  return new Date(ms).toLocaleString('zh-CN', { hour12: false });
+}
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 type LeftPanelView = 'team' | 'skills' | 'agents' | null;
@@ -49,16 +84,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const initialPaneIdRef = useRef(paneId);
   const floatingOpenKey = getFloatingOpenKey(initialPaneIdRef.current);
 
-  const getOpenPanelLayout = useCallback(() => {
-    const containerWidth = Math.max(mainAreaRef.current?.clientWidth || window.innerWidth || 1, 1);
-    const leftPercent = Math.min(100, Math.max(0, (LEFT_PANEL_WIDTH / containerWidth) * 100));
-    return {
-      'left-panel': leftPercent,
-      'right-panel': 100 - leftPercent,
-    };
-  }, []);
-
-  const mainTab = 'cli' as const;
+  const mainTab = 'cli' as 'chat' | 'cli';
   const [leftPanelView, setLeftPanelView] = useState<LeftPanelView>(() => {
     const v = cache.get('ws_leftPanel', null);
     if (v === 'team' || v === 'skills') return v;
@@ -67,16 +93,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
-  const [panelSizes, setPanelSizes] = useState<Record<string, number> | null>(() => {
-    const saved = cache.get('ws_panelSizes', null);
-    if (!saved || typeof saved !== 'object') return null;
-    const left = Number(saved['left-panel']);
-    const right = Number(saved['right-panel']);
-    if (!Number.isFinite(left) || !Number.isFinite(right)) return null;
-    if (left < 5 || right < 5) return null;
-    if (left === 50 && right === 50) return null;
-    return { 'left-panel': left, 'right-panel': right };
-  });
   const [toast, setToast] = useState<string | null>(null);
 
   const [status, setStatus] = useState('idle');
@@ -90,15 +106,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [codeServerSrc, setCodeServerSrc] = useState('');
   const [floatingCodeOpen, setFloatingCodeOpen] = useState(() => cache.get(floatingOpenKey, false));
   const [codeFolder, setCodeFolder] = useState('');
-  const [teamTerminalChildren, set团队TerminalChildren] = useState<Record<string, string[]>>(() => cache.get(TEAM_TERMINAL_CHILDREN_KEY, {}));
   const [teamTerminalActive, set团队TerminalActive] = useState<Record<string, string>>(() => cache.get(TEAM_TERMINAL_ACTIVE_KEY, {}));
+  const [canvasLocateRequest, setCanvasLocateRequest] = useState<{ paneId: string; nonce: number; zoomToActual?: boolean } | null>(null);
   const codeWindowInitializedRef = useRef(false);
   const agentWorkspaceRef = useRef(`~/workers/${paneId}`);
+  const prevCanvasPaneIdsRef = useRef<string[] | null>(null);
+  const initialCanvasRestoreScopeRef = useRef<string | null>(null);
 
   const handleCodeHome = () => {
-    const next = urls.codeServer(config.hostHome, token!);
+    const hostHome = getHostHome();
+    const next = urls.codeServer(hostHome, token!);
     window.open(next, '_blank');
-    if (next !== codeServerSrc) { setCodeServerSrc(next); setCodeFolder(config.hostHome); }
+    if (next !== codeServerSrc) { setCodeServerSrc(next); setCodeFolder(hostHome); }
   };
   const handleCodeServiceOpen = (folder?: string) => {
     const nextFolder = folder || codeFolder;
@@ -121,12 +140,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   };
   const [agentDetail, setAgentDetail] = useState<any>(null);
   const title = agentDetail?.title || '-';
-  const currentAgentType = normalizeAgentType(
-    agentDetail?.agent_type || paneDetails[paneId]?.agent_type || agents.find((a) => (a.pane_id || a.id || '').split(':')[0] === paneId)?.agent_type
-  );
-  const isOpenClawPane = currentAgentType === 'openclaw';
   const [netLatency, setNetLatency] = useState<number | null>(null);
-  const isApiOnlyRuntime = !!(agentDetail && (agentDetail.runtime_kind === 'cloudrun' || agentDetail.capabilities?.supports_tmux === false));
+  const [chatWsConnected, setChatWsConnected] = useState(false);
+  const [trialExpiresAt, setTrialExpiresAt] = useState<string | null>(null);
+  const [trialExpiresAtEpoch, setTrialExpiresAtEpoch] = useState<number | null>(null);
+  const [isPro, setIsPro] = useState<boolean | null>(null);
+  const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now());
+  const isApiOnlyRuntime = !!(agentDetail && agentDetail.capabilities?.supports_tmux === false);
 
   const [showVoiceControl, setShowVoiceControl] = useState(false);
   const [voiceLoading, setVoiceLoading] = useState(false);
@@ -135,14 +155,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [panelPos, setPanelPos] = useState(() => cache.get('agent_panelPos', { x: 20, y: Math.max(60, window.innerHeight - 280) }));
   const [panelSize, setPanelSize] = useState(() => cache.get('agent_panelSize', { width: 360, height: 220 }));
   const [activeWinIdx, setActiveWinIdx] = useState('0');
-  const [isEditingTopBarTitle, setIsEditingTopBarTitle] = useState(false);
-  const [topBarTitleDraft, setTopBarTitleDraft] = useState('');
-  const [savingTopBarTitle, setSavingTopBarTitle] = useState(false);
-  const groupRef = useRef<any>(null);
-  const mainAreaRef = useRef<HTMLDivElement>(null);
   const activityBarRef = useRef<HTMLDivElement>(null);
-  const topBarTitleInputRef = useRef<HTMLInputElement>(null);
-  const topBarTitleCommitRef = useRef(false);
 
   const addApp = (window as any).__desktopAddApp || (() => {});
   useDesktopEvents(addApp);
@@ -154,13 +167,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
 
   useEffect(() => {
     cache.set('ws_leftPanel', leftActive === 'team' || leftActive === 'skills' ? leftActive : null);
-    if (!groupRef.current) return;
-    if (leftActive) {
-      groupRef.current.setLayout(panelSizes ?? getOpenPanelLayout());
-    }
-  }, [getOpenPanelLayout, leftActive, panelSizes]);
+  }, [leftActive]);
   useEffect(() => { cache.set(floatingOpenKey, floatingCodeOpen); }, [floatingCodeOpen, floatingOpenKey]);
-  useEffect(() => { cache.set(TEAM_TERMINAL_CHILDREN_KEY, teamTerminalChildren); }, [teamTerminalChildren]);
   useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, teamTerminalActive); }, [teamTerminalActive]);
   useEffect(() => { cache.set('ws_voiceBtnPos', voiceBtnPos); }, [voiceBtnPos]);
   useEffect(() => { cache.set('agent_panelPos', panelPos); }, [panelPos]);
@@ -172,14 +180,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       document.body.style.overflow = prevOverflow;
     };
   }, []);
-  const onPanelLayout = useCallback((layout: Record<string, number>) => {
-    if (layout['left-panel'] < 5) {
-      closeLeftPanel();
-      return;
-    }
-    setPanelSizes(layout);
-    cache.set('ws_panelSizes', layout);
-  }, [closeLeftPanel]);
   const applyPanePatch = useCallback((targetPaneId: string, patch: any) => {
     setPaneDetails(prev => ({ ...prev, [targetPaneId]: { ...(prev[targetPaneId] || {}), ...patch } }));
     if (targetPaneId === paneId) setAgentDetail((prev: any) => ({ ...(prev || {}), ...patch }));
@@ -188,6 +188,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       return id === targetPaneId ? { ...a, ...patch } : a;
     }));
   }, [paneId]);
+  const handleRenamePaneTitle = useCallback(async (targetPaneId: string, nextTitle: string) => {
+    await apiService.updatePane(targetPaneId, { title: nextTitle });
+    applyPanePatch(targetPaneId, { title: nextTitle });
+    setBoundAgents(prev => prev.map((item: any) => {
+      const id = String(item?.name || item?.pane_id || '').replace(/:.*$/, '');
+      return id === targetPaneId ? { ...item, title: nextTitle } : item;
+    }));
+    try {
+      const { data } = await apiService.getPanes();
+      set智能体(Array.isArray(data) ? data : data?.panes || []);
+    } catch {}
+  }, [applyPanePatch]);
 
   const refreshPanes = useCallback(async () => {
     if (!token) return;
@@ -200,7 +212,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const refreshPoll = useCallback(async () => {
     const t0 = performance.now();
     try {
-      const { data } = await apiService.poll(paneId, { timeout: 1000 });
+      const { data } = await apiService.poll(paneId, { timeout: 5000 });
       const latency = Math.round(performance.now() - t0);
       setNetLatency(latency);
       window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency } }));
@@ -210,6 +222,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       if (st?.status) setStatus(st.status);
       if (st?.title) setAgentDetail((prev: any) => prev ? { ...prev, title: st.title } : { title: st.title });
       if (st?.contextUsage != null) setContextUsage(st.contextUsage);
+      const nextTrialExpiresAt = typeof data?.trial_expires_at === 'string' && data.trial_expires_at.trim()
+        ? data.trial_expires_at.trim()
+        : null;
+      const nextTrialEpochRaw = data?.trial_expires_at_epoch;
+      const nextTrialEpoch = typeof nextTrialEpochRaw === 'number'
+        ? nextTrialEpochRaw
+        : Number.parseInt(String(nextTrialEpochRaw ?? ''), 10);
+      setTrialExpiresAt(nextTrialExpiresAt);
+      setTrialExpiresAtEpoch(Number.isFinite(nextTrialEpoch) && nextTrialEpoch > 0 ? nextTrialEpoch : null);
+      setIsPro(parseIsPro(data?.is_pro));
     } catch {
       setNetLatency(null);
       window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency: null } }));
@@ -221,8 +243,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       setAgentDetail(data);
       setPaneDetails(prev => ({ ...prev, [paneId]: data }));
       const workspace = data?.workspace || `~/workers/${paneId}`;
+      syncHostHomeFromPath(workspace);
       agentWorkspaceRef.current = workspace;
-      if (!codeWindowInitializedRef.current && token && !(data?.runtime_kind === 'cloudrun' || data?.capabilities?.supports_code_server === false || data?.capabilities?.supports_tmux === false)) {
+      if (!codeWindowInitializedRef.current && token && !(data?.capabilities?.supports_code_server === false || data?.capabilities?.supports_tmux === false)) {
         setCodeFolder(workspace);
         setCodeServerSrc(urls.codeServer(workspace, token));
         codeWindowInitializedRef.current = true;
@@ -239,15 +262,61 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useEffect(() => {
     let timer: number | null = null;
     let cancelled = false;
-    const poll = async () => {
-      await refreshPoll();
-      if (cancelled) return;
-      timer = window.setTimeout(poll, 1000);
+    let inFlight = false;
+    let rerunRequested = false;
+
+    const clearTimer = () => {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
     };
-    void poll();
+
+    const schedule = (delay = config.pollInterval) => {
+      if (cancelled) return;
+      clearTimer();
+      timer = window.setTimeout(() => {
+        void runPoll();
+      }, delay);
+    };
+
+    const runPoll = async () => {
+      if (cancelled) return;
+      if (inFlight) {
+        rerunRequested = true;
+        return;
+      }
+      inFlight = true;
+      try {
+        await refreshPoll();
+      } finally {
+        inFlight = false;
+        if (cancelled) return;
+        if (rerunRequested) {
+          rerunRequested = false;
+          schedule(0);
+          return;
+        }
+        schedule();
+      }
+    };
+
+    const onRefresh = () => {
+      rerunRequested = true;
+      if (!inFlight) schedule(0);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') onRefresh();
+    };
+
+    onRefresh();
+    window.addEventListener('refresh-panes', onRefresh);
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       cancelled = true;
-      if (timer !== null) window.clearTimeout(timer);
+      clearTimer();
+      window.removeEventListener('refresh-panes', onRefresh);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [refreshPoll]);
 
@@ -264,6 +333,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     window.addEventListener('agent-status-change', handler as EventListener);
     return () => window.removeEventListener('agent-status-change', handler as EventListener);
   }, []);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      if (detail.agentId !== paneId) return;
+      setChatWsConnected(!!detail.connected);
+    };
+    window.addEventListener('chat-ws-connection', handler as EventListener);
+    return () => window.removeEventListener('chat-ws-connection', handler as EventListener);
+  }, [paneId]);
 
   const handleRestart = () => {
     if (isApiOnlyRuntime) return;
@@ -283,24 +362,51 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setLeftPanelView(prev => prev === 'agents' ? null : 'agents');
   };
 
-  const current团队Children = teamTerminalChildren[paneId] || [];
-  const currentTerminalTabs = useMemo(() => [paneId, ...current团队Children], [paneId, current团队Children]);
-  const current团队Active = currentTerminalTabs.includes(teamTerminalActive[paneId]) ? teamTerminalActive[paneId] : paneId;
-  const [loadedTtyds, setLoadedTtyds] = useState<Set<string>>(() => new Set());
-  useEffect(() => {
-    if (!token || isApiOnlyRuntime) return;
-    setLoadedTtyds(prev => {
-      const next = new Set(prev);
-      let changed = false;
-      currentTerminalTabs.forEach(id => {
-        if (id && !next.has(id)) {
-          next.add(id);
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
+  const canvasPaneIds = useMemo(() => {
+    const next = [paneId];
+    boundAgents.forEach((binding: any) => {
+      const boundPaneId = String(binding?.name || binding?.pane_id || '').replace(/:.*$/, '');
+      if (boundPaneId && !next.includes(boundPaneId)) {
+        next.push(boundPaneId);
+      }
     });
-  }, [currentTerminalTabs, isApiOnlyRuntime, token]);
+    return next;
+  }, [boundAgents, paneId]);
+  useEffect(() => {
+    const prev = prevCanvasPaneIdsRef.current;
+    prevCanvasPaneIdsRef.current = canvasPaneIds;
+    if (!prev) return;
+    const addedPaneIds = canvasPaneIds.filter((id) => id !== paneId && !prev.includes(id));
+    if (addedPaneIds.length > 0) {
+      const nextPaneId = addedPaneIds[addedPaneIds.length - 1];
+      set团队TerminalActive(current => ({ ...current, [paneId]: nextPaneId }));
+      setCanvasLocateRequest({ paneId: nextPaneId, nonce: Date.now(), zoomToActual: true });
+      return;
+    }
+
+    const removedPaneIds = prev.filter((id) => id !== paneId && !canvasPaneIds.includes(id));
+    if (removedPaneIds.length === 0) return;
+
+    const storedActivePaneId = teamTerminalActive[paneId];
+    const nextPaneId = canvasPaneIds.includes(storedActivePaneId) ? storedActivePaneId : paneId;
+    set团队TerminalActive(current => (
+      current[paneId] === nextPaneId ? current : { ...current, [paneId]: nextPaneId }
+    ));
+    setCanvasLocateRequest({ paneId: nextPaneId, nonce: Date.now(), zoomToActual: true });
+  }, [canvasPaneIds, paneId, teamTerminalActive]);
+  const current团队Active = canvasPaneIds.includes(teamTerminalActive[paneId]) ? teamTerminalActive[paneId] : paneId;
+  useEffect(() => {
+    initialCanvasRestoreScopeRef.current = null;
+  }, [paneId]);
+  useEffect(() => {
+    if (initialCanvasRestoreScopeRef.current === paneId) return;
+    const storedActivePaneId = teamTerminalActive[paneId];
+    if (storedActivePaneId && storedActivePaneId !== paneId && !canvasPaneIds.includes(storedActivePaneId)) {
+      return;
+    }
+    initialCanvasRestoreScopeRef.current = paneId;
+    setCanvasLocateRequest({ paneId: current团队Active, nonce: Date.now(), zoomToActual: true });
+  }, [canvasPaneIds, current团队Active, paneId, teamTerminalActive]);
   const settingsTargetPaneId = current团队Active || paneId;
   const settingsTargetFullPaneId = `${settingsTargetPaneId}:main.0`;
   const settingsTargetDetail = paneDetails[settingsTargetPaneId] || (settingsTargetPaneId === paneId ? agentDetail : null);
@@ -312,26 +418,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const topBarWorkspace = topBarDetail?.workspace || `~/workers/${topBarPaneId}`;
   const topBarIsApiOnlyRuntime = !!(
     topBarDetail
-    && (topBarDetail.runtime_kind === 'cloudrun' || topBarDetail.capabilities?.supports_tmux === false)
+    && topBarDetail.capabilities?.supports_tmux === false
   );
   const openPaneInCurrentTerminal = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
-    if (clean === paneId) {
-      set团队TerminalActive(prev => ({ ...prev, [paneId]: clean }));
-      return;
-    }
-    setLoadedTtyds(prev => {
-      const next = new Set(prev);
-      next.add(clean);
-      return next;
-    });
-    set团队TerminalChildren(prev => {
-      const current = prev[paneId] || [];
-      if (current.includes(clean)) return prev;
-      return { ...prev, [paneId]: [...current, clean] };
-    });
     set团队TerminalActive(prev => ({ ...prev, [paneId]: clean }));
+  }, [paneId]);
+  const locatePaneInCanvas = useCallback((targetPaneId: string) => {
+    const clean = targetPaneId.replace(/:.*$/, '');
+    if (!clean) return;
+    set团队TerminalActive(prev => ({ ...prev, [paneId]: clean }));
+    setCanvasLocateRequest({ paneId: clean, nonce: Date.now(), zoomToActual: true });
   }, [paneId]);
   useEffect(() => {
     if (!token || !settingsTargetPaneId || settingsTargetPaneId === paneId || paneDetails[settingsTargetPaneId]) return;
@@ -342,57 +440,24 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useEffect(() => {
     document.title = `${topBarTitle} (${topBarPaneId}) | CiCy Code`;
   }, [topBarPaneId, topBarTitle]);
+  const trialExpiresMs = useMemo(() => resolveTrialExpiresMs(trialExpiresAtEpoch, trialExpiresAt), [trialExpiresAt, trialExpiresAtEpoch]);
+  const isTrialUser = isPro === false;
+  const isProUser = isPro === true;
+  const showTrialUpgrade = trialExpiresMs !== null && (isTrialUser || isProUser);
   useEffect(() => {
-    if (!isEditingTopBarTitle) setTopBarTitleDraft(topBarTitle);
-  }, [isEditingTopBarTitle, topBarTitle]);
-  useEffect(() => {
-    setIsEditingTopBarTitle(false);
-    setSavingTopBarTitle(false);
-    setTopBarTitleDraft(topBarTitle);
-  }, [topBarPaneId, topBarTitle]);
-  useEffect(() => {
-    if (!isEditingTopBarTitle) return;
-    requestAnimationFrame(() => {
-      topBarTitleInputRef.current?.focus();
-      topBarTitleInputRef.current?.select();
-    });
-  }, [isEditingTopBarTitle, topBarPaneId]);
-
-  const cancelTopBarTitleEdit = useCallback(() => {
-    if (savingTopBarTitle) return;
-    setIsEditingTopBarTitle(false);
-    setTopBarTitleDraft(topBarTitle);
-  }, [savingTopBarTitle, topBarTitle]);
-
-  const startTopBarTitleEdit = useCallback(() => {
-    if (savingTopBarTitle) return;
-    setTopBarTitleDraft(topBarTitle);
-    setIsEditingTopBarTitle(true);
-  }, [savingTopBarTitle, topBarTitle]);
-
-  const commitTopBarTitle = useCallback(async () => {
-    if (!isEditingTopBarTitle || topBarTitleCommitRef.current) return;
-    const nextTitle = topBarTitleDraft.trim();
-    if (!nextTitle || nextTitle === topBarTitle) {
-      setTopBarTitleDraft(topBarTitle);
-      setIsEditingTopBarTitle(false);
-      return;
-    }
-    topBarTitleCommitRef.current = true;
-    setSavingTopBarTitle(true);
-    try {
-      await apiService.updatePane(topBarPaneId, { title: nextTitle });
-      applyPanePatch(topBarPaneId, { title: nextTitle });
-    } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '错误：标题修改失败' }));
-      setTopBarTitleDraft(topBarTitle);
-    } finally {
-      topBarTitleCommitRef.current = false;
-      setSavingTopBarTitle(false);
-      setIsEditingTopBarTitle(false);
-    }
-  }, [applyPanePatch, isEditingTopBarTitle, topBarPaneId, topBarTitle, topBarTitleDraft]);
-
+    if (!isTrialUser || trialExpiresMs === null) return;
+    setCountdownNowMs(Date.now());
+    const timer = window.setInterval(() => setCountdownNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [isTrialUser, trialExpiresMs]);
+  const trialCountdown = useMemo(() => {
+    if (trialExpiresMs === null) return '';
+    return formatDuration(trialExpiresMs - countdownNowMs);
+  }, [countdownNowMs, trialExpiresMs]);
+  const trialExpireAtLabel = useMemo(() => {
+    if (trialExpiresMs === null) return '';
+    return formatDateTime(trialExpiresMs);
+  }, [trialExpiresMs]);
   const rightContent = (
     <div data-id="right-content" className="h-full flex flex-col relative">
       <header data-id="top-bar" className="h-12 border-b border-[var(--vsc-border)] bg-[#0A0A0A] flex items-center justify-between px-4 shrink-0 z-10">
@@ -407,79 +472,52 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <Home className="w-3.5 h-3.5" />
             </button>
           )}
-          {isEditingTopBarTitle ? (
-            <input
-              ref={topBarTitleInputRef}
-              data-id="agent-title-input"
-              value={topBarTitleDraft}
-              onChange={(e) => setTopBarTitleDraft(e.target.value)}
-              onBlur={() => { void commitTopBarTitle(); }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  void commitTopBarTitle();
-                } else if (e.key === 'Escape') {
-                  e.preventDefault();
-                  cancelTopBarTitleEdit();
-                }
-              }}
-              disabled={savingTopBarTitle}
-              className="h-7 w-[180px] max-w-[180px] rounded border border-blue-500/40 bg-white/[0.08] px-2 text-sm font-medium text-zinc-100 outline-none"
-            />
-          ) : (
-            <div className="relative max-w-[180px] min-w-0 shrink-0 group">
-              <span
-                data-id="agent-title"
-                onDoubleClick={startTopBarTitleEdit}
-                className="block truncate rounded bg-white/[0.12] px-2 py-0.5 pr-7 text-sm font-medium text-zinc-100 cursor-text"
-                title="双击重命名"
-              >
-                {topBarTitle}
-              </span>
+          {showTrialUpgrade && (
+            <div data-id="top-bar-trial-upgrade" className="min-w-0 flex items-center gap-2 rounded-md border border-amber-400/25 bg-amber-400/10 px-2 py-1">
+              {isProUser ? (
+                <>
+                  <span
+                    data-id="top-bar-pro-badge"
+                    className="rounded border border-emerald-300/40 bg-emerald-300/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-200"
+                  >
+                    PRO
+                  </span>
+                  <span className="text-[11px] text-amber-100 font-mono whitespace-nowrap">
+                    到期时间 {trialExpireAtLabel}
+                  </span>
+                </>
+              ) : (
+                <span className="text-[11px] text-amber-100 font-mono whitespace-nowrap">
+                  试用剩余 {trialCountdown}
+                </span>
+              )}
               <button
                 type="button"
-                data-id="agent-title-edit"
-                onClick={startTopBarTitleEdit}
-                className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-zinc-500 opacity-0 transition-opacity cursor-pointer hover:text-zinc-200 group-hover:opacity-100"
-                title="编辑标题"
+                data-id="top-bar-upgrade-btn"
+                onClick={() => window.open(UPGRADE_URL, '_blank', 'noopener,noreferrer')}
+                className="shrink-0 rounded bg-amber-400/80 px-2 py-0.5 text-[10px] font-semibold text-black hover:bg-amber-300 transition-colors"
               >
-                <Pencil className="w-3 h-3" />
+                我要升级
               </button>
             </div>
-          )}
-          <span data-id="pane-id-badge" className="text-xs font-mono text-zinc-600 bg-white/[0.03] px-2 py-1 rounded shrink-0">{topBarPaneId}</span>
-          {!topBarIsApiOnlyRuntime && (
-            <button
-              type="button"
-              onClick={() => handleCodeServiceOpen(topBarWorkspace)}
-              className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0"
-              title="代码服务"
-            >
-              {floatingCodeOpen ? (
-                <FolderOpen className="w-3.5 h-3.5" />
-              ) : (
-                <Folder className="w-3.5 h-3.5" />
-              )}
-            </button>
-          )}
-          {!isApiOnlyRuntime && isOpenClawPane && (
-            <button
-              type="button"
-              onClick={handleOpenClawOpen}
-              className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0"
-              title="OpenClaw"
-            >
-              <span className="text-[13px] leading-none" aria-label="OpenClaw">🦞</span>
-            </button>
           )}
         </div>
         <div data-id="top-bar-center" className="flex items-center justify-center w-1/3" />
         <div data-id="top-bar-right" className="flex items-center justify-end w-1/3 gap-3">
-          <NetworkSignal latency={netLatency} />
+          <SystemResourceMonitor token={token} />
+          <NetworkSignal latency={netLatency} connected={chatWsConnected} />
+          <button
+            data-id="top-bar-github-issues"
+            onClick={() => window.open(GITHUB_ISSUES_URL, '_blank', 'noopener,noreferrer')}
+            className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"
+            title="GitHub Issues"
+          >
+            <Github className="w-3.5 h-3.5" />
+          </button>
           <button onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 令牌"><Key className="w-3.5 h-3.5" /></button>
           <button onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 服务器"><Server className="w-3.5 h-3.5" /></button>
           <button onClick={() => window.dispatchEvent(new Event('open-devtools-panel'))} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="开发工具"><Bug className="w-3.5 h-3.5" /></button>
-          <span id="version" className="text-[10px] font-mono text-zinc-600">1.0.7</span>
+          <span id="version" className="text-[10px] font-mono text-zinc-600">1.0.18</span>
           {contextUsage != null && (
             <div data-id="context-usage" className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/[0.02]">
               <div data-id="context-bar" className="w-12 h-1 rounded-full bg-white/[0.04] overflow-hidden">
@@ -509,23 +547,29 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>
         <div data-id="cli-tab" className="absolute inset-0 flex" style={{ display: mainTab === 'cli' ? 'flex' : 'none' }}>
           <div data-id="cli-terminal-area" className="w-full h-full relative bg-black">
-            {!isApiOnlyRuntime ? current团队Children.length > 0 ? (
-              <div className="absolute inset-0 bg-black">
-                {[...loadedTtyds].map(id => (
-                  <div key={id} className="absolute inset-0" style={{ display: currentTerminalTabs.includes(id) && id === current团队Active ? 'block' : 'none' }}>
-                    <WebFrame src={urls.ttydOpen(id, token!)} className="w-full h-full border-0 bg-black" title={`terminal-${id}`} />
-                  </div>
-                ))}
-              </div>
-            ) : [...loadedTtyds].map(id => (
-              <div key={id} className="absolute inset-0" style={{ display: id === paneId ? 'block' : 'none' }}>
-                <WebFrame src={urls.ttydOpen(id, token!)} className="w-full h-full border-0 bg-black" title={`terminal-${id}`} />
-              </div>
-            )) : (
-              <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500" data-id="workspace-api-only-terminal-empty">
-                Cloud Run / 仅 API 节点不支持 ttyd 终端
-              </div>
-            )}
+            <AgentCanvas
+              scopeId={paneId}
+              items={buildCanvasItems({
+                paneId,
+                token,
+                canvasPaneIds,
+                agents,
+                boundAgents,
+                paneDetails,
+                pollStatuses,
+                agentDetail,
+              })}
+              activePaneId={current团队Active}
+              locateRequest={canvasLocateRequest}
+              onActivePaneIdChange={(targetPaneId) => set团队TerminalActive(prev => ({ ...prev, [paneId]: targetPaneId }))}
+              onOpenCodeServicePane={(_targetPaneId, workspace) => handleCodeServiceOpen(workspace)}
+              onOpenOpenClaw={handleOpenClawOpen}
+              onRenamePaneTitle={handleRenamePaneTitle}
+              onOpenSettingsPane={(targetPaneId) => {
+                set团队TerminalActive(prev => ({ ...prev, [paneId]: targetPaneId }));
+                setSettingsOpen(true);
+              }}
+            />
           </div>
         </div>
       </div>
@@ -535,6 +579,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useDevRegister('Workspace', {
     paneId: fullPaneId, title, status, contextUsage, mouseMode, isRestarting,
     agentDetail, netLatency,
+    trialExpiresAt,
+    trialExpiresAtEpoch,
+    isPro,
+    trialCountdown,
+    trialExpireAtLabel,
+    isTrialUser,
+    isProUser,
+    showTrialUpgrade,
     agentsCount: agents.length,
     agents: agents.map((a: any) => ({ pane_id: a.pane_id, title: a.title, status: a.status, active: a.active })),
     leftPanel: leftActive, floatingCodeOpen, activeWinIdx,
@@ -558,13 +610,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       </div>
 
       {/* Main */}
-      <div data-id="main-area" ref={mainAreaRef} className="flex-1 flex flex-col min-w-0">
+      <div data-id="main-area" className="flex-1 flex flex-col min-w-0">
         {/* Content */}
         <main data-id="content-area" className="flex-1 relative overflow-hidden">
-          <Group id="main-layout" orientation="horizontal" groupRef={groupRef} defaultLayout={leftActive ? (panelSizes ?? undefined) : { 'right-panel': 100 }} onLayoutChanged={onPanelLayout}>
+          <div data-id="main-layout" className="flex h-full min-w-0">
             {leftActive ? (
-              <>
-                <Panel id="left-panel" defaultSize={`${LEFT_PANEL_WIDTH}px`} minSize={`${LEFT_PANEL_WIDTH}px`} groupResizeBehavior="preserve-pixel-size">
+              <div
+                data-testid="left-panel"
+                data-id="left-panel"
+                className="h-full w-[320px] min-w-[320px] max-w-[320px] shrink-0"
+              >
                 <div data-id="left-panel-wrap" className="h-full flex flex-col bg-[#0A0A0A] border-r border-[var(--vsc-border)] relative z-[130]">
                   <div data-id="left-panel-header" className="h-12 border-b border-[var(--vsc-border)] flex items-center px-2 bg-[#0e0e0e] shrink-0 gap-1">
                     {leftActive === 'agents' ? <>
@@ -599,7 +654,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                           bindings={boundAgents}
                           statuses={pollStatuses}
                           onOpenInCurrentPane={openPaneInCurrentTerminal}
-                          openedPaneIds={current团队Children}
+                          onLocatePane={locatePaneInCanvas}
+                          openedPaneIds={canvasPaneIds.filter(id => id !== paneId)}
                           activePaneId={current团队Active}
                           onRefreshPanes={refreshPanes}
                           onRefreshPoll={refreshPoll}
@@ -616,14 +672,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     )}
                   </div>
                 </div>
-                </Panel>
-                <Separator className="w-1 bg-white/[0.02] hover:bg-blue-500/30 active:bg-blue-500/50 transition-colors cursor-col-resize" />
-              </>
+              </div>
             ) : null}
-            <Panel id="right-panel" defaultSize={leftActive ? undefined : 100} minSize={30}>
+            <div data-testid="right-panel" data-id="right-panel" className="min-w-0 flex-1">
               {rightContent}
-            </Panel>
-          </Group>
+            </div>
+          </div>
         </main>
       </div>
 
@@ -664,7 +718,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         <FloatingCodeWindow
           open={floatingCodeOpen}
           src={codeServerSrc}
-          folderLabel={codeFolder.replace(config.hostHome, '~')}
+          folderLabel={toTildePath(codeFolder)}
           storageScopeId={initialPaneIdRef.current}
           onNavigate={navigateToFolder}
           onClose={() => setFloatingCodeOpen(false)}
@@ -721,6 +775,8 @@ function normalizeAgentType(agentType?: string) {
     case 'claude code':
     case 'claude-code':
       return 'claude';
+    case 'cicy':
+      return 'cicy';
     case 'opencode':
     case 'open code':
     case 'open-code':
@@ -728,6 +784,107 @@ function normalizeAgentType(agentType?: string) {
     default:
       return '';
   }
+}
+
+function getPaneStatus(statuses: Record<string, any>, paneId: string) {
+  return statuses[`${paneId}:main.0`] || statuses[paneId] || {};
+}
+
+function resolvePaneMeta({
+  paneId,
+  agents,
+  boundAgents,
+  paneDetails,
+  pollStatuses,
+  agentDetail,
+}: {
+  paneId: string;
+  agents: any[];
+  boundAgents: any[];
+  paneDetails: Record<string, any>;
+  pollStatuses: Record<string, any>;
+  agentDetail: any;
+}) {
+  const activePaneShortId = String(agentDetail?.pane_id || '').replace(/:.*$/, '');
+  const detail = paneDetails[paneId] || (paneId === activePaneShortId ? agentDetail : null);
+  const binding = boundAgents.find((item: any) => String(item?.name || item?.pane_id || '').replace(/:.*$/, '') === paneId);
+  const agent = agents.find((item: any) => String(item?.pane_id || item?.id || '').replace(/:.*$/, '') === paneId);
+  const status = getPaneStatus(pollStatuses, paneId);
+  return {
+    detail,
+    binding,
+    agent,
+    status,
+    title: detail?.title || binding?.title || status?.title || agent?.title || paneId,
+    agentType: detail?.agent_type || agent?.agent_type,
+    machineLabel: binding?.instance_label || binding?.machine_label || agent?.machine_label || agent?.instance_label || '',
+    contextUsage: status?.contextUsage ?? null,
+    workspace: detail?.workspace || agent?.workspace || `~/workers/${paneId}`,
+    isApiOnly: !!(detail && detail.capabilities?.supports_tmux === false),
+  };
+}
+
+function buildCanvasItems({
+  paneId,
+  token,
+  canvasPaneIds,
+  agents,
+  boundAgents,
+  paneDetails,
+  pollStatuses,
+  agentDetail,
+}: {
+  paneId: string;
+  token: string | null;
+  canvasPaneIds: string[];
+  agents: any[];
+  boundAgents: any[];
+  paneDetails: Record<string, any>;
+  pollStatuses: Record<string, any>;
+  agentDetail: any;
+}): AgentCanvasItem[] {
+  return canvasPaneIds.map((targetPaneId) => {
+    const meta = resolvePaneMeta({ paneId: targetPaneId, agents, boundAgents, paneDetails, pollStatuses, agentDetail });
+    return {
+      paneId: targetPaneId,
+      title: meta.title,
+      agentType: meta.agentType,
+      status: meta.status?.status,
+      contextUsage: meta.contextUsage,
+      machineLabel: meta.machineLabel,
+      ttydSrc: token && !meta.isApiOnly ? urls.ttydOpen(targetPaneId, token) : '',
+      workspace: meta.workspace,
+      isPrimary: targetPaneId === paneId,
+      isApiOnly: meta.isApiOnly,
+    };
+  });
+}
+
+function buildCommandTargets({
+  paneId,
+  canvasPaneIds,
+  agents,
+  boundAgents,
+  paneDetails,
+  pollStatuses,
+  agentDetail,
+}: {
+  paneId: string;
+  canvasPaneIds: string[];
+  agents: any[];
+  boundAgents: any[];
+  paneDetails: Record<string, any>;
+  pollStatuses: Record<string, any>;
+  agentDetail: any;
+}) {
+  return canvasPaneIds.map((targetPaneId) => {
+    const meta = resolvePaneMeta({ paneId: targetPaneId, agents, boundAgents, paneDetails, pollStatuses, agentDetail });
+    return {
+      paneId: targetPaneId,
+      title: meta.title,
+      status: meta.status?.status || (targetPaneId === paneId ? 'idle' : ''),
+    };
+  });
 }
 
 function AgentListAvatar({ agentType, title }: { agentType?: string; title: string }) {
@@ -759,9 +916,10 @@ function AgentListAvatar({ agentType, title }: { agentType?: string; title: stri
   }
 
   const iconMap: Record<string, { label: string; src: string; className?: string }> = {
-    codex: { label: 'Codex', src: '/assets/logos/openai.svg' },
-    claude: { label: 'Claude', src: '/assets/logos/claude-symbol.svg' },
-    opencode: { label: 'OpenCode', src: '/assets/logos/opencode.svg', className: 'h-7 w-7' },
+    codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg') },
+    claude: { label: 'Claude', src: assetUrl('/assets/logos/claude-symbol.svg') },
+    cicy: { label: 'CiCy', src: 'https://cicy-ai.com/logo.svg' },
+    opencode: { label: 'OpenCode', src: assetUrl('/assets/logos/opencode.svg'), className: 'h-7 w-7' },
   };
   const icon = iconMap[normalizedAgentType];
   if (!icon) return null;
@@ -793,6 +951,14 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
     document.addEventListener('pointerdown', closeMenu);
     return () => document.removeEventListener('pointerdown', closeMenu);
   }, []);
+  useDevRegister('AgentDrawer', {
+    paneId,
+    search,
+    filteredCount: agents.length,
+    adding,
+    createDialogOpen,
+    openMenuId,
+  });
 
   const handleQuickAddMaster = async (values: CreateAgentValues) => {
     setAdding(true);
@@ -857,8 +1023,8 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
   return (
     <>
       <div data-id="agent-drawer" className="h-full flex flex-col bg-[#0A0A0A]">
-        <div data-id="agent-drawer-body" className="p-3 flex-1 overflow-y-auto bg-[#0A0A0A]">
-          <div data-id="agent-search" className="mb-3 relative flex gap-2">
+        <div data-id="agent-drawer-toolbar" className="px-3 py-2 border-b border-[var(--vsc-border)] shrink-0 bg-[#0A0A0A]">
+          <div data-id="agent-search" className="relative flex gap-2">
             <div className="relative flex-1">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
               <input
@@ -875,6 +1041,8 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
               <Plus className="w-4 h-4" />
             </button>
           </div>
+        </div>
+        <div data-id="agent-drawer-body" className="flex-1 overflow-y-auto bg-[#0A0A0A] px-1.5 py-1.5">
           <div data-id="agent-list" className="space-y-2">
             {filtered.map((agent: any) => {
               const id = agent.pane_id || agent.id;
@@ -989,60 +1157,173 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
   );
 }
 
-function FloatCommand({ paneId, token, agentStatus, mouseMode, showVoiceControl, onToggleVoiceControl }: any) {
-  const W = 420, H = 140;
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState(() => cache.get('terminal_drag_pos', { x: -1, y: -1 }));
-  const [isDragging, setIsDragging] = useState(false);
-  const startRef = useRef({ mx: 0, my: 0, px: 0, py: 0 });
+interface SystemResourceSnapshot {
+  cpu_usage_pct: number;
+  cpu_cores: number;
+  mem_usage_pct: number;
+  mem_total_bytes: number;
+  mem_used_bytes: number;
+  disk_usage_pct: number;
+  disk_total_bytes: number;
+  disk_used_bytes: number;
+  load_1: number;
+  load_5: number;
+  load_15: number;
+  updated_at: string;
+}
+
+function formatResourcePct(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) return '--';
+  return `${Math.round(value)}%`;
+}
+
+function formatResourceBytes(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value) || value <= 0) return '--';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let next = value;
+  let unit = units[0];
+  for (let i = 0; i < units.length; i += 1) {
+    unit = units[i];
+    if (next < 1024 || i === units.length - 1) break;
+    next /= 1024;
+  }
+  const digits = next >= 100 ? 0 : next >= 10 ? 1 : 2;
+  return `${next.toFixed(digits)} ${unit}`;
+}
+
+function formatLoadValue(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) return '--';
+  return value.toFixed(2);
+}
+
+function SystemResourceMonitor({ token }: { token: string | null }) {
+  const [metrics, setMetrics] = useState<SystemResourceSnapshot | null>(null);
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const init = () => {
-      if (!ref.current?.parentElement) return;
-      const pr = ref.current.parentElement.getBoundingClientRect();
-      setPos(p => p.x >= 0 ? p : { x: (pr.width - W) / 2, y: pr.height - H - 36 });
+    const handlePointerDown = (event: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
     };
-    requestAnimationFrame(init);
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, []);
 
-  const onDown = (e: React.MouseEvent) => {
-    if (pos.x < 0) return;
-    startRef.current = { mx: e.clientX, my: e.clientY, px: pos.x, py: pos.y };
-    setIsDragging(true);
-    lockPointer();
-    const onMove = (ev: MouseEvent) => {
-      const parent = ref.current?.parentElement;
-      if (!parent) return;
-      const pr = parent.getBoundingClientRect();
-      setPos({ x: Math.max(0, Math.min(pr.width - W, startRef.current.px + ev.clientX - startRef.current.mx)), y: Math.max(0, Math.min(pr.height - H, startRef.current.py + ev.clientY - startRef.current.my)) });
-    };
-    const onUp = () => { setIsDragging(false); unlockPointer(); window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); setPos(p => { cache.set('terminal_drag_pos', p); return p; }); };
-    window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
-    e.preventDefault();
-  };
+  useEffect(() => {
+    if (!token) return;
+    let dead = false;
+    let reconnectTimer: number | null = null;
+    let ws: WebSocket | null = null;
 
-  if (pos.x < 0) return <div ref={ref} style={{ position: 'absolute', opacity: 0 }} />;
+    const loadSnapshot = async () => {
+      try {
+        const { data } = await apiService.getSystemResources({ timeout: 1500 });
+        if (!dead) setMetrics(data);
+      } catch {}
+    };
+
+    const connect = () => {
+      if (dead) return;
+      const httpBase = config.apiBase || window.location.origin;
+      const proto = httpBase.startsWith('https') ? 'wss' : (window.location.protocol === 'https:' ? 'wss' : 'ws');
+      const base = httpBase ? httpBase.replace(/^https?/, proto) : `${proto}://${window.location.host}`;
+      ws = new WebSocket(`${base}/api/system/resources/ws?token=${encodeURIComponent(token)}`);
+      ws.onmessage = (event) => {
+        try {
+          const next = JSON.parse(event.data);
+          if (!dead) setMetrics(next);
+        } catch {}
+      };
+      ws.onclose = () => {
+        if (dead) return;
+        reconnectTimer = window.setTimeout(connect, 3000);
+      };
+      ws.onerror = () => ws?.close();
+    };
+
+    void loadSnapshot();
+    connect();
+    return () => {
+      dead = true;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  }, [token]);
+
+  const cpu = formatResourcePct(metrics?.cpu_usage_pct);
+  const memory = formatResourcePct(metrics?.mem_usage_pct);
+  const disk = formatResourcePct(metrics?.disk_usage_pct);
+  const updatedAt = metrics?.updated_at ? new Date(metrics.updated_at).toLocaleTimeString('zh-CN', { hour12: false }) : '--';
+
   return (
-    <>
-      {isDragging && <div style={{ position: 'absolute', inset: 0, zIndex: 49 }} />}
-      <div data-id="float-command" ref={ref} onMouseDown={e => { if (e.clientY - ref.current!.getBoundingClientRect().top < 36 && !(e.target as HTMLElement).closest('button, select, input, [role="button"]')) onDown(e); }}
-        style={{ position: 'absolute', left: pos.x, top: pos.y, width: W, height: H, borderRadius: 8, zIndex: 50 }}>
-        <CommandPanel paneTarget={paneId} title="" token={token} panelPosition={{ x: 0, y: 0 }} panelSize={{ width: W, height: H }} readOnly={false} onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}} onChange={() => {}} canSend={agentStatus === 'idle'} agentStatus={agentStatus} mouseMode={mouseMode} showVoiceControl={showVoiceControl} onToggleVoiceControl={onToggleVoiceControl} />
+    <div data-id="system-resource-root" ref={rootRef} className="relative">
+      <div
+        data-id="system-resource-trigger"
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen(prev => !prev)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            setOpen(prev => !prev);
+          }
+        }}
+        className="flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[10px] font-mono text-zinc-500 transition-colors cursor-pointer hover:border-white/[0.12] hover:text-zinc-300"
+        title="系统资源"
+      >
+        <span data-id="system-resource-summary-cpu">CPU {cpu}</span>
+        <span data-id="system-resource-summary-memory">MEM {memory}</span>
+        <span data-id="system-resource-summary-disk">DSK {disk}</span>
+        <ChevronDown data-id="system-resource-chevron" className={`h-3 w-3 transition-transform ${open ? 'rotate-180' : ''}`} />
       </div>
-    </>
+      {open ? (
+        <div
+          data-id="system-resource-dropdown"
+          className="absolute right-0 top-[calc(100%+8px)] z-[180] min-w-[280px] rounded-2xl border border-white/[0.08] bg-[#111113]/98 p-3 shadow-2xl backdrop-blur-xl"
+        >
+          <div data-id="system-resource-dropdown-header" className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-medium text-zinc-300">系统资源</span>
+            <span data-id="system-resource-updated-at" className="text-[10px] font-mono text-zinc-600">{updatedAt}</span>
+          </div>
+          <div data-id="system-resource-grid" className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1.5 text-[11px]">
+            <span data-id="system-resource-label-cpu" className="text-zinc-600">CPU</span>
+            <span data-id="system-resource-value-cpu" className="font-mono text-zinc-300">{cpu} · {metrics?.cpu_cores ?? '--'} cores</span>
+
+            <span data-id="system-resource-label-memory" className="text-zinc-600">内存</span>
+            <span data-id="system-resource-value-memory" className="font-mono text-zinc-300">
+              {memory} · {formatResourceBytes(metrics?.mem_used_bytes)} / {formatResourceBytes(metrics?.mem_total_bytes)}
+            </span>
+
+            <span data-id="system-resource-label-disk" className="text-zinc-600">磁盘</span>
+            <span data-id="system-resource-value-disk" className="font-mono text-zinc-300">
+              {disk} · {formatResourceBytes(metrics?.disk_used_bytes)} / {formatResourceBytes(metrics?.disk_total_bytes)}
+            </span>
+
+            <span data-id="system-resource-label-load" className="text-zinc-600">负载</span>
+            <span data-id="system-resource-value-load" className="font-mono text-zinc-300">
+              {formatLoadValue(metrics?.load_1)} / {formatLoadValue(metrics?.load_5)} / {formatLoadValue(metrics?.load_15)}
+            </span>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
 function NetworkSignal({ latency }: { latency: number | null }) {
   const bars = latency === null ? 0 : latency < 100 ? 4 : latency < 200 ? 3 : latency < 500 ? 2 : 1;
   const color = bars >= 4 ? 'bg-emerald-400' : bars === 3 ? 'bg-emerald-400' : bars === 2 ? 'bg-yellow-400' : bars === 1 ? 'bg-red-400' : 'bg-zinc-700';
-  const label = latency === null ? 'offline' : `${latency}ms`;
+  const label = latency === null ? '离线' : `${latency}ms`;
   return (
-    <div data-id="network-signal" className="flex items-end gap-[2px] h-4 cursor-default" title={label}>
-      {[6, 8, 10, 12].map((h, i) => (
-        <div key={i} className={`w-[3px] rounded-sm transition-colors ${i < bars ? color : 'bg-zinc-800'}`} style={{ height: h }} />
-      ))}
-      <span className="text-[10px] font-mono text-zinc-600 ml-1">{label}</span>
+    <div data-id="network-signal" className="flex items-center gap-1.5 h-4 cursor-default" title={label}>
+      <div data-id="network-signal-bars" className="flex items-end gap-[2px] h-4">
+        {[6, 8, 10, 12].map((h, i) => (
+          <div key={i} data-id={`network-signal-bar-${i + 1}`} className={`w-[3px] rounded-sm transition-colors ${i < bars ? color : 'bg-zinc-800'}`} style={{ height: h }} />
+        ))}
+      </div>
+      <span data-id="network-signal-label" className="mt-[5px] min-w-[28px] text-[10px] leading-none text-zinc-600">{label}</span>
     </div>
   );
 }
