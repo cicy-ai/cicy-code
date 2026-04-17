@@ -5,7 +5,7 @@ import { lockPointer, unlockPointer } from '../lib/pointerLock';
 
 interface FloatingPanelProps {
   children: ReactNode;
-  title: string;
+  title: ReactNode;
   initialPosition?: Position;
   initialSize?: Size;
   minSize?: Size;

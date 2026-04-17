@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Copy, Folder, Pencil, Settings } from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Check, Copy, Folder, History, Pencil } from 'lucide-react';
 import { assetUrl } from '../../lib/assets';
 import config from '../../config';
 import { lockPointer, unlockPointer } from '../../lib/pointerLock';
 import { useDevRegister } from '../../lib/devStore';
 import { emitWebFrameMaskEvent } from '../../lib/webFrameMask';
 import { WebFrame } from '../WebFrame';
+import AgentHistoryOverlay from '../chat/AgentHistoryOverlay';
 
 export interface AgentCanvasItem {
   paneId: string;
@@ -296,7 +297,6 @@ export default function AgentCanvas({
     items
       .filter((item) => item.isPrimary && item.ttydSrc && !item.isApiOnly)
       .map((item) => item.paneId)
-      .slice(0, config.maxLiveTtydWindows)
   ));
   const stageRef = useRef<HTMLDivElement>(null);
   const hadSavedLayoutsRef = useRef(Object.keys(readJSON<Record<string, WindowLayout>>(layoutsKey, {})).length > 0);
@@ -306,6 +306,7 @@ export default function AgentCanvas({
   const locateFrameRef = useRef<number | null>(null);
   const stageScrollResetFrameRef = useRef<number | null>(null);
   const zoomMaskTimerRef = useRef<number | null>(null);
+  const stageSizeRef = useRef<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
     localStorage.setItem(viewportKey, JSON.stringify(viewport));
@@ -332,15 +333,6 @@ export default function AgentCanvas({
       if (index >= 0) ordered.splice(index, 1);
       ordered.push(paneId);
     });
-
-    while (ordered.length > config.maxLiveTtydWindows) {
-      const removableIndex = ordered.findIndex((paneId) => !pinnedPaneIds.includes(paneId));
-      if (removableIndex >= 0) {
-        ordered.splice(removableIndex, 1);
-        continue;
-      }
-      ordered.splice(0, ordered.length - config.maxLiveTtydWindows);
-    }
 
     return ordered;
   }, [items]);
@@ -395,6 +387,42 @@ export default function AgentCanvas({
       }
     };
   }, [resetStageScroll]);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || typeof ResizeObserver === 'undefined') return;
+
+    const syncStageSize = (width: number, height: number) => {
+      const nextWidth = Math.max(0, width);
+      const nextHeight = Math.max(0, height);
+      const previous = stageSizeRef.current;
+      stageSizeRef.current = { width: nextWidth, height: nextHeight };
+      if (!previous) return;
+
+      const deltaWidth = nextWidth - previous.width;
+      const deltaHeight = nextHeight - previous.height;
+      if (Math.abs(deltaWidth) < 1 && Math.abs(deltaHeight) < 1) return;
+
+      setViewport((prev) => ({
+        ...prev,
+        x: prev.x + deltaWidth / 2,
+        y: prev.y + deltaHeight / 2,
+      }));
+    };
+
+    syncStageSize(stage.clientWidth, stage.clientHeight);
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      syncStageSize(entry.contentRect.width, entry.contentRect.height);
+    });
+
+    observer.observe(stage);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     resetStageScroll();
@@ -736,7 +764,7 @@ export default function AgentCanvas({
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.09),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_22%)]" />
       <div
         data-id="agent-canvas-viewport-controls"
-        className="fixed right-4 top-[62px] z-[260] flex items-center gap-2 rounded-full border border-white/[0.08] bg-black/70 px-2 py-1 shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur"
+        className="absolute left-4 top-4 z-[260] flex items-center gap-2 rounded-full border border-white/[0.08] bg-black/70 px-2 py-1 shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur"
       >
         <button
           type="button"
@@ -792,7 +820,7 @@ export default function AgentCanvas({
   );
 }
 
-function AgentCanvasWindow({
+const AgentCanvasWindow = memo(function AgentCanvasWindow({
   item,
   layout,
   active,
@@ -828,6 +856,7 @@ function AgentCanvasWindow({
   const [titleDraft, setTitleDraft] = useState(item.title || item.paneId);
   const [savingTitle, setSavingTitle] = useState(false);
   const [copiedPaneId, setCopiedPaneId] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const copiedPaneTimerRef = useRef<number | null>(null);
   const titleCommitInFlightRef = useRef(false);
@@ -852,6 +881,7 @@ function AgentCanvasWindow({
     active,
     liveMounted,
     shouldRenderLiveView,
+    historyOpen,
   });
 
   useEffect(() => {
@@ -1125,6 +1155,20 @@ function AgentCanvasWindow({
           title="拖拽窗口"
         />
         <div data-id="agent-window-header-right" className="flex items-center gap-1">
+          {!item.isApiOnly ? (
+            <button
+              type="button"
+              data-id="agent-window-history"
+              onClick={(event) => {
+                event.stopPropagation();
+                setHistoryOpen((value) => !value);
+              }}
+              className={`rounded p-1 transition-colors ${historyOpen ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200'}`}
+              title="History"
+            >
+              <History className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
           {onOpenOpenClaw ? (
             <button
               type="button"
@@ -1151,20 +1195,6 @@ function AgentCanvasWindow({
               title="代码服务"
             >
               <Folder className="h-3.5 w-3.5" />
-            </button>
-          ) : null}
-          {onOpenSettings ? (
-            <button
-              type="button"
-              data-id="agent-window-settings"
-              onClick={(event) => {
-                event.stopPropagation();
-                onOpenSettings();
-              }}
-              className="rounded p-1 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
-              title="设置"
-            >
-              <Settings className="h-3.5 w-3.5" />
             </button>
           ) : null}
         </div>
@@ -1197,6 +1227,7 @@ function AgentCanvasWindow({
             暂无可用工作现场
           </div>
         )}
+        <AgentHistoryOverlay paneId={item.paneId} open={historyOpen} onClose={() => setHistoryOpen(false)} />
         <button
           type="button"
           data-id="agent-window-resize-handle"
@@ -1223,4 +1254,33 @@ function AgentCanvasWindow({
 
     </div>
   );
-}
+}, (prev, next) => {
+  return (
+    prev.active === next.active &&
+    prev.liveMounted === next.liveMounted &&
+    prev.zoom === next.zoom &&
+    prev.maskScopeId === next.maskScopeId &&
+    prev.item.paneId === next.item.paneId &&
+    prev.item.title === next.item.title &&
+    prev.item.status === next.item.status &&
+    prev.item.contextUsage === next.item.contextUsage &&
+    prev.item.machineLabel === next.item.machineLabel &&
+    prev.item.ttydSrc === next.item.ttydSrc &&
+    prev.item.workspace === next.item.workspace &&
+    prev.item.isPrimary === next.item.isPrimary &&
+    prev.item.isApiOnly === next.item.isApiOnly &&
+    prev.item.agentType === next.item.agentType &&
+    prev.layout.x === next.layout.x &&
+    prev.layout.y === next.layout.y &&
+    prev.layout.width === next.layout.width &&
+    prev.layout.height === next.layout.height &&
+    prev.layout.zIndex === next.layout.zIndex &&
+    prev.layout.minimized === next.layout.minimized &&
+    prev.onFocus === next.onFocus &&
+    prev.onLayoutChange === next.onLayoutChange &&
+    prev.onOpenCodeService === next.onOpenCodeService &&
+    prev.onOpenOpenClaw === next.onOpenOpenClaw &&
+    prev.onRenameTitle === next.onRenameTitle &&
+    prev.onOpenSettings === next.onOpenSettings
+  );
+});

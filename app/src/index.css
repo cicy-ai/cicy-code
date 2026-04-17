@@ -47,6 +47,14 @@
   .hide-scrollbar::-webkit-scrollbar {
     display: none;
   }
+  .scrollbar-zero {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-zero::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
   .animate-slide-in-left {
     animation: slideInLeft 0.2s ease-out forwards;
   }
@@ -108,6 +116,96 @@
 .chat-markdown a:hover { text-decoration: underline; }
 .chat-markdown strong { color: rgba(255,255,255,0.9); }
 .chat-markdown img { max-width: 100%; border-radius: 6px; margin: 0.4em 0; }
+.inspector-markdown {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.inspector-history-hit {
+  padding: 0 0.12rem;
+  border-radius: 0.22rem;
+  background: rgba(250, 204, 21, 0.28);
+  color: #fff4bf;
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.22);
+}
+.inspector-markdown > :first-child {
+  margin-top: 0;
+}
+.inspector-markdown > :last-child {
+  margin-bottom: 0;
+}
+.inspector-markdown h1, .inspector-markdown h2, .inspector-markdown h3, .inspector-markdown h4 {
+  margin: 0.65em 0 0.3em;
+  line-height: 1.35;
+}
+.inspector-markdown h1 { font-size: 1.05em; }
+.inspector-markdown h2 { font-size: 1em; }
+.inspector-markdown h3, .inspector-markdown h4 { font-size: 0.95em; }
+.inspector-markdown p {
+  margin: 0.3em 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.inspector-markdown ul, .inspector-markdown ol {
+  margin: 0.3em 0;
+  padding-left: 1.15rem;
+}
+.inspector-markdown li {
+  margin: 0.16em 0;
+}
+.inspector-markdown li > p {
+  margin: 0.15em 0;
+}
+.inspector-markdown blockquote {
+  margin: 0.45em 0;
+  padding: 0.5em 0.7em;
+  border-left: 2px solid rgba(96, 165, 250, 0.35);
+  border-radius: 0 8px 8px 0;
+  background: rgba(255,255,255,0.03);
+  color: rgba(255,255,255,0.72);
+}
+.inspector-markdown code {
+  font-size: 0.88em;
+}
+.inspector-markdown pre {
+  margin: 0.45em 0;
+  padding: 0.7em 0.75em;
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 10px;
+  background: #08090c;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  overflow-x: auto;
+}
+.inspector-markdown pre code {
+  display: block;
+  font-size: 0.82em;
+  line-height: 1.55;
+  white-space: pre;
+}
+.inspector-markdown table {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.45em 0;
+  border-spacing: 0;
+}
+.inspector-markdown th, .inspector-markdown td {
+  white-space: nowrap;
+}
+.inspector-markdown hr {
+  margin: 0.65em 0;
+}
+.inspector-markdown a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.inspector-markdown-answer strong {
+  color: #f4f4f5;
+}
+.inspector-markdown-question strong {
+  color: #ffffff;
+}
 
 /* Custom Scrollbar for IDE feel */
 ::-webkit-scrollbar {

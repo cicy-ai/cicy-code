@@ -1,5 +1,18 @@
 .terminal {
     font-family: "DejaVu Sans Mono", "Everson Mono", FreeMono, Menlo, Terminal, monospace, "Apple Symbols";
+    overflow: hidden !important;
+}
+
+.terminal .xterm-viewport {
+    overflow: hidden !important;
+    overflow-y: hidden !important;
+    overflow-x: hidden !important;
+}
+
+.terminal .xterm-screen,
+.terminal .xterm-rows,
+.terminal .xterm-scroll-area {
+    overflow: hidden !important;
 }
 
 .xterm-overlay {

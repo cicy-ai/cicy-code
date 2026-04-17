@@ -11,7 +11,13 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+)
+
+var (
+	containerReportedRegionOnce sync.Once
+	containerReportedRegion     string
 )
 
 func handleRuntimeInstances(w http.ResponseWriter, r *http.Request) {
@@ -34,17 +40,18 @@ func handleRuntimeInstanceRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		InstanceID    string                 `json:"instance_id"`
-		InstanceKey   string                 `json:"instance_key"`
-		InstanceLabel string                 `json:"instance_label"`
-		RuntimeKind   string                 `json:"runtime_kind"`
-		Endpoint      string                 `json:"endpoint"`
-		Token         string                 `json:"token"`
-		Status        string                 `json:"status"`
-		LastSeenAt    string                 `json:"last_seen_at"`
-		Capabilities  map[string]interface{} `json:"capabilities"`
-		Host          string                 `json:"host"`
-		Port          int                    `json:"port"`
+		InstanceID     string                 `json:"instance_id"`
+		InstanceKey    string                 `json:"instance_key"`
+		InstanceLabel  string                 `json:"instance_label"`
+		RuntimeKind    string                 `json:"runtime_kind"`
+		ReportedRegion string                 `json:"reported_region"`
+		Endpoint       string                 `json:"endpoint"`
+		Token          string                 `json:"token"`
+		Status         string                 `json:"status"`
+		LastSeenAt     string                 `json:"last_seen_at"`
+		Capabilities   map[string]interface{} `json:"capabilities"`
+		Host           string                 `json:"host"`
+		Port           int                    `json:"port"`
 	}
 	if err := readBody(r, &req); err != nil {
 		httpErr(w, 400, err.Error())
@@ -109,6 +116,122 @@ func containerRuntimeCapabilities() map[string]interface{} {
 	}
 }
 
+func normalizeReportedRegion(parts ...string) string {
+	seen := map[string]bool{}
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		part = strings.Join(strings.Fields(part), " ")
+		if part == "" || seen[part] {
+			continue
+		}
+		seen[part] = true
+		filtered = append(filtered, part)
+	}
+	return strings.Join(filtered, " ")
+}
+
+func fetchReportedRegionFromJSON(url string, countryKeys []string, regionKeys []string, cityKeys []string) string {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Accept", "application/json,text/plain,*/*")
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return ""
+	}
+	pick := func(keys []string) string {
+		for _, key := range keys {
+			if value, ok := payload[key]; ok {
+				if s, ok := value.(string); ok && strings.TrimSpace(s) != "" {
+					return strings.TrimSpace(s)
+				}
+			}
+		}
+		return ""
+	}
+	return normalizeReportedRegion(pick(countryKeys), pick(regionKeys), pick(cityKeys))
+}
+
+func fetchReportedRegionFromIPIP() string {
+	req, err := http.NewRequest("GET", "https://myip.ipip.net", nil)
+	if err != nil {
+		return ""
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ""
+	}
+	var raw bytes.Buffer
+	if _, err := raw.ReadFrom(resp.Body); err != nil {
+		return ""
+	}
+	text := strings.TrimSpace(raw.String())
+	if text == "" {
+		return ""
+	}
+	marker := "来自于："
+	idx := strings.Index(text, marker)
+	if idx < 0 {
+		marker = "来自于:"
+		idx = strings.Index(text, marker)
+	}
+	if idx < 0 {
+		return ""
+	}
+	return normalizeReportedRegion(strings.TrimSpace(text[idx+len(marker):]))
+}
+
+func detectContainerReportedRegion() string {
+	providers := []func() string{
+		fetchReportedRegionFromIPIP,
+		func() string {
+			return fetchReportedRegionFromJSON(
+				"https://ip.sb/geoip",
+				[]string{"country", "country_name"},
+				[]string{"region", "region_name"},
+				[]string{"city"},
+			)
+		},
+		func() string {
+			return fetchReportedRegionFromJSON(
+				"https://ipapi.co/json/",
+				[]string{"country_name"},
+				[]string{"region"},
+				[]string{"city"},
+			)
+		},
+	}
+	for _, provider := range providers {
+		if region := strings.TrimSpace(provider()); region != "" {
+			return region
+		}
+	}
+	return ""
+}
+
+func containerReportedRegionLabel() string {
+	containerReportedRegionOnce.Do(func() {
+		containerReportedRegion = detectContainerReportedRegion()
+	})
+	return strings.TrimSpace(containerReportedRegion)
+}
+
 func containerRegisterPayload() M {
 	instanceKey := firstNonEmpty(strings.TrimSpace(os.Getenv("CICY_INSTANCE_KEY")), strings.TrimSpace(os.Getenv("K_SERVICE")), "container")
 	instanceLabel := firstNonEmpty(strings.TrimSpace(os.Getenv("CICY_INSTANCE_LABEL")), instanceKey)
@@ -133,17 +256,18 @@ func containerRegisterPayload() M {
 		}
 	}
 	return M{
-		"instance_id":    instanceKey,
-		"instance_key":   instanceKey,
-		"instance_label": instanceLabel,
-		"runtime_kind":   runtimeKind,
-		"endpoint":       publicURL,
-		"token":          apiToken,
-		"status":         "online",
-		"last_seen_at":   lastSeenAt,
-		"host":           endpointHost,
-		"port":           endpointPort,
-		"capabilities":   caps,
+		"instance_id":     instanceKey,
+		"instance_key":    instanceKey,
+		"instance_label":  instanceLabel,
+		"runtime_kind":    runtimeKind,
+		"reported_region": containerReportedRegionLabel(),
+		"endpoint":        publicURL,
+		"token":           apiToken,
+		"status":          "online",
+		"last_seen_at":    lastSeenAt,
+		"host":            endpointHost,
+		"port":            endpointPort,
+		"capabilities":    caps,
 	}
 }
 

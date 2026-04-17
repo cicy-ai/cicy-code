@@ -156,14 +156,15 @@ func handleOpenClawGatewayInfo(w http.ResponseWriter, r *http.Request) {
 
 func aiGatewayProxyBaseURL(provider string) (*url.URL, error) {
 	raw := ""
+	cfg := loadRuntimeAIConfig()
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "openai":
-		raw = strings.TrimSpace(os.Getenv("CICY_API_URL"))
+		raw = strings.TrimSpace(cfg.APIURL)
 		if raw == "" {
 			raw = "http://2000.run:6543/v1"
 		}
 	case "anthropic":
-		raw = strings.TrimSpace(os.Getenv("CICY_ANTHROPIC_URL"))
+		raw = strings.TrimSpace(cfg.AnthropicURL)
 		if raw == "" {
 			raw = "http://2000.run:6543"
 		}
@@ -175,10 +176,7 @@ func aiGatewayProxyBaseURL(provider string) (*url.URL, error) {
 }
 
 func aiGatewayProxyAPIKey() string {
-	if key := strings.TrimSpace(os.Getenv("CICY_API_KEY")); key != "" {
-		return key
-	}
-	return strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	return strings.TrimSpace(loadRuntimeAIConfig().APIKey)
 }
 
 func isLoopbackRemote(addr string) bool {
@@ -252,6 +250,16 @@ func stripOpenAIFingerprintHeaders(req *http.Request) {
 		"X-Stainless-Retry-Count",
 		"X-Stainless-Runtime",
 		"X-Stainless-Runtime-Version",
+	} {
+		req.Header.Del(name)
+	}
+}
+
+func stripAIGatewayClientAuthHeaders(req *http.Request) {
+	for _, name := range []string{
+		"Authorization",
+		"X-API-Key",
+		"Api-Key",
 	} {
 		req.Header.Del(name)
 	}
@@ -387,14 +395,15 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 		req.Header.Set("User-Agent", "cicy-ai-gateway/1.0")
 		req.Header.Set("X_AGENT_SHORT_ID", agentID)
 		req.Header.Set("X-Agent-Short-Id", agentID)
+		stripAIGatewayClientAuthHeaders(req)
 		switch provider {
 		case "openai":
 			stripOpenAIFingerprintHeaders(req)
-			if apiKey := aiGatewayProxyAPIKey(); apiKey != "" && strings.TrimSpace(req.Header.Get("Authorization")) == "" {
+			if apiKey := aiGatewayProxyAPIKey(); apiKey != "" {
 				req.Header.Set("Authorization", "Bearer "+apiKey)
 			}
 		case "anthropic":
-			if apiKey := aiGatewayProxyAPIKey(); apiKey != "" && strings.TrimSpace(req.Header.Get("x-api-key")) == "" {
+			if apiKey := aiGatewayProxyAPIKey(); apiKey != "" {
 				req.Header.Set("x-api-key", apiKey)
 			}
 		}
@@ -442,6 +451,7 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "ai_gateway_proxy_read_body_failed")
 		return
 	}
+	requestBody = agentInspectorRewriteRequestBody(provider, agentID, requestBody)
 	r.Body = io.NopCloser(bytes.NewReader(requestBody))
 	r.GetBody = func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(requestBody)), nil

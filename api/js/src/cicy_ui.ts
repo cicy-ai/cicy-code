@@ -46,14 +46,87 @@ function createAPIHeaders(token: string): { [key: string]: string } {
     return headers;
 }
 
+function ensureTmuxSendSucceeded(payload: any): any {
+    if (!payload || typeof payload !== "object") {
+        return payload;
+    }
+    var errorText = "";
+    if (typeof payload.error === "string" && payload.error.trim()) {
+        errorText = payload.error.trim();
+    } else if (typeof payload.detail === "string" && payload.detail.trim()) {
+        errorText = payload.detail.trim();
+    }
+    if (errorText) {
+        throw createTmuxSendError(errorText, payload);
+    }
+    if (payload.success === false) {
+        throw createTmuxSendError("tmux send failed", payload);
+    }
+    return payload;
+}
+
+function createTmuxSendError(message: string, payload?: any, statusCode?: number, isNetworkError?: boolean): any {
+    var error: any = new Error(message || "request failed");
+    if (typeof statusCode === "number" && isFinite(statusCode)) {
+        error.statusCode = statusCode;
+    }
+    error.isNetworkError = isNetworkError === true;
+    if (payload && typeof payload === "object") {
+        error.detail = typeof payload.detail === "string" ? payload.detail : "";
+        error.paneUpdated = payload.pane_updated === true;
+        if (typeof payload.restore_input === "boolean") {
+            error.restoreInput = payload.restore_input;
+        } else if (error.paneUpdated) {
+            error.restoreInput = false;
+        }
+    }
+    return error;
+}
+
+function clipTracePreview(text: string, maxLen: number): string {
+    var normalized = String(text || "").replace(/\s+/g, " ").trim();
+    if (normalized.length <= maxLen) {
+        return normalized;
+    }
+    return normalized.slice(0, maxLen);
+}
+
+function isWindowsPlatform(): boolean {
+    var nav = window.navigator as Navigator & {
+        userAgentData?: {
+            platform?: string;
+        };
+    };
+    var platform = "";
+    if (nav.userAgentData && typeof nav.userAgentData.platform === "string") {
+        platform = nav.userAgentData.platform;
+    } else if (typeof nav.platform === "string") {
+        platform = nav.platform;
+    } else if (typeof nav.userAgent === "string") {
+        platform = nav.userAgent;
+    }
+    return /win/i.test(platform);
+}
+
+function monoFontStack(): string {
+    if (isWindowsPlatform()) {
+        return '"Cascadia Mono", "Cascadia Code", "Sarasa Mono SC", "Sarasa Term SC", Consolas, monospace';
+    }
+    return '"SF Mono", Menlo, Consolas, monospace';
+}
+
 function installStyles(): void {
     if (document.getElementById("cicy-ttyd-source-style") !== null) {
         return;
     }
 
+    var monoFont = monoFontStack();
     var style = document.createElement("style");
     style.id = "cicy-ttyd-source-style";
     style.textContent = `
+:root {
+  --cp-mono-font: ${monoFont};
+}
 html, body, #terminal, .terminal {
   height: 100% !important;
   width: 100% !important;
@@ -73,7 +146,7 @@ body {
 .terminal {
   font-size: 13px !important;
   color: #b9adad !important;
-  font-family: "DejaVu Sans Mono", "Everson Mono", FreeMono, Menlo, Terminal, monospace, "Apple Symbols";
+  font-family: var(--cp-mono-font);
 }
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -113,7 +186,7 @@ body {
 #cp-loading-text {
   color: rgba(255,255,255,0.5);
   font-size: 13px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--cp-mono-font);
   letter-spacing: 0.3px;
 }
 #cp {
@@ -129,7 +202,7 @@ body {
   z-index: 9999;
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--cp-mono-font);
   box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 0 0.5px rgba(255,255,255,0.08) inset;
   display: flex;
   flex-direction: column;
@@ -164,6 +237,170 @@ body {
 .cp-chip:hover { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.85); }
 .cp-chip-dim { color: rgba(255,255,255,0.4); padding: 3px 6px; }
 .cp-chip-dim:hover { color: rgba(255,255,255,0.7); }
+#cp-sigint {
+  width: 28px;
+  min-width: 28px;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+#cp-enter-key {
+  width: 28px;
+  min-width: 28px;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+#cp-up-key,
+#cp-down-key {
+  width: 28px;
+  min-width: 28px;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+#cp-esc-key {
+  width: 32px;
+  min-width: 32px;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+#cp-backspace-key {
+  width: 32px;
+  min-width: 32px;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+.cp-tooltip-host {
+  position: relative;
+}
+.cp-tooltip-host::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%) translateY(4px);
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(34,37,46,0.97);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.92);
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .12s ease, transform .12s ease;
+}
+.cp-tooltip-host::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 4px);
+  width: 8px;
+  height: 8px;
+  background: rgba(34,37,46,0.97);
+  border-right: 1px solid rgba(255,255,255,0.08);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  transform: translateX(-50%) rotate(45deg);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .12s ease;
+}
+.cp-tooltip-host:hover::after,
+.cp-tooltip-host:hover::before,
+.cp-tooltip-host:focus-visible::after,
+.cp-tooltip-host:focus-visible::before {
+  opacity: 1;
+}
+.cp-tooltip-host:hover::after,
+.cp-tooltip-host:focus-visible::after {
+  transform: translateX(-50%) translateY(0);
+}
+.cp-tooltip-host.cp-tooltip-left::after {
+  left: 0;
+  right: auto;
+  transform: translateX(0) translateY(4px);
+  transform-origin: left bottom;
+  text-align: left;
+}
+.cp-tooltip-host.cp-tooltip-multiline::after {
+  white-space: pre-line;
+  min-width: 164px;
+}
+.cp-tooltip-host.cp-tooltip-left::before {
+  left: 6px;
+  right: auto;
+  transform: translateX(0) rotate(45deg);
+}
+.cp-tooltip-host.cp-tooltip-right::after {
+  left: auto;
+  right: 0;
+  transform: translateX(0) translateY(4px);
+  transform-origin: right bottom;
+  text-align: left;
+}
+.cp-tooltip-host.cp-tooltip-right::before {
+  left: auto;
+  right: 6px;
+  transform: translateX(0) rotate(45deg);
+}
+.cp-tooltip-host.cp-tooltip-left:hover::after,
+.cp-tooltip-host.cp-tooltip-left:focus-visible::after {
+  transform: translateX(0) translateY(0);
+}
+.cp-tooltip-host.cp-tooltip-right:hover::after,
+.cp-tooltip-host.cp-tooltip-right:focus-visible::after {
+  transform: translateX(0) translateY(0);
+}
+.cp-tooltip-host.cp-tooltip-force::after,
+.cp-tooltip-host.cp-tooltip-force::before {
+  opacity: 1;
+}
+.cp-tooltip-host.cp-tooltip-force::after {
+  transform: translateX(-50%) translateY(0);
+}
+.cp-tooltip-host.cp-tooltip-left.cp-tooltip-force::after {
+  transform: translateX(0) translateY(0);
+}
+.cp-tooltip-host.cp-tooltip-right.cp-tooltip-force::after {
+  transform: translateX(0) translateY(0);
+}
+.cp-tooltip-host.cp-tooltip-bottom::after {
+  bottom: auto;
+  top: calc(100% + 8px);
+  transform: translateX(-50%) translateY(-4px);
+  transform-origin: center top;
+}
+.cp-tooltip-host.cp-tooltip-bottom::before {
+  bottom: auto;
+  top: calc(100% + 4px);
+  transform: translateX(-50%) rotate(225deg);
+}
+.cp-tooltip-host.cp-tooltip-bottom.cp-tooltip-right::after {
+  left: auto;
+  right: 0;
+  transform: translateX(0) translateY(-4px);
+  transform-origin: right top;
+}
+.cp-tooltip-host.cp-tooltip-bottom.cp-tooltip-right::before {
+  left: auto;
+  right: 6px;
+  transform: translateX(0) rotate(225deg);
+}
+.cp-tooltip-host.cp-tooltip-bottom:hover::after,
+.cp-tooltip-host.cp-tooltip-bottom:focus-visible::after,
+.cp-tooltip-host.cp-tooltip-bottom.cp-tooltip-force::after {
+  transform: translateX(-50%) translateY(0);
+}
+.cp-tooltip-host.cp-tooltip-bottom.cp-tooltip-right:hover::after,
+.cp-tooltip-host.cp-tooltip-bottom.cp-tooltip-right:focus-visible::after,
+.cp-tooltip-host.cp-tooltip-bottom.cp-tooltip-right.cp-tooltip-force::after {
+  transform: translateX(0) translateY(0);
+}
 .cp-drop {
   display: none;
   position: absolute;
@@ -192,7 +429,7 @@ body {
   height: 28px;
   background: rgba(30,30,30,0.95);
   border-bottom: 1px solid rgba(255,255,255,0.06);
-  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--cp-mono-font);
   padding: 0 4px;
   gap: 0;
 }
@@ -205,6 +442,7 @@ body {
   flex-direction: row;
   align-items: center;
   overflow: visible;
+  font-family: var(--cp-mono-font);
 }
 #cp-win-tabs {
   display: flex;
@@ -229,6 +467,7 @@ body {
   transition: all .1s;
   white-space: nowrap;
   border-right: 1px solid rgba(255,255,255,0.04);
+  overflow: visible;
 }
 .cp-wtab:hover { color: rgba(255,255,255,0.7); background: rgba(255,255,255,0.04); }
 .cp-wtab.active { color: rgba(255,255,255,0.9); background: rgba(255,255,255,0.07); }
@@ -247,8 +486,12 @@ body {
   cursor: pointer;
   display: none;
   transition: all .1s;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  z-index: 3;
 }
-.cp-wtab:hover .cp-wdel { display: block; }
+.cp-wtab:hover .cp-wdel { display: inline-flex; }
 .cp-wtab .cp-wdel:hover { background: rgba(239,68,68,0.8); color: #fff; }
 .fta-btn {
   background: none;
@@ -259,9 +502,18 @@ body {
   width: 100%;
   cursor: pointer;
   transition: color .1s;
-  font-family: inherit;
+  font-family: var(--cp-mono-font);
 }
 .fta-btn:hover { color: rgba(255,255,255,0.7); }
+#cp-win-restart {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
 #cp-win-restart.restarting { color: rgba(59,130,246,0.8); animation: cp-spin .8s linear infinite; }
 #cp-more-menu { z-index: 10001; }
 .cp-drop-item {
@@ -278,6 +530,30 @@ body {
 }
 .cp-drop-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
 .cp-drop-danger:hover { background: rgba(239,68,68,0.15); color: #f87171; }
+#cp-fixed-tooltip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 10002;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(34,37,46,0.97);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.92);
+  font-size: 11px;
+  font-family: var(--cp-mono-font);
+  line-height: 1.2;
+  white-space: nowrap;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity .12s ease, transform .12s ease;
+}
+#cp-fixed-tooltip.open {
+  opacity: 1;
+  transform: translateY(0);
+}
 #cp-model {
   background: rgba(255,255,255,0.05);
   border: none;
@@ -286,7 +562,7 @@ body {
   padding: 6px 10px;
   border-radius: 7px;
   cursor: pointer;
-  font-family: inherit;
+  font-family: var(--cp-mono-font);
   outline: none;
   width: 100%;
 }
@@ -300,7 +576,10 @@ body {
   border-radius: 10px;
   color: #e4e4e7;
   font-size: 13px;
-  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--cp-mono-font) !important;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+  letter-spacing: 0;
   padding: 8px 40px 8px 12px;
   resize: none;
   outline: none;
@@ -356,7 +635,7 @@ body {
   inset: 0;
   z-index: 9998;
   pointer-events: none;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--cp-mono-font);
   background: transparent;
   transition: background .3s;
 }
@@ -443,11 +722,11 @@ function configureTerminal(term: Terminal): void {
     var inner = anyTerm.term;
     if (inner && typeof inner.setOption === "function") {
         try {
-            inner.setOption("scrollback", 1000);
+            inner.setOption("scrollback", 0);
         } catch (_error) {
         }
         try {
-            inner.setOption("fontFamily", "Menlo, Consolas, monospace");
+            inner.setOption("fontFamily", monoFontStack());
         } catch (_error) {
         }
         try {
@@ -609,10 +888,15 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     panel.innerHTML =
         '<div id="cp-bar">' +
             '<div class="cp-bar-l">' +
-                '<button id="cp-sigint" class="cp-chip cp-chip-dim" title="Send tmux Ctrl+C">^C</button>' +
-                '<button id="cp-enter" class="cp-chip cp-chip-dim"></button>' +
+                '<button id="cp-sigint" class="cp-chip cp-chip-dim cp-tooltip-host cp-tooltip-left" data-tooltip="发送 Ctrl+C Event">^C</button>' +
+                '<button id="cp-esc-key" class="cp-chip cp-chip-dim cp-tooltip-host cp-tooltip-left" data-tooltip="发送 Esc Event">Esc</button>' +
+                '<button id="cp-backspace-key" class="cp-chip cp-chip-dim cp-tooltip-host cp-tooltip-left" data-tooltip="发送 Backspace Event">⌫</button>' +
+                '<button id="cp-up-key" class="cp-chip cp-chip-dim cp-tooltip-host cp-tooltip-left" data-tooltip="发送 Up Event">↑</button>' +
+                '<button id="cp-down-key" class="cp-chip cp-chip-dim cp-tooltip-host cp-tooltip-left" data-tooltip="发送 Down Event">↓</button>' +
+                '<button id="cp-enter-key" class="cp-chip cp-chip-dim cp-tooltip-host cp-tooltip-left" data-tooltip="发送 Enter Event">↵</button>' +
             "</div>" +
             '<div class="cp-bar-r">' +
+                '<button id="cp-enter" class="cp-chip cp-chip-dim cp-tooltip-host cp-tooltip-right" data-tooltip="切换发送Prompt方式:Enter/Shit+Enter"></button>' +
                 '<button id="cp-collapse" style="display:none" class="cp-chip cp-chip-dim" title="Collapse">−</button>' +
             "</div>" +
         "</div>" +
@@ -629,8 +913,8 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var fixedTop = document.createElement("div");
     fixedTop.id = "fixed-top-action";
     fixedTop.innerHTML =
-        '<button id="cp-win-add" class="fta-btn" title="New window">+</button>' +
-        '<button id="cp-win-restart" class="fta-btn" title="Restart pane">↻</button>' +
+        '<button id="cp-win-add" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="新加tmux window">+</button>' +
+        '<button id="cp-win-restart" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="重启tmux">↻</button>' +
         '<button id="cp-more" class="fta-btn" title="More" style="display:none">⋯</button>' +
         '<div id="cp-more-menu" class="cp-drop">' +
             '<select id="cp-model" title="Model">' +
@@ -654,6 +938,11 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var input = document.getElementById("cp-input") as HTMLTextAreaElement;
     var sendBtn = document.getElementById("cp-send") as HTMLButtonElement;
     var sigintBtn = document.getElementById("cp-sigint") as HTMLButtonElement;
+    var escKeyBtn = document.getElementById("cp-esc-key") as HTMLButtonElement;
+    var backspaceKeyBtn = document.getElementById("cp-backspace-key") as HTMLButtonElement;
+    var upKeyBtn = document.getElementById("cp-up-key") as HTMLButtonElement;
+    var downKeyBtn = document.getElementById("cp-down-key") as HTMLButtonElement;
+    var enterKeyBtn = document.getElementById("cp-enter-key") as HTMLButtonElement;
     var enterBtn = document.getElementById("cp-enter") as HTMLButtonElement;
     var modelSel = document.getElementById("cp-model") as HTMLSelectElement;
     var moreBtn = document.getElementById("cp-more") as HTMLButtonElement;
@@ -665,10 +954,48 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
 
     var historyKey = "cicy_hist_" + paneId;
     var draftKey = "cicy_draft_" + paneId;
+    var clientTraceKey = "cicy_ttyd_trace_" + paneId;
     var history = storage.get(historyKey, []) as string[];
     var historyIndex = -1;
     var tempDraft = "";
     var enterToSend = storage.get("cicy_enter_to_send", true) as boolean;
+    var sigintDefaultTooltip = sigintBtn.getAttribute("data-tooltip") || "发送 Ctrl+C Event";
+    var sigintConfirmTooltip = "再点一次确认发送 Ctrl+C\n可能会终止当前操作\n如果不想操作，继续等待即可";
+
+    function writeClientTrace(eventName: string, meta?: any): void {
+        var entry: any = {
+            event: eventName,
+            pane_id: paneId,
+            path: window.location.pathname,
+            ts_client: new Date().toISOString(),
+        };
+        if (meta && typeof meta === "object") {
+            Object.keys(meta).forEach(function(key: string): void {
+                entry[key] = meta[key];
+            });
+        }
+        try {
+            var existing = storage.get(clientTraceKey, []) as any[];
+            existing.push(entry);
+            if (existing.length > 200) {
+                existing = existing.slice(existing.length - 200);
+            }
+            storage.set(clientTraceKey, existing);
+        } catch (_error) {
+        }
+
+        var fetchImpl = (window as any).fetch;
+        if (typeof fetchImpl === "function") {
+            fetchImpl("/api/tmux/client-trace", {
+                method: "POST",
+                headers: apiHeaders,
+                body: JSON.stringify(entry),
+                keepalive: true
+            }).catch(function(): void {});
+            return;
+        }
+        webtty.requestAPI("POST", "/api/tmux/client-trace", entry, apiHeaders).catch(function(): void {});
+    }
 
     function sendInput(value: string): boolean {
         var ok = webtty.sendInput(value);
@@ -688,16 +1015,33 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
 
     function sendHTTP(command: string): Promise<any> {
         if (!webtty.isConnectionOpen()) {
+            writeClientTrace("cp-send-http-skipped-closed", {
+                command_len: command.length,
+                command_preview: clipTracePreview(command, 160),
+            });
             flashButton(sendBtn);
             var PromiseCtor = (window as any).Promise;
             return PromiseCtor.resolve(null);
         }
         var fetchImpl = (window as any).fetch;
+        writeClientTrace("cp-send-http-request", {
+            command_len: command.length,
+            command_preview: clipTracePreview(command, 160),
+            has_fetch: typeof fetchImpl === "function",
+        });
         if (typeof fetchImpl !== "function") {
             return webtty.requestAPI("POST", "/api/tmux/send", {
                 pane_id: paneId,
                 text: command
-            }, apiHeaders);
+            }, apiHeaders).then(function(payload: any): any {
+                writeClientTrace("cp-send-http-response", {
+                    mode: "webtty-request-api",
+                    success: payload && payload.success,
+                    error: payload && payload.error,
+                    detail: payload && payload.detail,
+                });
+                return ensureTmuxSendSucceeded(payload);
+            });
         }
         return fetchImpl("/api/tmux/send", {
             method: "POST",
@@ -708,19 +1052,99 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             })
         }).then(function(response: any): Promise<any> {
             if (!response || !response.ok) {
-                throw new Error("request failed");
+                var status = response ? response.status : 0;
+                var statusText = response ? response.statusText : "";
+                var contentType = response && response.headers && response.headers.get ? response.headers.get("content-type") : "";
+                if (contentType && contentType.indexOf("application/json") >= 0 && response && response.json) {
+                    return response.json().then(function(payload: any): any {
+                        writeClientTrace("cp-send-http-bad-status", {
+                            status: status,
+                            status_text: statusText,
+                            detail: payload && payload.detail,
+                            pane_updated: payload && payload.pane_updated === true,
+                            restore_input: payload && payload.restore_input,
+                        });
+                        throw createTmuxSendError((payload && payload.detail) || "request failed", payload, status);
+                    });
+                }
+                writeClientTrace("cp-send-http-bad-status", {
+                    status: status,
+                    status_text: statusText,
+                });
+                throw createTmuxSendError("request failed", null, status);
+            }
+            var contentType = response.headers && response.headers.get ? response.headers.get("content-type") : "";
+            if (contentType && contentType.indexOf("application/json") >= 0) {
+                return response.json().then(function(payload: any): any {
+                    writeClientTrace("cp-send-http-response", {
+                        mode: "fetch-json",
+                        success: payload && payload.success,
+                        error: payload && payload.error,
+                        detail: payload && payload.detail,
+                    });
+                    return ensureTmuxSendSucceeded(payload);
+                });
+            }
+            return response.text().then(function(text: string): string {
+                writeClientTrace("cp-send-http-response", {
+                    mode: "fetch-text",
+                    text_len: text.length,
+                    text_preview: clipTracePreview(text, 160),
+                });
+                return text;
+            });
+        }).catch(function(error: any): any {
+            if (error && (typeof error.statusCode === "number" || error.paneUpdated === true || error.restoreInput === false || error.isNetworkError === true)) {
+                throw error;
+            }
+            throw createTmuxSendError(error && error.message ? error.message : "network request failed", null, 0, true);
+        });
+    }
+
+    function sendTmuxKey(key: string): Promise<any> {
+        if (!webtty.isConnectionOpen()) {
+            writeClientTrace("cp-send-key-skipped-closed", { key: key });
+            flashButton(sendBtn);
+            var PromiseCtor = (window as any).Promise;
+            return PromiseCtor.resolve(null);
+        }
+        var fetchImpl = (window as any).fetch;
+        writeClientTrace("cp-send-key-request", { key: key, has_fetch: typeof fetchImpl === "function" });
+        if (typeof fetchImpl !== "function") {
+            return webtty.requestAPI("POST", "/api/tmux/send-keys", {
+                win_id: paneId,
+                keys: key
+            }, apiHeaders);
+        }
+        return fetchImpl("/api/tmux/send-keys", {
+            method: "POST",
+            headers: apiHeaders,
+            body: JSON.stringify({
+                win_id: paneId,
+                keys: key
+            })
+        }).then(function(response: any): Promise<any> {
+            if (!response || !response.ok) {
+                var status = response ? response.status : 0;
+                var statusText = response ? response.statusText : "";
+                throw createTmuxSendError("send key failed", { detail: statusText }, status);
             }
             var contentType = response.headers && response.headers.get ? response.headers.get("content-type") : "";
             if (contentType && contentType.indexOf("application/json") >= 0) {
                 return response.json();
             }
             return response.text();
+        }).catch(function(error: any): any {
+            if (error && (typeof error.statusCode === "number" || error.isNetworkError === true)) {
+                throw error;
+            }
+            throw createTmuxSendError(error && error.message ? error.message : "network request failed", null, 0, true);
         });
     }
 
     function updateEnterButton(): void {
         enterBtn.textContent = enterToSend ? "⏎" : "⇧⏎";
-        enterBtn.title = enterToSend ? "Enter = Send" : "Shift+Enter = Send";
+        enterBtn.setAttribute("data-tooltip", enterToSend ? "发送Prompt方式:Enter" : "发送Prompt方式:Shift+Enter");
     }
 
     function addHistory(command: string): void {
@@ -731,19 +1155,35 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     }
 
     function doSend(value?: string): void {
-        var command = (value || input.value).trim();
-        if (!command) {
+        var command = value !== undefined ? value : input.value;
+        if (!command || !command.trim()) {
             return;
         }
+        writeClientTrace("cp-do-send", {
+            command_len: command.length,
+            command_preview: clipTracePreview(command, 160),
+            enter_to_send: enterToSend,
+        });
         addHistory(command);
         historyIndex = -1;
         tempDraft = "";
         var prev = input.value;
         input.value = "";
         storage.set(draftKey, "");
-        sendHTTP(command).catch(function(): void {
-            input.value = prev;
-            storage.set(draftKey, prev);
+        sendHTTP(command).catch(function(error: any): void {
+            var shouldRestore = !!(error && error.isNetworkError === true);
+            writeClientTrace("cp-do-send-error", {
+                message: error && error.message ? error.message : String(error || ""),
+                status: error && typeof error.statusCode === "number" ? error.statusCode : 0,
+                pane_updated: !!(error && error.paneUpdated === true),
+                restore_input: shouldRestore,
+                command_len: command.length,
+                command_preview: clipTracePreview(command, 160),
+            });
+            if (shouldRestore) {
+                input.value = prev;
+                storage.set(draftKey, prev);
+            }
             flashButton(sendBtn);
         });
     }
@@ -804,7 +1244,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         }
         var activeIndex = pendingExists ? optimisticActiveIndex : serverActiveIndex;
         winTabs.innerHTML = windows.map(function(win: any): string {
-            var close = win.index === "0" ? "" : '<span class="cp-wdel" data-idx="' + win.index + '">✕</span>';
+            var close = win.index === "0" ? "" : '<span class="cp-wdel" data-idx="' + win.index + '" data-tooltip="关闭tmux window">✕</span>';
             var active = String(win.index) === activeIndex ? " active" : "";
             return '<button class="cp-wtab' + active + '" data-idx="' + win.index + '">' + win.name + "." + win.index + close + "</button>";
         }).join("");
@@ -827,6 +1267,78 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     input.value = storage.get(draftKey, "");
     updateEnterButton();
 
+    var fixedTooltip = document.createElement("div");
+    fixedTooltip.id = "cp-fixed-tooltip";
+    document.body.appendChild(fixedTooltip);
+
+    function hideFixedTooltip(): void {
+        fixedTooltip.classList.remove("open");
+    }
+
+    function showFixedTooltip(target: HTMLElement, text: string): void {
+        if (!text) {
+            hideFixedTooltip();
+            return;
+        }
+        fixedTooltip.textContent = text;
+        fixedTooltip.classList.add("open");
+        var rect = target.getBoundingClientRect();
+        var tipRect = fixedTooltip.getBoundingClientRect();
+        var left = rect.right - tipRect.width;
+        if (left < 8) {
+            left = 8;
+        }
+        var top = rect.bottom + 10;
+        if (left + tipRect.width > window.innerWidth - 8) {
+            left = Math.max(8, window.innerWidth - tipRect.width - 8);
+        }
+        if (top + tipRect.height > window.innerHeight - 8) {
+            top = Math.max(8, rect.top - tipRect.height - 10);
+        }
+        fixedTooltip.style.left = left + "px";
+        fixedTooltip.style.top = top + "px";
+    }
+
+    escKeyBtn.addEventListener("click", function(event: MouseEvent): void {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!sendInput("\x1b")) {
+            flashButton(escKeyBtn);
+        }
+    });
+
+    backspaceKeyBtn.addEventListener("click", function(event: MouseEvent): void {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!sendInput("\x7f")) {
+            flashButton(backspaceKeyBtn);
+        }
+    });
+
+    upKeyBtn.addEventListener("click", function(event: MouseEvent): void {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!sendInput("\x1b[A")) {
+            flashButton(upKeyBtn);
+        }
+    });
+
+    downKeyBtn.addEventListener("click", function(event: MouseEvent): void {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!sendInput("\x1b[B")) {
+            flashButton(downKeyBtn);
+        }
+    });
+
+    enterKeyBtn.addEventListener("click", function(event: MouseEvent): void {
+        event.preventDefault();
+        event.stopPropagation();
+        sendTmuxKey("Enter").catch(function(): void {
+            flashButton(enterKeyBtn);
+        });
+    });
+
     enterBtn.addEventListener("click", function(): void {
         enterToSend = !enterToSend;
         storage.set("cicy_enter_to_send", enterToSend);
@@ -839,6 +1351,15 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         }
         if (event.key === "Enter" && !event.ctrlKey && !event.metaKey) {
             var shouldSend = enterToSend ? !event.shiftKey : event.shiftKey;
+            writeClientTrace("cp-keydown-enter", {
+                should_send: shouldSend,
+                enter_to_send: enterToSend,
+                shift_key: event.shiftKey,
+                ctrl_key: event.ctrlKey,
+                meta_key: event.metaKey,
+                input_len: input.value.length,
+                input_preview: clipTracePreview(input.value, 160),
+            });
             if (!shouldSend) {
                 return;
             }
@@ -846,17 +1367,10 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             if (input.value.trim()) {
                 doSend();
             } else {
-                sendInput("\r");
+                sendTmuxKey("Enter").catch(function(): void {
+                    flashButton(enterKeyBtn);
+                });
             }
-            return;
-        }
-        if (event.key === "Escape" && !input.value) {
-            sendInput("\x1b");
-            return;
-        }
-        if (event.key === "Backspace" && !input.value) {
-            event.preventDefault();
-            sendInput("\x7f");
             return;
         }
         if (event.key === "ArrowUp" && input.value.substring(0, input.selectionStart).indexOf("\n") === -1) {
@@ -940,14 +1454,21 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         if (closeButton !== null) {
             event.stopPropagation();
             if (closeButton.dataset.confirm) {
+                hideFixedTooltip();
                 apiFetch("DELETE", "", { session: paneId, index: closeButton.dataset.idx }).then(loadWindows);
             } else {
                 var confirmButton = closeButton;
                 confirmButton.dataset.confirm = "1";
                 confirmButton.textContent = "?";
+                confirmButton.setAttribute("data-tooltip", "再点一次确认关闭tmux window");
+                confirmButton.classList.add("cp-confirm");
+                showFixedTooltip(confirmButton, "再点一次确认关闭tmux window");
                 setTimeout(function(): void {
                     delete confirmButton.dataset.confirm;
                     confirmButton.textContent = "✕";
+                    confirmButton.setAttribute("data-tooltip", "关闭tmux window");
+                    confirmButton.classList.remove("cp-confirm");
+                    hideFixedTooltip();
                 }, 2000);
             }
             return;
@@ -972,12 +1493,48 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         }
     });
 
+    winTabs.addEventListener("mouseover", function(event: MouseEvent): void {
+        var target = event.target as Element;
+        var closeButton = target.closest(".cp-wdel") as HTMLElement | null;
+        if (closeButton !== null) {
+            showFixedTooltip(closeButton, closeButton.getAttribute("data-tooltip") || "");
+        }
+    });
+
+    winTabs.addEventListener("mousemove", function(event: MouseEvent): void {
+        var target = event.target as Element;
+        var closeButton = target.closest(".cp-wdel") as HTMLElement | null;
+        if (closeButton !== null) {
+            showFixedTooltip(closeButton, closeButton.getAttribute("data-tooltip") || "");
+        }
+    });
+
+    winTabs.addEventListener("mouseout", function(event: MouseEvent): void {
+        var target = event.target as Element;
+        var closeButton = target.closest(".cp-wdel") as HTMLElement | null;
+        if (closeButton !== null) {
+            var related = event.relatedTarget as Element | null;
+            if (!related || !closeButton.contains(related)) {
+                hideFixedTooltip();
+            }
+        }
+    });
+
     addWindowBtn.addEventListener("click", function(): void {
         apiFetch("POST", "", { session: paneId }).then(loadWindows);
     });
 
     var sigintPending = false;
     var sigintTimer = 0;
+    function resetSigintConfirm(): void {
+        sigintPending = false;
+        clearTimeout(sigintTimer);
+        sigintBtn.textContent = "^C";
+        sigintBtn.style.color = "";
+        sigintBtn.setAttribute("data-tooltip", sigintDefaultTooltip);
+        sigintBtn.classList.remove("cp-tooltip-force");
+        sigintBtn.classList.remove("cp-tooltip-multiline");
+    }
     sigintBtn.addEventListener("click", function(event: MouseEvent): void {
         event.preventDefault();
         event.stopPropagation();
@@ -985,18 +1542,16 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             sigintPending = true;
             sigintBtn.textContent = "⚠";
             sigintBtn.style.color = "rgba(239,68,68,0.9)";
+            sigintBtn.setAttribute("data-tooltip", sigintConfirmTooltip);
+            sigintBtn.classList.add("cp-tooltip-force");
+            sigintBtn.classList.add("cp-tooltip-multiline");
             sigintTimer = window.setTimeout(function(): void {
-                sigintPending = false;
-                sigintBtn.textContent = "^C";
-                sigintBtn.style.color = "";
+                resetSigintConfirm();
             }, 2000);
             return;
         }
 
-        clearTimeout(sigintTimer);
-        sigintPending = false;
-        sigintBtn.textContent = "^C";
-        sigintBtn.style.color = "";
+        resetSigintConfirm();
         if (!sendInput("\x03")) {
             flashButton(sigintBtn);
         }

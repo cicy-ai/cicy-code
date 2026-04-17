@@ -8,11 +8,14 @@ import { mountCicyTTYUI } from "./cicy_ui";
 declare var gotty_auth_token: string;
 declare var gotty_term: string;
 
+const TTYD_BUNDLE_VERSION = "1.0.23-debug-ttyd-1";
+
 const elem = document.getElementById("terminal")
 
 if (elem !== null) {
     console.log("[ttyd-test] gotty bundle loaded", {
         path: window.location.pathname,
+        ttyd_bundle_version: TTYD_BUNDLE_VERSION,
     });
 
     var term: Terminal;

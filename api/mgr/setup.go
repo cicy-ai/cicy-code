@@ -646,18 +646,13 @@ func checkEnv() {
 }
 
 func setupAIConfigs() {
-	apiKey := os.Getenv("CICY_API_KEY")
-	apiUrl := os.Getenv("CICY_API_URL")
-	anthropicUrl := os.Getenv("CICY_ANTHROPIC_URL")
-	defaultOpencodeModel := os.Getenv("CICY_DEFAULT_OPENCODE_MODEL")
-	if defaultOpencodeModel == "" {
-		defaultOpencodeModel = os.Getenv("CICY_DEFAULT_MODEL")
-	}
-	defaultClaudeModel := os.Getenv("CICY_DEFAULT_CLAUDE_MODEL")
-	if defaultClaudeModel == "" {
-		defaultClaudeModel = os.Getenv("CICY_CLAUDE_MODEL")
-	}
-	codexModel := os.Getenv("CICY_CODEX_MODEL")
+	cfg := loadRuntimeAIConfig()
+	apiKey := cfg.APIKey
+	apiUrl := cfg.APIURL
+	anthropicUrl := cfg.AnthropicURL
+	defaultOpencodeModel := cfg.DefaultOpencodeModel
+	defaultClaudeModel := cfg.DefaultClaudeModel
+	codexModel := cfg.CodexModel
 
 	if apiKey == "" {
 		return

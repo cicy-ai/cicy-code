@@ -27,6 +27,19 @@ export function getBackend(): string {
   return localStorage.getItem(BACKEND_KEY) || config.apiBase;
 }
 
+function unwrapTmuxSend<T extends { success?: boolean; error?: string; detail?: string }>(promise: Promise<{ data: T }>) {
+  return promise.then((resp) => {
+    const errorText = String(resp.data?.error || resp.data?.detail || '').trim();
+    if (errorText) {
+      throw new Error(errorText);
+    }
+    if (resp.data && resp.data.success === false) {
+      throw new Error('tmux send failed');
+    }
+    return resp;
+  });
+}
+
 const api = {
   verifyToken: (token?: string) => http.post('/api/auth/verify-token', token ? { token } : null, { baseURL: config.mgrBase }),
   verifyAuth: (token: string) => http.get('/api/auth/verify', { baseURL: config.isWorkspace ? config.apiBase : config.mgrBase, headers: { Authorization: `Bearer ${token}` } }),
@@ -41,8 +54,8 @@ const api = {
   restartPane: (id: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/restart`),
   capturePane: (id: string, lines = 100) => http.post('/api/tmux/capture_pane', { pane_id: id, lines }),
 
-  sendCommand: (winId: string, text: string) => http.post('/api/tmux/send', { win_id: winId, text }),
-  sendKeys: (winId: string, keys: string) => http.post('/api/tmux/send-keys', { win_id: winId, keys }),
+  sendCommand: (winId: string, text: string) => unwrapTmuxSend(http.post('/api/tmux/send', { win_id: winId, text })),
+  sendKeys: (winId: string, keys: string) => unwrapTmuxSend(http.post('/api/tmux/send-keys', { win_id: winId, keys })),
   toggleMouse: (mode: string, paneId: string) => http.post(`/api/tmux/mouse/${mode}`, null, { params: { pane_id: paneId } }),
   chooseSession: (id: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/choose-session`),
   splitPane: (id: string, dir: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/split`, null, { params: { direction: dir } }),
@@ -50,6 +63,12 @@ const api = {
 
   deleteAgent: (id: string) => http.delete(`/api/agents/${encodeURIComponent(id)}`),
   getAgentsByPane: (id: string) => http.get(`/api/agents/pane/${encodeURIComponent(id)}`),
+  getAgentInspector: (id: string, params?: { q?: string; limit?: number; offset?: number }) => http.get(`/api/agents/inspector/${encodeURIComponent(id)}`, { params }),
+  getAgentHistorySync: (id: string, params?: { cursor?: string; limit?: number }) => http.get(`/api/agents/history-sync/${encodeURIComponent(id)}`, { params }),
+  getAgentHistoryView: (id: string) => http.get(`/api/agents/history-view/${encodeURIComponent(id)}`),
+  updateAgentInspectorNotes: (id: string, content: string) => http.put(`/api/agents/inspector/${encodeURIComponent(id)}/notes`, { content }),
+  updateAgentRuntimeMemory: (id: string, data: { content: string; enabled: boolean }) => http.put(`/api/agents/inspector/${encodeURIComponent(id)}/runtime-memory`, data),
+  updateAgentPromptRules: (id: string, data: any) => http.put(`/api/agents/inspector/${encodeURIComponent(id)}/prompt-rules`, data),
   bindAgent: (data: any) => http.post('/api/agents/bind', data),
   unbindAgent: (agentId: number) => http.delete(`/api/agents/unbind/${agentId}`),
 

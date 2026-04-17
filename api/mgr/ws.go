@@ -129,26 +129,32 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 
 	inst := getInstance(paneID)
 	if inst == nil {
-		if subPath != "/" && subPath != "/ws" {
-			httpErr(w, 404, "instance not started")
+		if subPath == "/" {
+			token := r.URL.Query().Get("token")
+			readyInst, err := ensureInstanceReady(paneID, token, 5*time.Second)
+			if err != nil {
+				httpErr(w, 500, "failed to start ttyd: "+err.Error())
+				return
+			}
+			inst = readyInst
+		} else {
+			inst = waitForInstanceReady(paneID, 5*time.Second)
+			if inst == nil {
+				httpErr(w, 503, "instance starting")
+				return
+			}
+		}
+	} else {
+		readyInst := waitForInstanceReady(paneID, 5*time.Second)
+		if readyInst == nil {
+			httpErr(w, 503, "instance unavailable")
 			return
 		}
-		port := portPool.Allocate()
-		if port == 0 {
-			httpErr(w, 500, "no available ports")
-			return
-		}
-		token := r.URL.Query().Get("token")
-		if err := startInstance(paneID, port, token); err != nil {
-			portPool.Release(port)
-			httpErr(w, 500, "failed to start ttyd: "+err.Error())
-			return
-		}
-		if !waitPort(port, 5*time.Second) {
-			httpErr(w, 500, "ttyd start timeout")
-			return
-		}
-		inst = getInstance(paneID)
+		inst = readyInst
+	}
+	if inst == nil {
+		httpErr(w, 503, "instance unavailable")
+		return
 	}
 
 	// WebSocket upgrade
@@ -159,7 +165,15 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 
 	// HTTP reverse proxy
 	targetURL := fmt.Sprintf("http://127.0.0.1:%d%s", inst.Port, subPath)
-	resp, err := http.Get(targetURL)
+	if rawQuery := strings.TrimSpace(r.URL.RawQuery); rawQuery != "" {
+		targetURL += "?" + rawQuery
+	}
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, nil)
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		httpErr(w, 502, err.Error())
 		return
