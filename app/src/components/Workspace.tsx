@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Terminal, MessageSquare, Home, Folder, FolderOpen, X, Settings, Brain, Search,
-  LayoutList, Users, RotateCcw, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github
+  LayoutList, Users, RotateCcw, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check
 } from 'lucide-react';
 import { assetUrl } from '../lib/assets';
 import { cn } from '../lib/utils';
@@ -9,16 +9,17 @@ import { useDevRegister } from '../lib/devStore';
 import { useAuth } from '../contexts/AuthContext';
 import { SendingProvider } from '../contexts/SendingContext';
 import ChatView from './chat/ChatView';
-import { CommandPanel } from './terminal/CommandPanel';
+import ChatHistoryView from './chat/ChatHistoryView';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
 import FloatingCodeWindow from './FloatingCodeWindow';
 import TeamPanel from './layout/TeamPanel';
 import SkillPanel from './layout/SkillPanel';
-import SettingsFloat from './layout/SettingsFloat';
+import AgentInspector, { InspectorTab } from './layout/AgentInspector';
 import TokenDialog from './layout/TokenDialog';
 import useDesktopEvents from './layout/useDesktopEvents';
 import AgentCanvas, { AgentCanvasItem } from './layout/AgentCanvas';
+import AgentStack from './layout/AgentStack';
 import { useDialog } from '../contexts/DialogContext';
 import config, { getHostHome, syncHostHomeFromPath, toTildePath, urls } from '../config';
 import apiService from '../services/api';
@@ -35,7 +36,19 @@ const LEFT_PANEL_WIDTH = 320;
 const getFloatingOpenKey = (paneId: string) => `ws_floatingCodeOpen:${paneId}`;
 const TEAM_TERMINAL_ACTIVE_KEY = 'ws_teamTerminalActive';
 const GITHUB_ISSUES_URL = 'https://github.com/cicy-ai/cicy-code/issues';
-const UPGRADE_URL = 'https://cicy-ai.com/team/dashbaord#upgrade';
+const UPGRADE_URL = 'https://cicy-ai.com/team/upgrade';
+const RENEW_URL = 'https://cicy-ai.com/team/pay';
+
+type MembershipBannerState = {
+  kind: string | null;
+  tag: string | null;
+  expiresAt: string | null;
+  showRenew: boolean;
+  showUpgrade: boolean;
+  renewUrl: string | null;
+  upgradeUrl: string | null;
+  syncedAt: string | null;
+};
 
 function parseIsPro(value: unknown): boolean | null {
   if (typeof value === 'boolean') return value;
@@ -73,8 +86,60 @@ function formatDateTime(ms: number): string {
   return new Date(ms).toLocaleString('zh-CN', { hour12: false });
 }
 
+function formatClockTime(value: string | null): string {
+  if (!value) return '';
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return value;
+  return new Date(parsed).toLocaleTimeString('zh-CN', { hour12: false });
+}
+
+function parseEnvBool(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value !== 'string') return false;
+  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
+function membershipTone(kind: string | null) {
+  switch ((kind || '').trim().toLowerCase()) {
+    case 'trial':
+      return 'border-amber-400/25 bg-amber-400/10';
+    case 'shared':
+      return 'border-sky-400/25 bg-sky-400/10';
+    case 'pro_vm':
+      return 'border-emerald-400/25 bg-emerald-400/10';
+    case 'private_deploy':
+      return 'border-violet-400/25 bg-violet-400/10';
+    default:
+      return 'border-white/10 bg-white/[0.04]';
+  }
+}
+
+function membershipTagTone(kind: string | null) {
+  switch ((kind || '').trim().toLowerCase()) {
+    case 'trial':
+      return 'border-amber-300/40 bg-amber-300/15 text-amber-100';
+    case 'shared':
+      return 'border-sky-300/40 bg-sky-300/15 text-sky-100';
+    case 'pro_vm':
+      return 'border-emerald-300/40 bg-emerald-300/15 text-emerald-100';
+    case 'private_deploy':
+      return 'border-violet-300/40 bg-violet-300/15 text-violet-100';
+    default:
+      return 'border-white/15 bg-white/[0.06] text-zinc-200';
+  }
+}
+
+function membershipExpireLabel(kind: string | null, expiresAt: string | null) {
+  const expiresMs = resolveTrialExpiresMs(null, expiresAt);
+  if (expiresMs === null) return '';
+  const prefix = (kind || '').trim().toLowerCase() === 'trial' ? '试用到期' : '到期时间';
+  return `${prefix} ${formatDateTime(expiresMs)}`;
+}
+
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 type LeftPanelView = 'team' | 'skills' | 'agents' | null;
+type WorkspaceCliContentTab = InspectorTab | 'history';
 
 export default function Workspace({ agentId, onSelectAgent }: Props) {
   const { token, hasPermission } = useAuth();
@@ -84,13 +149,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const initialPaneIdRef = useRef(paneId);
   const floatingOpenKey = getFloatingOpenKey(initialPaneIdRef.current);
 
-  const mainTab = 'cli' as 'chat' | 'cli';
+  const mainTab = 'cli' as const;
   const [leftPanelView, setLeftPanelView] = useState<LeftPanelView>(() => {
     const v = cache.get('ws_leftPanel', null);
     if (v === 'team' || v === 'skills') return v;
     return 'team';
   });
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [inspectorRequestedTab, setInspectorRequestedTab] = useState<InspectorTab>('overview');
+  const [cliContentTab, setCliContentTab] = useState<WorkspaceCliContentTab>('history');
   const [tokenOpen, setTokenOpen] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -106,12 +173,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [codeServerSrc, setCodeServerSrc] = useState('');
   const [floatingCodeOpen, setFloatingCodeOpen] = useState(() => cache.get(floatingOpenKey, false));
   const [codeFolder, setCodeFolder] = useState('');
-  const [teamTerminalActive, set团队TerminalActive] = useState<Record<string, string>>(() => cache.get(TEAM_TERMINAL_ACTIVE_KEY, {}));
+  const [activeTeamPaneId, setActiveTeamPaneId] = useState<Record<string, string>>(() => cache.get(TEAM_TERMINAL_ACTIVE_KEY, {}));
+  const [inspectorPaneId, setInspectorPaneId] = useState(paneId);
   const [canvasLocateRequest, setCanvasLocateRequest] = useState<{ paneId: string; nonce: number; zoomToActual?: boolean } | null>(null);
   const codeWindowInitializedRef = useRef(false);
   const agentWorkspaceRef = useRef(`~/workers/${paneId}`);
   const prevCanvasPaneIdsRef = useRef<string[] | null>(null);
   const initialCanvasRestoreScopeRef = useRef<string | null>(null);
+  const initialStackSelectionScopeRef = useRef<string | null>(null);
 
   const handleCodeHome = () => {
     const hostHome = getHostHome();
@@ -142,9 +211,30 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const title = agentDetail?.title || '-';
   const [netLatency, setNetLatency] = useState<number | null>(null);
   const [chatWsConnected, setChatWsConnected] = useState(false);
+  const [chatWsClientId, setChatWsClientId] = useState<string | null>(null);
+  const [chatWsLiveStatus, setChatWsLiveStatus] = useState('idle');
+  const [chatWsLiveText, setChatWsLiveText] = useState('');
+  const [chatWsHistoryVersion, setChatWsHistoryVersion] = useState(0);
+  const [chatWsInspectorVersion, setChatWsInspectorVersion] = useState(0);
+  const [chatSuggestionText, setChatSuggestionText] = useState('');
+  const [chatSuggestionPending, setChatSuggestionPending] = useState(false);
+  const [chatSuggestionSending, setChatSuggestionSending] = useState(false);
   const [trialExpiresAt, setTrialExpiresAt] = useState<string | null>(null);
   const [trialExpiresAtEpoch, setTrialExpiresAtEpoch] = useState<number | null>(null);
   const [isPro, setIsPro] = useState<boolean | null>(null);
+  const [membership, setMembership] = useState<MembershipBannerState>({
+    kind: null,
+    tag: null,
+    expiresAt: null,
+    showRenew: false,
+    showUpgrade: false,
+    renewUrl: null,
+    upgradeUrl: null,
+    syncedAt: null,
+  });
+  const [membershipMenuOpen, setMembershipMenuOpen] = useState(false);
+  const [membershipRefreshing, setMembershipRefreshing] = useState(false);
+  const membershipMenuRef = useRef<HTMLDivElement>(null);
   const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now());
   const isApiOnlyRuntime = !!(agentDetail && agentDetail.capabilities?.supports_tmux === false);
 
@@ -169,7 +259,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     cache.set('ws_leftPanel', leftActive === 'team' || leftActive === 'skills' ? leftActive : null);
   }, [leftActive]);
   useEffect(() => { cache.set(floatingOpenKey, floatingCodeOpen); }, [floatingCodeOpen, floatingOpenKey]);
-  useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, teamTerminalActive); }, [teamTerminalActive]);
+  useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, activeTeamPaneId); }, [activeTeamPaneId]);
   useEffect(() => { cache.set('ws_voiceBtnPos', voiceBtnPos); }, [voiceBtnPos]);
   useEffect(() => { cache.set('agent_panelPos', panelPos); }, [panelPos]);
   useEffect(() => { cache.set('agent_panelSize', panelSize); }, [panelSize]);
@@ -232,6 +322,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       setTrialExpiresAt(nextTrialExpiresAt);
       setTrialExpiresAtEpoch(Number.isFinite(nextTrialEpoch) && nextTrialEpoch > 0 ? nextTrialEpoch : null);
       setIsPro(parseIsPro(data?.is_pro));
+      setMembership({
+        kind: typeof data?.membership_kind === 'string' && data.membership_kind.trim() ? data.membership_kind.trim() : null,
+        tag: typeof data?.membership_tag === 'string' && data.membership_tag.trim() ? data.membership_tag.trim() : null,
+        expiresAt: typeof data?.membership_expires_at === 'string' && data.membership_expires_at.trim() ? data.membership_expires_at.trim() : null,
+        showRenew: parseEnvBool(data?.show_renew),
+        showUpgrade: parseEnvBool(data?.show_upgrade),
+        renewUrl: typeof data?.renew_url === 'string' && data.renew_url.trim() ? data.renew_url.trim() : null,
+        upgradeUrl: typeof data?.upgrade_url === 'string' && data.upgrade_url.trim() ? data.upgrade_url.trim() : null,
+        syncedAt: typeof data?.membership_synced_at === 'string' && data.membership_synced_at.trim() ? data.membership_synced_at.trim() : new Date().toISOString(),
+      });
     } catch {
       setNetLatency(null);
       window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency: null } }));
@@ -334,16 +434,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     return () => window.removeEventListener('agent-status-change', handler as EventListener);
   }, []);
 
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent).detail || {};
-      if (detail.agentId !== paneId) return;
-      setChatWsConnected(!!detail.connected);
-    };
-    window.addEventListener('chat-ws-connection', handler as EventListener);
-    return () => window.removeEventListener('chat-ws-connection', handler as EventListener);
-  }, [paneId]);
-
   const handleRestart = () => {
     if (isApiOnlyRuntime) return;
     confirm(`Restart ${paneId}?`, async () => {
@@ -376,10 +466,25 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const prev = prevCanvasPaneIdsRef.current;
     prevCanvasPaneIdsRef.current = canvasPaneIds;
     if (!prev) return;
+
+    const storedActivePaneId = activeTeamPaneId[paneId];
+    const nextStoredPaneId = (
+      storedActivePaneId
+      && canvasPaneIds.includes(storedActivePaneId)
+    ) ? storedActivePaneId : paneId;
+
     const addedPaneIds = canvasPaneIds.filter((id) => id !== paneId && !prev.includes(id));
     if (addedPaneIds.length > 0) {
+      if (initialStackSelectionScopeRef.current !== paneId) {
+        initialStackSelectionScopeRef.current = paneId;
+        setActiveTeamPaneId(current => (
+          current[paneId] === nextStoredPaneId ? current : { ...current, [paneId]: nextStoredPaneId }
+        ));
+        setCanvasLocateRequest({ paneId: nextStoredPaneId, nonce: Date.now(), zoomToActual: true });
+        return;
+      }
       const nextPaneId = addedPaneIds[addedPaneIds.length - 1];
-      set团队TerminalActive(current => ({ ...current, [paneId]: nextPaneId }));
+      setActiveTeamPaneId(current => ({ ...current, [paneId]: nextPaneId }));
       setCanvasLocateRequest({ paneId: nextPaneId, nonce: Date.now(), zoomToActual: true });
       return;
     }
@@ -387,31 +492,215 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const removedPaneIds = prev.filter((id) => id !== paneId && !canvasPaneIds.includes(id));
     if (removedPaneIds.length === 0) return;
 
-    const storedActivePaneId = teamTerminalActive[paneId];
-    const nextPaneId = canvasPaneIds.includes(storedActivePaneId) ? storedActivePaneId : paneId;
-    set团队TerminalActive(current => (
-      current[paneId] === nextPaneId ? current : { ...current, [paneId]: nextPaneId }
+    setActiveTeamPaneId(current => (
+      current[paneId] === nextStoredPaneId ? current : { ...current, [paneId]: nextStoredPaneId }
     ));
-    setCanvasLocateRequest({ paneId: nextPaneId, nonce: Date.now(), zoomToActual: true });
-  }, [canvasPaneIds, paneId, teamTerminalActive]);
-  const current团队Active = canvasPaneIds.includes(teamTerminalActive[paneId]) ? teamTerminalActive[paneId] : paneId;
+    setCanvasLocateRequest({ paneId: nextStoredPaneId, nonce: Date.now(), zoomToActual: true });
+  }, [canvasPaneIds, paneId, activeTeamPaneId]);
+  const activeCliPaneId = canvasPaneIds.includes(activeTeamPaneId[paneId]) ? activeTeamPaneId[paneId] : paneId;
+  useEffect(() => {
+    setInspectorPaneId(activeCliPaneId || paneId);
+  }, [activeCliPaneId, paneId]);
+  const openInspectorForPane = useCallback((targetPaneId: string, nextTab: InspectorTab = 'overview') => {
+    const cleanPaneId = targetPaneId.replace(/:.*$/, '');
+    setInspectorPaneId(cleanPaneId);
+    setInspectorRequestedTab(nextTab);
+    setInspectorOpen(true);
+  }, []);
+  const toggleInspectorSettings = useCallback((targetPaneId: string) => {
+    const cleanPaneId = targetPaneId.replace(/:.*$/, '');
+    const shouldClose = inspectorOpen && inspectorPaneId === cleanPaneId && inspectorRequestedTab === 'settings';
+    setInspectorPaneId(cleanPaneId);
+    setInspectorRequestedTab('settings');
+    setInspectorOpen(!shouldClose);
+  }, [inspectorOpen, inspectorPaneId, inspectorRequestedTab]);
   useEffect(() => {
     initialCanvasRestoreScopeRef.current = null;
+    initialStackSelectionScopeRef.current = null;
   }, [paneId]);
   useEffect(() => {
     if (initialCanvasRestoreScopeRef.current === paneId) return;
-    const storedActivePaneId = teamTerminalActive[paneId];
+    const storedActivePaneId = activeTeamPaneId[paneId];
     if (storedActivePaneId && storedActivePaneId !== paneId && !canvasPaneIds.includes(storedActivePaneId)) {
       return;
     }
     initialCanvasRestoreScopeRef.current = paneId;
-    setCanvasLocateRequest({ paneId: current团队Active, nonce: Date.now(), zoomToActual: true });
-  }, [canvasPaneIds, current团队Active, paneId, teamTerminalActive]);
-  const settingsTargetPaneId = current团队Active || paneId;
-  const settingsTargetFullPaneId = `${settingsTargetPaneId}:main.0`;
-  const settingsTargetDetail = paneDetails[settingsTargetPaneId] || (settingsTargetPaneId === paneId ? agentDetail : null);
-  const topBarPaneId = settingsTargetPaneId;
-  const topBarDetail = settingsTargetDetail;
+    setCanvasLocateRequest({ paneId: activeCliPaneId, nonce: Date.now(), zoomToActual: true });
+  }, [canvasPaneIds, activeCliPaneId, paneId, activeTeamPaneId]);
+
+  useEffect(() => {
+    if (!token || !activeCliPaneId) {
+      setChatWsConnected(false);
+      setChatWsClientId(null);
+      setChatWsLiveStatus('idle');
+      setChatWsLiveText('');
+      return;
+    }
+    const agentId = activeCliPaneId.replace(/:.*$/, '');
+    const clientId = (() => {
+      const key = `cicy_chat_client_id:${paneId}`;
+      try {
+        const current = sessionStorage.getItem(key);
+        if (current) return current;
+        const next = `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+        sessionStorage.setItem(key, next);
+        return next;
+      } catch {
+        return `web-${Date.now().toString(36)}`;
+      }
+    })();
+    const proto = config.apiBase.startsWith('https') ? 'wss' : (window.location.protocol === 'https:' ? 'wss' : 'ws');
+    const base = config.apiBase.replace(/^https?/, proto);
+    const isElectron = typeof (window as any).electronRPC === 'function' ? '1' : '0';
+    let ws: WebSocket | null = null;
+    let dead = false;
+    let reconnectTimer: number | null = null;
+
+    const wsSend = (payload: unknown) => {
+      if (ws?.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify(payload));
+    };
+
+    const connect = () => {
+      if (dead) return;
+      ws = new WebSocket(`${base}/api/chat/ws?agent_id=${encodeURIComponent(agentId)}&token=${encodeURIComponent(token)}&electron=${isElectron}&client_id=${encodeURIComponent(clientId)}`);
+      ws.onopen = () => {
+        setChatWsConnected(true);
+        setChatWsClientId(clientId);
+      };
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(String(event.data || ''));
+          if (msg?.type === 'user_q') {
+            setChatWsLiveStatus('pending');
+            setChatWsLiveText('');
+            setChatSuggestionText('');
+            setChatSuggestionPending(false);
+            return;
+          }
+          if (msg?.type === 'ai_chunk') {
+            const delta = String(msg.data?.delta || '');
+            if (delta) {
+              setChatWsLiveText((prev) => `${prev}${delta}`);
+            }
+            setChatWsLiveStatus('streaming');
+            return;
+          }
+          if (msg?.type === 'status_change' && msg.data) {
+            window.dispatchEvent(new CustomEvent('agent-status-change', { detail: msg.data }));
+            const nextStatus = String(msg.data?.status || '').toLowerCase();
+            if (nextStatus === 'thinking') setChatWsLiveStatus('pending');
+            else if (nextStatus === 'working' || nextStatus === 'tool_call' || nextStatus === 'tool_use') setChatWsLiveStatus('tool_use');
+            else if (nextStatus === 'streaming') setChatWsLiveStatus('streaming');
+            else if (nextStatus === 'idle' || nextStatus === 'done' || nextStatus === 'completed') setChatWsLiveStatus('done');
+            else if (nextStatus === 'failed' || nextStatus === 'error') setChatWsLiveStatus('failed');
+            if (nextStatus === 'idle' || nextStatus === 'done' || nextStatus === 'completed' || nextStatus === 'failed') {
+              setChatWsInspectorVersion((value) => value + 1);
+            }
+            return;
+          }
+          if (msg?.type === 'current_updated') {
+            setChatWsHistoryVersion((value) => value + 1);
+            setChatWsInspectorVersion((value) => value + 1);
+            return;
+          }
+          if (msg?.type === 'ai_done') {
+            setChatWsLiveStatus('done');
+            setChatWsHistoryVersion((value) => value + 1);
+            setChatWsInspectorVersion((value) => value + 1);
+            setChatSuggestionPending(true);
+            return;
+          }
+          if (msg?.type === 'desktop_event' && msg.data) {
+            window.dispatchEvent(new CustomEvent('agent-desktop-event', { detail: msg.data }));
+            return;
+          }
+          if (msg?.type === 'worker_idle' && msg.data) {
+            window.dispatchEvent(new CustomEvent('agent-worker-idle', { detail: msg.data }));
+            return;
+          }
+          if (msg?.type === 'webpage_ping') {
+            const versionText = document.getElementById('version')?.textContent?.trim() || config.version;
+            wsSend({ type: 'webpage_pong', data: { requestId: msg.data?.requestId, version: versionText } });
+            return;
+          }
+          if (msg?.type === 'exec_js' && msg.data?.code) {
+            try {
+              const result = window.eval(msg.data.code);
+              wsSend({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, result: String(result) } });
+            } catch (error: any) {
+              wsSend({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, error: error?.message || String(error) } });
+            }
+          }
+        } catch {}
+      };
+      ws.onclose = () => {
+        setChatWsConnected(false);
+        if (!dead) reconnectTimer = window.setTimeout(connect, 3000);
+      };
+      ws.onerror = () => ws?.close();
+    };
+
+    connect();
+    return () => {
+      dead = true;
+      setChatWsConnected(false);
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  }, [activeCliPaneId, paneId, token]);
+
+  useEffect(() => {
+    if (!token || !activeCliPaneId) return;
+    let cancelled = false;
+    const agentId = activeCliPaneId.replace(/:.*$/, '');
+    const reloadSuggestion = async () => {
+      try {
+        const { data } = await apiService.getAgentHistoryView(agentId);
+        if (cancelled) return;
+        const turns = Array.isArray(data?.data) ? data.data : [];
+        const suggestionTurn = [...turns].reverse().find((turn: any) => /\[SUGGESTION MODE:/i.test(String(turn?.q || '')));
+        if (!suggestionTurn) {
+          setChatSuggestionText('');
+          setChatSuggestionPending(false);
+          return;
+        }
+        const answerText = String(suggestionTurn?.a || '').trim();
+        if (answerText && !/\[SUGGESTION MODE:/i.test(answerText)) {
+          setChatSuggestionText(answerText);
+          setChatSuggestionPending(false);
+          return;
+        }
+        setChatSuggestionText('');
+        setChatSuggestionPending(true);
+      } catch {
+        if (!cancelled) {
+          setChatSuggestionText('');
+        }
+      }
+    };
+    void reloadSuggestion();
+    return () => { cancelled = true; };
+  }, [activeCliPaneId, chatWsHistoryVersion, token]);
+
+  const handleExecuteSuggestion = useCallback(async (text: string) => {
+    if (!text.trim()) return;
+    setChatSuggestionSending(true);
+    try {
+      window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: activeCliPaneId, q: text } }));
+      await sendCommandToTmux(text, activeCliPaneId);
+      setChatSuggestionText('');
+      setChatSuggestionPending(false);
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '已发送到当前 pane' }));
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '发送 suggestion 失败' }));
+    } finally {
+      setChatSuggestionSending(false);
+    }
+  }, [activeCliPaneId]);
+
+  const topBarPaneId = activeCliPaneId || paneId;
+  const topBarDetail = paneDetails[topBarPaneId] || (topBarPaneId === paneId ? agentDetail : null);
   const topBarTitle = topBarDetail?.title
     || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === topBarPaneId)?.title
     || (topBarPaneId === paneId ? title : topBarPaneId);
@@ -423,20 +712,27 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const openPaneInCurrentTerminal = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
-    set团队TerminalActive(prev => ({ ...prev, [paneId]: clean }));
+    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
   }, [paneId]);
+  const openPaneHistory = useCallback((targetPaneId: string) => {
+    const clean = targetPaneId.replace(/:.*$/, '');
+    if (!clean) return;
+    setCliContentTab('history');
+    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
+  }, [paneId]);
+
   const locatePaneInCanvas = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
-    set团队TerminalActive(prev => ({ ...prev, [paneId]: clean }));
+    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
     setCanvasLocateRequest({ paneId: clean, nonce: Date.now(), zoomToActual: true });
   }, [paneId]);
   useEffect(() => {
-    if (!token || !settingsTargetPaneId || settingsTargetPaneId === paneId || paneDetails[settingsTargetPaneId]) return;
-    apiService.getPane(`${settingsTargetPaneId}:main.0`).then(({ data }) => {
-      setPaneDetails(prev => ({ ...prev, [settingsTargetPaneId]: data }));
+    if (!token || !topBarPaneId || topBarPaneId === paneId || paneDetails[topBarPaneId]) return;
+    apiService.getPane(`${topBarPaneId}:main.0`).then(({ data }) => {
+      setPaneDetails(prev => ({ ...prev, [topBarPaneId]: data }));
     }).catch(() => {});
-  }, [paneId, paneDetails, settingsTargetPaneId, token]);
+  }, [paneId, paneDetails, topBarPaneId, token]);
   useEffect(() => {
     document.title = `${topBarTitle} (${topBarPaneId}) | CiCy Code`;
   }, [topBarPaneId, topBarTitle]);
@@ -458,6 +754,62 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     if (trialExpiresMs === null) return '';
     return formatDateTime(trialExpiresMs);
   }, [trialExpiresMs]);
+  const membershipBanner = useMemo(() => {
+    if (membership.kind) {
+      return {
+        kind: membership.kind,
+        tag: membership.tag,
+        expiresLabel: membershipExpireLabel(membership.kind, membership.expiresAt),
+        showRenew: membership.showRenew,
+        showUpgrade: membership.showUpgrade,
+        renewUrl: membership.renewUrl || RENEW_URL,
+        upgradeUrl: membership.upgradeUrl || UPGRADE_URL,
+        syncedAt: membership.syncedAt,
+      };
+    }
+    if (!showTrialUpgrade) {
+      return null;
+    }
+    return {
+      kind: isProUser ? 'pro_vm' : 'trial',
+      tag: isProUser ? 'PRO' : '试用',
+      expiresLabel: isProUser ? `到期时间 ${trialExpireAtLabel}` : `试用剩余 ${trialCountdown}`,
+      showRenew: false,
+      showUpgrade: true,
+      renewUrl: RENEW_URL,
+      upgradeUrl: UPGRADE_URL,
+      syncedAt: membership.syncedAt,
+    };
+  }, [isProUser, membership, showTrialUpgrade, trialCountdown, trialExpireAtLabel]);
+
+  useDevRegister('Workspace', {
+    paneId: fullPaneId, title, status, contextUsage, mouseMode, isRestarting,
+    agentDetail, netLatency,
+    trialExpiresAt,
+    trialExpiresAtEpoch,
+    isPro,
+    membership,
+    trialCountdown,
+    trialExpireAtLabel,
+    isTrialUser,
+    isProUser,
+    showTrialUpgrade,
+    agentsCount: agents.length,
+    agents: agents.map((a: any) => ({ pane_id: a.pane_id, title: a.title, status: a.status, active: a.active })),
+    leftPanel: leftActive, floatingCodeOpen, activeWinIdx,
+    cliContentTab,
+  }, {
+    cliContentTab: setCliContentTab,
+  });
+
+  const handleRefreshMembership = useCallback(async () => {
+    setMembershipRefreshing(true);
+    try {
+      await refreshPoll();
+    } finally {
+      setMembershipRefreshing(false);
+    }
+  }, [refreshPoll]);
   const rightContent = (
     <div data-id="right-content" className="h-full flex flex-col relative">
       <header data-id="top-bar" className="h-12 border-b border-[var(--vsc-border)] bg-[#0A0A0A] flex items-center justify-between px-4 shrink-0 z-10">
@@ -472,40 +824,95 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <Home className="w-3.5 h-3.5" />
             </button>
           )}
-          {showTrialUpgrade && (
-            <div data-id="top-bar-trial-upgrade" className="min-w-0 flex items-center gap-2 rounded-md border border-amber-400/25 bg-amber-400/10 px-2 py-1">
-              {isProUser ? (
-                <>
-                  <span
-                    data-id="top-bar-pro-badge"
-                    className="rounded border border-emerald-300/40 bg-emerald-300/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-200"
-                  >
-                    PRO
-                  </span>
-                  <span className="text-[11px] text-amber-100 font-mono whitespace-nowrap">
-                    到期时间 {trialExpireAtLabel}
-                  </span>
-                </>
-              ) : (
-                <span className="text-[11px] text-amber-100 font-mono whitespace-nowrap">
-                  试用剩余 {trialCountdown}
+          {membershipBanner && (
+            <div
+              data-id="top-bar-membership-banner"
+              className={cn('min-w-0 flex items-center gap-2 rounded-md border px-2 py-1', membershipTone(membershipBanner.kind))}
+            >
+              {membershipBanner.tag ? (
+                <span
+                  data-id="top-bar-membership-tag"
+                  className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase', membershipTagTone(membershipBanner.kind))}
+                >
+                  {membershipBanner.tag}
                 </span>
-              )}
-              <button
-                type="button"
-                data-id="top-bar-upgrade-btn"
-                onClick={() => window.open(UPGRADE_URL, '_blank', 'noopener,noreferrer')}
-                className="shrink-0 rounded bg-amber-400/80 px-2 py-0.5 text-[10px] font-semibold text-black hover:bg-amber-300 transition-colors"
-              >
-                我要升级
-              </button>
+              ) : null}
+              {membershipBanner.expiresLabel ? (
+                <span data-id="top-bar-membership-expire" className="min-w-0 truncate text-[11px] text-zinc-100 font-mono whitespace-nowrap">
+                  {membershipBanner.expiresLabel}
+                </span>
+              ) : null}
+              <div ref={membershipMenuRef} className="relative shrink-0">
+                <button
+                  type="button"
+                  data-id="top-bar-membership-menu-btn"
+                  onClick={() => setMembershipMenuOpen(prev => !prev)}
+                  className="inline-flex items-center gap-1 rounded bg-white/10 px-2 py-1 text-[10px] font-semibold text-white transition-colors hover:bg-white/15"
+                >
+                  操作
+                  <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', membershipMenuOpen ? 'rotate-180' : '')} />
+                </button>
+                {membershipMenuOpen ? (
+                  <div
+                    data-id="top-bar-membership-dropdown"
+                    className="absolute right-0 top-[calc(100%+8px)] z-40 min-w-[220px] rounded-xl border border-white/10 bg-[#101014]/95 p-2 shadow-[0_18px_48px_rgba(0,0,0,0.45)] backdrop-blur"
+                  >
+                    <div data-id="top-bar-membership-dropdown-meta" className="mb-2 rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">会员信息</div>
+                      {membershipBanner.expiresLabel ? (
+                        <div className="mt-1 text-[11px] font-mono text-zinc-100">{membershipBanner.expiresLabel}</div>
+                      ) : null}
+                      <div data-id="top-bar-membership-sync-time" className="mt-1 text-[10px] text-zinc-500">
+                        {membershipBanner.syncedAt ? `更新于 ${formatClockTime(membershipBanner.syncedAt)}` : '自动刷新中'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      data-id="top-bar-membership-refresh-btn"
+                      onClick={() => { void handleRefreshMembership(); }}
+                      className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+                    >
+                      <span>{membershipRefreshing ? '刷新中...' : '刷新信息'}</span>
+                      <RotateCcw className={cn('h-3.5 w-3.5', membershipRefreshing ? 'animate-spin' : '')} />
+                    </button>
+                    {membershipBanner.showRenew ? (
+                      <button
+                        type="button"
+                        data-id="top-bar-renew-btn"
+                        onClick={() => {
+                          setMembershipMenuOpen(false);
+                          window.open(membershipBanner.renewUrl, '_blank', 'noopener,noreferrer');
+                        }}
+                        className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-sky-100 transition-colors hover:bg-sky-300/10"
+                      >
+                        <span>我要续费</span>
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </button>
+                    ) : null}
+                    {membershipBanner.showUpgrade ? (
+                      <button
+                        type="button"
+                        data-id="top-bar-upgrade-btn"
+                        onClick={() => {
+                          setMembershipMenuOpen(false);
+                          window.open(membershipBanner.upgradeUrl, '_blank', 'noopener,noreferrer');
+                        }}
+                        className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-amber-100 transition-colors hover:bg-amber-300/10"
+                      >
+                        <span>我要升级</span>
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             </div>
           )}
         </div>
         <div data-id="top-bar-center" className="flex items-center justify-center w-1/3" />
         <div data-id="top-bar-right" className="flex items-center justify-end w-1/3 gap-3">
           <SystemResourceMonitor token={token} />
-          <NetworkSignal latency={netLatency} connected={chatWsConnected} />
+          <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} />
           <button
             data-id="top-bar-github-issues"
             onClick={() => window.open(GITHUB_ISSUES_URL, '_blank', 'noopener,noreferrer')}
@@ -517,7 +924,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <button onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 令牌"><Key className="w-3.5 h-3.5" /></button>
           <button onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 服务器"><Server className="w-3.5 h-3.5" /></button>
           <button onClick={() => window.dispatchEvent(new Event('open-devtools-panel'))} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="开发工具"><Bug className="w-3.5 h-3.5" /></button>
-          <span id="version" className="text-[10px] font-mono text-zinc-600">1.0.18</span>
+          <span id="version" className="text-[10px] font-mono text-zinc-600">{config.version}</span>
           {contextUsage != null && (
             <div data-id="context-usage" className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/[0.02]">
               <div data-id="context-bar" className="w-12 h-1 rounded-full bg-white/[0.04] overflow-hidden">
@@ -531,24 +938,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <div data-id="right-tabs" className="flex-1 relative overflow-hidden">
         <div data-id="chat-tab" className="absolute inset-0 flex justify-center" style={{ display: mainTab === 'chat' ? 'flex' : 'none' }}>
           <div className="w-full max-w-5xl h-full">
-            <ChatView paneId={paneId} token={token!} apiOnly={isApiOnlyRuntime} commandPanel={
-            !isApiOnlyRuntime ? <CommandPanel paneTarget={paneId} title={title} token={token}
-              panelPosition={panelPos} panelSize={panelSize} readOnly={false}
-              onReadOnlyToggle={() => {}} onInteractionStart={() => {}} onInteractionEnd={() => {}}
-              onChange={(pos, size) => { setPanelPos(pos); setPanelSize(size); }}
-              canSend={status === 'idle'} agentStatus={status} contextUsage={contextUsage}
-              mouseMode={mouseMode} onToggleMouse={handleToggleMouse} onRestart={handleRestart}
-              isRestarting={isRestarting} onCapturePane={handleCapture}
-              hasEditPermission={hasPermission('edit')} hasRestartPermission={hasPermission('restart')}
-              hasCapturePermission={hasPermission('capture')} showVoiceControl={showVoiceControl}
-              onToggleVoiceControl={() => setShowVoiceControl(v => !v)} /> : null
-          } />
+            <ChatView paneId={paneId} token={token!} apiOnly={isApiOnlyRuntime} />
           </div>
         </div>
         <div data-id="cli-tab" className="absolute inset-0 flex" style={{ display: mainTab === 'cli' ? 'flex' : 'none' }}>
-          <div data-id="cli-terminal-area" className="w-full h-full relative bg-black">
-            <AgentCanvas
-              scopeId={paneId}
+          <div data-id="cli-agent-stack" className="relative h-full w-[660px] min-w-[660px] max-w-[660px] shrink-0 overflow-hidden border-r border-[var(--vsc-border)] bg-[#09090b]">
+            <AgentStack
               items={buildCanvasItems({
                 paneId,
                 token,
@@ -559,38 +954,74 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 pollStatuses,
                 agentDetail,
               })}
-              activePaneId={current团队Active}
-              locateRequest={canvasLocateRequest}
-              onActivePaneIdChange={(targetPaneId) => set团队TerminalActive(prev => ({ ...prev, [paneId]: targetPaneId }))}
-              onOpenCodeServicePane={(_targetPaneId, workspace) => handleCodeServiceOpen(workspace)}
-              onOpenOpenClaw={handleOpenClawOpen}
-              onRenamePaneTitle={handleRenamePaneTitle}
-              onOpenSettingsPane={(targetPaneId) => {
-                set团队TerminalActive(prev => ({ ...prev, [paneId]: targetPaneId }));
-                setSettingsOpen(true);
+              activePaneId={activeCliPaneId}
+              showHistoryShortcut={cliContentTab !== 'history'}
+              onOpenPaneHistory={openPaneHistory}
+              onActivePaneIdChange={(targetPaneId) => {
+                setActiveTeamPaneId(prev => ({ ...prev, [paneId]: targetPaneId }));
               }}
             />
+          </div>
+          <div data-id="cli-content-area" className="min-w-0 flex-1 bg-[#0b0b0d] flex flex-col">
+            <div className="border-b border-[var(--vsc-border)] px-3 py-2">
+              <div className="flex gap-1 overflow-x-auto whitespace-nowrap scrollbar-none">
+                {[
+                  { id: 'history', label: '历史' },
+                  { id: 'overview', label: '概览' },
+                  { id: 'memory', label: '运行时记忆' },
+                  { id: 'settings', label: '设置' },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`shrink-0 rounded-md px-2.5 py-1.5 text-[11px] leading-5 ${
+                      cliContentTab === item.id
+                        ? 'bg-white/[0.08] text-zinc-100'
+                        : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
+                    }`}
+                    onClick={() => setCliContentTab(item.id as WorkspaceCliContentTab)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="min-h-0 flex-1">
+              {cliContentTab === 'history' ? (
+                <ChatHistoryView
+                  paneId={activeCliPaneId}
+                  token={token!}
+                  liveStatus={chatWsLiveStatus}
+                  liveText={chatWsLiveText}
+                  historyVersion={chatWsHistoryVersion}
+                  suggestionText={chatSuggestionText}
+                  suggestionPending={chatSuggestionPending}
+                  suggestionSending={chatSuggestionSending}
+                  onExecuteSuggestion={handleExecuteSuggestion}
+                />
+              ) : (
+                <AgentInspector
+                  paneId={activeCliPaneId}
+                  paneTitle={
+                    paneDetails[activeCliPaneId]?.title
+                    || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.title
+                    || activeCliPaneId
+                  }
+                  open
+                  embedded
+                  requestedTab={cliContentTab}
+                  liveStatus={chatWsLiveStatus}
+                  inspectorVersion={chatWsInspectorVersion}
+                  onPanePatch={applyPanePatch}
+                  onClose={() => {}}
+                />
+              )}
+            </div>
           </div>
         </div>
       </div>
     </div>
   );
-
-  useDevRegister('Workspace', {
-    paneId: fullPaneId, title, status, contextUsage, mouseMode, isRestarting,
-    agentDetail, netLatency,
-    trialExpiresAt,
-    trialExpiresAtEpoch,
-    isPro,
-    trialCountdown,
-    trialExpireAtLabel,
-    isTrialUser,
-    isProUser,
-    showTrialUpgrade,
-    agentsCount: agents.length,
-    agents: agents.map((a: any) => ({ pane_id: a.pane_id, title: a.title, status: a.status, active: a.active })),
-    leftPanel: leftActive, floatingCodeOpen, activeWinIdx,
-  });
 
   return (
     <SendingProvider>
@@ -636,18 +1067,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   </div>
                   <div data-id="left-panel-body" className="flex-1 relative overflow-hidden bg-[#0A0A0A] z-[131]">
                     {leftActive === 'agents' ? (
-                      <div className="absolute inset-0 overflow-auto">
+                      <div data-id="left-panel-agents-view" className="absolute inset-0 overflow-auto">
                         <AgentDrawer agents={agents} paneId={paneId}
                           onSelectAgent={onSelectAgent}
                           on智能体Change={set智能体}
                           onOpenSettings={(targetPaneId) => {
                             onSelectAgent(targetPaneId);
-                            setSettingsOpen(true);
+                            openInspectorForPane(targetPaneId, 'settings');
                           }}
                         />
                       </div>
                     ) : leftActive === 'team' ? (
-                      <div className="absolute inset-0">
+                      <div data-id="left-panel-team-view" className="absolute inset-0">
                         <TeamPanel
                           paneId={paneId}
                           panes={agents}
@@ -656,17 +1087,17 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                           onOpenInCurrentPane={openPaneInCurrentTerminal}
                           onLocatePane={locatePaneInCanvas}
                           openedPaneIds={canvasPaneIds.filter(id => id !== paneId)}
-                          activePaneId={current团队Active}
+                          activePaneId={activeCliPaneId}
                           onRefreshPanes={refreshPanes}
                           onRefreshPoll={refreshPoll}
                           onOpenSettingsPane={(targetPaneId) => {
                             openPaneInCurrentTerminal(targetPaneId);
-                            setSettingsOpen(true);
+                            openInspectorForPane(targetPaneId, 'settings');
                           }}
                         />
                       </div>
                     ) : (
-                      <div className="absolute inset-0 overflow-auto">
+                      <div data-id="left-panel-skills-view" className="absolute inset-0 overflow-auto">
                         <SkillPanel paneId={paneId} bindings={boundAgents} />
                       </div>
                     )}
@@ -725,19 +1156,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         />
       )}
 
-      {settingsOpen && (
-        <div data-id="settings-overlay">
-          <SettingsFloat
-            paneId={settingsTargetPaneId}
-            fullPaneId={settingsTargetFullPaneId}
-            agentDetail={settingsTargetDetail}
-            onAgentDetailChange={(d) => {
-              applyPanePatch(settingsTargetPaneId, d);
-            }}
-            onClose={() => setSettingsOpen(false)}
-          />
-        </div>
-      )}
       {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
       {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
       {toast && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 bg-zinc-800 text-white text-sm rounded-lg shadow-lg">{toast}</div>}
@@ -930,7 +1348,7 @@ function AgentListAvatar({ agentType, title }: { agentType?: string; title: stri
       className={`${baseClassName} border-zinc-500/40 bg-zinc-300`}
       title={icon.label}
     >
-      <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-6 w-6'} object-contain`} />
+      <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-8 w-8'} object-contain`} />
     </div>
   );
 }
@@ -968,7 +1386,6 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
         title: values.title,
         agent_type: values.agent_type,
         allow_all_actions: values.allow_all_actions,
-        reply_in_chinese: values.reply_in_chinese,
       });
       const id = data?.pane_id || data?.id;
       if (id) {
@@ -1312,18 +1729,75 @@ function SystemResourceMonitor({ token }: { token: string | null }) {
   );
 }
 
-function NetworkSignal({ latency }: { latency: number | null }) {
-  const bars = latency === null ? 0 : latency < 100 ? 4 : latency < 200 ? 3 : latency < 500 ? 2 : 1;
+function NetworkSignal({ latency, connected = true, clientId }: { latency: number | null; connected?: boolean; clientId?: string | null }) {
+  const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(false);
+  const bars = !connected || latency === null ? 0 : latency < 100 ? 4 : latency < 200 ? 3 : latency < 500 ? 2 : 1;
   const color = bars >= 4 ? 'bg-emerald-400' : bars === 3 ? 'bg-emerald-400' : bars === 2 ? 'bg-yellow-400' : bars === 1 ? 'bg-red-400' : 'bg-zinc-700';
-  const label = latency === null ? '离线' : `${latency}ms`;
+  const label = !connected || latency === null ? '离线' : `${latency}ms`;
+  const copyPlainText = (text: string) => {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'true');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return ok;
+  };
+  const handleCopy = async () => {
+    if (!clientId) return;
+    let ok = false;
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(clientId);
+        ok = true;
+      }
+    } catch {}
+    if (!ok) ok = copyPlainText(clientId);
+    if (!ok) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  };
   return (
-    <div data-id="network-signal" className="flex items-center gap-1.5 h-4 cursor-default" title={label}>
+    <div
+      data-id="network-signal"
+      className="relative flex items-center gap-1.5 h-4 cursor-default pr-1 pb-3"
+      onPointerEnter={() => setOpen(true)}
+      onPointerLeave={() => setOpen(false)}
+    >
       <div data-id="network-signal-bars" className="flex items-end gap-[2px] h-4">
         {[6, 8, 10, 12].map((h, i) => (
           <div key={i} data-id={`network-signal-bar-${i + 1}`} className={`w-[3px] rounded-sm transition-colors ${i < bars ? color : 'bg-zinc-800'}`} style={{ height: h }} />
         ))}
       </div>
-      <span data-id="network-signal-label" className="mt-[5px] min-w-[28px] text-[10px] leading-none text-zinc-600">{label}</span>
+      <span
+        data-id="network-signal-label"
+        className="mt-[5px] min-w-[28px] text-[10px] leading-none text-zinc-600"
+      >
+        {label}
+      </span>
+      {open ? (
+        <div className="absolute right-0 top-full z-[180] min-w-[240px] rounded-lg border border-white/[0.08] bg-[#111113]/98 px-3 py-2 text-[11px] shadow-2xl backdrop-blur-xl">
+          <div className="text-zinc-500">WebSocket</div>
+          <div className="mt-1 flex items-start gap-2">
+            <div className="min-w-0 flex-1 font-mono text-zinc-200 break-all">{clientId || '未连接 client_id'}</div>
+            <button
+              type="button"
+              data-id="network-signal-copy-client-id"
+              className="shrink-0 rounded p-1 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200 transition-colors"
+              onClick={() => { void handleCopy(); }}
+              title="复制 client_id"
+            >
+              {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+            </button>
+          </div>
+          <div className="mt-1 text-zinc-500">{connected ? '已连接' : '未连接'}</div>
+          {copied ? <div className="mt-1 text-emerald-400">已复制 client_id</div> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

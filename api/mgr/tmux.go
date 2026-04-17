@@ -34,10 +34,14 @@ const openClawAgentReadyTimeout = 150 * time.Second
 const submitConfirmPollInterval = 200 * time.Millisecond
 const codexSubmitConfirmPollInterval = 80 * time.Millisecond
 const submitConfirmTimeout = 4 * time.Second
+const codexSubmitConfirmTimeout = 1200 * time.Millisecond
 const submitEnterRetryLimit = 2
+const codexSubmitEnterRetryLimit = 0
 const startupPromptBatchWindow = 5 * time.Second
 const startupPromptCooldown = 15 * time.Second
 const directPromptRuneThreshold = 600
+const bracketedPasteStart = "\x1b[200~"
+const bracketedPasteEnd = "\x1b[201~"
 
 type startupPromptTask struct {
 	paneID    string
@@ -59,6 +63,15 @@ type tmuxSendTrace struct {
 	AgentType string
 }
 
+type paneSendRequest struct {
+	text   string
+	result chan error
+}
+
+type paneSendWorker struct {
+	ch chan paneSendRequest
+}
+
 var replyInChineseStartupQueue = func() *startupPromptQueue {
 	q := &startupPromptQueue{
 		pending:   map[string]startupPromptTask{},
@@ -69,6 +82,8 @@ var replyInChineseStartupQueue = func() *startupPromptQueue {
 }()
 
 var tmuxSendTraceMu sync.Mutex
+var paneSendWorkersMu sync.Mutex
+var paneSendWorkers = map[string]*paneSendWorker{}
 
 func newTmuxSendTrace(paneID, agentType string) *tmuxSendTrace {
 	return &tmuxSendTrace{
@@ -84,6 +99,14 @@ func tmuxSendTraceLogPath() string {
 		return filepath.Join(os.TempDir(), "cicy-tmux-send.log")
 	}
 	return filepath.Join(home, ".cicy", "tmux-send.log")
+}
+
+func tmuxClientTraceLogPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join(os.TempDir(), "cicy-tmux-client-trace.log")
+	}
+	return filepath.Join(home, ".cicy", "tmux-client-trace.log")
 }
 
 func (t *tmuxSendTrace) logStep(step string, meta map[string]any, body string) {
@@ -127,6 +150,41 @@ func (t *tmuxSendTrace) logStep(step string, meta map[string]any, body string) {
 		return
 	}
 	log.Printf("[tmux-send-trace] id=%s pane=%s step=%s", t.ID, shortPaneID(t.PaneID), step)
+}
+
+func appendTmuxClientTrace(entry map[string]any) {
+	if entry == nil {
+		return
+	}
+	entry["ts_server"] = time.Now().UTC().Format(time.RFC3339Nano)
+	payload, _ := json.Marshal(entry)
+	path := tmuxClientTraceLogPath()
+	_ = os.MkdirAll(filepath.Dir(path), 0755)
+	tmuxSendTraceMu.Lock()
+	defer tmuxSendTraceMu.Unlock()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.Printf("[tmux-client-trace] log-open-error=%v", err)
+		return
+	}
+	defer f.Close()
+	if _, err := f.Write(append(payload, '\n')); err != nil {
+		log.Printf("[tmux-client-trace] log-write-error=%v", err)
+		return
+	}
+}
+
+func handleTmuxClientTrace(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req M
+	readBody(r, &req)
+	req["remote_addr"] = r.RemoteAddr
+	req["user_agent"] = r.UserAgent()
+	appendTmuxClientTrace(req)
+	J(w, M{"success": true})
 }
 
 func paneStartupPromptOrder(paneID string) int {
@@ -646,7 +704,7 @@ func normalizeAgentType(agentType string) string {
 }
 
 func normalizedOpenClawPrimaryModel() string {
-	model := strings.ToLower(strings.TrimSpace(os.Getenv("CICY_OPENCLAW_MODEL")))
+	model := strings.ToLower(strings.TrimSpace(loadRuntimeAIConfig().OpenClawModel))
 	switch model {
 	case "":
 		return "claude-sonnet-4-6"
@@ -740,6 +798,7 @@ fi`, commandName, label)
 }
 
 func agentBootLines(agentType string, allowAllActions bool, shortID string) []string {
+	aiCfg := loadRuntimeAIConfig()
 	switch normalizeAgentType(agentType) {
 	case "openclaw":
 		home, _ := os.UserHomeDir()
@@ -756,7 +815,7 @@ func agentBootLines(agentType string, allowAllActions bool, shortID string) []st
 			fmt.Sprintf("export OPENCLAW_STATE_DIR=%s", tmuxShellQuote(stateDir)),
 			fmt.Sprintf("export OPENCLAW_SESSION_KEY=%s", tmuxShellQuote("agent:main:"+sessionName)),
 			fmt.Sprintf("export OPENCLAW_SESSION_STORE=%s", tmuxShellQuote(sessionStorePath)),
-			fmt.Sprintf("export OPENAI_API_KEY=%s", tmuxShellQuote(os.Getenv("CICY_API_KEY"))),
+			fmt.Sprintf("export OPENAI_API_KEY=%s", tmuxShellQuote("cicy-local-gateway")),
 			fmt.Sprintf("export OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
 			fmt.Sprintf("export ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
 			fmt.Sprintf("mkdir -p %s", tmuxShellQuote(stateDir)),
@@ -834,6 +893,7 @@ cfg.agents ||= {};
 cfg.agents.defaults ||= {};
 cfg.agents.defaults.contextTokens = providerApi === "anthropic-messages" ? 200000 : 272000;
 cfg.models.providers.cicy.baseUrl = baseUrl;
+cfg.models.providers.cicy.apiKey = "cicy-local-gateway";
 	cfg.models.providers.cicy.api = providerApi;
 	if (Array.isArray(cfg.models.providers.cicy.models)) {
 	  cfg.models.providers.cicy.models = cfg.models.providers.cicy.models.map((entry) => {
@@ -883,9 +943,7 @@ EOF`,
 			`export OPENCLAW_GATEWAY_TOKEN="$(node -e 'const fs=require("fs"); const p=process.env.OPENCLAW_CONFIG_PATH; try { const data=JSON.parse(fs.readFileSync(p, "utf8")); process.stdout.write((((data.gateway || {}).auth || {}).token || "")); } catch (_) {}')"`,
 		}
 		lines = append(lines, ensureAgentCommandLine("openclaw", "OpenClaw", openClawInstallCmd(), installLog))
-		lines = append(lines, fmt.Sprintf(`oc() {
-  command openclaw --profile %s "$@"
-}`, tmuxShellQuote(shortID)))
+		lines = append(lines, fmt.Sprintf(`openclaw_profile_cmd=(openclaw --profile %s)`, tmuxShellQuote(shortID)))
 		if allowAllActions {
 			approvalsPath := fmt.Sprintf("%s/exec-approvals.json", stateDir)
 			lines = append(lines, fmt.Sprintf(`cat > %s <<'EOF'
@@ -908,224 +966,224 @@ EOF`,
 }
 EOF`, tmuxShellQuote(approvalsPath)))
 		}
-			if shortID == primaryWorkerSession {
-				lines = append(lines,
-					fmt.Sprintf(`openclaw_sessions_store=%s`, tmuxShellQuote(filepath.Join(stateDir, "agents", "main", "sessions", "sessions.json"))),
-					fmt.Sprintf(`weixin_accounts_path=%s`, tmuxShellQuote(filepath.Join(stateDir, "openclaw-weixin", "accounts.json"))),
-					fmt.Sprintf(`weixin_accounts_dir=%s`, tmuxShellQuote(filepath.Join(stateDir, "openclaw-weixin", "accounts"))),
-					fmt.Sprintf(`weixin_ready_notify_state=%s`, tmuxShellQuote(filepath.Join(stateDir, "openclaw-weixin", ".last-ready-notify"))),
-					fmt.Sprintf(`weixin_welcome_state=%s`, tmuxShellQuote(filepath.Join(stateDir, "openclaw-weixin", ".last-welcome-stamp"))),
-					fmt.Sprintf(`feishu_welcome_state=%s`, tmuxShellQuote(filepath.Join(stateDir, "openclaw-lark", ".last-welcome-stamp"))),
-				)
-			}
+		if shortID == primaryWorkerSession {
+			lines = append(lines,
+				fmt.Sprintf(`openclaw_sessions_store=%s`, tmuxShellQuote(filepath.Join(stateDir, "agents", "main", "sessions", "sessions.json"))),
+				fmt.Sprintf(`weixin_accounts_path=%s`, tmuxShellQuote(filepath.Join(stateDir, "openclaw-weixin", "accounts.json"))),
+				fmt.Sprintf(`weixin_accounts_dir=%s`, tmuxShellQuote(filepath.Join(stateDir, "openclaw-weixin", "accounts"))),
+				fmt.Sprintf(`weixin_ready_notify_state=%s`, tmuxShellQuote(filepath.Join(stateDir, "openclaw-weixin", ".last-ready-notify"))),
+				fmt.Sprintf(`weixin_welcome_state=%s`, tmuxShellQuote(filepath.Join(stateDir, "openclaw-weixin", ".last-welcome-stamp"))),
+				fmt.Sprintf(`feishu_welcome_state=%s`, tmuxShellQuote(filepath.Join(stateDir, "openclaw-lark", ".last-welcome-stamp"))),
+			)
+		}
 		gatewayLog := filepath.Join(stateDir, "openclaw-gateway.log")
 		tmpGatewayLog := filepath.Join("/tmp", fmt.Sprintf("openclaw-gateway-%s.log", shortID))
 		lines = append(lines,
-				strings.Join([]string{
-					"resolve_openclaw_tui_session() {",
-					`  node - "$OPENCLAW_SESSION_STORE" "$weixin_accounts_dir" <<'EOF'`,
-					`const fs = require("fs");`,
-					`const path = require("path");`,
-					`const storePath = process.argv[2];`,
-					`const accountsDir = process.argv[3];`,
-					`const fallback = "main";`,
-					`const prefix = "agent:main:openclaw-weixin:direct:";`,
-					`function latestWeixinAccountSession(dir) {`,
-					`  if (!dir || !fs.existsSync(dir)) return "";`,
-					`  const files = fs.readdirSync(dir)`,
-					`    .filter((name) => name.endsWith(".json") && !name.endsWith(".sync.json") && !name.endsWith(".context-tokens.json"))`,
-					`    .sort();`,
-					`  if (!files.length) return "";`,
-					`  const file = path.join(dir, files[files.length - 1]);`,
-					`  const raw = JSON.parse(fs.readFileSync(file, "utf8"));`,
-					`  const userId = String((raw && raw.userId) || "").trim().toLowerCase();`,
-					`  if (!userId) return "";`,
-					`  return "openclaw-weixin:direct:" + userId;`,
-					`}`,
-					`try {`,
-					`  if (!storePath || !fs.existsSync(storePath)) {`,
-					`    process.stdout.write(latestWeixinAccountSession(accountsDir) || fallback);`,
-					`    process.exit(0);`,
-					`  }`,
-					`  const raw = JSON.parse(fs.readFileSync(storePath, "utf8"));`,
-					`  const matches = Object.entries(raw || {})`,
-					`    .filter(([key]) => typeof key === "string" && key.startsWith(prefix))`,
-					`    .map(([key, value]) => ({`,
-					`      sessionName: key.slice("agent:main:".length),`,
-					`      updatedAt: Number((value && value.updatedAt) || 0),`,
-					`    }))`,
-					`    .filter((entry) => entry.sessionName);`,
-					`  matches.sort((a, b) => b.updatedAt - a.updatedAt || a.sessionName.localeCompare(b.sessionName));`,
-					`  process.stdout.write((matches[0] && matches[0].sessionName) || latestWeixinAccountSession(accountsDir) || fallback);`,
-					`} catch (_) {`,
-					`  process.stdout.write(latestWeixinAccountSession(accountsDir) || fallback);`,
-					`}`,
-					`EOF`,
-					`}`,
-				}, "\n"),
-				`sync_openclaw_session_key() {`,
-				`  selected_session="$(resolve_openclaw_tui_session)"`,
-				`  [ -n "$selected_session" ] || selected_session="main"`,
-				`  export OPENCLAW_SESSION_KEY="agent:main:${selected_session}"`,
+			strings.Join([]string{
+				"resolve_openclaw_tui_session() {",
+				`  node - "$OPENCLAW_SESSION_STORE" "$weixin_accounts_dir" <<'EOF'`,
+				`const fs = require("fs");`,
+				`const path = require("path");`,
+				`const storePath = process.argv[2];`,
+				`const accountsDir = process.argv[3];`,
+				`const fallback = "main";`,
+				`const prefix = "agent:main:openclaw-weixin:direct:";`,
+				`function latestWeixinAccountSession(dir) {`,
+				`  if (!dir || !fs.existsSync(dir)) return "";`,
+				`  const files = fs.readdirSync(dir)`,
+				`    .filter((name) => name.endsWith(".json") && !name.endsWith(".sync.json") && !name.endsWith(".context-tokens.json"))`,
+				`    .sort();`,
+				`  if (!files.length) return "";`,
+				`  const file = path.join(dir, files[files.length - 1]);`,
+				`  const raw = JSON.parse(fs.readFileSync(file, "utf8"));`,
+				`  const userId = String((raw && raw.userId) || "").trim().toLowerCase();`,
+				`  if (!userId) return "";`,
+				`  return "openclaw-weixin:direct:" + userId;`,
 				`}`,
-				`cicy_ts() {`,
-				`  date '+%H:%M:%S'`,
+				`try {`,
+				`  if (!storePath || !fs.existsSync(storePath)) {`,
+				`    process.stdout.write(latestWeixinAccountSession(accountsDir) || fallback);`,
+				`    process.exit(0);`,
+				`  }`,
+				`  const raw = JSON.parse(fs.readFileSync(storePath, "utf8"));`,
+				`  const matches = Object.entries(raw || {})`,
+				`    .filter(([key]) => typeof key === "string" && key.startsWith(prefix))`,
+				`    .map(([key, value]) => ({`,
+				`      sessionName: key.slice("agent:main:".length),`,
+				`      updatedAt: Number((value && value.updatedAt) || 0),`,
+				`    }))`,
+				`    .filter((entry) => entry.sessionName);`,
+				`  matches.sort((a, b) => b.updatedAt - a.updatedAt || a.sessionName.localeCompare(b.sessionName));`,
+				`  process.stdout.write((matches[0] && matches[0].sessionName) || latestWeixinAccountSession(accountsDir) || fallback);`,
+				`} catch (_) {`,
+				`  process.stdout.write(latestWeixinAccountSession(accountsDir) || fallback);`,
 				`}`,
-				`cicy_log() {`,
-				`  printf '[%s] [cicy] %s\n' "$(cicy_ts)" "$*"`,
+				`EOF`,
 				`}`,
-				`cicy_sep() {`,
-				`  cicy_log '=================================================='`,
+			}, "\n"),
+			`sync_openclaw_session_key() {`,
+			`  selected_session="$(resolve_openclaw_tui_session)"`,
+			`  [ -n "$selected_session" ] || selected_session="main"`,
+			`  export OPENCLAW_SESSION_KEY="agent:main:${selected_session}"`,
+			`}`,
+			`cicy_ts() {`,
+			`  date '+%H:%M:%S'`,
+			`}`,
+			`cicy_log() {`,
+			`  printf '[%s] [cicy] %s\n' "$(cicy_ts)" "$*"`,
+			`}`,
+			`cicy_sep() {`,
+			`  cicy_log '=================================================='`,
+			`}`,
+			`cicy_pause() {`,
+			`  printf '\n'`,
+			`  read -r -p '按 Enter 返回管理台...' _cicy_pause || true`,
+			`}`,
+			strings.Join([]string{
+				"latest_channel_session_env() {",
+				`  node - "$openclaw_sessions_store" "$1" <<'EOF'`,
+				`const fs = require("fs");`,
+				`const storePath = process.argv[2];`,
+				`const wanted = String(process.argv[3] || "").trim().toLowerCase();`,
+				`function shellQuote(value) {`,
+				`  return "'" + String(value ?? "").replace(/'/g, "'\"'\"'") + "'";`,
 				`}`,
-					`cicy_pause() {`,
-					`  printf '\n'`,
-					`  read -r -p '按 Enter 返回管理台...' _cicy_pause || true`,
-					`}`,
-					strings.Join([]string{
-						"latest_channel_session_env() {",
-						`  node - "$openclaw_sessions_store" "$1" <<'EOF'`,
-						`const fs = require("fs");`,
-						`const storePath = process.argv[2];`,
-						`const wanted = String(process.argv[3] || "").trim().toLowerCase();`,
-						`function shellQuote(value) {`,
-						`  return "'" + String(value ?? "").replace(/'/g, "'\"'\"'") + "'";`,
-						`}`,
-						`function detectChannel(entry) {`,
-						`  return String((((entry || {}).deliveryContext || {}).channel) || entry.lastChannel || (((entry || {}).origin || {}).provider) || "").trim().toLowerCase();`,
-						`}`,
-						`function detectLabel(key, entry) {`,
-						`  const origin = (entry && entry.origin) || {};`,
-						`  const delivery = (entry && entry.deliveryContext) || {};`,
-						`  return String(origin.label || delivery.to || origin.to || key.replace(/^agent:[^:]+:/, "")).trim();`,
-						`}`,
-						`function shorten(value) {`,
-						`  const text = String(value || "").trim();`,
-						`  if (!text) return "";`,
-						`  if (text.length <= 48) return text;`,
-						`  return text.slice(0, 22) + "..." + text.slice(-18);`,
-						`}`,
-						`function displayName(key, entry) {`,
-						`  const channel = detectChannel(entry);`,
-						`  const origin = (entry && entry.origin) || {};`,
-						`  const chatType = String(origin.chatType || entry.chatType || "").trim().toLowerCase();`,
-						`  const channelLabelMap = { "openclaw-weixin": "微信", feishu: "飞书", webchat: "网页", telegram: "Telegram", slack: "Slack" };`,
-						`  const chatTypeMap = { direct: "单聊", group: "群聊", channel: "频道", thread: "话题" };`,
-						`  const channelLabel = channelLabelMap[channel] || channel || "会话";`,
-						`  const chatTypeLabel = chatTypeMap[chatType] || "";`,
-						`  const label = shorten(detectLabel(key, entry)) || "未命名会话";`,
-						`  return channelLabel + (chatTypeLabel ? " " + chatTypeLabel : "") + " | " + label;`,
-						`}`,
-						`try {`,
-						`  if (!wanted || !storePath || !fs.existsSync(storePath)) process.exit(0);`,
-						`  const raw = JSON.parse(fs.readFileSync(storePath, "utf8"));`,
-						`  const matches = Object.entries(raw || {})`,
-						`    .map(([key, entry]) => ({ key, entry, updatedAt: Number((entry && entry.updatedAt) || 0) }))`,
-						`    .filter((item) => detectChannel(item.entry) === wanted)`,
-						`    .sort((a, b) => b.updatedAt - a.updatedAt || a.key.localeCompare(b.key));`,
-						`  const current = matches[0];`,
-						`  if (!current) process.exit(0);`,
-						`  const delivery = (current.entry && current.entry.deliveryContext) || {};`,
-						`  const origin = (current.entry && current.entry.origin) || {};`,
-						`  process.stdout.write("session_key=" + shellQuote(current.key) + "\n");`,
-						`  process.stdout.write("session_name=" + shellQuote(current.key.replace(/^agent:[^:]+:/, "")) + "\n");`,
-						`  process.stdout.write("session_display=" + shellQuote(displayName(current.key, current.entry)) + "\n");`,
-						`  process.stdout.write("session_target=" + shellQuote(String(delivery.to || current.entry.lastTo || origin.to || "")) + "\n");`,
-						`  process.stdout.write("session_account_id=" + shellQuote(String(delivery.accountId || current.entry.lastAccountId || origin.accountId || "")) + "\n");`,
-						`  process.stdout.write("session_thread_id=" + shellQuote(String(delivery.threadId || current.entry.lastThreadId || origin.threadId || "")) + "\n");`,
-						`  process.stdout.write("session_updated_at=" + shellQuote(String(current.updatedAt || "")) + "\n");`,
-						`  process.stdout.write("session_label=" + shellQuote(String(origin.label || "")) + "\n");`,
-						`} catch (_) {}`,
-						`EOF`,
-						`}`,
-					}, "\n"),
-					strings.Join([]string{
-						"current_session_display_name() {",
-						`  node - "$openclaw_sessions_store" "$selected_session" <<'EOF'`,
-						`const fs = require("fs");`,
-						`const storePath = process.argv[2];`,
-						`const selected = String(process.argv[3] || "").trim();`,
-						`function detectChannel(entry) {`,
-						`  return String((((entry || {}).deliveryContext || {}).channel) || entry.lastChannel || (((entry || {}).origin || {}).provider) || "").trim().toLowerCase();`,
-						`}`,
-						`function detectLabel(key, entry) {`,
-						`  const origin = (entry && entry.origin) || {};`,
-						`  const delivery = (entry && entry.deliveryContext) || {};`,
-						`  return String(origin.label || delivery.to || origin.to || key.replace(/^agent:[^:]+:/, "")).trim();`,
-						`}`,
-						`function shorten(value) {`,
-						`  const text = String(value || "").trim();`,
-						`  if (!text) return "";`,
-						`  if (text.length <= 48) return text;`,
-						`  return text.slice(0, 22) + "..." + text.slice(-18);`,
-						`}`,
-						`function displayName(key, entry) {`,
-						`  if (!entry) return selected === "main" ? "主会话" : selected || "主会话";`,
-						`  const channel = detectChannel(entry);`,
-						`  const origin = (entry && entry.origin) || {};`,
-						`  const chatType = String(origin.chatType || entry.chatType || "").trim().toLowerCase();`,
-						`  const channelLabelMap = { "openclaw-weixin": "微信", feishu: "飞书", webchat: "网页", telegram: "Telegram", slack: "Slack" };`,
-						`  const chatTypeMap = { direct: "单聊", group: "群聊", channel: "频道", thread: "话题" };`,
-						`  const channelLabel = channelLabelMap[channel] || channel || "会话";`,
-						`  const chatTypeLabel = chatTypeMap[chatType] || "";`,
-						`  const label = shorten(detectLabel(key, entry)) || "未命名会话";`,
-						`  return channelLabel + (chatTypeLabel ? " " + chatTypeLabel : "") + " | " + label;`,
-						`}`,
-						`try {`,
-						`  if (!storePath || !fs.existsSync(storePath)) {`,
-						`    process.stdout.write(selected === "main" ? "主会话" : (selected || "主会话"));`,
-						`    process.exit(0);`,
-						`  }`,
-						`  const raw = JSON.parse(fs.readFileSync(storePath, "utf8"));`,
-						`  const key = selected.startsWith("agent:") ? selected : ("agent:main:" + (selected || "main"));`,
-						`  process.stdout.write(displayName(key, raw[key] || null));`,
-						`} catch (_) {`,
-						`  process.stdout.write(selected === "main" ? "主会话" : (selected || "主会话"));`,
-						`}`,
-						`EOF`,
-						`}`,
-					}, "\n"),
-					strings.Join([]string{
-						"openclaw_send_channel_message() {",
-						`  send_channel="$1"`,
-						`  send_message="$2"`,
-						`  eval "$(latest_channel_session_env "$send_channel")"`,
-						`  if [ -z "$session_key" ] || [ -z "$session_target" ]; then`,
-						`    cicy_log "${send_channel} 当前没有可发送的活跃会话。"` ,
-						`    return 1`,
-						`  fi`,
-						`  send_params="$(node - "$send_channel" "$session_target" "$session_account_id" "$session_thread_id" "$session_key" "$send_message" <<'EOF'`,
-						`const [channel, to, accountId, threadId, sessionKey, message] = process.argv.slice(2);`,
-						`const payload = {`,
-						`  channel,`,
-						`  to,`,
-						`  message,`,
-						`  sessionKey,`,
-						`  idempotencyKey: "cicy-" + Date.now() + "-" + Math.random().toString(16).slice(2),`,
-						`};`,
-						`if (accountId) payload.accountId = accountId;`,
-						`if (threadId) payload.threadId = threadId;`,
-						`process.stdout.write(JSON.stringify(payload));`,
-						`EOF`,
-						`  )"`,
-						`  send_out="$(oc gateway call send --json --params "$send_params" 2>&1 || true)"`,
-						`  send_ok="$(printf '%s' "$send_out" | node -e 'let data=""; process.stdin.on("data",(chunk)=>data+=chunk).on("end",()=>{ try { const parsed = JSON.parse(data); process.stdout.write(parsed && parsed.messageId ? "1" : "0"); } catch (_) { process.stdout.write("0"); } });')"`,
-						`  if [ "$send_ok" = "1" ]; then`,
-						`    return 0`,
-						`  fi`,
-						`  cicy_log "${send_channel} 消息发送失败: $send_out"` ,
-						`  return 1`,
-						`}`,
-					}, "\n"),
-					`sync_openclaw_session_key`,
-					`cicy_log "已准备 OpenClaw 会话: $(current_session_display_name)"`,
-				fmt.Sprintf(`openclaw_gateway_ready() {
+				`function detectChannel(entry) {`,
+				`  return String((((entry || {}).deliveryContext || {}).channel) || entry.lastChannel || (((entry || {}).origin || {}).provider) || "").trim().toLowerCase();`,
+				`}`,
+				`function detectLabel(key, entry) {`,
+				`  const origin = (entry && entry.origin) || {};`,
+				`  const delivery = (entry && entry.deliveryContext) || {};`,
+				`  return String(origin.label || delivery.to || origin.to || key.replace(/^agent:[^:]+:/, "")).trim();`,
+				`}`,
+				`function shorten(value) {`,
+				`  const text = String(value || "").trim();`,
+				`  if (!text) return "";`,
+				`  if (text.length <= 48) return text;`,
+				`  return text.slice(0, 22) + "..." + text.slice(-18);`,
+				`}`,
+				`function displayName(key, entry) {`,
+				`  const channel = detectChannel(entry);`,
+				`  const origin = (entry && entry.origin) || {};`,
+				`  const chatType = String(origin.chatType || entry.chatType || "").trim().toLowerCase();`,
+				`  const channelLabelMap = { "openclaw-weixin": "微信", feishu: "飞书", webchat: "网页", telegram: "Telegram", slack: "Slack" };`,
+				`  const chatTypeMap = { direct: "单聊", group: "群聊", channel: "频道", thread: "话题" };`,
+				`  const channelLabel = channelLabelMap[channel] || channel || "会话";`,
+				`  const chatTypeLabel = chatTypeMap[chatType] || "";`,
+				`  const label = shorten(detectLabel(key, entry)) || "未命名会话";`,
+				`  return channelLabel + (chatTypeLabel ? " " + chatTypeLabel : "") + " | " + label;`,
+				`}`,
+				`try {`,
+				`  if (!wanted || !storePath || !fs.existsSync(storePath)) process.exit(0);`,
+				`  const raw = JSON.parse(fs.readFileSync(storePath, "utf8"));`,
+				`  const matches = Object.entries(raw || {})`,
+				`    .map(([key, entry]) => ({ key, entry, updatedAt: Number((entry && entry.updatedAt) || 0) }))`,
+				`    .filter((item) => detectChannel(item.entry) === wanted)`,
+				`    .sort((a, b) => b.updatedAt - a.updatedAt || a.key.localeCompare(b.key));`,
+				`  const current = matches[0];`,
+				`  if (!current) process.exit(0);`,
+				`  const delivery = (current.entry && current.entry.deliveryContext) || {};`,
+				`  const origin = (current.entry && current.entry.origin) || {};`,
+				`  process.stdout.write("session_key=" + shellQuote(current.key) + "\n");`,
+				`  process.stdout.write("session_name=" + shellQuote(current.key.replace(/^agent:[^:]+:/, "")) + "\n");`,
+				`  process.stdout.write("session_display=" + shellQuote(displayName(current.key, current.entry)) + "\n");`,
+				`  process.stdout.write("session_target=" + shellQuote(String(delivery.to || current.entry.lastTo || origin.to || "")) + "\n");`,
+				`  process.stdout.write("session_account_id=" + shellQuote(String(delivery.accountId || current.entry.lastAccountId || origin.accountId || "")) + "\n");`,
+				`  process.stdout.write("session_thread_id=" + shellQuote(String(delivery.threadId || current.entry.lastThreadId || origin.threadId || "")) + "\n");`,
+				`  process.stdout.write("session_updated_at=" + shellQuote(String(current.updatedAt || "")) + "\n");`,
+				`  process.stdout.write("session_label=" + shellQuote(String(origin.label || "")) + "\n");`,
+				`} catch (_) {}`,
+				`EOF`,
+				`}`,
+			}, "\n"),
+			strings.Join([]string{
+				"current_session_display_name() {",
+				`  node - "$openclaw_sessions_store" "$selected_session" <<'EOF'`,
+				`const fs = require("fs");`,
+				`const storePath = process.argv[2];`,
+				`const selected = String(process.argv[3] || "").trim();`,
+				`function detectChannel(entry) {`,
+				`  return String((((entry || {}).deliveryContext || {}).channel) || entry.lastChannel || (((entry || {}).origin || {}).provider) || "").trim().toLowerCase();`,
+				`}`,
+				`function detectLabel(key, entry) {`,
+				`  const origin = (entry && entry.origin) || {};`,
+				`  const delivery = (entry && entry.deliveryContext) || {};`,
+				`  return String(origin.label || delivery.to || origin.to || key.replace(/^agent:[^:]+:/, "")).trim();`,
+				`}`,
+				`function shorten(value) {`,
+				`  const text = String(value || "").trim();`,
+				`  if (!text) return "";`,
+				`  if (text.length <= 48) return text;`,
+				`  return text.slice(0, 22) + "..." + text.slice(-18);`,
+				`}`,
+				`function displayName(key, entry) {`,
+				`  if (!entry) return selected === "main" ? "主会话" : selected || "主会话";`,
+				`  const channel = detectChannel(entry);`,
+				`  const origin = (entry && entry.origin) || {};`,
+				`  const chatType = String(origin.chatType || entry.chatType || "").trim().toLowerCase();`,
+				`  const channelLabelMap = { "openclaw-weixin": "微信", feishu: "飞书", webchat: "网页", telegram: "Telegram", slack: "Slack" };`,
+				`  const chatTypeMap = { direct: "单聊", group: "群聊", channel: "频道", thread: "话题" };`,
+				`  const channelLabel = channelLabelMap[channel] || channel || "会话";`,
+				`  const chatTypeLabel = chatTypeMap[chatType] || "";`,
+				`  const label = shorten(detectLabel(key, entry)) || "未命名会话";`,
+				`  return channelLabel + (chatTypeLabel ? " " + chatTypeLabel : "") + " | " + label;`,
+				`}`,
+				`try {`,
+				`  if (!storePath || !fs.existsSync(storePath)) {`,
+				`    process.stdout.write(selected === "main" ? "主会话" : (selected || "主会话"));`,
+				`    process.exit(0);`,
+				`  }`,
+				`  const raw = JSON.parse(fs.readFileSync(storePath, "utf8"));`,
+				`  const key = selected.startsWith("agent:") ? selected : ("agent:main:" + (selected || "main"));`,
+				`  process.stdout.write(displayName(key, raw[key] || null));`,
+				`} catch (_) {`,
+				`  process.stdout.write(selected === "main" ? "主会话" : (selected || "主会话"));`,
+				`}`,
+				`EOF`,
+				`}`,
+			}, "\n"),
+			strings.Join([]string{
+				"openclaw_send_channel_message() {",
+				`  send_channel="$1"`,
+				`  send_message="$2"`,
+				`  eval "$(latest_channel_session_env "$send_channel")"`,
+				`  if [ -z "$session_key" ] || [ -z "$session_target" ]; then`,
+				`    cicy_log "${send_channel} 当前没有可发送的活跃会话。"`,
+				`    return 1`,
+				`  fi`,
+				`  send_params="$(node - "$send_channel" "$session_target" "$session_account_id" "$session_thread_id" "$session_key" "$send_message" <<'EOF'`,
+				`const [channel, to, accountId, threadId, sessionKey, message] = process.argv.slice(2);`,
+				`const payload = {`,
+				`  channel,`,
+				`  to,`,
+				`  message,`,
+				`  sessionKey,`,
+				`  idempotencyKey: "cicy-" + Date.now() + "-" + Math.random().toString(16).slice(2),`,
+				`};`,
+				`if (accountId) payload.accountId = accountId;`,
+				`if (threadId) payload.threadId = threadId;`,
+				`process.stdout.write(JSON.stringify(payload));`,
+				`EOF`,
+				`  )"`,
+				`  send_out="$("${openclaw_profile_cmd[@]}" gateway call send --json --params "$send_params" 2>&1 || true)"`,
+				`  send_ok="$(printf '%s' "$send_out" | node -e 'let data=""; process.stdin.on("data",(chunk)=>data+=chunk).on("end",()=>{ try { const parsed = JSON.parse(data); process.stdout.write(parsed && parsed.messageId ? "1" : "0"); } catch (_) { process.stdout.write("0"); } });')"`,
+				`  if [ "$send_ok" = "1" ]; then`,
+				`    return 0`,
+				`  fi`,
+				`  cicy_log "${send_channel} 消息发送失败: $send_out"`,
+				`  return 1`,
+				`}`,
+			}, "\n"),
+			`sync_openclaw_session_key`,
+			`cicy_log "已准备 OpenClaw 会话: $(current_session_display_name)"`,
+			fmt.Sprintf(`openclaw_gateway_ready() {
   (exec 3<>/dev/tcp/127.0.0.1/%s) >/dev/null 2>&1
 }`, openClawPort()),
-				fmt.Sprintf(`gateway_log=%s`, tmuxShellQuote(tmpGatewayLog)),
-				`openclaw_gateway_running() {
+			fmt.Sprintf(`gateway_log=%s`, tmuxShellQuote(tmpGatewayLog)),
+			`openclaw_gateway_running() {
   pgrep -x openclaw-gateway >/dev/null 2>&1
 }`,
-				`restart_openclaw_gateway_for_session() {
+			`restart_openclaw_gateway_for_session() {
   if ! openclaw_gateway_running; then
     return 0
   fi
@@ -1139,7 +1197,7 @@ EOF`, tmuxShellQuote(approvalsPath)))
   done
   cicy_log "gateway 在 30 秒后仍未完全退出，继续后续流程。"
 }`,
-				`ensure_openclaw_gateway() {
+			`ensure_openclaw_gateway() {
   if openclaw_gateway_ready; then
     return 0
   fi
@@ -1149,7 +1207,7 @@ EOF`, tmuxShellQuote(approvalsPath)))
     rm -f "$gateway_log"
     : > "$gateway_log"
     rm -f `+tmuxShellQuote(gatewayLog)+`
-    nohup oc gateway run --verbose >"$gateway_log" 2>&1 </dev/null &
+    nohup "${openclaw_profile_cmd[@]}" gateway run --verbose >"$gateway_log" 2>&1 </dev/null &
   else
     cicy_log "检测到已有 gateway 进程，等待就绪 ..."
   fi
@@ -1184,7 +1242,7 @@ EOF`, tmuxShellQuote(approvalsPath)))
     return 1
   fi
 }`,
-				)
+		)
 		if shortID != primaryWorkerSession {
 			lines = append(lines, `ensure_openclaw_gateway`)
 		}
@@ -1232,31 +1290,31 @@ EOF
 					`EOF`,
 					"}",
 				}, "\n"),
-					strings.Join([]string{
-						"weixin_wait_until_ready() {",
-						`  eval "$(weixin_latest_account_env)"`,
-						`  [ -n "$account_id" ] || return 0`,
-						`  cicy_log "正在等待微信进入可交互状态 ..."`,
-						`  provider_seen=0`,
-						`  for i in $(seq 1 120); do`,
-						`    if [ "$provider_seen" -ne 1 ] && grep -Fq "[$account_id] starting weixin provider" "$gateway_log" 2>/dev/null; then`,
-						`      cicy_log "微信 provider 正在启动 ..."`,
-						`      provider_seen=1`,
-						`    fi`,
-						`    if grep -Fq "weixin monitor started" "$gateway_log" 2>/dev/null && grep -Fq "account=${account_id}" "$gateway_log" 2>/dev/null; then`,
-						`      cicy_log "微信监控已上线。"` ,
-						`      return 0`,
-						`    fi`,
-						`    if [ $((i % 5)) -eq 0 ]; then`,
-						`      cicy_log "等待微信可交互 ${i}s/120s ..."`,
-						`    fi`,
-						`    sleep 1`,
-						`  done`,
-						`  cicy_log "微信在 120 秒后仍未完成预热。"` ,
-						`  return 1`,
-						"}",
-					}, "\n"),
-					fmt.Sprintf(`weixin_send_welcome() {
+				strings.Join([]string{
+					"weixin_wait_until_ready() {",
+					`  eval "$(weixin_latest_account_env)"`,
+					`  [ -n "$account_id" ] || return 0`,
+					`  cicy_log "正在等待微信进入可交互状态 ..."`,
+					`  provider_seen=0`,
+					`  for i in $(seq 1 120); do`,
+					`    if [ "$provider_seen" -ne 1 ] && grep -Fq "[$account_id] starting weixin provider" "$gateway_log" 2>/dev/null; then`,
+					`      cicy_log "微信 provider 正在启动 ..."`,
+					`      provider_seen=1`,
+					`    fi`,
+					`    if grep -Fq "weixin monitor started" "$gateway_log" 2>/dev/null && grep -Fq "account=${account_id}" "$gateway_log" 2>/dev/null; then`,
+					`      cicy_log "微信监控已上线。"`,
+					`      return 0`,
+					`    fi`,
+					`    if [ $((i % 5)) -eq 0 ]; then`,
+					`      cicy_log "等待微信可交互 ${i}s/120s ..."`,
+					`    fi`,
+					`    sleep 1`,
+					`  done`,
+					`  cicy_log "微信在 120 秒后仍未完成预热。"`,
+					`  return 1`,
+					"}",
+				}, "\n"),
+				fmt.Sprintf(`weixin_send_welcome() {
   eval "$(weixin_latest_account_env)"
   [ -n "$account_id" ] || return 0
   stamp="${account_id}|${saved_at}"
@@ -1264,7 +1322,7 @@ EOF
     return 0
   fi
   welcome_text="你好，我是小龙虾管家，有什么可以效劳的吗？"
-  send_out="$(oc message send --channel openclaw-weixin --target "$user_id" --message "$welcome_text" 2>&1 || true)"
+  send_out="$("${openclaw_profile_cmd[@]}" message send --channel openclaw-weixin --target "$user_id" --message "$welcome_text" 2>&1 || true)"
   if printf '%%s' "$send_out" | grep -Fq "Sent via"; then
     printf '%%s' "$stamp" > "$weixin_welcome_state"
     cicy_log "欢迎消息已发送到 $user_id"
@@ -1273,329 +1331,330 @@ EOF
   cicy_log "欢迎消息发送失败: $send_out"
   return 1
 }`),
-					strings.Join([]string{
-						"feishu_has_logged_account() {",
-						`  status_json="$(oc channels status --json --probe --timeout 5000 2>/dev/null || true)"`,
-						`  node - "$status_json" <<'EOF'`,
-						`const raw = process.argv[2] || "{}";`,
-						`try {`,
-						`  const parsed = JSON.parse(raw);`,
-						`  const accounts = parsed?.channelAccounts?.feishu;`,
-						`  if (!Array.isArray(accounts) || accounts.length === 0) process.exit(1);`,
-						`  const ok = accounts.some((item) => item && item.configured !== false && item.enabled !== false);`,
-						`  process.exit(ok ? 0 : 1);`,
-						`} catch (_) {`,
-						`  process.exit(1);`,
-						`}`,
-						`EOF`,
-						"}",
-					}, "\n"),
-					strings.Join([]string{
-						"feishu_wait_until_ready() {",
-						`  if ! feishu_has_logged_account; then`,
-						`    return 0`,
-						`  fi`,
-						`  cicy_log "检测到飞书已登录，正在同时拉起飞书 ..."` ,
-						`  for i in $(seq 1 60); do`,
-						`    status_json="$(oc channels status --json --probe --timeout 5000 2>/dev/null || true)"`,
-						`    if node - "$status_json" <<'EOF'`,
-						`const raw = process.argv[2] || "{}";`,
-						`try {`,
-						`  const parsed = JSON.parse(raw);`,
-						`  const accounts = parsed?.channelAccounts?.feishu;`,
-						`  if (!Array.isArray(accounts) || accounts.length === 0) process.exit(1);`,
-						`  const ok = accounts.some((item) => item && item.running === true && item.configured !== false && item.enabled !== false);`,
-						`  process.exit(ok ? 0 : 1);`,
-						`} catch (_) {`,
-						`  process.exit(1);`,
-						`}`,
-						`EOF`,
-						`    then`,
-						`      cicy_log "飞书已上线。"` ,
-						`      return 0`,
-						`    fi`,
-						`    if [ $((i % 5)) -eq 0 ]; then`,
-						`      cicy_log "等待飞书可交互 ${i}s/60s ..."` ,
-						`    fi`,
-						`    sleep 1`,
-						`  done`,
-						`  cicy_log "飞书尚未完成启动，稍后会继续自动重连。"` ,
-						`  return 1`,
-						"}",
-					}, "\n"),
-					`boot_completed=0`,
-					`just_booted=0`,
-					`refresh_openclaw_session() {`,
-					`  previous_selected_session="$selected_session"`,
-					`  session_changed=0`,
-					`  sync_openclaw_session_key`,
-					`  if [ "$selected_session" != "$previous_selected_session" ]; then`,
-					`    session_changed=1`,
-					`    cicy_log "OpenClaw 会话已切换: $previous_selected_session -> $selected_session"`,
-					`  fi`,
+				strings.Join([]string{
+					"feishu_has_logged_account() {",
+					`  status_json="$("${openclaw_profile_cmd[@]}" channels status --json --probe --timeout 5000 2>/dev/null || true)"`,
+					`  node - "$status_json" <<'EOF'`,
+					`const raw = process.argv[2] || "{}";`,
+					`try {`,
+					`  const parsed = JSON.parse(raw);`,
+					`  const accounts = parsed?.channelAccounts?.feishu;`,
+					`  if (!Array.isArray(accounts) || accounts.length === 0) process.exit(1);`,
+					`  const ok = accounts.some((item) => item && item.configured !== false && item.enabled !== false);`,
+					`  process.exit(ok ? 0 : 1);`,
+					`} catch (_) {`,
+					`  process.exit(1);`,
 					`}`,
-					`weixin_login_and_start() {`,
-					`  login_performed=0`,
-					`  if weixin_needs_login; then`,
-					`    cicy_log "未检测到微信账号，开始二维码登录 ..."` ,
-					`    if ! oc channels login --channel openclaw-weixin; then`,
-					`      cicy_log "微信二维码登录未完成。"` ,
-					`      return 1`,
-					`    fi`,
-					`    login_performed=1`,
-					`  else`,
-					`    cicy_log "已检测到现有微信账号，直接启动服务。"` ,
-					`  fi`,
-					`  refresh_openclaw_session`,
-					`  if [ "$login_performed" = "1" ] || [ "$session_changed" = "1" ]; then`,
-					`    restart_openclaw_gateway_for_session`,
-					`  fi`,
-					`  ensure_openclaw_gateway || return 1`,
-					`  if weixin_wait_until_ready; then`,
-					`    feishu_wait_until_ready || true`,
-					`    if [ "$login_performed" = "1" ]; then`,
-					`      weixin_send_welcome || true`,
-					`    fi`,
-					`    cicy_log "您的微信已成功连通，请在微信发指令给我！"` ,
-					`    boot_completed=1`,
-					`    just_booted=1`,
-					`    return 0`,
-					`  fi`,
-					`  cicy_log "微信仍在预热，请稍后通过微信重试。"` ,
-					`  return 1`,
-					`}`,
-					`show_boot_screen() {`,
-					`  clear`,
-					`  cicy_sep`,
-					`  cicy_log "小龙虾管家"` ,
-					`  cicy_log "你好，我是小龙虾管家。"` ,
-					`  cicy_log "点 Enter 扫码登录微信。"` ,
-					`  cicy_log "登录成功后，我会自动连通微信并进入管理菜单。"` ,
-					`  cicy_sep`,
-					`}`,
-					`show_openclaw_status() {`,
-					`  cicy_log "正在查看 OpenClaw 状态 ..."` ,
-					`  oc status || true`,
-					`  printf '\n'`,
-					`  cicy_log "正在查看 Gateway 探测 ..."` ,
-					`  oc gateway probe || true`,
-					`  printf '\n'`,
-					`  cicy_log "正在查看 Channel 状态 ..."` ,
-					`  oc channels status --probe || true`,
-					`}`,
-					`restart_gateway_action() {`,
-					`  refresh_openclaw_session`,
-					`  restart_openclaw_gateway_for_session`,
-					`  ensure_openclaw_gateway || return 1`,
-					`  weixin_wait_until_ready || true`,
-					`  feishu_wait_until_ready || true`,
-					`}`,
-					`show_dashboard_url() {`,
-					`  cicy_log "OpenClaw Dashboard 地址如下："` ,
-					`  oc dashboard --no-open || true`,
-					`}`,
-					`install_plugin_action() {`,
-					`  read -r -p '请输入插件 spec: ' plugin_spec || true`,
-					`  plugin_spec="$(printf '%s' "$plugin_spec" | xargs)"`,
-					`  if [ -z "$plugin_spec" ]; then`,
-					`    cicy_log "未输入插件 spec，已取消。"` ,
-					`    return 0`,
-					`  fi`,
-					`  cicy_log "正在安装插件: $plugin_spec"` ,
-					`  if oc plugins install "$plugin_spec"; then`,
-					`    cicy_log "插件安装完成。"` ,
-					`    restart_gateway_action || true`,
-					`  else`,
-					`    cicy_log "插件安装失败。"` ,
-					`    return 1`,
-					`  fi`,
-					`}`,
-					`install_skill_action() {`,
-					`  read -r -p '请输入 skill slug: ' skill_slug || true`,
-					`  skill_slug="$(printf '%s' "$skill_slug" | xargs)"`,
-					`  if [ -z "$skill_slug" ]; then`,
-					`    cicy_log "未输入 skill slug，已取消。"` ,
-					`    return 0`,
-					`  fi`,
-					`  cicy_log "正在安装 skill: $skill_slug"` ,
-					`  oc skills install "$skill_slug" || return 1`,
-					`  cicy_log "skill 安装完成。"` ,
-					`}`,
-					`normalize_feishu_config() {`,
-					`  node - "$OPENCLAW_CONFIG_PATH" <<'EOF'`,
-					`const fs = require("fs");`,
-					`const path = process.argv[2];`,
-					`if (!path || !fs.existsSync(path)) process.exit(0);`,
-					`const cfg = JSON.parse(fs.readFileSync(path, "utf8"));`,
-					`cfg.plugins ||= {};`,
-					`cfg.plugins.entries ||= {};`,
-					`cfg.plugins.entries["openclaw-lark"] = { ...(cfg.plugins.entries["openclaw-lark"] || {}), enabled: true };`,
-					`delete cfg.plugins.entries["feishu"];`,
-					`delete cfg.plugins.entries["feishu-openclaw-plugin"];`,
-					`cfg.channels ||= {};`,
-					`cfg.channels.feishu = { ...(cfg.channels.feishu || {}), enabled: true };`,
-					`const allow = Array.isArray(cfg.plugins.allow) ? cfg.plugins.allow : [];`,
-					`const allowSet = new Set(allow.filter((item) => typeof item === "string" && item.trim()));`,
-					`allowSet.delete("feishu");`,
-					`allowSet.delete("feishu-openclaw-plugin");`,
-					`allowSet.add("openclaw-lark");`,
-					`allowSet.add("openclaw-weixin");`,
-					`cfg.plugins.allow = Array.from(allowSet);`,
-					`fs.writeFileSync(path, JSON.stringify(cfg, null, 2));`,
 					`EOF`,
-					`}`,
-					`install_feishu_action() {`,
-					`  cicy_log "即将安装飞书插件，过程中可能需要扫码和确认。"` ,
-					`  cicy_log "正在执行飞书官方安装命令 ..."` ,
-					`  if npx -y https://sf3-cn.feishucdn.com/obj/open-platform-opendoc/8ab6e7a04c17db1becfcbda8ca35f091_1rCCFRWlRV.tgz install; then`,
-					`    normalize_feishu_config`,
-					`    cicy_log "飞书安装完成。"` ,
-					`    cicy_log "正在重启 gateway 以加载飞书配置 ..."` ,
-					`    restart_gateway_action || true`,
-					`    cicy_log "验证方式：在飞书里发送 /feishu start"` ,
-					`    cicy_log "如需授权更多飞书能力，可发送 /feishu auth"` ,
-					fmt.Sprintf(`    cicy_log "如需开启流式输出，可运行：openclaw --profile %s config set channels.feishu.streaming true"`, shortID),
-					`  else`,
-					`    cicy_log "飞书安装失败。"` ,
-					`    return 1`,
+					"}",
+				}, "\n"),
+				strings.Join([]string{
+					"feishu_wait_until_ready() {",
+					`  if ! feishu_has_logged_account; then`,
+					`    return 0`,
 					`  fi`,
+					`  cicy_log "检测到飞书已登录，正在同时拉起飞书 ..."`,
+					`  for i in $(seq 1 60); do`,
+					`    status_json="$("${openclaw_profile_cmd[@]}" channels status --json --probe --timeout 5000 2>/dev/null || true)"`,
+					`    if node - "$status_json" <<'EOF'`,
+					`const raw = process.argv[2] || "{}";`,
+					`try {`,
+					`  const parsed = JSON.parse(raw);`,
+					`  const accounts = parsed?.channelAccounts?.feishu;`,
+					`  if (!Array.isArray(accounts) || accounts.length === 0) process.exit(1);`,
+					`  const ok = accounts.some((item) => item && item.running === true && item.configured !== false && item.enabled !== false);`,
+					`  process.exit(ok ? 0 : 1);`,
+					`} catch (_) {`,
+					`  process.exit(1);`,
 					`}`,
-					`add_channel_action() {`,
-					`  printf '1. 交互登录型 channel\n'`,
-					`  printf '2. 参数添加型 channel\n'`,
-					`  read -r -p '请选择添加方式: ' add_mode || true`,
-					`  case "$add_mode" in`,
-					`    1)`,
-					`      read -r -p '请输入 channel 名称: ' channel_name || true`,
-					`      channel_name="$(printf '%s' "$channel_name" | xargs)"`,
-					`      [ -n "$channel_name" ] || { cicy_log "未输入 channel 名称，已取消。"; return 0; }`,
-					`      cicy_log "开始登录 channel: $channel_name"` ,
-					`      oc channels login --channel "$channel_name" || return 1`,
-					`      refresh_openclaw_session`,
-					`      ensure_openclaw_gateway || true`,
-					`      [ "$channel_name" = "openclaw-weixin" ] && weixin_wait_until_ready || true`,
-					`      ;;`,
-					`    2)`,
-					`      cicy_log "即将显示 openclaw channels add 帮助。"` ,
-					`      oc channels add --help || true`,
-					`      printf '\n'`,
-					`      read -r -p '请输入附加参数（例如 --channel telegram --token xxx）: ' channel_args || true`,
-					`      channel_args="$(printf '%s' "$channel_args" | xargs)"`,
-					`      [ -n "$channel_args" ] || { cicy_log "未输入参数，已取消。"; return 0; }`,
-					fmt.Sprintf(`      bash -lc "command openclaw --profile %s channels add $channel_args" || return 1`, shortID),
-					`      refresh_openclaw_session`,
-					`      ensure_openclaw_gateway || true`,
-					`      ;;`,
-					`    *)`,
-					`      cicy_log "无效选择，已取消。"` ,
-					`      ;;`,
-					`  esac`,
-					`}`,
-					`tail_recent_logs_action() {`,
-					`  cicy_log "最近 gateway 日志如下："` ,
-					`  tail -n 120 "$gateway_log" 2>/dev/null || true`,
-					`  printf '\n'`,
-					`  cicy_log "最近 channel 日志如下："` ,
-					`  oc channels logs || true`,
-					`}`,
-					`send_weixin_test_message_action() {`,
-					`  eval "$(weixin_latest_account_env)"`,
-					`  if [ -z "$user_id" ]; then`,
-					`    cicy_log "未检测到当前微信用户，无法发送测试消息。"` ,
-					`    return 1`,
-					`  fi`,
-					`  read -r -p '请输入要发送的消息（留空则发送默认文案）: ' test_message || true`,
-					`  if [ -z "$test_message" ]; then`,
-					`    test_message='你好，我是 CiCy 管理台测试消息。'`,
-					`  fi`,
-					`  cicy_log "正在向当前微信发送测试消息 ..."` ,
-					`  oc message send --channel openclaw-weixin --target "$user_id" --message "$test_message" || return 1`,
-					`  cicy_log "测试消息已发送。"` ,
-					`}`,
-					`show_management_menu() {`,
-					`  if [ "$just_booted" = "1" ]; then`,
-					`    just_booted=0`,
-					`    printf '\n'`,
-					`  else`,
-					`    clear`,
-					`  fi`,
-					`  refresh_openclaw_session`,
-					`  if openclaw_gateway_ready; then`,
-					`    gateway_state='在线'`,
-					`  else`,
-					`    gateway_state='离线'`,
-					`  fi`,
-					`  cicy_sep`,
-					`  cicy_log "小龙虾管家"` ,
-					`  cicy_log "当前会话: $selected_session"` ,
-					`  cicy_log "Gateway 状态: $gateway_state"` ,
-					`  cicy_log "配置文件: $OPENCLAW_CONFIG_PATH"` ,
-					`  cicy_sep`,
-					`  printf '1. 重新连接微信并启动服务\n'`,
-					`  printf '2. 查看 OpenClaw 状态\n'`,
-					`  printf '3. 重启 Gateway\n'`,
-					`  printf '4. 查看 Dashboard 地址\n'`,
-					`  printf '5. 安装插件\n'`,
-					`  printf '6. 安装 Skill\n'`,
-					`  printf '7. 安装飞书\n'`,
-					`  printf '8. 添加 Channel\n'`,
-					`  printf '9. 查看最近日志\n'`,
-					`  printf '10. 向当前微信发送测试消息\n'`,
-					`  printf '0. 刷新管理台\n'`,
-					`}`,
-					`trap 'printf "\n"; cicy_log "管理台不可退出，正在返回主菜单。"' INT`,
-					`while true; do`,
-					`  if [ "$boot_completed" != "1" ]; then`,
-					`    if weixin_needs_login; then`,
-					`      show_boot_screen`,
-					`      read -r -p '按 Enter 开始扫码登录...' _cicy_boot_enter || true`,
-					`    else`,
-					`      cicy_log "已检测到微信已登录，正在直接启动服务并进入管理菜单。"` ,
+					`EOF`,
+					`    then`,
+					`      cicy_log "飞书已上线。"`,
+					`      return 0`,
 					`    fi`,
-					`    weixin_login_and_start || true`,
-					`    if [ "$boot_completed" = "1" ]; then`,
-					`      continue`,
+					`    if [ $((i % 5)) -eq 0 ]; then`,
+					`      cicy_log "等待飞书可交互 ${i}s/60s ..."`,
 					`    fi`,
-					`    cicy_pause`,
-					`    continue`,
-					`  fi`,
-					`  show_management_menu`,
-					`  read -r -p '请选择操作: ' cicy_choice || true`,
-					`  case "$cicy_choice" in`,
-					`    1) weixin_login_and_start ;;`,
-					`    2) show_openclaw_status ;;`,
-					`    3) restart_gateway_action ;;`,
-					`    4) show_dashboard_url ;;`,
-					`    5) install_plugin_action ;;`,
-					`    6) install_skill_action ;;`,
-					`    7) install_feishu_action ;;`,
-					`    8) add_channel_action ;;`,
-					`    9) tail_recent_logs_action ;;`,
-					`    10) send_weixin_test_message_action ;;`,
-					`    0|'') cicy_log "已刷新管理台。";;`,
-					`    *) cicy_log "无效选择，请重新输入。";;`,
-					`  esac`,
-					`  case "$cicy_choice" in`,
-					`    0|'') ;;`,
-					`    *) cicy_pause ;;`,
-					`  esac`,
-					`done`,
-					)
-			} else {
-					lines = append(lines,
-						`previous_selected_session="$selected_session"`,
-						`sync_openclaw_session_key`,
-					`if [ "$selected_session" != "$previous_selected_session" ]; then`,
-					`  cicy_log "OpenClaw 会话已切换: $previous_selected_session -> $selected_session"`,
-					`  restart_openclaw_gateway_for_session`,
-					`fi`,
-						`ensure_openclaw_gateway`,
-						`cicy_log "正在打开 OpenClaw TUI 会话: $selected_session"`,
-						`oc tui --session "$selected_session" || true`,
-						`cicy_log "OpenClaw TUI 已退出，Shell 仍保持活动。"`,
-					)
-			}
-			return lines
+					`    sleep 1`,
+					`  done`,
+					`  cicy_log "飞书尚未完成启动，稍后会继续自动重连。"`,
+					`  return 1`,
+					"}",
+				}, "\n"),
+				`boot_completed=0`,
+				`just_booted=0`,
+				`refresh_openclaw_session() {`,
+				`  previous_selected_session="$selected_session"`,
+				`  session_changed=0`,
+				`  sync_openclaw_session_key`,
+				`  if [ "$selected_session" != "$previous_selected_session" ]; then`,
+				`    session_changed=1`,
+				`    cicy_log "OpenClaw 会话已切换: $previous_selected_session -> $selected_session"`,
+				`  fi`,
+				`}`,
+				`weixin_login_and_start() {`,
+				`  login_performed=0`,
+				`  if weixin_needs_login; then`,
+				`    cicy_log "未检测到微信账号，开始二维码登录 ..."`,
+				`    if ! "${openclaw_profile_cmd[@]}" channels login --channel openclaw-weixin; then`,
+				`      cicy_log "微信二维码登录未完成。"`,
+				`      return 1`,
+				`    fi`,
+				`    login_performed=1`,
+				`  else`,
+				`    cicy_log "已检测到现有微信账号，直接启动服务。"`,
+				`  fi`,
+				`  refresh_openclaw_session`,
+				`  if [ "$login_performed" = "1" ] || [ "$session_changed" = "1" ]; then`,
+				`    restart_openclaw_gateway_for_session`,
+				`  fi`,
+				`  ensure_openclaw_gateway || return 1`,
+				`  if weixin_wait_until_ready; then`,
+				`    feishu_wait_until_ready || true`,
+				`    if [ "$login_performed" = "1" ]; then`,
+				`      weixin_send_welcome || true`,
+				`    fi`,
+				`    cicy_log "您的微信已成功连通，请在微信发指令给我！"`,
+				`    boot_completed=1`,
+				`    just_booted=1`,
+				`    return 0`,
+				`  fi`,
+				`  cicy_log "微信仍在预热，请稍后通过微信重试。"`,
+				`  return 1`,
+				`}`,
+				`show_boot_screen() {`,
+				`  clear`,
+				`  cicy_sep`,
+				`  cicy_log "小龙虾管家"`,
+				`  cicy_log "你好，我是小龙虾管家。"`,
+				`  cicy_log "点 Enter 扫码登录微信。"`,
+				`  cicy_log "登录成功后，我会自动连通微信并进入管理菜单。"`,
+				`  cicy_sep`,
+				`}`,
+				`show_openclaw_status() {`,
+				`  cicy_log "正在查看 OpenClaw 状态 ..."`,
+				`  "${openclaw_profile_cmd[@]}" status || true`,
+				`  printf '\n'`,
+				`  cicy_log "正在查看 Gateway 探测 ..."`,
+				`  "${openclaw_profile_cmd[@]}" gateway probe || true`,
+				`  printf '\n'`,
+				`  cicy_log "正在查看 Channel 状态 ..."`,
+				`  "${openclaw_profile_cmd[@]}" channels status --probe || true`,
+				`}`,
+				`restart_gateway_action() {`,
+				`  refresh_openclaw_session`,
+				`  restart_openclaw_gateway_for_session`,
+				`  ensure_openclaw_gateway || return 1`,
+				`  weixin_wait_until_ready || true`,
+				`  feishu_wait_until_ready || true`,
+				`}`,
+				`show_dashboard_url() {`,
+				`  cicy_log "OpenClaw Dashboard 地址如下："`,
+				`  "${openclaw_profile_cmd[@]}" dashboard --no-open || true`,
+				`}`,
+				`install_plugin_action() {`,
+				`  read -r -p '请输入插件 spec: ' plugin_spec || true`,
+				`  plugin_spec="$(printf '%s' "$plugin_spec" | xargs)"`,
+				`  if [ -z "$plugin_spec" ]; then`,
+				`    cicy_log "未输入插件 spec，已取消。"`,
+				`    return 0`,
+				`  fi`,
+				`  cicy_log "正在安装插件: $plugin_spec"`,
+				`  if "${openclaw_profile_cmd[@]}" plugins install "$plugin_spec"; then`,
+				`    cicy_log "插件安装完成。"`,
+				`    restart_gateway_action || true`,
+				`  else`,
+				`    cicy_log "插件安装失败。"`,
+				`    return 1`,
+				`  fi`,
+				`}`,
+				`install_skill_action() {`,
+				`  read -r -p '请输入 skill slug: ' skill_slug || true`,
+				`  skill_slug="$(printf '%s' "$skill_slug" | xargs)"`,
+				`  if [ -z "$skill_slug" ]; then`,
+				`    cicy_log "未输入 skill slug，已取消。"`,
+				`    return 0`,
+				`  fi`,
+				`  cicy_log "正在安装 skill: $skill_slug"`,
+				`  "${openclaw_profile_cmd[@]}" skills install "$skill_slug" || return 1`,
+				`  cicy_log "skill 安装完成。"`,
+				`}`,
+				`normalize_feishu_config() {`,
+				`  node - "$OPENCLAW_CONFIG_PATH" <<'EOF'`,
+				`const fs = require("fs");`,
+				`const path = process.argv[2];`,
+				`if (!path || !fs.existsSync(path)) process.exit(0);`,
+				`const cfg = JSON.parse(fs.readFileSync(path, "utf8"));`,
+				`cfg.plugins ||= {};`,
+				`cfg.plugins.entries ||= {};`,
+				`cfg.plugins.entries["openclaw-lark"] = { ...(cfg.plugins.entries["openclaw-lark"] || {}), enabled: true };`,
+				`delete cfg.plugins.entries["feishu"];`,
+				`delete cfg.plugins.entries["feishu-openclaw-plugin"];`,
+				`cfg.channels ||= {};`,
+				`cfg.channels.feishu = { ...(cfg.channels.feishu || {}), enabled: true };`,
+				`const allow = Array.isArray(cfg.plugins.allow) ? cfg.plugins.allow : [];`,
+				`const allowSet = new Set(allow.filter((item) => typeof item === "string" && item.trim()));`,
+				`allowSet.delete("feishu");`,
+				`allowSet.delete("feishu-openclaw-plugin");`,
+				`allowSet.add("openclaw-lark");`,
+				`allowSet.add("openclaw-weixin");`,
+				`cfg.plugins.allow = Array.from(allowSet);`,
+				`fs.writeFileSync(path, JSON.stringify(cfg, null, 2));`,
+				`EOF`,
+				`}`,
+				`install_feishu_action() {`,
+				`  cicy_log "即将安装飞书插件，过程中可能需要扫码和确认。"`,
+				`  cicy_log "正在执行飞书官方安装命令 ..."`,
+				`  if npx -y https://sf3-cn.feishucdn.com/obj/open-platform-opendoc/8ab6e7a04c17db1becfcbda8ca35f091_1rCCFRWlRV.tgz install; then`,
+				`    normalize_feishu_config`,
+				`    cicy_log "飞书安装完成。"`,
+				`    cicy_log "正在重启 gateway 以加载飞书配置 ..."`,
+				`    restart_gateway_action || true`,
+				`    cicy_log "验证方式：在飞书里发送 /feishu start"`,
+				`    cicy_log "如需授权更多飞书能力，可发送 /feishu auth"`,
+				fmt.Sprintf(`    cicy_log "如需开启流式输出，可运行：openclaw --profile %s config set channels.feishu.streaming true"`, shortID),
+				`  else`,
+				`    cicy_log "飞书安装失败。"`,
+				`    return 1`,
+				`  fi`,
+				`}`,
+				`add_channel_action() {`,
+				`  printf '1. 交互登录型 channel\n'`,
+				`  printf '2. 参数添加型 channel\n'`,
+				`  read -r -p '请选择添加方式: ' add_mode || true`,
+				`  case "$add_mode" in`,
+				`    1)`,
+				`      read -r -p '请输入 channel 名称: ' channel_name || true`,
+				`      channel_name="$(printf '%s' "$channel_name" | xargs)"`,
+				`      [ -n "$channel_name" ] || { cicy_log "未输入 channel 名称，已取消。"; return 0; }`,
+				`      cicy_log "开始登录 channel: $channel_name"`,
+				`      "${openclaw_profile_cmd[@]}" channels login --channel "$channel_name" || return 1`,
+				`      refresh_openclaw_session`,
+				`      ensure_openclaw_gateway || true`,
+				`      [ "$channel_name" = "openclaw-weixin" ] && weixin_wait_until_ready || true`,
+				`      ;;`,
+				`    2)`,
+				`      cicy_log "即将显示 openclaw channels add 帮助。"`,
+				`      "${openclaw_profile_cmd[@]}" channels add --help || true`,
+				`      printf '\n'`,
+				`      read -r -p '请输入附加参数（例如 --channel telegram --token xxx）: ' channel_args || true`,
+				`      channel_args="$(printf '%s' "$channel_args" | xargs)"`,
+				`      [ -n "$channel_args" ] || { cicy_log "未输入参数，已取消。"; return 0; }`,
+				`      eval "set -- $channel_args" || return 1`,
+				`      "${openclaw_profile_cmd[@]}" channels add "$@" || return 1`,
+				`      refresh_openclaw_session`,
+				`      ensure_openclaw_gateway || true`,
+				`      ;;`,
+				`    *)`,
+				`      cicy_log "无效选择，已取消。"`,
+				`      ;;`,
+				`  esac`,
+				`}`,
+				`tail_recent_logs_action() {`,
+				`  cicy_log "最近 gateway 日志如下："`,
+				`  tail -n 120 "$gateway_log" 2>/dev/null || true`,
+				`  printf '\n'`,
+				`  cicy_log "最近 channel 日志如下："`,
+				`  "${openclaw_profile_cmd[@]}" channels logs || true`,
+				`}`,
+				`send_weixin_test_message_action() {`,
+				`  eval "$(weixin_latest_account_env)"`,
+				`  if [ -z "$user_id" ]; then`,
+				`    cicy_log "未检测到当前微信用户，无法发送测试消息。"`,
+				`    return 1`,
+				`  fi`,
+				`  read -r -p '请输入要发送的消息（留空则发送默认文案）: ' test_message || true`,
+				`  if [ -z "$test_message" ]; then`,
+				`    test_message='你好，我是 CiCy 管理台测试消息。'`,
+				`  fi`,
+				`  cicy_log "正在向当前微信发送测试消息 ..."`,
+				`  "${openclaw_profile_cmd[@]}" message send --channel openclaw-weixin --target "$user_id" --message "$test_message" || return 1`,
+				`  cicy_log "测试消息已发送。"`,
+				`}`,
+				`show_management_menu() {`,
+				`  if [ "$just_booted" = "1" ]; then`,
+				`    just_booted=0`,
+				`    printf '\n'`,
+				`  else`,
+				`    clear`,
+				`  fi`,
+				`  refresh_openclaw_session`,
+				`  if openclaw_gateway_ready; then`,
+				`    gateway_state='在线'`,
+				`  else`,
+				`    gateway_state='离线'`,
+				`  fi`,
+				`  cicy_sep`,
+				`  cicy_log "小龙虾管家"`,
+				`  cicy_log "当前会话: $selected_session"`,
+				`  cicy_log "Gateway 状态: $gateway_state"`,
+				`  cicy_log "配置文件: $OPENCLAW_CONFIG_PATH"`,
+				`  cicy_sep`,
+				`  printf '1. 重新连接微信并启动服务\n'`,
+				`  printf '2. 查看 OpenClaw 状态\n'`,
+				`  printf '3. 重启 Gateway\n'`,
+				`  printf '4. 查看 Dashboard 地址\n'`,
+				`  printf '5. 安装插件\n'`,
+				`  printf '6. 安装 Skill\n'`,
+				`  printf '7. 安装飞书\n'`,
+				`  printf '8. 添加 Channel\n'`,
+				`  printf '9. 查看最近日志\n'`,
+				`  printf '10. 向当前微信发送测试消息\n'`,
+				`  printf '0. 刷新管理台\n'`,
+				`}`,
+				`trap 'printf "\n"; cicy_log "管理台不可退出，正在返回主菜单。"' INT`,
+				`while true; do`,
+				`  if [ "$boot_completed" != "1" ]; then`,
+				`    if weixin_needs_login; then`,
+				`      show_boot_screen`,
+				`      read -r -p '按 Enter 开始扫码登录...' _cicy_boot_enter || true`,
+				`    else`,
+				`      cicy_log "已检测到微信已登录，正在直接启动服务并进入管理菜单。"`,
+				`    fi`,
+				`    weixin_login_and_start || true`,
+				`    if [ "$boot_completed" = "1" ]; then`,
+				`      continue`,
+				`    fi`,
+				`    cicy_pause`,
+				`    continue`,
+				`  fi`,
+				`  show_management_menu`,
+				`  read -r -p '请选择操作: ' cicy_choice || true`,
+				`  case "$cicy_choice" in`,
+				`    1) weixin_login_and_start ;;`,
+				`    2) show_openclaw_status ;;`,
+				`    3) restart_gateway_action ;;`,
+				`    4) show_dashboard_url ;;`,
+				`    5) install_plugin_action ;;`,
+				`    6) install_skill_action ;;`,
+				`    7) install_feishu_action ;;`,
+				`    8) add_channel_action ;;`,
+				`    9) tail_recent_logs_action ;;`,
+				`    10) send_weixin_test_message_action ;;`,
+				`    0|'') cicy_log "已刷新管理台。";;`,
+				`    *) cicy_log "无效选择，请重新输入。";;`,
+				`  esac`,
+				`  case "$cicy_choice" in`,
+				`    0|'') ;;`,
+				`    *) cicy_pause ;;`,
+				`  esac`,
+				`done`,
+			)
+		} else {
+			lines = append(lines,
+				`previous_selected_session="$selected_session"`,
+				`sync_openclaw_session_key`,
+				`if [ "$selected_session" != "$previous_selected_session" ]; then`,
+				`  cicy_log "OpenClaw 会话已切换: $previous_selected_session -> $selected_session"`,
+				`  restart_openclaw_gateway_for_session`,
+				`fi`,
+				`ensure_openclaw_gateway`,
+				`cicy_log "正在打开 OpenClaw TUI 会话: $selected_session"`,
+				`"${openclaw_profile_cmd[@]}" tui --session "$selected_session" || true`,
+				`cicy_log "OpenClaw TUI 已退出，Shell 仍保持活动。"`,
+			)
+		}
+		return lines
 	case "codex":
 		home, _ := os.UserHomeDir()
 		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("codex-install-%s.log", shortID))
@@ -1620,14 +1679,14 @@ EOF
 			ensureAgentCommandLine("claude", "Claude Code", claudeInstallCmd(), installLog),
 			fmt.Sprintf("export ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
 			fmt.Sprintf("export CLAUDE_SETTINGS_PATH=%s", tmuxShellQuote(settingsPath)),
-			fmt.Sprintf("export CICY_DEFAULT_CLAUDE_MODEL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_DEFAULT_CLAUDE_MODEL")))),
+			fmt.Sprintf("export CICY_DEFAULT_CLAUDE_MODEL=%s", tmuxShellQuote(aiCfg.DefaultClaudeModel)),
 			`node - <<'EOF'
 const fs = require("fs");
 const path = process.env.CLAUDE_SETTINGS_PATH;
 if (!path) process.exit(0);
 const config = {
   env: {
-    ANTHROPIC_AUTH_TOKEN: process.env.CICY_API_KEY || "",
+    ANTHROPIC_AUTH_TOKEN: "cicy-local-gateway",
     ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL || "",
   },
 };
@@ -1661,9 +1720,9 @@ EOF`,
 			lines = append(lines,
 				"resolve_claude_bypass_user || return 1",
 				`if [ "$CLAUDE_BYPASS_USER" = "$(id -un)" ]; then
-  env HOME="$CLAUDE_BYPASS_HOME" USER="$CLAUDE_BYPASS_USER" LOGNAME="$CLAUDE_BYPASS_USER" SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" CICY_API_KEY="$CICY_API_KEY" sh -lc 'cd "$WORKSPACE" && exec claude --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'
+  env HOME="$CLAUDE_BYPASS_HOME" USER="$CLAUDE_BYPASS_USER" LOGNAME="$CLAUDE_BYPASS_USER" SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" sh -lc 'if [ ! -e "$WORKSPACE/home" ] || [ -L "$WORKSPACE/home" ]; then ln -sfn -- "$HOME" "$WORKSPACE/home"; fi; cd "$WORKSPACE" && exec claude --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'
 else
-  runuser -u "$CLAUDE_BYPASS_USER" -- env HOME="$CLAUDE_BYPASS_HOME" USER="$CLAUDE_BYPASS_USER" LOGNAME="$CLAUDE_BYPASS_USER" SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" CICY_API_KEY="$CICY_API_KEY" sh -lc 'cd "$WORKSPACE" && exec claude --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'
+  runuser -u "$CLAUDE_BYPASS_USER" -- env HOME="$CLAUDE_BYPASS_HOME" USER="$CLAUDE_BYPASS_USER" LOGNAME="$CLAUDE_BYPASS_USER" SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" sh -lc 'if [ ! -e "$WORKSPACE/home" ] || [ -L "$WORKSPACE/home" ]; then ln -sfn -- "$HOME" "$WORKSPACE/home"; fi; cd "$WORKSPACE" && exec claude --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'
 fi`,
 			)
 			return lines
@@ -1679,14 +1738,14 @@ fi`,
 			ensureAgentCommandLine("cicy", "CiCy", cicyInstallCmd(), installLog),
 			fmt.Sprintf("export ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
 			fmt.Sprintf("export CLAUDE_SETTINGS_PATH=%s", tmuxShellQuote(settingsPath)),
-			fmt.Sprintf("export CICY_DEFAULT_CLAUDE_MODEL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_DEFAULT_CLAUDE_MODEL")))),
+			fmt.Sprintf("export CICY_DEFAULT_CLAUDE_MODEL=%s", tmuxShellQuote(aiCfg.DefaultClaudeModel)),
 			`node - <<'EOF'
 const fs = require("fs");
 const path = process.env.CLAUDE_SETTINGS_PATH;
 if (!path) process.exit(0);
 const config = {
   env: {
-    ANTHROPIC_AUTH_TOKEN: process.env.CICY_API_KEY || "",
+    ANTHROPIC_AUTH_TOKEN: "cicy-local-gateway",
     ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL || "",
   },
 };
@@ -1720,9 +1779,9 @@ EOF`,
 			lines = append(lines,
 				"resolve_cicy_bypass_user || return 1",
 				`if [ "$CICY_BYPASS_USER" = "$(id -un)" ]; then
-  env HOME="$CICY_BYPASS_HOME" USER="$CICY_BYPASS_USER" LOGNAME="$CICY_BYPASS_USER" SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" CICY_API_KEY="$CICY_API_KEY" sh -lc 'cd "$WORKSPACE" && exec cicy --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'
+  env HOME="$CICY_BYPASS_HOME" USER="$CICY_BYPASS_USER" LOGNAME="$CICY_BYPASS_USER" SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" sh -lc 'if [ ! -e "$WORKSPACE/home" ] || [ -L "$WORKSPACE/home" ]; then ln -sfn -- "$HOME" "$WORKSPACE/home"; fi; cd "$WORKSPACE" && exec cicy --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'
 else
-  runuser -u "$CICY_BYPASS_USER" -- env HOME="$CICY_BYPASS_HOME" USER="$CICY_BYPASS_USER" LOGNAME="$CICY_BYPASS_USER" SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" CICY_API_KEY="$CICY_API_KEY" sh -lc 'cd "$WORKSPACE" && exec cicy --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'
+  runuser -u "$CICY_BYPASS_USER" -- env HOME="$CICY_BYPASS_HOME" USER="$CICY_BYPASS_USER" LOGNAME="$CICY_BYPASS_USER" SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" sh -lc 'if [ ! -e "$WORKSPACE/home" ] || [ -L "$WORKSPACE/home" ]; then ln -sfn -- "$HOME" "$WORKSPACE/home"; fi; cd "$WORKSPACE" && exec cicy --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'
 fi`,
 			)
 			return lines
@@ -1833,11 +1892,21 @@ EOF`)
 }
 
 func isClaudeInputReady(out string) bool {
-	return strings.Contains(out, "Claude Code v") &&
-		(strings.Contains(out, "? for shortcuts") ||
-			strings.Contains(out, " /effort") ||
-			strings.Contains(out, "Welcome back!") ||
-			strings.Contains(out, "Recent activity"))
+	if isClaudeThemePrompt(out) || isClaudeSecurityNotesPrompt(out) || isClaudeTrustPrompt(out) || isClaudeBypassChoicePrompt(out) || isClaudeBypassConfirmPrompt(out) {
+		return false
+	}
+	if strings.Contains(out, "? for shortcuts") ||
+		strings.Contains(out, " /effort") ||
+		strings.Contains(out, "Welcome back!") ||
+		strings.Contains(out, "Recent activity") {
+		return true
+	}
+	for _, line := range normalizeNonEmptyMeaningfulLines(strings.Split(out, "\n")) {
+		if strings.HasPrefix(strings.TrimSpace(line), "❯") {
+			return true
+		}
+	}
+	return false
 }
 
 func isClaudeThemePrompt(out string) bool {
@@ -1900,13 +1969,45 @@ func isCodexTrustPrompt(out string) bool {
 		strings.Contains(out, "Press enter to continue")
 }
 
+func isCodexUpdatePrompt(out string) bool {
+	return (strings.Contains(out, "Update available!") || strings.Contains(out, "Update available:")) &&
+		strings.Contains(out, "Skip until next version") &&
+		strings.Contains(out, "Press enter to continue")
+}
+
+func isCodexBusyStateVisible(out string) bool {
+	lower := strings.ToLower(out)
+	return strings.Contains(lower, "esc to interrupt") ||
+		strings.Contains(lower, "working (") ||
+		strings.Contains(lower, "messages to be submitted after next tool call")
+}
+
+func isCodexPromptVisible(out string) bool {
+	return strings.Contains(out, "› ")
+}
+
+func isCodexStatusFooterVisible(out string) bool {
+	return strings.Contains(out, "· ") &&
+		strings.Contains(out, "% left") &&
+		(strings.Contains(out, "~/") || strings.Contains(out, "/workers/"))
+}
+
 func isCodexInputReady(out string) bool {
+	if isCodexTrustPrompt(out) {
+		return false
+	}
+	if isCodexUpdatePrompt(out) {
+		return false
+	}
 	// Newer Codex UI often no longer keeps the initial "OpenAI Codex (v...)"
 	// header in the visible capture. Treat the active prompt + status footer as ready.
-	if strings.Contains(out, "› ") &&
-		strings.Contains(out, "· ") &&
-		strings.Contains(out, "% left") &&
-		(strings.Contains(out, "~/") || strings.Contains(out, "/workers/")) {
+	if isCodexPromptVisible(out) && isCodexStatusFooterVisible(out) {
+		return true
+	}
+	// Codex can accept queued prompts while it is still working. As long as the
+	// prompt is visible and the terminal shows Codex's working/queue affordance,
+	// allow send so the built-in queue can handle it.
+	if isCodexPromptVisible(out) && isCodexBusyStateVisible(out) {
 		return true
 	}
 	if strings.Contains(out, "OpenAI Codex (v") &&
@@ -1918,9 +2019,6 @@ func isCodexInputReady(out string) bool {
 			strings.Contains(out, "100% left") ||
 			strings.Contains(out, "› ")) {
 		return true
-	}
-	if isCodexTrustPrompt(out) {
-		return false
 	}
 	return false
 }
@@ -1979,9 +2077,8 @@ func lazyAgentMarkerPath(agentType, paneID string) string {
 func ensurePaneReadyForSend(paneID string, trace *tmuxSendTrace) error {
 	paneID = normPaneID(paneID)
 	var agentType string
-	var replyInChinese int
-	if err := store.QueryRow("SELECT COALESCE(agent_type,''), COALESCE(reply_in_chinese,0) FROM agent_config WHERE pane_id=?", paneID).
-		Scan(&agentType, &replyInChinese); err != nil {
+	if err := store.QueryRow("SELECT COALESCE(agent_type,'') FROM agent_config WHERE pane_id=?", paneID).
+		Scan(&agentType); err != nil {
 		log.Printf("[lazy-agent] %s lookup skipped: %v", paneID, err)
 		if trace != nil {
 			trace.logStep("lookup-skipped", map[string]any{"error": err.Error()}, "")
@@ -1991,7 +2088,7 @@ func ensurePaneReadyForSend(paneID string, trace *tmuxSendTrace) error {
 	if trace != nil && trace.AgentType == "" {
 		trace.AgentType = normalizeAgentType(agentType)
 	}
-	if err := ensureLazyAgentReady(paneID, agentType, replyInChinese != 0); err != nil {
+	if err := ensureLazyAgentReady(paneID, agentType); err != nil {
 		if trace != nil {
 			trace.logStep("lazy-ready-error", map[string]any{"error": err.Error()}, "")
 		}
@@ -2000,28 +2097,26 @@ func ensurePaneReadyForSend(paneID string, trace *tmuxSendTrace) error {
 	return waitForAgentInputReady(paneID, agentType, trace)
 }
 
-func ensureLazyAgentReady(paneID, agentType string, replyInChinese bool) error {
+func ensureLazyAgentReady(paneID, agentType string) error {
 	switch normalizeAgentType(agentType) {
 	case "opencode":
-		return ensureLazyOpenCodeReady(paneID, replyInChinese)
+		return ensureLazyOpenCodeReady(paneID)
 	default:
 		return nil
 	}
 }
 
-func ensureLazyOpenCodeReady(paneID string, replyInChinese bool) error {
+func ensureLazyOpenCodeReady(paneID string) error {
 	out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", "-160")
 	if err == nil && isOpenCodeInputReady(out) {
 		return nil
 	}
 
 	markerPath := lazyAgentMarkerPath("opencode", paneID)
-	startedNow := false
 	if markerPath != "" {
 		if _, statErr := os.Stat(markerPath); os.IsNotExist(statErr) {
 			log.Printf("[lazy-agent] %s starting opencode", paneID)
 			sendPaneText(paneID, "cicy_start_opencode")
-			startedNow = true
 		}
 	}
 
@@ -2034,11 +2129,6 @@ func ensureLazyOpenCodeReady(paneID string, replyInChinese bool) error {
 		if !isOpenCodeInputReady(out) {
 			continue
 		}
-		if startedNow && replyInChinese {
-			log.Printf("[lazy-agent] %s send reply_in_chinese after opencode start", paneID)
-			sendPaneText(paneID, "reply in chinese")
-			time.Sleep(800 * time.Millisecond)
-		}
 		return nil
 	}
 
@@ -2047,7 +2137,7 @@ func ensureLazyOpenCodeReady(paneID string, replyInChinese bool) error {
 
 func waitForAgentInputReady(paneID, agentType string, trace *tmuxSendTrace) error {
 	agentType = normalizeAgentType(agentType)
-	if agentType == "" || agentType == "opencode" {
+	if agentType == "" || agentType == "opencode" || agentType == "codex" {
 		return nil
 	}
 	if trace != nil {
@@ -2119,10 +2209,28 @@ func submitConfirmPollIntervalForAgent(agentType string) time.Duration {
 	}
 }
 
+func submitConfirmTimeoutForAgent(agentType string) time.Duration {
+	switch normalizeAgentType(agentType) {
+	case "codex":
+		return codexSubmitConfirmTimeout
+	default:
+		return submitConfirmTimeout
+	}
+}
+
+func submitEnterRetryLimitForAgent(agentType string) int {
+	switch normalizeAgentType(agentType) {
+	case "codex":
+		return codexSubmitEnterRetryLimit
+	default:
+		return submitEnterRetryLimit
+	}
+}
+
 func sendPaneText(paneID, text string) {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
-		runTmux("send-keys", "-t", paneID, "-l", line)
+		runTmux("send-keys", "-t", paneID, "-l", "--", line)
 		if i < len(lines)-1 {
 			time.Sleep(100 * time.Millisecond)
 			runTmux("send-keys", "-t", paneID, "Enter")
@@ -2166,6 +2274,10 @@ func shouldPastePromptText(text string) bool {
 	return utf8.RuneCountInString(text) > directPromptRuneThreshold
 }
 
+func shouldBracketedPastePromptText(text string) bool {
+	return strings.Contains(text, "\n")
+}
+
 func splitTextByRunes(text string, size int) []string {
 	if size <= 0 || text == "" {
 		return []string{text}
@@ -2191,7 +2303,7 @@ func sendPromptChunked(paneID, text string) error {
 		if part == "" {
 			continue
 		}
-		if _, err := runTmux("send-keys", "-t", paneID, "-l", part); err != nil {
+		if _, err := runTmux("send-keys", "-t", paneID, "-l", "--", part); err != nil {
 			return err
 		}
 		if i < len(parts)-1 {
@@ -2201,9 +2313,33 @@ func sendPromptChunked(paneID, text string) error {
 	return nil
 }
 
+func sendPromptBracketedPaste(paneID, text string) error {
+	if _, err := runTmux("send-keys", "-t", paneID, "-l", "--", bracketedPasteStart); err != nil {
+		return err
+	}
+	parts := splitTextByRunes(text, chunkedPromptRuneSize)
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		if _, err := runTmux("send-keys", "-t", paneID, "-l", "--", part); err != nil {
+			return err
+		}
+		if i < len(parts)-1 {
+			time.Sleep(chunkedPromptChunkDelay)
+		}
+	}
+	if _, err := runTmux("send-keys", "-t", paneID, "-l", "--", bracketedPasteEnd); err != nil {
+		return err
+	}
+	return nil
+}
+
 func sendPromptText(paneID, text string, trace *tmuxSendTrace) (string, error) {
 	mode := "literal"
-	if shouldPastePromptText(text) {
+	if shouldBracketedPastePromptText(text) {
+		mode = "bracketed-paste"
+	} else if shouldPastePromptText(text) {
 		mode = "chunked"
 	}
 	logPromptSend(paneID, mode, text)
@@ -2215,10 +2351,13 @@ func sendPromptText(paneID, text string, trace *tmuxSendTrace) (string, error) {
 			"chunks":     len(splitTextByRunes(text, chunkedPromptRuneSize)),
 		}, text)
 	}
+	if mode == "bracketed-paste" {
+		return mode, sendPromptBracketedPaste(paneID, text)
+	}
 	if mode == "chunked" {
 		return mode, sendPromptChunked(paneID, text)
 	}
-	_, err := runTmux("send-keys", "-t", paneID, "-l", text)
+	_, err := runTmux("send-keys", "-t", paneID, "-l", "--", text)
 	return mode, err
 }
 
@@ -2337,11 +2476,28 @@ func pasteIndicatorCount(out, agentType string) int {
 	}
 }
 
+func codexQueuedPromptVisible(before, after string) bool {
+	lowerAfter := strings.ToLower(after)
+	if !(strings.Contains(lowerAfter, "queue message") ||
+		strings.Contains(lowerAfter, "messages to be submitted after next tool call")) {
+		return false
+	}
+	lowerBefore := strings.ToLower(before)
+	if strings.Contains(lowerBefore, "queue message") ||
+		strings.Contains(lowerBefore, "messages to be submitted after next tool call") {
+		return false
+	}
+	return isCodexPromptVisible(after)
+}
+
 func promptEchoConfirmed(before, after, text, mode, agentType string) (string, bool) {
 	if promptEchoVisible(before, after, text) {
 		return "matched-text", true
 	}
-	if mode == "chunked" {
+	if normalizeAgentType(agentType) == "codex" && codexQueuedPromptVisible(before, after) {
+		return "matched-codex-queue-hint", true
+	}
+	if mode == "chunked" || mode == "bracketed-paste" {
 		beforePasteCount := pasteIndicatorCount(before, agentType)
 		afterPasteCount := pasteIndicatorCount(after, agentType)
 		if afterPasteCount > beforePasteCount {
@@ -2412,6 +2568,12 @@ func lineContainsPromptFragment(line string, text string) bool {
 }
 
 func codexSubmitConfirmed(out, text string) bool {
+	lower := strings.ToLower(out)
+	if (strings.Contains(lower, "queue message") ||
+		strings.Contains(lower, "messages to be submitted after next tool call")) &&
+		lineContainsPromptFragment(out, text) {
+		return true
+	}
 	lines := strings.Split(out, "\n")
 	lastPromptLine := -1
 	for i, line := range lines {
@@ -2495,9 +2657,19 @@ func promptSubmitConfirmed(after, text, agentType string) bool {
 	}
 }
 
+func shouldRequireStablePreSubmitConfirm(agentType string) bool {
+	switch normalizeAgentType(agentType) {
+	case "codex":
+		return false
+	default:
+		return true
+	}
+}
+
 func waitForPromptEchoBeforeEnter(paneID, agentType, text, mode, baseline string, trace *tmuxSendTrace) (string, error) {
 	pollInterval := promptConfirmPollIntervalForAgent(agentType)
 	stabilizeDelay := promptConfirmStabilizeDelayForAgent(agentType)
+	requireStableConfirm := shouldRequireStablePreSubmitConfirm(agentType)
 	deadline := time.Now().Add(promptConfirmTimeout)
 	var lastCapture string
 	var lastErr error
@@ -2519,6 +2691,11 @@ func waitForPromptEchoBeforeEnter(paneID, agentType, text, mode, baseline string
 			trace.logStep("pre-submit-capture", map[string]any{"attempt": attempt, "matched": ok, "match_kind": match}, out)
 		}
 		if match, ok := promptEchoConfirmed(baseline, out, text, mode, agentType); ok {
+			if !requireStableConfirm {
+				log.Printf("[tmux-send] pane=%s confirm=%s confirm2=skipped agent=%s mode=%s preview=%q",
+					shortPaneID(paneID), match, normalizeAgentType(agentType), mode, promptPreview(text))
+				return match, nil
+			}
 			time.Sleep(stabilizeDelay)
 			out2, err := capturePromptConfirmPane(paneID)
 			if err != nil {
@@ -2546,6 +2723,9 @@ func waitForPromptEchoBeforeEnter(paneID, agentType, text, mode, baseline string
 	if lastErr != nil {
 		return "", fmt.Errorf("prompt echo confirm failed for %s: %w", shortPaneID(paneID), lastErr)
 	}
+	if normalizeAgentType(agentType) == "codex" && isCodexBusyStateVisible(lastCapture) {
+		return "", fmt.Errorf("pane %s codex not ready for send", shortPaneID(paneID))
+	}
 	if lastCapture != "" {
 		log.Printf("[tmux-send] pane=%s confirm=timeout agent=%s mode=%s preview=%q tail=%q",
 			shortPaneID(paneID), normalizeAgentType(agentType), mode, promptPreview(text), promptPreview(lastCapture))
@@ -2555,9 +2735,11 @@ func waitForPromptEchoBeforeEnter(paneID, agentType, text, mode, baseline string
 
 func submitPromptWithConfirmation(paneID, agentType, text string, trace *tmuxSendTrace) error {
 	pollInterval := submitConfirmPollIntervalForAgent(agentType)
+	timeout := submitConfirmTimeoutForAgent(agentType)
+	retryLimit := submitEnterRetryLimitForAgent(agentType)
 	var lastCapture string
 	var lastErr error
-	for attempt := 0; attempt <= submitEnterRetryLimit; attempt++ {
+	for attempt := 0; attempt <= retryLimit; attempt++ {
 		if attempt > 0 {
 			log.Printf("[tmux-send] pane=%s submit=retry attempt=%d agent=%s preview=%q",
 				shortPaneID(paneID), attempt+1, normalizeAgentType(agentType), promptPreview(text))
@@ -2571,7 +2753,7 @@ func submitPromptWithConfirmation(paneID, agentType, text string, trace *tmuxSen
 			}
 			return fmt.Errorf("failed to submit text: %w", err)
 		}
-		deadline := time.Now().Add(submitConfirmTimeout)
+		deadline := time.Now().Add(timeout)
 		captureAttempt := 0
 		for time.Now().Before(deadline) {
 			captureAttempt++
@@ -2602,6 +2784,14 @@ func submitPromptWithConfirmation(paneID, agentType, text string, trace *tmuxSen
 	}
 	if lastErr != nil {
 		return fmt.Errorf("submit confirm failed for %s: %w", shortPaneID(paneID), lastErr)
+	}
+	if normalizeAgentType(agentType) == "codex" {
+		log.Printf("[tmux-send] pane=%s submit=soft-timeout agent=%s preview=%q tail=%q",
+			shortPaneID(paneID), normalizeAgentType(agentType), promptPreview(text), promptPreview(lastCapture))
+		if trace != nil {
+			trace.logStep("submit-soft-timeout", map[string]any{}, lastCapture)
+		}
+		return nil
 	}
 	if lastCapture != "" {
 		log.Printf("[tmux-send] pane=%s submit=timeout agent=%s preview=%q tail=%q",
@@ -2687,6 +2877,7 @@ func autoConfirmCodexTrust(paneID string) {
 	go func() {
 		var lastAction time.Time
 		enterCount := 0
+		updateSkipCount := 0
 		for i := 0; i < 120; i++ {
 			time.Sleep(500 * time.Millisecond)
 			out, err := runTmux("capture-pane", "-t", paneID, "-p")
@@ -2696,6 +2887,18 @@ func autoConfirmCodexTrust(paneID string) {
 			if isCodexInputReady(out) {
 				log.Printf("[codex-auto-confirm] %s ready", paneID)
 				return
+			}
+			if isCodexUpdatePrompt(out) {
+				if updateSkipCount >= 2 || time.Since(lastAction) < 1500*time.Millisecond {
+					continue
+				}
+				log.Printf("[codex-auto-confirm] %s dismiss update prompt #%d", paneID, updateSkipCount+1)
+				runTmux("send-keys", "-t", paneID, "2")
+				time.Sleep(150 * time.Millisecond)
+				runTmux("send-keys", "-t", paneID, "Enter")
+				lastAction = time.Now()
+				updateSkipCount++
+				continue
 			}
 			if !isCodexTrustPrompt(out) {
 				continue
@@ -2715,19 +2918,20 @@ func autoConfirmCodexTrust(paneID string) {
 func initPaneEnv(opts paneEnvOpts) {
 	pid := opts.paneID
 	shortID := strings.Split(pid, ":")[0]
+	aiCfg := loadRuntimeAIConfig()
 	// proxyURL := fmt.Sprintf("http://%s:x@127.0.0.1:17080", shortID)
 
 	// tmux panes inherit environment from the tmux server, not from the current
 	// cicy-code process. Sync runtime auth/config into the target session before
 	// sourcing the init script so agent boot code can see current values.
 	sessionEnv := map[string]string{
-		"CICY_API_KEY":                strings.TrimSpace(os.Getenv("CICY_API_KEY")),
-		"CICY_API_URL":                strings.TrimSpace(os.Getenv("CICY_API_URL")),
-		"CICY_ANTHROPIC_URL":          strings.TrimSpace(os.Getenv("CICY_ANTHROPIC_URL")),
-		"CICY_DEFAULT_CLAUDE_MODEL":   strings.TrimSpace(os.Getenv("CICY_DEFAULT_CLAUDE_MODEL")),
-		"CICY_DEFAULT_OPENCODE_MODEL": strings.TrimSpace(os.Getenv("CICY_DEFAULT_OPENCODE_MODEL")),
-		"CICY_CODEX_MODEL":            strings.TrimSpace(os.Getenv("CICY_CODEX_MODEL")),
-		"CICY_OPENCLAW_MODEL":         strings.TrimSpace(os.Getenv("CICY_OPENCLAW_MODEL")),
+		"CICY_API_KEY":                strings.TrimSpace(aiCfg.APIKey),
+		"CICY_API_URL":                strings.TrimSpace(aiCfg.APIURL),
+		"CICY_ANTHROPIC_URL":          strings.TrimSpace(aiCfg.AnthropicURL),
+		"CICY_DEFAULT_CLAUDE_MODEL":   strings.TrimSpace(aiCfg.DefaultClaudeModel),
+		"CICY_DEFAULT_OPENCODE_MODEL": strings.TrimSpace(aiCfg.DefaultOpencodeModel),
+		"CICY_CODEX_MODEL":            strings.TrimSpace(aiCfg.CodexModel),
+		"CICY_OPENCLAW_MODEL":         strings.TrimSpace(aiCfg.OpenClawModel),
 	}
 	for key, value := range sessionEnv {
 		if value == "" {
@@ -2743,13 +2947,13 @@ func initPaneEnv(opts paneEnvOpts) {
 		`export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$HOME/.opencode/bin:$PATH"`,
 		fmt.Sprintf("export X_AGENT_ID=%s", tmuxShellQuote(pid)),
 		fmt.Sprintf("export X_AGENT_SHORT_ID=%s", tmuxShellQuote(shortID)),
-		fmt.Sprintf("export CICY_API_KEY=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_API_KEY")))),
-		fmt.Sprintf("export CICY_API_URL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_API_URL")))),
-		fmt.Sprintf("export CICY_ANTHROPIC_URL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_ANTHROPIC_URL")))),
-		fmt.Sprintf("export CICY_DEFAULT_CLAUDE_MODEL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_DEFAULT_CLAUDE_MODEL")))),
-		fmt.Sprintf("export CICY_DEFAULT_OPENCODE_MODEL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_DEFAULT_OPENCODE_MODEL")))),
-		fmt.Sprintf("export CICY_CODEX_MODEL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_CODEX_MODEL")))),
-		fmt.Sprintf("export CICY_OPENCLAW_MODEL=%s", tmuxShellQuote(strings.TrimSpace(os.Getenv("CICY_OPENCLAW_MODEL")))),
+		fmt.Sprintf("export CICY_API_KEY=%s", tmuxShellQuote(strings.TrimSpace(aiCfg.APIKey))),
+		fmt.Sprintf("export CICY_API_URL=%s", tmuxShellQuote(strings.TrimSpace(aiCfg.APIURL))),
+		fmt.Sprintf("export CICY_ANTHROPIC_URL=%s", tmuxShellQuote(strings.TrimSpace(aiCfg.AnthropicURL))),
+		fmt.Sprintf("export CICY_DEFAULT_CLAUDE_MODEL=%s", tmuxShellQuote(strings.TrimSpace(aiCfg.DefaultClaudeModel))),
+		fmt.Sprintf("export CICY_DEFAULT_OPENCODE_MODEL=%s", tmuxShellQuote(strings.TrimSpace(aiCfg.DefaultOpencodeModel))),
+		fmt.Sprintf("export CICY_CODEX_MODEL=%s", tmuxShellQuote(strings.TrimSpace(aiCfg.CodexModel))),
+		fmt.Sprintf("export CICY_OPENCLAW_MODEL=%s", tmuxShellQuote(strings.TrimSpace(aiCfg.OpenClawModel))),
 		fmt.Sprintf("export CICY_OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
 		fmt.Sprintf("export CICY_ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
 		//fmt.Sprintf("export HTTP_PROXY=%s", tmuxShellQuote(proxyURL)),
@@ -2766,6 +2970,7 @@ func initPaneEnv(opts paneEnvOpts) {
 		lines = append(lines,
 			"cd "+tmuxShellQuote(opts.workspace),
 			fmt.Sprintf("export WORKSPACE=%s", tmuxShellQuote(opts.workspace)),
+				`if [ ! -e ./home ] || [ -L ./home ]; then ln -sfn -- "${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}" ./home; fi`,
 			// "mkdir -p ./skills ./projects",
 		)
 	}
@@ -2819,7 +3024,6 @@ func initPaneEnv(opts paneEnvOpts) {
 	} else if normalizeAgentType(opts.agentType) == "codex" {
 		autoConfirmCodexTrust(pid)
 	}
-	autoSendReplyInChinese(pid, opts.agentType, opts.replyInChinese)
 }
 
 func handleRestartAll(w http.ResponseWriter, r *http.Request) {
@@ -2835,14 +3039,96 @@ func handleRestartAll(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"success": true, "results": results, "total": len(results)})
 }
 
+type tmuxSendError struct {
+	Message      string
+	StatusCode   int
+	PaneUpdated  bool
+	RestoreInput bool
+}
+
+func (e *tmuxSendError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
+
+func newTmuxSendError(message string, statusCode int, paneUpdated bool) *tmuxSendError {
+	return &tmuxSendError{
+		Message:      message,
+		StatusCode:   statusCode,
+		PaneUpdated:  paneUpdated,
+		RestoreInput: !paneUpdated,
+	}
+}
+
+func getPaneSendWorker(paneID string) *paneSendWorker {
+	paneID = normPaneID(paneID)
+	paneSendWorkersMu.Lock()
+	defer paneSendWorkersMu.Unlock()
+	if worker, ok := paneSendWorkers[paneID]; ok {
+		return worker
+	}
+	worker := &paneSendWorker{ch: make(chan paneSendRequest, 128)}
+	paneSendWorkers[paneID] = worker
+	go runPaneSendWorker(paneID, worker)
+	return worker
+}
+
+func mergePaneSendBatch(batch []paneSendRequest) string {
+	if len(batch) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(batch))
+	for _, req := range batch {
+		parts = append(parts, req.text)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func runPaneSendWorker(paneID string, worker *paneSendWorker) {
+	for req := range worker.ch {
+		batch := []paneSendRequest{req}
+	collect:
+		for {
+			select {
+			case next := <-worker.ch:
+				batch = append(batch, next)
+			default:
+				break collect
+			}
+		}
+		text := mergePaneSendBatch(batch)
+		if len(batch) > 1 {
+			log.Printf("[tmux-send-queue] pane=%s merged=%d line_count=%d rune_count=%d",
+				shortPaneID(paneID), len(batch), promptLineCount(text), utf8.RuneCountInString(text))
+		}
+		err := sendTextToPaneDirect(paneID, text)
+		for _, item := range batch {
+			item.result <- err
+			close(item.result)
+		}
+	}
+}
+
 func sendTextToPane(winID, text string) error {
 	winID = normPaneID(winID)
-	text = strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
-	if winID == "" {
-		return fmt.Errorf("win_id required")
+	req := paneSendRequest{
+		text:   text,
+		result: make(chan error, 1),
 	}
-	if text == "" {
-		return fmt.Errorf("text required")
+	getPaneSendWorker(winID).ch <- req
+	return <-req.result
+}
+
+func sendTextToPaneDirect(winID, text string) error {
+	winID = normPaneID(winID)
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	if winID == "" {
+		return newTmuxSendError("win_id required", http.StatusBadRequest, false)
+	}
+	if strings.TrimSpace(text) == "" {
+		return newTmuxSendError("text required", http.StatusBadRequest, false)
 	}
 	agentType := paneAgentType(winID)
 	trace := newTmuxSendTrace(winID, agentType)
@@ -2852,7 +3138,11 @@ func sendTextToPane(winID, text string) error {
 	}, text)
 	if err := ensurePaneReadyForSend(winID, trace); err != nil {
 		trace.logStep("request-error", map[string]any{"error": err.Error()}, "")
-		return err
+		statusCode := http.StatusInternalServerError
+		if strings.Contains(strings.ToLower(err.Error()), "not ready for send") {
+			statusCode = http.StatusConflict
+		}
+		return newTmuxSendError(err.Error(), statusCode, false)
 	}
 	confirmBeforeEnter := shouldConfirmPromptBeforeEnter(winID, agentType)
 	baseline := ""
@@ -2870,16 +3160,16 @@ func sendTextToPane(winID, text string) error {
 	mode, err := sendPromptText(winID, text, trace)
 	if err != nil {
 		trace.logStep("send-text-error", map[string]any{"error": err.Error()}, "")
-		return fmt.Errorf("failed to send text: %w", err)
+		return newTmuxSendError("failed to send text: "+err.Error(), http.StatusInternalServerError, false)
 	}
 	if confirmBeforeEnter {
 		if _, err := waitForPromptEchoBeforeEnter(winID, agentType, text, mode, baseline, trace); err != nil {
 			trace.logStep("pre-submit-failed", map[string]any{"error": err.Error()}, "")
-			return fmt.Errorf("failed to confirm text before submit: %w", err)
+			return newTmuxSendError("failed to confirm text before submit: "+err.Error(), http.StatusConflict, true)
 		}
 		if err := submitPromptWithConfirmation(winID, agentType, text, trace); err != nil {
 			trace.logStep("submit-failed", map[string]any{"error": err.Error()}, "")
-			return err
+			return newTmuxSendError(err.Error(), http.StatusConflict, true)
 		}
 	} else {
 		delay := enterDelay
@@ -2889,7 +3179,7 @@ func sendTextToPane(winID, text string) error {
 		time.Sleep(delay)
 		if err := sendPromptEnter(winID); err != nil {
 			trace.logStep("submit-enter-error", map[string]any{"error": err.Error()}, "")
-			return fmt.Errorf("failed to submit text: %w", err)
+			return newTmuxSendError("failed to submit text: "+err.Error(), http.StatusConflict, true)
 		}
 	}
 	trace.logStep("request-complete", map[string]any{"mode": mode, "confirm_before_enter": confirmBeforeEnter}, "")
@@ -2905,20 +3195,33 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 	winID = normPaneID(winID)
 	if winID == "" {
-		J(w, M{"error": "win_id required"})
+		httpErr(w, http.StatusBadRequest, "win_id required")
 		return
 	}
 	if text, ok := req["text"].(string); ok && text != "" {
 		if err := sendTextToPane(winID, text); err != nil {
-			J(w, M{"error": err.Error()})
+			if sendErr, ok := err.(*tmuxSendError); ok {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(sendErr.StatusCode)
+				_ = json.NewEncoder(w).Encode(M{
+					"detail":        sendErr.Message,
+					"pane_updated":  sendErr.PaneUpdated,
+					"restore_input": sendErr.RestoreInput,
+				})
+				return
+			}
+			httpErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	} else if keys, ok := req["keys"].(string); ok && keys != "" {
 		log.Printf("[tmux-send] pane=%s mode=keys keys=%q", shortPaneID(winID), keys)
 		if _, err := runTmux("send-keys", "-t", winID, keys); err != nil {
-			J(w, M{"error": "failed to send keys: " + err.Error()})
+			httpErr(w, http.StatusInternalServerError, "failed to send keys: "+err.Error())
 			return
 		}
+	} else {
+		httpErr(w, http.StatusBadRequest, "text or keys required")
+		return
 	}
 	J(w, M{"success": true, "win_id": shortPaneID(winID)})
 }
@@ -2929,15 +3232,18 @@ func handleSendKeys(w http.ResponseWriter, r *http.Request) {
 	winID, _ := req["win_id"].(string)
 	winID = normPaneID(winID)
 	if winID == "" {
-		J(w, M{"error": "win_id required"})
+		httpErr(w, http.StatusBadRequest, "win_id required")
 		return
 	}
 	keys, _ := req["keys"].(string)
 	if keys == "" {
-		J(w, M{"error": "keys required"})
+		httpErr(w, http.StatusBadRequest, "keys required")
 		return
 	}
-	runTmux("send-keys", "-t", winID, keys)
+	if _, err := runTmux("send-keys", "-t", winID, keys); err != nil {
+		httpErr(w, http.StatusInternalServerError, "failed to send keys: "+err.Error())
+		return
+	}
 	J(w, M{"success": true, "win_id": shortPaneID(winID)})
 }
 
@@ -3136,23 +3442,7 @@ func aiGatewayReplyTimestamp(snapshot aiGatewayReplySnapshot) time.Time {
 }
 
 func readAIGatewayMessagesFile(agentID string) (aiGatewayMessagesFile, error) {
-	path := aiGatewayMessagesPath(agentID)
-	file := aiGatewayMessagesFile{Messages: []aiGatewayMessageRecord{}}
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return file, err
-	}
-	if len(strings.TrimSpace(string(body))) == 0 {
-		return file, nil
-	}
-	if err := json.Unmarshal(body, &file); err != nil {
-		var legacy []aiGatewayMessageRecord
-		if legacyErr := json.Unmarshal(body, &legacy); legacyErr != nil {
-			return file, err
-		}
-		file = aiGatewayMigrateLegacyMessagesFile(legacy)
-	}
-	return file, nil
+	return aiGatewayLoadMessagesFile(agentID)
 }
 
 func aiGatewayMessageRecordTimestamp(record aiGatewayMessageRecord) time.Time {
@@ -3217,13 +3507,13 @@ func waitForAIGatewayMessageRecord(agentID string, baselineCount int, expectedQu
 			if isAIGatewayReplyTerminal(snapshot.Status) && strings.EqualFold(snapshot.Status, "failed") {
 				current, currentErr := aiGatewayReadCurrentSnapshot(agentID)
 				if currentErr == nil && aiGatewayMessageMatchesSend(aiGatewayMessageRecord{
-					Q:     current.Question,
+					Q:     aiGatewayCurrentQuestion(current),
 					A:     snapshot.Answer,
 					QTime: current.Timestamp,
 					ATime: snapshot.UpdatedAt,
 				}, expectedQuestion, sentFloor) {
 					return aiGatewayMessageRecord{
-						Q:         aiGatewaySanitizeUserQuestion(current.Question),
+						Q:         aiGatewayCurrentQuestion(current),
 						A:         aiGatewaySanitizeMessageAnswer(snapshot.Answer),
 						QTime:     aiGatewayMessageQuestionTime(current, snapshot),
 						ATime:     aiGatewayMessageAnswerTime(snapshot),
