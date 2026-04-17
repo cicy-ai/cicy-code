@@ -33,6 +33,7 @@ interface ChatViewProps {
   token: string;
   commandPanel?: React.ReactNode;
   apiOnly?: boolean;
+  headerTabs?: React.ReactNode;
 }
 
 // IndexedDB cache
@@ -114,7 +115,7 @@ const ToolCard: React.FC<{ tool: any; running?: boolean }> = ({ tool, running })
   );
 };
 
-const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, commandPanel, apiOnly = false }) => {
+const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, commandPanel, apiOnly = false, headerTabs }) => {
   const [agentType, setAgentType] = useState('AI');
   const [chatData, setChatData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -264,7 +265,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
 
       ws.onopen = () => {
         console.log('[ChatView] WS connected, agent_id=' + agentId + ', client_id=' + clientId);
-        window.dispatchEvent(new CustomEvent('chat-ws-connection', { detail: { agentId, connected: true } }));
+        window.dispatchEvent(new CustomEvent('chat-ws-connection', { detail: { agentId, connected: true, clientId } }));
         reload();
       };
 
@@ -277,13 +278,15 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
             window.dispatchEvent(new CustomEvent('ai-streaming', { detail: false }));
             setChatData(prev => [...prev.filter((c: any) => !c.system), { q: msg.data.q, status: 'pending', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0 }]);
           } else if (msg.type === 'ai_chunk') {
+            const delta = String(msg.data?.delta || '');
+            if (!delta) return;
             if (!streamingRef.current) { streamingRef.current = true; window.dispatchEvent(new CustomEvent('ai-streaming', { detail: true })); }
             setChatData(prev => {
               if (!prev.length) return prev;
               const last = { ...prev[prev.length - 1] };
               const steps = last.steps ? [...last.steps] : [];
-              if (!steps.length || steps[steps.length - 1].type !== 'text') steps.push({ type: 'text', text: msg.data.delta });
-              else steps[steps.length - 1] = { ...steps[steps.length - 1], text: msg.data.delta };
+              if (!steps.length || steps[steps.length - 1].type !== 'text') steps.push({ type: 'text', text: delta });
+              else steps[steps.length - 1] = { ...steps[steps.length - 1], text: `${steps[steps.length - 1].text || ''}${delta}` };
               last.steps = steps; last.status = 'streaming';
               return [...prev.slice(0, -1), last];
             });
@@ -315,7 +318,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
               if (msg.data.requestId && ws) ws发送({ type: 'exec_js_result', data: { requestId: msg.data.requestId, error: e.message } });
             }
           } else if (msg.type === 'webpage_ping') {
-            const versionText = document.getElementById('version')?.textContent?.trim() || import.meta.env.VITE_APP_VERSION;
+            const versionText = document.getElementById('version')?.textContent?.trim() || config.version;
             ws发送({ type: 'webpage_pong', data: { requestId: msg.data?.requestId, version: versionText } });
           } else if (msg.type === 'worker_idle') {
             const d = msg.data?.data;
@@ -328,7 +331,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
 
       ws.onclose = () => {
         cleanup();
-        window.dispatchEvent(new CustomEvent('chat-ws-connection', { detail: { agentId, connected: false } }));
+        window.dispatchEvent(new CustomEvent('chat-ws-connection', { detail: { agentId, connected: false, clientId } }));
         if (!dead) reconnectTimer = setTimeout(connect, 3000);
       };
       ws.onerror = () => ws?.close();
@@ -336,7 +339,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
     connect();
     return () => {
       dead = true;
-      window.dispatchEvent(new CustomEvent('chat-ws-connection', { detail: { agentId, connected: false } }));
+      window.dispatchEvent(new CustomEvent('chat-ws-connection', { detail: { agentId, connected: false, clientId } }));
       clearTimeout(reconnectTimer);
       clearTimeout(fetchTimer);
       ws?.close();
@@ -371,6 +374,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
 
   return (
     <div className="flex flex-col h-full">
+      {headerTabs ? <div className="shrink-0 border-b border-white/[0.06] px-2 py-1.5 bg-[#0b0b0d]">{headerTabs}</div> : null}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <div className="max-w-full mx-auto px-2 py-4">
           {loading ? (
@@ -480,9 +484,11 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
           />
         </div>
       )}
-      <div className="shrink-0 h-[180px] pb-2 px-2">
-        {commandPanel}
-      </div>
+      {commandPanel ? (
+        <div className="shrink-0 h-[180px] pb-2 px-2">
+          {commandPanel}
+        </div>
+      ) : null}
     </div>
   );
 };

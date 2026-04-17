@@ -199,6 +199,15 @@ func (d *DB) Migrate() {
 			perms TEXT NOT NULL, note TEXT,
 			expires_at TEXT, created_at TEXT DEFAULT (datetime('now'))
 		)`,
+		`CREATE TABLE IF NOT EXISTS prompt_rules (
+			scope_type TEXT NOT NULL,
+			scope_key TEXT NOT NULL,
+			content TEXT DEFAULT '',
+			enabled INTEGER DEFAULT 0,
+			inject_on_request INTEGER DEFAULT 0,
+			updated_at TEXT DEFAULT (datetime('now')),
+			PRIMARY KEY(scope_type, scope_key)
+		)`,
 		`INSERT OR IGNORE INTO global_vars (key_name, value) VALUES ('worker_index', '20000')`,
 	}
 	for _, s := range stmts {
@@ -212,6 +221,8 @@ func (d *DB) Migrate() {
 	d.ensureColumn("agent_config", "source_ref", "TEXT DEFAULT ''")
 	d.ensureColumn("agent_config", "allow_all_actions", "INTEGER DEFAULT 0")
 	d.ensureColumn("agent_config", "reply_in_chinese", "INTEGER DEFAULT 0")
+	d.ensureColumn("agent_config", "inspector_notes", "TEXT DEFAULT ''")
+	d.ensureColumn("agent_config", "inspector_notes_updated_at", "TEXT")
 	d.ensureColumn("agent_queue", "step_kind", "TEXT DEFAULT 'message'")
 	d.ensureColumn("agent_queue", "workflow_id", "INTEGER")
 	d.ensureColumn("agent_queue", "parent_id", "INTEGER")

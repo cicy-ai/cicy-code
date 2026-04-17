@@ -117,7 +117,7 @@ function AgentTypeAvatar({ agentType, title }: { agentType?: string; title: stri
       className={`${baseClassName} border-zinc-500/40 bg-zinc-300`}
       title={icon.label}
     >
-      <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-6 w-6'} object-contain`} />
+      <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-8 w-8'} object-contain`} />
     </div>
   );
 }
@@ -228,7 +228,6 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         title: values.title,
         agent_type: values.agent_type,
         allow_all_actions: values.allow_all_actions,
-        reply_in_chinese: values.reply_in_chinese,
       });
       const newId = data?.pane_id || data?.session;
       if (newId) {

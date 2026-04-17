@@ -9,8 +9,10 @@ import argparse
 import urllib.request
 import urllib.error
 import base64
+import tempfile
+import shutil
 
-PORT = int(os.environ.get("PORT", "8021"))
+PORT = int(os.environ.get("PORT", "8008"))
 SQLITE_PATH = os.environ.get("SQLITE_PATH", f"{os.path.expanduser('~')}/.cicy/data-v1.db")
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 API_DIR = os.path.join(ROOT_DIR, "api")
@@ -100,6 +102,96 @@ def get_ai_env_defaults(provider_name=""):
 def get_cicy_api_key():
     return get_ai_env_defaults().get("CICY_API_KEY", "")
 
+def build_minimal_runtime_global_json():
+    selected, config = get_ai_provider_config()
+    data = {}
+    token = get_local_api_token()
+    if token:
+        data["api_token"] = token
+    provider_config = {}
+    for src_key, dst_key in (
+        ("apiKey", "apiKey"),
+        ("apiUrl", "apiUrl"),
+        ("anthropicUrl", "anthropicUrl"),
+        ("defaultOpencodeModel", "defaultOpencodeModel"),
+        ("defaultClaudeModel", "defaultClaudeModel"),
+        ("codexModel", "codexModel"),
+        ("openclawModel", "openclawModel"),
+    ):
+        value = str(config.get(src_key, "") or "").strip()
+        if value:
+            provider_config[dst_key] = value
+    data["ai"] = {
+        "currentProvider": selected or "cicyAi",
+        "provider": {
+            selected or "cicyAi": provider_config,
+        },
+    }
+    return data
+
+def build_dev_runtime_home(container_name):
+    safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in container_name).strip("-") or "cicy-code-dev"
+    home_dir = os.path.join(tempfile.gettempdir(), safe_name)
+    os.makedirs(home_dir, exist_ok=True)
+    global_json_path = os.path.join(home_dir, "global.json")
+    with open(global_json_path, "w", encoding="utf-8") as f:
+        json.dump(build_minimal_runtime_global_json(), f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    return home_dir, global_json_path
+
+def seed_runtime_home_from_image(image_ref, home_dir):
+    openclaw_dir = os.path.join(home_dir, ".openclaw")
+    plugin_dir = os.path.join(openclaw_dir, "extensions", "openclaw-weixin")
+    if os.path.isdir(plugin_dir):
+        return
+
+    container_id = ""
+    temp_dir = tempfile.mkdtemp(prefix="cicy-openclaw-seed-")
+    try:
+        result = subprocess.run(
+            ["docker", "create", image_ref, "--public", "--agents=all"],
+            capture_output=True,
+            text=True,
+            cwd=ROOT_DIR,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            err = (result.stderr or result.stdout or "").strip()
+            print(f"[dev] failed to create seed container for {image_ref}: {err}")
+            return
+        container_id = result.stdout.strip()
+        copy_result = subprocess.run(
+            ["docker", "cp", f"{container_id}:/home/cicy/.openclaw", temp_dir],
+            capture_output=True,
+            text=True,
+            cwd=ROOT_DIR,
+        )
+        if copy_result.returncode != 0:
+            err = (copy_result.stderr or copy_result.stdout or "").strip()
+            print(f"[dev] failed to seed runtime home from image: {err}")
+            return
+
+        seeded_dir = os.path.join(temp_dir, ".openclaw")
+        if not os.path.isdir(seeded_dir):
+            print("[dev] seed image missing /home/cicy/.openclaw")
+            return
+
+        if os.path.exists(openclaw_dir):
+            shutil.rmtree(openclaw_dir)
+        shutil.copytree(seeded_dir, openclaw_dir)
+        print(f"[dev] Seeded runtime home with image OpenClaw assets")
+    finally:
+        if container_id:
+            subprocess.run(["docker", "rm", "-f", container_id], capture_output=True, cwd=ROOT_DIR)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+def read_api_token_from_file(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return str(data.get("api_token", "") or "").strip()
+    except Exception:
+        return ""
+
 def get_local_api_token():
     value = os.environ.get("CICY_API_TOKEN", "").strip()
     if value:
@@ -184,9 +276,22 @@ def print_access_urls(base_url, token, service_url=""):
         return
     open_url = f"{base_url.rstrip('/')}/?token={token}"
     print(f"[dev] API Token: {token}")
-    print(f"[dev] URL: {open_url}")
+    print(f"[dev] Open URL: {open_url}")
     if service_url and service_url.rstrip("/") != base_url.rstrip("/"):
         print(f"[dev] Service URL: {service_url.rstrip('/')}/?token={token}")
+
+def detect_public_ip():
+    for cmd in (
+        ["curl", "-fsS", "--max-time", "5", "ifconfig.me"],
+        ["curl", "-fsS", "--max-time", "5", "https://api.ipify.org"],
+    ):
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except Exception:
+            pass
+    return ""
 
 def get_version_info():
     try:
@@ -604,14 +709,10 @@ def run_docker(ports):
     
     container_name = "cicy-code-dev"
     subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
+    dev_home_dir, dev_global_json_path = build_dev_runtime_home(container_name)
+    seed_runtime_home_from_image("cicy-code:latest", dev_home_dir)
     
-    # Pass AI config env vars to docker
     env_vars = []
-    for key, value in get_ai_env_defaults().items():
-        env_vars.extend(["-e", f"{key}={value}"])
-    local_api_token = get_local_api_token()
-    if local_api_token:
-        env_vars.extend(["-e", f"CICY_API_TOKEN={local_api_token}"])
     passthrough_env_keys = [
         "CICY_TEAM_TOKEN",
         "CICY_TEAMCENTER_URL",
@@ -629,14 +730,15 @@ def run_docker(ports):
         value = os.environ.get(key, "").strip()
         if value:
             env_vars.extend(["-e", f"{key}={value}"])
-    trial_expires_at = str(int(time.time()) + 6 * 3600)
+    trial_ttl_seconds = int((os.environ.get("CLOUD_TRIAL_RUNTIME_TTL_SECONDS", "3600") or "3600").strip() or "3600")
+    trial_expires_at = str(int(time.time()) + trial_ttl_seconds)
     env_vars.extend(["-e", f"CLOUD_TRIAL_RUNTIME_EXPIRES_AT={trial_expires_at}"])
     is_pro = "true"
     env_vars.extend(["-e", f"CICY_IS_PRO={is_pro}"])
-    
     run_cmd = [
         "docker", "run", "-d",
         "--name", container_name,
+        "-v", f"{dev_home_dir}:/home/cicy",
     ] + env_vars + [
         "-p", f"{ports}:8008",
         "cicy-code:latest", "--public", "--agents=all"
@@ -667,36 +769,18 @@ def run_docker(ports):
         if version_err:
             print(f"[dev] OpenClaw version check failed: {version_err}")
 
-    # Get public IP
-    pub_ip = "localhost"
-    try:
-        result = subprocess.run(
-            ["curl", "-s", "ifconfig.me"],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            pub_ip = result.stdout.strip()
-    except:
-        pass
-
     # Get and display the API token
-    token = local_api_token
-    if not token:
-        result = subprocess.run(
-            ["docker", "exec", container_name, "cat", "/root/global.json"],
-            capture_output=True, text=True
-        )
-        if result.returncode == 0:
-            import json
-            try:
-                config = json.loads(result.stdout)
-                token = config.get("api_token", "")
-            except Exception as e:
-                print(f"Error: {e}")
+    token = read_api_token_from_file(dev_global_json_path)
     if token:
-        print(f"[dev] API Token: {token}")
-        print(f"[dev] URL: http://{pub_ip}:{ports}/?token={token}")
+        public_ip = detect_public_ip()
+        public_base_url = f"http://{public_ip}:{ports}" if public_ip else ""
+        local_base_url = f"http://localhost:{ports}"
+        if public_base_url:
+            print_access_urls(public_base_url, token, local_base_url)
+        else:
+            print_access_urls(local_base_url, token)
         print(f"[dev] Token available in {time.time() - docker_run_started_at:.1f}s (since docker run)")
+        print(f"[dev] Runtime home: {dev_home_dir}")
 
         # Test agents
         print("[dev] Testing agents...")
@@ -853,6 +937,7 @@ def main():
             pass
 
     platform = "darwin" if sys.platform == "darwin" else "linux"
+    os.environ["PORT"] = str(PORT)
     os.environ["SKIP_NPM"] = "1"
     os.environ["SQLITE_PATH"] = SQLITE_PATH
     for key, value in get_ai_env_defaults().items():

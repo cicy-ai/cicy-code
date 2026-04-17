@@ -1,3 +1,5 @@
+import config from '../config';
+
 export interface OpenClawGatewayInfo {
   ws_url: string;
   token: string;
@@ -134,7 +136,7 @@ export class OpenClawGatewayClient {
             client: {
               id: CONTROL_UI_CLIENT_ID,
               displayName: this.opts.clientName ?? CONTROL_UI_CLIENT_ID,
-              version: this.opts.clientVersion ?? '1.0.0',
+              version: this.opts.clientVersion ?? config.version ?? 'web',
               platform: navigator.platform || 'web',
               mode: 'webchat',
               instanceId: this.instanceId,

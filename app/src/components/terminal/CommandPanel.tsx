@@ -88,8 +88,34 @@ function useCommandHistory(paneId: string) {
 function useDraft(paneId: string) {
   const key = `cmd_draft_${paneId.replace(/[^a-zA-Z0-9]/g, '_')}`;
   const [draft, setDraft] = useState(() => localStorage.getItem(key) || '');
-  const save = useCallback((v: string) => { setDraft(v); localStorage.setItem(key, v); }, [key]);
-  return [draft, save] as const;
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setDraft(localStorage.getItem(key) || '');
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [key]);
+
+  const save = useCallback((v: string) => {
+    setDraft(v);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      localStorage.setItem(key, v);
+      timerRef.current = null;
+    }, 200);
+  }, [key]);
+
+  const flush = useCallback((v: string) => {
+    setDraft(v);
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    localStorage.setItem(key, v);
+  }, [key]);
+
+  return [draft, save, flush] as const;
 }
 
 // ============================================================================
@@ -163,7 +189,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
   selectedPaneRef.current = selectedPane;
   const { sending, setSending, checkIdle } = useSending();
   const { history: commandHistory, add: addToHistory } = useCommandHistory(selectedPane);
-  const [draft, saveDraft] = useDraft(selectedPane);
+  const [draft, saveDraft, flushDraft] = useDraft(selectedPane);
 
   // ---- Sync ----
   useEffect(() => { setSelectedPane(paneTarget); }, [paneTarget]);
@@ -217,7 +243,7 @@ export const CommandPanel = forwardRef<CommandPanelHandle, CommandPanelProps>(({
     const atMatch = trimmedCmd.match(/^@(w-\d+)\s+(.+)$/s);
     if (atMatch) {
       const [, targetWorker, taskMsg] = atMatch;
-      setPromptText(''); saveDraft('');
+      setPromptText(''); flushDraft('');
       setSending(true);
       window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneTarget, q: cmd } }));
       await apiService.pushQueue({ pane_id: targetWorker, message: taskMsg, type: 'task' });
@@ -507,7 +533,7 @@ function ModelSelect({ value, onChange }: { value: string; onChange: (v: string)
 function useTwiceConfirm(timeout = 2000) {
   const [pending, setPending] = useState(false);
   const ref = useRef(false);
-  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const click = useCallback((action: () => void) => {
     if (!ref.current) {
       ref.current = true; setPending(true);

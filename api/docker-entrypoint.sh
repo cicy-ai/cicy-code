@@ -15,43 +15,22 @@ node_eval() {
   node -e "$1" "${@:2}"
 }
 
-ensure_api_token() {
+ensure_runtime_api_token() {
+  mkdir -p "$(dirname "$GLOBAL_JSON_PATH")"
+  export CICY_RUNTIME_API_TOKEN
   export CICY_API_TOKEN
-  CICY_API_TOKEN="$(
-    node - "$GLOBAL_JSON_PATH" "${CICY_API_TOKEN:-}" <<'NODE'
+  CICY_RUNTIME_API_TOKEN="$(
+    node - "$GLOBAL_JSON_PATH" "${CICY_RUNTIME_API_TOKEN:-${CICY_API_TOKEN:-}}" <<'NODE'
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const file = process.argv[2];
 const envToken = String(process.argv[3] || '').trim();
 const dir = path.dirname(file);
-const lockDir = `${file}.lock`;
 const tmpFile = path.join(dir, `.${path.basename(file)}.tmp-${process.pid}`);
 
-function sleep(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-function acquireLock() {
-  for (let i = 0; i < 100; i += 1) {
-    try {
-      fs.mkdirSync(lockDir);
-      return;
-    } catch (error) {
-      if (error && error.code === 'EEXIST') {
-        sleep(50);
-        continue;
-      }
-      throw error;
-    }
-  }
-  throw new Error(`lock timeout: ${lockDir}`);
-}
-
-fs.mkdirSync(dir, { recursive: true });
-acquireLock();
-
 try {
+  fs.mkdirSync(dir, { recursive: true });
   let config = {};
   if (fs.existsSync(file)) {
     const raw = fs.readFileSync(file, 'utf8');
@@ -72,10 +51,60 @@ try {
   process.stdout.write(nextToken);
 } finally {
   try { fs.rmSync(tmpFile, { force: true }); } catch (_) {}
-  try { fs.rmdirSync(lockDir); } catch (_) {}
 }
 NODE
   )"
+  CICY_API_TOKEN="$CICY_RUNTIME_API_TOKEN"
+}
+
+persist_runtime_ai_config() {
+  mkdir -p "$(dirname "$GLOBAL_JSON_PATH")"
+  node - "$GLOBAL_JSON_PATH" \
+    "${CICY_AI_PROVIDER:-}" \
+    "${CICY_API_KEY:-}" \
+    "${CICY_API_URL:-}" \
+    "${CICY_ANTHROPIC_URL:-}" \
+    "${CICY_DEFAULT_OPENCODE_MODEL:-${CICY_DEFAULT_MODEL:-}}" \
+    "${CICY_DEFAULT_CLAUDE_MODEL:-${CICY_CLAUDE_MODEL:-}}" \
+    "${CICY_CODEX_MODEL:-}" \
+    "${CICY_OPENCLAW_MODEL:-}" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const [file, providerRaw, apiKey, apiUrl, anthropicUrl, defaultOpencodeModel, defaultClaudeModel, codexModel, openclawModel] = process.argv.slice(2);
+const provider = String(providerRaw || '').trim() || 'cicyAi';
+const dir = path.dirname(file);
+const tmpFile = path.join(dir, `.${path.basename(file)}.tmp-ai-${process.pid}`);
+
+function loadConfig() {
+  if (!fs.existsSync(file)) return {};
+  const raw = fs.readFileSync(file, 'utf8');
+  if (!raw.trim()) return {};
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`invalid global json root: ${file}`);
+  }
+  return parsed;
+}
+
+const cfg = loadConfig();
+cfg.ai = cfg.ai && typeof cfg.ai === 'object' && !Array.isArray(cfg.ai) ? cfg.ai : {};
+cfg.ai.provider = cfg.ai.provider && typeof cfg.ai.provider === 'object' && !Array.isArray(cfg.ai.provider) ? cfg.ai.provider : {};
+cfg.ai.currentProvider = provider;
+const current = cfg.ai.provider[provider] && typeof cfg.ai.provider[provider] === 'object' && !Array.isArray(cfg.ai.provider[provider]) ? cfg.ai.provider[provider] : {};
+
+if (String(apiKey || '').trim()) current.apiKey = String(apiKey).trim();
+if (String(apiUrl || '').trim()) current.apiUrl = String(apiUrl).trim();
+if (String(anthropicUrl || '').trim()) current.anthropicUrl = String(anthropicUrl).trim();
+if (String(defaultOpencodeModel || '').trim()) current.defaultOpencodeModel = String(defaultOpencodeModel).trim();
+if (String(defaultClaudeModel || '').trim()) current.defaultClaudeModel = String(defaultClaudeModel).trim();
+if (String(codexModel || '').trim()) current.codexModel = String(codexModel).trim();
+if (String(openclawModel || '').trim()) current.openclawModel = String(openclawModel).trim();
+
+cfg.ai.provider[provider] = current;
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(tmpFile, `${JSON.stringify(cfg, null, 2)}\n`, 'utf8');
+fs.renameSync(tmpFile, file);
+NODE
 }
 
 default_teamcenter_url() {
@@ -119,13 +148,13 @@ bootstrap_team_runtime() {
   fi
   bootstrap_url="${teamcenter_url%/}${bootstrap_path}"
   payload="$(
-    node - "$instance_key" "$instance_label" "${PORT:-8008}" "${CICY_API_TOKEN:-}" "${CICY_RUNTIME_KIND:-container}" <<'NODE'
-const [instanceKey, instanceLabel, port, apiToken, runtimeKind] = process.argv.slice(2);
+    node - "$instance_key" "$instance_label" "${PORT:-8008}" "${CICY_RUNTIME_API_TOKEN:-${CICY_API_TOKEN:-}}" "${CICY_RUNTIME_KIND:-container}" <<'NODE'
+const [instanceKey, instanceLabel, port, runtimeApiToken, runtimeKind] = process.argv.slice(2);
 process.stdout.write(JSON.stringify({
   instance_key: instanceKey,
   instance_label: instanceLabel,
   port: Number(port || 8008),
-  api_token: apiToken || '',
+  api_token: runtimeApiToken || '',
   runtime_kind: runtimeKind || 'container'
 }));
 NODE
@@ -170,6 +199,8 @@ const env = {
   CICY_MASTER_URL: pick('master_url', 'teamcenter_url', 'register_url'),
   CICY_MASTER_TOKEN: pick('master_token', 'register_token'),
   CICY_PUBLIC_URL: pick('public_url', 'workspace_url', 'endpoint', 'url'),
+  CICY_RUNTIME_API_TOKEN: pick('api_token', 'workspace_token'),
+  CICY_TRIAL_AI_API_TOKEN: pick('api_key', 'newapi_token'),
   CICY_API_TOKEN: pick('api_token', 'workspace_token'),
   CICY_API_KEY: pick('api_key', 'newapi_token'),
   CICY_API_URL: pick('api_url'),
@@ -185,10 +216,31 @@ const env = {
   CICY_INSTANCE_KEY: pick('instance_key'),
   CICY_INSTANCE_LABEL: pick('instance_label'),
   CICY_TEAM_ID: pick('team_id'),
+  CICY_MEMBERSHIP_KIND: pick('membership_kind'),
+  CICY_MEMBERSHIP_TAG: pick('membership_tag'),
+  CICY_MEMBERSHIP_EXPIRES_AT: pick('membership_expires_at'),
+  CICY_MEMBERSHIP_RENEW_URL: pick('renew_url'),
+  CICY_MEMBERSHIP_UPGRADE_URL: pick('upgrade_url'),
+  CICY_MEMBERSHIP_SHOW_RENEW: bool('show_renew'),
+  CICY_MEMBERSHIP_SHOW_UPGRADE: bool('show_upgrade'),
   CICY_ALREADY_REGISTERED: bool('already_registered', 'registered'),
 };
 for (const [key, value] of Object.entries(env)) {
   if (!value) continue;
+  if ([
+    'CICY_API_KEY',
+    'CICY_API_URL',
+    'CICY_ANTHROPIC_URL',
+    'CICY_AI_PROVIDER',
+    'CICY_DEFAULT_OPENCODE_MODEL',
+    'CICY_DEFAULT_MODEL',
+    'CICY_DEFAULT_CLAUDE_MODEL',
+    'CICY_CLAUDE_MODEL',
+    'CICY_CODEX_MODEL',
+    'CICY_OPENCLAW_MODEL',
+  ].includes(key)) {
+    continue;
+  }
   process.stdout.write(`export ${key}=${JSON.stringify(value)}\n`);
 }
 NODE
@@ -204,9 +256,16 @@ NODE
   if [ -z "${CICY_MASTER_TOKEN:-}" ]; then
     export CICY_MASTER_TOKEN="$team_token"
   fi
+  if [ -z "${CICY_RUNTIME_API_TOKEN:-}" ] && [ -n "${CICY_API_TOKEN:-}" ]; then
+    export CICY_RUNTIME_API_TOKEN="$CICY_API_TOKEN"
+  fi
+  if [ -z "${CICY_TRIAL_AI_API_TOKEN:-}" ] && [ -n "${CICY_API_KEY:-}" ]; then
+    export CICY_TRIAL_AI_API_TOKEN="$CICY_API_KEY"
+  fi
   if [ -n "${CICY_TEAM_ID:-}" ] && [ -z "${CICY_INSTANCE_KEY:-}" ]; then
     export CICY_INSTANCE_KEY="team-${CICY_TEAM_ID}"
   fi
+  persist_runtime_ai_config
 
   log "team bootstrap ok"
   if [ "${CICY_ALREADY_REGISTERED:-}" = "true" ]; then
@@ -257,7 +316,7 @@ build_app_argv() {
 
 main() {
   bootstrap_team_runtime
-  ensure_api_token
+  ensure_runtime_api_token
   start_cloudflared
 
   mapfile -d '' app_argv < <(build_app_argv "$@")

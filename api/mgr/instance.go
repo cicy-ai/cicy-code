@@ -23,9 +23,11 @@ type Instance struct {
 }
 
 var (
-	instances   = make(map[string]*Instance)
-	instancesMu sync.RWMutex
-	portPool    = initPortPool()
+	instances      = make(map[string]*Instance)
+	instancesMu    sync.RWMutex
+	instanceStarts = make(map[string]chan struct{})
+	startsMu       sync.Mutex
+	portPool       = initPortPool()
 )
 
 type PortPool struct {
@@ -48,10 +50,14 @@ func (p *PortPool) Allocate() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for i := p.start; i <= p.end; i++ {
-		if !p.used[i] {
-			p.used[i] = true
-			return i
+		if p.used[i] {
+			continue
 		}
+		if isPortListening(i) {
+			continue
+		}
+		p.used[i] = true
+		return i
 	}
 	return 0
 }
@@ -96,13 +102,16 @@ func startInstance(paneID string, port int, token string) error {
 	instances[paneID] = &Instance{PaneID: paneID, Port: port, Cancel: cancel}
 	//log.Printf("[instance] started %s on :%d", paneID, port)
 	go func() {
-		if err := srv.Run(ctx); err != nil && err != context.Canceled {
+		err := srv.Run(ctx)
+		if err != nil && err != context.Canceled {
 			log.Printf("[instance] %s error: %v", paneID, err)
-			// Clean up so watcher can retry
-			instancesMu.Lock()
-			delete(instances, paneID)
-			instancesMu.Unlock()
 		}
+		instancesMu.Lock()
+		if current := instances[paneID]; current != nil && current.Port == port {
+			delete(instances, paneID)
+		}
+		instancesMu.Unlock()
+		portPool.Release(port)
 	}()
 	return nil
 }
@@ -121,6 +130,94 @@ func getInstance(paneID string) *Instance {
 	instancesMu.RLock()
 	defer instancesMu.RUnlock()
 	return instances[paneID]
+}
+
+func beginInstanceStart(paneID string) (chan struct{}, bool) {
+	startsMu.Lock()
+	defer startsMu.Unlock()
+	if ch, ok := instanceStarts[paneID]; ok {
+		return ch, false
+	}
+	ch := make(chan struct{})
+	instanceStarts[paneID] = ch
+	return ch, true
+}
+
+func finishInstanceStart(paneID string, ch chan struct{}) {
+	startsMu.Lock()
+	defer startsMu.Unlock()
+	current, ok := instanceStarts[paneID]
+	if !ok || current != ch {
+		return
+	}
+	delete(instanceStarts, paneID)
+	close(ch)
+}
+
+func ensureInstanceReady(paneID string, token string, timeout time.Duration) (*Instance, error) {
+	if inst := waitForInstanceReady(paneID, 200*time.Millisecond); inst != nil {
+		return inst, nil
+	}
+
+	waitCh, shouldStart := beginInstanceStart(paneID)
+	if !shouldStart {
+		select {
+		case <-waitCh:
+		case <-time.After(timeout):
+			return nil, fmt.Errorf("ttyd start timeout")
+		}
+		inst := waitForInstanceReady(paneID, timeout)
+		if inst == nil {
+			return nil, fmt.Errorf("instance unavailable")
+		}
+		return inst, nil
+	}
+	defer finishInstanceStart(paneID, waitCh)
+
+	port := portPool.Allocate()
+	if port == 0 {
+		return nil, fmt.Errorf("no available ports")
+	}
+	if err := startInstance(paneID, port, token); err != nil {
+		portPool.Release(port)
+		return nil, err
+	}
+	inst := waitForInstanceReady(paneID, timeout)
+	if inst == nil {
+		return nil, fmt.Errorf("ttyd start timeout")
+	}
+	return inst, nil
+}
+
+func waitForInstanceReady(paneID string, timeout time.Duration) *Instance {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		inst := getInstance(paneID)
+		if inst != nil {
+			remaining := time.Until(deadline)
+			if remaining > 0 && waitPort(inst.Port, minDuration(remaining, 300*time.Millisecond)) {
+				return inst
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	inst := getInstance(paneID)
+	if inst == nil {
+		return nil
+	}
+	remaining := time.Until(deadline)
+	if remaining > 0 && waitPort(inst.Port, remaining) {
+		return inst
+	}
+	return nil
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func waitPort(port int, timeout time.Duration) bool {

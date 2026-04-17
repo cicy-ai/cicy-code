@@ -7,8 +7,10 @@ import sys
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NPM_PACKAGE_PATH = os.path.join(ROOT_DIR, "npm", "package.json")
+APP_PACKAGE_PATH = os.path.join(ROOT_DIR, "app", "package.json")
+APP_PACKAGE_LOCK_PATH = os.path.join(ROOT_DIR, "app", "package-lock.json")
+APP_CONFIG_PATH = os.path.join(ROOT_DIR, "app", "src", "config.ts")
 MAIN_GO_PATH = os.path.join(ROOT_DIR, "api", "mgr", "main.go")
-WORKSPACE_TSX_PATH = os.path.join(ROOT_DIR, "app", "src", "components", "Workspace.tsx")
 TMUX_CONF_PATH = os.path.join(ROOT_DIR, ".cicy_tmux.conf")
 
 
@@ -47,6 +49,31 @@ def set_npm_version(version):
     write_json(NPM_PACKAGE_PATH, data)
 
 
+def get_app_version():
+    data = read_json(APP_PACKAGE_PATH)
+    version = str(data.get("version", "")).strip()
+    if not version:
+        raise RuntimeError(f"missing version in {APP_PACKAGE_PATH}")
+    return version
+
+
+def set_app_version(version):
+    data = read_json(APP_PACKAGE_PATH)
+    data["version"] = version
+    write_json(APP_PACKAGE_PATH, data)
+
+
+def set_app_lock_version(version):
+    data = read_json(APP_PACKAGE_LOCK_PATH)
+    data["version"] = version
+    packages = data.get("packages")
+    if isinstance(packages, dict):
+        root = packages.get("")
+        if isinstance(root, dict):
+            root["version"] = version
+    write_json(APP_PACKAGE_LOCK_PATH, data)
+
+
 def extract_one(pattern, text, path):
     match = re.search(pattern, text, re.MULTILINE)
     if not match:
@@ -64,27 +91,25 @@ def replace_one(pattern, repl, text, path):
 def get_versions():
     return {
         "npm_package": get_npm_version(),
+        "app_package": get_app_version(),
+        "app_config": extract_one(r"^const APP_VERSION = '([^']+)';$", read_text(APP_CONFIG_PATH), APP_CONFIG_PATH),
         "mgr_main_go": extract_one(r'^const version = "([^"]+)"$', read_text(MAIN_GO_PATH), MAIN_GO_PATH),
-        "workspace_ui": extract_one(r'<span id="version"[^>]*>([^<]+)</span>', read_text(WORKSPACE_TSX_PATH), WORKSPACE_TSX_PATH),
         "cicy_tmux_conf": extract_one(r'^export CICY_VERSION="([^"]+)"$', read_text(TMUX_CONF_PATH), TMUX_CONF_PATH),
     }
 
 
 def sync_targets(version):
     set_npm_version(version)
+    set_app_version(version)
+    set_app_lock_version(version)
+
+    app_config = read_text(APP_CONFIG_PATH)
+    app_config = replace_one(r"^const APP_VERSION = '([^']+)';$", f"const APP_VERSION = '{version}';", app_config, APP_CONFIG_PATH)
+    write_text(APP_CONFIG_PATH, app_config)
 
     main_go = read_text(MAIN_GO_PATH)
     main_go = replace_one(r'^const version = "([^"]+)"$', f'const version = "{version}"', main_go, MAIN_GO_PATH)
     write_text(MAIN_GO_PATH, main_go)
-
-    workspace = read_text(WORKSPACE_TSX_PATH)
-    workspace = replace_one(
-        r'(<span id="version"[^>]*>)([^<]+)(</span>)',
-        rf'\g<1>{version}\g<3>',
-        workspace,
-        WORKSPACE_TSX_PATH,
-    )
-    write_text(WORKSPACE_TSX_PATH, workspace)
 
     tmux_conf = read_text(TMUX_CONF_PATH)
     if re.search(r'^export CICY_VERSION="([^"]+)"$', tmux_conf, re.MULTILINE):

@@ -295,7 +295,7 @@ export const PaneProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     finally { setIsCapturing(false); }
   }, [isCapturing, displayPaneId]);
 
-  const handleRestart = useCallback((paneId?: string) => {
+  const handleRestart = useCallback(async (paneId?: string) => {
     const target = paneId || displayPaneId;
     confirm(`Restart tmux and ttyd for ${target}?`, async () => {
       setIsRestarting(true);

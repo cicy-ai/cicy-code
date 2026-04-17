@@ -27,3 +27,4 @@ audit-worker/.wrangler/
 # local tmux configs
 api/mgr/.tmux.conf
 api/mgr/.cicy_tmux.conf
+.gstack/

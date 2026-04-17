@@ -5,6 +5,8 @@ import { openExternalLinkWithConfirm } from "./link_confirm";
 
 bare.loadAddon("fit");
 
+const MAX_VISIBLE_ROWS = 42;
+
 export class Xterm {
     elem: HTMLElement;
     term: bare;
@@ -69,6 +71,12 @@ export class Xterm {
 
         this.resizeListener = () => {
             this.term.fit();
+            if (this.term.rows > MAX_VISIBLE_ROWS) {
+                this.elem.style.height = (MAX_VISIBLE_ROWS * this.term.charMeasure.height) + "px";
+                this.term.fit();
+            } else {
+                this.elem.style.height = "100%";
+            }
             this.term.scrollToBottom();
             this.showMessage(String(this.term.cols) + "x" + String(this.term.rows), this.messageTimeout);
         };
@@ -79,6 +87,39 @@ export class Xterm {
         });
 
         this.term.open(elem, true);
+        const blockScroll = (event: Event): void => {
+            event.preventDefault();
+            event.stopPropagation();
+            var anyEvent = event as any;
+            if (typeof anyEvent.stopImmediatePropagation === "function") {
+                anyEvent.stopImmediatePropagation();
+            }
+        };
+        const hardDisableViewportScroll = (): void => {
+            const nodes = this.elem.querySelectorAll(".xterm-viewport, .xterm-scroll-area");
+            for (let i = 0; i < nodes.length; i++) {
+                const node = nodes[i] as HTMLElement;
+                node.style.overflow = "hidden";
+                node.style.overflowY = "hidden";
+                node.style.overflowX = "hidden";
+                node.style.maxHeight = "100%";
+                node.scrollTop = 0;
+                node.scrollLeft = 0;
+                node.addEventListener("wheel", blockScroll, { passive: false, capture: true });
+                node.addEventListener("touchmove", blockScroll, { passive: false, capture: true });
+            }
+        };
+        hardDisableViewportScroll();
+        const viewportObserver = new MutationObserver((): void => {
+            hardDisableViewportScroll();
+        });
+        viewportObserver.observe(this.elem, { childList: true, subtree: true, attributes: true });
+        window.addEventListener("wheel", blockScroll, { passive: false, capture: true });
+        window.addEventListener("touchmove", blockScroll, { passive: false, capture: true });
+        document.addEventListener("wheel", blockScroll, { passive: false, capture: true });
+        document.addEventListener("touchmove", blockScroll, { passive: false, capture: true });
+        this.elem.addEventListener("wheel", blockScroll, { passive: false, capture: true });
+        this.elem.addEventListener("touchmove", blockScroll, { passive: false, capture: true });
         this.term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
             if ((event.ctrlKey || event.metaKey) && !event.altKey && String(event.key).toLowerCase() === "c") {
                 return false;

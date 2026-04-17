@@ -43,6 +43,7 @@ var (
 	spinnerRe    = regexp.MustCompile(`[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]`)
 	idlePromptRe = regexp.MustCompile(`\d+%?\s*!?>\s`)
 	ctxRe        = regexp.MustCompile(`(\d+)%?\s*!?>\s*$`)
+	codexLeftRe  = regexp.MustCompile(`(\d+)%\s+left`)
 	credRe       = regexp.MustCompile(`Credits:\s*([\d.]+)`)
 	elapRe       = regexp.MustCompile(`Time:\s*(\d+)s`)
 )
@@ -242,6 +243,30 @@ func checkPane(paneID string, cfg map[string]string) paneSt {
 	if det == "unknown" && cfg != nil && cfg["agent_type"] != "" {
 		det = cfg["agent_type"]
 	}
+	if det == "codex" {
+		out, _ := exec.Command("tmux", "capture-pane", "-t", t, "-p").Output()
+		captured := strings.TrimSpace(string(out))
+		if captured != "" {
+			raw = captured
+			mtime = &ts
+			nonEmpty = nil
+			for _, l := range strings.Split(raw, "\n") {
+				if strings.TrimSpace(l) != "" {
+					nonEmpty = append(nonEmpty, l)
+				}
+			}
+			n = 4
+			if len(nonEmpty) < n {
+				n = len(nonEmpty)
+			}
+			text = strings.Join(nonEmpty[len(nonEmpty)-n:], "\n")
+			last2start = len(nonEmpty) - 2
+			if last2start < 0 {
+				last2start = 0
+			}
+			last2 = strings.Join(nonEmpty[last2start:], " ")
+		}
+	}
 
 	st := parsePane(clean, det, text, last2, nonEmpty)
 	st.Active = true
@@ -277,6 +302,46 @@ func parsePane(pid, atype, text, last2 string, lines []string) paneSt {
 	last := ""
 	if len(lines) > 0 {
 		last = strings.TrimRight(lines[len(lines)-1], " ")
+	}
+	fullText := strings.Join(lines, "\n")
+	lowerFullText := strings.ToLower(fullText)
+	lowerLast2 := strings.ToLower(last2)
+	if atype == "codex" {
+		working := strings.Contains(lowerFullText, "working") ||
+			strings.Contains(lowerFullText, "interrupt") ||
+			strings.Contains(lowerFullText, "background terminals running") ||
+			strings.Contains(lowerFullText, "messages to be submitted after next tool call")
+		waitAuth := strings.Contains(lowerFullText, "do you trust the contents of this directory?") ||
+			strings.Contains(lowerFullText, "press enter to continue")
+		idle := strings.Contains(fullText, "› ") && (strings.Contains(lowerFullText, "% left") || strings.Contains(lowerLast2, "% left")) && !working
+		status := ""
+		switch {
+		case waitAuth:
+			status = "wait_auth"
+		case working:
+			status = "working"
+		case idle:
+			status = "idle"
+		}
+		st.Status = &status
+		st.IsThink = bp(working)
+		st.IsWait = bp(waitAuth)
+		st.IsCompact = bp(false)
+		st.IsIdle = bp(idle)
+		st.Raw = &fullText
+		if m := codexLeftRe.FindAllStringSubmatch(fullText, -1); len(m) > 0 {
+			if left, err := strconv.Atoi(m[len(m)-1][1]); err == nil {
+				used := 100 - left
+				if used < 0 {
+					used = 0
+				}
+				if used > 100 {
+					used = 100
+				}
+				st.CtxUsage = ip(used)
+			}
+		}
+		return st
 	}
 	wa := strings.Contains(last2, "Allow this action") || strings.Contains(last2, "[y/n/t]")
 	co := strings.Contains(last2, "Creating summary") || strings.Contains(last2, "/compact")

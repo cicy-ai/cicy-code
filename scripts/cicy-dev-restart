@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec /home/w3c_offical/projects/cicy-code-v1/scripts/dev-supervisor.sh restart

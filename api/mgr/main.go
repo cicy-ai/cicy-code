@@ -30,7 +30,7 @@ var (
 	desktopCmd    *exec.Cmd
 )
 
-const version = "1.0.18"
+const version = "1.0.26"
 
 // agentsFlag holds --agents=openclaw,codex,claude,... for non-interactive setup
 var agentsFlag string
@@ -133,6 +133,7 @@ Environment:
 	// Tmux
 	http.HandleFunc("/api/tmux/send", authM(handleSend))
 	http.HandleFunc("/api/tmux/send-keys", authM(handleSendKeys))
+	http.HandleFunc("/api/tmux/client-trace", authM(handleTmuxClientTrace))
 	http.HandleFunc("/api/tmux/send_wait", authM(handleSendWait))
 	http.HandleFunc("/api/tmux/capture", authM(handleCapture))
 	http.HandleFunc("/api/tmux/windows", authM(handleWindows))
@@ -198,6 +199,9 @@ Environment:
 	http.HandleFunc("/api/agents/by-pane", wa(handleAgentsByPane))
 	http.HandleFunc("/api/agents/by-pane/", wa(handleAgentsByPane))
 	http.HandleFunc("/api/agents/pane/", wa(handleAgentsByPane))
+	http.HandleFunc("/api/agents/inspector/", wa(handleAgentInspectorByPane))
+	http.HandleFunc("/api/agents/history-sync/", wa(handleAgentHistorySyncByPane))
+	http.HandleFunc("/api/agents/history-view/", wa(handleAgentHistoryViewByPane))
 	http.HandleFunc("/api/agents/bind", wa(handleAgentBind))
 	http.HandleFunc("/api/agents/unbind", wa(handleAgentUnbind))
 	http.HandleFunc("/api/agents/unbind/", wa(handleAgentUnbind))

@@ -1,8 +1,6 @@
 FROM node:22-bookworm-slim
 
 ARG BASE_DOCKERFILE_HASH=unknown
-ARG FEISHU_PLUGIN_INSTALL_SPEC=https://sf3-cn.feishucdn.com/obj/open-platform-opendoc/8ab6e7a04c17db1becfcbda8ca35f091_1rCCFRWlRV.tgz
-
 LABEL cicy.base_dockerfile_hash="${BASE_DOCKERFILE_HASH}"
 
 ENV LANG=C.UTF-8 \
@@ -44,6 +42,43 @@ RUN set -eux; \
     npm install -g openclaw@latest; \
     npm install -g @anthropic-ai/claude-code; \
     npm install -g @openai/codex; \
+    rm -rf \
+        /usr/lib/code-server/src \
+        /usr/lib/code-server/README.md \
+        /usr/lib/code-server/LICENSE \
+        /usr/lib/code-server/ThirdPartyNotices.txt \
+        /usr/lib/code-server/postinstall.sh \
+        /usr/lib/code-server/npm-shrinkwrap.json \
+    ; \
+    find /usr/local/lib/node_modules/openclaw -type d \( -name test -o -name tests -o -name __tests__ -o -name docs -o -name examples \) -prune -exec rm -rf {} +; \
+    rm -f \
+        /usr/local/lib/node_modules/openclaw/CHANGELOG.md \
+        /usr/local/lib/node_modules/openclaw/README.md \
+        /usr/local/lib/node_modules/@anthropic-ai/claude-code/README.md \
+        /usr/local/lib/node_modules/@anthropic-ai/claude-code/LICENSE.md \
+    ; \
+    if [ -d /usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/audio-capture ]; then \
+        find /usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/audio-capture -mindepth 1 -maxdepth 1 -type d ! -name x64-linux -exec rm -rf {} +; \
+    fi; \
+    if [ -d /usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep ]; then \
+        find /usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep -mindepth 1 -maxdepth 1 -type d ! -name x64-linux -exec rm -rf {} +; \
+    fi; \
+    if [ -d /usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/seccomp ]; then \
+        find /usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/seccomp -mindepth 1 -maxdepth 1 -type d ! -name x64 -exec rm -rf {} +; \
+    fi; \
+    if [ -d /usr/local/lib/node_modules/openclaw/node_modules/koffi/build/koffi ]; then \
+        find /usr/local/lib/node_modules/openclaw/node_modules/koffi/build/koffi -mindepth 1 -maxdepth 1 -type d ! -name linux_x64 -exec rm -rf {} +; \
+    fi; \
+    find /usr/local/lib/node_modules/openclaw/node_modules -path '*/prebuilds/*' -type d \( \
+        -name '*darwin*' -o \
+        -name '*win32*' -o \
+        -name '*arm64*' -o \
+        -name '*android*' -o \
+        -name '*ios*' -o \
+        -name '*musl*' -o \
+        -name '*freebsd*' -o \
+        -name 'linux-arm64' \
+    \) -exec rm -rf {} +; \
     npm cache clean --force; \
     rm -rf /var/lib/apt/lists/* /tmp/npm-cache /root/.npm /root/.cache /tmp/* /var/tmp/*
 
@@ -53,7 +88,6 @@ RUN set -eux; \
     export OPENCLAW_STATE_DIR="$HOME/.openclaw"; \
     export OPENCLAW_CONFIG_PATH="$OPENCLAW_STATE_DIR/openclaw.json"; \
     mkdir -p "$OPENCLAW_STATE_DIR"; \
-    openclaw plugins install "@tencent-weixin/openclaw-weixin@latest"; \
-    npx -y "${FEISHU_PLUGIN_INSTALL_SPEC}" install
+    openclaw plugins install "@tencent-weixin/openclaw-weixin@latest"
 
 USER root

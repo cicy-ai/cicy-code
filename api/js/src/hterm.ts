@@ -22,7 +22,7 @@ export class Hterm {
         this.term = new bare.hterm.Terminal();
         this.term.getPrefs().set("send-encoding", "raw");
         this.term.decorate(this.elem);
-        this.term.openUrl = (url: string) => {
+        (this.term as any).openUrl = (url: string) => {
             openExternalLinkWithConfirm(this.elem.ownerDocument, url);
         };
 
