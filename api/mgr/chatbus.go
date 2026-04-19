@@ -116,6 +116,18 @@ func (h *chatHub) broadcast(agentID string, evt ChatEvent) {
 	h.broadcastExcept(agentID, evt, nil)
 }
 
+func (h *chatHub) broadcastAll(evt ChatEvent) {
+	h.mu.RLock()
+	agentIDs := make([]string, 0, len(h.clients))
+	for agentID := range h.clients {
+		agentIDs = append(agentIDs, agentID)
+	}
+	h.mu.RUnlock()
+	for _, agentID := range agentIDs {
+		h.broadcastExcept(agentID, evt, nil)
+	}
+}
+
 func (h *chatHub) broadcastExcept(agentID string, evt ChatEvent, except *chatClient) {
 	b, _ := json.Marshal(evt)
 	h.mu.RLock()

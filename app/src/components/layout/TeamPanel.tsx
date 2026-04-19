@@ -69,6 +69,10 @@ function normalizeAgentType(agentType?: string) {
     case 'open code':
     case 'open-code':
       return 'opencode';
+    case 'hermes':
+    case 'hermes-agent':
+    case 'hermes agent':
+      return 'hermes';
     default:
       return '';
   }
@@ -102,11 +106,12 @@ function AgentTypeAvatar({ agentType, title }: { agentType?: string; title: stri
     );
   }
 
-  const iconMap: Record<string, { label: string; src: string; className?: string }> = {
+  const iconMap: Record<string, { label: string; src?: string; className?: string; textClassName?: string }> = {
     codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg') },
     claude: { label: 'Claude', src: assetUrl('/assets/logos/claude-symbol.svg') },
     cicy: { label: 'CiCy', src: 'https://cicy-ai.com/logo.svg' },
     opencode: { label: 'OpenCode', src: assetUrl('/assets/logos/opencode.svg'), className: 'h-7 w-7' },
+    hermes: { label: 'Hermes', textClassName: 'text-[15px] font-semibold tracking-[0.08em]' },
   };
   const icon = iconMap[normalizedAgentType];
   if (!icon) return null;
@@ -114,10 +119,14 @@ function AgentTypeAvatar({ agentType, title }: { agentType?: string; title: stri
   return (
     <div
       data-id="team-panel-worker-agent-avatar"
-      className={`${baseClassName} border-zinc-500/40 bg-zinc-300`}
+      className={`${baseClassName} border-zinc-500/40 bg-zinc-300 text-zinc-950`}
       title={icon.label}
     >
-      <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-8 w-8'} object-contain`} />
+      {icon.src ? (
+        <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-8 w-8'} object-contain`} />
+      ) : (
+        <span className={icon.textClassName || 'text-xs font-semibold uppercase'}>{icon.label.slice(0, 2).toUpperCase()}</span>
+      )}
     </div>
   );
 }
@@ -148,21 +157,26 @@ function AgentTypeMiniAvatar({ agentType, title }: { agentType?: string; title: 
     );
   }
 
-  const iconMap: Record<string, { label: string; src: string; className?: string }> = {
+  const iconMap: Record<string, { label: string; src?: string; className?: string; textClassName?: string }> = {
     codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg'), className: 'h-4.5 w-4.5' },
     claude: { label: 'Claude', src: assetUrl('/assets/logos/claude-symbol.svg'), className: 'h-4.5 w-4.5' },
     cicy: { label: 'CiCy', src: 'https://cicy-ai.com/logo.svg', className: 'h-4.5 w-4.5' },
     opencode: { label: 'OpenCode', src: assetUrl('/assets/logos/opencode.svg'), className: 'h-5 w-5' },
+    hermes: { label: 'Hermes', textClassName: 'text-[10px] font-semibold tracking-[0.08em]' },
   };
   const icon = iconMap[normalizedAgentType];
   if (!icon) return null;
 
   return (
     <div
-      className={`${baseClassName} border-zinc-500/30 bg-zinc-200`}
+      className={`${baseClassName} border-zinc-500/30 bg-zinc-200 text-zinc-950`}
       title={icon.label}
     >
-      <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-4.5 w-4.5'} object-contain`} />
+      {icon.src ? (
+        <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-4.5 w-4.5'} object-contain`} />
+      ) : (
+        <span className={icon.textClassName || 'text-[10px] font-semibold uppercase'}>{icon.label.slice(0, 2).toUpperCase()}</span>
+      )}
     </div>
   );
 }

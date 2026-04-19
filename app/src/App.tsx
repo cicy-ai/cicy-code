@@ -51,7 +51,7 @@ function Main() {
   useEffect(() => {
     if (!token) return;
     apiService.getPane('w-10001:main.0').catch(() => {
-      apiService.createPane({ win_name: 'w-10001', title: 'Master' }).catch(() => {});
+      apiService.createPane({ win_name: 'w-10001', title: 'Master', agent_type: 'hermes' }).catch(() => {});
     });
   }, [token]);
 

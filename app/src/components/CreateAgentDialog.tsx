@@ -23,11 +23,12 @@ const AGENT_TYPE_OPTIONS = [
   { value: 'codex', label: 'Codex', icon: assetUrl('/assets/logos/openai.svg') },
   { value: 'claude', label: 'Claude', icon: assetUrl('/assets/logos/claude-symbol.svg') },
   { value: 'cicy', label: 'CiCy', icon: 'https://cicy-ai.com/logo.svg' },
+  { value: 'hermes', label: 'Hermes', icon: null },
 ] as const;
 
 const DEFAULT_VALUES: CreateAgentValues = {
   title: '',
-  agent_type: 'codex',
+  agent_type: 'hermes',
   allow_all_actions: true,
 };
 
@@ -130,10 +131,16 @@ export default function CreateAgentDialog({
                         className="h-4 w-4"
                       />
                     </div>
-                  ) : (
+                  ) : option.value === 'openclaw' ? (
                     <div className="flex h-4 w-4 items-center justify-center">
                       <span className="text-[13px] leading-none" aria-label="OpenClaw">🦞</span>
                     </div>
+                  ) : option.value === 'hermes' ? (
+                    <div className="flex h-5 min-w-5 items-center justify-center rounded bg-zinc-300 px-1 text-[9px] font-semibold tracking-[0.08em] text-zinc-950">
+                      HE
+                    </div>
+                  ) : (
+                    <div className="h-4 w-4 rounded border border-white/[0.2]" />
                   )}
                   <span>{option.label}</span>
                 </button>

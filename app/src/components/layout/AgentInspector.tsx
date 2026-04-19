@@ -771,7 +771,7 @@ export default function AgentInspector({
                   Prompt Rules
                 </div>
                 <div className="text-[12px] leading-5 text-zinc-400">
-                  请求前会按 <code>global -&gt; project -&gt; agent</code> 合并，并固定追加 <code>always reply in chinese</code>。
+                  请求前会按 <code>global -&gt; project -&gt; agent</code> 合并；中文回复由 gateway 统一注入，不再依赖 pane 配置。
                 </div>
               </div>
               <div data-id="agent-inspector-memory-sections" className="scrollbar-zero flex gap-1 overflow-x-auto whitespace-nowrap">
@@ -868,6 +868,7 @@ export default function AgentInspector({
                         { value: 'codex', label: 'Codex', icon: assetUrl('/assets/logos/openai.svg') },
                         { value: 'claude', label: 'Claude', icon: assetUrl('/assets/logos/claude-symbol.svg') },
                         { value: 'cicy', label: 'CiCy', icon: 'https://cicy-ai.com/logo.svg' },
+                        { value: 'hermes', label: 'Hermes', icon: '' },
                       ].map((option) => (
                         <button
                           key={option.value}
@@ -888,6 +889,10 @@ export default function AgentInspector({
                             <div data-id="agent-inspector-settings-agent-type-openclaw" className="flex h-4 w-4 items-center justify-center">
                               <span className="text-[13px] leading-none" aria-label="OpenClaw">🦞</span>
                             </div>
+                          ) : option.value === 'hermes' ? (
+                            <div data-id="agent-inspector-settings-agent-type-hermes" className="flex h-5 min-w-5 items-center justify-center rounded bg-zinc-300 px-1 text-[9px] font-semibold tracking-[0.08em] text-zinc-950">
+                              HE
+                            </div>
                           ) : (
                             <div data-id="agent-inspector-settings-agent-type-empty" className="h-4 w-4 rounded border border-white/[0.2]" />
                           )}
@@ -902,9 +907,6 @@ export default function AgentInspector({
                     checked={!!settingsData?.allow_all_actions}
                     onChange={(value) => patchSettingsData({ allow_all_actions: value })}
                   />
-                  <div data-id="agent-inspector-settings-agent-note" className="rounded-xl border border-blue-500/10 bg-blue-500/5 px-3 py-2 text-[12px] leading-5 text-blue-200/80">
-                    中文回复不再依赖 pane 配置，gateway 会统一注入 <code>always reply in chinese</code>。
-                  </div>
                 </div>
               )}
 

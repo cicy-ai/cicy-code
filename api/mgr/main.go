@@ -30,9 +30,9 @@ var (
 	desktopCmd    *exec.Cmd
 )
 
-const version = "1.0.26"
+const version = "2.0.1"
 
-// agentsFlag holds --agents=openclaw,codex,claude,... for non-interactive setup
+// agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
 
 func main() {
@@ -55,11 +55,11 @@ Options:
   --audit                 Enable audit mode
   --cn                    Use Chinese mirrors
   --agents=LIST           Comma-separated agents to install (skip interactive)
-                          e.g. --agents=openclaw,codex,claude
+                          e.g. --agents=hermes
                           Use --agents=all for all agents
 
 Environment:
-  PORT          API port (default: 8021)
+  PORT          API port (default: 8008)
   CS_PORT       code-server port (default: 8002)
   SQLITE_PATH   SQLite database file (default: ~/.cicy/data-v1.db)`)
 			os.Exit(0)
@@ -82,7 +82,7 @@ Environment:
 
 	// --dev without explicit --agents defaults to the supported builtin set
 	if devMode && agentsFlag == "" {
-		agentsFlag = "openclaw,codex,claude"
+		agentsFlag = "hermes"
 	}
 
 	initKV()
@@ -171,7 +171,6 @@ Environment:
 		handleTrafficLive(w, r)
 	}))
 	http.HandleFunc("/api/system/resources", wa(handleSystemResources))
-	http.HandleFunc("/api/system/resources/ws", handleSystemResourcesWS)
 
 	// Notifications
 	http.HandleFunc("/api/notify", wa(handleNotify))
@@ -287,7 +286,7 @@ Environment:
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8021"
+		port = "8008"
 	}
 
 	kvMode := "memory"

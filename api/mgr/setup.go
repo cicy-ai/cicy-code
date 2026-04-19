@@ -155,6 +155,7 @@ func checkEnvironment() []Tool {
 		{"claude", "claude", claudeInstallCmd(), true, false},
 		{"codex", "codex", codexInstallCmd(), true, false},
 		{"opencode", "opencode", opencodeInstallCmd(), true, false},
+		{"hermes", "hermes", hermesInstallCmd(), true, false},
 		{"code-server", "code-server", codeServerInstallCmd(), true, false},
 	}...)
 
@@ -211,13 +212,19 @@ func installMissing(tools []Tool) {
 }
 
 func selectAgents() []string {
-	selected := []string{"openclaw", "codex", "claude"}
+	selected := []string{"hermes"}
 	fmt.Println("\n🤖 默认预装 AI 工具:")
-	fmt.Println("  ✅ OpenClaw")
-	fmt.Println("  ✅ OpenAI Codex")
-	fmt.Println("  ✅ Claude Code")
+	fmt.Println("  ✅ Hermes Agent")
 	fmt.Printf("✅ 已选择: %v\n", selected)
 	return selected
+}
+
+func hermesInstallCmd() string {
+	return strings.Join([]string{
+		"export HERMES_HOME=\"$HOME/.hermes\"",
+		"export HERMES_INSTALL_DIR=\"$HOME/.hermes/hermes-agent\"",
+		"curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --no-venv --skip-setup </dev/null",
+	}, " && ")
 }
 
 func selectedAgentConfigs() map[string]Tool {
@@ -227,6 +234,7 @@ func selectedAgentConfigs() map[string]Tool {
 		"cicy":     {"cicy", "cicy", cicyInstallCmd(), true, false},
 		"codex":    {"codex", "codex", codexInstallCmd(), true, false},
 		"opencode": {"opencode", "opencode", opencodeInstallCmd(), true, false},
+		"hermes":   {"hermes", "hermes", hermesInstallCmd(), true, false},
 	}
 }
 
@@ -236,7 +244,7 @@ func ensureAgentToolInstalled(agentType string) {
 		return
 	}
 	switch normalizeAgentType(agentType) {
-	case "openclaw", "claude", "cicy", "codex", "opencode":
+	case "openclaw", "claude", "cicy", "codex", "opencode", "hermes":
 		return
 	}
 	config, exists := selectedAgentConfigs()[agentType]
@@ -270,15 +278,13 @@ func installSelectedAgents(selected []string) {
 	fmt.Printf("\n📦 AI 工具将在 tmux pane 启动时按需安装: %v\n", selected)
 }
 
-// builtinAgents defines the built-in agents with fixed ports 10001-10003.
+// builtinAgents defines the built-in agents with fixed ports.
 var builtinAgents = []struct {
 	Port      int
 	AgentType string
 	Title     string
 }{
-	{10001, "openclaw", "小龙虾管家"},
-	{10002, "codex", "软件工程师"},
-	{10003, "claude", "架构师"},
+	{10001, "hermes", "Hermes Agent"},
 }
 
 const (
@@ -409,12 +415,12 @@ func builtinWorkerSession(port int) string {
 }
 
 func ensurePrimaryWorkerForBindings(selected []string) {
-	if hasSelectedAgentType(selected, "openclaw") {
+	if hasSelectedAgentType(selected, builtinAgents[0].AgentType) {
 		return
 	}
 	needsBindingTarget := false
 	for _, agentType := range selected {
-		if agentType != "openclaw" {
+		if agentType != builtinAgents[0].AgentType {
 			needsBindingTarget = true
 			break
 		}
@@ -433,7 +439,7 @@ func ensurePrimaryWorkerForBindings(selected []string) {
 	}
 
 	log.Printf("[startup] primary worker %s missing; creating it for agent bindings", primaryWorkerSession)
-	createBuiltinWorker(10001, "openclaw", "小龙虾管家")
+	createBuiltinWorker(builtinAgents[0].Port, builtinAgents[0].AgentType, builtinAgents[0].Title)
 }
 
 func ensureWorkerBoundToPrimary(workerSession string) {
@@ -598,6 +604,44 @@ func runSetupWithAgents(agentList string) {
 	fmt.Println("🎉 环境初始化完成！")
 }
 
+func migrateBuiltinAgentsToHermesOnly() {
+	builtinPaneIDs := make(map[string]struct{}, len(builtinAgents))
+	for _, builtin := range builtinAgents {
+		builtinPaneIDs[builtinWorkerSession(builtin.Port)+":main.0"] = struct{}{}
+	}
+
+	rows, err := store.Query("SELECT pane_id, COALESCE(agent_type,''), COALESCE(ttyd_port,0) FROM agent_config WHERE active=1 ORDER BY ttyd_port ASC, pane_id ASC")
+	if err != nil {
+		log.Printf("[startup] failed to inspect builtin agents for hermes migration: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var paneID, agentType string
+		var port int
+		if err := rows.Scan(&paneID, &agentType, &port); err != nil {
+			continue
+		}
+		_, isBuiltinPane := builtinPaneIDs[paneID]
+		if isBuiltinPane && paneID == primaryWorkerPaneID {
+			if agentType != builtinAgents[0].AgentType {
+				query := fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, active=1, updated_at=%s WHERE pane_id=?", store.Now())
+				if _, err := store.Exec(query, builtinAgents[0].AgentType, builtinAgents[0].Title, paneID); err != nil {
+					log.Printf("[startup] failed to migrate primary builtin %s to hermes: %v", paneID, err)
+				}
+			}
+			continue
+		}
+		if port >= 10001 && port <= 10003 {
+			query := fmt.Sprintf("UPDATE agent_config SET active=0, updated_at=%s WHERE pane_id=?", store.Now())
+			if _, err := store.Exec(query, paneID); err != nil {
+				log.Printf("[startup] failed to disable legacy builtin %s: %v", paneID, err)
+			}
+		}
+	}
+}
+
 func checkEnv() {
 	extendPATH()
 
@@ -630,7 +674,7 @@ func checkEnv() {
 			if agentsFlag != "" {
 				runSetupWithAgents(agentsFlag)
 			} else {
-				createSelectedWorkers([]string{"openclaw"})
+				createSelectedWorkers([]string{"hermes"})
 			}
 		} else if agentsFlag != "" {
 			runSetupWithAgents(agentsFlag)
@@ -639,6 +683,7 @@ func checkEnv() {
 		}
 	}
 
+	migrateBuiltinAgentsToHermesOnly()
 	ensureBuiltinAgents()
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles()
@@ -869,8 +914,13 @@ func mustAtoi(s string) int {
 	return n
 }
 
-// ensureBuiltinAgents restores tmux sessions and ttyd for agents already in DB.
+// ensureBuiltinAgents restores tmux sessions and ttyd only for currently supported builtin agents.
 func ensureBuiltinAgents() {
+	allowedByPaneID := make(map[string]struct{}, len(builtinAgents))
+	for _, builtin := range builtinAgents {
+		allowedByPaneID[builtinWorkerSession(builtin.Port)+":main.0"] = struct{}{}
+	}
+
 	rows, err := store.Query("SELECT pane_id, ttyd_port, workspace, COALESCE(init_script,''), COALESCE(config,'{}'), COALESCE(agent_type,''), COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0) FROM agent_config WHERE active=1 ORDER BY ttyd_port ASC, pane_id ASC")
 	if err != nil {
 		return
@@ -885,6 +935,9 @@ func ensureBuiltinAgents() {
 		var port int
 		rows.Scan(&paneID, &port, &workspace, &initScript, &configJSON, &agentType, &allowAllActions, &replyInChinese)
 		if paneID == "" || port == 0 {
+			continue
+		}
+		if _, ok := allowedByPaneID[paneID]; !ok {
 			continue
 		}
 
@@ -906,7 +959,6 @@ func ensureBuiltinAgents() {
 		// Ensure ttyd
 		if !isPortListening(port) {
 			startInstance(paneID, port, token)
-			//log.Printf("[startup] started %s on :%d", paneID, port)
 		}
 		if sessionCreated {
 			initPaneEnv(paneEnvOpts{

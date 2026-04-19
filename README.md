@@ -11,7 +11,7 @@
 - 当前推荐的本地开发入口是 `python3 dev.py`
 - 当前正式构建入口是 `./build.sh`
 - 前端开发服务器是 `app` 下的 Vite，默认 `8022`
-- 后端默认监听 `8021`
+- 后端默认监听 `8008`
 - 旧的 `.env`、`docker-compose.yml`、desktop submodule、`api/Makefile.manager` 已经不再是主流程的一部分
 - 仓库里仍然保留了一些历史脚本，但不应默认当成现在的推荐路径
 
@@ -114,7 +114,7 @@ npx cicy-code
 服务启动后会打印访问地址。默认端口来自后端二进制本身，通常是：
 
 ```text
-http://127.0.0.1:8021/?token=<token>
+http://127.0.0.1:8008/?token=<token>
 ```
 
 token 也会写入 `~/global.json` 的 `api_token`。
@@ -137,7 +137,7 @@ python3 dev.py
 
 默认端口：
 
-- API: `8021`
+- API: `8008`
 - Vite: `8022`
 - code-server: `8002`
 

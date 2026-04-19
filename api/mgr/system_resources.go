@@ -70,6 +70,7 @@ func (h *systemResourceHub) loop() {
 		prevCPU = curr
 		h.setLatest(snap)
 		h.broadcast(snap)
+		hub.broadcastAll(ChatEvent{Type: "system_resources", Data: snap})
 	}
 }
 

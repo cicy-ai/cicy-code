@@ -50,7 +50,7 @@ import (
 )
 
 func main() {
-	base := flag.String("base", "ws://127.0.0.1:8021", "cicy ws base")
+	base := flag.String("base", "ws://127.0.0.1:8008", "cicy ws base")
 	agent := flag.String("agent", "w-20016", "agent_id or pane")
 	token := flag.String("token", "", "api token")
 	clientID := flag.String("client", fmt.Sprintf("go-sender-%d", time.Now().Unix()), "client_id")
@@ -98,7 +98,7 @@ go get github.com/gorilla/websocket
 运行：
 
 ```bash
-go run main.go -base ws://127.0.0.1:8021 -agent w-20016 -token '<YOUR_TOKEN>'
+go run main.go -base ws://127.0.0.1:8008 -agent w-20016 -token '<YOUR_TOKEN>'
 ```
 
 ## 4. 关键行为（必须知道）

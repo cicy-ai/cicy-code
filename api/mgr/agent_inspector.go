@@ -13,7 +13,6 @@ import (
 )
 
 const (
-	agentInspectorDefaultReplyInstruction = "always reply in chinese"
 	agentInspectorHistoryDefaultLimit     = 24
 	agentInspectorHistoryMaxLimit         = 100
 	agentInspectorTmuxHistoryCaptureStart = -400
@@ -564,7 +563,7 @@ func agentInspectorPromptRulesBundle(agentID string) agentInspectorPromptRules {
 }
 
 func agentInspectorPromptOverlayFromRules(agentID string, global agentInspectorPromptRule, project agentInspectorPromptRule, agent agentInspectorPromptRule) string {
-	parts := []string{agentInspectorDefaultReplyInstruction}
+	parts := []string{}
 	appendRule := func(tag string, rule agentInspectorPromptRule) {
 		if !rule.Available || !rule.Enabled || !rule.InjectOnRequest || strings.TrimSpace(rule.Content) == "" {
 			return

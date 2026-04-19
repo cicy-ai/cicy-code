@@ -1,11 +1,10 @@
 import * as bare from "xterm";
 import { lib } from "libapps"
+import { applyMonoFontVar } from "./font";
 import { openExternalLinkWithConfirm } from "./link_confirm";
 
 
 bare.loadAddon("fit");
-
-const MAX_VISIBLE_ROWS = 42;
 
 export class Xterm {
     elem: HTMLElement;
@@ -20,6 +19,7 @@ export class Xterm {
 
     constructor(elem: HTMLElement) {
         this.elem = elem;
+        applyMonoFontVar(elem.ownerDocument);
         this.term = new bare({ fontSize: 12 });
 
         this.message = elem.ownerDocument.createElement("div");
@@ -40,6 +40,7 @@ export class Xterm {
                 justify-content: center;
                 color: #888;
                 font-size: 14px;
+                font-family: var(--cp-mono-font);
             }
             .xterm-reconnect-spinner {
                 width: 40px;
@@ -62,6 +63,7 @@ export class Xterm {
                 color: #ccc;
                 cursor: pointer;
                 font-size: 14px;
+                font-family: var(--cp-mono-font);
             }
             .xterm-reconnect-btn:hover {
                 background: #555;
@@ -70,13 +72,8 @@ export class Xterm {
         elem.ownerDocument.head.appendChild(style);
 
         this.resizeListener = () => {
+            this.elem.style.height = "100%";
             this.term.fit();
-            if (this.term.rows > MAX_VISIBLE_ROWS) {
-                this.elem.style.height = (MAX_VISIBLE_ROWS * this.term.charMeasure.height) + "px";
-                this.term.fit();
-            } else {
-                this.elem.style.height = "100%";
-            }
             this.term.scrollToBottom();
             this.showMessage(String(this.term.cols) + "x" + String(this.term.rows), this.messageTimeout);
         };
@@ -87,39 +84,6 @@ export class Xterm {
         });
 
         this.term.open(elem, true);
-        const blockScroll = (event: Event): void => {
-            event.preventDefault();
-            event.stopPropagation();
-            var anyEvent = event as any;
-            if (typeof anyEvent.stopImmediatePropagation === "function") {
-                anyEvent.stopImmediatePropagation();
-            }
-        };
-        const hardDisableViewportScroll = (): void => {
-            const nodes = this.elem.querySelectorAll(".xterm-viewport, .xterm-scroll-area");
-            for (let i = 0; i < nodes.length; i++) {
-                const node = nodes[i] as HTMLElement;
-                node.style.overflow = "hidden";
-                node.style.overflowY = "hidden";
-                node.style.overflowX = "hidden";
-                node.style.maxHeight = "100%";
-                node.scrollTop = 0;
-                node.scrollLeft = 0;
-                node.addEventListener("wheel", blockScroll, { passive: false, capture: true });
-                node.addEventListener("touchmove", blockScroll, { passive: false, capture: true });
-            }
-        };
-        hardDisableViewportScroll();
-        const viewportObserver = new MutationObserver((): void => {
-            hardDisableViewportScroll();
-        });
-        viewportObserver.observe(this.elem, { childList: true, subtree: true, attributes: true });
-        window.addEventListener("wheel", blockScroll, { passive: false, capture: true });
-        window.addEventListener("touchmove", blockScroll, { passive: false, capture: true });
-        document.addEventListener("wheel", blockScroll, { passive: false, capture: true });
-        document.addEventListener("touchmove", blockScroll, { passive: false, capture: true });
-        this.elem.addEventListener("wheel", blockScroll, { passive: false, capture: true });
-        this.elem.addEventListener("touchmove", blockScroll, { passive: false, capture: true });
         this.term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
             if ((event.ctrlKey || event.metaKey) && !event.altKey && String(event.key).toLowerCase() === "c") {
                 return false;
