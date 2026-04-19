@@ -1,4 +1,5 @@
 import * as bare from "libapps";
+import { applyMonoFontVar, monoFontStack } from "./font";
 import { openExternalLinkWithConfirm } from "./link_confirm";
 
 export class Hterm {
@@ -17,9 +18,11 @@ export class Hterm {
 
     constructor(elem: HTMLElement) {
         this.elem = elem;
+        applyMonoFontVar(this.elem.ownerDocument);
         this.suppressNextSigintFromCopy = false;
         bare.hterm.defaultStorage = new bare.lib.Storage.Memory();
         this.term = new bare.hterm.Terminal();
+        this.term.getPrefs().set("font-family", monoFontStack());
         this.term.getPrefs().set("send-encoding", "raw");
         this.term.decorate(this.elem);
         (this.term as any).openUrl = (url: string) => {

@@ -8,11 +8,11 @@ import { cn } from '../lib/utils';
 import { useDevRegister } from '../lib/devStore';
 import { useAuth } from '../contexts/AuthContext';
 import { SendingProvider } from '../contexts/SendingContext';
-import ChatView from './chat/ChatView';
+// import ChatView from './chat/ChatView';
 import ChatHistoryView from './chat/ChatHistoryView';
+import { WebFrame } from './WebFrame';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
-import FloatingCodeWindow from './FloatingCodeWindow';
 import TeamPanel from './layout/TeamPanel';
 import SkillPanel from './layout/SkillPanel';
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
@@ -33,7 +33,6 @@ const cache = {
 };
 
 const LEFT_PANEL_WIDTH = 320;
-const getFloatingOpenKey = (paneId: string) => `ws_floatingCodeOpen:${paneId}`;
 const TEAM_TERMINAL_ACTIVE_KEY = 'ws_teamTerminalActive';
 const GITHUB_ISSUES_URL = 'https://github.com/cicy-ai/cicy-code/issues';
 const UPGRADE_URL = 'https://cicy-ai.com/team/upgrade';
@@ -139,7 +138,7 @@ function membershipExpireLabel(kind: string | null, expiresAt: string | null) {
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 type LeftPanelView = 'team' | 'skills' | 'agents' | null;
-type WorkspaceCliContentTab = InspectorTab | 'history';
+type WorkspaceCliContentTab = InspectorTab | 'history' | 'files';
 
 export default function Workspace({ agentId, onSelectAgent }: Props) {
   const { token, hasPermission } = useAuth();
@@ -147,7 +146,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const paneId = agentId || 'w-10001';
   const fullPaneId = `${paneId}:main.0`;
   const initialPaneIdRef = useRef(paneId);
-  const floatingOpenKey = getFloatingOpenKey(initialPaneIdRef.current);
 
   const mainTab = 'cli' as const;
   const [leftPanelView, setLeftPanelView] = useState<LeftPanelView>(() => {
@@ -157,7 +155,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   });
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorRequestedTab, setInspectorRequestedTab] = useState<InspectorTab>('overview');
-  const [cliContentTab, setCliContentTab] = useState<WorkspaceCliContentTab>('history');
+  const [cliContentOpen, setCliContentOpen] = useState(false);
+  const [cliContentTab, setCliContentTab] = useState<WorkspaceCliContentTab>('files');
   const [tokenOpen, setTokenOpen] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -170,13 +169,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [boundAgents, setBoundAgents] = useState<any[]>([]);
   const [pollStatuses, setPollStatuses] = useState<Record<string, any>>({});
   const [paneDetails, setPaneDetails] = useState<Record<string, any>>({});
-  const [codeServerSrc, setCodeServerSrc] = useState('');
-  const [floatingCodeOpen, setFloatingCodeOpen] = useState(() => cache.get(floatingOpenKey, false));
-  const [codeFolder, setCodeFolder] = useState('');
   const [activeTeamPaneId, setActiveTeamPaneId] = useState<Record<string, string>>(() => cache.get(TEAM_TERMINAL_ACTIVE_KEY, {}));
   const [inspectorPaneId, setInspectorPaneId] = useState(paneId);
   const [canvasLocateRequest, setCanvasLocateRequest] = useState<{ paneId: string; nonce: number; zoomToActual?: boolean } | null>(null);
-  const codeWindowInitializedRef = useRef(false);
   const agentWorkspaceRef = useRef(`~/workers/${paneId}`);
   const prevCanvasPaneIdsRef = useRef<string[] | null>(null);
   const initialCanvasRestoreScopeRef = useRef<string | null>(null);
@@ -186,26 +181,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const hostHome = getHostHome();
     const next = urls.codeServer(hostHome, token!);
     window.open(next, '_blank');
-    if (next !== codeServerSrc) { setCodeServerSrc(next); setCodeFolder(hostHome); }
-  };
-  const handleCodeServiceOpen = (folder?: string) => {
-    const nextFolder = folder || codeFolder;
-    if (!nextFolder || !token) return;
-    const next = urls.codeServer(nextFolder, token);
-    window.open(next, '_blank');
-    if (next !== codeServerSrc || nextFolder !== codeFolder) {
-      setCodeServerSrc(next);
-      setCodeFolder(nextFolder);
-    }
   };
   const handleOpenClawOpen = () => {
     if (!token) return;
     window.open(urls.openClaw(token), '_blank');
-  };
-
-  const navigateToFolder = (folder: string) => {
-    const next = urls.codeServer(folder, token!);
-    if (next !== codeServerSrc) { setCodeServerSrc(next); setCodeFolder(folder); }
   };
   const [agentDetail, setAgentDetail] = useState<any>(null);
   const title = agentDetail?.title || '-';
@@ -258,7 +237,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useEffect(() => {
     cache.set('ws_leftPanel', leftActive === 'team' || leftActive === 'skills' ? leftActive : null);
   }, [leftActive]);
-  useEffect(() => { cache.set(floatingOpenKey, floatingCodeOpen); }, [floatingCodeOpen, floatingOpenKey]);
   useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, activeTeamPaneId); }, [activeTeamPaneId]);
   useEffect(() => { cache.set('ws_voiceBtnPos', voiceBtnPos); }, [voiceBtnPos]);
   useEffect(() => { cache.set('agent_panelPos', panelPos); }, [panelPos]);
@@ -345,13 +323,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       const workspace = data?.workspace || `~/workers/${paneId}`;
       syncHostHomeFromPath(workspace);
       agentWorkspaceRef.current = workspace;
-      if (!codeWindowInitializedRef.current && token && !(data?.capabilities?.supports_code_server === false || data?.capabilities?.supports_tmux === false)) {
-        setCodeFolder(workspace);
-        setCodeServerSrc(urls.codeServer(workspace, token));
-        codeWindowInitializedRef.current = true;
-      }
     }).catch(() => {}); 
-  }, [fullPaneId, paneId, token]);
+  }, [fullPaneId, paneId]);
   const prevPaneId = useRef(paneId);
   useEffect(() => {
     if (prevPaneId.current !== paneId) {
@@ -709,6 +682,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     topBarDetail
     && topBarDetail.capabilities?.supports_tmux === false
   );
+  const filePaneDetail = paneDetails[paneId] || agentDetail;
+  const filePaneWorkspace = filePaneDetail?.workspace || `~/workers/${paneId}`;
+  const filePaneIsApiOnlyRuntime = !!(
+    filePaneDetail
+    && filePaneDetail.capabilities?.supports_tmux === false
+  );
+  const fileCodeServerSrc = token && !filePaneIsApiOnlyRuntime
+    ? urls.codeServer(filePaneWorkspace, token)
+    : '';
   const openPaneInCurrentTerminal = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
@@ -717,9 +699,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const openPaneHistory = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
-    setCliContentTab('history');
     setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
-  }, [paneId]);
+    setCliContentOpen(prev => (clean === activeCliPaneId ? !prev : true));
+  }, [activeCliPaneId, paneId]);
 
   const locatePaneInCanvas = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
@@ -796,7 +778,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     showTrialUpgrade,
     agentsCount: agents.length,
     agents: agents.map((a: any) => ({ pane_id: a.pane_id, title: a.title, status: a.status, active: a.active })),
-    leftPanel: leftActive, floatingCodeOpen, activeWinIdx,
+    leftPanel: leftActive, activeWinIdx,
     cliContentTab,
   }, {
     cliContentTab: setCliContentTab,
@@ -911,7 +893,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>
         <div data-id="top-bar-center" className="flex items-center justify-center w-1/3" />
         <div data-id="top-bar-right" className="flex items-center justify-end w-1/3 gap-3">
-          <SystemResourceMonitor token={token} />
+          <SystemResourceMonitor token={token} paneId={activeCliPaneId || paneId} />
           <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} />
           <button
             data-id="top-bar-github-issues"
@@ -938,11 +920,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <div data-id="right-tabs" className="flex-1 relative overflow-hidden">
         <div data-id="chat-tab" className="absolute inset-0 flex justify-center" style={{ display: mainTab === 'chat' ? 'flex' : 'none' }}>
           <div className="w-full max-w-5xl h-full">
+            {/* ChatView 引用先注释保留，暂时停用以阻断其内部 stats/chat 请求
             <ChatView paneId={paneId} token={token!} apiOnly={isApiOnlyRuntime} />
+            */}
+            <div data-id="chat-view-disabled" className="flex h-full items-center justify-center text-sm text-zinc-500">
+              ChatView 已临时停用
+            </div>
           </div>
         </div>
         <div data-id="cli-tab" className="absolute inset-0 flex" style={{ display: mainTab === 'cli' ? 'flex' : 'none' }}>
-          <div data-id="cli-agent-stack" className="relative h-full w-[660px] min-w-[660px] max-w-[660px] shrink-0 overflow-hidden border-r border-[var(--vsc-border)] bg-[#09090b]">
+          <div data-id="cli-agent-stack" className={`relative h-full min-w-0 overflow-hidden bg-[#09090b] transition-all duration-200 ${cliContentOpen ? 'w-[660px] min-w-[660px] max-w-[660px] shrink-0 border-r border-[var(--vsc-border)]' : 'flex-1'}`}>
             <AgentStack
               items={buildCanvasItems({
                 paneId,
@@ -955,23 +942,31 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 agentDetail,
               })}
               activePaneId={activeCliPaneId}
-              showHistoryShortcut={cliContentTab !== 'history'}
+              historyShortcutActive={cliContentOpen}
               onOpenPaneHistory={openPaneHistory}
               onActivePaneIdChange={(targetPaneId) => {
                 setActiveTeamPaneId(prev => ({ ...prev, [paneId]: targetPaneId }));
               }}
             />
           </div>
-          <div data-id="cli-content-area" className="min-w-0 flex-1 bg-[#0b0b0d] flex flex-col">
-            <div className="border-b border-[var(--vsc-border)] px-3 py-2">
-              <div className="flex gap-1 overflow-x-auto whitespace-nowrap scrollbar-none">
+          <div data-id="cli-content-area" className="min-w-0 flex-1 bg-[#0b0b0d] flex-col transition-all duration-200" style={{ display: cliContentOpen ? 'flex' : 'none' }}>
+            <div data-id="cli-content-tabs-wrap" className="border-b border-[var(--vsc-border)] px-3 py-2">
+              <div data-id="cli-content-tabs" className="flex gap-1 overflow-x-auto whitespace-nowrap scrollbar-none">
+                {/* 只保留设置 tab；其他 tab 的引用先注释保留，不删除
                 {[
+                  { id: 'files', label: '文件' },
                   { id: 'history', label: '历史' },
                   { id: 'overview', label: '概览' },
                   { id: 'memory', label: '运行时记忆' },
                   { id: 'settings', label: '设置' },
                 ].map((item) => (
+                */}
+                {[
+                  { id: 'files', label: '文件' },
+                  { id: 'settings', label: '设置' },
+                ].map((item) => (
                   <button
+                    data-id={`cli-content-tab-${item.id}`}
                     key={item.id}
                     type="button"
                     className={`shrink-0 rounded-md px-2.5 py-1.5 text-[11px] leading-5 ${
@@ -986,7 +981,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 ))}
               </div>
             </div>
-            <div className="min-h-0 flex-1">
+            <div data-id="cli-content-body" className="min-h-0 flex-1 relative">
+              {/* 旧的 history / overview / memory 分支先注释保留，不删除
               {cliContentTab === 'history' ? (
                 <ChatHistoryView
                   paneId={activeCliPaneId}
@@ -1000,22 +996,49 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   onExecuteSuggestion={handleExecuteSuggestion}
                 />
               ) : (
-                <AgentInspector
-                  paneId={activeCliPaneId}
-                  paneTitle={
-                    paneDetails[activeCliPaneId]?.title
-                    || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.title
-                    || activeCliPaneId
-                  }
-                  open
-                  embedded
-                  requestedTab={cliContentTab}
-                  liveStatus={chatWsLiveStatus}
-                  inspectorVersion={chatWsInspectorVersion}
-                  onPanePatch={applyPanePatch}
-                  onClose={() => {}}
-                />
-              )}
+              */}
+                <div
+                  data-id="cli-content-files-host"
+                  className="absolute inset-0"
+                  style={{ display: cliContentTab === 'files' ? 'block' : 'none' }}
+                >
+                  {fileCodeServerSrc ? (
+                    <div data-id="cli-content-files-pane" className="relative h-full w-full">
+                      <WebFrame
+                        src={fileCodeServerSrc}
+                        codeServer
+                        className="h-full w-full border-0 bg-[#0A0A0A]"
+                        title="文件"
+                      />
+                    </div>
+                  ) : (
+                    <div data-id="cli-content-files-empty" className="flex h-full items-center justify-center text-sm text-zinc-500">
+                      当前主 agent 没有可用的文件视图
+                    </div>
+                  )}
+                </div>
+                <div
+                  data-id="cli-content-settings-host"
+                  className="absolute inset-0"
+                  style={{ display: cliContentTab === 'settings' ? 'block' : 'none' }}
+                >
+                  <AgentInspector
+                    paneId={activeCliPaneId}
+                    paneTitle={
+                      paneDetails[activeCliPaneId]?.title
+                      || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.title
+                      || activeCliPaneId
+                    }
+                    open
+                    embedded
+                    requestedTab={'settings'}
+                    liveStatus={chatWsLiveStatus}
+                    inspectorVersion={chatWsInspectorVersion}
+                    onPanePatch={applyPanePatch}
+                    onClose={() => {}}
+                  />
+                </div>
+              {/* )} */}
             </div>
           </div>
         </div>
@@ -1144,18 +1167,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           />
         </div>
       )}
-
-      {!isApiOnlyRuntime && (
-        <FloatingCodeWindow
-          open={floatingCodeOpen}
-          src={codeServerSrc}
-          folderLabel={toTildePath(codeFolder)}
-          storageScopeId={initialPaneIdRef.current}
-          onNavigate={navigateToFolder}
-          onClose={() => setFloatingCodeOpen(false)}
-        />
-      )}
-
       {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
       {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
       {toast && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 bg-zinc-800 text-white text-sm rounded-lg shadow-lg">{toast}</div>}
@@ -1199,6 +1210,10 @@ function normalizeAgentType(agentType?: string) {
     case 'open code':
     case 'open-code':
       return 'opencode';
+    case 'hermes':
+    case 'hermes-agent':
+    case 'hermes agent':
+      return 'hermes';
     default:
       return '';
   }
@@ -1333,11 +1348,12 @@ function AgentListAvatar({ agentType, title }: { agentType?: string; title: stri
     );
   }
 
-  const iconMap: Record<string, { label: string; src: string; className?: string }> = {
+  const iconMap: Record<string, { label: string; src?: string; className?: string; textClassName?: string }> = {
     codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg') },
     claude: { label: 'Claude', src: assetUrl('/assets/logos/claude-symbol.svg') },
     cicy: { label: 'CiCy', src: 'https://cicy-ai.com/logo.svg' },
     opencode: { label: 'OpenCode', src: assetUrl('/assets/logos/opencode.svg'), className: 'h-7 w-7' },
+    hermes: { label: 'Hermes', textClassName: 'text-[15px] font-semibold tracking-[0.08em]' },
   };
   const icon = iconMap[normalizedAgentType];
   if (!icon) return null;
@@ -1345,10 +1361,14 @@ function AgentListAvatar({ agentType, title }: { agentType?: string; title: stri
   return (
     <div
       data-id="agent-avatar"
-      className={`${baseClassName} border-zinc-500/40 bg-zinc-300`}
+      className={`${baseClassName} border-zinc-500/40 bg-zinc-300 text-zinc-950`}
       title={icon.label}
     >
-      <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-8 w-8'} object-contain`} />
+      {icon.src ? (
+        <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-8 w-8'} object-contain`} />
+      ) : (
+        <span className={icon.textClassName || 'text-xs font-semibold uppercase'}>{icon.label.slice(0, 2).toUpperCase()}</span>
+      )}
     </div>
   );
 }
@@ -1613,7 +1633,7 @@ function formatLoadValue(value: number | null | undefined) {
   return value.toFixed(2);
 }
 
-function SystemResourceMonitor({ token }: { token: string | null }) {
+function SystemResourceMonitor({ token, paneId }: { token: string | null; paneId: string }) {
   const [metrics, setMetrics] = useState<SystemResourceSnapshot | null>(null);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -1629,10 +1649,11 @@ function SystemResourceMonitor({ token }: { token: string | null }) {
   }, []);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || !paneId) return;
     let dead = false;
     let reconnectTimer: number | null = null;
     let ws: WebSocket | null = null;
+    const agentId = paneId.replace(/:.*$/, '');
 
     const loadSnapshot = async () => {
       try {
@@ -1646,11 +1667,13 @@ function SystemResourceMonitor({ token }: { token: string | null }) {
       const httpBase = config.apiBase || window.location.origin;
       const proto = httpBase.startsWith('https') ? 'wss' : (window.location.protocol === 'https:' ? 'wss' : 'ws');
       const base = httpBase ? httpBase.replace(/^https?/, proto) : `${proto}://${window.location.host}`;
-      ws = new WebSocket(`${base}/api/system/resources/ws?token=${encodeURIComponent(token)}`);
+      ws = new WebSocket(`${base}/api/chat/ws?agent_id=${encodeURIComponent(agentId)}&token=${encodeURIComponent(token)}`);
       ws.onmessage = (event) => {
         try {
-          const next = JSON.parse(event.data);
-          if (!dead) setMetrics(next);
+          const msg = JSON.parse(String(event.data || ''));
+          if (msg?.type === 'system_resources' && msg.data && !dead) {
+            setMetrics(msg.data as SystemResourceSnapshot);
+          }
         } catch {}
       };
       ws.onclose = () => {
@@ -1667,7 +1690,7 @@ function SystemResourceMonitor({ token }: { token: string | null }) {
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       ws?.close();
     };
-  }, [token]);
+  }, [paneId, token]);
 
   const cpu = formatResourcePct(metrics?.cpu_usage_pct);
   const memory = formatResourcePct(metrics?.mem_usage_pct);

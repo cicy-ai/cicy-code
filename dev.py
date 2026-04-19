@@ -12,7 +12,7 @@ import base64
 import tempfile
 import shutil
 
-PORT = int(os.environ.get("PORT", "8008"))
+PORT = 8008
 SQLITE_PATH = os.environ.get("SQLITE_PATH", f"{os.path.expanduser('~')}/.cicy/data-v1.db")
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 API_DIR = os.path.join(ROOT_DIR, "api")
@@ -539,16 +539,17 @@ def get_pid_on_port(port):
     try:
         result = subprocess.run(
             ["lsof", "-ti", f"TCP:{port}", "-sTCP:LISTEN"],
-            capture_output=True, text=True
+            capture_output=True,
+            text=True,
         )
         return result.stdout.strip().split("\n")[0] if result.stdout.strip() else None
-    except:
+    except Exception:
         return None
 
 def kill_process(pid):
     try:
         os.kill(int(pid), signal.SIGTERM)
-    except:
+    except Exception:
         pass
 
 def wait_for_probe(url, timeout=180, interval=1):
@@ -568,9 +569,15 @@ def get_cloudrun_service_url(project, region, service):
     try:
         result = subprocess.run(
             [
-                "gcloud", "run", "services", "describe", service,
-                "--project", project,
-                "--region", region,
+                "gcloud",
+                "run",
+                "services",
+                "describe",
+                service,
+                "--project",
+                project,
+                "--region",
+                region,
                 "--format=value(status.url)",
             ],
             capture_output=True,
@@ -587,9 +594,14 @@ def list_cloudrun_services(project, region):
     try:
         result = subprocess.run(
             [
-                "gcloud", "run", "services", "list",
-                "--project", project,
-                "--region", region,
+                "gcloud",
+                "run",
+                "services",
+                "list",
+                "--project",
+                project,
+                "--region",
+                region,
                 "--format=json",
             ],
             capture_output=True,
@@ -700,18 +712,18 @@ def run_docker_build(version_override=""):
 
 def run_docker(ports):
     run_version_sync()
-    print(f"[dev] Building and running Docker...")
+    print("[dev] Building and running Docker...")
     ensure_local_base_image_available()
     result = subprocess.run(["./build.sh", "docker", "latest"], cwd=ROOT_DIR)
     if result.returncode != 0:
         print("[dev] docker build failed")
         sys.exit(1)
-    
+
     container_name = "cicy-code-dev"
     subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
     dev_home_dir, dev_global_json_path = build_dev_runtime_home(container_name)
     seed_runtime_home_from_image("cicy-code:latest", dev_home_dir)
-    
+
     env_vars = []
     passthrough_env_keys = [
         "CICY_TEAM_TOKEN",
@@ -733,15 +745,21 @@ def run_docker(ports):
     trial_ttl_seconds = int((os.environ.get("CLOUD_TRIAL_RUNTIME_TTL_SECONDS", "3600") or "3600").strip() or "3600")
     trial_expires_at = str(int(time.time()) + trial_ttl_seconds)
     env_vars.extend(["-e", f"CLOUD_TRIAL_RUNTIME_EXPIRES_AT={trial_expires_at}"])
-    is_pro = "true"
-    env_vars.extend(["-e", f"CICY_IS_PRO={is_pro}"])
+    env_vars.extend(["-e", "CICY_IS_PRO=true"])
     run_cmd = [
-        "docker", "run", "-d",
-        "--name", container_name,
-        "-v", f"{dev_home_dir}:/home/cicy",
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        container_name,
+        "-v",
+        f"{dev_home_dir}:/home/cicy",
     ] + env_vars + [
-        "-p", f"{ports}:8008",
-        "cicy-code:latest", "--public", "--agents=all"
+        "-p",
+        f"{ports}:8008",
+        "cicy-code:latest",
+        "--public",
+        "--agents=all",
     ]
     print(f"[dev] docker run: {' '.join(run_cmd)}")
     docker_run_started_at = time.time()
@@ -760,7 +778,8 @@ def run_docker(ports):
 
     version_result = subprocess.run(
         ["docker", "exec", container_name, "sh", "-lc", "openclaw --version"],
-        capture_output=True, text=True
+        capture_output=True,
+        text=True,
     )
     if version_result.returncode == 0 and version_result.stdout.strip():
         print(f"[dev] OpenClaw: {version_result.stdout.strip()}")
@@ -769,7 +788,6 @@ def run_docker(ports):
         if version_err:
             print(f"[dev] OpenClaw version check failed: {version_err}")
 
-    # Get and display the API token
     token = read_api_token_from_file(dev_global_json_path)
     if token:
         public_ip = detect_public_ip()
@@ -781,22 +799,13 @@ def run_docker(ports):
             print_access_urls(local_base_url, token)
         print(f"[dev] Token available in {time.time() - docker_run_started_at:.1f}s (since docker run)")
         print(f"[dev] Runtime home: {dev_home_dir}")
-
-        # Test agents
         print("[dev] Testing agents...")
         test_agents(container_name, token, ports)
-    
+
     sys.exit(0)
 
-
 def test_agents(container_name, token, port):
-    """Test each agent by checking ttyd port connectivity"""
-    import urllib.request
-    import urllib.error
-
     base_url = f"http://localhost:{port}"
-
-    # Get panes with retry
     panes = None
     for attempt in range(3):
         try:
@@ -808,34 +817,30 @@ def test_agents(container_name, token, port):
             if attempt < 2:
                 time.sleep(3)
             else:
-                print(f"  ❌ Failed to get panes after 3 attempts: {e}")
+                print(f"  Failed to get panes after 3 attempts: {e}")
                 return
 
     if not panes:
-        print("  ❌ No panes found")
+        print("  No panes found")
         return
 
     print(f"\n[dev] Found {len(panes)} agents:")
     for pane in panes:
         title = pane.get("title", "")
-        pane_id = pane.get("pane_id", "")
         agent_type = pane.get("agent_type", "")
         ttyd_port = pane.get("ttyd_port", 0)
         active = pane.get("active", 0)
-
-        status = "✅" if active == 1 else "❌"
+        status = "OK" if active == 1 else "DOWN"
         print(f"  {status} {title} (type: {agent_type}, port: {ttyd_port})")
-
-        # Check if ttyd is running
         if ttyd_port > 0:
             try:
                 req = urllib.request.Request(f"http://localhost:{ttyd_port}")
                 urllib.request.urlopen(req, timeout=5)
-                print(f"     ✅ ttyd port {ttyd_port} is accessible")
+                print(f"     ttyd port {ttyd_port} is accessible")
             except urllib.error.URLError:
-                print(f"     ❌ ttyd port {ttyd_port} not accessible")
+                print(f"     ttyd port {ttyd_port} not accessible")
             except Exception as e:
-                print(f"     ❌ ttyd port {ttyd_port} error: {e}")
+                print(f"     ttyd port {ttyd_port} error: {e}")
 
     print("\n[dev] Agent test completed.")
 
@@ -890,7 +895,15 @@ def rebuild_ttyd_assets_for_local_dev():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--docker", action="store_true", help="Build and run Docker container")
-    parser.add_argument("--dockerBuild", "--docker-build", "--cloudRunBuild", "--cloudrun-build", dest="dockerBuild", action="store_true", help="Build image, push to Docker Hub, then update ~/global.json images.runtime")
+    parser.add_argument(
+        "--dockerBuild",
+        "--docker-build",
+        "--cloudRunBuild",
+        "--cloudrun-build",
+        dest="dockerBuild",
+        action="store_true",
+        help="Build image, push to Docker Hub, then update ~/global.json images.runtime",
+    )
     parser.add_argument("--dockerBuildVersion", "--docker-build-version", dest="dockerBuildVersion", default="", help="Override version tag used by --dockerBuild")
     parser.add_argument("--dockerVersion", "--docker-version", dest="dockerVersion", action="store_true", help="Show current package version and configured images.runtime")
     parser.add_argument("--dockerSetVersion", "--docker-set-version", dest="dockerSetVersion", default="", help="Update ~/global.json images.runtime to the specified tag without building")
@@ -921,8 +934,7 @@ def main():
     existing_pid = get_pid_on_port(PORT)
     if existing_pid:
         try:
-            cmd = subprocess.run(["ps", "-p", existing_pid, "-o", "command="],
-                               capture_output=True, text=True).stdout.strip()
+            cmd = subprocess.run(["ps", "-p", existing_pid, "-o", "command="], capture_output=True, text=True).stdout.strip()
             if "cicy-code" in cmd:
                 print(f"[dev] stop existing cicy process on :{PORT} (pid={existing_pid})")
                 kill_process(existing_pid)
@@ -933,7 +945,7 @@ def main():
             else:
                 print(f"[dev] port {PORT} is in use by non-cicy process: {cmd}")
                 sys.exit(1)
-        except:
+        except Exception:
             pass
 
     platform = "darwin" if sys.platform == "darwin" else "linux"

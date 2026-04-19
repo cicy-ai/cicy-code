@@ -43,7 +43,7 @@ normalize_openclaw_model() {
 }
 
 default_openclaw_runtime_base_url() {
-  local mgr_port="${PORT:-8021}"
+  local mgr_port="${PORT:-8008}"
   echo "http://127.0.0.1:${mgr_port}/api/openclaw/provider"
 }
 

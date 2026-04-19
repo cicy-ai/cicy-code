@@ -2,7 +2,7 @@
 const LS_API_BASE = 'cicy_api_base';
 const SS_HOST_HOME = 'cicy_host_home';
 const DEFAULT_HOST_HOME = import.meta.env.VITE_HOST_HOME || '/home/w3c_offical';
-const APP_VERSION = '1.0.26';
+const APP_VERSION = '2.0.1';
 
 function inferApiBase(): string {
   const envBase = import.meta.env.VITE_API_BASE || '';

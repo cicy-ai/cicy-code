@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -378,6 +379,11 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	req.AllowAllActions = true
 	req.ReplyInChinese = true
 	readBody(r, &req)
+	req.AgentType = normalizeAgentType(req.AgentType)
+	if req.AgentType == "" {
+		J(w, M{"success": false, "error": "unsupported agent_type"})
+		return
+	}
 	token := getToken(r)
 
 	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.ReplyInChinese, req.WinName, token)
@@ -389,6 +395,10 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 }
 
 func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, winName *string, token string) (M, error) {
+	agentType = normalizeAgentType(agentType)
+	if agentType == "" {
+		return M{"success": false}, fmt.Errorf("unsupported agent_type")
+	}
 	// Get next worker index
 	var workerIdx int
 	tx, _ := store.Begin()
@@ -698,6 +708,8 @@ func normalizeAgentType(agentType string) string {
 		return "cicy"
 	case "opencode", "open code", "open-code":
 		return "opencode"
+	case "hermes", "hermes-agent", "hermes agent":
+		return "hermes"
 	default:
 		return ""
 	}
@@ -730,7 +742,7 @@ func normalizedOpenClawPrimaryModel() string {
 func runtimeAPIBasePort() string {
 	port := strings.TrimSpace(os.Getenv("PORT"))
 	if port == "" {
-		port = "8021"
+		port = "8008"
 	}
 	return port
 }
@@ -1659,16 +1671,17 @@ EOF
 		home, _ := os.UserHomeDir()
 		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("codex-install-%s.log", shortID))
 		baseURL := openAIRuntimeBaseURL(shortID)
+		providerNameOverride := tmuxShellQuote(`model_providers.custom.name="cicy-local"`)
 		baseURLOverride := tmuxShellQuote(`model_providers.custom.base_url="` + baseURL + `"`)
 		lines := []string{
 			"mkdir -p ~/.cicy",
 			ensureAgentCommandLine("codex", "Codex", codexInstallCmd(), installLog),
 		}
 		if allowAllActions {
-			lines = append(lines, fmt.Sprintf("codex -c %s --dangerously-bypass-approvals-and-sandbox", baseURLOverride))
+			lines = append(lines, fmt.Sprintf("codex -c %s -c %s --dangerously-bypass-approvals-and-sandbox", providerNameOverride, baseURLOverride))
 			return lines
 		}
-		lines = append(lines, fmt.Sprintf("codex -c %s", baseURLOverride))
+		lines = append(lines, fmt.Sprintf("codex -c %s -c %s", providerNameOverride, baseURLOverride))
 		return lines
 	case "claude":
 		home, _ := os.UserHomeDir()
@@ -1886,6 +1899,68 @@ EOF`)
 			`echo '[cicy] Send a message from the UI or run cicy_start_opencode to launch it.'`,
 		)
 		return lines
+	case "hermes":
+		home, _ := os.UserHomeDir()
+		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("hermes-install-%s.log", shortID))
+		hermesHome := filepath.Join(home, ".hermes-"+shortID)
+		hermesInstallDir := filepath.Join(hermesHome, "hermes-agent")
+		hermesBin := filepath.Join(hermesInstallDir, "venv", "bin", "hermes")
+		configPath := filepath.Join(hermesHome, "config.yaml")
+		installScriptPath := fmt.Sprintf("/tmp/hermes-install-%s.sh", shortID)
+		modelName := "claude-opus-4-6"
+		contextLength := 1000000
+		lines := []string{
+			"mkdir -p ~/.cicy",
+			fmt.Sprintf("export HERMES_HOME=%s", tmuxShellQuote(hermesHome)),
+			fmt.Sprintf("export HERMES_INSTALL_DIR=%s", tmuxShellQuote(hermesInstallDir)),
+			fmt.Sprintf("export CICY_HERMES_BIN=%s", tmuxShellQuote(hermesBin)),
+			fmt.Sprintf("mkdir -p %s", tmuxShellQuote(hermesHome)),
+			fmt.Sprintf(`if [ ! -x %s ]; then
+  echo '[cicy] =================================================='
+  echo '[cicy] Hermes Agent is not installed. Installing now...'
+  echo '[cicy] This may take 1-5 minutes depending on network.'
+  echo '[cicy] =================================================='
+  install_log=%s
+  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh -o %s && HERMES_HOME="$HERMES_HOME" HERMES_INSTALL_DIR="$HERMES_INSTALL_DIR" bash %s --skip-setup >"$install_log" 2>&1
+  install_status=$?
+  if [ "$install_status" -ne 0 ]; then
+    echo '[cicy] Hermes Agent install failed. Recent log:'
+    tail -100 "$install_log"
+    return 1
+  fi
+  echo '[cicy] Hermes Agent install completed.'
+fi`, tmuxShellQuote(hermesBin), tmuxShellQuote(installLog), tmuxShellQuote(installScriptPath), tmuxShellQuote(installScriptPath)),
+			fmt.Sprintf("export CICY_HERMES_CONFIG=%s", tmuxShellQuote(configPath)),
+			fmt.Sprintf("export OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
+			fmt.Sprintf("export OPENAI_API_KEY=%s", tmuxShellQuote("cicy-local-gateway")),
+			fmt.Sprintf("export CICY_HERMES_MODEL=%s", tmuxShellQuote(modelName)),
+			`python3 - <<'EOF'
+from pathlib import Path
+import os
+config_path = Path((os.environ.get("CICY_HERMES_CONFIG") or "").strip())
+if not config_path:
+    raise SystemExit(0)
+config_path.parent.mkdir(parents=True, exist_ok=True)
+model = (os.environ.get("CICY_HERMES_MODEL") or "claude-opus-4-6").strip() or "claude-opus-4-6"
+base_url = (os.environ.get("OPENAI_BASE_URL") or "").strip()
+api_key = (os.environ.get("OPENAI_API_KEY") or "").strip() or "cicy-local-gateway"
+config_path.write_text(
+    "model:\n"
+    "  provider: custom\n"
+    f"  default: {model}\n"
+    f"  context_length: ` + strconv.Itoa(contextLength) + `\n"
+    f"  base_url: {base_url}\n"
+    f"  api_key: {api_key}\n"
+    "compression:\n"
+    "  enabled: false\n"
+    "terminal:\n"
+    "  cwd: auto\n",
+    encoding="utf-8",
+)
+EOF`,
+		}
+		lines = append(lines, `"$CICY_HERMES_BIN"`)
+		return lines
 	default:
 		return nil
 	}
@@ -1927,12 +2002,14 @@ func isClaudeTrustPrompt(out string) bool {
 
 func isClaudeBypassChoicePrompt(out string) bool {
 	return strings.Contains(out, "Bypass Permissions mode") &&
+		strings.Contains(out, "No, exit") &&
 		strings.Contains(out, "Yes, I accept")
 }
 
 func isClaudeBypassConfirmPrompt(out string) bool {
 	return strings.Contains(out, "Bypass Permissions mode") &&
-		strings.Contains(out, "Enter to confirm")
+		strings.Contains(out, "Enter to confirm") &&
+		!strings.Contains(out, "No, exit")
 }
 
 type claudePromptStage string
@@ -1954,10 +2031,10 @@ func detectClaudePromptStage(out string, allowAllActions bool) claudePromptStage
 		return claudeStageSecurityNotes
 	case isClaudeTrustPrompt(out):
 		return claudeStageTrust
-	case allowAllActions && isClaudeBypassChoicePrompt(out):
-		return claudeStageBypassChoice
 	case allowAllActions && isClaudeBypassConfirmPrompt(out):
 		return claudeStageBypassConfirm
+	case allowAllActions && isClaudeBypassChoicePrompt(out):
+		return claudeStageBypassChoice
 	default:
 		return claudeStageNone
 	}
@@ -2137,7 +2214,7 @@ func ensureLazyOpenCodeReady(paneID string) error {
 
 func waitForAgentInputReady(paneID, agentType string, trace *tmuxSendTrace) error {
 	agentType = normalizeAgentType(agentType)
-	if agentType == "" || agentType == "opencode" || agentType == "codex" {
+	if agentType == "" || agentType == "opencode" || agentType == "codex" || agentType == "hermes" {
 		return nil
 	}
 	if trace != nil {
@@ -2859,7 +2936,7 @@ func autoConfirmClaudeStartup(paneID string, allowAllActions bool) {
 				runTmux("send-keys", "-t", paneID, "Enter")
 			case claudeStageBypassChoice:
 				log.Printf("[claude-auto-confirm] %s accept bypass mode", paneID)
-				runTmux("send-keys", "-t", paneID, "Down")
+				runTmux("send-keys", "-t", paneID, "2")
 				time.Sleep(150 * time.Millisecond)
 				runTmux("send-keys", "-t", paneID, "Enter")
 			case claudeStageBypassConfirm:
@@ -2970,7 +3047,7 @@ func initPaneEnv(opts paneEnvOpts) {
 		lines = append(lines,
 			"cd "+tmuxShellQuote(opts.workspace),
 			fmt.Sprintf("export WORKSPACE=%s", tmuxShellQuote(opts.workspace)),
-				`if [ ! -e ./home ] || [ -L ./home ]; then ln -sfn -- "${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}" ./home; fi`,
+			`if [ ! -e ./home ] || [ -L ./home ]; then ln -sfn -- "${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}" ./home; fi`,
 			// "mkdir -p ./skills ./projects",
 		)
 	}
@@ -2995,14 +3072,20 @@ func initPaneEnv(opts paneEnvOpts) {
 	}
 	lines = append(lines, agentBootLines(opts.agentType, opts.allowAllActions, shortID)...)
 
-	// 写临时脚本，执行后删除
+	// 将启动脚本写入 workspace，避免散落到 /tmp
 	script := "#!/usr/bin/env bash\n\n" + strings.Join(lines, "\n") + "\n"
-	tmpFile := fmt.Sprintf("/tmp/init_pane_%s.sh", strings.ReplaceAll(pid, ":", "_"))
-	if err := os.WriteFile(tmpFile, []byte(script), 0700); err != nil {
+	scriptPath := filepath.Join(opts.workspace, "boot.sh")
+	if strings.TrimSpace(opts.workspace) == "" {
+		scriptPath = fmt.Sprintf("/tmp/init_pane_%s.sh", strings.ReplaceAll(pid, ":", "_"))
+	} else if err := os.MkdirAll(opts.workspace, 0755); err != nil {
+		log.Printf("[init] failed to ensure workspace for script: %v", err)
+		return
+	}
+	if err := os.WriteFile(scriptPath, []byte(script), 0700); err != nil {
 		log.Printf("[init] failed to write script: %v", err)
 		return
 	}
-	log.Printf("[init] v1 pane %s script:\n%s", pid, script)
+	log.Printf("[init] v1 pane %s script path=%s\n%s", pid, scriptPath, script)
 
 	// 轮询等待 shell 就绪（发 echo 检测响应）
 	ready := false
@@ -3018,7 +3101,7 @@ func initPaneEnv(opts paneEnvOpts) {
 		log.Printf("[init] shell not confirmed, continue anyway")
 	}
 
-	runTmux("send-keys", "-t", pid, fmt.Sprintf("source %s", tmuxShellQuote(tmpFile)), "Enter")
+	runTmux("send-keys", "-t", pid, fmt.Sprintf("source %s", tmuxShellQuote(scriptPath)), "Enter")
 	if normalizeAgentType(opts.agentType) == "claude" || normalizeAgentType(opts.agentType) == "cicy" {
 		autoConfirmClaudeStartup(pid, opts.allowAllActions)
 	} else if normalizeAgentType(opts.agentType) == "codex" {

@@ -88,7 +88,7 @@ func (d *DB) Migrate() {
 			machine_key TEXT NOT NULL UNIQUE,
 			label TEXT DEFAULT '',
 			host TEXT DEFAULT '',
-			port INTEGER DEFAULT 8021,
+			port INTEGER DEFAULT 8008,
 			url TEXT NOT NULL DEFAULT '',
 			token TEXT DEFAULT '',
 			status TEXT DEFAULT 'unknown',

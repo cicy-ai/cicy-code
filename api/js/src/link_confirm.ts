@@ -1,7 +1,10 @@
+import { applyMonoFontVar } from "./font";
+
 function ensureLinkConfirmStyle(doc: Document): void {
     if (doc.getElementById("cicy-link-confirm-style")) {
         return;
     }
+    applyMonoFontVar(doc);
     var style = doc.createElement("style");
     style.id = "cicy-link-confirm-style";
     style.textContent = `
@@ -24,7 +27,7 @@ function ensureLinkConfirmStyle(doc: Document): void {
             box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
             padding: 18px;
             color: #f5f5f5;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--cp-mono-font);
         }
         .cicy-link-confirm-title {
             margin: 0 0 10px;
@@ -48,6 +51,7 @@ function ensureLinkConfirmStyle(doc: Document): void {
             line-height: 1.5;
             word-break: break-all;
             white-space: pre-wrap;
+            font-family: var(--cp-mono-font);
         }
         .cicy-link-confirm-actions {
             display: flex;
@@ -61,6 +65,7 @@ function ensureLinkConfirmStyle(doc: Document): void {
             padding: 9px 14px;
             font-size: 13px;
             cursor: pointer;
+            font-family: var(--cp-mono-font);
         }
         .cicy-link-confirm-btn-cancel {
             background: rgba(255, 255, 255, 0.08);

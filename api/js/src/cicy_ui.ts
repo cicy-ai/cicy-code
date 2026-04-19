@@ -1,4 +1,5 @@
 import { Terminal, WebTTY } from "./webtty";
+import { applyMonoFontVar, monoFontStack } from "./font";
 
 interface StorageHelper {
     get(key: string, defaultValue: any): any;
@@ -91,41 +92,17 @@ function clipTracePreview(text: string, maxLen: number): string {
     return normalized.slice(0, maxLen);
 }
 
-function isWindowsPlatform(): boolean {
-    var nav = window.navigator as Navigator & {
-        userAgentData?: {
-            platform?: string;
-        };
-    };
-    var platform = "";
-    if (nav.userAgentData && typeof nav.userAgentData.platform === "string") {
-        platform = nav.userAgentData.platform;
-    } else if (typeof nav.platform === "string") {
-        platform = nav.platform;
-    } else if (typeof nav.userAgent === "string") {
-        platform = nav.userAgent;
-    }
-    return /win/i.test(platform);
-}
-
-function monoFontStack(): string {
-    if (isWindowsPlatform()) {
-        return '"Cascadia Mono", "Cascadia Code", "Sarasa Mono SC", "Sarasa Term SC", Consolas, monospace';
-    }
-    return '"SF Mono", Menlo, Consolas, monospace';
-}
-
 function installStyles(): void {
     if (document.getElementById("cicy-ttyd-source-style") !== null) {
         return;
     }
 
-    var monoFont = monoFontStack();
+    applyMonoFontVar(document);
     var style = document.createElement("style");
     style.id = "cicy-ttyd-source-style";
     style.textContent = `
 :root {
-  --cp-mono-font: ${monoFont};
+  --cp-mono-font: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 html, body, #terminal, .terminal {
   height: 100% !important;
@@ -722,7 +699,7 @@ function configureTerminal(term: Terminal): void {
     var inner = anyTerm.term;
     if (inner && typeof inner.setOption === "function") {
         try {
-            inner.setOption("scrollback", 0);
+            inner.setOption("scrollback", 5000);
         } catch (_error) {
         }
         try {

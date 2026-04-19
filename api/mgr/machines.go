@@ -100,7 +100,7 @@ func normalizeInstanceNode(node machineConfigNode) machineConfigNode {
 		node.Label = firstNonEmpty(node.MachineKey, node.ID, node.URL)
 	}
 	if node.Port == 0 {
-		node.Port = 8021
+		node.Port = 8008
 	}
 	if node.Status == "" {
 		node.Status = machineStatus(node.Online, node.Status)
@@ -153,7 +153,7 @@ func loadMachineConfig() machineConfigFile {
 		}
 		cfg := machineConfigFile{Default: old.Default, Machines: []machineConfigNode{}}
 		for key, item := range old.Nodes {
-			port := 8021
+			port := 8008
 			if rawPort, ok := item["port"].(float64); ok {
 				port = int(rawPort)
 			}
@@ -484,7 +484,7 @@ func fetchRegistryNodes(registryURL, secret string) ([]machineConfigNode, error)
 	}
 	var nodes []machineConfigNode
 	for _, item := range body.Nodes {
-		port := 8021
+		port := 8008
 		switch v := item["port"].(type) {
 		case float64:
 			port = int(v)

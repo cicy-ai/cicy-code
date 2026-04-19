@@ -1,4 +1,4 @@
-import { Check, ChevronRight, Copy } from 'lucide-react'
+import { Check, Copy, MoreHorizontal } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { assetUrl } from '../../lib/assets'
 import { WebFrame } from '../WebFrame'
@@ -31,29 +31,15 @@ function normalizeAgentType(agentType?: string) {
   }
 }
 
-function statusTone(status?: string) {
-  switch ((status || '').trim().toLowerCase()) {
-    case 'thinking':
-    case 'tool_use':
-      return { dot: 'bg-amber-400', text: 'thinking' }
-    case 'restarting':
-      return { dot: 'bg-sky-400', text: 'restarting' }
-    case 'idle':
-    case 'text':
-    default:
-      return { dot: 'bg-emerald-400', text: status || 'idle' }
-  }
-}
-
 function AgentWindowAvatar({ agentType, title }: { agentType?: string; title: string }) {
   const normalizedAgentType = normalizeAgentType(agentType)
   const baseClassName = 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border shadow-sm'
 
   if (!normalizedAgentType) {
-    return <div className={`${baseClassName} border-white/[0.08] bg-white/[0.03] text-zinc-400`}><span className="text-[11px] font-semibold uppercase">{title.slice(0, 1) || '?'}</span></div>
+    return <div data-id="agent-stack-card-avatar" className={`${baseClassName} border-white/[0.08] bg-white/[0.03] text-zinc-400`}><span className="text-[11px] font-semibold uppercase">{title.slice(0, 1) || '?'}</span></div>
   }
   if (normalizedAgentType === 'openclaw') {
-    return <div className={`${baseClassName} border-zinc-500/40 bg-zinc-300 text-zinc-950`}><span className="text-[16px] leading-none">🦞</span></div>
+    return <div data-id="agent-stack-card-avatar" className={`${baseClassName} border-zinc-500/40 bg-zinc-300 text-zinc-950`}><span className="text-[16px] leading-none">🦞</span></div>
   }
   const iconMap: Record<string, { label: string; src: string; className?: string }> = {
     codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg') },
@@ -63,20 +49,20 @@ function AgentWindowAvatar({ agentType, title }: { agentType?: string; title: st
   }
   const icon = iconMap[normalizedAgentType]
   if (!icon) return null
-  return <div className={`${baseClassName} border-zinc-500/40 bg-zinc-300`}><img src={icon.src} alt={icon.label} className={`${icon.className || 'h-4 w-4'} object-contain`} /></div>
+  return <div data-id="agent-stack-card-avatar" className={`${baseClassName} border-zinc-500/40 bg-zinc-300`}><img data-id="agent-stack-card-avatar-image" src={icon.src} alt={icon.label} className={`${icon.className || 'h-4 w-4'} object-contain`} /></div>
 }
 
 export default function AgentStack({
   items,
   activePaneId,
   onActivePaneIdChange,
-  showHistoryShortcut,
+  historyShortcutActive,
   onOpenPaneHistory,
 }: {
   items: AgentCanvasItem[]
   activePaneId: string
   onActivePaneIdChange: (paneId: string) => void
-  showHistoryShortcut: boolean
+  historyShortcutActive: boolean
   onOpenPaneHistory: (paneId: string) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -96,7 +82,7 @@ export default function AgentStack({
           key={item.paneId}
           item={item}
           active={activePaneId === item.paneId}
-          showHistoryShortcut={showHistoryShortcut}
+          historyShortcutActive={historyShortcutActive}
           onOpenPaneHistory={onOpenPaneHistory}
           onClick={() => onActivePaneIdChange(item.paneId)}
         />
@@ -108,17 +94,16 @@ export default function AgentStack({
 function AgentStackCard({
   item,
   active,
-  showHistoryShortcut,
+  historyShortcutActive,
   onOpenPaneHistory,
   onClick,
 }: {
   item: AgentCanvasItem;
   active: boolean;
-  showHistoryShortcut: boolean;
+  historyShortcutActive: boolean;
   onOpenPaneHistory: (paneId: string) => void;
   onClick: () => void;
 }) {
-  const tone = statusTone(item.status)
   const [copiedPaneId, setCopiedPaneId] = useState(false)
   const copiedPaneTimerRef = useRef<number | null>(null)
 
@@ -190,44 +175,44 @@ function AgentStackCard({
       className={`absolute inset-0 overflow-hidden text-left transition-colors ${active ? 'flex flex-col bg-[#0c0d10]' : 'hidden'}`}
       style={{ display: active ? 'flex' : 'none' }}
     >
-      <div className="flex h-12 shrink-0 items-center border-b border-white/[0.07] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] px-3">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
+      <div data-id={`agent-stack-card-header-${item.paneId}`} className="flex h-12 shrink-0 items-center border-b border-white/[0.07] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] px-3">
+        <div data-id={`agent-stack-card-header-main-${item.paneId}`} className="flex items-center gap-3 min-w-0 flex-1">
           <AgentWindowAvatar agentType={item.agentType} title={item.title || item.paneId} />
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium text-zinc-100">{item.title || item.paneId}</div>
-            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-zinc-500">
-              <span className="font-mono">{item.paneId}</span>
-              <button type="button" onClick={copyPaneId} className="rounded p-0.5 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300">
+          <div data-id={`agent-stack-card-meta-${item.paneId}`} className="min-w-0 flex-1">
+            <div data-id={`agent-stack-card-title-${item.paneId}`} className="truncate text-sm font-medium text-zinc-100">{item.title || item.paneId}</div>
+            <div data-id={`agent-stack-card-status-row-${item.paneId}`} className="mt-0.5 flex items-center gap-2 text-[11px] text-zinc-500">
+              <span data-id={`agent-stack-card-pane-id-${item.paneId}`} className="font-mono">{item.paneId}</span>
+              <button data-id={`agent-stack-card-copy-pane-${item.paneId}`} type="button" onClick={copyPaneId} className="rounded p-0.5 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300">
                 {copiedPaneId ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
               </button>
-              <span className={`inline-block h-2 w-2 rounded-full ${tone.dot}`} />
-              <span>{tone.text}</span>
-              {item.contextUsage != null ? <span>{item.contextUsage}%</span> : null}
+              {item.contextUsage != null ? <span data-id={`agent-stack-card-context-usage-${item.paneId}`}>{item.contextUsage}%</span> : null}
             </div>
           </div>
         </div>
-        {showHistoryShortcut ? (
-          <button
-            type="button"
-            onClick={handleOpenHistory}
-            className="ml-3 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-            title="查看历史"
-            aria-label="查看历史"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        ) : null}
+        <button
+          data-id={`agent-stack-card-history-${item.paneId}`}
+          type="button"
+          onClick={handleOpenHistory}
+          aria-pressed={historyShortcutActive}
+          className={`ml-3 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${historyShortcutActive ? 'bg-white/[0.08] text-zinc-100 ring-1 ring-white/[0.12]' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100'}`}
+          title="More"
+          aria-label="More"
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
       </div>
-      <div className="relative min-h-0 flex-1 bg-black">
+      <div data-id={`agent-stack-card-body-${item.paneId}`} className="relative min-h-0 flex-1 bg-black">
         {!item.isApiOnly && item.ttydSrc ? (
-          <WebFrame src={item.ttydSrc} className="h-full w-full border-0 bg-black" title={`stack-${item.paneId}`} />
+          <div data-id={`agent-stack-card-terminal-${item.paneId}`} className="h-full w-full">
+            <WebFrame src={item.ttydSrc} className="h-full w-full border-0 bg-black" title={`stack-${item.paneId}`} />
+          </div>
         ) : (
-          <div className="absolute inset-0 flex flex-col justify-between bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.12),transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] p-4">
-            <div>
-              <div className="text-xs uppercase tracking-[0.24em] text-zinc-600">workspace</div>
-              <div className="mt-2 truncate text-sm text-zinc-300">{item.workspace || `~/workers/${item.paneId}`}</div>
+          <div data-id={`agent-stack-card-empty-${item.paneId}`} className="absolute inset-0 flex flex-col justify-between bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.12),transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] p-4">
+            <div data-id={`agent-stack-card-workspace-${item.paneId}`}>
+              <div data-id={`agent-stack-card-workspace-label-${item.paneId}`} className="text-xs uppercase tracking-[0.24em] text-zinc-600">workspace</div>
+              <div data-id={`agent-stack-card-workspace-value-${item.paneId}`} className="mt-2 truncate text-sm text-zinc-300">{item.workspace || `~/workers/${item.paneId}`}</div>
             </div>
-            <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3 text-sm text-zinc-300">
+            <div data-id={`agent-stack-card-empty-message-${item.paneId}`} className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3 text-sm text-zinc-300">
               {item.isApiOnly ? '该成员当前只支持 API 能力。' : active ? '实时终端已激活。' : '点击切换到该成员，在右侧查看完整历史。'}
             </div>
           </div>
