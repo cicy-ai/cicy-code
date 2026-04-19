@@ -1,9 +1,11 @@
-const UglifyJSPlugin = require('uglifyjs-webpack-plugin');
+const path = require("path");
 
 module.exports = {
+    mode: "production",
     entry: "./src/main.ts",
     output: {
-        filename: "./dist/gotty-bundle.js"
+        path: path.resolve(__dirname),
+        filename: "dist/gotty-bundle.js"
     },
     devtool: "source-map",
     resolve: {
@@ -13,17 +15,12 @@ module.exports = {
         rules: [
             {
                 test: /\.tsx?$/,
-                loader: "ts-loader",
+                use: "ts-loader",
                 exclude: /node_modules/
-            },
-            {
-                test: /\.js$/,
-                include: /node_modules/,
-                loader: 'license-loader'
             }
         ]
     },
-    plugins: [
-        new UglifyJSPlugin()
-    ]
+    performance: {
+        hints: false
+    }
 };

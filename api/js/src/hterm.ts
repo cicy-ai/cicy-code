@@ -8,11 +8,11 @@ export class Hterm {
     term: bare.hterm.Terminal;
     io: bare.hterm.IO;
 
-    columns: number;
-    rows: number;
+    columns: number = 0;
+    rows: number = 0;
 
     // to "show" the current message when removeMessage() is called
-    message: string;
+    message: string = "";
     suppressNextSigintFromCopy: boolean;
     copyShortcutListener: (event: KeyboardEvent) => void;
 
@@ -83,10 +83,16 @@ export class Hterm {
         this.term.setWindowTitle(title);
     };
 
-    setPreferences(value: object) {
+    setPreferences(value: { [key: string]: any }) {
         Object.keys(value).forEach((key) => {
             this.term.getPrefs().set(key, value[key]);
         });
+    };
+
+    configure(_options: { scrollback?: number, fontFamily?: string, letterSpacing?: number }): void {
+    };
+
+    fit(): void {
     };
 
     onInput(callback: (input: string) => void) {
