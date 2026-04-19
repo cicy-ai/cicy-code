@@ -19,7 +19,15 @@ export declare class Hterm {
     showReconnecting(attempt: number, max: number, onRetry?: () => void): void;
     hideReconnecting(): void;
     setWindowTitle(title: string): void;
-    setPreferences(value: object): void;
+    setPreferences(value: {
+        [key: string]: any;
+    }): void;
+    configure(_options: {
+        scrollback?: number;
+        fontFamily?: string;
+        letterSpacing?: number;
+    }): void;
+    fit(): void;
     onInput(callback: (input: string) => void): void;
     onResize(callback: (colmuns: number, rows: number) => void): void;
     deactivate(): void;

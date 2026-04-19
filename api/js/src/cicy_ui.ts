@@ -695,28 +695,15 @@ body {
 }
 
 function configureTerminal(term: Terminal): void {
-    var anyTerm = term as any;
-    var inner = anyTerm.term;
-    if (inner && typeof inner.setOption === "function") {
-        try {
-            inner.setOption("scrollback", 5000);
-        } catch (_error) {
-        }
-        try {
-            inner.setOption("fontFamily", monoFontStack());
-        } catch (_error) {
-        }
-        try {
-            inner.setOption("letterSpacing", -0.5);
-        } catch (_error) {
-        }
-    }
+    term.configure({
+        scrollback: 5000,
+        fontFamily: monoFontStack(),
+        letterSpacing: -0.5,
+    });
 
-    if (inner && typeof inner.fit === "function") {
-        setTimeout(function(): void {
-            inner.fit();
-        }, 200);
-    }
+    setTimeout(function(): void {
+        term.fit();
+    }, 200);
 
     setTimeout(function() {
         window.dispatchEvent(new Event("resize"));
