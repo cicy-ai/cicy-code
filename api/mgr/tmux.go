@@ -3022,6 +3022,7 @@ func initPaneEnv(opts paneEnvOpts) {
 		"touch ~/.cicy_tmux.conf",
 		"source ~/.cicy_tmux.conf",
 		`export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$HOME/.opencode/bin:$PATH"`,
+						`case " ${NODE_OPTIONS:-} " in *" --max-old-space-size="*) ;; *) export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=3072" ;; esac`,
 		fmt.Sprintf("export X_AGENT_ID=%s", tmuxShellQuote(pid)),
 		fmt.Sprintf("export X_AGENT_SHORT_ID=%s", tmuxShellQuote(shortID)),
 		fmt.Sprintf("export CICY_API_KEY=%s", tmuxShellQuote(strings.TrimSpace(aiCfg.APIKey))),
