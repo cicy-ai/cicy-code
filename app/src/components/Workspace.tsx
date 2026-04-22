@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Terminal, MessageSquare, Home, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, RotateCcw, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check
@@ -33,6 +34,10 @@ const cache = {
 };
 
 const LEFT_PANEL_WIDTH = 320;
+const CLI_DRAWER_WIDTH_KEY = 'ws_cliDrawerWidth';
+const CLI_DRAWER_MIN_WIDTH = 360;
+const CLI_DRAWER_DEFAULT_WIDTH = 520;
+const CLI_DRAWER_MAX_WIDTH = 960;
 const TEAM_TERMINAL_ACTIVE_KEY = 'ws_teamTerminalActive';
 const GITHUB_ISSUES_URL = 'https://github.com/cicy-ai/cicy-code/issues';
 const UPGRADE_URL = 'https://cicy-ai.com/team/upgrade';
@@ -99,6 +104,11 @@ function parseEnvBool(value: unknown): boolean {
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
 }
 
+function clampCliDrawerWidth(value: number): number {
+  if (!Number.isFinite(value)) return CLI_DRAWER_DEFAULT_WIDTH;
+  return Math.min(CLI_DRAWER_MAX_WIDTH, Math.max(CLI_DRAWER_MIN_WIDTH, value));
+}
+
 function membershipTone(kind: string | null) {
   switch ((kind || '').trim().toLowerCase()) {
     case 'trial':
@@ -157,6 +167,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [inspectorRequestedTab, setInspectorRequestedTab] = useState<InspectorTab>('overview');
   const [cliContentOpen, setCliContentOpen] = useState(false);
   const [cliContentTab, setCliContentTab] = useState<WorkspaceCliContentTab>('files');
+  const [cliDrawerWidth, setCliDrawerWidth] = useState(() => clampCliDrawerWidth(Number(cache.get(CLI_DRAWER_WIDTH_KEY, CLI_DRAWER_DEFAULT_WIDTH))));
   const [tokenOpen, setTokenOpen] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -176,6 +187,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const prevCanvasPaneIdsRef = useRef<string[] | null>(null);
   const initialCanvasRestoreScopeRef = useRef<string | null>(null);
   const initialStackSelectionScopeRef = useRef<string | null>(null);
+  const cliDrawerResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const handleCodeHome = () => {
     const hostHome = getHostHome();
@@ -238,6 +250,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     cache.set('ws_leftPanel', leftActive === 'team' || leftActive === 'skills' ? leftActive : null);
   }, [leftActive]);
   useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, activeTeamPaneId); }, [activeTeamPaneId]);
+  useEffect(() => { cache.set(CLI_DRAWER_WIDTH_KEY, cliDrawerWidth); }, [cliDrawerWidth]);
   useEffect(() => { cache.set('ws_voiceBtnPos', voiceBtnPos); }, [voiceBtnPos]);
   useEffect(() => { cache.set('agent_panelPos', panelPos); }, [panelPos]);
   useEffect(() => { cache.set('agent_panelSize', panelSize); }, [panelSize]);
@@ -246,6 +259,28 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = prevOverflow;
+    };
+  }, []);
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      const resizeState = cliDrawerResizeRef.current;
+      if (!resizeState) return;
+      const nextWidth = clampCliDrawerWidth(resizeState.startWidth + (resizeState.startX - event.clientX));
+      setCliDrawerWidth(nextWidth);
+    };
+    const stopResize = () => {
+      if (!cliDrawerResizeRef.current) return;
+      cliDrawerResizeRef.current = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', stopResize);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', stopResize);
+      stopResize();
     };
   }, []);
   const applyPanePatch = useCallback((targetPaneId: string, patch: any) => {
@@ -700,8 +735,19 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
     setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
-    setCliContentOpen(prev => (clean === activeCliPaneId ? !prev : true));
-  }, [activeCliPaneId, paneId]);
+    setCliContentTab('settings');
+    setCliContentOpen(true);
+  }, [paneId]);
+  const handleCliDrawerResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    cliDrawerResizeRef.current = {
+      startX: event.clientX,
+      startWidth: cliDrawerWidth,
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [cliDrawerWidth]);
 
   const locatePaneInCanvas = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
@@ -792,6 +838,97 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       setMembershipRefreshing(false);
     }
   }, [refreshPoll]);
+  const cliDrawerPortal = cliContentOpen ? createPortal(
+    <div data-id="cli-content-portal" className="pointer-events-none fixed inset-y-0 right-0 z-[60] flex">
+      <div
+        data-id="cli-content-area"
+        className="pointer-events-auto relative flex h-full min-w-0 flex-col border-l border-[var(--vsc-border)] bg-[#0b0b0d] shadow-[-20px_0_40px_rgba(0,0,0,0.45)]"
+        style={{ width: `${cliDrawerWidth}px`, maxWidth: 'calc(100vw - 120px)' }}
+      >
+        <div
+          data-id="cli-content-resize-handle"
+          className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize"
+          onMouseDown={handleCliDrawerResizeStart}
+        />
+        <div data-id="cli-content-tabs-wrap" className="flex items-center justify-between border-b border-[var(--vsc-border)] px-3 py-2">
+          <div data-id="cli-content-tabs" className="flex gap-1 overflow-x-auto whitespace-nowrap scrollbar-none">
+            {[
+              { id: 'files', label: '文件' },
+              { id: 'settings', label: '设置' },
+            ].map((item) => (
+              <button
+                data-id={`cli-content-tab-${item.id}`}
+                key={item.id}
+                type="button"
+                className={`shrink-0 rounded-md px-2.5 py-1.5 text-[11px] leading-5 ${
+                  cliContentTab === item.id
+                    ? 'bg-white/[0.08] text-zinc-100'
+                    : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
+                }`}
+                onClick={() => setCliContentTab(item.id as WorkspaceCliContentTab)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <button
+            data-id="cli-content-close"
+            type="button"
+            onClick={() => setCliContentOpen(false)}
+            className="ml-3 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
+            title="关闭"
+            aria-label="关闭"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div data-id="cli-content-body" className="min-h-0 flex-1 relative">
+          <div
+            data-id="cli-content-files-host"
+            className="absolute inset-0"
+            style={{ display: cliContentTab === 'files' ? 'block' : 'none' }}
+          >
+            {fileCodeServerSrc ? (
+              <div data-id="cli-content-files-pane" className="relative h-full w-full">
+                <WebFrame
+                  src={fileCodeServerSrc}
+                  codeServer
+                  className="h-full w-full border-0 bg-[#0A0A0A]"
+                  title="文件"
+                />
+              </div>
+            ) : (
+              <div data-id="cli-content-files-empty" className="flex h-full items-center justify-center text-sm text-zinc-500">
+                当前主 agent 没有可用的文件视图
+              </div>
+            )}
+          </div>
+          <div
+            data-id="cli-content-settings-host"
+            className="absolute inset-0"
+            style={{ display: cliContentTab === 'settings' ? 'block' : 'none' }}
+          >
+            <AgentInspector
+              paneId={activeCliPaneId}
+              paneTitle={
+                paneDetails[activeCliPaneId]?.title
+                || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.title
+                || activeCliPaneId
+              }
+              open
+              embedded
+              requestedTab={'settings'}
+              liveStatus={chatWsLiveStatus}
+              inspectorVersion={chatWsInspectorVersion}
+              onPanePatch={applyPanePatch}
+              onClose={() => {}}
+            />
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  ) : null;
   const rightContent = (
     <div data-id="right-content" className="h-full flex flex-col relative">
       <header data-id="top-bar" className="h-12 border-b border-[var(--vsc-border)] bg-[#0A0A0A] flex items-center justify-between px-4 shrink-0 z-10">
@@ -929,7 +1066,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           </div>
         </div>
         <div data-id="cli-tab" className="absolute inset-0 flex" style={{ display: mainTab === 'cli' ? 'flex' : 'none' }}>
-          <div data-id="cli-agent-stack" className={`relative h-full min-w-0 overflow-hidden bg-[#09090b] transition-all duration-200 ${cliContentOpen ? 'w-[660px] min-w-[660px] max-w-[660px] shrink-0 border-r border-[var(--vsc-border)]' : 'flex-1'}`}>
+          <div data-id="cli-agent-stack" className="relative h-full min-w-0 flex-1 overflow-hidden bg-[#09090b]">
             <AgentStack
               items={buildCanvasItems({
                 paneId,
@@ -948,98 +1085,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 setActiveTeamPaneId(prev => ({ ...prev, [paneId]: targetPaneId }));
               }}
             />
-          </div>
-          <div data-id="cli-content-area" className="min-w-0 flex-1 bg-[#0b0b0d] flex-col transition-all duration-200" style={{ display: cliContentOpen ? 'flex' : 'none' }}>
-            <div data-id="cli-content-tabs-wrap" className="border-b border-[var(--vsc-border)] px-3 py-2">
-              <div data-id="cli-content-tabs" className="flex gap-1 overflow-x-auto whitespace-nowrap scrollbar-none">
-                {/* 只保留设置 tab；其他 tab 的引用先注释保留，不删除
-                {[
-                  { id: 'files', label: '文件' },
-                  { id: 'history', label: '历史' },
-                  { id: 'overview', label: '概览' },
-                  { id: 'memory', label: '运行时记忆' },
-                  { id: 'settings', label: '设置' },
-                ].map((item) => (
-                */}
-                {[
-                  { id: 'files', label: '文件' },
-                  { id: 'settings', label: '设置' },
-                ].map((item) => (
-                  <button
-                    data-id={`cli-content-tab-${item.id}`}
-                    key={item.id}
-                    type="button"
-                    className={`shrink-0 rounded-md px-2.5 py-1.5 text-[11px] leading-5 ${
-                      cliContentTab === item.id
-                        ? 'bg-white/[0.08] text-zinc-100'
-                        : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
-                    }`}
-                    onClick={() => setCliContentTab(item.id as WorkspaceCliContentTab)}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div data-id="cli-content-body" className="min-h-0 flex-1 relative">
-              {/* 旧的 history / overview / memory 分支先注释保留，不删除
-              {cliContentTab === 'history' ? (
-                <ChatHistoryView
-                  paneId={activeCliPaneId}
-                  token={token!}
-                  liveStatus={chatWsLiveStatus}
-                  liveText={chatWsLiveText}
-                  historyVersion={chatWsHistoryVersion}
-                  suggestionText={chatSuggestionText}
-                  suggestionPending={chatSuggestionPending}
-                  suggestionSending={chatSuggestionSending}
-                  onExecuteSuggestion={handleExecuteSuggestion}
-                />
-              ) : (
-              */}
-                <div
-                  data-id="cli-content-files-host"
-                  className="absolute inset-0"
-                  style={{ display: cliContentTab === 'files' ? 'block' : 'none' }}
-                >
-                  {fileCodeServerSrc ? (
-                    <div data-id="cli-content-files-pane" className="relative h-full w-full">
-                      <WebFrame
-                        src={fileCodeServerSrc}
-                        codeServer
-                        className="h-full w-full border-0 bg-[#0A0A0A]"
-                        title="文件"
-                      />
-                    </div>
-                  ) : (
-                    <div data-id="cli-content-files-empty" className="flex h-full items-center justify-center text-sm text-zinc-500">
-                      当前主 agent 没有可用的文件视图
-                    </div>
-                  )}
-                </div>
-                <div
-                  data-id="cli-content-settings-host"
-                  className="absolute inset-0"
-                  style={{ display: cliContentTab === 'settings' ? 'block' : 'none' }}
-                >
-                  <AgentInspector
-                    paneId={activeCliPaneId}
-                    paneTitle={
-                      paneDetails[activeCliPaneId]?.title
-                      || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.title
-                      || activeCliPaneId
-                    }
-                    open
-                    embedded
-                    requestedTab={'settings'}
-                    liveStatus={chatWsLiveStatus}
-                    inspectorVersion={chatWsInspectorVersion}
-                    onPanePatch={applyPanePatch}
-                    onClose={() => {}}
-                  />
-                </div>
-              {/* )} */}
-            </div>
           </div>
         </div>
       </div>
@@ -1167,6 +1212,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           />
         </div>
       )}
+      {cliDrawerPortal}
       {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
       {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
       {toast && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 bg-zinc-800 text-white text-sm rounded-lg shadow-lg">{toast}</div>}
