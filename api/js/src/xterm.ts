@@ -167,10 +167,7 @@ export class Xterm {
 
         this.term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
             if ((event.ctrlKey || event.metaKey) && !event.altKey && String(event.key).toLowerCase() === "c") {
-                this.suppressNextSigintFromCopy = true;
-                setTimeout(() => {
-                    this.suppressNextSigintFromCopy = false;
-                }, 0);
+                // Always intercept Ctrl+C for copy; use ^C button for SIGINT
                 return false;
             }
             return true;
@@ -203,6 +200,15 @@ export class Xterm {
                 this.layoutImageOverlays();
             });
             this.resizeObserver.observe(this.elem);
+        }
+        // Re-fit when iframe becomes visible (e.g. agent tab switch)
+        if (typeof IntersectionObserver !== "undefined") {
+            const visObs = new IntersectionObserver((entries) => {
+                if (entries[0]?.isIntersecting) {
+                    this.fitSoon();
+                }
+            });
+            visObs.observe(this.elem);
         }
         this.term.parser.registerOscHandler(9999, (data: string) => {
             this.handleImageOsc(data);
@@ -240,18 +246,35 @@ export class Xterm {
     }
 
     fit(): void {
+        // Skip fit when container is hidden (display:none) or too small
+        const rect = this.elem.getBoundingClientRect();
+        if (rect.width < 20 || rect.height < 20) return;
         this.fitAddon.fit();
     }
 
     private fitSoon(): void {
-        requestAnimationFrame(() => {
+        // Show a black overlay during resize to hide tmux redraw flicker
+        if (!this._resizeMask) {
+            this._resizeMask = this.elem.ownerDocument.createElement('div');
+            this._resizeMask.style.cssText = 'position:absolute;inset:0;background:#000;z-index:10;pointer-events:none;';
+        }
+        if (!this._resizeMask.parentNode) {
+            this.elem.style.position = 'relative';
+            this.elem.appendChild(this._resizeMask);
+        }
+        if (this._fitDebounce) clearTimeout(this._fitDebounce);
+        this._fitDebounce = window.setTimeout(() => {
+            this._fitDebounce = 0;
             this.fit();
-            requestAnimationFrame(() => {
-                this.fit();
-                this.layoutImageOverlays();
-            });
-        });
+            this.layoutImageOverlays();
+            // Remove mask after tmux has time to redraw
+            setTimeout(() => {
+                this._resizeMask?.remove();
+            }, 100);
+        }, 150);
     }
+    private _fitDebounce: number = 0;
+    private _resizeMask: HTMLDivElement | null = null;
 
     private handleImageOsc(data: string): void {
         var raw = String(data || "").trim();
@@ -436,14 +459,8 @@ export class Xterm {
     }
 
     deactivate(): void {
-        if (this.inputDisposable) {
-            this.inputDisposable.dispose();
-            this.inputDisposable = null;
-        }
-        if (this.resizeDisposable) {
-            this.resizeDisposable.dispose();
-            this.resizeDisposable = null;
-        }
+        // Don't dispose inputDisposable here — reconnect may have already
+        // registered a new one. Only blur to indicate inactive state.
         this.term.blur();
     }
 

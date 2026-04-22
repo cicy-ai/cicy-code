@@ -37,6 +37,8 @@ export declare class Xterm {
     }): void;
     fit(): void;
     private fitSoon;
+    private _fitDebounce;
+    private _resizeMask;
     private handleImageOsc;
     private layoutImageOverlays;
     info(): {

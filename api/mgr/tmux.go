@@ -708,6 +708,8 @@ func normalizeAgentType(agentType string) string {
 		return "copilot"
 	case "cicy-wechat", "wechat":
 		return "cicy-wechat"
+	case "cicy-feishu", "feishu", "lark":
+		return "cicy-feishu"
 	case "claude", "claude code", "claude-code":
 		return "claude"
 	case "cicy", "cicy-claude":
@@ -1853,6 +1855,15 @@ fi`,
 			"cicy-wechat",
 		}
 		return lines
+	case "cicy-feishu":
+		home, _ := os.UserHomeDir()
+		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("feishu-install-%s.log", shortID))
+		lines := []string{
+			"mkdir -p ~/.cicy",
+			ensureAgentCommandLine("cicy-feishu", "Feishu", cicyFeishuInstallCmd(), installLog),
+			"cicy-feishu",
+		}
+		return lines
 	case "hermes":
 		home, _ := os.UserHomeDir()
 		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("hermes-install-%s.log", shortID))
@@ -2957,7 +2968,9 @@ func initPaneEnv(opts paneEnvOpts) {
 	// sourcing the init script so agent boot code can see current values.
 	// Per-agent-type env: only set what each agent actually needs.
 	agentNorm := normalizeAgentType(opts.agentType)
-	sessionEnv := map[string]string{}
+	sessionEnv := map[string]string{
+		"CICY_AGENT_TYPE": agentNorm,
+	}
 	switch agentNorm {
 	case "openclaw":
 		sessionEnv["CICY_API_KEY"] = strings.TrimSpace(aiCfg.APIKey)
@@ -2978,6 +2991,8 @@ func initPaneEnv(opts paneEnvOpts) {
 		// copilot uses GitHub auth, no gateway env needed
 	case "cicy-wechat":
 		// cicy-wechat handles its own auth
+	case "cicy-feishu":
+		// cicy-feishu uses FEISHU_APP_ID/FEISHU_APP_SECRET env vars
 	case "hermes":
 		sessionEnv["CICY_API_KEY"] = strings.TrimSpace(aiCfg.APIKey)
 		sessionEnv["CICY_API_URL"] = strings.TrimSpace(aiCfg.APIURL)
@@ -3008,7 +3023,7 @@ func initPaneEnv(opts paneEnvOpts) {
 		}
 	}
 	switch agentNorm {
-	case "codex", "claude", "kiro-cli", "copilot", "cicy-wechat":
+	case "codex", "claude", "kiro-cli", "copilot", "cicy-wechat", "cicy-feishu":
 		// boot lines handle gateway URLs directly
 	default:
 		lines = append(lines,
