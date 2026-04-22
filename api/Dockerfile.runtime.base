@@ -13,7 +13,7 @@ ENV LANG=C.UTF-8 \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
     PUPPETEER_SKIP_DOWNLOAD=1 \
     PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1 \
-    PATH="/root/.npm-global/bin:/root/.opencode/bin:${PATH}" \
+    PATH="/root/.npm-global/bin:/root/.local/bin:/root/.opencode/bin:${PATH}" \
     PORT=8008 \
     CS_PORT=8002 \
     CICY_NO_BROWSER=1
@@ -27,6 +27,7 @@ RUN set -eux; \
         python3 \
         sudo \
         tmux \
+        unzip \
         vim \
         procps \
         fonts-wqy-microhei \
@@ -38,10 +39,6 @@ RUN set -eux; \
     echo 'cicy ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/cicy; \
     chmod 0440 /etc/sudoers.d/cicy; \
     curl -fsSL https://code-server.dev/install.sh | sh; \
-    curl -fsSL https://opencode.ai/install | bash; \
-    npm install -g openclaw@latest; \
-    npm install -g @anthropic-ai/claude-code; \
-    npm install -g @openai/codex; \
     rm -rf \
         /usr/lib/code-server/src \
         /usr/lib/code-server/README.md \
@@ -50,44 +47,10 @@ RUN set -eux; \
         /usr/lib/code-server/postinstall.sh \
         /usr/lib/code-server/npm-shrinkwrap.json \
     ; \
-    find /usr/local/lib/node_modules/openclaw -type d \( -name test -o -name tests -o -name __tests__ -o -name docs -o -name examples \) -prune -exec rm -rf {} +; \
-    rm -f \
-        /usr/local/lib/node_modules/openclaw/CHANGELOG.md \
-        /usr/local/lib/node_modules/openclaw/README.md \
-        /usr/local/lib/node_modules/@anthropic-ai/claude-code/README.md \
-        /usr/local/lib/node_modules/@anthropic-ai/claude-code/LICENSE.md \
-    ; \
-    if [ -d /usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/audio-capture ]; then \
-        find /usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/audio-capture -mindepth 1 -maxdepth 1 -type d ! -name x64-linux -exec rm -rf {} +; \
-    fi; \
-    if [ -d /usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep ]; then \
-        find /usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep -mindepth 1 -maxdepth 1 -type d ! -name x64-linux -exec rm -rf {} +; \
-    fi; \
-    if [ -d /usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/seccomp ]; then \
-        find /usr/local/lib/node_modules/@anthropic-ai/claude-code/vendor/seccomp -mindepth 1 -maxdepth 1 -type d ! -name x64 -exec rm -rf {} +; \
-    fi; \
-    if [ -d /usr/local/lib/node_modules/openclaw/node_modules/koffi/build/koffi ]; then \
-        find /usr/local/lib/node_modules/openclaw/node_modules/koffi/build/koffi -mindepth 1 -maxdepth 1 -type d ! -name linux_x64 -exec rm -rf {} +; \
-    fi; \
-    find /usr/local/lib/node_modules/openclaw/node_modules -path '*/prebuilds/*' -type d \( \
-        -name '*darwin*' -o \
-        -name '*win32*' -o \
-        -name '*arm64*' -o \
-        -name '*android*' -o \
-        -name '*ios*' -o \
-        -name '*musl*' -o \
-        -name '*freebsd*' -o \
-        -name 'linux-arm64' \
-    \) -exec rm -rf {} +; \
     npm cache clean --force; \
     rm -rf /var/lib/apt/lists/* /tmp/npm-cache /root/.npm /root/.cache /tmp/* /var/tmp/*
 
 USER cicy
 RUN set -eux; \
-    export HOME=/home/cicy; \
-    export OPENCLAW_STATE_DIR="$HOME/.openclaw"; \
-    export OPENCLAW_CONFIG_PATH="$OPENCLAW_STATE_DIR/openclaw.json"; \
-    mkdir -p "$OPENCLAW_STATE_DIR"; \
-    openclaw plugins install "@tencent-weixin/openclaw-weixin@latest"
-
-USER root
+    mkdir -p /home/cicy/.npm-global; \
+    npm config set prefix /home/cicy/.npm-global

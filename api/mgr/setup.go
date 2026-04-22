@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -75,7 +74,7 @@ func sudoPrefix() string {
 }
 
 func npmGlobalInstallCmd(pkg string) string {
-	return sudoPrefix() + "npm install -g " + pkg
+	return "npm install -g " + pkg
 }
 
 func preinstalledRuntimeInstallCmd(cmd string) string {
@@ -86,23 +85,31 @@ func preinstalledRuntimeInstallCmd(cmd string) string {
 }
 
 func openClawInstallCmd() string {
-	return preinstalledRuntimeInstallCmd(npmGlobalInstallCmd("openclaw@latest"))
+	return npmGlobalInstallCmd("openclaw@latest")
 }
 
 func claudeInstallCmd() string {
-	return preinstalledRuntimeInstallCmd(npmGlobalInstallCmd("@anthropic-ai/claude-code"))
+	return npmGlobalInstallCmd("@anthropic-ai/claude-code@latest")
 }
 
 func codexInstallCmd() string {
-	return preinstalledRuntimeInstallCmd(npmGlobalInstallCmd("@openai/codex"))
+	return npmGlobalInstallCmd("@openai/codex@latest")
 }
 
 func opencodeInstallCmd() string {
-	return preinstalledRuntimeInstallCmd("curl -fsSL https://opencode.ai/install | bash && echo 'export PATH=\"$HOME/.opencode/bin:$PATH\"' >> " + shellRC() + " && export PATH=\"$HOME/.opencode/bin:$PATH\"")
+	return "curl -fsSL https://opencode.ai/install | bash && echo 'export PATH=\"$HOME/.opencode/bin:$PATH\"' >> " + shellRC() + " && export PATH=\"$HOME/.opencode/bin:$PATH\""
 }
 
 func cicyInstallCmd() string {
-	return ""
+	return npmGlobalInstallCmd("cicy-claude@latest")
+}
+
+func kiroCliInstallCmd() string {
+	return "curl -fsSL https://cli.kiro.dev/install | bash"
+}
+
+func cicyWechatInstallCmd() string {
+	return npmGlobalInstallCmd("cicy-wechat@latest")
 }
 
 func packageInstallCmd(pkg string) string {
@@ -132,10 +139,7 @@ func codeServerInstallCmd() string {
 }
 
 func copilotInstallCmd() string {
-	if runtime.GOOS == "darwin" {
-		return "brew install copilot-cli"
-	}
-	return npmGlobalInstallCmd("@githubnext/github-copilot-cli")
+	return npmGlobalInstallCmd("@github/copilot@latest")
 }
 
 func baseTools() []Tool {
@@ -278,21 +282,60 @@ func installSelectedAgents(selected []string) {
 	fmt.Printf("\n📦 AI 工具将在 tmux pane 启动时按需安装: %v\n", selected)
 }
 
-// builtinAgents defines the built-in agents with fixed ports.
+// builtinAgents defines the available agent catalog (no fixed port binding).
 var builtinAgents = []struct {
-	Port      int
 	AgentType string
 	Title     string
 }{
-	{10001, "hermes", "Hermes Agent"},
+	{"hermes", "Hermes Agent"},
+	{"openclaw", "OpenClaw"},
+	{"codex", "Codex"},
+	{"claude", "Claude"},
+	{"kiro-cli", "Kiro CLI"},
+	{"copilot", "GitHub Copilot"},
+	{"cicy-wechat", "WeChat"},
+	{"cicy-claude", "CiCy"},
+	{"opencode", "OpenCode"},
 }
 
-const (
-	primaryWorkerSession = "w-10001"
-	primaryWorkerPaneID  = "w-10001:main.0"
-)
+const primaryWorkerSession = "w-10001"
+const primaryWorkerPaneID = "w-10001:main.0"
+
+type builtinWorker struct {
+	Port      int
+	AgentType string
+	Title     string
+}
+
+// selectedBuiltinWorkers assigns ports starting from 10001 in the order of selected.
+func selectedBuiltinWorkers(selected []string) []builtinWorker {
+	workers := make([]builtinWorker, 0, len(selected))
+	for i, agentType := range selected {
+		agentType = normalizeAgentType(agentType)
+		if agentType == "" {
+			continue
+		}
+		workers = append(workers, builtinWorker{
+			Port:      10001 + i,
+			AgentType: agentType,
+			Title:     builtinAgentTitle(agentType),
+		})
+	}
+	return workers
+}
+
+func builtinAgentTitle(agentType string) string {
+	agentType = normalizeAgentType(agentType)
+	for _, ba := range builtinAgents {
+		if ba.AgentType == agentType {
+			return ba.Title
+		}
+	}
+	return agentType
+}
 
 func isBuiltinAgentType(agentType string) bool {
+	agentType = normalizeAgentType(agentType)
 	for _, ba := range builtinAgents {
 		if ba.AgentType == agentType {
 			return true
@@ -312,7 +355,6 @@ func parseSelectedAgents(agentList string) ([]string, error) {
 		for _, ba := range builtinAgents {
 			selected = append(selected, ba.AgentType)
 		}
-		sort.Strings(selected)
 		return selected, nil
 	}
 
@@ -337,7 +379,6 @@ func parseSelectedAgents(agentList string) ([]string, error) {
 	if len(selected) == 0 {
 		return nil, fmt.Errorf("no valid agents selected")
 	}
-	sort.Strings(selected)
 	return selected, nil
 }
 
@@ -387,15 +428,15 @@ func syncWorkerIndexToExistingAgents() {
 	}
 }
 
-func syncBuiltinAgentTitles() {
-	for _, ba := range builtinAgents {
-		paneID := builtinWorkerSession(ba.Port) + ":main.0"
+func syncBuiltinAgentTitles(selected []string) {
+	for _, w := range selectedBuiltinWorkers(selected) {
+		paneID := builtinWorkerSession(w.Port) + ":main.0"
 		query := fmt.Sprintf("UPDATE agent_config SET title=?, updated_at=%s WHERE pane_id=? AND (COALESCE(TRIM(title), '')='' OR title=?)", store.Now())
 		legacyTitle := ""
 		if paneID == primaryWorkerPaneID {
 			legacyTitle = "商业顾问"
 		}
-		if _, err := store.Exec(query, ba.Title, paneID, legacyTitle); err != nil {
+		if _, err := store.Exec(query, w.Title, paneID, legacyTitle); err != nil {
 			log.Printf("[startup] failed to sync builtin title for %s: %v", paneID, err)
 		}
 	}
@@ -415,90 +456,30 @@ func builtinWorkerSession(port int) string {
 }
 
 func ensurePrimaryWorkerForBindings(selected []string) {
-	if hasSelectedAgentType(selected, builtinAgents[0].AgentType) {
-		return
-	}
-	needsBindingTarget := false
-	for _, agentType := range selected {
-		if agentType != builtinAgents[0].AgentType {
-			needsBindingTarget = true
-			break
-		}
-	}
-	if !needsBindingTarget {
-		return
-	}
-
-	var count int
-	if err := store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE pane_id=?", primaryWorkerPaneID).Scan(&count); err != nil {
-		log.Printf("[startup] failed to inspect primary worker %s: %v", primaryWorkerSession, err)
-		return
-	}
-	if count > 0 {
-		return
-	}
-
-	log.Printf("[startup] primary worker %s missing; creating it for agent bindings", primaryWorkerSession)
-	createBuiltinWorker(builtinAgents[0].Port, builtinAgents[0].AgentType, builtinAgents[0].Title)
 }
 
 func ensureWorkerBoundToPrimary(workerSession string) {
-	workerSession = strings.TrimSpace(workerSession)
-	if workerSession == "" || workerSession == primaryWorkerSession {
-		return
-	}
-
-	var primaryCount int
-	if err := store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE pane_id=?", primaryWorkerPaneID).Scan(&primaryCount); err != nil {
-		log.Printf("[startup] failed to inspect primary binding target %s: %v", primaryWorkerSession, err)
-		return
-	}
-	if primaryCount == 0 {
-		log.Printf("[startup] skip binding %s to %s: primary worker missing", workerSession, primaryWorkerSession)
-		return
-	}
-
-	query := fmt.Sprintf(`INSERT INTO pane_agents (pane_id, agent_name, status, created_at, updated_at)
-		VALUES (?, ?, 'active', %s, %s)
-		ON CONFLICT(pane_id, agent_name) DO UPDATE SET status='active', updated_at=%s`, store.Now(), store.Now(), store.Now())
-	if _, err := store.Exec(query, primaryWorkerSession, workerSession); err != nil {
-		log.Printf("[startup] failed to bind %s to %s: %v", workerSession, primaryWorkerSession, err)
-		return
-	}
 }
 
 func createSelectedWorkers(selected []string) {
 	fmt.Println("\n🚀 创建选中的 Workers...")
-	ensurePrimaryWorkerForBindings(selected)
-	maxPort := 0
-	for _, ba := range builtinAgents {
-		found := false
-		for _, s := range selected {
-			if s == ba.AgentType {
-				found = true
-				break
-			}
-		}
-		if !found {
-			continue
-		}
-		if ba.Port > maxPort {
-			maxPort = ba.Port
-		}
-		// Skip if already in DB
+	workers := selectedBuiltinWorkers(selected)
+	for _, w := range workers {
+		paneID := builtinWorkerSession(w.Port) + ":main.0"
 		var count int
-		store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE agent_type=?", ba.AgentType).Scan(&count)
+		store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE pane_id=?", paneID).Scan(&count)
 		if count > 0 {
-			fmt.Printf("  ⏭ %s - 已存在，跳过\n", ba.Title)
-			ensureWorkerBoundToPrimary(builtinWorkerSession(ba.Port))
+			// Update agent_type and title in case they changed
+			store.Exec(fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, updated_at=%s WHERE pane_id=?", store.Now()),
+				w.AgentType, w.Title, paneID)
+			fmt.Printf("  ⏭ %s - 已存在，已更新\n", w.Title)
 			continue
 		}
-		createBuiltinWorker(ba.Port, ba.AgentType, ba.Title)
-		ensureWorkerBoundToPrimary(builtinWorkerSession(ba.Port))
+		createBuiltinWorker(w.Port, w.AgentType, w.Title)
 	}
-	ensureWorkerIndexAtLeast(maxPort)
-	syncWorkerIndexToExistingAgents()
-	syncBuiltinAgentTitles()
+	if len(workers) > 0 {
+		setWorkerIndex(workers[len(workers)-1].Port)
+	}
 }
 
 func createBuiltinWorker(port int, agentType, title string) {
@@ -604,44 +585,6 @@ func runSetupWithAgents(agentList string) {
 	fmt.Println("🎉 环境初始化完成！")
 }
 
-func migrateBuiltinAgentsToHermesOnly() {
-	builtinPaneIDs := make(map[string]struct{}, len(builtinAgents))
-	for _, builtin := range builtinAgents {
-		builtinPaneIDs[builtinWorkerSession(builtin.Port)+":main.0"] = struct{}{}
-	}
-
-	rows, err := store.Query("SELECT pane_id, COALESCE(agent_type,''), COALESCE(ttyd_port,0) FROM agent_config WHERE active=1 ORDER BY ttyd_port ASC, pane_id ASC")
-	if err != nil {
-		log.Printf("[startup] failed to inspect builtin agents for hermes migration: %v", err)
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var paneID, agentType string
-		var port int
-		if err := rows.Scan(&paneID, &agentType, &port); err != nil {
-			continue
-		}
-		_, isBuiltinPane := builtinPaneIDs[paneID]
-		if isBuiltinPane && paneID == primaryWorkerPaneID {
-			if agentType != builtinAgents[0].AgentType {
-				query := fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, active=1, updated_at=%s WHERE pane_id=?", store.Now())
-				if _, err := store.Exec(query, builtinAgents[0].AgentType, builtinAgents[0].Title, paneID); err != nil {
-					log.Printf("[startup] failed to migrate primary builtin %s to hermes: %v", paneID, err)
-				}
-			}
-			continue
-		}
-		if port >= 10001 && port <= 10003 {
-			query := fmt.Sprintf("UPDATE agent_config SET active=0, updated_at=%s WHERE pane_id=?", store.Now())
-			if _, err := store.Exec(query, paneID); err != nil {
-				log.Printf("[startup] failed to disable legacy builtin %s: %v", paneID, err)
-			}
-		}
-	}
-}
-
 func checkEnv() {
 	extendPATH()
 
@@ -683,10 +626,21 @@ func checkEnv() {
 		}
 	}
 
-	migrateBuiltinAgentsToHermesOnly()
-	ensureBuiltinAgents()
+	// Parse selected agents from --agents flag
+	var selectedAgents []string
+	if agentsFlag != "" {
+		selected, err := parseSelectedAgents(agentsFlag)
+		if err != nil {
+			log.Fatalf("[startup] invalid --agents value %q: %v", agentsFlag, err)
+		}
+		selectedAgents = selected
+	} else {
+		selectedAgents = []string{"hermes"}
+	}
+
+	ensureBuiltinAgents(selectedAgents)
 	syncWorkerIndexToExistingAgents()
-	syncBuiltinAgentTitles()
+	syncBuiltinAgentTitles(selectedAgents)
 	ensureCodeServer()
 }
 
@@ -914,11 +868,15 @@ func mustAtoi(s string) int {
 	return n
 }
 
-// ensureBuiltinAgents restores tmux sessions and ttyd only for currently supported builtin agents.
-func ensureBuiltinAgents() {
-	allowedByPaneID := make(map[string]struct{}, len(builtinAgents))
-	for _, builtin := range builtinAgents {
-		allowedByPaneID[builtinWorkerSession(builtin.Port)+":main.0"] = struct{}{}
+// ensureBuiltinAgents restores tmux sessions and ttyd only for selected builtin agents.
+func ensureBuiltinAgents(selected []string) {
+	workers := selectedBuiltinWorkers(selected)
+	allowedByPaneID := make(map[string]struct{}, len(workers))
+	desiredByPaneID := make(map[string]builtinWorker, len(workers))
+	for _, w := range workers {
+		pid := builtinWorkerSession(w.Port) + ":main.0"
+		allowedByPaneID[pid] = struct{}{}
+		desiredByPaneID[pid] = w
 	}
 
 	rows, err := store.Query("SELECT pane_id, ttyd_port, workspace, COALESCE(init_script,''), COALESCE(config,'{}'), COALESCE(agent_type,''), COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0) FROM agent_config WHERE active=1 ORDER BY ttyd_port ASC, pane_id ASC")
@@ -939,6 +897,13 @@ func ensureBuiltinAgents() {
 		}
 		if _, ok := allowedByPaneID[paneID]; !ok {
 			continue
+		}
+
+		// Sync agent_type and title if changed
+		if desired, ok := desiredByPaneID[paneID]; ok && normalizeAgentType(agentType) != desired.AgentType {
+			store.Exec(fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, updated_at=%s WHERE pane_id=?", store.Now()),
+				desired.AgentType, desired.Title, paneID)
+			agentType = desired.AgentType
 		}
 
 		// Ensure tmux session

@@ -1,5 +1,7 @@
-ARG BASE_IMAGE=cicy-code-base:1.0.2
+ARG BASE_IMAGE=cicy-code-base:1.0.6
 FROM ${BASE_IMAGE}
+
+USER root
 
 ARG SETUP_AGENT_HASH=unknown
 ARG APP_BINARY_HASH=unknown
@@ -9,7 +11,8 @@ LABEL cicy.setup_agent_hash="${SETUP_AGENT_HASH}" \
 
 COPY setup-agent.sh /usr/local/bin/setup-agent.sh
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/setup-agent.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/setup-agent.sh /usr/local/bin/docker-entrypoint.sh && \
+    chown -R cicy:cicy /usr/local/lib/node_modules /usr/local/bin
 
 WORKDIR /app
 COPY --chown=cicy:cicy cicy-code-docker /app/cicy-code

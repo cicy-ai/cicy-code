@@ -700,12 +700,18 @@ func normalizeAgentType(agentType string) string {
 	switch strings.ToLower(strings.TrimSpace(agentType)) {
 	case "openclaw", "opencraw":
 		return "openclaw"
-	case "codex", "openai", "kiro-cli", "kiro-cli chat", "gemini", "copilot":
+	case "codex", "openai":
 		return "codex"
+	case "kiro-cli", "kiro", "kiro-cli chat":
+		return "kiro-cli"
+	case "copilot", "github-copilot", "github copilot", "ghcopilot":
+		return "copilot"
+	case "cicy-wechat", "wechat":
+		return "cicy-wechat"
 	case "claude", "claude code", "claude-code":
 		return "claude"
-	case "cicy":
-		return "cicy"
+	case "cicy", "cicy-claude":
+		return "cicy-claude"
 	case "opencode", "open code", "open-code":
 		return "opencode"
 	case "hermes", "hermes-agent", "hermes agent":
@@ -769,8 +775,8 @@ func openClawRuntimeBaseURL(agentID string) string {
 func visibleAgentInstallLine(commandName, label, installCmd, logPath string) string {
 	return fmt.Sprintf(`if ! command -v %s >/dev/null 2>&1; then
   echo '[cicy] =================================================='
-  echo '[cicy] %s is not installed. Installing now...'
-  echo '[cicy] This may take 1-5 minutes depending on network.'
+  echo '[cicy] %s 未安装，正在安装...'
+  echo '[cicy] 可能需要 1-5 分钟，取决于网络速度'
   echo '[cicy] =================================================='
   install_log=%s
   ( %s ) >"$install_log" 2>&1 &
@@ -781,18 +787,19 @@ func visibleAgentInstallLine(commandName, label, installCmd, logPath string) str
     filled=$(((elapsed %% 20) + 1))
     bar=$(printf '%%-*s' "$filled" '' | tr ' ' '#')
     pad=$(printf '%%-*s' $((20 - filled)) '')
-    printf '\r[cicy] [%%s%%s] installing %s... %%3ss' "$bar" "$pad" "$elapsed"
+    printf '\r[cicy] [%%s%%s] 正在安装 %s... %%3ss' "$bar" "$pad" "$elapsed"
     sleep 1
   done
   wait "$install_pid"
   install_status=$?
   printf '\n'
   if [ "$install_status" -ne 0 ]; then
-    echo '[cicy] %s install failed. Recent log:'
+    echo '[cicy] %s 安装失败，最近日志：'
     tail -100 "$install_log"
+    echo '[cicy] 手动重试: source boot.sh'
     return 1
   fi
-  echo '[cicy] %s install completed.'
+  echo '[cicy] %s 安装完成'
 fi`, commandName, label, tmuxShellQuote(logPath), installCmd, strings.ToLower(label), strings.ToLower(label), strings.ToLower(label))
 }
 
@@ -800,8 +807,7 @@ func ensureAgentCommandLine(commandName, label, installCmd, logPath string) stri
 	if strings.TrimSpace(installCmd) == "" {
 		return fmt.Sprintf(`if ! command -v %s >/dev/null 2>&1; then
   echo '[cicy] =================================================='
-  echo '[cicy] %s is missing from the preinstalled runtime image.'
-  echo '[cicy] Rebuild or update the base image, then restart this pane.'
+  echo '[cicy] %s 未找到，请更新基础镜像后重启'
   echo '[cicy] =================================================='
   return 1
 fi`, commandName, label)
@@ -904,6 +910,8 @@ cfg.models.providers.cicy ||= {};
 cfg.agents ||= {};
 cfg.agents.defaults ||= {};
 cfg.agents.defaults.contextTokens = providerApi === "anthropic-messages" ? 200000 : 272000;
+cfg.agents.defaults.model = cfg.agents.defaults.model || {};
+cfg.agents.defaults.model.primary = "cicy/" + model;
 cfg.models.providers.cicy.baseUrl = baseUrl;
 cfg.models.providers.cicy.apiKey = "cicy-local-gateway";
 	cfg.models.providers.cicy.api = providerApi;
@@ -955,6 +963,8 @@ EOF`,
 			`export OPENCLAW_GATEWAY_TOKEN="$(node -e 'const fs=require("fs"); const p=process.env.OPENCLAW_CONFIG_PATH; try { const data=JSON.parse(fs.readFileSync(p, "utf8")); process.stdout.write((((data.gateway || {}).auth || {}).token || "")); } catch (_) {}')"`,
 		}
 		lines = append(lines, ensureAgentCommandLine("openclaw", "OpenClaw", openClawInstallCmd(), installLog))
+		lines = append(lines, `openclaw plugins list 2>/dev/null | grep -q openclaw-weixin || OPENCLAW_STATE_DIR="$OPENCLAW_STATE_DIR" openclaw plugins install "@tencent-weixin/openclaw-weixin@latest" 2>/dev/null || true`)
+		lines = append(lines, `openclaw plugins list 2>/dev/null | grep -q openclaw-lark || OPENCLAW_STATE_DIR="$OPENCLAW_STATE_DIR" openclaw plugins install "@larksuite/openclaw-lark@latest" 2>/dev/null || true`)
 		lines = append(lines, fmt.Sprintf(`openclaw_profile_cmd=(openclaw --profile %s)`, tmuxShellQuote(shortID)))
 		if allowAllActions {
 			approvalsPath := fmt.Sprintf("%s/exec-approvals.json", stateDir)
@@ -978,7 +988,7 @@ EOF`,
 }
 EOF`, tmuxShellQuote(approvalsPath)))
 		}
-		if shortID == primaryWorkerSession {
+		if normalizeAgentType(agentType) == "openclaw" {
 			lines = append(lines,
 				fmt.Sprintf(`openclaw_sessions_store=%s`, tmuxShellQuote(filepath.Join(stateDir, "agents", "main", "sessions", "sessions.json"))),
 				fmt.Sprintf(`weixin_accounts_path=%s`, tmuxShellQuote(filepath.Join(stateDir, "openclaw-weixin", "accounts.json"))),
@@ -1219,7 +1229,7 @@ EOF`, tmuxShellQuote(approvalsPath)))
     rm -f "$gateway_log"
     : > "$gateway_log"
     rm -f `+tmuxShellQuote(gatewayLog)+`
-    nohup "${openclaw_profile_cmd[@]}" gateway run --verbose >"$gateway_log" 2>&1 </dev/null &
+    nohup env CIAO_DISABLE=1 "${openclaw_profile_cmd[@]}" gateway run --verbose >"$gateway_log" 2>&1 </dev/null &
   else
     cicy_log "检测到已有 gateway 进程，等待就绪 ..."
   fi
@@ -1258,7 +1268,7 @@ EOF`, tmuxShellQuote(approvalsPath)))
 		if shortID != primaryWorkerSession {
 			lines = append(lines, `ensure_openclaw_gateway`)
 		}
-		if shortID == primaryWorkerSession {
+		if normalizeAgentType(agentType) == "openclaw" {
 			lines = append(lines,
 				`weixin_needs_login() {
   node - "$weixin_accounts_path" <<'EOF'
@@ -1614,43 +1624,29 @@ EOF
 				`  printf '10. 向当前微信发送测试消息\n'`,
 				`  printf '0. 刷新管理台\n'`,
 				`}`,
-				`trap 'printf "\n"; cicy_log "管理台不可退出，正在返回主菜单。"' INT`,
-				`while true; do`,
-				`  if [ "$boot_completed" != "1" ]; then`,
-				`    if weixin_needs_login; then`,
-				`      show_boot_screen`,
-				`      read -r -p '按 Enter 开始扫码登录...' _cicy_boot_enter || true`,
-				`    else`,
-				`      cicy_log "已检测到微信已登录，正在直接启动服务并进入管理菜单。"`,
-				`    fi`,
-				`    weixin_login_and_start || true`,
-				`    if [ "$boot_completed" = "1" ]; then`,
-				`      continue`,
-				`    fi`,
-				`    cicy_pause`,
-				`    continue`,
-				`  fi`,
-				`  show_management_menu`,
-				`  read -r -p '请选择操作: ' cicy_choice || true`,
-				`  case "$cicy_choice" in`,
-				`    1) weixin_login_and_start ;;`,
-				`    2) show_openclaw_status ;;`,
-				`    3) restart_gateway_action ;;`,
-				`    4) show_dashboard_url ;;`,
-				`    5) install_plugin_action ;;`,
-				`    6) install_skill_action ;;`,
-				`    7) install_feishu_action ;;`,
-				`    8) add_channel_action ;;`,
-				`    9) tail_recent_logs_action ;;`,
-				`    10) send_weixin_test_message_action ;;`,
-				`    0|'') cicy_log "已刷新管理台。";;`,
-				`    *) cicy_log "无效选择，请重新输入。";;`,
-				`  esac`,
-				`  case "$cicy_choice" in`,
-				`    0|'') ;;`,
-				`    *) cicy_pause ;;`,
-				`  esac`,
-				`done`,
+				// Split pane: left=TUI, right=weixin login
+				`_cicy_tmux_session="$(tmux display-message -p '#{session_name}')"`,
+				`sync_openclaw_session_key`,
+				`ensure_openclaw_gateway || true`,
+				`if weixin_needs_login; then`,
+				`  cicy_log "微信未登录，正在右侧打开登录窗口..."`,
+				`  tmux split-window -h -t "$_cicy_tmux_session" "OPENCLAW_STATE_DIR='$OPENCLAW_STATE_DIR' OPENCLAW_CONFIG_PATH='$OPENCLAW_CONFIG_PATH' ${openclaw_profile_cmd[*]} channels login --channel openclaw-weixin; sleep 2"`,
+				`  _login_pane=$(tmux list-panes -t "$_cicy_tmux_session" -F '#{pane_id}' | tail -1)`,
+				`  while tmux list-panes -t "$_cicy_tmux_session" -F '#{pane_id}' 2>/dev/null | grep -q "$_login_pane"; do sleep 2; done`,
+				`  refresh_openclaw_session`,
+				`  restart_openclaw_gateway_for_session`,
+				`  ensure_openclaw_gateway || true`,
+				`  weixin_wait_until_ready || true`,
+				`  weixin_send_welcome || true`,
+				`  cicy_log "微信已连通"`,
+				`else`,
+				`  cicy_log "已检测到微信已登录"`,
+				`  weixin_wait_until_ready || true`,
+				`fi`,
+				`sync_openclaw_session_key`,
+				`cicy_log "正在打开 OpenClaw TUI 会话: $selected_session"`,
+				`"${openclaw_profile_cmd[@]}" tui --session "$selected_session" || true`,
+				`cicy_log "OpenClaw TUI 已退出。手动重启: source boot.sh"`,
 			)
 		} else {
 			lines = append(lines,
@@ -1671,135 +1667,46 @@ EOF
 		home, _ := os.UserHomeDir()
 		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("codex-install-%s.log", shortID))
 		baseURL := openAIRuntimeBaseURL(shortID)
+		providerOverride := tmuxShellQuote(`model_provider="custom"`)
 		providerNameOverride := tmuxShellQuote(`model_providers.custom.name="cicy-local"`)
 		baseURLOverride := tmuxShellQuote(`model_providers.custom.base_url="` + baseURL + `"`)
 		lines := []string{
 			"mkdir -p ~/.cicy",
+			"export OPENAI_API_KEY='cicy-local-gateway'",
 			ensureAgentCommandLine("codex", "Codex", codexInstallCmd(), installLog),
 		}
 		if allowAllActions {
-			lines = append(lines, fmt.Sprintf("codex -c %s -c %s --dangerously-bypass-approvals-and-sandbox", providerNameOverride, baseURLOverride))
+			lines = append(lines, fmt.Sprintf("codex -c %s -c %s -c %s --dangerously-bypass-approvals-and-sandbox", providerOverride, providerNameOverride, baseURLOverride))
 			return lines
 		}
-		lines = append(lines, fmt.Sprintf("codex -c %s -c %s", providerNameOverride, baseURLOverride))
+		lines = append(lines, fmt.Sprintf("codex -c %s -c %s -c %s", providerOverride, providerNameOverride, baseURLOverride))
 		return lines
-	case "claude":
+	case "claude", "cicy-claude":
+		cmdName := "claude"
+		label := "Claude Code"
+		installCmd := claudeInstallCmd()
+		settingsFile := "claude-settings.json"
+		if normalizeAgentType(agentType) == "cicy-claude" {
+			cmdName = "cicy-claude"
+			label = "CiCy"
+			installCmd = cicyInstallCmd()
+			settingsFile = "cicy-settings.json"
+		}
 		home, _ := os.UserHomeDir()
-		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("claude-install-%s.log", shortID))
-		settingsPath := fmt.Sprintf("/tmp/claude-settings-%s.json", shortID)
+		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("%s-install-%s.log", cmdName, shortID))
+		baseURL := anthropicRuntimeBaseURL(shortID)
+		model := aiCfg.DefaultClaudeModel
+		settingsJSON := fmt.Sprintf(`{"env":{"ANTHROPIC_AUTH_TOKEN":"cicy-local-gateway","ANTHROPIC_BASE_URL":"%s"},"model":"%s"}`, baseURL, model)
 		lines := []string{
 			"mkdir -p ~/.cicy",
-			ensureAgentCommandLine("claude", "Claude Code", claudeInstallCmd(), installLog),
-			fmt.Sprintf("export ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
-			fmt.Sprintf("export CLAUDE_SETTINGS_PATH=%s", tmuxShellQuote(settingsPath)),
-			fmt.Sprintf("export CICY_DEFAULT_CLAUDE_MODEL=%s", tmuxShellQuote(aiCfg.DefaultClaudeModel)),
-			`node - <<'EOF'
-const fs = require("fs");
-const path = process.env.CLAUDE_SETTINGS_PATH;
-if (!path) process.exit(0);
-const config = {
-  env: {
-    ANTHROPIC_AUTH_TOKEN: "cicy-local-gateway",
-    ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL || "",
-  },
-};
-const model = String(process.env.CICY_DEFAULT_CLAUDE_MODEL || "").trim();
-if (model) {
-  config.model = model;
-}
-fs.writeFileSync(path, JSON.stringify(config, null, 2));
-EOF`,
+			ensureAgentCommandLine(cmdName, label, installCmd, installLog),
+			fmt.Sprintf(`printf '%%s' %s > "$WORKSPACE/%s"`, tmuxShellQuote(settingsJSON), settingsFile),
 		}
 		if allowAllActions {
-			lines = append(lines, `resolve_claude_bypass_user() {
-  if [ "$(id -u)" -ne 0 ]; then
-    export CLAUDE_BYPASS_USER="$(id -un)"
-    export CLAUDE_BYPASS_HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"
-    return 0
-  fi
-  for candidate in cicy node; do
-    if id -u "$candidate" >/dev/null 2>&1; then
-      export CLAUDE_BYPASS_USER="$candidate"
-      export CLAUDE_BYPASS_HOME="$(getent passwd "$candidate" | cut -d: -f6)"
-      chmod 711 /root 2>/dev/null || true
-      mkdir -p "$CLAUDE_BYPASS_HOME/.claude" "$CLAUDE_BYPASS_HOME/.config" "$CLAUDE_BYPASS_HOME/.cache"
-      chown -R "$candidate:$candidate" "$WORKSPACE" "$CLAUDE_BYPASS_HOME/.claude" "$CLAUDE_BYPASS_HOME/.config" "$CLAUDE_BYPASS_HOME/.cache"
-      return 0
-    fi
-  done
-  export CLAUDE_BYPASS_USER=root
-  export CLAUDE_BYPASS_HOME=/root
-}`)
-			lines = append(lines,
-				"resolve_claude_bypass_user || return 1",
-				`if [ "$CLAUDE_BYPASS_USER" = "$(id -un)" ]; then
-  env HOME="$CLAUDE_BYPASS_HOME" USER="$CLAUDE_BYPASS_USER" LOGNAME="$CLAUDE_BYPASS_USER" SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" sh -lc 'if [ ! -e "$WORKSPACE/home" ] || [ -L "$WORKSPACE/home" ]; then ln -sfn -- "$HOME" "$WORKSPACE/home"; fi; cd "$WORKSPACE" && exec claude --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'
-else
-  runuser -u "$CLAUDE_BYPASS_USER" -- env HOME="$CLAUDE_BYPASS_HOME" USER="$CLAUDE_BYPASS_USER" LOGNAME="$CLAUDE_BYPASS_USER" SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" sh -lc 'if [ ! -e "$WORKSPACE/home" ] || [ -L "$WORKSPACE/home" ]; then ln -sfn -- "$HOME" "$WORKSPACE/home"; fi; cd "$WORKSPACE" && exec claude --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'
-fi`,
-			)
-			return lines
+			lines = append(lines, fmt.Sprintf(`%s --settings "$WORKSPACE/%s" --dangerously-skip-permissions`, cmdName, settingsFile))
+		} else {
+			lines = append(lines, fmt.Sprintf(`%s --settings "$WORKSPACE/%s"`, cmdName, settingsFile))
 		}
-		lines = append(lines, "claude --settings \"$CLAUDE_SETTINGS_PATH\"")
-		return lines
-	case "cicy":
-		home, _ := os.UserHomeDir()
-		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("cicy-install-%s.log", shortID))
-		settingsPath := fmt.Sprintf("/tmp/cicy-settings-%s.json", shortID)
-		lines := []string{
-			"mkdir -p ~/.cicy",
-			ensureAgentCommandLine("cicy", "CiCy", cicyInstallCmd(), installLog),
-			fmt.Sprintf("export ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
-			fmt.Sprintf("export CLAUDE_SETTINGS_PATH=%s", tmuxShellQuote(settingsPath)),
-			fmt.Sprintf("export CICY_DEFAULT_CLAUDE_MODEL=%s", tmuxShellQuote(aiCfg.DefaultClaudeModel)),
-			`node - <<'EOF'
-const fs = require("fs");
-const path = process.env.CLAUDE_SETTINGS_PATH;
-if (!path) process.exit(0);
-const config = {
-  env: {
-    ANTHROPIC_AUTH_TOKEN: "cicy-local-gateway",
-    ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL || "",
-  },
-};
-const model = String(process.env.CICY_DEFAULT_CLAUDE_MODEL || "").trim();
-if (model) {
-  config.model = model;
-}
-fs.writeFileSync(path, JSON.stringify(config, null, 2));
-EOF`,
-		}
-		if allowAllActions {
-			lines = append(lines, `resolve_cicy_bypass_user() {
-  if [ "$(id -u)" -ne 0 ]; then
-    export CICY_BYPASS_USER="$(id -un)"
-    export CICY_BYPASS_HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"
-    return 0
-  fi
-  for candidate in cicy node; do
-    if id -u "$candidate" >/dev/null 2>&1; then
-      export CICY_BYPASS_USER="$candidate"
-      export CICY_BYPASS_HOME="$(getent passwd "$candidate" | cut -d: -f6)"
-      chmod 711 /root 2>/dev/null || true
-      mkdir -p "$CICY_BYPASS_HOME/.claude" "$CICY_BYPASS_HOME/.config" "$CICY_BYPASS_HOME/.cache"
-      chown -R "$candidate:$candidate" "$WORKSPACE" "$CICY_BYPASS_HOME/.claude" "$CICY_BYPASS_HOME/.config" "$CICY_BYPASS_HOME/.cache"
-      return 0
-    fi
-  done
-  export CICY_BYPASS_USER=root
-  export CICY_BYPASS_HOME=/root
-}`)
-			lines = append(lines,
-				"resolve_cicy_bypass_user || return 1",
-				`if [ "$CICY_BYPASS_USER" = "$(id -un)" ]; then
-  env HOME="$CICY_BYPASS_HOME" USER="$CICY_BYPASS_USER" LOGNAME="$CICY_BYPASS_USER" SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" sh -lc 'if [ ! -e "$WORKSPACE/home" ] || [ -L "$WORKSPACE/home" ]; then ln -sfn -- "$HOME" "$WORKSPACE/home"; fi; cd "$WORKSPACE" && exec cicy --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'
-else
-  runuser -u "$CICY_BYPASS_USER" -- env HOME="$CICY_BYPASS_HOME" USER="$CICY_BYPASS_USER" LOGNAME="$CICY_BYPASS_USER" SHELL=/bin/bash PATH="$PATH" TERM="$TERM" WORKSPACE="$WORKSPACE" CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" sh -lc 'if [ ! -e "$WORKSPACE/home" ] || [ -L "$WORKSPACE/home" ]; then ln -sfn -- "$HOME" "$WORKSPACE/home"; fi; cd "$WORKSPACE" && exec cicy --settings "$CLAUDE_SETTINGS_PATH" --dangerously-skip-permissions'
-fi`,
-			)
-			return lines
-		}
-		lines = append(lines, "cicy --settings \"$CLAUDE_SETTINGS_PATH\"")
 		return lines
 	case "opencode":
 		home, _ := os.UserHomeDir()
@@ -1854,8 +1761,7 @@ EOF`)
   return "$status"
 }`)
 			lines = append(lines,
-				`echo '[cicy] OpenCode is installed but not auto-started to save resources.'`,
-				`echo '[cicy] Send a message from the UI or run cicy_start_opencode to launch it.'`,
+				`opencode`,
 			)
 			return lines
 		}
@@ -1895,9 +1801,57 @@ EOF`)
   return "$status"
 }`)
 		lines = append(lines,
-			`echo '[cicy] OpenCode is installed but not auto-started to save resources.'`,
-			`echo '[cicy] Send a message from the UI or run cicy_start_opencode to launch it.'`,
+			`opencode`,
 		)
+		return lines
+	case "kiro-cli":
+		home, _ := os.UserHomeDir()
+		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("kiro-install-%s.log", shortID))
+		baseURL := anthropicRuntimeBaseURL(shortID)
+		lines := []string{
+			"mkdir -p ~/.cicy",
+			ensureAgentCommandLine("kiro-cli", "Kiro CLI", kiroCliInstallCmd(), installLog),
+			fmt.Sprintf("export ANTHROPIC_BASE_URL=%s", tmuxShellQuote(baseURL)),
+			"export ANTHROPIC_API_KEY='cicy-local-gateway'",
+			`if kiro-cli whoami 2>/dev/null | grep -q "^Not logged in"; then
+  while true; do
+    echo ''
+    echo '[cicy] Kiro CLI 尚未登录，请选择账号类型：'
+    echo '  1. 免费版 (Builder ID / Google / Github)'
+    echo '  2. 专业版 (Identity Center)'
+    echo '  0. 跳过登录'
+    read -r -p '请选择 [0/1/2]: ' kiro_choice
+    case "$kiro_choice" in
+      1) kiro-cli login --license free --use-device-flow && break ;;
+      2) kiro-cli login --license pro --use-device-flow && break ;;
+      0) echo '[cicy] 已跳过登录。手动登录: source boot.sh'; break ;;
+      *) echo '[cicy] 无效选择，请重新输入' ;;
+    esac
+    echo '[cicy] 登录失败或已取消，可重新选择'
+  done
+fi`,
+			"kiro-cli chat",
+		}
+		return lines
+	case "copilot":
+		home, _ := os.UserHomeDir()
+		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("copilot-install-%s.log", shortID))
+		lines := []string{
+			"mkdir -p ~/.cicy ~/.copilot",
+			ensureAgentCommandLine("copilot", "GitHub Copilot", copilotInstallCmd(), installLog),
+			`node -e 'const fs=require("fs"),f=process.env.HOME+"/.copilot/config.json";let c={};try{c=JSON.parse(fs.readFileSync(f))}catch(_){}c.trustedFolders=c.trustedFolders||[];const w=process.env.WORKSPACE||".";if(!c.trustedFolders.includes(w))c.trustedFolders.push(w);fs.writeFileSync(f,JSON.stringify(c,null,2))'`,
+			"copilot --yolo",
+		}
+		return lines
+	case "cicy-wechat":
+		home, _ := os.UserHomeDir()
+		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("wechat-install-%s.log", shortID))
+		lines := []string{
+			"mkdir -p ~/.cicy",
+			ensureAgentCommandLine("cicy-wechat", "WeChat", cicyWechatInstallCmd(), installLog),
+			`export DATA_DIR="$WORKSPACE/.cicy-wechat"`,
+			"cicy-wechat",
+		}
 		return lines
 	case "hermes":
 		home, _ := os.UserHomeDir()
@@ -2119,7 +2073,7 @@ func isAgentInputReady(agentType, out string) bool {
 	switch normalizeAgentType(agentType) {
 	case "claude":
 		return isClaudeInputReady(out)
-	case "cicy":
+	case "cicy-claude":
 		return isClaudeInputReady(out)
 	case "codex":
 		return isCodexInputReady(out)
@@ -2456,7 +2410,7 @@ func shouldConfirmPromptBeforeEnter(paneID, agentType string) bool {
 		return false
 	}
 	switch normalizeAgentType(agentType) {
-	case "codex", "claude", "cicy", "openclaw":
+	case "codex", "claude", "cicy-claude", "openclaw":
 		return true
 	default:
 		return false
@@ -2725,7 +2679,7 @@ func promptSubmitConfirmed(after, text, agentType string) bool {
 		return codexSubmitConfirmed(after, text)
 	case "claude":
 		return claudeSubmitConfirmed(after, text)
-	case "cicy":
+	case "cicy-claude":
 		return claudeSubmitConfirmed(after, text)
 	case "openclaw":
 		return openClawSubmitConfirmed(after, text)
@@ -3001,14 +2955,36 @@ func initPaneEnv(opts paneEnvOpts) {
 	// tmux panes inherit environment from the tmux server, not from the current
 	// cicy-code process. Sync runtime auth/config into the target session before
 	// sourcing the init script so agent boot code can see current values.
-	sessionEnv := map[string]string{
-		"CICY_API_KEY":                strings.TrimSpace(aiCfg.APIKey),
-		"CICY_API_URL":                strings.TrimSpace(aiCfg.APIURL),
-		"CICY_ANTHROPIC_URL":          strings.TrimSpace(aiCfg.AnthropicURL),
-		"CICY_DEFAULT_CLAUDE_MODEL":   strings.TrimSpace(aiCfg.DefaultClaudeModel),
-		"CICY_DEFAULT_OPENCODE_MODEL": strings.TrimSpace(aiCfg.DefaultOpencodeModel),
-		"CICY_CODEX_MODEL":            strings.TrimSpace(aiCfg.CodexModel),
-		"CICY_OPENCLAW_MODEL":         strings.TrimSpace(aiCfg.OpenClawModel),
+	// Per-agent-type env: only set what each agent actually needs.
+	agentNorm := normalizeAgentType(opts.agentType)
+	sessionEnv := map[string]string{}
+	switch agentNorm {
+	case "openclaw":
+		sessionEnv["CICY_API_KEY"] = strings.TrimSpace(aiCfg.APIKey)
+		sessionEnv["CICY_API_URL"] = strings.TrimSpace(aiCfg.APIURL)
+		sessionEnv["CICY_ANTHROPIC_URL"] = strings.TrimSpace(aiCfg.AnthropicURL)
+		sessionEnv["CICY_OPENCLAW_MODEL"] = strings.TrimSpace(aiCfg.OpenClawModel)
+	case "claude":
+		// claude uses ANTHROPIC_BASE_URL and settings.json directly in boot lines
+	case "opencode":
+		sessionEnv["CICY_API_KEY"] = strings.TrimSpace(aiCfg.APIKey)
+		sessionEnv["CICY_API_URL"] = strings.TrimSpace(aiCfg.APIURL)
+		sessionEnv["CICY_DEFAULT_OPENCODE_MODEL"] = strings.TrimSpace(aiCfg.DefaultOpencodeModel)
+	case "codex":
+		// codex uses -c flags directly, no env needed
+	case "kiro-cli":
+		// kiro-cli uses ANTHROPIC_BASE_URL directly in boot lines
+	case "copilot":
+		// copilot uses GitHub auth, no gateway env needed
+	case "cicy-wechat":
+		// cicy-wechat handles its own auth
+	case "hermes":
+		sessionEnv["CICY_API_KEY"] = strings.TrimSpace(aiCfg.APIKey)
+		sessionEnv["CICY_API_URL"] = strings.TrimSpace(aiCfg.APIURL)
+		sessionEnv["CICY_ANTHROPIC_URL"] = strings.TrimSpace(aiCfg.AnthropicURL)
+	default:
+		sessionEnv["CICY_API_KEY"] = strings.TrimSpace(aiCfg.APIKey)
+		sessionEnv["CICY_API_URL"] = strings.TrimSpace(aiCfg.APIURL)
 	}
 	for key, value := range sessionEnv {
 		if value == "" {
@@ -3025,23 +3001,20 @@ func initPaneEnv(opts paneEnvOpts) {
 						`case " ${NODE_OPTIONS:-} " in *" --max-old-space-size="*) ;; *) export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=3072" ;; esac`,
 		fmt.Sprintf("export X_AGENT_ID=%s", tmuxShellQuote(pid)),
 		fmt.Sprintf("export X_AGENT_SHORT_ID=%s", tmuxShellQuote(shortID)),
-		fmt.Sprintf("export CICY_API_KEY=%s", tmuxShellQuote(strings.TrimSpace(aiCfg.APIKey))),
-		fmt.Sprintf("export CICY_API_URL=%s", tmuxShellQuote(strings.TrimSpace(aiCfg.APIURL))),
-		fmt.Sprintf("export CICY_ANTHROPIC_URL=%s", tmuxShellQuote(strings.TrimSpace(aiCfg.AnthropicURL))),
-		fmt.Sprintf("export CICY_DEFAULT_CLAUDE_MODEL=%s", tmuxShellQuote(strings.TrimSpace(aiCfg.DefaultClaudeModel))),
-		fmt.Sprintf("export CICY_DEFAULT_OPENCODE_MODEL=%s", tmuxShellQuote(strings.TrimSpace(aiCfg.DefaultOpencodeModel))),
-		fmt.Sprintf("export CICY_CODEX_MODEL=%s", tmuxShellQuote(strings.TrimSpace(aiCfg.CodexModel))),
-		fmt.Sprintf("export CICY_OPENCLAW_MODEL=%s", tmuxShellQuote(strings.TrimSpace(aiCfg.OpenClawModel))),
-		fmt.Sprintf("export CICY_OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
-		fmt.Sprintf("export CICY_ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
-		//fmt.Sprintf("export HTTP_PROXY=%s", tmuxShellQuote(proxyURL)),
-		// "export HTTPS_PROXY=\"$HTTP_PROXY\"",
-		// "export ALL_PROXY=\"$HTTP_PROXY\"",
-		// "export http_proxy=\"$HTTP_PROXY\"",
-		// "export https_proxy=\"$HTTP_PROXY\"",
-		// "export all_proxy=\"$HTTP_PROXY\"",
-		// "export NO_PROXY='localhost,127.0.0.1'",
-		// "export no_proxy=\"$NO_PROXY\"",
+	}
+	for key, value := range sessionEnv {
+		if value != "" {
+			lines = append(lines, fmt.Sprintf("export %s=%s", key, tmuxShellQuote(value)))
+		}
+	}
+	switch agentNorm {
+	case "codex", "claude", "kiro-cli", "copilot", "cicy-wechat":
+		// boot lines handle gateway URLs directly
+	default:
+		lines = append(lines,
+			fmt.Sprintf("export CICY_OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
+			fmt.Sprintf("export CICY_ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
+		)
 	}
 
 	if opts.workspace != "" {
@@ -3102,8 +3075,8 @@ func initPaneEnv(opts paneEnvOpts) {
 		log.Printf("[init] shell not confirmed, continue anyway")
 	}
 
-	runTmux("send-keys", "-t", pid, fmt.Sprintf("source %s", tmuxShellQuote(scriptPath)), "Enter")
-	if normalizeAgentType(opts.agentType) == "claude" || normalizeAgentType(opts.agentType) == "cicy" {
+	runTmux("send-keys", "-t", pid, "source boot.sh", "Enter")
+	if normalizeAgentType(opts.agentType) == "claude" || normalizeAgentType(opts.agentType) == "cicy-claude" {
 		autoConfirmClaudeStartup(pid, opts.allowAllActions)
 	} else if normalizeAgentType(opts.agentType) == "codex" {
 		autoConfirmCodexTrust(pid)

@@ -117,7 +117,6 @@ html {
 body {
   margin: 8px !important;
   padding-top: 28px !important;
-  padding-bottom: 122px !important;
   padding-left: 8px !important;
 }
 .terminal {
@@ -412,16 +411,35 @@ body {
 }
 #fixed-top-action {
   position: fixed;
-  top: -2px;
-  right: 0;
+  top: 0;
+  right: 4px;
   z-index: 9999;
   display: flex;
   flex-direction: row;
   align-items: center;
-  overflow: visible;
+  height: 28px;
+  gap: 2px;
   font-family: var(--cp-mono-font);
 }
-#cp-win-tabs {
+.fta-sep {
+  width: 1px;
+  height: 14px;
+  background: rgba(255,255,255,0.1);
+  margin: 0 4px;
+}
+.fta-btn {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: rgba(255,255,255,0.4);
+  font-size: 12px;
+  padding: 3px 6px;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: var(--cp-mono-font);
+  line-height: 1;
+}
+.fta-btn:hover { color: rgba(255,255,255,0.9); background: rgba(255,255,255,0.08); }#cp-win-tabs {
   display: flex;
   align-items: center;
   height: 100%;
@@ -470,18 +488,7 @@ body {
 }
 .cp-wtab:hover .cp-wdel { display: inline-flex; }
 .cp-wtab .cp-wdel:hover { background: rgba(239,68,68,0.8); color: #fff; }
-.fta-btn {
-  background: none;
-  border: none;
-  color: rgba(255,255,255,0.3);
-  font-size: 14px;
-  padding: 6px 8px;
-  width: 100%;
-  cursor: pointer;
-  transition: color .1s;
-  font-family: var(--cp-mono-font);
-}
-.fta-btn:hover { color: rgba(255,255,255,0.7); }
+.fta-btn:hover { color: rgba(255,255,255,0.9); background: rgba(255,255,255,0.08); }
 #cp-win-restart {
   width: 30px;
   min-width: 30px;
@@ -545,7 +552,7 @@ body {
 }
 #cp-model:hover { background: rgba(255,255,255,0.1); }
 .cp-win-wrap, .cp-bar-r { position: relative; }
-#cp-body { padding: 0 8px 8px; height: 64px; display: flex; position: relative; min-height: 0; box-sizing: border-box; }
+#cp-body { padding: 0 8px 8px; height: 64px; display: none; position: relative; min-height: 0; box-sizing: border-box; }
 #cp-input {
   width: 100%;
   background: rgba(255,255,255,0.03);
@@ -847,28 +854,8 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var loading = createLoadingOverlay();
     var hadOpen = false;
 
+    // panel removed - dummy element for legacy references
     var panel = document.createElement("div");
-    panel.id = "cp";
-    panel.innerHTML =
-        '<div id="cp-bar">' +
-            '<div class="cp-bar-l">' +
-                '<button id="cp-sigint" class="cp-chip cp-chip-dim cp-tooltip-host cp-tooltip-left" data-tooltip="发送 Ctrl+C Event">^C</button>' +
-                '<button id="cp-esc-key" class="cp-chip cp-chip-dim cp-tooltip-host cp-tooltip-left" data-tooltip="发送 Esc Event">Esc</button>' +
-                '<button id="cp-backspace-key" class="cp-chip cp-chip-dim cp-tooltip-host cp-tooltip-left" data-tooltip="发送 Backspace Event">⌫</button>' +
-                '<button id="cp-up-key" class="cp-chip cp-chip-dim cp-tooltip-host cp-tooltip-left" data-tooltip="发送 Up Event">↑</button>' +
-                '<button id="cp-down-key" class="cp-chip cp-chip-dim cp-tooltip-host cp-tooltip-left" data-tooltip="发送 Down Event">↓</button>' +
-                '<button id="cp-enter-key" class="cp-chip cp-chip-dim cp-tooltip-host cp-tooltip-left" data-tooltip="发送 Enter Event">↵</button>' +
-            "</div>" +
-            '<div class="cp-bar-r">' +
-                '<button id="cp-enter" class="cp-chip cp-chip-dim cp-tooltip-host cp-tooltip-right" data-tooltip="切换发送Prompt方式:Enter/Shit+Enter"></button>' +
-                '<button id="cp-collapse" style="display:none" class="cp-chip cp-chip-dim" title="Collapse">−</button>' +
-            "</div>" +
-        "</div>" +
-        '<div id="cp-body">' +
-            '<textarea id="cp-input" rows="2" placeholder="请输入关键词..." spellcheck="false"></textarea>' +
-            '<button id="cp-send" title="Send"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg></button>' +
-        "</div>" +
-        '<div id="cp-grip"></div>';
 
     var winFloat = document.createElement("div");
     winFloat.id = "cp-win-float";
@@ -879,6 +866,15 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     fixedTop.innerHTML =
         '<button id="cp-win-add" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="新加tmux window">+</button>' +
         '<button id="cp-win-restart" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="重启tmux">↻</button>' +
+        '<span class="fta-sep"></span>' +
+        '<button id="cp-sigint" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="Ctrl+C">^C</button>' +
+        '<button id="cp-esc-key" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="Esc">⎋</button>' +
+        '<button id="cp-backspace-key" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="Backspace">⌫</button>' +
+        '<button id="cp-up-key" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="Up">↑</button>' +
+        '<button id="cp-down-key" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="Down">↓</button>' +
+        '<button id="cp-enter-key" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="Enter">↵</button>' +
+        '<span class="fta-sep"></span>' +
+        '<button id="cp-reload" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="刷新页面" onclick="location.reload()">⟳</button>' +
         '<button id="cp-more" class="fta-btn" title="More" style="display:none">⋯</button>' +
         '<div id="cp-more-menu" class="cp-drop">' +
             '<select id="cp-model" title="Model">' +
@@ -897,22 +893,21 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
 
     document.body.appendChild(winFloat);
     document.body.appendChild(fixedTop);
-    document.body.appendChild(panel);
 
-    var input = document.getElementById("cp-input") as HTMLTextAreaElement;
-    var sendBtn = document.getElementById("cp-send") as HTMLButtonElement;
+    var input = (document.getElementById("cp-input") || document.createElement("textarea")) as HTMLTextAreaElement;
+    var sendBtn = (document.getElementById("cp-send") || document.createElement("button")) as HTMLButtonElement;
     var sigintBtn = document.getElementById("cp-sigint") as HTMLButtonElement;
     var escKeyBtn = document.getElementById("cp-esc-key") as HTMLButtonElement;
     var backspaceKeyBtn = document.getElementById("cp-backspace-key") as HTMLButtonElement;
     var upKeyBtn = document.getElementById("cp-up-key") as HTMLButtonElement;
     var downKeyBtn = document.getElementById("cp-down-key") as HTMLButtonElement;
     var enterKeyBtn = document.getElementById("cp-enter-key") as HTMLButtonElement;
-    var enterBtn = document.getElementById("cp-enter") as HTMLButtonElement;
+    var enterBtn = (document.getElementById("cp-enter") || document.createElement("button")) as HTMLButtonElement;
     var modelSel = document.getElementById("cp-model") as HTMLSelectElement;
     var moreBtn = document.getElementById("cp-more") as HTMLButtonElement;
     var moreMenu = document.getElementById("cp-more-menu") as HTMLElement;
     var winTabs = document.getElementById("cp-win-tabs") as HTMLElement;
-    var collapseBtn = document.getElementById("cp-collapse") as HTMLButtonElement;
+    var collapseBtn = (document.getElementById("cp-collapse") || document.createElement("button")) as HTMLButtonElement;
     var restartBtn = document.getElementById("cp-win-restart") as HTMLButtonElement;
     var addWindowBtn = document.getElementById("cp-win-add") as HTMLButtonElement;
 

@@ -80,7 +80,6 @@ export class Xterm {
             allowTransparency: true,
             scrollback: 20000,
             fontFamily: "var(--cp-mono-font)",
-            disableStdin: true,
             theme: {
                 background: "#000000",
             },
@@ -178,6 +177,17 @@ export class Xterm {
         });
 
         this.term.open(elem);
+
+        // IME composing state
+        var isComposing = false;
+        const textarea = this.term.textarea;
+        if (textarea) {
+            textarea.addEventListener('compositionstart', () => { isComposing = true; });
+            textarea.addEventListener('compositionend', () => { isComposing = false; });
+        }
+        // Expose for onInput
+        (this as any)._isComposing = () => isComposing;
+
         this.fitSoon();
         setTimeout(() => this.fitSoon(), 50);
         setTimeout(() => this.fitSoon(), 200);
@@ -390,11 +400,30 @@ export class Xterm {
     setPreferences(_value: object): void {
     }
 
-    onInput(_callback: (input: string) => void): void {
+    onInput(callback: (input: string) => void): void {
         if (this.inputDisposable) {
             this.inputDisposable.dispose();
             this.inputDisposable = null;
         }
+        var buffer = '';
+        var timer: number | null = null;
+        const flush = () => {
+            if (buffer) { callback(buffer); buffer = ''; }
+            if (timer) { clearTimeout(timer); timer = null; }
+        };
+        const isComposing = (this as any)._isComposing as () => boolean;
+        this.inputDisposable = this.term.onData((data: string) => {
+            if (isComposing()) return;
+            // 控制字符立即发送
+            if (data.length === 1 && data.charCodeAt(0) < 32 || data.charCodeAt(0) === 127 || data[0] === '\x1b') {
+                flush();
+                callback(data);
+                return;
+            }
+            buffer += data;
+            if (timer) clearTimeout(timer);
+            timer = window.setTimeout(flush, 50);
+        });
     }
 
     onResize(callback: (colmuns: number, rows: number) => void): void {
