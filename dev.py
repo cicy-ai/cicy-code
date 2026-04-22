@@ -103,30 +103,13 @@ def get_cicy_api_key():
     return get_ai_env_defaults().get("CICY_API_KEY", "")
 
 def build_minimal_runtime_global_json():
-    selected, config = get_ai_provider_config()
+    source = load_global_json()
     data = {}
     token = get_local_api_token()
     if token:
         data["api_token"] = token
-    provider_config = {}
-    for src_key, dst_key in (
-        ("apiKey", "apiKey"),
-        ("apiUrl", "apiUrl"),
-        ("anthropicUrl", "anthropicUrl"),
-        ("defaultOpencodeModel", "defaultOpencodeModel"),
-        ("defaultClaudeModel", "defaultClaudeModel"),
-        ("codexModel", "codexModel"),
-        ("openclawModel", "openclawModel"),
-    ):
-        value = str(config.get(src_key, "") or "").strip()
-        if value:
-            provider_config[dst_key] = value
-    data["ai"] = {
-        "currentProvider": selected or "cicyAi",
-        "provider": {
-            selected or "cicyAi": provider_config,
-        },
-    }
+    if "ai" in source and isinstance(source["ai"], dict):
+        data["ai"] = source["ai"]
     return data
 
 def build_dev_runtime_home(container_name):
@@ -710,19 +693,35 @@ def run_docker_build(version_override=""):
     print(f"[dev] Next deploy: use ~/global.json images.runtime")
     sys.exit(0)
 
-def run_docker(ports):
+def run_docker(ports, container_name="cicy-code-dev", agents=""):
     run_version_sync()
+
+    runtime_image = get_current_runtime_image()
+    if not runtime_image:
+        print("[dev] ERROR: No runtime image configured. Set images.runtime in ~/global.json")
+        sys.exit(1)
+    print(f"[dev] Runtime image: {runtime_image}")
+
     print("[dev] Building and running Docker...")
+    os.environ.pop("SKIP_NPM", None)
     ensure_local_base_image_available()
-    result = subprocess.run(["./build.sh", "docker", "latest"], cwd=ROOT_DIR)
+    # Extract tag from runtime_image for build
+    build_tag = runtime_image.rsplit(":", 1)[-1] if ":" in runtime_image else "dev"
+    result = subprocess.run(["./build.sh", "docker", build_tag], cwd=ROOT_DIR)
     if result.returncode != 0:
         print("[dev] docker build failed")
         sys.exit(1)
 
-    container_name = "cicy-code-dev"
+    # Tag local build as the configured runtime image
+    subprocess.run(["docker", "tag", f"cicy-code:{build_tag}", runtime_image], capture_output=True)
     subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
     dev_home_dir, dev_global_json_path = build_dev_runtime_home(container_name)
-    seed_runtime_home_from_image("cicy-code:latest", dev_home_dir)
+
+    # Pull if not available locally
+    result = subprocess.run(["docker", "image", "inspect", runtime_image], capture_output=True)
+    if result.returncode != 0:
+        print(f"[dev] Pulling {runtime_image}...")
+        subprocess.run(["docker", "pull", runtime_image])
 
     env_vars = []
     passthrough_env_keys = [
@@ -746,24 +745,27 @@ def run_docker(ports):
     trial_expires_at = str(int(time.time()) + trial_ttl_seconds)
     env_vars.extend(["-e", f"CLOUD_TRIAL_RUNTIME_EXPIRES_AT={trial_expires_at}"])
     env_vars.extend(["-e", "CICY_IS_PRO=true"])
+    local_token = get_local_api_token()
+    if local_token:
+        env_vars.extend(["-e", f"CICY_API_TOKEN={local_token}"])
+    agents_flag = str(agents or "").strip() or "all"
     run_cmd = [
         "docker",
         "run",
         "-d",
         "--name",
         container_name,
-        "-v",
-        f"{dev_home_dir}:/home/cicy",
     ] + env_vars + [
         "-p",
         f"{ports}:8008",
-        "cicy-code:latest",
+        runtime_image,
         "--public",
-        "--agents=all",
+        f"--agents={agents_flag}",
     ]
     print(f"[dev] docker run: {' '.join(run_cmd)}")
     docker_run_started_at = time.time()
     subprocess.run(run_cmd)
+    subprocess.run(["docker", "cp", dev_global_json_path, f"{container_name}:/home/cicy/global.json"], capture_output=True)
     print(f"[dev] Docker started on port {ports}")
 
     probe_url = f"http://localhost:{ports}/api/health"
@@ -790,6 +792,19 @@ def run_docker(ports):
 
     token = read_api_token_from_file(dev_global_json_path)
     if token:
+        # Verify token via /api/auth/verify
+        verify_url = f"http://localhost:{ports}/api/auth/verify"
+        try:
+            req = urllib.request.Request(verify_url, headers={"Authorization": f"Bearer {token}"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                verify_data = json.loads(resp.read())
+                if verify_data.get("valid"):
+                    print(f"[dev] Auth verified: {verify_data}")
+                else:
+                    print(f"[dev] Auth verify failed: {verify_data}")
+        except Exception as e:
+            print(f"[dev] Auth verify error: {e}")
+
         public_ip = detect_public_ip()
         public_base_url = f"http://{public_ip}:{ports}" if public_ip else ""
         local_base_url = f"http://localhost:{ports}"
@@ -911,11 +926,13 @@ def main():
     parser.add_argument("--cloudRun", "--cloudrun", dest="cloudRun", action="store_true", help="Deploy to Cloud Run using scripts/deploy-cloudrun.sh")
     parser.add_argument("--cloudRunList", "--cloudrun-list", dest="cloudRunList", action="store_true", help="List Cloud Run services for current project/region")
     parser.add_argument("--ttydAssets", "--ttyd-assets", dest="ttydAssets", action="store_true", help="Rebuild embedded ttyd/goTTY static assets via api/Makefile `make asset`")
+    parser.add_argument("--agents", default="", help="Comma-separated agents to start (default: all)")
     parser.add_argument("--port", type=int, default=8026, help="Base port for Docker (default: 8026)")
+    parser.add_argument("--name", default="cicy-code-dev", help="Docker container name (default: cicy-code-dev)")
     args = parser.parse_args()
 
     if args.docker:
-        run_docker(args.port)
+        run_docker(args.port, args.name, args.agents)
     if args.dockerVersion:
         print_docker_version()
     if args.bumpVersion:

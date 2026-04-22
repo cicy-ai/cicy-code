@@ -1195,17 +1195,24 @@ function normalizeAgentType(agentType?: string) {
       return 'openclaw';
     case 'codex':
     case 'openai':
+      return 'codex';
     case 'kiro-cli':
+    case 'kiro':
     case 'kiro-cli chat':
-    case 'gemini':
+      return 'kiro-cli';
     case 'copilot':
+    case 'github-copilot':
+    case 'ghcopilot':
+      return 'copilot';
+    case 'gemini':
       return 'codex';
     case 'claude':
     case 'claude code':
     case 'claude-code':
       return 'claude';
     case 'cicy':
-      return 'cicy';
+    case 'cicy-claude':
+      return 'cicy-claude';
     case 'opencode':
     case 'open code':
     case 'open-code':
@@ -1351,8 +1358,10 @@ function AgentListAvatar({ agentType, title }: { agentType?: string; title: stri
   const iconMap: Record<string, { label: string; src?: string; className?: string; textClassName?: string }> = {
     codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg') },
     claude: { label: 'Claude', src: assetUrl('/assets/logos/claude-symbol.svg') },
-    cicy: { label: 'CiCy', src: 'https://cicy-ai.com/logo.svg' },
+    'cicy-claude': { label: 'CiCy', src: 'https://cicy-ai.com/logo.svg' },
     opencode: { label: 'OpenCode', src: assetUrl('/assets/logos/opencode.svg'), className: 'h-7 w-7' },
+    'kiro-cli': { label: 'Kiro', src: assetUrl('/assets/logos/kiro.png') },
+    copilot: { label: 'Copilot', src: assetUrl('/assets/logos/copilot.svg') },
     hermes: { label: 'Hermes', textClassName: 'text-[15px] font-semibold tracking-[0.08em]' },
   };
   const icon = iconMap[normalizedAgentType];

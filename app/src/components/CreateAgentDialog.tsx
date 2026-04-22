@@ -22,7 +22,10 @@ const AGENT_TYPE_OPTIONS = [
   { value: 'openclaw', label: 'OpenClaw', icon: null },
   { value: 'codex', label: 'Codex', icon: assetUrl('/assets/logos/openai.svg') },
   { value: 'claude', label: 'Claude', icon: assetUrl('/assets/logos/claude-symbol.svg') },
-  { value: 'cicy', label: 'CiCy', icon: 'https://cicy-ai.com/logo.svg' },
+  { value: 'kiro-cli', label: 'Kiro CLI', icon: assetUrl('/assets/logos/kiro.png') },
+  { value: 'copilot', label: 'Copilot', icon: assetUrl('/assets/logos/copilot.svg') },
+  { value: 'opencode', label: 'OpenCode', icon: assetUrl('/assets/logos/opencode.svg') },
+  { value: 'cicy-claude', label: 'CiCy', icon: 'https://cicy-ai.com/logo.svg' },
   { value: 'hermes', label: 'Hermes', icon: null },
 ] as const;
 

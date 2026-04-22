@@ -50,7 +50,7 @@ export declare class Xterm {
     removeMessage(): void;
     setWindowTitle(title: string): void;
     setPreferences(_value: object): void;
-    onInput(_callback: (input: string) => void): void;
+    onInput(callback: (input: string) => void): void;
     onResize(callback: (colmuns: number, rows: number) => void): void;
     deactivate(): void;
     reset(): void;
