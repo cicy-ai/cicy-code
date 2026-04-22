@@ -112,12 +112,24 @@ func cicyWechatInstallCmd() string {
 	return npmGlobalInstallCmd("cicy-wechat@latest")
 }
 
+func cicyFeishuInstallCmd() string {
+	return npmGlobalInstallCmd("cicy-feishu@latest")
+}
+
 func packageInstallCmd(pkg string) string {
 	if runtime.GOOS == "darwin" {
 		return "brew install " + pkg
 	}
 	prefix := sudoPrefix()
 	return prefix + "apt-get update && " + prefix + "apt-get install -y " + pkg
+}
+
+func opensshInstallCmd() string {
+	if runtime.GOOS == "darwin" {
+		return "brew install openssh"
+	}
+	prefix := sudoPrefix()
+	return prefix + "apt-get update && " + prefix + "apt-get install -y openssh-client"
 }
 
 func nodeInstallCmd() string {
@@ -146,6 +158,7 @@ func baseTools() []Tool {
 	return []Tool{
 		{"curl", "curl", packageInstallCmd("curl"), true, false},
 		// {"unzip", "unzip", packageInstallCmd("unzip"), true, false},
+		{"ssh-keygen", "ssh-keygen", opensshInstallCmd(), true, false},
 		{"tmux", "tmux", packageInstallCmd("tmux"), true, false},
 		{"git", "git", packageInstallCmd("git"), true, false},
 		{"node", "node", nodeInstallCmd(), true, false},
@@ -294,6 +307,7 @@ var builtinAgents = []struct {
 	{"kiro-cli", "Kiro CLI"},
 	{"copilot", "GitHub Copilot"},
 	{"cicy-wechat", "WeChat"},
+	{"cicy-feishu", "Feishu"},
 	{"cicy-claude", "CiCy"},
 	{"opencode", "OpenCode"},
 }
@@ -600,6 +614,7 @@ func checkEnv() {
 		fmt.Printf("  %s %s\n", status, base[i].Name)
 	}
 	installMissing(base)
+	ensureSSHKeyPair()
 	ensureTmuxConf()
 	ensureCicyTmuxConf()
 
@@ -778,6 +793,145 @@ func ensureCicyTmuxConf() {
 		log.Fatalf("[startup] failed to write %s: %v", dst, writeErr)
 	}
 }
+
+func ensureSSHKeyPair() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("[startup] failed to resolve home dir for ssh key setup: %v", err)
+	}
+	sshDir := filepath.Join(home, ".ssh")
+	privateKey := filepath.Join(sshDir, "id_rsa")
+	publicKey := privateKey + ".pub"
+	authKeysPath := filepath.Join(sshDir, "authkeys")
+	authorizedKeysPath := filepath.Join(sshDir, "authorized_keys")
+	configPath := filepath.Join(sshDir, "config")
+
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		log.Fatalf("[startup] failed to create %s: %v", sshDir, err)
+	}
+	if err := os.Chmod(sshDir, 0700); err != nil {
+		log.Printf("[startup] failed to chmod %s to 0700: %v", sshDir, err)
+	}
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		log.Fatalf("[startup] ssh-keygen not found after base tool setup: %v", err)
+	}
+
+	if _, err := os.Stat(privateKey); err == nil {
+		if chmodErr := os.Chmod(privateKey, 0600); chmodErr != nil {
+			log.Printf("[startup] failed to chmod %s to 0600: %v", privateKey, chmodErr)
+		}
+		if _, pubErr := os.Stat(publicKey); os.IsNotExist(pubErr) {
+			cmd := exec.Command("ssh-keygen", "-y", "-f", privateKey)
+			out, genErr := cmd.Output()
+			if genErr != nil {
+				log.Fatalf("[startup] failed to regenerate %s from %s: %v", publicKey, privateKey, genErr)
+			}
+			if writeErr := os.WriteFile(publicKey, out, 0644); writeErr != nil {
+				log.Fatalf("[startup] failed to write %s: %v", publicKey, writeErr)
+			}
+			log.Printf("[startup] regenerated %s", publicKey)
+		}
+		if chmodErr := os.Chmod(publicKey, 0644); chmodErr != nil && !os.IsNotExist(chmodErr) {
+			log.Printf("[startup] failed to chmod %s to 0644: %v", publicKey, chmodErr)
+		}
+	} else if !os.IsNotExist(err) {
+		log.Fatalf("[startup] failed to inspect %s: %v", privateKey, err)
+	} else {
+		log.Printf("[startup] generating missing SSH keypair at %s", privateKey)
+		cmd := exec.Command("ssh-keygen", "-t", "rsa", "-b", "4096", "-N", "", "-f", privateKey, "-q")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			log.Fatalf("[startup] failed to generate %s: %v", privateKey, err)
+		}
+		if chmodErr := os.Chmod(privateKey, 0600); chmodErr != nil {
+			log.Printf("[startup] failed to chmod %s to 0600: %v", privateKey, chmodErr)
+		}
+		if chmodErr := os.Chmod(publicKey, 0644); chmodErr != nil {
+			log.Printf("[startup] failed to chmod %s to 0644: %v", publicKey, chmodErr)
+		}
+	}
+
+	pubKeyBytes, readErr := os.ReadFile(publicKey)
+	if readErr != nil {
+		log.Fatalf("[startup] failed to read %s: %v", publicKey, readErr)
+	}
+	pubKey := strings.TrimSpace(string(pubKeyBytes))
+	if pubKey == "" {
+		log.Fatalf("[startup] %s is empty", publicKey)
+	}
+
+	ensureSSHAuthKeysFile(authKeysPath, pubKey)
+	ensureSSHAuthKeysFile(authorizedKeysPath, pubKey)
+	ensureSSHConfigFile(configPath)
+}
+
+func ensureSSHAuthKeysFile(path string, pubKey string) {
+	current, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		log.Fatalf("[startup] failed to read %s: %v", path, err)
+	}
+	if err == nil {
+		for _, line := range strings.Split(string(current), "\n") {
+			if strings.TrimSpace(line) == pubKey {
+				if chmodErr := os.Chmod(path, 0600); chmodErr != nil {
+					log.Printf("[startup] failed to chmod %s to 0600: %v", path, chmodErr)
+				}
+				return
+			}
+		}
+	}
+
+	var content string
+	if len(current) > 0 {
+		content = string(current)
+		if !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		content += pubKey + "\n"
+	} else {
+		content = pubKey + "\n"
+	}
+	if writeErr := os.WriteFile(path, []byte(content), 0600); writeErr != nil {
+		log.Fatalf("[startup] failed to write %s: %v", path, writeErr)
+	}
+	if chmodErr := os.Chmod(path, 0600); chmodErr != nil {
+		log.Printf("[startup] failed to chmod %s to 0600: %v", path, chmodErr)
+	}
+	log.Printf("[startup] ensured %s contains the local public key", path)
+}
+
+func ensureSSHConfigFile(path string) {
+	const managedBlock = "# cicy-code managed ssh defaults\nHost *\n  IdentityFile ~/.ssh/id_rsa\n  IdentitiesOnly yes\n"
+
+	current, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		log.Fatalf("[startup] failed to read %s: %v", path, err)
+	}
+	if err == nil && strings.Contains(string(current), managedBlock) {
+		if chmodErr := os.Chmod(path, 0600); chmodErr != nil {
+			log.Printf("[startup] failed to chmod %s to 0600: %v", path, chmodErr)
+		}
+		return
+	}
+
+	content := managedBlock
+	if len(current) > 0 {
+		content = string(current)
+		if !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		content += "\n" + managedBlock
+	}
+	if writeErr := os.WriteFile(path, []byte(content), 0600); writeErr != nil {
+		log.Fatalf("[startup] failed to write %s: %v", path, writeErr)
+	}
+	if chmodErr := os.Chmod(path, 0600); chmodErr != nil {
+		log.Printf("[startup] failed to chmod %s to 0600: %v", path, chmodErr)
+	}
+	log.Printf("[startup] ensured %s exists", path)
+}
+
 func ensureCodeServer() {
 	go ensureCodeServerAsync()
 }
