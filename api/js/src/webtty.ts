@@ -185,8 +185,12 @@ export class WebTTY {
         const setup = () => {
             connection.onOpen(() => {
                 this.connection = connection;
+                const isReconnect = this.reconnectAttempts > 0;
                 this.reconnectAttempts = 0;
                 this.term.hideReconnecting();
+                if (isReconnect) {
+                    this.term.reset();
+                }
                 this.emitConnectionState(true);
                 
                 const termInfo = this.term.info();
