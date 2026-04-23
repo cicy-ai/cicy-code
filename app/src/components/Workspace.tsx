@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useApp } from '../contexts/AppContext';
 import { createPortal } from 'react-dom';
 import {
   Terminal, MessageSquare, Home, Folder, FolderOpen, X, Settings, Brain, Search,
@@ -151,6 +152,12 @@ type LeftPanelView = 'team' | 'skills' | 'agents' | null;
 type WorkspaceCliContentTab = InspectorTab | 'history' | 'files';
 
 export default function Workspace({ agentId, onSelectAgent }: Props) {
+  const {
+    setChatWsState,
+    setChatWsSender,
+    sendChatWsMessage,
+    broadcastChatWsMessage,
+  } = useApp();
   const { token, hasPermission } = useAuth();
   const { confirm } = useDialog();
   const paneId = agentId || 'w-10001';
@@ -210,6 +217,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [chatSuggestionText, setChatSuggestionText] = useState('');
   const [chatSuggestionPending, setChatSuggestionPending] = useState(false);
   const [chatSuggestionSending, setChatSuggestionSending] = useState(false);
+  const chatWsRef = useRef<WebSocket | null>(null);
+  const chatWsReconnectTimerRef = useRef<number | null>(null);
+
   const [trialExpiresAt, setTrialExpiresAt] = useState<string | null>(null);
   const [trialExpiresAtEpoch, setTrialExpiresAtEpoch] = useState<number | null>(null);
   const [isPro, setIsPro] = useState<boolean | null>(null);
@@ -312,44 +322,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       window.dispatchEvent(new CustomEvent('refresh-panes'));
     } catch {}
   }, [token]);
-  const refreshPoll = useCallback(async () => {
-    const t0 = performance.now();
-    try {
-      const { data } = await apiService.poll(paneId, { timeout: 5000 });
-      const latency = Math.round(performance.now() - t0);
-      setNetLatency(latency);
-      window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency } }));
-      setBoundAgents(Array.isArray(data?.agents) ? data.agents : []);
-      setPollStatuses(data?.statuses && typeof data.statuses === 'object' ? data.statuses : {});
-      const st = data?.statuses?.[fullPaneId] || data?.statuses?.[paneId];
-      if (st?.status) setStatus(st.status);
-      if (st?.title) setAgentDetail((prev: any) => prev ? { ...prev, title: st.title } : { title: st.title });
-      if (st?.contextUsage != null) setContextUsage(st.contextUsage);
-      const nextTrialExpiresAt = typeof data?.trial_expires_at === 'string' && data.trial_expires_at.trim()
-        ? data.trial_expires_at.trim()
-        : null;
-      const nextTrialEpochRaw = data?.trial_expires_at_epoch;
-      const nextTrialEpoch = typeof nextTrialEpochRaw === 'number'
-        ? nextTrialEpochRaw
-        : Number.parseInt(String(nextTrialEpochRaw ?? ''), 10);
-      setTrialExpiresAt(nextTrialExpiresAt);
-      setTrialExpiresAtEpoch(Number.isFinite(nextTrialEpoch) && nextTrialEpoch > 0 ? nextTrialEpoch : null);
-      setIsPro(parseIsPro(data?.is_pro));
-      setMembership({
-        kind: typeof data?.membership_kind === 'string' && data.membership_kind.trim() ? data.membership_kind.trim() : null,
-        tag: typeof data?.membership_tag === 'string' && data.membership_tag.trim() ? data.membership_tag.trim() : null,
-        expiresAt: typeof data?.membership_expires_at === 'string' && data.membership_expires_at.trim() ? data.membership_expires_at.trim() : null,
-        showRenew: parseEnvBool(data?.show_renew),
-        showUpgrade: parseEnvBool(data?.show_upgrade),
-        renewUrl: typeof data?.renew_url === 'string' && data.renew_url.trim() ? data.renew_url.trim() : null,
-        upgradeUrl: typeof data?.upgrade_url === 'string' && data.upgrade_url.trim() ? data.upgrade_url.trim() : null,
-        syncedAt: typeof data?.membership_synced_at === 'string' && data.membership_synced_at.trim() ? data.membership_synced_at.trim() : new Date().toISOString(),
-      });
-    } catch {
-      setNetLatency(null);
-      window.dispatchEvent(new CustomEvent('network-latency', { detail: { latency: null } }));
-    }
-  }, [fullPaneId, paneId]);
   useEffect(() => { void refreshPanes(); }, [refreshPanes, paneId]);
   useEffect(() => { 
     apiService.getPane(fullPaneId).then(({ data }) => { 
@@ -368,65 +340,24 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }
   }, [paneId]);
   useEffect(() => {
-    let timer: number | null = null;
-    let cancelled = false;
-    let inFlight = false;
-    let rerunRequested = false;
-
-    const clearTimer = () => {
-      if (timer !== null) {
-        window.clearTimeout(timer);
-        timer = null;
-      }
+    // 5 秒 WS 轮询兜底 + 页面可见时立即请求
+    const sendPollRequest = () => {
+      console.log('[poll_request] sending via WS, readyState:', chatWsRef.current?.readyState);
+      try { chatWsRef.current?.send(JSON.stringify({ type: 'poll_request' })); } catch (e) { console.warn('[poll_request] send failed:', e); } 
     };
-
-    const schedule = (delay = config.pollInterval) => {
-      if (cancelled) return;
-      clearTimer();
-      timer = window.setTimeout(() => {
-        void runPoll();
-      }, delay);
-    };
-
-    const runPoll = async () => {
-      if (cancelled) return;
-      if (inFlight) {
-        rerunRequested = true;
-        return;
-      }
-      inFlight = true;
-      try {
-        await refreshPoll();
-      } finally {
-        inFlight = false;
-        if (cancelled) return;
-        if (rerunRequested) {
-          rerunRequested = false;
-          schedule(0);
-          return;
-        }
-        schedule();
-      }
-    };
-
-    const onRefresh = () => {
-      rerunRequested = true;
-      if (!inFlight) schedule(0);
-    };
+    const onRefresh = () => sendPollRequest();
     const onVisible = () => {
-      if (document.visibilityState === 'visible') onRefresh();
+      if (document.visibilityState === 'visible') sendPollRequest();
     };
-
-    onRefresh();
+    const timer = window.setInterval(sendPollRequest, 5000);
     window.addEventListener('refresh-panes', onRefresh);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
-      cancelled = true;
-      clearTimer();
+      window.clearInterval(timer);
       window.removeEventListener('refresh-panes', onRefresh);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [refreshPoll]);
+  }, []);
 
   // Toast listener
   useEffect(() => {
@@ -537,14 +468,69 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }, [canvasPaneIds, activeCliPaneId, paneId, activeTeamPaneId]);
 
   useEffect(() => {
-    if (!token || !activeCliPaneId) {
+    const send = (payload: unknown) => {
+      const ws = chatWsRef.current;
+      if (ws?.readyState !== WebSocket.OPEN) return false;
+      ws.send(JSON.stringify(payload));
+      return true;
+    };
+    setChatWsSender(send);
+    return () => {
+      setChatWsSender(() => false);
+    };
+  }, [setChatWsSender]);
+
+  useEffect(() => {
+    const visionHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      sendChatWsMessage({ type: 'gemini_vision_result', data: detail });
+    };
+    const askHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      sendChatWsMessage({ type: 'gemini_ask_result', data: detail });
+    };
+    const pongHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      sendChatWsMessage({ type: 'pong', data: detail });
+    };
+    const ipcPongHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      sendChatWsMessage({ type: 'ipc_pong', data: detail });
+    };
+    window.addEventListener('gemini-vision-result', visionHandler as EventListener);
+    window.addEventListener('gemini-ask-result', askHandler as EventListener);
+    window.addEventListener('agent-pong', pongHandler as EventListener);
+    window.addEventListener('ipc-pong', ipcPongHandler as EventListener);
+    return () => {
+      window.removeEventListener('gemini-vision-result', visionHandler as EventListener);
+      window.removeEventListener('gemini-ask-result', askHandler as EventListener);
+      window.removeEventListener('agent-pong', pongHandler as EventListener);
+      window.removeEventListener('ipc-pong', ipcPongHandler as EventListener);
+    };
+  }, [sendChatWsMessage]);
+
+  useEffect(() => {
+    if (!token || !paneId) {
+      if (chatWsReconnectTimerRef.current !== null) {
+        window.clearTimeout(chatWsReconnectTimerRef.current);
+        chatWsReconnectTimerRef.current = null;
+      }
+      chatWsRef.current?.close();
+      chatWsRef.current = null;
       setChatWsConnected(false);
       setChatWsClientId(null);
       setChatWsLiveStatus('idle');
       setChatWsLiveText('');
+      setChatWsState({
+        activeChatPaneId: null,
+        chatWsConnected: false,
+        chatWsClientId: null,
+        chatWsLiveStatus: 'idle',
+        chatWsLiveText: '',
+      });
       return;
     }
-    const agentId = activeCliPaneId.replace(/:.*$/, '');
+    const agentId = paneId.replace(/:.*$/, '');
     const clientId = (() => {
       const key = `cicy_chat_client_id:${paneId}`;
       try {
@@ -560,23 +546,32 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const proto = config.apiBase.startsWith('https') ? 'wss' : (window.location.protocol === 'https:' ? 'wss' : 'ws');
     const base = config.apiBase.replace(/^https?/, proto);
     const isElectron = typeof (window as any).electronRPC === 'function' ? '1' : '0';
-    let ws: WebSocket | null = null;
     let dead = false;
-    let reconnectTimer: number | null = null;
-
-    const wsSend = (payload: unknown) => {
-      if (ws?.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify(payload));
-    };
 
     const connect = () => {
       if (dead) return;
-      ws = new WebSocket(`${base}/api/chat/ws?agent_id=${encodeURIComponent(agentId)}&token=${encodeURIComponent(token)}&electron=${isElectron}&client_id=${encodeURIComponent(clientId)}`);
+      if (chatWsReconnectTimerRef.current !== null) {
+        window.clearTimeout(chatWsReconnectTimerRef.current);
+        chatWsReconnectTimerRef.current = null;
+      }
+      chatWsRef.current?.close();
+      const ws = new WebSocket(`${base}/api/chat/ws?agent_id=${encodeURIComponent(agentId)}&token=${encodeURIComponent(token)}&electron=${isElectron}&client_id=${encodeURIComponent(clientId)}`);
+      chatWsRef.current = ws;
       ws.onopen = () => {
+        if (dead || chatWsRef.current !== ws) return;
         setChatWsConnected(true);
         setChatWsClientId(clientId);
+        setChatWsState({
+          activeChatPaneId: paneId,
+          chatWsConnected: true,
+          chatWsClientId: clientId,
+        });
+        // 连接建立后立即请求 poll 数据
+        console.log('[poll_request] WS onopen, sending initial poll_request');
+        try { ws.send(JSON.stringify({ type: 'poll_request' })); } catch (e) { console.warn('[poll_request] onopen send failed:', e); }
       };
       ws.onmessage = (event) => {
+        if (dead || chatWsRef.current !== ws) return;
         try {
           const msg = JSON.parse(String(event.data || ''));
           if (msg?.type === 'user_q') {
@@ -584,17 +579,22 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             setChatWsLiveText('');
             setChatSuggestionText('');
             setChatSuggestionPending(false);
-            return;
-          }
-          if (msg?.type === 'ai_chunk') {
+            setChatWsState({
+              activeChatPaneId: paneId,
+              chatWsLiveStatus: 'pending',
+              chatWsLiveText: '',
+            });
+          } else if (msg?.type === 'ai_chunk') {
             const delta = String(msg.data?.delta || '');
             if (delta) {
-              setChatWsLiveText((prev) => `${prev}${delta}`);
+              setChatWsLiveText((prev) => {
+                const next = `${prev}${delta}`;
+                setChatWsState({ activeChatPaneId: paneId, chatWsLiveStatus: 'streaming', chatWsLiveText: next });
+                return next;
+              });
             }
             setChatWsLiveStatus('streaming');
-            return;
-          }
-          if (msg?.type === 'status_change' && msg.data) {
+          } else if (msg?.type === 'status_change' && msg.data) {
             window.dispatchEvent(new CustomEvent('agent-status-change', { detail: msg.data }));
             const nextStatus = String(msg.data?.status || '').toLowerCase();
             if (nextStatus === 'thinking') setChatWsLiveStatus('pending');
@@ -602,61 +602,127 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             else if (nextStatus === 'streaming') setChatWsLiveStatus('streaming');
             else if (nextStatus === 'idle' || nextStatus === 'done' || nextStatus === 'completed') setChatWsLiveStatus('done');
             else if (nextStatus === 'failed' || nextStatus === 'error') setChatWsLiveStatus('failed');
+            setChatWsState({ activeChatPaneId: paneId, chatWsLiveStatus: nextStatus === 'thinking' ? 'pending' : nextStatus === 'working' || nextStatus === 'tool_call' || nextStatus === 'tool_use' ? 'tool_use' : nextStatus === 'streaming' ? 'streaming' : nextStatus === 'failed' || nextStatus === 'error' ? 'failed' : 'done' });
             if (nextStatus === 'idle' || nextStatus === 'done' || nextStatus === 'completed' || nextStatus === 'failed') {
-              setChatWsInspectorVersion((value) => value + 1);
+              setChatWsInspectorVersion((value) => {
+                const next = value + 1;
+                setChatWsState({ chatWsInspectorVersion: next });
+                return next;
+              });
             }
-            return;
-          }
-          if (msg?.type === 'current_updated') {
-            setChatWsHistoryVersion((value) => value + 1);
-            setChatWsInspectorVersion((value) => value + 1);
-            return;
-          }
-          if (msg?.type === 'ai_done') {
+          } else if (msg?.type === 'current_updated') {
+            setChatWsHistoryVersion((value) => {
+              const next = value + 1;
+              setChatWsState({ chatWsHistoryVersion: next });
+              return next;
+            });
+            setChatWsInspectorVersion((value) => {
+              const next = value + 1;
+              setChatWsState({ chatWsInspectorVersion: next });
+              return next;
+            });
+          } else if (msg?.type === 'ai_done') {
             setChatWsLiveStatus('done');
-            setChatWsHistoryVersion((value) => value + 1);
-            setChatWsInspectorVersion((value) => value + 1);
+            setChatWsState({ activeChatPaneId: paneId, chatWsLiveStatus: 'done' });
+            setChatWsHistoryVersion((value) => {
+              const next = value + 1;
+              setChatWsState({ chatWsHistoryVersion: next });
+              return next;
+            });
+            setChatWsInspectorVersion((value) => {
+              const next = value + 1;
+              setChatWsState({ chatWsInspectorVersion: next });
+              return next;
+            });
             setChatSuggestionPending(true);
-            return;
-          }
-          if (msg?.type === 'desktop_event' && msg.data) {
+          } else if (msg?.type === 'desktop_event' && msg.data) {
             window.dispatchEvent(new CustomEvent('agent-desktop-event', { detail: msg.data }));
-            return;
-          }
-          if (msg?.type === 'worker_idle' && msg.data) {
+          } else if (msg?.type === 'worker_idle' && msg.data) {
             window.dispatchEvent(new CustomEvent('agent-worker-idle', { detail: msg.data }));
-            return;
-          }
-          if (msg?.type === 'webpage_ping') {
+          } else if (msg?.type === 'webpage_ping') {
             const versionText = document.getElementById('version')?.textContent?.trim() || config.version;
-            wsSend({ type: 'webpage_pong', data: { requestId: msg.data?.requestId, version: versionText } });
-            return;
-          }
-          if (msg?.type === 'exec_js' && msg.data?.code) {
+            sendChatWsMessage({ type: 'webpage_pong', data: { requestId: msg.data?.requestId, version: versionText } });
+          } else if (msg?.type === 'exec_js' && msg.data?.code) {
             try {
               const result = window.eval(msg.data.code);
-              wsSend({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, result: String(result) } });
+              sendChatWsMessage({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, result: String(result) } });
             } catch (error: any) {
-              wsSend({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, error: error?.message || String(error) } });
+              sendChatWsMessage({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, error: error?.message || String(error) } });
             }
+          } else if (msg?.type === 'poll_data' && msg.data) {
+            const data = msg.data;
+            console.log('[poll_data]', data);
+            setBoundAgents(Array.isArray(data.agents) ? data.agents : []);
+            setPollStatuses(data.statuses && typeof data.statuses === 'object' ? data.statuses : {});
+            const st = data.statuses?.[fullPaneId] || data.statuses?.[paneId];
+            if (st?.status) setStatus(st.status);
+            if (st?.title) setAgentDetail((prev: any) => prev ? { ...prev, title: st.title } : { title: st.title });
+            if (st?.contextUsage != null) setContextUsage(st.contextUsage);
+            setTrialExpiresAt(typeof data.trial_expires_at === 'string' && data.trial_expires_at.trim() ? data.trial_expires_at.trim() : null);
+            const epoch = typeof data.trial_expires_at_epoch === 'number' ? data.trial_expires_at_epoch : Number.parseInt(String(data.trial_expires_at_epoch ?? ''), 10);
+            setTrialExpiresAtEpoch(Number.isFinite(epoch) && epoch > 0 ? epoch : null);
+            setIsPro(parseIsPro(data.is_pro));
+            setMembership({
+              kind: typeof data.membership_kind === 'string' && data.membership_kind.trim() ? data.membership_kind.trim() : null,
+              tag: typeof data.membership_tag === 'string' && data.membership_tag.trim() ? data.membership_tag.trim() : null,
+              expiresAt: typeof data.membership_expires_at === 'string' && data.membership_expires_at.trim() ? data.membership_expires_at.trim() : null,
+              showRenew: parseEnvBool(data.show_renew),
+              showUpgrade: parseEnvBool(data.show_upgrade),
+              renewUrl: typeof data.renew_url === 'string' && data.renew_url.trim() ? data.renew_url.trim() : null,
+              upgradeUrl: typeof data.upgrade_url === 'string' && data.upgrade_url.trim() ? data.upgrade_url.trim() : null,
+              syncedAt: typeof data.membership_synced_at === 'string' && data.membership_synced_at.trim() ? data.membership_synced_at.trim() : new Date().toISOString(),
+            });
           }
+          broadcastChatWsMessage(msg);
         } catch {}
       };
       ws.onclose = () => {
+        if (chatWsRef.current === ws) {
+          chatWsRef.current = null;
+        }
         setChatWsConnected(false);
-        if (!dead) reconnectTimer = window.setTimeout(connect, 3000);
+        setChatWsState({
+          activeChatPaneId: paneId,
+          chatWsConnected: false,
+          chatWsClientId: clientId,
+        });
+        if (!dead) {
+          chatWsReconnectTimerRef.current = window.setTimeout(connect, 3000);
+        }
       };
-      ws.onerror = () => ws?.close();
+      ws.onerror = () => ws.close();
     };
 
+    setChatWsConnected(false);
+    setChatWsLiveStatus('idle');
+    setChatWsLiveText('');
+    setChatWsState({
+      activeChatPaneId: paneId,
+      chatWsConnected: false,
+      chatWsClientId: clientId,
+      chatWsLiveStatus: 'idle',
+      chatWsLiveText: '',
+    });
     connect();
     return () => {
       dead = true;
+      if (chatWsReconnectTimerRef.current !== null) {
+        window.clearTimeout(chatWsReconnectTimerRef.current);
+        chatWsReconnectTimerRef.current = null;
+      }
+      if (chatWsRef.current) {
+        const closingWs = chatWsRef.current;
+        chatWsRef.current = null;
+        closingWs.close();
+      }
       setChatWsConnected(false);
-      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
-      ws?.close();
+      setChatWsState({
+        activeChatPaneId: activeCliPaneId,
+        chatWsConnected: false,
+        chatWsClientId: clientId,
+      });
     };
-  }, [activeCliPaneId, paneId, token]);
+  }, [broadcastChatWsMessage, paneId, sendChatWsMessage, setChatWsSender, setChatWsState, token]);
 
   useEffect(() => {
     if (!token || !activeCliPaneId) return;
@@ -833,11 +899,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleRefreshMembership = useCallback(async () => {
     setMembershipRefreshing(true);
     try {
-      await refreshPoll();
-    } finally {
-      setMembershipRefreshing(false);
-    }
-  }, [refreshPoll]);
+      chatWsRef.current?.send(JSON.stringify({ type: 'poll_request' }));
+    } catch {}
+    // 给 WS 响应一点时间
+    setTimeout(() => setMembershipRefreshing(false), 500);
+  }, []);
   const cliDrawerPortal = cliContentOpen ? createPortal(
     <div data-id="cli-content-portal" className="pointer-events-none fixed inset-y-0 right-0 z-[60] flex">
       <div
@@ -1030,7 +1096,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>
         <div data-id="top-bar-center" className="flex items-center justify-center w-1/3" />
         <div data-id="top-bar-right" className="flex items-center justify-end w-1/3 gap-3">
-          <SystemResourceMonitor token={token} paneId={activeCliPaneId || paneId} />
+          <SystemResourceMonitor token={token} paneId={paneId} />
           <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} />
           <button
             data-id="top-bar-github-issues"
@@ -1157,7 +1223,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                           openedPaneIds={canvasPaneIds.filter(id => id !== paneId)}
                           activePaneId={activeCliPaneId}
                           onRefreshPanes={refreshPanes}
-                          onRefreshPoll={refreshPoll}
+                          onRefreshPoll={() => { try { chatWsRef.current?.send(JSON.stringify({ type: 'poll_request' })); } catch {} }}
                           onOpenSettingsPane={(targetPaneId) => {
                             openPaneInCurrentTerminal(targetPaneId);
                             openInspectorForPane(targetPaneId, 'settings');
@@ -1689,6 +1755,7 @@ function formatLoadValue(value: number | null | undefined) {
 }
 
 function SystemResourceMonitor({ token, paneId }: { token: string | null; paneId: string }) {
+  const { activeChatPaneId, subscribeChatWs } = useApp();
   const [metrics, setMetrics] = useState<SystemResourceSnapshot | null>(null);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -1706,46 +1773,27 @@ function SystemResourceMonitor({ token, paneId }: { token: string | null; paneId
   useEffect(() => {
     if (!token || !paneId) return;
     let dead = false;
-    let reconnectTimer: number | null = null;
-    let ws: WebSocket | null = null;
-    const agentId = paneId.replace(/:.*$/, '');
-
     const loadSnapshot = async () => {
       try {
         const { data } = await apiService.getSystemResources({ timeout: 1500 });
         if (!dead) setMetrics(data);
       } catch {}
     };
-
-    const connect = () => {
-      if (dead) return;
-      const httpBase = config.apiBase || window.location.origin;
-      const proto = httpBase.startsWith('https') ? 'wss' : (window.location.protocol === 'https:' ? 'wss' : 'ws');
-      const base = httpBase ? httpBase.replace(/^https?/, proto) : `${proto}://${window.location.host}`;
-      ws = new WebSocket(`${base}/api/chat/ws?agent_id=${encodeURIComponent(agentId)}&token=${encodeURIComponent(token)}`);
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(String(event.data || ''));
-          if (msg?.type === 'system_resources' && msg.data && !dead) {
-            setMetrics(msg.data as SystemResourceSnapshot);
-          }
-        } catch {}
-      };
-      ws.onclose = () => {
-        if (dead) return;
-        reconnectTimer = window.setTimeout(connect, 3000);
-      };
-      ws.onerror = () => ws?.close();
-    };
-
     void loadSnapshot();
-    connect();
     return () => {
       dead = true;
-      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
-      ws?.close();
     };
   }, [paneId, token]);
+
+  useEffect(() => {
+    if (!paneId) return;
+    return subscribeChatWs((msg) => {
+      if (activeChatPaneId !== paneId) return;
+      if (msg?.type === 'system_resources' && msg.data) {
+        setMetrics(msg.data as SystemResourceSnapshot);
+      }
+    });
+  }, [activeChatPaneId, paneId, subscribeChatWs]);
 
   const cpu = formatResourcePct(metrics?.cpu_usage_pct);
   const memory = formatResourcePct(metrics?.mem_usage_pct);

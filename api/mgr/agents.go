@@ -101,6 +101,7 @@ func handleAgentBind(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, _ := res.LastInsertId()
+	go broadcastPollData(paneID)
 	J(w, M{"success": true, "id": id, "pane_id": paneID, "agent_name": shortName})
 }
 
@@ -110,6 +111,9 @@ func handleAgentUnbind(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/agents/unbind/")
+	// 先查出 pane_id 用于广播
+	var unbindPaneID string
+	_ = store.QueryRow("SELECT pane_id FROM pane_agents WHERE id=?", id).Scan(&unbindPaneID)
 	res, err := store.Exec("DELETE FROM pane_agents WHERE id=?", id)
 	if err != nil {
 		httpErr(w, 500, err.Error())
@@ -119,6 +123,9 @@ func handleAgentUnbind(w http.ResponseWriter, r *http.Request) {
 	if n == 0 {
 		httpErr(w, 404, "Agent binding not found")
 		return
+	}
+	if unbindPaneID != "" {
+		go broadcastPollData(unbindPaneID)
 	}
 	J(w, M{"success": true})
 }

@@ -214,12 +214,81 @@ func (c *chatClient) readPump() {
 		if err != nil {
 			return
 		}
-		// 广播客户端发来的消息给同 agent 的其他客户端
 		var evt ChatEvent
-		if json.Unmarshal(msg, &evt) == nil && evt.Type != "" {
-			hub.broadcastExcept(c.agentID, evt, c)
+		if json.Unmarshal(msg, &evt) != nil || evt.Type == "" {
+			continue
+		}
+		// poll_request: 回复当前 poll 数据给请求方
+		if evt.Type == "poll_request" {
+			data := buildPollData(c.agentID)
+			reply := ChatEvent{Type: "poll_data", Data: data}
+			if b, err := json.Marshal(reply); err == nil {
+				select {
+				case c.send <- b:
+				default:
+				}
+			}
+			continue
+		}
+		// 广播客户端发来的消息给同 agent 的其他客户端
+		hub.broadcastExcept(c.agentID, evt, c)
+	}
+}
+
+// buildPollData 构造 poll 响应数据，与 handlePoll 返回格式一致
+func buildPollData(paneID string) M {
+	agents, _ := listAgentsByPane(paneID)
+	if agents == nil {
+		agents = []M{}
+	}
+	snapshot := loadRuntimeMembershipSnapshot()
+	resp := M{
+		"success":     true,
+		"pane_id":     shortPaneID(normPaneID(paneID)),
+		"agents":      agents,
+		"statuses":    M{},
+		"server_time": time.Now().UTC().Format(time.RFC3339),
+	}
+	if snapshot.TrialExpiresAt != "" {
+		resp["trial_expires_at"] = snapshot.TrialExpiresAt
+		if snapshot.TrialExpiresEpoch != "" {
+			resp["trial_expires_at_epoch"] = snapshot.TrialExpiresEpoch
 		}
 	}
+	if snapshot.IsPro != nil {
+		resp["is_pro"] = *snapshot.IsPro
+	}
+	if snapshot.Kind != "" {
+		resp["membership_kind"] = snapshot.Kind
+	}
+	if snapshot.Tag != "" {
+		resp["membership_tag"] = snapshot.Tag
+	}
+	if snapshot.ExpiresAt != "" {
+		resp["membership_expires_at"] = snapshot.ExpiresAt
+	}
+	if snapshot.RenewURL != "" {
+		resp["renew_url"] = snapshot.RenewURL
+	}
+	if snapshot.UpgradeURL != "" {
+		resp["upgrade_url"] = snapshot.UpgradeURL
+	}
+	if snapshot.ShowRenew != nil {
+		resp["show_renew"] = *snapshot.ShowRenew
+	}
+	if snapshot.ShowUpgrade != nil {
+		resp["show_upgrade"] = *snapshot.ShowUpgrade
+	}
+	if snapshot.SyncedAt != "" {
+		resp["membership_synced_at"] = snapshot.SyncedAt
+	}
+	return resp
+}
+
+// broadcastPollData 向指定 agent 的所有 WS 客户端推送最新 poll 数据
+func broadcastPollData(paneID string) {
+	data := buildPollData(paneID)
+	hub.broadcast(paneID, ChatEvent{Type: "poll_data", Data: data})
 }
 
 // ── HTTP handlers ──
