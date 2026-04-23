@@ -44,7 +44,7 @@ interface Props {
   activePaneId?: string;
   onOpenSettingsPane?: (paneId: string) => void;
   onRefreshPanes: () => Promise<void>;
-  onRefreshPoll: () => Promise<void>;
+  onRefreshPoll: () => void;
 }
 
 function normalizeAgentType(agentType?: string) {
@@ -224,7 +224,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   const bind = async (agentPaneId: string) => {
     try {
       await apiService.bindAgent({ pane_id: paneId, agent_name: shortId(agentPaneId) });
-      await onRefreshPoll();
+      onRefreshPoll();
     } catch {}
   };
 
@@ -240,7 +240,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     try {
       await apiService.unbindAgent(binding.id);
       onOpenInCurrentPane?.(nextSelectedPaneId);
-      await onRefreshPoll();
+      onRefreshPoll();
     } catch {}
   };
 
@@ -258,7 +258,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         await apiService.bindAgent({ pane_id: paneId, agent_name: shortId(newId) });
         setCreateDialogOpen(false);
         await onRefreshPanes();
-        await onRefreshPoll();
+        onRefreshPoll();
       }
     } catch {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: '创建并绑定员工失败' }));
@@ -322,7 +322,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
           await apiService.deletePane(wid);
           onOpenInCurrentPane?.(paneId);
           await onRefreshPanes();
-          await onRefreshPoll();
+          onRefreshPoll();
         } catch {
           showToast(`错误：${title} 删除失败`);
         }
