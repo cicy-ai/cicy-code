@@ -32,6 +32,21 @@ interface ChatWsMessage {
   [key: string]: any;
 }
 
+export interface SystemResourceSnapshot {
+  cpu_usage_pct: number;
+  cpu_cores: number;
+  mem_usage_pct: number;
+  mem_total_bytes: number;
+  mem_used_bytes: number;
+  disk_usage_pct: number;
+  disk_total_bytes: number;
+  disk_used_bytes: number;
+  load_1: number;
+  load_5: number;
+  load_15: number;
+  updated_at: string;
+}
+
 interface AppContextType {
   // Auth
   token: string | null;
@@ -77,6 +92,8 @@ interface AppContextType {
   sendChatWsMessage: (payload: unknown) => boolean;
   subscribeChatWs: (listener: (msg: ChatWsMessage) => void) => () => void;
   broadcastChatWsMessage: (msg: ChatWsMessage) => void;
+  systemResources: SystemResourceSnapshot | null;
+  setSystemResources: (snapshot: SystemResourceSnapshot | null) => void;
 
   // UI State
   loading: boolean;
@@ -96,6 +113,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [agents, set智能体] = useState<Agent[]>([]);
   const [allPanes, setAllPanes] = useState<Agent[]>([]);
   const [globalVar, setGlobalVar] = useState<any>({});
+  const [systemResources, setSystemResources] = useState<SystemResourceSnapshot | null>(null);
   const [chatWsState, setChatWsStateValue] = useState<ChatWsState>({
     activeChatPaneId: null,
     chatWsConnected: false,
@@ -199,6 +217,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setCurrentPaneId(null);
     setApi(null);
     set智能体([]);
+    setSystemResources(null);
   };
 
   const selectPane = async (paneId: string) => {
@@ -340,6 +359,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     sendChatWsMessage,
     subscribeChatWs,
     broadcastChatWsMessage,
+    systemResources,
+    setSystemResources,
     loading,
     error,
     setError,
@@ -362,6 +383,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     agentsCount: agents.length,
     allPanes: allPanes.map(p => ({ pane_id: p.pane_id, title: p.title, status: p.status })),
     globalVar,
+    systemResources,
   }, { currentPaneId: (v: string) => selectPane(v), error: setError });
 
   return (

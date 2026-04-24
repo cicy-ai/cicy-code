@@ -247,6 +247,7 @@ func buildPollData(paneID string) M {
 		"pane_id":     shortPaneID(normPaneID(paneID)),
 		"agents":      agents,
 		"statuses":    M{},
+		"system_resources": systemResources.getLatest(),
 		"server_time": time.Now().UTC().Format(time.RFC3339),
 	}
 	if snapshot.TrialExpiresAt != "" {
