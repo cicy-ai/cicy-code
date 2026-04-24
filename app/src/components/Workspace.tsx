@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useApp } from '../contexts/AppContext';
+import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import { createPortal } from 'react-dom';
 import {
   Terminal, MessageSquare, Home, Folder, FolderOpen, X, Settings, Brain, Search,
@@ -157,6 +158,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setChatWsSender,
     sendChatWsMessage,
     broadcastChatWsMessage,
+    systemResources,
+    setSystemResources,
   } = useApp();
   const { token, hasPermission } = useAuth();
   const { confirm } = useDialog();
@@ -654,6 +657,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             console.log('[poll_data]', data);
             setBoundAgents(Array.isArray(data.agents) ? data.agents : []);
             setPollStatuses(data.statuses && typeof data.statuses === 'object' ? data.statuses : {});
+            if (data.system_resources && typeof data.system_resources === 'object') {
+              setSystemResources(data.system_resources as SystemResourceSnapshot);
+            }
             const st = data.statuses?.[fullPaneId] || data.statuses?.[paneId];
             if (st?.status) setStatus(st.status);
             if (st?.title) setAgentDetail((prev: any) => prev ? { ...prev, title: st.title } : { title: st.title });
@@ -672,6 +678,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               upgradeUrl: typeof data.upgrade_url === 'string' && data.upgrade_url.trim() ? data.upgrade_url.trim() : null,
               syncedAt: typeof data.membership_synced_at === 'string' && data.membership_synced_at.trim() ? data.membership_synced_at.trim() : new Date().toISOString(),
             });
+          }
+          if (msg?.type === 'system_resources' && msg.data && typeof msg.data === 'object') {
+            setSystemResources(msg.data as SystemResourceSnapshot);
           }
           broadcastChatWsMessage(msg);
         } catch {}
@@ -1096,7 +1105,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>
         <div data-id="top-bar-center" className="flex items-center justify-center w-1/3" />
         <div data-id="top-bar-right" className="flex items-center justify-end w-1/3 gap-3">
-          <SystemResourceMonitor token={token} paneId={paneId} />
+          <SystemResourceMonitor paneId={paneId} />
           <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} />
           <button
             data-id="top-bar-github-issues"
@@ -1684,21 +1693,6 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
   );
 }
 
-interface SystemResourceSnapshot {
-  cpu_usage_pct: number;
-  cpu_cores: number;
-  mem_usage_pct: number;
-  mem_total_bytes: number;
-  mem_used_bytes: number;
-  disk_usage_pct: number;
-  disk_total_bytes: number;
-  disk_used_bytes: number;
-  load_1: number;
-  load_5: number;
-  load_15: number;
-  updated_at: string;
-}
-
 function formatResourcePct(value: number | null | undefined) {
   if (value == null || Number.isNaN(value)) return '--';
   return `${Math.round(value)}%`;
@@ -1723,9 +1717,8 @@ function formatLoadValue(value: number | null | undefined) {
   return value.toFixed(2);
 }
 
-function SystemResourceMonitor({ token, paneId }: { token: string | null; paneId: string }) {
-  const { activeChatPaneId, subscribeChatWs } = useApp();
-  const [metrics, setMetrics] = useState<SystemResourceSnapshot | null>(null);
+function SystemResourceMonitor({ paneId }: { paneId: string }) {
+  const { activeChatPaneId, sendChatWsMessage, systemResources } = useApp();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -1740,34 +1733,23 @@ function SystemResourceMonitor({ token, paneId }: { token: string | null; paneId
   }, []);
 
   useEffect(() => {
-    if (!token || !paneId) return;
-    let dead = false;
-    const loadSnapshot = async () => {
-      try {
-        const { data } = await apiService.getSystemResources({ timeout: 1500 });
-        if (!dead) setMetrics(data);
-      } catch {}
+    if (!paneId || activeChatPaneId !== paneId) return;
+    const requestPoll = () => {
+      sendChatWsMessage({ type: 'poll_request' });
     };
-    void loadSnapshot();
-    return () => {
-      dead = true;
+    requestPoll();
+    if (!open) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') requestPoll();
     };
-  }, [paneId, token]);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [activeChatPaneId, open, paneId, sendChatWsMessage]);
 
-  useEffect(() => {
-    if (!paneId) return;
-    return subscribeChatWs((msg) => {
-      if (activeChatPaneId !== paneId) return;
-      if (msg?.type === 'system_resources' && msg.data) {
-        setMetrics(msg.data as SystemResourceSnapshot);
-      }
-    });
-  }, [activeChatPaneId, paneId, subscribeChatWs]);
-
-  const cpu = formatResourcePct(metrics?.cpu_usage_pct);
-  const memory = formatResourcePct(metrics?.mem_usage_pct);
-  const disk = formatResourcePct(metrics?.disk_usage_pct);
-  const updatedAt = metrics?.updated_at ? new Date(metrics.updated_at).toLocaleTimeString('zh-CN', { hour12: false }) : '--';
+  const cpu = formatResourcePct(systemResources?.cpu_usage_pct);
+  const memory = formatResourcePct(systemResources?.mem_usage_pct);
+  const disk = formatResourcePct(systemResources?.disk_usage_pct);
+  const updatedAt = systemResources?.updated_at ? new Date(systemResources.updated_at).toLocaleTimeString('zh-CN', { hour12: false }) : '--';
 
   return (
     <div data-id="system-resource-root" ref={rootRef} className="relative">
@@ -1801,21 +1783,21 @@ function SystemResourceMonitor({ token, paneId }: { token: string | null; paneId
           </div>
           <div data-id="system-resource-grid" className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1.5 text-[11px]">
             <span data-id="system-resource-label-cpu" className="text-zinc-600">CPU</span>
-            <span data-id="system-resource-value-cpu" className="font-mono text-zinc-300">{cpu} · {metrics?.cpu_cores ?? '--'} cores</span>
+            <span data-id="system-resource-value-cpu" className="font-mono text-zinc-300">{cpu} · {systemResources?.cpu_cores ?? '--'} cores</span>
 
             <span data-id="system-resource-label-memory" className="text-zinc-600">内存</span>
             <span data-id="system-resource-value-memory" className="font-mono text-zinc-300">
-              {memory} · {formatResourceBytes(metrics?.mem_used_bytes)} / {formatResourceBytes(metrics?.mem_total_bytes)}
+              {memory} · {formatResourceBytes(systemResources?.mem_used_bytes)} / {formatResourceBytes(systemResources?.mem_total_bytes)}
             </span>
 
             <span data-id="system-resource-label-disk" className="text-zinc-600">磁盘</span>
             <span data-id="system-resource-value-disk" className="font-mono text-zinc-300">
-              {disk} · {formatResourceBytes(metrics?.disk_used_bytes)} / {formatResourceBytes(metrics?.disk_total_bytes)}
+              {disk} · {formatResourceBytes(systemResources?.disk_used_bytes)} / {formatResourceBytes(systemResources?.disk_total_bytes)}
             </span>
 
             <span data-id="system-resource-label-load" className="text-zinc-600">负载</span>
             <span data-id="system-resource-value-load" className="font-mono text-zinc-300">
-              {formatLoadValue(metrics?.load_1)} / {formatLoadValue(metrics?.load_5)} / {formatLoadValue(metrics?.load_15)}
+              {formatLoadValue(systemResources?.load_1)} / {formatLoadValue(systemResources?.load_5)} / {formatLoadValue(systemResources?.load_15)}
             </span>
           </div>
         </div>
