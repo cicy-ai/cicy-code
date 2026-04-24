@@ -2,7 +2,7 @@ import { Terminal as XtermTerminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { lib } from "libapps";
-import { applyMonoFontVar } from "./font";
+import { applyMonoFontVar, isMacPlatform } from "./font";
 import { openExternalLinkWithConfirm } from "./link_confirm";
 
 const deviceAttributesRe = /\x1b\[\??[\d;]*c/g;
@@ -82,6 +82,7 @@ export class Xterm {
             fontFamily: "var(--cp-mono-font)",
             theme: {
                 background: "#000000",
+                foreground: "#b9adad",
             },
         });
         this.fitAddon = new FitAddon();
@@ -166,9 +167,11 @@ export class Xterm {
         };
 
         this.term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
-            if ((event.ctrlKey || event.metaKey) && !event.altKey && String(event.key).toLowerCase() === "c") {
-                // Always intercept Ctrl+C for copy; use ^C button for SIGINT
-                return false;
+            var isCopyShortcut = String(event.key).toLowerCase() === "c" && !event.altKey && (isMacPlatform() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey);
+            if (isCopyShortcut) {
+                var selection = this.elem.ownerDocument.getSelection();
+                var hasDocumentSelection = !!selection && !selection.isCollapsed && String(selection).length > 0;
+                return !(hasDocumentSelection || this.term.hasSelection());
             }
             return true;
         });

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
 import { useDevRegister } from '../lib/devStore';
 import { PaneManager } from '../services/paneManager';
 import apiService from '../services/api';
@@ -13,6 +13,22 @@ interface Agent {
   status?: string;
   title?: string;
   id?: number;
+  [key: string]: any;
+}
+
+interface ChatWsState {
+  activeChatPaneId: string | null;
+  chatWsConnected: boolean;
+  chatWsClientId: string | null;
+  chatWsLiveStatus: string;
+  chatWsLiveText: string;
+  chatWsHistoryVersion: number;
+  chatWsInspectorVersion: number;
+}
+
+interface ChatWsMessage {
+  type?: string;
+  data?: any;
   [key: string]: any;
 }
 
@@ -48,6 +64,20 @@ interface AppContextType {
   loadGlobalVar: () => Promise<void>;
   updateGlobalVar: (data: any) => Promise<void>;
   
+  // Shared chat websocket
+  activeChatPaneId: string | null;
+  chatWsConnected: boolean;
+  chatWsClientId: string | null;
+  chatWsLiveStatus: string;
+  chatWsLiveText: string;
+  chatWsHistoryVersion: number;
+  chatWsInspectorVersion: number;
+  setChatWsState: (next: Partial<ChatWsState>) => void;
+  setChatWsSender: (sender: (payload: unknown) => boolean) => void;
+  sendChatWsMessage: (payload: unknown) => boolean;
+  subscribeChatWs: (listener: (msg: ChatWsMessage) => void) => () => void;
+  broadcastChatWsMessage: (msg: ChatWsMessage) => void;
+
   // UI State
   loading: boolean;
   error: string | null;
@@ -66,6 +96,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [agents, set智能体] = useState<Agent[]>([]);
   const [allPanes, setAllPanes] = useState<Agent[]>([]);
   const [globalVar, setGlobalVar] = useState<any>({});
+  const [chatWsState, setChatWsStateValue] = useState<ChatWsState>({
+    activeChatPaneId: null,
+    chatWsConnected: false,
+    chatWsClientId: null,
+    chatWsLiveStatus: 'idle',
+    chatWsLiveText: '',
+    chatWsHistoryVersion: 0,
+    chatWsInspectorVersion: 0,
+  });
+  const chatWsSendRef = useRef<(payload: unknown) => boolean>(() => false);
+  const chatWsListenersRef = useRef(new Set<(msg: ChatWsMessage) => void>());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -219,6 +260,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const setChatWsState = useCallback((next: Partial<ChatWsState>) => {
+    setChatWsStateValue(prev => ({ ...prev, ...next }));
+  }, []);
+
+  const setChatWsSender = useCallback((sender: (payload: unknown) => boolean) => {
+    chatWsSendRef.current = sender;
+  }, []);
+
+  const sendChatWsMessage = useCallback((payload: unknown) => {
+    return chatWsSendRef.current(payload);
+  }, []);
+
+  const subscribeChatWs = useCallback((listener: (msg: ChatWsMessage) => void) => {
+    chatWsListenersRef.current.add(listener);
+    return () => {
+      chatWsListenersRef.current.delete(listener);
+    };
+  }, []);
+
+  const broadcastChatWsMessage = useCallback((msg: ChatWsMessage) => {
+    for (const listener of chatWsListenersRef.current) {
+      try {
+        listener(msg);
+      } catch {}
+    }
+  }, []);
+
   const loadGlobalVar = useCallback(async () => {
     if (!api || !token) return;
     try {
@@ -260,6 +328,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     globalVar,
     loadGlobalVar,
     updateGlobalVar,
+    activeChatPaneId: chatWsState.activeChatPaneId,
+    chatWsConnected: chatWsState.chatWsConnected,
+    chatWsClientId: chatWsState.chatWsClientId,
+    chatWsLiveStatus: chatWsState.chatWsLiveStatus,
+    chatWsLiveText: chatWsState.chatWsLiveText,
+    chatWsHistoryVersion: chatWsState.chatWsHistoryVersion,
+    chatWsInspectorVersion: chatWsState.chatWsInspectorVersion,
+    setChatWsState,
+    setChatWsSender,
+    sendChatWsMessage,
+    subscribeChatWs,
+    broadcastChatWsMessage,
     loading,
     error,
     setError,

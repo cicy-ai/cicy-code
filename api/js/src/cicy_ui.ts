@@ -135,6 +135,7 @@ body {
 .terminal .xterm-rows {
   right: 0 !important;
   bottom: 0 !important;
+  color: #b9adad !important;
 }
 #cp-loading-overlay {
   position: fixed;

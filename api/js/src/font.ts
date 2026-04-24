@@ -1,18 +1,27 @@
-export function isWindowsPlatform(): boolean {
+function getPlatformName(): string {
     var nav = window.navigator as Navigator & {
         userAgentData?: {
             platform?: string;
         };
     };
-    var platform = "";
     if (nav.userAgentData && typeof nav.userAgentData.platform === "string") {
-        platform = nav.userAgentData.platform;
-    } else if (typeof nav.platform === "string") {
-        platform = nav.platform;
-    } else if (typeof nav.userAgent === "string") {
-        platform = nav.userAgent;
+        return nav.userAgentData.platform;
     }
-    return /win/i.test(platform);
+    if (typeof nav.platform === "string") {
+        return nav.platform;
+    }
+    if (typeof nav.userAgent === "string") {
+        return nav.userAgent;
+    }
+    return "";
+}
+
+export function isWindowsPlatform(): boolean {
+    return /win/i.test(getPlatformName());
+}
+
+export function isMacPlatform(): boolean {
+    return /(mac|iphone|ipad|ipod)/i.test(getPlatformName());
 }
 
 export function monoFontStack(): string {

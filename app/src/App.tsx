@@ -35,31 +35,19 @@ function Main() {
     return () => window.removeEventListener('hashchange', onChange);
   }, []);
 
-  // On audit.cicy-ai.com, show audit dashboard (but require login first)
-  if (config.isAudit) {
-    document.title = 'CiCy Audit';
-    if (isChecking) return (
-      <div className="h-screen bg-[#0A0A0A] flex items-center justify-center">
-        <div className="w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
-      </div>
-    );
-    if (!token) return <Login />;
-    return <AuditDashboard />;
-  }
-
   // Ensure w-10001 exists on login
   useEffect(() => {
-    if (!token) return;
+    if (!token || config.isAudit) return;
     apiService.getPane('w-10001:main.0').catch(() => {
       apiService.createPane({ win_name: 'w-10001', title: 'Master', agent_type: 'hermes' }).catch(() => {});
     });
   }, [token]);
 
-  const selectAgent = (id: string) => {
+  const selectAgent = useCallback((id: string) => {
     const clean = id.replace(/:.*$/, '');
     setRoute({ view: 'workspace', agentId: clean });
     window.location.hash = `#/agent/${encodeURIComponent(clean)}`;
-  };
+  }, []);
 
   const handleProvisionReady = useCallback((_backend: string) => {
     const t = TokenManager.getToken();
@@ -74,34 +62,33 @@ function Main() {
     window.location.reload();
   }, []);
 
+  // Loading spinner
   if (isChecking) return (
-    <div className="h-screen bg-[#0A0A0A] flex items-center justify-center">
+    <div data-id="loading-spinner" className="h-screen bg-[#0A0A0A] flex items-center justify-center">
       <div className="w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
     </div>
   );
 
+  // Audit mode
+  if (config.isAudit) {
+    document.title = 'CiCy Audit';
+    if (!token) return <Login />;
+    return <AuditDashboard />;
+  }
+
   if (provisioning) return <ProvisionScreen onReady={handleProvisionReady} />;
+
+  // Not authenticated
+  if (!token) return <Login />;
 
   // #/audit → Audit Dashboard
   if (route.view === 'audit') {
-    if (!token) return <Login />;
     return <AuditDashboard onBack={() => { window.location.hash = '#/agent/w-10001'; }} />;
   }
 
-  // No hash or non-workspace hash → original workspace UI
-  if (route.view === 'desktop') {
-    if (!token) return <Login />;
-    return <Workspace agentId="w-10001" onSelectAgent={selectAgent} />;
-  }
-
-  if (!token) return <Login />;
-
-  // #/agent/xxx → Workspace
-  if (route.view === 'workspace') {
-    return <Workspace agentId={route.agentId} onSelectAgent={selectAgent} />;
-  }
-  if (!token) return <Login />;
-  return <Workspace agentId="w-10001" onSelectAgent={selectAgent} />;
+  // #/agent/xxx or default → Workspace
+  const agentId = route.view === 'workspace' ? route.agentId : 'w-10001';
+  return <Workspace agentId={agentId} onSelectAgent={selectAgent} />;
 }
 
 export default function App() {

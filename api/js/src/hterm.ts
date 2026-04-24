@@ -1,5 +1,5 @@
 import * as bare from "libapps";
-import { applyMonoFontVar, monoFontStack } from "./font";
+import { applyMonoFontVar, monoFontStack, isMacPlatform } from "./font";
 import { openExternalLinkWithConfirm } from "./link_confirm";
 
 export class Hterm {
@@ -33,8 +33,10 @@ export class Hterm {
         this.term.installKeyboard();
 
         this.copyShortcutListener = (event: KeyboardEvent) => {
-            if ((event.ctrlKey || event.metaKey) && !event.altKey && String(event.key).toLowerCase() === "c") {
-                this.suppressNextSigintFromCopy = true;
+            var isCopyShortcut = String(event.key).toLowerCase() === "c" && !event.altKey && (isMacPlatform() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey);
+            if (isCopyShortcut) {
+                var selection = this.elem.ownerDocument.getSelection();
+                this.suppressNextSigintFromCopy = !!selection && !selection.isCollapsed && String(selection).length > 0;
                 setTimeout(() => {
                     this.suppressNextSigintFromCopy = false;
                 }, 0);

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useApp } from '../../contexts/AppContext';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../../config';
@@ -116,6 +117,7 @@ const ToolCard: React.FC<{ tool: any; running?: boolean }> = ({ tool, running })
 };
 
 const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, commandPanel, apiOnly = false, headerTabs }) => {
+  const { activeChatPaneId, chatWsHistoryVersion, subscribeChatWs } = useApp();
   const [agentType, setAgentType] = useState('AI');
   const [chatData, setChatData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -194,23 +196,11 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
     prevCountRef.current = count;
   }, [chatData.length]);
 
-  // WS + API
+  // Chat websocket is owned by Workspace. Keep ChatView display-only.
   useEffect(() => {
     if (!displayPaneId || !token) return;
     const agentId = displayPaneId.replace(':main.0', '');
-    const clientId = (() => {
-      const key = 'cicy_chat_client_id';
-      try {
-        const current = sessionStorage.getItem(key);
-        if (current) return current;
-        const next = `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-        sessionStorage.setItem(key, next);
-        return next;
-      } catch {
-        return `web-${Date.now().toString(36)}`;
-      }
-    })();
-    let ws: WebSocket | null = null, dead = false, reconnectTimer: ReturnType<typeof setTimeout>, fetchTimer: ReturnType<typeof setTimeout>;
+    let fetchTimer: ReturnType<typeof setTimeout>;
 
     async function reload() {
       try {
@@ -233,118 +223,60 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
 
     const debouncedReload = () => { clearTimeout(fetchTimer); fetchTimer = setTimeout(reload, 300); };
 
-    function connect() {
-      if (dead) return;
-      const proto = config.apiBase.startsWith('https') ? 'wss' : (location.protocol === 'https:' ? 'wss' : 'ws');
-      const base = config.apiBase.replace(/^https?/, proto);
-      const isElectron = typeof (window as any).electronRPC === 'function' ? '1' : '0';
-      ws = new WebSocket(`${base}/api/chat/ws?agent_id=${encodeURIComponent(agentId)}&token=${token}&electron=${isElectron}&client_id=${encodeURIComponent(clientId)}`);
-
-      const ws发送 = (data: object) => {
-        if (ws?.readyState === WebSocket.OPEN) {
-          console.log('[ChatView] WS send:', (data as any).type, data);
-          ws.send(JSON.stringify(data));
-        }
-      };
-      const visionHandler = (e: CustomEvent) => { ws发送({ type: 'gemini_vision_result', data: e.detail }); };
-      const askHandler = (e: CustomEvent) => { ws发送({ type: 'gemini_ask_result', data: e.detail }); };
-      const pongHandler = (e: CustomEvent) => { ws发送({ type: 'pong', data: e.detail }); };
-      const ipcPongHandler = (e: CustomEvent) => { ws发送({ type: 'ipc_pong', data: e.detail }); };
-
-      window.addEventListener('gemini-vision-result', visionHandler as EventListener);
-      window.addEventListener('gemini-ask-result', askHandler as EventListener);
-      window.addEventListener('agent-pong', pongHandler as EventListener);
-      window.addEventListener('ipc-pong', ipcPongHandler as EventListener);
-
-      const cleanup = () => {
-        window.removeEventListener('gemini-vision-result', visionHandler as EventListener);
-        window.removeEventListener('gemini-ask-result', askHandler as EventListener);
-        window.removeEventListener('agent-pong', pongHandler as EventListener);
-        window.removeEventListener('ipc-pong', ipcPongHandler as EventListener);
-      };
-
-      ws.onopen = () => {
-        console.log('[ChatView] WS connected, agent_id=' + agentId + ', client_id=' + clientId);
-        window.dispatchEvent(new CustomEvent('chat-ws-connection', { detail: { agentId, connected: true, clientId } }));
-        reload();
-      };
-
-      ws.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(e.data);
-          console.log('[ChatView] WS msg:', msg.type, msg);
-          if (msg.type === 'user_q') {
-            streamingRef.current = false;
-            window.dispatchEvent(new CustomEvent('ai-streaming', { detail: false }));
-            setChatData(prev => [...prev.filter((c: any) => !c.system), { q: msg.data.q, status: 'pending', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0 }]);
-          } else if (msg.type === 'ai_chunk') {
-            const delta = String(msg.data?.delta || '');
-            if (!delta) return;
-            if (!streamingRef.current) { streamingRef.current = true; window.dispatchEvent(new CustomEvent('ai-streaming', { detail: true })); }
-            setChatData(prev => {
-              if (!prev.length) return prev;
-              const last = { ...prev[prev.length - 1] };
-              const steps = last.steps ? [...last.steps] : [];
-              if (!steps.length || steps[steps.length - 1].type !== 'text') steps.push({ type: 'text', text: delta });
-              else steps[steps.length - 1] = { ...steps[steps.length - 1], text: `${steps[steps.length - 1].text || ''}${delta}` };
-              last.steps = steps; last.status = 'streaming';
-              return [...prev.slice(0, -1), last];
-            });
-          } else if (msg.type === 'ai_done') {
-            streamingRef.current = false;
-            window.dispatchEvent(new CustomEvent('ai-streaming', { detail: false }));
-            debouncedReload();
-            setChatData(prev => {
-              const last = prev[prev.length - 1];
-              if (last?.a) {
-                const parts = Array.isArray(last.a) ? last.a : [last.a];
-                const textOnly = parts.filter((s: any) => typeof s === 'string').join(' ').trim();
-                if (textOnly) window.dispatchEvent(new CustomEvent('ai-reply-done', { detail: { text: textOnly } }));
-              }
-              return prev;
-            });
-          } else if (msg.type === 'desktop_event' && msg.data) {
-            window.dispatchEvent(new CustomEvent('agent-desktop-event', { detail: msg.data }));
-          } else if (msg.type === 'status_change' && msg.data) {
-            window.dispatchEvent(new CustomEvent('agent-status-change', { detail: msg.data }));
-          } else if (msg.type === 'exec_js' && msg.data?.code) {
-            console.log('[exec_js] received:', msg.data.code);
-            try {
-              const result = eval(msg.data.code);
-              console.log('[exec_js] result:', result);
-              if (msg.data.requestId && ws) ws发送({ type: 'exec_js_result', data: { requestId: msg.data.requestId, result: String(result) } });
-            } catch (e: any) {
-              console.error('[exec_js] error:', e);
-              if (msg.data.requestId && ws) ws发送({ type: 'exec_js_result', data: { requestId: msg.data.requestId, error: e.message } });
+    const unsubscribe = subscribeChatWs((msg) => {
+      if (activeChatPaneId !== displayPaneId) return;
+      try {
+        if (msg.type === 'user_q') {
+          streamingRef.current = false;
+          window.dispatchEvent(new CustomEvent('ai-streaming', { detail: false }));
+          setChatData(prev => [...prev.filter((c: any) => !c.system), { q: msg.data.q, status: 'pending', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0 }]);
+        } else if (msg.type === 'ai_chunk') {
+          const delta = String(msg.data?.delta || '');
+          if (!delta) return;
+          if (!streamingRef.current) { streamingRef.current = true; window.dispatchEvent(new CustomEvent('ai-streaming', { detail: true })); }
+          setChatData(prev => {
+            if (!prev.length) return prev;
+            const last = { ...prev[prev.length - 1] };
+            const steps = last.steps ? [...last.steps] : [];
+            if (!steps.length || steps[steps.length - 1].type !== 'text') steps.push({ type: 'text', text: delta });
+            else steps[steps.length - 1] = { ...steps[steps.length - 1], text: `${steps[steps.length - 1].text || ''}${delta}` };
+            last.steps = steps; last.status = 'streaming';
+            return [...prev.slice(0, -1), last];
+          });
+        } else if (msg.type === 'ai_done') {
+          streamingRef.current = false;
+          window.dispatchEvent(new CustomEvent('ai-streaming', { detail: false }));
+          debouncedReload();
+          setChatData(prev => {
+            const last = prev[prev.length - 1];
+            if (last?.a) {
+              const parts = Array.isArray(last.a) ? last.a : [last.a];
+              const textOnly = parts.filter((s: any) => typeof s === 'string').join(' ').trim();
+              if (textOnly) window.dispatchEvent(new CustomEvent('ai-reply-done', { detail: { text: textOnly } }));
             }
-          } else if (msg.type === 'webpage_ping') {
-            const versionText = document.getElementById('version')?.textContent?.trim() || config.version;
-            ws发送({ type: 'webpage_pong', data: { requestId: msg.data?.requestId, version: versionText } });
-          } else if (msg.type === 'worker_idle') {
-            const d = msg.data?.data;
-            if (d) setChatData(prev => [...prev, { q: '', a: `🔔 **${d.worker || msg.data.from}** 已完成任务（空闲）`, status: 'done', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0, system: true }]);
-          } else {
-            if (!streamingRef.current) debouncedReload();
-          }
-        } catch { if (!streamingRef.current) debouncedReload(); }
-      };
+            return prev;
+          });
+        } else if (msg.type === 'desktop_event' && msg.data) {
+          window.dispatchEvent(new CustomEvent('agent-desktop-event', { detail: msg.data }));
+        } else if (msg.type === 'status_change' && msg.data) {
+          window.dispatchEvent(new CustomEvent('agent-status-change', { detail: msg.data }));
+        } else if (msg.type === 'worker_idle') {
+          const d = msg.data?.data;
+          if (d) setChatData(prev => [...prev, { q: '', a: `🔔 **${d.worker || msg.data.from}** 已完成任务（空闲）`, status: 'done', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0, system: true }]);
+        } else {
+          if (!streamingRef.current) debouncedReload();
+        }
+      } catch {
+        if (!streamingRef.current) debouncedReload();
+      }
+    });
 
-      ws.onclose = () => {
-        cleanup();
-        window.dispatchEvent(new CustomEvent('chat-ws-connection', { detail: { agentId, connected: false, clientId } }));
-        if (!dead) reconnectTimer = setTimeout(connect, 3000);
-      };
-      ws.onerror = () => ws?.close();
-    }
-    connect();
+    void reload();
     return () => {
-      dead = true;
-      window.dispatchEvent(new CustomEvent('chat-ws-connection', { detail: { agentId, connected: false, clientId } }));
-      clearTimeout(reconnectTimer);
       clearTimeout(fetchTimer);
-      ws?.close();
+      unsubscribe();
     };
-  }, [displayPaneId, token]);
+  }, [activeChatPaneId, displayPaneId, subscribeChatWs, token]);
 
   // Load more on scroll up
   useEffect(() => {

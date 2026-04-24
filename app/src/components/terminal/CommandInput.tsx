@@ -2,6 +2,10 @@ import React, { useState, useRef, useCallback } from 'react';
 import { Loader2, ArrowUp, CheckCircle } from 'lucide-react';
 import apiService from '../../services/api';
 
+const isMacPlatform = /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent);
+const isInterruptShortcut = (event: React.KeyboardEvent<HTMLTextAreaElement>) =>
+  event.key.toLowerCase() === 'c' && !event.altKey && (isMacPlatform ? event.ctrlKey && !event.metaKey : event.ctrlKey && !event.metaKey);
+
 interface CommandInputProps {
   paneId: string;
   token: string;
@@ -77,7 +81,7 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
         await apiService.sendKeys(paneId, map[e.key.toLowerCase()]);
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+      if (isInterruptShortcut(e)) {
         e.preventDefault();
         await apiService.sendKeys(paneId, 'C-c');
         return;
