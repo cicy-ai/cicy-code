@@ -682,6 +682,78 @@ body {
   box-shadow: 0 0 40px rgba(99,102,241,0.2);
 }
 #vm-overlay.processing #vm-icon { color: rgba(129,140,248,0.8); animation: vm-spin 1.5s linear infinite; }
+#cp-paste-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10003;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0,0,0,0.55);
+  box-sizing: border-box;
+}
+#cp-paste-confirm-modal {
+  width: min(760px, 100%);
+  max-height: min(80vh, 720px);
+  border-radius: 14px;
+  background: #111214;
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 24px 80px rgba(0,0,0,0.45);
+  padding: 18px;
+  color: #f5f5f5;
+  font-family: var(--cp-mono-font);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+#cp-paste-confirm-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+#cp-paste-confirm-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255,255,255,0.72);
+}
+#cp-paste-confirm-body {
+  min-height: 160px;
+  max-height: min(52vh, 520px);
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  color: #8bd5ff;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+#cp-paste-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.cp-paste-confirm-btn {
+  appearance: none;
+  border: none;
+  border-radius: 10px;
+  padding: 9px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: var(--cp-mono-font);
+}
+#cp-paste-confirm-cancel {
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.86);
+}
+#cp-paste-confirm-send {
+  background: #2f6df6;
+  color: #fff;
+}
 #cp.voice-mode {
   top: 8px !important;
   right: 8px !important;
@@ -1575,7 +1647,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             return;
         }
         restartBtn.classList.add("restarting");
-        loading.show("Restarting...");
+        loading.show("重启中");
         webtty.requestAPI("POST", "/api/tmux/panes/" + paneId + "/restart", undefined, apiHeaders).catch(function(): void {
             restartBtn.classList.remove("restarting");
         });
@@ -1861,14 +1933,86 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         });
     }
 
+    function sendPastedText(command: string): void {
+        if (!command) {
+            return;
+        }
+        var existing = document.getElementById("cp-paste-confirm-overlay");
+        if (existing && existing.parentNode) {
+            existing.parentNode.removeChild(existing);
+        }
+        var overlay = document.createElement("div");
+        overlay.id = "cp-paste-confirm-overlay";
+        var modal = document.createElement("div");
+        modal.id = "cp-paste-confirm-modal";
+        var title = document.createElement("h3");
+        title.id = "cp-paste-confirm-title";
+        title.textContent = "发送粘贴内容";
+        var desc = document.createElement("p");
+        desc.id = "cp-paste-confirm-desc";
+        desc.textContent = "内容较长，确认后将直接发送到终端。";
+        var body = document.createElement("div");
+        body.id = "cp-paste-confirm-body";
+        body.textContent = command;
+        var actions = document.createElement("div");
+        actions.id = "cp-paste-confirm-actions";
+        var cancelBtn = document.createElement("button");
+        cancelBtn.id = "cp-paste-confirm-cancel";
+        cancelBtn.className = "cp-paste-confirm-btn";
+        cancelBtn.textContent = "取消";
+        var sendBtnEl = document.createElement("button");
+        sendBtnEl.id = "cp-paste-confirm-send";
+        sendBtnEl.className = "cp-paste-confirm-btn";
+        sendBtnEl.textContent = "发送";
+        actions.appendChild(cancelBtn);
+        actions.appendChild(sendBtnEl);
+        modal.appendChild(title);
+        modal.appendChild(desc);
+        modal.appendChild(body);
+        modal.appendChild(actions);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        function close(): void {
+            document.removeEventListener("keydown", onKeyDown, true);
+            if (overlay.parentNode) {
+                overlay.parentNode.removeChild(overlay);
+            }
+        }
+        function onKeyDown(event: KeyboardEvent): void {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                close();
+            }
+        }
+        overlay.addEventListener("click", function(event: MouseEvent): void {
+            if (event.target === overlay) {
+                close();
+            }
+        });
+        cancelBtn.addEventListener("click", function(): void {
+            close();
+        });
+        sendBtnEl.addEventListener("click", function(): void {
+            close();
+            writeClientTrace("cp-paste-http", {
+                command_len: command.length,
+                command_preview: clipTracePreview(command, 160),
+            });
+            sendHTTP(command).catch(function(): void {
+                flashButton(restartBtn);
+            });
+        });
+        document.addEventListener("keydown", onKeyDown, true);
+        sendBtnEl.focus();
+    }
+
     webtty.onConnectionStateChange(function(isOpen: boolean): void {
         if (isOpen) {
             hadOpen = true;
             restartBtn.classList.remove("restarting");
             loading.hide();
             loadWindows();
-        } else if (hadOpen) {
-            loading.show();
         }
     });
 }

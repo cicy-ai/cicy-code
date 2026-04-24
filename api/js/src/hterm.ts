@@ -114,6 +114,9 @@ export class Hterm {
         };
     };
 
+    onPaste(_callback: (input: string) => void): void {
+    };
+
     onResize(callback: (colmuns: number, rows: number) => void) {
         this.io.onTerminalResize = (columns: number, rows: number) => {
             this.columns = columns;

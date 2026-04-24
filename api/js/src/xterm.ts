@@ -7,6 +7,22 @@ import { openExternalLinkWithConfirm } from "./link_confirm";
 
 const deviceAttributesRe = /\x1b\[\??[\d;]*c/g;
 const mouseClickRe = /\x1b\[<(?:0|1|2|3|32|33|34|35);\d+;\d+[Mm]|\x1b\[M[\s\S]{3}/g;
+const fullWidthPunctuationMap: Record<string, string> = {
+    "～": "~",
+    "。": ".",
+    "，": ",",
+    "、": ",",
+    "》": ">",
+    "《": "<",
+    "？": "?",
+    "（": "(",
+    "）": ")",
+    "；": ";",
+    "：": ":",
+};
+function normalizeTerminalInput(value: string): string {
+    return value.replace(/[～。，、》《？（）；：]/g, (char: string) => fullWidthPunctuationMap[char] || char);
+}
 const stripModeSequenceRes = [
     /\x1b\[\?1000[hl]/g,
     /\x1b\[\?1002[hl]/g,
@@ -63,6 +79,7 @@ export class Xterm {
     imageOverlays: ImageRectOverlay[];
     initialFitDone: boolean;
     isComposing: boolean;
+    pasteCallback: ((input: string) => void) | null;
 
     constructor(elem: HTMLElement) {
         this.elem = elem;
@@ -75,9 +92,10 @@ export class Xterm {
         this.imageOverlays = [];
         this.initialFitDone = false;
         this.isComposing = false;
+        this.pasteCallback = null;
 
         this.term = new XtermTerminal({
-            fontSize: 12,
+            fontSize: 13,
             convertEol: false,
             allowTransparency: true,
             scrollback: 20000,
@@ -158,6 +176,11 @@ export class Xterm {
                 object-fit: contain;
                 display: block;
             }
+            .xterm .xterm-helper-textarea,
+            .xterm .composition-view {
+                font-family: var(--cp-mono-font);
+                font-size: 13px;
+            }
         `;
         elem.ownerDocument.head.appendChild(style);
 
@@ -190,19 +213,31 @@ export class Xterm {
                 } catch {}
             });
         };
+        const showPasteDialog = (event: ClipboardEvent) => {
+            clearComposing();
+            const text = normalizeTerminalInput(event.clipboardData?.getData('text/plain') || '');
+            if (!text) {
+                refocus();
+                return;
+            }
+            const lineCount = text.split(/\r\n|\r|\n/).length;
+            const shouldConfirm = lineCount > 1 || text.length > 100;
+            if (!shouldConfirm || !this.pasteCallback) {
+                refocus();
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            this.pasteCallback(text);
+            refocus();
+        };
         if (textarea) {
             textarea.addEventListener('compositionstart', () => { this.isComposing = true; });
             textarea.addEventListener('compositionend', clearComposing);
             textarea.addEventListener('blur', clearComposing);
-            textarea.addEventListener('paste', () => {
-                clearComposing();
-                refocus();
-            });
+            textarea.addEventListener('paste', showPasteDialog, true);
         }
-        this.elem.addEventListener('paste', () => {
-            clearComposing();
-            refocus();
-        });
+        this.elem.addEventListener('paste', showPasteDialog, true);
         this.elem.addEventListener('mousedown', refocus);
 
         this.fitSoon();
@@ -456,16 +491,21 @@ export class Xterm {
         };
         this.inputDisposable = this.term.onData((data: string) => {
             if (this.isComposing) return;
+            const normalized = normalizeTerminalInput(data);
             // 控制字符立即发送
-            if (data.length === 1 && data.charCodeAt(0) < 32 || data.charCodeAt(0) === 127 || data[0] === '\x1b') {
+            if (normalized.length === 1 && normalized.charCodeAt(0) < 32 || normalized.charCodeAt(0) === 127 || normalized[0] === '\x1b') {
                 flush();
-                callback(data);
+                callback(normalized);
                 return;
             }
-            buffer += data;
+            buffer += normalized;
             if (timer) clearTimeout(timer);
             timer = window.setTimeout(flush, 50);
         });
+    }
+
+    onPaste(callback: (input: string) => void): void {
+        this.pasteCallback = callback;
     }
 
     onResize(callback: (colmuns: number, rows: number) => void): void {

@@ -44,6 +44,7 @@ export interface Terminal {
     configure(options: { scrollback?: number, fontFamily?: string, letterSpacing?: number }): void;
     fit(): void;
     onInput(callback: (input: string) => void): void;
+    onPaste?(callback: (input: string) => void): void;
     onResize(callback: (colmuns: number, rows: number) => void): void;
     reset(): void;
     deactivate(): void;
@@ -218,6 +219,11 @@ export class WebTTY {
                 resizeHandler(termInfo.columns, termInfo.rows);
 
                 this.term.onInput(
+                    (input: string) => {
+                        connection.send(msgInput + input);
+                    }
+                );
+                this.term.onPaste?.(
                     (input: string) => {
                         connection.send(msgInput + input);
                     }
