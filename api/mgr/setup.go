@@ -396,6 +396,31 @@ func parseSelectedAgents(agentList string) ([]string, error) {
 	return selected, nil
 }
 
+const defaultDevAgent = "cicy-claude"
+
+func effectiveAgentsFlag() string {
+	if value := strings.TrimSpace(agentsFlag); value != "" {
+		return value
+	}
+	if devMode {
+		return defaultDevAgent
+	}
+	return ""
+}
+
+func mustSelectedAgents() []string {
+	effective := effectiveAgentsFlag()
+	if effective == "" {
+		return []string{defaultDevAgent}
+	}
+
+	selected, err := parseSelectedAgents(effective)
+	if err != nil {
+		log.Fatalf("[startup] invalid --agents value %q: %v", effective, err)
+	}
+	return selected
+}
+
 func ensureWorkerIndexAtLeast(n int) {
 	if n <= 0 {
 		return
@@ -624,35 +649,25 @@ func checkEnv() {
 	if err := store.QueryRow("SELECT COUNT(*) FROM agent_config").Scan(&count); err != nil {
 		log.Fatalf("[startup] failed to query agent_config: %v", err)
 	}
+	effectiveAgentList := effectiveAgentsFlag()
 	if count == 0 {
 		if isContainerRuntime() {
 			// Preinstalled container runtime must never block on interactive setup.
 			// Respect explicit --agents=... when provided; otherwise keep the default
 			// footprint minimal with only w-10001 OpenClaw.
-			if agentsFlag != "" {
-				runSetupWithAgents(agentsFlag)
+			if effectiveAgentList != "" {
+				runSetupWithAgents(effectiveAgentList)
 			} else {
 				createSelectedWorkers([]string{"hermes"})
 			}
-		} else if agentsFlag != "" {
-			runSetupWithAgents(agentsFlag)
+		} else if effectiveAgentList != "" {
+			runSetupWithAgents(effectiveAgentList)
 		} else {
 			runSetup()
 		}
 	}
 
-	// Parse selected agents from --agents flag
-	var selectedAgents []string
-	if agentsFlag != "" {
-		selected, err := parseSelectedAgents(agentsFlag)
-		if err != nil {
-			log.Fatalf("[startup] invalid --agents value %q: %v", agentsFlag, err)
-		}
-		selectedAgents = selected
-	} else {
-		selectedAgents = []string{"hermes"}
-	}
-
+	selectedAgents := mustSelectedAgents()
 	ensureBuiltinAgents(selectedAgents)
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles(selectedAgents)

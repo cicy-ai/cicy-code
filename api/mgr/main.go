@@ -80,11 +80,6 @@ Environment:
 		}
 	}
 
-	// --dev without explicit --agents defaults to the supported builtin set
-	if devMode && agentsFlag == "" {
-		agentsFlag = "hermes"
-	}
-
 	initKV()
 	initRedis()
 	initDB()
