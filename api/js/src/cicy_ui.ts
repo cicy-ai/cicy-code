@@ -1111,8 +1111,43 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         storage.set(historyKey, history);
     }
 
+    function normalizePromptPunctuation(value: string): string {
+        return String(value || "").replace(/[～。，、》《？（）；：]/g, function(ch: string): string {
+            var map: { [key: string]: string } = {
+                "～": "~",
+                "。": ".",
+                "，": ",",
+                "、": ",",
+                "》": ">",
+                "《": "<",
+                "？": "?",
+                "（": "(",
+                "）": ")",
+                "；": ";",
+                "：": ":",
+            };
+            return map[ch] || ch;
+        });
+    }
+
+    function syncNormalizedPromptValue(): void {
+        var normalized = normalizePromptPunctuation(input.value);
+        if (normalized === input.value) {
+            storage.set(draftKey, input.value);
+            return;
+        }
+        var start = input.selectionStart;
+        var end = input.selectionEnd;
+        input.value = normalized;
+        try {
+            input.setSelectionRange(start, end);
+        } catch (_error) {
+        }
+        storage.set(draftKey, normalized);
+    }
+
     function doSend(value?: string): void {
-        var command = value !== undefined ? value : input.value;
+        var command = value !== undefined ? normalizePromptPunctuation(value) : normalizePromptPunctuation(input.value);
         if (!command || !command.trim()) {
             return;
         }
@@ -1221,7 +1256,8 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         });
     }
 
-    input.value = storage.get(draftKey, "");
+    input.value = normalizePromptPunctuation(storage.get(draftKey, ""));
+    storage.set(draftKey, input.value);
     updateEnterButton();
 
     var fixedTooltip = document.createElement("div");
@@ -1349,7 +1385,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     });
 
     input.addEventListener("input", function(): void {
-        storage.set(draftKey, input.value);
+        syncNormalizedPromptValue();
     });
     sendBtn.addEventListener("click", function(event: MouseEvent): void {
         event.preventDefault();

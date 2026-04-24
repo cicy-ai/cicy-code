@@ -39,6 +39,18 @@
   --font-mono: "SFMono-Regular", "JetBrains Mono", "Cascadia Mono", "Cascadia Code", "Source Code Pro", "Consolas", "Liberation Mono", ui-monospace, monospace;
 }
 
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
+
 @layer utilities {
   .hide-scrollbar {
     -ms-overflow-style: none;

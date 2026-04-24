@@ -94,8 +94,8 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
   const defaultVal = `${DEFAULT_URL}${localStorage.getItem(TOKEN_KEY) ? `?token=${localStorage.getItem(TOKEN_KEY)}` : ''}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div className="bg-[#1a1a1a] border border-white/10 rounded-xl w-[460px] p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex cursor-pointer items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="w-[460px] cursor-default rounded-xl border border-white/10 bg-[#1a1a1a] p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-300"><X className="w-4 h-4" /></button>
         </div>
