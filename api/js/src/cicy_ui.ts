@@ -934,48 +934,16 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var fixedTop = document.createElement("div");
     fixedTop.id = "fixed-top-action";
     fixedTop.innerHTML =
-        '<button id="cp-win-add" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="新加tmux window">+</button>' +
-        '<button id="cp-win-restart" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="重启tmux">↻</button>' +
-        '<span class="fta-sep"></span>' +
-        '<button id="cp-sigint" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="Ctrl+C">^C</button>' +
-        '<button id="cp-esc-key" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="Esc">⎋</button>' +
-        '<button id="cp-backspace-key" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="Backspace">⌫</button>' +
-        '<button id="cp-up-key" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="Up">↑</button>' +
-        '<button id="cp-down-key" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="Down">↓</button>' +
-        '<button id="cp-enter-key" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="Enter">↵</button>' +
-        '<span class="fta-sep"></span>' +
-        '<button id="cp-reload" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="刷新页面" onclick="location.reload()">⟳</button>' +
-        '<button id="cp-more" class="fta-btn" title="More" style="display:none">⋯</button>' +
-        '<div id="cp-more-menu" class="cp-drop">' +
-            '<select id="cp-model" title="Model">' +
-                '<option value="">Model</option>' +
-                '<option value="claude-opus-4.6">opus-4.6</option>' +
-                '<option value="claude-opus-4.5">opus-4.5</option>' +
-                '<option value="claude-sonnet-4.5">sonnet-4.5</option>' +
-                '<option value="claude-sonnet-4">sonnet-4</option>' +
-                '<option value="claude-haiku-4.5">haiku-4.5</option>' +
-                '<option value="deepseek-3.2">deepseek-3.2</option>' +
-                '<option value="minimax-m2.1">minimax-m2.1</option>' +
-                '<option value="qwen3-coder-next">qwen3-coder</option>' +
-            "</select>" +
-            '<button id="cp-compact" class="cp-drop-item">Compact</button>' +
-        "</div>";
+        '<button id="cp-win-add" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="新加CLI Window">+</button>' +
+        '<button id="cp-win-restart" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="重启智能体">↻</button>' +
+        '<button id="cp-reload" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="刷新页面" onclick="location.reload()">⟳</button>';
 
     document.body.appendChild(winFloat);
     document.body.appendChild(fixedTop);
 
     var input = (document.getElementById("cp-input") || document.createElement("textarea")) as HTMLTextAreaElement;
     var sendBtn = (document.getElementById("cp-send") || document.createElement("button")) as HTMLButtonElement;
-    var sigintBtn = document.getElementById("cp-sigint") as HTMLButtonElement;
-    var escKeyBtn = document.getElementById("cp-esc-key") as HTMLButtonElement;
-    var backspaceKeyBtn = document.getElementById("cp-backspace-key") as HTMLButtonElement;
-    var upKeyBtn = document.getElementById("cp-up-key") as HTMLButtonElement;
-    var downKeyBtn = document.getElementById("cp-down-key") as HTMLButtonElement;
-    var enterKeyBtn = document.getElementById("cp-enter-key") as HTMLButtonElement;
     var enterBtn = (document.getElementById("cp-enter") || document.createElement("button")) as HTMLButtonElement;
-    var modelSel = document.getElementById("cp-model") as HTMLSelectElement;
-    var moreBtn = document.getElementById("cp-more") as HTMLButtonElement;
-    var moreMenu = document.getElementById("cp-more-menu") as HTMLElement;
     var winTabs = document.getElementById("cp-win-tabs") as HTMLElement;
     var collapseBtn = (document.getElementById("cp-collapse") || document.createElement("button")) as HTMLButtonElement;
     var restartBtn = document.getElementById("cp-win-restart") as HTMLButtonElement;
@@ -988,8 +956,6 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var historyIndex = -1;
     var tempDraft = "";
     var enterToSend = storage.get("cicy_enter_to_send", true) as boolean;
-    var sigintDefaultTooltip = sigintBtn.getAttribute("data-tooltip") || "发送 Ctrl+C Event";
-    var sigintConfirmTooltip = "再点一次确认发送 Ctrl+C\n可能会终止当前操作\n如果不想操作，继续等待即可";
 
     function writeClientTrace(eventName: string, meta?: any): void {
         var entry: any = {
@@ -1184,7 +1150,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     }
 
     function normalizePromptPunctuation(value: string): string {
-        return String(value || "").replace(/[～。，、》《？（）；：]/g, function(ch: string): string {
+        return String(value || "").replace(/——|[～。，、》《？（）；：－]/g, function(ch: string): string {
             var map: { [key: string]: string } = {
                 "～": "~",
                 "。": ".",
@@ -1197,8 +1163,9 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
                 "）": ")",
                 "；": ";",
                 "：": ":",
+                "－": "-",
             };
-            return map[ch] || ch;
+            return ch === "——" ? "_" : (map[ch] || ch);
         });
     }
 
@@ -1274,7 +1241,6 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             pending = false;
             button.textContent = original;
             button.classList.remove("cp-confirm");
-            moreMenu.classList.remove("open");
             action();
         });
     }
@@ -1364,46 +1330,6 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         fixedTooltip.style.top = top + "px";
     }
 
-    escKeyBtn.addEventListener("click", function(event: MouseEvent): void {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!sendInput("\x1b")) {
-            flashButton(escKeyBtn);
-        }
-    });
-
-    backspaceKeyBtn.addEventListener("click", function(event: MouseEvent): void {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!sendInput("\x7f")) {
-            flashButton(backspaceKeyBtn);
-        }
-    });
-
-    upKeyBtn.addEventListener("click", function(event: MouseEvent): void {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!sendInput("\x1b[A")) {
-            flashButton(upKeyBtn);
-        }
-    });
-
-    downKeyBtn.addEventListener("click", function(event: MouseEvent): void {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!sendInput("\x1b[B")) {
-            flashButton(downKeyBtn);
-        }
-    });
-
-    enterKeyBtn.addEventListener("click", function(event: MouseEvent): void {
-        event.preventDefault();
-        event.stopPropagation();
-        sendTmuxKey("Enter").catch(function(): void {
-            flashButton(enterKeyBtn);
-        });
-    });
-
     enterBtn.addEventListener("click", function(): void {
         enterToSend = !enterToSend;
         storage.set("cicy_enter_to_send", enterToSend);
@@ -1433,7 +1359,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
                 doSend();
             } else {
                 sendTmuxKey("Enter").catch(function(): void {
-                    flashButton(enterKeyBtn);
+                    flashButton(sendBtn);
                 });
             }
             return;
@@ -1462,46 +1388,6 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     sendBtn.addEventListener("click", function(event: MouseEvent): void {
         event.preventDefault();
         doSend();
-    });
-
-    twiceConfirm(document.getElementById("cp-compact") as HTMLButtonElement, function(): void {
-        sendLine("/model auto");
-        setTimeout(function(): void {
-            sendLine("/model claude-sonnet-4");
-        }, 400);
-        setTimeout(function(): void {
-            sendLine("/compact --truncate-large-messages true --max-message-length 500");
-        }, 1200);
-    });
-
-    modelSel.addEventListener("change", function(): void {
-        if (!modelSel.value) {
-            return;
-        }
-        sendLine("/model " + modelSel.value);
-        modelSel.value = "";
-        moreMenu.classList.remove("open");
-    });
-
-    document.body.appendChild(moreMenu);
-    moreBtn.addEventListener("click", function(event: MouseEvent): void {
-        event.stopPropagation();
-        var isOpen = moreMenu.classList.contains("open");
-        moreMenu.classList.remove("open");
-        if (!isOpen) {
-            var rect = moreBtn.getBoundingClientRect();
-            moreMenu.style.position = "fixed";
-            moreMenu.style.top = rect.top + "px";
-            moreMenu.style.left = (rect.right + 4) + "px";
-            moreMenu.style.right = "auto";
-            moreMenu.classList.add("open");
-        }
-    });
-    document.addEventListener("click", function(event: MouseEvent): void {
-        var target = event.target as Node;
-        if (!moreMenu.contains(target) && target !== moreBtn) {
-            moreMenu.classList.remove("open");
-        }
     });
 
     collapseBtn.addEventListener("click", function(event: MouseEvent): void {
@@ -1589,39 +1475,6 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         apiFetch("POST", "", { session: paneId }).then(loadWindows);
     });
 
-    var sigintPending = false;
-    var sigintTimer = 0;
-    function resetSigintConfirm(): void {
-        sigintPending = false;
-        clearTimeout(sigintTimer);
-        sigintBtn.textContent = "^C";
-        sigintBtn.style.color = "";
-        sigintBtn.setAttribute("data-tooltip", sigintDefaultTooltip);
-        sigintBtn.classList.remove("cp-tooltip-force");
-        sigintBtn.classList.remove("cp-tooltip-multiline");
-    }
-    sigintBtn.addEventListener("click", function(event: MouseEvent): void {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!sigintPending) {
-            sigintPending = true;
-            sigintBtn.textContent = "⚠";
-            sigintBtn.style.color = "rgba(239,68,68,0.9)";
-            sigintBtn.setAttribute("data-tooltip", sigintConfirmTooltip);
-            sigintBtn.classList.add("cp-tooltip-force");
-            sigintBtn.classList.add("cp-tooltip-multiline");
-            sigintTimer = window.setTimeout(function(): void {
-                resetSigintConfirm();
-            }, 2000);
-            return;
-        }
-
-        resetSigintConfirm();
-        if (!sendInput("\x03")) {
-            flashButton(sigintBtn);
-        }
-    });
-
     var restartPending = false;
     var restartTimer = 0;
     restartBtn.addEventListener("click", function(event: MouseEvent): void {
@@ -1647,7 +1500,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             return;
         }
         restartBtn.classList.add("restarting");
-        loading.show("重启中");
+        loading.show("重启智能体中");
         webtty.requestAPI("POST", "/api/tmux/panes/" + paneId + "/restart", undefined, apiHeaders).catch(function(): void {
             restartBtn.classList.remove("restarting");
         });
@@ -1669,7 +1522,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     micButton.className = "fta-btn";
     micButton.title = "Voice Mode";
     micButton.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" x2="12" y1="19" y2="22"></line></svg>';
-    fixedTop.insertBefore(micButton, moreBtn);
+    document.body.appendChild(micButton);
 
     var voiceOverlay = document.createElement("div");
     voiceOverlay.id = "vm-overlay";

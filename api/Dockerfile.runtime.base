@@ -24,6 +24,7 @@ RUN set -eux; \
         ca-certificates \
         curl \
         git \
+        jq \
         python3 \
         sudo \
         tmux \

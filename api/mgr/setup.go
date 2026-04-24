@@ -97,7 +97,7 @@ func codexInstallCmd() string {
 }
 
 func opencodeInstallCmd() string {
-	return "curl -fsSL https://opencode.ai/install | bash && echo 'export PATH=\"$HOME/.opencode/bin:$PATH\"' >> " + shellRC() + " && export PATH=\"$HOME/.opencode/bin:$PATH\""
+	return npmGlobalInstallCmd("opencode-ai@latest")
 }
 
 func cicyInstallCmd() string {
@@ -105,7 +105,7 @@ func cicyInstallCmd() string {
 }
 
 func kiroCliInstallCmd() string {
-	return "curl -fsSL https://cli.kiro.dev/install | bash"
+	return "__cicy_install_kiro_cli_with_progress"
 }
 
 func cicyWechatInstallCmd() string {
@@ -157,7 +157,8 @@ func copilotInstallCmd() string {
 func baseTools() []Tool {
 	return []Tool{
 		{"curl", "curl", packageInstallCmd("curl"), true, false},
-		// {"unzip", "unzip", packageInstallCmd("unzip"), true, false},
+		{"unzip", "unzip", packageInstallCmd("unzip"), true, false},
+		{"jq", "jq", packageInstallCmd("jq"), true, false},
 		{"ssh-keygen", "ssh-keygen", opensshInstallCmd(), true, false},
 		{"tmux", "tmux", packageInstallCmd("tmux"), true, false},
 		{"git", "git", packageInstallCmd("git"), true, false},

@@ -56,7 +56,7 @@ curl -fsSL https://cli.kiro.dev/install | bash
 
 # ── AI CLI 工具 ──
 sudo npm install -g @anthropic-ai/claude-cli || true    # claude
-sudo npm install -g opencode || true                     # opencode
+sudo npm install -g opencode-ai || true                  # opencode
 sudo npm install -g @openai/codex || true                # codex
 # sudo npm install -g @google/gemini-cli || true         # gemini (待稳定)
 # sudo npm install -g @githubnext/github-copilot-cli || true  # copilot (待稳定)
