@@ -74,7 +74,7 @@ func sudoPrefix() string {
 }
 
 func npmGlobalInstallCmd(pkg string) string {
-	return "npm install -g " + pkg
+	return `mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && npm install -g --prefix "$HOME/.npm-global" ` + pkg
 }
 
 func preinstalledRuntimeInstallCmd(cmd string) string {
