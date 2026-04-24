@@ -47,6 +47,7 @@ export interface Terminal {
     }): void;
     fit(): void;
     onInput(callback: (input: string) => void): void;
+    onPaste?(callback: (input: string) => void): void;
     onResize(callback: (colmuns: number, rows: number) => void): void;
     reset(): void;
     deactivate(): void;

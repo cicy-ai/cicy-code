@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -206,9 +207,27 @@ func handleSystemResourcesWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func sampleSystemResources(prev cpuCounters) (systemResourceSnapshot, cpuCounters, error) {
-	currentCPU, err := readCPUCounters()
-	if err != nil {
-		return systemResourceSnapshot{}, prev, err
+	currentCPU := prev
+	cpuUsagePct := 0.0
+	var err error
+	if runtime.GOOS == "darwin" {
+		value, err := readDarwinCPUUsage()
+		if err != nil {
+			return systemResourceSnapshot{}, prev, err
+		}
+		cpuUsagePct = value
+	} else {
+		currentCPU, err = readCPUCounters()
+		if err != nil {
+			return systemResourceSnapshot{}, prev, err
+		}
+		if prev.total > 0 && currentCPU.total > prev.total && currentCPU.idle >= prev.idle {
+			deltaTotal := currentCPU.total - prev.total
+			deltaIdle := currentCPU.idle - prev.idle
+			if deltaTotal > 0 && deltaIdle <= deltaTotal {
+				cpuUsagePct = float64(deltaTotal-deltaIdle) * 100 / float64(deltaTotal)
+			}
+		}
 	}
 	memTotal, memUsed, memUsagePct, err := readMemorySnapshot()
 	if err != nil {
@@ -221,14 +240,6 @@ func sampleSystemResources(prev cpuCounters) (systemResourceSnapshot, cpuCounter
 	load1, load5, load15, err := readLoadAverage()
 	if err != nil {
 		return systemResourceSnapshot{}, prev, err
-	}
-	cpuUsagePct := 0.0
-	if prev.total > 0 && currentCPU.total > prev.total && currentCPU.idle >= prev.idle {
-		deltaTotal := currentCPU.total - prev.total
-		deltaIdle := currentCPU.idle - prev.idle
-		if deltaTotal > 0 && deltaIdle <= deltaTotal {
-			cpuUsagePct = float64(deltaTotal-deltaIdle) * 100 / float64(deltaTotal)
-		}
 	}
 	return systemResourceSnapshot{
 		CPUUsagePct:    cpuUsagePct,
@@ -286,6 +297,9 @@ func readCPUCounters() (cpuCounters, error) {
 }
 
 func readMemorySnapshot() (uint64, uint64, float64, error) {
+	if runtime.GOOS == "darwin" {
+		return readDarwinMemorySnapshot()
+	}
 	f, err := os.Open("/proc/meminfo")
 	if err != nil {
 		return 0, 0, 0, err
@@ -341,11 +355,126 @@ func readDiskSnapshot(path string) (uint64, uint64, float64, error) {
 }
 
 func readLoadAverage() (float64, float64, float64, error) {
+	if runtime.GOOS == "darwin" {
+		return readDarwinLoadAverage()
+	}
 	data, err := os.ReadFile("/proc/loadavg")
 	if err != nil {
 		return 0, 0, 0, err
 	}
 	fields := strings.Fields(string(data))
+	if len(fields) < 3 {
+		return 0, 0, 0, os.ErrInvalid
+	}
+	load1, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	load5, err := strconv.ParseFloat(fields[1], 64)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	load15, err := strconv.ParseFloat(fields[2], 64)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return load1, load5, load15, nil
+}
+
+func readDarwinCPUUsage() (float64, error) {
+	out, err := exec.Command("iostat", "-C", "1", "2").Output()
+	if err != nil {
+		return 0, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		fields := strings.Fields(lines[i])
+		if len(fields) < 6 {
+			continue
+		}
+		idle, err := strconv.ParseFloat(fields[len(fields)-4], 64)
+		if err != nil {
+			continue
+		}
+		if idle < 0 {
+			idle = 0
+		}
+		if idle > 100 {
+			idle = 100
+		}
+		return 100 - idle, nil
+	}
+	return 0, os.ErrInvalid
+}
+
+func readDarwinMemorySnapshot() (uint64, uint64, float64, error) {
+	memOut, err := exec.Command("sysctl", "-n", "hw.memsize").Output()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	total, err := strconv.ParseUint(strings.TrimSpace(string(memOut)), 10, 64)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	pageOut, err := exec.Command("sysctl", "-n", "hw.pagesize").Output()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	pageSize, err := strconv.ParseUint(strings.TrimSpace(string(pageOut)), 10, 64)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	vmOut, err := exec.Command("vm_stat").Output()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	var activePages, wiredPages, compressedPages uint64
+	scanner := bufio.NewScanner(strings.NewReader(string(vmOut)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		switch {
+		case strings.HasPrefix(line, "Pages active:"):
+			activePages = parseVMStatPages(line)
+		case strings.HasPrefix(line, "Pages wired down:"):
+			wiredPages = parseVMStatPages(line)
+		case strings.HasPrefix(line, "Pages occupied by compressor:"):
+			compressedPages = parseVMStatPages(line)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, 0, 0, err
+	}
+
+	used := (activePages + wiredPages + compressedPages) * pageSize
+	if used > total {
+		used = total
+	}
+	return total, used, float64(used) * 100 / float64(total), nil
+}
+
+func parseVMStatPages(line string) uint64 {
+	fields := strings.Fields(strings.ReplaceAll(line, ".", ""))
+	if len(fields) == 0 {
+		return 0
+	}
+	value, err := strconv.ParseUint(fields[len(fields)-1], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return value
+}
+
+func readDarwinLoadAverage() (float64, float64, float64, error) {
+	out, err := exec.Command("sysctl", "-n", "vm.loadavg").Output()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	raw := strings.TrimSpace(string(out))
+	raw = strings.TrimPrefix(raw, "{")
+	raw = strings.TrimSuffix(raw, "}")
+	fields := strings.Fields(raw)
 	if len(fields) < 3 {
 		return 0, 0, 0, os.ErrInvalid
 	}

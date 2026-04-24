@@ -230,6 +230,16 @@ func (c *chatClient) readPump() {
 			}
 			continue
 		}
+		if evt.Type == "ping" {
+			reply := ChatEvent{Type: "pong", Data: evt.Data}
+			if b, err := json.Marshal(reply); err == nil {
+				select {
+				case c.send <- b:
+				default:
+				}
+			}
+			continue
+		}
 		// 广播客户端发来的消息给同 agent 的其他客户端
 		hub.broadcastExcept(c.agentID, evt, c)
 	}

@@ -30,6 +30,7 @@ export declare class Xterm {
     imageOverlays: ImageRectOverlay[];
     initialFitDone: boolean;
     isComposing: boolean;
+    pasteCallback: ((input: string) => void) | null;
     constructor(elem: HTMLElement);
     configure(options: {
         scrollback?: number;
@@ -54,6 +55,7 @@ export declare class Xterm {
     setWindowTitle(title: string): void;
     setPreferences(_value: object): void;
     onInput(callback: (input: string) => void): void;
+    onPaste(callback: (input: string) => void): void;
     onResize(callback: (colmuns: number, rows: number) => void): void;
     deactivate(): void;
     reset(): void;

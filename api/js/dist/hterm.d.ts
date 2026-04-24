@@ -29,6 +29,7 @@ export declare class Hterm {
     }): void;
     fit(): void;
     onInput(callback: (input: string) => void): void;
+    onPaste(_callback: (input: string) => void): void;
     onResize(callback: (colmuns: number, rows: number) => void): void;
     deactivate(): void;
     reset(): void;

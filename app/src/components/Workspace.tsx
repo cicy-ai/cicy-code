@@ -3,7 +3,7 @@ import { useApp } from '../contexts/AppContext';
 import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import { createPortal } from 'react-dom';
 import {
-  Terminal, MessageSquare, Home, Folder, FolderOpen, X, Settings, Brain, Search,
+  Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, RotateCcw, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check
 } from 'lucide-react';
 import { assetUrl } from '../lib/assets';
@@ -199,11 +199,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const initialStackSelectionScopeRef = useRef<string | null>(null);
   const cliDrawerResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
-  const handleCodeHome = () => {
-    const hostHome = getHostHome();
-    const next = urls.codeServer(hostHome, token!);
-    window.open(next, '_blank');
-  };
   const handleOpenClawOpen = () => {
     if (!token) return;
     window.open(urls.openClaw(token), '_blank');
@@ -222,6 +217,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [chatSuggestionSending, setChatSuggestionSending] = useState(false);
   const chatWsRef = useRef<WebSocket | null>(null);
   const chatWsReconnectTimerRef = useRef<number | null>(null);
+  const chatWsPingTimerRef = useRef<number | null>(null);
+  const chatWsPingSentAtRef = useRef<number | null>(null);
+  const chatWsPingRequestIdRef = useRef<string | null>(null);
 
   const [trialExpiresAt, setTrialExpiresAt] = useState<string | null>(null);
   const [trialExpiresAtEpoch, setTrialExpiresAtEpoch] = useState<number | null>(null);
@@ -522,6 +520,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       chatWsRef.current = null;
       setChatWsConnected(false);
       setChatWsClientId(null);
+      setNetLatency(null);
       setChatWsLiveStatus('idle');
       setChatWsLiveText('');
       setChatWsState({
@@ -557,9 +556,24 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         window.clearTimeout(chatWsReconnectTimerRef.current);
         chatWsReconnectTimerRef.current = null;
       }
+      if (chatWsPingTimerRef.current !== null) {
+        window.clearInterval(chatWsPingTimerRef.current);
+        chatWsPingTimerRef.current = null;
+      }
+      chatWsPingSentAtRef.current = null;
+      chatWsPingRequestIdRef.current = null;
       chatWsRef.current?.close();
       const ws = new WebSocket(`${base}/api/chat/ws?agent_id=${encodeURIComponent(agentId)}&token=${encodeURIComponent(token)}&electron=${isElectron}&client_id=${encodeURIComponent(clientId)}`);
       chatWsRef.current = ws;
+      const sendLatencyPing = () => {
+        if (dead || chatWsRef.current !== ws || ws.readyState !== WebSocket.OPEN) return;
+        const requestId = `ping-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        chatWsPingRequestIdRef.current = requestId;
+        chatWsPingSentAtRef.current = performance.now();
+        try {
+          ws.send(JSON.stringify({ type: 'ping', data: { requestId } }));
+        } catch {}
+      };
       ws.onopen = () => {
         if (dead || chatWsRef.current !== ws) return;
         setChatWsConnected(true);
@@ -572,6 +586,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         // 连接建立后立即请求 poll 数据
         console.log('[poll_request] WS onopen, sending initial poll_request');
         try { ws.send(JSON.stringify({ type: 'poll_request' })); } catch (e) { console.warn('[poll_request] onopen send failed:', e); }
+        sendLatencyPing();
+        chatWsPingTimerRef.current = window.setInterval(sendLatencyPing, 5000);
       };
       ws.onmessage = (event) => {
         if (dead || chatWsRef.current !== ws) return;
@@ -652,6 +668,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             } catch (error: any) {
               sendChatWsMessage({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, error: error?.message || String(error) } });
             }
+          } else if (msg?.type === 'pong' && msg.data?.requestId) {
+            if (msg.data.requestId === chatWsPingRequestIdRef.current && chatWsPingSentAtRef.current != null) {
+              setNetLatency(Math.max(0, Math.round(performance.now() - chatWsPingSentAtRef.current)));
+              chatWsPingSentAtRef.current = null;
+            }
           } else if (msg?.type === 'poll_data' && msg.data) {
             const data = msg.data;
             console.log('[poll_data]', data);
@@ -689,7 +710,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         if (chatWsRef.current === ws) {
           chatWsRef.current = null;
         }
+        if (chatWsPingTimerRef.current !== null) {
+          window.clearInterval(chatWsPingTimerRef.current);
+          chatWsPingTimerRef.current = null;
+        }
+        chatWsPingSentAtRef.current = null;
+        chatWsPingRequestIdRef.current = null;
         setChatWsConnected(false);
+        setNetLatency(null);
         setChatWsState({
           activeChatPaneId: paneId,
           chatWsConnected: false,
@@ -703,6 +731,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     };
 
     setChatWsConnected(false);
+    setNetLatency(null);
     setChatWsLiveStatus('idle');
     setChatWsLiveText('');
     setChatWsState({
@@ -719,12 +748,19 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         window.clearTimeout(chatWsReconnectTimerRef.current);
         chatWsReconnectTimerRef.current = null;
       }
+      if (chatWsPingTimerRef.current !== null) {
+        window.clearInterval(chatWsPingTimerRef.current);
+        chatWsPingTimerRef.current = null;
+      }
+      chatWsPingSentAtRef.current = null;
+      chatWsPingRequestIdRef.current = null;
       if (chatWsRef.current) {
         const closingWs = chatWsRef.current;
         chatWsRef.current = null;
         closingWs.close();
       }
       setChatWsConnected(false);
+      setNetLatency(null);
       setChatWsState({
         activeChatPaneId: activeCliPaneId,
         chatWsConnected: false,
@@ -1008,16 +1044,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     <div data-id="right-content" className="h-full flex flex-col relative">
       <header data-id="top-bar" className="h-12 border-b border-[var(--vsc-border)] bg-[#0A0A0A] flex items-center justify-between px-4 shrink-0 z-10">
         <div data-id="top-bar-left" className="flex items-center gap-3 w-1/3 min-w-0">
-          {!topBarIsApiOnlyRuntime && (
-            <button
-              type="button"
-              onClick={handleCodeHome}
-              className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer shrink-0"
-              title={topBarWorkspace}
-            >
-              <Home className="w-3.5 h-3.5" />
-            </button>
-          )}
           {membershipBanner && (
             <div
               data-id="top-bar-membership-banner"
@@ -1104,7 +1130,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           )}
         </div>
         <div data-id="top-bar-center" className="flex items-center justify-center w-1/3" />
-        <div data-id="top-bar-right" className="flex items-center justify-end w-1/3 gap-3">
+        <div data-id="top-bar-right" className="flex h-full items-center justify-end gap-3 w-1/3">
           <SystemResourceMonitor paneId={paneId} />
           <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} />
           <button
@@ -1118,13 +1144,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <button onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 令牌"><Key className="w-3.5 h-3.5" /></button>
           <button onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 服务器"><Server className="w-3.5 h-3.5" /></button>
           <button onClick={() => window.dispatchEvent(new Event('open-devtools-panel'))} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="开发工具"><Bug className="w-3.5 h-3.5" /></button>
-          <span id="version" className="text-[10px] font-mono text-zinc-600">{config.version}</span>
+          <span id="version" className="text-[10px] font-mono leading-none text-zinc-600">{config.version}</span>
           {contextUsage != null && (
-            <div data-id="context-usage" className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/[0.02]">
-              <div data-id="context-bar" className="w-12 h-1 rounded-full bg-white/[0.04] overflow-hidden">
+            <div data-id="context-usage" className="flex items-center gap-1.5 rounded-full bg-white/[0.02] px-2 py-0.5">
+              <div data-id="context-bar" className="h-1 w-12 overflow-hidden rounded-full bg-white/[0.04]">
                 <div className={`h-full rounded-full ${contextUsage > 80 ? 'bg-red-400/60' : contextUsage > 50 ? 'bg-yellow-400/60' : 'bg-emerald-400/60'}`} style={{ width: `${contextUsage}%` }} />
               </div>
-              <span data-id="context-pct" className="text-xs text-zinc-600 font-mono">{contextUsage}%</span>
+              <span data-id="context-pct" className="font-mono text-xs leading-none text-zinc-600">{contextUsage}%</span>
             </div>
           )}
         </div>
@@ -1809,9 +1835,9 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
 function NetworkSignal({ latency, connected = true, clientId }: { latency: number | null; connected?: boolean; clientId?: string | null }) {
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState(false);
-  const bars = !connected || latency === null ? 0 : latency < 100 ? 4 : latency < 200 ? 3 : latency < 500 ? 2 : 1;
+  const bars = !connected ? 0 : latency === null ? 4 : latency < 100 ? 4 : latency < 200 ? 3 : latency < 500 ? 2 : 1;
   const color = bars >= 4 ? 'bg-emerald-400' : bars === 3 ? 'bg-emerald-400' : bars === 2 ? 'bg-yellow-400' : bars === 1 ? 'bg-red-400' : 'bg-zinc-700';
-  const label = !connected || latency === null ? '离线' : `${latency}ms`;
+  const label = !connected ? '离线' : latency === null ? '在线' : `${latency}ms`;
   const copyPlainText = (text: string) => {
     const textarea = document.createElement('textarea');
     textarea.value = text;
@@ -1841,7 +1867,7 @@ function NetworkSignal({ latency, connected = true, clientId }: { latency: numbe
   return (
     <div
       data-id="network-signal"
-      className="relative flex items-center gap-1.5 h-4 cursor-default pr-1 pb-3"
+      className="relative flex h-5 items-center gap-1.5 pr-1"
       onPointerEnter={() => setOpen(true)}
       onPointerLeave={() => setOpen(false)}
     >
@@ -1852,7 +1878,7 @@ function NetworkSignal({ latency, connected = true, clientId }: { latency: numbe
       </div>
       <span
         data-id="network-signal-label"
-        className="mt-[5px] min-w-[28px] text-[10px] leading-none text-zinc-600"
+        className="min-w-[28px] text-[10px] leading-none text-zinc-600"
       >
         {label}
       </span>
