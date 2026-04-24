@@ -826,46 +826,19 @@ func openClawRuntimeBaseURL(agentID string) string {
 }
 
 func visibleAgentInstallLine(commandName, label, installCmd, logPath string) string {
-	return fmt.Sprintf(`if ! command -v %s >/dev/null 2>&1; then
-  echo '[cicy] =================================================='
-  echo '[cicy] %s 未安装，正在安装...'
-  echo '[cicy] 可能需要 1-5 分钟，取决于网络速度'
-  echo '[cicy] =================================================='
-  install_log=%s
-  ( %s ) >"$install_log" 2>&1 &
-  install_pid=$!
-  elapsed=0
-  while kill -0 "$install_pid" 2>/dev/null; do
-    elapsed=$((elapsed + 1))
-    filled=$(((elapsed %% 20) + 1))
-    bar=$(printf '%%-*s' "$filled" '' | tr ' ' '#')
-    pad=$(printf '%%-*s' $((20 - filled)) '')
-    printf '\r[cicy] [%%s%%s] 正在安装 %s... %%3ss' "$bar" "$pad" "$elapsed"
-    sleep 1
-  done
-  wait "$install_pid"
-  install_status=$?
-  printf '\n'
-  if [ "$install_status" -ne 0 ]; then
-    echo '[cicy] %s 安装失败，最近日志：'
-    tail -100 "$install_log"
-    echo '[cicy] 手动重试: source boot.sh'
-    return 1
-  fi
-  echo '[cicy] %s 安装完成'
-fi`, commandName, label, tmuxShellQuote(logPath), installCmd, strings.ToLower(label), strings.ToLower(label), strings.ToLower(label))
+	return fmt.Sprintf(`__cicy_require_command %s %s %s %s`, tmuxShellQuote(commandName), tmuxShellQuote(label), tmuxShellQuote(installCmd), tmuxShellQuote(logPath))
+}
+
+func visibleAgentInstallLiveLine(commandName, label, installCmd, logPath string) string {
+	return fmt.Sprintf(`__cicy_require_command_live %s %s %s %s`, tmuxShellQuote(commandName), tmuxShellQuote(label), tmuxShellQuote(installCmd), tmuxShellQuote(logPath))
 }
 
 func ensureAgentCommandLine(commandName, label, installCmd, logPath string) string {
-	if strings.TrimSpace(installCmd) == "" {
-		return fmt.Sprintf(`if ! command -v %s >/dev/null 2>&1; then
-  echo '[cicy] =================================================='
-  echo '[cicy] %s 未找到，请更新基础镜像后重启'
-  echo '[cicy] =================================================='
-  return 1
-fi`, commandName, label)
-	}
 	return visibleAgentInstallLine(commandName, label, installCmd, logPath)
+}
+
+func ensureAgentCommandLineLive(commandName, label, installCmd, logPath string) string {
+	return visibleAgentInstallLiveLine(commandName, label, installCmd, logPath)
 }
 
 func agentBootLines(agentType string, allowAllActions bool, shortID string) []string {
@@ -1724,7 +1697,6 @@ EOF
 		providerNameOverride := tmuxShellQuote(`model_providers.custom.name="cicy-local"`)
 		baseURLOverride := tmuxShellQuote(`model_providers.custom.base_url="` + baseURL + `"`)
 		lines := []string{
-			"mkdir -p ~/.cicy",
 			"export OPENAI_API_KEY='cicy-local-gateway'",
 			ensureAgentCommandLine("codex", "Codex", codexInstallCmd(), installLog),
 		}
@@ -1751,7 +1723,6 @@ EOF
 		model := aiCfg.DefaultClaudeModel
 		settingsJSON := fmt.Sprintf(`{"env":{"ANTHROPIC_AUTH_TOKEN":"cicy-local-gateway","ANTHROPIC_BASE_URL":"%s"},"model":"%s"}`, baseURL, model)
 		lines := []string{
-			"mkdir -p ~/.cicy",
 			ensureAgentCommandLine(cmdName, label, installCmd, installLog),
 			fmt.Sprintf(`printf '%%s' %s > "$WORKSPACE/%s"`, tmuxShellQuote(settingsJSON), settingsFile),
 		}
@@ -1768,7 +1739,6 @@ EOF
 		configPath := fmt.Sprintf("/tmp/opencode-%s.json", shortID)
 		markerPath := lazyAgentMarkerPath("opencode", shortID)
 		lines := []string{
-			"mkdir -p ~/.cicy",
 			ensureAgentCommandLine("opencode", "OpenCode", opencodeInstallCmd(), installLog),
 			fmt.Sprintf("export OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
 			fmt.Sprintf("export OPENCODE_BASE_CONFIG=%s", tmuxShellQuote(baseConfigPath)),
@@ -1860,12 +1830,8 @@ EOF`)
 	case "kiro-cli":
 		home, _ := os.UserHomeDir()
 		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("kiro-install-%s.log", shortID))
-		baseURL := anthropicRuntimeBaseURL(shortID)
 		lines := []string{
-			"mkdir -p ~/.cicy",
-			ensureAgentCommandLine("kiro-cli", "Kiro CLI", kiroCliInstallCmd(), installLog),
-			fmt.Sprintf("export ANTHROPIC_BASE_URL=%s", tmuxShellQuote(baseURL)),
-			"export ANTHROPIC_API_KEY='cicy-local-gateway'",
+			ensureAgentCommandLineLive("kiro-cli", "Kiro CLI", kiroCliInstallCmd(), installLog),
 			`if kiro-cli whoami 2>/dev/null | grep -q "^Not logged in"; then
   while true; do
     echo ''
@@ -1890,7 +1856,7 @@ fi`,
 		home, _ := os.UserHomeDir()
 		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("copilot-install-%s.log", shortID))
 		lines := []string{
-			"mkdir -p ~/.cicy ~/.copilot",
+			"mkdir -p ~/.copilot",
 			ensureAgentCommandLine("copilot", "GitHub Copilot", copilotInstallCmd(), installLog),
 			`node -e 'const fs=require("fs"),f=process.env.HOME+"/.copilot/config.json";let c={};try{c=JSON.parse(fs.readFileSync(f))}catch(_){}c.trustedFolders=c.trustedFolders||[];const w=process.env.WORKSPACE||".";if(!c.trustedFolders.includes(w))c.trustedFolders.push(w);fs.writeFileSync(f,JSON.stringify(c,null,2))'`,
 			"copilot --yolo",
@@ -1900,7 +1866,6 @@ fi`,
 		home, _ := os.UserHomeDir()
 		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("wechat-install-%s.log", shortID))
 		lines := []string{
-			"mkdir -p ~/.cicy",
 			ensureAgentCommandLine("cicy-wechat", "WeChat", cicyWechatInstallCmd(), installLog),
 			`export DATA_DIR="$WORKSPACE/.cicy-wechat"`,
 			"cicy-wechat",
@@ -1910,7 +1875,6 @@ fi`,
 		home, _ := os.UserHomeDir()
 		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("feishu-install-%s.log", shortID))
 		lines := []string{
-			"mkdir -p ~/.cicy",
 			ensureAgentCommandLine("cicy-feishu", "Feishu", cicyFeishuInstallCmd(), installLog),
 			"cicy-feishu",
 		}
@@ -1926,7 +1890,6 @@ fi`,
 		modelName := "claude-opus-4-6"
 		contextLength := 1000000
 		lines := []string{
-			"mkdir -p ~/.cicy",
 			fmt.Sprintf("export HERMES_HOME=%s", tmuxShellQuote(hermesHome)),
 			fmt.Sprintf("export HERMES_INSTALL_DIR=%s", tmuxShellQuote(hermesInstallDir)),
 			fmt.Sprintf("export CICY_HERMES_BIN=%s", tmuxShellQuote(hermesBin)),
@@ -3066,8 +3029,6 @@ func initPaneEnv(opts paneEnvOpts) {
 	lines := []string{
 		"touch ~/.cicy_tmux.conf",
 		"source ~/.cicy_tmux.conf",
-		`export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$HOME/.opencode/bin:$PATH"`,
-		`case " ${NODE_OPTIONS:-} " in *" --max-old-space-size="*) ;; *) export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=3072" ;; esac`,
 		fmt.Sprintf("export X_AGENT_ID=%s", tmuxShellQuote(pid)),
 		fmt.Sprintf("export X_AGENT_SHORT_ID=%s", tmuxShellQuote(shortID)),
 	}
@@ -3088,7 +3049,6 @@ func initPaneEnv(opts paneEnvOpts) {
 
 	if opts.workspace != "" {
 		lines = append(lines,
-			"cd "+tmuxShellQuote(opts.workspace),
 			fmt.Sprintf("export WORKSPACE=%s", tmuxShellQuote(opts.workspace)),
 			`if [ ! -e ./home ] || [ -L ./home ]; then ln -sfn -- "${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}" ./home; fi`,
 			// "mkdir -p ./skills ./projects",
@@ -3120,13 +3080,17 @@ func initPaneEnv(opts paneEnvOpts) {
 	// on bash semantics. Re-enter through bash so manual/source startup still works.
 	script := "#!/usr/bin/env bash\n\n" +
 		"if [ -z \"${BASH_VERSION:-}\" ]; then\n" +
-		"  _cicy_boot_pwd=\"$PWD\"\n" +
-		"  bash -lc 'cd \"$1\" && source ./boot.sh' bash \"$_cicy_boot_pwd\"\n" +
+		"  _cicy_boot_dir=\"$PWD\"\n" +
+		"  bash -lc 'cd \"$1\" && source ./boot.sh' bash \"$_cicy_boot_dir\"\n" +
 		"  _cicy_boot_status=$?\n" +
-		"  unset _cicy_boot_pwd\n" +
+		"  unset _cicy_boot_dir\n" +
 		"  return \"$_cicy_boot_status\" 2>/dev/null || exit \"$_cicy_boot_status\"\n" +
 		"fi\n\n" +
-		strings.Join(lines, "\n") + "\n"
+		"_cicy_boot_script=\"${BASH_SOURCE:-$0}\"\n" +
+		"_cicy_boot_dir=\"$(cd \"$(dirname \"$_cicy_boot_script\")\" && pwd)\"\n" +
+		"cd \"$_cicy_boot_dir\"\n\n" +
+		strings.Join(lines, "\n") + "\n" +
+		"unset _cicy_boot_script _cicy_boot_dir\n"
 	scriptPath := filepath.Join(opts.workspace, "boot.sh")
 	if strings.TrimSpace(opts.workspace) == "" {
 		scriptPath = fmt.Sprintf("/tmp/init_pane_%s.sh", strings.ReplaceAll(pid, ":", "_"))

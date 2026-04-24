@@ -19,9 +19,10 @@ const fullWidthPunctuationMap: Record<string, string> = {
     "）": ")",
     "；": ";",
     "：": ":",
+    "－": "-",
 };
 function normalizeTerminalInput(value: string): string {
-    return value.replace(/[～。，、》《？（）；：]/g, (char: string) => fullWidthPunctuationMap[char] || char);
+    return value.replace(/——|[～。，、》《？（）；：－]/g, (char: string) => char === "——" ? "_" : (fullWidthPunctuationMap[char] || char));
 }
 const stripModeSequenceRes = [
     /\x1b\[\?1000[hl]/g,

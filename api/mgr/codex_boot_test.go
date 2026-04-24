@@ -10,9 +10,9 @@ func TestAgentBootLinesCodexAllowAllActions(t *testing.T) {
 
 	script := strings.Join(lines, "\n")
 
-	// Must have mkdir
-	if !strings.Contains(script, "mkdir -p ~/.cicy") {
-		t.Error("missing mkdir -p ~/.cicy")
+	// mkdir moved to ~/.cicy_tmux.conf
+	if strings.Contains(script, "mkdir -p ~/.cicy") {
+		t.Error("codex boot lines should not duplicate mkdir -p ~/.cicy")
 	}
 
 	// Must set OPENAI_API_KEY
@@ -20,9 +20,9 @@ func TestAgentBootLinesCodexAllowAllActions(t *testing.T) {
 		t.Error("missing OPENAI_API_KEY")
 	}
 
-	// Must have codex install check
-	if !strings.Contains(script, "command -v codex") {
-		t.Error("missing codex install check")
+	// Must use shared install helper
+	if !strings.Contains(script, "__cicy_require_command 'codex' 'Codex'") {
+		t.Error("missing codex shared install helper")
 	}
 
 	// Must use custom provider
@@ -71,9 +71,9 @@ func TestAgentBootLinesCodexRestrictedActions(t *testing.T) {
 		t.Error("missing model_providers.custom.base_url")
 	}
 
-	// Must still have install check
-	if !strings.Contains(script, "command -v codex") {
-		t.Error("missing codex install check")
+	// Must still use shared install helper
+	if !strings.Contains(script, "__cicy_require_command 'codex' 'Codex'") {
+		t.Error("missing codex shared install helper")
 	}
 
 	// Must still have OPENAI_API_KEY
@@ -83,8 +83,8 @@ func TestAgentBootLinesCodexRestrictedActions(t *testing.T) {
 }
 
 func TestAgentBootLinesCodexNormalization(t *testing.T) {
-	// "openai" and "kiro-cli" should normalize to codex
-	for _, alias := range []string{"codex", "openai", "kiro-cli"} {
+	// "openai" should normalize to codex
+	for _, alias := range []string{"codex", "openai"} {
 		lines := agentBootLines(alias, true, "w-10001")
 		script := strings.Join(lines, "\n")
 		if !strings.Contains(script, "codex -c") {
