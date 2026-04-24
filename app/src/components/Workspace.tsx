@@ -1296,10 +1296,6 @@ function SideBtn({ dataId, active, icon, title, onClick }: { dataId: string; act
   );
 }
 
-function Placeholder({ icon, text }: { icon: React.ReactNode; text: string }) {
-  return <div data-id="placeholder" className="absolute inset-0 flex items-center justify-center text-zinc-600 flex-col gap-4 pointer-events-none">{icon}<p className="text-sm">{text}</p></div>;
-}
-
 function normalizeAgentType(agentType?: string) {
   switch ((agentType || '').trim().toLowerCase()) {
     case 'openclaw':
@@ -1408,33 +1404,6 @@ function buildCanvasItems({
       workspace: meta.workspace,
       isPrimary: targetPaneId === paneId,
       isApiOnly: meta.isApiOnly,
-    };
-  });
-}
-
-function buildCommandTargets({
-  paneId,
-  canvasPaneIds,
-  agents,
-  boundAgents,
-  paneDetails,
-  pollStatuses,
-  agentDetail,
-}: {
-  paneId: string;
-  canvasPaneIds: string[];
-  agents: any[];
-  boundAgents: any[];
-  paneDetails: Record<string, any>;
-  pollStatuses: Record<string, any>;
-  agentDetail: any;
-}) {
-  return canvasPaneIds.map((targetPaneId) => {
-    const meta = resolvePaneMeta({ paneId: targetPaneId, agents, boundAgents, paneDetails, pollStatuses, agentDetail });
-    return {
-      paneId: targetPaneId,
-      title: meta.title,
-      status: meta.status?.status || (targetPaneId === paneId ? 'idle' : ''),
     };
   });
 }

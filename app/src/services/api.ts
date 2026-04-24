@@ -109,8 +109,6 @@ const api = {
   updateQueueItem: (id: number, data: any) => http.patch(`/api/workers/queue/${id}`, data),
   deleteQueueItem: (id: number) => http.delete(`/api/workers/queue/${id}`),
 
-  getPaneList: () => http.get('/api/tmux/panes'),
-
   listWindows: (session: string) => http.get(`/api/tmux/windows?session=${session}`),
   createWindow: (session: string, name?: string) => http.post('/api/tmux/windows', { session, name }),
   renameWindow: (session: string, index: string, name: string) => http.patch('/api/tmux/windows', { session, index, name }),

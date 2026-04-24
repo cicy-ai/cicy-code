@@ -43,6 +43,8 @@ const startupPromptCooldown = 15 * time.Second
 const directPromptRuneThreshold = 600
 const bracketedPasteStart = "\x1b[200~"
 const bracketedPasteEnd = "\x1b[201~"
+const shellPromptPollInterval = 200 * time.Millisecond
+const shellPromptTimeout = 12 * time.Second
 
 type startupPromptTask struct {
 	paneID    string
@@ -204,6 +206,55 @@ func startupPromptLess(a, b startupPromptTask) bool {
 		return ao < bo
 	}
 	return a.paneID < b.paneID
+}
+
+func isShellPromptVisible(out string) bool {
+	lines := normalizeNonEmptyMeaningfulLines(strings.Split(out, "\n"))
+	if len(lines) == 0 {
+		return false
+	}
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if last == "" {
+		return false
+	}
+	// Before boot.sh runs the pane may show the system's default shell prompt
+	// (often "%" on macOS zsh, "$" on bash). After ~/.cicy_tmux.conf loads it
+	// becomes "... $". In all cases, wait for a visible prompt terminator before
+	// sending the startup script.
+	switch {
+	case strings.HasSuffix(last, " $"),
+		strings.HasSuffix(last, "$"),
+		strings.HasSuffix(last, " %"),
+		strings.HasSuffix(last, "%"),
+		strings.HasSuffix(last, " #"),
+		strings.HasSuffix(last, "#"):
+		return true
+	default:
+		return false
+	}
+}
+
+func waitForShellPromptReady(paneID string) bool {
+	deadline := time.Now().Add(shellPromptTimeout)
+	stableCount := 0
+	lastCapture := ""
+	for time.Now().Before(deadline) {
+		out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", "-40")
+		if err == nil {
+			lastCapture = out
+			if isShellPromptVisible(out) {
+				stableCount++
+				if stableCount >= 2 {
+					return true
+				}
+			} else {
+				stableCount = 0
+			}
+		}
+		time.Sleep(shellPromptPollInterval)
+	}
+	log.Printf("[init] shell prompt not confirmed for %s within %s; last capture=%q", shortPaneID(paneID), shellPromptTimeout, promptPreview(lastCapture))
+	return false
 }
 
 func (q *startupPromptQueue) start() {
@@ -3013,7 +3064,7 @@ func initPaneEnv(opts paneEnvOpts) {
 		"touch ~/.cicy_tmux.conf",
 		"source ~/.cicy_tmux.conf",
 		`export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$HOME/.opencode/bin:$PATH"`,
-						`case " ${NODE_OPTIONS:-} " in *" --max-old-space-size="*) ;; *) export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=3072" ;; esac`,
+		`case " ${NODE_OPTIONS:-} " in *" --max-old-space-size="*) ;; *) export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=3072" ;; esac`,
 		fmt.Sprintf("export X_AGENT_ID=%s", tmuxShellQuote(pid)),
 		fmt.Sprintf("export X_AGENT_SHORT_ID=%s", tmuxShellQuote(shortID)),
 	}
@@ -3061,8 +3112,18 @@ func initPaneEnv(opts paneEnvOpts) {
 	}
 	lines = append(lines, agentBootLines(opts.agentType, opts.allowAllActions, shortID)...)
 
-	// 将启动脚本写入 workspace，避免散落到 /tmp
-	script := "#!/usr/bin/env bash\n\n" + strings.Join(lines, "\n") + "\n"
+	// 将启动脚本写入 workspace，避免散落到 /tmp。
+	// source boot.sh may happen inside zsh on macOS, but the generated body relies
+	// on bash semantics. Re-enter through bash so manual/source startup still works.
+	script := "#!/usr/bin/env bash\n\n" +
+		"if [ -z \"${BASH_VERSION:-}\" ]; then\n" +
+		"  _cicy_boot_pwd=\"$PWD\"\n" +
+		"  bash -lc 'cd \"$1\" && source ./boot.sh' bash \"$_cicy_boot_pwd\"\n" +
+		"  _cicy_boot_status=$?\n" +
+		"  unset _cicy_boot_pwd\n" +
+		"  return \"$_cicy_boot_status\" 2>/dev/null || exit \"$_cicy_boot_status\"\n" +
+		"fi\n\n" +
+		strings.Join(lines, "\n") + "\n"
 	scriptPath := filepath.Join(opts.workspace, "boot.sh")
 	if strings.TrimSpace(opts.workspace) == "" {
 		scriptPath = fmt.Sprintf("/tmp/init_pane_%s.sh", strings.ReplaceAll(pid, ":", "_"))
@@ -3076,18 +3137,12 @@ func initPaneEnv(opts paneEnvOpts) {
 	}
 	log.Printf("[init] v1 pane %s script path=%s\n%s", pid, scriptPath, script)
 
-	// 轮询等待 shell 就绪（发 echo 检测响应）
-	ready := false
-	for i := 0; i < 20; i++ {
-		time.Sleep(200 * time.Millisecond)
-		if _, err := exec.Command("tmux", "capture-pane", "-t", pid, "-p", "-S", "-1").Output(); err == nil {
-			log.Printf("[init] shell ready after %d attempts", i+1)
-			ready = true
-			break
-		}
-	}
-	if !ready {
-		log.Printf("[init] shell not confirmed, continue anyway")
+	// On macOS the tmux pane can exist before the shell prompt is actually
+	// visible/interactive. Wait for the prompt marker before sending boot.sh.
+	if waitForShellPromptReady(pid) {
+		log.Printf("[init] shell prompt ready for %s", shortPaneID(pid))
+	} else {
+		log.Printf("[init] shell prompt not confirmed for %s, continue anyway", shortPaneID(pid))
 	}
 
 	runTmux("send-keys", "-t", pid, "source boot.sh", "Enter")
