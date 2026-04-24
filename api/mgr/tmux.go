@@ -2001,7 +2001,10 @@ func isClaudeInputReady(out string) bool {
 }
 
 func isClaudeThemePrompt(out string) bool {
-	return strings.Contains(out, "Choose the text style that looks best with your terminal") &&
+	return (strings.Contains(out, "Choose the text style that looks best with your terminal") ||
+		(strings.Contains(out, "Let's get started.") &&
+			strings.Contains(out, "/theme") &&
+			strings.Contains(out, "Dark mode"))) &&
 		strings.Contains(out, "Dark mode")
 }
 
