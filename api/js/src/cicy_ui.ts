@@ -133,8 +133,6 @@ body {
 .xterm-reconnect-overlay div:not(.xterm-reconnect-spinner) { display: none !important; }
 .xterm-reconnect-overlay button { display: block !important; }
 .terminal .xterm-rows {
-  right: 0 !important;
-  bottom: 0 !important;
   color: #b9adad !important;
 }
 #cp-loading-overlay {
@@ -706,7 +704,6 @@ function configureTerminal(term: Terminal): void {
     term.configure({
         scrollback: 5000,
         fontFamily: monoFontStack(),
-        letterSpacing: -0.5,
     });
 
     setTimeout(function(): void {
