@@ -44,8 +44,8 @@ export const EditPaneDialog: React.FC<EditPaneDialogProps> = ({
   const isFull = mode === 'full';
 
   return (
-    <div className="fixed inset-0 bg-vsc-bg flex flex-col" style={{zIndex:999999999}} onClick={onClose}>
-      <div className="bg-vsc-bg w-full h-full flex flex-col" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 flex cursor-pointer flex-col bg-vsc-bg" style={{zIndex:999999999}} onClick={onClose}>
+      <div className="flex h-full w-full cursor-default flex-col bg-vsc-bg" onClick={e => e.stopPropagation()}>
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-vsc-border flex-shrink-0">
           <div>

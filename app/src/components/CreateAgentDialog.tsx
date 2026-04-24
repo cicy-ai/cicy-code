@@ -73,11 +73,11 @@ export default function CreateAgentDialog({
   };
 
   return (
-    <div data-id="create-agent-dialog-overlay" className="fixed inset-0 z-[100000] flex items-center justify-center" onClick={submitting ? undefined : onClose}>
+    <div data-id="create-agent-dialog-overlay" className="fixed inset-0 z-[100000] flex items-center justify-center cursor-pointer" onClick={submitting ? undefined : onClose}>
       <div data-id="create-agent-dialog-backdrop" className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <form
         data-id="create-agent-dialog"
-        className="relative w-[560px] max-w-[92vw] rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl overflow-hidden"
+        className="relative w-[560px] max-w-[92vw] cursor-default overflow-hidden rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
         onSubmit={handleSubmit}
       >

@@ -17,7 +17,7 @@ export default function DesktopCanvas({ paneId, codeDrawerOpen, onToggleCodeDraw
   (window as any).__desktopAddApp = addApp;
 
   return (
-    <div data-id="desktop-canvas" className="absolute inset-0" onClick={() => { setCtxMenu(null); if (editMode) setEditMode(false); }}>
+    <div data-id="desktop-canvas" className="absolute inset-0 cursor-pointer" onClick={() => { setCtxMenu(null); if (editMode) setEditMode(false); }}>
       {/* Background */}
       <div className="absolute inset-0 bg-gradient-to-br from-[#0f0f1a] via-[#111827] to-[#0c1222]" />
       <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '32px 32px' }} />

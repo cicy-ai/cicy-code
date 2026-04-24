@@ -29,6 +29,7 @@ export declare class Xterm {
     resizeObserver: ResizeObserver | null;
     imageOverlays: ImageRectOverlay[];
     initialFitDone: boolean;
+    isComposing: boolean;
     constructor(elem: HTMLElement);
     configure(options: {
         scrollback?: number;

@@ -62,6 +62,7 @@ export class Xterm {
     resizeObserver: ResizeObserver | null;
     imageOverlays: ImageRectOverlay[];
     initialFitDone: boolean;
+    isComposing: boolean;
 
     constructor(elem: HTMLElement) {
         this.elem = elem;
@@ -73,6 +74,7 @@ export class Xterm {
         this.resizeObserver = null;
         this.imageOverlays = [];
         this.initialFitDone = false;
+        this.isComposing = false;
 
         this.term = new XtermTerminal({
             fontSize: 12,
@@ -179,14 +181,29 @@ export class Xterm {
         this.term.open(elem);
 
         // IME composing state
-        var isComposing = false;
         const textarea = this.term.textarea;
+        const clearComposing = () => { this.isComposing = false; };
+        const refocus = () => {
+            window.requestAnimationFrame(() => {
+                try {
+                    this.term.focus();
+                } catch {}
+            });
+        };
         if (textarea) {
-            textarea.addEventListener('compositionstart', () => { isComposing = true; });
-            textarea.addEventListener('compositionend', () => { isComposing = false; });
+            textarea.addEventListener('compositionstart', () => { this.isComposing = true; });
+            textarea.addEventListener('compositionend', clearComposing);
+            textarea.addEventListener('blur', clearComposing);
+            textarea.addEventListener('paste', () => {
+                clearComposing();
+                refocus();
+            });
         }
-        // Expose for onInput
-        (this as any)._isComposing = () => isComposing;
+        this.elem.addEventListener('paste', () => {
+            clearComposing();
+            refocus();
+        });
+        this.elem.addEventListener('mousedown', refocus);
 
         this.fitSoon();
         setTimeout(() => this.fitSoon(), 50);
@@ -437,9 +454,8 @@ export class Xterm {
             if (buffer) { callback(buffer); buffer = ''; }
             if (timer) { clearTimeout(timer); timer = null; }
         };
-        const isComposing = (this as any)._isComposing as () => boolean;
         this.inputDisposable = this.term.onData((data: string) => {
-            if (isComposing()) return;
+            if (this.isComposing) return;
             // 控制字符立即发送
             if (data.length === 1 && data.charCodeAt(0) < 32 || data.charCodeAt(0) === 127 || data[0] === '\x1b') {
                 flush();
@@ -464,12 +480,15 @@ export class Xterm {
     deactivate(): void {
         // Don't dispose inputDisposable here — reconnect may have already
         // registered a new one. Only blur to indicate inactive state.
+        this.isComposing = false;
         this.term.blur();
     }
 
     reset(): void {
         this.removeMessage();
+        this.isComposing = false;
         this.term.clear();
+        this.term.focus();
     }
 
     close(): void {

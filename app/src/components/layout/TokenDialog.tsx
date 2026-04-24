@@ -51,9 +51,9 @@ export default function TokenDialog({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[99999] flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 z-[99999] flex cursor-pointer items-center justify-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className="relative w-[600px] max-w-[92vw] max-h-[80vh] bg-[#161618] rounded-2xl shadow-2xl border border-white/[0.08] flex flex-col overflow-hidden"
+      <div className="relative flex max-h-[80vh] w-[600px] max-w-[92vw] cursor-default flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl"
         onClick={e => e.stopPropagation()}>
 
         {/* Header */}
