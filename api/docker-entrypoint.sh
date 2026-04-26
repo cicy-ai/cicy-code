@@ -11,6 +11,42 @@ log() {
   printf '[entrypoint] %s\n' "$*"
 }
 
+ensure_shell_init_files() {
+  local tmux_line='[ -f "$HOME/.cicy_tmux.conf" ] && . "$HOME/.cicy_tmux.conf"'
+  local cicy_tmux_path="$HOME_DIR/.cicy_tmux.conf"
+  local tmux_conf_path="$HOME_DIR/.tmux.conf"
+  local proxy_json_path="$HOME_DIR/proxy.json"
+  local bashrc_path="$HOME_DIR/.bashrc"
+  local profile_path="$HOME_DIR/.profile"
+  local bash_profile_path="$HOME_DIR/.bash_profile"
+  local profile_line='[ -n "${BASH_VERSION:-}" ] && [ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"'
+  local bash_profile_line='[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"'
+
+  touch "$bashrc_path" "$profile_path" "$bash_profile_path"
+  if [ -e "$cicy_tmux_path" ]; then
+    chown cicy:cicy "$cicy_tmux_path" 2>/dev/null || true
+    chmod u+rw,go+r "$cicy_tmux_path" 2>/dev/null || true
+  fi
+  if [ -e "$tmux_conf_path" ]; then
+    chown cicy:cicy "$tmux_conf_path" 2>/dev/null || true
+    chmod u+rw,go+r "$tmux_conf_path" 2>/dev/null || true
+  fi
+  if [ -e "$proxy_json_path" ]; then
+    chown cicy:cicy "$proxy_json_path" 2>/dev/null || true
+    chmod u+rw,go-rwx "$proxy_json_path" 2>/dev/null || true
+  fi
+  chown cicy:cicy "$bashrc_path" "$profile_path" "$bash_profile_path" 2>/dev/null || true
+  chmod u+rw "$bashrc_path" "$profile_path" "$bash_profile_path" 2>/dev/null || true
+
+  grep -Fqx "$tmux_line" "$bashrc_path" || printf '\n%s\n' "$tmux_line" >>"$bashrc_path"
+  grep -Fvx '[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"' "$profile_path" >"$profile_path.tmp" || true
+  mv "$profile_path.tmp" "$profile_path"
+  grep -Fqx "$profile_line" "$profile_path" || printf '\n%s\n' "$profile_line" >>"$profile_path"
+  grep -Fvx '[ -f "$HOME/.profile" ] && . "$HOME/.profile"' "$bash_profile_path" >"$bash_profile_path.tmp" || true
+  mv "$bash_profile_path.tmp" "$bash_profile_path"
+  grep -Fqx "$bash_profile_line" "$bash_profile_path" || printf '\n%s\n' "$bash_profile_line" >>"$bash_profile_path"
+}
+
 node_eval() {
   node -e "$1" "${@:2}"
 }
@@ -315,6 +351,7 @@ build_app_argv() {
 }
 
 main() {
+  ensure_shell_init_files
   bootstrap_team_runtime
   ensure_runtime_api_token
   start_cloudflared

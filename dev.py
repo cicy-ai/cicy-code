@@ -17,6 +17,7 @@ SQLITE_PATH = os.environ.get("SQLITE_PATH", f"{os.path.expanduser('~')}/.cicy/da
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 API_DIR = os.path.join(ROOT_DIR, "api")
 GLOBAL_JSON_PATH = os.path.expanduser("~/global.json")
+PROXY_JSON_PATH = os.path.expanduser("~/proxy.json")
 VERSION_SYNC_SCRIPT = os.path.join(ROOT_DIR, "scripts", "sync-version.py")
 
 AI_PROVIDER_ALIASES = {
@@ -112,6 +113,64 @@ def build_minimal_runtime_global_json():
         data["ai"] = source["ai"]
     return data
 
+def load_proxy_json():
+    try:
+        with open(PROXY_JSON_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def build_runtime_proxy_json(shared_host="host.docker.internal"):
+    source = load_proxy_json()
+    profiles = source.get("ssh_proxies", [])
+    if not isinstance(profiles, list) or not profiles:
+        return {}
+
+    runtime_profiles = []
+    existing_names = set()
+    for item in profiles:
+        if not isinstance(item, dict):
+            continue
+        copied = dict(item)
+        runtime_profiles.append(copied)
+        name = str(copied.get("name", "") or "").strip()
+        if name:
+            existing_names.add(name)
+
+    for item in profiles:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "") or "").strip()
+        local_port = item.get("local_port")
+        if not name or not local_port:
+            continue
+        kind = str(item.get("kind", "") or "").strip()
+        source_mode = str((item.get("source") or {}).get("mode", "") or "").strip()
+        if kind in ("shared", "shared_only") or source_mode in ("shared", "shared_only"):
+            continue
+        shared_name = f"{name}-shared"
+        if shared_name in existing_names:
+            continue
+        scheme = str(item.get("scheme", "") or "socks5").strip() or "socks5"
+        runtime_profiles.append({
+            "name": shared_name,
+            "kind": "shared_only",
+            "scheme": scheme,
+            "local_host": shared_host,
+            "local_port": local_port,
+            "proxy_url": f"{scheme}://{shared_host}:{local_port}",
+            "source": {
+                "mode": "shared",
+                "from": name,
+            },
+        })
+        existing_names.add(shared_name)
+
+    if not runtime_profiles:
+        return {}
+    return {"ssh_proxies": runtime_profiles}
+
 def build_dev_runtime_home(container_name):
     safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in container_name).strip("-") or "cicy-code-dev"
     home_dir = os.path.join(tempfile.gettempdir(), safe_name)
@@ -120,7 +179,15 @@ def build_dev_runtime_home(container_name):
     with open(global_json_path, "w", encoding="utf-8") as f:
         json.dump(build_minimal_runtime_global_json(), f, ensure_ascii=False, indent=2)
         f.write("\n")
-    return home_dir, global_json_path
+    proxy_json_path = os.path.join(home_dir, "proxy.json")
+    runtime_proxy_json = build_runtime_proxy_json()
+    if runtime_proxy_json:
+        with open(proxy_json_path, "w", encoding="utf-8") as f:
+            json.dump(runtime_proxy_json, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+    else:
+        proxy_json_path = ""
+    return home_dir, global_json_path, proxy_json_path
 
 def seed_runtime_home_from_image(image_ref, home_dir):
     openclaw_dir = os.path.join(home_dir, ".openclaw")
@@ -166,6 +233,14 @@ def seed_runtime_home_from_image(image_ref, home_dir):
         if container_id:
             subprocess.run(["docker", "rm", "-f", container_id], capture_output=True, cwd=ROOT_DIR)
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+def add_optional_file_mount(volume_args, host_path, container_path, label):
+    resolved = os.path.abspath(os.path.expanduser(host_path))
+    if not os.path.isfile(resolved):
+        print(f"[dev] Skip mount missing {label}: {resolved}")
+        return
+    volume_args.extend(["-v", f"{resolved}:{container_path}:ro"])
+    print(f"[dev] Mount host {label}: {resolved} -> {container_path}")
 
 def read_api_token_from_file(path):
     try:
@@ -693,7 +768,7 @@ def run_docker_build(version_override=""):
     print(f"[dev] Next deploy: use ~/global.json images.runtime")
     sys.exit(0)
 
-def run_docker(ports, container_name="cicy-code-dev", agents=""):
+def run_docker(ports, container_name="cicy-code-dev", agents="", mount_projects=False, projects_dir="", mount_home=False, home_dir=""):
     run_version_sync()
 
     runtime_image = get_current_runtime_image()
@@ -715,7 +790,7 @@ def run_docker(ports, container_name="cicy-code-dev", agents=""):
     # Tag local build as the configured runtime image
     subprocess.run(["docker", "tag", f"cicy-code:{build_tag}", runtime_image], capture_output=True)
     subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
-    dev_home_dir, dev_global_json_path = build_dev_runtime_home(container_name)
+    dev_home_dir, dev_global_json_path, dev_proxy_json_path = build_dev_runtime_home(container_name)
 
     # Pull if not available locally
     result = subprocess.run(["docker", "image", "inspect", runtime_image], capture_output=True)
@@ -748,6 +823,22 @@ def run_docker(ports, container_name="cicy-code-dev", agents=""):
     local_token = get_local_api_token()
     if local_token:
         env_vars.extend(["-e", f"CICY_API_TOKEN={local_token}"])
+    volume_args = []
+    host_home_dir = ""
+    if mount_home:
+        host_home_dir = os.path.abspath(os.path.expanduser(home_dir or f"~/docker-homes/{container_name}"))
+        os.makedirs(host_home_dir, exist_ok=True)
+        volume_args.extend(["-v", f"{host_home_dir}:/home/cicy"])
+        print(f"[dev] Mount host home: {host_home_dir} -> /home/cicy")
+    if mount_projects:
+        host_projects_dir = os.path.abspath(os.path.expanduser(projects_dir or "~/projects"))
+        os.makedirs(host_projects_dir, exist_ok=True)
+        if mount_home and host_home_dir and os.path.realpath(host_projects_dir).startswith(os.path.realpath(host_home_dir) + os.sep):
+            print(f"[dev] Host projects already inside mounted home: {host_projects_dir}")
+        else:
+            volume_args.extend(["-v", f"{host_projects_dir}:/home/cicy/projects"])
+        print(f"[dev] Mount host projects: {host_projects_dir} -> /home/cicy/projects")
+    add_optional_file_mount(volume_args, dev_proxy_json_path, "/home/cicy/proxy.json", "proxy.json")
     agents_flag = str(agents or "").strip() or "all"
     run_cmd = [
         "docker",
@@ -755,7 +846,9 @@ def run_docker(ports, container_name="cicy-code-dev", agents=""):
         "-d",
         "--name",
         container_name,
-    ] + env_vars + [
+        "--add-host",
+        "host.docker.internal:host-gateway",
+    ] + env_vars + volume_args + [
         "-p",
         f"{ports}:8008",
         runtime_image,
@@ -929,10 +1022,14 @@ def main():
     parser.add_argument("--agents", default="", help="Comma-separated agents to start (default: all)")
     parser.add_argument("--port", type=int, default=8026, help="Base port for Docker (default: 8026)")
     parser.add_argument("--name", default="cicy-code-dev", help="Docker container name (default: cicy-code-dev)")
+    parser.add_argument("--mountProjects", "--mount-projects", dest="mountProjects", action="store_true", help="Mount host projects dir into container at /home/cicy/projects")
+    parser.add_argument("--projectsDir", "--projects-dir", dest="projectsDir", default="~/projects", help="Host projects dir for --mountProjects (default: ~/projects)")
+    parser.add_argument("--mountHome", "--mount-home", dest="mountHome", action="store_true", help="Mount host home dir into container at /home/cicy")
+    parser.add_argument("--homeDir", "--home-dir", dest="homeDir", default="", help="Host home dir for --mountHome (default: ~/docker-homes/<container-name>)")
     args = parser.parse_args()
 
     if args.docker:
-        run_docker(args.port, args.name, args.agents)
+        run_docker(args.port, args.name, args.agents, args.mountProjects, args.projectsDir, args.mountHome, args.homeDir)
     if args.dockerVersion:
         print_docker_version()
     if args.bumpVersion:

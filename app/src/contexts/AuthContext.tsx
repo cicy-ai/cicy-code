@@ -18,12 +18,27 @@ interface AuthContextType {
   plan: string | null;
   provisioning: boolean;
   isChecking: boolean;
-  login: (token: string) => void;
+  login: (token: string) => Promise<boolean>;
   logout: () => void;
   hasPermission: (perm: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const pendingVerifyRequests = new Map<string, Promise<any>>();
+
+function fetchVerifyData(token: string) {
+  const cached = pendingVerifyRequests.get(token);
+  if (cached) return cached;
+  const request = apiService
+    .verifyAuth(token)
+    .then(({ data }) => data)
+    .finally(() => {
+      pendingVerifyRequests.delete(token);
+    });
+  pendingVerifyRequests.set(token, request);
+  return request;
+}
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   children,
@@ -36,7 +51,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   const [isChecking, setIsChecking] = useState(true);
 
   const handleVerify = useCallback(async (t: string) => {
-    const { data } = await apiService.verifyAuth(t);
+    const data = await fetchVerifyData(t);
     if (!data.valid) return false;
     setToken(t);
     setPerms(data.perms || []);
@@ -116,10 +131,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     init();
   }, [handleVerify]);
 
-  const login = (t: string) => {
-    TokenManager.saveToken(t);
-    handleVerify(t).catch(() => {});
-  };
+  const login = useCallback(async (t: string) => {
+    const next = t.trim();
+    if (!next) return false;
+    try {
+      const ok = await handleVerify(next);
+      if (!ok) {
+        TokenManager.clearToken();
+        return false;
+      }
+      TokenManager.saveToken(next);
+      return true;
+    } catch {
+      TokenManager.clearToken();
+      throw new Error("verify failed");
+    }
+  }, [handleVerify]);
 
   const logout = () => {
     TokenManager.clearToken();

@@ -320,19 +320,23 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     try {
       const { data } = await apiService.getPanes();
       set智能体(Array.isArray(data) ? data : data?.panes || []);
-      window.dispatchEvent(new CustomEvent('refresh-panes'));
     } catch {}
   }, [token]);
-  useEffect(() => { void refreshPanes(); }, [refreshPanes, paneId]);
-  useEffect(() => { 
-    apiService.getPane(fullPaneId).then(({ data }) => { 
+  useEffect(() => { void refreshPanes(); }, [refreshPanes]);
+  useEffect(() => {
+    let cancelled = false;
+    apiService.getPane(fullPaneId).then(({ data }) => {
+      if (cancelled) return;
       setAgentDetail(data);
       setPaneDetails(prev => ({ ...prev, [paneId]: data }));
       const workspace = data?.workspace || `~/workers/${paneId}`;
       syncHostHomeFromPath(workspace);
       agentWorkspaceRef.current = workspace;
-    }).catch(() => {}); 
-  }, [fullPaneId, paneId]);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [fullPaneId]);
   const prevPaneId = useRef(paneId);
   useEffect(() => {
     if (prevPaneId.current !== paneId) {
@@ -346,16 +350,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       console.log('[poll_request] sending via WS, readyState:', chatWsRef.current?.readyState);
       try { chatWsRef.current?.send(JSON.stringify({ type: 'poll_request' })); } catch (e) { console.warn('[poll_request] send failed:', e); } 
     };
-    const onRefresh = () => sendPollRequest();
     const onVisible = () => {
       if (document.visibilityState === 'visible') sendPollRequest();
     };
     const timer = window.setInterval(sendPollRequest, 5000);
-    window.addEventListener('refresh-panes', onRefresh);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener('refresh-panes', onRefresh);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);

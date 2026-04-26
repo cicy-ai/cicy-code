@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import apiService from '../services/api';
 import config from '../config';
 
 export default function Login() {
@@ -16,10 +15,8 @@ export default function Login() {
     setLoading(true);
     setError('');
     try {
-      const { data } = await apiService.verifyAuth(t);
-      if (data.valid) {
-        login(t);
-      } else {
+      const ok = await login(t);
+      if (!ok) {
         setError('令牌无效');
       }
     } catch {

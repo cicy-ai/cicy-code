@@ -1274,7 +1274,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         }
         var activeIndex = pendingExists ? optimisticActiveIndex : serverActiveIndex;
         winTabs.innerHTML = windows.map(function(win: any): string {
-            var close = win.index === "0" ? "" : '<span class="cp-wdel" data-idx="' + win.index + '" data-tooltip="关闭tmux window">✕</span>';
+            var close = win.index === "0" ? "" : '<span class="cp-wdel" data-idx="' + win.index + '" data-tooltip="关闭CLI Window">✕</span>';
             var active = String(win.index) === activeIndex ? " active" : "";
             return '<button class="cp-wtab' + active + '" data-idx="' + win.index + '">' + win.name + "." + win.index + close + "</button>";
         }).join("");
@@ -1411,13 +1411,13 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
                 var confirmButton = closeButton;
                 confirmButton.dataset.confirm = "1";
                 confirmButton.textContent = "?";
-                confirmButton.setAttribute("data-tooltip", "再点一次确认关闭tmux window");
+                confirmButton.setAttribute("data-tooltip", "再点一次确认关闭CLI Window");
                 confirmButton.classList.add("cp-confirm");
-                showFixedTooltip(confirmButton, "再点一次确认关闭tmux window");
+                showFixedTooltip(confirmButton, "再点一次确认关闭CLI Window");
                 setTimeout(function(): void {
                     delete confirmButton.dataset.confirm;
                     confirmButton.textContent = "✕";
-                    confirmButton.setAttribute("data-tooltip", "关闭tmux window");
+                    confirmButton.setAttribute("data-tooltip", "关闭CLI Window");
                     confirmButton.classList.remove("cp-confirm");
                     hideFixedTooltip();
                 }, 2000);

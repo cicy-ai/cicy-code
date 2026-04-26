@@ -51,7 +51,7 @@ interface AppContextType {
   // Auth
   token: string | null;
   isAuthenticated: boolean;
-  login: (token: string) => void;
+  login: (token: string) => Promise<boolean>;
   logout: () => void;
 
   // Pane Selection
@@ -143,6 +143,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     if (token) {
       setApi(apiService);
+      setLoading(false);
       return;
     }
 
@@ -167,49 +168,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       loadGlobalVar();
     }
   }, [api, isChecking, token]);
-  useEffect(() => {
-    if (isChecking || !api || !token) return;
-    const fetchAllPanes = async () => {
-      try {
-        const panesRes = await api.getPanes();
-        mergePanes(panesRes.data?.panes || []);
-      } catch (err) {
-        console.error('获取窗格失败：', err);
-        setLoading(false);
-      }
-    };
-    const mergePanes = (panes: any[]) => {
-      const panesArray = panes.map((p: any) => ({ ...p, pane_id: p.pane_id, active: p.active }));
-      if (panesArray.length === 0) return;
-      setAllPanes(prev => {
-        const prevJson = JSON.stringify(prev);
-        const nextJson = JSON.stringify(panesArray);
-        return prevJson === nextJson ? prev : panesArray;
-      });
-      setLoading(false);
-      if (panesArray.length > 0 && !currentPaneId && !PaneManager.getCurrentPane()) {
-        const firstPane = panesArray[0];
-        PaneManager.setCurrentPane(firstPane.pane_id);
-        setCurrentPaneId(firstPane.pane_id);
-      }
-    };
-    fetchAllPanes();
-    const onRefresh = () => { fetchAllPanes(); };
-    window.addEventListener('refresh-panes', onRefresh);
-    const onVisible = () => { if (document.visibilityState === 'visible') fetchAllPanes(); };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => { window.removeEventListener('refresh-panes', onRefresh); document.removeEventListener('visibilitychange', onVisible); };
-  }, [api, currentPaneId, isChecking, token]);
-
   // Auto-load paneDetail when currentPaneId changes
   useEffect(() => {
     if (isChecking || !api || !token || !currentPaneId) { setPaneDetail(null); return; }
     api.getPane(currentPaneId).then(({ data }) => setPaneDetail(data)).catch(() => setPaneDetail(null));
   }, [api, currentPaneId, isChecking, token]);
 
-  const login = (newToken: string) => {
-    authLogin(newToken);
-  };
+  const login = (newToken: string) => authLogin(newToken);
 
   const logout = () => {
     authLogout();
@@ -223,18 +188,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const selectPane = async (paneId: string) => {
     PaneManager.setCurrentPane(paneId);
     setCurrentPaneId(paneId);
-    window.dispatchEvent(new CustomEvent('refresh-panes'));
-    
-    // Fetch detailed pane config
-    if (api) {
-      try {
-        const { data: detail } = await api.getPane(paneId);
-        setPaneDetail(detail);
-      } catch (err) {
-        console.error('获取窗格详情失败：', err);
-        setPaneDetail(null);
-      }
-    }
   };
 
   const clearPane = () => {

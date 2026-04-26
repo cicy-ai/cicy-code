@@ -707,18 +707,6 @@ func setupAIConfigs() {
 	home, _ := os.UserHomeDir()
 	log.Printf("[setup] configuring AI tools with API URL: %s", apiUrl)
 
-	scriptPath := findSetupAgentScript()
-	if scriptPath == "" {
-		log.Printf("[setup] setup-agent.sh not found")
-	} else {
-		cmd := exec.Command(scriptPath, apiKey, apiUrl, anthropicUrl, defaultOpencodeModel, defaultClaudeModel, codexModel)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			log.Printf("[setup] setup-agent.sh failed: %v", err)
-		}
-	}
-
 	// Set env vars for OpenClaw worker (available via agentBootLines)
 	os.Setenv("OPENCLAW_CONFIG_PATH", filepath.Join(home, ".openclaw", "openclaw.json"))
 	os.Setenv("OPENAI_API_KEY", apiKey)
@@ -728,36 +716,6 @@ func setupAIConfigs() {
 	} else if openClawToken := strings.TrimSpace(readOpenClawTokenFromConfig()); openClawToken != "" {
 		os.Setenv("OPENCLAW_GATEWAY_TOKEN", openClawToken)
 	}
-}
-
-func findSetupAgentScript() string {
-	candidates := []string{
-		"/usr/local/bin/setup-agent.sh",
-	}
-	if exePath, err := os.Executable(); err == nil {
-		candidates = append(candidates,
-			filepath.Join(filepath.Dir(exePath), "setup-agent.sh"),
-			filepath.Join(filepath.Dir(exePath), "..", "setup-agent.sh"),
-		)
-	}
-	if cwd, err := os.Getwd(); err == nil {
-		candidates = append(candidates,
-			filepath.Join(cwd, "setup-agent.sh"),
-			filepath.Join(cwd, "api", "setup-agent.sh"),
-		)
-	}
-	seen := map[string]bool{}
-	for _, candidate := range candidates {
-		candidate = filepath.Clean(candidate)
-		if seen[candidate] {
-			continue
-		}
-		seen[candidate] = true
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate
-		}
-	}
-	return ""
 }
 
 func ensureTmuxConf() {

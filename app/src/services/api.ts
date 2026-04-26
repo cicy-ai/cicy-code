@@ -5,6 +5,12 @@ import { TokenManager } from './tokenManager';
 const BACKEND_KEY = 'cicy_backend';
 
 const http = axios.create({ baseURL: config.apiBase });
+let pendingPanesRequest: Promise<any> | null = null;
+const pendingPaneDetailRequests = new Map<string, Promise<any>>();
+
+function shortPaneRouteId(id: string) {
+  return String(id || '').replace(/:main\.0$/, '');
+}
 
 http.interceptors.request.use((cfg) => {
   const token = TokenManager.getToken();
@@ -44,10 +50,25 @@ const api = {
   verifyToken: (token?: string) => http.post('/api/auth/verify-token', token ? { token } : null, { baseURL: config.mgrBase }),
   verifyAuth: (token: string) => http.get('/api/auth/verify', { baseURL: config.isWorkspace ? config.apiBase : config.mgrBase, headers: { Authorization: `Bearer ${token}` } }),
 
-  getPanes: () => http.get('/api/tmux/panes'),
+  getPanes: () => {
+    if (pendingPanesRequest) return pendingPanesRequest;
+    pendingPanesRequest = http.get('/api/tmux/panes').finally(() => {
+      pendingPanesRequest = null;
+    });
+    return pendingPanesRequest;
+  },
   poll: (paneId?: string, cfg?: any) => http.get('/api/poll', { ...cfg, params: { ...(cfg?.params || {}), ...(paneId ? { pane_id: paneId } : {}) } }),
   getAllStatus: (cfg?: any) => http.get('/api/tmux/status', cfg),
-  getPane: (id: string) => http.get(`/api/tmux/panes/${encodeURIComponent(id)}`),
+  getPane: (id: string) => {
+    const routeId = shortPaneRouteId(id);
+    const cached = pendingPaneDetailRequests.get(routeId);
+    if (cached) return cached;
+    const request = http.get(`/api/tmux/panes/${encodeURIComponent(routeId)}`).finally(() => {
+      pendingPaneDetailRequests.delete(routeId);
+    });
+    pendingPaneDetailRequests.set(routeId, request);
+    return request;
+  },
   updatePane: (id: string, data: any) => http.patch(`/api/tmux/panes/${encodeURIComponent(id)}`, data),
   deletePane: (id: string) => http.delete(`/api/tmux/panes/${encodeURIComponent(id)}`),
   createPane: (data: any) => http.post('/api/tmux/create', data),

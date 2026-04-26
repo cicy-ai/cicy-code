@@ -233,7 +233,7 @@ build_docker() {
   local tag="${1:-latest}"
   local base_image="${BASE_IMAGE:-$(default_base_image)}"
   local docker_args=()
-  local setup_agent_hash app_binary_hash
+  local app_binary_hash
   if [ "${NO_CACHE:-0}" = "1" ]; then
     docker_args+=(--no-cache)
   fi
@@ -244,13 +244,10 @@ build_docker() {
     exit 1
   fi
   cp  $API_DIR/cicy-code  $API_DIR/cicy-code-docker
-  setup_agent_hash="$(file_hash "$API_DIR/setup-agent.sh")"
   app_binary_hash="$(file_hash "$API_DIR/cicy-code-docker")"
-  echo "   SETUP_AGENT_HASH=${setup_agent_hash:0:12}"
   echo "   APP_BINARY_HASH=${app_binary_hash:0:12}"
   cd $API_DIR && docker build -f Dockerfile.runtime \
     --build-arg BASE_IMAGE="$base_image" \
-    --build-arg SETUP_AGENT_HASH="$setup_agent_hash" \
     --build-arg APP_BINARY_HASH="$app_binary_hash" \
     -t cicy-code:${tag} . "${docker_args[@]}" && cd "$ROOT_DIR"
   rm -f $API_DIR/cicy-code-docker
