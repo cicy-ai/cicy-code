@@ -6,8 +6,8 @@ import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, RotateCcw, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check
 } from 'lucide-react';
-import { assetUrl } from '../lib/assets';
 import { cn } from '../lib/utils';
+import AgentAvatar from './AgentAvatar';
 import { useDevRegister } from '../lib/devStore';
 import { useAuth } from '../contexts/AuthContext';
 import { SendingProvider } from '../contexts/SendingContext';
@@ -850,6 +850,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCliContentTab('settings');
     setCliContentOpen(true);
   }, [paneId]);
+  const openPaneFiles = useCallback((targetPaneId: string) => {
+    const clean = targetPaneId.replace(/:.*$/, '');
+    if (!clean) return;
+    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
+    setCliContentTab('files');
+    setCliContentOpen(true);
+  }, [paneId]);
   const handleCliDrawerResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -950,11 +957,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     // 给 WS 响应一点时间
     setTimeout(() => setMembershipRefreshing(false), 500);
   }, []);
-  const cliDrawerPortal = cliContentOpen ? createPortal(
-    <div data-id="cli-content-portal" className="pointer-events-none fixed inset-y-0 right-0 z-[60] flex">
+  const cliDrawerPortal = createPortal(
+    <div
+      data-id="cli-content-portal"
+      className="fixed inset-y-0 right-0 z-[60] flex"
+      style={{ display: cliContentOpen ? 'flex' : 'none', pointerEvents: cliContentOpen ? 'auto' : 'none' }}
+    >
       <div
         data-id="cli-content-area"
-        className="pointer-events-auto relative flex h-full min-w-0 flex-col border-l border-[var(--vsc-border)] bg-[#0b0b0d] shadow-[-20px_0_40px_rgba(0,0,0,0.45)]"
+        className="relative flex h-full min-w-0 flex-col border-l border-[var(--vsc-border)] bg-[#0b0b0d] shadow-[-20px_0_40px_rgba(0,0,0,0.45)]"
         style={{ width: `${cliDrawerWidth}px`, maxWidth: 'calc(100vw - 120px)' }}
       >
         <div
@@ -1040,7 +1051,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       </div>
     </div>,
     document.body
-  ) : null;
+  );
   const rightContent = (
     <div data-id="right-content" className="h-full flex flex-col relative">
       <header data-id="top-bar" className="h-12 border-b border-[var(--vsc-border)] bg-[#0A0A0A] flex items-center justify-between px-4 shrink-0 z-10">
@@ -1181,8 +1192,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 agentDetail,
               })}
               activePaneId={activeCliPaneId}
-              historyShortcutActive={cliContentOpen}
-              onOpenPaneHistory={openPaneHistory}
+              settingsShortcutActive={cliContentOpen && cliContentTab === 'settings'}
+              onOpenPaneSettings={openPaneHistory}
+              onOpenPaneFiles={openPaneFiles}
               onActivePaneIdChange={(targetPaneId) => {
                 setActiveTeamPaneId(prev => ({ ...prev, [paneId]: targetPaneId }));
               }}
@@ -1332,44 +1344,6 @@ function SideBtn({ dataId, active, icon, title, onClick }: { dataId: string; act
   );
 }
 
-function normalizeAgentType(agentType?: string) {
-  switch ((agentType || '').trim().toLowerCase()) {
-    case 'openclaw':
-    case 'opencraw':
-      return 'openclaw';
-    case 'codex':
-    case 'openai':
-      return 'codex';
-    case 'kiro-cli':
-    case 'kiro':
-    case 'kiro-cli chat':
-      return 'kiro-cli';
-    case 'copilot':
-    case 'github-copilot':
-    case 'ghcopilot':
-      return 'copilot';
-    case 'gemini':
-      return 'codex';
-    case 'claude':
-    case 'claude code':
-    case 'claude-code':
-      return 'claude';
-    case 'cicy':
-    case 'cicy-claude':
-      return 'cicy-claude';
-    case 'opencode':
-    case 'open code':
-    case 'open-code':
-      return 'opencode';
-    case 'hermes':
-    case 'hermes-agent':
-    case 'hermes agent':
-      return 'hermes';
-    default:
-      return '';
-  }
-}
-
 function getPaneStatus(statuses: Record<string, any>, paneId: string) {
   return statuses[`${paneId}:main.0`] || statuses[paneId] || {};
 }
@@ -1442,61 +1416,6 @@ function buildCanvasItems({
       isApiOnly: meta.isApiOnly,
     };
   });
-}
-
-function AgentListAvatar({ agentType, title }: { agentType?: string; title: string }) {
-  const normalizedAgentType = normalizeAgentType(agentType);
-  const baseClassName = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border shadow-sm';
-
-  if (!normalizedAgentType) {
-    return (
-      <div
-        data-id="agent-avatar"
-        className={`${baseClassName} border-white/[0.08] bg-white/[0.03] text-zinc-400`}
-        title={title}
-      >
-        <span className="text-xs font-semibold uppercase">{title.slice(0, 1) || '?'}</span>
-      </div>
-    );
-  }
-
-  if (normalizedAgentType === 'openclaw') {
-    return (
-      <div
-        data-id="agent-avatar"
-        className={`${baseClassName} border-zinc-500/40 bg-zinc-300 text-zinc-950`}
-        title="OpenClaw"
-      >
-        <span className="text-[20px] leading-none" aria-label="OpenClaw">🦞</span>
-      </div>
-    );
-  }
-
-  const iconMap: Record<string, { label: string; src?: string; className?: string; textClassName?: string }> = {
-    codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg') },
-    claude: { label: 'Claude', src: assetUrl('/assets/logos/claude-symbol.svg') },
-    'cicy-claude': { label: 'CiCy', src: 'https://cicy-ai.com/logo.svg' },
-    opencode: { label: 'OpenCode', src: assetUrl('/assets/logos/opencode.svg'), className: 'h-7 w-7' },
-    'kiro-cli': { label: 'Kiro', src: assetUrl('/assets/logos/kiro.png') },
-    copilot: { label: 'Copilot', src: assetUrl('/assets/logos/copilot.svg') },
-    hermes: { label: 'Hermes', textClassName: 'text-[15px] font-semibold tracking-[0.08em]' },
-  };
-  const icon = iconMap[normalizedAgentType];
-  if (!icon) return null;
-
-  return (
-    <div
-      data-id="agent-avatar"
-      className={`${baseClassName} border-zinc-500/40 bg-zinc-300 text-zinc-950`}
-      title={icon.label}
-    >
-      {icon.src ? (
-        <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-8 w-8'} object-contain`} />
-      ) : (
-        <span className={icon.textClassName || 'text-xs font-semibold uppercase'}>{icon.label.slice(0, 2).toUpperCase()}</span>
-      )}
-    </div>
-  );
 }
 
 function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenSettings }: {
@@ -1694,7 +1613,15 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
                     ) : null}
                   </div>
                   <div className="flex items-center gap-3 flex-1 min-w-0 text-left">
-                    <AgentListAvatar agentType={agent.agent_type} title={agent.title || shortId} />
+                    <AgentAvatar
+                      agentType={agent.agent_type}
+                      title={agent.title || shortId}
+                      dataId="agent-avatar"
+                      className="h-10 w-10 rounded-xl border-zinc-500/40 bg-zinc-300 shadow-sm"
+                      fallbackClassName="border-white/[0.08] bg-white/[0.03]"
+                      iconClassName="h-8 w-8"
+                      textClassName={agent.agent_type === 'openclaw' ? 'text-[20px] leading-none' : agent.agent_type === 'hermes' ? 'text-[15px] font-semibold tracking-[0.08em]' : 'text-xs font-semibold uppercase'}
+                    />
 	                    <div className="flex-1 min-w-0 pr-7">
 	                      <div className="flex items-center gap-1.5">
 	                        <h3 className={cn("text-sm font-medium truncate", isActive ? "text-blue-300" : "text-zinc-300")}>{agent.title || shortId}</h3>

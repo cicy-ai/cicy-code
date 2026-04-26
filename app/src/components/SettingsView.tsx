@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { EditPaneData } from './EditPaneDialog';
 import { Loader2 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
+import { AGENT_TYPE_OPTIONS } from '../lib/agentType';
 import Select from './ui/Select';
 
 const THEME_KEY = 'app_theme';
@@ -94,7 +95,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
             <label className="block text-xs text-vsc-text-secondary mb-1">智能体类型</label>
             <Select value={pane.agent_type || ''}
               onChange={v => onChange({ ...pane, agent_type: v })}
-              options={[{value:'openclaw',label:'openclaw'},{value:'codex',label:'codex'},{value:'claude',label:'claude'},{value:'kiro-cli',label:'kiro-cli'},{value:'copilot',label:'copilot'},{value:'opencode',label:'opencode'},{value:'cicy-claude',label:'cicy-claude'},{value:'hermes',label:'hermes'}]}
+              options={AGENT_TYPE_OPTIONS.map(option => ({ value: option.value, label: option.value }))}
               searchable
             />
           </div>
