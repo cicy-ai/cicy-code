@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Loader2, X, Zap } from 'lucide-react';
-import { assetUrl } from '../lib/assets';
+import { AGENT_TYPE_OPTIONS } from '../lib/agentType';
 import { useDevRegister } from '../lib/devStore';
+import AgentTypeOptionButton from './AgentTypeOptionButton';
 
 export interface CreateAgentValues {
   title: string;
@@ -17,17 +18,6 @@ interface Props {
   title?: string;
   submitLabel?: string;
 }
-
-const AGENT_TYPE_OPTIONS = [
-  { value: 'openclaw', label: 'OpenClaw', icon: null },
-  { value: 'codex', label: 'Codex', icon: assetUrl('/assets/logos/openai.svg') },
-  { value: 'claude', label: 'Claude', icon: assetUrl('/assets/logos/claude-symbol.svg') },
-  { value: 'kiro-cli', label: 'Kiro CLI', icon: assetUrl('/assets/logos/kiro.png') },
-  { value: 'copilot', label: 'Copilot', icon: assetUrl('/assets/logos/copilot.svg') },
-  { value: 'opencode', label: 'OpenCode', icon: assetUrl('/assets/logos/opencode.svg') },
-  { value: 'cicy-claude', label: 'CiCy', icon: 'https://cicy-ai.com/logo.svg' },
-  { value: 'hermes', label: 'Hermes', icon: null },
-] as const;
 
 const DEFAULT_VALUES: CreateAgentValues = {
   title: '',
@@ -115,38 +105,13 @@ export default function CreateAgentDialog({
             <label data-id="create-agent-dialog-agent-type-label" className="mb-1.5 block text-[13px] font-medium text-zinc-300">智能体类型</label>
             <div data-id="create-agent-dialog-agent-type-options" className="flex flex-wrap gap-2">
               {AGENT_TYPE_OPTIONS.map((option) => (
-                <button
-                  data-id={`create-agent-dialog-agent-type-${option.value}`}
-                  key={option.value}
-                  type="button"
-                  onClick={() => set({ agent_type: option.value })}
-                  className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-all ${
-                    values.agent_type === option.value
-                      ? 'border-blue-500/40 bg-blue-500/20 text-blue-300'
-                      : 'border-white/[0.08] bg-white/[0.03] text-zinc-400 hover:border-white/[0.12] hover:bg-white/[0.06]'
-                  }`}
-                >
-                  {option.icon ? (
-                    <div className="flex h-5 w-5 items-center justify-center rounded bg-zinc-400">
-                      <img
-                        src={option.icon}
-                        alt={option.label}
-                        className="h-4 w-4"
-                      />
-                    </div>
-                  ) : option.value === 'openclaw' ? (
-                    <div className="flex h-4 w-4 items-center justify-center">
-                      <span className="text-[13px] leading-none" aria-label="OpenClaw">🦞</span>
-                    </div>
-                  ) : option.value === 'hermes' ? (
-                    <div className="flex h-5 min-w-5 items-center justify-center rounded bg-zinc-300 px-1 text-[9px] font-semibold tracking-[0.08em] text-zinc-950">
-                      HE
-                    </div>
-                  ) : (
-                    <div className="h-4 w-4 rounded border border-white/[0.2]" />
-                  )}
-                  <span>{option.label}</span>
-                </button>
+                  <AgentTypeOptionButton
+                    dataId={`create-agent-dialog-agent-type-${option.value}`}
+                    value={option.value}
+                    label={option.label}
+                    selected={values.agent_type === option.value}
+                    onClick={() => set({ agent_type: option.value })}
+                  />
               ))}
             </div>
           </div>

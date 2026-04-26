@@ -1,11 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Copy, Folder, History, Pencil } from 'lucide-react';
-import { assetUrl } from '../../lib/assets';
-import config from '../../config';
-import { lockPointer, unlockPointer } from '../../lib/pointerLock';
+import { normalizeAgentType } from '../../lib/agentType';
 import { useDevRegister } from '../../lib/devStore';
 import { emitWebFrameMaskEvent } from '../../lib/webFrameMask';
-import { WebFrame } from '../WebFrame';
+import AgentAvatar from '../AgentAvatar';
 import AgentHistoryOverlay from '../chat/AgentHistoryOverlay';
 
 export interface AgentCanvasItem {
@@ -109,89 +107,6 @@ function blurActiveEditableElement() {
   try {
     active.blur();
   } catch {}
-}
-
-function normalizeAgentType(agentType?: string) {
-  switch ((agentType || '').trim().toLowerCase()) {
-    case 'openclaw':
-    case 'opencraw':
-      return 'openclaw';
-    case 'codex':
-    case 'openai':
-      return 'codex';
-    case 'kiro-cli':
-    case 'kiro':
-    case 'kiro-cli chat':
-      return 'kiro-cli';
-    case 'copilot':
-    case 'github-copilot':
-      return 'copilot';
-    case 'gemini':
-      return 'codex';
-    case 'claude':
-    case 'claude code':
-    case 'claude-code':
-      return 'claude';
-    case 'cicy':
-    case 'cicy-claude':
-      return 'cicy-claude';
-    case 'opencode':
-    case 'open code':
-    case 'open-code':
-      return 'opencode';
-    default:
-      return '';
-  }
-}
-
-function AgentWindowAvatar({ agentType, title }: { agentType?: string; title: string }) {
-  const normalizedAgentType = normalizeAgentType(agentType);
-  const baseClassName = 'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border shadow-sm';
-
-  if (!normalizedAgentType) {
-    return (
-      <div
-        data-id="agent-window-avatar"
-        className={`${baseClassName} border-white/[0.08] bg-white/[0.03] text-zinc-400`}
-        title={title}
-      >
-        <span data-id="agent-window-avatar-fallback" className="text-[11px] font-semibold uppercase">{title.slice(0, 1) || '?'}</span>
-      </div>
-    );
-  }
-
-  if (normalizedAgentType === 'openclaw') {
-    return (
-      <div
-        data-id="agent-window-avatar"
-        className={`${baseClassName} border-zinc-500/40 bg-zinc-300 text-zinc-950`}
-        title="OpenClaw"
-      >
-        <span data-id="agent-window-avatar-openclaw" className="text-[18px] leading-none" aria-label="OpenClaw">🦞</span>
-      </div>
-    );
-  }
-
-  const iconMap: Record<string, { label: string; src: string; className?: string }> = {
-    codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg') },
-    claude: { label: 'Claude', src: assetUrl('/assets/logos/claude-symbol.svg') },
-    'cicy-claude': { label: 'CiCy', src: 'https://cicy-ai.com/logo.svg' },
-    opencode: { label: 'OpenCode', src: assetUrl('/assets/logos/opencode.svg'), className: 'h-6 w-6' },
-    'kiro-cli': { label: 'Kiro', src: assetUrl('/assets/logos/kiro.png') },
-    copilot: { label: 'Copilot', src: assetUrl('/assets/logos/copilot.svg') },
-  };
-  const icon = iconMap[normalizedAgentType];
-  if (!icon) return null;
-
-  return (
-    <div
-      data-id="agent-window-avatar"
-      className={`${baseClassName} border-zinc-500/40 bg-zinc-300`}
-      title={icon.label}
-    >
-      <img data-id="agent-window-avatar-image" src={icon.src} alt={icon.label} className={`${icon.className || 'h-5 w-5'} object-contain`} />
-    </div>
-  );
 }
 
 function defaultWindowLayout(index: number, _isPrimary: boolean, zIndex: number, total: number): WindowLayout {
@@ -1065,7 +980,15 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
         className="flex h-12 items-center border-b border-white/[0.07] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] px-3"
       >
         <div data-id="agent-window-header-left" className="flex items-center gap-3">
-          <AgentWindowAvatar agentType={item.agentType} title={item.title || item.paneId} />
+          <AgentAvatar
+            agentType={item.agentType}
+            title={item.title || item.paneId}
+            dataId="agent-window-avatar"
+            className="h-9 w-9 rounded-xl border-zinc-500/40 bg-zinc-300 shadow-sm"
+            fallbackClassName="border-white/[0.08] bg-white/[0.03]"
+            iconClassName={normalizeAgentType(item.agentType) === 'opencode' ? 'h-6 w-6' : 'h-5 w-5'}
+            textClassName={normalizeAgentType(item.agentType) === 'openclaw' ? 'text-[18px] leading-none' : 'text-[11px] font-semibold uppercase'}
+          />
           <div data-id="agent-window-header-left-body">
             <div data-id="agent-window-title-row" className="group/title flex items-center gap-2">
               <div data-id="agent-window-title-wrap" className="relative min-w-0 flex-1">
