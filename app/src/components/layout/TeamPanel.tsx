@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Users, Plus, X, Loader2, ExternalLink, Settings, MoreHorizontal, Trash2, RefreshCw } from 'lucide-react';
 import apiService from '../../services/api';
 import { useDialog } from '../../contexts/DialogContext';
-import { assetUrl } from '../../lib/assets';
+import { normalizeAgentType } from '../../lib/agentType';
 import { useDevRegister } from '../../lib/devStore';
+import AgentAvatar from '../AgentAvatar';
 import Select from '../ui/Select';
 import CreateAgentDialog, { CreateAgentValues } from '../CreateAgentDialog';
 
@@ -45,150 +46,6 @@ interface Props {
   onOpenSettingsPane?: (paneId: string) => void;
   onRefreshPanes: () => Promise<void>;
   onRefreshPoll: () => void;
-}
-
-function normalizeAgentType(agentType?: string) {
-  switch ((agentType || '').trim().toLowerCase()) {
-    case 'openclaw':
-    case 'opencraw':
-      return 'openclaw';
-    case 'codex':
-    case 'openai':
-      return 'codex';
-    case 'kiro-cli':
-    case 'kiro':
-    case 'kiro-cli chat':
-      return 'kiro-cli';
-    case 'copilot':
-    case 'github-copilot':
-      return 'copilot';
-    case 'gemini':
-      return 'codex';
-    case 'claude':
-    case 'claude code':
-    case 'claude-code':
-      return 'claude';
-    case 'cicy':
-    case 'cicy-claude':
-      return 'cicy-claude';
-    case 'opencode':
-    case 'open code':
-    case 'open-code':
-      return 'opencode';
-    case 'hermes':
-    case 'hermes-agent':
-    case 'hermes agent':
-      return 'hermes';
-    default:
-      return '';
-  }
-}
-
-function AgentTypeAvatar({ agentType, title }: { agentType?: string; title: string }) {
-  const normalizedAgentType = normalizeAgentType(agentType);
-  const baseClassName = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border shadow-sm';
-
-  if (!normalizedAgentType) {
-    return (
-      <div
-        data-id="team-panel-worker-agent-avatar"
-        className={`${baseClassName} border-white/[0.08] bg-white/[0.03] text-zinc-400`}
-        title={title}
-      >
-        <span className="text-xs font-semibold uppercase">{title.slice(0, 1) || '?'}</span>
-      </div>
-    );
-  }
-
-  if (normalizedAgentType === 'openclaw') {
-    return (
-      <div
-        data-id="team-panel-worker-agent-avatar"
-        className={`${baseClassName} border-zinc-500/40 bg-zinc-300 text-zinc-950`}
-        title="OpenClaw"
-      >
-        <span className="text-[20px] leading-none" aria-label="OpenClaw">🦞</span>
-      </div>
-    );
-  }
-
-  const iconMap: Record<string, { label: string; src?: string; className?: string; textClassName?: string }> = {
-    codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg') },
-    claude: { label: 'Claude', src: assetUrl('/assets/logos/claude-symbol.svg') },
-    'cicy-claude': { label: 'CiCy', src: 'https://cicy-ai.com/logo.svg' },
-    opencode: { label: 'OpenCode', src: assetUrl('/assets/logos/opencode.svg'), className: 'h-7 w-7' },
-    'kiro-cli': { label: 'Kiro', src: assetUrl('/assets/logos/kiro.png') },
-    copilot: { label: 'Copilot', src: assetUrl('/assets/logos/copilot.svg') },
-    hermes: { label: 'Hermes', textClassName: 'text-[15px] font-semibold tracking-[0.08em]' },
-  };
-  const icon = iconMap[normalizedAgentType];
-  if (!icon) return null;
-
-  return (
-    <div
-      data-id="team-panel-worker-agent-avatar"
-      className={`${baseClassName} border-zinc-500/40 bg-zinc-300 text-zinc-950`}
-      title={icon.label}
-    >
-      {icon.src ? (
-        <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-8 w-8'} object-contain`} />
-      ) : (
-        <span className={icon.textClassName || 'text-xs font-semibold uppercase'}>{icon.label.slice(0, 2).toUpperCase()}</span>
-      )}
-    </div>
-  );
-}
-
-function AgentTypeMiniAvatar({ agentType, title }: { agentType?: string; title: string }) {
-  const normalizedAgentType = normalizeAgentType(agentType);
-  const baseClassName = 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border';
-
-  if (!normalizedAgentType) {
-    return (
-      <div
-        className={`${baseClassName} border-white/[0.08] bg-white/[0.03] text-zinc-400`}
-        title={title}
-      >
-        <span className="text-[10px] font-semibold uppercase">{title.slice(0, 1) || '?'}</span>
-      </div>
-    );
-  }
-
-  if (normalizedAgentType === 'openclaw') {
-    return (
-      <div
-        className={`${baseClassName} border-zinc-500/30 bg-zinc-200 text-zinc-950`}
-        title="OpenClaw"
-      >
-        <span className="text-[15px] leading-none" aria-label="OpenClaw">🦞</span>
-      </div>
-    );
-  }
-
-  const iconMap: Record<string, { label: string; src?: string; className?: string; textClassName?: string }> = {
-    codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg'), className: 'h-4.5 w-4.5' },
-    claude: { label: 'Claude', src: assetUrl('/assets/logos/claude-symbol.svg'), className: 'h-4.5 w-4.5' },
-    'cicy-claude': { label: 'CiCy', src: 'https://cicy-ai.com/logo.svg', className: 'h-4.5 w-4.5' },
-    opencode: { label: 'OpenCode', src: assetUrl('/assets/logos/opencode.svg'), className: 'h-5 w-5' },
-    'kiro-cli': { label: 'Kiro', src: assetUrl('/assets/logos/kiro.png'), className: 'h-4.5 w-4.5' },
-    copilot: { label: 'Copilot', src: assetUrl('/assets/logos/copilot.svg'), className: 'h-4.5 w-4.5' },
-    hermes: { label: 'Hermes', textClassName: 'text-[10px] font-semibold tracking-[0.08em]' },
-  };
-  const icon = iconMap[normalizedAgentType];
-  if (!icon) return null;
-
-  return (
-    <div
-      className={`${baseClassName} border-zinc-500/30 bg-zinc-200 text-zinc-950`}
-      title={icon.label}
-    >
-      {icon.src ? (
-        <img src={icon.src} alt={icon.label} className={`${icon.className || 'h-4.5 w-4.5'} object-contain`} />
-      ) : (
-        <span className={icon.textClassName || 'text-[10px] font-semibold uppercase'}>{icon.label.slice(0, 2).toUpperCase()}</span>
-      )}
-    </div>
-  );
 }
 
 export default function TeamPanel({ paneId, panes = [], bindings = [], statuses = {}, onOpenInCurrentPane, onLocatePane, openedPaneIds = [], activePaneId, onOpenSettingsPane, onRefreshPanes, onRefreshPoll }: Props) {
@@ -500,7 +357,15 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         ) : null}
       </div>
       <div className="flex items-center gap-3 flex-1 min-w-0 text-left">
-        <AgentTypeAvatar agentType={agentType} title={title} />
+        <AgentAvatar
+          agentType={agentType}
+          title={title}
+          dataId="team-panel-worker-agent-avatar"
+          className="h-10 w-10 rounded-xl border-zinc-500/40 bg-zinc-300 shadow-sm"
+          fallbackClassName="border-white/[0.08] bg-white/[0.03]"
+          iconClassName="h-8 w-8"
+          textClassName={normalizeAgentType(agentType) === 'openclaw' ? 'text-[20px] leading-none' : normalizeAgentType(agentType) === 'hermes' ? 'text-[15px] font-semibold tracking-[0.08em]' : 'text-xs font-semibold uppercase'}
+        />
 	        <div className="flex-1 min-w-0 pr-7">
 	          <div className="flex items-center gap-1.5">
 	            <h3 className={`text-sm font-medium truncate ${active ? 'text-blue-300' : 'text-zinc-300'}`}>{title}</h3>
@@ -521,7 +386,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
             value: a.pane_id,
             label: a.title || shortId(a.pane_id),
             sub: shortId(a.pane_id),
-            icon: <AgentTypeMiniAvatar agentType={a.agent_type} title={a.title || shortId(a.pane_id)} />,
+            icon: <AgentAvatar agentType={a.agent_type} title={a.title || shortId(a.pane_id)} className="h-8 w-8 rounded-lg border-zinc-500/30 bg-zinc-200" fallbackClassName="border-white/[0.08] bg-white/[0.03]" iconClassName="h-4.5 w-4.5" textClassName={normalizeAgentType(a.agent_type) === 'openclaw' ? 'text-[15px] leading-none' : normalizeAgentType(a.agent_type) === 'hermes' ? 'text-[10px] font-semibold tracking-[0.08em]' : 'text-[10px] font-semibold uppercase'} />,
           }))}
           onChange={v => bind(v)}
           onOpenChange={open => { if (open) void onRefreshPanes(); }}
