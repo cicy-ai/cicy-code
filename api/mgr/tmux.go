@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +46,7 @@ const bracketedPasteStart = "\x1b[200~"
 const bracketedPasteEnd = "\x1b[201~"
 const shellPromptPollInterval = 200 * time.Millisecond
 const shellPromptTimeout = 12 * time.Second
+const shellPromptTimeoutDarwin = 20 * time.Second
 
 type startupPromptTask struct {
 	paneID    string
@@ -234,26 +236,64 @@ func isShellPromptVisible(out string) bool {
 	}
 }
 
+func shellPromptTimeoutForRuntime() time.Duration {
+	if runtime.GOOS == "darwin" {
+		return shellPromptTimeoutDarwin
+	}
+	return shellPromptTimeout
+}
+
+func paneCurrentCommand(paneID string) string {
+	out, err := runTmux("display-message", "-p", "-t", paneID, "#{pane_current_command}")
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(out))
+}
+
+func isDarwinShellDollarPrompt(out string) bool {
+	lines := normalizeNonEmptyMeaningfulLines(strings.Split(out, "\n"))
+	if len(lines) == 0 {
+		return false
+	}
+	return strings.HasSuffix(strings.TrimSpace(lines[len(lines)-1]), " $")
+}
+
 func waitForShellPromptReady(paneID string) bool {
-	deadline := time.Now().Add(shellPromptTimeout)
+	deadline := time.Now().Add(shellPromptTimeoutForRuntime())
 	stableCount := 0
 	lastCapture := ""
+	lastCommand := ""
 	for time.Now().Before(deadline) {
-		out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", "-40")
+		out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", "-80")
 		if err == nil {
 			lastCapture = out
-			if isShellPromptVisible(out) {
-				stableCount++
+			if runtime.GOOS == "darwin" {
+				if isDarwinShellDollarPrompt(out) {
+					stableCount++
+				} else {
+					stableCount = 0
+				}
 				if stableCount >= 2 {
 					return true
 				}
 			} else {
-				stableCount = 0
+				if isShellPromptVisible(out) {
+					stableCount++
+				} else {
+					stableCount = 0
+				}
+			}
+		}
+		if runtime.GOOS != "darwin" {
+			lastCommand = paneCurrentCommand(paneID)
+			if stableCount >= 2 && (lastCommand == "bash" || lastCommand == "zsh" || lastCommand == "sh") {
+				return true
 			}
 		}
 		time.Sleep(shellPromptPollInterval)
 	}
-	log.Printf("[init] shell prompt not confirmed for %s within %s; last capture=%q", shortPaneID(paneID), shellPromptTimeout, promptPreview(lastCapture))
+	log.Printf("[init] shell prompt not confirmed for %s within %s; cmd=%q last capture=%q", shortPaneID(paneID), shellPromptTimeoutForRuntime(), lastCommand, promptPreview(lastCapture))
 	return false
 }
 
@@ -3165,11 +3205,11 @@ func initPaneEnv(opts paneEnvOpts) {
 	// visible/interactive. Wait for the prompt marker before sending boot.sh.
 	if waitForShellPromptReady(pid) {
 		log.Printf("[init] shell prompt ready for %s", shortPaneID(pid))
+		runTmux("send-keys", "-t", pid, "source boot.sh", "Enter")
 	} else {
-		log.Printf("[init] shell prompt not confirmed for %s, continue anyway", shortPaneID(pid))
+		log.Printf("[init] shell prompt not confirmed for %s, skip auto source boot.sh", shortPaneID(pid))
+		return
 	}
-
-	runTmux("send-keys", "-t", pid, "source boot.sh", "Enter")
 	if normalizeAgentType(opts.agentType) == "claude" || normalizeAgentType(opts.agentType) == "cicy-claude" {
 		autoConfirmClaudeStartup(pid, opts.allowAllActions)
 	} else if normalizeAgentType(opts.agentType) == "codex" {
