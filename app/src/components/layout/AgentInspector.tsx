@@ -6,7 +6,8 @@ import config from '../../config';
 import apiService from '../../services/api';
 import { TokenManager } from '../../services/tokenManager';
 import type { EditPaneData } from '../EditPaneDialog';
-import { assetUrl } from '../../lib/assets';
+import { AGENT_TYPE_OPTIONS } from '../../lib/agentType';
+import AgentTypeOptionButton from '../AgentTypeOptionButton';
 
 export type InspectorTab = 'overview' | 'memory' | 'settings';
 type InspectorRequestedTab = InspectorTab | 'notes' | 'history';
@@ -863,44 +864,15 @@ export default function AgentInspector({
                 <div data-id="agent-inspector-settings-agent" className="space-y-5">
                   <InspectorField label="智能体类型">
                     <div data-id="agent-inspector-settings-agent-types" className="flex flex-wrap gap-2">
-                      {[
-                        { value: 'openclaw', label: 'OpenClaw', icon: '' },
-                        { value: 'codex', label: 'Codex', icon: assetUrl('/assets/logos/openai.svg') },
-                        { value: 'claude', label: 'Claude', icon: assetUrl('/assets/logos/claude-symbol.svg') },
-                        { value: 'kiro-cli', label: 'Kiro CLI', icon: assetUrl('/assets/logos/kiro.png') },
-                        { value: 'copilot', label: 'Copilot', icon: assetUrl('/assets/logos/copilot.svg') },
-                        { value: 'opencode', label: 'OpenCode', icon: assetUrl('/assets/logos/opencode.svg') },
-                        { value: 'cicy-claude', label: 'CiCy', icon: 'https://cicy-ai.com/logo.svg' },
-                        { value: 'hermes', label: 'Hermes', icon: '' },
-                      ].map((option) => (
-                        <button
+                      {AGENT_TYPE_OPTIONS.map((option) => (
+                        <AgentTypeOptionButton
                           key={option.value}
-                          type="button"
-                          data-id={`agent-inspector-settings-agent-type-${option.value}`}
+                          dataId={`agent-inspector-settings-agent-type-${option.value}`}
+                          value={option.value}
+                          label={option.label}
+                          selected={settingsData?.agent_type === option.value}
                           onClick={() => patchSettingsData({ agent_type: option.value })}
-                          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-all ${
-                            settingsData?.agent_type === option.value
-                              ? 'border-blue-500/40 bg-blue-500/20 text-blue-300'
-                              : 'border-white/[0.08] bg-white/[0.03] text-zinc-400 hover:border-white/[0.12] hover:bg-white/[0.06]'
-                          }`}
-                        >
-                          {option.icon ? (
-                            <div data-id="agent-inspector-settings-agent-type-icon" className="flex h-5 w-5 items-center justify-center rounded bg-zinc-400">
-                              <img src={option.icon} alt={option.label} className="h-4 w-4" />
-                            </div>
-                          ) : option.value === 'openclaw' ? (
-                            <div data-id="agent-inspector-settings-agent-type-openclaw" className="flex h-4 w-4 items-center justify-center">
-                              <span className="text-[13px] leading-none" aria-label="OpenClaw">🦞</span>
-                            </div>
-                          ) : option.value === 'hermes' ? (
-                            <div data-id="agent-inspector-settings-agent-type-hermes" className="flex h-5 min-w-5 items-center justify-center rounded bg-zinc-300 px-1 text-[9px] font-semibold tracking-[0.08em] text-zinc-950">
-                              HE
-                            </div>
-                          ) : (
-                            <div data-id="agent-inspector-settings-agent-type-empty" className="h-4 w-4 rounded border border-white/[0.2]" />
-                          )}
-                          <span>{option.label}</span>
-                        </button>
+                        />
                       ))}
                     </div>
                   </InspectorField>
