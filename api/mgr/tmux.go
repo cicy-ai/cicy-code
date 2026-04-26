@@ -841,6 +841,97 @@ func ensureAgentCommandLineLive(commandName, label, installCmd, logPath string) 
 	return visibleAgentInstallLiveLine(commandName, label, installCmd, logPath)
 }
 
+func kiroCliBootHelperLines() []string {
+	return []string{
+		`__cicy_local_install_kiro() {
+  local download_dir installer_path manifest_url base_url channel arch_raw arch suffix filename download_url expected_checksum actual_checksum install_script
+  download_dir="$(mktemp -d "${TMPDIR:-/tmp}/kiro-cli-install-XXXXXX")" || return 1
+  installer_path="$download_dir/install.sh"
+  echo '[cicy] 下载安装脚本: https://cli.kiro.dev/install'
+  curl -fsSL -o "$installer_path" https://cli.kiro.dev/install || {
+    rm -rf "$download_dir"
+    return 1
+  }
+  base_url="$(sed -n 's/^BASE_URL="\([^"]*\)"/\1/p' "$installer_path" | head -n 1)"
+  channel="$(sed -n 's/^CHANNEL="\([^"]*\)"/\1/p' "$installer_path" | head -n 1)"
+  manifest_url="${base_url%/}/${channel}/latest/manifest.json"
+  arch_raw="$(uname -m)"
+  case "$arch_raw" in
+    x86_64|amd64) arch="x86_64" ;;
+    aarch64|arm64) arch="aarch64" ;;
+    *)
+      echo "[cicy] 不支持的 Kiro CLI 架构: $arch_raw"
+      rm -rf "$download_dir"
+      return 1
+      ;;
+  esac
+  suffix="-musl"
+  filename="kirocli-${arch}-linux${suffix}.zip"
+  download_url="${base_url%/}/${channel}/latest/${filename}"
+  echo "[cicy] 真实下载地址: $download_url"
+  echo "[cicy] 获取校验清单: $manifest_url"
+  curl -fsSL -o "$download_dir/manifest.json" "$manifest_url" || {
+    rm -rf "$download_dir"
+    return 1
+  }
+  expected_checksum="$(python3 - "$download_dir/manifest.json" "$filename" <<'PY'
+import json, sys
+manifest_path, filename = sys.argv[1], sys.argv[2]
+with open(manifest_path, "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+for pkg in data.get("packages", []):
+    if str(pkg.get("download", "")).endswith(filename):
+        print(pkg.get("sha256", ""))
+        break
+PY
+)"
+  if [ -z "$expected_checksum" ]; then
+    echo "[cicy] 未找到校验和: $filename"
+    rm -rf "$download_dir"
+    return 1
+  fi
+  echo "[cicy] 开始下载 Kiro CLI 安装包..."
+  curl -L -o "$download_dir/$filename" "$download_url" || {
+    rm -rf "$download_dir"
+    return 1
+  }
+  actual_checksum="$(sha256sum "$download_dir/$filename" | awk '{print $1}')"
+  if [ "$actual_checksum" != "$expected_checksum" ]; then
+    echo "[cicy] Kiro CLI 校验失败"
+    echo "[cicy] expected: $expected_checksum"
+    echo "[cicy] actual:   $actual_checksum"
+    rm -rf "$download_dir"
+    return 1
+  fi
+  unzip -q "$download_dir/$filename" -d "$download_dir" || {
+    rm -rf "$download_dir"
+    return 1
+  }
+  install_script="$download_dir/kirocli/install.sh"
+  chmod +x "$install_script" || {
+    rm -rf "$download_dir"
+    return 1
+  }
+  KIRO_CLI_SKIP_SETUP=1 bash "$install_script"
+  local status=$?
+  rm -rf "$download_dir"
+  return "$status"
+}`,
+		`__cicy_purge_bad_kiro() {
+  local bad=0
+  if [ -x "$HOME/.local/bin/kiro-cli-chat" ] && strings "$HOME/.local/bin/kiro-cli-chat" 2>/dev/null | grep -Eq 'GLIBC_2\.(38|39)'; then
+    bad=1
+  fi
+  if [ "$bad" -eq 1 ]; then
+    echo '[cicy] 检测到旧版 Kiro 二进制与当前系统 glibc 不兼容，准备重新安装...'
+    rm -f "$HOME/.local/bin/kiro-cli" "$HOME/.local/bin/kiro-cli-chat" "$HOME/.local/bin/kiro-cli-term"
+    hash -r 2>/dev/null || true
+  fi
+}`,
+		`__cicy_purge_bad_kiro`,
+	}
+}
+
 func agentBootLines(agentType string, allowAllActions bool, shortID string) []string {
 	aiCfg := loadRuntimeAIConfig()
 	switch normalizeAgentType(agentType) {
@@ -1727,7 +1818,7 @@ EOF
 			fmt.Sprintf(`printf '%%s' %s > "$WORKSPACE/%s"`, tmuxShellQuote(settingsJSON), settingsFile),
 		}
 		if allowAllActions {
-			lines = append(lines, fmt.Sprintf(`%s --settings "$WORKSPACE/%s" --dangerously-skip-permissions`, cmdName, settingsFile))
+			lines = append(lines, fmt.Sprintf(`%s --settings "$WORKSPACE/%s" --permission-mode bypassPermissions`, cmdName, settingsFile))
 		} else {
 			lines = append(lines, fmt.Sprintf(`%s --settings "$WORKSPACE/%s"`, cmdName, settingsFile))
 		}
@@ -1735,103 +1826,58 @@ EOF
 	case "opencode":
 		home, _ := os.UserHomeDir()
 		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("opencode-install-%s.log", shortID))
-		baseConfigPath := filepath.Join(home, ".config", "opencode", "opencode.json")
-		configPath := fmt.Sprintf("/tmp/opencode-%s.json", shortID)
-		markerPath := lazyAgentMarkerPath("opencode", shortID)
+		runCmd := "opencode"
+		if allowAllActions {
+			runCmd = "opencode --dangerously-skip-permissions"
+		}
 		lines := []string{
 			ensureAgentCommandLine("opencode", "OpenCode", opencodeInstallCmd(), installLog),
-			fmt.Sprintf("export OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
-			fmt.Sprintf("export OPENCODE_BASE_CONFIG=%s", tmuxShellQuote(baseConfigPath)),
-			fmt.Sprintf("export OPENCODE_CONFIG=%s", tmuxShellQuote(configPath)),
-			fmt.Sprintf("export CICY_OPENCODE_MARKER=%s", tmuxShellQuote(markerPath)),
+			fmt.Sprintf("export CICY_OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
+			`export OPENCODE_CONFIG="$WORKSPACE/.opencode/opencode.json"`,
+			`export OPENCODE_CONFIG_ROOT="$WORKSPACE/.opencode/xdg"`,
+			`export CICY_OPENCODE_MARKER="$WORKSPACE/.opencode/running"`,
 			`rm -f "$CICY_OPENCODE_MARKER"`,
+			`mkdir -p "$WORKSPACE/.opencode" "$OPENCODE_CONFIG_ROOT"`,
+			`cat > "$OPENCODE_CONFIG" <<EOF
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "cicyai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "api": "openai",
+      "name": "cicyAi Gateway",
+      "options": {
+        "baseURL": "${CICY_OPENAI_BASE_URL}"
+      }
+    }
+  }
+}
+EOF`,
 		}
-		if allowAllActions {
-			lines = append(lines, `node - <<'EOF'
-const fs = require("fs");
-const src = process.env.OPENCODE_BASE_CONFIG;
-const dst = process.env.OPENCODE_CONFIG;
-if (!src || !dst) process.exit(0);
-const cfg = JSON.parse(fs.readFileSync(src, "utf8"));
-cfg.provider ||= {};
-const provider = cfg.provider.cicyai || cfg.provider.shibacc || {};
-provider.npm ||= "@ai-sdk/openai-compatible";
-provider.options ||= {};
-provider.options.baseURL = process.env.OPENAI_BASE_URL || provider.options.baseURL;
-cfg.provider.cicyai = provider;
-delete cfg.provider.shibacc;
-	if (typeof cfg.model === "string") {
-	  cfg.model = cfg.model.replace(/^shibacc\//, "cicyai/");
-	  if (!cfg.model.includes("/")) cfg.model = "cicyai/" + cfg.model;
-	}
-	if (typeof cfg.small_model === "string") {
-	  cfg.small_model = cfg.small_model.replace(/^shibacc\//, "cicyai/");
-	  if (!cfg.small_model.includes("/")) cfg.small_model = "cicyai/" + cfg.small_model;
-	}
-cfg.permission = "allow";
-fs.writeFileSync(dst, JSON.stringify(cfg, null, 2));
-EOF`)
-			lines = append(lines, `cicy_start_opencode() {
-  if [ -f "$CICY_OPENCODE_MARKER" ]; then
-    echo '[cicy] OpenCode is already starting or running.'
-    return 0
-  fi
-  : > "$CICY_OPENCODE_MARKER"
-  opencode
-  status=$?
-  rm -f "$CICY_OPENCODE_MARKER"
-  echo '[cicy] OpenCode exited. Run cicy_start_opencode to relaunch.'
-  return "$status"
-}`)
-			lines = append(lines,
-				`opencode`,
-			)
-			return lines
-		}
-		lines = append(lines, `node - <<'EOF'
-const fs = require("fs");
-const src = process.env.OPENCODE_BASE_CONFIG;
-const dst = process.env.OPENCODE_CONFIG;
-if (!src || !dst) process.exit(0);
-const cfg = JSON.parse(fs.readFileSync(src, "utf8"));
-cfg.provider ||= {};
-const provider = cfg.provider.cicyai || cfg.provider.shibacc || {};
-provider.npm ||= "@ai-sdk/openai-compatible";
-provider.options ||= {};
-provider.options.baseURL = process.env.OPENAI_BASE_URL || provider.options.baseURL;
-cfg.provider.cicyai = provider;
-delete cfg.provider.shibacc;
-	if (typeof cfg.model === "string") {
-	  cfg.model = cfg.model.replace(/^shibacc\//, "cicyai/");
-	  if (!cfg.model.includes("/")) cfg.model = "cicyai/" + cfg.model;
-	}
-	if (typeof cfg.small_model === "string") {
-	  cfg.small_model = cfg.small_model.replace(/^shibacc\//, "cicyai/");
-	  if (!cfg.small_model.includes("/")) cfg.small_model = "cicyai/" + cfg.small_model;
-	}
-fs.writeFileSync(dst, JSON.stringify(cfg, null, 2));
-EOF`)
+		lines = append(lines, fmt.Sprintf(`cicy_run_opencode() {
+  XDG_CONFIG_HOME="$OPENCODE_CONFIG_ROOT" OPENCODE_CONFIG="$OPENCODE_CONFIG" %s
+}`, runCmd))
 		lines = append(lines, `cicy_start_opencode() {
   if [ -f "$CICY_OPENCODE_MARKER" ]; then
     echo '[cicy] OpenCode is already starting or running.'
     return 0
   fi
   : > "$CICY_OPENCODE_MARKER"
-  opencode
+  cicy_run_opencode
   status=$?
   rm -f "$CICY_OPENCODE_MARKER"
   echo '[cicy] OpenCode exited. Run cicy_start_opencode to relaunch.'
   return "$status"
 }`)
 		lines = append(lines,
-			`opencode`,
+			`cicy_run_opencode`,
 		)
 		return lines
 	case "kiro-cli":
 		home, _ := os.UserHomeDir()
 		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("kiro-install-%s.log", shortID))
-		lines := []string{
-			ensureAgentCommandLineLive("kiro-cli", "Kiro CLI", kiroCliInstallCmd(), installLog),
+		lines := append(kiroCliBootHelperLines(),
+			ensureAgentCommandLineLive("kiro-cli", "Kiro CLI", "__cicy_local_install_kiro", installLog),
 			`if kiro-cli whoami 2>/dev/null | grep -q "^Not logged in"; then
   while true; do
     echo ''
@@ -1849,7 +1895,11 @@ EOF`)
     echo '[cicy] 登录失败或已取消，可重新选择'
   done
 fi`,
-			"kiro-cli chat",
+		)
+		if allowAllActions {
+			lines = append(lines, "kiro-cli chat --trust-all-tools")
+		} else {
+			lines = append(lines, "kiro-cli chat")
 		}
 		return lines
 	case "copilot":
@@ -2127,6 +2177,16 @@ func lazyAgentMarkerPath(agentType, paneID string) string {
 	shortID := strings.Split(normPaneID(paneID), ":")[0]
 	switch normalizeAgentType(agentType) {
 	case "opencode":
+		var workspace string
+		if err := store.QueryRow("SELECT COALESCE(workspace, '') FROM agent_config WHERE pane_id=?", normPaneID(paneID)).Scan(&workspace); err == nil {
+			workspace = strings.TrimSpace(workspace)
+			if workspace != "" {
+				return filepath.Join(workspace, ".opencode", "running")
+			}
+		}
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			return filepath.Join(home, "workers", shortID, ".opencode", "running")
+		}
 		return filepath.Join(os.TempDir(), fmt.Sprintf("opencode-running-%s", shortID))
 	default:
 		return ""
@@ -2997,9 +3057,6 @@ func initPaneEnv(opts paneEnvOpts) {
 	case "claude":
 		// claude uses ANTHROPIC_BASE_URL and settings.json directly in boot lines
 	case "opencode":
-		sessionEnv["CICY_API_KEY"] = strings.TrimSpace(aiCfg.APIKey)
-		sessionEnv["CICY_API_URL"] = strings.TrimSpace(aiCfg.APIURL)
-		sessionEnv["CICY_DEFAULT_OPENCODE_MODEL"] = strings.TrimSpace(aiCfg.DefaultOpencodeModel)
 	case "codex":
 		// codex uses -c flags directly, no env needed
 	case "kiro-cli":
@@ -3038,7 +3095,7 @@ func initPaneEnv(opts paneEnvOpts) {
 		}
 	}
 	switch agentNorm {
-	case "codex", "claude", "kiro-cli", "copilot", "cicy-wechat", "cicy-feishu":
+	case "codex", "claude", "kiro-cli", "copilot", "cicy-wechat", "cicy-feishu", "opencode":
 		// boot lines handle gateway URLs directly
 	default:
 		lines = append(lines,

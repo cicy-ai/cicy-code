@@ -223,11 +223,12 @@ export class WebTTY {
                         connection.send(msgInput + input);
                     }
                 );
-                this.term.onPaste?.(
-                    (input: string) => {
-                        connection.send(msgInput + input);
-                    }
-                );
+                // Temporarily disable the custom paste interception flow.
+                // this.term.onPaste?.(
+                //     (input: string) => {
+                //         connection.send(msgInput + input);
+                //     }
+                // );
 
                 pingTimer = setInterval(() => {
                     connection.send(msgPing)
