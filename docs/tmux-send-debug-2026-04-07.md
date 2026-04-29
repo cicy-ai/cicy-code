@@ -1,138 +1,54 @@
-# tmux send Debug Log (2026-04-07)
+# tmux send 调试记录（2026-04-07，归档）
 
-Target: Docker container `cicy-code-dev`, pane `w-10002:main.0` (`codex`)
+这是一次针对 `/api/tmux/send` 的历史调试记录摘要。
 
-Recorded at: 2026-04-07 10:12:19 UTC
+它保留结论，不再保留当天的敏感 token、临时路径和一次性环境细节。
 
-## Context
+## 调试对象
 
-- Container API: `http://127.0.0.1:8027`
-- Token: `cicy_e20ff4146b5a557a9f6e14394905854f`
-- Agent type: `codex`
-- Pane command:
-  - `node /usr/local/bin/codex -c model_providers.custom.base_url="http://127.0.0.1:8008/api/ai-gateway/openai/w-10002" --dangerously-bypass-approvals-and-sandbox`
+- 容器内一个 `codex` pane
+- 目标是确认长文本通过 `/api/tmux/send` 后，是否真的被提交给 agent，而不是只停留在输入框里
 
-## What Was Sent
+## 当天确认过的路径
 
-At `2026-04-07 09:15:09`, `/api/tmux/send` sent this prompt to `w-10002:main.0`:
+1. 发送超长文本时，代码会进入 `chunked` 发送路径
+2. 发送后会先做一次或两次“回显确认”
+3. 确认文本已经稳定出现在 pane UI 里后，才发送 Enter
+4. Enter 后还会再抓一次 pane 内容，确认已经进入真正的对话推进状态
 
-```text
-FIX_VERIFY_CODEX_20260407
-Reply exactly FIXED_CODEX_OK_20260407.
-PATCH_FILLER_1234567890abcdef PATCH_FILLER_1234567890abcdef ... (repeated 30 times)
-```
+## 当天得到的有效结论
 
-This was intentionally long enough to exercise the `chunked` send path.
+### 1. `chunked` 路径可用
 
-## Decision Trail
+对 `codex` 的那次测试里，长文本确实走了 `chunked` 发送路径，并且后续确认链路成功。
 
-### 1. Agent ready check
+### 2. 预提交确认不是摆设
 
-Observed log:
+调试结果表明，`tmux.go` 里的“发送前确认 prompt 已稳定出现在界面上”这一步是有效的，不是日志噪音。
 
-```text
-2026/04/07 09:14:34 [codex-auto-confirm] w-10002:main.0 trust workspace enter #1
-2026/04/07 09:14:35 [codex-auto-confirm] w-10002:main.0 ready
-```
+### 3. 提交确认依赖 agent 类型
 
-Decision:
+`codex`、`claude`、`openclaw` 的“提交成功”判断逻辑并不相同。
 
-- Codex had already passed the trust prompt and reached its normal input-ready state.
-- This means the send path was not racing Codex startup at the time of the test.
+当前代码位置：
 
-### 2. Text send
+- `waitForPromptEchoBeforeEnter`
+- `submitPromptWithConfirmation`
+- `promptSubmitConfirmed`
 
-Observed log:
+都在 `api/mgr/tmux.go`。
 
-```text
-2026/04/07 09:15:09 [tmux-send] pane=w-10002 mode=chunked lines=3 runes=965 preview="FIX_VERIFY_CODEX_20260407"
-```
+## 现在仍然有用的排查方法
 
-Decision:
+如果今天再排查 `/api/tmux/send`，优先看：
 
-- The text was sent via the chunked path because it exceeded the direct-send threshold.
+- `api/mgr/tmux.go` 里的 ready / confirm / submit 三段逻辑
+- `capture-pane` 输出
+- tmux send trace 日志
+- agent 当前是否处在 trust / theme / startup prompt 阶段
 
-### 3. Pre-submit confirmation (`cap` before Enter)
+## 这份归档的作用
 
-Observed log:
+它现在只用于说明一件事：
 
-```text
-2026/04/07 09:15:10 [tmux-send] pane=w-10002 confirm=matched-text confirm2=matched agent=codex mode=chunked preview="FIX_VERIFY_CODEX_20260407"
-```
-
-What `cap` showed:
-
-```text
-› FIX_VERIFY_CODEX_20260407
-  Reply exactly FIXED_CODEX_OK_20260407.
-  PATCH_FILLER_1234567890abcdef ...
-```
-
-Decision:
-
-- The prompt text visibly appeared in the Codex UI.
-- A second `cap` also still matched.
-- So the implementation treated this as "text is in the input/UI and it is now safe to attempt submit".
-
-### 4. Submit confirmation (`cap` after Enter)
-
-Observed log:
-
-```text
-2026/04/07 09:15:11 [tmux-send] pane=w-10002 submit=confirmed agent=codex preview="FIX_VERIFY_CODEX_20260407"
-```
-
-What `cap` showed afterward:
-
-```text
-• FIXED_CODEX_OK_20260407
-```
-
-Decision:
-
-- The session visibly progressed after Enter.
-- The send was not just "text sitting in the input box"; it became a real submitted prompt and produced a reply.
-- This is a confirmed good path.
-
-## Current Pane Snapshot
-
-Current `capture-pane` snapshot shows:
-
-```text
-› test
-
-  gpt-5.4 high · 100% left · ~/workers/w-10002
-```
-
-Current tmux cursor state:
-
-```text
-cursor_x=2 cursor_y=34 pane_in_mode=0
-```
-
-## Important Finding About The Current `test`
-
-There is no matching `tmux-send` log for the visible `› test` content.
-
-Only these `w-10002` tmux-send logs exist:
-
-```text
-2026/04/07 09:15:09 [tmux-send] pane=w-10002 mode=chunked lines=3 runes=965 preview="FIX_VERIFY_CODEX_20260407"
-2026/04/07 09:15:10 [tmux-send] pane=w-10002 confirm=matched-text confirm2=matched agent=codex mode=chunked preview="FIX_VERIFY_CODEX_20260407"
-2026/04/07 09:15:11 [tmux-send] pane=w-10002 submit=confirmed agent=codex preview="FIX_VERIFY_CODEX_20260407"
-```
-
-Interpretation:
-
-- The currently visible `› test` did not come from the recorded `/api/tmux/send` flow above.
-- It may have been typed through another path, or entered after the recorded API test.
-- Based on available logs, the known API-driven `tmux send` test for `w-10002` succeeded.
-- Based on the current pane alone, `› test` looks like pending input with no confirmed submit event attached to it yet.
-
-## Summary
-
-- `w-10002:main.0` Docker test path for `/api/tmux/send` was successful.
-- The recorded prompt used the `chunked` path.
-- Two-stage pre-submit `cap` matched the prompt text.
-- Post-Enter `cap` showed real session progression and reply, so `submit=confirmed` was correct.
-- The currently visible `› test` is not backed by any `tmux-send` log, so it should not be treated as evidence that the recorded API send path failed.
+> 这条发送链路历史上已经验证过“长文本可以被真正提交”，所以今天再出问题时，先查当前 agent 启动状态、pane ready 判断和提交确认条件，不要直接假设 `chunked send` 本身坏了。

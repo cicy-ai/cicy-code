@@ -1,7 +1,12 @@
 # SOP v1
 
+这里存放当前仍在维护的 SOP。
+
 - [Bump Docker Version And Push DockerHub](./bump-docker-version-and-push-dockerhub.md)
 
-这组文档只记录当前确认过的实际流程。
+默认约定：
 
-旧文档保留在 `docs/` 下作为历史参考，后续继续维护以 `docs/sop/v1/` 为准。
+- 仓库目录：`~/projects/cicy-code`
+- 全局状态目录：`~/cicy-ai`
+
+`docs/` 下按日期命名的记录文件属于历史材料，不是当前标准流程说明。

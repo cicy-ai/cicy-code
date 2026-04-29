@@ -1,153 +1,74 @@
 # cicy-code
 
-`cicy-code` 是一个本地优先的 AI Agent 协作开发环境。
+`cicy-code` 是一个本地优先的多 agent 开发工作区。
 
-它把 tmux worker、WebTTY 终端、React 工作区、code-server、AI CLI 启动逻辑、node registry、shared workspace API 和 npm 启动入口收在同一个仓库里，目标不是“聊天 UI”，而是让一个人同时操作多个可执行的 agent workspace。
+它把 tmux worker、WebTTY、React 工作区、code-server 代理、OpenClaw 网关、shared workspace API、runtime/machines API、npm 启动器和本地 skills 收在同一个仓库里。
 
-## 当前状态
+## 当前结论
 
-这份 README 以当前仓库真实状态为准，而不是历史文档：
+这份 README 只描述当前代码状态。
 
-- 当前推荐的本地开发入口是 `python3 dev.py`
-- 当前正式构建入口是 `./build.sh`
-- 前端开发服务器是 `app` 下的 Vite，默认 `8022`
-- 后端默认监听 `8008`
-- 旧的 `.env`、`docker-compose.yml`、desktop submodule、`api/Makefile.manager` 已经不再是主流程的一部分
-- 仓库里仍然保留了一些历史脚本，但不应默认当成现在的推荐路径
+- 本地开发主入口：`python3 dev.py`
+- 正式构建入口：`./build.sh`
+- 后端主入口：`api/mgr/main.go`
+- 前端主入口：`app/src/App.tsx`
+- 主工作区组件：`app/src/components/Workspace.tsx`
+- 版本号源头：`npm/package.json`
+- 本地状态根目录：`~/cicy-ai`
 
-## 核心能力
-
-- tmux 驱动的多 pane / 多 worker 工作区
-- 每个 worker 绑定独立 agent 类型、工作目录、ttyd 端口和运行状态
-- React 工作区 UI，内含终端、聊天、队列、技能、团队面板、设置面板
-- 内嵌式 code-server 代理
-- 自带 WebTTY / ttyd-go 前后端协议实现，不依赖外部终端网关
-- 本地 SQLite 默认模式，也支持 Redis / 容器运行时
-- 多节点 registry，配置文件默认在 `~/Private/cicy-node.json`
-- shared workspace API，用 JSON / Markdown 文件做跨 worker 协作桥接
-- npm launcher，支持 `npx cicy-code`
-- 可选桌面模式：复用全局安装的 `cicy-desktop`
-
-## 目录结构
+## 目录
 
 ```text
 cicy-code/
-├── app/                  React 19 + Vite 前端
-├── api/                  Go 后端、WebTTY、ttyd-go 相关实现
-│   ├── mgr/              主程序，负责 tmux / panes / skills / auth / runtime / UI embed
-│   ├── server/           WebTTY HTTP / WebSocket 服务层
-│   ├── webtty/           WebTTY 协议与实现
-│   ├── resources/        后端静态资源
-│   └── js/               ttyd 前端资源构建源码
-├── npm/                  npm 发布包与 `cicy-code` 启动器
-├── skills/               本地 CLI helpers：`cicy-code`、`cicy-master`
-├── scripts/              版本同步、安装、镜像相关脚本，部分为历史脚本
-├── docs/                 当前仓库内剩余文档
-├── build.sh              统一构建脚本
-├── dev.py                当前推荐的本地开发入口
-├── versions.json         基础镜像 / 资源版本信息
-└── Makefile              常用别名
+├── app/                    React + Vite 前端
+├── api/                    Go 后端、WebTTY、ttyd 资产、manager 运行时
+│   ├── mgr/                主程序与业务路由
+│   ├── server/             WebTTY HTTP/WebSocket 服务
+│   ├── webtty/             WebTTY 协议实现
+│   ├── js/                 终端前端静态资源源码
+│   └── resources/          后端静态资源
+├── npm/                    npm 发布包与启动器
+├── skills/                 本地 CLI：cicy-code / cicy-master
+├── code-server-extension/  code-server / VS Code 扩展源码
+├── docs/                   当前文档与历史记录
+├── dev.py                  本地开发入口
+├── build.sh                标准构建入口
+├── versions.json           基础镜像与静态资源版本
+└── Makefile                常用别名
 ```
 
-## 运行模型
+## 运行方式
 
-项目由四层组成：
-
-1. `api/mgr`
-   这是核心运行时。负责启动与恢复 tmux workers，提供 `/api/*`，管理 token、pane、agent、queue、machines、shared workspace、skills、runtime 任务等能力。
-
-2. `api/server` + `api/webtty`
-   这是终端传输层。后端通过 WebSocket 把 PTY 映射到浏览器，前端协议实现位于 `api/js/src/webtty.ts`。
-
-3. `app`
-   React 工作区。主界面包括 Home、Workspace、Audit、TeamPanel、SkillPanel、Settings、Terminal、Chat 等。
-
-4. `npm`
-   发布给最终用户的入口。`npx cicy-code` 最终运行的是这个目录里的启动器和预编译二进制。
-
-## 默认 agent 类型
-
-当前主流程围绕这 4 类 agent：
-
-- `openclaw`
-- `codex`
-- `claude`
-- `opencode`
-
-在 `--dev` 模式下，如果没有显式传 `--agents=...`，默认会按这 4 类去准备内置 worker。
-
-当前内置 worker 端口映射也以这 4 个为准：
-
-- `10001` -> `openclaw`
-- `10002` -> `codex`
-- `10003` -> `claude`
-- `10004` -> `opencode`
-
-## 依赖
-
-最低建议环境：
-
-- Go `1.25+`
-- Node.js `20+`
-- `tmux`
-- `git`
-- `curl`
-
-本地模式下，程序会检查并尽量安装缺失的 AI CLI / `code-server`：
-
-- `openclaw`
-- `@openai/codex`
-- `@anthropic-ai/claude-code`
-- `opencode`
-- `code-server`
-
-容器 runtime 下则假设这些工具已经预装在镜像中。
-
-## 快速开始
-
-### 方式 1：npm 用户入口
+### 1. 本地开发
 
 ```bash
-npx cicy-code
-```
-
-服务启动后会打印访问地址。默认端口来自后端二进制本身，通常是：
-
-```text
-http://127.0.0.1:8008/?token=<token>
-```
-
-token 也会写入 `~/global.json` 的 `api_token`。
-
-### 方式 2：本地开发主入口
-
-```bash
-cd /path/to/cicy-code
+cd ~/projects/cicy-code
 python3 dev.py
 ```
 
-`dev.py` 会做这些事：
+`dev.py` 当前会：
 
-- 读取 `~/global.json` 里的 AI provider 配置
-- 同步版本号
-- 设置 `SKIP_NPM=1`
-- 构建 `api/cicy-code`
-- 杀掉占用当前 API 端口的旧 `cicy-code` 进程
-- 最后执行 `api/cicy-code --public --dev`
+1. 读取 `~/cicy-ai/global.json`
+2. 停掉占用 `8008` 的旧 `cicy-code`
+3. 刷新 ttyd 嵌入资产
+4. 同步版本号
+5. 执行 `./build.sh build <platform>`
+6. 后台启动 `api/cicy-code --public --dev`
+7. tail `.dev-logs/cicy-code.log`
 
 默认端口：
 
-- API: `8008`
-- Vite: `8022`
-- code-server: `8002`
+- API：`8008`
+- Vite：`8022`
+- code-server：`8002`
 
-### 方式 3：前后端分开调试
+### 2. 前后端分开调试
 
 前端：
 
 ```bash
 cd app
-npm install
+npm ci
 npm run dev
 ```
 
@@ -158,194 +79,87 @@ cd api
 go run ./mgr/ --dev --public
 ```
 
-在 `--dev` 模式下，后端的 UI 层会把非 API 请求代理到 `http://127.0.0.1:8022`，所以前端热更新是原生生效的。
+`--dev` 下，后端会把非 API 请求反代到 `http://127.0.0.1:8022`。
+
+### 3. npm 用户入口
+
+```bash
+npx cicy-code
+```
+
+npm 包会在安装阶段下载对应平台的预编译二进制；启动器位于 `npm/bin/cicy-code.js`。
+
+### 4. 桌面模式
+
+```bash
+cicy-code --desktop
+```
+
+当前桌面模式依赖全局 `electron` 和 `cicy-desktop`。npm 启动器与后端 `--desktop` 模式都会尝试拉起它。
 
 ## 常用命令
 
 ```bash
-# 本地开发主入口
+# 本地开发
 python3 dev.py
 
-# 仅重建 ttyd / WebTTY 静态资源
+# 仅刷新 ttyd 嵌入资产
 python3 dev.py --ttydAssets
 
-# 前端开发
-make dev-app
+# 前端热更新
+cd app && npm run dev
 
-# 后端开发
-make dev-api
+# 后端 dev 模式
+cd api && go run ./mgr/ --dev --public
 
-# 构建当前平台二进制
-make build
-# 等价于
+# Go 测试
+cd api && go test ./...
+
+# 构建当前平台
 ./build.sh build
 
 # 构建所有平台
-make build-all
-# 等价于
 ./build.sh all
 
-# 构建容器运行镜像
+# 构建 Docker runtime 镜像
 ./build.sh docker <tag>
 
-# 构建基础镜像
+# 构建 Docker base 镜像
 ./build.sh docker-base <tag>
 ```
 
-## 构建说明
+`make dev-api` 当前只是 `go run ./mgr/`，不带 `--dev --public`；调试 Vite 代理时请直接用上面的显式命令。
 
-不要把 `go build ./mgr/` 当成标准发版流程。
+## 构建规则
 
-标准构建入口是 [`build.sh`](build.sh)，它会先做这些准备：
+标准构建入口是 `build.sh`，不是直接 `go build ./mgr/`。
 
-- 把 `api/resources` 复制到 `api/mgr/resources`
-- 把根目录 `.tmux.conf` 和 `.cicy_tmux.conf` 复制到 `api/mgr/`
-- 构建 `app/dist`
-- 把 `app/dist` 复制到 `api/mgr/ui`
-- 如果仓库内存在 `mitmproxy/`，会一并复制到 `api/mgr/monitor`
+`build.sh` 当前会：
 
-之后才会对 `./mgr/` 做 Go build。
+1. 同步版本号
+2. 复制 `api/resources` 到 `api/mgr/resources`
+3. 复制 `.tmux.conf` 与 `.cicy_tmux.conf` 到 `api/mgr/`
+4. 构建 `app/dist`（除非 `SKIP_NPM=1`）
+5. 刷新 `api/server/asset.go`（除非 `SKIP_TTYD_ASSET=1`）
+6. 复制 `app/dist` 到 `api/mgr/ui`
+7. 最后再编译 `api/mgr`
 
-如果前端产物已经是最新的，可以用：
+只直接执行 `go build ./mgr/` 会跳过这些嵌入步骤。
 
-```bash
-SKIP_NPM=1 ./build.sh build
-```
+## 架构
 
-## 配置来源
+### 后端：`api/mgr`
 
-当前仓库的配置来源主要有三类：
-
-### 1. 环境变量
-
-最常用的包括：
-
-- `PORT`
-- `CS_PORT`
-- `SQLITE_PATH`
-- `CICY_API_KEY`
-- `CICY_API_URL`
-- `CICY_ANTHROPIC_URL`
-- `CICY_DEFAULT_OPENCODE_MODEL`
-- `CICY_DEFAULT_CLAUDE_MODEL`
-- `CICY_CODEX_MODEL`
-- `CICY_OPENCLAW_MODEL`
-- `CICY_API_TOKEN`
-- `CICY_RUNTIME_KIND`
-- `CICY_TEAM_TOKEN`
-- `CICY_TEAMCENTER_URL`
-- `CICY_TEAMCENTER_BOOTSTRAP_PATH`
-- `CICY_MASTER_URL`
-- `CICY_MASTER_TOKEN`
-- `CICY_PUBLIC_URL`
-- `CICY_CLOUDFLARED_TOKEN`
-
-其中 runtime / docker 的环境约定是：
-
-- dev 和 prod 走同一套容器启动流程
-- 容器先用 `CICY_TEAM_TOKEN` 调 `CICY_TEAMCENTER_URL + CICY_TEAMCENTER_BOOTSTRAP_PATH`
-- 服务端返回 `CICY_PUBLIC_URL`、`CICY_MASTER_URL`、`CICY_MASTER_TOKEN`、`CICY_CLOUDFLARED_TOKEN`
-- 容器内再启动 `cloudflared`，并把自己注册回 teamcenter
-
-也就是说：
-
-- VM / docker / cloudflared 流程不分 dev / prod
-- 只通过 teamcenter 地址和回填域名区分环境
-
-### 2. `~/global.json`
-
-这是当前本地开发流最重要的外部配置文件之一。`dev.py` 会从这里读取：
-
-- `api_token`
-- `ai.currentProvider`
-- `ai.provider.*`
-- `cicyAiapikey`
-- `2000RunApikey`
-- `cicy-cluster.*`
-- `images.*`
-
-### 3. `~/Private/cicy-node.json`
-
-这是 node registry 的默认来源，由：
-
-- 后端 `api/mgr/machines.go`
-- CLI `skills/cicy-code`
-- CLI `skills/cicy-master`
-
-共同使用。
-
-## 前端概览
-
-前端主入口在 [`app/src/App.tsx`](app/src/App.tsx)，当前主要有三种视图：
-
-- `desktop`
-- `workspace`
-- `audit`
-
-关键模块：
-
-- `components/Workspace.tsx`
-  主工作区。包含终端、聊天、team panel、skill panel、settings、code-server 浮窗等。
-
-- `components/CreateAgentDialog.tsx`
-  创建工作实例，当前支持 `openclaw`、`codex`、`claude`、`opencode`，并支持：
-  - 启动时允许所有操作
-  - 默认中文回复
-
-- `components/chat/ChatView.tsx`
-  聊天和 agent 事件展示。
-
-- `components/terminal/*`
-  命令面板、终端 frame、窗口管理。
-
-- `services/api.ts`
-  所有前端 API 调用都从这里出。
-
-## 后端概览
-
-后端主入口在 [`api/mgr/main.go`](api/mgr/main.go)。
-
-主要能力分布如下：
-
-- `setup.go`
-  环境检查、依赖安装、内置 worker 恢复与初始化
-
-- `tmux.go`
-  worker 启动、tmux 指令、agent 启动脚本拼装、自动确认逻辑
-
-- `db.go`
-  SQLite schema 与 migration
-
-- `machines.go`
-  node registry、机器同步、实例视图
-
-- `runtime.go`
-  runtime instance / session / task / artifact API
-
-- `shared_workspace.go`
-  work item、artifact、handoff、event 的文件式共享协作层
-
-- `skills.go`
-  skills API
-
-- `proxy.go`
-  code-server / mitm / 其他代理能力
-
-- `ui.go`
-  SPA 静态资源或 Vite dev server 代理
-
-## API 能力面
-
-从当前 `main.go` 暴露的路由来看，项目已经不只是“tmux 管理器”，而是一个完整的协作 runtime：
+主入口是 `api/mgr/main.go`。当前路由面包括：
 
 - `/api/auth/*`
-- `/api/tmux/*`
+- `/api/panes` 与 `/api/tmux/*`
 - `/api/chat/*`
 - `/api/stats/*`
 - `/api/queue/*`
 - `/api/agents/*`
 - `/api/groups/*`
-- `/api/machines/*`
+- `/api/nodes` / `/api/machines/*`
 - `/api/runtime/*`
 - `/api/shared-workspace/*`
 - `/api/skills/*`
@@ -354,82 +168,186 @@ SKIP_NPM=1 ./build.sh build
 - `/code/*`
 - `/ttyd/*`
 
-## Skills 与节点工具
+关键文件：
 
-仓库自带两个实用 CLI：
+- `api/mgr/setup.go`：环境检查、安装、worker 初始化、code-server 启动
+- `api/mgr/tmux.go`：pane 生命周期、tmux send、agent 启动脚本
+- `api/mgr/chatbus.go`：聊天 WebSocket、poll 数据、client 间广播
+- `api/mgr/runtime.go`：runtime instance/session/task/artifact
+- `api/mgr/machines.go`：机器列表、同步、配置落盘
+- `api/mgr/shared_workspace.go`：文件式协作层
+- `api/mgr/proxy.go` / `api/mgr/openclaw_gateway.go`：代理与 AI 网关
+- `api/mgr/ui.go`：内嵌 UI 或 Vite 反代
 
-### `skills/cicy-code`
+### 终端层
 
-面向节点 API 调用，支持：
+- `api/server`：终端 HTTP/WebSocket 服务
+- `api/webtty`：协议层
+- `api/js`：浏览器端终端资产源码
 
-- 选择默认或指定 node
-- 请求 runtime / session / task API
-- 请求 shared workspace API
-- 请求 tmux / panes API
-
-### `skills/cicy-master`
-
-面向本地 node registry 管理，支持：
-
-- 规范化 `~/Private/cicy-node.json`
-- 原子写入
-- 文件锁
-- `register`
-- `sync`
-- `ping`
-- `health`
-
-## 桌面模式
-
-npm 启动器支持：
+如果改的是 `api/js/src/*`，还需要：
 
 ```bash
-cicy-code --desktop
+cd api && make asset
 ```
 
-它会：
+### 前端：`app`
 
-- 启动 `cicy-code` API
-- 检查全局 `electron`
-- 检查全局 `cicy-desktop`
-- 如果存在则打开桌面模式
+- `app/src/App.tsx`：入口与 hash 路由切换
+- `app/src/components/Workspace.tsx`：主工作区、agent stack、code-server 面板、team panel、skills、WebSocket 状态
+- `app/src/services/api.ts`：统一 API 客户端
+- `app/src/config.ts`：前端版本号、API base、路径辅助函数
 
-桌面模式现在依赖全局安装的 `cicy-desktop`，仓库内部已经不再内置 desktop submodule。
+前端视图当前主要有：
 
-## Docker / Container Runtime
+- `desktop`
+- `workspace`
+- `audit`（前端仍有残留，见下方“已知差异”）
 
-当前仓库仍然保留了这部分底层能力：
+### npm 与扩展
 
-- `api/Dockerfile.runtime.base`
+- `npm/bin/cicy-code.js`：npm 启动器
+- `npm/scripts/install.js`：按平台下载二进制
+- `code-server-extension/`：发送文件路径给当前 agent 的扩展源码
+
+## worker 与 agent
+
+pane 是核心运行单位，典型 ID 形态：
+
+- `w-10001`
+- `w-10001:main.0`
+
+当前内置 agent 目录由 `api/mgr/setup.go` 定义：
+
+- `claude`
+- `codex`
+- `opencode`
+- `kiro-cli`
+- `copilot`
+- `cicy-wechat`
+- `cicy-feishu`
+- `openclaw`
+- `hermes`
+- `cicy-claude`
+
+当前事实：
+
+- `python3 dev.py` 这条主路径下，默认内置 agent 是 `claude`
+- 首个内置 worker 仍然是 `w-10001`
+- `--agents=all` 时，端口按上面列表顺序从 `10001` 递增分配
+- 前端创建对话框也以这组 agent 类型为准
+
+`App.tsx` 里仍保留了一个前端兜底：如果登录后发现 `w-10001` 不存在，会尝试创建一个 `hermes` pane。它不是当前主启动链路的真实默认值，只是 UI 侧补救逻辑。
+
+## 配置与路径
+
+### 全局状态目录
+
+当前代码以 `~/cicy-ai` 为根：
+
+- `~/cicy-ai/global.json`
+- `~/cicy-ai/.cicy/`
+- `~/cicy-ai/workers/`
+- `~/cicy-ai/projects/`
+- `~/cicy-ai/shared-workspace/`
+- `~/cicy-ai/cicy-node.json`
+
+`api/mgr/paths.go` 还保留了 `/cicy/...` 到 `~/cicy-ai/...` 的运行时路径映射，所以某些 API 或 agent 看到的绝对路径可能仍是 `/cicy/...` 形态。
+
+### 机器注册表：有两套默认路径
+
+这是当前仓库里最容易混淆的一点：
+
+1. **后端 runtime 默认文件**：`~/cicy-ai/cicy-node.json`
+   - 来自 `api/mgr/paths.go`
+   - `api/mgr/machines.go` 会读写它
+
+2. **skills CLI 默认文件**：`~/Private/cicy-node.json`
+   - 来自 `skills/cicy-code` 与 `skills/cicy-master`
+   - 可用 `CICY_NODES_FILE` 改写
+
+如果你希望 skills 与后端读写同一份文件，显式设置：
+
+```bash
+export CICY_NODES_FILE=~/cicy-ai/cicy-node.json
+```
+
+### 常用环境变量
+
+常见变量包括：
+
+- `PORT`
+- `CS_PORT`
+- `SQLITE_PATH`
+- `CICY_API_TOKEN`
+- `CICY_API_KEY`
+- `CICY_API_URL`
+- `CICY_ANTHROPIC_URL`
+- `CICY_DEFAULT_OPENCODE_MODEL`
+- `CICY_DEFAULT_CLAUDE_MODEL`
+- `CICY_CODEX_MODEL`
+- `CICY_OPENCLAW_MODEL`
+- `CICY_RUNTIME_KIND`
+- `CICY_RUNTIME_MODE`
+- `CICY_RUNTIME_API_ONLY`
+- `CICY_PUBLIC_URL`
+- `CICY_MASTER_URL`
+- `CICY_MASTER_TOKEN`
+- `CICY_TEAM_TOKEN`
+- `CICY_TEAMCENTER_URL`
+
+其中：
+
+- `CICY_RUNTIME_MODE=api-only` 或 `CICY_RUNTIME_API_ONLY=1` 会让部分 tmux/desktop 接口返回 `not_supported_in_api_only_runtime`
+- `CICY_MASTER_URL` / `CICY_MASTER_TOKEN` / `CICY_PUBLIC_URL` 会触发 managed runtime 的自注册路径
+
+## managed runtime / Docker
+
+当前仓库仍保留完整 Docker 与 managed runtime 能力：
+
 - `api/Dockerfile.runtime`
-- `build.sh docker`
-- `build.sh docker-base`
-- `dev.py --docker`
-- `dev.py --dockerBuild`
+- `api/Dockerfile.runtime.base`
+- `./build.sh docker <tag>`
+- `./build.sh docker-base <tag>`
+- `python3 dev.py --docker`
+- `python3 dev.py --dockerBuild`
+- `python3 dev.py --cloudRun`
+- `python3 dev.py --cloudRunList`
 
-但高层部署脚本正在清理中，因此 README 不再把它们当成本地开发主流程。更准确地说：
+`python3 dev.py --dockerBuild` 当前还会先做 CDN 资产构建与 COS 上传，再 push runtime 镜像，并更新 `~/cicy-ai/global.json -> images.runtime*`。
 
-- 镜像构建能力还在
-- 自动化部署脚本并不稳定，是否可用要以当前工作区文件状态为准
+## code-server 扩展
 
-## 当前推荐工作流
+`code-server-extension` 提供两个用户动作：
 
-如果你是在这个仓库里继续开发，建议默认这样做：
+- 资源管理器右键：发送路径给当前 agent
+- 编辑器右键：发送当前文档/选区给当前 agent
 
-1. 用 `python3 dev.py` 跑本地 API
-2. 需要热更新 UI 时，再开一个 `cd app && npm run dev`
-3. 正式构建或出二进制时，用 `./build.sh`
-4. 管理 node registry 时，用 `skills/cicy-master`
-5. 调用远端或本地 runtime API 时，用 `skills/cicy-code`
+它通过：
 
-## 需要注意的历史残留
+- `POST /api/code-server/send-path`
 
-仓库正在从旧的部署方式收敛到当前的本地优先开发流，所以你会看到一些历史文件或脚本痕迹。当前判断标准应该是：
+与当前页面所属的 `cicy-code` 后端通信。
 
-- 以 `dev.py` 和 `build.sh` 为准
-- 以 `api/mgr/main.go` 暴露的真实路由为准
-- 以 `app/package.json` 和 `npm/package.json` 的脚本为准
-- 不要默认相信旧的 `.env` / `docker-compose` / 旧 supervisor 文档
+仓库里根目录和 `api/code-server-extension/` 下各有一份同名扩展目录；当前代码库保留了这两份副本，维护时应保持同步。
+
+## 已知差异
+
+当前代码与历史文档相比，至少有这几处需要按代码为准：
+
+- 全局状态根目录是 `~/cicy-ai`，不是 `/cicy`
+- 默认 dev agent 是 `claude`，不是一组固定的四 agent 启动模版
+- 机器配置文件存在“后端一份、skills 一份”的默认路径差异
+- 前端仍有 audit 页面和 `/api/audit/*` 调用，但 `api/mgr/main.go` 当前并没有注册这些 audit 路由；它属于未接完的残留面
+
+## 当前建议工作流
+
+1. 本地开发先用 `python3 dev.py`
+2. 需要前端热更新时，再开一个 `cd app && npm run dev`
+3. 改 `api/js` 后执行 `cd api && make asset`
+4. 正式构建走 `./build.sh`
+5. 节点注册表管理走 `skills/cicy-master`
+6. 节点 API 调用走 `skills/cicy-code`
 
 ## 许可证
 

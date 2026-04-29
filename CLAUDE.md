@@ -1,98 +1,83 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file documents the current repo reality for code agents working inside `cicy-code`.
 
-## Common commands
+## Entry points
 
-- Recommended local entrypoint: `python3 dev.py`
-  - This is the main local-dev workflow. It stops any existing `cicy-code` process on port `8008`, refreshes embedded goTTY assets, syncs versions, builds `api/cicy-code`, then execs `api/cicy-code --public --dev`.
-  - Default local ports from the current code/docs: API `8008`, Vite `8022`, code-server `8002`.
-- Restart the running `cicy-code` API during dev: `cicy-dev-restart`
-- Frontend hot reload: `cd app && npm ci && npm run dev`
-  - Vite HMR is enabled; editing `app/src/*` refreshes automatically.
-- Backend-only dev while using the Vite dev server: `cd api && go run ./mgr/ --dev --public`
-- Frontend checks:
-  - `cd app && npm run lint`
-  - `cd app && npm run build`
-  - There is no frontend test script in `app/package.json`.
-- Standard build for the current platform: `./build.sh build`
-- Explicit platform build: `./build.sh build linux amd64`
-- Cross-compile all release binaries: `./build.sh all`
-- Build app dist + embedded ttyd assets only: `./build.sh assets`
-- Refresh embedded goTTY/WebTTY assets only:
-  - `python3 dev.py --ttydAssets`
-  - or `cd api && make asset`
-- Rebuild the raw goTTY frontend bundle while iterating on `api/js/src`: `cd api/js && ./node_modules/.bin/webpack`
-  - `api/js/package.json` has no `build` script; webpack is invoked directly or through `cd api && make asset`.
-- Build runtime images:
-  - `./build.sh docker <tag>`
-  - `./build.sh docker-base <tag>`
+- Main local-dev entrypoint: `python3 dev.py`
+- Standard build entrypoint: `./build.sh`
+- Backend entrypoint: `api/mgr/main.go`
+- Frontend entrypoint: `app/src/App.tsx`
+- Main workspace UI: `app/src/components/Workspace.tsx`
+
+## Commands
+
+- Local dev: `python3 dev.py`
+- Refresh ttyd assets only: `python3 dev.py --ttydAssets`
+- Frontend HMR: `cd app && npm ci && npm run dev`
+- Backend manual dev with Vite proxy: `cd api && go run ./mgr/ --dev --public`
 - Go tests: `cd api && go test ./...`
-- Run a single Go test: `cd api && go test ./webtty -run TestWriteFromPTY`
-- Legacy note: `cd api && make test` only checks `go fmt`; it is not the main test suite.
-- Convenience stop command: `make stop`
+- Frontend type check: `cd app && npm run lint`
+- Frontend production build: `cd app && npm run build`
+- Current-platform build: `./build.sh build`
+- Cross build: `./build.sh all`
+- Runtime image build: `./build.sh docker <tag>`
+- Base image build: `./build.sh docker-base <tag>`
 
-## Architecture overview
+`make dev-api` currently runs plain `go run ./mgr/`; it does not pass `--dev --public`.
 
-### 1. Build and launch pipeline
+## Current repo truths
 
-- `dev.py` is the authoritative local development entrypoint.
-- `build.sh` is the authoritative packaging/embed pipeline. It:
-  1. syncs versions,
-  2. copies `api/resources` and tmux config files into `api/mgr/`,
-  3. builds `app/dist` unless `SKIP_NPM=1`,
-  4. refreshes embedded goTTY assets unless `SKIP_TTYD_ASSET=1`,
-  5. copies UI into `api/mgr/ui`,
-  6. then builds the Go binary from `api/mgr/`.
-- `go build ./mgr/` by itself skips this embed pipeline, so it is not equivalent to a normal repo build.
+- State root is `~/cicy-ai`
+- Global config/token file is `~/cicy-ai/global.json`
+- Backend machine file is `~/cicy-ai/cicy-node.json`
+- Skills CLI registry file defaults to `~/Private/cicy-node.json` unless `CICY_NODES_FILE` is set
+- Version source is `npm/package.json`
+- Version sync target files are:
+  - `npm/package.json`
+  - `app/package.json`
+  - `app/package-lock.json`
+  - `app/src/config.ts`
+  - `api/mgr/main.go`
+  - `.cicy_tmux.conf`
+- Default builtin dev agent from `api/mgr/setup.go` is `claude`
+- Primary builtin session is still `w-10001`
+- Frontend still contains an audit view and audit API client calls, but `api/mgr/main.go` does not currently register `/api/audit/*`
 
-### 2. Backend runtime (`api/mgr`)
+## Build caveats
 
-- `api/mgr/main.go` is the monolithic runtime/API entrypoint. It registers auth, panes/tmux, chat, stats, queue, agents, groups, machines, runtime, shared-workspace, skills, settings, code-server proxy, ttyd proxy, and SPA UI routes.
-- Major backend slices are organized by responsibility:
-  - `setup.go`: environment checks, tool installation, builtin-agent setup
-  - `tmux.go`: worker lifecycle, tmux commands, startup scripts
-  - `db.go`: SQLite schema and migrations
-  - `machines.go`: node registry and machine sync
-  - `runtime.go`: runtime instance/session/task/artifact APIs
-  - `shared_workspace.go`: filesystem-backed collaboration bridge
-  - `proxy.go`: code-server / AI gateway / other proxy logic
-  - `ui.go`: embedded UI serving or Vite reverse proxy in `--dev`
+- `go build ./mgr/` is not equivalent to the repo build pipeline
+- `./build.sh` prepares embedded resources before compiling
+- `app/src/*` changes use Vite HMR and do not require a backend rebuild
+- `api/js/src/*` changes do require `cd api && make asset`
 
-### 3. Terminal stack
+## File map
 
-- `api/server` + `api/webtty` implement the Go-side terminal transport.
-- `api/js` is the browser-side goTTY/WebTTY frontend source.
-- `app/src/*` changes use Vite HMR and do not require rebuilding assets or restarting the API.
-- goTTY/WebTTY asset flow is:
-  - edit `api/js/src/*`
-  - rebuild `api/js/dist/gotty-bundle.js`
-  - run `cd api && make asset`
-  - `make asset` regenerates `api/server/asset.go`
-  - reload the API with `cicy-dev-restart`
-- If terminal UI changes appear to do nothing, the embedded asset refresh and API reload are usually what was missed.
+- `api/mgr/main.go`: route registration and startup
+- `api/mgr/setup.go`: env checks, dependency install, builtin workers, code-server bootstrap
+- `api/mgr/tmux.go`: pane lifecycle, tmux send path, agent boot scripts
+- `api/mgr/chatbus.go`: chat WebSocket, poll data, client broadcast
+- `api/mgr/runtime.go`: runtime instances/tasks/artifacts and managed-runtime registration
+- `api/mgr/machines.go`: machine config load/save/sync
+- `api/mgr/ui.go`: SPA serve path or Vite reverse proxy
+- `app/src/App.tsx`: route switcher
+- `app/src/components/Workspace.tsx`: main operator UI
+- `app/src/services/api.ts`: frontend API client
+- `scripts/sync-version.py`: version sync implementation
 
-### 4. Frontend app (`app`)
+## Runtime notes
 
-- `app/src/App.tsx` is the React entrypoint and route switcher. It chooses between `desktop`, `workspace`, and `audit` views using hash routes.
-- `app/src/components/Workspace.tsx` is the main operator UI. Most visible workspace behavior flows through it: terminal area, agent stack, code-server pane, team panel, skills panel, and inspector/settings.
-- `app/src/services/api.ts` is the single frontend API client. The frontend still calls many legacy `/api/tmux/*` aliases, so backend route changes need to preserve compatibility, not just the newer route shapes.
+- Pane IDs are normalized to `w-xxxxx:main.0`
+- `handleChatWS` normalizes `agent_id` to the short pane ID (`w-xxxxx`)
+- `poll_request` and `ping` are request/response events handled directly by `chatbus.go`
+- Most other WS events are broadcast to other clients of the same agent and are not echoed back to the sender
+- `CICY_RUNTIME_MODE=api-only` or `CICY_RUNTIME_API_ONLY=1` disables tmux/desktop-only interfaces through middleware
 
-### 5. Runtime and agent model
+## Extension note
 
-- A pane/worker is the core runtime unit. The UI, tmux management, chat history, and inspector flows all key off pane IDs.
-- The project is more than a tmux wrapper: queue, runtime tasks/artifacts, machines, skills, and shared-workspace APIs are first-class backend features.
-- README still describes several agent types, but current code defaults `--dev` to `hermes` when `--agents` is omitted. Treat `api/mgr/main.go` and `api/mgr/setup.go` as the source of truth if docs and runtime behavior diverge.
+There are two extension folders in the repo:
 
-### 6. External configuration and environment
+- `code-server-extension/`
+- `api/code-server-extension/`
 
-- Local/dev behavior is driven mostly by environment variables plus `~/global.json`.
-- `dev.py` reads AI provider selection and credentials from `~/global.json`.
-- The node registry lives in `~/Private/cicy-node.json` and is shared by the backend plus the `skills/cicy-code` / `skills/cicy-master` CLIs.
-- `shared_workspace.go` currently points the shared-workspace bridge at a hardcoded filesystem root. Verify that path before debugging shared-workspace behavior on a new machine.
-
-### 7. Generated outputs worth recognizing
-
-- `api/mgr/ui` and `api/mgr/resources` are build-prepared embed inputs, not primary source directories.
-- `api/server/asset.go` is generated by `cd api && make asset`.
-- `api/js/dist/gotty-bundle.js` is generated from `api/js/src`.
+They currently exist as duplicated copies and should stay aligned when edited.
