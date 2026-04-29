@@ -1,108 +1,141 @@
-# cicy WS Client（Go）发消息
+    # cicy WebSocket（Go）发消息
 
-这份文档只讲一件事：用 Go 通过 `cicy` 的 WebSocket 发消息。
+    这份文档只讲当前代码里的聊天 WebSocket。
 
-## 1. 连接地址
+    ## 连接地址
 
-`cicy-code-v1` 的 WS 入口：
+    ```text
+    ws://<host>:<port>/api/chat/ws?agent_id=<agent>&token=<token>&client_id=<client_id>
+    ```
 
-```text
-ws://<host>:<port>/api/chat/ws?agent_id=<agent>&token=<token>&client_id=<client_id>
-```
+    参数说明：
 
-- `agent_id` 必填。可用 `w-20016` 或 `w-20016:main.0`（服务端会归一化）。
-- `token` 必填。可用 `~/global.json` 里的 `api_token`。
-- `client_id` 可选。建议显式传，方便排查。
+    - `agent_id`：必填，`w-10001` 或 `w-10001:main.0` 都可以
+    - `token`：必填，通常来自 `~/cicy-ai/global.json -> api_token`
+    - `client_id`：建议显式传，便于排查
+    - `electron`：可选，桌面端内部使用
 
-## 2. 消息格式
+    服务端会把 `agent_id` 归一化为短 pane ID，例如 `w-10001`。
 
-WS 文本帧 JSON 格式固定是：
+    ## 消息格式
 
-```json
-{
-  "type": "事件类型",
-  "data": {}
-}
-```
+    文本帧固定是：
 
-示例（发一条用户问题事件）：
+    ```json
+    {
+      "type": "事件类型",
+      "data": {}
+    }
+    ```
 
-```json
-{
-  "type": "user_q",
-  "data": { "q": "你好，测试一下" }
-}
-```
+    最常见的用户问题事件：
 
-## 3. Go 最小可运行示例（发送）
+    ```json
+    {
+      "type": "user_q",
+      "data": {
+        "q": "你好，测试一下"
+      }
+    }
+    ```
 
-```go
-package main
+    ## 需要知道的当前行为
 
-import (
-	"flag"
-	"fmt"
-	"log"
-	"net/url"
-	"time"
+    - 普通事件会广播给**同一个 agent_id 下的其他客户端**
+    - 发送者自己默认**不会收到回显**
+    - `poll_request` 是例外：服务端会直接回一个 `poll_data`
+    - `ping` 也是例外：服务端会直接回一个 `pong`
 
-	"github.com/gorilla/websocket"
-)
+    也就是说，如果你只连了一个 WS 客户端，发 `user_q` 后没有收到同内容回包是正常的。
 
-func main() {
-	base := flag.String("base", "ws://127.0.0.1:8008", "cicy ws base")
-	agent := flag.String("agent", "w-20016", "agent_id or pane")
-	token := flag.String("token", "", "api token")
-	clientID := flag.String("client", fmt.Sprintf("go-sender-%d", time.Now().Unix()), "client_id")
-	flag.Parse()
+    ## Go 最小示例
 
-	if *token == "" {
-		log.Fatal("token required")
-	}
+    ```go
+    package main
 
-	u, err := url.Parse(*base + "/api/chat/ws")
-	if err != nil {
-		log.Fatal(err)
-	}
-	q := u.Query()
-	q.Set("agent_id", *agent)
-	q.Set("token", *token)
-	q.Set("client_id", *clientID)
-	u.RawQuery = q.Encode()
+    import (
+        "flag"
+        "fmt"
+        "log"
+        "net/url"
+        "time"
 
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer conn.Close()
+        "github.com/gorilla/websocket"
+    )
 
-	msg := map[string]interface{}{
-		"type": "user_q",
-		"data": map[string]interface{}{
-			"q": "请回复：WS_OK",
-		},
-	}
-	if err := conn.WriteJSON(msg); err != nil {
-		log.Fatal(err)
-	}
-	log.Println("sent:", msg)
-}
-```
+    func main() {
+        base := flag.String("base", "ws://127.0.0.1:8008", "ws base")
+        agent := flag.String("agent", "w-10001", "agent_id or pane")
+        token := flag.String("token", "", "api token")
+        clientID := flag.String("client", fmt.Sprintf("go-%d", time.Now().Unix()), "client_id")
+        flag.Parse()
 
-依赖安装：
+        if *token == "" {
+            log.Fatal("token required")
+        }
 
-```bash
-go get github.com/gorilla/websocket
-```
+        u, err := url.Parse(*base + "/api/chat/ws")
+        if err != nil {
+            log.Fatal(err)
+        }
+        q := u.Query()
+        q.Set("agent_id", *agent)
+        q.Set("token", *token)
+        q.Set("client_id", *clientID)
+        u.RawQuery = q.Encode()
 
-运行：
+        conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+        if err != nil {
+            log.Fatal(err)
+        }
+        defer conn.Close()
 
-```bash
-go run main.go -base ws://127.0.0.1:8008 -agent w-20016 -token '<YOUR_TOKEN>'
-```
+        go func() {
+            for {
+                var msg map[string]any
+                if err := conn.ReadJSON(&msg); err != nil {
+                    log.Println("read:", err)
+                    return
+                }
+                log.Printf("recv: %#v
+", msg)
+            }
+        }()
 
-## 4. 关键行为（必须知道）
+        if err := conn.WriteJSON(map[string]any{
+            "type": "poll_request",
+        }); err != nil {
+            log.Fatal(err)
+        }
 
-- 这个 WS Hub 默认是「同 `agent_id` 广播给其他客户端」，不会回显给发送者自己。
-- 所以你如果只连了一个 WS 客户端，发完后看不到任何回包是正常的。
-- 要看到结果，需要另一个客户端（如 Web UI 或 worker-client）也连在同一个 `agent_id`，由它处理并回发事件（如 `ai_chunk` / `ai_done`）。
+        if err := conn.WriteJSON(map[string]any{
+            "type": "user_q",
+            "data": map[string]any{
+                "q": "请回复：WS_OK",
+            },
+        }); err != nil {
+            log.Fatal(err)
+        }
+
+        time.Sleep(10 * time.Second)
+    }
+    ```
+
+    依赖：
+
+    ```bash
+    go get github.com/gorilla/websocket
+    ```
+
+    运行：
+
+    ```bash
+    go run main.go -base ws://127.0.0.1:8008 -agent w-10001 -token '<YOUR_TOKEN>'
+    ```
+
+    ## 排查要点
+
+    1. `agent_id` 用短 ID 或完整 pane ID 都行
+    2. 没有 token 会直接 `401`
+    3. 想立即验证连接活着，用 `poll_request` 或 `ping`
+    4. 想看 agent 处理结果，需要有别的客户端也连在同一个 `agent_id` 下参与转发

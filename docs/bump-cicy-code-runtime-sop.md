@@ -1,219 +1,50 @@
 # CiCy Code Runtime Bump SOP
 
-## 目的
+这份文档保留为兼容入口；当前详细流程以：
 
-把 `cicy-code-v1` 的 runtime 版本标准化升级为一个新的 Docker Hub tag，并让后续试用/部署默认使用这个新镜像。
+- `docs/sop/v1/bump-docker-version-and-push-dockerhub.md`
 
-这份 SOP 的标准目标是：
+为准。
 
-1. bump `cicy-code-v1` 版本
-2. 构建并推送新的 `cicybot/cicy-code-runtime:<version>`
-3. 自动更新 `~/global.json -> images.runtime`
-4. 后续 trial deploy / runtime deploy 默认走新镜像
+## 当前仓库前提
 
-## 完成定义
+- 仓库目录建议：`~/projects/cicy-code`
+- 全局状态目录：`~/cicy-ai`
+- 版本同步入口：`python3 dev.py --bumpVersion <version>`
+- runtime push 入口：`python3 dev.py --dockerBuild --dockerBuildVersion <version>`
 
-`bump cicy-code version` 不等于只改版本号。
+## 这条链路当前会改哪些地方
 
-这件事只有在下面几件事全部完成后，才算结束：
-
-1. `python3 dev.py --bumpVersion <version>` 已执行
-2. `python3 dev.py --dockerBuild --dockerBuildVersion <version>` 已执行
-3. Docker Hub 已存在 `cicybot/cicy-code-runtime:<version>`
-4. `~/global.json -> images.runtime_tag` 已切到这个新版本
-
-如果只做了 `--bumpVersion`，没有 push Docker Hub，这一轮不算完成，不能对外说“已经 bump 完”。
-
-## 标准工作目录
-
-统一在：
-
-```bash
-cd /pr/cicy-code-v1
-```
-
-不要一会儿在 `/pr/cicy-code-v1`，一会儿在 `/home/w3c_offical/projects/cicy-code-v1` 混着做。
-
-## 版本来源
-
-`dev.py` 的版本同步源最终走：
+`python3 dev.py --bumpVersion <version>` 当前会同步：
 
 - `npm/package.json`
-
-并同步到这些目标：
-
-- `npm/package.json`
+- `app/package.json`
+- `app/package-lock.json`
+- `app/src/config.ts`
 - `api/mgr/main.go`
-- `app/src/components/Workspace.tsx`
 - `.cicy_tmux.conf`
 
-对应命令由：
+`python3 dev.py --dockerBuild --dockerBuildVersion <version>` 当前还会：
+
+- 构建 CDN 资产
+- 上传 `app` 与 `ttyd` 资产到 COS
+- 构建 runtime Docker 镜像
+- push Docker Hub tag
+- 更新 `~/cicy-ai/global.json -> images.runtime*`
+
+## 最短命令
 
 ```bash
+cd ~/projects/cicy-code
+export DOCKER_IMAGE_REPOSITORY=<your-dockerhub-repo>
+python3 dev.py --dockerVersion
 python3 dev.py --bumpVersion <version>
-```
-
-统一处理，不要手改多个文件。
-
-## 标准流程
-
-### 1. 看当前版本
-
-```bash
-cd /pr/cicy-code-v1
+python3 dev.py --dockerBuild --dockerBuildVersion <version>
 python3 dev.py --dockerVersion
 ```
 
-预期看到：
+## 注意
 
-- `package_version`
-- `current_runtime_image`
-- `current_runtime_tag`
-
-### 2. 决定新版本号
-
-标准做法：patch 加一位。
-
-例如：
-
-- 当前 `1.0.6`
-- 新版本用 `1.0.7`
-
-### 3. bump 版本
-
-```bash
-cd /pr/cicy-code-v1
-python3 dev.py --bumpVersion 1.0.7
-```
-
-预期输出类似：
-
-```text
-[dev] bumped version=1.0.7
-[dev] npm_version=1.0.7
-[dev] mgr_version=1.0.7
-[dev] ui_version=1.0.7
-[dev] tmux_version=1.0.7
-```
-
-注意：
-
-- 到这一步还不算结束
-- 这只是把版本号同步到代码
-- 只有下一步 Docker Hub push 成功后，整个 bump 流程才算完成
-
-### 4. 构建并推送 Docker Hub
-
-```bash
-cd /pr/cicy-code-v1
-python3 dev.py --dockerBuild --dockerBuildVersion 1.0.7
-```
-
-这一步会自动做下面几件事：
-
-1. 再次同步版本
-2. 调 `./build.sh docker 1.0.7`
-3. 打 tag：
-   - `cicybot/cicy-code-runtime:1.0.7`
-   - `cicybot/cicy-code-runtime:latest`
-4. push 到 Docker Hub
-5. 自动更新：
-   - `~/global.json -> images.runtime`
-   - `~/global.json -> images.runtime_repository`
-   - `~/global.json -> images.runtime_tag`
-
-### 5. 验证 global.json 已切到新镜像
-
-```bash
-python3 - <<'PY'
-import json
-from pathlib import Path
-p = Path('/home/w3c_offical/global.json')
-data = json.loads(p.read_text())
-print(json.dumps(data.get('images', {}), ensure_ascii=False, indent=2))
-PY
-```
-
-预期类似：
-
-```json
-{
-  "runtime": "cicybot/cicy-code-runtime:1.0.7",
-  "runtime_repository": "cicybot/cicy-code-runtime",
-  "runtime_tag": "1.0.7"
-}
-```
-
-## 部署到试用链路
-
-`cicy-cloud` 的 trial deploy 脚本读的是本机 `~/global.json` 的 `images.runtime`。
-
-所以只要上面的 `dockerBuild` 成功，后续新的 trial runtime 就会默认使用新镜像，不需要额外手改 trial deploy 脚本。
-
-标准验证方式：
-
-```bash
-cd /home/w3c_offical/projects/cicy-cloud
-BASE_URL=https://cicy-ai.com ./scripts/trial-claim-support-grant-from-global.sh <claim_code>
-```
-
-然后去 trial VM 上验证：
-
-```bash
-gcloud compute ssh <trial-vm> --project <project> --zone <zone> --command \
-  "sudo docker ps --filter label=cicy.trial.runtime=true --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'"
-```
-
-预期镜像应为新版本，例如：
-
-```text
-cicybot/cicy-code-runtime:1.0.7
-```
-
-## 验收标准
-
-必须同时满足：
-
-1. `python3 dev.py --dockerVersion` 显示 `package_version=<new_version>`
-2. Docker Hub 已存在 `cicybot/cicy-code-runtime:<new_version>`
-3. `~/global.json images.runtime` 已变成新 tag
-4. 新开出来的 trial runtime 确实跑的是新镜像
-5. workspace 可正常打开，`/api/health` 正常
-
-只有上面 5 条都满足，才能说这次 `bump cicy-code version` 已完成。
-
-## 回滚 SOP
-
-如果新镜像有问题，不重新 build，直接把默认 runtime tag 切回旧版本：
-
-```bash
-cd /pr/cicy-code-v1
-python3 dev.py --dockerSetVersion 1.0.6
-```
-
-这会只更新：
-
-- `~/global.json -> images.runtime`
-- `~/global.json -> images.runtime_tag`
-
-不会重新构建镜像。
-
-然后重新发一个新的 trial runtime 即可验证是否已回滚到旧镜像。
-
-## 禁忌
-
-不要这样做：
-
-1. 手工同时改多个版本文件，不走 `dev.py --bumpVersion`
-2. 只 push 了新镜像，但没确认 `~/global.json` 是否更新
-3. 只看本地 build 成功，不看 trial runtime 实际跑的镜像
-4. 在两个工作树里混着 bump，同一轮操作必须固定在一个目录完成
-
-## 最短命令模板
-
-```bash
-cd /pr/cicy-code-v1
-python3 dev.py --dockerVersion
-python3 dev.py --bumpVersion 1.0.7
-python3 dev.py --dockerBuild --dockerBuildVersion 1.0.7
-```
+- `./build.sh docker <tag>` 只做本地镜像构建，不会 push，也不会更新 `global.json`
+- `python3 dev.py --dockerBuild` 依赖 `~/cicy-ai/global.json` 里的腾讯 COS 配置
+- 不要再使用旧路径名 `cicy-code-v1` 或旧状态目录 `/cicy/global.json`

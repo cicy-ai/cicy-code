@@ -1,56 +1,116 @@
 # skills
 
-This directory contains small CLI helpers (“skills”) used to operate and automate `cicy-code`.
+这个目录放的是随仓库提供的本地 CLI。
 
-## cicy-master (node registry manager)
+当前主要有两个：
 
-> **Audience:** `w-20091` implementer
+- `skills/cicy-code`：节点 API 客户端
+- `skills/cicy-master`：本地节点注册表管理器
 
-### Purpose
+## 1. `skills/cicy-code`
 
-`cicy-master` is a dedicated skill to manage **all nodes** via a **local node registry file**.
+`cicy-code` 是一个 shell CLI，用来调节点或本机 `cicy-code` 的 HTTP API。
 
-- `cicy-code` remains the *client* for calling a node’s API.
-- `cicy-master` is the *registry manager* for creating/updating/inspecting node entries.
+### 默认配置来源
 
-### Hard requirements
+1. 选中节点时：
+   - 默认注册表文件：`~/Private/cicy-node.json`
+   - 可改写：`CICY_NODES_FILE`
+2. 未选节点时：
+   - API 默认：`http://127.0.0.1:8008`
+   - token 默认读取：`~/cicy-ai/global.json`
 
-1. **Source of truth is local file**
-   - Default: `~/Private/cicy-node.json`
-   - Override: `CICY_NODES_FILE`
-   - Legacy (import/migrate only): `~/Private/cicy-nodes.json`
+### 当前能力
 
-2. **Nodes MUST NOT call master**
-   - Do not require `CICY_MASTER_URL` / `CICY_MASTER_TOKEN` on nodes.
-   - Master (or tooling) probes nodes using `ping/health`.
+- 通用 API：`api/get/post/patch/put/delete`
+- pane / tmux：`panes`、`pane`、`create-pane`、`restart-pane`、`send`、`capture`
+- runtime：`runtime-instances`、`runtime-tasks`、`runtime-artifacts`
+- shared workspace：`shared-work-items`、`shared-handoffs`、`shared-artifacts`、`shared-events`
+- queue / collab / groups / settings / skills
+- auth：`tokens`、`create-token`、`delete-token`
+- 基础检查：`ping`、`health`
 
-3. **Long-lived per-node token**
-   - `CICY_API_TOKEN` is redefined as a **long-lived per-node API token**.
-   - It is **created by the master/tooling and injected into the node** at deploy time.
-   - The registry stores it as `machines[].token`.
+### 能力判断
 
-4. **Canonical schema + normalization must match Go**
-   - Schema + rules are defined in:
-     - `api/mgr/machines.go`
-   - `cicy-master` must implement the same normalization rules and preserve unknown `capabilities` keys.
+当前脚本会读取节点能力字段：
 
-### Canonical registry schema (stored on disk)
+- `supports_tmux`
+- `supports_ttyd`
+- `supports_code_server`
+
+如果节点显式声明这些能力为 false，tmux 相关命令会直接拒绝执行。
+
+### 例子
+
+```bash
+# 调本机
+skills/cicy-code ping
+skills/cicy-code panes
+
+# 调注册表里的某个节点
+skills/cicy-code -n dev ping
+skills/cicy-code -n dev runtime-instances
+skills/cicy-code -n dev send w-10001:main.0 'hello'
+```
+
+## 2. `skills/cicy-master`
+
+`cicy-master` 是一个 Python CLI，用来管理本地节点注册表文件。
+
+### 默认文件
+
+- 默认：`~/Private/cicy-node.json`
+- 可改写：`CICY_NODES_FILE`
+- 兼容导入旧文件：`~/Private/cicy-nodes.json`
+
+### 当前命令
+
+- `list`
+- `register`
+- `sync`
+- `ping`
+- `health`
+
+### 当前特性
+
+- canonical schema 归一化
+- 接受 `instance_*` 别名并落盘为 `machine_*`
+- `sync` 支持：
+  - `--from-registry`
+  - `--registry-secret`
+  - `--migrate-legacy`
+  - `--merge-file`
+- 写文件时使用：
+  - `flock`
+  - 同目录临时文件 + `os.replace()` 原子替换
+- `ping/health --write` 会把 `online/status/last_seen_at` 回写到注册表
+
+### 例子
+
+```bash
+skills/cicy-master list
+skills/cicy-master register dev http://127.0.0.1:8008 --set-default
+skills/cicy-master ping dev --write
+skills/cicy-master health --all --write
+```
+
+## 3. 当前 canonical schema
 
 ```json
 {
-  "default": "node-a",
+  "default": "dev",
   "machines": [
     {
-      "id": "node-a",
-      "machine_key": "node-a",
-      "label": "Node A",
-      "host": "1.2.3.4",
+      "id": "dev",
+      "machine_key": "dev",
+      "label": "Dev",
+      "host": "127.0.0.1",
       "port": 8008,
-      "url": "http://1.2.3.4:8008",
-      "token": "<long-lived token>",
+      "url": "http://127.0.0.1:8008",
+      "token": "<api-token>",
       "status": "online",
       "online": true,
-      "last_seen_at": "2026-03-27T12:00:00Z",
+      "last_seen_at": "2026-04-29T00:00:00Z",
       "capabilities": {
         "runtime_kind": "container"
       }
@@ -59,60 +119,39 @@ This directory contains small CLI helpers (“skills”) used to operate and aut
 }
 ```
 
-### Normalization rules (must mirror `api/mgr/machines.go`)
+归一化规则以 `skills/cicy-master` 与 `api/mgr/machines.go` 当前实现为准：
 
-- `machine_key` empty → use `id`
-- `id` empty → use `machine_key`
-- still empty → use `url`
-- `label` empty → first non-empty of `(machine_key, id, url)`
-- `port` empty/0 → `8008`
-- `capabilities` missing → `{}`
-- `capabilities.runtime_kind` missing → `"container"`
-- `status`: if `online==true` then `"online"`, else if empty then `"offline"`
-- `last_seen_at`: if `online==true` and empty → set `now(RFC3339)`
+- `machine_key` 为空时优先回退 `id`
+- `id` 为空时回退 `machine_key`
+- 仍为空时回退 `url`
+- `label` 为空时取 `machine_key / id / url`
+- `port=0` 时默认 `8008`
+- `capabilities.runtime_kind` 缺失时默认 `container`
+- `online=true` 时 `status` 归一为 `online`
+- `online=true` 且 `last_seen_at` 为空时自动写当前时间
 
-### Alias compatibility
+## 4. 需要特别注意的路径差异
 
-`cicy-master register` must accept instance-style inputs but always persist canonical fields:
+当前后端 runtime 默认机器文件是：
 
-- `machine_key <- machine_key | instance_key | instance_id | id`
-- `id <- id | instance_id | machine_key`
-- `label <- label | instance_label`
-- `url <- url | endpoint`
+- `~/cicy-ai/cicy-node.json`
 
-`cicy-master list --json` should include:
-- `machines[]` (canonical)
-- `instances[]` (derived view with `instance_key/instance_id/instance_label/runtime_kind`)
+但 skills 默认机器文件是：
 
-### v1 command contract
+- `~/Private/cicy-node.json`
 
-Must implement:
+如果你希望前后端共用同一份注册表，先设置：
 
-- `list` (+ `--json`)
-- `register` (upsert by `machine_key`, require key+url, optional `--set-default`)
-- `sync`
-  - normalize + dedupe + sort by `machine_key`
-  - optional legacy migration flag
-  - optional registry merge (local remains authoritative)
-  - MUST write atomically and use file lock
-- `ping` / `health`
-  - `GET <url>/api/ping` and `GET <url>/api/health`
-  - support `--all` and `--write` to persist `online/status/last_seen_at`
+```bash
+export CICY_NODES_FILE=~/cicy-ai/cicy-node.json
+```
 
-### File write safety
+## 5. 与 managed runtime 的关系
 
-Any write to the registry must:
-- use a lock (e.g. `flock` on `<file>.lock`)
-- be atomic (tmp file in same dir + rename)
+后端代码当前还支持通过这些环境变量做节点自注册：
 
-### Verification (minimum)
+- `CICY_MASTER_URL`
+- `CICY_MASTER_TOKEN`
+- `CICY_PUBLIC_URL`
 
-1. Golden-file tests using temp `CICY_NODES_FILE`:
-   - `register` then `list --json` normalization
-   - `sync` dedupe + stable sort
-
-2. Network test:
-   - run `ping/health --write` against a stub or real node and confirm file updates
-
-3. Compatibility:
-   - after `register`, `skills/cicy-code -n <key> ping` should resolve and work.
+那是 runtime 侧能力；它和 `skills/cicy-master` 维护的本地注册表是两条并行路径，不要混为一个概念。
