@@ -3,12 +3,18 @@
 set -euo pipefail
 
 HOME_DIR="${HOME:-/home/cicy}"
-STATE_DIR="${CICY_STATE_DIR:-$HOME_DIR/.cicy}"
-GLOBAL_JSON_PATH="${GLOBAL_JSON_PATH:-$HOME_DIR/global.json}"
-mkdir -p "$STATE_DIR"
+CICY_ROOT_DIR="$HOME_DIR/cicy-ai"
+STATE_DIR="$CICY_ROOT_DIR/.cicy"
+GLOBAL_JSON_PATH="$CICY_ROOT_DIR/global.json"
 
 log() {
   printf '[entrypoint] %s\n' "$*"
+}
+
+ensure_cicy_base() {
+  sudo -n mkdir -p "$CICY_ROOT_DIR" "$STATE_DIR"
+  sudo -n chown cicy:cicy "$CICY_ROOT_DIR" "$STATE_DIR"
+  sudo -n chmod 0755 "$CICY_ROOT_DIR" "$STATE_DIR"
 }
 
 ensure_shell_init_files() {
@@ -91,6 +97,10 @@ try {
 NODE
   )"
   CICY_API_TOKEN="$CICY_RUNTIME_API_TOKEN"
+}
+
+ensure_legacy_home_links() {
+  :
 }
 
 persist_runtime_ai_config() {
@@ -351,9 +361,11 @@ build_app_argv() {
 }
 
 main() {
+  ensure_cicy_base
   ensure_shell_init_files
   bootstrap_team_runtime
   ensure_runtime_api_token
+  ensure_legacy_home_links
   start_cloudflared
 
   mapfile -d '' app_argv < <(build_app_argv "$@")
