@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -27,6 +28,17 @@ var embeddedTmuxConf string
 
 //go:embed .cicy_tmux.conf
 var embeddedCicyTmuxConf string
+
+var cicySkillsInstallOnce sync.Once
+
+const (
+	cicySkillsRepoURL        = "https://github.com/cicy-ai/cicy-skills"
+	cicySkillsRepoAPIURL     = "https://api.github.com/repos/cicy-ai/cicy-skills"
+	cicySkillsDefaultVersion = "v0.1.2"
+	cicySkillsDefaultGHProxy = "https://gh-proxy.com/"
+	cicySkillsNPMMirror      = "https://registry.npmmirror.com"
+	cicySkillsInstallLogFile = "cicy-skills-install.log"
+)
 
 // 获取用户 shell 的 rc 文件路径
 func shellRC() string {
@@ -230,9 +242,9 @@ func installMissing(tools []Tool) {
 }
 
 func selectAgents() []string {
-	selected := []string{"hermes"}
+	selected := []string{"claude"}
 	fmt.Println("\n🤖 默认预装 AI 工具:")
-	fmt.Println("  ✅ Hermes Agent")
+	fmt.Println("  ✅ Claude")
 	fmt.Printf("✅ 已选择: %v\n", selected)
 	return selected
 }
@@ -301,16 +313,16 @@ var builtinAgents = []struct {
 	AgentType string
 	Title     string
 }{
-	{"hermes", "Hermes Agent"},
-	{"openclaw", "OpenClaw"},
-	{"codex", "Codex"},
 	{"claude", "Claude"},
+	{"codex", "Codex"},
+	{"opencode", "OpenCode"},
 	{"kiro-cli", "Kiro CLI"},
 	{"copilot", "GitHub Copilot"},
 	{"cicy-wechat", "WeChat"},
 	{"cicy-feishu", "Feishu"},
+	{"openclaw", "OpenClaw"},
+	{"hermes", "Hermes Agent"},
 	{"cicy-claude", "CiCy"},
-	{"opencode", "OpenCode"},
 }
 
 const primaryWorkerSession = "w-10001"
@@ -397,7 +409,7 @@ func parseSelectedAgents(agentList string) ([]string, error) {
 	return selected, nil
 }
 
-const defaultDevAgent = "cicy-claude"
+const defaultDevAgent = "claude"
 
 func effectiveAgentsFlag() string {
 	if value := strings.TrimSpace(agentsFlag); value != "" {
@@ -655,11 +667,11 @@ func checkEnv() {
 		if isContainerRuntime() {
 			// Preinstalled container runtime must never block on interactive setup.
 			// Respect explicit --agents=... when provided; otherwise keep the default
-			// footprint minimal with only w-10001 OpenClaw.
+			// footprint minimal with only w-10001 Claude.
 			if effectiveAgentList != "" {
 				runSetupWithAgents(effectiveAgentList)
 			} else {
-				createSelectedWorkers([]string{"hermes"})
+				createSelectedWorkers([]string{"claude"})
 			}
 		} else if effectiveAgentList != "" {
 			runSetupWithAgents(effectiveAgentList)
@@ -672,6 +684,7 @@ func checkEnv() {
 	ensureBuiltinAgents(selectedAgents)
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles(selectedAgents)
+	ensureCicySkillsAsync()
 	ensureCodeServer()
 }
 
@@ -904,6 +917,303 @@ func ensureSSHConfigFile(path string) {
 		log.Printf("[startup] failed to chmod %s to 0600: %v", path, chmodErr)
 	}
 	log.Printf("[startup] ensured %s exists", path)
+}
+
+func cicySkillsVersion() string {
+	if v := strings.TrimSpace(os.Getenv("CICY_SKILLS_VERSION")); v != "" {
+		return v
+	}
+	return cicySkillsDefaultVersion
+}
+
+func cicySkillsGitHubProxy() string {
+	value := strings.TrimSpace(os.Getenv("GITHUB_PROXY"))
+	if value == "" {
+		value = cicySkillsDefaultGHProxy
+	}
+	if value == "" {
+		return ""
+	}
+	if !strings.HasSuffix(value, "/") {
+		value += "/"
+	}
+	return value
+}
+
+func cicySkillsBundleName(goos, goarch, tag string) (string, error) {
+	tag = strings.TrimSpace(tag)
+	goos = strings.TrimSpace(goos)
+	goarch = strings.TrimSpace(goarch)
+	if tag == "" || goos == "" || goarch == "" {
+		return "", fmt.Errorf("invalid cicy-skills bundle params: goos=%q goarch=%q tag=%q", goos, goarch, tag)
+	}
+	switch goos {
+	case "linux", "darwin":
+		return fmt.Sprintf("cicy-skills_%s_%s_%s.tar.gz", tag, goos, goarch), nil
+	case "windows":
+		return fmt.Sprintf("cicy-skills_%s_%s_%s.zip", tag, goos, goarch), nil
+	default:
+		return "", fmt.Errorf("unsupported cicy-skills runtime: %s/%s", goos, goarch)
+	}
+}
+
+func cicySkillsBundleURL(tag string) (string, error) {
+	bundle, err := cicySkillsBundleName(runtime.GOOS, runtime.GOARCH, tag)
+	if err != nil {
+		return "", err
+	}
+	return cicySkillsGitHubProxy() + cicySkillsRepoURL + "/releases/download/" + tag + "/" + bundle, nil
+}
+
+func cicySkillsSourceArchiveName(tag string) string {
+	name := strings.TrimSpace(tag)
+	name = strings.TrimPrefix(name, "refs/tags/")
+	if name == "" {
+		name = cicySkillsVersion()
+	}
+	return name + ".tar.gz"
+}
+
+func cicySkillsSourceURL(tag string) string {
+	return cicySkillsGitHubProxy() + cicySkillsRepoURL + "/archive/refs/tags/" + strings.TrimSpace(tag) + ".tar.gz"
+}
+
+func cicySkillsSourceAPIURL(tag string) string {
+	return cicySkillsRepoAPIURL + "/tarball/" + strings.TrimSpace(tag)
+}
+
+func cicySkillsReleaseAPIURL(tag string) string {
+	return cicySkillsRepoAPIURL + "/releases/tags/" + strings.TrimSpace(tag)
+}
+
+func cicySkillsDistBinaryPath() string {
+	return filepath.Join(cicySkillsProjectDir(), "dist", "cicy-skills")
+}
+
+func cicySkillsProjectDir() string {
+	return filepath.Join(cicySkillsDir, "cicy-skills")
+}
+
+func cicySkillsMountedProjectDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, "projects", "cicy-skills")
+}
+
+func cicySkillsSkillDocPath(profile, skill string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, "."+profile, "skills", skill, "SKILL.md")
+}
+
+func cicySkillsCommandPath(name string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, ".local", "bin", name)
+}
+
+func needsCicySkillsInstall() bool {
+	required := []string{
+		filepath.Join(cicySkillsProjectDir(), "go.mod"),
+		filepath.Join(cicySkillsProjectDir(), "providers", "google-node", "package.json"),
+		cicySkillsDistBinaryPath(),
+		cicySkillsCommandPath("cicy-skills"),
+		cicySkillsCommandPath("agent-code-server"),
+		cicySkillsCommandPath("agent-webpage"),
+		cicySkillsSkillDocPath("codex", "agent-code-server"),
+		cicySkillsSkillDocPath("claude", "agent-code-server"),
+		cicySkillsSkillDocPath("openclaw", "agent-code-server"),
+	}
+	for _, path := range required {
+		if strings.TrimSpace(path) == "" {
+			return true
+		}
+		if _, err := os.Stat(path); err != nil {
+			return true
+		}
+	}
+	for _, name := range []string{"webpage", "webpage-ping", "ipc-ping", "agent-page-ping"} {
+		path := cicySkillsCommandPath(name)
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func cicySkillsInstallScript(tag string) (string, error) {
+	bundleName, err := cicySkillsBundleName(runtime.GOOS, runtime.GOARCH, tag)
+	if err != nil {
+		return "", err
+	}
+	bundleURL, err := cicySkillsBundleURL(tag)
+	if err != nil {
+		return "", err
+	}
+	sourceURL := cicySkillsSourceURL(tag)
+	sourceArchiveName := cicySkillsSourceArchiveName(tag)
+	bundleDir := strings.TrimSuffix(bundleName, ".tar.gz")
+	projectRoot := cicySkillsProjectDir()
+	localProjectRoot := cicySkillsMountedProjectDir()
+	distFiles := []string{"cicy-skills", "cicy-skillsd", "cicy-hosttools", "stt", "tts"}
+	var copyLines []string
+	var localCopyLines []string
+	var localDistChecks []string
+	var buildLines []string
+	for _, name := range distFiles {
+		copyLines = append(copyLines,
+			fmt.Sprintf("cp -f \"$bundle_dir/%s\" %q", name, filepath.Join(projectRoot, "dist", name)),
+			fmt.Sprintf("chmod +x %q", filepath.Join(projectRoot, "dist", name)),
+		)
+		localCopyLines = append(localCopyLines,
+			fmt.Sprintf("    cp -f %q %q", filepath.Join(localProjectRoot, "dist", name), filepath.Join(projectRoot, "dist", name)),
+			fmt.Sprintf("    chmod +x %q", filepath.Join(projectRoot, "dist", name)),
+		)
+		localDistChecks = append(localDistChecks, fmt.Sprintf("[ -x %q ]", filepath.Join(localProjectRoot, "dist", name)))
+		buildLines = append(buildLines, fmt.Sprintf("      CGO_ENABLED=0 GOOS=%q GOARCH=%q go build -o %q ./%s", runtime.GOOS, runtime.GOARCH, filepath.Join(projectRoot, "dist", name), filepath.ToSlash(filepath.Join("cmd", name))))
+	}
+	npmMirror := ""
+	if strings.TrimSpace(os.Getenv("CN_MIRROR")) == "1" {
+		npmMirror = fmt.Sprintf("export NPM_CONFIG_REGISTRY=%q\n", cicySkillsNPMMirror)
+	}
+	script := fmt.Sprintf(`set -e
+root=%q
+project_root=%q
+local_project_root=%q
+tag=%q
+tmp="$(mktemp -d)"
+token="${CICY_SKILLS_GITHUB_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}"
+cleanup() {
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
+
+download_release_bundle() {
+  out="$1"
+  if [ -n "$token" ]; then
+    release_json="$(curl --http1.1 -fsSL -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" %q)"
+    asset_api_url="$(printf '%%s' "$release_json" | python3 - %q <<'PY'
+import json
+import sys
+
+name = sys.argv[1]
+data = json.load(sys.stdin)
+for asset in data.get("assets", []):
+    if asset.get("name") == name:
+        print(asset.get("url", ""))
+        break
+else:
+    raise SystemExit(f"missing release asset: {name}")
+PY
+)"
+    curl --http1.1 -fsSL -H "Authorization: Bearer $token" -H "Accept: application/octet-stream" "$asset_api_url" -o "$out"
+    return
+  fi
+  curl -fsSL %q -o "$out"
+}
+
+download_source_archive() {
+  out="$1"
+  if [ -n "$token" ]; then
+    curl --http1.1 -fsSL -H "Authorization: Bearer $token" -H "Accept: application/octet-stream" %q -o "$out"
+    return
+  fi
+  curl -fsSL %q -o "$out"
+}
+
+mkdir -p "$root" "$project_root" %q
+rm -rf "$project_root"
+mkdir -p "$project_root" %q
+if [ -f "$local_project_root/go.mod" ]; then
+  cp -a "$local_project_root"/. "$project_root"/
+  if %s; then
+%s
+  else
+    (
+      cd "$project_root"
+%s
+    )
+  fi
+else
+  download_source_archive "$tmp/%s"
+  mkdir -p "$tmp/source"
+  tar -xzf "$tmp/%s" -C "$tmp/source"
+  src_dir="$(find "$tmp/source" -mindepth 1 -maxdepth 1 -type d | head -n1)"
+  if [ -z "$src_dir" ] || [ ! -d "$src_dir" ]; then
+    echo "missing extracted cicy-skills source dir" >&2
+    exit 1
+  fi
+
+  download_release_bundle "$tmp/%s"
+  mkdir -p "$tmp/release"
+  tar -xzf "$tmp/%s" -C "$tmp/release"
+  bundle_dir="$tmp/release/%s"
+  if [ ! -d "$bundle_dir" ]; then
+    echo "missing extracted cicy-skills release dir: $bundle_dir" >&2
+    exit 1
+  fi
+
+  cp -a "$src_dir"/. "$project_root"/
+  mkdir -p %q
+%s
+fi
+%s
+export CICY_SKILLS_ROOT="$project_root"
+%s install all
+%s agent sync openclaw
+`, cicySkillsDir, projectRoot, localProjectRoot, tag, cicySkillsReleaseAPIURL(tag), bundleName, bundleURL, cicySkillsSourceAPIURL(tag), sourceURL, filepath.Join(projectRoot, "dist"), filepath.Join(projectRoot, "dist"), strings.Join(localDistChecks, " && "), strings.Join(localCopyLines, "\n"), strings.Join(buildLines, "\n"), sourceArchiveName, sourceArchiveName, bundleName, bundleName, bundleDir, filepath.Join(projectRoot, "dist"), strings.Join(copyLines, "\n"), npmMirror, cicySkillsDistBinaryPath(), cicySkillsDistBinaryPath())
+	return script, nil
+}
+
+func ensureCicySkillsAsync() {
+	cicySkillsInstallOnce.Do(func() {
+		if !needsCicySkillsInstall() {
+			return
+		}
+		go func() {
+			tag := cicySkillsVersion()
+			script, err := cicySkillsInstallScript(tag)
+			if err != nil {
+				log.Printf("[startup] skipped cicy-skills bootstrap: %v", err)
+				return
+			}
+			if err := os.MkdirAll(cicyStateDir, 0755); err != nil {
+				log.Printf("[startup] failed to create %s for cicy-skills bootstrap: %v", cicyStateDir, err)
+				return
+			}
+			logPath := filepath.Join(cicyStateDir, cicySkillsInstallLogFile)
+			logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+			if err != nil {
+				log.Printf("[startup] failed to open cicy-skills install log: %v", err)
+				return
+			}
+			defer logFile.Close()
+			log.Printf("[startup] installing cicy-skills in background: root=%s version=%s", cicySkillsDir, tag)
+			cmd := exec.Command("sh", "-lc", script)
+			cmd.Stdout = logFile
+			cmd.Stderr = logFile
+			cmd.Env = os.Environ()
+			if err := cmd.Run(); err != nil {
+				log.Printf("[startup] cicy-skills bootstrap failed: %v (log: %s)", err, logPath)
+				return
+			}
+			extendPATH()
+			if needsCicySkillsInstall() {
+				log.Printf("[startup] cicy-skills bootstrap incomplete: required commands or docs still missing (log: %s)", logPath)
+				return
+			}
+			log.Printf("[startup] cicy-skills bootstrap completed")
+		}()
+	})
 }
 
 func ensureCodeServer() {
