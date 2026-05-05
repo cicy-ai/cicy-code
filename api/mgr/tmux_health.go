@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// startTmuxHealth periodically ensures tmux sessions, ttyd instances, and pipe-pane are alive.
+// startTmuxHealth periodically ensures tmux sessions and ttyd instances are alive.
 func startTmuxHealth() {
 	interval := 30 * time.Second
 	log.Printf("[tmux-health] started | interval=%s", interval)
@@ -45,8 +45,5 @@ func healthCheck() {
 			log.Printf("[tmux-health] ttyd port %d down for %s, starting", port, pid)
 			startInstance(pid, port, token)
 		}
-
-		// 3. pipe-pane restore
-		ensurePipe(pid)
 	}
 }

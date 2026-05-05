@@ -1,6 +1,6 @@
 import * as bare from "libapps";
 import { applyMonoFontVar, monoFontStack, isMacPlatform } from "./font";
-import { openExternalLinkWithConfirm } from "./link_confirm";
+import { openExternalLinkWithConfirm, openFileReferencePopup } from "./link_confirm";
 
 export class Hterm {
     elem: HTMLElement;
@@ -26,6 +26,11 @@ export class Hterm {
         this.term.getPrefs().set("send-encoding", "raw");
         this.term.decorate(this.elem);
         (this.term as any).openUrl = (url: string) => {
+            var lowerUrl = String(url || "").toLowerCase();
+            if (lowerUrl.indexOf("file://") === 0 || lowerUrl.indexOf("image://") === 0) {
+                openFileReferencePopup(this.elem.ownerDocument, url);
+                return;
+            }
             openExternalLinkWithConfirm(this.elem.ownerDocument, url);
         };
 

@@ -5,9 +5,9 @@ import remarkGfm from 'remark-gfm';
 import config from '../../config';
 import apiService from '../../services/api';
 import { TokenManager } from '../../services/tokenManager';
+import { useApp } from '../../contexts/AppContext';
 import type { EditPaneData } from '../EditPaneDialog';
-import { AGENT_TYPE_OPTIONS } from '../../lib/agentType';
-import AgentTypeOptionButton from '../AgentTypeOptionButton';
+import AgentTypeSelector from '../AgentTypeSelector';
 
 export type InspectorTab = 'overview' | 'memory' | 'settings';
 type InspectorRequestedTab = InspectorTab | 'notes' | 'history';
@@ -303,6 +303,7 @@ export default function AgentInspector({
   liveStatus?: string;
   inspectorVersion?: number;
 }) {
+  const { agentTypeOptions } = useApp();
   const [tab, setTab] = useState<InspectorTab>('overview');
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [queryDraft, setQueryDraft] = useState('');
@@ -320,8 +321,8 @@ export default function AgentInspector({
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const settingsPaneLoadedRef = useRef<string>('');
+  const settingsAutoSaveTimerRef = useRef<number | null>(null);
   const [settingsBaseline, setSettingsBaseline] = useState('null');
-  const inspectorCacheRef = useRef<Map<string, any>>(new Map());
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(queryDraft.trim()), 220);
@@ -343,11 +344,52 @@ export default function AgentInspector({
 
   useEffect(() => {
     if (!open || !paneId) return;
-    const cached = inspectorCacheRef.current.get(paneId);
-    if (cached) {
-      setData(cached);
-      return;
-    }
+    let cancelled = false;
+    const target = `${paneId}:main.0`;
+    settingsPaneLoadedRef.current = target;
+    setSettingsLoading(true);
+    setSettingsSaved(false);
+    apiService.getPane(paneId).then(({ data: detail }) => {
+      if (cancelled || settingsPaneLoadedRef.current !== target) return;
+      const next: EditPaneData = {
+        target,
+        title: String(detail?.title || paneTitle || paneId),
+        agent_duty: String(detail?.agent_duty || ''),
+        agent_type: String(detail?.agent_type || ''),
+        allow_all_actions: !!detail?.allow_all_actions,
+        workspace: String(detail?.workspace || ''),
+        active: detail?.active !== false && detail?.active !== 0,
+        init_script: String(detail?.init_script || ''),
+        tg_enable: !!detail?.tg_enable,
+        tg_token: String(detail?.tg_token || ''),
+        tg_chat_id: String(detail?.tg_chat_id || ''),
+        config: String(detail?.config || '{}'),
+        ttyd_preview: String(detail?.ttyd_preview || ''),
+        role: String(detail?.role || ''),
+        default_model: String(detail?.default_model || ''),
+      };
+      setSettingsData(next);
+      setSettingsBaseline(serializeSettingsData(next));
+    }).catch(() => {
+      if (cancelled || settingsPaneLoadedRef.current !== target) return;
+      const fallback: EditPaneData = {
+        target,
+        title: paneTitle || paneId,
+      };
+      setSettingsData(fallback);
+      setSettingsBaseline(serializeSettingsData(fallback));
+    }).finally(() => {
+      if (!cancelled && settingsPaneLoadedRef.current === target) {
+        setSettingsLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, paneId, paneTitle]);
+
+  useEffect(() => {
+    if (!open || !paneId) return;
     setData({
       pane_id: paneId,
       overview: {
@@ -360,6 +402,7 @@ export default function AgentInspector({
         provider: '',
       },
       history: { total: 0, items: [], offset: 0, limit: HISTORY_PAGE_SIZE, has_more: false },
+      history_view: [],
       notes: { content: '', updated_at: '' },
       runtime_memory: { content: '', enabled: false, updated_at: '' },
       prompt_rules: {
@@ -368,25 +411,7 @@ export default function AgentInspector({
         agent: { content: '', enabled: false, inject_on_request: false, available: true, label: paneId, key: paneId },
       },
     });
-  }, [open, paneId]);
-
-  useEffect(() => {
-    if (!open || !paneId) return;
-    let cancelled = false;
-    apiService.getAgentInspector(paneId, { q: query, limit: HISTORY_PAGE_SIZE, offset: historyOffset })
-      .then(({ data }) => {
-        if (cancelled) return;
-        inspectorCacheRef.current.set(paneId, data);
-        setData(data);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: `错误：${paneId} Inspector 读取失败` }));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, paneId, query, historyOffset, refreshNonce, inspectorVersion]);
+  }, [open, paneId, paneTitle, query, historyOffset]);
 
   useEffect(() => {
     if (!open || !paneId) return;
@@ -410,66 +435,12 @@ export default function AgentInspector({
 
 
   useEffect(() => {
-    if (!open || !paneId) return;
-    let cancelled = false;
-    let inflight = false;
-    const activeStatus = String(data?.overview?.status || '').toLowerCase();
-    const intervalMs = activeStatus && activeStatus !== 'idle' && activeStatus !== 'completed' && activeStatus !== 'done' && activeStatus !== 'failed' ? 2500 : 8000;
-
-    const syncInspector = () => {
-      if (cancelled || inflight) return;
-      inflight = true;
-      apiService.getAgentInspector(paneId, { q: query, limit: HISTORY_PAGE_SIZE, offset: historyOffset })
-        .then(({ data: next }) => {
-          if (cancelled) return;
-          inspectorCacheRef.current.set(paneId, next);
-          setData(next);
-        })
-        .catch(() => {})
-        .finally(() => {
-          inflight = false;
-        });
-    };
-
-    const timer = window.setInterval(syncInspector, intervalMs);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [open, paneId, query, historyOffset, data?.overview?.status]);
-
-  useEffect(() => {
     setNotesDraft(data?.notes?.content || '');
   }, [data?.notes?.content, paneId]);
 
   useEffect(() => {
     setPromptRulesDraft(buildPromptRulesDraft(data, paneId));
   }, [data?.prompt_rules, data?.runtime_memory?.content, data?.runtime_memory?.enabled, data?.runtime_memory?.updated_at, paneId]);
-
-  useEffect(() => {
-    if (!open || !paneId) return;
-    if (settingsPaneLoadedRef.current === paneId && settingsData?.target === `${paneId}:main.0`) return;
-    let cancelled = false;
-    setSettingsLoading(true);
-    apiService.getPane(`${paneId}:main.0`)
-      .then(({ data }) => {
-        if (cancelled) return;
-        settingsPaneLoadedRef.current = paneId;
-        const next = { target: `${paneId}:main.0`, title: paneTitle || paneId, ...data };
-        setSettingsData(next);
-        setSettingsBaseline(serializeSettingsData(next));
-      })
-      .catch(() => {
-        if (cancelled) return;
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: `错误：${paneId} 设置读取失败` }));
-      })
-      .finally(() => {
-        if (!cancelled) setSettingsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, paneId, paneTitle, settingsData?.target]);
 
   useEffect(() => {
     setSettingsSection('general');
@@ -493,6 +464,33 @@ export default function AgentInspector({
   const dirtySettings = useMemo(() => {
     return serializeSettingsData(settingsData) !== settingsBaseline;
   }, [settingsBaseline, settingsData]);
+
+  useEffect(() => {
+    if (settingsAutoSaveTimerRef.current !== null) {
+      window.clearTimeout(settingsAutoSaveTimerRef.current);
+      settingsAutoSaveTimerRef.current = null;
+    }
+    if (
+      tab !== 'settings'
+      || settingsSection !== 'general'
+      || settingsLoading
+      || settingsSaving
+      || !settingsData
+      || !dirtySettings
+    ) {
+      return;
+    }
+    settingsAutoSaveTimerRef.current = window.setTimeout(() => {
+      settingsAutoSaveTimerRef.current = null;
+      void saveSettings();
+    }, 300);
+    return () => {
+      if (settingsAutoSaveTimerRef.current !== null) {
+        window.clearTimeout(settingsAutoSaveTimerRef.current);
+        settingsAutoSaveTimerRef.current = null;
+      }
+    };
+  }, [dirtySettings, settingsData, settingsLoading, settingsSaving, settingsSection, tab]);
 
   const saveNotes = async () => {
     if (notesSaving || !dirtyNotes) return;
@@ -546,6 +544,15 @@ export default function AgentInspector({
       },
     }));
   };
+
+  const inspectorAgentTypeOptions = useMemo(() => {
+    const options = agentTypeOptions.map((option) => ({ ...option }));
+    const currentValue = String(settingsData?.agent_type || '').trim();
+    if (currentValue && !options.some((option) => option.value === currentValue)) {
+      options.unshift({ value: currentValue, label: currentValue, description: '当前值（不在可选列表中）' });
+    }
+    return options;
+  }, [agentTypeOptions, settingsData?.agent_type]);
 
   const patchSettingsData = (patch: Partial<EditPaneData>) => {
     setSettingsData((prev) => ({ ...(prev || { target: `${paneId}:main.0`, title: paneTitle || paneId }), ...patch }));
@@ -849,7 +856,7 @@ export default function AgentInspector({
                     <InspectorInput value={settingsData?.title || ''} onChange={(value) => patchSettingsData({ title: value })} placeholder="窗格标题" />
                   </InspectorField>
                   <InspectorField label="工作目录" desc="worker 工作区目录" mono>
-                    <InspectorInput value={settingsData?.workspace || ''} onChange={(value) => patchSettingsData({ workspace: value })} placeholder="/home/user/project" mono />
+                    <InspectorInput value={settingsData?.workspace || ''} onChange={(value) => patchSettingsData({ workspace: value })} placeholder="/home/user/project" mono readOnly />
                   </InspectorField>
                   <InspectorToggle
                     label="自动启动"
@@ -863,18 +870,13 @@ export default function AgentInspector({
               {settingsSection === 'agent' && (
                 <div data-id="agent-inspector-settings-agent" className="space-y-5">
                   <InspectorField label="智能体类型">
-                    <div data-id="agent-inspector-settings-agent-types" className="flex flex-wrap gap-2">
-                      {AGENT_TYPE_OPTIONS.map((option) => (
-                        <AgentTypeOptionButton
-                          key={option.value}
-                          dataId={`agent-inspector-settings-agent-type-${option.value}`}
-                          value={option.value}
-                          label={option.label}
-                          selected={settingsData?.agent_type === option.value}
-                          onClick={() => patchSettingsData({ agent_type: option.value })}
-                        />
-                      ))}
-                    </div>
+                    <AgentTypeSelector
+                      value={settingsData?.agent_type || ''}
+                      options={inspectorAgentTypeOptions}
+                      onChange={(value) => patchSettingsData({ agent_type: value })}
+                      dataId="agent-inspector-settings-agent-types"
+                      optionDataIdPrefix="agent-inspector-settings-agent-type"
+                    />
                   </InspectorField>
                   <InspectorToggle
                     label="启动时允许所有操作"
@@ -904,14 +906,6 @@ export default function AgentInspector({
 
             </div>
           )}
-        </div>
-
-        <div data-id="agent-inspector-footer" className="border-t border-white/[0.06] px-4 py-3">
-          {tab === 'memory' ? (
-            <SaveButton label={memorySaving ? '保存中...' : '保存 Prompt Rules'} disabled={!dirtyMemory || memorySaving} busy={memorySaving} onClick={saveRuntimeMemory} />
-          ) : tab === 'settings' ? (
-            <SaveButton label={settingsSaving ? '保存中...' : settingsSaved ? '已保存' : '保存设置'} disabled={!dirtySettings || settingsSaving || settingsLoading || !settingsData} busy={settingsSaving} onClick={saveSettings} />
-          ) : null}
         </div>
       </div>
     </aside>

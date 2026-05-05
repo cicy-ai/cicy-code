@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Users, Plus, X, Loader2, ExternalLink, Settings, MoreHorizontal, Trash2, RefreshCw } from 'lucide-react';
+import { Users, Plus, X, Loader2, ExternalLink, MoreHorizontal, Trash2, RefreshCw } from 'lucide-react';
+import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
 import { useDialog } from '../../contexts/DialogContext';
 import { normalizeAgentType } from '../../lib/agentType';
@@ -186,6 +187,22 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
       }
     );
   }, [confirm, onOpenInCurrentPane, onRefreshPanes, onRefreshPoll, paneId, showToast]);
+  const deleteUnboundPane = useCallback((agent: Agent) => {
+    const wid = shortId(agent.pane_id);
+    const title = agent.title || wid;
+    confirm(
+      <>删除 <span className="text-zinc-100 font-medium">{title}</span>？</>,
+      async () => {
+        try {
+          await apiService.deletePane(wid);
+          await onRefreshPanes();
+          onRefreshPoll();
+        } catch {
+          showToast(`错误：${title} 删除失败`);
+        }
+      }
+    );
+  }, [confirm, onRefreshPanes, onRefreshPoll, showToast]);
   const groupedBindings = useMemo(() => {
     const groups = new Map<string, { machineId?: number; machineLabel?: string; items: Binding[] }>();
     for (const binding of bindings) {
@@ -287,7 +304,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
             >
               <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-              <span>打开</span>
+              <span>新窗口打开</span>
             </button>
             {onRemove ? (
               <button
@@ -321,24 +338,6 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               <RefreshCw className="w-3.5 h-3.5 shrink-0" />
               <span>重启</span>
             </button>
-            <button
-              type="button"
-              data-id="team-panel-worker-menu-settings"
-              disabled={!onOpenSettings}
-              onClick={() => {
-                if (!onOpenSettings) return;
-                setOpenMenuId(null);
-                onOpenSettings();
-              }}
-              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
-                onOpenSettings
-                  ? 'cursor-pointer text-zinc-300 hover:bg-white/[0.06]'
-                  : 'cursor-not-allowed text-zinc-600'
-              }`}
-            >
-              <Settings className="w-3.5 h-3.5 shrink-0" />
-              <span>设置</span>
-            </button>
             {onDelete ? (
               <button
                 type="button"
@@ -361,10 +360,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
           agentType={agentType}
           title={title}
           dataId="team-panel-worker-agent-avatar"
-          className="h-10 w-10 rounded-xl border-zinc-500/40 bg-zinc-300 shadow-sm"
-          fallbackClassName="border-white/[0.08] bg-white/[0.03]"
-          iconClassName="h-8 w-8"
-          textClassName={normalizeAgentType(agentType) === 'openclaw' ? 'text-[20px] leading-none' : normalizeAgentType(agentType) === 'hermes' ? 'text-[15px] font-semibold tracking-[0.08em]' : 'text-xs font-semibold uppercase'}
+          variant="panel"
         />
 	        <div className="flex-1 min-w-0 pr-7">
 	          <div className="flex items-center gap-1.5">
@@ -386,7 +382,22 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
             value: a.pane_id,
             label: a.title || shortId(a.pane_id),
             sub: shortId(a.pane_id),
-            icon: <AgentAvatar agentType={a.agent_type} title={a.title || shortId(a.pane_id)} className="h-8 w-8 rounded-lg border-zinc-500/30 bg-zinc-200" fallbackClassName="border-white/[0.08] bg-white/[0.03]" iconClassName="h-4.5 w-4.5" textClassName={normalizeAgentType(a.agent_type) === 'openclaw' ? 'text-[15px] leading-none' : normalizeAgentType(a.agent_type) === 'hermes' ? 'text-[10px] font-semibold tracking-[0.08em]' : 'text-[10px] font-semibold uppercase'} />,
+            icon: <AgentAvatar agentType={a.agent_type} title={a.title || shortId(a.pane_id)} variant="select" />,
+            actions: [
+              {
+                id: 'open',
+                label: '新窗口打开',
+                icon: <ExternalLink className="w-3.5 h-3.5" />,
+                onClick: () => window.open(`#/agent/${shortId(a.pane_id)}`, '_blank'),
+              },
+              {
+                id: 'delete',
+                label: '删除',
+                icon: <Trash2 className="w-3.5 h-3.5" />,
+                danger: true,
+                onClick: () => deleteUnboundPane(a),
+              },
+            ] as SelectOptionAction[],
           }))}
           onChange={v => bind(v)}
           onOpenChange={open => { if (open) void onRefreshPanes(); }}
@@ -412,6 +423,9 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         onSubmit={createAndBind}
         title="创建并绑定新员工"
         submitLabel="创建并绑定"
+        emptyTitleOnAgentSelect="全栈软件开发工程师"
+        dialogClassName="w-[960px] max-w-[96vw]"
+        agentTypeGridClassName="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3"
       />
 
 

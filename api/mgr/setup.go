@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -29,14 +30,18 @@ var embeddedTmuxConf string
 //go:embed .cicy_tmux.conf
 var embeddedCicyTmuxConf string
 
+//go:embed resources/cicy-code-server-bridge-0.0.1.vsix
+var embeddedCodeServerBridgeVSIX []byte
+
 var cicySkillsInstallOnce sync.Once
 
 const (
 	cicySkillsRepoURL        = "https://github.com/cicy-ai/cicy-skills"
 	cicySkillsRepoAPIURL     = "https://api.github.com/repos/cicy-ai/cicy-skills"
-	cicySkillsDefaultVersion = "v0.1.2"
+	cicySkillsDefaultVersion = "v0.1.4"
 	cicySkillsDefaultGHProxy = "https://gh-proxy.com/"
 	cicySkillsNPMMirror      = "https://registry.npmmirror.com"
+	cicyDefaultPyPIMirror    = "https://pypi.tuna.tsinghua.edu.cn/simple"
 	cicySkillsInstallLogFile = "cicy-skills-install.log"
 )
 
@@ -47,6 +52,23 @@ func shellRC() string {
 		return "~/.zshrc"
 	}
 	return "~/.bashrc"
+}
+
+func expandHomePath(path string) string {
+	if path == "" || path[0] != '~' {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(home, path[2:])
+	}
+	return path
 }
 
 func extendPATH() {
@@ -325,6 +347,33 @@ var builtinAgents = []struct {
 	{"cicy-claude", "CiCy"},
 }
 
+var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode", "kiro-cli"}
+
+func effectiveAllowedAgentTypes() []string {
+	if labMode {
+		selected := make([]string, 0, len(builtinAgents))
+		for _, ba := range builtinAgents {
+			selected = append(selected, ba.AgentType)
+		}
+		return selected
+	}
+	selected := make([]string, 0, len(nonLabAllowedBuiltinAgents))
+	selected = append(selected, nonLabAllowedBuiltinAgents...)
+	return selected
+}
+
+func effectiveAgentOptions() []M {
+	allowed := effectiveAllowedAgentTypes()
+	options := make([]M, 0, len(allowed))
+	for _, agentType := range allowed {
+		options = append(options, M{
+			"value": agentType,
+			"label": builtinAgentTitle(agentType),
+		})
+	}
+	return options
+}
+
 const primaryWorkerSession = "w-10001"
 const primaryWorkerPaneID = "w-10001:main.0"
 
@@ -371,6 +420,16 @@ func isBuiltinAgentType(agentType string) bool {
 	return false
 }
 
+func isAllowedAgentType(agentType string) bool {
+	agentType = normalizeAgentType(agentType)
+	for _, allowedAgentType := range effectiveAllowedAgentTypes() {
+		if allowedAgentType == agentType {
+			return true
+		}
+	}
+	return false
+}
+
 func parseSelectedAgents(agentList string) ([]string, error) {
 	agentList = strings.TrimSpace(agentList)
 	if agentList == "" {
@@ -378,11 +437,7 @@ func parseSelectedAgents(agentList string) ([]string, error) {
 	}
 
 	if strings.EqualFold(agentList, "all") {
-		selected := make([]string, 0, len(builtinAgents))
-		for _, ba := range builtinAgents {
-			selected = append(selected, ba.AgentType)
-		}
-		return selected, nil
+		return effectiveAllowedAgentTypes(), nil
 	}
 
 	seen := map[string]bool{}
@@ -395,6 +450,9 @@ func parseSelectedAgents(agentList string) ([]string, error) {
 		agentType := normalizeAgentType(raw)
 		if !isBuiltinAgentType(agentType) {
 			return nil, fmt.Errorf("unsupported agent: %s", raw)
+		}
+		if !isAllowedAgentType(agentType) {
+			return nil, fmt.Errorf("agent not allowed in current mode: %s", raw)
 		}
 		if seen[agentType] {
 			continue
@@ -414,6 +472,9 @@ const defaultDevAgent = "claude"
 func effectiveAgentsFlag() string {
 	if value := strings.TrimSpace(agentsFlag); value != "" {
 		return value
+	}
+	if labMode {
+		return "all"
 	}
 	if devMode {
 		return defaultDevAgent
@@ -536,35 +597,23 @@ func createSelectedWorkers(selected []string) {
 
 func createBuiltinWorker(port int, agentType, title string) {
 	session := fmt.Sprintf("w-%d", port)
-	paneID := session + ":main.0"
-	home, _ := os.UserHomeDir()
-	workspace := filepath.Join(home, "workers", session)
-	os.MkdirAll(workspace, 0755)
-
-	// Create tmux session
-	exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", workspace).Run()
-
-	// Insert DB
-	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()),
-		paneID, title, port, workspace, "", "{}", "master", "", agentType, true, true)
-
-	// Start ttyd
 	token := getFirstToken()
-	if err := startInstance(paneID, port, token); err != nil {
+	if _, err := createManagedPane(paneCreateOpts{
+		session:         session,
+		title:           title,
+		role:            "master",
+		defaultModel:    "",
+		agentType:       agentType,
+		workspace:       builtinWorkerWorkspace(session),
+		initScript:      "",
+		port:            port,
+		token:           token,
+		allowAllActions: true,
+		replyInChinese:  true,
+	}); err != nil {
 		fmt.Printf("  ❌ %s 创建失败: %v\n", title, err)
 		return
 	}
-	waitPort(port, 10*time.Second)
-	initPaneEnv(paneEnvOpts{
-		paneID:          paneID,
-		configJSON:      "{}",
-		workspace:       workspace,
-		initScript:      "",
-		agentType:       agentType,
-		allowAllActions: true,
-		replyInChinese:  true,
-	})
 	fmt.Printf("  ✅ %s (w-%d, port %d)\n", title, port, port)
 }
 
@@ -655,6 +704,7 @@ func checkEnv() {
 	ensureSSHKeyPair()
 	ensureTmuxConf()
 	ensureCicyTmuxConf()
+	ensureShellRCSourcesCicyTmuxConf()
 
 	setupAIConfigs()
 
@@ -779,6 +829,37 @@ func ensureCicyTmuxConf() {
 	if writeErr := os.WriteFile(dst, []byte(embeddedCicyTmuxConf), 0644); writeErr != nil {
 		log.Fatalf("[startup] failed to write %s: %v", dst, writeErr)
 	}
+}
+
+func ensureShellRCSourcesCicyTmuxConf() {
+	rcPath := expandHomePath(shellRC())
+	if strings.TrimSpace(rcPath) == "" {
+		return
+	}
+	line := `[ -f "$HOME/.cicy_tmux.conf" ] && source "$HOME/.cicy_tmux.conf"`
+	current, err := os.ReadFile(rcPath)
+	if os.IsNotExist(err) {
+		if writeErr := os.WriteFile(rcPath, []byte(line+"\n"), 0644); writeErr != nil {
+			log.Fatalf("[startup] failed to write %s: %v", rcPath, writeErr)
+		}
+		log.Printf("[startup] installing %s", rcPath)
+		return
+	}
+	if err != nil {
+		log.Fatalf("[startup] failed to read %s: %v", rcPath, err)
+	}
+	if strings.Contains(string(current), line) {
+		return
+	}
+	payload := strings.TrimRight(string(current), "\n")
+	if payload != "" {
+		payload += "\n\n"
+	}
+	payload += line + "\n"
+	if writeErr := os.WriteFile(rcPath, []byte(payload), 0644); writeErr != nil {
+		log.Fatalf("[startup] failed to update %s: %v", rcPath, writeErr)
+	}
+	log.Printf("[startup] updated %s", rcPath)
 }
 
 func ensureSSHKeyPair() {
@@ -1220,6 +1301,91 @@ func ensureCodeServer() {
 	go ensureCodeServerAsync()
 }
 
+func ensureCodeServerUserSettings(home string) {
+	userDir := filepath.Join(home, ".local", "share", "code-server", "User")
+	if err := os.MkdirAll(userDir, 0755); err != nil {
+		log.Printf("[startup] failed to create code-server User dir: %v", err)
+		return
+	}
+
+	settingsPath := filepath.Join(userDir, "settings.json")
+	settings := map[string]any{}
+	if raw, err := os.ReadFile(settingsPath); err == nil && strings.TrimSpace(string(raw)) != "" {
+		if err := json.Unmarshal(raw, &settings); err != nil {
+			log.Printf("[startup] failed to parse code-server settings.json, recreating: %v", err)
+			settings = map[string]any{}
+		}
+	}
+
+	if _, ok := settings["workbench.colorTheme"]; !ok {
+		settings["workbench.colorTheme"] = "Default Dark+"
+	}
+	if _, ok := settings["workbench.iconTheme"]; !ok {
+		settings["workbench.iconTheme"] = "simple-icons"
+	}
+
+	payload, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		log.Printf("[startup] failed to marshal code-server settings: %v", err)
+		return
+	}
+	payload = append(payload, '\n')
+	if err := os.WriteFile(settingsPath, payload, 0644); err != nil {
+		log.Printf("[startup] failed to write code-server settings.json: %v", err)
+	}
+}
+
+func installCodeServerExtension(home string, extension string) {
+	log.Printf("[startup] installing code-server extension: %s", extension)
+	cmd := exec.Command("code-server", "--install-extension", extension, "--force")
+	cmd.Dir = home
+	var env []string
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "PORT=") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	cmd.Env = env
+	output, runErr := cmd.CombinedOutput()
+	if runErr != nil {
+		log.Printf("[startup] failed to install code-server extension %s: %v output=%s", extension, runErr, strings.TrimSpace(string(output)))
+		return
+	}
+	if trimmed := strings.TrimSpace(string(output)); trimmed != "" {
+		log.Printf("[startup] code-server extension installed: %s output=%s", extension, trimmed)
+	}
+}
+
+func installEmbeddedCodeServerExtension(home string, fileName string, payload []byte) {
+	if len(payload) == 0 {
+		log.Printf("[startup] skipped empty embedded code-server extension: %s", fileName)
+		return
+	}
+	tmpFile, err := os.CreateTemp("", "cicy-code-server-extension-*.vsix")
+	if err != nil {
+		log.Printf("[startup] failed to create temp vsix for %s: %v", fileName, err)
+		return
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmpFile.Write(payload); err != nil {
+		_ = tmpFile.Close()
+		log.Printf("[startup] failed to write temp vsix for %s: %v", fileName, err)
+		return
+	}
+	if err := tmpFile.Close(); err != nil {
+		log.Printf("[startup] failed to close temp vsix for %s: %v", fileName, err)
+		return
+	}
+	installCodeServerExtension(home, tmpPath)
+}
+
+func installBundledCodeServerExtensions(home string) {
+	installEmbeddedCodeServerExtension(home, "cicy-code-server-bridge-0.0.1.vsix", embeddedCodeServerBridgeVSIX)
+	installCodeServerExtension(home, "laurenttreguier.vscode-simple-icons")
+}
+
 func ensureCodeServerAsync() {
 	extendPATH()
 	if _, err := exec.LookPath("code-server"); err != nil {
@@ -1258,6 +1424,7 @@ func ensureCodeServerAsync() {
 		log.Printf("[startup] failed to create ~/.cicy: %v", mkErr)
 		return
 	}
+	ensureCodeServerUserSettings(home)
 
 	logPath := filepath.Join(home, ".cicy", "code-server.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -1296,6 +1463,8 @@ func ensureCodeServerAsync() {
 		return
 	}
 	log.Printf("[startup] code-server ready on :%s", csPort)
+
+	go installBundledCodeServerExtensions(home)
 }
 
 func mustAtoi(s string) int {
@@ -1349,8 +1518,7 @@ func ensureBuiltinAgents(selected []string) {
 		sessionCreated := false
 		if exec.Command("tmux", "has-session", "-t", sess).Run() != nil {
 			if workspace == "" {
-				home, _ := os.UserHomeDir()
-				workspace = filepath.Join(home, "workers", sess)
+				workspace = builtinWorkerWorkspace(sess)
 			}
 			ensureAgentToolInstalled(agentType)
 			os.MkdirAll(workspace, 0755)

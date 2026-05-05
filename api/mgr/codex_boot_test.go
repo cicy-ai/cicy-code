@@ -6,7 +6,7 @@ import (
 )
 
 func TestAgentBootLinesCodexAllowAllActions(t *testing.T) {
-	lines := agentBootLines("codex", true, "w-10001")
+	lines := agentBootLines("codex", true, false, "w-10001", "gpt-5.5")
 
 	script := strings.Join(lines, "\n")
 
@@ -40,6 +40,11 @@ func TestAgentBootLinesCodexAllowAllActions(t *testing.T) {
 		t.Error("missing ai-gateway base_url")
 	}
 
+	// Must pass model explicitly so shared ~/.codex/config.toml does not win
+	if !strings.Contains(script, "codex -m 'gpt-5.5'") {
+		t.Error("missing explicit codex model override")
+	}
+
 	// Must have --dangerously-bypass-approvals-and-sandbox
 	if !strings.Contains(script, "--dangerously-bypass-approvals-and-sandbox") {
 		t.Error("missing --dangerously-bypass-approvals-and-sandbox when allowAllActions=true")
@@ -54,7 +59,7 @@ func TestAgentBootLinesCodexAllowAllActions(t *testing.T) {
 }
 
 func TestAgentBootLinesCodexRestrictedActions(t *testing.T) {
-	lines := agentBootLines("codex", false, "w-10001")
+	lines := agentBootLines("codex", false, false, "w-10001", "gpt-5.5")
 
 	script := strings.Join(lines, "\n")
 
@@ -69,6 +74,9 @@ func TestAgentBootLinesCodexRestrictedActions(t *testing.T) {
 	}
 	if !strings.Contains(script, `model_providers.custom.base_url=`) {
 		t.Error("missing model_providers.custom.base_url")
+	}
+	if !strings.Contains(script, "codex -m 'gpt-5.5'") {
+		t.Error("missing explicit codex model override")
 	}
 
 	// Must still use shared install helper
@@ -85,9 +93,9 @@ func TestAgentBootLinesCodexRestrictedActions(t *testing.T) {
 func TestAgentBootLinesCodexNormalization(t *testing.T) {
 	// "openai" should normalize to codex
 	for _, alias := range []string{"codex", "openai"} {
-		lines := agentBootLines(alias, true, "w-10001")
+		lines := agentBootLines(alias, true, false, "w-10001", "gpt-5.5")
 		script := strings.Join(lines, "\n")
-		if !strings.Contains(script, "codex -c") {
+		if !strings.Contains(script, "codex -m 'gpt-5.5'") {
 			t.Errorf("agentType=%q should produce codex boot lines", alias)
 		}
 	}

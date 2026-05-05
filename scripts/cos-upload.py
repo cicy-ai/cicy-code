@@ -9,14 +9,16 @@ import os, sys, json, hashlib, hmac, time, mimetypes, shutil, tempfile, requests
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(ROOT, '..'))
-conf = json.load(open(os.path.expanduser('~/global.json')))['tencent']
+CICY_ROOT_DIR = os.path.expanduser('~/cicy-ai')
+GLOBAL_JSON_PATH = os.path.join(CICY_ROOT_DIR, 'global.json')
+conf = json.load(open(GLOBAL_JSON_PATH))['tencent']
 SID, SKEY = conf['secret_id'], conf['secret_key']
 BUCKET, REGION = conf['bucket'], conf['region']
 HOST = f"{BUCKET}.cos.{REGION}.myqcloud.com"
 versions = json.load(open(os.path.join(REPO_ROOT, 'versions.json')))
 
 TARGETS = {
-    'app':     {'src': os.path.join(REPO_ROOT, 'app', 'dist', 'assets'), 'prefix': 'app',  'key': 'app',     'flat': False, 'base_dir': 'assets'},
+    'app':     {'src': os.path.join(REPO_ROOT, 'app', 'dist'), 'prefix': 'app',  'key': 'app',     'flat': False, 'base_dir': ''},
     'ttyd':    {'prefix': 'ttyd', 'key': 'ttyd', 'flat': False, 'base_dir': ''},
     'landing': {'src': os.path.expanduser('~/projects/cicy-landing/public/assets'), 'prefix': 'landing', 'key': 'landing', 'flat': True, 'base_dir': 'assets'},
 }

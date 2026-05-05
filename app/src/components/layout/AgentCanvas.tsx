@@ -3,6 +3,7 @@ import { Check, Copy, Folder, History, Pencil } from 'lucide-react';
 import { normalizeAgentType } from '../../lib/agentType';
 import { useDevRegister } from '../../lib/devStore';
 import { emitWebFrameMaskEvent } from '../../lib/webFrameMask';
+import { defaultWorkerWorkspace } from '../../config';
 import AgentAvatar from '../AgentAvatar';
 import AgentHistoryOverlay from '../chat/AgentHistoryOverlay';
 
@@ -984,10 +985,7 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
             agentType={item.agentType}
             title={item.title || item.paneId}
             dataId="agent-window-avatar"
-            className="h-9 w-9 rounded-xl border-zinc-500/40 bg-zinc-300 shadow-sm"
-            fallbackClassName="border-white/[0.08] bg-white/[0.03]"
-            iconClassName={normalizeAgentType(item.agentType) === 'opencode' ? 'h-6 w-6' : 'h-5 w-5'}
-            textClassName={normalizeAgentType(item.agentType) === 'openclaw' ? 'text-[18px] leading-none' : 'text-[11px] font-semibold uppercase'}
+            variant="panel"
           />
           <div data-id="agent-window-header-left-body">
             <div data-id="agent-window-title-row" className="group/title flex items-center gap-2">
@@ -1136,7 +1134,7 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
           <div className="absolute inset-0 flex flex-col justify-between bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.12),transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] p-4">
             <div>
               <div className="text-xs uppercase tracking-[0.24em] text-zinc-600">workspace</div>
-              <div className="mt-2 truncate text-sm text-zinc-300">{item.workspace || `~/workers/${item.paneId}`}</div>
+              <div className="mt-2 truncate text-sm text-zinc-300">{item.workspace || defaultWorkerWorkspace(item.paneId)}</div>
             </div>
             <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3">
               <div className="text-xs text-zinc-500">协作概览</div>

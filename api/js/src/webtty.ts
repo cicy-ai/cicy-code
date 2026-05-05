@@ -13,6 +13,27 @@ export const msgSetPreferences = '4';
 export const msgSetReconnect = '5';
 export const msgAPI = '6';
 
+const fullWidthPunctuationMap: Record<string, string> = {
+    "～": "~",
+    "。": ".",
+    "，": ",",
+    "、": ",",
+    "》": ">",
+    "《": "<",
+    "？": "?",
+    "！": "!",
+    "…": "^",
+    "（": "(",
+    "）": ")",
+    "；": ";",
+    "：": ":",
+    "－": "-",
+};
+
+export function normalizeTerminalText(value: string): string {
+    return String(value || "").replace(/——|[～。，、》《？！（）；：－…]/g, (char: string) => char === "——" ? "_" : (fullWidthPunctuationMap[char] || char));
+}
+
 export interface APIRequestMessage {
     id: string;
     method: string;

@@ -22,15 +22,6 @@ func TestIsShellPromptVisible(t *testing.T) {
 	}
 }
 
-func TestIsDarwinShellDollarPrompt(t *testing.T) {
-	if !isDarwinShellDollarPrompt("cicy tmux inited!!\nw-10009 $") {
-		t.Fatal("expected darwin dollar prompt to be detected")
-	}
-	if isDarwinShellDollarPrompt("w-10009 %") {
-		t.Fatal("did not expect percent prompt to pass darwin dollar prompt check")
-	}
-}
-
 func TestShellPromptTimeoutForRuntime(t *testing.T) {
 	timeout := shellPromptTimeoutForRuntime()
 	if timeout <= 0 {

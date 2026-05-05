@@ -74,8 +74,6 @@ type aiGatewayCurrentSnapshot struct {
 	Method           string              `json:"method"`
 	Headers          map[string][]string `json:"headers"`
 	Body             interface{}         `json:"body"`
-	History          interface{}         `json:"history"`
-	HistorySource    string              `json:"history_source"`
 	Timestamp        string              `json:"timestamp"`
 	Status           string              `json:"status"`
 	StartedAt        string              `json:"started_at"`
@@ -213,6 +211,9 @@ var (
 )
 
 func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suffix string, method string, requestHeaders http.Header, requestBody []byte) *aiGatewayAuditSession {
+	if err := aiGatewaySyncLatestCurrentHistory(agentID); err != nil {
+		log.Printf("[ai-gateway] sync latest current history failed for %s: %v", agentID, err)
+	}
 	startedAt := time.Now().UTC()
 	startedAtISO := startedAt.Format(time.RFC3339)
 	prevReply := aiGatewayLoadReplySnapshot(agentID)
@@ -232,11 +233,7 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	model := aiGatewayString(payloadMap["model"])
 	conversationID := aiGatewayExtractConversationID(payloadMap)
 	requestID := aiGatewayFirstNonEmpty(aiGatewayString(payloadMap["request_id"]), aiGatewayString(payloadMap["id"]), aiGatewayShortID())
-	historySource, requestHistory := aiGatewayExtractRequestHistory(payloadMap)
 	question := aiGatewayExtractQuestion(payloadMap)
-	if question == "" {
-		question = aiGatewayQuestionFromHistoryValue(requestHistory)
-	}
 	turnID := aiGatewayShortID()
 	targetURL := *targetBase
 	targetURL.Path = resolveOpenClawProviderTargetPath(targetBase.Path, suffix)
@@ -278,8 +275,6 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		Method:           method,
 		Headers:          aiGatewayCloneHeader(requestHeaders),
 		Body:             aiGatewayCloneJSONValue(payloadValue),
-		History:          aiGatewayCloneJSONValue(requestHistory),
-		HistorySource:    historySource,
 		Timestamp:        startedAtISO,
 		Status:           "thinking",
 		StartedAt:        startedAtISO,
@@ -428,8 +423,6 @@ func (s *aiGatewayAuditSession) recordOutboundRequest(req *http.Request) {
 		"method":          s.current.Method,
 		"headers":         aiGatewayCloneHeader(req.Header),
 		"body":            aiGatewayCloneJSONValue(s.current.Body),
-		"history":         aiGatewayCloneJSONValue(s.current.History),
-		"source":          s.current.HistorySource,
 		"request_id":      s.current.RequestID,
 		"conversation_id": s.current.ConversationID,
 	})
@@ -450,16 +443,16 @@ func (s *aiGatewayAuditSession) writeStartSnapshots() error {
 	}
 	statusEvent := s.broadcastStatusLocked()
 	currentUpdatedEvent := ChatEvent{Type: "current_updated", Data: M{
-		"agent_id":       s.agentID,
+		"agent_id":        s.agentID,
 		"conversation_id": s.current.ConversationID,
-		"turn_id":        s.current.TurnID,
-		"updated_at":     s.current.UpdatedAt,
+		"turn_id":         s.current.TurnID,
+		"updated_at":      s.current.UpdatedAt,
 	}}
 	s.mu.Unlock()
 	if statusEvent != nil {
-		hub.broadcast(s.agentID, *statusEvent)
+		hub.publishAgent(s.agentID, *statusEvent)
 	}
-	hub.broadcast(s.agentID, currentUpdatedEvent)
+	hub.publishAgent(s.agentID, currentUpdatedEvent)
 	return nil
 }
 
@@ -554,17 +547,24 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 		log.Printf("[ai-gateway] write reply snapshot failed for %s: %v", s.agentID, err)
 	}
 	if err := aiGatewayAppendMessageRecord(s.agentID, s.current, s.question, s.reply); err != nil {
-		log.Printf("[ai-gateway] write messages failed for %s: %v", s.agentID, err)
+		log.Printf("[ai-gateway] write history failed for %s: %v", s.agentID, err)
 	}
 	replySnapshot := s.reply
 	tgHook := s.tgHook
 	statusEvent := s.broadcastStatusLocked()
+	currentUpdatedEvent := ChatEvent{Type: "current_updated", Data: M{
+		"agent_id":        s.agentID,
+		"conversation_id": s.current.ConversationID,
+		"turn_id":         s.current.TurnID,
+		"updated_at":      s.current.UpdatedAt,
+	}}
 	log.Printf("[ai-gateway] complete agent=%s status=%s status_code=%d answer_len=%d thinking_len=%d tools=%d tg_hook=%t",
 		s.agentID, replySnapshot.Status, statusCode, len([]rune(replySnapshot.Answer)), len([]rune(replySnapshot.Thinking)), len(replySnapshot.ToolCalls), tgHook != nil)
 	s.mu.Unlock()
 	if statusEvent != nil {
-		hub.broadcast(s.agentID, *statusEvent)
+		hub.publishAgent(s.agentID, *statusEvent)
 	}
+	hub.publishAgent(s.agentID, currentUpdatedEvent)
 	if tgHook != nil {
 		tgHook.finalize(replySnapshot)
 	}
@@ -584,23 +584,24 @@ func (s *aiGatewayAuditSession) writeSnapshotsLocked() error {
 }
 
 func aiGatewayHistoryDir(agentID string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		home = "/root"
+	newDir := filepath.Join(builtinWorkerRuntimeDir(agentID), "history")
+	legacyDirs := []string{
+		filepath.Join(builtinWorkerWorkspace(agentID), ".history"),
+		filepath.Join(builtinWorkerWorkspace(agentID), "history"),
+		filepath.Join("/home/cicy", "workers", agentID, ".history"),
+		filepath.Join("/home/cicy", "workers", agentID, "history"),
 	}
-	baseDir := filepath.Join(home, "workers", agentID)
-	newDir := filepath.Join(baseDir, "history")
-	oldDir := filepath.Join(baseDir, ".history")
-	if oldDir == newDir {
-		return newDir
-	}
-	if _, err := os.Stat(oldDir); err == nil {
-		if _, err := os.Stat(newDir); os.IsNotExist(err) {
-			if renameErr := os.Rename(oldDir, newDir); renameErr == nil {
-				return newDir
-			}
+	for _, oldDir := range legacyDirs {
+		if oldDir == newDir {
+			continue
 		}
-		for _, name := range []string{"current.json", "reply.json"} {
+		if _, err := os.Stat(oldDir); err != nil {
+			continue
+		}
+		if err := os.MkdirAll(newDir, 0755); err != nil {
+			break
+		}
+		for _, name := range []string{"current.json", "reply.json", "system_prompt.txt", "prompt_rules.json"} {
 			oldPath := filepath.Join(oldDir, name)
 			newPath := filepath.Join(newDir, name)
 			if _, err := os.Stat(oldPath); err != nil {
@@ -609,11 +610,26 @@ func aiGatewayHistoryDir(agentID string) string {
 			if _, err := os.Stat(newPath); err == nil {
 				continue
 			}
-			if err := os.MkdirAll(newDir, 0755); err != nil {
-				break
-			}
 			if body, err := os.ReadFile(oldPath); err == nil {
 				_ = os.WriteFile(newPath, body, 0644)
+			}
+		}
+		oldReplyDir := filepath.Join(oldDir, "reply")
+		newReplyDir := filepath.Join(newDir, "reply")
+		if entries, err := os.ReadDir(oldReplyDir); err == nil {
+			_ = os.MkdirAll(newReplyDir, 0755)
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				oldPath := filepath.Join(oldReplyDir, entry.Name())
+				newPath := filepath.Join(newReplyDir, entry.Name())
+				if _, err := os.Stat(newPath); err == nil {
+					continue
+				}
+				if body, err := os.ReadFile(oldPath); err == nil {
+					_ = os.WriteFile(newPath, body, 0644)
+				}
 			}
 		}
 	}
@@ -683,7 +699,7 @@ func aiGatewayBuildMessageRecord(agentID string, current aiGatewayCurrentSnapsho
 			return aiGatewayMessageRecord{}, false, err
 		}
 	}
-	return aiGatewayMessageRecord{
+	record := aiGatewayMessageRecord{
 		Q:         sanitizedQuestion,
 		A:         aiGatewaySanitizeMessageAnswer(reply.Answer),
 		QTime:     aiGatewayMessageQuestionTime(current, reply),
@@ -691,7 +707,32 @@ func aiGatewayBuildMessageRecord(agentID string, current aiGatewayCurrentSnapsho
 		Model:     aiGatewayFirstNonEmpty(aiGatewayReplyPrimaryModel(reply), strings.TrimSpace(current.Model)),
 		Thinking:  strings.TrimSpace(reply.Thinking),
 		ToolCalls: aiGatewayBuildMessageToolCalls(turnEvents, reply),
-	}, true, nil
+	}
+	if currentRecords := agentInspectorBuildCurrentOnlyRecords(current); len(currentRecords) > 0 {
+		candidate := currentRecords[len(currentRecords)-1]
+		if strings.TrimSpace(candidate.Q) != "" {
+			record.Q = candidate.Q
+		}
+		if strings.TrimSpace(candidate.A) != "" {
+			record.A = candidate.A
+		}
+		if strings.TrimSpace(candidate.QTime) != "" {
+			record.QTime = candidate.QTime
+		}
+		if strings.TrimSpace(candidate.ATime) != "" {
+			record.ATime = candidate.ATime
+		}
+		if strings.TrimSpace(candidate.Model) != "" {
+			record.Model = candidate.Model
+		}
+		if strings.TrimSpace(candidate.Thinking) != "" {
+			record.Thinking = strings.TrimSpace(aiGatewayJoinUniqueText([]string{candidate.Thinking, record.Thinking}))
+		}
+		if len(candidate.ToolCalls) > 0 {
+			record.ToolCalls = candidate.ToolCalls
+		}
+	}
+	return record, true, nil
 }
 
 func aiGatewayMaybeRebuildMessagesFile(agentID string) (aiGatewayMessagesFile, error) {
@@ -715,9 +756,6 @@ func aiGatewayMaybeRebuildMessagesFile(agentID string) (aiGatewayMessagesFile, e
 		return file, nil
 	}
 	file.Messages = aiGatewayCompactMessageRecords([]aiGatewayMessageRecord{record})
-	if err := aiGatewayWriteJSONAtomic(aiGatewayMessagesPath(agentID), file); err != nil {
-		return aiGatewayMessagesFile{}, err
-	}
 	return file, nil
 }
 
@@ -746,11 +784,6 @@ func aiGatewayLoadMessagesFile(agentID string) (aiGatewayMessagesFile, error) {
 }
 
 func aiGatewayAppendMessageRecord(agentID string, current aiGatewayCurrentSnapshot, question string, reply aiGatewayReplySnapshot) error {
-	path := aiGatewayMessagesPath(agentID)
-	file, err := aiGatewayLoadMessagesFile(agentID)
-	if err != nil {
-		return err
-	}
 	record, ok, err := aiGatewayBuildMessageRecord(agentID, current, question, reply)
 	if err != nil {
 		return err
@@ -758,33 +791,62 @@ func aiGatewayAppendMessageRecord(agentID string, current aiGatewayCurrentSnapsh
 	if !ok {
 		return nil
 	}
-	if count := len(file.Messages); count > 0 {
-		last := &file.Messages[count-1]
-		if agentInspectorShouldMergeHistoryRecord(*last, record) {
-			if strings.TrimSpace(last.Q) == "" {
-				last.Q = record.Q
-			}
-			if strings.TrimSpace(last.QTime) == "" {
-				last.QTime = record.QTime
-			}
-			if strings.TrimSpace(record.A) != "" {
-				last.A = record.A
-			}
-			if strings.TrimSpace(record.ATime) != "" {
-				last.ATime = record.ATime
-			}
-			if strings.TrimSpace(record.Model) != "" {
-				last.Model = record.Model
-			}
-			if strings.TrimSpace(record.Thinking) != "" {
-				last.Thinking = record.Thinking
-			}
-			last.ToolCalls = agentInspectorMergeToolCalls(last.ToolCalls, record.ToolCalls)
-			return aiGatewayWriteJSONAtomic(path, file)
+	return agentHistoryUpsertRecord(agentID, current, reply, record)
+}
+
+func aiGatewaySyncLatestCurrentHistory(agentID string) error {
+	current, err := aiGatewayReadCurrentSnapshot(agentID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	turns := agentInspectorBuildPersistedTurnsFromFullCurrent(current)
+	if len(turns) == 0 {
+		return nil
+	}
+	reply := aiGatewayLoadReplySnapshot(agentID)
+	syncCurrent := current
+	syncCurrent.TurnID = ""
+	syncReply := reply
+	syncReply.TurnID = ""
+	for _, turn := range turns {
+		question := strings.TrimSpace(aiGatewayString(turn["q"]))
+		if question == "" {
+			continue
+		}
+		stepsCount := 0
+		switch steps := turn["steps"].(type) {
+		case []M:
+			stepsCount = len(steps)
+		case []interface{}:
+			stepsCount = len(steps)
+		}
+		answer := strings.TrimSpace(aiGatewayString(turn["a"]))
+		if answer == "" && stepsCount == 0 {
+			continue
+		}
+		qTime := agentHistoryFirstNonEmpty(current.Timestamp, current.StartedAt, current.UpdatedAt)
+		aTime := agentHistoryFirstNonEmpty(current.UpdatedAt, current.Timestamp, current.StartedAt)
+		if startTS := agentInspectorHistoryUnix(turn, "start_ts"); startTS > 0 {
+			qTime = time.Unix(startTS, 0).UTC().Format(time.RFC3339)
+		}
+		if endTS := agentInspectorHistoryUnix(turn, "ts"); endTS > 0 {
+			aTime = time.Unix(endTS, 0).UTC().Format(time.RFC3339)
+		}
+		record := aiGatewayMessageRecord{
+			Q:     question,
+			A:     answer,
+			QTime: qTime,
+			ATime: aTime,
+			Model: strings.TrimSpace(aiGatewayFirstNonEmpty(aiGatewayString(turn["model"]), current.Model, aiGatewayReplyPrimaryModel(reply))),
+		}
+		if err := agentHistoryUpsertRecordWithItem(agentID, syncCurrent, syncReply, record, turn); err != nil {
+			return err
 		}
 	}
-	file.Messages = append(file.Messages, record)
-	return aiGatewayWriteJSONAtomic(path, file)
+	return nil
 }
 
 func aiGatewayMessageQuestionTime(current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot) string {
@@ -926,6 +988,8 @@ func aiGatewayClassifyQuestion(question string) (string, string) {
 	switch {
 	case trimmed == "":
 		return "internal", "empty"
+	case strings.HasPrefix(lower, "perform a web search for the query:"):
+		return "internal", "tool_prompt"
 	case strings.Contains(trimmed, "Sender (untrusted metadata):"):
 		return "user", "forwarded_user"
 	case strings.Contains(lower, "the messages above are a conversation to summarize"):
@@ -1994,7 +2058,7 @@ func aiGatewayCurrentQuestion(current aiGatewayCurrentSnapshot) string {
 			return aiGatewaySanitizeUserQuestion(question)
 		}
 	}
-	return aiGatewaySanitizeUserQuestion(aiGatewayQuestionFromHistoryValue(current.History))
+	return ""
 }
 
 func aiGatewayExtractMessageSystemPrompt(current aiGatewayCurrentSnapshot, turnID string, events []map[string]interface{}) string {
@@ -2192,9 +2256,6 @@ func (s *aiGatewayAuditSession) emitReplyStreamPayload(payload map[string]interf
 		return
 	}
 	events := aiGatewayReplyEventsFromStreamPayload(payload)
-	if len(events) > 0 {
-		log.Printf("[ai-gateway] stream agent=%s payload_type=%s events=%d tg_hook=%t", s.agentID, aiGatewayString(payload["type"]), len(events), s.tgHook != nil)
-	}
 	s.mu.Lock()
 	if s.finalized {
 		s.mu.Unlock()
@@ -2208,10 +2269,10 @@ func (s *aiGatewayAuditSession) emitReplyStreamPayload(payload map[string]interf
 	tgHook := s.tgHook
 	s.mu.Unlock()
 	for _, evt := range chatEvents {
-		hub.broadcast(s.agentID, evt)
+		hub.publishAgent(s.agentID, evt)
 	}
 	if statusEvent != nil {
-		hub.broadcast(s.agentID, *statusEvent)
+		hub.publishAgent(s.agentID, *statusEvent)
 	}
 	if tgHook != nil {
 		tgHook.handleEvents(events)
@@ -2986,6 +3047,25 @@ func aiGatewayExtractInputItems(body map[string]interface{}) []interface{} {
 		return list
 	}
 	return []interface{}{inputItems}
+}
+
+func aiGatewayCurrentHistoryItems(current aiGatewayCurrentSnapshot) []interface{} {
+	body := aiGatewayMap(current.Body)
+	if len(body) == 0 {
+		return nil
+	}
+	if messages := body["messages"]; messages != nil {
+		if list := aiGatewaySlice(messages); len(list) > 0 {
+			return list
+		}
+	}
+	if input := body["input"]; input != nil {
+		if list := aiGatewaySlice(input); len(list) > 0 {
+			return list
+		}
+		return []interface{}{input}
+	}
+	return nil
 }
 
 func aiGatewayExtractConversationID(body map[string]interface{}) string {

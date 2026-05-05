@@ -13,7 +13,7 @@ import (
 )
 
 func sharedWorkspaceRoot() string {
-	return "/Users/ton/projects/cicy-team/shared-workspace"
+	return cicySharedWorkspaceDir
 }
 
 func sharedWorkspacePath(parts ...string) string {

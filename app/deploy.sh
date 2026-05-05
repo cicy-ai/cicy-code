@@ -4,6 +4,8 @@ set -e
 cd "$(dirname "$0")"
 
 WORKER=../app-worker
+CICY_ROOT_DIR="$HOME/cicy-ai"
+GLOBAL_JSON="$CICY_ROOT_DIR/global.json"
 
 # Build frontend
 echo "=== Build ==="
@@ -16,8 +18,8 @@ cp -r dist/* "$WORKER/public/"
 cd "$WORKER"
 
 VER=$(jq -r '.app' ../versions.json)
-CF_ACCOUNT=$(jq -r '.cf.prod.account_id' ~/global.json)
-CF_TOKEN=$(jq -r '.cf.prod.api_token' ~/global.json)
+CF_ACCOUNT=$(jq -r '.cf.prod.account_id' "$GLOBAL_JSON")
+CF_TOKEN=$(jq -r '.cf.prod.api_token' "$GLOBAL_JSON")
 
 echo "=== App v$VER ==="
 

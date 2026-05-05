@@ -127,6 +127,9 @@ func bootstrapRuntimeEvents(sessionID string) []runtimeEvent {
 }
 
 func getPaneStatus(sessionID string) *paneSt {
+	if !watcherEnabled {
+		return nil
+	}
 	raw := redisDo("GET", "pane_status_map")
 	if raw == "" {
 		return nil

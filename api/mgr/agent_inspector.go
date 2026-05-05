@@ -1,7 +1,9 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,6 +23,19 @@ const (
 
 var agentInspectorHistoryMergeWindow = 20 * time.Minute
 var agentInspectorCodexLeftRe = regexp.MustCompile(`(\d+)%\s+left`)
+
+type agentInspectorHistoryCacheEntry struct {
+	key      string
+	records  []aiGatewayMessageRecord
+	managed  bool
+	reason   string
+	cachedAt time.Time
+}
+
+var agentInspectorHistoryCache struct {
+	mu    sync.RWMutex
+	items map[string]agentInspectorHistoryCacheEntry
+}
 
 type agentInspectorTextFile struct {
 	Content   string `json:"content"`
@@ -88,6 +104,13 @@ type agentHistorySyncItem struct {
 	TurnID      string                 `json:"turn_id,omitempty"`
 	Status      string                 `json:"status,omitempty"`
 	Model       string                 `json:"model,omitempty"`
+}
+
+type agentInspectorProviderRequestSection struct {
+	Type  string `json:"type"`
+	Label string `json:"label"`
+	Text  string `json:"text,omitempty"`
+	Items []M    `json:"items,omitempty"`
 }
 
 func agentInspectorPaneRegistered(agentID string) bool {
@@ -607,12 +630,12 @@ func agentInspectorHistoryQuestionFromItem(item map[string]interface{}) string {
 	if contentParts := aiGatewaySlice(item["content"]); len(contentParts) > 0 {
 		parts := make([]string, 0, len(contentParts))
 		for _, part := range contentParts {
-			if text := strings.TrimSpace(aiGatewayContentPartToText(part)); text != "" {
+			if text := strings.TrimSpace(aiGatewaySanitizeUserQuestion(aiGatewayContentPartToText(part))); text != "" {
 				parts = append(parts, text)
 			}
 		}
 		if len(parts) > 0 {
-			return aiGatewaySanitizeUserQuestion(strings.Join(parts, "\n"))
+			return strings.TrimSpace(strings.Join(parts, "\n"))
 		}
 	}
 	if text := strings.TrimSpace(aiGatewayContentPartToText(item)); text != "" {
@@ -624,6 +647,21 @@ func agentInspectorHistoryQuestionFromItem(item map[string]interface{}) string {
 func agentInspectorHistoryAnswerFromItem(item map[string]interface{}) string {
 	if len(item) == 0 || aiGatewayString(item["role"]) != "assistant" {
 		return ""
+	}
+	if strings.EqualFold(strings.TrimSpace(aiGatewayString(item["phase"])), "commentary") {
+		return ""
+	}
+	hasThinkingOrToolUse := false
+	for _, rawPart := range aiGatewaySlice(item["content"]) {
+		part := aiGatewayMap(rawPart)
+		if len(part) == 0 {
+			continue
+		}
+		partType := aiGatewayString(part["type"])
+		if partType == "thinking" || partType == "tool_use" {
+			hasThinkingOrToolUse = true
+			break
+		}
 	}
 	parts := []string{}
 	for _, rawPart := range aiGatewaySlice(item["content"]) {
@@ -639,8 +677,62 @@ func agentInspectorHistoryAnswerFromItem(item map[string]interface{}) string {
 		if text == "" {
 			continue
 		}
-		if partType == "" || partType == "text" || partType == "output_text" {
+		if (partType == "" || partType == "text" || partType == "output_text") && !hasThinkingOrToolUse {
 			parts = append(parts, text)
+		}
+	}
+	if len(parts) > 0 {
+		return strings.TrimSpace(aiGatewayJoinUniqueText(parts))
+	}
+	if hasThinkingOrToolUse {
+		return ""
+	}
+	if text := strings.TrimSpace(aiGatewayContentPartToText(item)); text != "" {
+		return text
+	}
+	return ""
+}
+
+func agentInspectorHistoryThinkingFromItem(item map[string]interface{}) string {
+	if len(item) == 0 || aiGatewayString(item["role"]) != "assistant" {
+		return ""
+	}
+	isCommentaryPhase := strings.EqualFold(strings.TrimSpace(aiGatewayString(item["phase"])), "commentary")
+	hasThinkingOrToolUse := false
+	for _, rawPart := range aiGatewaySlice(item["content"]) {
+		part := aiGatewayMap(rawPart)
+		if len(part) == 0 {
+			continue
+		}
+		partType := aiGatewayString(part["type"])
+		if partType == "thinking" || partType == "tool_use" {
+			hasThinkingOrToolUse = true
+			break
+		}
+	}
+	if !isCommentaryPhase && !hasThinkingOrToolUse {
+		return ""
+	}
+	parts := []string{}
+	for _, rawPart := range aiGatewaySlice(item["content"]) {
+		part := aiGatewayMap(rawPart)
+		if len(part) == 0 {
+			if text := strings.TrimSpace(aiGatewayContentPartToText(rawPart)); text != "" {
+				parts = append(parts, text)
+			}
+			continue
+		}
+		partType := aiGatewayString(part["type"])
+		switch partType {
+		case "thinking":
+			if text := strings.TrimSpace(aiGatewayString(part["thinking"])); text != "" {
+				parts = append(parts, text)
+			}
+			continue
+		case "", "text", "output_text":
+			if text := strings.TrimSpace(aiGatewayContentPartToText(part)); text != "" {
+				parts = append(parts, text)
+			}
 		}
 	}
 	if len(parts) > 0 {
@@ -717,7 +809,7 @@ func agentInspectorMergeHistoryToolStep(record *aiGatewayMessageRecord, byID map
 }
 
 func agentInspectorBuildSnapshotHistory(agentID string, current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot) []aiGatewayMessageRecord {
-	items := aiGatewaySlice(current.History)
+	items := aiGatewayCurrentHistoryItems(current)
 	records := make([]aiGatewayMessageRecord, 0, 64)
 	var currentRecord *aiGatewayMessageRecord
 	currentToolByID := map[string]int{}
@@ -747,6 +839,9 @@ func agentInspectorBuildSnapshotHistory(agentID string, current aiGatewayCurrent
 		}
 		if currentRecord == nil {
 			continue
+		}
+		if thinking := agentInspectorHistoryThinkingFromItem(item); thinking != "" {
+			currentRecord.Thinking = strings.TrimSpace(aiGatewayJoinUniqueText([]string{currentRecord.Thinking, thinking}))
 		}
 		if answer := agentInspectorHistoryAnswerFromItem(item); answer != "" {
 			currentRecord.A = strings.TrimSpace(aiGatewayJoinUniqueText([]string{currentRecord.A, answer}))
@@ -889,6 +984,82 @@ func agentInspectorTmuxPromptLine(line string) (string, bool) {
 	return strings.TrimSpace(strings.TrimPrefix(left, "› ")), true
 }
 
+func agentInspectorHistoryCacheKey(agentID string, current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot, runtimeManaged bool) string {
+	return fmt.Sprintf("%s|%t|%s|%s|%s|%s|%s|%d|%d|%s|%s",
+		agentID,
+		runtimeManaged,
+		strings.TrimSpace(current.UpdatedAt),
+		strings.TrimSpace(reply.UpdatedAt),
+		strings.TrimSpace(current.Status),
+		strings.TrimSpace(reply.Status),
+		strings.TrimSpace(reply.TurnID),
+		len(current.RequestIDs),
+		len(current.ActiveRequestIDs),
+		strings.TrimSpace(current.ConversationID),
+		strings.TrimSpace(current.Model),
+	)
+}
+
+func agentInspectorCloneHistoryRecords(records []aiGatewayMessageRecord) []aiGatewayMessageRecord {
+	if len(records) == 0 {
+		return []aiGatewayMessageRecord{}
+	}
+	out := make([]aiGatewayMessageRecord, 0, len(records))
+	for _, record := range records {
+		clone := record
+		if len(record.ToolCalls) > 0 {
+			clone.ToolCalls = append([]aiGatewayMessageToolCall(nil), record.ToolCalls...)
+		}
+		out = append(out, clone)
+	}
+	return out
+}
+
+func agentInspectorGetCachedHistory(agentID string, key string) ([]aiGatewayMessageRecord, bool, string, bool) {
+	agentInspectorHistoryCache.mu.RLock()
+	defer agentInspectorHistoryCache.mu.RUnlock()
+	entry, ok := agentInspectorHistoryCache.items[agentID]
+	if !ok || entry.key != key {
+		return nil, false, "", false
+	}
+	return agentInspectorCloneHistoryRecords(entry.records), entry.managed, entry.reason, true
+}
+
+func agentInspectorStoreCachedHistory(agentID string, key string, records []aiGatewayMessageRecord, managed bool, reason string) {
+	agentInspectorHistoryCache.mu.Lock()
+	defer agentInspectorHistoryCache.mu.Unlock()
+	if agentInspectorHistoryCache.items == nil {
+		agentInspectorHistoryCache.items = map[string]agentInspectorHistoryCacheEntry{}
+	}
+	agentInspectorHistoryCache.items[agentID] = agentInspectorHistoryCacheEntry{
+		key:      key,
+		records:  agentInspectorCloneHistoryRecords(records),
+		managed:  managed,
+		reason:   reason,
+		cachedAt: time.Now(),
+	}
+}
+
+func agentInspectorSnapshotHistoryData(agentID string, current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot, runtimeManaged bool) ([]aiGatewayMessageRecord, bool, string) {
+	key := agentInspectorHistoryCacheKey(agentID, current, reply, runtimeManaged)
+	if records, managed, reason, ok := agentInspectorGetCachedHistory(agentID, key); ok {
+		return records, managed, reason
+	}
+	records := agentInspectorCollapseHistoryRecords(agentInspectorBuildSnapshotHistory(agentID, current, reply))
+	reason := ""
+	if len(records) > 0 {
+		if runtimeManaged || agentInspectorSnapshotFresh(current, reply) {
+			agentInspectorStoreCachedHistory(agentID, key, records, runtimeManaged, reason)
+			return records, runtimeManaged, reason
+		}
+		reason = "当前 pane 的 history 基于 gateway current/reply 快照，tmux 当前会话可能已脱管。"
+		agentInspectorStoreCachedHistory(agentID, key, records, false, reason)
+		return records, false, reason
+	}
+	agentInspectorStoreCachedHistory(agentID, key, records, runtimeManaged, reason)
+	return records, runtimeManaged, reason
+}
+
 func agentInspectorLoadTmuxMessages(agentID string) []aiGatewayMessageRecord {
 	out, err := runTmux("capture-pane", "-t", normPaneID(agentID), "-p", "-S", strconv.Itoa(agentInspectorTmuxHistoryCaptureStart))
 	if err != nil {
@@ -947,10 +1118,10 @@ func agentInspectorHistoryData(agentID string) ([]aiGatewayMessageRecord, bool, 
 	runtimeManaged := agentInspectorPaneRuntimeManaged(agentID)
 	current := agentInspectorLoadCurrent(agentID)
 	reply := agentInspectorLoadReply(agentID)
-	snapshotMessages := agentInspectorCollapseHistoryRecords(agentInspectorBuildSnapshotHistory(agentID, current, reply))
+	snapshotMessages, snapshotManaged, snapshotReason := agentInspectorSnapshotHistoryData(agentID, current, reply, runtimeManaged)
 	if len(snapshotMessages) > 0 {
-		if runtimeManaged || agentInspectorSnapshotFresh(current, reply) {
-			return snapshotMessages, runtimeManaged, ""
+		if snapshotManaged || agentInspectorSnapshotFresh(current, reply) {
+			return snapshotMessages, snapshotManaged, ""
 		}
 	}
 	if runtimeManaged {
@@ -961,7 +1132,7 @@ func agentInspectorHistoryData(agentID string) ([]aiGatewayMessageRecord, bool, 
 		return messages, false, "当前 pane 是脱管会话，以下 history 基于 tmux 当前可见内容解析。"
 	}
 	if len(snapshotMessages) > 0 {
-		return snapshotMessages, false, "当前 pane 的 history 基于 gateway current/reply 快照，tmux 当前会话可能已脱管。"
+		return snapshotMessages, false, snapshotReason
 	}
 	return []aiGatewayMessageRecord{}, false, agentInspectorHistoryUnavailableReason(agentID)
 }
@@ -1318,6 +1489,683 @@ func agentInspectorBuildSyncItems(agentID string, current aiGatewayCurrentSnapsh
 	return items
 }
 
+func agentInspectorBuildCurrentOnlyRecords(current aiGatewayCurrentSnapshot) []aiGatewayMessageRecord {
+	records := make([]aiGatewayMessageRecord, 0, 64)
+	items := aiGatewayCurrentHistoryItems(current)
+	var currentRecord *aiGatewayMessageRecord
+	currentToolByID := map[string]int{}
+	flush := func() {
+		if currentRecord == nil {
+			return
+		}
+		currentRecord.Q = strings.TrimSpace(currentRecord.Q)
+		currentRecord.A = strings.TrimSpace(currentRecord.A)
+		currentRecord.Thinking = strings.TrimSpace(currentRecord.Thinking)
+		currentRecord.ToolCalls = aiGatewayCompactMessageToolCalls(currentRecord.ToolCalls)
+		if currentRecord.Q != "" || currentRecord.A != "" || currentRecord.Thinking != "" || len(currentRecord.ToolCalls) > 0 {
+			records = append(records, *currentRecord)
+		}
+		currentRecord = nil
+		currentToolByID = map[string]int{}
+	}
+	for _, raw := range items {
+		item := aiGatewayMap(raw)
+		if len(item) == 0 {
+			continue
+		}
+		if question := agentInspectorHistoryQuestionFromItem(item); question != "" {
+			flush()
+			currentRecord = &aiGatewayMessageRecord{Q: question}
+			continue
+		}
+		if currentRecord == nil {
+			continue
+		}
+		if thinking := agentInspectorHistoryThinkingFromItem(item); thinking != "" {
+			currentRecord.Thinking = strings.TrimSpace(aiGatewayJoinUniqueText([]string{currentRecord.Thinking, thinking}))
+		}
+		if answer := agentInspectorHistoryAnswerFromItem(item); answer != "" {
+			currentRecord.A = strings.TrimSpace(aiGatewayJoinUniqueText([]string{currentRecord.A, answer}))
+		}
+		for _, step := range aiGatewayToolCallsFromMessage(item) {
+			agentInspectorMergeHistoryToolStep(currentRecord, currentToolByID, step)
+		}
+		for _, step := range aiGatewayToolResultsFromMessage(item) {
+			agentInspectorMergeHistoryToolStep(currentRecord, currentToolByID, step)
+		}
+		for _, step := range aiGatewayToolCallsFromInputItem(item) {
+			agentInspectorMergeHistoryToolStep(currentRecord, currentToolByID, step)
+		}
+		for _, step := range aiGatewayToolResultsFromInputItem(item) {
+			agentInspectorMergeHistoryToolStep(currentRecord, currentToolByID, step)
+		}
+	}
+	flush()
+	return agentInspectorCollapseHistoryRecords(records)
+}
+
+func agentInspectorAppendCurrentHistoryTextStep(steps *[]M, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	*steps = append(*steps, M{"type": "text", "text": text})
+}
+
+func agentInspectorAppendCurrentHistoryThinkingStep(steps *[]M, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	*steps = append(*steps, M{"type": "thinking", "text": text})
+}
+
+func agentInspectorCurrentHistoryUpsertToolStep(steps *[]M, pending map[string]int, step map[string]interface{}) {
+	if len(step) == 0 {
+		return
+	}
+	id := strings.TrimSpace(aiGatewayString(step["tool_id"]))
+	name := strings.TrimSpace(aiGatewayString(step["tool_name"]))
+	input := strings.TrimSpace(aiGatewayString(step["input"]))
+	output := strings.TrimSpace(aiGatewayString(step["output"]))
+	call := aiGatewayMessageToolCall{Name: name, Input: input, Output: output}
+	if id != "" {
+		if idx, ok := pending[id]; ok && idx >= 0 && idx < len(*steps) {
+			toolStep := (*steps)[idx]
+			tools, _ := toolStep["tools"].([]M)
+			if len(tools) > 0 {
+				tool := tools[0]
+				if strings.TrimSpace(tool["arg"].(string)) == "" && input != "" {
+					merged := agentInspectorBuildToolDisplay(call)
+					if value, ok := merged["arg"]; ok {
+						tool["arg"] = value
+					}
+				}
+				if output != "" {
+					merged := agentInspectorBuildToolDisplay(call)
+					if value, ok := merged["result"]; ok {
+						tool["result"] = value
+					}
+					if value, ok := merged["diff"]; ok {
+						tool["diff"] = value
+					}
+				}
+				tools[0] = tool
+				toolStep["tools"] = tools
+				(*steps)[idx] = toolStep
+				return
+			}
+		}
+	}
+	tool := agentInspectorBuildToolDisplay(call)
+	*steps = append(*steps, M{"type": "tool", "tools": []M{tool}})
+	if id != "" {
+		pending[id] = len(*steps) - 1
+	}
+}
+
+func agentInspectorCurrentHistoryShouldSkipClaudeText(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	lower := strings.ToLower(trimmed)
+	if trimmed == "" {
+		return true
+	}
+	if strings.Contains(lower, "updated task #") {
+		return true
+	}
+	if strings.Contains(lower, "<tool_use_error>") || strings.Contains(lower, "<persisted-output>") {
+		return true
+	}
+	if strings.Contains(lower, "shell cwd was reset") || strings.Contains(lower, "running…") || strings.Contains(lower, "timeout 10m") {
+		return true
+	}
+	if strings.Contains(lower, "the file /home/") && strings.Contains(lower, "has been updated successfully") {
+		return true
+	}
+	if strings.HasPrefix(trimmed, "● ") || strings.HasPrefix(trimmed, "❯ ") || strings.HasPrefix(trimmed, "✻ ") || strings.HasPrefix(trimmed, "✽ ") {
+		return true
+	}
+	return false
+}
+
+func agentInspectorCurrentHistoryAnswerFromSteps(steps []M) string {
+	parts := make([]string, 0, len(steps))
+	for _, step := range steps {
+		if stepType, _ := step["type"].(string); stepType == "text" {
+			if text, _ := step["text"].(string); strings.TrimSpace(text) != "" {
+				parts = append(parts, strings.TrimSpace(text))
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
+func agentInspectorCurrentHistoryShouldSkipUserText(text string) bool {
+	text = aiGatewaySanitizeUserQuestion(text)
+	if text == "" {
+		return true
+	}
+	source, kind := aiGatewayClassifyQuestion(text)
+	if source != "user" || kind == "suggestion_mode" {
+		return true
+	}
+	return agentInspectorCurrentHistoryShouldSkipClaudeText(text)
+}
+
+func agentInspectorClaudeUserQuestion(item map[string]interface{}) string {
+	if len(item) == 0 {
+		return ""
+	}
+	if contentParts := aiGatewaySlice(item["content"]); len(contentParts) > 0 {
+		parts := make([]string, 0, len(contentParts))
+		for _, part := range contentParts {
+			if text := strings.TrimSpace(aiGatewaySanitizeUserQuestion(aiGatewayContentPartToText(part))); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.TrimSpace(strings.Join(parts, "\n"))
+	}
+	if text := strings.TrimSpace(aiGatewaySanitizeUserQuestion(aiGatewayFlattenPromptValue(item["content"]))); text != "" {
+		return text
+	}
+	return strings.TrimSpace(aiGatewaySanitizeUserQuestion(aiGatewayContentPartToText(item)))
+}
+
+func agentInspectorClaudeAssistantMessageHasToolActivity(item map[string]interface{}) bool {
+	for _, raw := range aiGatewaySlice(item["content"]) {
+		part := aiGatewayMap(raw)
+		if len(part) == 0 {
+			continue
+		}
+		partType := strings.TrimSpace(aiGatewayString(part["type"]))
+		if partType == "thinking" || partType == "tool_use" || partType == "tool_result" || partType == "function_call_output" {
+			return true
+		}
+	}
+	return false
+}
+
+func agentInspectorClaudeHasLaterToolActivityInTurn(messages []map[string]interface{}, start int) bool {
+	for i := start + 1; i < len(messages); i++ {
+		item := messages[i]
+		role := strings.TrimSpace(aiGatewayString(item["role"]))
+		if role == "user" && !aiGatewayItemIsToolResult(item) {
+			return false
+		}
+		if role == "user" && aiGatewayItemIsToolResult(item) {
+			return true
+		}
+		if role == "assistant" && agentInspectorClaudeAssistantMessageHasToolActivity(item) {
+			return true
+		}
+	}
+	return false
+}
+
+func agentInspectorBuildClaudeTurns(messages []map[string]interface{}, model string) []M {
+	turns := make([]M, 0, len(messages))
+	lastAssistantIdx := -1
+	lastAssistantSteps := []M{}
+	pending := map[string]int{}
+	for idx, item := range messages {
+		if len(item) == 0 {
+			continue
+		}
+		role := strings.TrimSpace(aiGatewayString(item["role"]))
+		if role == "" {
+			continue
+		}
+		if role == "user" && aiGatewayItemIsToolResult(item) {
+			if lastAssistantIdx < 0 {
+				continue
+			}
+			for _, step := range aiGatewayToolResultsFromMessage(item) {
+				agentInspectorCurrentHistoryUpsertToolStep(&lastAssistantSteps, pending, step)
+			}
+			turns[lastAssistantIdx]["steps"] = lastAssistantSteps
+			turns[lastAssistantIdx]["a"] = agentInspectorCurrentHistoryAnswerFromSteps(lastAssistantSteps)
+			continue
+		}
+		if role == "user" {
+			text := agentInspectorClaudeUserQuestion(item)
+			if agentInspectorCurrentHistoryShouldSkipUserText(text) {
+				continue
+			}
+			turns = append(turns, M{
+				"role":     "user",
+				"text":     text,
+				"q":        text,
+				"a":        "",
+				"steps":    []M{},
+				"status":   "done",
+				"ts":       0,
+				"start_ts": 0,
+				"credit":   0,
+				"model":    strings.TrimSpace(model),
+			})
+			lastAssistantIdx = -1
+			lastAssistantSteps = nil
+			pending = map[string]int{}
+			continue
+		}
+		if role != "assistant" {
+			continue
+		}
+		steps := make([]M, 0, 4)
+		pending = map[string]int{}
+		messageHasToolActivity := agentInspectorClaudeAssistantMessageHasToolActivity(item)
+		hasLaterToolActivity := agentInspectorClaudeHasLaterToolActivityInTurn(messages, idx)
+		for _, raw := range aiGatewaySlice(item["content"]) {
+			part := aiGatewayMap(raw)
+			if len(part) == 0 {
+				if text := strings.TrimSpace(aiGatewayContentPartToText(raw)); text != "" && !agentInspectorCurrentHistoryShouldSkipClaudeText(text) {
+					if hasLaterToolActivity {
+						steps = append(steps, M{"type": "thinking", "text": text})
+					} else {
+						steps = append(steps, M{"type": "text", "text": text})
+					}
+				}
+				continue
+			}
+			switch strings.TrimSpace(aiGatewayString(part["type"])) {
+			case "thinking":
+				if text := strings.TrimSpace(aiGatewayString(part["thinking"])); text != "" {
+					steps = append(steps, M{"type": "thinking", "text": text})
+				}
+			case "tool_use":
+				agentInspectorCurrentHistoryUpsertToolStep(&steps, pending, M{
+					"tool_id":   strings.TrimSpace(aiGatewayString(part["id"])),
+					"tool_name": strings.TrimSpace(aiGatewayString(part["name"])),
+					"input":     strings.TrimSpace(aiGatewayJSONString(part["input"])),
+				})
+			case "tool_result", "function_call_output":
+				agentInspectorCurrentHistoryUpsertToolStep(&steps, pending, M{
+					"tool_id":   strings.TrimSpace(aiGatewayFirstNonEmpty(aiGatewayString(part["tool_use_id"]), aiGatewayString(part["tool_id"]), aiGatewayString(part["call_id"]))),
+					"tool_name": strings.TrimSpace(aiGatewayFirstNonEmpty(aiGatewayString(part["name"]), aiGatewayString(part["tool_name"]))),
+					"output":    strings.TrimSpace(aiGatewayFlattenPromptValue(part["content"])),
+				})
+			default:
+				if text := strings.TrimSpace(aiGatewayContentPartToText(part)); text != "" && !agentInspectorCurrentHistoryShouldSkipClaudeText(text) {
+					if messageHasToolActivity || hasLaterToolActivity {
+						steps = append(steps, M{"type": "thinking", "text": text})
+					} else {
+						steps = append(steps, M{"type": "text", "text": text})
+					}
+				}
+			}
+		}
+		if len(steps) == 0 {
+			continue
+		}
+		turns = append(turns, M{
+			"role":     "assistant",
+			"text":     "",
+			"q":        "",
+			"a":        agentInspectorCurrentHistoryAnswerFromSteps(steps),
+			"steps":    steps,
+			"status":   "text",
+			"ts":       0,
+			"start_ts": 0,
+			"credit":   0,
+			"model":    strings.TrimSpace(model),
+		})
+		lastAssistantIdx = len(turns) - 1
+		lastAssistantSteps = steps
+	}
+	return turns
+}
+
+func agentInspectorBuildCurrentOnlyClaudeTurns(current aiGatewayCurrentSnapshot) []M {
+	body := aiGatewayMap(current.Body)
+	return agentInspectorBuildClaudeTurns(aiGatewayExtractMessages(body), current.Model)
+}
+
+func agentInspectorBuildInputTurns(items []interface{}, model string) []M {
+	turns := make([]M, 0, 64)
+	var currentTurn M
+	var steps []M
+	pending := map[string]int{}
+	flush := func() {
+		if currentTurn == nil {
+			return
+		}
+		currentTurn["steps"] = steps
+		currentTurn["a"] = ""
+		for _, step := range steps {
+			if stepType, _ := step["type"].(string); stepType == "text" {
+				if text, _ := step["text"].(string); strings.TrimSpace(text) != "" {
+					if currentTurn["a"] == "" {
+						currentTurn["a"] = strings.TrimSpace(text)
+					} else {
+						currentTurn["a"] = strings.TrimSpace(currentTurn["a"].(string) + "\n\n" + text)
+					}
+				}
+			}
+		}
+		turns = append(turns, currentTurn)
+		currentTurn = nil
+		steps = nil
+		pending = map[string]int{}
+	}
+	for _, raw := range items {
+		item := aiGatewayMap(raw)
+		if len(item) == 0 {
+			continue
+		}
+		if question := agentInspectorHistoryQuestionFromItem(item); question != "" {
+			flush()
+			currentTurn = M{
+				"q":        question,
+				"model":    strings.TrimSpace(model),
+				"status":   "text",
+				"ts":       0,
+				"start_ts": 0,
+				"credit":   0,
+			}
+			continue
+		}
+		if currentTurn == nil {
+			continue
+		}
+		if thinking := agentInspectorHistoryThinkingFromItem(item); thinking != "" {
+			agentInspectorAppendCurrentHistoryThinkingStep(&steps, thinking)
+		}
+		for _, step := range aiGatewayToolCallsFromMessage(item) {
+			agentInspectorCurrentHistoryUpsertToolStep(&steps, pending, step)
+		}
+		for _, step := range aiGatewayToolResultsFromMessage(item) {
+			agentInspectorCurrentHistoryUpsertToolStep(&steps, pending, step)
+		}
+		for _, step := range aiGatewayToolCallsFromInputItem(item) {
+			agentInspectorCurrentHistoryUpsertToolStep(&steps, pending, step)
+		}
+		for _, step := range aiGatewayToolResultsFromInputItem(item) {
+			agentInspectorCurrentHistoryUpsertToolStep(&steps, pending, step)
+		}
+		if text := agentInspectorHistoryAnswerFromItem(item); text != "" {
+			agentInspectorAppendCurrentHistoryTextStep(&steps, text)
+		}
+	}
+	flush()
+	return turns
+}
+
+func agentInspectorBuildCurrentOnlyInputTurns(current aiGatewayCurrentSnapshot) []M {
+	return agentInspectorBuildInputTurns(aiGatewayCurrentHistoryItems(current), current.Model)
+}
+
+func agentInspectorBuildCurrentOnlyTurns(current aiGatewayCurrentSnapshot) []M {
+	body := aiGatewayMap(current.Body)
+	if len(aiGatewayExtractMessages(body)) > 0 {
+		return agentInspectorBuildCurrentOnlyClaudeTurns(current)
+	}
+	return agentInspectorBuildCurrentOnlyInputTurns(current)
+}
+
+func agentInspectorShouldSkipCurrentSnapshot(current aiGatewayCurrentSnapshot) bool {
+	body := aiGatewayMap(current.Body)
+	if len(body) == 0 {
+		return false
+	}
+	return aiGatewayShouldSkipInternalPrompt(aiGatewayBuildSystemPrompt(body))
+}
+
+func agentInspectorBuildCurrentOnlyPersistedTurns(current aiGatewayCurrentSnapshot) []M {
+	if agentInspectorShouldSkipCurrentSnapshot(current) {
+		return nil
+	}
+	body := aiGatewayMap(current.Body)
+	if len(aiGatewayExtractMessages(body)) == 0 {
+		return agentInspectorBuildCurrentOnlyInputTurns(current)
+	}
+
+	rawTurns := agentInspectorBuildCurrentOnlyClaudeTurns(current)
+	persisted := make([]M, 0, len(rawTurns))
+	var currentUserTurn M
+
+	flushUserOnly := func() {
+		if currentUserTurn == nil {
+			return
+		}
+		persisted = append(persisted, currentUserTurn)
+		currentUserTurn = nil
+	}
+
+	for _, turn := range rawTurns {
+		role := strings.TrimSpace(aiGatewayString(turn["role"]))
+		switch role {
+		case "user":
+			flushUserOnly()
+			currentUserTurn = M{
+				"q":        strings.TrimSpace(aiGatewayString(turn["q"])),
+				"a":        "",
+				"steps":    []M{},
+				"status":   strings.TrimSpace(aiGatewayFirstNonEmpty(aiGatewayString(turn["status"]), "pending")),
+				"ts":       turn["ts"],
+				"start_ts": turn["start_ts"],
+				"credit":   turn["credit"],
+				"model":    strings.TrimSpace(aiGatewayFirstNonEmpty(aiGatewayString(turn["model"]), current.Model)),
+			}
+		case "assistant":
+			if currentUserTurn == nil {
+				continue
+			}
+			existingSteps, _ := currentUserTurn["steps"].([]M)
+			nextSteps := make([]M, 0, len(existingSteps)+8)
+			nextSteps = append(nextSteps, existingSteps...)
+			if assistantSteps, ok := turn["steps"].([]M); ok {
+				nextSteps = append(nextSteps, assistantSteps...)
+			}
+			currentUserTurn["steps"] = nextSteps
+			currentUserTurn["a"] = agentInspectorCurrentHistoryAnswerFromSteps(nextSteps)
+			currentUserTurn["status"] = strings.TrimSpace(aiGatewayFirstNonEmpty(aiGatewayString(turn["status"]), aiGatewayString(currentUserTurn["status"]), "text"))
+			if model := strings.TrimSpace(aiGatewayString(turn["model"])); model != "" {
+				currentUserTurn["model"] = model
+			}
+			if startTS, ok := turn["start_ts"]; ok && startTS != nil {
+				currentUserTurn["start_ts"] = startTS
+			}
+			if ts, ok := turn["ts"]; ok && ts != nil {
+				currentUserTurn["ts"] = ts
+			}
+			if credit, ok := turn["credit"]; ok && credit != nil {
+				currentUserTurn["credit"] = credit
+			}
+		}
+	}
+	flushUserOnly()
+	return persisted
+}
+
+func agentInspectorBuildPersistedTurnsFromFullCurrent(current aiGatewayCurrentSnapshot) []M {
+	if agentInspectorShouldSkipCurrentSnapshot(current) {
+		return nil
+	}
+	body := aiGatewayMap(current.Body)
+	if len(aiGatewayExtractMessages(body)) > 0 {
+		rawTurns := agentInspectorBuildClaudeTurns(aiGatewayExtractMessages(body), current.Model)
+		persisted := make([]M, 0, len(rawTurns))
+		var currentUserTurn M
+		flushUserOnly := func() {
+			if currentUserTurn == nil {
+				return
+			}
+			persisted = append(persisted, currentUserTurn)
+			currentUserTurn = nil
+		}
+		for _, turn := range rawTurns {
+			role := strings.TrimSpace(aiGatewayString(turn["role"]))
+			switch role {
+			case "user":
+				flushUserOnly()
+				currentUserTurn = M{
+					"q":        strings.TrimSpace(aiGatewayString(turn["q"])),
+					"a":        "",
+					"steps":    []M{},
+					"status":   strings.TrimSpace(aiGatewayFirstNonEmpty(aiGatewayString(turn["status"]), "pending")),
+					"ts":       turn["ts"],
+					"start_ts": turn["start_ts"],
+					"credit":   turn["credit"],
+					"model":    strings.TrimSpace(aiGatewayFirstNonEmpty(aiGatewayString(turn["model"]), current.Model)),
+				}
+			case "assistant":
+				if currentUserTurn == nil {
+					continue
+				}
+				existingSteps, _ := currentUserTurn["steps"].([]M)
+				nextSteps := make([]M, 0, len(existingSteps)+8)
+				nextSteps = append(nextSteps, existingSteps...)
+				if assistantSteps, ok := turn["steps"].([]M); ok {
+					nextSteps = append(nextSteps, assistantSteps...)
+				}
+				currentUserTurn["steps"] = nextSteps
+				currentUserTurn["a"] = agentInspectorCurrentHistoryAnswerFromSteps(nextSteps)
+				currentUserTurn["status"] = strings.TrimSpace(aiGatewayFirstNonEmpty(aiGatewayString(turn["status"]), aiGatewayString(currentUserTurn["status"]), "text"))
+				if model := strings.TrimSpace(aiGatewayString(turn["model"])); model != "" {
+					currentUserTurn["model"] = model
+				}
+			}
+		}
+		flushUserOnly()
+		return persisted
+	}
+	return agentInspectorBuildInputTurns(aiGatewayExtractInputItems(body), current.Model)
+}
+
+func agentInspectorHistoryStepCount(item M) int {
+	switch steps := item["steps"].(type) {
+	case []M:
+		return len(steps)
+	case []interface{}:
+		return len(steps)
+	default:
+		return 0
+	}
+}
+
+func agentInspectorHistoryUnix(item M, key string) int64 {
+	switch value := item[key].(type) {
+	case int64:
+		return value
+	case int:
+		return int64(value)
+	case float64:
+		return int64(value)
+	case json.Number:
+		if parsed, err := value.Int64(); err == nil {
+			return parsed
+		}
+	case string:
+		if parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil {
+			return parsed
+		}
+	}
+	return 0
+}
+
+func agentInspectorShouldPreferLiveHistoryTurn(stored M, live M) bool {
+	storedTS := agentInspectorHistoryUnix(stored, "ts")
+	liveTS := agentInspectorHistoryUnix(live, "ts")
+	if liveTS > storedTS {
+		return true
+	}
+	if liveTS < storedTS {
+		return false
+	}
+	if agentInspectorHistoryStepCount(live) > agentInspectorHistoryStepCount(stored) {
+		return true
+	}
+	return len(strings.TrimSpace(aiGatewayString(live["a"]))) >= len(strings.TrimSpace(aiGatewayString(stored["a"])))
+}
+
+func agentInspectorMergeCurrentHistoryItems(items []M, liveTurns []M, limit int) []M {
+	if len(liveTurns) == 0 {
+		return items
+	}
+	live := liveTurns[len(liveTurns)-1]
+	liveQ := agentInspectorNormalizeQuestion(aiGatewayString(live["q"]))
+	if liveQ == "" {
+		return items
+	}
+	if len(items) == 0 {
+		return []M{live}
+	}
+	out := append([]M{}, items...)
+	lastIdx := len(out) - 1
+	lastQ := agentInspectorNormalizeQuestion(aiGatewayString(out[lastIdx]["q"]))
+	if lastQ == liveQ {
+		if agentInspectorShouldPreferLiveHistoryTurn(out[lastIdx], live) {
+			out[lastIdx] = live
+		}
+		return out
+	}
+	out = append(out, live)
+	if limit > 0 && len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out
+}
+
+func handleAgentCurrentHistoryByPane(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/agents/current-history/")
+	paneID := shortPaneID(strings.Trim(path, "/"))
+	if paneID == "" {
+		httpErr(w, http.StatusBadRequest, "pane id required")
+		return
+	}
+	limit := 5
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	before := int64(0)
+	if raw := strings.TrimSpace(r.URL.Query().Get("before")); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
+			before = parsed
+		}
+	}
+	conversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
+	if before == 0 {
+		_ = aiGatewaySyncLatestCurrentHistory(paneID)
+	}
+	current := agentInspectorLoadCurrent(paneID)
+	reply := agentInspectorLoadReply(paneID)
+	liveTurns := []M{}
+	if before == 0 && agentInspectorSnapshotFresh(current, reply) {
+		liveTurns = agentInspectorBuildCurrentOnlyPersistedTurns(current)
+	}
+	if page, err := agentHistoryLoadPage(paneID, conversationID, limit, before); err == nil && (len(page.Items) > 0 || page.ConversationID != "") {
+		if before == 0 && len(liveTurns) > 0 {
+			page.Items = agentInspectorMergeCurrentHistoryItems(page.Items, liveTurns, limit)
+		}
+		J(w, M{
+			"pane_id":         paneID,
+			"conversation_id": page.ConversationID,
+			"items":           page.Items,
+			"next_before":     page.NextBefore,
+			"has_more":        page.HasMore,
+		})
+		return
+	}
+	turns := liveTurns
+	if len(turns) == 0 {
+		turns = agentInspectorBuildCurrentOnlyPersistedTurns(current)
+	}
+	if limit > 0 && len(turns) > limit {
+		turns = turns[len(turns)-limit:]
+	}
+	J(w, M{
+		"pane_id":         paneID,
+		"conversation_id": strings.TrimSpace(current.ConversationID),
+		"provider":        strings.TrimSpace(current.Provider),
+		"model":           strings.TrimSpace(current.Model),
+		"items":           turns,
+		"next_before":     0,
+		"has_more":        false,
+	})
+}
+
 func handleAgentHistorySyncByPane(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/agents/history-sync/")
 	paneID := shortPaneID(strings.Trim(path, "/"))
@@ -1371,19 +2219,19 @@ func handleAgentHistorySyncByPane(w http.ResponseWriter, r *http.Request) {
 		nextCursor = items[len(items)-1].ID
 	}
 	J(w, M{
-		"agent_id":       paneID,
+		"agent_id":        paneID,
 		"conversation_id": conversationID,
-		"cursor":         nextCursor,
-		"base_complete":  baseComplete,
-		"items":          nextItems,
+		"cursor":          nextCursor,
+		"base_complete":   baseComplete,
+		"items":           nextItems,
 		"reply": M{
-			"turn_id":     strings.TrimSpace(reply.TurnID),
-			"status":      strings.TrimSpace(reply.Status),
-			"answer":      strings.TrimSpace(reply.Answer),
-			"thinking":    strings.TrimSpace(reply.Thinking),
-			"updated_at":  strings.TrimSpace(reply.UpdatedAt),
-			"model":       strings.TrimSpace(aiGatewayReplyPrimaryModel(reply)),
-			"tool_calls":  reply.ToolCalls,
+			"turn_id":    strings.TrimSpace(reply.TurnID),
+			"status":     strings.TrimSpace(reply.Status),
+			"answer":     strings.TrimSpace(reply.Answer),
+			"thinking":   strings.TrimSpace(reply.Thinking),
+			"updated_at": strings.TrimSpace(reply.UpdatedAt),
+			"model":      strings.TrimSpace(aiGatewayReplyPrimaryModel(reply)),
+			"tool_calls": reply.ToolCalls,
 		},
 	})
 }
@@ -1423,8 +2271,7 @@ func agentInspectorBuildToolDisplay(call aiGatewayMessageToolCall) M {
 	return tool
 }
 
-func agentInspectorBuildChatTurns(agentID string, current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot) []M {
-	records := agentInspectorCollapseHistoryRecords(agentInspectorBuildSnapshotHistory(agentID, current, reply))
+func agentInspectorBuildChatTurnsFromRecords(records []aiGatewayMessageRecord, current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot) []M {
 	turns := make([]M, 0, len(records))
 	liveTurnID := strings.TrimSpace(reply.TurnID)
 	currentQuestion := agentInspectorNormalizeQuestion(aiGatewayCurrentQuestion(current))
@@ -1450,7 +2297,7 @@ func agentInspectorBuildChatTurns(agentID string, current aiGatewayCurrentSnapsh
 				index int
 				text  string
 				call  aiGatewayMessageToolCall
-			}{kind: "text", index: -1, text: thinking})
+			}{kind: "thinking", index: -1, text: thinking})
 		}
 		for _, call := range record.ToolCalls {
 			if strings.TrimSpace(call.Name) == "" {
@@ -1505,6 +2352,8 @@ func agentInspectorBuildChatTurns(agentID string, current aiGatewayCurrentSnapsh
 
 		for _, item := range timeline {
 			switch item.kind {
+			case "thinking":
+				steps = append(steps, M{"type": "thinking", "text": strings.TrimSpace(item.text)})
 			case "text":
 				appendTextStep(item.text)
 			case "tool":
@@ -1576,6 +2425,11 @@ func agentInspectorBuildChatTurns(agentID string, current aiGatewayCurrentSnapsh
 	return turns
 }
 
+func agentInspectorBuildChatTurns(agentID string, current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot) []M {
+	records, _, _ := agentInspectorSnapshotHistoryData(agentID, current, reply, agentInspectorPaneRuntimeManaged(agentID))
+	return agentInspectorBuildChatTurnsFromRecords(records, current, reply)
+}
+
 func handleAgentHistoryViewByPane(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/agents/history-view/")
 	paneID := shortPaneID(strings.Trim(path, "/"))
@@ -1583,11 +2437,13 @@ func handleAgentHistoryViewByPane(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "pane id required")
 		return
 	}
-	current := agentInspectorLoadCurrent(paneID)
-	reply := agentInspectorLoadReply(paneID)
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	limit, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("limit")))
+	offset, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("offset")))
+	bundle := agentInspectorBuildBundle(paneID, query, limit, offset)
 	J(w, M{
 		"pane_id": paneID,
-		"data":    agentInspectorBuildChatTurns(paneID, current, reply),
+		"data":    bundle["history_view"],
 	})
 }
 
@@ -1614,16 +2470,29 @@ func agentInspectorBuildHistory(agentID string, query string, limit int, offset 
 			Reason:  reason,
 		}
 	}
-	matched := make([]agentInspectorHistoryItem, 0, len(messages))
+	matched := make([]agentInspectorHistoryItem, 0, limit+1)
+	seenQuestions := map[string]int{}
+	activeQuestion := ""
+	current := agentInspectorLoadCurrent(agentID)
+	reply := agentInspectorLoadReply(agentID)
+	if agentInspectorStatusIsActive(aiGatewayFirstNonEmpty(reply.Status, current.Status)) {
+		activeQuestion = agentInspectorNormalizeQuestion(aiGatewayCurrentQuestion(current))
+	}
+	total := 0
+	needCount := offset + limit + 1
 	for idx := len(messages) - 1; idx >= 0; idx-- {
 		record := messages[idx]
+		question := agentInspectorCanonicalQuestion(record.Q)
+		if activeQuestion != "" && (agentInspectorQuestionsOverlap(question, activeQuestion) || agentInspectorQuestionContained(question, activeQuestion)) {
+			continue
+		}
 		matchField, snippet, ok := agentInspectorMatchHistory(record, query)
 		if !ok {
 			continue
 		}
-		matched = append(matched, agentInspectorHistoryItem{
+		item := agentInspectorHistoryItem{
 			ID:         idx,
-			Q:          agentInspectorCanonicalQuestion(record.Q),
+			Q:          question,
 			A:          record.A,
 			QTime:      record.QTime,
 			ATime:      record.ATime,
@@ -1633,11 +2502,37 @@ func agentInspectorBuildHistory(agentID string, query string, limit int, offset 
 			MatchField: matchField,
 			Snippet:    snippet,
 			MergeCount: 1,
-		})
+		}
+		key := agentInspectorNormalizeQuestion(item.Q)
+		if key == "" {
+			key = strings.ToLower(strings.TrimSpace(item.Snippet))
+		}
+		if key != "" {
+			if existingIdx, exists := seenQuestions[key]; exists {
+				existing := &matched[existingIdx]
+				existing.A = agentInspectorMergeStrings(existing.A, item.A)
+				existing.ATime = agentInspectorMergeStrings(existing.ATime, item.ATime)
+				existing.Model = agentInspectorMergeStrings(existing.Model, item.Model)
+				existing.Thinking = agentInspectorMergeStrings(existing.Thinking, item.Thinking)
+				existing.MatchField = agentInspectorMergeStrings(existing.MatchField, item.MatchField)
+				existing.Snippet = agentInspectorMergeStrings(existing.Snippet, item.Snippet)
+				existing.ToolNames = agentInspectorMergeHistoryItemToolNames(existing.ToolNames, item.ToolNames)
+				existing.MergeCount++
+				continue
+			}
+			seenQuestions[key] = len(matched)
+		}
+		matched = append(matched, item)
+		total++
+		if len(matched) >= needCount && query == "" {
+			break
+		}
 	}
-	matched = agentInspectorDedupHistoryItems(matched)
-	matched = agentInspectorFilterActiveHistoryItem(agentID, matched)
-	total := len(matched)
+	if query != "" {
+		total = len(matched)
+	} else {
+		total = len(matched)
+	}
 	if offset > total {
 		offset = total
 	}
@@ -1852,7 +2747,6 @@ func agentInspectorOverview(agentID string) M {
 		"status_map":               agentInspectorStatusMap(aiGatewayReplySnapshot{Status: derivedStatus, StatusMap: aiGatewayBuildStatusMap(current, reply)}),
 		"provider":                 aiGatewayFirstNonEmpty(current.Provider, latestMessage.Model),
 		"model":                    aiGatewayFirstNonEmpty(current.Model, latestMessage.Model),
-		"history_source":           current.HistorySource,
 		"started_at":               aiGatewayFirstNonEmpty(reply.StartedAt, current.StartedAt),
 		"current_updated_at":       current.UpdatedAt,
 		"reply_updated_at":         reply.UpdatedAt,
@@ -2030,6 +2924,334 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 	return body
 }
 
+func agentInspectorProviderRequestToolItems(items []interface{}) []M {
+	out := make([]M, 0, len(items))
+	for _, raw := range items {
+		item := aiGatewayMap(raw)
+		if len(item) == 0 {
+			continue
+		}
+		name := strings.TrimSpace(aiGatewayFirstNonEmpty(
+			aiGatewayString(item["name"]),
+			aiGatewayString(aiGatewayMap(item["function"])["name"]),
+		))
+		if name == "" {
+			continue
+		}
+		description := strings.TrimSpace(aiGatewayFirstNonEmpty(
+			aiGatewayString(item["description"]),
+			aiGatewayString(aiGatewayMap(item["function"])["description"]),
+		))
+		inputSchema := aiGatewayMap(aiGatewayFirstNonEmptyMap(item["input_schema"], aiGatewayMap(item["parameters"]), aiGatewayMap(item["function"])["parameters"]))
+		propertyCount := 0
+		required := []string{}
+		properties := []M{}
+		schemaType := ""
+		additionalProperties := interface{}(nil)
+		if len(inputSchema) > 0 {
+			schemaType = strings.TrimSpace(aiGatewayString(inputSchema["type"]))
+			if props := aiGatewayMap(inputSchema["properties"]); len(props) > 0 {
+				propertyCount = len(props)
+				keys := make([]string, 0, len(props))
+				for key := range props {
+					keys = append(keys, key)
+				}
+				sort.Strings(keys)
+				for _, key := range keys {
+					prop := aiGatewayMap(props[key])
+					row := M{"name": key}
+					if len(prop) > 0 {
+						if value := strings.TrimSpace(aiGatewayString(prop["type"])); value != "" {
+							row["type"] = value
+						}
+						if value := strings.TrimSpace(aiGatewayString(prop["description"])); value != "" {
+							row["description"] = agentInspectorCompactText(value, 400)
+						}
+						if enumValues := aiGatewaySlice(prop["enum"]); len(enumValues) > 0 {
+							row["enum"] = aiGatewayStringList(enumValues, 12)
+						}
+						if itemsSchema := aiGatewayMap(prop["items"]); len(itemsSchema) > 0 {
+							itemInfo := M{}
+							if value := strings.TrimSpace(aiGatewayString(itemsSchema["type"])); value != "" {
+								itemInfo["type"] = value
+							}
+							if value := strings.TrimSpace(aiGatewayString(itemsSchema["description"])); value != "" {
+								itemInfo["description"] = agentInspectorCompactText(value, 220)
+							}
+							if len(itemInfo) > 0 {
+								row["items"] = itemInfo
+							}
+						}
+						if value, ok := prop["additionalProperties"]; ok {
+							row["additional_properties"] = value
+						}
+					}
+					properties = append(properties, row)
+				}
+			}
+			for _, rawRequired := range aiGatewaySlice(inputSchema["required"]) {
+				if value := strings.TrimSpace(aiGatewayString(rawRequired)); value != "" {
+					required = append(required, value)
+				}
+			}
+			if value, ok := inputSchema["additionalProperties"]; ok {
+				additionalProperties = value
+			}
+		}
+		tool := M{
+			"name": name,
+		}
+		if description != "" {
+			tool["summary"] = agentInspectorCompactText(description, 240)
+			tool["description"] = description
+		}
+		if schemaType != "" {
+			tool["schema_type"] = schemaType
+		}
+		if propertyCount > 0 {
+			tool["property_count"] = propertyCount
+		}
+		if len(required) > 0 {
+			tool["required"] = required
+		}
+		if len(properties) > 0 {
+			tool["properties"] = properties
+		}
+		if additionalProperties != nil {
+			tool["additional_properties"] = additionalProperties
+		}
+		out = append(out, tool)
+	}
+	return out
+}
+
+func aiGatewayFirstNonEmptyMap(values ...interface{}) map[string]interface{} {
+	for _, raw := range values {
+		if item := aiGatewayMap(raw); len(item) > 0 {
+			return item
+		}
+	}
+	return nil
+}
+
+func agentInspectorProviderRequestMessageItems(items []interface{}) []M {
+	out := make([]M, 0, len(items))
+	for _, raw := range items {
+		item := aiGatewayMap(raw)
+		if len(item) == 0 {
+			if text := strings.TrimSpace(aiGatewayJSONOrString(raw)); text != "" {
+				out = append(out, M{"role": "input", "text": agentInspectorCompactText(text, 1200)})
+			}
+			continue
+		}
+		role := strings.TrimSpace(aiGatewayString(item["role"]))
+		if role == "" {
+			role = strings.TrimSpace(aiGatewayString(item["type"]))
+		}
+		text := strings.TrimSpace(aiGatewayFlattenPromptValue(item["content"]))
+		if text == "" {
+			text = strings.TrimSpace(aiGatewayFlattenPromptValue(item["input"]))
+		}
+		if text == "" {
+			text = strings.TrimSpace(aiGatewayJSONOrString(item))
+		}
+		if text == "" {
+			continue
+		}
+		out = append(out, M{
+			"role": aiGatewayFirstNonEmpty(role, "message"),
+			"text": agentInspectorCompactText(text, 1600),
+		})
+	}
+	return out
+}
+
+func agentInspectorProviderRequestMessageItemsByRole(items []interface{}, roleFilter string) []M {
+	all := agentInspectorProviderRequestMessageItems(items)
+	if strings.TrimSpace(roleFilter) == "" {
+		return all
+	}
+	filter := strings.ToLower(strings.TrimSpace(roleFilter))
+	out := make([]M, 0, len(all))
+	for _, item := range all {
+		role := strings.ToLower(strings.TrimSpace(aiGatewayString(item["role"])))
+		if role == filter {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func agentInspectorProviderRequestPromptItems(items []interface{}) []M {
+	out := make([]M, 0, len(items))
+	for index, raw := range items {
+		text := strings.TrimSpace(aiGatewayFlattenPromptValue(raw))
+		if text == "" {
+			text = strings.TrimSpace(aiGatewayJSONOrString(raw))
+		}
+		if text == "" {
+			continue
+		}
+		item := aiGatewayMap(raw)
+		entry := M{
+			"index": index,
+			"text":  text,
+		}
+		if len(item) > 0 {
+			if value := strings.TrimSpace(aiGatewayString(item["type"])); value != "" {
+				entry["part_type"] = value
+			}
+			if aiGatewayMap(item["cache_control"]) != nil {
+				entry["cache_control"] = aiGatewayMap(item["cache_control"])
+			}
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func agentInspectorProviderRequestView(agentID string, current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot) M {
+	body := aiGatewayMap(current.Body)
+	if len(body) == 0 {
+		return M{}
+	}
+	provider := strings.TrimSpace(aiGatewayFirstNonEmpty(current.Provider, reply.HTTPRequests[0].Provider))
+	model := strings.TrimSpace(aiGatewayFirstNonEmpty(current.Model, aiGatewayReplyPrimaryModel(reply)))
+	requestKind := "generic"
+	promptLabel := "Prompt"
+	promptText := ""
+	promptItems := []M{}
+	developerItems := []M{}
+	if systemItems := aiGatewaySlice(body["system"]); len(systemItems) > 0 {
+		promptText = strings.TrimSpace(aiGatewayFlattenPromptValue(systemItems))
+		promptItems = agentInspectorProviderRequestPromptItems(systemItems)
+		requestKind = "anthropic_messages"
+		promptLabel = "System"
+	} else if systemText := strings.TrimSpace(aiGatewayString(body["system"])); systemText != "" {
+		promptText = systemText
+		requestKind = "anthropic_messages"
+		promptLabel = "System"
+	} else if instructions := strings.TrimSpace(aiGatewayString(body["instructions"])); instructions != "" {
+		inputItems := aiGatewayExtractInputItems(body)
+		promptText = instructions
+		requestKind = "openai_responses"
+		promptLabel = "Instructions"
+		developerItems = agentInspectorProviderRequestMessageItemsByRole(inputItems, "developer")
+	}
+	toolItems := agentInspectorProviderRequestToolItems(aiGatewaySlice(body["tools"]))
+	sections := []agentInspectorProviderRequestSection{}
+	if strings.TrimSpace(promptText) != "" {
+		section := agentInspectorProviderRequestSection{Type: "prompt", Label: promptLabel, Text: promptText}
+		if len(promptItems) > 0 {
+			section.Items = promptItems
+		}
+		sections = append(sections, section)
+	}
+	if len(developerItems) > 0 {
+		sections = append(sections, agentInspectorProviderRequestSection{Type: "developer_messages", Label: "Developer Messages", Items: developerItems})
+	}
+	if len(toolItems) > 0 {
+		sections = append(sections, agentInspectorProviderRequestSection{Type: "tools", Label: "Tools", Items: toolItems})
+	}
+	sections = append(sections, agentInspectorProviderRequestSection{Type: "meta", Label: "Meta", Items: []M{
+		{"key": "provider", "value": provider},
+		{"key": "model", "value": model},
+		{"key": "method", "value": strings.TrimSpace(current.Method)},
+		{"key": "url", "value": strings.TrimSpace(current.URL)},
+		{"key": "status", "value": strings.TrimSpace(aiGatewayFirstNonEmpty(reply.Status, current.Status))},
+	}})
+	return M{
+		"provider":     provider,
+		"model":        model,
+		"request_kind": requestKind,
+		"request_id":   strings.TrimSpace(current.RequestID),
+		"updated_at":   strings.TrimSpace(aiGatewayFirstNonEmpty(reply.UpdatedAt, current.UpdatedAt)),
+		"tool_count":   len(toolItems),
+		"sections":     sections,
+	}
+}
+
+func agentInspectorLoadPaneDetail(agentID string) M {
+	paneID := normPaneID(agentID)
+	var title, workspace, initScript, agentType, agentDuty, config, commonPrompt, ttydPreview sql.NullString
+	var port sql.NullInt64
+	var active sql.NullInt64
+	var allowAllActions sql.NullBool
+	var replyInChinese sql.NullBool
+	var tgEnable sql.NullBool
+	var tgToken, tgChatID sql.NullString
+	var groupID sql.NullInt64
+	var role, defaultModel, trustLevel sql.NullString
+	var machineID sql.NullInt64
+	var machineLabel, machineURL, runtimeKind, capabilitiesJSON sql.NullString
+	err := store.QueryRow(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script,
+		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.agent_duty, t.config, t.common_prompt, t.ttyd_preview, gp.group_id, t.role, t.default_model, t.trust_level,
+		COALESCE(t.allow_all_actions, 0),
+		COALESCE(t.reply_in_chinese, 0),
+		COALESCE(t.machine_id, 0), COALESCE(m.label, ''), COALESCE(m.url, ''), COALESCE(json_extract(m.capabilities_json, '$.runtime_kind'), ''), COALESCE(m.capabilities_json, '{}')
+		FROM agent_config t
+		LEFT JOIN group_windows gp ON t.pane_id=gp.win_id
+		LEFT JOIN machines m ON t.machine_id=m.id
+		WHERE t.pane_id=?`, paneID).Scan(
+		&paneID, &title, &port, &workspace, &initScript,
+		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &agentDuty, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel, &allowAllActions,
+		&replyInChinese,
+		&machineID, &machineLabel, &machineURL, &runtimeKind, &capabilitiesJSON)
+	if err != nil {
+		return nil
+	}
+	resp := M{
+		"pane_id": shortPaneID(paneID), "title": title.String, "ttyd_port": port.Int64,
+		"workspace": workspace.String, "init_script": initScript.String,
+		"tg_token": tgToken.String, "tg_chat_id": tgChatID.String, "tg_enable": tgEnable.Bool,
+		"active": active.Int64, "agent_type": agentType.String, "agent_duty": agentDuty.String,
+		"config": config.String, "common_prompt": commonPrompt.String, "ttyd_preview": ttydPreview.String,
+		"allow_all_actions": allowAllActions.Bool,
+		"reply_in_chinese":  replyInChinese.Bool,
+		"role":              role.String, "default_model": defaultModel.String,
+		"trust_level":   trustLevel.String,
+		"machine_label": machineLabel.String,
+		"machine_url":   machineURL.String,
+		"runtime_kind":  runtimeKind.String,
+	}
+	if machineID.Valid && machineID.Int64 > 0 {
+		resp["machine_id"] = machineID.Int64
+	} else {
+		resp["machine_id"] = nil
+	}
+	capabilities := M{}
+	if strings.TrimSpace(capabilitiesJSON.String) != "" {
+		_ = json.Unmarshal([]byte(capabilitiesJSON.String), &capabilities)
+	}
+	resp["capabilities"] = capabilities
+	if groupID.Valid {
+		resp["group_id"] = groupID.Int64
+	} else {
+		resp["group_id"] = nil
+	}
+	return resp
+}
+
+func agentInspectorBuildBundle(agentID string, query string, limit int, offset int) M {
+	shortID := shortPaneID(normPaneID(agentID))
+	promptRules := agentInspectorPromptRulesBundle(shortID)
+	agentInspectorSyncPromptRuleFiles(shortID)
+	current := agentInspectorLoadCurrent(shortID)
+	reply := agentInspectorLoadReply(shortID)
+	records, _, _ := agentInspectorSnapshotHistoryData(shortID, current, reply, agentInspectorPaneRuntimeManaged(shortID))
+	return M{
+		"pane_id":               shortID,
+		"overview":              agentInspectorOverview(shortID),
+		"history":               agentInspectorBuildHistory(shortID, query, limit, offset),
+		"notes":                 agentInspectorLoadNotes(shortID),
+		"runtime_memory":        agentInspectorRuntimeMemoryFromRule(promptRules.Agent),
+		"prompt_rules":          promptRules,
+		"pane":                  agentInspectorLoadPaneDetail(shortID),
+		"history_view":          agentInspectorBuildChatTurnsFromRecords(records, current, reply),
+		"provider_request_view": agentInspectorProviderRequestView(shortID, current, reply),
+	}
+}
+
 func handleAgentInspectorByPane(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/agents/inspector/")
 	path = strings.Trim(path, "/")
@@ -2048,18 +3270,13 @@ func handleAgentInspectorByPane(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case r.Method == http.MethodGet && action == "":
-		query := strings.TrimSpace(r.URL.Query().Get("q"))
-		limit, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("limit")))
-		offset, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("offset")))
-		promptRules := agentInspectorPromptRulesBundle(shortID)
-		agentInspectorSyncPromptRuleFiles(shortID)
+		bundle := agentInspectorBuildBundle(shortID, "", 0, 0)
 		J(w, M{
-			"pane_id":        shortID,
-			"overview":       agentInspectorOverview(shortID),
-			"history":        agentInspectorBuildHistory(shortID, query, limit, offset),
-			"notes":          agentInspectorLoadNotes(shortID),
-			"runtime_memory": agentInspectorRuntimeMemoryFromRule(promptRules.Agent),
-			"prompt_rules":   promptRules,
+			"pane_id":               shortID,
+			"pane":                  bundle["pane"],
+			"runtime_memory":        bundle["runtime_memory"],
+			"prompt_rules":          bundle["prompt_rules"],
+			"provider_request_view": bundle["provider_request_view"],
 		})
 		return
 	case r.Method == http.MethodPut && action == "notes":

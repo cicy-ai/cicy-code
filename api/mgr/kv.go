@@ -18,12 +18,9 @@ var kv *KV
 
 func initKV() {
 	path := os.Getenv("KV_PATH")
-	// Local mode defaults to ~/.cicy/kv.json
 	if path == "" && os.Getenv("SAAS_MODE") != "1" && os.Getenv("MYSQL_DSN") == "" {
-		home, _ := os.UserHomeDir()
-		dir := filepath.Join(home, ".cicy")
-		os.MkdirAll(dir, 0755)
-		path = filepath.Join(dir, "kv.json")
+		os.MkdirAll(cicyDBDir, 0755)
+		path = filepath.Join(cicyDBDir, "kv.json")
 	}
 	kv = &KV{data: make(map[string]string), file: path}
 	if path != "" {

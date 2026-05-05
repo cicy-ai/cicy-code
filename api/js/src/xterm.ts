@@ -3,26 +3,92 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { lib } from "libapps";
 import { applyMonoFontVar, isMacPlatform } from "./font";
-import { openExternalLinkWithConfirm } from "./link_confirm";
+import { openExternalLinkWithConfirm, openFileReferencePopup } from "./link_confirm";
+import { normalizeTerminalText } from "./webtty";
 
 const deviceAttributesRe = /\x1b\[\??[\d;]*c/g;
 const mouseClickRe = /\x1b\[<(?:0|1|2|3|32|33|34|35);\d+;\d+[Mm]|\x1b\[M[\s\S]{3}/g;
-const fullWidthPunctuationMap: Record<string, string> = {
-    "～": "~",
-    "。": ".",
-    "，": ",",
-    "、": ",",
-    "》": ">",
-    "《": "<",
-    "？": "?",
-    "（": "(",
-    "）": ")",
-    "；": ";",
-    "：": ":",
-    "－": "-",
-};
+const filenameLinkRe = /(?:\.{1,2}\/|~\/|\/)?(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.[A-Za-z0-9_-]+(?::\d+){0,2}/g;
+const filenameExcludedPrefixes = ["http://", "https://", "ws://", "wss://"];
+const localResourceProtocolUrlRegex = /(?:file|image):\/\/[^\s"'!*(){}|\\\^<>`]*[^\s"':,.!?{}|\\\^~\[\]`()<>]/;
 function normalizeTerminalInput(value: string): string {
-    return value.replace(/——|[～。，、》《？（）；：－]/g, (char: string) => char === "——" ? "_" : (fullWidthPunctuationMap[char] || char));
+    return normalizeTerminalText(value);
+}
+function isLikelyFilenameLink(value: string, lineText?: string, matchIndex?: number): boolean {
+    var text = String(value || "").trim();
+    if (!text) {
+        return false;
+    }
+    if (lineText !== undefined && typeof matchIndex === "number") {
+        var lowerLine = lineText.toLowerCase();
+        if ((matchIndex >= 7 && lowerLine.slice(matchIndex - 7, matchIndex) === "file://")
+            || (matchIndex >= 8 && lowerLine.slice(matchIndex - 8, matchIndex) === "image://")) {
+            return false;
+        }
+    }
+    for (var i = 0; i < filenameExcludedPrefixes.length; i += 1) {
+        if (text.indexOf(filenameExcludedPrefixes[i]) === 0) {
+            return false;
+        }
+    }
+    return /\.[A-Za-z0-9_-]+(?::\d+){0,2}$/.test(text);
+}
+function mapStringIndexToBufferPosition(term: XtermTerminal, lineIndex: number, rowIndex: number, stringIndex: number): [number, number] {
+    const buf = term.buffer.active;
+    const cell = buf.getNullCell();
+    let start = rowIndex;
+    while (stringIndex) {
+        const line = buf.getLine(lineIndex);
+        if (!line) {
+            return [-1, -1];
+        }
+        for (let i = start; i < line.length; ++i) {
+            line.getCell(i, cell);
+            const chars = cell.getChars();
+            if (cell.getWidth()) {
+                stringIndex -= chars.length || 1;
+                if (i === line.length - 1 && chars === '') {
+                    const nextLine = buf.getLine(lineIndex + 1);
+                    if (nextLine && nextLine.isWrapped) {
+                        nextLine.getCell(0, cell);
+                        if (cell.getWidth() === 2) {
+                            stringIndex += 1;
+                        }
+                    }
+                }
+            }
+            if (stringIndex < 0) {
+                return [lineIndex, i];
+            }
+        }
+        lineIndex += 1;
+        start = 0;
+    }
+    return [lineIndex, start];
+}
+function collectFilenameLinks(lineText: string, term: XtermTerminal, bufferLineNumber: number): Array<{ text: string, range: { start: { x: number, y: number }, end: { x: number, y: number } } }> {
+    var matches: Array<{ text: string, range: { start: { x: number, y: number }, end: { x: number, y: number } } }> = [];
+    var match: RegExpExecArray | null;
+    filenameLinkRe.lastIndex = 0;
+    while ((match = filenameLinkRe.exec(lineText)) !== null) {
+        var text = match[0];
+        if (!isLikelyFilenameLink(text, lineText, match.index)) {
+            continue;
+        }
+        const [startY, startX] = mapStringIndexToBufferPosition(term, bufferLineNumber - 1, 0, match.index);
+        const [endY, endX] = mapStringIndexToBufferPosition(term, startY, startX, text.length);
+        if (startY === -1 || startX === -1 || endY === -1 || endX === -1) {
+            continue;
+        }
+        matches.push({
+            text: text,
+            range: {
+                start: { x: startX + 1, y: startY + 1 },
+                end: { x: endX, y: endY + 1 },
+            },
+        });
+    }
+    return matches;
 }
 const stripModeSequenceRes = [
     /\x1b\[\?1000[hl]/g,
@@ -54,14 +120,6 @@ interface DisposableLike {
     dispose(): void;
 }
 
-interface ImageRectOverlay {
-    marker: { line: number } | null;
-    element: HTMLDivElement;
-    widthCells: number;
-    heightCells: number;
-    col: number;
-}
-
 export class Xterm {
     elem: HTMLElement;
     term: XtermTerminal;
@@ -77,7 +135,6 @@ export class Xterm {
     resizeDisposable: DisposableLike | null;
     renderDisposable: DisposableLike | null;
     resizeObserver: ResizeObserver | null;
-    imageOverlays: ImageRectOverlay[];
     initialFitDone: boolean;
     isComposing: boolean;
     pasteCallback: ((input: string) => void) | null;
@@ -90,7 +147,6 @@ export class Xterm {
         this.resizeDisposable = null;
         this.renderDisposable = null;
         this.resizeObserver = null;
-        this.imageOverlays = [];
         this.initialFitDone = false;
         this.isComposing = false;
         this.pasteCallback = null;
@@ -108,14 +164,69 @@ export class Xterm {
         });
         this.fitAddon = new FitAddon();
         this.term.loadAddon(this.fitAddon);
+        const clearSelection = (): void => {
+            this.term.clearSelection();
+            var selection = this.elem.ownerDocument.getSelection();
+            if (selection) {
+                try {
+                    selection.removeAllRanges();
+                } catch {}
+            }
+        };
         this.term.loadAddon(new WebLinksAddon((event: MouseEvent, uri: string) => {
             event.preventDefault();
             event.stopPropagation();
             if ((event as any).stopImmediatePropagation) {
                 (event as any).stopImmediatePropagation();
             }
+            clearSelection();
+            if (uri.toLowerCase().indexOf("file://") === 0 || uri.toLowerCase().indexOf("image://") === 0) {
+                openFileReferencePopup(this.elem.ownerDocument, uri);
+                return;
+            }
+            openExternalLinkWithConfirm(this.elem.ownerDocument, uri);
+        }, { urlRegex: localResourceProtocolUrlRegex }));
+        this.term.loadAddon(new WebLinksAddon((event: MouseEvent, uri: string) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if ((event as any).stopImmediatePropagation) {
+                (event as any).stopImmediatePropagation();
+            }
+            clearSelection();
             openExternalLinkWithConfirm(this.elem.ownerDocument, uri);
         }));
+        this.term.registerLinkProvider({
+            provideLinks: (bufferLineNumber: number, callback: (links: any[] | undefined) => void): void => {
+                var line = this.term.buffer.active.getLine(bufferLineNumber - 1);
+                if (!line) {
+                    callback(undefined);
+                    return;
+                }
+                var lineText = line.translateToString(true);
+                var matches = collectFilenameLinks(lineText, this.term, bufferLineNumber);
+                if (!matches.length) {
+                    callback(undefined);
+                    return;
+                }
+                callback(matches.map((match) => ({
+                    range: match.range,
+                    text: match.text,
+                    decorations: {
+                        underline: true,
+                        pointerCursor: true,
+                    },
+                    activate: (event: MouseEvent, text: string): void => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if ((event as any).stopImmediatePropagation) {
+                            (event as any).stopImmediatePropagation();
+                        }
+                        clearSelection();
+                        openFileReferencePopup(this.elem.ownerDocument, text);
+                    },
+                })));
+            },
+        });
 
         this.message = elem.ownerDocument.createElement("div");
         this.message.className = "xterm-overlay";
@@ -161,21 +272,6 @@ export class Xterm {
             }
             .xterm-reconnect-btn:hover {
                 background: #555;
-            }
-            .xterm-image-overlay {
-                position: absolute;
-                z-index: 50;
-                border: 1px solid rgba(255,255,255,0.14);
-                background: rgba(255,255,255,0.04);
-                box-sizing: border-box;
-                overflow: hidden;
-                pointer-events: none;
-            }
-            .xterm-image-overlay img {
-                width: 100%;
-                height: 100%;
-                object-fit: contain;
-                display: block;
             }
             .xterm .xterm-helper-textarea,
             .xterm .composition-view {
@@ -248,12 +344,10 @@ export class Xterm {
             if (!this.initialFitDone) {
                 this.fitSoon();
             }
-            this.layoutImageOverlays();
         });
         if (typeof ResizeObserver !== "undefined") {
             this.resizeObserver = new ResizeObserver(() => {
                 this.fitSoon();
-                this.layoutImageOverlays();
             });
             this.resizeObserver.observe(this.elem);
         }
@@ -266,18 +360,6 @@ export class Xterm {
             });
             visObs.observe(this.elem);
         }
-        this.term.parser.registerOscHandler(9999, (data: string) => {
-            this.handleImageOsc(data);
-            return true;
-        });
-        this.term.parser.registerCsiHandler({ prefix: "?", final: "h" }, (params: (number | number[])[]) => {
-            const values = flattenParams(params);
-            return values.some((value: number) => [47, 1000, 1002, 1003, 1005, 1006, 1015, 1047, 1048, 1049].indexOf(value) >= 0);
-        });
-        this.term.parser.registerCsiHandler({ prefix: "?", final: "l" }, (params: (number | number[])[]) => {
-            const values = flattenParams(params);
-            return values.some((value: number) => [47, 1000, 1002, 1003, 1005, 1006, 1015, 1047, 1048, 1049].indexOf(value) >= 0);
-        });
         this.term.parser.registerCsiHandler({ final: "J" }, (params: (number | number[])[]) => {
             const values = flattenParams(params);
             return values.indexOf(3) >= 0;
@@ -322,8 +404,6 @@ export class Xterm {
         this._fitDebounce = window.setTimeout(() => {
             this._fitDebounce = 0;
             this.fit();
-            this.layoutImageOverlays();
-            // Remove mask after tmux has time to redraw
             setTimeout(() => {
                 this._resizeMask?.remove();
             }, 100);
@@ -331,69 +411,6 @@ export class Xterm {
     }
     private _fitDebounce: number = 0;
     private _resizeMask: HTMLDivElement | null = null;
-
-    private handleImageOsc(data: string): void {
-        var raw = String(data || "").trim();
-        if (!raw) {
-            return;
-        }
-        var parts = raw.split(";");
-        var values: { [key: string]: string } = {};
-        parts.forEach((part: string) => {
-            var idx = part.indexOf("=");
-            if (idx <= 0) {
-                return;
-            }
-            values[part.slice(0, idx)] = part.slice(idx + 1);
-        });
-        var src = values.src || values.image || "";
-        if (!src) {
-            return;
-        }
-        var widthCells = Math.max(1, parseInt(values.w || values.width || "24", 10) || 24);
-        var heightCells = Math.max(1, parseInt(values.h || values.height || "12", 10) || 12);
-        var col = Math.max(0, parseInt(values.x || values.col || "0", 10) || 0);
-        var marker = this.term.registerMarker(0);
-        var overlay = this.elem.ownerDocument.createElement("div");
-        overlay.className = "xterm-image-overlay";
-        var img = this.elem.ownerDocument.createElement("img");
-        img.src = src;
-        overlay.appendChild(img);
-        this.elem.appendChild(overlay);
-        this.imageOverlays.push({
-            marker: marker ? { line: marker.line } : null,
-            element: overlay,
-            widthCells: widthCells,
-            heightCells: heightCells,
-            col: col,
-        });
-        this.layoutImageOverlays();
-    }
-
-    private layoutImageOverlays(): void {
-        var cellWidth = this.term.element ? (this.term.element.clientWidth / Math.max(this.term.cols, 1)) : 0;
-        var cellHeight = this.elem.querySelector(".xterm-rows") ? ((this.elem.querySelector(".xterm-rows") as HTMLElement).clientHeight / Math.max(this.term.rows, 1)) : 0;
-        if (!cellWidth || !cellHeight) {
-            return;
-        }
-        var viewportY = this.term.buffer.active.viewportY;
-        this.imageOverlays.forEach((overlay: ImageRectOverlay) => {
-            if (!overlay.marker || overlay.marker.line < 0) {
-                overlay.element.style.display = "none";
-                return;
-            }
-            var rowInViewport = overlay.marker.line - viewportY;
-            if (rowInViewport + overlay.heightCells < 0 || rowInViewport > this.term.rows) {
-                overlay.element.style.display = "none";
-                return;
-            }
-            overlay.element.style.display = "block";
-            overlay.element.style.left = String(overlay.col * cellWidth) + "px";
-            overlay.element.style.top = String(rowInViewport * cellHeight) + "px";
-            overlay.element.style.width = String(overlay.widthCells * cellWidth) + "px";
-            overlay.element.style.height = String(overlay.heightCells * cellHeight) + "px";
-        });
-    }
 
     info(): { columns: number, rows: number } {
         return { columns: this.term.cols, rows: this.term.rows };

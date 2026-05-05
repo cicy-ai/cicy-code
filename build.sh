@@ -5,7 +5,8 @@ cd "$ROOT_DIR"
 API_DIR="$ROOT_DIR/api"
 APP_DIR="$ROOT_DIR/app"
 DIST_DIR="$ROOT_DIR/dist"
-GLOBAL_JSON="$HOME/global.json"
+CICY_ROOT_DIR="$HOME/cicy-ai"
+GLOBAL_JSON="$CICY_ROOT_DIR/global.json"
 VERSIONS_JSON="$ROOT_DIR/versions.json"
 BUILD_EMBED_LOCK_DIR="$ROOT_DIR/.build-embed.lock"
 BUILD_EMBED_LOCK_HELD=0
@@ -78,20 +79,38 @@ default_base_image() {
   local images_base
   images_base="$(global_json_value images.base)"
   if [ -n "$images_base" ]; then
-    printf '%s' "$images_base"
+    case "$images_base" in
+      ghcr.io/cicy-ai/cicy-code-base:*)
+        printf 'cicy-code-base:%s' "${images_base##*:}"
+        ;;
+      *)
+        printf '%s' "$images_base"
+        ;;
+    esac
     return
   fi
   local images_base_repo images_base_tag
   images_base_repo="$(global_json_value images.base_repository)"
   images_base_tag="$(global_json_value images.base_tag)"
   if [ -n "$images_base_repo" ] && [ -n "$images_base_tag" ]; then
-    printf '%s:%s' "$images_base_repo" "$images_base_tag"
+    if [ "$images_base_repo" = "ghcr.io/cicy-ai/cicy-code-base" ]; then
+      printf 'cicy-code-base:%s' "$images_base_tag"
+    else
+      printf '%s:%s' "$images_base_repo" "$images_base_tag"
+    fi
     return
   fi
   local explicit
   explicit="$(global_json_value cicy-cluster.base_image)"
   if [ -n "$explicit" ]; then
-    printf '%s' "$explicit"
+    case "$explicit" in
+      ghcr.io/cicy-ai/cicy-code-base:*)
+        printf 'cicy-code-base:%s' "${explicit##*:}"
+        ;;
+      *)
+        printf '%s' "$explicit"
+        ;;
+    esac
     return
   fi
   printf 'cicy-code-base:%s' "$(default_base_tag)"
@@ -102,7 +121,7 @@ cos_base_url() {
   bucket="$(global_json_value tencent.bucket)"
   region="$(global_json_value tencent.region)"
   if [ -z "$bucket" ] || [ -z "$region" ]; then
-    echo "❌ CDN=1 requires ~/global.json.tencent.bucket and ~/global.json.tencent.region" >&2
+    echo "❌ CDN=1 requires ${GLOBAL_JSON}.tencent.bucket and ${GLOBAL_JSON}.tencent.region" >&2
     exit 1
   fi
   printf 'https://%s.cos.%s.myqcloud.com' "$bucket" "$region"
@@ -233,7 +252,6 @@ build_docker() {
   local tag="${1:-latest}"
   local base_image="${BASE_IMAGE:-$(default_base_image)}"
   local docker_args=()
-  local app_binary_hash
   if [ "${NO_CACHE:-0}" = "1" ]; then
     docker_args+=(--no-cache)
   fi
@@ -244,11 +262,8 @@ build_docker() {
     exit 1
   fi
   cp  $API_DIR/cicy-code  $API_DIR/cicy-code-docker
-  app_binary_hash="$(file_hash "$API_DIR/cicy-code-docker")"
-  echo "   APP_BINARY_HASH=${app_binary_hash:0:12}"
   cd $API_DIR && docker build -f Dockerfile.runtime \
     --build-arg BASE_IMAGE="$base_image" \
-    --build-arg APP_BINARY_HASH="$app_binary_hash" \
     -t cicy-code:${tag} . "${docker_args[@]}" && cd "$ROOT_DIR"
   rm -f $API_DIR/cicy-code-docker
   echo "✅ Docker image built: cicy-code:${tag}"
@@ -274,10 +289,13 @@ build_docker_base() {
 build_one() {
   local os=${1:-linux} arch=${2:-amd64} out=${3:-$API_DIR/cicy-code}
   local ldflags="-s -w"
+  if [ -n "${CICY_APP_CDN_PREFIX:-}" ]; then
+    ldflags="$ldflags -X main.BuiltAppCDNPrefix=${CICY_APP_CDN_PREFIX}"
+  fi
   if [ -n "${CICY_TTYD_CDN_PREFIX:-}" ]; then
     ldflags="$ldflags -X ttyd-go/server.BuiltTTYDCDNPrefix=${CICY_TTYD_CDN_PREFIX}"
   fi
-  cd $API_DIR && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags="$ldflags" -o "$out" ./mgr/ && cd "$ROOT_DIR"
+  cd $API_DIR && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -buildvcs=false -ldflags="$ldflags" -o "$out" ./mgr/ && cd "$ROOT_DIR"
   echo "✅ $out (${os}/${arch})"
 }
 
@@ -337,7 +355,7 @@ case "${1:-build}" in
     echo "  build          Build for current/specified platform (default: linux/amd64)"
     echo "  all            Cross-compile all platforms to dist/"
     echo "  docker [tag]       Build app Docker image using BASE_IMAGE"
-    echo "                     default BASE_IMAGE: ~/global.json images.base / cicy-cluster.base_image"
+    echo "                     default BASE_IMAGE: ${GLOBAL_JSON} images.base / cicy-cluster.base_image"
     echo "                     fallback: cicy-code-base:\$(versions.json.base)"
     echo "  docker-base [tag]  Build reusable base Docker image"
     echo "                     default tag: versions.json base (fallback: latest)"
@@ -350,7 +368,7 @@ case "${1:-build}" in
     echo "Environment variables:"
     echo "  SKIP_NPM=1     Skip npm ci + npm run build (reuse existing app/dist)"
     echo "  SKIP_TTYD_ASSET=1  Skip ttyd bindata refresh (reuse existing api/server/asset.go)"
-    echo "  CDN=1          Build app/ttyd asset URLs with COS CDN prefix from ~/global.json.tencent"
+    echo "  CDN=1          Build app/ttyd asset URLs with COS CDN prefix from ${GLOBAL_JSON}.tencent"
     echo "  BASE_IMAGE     Base image for docker command"
     echo "  NO_CACHE=1     Disable Docker layer cache"
     exit 0
@@ -366,7 +384,7 @@ case "${1:-build}" in
     echo "Env vars:"
     echo "  SKIP_NPM=1     Skip npm ci + npm run build (reuse existing app/dist)"
     echo "  SKIP_TTYD_ASSET=1  Skip ttyd bindata refresh (reuse existing api/server/asset.go)"
-    echo "  CDN=1          Build app/ttyd asset URLs with COS CDN prefix from ~/global.json.tencent"
+    echo "  CDN=1          Build app/ttyd asset URLs with COS CDN prefix from ${GLOBAL_JSON}.tencent"
     echo "  BASE_IMAGE     Base image for docker command"
     echo "  NO_CACHE=1     Disable Docker layer cache"
     exit 1

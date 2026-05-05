@@ -1,9 +1,9 @@
 import apiService from './api';
 
 // 发送命令到 tmux
-export const sendCommandToTmux = async (command: string, tmuxTarget: string): Promise<{ success: boolean; message: string }> => {
-  console.log('[sendCommandToTmux] currentPaneId (tmuxTarget):', tmuxTarget, 'command:', command);
-  const { data } = await apiService.sendCommand(tmuxTarget, command);
+export const sendCommandToTmux = async (command: string, tmuxTarget: string, submit = true): Promise<{ success: boolean; message: string }> => {
+  console.log('[sendCommandToTmux] currentPaneId (tmuxTarget):', tmuxTarget, 'command:', command, 'submit:', submit);
+  const { data } = await apiService.sendCommand(tmuxTarget, command, submit);
   return { success: data.success, message: data.success ? '已发送到 tmux' : data.detail };
 };
 

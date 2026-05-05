@@ -92,6 +92,43 @@ func TestCodeServerInstallCmdContainerRuntimeDisabled(t *testing.T) {
 	}
 }
 
+func TestHermesInstallCmdUsesGitHubChinaProxy(t *testing.T) {
+	cmd := hermesInstallCmd()
+	if !strings.Contains(cmd, "https://gh-proxy.com/https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh") {
+		t.Fatalf("hermesInstallCmd = %q", cmd)
+	}
+	if !strings.Contains(cmd, "https://gh-proxy.com/https://codeload.github.com/NousResearch/hermes-agent/tar.gz/refs/heads/${branch}") {
+		t.Fatalf("hermesInstallCmd should use codeload tarball via gh proxy: %q", cmd)
+	}
+	if !strings.Contains(cmd, `if cicy_clone_hermes "$BRANCH" "$INSTALL_DIR"; then`) {
+		t.Fatalf("hermesInstallCmd should rewrite https clone to tarball flow: %q", cmd)
+	}
+	if !strings.Contains(cmd, `export UV_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"`) {
+		t.Fatalf("hermesInstallCmd missing uv mirror: %q", cmd)
+	}
+	if !strings.Contains(cmd, `export PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"`) {
+		t.Fatalf("hermesInstallCmd missing pip mirror: %q", cmd)
+	}
+}
+
+func TestNormalizeHermesModel(t *testing.T) {
+	cases := map[string]string{
+		"":             "gpt-5.5",
+		"gpt5.5":       "gpt-5.5",
+		"gpt5.4":       "gpt-5.4",
+		"claude4.7":    "claude-opus-4-7",
+		"claude-4.7":   "claude-opus-4-7",
+		"cluade4.7":    "claude-opus-4-7",
+		"opus[1m]":     "claude-opus-4-7",
+		"custom-model": "custom-model",
+	}
+	for input, want := range cases {
+		if got := normalizeHermesModel(input); got != want {
+			t.Fatalf("normalizeHermesModel(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestBaseToolsIncludeRequiredPackages(t *testing.T) {
 	tools := baseTools()
 	required := map[string]bool{

@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -17,14 +16,11 @@ type runtimeAIConfig struct {
 	DefaultClaudeModel   string
 	CodexModel           string
 	OpenClawModel        string
+	HermesModel          string
 }
 
 func globalJSONPath() string {
-	home, _ := os.UserHomeDir()
-	if strings.TrimSpace(home) == "" {
-		return ""
-	}
-	return filepath.Join(home, "global.json")
+	return cicyGlobalJSONPath
 }
 
 func readGlobalJSONConfig() map[string]any {
@@ -69,6 +65,16 @@ func cfgStringValue(root map[string]any, key string) string {
 	}
 }
 
+func normalizeClaudeModel(value string) string {
+	value = strings.TrimSpace(value)
+	switch strings.ToLower(value) {
+	case "", "opus[1m]":
+		return "claude-opus-4-7"
+	default:
+		return value
+	}
+}
+
 func defaultRuntimeAIConfig(provider string, cfg map[string]any) runtimeAIConfig {
 	provider = strings.TrimSpace(provider)
 	if provider == "" {
@@ -82,9 +88,10 @@ func defaultRuntimeAIConfig(provider string, cfg map[string]any) runtimeAIConfig
 			APIURL:               "http://2000.run:6543/v1",
 			AnthropicURL:         "http://2000.run:6543",
 			DefaultOpencodeModel: "gpt-5.4",
-			DefaultClaudeModel:   "opus[1m]",
+			DefaultClaudeModel:   "claude-opus-4-7",
 			CodexModel:           "gpt-5.4",
-			OpenClawModel:        "claude-sonnet-4-6",
+			OpenClawModel:        "gpt-5.5",
+			HermesModel:          "gpt-5.5",
 		}
 	default:
 		baseURL := strings.TrimRight(cfgStringValue(cfg, "cicyAiUrl"), "/")
@@ -97,10 +104,27 @@ func defaultRuntimeAIConfig(provider string, cfg map[string]any) runtimeAIConfig
 			APIURL:               baseURL + "/v1",
 			AnthropicURL:         baseURL,
 			DefaultOpencodeModel: "gpt-5.4",
-			DefaultClaudeModel:   "opus[1m]",
+			DefaultClaudeModel:   "claude-opus-4-7",
 			CodexModel:           "gpt-5.4",
-			OpenClawModel:        "claude-sonnet-4-6",
+			OpenClawModel:        "gpt-5.5",
+			HermesModel:          "gpt-5.5",
 		}
+	}
+}
+
+func normalizeHermesModel(value string) string {
+	value = strings.TrimSpace(value)
+	switch strings.ToLower(value) {
+	case "":
+		return "gpt-5.5"
+	case "gpt5.5":
+		return "gpt-5.5"
+	case "gpt5.4":
+		return "gpt-5.4"
+	case "claude4.7", "claude-4.7", "cluade4.7", "cluade-4.7", "opus[1m]":
+		return "claude-opus-4-7"
+	default:
+		return value
 	}
 }
 
@@ -142,6 +166,9 @@ func loadRuntimeAIConfig() runtimeAIConfig {
 	if value := cfgStringValue(selectedProvider, "openclawModel"); value != "" {
 		result.OpenClawModel = value
 	}
+	if value := cfgStringValue(selectedProvider, "hermesModel"); value != "" {
+		result.HermesModel = value
+	}
 
 	if result.Provider == "" {
 		result.Provider = provider
@@ -156,13 +183,15 @@ func loadRuntimeAIConfig() runtimeAIConfig {
 		result.DefaultOpencodeModel = "gpt-5.4"
 	}
 	if result.DefaultClaudeModel == "" {
-		result.DefaultClaudeModel = "opus[1m]"
+		result.DefaultClaudeModel = "claude-opus-4-7"
 	}
+	result.DefaultClaudeModel = normalizeClaudeModel(result.DefaultClaudeModel)
 	if result.CodexModel == "" {
 		result.CodexModel = "gpt-5.4"
 	}
 	if result.OpenClawModel == "" {
-		result.OpenClawModel = "claude-sonnet-4-6"
+		result.OpenClawModel = "gpt-5.5"
 	}
+	result.HermesModel = normalizeHermesModel(result.HermesModel)
 	return result
 }

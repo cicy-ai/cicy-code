@@ -1,4 +1,4 @@
-import React, { forwardRef, useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { forwardRef, useState, useRef, useEffect, useCallback } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useDevRegister } from '../lib/devStore';
 import { usePointerLock } from '../lib/pointerLock';
@@ -82,8 +82,6 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
     const useWebview = isElectron && codeServer;
     const pointerLocked = usePointerLock();
     const activeMaskKeysRef = useRef<Set<string>>(new Set());
-    // Freeze initial src so React doesn't re-set webview src on re-render
-    const initialSrc = useMemo(() => src, []);
     useDevRegister(`WebFrame:${title || src}`, {
       src,
       title: title || '',
@@ -196,7 +194,7 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
           {(pointerLocked || maskActive) && <div data-id="web-frame-interaction-mask" className="absolute inset-0 z-20" />}
           <webview
             ref={webviewRef as any}
-            src={initialSrc}
+            src={src}
             className={className}
             style={style}
             onPointerDownCapture={focusEmbeddedFrame as any}

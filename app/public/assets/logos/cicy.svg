@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <defs>
+    <linearGradient id="cicyLogoBg" x1="20" y1="16" x2="76" y2="82" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FB923C"/>
+      <stop offset="1" stop-color="#EA580C"/>
+    </linearGradient>
+    <filter id="cicyLogoShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#EA580C" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <rect x="10" y="10" width="76" height="76" rx="24" fill="url(#cicyLogoBg)" filter="url(#cicyLogoShadow)"/>
+  <path d="M61.5 29C57.8 25.9 52.9 23.8 47 23.8C35 23.8 26.2 33 26.2 48C26.2 63 35 72.2 47 72.2C52.9 72.2 57.8 70.1 61.5 67" stroke="#FFF7ED" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

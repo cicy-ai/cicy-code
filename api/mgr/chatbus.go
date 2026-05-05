@@ -19,7 +19,7 @@ type ChatEvent struct {
 	Data interface{} `json:"data,omitempty"`
 }
 
-// ── Hub: per-agent pub/sub over WebSocket ──
+// ── Hub: master-channel pub/sub over WebSocket ──
 
 type chatClient struct {
 	conn        *websocket.Conn
@@ -33,11 +33,19 @@ type chatClient struct {
 }
 
 type chatHub struct {
-	mu      sync.RWMutex
-	clients map[string]map[string]*chatClient // agent_id -> client_id -> client
+	mu                  sync.RWMutex
+	clients             map[string]map[string]*chatClient // master_agent_id -> client_id -> client
+	waiters             map[string]chan ChatEvent
+	agentClients        map[string]map[string]struct{}    // agent_id -> client_id set
+	clientActiveAgents  map[string]map[string]struct{}    // client_id -> agent_id set
 }
 
-var hub = &chatHub{clients: make(map[string]map[string]*chatClient)}
+var hub = &chatHub{
+	clients:            make(map[string]map[string]*chatClient),
+	waiters:            make(map[string]chan ChatEvent),
+	agentClients:       make(map[string]map[string]struct{}),
+	clientActiveAgents: make(map[string]map[string]struct{}),
+}
 
 func (c *chatClient) close() {
 	c.closeOnce.Do(func() {
@@ -78,6 +86,15 @@ func handleWsClients(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(hub.stats())
 }
 
+func (h *chatHub) lookupClientLocked(clientID string) *chatClient {
+	for _, bucket := range h.clients {
+		if c := bucket[clientID]; c != nil {
+			return c
+		}
+	}
+	return nil
+}
+
 func (h *chatHub) register(c *chatClient) {
 	h.mu.Lock()
 	var replaced *chatClient
@@ -93,7 +110,7 @@ func (h *chatHub) register(c *chatClient) {
 	if replaced != nil {
 		replaced.close()
 	}
-	log.Printf("[chat-ws] connect agent_id=%s client_id=%s clients=%d", c.agentID, c.clientID, count)
+	log.Printf("[chat-ws] connect master_agent_id=%s client_id=%s clients=%d", c.agentID, c.clientID, count)
 }
 
 func (h *chatHub) unregister(c *chatClient) {
@@ -106,11 +123,24 @@ func (h *chatHub) unregister(c *chatClient) {
 			delete(h.clients, c.agentID)
 		}
 	}
+	if agents := h.clientActiveAgents[c.clientID]; agents != nil {
+		for agentID := range agents {
+			if clients := h.agentClients[agentID]; clients != nil {
+				delete(clients, c.clientID)
+				if len(clients) == 0 {
+					delete(h.agentClients, agentID)
+				}
+			}
+		}
+		delete(h.clientActiveAgents, c.clientID)
+	}
 	h.mu.Unlock()
 	c.close()
-	log.Printf("[chat-ws] disconnect agent_id=%s client_id=%s", c.agentID, c.clientID)
+	log.Printf("[chat-ws] disconnect master_agent_id=%s client_id=%s", c.agentID, c.clientID)
 }
 
+// Deprecated: broadcast routes by the websocket's master agent bucket, not the
+// page's currently selected agent. Prefer direct client_id delivery for new work.
 func (h *chatHub) broadcast(agentID string, evt ChatEvent) {
 	appendRuntimeEvent(agentID, evt.Type, evt.Data)
 	h.broadcastExcept(agentID, evt, nil)
@@ -133,7 +163,9 @@ func (h *chatHub) broadcastExcept(agentID string, evt ChatEvent, except *chatCli
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	n := len(h.clients[agentID])
-	log.Printf("[chat-ws] broadcast agent_id=%s type=%s clients=%d", agentID, evt.Type, n)
+	if evt.Type != "system_resources" && evt.Type != "ai_chunk" && evt.Type != "status_change" {
+		log.Printf("[chat-ws] broadcast master_agent_id=%s type=%s clients=%d", agentID, evt.Type, n)
+	}
 	for _, c := range h.clients[agentID] {
 		if c == except {
 			continue
@@ -160,11 +192,11 @@ func (h *chatHub) broadcastElectron(agentID string, evt ChatEvent) {
 	}
 }
 
-func (h *chatHub) sendToClient(agentID, clientID string, evt ChatEvent) bool {
+func (h *chatHub) sendToClient(clientID string, evt ChatEvent) bool {
 	b, _ := json.Marshal(evt)
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	c := h.clients[agentID][clientID]
+	c := h.lookupClientLocked(clientID)
 	if c == nil {
 		return false
 	}
@@ -174,6 +206,90 @@ func (h *chatHub) sendToClient(agentID, clientID string, evt ChatEvent) bool {
 	default:
 		return false
 	}
+}
+
+func (h *chatHub) registerClientAgent(clientID, agentID string) {
+	clientID = strings.TrimSpace(clientID)
+	agentID = normalizeChatAgentValue(agentID)
+	if clientID == "" || agentID == "" {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.agentClients[agentID] == nil {
+		h.agentClients[agentID] = make(map[string]struct{})
+	}
+	h.agentClients[agentID][clientID] = struct{}{}
+	if h.clientActiveAgents[clientID] == nil {
+		h.clientActiveAgents[clientID] = make(map[string]struct{})
+	}
+	h.clientActiveAgents[clientID][agentID] = struct{}{}
+	log.Printf("[chat-ws] register agent client agent_id=%s client_id=%s", agentID, clientID)
+}
+
+func (h *chatHub) publishAgent(agentID string, evt ChatEvent) {
+	agentID = normalizeChatAgentValue(agentID)
+	if agentID == "" {
+		return
+	}
+	appendRuntimeEvent(agentID, evt.Type, evt.Data)
+	b, _ := json.Marshal(evt)
+	h.mu.RLock()
+	clientIDs := make([]string, 0, len(h.agentClients[agentID]))
+	for clientID := range h.agentClients[agentID] {
+		clientIDs = append(clientIDs, clientID)
+	}
+	h.mu.RUnlock()
+	if evt.Type != "system_resources" && evt.Type != "ai_chunk" && evt.Type != "status_change" {
+		log.Printf("[chat-ws] publish agent_id=%s type=%s clients=%d", agentID, evt.Type, len(clientIDs))
+	}
+	for _, clientID := range clientIDs {
+		h.mu.RLock()
+		c := h.lookupClientLocked(clientID)
+		h.mu.RUnlock()
+		if c == nil {
+			continue
+		}
+		select {
+		case c.send <- b:
+		default:
+		}
+	}
+}
+
+func (h *chatHub) registerWaiter(requestID string) chan ChatEvent {
+	ch := make(chan ChatEvent, 1)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.waiters[requestID] = ch
+	return ch
+}
+
+func (h *chatHub) resolveWaiter(requestID string, evt ChatEvent) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	ch := h.waiters[requestID]
+	if ch == nil {
+		return false
+	}
+	delete(h.waiters, requestID)
+	select {
+	case ch <- evt:
+	default:
+	}
+	close(ch)
+	return true
+}
+
+func (h *chatHub) cancelWaiter(requestID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	ch := h.waiters[requestID]
+	if ch == nil {
+		return
+	}
+	delete(h.waiters, requestID)
+	close(ch)
 }
 
 // ── Client read/write pumps ──
@@ -220,6 +336,11 @@ func (c *chatClient) readPump() {
 		}
 		// poll_request: 回复当前 poll 数据给请求方
 		if evt.Type == "poll_request" {
+			if workspace := paneWorkspace(c.agentID); strings.TrimSpace(workspace) != "" {
+				if err := ensureWorkspaceHomeLink(workspace); err != nil {
+					log.Printf("[poll_request] ensure workspace home link failed master_agent_id=%s workspace=%s err=%v", c.agentID, workspace, err)
+				}
+			}
 			data := buildPollData(c.agentID)
 			reply := ChatEvent{Type: "poll_data", Data: data}
 			if b, err := json.Marshal(reply); err == nil {
@@ -240,6 +361,20 @@ func (c *chatClient) readPump() {
 			}
 			continue
 		}
+		if evt.Type == "register_active_channel" {
+			data := aiGatewayMap(evt.Data)
+			agentID := normalizeChatAgentValue(aiGatewayFirstNonEmpty(aiGatewayString(data["agent_id"]), aiGatewayString(data["pane_id"])))
+			if agentID != "" {
+				hub.registerClientAgent(c.clientID, agentID)
+			}
+			continue
+		}
+		if evt.Type == "webpage_pong" || evt.Type == "exec_js_result" {
+			requestID := strings.TrimSpace(aiGatewayString(aiGatewayMap(evt.Data)["requestId"]))
+			if requestID != "" && hub.resolveWaiter(requestID, evt) {
+				continue
+			}
+		}
 		// 广播客户端发来的消息给同 agent 的其他客户端
 		hub.broadcastExcept(c.agentID, evt, c)
 	}
@@ -253,12 +388,12 @@ func buildPollData(paneID string) M {
 	}
 	snapshot := loadRuntimeMembershipSnapshot()
 	resp := M{
-		"success":     true,
-		"pane_id":     shortPaneID(normPaneID(paneID)),
-		"agents":      agents,
-		"statuses":    M{},
+		"success":          true,
+		"pane_id":          shortPaneID(normPaneID(paneID)),
+		"agents":           agents,
+		"statuses":         M{},
 		"system_resources": systemResources.getLatest(),
-		"server_time": time.Now().UTC().Format(time.RFC3339),
+		"server_time":      time.Now().UTC().Format(time.RFC3339),
 	}
 	if snapshot.TrialExpiresAt != "" {
 		resp["trial_expires_at"] = snapshot.TrialExpiresAt
@@ -313,14 +448,18 @@ func normalizeChatAgentValue(value string) string {
 }
 
 func normalizeChatAgentID(r *http.Request) string {
-	value := strings.TrimSpace(r.URL.Query().Get("agent_id"))
+	value := strings.TrimSpace(r.URL.Query().Get("master_agent_id"))
+	if value == "" {
+		value = strings.TrimSpace(r.URL.Query().Get("agent_id"))
+	}
 	if value == "" {
 		value = strings.TrimSpace(r.URL.Query().Get("pane"))
 	}
 	return normalizeChatAgentValue(value)
 }
 
-// GET /api/chat/ws?agent_id=xxx&token=xxx — WebSocket upgrade
+// GET /api/chat/ws?master_agent_id=xxx&token=xxx — WebSocket upgrade
+// master_agent_id here is the master websocket channel id, not the page's current agent.
 func handleChatWS(w http.ResponseWriter, r *http.Request) {
 	agentID := normalizeChatAgentID(r)
 	t := r.URL.Query().Get("token")
@@ -355,30 +494,89 @@ func handleChatWS(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/chat/webhook — mitmproxy pushes events
-func handleChatWebhook(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ClientID string      `json:"client_id"`
-		AgentID  string      `json:"agent_id"`
-		Pane     string      `json:"pane"`
-		Event    string      `json:"event"`
-		Data     interface{} `json:"data"`
-	}
-	if readBody(r, &req) != nil || (req.AgentID == "" && req.Pane == "") || req.Event == "" {
-		httpErr(w, 400, "agent_id and event required")
+func handleChatPingClient(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", 405)
 		return
 	}
-	agentID := normalizeChatAgentValue(req.AgentID)
-	if agentID == "" {
-		agentID = normalizeChatAgentValue(req.Pane)
+	var req struct {
+		ClientID      string `json:"client_id"`
+		MasterAgentID string `json:"master_agent_id"`
+		AgentID       string `json:"agent_id"`
+		Pane          string `json:"pane"`
+		Timeout       int    `json:"timeout_ms"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", 400)
+		return
+	}
+	clientID := strings.TrimSpace(req.ClientID)
+	if clientID == "" {
+		http.Error(w, "client_id required", 400)
+		return
+	}
+	timeoutMS := req.Timeout
+	if timeoutMS <= 0 {
+		timeoutMS = 5000
+	}
+	requestID := "ping-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	ch := hub.registerWaiter(requestID)
+	if !hub.sendToClient(clientID, ChatEvent{Type: "webpage_ping", Data: M{"requestId": requestID}}) {
+		hub.cancelWaiter(requestID)
+		http.Error(w, "client not found", 404)
+		return
+	}
+	select {
+	case evt, ok := <-ch:
+		if !ok {
+			http.Error(w, "waiter canceled", 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"mode":    "direct",
+			"type":    evt.Type,
+			"data":    evt.Data,
+		})
+	case <-time.After(time.Duration(timeoutMS) * time.Millisecond):
+		hub.cancelWaiter(requestID)
+		http.Error(w, "ping timeout", 504)
+	}
+}
+
+func handleChatWebhook(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ClientID      string      `json:"client_id"`
+		MasterAgentID string      `json:"master_agent_id"`
+		AgentID       string      `json:"agent_id"`
+		Pane          string      `json:"pane"`
+		Event         string      `json:"event"`
+		Data          interface{} `json:"data"`
+	}
+	if readBody(r, &req) != nil || req.Event == "" {
+		httpErr(w, 400, "event required")
+		return
 	}
 	evt := ChatEvent{Type: req.Event, Data: req.Data}
 	if req.ClientID != "" {
-		if !hub.sendToClient(agentID, req.ClientID, evt) {
+		if !hub.sendToClient(req.ClientID, evt) {
 			httpErr(w, 404, "client not found")
 			return
 		}
-		log.Printf("[chat-webhook] agent_id=%s client_id=%s type=%s mode=direct", agentID, req.ClientID, req.Event)
+		log.Printf("[chat-webhook] client_id=%s type=%s mode=direct", req.ClientID, req.Event)
 		w.WriteHeader(204)
+		return
+	}
+	agentID := normalizeChatAgentValue(req.MasterAgentID)
+	if agentID == "" {
+		agentID = normalizeChatAgentValue(req.AgentID)
+	}
+	if agentID == "" {
+		agentID = normalizeChatAgentValue(req.Pane)
+	}
+	if agentID == "" {
+		httpErr(w, 400, "master_agent_id required for broadcast")
 		return
 	}
 	hub.broadcast(agentID, evt)
@@ -400,36 +598,43 @@ func handleChatPush(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ClientID string      `json:"client_id"`
-		AgentID  string      `json:"agent_id"`
-		Pane     string      `json:"pane"`
-		Type     string      `json:"type"`
-		Data     interface{} `json:"data"`
+		ClientID      string      `json:"client_id"`
+		MasterAgentID string      `json:"master_agent_id"`
+		AgentID       string      `json:"agent_id"`
+		Pane          string      `json:"pane"`
+		Type          string      `json:"type"`
+		Data          interface{} `json:"data"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON", 400)
 		return
 	}
-
-	if (req.AgentID == "" && req.Pane == "") || req.Type == "" {
-		http.Error(w, "agent_id and type required", 400)
+	if req.Type == "" {
+		http.Error(w, "type required", 400)
 		return
-	}
-	agentID := normalizeChatAgentValue(req.AgentID)
-	if agentID == "" {
-		agentID = normalizeChatAgentValue(req.Pane)
 	}
 
 	if req.ClientID != "" {
-		ok := hub.sendToClient(agentID, req.ClientID, ChatEvent{Type: req.Type, Data: req.Data})
+		ok := hub.sendToClient(req.ClientID, ChatEvent{Type: req.Type, Data: req.Data})
 		if !ok {
 			http.Error(w, "client not found", 404)
 			return
 		}
-		log.Printf("[chat-push] agent_id=%s client_id=%s type=%s mode=direct", agentID, req.ClientID, req.Type)
+		log.Printf("[chat-push] client_id=%s type=%s mode=direct", req.ClientID, req.Type)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "mode": "direct"})
+		return
+	}
+	agentID := normalizeChatAgentValue(req.MasterAgentID)
+	if agentID == "" {
+		agentID = normalizeChatAgentValue(req.AgentID)
+	}
+	if agentID == "" {
+		agentID = normalizeChatAgentValue(req.Pane)
+	}
+	if agentID == "" {
+		http.Error(w, "master_agent_id required for broadcast", 400)
 		return
 	}
 
@@ -446,7 +651,7 @@ func handleChatPush(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hub.broadcast(agentID, ChatEvent{Type: req.Type, Data: req.Data})
-	log.Printf("[chat-push] agent_id=%s type=%s", agentID, req.Type)
+	log.Printf("[chat-push] master_agent_id=%s type=%s", agentID, req.Type)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "mode": "broadcast"})
 }

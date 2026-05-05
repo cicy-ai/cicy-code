@@ -1,21 +1,31 @@
-ARG BASE_IMAGE=cicy-code-base:1.0.6
+ARG BASE_IMAGE=ghcr.io/cicy-ai/cicy-code-base:1.0.8
 FROM ${BASE_IMAGE}
 
 USER root
 
-ARG APP_BINARY_HASH=unknown
-
-LABEL cicy.app_binary_hash="${APP_BINARY_HASH}"
+RUN set -eux; \
+    printf '%s\n' \
+        'Types: deb' \
+        'URIs: http://mirrors.tuna.tsinghua.edu.cn/debian' \
+        'Suites: bookworm bookworm-updates' \
+        'Components: main' \
+        'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+        '' \
+        'Types: deb' \
+        'URIs: http://mirrors.tuna.tsinghua.edu.cn/debian-security' \
+        'Suites: bookworm-security' \
+        'Components: main' \
+        'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+        > /etc/apt/sources.list.d/debian.sources
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-COPY --chown=cicy:cicy mgr/.tmux.conf /home/cicy/.tmux.conf
-COPY --chown=cicy:cicy mgr/.cicy_tmux.conf /home/cicy/.cicy_tmux.conf
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh && \
     chown -R cicy:cicy /usr/local/lib/node_modules /usr/local/bin
 
 WORKDIR /app
 COPY --chown=cicy:cicy cicy-code-docker /app/cicy-code
 RUN chown -R cicy:cicy /app && \
+    mkdir -p /home/cicy/cicy-ai /home/cicy/cicy-ai/.cicy /home/cicy/cicy-ai/projects /home/cicy/cicy-ai/workers /home/cicy/cicy-ai/skills && chown -R cicy:cicy /home/cicy/cicy-ai && \
     touch /home/cicy/.bashrc && \
     grep -Fqx '[ -f "$HOME/.cicy_tmux.conf" ] && source "$HOME/.cicy_tmux.conf"' /home/cicy/.bashrc || \
       printf '%s\n' '[ -f "$HOME/.cicy_tmux.conf" ] && source "$HOME/.cicy_tmux.conf"' >> /home/cicy/.bashrc
