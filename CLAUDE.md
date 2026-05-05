@@ -16,7 +16,8 @@ This file documents the current repo reality for code agents working inside `cic
 - Refresh ttyd assets only: `python3 dev.py --ttydAssets`
 - Frontend HMR: `cd app && npm ci && npm run dev`
 - Backend manual dev with Vite proxy: `cd api && go run ./mgr/ --dev --public`
-- Go tests: `cd api && go test ./...`
+- Go tests: `./build.sh test-go`
+- Go tests for a specific package: `./build.sh test-go ./mgr/...`
 - Frontend type check: `cd app && npm run lint`
 - Frontend production build: `cd app && npm run build`
 - Current-platform build: `./build.sh build`
@@ -48,6 +49,7 @@ This file documents the current repo reality for code agents working inside `cic
 
 - `go build ./mgr/` is not equivalent to the repo build pipeline
 - `./build.sh` prepares embedded resources before compiling
+- `./build.sh test-go` is the stable Go test entrypoint for agents
 - `app/src/*` changes use Vite HMR and do not require a backend rebuild
 - `api/js/src/*` changes do require `cd api && make asset`
 
