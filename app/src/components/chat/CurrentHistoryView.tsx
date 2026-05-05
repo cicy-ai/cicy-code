@@ -138,6 +138,7 @@ export default function CurrentHistoryView({
   const [conversationId, setConversationId] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const didInitialScrollRef = useRef(false);
+  const refreshTimersRef = useRef<number[]>([]);
 
   useEffect(() => {
     if (!open || !paneId) return;
@@ -171,6 +172,12 @@ export default function CurrentHistoryView({
   useEffect(() => {
     if (!open || !paneId) return;
     let cancelled = false;
+    const clearRefreshTimers = () => {
+      for (const timer of refreshTimersRef.current) {
+        window.clearTimeout(timer);
+      }
+      refreshTimersRef.current = [];
+    };
     const mergeLatest = async () => {
       try {
         const data = await getCurrentHistory(paneId, { limit: 2, conversation_id: conversationId || undefined });
@@ -217,8 +224,22 @@ export default function CurrentHistoryView({
       const agentID = String(msg?.data?.agent_id || '').trim();
       if (agentID !== paneId) return;
       void mergeLatest();
+      clearRefreshTimers();
+      refreshTimersRef.current = [300, 1200, 3000, 8000, 15000].map((delay) => window.setTimeout(() => {
+        if (cancelled) return;
+        void mergeLatest();
+      }, delay));
     });
   }, [conversationId, hasMore, open, paneId, subscribeChatWs]);
+
+  useEffect(() => {
+    return () => {
+      for (const timer of refreshTimersRef.current) {
+        window.clearTimeout(timer);
+      }
+      refreshTimersRef.current = [];
+    };
+  }, []);
 
   useEffect(() => {
     if (!open || loading || didInitialScrollRef.current) return;
@@ -272,7 +293,7 @@ export default function CurrentHistoryView({
           ) : items.length === 0 ? (
             <div data-id="current-history-empty" className="pt-20 text-center">
               <div className="mb-2 text-2xl text-zinc-700">✦</div>
-              <p className="text-xs text-zinc-500">current.json 暂无可用历史</p>
+              <p className="text-xs text-zinc-500">暂无历史</p>
             </div>
           ) : <>
             {hasMore ? (

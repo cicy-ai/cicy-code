@@ -318,6 +318,13 @@ build_assets() {
   echo "   ttyd_assets_refreshed=1"
 }
 
+test_go() {
+  local pkg="${1:-./mgr/...}"
+  shift || true
+  prepare_embed
+  cd "$API_DIR" && go test "$pkg" "$@" && cd "$ROOT_DIR"
+}
+
 # ── Main ──
 case "${1:-build}" in
   assets)
@@ -347,6 +354,9 @@ case "${1:-build}" in
   docker-base)
     build_docker_base "${2:-latest}"
     ;;
+  test-go)
+    test_go "${@:2}"
+    ;;
   -h|--help)
     echo "Usage: ./build.sh [command] [os] [arch]"
     echo ""
@@ -354,6 +364,9 @@ case "${1:-build}" in
     echo "  assets         Build app dist and ttyd static assets only"
     echo "  build          Build for current/specified platform (default: linux/amd64)"
     echo "  all            Cross-compile all platforms to dist/"
+    echo "  test-go [pkg] [go test flags...]"
+    echo "                 Run Go tests through the repo embed-prep pipeline"
+    echo "                 default pkg: ./mgr/..."
     echo "  docker [tag]       Build app Docker image using BASE_IMAGE"
     echo "                     default BASE_IMAGE: ${GLOBAL_JSON} images.base / cicy-cluster.base_image"
     echo "                     fallback: cicy-code-base:\$(versions.json.base)"
@@ -374,10 +387,11 @@ case "${1:-build}" in
     exit 0
     ;;
   *)
-    echo "Usage: ./build.sh [build|all|docker|docker-base] [os] [arch]"
+    echo "Usage: ./build.sh [build|all|test-go|docker|docker-base] [os] [arch]"
     echo "  assets         Build app dist and ttyd static assets only"
     echo "  build          Build for current/specified platform (default: linux/amd64)"
     echo "  all            Cross-compile all platforms to dist/"
+    echo "  test-go [pkg] [go test flags...]"
     echo "  docker [tag]       Build app Docker image"
     echo "  docker-base [tag]  Build reusable base Docker image"
     echo ""
