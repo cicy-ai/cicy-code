@@ -48,6 +48,20 @@ const shellPromptPollInterval = 200 * time.Millisecond
 const shellPromptTimeout = 12 * time.Second
 const shellPromptTimeoutDarwin = 20 * time.Second
 
+type paneCreateOpts struct {
+	session         string
+	title           string
+	role            string
+	defaultModel    string
+	agentType       string
+	workspace       string
+	initScript      string
+	port            int
+	token           string
+	allowAllActions bool
+	replyInChinese  bool
+}
+
 type startupPromptTask struct {
 	paneID    string
 	agentType string
@@ -251,14 +265,6 @@ func paneCurrentCommand(paneID string) string {
 	return strings.ToLower(strings.TrimSpace(out))
 }
 
-func isDarwinShellDollarPrompt(out string) bool {
-	lines := normalizeNonEmptyMeaningfulLines(strings.Split(out, "\n"))
-	if len(lines) == 0 {
-		return false
-	}
-	return strings.HasSuffix(strings.TrimSpace(lines[len(lines)-1]), " $")
-}
-
 func waitForShellPromptReady(paneID string) bool {
 	deadline := time.Now().Add(shellPromptTimeoutForRuntime())
 	stableCount := 0
@@ -269,7 +275,7 @@ func waitForShellPromptReady(paneID string) bool {
 		if err == nil {
 			lastCapture = out
 			if runtime.GOOS == "darwin" {
-				if isDarwinShellDollarPrompt(out) {
+				if isShellPromptVisible(out) {
 					stableCount++
 				} else {
 					stableCount = 0
@@ -475,6 +481,10 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 		J(w, M{"success": false, "error": "unsupported agent_type"})
 		return
 	}
+	if !isAllowedAgentType(req.AgentType) {
+		J(w, M{"success": false, "error": "agent_type not allowed in current mode"})
+		return
+	}
 	token := getToken(r)
 
 	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.ReplyInChinese, req.WinName, token)
@@ -490,12 +500,15 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 	if agentType == "" {
 		return M{"success": false}, fmt.Errorf("unsupported agent_type")
 	}
+	if !isAllowedAgentType(agentType) {
+		return M{"success": false}, fmt.Errorf("agent_type not allowed in current mode")
+	}
 	// Get next worker index
 	var workerIdx int
 	tx, _ := store.Begin()
 	tx.QueryRow("SELECT value FROM global_vars WHERE key_name='worker_index'").Scan(&workerIdx)
 	if workerIdx == 0 {
-		workerIdx = 20000
+		workerIdx = defaultWorkerIndex
 	}
 	workerIdx++
 	tx.Exec(store.Upsert("global_vars", "key_name", []string{"key_name", "value"}, []string{"value"}), "worker_index", workerIdx)
@@ -509,43 +522,58 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 	if title != "" {
 		t = title
 	}
-	home, _ := os.UserHomeDir()
-	workspace := fmt.Sprintf("%s/workers/%s", home, session)
-	os.MkdirAll(workspace, 0755)
+	return createManagedPane(paneCreateOpts{
+		session:         session,
+		title:           t,
+		role:            role,
+		defaultModel:    defaultModel,
+		agentType:       agentType,
+		workspace:       builtinWorkerWorkspace(session),
+		initScript:      initScript,
+		port:            workerIdx,
+		token:           token,
+		allowAllActions: allowAllActions,
+		replyInChinese:  replyInChinese,
+	})
+}
 
-	paneID := session + ":main.0"
-	port := workerIdx
-
-	// Create tmux session
-	runTmux("new-session", "-d", "-s", session, "-n", "main", "-c", workspace)
-	// Insert DB
-	store.Exec(fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()), paneID, t, port, workspace, initScript, "{}", role, defaultModel, agentType, allowAllActions, replyInChinese)
-
-	// Start ttyd-go instance
-	if err := startInstance(paneID, port, token); err != nil {
-		return M{"session": session, "pane_id": shortPaneID(paneID)}, err
+func createManagedPane(opts paneCreateOpts) (M, error) {
+	workspace := strings.TrimSpace(opts.workspace)
+	if err := ensureRuntimeDir(workspace, 0755); err != nil {
+		return M{"success": false}, err
 	}
 
-	// Wait for port
-	waitPort(port, 10*time.Second)
-
+	paneID := opts.session + ":main.0"
+	runTmux("new-session", "-d", "-s", opts.session, "-n", "main", "-c", workspace)
+	store.Exec(
+		fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()),
+		paneID, opts.title, opts.port, workspace, opts.initScript, "{}", opts.role, opts.defaultModel, opts.agentType, opts.allowAllActions, opts.replyInChinese,
+	)
+	if err := startInstance(paneID, opts.port, opts.token); err != nil {
+		return M{"session": opts.session, "pane_id": shortPaneID(paneID)}, err
+	}
+	waitPort(opts.port, 10*time.Second)
 	initPaneEnv(paneEnvOpts{
 		paneID:          paneID,
 		configJSON:      "{}",
 		workspace:       workspace,
-		initScript:      initScript,
-		agentType:       agentType,
-		allowAllActions: allowAllActions,
-		replyInChinese:  replyInChinese,
+		initScript:      opts.initScript,
+		agentType:       opts.agentType,
+		defaultModel:    opts.defaultModel,
+		allowAllActions: opts.allowAllActions,
+		replyInChinese:  opts.replyInChinese,
 	})
-
 	return M{
-		"success": true, "session": session, "window": "main",
-		"pane_id": shortPaneID(paneID), "title": t,
-		"workspace": workspace, "init_script": initScript,
-		"ttyd_port":        port,
-		"reply_in_chinese": replyInChinese,
+		"success":          true,
+		"session":          opts.session,
+		"window":           "main",
+		"pane_id":          shortPaneID(paneID),
+		"title":            opts.title,
+		"workspace":        workspace,
+		"init_script":      opts.initScript,
+		"ttyd_port":        opts.port,
+		"reply_in_chinese": opts.replyInChinese,
 	}, nil
 }
 
@@ -668,6 +696,23 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 		httpErr(w, 400, "No valid fields to update")
 		return
 	}
+	if rawAgentType, ok := filtered["agent_type"]; ok {
+		agentType, ok := rawAgentType.(string)
+		if !ok {
+			httpErr(w, 400, "agent_type must be a string")
+			return
+		}
+		agentType = normalizeAgentType(agentType)
+		if agentType == "" {
+			httpErr(w, 400, "unsupported agent_type")
+			return
+		}
+		if !isAllowedAgentType(agentType) {
+			httpErr(w, 400, "agent_type not allowed in current mode")
+			return
+		}
+		filtered["agent_type"] = agentType
+	}
 	var sets []string
 	var vals []interface{}
 	for k, v := range filtered {
@@ -698,17 +743,44 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 
 func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 	paneID := normPaneID(id)
+	shortID := shortPaneID(paneID)
 	var port sql.NullInt64
 	store.QueryRow("SELECT ttyd_port FROM agent_config WHERE pane_id=?", paneID).Scan(&port)
+	affectedParents := []string{}
+	rows, err := store.Query("SELECT pane_id FROM pane_agents WHERE agent_name=?", shortID)
+	if err == nil {
+		defer rows.Close()
+		seen := map[string]struct{}{}
+		for rows.Next() {
+			var parentPaneID string
+			if scanErr := rows.Scan(&parentPaneID); scanErr != nil {
+				continue
+			}
+			parentPaneID = shortPaneID(normPaneID(parentPaneID))
+			if parentPaneID == "" {
+				continue
+			}
+			if _, ok := seen[parentPaneID]; ok {
+				continue
+			}
+			seen[parentPaneID] = struct{}{}
+			affectedParents = append(affectedParents, parentPaneID)
+		}
+	}
 	go func() {
 		defer func() { recover() }()
 		stopInstance(paneID)
 		session := strings.Split(paneID, ":")[0]
 		runTmux("kill-session", "-t", session)
 	}()
+	store.Exec("DELETE FROM pane_agents WHERE pane_id=?", shortID)
+	store.Exec("DELETE FROM pane_agents WHERE agent_name=?", shortID)
 	store.Exec("DELETE FROM group_windows WHERE win_id=?", paneID)
 	store.Exec("DELETE FROM agent_config WHERE pane_id=?", paneID)
-	J(w, M{"success": true, "pane_id": shortPaneID(paneID), "message": "Pane deleted"})
+	for _, parentPaneID := range affectedParents {
+		go broadcastPollData(parentPaneID)
+	}
+	J(w, M{"success": true, "pane_id": shortID, "message": "Pane deleted"})
 }
 
 func handleRestartPane(w http.ResponseWriter, r *http.Request, id string) {
@@ -723,11 +795,11 @@ func handleRestartPane(w http.ResponseWriter, r *http.Request, id string) {
 
 func restartPaneCore(paneID, token string) error {
 	var port sql.NullInt64
-	var workspace, initScript, title, config, agentType, trustLevel sql.NullString
+	var workspace, initScript, title, config, agentType, defaultModel, trustLevel sql.NullString
 	var allowAllActions sql.NullBool
 	var replyInChinese sql.NullBool
-	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, trust_level, COALESCE(allow_all_actions, 0), COALESCE(reply_in_chinese, 0) FROM agent_config WHERE pane_id=?", paneID).
-		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &trustLevel, &allowAllActions, &replyInChinese)
+	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, default_model, trust_level, COALESCE(allow_all_actions, 0), COALESCE(reply_in_chinese, 0) FROM agent_config WHERE pane_id=?", paneID).
+		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &defaultModel, &trustLevel, &allowAllActions, &replyInChinese)
 	if err != nil {
 		return fmt.Errorf("pane %s not found in db", paneID)
 	}
@@ -765,6 +837,7 @@ func restartPaneCore(paneID, token string) error {
 		workspace:       wsExpanded,
 		initScript:      initScript.String,
 		agentType:       agentType.String,
+		defaultModel:    defaultModel.String,
 		allowAllActions: allowAllActions.Bool,
 		replyInChinese:  replyInChinese.Bool,
 	})
@@ -779,6 +852,7 @@ type paneEnvOpts struct {
 	workspace       string // expanded workspace path
 	initScript      string
 	agentType       string
+	defaultModel    string
 	allowAllActions bool
 	replyInChinese  bool
 }
@@ -818,7 +892,9 @@ func normalizedOpenClawPrimaryModel() string {
 	model := strings.ToLower(strings.TrimSpace(loadRuntimeAIConfig().OpenClawModel))
 	switch model {
 	case "":
-		return "claude-sonnet-4-6"
+		return "gpt-5.5"
+	case "gpt5.5":
+		return "gpt-5.5"
 	case "gpt5.4":
 		return "gpt-5.4"
 	case "cicyai/claude-opus-4-6":
@@ -865,20 +941,35 @@ func openClawRuntimeBaseURL(agentID string) string {
 	return openAIRuntimeBaseURL(agentID)
 }
 
-func visibleAgentInstallLine(commandName, label, installCmd, logPath string) string {
-	return fmt.Sprintf(`__cicy_require_command %s %s %s %s`, tmuxShellQuote(commandName), tmuxShellQuote(label), tmuxShellQuote(installCmd), tmuxShellQuote(logPath))
+func tmuxHomeJoin(parts ...string) string {
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.Trim(part, "/")
+		if part == "" {
+			continue
+		}
+		cleaned = append(cleaned, part)
+	}
+	if len(cleaned) == 0 {
+		return `"$HOME"`
+	}
+	return `"$HOME/` + strings.Join(cleaned, "/") + `"`
 }
 
-func visibleAgentInstallLiveLine(commandName, label, installCmd, logPath string) string {
-	return fmt.Sprintf(`__cicy_require_command_live %s %s %s %s`, tmuxShellQuote(commandName), tmuxShellQuote(label), tmuxShellQuote(installCmd), tmuxShellQuote(logPath))
+func visibleAgentInstallLine(commandName, label, installCmd, logPathExpr string) string {
+	return fmt.Sprintf(`__cicy_require_command %s %s %s %s`, tmuxShellQuote(commandName), tmuxShellQuote(label), tmuxShellQuote(installCmd), logPathExpr)
 }
 
-func ensureAgentCommandLine(commandName, label, installCmd, logPath string) string {
-	return visibleAgentInstallLine(commandName, label, installCmd, logPath)
+func visibleAgentInstallLiveLine(commandName, label, installCmd, logPathExpr string) string {
+	return fmt.Sprintf(`__cicy_require_command_live %s %s %s %s`, tmuxShellQuote(commandName), tmuxShellQuote(label), tmuxShellQuote(installCmd), logPathExpr)
 }
 
-func ensureAgentCommandLineLive(commandName, label, installCmd, logPath string) string {
-	return visibleAgentInstallLiveLine(commandName, label, installCmd, logPath)
+func ensureAgentCommandLine(commandName, label, installCmd, logPathExpr string) string {
+	return visibleAgentInstallLine(commandName, label, installCmd, logPathExpr)
+}
+
+func ensureAgentCommandLineLive(commandName, label, installCmd, logPathExpr string) string {
+	return visibleAgentInstallLiveLine(commandName, label, installCmd, logPathExpr)
 }
 
 func kiroCliBootHelperLines() []string {
@@ -972,20 +1063,27 @@ PY
 	}
 }
 
-func agentBootLines(agentType string, allowAllActions bool, shortID string) []string {
+func resolveCodexStartupModel(defaultModel string, aiCfg runtimeAIConfig) string {
+	if model := strings.TrimSpace(defaultModel); model != "" {
+		return model
+	}
+	if model := strings.TrimSpace(aiCfg.CodexModel); model != "" {
+		return model
+	}
+	return "gpt-5.4"
+}
+
+func agentBootLines(agentType string, allowAllActions bool, replyInChinese bool, shortID string, defaultModel string) []string {
 	aiCfg := loadRuntimeAIConfig()
 	switch normalizeAgentType(agentType) {
 	case "openclaw":
 		home, _ := os.UserHomeDir()
-		baseStateDir := filepath.Join(home, ".openclaw")
 		stateDir := filepath.Join(home, ".openclaw-"+shortID)
-		baseConfigPath := filepath.Join(baseStateDir, "openclaw.json")
 		stateConfigPath := filepath.Join(stateDir, "openclaw.json")
 		installLog := filepath.Join(stateDir, "openclaw-install.log")
 		sessionName := "main"
 		sessionStorePath := filepath.Join(stateDir, "agents", "main", "sessions", "sessions.json")
 		lines := []string{
-			fmt.Sprintf("export OPENCLAW_BASE_CONFIG_PATH=%s", tmuxShellQuote(baseConfigPath)),
 			fmt.Sprintf("export OPENCLAW_CONFIG_PATH=%s", tmuxShellQuote(stateConfigPath)),
 			fmt.Sprintf("export OPENCLAW_STATE_DIR=%s", tmuxShellQuote(stateDir)),
 			fmt.Sprintf("export OPENCLAW_SESSION_KEY=%s", tmuxShellQuote("agent:main:"+sessionName)),
@@ -995,18 +1093,34 @@ func agentBootLines(agentType string, allowAllActions bool, shortID string) []st
 			fmt.Sprintf("export ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
 			fmt.Sprintf("mkdir -p %s", tmuxShellQuote(stateDir)),
 			fmt.Sprintf("mkdir -p %s %s %s %s %s", tmuxShellQuote(filepath.Join(stateDir, "identity")), tmuxShellQuote(filepath.Join(stateDir, "devices")), tmuxShellQuote(filepath.Join(stateDir, "extensions")), tmuxShellQuote(filepath.Join(stateDir, "agents", "main", "agent")), tmuxShellQuote(filepath.Dir(sessionStorePath))),
-			fmt.Sprintf("if [ -d %s ]; then cp -a %s/. %s/; fi", tmuxShellQuote(filepath.Join(baseStateDir, "identity")), tmuxShellQuote(filepath.Join(baseStateDir, "identity")), tmuxShellQuote(filepath.Join(stateDir, "identity"))),
-			fmt.Sprintf("if [ -d %s ]; then cp -a %s/. %s/; fi", tmuxShellQuote(filepath.Join(baseStateDir, "devices")), tmuxShellQuote(filepath.Join(baseStateDir, "devices")), tmuxShellQuote(filepath.Join(stateDir, "devices"))),
-			fmt.Sprintf("if [ -d %s ]; then cp -a %s/. %s/; fi", tmuxShellQuote(filepath.Join(baseStateDir, "extensions")), tmuxShellQuote(filepath.Join(baseStateDir, "extensions")), tmuxShellQuote(filepath.Join(stateDir, "extensions"))),
 			`node - <<'EOF'
 const fs = require("fs");
-const path = require("path");
-const src = process.env.OPENCLAW_BASE_CONFIG_PATH;
 const dst = process.env.OPENCLAW_CONFIG_PATH;
-const baseStateDir = src ? path.dirname(src) : "";
 const stateDir = process.env.OPENCLAW_STATE_DIR || "";
-if (!src || !dst) process.exit(0);
-const cfg = JSON.parse(fs.readFileSync(src, "utf8"));
+if (!dst) process.exit(0);
+let cfg = {};
+if (fs.existsSync(dst)) {
+  cfg = JSON.parse(fs.readFileSync(dst, "utf8"));
+}
+if (!cfg || typeof cfg !== "object" || Array.isArray(cfg) || Object.keys(cfg).length === 0) {
+  const token = require("crypto").randomBytes(24).toString("hex");
+  cfg = {
+    gateway: {
+      mode: "local",
+      auth: { mode: "token", token },
+      controlUi: {
+        allowInsecureAuth: true,
+        dangerouslyDisableDeviceAuth: true,
+        dangerouslyAllowHostHeaderOriginFallback: true,
+        allowedOrigins: ["*"]
+      }
+    },
+    models: { providers: { cicy: { models: [] } } },
+    agents: { defaults: {} },
+    plugins: { enabled: false, entries: {}, allow: [], deny: [], installs: {}, slots: { memory: "none" } },
+    channels: {}
+  };
+}
 let existingCfg = null;
 try {
   if (fs.existsSync(dst)) {
@@ -1031,8 +1145,11 @@ function mergeWeixinChannelConfig(targetCfg, sourceCfg) {
   targetCfg.channels["openclaw-weixin"] = nextChannel;
 }
 const rawModel = String(process.env.CICY_OPENCLAW_MODEL || "").trim().toLowerCase();
-let model = rawModel || "claude-sonnet-4-6";
+let model = rawModel || "gpt-5.5";
 switch (model) {
+  case "gpt5.5":
+    model = "gpt-5.5";
+    break;
   case "gpt5.4":
     model = "gpt-5.4";
     break;
@@ -1066,12 +1183,25 @@ cfg.models.providers ||= {};
 cfg.models.providers.cicy ||= {};
 cfg.agents ||= {};
 cfg.agents.defaults ||= {};
+cfg.plugins ||= {};
+cfg.plugins.enabled = cfg.plugins.enabled === true;
+cfg.plugins.allow = Array.isArray(cfg.plugins.allow) ? cfg.plugins.allow : [];
+cfg.plugins.deny = Array.isArray(cfg.plugins.deny) ? cfg.plugins.deny : [];
+cfg.plugins.entries = cfg.plugins.entries && typeof cfg.plugins.entries === "object" && !Array.isArray(cfg.plugins.entries) ? cfg.plugins.entries : {};
+cfg.plugins.installs = cfg.plugins.installs && typeof cfg.plugins.installs === "object" && !Array.isArray(cfg.plugins.installs) ? cfg.plugins.installs : {};
+cfg.plugins.slots = cfg.plugins.slots && typeof cfg.plugins.slots === "object" && !Array.isArray(cfg.plugins.slots) ? cfg.plugins.slots : {};
+if (!Object.prototype.hasOwnProperty.call(cfg.plugins.slots, "memory")) {
+  cfg.plugins.slots.memory = "none";
+}
 cfg.agents.defaults.contextTokens = providerApi === "anthropic-messages" ? 200000 : 272000;
 cfg.agents.defaults.model = cfg.agents.defaults.model || {};
 cfg.agents.defaults.model.primary = "cicy/" + model;
 cfg.models.providers.cicy.baseUrl = baseUrl;
 cfg.models.providers.cicy.apiKey = "cicy-local-gateway";
 	cfg.models.providers.cicy.api = providerApi;
+	if (!Array.isArray(cfg.models.providers.cicy.models)) {
+	  cfg.models.providers.cicy.models = [{ id: model, name: model, api: providerApi }];
+	}
 	if (Array.isArray(cfg.models.providers.cicy.models)) {
 	  cfg.models.providers.cicy.models = cfg.models.providers.cicy.models.map((entry) => {
 	    const next = { ...entry, api: providerApi };
@@ -1082,21 +1212,6 @@ cfg.models.providers.cicy.apiKey = "cicy-local-gateway";
 	    return next;
 	  });
 	}
-if (baseStateDir && stateDir && cfg.plugins && cfg.plugins.installs && typeof cfg.plugins.installs === "object") {
-  for (const install of Object.values(cfg.plugins.installs)) {
-    if (!install || typeof install !== "object") continue;
-    const installPath = typeof install.installPath === "string" ? install.installPath : "";
-    if (!installPath) continue;
-    if (installPath === baseStateDir) {
-      install.installPath = stateDir;
-      continue;
-    }
-    const prefix = baseStateDir + "/";
-    if (installPath.startsWith(prefix)) {
-      install.installPath = stateDir + "/" + installPath.slice(prefix.length);
-    }
-  }
-}
 mergeWeixinChannelConfig(cfg, existingCfg);
 fs.writeFileSync(dst, JSON.stringify(cfg, null, 2));
 EOF`,
@@ -1120,8 +1235,6 @@ EOF`,
 			`export OPENCLAW_GATEWAY_TOKEN="$(node -e 'const fs=require("fs"); const p=process.env.OPENCLAW_CONFIG_PATH; try { const data=JSON.parse(fs.readFileSync(p, "utf8")); process.stdout.write((((data.gateway || {}).auth || {}).token || "")); } catch (_) {}')"`,
 		}
 		lines = append(lines, ensureAgentCommandLine("openclaw", "OpenClaw", openClawInstallCmd(), installLog))
-		lines = append(lines, `openclaw plugins list 2>/dev/null | grep -q openclaw-weixin || OPENCLAW_STATE_DIR="$OPENCLAW_STATE_DIR" openclaw plugins install "@tencent-weixin/openclaw-weixin@latest" 2>/dev/null || true`)
-		lines = append(lines, `openclaw plugins list 2>/dev/null | grep -q openclaw-lark || OPENCLAW_STATE_DIR="$OPENCLAW_STATE_DIR" openclaw plugins install "@larksuite/openclaw-lark@latest" 2>/dev/null || true`)
 		lines = append(lines, fmt.Sprintf(`openclaw_profile_cmd=(openclaw --profile %s)`, tmuxShellQuote(shortID)))
 		if allowAllActions {
 			approvalsPath := fmt.Sprintf("%s/exec-approvals.json", stateDir)
@@ -1785,25 +1898,10 @@ EOF
 				`_cicy_tmux_session="$(tmux display-message -p '#{session_name}')"`,
 				`sync_openclaw_session_key`,
 				`ensure_openclaw_gateway || true`,
-				`if weixin_needs_login; then`,
-				`  cicy_log "微信未登录，正在右侧打开登录窗口..."`,
-				`  tmux split-window -h -t "$_cicy_tmux_session" "OPENCLAW_STATE_DIR='$OPENCLAW_STATE_DIR' OPENCLAW_CONFIG_PATH='$OPENCLAW_CONFIG_PATH' ${openclaw_profile_cmd[*]} channels login --channel openclaw-weixin; sleep 2"`,
-				`  _login_pane=$(tmux list-panes -t "$_cicy_tmux_session" -F '#{pane_id}' | tail -1)`,
-				`  while tmux list-panes -t "$_cicy_tmux_session" -F '#{pane_id}' 2>/dev/null | grep -q "$_login_pane"; do sleep 2; done`,
-				`  refresh_openclaw_session`,
-				`  restart_openclaw_gateway_for_session`,
-				`  ensure_openclaw_gateway || true`,
-				`  weixin_wait_until_ready || true`,
-				`  weixin_send_welcome || true`,
-				`  cicy_log "微信已连通"`,
-				`else`,
-				`  cicy_log "已检测到微信已登录"`,
-				`  weixin_wait_until_ready || true`,
-				`fi`,
 				`sync_openclaw_session_key`,
-				`cicy_log "正在打开 OpenClaw TUI 会话: $selected_session"`,
-				`"${openclaw_profile_cmd[@]}" tui --session "$selected_session" || true`,
-				`cicy_log "OpenClaw TUI 已退出。手动重启: source boot.sh"`,
+				`cicy_log "OpenClaw gateway 已启动，当前会话: $selected_session"`,
+				`"${openclaw_profile_cmd[@]}" gateway probe --token "$OPENCLAW_GATEWAY_TOKEN" || true`,
+				`cicy_log "如需手动打开 TUI: openclaw --profile `+shortID+` tui --url ws://127.0.0.1:`+openClawPort()+` --token \"$OPENCLAW_GATEWAY_TOKEN\" --session \"$selected_session\""`,
 			)
 		} else {
 			lines = append(lines,
@@ -1814,28 +1912,31 @@ EOF
 				`  restart_openclaw_gateway_for_session`,
 				`fi`,
 				`ensure_openclaw_gateway`,
-				`cicy_log "正在打开 OpenClaw TUI 会话: $selected_session"`,
-				`"${openclaw_profile_cmd[@]}" tui --session "$selected_session" || true`,
-				`cicy_log "OpenClaw TUI 已退出，Shell 仍保持活动。"`,
+				`cicy_log "OpenClaw gateway 已启动，当前会话: $selected_session"`,
+				`"${openclaw_profile_cmd[@]}" gateway probe --token "$OPENCLAW_GATEWAY_TOKEN" || true`,
+				`cicy_log "如需手动打开 TUI: openclaw --profile `+shortID+` tui --url ws://127.0.0.1:`+openClawPort()+` --token \"$OPENCLAW_GATEWAY_TOKEN\" --session \"$selected_session\""`,
 			)
 		}
 		return lines
 	case "codex":
-		home, _ := os.UserHomeDir()
-		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("codex-install-%s.log", shortID))
+		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("codex-install-%s.log", shortID))
 		baseURL := openAIRuntimeBaseURL(shortID)
+		model := resolveCodexStartupModel(defaultModel, aiCfg)
 		providerOverride := tmuxShellQuote(`model_provider="custom"`)
 		providerNameOverride := tmuxShellQuote(`model_providers.custom.name="cicy-local"`)
 		baseURLOverride := tmuxShellQuote(`model_providers.custom.base_url="` + baseURL + `"`)
+		modelArg := tmuxShellQuote(model)
 		lines := []string{
 			"export OPENAI_API_KEY='cicy-local-gateway'",
 			ensureAgentCommandLine("codex", "Codex", codexInstallCmd(), installLog),
 		}
 		if allowAllActions {
-			lines = append(lines, fmt.Sprintf("codex -c %s -c %s -c %s --dangerously-bypass-approvals-and-sandbox", providerOverride, providerNameOverride, baseURLOverride))
+			lines = append(lines, "clear")
+			lines = append(lines, fmt.Sprintf("codex -m %s -c %s -c %s -c %s --dangerously-bypass-approvals-and-sandbox", modelArg, providerOverride, providerNameOverride, baseURLOverride))
 			return lines
 		}
-		lines = append(lines, fmt.Sprintf("codex -c %s -c %s -c %s", providerOverride, providerNameOverride, baseURLOverride))
+		lines = append(lines, "clear")
+		lines = append(lines, fmt.Sprintf("codex -m %s -c %s -c %s -c %s", modelArg, providerOverride, providerNameOverride, baseURLOverride))
 		return lines
 	case "claude", "cicy-claude":
 		cmdName := "claude"
@@ -1848,27 +1949,39 @@ EOF
 			installCmd = cicyInstallCmd()
 			settingsFile = "cicy-settings.json"
 		}
-		home, _ := os.UserHomeDir()
-		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("%s-install-%s.log", cmdName, shortID))
-		baseURL := anthropicRuntimeBaseURL(shortID)
+		launchPrefix := cmdName
+		if normalizeAgentType(agentType) == "cicy-claude" {
+			launchPrefix += " --bare"
+		}
+		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("%s-install-%s.log", cmdName, shortID))
 		model := aiCfg.DefaultClaudeModel
-		settingsJSON := fmt.Sprintf(`{"env":{"ANTHROPIC_AUTH_TOKEN":"cicy-local-gateway","ANTHROPIC_BASE_URL":"%s"},"model":"%s"}`, baseURL, model)
 		lines := []string{
 			ensureAgentCommandLine(cmdName, label, installCmd, installLog),
-			fmt.Sprintf(`printf '%%s' %s > "$WORKSPACE/%s"`, tmuxShellQuote(settingsJSON), settingsFile),
+			`mkdir -p "$WORKSPACE/.cicy"`,
+			fmt.Sprintf(`cat > "$WORKSPACE/.cicy/%s" <<EOF`, settingsFile),
+			`{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "cicy-local-gateway",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8008/api/ai-gateway/anthropic/${X_AGENT_SHORT_ID}"
+  },
+  "model": "` + model + `"
+}`,
+			`EOF`,
 		}
 		if allowAllActions {
-			lines = append(lines, fmt.Sprintf(`%s --settings "$WORKSPACE/%s" --permission-mode bypassPermissions`, cmdName, settingsFile))
+			lines = append(lines, "clear")
+			lines = append(lines, fmt.Sprintf(`%s --settings "$WORKSPACE/.cicy/%s" --dangerously-skip-permissions`, launchPrefix, settingsFile))
 		} else {
-			lines = append(lines, fmt.Sprintf(`%s --settings "$WORKSPACE/%s"`, cmdName, settingsFile))
+			lines = append(lines, "clear")
+			lines = append(lines, fmt.Sprintf(`%s --settings "$WORKSPACE/.cicy/%s"`, launchPrefix, settingsFile))
 		}
 		return lines
 	case "opencode":
-		home, _ := os.UserHomeDir()
-		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("opencode-install-%s.log", shortID))
-		runCmd := "opencode"
-		if allowAllActions {
-			runCmd = "opencode --dangerously-skip-permissions"
+		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("opencode-install-%s.log", shortID))
+		instructionsJSON := ""
+		replyInstructionsPath := "${WORKSPACE}/.opencode/reply-in-chinese.md"
+		if replyInChinese {
+			instructionsJSON = fmt.Sprintf(",\n  \"instructions\": [%q]", replyInstructionsPath)
 		}
 		lines := []string{
 			ensureAgentCommandLine("opencode", "OpenCode", opencodeInstallCmd(), installLog),
@@ -1878,9 +1991,20 @@ EOF
 			`export CICY_OPENCODE_MARKER="$WORKSPACE/.opencode/running"`,
 			`rm -f "$CICY_OPENCODE_MARKER"`,
 			`mkdir -p "$WORKSPACE/.opencode" "$OPENCODE_CONFIG_ROOT"`,
+		}
+		if replyInChinese {
+			lines = append(lines, `cat > "$WORKSPACE/.opencode/reply-in-chinese.md" <<'EOF'
+Always reply in Chinese unless the user explicitly asks for another language.
+Keep code, commands, file paths, environment variables, API identifiers, and other literal tokens unchanged when accuracy matters.
+EOF`)
+		} else {
+			lines = append(lines, `rm -f "$WORKSPACE/.opencode/reply-in-chinese.md"`)
+		}
+		lines = append(lines,
 			`cat > "$OPENCODE_CONFIG" <<EOF
 {
-  "$schema": "https://opencode.ai/config.json",
+  "\$schema": "https://opencode.ai/config.json",
+  "permission": "allow"`+instructionsJSON+`,
   "provider": {
     "cicyai": {
       "npm": "@ai-sdk/openai-compatible",
@@ -1893,10 +2017,10 @@ EOF
   }
 }
 EOF`,
-		}
-		lines = append(lines, fmt.Sprintf(`cicy_run_opencode() {
-  XDG_CONFIG_HOME="$OPENCODE_CONFIG_ROOT" OPENCODE_CONFIG="$OPENCODE_CONFIG" %s
-}`, runCmd))
+		)
+		lines = append(lines, `cicy_run_opencode() {
+  XDG_CONFIG_HOME="$OPENCODE_CONFIG_ROOT" OPENCODE_CONFIG="$OPENCODE_CONFIG" opencode
+}`)
 		lines = append(lines, `cicy_start_opencode() {
   if [ -f "$CICY_OPENCODE_MARKER" ]; then
     echo '[cicy] OpenCode is already starting or running.'
@@ -1914,22 +2038,34 @@ EOF`,
 		)
 		return lines
 	case "kiro-cli":
-		home, _ := os.UserHomeDir()
-		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("kiro-install-%s.log", shortID))
+		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("kiro-install-%s.log", shortID))
 		lines := append(kiroCliBootHelperLines(),
 			ensureAgentCommandLineLive("kiro-cli", "Kiro CLI", "__cicy_local_install_kiro", installLog),
+			`mkdir -p "$WORKSPACE/.kiro/steering"`,
+		)
+		if replyInChinese {
+			lines = append(lines, `cat > "$WORKSPACE/.kiro/steering/reply-in-chinese.md" <<'EOF'
+---
+inclusion: always
+---
+
+Always reply in Chinese unless the user explicitly asks for another language.
+Keep code, commands, file paths, environment variables, API identifiers, and other literal tokens unchanged when accuracy matters.
+EOF`)
+		} else {
+			lines = append(lines, `rm -f "$WORKSPACE/.kiro/steering/reply-in-chinese.md"`)
+		}
+		lines = append(lines,
 			`if kiro-cli whoami 2>/dev/null | grep -q "^Not logged in"; then
   while true; do
     echo ''
     echo '[cicy] Kiro CLI 尚未登录，请选择账号类型：'
     echo '  1. 免费版 (Builder ID / Google / Github)'
     echo '  2. 专业版 (Identity Center)'
-    echo '  0. 跳过登录'
-    read -r -p '请选择 [0/1/2]: ' kiro_choice
+    read -r -p '请选择 [1/2]: ' kiro_choice
     case "$kiro_choice" in
       1) kiro-cli login --license free --use-device-flow && break ;;
       2) kiro-cli login --license pro --use-device-flow && break ;;
-      0) echo '[cicy] 已跳过登录。手动登录: source boot.sh'; break ;;
       *) echo '[cicy] 无效选择，请重新输入' ;;
     esac
     echo '[cicy] 登录失败或已取消，可重新选择'
@@ -1943,8 +2079,7 @@ fi`,
 		}
 		return lines
 	case "copilot":
-		home, _ := os.UserHomeDir()
-		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("copilot-install-%s.log", shortID))
+		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("copilot-install-%s.log", shortID))
 		lines := []string{
 			"mkdir -p ~/.copilot",
 			ensureAgentCommandLine("copilot", "GitHub Copilot", copilotInstallCmd(), installLog),
@@ -1953,8 +2088,7 @@ fi`,
 		}
 		return lines
 	case "cicy-wechat":
-		home, _ := os.UserHomeDir()
-		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("wechat-install-%s.log", shortID))
+		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("wechat-install-%s.log", shortID))
 		lines := []string{
 			ensureAgentCommandLine("cicy-wechat", "WeChat", cicyWechatInstallCmd(), installLog),
 			`export DATA_DIR="$WORKSPACE/.cicy-wechat"`,
@@ -1962,43 +2096,93 @@ fi`,
 		}
 		return lines
 	case "cicy-feishu":
-		home, _ := os.UserHomeDir()
-		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("feishu-install-%s.log", shortID))
+		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("feishu-install-%s.log", shortID))
 		lines := []string{
 			ensureAgentCommandLine("cicy-feishu", "Feishu", cicyFeishuInstallCmd(), installLog),
 			"cicy-feishu",
 		}
 		return lines
 	case "hermes":
-		home, _ := os.UserHomeDir()
-		installLog := filepath.Join(home, ".cicy", fmt.Sprintf("hermes-install-%s.log", shortID))
-		hermesHome := filepath.Join(home, ".hermes-"+shortID)
+		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("hermes-install-%s.log", shortID))
+		hermesHome := filepath.Join(os.Getenv("HOME"), ".hermes-"+shortID)
 		hermesInstallDir := filepath.Join(hermesHome, "hermes-agent")
 		hermesBin := filepath.Join(hermesInstallDir, "venv", "bin", "hermes")
 		configPath := filepath.Join(hermesHome, "config.yaml")
 		installScriptPath := fmt.Sprintf("/tmp/hermes-install-%s.sh", shortID)
-		modelName := "claude-opus-4-6"
+		modelName := normalizeHermesModel(aiCfg.HermesModel)
 		contextLength := 1000000
 		lines := []string{
 			fmt.Sprintf("export HERMES_HOME=%s", tmuxShellQuote(hermesHome)),
 			fmt.Sprintf("export HERMES_INSTALL_DIR=%s", tmuxShellQuote(hermesInstallDir)),
 			fmt.Sprintf("export CICY_HERMES_BIN=%s", tmuxShellQuote(hermesBin)),
+			fmt.Sprintf("export UV_INDEX_URL=%s", tmuxShellQuote(cicyDefaultPyPIMirror)),
+			fmt.Sprintf("export PIP_INDEX_URL=%s", tmuxShellQuote(cicyDefaultPyPIMirror)),
 			fmt.Sprintf("mkdir -p %s", tmuxShellQuote(hermesHome)),
 			fmt.Sprintf(`if [ ! -x %s ]; then
   echo '[cicy] =================================================='
   echo '[cicy] Hermes Agent is not installed. Installing now...'
   echo '[cicy] This may take 1-5 minutes depending on network.'
   echo '[cicy] =================================================='
+  rm -rf "$HERMES_INSTALL_DIR"
   install_log=%s
-  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh -o %s && HERMES_HOME="$HERMES_HOME" HERMES_INSTALL_DIR="$HERMES_INSTALL_DIR" bash %s --skip-setup >"$install_log" 2>&1
-  install_status=$?
+  if ! curl -fsSL %s -o %s; then
+    install_status=$?
+  else
+    python3 - %s <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+raw = path.read_text(encoding="utf-8")
+raw = raw.replace(
+    'REPO_URL_HTTPS="https://github.com/NousResearch/hermes-agent.git"',
+    'REPO_URL_HTTPS="https://gh-proxy.com/https://github.com/NousResearch/hermes-agent.git"',
+)
+helper = """cicy_clone_hermes() {
+    local branch=\"$1\" install_dir=\"$2\" archive_url tmp_dir archive_file root_dir
+    tmp_dir=\"$(mktemp -d \"${TMPDIR:-/tmp}/hermes-src-XXXXXX\")\" || return 1
+    archive_file=\"$tmp_dir/hermes.tar.gz\"
+    archive_url=\"https://gh-proxy.com/https://codeload.github.com/NousResearch/hermes-agent/tar.gz/refs/heads/${branch}\"
+    log_info \"Downloading source archive via gh proxy...\"
+    if ! curl -L --fail --retry 3 --retry-delay 1 -o \"$archive_file\" \"$archive_url\"; then
+        rm -rf \"$tmp_dir\"
+        return 1
+    fi
+    if ! tar -xzf \"$archive_file\" -C \"$tmp_dir\"; then
+        rm -rf \"$tmp_dir\"
+        return 1
+    fi
+    root_dir=\"$(find \"$tmp_dir\" -mindepth 1 -maxdepth 1 -type d | head -n 1)\"
+    if [ -z \"$root_dir\" ]; then
+        rm -rf \"$tmp_dir\"
+        return 1
+    fi
+    rm -rf \"$install_dir\"
+    mv \"$root_dir\" \"$install_dir\"
+    rm -rf \"$tmp_dir\"
+    return 0
+}
+
+"""
+marker = "# ============================================================================\n# Helper functions\n# ============================================================================\n"
+if helper not in raw and marker in raw:
+    raw = raw.replace(marker, marker + "\n" + helper, 1)
+raw = raw.replace(
+    'if git clone --branch "$BRANCH" "$REPO_URL_HTTPS" "$INSTALL_DIR"; then',
+    'if cicy_clone_hermes "$BRANCH" "$INSTALL_DIR"; then',
+)
+path.write_text(raw, encoding="utf-8")
+PY
+    HERMES_HOME="$HERMES_HOME" HERMES_INSTALL_DIR="$HERMES_INSTALL_DIR" bash %s --skip-setup 2>&1 | tee "$install_log"
+    install_status=${PIPESTATUS[0]}
+  fi
   if [ "$install_status" -ne 0 ]; then
     echo '[cicy] Hermes Agent install failed. Recent log:'
     tail -100 "$install_log"
     return 1
   fi
   echo '[cicy] Hermes Agent install completed.'
-fi`, tmuxShellQuote(hermesBin), tmuxShellQuote(installLog), tmuxShellQuote(installScriptPath), tmuxShellQuote(installScriptPath)),
+	fi`, tmuxShellQuote(hermesBin), installLog, tmuxShellQuote(cicySkillsDefaultGHProxy+"https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"), tmuxShellQuote(installScriptPath), tmuxShellQuote(installScriptPath), tmuxShellQuote(installScriptPath)),
 			fmt.Sprintf("export CICY_HERMES_CONFIG=%s", tmuxShellQuote(configPath)),
 			fmt.Sprintf("export OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
 			fmt.Sprintf("export OPENAI_API_KEY=%s", tmuxShellQuote("cicy-local-gateway")),
@@ -2010,7 +2194,7 @@ config_path = Path((os.environ.get("CICY_HERMES_CONFIG") or "").strip())
 if not config_path:
     raise SystemExit(0)
 config_path.parent.mkdir(parents=True, exist_ok=True)
-model = (os.environ.get("CICY_HERMES_MODEL") or "claude-opus-4-6").strip() or "claude-opus-4-6"
+model = (os.environ.get("CICY_HERMES_MODEL") or "gpt-5.5").strip() or "gpt-5.5"
 base_url = (os.environ.get("OPENAI_BASE_URL") or "").strip()
 api_key = (os.environ.get("OPENAI_API_KEY") or "").strip() or "cicy-local-gateway"
 config_path.write_text(
@@ -2035,7 +2219,29 @@ EOF`,
 	}
 }
 
+func sanitizeTmuxPaneText(out string) string {
+	if out == "" {
+		return ""
+	}
+	out = ansiRe.ReplaceAllString(out, "")
+	out = ctrlRe.ReplaceAllString(out, "")
+	return out
+}
+
+func recentTmuxPaneText(out string, maxLines int) string {
+	out = sanitizeTmuxPaneText(out)
+	if out == "" || maxLines <= 0 {
+		return out
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) <= maxLines {
+		return out
+	}
+	return strings.Join(lines[len(lines)-maxLines:], "\n")
+}
+
 func isClaudeInputReady(out string) bool {
+	out = recentTmuxPaneText(out, 80)
 	if isClaudeThemePrompt(out) || isClaudeSecurityNotesPrompt(out) || isClaudeTrustPrompt(out) || isClaudeBypassChoicePrompt(out) || isClaudeBypassConfirmPrompt(out) {
 		return false
 	}
@@ -2054,6 +2260,7 @@ func isClaudeInputReady(out string) bool {
 }
 
 func isClaudeThemePrompt(out string) bool {
+	out = recentTmuxPaneText(out, 80)
 	return (strings.Contains(out, "Choose the text style that looks best with your terminal") ||
 		(strings.Contains(out, "Let's get started.") &&
 			strings.Contains(out, "/theme") &&
@@ -2062,23 +2269,38 @@ func isClaudeThemePrompt(out string) bool {
 }
 
 func isClaudeSecurityNotesPrompt(out string) bool {
+	out = recentTmuxPaneText(out, 80)
 	return strings.Contains(out, "Security notes:") &&
 		strings.Contains(out, "Press Enter to continue")
 }
 
 func isClaudeTrustPrompt(out string) bool {
+	out = recentTmuxPaneText(out, 80)
 	return strings.Contains(out, "Quick safety check") &&
 		strings.Contains(out, "Yes, I trust this folder") &&
 		strings.Contains(out, "Enter to confirm")
 }
 
 func isClaudeBypassChoicePrompt(out string) bool {
+	out = recentTmuxPaneText(out, 80)
 	return strings.Contains(out, "Bypass Permissions mode") &&
 		strings.Contains(out, "No, exit") &&
 		strings.Contains(out, "Yes, I accept")
 }
 
+func isClaudeBypassAcceptSelected(out string) bool {
+	out = recentTmuxPaneText(out, 80)
+	for _, line := range normalizeNonEmptyMeaningfulLines(strings.Split(out, "\n")) {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "❯") && strings.Contains(line, "2. Yes, I accept") {
+			return true
+		}
+	}
+	return false
+}
+
 func isClaudeBypassConfirmPrompt(out string) bool {
+	out = recentTmuxPaneText(out, 80)
 	return strings.Contains(out, "Bypass Permissions mode") &&
 		strings.Contains(out, "Enter to confirm") &&
 		!strings.Contains(out, "No, exit")
@@ -2095,6 +2317,24 @@ const (
 	claudeStageBypassConfirm claudePromptStage = "bypass_confirm"
 )
 
+type claudeAutoConfirmAction string
+
+const (
+	claudeActionNone  claudeAutoConfirmAction = ""
+	claudeActionDown  claudeAutoConfirmAction = "down"
+	claudeActionEnter claudeAutoConfirmAction = "enter"
+	claudeActionReady claudeAutoConfirmAction = "ready"
+	claudeActionStop  claudeAutoConfirmAction = "stop"
+)
+
+type claudeAutoConfirmState struct {
+	lastAction       time.Time
+	currentStage     claudePromptStage
+	stageSince       time.Time
+	stageAttempts    int
+	sawClaudeProcess bool
+}
+
 func detectClaudePromptStage(out string, allowAllActions bool) claudePromptStage {
 	switch {
 	case isClaudeThemePrompt(out):
@@ -2103,22 +2343,76 @@ func detectClaudePromptStage(out string, allowAllActions bool) claudePromptStage
 		return claudeStageSecurityNotes
 	case isClaudeTrustPrompt(out):
 		return claudeStageTrust
-	case allowAllActions && isClaudeBypassConfirmPrompt(out):
-		return claudeStageBypassConfirm
 	case allowAllActions && isClaudeBypassChoicePrompt(out):
 		return claudeStageBypassChoice
+	case allowAllActions && isClaudeBypassConfirmPrompt(out):
+		return claudeStageBypassConfirm
 	default:
 		return claudeStageNone
 	}
 }
 
+func nextClaudeAutoConfirmAction(state *claudeAutoConfirmState, out, currentCmd string, allowAllActions bool, now time.Time) claudeAutoConfirmAction {
+	stage := detectClaudePromptStage(out, allowAllActions)
+	currentCmd = strings.ToLower(strings.TrimSpace(currentCmd))
+	if currentCmd == "claude" || currentCmd == "cicy-claude" {
+		state.sawClaudeProcess = true
+	} else if state.sawClaudeProcess && currentCmd != "" && stage == claudeStageNone {
+		return claudeActionStop
+	}
+	if isClaudeInputReady(out) {
+		return claudeActionReady
+	}
+	if stage == claudeStageNone {
+		state.currentStage = claudeStageNone
+		state.stageAttempts = 0
+		state.stageSince = time.Time{}
+		return claudeActionNone
+	}
+	if stage != state.currentStage {
+		state.currentStage = stage
+		state.stageSince = now
+		state.stageAttempts = 0
+	}
+	actionCooldown := 700 * time.Millisecond
+	retryDelay := 1500 * time.Millisecond
+	if stage == claudeStageBypassChoice || stage == claudeStageBypassConfirm {
+		actionCooldown = 120 * time.Millisecond
+		retryDelay = 250 * time.Millisecond
+	}
+	if now.Sub(state.lastAction) < actionCooldown {
+		return claudeActionNone
+	}
+	if retryDelay > 0 && state.stageAttempts >= 1 && now.Sub(state.stageSince) < retryDelay {
+		return claudeActionNone
+	}
+	if state.stageAttempts >= 4 {
+		return claudeActionNone
+	}
+	state.lastAction = now
+	state.stageAttempts++
+	switch stage {
+	case claudeStageTheme, claudeStageSecurityNotes, claudeStageTrust, claudeStageBypassConfirm:
+		return claudeActionEnter
+	case claudeStageBypassChoice:
+		if !isClaudeBypassAcceptSelected(out) {
+			return claudeActionDown
+		}
+		return claudeActionEnter
+	default:
+		return claudeActionNone
+	}
+}
+
 func isCodexTrustPrompt(out string) bool {
+	out = recentTmuxPaneText(out, 80)
 	return strings.Contains(out, "Do you trust the contents of this directory?") &&
 		strings.Contains(out, "1. Yes, continue") &&
 		strings.Contains(out, "Press enter to continue")
 }
 
 func isCodexUpdatePrompt(out string) bool {
+	out = recentTmuxPaneText(out, 80)
 	return (strings.Contains(out, "Update available!") || strings.Contains(out, "Update available:")) &&
 		strings.Contains(out, "Skip until next version") &&
 		strings.Contains(out, "Press enter to continue")
@@ -2142,31 +2436,31 @@ func isCodexStatusFooterVisible(out string) bool {
 }
 
 func isCodexInputReady(out string) bool {
+	recent := recentTmuxPaneText(out, 80)
+	// If the active prompt and footer are visible, treat Codex as ready even if
+	// an older trust/update prompt remains in scrollback.
+	if isCodexPromptVisible(recent) && isCodexStatusFooterVisible(recent) {
+		return true
+	}
+	if isCodexPromptVisible(recent) && isCodexBusyStateVisible(recent) {
+		return true
+	}
 	if isCodexTrustPrompt(out) {
 		return false
 	}
 	if isCodexUpdatePrompt(out) {
 		return false
 	}
-	// Newer Codex UI often no longer keeps the initial "OpenAI Codex (v...)"
-	// header in the visible capture. Treat the active prompt + status footer as ready.
-	if isCodexPromptVisible(out) && isCodexStatusFooterVisible(out) {
-		return true
-	}
-	// Codex can accept queued prompts while it is still working. As long as the
-	// prompt is visible and the terminal shows Codex's working/queue affordance,
-	// allow send so the built-in queue can handle it.
-	if isCodexPromptVisible(out) && isCodexBusyStateVisible(out) {
-		return true
-	}
-	if strings.Contains(out, "OpenAI Codex (v") &&
-		(strings.Contains(out, "directory:") ||
-			strings.Contains(out, "~/workers/") ||
-			strings.Contains(out, "model:")) &&
-		(strings.Contains(out, "/model to change") ||
-			strings.Contains(out, "Use /skills to list available skills") ||
-			strings.Contains(out, "100% left") ||
-			strings.Contains(out, "› ")) {
+	if strings.Contains(recent, "OpenAI Codex (v") &&
+		(strings.Contains(recent, "directory:") ||
+			strings.Contains(recent, "~/cicy-ai/workers/") ||
+			strings.Contains(recent, "/cicy-ai/workers/") ||
+			strings.Contains(recent, "~/cicy-ai/workers/") ||
+			strings.Contains(recent, "model:")) &&
+		(strings.Contains(recent, "/model to change") ||
+			strings.Contains(recent, "Use /skills to list available skills") ||
+			strings.Contains(recent, "100% left") ||
+			strings.Contains(recent, "› ")) {
 		return true
 	}
 	return false
@@ -2224,9 +2518,7 @@ func lazyAgentMarkerPath(agentType, paneID string) string {
 				return filepath.Join(workspace, ".opencode", "running")
 			}
 		}
-		if home, err := os.UserHomeDir(); err == nil && home != "" {
-			return filepath.Join(home, "workers", shortID, ".opencode", "running")
-		}
+		return filepath.Join(cicyWorkersDir, shortID, ".opencode", "running")
 		return filepath.Join(os.TempDir(), fmt.Sprintf("opencode-running-%s", shortID))
 	default:
 		return ""
@@ -2971,65 +3263,58 @@ func autoSendReplyInChinese(paneID, agentType string, enabled bool) {
 
 func autoConfirmClaudeStartup(paneID string, allowAllActions bool) {
 	go func() {
-		var lastAction time.Time
-		var currentStage claudePromptStage
-		var stageSince time.Time
-		stageAttempts := 0
-		for i := 0; i < 120; i++ {
-			time.Sleep(500 * time.Millisecond)
+		state := claudeAutoConfirmState{}
+		for i := 0; i < 1500; i++ {
+			pollInterval := 200 * time.Millisecond
+			if state.currentStage == claudeStageBypassChoice || state.currentStage == claudeStageBypassConfirm {
+				pollInterval = 20 * time.Millisecond
+			}
+			time.Sleep(pollInterval)
 			out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", "-160")
 			if err != nil {
 				continue
 			}
-			if isClaudeInputReady(out) {
+			currentCmd, _ := runTmux("display-message", "-p", "-t", paneID, "#{pane_current_command}")
+			action := nextClaudeAutoConfirmAction(&state, out, currentCmd, allowAllActions, time.Now())
+			switch action {
+			case claudeActionStop:
+				log.Printf("[claude-auto-confirm] %s stop: current command=%s", paneID, currentCmd)
+				return
+			case claudeActionReady:
+				go clearClaudeStartupScreen(paneID)
 				log.Printf("[claude-auto-confirm] %s ready", paneID)
 				return
-			}
-			stage := detectClaudePromptStage(out, allowAllActions)
-			if stage == claudeStageNone {
-				currentStage = claudeStageNone
-				stageAttempts = 0
-				stageSince = time.Time{}
+			case claudeActionNone:
 				continue
-			}
-			if stage != currentStage {
-				currentStage = stage
-				stageSince = time.Now()
-				stageAttempts = 0
-			}
-			if time.Since(lastAction) < 1200*time.Millisecond {
-				continue
-			}
-			if stageAttempts >= 1 && time.Since(stageSince) < 4*time.Second {
-				continue
-			}
-			if stageAttempts >= 2 {
-				continue
-			}
-			switch stage {
-			case claudeStageTheme:
-				log.Printf("[claude-auto-confirm] %s theme selected", paneID)
+			case claudeActionEnter:
+				switch state.currentStage {
+				case claudeStageTheme:
+					log.Printf("[claude-auto-confirm] %s theme selected", paneID)
+				case claudeStageSecurityNotes:
+					log.Printf("[claude-auto-confirm] %s security notes continue", paneID)
+				case claudeStageTrust:
+					log.Printf("[claude-auto-confirm] %s trust workspace", paneID)
+				case claudeStageBypassChoice:
+					log.Printf("[claude-auto-confirm] %s confirm selected bypass accept option", paneID)
+				case claudeStageBypassConfirm:
+					log.Printf("[claude-auto-confirm] %s confirm bypass mode", paneID)
+				}
 				runTmux("send-keys", "-t", paneID, "Enter")
-			case claudeStageSecurityNotes:
-				log.Printf("[claude-auto-confirm] %s security notes continue", paneID)
-				runTmux("send-keys", "-t", paneID, "Enter")
-			case claudeStageTrust:
-				log.Printf("[claude-auto-confirm] %s trust workspace", paneID)
-				runTmux("send-keys", "-t", paneID, "Enter")
-			case claudeStageBypassChoice:
-				log.Printf("[claude-auto-confirm] %s accept bypass mode", paneID)
-				runTmux("send-keys", "-t", paneID, "2")
-				time.Sleep(150 * time.Millisecond)
-				runTmux("send-keys", "-t", paneID, "Enter")
-			case claudeStageBypassConfirm:
-				log.Printf("[claude-auto-confirm] %s confirm bypass mode", paneID)
-				runTmux("send-keys", "-t", paneID, "Enter")
+			case claudeActionDown:
+				log.Printf("[claude-auto-confirm] %s move selection to accept bypass mode", paneID)
+				runTmux("send-keys", "-t", paneID, "Down")
 			}
-			lastAction = time.Now()
-			stageAttempts++
 		}
 		log.Printf("[claude-auto-confirm] %s timeout", paneID)
 	}()
+}
+
+func clearClaudeStartupScreen(paneID string) {
+	for i := 0; i < 3; i++ {
+		runTmux("send-keys", "-t", paneID, "C-l")
+		time.Sleep(80 * time.Millisecond)
+	}
+	runTmux("clear-history", "-t", paneID)
 }
 
 func autoConfirmCodexTrust(paneID string) {
@@ -3037,8 +3322,8 @@ func autoConfirmCodexTrust(paneID string) {
 		var lastAction time.Time
 		enterCount := 0
 		updateSkipCount := 0
-		for i := 0; i < 120; i++ {
-			time.Sleep(500 * time.Millisecond)
+		for i := 0; i < 300; i++ {
+			time.Sleep(200 * time.Millisecond)
 			out, err := runTmux("capture-pane", "-t", paneID, "-p")
 			if err != nil {
 				continue
@@ -3062,10 +3347,12 @@ func autoConfirmCodexTrust(paneID string) {
 			if !isCodexTrustPrompt(out) {
 				continue
 			}
-			if enterCount >= 3 || time.Since(lastAction) < 1500*time.Millisecond {
+			if enterCount >= 4 || time.Since(lastAction) < 800*time.Millisecond {
 				continue
 			}
-			log.Printf("[codex-auto-confirm] %s trust workspace enter #%d", paneID, enterCount+1)
+			log.Printf("[codex-auto-confirm] %s trust workspace 1+Enter #%d", paneID, enterCount+1)
+			runTmux("send-keys", "-t", paneID, "-l", "--", "1")
+			time.Sleep(120 * time.Millisecond)
 			runTmux("send-keys", "-t", paneID, "Enter")
 			lastAction = time.Now()
 			enterCount++
@@ -3106,11 +3393,12 @@ func initPaneEnv(opts paneEnvOpts) {
 	case "cicy-wechat":
 		// cicy-wechat handles its own auth
 	case "cicy-feishu":
-		// cicy-feishu uses FEISHU_APP_ID/FEISHU_APP_SECRET env vars
+	// cicy-feishu uses FEISHU_APP_ID/FEISHU_APP_SECRET env vars
 	case "hermes":
 		sessionEnv["CICY_API_KEY"] = strings.TrimSpace(aiCfg.APIKey)
 		sessionEnv["CICY_API_URL"] = strings.TrimSpace(aiCfg.APIURL)
 		sessionEnv["CICY_ANTHROPIC_URL"] = strings.TrimSpace(aiCfg.AnthropicURL)
+		sessionEnv["CICY_HERMES_MODEL"] = normalizeHermesModel(aiCfg.HermesModel)
 	default:
 		sessionEnv["CICY_API_KEY"] = strings.TrimSpace(aiCfg.APIKey)
 		sessionEnv["CICY_API_URL"] = strings.TrimSpace(aiCfg.APIURL)
@@ -3143,11 +3431,9 @@ func initPaneEnv(opts paneEnvOpts) {
 			fmt.Sprintf("export CICY_ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
 		)
 	}
-
 	if opts.workspace != "" {
 		lines = append(lines,
 			fmt.Sprintf("export WORKSPACE=%s", tmuxShellQuote(opts.workspace)),
-			`if [ ! -e ./home ] || [ -L ./home ]; then ln -sfn -- "${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}" ./home; fi`,
 			// "mkdir -p ./skills ./projects",
 		)
 	}
@@ -3170,33 +3456,48 @@ func initPaneEnv(opts paneEnvOpts) {
 	if strings.TrimSpace(opts.initScript) != "" {
 		lines = append(lines, opts.initScript)
 	}
-	lines = append(lines, agentBootLines(opts.agentType, opts.allowAllActions, shortID)...)
+	bootAgentNorm := normalizeAgentType(opts.agentType)
+	if bootAgentNorm != "claude" && bootAgentNorm != "cicy-claude" && bootAgentNorm != "codex" {
+		lines = append(lines, "clear")
+	}
+	lines = append(lines, agentBootLines(opts.agentType, opts.allowAllActions, opts.replyInChinese, shortID, opts.defaultModel)...)
 
 	// 将启动脚本写入 workspace，避免散落到 /tmp。
-	// source boot.sh may happen inside zsh on macOS, but the generated body relies
-	// on bash semantics. Re-enter through bash so manual/source startup still works.
-	script := "#!/usr/bin/env bash\n\n" +
-		"if [ -z \"${BASH_VERSION:-}\" ]; then\n" +
-		"  _cicy_boot_dir=\"$PWD\"\n" +
-		"  bash -lc 'cd \"$1\" && source ./boot.sh' bash \"$_cicy_boot_dir\"\n" +
-		"  _cicy_boot_status=$?\n" +
-		"  unset _cicy_boot_dir\n" +
-		"  return \"$_cicy_boot_status\" 2>/dev/null || exit \"$_cicy_boot_status\"\n" +
-		"fi\n\n" +
-		"_cicy_boot_script=\"${BASH_SOURCE:-$0}\"\n" +
-		"_cicy_boot_dir=\"$(cd \"$(dirname \"$_cicy_boot_script\")\" && pwd)\"\n" +
-		"cd \"$_cicy_boot_dir\"\n\n" +
-		strings.Join(lines, "\n") + "\n" +
-		"unset _cicy_boot_script _cicy_boot_dir\n"
-	scriptPath := filepath.Join(opts.workspace, "boot.sh")
+	// Claude boot scripts are kept intentionally small/readable; other agents keep the
+	// bash re-entry wrapper because their generated bodies may rely on being sourced
+	// from non-bash shells on macOS.
+	script := "#!/usr/bin/env bash\n\n"
+	if bootAgentNorm == "claude" || bootAgentNorm == "cicy-claude" || bootAgentNorm == "codex" {
+		script += strings.Join(lines, "\n") + "\n"
+	} else {
+		script += "if [ -z \"${BASH_VERSION:-}\" ]; then\n" +
+			"  _cicy_boot_script_path=\"$PWD/.cicy/boot.sh\"\n" +
+			"  bash \"$_cicy_boot_script_path\"\n" +
+			"  _cicy_boot_status=$?\n" +
+			"  unset _cicy_boot_script_path\n" +
+			"  return \"$_cicy_boot_status\" 2>/dev/null || exit \"$_cicy_boot_status\"\n" +
+			"fi\n\n" +
+			"_cicy_boot_script=\"${BASH_SOURCE:-$0}\"\n" +
+			"_cicy_runtime_dir=\"$(cd \"$(dirname \"$_cicy_boot_script\")\" && pwd)\"\n" +
+			"export CICY_RUNTIME_DIR=\"$_cicy_runtime_dir\"\n" +
+			"_cicy_workspace_dir=\"$(cd \"$_cicy_runtime_dir/..\" && pwd)\"\n" +
+			"cd \"$_cicy_workspace_dir\"\n\n" +
+			strings.Join(lines, "\n") + "\n" +
+			"unset _cicy_boot_script _cicy_runtime_dir _cicy_workspace_dir\n"
+	}
+	scriptPath := filepath.Join(workspaceRuntimeDir(opts.workspace), "boot.sh")
 	if strings.TrimSpace(opts.workspace) == "" {
 		scriptPath = fmt.Sprintf("/tmp/init_pane_%s.sh", strings.ReplaceAll(pid, ":", "_"))
-	} else if err := os.MkdirAll(opts.workspace, 0755); err != nil {
+	} else if err := ensureRuntimeDir(workspaceRuntimeDir(opts.workspace), 0755); err != nil {
 		log.Printf("[init] failed to ensure workspace for script: %v", err)
 		return
 	}
 	if err := os.WriteFile(scriptPath, []byte(script), 0700); err != nil {
 		log.Printf("[init] failed to write script: %v", err)
+		return
+	}
+	if err := ensureRuntimeFile(scriptPath, 0700); err != nil {
+		log.Printf("[init] failed to set script ownership: %v", err)
 		return
 	}
 	log.Printf("[init] v1 pane %s script path=%s\n%s", pid, scriptPath, script)
@@ -3205,9 +3506,9 @@ func initPaneEnv(opts paneEnvOpts) {
 	// visible/interactive. Wait for the prompt marker before sending boot.sh.
 	if waitForShellPromptReady(pid) {
 		log.Printf("[init] shell prompt ready for %s", shortPaneID(pid))
-		runTmux("send-keys", "-t", pid, "source boot.sh", "Enter")
+		runTmux("send-keys", "-t", pid, "bash ./.cicy/boot.sh", "Enter")
 	} else {
-		log.Printf("[init] shell prompt not confirmed for %s, skip auto source boot.sh", shortPaneID(pid))
+		log.Printf("[init] shell prompt not confirmed for %s, skip auto source .cicy/boot.sh", shortPaneID(pid))
 		return
 	}
 	if normalizeAgentType(opts.agentType) == "claude" || normalizeAgentType(opts.agentType) == "cicy-claude" {
@@ -3302,8 +3603,18 @@ func runPaneSendWorker(paneID string, worker *paneSendWorker) {
 	}
 }
 
-func sendTextToPane(winID, text string) error {
+func sendTextToPane(winID, text string, submit bool) error {
 	winID = normPaneID(winID)
+	if !submit {
+		if strings.TrimSpace(text) == "" {
+			return newTmuxSendError("text required", http.StatusBadRequest, false)
+		}
+		log.Printf("[tmux-send] pane=%s mode=text-no-submit text=%q", shortPaneID(winID), text)
+		if _, err := runTmux("send-keys", "-t", winID, "-l", text); err != nil {
+			return newTmuxSendError("failed to send text without submit: "+err.Error(), http.StatusInternalServerError, false)
+		}
+		return nil
+	}
 	req := paneSendRequest{
 		text:   text,
 		result: make(chan error, 1),
@@ -3390,7 +3701,11 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if text, ok := req["text"].(string); ok && text != "" {
-		if err := sendTextToPane(winID, text); err != nil {
+		submit := true
+		if raw, ok := req["submit"].(bool); ok {
+			submit = raw
+		}
+		if err := sendTextToPane(winID, text, submit); err != nil {
 			if sendErr, ok := err.(*tmuxSendError); ok {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(sendErr.StatusCode)
@@ -3421,6 +3736,9 @@ func handleSendKeys(w http.ResponseWriter, r *http.Request) {
 	var req M
 	readBody(r, &req)
 	winID, _ := req["win_id"].(string)
+	if strings.TrimSpace(winID) == "" {
+		winID, _ = req["pane_id"].(string)
+	}
 	winID = normPaneID(winID)
 	if winID == "" {
 		httpErr(w, http.StatusBadRequest, "win_id required")
@@ -3499,8 +3817,7 @@ func handleWindows(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, 400, "session required")
 			return
 		}
-		home, _ := os.UserHomeDir()
-		workersDir := filepath.Join(home, "workers", body.Session)
+		workersDir := filepath.Join(cicyWorkersDir, body.Session)
 		_ = os.MkdirAll(workersDir, 0755)
 		args := []string{"new-window", "-c", workersDir, "-t", body.Session}
 		if body.Name != "" {
@@ -3772,7 +4089,7 @@ func handleSendWait(w http.ResponseWriter, r *http.Request) {
 		agentID, req.Timeout, baseline.TurnID, baseline.Status)
 
 	sentAt := time.Now().UTC()
-	if err := sendTextToPane(paneID, req.Text); err != nil {
+	if err := sendTextToPane(paneID, req.Text, true); err != nil {
 		log.Printf("[send-wait] pane=%s send failed: %v", agentID, err)
 		J(w, M{"success": false, "pane_id": agentID, "question": req.Text, "error": err.Error()})
 		return

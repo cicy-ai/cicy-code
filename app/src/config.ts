@@ -1,7 +1,8 @@
 
 const LS_API_BASE = 'cicy_api_base';
 const SS_HOST_HOME = 'cicy_host_home';
-const DEFAULT_HOST_HOME = import.meta.env.VITE_HOST_HOME || '/home/w3c_offical';
+const DEFAULT_CICY_ROOT = '~/cicy-ai';
+const DEFAULT_HOST_HOME = import.meta.env.VITE_HOST_HOME || DEFAULT_CICY_ROOT;
 const APP_VERSION = '2.0.1';
 
 function inferApiBase(): string {
@@ -95,6 +96,10 @@ export function toTildePath(path: string): string {
   return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
 }
 
+export function defaultWorkerWorkspace(paneId: string): string {
+  return `${DEFAULT_CICY_ROOT}/workers/${paneId}`;
+}
+
 // Workspace: Pro → u-xxx-api, Trial → u-xxx-free-api
 const host = typeof window !== 'undefined' ? window.location.hostname : '';
 const isWorkspace = /^(u-.+)-(app|free-app)\.cicy-ai\.com$/.test(host);
@@ -125,9 +130,13 @@ console.log('[config] version', config.version);
 export const urls = {
   ttyd:       (paneId: string, token: string, mode = 1) => `${config.ttydBase}/ttyd/${paneId}/?token=${token}&mode=${mode}`,
   ttydOpen:   (paneId: string, token: string)            => `${config.ttydBase}/ttyd/${paneId}/?token=${token}`,
-  codeServer: (folder: string, token?: string) => {
+  codeServer: (folder: string, token?: string, pageClientId?: string, pagePaneId?: string) => {
     const f = toRuntimeAbsolutePath(folder);
-    return `${config.codeServerBase}/?folder=${encodeURIComponent(f)}${token ? '&token=' + token : ''}`;
+    const params = [`folder=${encodeURIComponent(f)}`];
+    if (token) params.push(`token=${encodeURIComponent(token)}`);
+    if (pageClientId) params.push(`client_id=${encodeURIComponent(pageClientId)}`);
+    if (pagePaneId) params.push(`page_pane=${encodeURIComponent(pagePaneId)}`);
+    return `${config.codeServerBase}/?${params.join('&')}`;
   },
   openClaw:   (token?: string)                           => `${config.openClawBase}${token ? `?token=${encodeURIComponent(token)}` : ''}`,
   desktop:    (token: string)                            => `${config.desktopBase}/?token=${token}`,

@@ -23,6 +23,7 @@ var (
 	upgrader      = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 	publicMode    bool
 	devMode       bool
+	labMode       bool
 	desktopMode   bool
 	auditMode     bool
 	cnMirror      bool
@@ -42,7 +43,7 @@ func main() {
 			fmt.Println("cicy-code " + version)
 			os.Exit(0)
 		case arg == "--help" || arg == "-h":
-			fmt.Println(`cicy-code - AI agent collaboration tool (local, SQLite)
+			fmt.Printf(`cicy-code - AI agent collaboration tool (local, SQLite)
 
 Usage: cicy-code [options]
 
@@ -51,6 +52,7 @@ Options:
   --version, -v           Show version
   --desktop               Start in desktop mode
   --dev                   Development mode
+  --lab                   Enable lab mode
   --public                Listen on 0.0.0.0 (default: 127.0.0.1)
   --audit                 Enable audit mode
   --cn                    Use Chinese mirrors
@@ -58,15 +60,17 @@ Options:
                           e.g. --agents=hermes
                           Use --agents=all for all agents
 
-Environment:
-  PORT          API port (default: 8008)
-  CS_PORT       code-server port (default: 8002)
-  SQLITE_PATH   SQLite database file (default: ~/.cicy/data-v1.db)`)
+	Environment:
+	  PORT          API port (default: 8008)
+	  CS_PORT       code-server port (default: 8002)
+	  SQLITE_PATH   SQLite database file (default: %s)`, defaultSQLitePath())
 			os.Exit(0)
 		case arg == "--desktop":
 			desktopMode = true
 		case arg == "--dev":
 			devMode = true
+		case arg == "--lab":
+			labMode = true
 		case arg == "--public":
 			publicMode = true
 		case arg == "--audit":
@@ -80,6 +84,7 @@ Environment:
 		}
 	}
 
+	ensureRuntimeUnprivileged()
 	initKV()
 	initRedis()
 	initDB()
@@ -91,9 +96,9 @@ Environment:
 		publicMode = true
 	}
 	// Any managed runtime with master envs should self-register.
-	startContainerRegisterLoop()
-
 	checkEnv()
+	startContainerRegisterLoop()
+	startCOSActiveVersionHeartbeat()
 
 	go startWatcher()
 	go startTmuxHealth()
@@ -146,7 +151,11 @@ Environment:
 
 	// Chat
 	http.HandleFunc("/api/chat/push", wa(handleChatPush))
+	http.HandleFunc("/api/chat/ping-client", wa(handleChatPingClient))
 	http.HandleFunc("/api/chat/ws", handleChatWS)
+	http.HandleFunc("/code-server-inject.js", serveCodeServerInjectJS)
+	http.HandleFunc("/api/code-server/page-context", wa(handleCodeServerPageContext))
+	http.HandleFunc("/api/code-server/send-path", handleCodeServerSendPath)
 	http.HandleFunc("/api/chat/clients", wa(handleWsClients))
 	http.HandleFunc("/api/chat/debug", wa(handleChatDebug))
 	http.HandleFunc("/api/chat/webhook", corsM(handleChatWebhook))
@@ -171,6 +180,8 @@ Environment:
 	http.HandleFunc("/api/notify", wa(handleNotify))
 	http.HandleFunc("/api/cicy/files", wa(handleCicyFiles))
 	http.HandleFunc("/api/cicy/file", wa(handleCicyFile))
+	http.HandleFunc("/assets/files", wa(handleAssetFileUpload))
+	http.HandleFunc("/assets/files/", wa(handleAssetFile))
 	http.HandleFunc("/api/notify/stream", corsM(func(w http.ResponseWriter, r *http.Request) {
 		t := r.URL.Query().Get("token")
 		if t == "" || !verifyToken(t) {
@@ -194,6 +205,7 @@ Environment:
 	http.HandleFunc("/api/agents/by-pane/", wa(handleAgentsByPane))
 	http.HandleFunc("/api/agents/pane/", wa(handleAgentsByPane))
 	http.HandleFunc("/api/agents/inspector/", wa(handleAgentInspectorByPane))
+	http.HandleFunc("/api/agents/current-history/", wa(handleAgentCurrentHistoryByPane))
 	http.HandleFunc("/api/agents/history-sync/", wa(handleAgentHistorySyncByPane))
 	http.HandleFunc("/api/agents/history-view/", wa(handleAgentHistoryViewByPane))
 	http.HandleFunc("/api/agents/bind", wa(handleAgentBind))
@@ -244,6 +256,7 @@ Environment:
 	http.HandleFunc("/api/settings/global", wa(handleSettings))
 	http.HandleFunc("/api/file-exists", wa(handleFileExists))
 	http.HandleFunc("/api/utils/file/exists", wa(handleFileExists))
+	http.HandleFunc("/api/utils/translateText", wa(handleTranslateText))
 	http.HandleFunc("/api/correctEnglish", wa(handleCorrectEnglish))
 
 	// TTS
@@ -393,8 +406,7 @@ Environment:
 }
 
 func getFirstToken() string {
-	home, _ := os.UserHomeDir()
-	gpath := home + "/global.json"
+	gpath := cicyGlobalJSONPath
 	if token := strings.TrimSpace(loadAPIToken()); token != "" {
 		_, _ = ensureGlobalAPIToken(gpath, token)
 		return token
@@ -411,17 +423,6 @@ func getFirstToken() string {
 }
 
 func ensureGlobalAPIToken(globalPath string, preferredToken ...string) (string, error) {
-	lockPath := globalPath + ".lock"
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		return "", err
-	}
-	defer lockFile.Close()
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		return "", err
-	}
-	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-
 	cfg := map[string]interface{}{}
 	if data, err := os.ReadFile(globalPath); err == nil {
 		if strings.TrimSpace(string(data)) != "" {

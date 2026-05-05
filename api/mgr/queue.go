@@ -184,7 +184,7 @@ func dispatchQueue(paneID string) {
 		if types[i] == "command" {
 			runTmux("send-keys", "-t", paneID, msg, "Enter")
 		} else {
-			if err := sendTextToPane(paneID, msg); err != nil {
+			if err := sendTextToPane(paneID, msg, true); err != nil {
 				log.Printf("[queue] failed to dispatch msg id=%d to %s: %v", ids[i], shortPaneID(paneID), err)
 				continue
 			}

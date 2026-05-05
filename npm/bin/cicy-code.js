@@ -7,6 +7,8 @@ const https = require('https');
 const pkg = require('../package.json');
 const binPath = path.join(__dirname, 'cicy-code');
 const os = require('os');
+const CICY_ROOT_DIR = path.join(os.homedir(), 'cicy-ai');
+const CICY_GLOBAL_JSON_PATH = path.join(CICY_ROOT_DIR, 'global.json');
 
 const cn = process.argv.includes('--cn') || process.env.CN_MIRROR === '1';
 const desktopMode = process.argv.includes('--desktop');
@@ -102,8 +104,7 @@ async function main() {
 
 function getToken() {
   try {
-    const globalJson = path.join(os.homedir(), 'global.json');
-    const data = JSON.parse(fs.readFileSync(globalJson, 'utf8'));
+    const data = JSON.parse(fs.readFileSync(CICY_GLOBAL_JSON_PATH, 'utf8'));
     return data.api_token || '';
   } catch { return ''; }
 }

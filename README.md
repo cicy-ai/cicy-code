@@ -29,7 +29,7 @@ cicy-code/
 │   └── resources/          后端静态资源
 ├── npm/                    npm 发布包与启动器
 ├── skills/                 本地 CLI：cicy-code / cicy-master
-├── code-server-extension/  code-server / VS Code 扩展源码
+│   ├── code-server-extension/ code-server / VS Code 扩展源码
 ├── docs/                   当前文档与历史记录
 ├── dev.py                  本地开发入口
 ├── build.sh                标准构建入口
@@ -208,7 +208,7 @@ cd api && make asset
 
 - `npm/bin/cicy-code.js`：npm 启动器
 - `npm/scripts/install.js`：按平台下载二进制
-- `code-server-extension/`：发送文件路径给当前 agent 的扩展源码
+- `api/code-server-extension/`：发送文件路径给当前 agent 的扩展源码
 
 ## worker 与 agent
 
@@ -318,7 +318,7 @@ export CICY_NODES_FILE=~/cicy-ai/cicy-node.json
 
 ## code-server 扩展
 
-`code-server-extension` 提供两个用户动作：
+`api/code-server-extension` 提供两个用户动作：
 
 - 资源管理器右键：发送路径给当前 agent
 - 编辑器右键：发送当前文档/选区给当前 agent
@@ -329,7 +329,7 @@ export CICY_NODES_FILE=~/cicy-ai/cicy-node.json
 
 与当前页面所属的 `cicy-code` 后端通信。
 
-仓库里根目录和 `api/code-server-extension/` 下各有一份同名扩展目录；当前代码库保留了这两份副本，维护时应保持同步。
+当前只保留 `api/code-server-extension/` 这一套扩展源码与打包产物。
 
 ## 已知差异
 

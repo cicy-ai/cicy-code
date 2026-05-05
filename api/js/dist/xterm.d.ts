@@ -4,15 +4,6 @@ import { lib } from "libapps";
 interface DisposableLike {
     dispose(): void;
 }
-interface ImageRectOverlay {
-    marker: {
-        line: number;
-    } | null;
-    element: HTMLDivElement;
-    widthCells: number;
-    heightCells: number;
-    col: number;
-}
 export declare class Xterm {
     elem: HTMLElement;
     term: XtermTerminal;
@@ -27,7 +18,6 @@ export declare class Xterm {
     resizeDisposable: DisposableLike | null;
     renderDisposable: DisposableLike | null;
     resizeObserver: ResizeObserver | null;
-    imageOverlays: ImageRectOverlay[];
     initialFitDone: boolean;
     isComposing: boolean;
     pasteCallback: ((input: string) => void) | null;
@@ -41,8 +31,6 @@ export declare class Xterm {
     private fitSoon;
     private _fitDebounce;
     private _resizeMask;
-    private handleImageOsc;
-    private layoutImageOverlays;
     info(): {
         columns: number;
         rows: number;

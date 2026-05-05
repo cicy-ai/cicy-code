@@ -1,0 +1,55 @@
+{
+  "name": "cicy-code-server-bridge",
+  "displayName": "CiCy Code Server Bridge",
+  "description": "Explorer context actions for sending file paths to the current CiCy agent.",
+  "version": "0.0.1",
+  "publisher": "cicy-ai",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:cicy.sendPathToCurrentAgent",
+    "onCommand:cicy.sendActiveDocumentToCurrentAgent"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cicy.sendPathToCurrentAgent",
+        "title": "发送给当前 agent"
+      },
+      {
+        "command": "cicy.sendActiveDocumentToCurrentAgent",
+        "title": "发送当前文档给 agent"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "cicy.sendPathToCurrentAgent",
+          "when": "explorerResourceIsFolder || resourceScheme == file",
+          "group": "navigation@1000"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "cicy.sendActiveDocumentToCurrentAgent",
+          "group": "navigation@1000"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc -p ./",
+    "package": "npx @vscode/vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "@types/vscode": "^1.100.0",
+    "typescript": "^5.8.3"
+  }
+}

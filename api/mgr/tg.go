@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -52,8 +51,7 @@ type tgReplyPushHook struct {
 }
 
 func getGlobalTGConfig() (token, chatID string) {
-	home, _ := os.UserHomeDir()
-	raw, _ := os.ReadFile(filepath.Join(home, "global.json"))
+	raw, _ := os.ReadFile(cicyGlobalJSONPath)
 	var g map[string]interface{}
 	json.Unmarshal(raw, &g)
 	token, _ = g["TG_BOT_TOKEN"].(string)
@@ -332,7 +330,7 @@ func routeTelegramMessage(cfg tgPaneConfig, text string) (string, error) {
 	status := currentPaneStatusForTelegram(paneID, agentType)
 
 	if agentType == "codex" {
-		if err := sendTextToPane(paneID, text); err != nil {
+		if err := sendTextToPane(paneID, text, true); err != nil {
 			return "", err
 		}
 		if _, err := insertTelegramQueueItem(paneID, text, "sent"); err != nil {

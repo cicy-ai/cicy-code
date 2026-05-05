@@ -77,7 +77,6 @@ This file documents the current repo reality for code agents working inside `cic
 
 There are two extension folders in the repo:
 
-- `code-server-extension/`
 - `api/code-server-extension/`
 
 They currently exist as duplicated copies and should stay aligned when edited.

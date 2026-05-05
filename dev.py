@@ -11,13 +11,23 @@ import urllib.error
 import base64
 import tempfile
 import shutil
+from pathlib import Path
 
 PORT = 8008
-SQLITE_PATH = os.environ.get("SQLITE_PATH", f"{os.path.expanduser('~')}/.cicy/data-v1.db")
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 API_DIR = os.path.join(ROOT_DIR, "api")
-GLOBAL_JSON_PATH = os.path.expanduser("~/global.json")
-PROXY_JSON_PATH = os.path.expanduser("~/proxy.json")
+CICY_ROOT_DIR = os.path.expanduser("~/cicy-ai")
+CICY_STATE_DIR = os.path.join(CICY_ROOT_DIR, ".cicy")
+HOST_PROJECTS_DIR = os.path.expanduser("~/projects")
+CICY_DOCKER_HOMES_DIR = os.path.join(CICY_ROOT_DIR, "docker-homes")
+CICY_GLOBAL_JSON_PATH = os.path.join(CICY_ROOT_DIR, "global.json")
+CICY_PROXY_JSON_PATH = os.path.join(CICY_ROOT_DIR, "proxy.json")
+DOCKER_HOME_DIR = "/home/cicy"
+DOCKER_PROJECTS_DIR = f"{DOCKER_HOME_DIR}/projects"
+LEGACY_PROXY_JSON_PATH = os.path.expanduser("~/proxy.json")
+SQLITE_PATH = os.environ.get("SQLITE_PATH", os.path.join(CICY_STATE_DIR, "data-v1.db"))
+GLOBAL_JSON_PATH = CICY_GLOBAL_JSON_PATH
+PROXY_JSON_PATH = CICY_PROXY_JSON_PATH
 VERSION_SYNC_SCRIPT = os.path.join(ROOT_DIR, "scripts", "sync-version.py")
 
 AI_PROVIDER_ALIASES = {
@@ -51,7 +61,8 @@ def default_ai_provider_config(name, data):
             "defaultOpencodeModel": "gpt-5.4",
             "defaultClaudeModel": "opus[1m]",
             "codexModel": "gpt-5.4",
-            "openclawModel": "claude-sonnet-4-6",
+            "openclawModel": "gpt-5.5",
+            "hermesModel": "gpt-5.5",
         },
         "cicyAi": {
             "apiKey": data.get("cicyAiapikey", ""),
@@ -60,7 +71,8 @@ def default_ai_provider_config(name, data):
             "defaultOpencodeModel": "gpt-5.4",
             "defaultClaudeModel": "opus[1m]",
             "codexModel": "gpt-5.4",
-            "openclawModel": "claude-sonnet-4-6",
+            "openclawModel": "gpt-5.5",
+            "hermesModel": "gpt-5.5",
         },
     }
     return defaults.get(canonical, {})
@@ -97,7 +109,8 @@ def get_ai_env_defaults(provider_name=""):
         "CICY_DEFAULT_OPENCODE_MODEL": os.environ.get("CICY_DEFAULT_OPENCODE_MODEL") or os.environ.get("CICY_DEFAULT_MODEL") or config.get("defaultOpencodeModel") or config.get("defaultModel", "gpt-5.4"),
         "CICY_DEFAULT_CLAUDE_MODEL": os.environ.get("CICY_DEFAULT_CLAUDE_MODEL") or os.environ.get("CICY_CLAUDE_MODEL") or config.get("defaultClaudeModel") or config.get("claudeModel", "opus[1m]"),
         "CICY_CODEX_MODEL": os.environ.get("CICY_CODEX_MODEL") or config.get("codexModel", "gpt-5.4"),
-        "CICY_OPENCLAW_MODEL": os.environ.get("CICY_OPENCLAW_MODEL") or config.get("openclawModel", "claude-sonnet-4-6"),
+        "CICY_OPENCLAW_MODEL": os.environ.get("CICY_OPENCLAW_MODEL") or config.get("openclawModel", "gpt-5.5"),
+        "CICY_HERMES_MODEL": os.environ.get("CICY_HERMES_MODEL") or config.get("hermesModel", "gpt-5.5"),
     }
 
 def get_cicy_api_key():
@@ -114,12 +127,14 @@ def build_minimal_runtime_global_json():
     return data
 
 def load_proxy_json():
-    try:
-        with open(PROXY_JSON_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    for path in (PROXY_JSON_PATH, LEGACY_PROXY_JSON_PATH):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            continue
+    return {}
 
 def build_runtime_proxy_json(shared_host="host.docker.internal"):
     source = load_proxy_json()
@@ -171,23 +186,86 @@ def build_runtime_proxy_json(shared_host="host.docker.internal"):
         return {}
     return {"ssh_proxies": runtime_profiles}
 
-def build_dev_runtime_home(container_name):
-    safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in container_name).strip("-") or "cicy-code-dev"
-    home_dir = os.path.join(tempfile.gettempdir(), safe_name)
+def build_dev_runtime_home(container_name, home_dir=""):
+    if home_dir:
+        home_dir = os.path.abspath(os.path.expanduser(home_dir))
+    else:
+        os.makedirs(CICY_DOCKER_HOMES_DIR, exist_ok=True)
+        safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in str(container_name or "").strip()).strip("-") or "cicy-code-dev"
+        home_dir = os.path.join(CICY_DOCKER_HOMES_DIR, safe_name)
     os.makedirs(home_dir, exist_ok=True)
-    global_json_path = os.path.join(home_dir, "global.json")
+    for source_name in (".tmux.conf", ".cicy_tmux.conf"):
+        source_path = os.path.join(API_DIR, "mgr", source_name)
+        target_path = os.path.join(home_dir, source_name)
+        if os.path.isfile(source_path):
+            shutil.copy2(source_path, target_path)
+    bashrc_path = os.path.join(home_dir, ".bashrc")
+    bashrc_line = '[ -f "$HOME/.cicy_tmux.conf" ] && source "$HOME/.cicy_tmux.conf"'
+    bashrc = ""
+    if os.path.isfile(bashrc_path):
+        try:
+            with open(bashrc_path, "r", encoding="utf-8") as f:
+                bashrc = f.read()
+        except Exception:
+            bashrc = ""
+    if bashrc_line not in bashrc:
+        with open(bashrc_path, "a", encoding="utf-8") as f:
+            if bashrc and not bashrc.endswith("\n"):
+                f.write("\n")
+            f.write(bashrc_line + "\n")
+    runtime_root_dir = os.path.join(home_dir, "cicy-ai")
+    os.makedirs(runtime_root_dir, exist_ok=True)
+    global_json_path = os.path.join(runtime_root_dir, "global.json")
     with open(global_json_path, "w", encoding="utf-8") as f:
         json.dump(build_minimal_runtime_global_json(), f, ensure_ascii=False, indent=2)
         f.write("\n")
-    proxy_json_path = os.path.join(home_dir, "proxy.json")
+    os.chmod(global_json_path, 0o644)
+    proxy_json_path = os.path.join(runtime_root_dir, "proxy.json")
     runtime_proxy_json = build_runtime_proxy_json()
     if runtime_proxy_json:
         with open(proxy_json_path, "w", encoding="utf-8") as f:
             json.dump(runtime_proxy_json, f, ensure_ascii=False, indent=2)
             f.write("\n")
+        os.chmod(proxy_json_path, 0o644)
     else:
         proxy_json_path = ""
     return home_dir, global_json_path, proxy_json_path
+
+def ensure_docker_home_writable(home_dir, runtime_image):
+    os.makedirs(home_dir, exist_ok=True)
+    for root, dirs, files in os.walk(home_dir):
+        for name in dirs:
+            try:
+                os.chmod(os.path.join(root, name), 0o777)
+            except OSError:
+                pass
+        for name in files:
+            try:
+                os.chmod(os.path.join(root, name), 0o666)
+            except OSError:
+                pass
+        try:
+            os.chmod(root, 0o777)
+        except OSError:
+            pass
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--user",
+            "root",
+            "--entrypoint",
+            "sh",
+            "-v",
+            f"{os.path.abspath(home_dir)}:/target",
+            runtime_image,
+            "-lc",
+            "chmod -R a+rwX /target",
+        ],
+        cwd=ROOT_DIR,
+        capture_output=True,
+    )
 
 def seed_runtime_home_from_image(image_ref, home_dir):
     openclaw_dir = os.path.join(home_dir, ".openclaw")
@@ -199,7 +277,7 @@ def seed_runtime_home_from_image(image_ref, home_dir):
     temp_dir = tempfile.mkdtemp(prefix="cicy-openclaw-seed-")
     try:
         result = subprocess.run(
-            ["docker", "create", image_ref, "--public", "--agents=all"],
+            ["docker", "create", image_ref, "--public", "--agents=codex"],
             capture_output=True,
             text=True,
             cwd=ROOT_DIR,
@@ -234,13 +312,15 @@ def seed_runtime_home_from_image(image_ref, home_dir):
             subprocess.run(["docker", "rm", "-f", container_id], capture_output=True, cwd=ROOT_DIR)
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-def add_optional_file_mount(volume_args, host_path, container_path, label):
+def add_optional_file_mount(volume_args, host_path, container_path, label, read_only=True):
     resolved = os.path.abspath(os.path.expanduser(host_path))
     if not os.path.isfile(resolved):
         print(f"[dev] Skip mount missing {label}: {resolved}")
         return
-    volume_args.extend(["-v", f"{resolved}:{container_path}:ro"])
-    print(f"[dev] Mount host {label}: {resolved} -> {container_path}")
+    suffix = ":ro" if read_only else ""
+    volume_args.extend(["-v", f"{resolved}:{container_path}{suffix}"])
+    mode_label = "ro" if read_only else "rw"
+    print(f"[dev] Mount host {label} ({mode_label}): {resolved} -> {container_path}")
 
 def read_api_token_from_file(path):
     try:
@@ -435,20 +515,28 @@ def load_versions_json():
 def local_default_base_tag():
     return str(load_versions_json().get("base", "") or "").strip() or "latest"
 
+def prefer_local_base_image(image_ref):
+    value = str(image_ref or "").strip()
+    if value.startswith("ghcr.io/cicy-ai/cicy-code-base:"):
+        return f"cicy-code-base:{get_image_tag(value) or local_default_base_tag()}"
+    return value
+
 def local_default_base_image():
     data = load_global_json()
     images = data.get("images", {}) if isinstance(data, dict) else {}
     if isinstance(images, dict):
-        explicit = str(images.get("base", "") or "").strip()
+        explicit = prefer_local_base_image(images.get("base", ""))
         if explicit:
             return explicit
         repo = str(images.get("base_repository", "") or "").strip()
         tag = str(images.get("base_tag", "") or "").strip()
         if repo and tag:
+            if repo == "ghcr.io/cicy-ai/cicy-code-base":
+                return f"cicy-code-base:{tag}"
             return f"{repo}:{tag}"
     cluster = data.get("cicy-cluster", {}) if isinstance(data, dict) else {}
     if isinstance(cluster, dict):
-        explicit = str(cluster.get("base_image", "") or "").strip()
+        explicit = prefer_local_base_image(cluster.get("base_image", ""))
         if explicit:
             return explicit
     return f"cicy-code-base:{local_default_base_tag()}"
@@ -604,11 +692,44 @@ def get_pid_on_port(port):
     except Exception:
         return None
 
+def is_pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except Exception:
+        return False
+
+def wait_for_process_exit(pid, timeout=6.0, interval=0.2):
+    start = time.time()
+    while time.time() - start < timeout:
+        if not is_pid_alive(pid):
+            return True
+        time.sleep(interval)
+    return not is_pid_alive(pid)
+
 def kill_process(pid):
+    pid = str(pid or "").strip()
+    if not pid:
+        return True
     try:
         os.kill(int(pid), signal.SIGTERM)
+    except ProcessLookupError:
+        return True
     except Exception:
-        pass
+        return False
+    if wait_for_process_exit(pid, timeout=6.0, interval=0.2):
+        return True
+    try:
+        os.kill(int(pid), signal.SIGKILL)
+    except ProcessLookupError:
+        return True
+    except Exception:
+        return False
+    return wait_for_process_exit(pid, timeout=2.0, interval=0.1)
 
 def wait_for_probe(url, timeout=180, interval=1):
     start = time.time()
@@ -765,15 +886,15 @@ def run_docker_build(version_override=""):
     print(f"[dev] Updated {GLOBAL_JSON_PATH} -> images.runtime={target_image}")
     print(f"[dev] Updated {GLOBAL_JSON_PATH} -> images.runtime_repository={repository}")
     print(f"[dev] Updated {GLOBAL_JSON_PATH} -> images.runtime_tag={version}")
-    print(f"[dev] Next deploy: use ~/global.json images.runtime")
+    print(f"[dev] Next deploy: use {CICY_GLOBAL_JSON_PATH} images.runtime")
     sys.exit(0)
 
-def run_docker(ports, container_name="cicy-code-dev", agents="", mount_projects=False, projects_dir="", mount_home=False, home_dir=""):
+def run_docker(ports, container_name="cicy-code-dev", agents="", mount_projects=True, projects_dir="", mount_home=False, home_dir=""):
     run_version_sync()
 
     runtime_image = get_current_runtime_image()
     if not runtime_image:
-        print("[dev] ERROR: No runtime image configured. Set images.runtime in ~/global.json")
+        print(f"[dev] ERROR: No runtime image configured. Set images.runtime in {CICY_GLOBAL_JSON_PATH}")
         sys.exit(1)
     print(f"[dev] Runtime image: {runtime_image}")
 
@@ -790,7 +911,13 @@ def run_docker(ports, container_name="cicy-code-dev", agents="", mount_projects=
     # Tag local build as the configured runtime image
     subprocess.run(["docker", "tag", f"cicy-code:{build_tag}", runtime_image], capture_output=True)
     subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
-    dev_home_dir, dev_global_json_path, dev_proxy_json_path = build_dev_runtime_home(container_name)
+    host_home_path = os.path.abspath(os.path.expanduser(home_dir)) if home_dir else ""
+    dev_home_dir, dev_global_json_path, dev_proxy_json_path = build_dev_runtime_home(
+        container_name,
+        host_home_path if mount_home and host_home_path else "",
+    )
+    if mount_home:
+        ensure_docker_home_writable(dev_home_dir, runtime_image)
 
     # Pull if not available locally
     result = subprocess.run(["docker", "image", "inspect", runtime_image], capture_output=True)
@@ -824,22 +951,16 @@ def run_docker(ports, container_name="cicy-code-dev", agents="", mount_projects=
     if local_token:
         env_vars.extend(["-e", f"CICY_API_TOKEN={local_token}"])
     volume_args = []
-    host_home_dir = ""
     if mount_home:
-        host_home_dir = os.path.abspath(os.path.expanduser(home_dir or f"~/docker-homes/{container_name}"))
-        os.makedirs(host_home_dir, exist_ok=True)
-        volume_args.extend(["-v", f"{host_home_dir}:/home/cicy"])
-        print(f"[dev] Mount host home: {host_home_dir} -> /home/cicy")
+        os.makedirs(dev_home_dir, exist_ok=True)
+        volume_args.extend(["-v", f"{dev_home_dir}:{DOCKER_HOME_DIR}"])
+        print(f"[dev] Mount runtime home: {dev_home_dir} -> {DOCKER_HOME_DIR}")
     if mount_projects:
-        host_projects_dir = os.path.abspath(os.path.expanduser(projects_dir or "~/projects"))
+        host_projects_dir = os.path.abspath(os.path.expanduser(projects_dir or HOST_PROJECTS_DIR))
         os.makedirs(host_projects_dir, exist_ok=True)
-        if mount_home and host_home_dir and os.path.realpath(host_projects_dir).startswith(os.path.realpath(host_home_dir) + os.sep):
-            print(f"[dev] Host projects already inside mounted home: {host_projects_dir}")
-        else:
-            volume_args.extend(["-v", f"{host_projects_dir}:/home/cicy/projects"])
-        print(f"[dev] Mount host projects: {host_projects_dir} -> /home/cicy/projects")
-    add_optional_file_mount(volume_args, dev_proxy_json_path, "/home/cicy/proxy.json", "proxy.json")
-    agents_flag = str(agents or "").strip() or "all"
+        volume_args.extend(["-v", f"{host_projects_dir}:{DOCKER_PROJECTS_DIR}"])
+        print(f"[dev] Mount host projects: {host_projects_dir} -> {DOCKER_PROJECTS_DIR}")
+    agents_flag = str(agents or "").strip() or "codex"
     run_cmd = [
         "docker",
         "run",
@@ -857,8 +978,13 @@ def run_docker(ports, container_name="cicy-code-dev", agents="", mount_projects=
     ]
     print(f"[dev] docker run: {' '.join(run_cmd)}")
     docker_run_started_at = time.time()
-    subprocess.run(run_cmd)
-    subprocess.run(["docker", "cp", dev_global_json_path, f"{container_name}:/home/cicy/global.json"], capture_output=True)
+    run_result = subprocess.run(run_cmd, cwd=ROOT_DIR)
+    if run_result.returncode != 0:
+        print("[dev] docker run failed")
+        sys.exit(run_result.returncode or 1)
+    subprocess.run(["docker", "cp", dev_global_json_path, f"{container_name}:{CICY_GLOBAL_JSON_PATH}"], capture_output=True, cwd=ROOT_DIR)
+    if dev_proxy_json_path:
+        subprocess.run(["docker", "cp", dev_proxy_json_path, f"{container_name}:{CICY_PROXY_JSON_PATH}"], capture_output=True, cwd=ROOT_DIR)
     print(f"[dev] Docker started on port {ports}")
 
     probe_url = f"http://localhost:{ports}/api/health"
@@ -990,42 +1116,204 @@ def run_cloudrun():
     sys.exit(result.returncode)
 
 def run_ttyd_assets():
+    os.environ["GOPROXY"] = "https://goproxy.cn,direct"
     print("[dev] Rebuilding ttyd embedded assets via `make asset`...")
     run_checked(["make", "asset"], cwd=API_DIR)
     print("[dev] ttyd assets rebuilt.")
     sys.exit(0)
 
 def rebuild_ttyd_assets_for_local_dev():
+    os.environ["GOPROXY"] = "https://goproxy.cn,direct"
     print("[dev] Refreshing ttyd embedded assets for local dev...")
     run_checked(["make", "asset"], cwd=API_DIR)
     print("[dev] ttyd embedded assets refreshed.")
 
+
+def start_local_dev_detached(cicy_bin):
+    logs_dir = os.path.join(ROOT_DIR, ".dev-logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    log_path = os.path.join(logs_dir, "cicy-code.log")
+    Path(log_path).touch(exist_ok=True)
+
+    run_env = os.environ.copy()
+    run_env["PATH"] = f"{API_DIR}:{run_env.get('PATH', '')}"
+
+    with open(log_path, "ab", buffering=0) as log_file:
+        process = subprocess.Popen(
+            [cicy_bin, "--public", "--dev", "--lab"],
+            env=run_env,
+            cwd=ROOT_DIR,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+
+    print(f"[dev] cicy-code started in background (pid={process.pid})")
+    print(f"[dev] Log file: {log_path}")
+    print(f"[dev] Tailing logs. Press Ctrl+C to stop tailing; cicy-code keeps running.")
+    tail_proc = subprocess.Popen(["tail", "-f", log_path], cwd=ROOT_DIR)
+    try:
+        tail_proc.wait()
+    except KeyboardInterrupt:
+        print("\n[dev] Stopped tail. cicy-code is still running.")
+        tail_proc.terminate()
+        try:
+            tail_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            tail_proc.kill()
+            tail_proc.wait()
+
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--docker", action="store_true", help="Build and run Docker container")
-    parser.add_argument(
+    parser = argparse.ArgumentParser(
+        description=(
+            "cicy-code development entrypoint.\n\n"
+            "Default behavior with no flags:\n"
+            "  Build local dev binary, start cicy-code in background, and tail its log.\n"
+            "  Press Ctrl+C to stop tailing; cicy-code keeps running."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  python3 dev.py\n"
+            "      Start local dev server in background and tail logs.\n\n"
+            "  python3 dev.py --docker --agents codex --port 8026\n"
+            "      Build and run the configured runtime image in Docker.\n\n"
+            "  python3 dev.py --dockerBuild\n"
+            f"      Build runtime image, push it, and update {CICY_GLOBAL_JSON_PATH}.\n\n"
+            "  python3 dev.py --dockerBuild --dockerBuildVersion 1.2.3\n"
+            "      Build and push a specific runtime image tag.\n\n"
+            "  python3 dev.py --dockerVersion\n"
+            "      Show current package version and configured runtime image.\n\n"
+            "  python3 dev.py --dockerSetVersion 1.2.3\n"
+            "      Point images.runtime at an existing image tag.\n\n"
+            "  python3 dev.py --bumpVersion 1.2.3\n"
+            "      Sync all version targets to the given version.\n\n"
+            "  python3 dev.py --cloudRun\n"
+            "      Deploy the configured service to Cloud Run.\n\n"
+            "  python3 dev.py --cloudRunList\n"
+            "      List Cloud Run services in the configured project and region.\n\n"
+            "  python3 dev.py --ttydAssets\n"
+            "      Rebuild embedded ttyd static assets only; do not start cicy-code.\n"
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+
+    local_group = parser.add_argument_group("local dev")
+    local_group.add_argument(
+        "--ttydAssets",
+        "--ttyd-assets",
+        dest="ttydAssets",
+        action="store_true",
+        help="Rebuild embedded ttyd/goTTY static assets only; do not start cicy-code.",
+    )
+
+    docker_group = parser.add_argument_group("docker runtime")
+    docker_group.add_argument(
+        "--docker",
+        action="store_true",
+        help="Build local runtime image, start Docker container, wait for health check, and print access URLs.",
+    )
+    docker_group.add_argument(
+        "--agents",
+        default="",
+        help="Comma-separated agents to start with --docker. Default: codex.",
+    )
+    docker_group.add_argument(
+        "--port",
+        type=int,
+        default=8026,
+        help="Host port mapped to container port 8008 when using --docker. Default: 8026.",
+    )
+    docker_group.add_argument(
+        "--name",
+        default="cicy-code-dev",
+        help="Docker container name used by --docker. Default: cicy-code-dev.",
+    )
+    docker_group.add_argument(
+        "--mountProjects",
+        "--mount-projects",
+        dest="mountProjects",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Mount a host projects directory into ~/projects inside the container. Default: enabled.",
+    )
+    docker_group.add_argument(
+        "--projectsDir",
+        "--projects-dir",
+        dest="projectsDir",
+        default=HOST_PROJECTS_DIR,
+        help=f"Host projects directory used with --mountProjects. Default: {HOST_PROJECTS_DIR}.",
+    )
+    docker_group.add_argument(
+        "--mountHome",
+        "--mount-home",
+        dest="mountHome",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=f"Mount a host runtime home into {DOCKER_HOME_DIR} inside the container. Default: enabled.",
+    )
+    docker_group.add_argument(
+        "--homeDir",
+        "--home-dir",
+        dest="homeDir",
+        default="",
+        help="Host runtime home directory used with --mountHome. Default: ~/cicy-ai/docker-homes/<container-name>.",
+    )
+
+    image_group = parser.add_argument_group("image and version management")
+    image_group.add_argument(
         "--dockerBuild",
         "--docker-build",
         "--cloudRunBuild",
         "--cloudrun-build",
         dest="dockerBuild",
         action="store_true",
-        help="Build image, push to Docker Hub, then update ~/global.json images.runtime",
+        help=f"Build runtime image, push it to Docker Hub, and update {CICY_GLOBAL_JSON_PATH} images.runtime.",
     )
-    parser.add_argument("--dockerBuildVersion", "--docker-build-version", dest="dockerBuildVersion", default="", help="Override version tag used by --dockerBuild")
-    parser.add_argument("--dockerVersion", "--docker-version", dest="dockerVersion", action="store_true", help="Show current package version and configured images.runtime")
-    parser.add_argument("--dockerSetVersion", "--docker-set-version", dest="dockerSetVersion", default="", help="Update ~/global.json images.runtime to the specified tag without building")
-    parser.add_argument("--bumpVersion", "--bump-version", dest="bumpVersion", default="", help="Set runtime version and sync all version targets")
-    parser.add_argument("--cloudRun", "--cloudrun", dest="cloudRun", action="store_true", help="Deploy to Cloud Run using scripts/deploy-cloudrun.sh")
-    parser.add_argument("--cloudRunList", "--cloudrun-list", dest="cloudRunList", action="store_true", help="List Cloud Run services for current project/region")
-    parser.add_argument("--ttydAssets", "--ttyd-assets", dest="ttydAssets", action="store_true", help="Rebuild embedded ttyd/goTTY static assets via api/Makefile `make asset`")
-    parser.add_argument("--agents", default="", help="Comma-separated agents to start (default: all)")
-    parser.add_argument("--port", type=int, default=8026, help="Base port for Docker (default: 8026)")
-    parser.add_argument("--name", default="cicy-code-dev", help="Docker container name (default: cicy-code-dev)")
-    parser.add_argument("--mountProjects", "--mount-projects", dest="mountProjects", action="store_true", help="Mount host projects dir into container at /home/cicy/projects")
-    parser.add_argument("--projectsDir", "--projects-dir", dest="projectsDir", default="~/projects", help="Host projects dir for --mountProjects (default: ~/projects)")
-    parser.add_argument("--mountHome", "--mount-home", dest="mountHome", action="store_true", help="Mount host home dir into container at /home/cicy")
-    parser.add_argument("--homeDir", "--home-dir", dest="homeDir", default="", help="Host home dir for --mountHome (default: ~/docker-homes/<container-name>)")
+    image_group.add_argument(
+        "--dockerBuildVersion",
+        "--docker-build-version",
+        dest="dockerBuildVersion",
+        default="",
+        help="Override the image tag used by --dockerBuild.",
+    )
+    image_group.add_argument(
+        "--dockerVersion",
+        "--docker-version",
+        dest="dockerVersion",
+        action="store_true",
+        help="Show current package version and the configured runtime image tag.",
+    )
+    image_group.add_argument(
+        "--dockerSetVersion",
+        "--docker-set-version",
+        dest="dockerSetVersion",
+        default="",
+        help=f"Update {CICY_GLOBAL_JSON_PATH} images.runtime to an existing image tag without building.",
+    )
+    image_group.add_argument(
+        "--bumpVersion",
+        "--bump-version",
+        dest="bumpVersion",
+        default="",
+        help="Set the project version and sync all version targets to that value.",
+    )
+
+    cloudrun_group = parser.add_argument_group("cloud run")
+    cloudrun_group.add_argument(
+        "--cloudRun",
+        "--cloudrun",
+        dest="cloudRun",
+        action="store_true",
+        help="Deploy to Cloud Run using scripts/deploy-cloudrun.sh and wait for the health check.",
+    )
+    cloudrun_group.add_argument(
+        "--cloudRunList",
+        "--cloudrun-list",
+        dest="cloudRunList",
+        action="store_true",
+        help="List Cloud Run services for the configured project and region.",
+    )
+
     args = parser.parse_args()
 
     if args.docker:
@@ -1051,24 +1339,28 @@ def main():
             cmd = subprocess.run(["ps", "-p", existing_pid, "-o", "command="], capture_output=True, text=True).stdout.strip()
             if "cicy-code" in cmd:
                 print(f"[dev] stop existing cicy process on :{PORT} (pid={existing_pid})")
-                kill_process(existing_pid)
-                for _ in range(30):
-                    if not get_pid_on_port(PORT):
-                        break
-                    time.sleep(0.2)
+                if not kill_process(existing_pid):
+                    print(f"[dev] failed to stop existing cicy process pid={existing_pid}")
+                    sys.exit(1)
+                still_running_pid = get_pid_on_port(PORT)
+                if still_running_pid:
+                    print(f"[dev] port {PORT} is still in use after stop attempt (pid={still_running_pid})")
+                    sys.exit(1)
             else:
                 print(f"[dev] port {PORT} is in use by non-cicy process: {cmd}")
                 sys.exit(1)
         except Exception:
             pass
 
+    os.environ["SKIP_TTYD_ASSET"] = os.environ.get("SKIP_TTYD_ASSET", "1")
     platform = "darwin" if sys.platform == "darwin" else "linux"
     os.environ["PORT"] = str(PORT)
     os.environ["SKIP_NPM"] = "1"
     os.environ["SQLITE_PATH"] = SQLITE_PATH
     for key, value in get_ai_env_defaults().items():
         os.environ[key] = value
-    rebuild_ttyd_assets_for_local_dev()
+    if not args.ttydAssets:
+        rebuild_ttyd_assets_for_local_dev()
     run_version_sync()
 
     result = subprocess.run(["./build.sh", "build", platform], cwd=ROOT_DIR)
@@ -1076,7 +1368,9 @@ def main():
         print("[dev] build failed, not starting")
         sys.exit(1)
 
-    os.execl(os.path.join(API_DIR, "cicy-code"), "cicy-code", "--public", "--dev")
+    cicy_bin = os.path.join(API_DIR, "cicy-code")
+    start_local_dev_detached(cicy_bin)
+    sys.exit(0)
 
 if __name__ == "__main__":
     main()

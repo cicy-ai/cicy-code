@@ -75,7 +75,7 @@ const api = {
   restartPane: (id: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/restart`),
   capturePane: (id: string, lines = 100) => http.post('/api/tmux/capture_pane', { pane_id: id, lines }),
 
-  sendCommand: (winId: string, text: string) => unwrapTmuxSend(http.post('/api/tmux/send', { win_id: winId, text })),
+  sendCommand: (winId: string, text: string, submit = true) => unwrapTmuxSend(http.post('/api/tmux/send', { win_id: winId, text, submit })),
   sendKeys: (winId: string, keys: string) => unwrapTmuxSend(http.post('/api/tmux/send-keys', { win_id: winId, keys })),
   toggleMouse: (mode: string, paneId: string) => http.post(`/api/tmux/mouse/${mode}`, null, { params: { pane_id: paneId } }),
   chooseSession: (id: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/choose-session`),
@@ -85,6 +85,7 @@ const api = {
   deleteAgent: (id: string) => http.delete(`/api/agents/${encodeURIComponent(id)}`),
   getAgentsByPane: (id: string) => http.get(`/api/agents/pane/${encodeURIComponent(id)}`),
   getAgentInspector: (id: string, params?: { q?: string; limit?: number; offset?: number }) => http.get(`/api/agents/inspector/${encodeURIComponent(id)}`, { params }),
+  getAgentCurrentHistory: (id: string, params?: { limit?: number; before?: number; conversation_id?: string }) => http.get(`/api/agents/current-history/${encodeURIComponent(id)}`, { params }),
   getAgentHistorySync: (id: string, params?: { cursor?: string; limit?: number }) => http.get(`/api/agents/history-sync/${encodeURIComponent(id)}`, { params }),
   getAgentHistoryView: (id: string) => http.get(`/api/agents/history-view/${encodeURIComponent(id)}`),
   updateAgentInspectorNotes: (id: string, content: string) => http.put(`/api/agents/inspector/${encodeURIComponent(id)}/notes`, { content }),
@@ -101,11 +102,12 @@ const api = {
   runSkill: (data: any) => http.post('/api/skills/run', data),
 
   getTtydStatus: (id: string) => http.get(`/api/tmux/ttyd/status/${encodeURIComponent(id)}`),
-  correctEnglish: (text: string) => http.post('/api/correctEnglish', { text }),
+  correctEnglish: (text: string, target = 'zh-CN') => http.post('/api/correctEnglish', { text, target }),
+  translateText: (text: string, target = 'zh-CN') => http.post('/api/utils/translateText', { text, target }),
   fileExists: (path: string) => http.get('/api/utils/file/exists', { params: { path } }),
   stt: (formData: FormData) => http.post('/stt', formData, { baseURL: config.sttBase, headers: { 'Content-Type': 'multipart/form-data' } }),
 
-  getGlobalSettings: () => http.get('/api/settings/global'),
+  getGlobalSettings: (token?: string) => http.get('/api/settings/global', token ? { headers: { Authorization: `Bearer ${token}` } } : undefined),
   updateGlobalSettings: (data: any) => http.post('/api/settings/global', data),
   getOpenClawGateway: () => http.get('/api/openclaw/gateway'),
 

@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -72,8 +71,7 @@ func loadAPIToken() string {
 	if token := strings.TrimSpace(os.Getenv("CICY_API_TOKEN")); token != "" {
 		return token
 	}
-	home, _ := os.UserHomeDir()
-	data, _ := os.ReadFile(filepath.Join(home, "global.json"))
+	data, _ := os.ReadFile(cicyGlobalJSONPath)
 	var cfg M
 	json.Unmarshal(data, &cfg)
 	if t, ok := cfg["api_token"].(string); ok {

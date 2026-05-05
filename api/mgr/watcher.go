@@ -16,6 +16,7 @@ import (
 )
 
 var (
+	watcherEnabled   = false
 	pipeLogDir       = ""
 	compactThreshold = 70
 	fullSyncInterval = 3 * time.Second
@@ -444,12 +445,8 @@ func ensurePipe(paneID string) bool {
 	if !strings.Contains(target, ":") {
 		target += ":main.0"
 	}
-	logFile := filepath.Join(pipeLogDir, "pipe-"+strings.NewReplacer(":", "_", ".", "_").Replace(target)+".log")
-	if info, err := os.Stat(logFile); err == nil && time.Since(info.ModTime()) < 2*fullSyncInterval {
-		return false
-	}
-	exec.Command("tmux", "pipe-pane", "-t", target, "-o", "cat >> "+logFile).Run()
-	return true
+	exec.Command("tmux", "pipe-pane", "-t", target).Run()
+	return false
 }
 
 func refreshCfgCache() {
@@ -471,6 +468,9 @@ func refreshCfgCache() {
 }
 
 func fullSyncOnce() {
+	if !watcherEnabled {
+		return
+	}
 	refreshCfgCache()
 	watcherMu.Lock()
 	cache := cfgCache
@@ -534,6 +534,9 @@ func fullSyncOnce() {
 }
 
 func processOne(paneID string) {
+	if !watcherEnabled {
+		return
+	}
 	watcherMu.Lock()
 	cfg := cfgCache[paneID]
 	watcherMu.Unlock()
@@ -578,6 +581,11 @@ func processOne(paneID string) {
 }
 
 func startWatcher() {
+	if !watcherEnabled {
+		redisDo("DEL", "pane_status_map")
+		log.Printf("[watcher] disabled")
+		return
+	}
 	initWatcher()
 	log.Printf("[watcher] started | log_dir=%s interval=%s", pipeLogDir, fullSyncInterval)
 

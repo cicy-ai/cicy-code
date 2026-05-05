@@ -5,6 +5,8 @@ set -euo pipefail
 
 NODES_FILE="${CICY_NODES_FILE:-$HOME/Private/cicy-node.json}"
 LEGACY_NODES_FILE="$HOME/Private/cicy-nodes.json"
+CICY_ROOT_DIR="$HOME/cicy-ai"
+CICY_GLOBAL_JSON_PATH="$CICY_ROOT_DIR/global.json"
 
 ensure_nodes_file() {
   if [ -f "$NODES_FILE" ]; then
@@ -77,7 +79,7 @@ if [ -n "$NODE" ] || [ -f "$NODES_FILE" ]; then
   TOKEN="${_TOKEN}"
 else
   API="http://127.0.0.1:${API_PORT:-8008}"
-  TOKEN=$(jq -r '.api_token' ~/global.json 2>/dev/null || echo "")
+  TOKEN=$(jq -r '.api_token' "$CICY_GLOBAL_JSON_PATH" 2>/dev/null || echo "")
 fi
 
 AUTH=(-H "Authorization: Bearer $TOKEN")

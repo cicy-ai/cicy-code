@@ -8,7 +8,7 @@ import apiService from '../../services/api'
 type HistoryTurn = {
   q: string
   a?: string
-  steps?: Array<{ type: 'text'; text: string } | { type: 'tool'; tools: any[] }>
+  steps?: Array<{ type: 'text'; text: string } | { type: 'thinking'; text: string } | { type: 'tool'; tools: any[] }>
   status?: string
   ts?: number
   start_ts?: number
@@ -87,6 +87,13 @@ const ToolCard = ({ tool, running }: { tool: any; running?: boolean }) => {
   )
 }
 
+const ThinkingBlock = ({ text }: { text: string }) => (
+  <div className="my-2 rounded-lg border border-amber-300/[0.08] bg-amber-500/[0.05] px-3 py-2">
+    <div className="mb-1 text-[11px] uppercase text-amber-300/60">Thinking</div>
+    <div className="chat-markdown text-sm leading-[1.7] text-amber-50/75"><Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown></div>
+  </div>
+)
+
 export default function ChatHistoryView({ paneId, token, liveStatus = 'idle', liveText = '', historyVersion = 0, suggestionText = '', suggestionPending = false, suggestionSending = false, onExecuteSuggestion }: ChatHistoryViewProps) {
   const [chatData, setChatData] = useState<HistoryTurn[]>([])
   const [loading, setLoading] = useState(true)
@@ -96,21 +103,8 @@ export default function ChatHistoryView({ paneId, token, liveStatus = 'idle', li
   const ttydUrl = token ? `${config.ttydBase}/ttyd/${paneId}/?token=${token}` : ''
 
   useEffect(() => {
-    if (!paneId || !token) return
-    const agentId = paneId.replace(':main.0', '')
-    let dead = false
-    const reload = async () => {
-      try {
-        const { data } = await apiService.getAgentHistoryView(agentId)
-        if (!dead) setChatData(Array.isArray(data?.data) ? data.data : [])
-      } catch {
-        if (!dead) setChatData([])
-      } finally {
-        if (!dead) setLoading(false)
-      }
-    }
-    void reload()
-    return () => { dead = true }
+    setChatData([])
+    setLoading(false)
   }, [paneId, token, historyVersion])
 
   const groups = useMemo(() => {
@@ -180,6 +174,9 @@ export default function ChatHistoryView({ paneId, token, liveStatus = 'idle', li
                   <div className="px-3.5 py-2.5">
                     {steps.map((s: any, si: number) => {
                       const isLast = si === steps.length - 1
+                      if (s.type === 'thinking') {
+                        return <ThinkingBlock key={si} text={s.text} />
+                      }
                       if (s.type === 'text') {
                         const isFinal = isLast && (r?.status === 'text' || r?.status === 'done')
                         if (!isFinal && hasToolStep) return <div key={si} className="chat-markdown text-base text-vsc-text-muted/80 my-2 pl-3 leading-relaxed border-l-2 border-white/[0.06]"><Markdown remarkPlugins={[remarkGfm]}>{s.text}</Markdown></div>

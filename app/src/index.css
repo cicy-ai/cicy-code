@@ -128,6 +128,44 @@
 .chat-markdown a:hover { text-decoration: underline; }
 .chat-markdown strong { color: rgba(255,255,255,0.9); }
 .chat-markdown img { max-width: 100%; border-radius: 6px; margin: 0.4em 0; }
+
+[data-id="current-history-list"] .chat-markdown {
+  color: rgb(212 212 216);
+}
+
+[data-id="current-history-list"] .chat-markdown h1,
+[data-id="current-history-list"] .chat-markdown h2,
+[data-id="current-history-list"] .chat-markdown h3,
+[data-id="current-history-list"] .chat-markdown h4 {
+  color: rgb(228 228 231);
+}
+
+[data-id="current-history-list"] .chat-markdown strong {
+  color: rgb(244 244 245);
+}
+
+[data-id="current-history-list"] .chat-markdown blockquote {
+  color: rgb(161 161 170);
+  border-left-color: rgba(125, 211, 252, 0.22);
+}
+
+[data-id="current-history-list"] .chat-markdown code {
+  color: rgb(186 230 253);
+  background: rgba(14, 165, 233, 0.10);
+}
+
+[data-id="current-history-list"] .chat-markdown pre {
+  background: rgba(0, 0, 0, 0.26);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+[data-id="current-history-list"] .chat-markdown pre code {
+  color: rgb(180 180 190);
+}
+
+[data-id="current-history-list"] .chat-markdown td {
+  color: rgb(180 180 190);
+}
 .inspector-markdown {
   overflow-wrap: anywhere;
   word-break: break-word;

@@ -78,6 +78,10 @@ export const devStore = {
   },
 };
 
+if (typeof globalThis !== 'undefined') {
+  (globalThis as any).devStore = devStore;
+}
+
 // Hook: register context state into devStore
 import { useEffect, useSyncExternalStore } from 'react';
 

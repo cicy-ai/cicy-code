@@ -53,8 +53,7 @@ type machineConfigFile struct {
 }
 
 func machinesConfigPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "Private", "cicy-node.json")
+	return cicyMachinesConfigPath
 }
 
 func legacyMachinesConfigPath() string {

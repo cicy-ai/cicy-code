@@ -10,6 +10,7 @@ export declare const msgSetWindowTitle = "3";
 export declare const msgSetPreferences = "4";
 export declare const msgSetReconnect = "5";
 export declare const msgAPI = "6";
+export declare function normalizeTerminalText(value: string): string;
 export interface APIRequestMessage {
     id: string;
     method: string;

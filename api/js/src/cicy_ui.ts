@@ -1,4 +1,4 @@
-import { Terminal, WebTTY } from "./webtty";
+import { Terminal, WebTTY, normalizeTerminalText } from "./webtty";
 import { applyMonoFontVar, monoFontStack } from "./font";
 
 interface StorageHelper {
@@ -9,6 +9,11 @@ interface StorageHelper {
 interface LoadingOverlayController {
     show(message?: string): void;
     hide(): void;
+}
+
+interface FilePasteDialogContent {
+    element: HTMLElement;
+    cleanup?: () => void;
 }
 
 function createStorage(): StorageHelper {
@@ -82,6 +87,16 @@ function createTmuxSendError(message: string, payload?: any, statusCode?: number
         }
     }
     return error;
+}
+
+function formatPastedFileSize(size: number): string {
+    if (size < 1024) {
+        return String(size) + " B";
+    }
+    if (size < 1024 * 1024) {
+        return (size / 1024).toFixed(size < 10 * 1024 ? 1 : 0) + " KB";
+    }
+    return (size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0) + " MB";
 }
 
 function clipTracePreview(text: string, maxLen: number): string {
@@ -688,13 +703,14 @@ body {
   z-index: 10003;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   padding: 24px;
   background: rgba(0,0,0,0.55);
   box-sizing: border-box;
 }
 #cp-paste-confirm-modal {
   width: min(760px, 100%);
+  margin-left: 0;
   max-height: min(80vh, 720px);
   border-radius: 14px;
   background: #111214;
@@ -731,10 +747,14 @@ body {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+  width: 100%;
+  resize: vertical;
+  box-sizing: border-box;
+  font-family: var(--cp-mono-font);
 }
 #cp-paste-confirm-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 10px;
 }
 .cp-paste-confirm-btn {
@@ -753,6 +773,192 @@ body {
 #cp-paste-confirm-send {
   background: #2f6df6;
   color: #fff;
+}
+#cp-file-paste-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10004;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(5,8,14,0.72);
+  box-sizing: border-box;
+}
+#cp-file-paste-modal {
+  width: min(820px, 100%);
+  max-height: min(84vh, 780px);
+  overflow: hidden;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(14,18,28,0.98), rgba(10,13,20,0.98));
+  border: 1px solid rgba(140,170,255,0.18);
+  box-shadow: 0 32px 90px rgba(0,0,0,0.55);
+  color: #f5f7fb;
+  font-family: var(--cp-mono-font);
+}
+#cp-file-paste-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+#cp-file-paste-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(143,190,255,0.92);
+}
+#cp-file-paste-eyebrow::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #5ea0ff;
+  box-shadow: 0 0 16px rgba(94,160,255,0.8);
+}
+#cp-file-paste-title {
+  margin: 10px 0 0;
+  font-size: 20px;
+  line-height: 1.2;
+}
+#cp-file-paste-desc {
+  margin: 8px 0 0;
+  color: rgba(255,255,255,0.72);
+  font-size: 13px;
+  line-height: 1.6;
+}
+#cp-file-paste-desc:empty {
+  display: none;
+}
+#cp-file-paste-close {
+  appearance: none;
+  border: none;
+  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.82);
+  font-size: 18px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+#cp-file-paste-body {
+  display: block;
+  max-height: calc(min(84vh, 780px) - 160px);
+}
+#cp-file-paste-preview {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  min-height: 280px;
+  padding: 18px;
+  overflow: auto;
+  background: rgba(255,255,255,0.02);
+}
+#cp-file-paste-preview.image-only {
+  min-height: 0;
+}
+#cp-file-paste-preview img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  margin: 0;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.03);
+}
+.cp-file-paste-label {
+  margin: 0 0 10px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(143,190,255,0.78);
+}
+#cp-file-paste-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cp-file-paste-meta-row {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.cp-file-paste-meta-key {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.48);
+  text-transform: uppercase;
+}
+.cp-file-paste-meta-value {
+  display: block;
+  color: #f5f7fb;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+#cp-file-paste-list {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cp-file-paste-list-item {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.cp-file-paste-list-name {
+  display: block;
+  font-size: 13px;
+  color: #f5f7fb;
+  word-break: break-word;
+}
+.cp-file-paste-list-meta {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.6);
+}
+#cp-file-paste-actions {
+  display: flex;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 16px 20px 20px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.cp-file-paste-btn {
+  appearance: none;
+  border: none;
+  border-radius: 12px;
+  padding: 10px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: var(--cp-mono-font);
+}
+#cp-file-paste-cancel {
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.86);
+}
+#cp-file-paste-send {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: #fff;
+}
+@media (max-width: 760px) {
+  #cp-file-paste-overlay {
+    padding: 14px;
+  }
 }
 #cp.voice-mode {
   top: 8px !important;
@@ -880,6 +1086,145 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
         binary += String.fromCharCode(bytes[i]);
     }
     return btoa(binary);
+}
+
+function buildMultipartPayload(file: Blob, fileName: string, mimeType: string): Promise<{ bodyBase64: string; contentType: string; }> {
+    return blobToArrayBuffer(file).then(function(buffer: ArrayBuffer): { bodyBase64: string; contentType: string; } {
+        var boundary = "----cicy-ws-" + String(Date.now());
+        var safeName = String(fileName || "file").replace(/[\r\n"]/g, "_");
+        var header =
+            "--" + boundary + "\r\n" +
+            'Content-Disposition: form-data; name="file"; filename="' + safeName + '"\r\n' +
+            "Content-Type: " + (mimeType || "application/octet-stream") + "\r\n\r\n";
+        var footer = "\r\n--" + boundary + "--\r\n";
+        var bodyBytes = concatUint8Arrays([
+            asciiToUint8Array(header),
+            new Uint8Array(buffer),
+            asciiToUint8Array(footer),
+        ]);
+        return {
+            bodyBase64: uint8ArrayToBase64(bodyBytes),
+            contentType: "multipart/form-data; boundary=" + boundary,
+        };
+    });
+}
+
+function normalizePastedFiles(event: ClipboardEvent): File[] {
+    var result: File[] = [];
+    var seen: string[] = [];
+    var items = event.clipboardData && event.clipboardData.items ? event.clipboardData.items : [];
+    for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        if (!item || item.kind !== "file") {
+            continue;
+        }
+        var file = item.getAsFile();
+        if (!file) {
+            continue;
+        }
+        var key = [file.name, file.type, String(file.size)].join("|");
+        if (seen.indexOf(key) >= 0) {
+            continue;
+        }
+        seen.push(key);
+        result.push(file);
+    }
+    var files = event.clipboardData && event.clipboardData.files ? event.clipboardData.files : [];
+    for (var j = 0; j < files.length; j++) {
+        var extra = files[j];
+        if (!extra) {
+            continue;
+        }
+        var extraKey = [extra.name, extra.type, String(extra.size)].join("|");
+        if (seen.indexOf(extraKey) >= 0) {
+            continue;
+        }
+        seen.push(extraKey);
+        result.push(extra);
+    }
+    return result;
+}
+
+function isEditableTextTarget(target: HTMLElement | null): target is HTMLInputElement | HTMLTextAreaElement {
+    if (!target) {
+        return false;
+    }
+    if (target instanceof HTMLTextAreaElement) {
+        return !target.readOnly && !target.disabled;
+    }
+    if (target instanceof HTMLInputElement) {
+        if (target.readOnly || target.disabled) {
+            return false;
+        }
+        var type = String(target.type || "text").toLowerCase();
+        return ["text", "search", "url", "tel", "password", "email"].indexOf(type) >= 0;
+    }
+    return false;
+}
+
+function isTerminalTarget(target: HTMLElement | null): boolean {
+    if (!target) {
+        return false;
+    }
+    if (target.id === "terminal") {
+        return true;
+    }
+    if (target.classList && target.classList.contains("xterm-helper-textarea")) {
+        return true;
+    }
+    return !!target.closest("#terminal");
+}
+
+function isPasteDialogTarget(target: HTMLElement | null): boolean {
+    return !!(target && target.closest("#cp-paste-confirm-modal, #cp-file-paste-modal"));
+}
+
+function insertTextAtCursor(target: HTMLInputElement | HTMLTextAreaElement, text: string): void {
+    var start = typeof target.selectionStart === "number" ? target.selectionStart : target.value.length;
+    var end = typeof target.selectionEnd === "number" ? target.selectionEnd : start;
+    if (typeof target.setRangeText === "function") {
+        target.setRangeText(text, start, end, "end");
+    } else {
+        target.value = target.value.slice(0, start) + text + target.value.slice(end);
+        var next = start + text.length;
+        try {
+            target.setSelectionRange(next, next);
+        } catch (_error) {
+        }
+    }
+    target.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function uploadPastedFile(term: Terminal, webtty: WebTTY, paneId: string, apiHeaders: { [key: string]: string }, file: File): Promise<any> {
+    return buildMultipartPayload(file, file.name || "file", file.type || "application/octet-stream").then(function(payload: { bodyBase64: string; contentType: string; }): Promise<any> {
+        var uploadHeaders: { [key: string]: string } = {};
+        if (apiHeaders.Authorization) {
+            uploadHeaders.Authorization = apiHeaders.Authorization;
+        }
+        return webtty.requestAPI("POST", "/assets/files?pane=" + encodeURIComponent(paneId), undefined, uploadHeaders, payload.bodyBase64, payload.contentType);
+    }).then(function(data: any): any {
+        var asset = data && data.file ? data.file : null;
+        if (!asset || (!asset.file_ref && !asset.url)) {
+            throw new Error("upload failed");
+        }
+        var assetRef = String(asset.file_ref || "");
+        if (!assetRef) {
+            assetRef = "file://" + String(asset.url || "").replace(/^\/+/, "");
+        } else if (assetRef.indexOf("file:///") === 0) {
+            assetRef = "file://" + assetRef.slice(8);
+        }
+        if (asset && asset.is_image) {
+            if (assetRef.indexOf("file://") === 0) {
+                assetRef = "image://" + assetRef.slice(7);
+            } else if (assetRef.indexOf("image://") !== 0) {
+                assetRef = "image://" + assetRef.replace(/^image:\/\//, "").replace(/^\/+/, "");
+            }
+        }
+        if (!webtty.sendInput(assetRef)) {
+            throw new Error("send asset ref failed");
+        }
+        return asset;
+    });
 }
 
 function buildSTTMultipartPayload(blob: Blob, mimeType: string): Promise<{ bodyBase64: string; contentType: string; }> {
@@ -1150,23 +1495,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     }
 
     function normalizePromptPunctuation(value: string): string {
-        return String(value || "").replace(/——|[～。，、》《？（）；：－]/g, function(ch: string): string {
-            var map: { [key: string]: string } = {
-                "～": "~",
-                "。": ".",
-                "，": ",",
-                "、": ",",
-                "》": ">",
-                "《": "<",
-                "？": "?",
-                "（": "(",
-                "）": ")",
-                "；": ";",
-                "：": ":",
-                "－": "-",
-            };
-            return ch === "——" ? "_" : (map[ch] || ch);
-        });
+        return normalizeTerminalText(value);
     }
 
     function syncNormalizedPromptValue(): void {
@@ -1786,10 +2115,199 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         });
     }
 
-    function sendPastedText(command: string): void {
-        if (!command) {
+    function buildFileMetaText(file: File): string {
+        var meta: string[] = [];
+        if (file.type) {
+            meta.push(file.type);
+        }
+        meta.push(formatPastedFileSize(file.size || 0));
+        return meta.join(" · ");
+    }
+
+    function createFileListPreview(files: File[]): FilePasteDialogContent {
+        var wrapper = document.createElement("div");
+        var meta = document.createElement("div");
+        meta.id = "cp-file-paste-meta";
+
+        var summaryRow = document.createElement("div");
+        summaryRow.className = "cp-file-paste-meta-row";
+        var summaryKey = document.createElement("span");
+        summaryKey.className = "cp-file-paste-meta-key";
+        summaryKey.textContent = "上传内容";
+        var summaryValue = document.createElement("span");
+        summaryValue.className = "cp-file-paste-meta-value";
+        summaryValue.textContent = files.length === 1 ? "1 个文件" : String(files.length) + " 个文件";
+        summaryRow.appendChild(summaryKey);
+        summaryRow.appendChild(summaryValue);
+        meta.appendChild(summaryRow);
+
+        var list = document.createElement("ul");
+        list.id = "cp-file-paste-list";
+        files.forEach(function(file: File): void {
+            var item = document.createElement("li");
+            item.className = "cp-file-paste-list-item";
+            var name = document.createElement("span");
+            name.className = "cp-file-paste-list-name";
+            name.textContent = file.name || "file";
+            var details = document.createElement("span");
+            details.className = "cp-file-paste-list-meta";
+            details.textContent = buildFileMetaText(file);
+            item.appendChild(name);
+            item.appendChild(details);
+            list.appendChild(item);
+        });
+
+        wrapper.appendChild(meta);
+        wrapper.appendChild(list);
+        return { element: wrapper };
+    }
+
+    function createImagePastePreview(file: File): FilePasteDialogContent {
+        var wrapper = document.createElement("div");
+        wrapper.style.display = "flex";
+        wrapper.style.alignItems = "flex-start";
+        wrapper.style.justifyContent = "flex-start";
+        var img = document.createElement("img");
+        var objectURL = URL.createObjectURL(file);
+        img.src = objectURL;
+        img.alt = file.name || "pasted image";
+        wrapper.appendChild(img);
+        return {
+            element: wrapper,
+            cleanup: function(): void {
+                URL.revokeObjectURL(objectURL);
+            },
+        };
+    }
+
+    function createFileMetaPanel(files: File[]): HTMLElement {
+        var panel = document.createElement("div");
+        panel.id = "cp-file-paste-meta";
+
+        function appendRow(label: string, value: string): void {
+            var row = document.createElement("div");
+            row.className = "cp-file-paste-meta-row";
+            var key = document.createElement("span");
+            key.className = "cp-file-paste-meta-key";
+            key.textContent = label;
+            var text = document.createElement("span");
+            text.className = "cp-file-paste-meta-value";
+            text.textContent = value;
+            row.appendChild(key);
+            row.appendChild(text);
+            panel.appendChild(row);
+        }
+
+        if (files.length === 1) {
+            appendRow("文件名", files[0].name || "file");
+            appendRow("类型", files[0].type || "unknown");
+            appendRow("大小", formatPastedFileSize(files[0].size || 0));
+        } else {
+            appendRow("文件数", String(files.length));
+            appendRow("总大小", formatPastedFileSize(files.reduce(function(sum: number, file: File): number {
+                return sum + (file.size || 0);
+            }, 0)));
+        }
+        return panel;
+    }
+
+    function openFilePasteDialog(files: File[]): void {
+        if (!files.length) {
             return;
         }
+        var existing = document.getElementById("cp-file-paste-overlay");
+        if (existing && existing.parentNode) {
+            existing.parentNode.removeChild(existing);
+        }
+        var previewContent = files.length === 1 && String(files[0].type || "").match(/^image\//)
+            ? createImagePastePreview(files[0])
+            : createFileListPreview(files);
+        var overlay = document.createElement("div");
+        overlay.id = "cp-file-paste-overlay";
+        var modal = document.createElement("div");
+        modal.id = "cp-file-paste-modal";
+        var head = document.createElement("div");
+        head.id = "cp-file-paste-head";
+        var heading = document.createElement("div");
+        var eyebrow = document.createElement("div");
+        eyebrow.id = "cp-file-paste-eyebrow";
+        eyebrow.textContent = files.length === 1 && String(files[0].type || "").match(/^image\//) ? "Image Paste" : "File Paste";
+        var title = document.createElement("h3");
+        title.id = "cp-file-paste-title";
+        title.textContent = files.length === 1 && String(files[0].type || "").match(/^image\//) ? "发送粘贴图片" : "发送粘贴文件";
+        var desc = document.createElement("p");
+        desc.id = "cp-file-paste-desc";
+        desc.textContent = files.length === 1 && String(files[0].type || "").match(/^image\//)
+            ? ""
+            : "确认后上传这些文件，并在终端里写入 file:// 地址。";
+        heading.appendChild(eyebrow);
+        heading.appendChild(title);
+        heading.appendChild(desc);
+        var closeBtn = document.createElement("button");
+        closeBtn.id = "cp-file-paste-close";
+        closeBtn.textContent = "×";
+        head.appendChild(heading);
+        head.appendChild(closeBtn);
+
+        var body = document.createElement("div");
+        body.id = "cp-file-paste-body";
+        var preview = document.createElement("div");
+        preview.id = "cp-file-paste-preview";
+        preview.appendChild(previewContent.element);
+        body.appendChild(preview);
+
+        var actions = document.createElement("div");
+        actions.id = "cp-file-paste-actions";
+        var cancelBtn = document.createElement("button");
+        cancelBtn.id = "cp-file-paste-cancel";
+        cancelBtn.className = "cp-file-paste-btn";
+        cancelBtn.textContent = "取消";
+        var sendBtn = document.createElement("button");
+        sendBtn.id = "cp-file-paste-send";
+        sendBtn.className = "cp-file-paste-btn";
+        sendBtn.textContent = "发送";
+        actions.appendChild(cancelBtn);
+        actions.appendChild(sendBtn);
+
+        modal.appendChild(head);
+        modal.appendChild(body);
+        modal.appendChild(actions);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        var cleanup = previewContent.cleanup || null;
+        function close(): void {
+            document.removeEventListener("keydown", onKeyDown, true);
+            if (cleanup) {
+                cleanup();
+                cleanup = null;
+            }
+            if (overlay.parentNode) {
+                overlay.parentNode.removeChild(overlay);
+            }
+        }
+        function onKeyDown(event: KeyboardEvent): void {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                close();
+            }
+        }
+        overlay.addEventListener("click", function(event: MouseEvent): void {
+            if (event.target === overlay) {
+                close();
+            }
+        });
+        closeBtn.addEventListener("click", close);
+        cancelBtn.addEventListener("click", close);
+        sendBtn.addEventListener("click", function(): void {
+            close();
+            uploadPastedFiles(files);
+        });
+        document.addEventListener("keydown", onKeyDown, true);
+        sendBtn.focus();
+    }
+
+    function openPasteConfirmDialog(titleText: string, descriptionText: string, bodyValue: string, onSend: (bodyValue: string) => void): void {
         var existing = document.getElementById("cp-paste-confirm-overlay");
         if (existing && existing.parentNode) {
             existing.parentNode.removeChild(existing);
@@ -1800,13 +2318,13 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         modal.id = "cp-paste-confirm-modal";
         var title = document.createElement("h3");
         title.id = "cp-paste-confirm-title";
-        title.textContent = "发送粘贴内容";
+        title.textContent = titleText;
         var desc = document.createElement("p");
         desc.id = "cp-paste-confirm-desc";
-        desc.textContent = "内容较长，确认后将直接发送到终端。";
-        var body = document.createElement("div");
+        desc.textContent = descriptionText;
+        var body = document.createElement("textarea");
         body.id = "cp-paste-confirm-body";
-        body.textContent = command;
+        body.value = bodyValue || "";
         var actions = document.createElement("div");
         actions.id = "cp-paste-confirm-actions";
         var cancelBtn = document.createElement("button");
@@ -1847,18 +2365,109 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             close();
         });
         sendBtnEl.addEventListener("click", function(): void {
+            var nextValue = body.value || "";
             close();
-            writeClientTrace("cp-paste-http", {
-                command_len: command.length,
-                command_preview: clipTracePreview(command, 160),
-            });
-            sendHTTP(command).catch(function(): void {
-                flashButton(restartBtn);
-            });
+            onSend(nextValue);
         });
         document.addEventListener("keydown", onKeyDown, true);
-        sendBtnEl.focus();
+        body.focus();
+        try {
+            body.setSelectionRange(body.value.length, body.value.length);
+        } catch (_error) {
+        }
     }
+
+    function sendPastedText(command: string): void {
+        if (!command) {
+            return;
+        }
+        openPasteConfirmDialog(
+            "发送粘贴内容",
+            "检测到粘贴文本，确认后将直接发送到终端。",
+            command,
+            function(bodyValue: string): void {
+                var finalCommand = normalizePromptPunctuation(bodyValue || "");
+                if (!finalCommand) {
+                    return;
+                }
+                writeClientTrace("cp-paste-http", {
+                    command_len: finalCommand.length,
+                    command_preview: clipTracePreview(finalCommand, 160),
+                });
+                sendHTTP(finalCommand).catch(function(): void {
+                    flashButton(restartBtn);
+                });
+            }
+        );
+    }
+
+    function sendPastedFiles(files: File[]): void {
+        if (!files.length) {
+            return;
+        }
+        openFilePasteDialog(files);
+    }
+
+    function uploadPastedFiles(files: File[]): void {
+        if (!files.length) {
+            return;
+        }
+        var PromiseCtor = (window as any).Promise || Promise;
+        writeClientTrace("cp-paste-files", {
+            count: files.length,
+            names: files.map(function(file: File): string {
+                return file.name || "file";
+            }).join(","),
+        });
+        files.reduce(function(chain: Promise<any>, file: File): Promise<any> {
+            return chain.then(function(): Promise<any> {
+                return uploadPastedFile(term, webtty, paneId, apiHeaders, file);
+            });
+        }, PromiseCtor.resolve()).catch(function(): void {
+            flashButton(restartBtn);
+        });
+    }
+
+    window.addEventListener("paste", function(event: ClipboardEvent): void {
+        var target = event.target as HTMLElement | null;
+        if (isPasteDialogTarget(target)) {
+            return;
+        }
+        var files = normalizePastedFiles(event);
+        if (files.length) {
+            event.preventDefault();
+            event.stopPropagation();
+            if ((event as any).stopImmediatePropagation) {
+                (event as any).stopImmediatePropagation();
+            }
+            sendPastedFiles(files);
+            return;
+        }
+        var rawText = (event.clipboardData && event.clipboardData.getData("text/plain")) || "";
+        if (!rawText) {
+            return;
+        }
+        var trimmedText = rawText.trim();
+        if (!trimmedText) {
+            return;
+        }
+        var text = normalizePromptPunctuation(trimmedText);
+        var lineCount = text.split(/\r\n|\r|\n/).length;
+        var shouldConfirm = lineCount > 1 || text.length > 100;
+        if (!shouldConfirm) {
+            if (isEditableTextTarget(target) && !isTerminalTarget(target)) {
+                event.preventDefault();
+                insertTextAtCursor(target, text);
+            }
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        if ((event as any).stopImmediatePropagation) {
+            (event as any).stopImmediatePropagation();
+        }
+        sendPastedText(text);
+    }, true);
 
     webtty.onConnectionStateChange(function(isOpen: boolean): void {
         if (isOpen) {

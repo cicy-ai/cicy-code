@@ -73,7 +73,7 @@ sudo id w3c_offical &>/dev/null || sudo useradd -m -s /bin/bash w3c_offical
 sudo usermod -aG docker w3c_offical
 
 # ── 创建目录结构 ──
-sudo su - w3c_offical -c "mkdir -p ~/projects ~/workers/w-10001"
+sudo su - w3c_offical -c "mkdir -p ~/projects ~/cicy-ai/workers/w-10001"
 
 # ── 清理 ──
 sudo apt-get clean

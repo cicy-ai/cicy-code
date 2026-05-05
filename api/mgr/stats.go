@@ -1,16 +1,26 @@
 package main
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"log"
+	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +42,16 @@ type minuteStats struct {
 	ReqKB  float64 `json:"req_kb"`
 	ResKB  float64 `json:"res_kb"`
 	Count  int     `json:"count"`
+}
+
+type uploadedAssetFile struct {
+	Name        string `json:"name"`
+	Size        int64  `json:"size"`
+	ContentType string `json:"content_type"`
+	IsImage     bool   `json:"is_image"`
+	URL         string `json:"url"`
+	Path        string `json:"path"`
+	FileRef     string `json:"file_ref"`
 }
 
 func redisKey(key string) string {
@@ -89,14 +109,14 @@ func redisLRange(key string) []string {
 	buf := make([]byte, 1024*1024)
 	n, _ := conn.Read(buf)
 	resp := string(buf[:n])
-	
+
 	if !strings.HasPrefix(resp, "*") {
 		return nil
 	}
-	
+
 	lines := strings.Split(resp, "\r\n")
 	count, _ := strconv.Atoi(lines[0][1:])
-	
+
 	result := []string{}
 	i := 1
 	for len(result) < count && i < len(lines)-1 {
@@ -269,20 +289,70 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"success": true})
 }
 
+func findCodeServerRemoteCLI() string {
+	if bin, err := exec.LookPath("code-server"); err == nil {
+		paths := []string{bin}
+		if resolved, resolveErr := filepath.EvalSymlinks(bin); resolveErr == nil && resolved != "" && resolved != bin {
+			paths = append(paths, resolved)
+		}
+		for _, current := range paths {
+			binDir := filepath.Dir(current)
+			candidates := []string{
+				filepath.Clean(filepath.Join(binDir, "..", "lib", "vscode", "bin", "remote-cli", "code-server")),
+				filepath.Clean(filepath.Join(binDir, "..", "lib", "code-server", "lib", "vscode", "bin", "remote-cli", "code-server")),
+				"/usr/lib/code-server/lib/vscode/bin/remote-cli/code-linux.sh",
+			}
+			for _, candidate := range candidates {
+				if _, statErr := os.Stat(candidate); statErr == nil {
+					return candidate
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func openInCodeServer(file string) {
-	// Find IPC socket inside container
-	out, err := exec.Command("docker", "exec", "cicy-code-server", "bash", "-c",
+	remoteCLI := findCodeServerRemoteCLI()
+	if remoteCLI == "" {
+		log.Printf("[code-server] remote CLI not found")
+		return
+	}
+	out, err := exec.Command("bash", "-lc",
 		`find /tmp -name "vscode-ipc-*.sock" -type s -printf "%T@ %p\n" 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2`).Output()
 	if err != nil || len(out) == 0 {
 		log.Printf("[code-server] no IPC socket found")
 		return
 	}
 	sock := strings.TrimSpace(string(out))
-	cmd := exec.Command("docker", "exec",
-		"-e", "VSCODE_IPC_HOOK_CLI="+sock,
-		"cicy-code-server",
-		"/usr/lib/code-server/lib/vscode/bin/remote-cli/code-linux.sh",
-		"--reuse-window", "--goto", file+":1:1")
+	target := strings.TrimSpace(file)
+	if target == "" {
+		return
+	}
+	if strings.HasPrefix(target, "file://") {
+		target = strings.TrimSpace(strings.TrimPrefix(target, "file://"))
+		if target != "" && !strings.HasPrefix(target, "/") && !strings.HasPrefix(target, "~/") && !strings.HasPrefix(target, "./") && !strings.HasPrefix(target, "../") {
+			target = "/" + strings.TrimLeft(target, "/")
+		}
+	}
+	if matches := regexp.MustCompile(`^(.*?):(\d+):(\d+)-(\d+):(\d+)$`).FindStringSubmatch(target); len(matches) > 0 {
+		target = strings.TrimSpace(matches[1]) + ":" + strings.TrimSpace(matches[2]) + ":" + strings.TrimSpace(matches[3])
+	} else if matches := regexp.MustCompile(`^(.*?):(\d+)(?::(\d+))?$`).FindStringSubmatch(target); len(matches) > 0 {
+		line := strings.TrimSpace(matches[2])
+		column := strings.TrimSpace(matches[3])
+		if column == "" {
+			column = "1"
+		}
+		target = matches[1] + ":" + line + ":" + column
+	}
+	if info, err := os.Stat(target); err == nil && info.IsDir() {
+		return
+	}
+	if !regexp.MustCompile(`:\d+:\d+$`).MatchString(target) {
+		target += ":1:1"
+	}
+	cmd := exec.Command(remoteCLI, "--reuse-window", "--goto", target)
+	cmd.Env = append(os.Environ(), "VSCODE_IPC_HOOK_CLI="+sock)
 	if err := cmd.Run(); err != nil {
 		log.Printf("[code-server] open file error: %v", err)
 	}
@@ -340,7 +410,9 @@ func handleNotifyStream(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(line, "{") {
 				// Filter by pane if specified
 				if filterPane != "" {
-					var msg struct{ Pane string `json:"pane"` }
+					var msg struct {
+						Pane string `json:"pane"`
+					}
 					json.Unmarshal([]byte(line), &msg)
 					if msg.Pane != "" && msg.Pane != filterPane {
 						continue
@@ -354,13 +426,308 @@ func handleNotifyStream(w http.ResponseWriter, r *http.Request) {
 }
 
 func paneWorkspace(pane string) string {
+	pane = normPaneID(strings.TrimSpace(pane))
+	if pane == "" {
+		return ""
+	}
 	var ws string
 	store.QueryRow("SELECT workspace FROM agent_config WHERE pane_id=?", pane).Scan(&ws)
 	if ws == "" {
 		return ""
 	}
 	home, _ := os.UserHomeDir()
-	return os.ExpandEnv(strings.Replace(ws, "~", home, 1))
+	return runtimePathToHostPath(os.ExpandEnv(strings.Replace(ws, "~", home, 1)))
+}
+
+func sanitizeAssetFileName(name string) string {
+	name = strings.TrimSpace(strings.ReplaceAll(name, "\\", "/"))
+	name = path.Base(name)
+	if name == "" || name == "." || name == "/" {
+		return "file"
+	}
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range name {
+		allowed := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_'
+		if allowed {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	cleaned := strings.Trim(b.String(), "._-")
+	if cleaned == "" {
+		return "file"
+	}
+	return cleaned
+}
+
+func detectAssetContentType(headerValue string, fileName string, head []byte) string {
+	contentType := strings.TrimSpace(headerValue)
+	if idx := strings.Index(contentType, ";"); idx >= 0 {
+		contentType = strings.TrimSpace(contentType[:idx])
+	}
+	if contentType == "" || contentType == "application/octet-stream" {
+		if extType := strings.TrimSpace(mime.TypeByExtension(strings.ToLower(filepath.Ext(fileName)))); extType != "" {
+			contentType = extType
+		}
+	}
+	if (contentType == "" || contentType == "application/octet-stream") && len(head) > 0 {
+		contentType = http.DetectContentType(head)
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	return contentType
+}
+
+func randomAssetID(byteLen int) string {
+	if byteLen <= 0 {
+		byteLen = 8
+	}
+	buf := make([]byte, byteLen)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf)
+}
+
+func buildAssetFileURL(r *http.Request, pane string, relPath string) string {
+	parts := []string{url.PathEscape(shortPaneID(normPaneID(pane)))}
+	for _, segment := range strings.Split(relPath, "/") {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			continue
+		}
+		parts = append(parts, url.PathEscape(segment))
+	}
+	assetURL := "/assets/files/" + strings.Join(parts, "/")
+	token := strings.TrimSpace(getToken(r))
+	if token == "" {
+		token = strings.TrimSpace(r.URL.Query().Get("token"))
+	}
+	if token != "" {
+		assetURL += "?token=" + url.QueryEscape(token)
+	}
+	return assetURL
+}
+
+func resolveAssetDiskPath(root string, relPath string) (string, bool) {
+	relPath = strings.TrimSpace(relPath)
+	if relPath == "" || strings.Contains(relPath, "\\") || strings.Contains(relPath, "\x00") {
+		return "", false
+	}
+	cleanRel := strings.TrimPrefix(path.Clean("/"+relPath), "/")
+	if cleanRel == "." || cleanRel == "" || cleanRel != relPath {
+		return "", false
+	}
+	cleanRoot := filepath.Clean(root)
+	fullPath := filepath.Clean(filepath.Join(cleanRoot, filepath.FromSlash(cleanRel)))
+	if fullPath != cleanRoot && !strings.HasPrefix(fullPath, cleanRoot+string(os.PathSeparator)) {
+		return "", false
+	}
+	return fullPath, true
+}
+
+func assetDownloadName(filePath string) string {
+	name := filepath.Base(filePath)
+	if parts := strings.SplitN(name, "__", 2); len(parts) == 2 && strings.TrimSpace(parts[1]) != "" {
+		return parts[1]
+	}
+	return name
+}
+
+func imageDimensionsFromFile(filePath string) (int, int, bool) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0, 0, false
+	}
+	defer file.Close()
+	cfg, _, err := image.DecodeConfig(file)
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		return 0, 0, false
+	}
+	return cfg.Width, cfg.Height, true
+}
+
+func decorateImageAssetFileName(fileName string, size int64, filePath string) string {
+	width, height, ok := imageDimensionsFromFile(filePath)
+	if !ok {
+		return fileName
+	}
+	ext := filepath.Ext(fileName)
+	base := strings.TrimSuffix(fileName, ext)
+	if base == "" {
+		base = "image"
+	}
+	return fmt.Sprintf("%s_%d_%d_%d%s", base, width, height, size, ext)
+}
+
+func handleAssetFileUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, 405, "method not allowed")
+		return
+	}
+	pane := normPaneID(r.URL.Query().Get("pane"))
+	if pane == "" {
+		httpErr(w, 400, "pane required")
+		return
+	}
+	workspace := paneWorkspace(pane)
+	if workspace == "" {
+		httpErr(w, 404, "pane not found")
+		return
+	}
+	if err := r.ParseMultipartForm(64 << 20); err != nil {
+		httpErr(w, 400, "invalid multipart form")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		httpErr(w, 400, "file required")
+		return
+	}
+	defer file.Close()
+
+	fileName := sanitizeAssetFileName(header.Filename)
+	head := make([]byte, 512)
+	headN, readErr := file.Read(head)
+	if readErr != nil && readErr != io.EOF {
+		httpErr(w, 400, "failed to read uploaded file")
+		return
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		httpErr(w, 500, "failed to reset uploaded file")
+		return
+	}
+	contentType := detectAssetContentType(header.Header.Get("Content-Type"), fileName, head[:headN])
+	now := time.Now()
+	relDir := path.Join(now.Format("2006"), now.Format("01"), now.Format("02"))
+	relPath := path.Join(relDir, randomAssetID(8)+"__"+fileName)
+	assetsRoot := workspaceAssetsFilesDir(workspace)
+	fullPath, ok := resolveAssetDiskPath(assetsRoot, relPath)
+	if !ok {
+		httpErr(w, 400, "bad asset path")
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		httpErr(w, 500, "failed to create asset directory")
+		return
+	}
+	dst, err := os.OpenFile(fullPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0644)
+	if err != nil {
+		httpErr(w, 500, "failed to create asset file")
+		return
+	}
+	size, copyErr := io.Copy(dst, file)
+	closeErr := dst.Close()
+	if copyErr != nil {
+		_ = os.Remove(fullPath)
+		httpErr(w, 500, "failed to save asset file")
+		return
+	}
+	if closeErr != nil {
+		_ = os.Remove(fullPath)
+		httpErr(w, 500, "failed to finalize asset file")
+		return
+	}
+	if strings.HasPrefix(contentType, "image/") {
+		decoratedFileName := sanitizeAssetFileName(decorateImageAssetFileName(fileName, size, fullPath))
+		if decoratedFileName != "" && decoratedFileName != fileName {
+			if parts := strings.SplitN(filepath.Base(relPath), "__", 2); len(parts) == 2 {
+				nextRelPath := path.Join(relDir, parts[0]+"__"+decoratedFileName)
+				nextFullPath, nextOK := resolveAssetDiskPath(assetsRoot, nextRelPath)
+				if nextOK {
+					if err := os.Rename(fullPath, nextFullPath); err == nil {
+						fileName = decoratedFileName
+						relPath = nextRelPath
+						fullPath = nextFullPath
+					}
+				}
+			}
+		}
+	}
+	asset := uploadedAssetFile{
+		Name:        fileName,
+		Size:        size,
+		ContentType: contentType,
+		IsImage:     strings.HasPrefix(contentType, "image/"),
+		URL:         buildAssetFileURL(r, pane, relPath),
+		Path:        relPath,
+		FileRef:     hostPathToFileRef(fullPath),
+	}
+	J(w, M{"ok": true, "file": asset})
+}
+
+func handleAssetFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httpErr(w, 405, "method not allowed")
+		return
+	}
+	rawPath := strings.TrimPrefix(r.URL.Path, "/assets/files/")
+	parts := strings.SplitN(rawPath, "/", 2)
+	if len(parts) != 2 {
+		http.NotFound(w, r)
+		return
+	}
+	pane := normPaneID(parts[0])
+	workspace := paneWorkspace(pane)
+	if workspace == "" {
+		httpErr(w, 404, "pane not found")
+		return
+	}
+	assetsRoot := workspaceAssetsFilesDir(workspace)
+	fullPath, ok := resolveAssetDiskPath(assetsRoot, parts[1])
+	if !ok {
+		httpErr(w, 400, "bad asset path")
+		return
+	}
+	if info, err := os.Stat(fullPath); err != nil || info.IsDir() {
+		legacyRoot := workspaceLegacyAssetsFilesDir(workspace)
+		legacyPath, legacyOK := resolveAssetDiskPath(legacyRoot, parts[1])
+		if !legacyOK {
+			http.NotFound(w, r)
+			return
+		}
+		if legacyInfo, legacyErr := os.Stat(legacyPath); legacyErr != nil || legacyInfo.IsDir() {
+			http.NotFound(w, r)
+			return
+		}
+		fullPath = legacyPath
+	}
+	contentType := detectAssetContentType("", fullPath, nil)
+	if contentType == "application/octet-stream" {
+		if f, err := os.Open(fullPath); err == nil {
+			defer f.Close()
+			info, statErr := f.Stat()
+			if statErr != nil || info.IsDir() {
+				http.NotFound(w, r)
+				return
+			}
+			head := make([]byte, 512)
+			n, _ := f.Read(head)
+			contentType = detectAssetContentType("", fullPath, head[:n])
+		}
+	} else if info, err := os.Stat(fullPath); err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	disposition := "attachment"
+	if strings.HasPrefix(contentType, "image/") {
+		disposition = "inline"
+	}
+	headerValue := mime.FormatMediaType(disposition, map[string]string{"filename": assetDownloadName(fullPath)})
+	if headerValue != "" {
+		w.Header().Set("Content-Disposition", headerValue)
+	}
+	http.ServeFile(w, r, fullPath)
 }
 
 func handleCicyFiles(w http.ResponseWriter, r *http.Request) {

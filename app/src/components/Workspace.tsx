@@ -4,31 +4,35 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import { createPortal } from 'react-dom';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
-  LayoutList, Users, RotateCcw, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check
+  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import AgentAvatar from './AgentAvatar';
-import { useDevRegister } from '../lib/devStore';
+import { useDevRegister, devStore } from '../lib/devStore';
 import { useAuth } from '../contexts/AuthContext';
 import { SendingProvider } from '../contexts/SendingContext';
 // import ChatView from './chat/ChatView';
 import ChatHistoryView from './chat/ChatHistoryView';
+import CurrentHistoryView from './chat/CurrentHistoryView';
 import { WebFrame } from './WebFrame';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
 import TeamPanel from './layout/TeamPanel';
 import SkillPanel from './layout/SkillPanel';
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
+import AgentProviderRequestView, { type RequestViewTab } from './layout/AgentProviderRequestView';
 import TokenDialog from './layout/TokenDialog';
 import useDesktopEvents from './layout/useDesktopEvents';
 import AgentCanvas, { AgentCanvasItem } from './layout/AgentCanvas';
 import AgentStack from './layout/AgentStack';
 import { useDialog } from '../contexts/DialogContext';
-import config, { getHostHome, syncHostHomeFromPath, toTildePath, urls } from '../config';
+import config, { defaultWorkerWorkspace, getHostHome, syncHostHomeFromPath, toTildePath, urls } from '../config';
 import apiService from '../services/api';
 import { sendCommandToTmux } from '../services/mockApi';
 import { ApiSwitchDialog } from './layout/ApiSwitchDialog';
 import CreateAgentDialog, { CreateAgentValues } from './CreateAgentDialog';
+import { lockPointer, unlockPointer, clearPointerLock } from '../lib/pointerLock';
+import { emitWebFrameMaskEvent } from '../lib/webFrameMask';
 
 const cache = {
   get: (k: string, def: any) => { try { const v = JSON.parse(localStorage.getItem(k)!); return v ?? def; } catch { return def; } },
@@ -37,6 +41,8 @@ const cache = {
 
 const LEFT_PANEL_WIDTH = 320;
 const CLI_DRAWER_WIDTH_KEY = 'ws_cliDrawerWidth';
+const CLI_CONTENT_MODE_KEY = 'ws_cliContentMode';
+const cliContentTabKey = (paneId: string) => `TeamPanel:${paneId}.paneId:cliContentTab`;
 const CLI_DRAWER_MIN_WIDTH = 360;
 const CLI_DRAWER_DEFAULT_WIDTH = 520;
 const CLI_DRAWER_MAX_WIDTH = 960;
@@ -45,74 +51,71 @@ const GITHUB_ISSUES_URL = 'https://github.com/cicy-ai/cicy-code/issues';
 const UPGRADE_URL = 'https://cicy-ai.com/team/upgrade';
 const RENEW_URL = 'https://cicy-ai.com/team/pay';
 
-type MembershipBannerState = {
-  kind: string | null;
-  tag: string | null;
+type MembershipCardState = {
+  userId: string;
+  level: 'open_source' | 'trial' | 'shared' | 'pro_vm' | 'private_deploy';
+  tag: string;
   expiresAt: string | null;
-  showRenew: boolean;
-  showUpgrade: boolean;
   renewUrl: string | null;
   upgradeUrl: string | null;
-  syncedAt: string | null;
 };
 
-function parseIsPro(value: unknown): boolean | null {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') {
-    if (value === 1) return true;
-    if (value === 0) return false;
-    return null;
-  }
-  if (typeof value !== 'string') return null;
-  const raw = value.trim().toLowerCase();
-  if (!raw) return null;
-  if (['1', 'true', 'yes', 'on', 'pro'].includes(raw)) return true;
-  if (['0', 'false', 'no', 'off', 'trial', 'free'].includes(raw)) return false;
-  return null;
-}
-
-function resolveTrialExpiresMs(epoch: number | null, expiresAt: string | null): number | null {
-  if (typeof epoch === 'number' && Number.isFinite(epoch) && epoch > 0) {
-    return epoch * 1000;
-  }
-  if (!expiresAt) return null;
-  const parsed = Date.parse(expiresAt);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-}
-
-function formatDateTime(ms: number): string {
+function formatDateTime(ms: number) {
   return new Date(ms).toLocaleString('zh-CN', { hour12: false });
 }
 
-function formatClockTime(value: string | null): string {
+function formatClockTime(value: string | null) {
   if (!value) return '';
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) return value;
   return new Date(parsed).toLocaleTimeString('zh-CN', { hour12: false });
 }
 
-function parseEnvBool(value: unknown): boolean {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') return value !== 0;
-  if (typeof value !== 'string') return false;
-  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
-}
-
 function clampCliDrawerWidth(value: number): number {
   if (!Number.isFinite(value)) return CLI_DRAWER_DEFAULT_WIDTH;
-  return Math.min(CLI_DRAWER_MAX_WIDTH, Math.max(CLI_DRAWER_MIN_WIDTH, value));
+  const viewportMax = typeof window === 'undefined' ? CLI_DRAWER_MAX_WIDTH : Math.max(CLI_DRAWER_MIN_WIDTH, window.innerWidth - 120);
+  const maxWidth = Math.min(CLI_DRAWER_MAX_WIDTH, viewportMax);
+  return Math.min(maxWidth, Math.max(CLI_DRAWER_MIN_WIDTH, value));
 }
 
-function membershipTone(kind: string | null) {
-  switch ((kind || '').trim().toLowerCase()) {
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function isDeepEqual(a: unknown, b: unknown, seen = new WeakMap<object, object>()): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== typeof b || a == null || b == null) return false;
+  if (typeof a !== 'object') return false;
+
+  const aObject = a as object;
+  const bObject = b as object;
+  if (seen.get(aObject) === bObject) return true;
+  seen.set(aObject, bObject);
+
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (!isDeepEqual(a[i], b[i], seen)) return false;
+    }
+    return true;
+  }
+
+  if (!isPlainObject(a) || !isPlainObject(b)) return false;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+
+  for (const key of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+    if (!isDeepEqual(a[key], b[key], seen)) return false;
+  }
+  return true;
+}
+
+function membershipTone(level: string | null) {
+  switch ((level || '').trim().toLowerCase()) {
     case 'trial':
       return 'border-amber-400/25 bg-amber-400/10';
     case 'shared':
@@ -126,8 +129,8 @@ function membershipTone(kind: string | null) {
   }
 }
 
-function membershipTagTone(kind: string | null) {
-  switch ((kind || '').trim().toLowerCase()) {
+function membershipTagTone(level: string | null) {
+  switch ((level || '').trim().toLowerCase()) {
     case 'trial':
       return 'border-amber-300/40 bg-amber-300/15 text-amber-100';
     case 'shared':
@@ -141,16 +144,62 @@ function membershipTagTone(kind: string | null) {
   }
 }
 
-function membershipExpireLabel(kind: string | null, expiresAt: string | null) {
-  const expiresMs = resolveTrialExpiresMs(null, expiresAt);
-  if (expiresMs === null) return '';
-  const prefix = (kind || '').trim().toLowerCase() === 'trial' ? '试用到期' : '到期时间';
-  return `${prefix} ${formatDateTime(expiresMs)}`;
+const DEFAULT_MEMBERSHIP_CARD: MembershipCardState = {
+  userId: 'open-source',
+  level: 'open_source',
+  tag: '开源版',
+  expiresAt: null,
+  renewUrl: null,
+  upgradeUrl: UPGRADE_URL,
+};
+
+function normalizeMembershipLevel(value: unknown): MembershipCardState['level'] {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'open_source' || raw === 'trial' || raw === 'shared' || raw === 'pro_vm' || raw === 'private_deploy') return raw;
+  return DEFAULT_MEMBERSHIP_CARD.level;
+}
+
+function resolveMembershipTag(level: MembershipCardState['level'], value: unknown): string {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (raw) return raw;
+  switch (level) {
+    case 'trial':
+      return '试用';
+    case 'shared':
+      return '共享版';
+    case 'pro_vm':
+      return 'PRO';
+    case 'private_deploy':
+      return '私有版';
+    default:
+      return '开源版';
+  }
+}
+
+function normalizeMembershipCard(value: any): MembershipCardState {
+  const base = DEFAULT_MEMBERSHIP_CARD;
+  const level = normalizeMembershipLevel(value?.level ?? value?.kind);
+  return {
+    userId: typeof value?.userId === 'string' && value.userId.trim() ? value.userId.trim() : base.userId,
+    level,
+    tag: resolveMembershipTag(level, value?.tag),
+    expiresAt: level === 'open_source' ? null : (typeof value?.expiresAt === 'string' && value.expiresAt.trim() ? value.expiresAt.trim() : base.expiresAt),
+    renewUrl: typeof value?.renewUrl === 'string' && value.renewUrl.trim() ? value.renewUrl.trim() : base.renewUrl,
+    upgradeUrl: typeof value?.upgradeUrl === 'string' && value.upgradeUrl.trim() ? value.upgradeUrl.trim() : base.upgradeUrl,
+  };
 }
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 type LeftPanelView = 'team' | 'skills' | 'agents' | null;
-type WorkspaceCliContentTab = InspectorTab | 'history' | 'files';
+type WorkspaceCliContentTab = InspectorTab | 'history' | 'files' | RequestViewTab;
+type CliContentMode = 'drawer' | 'fixed';
+
+function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
+  if (value === 'files' || value === 'history' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'settings') {
+    return value;
+  }
+  return 'files';
+}
 
 export default function Workspace({ agentId, onSelectAgent }: Props) {
   const {
@@ -160,6 +209,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     broadcastChatWsMessage,
     systemResources,
     setSystemResources,
+    globalVar,
+    setGlobalVar,
   } = useApp();
   const { token, hasPermission } = useAuth();
   const { confirm } = useDialog();
@@ -167,7 +218,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const fullPaneId = `${paneId}:main.0`;
   const initialPaneIdRef = useRef(paneId);
 
-  const mainTab = 'cli' as const;
+  const mainTab: 'cli' | 'chat' = 'cli';
   const [leftPanelView, setLeftPanelView] = useState<LeftPanelView>(() => {
     const v = cache.get('ws_leftPanel', null);
     if (v === 'team' || v === 'skills') return v;
@@ -175,9 +226,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   });
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorRequestedTab, setInspectorRequestedTab] = useState<InspectorTab>('overview');
-  const [cliContentOpen, setCliContentOpen] = useState(false);
-  const [cliContentTab, setCliContentTab] = useState<WorkspaceCliContentTab>('files');
+  const [cliContentOpen, setCliContentOpen] = useState(() => cache.get(CLI_CONTENT_MODE_KEY, 'drawer') === 'fixed');
+  const [cliContentTab, setCliContentTab] = useState<WorkspaceCliContentTab>(() => normalizeCliContentTab(cache.get(cliContentTabKey(paneId), 'files')));
+  const [cliContentMode, setCliContentMode] = useState<CliContentMode>(() => cache.get(CLI_CONTENT_MODE_KEY, 'drawer') === 'fixed' ? 'fixed' : 'drawer');
   const [cliDrawerWidth, setCliDrawerWidth] = useState(() => clampCliDrawerWidth(Number(cache.get(CLI_DRAWER_WIDTH_KEY, CLI_DRAWER_DEFAULT_WIDTH))));
+  const [cliDrawerResizing, setCliDrawerResizing] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -193,11 +246,17 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [activeTeamPaneId, setActiveTeamPaneId] = useState<Record<string, string>>(() => cache.get(TEAM_TERMINAL_ACTIVE_KEY, {}));
   const [inspectorPaneId, setInspectorPaneId] = useState(paneId);
   const [canvasLocateRequest, setCanvasLocateRequest] = useState<{ paneId: string; nonce: number; zoomToActual?: boolean } | null>(null);
-  const agentWorkspaceRef = useRef(`~/workers/${paneId}`);
+  const agentWorkspaceRef = useRef(defaultWorkerWorkspace(paneId));
   const prevCanvasPaneIdsRef = useRef<string[] | null>(null);
   const initialCanvasRestoreScopeRef = useRef<string | null>(null);
   const initialStackSelectionScopeRef = useRef<string | null>(null);
   const cliDrawerResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const cliContentPanelRef = useRef<HTMLDivElement>(null);
+  const systemResourcesRef = useRef<SystemResourceSnapshot | null>(systemResources);
+
+  useEffect(() => {
+    systemResourcesRef.current = systemResources;
+  }, [systemResources]);
 
   const handleOpenClawOpen = () => {
     if (!token) return;
@@ -208,6 +267,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [netLatency, setNetLatency] = useState<number | null>(null);
   const [chatWsConnected, setChatWsConnected] = useState(false);
   const [chatWsClientId, setChatWsClientId] = useState<string | null>(null);
+  const pageClientId = useMemo(() => {
+    const key = `cicy_chat_client_id:${paneId}`;
+    try {
+      const current = sessionStorage.getItem(key);
+      if (current) return current;
+      const next = `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+      sessionStorage.setItem(key, next);
+      return next;
+    } catch {
+      return `web-${Date.now().toString(36)}`;
+    }
+  }, [paneId]);
   const [chatWsLiveStatus, setChatWsLiveStatus] = useState('idle');
   const [chatWsLiveText, setChatWsLiveText] = useState('');
   const [chatWsHistoryVersion, setChatWsHistoryVersion] = useState(0);
@@ -215,29 +286,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [chatSuggestionText, setChatSuggestionText] = useState('');
   const [chatSuggestionPending, setChatSuggestionPending] = useState(false);
   const [chatSuggestionSending, setChatSuggestionSending] = useState(false);
+  const [filesTargetPaneId, setFilesTargetPaneId] = useState<string | null>(null);
   const chatWsRef = useRef<WebSocket | null>(null);
   const chatWsReconnectTimerRef = useRef<number | null>(null);
   const chatWsPingTimerRef = useRef<number | null>(null);
   const chatWsPingSentAtRef = useRef<number | null>(null);
   const chatWsPingRequestIdRef = useRef<string | null>(null);
 
-  const [trialExpiresAt, setTrialExpiresAt] = useState<string | null>(null);
-  const [trialExpiresAtEpoch, setTrialExpiresAtEpoch] = useState<number | null>(null);
-  const [isPro, setIsPro] = useState<boolean | null>(null);
-  const [membership, setMembership] = useState<MembershipBannerState>({
-    kind: null,
-    tag: null,
-    expiresAt: null,
-    showRenew: false,
-    showUpgrade: false,
-    renewUrl: null,
-    upgradeUrl: null,
-    syncedAt: null,
-  });
+  const membershipCard = useMemo(() => normalizeMembershipCard(globalVar?.membership), [globalVar]);
   const [membershipMenuOpen, setMembershipMenuOpen] = useState(false);
-  const [membershipRefreshing, setMembershipRefreshing] = useState(false);
+  const [membershipPopoverPos, setMembershipPopoverPos] = useState<{ x: number; y: number } | null>(null);
   const membershipMenuRef = useRef<HTMLDivElement>(null);
-  const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now());
+  const membershipTriggerRef = useRef<HTMLButtonElement>(null);
   const isApiOnlyRuntime = !!(agentDetail && agentDetail.capabilities?.supports_tmux === false);
 
   const [showVoiceControl, setShowVoiceControl] = useState(false);
@@ -262,6 +322,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }, [leftActive]);
   useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, activeTeamPaneId); }, [activeTeamPaneId]);
   useEffect(() => { cache.set(CLI_DRAWER_WIDTH_KEY, cliDrawerWidth); }, [cliDrawerWidth]);
+  useEffect(() => { cache.set(CLI_CONTENT_MODE_KEY, cliContentMode); }, [cliContentMode]);
+  useEffect(() => {
+    setCliContentTab(normalizeCliContentTab(cache.get(cliContentTabKey(paneId), 'files')));
+  }, [paneId]);
+  useEffect(() => {
+    cache.set(cliContentTabKey(paneId), cliContentTab);
+  }, [cliContentTab, paneId]);
   useEffect(() => { cache.set('ws_voiceBtnPos', voiceBtnPos); }, [voiceBtnPos]);
   useEffect(() => { cache.set('agent_panelPos', panelPos); }, [panelPos]);
   useEffect(() => { cache.set('agent_panelSize', panelSize); }, [panelSize]);
@@ -282,21 +349,35 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const stopResize = () => {
       if (!cliDrawerResizeRef.current) return;
       cliDrawerResizeRef.current = null;
+      setCliDrawerResizing(false);
+      emitWebFrameMaskEvent({ action: 'end', key: `workspace:${paneId}:cli-drawer-resize`, reason: 'cli-drawer-resize' });
+      unlockPointer();
+      clearPointerLock();
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
 
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', stopResize);
+    window.addEventListener('blur', stopResize);
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', stopResize);
+      window.removeEventListener('blur', stopResize);
       stopResize();
     };
-  }, []);
+  }, [paneId]);
   const applyPanePatch = useCallback((targetPaneId: string, patch: any) => {
     setPaneDetails(prev => ({ ...prev, [targetPaneId]: { ...(prev[targetPaneId] || {}), ...patch } }));
-    if (targetPaneId === paneId) setAgentDetail((prev: any) => ({ ...(prev || {}), ...patch }));
+    if (targetPaneId === paneId) {
+      setAgentDetail((prev: any) => {
+        const next = { ...(prev || {}), ...patch };
+        const workspace = next?.workspace || defaultWorkerWorkspace(targetPaneId);
+        syncHostHomeFromPath(workspace);
+        agentWorkspaceRef.current = workspace;
+        return next;
+      });
+    }
     set智能体(prev => prev.map(a => {
       const id = (a.pane_id || a.id || '').split(':')[0];
       return id === targetPaneId ? { ...a, ...patch } : a;
@@ -323,20 +404,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     } catch {}
   }, [token]);
   useEffect(() => { void refreshPanes(); }, [refreshPanes]);
-  useEffect(() => {
-    let cancelled = false;
-    apiService.getPane(fullPaneId).then(({ data }) => {
-      if (cancelled) return;
-      setAgentDetail(data);
-      setPaneDetails(prev => ({ ...prev, [paneId]: data }));
-      const workspace = data?.workspace || `~/workers/${paneId}`;
-      syncHostHomeFromPath(workspace);
-      agentWorkspaceRef.current = workspace;
-    }).catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [fullPaneId]);
   const prevPaneId = useRef(paneId);
   useEffect(() => {
     if (prevPaneId.current !== paneId) {
@@ -533,19 +600,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       });
       return;
     }
-    const agentId = paneId.replace(/:.*$/, '');
-    const clientId = (() => {
-      const key = `cicy_chat_client_id:${paneId}`;
-      try {
-        const current = sessionStorage.getItem(key);
-        if (current) return current;
-        const next = `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-        sessionStorage.setItem(key, next);
-        return next;
-      } catch {
-        return `web-${Date.now().toString(36)}`;
-      }
-    })();
+    const masterAgentId = paneId.replace(/:.*$/, '');
+    const clientId = pageClientId;
     const proto = config.apiBase.startsWith('https') ? 'wss' : (window.location.protocol === 'https:' ? 'wss' : 'ws');
     const base = config.apiBase.replace(/^https?/, proto);
     const isElectron = typeof (window as any).electronRPC === 'function' ? '1' : '0';
@@ -564,7 +620,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       chatWsPingSentAtRef.current = null;
       chatWsPingRequestIdRef.current = null;
       chatWsRef.current?.close();
-      const ws = new WebSocket(`${base}/api/chat/ws?agent_id=${encodeURIComponent(agentId)}&token=${encodeURIComponent(token)}&electron=${isElectron}&client_id=${encodeURIComponent(clientId)}`);
+      const ws = new WebSocket(`${base}/api/chat/ws?master_agent_id=${encodeURIComponent(masterAgentId)}&token=${encodeURIComponent(token)}&electron=${isElectron}&client_id=${encodeURIComponent(clientId)}`);
       chatWsRef.current = ws;
       const sendLatencyPing = () => {
         if (dead || chatWsRef.current !== ws || ws.readyState !== WebSocket.OPEN) return;
@@ -587,6 +643,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         // 连接建立后立即请求 poll 数据
         console.log('[poll_request] WS onopen, sending initial poll_request');
         try { ws.send(JSON.stringify({ type: 'poll_request' })); } catch (e) { console.warn('[poll_request] onopen send failed:', e); }
+        try { ws.send(JSON.stringify({ type: 'register_active_channel', data: { agent_id: activeCliPaneId || paneId, client_id: clientId, channel_type: 'web' } })); } catch (e) { console.warn('[chat-ws] register_active_channel onopen failed:', e); }
         sendLatencyPing();
         chatWsPingTimerRef.current = window.setInterval(sendLatencyPing, 5000);
       };
@@ -674,35 +731,56 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               setNetLatency(Math.max(0, Math.round(performance.now() - chatWsPingSentAtRef.current)));
               chatWsPingSentAtRef.current = null;
             }
+          } else if (msg?.type === 'code.open_file' && msg.data?.path) {
+            openCodeFile(String(msg.data.path || ''), String(msg.data?.requestId || ''));
+          } else if (msg?.type === 'code.send_path' && msg.data?.path) {
+            const targetClientId = String(msg.data?.page_client_id || '').trim();
+            const filePath = String(msg.data.path || '').trim();
+            if (targetClientId === clientId && filePath) {
+              const workspaceState = devStore.getSnapshot().Workspace?.state || {};
+              const runtimeActivePaneId = String(workspaceState.activeCliPaneId || activeCliPaneId || paneId).trim();
+              const tmuxTarget = runtimeActivePaneId || paneId;
+              const normalizedFilePath = `/${filePath.replace(/^\/+/, '')}`;
+              const promptText = `file://${normalizedFilePath.replace(/^\/+/, '')}`;
+              window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: promptText } }));
+              sendCommandToTmux(promptText, tmuxTarget, false).catch(() => {
+                window.dispatchEvent(new CustomEvent('show-toast', { detail: '发送文件路径失败' }));
+              });
+            }
           } else if (msg?.type === 'poll_data' && msg.data) {
             const data = msg.data;
             console.log('[poll_data]', data);
-            setBoundAgents(Array.isArray(data.agents) ? data.agents : []);
-            setPollStatuses(data.statuses && typeof data.statuses === 'object' ? data.statuses : {});
+            const nextBoundAgents = Array.isArray(data.agents) ? data.agents : [];
+            const nextPollStatuses = data.statuses && typeof data.statuses === 'object' ? data.statuses : {};
+            setBoundAgents((prev) => isDeepEqual(prev, nextBoundAgents) ? prev : nextBoundAgents);
+            setPollStatuses((prev) => isDeepEqual(prev, nextPollStatuses) ? prev : nextPollStatuses);
             if (data.system_resources && typeof data.system_resources === 'object') {
-              setSystemResources(data.system_resources as SystemResourceSnapshot);
+              if (!isDeepEqual(systemResourcesRef.current, data.system_resources)) {
+                const nextSystemResources = data.system_resources as SystemResourceSnapshot;
+                systemResourcesRef.current = nextSystemResources;
+                setSystemResources(nextSystemResources);
+              }
+            }
+            if (data.membership && typeof data.membership === 'object') {
+              setGlobalVar((prev: any) => {
+                const base = prev && typeof prev === 'object' ? prev : {};
+                return isDeepEqual(base.membership, data.membership) ? prev : { ...base, membership: data.membership };
+              });
             }
             const st = data.statuses?.[fullPaneId] || data.statuses?.[paneId];
-            if (st?.status) setStatus(st.status);
-            if (st?.title) setAgentDetail((prev: any) => prev ? { ...prev, title: st.title } : { title: st.title });
-            if (st?.contextUsage != null) setContextUsage(st.contextUsage);
-            setTrialExpiresAt(typeof data.trial_expires_at === 'string' && data.trial_expires_at.trim() ? data.trial_expires_at.trim() : null);
-            const epoch = typeof data.trial_expires_at_epoch === 'number' ? data.trial_expires_at_epoch : Number.parseInt(String(data.trial_expires_at_epoch ?? ''), 10);
-            setTrialExpiresAtEpoch(Number.isFinite(epoch) && epoch > 0 ? epoch : null);
-            setIsPro(parseIsPro(data.is_pro));
-            setMembership({
-              kind: typeof data.membership_kind === 'string' && data.membership_kind.trim() ? data.membership_kind.trim() : null,
-              tag: typeof data.membership_tag === 'string' && data.membership_tag.trim() ? data.membership_tag.trim() : null,
-              expiresAt: typeof data.membership_expires_at === 'string' && data.membership_expires_at.trim() ? data.membership_expires_at.trim() : null,
-              showRenew: parseEnvBool(data.show_renew),
-              showUpgrade: parseEnvBool(data.show_upgrade),
-              renewUrl: typeof data.renew_url === 'string' && data.renew_url.trim() ? data.renew_url.trim() : null,
-              upgradeUrl: typeof data.upgrade_url === 'string' && data.upgrade_url.trim() ? data.upgrade_url.trim() : null,
-              syncedAt: typeof data.membership_synced_at === 'string' && data.membership_synced_at.trim() ? data.membership_synced_at.trim() : new Date().toISOString(),
+            if (st?.status) setStatus((prev) => prev === st.status ? prev : st.status);
+            if (st?.title) setAgentDetail((prev: any) => {
+              if (prev?.title === st.title) return prev;
+              return prev ? { ...prev, title: st.title } : { title: st.title };
             });
+            if (st?.contextUsage != null) setContextUsage((prev) => prev === st.contextUsage ? prev : st.contextUsage);
           }
           if (msg?.type === 'system_resources' && msg.data && typeof msg.data === 'object') {
-            setSystemResources(msg.data as SystemResourceSnapshot);
+            if (!isDeepEqual(systemResourcesRef.current, msg.data)) {
+              const nextSystemResources = msg.data as SystemResourceSnapshot;
+              systemResourcesRef.current = nextSystemResources;
+              setSystemResources(nextSystemResources);
+            }
           }
           broadcastChatWsMessage(msg);
         } catch {}
@@ -768,93 +846,151 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         chatWsClientId: clientId,
       });
     };
-  }, [broadcastChatWsMessage, paneId, sendChatWsMessage, setChatWsSender, setChatWsState, token]);
+  }, [activeCliPaneId, broadcastChatWsMessage, pageClientId, paneId, sendChatWsMessage, setChatWsSender, setChatWsState, token]);
 
   useEffect(() => {
-    if (!token || !activeCliPaneId) return;
-    let cancelled = false;
-    const agentId = activeCliPaneId.replace(/:.*$/, '');
-    const reloadSuggestion = async () => {
-      try {
-        const { data } = await apiService.getAgentHistoryView(agentId);
-        if (cancelled) return;
-        const turns = Array.isArray(data?.data) ? data.data : [];
-        const suggestionTurn = [...turns].reverse().find((turn: any) => /\[SUGGESTION MODE:/i.test(String(turn?.q || '')));
-        if (!suggestionTurn) {
-          setChatSuggestionText('');
-          setChatSuggestionPending(false);
-          return;
-        }
-        const answerText = String(suggestionTurn?.a || '').trim();
-        if (answerText && !/\[SUGGESTION MODE:/i.test(answerText)) {
-          setChatSuggestionText(answerText);
-          setChatSuggestionPending(false);
-          return;
-        }
-        setChatSuggestionText('');
-        setChatSuggestionPending(true);
-      } catch {
-        if (!cancelled) {
-          setChatSuggestionText('');
-        }
-      }
-    };
-    void reloadSuggestion();
-    return () => { cancelled = true; };
+    const clientId = String(chatWsClientId || pageClientId || '').trim();
+    const agentID = String(activeCliPaneId || '').trim();
+    if (!clientId || !agentID || !chatWsConnected) return;
+    try {
+      sendChatWsMessage({ type: 'register_active_channel', data: { agent_id: agentID, client_id: clientId, channel_type: 'web' } });
+    } catch {}
+  }, [activeCliPaneId, chatWsClientId, chatWsConnected, pageClientId, sendChatWsMessage]);
+
+  useEffect(() => {
+    setChatSuggestionText('');
+    setChatSuggestionPending(false);
   }, [activeCliPaneId, chatWsHistoryVersion, token]);
 
-  const handleExecuteSuggestion = useCallback(async (text: string) => {
-    if (!text.trim()) return;
-    setChatSuggestionSending(true);
+  const openCodeFile = useCallback((rawPath: string, requestId?: string) => {
+    const filePath = String(rawPath || '').trim();
+    if (!filePath) return;
+    setCliContentTab('files');
+    setCliContentOpen(true);
+    const targetPagePane = String(paneId || '').trim();
+    const targetClientId = `${pageClientId}:code-ext`;
+    fetch('/api/chat/push', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        agent_id: targetPagePane,
+        client_id: targetClientId,
+        type: 'host.open_file',
+        data: {
+          path: filePath,
+          requestId: String(requestId || '').trim(),
+          page_client_id: pageClientId,
+          code_client_id: targetClientId,
+          page_pane: targetPagePane,
+        },
+      }),
+    }).catch(() => {});
+  }, [pageClientId, paneId, token]);
+
+  const handleSendPageClientIdToAgent = useCallback(async () => {
+    const currentClientId = String(chatWsClientId || pageClientId || '').trim();
+    const workspaceState = devStore.getSnapshot().Workspace?.state || {};
+    const tmuxTarget = String(workspaceState.activeCliPaneId || '').trim();
+    if (!currentClientId || !tmuxTarget) return;
+    const promptText = `我的浏览器页面clientId:${currentClientId},你可以通过agent-webpage 和agent-code-server skill 与我通信了!`;
     try {
-      window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: activeCliPaneId, q: text } }));
-      await sendCommandToTmux(text, activeCliPaneId);
-      setChatSuggestionText('');
-      setChatSuggestionPending(false);
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '已发送到当前 pane' }));
+      window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: promptText } }));
+      await sendCommandToTmux(promptText, tmuxTarget, true);
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '已发送页面 client_id 到当前 agent' }));
     } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '发送 suggestion 失败' }));
-    } finally {
-      setChatSuggestionSending(false);
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '发送页面 client_id 失败' }));
     }
-  }, [activeCliPaneId]);
+  }, [activeCliPaneId, chatWsClientId, pageClientId, paneId]);
+
+  const handleCopyPageConnectPrompt = useCallback(async () => {
+    const currentClientId = String(chatWsClientId || pageClientId || '').trim();
+    if (!currentClientId) return;
+    const promptText = `我的浏览器页面clientId:${currentClientId},你可以通过agent-webpage 和agent-code-server skill 与我通信了!`;
+    let ok = false;
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(promptText);
+        ok = true;
+      }
+    } catch {}
+    if (!ok) {
+      const textarea = document.createElement('textarea');
+      textarea.value = promptText;
+      textarea.setAttribute('readonly', 'true');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
+    if (ok) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '已复制连接指令' }));
+    }
+  }, [chatWsClientId, pageClientId]);
 
   const topBarPaneId = activeCliPaneId || paneId;
   const topBarDetail = paneDetails[topBarPaneId] || (topBarPaneId === paneId ? agentDetail : null);
   const topBarTitle = topBarDetail?.title
     || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === topBarPaneId)?.title
     || (topBarPaneId === paneId ? title : topBarPaneId);
-  const topBarWorkspace = topBarDetail?.workspace || `~/workers/${topBarPaneId}`;
+  const topBarWorkspace = topBarDetail?.workspace || defaultWorkerWorkspace(topBarPaneId);
   const topBarIsApiOnlyRuntime = !!(
     topBarDetail
     && topBarDetail.capabilities?.supports_tmux === false
   );
-  const filePaneDetail = paneDetails[paneId] || agentDetail;
-  const filePaneWorkspace = filePaneDetail?.workspace || `~/workers/${paneId}`;
+  const filePaneId = paneId;
+  const filePaneDetail = paneDetails[filePaneId] || (filePaneId === paneId ? agentDetail : null);
+  const filePaneWorkspace = defaultWorkerWorkspace(filePaneId);
   const filePaneIsApiOnlyRuntime = !!(
     filePaneDetail
     && filePaneDetail.capabilities?.supports_tmux === false
   );
   const fileCodeServerSrc = token && !filePaneIsApiOnlyRuntime
-    ? urls.codeServer(filePaneWorkspace, token)
+    ? urls.codeServer(defaultWorkerWorkspace(paneId), token, pageClientId, paneId)
     : '';
   const openPaneInCurrentTerminal = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
     setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
   }, [paneId]);
-  const openPaneHistory = useCallback((targetPaneId: string) => {
+  const openPaneSettings = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
     setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
     setCliContentTab('settings');
     setCliContentOpen(true);
   }, [paneId]);
-  const openPaneFiles = useCallback((targetPaneId: string) => {
+  const openPaneHistory = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
     setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
+    setCliContentTab('history');
+    setCliContentOpen(true);
+  }, [paneId]);
+  const openPaneFiles = useCallback((targetPaneId: string) => {
+    const clean = targetPaneId.replace(/:.*$/, '');
+    if (!clean) return;
+    const halfWindowWidth = Math.floor(window.innerWidth / 2);
+    if (halfWindowWidth > 0) {
+      setCliDrawerWidth(prev => (prev > halfWindowWidth ? halfWindowWidth : prev));
+    }
+    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
     setCliContentTab('files');
+    setCliContentOpen(true);
+  }, [paneId]);
+  const openPaneRequestView = useCallback((targetPaneId: string, nextTab: RequestViewTab) => {
+    const clean = targetPaneId.replace(/:.*$/, '');
+    if (!clean) return;
+    const halfWindowWidth = Math.floor(window.innerWidth / 2);
+    if (halfWindowWidth > 0) {
+      setCliDrawerWidth(prev => (prev > halfWindowWidth ? halfWindowWidth : prev));
+    }
+    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
+    setCliContentTab(nextTab);
     setCliContentOpen(true);
   }, [paneId]);
   const handleCliDrawerResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
@@ -862,11 +998,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     event.stopPropagation();
     cliDrawerResizeRef.current = {
       startX: event.clientX,
-      startWidth: cliDrawerWidth,
+      startWidth: cliContentPanelRef.current?.getBoundingClientRect().width || cliDrawerWidth,
     };
+    setCliDrawerResizing(true);
+    emitWebFrameMaskEvent({ action: 'start', key: `workspace:${paneId}:cli-drawer-resize`, reason: 'cli-drawer-resize' });
+    lockPointer();
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
-  }, [cliDrawerWidth]);
+  }, [cliDrawerWidth, paneId]);
 
   const locatePaneInCanvas = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
@@ -875,331 +1014,281 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCanvasLocateRequest({ paneId: clean, nonce: Date.now(), zoomToActual: true });
   }, [paneId]);
   useEffect(() => {
-    if (!token || !topBarPaneId || topBarPaneId === paneId || paneDetails[topBarPaneId]) return;
-    apiService.getPane(`${topBarPaneId}:main.0`).then(({ data }) => {
-      setPaneDetails(prev => ({ ...prev, [topBarPaneId]: data }));
-    }).catch(() => {});
-  }, [paneId, paneDetails, topBarPaneId, token]);
-  useEffect(() => {
     document.title = `${topBarTitle} (${topBarPaneId}) | CiCy Code`;
   }, [topBarPaneId, topBarTitle]);
-  const trialExpiresMs = useMemo(() => resolveTrialExpiresMs(trialExpiresAtEpoch, trialExpiresAt), [trialExpiresAt, trialExpiresAtEpoch]);
-  const isTrialUser = isPro === false;
-  const isProUser = isPro === true;
-  const showTrialUpgrade = trialExpiresMs !== null && (isTrialUser || isProUser);
   useEffect(() => {
-    if (!isTrialUser || trialExpiresMs === null) return;
-    setCountdownNowMs(Date.now());
-    const timer = window.setInterval(() => setCountdownNowMs(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [isTrialUser, trialExpiresMs]);
-  const trialCountdown = useMemo(() => {
-    if (trialExpiresMs === null) return '';
-    return formatDuration(trialExpiresMs - countdownNowMs);
-  }, [countdownNowMs, trialExpiresMs]);
-  const trialExpireAtLabel = useMemo(() => {
-    if (trialExpiresMs === null) return '';
-    return formatDateTime(trialExpiresMs);
-  }, [trialExpiresMs]);
-  const membershipBanner = useMemo(() => {
-    if (membership.kind) {
-      return {
-        kind: membership.kind,
-        tag: membership.tag,
-        expiresLabel: membershipExpireLabel(membership.kind, membership.expiresAt),
-        showRenew: membership.showRenew,
-        showUpgrade: membership.showUpgrade,
-        renewUrl: membership.renewUrl || RENEW_URL,
-        upgradeUrl: membership.upgradeUrl || UPGRADE_URL,
-        syncedAt: membership.syncedAt,
-      };
-    }
-    if (!showTrialUpgrade) {
-      return null;
-    }
-    return {
-      kind: isProUser ? 'pro_vm' : 'trial',
-      tag: isProUser ? 'PRO' : '试用',
-      expiresLabel: isProUser ? `到期时间 ${trialExpireAtLabel}` : `试用剩余 ${trialCountdown}`,
-      showRenew: false,
-      showUpgrade: true,
-      renewUrl: RENEW_URL,
-      upgradeUrl: UPGRADE_URL,
-      syncedAt: membership.syncedAt,
+    if (!token) return;
+  }, [token]);
+  useEffect(() => {
+    (window as any).__cicyOpenCodeFile = openCodeFile;
+    const onCodeFileMessage = (event: MessageEvent) => {
+      const data = event.data as any;
+      if (!data || data.type !== 'cicy-open-code-file') return;
+      openCodeFile(data.path);
     };
-  }, [isProUser, membership, showTrialUpgrade, trialCountdown, trialExpireAtLabel]);
+    window.addEventListener('message', onCodeFileMessage);
+    return () => {
+      window.removeEventListener('message', onCodeFileMessage);
+      if ((window as any).__cicyOpenCodeFile === openCodeFile) {
+        delete (window as any).__cicyOpenCodeFile;
+      }
+    };
+  }, [openCodeFile]);
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (membershipMenuRef.current?.contains(target) || membershipTriggerRef.current?.contains(target)) return;
+      setMembershipMenuOpen(false);
+    };
+    const handleWindowResize = () => setMembershipMenuOpen(false);
+    document.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('resize', handleWindowResize);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('resize', handleWindowResize);
+    };
+  }, []);
+
+  const handleToggleMembershipMenu = useCallback(() => {
+    if (membershipMenuOpen) {
+      setMembershipMenuOpen(false);
+      return;
+    }
+    const rect = membershipTriggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setMembershipPopoverPos({ x: rect.right + 8, y: 0 });
+    setMembershipMenuOpen(true);
+  }, [membershipMenuOpen]);
 
   useDevRegister('Workspace', {
-    paneId: fullPaneId, title, status, contextUsage, mouseMode, isRestarting,
+    paneId: fullPaneId, masterAgentId: paneId, title, status, contextUsage, mouseMode, isRestarting,
     agentDetail, netLatency,
-    trialExpiresAt,
-    trialExpiresAtEpoch,
-    isPro,
-    membership,
-    trialCountdown,
-    trialExpireAtLabel,
-    isTrialUser,
-    isProUser,
-    showTrialUpgrade,
+    membershipCard,
+    membershipMenuOpen,
     agentsCount: agents.length,
     agents: agents.map((a: any) => ({ pane_id: a.pane_id, title: a.title, status: a.status, active: a.active })),
+    activeTeamPaneId,
+    activeCliPaneId,
     leftPanel: leftActive, activeWinIdx,
+    cliContentMode,
     cliContentTab,
   }, {
+    cliContentMode: setCliContentMode,
     cliContentTab: setCliContentTab,
   });
-
-  const handleRefreshMembership = useCallback(async () => {
-    setMembershipRefreshing(true);
-    try {
-      chatWsRef.current?.send(JSON.stringify({ type: 'poll_request' }));
-    } catch {}
-    // 给 WS 响应一点时间
-    setTimeout(() => setMembershipRefreshing(false), 500);
-  }, []);
-  const cliDrawerPortal = createPortal(
+  const cliContentTabs = [
+    { id: 'files', label: '文件' },
+    { id: 'history', label: '历史' },
+    { id: 'tools', label: '工具' },
+    { id: 'brain', label: '提示词' },
+    { id: 'meta', label: '元信息' },
+    { id: 'settings', label: '设置' },
+  ];
+  const renderCliContentPanel = (mode: CliContentMode) => (
     <div
-      data-id="cli-content-portal"
-      className="fixed inset-y-0 right-0 z-[60] flex"
-      style={{ display: cliContentOpen ? 'flex' : 'none', pointerEvents: cliContentOpen ? 'auto' : 'none' }}
+      ref={cliContentPanelRef}
+      data-id={mode === 'drawer' ? 'cli-content-area' : 'cli-content-fixed'}
+      className={cn(
+        'relative flex h-full min-w-0 shrink-0 flex-col bg-[#0b0b0d]',
+        mode === 'drawer'
+          ? 'border-l border-[var(--vsc-border)] shadow-[-20px_0_40px_rgba(0,0,0,0.45)]'
+          : 'border-l border-[var(--vsc-border)]'
+      )}
+      style={{ width: `${cliDrawerWidth}px` }}
     >
-      <div
-        data-id="cli-content-area"
-        className="relative flex h-full min-w-0 flex-col border-l border-[var(--vsc-border)] bg-[#0b0b0d] shadow-[-20px_0_40px_rgba(0,0,0,0.45)]"
-        style={{ width: `${cliDrawerWidth}px`, maxWidth: 'calc(100vw - 120px)' }}
-      >
+      {cliDrawerResizing ? (
         <div
-          data-id="cli-content-resize-handle"
-          className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize"
-          onMouseDown={handleCliDrawerResizeStart}
+          data-id="cli-content-resize-overlay"
+          className="fixed inset-0 z-[279] cursor-col-resize"
         />
-        <div data-id="cli-content-tabs-wrap" className="flex items-center justify-between border-b border-[var(--vsc-border)] px-3 py-2">
-          <div data-id="cli-content-tabs" className="flex gap-1 overflow-x-auto whitespace-nowrap scrollbar-none">
-            {[
-              { id: 'files', label: '文件' },
-              { id: 'settings', label: '设置' },
-            ].map((item) => (
-              <button
-                data-id={`cli-content-tab-${item.id}`}
-                key={item.id}
-                type="button"
-                className={`shrink-0 rounded-md px-2.5 py-1.5 text-[11px] leading-5 ${
-                  cliContentTab === item.id
-                    ? 'bg-white/[0.08] text-zinc-100'
-                    : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
-                }`}
-                onClick={() => setCliContentTab(item.id as WorkspaceCliContentTab)}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
+      ) : null}
+      <div
+        data-id="cli-content-resize-handle"
+        className={cn(
+          'absolute top-0 bottom-0 z-[280] w-1 cursor-col-resize bg-transparent transition-colors hover:bg-blue-400/70 active:bg-blue-400/80',
+          'left-0'
+        )}
+        onMouseDown={handleCliDrawerResizeStart}
+      />
+      <div data-id="cli-content-tabs-wrap" className="flex items-center justify-between border-b border-[var(--vsc-border)] px-3 py-2">
+        <div data-id="cli-content-tabs" className="flex gap-1 overflow-x-auto whitespace-nowrap scrollbar-none">
+          {cliContentTabs.map((item) => (
+            <button
+              data-id={`cli-content-tab-${item.id}`}
+              key={item.id}
+              type="button"
+              className={`shrink-0 rounded-md px-2.5 py-1.5 text-[11px] leading-5 ${
+                cliContentTab === item.id
+                  ? 'bg-white/[0.08] text-zinc-100'
+                  : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
+              }`}
+              onClick={() => setCliContentTab(item.id as WorkspaceCliContentTab)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <div data-id="cli-content-actions" className="ml-3 flex shrink-0 items-center gap-1">
+          <button
+            data-id="cli-content-mode-drawer"
+            type="button"
+            onClick={() => {
+              setCliContentMode(mode === 'drawer' ? 'fixed' : 'drawer');
+              setCliContentOpen(true);
+            }}
+            className={cn('rounded-md px-2 py-1.5 text-[11px] leading-5 transition-colors', mode === 'drawer' ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300')}
+          >
+            抽屉
+          </button>
           <button
             data-id="cli-content-close"
             type="button"
-            onClick={() => setCliContentOpen(false)}
-            className="ml-3 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
+            onClick={() => {
+              if (mode === 'fixed') setCliContentMode('drawer');
+              setCliContentOpen(false);
+            }}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
             title="关闭"
             aria-label="关闭"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div data-id="cli-content-body" className="min-h-0 flex-1 relative">
-          <div
-            data-id="cli-content-files-host"
-            className="absolute inset-0"
-            style={{ display: cliContentTab === 'files' ? 'block' : 'none' }}
-          >
-            {fileCodeServerSrc ? (
-              <div data-id="cli-content-files-pane" className="relative h-full w-full">
-                <WebFrame
-                  src={fileCodeServerSrc}
-                  codeServer
-                  className="h-full w-full border-0 bg-[#0A0A0A]"
-                  title="文件"
-                />
-              </div>
-            ) : (
-              <div data-id="cli-content-files-empty" className="flex h-full items-center justify-center text-sm text-zinc-500">
-                当前主 agent 没有可用的文件视图
-              </div>
-            )}
-          </div>
-          <div
-            data-id="cli-content-settings-host"
-            className="absolute inset-0"
-            style={{ display: cliContentTab === 'settings' ? 'block' : 'none' }}
-          >
-            <AgentInspector
-              paneId={activeCliPaneId}
-              paneTitle={
-                paneDetails[activeCliPaneId]?.title
-                || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.title
-                || activeCliPaneId
-              }
-              open
-              embedded
-              requestedTab={'settings'}
-              liveStatus={chatWsLiveStatus}
-              inspectorVersion={chatWsInspectorVersion}
-              onPanePatch={applyPanePatch}
-              onClose={() => {}}
-            />
-          </div>
+      </div>
+      <div data-id="cli-content-body" className="min-h-0 flex-1 relative">
+        <div
+          data-id="cli-content-files-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'files' ? 'block' : 'none' }}
+        >
+          {fileCodeServerSrc ? (
+            <div data-id="cli-content-files-pane" className="relative h-full w-full">
+              <WebFrame
+                src={fileCodeServerSrc}
+                codeServer
+                className="h-full w-full border-0 bg-[#0A0A0A]"
+                title="文件"
+              />
+            </div>
+          ) : (
+            <div data-id="cli-content-files-empty" className="flex h-full items-center justify-center text-sm text-zinc-500">
+              当前主 agent 没有可用的文件视图
+            </div>
+          )}
+        </div>
+        <div
+          data-id="cli-content-history-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'history' ? 'block' : 'none' }}
+        >
+          <CurrentHistoryView
+            paneId={activeCliPaneId}
+            open={cliContentOpen && cliContentTab === 'history'}
+            inspectorVersion={chatWsInspectorVersion}
+          />
+        </div>
+        <div
+          data-id="cli-content-request-view-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'tools' || cliContentTab === 'brain' || cliContentTab === 'meta' ? 'block' : 'none' }}
+        >
+          <AgentProviderRequestView
+            paneId={activeCliPaneId}
+            open={cliContentOpen && (cliContentTab === 'tools' || cliContentTab === 'brain' || cliContentTab === 'meta')}
+            tab={cliContentTab === 'tools' || cliContentTab === 'brain' || cliContentTab === 'meta' ? cliContentTab : 'tools'}
+            inspectorVersion={chatWsInspectorVersion}
+          />
+        </div>
+        <div
+          data-id="cli-content-settings-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'settings' ? 'block' : 'none' }}
+        >
+          <AgentInspector
+            paneId={activeCliPaneId}
+            paneTitle={
+              paneDetails[activeCliPaneId]?.title
+              || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.title
+              || activeCliPaneId
+            }
+            open
+            embedded
+            requestedTab={'settings'}
+            liveStatus={chatWsLiveStatus}
+            inspectorVersion={chatWsInspectorVersion}
+            onPanePatch={applyPanePatch}
+            onClose={() => {}}
+          />
         </div>
       </div>
+    </div>
+  );
+  const cliDrawerPortal = createPortal(
+    <div
+      data-id="cli-content-portal"
+      className="fixed inset-y-0 right-0 z-[60] flex"
+      style={{ display: cliContentMode === 'drawer' && cliContentOpen ? 'flex' : 'none', pointerEvents: cliContentMode === 'drawer' && cliContentOpen ? 'auto' : 'none' }}
+    >
+      {cliContentMode === 'drawer' ? renderCliContentPanel('drawer') : null}
     </div>,
     document.body
   );
+  const cliFixedContent = cliContentMode === 'fixed' && cliContentOpen ? renderCliContentPanel('fixed') : null;
+  const stackHeaderControls = (targetPaneId: string) => targetPaneId === activeCliPaneId ? (
+    <>
+      <SystemResourceMonitor paneId={paneId} />
+      <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} onSendClientId={handleSendPageClientIdToAgent} onCopyPrompt={handleCopyPageConnectPrompt} />
+      <button onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 令牌"><Key className="w-3.5 h-3.5" /></button>
+      <button onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 服务器"><Server className="w-3.5 h-3.5" /></button>
+      {contextUsage != null && (
+        <div data-id="context-usage" className="flex items-center gap-1.5 rounded-full bg-white/[0.02] px-2 py-0.5">
+          <div data-id="context-bar" className="h-1 w-12 overflow-hidden rounded-full bg-white/[0.04]">
+            <div className={`h-full rounded-full ${contextUsage > 80 ? 'bg-red-400/60' : contextUsage > 50 ? 'bg-yellow-400/60' : 'bg-emerald-400/60'}`} style={{ width: `${contextUsage}%` }} />
+          </div>
+          <span data-id="context-pct" className="font-mono text-xs leading-none text-zinc-600">{contextUsage}%</span>
+        </div>
+      )}
+    </>
+  ) : null;
   const rightContent = (
-    <div data-id="right-content" className="h-full flex flex-col relative">
-      <header data-id="top-bar" className="h-12 border-b border-[var(--vsc-border)] bg-[#0A0A0A] flex items-center justify-between px-4 shrink-0 z-10">
-        <div data-id="top-bar-left" className="flex items-center gap-3 w-1/3 min-w-0">
-          {membershipBanner && (
-            <div
-              data-id="top-bar-membership-banner"
-              className={cn('min-w-0 flex items-center gap-2 rounded-md border px-2 py-1', membershipTone(membershipBanner.kind))}
-            >
-              {membershipBanner.tag ? (
-                <span
-                  data-id="top-bar-membership-tag"
-                  className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase', membershipTagTone(membershipBanner.kind))}
-                >
-                  {membershipBanner.tag}
-                </span>
-              ) : null}
-              {membershipBanner.expiresLabel ? (
-                <span data-id="top-bar-membership-expire" className="min-w-0 truncate text-[11px] text-zinc-100 font-mono whitespace-nowrap">
-                  {membershipBanner.expiresLabel}
-                </span>
-              ) : null}
-              <div ref={membershipMenuRef} className="relative shrink-0">
-                <button
-                  type="button"
-                  data-id="top-bar-membership-menu-btn"
-                  onClick={() => setMembershipMenuOpen(prev => !prev)}
-                  className="inline-flex items-center gap-1 rounded bg-white/10 px-2 py-1 text-[10px] font-semibold text-white transition-colors hover:bg-white/15"
-                >
-                  操作
-                  <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', membershipMenuOpen ? 'rotate-180' : '')} />
-                </button>
-                {membershipMenuOpen ? (
-                  <div
-                    data-id="top-bar-membership-dropdown"
-                    className="absolute right-0 top-[calc(100%+8px)] z-40 min-w-[220px] rounded-xl border border-white/10 bg-[#101014]/95 p-2 shadow-[0_18px_48px_rgba(0,0,0,0.45)] backdrop-blur"
-                  >
-                    <div data-id="top-bar-membership-dropdown-meta" className="mb-2 rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2">
-                      <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">会员信息</div>
-                      {membershipBanner.expiresLabel ? (
-                        <div className="mt-1 text-[11px] font-mono text-zinc-100">{membershipBanner.expiresLabel}</div>
-                      ) : null}
-                      <div data-id="top-bar-membership-sync-time" className="mt-1 text-[10px] text-zinc-500">
-                        {membershipBanner.syncedAt ? `更新于 ${formatClockTime(membershipBanner.syncedAt)}` : '自动刷新中'}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      data-id="top-bar-membership-refresh-btn"
-                      onClick={() => { void handleRefreshMembership(); }}
-                      className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
-                    >
-                      <span>{membershipRefreshing ? '刷新中...' : '刷新信息'}</span>
-                      <RotateCcw className={cn('h-3.5 w-3.5', membershipRefreshing ? 'animate-spin' : '')} />
-                    </button>
-                    {membershipBanner.showRenew ? (
-                      <button
-                        type="button"
-                        data-id="top-bar-renew-btn"
-                        onClick={() => {
-                          setMembershipMenuOpen(false);
-                          window.open(membershipBanner.renewUrl, '_blank', 'noopener,noreferrer');
-                        }}
-                        className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-sky-100 transition-colors hover:bg-sky-300/10"
-                      >
-                        <span>我要续费</span>
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </button>
-                    ) : null}
-                    {membershipBanner.showUpgrade ? (
-                      <button
-                        type="button"
-                        data-id="top-bar-upgrade-btn"
-                        onClick={() => {
-                          setMembershipMenuOpen(false);
-                          window.open(membershipBanner.upgradeUrl, '_blank', 'noopener,noreferrer');
-                        }}
-                        className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-amber-100 transition-colors hover:bg-amber-300/10"
-                      >
-                        <span>我要升级</span>
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          )}
-        </div>
-        <div data-id="top-bar-center" className="flex items-center justify-center w-1/3" />
-        <div data-id="top-bar-right" className="flex h-full items-center justify-end gap-3 w-1/3">
-          <SystemResourceMonitor paneId={paneId} />
-          <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} />
-          <button
-            data-id="top-bar-github-issues"
-            onClick={() => window.open(GITHUB_ISSUES_URL, '_blank', 'noopener,noreferrer')}
-            className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"
-            title="GitHub Issues"
-          >
-            <Github className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 令牌"><Key className="w-3.5 h-3.5" /></button>
-          <button onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 服务器"><Server className="w-3.5 h-3.5" /></button>
-          <button onClick={() => window.dispatchEvent(new Event('open-devtools-panel'))} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="开发工具"><Bug className="w-3.5 h-3.5" /></button>
-          <span id="version" className="text-[10px] font-mono leading-none text-zinc-600">{config.version}</span>
-          {contextUsage != null && (
-            <div data-id="context-usage" className="flex items-center gap-1.5 rounded-full bg-white/[0.02] px-2 py-0.5">
-              <div data-id="context-bar" className="h-1 w-12 overflow-hidden rounded-full bg-white/[0.04]">
-                <div className={`h-full rounded-full ${contextUsage > 80 ? 'bg-red-400/60' : contextUsage > 50 ? 'bg-yellow-400/60' : 'bg-emerald-400/60'}`} style={{ width: `${contextUsage}%` }} />
-              </div>
-              <span data-id="context-pct" className="font-mono text-xs leading-none text-zinc-600">{contextUsage}%</span>
-            </div>
-          )}
-        </div>
-      </header>
-      <div data-id="right-tabs" className="flex-1 relative overflow-hidden">
-        <div data-id="chat-tab" className="absolute inset-0 flex justify-center" style={{ display: mainTab === 'chat' ? 'flex' : 'none' }}>
-          <div className="w-full max-w-5xl h-full">
-            {/* ChatView 引用先注释保留，暂时停用以阻断其内部 stats/chat 请求
-            <ChatView paneId={paneId} token={token!} apiOnly={isApiOnlyRuntime} />
-            */}
-            <div data-id="chat-view-disabled" className="flex h-full items-center justify-center text-sm text-zinc-500">
-              ChatView 已临时停用
-            </div>
+    <div data-id="right-tabs" className="h-full relative overflow-hidden">
+      <div data-id="chat-tab" className="absolute inset-0 flex justify-center" style={{ display: mainTab === 'chat' ? 'flex' : 'none' }}>
+        <div className="w-full max-w-5xl h-full">
+          {/* ChatView 引用先注释保留，暂时停用以阻断其内部 stats/chat 请求
+          <ChatView paneId={paneId} token={token!} apiOnly={isApiOnlyRuntime} />
+          */}
+          <div data-id="chat-view-disabled" className="flex h-full items-center justify-center text-sm text-zinc-500">
+            ChatView 已临时停用
           </div>
         </div>
-        <div data-id="cli-tab" className="absolute inset-0 flex" style={{ display: mainTab === 'cli' ? 'flex' : 'none' }}>
-          <div data-id="cli-agent-stack" className="relative h-full min-w-0 flex-1 overflow-hidden bg-[#09090b]">
-            <AgentStack
-              items={buildCanvasItems({
-                paneId,
-                token,
-                canvasPaneIds,
-                agents,
-                boundAgents,
-                paneDetails,
-                pollStatuses,
-                agentDetail,
-              })}
-              activePaneId={activeCliPaneId}
-              settingsShortcutActive={cliContentOpen && cliContentTab === 'settings'}
-              onOpenPaneSettings={openPaneHistory}
-              onOpenPaneFiles={openPaneFiles}
-              onActivePaneIdChange={(targetPaneId) => {
-                setActiveTeamPaneId(prev => ({ ...prev, [paneId]: targetPaneId }));
-              }}
-            />
-          </div>
+      </div>
+      <div data-id="cli-tab" className="absolute inset-0 flex" style={{ display: mainTab === 'cli' ? 'flex' : 'none' }}>
+        <div data-id="cli-agent-stack" className="relative h-full min-w-0 flex-1 overflow-hidden bg-[#09090b]">
+          <AgentStack
+            items={buildCanvasItems({
+              paneId,
+              token,
+              canvasPaneIds,
+              agents,
+              boundAgents,
+              paneDetails,
+              pollStatuses,
+              agentDetail,
+            })}
+            activePaneId={activeCliPaneId}
+            settingsShortcutActive={cliContentOpen && cliContentTab === 'settings'}
+            renderHeaderControls={stackHeaderControls}
+            showHeaderButtons={cliContentMode === 'drawer'}
+            onOpenPaneSettings={openPaneSettings}
+            onOpenPaneFiles={openPaneFiles}
+            onOpenPaneHistory={openPaneHistory}
+            onOpenPaneTools={(targetPaneId) => openPaneRequestView(targetPaneId, 'tools')}
+            onOpenPaneBrain={(targetPaneId) => openPaneRequestView(targetPaneId, 'brain')}
+            onOpenPaneMeta={(targetPaneId) => openPaneRequestView(targetPaneId, 'meta')}
+            onActivePaneIdChange={(targetPaneId) => {
+              setActiveTeamPaneId(prev => ({ ...prev, [paneId]: targetPaneId }));
+            }}
+          />
         </div>
       </div>
     </div>
@@ -1212,13 +1301,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <div data-id="activity-bar" ref={activityBarRef} className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
           <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title="团队" onClick={() => toggleLeft('team')} />
-          <SideBtn
-            dataId="btn-code-window"
-            active={leftActive === 'agents'}
-            icon={<LayoutList className="w-5 h-5" />}
-            title="智能体"
-            onClick={toggle智能体}
-          />
+        </div>
+        <div data-id="activity-bar-bottom" className="flex w-full flex-col items-center gap-3">
+          <button
+            ref={membershipTriggerRef}
+            type="button"
+            data-id="activity-bar-membership-trigger"
+            onClick={handleToggleMembershipMenu}
+            className={cn('group flex h-10 w-10 items-center justify-center rounded-xl border transition-all cursor-pointer', membershipTone(membershipCard.level), membershipMenuOpen ? 'text-zinc-100 shadow-[0_12px_30px_rgba(0,0,0,0.28)]' : 'text-zinc-400 hover:text-zinc-100 hover:border-white/[0.14]')}
+            title={membershipCard.userId}
+          >
+            <User className="h-4 w-4" />
+          </button>
         </div>
       </div>
 
@@ -1290,6 +1384,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             <div data-testid="right-panel" data-id="right-panel" className="min-w-0 flex-1">
               {rightContent}
             </div>
+            {cliFixedContent}
           </div>
         </main>
       </div>
@@ -1326,6 +1421,83 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           />
         </div>
       )}
+      {membershipMenuOpen && membershipPopoverPos ? createPortal(
+        <div
+          ref={membershipMenuRef}
+          data-id="membership-user-popover"
+          className="fixed z-[220] min-w-[220px] rounded-xl border border-white/10 bg-[#101014]/95 p-2 shadow-[0_18px_48px_rgba(0,0,0,0.45)] backdrop-blur"
+          style={{ left: membershipPopoverPos.x, bottom: 12 }}
+        >
+          <div data-id="membership-dropdown-meta" className={cn('mb-2 rounded-lg border px-3 py-2', membershipTone(membershipCard.level))}>
+            {membershipCard.tag ? (
+              <span className={cn('inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase', membershipTagTone(membershipCard.level))}>
+                {membershipCard.tag}
+              </span>
+            ) : null}
+            {membershipCard.expiresAt ? (
+              <div className="mt-1 text-[11px] font-mono text-zinc-100">到期时间 {formatDateTime(Date.parse(membershipCard.expiresAt))}</div>
+            ) : null}
+          </div>
+          {membershipCard.renewUrl ? (
+            <button
+              type="button"
+              data-id="membership-renew-btn"
+              onClick={() => {
+                setMembershipMenuOpen(false);
+                window.open(membershipCard.renewUrl, '_blank', 'noopener,noreferrer');
+              }}
+              className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-sky-100 transition-colors hover:bg-sky-300/10"
+            >
+              <span>我要续费</span>
+              <ExternalLink className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          {membershipCard.upgradeUrl ? (
+            <button
+              type="button"
+              data-id="membership-upgrade-btn"
+              onClick={() => {
+                setMembershipMenuOpen(false);
+                window.open(membershipCard.upgradeUrl, '_blank', 'noopener,noreferrer');
+              }}
+              className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-amber-100 transition-colors hover:bg-amber-300/10"
+            >
+              <span>我要升级</span>
+              <ExternalLink className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            data-id="top-bar-github-issues"
+            onClick={() => {
+              setMembershipMenuOpen(false);
+              window.open(GITHUB_ISSUES_URL, '_blank', 'noopener,noreferrer');
+            }}
+            className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+          >
+            <span>GitHub Issues</span>
+            <Github className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            data-id="membership-devtools"
+            onClick={() => {
+              setMembershipMenuOpen(false);
+              window.dispatchEvent(new Event('open-devtools-panel'));
+            }}
+            className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+            title="调试工具"
+          >
+            <span>调试工具</span>
+            <Bug className="h-3.5 w-3.5" />
+          </button>
+          <div data-id="membership-version" className="mt-1 flex items-center justify-between rounded-lg px-3 py-2 text-[11px] text-zinc-500">
+            <span>Version</span>
+            <span id="version" className="font-mono text-zinc-300">{config.version}</span>
+          </div>
+        </div>,
+        document.body
+      ) : null}
       {cliDrawerPortal}
       {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
       {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
@@ -1377,7 +1549,7 @@ function resolvePaneMeta({
     agentType: detail?.agent_type || agent?.agent_type,
     machineLabel: binding?.instance_label || binding?.machine_label || agent?.machine_label || agent?.instance_label || '',
     contextUsage: status?.contextUsage ?? null,
-    workspace: detail?.workspace || agent?.workspace || `~/workers/${paneId}`,
+    workspace: detail?.workspace || agent?.workspace || defaultWorkerWorkspace(paneId),
     isApiOnly: !!(detail && detail.capabilities?.supports_tmux === false),
   };
 }
@@ -1617,10 +1789,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
                       agentType={agent.agent_type}
                       title={agent.title || shortId}
                       dataId="agent-avatar"
-                      className="h-10 w-10 rounded-xl border-zinc-500/40 bg-zinc-300 shadow-sm"
-                      fallbackClassName="border-white/[0.08] bg-white/[0.03]"
-                      iconClassName="h-8 w-8"
-                      textClassName={agent.agent_type === 'openclaw' ? 'text-[20px] leading-none' : agent.agent_type === 'hermes' ? 'text-[15px] font-semibold tracking-[0.08em]' : 'text-xs font-semibold uppercase'}
+                      variant="panel"
                     />
 	                    <div className="flex-1 min-w-0 pr-7">
 	                      <div className="flex items-center gap-1.5">
@@ -1760,9 +1929,10 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
   );
 }
 
-function NetworkSignal({ latency, connected = true, clientId }: { latency: number | null; connected?: boolean; clientId?: string | null }) {
-  const [copied, setCopied] = useState(false);
+function NetworkSignal({ latency, connected = true, clientId, onSendClientId, onCopyPrompt }: { latency: number | null; connected?: boolean; clientId?: string | null; onSendClientId?: () => Promise<void> | void; onCopyPrompt?: () => Promise<void> | void }) {
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [open, setOpen] = useState(false);
+  const [sending, setSending] = useState(false);
   const bars = !connected ? 0 : latency === null ? 4 : latency < 100 ? 4 : latency < 200 ? 3 : latency < 500 ? 2 : 1;
   const color = bars >= 4 ? 'bg-emerald-400' : bars === 3 ? 'bg-emerald-400' : bars === 2 ? 'bg-yellow-400' : bars === 1 ? 'bg-red-400' : 'bg-zinc-700';
   const label = !connected ? '离线' : latency === null ? '在线' : `${latency}ms`;
@@ -1778,19 +1948,20 @@ function NetworkSignal({ latency, connected = true, clientId }: { latency: numbe
     document.body.removeChild(textarea);
     return ok;
   };
-  const handleCopy = async () => {
-    if (!clientId) return;
-    let ok = false;
+  const handleCopyPrompt = async () => {
+    if (!onCopyPrompt) return;
+    await onCopyPrompt();
+    setCopiedPrompt(true);
+    window.setTimeout(() => setCopiedPrompt(false), 1200);
+  };
+  const handleSend = async () => {
+    if (!onSendClientId || sending) return;
+    setSending(true);
     try {
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-        await navigator.clipboard.writeText(clientId);
-        ok = true;
-      }
-    } catch {}
-    if (!ok) ok = copyPlainText(clientId);
-    if (!ok) return;
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1200);
+      await onSendClientId();
+    } finally {
+      setSending(false);
+    }
   };
   return (
     <div
@@ -1806,7 +1977,7 @@ function NetworkSignal({ latency, connected = true, clientId }: { latency: numbe
       </div>
       <span
         data-id="network-signal-label"
-        className="min-w-[28px] text-[10px] leading-none text-zinc-600"
+        className="mt-[5px] flex h-4 min-w-[28px] items-center text-[10px] leading-none text-zinc-600"
       >
         {label}
       </span>
@@ -1815,18 +1986,28 @@ function NetworkSignal({ latency, connected = true, clientId }: { latency: numbe
           <div className="text-zinc-500">WebSocket</div>
           <div className="mt-1 flex items-start gap-2">
             <div className="min-w-0 flex-1 font-mono text-zinc-200 break-all">{clientId || '未连接 client_id'}</div>
-            <button
-              type="button"
-              data-id="network-signal-copy-client-id"
-              className="shrink-0 rounded p-1 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200 transition-colors"
-              onClick={() => { void handleCopy(); }}
-              title="复制 client_id"
-            >
-              {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-            </button>
           </div>
           <div className="mt-1 text-zinc-500">{connected ? '已连接' : '未连接'}</div>
-          {copied ? <div className="mt-1 text-emerald-400">已复制 client_id</div> : null}
+          <button
+            type="button"
+            data-id="network-signal-send-client-id"
+            className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1.5 text-[11px] text-zinc-200 transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => { void handleSend(); }}
+            disabled={sending}
+          >
+            <Send className="h-3.5 w-3.5" />
+            <span>{sending ? '发送中...' : '发送给 Agent'}</span>
+          </button>
+          <button
+            type="button"
+            data-id="network-signal-copy-connect-prompt"
+            className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1.5 text-[11px] text-zinc-200 transition-colors hover:bg-white/[0.08]"
+            onClick={() => { void handleCopyPrompt(); }}
+          >
+            <Copy className="h-3.5 w-3.5" />
+            <span>复制连接指令</span>
+          </button>
+          {copiedPrompt ? <div className="mt-1 text-emerald-400">已复制连接指令</div> : null}
         </div>
       ) : null}
     </div>

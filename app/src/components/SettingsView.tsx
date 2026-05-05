@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { EditPaneData } from './EditPaneDialog';
 import { Loader2 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
-import { AGENT_TYPE_OPTIONS } from '../lib/agentType';
 import Select from './ui/Select';
 
 const THEME_KEY = 'app_theme';
@@ -31,8 +30,17 @@ const tabs = ['常规', '智能体', '网络'] as const;
 type Tab = typeof tabs[number];
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSave, isSaving = false }) => {
+  const { agentTypeOptions } = useApp();
   const [tab, setTab] = useState<Tab>('常规');
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || '');
+  const selectAgentTypeOptions = useMemo(() => {
+    const options = agentTypeOptions.map((option) => ({ value: option.value, label: option.label, sub: option.description }));
+    const currentValue = String(pane.agent_type || '').trim();
+    if (currentValue && !options.some((option) => option.value === currentValue)) {
+      options.unshift({ value: currentValue, label: currentValue, sub: '当前值（不在可选列表中）' });
+    }
+    return options;
+  }, [agentTypeOptions, pane.agent_type]);
 
   const handleThemeChange = (value: string) => {
     setTheme(value);
@@ -95,7 +103,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
             <label className="block text-xs text-vsc-text-secondary mb-1">智能体类型</label>
             <Select value={pane.agent_type || ''}
               onChange={v => onChange({ ...pane, agent_type: v })}
-              options={AGENT_TYPE_OPTIONS.map(option => ({ value: option.value, label: option.value }))}
+              options={selectAgentTypeOptions}
               searchable
             />
           </div>

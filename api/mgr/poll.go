@@ -285,51 +285,5 @@ func handlePoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	paneID := r.URL.Query().Get("pane_id")
-	agents, err := listAgentsByPane(paneID)
-	if err != nil {
-		httpErr(w, 500, err.Error())
-		return
-	}
-	snapshot := loadRuntimeMembershipSnapshot()
-	resp := M{
-		"success":     true,
-		"pane_id":     shortPaneID(normPaneID(paneID)),
-		"agents":      agents,
-		"statuses":    M{},
-		"server_time": time.Now().UTC().Format(time.RFC3339),
-	}
-	if snapshot.TrialExpiresAt != "" {
-		resp["trial_expires_at"] = snapshot.TrialExpiresAt
-		if snapshot.TrialExpiresEpoch != "" {
-			resp["trial_expires_at_epoch"] = snapshot.TrialExpiresEpoch
-		}
-	}
-	if snapshot.IsPro != nil {
-		resp["is_pro"] = *snapshot.IsPro
-	}
-	if snapshot.Kind != "" {
-		resp["membership_kind"] = snapshot.Kind
-	}
-	if snapshot.Tag != "" {
-		resp["membership_tag"] = snapshot.Tag
-	}
-	if snapshot.ExpiresAt != "" {
-		resp["membership_expires_at"] = snapshot.ExpiresAt
-	}
-	if snapshot.RenewURL != "" {
-		resp["renew_url"] = snapshot.RenewURL
-	}
-	if snapshot.UpgradeURL != "" {
-		resp["upgrade_url"] = snapshot.UpgradeURL
-	}
-	if snapshot.ShowRenew != nil {
-		resp["show_renew"] = *snapshot.ShowRenew
-	}
-	if snapshot.ShowUpgrade != nil {
-		resp["show_upgrade"] = *snapshot.ShowUpgrade
-	}
-	if snapshot.SyncedAt != "" {
-		resp["membership_synced_at"] = snapshot.SyncedAt
-	}
-	J(w, resp)
+	J(w, buildPollData(paneID))
 }

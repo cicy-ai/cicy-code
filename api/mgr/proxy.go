@@ -1,7 +1,9 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -22,9 +24,15 @@ var codeServerProxy *httputil.ReverseProxy
 var mitmproxyProxy *httputil.ReverseProxy
 var pmaProxy *httputil.ReverseProxy
 var openClawProxy *httputil.ReverseProxy
-var codeServerInjectContent []byte
-var codeServerInjectMtime int64
 var openClawStartMu sync.Mutex
+var codeServerPageContextMu sync.RWMutex
+var codeServerPageContexts = map[string]M{}
+
+//go:embed resources/code-server-inject.html
+var codeServerInjectHTML []byte
+
+//go:embed resources/code-server-inject.js
+var codeServerInjectJS []byte
 
 func init() {
 	csPort := os.Getenv("CS_PORT")
@@ -54,19 +62,85 @@ func init() {
 }
 
 func loadCodeServerInject() []byte {
-	path := "resources/code-server-inject.html"
-	info, err := os.Stat(path)
+	return codeServerInjectHTML
+}
+
+func loadCodeServerInjectJS() ([]byte, error) {
+	return codeServerInjectJS, nil
+}
+
+func codeServerPort() string {
+	csPort := strings.TrimSpace(os.Getenv("CS_PORT"))
+	if csPort == "" {
+		return "8002"
+	}
+	return csPort
+}
+
+func waitForCodeServerReady() bool {
+	port := mustAtoi(codeServerPort())
+	if isPortListening(port) {
+		return true
+	}
+	return waitPort(port, 20*time.Second)
+}
+
+func serveCodeServerInjectJS(w http.ResponseWriter, r *http.Request) {
+	data, err := loadCodeServerInjectJS()
 	if err != nil {
-		return codeServerInjectContent
+		http.NotFound(w, r)
+		return
 	}
-	if info.ModTime().Unix() != codeServerInjectMtime {
-		data, err := os.ReadFile(path)
-		if err == nil {
-			codeServerInjectContent = data
-			codeServerInjectMtime = info.ModTime().Unix()
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
+}
+
+func handleCodeServerPageContext(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		var body struct {
+			Folder       string `json:"folder"`
+			PageClientID string `json:"page_client_id"`
+			PagePane     string `json:"page_pane"`
 		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad json", 400)
+			return
+		}
+		folder := strings.TrimSpace(body.Folder)
+		pageClientID := strings.TrimSpace(body.PageClientID)
+		pagePane := strings.TrimSpace(body.PagePane)
+		if folder == "" || pageClientID == "" || pagePane == "" {
+			http.Error(w, "folder, page_client_id and page_pane required", 400)
+			return
+		}
+		codeServerPageContextMu.Lock()
+		codeServerPageContexts[folder] = M{
+			"folder":         folder,
+			"page_client_id": pageClientID,
+			"page_pane":      pagePane,
+			"token":          strings.TrimSpace(r.Header.Get("Authorization")),
+		}
+		codeServerPageContextMu.Unlock()
+		J(w, M{"success": true})
+	case http.MethodGet:
+		folder := strings.TrimSpace(r.URL.Query().Get("folder"))
+		if folder == "" {
+			http.Error(w, "folder required", 400)
+			return
+		}
+		codeServerPageContextMu.RLock()
+		ctx, ok := codeServerPageContexts[folder]
+		codeServerPageContextMu.RUnlock()
+		if !ok {
+			http.Error(w, "not found", 404)
+			return
+		}
+		J(w, M{"success": true, "data": ctx})
+	default:
+		http.Error(w, "method not allowed", 405)
 	}
-	return codeServerInjectContent
 }
 
 func injectCodeServerJS(resp *http.Response) error {
@@ -91,18 +165,35 @@ func injectCodeServerJS(resp *http.Response) error {
 }
 
 func handleCodeServer(w http.ResponseWriter, r *http.Request) {
+	if folder := strings.TrimSpace(r.URL.Query().Get("folder")); folder != "" {
+		pageClientID := strings.TrimSpace(r.URL.Query().Get("client_id"))
+		pagePane := strings.TrimSpace(r.URL.Query().Get("page_pane"))
+		token := strings.TrimSpace(r.URL.Query().Get("token"))
+		if pageClientID != "" && pagePane != "" {
+			codeServerPageContextMu.Lock()
+			codeServerPageContexts[folder] = M{
+				"folder":         folder,
+				"page_client_id": pageClientID,
+				"page_pane":      pagePane,
+				"token":          token,
+			}
+			codeServerPageContextMu.Unlock()
+		}
+	}
 	r.URL.Path = r.URL.Path[len("/code"):]
 	if r.URL.Path == "" {
 		r.URL.Path = "/"
 	}
 	r.Header.Del("Authorization")
 
+	if !waitForCodeServerReady() {
+		http.Error(w, "code-server not ready", http.StatusBadGateway)
+		return
+	}
+
 	// WebSocket: hijack 双向代理
 	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		csPort := os.Getenv("CS_PORT")
-		if csPort == "" {
-			csPort = "8002"
-		}
+		csPort := codeServerPort()
 		wsProxyWithHeaders(w, r, "127.0.0.1:"+csPort, map[string]string{
 			"Origin": "http://127.0.0.1:" + csPort,
 		})
@@ -110,6 +201,85 @@ func handleCodeServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	codeServerProxy.ServeHTTP(w, r)
+}
+
+func intFromAny(value any) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	case float32:
+		return int(v)
+	case float64:
+		return int(v)
+	case json.Number:
+		n, _ := v.Int64()
+		return int(n)
+	case string:
+		n, _ := strconv.Atoi(strings.TrimSpace(v))
+		return n
+	default:
+		return 0
+	}
+}
+
+func handleCodeServerSendPath(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Folder        string `json:"folder"`
+		Path          string `json:"path"`
+		FileName      string `json:"fileName"`
+		SelectionText string `json:"selectionText"`
+		Range         any    `json:"range"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad json", 400)
+		return
+	}
+	folder := strings.TrimSpace(body.Folder)
+	path := strings.TrimSpace(body.Path)
+	if folder == "" || path == "" {
+		http.Error(w, "folder and path required", 400)
+		return
+	}
+	codeServerPageContextMu.RLock()
+	ctx, ok := codeServerPageContexts[folder]
+	codeServerPageContextMu.RUnlock()
+	if !ok {
+		http.Error(w, "page context not found", 404)
+		return
+	}
+	pageClientID, _ := ctx["page_client_id"].(string)
+	pagePane, _ := ctx["page_pane"].(string)
+	if pageClientID == "" || pagePane == "" {
+		http.Error(w, "page context incomplete", 404)
+		return
+	}
+	pathForAgent := path
+	if rangeMap, ok := body.Range.(map[string]any); ok {
+		startLine := intFromAny(rangeMap["startLine"])
+		startCharacter := intFromAny(rangeMap["startCharacter"])
+		endLine := intFromAny(rangeMap["endLine"])
+		endCharacter := intFromAny(rangeMap["endCharacter"])
+		if startLine > 0 && startCharacter > 0 && endLine > 0 && endCharacter > 0 {
+			pathForAgent = fmt.Sprintf("%s:%d:%d-%d:%d", path, startLine, startCharacter, endLine, endCharacter)
+		}
+	}
+	ok = hub.sendToClient(pageClientID, ChatEvent{Type: "code.send_path", Data: M{
+		"path":           pathForAgent,
+		"fileName":       strings.TrimSpace(body.FileName),
+		"selectionText":  "",
+		"range":          nil,
+		"page_client_id": pageClientID,
+		"page_pane":      pagePane,
+	}})
+	if !ok {
+		http.Error(w, "workspace client not found", 404)
+		return
+	}
+	J(w, M{"success": true, "page_client_id": pageClientID, "page_pane": pagePane, "path": pathForAgent})
 }
 
 func wsProxy(w http.ResponseWriter, r *http.Request, target string) {

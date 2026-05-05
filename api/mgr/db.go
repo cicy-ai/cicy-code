@@ -19,16 +19,20 @@ type DB struct {
 
 var store *DB
 
+func defaultSQLitePath() string {
+	return filepath.Join(cicyRootDir, "db", "data.db")
+}
+
 func initDB() {
 	var dsn string
 
 	if p := os.Getenv("SQLITE_PATH"); p != "" {
 		dsn = p
 	} else {
-		home, _ := os.UserHomeDir()
-		dir := filepath.Join(home, ".cicy")
-		os.MkdirAll(dir, 0755)
-		dsn = filepath.Join(dir, "data-v1.db")
+		dsn = defaultSQLitePath()
+	}
+	if err := os.MkdirAll(filepath.Dir(dsn), 0755); err != nil {
+		log.Fatal(err)
 	}
 
 	raw, err := sql.Open("sqlite", dsn)
@@ -208,7 +212,7 @@ func (d *DB) Migrate() {
 			updated_at TEXT DEFAULT (datetime('now')),
 			PRIMARY KEY(scope_type, scope_key)
 		)`,
-		`INSERT OR IGNORE INTO global_vars (key_name, value) VALUES ('worker_index', '20000')`,
+		fmt.Sprintf("INSERT OR IGNORE INTO global_vars (key_name, value) VALUES ('worker_index', '%d')", defaultWorkerIndex),
 	}
 	for _, s := range stmts {
 		if _, err := d.Exec(s); err != nil {

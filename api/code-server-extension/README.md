@@ -27,9 +27,6 @@ npm run package
 
 ## 仓库说明
 
-仓库里同时存在：
+当前仓库只使用这一份扩展目录：
 
-- `code-server-extension/`
 - `api/code-server-extension/`
-
-当前这两份目录是并行副本，维护时应保持同步。

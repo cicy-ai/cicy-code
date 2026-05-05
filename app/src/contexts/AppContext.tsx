@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef, useMemo } from 'react';
 import { useDevRegister } from '../lib/devStore';
+import { AgentTypeOption, AGENT_TYPE_OPTIONS } from '../lib/agentType';
 import { PaneManager } from '../services/paneManager';
 import apiService from '../services/api';
 import config from '../config';
@@ -76,6 +77,8 @@ interface AppContextType {
   
   // Global Settings
   globalVar: any;
+  agentTypeOptions: AgentTypeOption[];
+  setGlobalVar: React.Dispatch<React.SetStateAction<any>>;
   loadGlobalVar: () => Promise<void>;
   updateGlobalVar: (data: any) => Promise<void>;
   
@@ -114,6 +117,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [allPanes, setAllPanes] = useState<Agent[]>([]);
   const [globalVar, setGlobalVar] = useState<any>({});
   const [systemResources, setSystemResources] = useState<SystemResourceSnapshot | null>(null);
+  const agentTypeOptions = useMemo<AgentTypeOption[]>(() => {
+    const raw = Array.isArray(globalVar?.agents) ? globalVar.agents : [];
+    const mapped = raw
+      .map((item: any) => ({
+        value: String(item?.value || '').trim(),
+        label: String(item?.label || item?.value || '').trim(),
+        description: typeof item?.description === 'string' ? item.description : undefined,
+      }))
+      .filter((item) => item.value && item.label);
+    return mapped.length ? mapped : AGENT_TYPE_OPTIONS;
+  }, [globalVar]);
   const [chatWsState, setChatWsStateValue] = useState<ChatWsState>({
     activeChatPaneId: null,
     chatWsConnected: false,
@@ -273,7 +287,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (!api || !token) return;
     try {
       await apiService.updateGlobalSettings(data);
-      setGlobalVar(data);
+      const { data: fresh } = await apiService.getGlobalSettings();
+      setGlobalVar(fresh);
     } catch (err: any) {
       console.error('更新全局设置失败：', err);
       throw err;
@@ -298,6 +313,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     allPanes,
     updatePane,
     globalVar,
+    agentTypeOptions,
+    setGlobalVar,
     loadGlobalVar,
     updateGlobalVar,
     activeChatPaneId: chatWsState.activeChatPaneId,
@@ -336,6 +353,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     agentsCount: agents.length,
     allPanes: allPanes.map(p => ({ pane_id: p.pane_id, title: p.title, status: p.status })),
     globalVar,
+    agentTypeOptions,
     systemResources,
   }, { currentPaneId: (v: string) => selectPane(v), error: setError });
 

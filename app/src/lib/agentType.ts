@@ -1,10 +1,11 @@
 import { assetUrl } from './assets'
 
-export type NormalizedAgentType = '' | 'openclaw' | 'codex' | 'kiro-cli' | 'copilot' | 'claude' | 'cicy-claude' | 'opencode' | 'hermes'
+export type NormalizedAgentType = '' | 'claude' | 'codex' | 'opencode' | 'kiro-cli' | 'copilot' | 'cicy-wechat' | 'cicy-feishu' | 'openclaw' | 'hermes' | 'cicy-claude'
 
 export type AgentTypeOption = {
-  value: Exclude<NormalizedAgentType, ''>
+  value: string
   label: string
+  description?: string
 }
 
 export type AgentTypeIconMeta = {
@@ -14,25 +15,29 @@ export type AgentTypeIconMeta = {
 }
 
 export const AGENT_TYPE_OPTIONS: AgentTypeOption[] = [
-  { value: 'openclaw', label: 'OpenClaw' },
-  { value: 'codex', label: 'Codex' },
-  { value: 'claude', label: 'Claude' },
-  { value: 'kiro-cli', label: 'Kiro CLI' },
-  { value: 'copilot', label: 'Copilot' },
-  { value: 'opencode', label: 'OpenCode' },
-  { value: 'cicy-claude', label: 'CiCy' },
-  { value: 'hermes', label: 'Hermes' },
+  { value: 'claude', label: 'Claude', description: '偏稳健，适合分析与写作' },
+  { value: 'codex', label: 'Codex', description: '代码执行和自动修改更强' },
+  { value: 'opencode', label: 'OpenCode', description: '终端式编码体验，更轻量' },
+  { value: 'kiro-cli', label: 'Kiro CLI', description: '适合任务推进与工具流' },
+  { value: 'copilot', label: 'Copilot', description: '偏 GitHub 工作流与补全' },
+  { value: 'cicy-wechat', label: 'WeChat', description: '适合微信通道与消息协同' },
+  { value: 'cicy-feishu', label: 'Feishu', description: '适合飞书通道与办公协同' },
+  { value: 'openclaw', label: 'OpenClaw', description: '适合长连通道与外部集成' },
+  { value: 'hermes', label: 'Hermes', description: '默认主控型员工，适合统筹协调' },
+  { value: 'cicy-claude', label: 'CiCy', description: 'Claude 兼容包装，便于统一接入' },
 ]
 
 const AGENT_TYPE_ICON_MAP: Record<Exclude<NormalizedAgentType, ''>, AgentTypeIconMeta> = {
-  openclaw: { label: 'OpenClaw', text: '🦞' },
-  codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg') },
   claude: { label: 'Claude', src: assetUrl('/assets/logos/claude-symbol.svg') },
+  codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg') },
+  opencode: { label: 'OpenCode', src: assetUrl('/assets/logos/opencode.svg') },
   'kiro-cli': { label: 'Kiro', src: assetUrl('/assets/logos/kiro.png') },
   copilot: { label: 'Copilot', src: assetUrl('/assets/logos/copilot.svg') },
-  opencode: { label: 'OpenCode', src: assetUrl('/assets/logos/opencode.svg') },
-  'cicy-claude': { label: 'CiCy', src: 'https://cicy-ai.com/logo.svg' },
+  'cicy-wechat': { label: 'WeChat', text: '微' },
+  'cicy-feishu': { label: 'Feishu', text: '飞' },
+  openclaw: { label: 'OpenClaw', text: '🦞' },
   hermes: { label: 'Hermes', text: 'HE' },
+  'cicy-claude': { label: 'CiCy', src: assetUrl('/assets/logos/cicy.svg') },
 }
 
 export function normalizeAgentType(agentType?: string): NormalizedAgentType {
@@ -51,6 +56,12 @@ export function normalizeAgentType(agentType?: string): NormalizedAgentType {
     case 'github-copilot':
     case 'ghcopilot':
       return 'copilot'
+    case 'cicy-wechat':
+    case 'wechat':
+      return 'cicy-wechat'
+    case 'cicy-feishu':
+    case 'feishu':
+      return 'cicy-feishu'
     case 'gemini':
       return 'codex'
     case 'claude':

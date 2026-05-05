@@ -47,12 +47,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   const [perms, setPerms] = useState<string[]>([]);
   const [authType, setAuthType] = useState<string | null>(null);
   const [plan, setPlan] = useState<string | null>(null);
+  const [globalHome, setGlobalHome] = useState<string | null>(null);
   const [provisioning, setProvisioning] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
 
   const handleVerify = useCallback(async (t: string) => {
     const data = await fetchVerifyData(t);
     if (!data.valid) return false;
+    try {
+      const { data: settings } = await apiService.getGlobalSettings(t);
+      const home = typeof settings?.home === "string" ? settings.home.trim() : "";
+      if (home) {
+        setGlobalHome(home);
+        setHostHome(home);
+      }
+    } catch {}
     setToken(t);
     setPerms(data.perms || []);
     setAuthType(data.auth_type || "token");
@@ -167,6 +176,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     hasToken: !!token,
     authType,
     plan,
+    globalHome,
     provisioning,
     isChecking,
     perms,
