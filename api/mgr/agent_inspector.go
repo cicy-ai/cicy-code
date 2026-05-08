@@ -613,11 +613,7 @@ func agentInspectorLoadCurrent(agentID string) aiGatewayCurrentSnapshot {
 }
 
 func agentInspectorLoadReply(agentID string) aiGatewayReplySnapshot {
-	reply := aiGatewayReplySnapshot{}
-	if err := agentInspectorReadJSON(filepath.Join(aiGatewayHistoryDir(agentID), "reply.json"), &reply); err != nil {
-		return aiGatewayReplySnapshot{}
-	}
-	return reply
+	return aiGatewayLoadReplySnapshot(agentID)
 }
 
 func agentInspectorHistoryQuestionFromItem(item map[string]interface{}) string {
@@ -1164,6 +1160,118 @@ func agentInspectorCompactText(text string, limit int) string {
 	}
 	runes := []rune(text)
 	return strings.TrimSpace(string(runes[:limit])) + "..."
+}
+
+func agentInspectorBuildToolSummary(tool M) M {
+	if len(tool) == 0 {
+		return M{}
+	}
+	name := strings.TrimSpace(aiGatewayString(tool["name"]))
+	out := M{
+		"name": name,
+	}
+	return out
+}
+
+func agentInspectorCompactCurrentHistoryItems(items []M) []M {
+	if len(items) == 0 {
+		return items
+	}
+	out := make([]M, 0, len(items))
+	for _, item := range items {
+		if len(item) == 0 {
+			continue
+		}
+		next := aiGatewayCloneAnyMap(item)
+		next["q"] = agentInspectorCompactText(aiGatewayString(next["q"]), 600)
+		next["a"] = agentInspectorCompactText(aiGatewayString(next["a"]), 800)
+		switch steps := next["steps"].(type) {
+		case []M:
+			next["steps"] = agentInspectorCompactCurrentHistorySteps(steps)
+		case []interface{}:
+			normalized := make([]M, 0, len(steps))
+			for _, raw := range steps {
+				if step := aiGatewayMap(raw); len(step) > 0 {
+					normalized = append(normalized, step)
+				}
+			}
+			next["steps"] = agentInspectorCompactCurrentHistorySteps(normalized)
+		}
+		normalizedSteps, _ := next["steps"].([]M)
+		if len(normalizedSteps) > 0 {
+			hasRenderableStep := false
+			hasTextStep := false
+			for _, step := range normalizedSteps {
+				stepType := strings.TrimSpace(aiGatewayString(step["type"]))
+				switch stepType {
+				case "text":
+					if strings.TrimSpace(aiGatewayString(step["text"])) != "" {
+						hasRenderableStep = true
+						hasTextStep = true
+					}
+				case "thinking":
+					if strings.TrimSpace(aiGatewayString(step["text"])) != "" {
+						hasRenderableStep = true
+					}
+				case "tool":
+					if len(aiGatewaySlice(step["tools"])) > 0 {
+						hasRenderableStep = true
+					}
+				}
+			}
+			if hasRenderableStep && hasTextStep {
+				next["a"] = ""
+			}
+		}
+		out = append(out, next)
+	}
+	return out
+}
+
+func agentInspectorCompactCurrentHistorySteps(steps []M) []M {
+	if len(steps) == 0 {
+		return []M{}
+	}
+	out := make([]M, 0, len(steps))
+	for _, step := range steps {
+		if len(step) == 0 {
+			continue
+		}
+		next := aiGatewayCloneAnyMap(step)
+		switch strings.TrimSpace(aiGatewayString(next["type"])) {
+		case "text", "thinking":
+			next["text"] = agentInspectorCompactText(aiGatewayString(next["text"]), 600)
+		case "tool":
+			switch tools := next["tools"].(type) {
+			case []M:
+				next["tools"] = agentInspectorCompactCurrentHistoryTools(tools)
+			case []interface{}:
+				normalized := make([]M, 0, len(tools))
+				for _, raw := range tools {
+					if tool := aiGatewayMap(raw); len(tool) > 0 {
+						normalized = append(normalized, tool)
+					}
+				}
+				next["tools"] = agentInspectorCompactCurrentHistoryTools(normalized)
+			}
+		}
+		out = append(out, next)
+	}
+	return out
+}
+
+func agentInspectorCompactCurrentHistoryTools(tools []M) []M {
+	if len(tools) == 0 {
+		return []M{}
+	}
+	out := make([]M, 0, len(tools))
+	for _, tool := range tools {
+		if len(tool) == 0 {
+			continue
+		}
+		out = append(out, agentInspectorBuildToolSummary(tool))
+	}
+	return out
 }
 
 func agentInspectorCanonicalQuestion(text string) string {
@@ -1974,7 +2082,7 @@ func agentInspectorBuildCurrentOnlyPersistedTurns(current aiGatewayCurrentSnapsh
 		}
 	}
 	flushUserOnly()
-	return persisted
+	return agentInspectorCollapseContinuationTurns(persisted)
 }
 
 func agentInspectorBuildPersistedTurnsFromFullCurrent(current aiGatewayCurrentSnapshot) []M {
@@ -2027,9 +2135,9 @@ func agentInspectorBuildPersistedTurnsFromFullCurrent(current aiGatewayCurrentSn
 			}
 		}
 		flushUserOnly()
-		return persisted
+		return agentInspectorCollapseContinuationTurns(persisted)
 	}
-	return agentInspectorBuildInputTurns(aiGatewayExtractInputItems(body), current.Model)
+	return agentInspectorCollapseContinuationTurns(agentInspectorBuildInputTurns(aiGatewayExtractInputItems(body), current.Model))
 }
 
 func agentInspectorHistoryStepCount(item M) int {
@@ -2041,6 +2149,148 @@ func agentInspectorHistoryStepCount(item M) int {
 	default:
 		return 0
 	}
+}
+
+func agentInspectorTurnHasAssistantActivity(turn M) bool {
+	if len(turn) == 0 {
+		return false
+	}
+	if strings.TrimSpace(aiGatewayString(turn["a"])) != "" {
+		return true
+	}
+	switch steps := turn["steps"].(type) {
+	case []M:
+		for _, step := range steps {
+			switch strings.TrimSpace(aiGatewayString(step["type"])) {
+			case "thinking":
+				if strings.TrimSpace(aiGatewayString(step["text"])) != "" {
+					return true
+				}
+			case "tool":
+				if len(aiGatewaySlice(step["tools"])) > 0 {
+					return true
+				}
+			case "text":
+				if strings.TrimSpace(aiGatewayString(step["text"])) != "" {
+					return true
+				}
+			}
+		}
+	case []interface{}:
+		for _, raw := range steps {
+			step := aiGatewayMap(raw)
+			switch strings.TrimSpace(aiGatewayString(step["type"])) {
+			case "thinking":
+				if strings.TrimSpace(aiGatewayString(step["text"])) != "" {
+					return true
+				}
+			case "tool":
+				if len(aiGatewaySlice(step["tools"])) > 0 {
+					return true
+				}
+			case "text":
+				if strings.TrimSpace(aiGatewayString(step["text"])) != "" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func agentInspectorIsContinuationPrompt(text string) bool {
+	normalized := agentInspectorNormalizeQuestion(text)
+	switch normalized {
+	case "go", "continue", "go on", "keep going", "proceed", "继续", "继续吧", "继续一下", "继续执行", "接着":
+		return true
+	default:
+		return false
+	}
+}
+
+func agentInspectorCloneSteps(value interface{}) []M {
+	switch steps := value.(type) {
+	case []M:
+		out := make([]M, 0, len(steps))
+		for _, step := range steps {
+			out = append(out, aiGatewayCloneAnyMap(step))
+		}
+		return out
+	case []interface{}:
+		out := make([]M, 0, len(steps))
+		for _, raw := range steps {
+			if step := aiGatewayMap(raw); len(step) > 0 {
+				out = append(out, step)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func agentInspectorPreferContinuationTurn(base M, continuation M) M {
+	merged := aiGatewayCloneAnyMap(base)
+	if len(merged) == 0 {
+		merged = M{}
+	}
+	for key, value := range continuation {
+		switch key {
+		case "q", "start_ts":
+			continue
+		case "steps":
+			baseSteps := agentInspectorCloneSteps(base["steps"])
+			nextSteps := agentInspectorCloneSteps(value)
+			switch {
+			case len(nextSteps) == 0:
+			case len(baseSteps) == 0 || agentInspectorHistoryStepCount(continuation) >= agentInspectorHistoryStepCount(base):
+				merged["steps"] = nextSteps
+			}
+		case "a":
+			nextAnswer := strings.TrimSpace(aiGatewayString(value))
+			baseAnswer := strings.TrimSpace(aiGatewayString(base["a"]))
+			if nextAnswer != "" && (baseAnswer == "" || agentInspectorHistoryStepCount(continuation) >= agentInspectorHistoryStepCount(base) || len([]rune(nextAnswer)) >= len([]rune(baseAnswer))) {
+				merged["a"] = nextAnswer
+			}
+		default:
+			switch typed := value.(type) {
+			case string:
+				if strings.TrimSpace(typed) != "" {
+					merged[key] = typed
+				}
+			case nil:
+			default:
+				merged[key] = value
+			}
+		}
+	}
+	if _, ok := merged["steps"]; !ok {
+		merged["steps"] = agentInspectorCloneSteps(base["steps"])
+	}
+	if strings.TrimSpace(aiGatewayString(merged["a"])) == "" {
+		merged["a"] = strings.TrimSpace(aiGatewayString(base["a"]))
+	}
+	return merged
+}
+
+func agentInspectorCollapseContinuationTurns(turns []M) []M {
+	if len(turns) <= 1 {
+		return turns
+	}
+	out := make([]M, 0, len(turns))
+	for _, turn := range turns {
+		if len(out) == 0 {
+			out = append(out, turn)
+			continue
+		}
+		question := aiGatewayString(turn["q"])
+		if agentInspectorIsContinuationPrompt(question) {
+			out[len(out)-1] = agentInspectorPreferContinuationTurn(out[len(out)-1], turn)
+			continue
+		}
+		out = append(out, turn)
+	}
+	return out
 }
 
 func agentInspectorHistoryUnix(item M, key string) int64 {
@@ -2106,6 +2356,212 @@ func agentInspectorMergeCurrentHistoryItems(items []M, liveTurns []M, limit int)
 	return out
 }
 
+func agentInspectorAttachCurrentHistoryToolMeta(items []M, paneID string) []M {
+	if len(items) == 0 {
+		return items
+	}
+	out := make([]M, 0, len(items))
+	for _, item := range items {
+		next := aiGatewayCloneAnyMap(item)
+		historyID := int64(0)
+		switch value := next["history_id"].(type) {
+		case int64:
+			historyID = value
+		case int:
+			historyID = int64(value)
+		case float64:
+			historyID = int64(value)
+		}
+		steps := agentInspectorCloneSteps(next["steps"])
+		for stepIndex, step := range steps {
+			if strings.TrimSpace(aiGatewayString(step["type"])) != "tool" {
+				continue
+			}
+			tools := make([]M, 0, 1)
+			appendTool := func(toolIndex int, tool M) {
+				if len(tool) == 0 {
+					return
+				}
+				toolNext := aiGatewayCloneAnyMap(tool)
+				toolNext["step_index"] = stepIndex
+				toolNext["tool_index"] = toolIndex
+				id := ""
+				if historyID > 0 {
+					toolNext["history_id"] = historyID
+					id = fmt.Sprintf("history:%d:%d:%d", historyID, stepIndex, toolIndex)
+				} else {
+					id = fmt.Sprintf("live:%s:%d:%d", paneID, stepIndex, toolIndex)
+				}
+				toolNext["id"] = id
+				tools = append(tools, toolNext)
+			}
+			switch raw := step["tools"].(type) {
+			case []M:
+				for toolIndex, tool := range raw {
+					appendTool(toolIndex, tool)
+				}
+			case []interface{}:
+				for toolIndex, rawTool := range raw {
+					appendTool(toolIndex, aiGatewayMap(rawTool))
+				}
+			}
+			step["tools"] = tools
+			steps[stepIndex] = step
+		}
+		next["steps"] = steps
+		out = append(out, next)
+	}
+	return out
+}
+
+func agentInspectorCurrentHistoryToolFromItem(item M, stepIndex int, toolIndex int) M {
+	steps := agentInspectorCloneSteps(item["steps"])
+	if stepIndex < 0 || stepIndex >= len(steps) {
+		return nil
+	}
+	step := steps[stepIndex]
+	if strings.TrimSpace(aiGatewayString(step["type"])) != "tool" {
+		return nil
+	}
+	rawTools := aiGatewaySlice(step["tools"])
+	tools := make([]M, 0, len(rawTools))
+	for _, rawTool := range rawTools {
+		if tool := aiGatewayMap(rawTool); len(tool) > 0 {
+			tools = append(tools, tool)
+		}
+	}
+	if toolIndex < 0 || toolIndex >= len(tools) {
+		return nil
+	}
+	return tools[toolIndex]
+}
+
+func agentHistoryLoadItemByID(agentID string, historyID int64) (M, bool, error) {
+	db, err := agentHistoryOpen(agentID)
+	if err != nil {
+		return nil, false, err
+	}
+	var itemJSON string
+	var q, a, thinking, model string
+	if err := db.QueryRow(`SELECT item_json, q, a, thinking, model FROM history_turns WHERE agent_id=? AND id=?`, agentID, historyID).
+		Scan(&itemJSON, &q, &a, &thinking, &model); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	item := M{}
+	if strings.TrimSpace(itemJSON) != "" {
+		_ = json.Unmarshal([]byte(itemJSON), &item)
+	}
+	record := aiGatewayMessageRecord{Q: q, A: a, Thinking: thinking, Model: model}
+	item = agentHistoryNormalizePersistedItem(item, record)
+	item["history_id"] = historyID
+	return item, true, nil
+}
+
+func handleAgentCurrentHistoryToolDetailByPane(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/agents/current-history-tool/")
+	paneID := shortPaneID(strings.Trim(path, "/"))
+	if paneID == "" {
+		httpErr(w, http.StatusBadRequest, "pane id required")
+		return
+	}
+	stepIndex, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("step_index")))
+	if err != nil || stepIndex < 0 {
+		httpErr(w, http.StatusBadRequest, "step_index required")
+		return
+	}
+	toolIndex, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("tool_index")))
+	if err != nil || toolIndex < 0 {
+		httpErr(w, http.StatusBadRequest, "tool_index required")
+		return
+	}
+	historyID, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("history_id")), 10, 64)
+	live := strings.TrimSpace(r.URL.Query().Get("live")) == "1"
+	conversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
+
+	var item M
+	if historyID > 0 {
+		_, loaded, ok, err := agentHistoryLoadCurrentItemByID(paneID, conversationID, historyID)
+		if err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !ok {
+			httpErr(w, http.StatusNotFound, "history item not found")
+			return
+		}
+		item = loaded
+	} else if live {
+		current := agentInspectorLoadCurrent(paneID)
+		liveTurns := agentInspectorBuildCurrentOnlyPersistedTurns(current)
+		if len(liveTurns) == 0 {
+			httpErr(w, http.StatusNotFound, "live item not found")
+			return
+		}
+		item = liveTurns[len(liveTurns)-1]
+	} else {
+		httpErr(w, http.StatusBadRequest, "history_id or live=1 required")
+		return
+	}
+	tool := agentInspectorCurrentHistoryToolFromItem(item, stepIndex, toolIndex)
+	if len(tool) == 0 {
+		httpErr(w, http.StatusNotFound, "tool not found")
+		return
+	}
+	J(w, M{"tool": tool})
+}
+
+func handleAgentHistoryIDsByPane(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/agents/history-ids/")
+	paneID := shortPaneID(strings.Trim(path, "/"))
+	if paneID == "" {
+		httpErr(w, http.StatusBadRequest, "pane id required")
+		return
+	}
+	conversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
+	resolvedConversationID, maxID, err := agentHistoryCurrentMaxID(paneID, conversationID)
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	J(w, M{
+		"id":              maxID,
+		"conversation_id": resolvedConversationID,
+	})
+}
+
+func handleAgentHistoryTurnByPane(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/agents/history-turn/")
+	paneID := shortPaneID(strings.Trim(path, "/"))
+	if paneID == "" {
+		httpErr(w, http.StatusBadRequest, "pane id required")
+		return
+	}
+	historyID, err := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("history_id")), 10, 64)
+	if err != nil || historyID <= 0 {
+		httpErr(w, http.StatusBadRequest, "history_id required")
+		return
+	}
+	conversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
+	resolvedConversationID, item, ok, err := agentHistoryLoadCurrentItemByID(paneID, conversationID, historyID)
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		httpErr(w, http.StatusNotFound, "history item not found")
+		return
+	}
+	J(w, M{
+		"pane_id":         paneID,
+		"history_id":      historyID,
+		"conversation_id": resolvedConversationID,
+		"item":            item,
+	})
+}
+
 func handleAgentCurrentHistoryByPane(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/agents/current-history/")
 	paneID := shortPaneID(strings.Trim(path, "/"))
@@ -2126,41 +2582,21 @@ func handleAgentCurrentHistoryByPane(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	conversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
-	if before == 0 {
-		_ = aiGatewaySyncLatestCurrentHistory(paneID)
-	}
-	current := agentInspectorLoadCurrent(paneID)
-	reply := agentInspectorLoadReply(paneID)
-	liveTurns := []M{}
-	if before == 0 && agentInspectorSnapshotFresh(current, reply) {
-		liveTurns = agentInspectorBuildCurrentOnlyPersistedTurns(current)
-	}
-	if page, err := agentHistoryLoadPage(paneID, conversationID, limit, before); err == nil && (len(page.Items) > 0 || page.ConversationID != "") {
-		if before == 0 && len(liveTurns) > 0 {
-			page.Items = agentInspectorMergeCurrentHistoryItems(page.Items, liveTurns, limit)
-		}
+	page, err := agentHistoryLoadCurrentItemsPage(paneID, conversationID, limit, before)
+	if err == nil {
 		J(w, M{
 			"pane_id":         paneID,
-			"conversation_id": page.ConversationID,
+			"conversation_id": aiGatewayFirstNonEmpty(page.ConversationID, conversationID),
 			"items":           page.Items,
 			"next_before":     page.NextBefore,
 			"has_more":        page.HasMore,
 		})
 		return
 	}
-	turns := liveTurns
-	if len(turns) == 0 {
-		turns = agentInspectorBuildCurrentOnlyPersistedTurns(current)
-	}
-	if limit > 0 && len(turns) > limit {
-		turns = turns[len(turns)-limit:]
-	}
 	J(w, M{
 		"pane_id":         paneID,
-		"conversation_id": strings.TrimSpace(current.ConversationID),
-		"provider":        strings.TrimSpace(current.Provider),
-		"model":           strings.TrimSpace(current.Model),
-		"items":           turns,
+		"conversation_id": conversationID,
+		"items":           []M{},
 		"next_before":     0,
 		"has_more":        false,
 	})
@@ -2258,6 +2694,7 @@ func agentInspectorBuildToolDisplay(call aiGatewayMessageToolCall) M {
 	}
 
 	if rawOutput != "" {
+		rawOutput = agentInspectorFormatToolOutput(name, rawOutput)
 		switch {
 		case strings.Contains(rawOutput, "\n---\n"):
 			parts := strings.SplitN(rawOutput, "\n---\n", 2)
@@ -2269,6 +2706,30 @@ func agentInspectorBuildToolDisplay(call aiGatewayMessageToolCall) M {
 		}
 	}
 	return tool
+}
+
+func agentInspectorFormatToolOutput(name string, rawOutput string) string {
+	rawOutput = strings.TrimSpace(rawOutput)
+	if rawOutput == "" {
+		return ""
+	}
+	if strings.Contains(rawOutput, "\nOutput:\n") {
+		parts := strings.SplitN(rawOutput, "\nOutput:\n", 2)
+		suffix := strings.TrimSpace(parts[1])
+		if suffix != "" {
+			return suffix
+		}
+		if strings.Contains(rawOutput, "Process exited with code 0") {
+			return ""
+		}
+	}
+	switch strings.TrimSpace(name) {
+	case "exec_command":
+		if strings.Contains(rawOutput, "Process exited with code 0") {
+			return ""
+		}
+	}
+	return rawOutput
 }
 
 func agentInspectorBuildChatTurnsFromRecords(records []aiGatewayMessageRecord, current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot) []M {

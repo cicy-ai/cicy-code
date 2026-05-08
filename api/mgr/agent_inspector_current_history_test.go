@@ -1,6 +1,40 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestAgentInspectorBuildToolDisplayStripsExecCommandWrapper(t *testing.T) {
+	tool := agentInspectorBuildToolDisplay(aiGatewayMessageToolCall{
+		Name:   "exec_command",
+		Input:  `{"cmd":"sed -n '1,20p' demo.txt"}`,
+		Output: "Chunk ID: 123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOriginal token count: 5\nOutput:\nalpha\nbeta",
+	})
+	if got := aiGatewayString(tool["arg"]); got != "sed -n '1,20p' demo.txt" {
+		t.Fatalf("tool arg = %q", got)
+	}
+	if got := aiGatewayString(tool["result"]); got != "alpha\nbeta" {
+		t.Fatalf("tool result = %q", got)
+	}
+}
+
+func TestAgentInspectorBuildToolSummaryUsesPreviewOnly(t *testing.T) {
+	tool := agentInspectorBuildToolSummary(M{
+		"name":   "exec_command",
+		"arg":    "printf 'hello world'",
+		"result": strings.Repeat("x", 500),
+	})
+	if got := aiGatewayString(tool["name"]); got != "exec_command" {
+		t.Fatalf("tool name = %q", got)
+	}
+	if _, ok := tool["arg"]; ok {
+		t.Fatalf("expected no arg in summary, got %#v", tool["arg"])
+	}
+	if _, ok := tool["result"]; ok {
+		t.Fatalf("expected no result in summary, got %#v", tool["result"])
+	}
+}
 
 func TestAgentInspectorHistoryThinkingFromCommentaryItem(t *testing.T) {
 	item := map[string]interface{}{
@@ -386,8 +420,8 @@ func TestAgentInspectorBuildPersistedTurnsFromFullCurrentIncludesMultipleInputTu
 					},
 				},
 				map[string]interface{}{
-					"role": "assistant",
-					"type": "message",
+					"role":  "assistant",
+					"type":  "message",
 					"phase": "final_answer",
 					"content": []interface{}{
 						map[string]interface{}{"type": "output_text", "text": "alpha"},
@@ -401,8 +435,8 @@ func TestAgentInspectorBuildPersistedTurnsFromFullCurrentIncludesMultipleInputTu
 					},
 				},
 				map[string]interface{}{
-					"role": "assistant",
-					"type": "message",
+					"role":  "assistant",
+					"type":  "message",
 					"phase": "final_answer",
 					"content": []interface{}{
 						map[string]interface{}{"type": "output_text", "text": "beta"},
@@ -432,6 +466,89 @@ func TestAgentInspectorBuildPersistedTurnsFromFullCurrentIncludesMultipleInputTu
 	}
 	if got := steps1[0]["type"]; got != "text" {
 		t.Fatalf("expected second turn step text, got %#v", got)
+	}
+}
+
+func TestAgentInspectorBuildPersistedTurnsFromFullCurrentMergesContinuationGoIntoPreviousTurn(t *testing.T) {
+	current := aiGatewayCurrentSnapshot{
+		Model: "gpt-5.5",
+		Body: map[string]interface{}{
+			"input": []interface{}{
+				map[string]interface{}{
+					"role": "user",
+					"type": "message",
+					"content": []interface{}{
+						map[string]interface{}{"type": "input_text", "text": "Write codex-history-e2e.yaml and read it back"},
+					},
+				},
+				map[string]interface{}{
+					"role":  "assistant",
+					"type":  "message",
+					"phase": "final_answer",
+					"content": []interface{}{
+						map[string]interface{}{"type": "output_text", "text": "503 No available accounts"},
+					},
+				},
+				map[string]interface{}{
+					"role": "user",
+					"type": "message",
+					"content": []interface{}{
+						map[string]interface{}{"type": "input_text", "text": "go"},
+					},
+				},
+				map[string]interface{}{
+					"role":  "assistant",
+					"type":  "message",
+					"phase": "commentary",
+					"content": []interface{}{
+						map[string]interface{}{"type": "output_text", "text": "I’m creating the YAML first."},
+					},
+				},
+				map[string]interface{}{
+					"type":    "custom_tool_call",
+					"name":    "apply_patch",
+					"call_id": "call_1",
+					"input":   "*** Begin Patch\n*** Add File: codex-history-e2e.yaml\n+alpha: 1\n+beta: 2\n*** End Patch",
+				},
+				map[string]interface{}{
+					"type":    "custom_tool_call_output",
+					"call_id": "call_1",
+					"output":  "Success",
+				},
+				map[string]interface{}{
+					"role":  "assistant",
+					"type":  "message",
+					"phase": "final_answer",
+					"content": []interface{}{
+						map[string]interface{}{"type": "output_text", "text": "Done."},
+					},
+				},
+			},
+		},
+	}
+
+	turns := agentInspectorBuildPersistedTurnsFromFullCurrent(current)
+	if len(turns) != 1 {
+		t.Fatalf("expected continuation go to merge into previous turn, got %d turns: %#v", len(turns), turns)
+	}
+	if got := turns[0]["q"]; got != "Write codex-history-e2e.yaml and read it back" {
+		t.Fatalf("unexpected merged question: %#v", got)
+	}
+	if got := turns[0]["a"]; got != "Done." {
+		t.Fatalf("expected final continuation answer, got %#v", got)
+	}
+	steps, _ := turns[0]["steps"].([]M)
+	if len(steps) != 3 {
+		t.Fatalf("expected merged continuation timeline with 3 steps, got %d: %#v", len(steps), steps)
+	}
+	if got := steps[0]["type"]; got != "thinking" {
+		t.Fatalf("expected step 0 thinking, got %#v", got)
+	}
+	if got := steps[1]["type"]; got != "tool" {
+		t.Fatalf("expected step 1 tool, got %#v", got)
+	}
+	if got := steps[2]["type"]; got != "text" {
+		t.Fatalf("expected step 2 text, got %#v", got)
 	}
 }
 

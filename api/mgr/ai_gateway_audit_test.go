@@ -1,10 +1,49 @@
 package main
 
-import (
-	"os"
-	"path/filepath"
-	"testing"
-)
+import "testing"
+
+func TestAIGatewayAnnotateCurrentBodyHistoryIDsAddsSequentialIDs(t *testing.T) {
+	body := map[string]interface{}{
+		"history": []interface{}{
+			map[string]interface{}{"role": "user", "content": []interface{}{map[string]interface{}{"type": "text", "text": "old"}}},
+		},
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": []interface{}{map[string]interface{}{"type": "text", "text": "alpha"}}},
+			map[string]interface{}{"role": "assistant", "content": []interface{}{map[string]interface{}{"type": "text", "text": "beta"}}},
+		},
+		"input": []interface{}{
+			map[string]interface{}{"role": "user", "type": "message", "content": []interface{}{map[string]interface{}{"type": "input_text", "text": "gamma"}}},
+			map[string]interface{}{"role": "assistant", "type": "message", "content": []interface{}{map[string]interface{}{"type": "output_text", "text": "delta"}}},
+		},
+	}
+	annotated := aiGatewayMap(aiGatewayAnnotateCurrentBodyHistoryIDs(body))
+	if _, ok := annotated["history"]; ok {
+		t.Fatalf("expected top-level history to be removed from current body")
+	}
+	messages := aiGatewaySlice(annotated["messages"])
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+	if got := aiGatewayInt(aiGatewayMap(messages[0])["id"]); got != 1 {
+		t.Fatalf("expected message[0] id=1, got %#v", got)
+	}
+	if got := aiGatewayInt(aiGatewayMap(messages[1])["id"]); got != 2 {
+		t.Fatalf("expected message[1] id=2, got %#v", got)
+	}
+	input := aiGatewaySlice(annotated["input"])
+	if len(input) != 2 {
+		t.Fatalf("expected 2 input items, got %d", len(input))
+	}
+	if got := aiGatewayInt(aiGatewayMap(input[0])["id"]); got != 1 {
+		t.Fatalf("expected input[0] id=1, got %#v", got)
+	}
+	if got := aiGatewayInt(aiGatewayMap(input[1])["id"]); got != 2 {
+		t.Fatalf("expected input[1] id=2, got %#v", got)
+	}
+	if got := aiGatewayCurrentBodyMaxHistoryID(annotated); got != 2 {
+		t.Fatalf("expected max_history_id=2, got %d", got)
+	}
+}
 
 func TestAIGatewayBuildMessageRecordPrefersCurrentInputHistoryForCodexCommentary(t *testing.T) {
 	withTempCicyRoot(t)
@@ -80,56 +119,37 @@ func TestAIGatewayBuildMessageRecordPrefersCurrentInputHistoryForCodexCommentary
 	}
 }
 
-func TestAIGatewayMaybeRebuildMessagesFileDoesNotWriteMessagesJSON(t *testing.T) {
-	withTempCicyRoot(t)
+func TestAIGatewaySanitizeUserQuestionStripsEnvironmentContext(t *testing.T) {
+	raw := `<environment_context>
+<cwd>/home/cicy/cicy-ai/workers/w-10008</cwd>
+<shell>bash</shell>
+<current_date>2026-05-06</current_date>
+<timezone>Etc/UTC</timezone>
+</environment_context>
 
-	agentID := "w-10001"
-	current := aiGatewayCurrentSnapshot{
-		AgentID:   agentID,
-		Timestamp: "2026-05-05T01:00:00Z",
-		Model:     "gpt-5.5",
-		Body: map[string]interface{}{
-			"input": []interface{}{
-				map[string]interface{}{
-					"role": "user",
-					"type": "message",
-					"content": []interface{}{
-						map[string]interface{}{"type": "input_text", "text": "Write ws-demo-audit-2.js"},
-					},
-				},
-				map[string]interface{}{
-					"role":  "assistant",
-					"type":  "message",
-					"phase": "final_answer",
-					"content": []interface{}{
-						map[string]interface{}{"type": "output_text", "text": "Done."},
-					},
-				},
-			},
+hi 1`
+
+	if got := aiGatewaySanitizeUserQuestion(raw); got != "hi 1" {
+		t.Fatalf("sanitize user question = %q, want %q", got, "hi 1")
+	}
+}
+
+func TestExtractArgSupportsCodexCmdAndTaskTools(t *testing.T) {
+	if got := extractArg(map[string]interface{}{"cmd": "sed -n '1,20p' demo.txt"}, "exec_command"); got != "sed -n '1,20p' demo.txt" {
+		t.Fatalf("extractArg cmd = %q", got)
+	}
+	if got := extractArg(map[string]interface{}{"subject": "Create demo file"}, "TaskCreate"); got != "Create demo file" {
+		t.Fatalf("extractArg TaskCreate = %q", got)
+	}
+	if got := extractArg(map[string]interface{}{"taskId": "3", "status": "completed"}, "TaskUpdate"); got != "task #3 -> completed" {
+		t.Fatalf("extractArg TaskUpdate = %q", got)
+	}
+	if got := extractArg(map[string]interface{}{
+		"plan": []interface{}{
+			map[string]interface{}{"step": "Create demo file", "status": "completed"},
+			map[string]interface{}{"step": "Read file back", "status": "in_progress"},
 		},
-	}
-	reply := aiGatewayReplySnapshot{
-		TurnID:    "turn-1",
-		Status:    "completed",
-		StartedAt: "2026-05-05T01:00:00Z",
-		UpdatedAt: "2026-05-05T01:00:01Z",
-		Answer:    "Done.",
-	}
-	if err := aiGatewayWriteJSONAtomic(filepath.Join(aiGatewayHistoryDir(agentID), "current.json"), current); err != nil {
-		t.Fatalf("write current: %v", err)
-	}
-	if err := aiGatewayWriteJSONAtomic(filepath.Join(aiGatewayHistoryDir(agentID), "reply.json"), reply); err != nil {
-		t.Fatalf("write reply: %v", err)
-	}
-
-	file, err := aiGatewayMaybeRebuildMessagesFile(agentID)
-	if err != nil {
-		t.Fatalf("rebuild messages file: %v", err)
-	}
-	if len(file.Messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(file.Messages))
-	}
-	if _, err := os.Stat(aiGatewayMessagesPath(agentID)); !os.IsNotExist(err) {
-		t.Fatalf("expected messages.json to stay absent, stat err=%v", err)
+	}, "update_plan"); got != "Read file back" {
+		t.Fatalf("extractArg update_plan = %q", got)
 	}
 }
