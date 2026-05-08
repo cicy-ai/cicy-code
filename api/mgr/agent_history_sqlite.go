@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -57,6 +58,17 @@ type agentHistoryPage struct {
 	NextBefore     int64
 	HasMore        bool
 }
+type agentHistoryIDPage struct {
+	Items          []int64
+	ConversationID string
+	NextBefore     int64
+	HasMore        bool
+}
+type agentHistoryPersistedRecord struct {
+	ID     int64
+	Item   M
+	Record aiGatewayMessageRecord
+}
 
 func agentHistoryDBPath(agentID string) string {
 	return filepath.Join(aiGatewayHistoryDir(agentID), "history.db")
@@ -90,31 +102,8 @@ func agentHistoryOpen(agentID string) (*sql.DB, error) {
 
 func agentHistoryMigrate(db *sql.DB) error {
 	stmts := []string{
-		`CREATE TABLE IF NOT EXISTS conversations (
-			id TEXT PRIMARY KEY,
-			agent_id TEXT NOT NULL,
-			provider TEXT DEFAULT '',
-			model TEXT DEFAULT '',
-			started_at TEXT DEFAULT '',
-			updated_at TEXT DEFAULT ''
-		)`,
-		`CREATE TABLE IF NOT EXISTS history_turns (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			conversation_id TEXT NOT NULL,
-			turn_key TEXT NOT NULL,
-			agent_id TEXT NOT NULL,
-			q TEXT DEFAULT '',
-			a TEXT DEFAULT '',
-			thinking TEXT DEFAULT '',
-			model TEXT DEFAULT '',
-			status TEXT DEFAULT '',
-			q_time TEXT DEFAULT '',
-			a_time TEXT DEFAULT '',
-			created_at TEXT DEFAULT '',
-			updated_at TEXT DEFAULT '',
-			item_json TEXT NOT NULL,
-			UNIQUE(conversation_id, turn_key)
-		)`,
+		`CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, provider TEXT DEFAULT '', model TEXT DEFAULT '', started_at TEXT DEFAULT '', updated_at TEXT DEFAULT '', flushed_turn_count INTEGER DEFAULT 0)`,
+		`CREATE TABLE IF NOT EXISTS history_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL, turn_key TEXT NOT NULL, agent_id TEXT NOT NULL, q TEXT DEFAULT '', a TEXT DEFAULT '', thinking TEXT DEFAULT '', model TEXT DEFAULT '', status TEXT DEFAULT '', q_time TEXT DEFAULT '', a_time TEXT DEFAULT '', created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '', item_json TEXT NOT NULL, UNIQUE(conversation_id, turn_key))`,
 		`CREATE INDEX IF NOT EXISTS idx_history_turns_agent_id ON history_turns(agent_id, id)`,
 		`CREATE INDEX IF NOT EXISTS idx_history_turns_conversation_id ON history_turns(conversation_id, id)`,
 	}
@@ -145,12 +134,7 @@ func agentHistoryTurnKey(agentID string, current aiGatewayCurrentSnapshot, reply
 	if id := strings.TrimSpace(current.TurnID); id != "" {
 		return id
 	}
-	sum := sha1.Sum([]byte(strings.Join([]string{
-		agentID,
-		strings.TrimSpace(record.QTime),
-		strings.TrimSpace(record.ATime),
-		strings.TrimSpace(record.Q),
-	}, "\x00")))
+	sum := sha1.Sum([]byte(strings.Join([]string{agentID, strings.TrimSpace(record.QTime), strings.TrimSpace(record.ATime), strings.TrimSpace(record.Q)}, "\x00")))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -163,102 +147,55 @@ func agentHistoryFirstNonEmpty(values ...string) string {
 	return ""
 }
 
-func agentHistoryFindMergeTarget(tx *sql.Tx, agentID string, record aiGatewayMessageRecord) (conversationID string, turnKey string, ok bool, err error) {
+func agentHistoryFindMergeTarget(tx *sql.Tx, agentID string, record aiGatewayMessageRecord) (string, string, bool, error) {
 	question := agentInspectorCanonicalQuestion(record.Q)
 	if strings.TrimSpace(question) == "" {
 		return "", "", false, nil
 	}
-	rows, err := tx.Query(
-		`SELECT conversation_id, turn_key, q, q_time, a_time
-		 FROM history_turns
-		 WHERE agent_id = ?
-		 ORDER BY id DESC
-		 LIMIT 8`,
-		agentID,
-	)
+	rows, err := tx.Query(`SELECT conversation_id, turn_key, q, q_time, a_time FROM history_turns WHERE agent_id = ? ORDER BY id DESC LIMIT 8`, agentID)
 	if err != nil {
 		return "", "", false, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		var existingConversationID, existingTurnKey, existingQ, existingQTime, existingATime string
 		if err := rows.Scan(&existingConversationID, &existingTurnKey, &existingQ, &existingQTime, &existingATime); err != nil {
 			return "", "", false, err
 		}
-		existing := aiGatewayMessageRecord{
-			Q:     existingQ,
-			QTime: existingQTime,
-			ATime: existingATime,
-		}
+		existing := aiGatewayMessageRecord{Q: existingQ, QTime: existingQTime, ATime: existingATime}
 		if !agentInspectorShouldMergeHistoryRecord(existing, record) {
 			continue
 		}
 		return existingConversationID, existingTurnKey, true, nil
 	}
-	if err := rows.Err(); err != nil {
-		return "", "", false, err
-	}
-	return "", "", false, nil
+	return "", "", false, rows.Err()
 }
 
-func agentHistoryUpsertRecordWithItem(agentID string, current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot, record aiGatewayMessageRecord, item M) error {
-	currentTurns := agentInspectorBuildCurrentOnlyPersistedTurns(current)
+func agentHistoryUpsertRecordWithItem(agentID string, current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot, record aiGatewayMessageRecord, item M) (int64, error) {
 	if item == nil {
+		currentTurns := agentInspectorBuildCurrentOnlyPersistedTurns(current)
 		if len(currentTurns) > 0 {
 			item = currentTurns[len(currentTurns)-1]
 		} else {
 			turns := agentInspectorBuildChatTurnsFromRecords([]aiGatewayMessageRecord{record}, aiGatewayCurrentSnapshot{Model: current.Model}, aiGatewayReplySnapshot{})
 			if len(turns) == 0 {
-				return nil
+				return 0, nil
 			}
 			item = turns[0]
 		}
-	} else if len(item) == 0 {
-		turns := agentInspectorBuildChatTurnsFromRecords([]aiGatewayMessageRecord{record}, aiGatewayCurrentSnapshot{Model: current.Model}, aiGatewayReplySnapshot{})
-		if len(turns) == 0 {
-			return nil
-		}
-		item = turns[0]
 	}
 	item["q"] = strings.TrimSpace(aiGatewayFirstNonEmpty(aiGatewayString(item["q"]), record.Q))
 	item["a"] = strings.TrimSpace(aiGatewayFirstNonEmpty(aiGatewayString(item["a"]), record.A))
-	if model := strings.TrimSpace(aiGatewayFirstNonEmpty(aiGatewayString(item["model"]), record.Model, aiGatewayReplyPrimaryModel(reply), current.Model)); model != "" {
-		item["model"] = model
-	}
-	if status := strings.TrimSpace(aiGatewayFirstNonEmpty(reply.Status, current.Status, aiGatewayString(item["status"]), "done")); status != "" {
-		switch strings.ToLower(status) {
-		case "completed", "idle":
-			item["status"] = "text"
-		default:
-			item["status"] = status
-		}
-	}
-	startTS := int64(0)
-	if ts, err := time.Parse(time.RFC3339, agentHistoryFirstNonEmpty(record.QTime, reply.StartedAt, current.StartedAt, current.Timestamp)); err == nil {
-		startTS = ts.Unix()
-	}
-	endTS := startTS
-	if ts, err := time.Parse(time.RFC3339, agentHistoryFirstNonEmpty(record.ATime, reply.UpdatedAt, current.UpdatedAt, record.QTime)); err == nil {
-		endTS = ts.Unix()
-	}
-	if startTS > 0 {
-		item["start_ts"] = startTS
-	}
-	if endTS > 0 {
-		item["ts"] = endTS
-	}
 	item = agentHistoryNormalizePersistedItem(item, record)
 	itemBody, err := json.Marshal(item)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	db, err := agentHistoryOpen(agentID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer db.Close()
-
 	conversationID := agentHistoryFallbackConversationID(agentID, current, reply)
 	turnKey := agentHistoryTurnKey(agentID, current, reply, record)
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -266,73 +203,31 @@ func agentHistoryUpsertRecordWithItem(agentID string, current aiGatewayCurrentSn
 	updatedAt := agentHistoryFirstNonEmpty(record.ATime, reply.UpdatedAt, current.UpdatedAt, createdAt, now)
 	model := agentHistoryFirstNonEmpty(record.Model, aiGatewayReplyPrimaryModel(reply), current.Model)
 	status := strings.TrimSpace(aiGatewayFirstNonEmpty(reply.Status, current.Status, "done"))
-
 	tx, err := db.Begin()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer tx.Rollback()
-
-	if existingConversationID, existingTurnKey, found, err := agentHistoryFindMergeTarget(tx, agentID, record); err != nil {
-		return err
-	} else if found {
-		conversationID = existingConversationID
-		turnKey = existingTurnKey
+	if _, err := tx.Exec(`INSERT INTO conversations (id, agent_id, provider, model, started_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, model=excluded.model, updated_at=excluded.updated_at`, conversationID, agentID, strings.TrimSpace(current.Provider), model, createdAt, updatedAt); err != nil {
+		return 0, err
 	}
-
-	if _, err := tx.Exec(
-		`INSERT INTO conversations (id, agent_id, provider, model, started_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(id) DO UPDATE SET
-		   provider=excluded.provider,
-		   model=excluded.model,
-		   updated_at=excluded.updated_at`,
-		conversationID,
-		agentID,
-		strings.TrimSpace(current.Provider),
-		model,
-		createdAt,
-		updatedAt,
-	); err != nil {
-		return err
+	if _, err := tx.Exec(`INSERT INTO history_turns (conversation_id, turn_key, agent_id, q, a, thinking, model, status, q_time, a_time, created_at, updated_at, item_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(conversation_id, turn_key) DO UPDATE SET q=excluded.q, a=excluded.a, thinking=excluded.thinking, model=excluded.model, status=excluded.status, q_time=excluded.q_time, a_time=excluded.a_time, updated_at=excluded.updated_at, item_json=excluded.item_json`, conversationID, turnKey, agentID, strings.TrimSpace(record.Q), strings.TrimSpace(record.A), strings.TrimSpace(record.Thinking), model, status, strings.TrimSpace(record.QTime), strings.TrimSpace(record.ATime), createdAt, updatedAt, string(itemBody)); err != nil {
+		return 0, err
 	}
-
-	if _, err := tx.Exec(
-		`INSERT INTO history_turns (
-		   conversation_id, turn_key, agent_id, q, a, thinking, model, status,
-		   q_time, a_time, created_at, updated_at, item_json
-		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(conversation_id, turn_key) DO UPDATE SET
-		   q=excluded.q,
-		   a=excluded.a,
-		   thinking=excluded.thinking,
-		   model=excluded.model,
-		   status=excluded.status,
-		   q_time=excluded.q_time,
-		   a_time=excluded.a_time,
-		   updated_at=excluded.updated_at,
-		   item_json=excluded.item_json`,
-		conversationID,
-		turnKey,
-		agentID,
-		strings.TrimSpace(record.Q),
-		strings.TrimSpace(record.A),
-		strings.TrimSpace(record.Thinking),
-		model,
-		status,
-		strings.TrimSpace(record.QTime),
-		strings.TrimSpace(record.ATime),
-		createdAt,
-		updatedAt,
-		string(itemBody),
-	); err != nil {
-		return err
+	var historyID int64
+	if err := tx.QueryRow(`SELECT id FROM history_turns WHERE conversation_id = ? AND turn_key = ? LIMIT 1`, conversationID, turnKey).Scan(&historyID); err != nil {
+		return 0, err
 	}
-
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return historyID, nil
 }
 
-func agentHistoryUpsertRecord(agentID string, current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot, record aiGatewayMessageRecord) error {
+func agentHistoryUpsertRecordWithItemAndCount(agentID string, current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot, record aiGatewayMessageRecord, item M, flushedTurnCount *int) (int64, error) {
+	return agentHistoryUpsertRecordWithItem(agentID, current, reply, record, item)
+}
+func agentHistoryUpsertRecord(agentID string, current aiGatewayCurrentSnapshot, reply aiGatewayReplySnapshot, record aiGatewayMessageRecord) (int64, error) {
 	return agentHistoryUpsertRecordWithItem(agentID, current, reply, record, nil)
 }
 
@@ -348,7 +243,6 @@ func agentHistoryLoadPage(agentID string, conversationID string, limit int, befo
 		return agentHistoryPage{}, err
 	}
 	defer db.Close()
-
 	conversationID = strings.TrimSpace(conversationID)
 	args := []interface{}{agentID}
 	where := `agent_id = ?`
@@ -361,15 +255,11 @@ func agentHistoryLoadPage(agentID string, conversationID string, limit int, befo
 		args = append(args, before)
 	}
 	args = append(args, limit+1)
-	rows, err := db.Query(
-		`SELECT id, item_json FROM history_turns WHERE `+where+` ORDER BY id DESC LIMIT ?`,
-		args...,
-	)
+	rows, err := db.Query(`SELECT id, item_json FROM history_turns WHERE `+where+` ORDER BY id DESC LIMIT ?`, args...)
 	if err != nil {
 		return agentHistoryPage{}, err
 	}
 	defer rows.Close()
-
 	type rowItem struct {
 		id   int64
 		item M
@@ -385,16 +275,13 @@ func agentHistoryLoadPage(agentID string, conversationID string, limit int, befo
 		if err := json.Unmarshal([]byte(itemText), &item); err != nil {
 			continue
 		}
-		item = agentHistoryNormalizePersistedItem(item, aiGatewayMessageRecord{
-			A: aiGatewayString(item["a"]),
-		})
+		item = agentHistoryNormalizePersistedItem(item, aiGatewayMessageRecord{A: aiGatewayString(item["a"])})
 		item["history_id"] = id
 		raw = append(raw, rowItem{id: id, item: item})
 	}
 	if err := rows.Err(); err != nil {
 		return agentHistoryPage{}, err
 	}
-
 	hasMore := len(raw) > limit
 	if hasMore {
 		raw = raw[:limit]
@@ -410,10 +297,192 @@ func agentHistoryLoadPage(agentID string, conversationID string, limit int, befo
 	if !hasMore {
 		nextBefore = 0
 	}
-	return agentHistoryPage{
-		Items:          items,
-		ConversationID: conversationID,
-		NextBefore:     nextBefore,
-		HasMore:        hasMore,
-	}, nil
+	return agentHistoryPage{Items: items, ConversationID: conversationID, NextBefore: nextBefore, HasMore: hasMore}, nil
+}
+
+func agentHistoryLoadCurrentItemsPage(agentID string, conversationID string, limit int, before int64) (agentHistoryPage, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	if limit > agentInspectorHistoryMaxLimit {
+		limit = agentInspectorHistoryMaxLimit
+	}
+	resolvedConversationID, maxID, err := agentHistoryCurrentMaxID(agentID, conversationID)
+	if err != nil {
+		return agentHistoryPage{}, err
+	}
+	if resolvedConversationID == "" || maxID <= 0 {
+		return agentHistoryPage{ConversationID: resolvedConversationID}, nil
+	}
+	current, err := aiGatewayReadCurrentSnapshot(agentID)
+	if err != nil {
+		return agentHistoryPage{}, err
+	}
+	items := agentHistoryCurrentBodyItems(current)
+	if len(items) == 0 {
+		return agentHistoryPage{ConversationID: resolvedConversationID}, nil
+	}
+	upper := maxID
+	if before > 0 && before-1 < upper {
+		upper = before - 1
+	}
+	if upper <= 0 {
+		return agentHistoryPage{ConversationID: resolvedConversationID}, nil
+	}
+	lower := upper - int64(limit) + 1
+	if lower < 1 {
+		lower = 1
+	}
+	out := make([]M, 0, limit)
+	for _, item := range items {
+		itemID := int64(aiGatewayInt(item["id"]))
+		if itemID < lower || itemID > upper {
+			continue
+		}
+		next := aiGatewayCloneAnyMap(item)
+		next["history_id"] = itemID
+		next["conversation_id"] = resolvedConversationID
+		out = append(out, next)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return int64(aiGatewayInt(out[i]["history_id"])) < int64(aiGatewayInt(out[j]["history_id"]))
+	})
+	nextBefore := int64(0)
+	hasMore := lower > 1
+	if len(out) > 0 {
+		nextBefore = int64(aiGatewayInt(out[0]["history_id"]))
+	}
+	if !hasMore {
+		nextBefore = 0
+	}
+	return agentHistoryPage{Items: out, ConversationID: resolvedConversationID, NextBefore: nextBefore, HasMore: hasMore}, nil
+}
+
+func agentHistoryLoadIDPage(agentID string, conversationID string, limit int, before int64) (agentHistoryIDPage, error) {
+	page, err := agentHistoryLoadPage(agentID, conversationID, limit, before)
+	if err != nil {
+		return agentHistoryIDPage{}, err
+	}
+	items := make([]int64, 0, len(page.Items))
+	for _, item := range page.Items {
+		if id := int64(aiGatewayInt(item["history_id"])); id > 0 {
+			items = append(items, id)
+		}
+	}
+	return agentHistoryIDPage{Items: items, ConversationID: page.ConversationID, NextBefore: page.NextBefore, HasMore: page.HasMore}, nil
+}
+
+func agentHistoryLoadRecordsAfter(agentID string, afterID int64, limit int) ([]agentHistoryPersistedRecord, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	db, err := agentHistoryOpen(agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	rows, err := db.Query(`SELECT id, item_json, q, a, q_time, a_time, model, thinking FROM history_turns WHERE agent_id = ? AND id > ? ORDER BY id ASC LIMIT ?`, agentID, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]agentHistoryPersistedRecord, 0, limit)
+	for rows.Next() {
+		var entry agentHistoryPersistedRecord
+		var itemText string
+		if err := rows.Scan(&entry.ID, &itemText, &entry.Record.Q, &entry.Record.A, &entry.Record.QTime, &entry.Record.ATime, &entry.Record.Model, &entry.Record.Thinking); err != nil {
+			return nil, err
+		}
+		item := M{}
+		if err := json.Unmarshal([]byte(itemText), &item); err == nil {
+			entry.Item = agentHistoryNormalizePersistedItem(item, entry.Record)
+		}
+		out = append(out, entry)
+	}
+	return out, rows.Err()
+}
+
+func agentHistoryLatestID(agentID string) (int64, error) {
+	db, err := agentHistoryOpen(agentID)
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+	var id int64
+	if err := db.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM history_turns WHERE agent_id = ?`, agentID).Scan(&id); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+func agentHistoryCurrentMaxID(agentID string, conversationID string) (string, int64, error) {
+	current, err := aiGatewayReadCurrentSnapshot(agentID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", 0, nil
+		}
+		return "", 0, err
+	}
+	resolvedConversationID := strings.TrimSpace(current.ConversationID)
+	if candidate := strings.TrimSpace(conversationID); candidate != "" && candidate != resolvedConversationID {
+		return candidate, 0, nil
+	}
+	if current.MaxHistoryID > 0 {
+		return resolvedConversationID, int64(current.MaxHistoryID), nil
+	}
+	items := agentHistoryCurrentBodyItems(current)
+	maxID := int64(0)
+	for _, item := range items {
+		itemID := int64(aiGatewayInt(item["id"]))
+		if itemID > maxID {
+			maxID = itemID
+		}
+	}
+	return resolvedConversationID, maxID, nil
+}
+
+func agentHistoryLoadCurrentItemByID(agentID string, conversationID string, historyID int64) (string, M, bool, error) {
+	resolvedConversationID, maxID, err := agentHistoryCurrentMaxID(agentID, conversationID)
+	if err != nil {
+		return "", nil, false, err
+	}
+	if resolvedConversationID == "" || historyID <= 0 || historyID > maxID {
+		return resolvedConversationID, nil, false, nil
+	}
+	current, err := aiGatewayReadCurrentSnapshot(agentID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return resolvedConversationID, nil, false, nil
+		}
+		return "", nil, false, err
+	}
+	for _, item := range agentHistoryCurrentBodyItems(current) {
+		itemID := int64(aiGatewayInt(item["id"]))
+		if itemID != historyID {
+			continue
+		}
+		next := aiGatewayCloneAnyMap(item)
+		next["history_id"] = historyID
+		next["conversation_id"] = resolvedConversationID
+		return resolvedConversationID, next, true, nil
+	}
+	return resolvedConversationID, nil, false, nil
+}
+
+func agentHistoryCurrentBodyItems(current aiGatewayCurrentSnapshot) []map[string]interface{} {
+	body := aiGatewayMap(current.Body)
+	if len(body) == 0 {
+		return nil
+	}
+	if messages := aiGatewayExtractMessages(body); len(messages) > 0 {
+		return messages
+	}
+	inputs := aiGatewayExtractInputItems(body)
+	out := make([]map[string]interface{}, 0, len(inputs))
+	for _, raw := range inputs {
+		if item := aiGatewayMap(raw); len(item) > 0 {
+			out = append(out, item)
+		}
+	}
+	return out
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -97,7 +98,7 @@ func TestAgentHistoryLoadPageAggregatesAcrossConversationsByDefault(t *testing.T
 			Model:          item.record.Model,
 		}
 		reply := aiGatewayReplySnapshot{TurnID: item.conversationID + "-turn"}
-		if err := agentHistoryUpsertRecord(agentID, current, reply, item.record); err != nil {
+		if _, err := agentHistoryUpsertRecord(agentID, current, reply, item.record); err != nil {
 			t.Fatalf("upsert %s: %v", item.conversationID, err)
 		}
 	}
@@ -158,7 +159,7 @@ func TestAgentHistoryLoadPageHonorsConversationFilter(t *testing.T) {
 			Model:          record.Model,
 		}
 		reply := aiGatewayReplySnapshot{TurnID: fmt.Sprintf("conv-only-turn-%d", i+1)}
-		if err := agentHistoryUpsertRecord(agentID, current, reply, record); err != nil {
+		if _, err := agentHistoryUpsertRecord(agentID, current, reply, record); err != nil {
 			t.Fatalf("upsert %s: %v", q, err)
 		}
 	}
@@ -197,10 +198,10 @@ func TestAgentHistoryUpsertRecordUpdatesExistingTurn(t *testing.T) {
 	first := testHistoryRecord("same-q", "", "2026-05-05T01:00:00Z", "", "gpt-5.5")
 	second := testHistoryRecord("same-q", "same-a", "2026-05-05T01:00:00Z", "2026-05-05T01:00:02Z", "gpt-5.5")
 
-	if err := agentHistoryUpsertRecord(agentID, current, reply, first); err != nil {
+	if _, err := agentHistoryUpsertRecord(agentID, current, reply, first); err != nil {
 		t.Fatalf("first upsert: %v", err)
 	}
-	if err := agentHistoryUpsertRecord(agentID, current, reply, second); err != nil {
+	if _, err := agentHistoryUpsertRecord(agentID, current, reply, second); err != nil {
 		t.Fatalf("second upsert: %v", err)
 	}
 
@@ -213,6 +214,233 @@ func TestAgentHistoryUpsertRecordUpdatesExistingTurn(t *testing.T) {
 	}
 	if got := page.Items[0]["a"]; got != "same-a" {
 		t.Fatalf("expected updated answer, got %#v", got)
+	}
+}
+
+func TestAIGatewaySyncCurrentSnapshotToHistoryDBReturnsMaxInputItemID(t *testing.T) {
+	withTempCicyRoot(t)
+
+	agentID := "w-10001"
+	body := aiGatewayAnnotateCurrentBodyHistoryIDs(map[string]interface{}{
+		"input": []interface{}{
+			map[string]interface{}{
+				"role": "user",
+				"type": "message",
+				"content": []interface{}{
+					map[string]interface{}{"type": "input_text", "text": "hello input"},
+				},
+			},
+			map[string]interface{}{
+				"role": "assistant",
+				"type": "message",
+				"content": []interface{}{
+					map[string]interface{}{"type": "output_text", "text": "hi"},
+				},
+			},
+		},
+	})
+	current := aiGatewayCurrentSnapshot{
+		TurnID:         "turn-input-1",
+		AgentID:        agentID,
+		ConversationID: "conv-input-1",
+		RequestID:      "req-input-1",
+		Provider:       "openai",
+		Model:          "gpt-5.5",
+		Method:         "POST",
+		URL:            "http://127.0.0.1:8008/api/ai-gateway/openai/" + agentID,
+		Timestamp:      "2026-05-08T01:00:00Z",
+		StartedAt:      "2026-05-08T01:00:00Z",
+		UpdatedAt:      "2026-05-08T01:00:01Z",
+		Status:         "thinking",
+		Body:           body,
+		MaxHistoryID:   aiGatewayCurrentBodyMaxHistoryID(body),
+	}
+	if err := aiGatewayWriteJSONAtomic(filepath.Join(aiGatewayHistoryDir(agentID), "current.json"), current); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	snapshotID, err := aiGatewaySyncCurrentSnapshotToHistoryDB(agentID)
+	if err != nil {
+		t.Fatalf("sync current snapshot: %v", err)
+	}
+	if snapshotID != 2 {
+		t.Fatalf("expected snapshot id 2, got %d", snapshotID)
+	}
+	conversationID, maxID, err := agentHistoryCurrentMaxID(agentID, "")
+	if err != nil {
+		t.Fatalf("current max id: %v", err)
+	}
+	if conversationID != "conv-input-1" {
+		t.Fatalf("unexpected conversation_id: %q", conversationID)
+	}
+	if maxID != 2 {
+		t.Fatalf("expected max id 2, got %d", maxID)
+	}
+	_, item, ok, err := agentHistoryLoadCurrentItemByID(agentID, conversationID, 2)
+	if err != nil {
+		t.Fatalf("load current item: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected current item")
+	}
+	if got := aiGatewayString(item["role"]); got != "assistant" {
+		t.Fatalf("unexpected role: %q", got)
+	}
+}
+
+func TestAIGatewaySyncCurrentSnapshotToHistoryDBReturnsMaxMessagesItemID(t *testing.T) {
+	withTempCicyRoot(t)
+
+	agentID := "w-10001"
+	body := aiGatewayAnnotateCurrentBodyHistoryIDs(map[string]interface{}{
+		"messages": []interface{}{
+			map[string]interface{}{
+				"role": "user",
+				"content": []interface{}{
+					map[string]interface{}{"type": "text", "text": "hello messages"},
+				},
+			},
+			map[string]interface{}{
+				"role": "assistant",
+				"content": []interface{}{
+					map[string]interface{}{"type": "text", "text": "reply messages"},
+				},
+			},
+			map[string]interface{}{
+				"role": "user",
+				"content": []interface{}{
+					map[string]interface{}{"type": "tool_result", "tool_use_id": "call_1", "content": "ok"},
+				},
+			},
+		},
+	})
+	current := aiGatewayCurrentSnapshot{
+		TurnID:         "turn-messages-1",
+		AgentID:        agentID,
+		ConversationID: "conv-messages-1",
+		RequestID:      "req-messages-1",
+		Provider:       "anthropic",
+		Model:          "claude-opus-4-7",
+		Method:         "POST",
+		URL:            "http://127.0.0.1:8008/api/ai-gateway/anthropic/" + agentID,
+		Timestamp:      "2026-05-08T01:10:00Z",
+		StartedAt:      "2026-05-08T01:10:00Z",
+		UpdatedAt:      "2026-05-08T01:10:01Z",
+		Status:         "thinking",
+		Body:           body,
+		MaxHistoryID:   aiGatewayCurrentBodyMaxHistoryID(body),
+	}
+	if err := aiGatewayWriteJSONAtomic(filepath.Join(aiGatewayHistoryDir(agentID), "current.json"), current); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	snapshotID, err := aiGatewaySyncCurrentSnapshotToHistoryDB(agentID)
+	if err != nil {
+		t.Fatalf("sync current snapshot: %v", err)
+	}
+	if snapshotID != 3 {
+		t.Fatalf("expected snapshot id 3, got %d", snapshotID)
+	}
+	page, err := agentHistoryLoadCurrentItemsPage(agentID, "conv-messages-1", 2, 0)
+	if err != nil {
+		t.Fatalf("load current page: %v", err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(page.Items))
+	}
+	if got := int64(aiGatewayInt(page.Items[0]["history_id"])); got != 2 {
+		t.Fatalf("expected first paged history_id 2, got %d", got)
+	}
+	if got := int64(aiGatewayInt(page.Items[1]["history_id"])); got != 3 {
+		t.Fatalf("expected second paged history_id 3, got %d", got)
+	}
+	if !page.HasMore || page.NextBefore != 2 {
+		t.Fatalf("expected has_more with next_before=2, got has_more=%v next_before=%d", page.HasMore, page.NextBefore)
+	}
+}
+
+func TestAgentHistoryUpsertRecordDoesNotMergeSameQuestionAcrossConversations(t *testing.T) {
+	withTempCicyRoot(t)
+
+	agentID := "w-10001"
+	recordA := testHistoryRecord("same-q", "a1", "2026-05-05T01:00:00Z", "2026-05-05T01:00:02Z", "gpt-5.5")
+	recordB := testHistoryRecord("same-q", "a2", "2026-05-05T01:05:00Z", "2026-05-05T01:05:03Z", "gpt-5.5")
+
+	currentA := aiGatewayCurrentSnapshot{
+		AgentID:        agentID,
+		ConversationID: "conv-a",
+		Model:          "gpt-5.5",
+	}
+	currentB := aiGatewayCurrentSnapshot{
+		AgentID:        agentID,
+		ConversationID: "conv-b",
+		Model:          "gpt-5.5",
+	}
+	replyA := aiGatewayReplySnapshot{TurnID: "turn-a"}
+	replyB := aiGatewayReplySnapshot{TurnID: "turn-b"}
+
+	idA, err := agentHistoryUpsertRecord(agentID, currentA, replyA, recordA)
+	if err != nil {
+		t.Fatalf("upsert conv-a: %v", err)
+	}
+	idB, err := agentHistoryUpsertRecord(agentID, currentB, replyB, recordB)
+	if err != nil {
+		t.Fatalf("upsert conv-b: %v", err)
+	}
+	if idA <= 0 || idB <= 0 {
+		t.Fatalf("expected positive history ids, got %d and %d", idA, idB)
+	}
+	if idA == idB {
+		t.Fatalf("expected distinct history ids across conversations, got %d", idA)
+	}
+
+	pageA, err := agentHistoryLoadPage(agentID, "conv-a", 10, 0)
+	if err != nil {
+		t.Fatalf("load conv-a: %v", err)
+	}
+	pageB, err := agentHistoryLoadPage(agentID, "conv-b", 10, 0)
+	if err != nil {
+		t.Fatalf("load conv-b: %v", err)
+	}
+	if len(pageA.Items) != 1 || len(pageB.Items) != 1 {
+		t.Fatalf("expected one item per conversation, got %d and %d", len(pageA.Items), len(pageB.Items))
+	}
+	if got := pageA.Items[0]["a"]; got != "a1" {
+		t.Fatalf("unexpected conv-a answer: %#v", got)
+	}
+	if got := pageB.Items[0]["a"]; got != "a2" {
+		t.Fatalf("unexpected conv-b answer: %#v", got)
+	}
+}
+
+func TestAgentHistoryUpsertRecordDoesNotMergeSameQuestionAcrossTurnsInSameConversation(t *testing.T) {
+	withTempCicyRoot(t)
+
+	agentID := "w-10001"
+	current := aiGatewayCurrentSnapshot{
+		AgentID:        agentID,
+		ConversationID: "conv-same",
+		Model:          "gpt-5.5",
+	}
+	recordA := testHistoryRecord("same-q", "a1", "2026-05-05T01:00:00Z", "2026-05-05T01:00:02Z", "gpt-5.5")
+	recordB := testHistoryRecord("same-q", "a2", "2026-05-05T01:05:00Z", "2026-05-05T01:05:03Z", "gpt-5.5")
+
+	idA, err := agentHistoryUpsertRecord(agentID, current, aiGatewayReplySnapshot{TurnID: "turn-a"}, recordA)
+	if err != nil {
+		t.Fatalf("upsert turn-a: %v", err)
+	}
+	idB, err := agentHistoryUpsertRecord(agentID, current, aiGatewayReplySnapshot{TurnID: "turn-b"}, recordB)
+	if err != nil {
+		t.Fatalf("upsert turn-b: %v", err)
+	}
+	if idA <= 0 || idB <= 0 || idA == idB {
+		t.Fatalf("expected distinct history ids for repeated prompt in same conversation, got %d and %d", idA, idB)
+	}
+
+	page, err := agentHistoryLoadPage(agentID, "conv-same", 10, 0)
+	if err != nil {
+		t.Fatalf("load conv-same: %v", err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("expected 2 persisted turns, got %d", len(page.Items))
 	}
 }
 
@@ -239,7 +467,7 @@ func TestAgentHistoryLoadPagePreservesThinkingToolTimeline(t *testing.T) {
 		},
 	}
 
-	if err := agentHistoryUpsertRecord(agentID, current, reply, record); err != nil {
+	if _, err := agentHistoryUpsertRecord(agentID, current, reply, record); err != nil {
 		t.Fatalf("upsert timeline record: %v", err)
 	}
 
@@ -279,7 +507,7 @@ func TestAgentHistoryLoadPagePreservesThinkingToolTimeline(t *testing.T) {
 	}
 }
 
-func TestAgentHistoryUpsertRecordMergesEvolvingTurnAcrossChangingConversationIDs(t *testing.T) {
+func TestAgentHistoryUpsertRecordDoesNotMergeAcrossChangingConversationIDs(t *testing.T) {
 	withTempCicyRoot(t)
 
 	agentID := "w-10001"
@@ -328,9 +556,20 @@ func TestAgentHistoryUpsertRecordMergesEvolvingTurnAcrossChangingConversationIDs
 		},
 	}
 
+	ids := make([]int64, 0, len(records))
 	for _, item := range records {
-		if err := agentHistoryUpsertRecord(agentID, item.current, item.reply, item.record); err != nil {
+		historyID, err := agentHistoryUpsertRecord(agentID, item.current, item.reply, item.record)
+		if err != nil {
 			t.Fatalf("upsert evolving turn: %v", err)
+		}
+		ids = append(ids, historyID)
+	}
+	for i, historyID := range ids {
+		if historyID <= 0 {
+			t.Fatalf("expected positive history id at index %d, got %d", i, historyID)
+		}
+		if i > 0 && historyID == ids[0] {
+			t.Fatalf("expected distinct history ids across changing conversations, got %v", ids)
 		}
 	}
 
@@ -338,11 +577,8 @@ func TestAgentHistoryUpsertRecordMergesEvolvingTurnAcrossChangingConversationIDs
 	if err != nil {
 		t.Fatalf("load page: %v", err)
 	}
-	if len(page.Items) != 1 {
-		t.Fatalf("expected single merged history item, got %d", len(page.Items))
-	}
-	if got := page.Items[0]["a"]; got != "final answer" {
-		t.Fatalf("expected final answer, got %#v", got)
+	if len(page.Items) != 3 {
+		t.Fatalf("expected 3 history items, got %d", len(page.Items))
 	}
 }
 
@@ -372,9 +608,9 @@ func TestAgentHistoryUpsertRecordPrefersCurrentTimelineOrderForCodex(t *testing.
 					},
 				},
 				map[string]interface{}{
-					"type":    "function_call",
-					"name":    "exec_command",
-					"call_id": "call_1",
+					"type":      "function_call",
+					"name":      "exec_command",
+					"call_id":   "call_1",
 					"arguments": "{\"cmd\":\"pwd\"}",
 				},
 				map[string]interface{}{
@@ -391,9 +627,9 @@ func TestAgentHistoryUpsertRecordPrefersCurrentTimelineOrderForCodex(t *testing.
 					},
 				},
 				map[string]interface{}{
-					"type":    "function_call",
-					"name":    "exec_command",
-					"call_id": "call_2",
+					"type":      "function_call",
+					"name":      "exec_command",
+					"call_id":   "call_2",
 					"arguments": "{\"cmd\":\"sed -n '1,120p' ws-demo-order.js\"}",
 				},
 				map[string]interface{}{
@@ -431,7 +667,7 @@ func TestAgentHistoryUpsertRecordPrefersCurrentTimelineOrderForCodex(t *testing.
 		},
 	}
 
-	if err := agentHistoryUpsertRecord(agentID, current, reply, record); err != nil {
+	if _, err := agentHistoryUpsertRecord(agentID, current, reply, record); err != nil {
 		t.Fatalf("upsert record: %v", err)
 	}
 
@@ -469,13 +705,13 @@ func TestAgentHistoryUpsertRecordPrefersCurrentTimelineOrderForCodex(t *testing.
 	}
 }
 
-func TestAIGatewaySyncLatestCurrentHistoryRepairsPreviousTurnBeforeNextQuestion(t *testing.T) {
+func TestAIGatewaySyncLatestCurrentHistorySkipsOnlyActiveTurn(t *testing.T) {
 	withTempCicyRoot(t)
 
 	agentID := "w-10001"
-	partialCurrent := aiGatewayCurrentSnapshot{
+	current := aiGatewayCurrentSnapshot{
 		AgentID:        agentID,
-		ConversationID: "conv-sync",
+		ConversationID: "conv-active-only",
 		Model:          "gpt-5.5",
 		Timestamp:      "2026-05-05T01:00:00Z",
 		UpdatedAt:      "2026-05-05T01:00:10Z",
@@ -516,11 +752,11 @@ func TestAIGatewaySyncLatestCurrentHistoryRepairsPreviousTurnBeforeNextQuestion(
 					},
 				},
 				map[string]interface{}{
-					"type":      "web_search_call",
-					"status":    "completed",
-					"action":    map[string]interface{}{"query": "Codex official docs"},
-					"call_id":   "call_2",
-					"name":      "web_search_call",
+					"type":    "web_search_call",
+					"status":  "completed",
+					"action":  map[string]interface{}{"query": "Codex official docs"},
+					"call_id": "call_2",
+					"name":    "web_search_call",
 				},
 				map[string]interface{}{
 					"role":  "assistant",
@@ -540,45 +776,29 @@ func TestAIGatewaySyncLatestCurrentHistoryRepairsPreviousTurnBeforeNextQuestion(
 		UpdatedAt: "2026-05-05T01:00:10Z",
 		Models:    []string{"gpt-5.5"},
 	}
-
-	partialRecord := aiGatewayMessageRecord{
-		Q:     "Write ws-demo-sync.js and read it back",
-		A:     "Second thinking.Done.",
-		QTime: "2026-05-05T01:00:00Z",
-		ATime: "2026-05-05T01:00:05Z",
-		Model: "gpt-5.5",
-	}
-	if err := agentHistoryUpsertRecord(agentID, partialCurrent, reply, partialRecord); err != nil {
-		t.Fatalf("seed partial record: %v", err)
-	}
-	if err := aiGatewayWriteJSONAtomic(filepath.Join(aiGatewayHistoryDir(agentID), "current.json"), partialCurrent); err != nil {
+	if err := aiGatewayWriteJSONAtomic(filepath.Join(aiGatewayHistoryDir(agentID), "current.json"), current); err != nil {
 		t.Fatalf("write current: %v", err)
 	}
-	if err := aiGatewayWriteJSONAtomic(filepath.Join(aiGatewayHistoryDir(agentID), "reply.json"), reply); err != nil {
-		t.Fatalf("write reply: %v", err)
-	}
+	aiGatewayStoreLiveReplySnapshot(agentID, reply)
 
-	if err := aiGatewaySyncLatestCurrentHistory(agentID); err != nil {
+	historyID, err := aiGatewaySyncLatestCurrentHistory(agentID)
+	if err != nil {
 		t.Fatalf("sync latest current history: %v", err)
 	}
+	if historyID != 0 {
+		t.Fatalf("expected no history id when current only contains the active turn, got %d", historyID)
+	}
 
-	page, err := agentHistoryLoadPage(agentID, "conv-sync", 10, 0)
+	page, err := agentHistoryLoadPage(agentID, "conv-active-only", 10, 0)
 	if err != nil {
 		t.Fatalf("load page: %v", err)
 	}
-	if len(page.Items) != 1 {
-		t.Fatalf("expected 1 item, got %d", len(page.Items))
-	}
-	if got := page.Items[0]["a"]; got != "Done." {
-		t.Fatalf("expected repaired final answer, got %#v", got)
-	}
-	steps := testStepsSlice(page.Items[0]["steps"])
-	if len(steps) != 5 {
-		t.Fatalf("expected repaired 5-step timeline, got %d", len(steps))
+	if len(page.Items) != 0 {
+		t.Fatalf("expected no persisted item before a new question appears, got %d", len(page.Items))
 	}
 }
 
-func TestAIGatewaySyncLatestCurrentHistoryPersistsMultipleSimpleTurns(t *testing.T) {
+func TestAIGatewaySyncLatestCurrentHistoryPersistsOnlyPreviousTurns(t *testing.T) {
 	withTempCicyRoot(t)
 
 	agentID := "w-10001"
@@ -598,8 +818,8 @@ func TestAIGatewaySyncLatestCurrentHistoryPersistsMultipleSimpleTurns(t *testing
 					},
 				},
 				map[string]interface{}{
-					"role": "assistant",
-					"type": "message",
+					"role":  "assistant",
+					"type":  "message",
 					"phase": "final_answer",
 					"content": []interface{}{
 						map[string]interface{}{"type": "output_text", "text": "alpha"},
@@ -613,8 +833,8 @@ func TestAIGatewaySyncLatestCurrentHistoryPersistsMultipleSimpleTurns(t *testing
 					},
 				},
 				map[string]interface{}{
-					"role": "assistant",
-					"type": "message",
+					"role":  "assistant",
+					"type":  "message",
 					"phase": "final_answer",
 					"content": []interface{}{
 						map[string]interface{}{"type": "output_text", "text": "beta"},
@@ -633,26 +853,224 @@ func TestAIGatewaySyncLatestCurrentHistoryPersistsMultipleSimpleTurns(t *testing
 	if err := aiGatewayWriteJSONAtomic(filepath.Join(aiGatewayHistoryDir(agentID), "current.json"), current); err != nil {
 		t.Fatalf("write current: %v", err)
 	}
-	if err := aiGatewayWriteJSONAtomic(filepath.Join(aiGatewayHistoryDir(agentID), "reply.json"), reply); err != nil {
-		t.Fatalf("write reply: %v", err)
-	}
+	aiGatewayStoreLiveReplySnapshot(agentID, reply)
 
-	if err := aiGatewaySyncLatestCurrentHistory(agentID); err != nil {
+	historyID, err := aiGatewaySyncLatestCurrentHistory(agentID)
+	if err != nil {
 		t.Fatalf("sync current history: %v", err)
+	}
+	if historyID <= 0 {
+		t.Fatalf("expected positive history id from sync because the previous turn should flush, got %d", historyID)
 	}
 
 	page, err := agentHistoryLoadPage(agentID, "conv-sync-simple", 10, 0)
 	if err != nil {
 		t.Fatalf("load page: %v", err)
 	}
-	if len(page.Items) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(page.Items))
+	if len(page.Items) != 1 {
+		t.Fatalf("expected only the previous completed turn to persist, got %d", len(page.Items))
 	}
 	if got := page.Items[0]["a"]; got != "alpha" {
-		t.Fatalf("expected first answer alpha, got %#v", got)
+		t.Fatalf("expected persisted previous answer alpha, got %#v", got)
 	}
-	if got := page.Items[1]["a"]; got != "beta" {
-		t.Fatalf("expected second answer beta, got %#v", got)
+}
+
+func TestAIGatewaySyncLatestCurrentHistoryPersistsOnlyPreviousTurnsForClaude(t *testing.T) {
+	withTempCicyRoot(t)
+
+	agentID := "w-10001"
+	current := aiGatewayCurrentSnapshot{
+		AgentID:        agentID,
+		ConversationID: "conv-sync-claude",
+		Model:          "claude-opus-4-7",
+		Timestamp:      "2026-05-05T01:00:00Z",
+		UpdatedAt:      "2026-05-05T01:00:05Z",
+		Body: map[string]interface{}{
+			"messages": []interface{}{
+				map[string]interface{}{
+					"role": "user",
+					"content": []interface{}{
+						map[string]interface{}{"type": "text", "text": "Reply with exactly one word: alpha"},
+					},
+				},
+				map[string]interface{}{
+					"role": "assistant",
+					"content": []interface{}{
+						map[string]interface{}{"type": "text", "text": "alpha"},
+					},
+				},
+				map[string]interface{}{
+					"role": "user",
+					"content": []interface{}{
+						map[string]interface{}{"type": "text", "text": "Reply with exactly one word: beta"},
+					},
+				},
+				map[string]interface{}{
+					"role": "assistant",
+					"content": []interface{}{
+						map[string]interface{}{"type": "text", "text": "beta"},
+					},
+				},
+			},
+		},
+	}
+	if err := aiGatewayWriteJSONAtomic(filepath.Join(aiGatewayHistoryDir(agentID), "current.json"), current); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+
+	historyID, err := aiGatewaySyncLatestCurrentHistory(agentID)
+	if err != nil {
+		t.Fatalf("sync current history: %v", err)
+	}
+	if historyID <= 0 {
+		t.Fatalf("expected positive history id from sync because the previous Claude turn should flush, got %d", historyID)
+	}
+
+	page, err := agentHistoryLoadPage(agentID, "conv-sync-claude", 10, 0)
+	if err != nil {
+		t.Fatalf("load page: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected only the previous Claude turn to persist, got %d", len(page.Items))
+	}
+	if got := page.Items[0]["a"]; got != "alpha" {
+		t.Fatalf("expected persisted Claude previous answer alpha, got %#v", got)
+	}
+}
+
+func TestAIGatewaySyncLatestCurrentHistorySkipsUserOnlyPendingTurn(t *testing.T) {
+	withTempCicyRoot(t)
+
+	agentID := "w-10001"
+	current := aiGatewayCurrentSnapshot{
+		AgentID:        agentID,
+		ConversationID: "conv-pending-only",
+		Model:          "gpt-5.5",
+		Timestamp:      "2026-05-05T01:00:00Z",
+		UpdatedAt:      "2026-05-05T01:00:01Z",
+		Body: map[string]interface{}{
+			"input": []interface{}{
+				map[string]interface{}{
+					"role": "user",
+					"type": "message",
+					"content": []interface{}{
+						map[string]interface{}{"type": "input_text", "text": "prompt not submitted yet"},
+					},
+				},
+			},
+		},
+	}
+	if err := aiGatewayWriteJSONAtomic(filepath.Join(aiGatewayHistoryDir(agentID), "current.json"), current); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	aiGatewayStoreLiveReplySnapshot(agentID, aiGatewayReplySnapshot{})
+
+	historyID, err := aiGatewaySyncLatestCurrentHistory(agentID)
+	if err != nil {
+		t.Fatalf("sync current history: %v", err)
+	}
+	if historyID != 0 {
+		t.Fatalf("expected no history id for user-only pending turn, got %d", historyID)
+	}
+	page, err := agentHistoryLoadPage(agentID, "conv-pending-only", 10, 0)
+	if err != nil {
+		t.Fatalf("load page: %v", err)
+	}
+	if len(page.Items) != 0 {
+		t.Fatalf("expected no persisted items for user-only pending turn, got %d", len(page.Items))
+	}
+}
+
+func TestAIGatewaySyncLatestCurrentHistoryMergesContinuationGoIntoPreviousTurn(t *testing.T) {
+	withTempCicyRoot(t)
+
+	agentID := "w-10001"
+	current := aiGatewayCurrentSnapshot{
+		AgentID:        agentID,
+		ConversationID: "conv-sync-go",
+		Model:          "gpt-5.5",
+		Timestamp:      "2026-05-05T01:00:00Z",
+		UpdatedAt:      "2026-05-05T01:00:20Z",
+		Body: map[string]interface{}{
+			"input": []interface{}{
+				map[string]interface{}{
+					"role": "user",
+					"type": "message",
+					"content": []interface{}{
+						map[string]interface{}{"type": "input_text", "text": "Write codex-history-e2e.yaml and read it back"},
+					},
+				},
+				map[string]interface{}{
+					"role":  "assistant",
+					"type":  "message",
+					"phase": "final_answer",
+					"content": []interface{}{
+						map[string]interface{}{"type": "output_text", "text": "503 No available accounts"},
+					},
+				},
+				map[string]interface{}{
+					"role": "user",
+					"type": "message",
+					"content": []interface{}{
+						map[string]interface{}{"type": "input_text", "text": "go"},
+					},
+				},
+				map[string]interface{}{
+					"role":  "assistant",
+					"type":  "message",
+					"phase": "commentary",
+					"content": []interface{}{
+						map[string]interface{}{"type": "output_text", "text": "I’m creating the YAML first."},
+					},
+				},
+				map[string]interface{}{
+					"type":    "custom_tool_call",
+					"name":    "apply_patch",
+					"call_id": "call_1",
+					"input":   "*** Begin Patch\n*** Add File: codex-history-e2e.yaml\n+alpha: 1\n+beta: 2\n*** End Patch",
+				},
+				map[string]interface{}{
+					"type":    "custom_tool_call_output",
+					"call_id": "call_1",
+					"output":  "Success",
+				},
+				map[string]interface{}{
+					"role":  "assistant",
+					"type":  "message",
+					"phase": "final_answer",
+					"content": []interface{}{
+						map[string]interface{}{"type": "output_text", "text": "Done."},
+					},
+				},
+			},
+		},
+	}
+	reply := aiGatewayReplySnapshot{
+		TurnID:    "turn-sync-go",
+		Status:    "completed",
+		StartedAt: "2026-05-05T01:00:00Z",
+		UpdatedAt: "2026-05-05T01:00:20Z",
+		Models:    []string{"gpt-5.5"},
+	}
+	if err := aiGatewayWriteJSONAtomic(filepath.Join(aiGatewayHistoryDir(agentID), "current.json"), current); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	aiGatewayStoreLiveReplySnapshot(agentID, reply)
+
+	historyID, err := aiGatewaySyncLatestCurrentHistory(agentID)
+	if err != nil {
+		t.Fatalf("sync current history: %v", err)
+	}
+	if historyID != 0 {
+		t.Fatalf("expected no history id because continuation has not been closed by a new q, got %d", historyID)
+	}
+
+	page, err := agentHistoryLoadPage(agentID, "conv-sync-go", 10, 0)
+	if err != nil {
+		t.Fatalf("load page: %v", err)
+	}
+	if len(page.Items) != 0 {
+		t.Fatalf("expected no persisted item until a subsequent new q closes the continuation turn, got %d", len(page.Items))
 	}
 }
 
@@ -679,7 +1097,7 @@ func TestAgentHistoryUpsertRecordAddsTextStepWhenPersistedItemHasNoSteps(t *test
 		"steps": []M{},
 		"model": record.Model,
 	}
-	if err := agentHistoryUpsertRecordWithItem(agentID, current, reply, record, item); err != nil {
+	if _, err := agentHistoryUpsertRecordWithItem(agentID, current, reply, record, item); err != nil {
 		t.Fatalf("upsert with item: %v", err)
 	}
 
