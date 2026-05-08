@@ -38,8 +38,6 @@ const CURRENT_HISTORY_TOOL_DB_VERSION = 2;
 const CURRENT_HISTORY_TOOL_STORE = 'tool_details';
 const CURRENT_HISTORY_TURN_STORE = 'history_turns';
 const CURRENT_HISTORY_PAGE_SIZE = 5;
-const CURRENT_HISTORY_MIN_QUESTIONS = 2;
-const CURRENT_HISTORY_SCAN_CHUNK = 20;
 const CURRENT_HISTORY_ENABLE_LIVE_WS = false;
 
 function openCurrentHistoryToolDB(): Promise<IDBDatabase | null> {
@@ -738,33 +736,6 @@ function formatToolResult(tool: any) {
   return shortenToolPath(raw);
 }
 
-function realTurnHistoryId(turn: HistoryTurn) {
-  const rawItems = Array.isArray(turn?.raw_items) ? turn.raw_items : [];
-  const firstRaw = rawItems[0];
-  const rawId = Number(firstRaw?.history_id || firstRaw?.id || 0);
-  if (rawId > 0) return rawId;
-  const turnId = Number(turn?.history_id || 0);
-  return turnId > 0 ? turnId : 0;
-}
-
-function qDataId(turn: HistoryTurn) {
-  const rawItems = Array.isArray(turn?.raw_items) ? turn.raw_items : [];
-  const firstRaw = rawItems[0];
-  const rawId = Number(firstRaw?.history_id || firstRaw?.id || 0);
-  if (rawId > 0) return String(rawId);
-  const turnId = realTurnHistoryId(turn);
-  return turnId > 0 ? String(turnId) : 'q';
-}
-
-function stepDataId(turn: HistoryTurn, stepIndex: number) {
-  const rawItems = Array.isArray(turn?.raw_items) ? turn.raw_items : [];
-  const raw = rawItems[stepIndex];
-  const rawId = Number(raw?.history_id || raw?.id || 0);
-  if (rawId > 0) return String(rawId);
-  const turnId = realTurnHistoryId(turn);
-  return turnId > 0 ? String(turnId) : `step-${stepIndex}`;
-}
-
 function buildToolCardId(turnKey: string | number, stepIndex: number, tool: any, toolIndex: number) {
   const name = String(tool?.name || 'tool').trim();
   return `${turnKey}:${stepIndex}:${toolIndex}:${name}`;
@@ -1271,16 +1242,16 @@ export default function CurrentHistoryView({
             const turnKey = turn?.history_id || `${turn?.text || turn?.q || 'turn'}-${index}`;
             const isLatestTurn = index === items.length - 1;
             const steps = getVisibleHistorySteps(turn, isLatestTurn);
+            const itemId = Number(turn?.history_id || 0);
             if (turn?.role === 'user') {
               return (
                 <div
+                  data-id={itemId > 0 ? String(itemId) : undefined}
                   key={turnKey}
                   className="mb-5"
                 >
                   <HistoryTurnIdBadge historyId={turn?.history_id} />
-                  <div data-id={qDataId(turn)}>
-                    <CollapsibleQ text={turn.text || turn.q} />
-                  </div>
+                  <CollapsibleQ text={turn.text || turn.q} />
                 </div>
               );
             }
@@ -1295,6 +1266,7 @@ export default function CurrentHistoryView({
               const fallbackAnswer = String(turn?.a || '').trim();
               return (
                 <div
+                  data-id={itemId > 0 ? String(itemId) : undefined}
                   key={turnKey}
                   className="mb-5"
                 >
@@ -1307,19 +1279,19 @@ export default function CurrentHistoryView({
                     <div className="px-3.5 py-2.5">
                       {steps.map((step: any, stepIndex: number) => {
                         if (step.type === 'thinking') {
-                          return <div key={stepIndex} data-id={stepDataId(turn, stepIndex)}><ThinkingBlock text={step.text} /></div>;
+                          return <div key={stepIndex}><ThinkingBlock text={step.text} /></div>;
                         }
                         if (step.type === 'text') {
-                          return <div key={stepIndex} data-id={stepDataId(turn, stepIndex)} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><Markdown remarkPlugins={[remarkGfm]}>{step.text}</Markdown></div>;
+                          return <div key={stepIndex} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><Markdown remarkPlugins={[remarkGfm]}>{step.text}</Markdown></div>;
                         }
                         const tools = Array.isArray(step.tools) ? step.tools : [];
-                      return <div key={stepIndex} data-id={stepDataId(turn, stepIndex)} className="my-2 space-y-1.5">{tools.map((tool: any, toolIndex: number) => {
+                      return <div key={stepIndex} className="my-2 space-y-1.5">{tools.map((tool: any, toolIndex: number) => {
                           const toolId = buildToolCardId(turnKey, stepIndex, tool, toolIndex);
                           return <ToolCard key={toolId} tool={tool} toolId={toolId} />;
                         })}</div>;
                       })}
                       {!hasRenderableAssistantStep && fallbackAnswer ? (
-                        <div data-id={stepDataId(turn, steps.length)} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300">
+                        <div className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300">
                           <Markdown remarkPlugins={[remarkGfm]}>{fallbackAnswer}</Markdown>
                         </div>
                       ) : null}
@@ -1329,55 +1301,7 @@ export default function CurrentHistoryView({
                 </div>
               );
             }
-            const hasRenderableDefaultStep = steps.some((step: any) => {
-              if (step?.type === 'thinking' && String(step?.text || '').trim()) return true;
-              if (step?.type === 'text' && String(step?.text || '').trim()) return true;
-              if (step?.type === 'tool' && Array.isArray(step?.tools) && step.tools.length > 0) return true;
-              return false;
-            });
-            const showThinkingPlaceholder = isLatestTurn && String(turn?.status || '').trim() === 'thinking' && !String(turn?.a || '').trim() && !steps.length;
-            const fallbackAnswer = String(turn?.a || '').trim();
-            const showAiCard = hasRenderableDefaultStep || !!fallbackAnswer || showThinkingPlaceholder;
-            return (
-              <div
-                key={turnKey}
-                className="mb-5"
-              >
-                <HistoryTurnIdBadge historyId={turn?.history_id} />
-                <div data-id={qDataId(turn)}>
-                  <CollapsibleQ text={turn.q} />
-                </div>
-                {showAiCard ? (
-                <div className="overflow-hidden rounded-xl border border-white/[0.055] bg-white/[0.018]">
-                  <div className="flex flex-wrap items-center gap-1.5 border-b border-white/[0.035] bg-black/[0.10] px-3.5 py-1.5">
-                    <span className="text-sm font-medium text-sky-300/70">✦ AI</span>
-                    {turn?.model ? <span className="rounded border border-white/[0.04] bg-white/[0.025] px-1.5 py-0.5 font-mono text-xs text-zinc-500">{turn.model}</span> : null}
-                  </div>
-                  <div className="px-3.5 py-2.5">
-                    {steps.map((step: any, stepIndex: number) => {
-                      if (step.type === 'thinking') {
-                        return <div key={stepIndex} data-id={stepDataId(turn, stepIndex)}><ThinkingBlock text={step.text} /></div>;
-                      }
-                      if (step.type === 'text') {
-                        return <div key={stepIndex} data-id={stepDataId(turn, stepIndex)} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><Markdown remarkPlugins={[remarkGfm]}>{step.text}</Markdown></div>;
-                      }
-                      const tools = Array.isArray(step.tools) ? step.tools : [];
-                      return <div key={stepIndex} data-id={stepDataId(turn, stepIndex)} className="my-2 space-y-1.5">{tools.map((tool: any, toolIndex: number) => {
-                        const toolId = buildToolCardId(turnKey, stepIndex, tool, toolIndex);
-                        return <ToolCard key={toolId} tool={tool} toolId={toolId} />;
-                      })}</div>;
-                    })}
-                      {!hasRenderableDefaultStep && fallbackAnswer ? (
-                      <div data-id={stepDataId(turn, steps.length)} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300">
-                        <Markdown remarkPlugins={[remarkGfm]}>{fallbackAnswer}</Markdown>
-                      </div>
-                    ) : null}
-                    {!hasRenderableDefaultStep && !fallbackAnswer && showThinkingPlaceholder ? <PendingThinkingPlaceholder /> : null}
-                  </div>
-                </div>
-                ) : null}
-              </div>
-            );
+            return null;
           })}
           <div data-id="current-history-anchor-spacer" ref={anchorSpacerRef} aria-hidden="true" style={{ height: `${anchorSpacerHeight}px` }} />
           </>}

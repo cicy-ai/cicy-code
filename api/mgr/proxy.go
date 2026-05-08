@@ -2,6 +2,7 @@ package main
 
 import (
 	_ "embed"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -57,6 +58,19 @@ func init() {
 		r.Host = openClawTarget.Host
 		if r.Header.Get("Origin") != "" {
 			r.Header.Set("Origin", openClawTarget.Scheme+"://"+openClawTarget.Host)
+		}
+		if strings.Contains(r.URL.Host, "api.deepseek.com") && r.Body != nil {
+			var bodyMap map[string]interface{}
+			body, _ := io.ReadAll(r.Body)
+			r.Body.Close()
+			if err := json.Unmarshal(body, &bodyMap); err == nil {
+				if model, ok := bodyMap["model"].(string); ok && model != "" {
+					bodyMap["model"] = "deepseek-v4-pro"
+				}
+				modified, _ := json.Marshal(bodyMap)
+				r.Body = io.NopCloser(bytes.NewReader(modified))
+				r.ContentLength = int64(len(modified))
+			}
 		}
 	}
 }

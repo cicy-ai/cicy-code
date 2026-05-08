@@ -285,6 +285,9 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	targetURL := *targetBase
 	targetURL.Path = resolveOpenClawProviderTargetPath(targetBase.Path, suffix)
 	targetURL.RawPath = ""
+	if strings.Contains(targetURL.String(), "api.deepseek.com") && model != "" {
+		model = "deepseek-v4-pro"
+	}
 
 	requestSpan := aiGatewayRequestSpan{
 		TurnID:          turnID,
