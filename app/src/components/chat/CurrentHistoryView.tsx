@@ -38,7 +38,7 @@ const CURRENT_HISTORY_TOOL_DB_VERSION = 2;
 const CURRENT_HISTORY_TOOL_STORE = 'tool_details';
 const CURRENT_HISTORY_TURN_STORE = 'history_turns';
 const CURRENT_HISTORY_PAGE_SIZE = 5;
-const CURRENT_HISTORY_ENABLE_LIVE_WS = false;
+const CURRENT_HISTORY_ENABLE_LIVE_WS = true;
 
 function openCurrentHistoryToolDB(): Promise<IDBDatabase | null> {
   if (typeof window === 'undefined' || !window.indexedDB) {
@@ -242,17 +242,76 @@ async function loadRawItemsByCount(
   const upper = beforeExclusive && beforeExclusive > 0 ? beforeExclusive - 1 : upperBoundId;
   if (upper <= 0) return [] as RawHistoryItem[];
   const rawItems: RawHistoryItem[] = [];
-  for (let id = upper; id >= 1 && rawItems.length < count; id -= 1) {
+  let cardCount = 0;
+  for (let id = upper; id >= 1 && cardCount < count; id -= 1) {
     const item = await getCurrentHistoryTurnByID(paneId, conversationId, id);
     if (!item) continue;
+    const role = String(item?.role || '').trim();
+    const isToolResult = role === 'user' && Array.isArray(item?.content) && item.content.some((p: any) => String(p?.type || '').trim() === 'tool_result' || String(p?.type || '').trim() === 'function_call_output');
+    if (isToolResult) {
+      rawItems.unshift(item);
+      continue;
+    }
     rawItems.unshift(item);
+    cardCount += 1;
   }
   return rawItems;
 }
 
 function buildTurnsFromRawItems(rawItems: RawHistoryItem[]): HistoryTurn[] {
-  return rawItems
-    .map((item) => normalizeRawHistoryItem(item))
+  const toolNameByCallId = new Map<string, string>();
+  for (const raw of rawItems) {
+    const item = raw || {};
+    if (Array.isArray(item.content)) {
+      for (const part of item.content as any[]) {
+        if (String(part?.type || '').trim() === 'tool_use' && String(part?.name || '').trim()) {
+          const callId = String(part?.id || part?.call_id || '').trim();
+          if (callId) toolNameByCallId.set(callId, String(part.name).trim());
+        }
+      }
+    }
+    if (String(item?.type || '').trim() === 'custom_tool_call' && String(item?.name || '').trim()) {
+      const callId = String(item?.call_id || item?.id || '').trim();
+      if (callId) toolNameByCallId.set(callId, String(item.name).trim());
+    }
+  }
+  const merged: RawHistoryItem[] = [];
+  for (let i = 0; i < rawItems.length; i += 1) {
+    const current = rawItems[i] || {};
+    if (i + 1 < rawItems.length) {
+      const next = rawItems[i + 1] || {};
+      const currentRole = String(current?.role || '').trim();
+      const nextRole = String(next?.role || '').trim();
+      if (currentRole === 'assistant' && nextRole === 'user') {
+        const currentContent = Array.isArray(current?.content) ? current.content : [];
+        const nextContent = Array.isArray(next?.content) ? next.content : [];
+        const currentToolUse = currentContent.find((p: any) => String(p?.type || '').trim() === 'tool_use');
+        const nextToolResult = nextContent.find((p: any) => String(p?.type || '').trim() === 'tool_result' || String(p?.type || '').trim() === 'function_call_output');
+        const callId = String(currentToolUse?.id || '').trim();
+        if (callId && callId === String(nextToolResult?.tool_use_id || nextToolResult?.tool_id || '').trim()) {
+          const item = JSON.parse(JSON.stringify(current));
+          const itemContent = Array.isArray(item?.content) ? item.content : [];
+          for (let j = 0; j < itemContent.length; j += 1) {
+            if (String(itemContent[j]?.type || '').trim() === 'tool_use' && String(itemContent[j]?.id || '').trim() === callId) {
+              const result = typeof nextToolResult?.content === 'string' ? nextToolResult.content : (nextToolResult?.content ? JSON.stringify(nextToolResult.content) : '');
+              if (result) {
+                itemContent[j] = { ...itemContent[j], _tool_result: result };
+              }
+              break;
+            }
+          }
+          item.content = itemContent;
+          item._has_tool_result = true;
+          merged.push(item);
+          i += 1;
+          continue;
+        }
+      }
+    }
+    merged.push(current);
+  }
+  return merged
+    .map((raw) => normalizeRawHistoryItem(raw, toolNameByCallId))
     .filter(Boolean) as HistoryTurn[];
 }
 
@@ -325,7 +384,7 @@ function extractContentText(content: any): string {
   return String(content || '').trim();
 }
 
-function normalizeRawHistoryItem(raw: any): HistoryTurn | null {
+function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string, string>): HistoryTurn | null {
   if (!raw || typeof raw !== 'object') return null;
   const item = raw as RawHistoryItem;
   const historyId = Number(item.history_id || item.id || 0);
@@ -336,18 +395,56 @@ function normalizeRawHistoryItem(raw: any): HistoryTurn | null {
   const status = String(item.status || '').trim() || 'text';
   if (role === 'user') {
     const question = extractContentText(item.content) || String(item.text || item.q || '').trim();
-    if (!question) return null;
-    return {
-      history_id: historyId || undefined,
-      conversation_id: conversationId,
-      role: 'user',
-      q: question,
-      text: question,
-      a: '',
-      steps: [],
-      status,
-      model,
-    };
+
+    if (question) {
+      return {
+        history_id: historyId || undefined,
+        conversation_id: conversationId,
+        role: 'user',
+        q: question,
+        text: question,
+        a: '',
+        steps: [],
+        status,
+        model,
+      };
+    }
+    const toolSteps: any[] = [];
+    if (Array.isArray(item.content)) {
+      for (const part of item.content as any[]) {
+        const pt = String(part?.type || '').trim();
+        if (pt === 'tool_result' || pt === 'function_call_output') {
+          const callId = String(part?.tool_use_id || part?.tool_id || '').trim();
+          let name = String(part?.name || part?.tool_name || '').trim();
+          if (!name && callId && toolNameByCallId?.has(callId)) {
+            name = toolNameByCallId.get(callId) || 'tool_result';
+          }
+          if (!name) name = 'tool_result';
+          toolSteps.push({
+            type: 'tool',
+            tools: [{
+              name,
+              arg: '',
+              result: typeof part.content === 'string' ? part.content.trim() : (part.content ? JSON.stringify(part.content).trim() : ''),
+            }],
+          });
+        }
+      }
+    }
+    if (toolSteps.length) {
+      return {
+        history_id: historyId || undefined,
+        conversation_id: conversationId,
+        role: 'assistant',
+        q: '',
+        text: '',
+        a: '',
+        steps: toolSteps,
+        status,
+        model,
+      };
+    }
+    return null;
   }
   const steps: NonNullable<HistoryTurn['steps']> = [];
   const assistantText = extractContentText(item.content);
@@ -373,6 +470,38 @@ function normalizeRawHistoryItem(raw: any): HistoryTurn | null {
         result: String(item.output || item.result || '').trim(),
       }],
     });
+  }
+  if (itemType !== 'custom_tool_call' && itemType !== 'custom_tool_call_output' && Array.isArray(item.content)) {
+    for (const part of item.content as any[]) {
+      const pt = String(part?.type || '').trim();
+      if (pt === 'tool_use') {
+        const toolResult = String(part?._tool_result || '').trim();
+        steps.push({
+          type: 'tool',
+          tools: [{
+            name: String(part.name || 'tool'),
+            arg: typeof part.input === 'string' ? part.input.trim() : (part.input ? JSON.stringify(part.input).trim() : ''),
+            result: toolResult,
+          }],
+        });
+      }
+      if (pt === 'tool_result' || pt === 'function_call_output') {
+        const callId = String(part?.tool_use_id || part?.tool_id || '').trim();
+        let name = String(part?.name || part?.tool_name || '').trim();
+        if (!name && callId && toolNameByCallId?.has(callId)) {
+          name = toolNameByCallId.get(callId) || 'tool';
+        }
+        if (!name) name = 'tool_result';
+        steps.push({
+          type: 'tool',
+          tools: [{
+            name,
+            arg: '',
+            result: typeof part.content === 'string' ? part.content.trim() : (part.content ? JSON.stringify(part.content).trim() : ''),
+          }],
+        });
+      }
+    }
   }
   if (!steps.length) return null;
   const answer = steps
@@ -605,6 +734,28 @@ function EnvironmentContextCard({ context }: { context: EnvironmentContextData }
 
 function CollapsibleQ({ text }: { text: string }) {
   const environmentContext = parseEnvironmentContext(text);
+  let remaining = text;
+  const xmlBlocks: string[] = [];
+  while (/^<[\w-]+>[\s\S]*?<\/[\w-]+>/.test(remaining)) {
+    const match = remaining.match(/^<[\w-]+>[\s\S]*?<\/[\w-]+>/);
+    if (!match) break;
+    xmlBlocks.push(match[0]);
+    remaining = remaining.slice(match[0].length).trim();
+  }
+  if (xmlBlocks.length) {
+    return (
+      <div className="mb-2.5 flex justify-end">
+        <div className="max-w-[95%] flex flex-col gap-2">
+          <pre className="overflow-x-auto rounded-lg border border-sky-300/[0.12] bg-black/[0.25] px-3 py-2 font-mono text-xs leading-relaxed text-sky-100/70 whitespace-pre-wrap">{xmlBlocks.join('\n')}</pre>
+          {remaining ? (
+            <div className="overflow-hidden rounded-2xl rounded-br-sm border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
+              <Markdown remarkPlugins={[remarkGfm]}>{remaining}</Markdown>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="mb-2.5 flex justify-end">
       {environmentContext ? (
@@ -1034,7 +1185,8 @@ export default function CurrentHistoryView({
   useEffect(() => {
     if (!CURRENT_HISTORY_ENABLE_LIVE_WS) return;
     if (!open || !paneId) return;
-    const unsubscribe = subscribeChatWs((msg) => {
+    const unsubscribe = subscribeChatWs(async (msg) => {
+      try {
       const type = String(msg?.type || '').trim();
       if (type !== 'current_updated' && type !== 'status_change' && type !== 'ai_chunk') return;
       const data = (msg?.data || {}) as any;
@@ -1051,6 +1203,10 @@ export default function CurrentHistoryView({
       if (eventKey && eventKey === lastUpdateEventKeyRef.current) return;
       lastUpdateEventKeyRef.current = eventKey;
       if (type === 'current_updated') {
+        if (historyID !== lastAnchoredHistoryIDRef.current) {
+          pendingAnchorTurnKeyRef.current = String(historyID);
+          lastAnchoredHistoryIDRef.current = historyID;
+        }
         setItems((prev) => {
           const next = ensureLatestStreamingTurn(prev, {
             historyId: historyID,
@@ -1058,12 +1214,12 @@ export default function CurrentHistoryView({
             status: String(data?.status || 'thinking').trim() || 'thinking',
             question: String(data?.question || '').trim(),
           });
-          if (historyID !== lastAnchoredHistoryIDRef.current) {
-            pendingAnchorTurnKeyRef.current = String(historyID);
-            lastAnchoredHistoryIDRef.current = historyID;
-          }
           return next;
         });
+        const rawItem = await getCurrentHistoryTurnByID(paneId, eventConversationId, historyID);
+        if (rawItem) {
+          await setCurrentHistoryTurnsToIndexedDB(paneId, eventConversationId, [rawItem]);
+        }
         return;
       }
       if (type === 'status_change') {
@@ -1086,6 +1242,7 @@ export default function CurrentHistoryView({
           delta,
         }));
       }
+      } catch {}
     });
     return () => {
       unsubscribe();
@@ -1250,7 +1407,6 @@ export default function CurrentHistoryView({
                   key={turnKey}
                   className="mb-5"
                 >
-                  <HistoryTurnIdBadge historyId={turn?.history_id} />
                   <CollapsibleQ text={turn.text || turn.q} />
                 </div>
               );
@@ -1270,33 +1426,26 @@ export default function CurrentHistoryView({
                   key={turnKey}
                   className="mb-5"
                 >
-                  <HistoryTurnIdBadge historyId={turn?.history_id} />
-                  <div className="overflow-hidden rounded-xl border border-white/[0.055] bg-white/[0.018]">
-                    <div className="flex flex-wrap items-center gap-1.5 border-b border-white/[0.035] bg-black/[0.10] px-3.5 py-1.5">
-                      <span className="text-sm font-medium text-sky-300/70">✦ AI</span>
-                      {turn?.model ? <span className="rounded border border-white/[0.04] bg-white/[0.025] px-1.5 py-0.5 font-mono text-xs text-zinc-500">{turn.model}</span> : null}
-                    </div>
-                    <div className="px-3.5 py-2.5">
-                      {steps.map((step: any, stepIndex: number) => {
-                        if (step.type === 'thinking') {
-                          return <div key={stepIndex}><ThinkingBlock text={step.text} /></div>;
-                        }
-                        if (step.type === 'text') {
-                          return <div key={stepIndex} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><Markdown remarkPlugins={[remarkGfm]}>{step.text}</Markdown></div>;
-                        }
-                        const tools = Array.isArray(step.tools) ? step.tools : [];
-                      return <div key={stepIndex} className="my-2 space-y-1.5">{tools.map((tool: any, toolIndex: number) => {
-                          const toolId = buildToolCardId(turnKey, stepIndex, tool, toolIndex);
-                          return <ToolCard key={toolId} tool={tool} toolId={toolId} />;
-                        })}</div>;
-                      })}
-                      {!hasRenderableAssistantStep && fallbackAnswer ? (
-                        <div className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300">
-                          <Markdown remarkPlugins={[remarkGfm]}>{fallbackAnswer}</Markdown>
-                        </div>
-                      ) : null}
-                      {!hasRenderableAssistantStep && !fallbackAnswer && showThinkingPlaceholder ? <PendingThinkingPlaceholder /> : null}
-                    </div>
+                  <div>
+                    {steps.map((step: any, stepIndex: number) => {
+                      if (step.type === 'thinking') {
+                        return <div key={stepIndex}><ThinkingBlock text={step.text} /></div>;
+                      }
+                      if (step.type === 'text') {
+                        return <div key={stepIndex} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><Markdown remarkPlugins={[remarkGfm]}>{step.text}</Markdown></div>;
+                      }
+                      const tools = Array.isArray(step.tools) ? step.tools : [];
+                    return <div key={stepIndex} className="my-2 space-y-1.5">{tools.map((tool: any, toolIndex: number) => {
+                        const toolId = buildToolCardId(turnKey, stepIndex, tool, toolIndex);
+                        return <ToolCard key={toolId} tool={tool} toolId={toolId} />;
+                      })}</div>;
+                    })}
+                    {!hasRenderableAssistantStep && fallbackAnswer ? (
+                      <div className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300">
+                        <Markdown remarkPlugins={[remarkGfm]}>{fallbackAnswer}</Markdown>
+                      </div>
+                    ) : null}
+                    {!hasRenderableAssistantStep && !fallbackAnswer && showThinkingPlaceholder ? <PendingThinkingPlaceholder /> : null}
                   </div>
                 </div>
               );
