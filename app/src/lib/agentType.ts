@@ -1,6 +1,6 @@
 import { assetUrl } from './assets'
 
-export type NormalizedAgentType = '' | 'claude' | 'codex' | 'opencode' | 'kiro-cli' | 'copilot' | 'cicy-wechat' | 'cicy-feishu' | 'openclaw' | 'hermes' | 'cicy-claude'
+export type NormalizedAgentType = '' | 'claude' | 'codex' | 'opencode' | 'cursor' | 'kiro-cli' | 'copilot' | 'cicy-wechat' | 'cicy-feishu' | 'openclaw' | 'hermes' | 'cicy-claude'
 
 export type AgentTypeOption = {
   value: string
@@ -18,6 +18,7 @@ export const AGENT_TYPE_OPTIONS: AgentTypeOption[] = [
   { value: 'claude', label: 'Claude', description: '偏稳健，适合分析与写作' },
   { value: 'codex', label: 'Codex', description: '代码执行和自动修改更强' },
   { value: 'opencode', label: 'OpenCode', description: '终端式编码体验，更轻量' },
+  { value: 'cursor', label: 'Cursor', description: '适合 Cursor Agent 工作流' },
   { value: 'kiro-cli', label: 'Kiro CLI', description: '适合任务推进与工具流' },
   { value: 'copilot', label: 'Copilot', description: '偏 GitHub 工作流与补全' },
   { value: 'cicy-wechat', label: 'WeChat', description: '适合微信通道与消息协同' },
@@ -31,6 +32,7 @@ const AGENT_TYPE_ICON_MAP: Record<Exclude<NormalizedAgentType, ''>, AgentTypeIco
   claude: { label: 'Claude', src: assetUrl('/assets/logos/claude-symbol.svg') },
   codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg') },
   opencode: { label: 'OpenCode', src: assetUrl('/assets/logos/opencode.svg') },
+  cursor: { label: 'Cursor', src: assetUrl('/assets/logos/cursor.svg') },
   'kiro-cli': { label: 'Kiro', src: assetUrl('/assets/logos/kiro.png') },
   copilot: { label: 'Copilot', src: assetUrl('/assets/logos/copilot.svg') },
   'cicy-wechat': { label: 'WeChat', text: '微' },
@@ -48,6 +50,10 @@ export function normalizeAgentType(agentType?: string): NormalizedAgentType {
     case 'codex':
     case 'openai':
       return 'codex'
+    case 'cursor':
+    case 'cursor-agent':
+    case 'cursor agent':
+      return 'cursor'
     case 'kiro-cli':
     case 'kiro':
     case 'kiro-cli chat':

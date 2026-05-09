@@ -26,25 +26,38 @@ type chatClient struct {
 	send        chan []byte
 	agentID     string
 	clientID    string
+	activeAgent string
 	electron    bool
+	platform    string
+	arch        string
 	connectedAt time.Time
 	remoteAddr  string
 	closeOnce   sync.Once
 }
 
 type chatHub struct {
-	mu                  sync.RWMutex
-	clients             map[string]map[string]*chatClient // master_agent_id -> client_id -> client
-	waiters             map[string]chan ChatEvent
-	agentClients        map[string]map[string]struct{}    // agent_id -> client_id set
-	clientActiveAgents  map[string]map[string]struct{}    // client_id -> agent_id set
+	mu           sync.RWMutex
+	clients      map[string]map[string]*chatClient // master_agent_id -> client_id -> client
+	waiters      map[string]chan ChatEvent
+	agentClients map[string]map[string]struct{} // agent_id -> client_id set
 }
 
 var hub = &chatHub{
-	clients:            make(map[string]map[string]*chatClient),
-	waiters:            make(map[string]chan ChatEvent),
-	agentClients:       make(map[string]map[string]struct{}),
-	clientActiveAgents: make(map[string]map[string]struct{}),
+	clients:      make(map[string]map[string]*chatClient),
+	waiters:      make(map[string]chan ChatEvent),
+	agentClients: make(map[string]map[string]struct{}),
+}
+
+func (h *chatHub) ensureMapsLocked() {
+	if h.clients == nil {
+		h.clients = make(map[string]map[string]*chatClient)
+	}
+	if h.waiters == nil {
+		h.waiters = make(map[string]chan ChatEvent)
+	}
+	if h.agentClients == nil {
+		h.agentClients = make(map[string]map[string]struct{})
+	}
 }
 
 func (c *chatClient) close() {
@@ -58,25 +71,28 @@ func (h *chatHub) stats() interface{} {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	type clientInfo struct {
-		ClientID    string `json:"client_id"`
-		Electron    bool   `json:"electron"`
-		RemoteAddr  string `json:"remote_addr"`
-		ConnectedAt string `json:"connected_at"`
-		UptimeSec   int    `json:"uptime_sec"`
+		MasterAgentID string `json:"master_agent_id"`
+		ActiveAgentID string `json:"active_agent_id"`
+		ClientID      string `json:"client_id"`
+		IsElectron    bool   `json:"isElectron"`
+		Platform      string `json:"platform"`
+		RemoteAddr    string `json:"remote_addr"`
+		ConnectedAt   string `json:"connected_at"`
+		UptimeSec     int    `json:"uptime_sec"`
 	}
-	out := map[string]map[string]clientInfo{}
+	out := make([]clientInfo, 0)
 	for agentID, m := range h.clients {
-		if out[agentID] == nil {
-			out[agentID] = make(map[string]clientInfo)
-		}
 		for clientID, c := range m {
-			out[agentID][clientID] = clientInfo{
-				ClientID:    clientID,
-				Electron:    c.electron,
-				RemoteAddr:  c.remoteAddr,
-				ConnectedAt: c.connectedAt.Format(time.RFC3339),
-				UptimeSec:   int(time.Since(c.connectedAt).Seconds()),
-			}
+			out = append(out, clientInfo{
+				MasterAgentID: agentID,
+				ActiveAgentID: c.activeAgent,
+				ClientID:      clientID,
+				IsElectron:    c.electron,
+				Platform:      c.platform,
+				RemoteAddr:    c.remoteAddr,
+				ConnectedAt:   c.connectedAt.Format(time.RFC3339),
+				UptimeSec:     int(time.Since(c.connectedAt).Seconds()),
+			})
 		}
 	}
 	return out
@@ -97,6 +113,7 @@ func (h *chatHub) lookupClientLocked(clientID string) *chatClient {
 
 func (h *chatHub) register(c *chatClient) {
 	h.mu.Lock()
+	h.ensureMapsLocked()
 	var replaced *chatClient
 	if h.clients[c.agentID] == nil {
 		h.clients[c.agentID] = make(map[string]*chatClient)
@@ -115,6 +132,7 @@ func (h *chatHub) register(c *chatClient) {
 
 func (h *chatHub) unregister(c *chatClient) {
 	h.mu.Lock()
+	h.ensureMapsLocked()
 	if m, ok := h.clients[c.agentID]; ok {
 		if current, ok := m[c.clientID]; ok && current == c {
 			delete(m, c.clientID)
@@ -123,16 +141,14 @@ func (h *chatHub) unregister(c *chatClient) {
 			delete(h.clients, c.agentID)
 		}
 	}
-	if agents := h.clientActiveAgents[c.clientID]; agents != nil {
-		for agentID := range agents {
-			if clients := h.agentClients[agentID]; clients != nil {
-				delete(clients, c.clientID)
-				if len(clients) == 0 {
-					delete(h.agentClients, agentID)
-				}
-			}
+	for agentID, clients := range h.agentClients {
+		if clients == nil {
+			continue
 		}
-		delete(h.clientActiveAgents, c.clientID)
+		delete(clients, c.clientID)
+		if len(clients) == 0 {
+			delete(h.agentClients, agentID)
+		}
 	}
 	h.mu.Unlock()
 	c.close()
@@ -215,16 +231,90 @@ func (h *chatHub) registerClientAgent(clientID, agentID string) {
 		return
 	}
 	h.mu.Lock()
+	h.ensureMapsLocked()
 	defer h.mu.Unlock()
+	for existingAgentID, clients := range h.agentClients {
+		if clients == nil {
+			continue
+		}
+		delete(clients, clientID)
+		if len(clients) == 0 {
+			delete(h.agentClients, existingAgentID)
+		}
+	}
 	if h.agentClients[agentID] == nil {
 		h.agentClients[agentID] = make(map[string]struct{})
 	}
 	h.agentClients[agentID][clientID] = struct{}{}
-	if h.clientActiveAgents[clientID] == nil {
-		h.clientActiveAgents[clientID] = make(map[string]struct{})
+	if c := h.lookupClientLocked(clientID); c != nil {
+		c.activeAgent = agentID
 	}
-	h.clientActiveAgents[clientID][agentID] = struct{}{}
 	log.Printf("[chat-ws] register agent client agent_id=%s client_id=%s", agentID, clientID)
+}
+
+func normalizeChatClientPlatform(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "win", "windows":
+		return "win"
+	case "darwin", "mac", "macos", "osx":
+		return "darwin"
+	case "linux":
+		return "linux"
+	default:
+		return ""
+	}
+}
+
+func normalizeChatClientArch(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "x64", "amd64", "x86_64", "x86-64", "win64":
+		return "x64"
+	case "arm64", "aarch64":
+		return "arm64"
+	case "arm":
+		return "arm"
+	case "x86", "i386", "i686":
+		return "x86"
+	default:
+		return ""
+	}
+}
+
+func parseChatClientElectronValue(value interface{}) (bool, bool) {
+	switch v := value.(type) {
+	case bool:
+		return v, true
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "1", "true", "yes", "y", "on":
+			return true, true
+		case "0", "false", "no", "n", "off":
+			return false, true
+		}
+	}
+	return false, false
+}
+
+func (h *chatHub) updateClientMetadata(clientID string, platform string, arch string, electron *bool) {
+	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	c := h.lookupClientLocked(clientID)
+	if c == nil {
+		return
+	}
+	if normalized := normalizeChatClientPlatform(platform); normalized != "" {
+		c.platform = normalized
+	}
+	if normalized := normalizeChatClientArch(arch); normalized != "" {
+		c.arch = normalized
+	}
+	if electron != nil {
+		c.electron = *electron
+	}
 }
 
 func (h *chatHub) publishAgent(agentID string, evt ChatEvent) {
@@ -364,6 +454,15 @@ func (c *chatClient) readPump() {
 		if evt.Type == "register_active_channel" {
 			data := aiGatewayMap(evt.Data)
 			agentID := normalizeChatAgentValue(aiGatewayFirstNonEmpty(aiGatewayString(data["agent_id"]), aiGatewayString(data["pane_id"])))
+			platform := aiGatewayFirstNonEmpty(aiGatewayString(data["platform"]), aiGatewayString(data["os"]))
+			arch := aiGatewayString(data["arch"])
+			var electronPtr *bool
+			if value, ok := parseChatClientElectronValue(data["isElectron"]); ok {
+				electronPtr = &value
+			} else if value, ok := parseChatClientElectronValue(data["electron"]); ok {
+				electronPtr = &value
+			}
+			hub.updateClientMetadata(c.clientID, platform, arch, electronPtr)
 			if agentID != "" {
 				hub.registerClientAgent(c.clientID, agentID)
 			}
@@ -487,7 +586,18 @@ func handleChatWS(w http.ResponseWriter, r *http.Request) {
 	if remoteAddr == "" {
 		remoteAddr = r.RemoteAddr
 	}
-	c := &chatClient{conn: conn, send: make(chan []byte, 64), agentID: agentID, clientID: clientID, electron: r.URL.Query().Get("electron") == "1", connectedAt: time.Now(), remoteAddr: remoteAddr}
+	isElectron := r.URL.Query().Get("electron") == "1"
+	c := &chatClient{
+		conn:        conn,
+		send:        make(chan []byte, 64),
+		agentID:     agentID,
+		clientID:    clientID,
+		electron:    isElectron,
+		platform:    normalizeChatClientPlatform(r.URL.Query().Get("platform")),
+		arch:        normalizeChatClientArch(r.URL.Query().Get("arch")),
+		connectedAt: time.Now(),
+		remoteAddr:  remoteAddr,
+	}
 	hub.register(c)
 	go c.writePump()
 	c.readPump()
@@ -542,6 +652,60 @@ func handleChatPingClient(w http.ResponseWriter, r *http.Request) {
 	case <-time.After(time.Duration(timeoutMS) * time.Millisecond):
 		hub.cancelWaiter(requestID)
 		http.Error(w, "ping timeout", 504)
+	}
+}
+
+func handleChatExecJS(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req struct {
+		ClientID string `json:"client_id"`
+		Code     string `json:"code"`
+		Timeout  int    `json:"timeout_ms"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", 400)
+		return
+	}
+	clientID := strings.TrimSpace(req.ClientID)
+	if clientID == "" {
+		http.Error(w, "client_id required", 400)
+		return
+	}
+	code := req.Code
+	if strings.TrimSpace(code) == "" {
+		http.Error(w, "code required", 400)
+		return
+	}
+	timeoutMS := req.Timeout
+	if timeoutMS <= 0 {
+		timeoutMS = 5000
+	}
+	requestID := "exec-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	ch := hub.registerWaiter(requestID)
+	if !hub.sendToClient(clientID, ChatEvent{Type: "exec_js", Data: M{"requestId": requestID, "code": code}}) {
+		hub.cancelWaiter(requestID)
+		http.Error(w, "client not found", 404)
+		return
+	}
+	select {
+	case evt, ok := <-ch:
+		if !ok {
+			http.Error(w, "waiter canceled", 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"mode":    "direct",
+			"type":    evt.Type,
+			"data":    evt.Data,
+		})
+	case <-time.After(time.Duration(timeoutMS) * time.Millisecond):
+		hub.cancelWaiter(requestID)
+		http.Error(w, "exec_js timeout", 504)
 	}
 }
 

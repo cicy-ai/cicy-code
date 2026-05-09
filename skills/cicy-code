@@ -271,7 +271,7 @@ case "$cmd" in
     ;;
   send-wait)
     require_tmux_support
-    post /api/tmux/send_wait "{\"pane_id\":\"${1:?pane_id required}\",\"text\":\"${2:?text required}\",\"timeout\":${3:-60},\"prompt_type\":\"${4:-bash}\"}"
+    post /api/tmux/send "{\"pane_id\":\"${1:?pane_id required}\",\"text\":\"${2:?text required}\",\"prompt_type\":\"${4:-bash}\"}"
     ;;
   capture)
     require_tmux_support

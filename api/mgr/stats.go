@@ -436,7 +436,7 @@ func paneWorkspace(pane string) string {
 		return ""
 	}
 	home, _ := os.UserHomeDir()
-	return runtimePathToHostPath(os.ExpandEnv(strings.Replace(ws, "~", home, 1)))
+	return normalizeLegacyWorkspacePath(os.ExpandEnv(strings.Replace(ws, "~", home, 1)))
 }
 
 func sanitizeAssetFileName(name string) string {

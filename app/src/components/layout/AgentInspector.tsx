@@ -8,6 +8,7 @@ import { TokenManager } from '../../services/tokenManager';
 import { useApp } from '../../contexts/AppContext';
 import type { EditPaneData } from '../EditPaneDialog';
 import AgentTypeSelector from '../AgentTypeSelector';
+import Select from '../ui/Select';
 
 export type InspectorTab = 'overview' | 'memory' | 'settings';
 type InspectorRequestedTab = InspectorTab | 'notes' | 'history';
@@ -35,6 +36,7 @@ const tabs: Array<{ id: InspectorTab; label: string }> = [
 const settingsSections = [
   { id: 'general', label: '常规', icon: Settings },
   { id: 'agent', label: '智能体', icon: Zap },
+  { id: 'model', label: '模型', icon: Brain },
   { id: 'telegram', label: 'Telegram', icon: Send },
 ] as const;
 
@@ -67,6 +69,45 @@ function compactText(value?: string, fallback = '暂无', limit?: number) {
 
 function serializeSettingsData(value: EditPaneData | null) {
   return JSON.stringify(value || null);
+}
+
+function parseRuntimeAIConfig(configJSON?: string) {
+  const fallback = { provider_name: '', provider_protocol: '', model: '' };
+  const raw = String(configJSON || '').trim();
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    const runtimeAI = parsed?.runtime_ai || {};
+    return {
+      provider_name: String(runtimeAI.provider_name || ''),
+      provider_protocol: String(runtimeAI.provider_protocol || ''),
+      model: String(runtimeAI.model || ''),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function mergeRuntimeAIConfig(configJSON: string | undefined, runtimeAI: { provider_name?: string; provider_protocol?: string; model?: string }) {
+  let next: any = {};
+  try {
+    next = JSON.parse(String(configJSON || '{}'));
+    if (!next || typeof next !== 'object' || Array.isArray(next)) next = {};
+  } catch {
+    next = {};
+  }
+  const providerName = String(runtimeAI.provider_name || '').trim();
+  const providerProtocol = String(runtimeAI.provider_protocol || '').trim();
+  const model = String(runtimeAI.model || '').trim();
+  if (!providerName && !providerProtocol && !model) {
+    delete next.runtime_ai;
+  } else {
+    next.runtime_ai = {};
+    if (providerName) next.runtime_ai.provider_name = providerName;
+    if (providerProtocol) next.runtime_ai.provider_protocol = providerProtocol;
+    if (model) next.runtime_ai.model = model;
+  }
+  return JSON.stringify(next);
 }
 
 function formatCredit(value?: number) {
@@ -320,6 +361,7 @@ export default function AgentInspector({
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
+  const [runtimeAIProviderOptions, setRuntimeAIProviderOptions] = useState<Array<{ value: string; label: string }>>([]);
   const settingsPaneLoadedRef = useRef<string>('');
   const settingsAutoSaveTimerRef = useRef<number | null>(null);
   const [settingsBaseline, setSettingsBaseline] = useState('null');
@@ -367,7 +409,12 @@ export default function AgentInspector({
         ttyd_preview: String(detail?.ttyd_preview || ''),
         role: String(detail?.role || ''),
         default_model: String(detail?.default_model || ''),
+        runtime_ai_provider_name: parseRuntimeAIConfig(String(detail?.config || '{}')).provider_name,
+        runtime_ai_provider_protocol: parseRuntimeAIConfig(String(detail?.config || '{}')).provider_protocol,
+        runtime_ai_model: parseRuntimeAIConfig(String(detail?.config || '{}')).model,
       };
+      const providerNames = Array.isArray(detail?.runtime_ai_provider_names) ? detail.runtime_ai_provider_names : [];
+      setRuntimeAIProviderOptions(providerNames.map((name: string) => ({ value: String(name), label: String(name) })));
       setSettingsData(next);
       setSettingsBaseline(serializeSettingsData(next));
     }).catch(() => {
@@ -591,9 +638,18 @@ export default function AgentInspector({
         window.dispatchEvent(new CustomEvent('show-toast', { detail: '这个 token 已绑，请更换其他 token' }));
         return;
       }
-      await apiService.updatePane(paneId, settingsData);
-      onPanePatch?.(paneId, settingsData);
-      setSettingsBaseline(serializeSettingsData(settingsData));
+      const payload = {
+        ...settingsData,
+        config: mergeRuntimeAIConfig(settingsData.config, {
+          provider_name: settingsData.runtime_ai_provider_name,
+          provider_protocol: settingsData.runtime_ai_provider_protocol,
+          model: settingsData.runtime_ai_model,
+        }),
+      };
+      await apiService.updatePane(paneId, payload);
+      onPanePatch?.(paneId, payload);
+      setSettingsData(payload);
+      setSettingsBaseline(serializeSettingsData(payload));
       setSettingsSaved(true);
       window.dispatchEvent(new CustomEvent('show-toast', { detail: `${paneId} 设置已保存` }));
       window.setTimeout(() => setSettingsSaved(false), 2000);
@@ -883,6 +939,41 @@ export default function AgentInspector({
                     desc="Codex / Claude 追加危险参数"
                     checked={!!settingsData?.allow_all_actions}
                     onChange={(value) => patchSettingsData({ allow_all_actions: value })}
+                  />
+                </div>
+              )}
+
+              {settingsSection === 'model' && (
+                <div data-id="agent-inspector-settings-model" className="space-y-5">
+                  <InspectorField label="Provider Name" desc="从 ~/cicy-ai/global.json 的 ai.provider 里选择具体供应商">
+                    <Select
+                      value={settingsData?.runtime_ai_provider_name || ''}
+                      onChange={(value) => patchSettingsData({ runtime_ai_provider_name: value })}
+                      options={runtimeAIProviderOptions}
+                      placeholder="选择供应商"
+                      searchable
+                    />
+                  </InspectorField>
+                  <InspectorField label="Protocol" desc="决定请求走 openai 还是 anthropic 网关路径">
+                    <select
+                      data-id="agent-inspector-settings-model-protocol"
+                      value={settingsData?.runtime_ai_provider_protocol || ''}
+                      onChange={(event) => patchSettingsData({ runtime_ai_provider_protocol: event.target.value })}
+                      className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 transition-all focus:border-blue-500/40 focus:outline-none focus:ring-1 focus:ring-blue-500/20"
+                    >
+                      <option value="">跟随默认</option>
+                      <option value="openai">openai</option>
+                      <option value="anthropic">anthropic</option>
+                    </select>
+                  </InspectorField>
+                  <InspectorField label="Model" desc="实时生效：gateway 会在每次请求时覆盖 model">
+                    <InspectorInput value={settingsData?.runtime_ai_model || ''} onChange={(value) => patchSettingsData({ runtime_ai_model: value })} placeholder="例如：gpt-5.5 / claude-opus-4-7" mono />
+                  </InspectorField>
+                  <SaveButton
+                    label={settingsSaving ? '保存中...' : (settingsSaved ? '已保存' : '保存模型设置')}
+                    busy={settingsSaving}
+                    disabled={settingsSaving || settingsLoading || !settingsData || !dirtySettings}
+                    onClick={() => { void saveSettings(); }}
                   />
                 </div>
               )}

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -154,9 +155,12 @@ func handleOpenClawGatewayInfo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func aiGatewayProxyBaseURL(provider string) (*url.URL, error) {
+func aiGatewayProxyBaseURL(provider string, agentID string) (*url.URL, error) {
+	cfg, _, err := resolveRuntimeAIConfigForAgent(provider, agentID)
+	if err != nil {
+		return nil, err
+	}
 	raw := ""
-	cfg := loadRuntimeAIConfig()
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "openai":
 		raw = strings.TrimSpace(cfg.APIURL)
@@ -175,8 +179,12 @@ func aiGatewayProxyBaseURL(provider string) (*url.URL, error) {
 	return url.Parse(raw)
 }
 
-func aiGatewayProxyAPIKey() string {
-	return strings.TrimSpace(loadRuntimeAIConfig().APIKey)
+func aiGatewayProxyAPIKey(provider string, agentID string) string {
+	cfg, _, err := resolveRuntimeAIConfigForAgent(provider, agentID)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.APIKey)
 }
 
 func isLoopbackRemote(addr string) bool {
@@ -399,11 +407,11 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 		switch provider {
 		case "openai":
 			stripOpenAIFingerprintHeaders(req)
-			if apiKey := aiGatewayProxyAPIKey(); apiKey != "" {
+			if apiKey := aiGatewayProxyAPIKey(provider, agentID); apiKey != "" {
 				req.Header.Set("Authorization", "Bearer "+apiKey)
 			}
 		case "anthropic":
-			if apiKey := aiGatewayProxyAPIKey(); apiKey != "" {
+			if apiKey := aiGatewayProxyAPIKey(provider, agentID); apiKey != "" {
 				req.Header.Set("x-api-key", apiKey)
 			}
 		}
@@ -440,7 +448,15 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetBase, err := aiGatewayProxyBaseURL(provider)
+	targetBase, err := aiGatewayProxyBaseURL(provider, agentID)
+	if errors.Is(err, ErrRuntimeAIProviderMismatch) {
+		httpErr(w, 409, "ai_gateway_provider_mismatch")
+		return
+	}
+	if errors.Is(err, ErrRuntimeAIProviderNotFound) {
+		httpErr(w, 404, "ai_gateway_provider_not_found")
+		return
+	}
 	if err != nil || targetBase == nil || targetBase.Scheme == "" || targetBase.Host == "" {
 		httpErr(w, 503, "ai_gateway_proxy_target_invalid")
 		return
@@ -452,6 +468,15 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requestBody = agentInspectorRewriteRequestBody(provider, agentID, requestBody)
+	if override, err := loadPaneRuntimeAIOverride(agentID); err == nil && override != nil && strings.TrimSpace(override.Model) != "" {
+		var payload map[string]any
+		if err := json.Unmarshal(requestBody, &payload); err == nil {
+			payload["model"] = strings.TrimSpace(override.Model)
+			if nextBody, marshalErr := json.Marshal(payload); marshalErr == nil {
+				requestBody = nextBody
+			}
+		}
+	}
 	r.Body = io.NopCloser(bytes.NewReader(requestBody))
 	r.GetBody = func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(requestBody)), nil
@@ -473,7 +498,7 @@ func handleOpenClawProviderProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetBase, err := aiGatewayProxyBaseURL("openai")
+	targetBase, err := aiGatewayProxyBaseURL("openai", "openclaw")
 	if err != nil || targetBase == nil || targetBase.Scheme == "" || targetBase.Host == "" {
 		httpErr(w, 503, "openclaw_provider_proxy_target_invalid")
 		return

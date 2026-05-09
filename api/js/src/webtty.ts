@@ -67,6 +67,7 @@ export interface Terminal {
     onInput(callback: (input: string) => void): void;
     onPaste?(callback: (input: string) => void): void;
     onResize(callback: (colmuns: number, rows: number) => void): void;
+    onFit?(callback: (colmuns: number, rows: number) => void): void;
     reset(): void;
     deactivate(): void;
     close(): void;
@@ -237,6 +238,7 @@ export class WebTTY {
                 };
 
                 this.term.onResize(resizeHandler);
+                this.term.onFit?.(resizeHandler);
                 resizeHandler(termInfo.columns, termInfo.rows);
 
                 this.term.onInput(

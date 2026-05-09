@@ -713,6 +713,19 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 		}
 		filtered["agent_type"] = agentType
 	}
+	if rawConfig, ok := filtered["config"]; ok {
+		configStr, ok := rawConfig.(string)
+		if !ok {
+			httpErr(w, 400, "config must be a string")
+			return
+		}
+		normalizedConfig, err := normalizePaneConfigJSON(configStr)
+		if err != nil {
+			httpErr(w, 400, err.Error())
+			return
+		}
+		filtered["config"] = normalizedConfig
+	}
 	var sets []string
 	var vals []interface{}
 	for k, v := range filtered {
@@ -867,6 +880,8 @@ func normalizeAgentType(agentType string) string {
 		return "openclaw"
 	case "codex", "openai":
 		return "codex"
+	case "cursor", "cursor-agent", "cursor agent":
+		return "cursor"
 	case "kiro-cli", "kiro", "kiro-cli chat":
 		return "kiro-cli"
 	case "copilot", "github-copilot", "github copilot", "ghcopilot":
@@ -3190,6 +3205,38 @@ func submitPromptWithConfirmation(paneID, agentType, text string, trace *tmuxSen
 	retryLimit := submitEnterRetryLimitForAgent(agentType)
 	var lastCapture string
 	var lastErr error
+	checkConfirmed := func(attempt int) bool {
+		deadline := time.Now().Add(timeout)
+		captureAttempt := 0
+		for time.Now().Before(deadline) {
+			captureAttempt++
+			out, err := capturePromptConfirmPane(paneID)
+			if err != nil {
+				lastErr = err
+				if trace != nil {
+					trace.logStep("post-submit-capture-error", map[string]any{"attempt": attempt, "capture_attempt": captureAttempt, "error": err.Error()}, "")
+				}
+				time.Sleep(pollInterval)
+				continue
+			}
+			lastCapture = out
+			confirmed := promptSubmitConfirmed(out, text, agentType)
+			if trace != nil {
+				trace.logStep("post-submit-capture", map[string]any{
+					"attempt":         attempt,
+					"capture_attempt": captureAttempt,
+					"confirmed":       confirmed,
+				}, out)
+			}
+			if confirmed {
+				log.Printf("[tmux-send] pane=%s submit=confirmed agent=%s preview=%q",
+					shortPaneID(paneID), normalizeAgentType(agentType), promptPreview(text))
+				return true
+			}
+			time.Sleep(pollInterval)
+		}
+		return false
+	}
 	for attempt := 0; attempt <= retryLimit; attempt++ {
 		if attempt > 0 {
 			log.Printf("[tmux-send] pane=%s submit=retry attempt=%d agent=%s preview=%q",
@@ -3204,33 +3251,8 @@ func submitPromptWithConfirmation(paneID, agentType, text string, trace *tmuxSen
 			}
 			return fmt.Errorf("failed to submit text: %w", err)
 		}
-		deadline := time.Now().Add(timeout)
-		captureAttempt := 0
-		for time.Now().Before(deadline) {
-			captureAttempt++
-			out, err := capturePromptConfirmPane(paneID)
-			if err != nil {
-				lastErr = err
-				if trace != nil {
-					trace.logStep("post-submit-capture-error", map[string]any{"attempt": attempt + 1, "capture_attempt": captureAttempt, "error": err.Error()}, "")
-				}
-				time.Sleep(pollInterval)
-				continue
-			}
-			lastCapture = out
-			if trace != nil {
-				trace.logStep("post-submit-capture", map[string]any{
-					"attempt":         attempt + 1,
-					"capture_attempt": captureAttempt,
-					"confirmed":       promptSubmitConfirmed(out, text, agentType),
-				}, out)
-			}
-			if promptSubmitConfirmed(out, text, agentType) {
-				log.Printf("[tmux-send] pane=%s submit=confirmed agent=%s preview=%q",
-					shortPaneID(paneID), normalizeAgentType(agentType), promptPreview(text))
-				return nil
-			}
-			time.Sleep(pollInterval)
+		if checkConfirmed(attempt + 1) {
+			return nil
 		}
 	}
 	if lastErr != nil {
@@ -3247,6 +3269,18 @@ func submitPromptWithConfirmation(paneID, agentType, text string, trace *tmuxSen
 	if lastCapture != "" {
 		log.Printf("[tmux-send] pane=%s submit=timeout agent=%s preview=%q tail=%q",
 			shortPaneID(paneID), normalizeAgentType(agentType), promptPreview(text), promptPreview(lastCapture))
+	}
+	log.Printf("[tmux-send] pane=%s submit=timeout-enter-fallback agent=%s preview=%q",
+		shortPaneID(paneID), normalizeAgentType(agentType), promptPreview(text))
+	if trace != nil {
+		trace.logStep("submit-timeout-enter-fallback", map[string]any{}, "")
+	}
+	if err := sendPromptEnter(paneID); err == nil {
+		if checkConfirmed(retryLimit + 2) {
+			return nil
+		}
+	} else if trace != nil {
+		trace.logStep("submit-timeout-enter-fallback-error", map[string]any{"error": err.Error()}, "")
 	}
 	return fmt.Errorf("submit not confirmed for %s", shortPaneID(paneID))
 }
@@ -3667,10 +3701,19 @@ func sendTextToPaneDirect(winID, text string) error {
 	if confirmBeforeEnter {
 		if _, err := waitForPromptEchoBeforeEnter(winID, agentType, text, mode, baseline, trace); err != nil {
 			trace.logStep("pre-submit-failed", map[string]any{"error": err.Error()}, "")
-			return newTmuxSendError("failed to confirm text before submit: "+err.Error(), http.StatusConflict, true)
-		}
-		if err := submitPromptWithConfirmation(winID, agentType, text, trace); err != nil {
+			log.Printf("[tmux-send] pane=%s pre-submit failed; forcing enter fallback agent=%s mode=%s preview=%q err=%v",
+				shortPaneID(winID), normalizeAgentType(agentType), mode, promptPreview(text), err)
+			if trace != nil {
+				trace.logStep("pre-submit-enter-fallback", map[string]any{"reason": err.Error()}, "")
+			}
+			if submitErr := submitPromptWithConfirmation(winID, agentType, text, trace); submitErr != nil {
+				trace.logStep("submit-failed", map[string]any{"error": submitErr.Error(), "fallback": "pre-submit-enter"}, "")
+				clearPanePromptInput(winID, trace)
+				return newTmuxSendError("failed to confirm text before submit: "+err.Error()+"; enter fallback also failed: "+submitErr.Error(), http.StatusConflict, true)
+			}
+		} else if err := submitPromptWithConfirmation(winID, agentType, text, trace); err != nil {
 			trace.logStep("submit-failed", map[string]any{"error": err.Error()}, "")
+			clearPanePromptInput(winID, trace)
 			return newTmuxSendError(err.Error(), http.StatusConflict, true)
 		}
 	} else {
@@ -3685,7 +3728,25 @@ func sendTextToPaneDirect(winID, text string) error {
 		}
 	}
 	trace.logStep("request-complete", map[string]any{"mode": mode, "confirm_before_enter": confirmBeforeEnter}, "")
+	markWorkerPromptSubmitted(winID, text)
 	return nil
+}
+
+func clearPanePromptInput(paneID string, trace *tmuxSendTrace) {
+	paneID = normPaneID(paneID)
+	if paneID == "" {
+		return
+	}
+	if _, err := runTmux("send-keys", "-t", paneID, "C-u"); err != nil {
+		if trace != nil {
+			trace.logStep("clear-input-error", map[string]any{"error": err.Error()}, "")
+		}
+		return
+	}
+	_, _ = runTmux("send-keys", "-t", paneID, "Escape")
+	if trace != nil {
+		trace.logStep("clear-input", map[string]any{}, "")
+	}
 }
 
 func handleSend(w http.ResponseWriter, r *http.Request) {
@@ -3915,16 +3976,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func readAIGatewayReplySnapshot(agentID string) (aiGatewayReplySnapshot, error) {
-	path := filepath.Join(aiGatewayHistoryDir(agentID), "reply.json")
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return aiGatewayReplySnapshot{}, err
-	}
-	var snapshot aiGatewayReplySnapshot
-	if err := json.Unmarshal(body, &snapshot); err != nil {
-		return aiGatewayReplySnapshot{}, err
-	}
-	return snapshot, nil
+	return aiGatewayLoadReplySnapshot(agentID), nil
 }
 
 func isAIGatewayReplyTerminal(status string) bool {
@@ -3947,10 +3999,6 @@ func aiGatewayReplyTimestamp(snapshot aiGatewayReplySnapshot) time.Time {
 		}
 	}
 	return time.Time{}
-}
-
-func readAIGatewayMessagesFile(agentID string) (aiGatewayMessagesFile, error) {
-	return aiGatewayLoadMessagesFile(agentID)
 }
 
 func aiGatewayMessageRecordTimestamp(record aiGatewayMessageRecord) time.Time {
@@ -3982,7 +4030,7 @@ func aiGatewayMessageMatchesSend(record aiGatewayMessageRecord, expectedQuestion
 	return !ts.IsZero() && !ts.Before(sentFloor)
 }
 
-func waitForAIGatewayMessageRecord(agentID string, baselineCount int, expectedQuestion string, sentAt time.Time, timeout time.Duration) (aiGatewayMessageRecord, error) {
+func waitForAIGatewayMessageRecord(agentID string, baselineHistoryID int64, expectedQuestion string, sentAt time.Time, timeout time.Duration) (aiGatewayMessageRecord, error) {
 	deadline := time.Now().Add(timeout)
 	pollInterval := 250 * time.Millisecond
 	sentFloor := sentAt.UTC().Add(-1 * time.Second)
@@ -3990,18 +4038,12 @@ func waitForAIGatewayMessageRecord(agentID string, baselineCount int, expectedQu
 	var lastErr error
 
 	for time.Now().Before(deadline) {
-		file, err := readAIGatewayMessagesFile(agentID)
+		records, err := agentHistoryLoadRecordsAfter(agentID, baselineHistoryID, 20)
 		if err != nil {
-			if !os.IsNotExist(err) {
-				lastErr = err
-			}
-		} else if len(file.Messages) > baselineCount {
-			limit := len(file.Messages)
-			if baselineCount < 0 {
-				baselineCount = 0
-			}
-			for i := baselineCount; i < limit; i++ {
-				record := file.Messages[i]
+			lastErr = err
+		} else if len(records) > 0 {
+			for _, item := range records {
+				record := item.Record
 				if aiGatewayMessageMatchesSend(record, expectedQuestion, sentFloor) {
 					log.Printf("[send-wait] pane=%s matched message q_len=%d a_len=%d model=%s tools=%d",
 						agentID, len([]rune(record.Q)), len([]rune(record.A)), record.Model, len(record.ToolCalls))
@@ -4044,83 +4086,6 @@ func waitForAIGatewayMessageRecord(agentID string, baselineCount int, expectedQu
 	}
 	log.Printf("[send-wait] pane=%s timeout waiting message last_turn=%s status=%s", agentID, lastSnapshot.TurnID, lastSnapshot.Status)
 	return aiGatewayMessageRecord{}, fmt.Errorf("timeout after %ds waiting for gateway message", int(timeout/time.Second))
-}
-
-func handleSendWait(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Target  string `json:"target"`
-		Text    string `json:"text"`
-		Timeout int    `json:"timeout"`
-	}
-	readBody(r, &req)
-	if req.Timeout == 0 {
-		req.Timeout = 60
-	}
-	if req.Timeout > 120 {
-		req.Timeout = 120
-	}
-
-	paneID := req.Target
-	// Resolve @title
-	if strings.HasPrefix(paneID, "@") {
-		store.QueryRow("SELECT pane_id FROM agent_config WHERE title=? LIMIT 1", paneID[1:]).Scan(&paneID)
-		if paneID == "" {
-			J(w, M{"success": false, "error": fmt.Sprintf("No pane found with title '%s'", req.Target[1:])})
-			return
-		}
-	} else {
-		paneID = normPaneID(paneID)
-	}
-	if paneID == "" {
-		J(w, M{"success": false, "error": "target required"})
-		return
-	}
-
-	agentID := shortPaneID(paneID)
-	baseline, baselineErr := readAIGatewayReplySnapshot(agentID)
-	if baselineErr != nil && !os.IsNotExist(baselineErr) {
-		log.Printf("[send-wait] pane=%s baseline read error: %v", agentID, baselineErr)
-	}
-	baselineMessages, baselineMessagesErr := readAIGatewayMessagesFile(agentID)
-	if baselineMessagesErr != nil && !os.IsNotExist(baselineMessagesErr) {
-		log.Printf("[send-wait] pane=%s baseline messages read error: %v", agentID, baselineMessagesErr)
-	}
-	log.Printf("[send-wait] pane=%s send start timeout=%ds baseline_turn=%s baseline_status=%s",
-		agentID, req.Timeout, baseline.TurnID, baseline.Status)
-
-	sentAt := time.Now().UTC()
-	if err := sendTextToPane(paneID, req.Text, true); err != nil {
-		log.Printf("[send-wait] pane=%s send failed: %v", agentID, err)
-		J(w, M{"success": false, "pane_id": agentID, "question": req.Text, "error": err.Error()})
-		return
-	}
-
-	record, err := waitForAIGatewayMessageRecord(agentID, len(baselineMessages.Messages), req.Text, sentAt, time.Duration(req.Timeout)*time.Second)
-	if err != nil {
-		reply, _ := readAIGatewayReplySnapshot(agentID)
-		J(w, M{
-			"success":  false,
-			"pane_id":  agentID,
-			"question": req.Text,
-			"turn_id":  reply.TurnID,
-			"status":   reply.Status,
-			"answer":   reply.Answer,
-			"error":    err.Error(),
-		})
-		return
-	}
-	J(w, M{
-		"success":    true,
-		"pane_id":    agentID,
-		"question":   record.Q,
-		"status":     "completed",
-		"answer":     record.A,
-		"thinking":   record.Thinking,
-		"tool_calls": record.ToolCalls,
-		"qTime":      record.QTime,
-		"aTime":      record.ATime,
-		"model":      record.Model,
-	})
 }
 
 func handleMouseToggle(w http.ResponseWriter, r *http.Request) {

@@ -63,12 +63,6 @@ func runtimePathToHostPath(path string) string {
 	if value == "" {
 		return ""
 	}
-	if value == "/cicy" {
-		return cicyRootDir
-	}
-	if strings.HasPrefix(value, "/cicy/") {
-		return filepath.Join(cicyRootDir, strings.TrimPrefix(value, "/cicy/"))
-	}
 	return value
 }
 

@@ -138,6 +138,8 @@ export class Xterm {
     initialFitDone: boolean;
     isComposing: boolean;
     pasteCallback: ((input: string) => void) | null;
+    fitCallbacks: Array<(columns: number, rows: number) => void>;
+    lastNotifiedFit: { columns: number; rows: number };
 
     constructor(elem: HTMLElement) {
         this.elem = elem;
@@ -150,6 +152,8 @@ export class Xterm {
         this.initialFitDone = false;
         this.isComposing = false;
         this.pasteCallback = null;
+        this.fitCallbacks = [];
+        this.lastNotifiedFit = { columns: 0, rows: 0 };
 
         this.term = new XtermTerminal({
             fontSize: 13,
@@ -388,6 +392,18 @@ export class Xterm {
         const rect = this.elem.getBoundingClientRect();
         if (rect.width < 20 || rect.height < 20) return;
         this.fitAddon.fit();
+        this.notifyFitSize();
+    }
+
+    private notifyFitSize(force: boolean = false): void {
+        const columns = this.term.cols;
+        const rows = this.term.rows;
+        if (columns <= 0 || rows <= 0) return;
+        if (!force && this.lastNotifiedFit.columns === columns && this.lastNotifiedFit.rows === rows) return;
+        this.lastNotifiedFit = { columns, rows };
+        for (const callback of this.fitCallbacks) {
+            callback(columns, rows);
+        }
     }
 
     private fitSoon(): void {
@@ -531,8 +547,14 @@ export class Xterm {
             this.resizeDisposable.dispose();
         }
         this.resizeDisposable = this.term.onResize((data: { cols: number, rows: number }) => {
+            this.lastNotifiedFit = { columns: data.cols, rows: data.rows };
             callback(data.cols, data.rows);
         });
+    }
+
+    onFit(callback: (colmuns: number, rows: number) => void): void {
+        this.fitCallbacks.push(callback);
+        this.notifyFitSize(true);
     }
 
     deactivate(): void {

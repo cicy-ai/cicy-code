@@ -262,7 +262,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
           window.dispatchEvent(new CustomEvent('agent-status-change', { detail: msg.data }));
         } else if (msg.type === 'worker_idle') {
           const d = msg.data?.data;
-          if (d) setChatData(prev => [...prev, { q: '', a: `🔔 **${d.worker || msg.data.from}** 已完成任务（空闲）`, status: 'done', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0, system: true }]);
+          if (d) setChatData(prev => [...prev, { q: '', a: String(d.message || `🔔 **${d.worker || msg.data.from}** 已完成任务（空闲）`), status: 'done', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0, system: true }]);
         } else {
           if (!streamingRef.current) debouncedReload();
         }

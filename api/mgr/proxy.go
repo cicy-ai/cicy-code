@@ -71,6 +71,9 @@ func init() {
 				r.Body = io.NopCloser(bytes.NewReader(modified))
 				r.ContentLength = int64(len(modified))
 			}
+			if strings.HasSuffix(r.URL.Path, "/responses") {
+				r.URL.Path = strings.TrimSuffix(r.URL.Path, "/responses") + "/chat/completions"
+			}
 		}
 	}
 }

@@ -21,6 +21,11 @@ export declare class Xterm {
     initialFitDone: boolean;
     isComposing: boolean;
     pasteCallback: ((input: string) => void) | null;
+    fitCallbacks: Array<(columns: number, rows: number) => void>;
+    lastNotifiedFit: {
+        columns: number;
+        rows: number;
+    };
     constructor(elem: HTMLElement);
     configure(options: {
         scrollback?: number;
@@ -28,6 +33,7 @@ export declare class Xterm {
         letterSpacing?: number;
     }): void;
     fit(): void;
+    private notifyFitSize;
     private fitSoon;
     private _fitDebounce;
     private _resizeMask;
@@ -45,6 +51,7 @@ export declare class Xterm {
     onInput(callback: (input: string) => void): void;
     onPaste(callback: (input: string) => void): void;
     onResize(callback: (colmuns: number, rows: number) => void): void;
+    onFit(callback: (colmuns: number, rows: number) => void): void;
     deactivate(): void;
     reset(): void;
     close(): void;

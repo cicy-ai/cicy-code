@@ -45,6 +45,54 @@ var toolNameIdRe = regexp.MustCompile(`"name":"([^"]+)","toolUseId"`)
 var modelRe = regexp.MustCompile(`"modelId":"([^"]+)"`)
 
 func extractArg(inp map[string]interface{}, name string) string {
+	switch strings.TrimSpace(name) {
+	case "TaskCreate":
+		for _, key := range []string{"subject", "activeForm", "description"} {
+			if value, _ := inp[key].(string); strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+		}
+	case "TaskUpdate":
+		taskID, _ := inp["taskId"].(string)
+		status, _ := inp["status"].(string)
+		taskID = strings.TrimSpace(taskID)
+		status = strings.TrimSpace(status)
+		switch {
+		case taskID != "" && status != "":
+			return fmt.Sprintf("task #%s -> %s", taskID, status)
+		case taskID != "":
+			return fmt.Sprintf("task #%s", taskID)
+		case status != "":
+			return status
+		}
+	case "update_plan":
+		if rawPlan, ok := inp["plan"].([]interface{}); ok && len(rawPlan) > 0 {
+			inProgress := ""
+			completed := 0
+			pending := 0
+			for _, rawItem := range rawPlan {
+				item, _ := rawItem.(map[string]interface{})
+				step, _ := item["step"].(string)
+				status, _ := item["status"].(string)
+				switch strings.TrimSpace(status) {
+				case "in_progress":
+					if inProgress == "" {
+						inProgress = strings.TrimSpace(step)
+					}
+				case "completed":
+					completed++
+				case "pending":
+					pending++
+				}
+			}
+			if inProgress != "" {
+				return inProgress
+			}
+			if completed > 0 || pending > 0 {
+				return fmt.Sprintf("%d completed, %d pending", completed, pending)
+			}
+		}
+	}
 	if p, _ := inp["path"].(string); p != "" {
 		return p
 	}
@@ -64,6 +112,13 @@ func extractArg(inp map[string]interface{}, name string) string {
 		}
 	}
 	if c, _ := inp["command"].(string); c != "" {
+		c = strings.ReplaceAll(c, "\n", " ")
+		if len([]rune(c)) > 200 {
+			c = string([]rune(c)[:200]) + "..."
+		}
+		return c
+	}
+	if c, _ := inp["cmd"].(string); c != "" {
 		c = strings.ReplaceAll(c, "\n", " ")
 		if len([]rune(c)) > 200 {
 			c = string([]rune(c)[:200]) + "..."
