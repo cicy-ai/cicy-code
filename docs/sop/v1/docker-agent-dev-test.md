@@ -52,19 +52,6 @@ curl -fsS "$API_BASE/api/tmux/send" \
 - `text` 是要发给 agent 的 prompt
 - 这个接口会把文本送进 tmux pane，并自动提交
 
-如果要等回答完成，用 `/api/tmux/send_wait`：
-
-```bash
-curl -fsS "$API_BASE/api/tmux/send_wait" \
-  -H "Authorization: Bearer $(jq -r '.api_token' /home/cicy/cicy-ai/global.json)" \
-  -H 'Content-Type: application/json' \
-  --data '{
-    "target": "'"$AGENT_ID"'",
-    "text": "Reply with exactly one word: ok.",
-    "timeout": 60
-  }' | jq '.'
-```
-
 ## 2. 看 tmux agent 输出
 
 优先走现成接口 `/api/tmux/capture`：
@@ -218,7 +205,7 @@ curl -fsS "$API_BASE/api/chat/push" \
     "type": "exec_js",
     "data": {
       "requestId": "exec-history-text-1",
-      "code": "(() => { const el = document.querySelector(\"[data-id=\\\"current-history-list\\\"]\"); return el ? el.innerText.trim() : \"current-history-list not found\"; })()"
+      "code": "(() => { const el = document.querySelector(\"这\"); return el ? el.innerText.trim() : \"current-history-list not found\"; })()"
     }
   }' | jq '.'
 ```

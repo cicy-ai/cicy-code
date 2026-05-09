@@ -134,6 +134,10 @@ func opencodeInstallCmd() string {
 	return npmGlobalInstallCmd("opencode-ai@latest")
 }
 
+func cursorInstallCmd() string {
+	return preinstalledRuntimeInstallCmd("curl https://cursor.com/install -fsS | bash")
+}
+
 func cicyInstallCmd() string {
 	return npmGlobalInstallCmd("cicy-claude@latest")
 }
@@ -207,6 +211,7 @@ func checkEnvironment() []Tool {
 		{"claude", "claude", claudeInstallCmd(), true, false},
 		{"codex", "codex", codexInstallCmd(), true, false},
 		{"opencode", "opencode", opencodeInstallCmd(), true, false},
+		{"cursor-agent", "cursor-agent", cursorInstallCmd(), true, false},
 		{"hermes", "hermes", hermesInstallCmd(), true, false},
 		{"code-server", "code-server", codeServerInstallCmd(), true, false},
 	}...)
@@ -272,10 +277,18 @@ func selectAgents() []string {
 }
 
 func hermesInstallCmd() string {
+	rawScriptURL := cicySkillsDefaultGHProxy + "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
+	archiveURL := cicySkillsDefaultGHProxy + "https://codeload.github.com/NousResearch/hermes-agent/tar.gz/refs/heads/${branch}"
 	return strings.Join([]string{
 		"export HERMES_HOME=\"$HOME/.hermes\"",
 		"export HERMES_INSTALL_DIR=\"$HOME/.hermes/hermes-agent\"",
-		"curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --no-venv --skip-setup </dev/null",
+		"export UV_INDEX_URL=\"https://pypi.tuna.tsinghua.edu.cn/simple\"",
+		"export PIP_INDEX_URL=\"https://pypi.tuna.tsinghua.edu.cn/simple\"",
+		"export REPO_URL_HTTPS=\"https://gh-proxy.com/https://github.com/NousResearch/hermes-agent.git\"",
+		"export BRANCH=\"main\"",
+		"export INSTALL_DIR=\"$HERMES_INSTALL_DIR\"",
+		"cicy_clone_hermes() { branch=\"$1\"; install_dir=\"$2\"; tmp_dir=$(mktemp -d); archive_url=\"" + archiveURL + "\"; if ! curl -fsSL \"$archive_url\" -o \"$tmp_dir/hermes-agent.tar.gz\"; then rm -rf \"$tmp_dir\"; return 1; fi; if ! tar -xzf \"$tmp_dir/hermes-agent.tar.gz\" -C \"$tmp_dir\"; then rm -rf \"$tmp_dir\"; return 1; fi; root_dir=$(find \"$tmp_dir\" -maxdepth 1 -mindepth 1 -type d | head -n 1); if [ -z \"$root_dir\" ]; then rm -rf \"$tmp_dir\"; return 1; fi; rm -rf \"$install_dir\"; mkdir -p \"$(dirname \"$install_dir\")\"; mv \"$root_dir\" \"$install_dir\"; rm -rf \"$tmp_dir\"; return 0; }",
+		"if cicy_clone_hermes \"$BRANCH\" \"$INSTALL_DIR\"; then curl -fsSL " + rawScriptURL + " | HERMES_HOME=\"$HERMES_HOME\" HERMES_INSTALL_DIR=\"$HERMES_INSTALL_DIR\" bash -s -- --no-venv --skip-setup </dev/null; else curl -fsSL " + rawScriptURL + " | bash -s -- --no-venv --skip-setup </dev/null; fi",
 	}, " && ")
 }
 
@@ -286,6 +299,7 @@ func selectedAgentConfigs() map[string]Tool {
 		"cicy":     {"cicy", "cicy", cicyInstallCmd(), true, false},
 		"codex":    {"codex", "codex", codexInstallCmd(), true, false},
 		"opencode": {"opencode", "opencode", opencodeInstallCmd(), true, false},
+		"cursor":   {"cursor-agent", "cursor-agent", cursorInstallCmd(), true, false},
 		"hermes":   {"hermes", "hermes", hermesInstallCmd(), true, false},
 	}
 }
@@ -296,7 +310,7 @@ func ensureAgentToolInstalled(agentType string) {
 		return
 	}
 	switch normalizeAgentType(agentType) {
-	case "openclaw", "claude", "cicy", "codex", "opencode", "hermes":
+	case "openclaw", "claude", "cicy", "codex", "opencode", "cursor", "hermes":
 		return
 	}
 	config, exists := selectedAgentConfigs()[agentType]
@@ -338,6 +352,7 @@ var builtinAgents = []struct {
 	{"claude", "Claude"},
 	{"codex", "Codex"},
 	{"opencode", "OpenCode"},
+	{"cursor", "Cursor"},
 	{"kiro-cli", "Kiro CLI"},
 	{"copilot", "GitHub Copilot"},
 	{"cicy-wechat", "WeChat"},
@@ -347,7 +362,7 @@ var builtinAgents = []struct {
 	{"cicy-claude", "CiCy"},
 }
 
-var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode", "kiro-cli"}
+var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode", "cursor", "kiro-cli"}
 
 func effectiveAllowedAgentTypes() []string {
 	if labMode {
@@ -527,12 +542,12 @@ func setWorkerIndex(n int) {
 func syncWorkerIndexToExistingAgents() {
 	var current sql.NullInt64
 	if err := store.QueryRow("SELECT value FROM global_vars WHERE key_name='worker_index'").Scan(&current); err == nil {
-		if current.Valid && current.Int64 > 0 {
+		if current.Valid && current.Int64 > int64(defaultWorkerIndex) {
 			return
 		}
 	}
 	var maxPort int
-	if err := store.QueryRow("SELECT COALESCE(MAX(ttyd_port), 0) FROM agent_config WHERE active=1").Scan(&maxPort); err != nil {
+	if err := store.QueryRow("SELECT COALESCE(MAX(ttyd_port), 0) FROM agent_config").Scan(&maxPort); err != nil {
 		log.Printf("[startup] failed to sync worker_index from agent_config: %v", err)
 		return
 	}
@@ -1475,14 +1490,13 @@ func mustAtoi(s string) int {
 	return n
 }
 
-// ensureBuiltinAgents restores tmux sessions and ttyd only for selected builtin agents.
+// ensureBuiltinAgents restores tmux sessions and ttyd for all active agents.
+// The selected builtin list is only used to sync builtin title/agent_type.
 func ensureBuiltinAgents(selected []string) {
 	workers := selectedBuiltinWorkers(selected)
-	allowedByPaneID := make(map[string]struct{}, len(workers))
 	desiredByPaneID := make(map[string]builtinWorker, len(workers))
 	for _, w := range workers {
 		pid := builtinWorkerSession(w.Port) + ":main.0"
-		allowedByPaneID[pid] = struct{}{}
 		desiredByPaneID[pid] = w
 	}
 
@@ -1500,9 +1514,6 @@ func ensureBuiltinAgents(selected []string) {
 		var port int
 		rows.Scan(&paneID, &port, &workspace, &initScript, &configJSON, &agentType, &allowAllActions, &replyInChinese)
 		if paneID == "" || port == 0 {
-			continue
-		}
-		if _, ok := allowedByPaneID[paneID]; !ok {
 			continue
 		}
 

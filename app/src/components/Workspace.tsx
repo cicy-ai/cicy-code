@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useApp } from '../contexts/AppContext';
 import type { SystemResourceSnapshot } from '../contexts/AppContext';
-import { createPortal } from 'react-dom';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw
@@ -76,6 +76,24 @@ function clampCliDrawerWidth(value: number): number {
   const viewportMax = typeof window === 'undefined' ? CLI_DRAWER_MAX_WIDTH : Math.max(CLI_DRAWER_MIN_WIDTH, window.innerWidth - 120);
   const maxWidth = Math.min(CLI_DRAWER_MAX_WIDTH, viewportMax);
   return Math.min(maxWidth, Math.max(CLI_DRAWER_MIN_WIDTH, value));
+}
+
+function detectClientPlatform(): 'win' | 'darwin' | 'linux' {
+  if (typeof navigator === 'undefined') return 'linux';
+  const source = `${navigator.platform || ''} ${navigator.userAgent || ''}`.toLowerCase();
+  if (source.includes('win')) return 'win';
+  if (source.includes('mac') || source.includes('darwin')) return 'darwin';
+  return 'linux';
+}
+
+function detectClientArch(): string {
+  if (typeof navigator === 'undefined') return 'unknown';
+  const source = `${navigator.userAgent || ''}`.toLowerCase();
+  if (source.includes('arm64') || source.includes('aarch64')) return 'arm64';
+  if (source.includes('x86_64') || source.includes('win64') || source.includes('x64') || source.includes('amd64') || source.includes('x86-64')) return 'x64';
+  if (source.includes('arm')) return 'arm';
+  if (source.includes('x86') || source.includes('i386') || source.includes('i686')) return 'x86';
+  return 'unknown';
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -192,7 +210,7 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 type LeftPanelView = 'team' | 'skills' | 'agents' | null;
 type WorkspaceCliContentTab = InspectorTab | 'history' | 'files' | RequestViewTab;
-type CliContentMode = 'drawer' | 'fixed';
+type CliContentMode = 'fixed';
 
 function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
   if (value === 'files' || value === 'history' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'settings') {
@@ -226,9 +244,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   });
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorRequestedTab, setInspectorRequestedTab] = useState<InspectorTab>('overview');
-  const [cliContentOpen, setCliContentOpen] = useState(() => cache.get(CLI_CONTENT_MODE_KEY, 'drawer') === 'fixed');
+  const [cliContentOpen, setCliContentOpen] = useState(true);
   const [cliContentTab, setCliContentTab] = useState<WorkspaceCliContentTab>(() => normalizeCliContentTab(cache.get(cliContentTabKey(paneId), 'files')));
-  const [cliContentMode, setCliContentMode] = useState<CliContentMode>(() => cache.get(CLI_CONTENT_MODE_KEY, 'drawer') === 'fixed' ? 'fixed' : 'drawer');
+  const [cliContentMode, setCliContentMode] = useState<CliContentMode>('fixed');
   const [cliDrawerWidth, setCliDrawerWidth] = useState(() => clampCliDrawerWidth(Number(cache.get(CLI_DRAWER_WIDTH_KEY, CLI_DRAWER_DEFAULT_WIDTH))));
   const [cliDrawerResizing, setCliDrawerResizing] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
@@ -279,6 +297,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       return `web-${Date.now().toString(36)}`;
     }
   }, [paneId]);
+  const wsClientPlatform = useMemo(() => detectClientPlatform(), []);
+  const wsClientArch = useMemo(() => detectClientArch(), []);
   const [chatWsLiveStatus, setChatWsLiveStatus] = useState('idle');
   const [chatWsLiveText, setChatWsLiveText] = useState('');
   const [chatWsHistoryVersion, setChatWsHistoryVersion] = useState(0);
@@ -322,7 +342,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }, [leftActive]);
   useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, activeTeamPaneId); }, [activeTeamPaneId]);
   useEffect(() => { cache.set(CLI_DRAWER_WIDTH_KEY, cliDrawerWidth); }, [cliDrawerWidth]);
-  useEffect(() => { cache.set(CLI_CONTENT_MODE_KEY, cliContentMode); }, [cliContentMode]);
+  useEffect(() => {
+    cache.set(CLI_CONTENT_MODE_KEY, 'fixed');
+  }, []);
   useEffect(() => {
     setCliContentTab(normalizeCliContentTab(cache.get(cliContentTabKey(paneId), 'files')));
   }, [paneId]);
@@ -620,7 +642,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       chatWsPingSentAtRef.current = null;
       chatWsPingRequestIdRef.current = null;
       chatWsRef.current?.close();
-      const ws = new WebSocket(`${base}/api/chat/ws?master_agent_id=${encodeURIComponent(masterAgentId)}&token=${encodeURIComponent(token)}&electron=${isElectron}&client_id=${encodeURIComponent(clientId)}`);
+      const ws = new WebSocket(`${base}/api/chat/ws?master_agent_id=${encodeURIComponent(masterAgentId)}&token=${encodeURIComponent(token)}&electron=${isElectron}&client_id=${encodeURIComponent(clientId)}&platform=${encodeURIComponent(wsClientPlatform)}&arch=${encodeURIComponent(wsClientArch)}`);
       chatWsRef.current = ws;
       const sendLatencyPing = () => {
         if (dead || chatWsRef.current !== ws || ws.readyState !== WebSocket.OPEN) return;
@@ -643,7 +665,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         // 连接建立后立即请求 poll 数据
         console.log('[poll_request] WS onopen, sending initial poll_request');
         try { ws.send(JSON.stringify({ type: 'poll_request' })); } catch (e) { console.warn('[poll_request] onopen send failed:', e); }
-        try { ws.send(JSON.stringify({ type: 'register_active_channel', data: { agent_id: activeCliPaneId || paneId, client_id: clientId, channel_type: 'web' } })); } catch (e) { console.warn('[chat-ws] register_active_channel onopen failed:', e); }
+        try { ws.send(JSON.stringify({ type: 'register_active_channel', data: { agent_id: activeCliPaneId || paneId, client_id: clientId, channel_type: 'web', platform: wsClientPlatform, arch: wsClientArch } })); } catch (e) { console.warn('[chat-ws] register_active_channel onopen failed:', e); }
         sendLatencyPing();
         chatWsPingTimerRef.current = window.setInterval(sendLatencyPing, 5000);
       };
@@ -846,16 +868,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         chatWsClientId: clientId,
       });
     };
-  }, [activeCliPaneId, broadcastChatWsMessage, pageClientId, paneId, sendChatWsMessage, setChatWsSender, setChatWsState, token]);
+  }, [activeCliPaneId, broadcastChatWsMessage, pageClientId, paneId, sendChatWsMessage, setChatWsSender, setChatWsState, token, wsClientArch, wsClientPlatform]);
 
   useEffect(() => {
     const clientId = String(chatWsClientId || pageClientId || '').trim();
     const agentID = String(activeCliPaneId || '').trim();
     if (!clientId || !agentID || !chatWsConnected) return;
     try {
-      sendChatWsMessage({ type: 'register_active_channel', data: { agent_id: agentID, client_id: clientId, channel_type: 'web' } });
+      sendChatWsMessage({ type: 'register_active_channel', data: { agent_id: agentID, client_id: clientId, channel_type: 'web', platform: wsClientPlatform, arch: wsClientArch } });
     } catch {}
-  }, [activeCliPaneId, chatWsClientId, chatWsConnected, pageClientId, sendChatWsMessage]);
+  }, [activeCliPaneId, chatWsClientId, chatWsConnected, pageClientId, sendChatWsMessage, wsClientArch, wsClientPlatform]);
 
   useEffect(() => {
     setChatSuggestionText('');
@@ -961,6 +983,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
     setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
+    setCliContentMode('fixed');
     setCliContentTab('settings');
     setCliContentOpen(true);
   }, [paneId]);
@@ -968,6 +991,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
     setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
+    setCliContentMode('fixed');
     setCliContentTab('history');
     setCliContentOpen(true);
   }, [paneId]);
@@ -979,6 +1003,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       setCliDrawerWidth(prev => (prev > halfWindowWidth ? halfWindowWidth : prev));
     }
     setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
+    setCliContentMode('fixed');
     setCliContentTab('files');
     setCliContentOpen(true);
   }, [paneId]);
@@ -990,6 +1015,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       setCliDrawerWidth(prev => (prev > halfWindowWidth ? halfWindowWidth : prev));
     }
     setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
+    setCliContentMode('fixed');
     setCliContentTab(nextTab);
     setCliContentOpen(true);
   }, [paneId]);
@@ -1084,15 +1110,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     { id: 'meta', label: '元信息' },
     { id: 'settings', label: '设置' },
   ];
-  const renderCliContentPanel = (mode: CliContentMode) => (
+  const renderCliContentPanel = () => (
     <div
       ref={cliContentPanelRef}
-      data-id={mode === 'drawer' ? 'cli-content-area' : 'cli-content-fixed'}
+      data-id="cli-content-fixed"
       className={cn(
         'relative flex h-full min-w-0 shrink-0 flex-col bg-[#0b0b0d]',
-        mode === 'drawer'
-          ? 'border-l border-[var(--vsc-border)] shadow-[-20px_0_40px_rgba(0,0,0,0.45)]'
-          : 'border-l border-[var(--vsc-border)]'
+        'border-l border-[var(--vsc-border)]'
       )}
       style={{ width: `${cliDrawerWidth}px` }}
     >
@@ -1130,21 +1154,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>
         <div data-id="cli-content-actions" className="ml-3 flex shrink-0 items-center gap-1">
           <button
-            data-id="cli-content-mode-drawer"
-            type="button"
-            onClick={() => {
-              setCliContentMode(mode === 'drawer' ? 'fixed' : 'drawer');
-              setCliContentOpen(true);
-            }}
-            className={cn('rounded-md px-2 py-1.5 text-[11px] leading-5 transition-colors', mode === 'drawer' ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300')}
-          >
-            抽屉
-          </button>
-          <button
             data-id="cli-content-close"
             type="button"
             onClick={() => {
-              if (mode === 'fixed') setCliContentMode('drawer');
               setCliContentOpen(false);
             }}
             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
@@ -1223,17 +1235,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       </div>
     </div>
   );
-  const cliDrawerPortal = createPortal(
-    <div
-      data-id="cli-content-portal"
-      className="fixed inset-y-0 right-0 z-[60] flex"
-      style={{ display: cliContentMode === 'drawer' && cliContentOpen ? 'flex' : 'none', pointerEvents: cliContentMode === 'drawer' && cliContentOpen ? 'auto' : 'none' }}
-    >
-      {cliContentMode === 'drawer' ? renderCliContentPanel('drawer') : null}
-    </div>,
-    document.body
-  );
-  const cliFixedContent = cliContentMode === 'fixed' && cliContentOpen ? renderCliContentPanel('fixed') : null;
+  const cliFixedContent = cliContentOpen ? renderCliContentPanel() : null;
   const stackHeaderControls = (targetPaneId: string) => targetPaneId === activeCliPaneId ? (
     <>
       <SystemResourceMonitor paneId={paneId} />
@@ -1278,7 +1280,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             activePaneId={activeCliPaneId}
             settingsShortcutActive={cliContentOpen && cliContentTab === 'settings'}
             renderHeaderControls={stackHeaderControls}
-            showHeaderButtons={cliContentMode === 'drawer'}
+            showHeaderButtons={!cliContentOpen}
             onOpenPaneSettings={openPaneSettings}
             onOpenPaneFiles={openPaneFiles}
             onOpenPaneHistory={openPaneHistory}
@@ -1498,7 +1500,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>,
         document.body
       ) : null}
-      {cliDrawerPortal}
       {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
       {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
       {toast && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 bg-zinc-800 text-white text-sm rounded-lg shadow-lg">{toast}</div>}

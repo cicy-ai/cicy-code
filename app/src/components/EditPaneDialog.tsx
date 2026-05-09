@@ -19,6 +19,9 @@ export interface EditPaneData {
   ttyd_preview?: string;
   role?: string;
   default_model?: string;
+  runtime_ai_provider_name?: string;
+  runtime_ai_provider_protocol?: string;
+  runtime_ai_model?: string;
 }
 
 interface EditPaneDialogProps {

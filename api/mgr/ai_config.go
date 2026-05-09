@@ -131,14 +131,30 @@ func normalizeHermesModel(value string) string {
 func loadRuntimeAIConfig() runtimeAIConfig {
 	cfg := readGlobalJSONConfig()
 	ai := cfgMapValue(cfg, "ai")
-	providerMap := cfgMapValue(ai, "provider")
 	provider := cfgStringValue(ai, "currentProvider")
 	if provider == "" {
 		provider = "cicyAi"
 	}
+	if result, ok := loadRuntimeAIConfigForProvider(provider); ok {
+		return result
+	}
+	return defaultRuntimeAIConfig(provider, cfg)
+}
+
+func loadRuntimeAIConfigForProvider(provider string) (runtimeAIConfig, bool) {
+	cfg := readGlobalJSONConfig()
+	ai := cfgMapValue(cfg, "ai")
+	providerMap := cfgMapValue(ai, "provider")
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		return runtimeAIConfig{}, false
+	}
 	result := defaultRuntimeAIConfig(provider, cfg)
 
 	selectedProvider := cfgMapValue(providerMap, provider)
+	if len(selectedProvider) == 0 {
+		return runtimeAIConfig{}, false
+	}
 	if value := cfgStringValue(selectedProvider, "apiKey"); value != "" {
 		result.APIKey = value
 	}
@@ -193,5 +209,5 @@ func loadRuntimeAIConfig() runtimeAIConfig {
 		result.OpenClawModel = "gpt-5.5"
 	}
 	result.HermesModel = normalizeHermesModel(result.HermesModel)
-	return result
+	return result, true
 }

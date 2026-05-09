@@ -52,6 +52,17 @@ type boundAgentWorkspace struct {
 	sourceKind string
 }
 
+func normalizeLegacyWorkspacePath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "/cicy" {
+		return cicyRootDir
+	}
+	if strings.HasPrefix(value, "/cicy/") {
+		return filepath.Join(cicyRootDir, strings.TrimPrefix(value, "/cicy/"))
+	}
+	return value
+}
+
 var managedWorkerLinkPattern = regexp.MustCompile(`^w-\d+$`)
 
 func ensureWorkspaceHomeLink(workspace string) error {
@@ -117,7 +128,7 @@ func listBoundAgentWorkspaces(paneID string) ([]boundAgentWorkspace, error) {
 		item.sourceKind = strings.ToLower(strings.TrimSpace(item.sourceKind))
 		if item.workspace != "" {
 			home, _ := os.UserHomeDir()
-			item.workspace = runtimePathToHostPath(os.ExpandEnv(strings.Replace(item.workspace, "~", home, 1)))
+			item.workspace = normalizeLegacyWorkspacePath(os.ExpandEnv(strings.Replace(item.workspace, "~", home, 1)))
 		}
 		items = append(items, item)
 	}

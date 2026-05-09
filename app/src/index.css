@@ -163,6 +163,36 @@
   color: rgb(180 180 190);
 }
 
+[data-id="current-history-list"] .chat-markdown .hljs {
+  color: rgb(212 212 216);
+  background: transparent;
+}
+
+[data-id="current-history-list"] .chat-markdown .hljs-keyword,
+[data-id="current-history-list"] .chat-markdown .hljs-built_in {
+  color: rgb(125 211 252);
+}
+
+[data-id="current-history-list"] .chat-markdown .hljs-string,
+[data-id="current-history-list"] .chat-markdown .hljs-variable,
+[data-id="current-history-list"] .chat-markdown .hljs-template-variable {
+  color: rgb(134 239 172);
+}
+
+[data-id="current-history-list"] .chat-markdown .hljs-number,
+[data-id="current-history-list"] .chat-markdown .hljs-literal {
+  color: rgb(253 224 71);
+}
+
+[data-id="current-history-list"] .chat-markdown .hljs-comment {
+  color: rgb(113 113 122);
+}
+
+[data-id="current-history-list"] .chat-markdown .hljs-title,
+[data-id="current-history-list"] .chat-markdown .hljs-function {
+  color: rgb(196 181 253);
+}
+
 [data-id="current-history-list"] .chat-markdown td {
   color: rgb(180 180 190);
 }
