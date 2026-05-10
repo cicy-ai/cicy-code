@@ -161,12 +161,56 @@ func loadRuntimeAIConfig() runtimeAIConfig {
 
 func loadRuntimeAIConfigForProvider(provider string) (runtimeAIConfig, bool) {
 	cfg := readGlobalJSONConfig()
-	ai := cfgMapValue(cfg, "ai")
-	providerMap := cfgMapValue(ai, "provider")
 	provider = strings.TrimSpace(provider)
 	if provider == "" {
 		return runtimeAIConfig{}, false
 	}
+
+	// Try new providers config first
+	if pc, ok := loadProviderByKey(provider); ok {
+		result := runtimeAIConfig{
+			Provider:             pc.Key,
+			APIKey:               pc.APIKey,
+			DefaultOpencodeModel: pc.DefaultModel,
+			DefaultClaudeModel:   pc.DefaultModel,
+			CodexModel:           pc.DefaultModel,
+			OpenClawModel:        pc.DefaultModel,
+			HermesModel:          pc.DefaultModel,
+		}
+		// Set URL based on protocol
+		baseURL := strings.TrimRight(pc.URL, "/")
+		if pc.Protocol == "anthropic" {
+			result.AnthropicURL = baseURL
+			result.APIURL = baseURL + "/v1"
+		} else {
+			// openai protocol
+			result.APIURL = baseURL
+			if !strings.HasSuffix(baseURL, "/v1") {
+				result.APIURL = baseURL + "/v1"
+			}
+			result.AnthropicURL = strings.TrimSuffix(baseURL, "/v1")
+		}
+		// Apply defaults
+		if result.DefaultOpencodeModel == "" {
+			result.DefaultOpencodeModel = "gpt-5.4"
+		}
+		if result.DefaultClaudeModel == "" {
+			result.DefaultClaudeModel = "claude-opus-4-7"
+		}
+		result.DefaultClaudeModel = normalizeClaudeModel(result.DefaultClaudeModel)
+		if result.CodexModel == "" {
+			result.CodexModel = "gpt-5.4"
+		}
+		if result.OpenClawModel == "" {
+			result.OpenClawModel = "gpt-5.5"
+		}
+		result.HermesModel = normalizeHermesModel(result.HermesModel)
+		return result, true
+	}
+
+	// Fallback to legacy ai.provider config
+	ai := cfgMapValue(cfg, "ai")
+	providerMap := cfgMapValue(ai, "provider")
 	result := defaultRuntimeAIConfig(provider, cfg)
 
 	selectedProvider := cfgMapValue(providerMap, provider)
