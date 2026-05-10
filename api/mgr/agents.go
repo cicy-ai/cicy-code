@@ -13,6 +13,7 @@ import (
 func listAgentsByPane(paneID string) ([]M, error) {
 	query := `SELECT pa.id, pa.pane_id, pa.agent_name, pa.status,
 		COALESCE(ac.title, pa.agent_name) as title,
+		COALESCE(ac.agent_type, '') as agent_type,
 		COALESCE(ac.machine_id, 0) as machine_id,
 		COALESCE(m.label, '') as machine_label,
 		COALESCE(ac.source_kind, 'local') as source_kind,
@@ -33,10 +34,10 @@ func listAgentsByPane(paneID string) ([]M, error) {
 	var agents []M
 	for rows.Next() {
 		var id int
-		var pid, name, status, title, machineLabel, sourceKind, sourceRef string
+		var pid, name, status, title, agentType, machineLabel, sourceKind, sourceRef string
 		var machineID int
-		rows.Scan(&id, &pid, &name, &status, &title, &machineID, &machineLabel, &sourceKind, &sourceRef)
-		agents = append(agents, M{"id": id, "pane_id": pid, "name": name, "status": status, "title": title, "machine_id": machineID, "machine_label": machineLabel, "source_kind": sourceKind, "source_ref": sourceRef})
+		rows.Scan(&id, &pid, &name, &status, &title, &agentType, &machineID, &machineLabel, &sourceKind, &sourceRef)
+		agents = append(agents, M{"id": id, "pane_id": pid, "name": name, "status": status, "title": title, "agent_type": agentType, "machine_id": machineID, "machine_label": machineLabel, "source_kind": sourceKind, "source_ref": sourceRef})
 	}
 	if agents == nil {
 		agents = []M{}
