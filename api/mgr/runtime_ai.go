@@ -171,8 +171,40 @@ func loadPaneRuntimeAIOverride(agentID string) (*runtimeAIOverride, error) {
 	return extractRuntimeAIFromConfigJSON(config.String), nil
 }
 
+// loadPaneAgentType returns the agent_type for a given agent ID
+func loadPaneAgentType(agentID string) string {
+	paneID := normPaneID(agentID)
+	var agentType sql.NullString
+	if err := store.QueryRow("SELECT agent_type FROM agent_config WHERE pane_id=?", paneID).Scan(&agentType); err != nil {
+		return ""
+	}
+	if !agentType.Valid {
+		return ""
+	}
+	return strings.TrimSpace(agentType.String)
+}
+
 func resolveRuntimeAIConfigForAgent(providerProtocol string, agentID string) (runtimeAIConfig, *runtimeAIOverride, error) {
-	cfg := loadRuntimeAIConfig()
+	// First, try to get provider based on agent type from new providers config
+	agentType := loadPaneAgentType(agentID)
+	var cfg runtimeAIConfig
+	var foundNewConfig bool
+
+	if agentType != "" {
+		// Try to find default provider for this agent type in new config
+		if providerKey := loadDefaultProviderKeyForAgentType(agentType); providerKey != "" {
+			if specific, ok := loadRuntimeAIConfigForProvider(providerKey); ok {
+				cfg = specific
+				foundNewConfig = true
+			}
+		}
+	}
+
+	// Fallback to legacy config if new config not found
+	if !foundNewConfig {
+		cfg = loadRuntimeAIConfig()
+	}
+
 	ov, err := loadPaneRuntimeAIOverride(agentID)
 	if err != nil || ov == nil {
 		return cfg, ov, err

@@ -134,7 +134,7 @@ Options:
 	http.HandleFunc("/api/tmux/send", authM(handleSend))
 	http.HandleFunc("/api/tmux/send-keys", authM(handleSendKeys))
 	http.HandleFunc("/api/tmux/client-trace", authM(handleTmuxClientTrace))
-	http.HandleFunc("/api/tmux/send_wait", authM(handleSendWait))
+	// http.HandleFunc("/api/tmux/send_wait", authM(handleSendWait)) // TODO: implement handleSendWait
 	http.HandleFunc("/api/tmux/capture", authM(handleCapture))
 	http.HandleFunc("/api/tmux/windows", authM(handleWindows))
 	http.HandleFunc("/api/tmux/tree", authM(handleTree))

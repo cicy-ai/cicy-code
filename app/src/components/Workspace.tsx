@@ -436,7 +436,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useEffect(() => {
     // 5 秒 WS 轮询兜底 + 页面可见时立即请求
     const sendPollRequest = () => {
-      console.log('[poll_request] sending via WS, readyState:', chatWsRef.current?.readyState);
+      //console.log('[poll_request] sending via WS, readyState:', chatWsRef.current?.readyState);
       try { chatWsRef.current?.send(JSON.stringify({ type: 'poll_request' })); } catch (e) { console.warn('[poll_request] send failed:', e); } 
     };
     const onVisible = () => {
@@ -663,7 +663,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           chatWsClientId: clientId,
         });
         // 连接建立后立即请求 poll 数据
-        console.log('[poll_request] WS onopen, sending initial poll_request');
+        //console.log('[poll_request] WS onopen, sending initial poll_request');
         try { ws.send(JSON.stringify({ type: 'poll_request' })); } catch (e) { console.warn('[poll_request] onopen send failed:', e); }
         try { ws.send(JSON.stringify({ type: 'register_active_channel', data: { agent_id: activeCliPaneId || paneId, client_id: clientId, channel_type: 'web', platform: wsClientPlatform, arch: wsClientArch } })); } catch (e) { console.warn('[chat-ws] register_active_channel onopen failed:', e); }
         sendLatencyPing();
@@ -673,6 +673,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         if (dead || chatWsRef.current !== ws) return;
         try {
           const msg = JSON.parse(String(event.data || ''));
+          if (msg?.type === 'current_updated' || msg?.type === 'status_change' || msg?.type === 'ai_chunk') {
+            console.log('[chat-ws-live]', msg.type, msg.data || {});
+          }
           if (msg?.type === 'user_q') {
             setChatWsLiveStatus('pending');
             setChatWsLiveText('');
@@ -771,7 +774,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             }
           } else if (msg?.type === 'poll_data' && msg.data) {
             const data = msg.data;
-            console.log('[poll_data]', data);
             const nextBoundAgents = Array.isArray(data.agents) ? data.agents : [];
             const nextPollStatuses = data.statuses && typeof data.statuses === 'object' ? data.statuses : {};
             setBoundAgents((prev) => isDeepEqual(prev, nextBoundAgents) ? prev : nextBoundAgents);
