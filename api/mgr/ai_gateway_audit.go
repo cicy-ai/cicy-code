@@ -93,27 +93,30 @@ type aiGatewayCurrentSnapshot struct {
 }
 
 type aiGatewayReplySnapshot struct {
-	TurnID           string                 `json:"turn_id"`
-	Status           string                 `json:"status"`
-	StartedAt        string                 `json:"started_at"`
-	UpdatedAt        string                 `json:"updated_at"`
-	Thinking         string                 `json:"thinking"`
-	Answer           string                 `json:"answer"`
-	ToolCalls        []aiGatewayToolCall    `json:"tool_calls"`
-	HTTPRequests     []aiGatewayRequestSpan `json:"http_requests"`
-	Usage            map[string]interface{} `json:"usage"`
-	InputTokens      int                    `json:"input_tokens"`
-	OutputTokens     int                    `json:"output_tokens"`
-	TotalTokens      int                    `json:"total_tokens"`
-	CostCredit       float64                `json:"cost_credit"`
-	LastUsage        map[string]interface{} `json:"last_usage,omitempty"`
-	LastInputTokens  int                    `json:"last_input_tokens,omitempty"`
-	LastOutputTokens int                    `json:"last_output_tokens,omitempty"`
-	LastTotalTokens  int                    `json:"last_total_tokens,omitempty"`
-	LastCostCredit   float64                `json:"last_cost_credit,omitempty"`
-	Models           []string               `json:"models"`
-	RequestCount     int                    `json:"request_count"`
-	StatusMap        aiGatewayStatusMap     `json:"status_map"`
+	TurnID                   string                   `json:"turn_id"`
+	Status                   string                   `json:"status"`
+	StartedAt                string                   `json:"started_at"`
+	UpdatedAt                string                   `json:"updated_at"`
+	Thinking                 string                   `json:"thinking"`
+	Answer                   string                   `json:"answer"`
+	ToolCalls                []aiGatewayToolCall      `json:"tool_calls"`
+	Items                    []map[string]interface{} `json:"items"` // accumulated content blocks across all API calls
+	HTTPRequests             []aiGatewayRequestSpan   `json:"http_requests"`
+	Usage                    map[string]interface{}   `json:"usage"`
+	InputTokens              int                      `json:"input_tokens"`
+	OutputTokens             int                      `json:"output_tokens"`
+	CacheCreationInputTokens int                      `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int                      `json:"cache_read_input_tokens"`
+	TotalTokens              int                      `json:"total_tokens"`
+	CostCredit               float64                  `json:"cost_credit"`
+	LastUsage                map[string]interface{}   `json:"last_usage,omitempty"`
+	LastInputTokens          int                      `json:"last_input_tokens,omitempty"`
+	LastOutputTokens         int                      `json:"last_output_tokens,omitempty"`
+	LastTotalTokens          int                      `json:"last_total_tokens,omitempty"`
+	LastCostCredit           float64                  `json:"last_cost_credit,omitempty"`
+	Models                   []string                 `json:"models"`
+	RequestCount             int                      `json:"request_count"`
+	StatusMap                aiGatewayStatusMap       `json:"status_map"`
 }
 
 type aiGatewayMessageRecord struct {
@@ -184,6 +187,8 @@ type aiGatewayStreamAccumulator struct {
 	toolCalls     map[string]*aiGatewayToolCall
 	usage         map[string]interface{}
 	autoIndex     int
+	// contentBlocks accumulates raw content blocks in native format (Claude/OpenAI)
+	contentBlocks []map[string]interface{}
 }
 
 var aiGatewayLiveReplySnapshots = struct {
@@ -335,6 +340,21 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		ActiveRequestIDs: []string{requestID},
 		ConversationIDs:  []string{conversationID},
 	}
+	// If previous reply was updated recently (within 60 seconds), inherit Items
+	// This handles multi-round API calls within the same turn (e.g., tool_use -> tool_result -> continue)
+	var prevItems []map[string]interface{}
+	if prevReply.TurnID != "" && prevReply.UpdatedAt != "" {
+		prevUpdatedAt, err := time.Parse(time.RFC3339, prevReply.UpdatedAt)
+		if err == nil && time.Since(prevUpdatedAt) < 60*time.Second {
+			// Previous reply was updated recently, inherit items
+			prevItems = prevReply.Items
+			// Use the same turn_id as the previous reply
+			turnID = prevReply.TurnID
+		}
+	}
+	if prevItems == nil {
+		prevItems = []map[string]interface{}{}
+	}
 	reply := aiGatewayReplySnapshot{
 		TurnID:           turnID,
 		Status:           "thinking",
@@ -343,6 +363,7 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		Thinking:         "",
 		Answer:           "",
 		ToolCalls:        []aiGatewayToolCall{},
+		Items:            prevItems,
 		HTTPRequests:     []aiGatewayRequestSpan{requestSpan},
 		Usage:            map[string]interface{}{},
 		InputTokens:      prevInputTokens,
@@ -355,7 +376,7 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		LastTotalTokens:  prevReply.LastTotalTokens,
 		LastCostCredit:   prevReply.LastCostCredit,
 		Models:           aiGatewayOptionalStringList(model),
-		RequestCount:     1,
+		RequestCount:     0,
 		StatusMap: aiGatewayStatusMap{
 			Primary: "thinking",
 			Items: []aiGatewayStatusItem{
@@ -489,7 +510,11 @@ func (s *aiGatewayAuditSession) writeStartSnapshots() error {
 		s.mu.Unlock()
 		return err
 	}
-	if err := s.writeSnapshotsLocked(); err != nil {
+	if err := aiGatewayWriteCurrentSnapshot(s.agentID, s.current); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	if err := aiGatewayWriteReplySnapshot(s.agentID, s.reply); err != nil {
 		s.mu.Unlock()
 		return err
 	}
@@ -569,10 +594,54 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	s.reply.Thinking = parsed.Thinking
 	s.reply.Answer = parsed.Answer
 	s.reply.ToolCalls = parsed.ToolCalls
+	// Accumulate items from this API call
+	if parsed.Thinking != "" {
+		s.reply.Items = append(s.reply.Items, map[string]interface{}{
+			"id":       len(s.reply.Items) + 1,
+			"type":     "thinking",
+			"thinking": parsed.Thinking,
+		})
+	}
+	if parsed.Answer != "" {
+		s.reply.Items = append(s.reply.Items, map[string]interface{}{
+			"id":   len(s.reply.Items) + 1,
+			"type": "text",
+			"text": parsed.Answer,
+		})
+	}
+	for _, tc := range parsed.ToolCalls {
+		// Skip empty tool calls
+		if tc.ToolID == "" && tc.ToolName == "" {
+			continue
+		}
+		var input interface{}
+		if tc.Arguments != "" {
+			if err := json.Unmarshal([]byte(tc.Arguments), &input); err != nil {
+				input = tc.Arguments
+			}
+		}
+		s.reply.Items = append(s.reply.Items, map[string]interface{}{
+			"id":      len(s.reply.Items) + 1,
+			"type":    "tool_use",
+			"tool_id": tc.ToolID,
+			"name":    tc.ToolName,
+			"input":   input,
+		})
+	}
 	s.reply.Usage = aiGatewayCloneAnyMap(parsed.Usage)
-	s.reply.InputTokens += requestSpan.InputTokens
+	// input_tokens: use latest (each request includes full context, so don't accumulate)
+	// output_tokens: accumulate (each request produces independent output)
+	// cache tokens: use latest (same as input_tokens)
+	if requestSpan.InputTokens > 0 {
+		s.reply.InputTokens = requestSpan.InputTokens
+	}
+	cacheCreate, cacheRead := aiGatewayCacheTokens(parsed.Usage)
+	if cacheCreate > 0 || cacheRead > 0 {
+		s.reply.CacheCreationInputTokens = cacheCreate
+		s.reply.CacheReadInputTokens = cacheRead
+	}
 	s.reply.OutputTokens += requestSpan.OutputTokens
-	s.reply.TotalTokens += requestSpan.TotalTokens
+	s.reply.TotalTokens = s.reply.InputTokens + s.reply.OutputTokens
 	s.reply.CostCredit += requestSpan.CostCredit
 	if len(parsed.Usage) > 0 || requestSpan.InputTokens > 0 || requestSpan.OutputTokens > 0 || requestSpan.TotalTokens > 0 || requestSpan.CostCredit > 0 {
 		s.reply.LastUsage = aiGatewayCloneAnyMap(parsed.Usage)
@@ -601,7 +670,7 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	s.reply.Status = statusMap.Primary
 	s.reply.StatusMap = statusMap
 
-	if err := s.writeSnapshotsLocked(); err != nil {
+	if err := aiGatewayWriteReplySnapshot(s.agentID, s.reply); err != nil {
 		log.Printf("[ai-gateway] write reply snapshot failed for %s: %v", s.agentID, err)
 	}
 	replySnapshot := s.reply
@@ -630,20 +699,6 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	if tgHook != nil {
 		tgHook.finalize(replySnapshot)
 	}
-}
-
-func (s *aiGatewayAuditSession) writeSnapshotsLocked() error {
-	historyDir := aiGatewayHistoryDir(s.agentID)
-	currentPath := filepath.Join(historyDir, "current.json")
-	s.current.Body = aiGatewayAnnotateCurrentBodyHistoryIDs(aiGatewayCloneJSONValue(s.current.Body))
-	s.current.MaxHistoryID = aiGatewayCurrentBodyMaxHistoryID(s.current.Body)
-	if err := aiGatewayWriteJSONAtomic(currentPath, s.current); err != nil {
-		return err
-	}
-	aiGatewayStoreLiveReplySnapshot(s.agentID, s.reply)
-	_ = os.Remove(filepath.Join(historyDir, "reply.json"))
-	_ = os.RemoveAll(aiGatewayReplyDir(s.agentID))
-	return nil
 }
 
 func aiGatewayHistoryDir(agentID string) string {
@@ -695,6 +750,69 @@ func aiGatewayWriteJSONAtomic(path string, value interface{}) error {
 		return err
 	}
 	return os.Rename(tmpPath, path)
+}
+
+func aiGatewayCurrentSnapshotPath(agentID string) string {
+	return filepath.Join(aiGatewayHistoryDir(agentID), "current.json")
+}
+
+func aiGatewayReplySnapshotPath(agentID string) string {
+	return filepath.Join(aiGatewayHistoryDir(agentID), "reply.json")
+}
+
+func aiGatewayWriteCurrentSnapshot(agentID string, current aiGatewayCurrentSnapshot) error {
+	current.Body = aiGatewayAnnotateCurrentBodyHistoryIDs(aiGatewayCloneJSONValue(current.Body))
+	current.MaxHistoryID = aiGatewayCurrentBodyMaxHistoryID(current.Body)
+	return aiGatewayWriteJSONAtomic(aiGatewayCurrentSnapshotPath(agentID), current)
+}
+
+// aiGatewayReplySnapshotLite is a simplified version for reply.json
+// Contains native content blocks format (like body.messages in current.json)
+type aiGatewayReplySnapshotLite struct {
+	TurnID                   string                   `json:"turn_id"`
+	Status                   string                   `json:"status"`
+	StartedAt                string                   `json:"started_at"`
+	UpdatedAt                string                   `json:"updated_at"`
+	Items                    []map[string]interface{} `json:"items"`
+	InputTokens              int                      `json:"input_tokens"`
+	OutputTokens             int                      `json:"output_tokens"`
+	CacheCreationInputTokens int                      `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int                      `json:"cache_read_input_tokens"`
+	TotalTokens              int                      `json:"total_tokens"`
+	CostCredit               float64                  `json:"cost_credit"`
+}
+
+func aiGatewayWriteReplySnapshot(agentID string, reply aiGatewayReplySnapshot) error {
+	aiGatewayStoreLiveReplySnapshot(agentID, reply)
+	lite := aiGatewayReplySnapshotLite{
+		TurnID:                   reply.TurnID,
+		Status:                   reply.Status,
+		StartedAt:                reply.StartedAt,
+		UpdatedAt:                reply.UpdatedAt,
+		Items:                    reply.Items,
+		InputTokens:              reply.InputTokens,
+		OutputTokens:             reply.OutputTokens,
+		CacheCreationInputTokens: reply.CacheCreationInputTokens,
+		CacheReadInputTokens:     reply.CacheReadInputTokens,
+		TotalTokens:              reply.TotalTokens,
+		CostCredit:               reply.CostCredit,
+	}
+	return aiGatewayWriteJSONAtomic(aiGatewayReplySnapshotPath(agentID), lite)
+}
+
+func aiGatewayReadReplySnapshotFile(agentID string) (aiGatewayReplySnapshot, error) {
+	reply := aiGatewayReplySnapshot{}
+	body, err := os.ReadFile(aiGatewayReplySnapshotPath(agentID))
+	if err != nil {
+		return reply, err
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return reply, nil
+	}
+	if err := json.Unmarshal(body, &reply); err != nil {
+		return aiGatewayReplySnapshot{}, err
+	}
+	return reply, nil
 }
 
 func aiGatewaySystemPromptPath(agentID string) string {
@@ -2289,8 +2407,8 @@ func (s *aiGatewayAuditSession) applyStreamEventsLocked(events []aiGatewayReplyE
 	s.current.Status = statusMap.Primary
 	s.reply.Status = statusMap.Primary
 	s.reply.StatusMap = statusMap
-	if err := s.writeSnapshotsLocked(); err != nil {
-		log.Printf("[ai-gateway] write live snapshot failed for %s: %v", s.agentID, err)
+	if err := aiGatewayWriteReplySnapshot(s.agentID, s.reply); err != nil {
+		log.Printf("[ai-gateway] write live reply snapshot failed for %s: %v", s.agentID, err)
 	}
 	return s.broadcastStatusLocked()
 }
@@ -2525,13 +2643,16 @@ func aiGatewayParseStreamResponse(body []byte) aiGatewayParsedResponse {
 		if eventType != "data" || payload == nil {
 			continue
 		}
+		// Extract deltas first - this may modify payload["usage"] for message_start/message_delta events
+		deltas := aiGatewayExtractStreamDeltas(payload)
+		// Now read usage after aiGatewayExtractStreamDeltas has processed the payload
 		if usage := aiGatewayMap(payload["usage"]); len(usage) > 0 {
 			acc.usage = aiGatewayMergeUsage(acc.usage, usage)
 		}
 		if acc.handleResponsesEvent(payload) {
 			continue
 		}
-		for _, delta := range aiGatewayExtractStreamDeltas(payload) {
+		for _, delta := range deltas {
 			switch delta.Kind {
 			case "thinking":
 				if delta.Content != "" {
@@ -3163,6 +3284,11 @@ func aiGatewayEstimateCostCredit(model string, usage map[string]interface{}) flo
 }
 
 func aiGatewayLoadReplySnapshot(agentID string) aiGatewayReplySnapshot {
+	if reply, err := aiGatewayReadReplySnapshotFile(agentID); err == nil {
+		aiGatewayStoreLiveReplySnapshot(agentID, reply)
+		reply.StatusMap = aiGatewayBuildStatusMap(aiGatewayCurrentSnapshot{}, reply)
+		return reply
+	}
 	if reply, ok := aiGatewayGetLiveReplySnapshot(agentID); ok {
 		return reply
 	}
@@ -3325,6 +3451,12 @@ func aiGatewayUsageTotals(usage map[string]interface{}) (int, int, int) {
 		totalTokens = inputTokens + outputTokens
 	}
 	return inputTokens, outputTokens, totalTokens
+}
+
+func aiGatewayCacheTokens(usage map[string]interface{}) (int, int) {
+	cacheCreate := aiGatewayTokenValue(usage, "cache_creation_input_tokens", "cacheCreationInputTokens")
+	cacheRead := aiGatewayTokenValue(usage, "cache_read_input_tokens", "cacheReadInputTokens")
+	return cacheCreate, cacheRead
 }
 
 func aiGatewayTokenValue(usage map[string]interface{}, keys ...string) int {
