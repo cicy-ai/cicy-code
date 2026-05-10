@@ -19,6 +19,24 @@ type runtimeAIConfig struct {
 	HermesModel          string
 }
 
+// providerConfig represents a single provider from the new providers.items array
+type providerConfig struct {
+	Name         string            `json:"name"`
+	Key          string            `json:"key"`
+	URL          string            `json:"url"`
+	APIKey       string            `json:"apiKey"`
+	Protocol     string            `json:"protocol"` // "anthropic" or "openai"
+	DefaultModel string            `json:"defaultModel"`
+	ModelMapping map[string]string `json:"modelMapping"`
+	Models       []string          `json:"models"`
+}
+
+// providersConfig represents the new providers configuration structure
+type providersConfig struct {
+	Default map[string]string `json:"default"` // agent_type -> provider_key
+	Items   []providerConfig  `json:"items"`
+}
+
 func globalJSONPath() string {
 	return cicyGlobalJSONPath
 }
@@ -210,4 +228,178 @@ func loadRuntimeAIConfigForProvider(provider string) (runtimeAIConfig, bool) {
 	}
 	result.HermesModel = normalizeHermesModel(result.HermesModel)
 	return result, true
+}
+
+// loadProvidersConfig loads the new providers configuration from global.json
+// Returns nil if the new structure doesn't exist (fallback to legacy config)
+func loadProvidersConfig() *providersConfig {
+	cfg := readGlobalJSONConfig()
+	providersRaw, ok := cfg["providers"]
+	if !ok {
+		return nil
+	}
+	providersMap, ok := providersRaw.(map[string]any)
+	if !ok || len(providersMap) == 0 {
+		return nil
+	}
+
+	result := &providersConfig{
+		Default: make(map[string]string),
+		Items:   []providerConfig{},
+	}
+
+	// Parse default mapping
+	if defaultRaw, ok := providersMap["default"]; ok {
+		if defaultMap, ok := defaultRaw.(map[string]any); ok {
+			for agentType, providerKey := range defaultMap {
+				if keyStr, ok := providerKey.(string); ok {
+					result.Default[agentType] = keyStr
+				}
+			}
+		}
+	}
+
+	// Parse items array
+	if itemsRaw, ok := providersMap["items"]; ok {
+		if itemsArr, ok := itemsRaw.([]any); ok {
+			for _, itemRaw := range itemsArr {
+				if itemMap, ok := itemRaw.(map[string]any); ok {
+					pc := providerConfig{
+						Name:         cfgStringValue(itemMap, "name"),
+						Key:          cfgStringValue(itemMap, "key"),
+						URL:          cfgStringValue(itemMap, "url"),
+						APIKey:       cfgStringValue(itemMap, "apiKey"),
+						Protocol:     cfgStringValue(itemMap, "protocol"),
+						DefaultModel: cfgStringValue(itemMap, "defaultModel"),
+						ModelMapping: make(map[string]string),
+						Models:       []string{},
+					}
+
+					// Parse modelMapping
+					if mappingRaw, ok := itemMap["modelMapping"]; ok {
+						if mappingMap, ok := mappingRaw.(map[string]any); ok {
+							for from, to := range mappingMap {
+								if toStr, ok := to.(string); ok {
+									pc.ModelMapping[from] = toStr
+								}
+							}
+						}
+					}
+
+					// Parse models array
+					if modelsRaw, ok := itemMap["models"]; ok {
+						if modelsArr, ok := modelsRaw.([]any); ok {
+							for _, m := range modelsArr {
+								if mStr, ok := m.(string); ok {
+									pc.Models = append(pc.Models, mStr)
+								}
+							}
+						}
+					}
+
+					result.Items = append(result.Items, pc)
+				}
+			}
+		}
+	}
+
+	if len(result.Items) == 0 {
+		return nil
+	}
+	return result
+}
+
+// loadProviderByKey finds a provider by its key from the new providers.items array
+func loadProviderByKey(key string) (*providerConfig, bool) {
+	providers := loadProvidersConfig()
+	if providers == nil {
+		return nil, false
+	}
+	key = strings.TrimSpace(key)
+	for i := range providers.Items {
+		if providers.Items[i].Key == key {
+			return &providers.Items[i], true
+		}
+	}
+	return nil, false
+}
+
+// loadDefaultProviderKeyForAgentType returns the default provider key for a given agent type
+func loadDefaultProviderKeyForAgentType(agentType string) string {
+	providers := loadProvidersConfig()
+	if providers == nil {
+		return ""
+	}
+	agentType = strings.TrimSpace(strings.ToLower(agentType))
+	if key, ok := providers.Default[agentType]; ok {
+		return key
+	}
+	return ""
+}
+
+// loadProviderForAgentType returns the provider config for a given agent type
+func loadProviderForAgentType(agentType string) (*providerConfig, bool) {
+	key := loadDefaultProviderKeyForAgentType(agentType)
+	if key == "" {
+		return nil, false
+	}
+	return loadProviderByKey(key)
+}
+
+// listProviderKeys returns all provider keys from the new providers.items array
+func listProviderKeys() []string {
+	providers := loadProvidersConfig()
+	if providers == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(providers.Items))
+	for _, p := range providers.Items {
+		keys = append(keys, p.Key)
+	}
+	return keys
+}
+
+// listProviderNames returns all provider display names from the new providers.items array
+func listProviderNames() []string {
+	providers := loadProvidersConfig()
+	if providers == nil {
+		return nil
+	}
+	names := make([]string, 0, len(providers.Items))
+	for _, p := range providers.Items {
+		names = append(names, p.Name)
+	}
+	return names
+}
+
+// hasNewProvidersConfig returns true if the new providers configuration exists
+func hasNewProvidersConfig() bool {
+	return loadProvidersConfig() != nil
+}
+
+// applyModelMapping applies the provider's model mapping to the requested model
+func (p *providerConfig) applyModelMapping(requestedModel string) string {
+	if p.ModelMapping == nil {
+		return requestedModel
+	}
+	if mapped, ok := p.ModelMapping[requestedModel]; ok && mapped != "" {
+		return mapped
+	}
+	return requestedModel
+}
+
+// getEffectiveURL returns the URL for API requests based on protocol
+// For anthropic protocol, returns the base URL
+// For openai protocol, returns the URL (which should already include /v1 if needed)
+func (p *providerConfig) getEffectiveURL() string {
+	return strings.TrimRight(p.URL, "/")
+}
+
+// getOpenAIURL returns the URL for OpenAI-compatible API requests
+func (p *providerConfig) getOpenAIURL() string {
+	url := p.getEffectiveURL()
+	if p.Protocol == "openai" && !strings.HasSuffix(url, "/v1") {
+		return url + "/v1"
+	}
+	return url
 }

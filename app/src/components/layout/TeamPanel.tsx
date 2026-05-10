@@ -29,6 +29,7 @@ interface Binding {
   name: string;
   title?: string;
   status?: string;
+  agent_type?: string;
   machine_id?: number;
   machine_label?: string;
   instance_label?: string;
@@ -472,7 +473,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                   return renderAgentCard({
                     wid,
                     title: getName(b),
-                    agentType: agentTypeById.get(wid) || '',
+                    agentType: normalizeAgentType(b.agent_type) || agentTypeById.get(wid) || '',
                     status: s,
                     subtitle: subtitleParts.join(' · '),
                     active: activePaneId === wid,
