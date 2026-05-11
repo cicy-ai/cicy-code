@@ -14,28 +14,17 @@ var (
 )
 
 type runtimeAIOverride struct {
-	ProviderName     string `json:"provider_name,omitempty"`
-	ProviderProtocol string `json:"provider_protocol,omitempty"`
-	Model            string `json:"model,omitempty"`
+	ProviderName string `json:"provider_name,omitempty"`
+}
+
+type runtimeAIDefaultSummary struct {
+	ProviderName  string `json:"provider_name,omitempty"`
+	ProviderLabel string `json:"provider_label,omitempty"`
+	Model         string `json:"model,omitempty"`
 }
 
 func (o *runtimeAIOverride) Empty() bool {
-	return o == nil || (strings.TrimSpace(o.ProviderName) == "" && strings.TrimSpace(o.ProviderProtocol) == "" && strings.TrimSpace(o.Model) == "")
-}
-
-func normalizeRuntimeAIProtocol(raw string, model string) string {
-	protocol := normalizeAIGatewayProvider(raw)
-	if protocol != "" {
-		return protocol
-	}
-	lowerModel := strings.ToLower(strings.TrimSpace(model))
-	if strings.HasPrefix(lowerModel, "claude-") {
-		return "anthropic"
-	}
-	if strings.HasPrefix(lowerModel, "gpt-") {
-		return "openai"
-	}
-	return ""
+	return o == nil || strings.TrimSpace(o.ProviderName) == ""
 }
 
 func runtimeAIOverrideFromAny(raw any) (*runtimeAIOverride, error) {
@@ -48,12 +37,6 @@ func runtimeAIOverrideFromAny(raw any) (*runtimeAIOverride, error) {
 	}
 	ov := &runtimeAIOverride{
 		ProviderName: strings.TrimSpace(cfgStringValue(m, "provider_name")),
-		Model:        strings.TrimSpace(cfgStringValue(m, "model")),
-	}
-	rawProtocol := strings.TrimSpace(cfgStringValue(m, "provider_protocol"))
-	ov.ProviderProtocol = normalizeRuntimeAIProtocol(rawProtocol, ov.Model)
-	if rawProtocol != "" && ov.ProviderProtocol == "" {
-		return nil, fmt.Errorf("runtime_ai.provider_protocol must be openai or anthropic")
 	}
 	if ov.ProviderName != "" {
 		if _, ok := loadRuntimeAIConfigForProvider(ov.ProviderName); !ok {
@@ -70,20 +53,9 @@ func runtimeAIOverrideToMap(ov *runtimeAIOverride) map[string]any {
 	if ov == nil || ov.Empty() {
 		return nil
 	}
-	out := map[string]any{}
-	if strings.TrimSpace(ov.ProviderName) != "" {
-		out["provider_name"] = strings.TrimSpace(ov.ProviderName)
+	return map[string]any{
+		"provider_name": strings.TrimSpace(ov.ProviderName),
 	}
-	if strings.TrimSpace(ov.ProviderProtocol) != "" {
-		out["provider_protocol"] = strings.TrimSpace(ov.ProviderProtocol)
-	}
-	if strings.TrimSpace(ov.Model) != "" {
-		out["model"] = strings.TrimSpace(ov.Model)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 func parsePaneConfigJSON(configJSON string) (map[string]any, error) {
@@ -115,6 +87,17 @@ func normalizePaneConfigJSON(configJSON string) (string, error) {
 			delete(cfg, "runtime_ai")
 		} else {
 			cfg["runtime_ai"] = runtimeAIOverrideToMap(ov)
+		}
+	}
+	if raw, ok := cfg["proxy"]; ok {
+		ps, err := proxySettingsFromAny(raw)
+		if err != nil {
+			return "", err
+		}
+		if ps == nil {
+			delete(cfg, "proxy")
+		} else {
+			cfg["proxy"] = proxySettingsToMap(ps)
 		}
 	}
 	if len(cfg) == 0 {
@@ -171,6 +154,22 @@ func loadPaneRuntimeAIOverride(agentID string) (*runtimeAIOverride, error) {
 	return extractRuntimeAIFromConfigJSON(config.String), nil
 }
 
+func runtimeAIDefaultSummaryForAgentType(agentType string) *runtimeAIDefaultSummary {
+	provider, ok := loadProviderForAgentType(agentType)
+	if !ok || provider == nil {
+		return nil
+	}
+	label := strings.TrimSpace(provider.Name)
+	if label == "" {
+		label = strings.TrimSpace(provider.Key)
+	}
+	return &runtimeAIDefaultSummary{
+		ProviderName:  strings.TrimSpace(provider.Key),
+		ProviderLabel: label,
+		Model:         providerDefaultModelForAgentType(provider, agentType),
+	}
+}
+
 // loadPaneAgentType returns the agent_type for a given agent ID
 func loadPaneAgentType(agentID string) string {
 	paneID := normPaneID(agentID)
@@ -208,10 +207,6 @@ func resolveRuntimeAIConfigForAgent(providerProtocol string, agentID string) (ru
 	ov, err := loadPaneRuntimeAIOverride(agentID)
 	if err != nil || ov == nil {
 		return cfg, ov, err
-	}
-	protocol := normalizeAIGatewayProvider(providerProtocol)
-	if ov.ProviderProtocol != "" && protocol != "" && ov.ProviderProtocol != protocol {
-		return cfg, ov, ErrRuntimeAIProviderMismatch
 	}
 	if ov.ProviderName != "" {
 		specific, ok := loadRuntimeAIConfigForProvider(ov.ProviderName)

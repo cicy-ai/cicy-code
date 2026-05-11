@@ -1,18 +1,29 @@
 import { Children, cloneElement, isValidElement, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { Brain, Loader2, Save, Search, Send, Settings, Zap } from 'lucide-react';
+import { Brain, Search, Send, Settings } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../../config';
 import apiService from '../../services/api';
 import { TokenManager } from '../../services/tokenManager';
-import { useApp } from '../../contexts/AppContext';
 import type { EditPaneData } from '../EditPaneDialog';
-import AgentTypeSelector from '../AgentTypeSelector';
-import Select from '../ui/Select';
+import AgentAvatar from '../AgentAvatar';
+import Select, { type SelectOption } from '../ui/Select';
+import { normalizeAgentType } from '../../lib/agentType';
 
-export type InspectorTab = 'overview' | 'memory' | 'settings';
+export type InspectorTab = 'overview' | 'memory' | 'settings' | 'history';
 type InspectorRequestedTab = InspectorTab | 'notes' | 'history';
 type PromptRuleKey = 'global' | 'project' | 'agent';
+type RuntimeAIProviderOption = {
+  key: string;
+  label: string;
+  protocol?: string;
+  models?: string[];
+};
+type RuntimeAIDefaultSummary = {
+  provider_name?: string;
+  provider_label?: string;
+  model?: string;
+};
 type PromptRuleDraft = {
   content: string;
   enabled: boolean;
@@ -29,13 +40,13 @@ const PROMPT_RULE_KEYS: PromptRuleKey[] = ['global', 'project', 'agent'];
 
 const tabs: Array<{ id: InspectorTab; label: string }> = [
   { id: 'overview', label: '概览' },
+  { id: 'history', label: 'History' },
   { id: 'memory', label: '运行时记忆' },
   { id: 'settings', label: '设置' },
 ];
 
 const settingsSections = [
   { id: 'general', label: '常规', icon: Settings },
-  { id: 'agent', label: '智能体', icon: Zap },
   { id: 'model', label: '模型', icon: Brain },
   { id: 'telegram', label: 'Telegram', icon: Send },
 ] as const;
@@ -67,47 +78,27 @@ function compactText(value?: string, fallback = '暂无', limit?: number) {
   return text;
 }
 
-function serializeSettingsData(value: EditPaneData | null) {
-  return JSON.stringify(value || null);
+function serializeGeneralSettings(value: EditPaneData | null) {
+  return JSON.stringify({
+    title: String(value?.title || ''),
+    active: value?.active !== false,
+    allow_all_actions: !!value?.allow_all_actions,
+    use_proxy: !!value?.use_proxy,
+    proxy: {
+      password: String(value?.proxy?.password || ''),
+      rule: String(value?.proxy?.rule || ''),
+    },
+  });
 }
 
-function parseRuntimeAIConfig(configJSON?: string) {
-  const fallback = { provider_name: '', provider_protocol: '', model: '' };
-  const raw = String(configJSON || '').trim();
-  if (!raw) return fallback;
-  try {
-    const parsed = JSON.parse(raw);
-    const runtimeAI = parsed?.runtime_ai || {};
-    return {
-      provider_name: String(runtimeAI.provider_name || ''),
-      provider_protocol: String(runtimeAI.provider_protocol || ''),
-      model: String(runtimeAI.model || ''),
-    };
-  } catch {
-    return fallback;
-  }
-}
-
-function mergeRuntimeAIConfig(configJSON: string | undefined, runtimeAI: { provider_name?: string; provider_protocol?: string; model?: string }) {
-  let next: any = {};
-  try {
-    next = JSON.parse(String(configJSON || '{}'));
-    if (!next || typeof next !== 'object' || Array.isArray(next)) next = {};
-  } catch {
-    next = {};
-  }
-  const providerName = String(runtimeAI.provider_name || '').trim();
-  const providerProtocol = String(runtimeAI.provider_protocol || '').trim();
-  const model = String(runtimeAI.model || '').trim();
-  if (!providerName && !providerProtocol && !model) {
-    delete next.runtime_ai;
-  } else {
-    next.runtime_ai = {};
-    if (providerName) next.runtime_ai.provider_name = providerName;
-    if (providerProtocol) next.runtime_ai.provider_protocol = providerProtocol;
-    if (model) next.runtime_ai.model = model;
-  }
-  return JSON.stringify(next);
+function serializeModelSettings(value: EditPaneData | null) {
+  return JSON.stringify({
+    default_model: String(value?.default_model || ''),
+    use_official_auth: !!value?.use_official_auth,
+    runtime_ai: value?.use_official_auth ? null : (value?.runtime_ai && String(value.runtime_ai.provider_name || '').trim()
+      ? { provider_name: String(value.runtime_ai.provider_name || '').trim() }
+      : null),
+  });
 }
 
 function formatCredit(value?: number) {
@@ -254,7 +245,7 @@ function highlightReactNode(node: ReactNode, query: string): ReactNode {
   if (childProps.children == null) {
     return node;
   }
-  return cloneElement(node, {
+  return cloneElement(node as any, {
     ...childProps,
     children: highlightReactNode(childProps.children, keyword),
   });
@@ -344,7 +335,6 @@ export default function AgentInspector({
   liveStatus?: string;
   inspectorVersion?: number;
 }) {
-  const { agentTypeOptions } = useApp();
   const [tab, setTab] = useState<InspectorTab>('overview');
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [queryDraft, setQueryDraft] = useState('');
@@ -360,11 +350,11 @@ export default function AgentInspector({
   const [settingsData, setSettingsData] = useState<EditPaneData | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
-  const [settingsSaved, setSettingsSaved] = useState(false);
-  const [runtimeAIProviderOptions, setRuntimeAIProviderOptions] = useState<Array<{ value: string; label: string }>>([]);
+  const [runtimeAIProviderOptions, setRuntimeAIProviderOptions] = useState<RuntimeAIProviderOption[]>([]);
+  const [runtimeAIDefault, setRuntimeAIDefault] = useState<RuntimeAIDefaultSummary | null>(null);
   const settingsPaneLoadedRef = useRef<string>('');
-  const settingsAutoSaveTimerRef = useRef<number | null>(null);
-  const [settingsBaseline, setSettingsBaseline] = useState('null');
+  const [generalSettingsBaseline, setGeneralSettingsBaseline] = useState('null');
+  const [modelSettingsBaseline, setModelSettingsBaseline] = useState('null');
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(queryDraft.trim()), 220);
@@ -377,7 +367,7 @@ export default function AgentInspector({
 
   useEffect(() => {
     if (!requestedTab) return;
-    setTab(requestedTab === 'notes' ? 'overview' : requestedTab);
+    setTab(requestedTab === 'notes' || requestedTab === 'history' ? 'overview' : requestedTab);
   }, [paneId, requestedTab]);
 
   useEffect(() => {
@@ -390,7 +380,6 @@ export default function AgentInspector({
     const target = `${paneId}:main.0`;
     settingsPaneLoadedRef.current = target;
     setSettingsLoading(true);
-    setSettingsSaved(false);
     apiService.getPane(paneId).then(({ data: detail }) => {
       if (cancelled || settingsPaneLoadedRef.current !== target) return;
       const next: EditPaneData = {
@@ -399,6 +388,14 @@ export default function AgentInspector({
         agent_duty: String(detail?.agent_duty || ''),
         agent_type: String(detail?.agent_type || ''),
         allow_all_actions: !!detail?.allow_all_actions,
+        use_official_auth: !!detail?.use_official_auth,
+        use_proxy: !!detail?.use_proxy,
+        proxy: detail?.proxy && typeof detail.proxy === 'object'
+          ? {
+              password: String(detail.proxy.password || ''),
+              rule: String(detail.proxy.rule || ''),
+            }
+          : null,
         workspace: String(detail?.workspace || ''),
         active: detail?.active !== false && detail?.active !== 0,
         init_script: String(detail?.init_script || ''),
@@ -409,22 +406,39 @@ export default function AgentInspector({
         ttyd_preview: String(detail?.ttyd_preview || ''),
         role: String(detail?.role || ''),
         default_model: String(detail?.default_model || ''),
-        runtime_ai_provider_name: parseRuntimeAIConfig(String(detail?.config || '{}')).provider_name,
-        runtime_ai_provider_protocol: parseRuntimeAIConfig(String(detail?.config || '{}')).provider_protocol,
-        runtime_ai_model: parseRuntimeAIConfig(String(detail?.config || '{}')).model,
+        runtime_ai: detail?.runtime_ai && typeof detail.runtime_ai === 'object'
+          ? {
+              provider_name: String(detail.runtime_ai.provider_name || ''),
+            }
+          : null,
       };
-      const providerNames = Array.isArray(detail?.runtime_ai_provider_names) ? detail.runtime_ai_provider_names : [];
-      setRuntimeAIProviderOptions(providerNames.map((name: string) => ({ value: String(name), label: String(name) })));
+      const providerOptions = Array.isArray(detail?.runtime_ai_provider_options) ? detail.runtime_ai_provider_options : [];
+      setRuntimeAIProviderOptions(providerOptions.map((item: any) => ({
+        key: String(item?.key || ''),
+        label: String(item?.label || item?.key || ''),
+        protocol: String(item?.protocol || ''),
+        models: Array.isArray(item?.models) ? item.models.map((model: any) => String(model)) : undefined,
+      })).filter((item: RuntimeAIProviderOption) => item.key));
+      setRuntimeAIDefault(detail?.runtime_ai_default && typeof detail.runtime_ai_default === 'object' ? {
+        provider_name: String(detail.runtime_ai_default.provider_name || ''),
+        provider_label: String(detail.runtime_ai_default.provider_label || ''),
+        model: String(detail.runtime_ai_default.model || ''),
+      } : null);
       setSettingsData(next);
-      setSettingsBaseline(serializeSettingsData(next));
+      setGeneralSettingsBaseline(serializeGeneralSettings(next));
+      setModelSettingsBaseline(serializeModelSettings(next));
     }).catch(() => {
       if (cancelled || settingsPaneLoadedRef.current !== target) return;
       const fallback: EditPaneData = {
         target,
         title: paneTitle || paneId,
+        use_proxy: false,
+        proxy: null,
+        runtime_ai: null,
       };
       setSettingsData(fallback);
-      setSettingsBaseline(serializeSettingsData(fallback));
+      setGeneralSettingsBaseline(serializeGeneralSettings(fallback));
+      setModelSettingsBaseline(serializeModelSettings(fallback));
     }).finally(() => {
       if (!cancelled && settingsPaneLoadedRef.current === target) {
         setSettingsLoading(false);
@@ -496,6 +510,8 @@ export default function AgentInspector({
   const overview = data?.overview || {};
   const promptRules = data?.prompt_rules || {};
   const history = data?.history || { total: 0, items: [], offset: 0, limit: HISTORY_PAGE_SIZE, has_more: false };
+  const normalizedAgentType = normalizeAgentType(settingsData?.agent_type);
+  const modelSettingsEnabled = normalizedAgentType === 'codex' || normalizedAgentType === 'claude';
   const historyStart = history.total > 0 ? Number(history.offset || 0) + 1 : 0;
   const historyEnd = history.total > 0 ? Number(history.offset || 0) + (history.items || []).length : 0;
   const projectKey = String(promptRules?.project_key || promptRulesDraft.project.key || '').trim();
@@ -508,36 +524,18 @@ export default function AgentInspector({
   const dirtyMemory = useMemo(() => {
     return serializePromptRulesDraft(promptRulesDraft) !== serializePromptRulesDraft(buildPromptRulesDraft(data, paneId));
   }, [data, paneId, promptRulesDraft]);
-  const dirtySettings = useMemo(() => {
-    return serializeSettingsData(settingsData) !== settingsBaseline;
-  }, [settingsBaseline, settingsData]);
+  const dirtyGeneralSettings = useMemo(() => {
+    return serializeGeneralSettings(settingsData) !== generalSettingsBaseline;
+  }, [generalSettingsBaseline, settingsData]);
+  const dirtyModelSettings = useMemo(() => {
+    return serializeModelSettings(settingsData) !== modelSettingsBaseline;
+  }, [modelSettingsBaseline, settingsData]);
 
   useEffect(() => {
-    if (settingsAutoSaveTimerRef.current !== null) {
-      window.clearTimeout(settingsAutoSaveTimerRef.current);
-      settingsAutoSaveTimerRef.current = null;
+    if (settingsSection === 'model' && !modelSettingsEnabled) {
+      setSettingsSection('general');
     }
-    if (
-      tab !== 'settings'
-      || settingsSection !== 'general'
-      || settingsLoading
-      || settingsSaving
-      || !settingsData
-      || !dirtySettings
-    ) {
-      return;
-    }
-    settingsAutoSaveTimerRef.current = window.setTimeout(() => {
-      settingsAutoSaveTimerRef.current = null;
-      void saveSettings();
-    }, 300);
-    return () => {
-      if (settingsAutoSaveTimerRef.current !== null) {
-        window.clearTimeout(settingsAutoSaveTimerRef.current);
-        settingsAutoSaveTimerRef.current = null;
-      }
-    };
-  }, [dirtySettings, settingsData, settingsLoading, settingsSaving, settingsSection, tab]);
+  }, [modelSettingsEnabled, settingsSection]);
 
   const saveNotes = async () => {
     if (notesSaving || !dirtyNotes) return;
@@ -592,17 +590,20 @@ export default function AgentInspector({
     }));
   };
 
-  const inspectorAgentTypeOptions = useMemo(() => {
-    const options = agentTypeOptions.map((option) => ({ ...option }));
-    const currentValue = String(settingsData?.agent_type || '').trim();
-    if (currentValue && !options.some((option) => option.value === currentValue)) {
-      options.unshift({ value: currentValue, label: currentValue, description: '当前值（不在可选列表中）' });
-    }
-    return options;
-  }, [agentTypeOptions, settingsData?.agent_type]);
+  const runtimeAISelectOptions = useMemo<SelectOption[]>(() => {
+    return runtimeAIProviderOptions.map((option) => ({
+      value: option.key,
+      label: option.label,
+      sub: option.protocol ? `${option.key} · ${option.protocol}` : option.key,
+    }));
+  }, [runtimeAIProviderOptions]);
+
+  const runtimeAIEnabled = useMemo(() => {
+    return settingsData?.runtime_ai != null;
+  }, [settingsData?.runtime_ai]);
 
   const patchSettingsData = (patch: Partial<EditPaneData>) => {
-    setSettingsData((prev) => ({ ...(prev || { target: `${paneId}:main.0`, title: paneTitle || paneId }), ...patch }));
+    setSettingsData((prev) => ({ ...(prev || { target: `${paneId}:main.0`, title: paneTitle || paneId, runtime_ai: null }), ...patch }));
   };
 
   const hasDuplicateTelegramToken = async () => {
@@ -631,7 +632,7 @@ export default function AgentInspector({
   };
 
   const saveSettings = async () => {
-    if (!settingsData) return;
+    if (!settingsData || settingsSaving || !dirtyGeneralSettings) return;
     setSettingsSaving(true);
     try {
       if (await hasDuplicateTelegramToken()) {
@@ -640,21 +641,48 @@ export default function AgentInspector({
       }
       const payload = {
         ...settingsData,
-        config: mergeRuntimeAIConfig(settingsData.config, {
-          provider_name: settingsData.runtime_ai_provider_name,
-          provider_protocol: settingsData.runtime_ai_provider_protocol,
-          model: settingsData.runtime_ai_model,
-        }),
+        runtime_ai: settingsData.use_official_auth ? null : (settingsData.runtime_ai && String(settingsData.runtime_ai.provider_name || '').trim()
+          ? { provider_name: String(settingsData.runtime_ai.provider_name || '').trim() }
+          : null),
+        proxy: settingsData.proxy && (String(settingsData.proxy.password || '').trim() || String(settingsData.proxy.rule || '').trim())
+          ? {
+              password: String(settingsData.proxy.password || '').trim(),
+              rule: String(settingsData.proxy.rule || '').trim(),
+            }
+          : null,
       };
       await apiService.updatePane(paneId, payload);
       onPanePatch?.(paneId, payload);
       setSettingsData(payload);
-      setSettingsBaseline(serializeSettingsData(payload));
-      setSettingsSaved(true);
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: `${paneId} 设置已保存` }));
-      window.setTimeout(() => setSettingsSaved(false), 2000);
+      setGeneralSettingsBaseline(serializeGeneralSettings(payload));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: '已保存', variant: 'success' } }));
     } catch {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: `错误：${paneId} 设置保存失败` }));
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const saveModelSettings = async () => {
+    if (!settingsData || settingsSaving || !dirtyModelSettings) return;
+    setSettingsSaving(true);
+    try {
+      const runtimeAI = settingsData.use_official_auth ? null : (settingsData.runtime_ai && String(settingsData.runtime_ai.provider_name || '').trim()
+        ? { provider_name: String(settingsData.runtime_ai.provider_name || '').trim() }
+        : null);
+      const payload = {
+        default_model: settingsData.default_model || '',
+        use_official_auth: !!settingsData.use_official_auth,
+        runtime_ai: runtimeAI,
+      };
+      await apiService.updatePane(paneId, payload);
+      const next = { ...settingsData, runtime_ai: runtimeAI };
+      onPanePatch?.(paneId, payload);
+      setSettingsData(next);
+      setModelSettingsBaseline(serializeModelSettings(next));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: '已保存', variant: 'success' } }));
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: `错误：${paneId} 模型设置保存失败` }));
     } finally {
       setSettingsSaving(false);
     }
@@ -887,7 +915,7 @@ export default function AgentInspector({
           {tab === 'settings' && (
             <div data-id="agent-inspector-settings-tab" className="space-y-4">
               <div data-id="agent-inspector-settings-sections" className="scrollbar-zero flex gap-1 overflow-x-auto whitespace-nowrap">
-                {settingsSections.map((item) => {
+                {settingsSections.filter((item) => item.id !== 'model' || modelSettingsEnabled).map((item) => {
                   const Icon = item.icon;
                   return (
                     <button
@@ -909,72 +937,122 @@ export default function AgentInspector({
               {settingsSection === 'general' && (
                 <div data-id="agent-inspector-settings-general" className="space-y-5">
                   <InspectorField label="标题">
-                    <InspectorInput value={settingsData?.title || ''} onChange={(value) => patchSettingsData({ title: value })} placeholder="窗格标题" />
+                    <InspectorInput value={settingsData?.title || ''} onChange={(value) => patchSettingsData({ title: value })} onBlur={() => { void saveSettings(); }} placeholder="窗格标题" />
                   </InspectorField>
                   <InspectorField label="工作目录" desc="worker 工作区目录" mono>
                     <InspectorInput value={settingsData?.workspace || ''} onChange={(value) => patchSettingsData({ workspace: value })} placeholder="/home/user/project" mono readOnly />
+                  </InspectorField>
+                  <InspectorField label="智能体类型">
+                    <div
+                      data-id="agent-inspector-settings-agent-types"
+                      className="flex items-center gap-3 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200"
+                    >
+                      <AgentAvatar
+                        agentType={settingsData?.agent_type}
+                        title={settingsData?.agent_type || '未设置'}
+                        variant="select"
+                        dataId="agent-inspector-settings-agent-type-avatar"
+                      />
+                      <span className="truncate">{settingsData?.agent_type || '未设置'}</span>
+                    </div>
                   </InspectorField>
                   <InspectorToggle
                     label="自动启动"
                     desc="服务重启后恢复"
                     checked={settingsData?.active !== false}
                     onChange={(value) => patchSettingsData({ active: value })}
+                    onBlur={() => { void saveSettings(); }}
                   />
-                </div>
-              )}
-
-              {settingsSection === 'agent' && (
-                <div data-id="agent-inspector-settings-agent" className="space-y-5">
-                  <InspectorField label="智能体类型">
-                    <AgentTypeSelector
-                      value={settingsData?.agent_type || ''}
-                      options={inspectorAgentTypeOptions}
-                      onChange={(value) => patchSettingsData({ agent_type: value })}
-                      dataId="agent-inspector-settings-agent-types"
-                      optionDataIdPrefix="agent-inspector-settings-agent-type"
-                    />
-                  </InspectorField>
                   <InspectorToggle
                     label="启动时允许所有操作"
-                    desc="Codex / Claude 追加危险参数"
+                    desc="Codex / Claude / Opencode 追加全部允许操作"
                     checked={!!settingsData?.allow_all_actions}
                     onChange={(value) => patchSettingsData({ allow_all_actions: value })}
+                    onBlur={() => { void saveSettings(); }}
                   />
+                  <InspectorToggle
+                    label="启用代理"
+                    desc="启动前执行 cicy_proxy_on，并检查 mihome IN-USER 规则"
+                    checked={!!settingsData?.use_proxy}
+                    onChange={(value) => patchSettingsData({ use_proxy: value })}
+                    onBlur={() => { void saveSettings(); }}
+                  />
+                  {settingsData?.use_proxy && (
+                    <>
+                      <InspectorField label="代理密码" desc="留空时优先 api_token，不存在时回退 user==pass">
+                        <InspectorInput value={settingsData?.proxy?.password || ''} onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), password: value } })} onBlur={() => { void saveSettings(); }} placeholder="可选，自定义代理密码" mono />
+                      </InspectorField>
+                      <InspectorField label="mihome 规则" desc="可选，指定必须存在的完整规则，例如 IN-USER,w-10001,proxy-a">
+                        <InspectorInput value={settingsData?.proxy?.rule || ''} onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), rule: value } })} onBlur={() => { void saveSettings(); }} placeholder="IN-USER,w-10001,proxy-a" mono />
+                      </InspectorField>
+                    </>
+                  )}
                 </div>
               )}
 
               {settingsSection === 'model' && (
                 <div data-id="agent-inspector-settings-model" className="space-y-5">
-                  <InspectorField label="Provider Name" desc="从 ~/cicy-ai/global.json 的 ai.provider 里选择具体供应商">
-                    <Select
-                      value={settingsData?.runtime_ai_provider_name || ''}
-                      onChange={(value) => patchSettingsData({ runtime_ai_provider_name: value })}
-                      options={runtimeAIProviderOptions}
-                      placeholder="选择供应商"
-                      searchable
+                  <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+                    <div>
+                      <div className="text-sm font-medium text-zinc-100">启动默认模型</div>
+                      <div className="mt-1 text-xs leading-5 text-zinc-500">同时作为 agent 启动默认模型和网关默认模型。留空时跟随当前 provider 默认值。</div>
+                    </div>
+                    <InspectorField label="Default Model" desc="例如：gpt-5.5 / claude-opus-4-7">
+                      <InspectorInput value={settingsData?.default_model || ''} onChange={(value) => patchSettingsData({ default_model: value })} onBlur={() => { void saveModelSettings(); }} placeholder="留空则跟随当前 agent 默认" mono />
+                    </InspectorField>
+                  </div>
+
+                  <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+                    <InspectorToggle
+                      label="使用官方认证"
+                      desc="开启后不注入本地 gateway auth"
+                      checked={!!settingsData?.use_official_auth}
+                      onChange={(value) => patchSettingsData({ use_official_auth: value, runtime_ai: value ? null : settingsData?.runtime_ai || null })}
+                      onBlur={() => { void saveModelSettings(); }}
                     />
-                  </InspectorField>
-                  <InspectorField label="Protocol" desc="决定请求走 openai 还是 anthropic 网关路径">
-                    <select
-                      data-id="agent-inspector-settings-model-protocol"
-                      value={settingsData?.runtime_ai_provider_protocol || ''}
-                      onChange={(event) => patchSettingsData({ runtime_ai_provider_protocol: event.target.value })}
-                      className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 transition-all focus:border-blue-500/40 focus:outline-none focus:ring-1 focus:ring-blue-500/20"
-                    >
-                      <option value="">跟随默认</option>
-                      <option value="openai">openai</option>
-                      <option value="anthropic">anthropic</option>
-                    </select>
-                  </InspectorField>
-                  <InspectorField label="Model" desc="实时生效：gateway 会在每次请求时覆盖 model">
-                    <InspectorInput value={settingsData?.runtime_ai_model || ''} onChange={(value) => patchSettingsData({ runtime_ai_model: value })} placeholder="例如：gpt-5.5 / claude-opus-4-7" mono />
-                  </InspectorField>
-                  <SaveButton
-                    label={settingsSaving ? '保存中...' : (settingsSaved ? '已保存' : '保存模型设置')}
-                    busy={settingsSaving}
-                    disabled={settingsSaving || settingsLoading || !settingsData || !dirtySettings}
-                    onClick={() => { void saveSettings(); }}
-                  />
+                  </div>
+
+                  {!settingsData?.use_official_auth && (
+                    <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+                      <div>
+                        <div className="text-sm font-medium text-zinc-100">网关运行时覆盖</div>
+                        <div className="mt-1 text-xs leading-5 text-zinc-500">运行时只覆盖 provider；模型跟随上方默认模型。</div>
+                      </div>
+                      <div className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2 text-xs text-zinc-400">
+                        <div>默认 Provider：{runtimeAIDefault?.provider_label || runtimeAIDefault?.provider_name || '未配置'}</div>
+                      </div>
+                      <InspectorToggle
+                        label="启用自定义覆盖"
+                        desc="关闭时完全跟随当前 agent 默认 provider"
+                        checked={runtimeAIEnabled}
+                        onChange={(value) => patchSettingsData({ runtime_ai: value ? (settingsData?.runtime_ai || { provider_name: '' }) : null })}
+                        onBlur={() => { void saveModelSettings(); }}
+                      />
+                      {runtimeAIEnabled && (
+                        <InspectorField label="Provider" desc="按当前 agent 协议过滤后的可用 provider">
+                          <Select
+                            value={settingsData?.runtime_ai?.provider_name || ''}
+                            onChange={(value) => {
+                              patchSettingsData({
+                                runtime_ai: {
+                                  ...(settingsData?.runtime_ai || {}),
+                                  provider_name: value,
+                                },
+                              });
+                            }}
+                            onOpenChange={(open) => {
+                              if (!open) {
+                                void saveModelSettings();
+                              }
+                            }}
+                            options={runtimeAISelectOptions}
+                            placeholder="选择 provider"
+                            searchable
+                          />
+                        </InspectorField>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1000,30 +1078,6 @@ export default function AgentInspector({
         </div>
       </div>
     </aside>
-  );
-}
-
-function SaveButton({
-  label,
-  disabled,
-  busy,
-  onClick,
-}: {
-  label: string;
-  disabled?: boolean;
-  busy?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className="flex w-full items-center justify-center gap-2 rounded-xl bg-white/[0.06] px-3 py-2 text-sm text-zinc-200 transition-colors hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-40"
-    >
-      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-      {label}
-    </button>
   );
 }
 
@@ -1147,12 +1201,14 @@ function InspectorField({
 function InspectorInput({
   value,
   onChange,
+  onBlur,
   placeholder,
   mono,
   readOnly,
 }: {
   value: string;
   onChange: (value: string) => void;
+  onBlur?: () => void;
   placeholder?: string;
   mono?: boolean;
   readOnly?: boolean;
@@ -1163,6 +1219,7 @@ function InspectorInput({
       type="text"
       value={value}
       onChange={(event) => onChange(event.target.value)}
+      onBlur={onBlur}
       placeholder={placeholder}
       readOnly={readOnly}
       className={`w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 transition-all placeholder:text-zinc-700 focus:border-blue-500/40 focus:outline-none focus:ring-1 focus:ring-blue-500/20 ${mono ? 'font-mono' : ''} ${readOnly ? 'cursor-not-allowed opacity-70' : ''}`}
@@ -1200,11 +1257,13 @@ function InspectorToggle({
   desc,
   checked,
   onChange,
+  onBlur,
 }: {
   label: string;
   desc?: string;
   checked: boolean;
   onChange: (value: boolean) => void;
+  onBlur?: () => void;
 }) {
   return (
     <div data-id="agent-inspector-settings-toggle" className="flex items-center justify-between py-1">
@@ -1216,6 +1275,7 @@ function InspectorToggle({
         type="button"
         data-id="agent-inspector-settings-toggle-button"
         onClick={() => onChange(!checked)}
+        onBlur={onBlur}
         className={`relative h-6 w-11 rounded-full transition-colors ${checked ? 'bg-blue-600' : 'bg-white/[0.08]'}`}
       >
         <div data-id="agent-inspector-settings-toggle-thumb" className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-md transition-transform ${checked ? 'translate-x-[22px]' : 'translate-x-1'}`} />

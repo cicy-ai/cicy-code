@@ -21,14 +21,22 @@ type runtimeAIConfig struct {
 
 // providerConfig represents a single provider from the new providers.items array
 type providerConfig struct {
-	Name         string            `json:"name"`
-	Key          string            `json:"key"`
-	URL          string            `json:"url"`
-	APIKey       string            `json:"apiKey"`
-	Protocol     string            `json:"protocol"` // "anthropic" or "openai"
-	DefaultModel string            `json:"defaultModel"`
-	ModelMapping map[string]string `json:"modelMapping"`
-	Models       []string          `json:"models"`
+	Name          string            `json:"name"`
+	Key           string            `json:"key"`
+	URL           string            `json:"url"`
+	APIKey        string            `json:"apiKey"`
+	Protocol      string            `json:"protocol"` // "anthropic" or "openai"
+	DefaultModel  string            `json:"defaultModel"`
+	DefaultModels map[string]string `json:"defaultModels"`
+	ModelMapping  map[string]string `json:"modelMapping"`
+	Models        []string          `json:"models"`
+}
+
+type runtimeAIProviderOption struct {
+	Key      string   `json:"key"`
+	Label    string   `json:"label"`
+	Protocol string   `json:"protocol"`
+	Models   []string `json:"models,omitempty"`
 }
 
 // providersConfig represents the new providers configuration structure
@@ -171,11 +179,11 @@ func loadRuntimeAIConfigForProvider(provider string) (runtimeAIConfig, bool) {
 		result := runtimeAIConfig{
 			Provider:             pc.Key,
 			APIKey:               pc.APIKey,
-			DefaultOpencodeModel: pc.DefaultModel,
-			DefaultClaudeModel:   pc.DefaultModel,
-			CodexModel:           pc.DefaultModel,
-			OpenClawModel:        pc.DefaultModel,
-			HermesModel:          pc.DefaultModel,
+			DefaultOpencodeModel: providerDefaultModelForAgentType(pc, "opencode"),
+			DefaultClaudeModel:   providerDefaultModelForAgentType(pc, "claude"),
+			CodexModel:           providerDefaultModelForAgentType(pc, "codex"),
+			OpenClawModel:        providerDefaultModelForAgentType(pc, "openclaw"),
+			HermesModel:          providerDefaultModelForAgentType(pc, "hermes"),
 		}
 		// Set URL based on protocol
 		baseURL := strings.TrimRight(pc.URL, "/")
@@ -309,14 +317,29 @@ func loadProvidersConfig() *providersConfig {
 			for _, itemRaw := range itemsArr {
 				if itemMap, ok := itemRaw.(map[string]any); ok {
 					pc := providerConfig{
-						Name:         cfgStringValue(itemMap, "name"),
-						Key:          cfgStringValue(itemMap, "key"),
-						URL:          cfgStringValue(itemMap, "url"),
-						APIKey:       cfgStringValue(itemMap, "apiKey"),
-						Protocol:     cfgStringValue(itemMap, "protocol"),
-						DefaultModel: cfgStringValue(itemMap, "defaultModel"),
-						ModelMapping: make(map[string]string),
-						Models:       []string{},
+						Name:          cfgStringValue(itemMap, "name"),
+						Key:           cfgStringValue(itemMap, "key"),
+						URL:           cfgStringValue(itemMap, "url"),
+						APIKey:        cfgStringValue(itemMap, "apiKey"),
+						Protocol:      cfgStringValue(itemMap, "protocol"),
+						DefaultModel:  cfgStringValue(itemMap, "defaultModel"),
+						DefaultModels: make(map[string]string),
+						ModelMapping:  make(map[string]string),
+						Models:        []string{},
+					}
+
+					// Parse defaultModels (per agent type)
+					if dmRaw, ok := itemMap["defaultModels"]; ok {
+						if dmMap, ok := dmRaw.(map[string]any); ok {
+							for agentType, model := range dmMap {
+								if modelStr, ok := model.(string); ok {
+									key := strings.TrimSpace(strings.ToLower(agentType))
+									if key != "" {
+										pc.DefaultModels[key] = strings.TrimSpace(modelStr)
+									}
+								}
+							}
+						}
 					}
 
 					// Parse modelMapping
@@ -388,6 +411,87 @@ func loadProviderForAgentType(agentType string) (*providerConfig, bool) {
 		return nil, false
 	}
 	return loadProviderByKey(key)
+}
+
+func loadAllProviderConfigs() []providerConfig {
+	providers := loadProvidersConfig()
+	if providers == nil || len(providers.Items) == 0 {
+		return nil
+	}
+	items := make([]providerConfig, 0, len(providers.Items))
+	for _, item := range providers.Items {
+		items = append(items, item)
+	}
+	return items
+}
+
+func runtimeAIExpectedProtocolForAgentType(agentType string) string {
+	switch normalizeAgentType(agentType) {
+	case "claude", "cicy-claude", "kiro-cli":
+		return "anthropic"
+	case "codex", "opencode", "openclaw", "hermes":
+		return "openai"
+	default:
+		return ""
+	}
+}
+
+func providerDefaultModelForAgentType(provider *providerConfig, agentType string) string {
+	if provider == nil {
+		return ""
+	}
+	agentType = strings.TrimSpace(strings.ToLower(agentType))
+	if provider.DefaultModels != nil {
+		if value := strings.TrimSpace(provider.DefaultModels[agentType]); value != "" {
+			return value
+		}
+	}
+	return strings.TrimSpace(provider.DefaultModel)
+}
+
+func runtimeAIProviderOptionsForAgentType(agentType string) []runtimeAIProviderOption {
+	providers := loadProvidersConfig()
+	expectedProtocol := runtimeAIExpectedProtocolForAgentType(agentType)
+	if providers != nil && len(providers.Items) > 0 {
+		options := make([]runtimeAIProviderOption, 0, len(providers.Items))
+		for _, p := range providers.Items {
+			protocol := normalizeAIGatewayProvider(p.Protocol)
+			if expectedProtocol != "" && protocol != "" && protocol != expectedProtocol {
+				continue
+			}
+			key := strings.TrimSpace(p.Key)
+			if key == "" {
+				continue
+			}
+			label := strings.TrimSpace(p.Name)
+			if label == "" {
+				label = key
+			}
+			option := runtimeAIProviderOption{
+				Key:      key,
+				Label:    label,
+				Protocol: protocol,
+			}
+			if len(p.Models) > 0 {
+				option.Models = append([]string(nil), p.Models...)
+			}
+			options = append(options, option)
+		}
+		return options
+	}
+	legacy := runtimeAIProviderNames()
+	if len(legacy) == 0 {
+		return nil
+	}
+	options := make([]runtimeAIProviderOption, 0, len(legacy))
+	for _, key := range legacy {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		options = append(options, runtimeAIProviderOption{Key: key, Label: key})
+	}
+	return options
 }
 
 // listProviderKeys returns all provider keys from the new providers.items array

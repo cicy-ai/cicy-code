@@ -8,6 +8,12 @@ export interface EditPaneData {
   agent_duty?: string;
   agent_type?: string;
   allow_all_actions?: boolean;
+  use_official_auth?: boolean;
+  use_proxy?: boolean;
+  proxy?: {
+    password?: string;
+    rule?: string;
+  } | null;
   workspace?: string;
   active?: boolean;
   init_script?: string;
@@ -19,9 +25,11 @@ export interface EditPaneData {
   ttyd_preview?: string;
   role?: string;
   default_model?: string;
-  runtime_ai_provider_name?: string;
-  runtime_ai_provider_protocol?: string;
-  runtime_ai_model?: string;
+  runtime_ai?: {
+    provider_name?: string;
+    provider_protocol?: string;
+    model?: string;
+  } | null;
 }
 
 interface EditPaneDialogProps {
@@ -89,6 +97,16 @@ export const EditPaneDialog: React.FC<EditPaneDialogProps> = ({
                 <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-colors ${pane.active !== false ? 'bg-green-600' : 'bg-vsc-bg-active'}`}
                   onClick={() => onChange({ ...pane, active: pane.active === false ? true : false })}>
                   <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${pane.active !== false ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-vsc-text">使用官方认证</p>
+                  <p className="text-xs text-vsc-text-muted">开启后不注入本地 gateway auth</p>
+                </div>
+                <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-colors ${pane.use_official_auth ? 'bg-orange-600' : 'bg-vsc-bg-active'}`}
+                  onClick={() => onChange({ ...pane, use_official_auth: !pane.use_official_auth })}>
+                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${pane.use_official_auth ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </div>
               </div>
               <div>

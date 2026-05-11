@@ -1,10 +1,15 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+
+type ToastState = {
+  message: string;
+  variant?: 'default' | 'success';
+};
 import { useApp } from '../contexts/AppContext';
 import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
-  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw
+  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, MessageCircle
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import AgentAvatar from './AgentAvatar';
@@ -25,6 +30,8 @@ import TokenDialog from './layout/TokenDialog';
 import useDesktopEvents from './layout/useDesktopEvents';
 import AgentCanvas, { AgentCanvasItem } from './layout/AgentCanvas';
 import AgentStack from './layout/AgentStack';
+import ProviderDashboard from './providers/ProviderDashboard';
+import IMDashboard from './im/IMDashboard';
 import { useDialog } from '../contexts/DialogContext';
 import config, { defaultWorkerWorkspace, getHostHome, syncHostHomeFromPath, toTildePath, urls } from '../config';
 import apiService from '../services/api';
@@ -43,6 +50,11 @@ const LEFT_PANEL_WIDTH = 320;
 const CLI_DRAWER_WIDTH_KEY = 'ws_cliDrawerWidth';
 const CLI_CONTENT_MODE_KEY = 'ws_cliContentMode';
 const cliContentTabKey = (paneId: string) => `TeamPanel:${paneId}.paneId:cliContentTab`;
+const chatClientIdStorageKey = (masterAgentId: string) => `cicy_chat_client_id:${masterAgentId}`;
+function makePageClientId(masterAgentId: string): string {
+  const m = String(masterAgentId || 'w-10001').replace(/[^a-zA-Z0-9_-]/g, '') || 'w';
+  return `web-${m}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
 const CLI_DRAWER_MIN_WIDTH = 360;
 const CLI_DRAWER_DEFAULT_WIDTH = 520;
 const CLI_DRAWER_MAX_WIDTH = 960;
@@ -251,7 +263,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [cliDrawerResizing, setCliDrawerResizing] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [providersOpen, setProvidersOpen] = useState(false);
+  const [imOpen, setImOpen] = useState(false);
+  const [toast, setToast] = useState<ToastState | null>(null);
 
   const [status, setStatus] = useState('idle');
   const [contextUsage, setContextUsage] = useState<number | null>(null);
@@ -285,18 +299,62 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [netLatency, setNetLatency] = useState<number | null>(null);
   const [chatWsConnected, setChatWsConnected] = useState(false);
   const [chatWsClientId, setChatWsClientId] = useState<string | null>(null);
-  const pageClientId = useMemo(() => {
-    const key = `cicy_chat_client_id:${paneId}`;
+  // code-server (the bridge extension inside the iframe) derives its chat-ws client id from
+  // pageClientId; only spin it up once the workspace's own chat-ws has connected, by which point
+  // pageClientId is final (the BroadcastChannel dedup below has settled it). One-way latch so a
+  // later reconnect doesn't tear the iframe down.
+  const [codeServerReady, setCodeServerReady] = useState(false);
+  useEffect(() => { if (chatWsConnected) setCodeServerReady(true); }, [chatWsConnected]);
+  // chat-ws client id, bound to the current master agent (paneId is the short master id, e.g. "w-10001").
+  // Kept in sessionStorage so it survives reloads in the same tab; a BroadcastChannel guard below
+  // re-generates it if another tab in this browser is already using the same id — which happens when
+  // a tab is *duplicated* (Chrome copies sessionStorage) — so the two tabs don't fight over the slot.
+  const [pageClientId, setPageClientId] = useState<string>(() => {
     try {
-      const current = sessionStorage.getItem(key);
-      if (current) return current;
-      const next = `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-      sessionStorage.setItem(key, next);
-      return next;
-    } catch {
-      return `web-${Date.now().toString(36)}`;
+      const cur = sessionStorage.getItem(chatClientIdStorageKey(paneId));
+      if (cur) return cur;
+    } catch {}
+    const next = makePageClientId(paneId);
+    try { sessionStorage.setItem(chatClientIdStorageKey(paneId), next); } catch {}
+    return next;
+  });
+  const pageClientClaimTsRef = useRef<number>(Date.now() + Math.random());
+  // re-bind when the master agent changes
+  useEffect(() => {
+    let next: string;
+    try {
+      next = sessionStorage.getItem(chatClientIdStorageKey(paneId)) || '';
+    } catch { next = ''; }
+    if (!next) {
+      next = makePageClientId(paneId);
+      try { sessionStorage.setItem(chatClientIdStorageKey(paneId), next); } catch {}
     }
+    pageClientClaimTsRef.current = Date.now() + Math.random();
+    setPageClientId(next);
   }, [paneId]);
+  // uniqueness guard across tabs of this browser
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    let ch: BroadcastChannel;
+    try { ch = new BroadcastChannel('cicy-chat-clientid'); } catch { return; }
+    const myTs = pageClientClaimTsRef.current;
+    const announce = () => { try { ch.postMessage({ type: 'claim', agentId: paneId, clientId: pageClientId, ts: myTs }); } catch {} };
+    ch.onmessage = (e: MessageEvent) => {
+      const m: any = e?.data;
+      if (!m || m.agentId !== paneId) return;
+      if (m.type === 'hello') { announce(); return; }
+      if (m.type === 'claim' && m.clientId === pageClientId && typeof m.ts === 'number' && m.ts < myTs) {
+        // the other tab claimed this id first → yield, generate a fresh one (triggers chat-ws reconnect)
+        const next = makePageClientId(paneId);
+        try { sessionStorage.setItem(chatClientIdStorageKey(paneId), next); } catch {}
+        pageClientClaimTsRef.current = Date.now() + Math.random();
+        setPageClientId(next);
+      }
+    };
+    try { ch.postMessage({ type: 'hello', agentId: paneId }); } catch {}
+    announce();
+    return () => { try { ch.close(); } catch {} };
+  }, [paneId, pageClientId]);
   const wsClientPlatform = useMemo(() => detectClientPlatform(), []);
   const wsClientArch = useMemo(() => detectClientArch(), []);
   const [chatWsLiveStatus, setChatWsLiveStatus] = useState('idle');
@@ -452,7 +510,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
 
   // Toast listener
   useEffect(() => {
-    const handler = (e: CustomEvent) => { setToast(e.detail); setTimeout(() => setToast(null), 5000); };
+    const handler = (e: CustomEvent<string | ToastState>) => {
+      const detail = e.detail;
+      setToast(typeof detail === 'string' ? { message: detail } : detail);
+      setTimeout(() => setToast(null), 5000);
+    };
     window.addEventListener('show-toast', handler as EventListener);
     return () => window.removeEventListener('show-toast', handler as EventListener);
   }, []);
@@ -973,9 +1035,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     filePaneDetail
     && filePaneDetail.capabilities?.supports_tmux === false
   );
-  const fileCodeServerSrc = token && !filePaneIsApiOnlyRuntime
+  const fileCodeServerSrc = token && !filePaneIsApiOnlyRuntime && codeServerReady
     ? urls.codeServer(defaultWorkerWorkspace(paneId), token, pageClientId, paneId)
     : '';
+  const fileCodeServerWaiting = !!token && !filePaneIsApiOnlyRuntime && !codeServerReady;
   const openPaneInCurrentTerminal = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
@@ -1091,6 +1154,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useDevRegister('Workspace', {
     paneId: fullPaneId, masterAgentId: paneId, title, status, contextUsage, mouseMode, isRestarting,
     agentDetail, netLatency,
+    pageClientId, chatWsClientId, chatWsConnected, codeServerReady,
     membershipCard,
     membershipMenuOpen,
     agentsCount: agents.length,
@@ -1186,7 +1250,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             </div>
           ) : (
             <div data-id="cli-content-files-empty" className="flex h-full items-center justify-center text-sm text-zinc-500">
-              当前主 agent 没有可用的文件视图
+              {fileCodeServerWaiting ? '正在连接…' : '当前主 agent 没有可用的文件视图'}
             </div>
           )}
         </div>
@@ -1305,6 +1369,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <div data-id="activity-bar" ref={activityBarRef} className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
           <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title="团队" onClick={() => toggleLeft('team')} />
+          <SideBtn dataId="btn-providers" active={providersOpen} icon={<Boxes className="w-5 h-5" />} title="AI 供应商" onClick={() => setProvidersOpen(true)} />
+          <SideBtn dataId="btn-im" active={imOpen} icon={<MessageCircle className="w-5 h-5" />} title="IM 平台" onClick={() => setImOpen(true)} />
         </div>
         <div data-id="activity-bar-bottom" className="flex w-full flex-col items-center gap-3">
           <button
@@ -1504,7 +1570,19 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       ) : null}
       {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
       {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
-      {toast && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 bg-zinc-800 text-white text-sm rounded-lg shadow-lg">{toast}</div>}
+      {toast && <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 text-sm rounded-lg shadow-lg ${toast.variant === 'success' ? 'bg-green-600 text-white' : 'bg-zinc-800 text-white'}`}>{toast.message}</div>}
+      {providersOpen && createPortal(
+        <div data-id="providers-overlay" className="fixed inset-0 z-[9000] bg-[#0A0A0A]">
+          <ProviderDashboard onBack={() => setProvidersOpen(false)} />
+        </div>,
+        document.body,
+      )}
+      {imOpen && createPortal(
+        <div data-id="im-overlay" className="fixed inset-0 z-[9000] bg-[#0A0A0A]">
+          <IMDashboard onBack={() => setImOpen(false)} />
+        </div>,
+        document.body,
+      )}
     </div>
     </SendingProvider>
   );
@@ -1626,6 +1704,8 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
         title: values.title,
         agent_type: values.agent_type,
         allow_all_actions: values.allow_all_actions,
+        use_official_auth: values.use_official_auth,
+        use_proxy: values.use_proxy,
       });
       const id = data?.pane_id || data?.id;
       if (id) {

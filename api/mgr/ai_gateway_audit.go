@@ -165,7 +165,7 @@ type aiGatewayAuditSession struct {
 	replyEventIndex int
 	current         aiGatewayCurrentSnapshot
 	reply           aiGatewayReplySnapshot
-	tgHook          *tgReplyPushHook
+	replyHooks      []aiGatewayReplyHook
 	lastStatusPush  string
 }
 
@@ -398,7 +398,7 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		startedAt:      startedAt,
 		current:        current,
 		reply:          reply,
-		tgHook:         newTGReplyPushHook(agentID),
+		replyHooks:     newReplyHooksForPane(agentID),
 	}
 }
 
@@ -674,7 +674,7 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 		log.Printf("[ai-gateway] write reply snapshot failed for %s: %v", s.agentID, err)
 	}
 	replySnapshot := s.reply
-	tgHook := s.tgHook
+	replyHooks := s.replyHooks
 	statusEvent := s.broadcastStatusLocked()
 	currentUpdatedData := M{
 		"agent_id":        s.agentID,
@@ -688,16 +688,16 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 		"question":        aiGatewaySanitizeUserQuestion(aiGatewayFirstNonEmpty(s.question, aiGatewayCurrentQuestion(s.current))),
 	}
 	currentUpdatedEvent := ChatEvent{Type: "current_updated", Data: currentUpdatedData}
-	log.Printf("[ai-gateway] complete agent=%s status=%s status_code=%d answer_len=%d thinking_len=%d tools=%d tg_hook=%t",
-		s.agentID, replySnapshot.Status, statusCode, len([]rune(replySnapshot.Answer)), len([]rune(replySnapshot.Thinking)), len(replySnapshot.ToolCalls), tgHook != nil)
+	log.Printf("[ai-gateway] complete agent=%s status=%s status_code=%d answer_len=%d thinking_len=%d tools=%d reply_hooks=%d",
+		s.agentID, replySnapshot.Status, statusCode, len([]rune(replySnapshot.Answer)), len([]rune(replySnapshot.Thinking)), len(replySnapshot.ToolCalls), len(replyHooks))
 	s.mu.Unlock()
 	if statusEvent != nil {
 		hub.publishAgent(s.agentID, *statusEvent)
 	}
 	hub.publishAgent(s.agentID, currentUpdatedEvent)
 	notifyWorkerReplyFinished(s.agentID, replySnapshot.Status)
-	if tgHook != nil {
-		tgHook.finalize(replySnapshot)
+	for _, h := range replyHooks {
+		h.finalize(replySnapshot)
 	}
 }
 
@@ -2342,7 +2342,7 @@ func (s *aiGatewayAuditSession) emitReplyStreamPayload(payload map[string]interf
 	}
 	statusEvent := s.applyStreamEventsLocked(events)
 	chatEvents := s.streamChatEvents(events)
-	tgHook := s.tgHook
+	replyHooks := s.replyHooks
 	s.mu.Unlock()
 	for _, evt := range chatEvents {
 		hub.publishAgent(s.agentID, evt)
@@ -2350,8 +2350,8 @@ func (s *aiGatewayAuditSession) emitReplyStreamPayload(payload map[string]interf
 	if statusEvent != nil {
 		hub.publishAgent(s.agentID, *statusEvent)
 	}
-	if tgHook != nil {
-		tgHook.handleEvents(events)
+	for _, h := range replyHooks {
+		h.handleEvents(events)
 	}
 }
 

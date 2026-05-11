@@ -1,0 +1,480 @@
+#!/usr/bin/env python3
+
+import argparse
+import copy
+import fcntl
+import json
+import os
+import re
+import shlex
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Any, Dict, List
+
+DEFAULT_TEST_URL = "https://api.myip.com"
+DEFAULT_SSH_PORT = 22
+DEFAULT_BIND_HOST = "127.0.0.1"
+
+
+def first_non_empty(*values: Any) -> str:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def int_value(value: Any, default: int = 0) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        return default
+    try:
+        return int(text)
+    except ValueError:
+        return default
+
+
+def proxy_ssh_file_path() -> Path:
+    override = os.environ.get("CICY_PROXY_SSH_FILE", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / "cicy-ai" / "db" / "proxy_ssh.json"
+
+
+def expand_path(value: str) -> str:
+    return str(Path(value).expanduser()) if value else ""
+
+
+def shell_join(parts: List[str]) -> str:
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+def parse_proxy_url(proxy_url: str) -> tuple[str, int]:
+    m = re.match(r"^[a-zA-Z0-9+.-]+://([^:/]+):(\d+)$", proxy_url.strip())
+    if not m:
+        raise SystemExit(f"invalid proxy_url: {proxy_url}")
+    return m.group(1), int(m.group(2))
+
+
+def normalize_profile(raw: Dict[str, Any]) -> Dict[str, Any]:
+    profile = copy.deepcopy(raw) if isinstance(raw, dict) else {}
+    name = first_non_empty(profile.get("name"))
+    if not name:
+        raise SystemExit("profile name must not be empty")
+    proxy_url = first_non_empty(profile.get("proxy_url"))
+    start_cmd = first_non_empty(profile.get("start_cmd"))
+    if not proxy_url:
+        raise SystemExit(f"profile '{name}' requires proxy_url")
+    if not start_cmd:
+        raise SystemExit(f"profile '{name}' requires start_cmd")
+    return {
+        "name": name,
+        "proxy_url": proxy_url,
+        "start_cmd": start_cmd,
+    }
+
+
+def normalize_registry(data: Any) -> List[Dict[str, Any]]:
+    raw_profiles = []
+    if isinstance(data, list):
+        raw_profiles = data
+    elif isinstance(data, dict):
+        maybe_profiles = data.get("profiles")
+        if isinstance(maybe_profiles, list):
+            raw_profiles = maybe_profiles
+    profiles: List[Dict[str, Any]] = []
+    seen = set()
+    for raw in raw_profiles:
+        profile = normalize_profile(raw)
+        name = profile["name"]
+        if name in seen:
+            continue
+        seen.add(name)
+        profiles.append(profile)
+    profiles.sort(key=lambda item: item.get("name", ""))
+    return profiles
+
+
+def load_registry_unlocked(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    return normalize_registry(data)
+
+
+def write_registry_unlocked(path: Path, profiles: List[Dict[str, Any]]) -> None:
+    payload = normalize_registry(profiles)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, ensure_ascii=False)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+
+
+class RegistryLock:
+    def __init__(self, path: Path):
+        self.lock_path = Path(f"{path}.lock")
+        self.lock_fh = None
+
+    def __enter__(self):
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_fh = self.lock_path.open("a+")
+        fcntl.flock(self.lock_fh.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.lock_fh is not None:
+            fcntl.flock(self.lock_fh.fileno(), fcntl.LOCK_UN)
+            self.lock_fh.close()
+        return False
+
+
+def print_json(payload: Any) -> None:
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def find_profile(profiles: List[Dict[str, Any]], name: str) -> Dict[str, Any]:
+    key = first_non_empty(name)
+    for item in profiles:
+        if item.get("name") == key:
+            return item
+    raise SystemExit(f"profile '{key}' not found")
+
+
+def status_text(profile: Dict[str, Any]) -> str:
+    proxy_url = first_non_empty(profile.get("proxy_url"))
+    start_cmd = first_non_empty(profile.get("start_cmd"))
+    if not proxy_url or not start_cmd:
+        return "stopped"
+    _, local_port = parse_proxy_url(proxy_url)
+    try:
+        proc = subprocess.run(["ps", "-eo", "pid=,args="], check=True, capture_output=True, text=True)
+    except Exception:
+        return "stopped"
+    for raw_line in proc.stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        args = parts[1]
+        if not args.startswith("ssh "):
+            continue
+        if f"-D {local_port}" not in args and f":{local_port}" not in args:
+            continue
+        if first_non_empty(profile.get("proxy_url")) and first_non_empty(profile.get("start_cmd")):
+            return "running"
+    return "stopped"
+
+
+def find_profile_pids(profile: Dict[str, Any]) -> List[int]:
+    proxy_url = first_non_empty(profile.get("proxy_url"))
+    if not proxy_url:
+        return []
+    _, local_port = parse_proxy_url(proxy_url)
+    try:
+        proc = subprocess.run(["ps", "-eo", "pid=,args="], check=True, capture_output=True, text=True)
+    except Exception:
+        return []
+    pids: List[int] = []
+    for raw_line in proc.stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        pid_text, args = parts
+        if not args.startswith("ssh "):
+            continue
+        if f"-D {local_port}" not in args and f":{local_port}" not in args:
+            continue
+        try:
+            pids.append(int(pid_text))
+        except ValueError:
+            continue
+    return pids
+
+
+def stop_profile_processes(profile: Dict[str, Any]) -> bool:
+    pids = find_profile_pids(profile)
+    if not pids:
+        return True
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    time.sleep(1)
+    remaining = find_profile_pids(profile)
+    for pid in remaining:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    time.sleep(1)
+    return not find_profile_pids(profile)
+
+
+def print_profiles_table(profiles: List[Dict[str, Any]]) -> None:
+    if not profiles:
+        print("(no proxy_ssh profiles)")
+        return
+    headers = ["name", "status", "proxy_url"]
+    rows: List[List[str]] = []
+    for item in profiles:
+        rows.append([
+            str(item.get("name", "")),
+            status_text(item),
+            str(item.get("proxy_url", "")),
+        ])
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for idx, cell in enumerate(row):
+            widths[idx] = max(widths[idx], len(cell))
+    fmt = "  ".join("{:<" + str(width) + "}" for width in widths)
+    print(fmt.format(*headers))
+    for row in rows:
+        print(fmt.format(*row))
+
+
+def command_list(args: argparse.Namespace) -> int:
+    path = proxy_ssh_file_path()
+    profiles = load_registry_unlocked(path)
+    if args.json:
+        print_json(profiles)
+    else:
+        print_profiles_table(profiles)
+    return 0
+
+
+def command_show(args: argparse.Namespace) -> int:
+    profiles = load_registry_unlocked(proxy_ssh_file_path())
+    print_json(find_profile(profiles, args.name))
+    return 0
+
+
+def command_create(args: argparse.Namespace) -> int:
+    path = proxy_ssh_file_path()
+    identity_file = first_non_empty(args.identity_file)
+    target = first_non_empty(args.target)
+    if not target:
+        host = first_non_empty(args.ssh_host_name, args.ssh_host)
+        if not host:
+            raise SystemExit("create requires --target or --ssh-host/--ssh-host-name")
+        user = first_non_empty(args.ssh_user)
+        target = f"{user}@{host}" if user else host
+    bind_host = first_non_empty(args.bind_host, DEFAULT_BIND_HOST)
+    proxy_host = first_non_empty(args.proxy_host, bind_host if bind_host != "0.0.0.0" else "127.0.0.1")
+    proxy_url = f"socks5://{proxy_host}:{args.local_port}"
+    parts = ["ssh", "-N", "-f", "-D", f"{bind_host}:{args.local_port}"]
+    if identity_file:
+        parts.extend(["-i", identity_file])
+    parts.extend([
+        "-p", str(args.ssh_port),
+        "-o", "BatchMode=yes",
+        "-o", "ConnectTimeout=8",
+        "-o", "ExitOnForwardFailure=yes",
+        "-o", "StrictHostKeyChecking=accept-new",
+        target,
+    ])
+    item: Dict[str, Any] = {
+        "name": args.name,
+        "proxy_url": proxy_url,
+        "start_cmd": shell_join(parts),
+    }
+    with RegistryLock(path):
+        profiles = load_registry_unlocked(path)
+        if any(p.get("name") == args.name for p in profiles):
+            raise SystemExit(f"profile '{args.name}' already exists")
+        profiles.append(item)
+        write_registry_unlocked(path, profiles)
+    if args.json:
+        print_json(item)
+    else:
+        print(f"created {args.name} -> {proxy_url}")
+    return 0
+
+
+def command_delete(args: argparse.Namespace) -> int:
+    path = proxy_ssh_file_path()
+    with RegistryLock(path):
+        profiles = load_registry_unlocked(path)
+        profile = find_profile(profiles, args.name)
+        if status_text(profile) == "running":
+            if not args.force:
+                raise SystemExit(f"profile '{args.name}' is running; use --force to stop and delete")
+            if not stop_profile_processes(profile):
+                raise SystemExit(f"failed to stop running profile '{args.name}'")
+        remaining = [item for item in profiles if item.get("name") != args.name]
+        write_registry_unlocked(path, remaining)
+    if args.json:
+        print_json({"success": True, "deleted": profile})
+    else:
+        print(f"deleted {args.name}")
+    return 0
+
+
+def command_start(args: argparse.Namespace) -> int:
+    profiles = load_registry_unlocked(proxy_ssh_file_path())
+    profile = find_profile(profiles, args.name)
+    if status_text(profile) == "running":
+        if args.json:
+            print_json({"success": True, "name": args.name, "status": "running", "message": "already running"})
+        else:
+            print(f"proxy_ssh: profile {args.name} already running")
+        return 0
+    subprocess.run(["bash", "-lc", profile["start_cmd"]], check=True)
+    if status_text(profile) != "running":
+        raise SystemExit(f"failed to start profile '{args.name}'")
+    if args.json:
+        print_json({"success": True, "name": args.name, "status": "running"})
+    else:
+        print(f"started {args.name}")
+    return 0
+
+
+def command_stop(args: argparse.Namespace) -> int:
+    profiles = load_registry_unlocked(proxy_ssh_file_path())
+    profile = find_profile(profiles, args.name)
+    if status_text(profile) != "running":
+        if args.json:
+            print_json({"success": True, "name": args.name, "status": "stopped", "message": "already stopped"})
+        else:
+            print(f"proxy_ssh: profile {args.name} already stopped")
+        return 0
+    if not stop_profile_processes(profile):
+        raise SystemExit(f"failed to stop profile '{args.name}'")
+    if args.json:
+        print_json({"success": True, "name": args.name, "status": "stopped"})
+    else:
+        print(f"stopped {args.name}")
+    return 0
+
+
+def command_test(args: argparse.Namespace) -> int:
+    profiles = load_registry_unlocked(proxy_ssh_file_path())
+    profile = find_profile(profiles, args.name)
+    if status_text(profile) != "running":
+        raise SystemExit(f"profile '{args.name}' is not running")
+    proxy_host, proxy_port = parse_proxy_url(profile["proxy_url"])
+    target = first_non_empty(args.url, DEFAULT_TEST_URL)
+    cmd = [
+        "curl",
+        "-fsS",
+        "--socks5-hostname",
+        f"{proxy_host}:{proxy_port}",
+        "--connect-timeout",
+        "5",
+        target,
+    ]
+    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    if args.json:
+        print_json({
+            "success": proc.returncode == 0,
+            "name": args.name,
+            "test_url": target,
+            "stdout": proc.stdout.strip(),
+            "stderr": proc.stderr.strip(),
+        })
+    else:
+        if proc.returncode == 0:
+            print(f"proxy_ssh: ok {args.name}")
+            if proc.stdout.strip():
+                print(proc.stdout.strip())
+        else:
+            print(f"proxy_ssh: test failed for {args.name}", file=sys.stderr)
+            if proc.stderr.strip():
+                print(proc.stderr.strip(), file=sys.stderr)
+    return 0 if proc.returncode == 0 else 1
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="proxy_ssh", description="Manage local SSH proxy profiles.")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    list_parser = sub.add_parser("list", help="List proxy_ssh profiles")
+    list_parser.add_argument("--json", action="store_true", help="Print JSON output")
+    list_parser.set_defaults(func=command_list)
+
+    show_parser = sub.add_parser("show", help="Show one proxy_ssh profile")
+    show_parser.add_argument("name", help="Profile name")
+    show_parser.set_defaults(func=command_show)
+
+    create_parser = sub.add_parser("create", help="Create one proxy_ssh profile")
+    create_parser.add_argument("name", help="Profile name")
+    create_parser.add_argument("--local-port", required=True, type=int, help="Local SOCKS port")
+    create_parser.add_argument("--bind-host", default=DEFAULT_BIND_HOST, help="SSH -D bind host")
+    create_parser.add_argument("--proxy-host", help="Host used in proxy_url; default follows bind host")
+    create_parser.add_argument("--target", help="Full SSH target like root@1.2.3.4")
+    create_parser.add_argument("--ssh-host", help="SSH host label or name")
+    create_parser.add_argument("--ssh-host-name", help="SSH hostname or IP")
+    create_parser.add_argument("--ssh-user", help="SSH user")
+    create_parser.add_argument("--ssh-port", type=int, default=DEFAULT_SSH_PORT, help="SSH port")
+    create_parser.add_argument("--identity-file", help="SSH identity file path")
+    create_parser.add_argument("--json", action="store_true", help="Print JSON output")
+    create_parser.set_defaults(func=command_create)
+
+    delete_parser = sub.add_parser("delete", help="Delete one proxy_ssh profile")
+    delete_parser.add_argument("name", help="Profile name")
+    delete_parser.add_argument("--force", action="store_true", help="Stop running profile before deleting")
+    delete_parser.add_argument("--json", action="store_true", help="Print JSON output")
+    delete_parser.set_defaults(func=command_delete)
+
+    start_parser = sub.add_parser("start", help="Start one proxy_ssh profile")
+    start_parser.add_argument("name", help="Profile name")
+    start_parser.add_argument("--json", action="store_true", help="Print JSON output")
+    start_parser.set_defaults(func=command_start)
+
+    stop_parser = sub.add_parser("stop", help="Stop one proxy_ssh profile")
+    stop_parser.add_argument("name", help="Profile name")
+    stop_parser.add_argument("--json", action="store_true", help="Print JSON output")
+    stop_parser.set_defaults(func=command_stop)
+
+    test_parser = sub.add_parser("test", help="Test one proxy_ssh profile")
+    test_parser.add_argument("name", help="Profile name")
+    test_parser.add_argument("--url", help="Override test URL")
+    test_parser.add_argument("--json", action="store_true", help="Print JSON output")
+    test_parser.set_defaults(func=command_test)
+
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except BrokenPipeError:
+        try:
+            sys.stdout.close()
+        except Exception:
+            pass
+        raise SystemExit(1)

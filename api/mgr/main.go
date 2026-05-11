@@ -254,6 +254,13 @@ Options:
 	// Settings
 	http.HandleFunc("/api/settings", wa(handleSettings))
 	http.HandleFunc("/api/settings/global", wa(handleSettings))
+
+	// AI providers (global.json)
+	http.HandleFunc("/api/providers", wa(handleProviders))
+	http.HandleFunc("/api/providers/", wa(handleProvidersSub))
+
+	// IM platforms (Telegram / WeChat)
+	http.HandleFunc("/api/im/", wa(handleIMRoute))
 	http.HandleFunc("/api/file-exists", wa(handleFileExists))
 	http.HandleFunc("/api/utils/file/exists", wa(handleFileExists))
 	http.HandleFunc("/api/utils/translateText", wa(handleTranslateText))
@@ -343,6 +350,7 @@ Options:
 
 	initHTTPLogConsumer()
 	go syncTelegramPollers()
+	go imManagerStart()
 
 	bind := "127.0.0.1"
 	if publicMode {
@@ -438,6 +446,10 @@ func ensureGlobalAPIToken(globalPath string, preferredToken ...string) (string, 
 	if t, ok := cfg["api_token"].(string); ok && strings.TrimSpace(t) != "" {
 		currentToken = strings.TrimSpace(t)
 	}
+	currentProxyToken := ""
+	if t, ok := cfg["proxy_token"].(string); ok && strings.TrimSpace(t) != "" {
+		currentProxyToken = strings.TrimSpace(t)
+	}
 
 	token := ""
 	if len(preferredToken) > 0 {
@@ -451,12 +463,19 @@ func ensureGlobalAPIToken(globalPath string, preferredToken ...string) (string, 
 		rand.Read(b)
 		token = "cicy_" + hex.EncodeToString(b)
 	}
+	proxyToken := currentProxyToken
+	if proxyToken == "" {
+		b := make([]byte, 16)
+		rand.Read(b)
+		proxyToken = "cicy_" + hex.EncodeToString(b)
+	}
 	cfg["api_token"] = token
+	cfg["proxy_token"] = proxyToken
 
 	if err := os.MkdirAll(filepath.Dir(globalPath), 0755); err != nil {
 		return "", err
 	}
-	if currentToken == token {
+	if currentToken == token && currentProxyToken == proxyToken {
 		return token, nil
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")

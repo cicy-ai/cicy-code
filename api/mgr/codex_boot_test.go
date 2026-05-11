@@ -1,12 +1,13 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
 
 func TestAgentBootLinesCodexAllowAllActions(t *testing.T) {
-	lines := agentBootLines("codex", true, false, "w-10001", "gpt-5.5")
+	lines := agentBootLines("codex", true, false, true, "w-10001", "gpt-5.5")
 
 	script := strings.Join(lines, "\n")
 
@@ -59,7 +60,7 @@ func TestAgentBootLinesCodexAllowAllActions(t *testing.T) {
 }
 
 func TestAgentBootLinesCodexRestrictedActions(t *testing.T) {
-	lines := agentBootLines("codex", false, false, "w-10001", "gpt-5.5")
+	lines := agentBootLines("codex", false, false, true, "w-10001", "gpt-5.5")
 
 	script := strings.Join(lines, "\n")
 
@@ -93,11 +94,56 @@ func TestAgentBootLinesCodexRestrictedActions(t *testing.T) {
 func TestAgentBootLinesCodexNormalization(t *testing.T) {
 	// "openai" should normalize to codex
 	for _, alias := range []string{"codex", "openai"} {
-		lines := agentBootLines(alias, true, false, "w-10001", "gpt-5.5")
+		lines := agentBootLines(alias, true, false, true, "w-10001", "gpt-5.5")
 		script := strings.Join(lines, "\n")
 		if !strings.Contains(script, "codex -m 'gpt-5.5'") {
 			t.Errorf("agentType=%q should produce codex boot lines", alias)
 		}
+	}
+}
+
+func TestAgentBootLinesCodexUsesCodexDefaultProviderModel(t *testing.T) {
+	withTempCicyRoot(t)
+	body := `{
+	  "ai": {
+	    "currentProvider": "xchai"
+	  },
+	  "providers": {
+	    "default": {
+	      "claude": "2000RunClaude",
+	      "codex": "2000RunOpenAi"
+	    },
+	    "items": [
+	      {
+	        "name": "XChai",
+	        "key": "xchai",
+	        "url": "https://xchai.xyz",
+	        "apiKey": "test-anthropic-key",
+	        "protocol": "anthropic",
+	        "defaultModel": "claude-opus-4-7"
+	      },
+	      {
+	        "name": "2000Run OpenAI",
+	        "key": "2000RunOpenAi",
+	        "url": "https://api.2000.run/v1",
+	        "apiKey": "test-openai-key",
+	        "protocol": "openai",
+	        "defaultModel": "gpt-5.5"
+	      }
+	    ]
+	  }
+	}`
+	if err := os.WriteFile(cicyGlobalJSONPath, []byte(body), 0644); err != nil {
+		t.Fatalf("write global.json: %v", err)
+	}
+
+	lines := agentBootLines("codex", true, false, true, "w-10001", "")
+	script := strings.Join(lines, "\n")
+	if !strings.Contains(script, "codex -m 'gpt-5.5'") {
+		t.Fatalf("codex boot lines should use codex provider default model: %s", script)
+	}
+	if strings.Contains(script, "codex -m 'claude-opus-4-7'") {
+		t.Fatalf("codex boot lines should not use the global anthropic provider default model: %s", script)
 	}
 }
 

@@ -35,7 +35,14 @@ func initDB() {
 		log.Fatal(err)
 	}
 
-	raw, err := sql.Open("sqlite", dsn)
+	// Open with a busy timeout so concurrent writers (e.g. the IM workers' QR-login
+	// state updates) wait for the lock instead of failing immediately with SQLITE_BUSY.
+	// The _pragma= form is applied to every connection the pool opens.
+	openDSN := dsn
+	if !strings.Contains(openDSN, "?") {
+		openDSN = "file:" + openDSN + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	}
+	raw, err := sql.Open("sqlite", openDSN)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -128,6 +135,7 @@ func (d *DB) Migrate() {
 			role TEXT, default_model TEXT, trust_level TEXT,
 			allow_all_actions INTEGER DEFAULT 0,
 			reply_in_chinese INTEGER DEFAULT 0,
+			use_official_auth INTEGER DEFAULT 0,
 			machine_id INTEGER,
 			source_kind TEXT DEFAULT 'local',
 			source_ref TEXT DEFAULT ''
@@ -212,6 +220,21 @@ func (d *DB) Migrate() {
 			updated_at TEXT DEFAULT (datetime('now')),
 			PRIMARY KEY(scope_type, scope_key)
 		)`,
+		`CREATE TABLE IF NOT EXISTS im_accounts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			platform TEXT NOT NULL,
+			name TEXT DEFAULT '',
+			secret TEXT DEFAULT '',
+			config TEXT DEFAULT '{}',
+			enabled INTEGER DEFAULT 1,
+			state TEXT DEFAULT 'pending',
+			state_detail TEXT DEFAULT '',
+			bound_pane_id TEXT DEFAULT '',
+			inbound_to_agent INTEGER DEFAULT 1,
+			created_at TEXT DEFAULT (datetime('now')),
+			updated_at TEXT DEFAULT (datetime('now'))
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_im_accounts_bound ON im_accounts(bound_pane_id)`,
 		fmt.Sprintf("INSERT OR IGNORE INTO global_vars (key_name, value) VALUES ('worker_index', '%d')", defaultWorkerIndex),
 	}
 	for _, s := range stmts {
@@ -225,6 +248,7 @@ func (d *DB) Migrate() {
 	d.ensureColumn("agent_config", "source_ref", "TEXT DEFAULT ''")
 	d.ensureColumn("agent_config", "allow_all_actions", "INTEGER DEFAULT 0")
 	d.ensureColumn("agent_config", "reply_in_chinese", "INTEGER DEFAULT 0")
+	d.ensureColumn("agent_config", "use_official_auth", "INTEGER DEFAULT 0")
 	d.ensureColumn("agent_config", "inspector_notes", "TEXT DEFAULT ''")
 	d.ensureColumn("agent_config", "inspector_notes_updated_at", "TEXT")
 	d.ensureColumn("agent_queue", "step_kind", "TEXT DEFAULT 'message'")

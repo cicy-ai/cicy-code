@@ -124,6 +124,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
               <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${pane.allow_all_actions ? 'translate-x-5' : 'translate-x-0.5'}`} />
             </div>
           </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-vsc-text">使用官方认证</p>
+              <p className="text-xs text-vsc-text-muted">开启后不注入本地 gateway auth</p>
+            </div>
+            <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-colors ${pane.use_official_auth ? 'bg-orange-600' : 'bg-vsc-bg-active'}`}
+              onClick={() => onChange({ ...pane, use_official_auth: !pane.use_official_auth })}>
+              <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${pane.use_official_auth ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-vsc-text">启用代理</p>
+              <p className="text-xs text-vsc-text-muted">启动前执行 cicy_proxy_on，并检查 mihome 规则</p>
+            </div>
+            <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-colors ${pane.use_proxy ? 'bg-orange-600' : 'bg-vsc-bg-active'}`}
+              onClick={() => onChange({ ...pane, use_proxy: !pane.use_proxy })}>
+              <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${pane.use_proxy ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            </div>
+          </div>
+          {pane.use_proxy && (
+            <>
+              <div>
+                <label className="block text-xs text-vsc-text-secondary mb-1">代理密码</label>
+                <input type="text" value={pane.proxy?.password || ''}
+                  onChange={e => onChange({ ...pane, proxy: { ...(pane.proxy || {}), password: e.target.value } })}
+                  className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent"
+                  placeholder="留空时优先 api_token，不存在时回退 user==pass" />
+              </div>
+              <div>
+                <label className="block text-xs text-vsc-text-secondary mb-1">mihome 规则</label>
+                <input type="text" value={pane.proxy?.rule || ''}
+                  onChange={e => onChange({ ...pane, proxy: { ...(pane.proxy || {}), rule: e.target.value } })}
+                  className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent"
+                  placeholder="IN-USER,w-10001,proxy-a" />
+              </div>
+            </>
+          )}
           <div style={{"display":"none"}}>
             <label className="block text-xs text-vsc-text-secondary mb-1">智能体职责</label>
             <textarea value={pane.agent_duty || ''}
