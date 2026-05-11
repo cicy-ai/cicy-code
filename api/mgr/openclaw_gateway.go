@@ -468,15 +468,6 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requestBody = agentInspectorRewriteRequestBody(provider, agentID, requestBody)
-	if override, err := loadPaneRuntimeAIOverride(agentID); err == nil && override != nil && strings.TrimSpace(override.Model) != "" {
-		var payload map[string]any
-		if err := json.Unmarshal(requestBody, &payload); err == nil {
-			payload["model"] = strings.TrimSpace(override.Model)
-			if nextBody, marshalErr := json.Marshal(payload); marshalErr == nil {
-				requestBody = nextBody
-			}
-		}
-	}
 	r.Body = io.NopCloser(bytes.NewReader(requestBody))
 	r.GetBody = func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(requestBody)), nil

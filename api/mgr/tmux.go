@@ -60,6 +60,10 @@ type paneCreateOpts struct {
 	token           string
 	allowAllActions bool
 	replyInChinese  bool
+	useOfficialAuth bool
+	useProxy        bool
+	proxyPassword   string
+	proxyRule       string
 }
 
 type startupPromptTask struct {
@@ -410,11 +414,11 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if gid != "" {
-		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0)
-			FROM agent_config t INNER JOIN group_windows gp ON t.pane_id=gp.win_id WHERE gp.group_id=? AND t.active=1 ORDER BY t.created_at DESC`, gid)
+		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_official_auth, 0), COALESCE(t.proxy_enable, 0)
+				FROM agent_config t INNER JOIN group_windows gp ON t.pane_id=gp.win_id WHERE gp.group_id=? AND t.active=1 ORDER BY t.created_at DESC`, gid)
 	} else {
-		rows, err = store.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0)
-			FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.active=1 ORDER BY t.created_at DESC`)
+		rows, err = store.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_official_auth, 0), COALESCE(t.proxy_enable, 0)
+				FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.active=1 ORDER BY t.created_at DESC`)
 	}
 	if err != nil {
 		httpErr(w, 500, err.Error())
@@ -433,7 +437,9 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 		var agentType sql.NullString
 		var allowAllActions sql.NullBool
 		var replyInChinese sql.NullBool
-		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType, &allowAllActions, &replyInChinese)
+		var useOfficialAuth sql.NullBool
+		var useProxy sql.NullBool
+		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType, &allowAllActions, &replyInChinese, &useOfficialAuth, &useProxy)
 		p := M{
 			"pane_id": paneID.String, "title": title.String, "ttyd_port": port.Int64,
 			"workspace": workspace.String, "init_script": initScript.String,
@@ -442,6 +448,8 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 			"trust_level": trustLevel.String, "agent_type": agentType.String,
 			"allow_all_actions": allowAllActions.Bool,
 			"reply_in_chinese":  replyInChinese.Bool,
+			"use_official_auth": useOfficialAuth.Bool,
+			"use_proxy":         useProxy.Bool,
 		}
 		if createdAt.Valid {
 			p["created_at"] = createdAt.String
@@ -472,6 +480,9 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 		DefaultModel    string  `json:"default_model"`
 		AllowAllActions bool    `json:"allow_all_actions"`
 		ReplyInChinese  bool    `json:"reply_in_chinese"`
+		UseOfficialAuth *bool   `json:"use_official_auth"`
+		UseProxy        *bool   `json:"use_proxy"`
+		Proxy           any     `json:"proxy"`
 	}
 	req.AllowAllActions = true
 	req.ReplyInChinese = true
@@ -487,7 +498,20 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	}
 	token := getToken(r)
 
-	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.ReplyInChinese, req.WinName, token)
+	useOfficialAuth := false
+	if req.UseOfficialAuth != nil {
+		useOfficialAuth = *req.UseOfficialAuth
+	}
+	useProxy := false
+	if req.UseProxy != nil {
+		useProxy = *req.UseProxy
+	}
+	proxySettings, err := proxySettingsFromAny(req.Proxy)
+	if err != nil {
+		J(w, M{"success": false, "error": err.Error()})
+		return
+	}
+	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.ReplyInChinese, useOfficialAuth, useProxy, proxySettings, req.WinName, token)
 	if err != nil {
 		J(w, M{"success": false, "error": err.Error()})
 		return
@@ -495,7 +519,7 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	J(w, result)
 }
 
-func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, winName *string, token string) (M, error) {
+func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, useOfficialAuth bool, useProxy bool, proxy *proxySettings, winName *string, token string) (M, error) {
 	agentType = normalizeAgentType(agentType)
 	if agentType == "" {
 		return M{"success": false}, fmt.Errorf("unsupported agent_type")
@@ -534,7 +558,24 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 		token:           token,
 		allowAllActions: allowAllActions,
 		replyInChinese:  replyInChinese,
+		useOfficialAuth: useOfficialAuth,
+		useProxy:        useProxy,
+		proxyPassword:   proxySettingsPassword(proxy),
+		proxyRule:       proxySettingsRule(proxy),
 	})
+}
+
+func proxySettingsPassword(p *proxySettings) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(p.Password)
+}
+func proxySettingsRule(p *proxySettings) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(p.Rule)
 }
 
 func createManagedPane(opts paneCreateOpts) (M, error) {
@@ -545,10 +586,14 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 
 	paneID := opts.session + ":main.0"
 	runTmux("new-session", "-d", "-s", opts.session, "-n", "main", "-c", workspace)
+	proxyConfigJSON, err := mergeProxySettingsIntoConfigJSON("{}", &proxySettings{Password: opts.proxyPassword, Rule: opts.proxyRule})
+	if err != nil {
+		return M{"success": false}, err
+	}
 	store.Exec(
-		fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()),
-		paneID, opts.title, opts.port, workspace, opts.initScript, "{}", opts.role, opts.defaultModel, opts.agentType, opts.allowAllActions, opts.replyInChinese,
+		fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese, use_official_auth, proxy_enable, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()),
+		paneID, opts.title, opts.port, workspace, opts.initScript, proxyConfigJSON, opts.role, opts.defaultModel, opts.agentType, opts.allowAllActions, opts.replyInChinese, opts.useOfficialAuth, opts.useProxy,
 	)
 	if err := startInstance(paneID, opts.port, opts.token); err != nil {
 		return M{"session": opts.session, "pane_id": shortPaneID(paneID)}, err
@@ -556,13 +601,17 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 	waitPort(opts.port, 10*time.Second)
 	initPaneEnv(paneEnvOpts{
 		paneID:          paneID,
-		configJSON:      "{}",
+		configJSON:      proxyConfigJSON,
 		workspace:       workspace,
 		initScript:      opts.initScript,
 		agentType:       opts.agentType,
 		defaultModel:    opts.defaultModel,
 		allowAllActions: opts.allowAllActions,
 		replyInChinese:  opts.replyInChinese,
+		useOfficialAuth: opts.useOfficialAuth,
+		useProxy:        opts.useProxy,
+		proxyPassword:   opts.proxyPassword,
+		proxyRule:       opts.proxyRule,
 	})
 	return M{
 		"success":          true,
@@ -574,6 +623,7 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 		"init_script":      opts.initScript,
 		"ttyd_port":        opts.port,
 		"reply_in_chinese": opts.replyInChinese,
+		"use_proxy":        opts.useProxy,
 	}, nil
 }
 
@@ -614,6 +664,8 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	var active sql.NullInt64
 	var allowAllActions sql.NullBool
 	var replyInChinese sql.NullBool
+	var useOfficialAuth sql.NullBool
+	var useProxy sql.NullBool
 	var tgEnable sql.NullBool
 	var tgToken, tgChatID sql.NullString
 	var groupID sql.NullInt64
@@ -624,6 +676,8 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		t.tg_token, t.tg_chat_id, t.tg_enable, t.active, t.agent_type, t.agent_duty, t.config, t.common_prompt, t.ttyd_preview, gp.group_id, t.role, t.default_model, t.trust_level,
 		COALESCE(t.allow_all_actions, 0),
 		COALESCE(t.reply_in_chinese, 0),
+		COALESCE(t.use_official_auth, 0),
+		COALESCE(t.proxy_enable, 0),
 		COALESCE(t.machine_id, 0), COALESCE(m.label, ''), COALESCE(m.url, ''), COALESCE(json_extract(m.capabilities_json, '$.runtime_kind'), ''), COALESCE(m.capabilities_json, '{}')
 		FROM agent_config t
 		LEFT JOIN group_windows gp ON t.pane_id=gp.win_id
@@ -631,12 +685,15 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		WHERE t.pane_id=?`, paneID).Scan(
 		&paneID, &title, &port, &workspace, &initScript,
 		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &agentDuty, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel, &allowAllActions,
-		&replyInChinese,
+		&replyInChinese, &useOfficialAuth, &useProxy,
 		&machineID, &machineLabel, &machineURL, &runtimeKind, &capabilitiesJSON)
 	if err != nil {
 		httpErr(w, 404, "Pane "+id+" not found")
 		return
 	}
+	runtimeAI := extractRuntimeAIFromConfigJSON(config.String)
+	proxySettings := extractProxySettingsFromConfigJSON(config.String)
+	runtimeAIDefault := runtimeAIDefaultSummaryForAgentType(agentType.String)
 	resp := M{
 		"pane_id": shortPaneID(paneID), "title": title.String, "ttyd_port": port.Int64,
 		"workspace": workspace.String, "init_script": initScript.String,
@@ -645,11 +702,17 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		"config": config.String, "common_prompt": commonPrompt.String, "ttyd_preview": ttydPreview.String,
 		"allow_all_actions": allowAllActions.Bool,
 		"reply_in_chinese":  replyInChinese.Bool,
+		"use_official_auth": useOfficialAuth.Bool,
+		"use_proxy":         useProxy.Bool,
 		"role":              role.String, "default_model": defaultModel.String,
-		"trust_level":   trustLevel.String,
-		"machine_label": machineLabel.String,
-		"machine_url":   machineURL.String,
-		"runtime_kind":  runtimeKind.String,
+		"trust_level":                 trustLevel.String,
+		"machine_label":               machineLabel.String,
+		"machine_url":                 machineURL.String,
+		"runtime_kind":                runtimeKind.String,
+		"runtime_ai":                  runtimeAIOverrideToMap(runtimeAI),
+		"proxy":                       proxySettingsToMap(proxySettings),
+		"runtime_ai_provider_options": runtimeAIProviderOptionsForAgentType(agentType.String),
+		"runtime_ai_default":          runtimeAIDefault,
 	}
 	if machineID.Valid && machineID.Int64 > 0 {
 		resp["machine_id"] = machineID.Int64
@@ -677,6 +740,9 @@ var paneUpdateCols = map[string]bool{
 	"ttyd_preview": true, "role": true, "default_model": true, "trust_level": true,
 	"allow_all_actions": true,
 	"reply_in_chinese":  true,
+	"use_official_auth": true,
+	"use_proxy":         true,
+	"runtime_ai":        true,
 	"private_mode":      true, "allowed_users": true,
 	"node_url": true, "preview": true,
 }
@@ -725,6 +791,91 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 			return
 		}
 		filtered["config"] = normalizedConfig
+	}
+	if rawRuntimeAI, ok := req["runtime_ai"]; ok {
+		ov, err := runtimeAIOverrideFromAny(rawRuntimeAI)
+		if err != nil {
+			httpErr(w, 400, err.Error())
+			return
+		}
+		var configStr string
+		if rawConfig, ok := filtered["config"]; ok {
+			configStr, _ = rawConfig.(string)
+		} else {
+			var existingConfig sql.NullString
+			if err := store.QueryRow("SELECT COALESCE(config, '{}') FROM agent_config WHERE pane_id=?", paneID).Scan(&existingConfig); err != nil {
+				httpErr(w, 404, "Pane "+id+" not found")
+				return
+			}
+			configStr = existingConfig.String
+		}
+		nextConfig, err := mergeRuntimeAIIntoConfigJSON(configStr, ov)
+		if err != nil {
+			httpErr(w, 400, err.Error())
+			return
+		}
+		filtered["config"] = nextConfig
+	}
+	delete(filtered, "runtime_ai")
+	if rawProxy, ok := req["proxy"]; ok {
+		ps, err := proxySettingsFromAny(rawProxy)
+		if err != nil {
+			httpErr(w, 400, err.Error())
+			return
+		}
+		var configStr string
+		if rawConfig, ok := filtered["config"]; ok {
+			configStr, _ = rawConfig.(string)
+		} else {
+			var existingConfig sql.NullString
+			if err := store.QueryRow("SELECT COALESCE(config, '{}') FROM agent_config WHERE pane_id=?", paneID).Scan(&existingConfig); err != nil {
+				httpErr(w, 404, "Pane "+id+" not found")
+				return
+			}
+			configStr = existingConfig.String
+		}
+		nextConfig, err := mergeProxySettingsIntoConfigJSON(configStr, ps)
+		if err != nil {
+			httpErr(w, 400, err.Error())
+			return
+		}
+		filtered["config"] = nextConfig
+	}
+	delete(filtered, "proxy")
+	if rawUseOfficialAuth, ok := filtered["use_official_auth"]; ok {
+		useOfficialAuth, ok := rawUseOfficialAuth.(bool)
+		if !ok {
+			httpErr(w, 400, "use_official_auth must be a boolean")
+			return
+		}
+		filtered["use_official_auth"] = useOfficialAuth
+	}
+	if rawUseProxy, ok := filtered["use_proxy"]; ok {
+		useProxy, ok := rawUseProxy.(bool)
+		if !ok {
+			httpErr(w, 400, "use_proxy must be a boolean")
+			return
+		}
+		filtered["proxy_enable"] = useProxy
+		delete(filtered, "use_proxy")
+	}
+	if rawUseProxy, ok := filtered["use_proxy"]; ok {
+		useProxy, ok := rawUseProxy.(bool)
+		if !ok {
+			httpErr(w, 400, "use_proxy must be a boolean")
+			return
+		}
+		filtered["proxy_enable"] = useProxy
+		delete(filtered, "use_proxy")
+	}
+	if rawUseProxy, ok := filtered["use_proxy"]; ok {
+		useProxy, ok := rawUseProxy.(bool)
+		if !ok {
+			httpErr(w, 400, "use_proxy must be a boolean")
+			return
+		}
+		filtered["proxy_enable"] = useProxy
+		delete(filtered, "use_proxy")
 	}
 	var sets []string
 	var vals []interface{}
@@ -811,8 +962,10 @@ func restartPaneCore(paneID, token string) error {
 	var workspace, initScript, title, config, agentType, defaultModel, trustLevel sql.NullString
 	var allowAllActions sql.NullBool
 	var replyInChinese sql.NullBool
-	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, default_model, trust_level, COALESCE(allow_all_actions, 0), COALESCE(reply_in_chinese, 0) FROM agent_config WHERE pane_id=?", paneID).
-		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &defaultModel, &trustLevel, &allowAllActions, &replyInChinese)
+	var useOfficialAuth sql.NullBool
+	var useProxy sql.NullBool
+	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, default_model, trust_level, COALESCE(allow_all_actions, 0), COALESCE(reply_in_chinese, 0), COALESCE(use_official_auth, 0), COALESCE(proxy_enable, 0) FROM agent_config WHERE pane_id=?", paneID).
+		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &defaultModel, &trustLevel, &allowAllActions, &replyInChinese, &useOfficialAuth, &useProxy)
 	if err != nil {
 		return fmt.Errorf("pane %s not found in db", paneID)
 	}
@@ -853,6 +1006,8 @@ func restartPaneCore(paneID, token string) error {
 		defaultModel:    defaultModel.String,
 		allowAllActions: allowAllActions.Bool,
 		replyInChinese:  replyInChinese.Bool,
+		useOfficialAuth: useOfficialAuth.Bool,
+		useProxy:        useProxy.Bool,
 	})
 	store.Exec(fmt.Sprintf("UPDATE agent_config SET updated_at=%s WHERE pane_id=?", store.Now()), paneID)
 	return nil
@@ -868,6 +1023,10 @@ type paneEnvOpts struct {
 	defaultModel    string
 	allowAllActions bool
 	replyInChinese  bool
+	useOfficialAuth bool
+	useProxy        bool
+	proxyPassword   string
+	proxyRule       string
 }
 
 func tmuxShellQuote(v string) string {
@@ -1082,13 +1241,33 @@ func resolveCodexStartupModel(defaultModel string, aiCfg runtimeAIConfig) string
 	if model := strings.TrimSpace(defaultModel); model != "" {
 		return model
 	}
+	if provider, ok := loadProviderForAgentType("codex"); ok {
+		if model := strings.TrimSpace(providerDefaultModelForAgentType(provider, "codex")); model != "" {
+			return model
+		}
+	}
 	if model := strings.TrimSpace(aiCfg.CodexModel); model != "" {
 		return model
 	}
 	return "gpt-5.4"
 }
 
-func agentBootLines(agentType string, allowAllActions bool, replyInChinese bool, shortID string, defaultModel string) []string {
+func resolveClaudeStartupModel(defaultModel string, aiCfg runtimeAIConfig) string {
+	if model := strings.TrimSpace(defaultModel); model != "" {
+		return model
+	}
+	if provider, ok := loadProviderForAgentType("claude"); ok {
+		if model := strings.TrimSpace(providerDefaultModelForAgentType(provider, "claude")); model != "" {
+			return model
+		}
+	}
+	if model := strings.TrimSpace(aiCfg.DefaultClaudeModel); model != "" {
+		return model
+	}
+	return "claude-opus-4-7"
+}
+
+func agentBootLines(agentType string, allowAllActions bool, replyInChinese bool, useOfficialAuth bool, shortID string, defaultModel string) []string {
 	aiCfg := loadRuntimeAIConfig()
 	switch normalizeAgentType(agentType) {
 	case "openclaw":
@@ -1969,20 +2148,26 @@ EOF
 			launchPrefix += " --bare"
 		}
 		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("%s-install-%s.log", cmdName, shortID))
-		model := aiCfg.DefaultClaudeModel
-		lines := []string{
-			ensureAgentCommandLine(cmdName, label, installCmd, installLog),
-			`mkdir -p "$WORKSPACE/.cicy"`,
-			fmt.Sprintf(`cat > "$WORKSPACE/.cicy/%s" <<EOF`, settingsFile),
-			`{
-  "env": {
+		model := resolveClaudeStartupModel(defaultModel, aiCfg)
+		settingsJSON := "{\n"
+		if !useOfficialAuth {
+			settingsJSON += `  "env": {
     "ANTHROPIC_AUTH_TOKEN": "cicy-local-gateway",
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:8008/api/ai-gateway/anthropic/${X_AGENT_SHORT_ID}"
   },
-  "model": "` + model + `"
-}`,
-			`EOF`,
+`
 		}
+		settingsJSON += `  "model": "` + model + `"
+}`
+		lines := []string{
+			ensureAgentCommandLine(cmdName, label, installCmd, installLog),
+			`mkdir -p "$WORKSPACE/.cicy"`,
+		}
+		lines = append(lines,
+			fmt.Sprintf(`cat > "$WORKSPACE/.cicy/%s" <<EOF`, settingsFile),
+			settingsJSON,
+			`EOF`,
+		)
 		if allowAllActions {
 			lines = append(lines, "clear")
 			lines = append(lines, fmt.Sprintf(`%s --settings "$WORKSPACE/.cicy/%s" --dangerously-skip-permissions`, launchPrefix, settingsFile))
@@ -3472,6 +3657,7 @@ func initPaneEnv(opts paneEnvOpts) {
 		)
 	}
 
+	useOfficialAuth := opts.useOfficialAuth
 	if opts.configJSON != "" && opts.configJSON != "{}" {
 		var cfg struct {
 			Projects []string `json:"projects"`
@@ -3487,6 +3673,23 @@ func initPaneEnv(opts paneEnvOpts) {
 		}
 	}
 
+	if opts.useProxy {
+		if ps := extractProxySettingsFromConfigJSON(opts.configJSON); ps != nil {
+			if strings.TrimSpace(ps.Password) != "" {
+				lines = append(lines, fmt.Sprintf("export CICY_PROXY_PASSWORD=%s", tmuxShellQuote(strings.TrimSpace(ps.Password))))
+			}
+			if strings.TrimSpace(ps.Rule) != "" {
+				lines = append(lines, fmt.Sprintf("export CICY_PROXY_RULE=%s", tmuxShellQuote(strings.TrimSpace(ps.Rule))))
+			}
+		}
+		lines = append(lines,
+			"if ! __cicy_mihome_has_in_user_rule; then",
+			"  echo \"[cicy] 缺少 mihome IN-USER 规则，请先在后台设置里配置\"",
+			"  exit 1",
+			"fi",
+			"cicy_proxy_on",
+		)
+	}
 	if strings.TrimSpace(opts.initScript) != "" {
 		lines = append(lines, opts.initScript)
 	}
@@ -3494,7 +3697,7 @@ func initPaneEnv(opts paneEnvOpts) {
 	if bootAgentNorm != "claude" && bootAgentNorm != "cicy-claude" && bootAgentNorm != "codex" {
 		lines = append(lines, "clear")
 	}
-	lines = append(lines, agentBootLines(opts.agentType, opts.allowAllActions, opts.replyInChinese, shortID, opts.defaultModel)...)
+	lines = append(lines, agentBootLines(opts.agentType, opts.allowAllActions, opts.replyInChinese, useOfficialAuth, shortID, opts.defaultModel)...)
 
 	// 将启动脚本写入 workspace，避免散落到 /tmp。
 	// Claude boot scripts are kept intentionally small/readable; other agents keep the
@@ -3545,7 +3748,7 @@ func initPaneEnv(opts paneEnvOpts) {
 		log.Printf("[init] shell prompt not confirmed for %s, skip auto source .cicy/boot.sh", shortPaneID(pid))
 		return
 	}
-	if normalizeAgentType(opts.agentType) == "claude" || normalizeAgentType(opts.agentType) == "cicy-claude" {
+	if (normalizeAgentType(opts.agentType) == "claude" || normalizeAgentType(opts.agentType) == "cicy-claude") && !useOfficialAuth {
 		autoConfirmClaudeStartup(pid, opts.allowAllActions)
 	} else if normalizeAgentType(opts.agentType) == "codex" {
 		autoConfirmCodexTrust(pid)

@@ -94,7 +94,47 @@ skills/cicy-master ping dev --write
 skills/cicy-master health --all --write
 ```
 
-## 3. 当前 canonical schema
+## 3. `proxy_ssh`
+
+`proxy_ssh` 是一个 Python CLI，用来管理本地 SSH 动态转发代理配置。
+
+### 默认文件
+
+- 默认：`~/cicy-ai/db/proxy_ssh.json`
+- 可改写：`CICY_PROXY_SSH_FILE`
+
+### 当前命令
+
+- `list`
+- `show`
+- `create`
+- `start`
+- `stop`
+- `test`
+- `delete`
+
+### 当前特性
+
+- canonical schema：`default + profiles[]`
+- 写文件时使用：
+  - `flock`
+  - 同目录临时文件 + `os.replace()` 原子替换
+- 根据结构化字段运行时生成 SSH `-D` 启动命令
+- 运行态按本地 `ssh -D` 进程动态检测
+
+### 例子
+
+```bash
+skills/proxy_ssh create demo --ssh-host 1.2.3.4 --ssh-user root --local-port 1084
+skills/proxy_ssh list
+skills/proxy_ssh show demo
+skills/proxy_ssh start demo
+skills/proxy_ssh test demo
+skills/proxy_ssh stop demo
+skills/proxy_ssh delete demo
+```
+
+## 4. 当前 canonical schema
 
 ```json
 {

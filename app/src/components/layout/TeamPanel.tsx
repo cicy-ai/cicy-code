@@ -111,6 +111,8 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         title: values.title,
         agent_type: values.agent_type,
         allow_all_actions: values.allow_all_actions,
+        use_official_auth: values.use_official_auth,
+        use_proxy: values.use_proxy,
       });
       const newId = data?.pane_id || data?.session;
       if (newId) {

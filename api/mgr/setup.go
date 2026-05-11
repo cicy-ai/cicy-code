@@ -1500,7 +1500,7 @@ func ensureBuiltinAgents(selected []string) {
 		desiredByPaneID[pid] = w
 	}
 
-	rows, err := store.Query("SELECT pane_id, ttyd_port, workspace, COALESCE(init_script,''), COALESCE(config,'{}'), COALESCE(agent_type,''), COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0) FROM agent_config WHERE active=1 ORDER BY ttyd_port ASC, pane_id ASC")
+	rows, err := store.Query("SELECT pane_id, ttyd_port, workspace, COALESCE(init_script,''), COALESCE(config,'{}'), COALESCE(agent_type,''), COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0), COALESCE(use_official_auth,0) FROM agent_config WHERE active=1 ORDER BY ttyd_port ASC, pane_id ASC")
 	if err != nil {
 		return
 	}
@@ -1511,8 +1511,9 @@ func ensureBuiltinAgents(selected []string) {
 		var paneID, workspace, initScript, configJSON, agentType string
 		var allowAllActions bool
 		var replyInChinese bool
+		var useOfficialAuth bool
 		var port int
-		rows.Scan(&paneID, &port, &workspace, &initScript, &configJSON, &agentType, &allowAllActions, &replyInChinese)
+		rows.Scan(&paneID, &port, &workspace, &initScript, &configJSON, &agentType, &allowAllActions, &replyInChinese, &useOfficialAuth)
 		if paneID == "" || port == 0 {
 			continue
 		}

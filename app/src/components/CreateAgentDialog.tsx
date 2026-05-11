@@ -8,6 +8,8 @@ export interface CreateAgentValues {
   title: string;
   agent_type: string;
   allow_all_actions: boolean;
+  use_official_auth: boolean;
+  use_proxy: boolean;
 }
 
 interface Props {
@@ -26,6 +28,8 @@ const DEFAULT_VALUES: CreateAgentValues = {
   title: '',
   agent_type: '',
   allow_all_actions: true,
+  use_official_auth: false,
+  use_proxy: false,
 };
 
 export default function CreateAgentDialog({
@@ -151,6 +155,34 @@ export default function CreateAgentDialog({
               className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${values.allow_all_actions ? 'bg-blue-600' : 'bg-white/[0.08]'}`}
             >
               <div className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-md transition-transform ${values.allow_all_actions ? 'translate-x-[22px]' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          <div data-id="create-agent-dialog-use-proxy" className="flex items-center justify-between py-1">
+            <div>
+              <p className="text-[13px] font-medium text-zinc-300">启用代理</p>
+              <p className="mt-0.5 text-[11px] text-zinc-600">启动前执行 cicy_proxy_on，并检查 mihome 规则</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => set({ use_proxy: !values.use_proxy })}
+              className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${values.use_proxy ? 'bg-blue-600' : 'bg-white/[0.08]'}`}
+            >
+              <div className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-md transition-transform ${values.use_proxy ? 'translate-x-[22px]' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          <div data-id="create-agent-dialog-use-official-auth" className="flex items-center justify-between py-1">
+            <div>
+              <p className="text-[13px] font-medium text-zinc-300">使用官方认证</p>
+              <p className="mt-0.5 text-[11px] text-zinc-600">开启后不注入本地 gateway auth</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => set({ use_official_auth: !values.use_official_auth })}
+              className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${values.use_official_auth ? 'bg-blue-600' : 'bg-white/[0.08]'}`}
+            >
+              <div className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-md transition-transform ${values.use_official_auth ? 'translate-x-[22px]' : 'translate-x-1'}`} />
             </button>
           </div>
         </div>
