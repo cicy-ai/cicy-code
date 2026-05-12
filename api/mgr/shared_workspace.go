@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -68,7 +66,6 @@ func handleSharedWorkItems(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, 500, err.Error())
 			return
 		}
-		_ = appendSharedEvent(M{"id": fmt.Sprintf("event-%d", time.Now().UnixNano()), "workspaceId": firstNonEmpty(stringValue(merged["workspaceId"]), "workspace-cicy-virtual-employees"), "actor": "w-10004", "type": "work_item_updated", "summary": firstNonEmpty(stringValue(merged["title"]), stringValue(merged["id"])), "payload": M{"workItemId": stringValue(merged["id"])}, "ts": time.Now().UTC().Format(time.RFC3339)})
 		J(w, M{"success": true, "work_item": merged})
 	case "PATCH":
 		if id == "" {
@@ -91,7 +88,6 @@ func handleSharedWorkItems(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, 500, err.Error())
 			return
 		}
-		_ = appendSharedEvent(M{"id": fmt.Sprintf("event-%d", time.Now().UnixNano()), "workspaceId": firstNonEmpty(stringValue(merged["workspaceId"]), "workspace-cicy-virtual-employees"), "actor": "w-10004", "type": "work_item_updated", "summary": firstNonEmpty(stringValue(merged["title"]), id), "payload": M{"workItemId": id}, "ts": time.Now().UTC().Format(time.RFC3339)})
 		J(w, M{"success": true, "work_item": merged})
 	default:
 		httpErr(w, 405, "method not allowed")
@@ -138,7 +134,6 @@ func handleSharedArtifacts(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, 500, err.Error())
 			return
 		}
-		_ = appendSharedEvent(M{"id": fmt.Sprintf("event-%d", time.Now().UnixNano()), "workspaceId": firstNonEmpty(stringValue(item["workspaceId"]), "workspace-cicy-virtual-employees"), "actor": firstNonEmpty(stringValue(item["producer"]), "w-10004"), "type": "artifact_updated", "summary": firstNonEmpty(stringValue(item["title"]), artifactID), "payload": M{"artifacts": []string{artifactID}, "workItemId": stringValue(item["relatedWorkItemId"])}, "ts": time.Now().UTC().Format(time.RFC3339)})
 		J(w, M{"success": true, "artifact": item})
 	case "PATCH":
 		if id == "" {
@@ -163,7 +158,6 @@ func handleSharedArtifacts(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, 500, err.Error())
 			return
 		}
-		_ = appendSharedEvent(M{"id": fmt.Sprintf("event-%d", time.Now().UnixNano()), "workspaceId": firstNonEmpty(stringValue(item["workspaceId"]), "workspace-cicy-virtual-employees"), "actor": firstNonEmpty(stringValue(item["producer"]), "w-10004"), "type": "artifact_updated", "summary": firstNonEmpty(stringValue(item["title"]), id), "payload": M{"artifacts": []string{id}, "workItemId": stringValue(item["relatedWorkItemId"])}, "ts": time.Now().UTC().Format(time.RFC3339)})
 		J(w, M{"success": true, "artifact": item})
 	default:
 		httpErr(w, 405, "method not allowed")
@@ -205,7 +199,6 @@ func handleSharedHandoffs(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, 500, err.Error())
 			return
 		}
-		_ = appendSharedEvent(M{"id": fmt.Sprintf("event-%d", time.Now().UnixNano()), "workspaceId": firstNonEmpty(stringValue(item["workspaceId"]), "workspace-cicy-virtual-employees"), "actor": firstNonEmpty(stringValue(item["from"]), "w-10004"), "type": "handoff_updated", "summary": firstNonEmpty(stringValue(item["summary"]), handoffID), "payload": M{"handoff": handoffID, "workItemId": stringValue(item["workItemId"]), "artifactIds": item["artifactIds"]}, "ts": time.Now().UTC().Format(time.RFC3339)})
 		J(w, M{"success": true, "handoff": item})
 	case "PATCH":
 		if id == "" {
@@ -228,40 +221,10 @@ func handleSharedHandoffs(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, 500, err.Error())
 			return
 		}
-		_ = appendSharedEvent(M{"id": fmt.Sprintf("event-%d", time.Now().UnixNano()), "workspaceId": firstNonEmpty(stringValue(item["workspaceId"]), "workspace-cicy-virtual-employees"), "actor": firstNonEmpty(stringValue(item["from"]), "w-10004"), "type": "handoff_updated", "summary": firstNonEmpty(stringValue(item["summary"]), id), "payload": M{"handoff": id, "workItemId": stringValue(item["workItemId"]), "artifactIds": item["artifactIds"]}, "ts": time.Now().UTC().Format(time.RFC3339)})
 		J(w, M{"success": true, "handoff": item})
 	default:
 		httpErr(w, 405, "method not allowed")
 	}
-}
-
-func handleSharedEvents(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		httpErr(w, 405, "method not allowed")
-		return
-	}
-	file, err := os.Open(sharedWorkspacePath("events", "events.ndjson"))
-	if err != nil {
-		httpErr(w, 500, err.Error())
-		return
-	}
-	defer file.Close()
-	var events []M
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var item M
-		if json.Unmarshal([]byte(line), &item) == nil {
-			events = append(events, item)
-		}
-	}
-	if events == nil {
-		events = []M{}
-	}
-	J(w, M{"events": events})
 }
 
 func readJSONFile(path string, target interface{}) error {
@@ -334,24 +297,6 @@ func writeSharedMarkdown(relPath string, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
-func appendSharedEvent(event M) error {
-	path := sharedWorkspacePath("events", "events.ndjson")
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	body, err := json.Marshal(event)
-	if err != nil {
-		return err
-	}
-	_, err = f.Write(append(body, '\n'))
-	return err
-}
-
 func syncSharedWorkItem(task M) error {
 	workItemID := stringValue(task["work_item_id"])
 	workspaceID := firstNonEmpty(stringValue(task["workspace_id"]), "workspace-cicy-virtual-employees")
@@ -386,28 +331,12 @@ func syncSharedWorkItem(task M) error {
 
 func syncSharedArtifact(artifact M) error {
 	artifactID := stringValue(artifact["artifact_id"])
-	workspaceID := firstNonEmpty(stringValue(artifact["workspace_id"]), "workspace-cicy-virtual-employees")
 	if artifactID == "" {
 		return nil
 	}
 	mdPath := filepath.Join("artifacts", artifactID+".md")
 	content := buildArtifactMarkdown(artifact)
-	if err := writeSharedMarkdown(mdPath, content); err != nil {
-		return err
-	}
-	return appendSharedEvent(M{
-		"id":          fmt.Sprintf("event-%d", time.Now().UnixNano()),
-		"workspaceId": workspaceID,
-		"actor":       "w-10004",
-		"type":        "artifact_updated",
-		"summary":     firstNonEmpty(stringValue(artifact["summary"]), artifactID),
-		"payload": M{
-			"artifacts":  []string{artifactID},
-			"workItemId": stringValue(artifact["work_item_id"]),
-			"handoffId":  stringValue(artifact["handoff_id"]),
-		},
-		"ts": time.Now().UTC().Format(time.RFC3339),
-	})
+	return writeSharedMarkdown(mdPath, content)
 }
 
 func syncSharedHandoff(task M) error {
