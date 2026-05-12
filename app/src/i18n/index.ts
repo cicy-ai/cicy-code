@@ -94,29 +94,6 @@ import jaTeamPanel from './locales/ja/teamPanel.json';
 import jaTerminal from './locales/ja/terminal.json';
 import jaUi from './locales/ja/ui.json';
 import jaWorkspace from './locales/ja/workspace.json';
-import arAgentCanvas from './locales/ar/agentCanvas.json';
-import arAgentChat from './locales/ar/agentChat.json';
-import arAgentInspector from './locales/ar/agentInspector.json';
-import arAgentProviderRequest from './locales/ar/agentProviderRequest.json';
-import arAgentTypeDesc from './locales/ar/agentTypeDesc.json';
-import arApiSwitch from './locales/ar/apiSwitch.json';
-import arAudit from './locales/ar/audit.json';
-import arChat from './locales/ar/chat.json';
-import arCommon from './locales/ar/common.json';
-import arCreateAgent from './locales/ar/createAgent.json';
-import arDesktop from './locales/ar/desktop.json';
-import arDevPanel from './locales/ar/devPanel.json';
-import arEditPane from './locales/ar/editPane.json';
-import arIm from './locales/ar/im.json';
-import arLayout from './locales/ar/layout.json';
-import arLogin from './locales/ar/login.json';
-import arProvider from './locales/ar/provider.json';
-import arProvision from './locales/ar/provision.json';
-import arSettings from './locales/ar/settings.json';
-import arTeamPanel from './locales/ar/teamPanel.json';
-import arTerminal from './locales/ar/terminal.json';
-import arUi from './locales/ar/ui.json';
-import arWorkspace from './locales/ar/workspace.json';
 
 export const STORAGE_KEY = 'cicy.lang';
 
@@ -124,7 +101,7 @@ export const STORAGE_KEY = 'cicy.lang';
  * Languages we ship full translation bundles for. Adding a new code here
  * requires a matching `locales/<code>/<ns>.json` for every namespace.
  */
-export const TRANSLATED_LNGS = ['en', 'zh-CN', 'fr', 'ja', 'ar'] as const;
+export const TRANSLATED_LNGS = ['en', 'zh-CN', 'fr', 'ja'] as const;
 export type TranslatedLng = (typeof TRANSLATED_LNGS)[number];
 
 /**
@@ -150,7 +127,7 @@ export const SUPPORTED_LNGS = [
   // East Slavic
   'ru', 'uk', 'be',
   // Middle East
-  'ar', 'fa', 'he', 'tr', 'az', 'ku',
+  'fa', 'he', 'tr', 'az', 'ku',
   // Central Asia
   'kk', 'ky', 'uz', 'tg', 'mn',
   // Caucasus
@@ -260,31 +237,6 @@ const resources = {
     terminal: jaTerminal,
     ui: jaUi,
     workspace: jaWorkspace,
-  },
-  ar: {
-    agentCanvas: arAgentCanvas,
-    agentChat: arAgentChat,
-    agentInspector: arAgentInspector,
-    agentProviderRequest: arAgentProviderRequest,
-    agentTypeDesc: arAgentTypeDesc,
-    apiSwitch: arApiSwitch,
-    audit: arAudit,
-    chat: arChat,
-    common: arCommon,
-    createAgent: arCreateAgent,
-    desktop: arDesktop,
-    devPanel: arDevPanel,
-    editPane: arEditPane,
-    im: arIm,
-    layout: arLayout,
-    login: arLogin,
-    provider: arProvider,
-    provision: arProvision,
-    settings: arSettings,
-    teamPanel: arTeamPanel,
-    terminal: arTerminal,
-    ui: arUi,
-    workspace: arWorkspace,
   },
 };
 
