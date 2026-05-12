@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation, Trans } from 'react-i18next';
-import { SUPPORTED_LNGS } from '../i18n';
+import { SUPPORTED_LNGS, TRANSLATED_LNGS } from '../i18n';
 
 type ToastState = {
   message: string;
@@ -1563,6 +1563,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               >
                 {SUPPORTED_LNGS.map((code) => {
                   const active = currentLang === code;
+                  const translated = (TRANSLATED_LNGS as readonly string[]).includes(code);
                   return (
                     <button
                       key={code}
@@ -1574,10 +1575,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                         setLangMenuOpen(false);
                         if (!active) void i18nLive.changeLanguage(code);
                       }}
-                      className={`flex w-full cursor-pointer items-center justify-between px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/5 ${active ? 'text-zinc-100' : 'text-zinc-400'}`}
+                      className={`flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/5 ${active ? 'text-zinc-100' : translated ? 'text-zinc-300' : 'text-zinc-500'}`}
+                      title={translated ? code : `${code} — falls back to English`}
                     >
-                      <span>{languageDisplayName(code)}</span>
-                      {active ? <Check className="h-3 w-3 text-emerald-400" /> : null}
+                      <span className="truncate">{languageDisplayName(code)}</span>
+                      <span className="flex shrink-0 items-center gap-1.5">
+                        {!translated ? <span className="rounded bg-white/[0.04] px-1 py-px text-[9px] font-mono text-zinc-500">en</span> : null}
+                        {active ? <Check className="h-3 w-3 text-emerald-400" /> : null}
+                      </span>
                     </button>
                   );
                 })}
