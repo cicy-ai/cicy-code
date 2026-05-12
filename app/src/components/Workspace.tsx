@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation, Trans } from 'react-i18next';
-import i18n, { SUPPORTED_LNGS } from '../i18n';
+import { SUPPORTED_LNGS } from '../i18n';
 
 type ToastState = {
   message: string;
@@ -38,6 +38,7 @@ import { useDialog } from '../contexts/DialogContext';
 import config, { defaultWorkerWorkspace, getHostHome, syncHostHomeFromPath, toTildePath, urls } from '../config';
 import apiService from '../services/api';
 import { sendCommandToTmux } from '../services/mockApi';
+import { chatWs } from '../services/chatWs';
 import { ApiSwitchDialog } from './layout/ApiSwitchDialog';
 import CreateAgentDialog, { CreateAgentValues } from './CreateAgentDialog';
 import { lockPointer, unlockPointer, clearPointerLock } from '../lib/pointerLock';
@@ -259,7 +260,7 @@ function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
 }
 
 export default function Workspace({ agentId, onSelectAgent }: Props) {
-  const { t } = useTranslation('workspace');
+  const { t, i18n: i18nLive } = useTranslation('workspace');
   const {
     setChatWsState,
     setChatWsSender,
@@ -522,8 +523,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useEffect(() => {
     // 5 秒 WS 轮询兜底 + 页面可见时立即请求
     const sendPollRequest = () => {
-      //console.log('[poll_request] sending via WS, readyState:', chatWsRef.current?.readyState);
-      try { chatWsRef.current?.send(JSON.stringify({ type: 'poll_request' })); } catch (e) { console.warn('[poll_request] send failed:', e); } 
+      try { chatWs.send({ type: 'poll_request' }); } catch (e) { console.warn('[poll_request] send failed:', e); }
     };
     const onVisible = () => {
       if (document.visibilityState === 'visible') sendPollRequest();
@@ -655,16 +655,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }, [canvasPaneIds, activeCliPaneId, paneId, activeTeamPaneId]);
 
   useEffect(() => {
-    const send = (payload: unknown) => {
-      const ws = chatWsRef.current;
-      if (ws?.readyState !== WebSocket.OPEN) return false;
-      ws.send(JSON.stringify(payload));
-      return true;
-    };
-    setChatWsSender(send);
-    return () => {
-      setChatWsSender(() => false);
-    };
+    // Hand the context the singleton's send. The singleton owns the WS so this
+    // is a stable function pointer; no need to re-register on re-render.
+    setChatWsSender((payload: unknown) => chatWs.send(payload));
+    return () => { setChatWsSender(() => false); };
   }, [setChatWsSender]);
 
   useEffect(() => {
@@ -1618,7 +1612,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             <span>{t('language', { ns: 'common' })}</span>
             <div className="flex gap-1">
               {SUPPORTED_LNGS.map((code) => {
-                const active = (i18n.resolvedLanguage ?? i18n.language) === code;
+                const active = (i18nLive.resolvedLanguage ?? i18nLive.language) === code;
                 const labelKey = code === 'zh-CN' ? 'languageChinese' : 'languageEnglish';
                 return (
                   <button
@@ -1628,7 +1622,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => {
                       e.stopPropagation();
-                      void i18n.changeLanguage(code);
+                      console.log('[i18n] changeLanguage ->', code, 'before:', i18nLive.language);
+                      i18nLive.changeLanguage(code)
+                        .then(() => console.log('[i18n] changed, now:', i18nLive.language))
+                        .catch((err) => console.error('[i18n] changeLanguage failed', err));
                     }}
                     className={`cursor-pointer rounded-md border px-2 py-0.5 font-mono text-[10px] transition-colors ${active ? 'border-white/20 bg-white/10 text-zinc-100' : 'border-white/[0.06] text-zinc-500 hover:border-white/[0.12] hover:text-zinc-200'}`}
                   >
