@@ -1,5 +1,6 @@
 {
   "cicy.sendPathToCurrentAgent.title": "Send to current agent",
   "cicy.sendActiveDocumentToCurrentAgent.title": "Send current document to agent",
-  "cicy.showFileInfo.title": "Show file info"
+  "cicy.showFileInfo.title": "Show file info",
+  "cicy.addToFavorites.title": "Add to favorites"
 }

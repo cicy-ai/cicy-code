@@ -2,7 +2,7 @@
   "name": "cicy-code-server-bridge",
   "displayName": "CiCy Code Server Bridge",
   "description": "Explorer context actions for sending file paths to the current CiCy agent.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "cicy-ai",
   "engines": {
     "vscode": "^1.100.0"
@@ -14,7 +14,8 @@
     "onStartupFinished",
     "onCommand:cicy.sendPathToCurrentAgent",
     "onCommand:cicy.sendActiveDocumentToCurrentAgent",
-    "onCommand:cicy.showFileInfo"
+    "onCommand:cicy.showFileInfo",
+    "onCommand:cicy.addToFavorites"
   ],
   "main": "./dist/extension.js",
   "l10n": "./l10n",
@@ -31,6 +32,10 @@
       {
         "command": "cicy.showFileInfo",
         "title": "%cicy.showFileInfo.title%"
+      },
+      {
+        "command": "cicy.addToFavorites",
+        "title": "%cicy.addToFavorites.title%"
       }
     ],
     "menus": {
@@ -44,6 +49,11 @@
           "command": "cicy.showFileInfo",
           "when": "!explorerResourceIsFolder && resourceScheme == file",
           "group": "navigation@1001"
+        },
+        {
+          "command": "cicy.addToFavorites",
+          "when": "resourceScheme == file",
+          "group": "navigation@1002"
         }
       ],
       "editor/context": [

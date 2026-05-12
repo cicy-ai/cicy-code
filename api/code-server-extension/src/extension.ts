@@ -274,6 +274,57 @@ async function showFileInfo(uri: vscode.Uri): Promise<void> {
   }
 }
 
+async function addToFavorites(uri: vscode.Uri): Promise<void> {
+  try {
+    const workspaceFolder = currentWorkspaceFolder();
+    if (!workspaceFolder) {
+      void vscode.window.showErrorMessage(vscode.l10n.t('No active workspace folder'));
+      return;
+    }
+    const target = uri.fsPath;
+    const favoritesDir = path.join(workspaceFolder, 'favorite');
+    await fs.promises.mkdir(favoritesDir, { recursive: true });
+
+    const relToFavDir = path.relative(favoritesDir, target);
+    if (target === favoritesDir || (!relToFavDir.startsWith('..') && !path.isAbsolute(relToFavDir))) {
+      void vscode.window.showWarningMessage(vscode.l10n.t('Cannot favorite an item inside the favorites folder'));
+      return;
+    }
+
+    const baseName = path.basename(target) || 'item';
+    let linkName = baseName;
+    let counter = 2;
+    while (counter <= 100) {
+      const linkPath = path.join(favoritesDir, linkName);
+      let existing: import('fs').Stats | null = null;
+      try {
+        existing = await fs.promises.lstat(linkPath);
+      } catch {
+        existing = null;
+      }
+      if (!existing) {
+        await fs.promises.symlink(target, linkPath);
+        void vscode.window.showInformationMessage(vscode.l10n.t('Added to favorites: {0}', linkName));
+        return;
+      }
+      if (existing.isSymbolicLink()) {
+        const linkTarget = await fs.promises.readlink(linkPath);
+        const resolved = path.isAbsolute(linkTarget) ? linkTarget : path.resolve(favoritesDir, linkTarget);
+        if (resolved === target) {
+          void vscode.window.showInformationMessage(vscode.l10n.t('Already in favorites: {0}', linkName));
+          return;
+        }
+      }
+      linkName = `${baseName} (${counter})`;
+      counter += 1;
+    }
+    throw new Error('too many name collisions in favorites folder');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || '');
+    void vscode.window.showErrorMessage(vscode.l10n.t('Failed to add to favorites: {0}', message));
+  }
+}
+
 async function sendActiveDocumentToCurrentAgent(): Promise<void> {
   const payload = buildEditorPayload();
   if (!payload) {
@@ -442,7 +493,11 @@ export function activate(context: vscode.ExtensionContext) {
     if (!uri) return;
     await showFileInfo(uri);
   });
-  context.subscriptions.push(explorerDisposable, editorDisposable, fileInfoDisposable);
+  const favoritesDisposable = vscode.commands.registerCommand('cicy.addToFavorites', async (uri: vscode.Uri) => {
+    if (!uri) return;
+    await addToFavorites(uri);
+  });
+  context.subscriptions.push(explorerDisposable, editorDisposable, fileInfoDisposable, favoritesDisposable);
   connectHostOpenFileBridge(context);
 }
 
