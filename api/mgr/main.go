@@ -249,7 +249,6 @@ Options:
 	http.HandleFunc("/api/shared-workspace/artifacts/", wa(handleSharedArtifacts))
 	http.HandleFunc("/api/shared-workspace/handoffs", wa(handleSharedHandoffs))
 	http.HandleFunc("/api/shared-workspace/handoffs/", wa(handleSharedHandoffs))
-	http.HandleFunc("/api/shared-workspace/events", wa(handleSharedEvents))
 
 	// Settings
 	http.HandleFunc("/api/settings", wa(handleSettings))

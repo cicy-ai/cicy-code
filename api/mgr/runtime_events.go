@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -57,25 +56,6 @@ func appendRuntimeEvent(sessionID, eventType string, payload interface{}) runtim
 	if len(rtEvents.eventsBySess[sessionID]) > 200 {
 		rtEvents.eventsBySess[sessionID] = rtEvents.eventsBySess[sessionID][len(rtEvents.eventsBySess[sessionID])-200:]
 	}
-	_ = appendSharedEvent(M{
-		"id":          fmt.Sprintf("event-%d", time.Now().UnixNano()),
-		"workspaceId": firstNonEmpty(evt.WorkspaceID, "workspace-cicy-virtual-employees"),
-		"actor":       firstNonEmpty(evt.EmployeeID, "w-10004"),
-		"type":        "runtime_event",
-		"summary":     evt.Type + " @ " + evt.SessionID,
-		"payload": M{
-			"event_id":            evt.EventID,
-			"type":                evt.Type,
-			"session_id":          evt.SessionID,
-			"runtime_instance_id": evt.RuntimeInstanceID,
-			"task_id":             evt.TaskID,
-			"work_item_id":        evt.WorkItemID,
-			"artifact_id":         evt.ArtifactID,
-			"handoff_id":          evt.HandoffID,
-			"payload":             evt.Payload,
-		},
-		"ts": evt.TS,
-	})
 	return evt
 }
 
