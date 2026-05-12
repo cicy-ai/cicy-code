@@ -1,0 +1,21 @@
+{
+  "agentTypeSelected": "Selected",
+  "terminalMouseOn": "Mouse: on",
+  "terminalMouseOff": "Mouse: off",
+  "terminalCaptureFrame": "Capture pane",
+  "floatingPanelClose": "Close panel",
+  "voiceLocating": "Locating...",
+  "voiceTranscribing": "Transcribing...",
+  "voiceRecording": "Recording...",
+  "modalCancel": "Cancel",
+  "modalConfirm": "OK",
+  "selectPlaceholder": "Select...",
+  "selectSearchPlaceholder": "Search...",
+  "selectMore": "More",
+  "selectNoResults": "No results",
+  "codeServerFolders": "Common folders",
+  "codeServerOpenInNewWindow": "Open in new window",
+  "codeServerTitle": "Code server",
+  "windowConfirmDelete": "Delete window {{idx}}?",
+  "windowCreateButton": "New window"
+}

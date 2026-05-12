@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Copy, Key, Loader2, Check } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 
 const PERMS = ['ttyd_read', 'prompt', 'api_full', 'tmux_send', 'edit', 'restart', 'capture'];
 
 export default function TokenDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation('layout');
   const [tokens, setTokens] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -60,7 +62,7 @@ export default function TokenDialog({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06] shrink-0">
           <div className="flex items-center gap-2">
             <Key className="w-4 h-4 text-zinc-400" />
-            <h2 className="text-[15px] font-semibold text-white">API 令牌</h2>
+            <h2 className="text-[15px] font-semibold text-white">{t('tokenDialogTitle')}</h2>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors cursor-pointer">
             <X className="w-4 h-4" />
@@ -70,12 +72,12 @@ export default function TokenDialog({ onClose }: { onClose: () => void }) {
         {/* Create */}
         <div className="px-5 py-4 border-b border-white/[0.06] space-y-3 shrink-0">
           <div className="flex gap-2">
-            <input value={note} onChange={e => setNote(e.target.value)} placeholder="令牌备注..."
+            <input value={note} onChange={e => setNote(e.target.value)} placeholder={t('tokenNotePlaceholder')}
               className="flex-1 bg-white/[0.03] border border-white/[0.08] text-zinc-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500/40 placeholder:text-zinc-700" />
             <button onClick={create} disabled={creating || !note.trim()}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium disabled:opacity-40 cursor-pointer transition-colors">
               {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-              创建
+              {t('tokenCreateButton')}
             </button>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -101,28 +103,28 @@ export default function TokenDialog({ onClose }: { onClose: () => void }) {
           {loading ? (
             <div className="flex items-center justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-zinc-600" /></div>
           ) : tokens.length === 0 ? (
-            <p className="text-center text-zinc-600 text-sm py-8">暂无令牌</p>
+            <p className="text-center text-zinc-600 text-sm py-8">{t('tokenEmptyList')}</p>
           ) : (
             <div className="space-y-2">
-              {tokens.map((t: any) => (
-                <div key={t.id} className="flex items-center gap-3 bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5 group">
+              {tokens.map((row: any) => (
+                <div key={row.id} className="flex items-center gap-3 bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5 group">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-zinc-300 font-medium">{t.note || '未命名'}</span>
-                      <span className="text-[10px] text-zinc-600 font-mono">#{t.id}</span>
+                      <span className="text-sm text-zinc-300 font-medium">{row.note || t('tokenUnnamed')}</span>
+                      <span className="text-[10px] text-zinc-600 font-mono">#{row.id}</span>
                     </div>
                     <div className="flex items-center gap-2 mt-1">
-                      <code className="text-[11px] text-zinc-600 font-mono truncate max-w-[200px]">{t.token_prefix}</code>
-                      <span className="text-[10px] text-zinc-700">仅前缀</span>
+                      <code className="text-[11px] text-zinc-600 font-mono truncate max-w-[200px]">{row.token_prefix}</code>
+                      <span className="text-[10px] text-zinc-700">{t('tokenPrefixOnly')}</span>
                     </div>
                     <div className="flex flex-wrap gap-1 mt-1.5">
-                      {(t.perms || '').split(',').filter(Boolean).map((p: string) => (
+                      {(row.perms || '').split(',').filter(Boolean).map((p: string) => (
                         <span key={p} className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-white/[0.04] text-zinc-500">{p}</span>
                       ))}
                     </div>
                   </div>
-                  <span className="text-[10px] text-zinc-700 shrink-0">{t.created_at?.slice(0, 10)}</span>
-                  <button onClick={() => remove(t.id)}
+                  <span className="text-[10px] text-zinc-700 shrink-0">{row.created_at?.slice(0, 10)}</span>
+                  <button onClick={() => remove(row.id)}
                     className="p-1.5 rounded text-zinc-700 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer opacity-0 group-hover:opacity-100">
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

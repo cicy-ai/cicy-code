@@ -1,5 +1,6 @@
 import { Brain, Check, Copy, FileText, Folder, History, Settings, Wrench } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
 import AgentAvatar from '../AgentAvatar'
 import { WebFrame } from '../WebFrame'
@@ -92,6 +93,7 @@ function AgentStackCard({
   onOpenPaneMeta: (paneId: string) => void;
   onClick: () => void;
 }) {
+  const { t } = useTranslation('layout')
   const [copiedPaneId, setCopiedPaneId] = useState(false)
   const copiedPaneTimerRef = useRef<number | null>(null)
 
@@ -140,7 +142,7 @@ function AgentStackCard({
       return
     }
 
-    window.dispatchEvent(new CustomEvent('show-toast', { detail: `复制失败：${value}` }))
+    window.dispatchEvent(new CustomEvent('show-toast', { detail: t('agentStackCopyFailed', { value }) }))
   }, [handlePaneIdCopied, item.paneId])
 
   const handleOpenSettings = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
@@ -292,7 +294,7 @@ function AgentStackCard({
               <div data-id={`agent-stack-card-workspace-value-${item.paneId}`} className="mt-2 truncate text-sm text-zinc-300">{item.workspace || defaultWorkerWorkspace(item.paneId)}</div>
             </div>
             <div data-id={`agent-stack-card-empty-message-${item.paneId}`} className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3 text-sm text-zinc-300">
-              {item.isApiOnly ? '该成员当前只支持 API 能力。' : active ? '实时终端已激活。' : '点击切换到该成员，在右侧查看完整历史。'}
+              {item.isApiOnly ? t('agentStackApiOnly') : active ? t('agentStackActive') : t('agentStackInactiveHint')}
             </div>
           </div>
         )}

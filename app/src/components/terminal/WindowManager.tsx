@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Pencil, Trash2, ChevronDown, Check, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { useDialog } from '../../contexts/DialogContext';
 
 interface Win { index: string; name: string; active: boolean }
 
 export function WindowManager({ session, onActiveChange }: { session: string; onActiveChange?: (win: Win | null) => void }) {
+  const { t } = useTranslation('ui');
   const [wins, setWins] = useState<Win[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -29,7 +31,7 @@ export function WindowManager({ session, onActiveChange }: { session: string; on
   const select = async (idx: string) => { await apiService.selectWindow(session, idx); setOpen(false); setTimeout(load, 500); };
   const create = async () => { await apiService.createWindow(session); load(); };
   const rename = async (idx: string) => { if (!editName.trim()) return; await apiService.renameWindow(session, idx, editName.trim()); setEditing(null); load(); };
-  const del = (idx: string) => { confirm(`删除窗口 ${idx}？`, async () => { await apiService.deleteWindow(session, idx); load(); }); };
+  const del = (idx: string) => { confirm(t('windowConfirmDelete', { idx }), async () => { await apiService.deleteWindow(session, idx); load(); }); };
 
   return (
     <div ref={ref} className="relative z-50">
@@ -67,7 +69,7 @@ export function WindowManager({ session, onActiveChange }: { session: string; on
           </div>
           <div className="border-t border-white/[0.08]">
             <button onClick={create} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] cursor-pointer">
-              <Plus size={12} /> 新建窗口
+              <Plus size={12} /> {t('windowCreateButton')}
             </button>
           </div>
         </div>

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, ReactNode } from 'react';
 import { GripHorizontal, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Position, Size } from '../types';
 import { lockPointer, unlockPointer } from '../lib/pointerLock';
 
@@ -36,6 +37,7 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
   dragBounds,
   fixedAtBottom = false
 }) => {
+  const { t } = useTranslation('ui');
   const [position, setPosition] = useState<Position>(initialPosition);
   const [size, setSize] = useState<Size>(initialSize);
   const [isDragging, setIsDragging] = useState(false);
@@ -201,7 +203,7 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
                 <button 
                     onClick={(e) => { e.stopPropagation(); onClose(); }}
                     className="p-2 hover:bg-red-500/20 hover:text-red-400 rounded-lg text-vsc-text-secondary transition-colors ml-1 md:ml-2"
-                    title="关闭面板"
+                    title={t('floatingPanelClose')}
                 >
                     <X size={18} />
                 </button>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 
 interface SkillDef {
@@ -19,6 +20,7 @@ interface Binding {
 }
 
 export default function SkillPanel({ paneId, bindings }: { paneId: string; bindings: Binding[] }) {
+  const { t } = useTranslation('layout');
   const [skills, setSkills] = useState<SkillDef[]>([]);
   const [runningId, setRunningId] = useState<string>('');
 
@@ -51,7 +53,7 @@ export default function SkillPanel({ paneId, bindings }: { paneId: string; bindi
   return (
     <div className="h-full flex flex-col overflow-hidden bg-[#0A0A0A]" data-id="skill-panel-root">
       <div className="px-3 py-2 border-b border-[var(--vsc-border)] shrink-0" data-id="skill-panel-header">
-        <div className="text-xs text-gray-400 font-medium" data-id="skill-panel-title">协作技能</div>
+        <div className="text-xs text-gray-400 font-medium" data-id="skill-panel-title">{t('skillPanelTitle')}</div>
       </div>
       <div className="flex-1 overflow-y-auto px-1.5 py-1.5" data-id="skill-panel-list">
         <div className="space-y-1">
@@ -71,8 +73,8 @@ export default function SkillPanel({ paneId, bindings }: { paneId: string; bindi
         </div>
       </div>
       <div className="px-3 py-2 border-t border-[var(--vsc-border)] shrink-0 text-[11px] text-zinc-500" data-id="skill-panel-target-summary">
-        目标: {defaultTarget}
-        {defaultMachineId ? ` · 节点 ${defaultMachineLabel || defaultMachineId}` : ''}
+        {t('skillPanelTarget', { target: defaultTarget })}
+        {defaultMachineId ? t('skillPanelNode', { node: defaultMachineLabel || defaultMachineId }) : ''}
       </div>
     </div>
   );

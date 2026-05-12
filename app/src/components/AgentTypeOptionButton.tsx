@@ -1,4 +1,5 @@
 import { Check } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import AgentAvatar from './AgentAvatar'
 
 type AgentTypeOptionButtonProps = {
@@ -12,6 +13,7 @@ type AgentTypeOptionButtonProps = {
 }
 
 export default function AgentTypeOptionButton({ value, label, description, selected, onClick, dataId, className }: AgentTypeOptionButtonProps) {
+  const { t } = useTranslation('ui');
   return (
     <button
       data-id={dataId}
@@ -36,7 +38,7 @@ export default function AgentTypeOptionButton({ value, label, description, selec
           {selected && (
             <span className="inline-flex items-center gap-1 rounded-full bg-cyan-300/14 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-200">
               <Check className="h-3 w-3" />
-              已选
+              {t('agentTypeSelected')}
             </span>
           )}
         </span>

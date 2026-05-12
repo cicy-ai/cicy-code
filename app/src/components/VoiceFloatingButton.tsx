@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Mic, Move } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Position } from '../types';
 import { lockPointer, unlockPointer } from '../lib/pointerLock';
 import { useDevRegister } from '../lib/devStore';
@@ -23,6 +24,7 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
   disabled = false,
   isLoading = false
 }) => {
+  const { t } = useTranslation('ui');
   const [position, setPosition] = useState<Position>(initialPosition);
   const [isDragging, setIsDragging] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
@@ -183,7 +185,7 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
 
       {/* Label/Hint */}
       <div data-id="voice-floating-button-label" className={`absolute -bottom-10 left-1/2 -translate-x-1/2 text-sm font-bold whitespace-nowrap px-3 py-1.5 rounded-full bg-black/70 text-white backdrop-blur-sm transition-opacity duration-200 ${isPressed || isLoading ? 'opacity-100' : 'opacity-0'}`}>
-        {dragMode ? "定位中..." : isLoading ? "识别中..." : "录音中..."}
+        {dragMode ? t('voiceLocating') : isLoading ? t('voiceTranscribing') : t('voiceRecording')}
       </div>
     </div>
   );

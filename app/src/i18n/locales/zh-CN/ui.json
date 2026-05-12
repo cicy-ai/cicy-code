@@ -1,0 +1,21 @@
+{
+  "agentTypeSelected": "已选",
+  "terminalMouseOn": "鼠标: 开",
+  "terminalMouseOff": "鼠标: 关",
+  "terminalCaptureFrame": "捕获窗格",
+  "floatingPanelClose": "关闭面板",
+  "voiceLocating": "定位中...",
+  "voiceTranscribing": "识别中...",
+  "voiceRecording": "录音中...",
+  "modalCancel": "取消",
+  "modalConfirm": "确定",
+  "selectPlaceholder": "请选择...",
+  "selectSearchPlaceholder": "搜索...",
+  "selectMore": "更多",
+  "selectNoResults": "无结果",
+  "codeServerFolders": "常用文件夹",
+  "codeServerOpenInNewWindow": "在新窗口打开",
+  "codeServerTitle": "代码服务",
+  "windowConfirmDelete": "删除窗口 {{idx}}？",
+  "windowCreateButton": "新建窗口"
+}

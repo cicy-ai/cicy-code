@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, MoreHorizontal, Search } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 export interface SelectOptionAction {
   id: string;
@@ -29,7 +30,9 @@ interface Props {
   dropdownClassName?: string;
 }
 
-export default function Select({ options, value, onChange, onOpenChange, placeholder = '请选择...', searchable = false, className = '', dropdownClassName = '' }: Props) {
+export default function Select({ options, value, onChange, onOpenChange, placeholder, searchable = false, className = '', dropdownClassName = '' }: Props) {
+  const { t } = useTranslation('ui');
+  const resolvedPlaceholder = placeholder ?? t('selectPlaceholder');
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [actionMenu, setActionMenu] = useState<{ value: string; top: number; left: number } | null>(null);
@@ -93,7 +96,7 @@ export default function Select({ options, value, onChange, onOpenChange, placeho
         className="w-full flex items-center gap-2 text-sm bg-[var(--vsc-bg)] border border-[var(--vsc-border)] rounded px-2 py-1.5 text-left hover:border-zinc-500 transition-colors cursor-pointer"
       >
         <span className={`flex-1 truncate ${selected ? 'text-zinc-300' : 'text-zinc-500'}`}>
-          {selected ? selected.label : placeholder}
+          {selected ? selected.label : resolvedPlaceholder}
         </span>
         <ChevronDown className={`w-3 h-3 text-zinc-500 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -108,7 +111,7 @@ export default function Select({ options, value, onChange, onOpenChange, placeho
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 className="flex-1 text-sm bg-transparent text-zinc-300 outline-none placeholder-zinc-600"
-                placeholder="搜索..."
+                placeholder={t('selectSearchPlaceholder')}
               />
             </div>
           )}
@@ -155,7 +158,7 @@ export default function Select({ options, value, onChange, onOpenChange, placeho
                           });
                         }}
                         className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${actionMenuOpen ? 'bg-white/[0.08] text-zinc-200' : 'text-zinc-700 opacity-0 group-hover:opacity-100 hover:bg-white/[0.06] hover:text-zinc-300'}`}
-                        title="更多"
+                        title={t('selectMore')}
                       >
                         <MoreHorizontal className="w-3.5 h-3.5" />
                       </button>
@@ -164,7 +167,7 @@ export default function Select({ options, value, onChange, onOpenChange, placeho
                 </div>
               );
             }) : (
-              <div className="px-2 py-3 text-sm text-zinc-600 text-center">无结果</div>
+              <div className="px-2 py-3 text-sm text-zinc-600 text-center">{t('selectNoResults')}</div>
             )}
           </div>
         </div>

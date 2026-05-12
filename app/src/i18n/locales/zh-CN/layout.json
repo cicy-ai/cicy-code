@@ -1,0 +1,18 @@
+{
+  "agentStackCopyFailed": "复制失败：{{value}}",
+  "agentStackApiOnly": "该成员当前只支持 API 能力。",
+  "agentStackActive": "实时终端已激活。",
+  "agentStackInactiveHint": "点击切换到该成员，在右侧查看完整历史。",
+  "skillPanelTitle": "协作技能",
+  "skillPanelTarget": "目标: {{target}}",
+  "skillPanelNode": " · 节点 {{node}}",
+  "tokenDialogTitle": "API 令牌",
+  "tokenNotePlaceholder": "令牌备注...",
+  "tokenCreateButton": "创建",
+  "tokenEmptyList": "暂无令牌",
+  "tokenUnnamed": "未命名",
+  "tokenPrefixOnly": "仅前缀",
+  "desktopEmpty": "让你的智能体帮你构建点东西",
+  "desktopContextOpen": "打开",
+  "desktopContextRemove": "移除"
+}
