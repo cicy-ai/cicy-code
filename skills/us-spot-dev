@@ -146,9 +146,16 @@ def run(cmd, **kw):
     return subprocess.run(cmd, **kw)
 
 
-def run_aliyun(args):
-    p = run(["aliyun"] + args, timeout=30)
-    return json.loads(p.stdout)
+def run_aliyun(args, retries=5):
+    # Aliyun's OpenAPI throttles and is eventually consistent; retry transient failures.
+    last = None
+    for attempt in range(retries):
+        p = subprocess.run(["aliyun"] + args, capture_output=True, text=True, timeout=40)
+        if p.returncode == 0:
+            return json.loads(p.stdout)
+        last = (p.stdout or "") + (p.stderr or "")
+        time.sleep(4 + attempt * 3)
+    raise RuntimeError(f"aliyun {' '.join(args[:3])} failed after {retries} tries: {last.strip()[:300]}")
 
 
 def run_ssh(host, cmd, **kw):
@@ -175,16 +182,24 @@ def find_persistent_disk():
     return None
 
 
-def find_running_instance():
+def find_any_instance():
+    """Any instance with our name that isn't already gone (Running/Starting/Pending/Stopped/...)."""
     try:
         r = run_aliyun(["ecs", "DescribeInstances", "--region", REGION,
                         "--InstanceName", INSTANCE_NAME])
-        for inst in r.get("Instances", {}).get("Instance", []):
-            if inst["Status"] == "Running":
+        insts = r.get("Instances", {}).get("Instance", [])
+        # prefer a Running one, else any
+        for inst in insts:
+            if inst.get("Status") == "Running":
                 return inst
+        return insts[0] if insts else None
     except Exception:
-        pass
-    return None
+        return None
+
+
+def find_running_instance():
+    inst = find_any_instance()
+    return inst if inst and inst.get("Status") == "Running" else None
 
 
 def find_sg(vpc_id):
@@ -381,14 +396,22 @@ def clean_local_configs():
 
 
 def destroy(remove_disk=False):
-    inst = find_running_instance()
-    if inst:
+    # Delete every instance with our name, whatever state it's in (a half-created
+    # one may still be "Starting"/"Pending").
+    while True:
+        inst = find_any_instance()
+        if not inst:
+            break
         inst_id = inst["InstanceId"]
         ip = inst.get("PublicIpAddress", {}).get("IpAddress", [None])[0]
-        print(f"  Deleting instance {inst_id} ({ip})...")
-        run_aliyun(["ecs", "DeleteInstance", "--region", REGION,
-                    "--InstanceId", inst_id, "--Force", "true"])
-        print(f"  Deleted.")
+        print(f"  Deleting instance {inst_id} ({ip}) [status={inst.get('Status')}]...")
+        try:
+            run_aliyun(["ecs", "DeleteInstance", "--region", REGION,
+                        "--InstanceId", inst_id, "--Force", "true"])
+        except Exception as e:
+            print(f"  (delete failed, retrying: {e})"); time.sleep(8)
+        else:
+            print("  Deleted."); time.sleep(3)
 
     if remove_disk:
         disk = find_persistent_disk()
