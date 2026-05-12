@@ -1,0 +1,13 @@
+{
+  "titleCode": "CiCy Code",
+  "titleAudit": "CiCy Audit",
+  "subtitleCode": "使用你的 API 令牌登录",
+  "subtitleAudit": "使用你的 API 令牌查看 AI 使用情况面板",
+  "apiToken": "API 令牌",
+  "apiTokenHint": "粘贴有效令牌以继续",
+  "placeholder": "在这里粘贴令牌...",
+  "submit": "使用令牌登录",
+  "submitting": "验证中...",
+  "errorInvalid": "令牌无效",
+  "errorConnection": "连接失败"
+}

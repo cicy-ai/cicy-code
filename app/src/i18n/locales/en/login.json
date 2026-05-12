@@ -1,0 +1,13 @@
+{
+  "titleCode": "CiCy Code",
+  "titleAudit": "CiCy Audit",
+  "subtitleCode": "Sign in with your API token",
+  "subtitleAudit": "Use your API token to view the AI usage dashboard",
+  "apiToken": "API token",
+  "apiTokenHint": "Paste a valid token to continue",
+  "placeholder": "Paste your token here...",
+  "submit": "Sign in with token",
+  "submitting": "Verifying...",
+  "errorInvalid": "Invalid token",
+  "errorConnection": "Connection failed"
+}

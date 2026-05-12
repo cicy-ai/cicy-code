@@ -1,26 +1,28 @@
-import { useState } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import {useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {useAuth} from '../contexts/AuthContext';
 import config from '../config';
 
 export default function Login() {
-  const { login } = useAuth();
+  const {login} = useAuth();
+  const {t} = useTranslation('login');
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const t = value.trim();
-    if (!t) return;
+    const token = value.trim();
+    if (!token) return;
     setLoading(true);
     setError('');
     try {
-      const ok = await login(t);
+      const ok = await login(token);
       if (!ok) {
-        setError('令牌无效');
+        setError(t('errorInvalid'));
       }
     } catch {
-      setError('连接失败');
+      setError(t('errorConnection'));
     } finally {
       setLoading(false);
     }
@@ -31,13 +33,13 @@ export default function Login() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="text-4xl mb-3">{config.isAudit ? '🔍' : '✨'}</div>
-          <h1 className="text-xl font-semibold text-white">{config.isAudit ? 'CiCy Audit' : 'CiCy Code'}</h1>
-          <p className="text-sm text-zinc-500 mt-1">{config.isAudit ? '使用你的 API 令牌查看 AI 使用情况面板' : '使用你的 API 令牌登录'}</p>
+          <h1 className="text-xl font-semibold text-white">{config.isAudit ? t('titleAudit') : t('titleCode')}</h1>
+          <p className="text-sm text-zinc-500 mt-1">{config.isAudit ? t('subtitleAudit') : t('subtitleCode')}</p>
         </div>
 
         <div className="text-center mb-6">
-          <p className="text-sm text-zinc-400">API 令牌</p>
-          <p className="text-xs text-zinc-600 mt-1">粘贴有效令牌以继续</p>
+          <p className="text-sm text-zinc-400">{t('apiToken')}</p>
+          <p className="text-xs text-zinc-600 mt-1">{t('apiTokenHint')}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -45,7 +47,7 @@ export default function Login() {
             type="password"
             value={value}
             onChange={e => setValue(e.target.value)}
-            placeholder="在这里粘贴令牌..."
+            placeholder={t('placeholder')}
             autoFocus
             className="w-full bg-[#141414] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all font-mono"
           />
@@ -60,9 +62,9 @@ export default function Login() {
             {loading ? (
               <span className="flex items-center justify-center gap-2">
                 <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                验证中...
+                {t('submitting')}
               </span>
-            ) : '使用令牌登录'}
+            ) : t('submit')}
           </button>
         </form>
       </div>

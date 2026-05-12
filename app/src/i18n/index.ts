@@ -2,21 +2,32 @@ import i18n from 'i18next';
 import {initReactI18next} from 'react-i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 
-import en from './locales/en.json';
-import zhCN from './locales/zh-CN.json';
+import enCommon from './locales/en/common.json';
+import enLogin from './locales/en/login.json';
+import enSettings from './locales/en/settings.json';
+import zhCommon from './locales/zh-CN/common.json';
+import zhLogin from './locales/zh-CN/login.json';
+import zhSettings from './locales/zh-CN/settings.json';
 
-const STORAGE_KEY = 'cicy.lang';
+export const STORAGE_KEY = 'cicy.lang';
+
+export const SUPPORTED_LNGS = ['en', 'zh-CN'] as const;
+export type SupportedLng = (typeof SUPPORTED_LNGS)[number];
+
+const resources = {
+  en: {common: enCommon, login: enLogin, settings: enSettings},
+  'zh-CN': {common: zhCommon, login: zhLogin, settings: zhSettings},
+};
 
 void i18n
   .use(LanguageDetector)
   .use(initReactI18next)
   .init({
-    resources: {
-      en: {translation: en},
-      'zh-CN': {translation: zhCN},
-    },
+    resources,
+    ns: ['common', 'login', 'settings'],
+    defaultNS: 'common',
     fallbackLng: 'en',
-    supportedLngs: ['en', 'zh-CN'],
+    supportedLngs: [...SUPPORTED_LNGS],
     nonExplicitSupportedLngs: true,
     detection: {
       order: ['localStorage', 'navigator'],
