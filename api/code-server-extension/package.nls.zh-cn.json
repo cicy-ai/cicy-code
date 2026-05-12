@@ -1,0 +1,5 @@
+{
+  "cicy.sendPathToCurrentAgent.title": "发送给当前 agent",
+  "cicy.sendActiveDocumentToCurrentAgent.title": "发送当前文档给 agent",
+  "cicy.showFileInfo.title": "查看文件信息"
+}

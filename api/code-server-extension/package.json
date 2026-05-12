@@ -2,7 +2,7 @@
   "name": "cicy-code-server-bridge",
   "displayName": "CiCy Code Server Bridge",
   "description": "Explorer context actions for sending file paths to the current CiCy agent.",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "publisher": "cicy-ai",
   "engines": {
     "vscode": "^1.100.0"
@@ -13,18 +13,24 @@
   "activationEvents": [
     "onStartupFinished",
     "onCommand:cicy.sendPathToCurrentAgent",
-    "onCommand:cicy.sendActiveDocumentToCurrentAgent"
+    "onCommand:cicy.sendActiveDocumentToCurrentAgent",
+    "onCommand:cicy.showFileInfo"
   ],
   "main": "./dist/extension.js",
+  "l10n": "./l10n",
   "contributes": {
     "commands": [
       {
         "command": "cicy.sendPathToCurrentAgent",
-        "title": "发送给当前 agent"
+        "title": "%cicy.sendPathToCurrentAgent.title%"
       },
       {
         "command": "cicy.sendActiveDocumentToCurrentAgent",
-        "title": "发送当前文档给 agent"
+        "title": "%cicy.sendActiveDocumentToCurrentAgent.title%"
+      },
+      {
+        "command": "cicy.showFileInfo",
+        "title": "%cicy.showFileInfo.title%"
       }
     ],
     "menus": {
@@ -33,6 +39,11 @@
           "command": "cicy.sendPathToCurrentAgent",
           "when": "explorerResourceIsFolder || resourceScheme == file",
           "group": "navigation@1000"
+        },
+        {
+          "command": "cicy.showFileInfo",
+          "when": "!explorerResourceIsFolder && resourceScheme == file",
+          "group": "navigation@1001"
         }
       ],
       "editor/context": [
@@ -50,6 +61,7 @@
   "devDependencies": {
     "@types/node": "^22.15.29",
     "@types/vscode": "^1.100.0",
+    "@vscode/vsce": "^3.9.1",
     "typescript": "^5.8.3"
   }
 }

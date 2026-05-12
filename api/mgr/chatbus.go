@@ -29,7 +29,7 @@ type chatClient struct {
 	activeAgent string
 	electron    bool
 	platform    string
-	arch        string
+	userAgent   string
 	connectedAt time.Time
 	remoteAddr  string
 	closeOnce   sync.Once
@@ -67,6 +67,23 @@ func (c *chatClient) close() {
 	})
 }
 
+// closeWithReason sends a WebSocket close frame with the given code/reason and
+// then tears down the connection. Used to signal application-level conditions
+// (e.g. 4409 "superseded") so the client can decide not to auto-reconnect.
+func (c *chatClient) closeWithReason(code int, reason string) {
+	c.closeOnce.Do(func() {
+		if c.conn != nil {
+			_ = c.conn.WriteControl(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(code, reason),
+				time.Now().Add(2*time.Second),
+			)
+		}
+		close(c.send)
+		_ = c.conn.Close()
+	})
+}
+
 func (h *chatHub) stats() interface{} {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -76,6 +93,7 @@ func (h *chatHub) stats() interface{} {
 		ClientID      string `json:"client_id"`
 		IsElectron    bool   `json:"isElectron"`
 		Platform      string `json:"platform"`
+		UserAgent     string `json:"user_agent"`
 		RemoteAddr    string `json:"remote_addr"`
 		ConnectedAt   string `json:"connected_at"`
 		UptimeSec     int    `json:"uptime_sec"`
@@ -89,6 +107,7 @@ func (h *chatHub) stats() interface{} {
 				ClientID:      clientID,
 				IsElectron:    c.electron,
 				Platform:      c.platform,
+				UserAgent:     c.userAgent,
 				RemoteAddr:    c.remoteAddr,
 				ConnectedAt:   c.connectedAt.Format(time.RFC3339),
 				UptimeSec:     int(time.Since(c.connectedAt).Seconds()),
@@ -125,7 +144,11 @@ func (h *chatHub) register(c *chatClient) {
 	count := len(h.clients[c.agentID])
 	h.mu.Unlock()
 	if replaced != nil {
-		replaced.close()
+		// 4409 = application-level "superseded". The client uses this code to
+		// stop the auto-reconnect loop so two pages sharing the same client_id
+		// don't ping-pong each other off the slot.
+		replaced.closeWithReason(4409, "superseded")
+		log.Printf("[chat-ws] supersede master_agent_id=%s client_id=%s", c.agentID, c.clientID)
 	}
 	log.Printf("[chat-ws] connect master_agent_id=%s client_id=%s clients=%d", c.agentID, c.clientID, count)
 }
@@ -265,21 +288,6 @@ func normalizeChatClientPlatform(value string) string {
 	}
 }
 
-func normalizeChatClientArch(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "x64", "amd64", "x86_64", "x86-64", "win64":
-		return "x64"
-	case "arm64", "aarch64":
-		return "arm64"
-	case "arm":
-		return "arm"
-	case "x86", "i386", "i686":
-		return "x86"
-	default:
-		return ""
-	}
-}
-
 func parseChatClientElectronValue(value interface{}) (bool, bool) {
 	switch v := value.(type) {
 	case bool:
@@ -295,7 +303,7 @@ func parseChatClientElectronValue(value interface{}) (bool, bool) {
 	return false, false
 }
 
-func (h *chatHub) updateClientMetadata(clientID string, platform string, arch string, electron *bool) {
+func (h *chatHub) updateClientMetadata(clientID string, platform string, userAgent string, electron *bool) {
 	clientID = strings.TrimSpace(clientID)
 	if clientID == "" {
 		return
@@ -309,8 +317,8 @@ func (h *chatHub) updateClientMetadata(clientID string, platform string, arch st
 	if normalized := normalizeChatClientPlatform(platform); normalized != "" {
 		c.platform = normalized
 	}
-	if normalized := normalizeChatClientArch(arch); normalized != "" {
-		c.arch = normalized
+	if ua := strings.TrimSpace(userAgent); ua != "" {
+		c.userAgent = ua
 	}
 	if electron != nil {
 		c.electron = *electron
@@ -455,14 +463,14 @@ func (c *chatClient) readPump() {
 			data := aiGatewayMap(evt.Data)
 			agentID := normalizeChatAgentValue(aiGatewayFirstNonEmpty(aiGatewayString(data["agent_id"]), aiGatewayString(data["pane_id"])))
 			platform := aiGatewayFirstNonEmpty(aiGatewayString(data["platform"]), aiGatewayString(data["os"]))
-			arch := aiGatewayString(data["arch"])
+			userAgent := aiGatewayFirstNonEmpty(aiGatewayString(data["user_agent"]), aiGatewayString(data["userAgent"]))
 			var electronPtr *bool
 			if value, ok := parseChatClientElectronValue(data["isElectron"]); ok {
 				electronPtr = &value
 			} else if value, ok := parseChatClientElectronValue(data["electron"]); ok {
 				electronPtr = &value
 			}
-			hub.updateClientMetadata(c.clientID, platform, arch, electronPtr)
+			hub.updateClientMetadata(c.clientID, platform, userAgent, electronPtr)
 			if agentID != "" {
 				hub.registerClientAgent(c.clientID, agentID)
 			}
@@ -594,7 +602,7 @@ func handleChatWS(w http.ResponseWriter, r *http.Request) {
 		clientID:    clientID,
 		electron:    isElectron,
 		platform:    normalizeChatClientPlatform(r.URL.Query().Get("platform")),
-		arch:        normalizeChatClientArch(r.URL.Query().Get("arch")),
+		userAgent:   strings.TrimSpace(r.Header.Get("User-Agent")),
 		connectedAt: time.Now(),
 		remoteAddr:  remoteAddr,
 	}

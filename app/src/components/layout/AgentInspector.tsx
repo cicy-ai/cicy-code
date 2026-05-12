@@ -972,7 +972,7 @@ export default function AgentInspector({
                   />
                   <InspectorToggle
                     label="启用代理"
-                    desc="启动前执行 cicy_proxy_on，并检查 mihome IN-USER 规则"
+                    desc="启动前执行 cicy_proxy_on，并检查 mihomo IN-USER 规则"
                     checked={!!settingsData?.use_proxy}
                     onChange={(value) => patchSettingsData({ use_proxy: value })}
                     onBlur={() => { void saveSettings(); }}
@@ -982,7 +982,7 @@ export default function AgentInspector({
                       <InspectorField label="代理密码" desc="留空时优先 api_token，不存在时回退 user==pass">
                         <InspectorInput value={settingsData?.proxy?.password || ''} onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), password: value } })} onBlur={() => { void saveSettings(); }} placeholder="可选，自定义代理密码" mono />
                       </InspectorField>
-                      <InspectorField label="mihome 规则" desc="可选，指定必须存在的完整规则，例如 IN-USER,w-10001,proxy-a">
+                      <InspectorField label="mihomo 规则" desc="可选，指定必须存在的完整规则，例如 IN-USER,w-10001,proxy-a">
                         <InspectorInput value={settingsData?.proxy?.rule || ''} onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), rule: value } })} onBlur={() => { void saveSettings(); }} placeholder="IN-USER,w-10001,proxy-a" mono />
                       </InspectorField>
                     </>

@@ -156452,3 +156452,1312 @@ claude --settings "$WORKSPACE/.cicy/claude-settings.json" --dangerously-skip-per
 2026/05/11 22:53:04 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1blie5-kedyp6
 2026/05/11 22:53:07 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-mox34x5r-wrhlt6qr:code-ext
 2026/05/11 22:53:23 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-mox34x5r-wrhlt6qr
+2026/05/11 22:47:15 [db] driver=sqlite dsn=/Users/ton/cicy-ai/db/data.db
+🔍 检查基础环境...
+  ✅ curl
+  ✅ unzip
+  ✅ jq
+  ✅ ssh-keygen
+  ✅ tmux
+  ✅ git
+  ✅ node
+✅ 所有依赖已安装
+2026/05/11 22:47:15 [startup] updated /Users/ton/.cicy_tmux.conf (backup: /Users/ton/.cicy_tmux.conf.bak)
+2026/05/11 22:47:15 [startup] updated /Users/ton/.zshrc
+2026/05/11 22:47:15 [setup] configuring AI tools with API URL: https://xchai.xyz/v1
+2026/05/11 22:47:16 [startup] created session w-10001
+2026/05/11 22:47:16 HTTP server is listening at: http://127.0.0.1:10001/
+2026/05/11 22:47:16 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:16 [startup] created session w-10002
+2026/05/11 22:47:16 HTTP server is listening at: http://127.0.0.1:10002/
+2026/05/11 22:47:16 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:17 [startup] created session w-10003
+2026/05/11 22:47:17 HTTP server is listening at: http://127.0.0.1:10003/
+2026/05/11 22:47:17 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:17 [startup] created session w-10004
+2026/05/11 22:47:17 HTTP server is listening at: http://127.0.0.1:10004/
+2026/05/11 22:47:17 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:18 [startup] created session w-10005
+2026/05/11 22:47:18 HTTP server is listening at: http://127.0.0.1:10005/
+2026/05/11 22:47:18 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:18 [startup] created session w-10006
+2026/05/11 22:47:18 HTTP server is listening at: http://127.0.0.1:10006/
+2026/05/11 22:47:19 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:19 [startup] created session w-10007
+2026/05/11 22:47:19 HTTP server is listening at: http://127.0.0.1:10007/
+2026/05/11 22:47:19 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:19 [startup] created session w-10008
+2026/05/11 22:47:19 HTTP server is listening at: http://127.0.0.1:10008/
+2026/05/11 22:47:20 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:20 [startup] created session w-10009
+2026/05/11 22:47:20 HTTP server is listening at: http://127.0.0.1:10009/
+2026/05/11 22:47:20 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:21 [startup] created session w-10011
+2026/05/11 22:47:21 HTTP server is listening at: http://127.0.0.1:10011/
+2026/05/11 22:47:21 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:21 [startup] created session w-10012
+2026/05/11 22:47:21 HTTP server is listening at: http://127.0.0.1:10012/
+2026/05/11 22:47:22 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:22 [startup] created session w-10013
+2026/05/11 22:47:22 HTTP server is listening at: http://127.0.0.1:10013/
+2026/05/11 22:47:22 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:23 [startup] created session w-10017
+2026/05/11 22:47:23 HTTP server is listening at: http://127.0.0.1:10017/
+2026/05/11 22:47:23 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:23 [startup] created session w-10019
+2026/05/11 22:47:23 HTTP server is listening at: http://127.0.0.1:10019/
+2026/05/11 22:47:24 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:24 [startup] created session w-10020
+2026/05/11 22:47:24 HTTP server is listening at: http://127.0.0.1:10020/
+2026/05/11 22:47:24 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:25 [startup] created session w-10021
+2026/05/11 22:47:25 HTTP server is listening at: http://127.0.0.1:10021/
+2026/05/11 22:47:25 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:25 [startup] created session w-10022
+2026/05/11 22:47:25 HTTP server is listening at: http://127.0.0.1:10022/
+2026/05/11 22:47:26 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:26 [startup] created session w-10023
+2026/05/11 22:47:26 HTTP server is listening at: http://127.0.0.1:10023/
+2026/05/11 22:47:27 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:27 [startup] created session w-10024
+2026/05/11 22:47:27 HTTP server is listening at: http://127.0.0.1:10024/
+2026/05/11 22:47:27 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:28 [startup] created session w-10025
+2026/05/11 22:47:28 HTTP server is listening at: http://127.0.0.1:10025/
+2026/05/11 22:47:28 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:28 [startup] created session w-10026
+2026/05/11 22:47:28 HTTP server is listening at: http://127.0.0.1:10026/
+2026/05/11 22:47:29 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:29 [startup] created session w-10027
+2026/05/11 22:47:29 HTTP server is listening at: http://127.0.0.1:10027/
+2026/05/11 22:47:29 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:30 [startup] created session w-10028
+2026/05/11 22:47:30 HTTP server is listening at: http://127.0.0.1:10028/
+2026/05/11 22:47:30 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:30 [startup] created session w-10029
+2026/05/11 22:47:30 HTTP server is listening at: http://127.0.0.1:10029/
+2026/05/11 22:47:31 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:47:31 [tmux-health] started | interval=30s
+2026/05/11 22:47:31 [watcher] disabled
+2026/05/11 22:47:31 [startup] installing cicy-skills in background: root=/Users/ton/cicy-ai/skills version=v0.1.4
+2026/05/11 22:47:31 [startup] mode=local port=8008 db=sqlite kv=file:/Users/ton/cicy-ai/db/kv.json
+2026/05/11 22:47:31 [http-log] consumer started
+2026/05/11 22:47:31 cicy-code starting on 0.0.0.0:8008
+2026/05/11 22:47:31 
+2026/05/11 22:47:31 ============================================================
+2026/05/11 22:47:31 
+2026/05/11 22:47:31   >>> CICY CODE <<<
+2026/05/11 22:47:31 ============================================================
+2026/05/11 22:47:31   Token: cicy_e20ff4146b5a557a9f6e14394905854f
+2026/05/11 22:47:31   URL:   http://127.0.0.1:8008/?token=cicy_e20ff4146b5a557a9f6e14394905854f
+2026/05/11 22:47:31 ============================================================
+2026/05/11 22:47:31 
+2026/05/11 22:47:31 [im] started worker account=7
+2026/05/11 22:47:33 [startup] cicy-skills bootstrap failed: exit status 56 (log: /Users/ton/cicy-ai/.cicy/cicy-skills-install.log)
+2026/05/11 22:47:34 [startup] code-server ready on :8002
+2026/05/11 22:47:34 [startup] installing code-server extension: /var/folders/6q/v5y7mcfs4dj2rhc8bljptj240000gr/T/cicy-code-server-extension-1587443314.vsix
+2026/05/11 22:47:35 [startup] code-server extension installed: /var/folders/6q/v5y7mcfs4dj2rhc8bljptj240000gr/T/cicy-code-server-extension-1587443314.vsix output=🌐 i18next is maintained with support from Locize — consider powering your project with managed localization (AI, CDN, integrations): https://locize.com 💙
+Installing extensions...
+Extension 'cicy-code-server-extension-1587443314.vsix' was successfully installed.
+2026/05/11 22:47:35 [startup] installing code-server extension: laurenttreguier.vscode-simple-icons
+2026/05/11 22:47:49 [startup] code-server extension installed: laurenttreguier.vscode-simple-icons output=🌐 i18next is maintained with support from Locize — consider powering your project with managed localization (AI, CDN, integrations): https://locize.com 💙
+Installing extensions...
+Installing extension 'laurenttreguier.vscode-simple-icons'...
+Extension 'laurenttreguier.vscode-simple-icons' v1.16.0 was successfully installed.
+2026/05/11 22:50:18 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/11 22:50:18 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:50:18 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/11 22:50:18 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:50:18 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:50:18 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:50:23 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:50:28 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:50:33 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:50:33 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:50:33 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/11 22:50:34 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:50:34 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:50:34 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:50:34 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:50:34 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/11 22:50:35 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:50:35 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:50:35 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:50:36 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:50:36 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/11 22:50:36 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/11 22:50:36 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:50:36 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:50:36 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:50:36 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:50:41 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:50:46 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:50:48 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/11 22:50:51 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:50:56 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:50:58 Waiting for 1 connections to be closed
+2026/05/11 22:50:59 HTTP server is listening at: http://127.0.0.1:10001/
+2026/05/11 22:51:00 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:51:00 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:00 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:51:00 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:00 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:00 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:01 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:02 Waiting for 1 connections to be closed
+2026/05/11 22:51:03 HTTP server is listening at: http://127.0.0.1:10019/
+2026/05/11 22:51:03 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:03 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:51:03 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:51:03 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:03 [chat-ws] register agent client agent_id=w-10028 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:03 [chat-ws] register agent client agent_id=w-10028 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:04 Waiting for 1 connections to be closed
+2026/05/11 22:51:05 HTTP server is listening at: http://127.0.0.1:10028/
+2026/05/11 22:51:05 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:05 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:51:06 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:06 [chat-ws] register agent client agent_id=w-10029 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:06 [chat-ws] register agent client agent_id=w-10029 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:06 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:51:06 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:07 Waiting for 1 connections to be closed
+2026/05/11 22:51:08 HTTP server is listening at: http://127.0.0.1:10029/
+2026/05/11 22:51:09 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:51:09 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:09 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:51:09 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:09 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:09 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:11 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:14 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:14 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:51:14 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:14 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:14 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:16 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:19 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:19 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/11 22:51:19 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/11 22:51:19 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/11 22:51:19 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:19 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:19 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:19 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:19 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:19 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/11 22:51:19 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:19 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:19 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:22 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/11 22:51:24 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:30 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:35 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:39 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:39 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:40 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:40 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:51:41 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:41 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:41 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:45 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:50 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:50 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:53 Waiting for 1 connections to be closed
+2026/05/11 22:51:54 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:54 HTTP server is listening at: http://127.0.0.1:10001/
+2026/05/11 22:51:54 [init] failed to ensure workspace for script: mkdir /home/cicy: operation not supported
+2026/05/11 22:51:55 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:55 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:51:55 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:51:55 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:51:55 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:00 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:02 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:04 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:04 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:52:04 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:04 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:04 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:04 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:05 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:05 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:52:05 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:05 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:05 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:06 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:06 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:52:06 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:06 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:06 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:09 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:14 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:19 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:21 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:22 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/11 22:52:22 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/11 22:52:22 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/11 22:52:22 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:22 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:22 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:22 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:25 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/11 22:52:27 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:27 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:27 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:52:28 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:28 [chat-ws] register agent client agent_id=w-10028 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:28 [chat-ws] register agent client agent_id=w-10028 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:28 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:28 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:52:28 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:28 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:28 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:31 [webtty-input] len=1 raw="\r"
+2026/05/11 22:52:32 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:32 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:32 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:52:32 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:32 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:32 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:34 [webtty-input] len=1 raw="\r"
+2026/05/11 22:52:36 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:36 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:52:36 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:36 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:36 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:37 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:42 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:47 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:47 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:52:47 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:47 [chat-ws] register agent client agent_id=w-10028 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:47 [chat-ws] register agent client agent_id=w-10028 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:47 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:48 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:48 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:52:48 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:48 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:48 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:49 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:49 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:52:49 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:49 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:49 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:52:52 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:52:57 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:02 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:08 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:13 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:16 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:17 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:22 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:27 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:31 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:31 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:53:31 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:31 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:31 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:32 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:32 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:53:32 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:32 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:32 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:32 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:37 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:43 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:48 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:49 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:52 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:54 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:54 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:53:54 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:54 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:54 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:55 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:55 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:53:55 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:55 [chat-ws] register agent client agent_id=w-10028 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:55 [chat-ws] register agent client agent_id=w-10028 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:56 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:56 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:53:57 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:57 [chat-ws] register agent client agent_id=w-10029 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:57 [chat-ws] register agent client agent_id=w-10029 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:57 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:57 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:57 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:53:57 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:57 [chat-ws] register agent client agent_id=w-10028 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:57 [chat-ws] register agent client agent_id=w-10028 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:58 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:58 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:53:58 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:53:58 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:53:58 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:02 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:06 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:06 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:54:06 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:06 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:06 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:07 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:08 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:08 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:54:08 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:08 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:08 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:08 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:08 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:54:08 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:08 [chat-ws] register agent client agent_id=w-10028 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:08 [chat-ws] register agent client agent_id=w-10028 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:10 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:10 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:54:10 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:10 [chat-ws] register agent client agent_id=w-10029 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:10 [chat-ws] register agent client agent_id=w-10029 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:12 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:17 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:19 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:19 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:54:19 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:19 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:19 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:20 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:20 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 22:54:20 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:20 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:20 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 22:54:22 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:28 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:33 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:38 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:43 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:48 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:53 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:54:58 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:55:03 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:55:08 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:55:13 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:55:18 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:55:23 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:55:49 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:56:16 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:56:16 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:56:17 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:56:22 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:56:22 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:56:27 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:56:32 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:56:37 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:56:42 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:56:47 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:56:48 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/11 22:56:52 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:56:57 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:57:02 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:57:07 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:57:10 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:57:12 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:57:16 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:57:17 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:57:23 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:57:28 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:57:33 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:57:38 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:57:43 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:57:48 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:57:53 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:57:58 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:58:03 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:58:08 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:58:13 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:58:18 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:58:49 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 22:59:49 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 23:00:49 [poll_request] ensure workspace home link failed master_agent_id=w-10001 workspace=/home/cicy/cicy-ai/workers/w-10001 err=symlink /Users/ton /home/cicy/cicy-ai/workers/w-10001/home: no such file or directory
+2026/05/11 23:07:09 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 23:07:10 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/11 23:07:10 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/11 23:07:10 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 23:07:10 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 23:07:10 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 23:07:14 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/11 23:07:16 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 23:07:16 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 23:07:16 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 23:07:16 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 23:07:17 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 23:07:17 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/11 23:07:17 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 23:07:17 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/11 23:07:20 Waiting for 1 connections to be closed
+2026/05/11 23:07:21 HTTP server is listening at: http://127.0.0.1:10001/
+2026/05/11 23:07:21 [init] v1 pane w-10001:main.0 script path=/Users/ton/cicy-ai/workers/w-10001/.cicy/boot.sh
+#!/usr/bin/env bash
+
+touch ~/.cicy_tmux.conf
+source ~/.cicy_tmux.conf
+export X_AGENT_ID='w-10001:main.0'
+export X_AGENT_SHORT_ID='w-10001'
+export CICY_AGENT_TYPE='claude'
+export WORKSPACE='/Users/ton/cicy-ai/workers/w-10001'
+if ! __cicy_mihome_has_in_user_rule; then
+  echo "[cicy] 缺少 mihome IN-USER 规则，请先在后台设置里配置"
+  exit 1
+fi
+cicy_proxy_on
+__cicy_require_command 'claude' 'Claude Code' 'mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && npm install -g --prefix "$HOME/.npm-global" @anthropic-ai/claude-code@latest' "$HOME/.cicy/claude-install-w-10001.log"
+mkdir -p "$WORKSPACE/.cicy"
+cat > "$WORKSPACE/.cicy/claude-settings.json" <<EOF
+{
+  "model": "claude-opus-4-7"
+}
+EOF
+clear
+claude --settings "$WORKSPACE/.cicy/claude-settings.json" --dangerously-skip-permissions
+2026/05/11 23:07:24 [init] shell prompt ready for w-10001
+2026/05/11 23:07:36 [webtty-input] len=1 raw="\r"
+2026/05/12 08:09:08 [webtty-input] len=1 raw="\r"
+2026/05/12 08:09:12 [webtty-input] len=1 raw="\r"
+2026/05/12 08:09:16 [webtty-input] len=1 raw="\r"
+2026/05/12 08:09:23 [webtty-input] len=1 raw="\r"
+2026/05/12 08:13:01 [webtty-input] len=1 raw="\r"
+2026/05/12 08:13:13 [webtty-input] len=1 raw="\r"
+2026/05/12 08:16:29 [webtty-input] len=1 raw="\r"
+2026/05/12 08:16:36 [webtty-input] len=1 raw="\r"
+2026/05/12 08:16:40 [webtty-input] len=1 raw="\r"
+2026/05/12 08:16:42 [webtty-input] len=1 raw="\r"
+2026/05/12 08:19:05 [webtty-input] len=1 raw="\r"
+2026/05/12 08:19:14 [webtty-input] len=1 raw="\r"
+2026/05/12 08:40:14 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:40:14 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/12 08:40:14 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:40:14 [chat-ws] register agent client agent_id=w-10019 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:40:14 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:40:14 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/12 08:40:14 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:40:14 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:40:26 [poll_links] synced child link parent=w-10001 child=w-10003 target=/Users/ton/cicy-ai/workers/w-10003
+2026/05/12 08:40:26 [poll_links] synced child link parent=w-10001 child=w-10019 target=/Users/ton/cicy-ai/workers/w-10019
+2026/05/12 08:40:26 [poll_links] synced child link parent=w-10001 child=w-10028 target=/Users/ton/cicy-ai/workers/w-10028
+2026/05/12 08:40:26 [poll_links] synced child link parent=w-10001 child=w-10029 target=/Users/ton/cicy-ai/workers/w-10029
+2026/05/12 08:40:26 [chat-ws] broadcast master_agent_id=w-10001 type=poll_data clients=2
+2026/05/12 08:40:27 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:40:27 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/12 08:40:27 [chat-ws] register agent client agent_id=w-10003 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:40:27 [chat-ws] register agent client agent_id=w-10003 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:40:31 Waiting for 1 connections to be closed
+2026/05/12 08:40:32 HTTP server is listening at: http://127.0.0.1:10003/
+2026/05/12 08:40:32 [init] v1 pane w-10003:main.0 script path=/Users/ton/cicy-ai/workers/w-10003/.cicy/boot.sh
+#!/usr/bin/env bash
+
+if [ -z "${BASH_VERSION:-}" ]; then
+  _cicy_boot_script_path="$PWD/.cicy/boot.sh"
+  bash "$_cicy_boot_script_path"
+  _cicy_boot_status=$?
+  unset _cicy_boot_script_path
+  return "$_cicy_boot_status" 2>/dev/null || exit "$_cicy_boot_status"
+fi
+
+_cicy_boot_script="${BASH_SOURCE:-$0}"
+_cicy_runtime_dir="$(cd "$(dirname "$_cicy_boot_script")" && pwd)"
+export CICY_RUNTIME_DIR="$_cicy_runtime_dir"
+_cicy_workspace_dir="$(cd "$_cicy_runtime_dir/.." && pwd)"
+cd "$_cicy_workspace_dir"
+
+touch ~/.cicy_tmux.conf
+source ~/.cicy_tmux.conf
+export X_AGENT_ID='w-10003:main.0'
+export X_AGENT_SHORT_ID='w-10003'
+export CICY_AGENT_TYPE='opencode'
+export WORKSPACE='/Users/ton/cicy-ai/workers/w-10003'
+clear
+__cicy_require_command 'opencode' 'OpenCode' 'mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && npm install -g --prefix "$HOME/.npm-global" opencode-ai@latest' "$HOME/.cicy/opencode-install-w-10003.log"
+export CICY_OPENAI_BASE_URL='http://127.0.0.1:8008/api/ai-gateway/openai/w-10003'
+export OPENCODE_CONFIG="$WORKSPACE/.opencode/opencode.json"
+export OPENCODE_CONFIG_ROOT="$WORKSPACE/.opencode/xdg"
+export CICY_OPENCODE_MARKER="$WORKSPACE/.opencode/running"
+rm -f "$CICY_OPENCODE_MARKER"
+mkdir -p "$WORKSPACE/.opencode" "$OPENCODE_CONFIG_ROOT"
+cat > "$WORKSPACE/.opencode/reply-in-chinese.md" <<'EOF'
+Always reply in Chinese unless the user explicitly asks for another language.
+Keep code, commands, file paths, environment variables, API identifiers, and other literal tokens unchanged when accuracy matters.
+EOF
+cat > "$OPENCODE_CONFIG" <<EOF
+{
+  "\$schema": "https://opencode.ai/config.json",
+  "permission": "allow",
+  "instructions": ["${WORKSPACE}/.opencode/reply-in-chinese.md"],
+  "provider": {
+    "cicyai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "api": "openai",
+      "name": "cicyAi Gateway",
+      "options": {
+        "baseURL": "${CICY_OPENAI_BASE_URL}"
+      }
+    }
+  }
+}
+EOF
+cicy_run_opencode() {
+  XDG_CONFIG_HOME="$OPENCODE_CONFIG_ROOT" OPENCODE_CONFIG="$OPENCODE_CONFIG" opencode
+}
+cicy_start_opencode() {
+  if [ -f "$CICY_OPENCODE_MARKER" ]; then
+    echo '[cicy] OpenCode is already starting or running.'
+    return 0
+  fi
+  : > "$CICY_OPENCODE_MARKER"
+  cicy_run_opencode
+  status=$?
+  rm -f "$CICY_OPENCODE_MARKER"
+  echo '[cicy] OpenCode exited. Run cicy_start_opencode to relaunch.'
+  return "$status"
+}
+cicy_run_opencode
+unset _cicy_boot_script _cicy_runtime_dir _cicy_workspace_dir
+2026/05/12 08:40:35 [init] shell prompt ready for w-10003
+2026/05/12 08:40:44 [webtty-input] len=1 raw="\r"
+2026/05/12 08:40:45 [webtty-input] len=1 raw="\r"
+2026/05/12 08:41:41 [webtty-input] len=1 raw="\r"
+2026/05/12 08:42:00 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:00 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:01 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:01 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:02 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:02 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:03 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:03 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:04 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:04 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:05 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:05 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:06 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:06 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:07 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:07 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:08 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:08 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:09 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:09 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:10 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:10 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:11 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:11 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:12 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:12 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:13 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:13 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:14 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:14 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:16 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:16 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:17 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:17 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:18 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:18 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:19 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:19 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:20 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:20 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:21 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:21 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:22 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:22 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:23 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:23 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:24 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:24 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:25 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:25 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:26 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:26 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:27 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:27 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:28 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:28 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:29 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:29 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:30 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:30 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:31 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:31 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:32 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:32 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:33 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:33 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:34 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:34 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:35 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:35 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:36 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:36 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:37 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:37 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:38 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:38 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:39 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:39 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:40 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:40 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:41 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:41 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:42 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:42 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:43 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:43 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:44 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:44 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:45 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:45 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:46 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:46 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:47 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:47 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:48 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:48 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:49 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:49 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:50 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:50 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:51 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:51 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:52 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:52 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:53 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:53 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:54 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:54 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:55 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:55 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:56 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:56 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:57 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:57 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:58 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:58 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:42:59 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:42:59 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:00 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:00 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:01 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:01 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:02 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:02 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:02 [webtty-input] len=1 raw="\r"
+2026/05/12 08:43:03 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:03 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:04 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:04 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:05 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:05 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:06 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:06 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:07 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:07 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:07 [webtty-input] len=1 raw="\r"
+2026/05/12 08:43:08 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:08 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:09 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:09 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:10 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:10 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:11 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:11 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:12 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:12 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:13 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:13 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:14 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:14 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:15 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:15 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:16 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:16 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:17 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:17 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:18 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:18 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:19 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:19 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:20 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:20 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:21 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:21 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:22 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:22 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:23 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:23 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:24 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:24 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:25 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:25 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:26 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:26 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:27 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:27 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:28 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:28 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:29 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:29 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:30 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:30 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:31 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:31 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:32 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:32 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:33 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:33 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:34 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:34 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:35 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:35 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:36 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:36 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:37 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:37 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:38 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:38 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:39 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:39 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:40 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:40 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:41 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:41 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:42 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:42 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:43 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:43 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:44 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:44 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:45 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:45 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:46 [webtty-input] len=1 raw="\r"
+2026/05/12 08:43:46 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:46 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:47 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:47 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:48 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:48 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:49 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:49 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:50 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:50 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:51 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:51 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:52 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:52 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:53 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:53 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:54 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:54 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:55 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:55 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:56 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:56 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:57 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:57 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:58 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:58 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:43:59 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:43:59 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:00 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:00 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:01 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:01 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:02 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:02 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:03 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:03 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:04 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:04 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:05 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:44:05 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=1
+2026/05/12 08:44:05 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:05 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/12 08:44:05 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/12 08:44:05 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:44:06 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:44:06 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:44:06 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:44:06 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=2
+2026/05/12 08:44:06 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:06 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:06 [chat-ws] register agent client agent_id=w-10003 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:44:06 [chat-ws] register agent client agent_id=w-10003 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 08:44:07 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:07 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:08 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:08 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:09 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:09 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:10 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:10 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:11 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:11 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:12 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:12 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:13 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:13 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:14 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:14 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:15 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:15 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:16 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:16 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:17 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:17 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:18 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:18 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:19 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:19 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:20 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:20 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:21 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:21 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:22 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:22 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:23 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:23 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:24 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:24 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:25 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:25 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:26 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:26 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:27 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:27 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:28 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:28 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:29 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:29 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:30 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:30 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:31 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:31 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:32 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:32 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:33 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:33 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:34 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:34 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:35 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:35 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:36 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:36 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:37 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:37 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:37 [webtty-input] len=1 raw="\r"
+2026/05/12 08:44:38 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:38 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:39 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:39 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:40 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:40 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:41 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:41 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:42 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:42 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:43 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:43 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:44 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:44 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:45 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:45 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:46 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:46 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:47 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:47 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:48 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:48 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:49 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:49 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:50 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:50 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:51 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:51 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:52 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:52 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:53 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:53 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:54 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:54 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:55 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:55 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:56 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:56 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:57 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:57 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:58 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:58 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:44:59 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:44:59 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:00 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:00 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:01 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:01 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:02 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:02 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:03 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:03 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:04 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:04 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:05 [webtty-input] len=1 raw="\r"
+2026/05/12 08:45:05 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:05 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:06 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:06 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:07 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:07 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:08 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:08 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:09 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:09 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:10 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:10 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:11 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:11 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:12 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:12 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:13 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:13 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:14 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:14 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:15 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:15 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:16 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:16 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:17 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:17 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:18 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:18 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:19 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:19 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:20 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:20 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:21 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:21 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:22 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:22 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:23 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:23 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:24 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:24 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:25 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:25 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:26 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:26 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:27 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:27 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:28 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:28 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:29 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:29 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:30 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:30 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:31 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:31 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:32 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:32 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:33 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:33 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:34 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:34 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:35 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:35 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:36 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:36 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:37 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:37 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:38 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:38 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:39 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:39 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:40 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:40 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:41 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:41 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:42 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:42 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:43 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:43 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:44 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:44 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:45 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:45 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:46 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:46 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:47 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:47 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:48 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:48 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:49 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:49 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:50 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:50 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:51 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:51 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:52 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:52 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:53 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:53 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:54 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:54 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:55 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:55 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:56 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:56 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:57 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:57 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:58 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:58 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:45:59 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:45:59 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:00 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:00 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:01 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:01 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:02 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:02 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:03 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:03 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:04 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:04 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:05 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:05 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:06 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:06 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:07 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:07 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:08 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:08 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:09 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:09 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:10 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:10 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:11 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:11 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:13 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:13 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:14 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:14 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:15 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:15 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:16 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:16 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:17 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:17 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:17 [webtty-input] len=1 raw="\r"
+2026/05/12 08:46:18 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:18 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:19 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:19 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:20 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:20 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:21 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:21 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:22 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:22 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:23 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:23 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:24 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:24 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:25 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:25 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:26 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:26 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:27 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:27 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:28 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:28 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:29 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:29 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:30 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:30 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:31 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:31 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:32 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:32 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:33 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:33 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:34 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:34 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:35 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:35 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:36 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:36 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:37 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:37 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:38 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:38 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:39 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:39 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:40 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:40 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:41 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:41 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:42 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:42 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:43 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:43 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:44 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:44 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:45 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:45 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:46 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:46 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:47 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:47 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:48 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:48 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:49 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:49 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:50 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:50 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:51 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:51 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:46:52 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 08:46:52 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:47:03 [webtty-input] len=1 raw="\r"
+2026/05/12 08:47:35 [webtty-input] len=1 raw="\r"
+2026/05/12 08:48:06 [webtty-input] len=1 raw="\r"
+2026/05/12 08:48:57 [webtty-input] len=1 raw="\r"
+2026/05/12 08:49:06 [webtty-input] len=1 raw="\r"
+2026/05/12 08:49:07 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext
+2026/05/12 08:49:14 [webtty-input] len=1 raw="\r"
+2026/05/12 08:50:12 [webtty-input] len=1 raw="\r"
+2026/05/12 08:50:25 [webtty-input] len=1 raw="\r"
+2026/05/12 08:50:42 [webtty-input] len=1 raw="\r"
+2026/05/12 08:51:00 [webtty-input] len=1 raw="\r"
+2026/05/12 08:51:41 [webtty-input] len=1 raw="\r"
+2026/05/12 08:52:37 [webtty-input] len=1 raw="\r"
+2026/05/12 08:54:18 [webtty-input] len=1 raw="\r"
+2026/05/12 08:54:50 [webtty-input] len=1 raw="\r"
+2026/05/12 09:00:02 [webtty-input] len=1 raw="\r"
+2026/05/12 09:01:50 [webtty-input] len=1 raw="\r"
+2026/05/12 09:04:24 [webtty-input] len=1 raw="\r"
+2026/05/12 09:05:44 [webtty-input] len=1 raw="\r"
+2026/05/12 09:06:39 [webtty-input] len=1 raw="\r"
+2026/05/12 09:07:10 [webtty-input] len=1 raw="\r"
+2026/05/12 09:07:37 [webtty-input] len=1 raw="\r"
+2026/05/12 09:09:05 [webtty-input] len=1 raw="\r"
+2026/05/12 09:10:04 [webtty-input] len=1 raw="\r"
+2026/05/12 09:11:44 [webtty-input] len=1 raw="\r"
+2026/05/12 09:12:22 [webtty-input] len=1 raw="\r"
+2026/05/12 09:12:59 [webtty-input] len=1 raw="\r"
+2026/05/12 09:13:38 [webtty-input] len=1 raw="\r"
+2026/05/12 09:13:53 [webtty-input] len=1 raw="\r"
+2026/05/12 09:17:17 [webtty-input] len=1 raw="\r"
+2026/05/12 09:19:39 [webtty-input] len=1 raw="\r"
+2026/05/12 09:21:59 [webtty-input] len=1 raw="\r"
+2026/05/12 09:22:40 [webtty-input] len=1 raw="\r"
+2026/05/12 09:22:41 [webtty-input] len=1 raw="\r"
+2026/05/12 09:22:43 [webtty-input] len=1 raw="\r"
+2026/05/12 09:22:58 [webtty-input] len=1 raw="\r"
+2026/05/12 09:23:03 [webtty-input] len=1 raw="\r"
+2026/05/12 09:23:04 [webtty-input] len=1 raw="\r"
+2026/05/12 09:23:05 [webtty-input] len=1 raw="\r"
+2026/05/12 09:23:06 [webtty-input] len=1 raw="\r"
+2026/05/12 09:23:08 [webtty-input] len=1 raw="\r"
+2026/05/12 09:23:09 [webtty-input] len=1 raw="\r"
+2026/05/12 09:23:11 [webtty-input] len=1 raw="\r"
+2026/05/12 09:26:46 [tmux-send-trace] id=1778554606578591000-w-10003 pane=w-10003 step=request
+2026/05/12 09:26:46 [tmux-send] pane=w-10003 mode=bracketed-paste lines=20 runes=327 preview="log-level: info"
+2026/05/12 09:26:46 [tmux-send-trace] id=1778554606578591000-w-10003 pane=w-10003 step=send-text
+2026/05/12 09:26:47 [tmux-send-trace] id=1778554606578591000-w-10003 pane=w-10003 step=request-complete
+2026/05/12 09:29:04 [webtty-input] len=1 raw="\r"
+2026/05/12 09:29:05 [webtty-input] len=1 raw="\r"
+2026/05/12 09:29:06 [webtty-input] len=1 raw="\r"
+2026/05/12 09:29:07 [webtty-input] len=1 raw="\r"
+2026/05/12 09:29:08 [webtty-input] len=1 raw="\r"
+2026/05/12 09:29:10 [webtty-input] len=1 raw="\r"
+2026/05/12 09:34:53 [webtty-input] len=1 raw="\r"
+2026/05/12 09:34:55 [webtty-input] len=1 raw="\r"
+2026/05/12 09:34:56 [webtty-input] len=1 raw="\r"
+2026/05/12 09:34:56 [webtty-input] len=1 raw="\r"
+2026/05/12 09:34:59 [webtty-input] len=1 raw="\r"
+2026/05/12 09:35:01 [webtty-input] len=1 raw="\r"
+2026/05/12 09:35:28 [webtty-input] len=1 raw="\r"
+2026/05/12 09:45:54 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 09:45:54 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/12 09:45:54 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 09:45:54 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 09:45:57 [webtty-input] len=1 raw="\r"
+2026/05/12 09:46:10 [webtty-input] len=1 raw="\r"
+2026/05/12 09:46:13 [webtty-input] len=1 raw="\r"
+2026/05/12 09:46:20 [webtty-input] len=1 raw="\r"
+2026/05/12 09:46:35 [webtty-input] len=1 raw="\r"
+2026/05/12 09:46:38 [webtty-input] len=1 raw="\r"
+2026/05/12 09:46:43 [webtty-input] len=1 raw="\r"
+2026/05/12 09:46:51 [webtty-input] len=1 raw="\r"
+2026/05/12 09:46:56 [webtty-input] len=1 raw="\r"
+2026/05/12 09:47:00 [webtty-input] len=1 raw="\r"
+2026/05/12 09:47:03 [webtty-input] len=1 raw="\r"
+2026/05/12 09:47:15 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 09:47:15 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/12 09:47:15 [chat-ws] register agent client agent_id=w-10003 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 09:47:15 [chat-ws] register agent client agent_id=w-10003 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 09:47:40 [webtty-input] len=1 raw="\r"
+2026/05/12 09:48:39 [chat-ws] disconnect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 09:48:39 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7 clients=1
+2026/05/12 09:48:39 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 09:48:39 [chat-ws] register agent client agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7
+2026/05/12 09:48:46 Waiting for 1 connections to be closed
+2026/05/12 09:48:47 HTTP server is listening at: http://127.0.0.1:10001/
+2026/05/12 09:48:47 [init] v1 pane w-10001:main.0 script path=/Users/ton/cicy-ai/workers/w-10001/.cicy/boot.sh
+#!/usr/bin/env bash
+
+touch ~/.cicy_tmux.conf
+source ~/.cicy_tmux.conf
+export X_AGENT_ID='w-10001:main.0'
+export X_AGENT_SHORT_ID='w-10001'
+export CICY_AGENT_TYPE='claude'
+export WORKSPACE='/Users/ton/cicy-ai/workers/w-10001'
+if ! __cicy_mihome_has_in_user_rule; then
+  echo "[cicy] 缺少 mihome IN-USER 规则，请先在后台设置里配置"
+  exit 1
+fi
+cicy_proxy_on
+__cicy_require_command 'claude' 'Claude Code' 'mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && npm install -g --prefix "$HOME/.npm-global" @anthropic-ai/claude-code@latest' "$HOME/.cicy/claude-install-w-10001.log"
+mkdir -p "$WORKSPACE/.cicy"
+cat > "$WORKSPACE/.cicy/claude-settings.json" <<EOF
+{
+  "model": "claude-opus-4-7"
+}
+EOF
+clear
+claude --settings "$WORKSPACE/.cicy/claude-settings.json" --dangerously-skip-permissions
+2026/05/12 09:48:51 [init] shell prompt ready for w-10001
+2026/05/12 09:48:57 [chat-ws] connect master_agent_id=w-10001 client_id=web-w-10001-mp1er70m-sjrtp7:code-ext clients=2
+2026/05/12 09:49:18 Waiting for 1 connections to be closed
+2026/05/12 09:49:19 HTTP server is listening at: http://127.0.0.1:10001/
+2026/05/12 09:49:19 [init] v1 pane w-10001:main.0 script path=/Users/ton/cicy-ai/workers/w-10001/.cicy/boot.sh
+#!/usr/bin/env bash
+
+touch ~/.cicy_tmux.conf
+source ~/.cicy_tmux.conf
+export X_AGENT_ID='w-10001:main.0'
+export X_AGENT_SHORT_ID='w-10001'
+export CICY_AGENT_TYPE='claude'
+export WORKSPACE='/Users/ton/cicy-ai/workers/w-10001'
+if ! __cicy_mihome_has_in_user_rule; then
+  echo "[cicy] 缺少 mihome IN-USER 规则，请先在后台设置里配置"
+  exit 1
+fi
+cicy_proxy_on
+__cicy_require_command 'claude' 'Claude Code' 'mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && npm install -g --prefix "$HOME/.npm-global" @anthropic-ai/claude-code@latest' "$HOME/.cicy/claude-install-w-10001.log"
+mkdir -p "$WORKSPACE/.cicy"
+cat > "$WORKSPACE/.cicy/claude-settings.json" <<EOF
+{
+  "model": "claude-opus-4-7"
+}
+EOF
+clear
+claude --settings "$WORKSPACE/.cicy/claude-settings.json" --dangerously-skip-permissions
+2026/05/12 09:49:21 [init] shell prompt ready for w-10001
+2026/05/12 09:49:37 [webtty-input] len=1 raw="\r"
+2026/05/12 09:49:37 [webtty-input] len=1 raw="\r"
+2026/05/12 09:50:11 [shutdown] stopping...

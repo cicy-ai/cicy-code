@@ -181,7 +181,7 @@ def status_text(profile: Dict[str, Any]) -> str:
         if len(parts) != 2:
             continue
         args = parts[1]
-        if not args.startswith("ssh "):
+        if not args.startswith("ssh ") and not args.startswith("autossh "):
             continue
         if f"-D {local_port}" not in args and f":{local_port}" not in args:
             continue
@@ -208,7 +208,7 @@ def find_profile_pids(profile: Dict[str, Any]) -> List[int]:
         if len(parts) != 2:
             continue
         pid_text, args = parts
-        if not args.startswith("ssh "):
+        if not args.startswith("ssh ") and not args.startswith("autossh "):
             continue
         if f"-D {local_port}" not in args and f":{local_port}" not in args:
             continue
@@ -299,6 +299,9 @@ def command_create(args: argparse.Namespace) -> int:
         "-o", "ConnectTimeout=8",
         "-o", "ExitOnForwardFailure=yes",
         "-o", "StrictHostKeyChecking=accept-new",
+        "-o", "TCPKeepAlive=yes",
+        "-o", "ServerAliveInterval=15",
+        "-o", "ServerAliveCountMax=3",
         target,
     ])
     item: Dict[str, Any] = {
@@ -348,6 +351,7 @@ def command_start(args: argparse.Namespace) -> int:
             print(f"proxy_ssh: profile {args.name} already running")
         return 0
     subprocess.run(["bash", "-lc", profile["start_cmd"]], check=True)
+    time.sleep(1)
     if status_text(profile) != "running":
         raise SystemExit(f"failed to start profile '{args.name}'")
     if args.json:
@@ -372,6 +376,30 @@ def command_stop(args: argparse.Namespace) -> int:
         print_json({"success": True, "name": args.name, "status": "stopped"})
     else:
         print(f"stopped {args.name}")
+    return 0
+
+
+def command_install_autossh(args: argparse.Namespace) -> int:
+    import platform
+    system = platform.system().lower()
+    if system == "darwin":
+        cmd = ["brew", "install", "autossh"]
+    elif system == "linux":
+        for pm, pm_install in [("apt-get", "install -y"), ("yum", "install -y"), ("dnf", "install -y"), ("apk", "add")]:
+            if subprocess.run(["which", pm.split()[0]], capture_output=True).returncode == 0:
+                cmd = ["sudo", pm] + pm_install.split() + ["autossh"]
+                break
+        else:
+            raise SystemExit("unsupported Linux package manager")
+    else:
+        raise SystemExit(f"unsupported platform: {system}")
+    proc = subprocess.run(cmd, check=False)
+    if proc.returncode != 0:
+        raise SystemExit(f"failed to install autossh on {system}")
+    if args.json:
+        print_json({"success": True, "action": "installed", "platform": system})
+    else:
+        print(f"installed autossh on {system}")
     return 0
 
 
@@ -459,6 +487,10 @@ def build_parser() -> argparse.ArgumentParser:
     test_parser.add_argument("--url", help="Override test URL")
     test_parser.add_argument("--json", action="store_true", help="Print JSON output")
     test_parser.set_defaults(func=command_test)
+
+    install_autossh_parser = sub.add_parser("install-autossh", help="Install autossh (macOS/Linux)")
+    install_autossh_parser.add_argument("--json", action="store_true", help="Print JSON output")
+    install_autossh_parser.set_defaults(func=command_install_autossh)
 
     return parser
 

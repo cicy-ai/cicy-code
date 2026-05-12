@@ -83,6 +83,49 @@ function formatClockTime(value: string | null) {
   return new Date(parsed).toLocaleTimeString('zh-CN', { hour12: false });
 }
 
+function focusTmuxPaneFrame(paneId: string) {
+  const id = String(paneId || '').trim();
+  if (!id || typeof document === 'undefined') return;
+  const shortId = id.split(':')[0];
+  const titles = [`stack-${shortId}`, `canvas-${shortId}`, `terminal-${shortId}`];
+  const candidates: HTMLIFrameElement[] = [];
+  for (const title of titles) {
+    document.querySelectorAll<HTMLIFrameElement>(`iframe[title="${title}"]`).forEach((el) => candidates.push(el));
+  }
+  if (candidates.length === 0) return;
+  const target = candidates.find((el) => el.getClientRects().length > 0) || candidates[0];
+  const active = document.activeElement as HTMLElement | null;
+  if (active) {
+    const tag = active.tagName;
+    if (active.isContentEditable || tag === 'TEXTAREA' || tag === 'INPUT') {
+      try { active.blur(); } catch {}
+    }
+  }
+  const focusXterm = (): boolean => {
+    try {
+      target.focus();
+      target.contentWindow?.focus?.();
+      const doc = target.contentDocument;
+      const ta = doc?.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea');
+      if (ta) {
+        ta.focus();
+        return doc?.activeElement === ta;
+      }
+    } catch {}
+    return false;
+  };
+  window.requestAnimationFrame(() => {
+    if (focusXterm()) return;
+    let tries = 0;
+    const retry = () => {
+      tries += 1;
+      if (focusXterm() || tries >= 5) return;
+      window.setTimeout(retry, 60);
+    };
+    window.setTimeout(retry, 60);
+  });
+}
+
 function clampCliDrawerWidth(value: number): number {
   if (!Number.isFinite(value)) return CLI_DRAWER_DEFAULT_WIDTH;
   const viewportMax = typeof window === 'undefined' ? CLI_DRAWER_MAX_WIDTH : Math.max(CLI_DRAWER_MIN_WIDTH, window.innerWidth - 120);
@@ -96,16 +139,6 @@ function detectClientPlatform(): 'win' | 'darwin' | 'linux' {
   if (source.includes('win')) return 'win';
   if (source.includes('mac') || source.includes('darwin')) return 'darwin';
   return 'linux';
-}
-
-function detectClientArch(): string {
-  if (typeof navigator === 'undefined') return 'unknown';
-  const source = `${navigator.userAgent || ''}`.toLowerCase();
-  if (source.includes('arm64') || source.includes('aarch64')) return 'arm64';
-  if (source.includes('x86_64') || source.includes('win64') || source.includes('x64') || source.includes('amd64') || source.includes('x86-64')) return 'x64';
-  if (source.includes('arm')) return 'arm';
-  if (source.includes('x86') || source.includes('i386') || source.includes('i686')) return 'x86';
-  return 'unknown';
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -356,7 +389,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     return () => { try { ch.close(); } catch {} };
   }, [paneId, pageClientId]);
   const wsClientPlatform = useMemo(() => detectClientPlatform(), []);
-  const wsClientArch = useMemo(() => detectClientArch(), []);
+  const wsClientUserAgent = useMemo(() => (typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : ''), []);
   const [chatWsLiveStatus, setChatWsLiveStatus] = useState('idle');
   const [chatWsLiveText, setChatWsLiveText] = useState('');
   const [chatWsHistoryVersion, setChatWsHistoryVersion] = useState(0);
@@ -704,7 +737,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       chatWsPingSentAtRef.current = null;
       chatWsPingRequestIdRef.current = null;
       chatWsRef.current?.close();
-      const ws = new WebSocket(`${base}/api/chat/ws?master_agent_id=${encodeURIComponent(masterAgentId)}&token=${encodeURIComponent(token)}&electron=${isElectron}&client_id=${encodeURIComponent(clientId)}&platform=${encodeURIComponent(wsClientPlatform)}&arch=${encodeURIComponent(wsClientArch)}`);
+      const ws = new WebSocket(`${base}/api/chat/ws?master_agent_id=${encodeURIComponent(masterAgentId)}&token=${encodeURIComponent(token)}&electron=${isElectron}&client_id=${encodeURIComponent(clientId)}&platform=${encodeURIComponent(wsClientPlatform)}`);
       chatWsRef.current = ws;
       const sendLatencyPing = () => {
         if (dead || chatWsRef.current !== ws || ws.readyState !== WebSocket.OPEN) return;
@@ -727,7 +760,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         // 连接建立后立即请求 poll 数据
         //console.log('[poll_request] WS onopen, sending initial poll_request');
         try { ws.send(JSON.stringify({ type: 'poll_request' })); } catch (e) { console.warn('[poll_request] onopen send failed:', e); }
-        try { ws.send(JSON.stringify({ type: 'register_active_channel', data: { agent_id: activeCliPaneId || paneId, client_id: clientId, channel_type: 'web', platform: wsClientPlatform, arch: wsClientArch } })); } catch (e) { console.warn('[chat-ws] register_active_channel onopen failed:', e); }
+        try { ws.send(JSON.stringify({ type: 'register_active_channel', data: { agent_id: activeCliPaneId || paneId, client_id: clientId, channel_type: 'web', platform: wsClientPlatform, user_agent: wsClientUserAgent } })); } catch (e) { console.warn('[chat-ws] register_active_channel onopen failed:', e); }
         sendLatencyPing();
         chatWsPingTimerRef.current = window.setInterval(sendLatencyPing, 5000);
       };
@@ -830,7 +863,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               const normalizedFilePath = `/${filePath.replace(/^\/+/, '')}`;
               const promptText = `file://${normalizedFilePath.replace(/^\/+/, '')}`;
               window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: promptText } }));
-              sendCommandToTmux(promptText, tmuxTarget, false).catch(() => {
+              sendCommandToTmux(promptText, tmuxTarget, false).then(() => {
+                focusTmuxPaneFrame(tmuxTarget);
+              }).catch(() => {
                 window.dispatchEvent(new CustomEvent('show-toast', { detail: '发送文件路径失败' }));
               });
             }
@@ -871,7 +906,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           broadcastChatWsMessage(msg);
         } catch {}
       };
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         if (chatWsRef.current === ws) {
           chatWsRef.current = null;
         }
@@ -888,7 +923,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           chatWsConnected: false,
           chatWsClientId: clientId,
         });
-        if (!dead) {
+        // 4409 = server superseded us with another connection that owns the
+        // same client_id. Auto-reconnecting would just kick out the winner and
+        // start a 1s ping-pong; wait for the BroadcastChannel dedup below to
+        // regenerate pageClientId, which re-fires this effect with a fresh id.
+        const superseded = !!(event && event.code === 4409);
+        if (!dead && !superseded) {
           chatWsReconnectTimerRef.current = window.setTimeout(connect, 3000);
         }
       };
@@ -932,16 +972,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         chatWsClientId: clientId,
       });
     };
-  }, [activeCliPaneId, broadcastChatWsMessage, pageClientId, paneId, sendChatWsMessage, setChatWsSender, setChatWsState, token, wsClientArch, wsClientPlatform]);
+  }, [activeCliPaneId, broadcastChatWsMessage, pageClientId, paneId, sendChatWsMessage, setChatWsSender, setChatWsState, token, wsClientPlatform, wsClientUserAgent]);
 
   useEffect(() => {
     const clientId = String(chatWsClientId || pageClientId || '').trim();
     const agentID = String(activeCliPaneId || '').trim();
     if (!clientId || !agentID || !chatWsConnected) return;
     try {
-      sendChatWsMessage({ type: 'register_active_channel', data: { agent_id: agentID, client_id: clientId, channel_type: 'web', platform: wsClientPlatform, arch: wsClientArch } });
+      sendChatWsMessage({ type: 'register_active_channel', data: { agent_id: agentID, client_id: clientId, channel_type: 'web', platform: wsClientPlatform, user_agent: wsClientUserAgent } });
     } catch {}
-  }, [activeCliPaneId, chatWsClientId, chatWsConnected, pageClientId, sendChatWsMessage, wsClientArch, wsClientPlatform]);
+  }, [activeCliPaneId, chatWsClientId, chatWsConnected, pageClientId, sendChatWsMessage, wsClientPlatform, wsClientUserAgent]);
 
   useEffect(() => {
     setChatSuggestionText('');

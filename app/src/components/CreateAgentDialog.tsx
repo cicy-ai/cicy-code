@@ -161,7 +161,7 @@ export default function CreateAgentDialog({
           <div data-id="create-agent-dialog-use-proxy" className="flex items-center justify-between py-1">
             <div>
               <p className="text-[13px] font-medium text-zinc-300">启用代理</p>
-              <p className="mt-0.5 text-[11px] text-zinc-600">启动前执行 cicy_proxy_on，并检查 mihome 规则</p>
+              <p className="mt-0.5 text-[11px] text-zinc-600">启动前执行 cicy_proxy_on，并检查 mihomo 规则</p>
             </div>
             <button
               type="button"

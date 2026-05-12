@@ -197,7 +197,7 @@ func staticJsGottyBundleJs() (*asset, error) {
 		return nil, err
 	}
 
-	info := bindataFileInfo{name: "static/js/gotty-bundle.js", size: 636296, mode: os.FileMode(436), modTime: time.Unix(1778040984, 0)}
+	info := bindataFileInfo{name: "static/js/gotty-bundle.js", size: 636296, mode: os.FileMode(436), modTime: time.Unix(1778516192, 0)}
 	a := &asset{bytes: bytes, info: info}
 	return a, nil
 }
