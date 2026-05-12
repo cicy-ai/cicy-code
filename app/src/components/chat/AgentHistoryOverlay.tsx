@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next';
 import { Loader2, X } from 'lucide-react'
+import i18n from '../../i18n'
 import apiService from '../../services/api'
 import { appendHistoryItems, getHistoryMeta, getRecentHistoryItems, replaceHistoryBase, type HistorySyncItem } from '../../lib/historyCache'
 
@@ -17,21 +19,21 @@ function formatTime(value?: string) {
   if (!value) return ''
   const parsed = Date.parse(value)
   if (!Number.isFinite(parsed)) return value
-  return new Date(parsed).toLocaleString('zh-CN', { hour12: false })
+  return new Date(parsed).toLocaleString(undefined, { hour12: false })
 }
 
 function statusLabel(status?: string) {
   switch (String(status || '').toLowerCase()) {
-    case 'thinking': return '思考中'
+    case 'thinking': return i18n.t('statusThinking', { ns: 'agentChat' })
     case 'working':
     case 'tool_call':
-    case 'streaming': return '处理中'
+    case 'streaming': return i18n.t('statusProcessing', { ns: 'agentChat' })
     case 'failed':
-    case 'error': return '失败'
+    case 'error': return i18n.t('statusError', { ns: 'agentChat' })
     case 'idle':
     case 'completed':
-    case 'done': return '空闲'
-    default: return status || '空闲'
+    case 'done': return i18n.t('statusDone', { ns: 'agentChat' })
+    default: return status || i18n.t('statusDone', { ns: 'agentChat' })
   }
 }
 
@@ -58,6 +60,7 @@ function groupTurns(items: HistorySyncItem[]) {
 }
 
 export default function AgentHistoryOverlay({ paneId, open, onClose }: { paneId: string; open: boolean; onClose: () => void }) {
+  const { t } = useTranslation('agentChat')
   const [items, setItems] = useState<HistorySyncItem[]>([])
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -100,7 +103,7 @@ export default function AgentHistoryOverlay({ paneId, open, onClose }: { paneId:
           setLiveStatus(String(data?.reply?.status || 'idle'))
         }
       } catch (err: any) {
-        if (!cancelled) setError(err?.message || 'history 读取失败')
+        if (!cancelled) setError(err?.message || t('overlayHistoryReadFailed'))
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -126,14 +129,14 @@ export default function AgentHistoryOverlay({ paneId, open, onClose }: { paneId:
       <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
         <div>
           <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">History</div>
-          <div className="text-sm text-zinc-200">{statusLabel(liveStatus)}{syncing ? ' · 同步中' : ''}</div>
+          <div className="text-sm text-zinc-200">{statusLabel(liveStatus)}{syncing ? t('overlaySyncing') : ''}</div>
         </div>
-        <button type="button" onClick={onClose} className="rounded p-1 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200" title="关闭">
+        <button type="button" onClick={onClose} className="rounded p-1 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200" title={t('overlayCloseTitle')}>
           <X className="h-4 w-4" />
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        {loading ? <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />载入中...</div> : null}
+        {loading ? <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />{t('overlayLoading')}</div> : null}
         {error ? <div className="mb-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div> : null}
         <div className="space-y-4">
           {turns.map((turn) => (
@@ -154,14 +157,14 @@ export default function AgentHistoryOverlay({ paneId, open, onClose }: { paneId:
           ))}
           {liveReply ? (
             <div className="rounded-2xl rounded-bl-sm border border-blue-500/20 bg-blue-500/10 px-3.5 py-2.5 text-sm leading-6 text-blue-100 whitespace-pre-wrap break-words">
-              <div className="mb-1 text-[11px] uppercase tracking-[0.14em] text-blue-300/80">实时回复</div>
+              <div className="mb-1 text-[11px] uppercase tracking-[0.14em] text-blue-300/80">{t('overlayLiveReply')}</div>
               {liveReply}
             </div>
           ) : null}
         </div>
       </div>
       <div className="border-t border-white/[0.06] px-4 py-2 text-[11px] text-zinc-500">
-        {reply?.updated_at ? `最近更新 ${formatTime(reply.updated_at)}` : '等待数据'}
+        {reply?.updated_at ? t('overlayLastUpdated', { time: formatTime(reply.updated_at) }) : t('overlayWaitingData')}
       </div>
     </div>
   )

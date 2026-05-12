@@ -15,17 +15,17 @@ export type AgentTypeIconMeta = {
 }
 
 export const AGENT_TYPE_OPTIONS: AgentTypeOption[] = [
-  { value: 'claude', label: 'Claude', description: '偏稳健，适合分析与写作' },
-  { value: 'codex', label: 'Codex', description: '代码执行和自动修改更强' },
-  { value: 'opencode', label: 'OpenCode', description: '终端式编码体验，更轻量' },
-  { value: 'cursor', label: 'Cursor', description: '适合 Cursor Agent 工作流' },
-  { value: 'kiro-cli', label: 'Kiro CLI', description: '适合任务推进与工具流' },
-  { value: 'copilot', label: 'Copilot', description: '偏 GitHub 工作流与补全' },
-  { value: 'cicy-wechat', label: 'WeChat', description: '适合微信通道与消息协同' },
-  { value: 'cicy-feishu', label: 'Feishu', description: '适合飞书通道与办公协同' },
-  { value: 'openclaw', label: 'OpenClaw', description: '适合长连通道与外部集成' },
-  { value: 'hermes', label: 'Hermes', description: '默认主控型员工，适合统筹协调' },
-  { value: 'cicy-claude', label: 'CiCy', description: 'Claude 兼容包装，便于统一接入' },
+  { value: 'claude', label: 'Claude' },
+  { value: 'codex', label: 'Codex' },
+  { value: 'opencode', label: 'OpenCode' },
+  { value: 'cursor', label: 'Cursor' },
+  { value: 'kiro-cli', label: 'Kiro CLI' },
+  { value: 'copilot', label: 'Copilot' },
+  { value: 'cicy-wechat', label: 'WeChat' },
+  { value: 'cicy-feishu', label: 'Feishu' },
+  { value: 'openclaw', label: 'OpenClaw' },
+  { value: 'hermes', label: 'Hermes' },
+  { value: 'cicy-claude', label: 'CiCy' },
 ]
 
 const AGENT_TYPE_ICON_MAP: Record<Exclude<NormalizedAgentType, ''>, AgentTypeIconMeta> = {
@@ -35,8 +35,8 @@ const AGENT_TYPE_ICON_MAP: Record<Exclude<NormalizedAgentType, ''>, AgentTypeIco
   cursor: { label: 'Cursor', src: assetUrl('/assets/logos/cursor.svg') },
   'kiro-cli': { label: 'Kiro', src: assetUrl('/assets/logos/kiro.png') },
   copilot: { label: 'Copilot', src: assetUrl('/assets/logos/copilot.svg') },
-  'cicy-wechat': { label: 'WeChat', text: '微' },
-  'cicy-feishu': { label: 'Feishu', text: '飞' },
+  'cicy-wechat': { label: 'WeChat', text: 'W' },
+  'cicy-feishu': { label: 'Feishu', text: 'F' },
   openclaw: { label: 'OpenClaw', text: '🦞' },
   hermes: { label: 'Hermes', text: 'HE' },
   'cicy-claude': { label: 'CiCy', src: assetUrl('/assets/logos/cicy.svg') },

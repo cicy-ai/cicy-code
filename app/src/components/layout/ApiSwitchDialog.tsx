@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Plus, Trash2, Check } from 'lucide-react';
 import { getApiBase, setApiBase } from '../../config';
 
@@ -27,6 +28,7 @@ const LOCAL_TOKEN_BACKUP = 'api_token_local';
 
 
 export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation('apiSwitch');
   const [presets, setPresets] = useState(loadPresets);
   const [current, setCurrent] = useState(getApiBase);
   const [newLabel, setNewLabel] = useState('');
@@ -59,10 +61,10 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
   }
 
   async function add() {
-    if (!newUrl.trim()) { setError('请输入 URL'); return; }
+    if (!newUrl.trim()) { setError(t('errorUrlRequired')); return; }
     const { url: baseUrl, token } = parseValue(newUrl.trim());
-    try { new URL(baseUrl); } catch { setError('URL 格式不正确'); return; }
-    if (!token) { setError('请在 URL 中包含 ?token=xxx'); return; }
+    try { new URL(baseUrl); } catch { setError(t('errorUrlInvalid')); return; }
+    if (!token) { setError(t('errorTokenRequired')); return; }
 
     setTesting(true); setError('');
     try {
@@ -73,13 +75,13 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
         signal: AbortSignal.timeout(5000),
       });
       const data = await res.json();
-      if (!data.valid) { setError('Token 无效'); return; }
+      if (!data.valid) { setError(t('errorTokenInvalid')); return; }
     } catch (e: any) {
-      setError(`连接失败: ${e.message || '无法访问'}`); return;
+      setError(t('errorConnect', { message: e.message || t('errorConnectUnknown') })); return;
     } finally { setTesting(false); }
 
     const label = newLabel.trim() || (() => { try { return new URL(baseUrl).hostname; } catch { return baseUrl; } })();
-    // 自动升级到 https（非 localhost）
+    // Auto-upgrade to https (non-localhost)
     const finalUrl = newUrl.trim().replace(/^http:\/\/(?!localhost|127\.)/, 'https://');
     const p = [...presets, { label, value: finalUrl }];
     setPresets(p); savePresets(p);
@@ -101,15 +103,15 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="space-y-1 mb-4">
-          {/* 默认不可删 */}
+          {/* default cannot be removed */}
           <div className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer group ${current === DEFAULT_URL ? 'bg-white/10' : 'hover:bg-white/5'}`}
             onClick={() => select(DEFAULT_URL)}>
             <Check className={`w-3.5 h-3.5 shrink-0 ${current === DEFAULT_URL ? 'text-emerald-400' : 'text-transparent'}`} />
-            <span className="text-xs text-zinc-300 w-16 shrink-0">默认</span>
-            <span className="text-xs text-zinc-500 font-mono truncate flex-1">{defaultVal || '(同源)'}</span>
+            <span className="text-xs text-zinc-300 w-16 shrink-0">{t('labelDefault')}</span>
+            <span className="text-xs text-zinc-500 font-mono truncate flex-1">{defaultVal || t('defaultEmpty')}</span>
             <button onClick={e => { e.stopPropagation(); copy(defaultVal, 'default'); }}
               className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-zinc-300 text-[10px] shrink-0">
-              {copied === 'default' ? '✓ 已复制' : '复制'}
+              {copied === 'default' ? t('copied') : t('copy')}
             </button>
           </div>
 
@@ -124,7 +126,7 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
                 {token && <span className="text-[10px] text-zinc-600 shrink-0">🔑</span>}
                 <button onClick={e => { e.stopPropagation(); copy(p.value, `p${i}`); }}
                   className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-zinc-300 text-[10px] shrink-0">
-                  {copied === `p${i}` ? '✓ 已复制' : '复制'}
+                  {copied === `p${i}` ? t('copied') : t('copy')}
                 </button>
                 <button onClick={e => { e.stopPropagation(); remove(i); }}
                   className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400">
@@ -137,12 +139,12 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
 
         <div className="border-t border-white/5 pt-3 mb-4">
           <div className="flex gap-2">
-            <input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="名称"
+            <input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder={t('namePlaceholder')}
               className="w-20 bg-white/5 border border-white/10 rounded px-2 py-1.5 text-xs text-zinc-300 outline-none focus:border-white/20" />
             <input value={newUrl} onChange={e => { setNewUrl(e.target.value); setError(''); }} placeholder="https://...?token=xxx"
               className={`flex-1 bg-white/5 border rounded px-2 py-1.5 text-xs text-zinc-300 font-mono outline-none focus:border-white/20 ${error ? 'border-red-500/60' : 'border-white/10'}`} />
             <button onClick={add} disabled={testing} className="px-3 bg-white/5 hover:bg-white/10 disabled:opacity-50 rounded text-zinc-300 text-xs flex items-center gap-1">
-              <Plus className="w-3.5 h-3.5" /> {testing ? '验证中...' : '添加'}
+              <Plus className="w-3.5 h-3.5" /> {testing ? t('verifying') : t('add')}
             </button>
           </div>
           {error && <p className="text-red-400 text-[11px] mt-1.5">{error}</p>}
@@ -151,7 +153,7 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
         <div className="flex justify-end">
           <button onClick={() => window.location.reload()}
             className="px-3 py-1.5 bg-emerald-600/80 hover:bg-emerald-600 text-white text-xs rounded-lg">
-            应用并刷新
+            {t('applyAndReload')}
           </button>
         </div>
       </div>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { TokenManager } from '../services/tokenManager';
 import config from '../config';
 
@@ -9,15 +10,10 @@ interface Step {
   message: string;
 }
 
-const LABELS = [
-  '正在创建 Cloudflare Tunnel',
-  '正在创建服务器',
-  '正在上传部署脚本',
-  '正在部署服务',
-  '正在验证',
-];
+const STEP_KEYS = ['step0', 'step1', 'step2', 'step3', 'step4'] as const;
 
 export default function ProvisionScreen({ onReady }: { onReady: (backend: string) => void }) {
+  const { t } = useTranslation('provision');
   const [steps, setSteps] = useState<Step[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [error, setError] = useState('');
@@ -70,12 +66,12 @@ export default function ProvisionScreen({ onReady }: { onReady: (backend: string
 
       es.onerror = () => {
         es.close();
-        setLogs(prev => [...prev, '⚠ 连接已断开，正在重试...']);
+        setLogs(prev => [...prev, t('disconnectedRetrying')]);
         if (retryRef.current < 3) {
           retryRef.current++;
           setTimeout(connect, 2000);
         } else {
-          setError('连接已断开');
+          setError(t('disconnected'));
         }
       };
 
@@ -94,8 +90,8 @@ export default function ProvisionScreen({ onReady }: { onReady: (backend: string
       <div className="w-full max-w-md">
         <div className="text-center mb-6">
           <div className="text-4xl mb-3">🚀</div>
-          <h2 className="text-white text-lg font-medium">正在配置你的工作区</h2>
-          <p className="text-zinc-500 text-sm mt-1">已耗时 {elapsed}s</p>
+          <h2 className="text-white text-lg font-medium">{t('title')}</h2>
+          <p className="text-zinc-500 text-sm mt-1">{t('elapsed', { seconds: elapsed })}</p>
         </div>
 
         {/* Progress bar */}
@@ -108,7 +104,8 @@ export default function ProvisionScreen({ onReady }: { onReady: (backend: string
 
         {/* Steps */}
         <div className="space-y-2.5 mb-6">
-          {LABELS.map((label, i) => {
+          {STEP_KEYS.map((stepKey, i) => {
+            const label = t(stepKey);
             const s = steps.find(s => s.step === i + 1);
             const isDone = s && (s.status === 'done' || (s.step < currentStep));
             const isRunning = s && s.status === 'running' && s.step === currentStep;
@@ -135,7 +132,7 @@ export default function ProvisionScreen({ onReady }: { onReady: (backend: string
         {/* Log output */}
         <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-3 max-h-32 overflow-y-auto font-mono text-xs">
           {logs.length === 0 ? (
-            <span className="text-zinc-600">正在连接...</span>
+            <span className="text-zinc-600">{t('connecting')}</span>
           ) : (
             logs.map((l, i) => (
               <div key={i} className="text-zinc-500 leading-5">{l}</div>

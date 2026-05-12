@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useTranslation, Trans } from 'react-i18next';
+import i18n from '../../i18n';
 import { Users, Plus, X, Loader2, ExternalLink, MoreHorizontal, Trash2, RefreshCw } from 'lucide-react';
 import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
@@ -122,7 +124,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         onRefreshPoll();
       }
     } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '创建并绑定员工失败' }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: i18n.t('toastCreateBindFailed', { ns: 'teamPanel' }) }));
     } finally {
       setCreating(false);
     }
@@ -138,9 +140,9 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   };
 
   const statusLabel = (s: StatusInfo) => {
-    if (s.isThinking || s.status === 'thinking') return '思考中';
-    if (s.status === 'tool_use') return '执行中';
-    if (s.status === 'idle' || s.status === 'text') return '空闲';
+    if (s.isThinking || s.status === 'thinking') return i18n.t('statusThinking', { ns: 'teamPanel' });
+    if (s.status === 'tool_use') return i18n.t('statusRunning', { ns: 'teamPanel' });
+    if (s.status === 'idle' || s.status === 'text') return i18n.t('statusIdle', { ns: 'teamPanel' });
     return '';
   };
 
@@ -156,19 +158,19 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
 
   const restartPane = useCallback((wid: string, title: string, disabled?: boolean) => {
     if (disabled) {
-      showToast(`${title} 当前运行时不支持重启`);
+      showToast(i18n.t('toastRestartUnsupported', { ns: 'teamPanel', title }));
       return;
     }
     confirm(
-      <>重启 <span className="text-zinc-100 font-medium">{title}</span>？</>,
+      <Trans i18nKey="confirmRestart" ns="teamPanel" values={{ title }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
       async () => {
         try {
           await apiService.restartPane(wid);
-          showToast(`${title} 正在重启...`);
+          showToast(i18n.t('toastRestarting', { ns: 'teamPanel', title }));
           onRefreshPanes();
           onRefreshPoll();
         } catch {
-          showToast(`错误：${title} 重启失败`);
+          showToast(i18n.t('toastRestartFailed', { ns: 'teamPanel', title }));
         }
       }
     );
@@ -176,7 +178,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   const deletePane = useCallback((binding: Binding, title: string) => {
     const wid = shortId(binding.name);
     confirm(
-      <>删除 <span className="text-zinc-100 font-medium">{title}</span>？</>,
+      <Trans i18nKey="confirmDelete" ns="teamPanel" values={{ title }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
       async () => {
         try {
           await apiService.unbindAgent(binding.id);
@@ -185,7 +187,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
           await onRefreshPanes();
           onRefreshPoll();
         } catch {
-          showToast(`错误：${title} 删除失败`);
+          showToast(i18n.t('toastDeleteFailed', { ns: 'teamPanel', title }));
         }
       }
     );
@@ -194,14 +196,14 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     const wid = shortId(agent.pane_id);
     const title = agent.title || wid;
     confirm(
-      <>删除 <span className="text-zinc-100 font-medium">{title}</span>？</>,
+      <Trans i18nKey="confirmDelete" ns="teamPanel" values={{ title }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
       async () => {
         try {
           await apiService.deletePane(wid);
           await onRefreshPanes();
           onRefreshPoll();
         } catch {
-          showToast(`错误：${title} 删除失败`);
+          showToast(i18n.t('toastDeleteFailed', { ns: 'teamPanel', title }));
         }
       }
     );
@@ -288,7 +290,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               ? 'bg-white/[0.08] text-zinc-200'
               : 'text-zinc-700 opacity-0 group-hover:opacity-100 hover:bg-white/[0.05] hover:text-zinc-300'
           }`}
-          title="菜单"
+          title={i18n.t('menu', { ns: 'teamPanel' })}
         >
           <MoreHorizontal className="w-3.5 h-3.5" />
         </button>
@@ -307,7 +309,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
             >
               <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-              <span>新窗口打开</span>
+              <span>{i18n.t('openInNewWindow', { ns: 'teamPanel' })}</span>
             </button>
             {onRemove ? (
               <button
@@ -320,7 +322,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors cursor-pointer text-zinc-300 hover:bg-red-500/10 hover:text-red-300"
               >
                 <X className="w-3.5 h-3.5 shrink-0" />
-                <span>解绑</span>
+                <span>{i18n.t('unbind', { ns: 'teamPanel' })}</span>
               </button>
             ) : null}
             <button
@@ -339,7 +341,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               }`}
             >
               <RefreshCw className="w-3.5 h-3.5 shrink-0" />
-              <span>重启</span>
+              <span>{i18n.t('restart', { ns: 'teamPanel' })}</span>
             </button>
             {onDelete ? (
               <button
@@ -352,7 +354,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-red-300 transition-colors cursor-pointer hover:bg-red-500/10 hover:text-red-200"
               >
                 <Trash2 className="w-3.5 h-3.5 shrink-0" />
-                <span>删除</span>
+                <span>{i18n.t('delete', { ns: 'teamPanel' })}</span>
               </button>
             ) : null}
           </div>
@@ -389,13 +391,13 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
             actions: [
               {
                 id: 'open',
-                label: '新窗口打开',
+                label: i18n.t('openInNewWindow', { ns: 'teamPanel' }),
                 icon: <ExternalLink className="w-3.5 h-3.5" />,
                 onClick: () => window.open(`#/agent/${shortId(a.pane_id)}`, '_blank'),
               },
               {
                 id: 'delete',
-                label: '删除',
+                label: i18n.t('delete', { ns: 'teamPanel' }),
                 icon: <Trash2 className="w-3.5 h-3.5" />,
                 danger: true,
                 onClick: () => deleteUnboundPane(a),
@@ -404,7 +406,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
           }))}
           onChange={v => bind(v)}
           onOpenChange={open => { if (open) void onRefreshPanes(); }}
-          placeholder="+ 绑定团队成员..."
+          placeholder={i18n.t('bindMemberPlaceholder', { ns: 'teamPanel' })}
           searchable
           className="flex-1"
         />
@@ -413,7 +415,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
           onClick={() => setCreateDialogOpen(true)}
           disabled={creating}
           className="flex items-center text-sm px-2 py-1.5 rounded border border-[var(--vsc-border)] text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors cursor-pointer disabled:opacity-50"
-          title="创建并绑定新员工"
+          title={i18n.t('createBindShortLabel', { ns: 'teamPanel' })}
         >
           {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
         </button>
@@ -424,9 +426,9 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         submitting={creating}
         onClose={() => setCreateDialogOpen(false)}
         onSubmit={createAndBind}
-        title="创建并绑定新员工"
-        submitLabel="创建并绑定"
-        emptyTitleOnAgentSelect="全栈软件开发工程师"
+        title={i18n.t('createTitle', { ns: 'teamPanel' })}
+        submitLabel={i18n.t('createSubmit', { ns: 'teamPanel' })}
+        emptyTitleOnAgentSelect={i18n.t('createEmptyTitleAgent', { ns: 'teamPanel' })}
         dialogClassName="w-[960px] max-w-[96vw]"
         agentTypeGridClassName="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3"
       />
@@ -494,7 +496,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                     onRestart: () => restartPane(wid, getName(b)),
                     onOpenSettings: () => onOpenSettingsPane?.(wid),
                     canRestart: true,
-                    onRemove: () => confirm(<>解绑 <span className="text-zinc-100 font-medium">{getName(b)}</span>？</>, () => unbind(b)),
+                    onRemove: () => confirm(<Trans i18nKey="confirmUnbind" ns="teamPanel" values={{ name: getName(b) }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />, () => unbind(b)),
                     onDelete: () => deletePane(b, getName(b)),
                   });
                 })}
@@ -504,7 +506,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-zinc-600" data-id="team-panel-empty">
             <Users className="w-8 h-8 mb-2 opacity-20" />
-            <p className="text-sm">先绑定一个团队成员开始</p>
+            <p className="text-sm">{i18n.t('emptyState', { ns: 'teamPanel' })}</p>
           </div>
         )}
       </div>

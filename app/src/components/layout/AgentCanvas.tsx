@@ -1,4 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import { Check, Copy, Folder, History, Pencil } from 'lucide-react';
 import { normalizeAgentType } from '../../lib/agentType';
 import { useDevRegister } from '../../lib/devStore';
@@ -900,7 +902,7 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
       }
     } catch {}
 
-    window.dispatchEvent(new CustomEvent('show-toast', { detail: `复制失败：${value}` }));
+    window.dispatchEvent(new CustomEvent('show-toast', { detail: i18n.t('copyFailed', { ns: 'agentCanvas', value }) }));
   }, [handlePaneIdCopied, item.paneId]);
 
   const commitTitleEdit = useCallback(async () => {
@@ -918,7 +920,7 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
       await onRenameTitle(nextTitle);
       setIsEditingTitle(false);
     } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '错误：标题修改失败' }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: i18n.t('titleUpdateFailed', { ns: 'agentCanvas' }) }));
       setTitleDraft(item.title || item.paneId);
     } finally {
       titleCommitInFlightRef.current = false;
@@ -1026,7 +1028,7 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
                     data-id="agent-window-title"
                     onDoubleClick={startTitleEdit}
                     className="block h-7 w-full cursor-text truncate px-2 pr-7 text-sm font-medium leading-[1.75rem] text-zinc-100"
-                    title="双击重命名"
+                    title={i18n.t('doubleClickToRename', { ns: 'agentCanvas' })}
                   >
                     {item.title || item.paneId}
                   </span>
@@ -1038,7 +1040,7 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
                     data-agent-window-no-drag="true"
                     onClick={startTitleEdit}
                     className={`absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-zinc-500 transition-opacity hover:text-zinc-200 ${isEditingTitle ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover/title:opacity-100'}`}
-                    title="编辑标题"
+                    title={i18n.t('editTitle', { ns: 'agentCanvas' })}
                   >
                     <Pencil className="h-3 w-3" />
                   </button>
@@ -1067,7 +1069,7 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
                     void copyPaneId();
                   }}
                   className="cursor-pointer rounded p-0.5 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-300"
-                  title={copiedPaneId ? '已复制' : '复制成员 ID'}
+                  title={copiedPaneId ? i18n.t('copiedPaneId', { ns: 'agentCanvas' }) : i18n.t('copyMemberId', { ns: 'agentCanvas' })}
                 >
                   {copiedPaneId ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
                 </button>
@@ -1081,7 +1083,7 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
           data-id="agent-window-drag-zone"
           className="mx-3 h-7 flex-1 cursor-grab active:cursor-grabbing"
           onMouseDown={startDrag}
-          title="拖拽窗口"
+          title={i18n.t('dragWindow', { ns: 'agentCanvas' })}
         />
         <div data-id="agent-window-header-right" className="flex items-center gap-1">
           {!item.isApiOnly ? (
@@ -1121,7 +1123,7 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
                 onOpenCodeService();
               }}
               className="rounded p-1 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
-              title="代码服务"
+              title={i18n.t('codeServer', { ns: 'agentCanvas' })}
             >
               <Folder className="h-3.5 w-3.5" />
             </button>
@@ -1137,13 +1139,13 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
               <div className="mt-2 truncate text-sm text-zinc-300">{item.workspace || defaultWorkerWorkspace(item.paneId)}</div>
             </div>
             <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3">
-              <div className="text-xs text-zinc-500">协作概览</div>
+              <div className="text-xs text-zinc-500">{i18n.t('collabOverview', { ns: 'agentCanvas' })}</div>
               <div className="mt-2 text-sm text-zinc-200">
                 {item.isApiOnly
-                  ? '该成员当前只支持 API 能力，不提供 ttyd 终端。'
+                  ? i18n.t('apiOnlyHint', { ns: 'agentCanvas' })
                   : layout.minimized
-                    ? '缩放到更近或展开窗口以进入实时工作现场。'
-                    : '点击窗口后将按需连接实时 ttyd 工作现场。'}
+                    ? i18n.t('zoomInHint', { ns: 'agentCanvas' })
+                    : i18n.t('clickToConnect', { ns: 'agentCanvas' })}
               </div>
             </div>
           </div>
@@ -1153,7 +1155,7 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
           </div>
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500">
-            暂无可用工作现场
+            {i18n.t('noWorkSession', { ns: 'agentCanvas' })}
           </div>
         )}
         <AgentHistoryOverlay paneId={item.paneId} open={historyOpen} onClose={() => setHistoryOpen(false)} />
@@ -1163,7 +1165,7 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
           data-agent-window-no-drag="true"
           onMouseDown={startResize}
           className="absolute bottom-2 right-2 z-30 flex h-4 w-4 cursor-se-resize items-end justify-end text-zinc-600/70 transition-colors hover:text-zinc-300"
-          title="调整窗口大小"
+          title={i18n.t('resizeWindow', { ns: 'agentCanvas' })}
         >
           <svg
             viewBox="0 0 16 16"
