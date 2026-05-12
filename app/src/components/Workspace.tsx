@@ -306,7 +306,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [contextUsage, setContextUsage] = useState<number | null>(null);
   const [mouseMode, setMouseMode] = useState<'on' | 'off'>('off');
   const [isRestarting, setIsRestarting] = useState(false);
-  const [agents, set智能体] = useState<any[]>([]);
+  const [agents, setAgents] = useState<any[]>([]);
   const [boundAgents, setBoundAgents] = useState<any[]>([]);
   const [pollStatuses, setPollStatuses] = useState<Record<string, any>>({});
   const [paneDetails, setPaneDetails] = useState<Record<string, any>>({});
@@ -497,7 +497,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         return next;
       });
     }
-    set智能体(prev => prev.map(a => {
+    setAgents(prev => prev.map(a => {
       const id = (a.pane_id || a.id || '').split(':')[0];
       return id === targetPaneId ? { ...a, ...patch } : a;
     }));
@@ -511,7 +511,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }));
     try {
       const { data } = await apiService.getPanes();
-      set智能体(Array.isArray(data) ? data : data?.panes || []);
+      setAgents(Array.isArray(data) ? data : data?.panes || []);
     } catch {}
   }, [applyPanePatch]);
 
@@ -519,7 +519,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     if (!token) return;
     try {
       const { data } = await apiService.getPanes();
-      set智能体(Array.isArray(data) ? data : data?.panes || []);
+      setAgents(Array.isArray(data) ? data : data?.panes || []);
     } catch {}
   }, [token]);
   useEffect(() => { void refreshPanes(); }, [refreshPanes]);
@@ -531,7 +531,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }
   }, [paneId]);
   useEffect(() => {
-    // 5 秒 WS 轮询兜底 + 页面可见时立即请求
+    // 5s WS poll fallback + immediate request on visibility
     const sendPollRequest = () => {
       try { chatWs.send({ type: 'poll_request' }); } catch (e) { console.warn('[poll_request] send failed:', e); }
     };
@@ -578,7 +578,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setLeftPanelView(prev => prev === p ? null : p);
   };
 
-  const toggle智能体 = () => {
+  const toggleAgents = () => {
     setLeftPanelView(prev => prev === 'agents' ? null : 'agents');
   };
 
@@ -940,7 +940,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const workspaceState = devStore.getSnapshot().Workspace?.state || {};
     const tmuxTarget = String(workspaceState.activeCliPaneId || '').trim();
     if (!currentClientId || !tmuxTarget) return;
-    const promptText = `我的浏览器页面clientId:${currentClientId},你可以通过agent-webpage 和agent-code-server skill 与我通信了!`;
+    const promptText = `My browser page clientId: ${currentClientId}. You can communicate with me through the agent-webpage and agent-code-server skills.`;
     try {
       window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: promptText } }));
       await sendCommandToTmux(promptText, tmuxTarget, true);
@@ -953,7 +953,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleCopyPageConnectPrompt = useCallback(async () => {
     const currentClientId = String(chatWsClientId || pageClientId || '').trim();
     if (!currentClientId) return;
-    const promptText = `我的浏览器页面clientId:${currentClientId},你可以通过agent-webpage 和agent-code-server skill 与我通信了!`;
+    const promptText = `My browser page clientId: ${currentClientId}. You can communicate with me through the agent-webpage and agent-code-server skills.`;
     let ok = false;
     try {
       if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
@@ -1281,7 +1281,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     <div data-id="right-tabs" className="h-full relative overflow-hidden">
       <div data-id="chat-tab" className="absolute inset-0 flex justify-center" style={{ display: mainTab === 'chat' ? 'flex' : 'none' }}>
         <div className="w-full max-w-5xl h-full">
-          {/* ChatView 引用先注释保留，暂时停用以阻断其内部 stats/chat 请求
+          {/* ChatView reference kept as a comment, temporarily disabled to block its internal stats/chat requests
           <ChatView paneId={paneId} token={token!} apiOnly={isApiOnlyRuntime} />
           */}
           <div data-id="chat-view-disabled" className="flex h-full items-center justify-center text-sm text-zinc-500">
@@ -1301,6 +1301,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               paneDetails,
               pollStatuses,
               agentDetail,
+              lang: currentLang,
             })}
             activePaneId={activeCliPaneId}
             settingsShortcutActive={cliContentOpen && cliContentTab === 'settings'}
@@ -1375,7 +1376,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       <div data-id="left-panel-agents-view" className="absolute inset-0 overflow-auto">
                         <AgentDrawer agents={agents} paneId={paneId}
                           onSelectAgent={onSelectAgent}
-                          on智能体Change={set智能体}
+                          onAgentsChange={setAgents}
                           onOpenSettings={(targetPaneId) => {
                             onSelectAgent(targetPaneId);
                             openInspectorForPane(targetPaneId, 'settings');
@@ -1431,12 +1432,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 rec.start(); (window as any).__voiceRec = rec;
               });
             }}
-            onRecordEnd={(should发送) => {
+            onRecordEnd={(shouldSend) => {
               const rec = (window as any).__voiceRec as MediaRecorder | undefined;
               if (rec && rec.state !== 'inactive') {
                 rec.onstop = async () => {
                   (window as any).__voiceStream?.getTracks().forEach((t: any) => t.enabled = false);
-                  if (!should发送) return;
+                  if (!shouldSend) return;
                   const blob = new Blob((window as any).__voiceChunks || [], { type: 'audio/webm' });
                   if (blob.size < 100) return;
                   const fd = new FormData(); fd.append('file', blob, 'voice.webm'); fd.append('engine', 'google');
@@ -1633,6 +1634,7 @@ function buildCanvasItems({
   paneDetails,
   pollStatuses,
   agentDetail,
+  lang,
 }: {
   paneId: string;
   token: string | null;
@@ -1642,6 +1644,7 @@ function buildCanvasItems({
   paneDetails: Record<string, any>;
   pollStatuses: Record<string, any>;
   agentDetail: any;
+  lang?: string;
 }): AgentCanvasItem[] {
   return canvasPaneIds.map((targetPaneId) => {
     const meta = resolvePaneMeta({ paneId: targetPaneId, agents, boundAgents, paneDetails, pollStatuses, agentDetail });
@@ -1652,7 +1655,7 @@ function buildCanvasItems({
       status: meta.status?.status,
       contextUsage: meta.contextUsage,
       machineLabel: meta.machineLabel,
-      ttydSrc: token && !meta.isApiOnly ? urls.ttydOpen(targetPaneId, token) : '',
+      ttydSrc: token && !meta.isApiOnly ? urls.ttydOpen(targetPaneId, token, lang) : '',
       workspace: meta.workspace,
       isPrimary: targetPaneId === paneId,
       isApiOnly: meta.isApiOnly,
@@ -1660,9 +1663,9 @@ function buildCanvasItems({
   });
 }
 
-function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenSettings }: {
+function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange, onOpenSettings }: {
   agents: any[]; paneId: string;
-  onSelectAgent: (id: string) => void; on智能体Change: (a: any[]) => void;
+  onSelectAgent: (id: string) => void; onAgentsChange: (a: any[]) => void;
   onOpenSettings: (id: string) => void;
 }) {
   const { t } = useTranslation('workspace');
@@ -1700,7 +1703,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
       const id = data?.pane_id || data?.id;
       if (id) {
         const { data: fresh } = await apiService.getPanes();
-        on智能体Change(Array.isArray(fresh) ? fresh : fresh?.panes || []);
+        onAgentsChange(Array.isArray(fresh) ? fresh : fresh?.panes || []);
         setCreateDialogOpen(false);
         onSelectAgent(id.split(':')[0]);
       }
@@ -1717,7 +1720,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
         await apiService.deletePane(id);
         const { data: fresh } = await apiService.getPanes();
         const list = Array.isArray(fresh) ? fresh : fresh?.panes || [];
-        on智能体Change(list);
+        onAgentsChange(list);
         if (sid === paneId) {
           const idx = agents.findIndex(a => (a.pane_id || a.id) === id);
           const next = agents[idx + 1] || agents[idx - 1];

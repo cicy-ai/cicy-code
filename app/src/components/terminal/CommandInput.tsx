@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, ArrowUp, CheckCircle } from 'lucide-react';
 import apiService from '../../services/api';
 
@@ -14,17 +15,18 @@ interface CommandInputProps {
 }
 
 const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus = 'idle', contextUsage }) => {
+  const { t } = useTranslation('terminal');
   const [text, setText] = useState(() => localStorage.getItem(`v2_draft_${paneId}`) || '');
   const [history, setHistory] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem(`v2_hist_${paneId}`) || '[]'); } catch { return []; }
   });
   const [histIdx, setHistIdx] = useState(-1);
   const [tmpDraft, setTmpDraft] = useState('');
-  const [sending, set发送ing] = useState(false);
+  const [sending, setSendingFlag] = useState(false);
   const [sent, setSent] = useState(false);
   const [correcting, setCorrecting] = useState(false);
   const [correction, setCorrection] = useState<[string, string] | null>(null);
-  const [enterTo发送, setEnterTo发送] = useState(() => localStorage.getItem('enter_to_send') !== 'false');
+  const [enterToSend, setEnterToSend] = useState(() => localStorage.getItem('enter_to_send') !== 'false');
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const saveHist = (h: string[]) => { setHistory(h); localStorage.setItem(`v2_hist_${paneId}`, JSON.stringify(h)); };
@@ -35,13 +37,13 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
     const c = cmd;
     saveHist([c, ...history.filter(x => x !== c)].slice(0, 50));
     setHistIdx(-1); setTmpDraft(''); saveDraft('');
-    set发送ing(true); setSent(false);
+    setSendingFlag(true); setSent(false);
     try {
       window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: paneId, q: c } }));
       await apiService.sendCommand(paneId, c);
       setSent(true); setTimeout(() => setSent(false), 2000);
     } catch (e) { console.error(e); }
-    finally { set发送ing(false); setTimeout(() => ref.current?.focus(), 50); }
+    finally { setSendingFlag(false); setTimeout(() => ref.current?.focus(), 50); }
   }, [paneId, history]);
 
   const onKey = async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -49,7 +51,7 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (!text.trim() && correction) {
-        // 发送 correction: Shift=Chinese, else English
+        // Submit correction: Shift=Chinese, else English
         const cmd = e.shiftKey ? correction[1] : correction[0];
         setCorrection(null);
         await send(cmd);
@@ -90,8 +92,8 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
 
     // Enter → send
     if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-      const should发送 = enterTo发送 ? !e.shiftKey : e.shiftKey;
-      if (should发送) {
+      const shouldSend = enterToSend ? !e.shiftKey : e.shiftKey;
+      if (shouldSend) {
         e.preventDefault();
         if (!text.trim() && correction) {
           saveDraft(correction[0]);
@@ -130,7 +132,7 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
         <div className="px-3 py-2 border-b border-vsc-border bg-vsc-bg text-xs space-y-1">
           <div className="text-emerald-400 cursor-pointer hover:underline" onClick={() => send(correction[0])}>{correction[0]}</div>
           <div className="text-vsc-text-muted cursor-pointer hover:underline" onClick={() => send(correction[1])}>{correction[1]}</div>
-          <div className="text-vsc-text-muted opacity-50">⌘↵ 发送英文 · ⌘⇧↵ 发送中文 · Esc 关闭</div>
+          <div className="text-vsc-text-muted opacity-50">{t('inputHints')}</div>
         </div>
       )}
       {/* Input */}
@@ -140,7 +142,7 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
           value={text}
           onChange={e => { saveDraft(e.target.value); if (histIdx === -1) setTmpDraft(e.target.value); }}
           onKeyDown={onKey}
-          placeholder="输入命令..."
+          placeholder={t('placeholderCommand')}
           disabled={sending}
           className="w-full bg-vsc-bg text-vsc-text rounded-md border border-vsc-border p-2.5 pr-10 focus:border-vsc-accent/50 outline-none resize-none text-sm placeholder:text-vsc-text-muted/40"
           rows={3}
@@ -156,13 +158,13 @@ const CommandInput: React.FC<CommandInputProps> = ({ paneId, token, agentStatus 
       {/* Status bar */}
       <div className="h-6 border-t border-vsc-border flex items-center px-2.5 gap-2 shrink-0">
         <span className={`w-2 h-2 rounded-full ${agentStatus === 'thinking' ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`} />
-        <span className="text-[11px] text-vsc-text-secondary">{agentStatus === 'thinking' ? '思考中...' : '空闲'}</span>
+        <span className="text-[11px] text-vsc-text-secondary">{agentStatus === 'thinking' ? t('statusThinking') : t('statusIdle')}</span>
         {correcting && <Loader2 size={12} className="text-purple-400 animate-spin" />}
         <button
-          onClick={() => { const n = !enterTo发送; setEnterTo发送(n); localStorage.setItem('enter_to_send', String(n)); }}
+          onClick={() => { const n = !enterToSend; setEnterToSend(n); localStorage.setItem('enter_to_send', String(n)); }}
           className="text-[10px] text-vsc-text-muted px-1.5 py-0.5 border border-vsc-border rounded hover:text-white ml-auto"
         >
-          {enterTo发送 ? '⏎发送' : '⇧⏎发送'}
+          {enterToSend ? t('enterSend') : t('shiftEnterSend')}
         </button>
         {contextUsage != null && <span className="text-[11px] text-vsc-text-muted">{contextUsage}%</span>}
       </div>

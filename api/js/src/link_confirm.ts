@@ -1,4 +1,5 @@
 import { applyMonoFontVar } from "./font";
+import { ttydT } from "./cicy_i18n";
 
 function ensureLinkConfirmStyle(doc: Document): void {
     if (doc.getElementById("cicy-link-confirm-style")) {
@@ -358,7 +359,7 @@ function openLocalFilePath(doc: Document, filePath: string): void {
         body: JSON.stringify({
             action: "open_file",
             file: filePath,
-            message: "📄 打开文件",
+            message: ttydT("openFile"),
         }),
     }).catch(function(): void {});
 }
@@ -370,11 +371,11 @@ export function openExternalLinkWithConfirm(doc: Document, rawUrl: string): void
     }
 
     mountConfirmOverlay(doc, {
-        title: "打开链接",
-        description: "是否打开这个网址？",
+        title: ttydT("openLink"),
+        description: ttydT("openLinkPrompt"),
         bodyText: url,
-        cancelText: "取消",
-        confirmText: "打开链接",
+        cancelText: ttydT("cancel"),
+        confirmText: ttydT("openLinkAction"),
         onConfirm: function(): void {
             var win = window.open(url, "_blank");
             if (win) {
@@ -395,11 +396,11 @@ export function openFileProtocolLink(doc: Document, rawValue: string): void {
     }
     if (isImageFileURL(resolvedURL)) {
         mountConfirmOverlay(doc, {
-            title: "图片文件",
-            description: "预览这张图片，或直接下载。",
+            title: ttydT("imageFile"),
+            description: ttydT("imagePreviewHint"),
             bodyText: fileRef,
-            cancelText: "关闭",
-            confirmText: "下载",
+            cancelText: ttydT("close"),
+            confirmText: ttydT("download"),
             previewImageURL: resolvedURL,
             onConfirm: function(): void {
                 downloadURL(doc, resolvedURL);
@@ -408,11 +409,11 @@ export function openFileProtocolLink(doc: Document, rawValue: string): void {
         return;
     }
     mountConfirmOverlay(doc, {
-        title: "文件下载",
-        description: "点击下载这个文件。",
+        title: ttydT("fileDownload"),
+        description: ttydT("fileDownloadHint"),
         bodyText: fileRef,
-        cancelText: "关闭",
-        confirmText: "下载",
+        cancelText: ttydT("close"),
+        confirmText: ttydT("download"),
         onConfirm: function(): void {
             downloadURL(doc, resolvedURL);
         },
@@ -438,11 +439,11 @@ export function openFileReferencePopup(doc: Document, rawPath: string): void {
     }
 
     mountConfirmOverlay(doc, {
-        title: "文件路径",
-        description: "终端里检测到一个文件路径。",
+        title: ttydT("filePath"),
+        description: ttydT("filePathHint"),
         bodyText: originalPath,
-        cancelText: "关闭",
-        confirmText: "打开",
+        cancelText: ttydT("close"),
+        confirmText: ttydT("open"),
         onConfirm: function(): void {
             openLocalFilePath(doc, filePath);
         },

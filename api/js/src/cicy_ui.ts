@@ -1,4 +1,5 @@
 import { Terminal, WebTTY, normalizeTerminalText } from "./webtty";
+import { ttydT } from "./cicy_i18n";
 import { applyMonoFontVar, monoFontStack } from "./font";
 
 interface StorageHelper {
@@ -1279,9 +1280,9 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var fixedTop = document.createElement("div");
     fixedTop.id = "fixed-top-action";
     fixedTop.innerHTML =
-        '<button id="cp-win-add" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="新加CLI Window">+</button>' +
-        '<button id="cp-win-restart" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="重启智能体">↻</button>' +
-        '<button id="cp-reload" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="刷新页面" onclick="location.reload()">⟳</button>';
+        '<button id="cp-win-add" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="' + ttydT("tipAddCliWindow") + '">+</button>' +
+        '<button id="cp-win-restart" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="' + ttydT("tipRestartAgent") + '">↻</button>' +
+        '<button id="cp-reload" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="' + ttydT("tipReloadPage") + '" onclick="location.reload()">⟳</button>';
 
     document.body.appendChild(winFloat);
     document.body.appendChild(fixedTop);
@@ -1484,7 +1485,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
 
     function updateEnterButton(): void {
         enterBtn.textContent = enterToSend ? "⏎" : "⇧⏎";
-        enterBtn.setAttribute("data-tooltip", enterToSend ? "发送Prompt方式:Enter" : "发送Prompt方式:Shift+Enter");
+        enterBtn.setAttribute("data-tooltip", enterToSend ? ttydT("enterSendPromptEnter") : ttydT("enterSendPromptShiftEnter"));
     }
 
     function addHistory(command: string): void {
@@ -1603,7 +1604,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         }
         var activeIndex = pendingExists ? optimisticActiveIndex : serverActiveIndex;
         winTabs.innerHTML = windows.map(function(win: any): string {
-            var close = win.index === "0" ? "" : '<span class="cp-wdel" data-idx="' + win.index + '" data-tooltip="关闭CLI Window">✕</span>';
+            var close = win.index === "0" ? "" : '<span class="cp-wdel" data-idx="' + win.index + '" data-tooltip="' + ttydT("closeCliWindow") + '">✕</span>';
             var active = String(win.index) === activeIndex ? " active" : "";
             return '<button class="cp-wtab' + active + '" data-idx="' + win.index + '">' + win.name + "." + win.index + close + "</button>";
         }).join("");
@@ -1740,13 +1741,13 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
                 var confirmButton = closeButton;
                 confirmButton.dataset.confirm = "1";
                 confirmButton.textContent = "?";
-                confirmButton.setAttribute("data-tooltip", "再点一次确认关闭CLI Window");
+                confirmButton.setAttribute("data-tooltip", ttydT("clickAgainToConfirm"));
                 confirmButton.classList.add("cp-confirm");
-                showFixedTooltip(confirmButton, "再点一次确认关闭CLI Window");
+                showFixedTooltip(confirmButton, ttydT("clickAgainToConfirm"));
                 setTimeout(function(): void {
                     delete confirmButton.dataset.confirm;
                     confirmButton.textContent = "✕";
-                    confirmButton.setAttribute("data-tooltip", "关闭CLI Window");
+                    confirmButton.setAttribute("data-tooltip", ttydT("closeCliWindow"));
                     confirmButton.classList.remove("cp-confirm");
                     hideFixedTooltip();
                 }, 2000);
@@ -1829,7 +1830,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             return;
         }
         restartBtn.classList.add("restarting");
-        loading.show("重启智能体中");
+        loading.show(ttydT("restartingAgent"));
         webtty.requestAPI("POST", "/api/tmux/panes/" + paneId + "/restart", undefined, apiHeaders).catch(function(): void {
             restartBtn.classList.remove("restarting");
         });
@@ -2133,10 +2134,10 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         summaryRow.className = "cp-file-paste-meta-row";
         var summaryKey = document.createElement("span");
         summaryKey.className = "cp-file-paste-meta-key";
-        summaryKey.textContent = "上传内容";
+        summaryKey.textContent = ttydT("uploadContent");
         var summaryValue = document.createElement("span");
         summaryValue.className = "cp-file-paste-meta-value";
-        summaryValue.textContent = files.length === 1 ? "1 个文件" : String(files.length) + " 个文件";
+        summaryValue.textContent = files.length === 1 ? ttydT("singleFileCount") : ttydT("multiFileCount", { n: files.length });
         summaryRow.appendChild(summaryKey);
         summaryRow.appendChild(summaryValue);
         meta.appendChild(summaryRow);
@@ -2199,12 +2200,12 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         }
 
         if (files.length === 1) {
-            appendRow("文件名", files[0].name || "file");
-            appendRow("类型", files[0].type || "unknown");
-            appendRow("大小", formatPastedFileSize(files[0].size || 0));
+            appendRow(ttydT("fileName"), files[0].name || "file");
+            appendRow(ttydT("fileType"), files[0].type || "unknown");
+            appendRow(ttydT("fileSize"), formatPastedFileSize(files[0].size || 0));
         } else {
-            appendRow("文件数", String(files.length));
-            appendRow("总大小", formatPastedFileSize(files.reduce(function(sum: number, file: File): number {
+            appendRow(ttydT("fileCount"), String(files.length));
+            appendRow(ttydT("totalSize"), formatPastedFileSize(files.reduce(function(sum: number, file: File): number {
                 return sum + (file.size || 0);
             }, 0)));
         }
@@ -2234,12 +2235,12 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         eyebrow.textContent = files.length === 1 && String(files[0].type || "").match(/^image\//) ? "Image Paste" : "File Paste";
         var title = document.createElement("h3");
         title.id = "cp-file-paste-title";
-        title.textContent = files.length === 1 && String(files[0].type || "").match(/^image\//) ? "发送粘贴图片" : "发送粘贴文件";
+        title.textContent = files.length === 1 && String(files[0].type || "").match(/^image\//) ? ttydT("sendPastedImage") : ttydT("sendPastedFiles");
         var desc = document.createElement("p");
         desc.id = "cp-file-paste-desc";
         desc.textContent = files.length === 1 && String(files[0].type || "").match(/^image\//)
             ? ""
-            : "确认后上传这些文件，并在终端里写入 file:// 地址。";
+            : ttydT("confirmUploadHint");
         heading.appendChild(eyebrow);
         heading.appendChild(title);
         heading.appendChild(desc);
@@ -2261,11 +2262,11 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         var cancelBtn = document.createElement("button");
         cancelBtn.id = "cp-file-paste-cancel";
         cancelBtn.className = "cp-file-paste-btn";
-        cancelBtn.textContent = "取消";
+        cancelBtn.textContent = ttydT("cancel");
         var sendBtn = document.createElement("button");
         sendBtn.id = "cp-file-paste-send";
         sendBtn.className = "cp-file-paste-btn";
-        sendBtn.textContent = "发送";
+        sendBtn.textContent = ttydT("send");
         actions.appendChild(cancelBtn);
         actions.appendChild(sendBtn);
 
@@ -2330,11 +2331,11 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         var cancelBtn = document.createElement("button");
         cancelBtn.id = "cp-paste-confirm-cancel";
         cancelBtn.className = "cp-paste-confirm-btn";
-        cancelBtn.textContent = "取消";
+        cancelBtn.textContent = ttydT("cancel");
         var sendBtnEl = document.createElement("button");
         sendBtnEl.id = "cp-paste-confirm-send";
         sendBtnEl.className = "cp-paste-confirm-btn";
-        sendBtnEl.textContent = "发送";
+        sendBtnEl.textContent = ttydT("send");
         actions.appendChild(cancelBtn);
         actions.appendChild(sendBtnEl);
         modal.appendChild(title);
@@ -2382,8 +2383,8 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             return;
         }
         openPasteConfirmDialog(
-            "发送粘贴内容",
-            "检测到粘贴文本，确认后将直接发送到终端。",
+            ttydT("sendPastedText"),
+            ttydT("pastedTextDetected"),
             command,
             function(bodyValue: string): void {
                 var finalCommand = normalizePromptPunctuation(bodyValue || "");

@@ -113,11 +113,11 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
         
         // Boundary checks
         if (dragBounds) {
-          // 限制在 dragBounds 内
+          // Clamp within dragBounds
           newX = Math.max(dragBounds.x, Math.min(dragBounds.x + dragBounds.width - size.width, newX));
           newY = Math.max(dragBounds.y, Math.min(dragBounds.y + dragBounds.height - size.height, newY));
         } else {
-          // 默认限制在窗口内
+          // Default: clamp within the window
           newX = Math.max(0, Math.min(window.innerWidth - size.width, newX));
           newY = Math.max(0, Math.min(window.innerHeight - size.height, newY));
         }
