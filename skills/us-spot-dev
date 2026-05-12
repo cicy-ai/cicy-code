@@ -33,6 +33,7 @@ RSA_KEY = os.path.expanduser("~/.ssh/id_rsa")                  # used by some pr
 CICY_AI_DIR = os.path.expanduser("~/cicy-ai")
 CICY_CODE_REPO = "git@github-cicy-ai:cicy-ai/cicy-code.git"
 CICY_SKILLS_REPO = "git@github-cicy-ai:cicy-ai/cicy-skills.git"
+MIHOMO_LINUX_BIN = os.path.expanduser("~/projects/cicy-mihomo/bin/mihomo-linux-amd64")
 VPC_CIDR = "172.19.0.0/16"
 VSW_CIDR = "172.19.0.0/24"
 VPC_NAME = "us-spot-dev-vpc"
@@ -362,13 +363,16 @@ def bootstrap_container(ip):
                        check=False, capture_output=True, text=True)
     ssh_cicy(ip, f"[ -d ~/projects/cicy-code/.git ] || git clone {CICY_CODE_REPO} ~/projects/cicy-code", timeout=300)
     ssh_cicy(ip, f"[ -d ~/projects/cicy-skills/.git ] || git clone {CICY_SKILLS_REPO} ~/projects/cicy-skills", timeout=300)
-    # cicy-mihomo wrapper (the mihomo binary itself is pre-installed in the image)
+    # mihomo binary (image pre-install needs the private repo, so push it from here) + cicy-mihomo wrapper
+    if os.path.exists(MIHOMO_LINUX_BIN):
+        scp_to_cicy(ip, MIHOMO_LINUX_BIN, "~/.local/bin/mihomo")
+        ssh_cicy(ip, "chmod 0755 ~/.local/bin/mihomo")
     ssh_cicy(ip, "cd ~/projects/cicy-skills 2>/dev/null && /usr/local/go/bin/go build -o ~/.local/bin/cicy-hosttools "
                  "./cmd/cicy-hosttools && ln -sf cicy-hosttools ~/.local/bin/cicy-mihomo || true", timeout=240)
-    # start the dev server (idempotent)
-    ssh_cicy(ip, "pgrep -f '[d]ev[.]py' >/dev/null || (cd ~/projects/cicy-code && "
-                 "nohup python3 dev.py >~/logs/dev-py.log 2>&1 </dev/null &); "
-                 "sleep 2; pgrep -af '[d]ev[.]py' || echo '(dev.py launching)'", timeout=60)
+    # start the dev server — check the port (a pgrep on "dev.py" would match this very ssh command line)
+    ssh_cicy(ip, "curl -sf -o /dev/null --max-time 3 http://localhost:8008/api/ping || "
+                 "( cd ~/projects/cicy-code && setsid nohup python3 dev.py >~/logs/dev-py.log 2>&1 </dev/null & ) ; "
+                 "sleep 2; echo started", timeout=60)
     print("  Container bootstrapped — dev.py launching (log: ~/logs/dev-py.log)")
 
 
