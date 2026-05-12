@@ -361,8 +361,10 @@ def bootstrap_container(ip):
                         "--exclude=*.db", "--exclude=*.db-*", "--exclude=*.lock",
                         dbdir + "/", f"cicy@{ip}:cicy-ai/db/"],
                        check=False, capture_output=True, text=True)
-    ssh_cicy(ip, f"[ -d ~/projects/cicy-code/.git ] || git clone {CICY_CODE_REPO} ~/projects/cicy-code", timeout=300)
-    ssh_cicy(ip, f"[ -d ~/projects/cicy-skills/.git ] || git clone {CICY_SKILLS_REPO} ~/projects/cicy-skills", timeout=300)
+    ssh_cicy(ip, f"[ -d ~/projects/cicy-code/.git ] || git clone {CICY_CODE_REPO} ~/projects/cicy-code; "
+                 "git -C ~/projects/cicy-code pull --ff-only 2>/dev/null || true", timeout=300)
+    ssh_cicy(ip, f"[ -d ~/projects/cicy-skills/.git ] || git clone {CICY_SKILLS_REPO} ~/projects/cicy-skills; "
+                 "git -C ~/projects/cicy-skills pull --ff-only 2>/dev/null || true", timeout=300)
     # mihomo binary (image pre-install needs the private repo, so push it from here) + cicy-mihomo wrapper
     if os.path.exists(MIHOMO_LINUX_BIN):
         scp_to_cicy(ip, MIHOMO_LINUX_BIN, "~/.local/bin/mihomo")
