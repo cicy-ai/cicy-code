@@ -1,0 +1,16 @@
+{
+  "copyFailed": "Échec de copie : {{value}}",
+  "titleUpdateFailed": "Erreur : mise à jour du titre",
+  "doubleClickToRename": "Double-cliquer pour renommer",
+  "editTitle": "Modifier le titre",
+  "copiedPaneId": "Copié",
+  "copyMemberId": "Copier l'ID du membre",
+  "dragWindow": "Déplacer la fenêtre",
+  "codeServer": "Code server",
+  "collabOverview": "Vue collaborative",
+  "apiOnlyHint": "Ce membre ne supporte que l'API ; pas de terminal ttyd.",
+  "zoomInHint": "Zoomez ou agrandissez la fenêtre pour entrer dans la session.",
+  "clickToConnect": "Cliquez pour rejoindre la session ttyd à la demande.",
+  "noWorkSession": "Aucune session disponible",
+  "resizeWindow": "Redimensionner"
+}

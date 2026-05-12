@@ -1,0 +1,21 @@
+{
+  "agentTypeSelected": "選択中",
+  "terminalMouseOn": "マウス：オン",
+  "terminalMouseOff": "マウス：オフ",
+  "terminalCaptureFrame": "ペインをキャプチャ",
+  "floatingPanelClose": "パネルを閉じる",
+  "voiceLocating": "位置調整中…",
+  "voiceTranscribing": "文字起こし中…",
+  "voiceRecording": "録音中…",
+  "modalCancel": "キャンセル",
+  "modalConfirm": "OK",
+  "selectPlaceholder": "選択…",
+  "selectSearchPlaceholder": "検索…",
+  "selectMore": "その他",
+  "selectNoResults": "結果なし",
+  "codeServerFolders": "よく使うフォルダ",
+  "codeServerOpenInNewWindow": "新しいウィンドウで開く",
+  "codeServerTitle": "Code server",
+  "windowConfirmDelete": "ウィンドウ {{idx}} を削除しますか？",
+  "windowCreateButton": "新しいウィンドウ"
+}

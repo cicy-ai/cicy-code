@@ -1,0 +1,22 @@
+{
+  "agentBusy": "L'agent est occupé, cliquez sur charger pour forcer la réinitialisation.",
+  "errorCorrectFailed": "Échec de la correction",
+  "errorPrefix": "Erreur : {{message}}",
+  "agentWorking": "L'agent travaille, veuillez patienter…",
+  "enterSendShiftNewline": "Entrée = envoyer, Maj+Entrée = nouvelle ligne",
+  "enterNewlineShiftSend": "Entrée = nouvelle ligne, Maj+Entrée = envoyer",
+  "enterSend": "⏎ envoyer",
+  "shiftEnterSend": "⇧⏎ envoyer",
+  "hideVoiceMode": "Masquer le mode vocal",
+  "showVoiceMode": "Afficher le mode vocal",
+  "placeholderCommand": "Tapez une commande…",
+  "clickToStop": "Cliquer pour arrêter",
+  "send": "Envoyer",
+  "selectModel": "Choisir un modèle",
+  "sendCtrlC": "Envoyer Ctrl+C (cliquer deux fois)",
+  "confirm": "Confirmer ?",
+  "compactHistory": "Compacter l'historique (cliquer deux fois)",
+  "inputHints": "⌘↵ envoyer en anglais · ⌘⇧↵ envoyer en chinois · Échap fermer",
+  "statusThinking": "Réflexion…",
+  "statusIdle": "Inactif"
+}

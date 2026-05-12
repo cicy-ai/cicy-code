@@ -1,0 +1,13 @@
+{
+  "titleCode": "CiCy Code",
+  "titleAudit": "CiCy Audit",
+  "subtitleCode": "API トークンでサインインしてください",
+  "subtitleAudit": "API トークンで AI 利用ダッシュボードを表示",
+  "apiToken": "API トークン",
+  "apiTokenHint": "有効なトークンを貼り付けて続行",
+  "placeholder": "ここにトークンを貼り付け…",
+  "submit": "トークンでサインイン",
+  "submitting": "確認中…",
+  "errorInvalid": "トークンが無効です",
+  "errorConnection": "接続に失敗しました"
+}

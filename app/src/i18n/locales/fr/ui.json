@@ -1,0 +1,21 @@
+{
+  "agentTypeSelected": "Sélectionné",
+  "terminalMouseOn": "Souris : activée",
+  "terminalMouseOff": "Souris : désactivée",
+  "terminalCaptureFrame": "Capturer le panneau",
+  "floatingPanelClose": "Fermer le panneau",
+  "voiceLocating": "Positionnement…",
+  "voiceTranscribing": "Transcription…",
+  "voiceRecording": "Enregistrement…",
+  "modalCancel": "Annuler",
+  "modalConfirm": "OK",
+  "selectPlaceholder": "Sélectionner…",
+  "selectSearchPlaceholder": "Rechercher…",
+  "selectMore": "Plus",
+  "selectNoResults": "Aucun résultat",
+  "codeServerFolders": "Dossiers fréquents",
+  "codeServerOpenInNewWindow": "Ouvrir dans une nouvelle fenêtre",
+  "codeServerTitle": "Code server",
+  "windowConfirmDelete": "Supprimer la fenêtre {{idx}} ?",
+  "windowCreateButton": "Nouvelle fenêtre"
+}

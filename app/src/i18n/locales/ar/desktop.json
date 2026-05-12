@@ -1,0 +1,20 @@
+{
+  "thinkingStep": "🧠 Understanding intent...",
+  "designStep": "🎨 Designing UI...",
+  "codeStep": "⚙️ Generating code...",
+  "packageStep": "📦 Packaging...",
+  "appCreated": "✅ \"{{name}}\" {{icon}} created! ({{seconds}}s)\nClick the desktop icon to open it.",
+  "createFailed": "Creation failed: {{detail}}",
+  "createErrored": "Creation errored: {{message}}",
+  "assistantOops": "Sorry, something went wrong.",
+  "assistantConnFailed": "Connection failed, please retry.",
+  "statusCreating": "● Creating",
+  "statusThinking": "● Thinking",
+  "statusIdle": "● Idle",
+  "emptyHeadline": "Let your agent build something for you",
+  "emptySubline": "Describe what you need and AI will build it",
+  "creatingApp": "⚡ Creating app...",
+  "placeholderContinue": "Continue the conversation...",
+  "placeholderStart": "Build me a tool that watches the bitcoin price...",
+  "hintEnterToSend": "Press Enter to send · AI powered"
+}

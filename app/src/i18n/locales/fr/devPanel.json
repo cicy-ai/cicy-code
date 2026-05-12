@@ -1,0 +1,10 @@
+{
+  "title": "Outils dev",
+  "storesCount": "{{count}} stores",
+  "filterPlaceholder": "Filtrer…",
+  "noStores": "Aucun store enregistré",
+  "itemsCount": "{{count}} éléments",
+  "noMatch": "Aucune correspondance",
+  "copy": "Copier",
+  "edit": "Modifier"
+}

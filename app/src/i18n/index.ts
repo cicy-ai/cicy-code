@@ -48,6 +48,75 @@ import zhLogin from './locales/zh-CN/login.json';
 import zhSettings from './locales/zh-CN/settings.json';
 import zhUi from './locales/zh-CN/ui.json';
 import zhWorkspace from './locales/zh-CN/workspace.json';
+import frAgentCanvas from './locales/fr/agentCanvas.json';
+import frAgentChat from './locales/fr/agentChat.json';
+import frAgentInspector from './locales/fr/agentInspector.json';
+import frAgentProviderRequest from './locales/fr/agentProviderRequest.json';
+import frAgentTypeDesc from './locales/fr/agentTypeDesc.json';
+import frApiSwitch from './locales/fr/apiSwitch.json';
+import frAudit from './locales/fr/audit.json';
+import frChat from './locales/fr/chat.json';
+import frCommon from './locales/fr/common.json';
+import frCreateAgent from './locales/fr/createAgent.json';
+import frDesktop from './locales/fr/desktop.json';
+import frDevPanel from './locales/fr/devPanel.json';
+import frEditPane from './locales/fr/editPane.json';
+import frIm from './locales/fr/im.json';
+import frLayout from './locales/fr/layout.json';
+import frLogin from './locales/fr/login.json';
+import frProvider from './locales/fr/provider.json';
+import frProvision from './locales/fr/provision.json';
+import frSettings from './locales/fr/settings.json';
+import frTeamPanel from './locales/fr/teamPanel.json';
+import frTerminal from './locales/fr/terminal.json';
+import frUi from './locales/fr/ui.json';
+import frWorkspace from './locales/fr/workspace.json';
+import jaAgentCanvas from './locales/ja/agentCanvas.json';
+import jaAgentChat from './locales/ja/agentChat.json';
+import jaAgentInspector from './locales/ja/agentInspector.json';
+import jaAgentProviderRequest from './locales/ja/agentProviderRequest.json';
+import jaAgentTypeDesc from './locales/ja/agentTypeDesc.json';
+import jaApiSwitch from './locales/ja/apiSwitch.json';
+import jaAudit from './locales/ja/audit.json';
+import jaChat from './locales/ja/chat.json';
+import jaCommon from './locales/ja/common.json';
+import jaCreateAgent from './locales/ja/createAgent.json';
+import jaDesktop from './locales/ja/desktop.json';
+import jaDevPanel from './locales/ja/devPanel.json';
+import jaEditPane from './locales/ja/editPane.json';
+import jaIm from './locales/ja/im.json';
+import jaLayout from './locales/ja/layout.json';
+import jaLogin from './locales/ja/login.json';
+import jaProvider from './locales/ja/provider.json';
+import jaProvision from './locales/ja/provision.json';
+import jaSettings from './locales/ja/settings.json';
+import jaTeamPanel from './locales/ja/teamPanel.json';
+import jaTerminal from './locales/ja/terminal.json';
+import jaUi from './locales/ja/ui.json';
+import jaWorkspace from './locales/ja/workspace.json';
+import arAgentCanvas from './locales/ar/agentCanvas.json';
+import arAgentChat from './locales/ar/agentChat.json';
+import arAgentInspector from './locales/ar/agentInspector.json';
+import arAgentProviderRequest from './locales/ar/agentProviderRequest.json';
+import arAgentTypeDesc from './locales/ar/agentTypeDesc.json';
+import arApiSwitch from './locales/ar/apiSwitch.json';
+import arAudit from './locales/ar/audit.json';
+import arChat from './locales/ar/chat.json';
+import arCommon from './locales/ar/common.json';
+import arCreateAgent from './locales/ar/createAgent.json';
+import arDesktop from './locales/ar/desktop.json';
+import arDevPanel from './locales/ar/devPanel.json';
+import arEditPane from './locales/ar/editPane.json';
+import arIm from './locales/ar/im.json';
+import arLayout from './locales/ar/layout.json';
+import arLogin from './locales/ar/login.json';
+import arProvider from './locales/ar/provider.json';
+import arProvision from './locales/ar/provision.json';
+import arSettings from './locales/ar/settings.json';
+import arTeamPanel from './locales/ar/teamPanel.json';
+import arTerminal from './locales/ar/terminal.json';
+import arUi from './locales/ar/ui.json';
+import arWorkspace from './locales/ar/workspace.json';
 
 export const STORAGE_KEY = 'cicy.lang';
 
@@ -55,7 +124,7 @@ export const STORAGE_KEY = 'cicy.lang';
  * Languages we ship full translation bundles for. Adding a new code here
  * requires a matching `locales/<code>/<ns>.json` for every namespace.
  */
-export const TRANSLATED_LNGS = ['en', 'zh-CN'] as const;
+export const TRANSLATED_LNGS = ['en', 'zh-CN', 'fr', 'ja', 'ar'] as const;
 export type TranslatedLng = (typeof TRANSLATED_LNGS)[number];
 
 /**
@@ -142,6 +211,81 @@ const resources = {
     im: zhIm,
     terminal: zhTerminal,
   },
+  fr: {
+    agentCanvas: frAgentCanvas,
+    agentChat: frAgentChat,
+    agentInspector: frAgentInspector,
+    agentProviderRequest: frAgentProviderRequest,
+    agentTypeDesc: frAgentTypeDesc,
+    apiSwitch: frApiSwitch,
+    audit: frAudit,
+    chat: frChat,
+    common: frCommon,
+    createAgent: frCreateAgent,
+    desktop: frDesktop,
+    devPanel: frDevPanel,
+    editPane: frEditPane,
+    im: frIm,
+    layout: frLayout,
+    login: frLogin,
+    provider: frProvider,
+    provision: frProvision,
+    settings: frSettings,
+    teamPanel: frTeamPanel,
+    terminal: frTerminal,
+    ui: frUi,
+    workspace: frWorkspace,
+  },
+  ja: {
+    agentCanvas: jaAgentCanvas,
+    agentChat: jaAgentChat,
+    agentInspector: jaAgentInspector,
+    agentProviderRequest: jaAgentProviderRequest,
+    agentTypeDesc: jaAgentTypeDesc,
+    apiSwitch: jaApiSwitch,
+    audit: jaAudit,
+    chat: jaChat,
+    common: jaCommon,
+    createAgent: jaCreateAgent,
+    desktop: jaDesktop,
+    devPanel: jaDevPanel,
+    editPane: jaEditPane,
+    im: jaIm,
+    layout: jaLayout,
+    login: jaLogin,
+    provider: jaProvider,
+    provision: jaProvision,
+    settings: jaSettings,
+    teamPanel: jaTeamPanel,
+    terminal: jaTerminal,
+    ui: jaUi,
+    workspace: jaWorkspace,
+  },
+  ar: {
+    agentCanvas: arAgentCanvas,
+    agentChat: arAgentChat,
+    agentInspector: arAgentInspector,
+    agentProviderRequest: arAgentProviderRequest,
+    agentTypeDesc: arAgentTypeDesc,
+    apiSwitch: arApiSwitch,
+    audit: arAudit,
+    chat: arChat,
+    common: arCommon,
+    createAgent: arCreateAgent,
+    desktop: arDesktop,
+    devPanel: arDevPanel,
+    editPane: arEditPane,
+    im: arIm,
+    layout: arLayout,
+    login: arLogin,
+    provider: arProvider,
+    provision: arProvision,
+    settings: arSettings,
+    teamPanel: arTeamPanel,
+    terminal: arTerminal,
+    ui: arUi,
+    workspace: arWorkspace,
+  },
 };
 
 void i18n
@@ -170,13 +314,22 @@ void i18n
   })
   .then(() => {
     if (typeof document !== 'undefined') {
-      document.documentElement.lang = i18n.resolvedLanguage ?? i18n.language;
+      const active = i18n.resolvedLanguage ?? i18n.language;
+      document.documentElement.lang = active;
+      document.documentElement.dir = directionFor(active);
     }
   });
+
+const RTL_PREFIXES = ['ar', 'fa', 'he', 'ur', 'ps', 'ku', 'sd', 'ckb', 'dv', 'yi'];
+function directionFor(code: string | undefined | null): 'rtl' | 'ltr' {
+  const c = String(code || '').toLowerCase();
+  return RTL_PREFIXES.some((p) => c === p || c.startsWith(p + '-')) ? 'rtl' : 'ltr';
+}
 
 i18n.on('languageChanged', (lng) => {
   if (typeof document !== 'undefined') {
     document.documentElement.lang = lng;
+    document.documentElement.dir = directionFor(lng);
   }
 });
 

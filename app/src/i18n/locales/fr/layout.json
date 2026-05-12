@@ -1,0 +1,18 @@
+{
+  "agentStackCopyFailed": "Échec de copie : {{value}}",
+  "agentStackApiOnly": "Ce membre ne prend en charge que l'API.",
+  "agentStackActive": "Terminal en direct activé.",
+  "agentStackInactiveHint": "Cliquez pour passer à ce membre et voir son historique à droite.",
+  "skillPanelTitle": "Compétences collaboratives",
+  "skillPanelTarget": "Cible : {{target}}",
+  "skillPanelNode": " · nœud {{node}}",
+  "tokenDialogTitle": "Jetons API",
+  "tokenNotePlaceholder": "Note du jeton…",
+  "tokenCreateButton": "Créer",
+  "tokenEmptyList": "Aucun jeton",
+  "tokenUnnamed": "Sans nom",
+  "tokenPrefixOnly": "préfixe uniquement",
+  "desktopEmpty": "Laissez votre agent construire quelque chose pour vous",
+  "desktopContextOpen": "Ouvrir",
+  "desktopContextRemove": "Retirer"
+}
