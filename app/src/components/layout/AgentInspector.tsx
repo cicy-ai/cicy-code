@@ -1,5 +1,5 @@
 import { Children, cloneElement, isValidElement, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { Brain, Search, Send, Settings } from 'lucide-react';
+import { Brain, Search, Settings } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Trans, useTranslation } from 'react-i18next';
@@ -49,7 +49,6 @@ const tabs: Array<{ id: InspectorTab; labelKey: string }> = [
 const settingsSections = [
   { id: 'general', labelKey: 'sectionGeneral', icon: Settings },
   { id: 'model', labelKey: 'sectionModel', icon: Brain },
-  { id: 'telegram', labelKey: 'sectionTelegram', icon: Send },
 ] as const;
 
 type SettingsSectionId = typeof settingsSections[number]['id'];
@@ -998,12 +997,6 @@ export default function AgentInspector({
               {settingsSection === 'model' && (
                 <div data-id="agent-inspector-settings-model" className="space-y-5">
                   <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
-                    <InspectorField label={t('modelDefaultFieldLabel')} desc={t('modelDefaultFieldDesc')}>
-                      <InspectorInput value={settingsData?.default_model || ''} onChange={(value) => patchSettingsData({ default_model: value })} onBlur={() => { void saveModelSettings(); }} placeholder={t('modelDefaultPlaceholder')} mono />
-                    </InspectorField>
-                  </div>
-
-                  <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
                     <InspectorToggle
                       label={t('officialAuth')}
                       desc={t('officialAuthHint')}
@@ -1054,23 +1047,12 @@ export default function AgentInspector({
                       )}
                     </div>
                   )}
-                </div>
-              )}
 
-              {settingsSection === 'telegram' && (
-                <div data-id="agent-inspector-settings-telegram" className="space-y-5">
-                  <InspectorToggle
-                    label={t('telegramToggle')}
-                    desc={t('telegramToggleDesc')}
-                    checked={!!settingsData?.tg_enable}
-                    onChange={(value) => patchSettingsData({ tg_enable: value })}
-                  />
-                  <InspectorField label={t('telegramTokenLabel')} desc={t('telegramTokenDesc')}>
-                    <InspectorInput value={settingsData?.tg_token || ''} onChange={(value) => patchSettingsData({ tg_token: value, tg_chat_id: '' })} mono placeholder="1234567890:ABCdef..." />
-                  </InspectorField>
-                  <InspectorField label={t('telegramChatIdLabel')} desc={t('telegramChatIdDesc')}>
-                    <InspectorInput value={settingsData?.tg_chat_id || ''} onChange={() => {}} mono readOnly placeholder={t('telegramChatIdPlaceholder')} />
-                  </InspectorField>
+                  <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+                    <InspectorField label={t('modelDefaultFieldLabel')} desc={t('modelDefaultFieldDesc')}>
+                      <InspectorInput value={settingsData?.default_model || ''} onChange={(value) => patchSettingsData({ default_model: value })} onBlur={() => { void saveModelSettings(); }} placeholder={t('modelDefaultPlaceholder')} mono />
+                    </InspectorField>
+                  </div>
                 </div>
               )}
 
