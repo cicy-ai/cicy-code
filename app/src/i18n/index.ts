@@ -10,6 +10,9 @@ import enApiSwitch from './locales/en/apiSwitch.json';
 import enDesktop from './locales/en/desktop.json';
 import enDevPanel from './locales/en/devPanel.json';
 import enAgentCanvas from './locales/en/agentCanvas.json';
+import enAudit from './locales/en/audit.json';
+import enIm from './locales/en/im.json';
+import enProvider from './locales/en/provider.json';
 import enProvision from './locales/en/provision.json';
 import enTeamPanel from './locales/en/teamPanel.json';
 import enChat from './locales/en/chat.json';
@@ -29,6 +32,9 @@ import zhApiSwitch from './locales/zh-CN/apiSwitch.json';
 import zhDesktop from './locales/zh-CN/desktop.json';
 import zhDevPanel from './locales/zh-CN/devPanel.json';
 import zhAgentCanvas from './locales/zh-CN/agentCanvas.json';
+import zhAudit from './locales/zh-CN/audit.json';
+import zhIm from './locales/zh-CN/im.json';
+import zhProvider from './locales/zh-CN/provider.json';
 import zhProvision from './locales/zh-CN/provision.json';
 import zhTeamPanel from './locales/zh-CN/teamPanel.json';
 import zhChat from './locales/zh-CN/chat.json';
@@ -67,6 +73,9 @@ const resources = {
     provision: enProvision,
     agentCanvas: enAgentCanvas,
     teamPanel: enTeamPanel,
+    audit: enAudit,
+    provider: enProvider,
+    im: enIm,
   },
   'zh-CN': {
     common: zhCommon,
@@ -88,6 +97,9 @@ const resources = {
     provision: zhProvision,
     agentCanvas: zhAgentCanvas,
     teamPanel: zhTeamPanel,
+    audit: zhAudit,
+    provider: zhProvider,
+    im: zhIm,
   },
 };
 
@@ -96,7 +108,7 @@ void i18n
   .use(initReactI18next)
   .init({
     resources,
-    ns: ['common', 'login', 'settings', 'createAgent', 'editPane', 'workspace', 'ui', 'layout', 'chat', 'agentInspector', 'agentProviderRequest', 'agentChat', 'agentTypeDesc', 'apiSwitch', 'desktop', 'devPanel', 'provision', 'agentCanvas', 'teamPanel'],
+    ns: ['common', 'login', 'settings', 'createAgent', 'editPane', 'workspace', 'ui', 'layout', 'chat', 'agentInspector', 'agentProviderRequest', 'agentChat', 'agentTypeDesc', 'apiSwitch', 'desktop', 'devPanel', 'provision', 'agentCanvas', 'teamPanel', 'audit', 'provider', 'im'],
     defaultNS: 'common',
     fallbackLng: 'en',
     supportedLngs: [...SUPPORTED_LNGS],

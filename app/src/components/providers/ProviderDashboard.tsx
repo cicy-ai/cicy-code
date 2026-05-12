@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import {
   ArrowLeft, Boxes, Plus, RefreshCw, Save, Trash2, Zap, Eye, EyeOff, Check, X, Loader2,
   Server, Search, ChevronsUpDown, AlertTriangle, Link2, Cpu,
@@ -58,7 +60,7 @@ function toast(message: string) {
   window.dispatchEvent(new CustomEvent('show-toast', { detail: message }));
 }
 function errText(err: any): string {
-  return String(err?.response?.data?.detail || err?.message || err || '未知错误');
+  return String(err?.response?.data?.detail || err?.message || err || i18n.t('errorUnknown', { ns: 'provider' }));
 }
 function emptyDraft(): ProviderRecord {
   return { key: '', name: '', url: '', apiKey: '', protocol: 'openai', defaultModel: '', defaultModels: {}, models: [], modelMapping: {} };
@@ -114,7 +116,7 @@ function ProtocolBadge({ protocol: p, dim }: { protocol?: string; dim?: boolean 
   const cls = v === 'anthropic' ? 'bg-amber-500/12 text-amber-300'
     : v === 'openai' ? 'bg-emerald-500/12 text-emerald-300'
       : 'bg-white/[0.06] text-zinc-400';
-  return <span className={cn('inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium leading-none', cls, dim && 'opacity-50')}>{v || '未指定'}</span>;
+  return <span className={cn('inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium leading-none', cls, dim && 'opacity-50')}>{v || i18n.t('protoUnspecified', { ns: 'provider' })}</span>;
 }
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
@@ -199,7 +201,7 @@ function ProviderPicker({
             {selectedMismatch && <AlertTriangle size={12} className="shrink-0 text-amber-400" />}
           </>
         ) : (
-          <span className="text-zinc-600">未设置 — 使用内置兜底</span>
+          <span className="text-zinc-600">{i18n.t('useFallback', { ns: 'provider' })}</span>
         )}
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {busy && <Loader2 size={13} className="animate-spin text-zinc-600" />}
@@ -210,12 +212,12 @@ function ProviderPicker({
       {open && (
         <div className="absolute left-0 right-0 z-50 mt-1.5 max-h-72 overflow-auto rounded-xl border border-white/[0.09] bg-[#141416] p-1 shadow-2xl shadow-black/60">
           {restrictToProtocol && (
-            <div className="px-2.5 pb-1 pt-1.5 text-[10px] uppercase tracking-[0.1em] text-zinc-600">仅 {restrictToProtocol} 协议</div>
+            <div className="px-2.5 pb-1 pt-1.5 text-[10px] uppercase tracking-[0.1em] text-zinc-600">{i18n.t('restrictByProtocol', { ns: 'provider', protocol: restrictToProtocol })}</div>
           )}
           <button type="button" onClick={() => pick('')}
             className={cn('flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] transition-colors hover:bg-white/[0.06]', !value && 'bg-white/[0.07]')}>
             <span className="grid w-4 place-items-center">{!value && <Check size={13} className="text-blue-400" />}</span>
-            <span className="text-zinc-500">未设置 — 使用内置兜底</span>
+            <span className="text-zinc-500">{i18n.t('useFallback', { ns: 'provider' })}</span>
           </button>
           {compatible.length > 0 && <div className="my-1 h-px bg-white/[0.06]" />}
           {compatible.map((p) => {
@@ -234,7 +236,7 @@ function ProviderPicker({
               </button>
             );
           })}
-          {compatible.length === 0 && <div className="px-2.5 py-3 text-center text-[12px] text-zinc-600">{emptyHint || '还没有供应商'}</div>}
+          {compatible.length === 0 && <div className="px-2.5 py-3 text-center text-[12px] text-zinc-600">{emptyHint || i18n.t('noProviders', { ns: 'provider' })}</div>}
           {selectedMismatch && selected && (
             <>
               <div className="my-1 h-px bg-white/[0.06]" />
@@ -245,7 +247,7 @@ function ProviderPicker({
                   <span className="flex items-center gap-1.5">
                     <span className="truncate text-amber-200">{selected.name || selected.key}</span>
                     <ProtocolBadge protocol={selected.protocol} />
-                    <span className="rounded bg-amber-500/15 px-1 py-px text-[9px] font-medium text-amber-300">协议不符</span>
+                    <span className="rounded bg-amber-500/15 px-1 py-px text-[9px] font-medium text-amber-300">{i18n.t('protoMismatchPill', { ns: 'provider' })}</span>
                   </span>
                   <span className="block truncate font-mono text-[11px] text-zinc-600">{selected.key}</span>
                 </span>
@@ -261,6 +263,7 @@ function ProviderPicker({
 /* ───────────────────────── component ───────────────────────── */
 
 export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
+  const { t } = useTranslation('provider');
   const { confirm, node: dialogsNode } = useDialogs();
   const [tab, setTab] = useState<Tab>('routing');
   const [loading, setLoading] = useState(true);
@@ -320,7 +323,7 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
       }
       return payload;
     } catch (err) {
-      toast('加载供应商失败：' + errText(err));
+      toast(i18n.t('loadProvidersFailed', { ns: 'provider', err: errText(err) }));
       return null;
     } finally {
       setLoading(false);
@@ -348,7 +351,7 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
 
   const guardDirty = async (action: () => void) => {
     if (!dirty) { action(); return; }
-    if (await confirm({ title: '放弃未保存的改动？', body: '当前编辑尚未保存，继续将丢弃这些改动。', confirmLabel: '放弃改动', danger: true })) action();
+    if (await confirm({ title: i18n.t('confirmDiscardTitle', { ns: 'provider' }), body: i18n.t('confirmDiscardBody', { ns: 'provider' }), confirmLabel: i18n.t('confirmDiscardConfirm', { ns: 'provider' }), danger: true })) action();
   };
   const selectProvider = (key: string) => { void guardDirty(() => { setIsNew(false); setSelectedKey(key); }); };
   const startNew = () => { void guardDirty(() => { setIsNew(true); setSelectedKey(null); }); };
@@ -368,32 +371,32 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
 
   const save = useCallback(async () => {
     const payload = buildPayload();
-    if (!payload.key) { toast('请填写 provider key'); return; }
-    if (!payload.url) { toast('请填写 API Base URL'); return; }
-    if (payload.protocol !== 'openai' && payload.protocol !== 'anthropic') { toast('协议必须是 openai 或 anthropic'); return; }
+    if (!payload.key) { toast(i18n.t('errorKeyRequired', { ns: 'provider' })); return; }
+    if (!payload.url) { toast(i18n.t('errorUrlRequired', { ns: 'provider' })); return; }
+    if (payload.protocol !== 'openai' && payload.protocol !== 'anthropic') { toast(i18n.t('errorProtocolRequired', { ns: 'provider' })); return; }
     setSaving(true);
     try {
-      if (isNew) { await apiService.createProvider(payload); toast(`供应商 ${payload.key} 已创建`); setIsNew(false); }
-      else { const { key, ...rest } = payload; await apiService.updateProvider(key, rest); toast(`供应商 ${key} 已保存`); }
+      if (isNew) { await apiService.createProvider(payload); toast(i18n.t('providerCreated', { ns: 'provider', key: payload.key })); setIsNew(false); }
+      else { const { key, ...rest } = payload; await apiService.updateProvider(key, rest); toast(i18n.t('providerSaved', { ns: 'provider', key })); }
       const fresh = await load(payload.key);
       loadEditor(fresh?.items.find((p) => p.key === payload.key) || null);
-    } catch (err) { toast('保存失败：' + errText(err)); }
+    } catch (err) { toast(i18n.t('saveFailed', { ns: 'provider', err: errText(err) })); }
     finally { setSaving(false); }
   }, [buildPayload, isNew, load, loadEditor]);
 
   const remove = async (key: string) => {
     if (!key) return;
-    const ok = await confirm({ title: '删除供应商', body: <>确定删除 <span className="font-mono text-zinc-100">{key}</span>？此操作会写入 global.json。</>, confirmLabel: '删除', danger: true });
+    const ok = await confirm({ title: i18n.t('confirmDeleteTitle', { ns: 'provider' }), body: <>{i18n.t('confirmDeleteBodyPrefix', { ns: 'provider' })} <span className="font-mono text-zinc-100">{key}</span>{i18n.t('confirmDeleteBodySuffix', { ns: 'provider' })}</>, confirmLabel: i18n.t('deleteConfirm', { ns: 'provider' }), danger: true });
     if (!ok) return;
     try {
       await apiService.deleteProvider(key);
-      toast(`供应商 ${key} 已删除`);
+      toast(i18n.t('providerDeleted', { ns: 'provider', key }));
       if (selectedKey === key) { setSelectedKey(null); setIsNew(false); }
       await load();
     } catch (err) {
       const refs = err?.response?.data?.references;
-      if (Array.isArray(refs) && refs.length) toast(`无法删除：仍被引用 → ${refs.join('、')}`);
-      else toast('删除失败：' + errText(err));
+      if (Array.isArray(refs) && refs.length) toast(i18n.t('cannotDeleteRefs', { ns: 'provider', refs: refs.join('、') }));
+      else toast(i18n.t('deleteFailed', { ns: 'provider', err: errText(err) }));
     }
   };
 
@@ -417,10 +420,10 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
     try {
       const resp = await apiService.updateProviderDefaults(next);
       setData((d) => (d ? { ...d, defaults: resp.data?.defaults || next } : d));
-      toast(`${SLOT_LABELS[agentType] || agentType} 默认供应商已更新`);
+      toast(i18n.t('defaultProviderUpdated', { ns: 'provider', name: SLOT_LABELS[agentType] || agentType }));
     } catch (err) {
       setData((d) => (d ? { ...d, defaults: prev } : d));
-      toast('更新失败：' + errText(err));
+      toast(i18n.t('updateFailed', { ns: 'provider', err: errText(err) }));
     } finally { setSavingSlot(null); }
   };
 
@@ -451,17 +454,17 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
       {/* chrome */}
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-white/[0.06] px-4">
         {onBack && (
-          <button onClick={onBack} className="-ml-1 grid h-7 w-7 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200" title="返回">
+          <button onClick={onBack} className="-ml-1 grid h-7 w-7 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200" title={t('back')}>
             <ArrowLeft size={16} />
           </button>
         )}
         <Boxes size={16} className="text-zinc-400" />
-        <span className="text-[13px] font-semibold text-white">AI 供应商</span>
+        <span className="text-[13px] font-semibold text-white">{t('aiProviders')}</span>
         <div className="flex-1" />
         {data?.source_path && (
           <span className="hidden font-mono text-[11px] text-zinc-600 lg:inline" title={data.source_path}>{data.source_path}</span>
         )}
-        <button onClick={() => void load(selectedKey || undefined)} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200" title="刷新">
+        <button onClick={() => void load(selectedKey || undefined)} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200" title={t('refresh')}>
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
         </button>
       </header>
@@ -469,7 +472,7 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
       {/* tabs */}
       <div className="flex h-11 shrink-0 items-center border-b border-white/[0.06] px-4">
         <div className="inline-flex rounded-lg bg-white/[0.03] p-0.5">
-          {([['routing', 'Agent 路由'], ['providers', '供应商']] as const).map(([id, label]) => (
+          {([['routing', t('tabRouting')], ['providers', t('tabProviders')]] as const).map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)}
               className={cn('flex h-7 items-center rounded-md px-3 text-[13px] transition-colors',
                 tab === id ? 'bg-white/[0.08] text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300')}>
@@ -484,8 +487,8 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
           /* ═══════════ Agent routing ═══════════ */
           <div className="h-full overflow-auto">
             <div className="mx-auto max-w-[760px] px-6 py-8">
-              <h1 className="text-[17px] font-semibold tracking-tight text-white">Agent 路由</h1>
-              <p className="mt-1 text-[13px] text-zinc-500">每种 agent 启动 / 经本地网关请求时默认使用的供应商与模型。pane 自身的 <span className="font-mono text-zinc-400">runtime_ai.provider_name</span> 与 <span className="font-mono text-zinc-400">default_model</span> 优先级更高。</p>
+              <h1 className="text-[17px] font-semibold tracking-tight text-white">{t('routingTitle')}</h1>
+              <p className="mt-1 text-[13px] text-zinc-500">{t('routingHelp')}</p>
 
               <div className="mt-6 space-y-3">
                 {loading && items.length === 0 && [0, 1].map((i) => (
@@ -499,9 +502,9 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
                 {!loading && items.length === 0 && (
                   <div className={cn(CARD, 'flex flex-col items-center px-6 py-14 text-center')}>
                     <div className="grid h-11 w-11 place-items-center rounded-xl bg-white/[0.04]"><Server size={20} className="text-zinc-500" /></div>
-                    <div className="mt-3 text-[14px] font-medium text-zinc-200">还没有任何供应商</div>
-                    <div className="mt-1 text-[12px] text-zinc-500">先去「供应商」添加一个，再回来为 Claude / Codex 指定默认路由。</div>
-                    <Btn variant="primary" size="md" icon={<Plus size={14} />} className="mt-4" onClick={() => setTab('providers')}>添加供应商</Btn>
+                    <div className="mt-3 text-[14px] font-medium text-zinc-200">{t('noProvidersHeadline')}</div>
+                    <div className="mt-1 text-[12px] text-zinc-500">{t('noProvidersBody')}</div>
+                    <Btn variant="primary" size="md" icon={<Plus size={14} />} className="mt-4" onClick={() => setTab('providers')}>{t('addProvider')}</Btn>
                   </div>
                 )}
 
@@ -518,21 +521,21 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
                         <AgentAvatar agentType={slot} title={SLOT_LABELS[slot] || slot} variant="panel" />
                         <div className="min-w-0 flex-1">
                           <div className="text-[15px] font-semibold text-white">{SLOT_LABELS[slot] || slot}</div>
-                          <div className="mt-0.5 text-[12px] text-zinc-500">{SLOT_DESC[slot] || slot} · 需 <span className="text-zinc-400">{want}</span> 协议</div>
+                          <div className="mt-0.5 text-[12px] text-zinc-500">{t('slotProtocolHint', { desc: SLOT_DESC[slot] || slot, want })}</div>
                         </div>
                         <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white/[0.04] px-2 py-1 text-[11px] text-zinc-400">
                           <StatusDot tone={tone} />
-                          {tone === 'ok' ? '已配置' : tone === 'warn' ? '协议不匹配' : '未配置'}
+                          {tone === 'ok' ? t('slotConfigured') : tone === 'warn' ? t('slotProtoMismatch') : t('slotUnconfigured')}
                         </span>
                       </div>
 
                       <div className="my-4 h-px bg-white/[0.06]" />
 
-                      <div className="text-[12px] font-medium text-zinc-400">默认供应商</div>
+                      <div className="text-[12px] font-medium text-zinc-400">{t('defaultProviderLabel')}</div>
                       <div className="mt-1.5">
                         <ProviderPicker
                           value={curKey} options={items} restrictToProtocol={want}
-                          emptyHint={`还没有 ${want} 协议的供应商 — 去「供应商」添加`}
+                          emptyHint={t('emptyHintWithProto', { want })}
                           busy={savingSlot === slot} disabled={savingSlot === slot}
                           onChange={(k) => void updateDefault(slot, k)}
                         />
@@ -541,15 +544,15 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
                       {mismatch && (
                         <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-[12px] text-amber-200">
                           <AlertTriangle size={13} className="mt-px shrink-0 text-amber-400" />
-                          <span>该供应商是 <span className="font-mono">{proto(provider)}</span> 协议，与 {SLOT_LABELS[slot] || slot} 需要的 <span className="font-mono">{want}</span> 不一致，本地网关会拒绝。请换一个 {want} 供应商。</span>
+                          <span>{t('protoMismatchInline', { has: proto(provider), slot: SLOT_LABELS[slot] || slot, want })}</span>
                         </div>
                       )}
 
                       <dl className="mt-4 grid grid-cols-[3rem_1fr] gap-y-2 text-[12px]">
-                        <dt className="text-zinc-600">上游</dt>
-                        <dd className="truncate font-mono text-zinc-400">{provider?.url || <span className="font-sans text-zinc-600">内置兜底地址</span>}</dd>
-                        <dt className="text-zinc-600">模型</dt>
-                        <dd className="truncate font-mono text-zinc-300">{model || <span className="font-sans text-zinc-600">{SLOT_FALLBACK_MODEL[slot] || '—'}（兜底）</span>}</dd>
+                        <dt className="text-zinc-600">{t('upstream')}</dt>
+                        <dd className="truncate font-mono text-zinc-400">{provider?.url || <span className="font-sans text-zinc-600">{t('upstreamFallback')}</span>}</dd>
+                        <dt className="text-zinc-600">{t('modelLabel')}</dt>
+                        <dd className="truncate font-mono text-zinc-300">{model || <span className="font-sans text-zinc-600">{SLOT_FALLBACK_MODEL[slot] || '—'}{t('modelFallbackSuffix')}</span>}</dd>
                       </dl>
                     </div>
                   );
@@ -557,7 +560,7 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
               </div>
 
               {items.length > 0 && (
-                <p className="mt-5 text-[11px] text-zinc-600">改动写入 <span className="font-mono">~/cicy-ai/global.json</span> 的 <span className="font-mono">providers.default</span>；涉及 agent 启动的改动需重启对应 worker 后生效。</p>
+                <p className="mt-5 text-[11px] text-zinc-600">{t('routingFootnote')}</p>
               )}
             </div>
           </div>
@@ -569,15 +572,15 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
               <div className="p-2.5">
                 <div className="relative">
                   <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
-                  <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索名称 / key / url" className={cn(INPUT, 'h-8 pl-7 text-[12px]')} />
+                  <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('searchPlaceholder')} className={cn(INPUT, 'h-8 pl-7 text-[12px]')} />
                 </div>
               </div>
               <div className="flex-1 overflow-auto px-2 pb-2">
                 {loading && items.length === 0 && [0, 1, 2, 3].map((i) => (
                   <div key={i} className="flex items-center gap-2 px-2 py-2"><div className="min-w-0 flex-1 space-y-1.5"><Skeleton className="h-3 w-28" /><Skeleton className="h-2.5 w-20" /></div></div>
                 ))}
-                {!loading && items.length === 0 && <div className="px-3 py-10 text-center text-[12px] leading-relaxed text-zinc-600">还没有供应商<br />点下方「添加供应商」</div>}
-                {!loading && items.length > 0 && filteredItems.length === 0 && <div className="px-3 py-10 text-center text-[12px] text-zinc-600">没有匹配「{query}」的结果</div>}
+                {!loading && items.length === 0 && <div className="px-3 py-10 text-center text-[12px] leading-relaxed text-zinc-600">{t('noProviders')}<br />{t('addProviderBtn')}</div>}
+                {!loading && items.length > 0 && filteredItems.length === 0 && <div className="px-3 py-10 text-center text-[12px] text-zinc-600">{t('noMatchQuery', { query })}</div>}
                 <ul className="space-y-0.5">
                   {filteredItems.map((p) => {
                     const active = !isNew && selectedKey === p.key;
@@ -594,11 +597,11 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
                             </div>
                             <div className="mt-0.5 flex items-center gap-1.5">
                               <span className="truncate font-mono text-[11px] text-zinc-600">{p.key}</span>
-                              {usedBy.map((s) => <span key={s} className="shrink-0 rounded bg-blue-500/12 px-1 py-px text-[9px] font-medium text-blue-300">默认·{SLOT_LABELS[s] || s}</span>)}
+                              {usedBy.map((s) => <span key={s} className="shrink-0 rounded bg-blue-500/12 px-1 py-px text-[9px] font-medium text-blue-300">{t('defaultForSlot', { slot: SLOT_LABELS[s] || s })}</span>)}
                             </div>
                           </div>
                           <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); remove(p.key); }}
-                            className="grid h-6 w-6 shrink-0 place-items-center rounded text-zinc-600 opacity-0 transition-all hover:bg-red-500/15 hover:text-red-300 group-hover:opacity-100" title="删除">
+                            className="grid h-6 w-6 shrink-0 place-items-center rounded text-zinc-600 opacity-0 transition-all hover:bg-red-500/15 hover:text-red-300 group-hover:opacity-100" title={t('delete')}>
                             <Trash2 size={12} />
                           </span>
                         </button>
@@ -608,7 +611,7 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
                 </ul>
               </div>
               <div className="border-t border-white/[0.06] p-2">
-                <Btn variant={isNew ? 'primary' : 'secondary'} size="md" icon={<Plus size={14} />} className="w-full" onClick={startNew}>添加供应商</Btn>
+                <Btn variant={isNew ? 'primary' : 'secondary'} size="md" icon={<Plus size={14} />} className="w-full" onClick={startNew}>{t('addProvider')}</Btn>
               </div>
             </aside>
 
@@ -617,47 +620,47 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
               {!isNew && !selectedProvider ? (
                 <div className="flex h-full flex-col items-center justify-center px-6 text-center">
                   <div className="grid h-12 w-12 place-items-center rounded-xl bg-white/[0.04]"><Server size={22} className="text-zinc-500" /></div>
-                  <div className="mt-3 text-[14px] font-medium text-zinc-200">{loading ? '加载中…' : items.length === 0 ? '还没有供应商' : '选择一个供应商'}</div>
-                  <div className="mt-1 text-[12px] text-zinc-500">{items.length === 0 ? '添加你的第一个 AI 供应商。' : '从左侧选择，或新建一个。'}</div>
-                  <Btn variant="secondary" size="md" icon={<Plus size={14} />} className="mt-4" onClick={startNew}>添加供应商</Btn>
+                  <div className="mt-3 text-[14px] font-medium text-zinc-200">{loading ? t('loadingProviders') : items.length === 0 ? t('noProviders') : t('selectProvider')}</div>
+                  <div className="mt-1 text-[12px] text-zinc-500">{items.length === 0 ? t('addFirstProvider') : t('pickOrAddNew')}</div>
+                  <Btn variant="secondary" size="md" icon={<Plus size={14} />} className="mt-4" onClick={startNew}>{t('addProvider')}</Btn>
                 </div>
               ) : (
                 <div className="mx-auto max-w-[680px] px-8 py-7">
                   {/* header */}
                   <div className="flex items-center gap-2.5">
-                    <h1 className="truncate text-[17px] font-semibold tracking-tight text-white">{isNew ? '新建供应商' : (selectedProvider?.name || selectedProvider?.key)}</h1>
+                    <h1 className="truncate text-[17px] font-semibold tracking-tight text-white">{isNew ? t('newProvider') : (selectedProvider?.name || selectedProvider?.key)}</h1>
                     {!isNew && <ProtocolBadge protocol={draft.protocol} />}
-                    {dirty && <span className="inline-flex items-center gap-1 text-[11px] text-amber-300"><span className="h-1.5 w-1.5 rounded-full bg-amber-400" />未保存</span>}
+                    {dirty && <span className="inline-flex items-center gap-1 text-[11px] text-amber-300"><span className="h-1.5 w-1.5 rounded-full bg-amber-400" />{t('unsaved')}</span>}
                     <div className="flex-1" />
-                    {!isNew && <Btn variant="danger" size="sm" icon={<Trash2 size={12} />} onClick={() => remove(draft.key)}>删除</Btn>}
+                    {!isNew && <Btn variant="danger" size="sm" icon={<Trash2 size={12} />} onClick={() => remove(draft.key)}>{t('delete')}</Btn>}
                   </div>
                   <div className="my-5 h-px bg-white/[0.06]" />
 
                   <div className="space-y-7">
-                    {/* 基本信息 */}
+                    {/* Basic info */}
                     <section className="space-y-3.5">
-                      <SectionHeader>基本信息</SectionHeader>
+                      <SectionHeader>{t('sectionBasic')}</SectionHeader>
                       <div className="grid gap-3.5 sm:grid-cols-2">
-                        <Field label="名称">
+                        <Field label={t('fieldName')}>
                           <input value={draft.name || ''} onChange={(e) => patchDraft({ name: e.target.value })} className={INPUT} placeholder="2000Run Claude" />
                         </Field>
-                        <Field label="Key" help={isNew ? '创建后不可修改；只能含字母、数字、. _ -' : '创建后不可修改'}>
+                        <Field label="Key" help={isNew ? t('keyHelpNew') : t('keyHelpExisting')}>
                           <input value={draft.key} onChange={(e) => patchDraft({ key: e.target.value })} disabled={!isNew} className={cn(INPUT, 'font-mono', !isNew && 'cursor-not-allowed')} placeholder="2000RunClaude" />
                         </Field>
                       </div>
                     </section>
 
-                    {/* 接入 */}
+                    {/* Access */}
                     <section className="space-y-3.5">
-                      <SectionHeader>接入</SectionHeader>
-                      <Field label="API Base URL" help="OpenAI 协议会自动补 /v1；Anthropic 协议请填到域名根。">
+                      <SectionHeader>{t('sectionAccess')}</SectionHeader>
+                      <Field label="API Base URL" help={t('fieldApiBaseHelp')}>
                         <div className="relative">
                           <Link2 size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
                           <input value={draft.url || ''} onChange={(e) => patchDraft({ url: e.target.value })} className={cn(INPUT, 'pl-8 font-mono')} placeholder="https://api.2000.run/v1" />
                         </div>
                       </Field>
                       <div className="grid gap-3.5 sm:grid-cols-[150px_1fr]">
-                        <Field label="协议">
+                        <Field label={t('fieldProtocol')}>
                           <select value={proto(draft) || 'openai'} onChange={(e) => patchDraft({ protocol: e.target.value })} className={INPUT}>
                             {PROTOCOLS.map((p) => <option key={p} value={p}>{p}</option>)}
                           </select>
@@ -671,7 +674,7 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
                               data-1p-ignore data-lpignore="true"
                               style={showApiKey ? undefined : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties)}
                             />
-                            <button type="button" onClick={() => setShowApiKey((s) => !s)} className="absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300" title={showApiKey ? '隐藏' : '显示'}>
+                            <button type="button" onClick={() => setShowApiKey((s) => !s)} className="absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300" title={showApiKey ? t('hide') : t('show')}>
                               {showApiKey ? <EyeOff size={13} /> : <Eye size={13} />}
                             </button>
                           </div>
@@ -679,26 +682,26 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
                       </div>
                     </section>
 
-                    {/* 模型 */}
+                    {/* Models */}
                     <section className="space-y-3.5">
-                      <SectionHeader>模型</SectionHeader>
+                      <SectionHeader>{t('sectionModels')}</SectionHeader>
                       <div className="grid gap-3.5 sm:grid-cols-3">
-                        <Field label="默认模型" help="所有 agent 兜底">
+                        <Field label={t('fieldDefaultModel')} help={t('fieldDefaultModelHelp')}>
                           <input value={draft.defaultModel || ''} onChange={(e) => patchDraft({ defaultModel: e.target.value })} className={cn(INPUT, 'font-mono')} placeholder="gpt-5.5" />
                         </Field>
-                        <Field label="Claude 默认模型">
+                        <Field label={t('fieldClaudeDefault')}>
                           <input value={draft.defaultModels?.claude || ''} onChange={(e) => setSlotModel('claude', e.target.value)} className={cn(INPUT, 'font-mono')} placeholder="claude-opus-4-7" />
                         </Field>
-                        <Field label="Codex 默认模型">
+                        <Field label={t('fieldCodexDefault')}>
                           <input value={draft.defaultModels?.codex || ''} onChange={(e) => setSlotModel('codex', e.target.value)} className={cn(INPUT, 'font-mono')} placeholder="gpt-5.5" />
                         </Field>
                       </div>
-                      {otherDM.length > 0 && <div className="text-[11px] text-zinc-600">其他 agent 默认模型（保留）：{otherDM.map(([k, v]) => `${k}=${v}`).join('，')}</div>}
+                      {otherDM.length > 0 && <div className="text-[11px] text-zinc-600">{t('otherAgentDefaults', { list: otherDM.map(([k, v]) => `${k}=${v}`).join('，') })}</div>}
                       <div className="grid gap-3.5 sm:grid-cols-2">
-                        <Field label="可用模型" help="每行一个，仅用于展示">
+                        <Field label={t('fieldAvailableModels')} help={t('fieldAvailableModelsHelp')}>
                           <textarea value={modelsText} onChange={(e) => setModelsText(e.target.value)} rows={4} className={cn(INPUT, 'h-auto resize-y py-2 font-mono leading-relaxed')} placeholder={'gpt-5.5\ngpt-5.4'} />
                         </Field>
-                        <Field label="模型映射" help="每行 from = to">
+                        <Field label={t('fieldModelMapping')} help={t('fieldModelMappingHelp')}>
                           <textarea value={mappingText} onChange={(e) => setMappingText(e.target.value)} rows={4} className={cn(INPUT, 'h-auto resize-y py-2 font-mono leading-relaxed')} placeholder={'gpt-4 = gpt-5.5\nopus = claude-opus-4-7'} />
                         </Field>
                       </div>
@@ -711,7 +714,7 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
                         <button onClick={() => setTestResult(null)} className="absolute right-2.5 top-2.5 text-current opacity-50 transition-opacity hover:opacity-100"><X size={12} /></button>
                         <div className="flex items-center gap-1.5 pr-5 font-medium">
                           {testResult.ok ? <Check size={13} /> : <X size={13} />}
-                          {testResult.ok ? '连接成功' : '连接失败'}
+                          {testResult.ok ? t('testConnSuccess') : t('testConnFailed')}
                           {typeof testResult.status === 'number' && <span className="font-normal opacity-70">· HTTP {testResult.status}</span>}
                           {typeof testResult.duration_ms === 'number' && <span className="font-normal opacity-70">· {testResult.duration_ms} ms</span>}
                           {testResult.model && <span className="font-mono font-normal opacity-70">· {testResult.model}</span>}
@@ -724,13 +727,13 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
 
                   {/* footer */}
                   <div className="mt-7 flex items-center gap-2 border-t border-white/[0.06] pt-5">
-                    <Btn variant="primary" size="md" icon={<Save size={14} />} busy={saving} disabled={saving || !canSave} onClick={() => void save()}>{isNew ? '创建' : '保存'}</Btn>
-                    <Btn variant="secondary" size="md" icon={<Zap size={14} />} busy={testing} disabled={testing} onClick={() => void runTest()}>测试连接</Btn>
-                    {isNew && <Btn variant="ghost" size="md" onClick={() => { void guardDirty(() => { setIsNew(false); setSelectedKey(items[0]?.key || null); }); }}>取消</Btn>}
-                    {!isNew && dirty && <Btn variant="ghost" size="md" onClick={() => loadEditor(selectedProvider)}>放弃改动</Btn>}
+                    <Btn variant="primary" size="md" icon={<Save size={14} />} busy={saving} disabled={saving || !canSave} onClick={() => void save()}>{isNew ? t('create') : t('save')}</Btn>
+                    <Btn variant="secondary" size="md" icon={<Zap size={14} />} busy={testing} disabled={testing} onClick={() => void runTest()}>{t('testConnection')}</Btn>
+                    {isNew && <Btn variant="ghost" size="md" onClick={() => { void guardDirty(() => { setIsNew(false); setSelectedKey(items[0]?.key || null); }); }}>{t('cancel')}</Btn>}
+                    {!isNew && dirty && <Btn variant="ghost" size="md" onClick={() => loadEditor(selectedProvider)}>{t('discardChanges')}</Btn>}
                     <div className="flex-1" />
                     <span className="hidden text-[11px] text-zinc-600 sm:flex sm:items-center sm:gap-1.5">
-                      <Cpu size={11} /> 写入 global.json · 改动需重启 worker 生效 · <kbd className="rounded border border-white/10 bg-white/[0.04] px-1 text-[10px]">⌘S</kbd> 保存
+                      <Cpu size={11} /> {t('footnoteSave')}
                     </span>
                   </div>
                 </div>
