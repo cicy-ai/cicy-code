@@ -64,16 +64,17 @@ def cf_conf():
 
 
 def cf_api(method, path, token, body=None):
+    # Shell out to curl: the system python.org build on macOS has no CA bundle for urllib.
     url = "https://api.cloudflare.com/client/v4" + path
-    data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method,
-                                 headers={"Authorization": f"Bearer {token}",
-                                          "Content-Type": "application/json"})
+    cmd = ["curl", "-sS", "--max-time", "20", "-X", method, url,
+           "-H", f"Authorization: Bearer {token}", "-H", "Content-Type: application/json"]
+    if body is not None:
+        cmd += ["--data", json.dumps(body)]
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            return json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        return json.loads(e.read())
+        p = subprocess.run(cmd, capture_output=True, text=True)
+        return json.loads(p.stdout) if p.stdout.strip() else {"success": False, "errors": [p.stderr.strip()]}
+    except Exception as e:
+        return {"success": False, "errors": [str(e)]}
 
 
 def cf_dns_host():
