@@ -12,7 +12,7 @@ The persistent data disk (100GB ESSD) survives instance reclaims.
 When spot is recycled, just run `us-spot-dev` again.
 """
 
-import json, os, subprocess, sys, time
+import json, os, subprocess, sys, time, urllib.request, urllib.error
 from pathlib import Path
 
 REGION = "us-west-1"
@@ -28,6 +28,11 @@ DISK_NAME = "us-spot-dev-data"
 INSTANCE_NAME = "us-spot-dev"
 KEY_NAME = "cicy-dev-key"
 SSH_KEY = os.path.expanduser("~/.ssh/id_ed25519")
+GITHUB_KEY = os.path.expanduser("~/.ssh/id_ed25519_cicy_ai")  # deploy key for git@github-cicy-ai
+RSA_KEY = os.path.expanduser("~/.ssh/id_rsa")                  # used by some proxy_ssh profiles
+CICY_AI_DIR = os.path.expanduser("~/cicy-ai")
+CICY_CODE_REPO = "git@github-cicy-ai:cicy-ai/cicy-code.git"
+CICY_SKILLS_REPO = "git@github-cicy-ai:cicy-ai/cicy-skills.git"
 VPC_CIDR = "172.19.0.0/16"
 VSW_CIDR = "172.19.0.0/24"
 VPC_NAME = "us-spot-dev-vpc"
@@ -38,8 +43,99 @@ SSH_PORT_CONTAINER = 2022
 HOST_NAME = "us-spot-dev"
 HOST_CICY_NAME = "us-spot-dev-cicy"
 
+# Cloudflare: a stable A record points at the instance (so ~/.ssh/config never
+# needs the raw IP), and a dedicated cfd tunnel run inside the container exposes
+# the dev server at dev.<domain> -> http://localhost:8008.
+GLOBAL_JSON = Path(os.path.expanduser("~/cicy-ai/global.json"))
+CF_HOST_SUB = "us-spot-dev"       # us-spot-dev.<domain>  -> A record (not proxied), for SSH
+CF_DEV_SUB = "dev"                # dev.<domain>          -> via cfd tunnel -> :8008
+CF_TUNNEL_NAME = "us-spot-dev"    # dedicated tunnel, created once and reused
+
 LOCAL_SSH_CONFIG = Path.home() / ".ssh" / "config"
 PROXY_SSH_JSON = Path(os.path.expanduser("~/cicy-ai/db/proxy_ssh.json"))
+
+
+def cf_conf():
+    try:
+        return json.loads(GLOBAL_JSON.read_text())["cf"]["prod"]
+    except Exception as e:
+        print(f"  (cloudflare config not available in {GLOBAL_JSON}: {e})")
+        return None
+
+
+def cf_api(method, path, token, body=None):
+    url = "https://api.cloudflare.com/client/v4" + path
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method,
+                                 headers={"Authorization": f"Bearer {token}",
+                                          "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return json.loads(e.read())
+
+
+def cf_dns_host():
+    cf = cf_conf()
+    return f"{CF_HOST_SUB}.{cf['domain']}" if cf else None
+
+
+def cf_dev_host():
+    cf = cf_conf()
+    return f"{CF_DEV_SUB}.{cf['domain']}" if cf else None
+
+
+def cf_upsert_record(token, zone_id, name, rtype, content, proxied, ttl=1):
+    res = cf_api("GET", f"/zones/{zone_id}/dns_records?type={rtype}&name={name}", token)
+    recs = res.get("result") or []
+    payload = {"type": rtype, "name": name, "content": content, "proxied": proxied, "ttl": ttl}
+    if recs:
+        rid = recs[0]["id"]
+        cf_api("PUT", f"/zones/{zone_id}/dns_records/{rid}", token, payload)
+    else:
+        cf_api("POST", f"/zones/{zone_id}/dns_records", token, payload)
+
+
+def update_cf_dns(ip):
+    cf = cf_conf()
+    if not cf:
+        return
+    name = f"{CF_HOST_SUB}.{cf['domain']}"
+    cf_upsert_record(cf["api_token"], cf["zone_id"], name, "A", ip, proxied=False, ttl=60)
+    print(f"  Cloudflare DNS: {name} -> {ip}")
+
+
+def ensure_cf_tunnel():
+    """Ensure the dedicated cfd tunnel exists, route dev.<domain> -> :8008, return its token (or None)."""
+    cf = cf_conf()
+    if not cf:
+        return None
+    token, acct = cf["api_token"], cf["account_id"]
+    res = cf_api("GET", f"/accounts/{acct}/cfd_tunnel?name={CF_TUNNEL_NAME}&is_deleted=false", token)
+    tunnels = res.get("result") or []
+    if tunnels:
+        tid = tunnels[0]["id"]
+    else:
+        import secrets, base64
+        secret = base64.b64encode(secrets.token_bytes(32)).decode()
+        res = cf_api("POST", f"/accounts/{acct}/cfd_tunnel", token,
+                     {"name": CF_TUNNEL_NAME, "tunnel_secret": secret, "config_src": "cloudflare"})
+        if not res.get("success"):
+            print(f"  (cloudflare tunnel create failed: {res.get('errors')})")
+            return None
+        tid = res["result"]["id"]
+        print(f"  Cloudflare tunnel created: {CF_TUNNEL_NAME} ({tid})")
+    dev_host = f"{CF_DEV_SUB}.{cf['domain']}"
+    cf_api("PUT", f"/accounts/{acct}/cfd_tunnel/{tid}/configurations", token,
+           {"config": {"ingress": [
+               {"hostname": dev_host, "service": "http://localhost:8008"},
+               {"service": "http_status:404"},
+           ]}})
+    cf_upsert_record(token, cf["zone_id"], dev_host, "CNAME", f"{tid}.cfargotunnel.com", proxied=True)
+    tk = cf_api("GET", f"/accounts/{acct}/cfd_tunnel/{tid}/token", token).get("result")
+    print(f"  Cloudflare tunnel ready: {dev_host} -> :8008 (via tunnel {tid})")
+    return tk
 
 
 def run(cmd, **kw):
@@ -163,18 +259,31 @@ def purge_known_hosts(ip):
                        capture_output=True, text=True)
 
 
+def _strip_ssh_block(content, host):
+    """Remove an existing `Host <host>` block (up to the next Host or EOF)."""
+    out, lines, skip = [], content.splitlines(), False
+    for ln in lines:
+        if ln.strip().startswith("Host "):
+            skip = (ln.strip() == f"Host {host}")
+        if not skip:
+            out.append(ln)
+    return "\n".join(out)
+
+
 def update_ssh_config(ip):
     purge_known_hosts(ip)
+    # Use the stable Cloudflare A record as HostName so this never needs the raw
+    # IP again; fall back to the IP if cloudflare isn't configured.
+    hostname = cf_dns_host() or ip
     entries = {
-        HOST_NAME: f"Host {HOST_NAME}\n    HostName {ip}\n    User root\n    Port {SSH_PORT_HOST}\n    IdentityFile {SSH_KEY}\n    StrictHostKeyChecking accept-new\n",
-        HOST_CICY_NAME: f"Host {HOST_CICY_NAME}\n    HostName {ip}\n    User cicy\n    Port {SSH_PORT_CONTAINER}\n    IdentityFile {SSH_KEY}\n    StrictHostKeyChecking accept-new\n",
+        HOST_NAME: f"Host {HOST_NAME}\n    HostName {hostname}\n    User root\n    Port {SSH_PORT_HOST}\n    IdentityFile {SSH_KEY}\n    StrictHostKeyChecking accept-new\n",
+        HOST_CICY_NAME: f"Host {HOST_CICY_NAME}\n    HostName {hostname}\n    User cicy\n    Port {SSH_PORT_CONTAINER}\n    IdentityFile {SSH_KEY}\n    StrictHostKeyChecking accept-new\n",
     }
     content = LOCAL_SSH_CONFIG.read_text() if LOCAL_SSH_CONFIG.exists() else ""
     for host, entry in entries.items():
-        if f"Host {host}" not in content:
-            content = content.rstrip() + "\n" + entry
-    LOCAL_SSH_CONFIG.write_text(content)
-    print(f"  Updated ~/.ssh/config")
+        content = _strip_ssh_block(content, host).rstrip() + "\n" + entry
+    LOCAL_SSH_CONFIG.write_text(content.lstrip("\n"))
+    print(f"  Updated ~/.ssh/config (HostName {hostname})")
 
 
 def update_proxy_ssh_json(ip):
@@ -193,6 +302,58 @@ def update_proxy_ssh_json(ip):
     entries.append(entry)
     PROXY_SSH_JSON.write_text(json.dumps(entries, indent=2) + "\n")
     print(f"  Updated {PROXY_SSH_JSON}")
+
+
+def _ssh_opts():
+    return ["-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
+
+
+def scp_to_cicy(ip, src, dst):
+    return subprocess.run(["scp"] + _ssh_opts() + ["-P", str(SSH_PORT_CONTAINER),
+                          "-i", SSH_KEY, src, f"cicy@{ip}:{dst}"],
+                          check=False, capture_output=True, text=True)
+
+
+def ssh_cicy(ip, cmd, timeout=120, check=False):
+    return subprocess.run(["ssh"] + _ssh_opts() + ["-p", str(SSH_PORT_CONTAINER),
+                          "-i", SSH_KEY, f"cicy@{ip}", cmd],
+                          check=check, capture_output=True, text=True, timeout=timeout)
+
+
+def bootstrap_container(ip):
+    """Make the fresh container self-sufficient: ssh keys, ~/cicy-ai, cloned repos, dev.py running."""
+    print("=== Bootstrapping container ===")
+    ssh_cicy(ip, "mkdir -p ~/.ssh ~/cicy-ai/db ~/projects ~/logs ~/.local/bin && chmod 700 ~/.ssh")
+    for k in (GITHUB_KEY, RSA_KEY):
+        if os.path.exists(k):
+            scp_to_cicy(ip, k, "~/.ssh/" + os.path.basename(k))
+            ssh_cicy(ip, f"chmod 600 ~/.ssh/{os.path.basename(k)}")
+    ssh_cicy(ip, "grep -q 'Host github-cicy-ai' ~/.ssh/config 2>/dev/null || "
+                 "printf 'Host github-cicy-ai\\n  HostName github.com\\n  User git\\n  "
+                 "IdentityFile ~/.ssh/id_ed25519_cicy_ai\\n  IdentitiesOnly yes\\n  "
+                 "StrictHostKeyChecking accept-new\\n' >> ~/.ssh/config; "
+                 "touch ~/.ssh/config; chmod 600 ~/.ssh/config")
+    gj = os.path.join(CICY_AI_DIR, "global.json")
+    if os.path.exists(gj):
+        scp_to_cicy(ip, gj, "~/cicy-ai/global.json")
+    dbdir = os.path.join(CICY_AI_DIR, "db")
+    if os.path.isdir(dbdir):
+        subprocess.run(["rsync", "-az", "-e",
+                        " ".join(["ssh"] + _ssh_opts() + ["-p", str(SSH_PORT_CONTAINER), "-i", SSH_KEY]),
+                        "--exclude=*.db", "--exclude=*.db-*", "--exclude=*.lock",
+                        dbdir + "/", f"cicy@{ip}:cicy-ai/db/"],
+                       check=False, capture_output=True, text=True)
+    ssh_cicy(ip, f"[ -d ~/projects/cicy-code/.git ] || git clone {CICY_CODE_REPO} ~/projects/cicy-code", timeout=300)
+    ssh_cicy(ip, f"[ -d ~/projects/cicy-skills/.git ] || git clone {CICY_SKILLS_REPO} ~/projects/cicy-skills", timeout=300)
+    # cicy-mihomo wrapper (the mihomo binary itself is pre-installed in the image)
+    ssh_cicy(ip, "cd ~/projects/cicy-skills 2>/dev/null && /usr/local/go/bin/go build -o ~/.local/bin/cicy-hosttools "
+                 "./cmd/cicy-hosttools && ln -sf cicy-hosttools ~/.local/bin/cicy-mihomo || true", timeout=240)
+    # start the dev server (idempotent)
+    ssh_cicy(ip, "pgrep -f '[d]ev[.]py' >/dev/null || (cd ~/projects/cicy-code && "
+                 "nohup python3 dev.py >~/logs/dev-py.log 2>&1 </dev/null &); "
+                 "sleep 2; pgrep -af '[d]ev[.]py' || echo '(dev.py launching)'", timeout=60)
+    print("  Container bootstrapped — dev.py launching (log: ~/logs/dev-py.log)")
 
 
 def clean_local_configs():
@@ -254,6 +415,9 @@ def main():
     if existing:
         ip = existing.get("PublicIpAddress", {}).get("IpAddress", [None])[0]
         print(f"  {INSTANCE_NAME} already running at {ip}")
+        update_cf_dns(ip)
+        ensure_cf_tunnel()
+        bootstrap_container(ip)
         update_ssh_config(ip)
         update_proxy_ssh_json(ip)
         return
@@ -322,6 +486,10 @@ def main():
     if not ip:
         print("ERROR: timeout waiting for IP"); sys.exit(1)
 
+    # point the stable Cloudflare A record at the new IP right away
+    update_cf_dns(ip)
+    cf_tunnel_token = ensure_cf_tunnel() or ""
+
     # 6. attach disk
     print("=== Attaching persistent disk... ===")
     run_aliyun(["ecs", "AttachDisk", "--region", REGION,
@@ -380,6 +548,9 @@ def main():
         'RUN git clone --depth 1 https://github.com/cicy-ai/cicy-mihomo.git /tmp/cicy-mihomo 2>/dev/null \\\n'
         '    && install -m 0755 /tmp/cicy-mihomo/bin/mihomo-linux-amd64 /usr/local/bin/mihomo \\\n'
         '    && rm -rf /tmp/cicy-mihomo || echo "[image] mihomo not pre-installed"\n'
+        '# cloudflared (exposes dev.<domain> -> :8008 when CF_TUNNEL_TOKEN is set)\n'
+        'RUN curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o /tmp/cf.deb \\\n'
+        '    && dpkg -i /tmp/cf.deb && rm -f /tmp/cf.deb || echo "[image] cloudflared not pre-installed"\n'
         '# Go toolchain so dev.py / build.sh can build cicy-code inside the container\n'
         'RUN curl -fsSL https://go.dev/dl/go1.25.3.linux-amd64.tar.gz | tar -C /usr/local -xz && \\\n'
         '    ln -sf /usr/local/go/bin/go /usr/local/bin/go && \\\n'
@@ -411,6 +582,10 @@ def main():
         'chown cicy:cicy /home/cicy 2>/dev/null || true\n'
         'service ssh start\n'
         'echo "[spot-dev] SSHD running on port 2022"\n'
+        'if [ -n "$CF_TUNNEL_TOKEN" ] && command -v cloudflared >/dev/null 2>&1; then\n'
+        '    echo "[spot-dev] starting cloudflared tunnel"\n'
+        '    cloudflared tunnel --no-autoupdate run --token "$CF_TUNNEL_TOKEN" >/var/log/cloudflared.log 2>&1 &\n'
+        'fi\n'
         'tail -f /dev/null\n'
         'ENTRYPOINT\n'
         'RUN chmod +x /usr/local/bin/spot-entrypoint.sh\n'
@@ -436,6 +611,7 @@ def main():
            '--restart unless-stopped --network host --privileged '
            '-v /data/cicy:/home/cicy '
            '-v /var/run/docker.sock:/var/run/docker.sock '
+           f'-e CF_TUNNEL_TOKEN={cf_tunnel_token} '
            'us-spot-dev:latest', timeout=30)
     time.sleep(5)
 
@@ -451,27 +627,30 @@ def main():
                 "echo SSH_OK && docker ps -q | wc -l"], check=False)
     print(f"  Container test: {test.stdout.strip() if test.returncode == 0 else 'FAILED'}")
 
-    # 13. update local configs
+    # 13. bootstrap container (keys, cicy-ai, repos, dev.py) + update local configs
+    bootstrap_container(ip)
     print("=== Updating local configs ===")
     update_ssh_config(ip)
     update_proxy_ssh_json(ip)
 
+    dns_host = cf_dns_host()
+    dev_host = cf_dev_host()
     if output_json:
         print(json.dumps({
             "instance_id": inst_id, "ip": ip, "disk_id": disk_id,
             "region": REGION, "zone": ZONE, "type": INSTANCE_TYPE,
-            "ssh_host": HOST_NAME,
+            "ssh_host": HOST_NAME, "dns": dns_host, "dev_url": f"https://{dev_host}" if dev_host else None,
             "ssh_cicy": f"ssh -p {SSH_PORT_CONTAINER} -i {SSH_KEY} cicy@{ip}",
         }, indent=2))
     else:
         print(f"\n=== Done ===")
+        print(f"  IP: {ip}" + (f"  DNS: {dns_host}" if dns_host else ""))
         print(f"  SSH to host: ssh {HOST_NAME}")
-        print(f"  SSH to container: ssh -p {SSH_PORT_CONTAINER} -i {SSH_KEY} cicy@{ip}")
-        print(f"  or: ssh {HOST_CICY_NAME}")
+        print(f"  SSH to container: ssh {HOST_CICY_NAME}  (port {SSH_PORT_CONTAINER})")
+        if dev_host:
+            print(f"  Dev server: https://{dev_host}  (cloudflared tunnel -> :8008)")
         print(f"  Disk {disk_id} persists across instance reclaims")
-        print(f"  Rebuild: us-spot-dev")
-        print(f"  Destroy: us-spot-dev --destroy")
-        print(f"  Destroy all: us-spot-dev --destroy-all")
+        print(f"  Rebuild: us-spot-dev   |   Destroy: us-spot-dev --destroy   |   --destroy-all")
 
 
 if __name__ == "__main__":
