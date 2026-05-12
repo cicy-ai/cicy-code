@@ -81,5 +81,11 @@
   "toastTokenAlreadyBound": "这个 token 已绑，请更换其他 token",
   "toastSettingsSaved": "已保存",
   "toastSettingsSaveFailed": "错误：{{paneId}} 设置保存失败",
-  "toastModelSettingsSaveFailed": "错误：{{paneId}} 模型设置保存失败"
+  "toastModelSettingsSaveFailed": "错误：{{paneId}} 模型设置保存失败",
+  "generalIdentityTitle": "身份",
+  "generalIdentityDesc": "此窗格在工作区里的显示方式以及运行的智能体。",
+  "generalBehaviorTitle": "行为",
+  "generalBehaviorDesc": "启动时的生命周期与权限设置。",
+  "generalProxyTitle": "代理",
+  "generalProxyDesc": "此窗格启动时使用的本地代理。"
 }

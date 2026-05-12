@@ -81,5 +81,11 @@
   "toastTokenAlreadyBound": "Ce jeton est déjà lié, utilisez-en un autre.",
   "toastSettingsSaved": "Enregistré",
   "toastSettingsSaveFailed": "Erreur : échec de sauvegarde des réglages de {{paneId}}",
-  "toastModelSettingsSaveFailed": "Erreur : échec de sauvegarde du modèle de {{paneId}}"
+  "toastModelSettingsSaveFailed": "Erreur : échec de sauvegarde du modèle de {{paneId}}",
+  "generalIdentityTitle": "Identité",
+  "generalIdentityDesc": "Comment ce panneau apparaît dans l'espace de travail et quel agent y tourne.",
+  "generalBehaviorTitle": "Comportement",
+  "generalBehaviorDesc": "Cycle de vie et permissions appliqués au démarrage.",
+  "generalProxyTitle": "Proxy",
+  "generalProxyDesc": "Proxy local utilisé par ce panneau au démarrage."
 }

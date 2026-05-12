@@ -938,57 +938,77 @@ export default function AgentInspector({
 
               {settingsSection === 'general' && (
                 <div data-id="agent-inspector-settings-general" className="space-y-5">
-                  <InspectorField label={t('fieldTitle')}>
-                    <InspectorInput value={settingsData?.title || ''} onChange={(value) => patchSettingsData({ title: value })} onBlur={() => { void saveSettings(); }} placeholder={t('fieldTitlePlaceholder')} />
-                  </InspectorField>
-                  <InspectorField label={t('fieldWorkspace')} desc={t('fieldWorkspaceDesc')} mono>
-                    <InspectorInput value={settingsData?.workspace || ''} onChange={(value) => patchSettingsData({ workspace: value })} placeholder="/home/user/project" mono readOnly />
-                  </InspectorField>
-                  <InspectorField label={t('fieldAgentType')}>
-                    <div
-                      data-id="agent-inspector-settings-agent-types"
-                      className="flex items-center gap-3 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200"
-                    >
-                      <AgentAvatar
-                        agentType={settingsData?.agent_type}
-                        title={settingsData?.agent_type || t('agentTypeUnset')}
-                        variant="select"
-                        dataId="agent-inspector-settings-agent-type-avatar"
-                      />
-                      <span className="truncate">{settingsData?.agent_type || t('agentTypeUnset')}</span>
+                  <div data-id="agent-inspector-settings-general-identity" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+                    <div>
+                      <div className="text-sm font-medium text-zinc-100">{t('generalIdentityTitle')}</div>
+                      <div className="mt-1 text-xs leading-5 text-zinc-500">{t('generalIdentityDesc')}</div>
                     </div>
-                  </InspectorField>
-                  <InspectorToggle
-                    label={t('autoStart')}
-                    desc={t('autoStartHint')}
-                    checked={settingsData?.active !== false}
-                    onChange={(value) => patchSettingsData({ active: value })}
-                    onBlur={() => { void saveSettings(); }}
-                  />
-                  <InspectorToggle
-                    label={t('allowAllActions')}
-                    desc={t('allowAllActionsHint')}
-                    checked={!!settingsData?.allow_all_actions}
-                    onChange={(value) => patchSettingsData({ allow_all_actions: value })}
-                    onBlur={() => { void saveSettings(); }}
-                  />
-                  <InspectorToggle
-                    label={t('useProxy')}
-                    desc={t('useProxyHint')}
-                    checked={!!settingsData?.use_proxy}
-                    onChange={(value) => patchSettingsData({ use_proxy: value })}
-                    onBlur={() => { void saveSettings(); }}
-                  />
-                  {settingsData?.use_proxy && (
-                    <>
-                      <InspectorField label={t('proxyPassword')} desc={t('proxyPasswordDesc')}>
-                        <InspectorInput value={settingsData?.proxy?.password || ''} onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), password: value } })} onBlur={() => { void saveSettings(); }} placeholder={t('proxyPasswordPlaceholder')} mono />
-                      </InspectorField>
-                      <InspectorField label={t('mihomoRule')} desc={t('mihomoRuleDesc')}>
-                        <InspectorInput value={settingsData?.proxy?.rule || ''} onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), rule: value } })} onBlur={() => { void saveSettings(); }} placeholder="IN-USER,w-10001,proxy-a" mono />
-                      </InspectorField>
-                    </>
-                  )}
+                    <InspectorField label={t('fieldTitle')}>
+                      <InspectorInput value={settingsData?.title || ''} onChange={(value) => patchSettingsData({ title: value })} onBlur={() => { void saveSettings(); }} placeholder={t('fieldTitlePlaceholder')} />
+                    </InspectorField>
+                    <InspectorField label={t('fieldWorkspace')} desc={t('fieldWorkspaceDesc')} mono>
+                      <InspectorInput value={settingsData?.workspace || ''} onChange={(value) => patchSettingsData({ workspace: value })} placeholder="/home/user/project" mono readOnly />
+                    </InspectorField>
+                    <InspectorField label={t('fieldAgentType')}>
+                      <div
+                        data-id="agent-inspector-settings-agent-types"
+                        className="flex items-center gap-3 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200"
+                      >
+                        <AgentAvatar
+                          agentType={settingsData?.agent_type}
+                          title={settingsData?.agent_type || t('agentTypeUnset')}
+                          variant="select"
+                          dataId="agent-inspector-settings-agent-type-avatar"
+                        />
+                        <span className="truncate">{settingsData?.agent_type || t('agentTypeUnset')}</span>
+                      </div>
+                    </InspectorField>
+                  </div>
+
+                  <div data-id="agent-inspector-settings-general-behavior" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+                    <div>
+                      <div className="text-sm font-medium text-zinc-100">{t('generalBehaviorTitle')}</div>
+                      <div className="mt-1 text-xs leading-5 text-zinc-500">{t('generalBehaviorDesc')}</div>
+                    </div>
+                    <InspectorToggle
+                      label={t('autoStart')}
+                      desc={t('autoStartHint')}
+                      checked={settingsData?.active !== false}
+                      onChange={(value) => patchSettingsData({ active: value })}
+                      onBlur={() => { void saveSettings(); }}
+                    />
+                    <InspectorToggle
+                      label={t('allowAllActions')}
+                      desc={t('allowAllActionsHint')}
+                      checked={!!settingsData?.allow_all_actions}
+                      onChange={(value) => patchSettingsData({ allow_all_actions: value })}
+                      onBlur={() => { void saveSettings(); }}
+                    />
+                  </div>
+
+                  <div data-id="agent-inspector-settings-general-proxy" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+                    <div>
+                      <div className="text-sm font-medium text-zinc-100">{t('generalProxyTitle')}</div>
+                      <div className="mt-1 text-xs leading-5 text-zinc-500">{t('generalProxyDesc')}</div>
+                    </div>
+                    <InspectorToggle
+                      label={t('useProxy')}
+                      desc={t('useProxyHint')}
+                      checked={!!settingsData?.use_proxy}
+                      onChange={(value) => patchSettingsData({ use_proxy: value })}
+                      onBlur={() => { void saveSettings(); }}
+                    />
+                    {settingsData?.use_proxy && (
+                      <>
+                        <InspectorField label={t('proxyPassword')} desc={t('proxyPasswordDesc')}>
+                          <InspectorInput value={settingsData?.proxy?.password || ''} onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), password: value } })} onBlur={() => { void saveSettings(); }} placeholder={t('proxyPasswordPlaceholder')} mono />
+                        </InspectorField>
+                        <InspectorField label={t('mihomoRule')} desc={t('mihomoRuleDesc')}>
+                          <InspectorInput value={settingsData?.proxy?.rule || ''} onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), rule: value } })} onBlur={() => { void saveSettings(); }} placeholder="IN-USER,w-10001,proxy-a" mono />
+                        </InspectorField>
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
 
