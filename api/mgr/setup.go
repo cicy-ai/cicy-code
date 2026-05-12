@@ -30,8 +30,11 @@ var embeddedTmuxConf string
 //go:embed .cicy_tmux.conf
 var embeddedCicyTmuxConf string
 
-//go:embed resources/cicy-code-server-bridge-0.0.3.vsix
+//go:embed resources/cicy-code-server-bridge-0.0.4.vsix
 var embeddedCodeServerBridgeVSIX []byte
+
+//go:embed resources/MS-CEINTL.vscode-language-pack-zh-hans-1.110.0.vsix
+var embeddedCodeServerZhHansVSIX []byte
 
 var cicySkillsInstallOnce sync.Once
 
@@ -1338,6 +1341,9 @@ func ensureCodeServerUserSettings(home string) {
 	if _, ok := settings["workbench.iconTheme"]; !ok {
 		settings["workbench.iconTheme"] = "simple-icons"
 	}
+	if _, ok := settings["locale"]; !ok {
+		settings["locale"] = "zh-cn"
+	}
 
 	payload, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -1397,7 +1403,8 @@ func installEmbeddedCodeServerExtension(home string, fileName string, payload []
 }
 
 func installBundledCodeServerExtensions(home string) {
-	installEmbeddedCodeServerExtension(home, "cicy-code-server-bridge-0.0.3.vsix", embeddedCodeServerBridgeVSIX)
+	installEmbeddedCodeServerExtension(home, "cicy-code-server-bridge-0.0.4.vsix", embeddedCodeServerBridgeVSIX)
+	installEmbeddedCodeServerExtension(home, "MS-CEINTL.vscode-language-pack-zh-hans-1.110.0.vsix", embeddedCodeServerZhHansVSIX)
 	installCodeServerExtension(home, "laurenttreguier.vscode-simple-icons")
 }
 

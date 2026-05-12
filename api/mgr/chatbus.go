@@ -22,17 +22,35 @@ type ChatEvent struct {
 // ── Hub: master-channel pub/sub over WebSocket ──
 
 type chatClient struct {
-	conn        *websocket.Conn
-	send        chan []byte
-	agentID     string
-	clientID    string
-	activeAgent string
-	electron    bool
-	platform    string
-	userAgent   string
-	connectedAt time.Time
-	remoteAddr  string
-	closeOnce   sync.Once
+	conn           *websocket.Conn
+	send           chan []byte
+	agentID        string
+	clientID       string
+	activeAgent    string
+	electron       bool
+	platform       string
+	userAgent      string
+	connectedAt    time.Time
+	remoteAddr     string
+	closeOnce      sync.Once
+	activityMu     sync.Mutex
+	lastActivityAt time.Time
+}
+
+func (c *chatClient) markActive() {
+	c.activityMu.Lock()
+	c.lastActivityAt = time.Now()
+	c.activityMu.Unlock()
+}
+
+func (c *chatClient) idleFor() time.Duration {
+	c.activityMu.Lock()
+	t := c.lastActivityAt
+	c.activityMu.Unlock()
+	if t.IsZero() {
+		return time.Since(c.connectedAt)
+	}
+	return time.Since(t)
 }
 
 type chatHub struct {
@@ -130,27 +148,47 @@ func (h *chatHub) lookupClientLocked(clientID string) *chatClient {
 	return nil
 }
 
-func (h *chatHub) register(c *chatClient) {
+// activeClientGrace is how long an existing connection is considered "alive"
+// after its last read/pong. New connections that arrive with the same
+// (agentID, clientID) while the existing one is within grace are REJECTED with
+// 4409, protecting the current winner from being kicked off the slot. This
+// breaks supersede loops where new extension instances appear periodically
+// (e.g. iframe reloads, code-server extension host restarts). Past the grace,
+// the existing connection is presumed stale and the new one replaces it.
+const activeClientGrace = 30 * time.Second
+
+// register tries to install c as the active client for (agentID, clientID).
+// Returns true on success. Returns false if an active winner already holds
+// the slot — the caller is expected to close c with a 4409 close frame so the
+// browser-side client knows not to auto-reconnect.
+func (h *chatHub) register(c *chatClient) bool {
+	c.markActive()
 	h.mu.Lock()
 	h.ensureMapsLocked()
-	var replaced *chatClient
 	if h.clients[c.agentID] == nil {
 		h.clients[c.agentID] = make(map[string]*chatClient)
 	}
-	if existing := h.clients[c.agentID][c.clientID]; existing != nil && existing != c {
+	existing := h.clients[c.agentID][c.clientID]
+	if existing != nil && existing != c && existing.idleFor() < activeClientGrace {
+		idle := existing.idleFor()
+		h.mu.Unlock()
+		log.Printf("[chat-ws] reject (slot held) master_agent_id=%s client_id=%s existing_idle=%s",
+			c.agentID, c.clientID, idle.Truncate(time.Millisecond))
+		return false
+	}
+	var replaced *chatClient
+	if existing != nil && existing != c {
 		replaced = existing
 	}
 	h.clients[c.agentID][c.clientID] = c
 	count := len(h.clients[c.agentID])
 	h.mu.Unlock()
 	if replaced != nil {
-		// 4409 = application-level "superseded". The client uses this code to
-		// stop the auto-reconnect loop so two pages sharing the same client_id
-		// don't ping-pong each other off the slot.
-		replaced.closeWithReason(4409, "superseded")
+		replaced.closeWithReason(4409, "superseded (existing stale)")
 		log.Printf("[chat-ws] supersede master_agent_id=%s client_id=%s", c.agentID, c.clientID)
 	}
 	log.Printf("[chat-ws] connect master_agent_id=%s client_id=%s clients=%d", c.agentID, c.clientID, count)
+	return true
 }
 
 func (h *chatHub) unregister(c *chatClient) {
@@ -420,6 +458,7 @@ func (c *chatClient) readPump() {
 	c.conn.SetReadLimit(64 * 1024)
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+		c.markActive()
 		return nil
 	})
 	for {
@@ -428,6 +467,7 @@ func (c *chatClient) readPump() {
 		if err != nil {
 			return
 		}
+		c.markActive()
 		var evt ChatEvent
 		if json.Unmarshal(msg, &evt) != nil || evt.Type == "" {
 			continue
@@ -606,7 +646,11 @@ func handleChatWS(w http.ResponseWriter, r *http.Request) {
 		connectedAt: time.Now(),
 		remoteAddr:  remoteAddr,
 	}
-	hub.register(c)
+	if !hub.register(c) {
+		// Slot is held by an active winner; tell this client to give up.
+		c.closeWithReason(4409, "slot held by active connection")
+		return
+	}
 	go c.writePump()
 	c.readPump()
 }

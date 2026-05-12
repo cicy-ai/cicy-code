@@ -10,5 +10,9 @@
   "in the future": "未来",
   "{0} minutes ago": "{0} 分钟前",
   "{0} hours ago": "{0} 小时前",
-  "{0} days ago": "{0} 天前"
+  "{0} days ago": "{0} 天前",
+  "Added to favorites: {0}": "已添加到收藏夹: {0}",
+  "Already in favorites: {0}": "已在收藏夹中: {0}",
+  "Failed to add to favorites: {0}": "添加到收藏夹失败: {0}",
+  "Cannot favorite an item inside the favorites folder": "不能收藏 favorite 文件夹内的项目"
 }
