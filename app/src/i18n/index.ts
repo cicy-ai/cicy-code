@@ -51,7 +51,44 @@ import zhWorkspace from './locales/zh-CN/workspace.json';
 
 export const STORAGE_KEY = 'cicy.lang';
 
-export const SUPPORTED_LNGS = ['en', 'zh-CN'] as const;
+/**
+ * Languages we ship full translation bundles for. Adding a new code here
+ * requires a matching `locales/<code>/<ns>.json` for every namespace.
+ */
+export const TRANSLATED_LNGS = ['en', 'zh-CN'] as const;
+export type TranslatedLng = (typeof TRANSLATED_LNGS)[number];
+
+/**
+ * Languages offered in the in-app picker. The picker uses Intl.DisplayNames
+ * to render each entry in its native form, so adding a code here is a
+ * one-line change. Codes that are NOT in TRANSLATED_LNGS still switch
+ * i18n.language and <html lang>, but every t() call falls back to English
+ * (fallbackLng below).
+ */
+export const SUPPORTED_LNGS = [
+  // East Asia
+  'en', 'zh-CN', 'zh-TW', 'zh-HK', 'ja', 'ko',
+  // SE Asia
+  'vi', 'th', 'id', 'ms', 'tl', 'my', 'km', 'lo',
+  // South Asia
+  'hi', 'bn', 'ta', 'te', 'ml', 'kn', 'mr', 'gu', 'pa', 'ur', 'ne', 'si',
+  // Western Europe
+  'es', 'es-MX', 'pt', 'pt-BR', 'fr', 'fr-CA', 'de', 'it', 'nl', 'sv',
+  'da', 'no', 'fi', 'is', 'ga', 'cy', 'eu', 'ca', 'gl', 'lb', 'fo',
+  // Central / Eastern Europe
+  'pl', 'cs', 'sk', 'hu', 'ro', 'bg', 'hr', 'sr', 'sl', 'mk', 'sq',
+  'lt', 'lv', 'et', 'mt', 'el',
+  // East Slavic
+  'ru', 'uk', 'be',
+  // Middle East
+  'ar', 'fa', 'he', 'tr', 'az', 'ku',
+  // Central Asia
+  'kk', 'ky', 'uz', 'tg', 'mn',
+  // Caucasus
+  'hy', 'ka',
+  // Africa
+  'sw', 'am', 'ha', 'yo', 'ig', 'zu', 'xh', 'af', 'so', 'rw', 'om', 'sn',
+] as const;
 export type SupportedLng = (typeof SUPPORTED_LNGS)[number];
 
 const resources = {
@@ -114,7 +151,12 @@ void i18n
     resources,
     ns: ['common', 'login', 'settings', 'createAgent', 'editPane', 'workspace', 'ui', 'layout', 'chat', 'agentInspector', 'agentProviderRequest', 'agentChat', 'agentTypeDesc', 'apiSwitch', 'desktop', 'devPanel', 'provision', 'agentCanvas', 'teamPanel', 'audit', 'provider', 'im', 'terminal'],
     defaultNS: 'common',
-    fallbackLng: 'en',
+    fallbackLng: {
+      'zh-TW': ['zh-CN', 'en'],
+      'zh-HK': ['zh-CN', 'en'],
+      'zh': ['zh-CN', 'en'],
+      default: ['en'],
+    },
     supportedLngs: [...SUPPORTED_LNGS],
     load: 'currentOnly',
     detection: {
