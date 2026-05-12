@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation, Trans } from 'react-i18next';
+import i18n, { SUPPORTED_LNGS } from '../i18n';
 
 type ToastState = {
   message: string;
@@ -754,7 +755,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         // 连接建立后立即请求 poll 数据
         //console.log('[poll_request] WS onopen, sending initial poll_request');
         try { ws.send(JSON.stringify({ type: 'poll_request' })); } catch (e) { console.warn('[poll_request] onopen send failed:', e); }
-        try { ws.send(JSON.stringify({ type: 'register_active_channel', data: { agent_id: activeCliPaneId || paneId, client_id: clientId, channel_type: 'web', platform: wsClientPlatform, user_agent: wsClientUserAgent } })); } catch (e) { console.warn('[chat-ws] register_active_channel onopen failed:', e); }
+        // NOTE: register_active_channel is sent by the dedicated useEffect below
+        // (triggered once chatWsConnected flips true). Sending it here too caused
+        // duplicate register logs on every connect.
         sendLatencyPing();
         chatWsPingTimerRef.current = window.setInterval(sendLatencyPing, 5000);
       };
@@ -1600,6 +1603,26 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             <span>{t('debugTools')}</span>
             <Bug className="h-3.5 w-3.5" />
           </button>
+          <div data-id="membership-language" className="mt-1 flex items-center justify-between rounded-lg px-3 py-2 text-[11px] text-zinc-200">
+            <span>{t('language', { ns: 'common' })}</span>
+            <div className="flex gap-1">
+              {SUPPORTED_LNGS.map((code) => {
+                const active = (i18n.resolvedLanguage ?? i18n.language) === code;
+                const labelKey = code === 'zh-CN' ? 'languageChinese' : 'languageEnglish';
+                return (
+                  <button
+                    key={code}
+                    type="button"
+                    data-id={`membership-language-${code}`}
+                    onClick={() => { void i18n.changeLanguage(code); }}
+                    className={`rounded-md border px-2 py-0.5 font-mono text-[10px] transition-colors ${active ? 'border-white/20 bg-white/10 text-zinc-100' : 'border-white/[0.06] text-zinc-500 hover:border-white/[0.12] hover:text-zinc-200'}`}
+                  >
+                    {t(labelKey, { ns: 'common' })}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <div data-id="membership-version" className="mt-1 flex items-center justify-between rounded-lg px-3 py-2 text-[11px] text-zinc-500">
             <span>Version</span>
             <span id="version" className="font-mono text-zinc-300">{config.version}</span>
