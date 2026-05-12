@@ -79,6 +79,15 @@ function formatDateTime(ms: number) {
   return new Date(ms).toLocaleString(undefined, { hour12: false });
 }
 
+function languageDisplayName(code: string): string {
+  try {
+    const dn = new Intl.DisplayNames([code, 'en'], { type: 'language' });
+    const name = dn.of(code);
+    if (name && name !== code) return name;
+  } catch {}
+  return code;
+}
+
 function formatClockTime(value: string | null) {
   if (!value) return '';
   const parsed = Date.parse(value);
@@ -262,8 +271,9 @@ function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
 export default function Workspace({ agentId, onSelectAgent }: Props) {
   const { t, i18n: i18nLive } = useTranslation('workspace');
   const [currentLang, setCurrentLang] = useState<string>(() => i18nLive.resolvedLanguage ?? i18nLive.language ?? 'en');
+  const [langMenuOpen, setLangMenuOpen] = useState(false);
   useEffect(() => {
-    const handler = (lng: string) => setCurrentLang(lng);
+    const handler = (lng: string) => { setCurrentLang(lng); setLangMenuOpen(false); };
     i18nLive.on('languageChanged', handler);
     return () => { i18nLive.off('languageChanged', handler); };
   }, [i18nLive]);
@@ -995,7 +1005,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     && filePaneDetail.capabilities?.supports_tmux === false
   );
   const fileCodeServerSrc = token && !filePaneIsApiOnlyRuntime && codeServerReady
-    ? urls.codeServer(defaultWorkerWorkspace(paneId), token, pageClientId, paneId)
+    ? urls.codeServer(defaultWorkerWorkspace(paneId), token, pageClientId, paneId, currentLang)
     : '';
   const fileCodeServerWaiting = !!token && !filePaneIsApiOnlyRuntime && !codeServerReady;
   const openPaneInCurrentTerminal = useCallback((targetPaneId: string) => {
@@ -1089,8 +1099,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       const target = event.target as Node;
       if (membershipMenuRef.current?.contains(target) || membershipTriggerRef.current?.contains(target)) return;
       setMembershipMenuOpen(false);
+      setLangMenuOpen(false);
     };
-    const handleWindowResize = () => setMembershipMenuOpen(false);
+    const handleWindowResize = () => { setMembershipMenuOpen(false); setLangMenuOpen(false); };
     document.addEventListener('pointerdown', handlePointerDown);
     window.addEventListener('resize', handleWindowResize);
     return () => {
@@ -1102,6 +1113,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleToggleMembershipMenu = useCallback(() => {
     if (membershipMenuOpen) {
       setMembershipMenuOpen(false);
+      setLangMenuOpen(false);
       return;
     }
     const rect = membershipTriggerRef.current?.getBoundingClientRect();
@@ -1526,30 +1538,51 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             <span>{t('debugTools')}</span>
             <Bug className="h-3.5 w-3.5" />
           </button>
-          <div data-id="membership-language" className="mt-1 flex items-center justify-between rounded-lg px-3 py-2 text-[11px] text-zinc-200">
-            <span>{t('language', { ns: 'common' })}</span>
-            <div className="flex gap-1">
-              {SUPPORTED_LNGS.map((code) => {
-                const active = currentLang === code;
-                const labelKey = code === 'zh-CN' ? 'languageChinese' : 'languageEnglish';
-                return (
-                  <button
-                    key={code}
-                    type="button"
-                    data-id={`membership-language-${code}`}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (active) return;
-                      void i18nLive.changeLanguage(code);
-                    }}
-                    className={`cursor-pointer rounded-md border px-2 py-0.5 font-mono text-[10px] transition-colors ${active ? 'border-white/20 bg-white/10 text-zinc-100' : 'border-white/[0.06] text-zinc-500 hover:border-white/[0.12] hover:text-zinc-200'}`}
-                  >
-                    {t(labelKey, { ns: 'common' })}
-                  </button>
-                );
-              })}
-            </div>
+          <div data-id="membership-language" className="mt-1">
+            <button
+              type="button"
+              data-id="membership-language-trigger"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                setLangMenuOpen((open) => !open);
+              }}
+              className="flex w-full cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+              title={t('language', { ns: 'common' })}
+            >
+              <span>{t('language', { ns: 'common' })}</span>
+              <span className="flex items-center gap-1 text-[11px] font-normal text-zinc-400">
+                <span data-id="membership-language-current">{languageDisplayName(currentLang)}</span>
+                <ChevronDown className={`h-3 w-3 transition-transform ${langMenuOpen ? 'rotate-180' : ''}`} />
+              </span>
+            </button>
+            {langMenuOpen ? (
+              <div
+                data-id="membership-language-menu"
+                className="mt-1 max-h-60 overflow-y-auto rounded-lg border border-white/[0.06] bg-[#0c0c0e]"
+              >
+                {SUPPORTED_LNGS.map((code) => {
+                  const active = currentLang === code;
+                  return (
+                    <button
+                      key={code}
+                      type="button"
+                      data-id={`membership-language-${code}`}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLangMenuOpen(false);
+                        if (!active) void i18nLive.changeLanguage(code);
+                      }}
+                      className={`flex w-full cursor-pointer items-center justify-between px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/5 ${active ? 'text-zinc-100' : 'text-zinc-400'}`}
+                    >
+                      <span>{languageDisplayName(code)}</span>
+                      {active ? <Check className="h-3 w-3 text-emerald-400" /> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
           <div data-id="membership-version" className="mt-1 flex items-center justify-between rounded-lg px-3 py-2 text-[11px] text-zinc-500">
             <span>Version</span>
