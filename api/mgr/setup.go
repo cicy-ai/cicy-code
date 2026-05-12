@@ -1364,6 +1364,22 @@ func ensureCodeServerUserSettings(home string) {
 			log.Printf("[startup] failed to write code-server argv.json: %v", err)
 		}
 	}
+
+	// VS Code's web workbench eagerly reads these on load; when they are absent
+	// the requests surface as "Failed to resolve files / 无法读取文件" plus
+	// cascading "Canceled" errors in the browser console. Pre-create them empty
+	// (only if missing — never clobber real state).
+	if err := os.MkdirAll(filepath.Join(userDir, "prompts"), 0755); err != nil {
+		log.Printf("[startup] failed to create code-server User/prompts dir: %v", err)
+	}
+	for _, name := range []string{"extensions.json", "systemExtensionsCache.json"} {
+		p := filepath.Join(userDir, name)
+		if _, err := os.Stat(p); os.IsNotExist(err) {
+			if err := os.WriteFile(p, []byte("[]\n"), 0644); err != nil {
+				log.Printf("[startup] failed to write code-server %s: %v", name, err)
+			}
+		}
+	}
 }
 
 func installCodeServerExtension(home string, extension string) {
