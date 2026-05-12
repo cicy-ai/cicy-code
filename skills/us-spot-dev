@@ -57,6 +57,9 @@ def run_aliyun(args):
 def run_ssh(host, cmd, **kw):
     kw.setdefault("timeout", 120)
     kw.setdefault("check", True)
+    # Call sites pass a bare IP; the fresh Ubuntu instance only has `root`.
+    if "@" not in host:
+        host = f"root@{host}"
     return subprocess.run(
         ["ssh", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new",
          "-o", "UserKnownHostsFile=/dev/null", "-o", "PasswordAuthentication=no",
