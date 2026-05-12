@@ -237,7 +237,7 @@ def main():
     print("=== Setting up instance... ===")
     run_ssh(HOST_NAME, "apt-get update -qq && apt-get install -y -qq autossh")
     run_ssh(HOST_NAME,
-        'DISK_DEV=$(lsblk -ndo NAME,MOUNTPOINT | grep "^vd" | grep -v "^vda" | awk "{print \$1}"); '
+        'DISK_DEV=$(lsblk -ndo NAME,MOUNTPOINT | grep "^vd" | grep -v "^vda" | awk "{print \\$1}"); '
         'if [ -n "$DISK_DEV" ]; then '
         '  mkfs.ext4 -F /dev/$DISK_DEV 2>/dev/null; '
         '  mkdir -p /data; '
