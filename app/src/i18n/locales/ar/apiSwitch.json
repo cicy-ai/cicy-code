@@ -1,0 +1,16 @@
+{
+  "errorUrlRequired": "Please enter a URL",
+  "errorUrlInvalid": "Invalid URL format",
+  "errorTokenRequired": "Please include ?token=xxx in the URL",
+  "errorTokenInvalid": "Invalid token",
+  "errorConnect": "Connection failed: {{message}}",
+  "errorConnectUnknown": "could not connect",
+  "labelDefault": "Default",
+  "defaultEmpty": "(same origin)",
+  "copy": "Copy",
+  "copied": "✓ Copied",
+  "namePlaceholder": "Name",
+  "verifying": "Verifying...",
+  "add": "Add",
+  "applyAndReload": "Apply and reload"
+}

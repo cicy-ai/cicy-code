@@ -1,0 +1,13 @@
+{
+  "title": "ペインを編集",
+  "agentDutyLabel": "エージェントの役割",
+  "agentDutyPlaceholder": "このペインのエージェントの役割を記述",
+  "initScriptHintShort": "sleep:N で N 秒待機 ; key:X でキー送信",
+  "telegramToggle": "Telegram 通知",
+  "telegramTokenPlaceholder": "ボットトークン",
+  "telegramChatIdPlaceholder": "チャット ID",
+  "restart": "再起動",
+  "delete": "削除",
+  "confirmRestart": "{{target}} を再起動しますか？",
+  "confirmDelete": "{{target}} を削除しますか？"
+}

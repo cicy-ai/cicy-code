@@ -1,0 +1,16 @@
+{
+  "errorUrlRequired": "Veuillez saisir une URL",
+  "errorUrlInvalid": "Format d'URL invalide",
+  "errorTokenRequired": "Incluez ?token=xxx dans l'URL",
+  "errorTokenInvalid": "Jeton invalide",
+  "errorConnect": "Échec de connexion : {{message}}",
+  "errorConnectUnknown": "impossible de se connecter",
+  "labelDefault": "Par défaut",
+  "defaultEmpty": "(même origine)",
+  "copy": "Copier",
+  "copied": "✓ Copié",
+  "namePlaceholder": "Nom",
+  "verifying": "Vérification…",
+  "add": "Ajouter",
+  "applyAndReload": "Appliquer et recharger"
+}

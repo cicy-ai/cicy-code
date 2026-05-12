@@ -1,0 +1,12 @@
+{
+  "step0": "Création du tunnel Cloudflare",
+  "step1": "Création du serveur",
+  "step2": "Téléversement du script de déploiement",
+  "step3": "Déploiement du service",
+  "step4": "Vérification",
+  "disconnectedRetrying": "⚠ Déconnecté, nouvelle tentative…",
+  "disconnected": "Déconnecté",
+  "title": "Configuration de votre espace de travail",
+  "elapsed": "{{seconds}}s écoulées",
+  "connecting": "Connexion…"
+}

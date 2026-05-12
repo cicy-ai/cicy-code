@@ -1,0 +1,20 @@
+{
+  "thinkingStep": "🧠 要件を理解中…",
+  "designStep": "🎨 UI 設計中…",
+  "codeStep": "⚙️ コード生成中…",
+  "packageStep": "📦 パッケージング中…",
+  "appCreated": "✅ 「{{name}}」{{icon}} 作成完了！（{{seconds}}s）\nデスクトップアイコンをクリックして開く。",
+  "createFailed": "作成失敗：{{detail}}",
+  "createErrored": "作成エラー：{{message}}",
+  "assistantOops": "申し訳ありません、問題が発生しました。",
+  "assistantConnFailed": "接続に失敗しました、再試行してください。",
+  "statusCreating": "● 作成中",
+  "statusThinking": "● 思考中",
+  "statusIdle": "● アイドル",
+  "emptyHeadline": "エージェントに何か作らせてみましょう",
+  "emptySubline": "要件を記述すると AI が作成します",
+  "creatingApp": "⚡ アプリ作成中…",
+  "placeholderContinue": "会話を続ける…",
+  "placeholderStart": "ビットコイン価格を見られるツールを作って…",
+  "hintEnterToSend": "Enter で送信 · AI 駆動"
+}

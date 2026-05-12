@@ -1,0 +1,13 @@
+{
+  "title": "Nouveau collaborateur",
+  "titleHint": "Définir le nom, le type d'agent et les permissions",
+  "submit": "Créer",
+  "submitting": "Création…",
+  "nameLabel": "Nom du collaborateur",
+  "namePlaceholder": "ex. Responsable Marketing",
+  "agentTypeLabel": "Type d'agent",
+  "currentSelection": "Sélectionné :",
+  "noSelection": "Non sélectionné",
+  "selectAgentTypeHint": "Veuillez choisir un type d'agent.",
+  "noAgentTypesAvailable": "Aucun type d'agent disponible."
+}

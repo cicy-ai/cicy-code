@@ -1,0 +1,13 @@
+{
+  "titleCode": "CiCy Code",
+  "titleAudit": "CiCy Audit",
+  "subtitleCode": "Connectez-vous avec votre jeton API",
+  "subtitleAudit": "Utilisez votre jeton API pour voir le tableau d'utilisation IA",
+  "apiToken": "Jeton API",
+  "apiTokenHint": "Collez un jeton valide pour continuer",
+  "placeholder": "Collez votre jeton ici…",
+  "submit": "Se connecter avec le jeton",
+  "submitting": "Vérification…",
+  "errorInvalid": "Jeton invalide",
+  "errorConnection": "Échec de la connexion"
+}

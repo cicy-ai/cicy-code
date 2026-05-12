@@ -136,12 +136,13 @@ export const urls = {
     const base = `${config.ttydBase}/ttyd/${paneId}/?token=${token}`;
     return lang ? `${base}&lang=${encodeURIComponent(lang)}` : base;
   },
-  codeServer: (folder: string, token?: string, pageClientId?: string, pagePaneId?: string) => {
+  codeServer: (folder: string, token?: string, pageClientId?: string, pagePaneId?: string, lang?: string) => {
     const f = toRuntimeAbsolutePath(folder);
     const params = [`folder=${encodeURIComponent(f)}`];
     if (token) params.push(`token=${encodeURIComponent(token)}`);
     if (pageClientId) params.push(`client_id=${encodeURIComponent(pageClientId)}`);
     if (pagePaneId) params.push(`page_pane=${encodeURIComponent(pagePaneId)}`);
+    if (lang) params.push(`lang=${encodeURIComponent(lang)}`);
     return `${config.codeServerBase}/?${params.join('&')}`;
   },
   openClaw:   (token?: string)                           => `${config.openClawBase}${token ? `?token=${encodeURIComponent(token)}` : ''}`,

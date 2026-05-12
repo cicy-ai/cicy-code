@@ -1,0 +1,13 @@
+{
+  "claude": "Stable, idéal pour l'analyse et la rédaction",
+  "codex": "Meilleur pour l'exécution et l'édition de code",
+  "opencode": "Codage en style terminal, plus léger",
+  "cursor": "Compatible avec le workflow Cursor Agent",
+  "kiro-cli": "Bon pour la progression de tâches",
+  "copilot": "Centré sur GitHub et complétion",
+  "cicy-wechat": "Adapté au canal WeChat",
+  "cicy-feishu": "Adapté au canal Feishu",
+  "openclaw": "Adapté aux canaux longue durée",
+  "hermes": "Master par défaut, idéal pour la coordination",
+  "cicy-claude": "Wrapper compatible Claude"
+}

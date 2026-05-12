@@ -88,6 +88,35 @@ function languageDisplayName(code: string): string {
   return code;
 }
 
+// Map BCP-47 language code → ISO 3166-1 alpha-2 country code for the flag emoji.
+// For codes that already carry a region (zh-CN), we use that region directly.
+const LANG_TO_COUNTRY: Record<string, string> = {
+  en: 'US', 'zh-CN': 'CN', 'zh-TW': 'TW', 'zh-HK': 'HK', ja: 'JP', ko: 'KR',
+  vi: 'VN', th: 'TH', id: 'ID', ms: 'MY', tl: 'PH', my: 'MM', km: 'KH', lo: 'LA',
+  hi: 'IN', bn: 'BD', ta: 'IN', te: 'IN', ml: 'IN', kn: 'IN', mr: 'IN', gu: 'IN',
+  pa: 'IN', ur: 'PK', ne: 'NP', si: 'LK',
+  es: 'ES', 'es-MX': 'MX', pt: 'PT', 'pt-BR': 'BR', fr: 'FR', 'fr-CA': 'CA',
+  de: 'DE', it: 'IT', nl: 'NL', sv: 'SE', da: 'DK', no: 'NO', fi: 'FI', is: 'IS',
+  ga: 'IE', cy: 'GB', eu: 'ES', ca: 'ES', gl: 'ES', lb: 'LU', fo: 'FO',
+  pl: 'PL', cs: 'CZ', sk: 'SK', hu: 'HU', ro: 'RO', bg: 'BG', hr: 'HR',
+  sr: 'RS', sl: 'SI', mk: 'MK', sq: 'AL', lt: 'LT', lv: 'LV', et: 'EE',
+  mt: 'MT', el: 'GR',
+  ru: 'RU', uk: 'UA', be: 'BY',
+  ar: 'SA', fa: 'IR', he: 'IL', tr: 'TR', az: 'AZ', ku: 'TR',
+  kk: 'KZ', ky: 'KG', uz: 'UZ', tg: 'TJ', mn: 'MN',
+  hy: 'AM', ka: 'GE',
+  sw: 'KE', am: 'ET', ha: 'NG', yo: 'NG', ig: 'NG', zu: 'ZA', xh: 'ZA',
+  af: 'ZA', so: 'SO', rw: 'RW', om: 'ET', sn: 'ZW',
+};
+
+function flagEmoji(code: string): string {
+  const country = LANG_TO_COUNTRY[code];
+  if (!country) return '';
+  return country.toUpperCase().replace(/./g, (ch) =>
+    String.fromCodePoint(0x1F1A5 + ch.charCodeAt(0)),
+  );
+}
+
 function formatClockTime(value: string | null) {
   if (!value) return '';
   const parsed = Date.parse(value);
@@ -1551,7 +1580,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               title={t('language', { ns: 'common' })}
             >
               <span>{t('language', { ns: 'common' })}</span>
-              <span className="flex items-center gap-1 text-[11px] font-normal text-zinc-400">
+              <span className="flex items-center gap-1.5 text-[11px] font-normal text-zinc-400">
+                <span aria-hidden>{flagEmoji(currentLang)}</span>
                 <span data-id="membership-language-current">{languageDisplayName(currentLang)}</span>
                 <ChevronDown className={`h-3 w-3 transition-transform ${langMenuOpen ? 'rotate-180' : ''}`} />
               </span>
@@ -1578,7 +1608,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       className={`flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/5 ${active ? 'text-zinc-100' : translated ? 'text-zinc-300' : 'text-zinc-500'}`}
                       title={translated ? code : `${code} — falls back to English`}
                     >
-                      <span className="truncate">{languageDisplayName(code)}</span>
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span aria-hidden className="text-[12px] leading-none">{flagEmoji(code)}</span>
+                        <span className="truncate">{languageDisplayName(code)}</span>
+                      </span>
                       <span className="flex shrink-0 items-center gap-1.5">
                         {!translated ? <span className="rounded bg-white/[0.04] px-1 py-px text-[9px] font-mono text-zinc-500">en</span> : null}
                         {active ? <Check className="h-3 w-3 text-emerald-400" /> : null}

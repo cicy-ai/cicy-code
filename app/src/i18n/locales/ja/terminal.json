@@ -1,0 +1,22 @@
+{
+  "agentBusy": "エージェントがビジー、ロードボタンでリセットしてください。",
+  "errorCorrectFailed": "修正に失敗",
+  "errorPrefix": "エラー：{{message}}",
+  "agentWorking": "エージェントが作業中、お待ちください…",
+  "enterSendShiftNewline": "Enter=送信、Shift+Enter=改行",
+  "enterNewlineShiftSend": "Enter=改行、Shift+Enter=送信",
+  "enterSend": "⏎ 送信",
+  "shiftEnterSend": "⇧⏎ 送信",
+  "hideVoiceMode": "音声モードを隠す",
+  "showVoiceMode": "音声モードを表示",
+  "placeholderCommand": "コマンドを入力…",
+  "clickToStop": "クリックで停止",
+  "send": "送信",
+  "selectModel": "モデルを選択",
+  "sendCtrlC": "Ctrl+C 中断を送信（2 回クリック）",
+  "confirm": "確認？",
+  "compactHistory": "チャット履歴を圧縮（2 回クリック）",
+  "inputHints": "⌘↵ 英語送信 · ⌘⇧↵ 中国語送信 · Esc 閉じる",
+  "statusThinking": "思考中…",
+  "statusIdle": "アイドル"
+}

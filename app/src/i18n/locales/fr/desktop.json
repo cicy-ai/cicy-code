@@ -1,0 +1,20 @@
+{
+  "thinkingStep": "🧠 Compréhension…",
+  "designStep": "🎨 Conception de l'UI…",
+  "codeStep": "⚙️ Génération du code…",
+  "packageStep": "📦 Packaging…",
+  "appCreated": "✅ « {{name}} » {{icon}} créé ! ({{seconds}}s)\nCliquez sur l'icône pour ouvrir.",
+  "createFailed": "Échec de création : {{detail}}",
+  "createErrored": "Erreur de création : {{message}}",
+  "assistantOops": "Désolé, quelque chose a mal tourné.",
+  "assistantConnFailed": "Échec de connexion, réessayez.",
+  "statusCreating": "● Création",
+  "statusThinking": "● Réflexion",
+  "statusIdle": "● Inactif",
+  "emptyHeadline": "Laissez votre agent construire quelque chose",
+  "emptySubline": "Décrivez votre besoin et l'IA le construira",
+  "creatingApp": "⚡ Création de l'application…",
+  "placeholderContinue": "Poursuivre la conversation…",
+  "placeholderStart": "Construis-moi un outil pour suivre le prix du bitcoin…",
+  "hintEnterToSend": "Appuyez sur Entrée pour envoyer · Propulsé par IA"
+}
