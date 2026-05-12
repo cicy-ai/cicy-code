@@ -2,6 +2,7 @@ import { Children, cloneElement, isValidElement, type ReactNode, useEffect, useM
 import { Brain, Search, Send, Settings } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Trans, useTranslation } from 'react-i18next';
 import config from '../../config';
 import apiService from '../../services/api';
 import { TokenManager } from '../../services/tokenManager';
@@ -38,25 +39,25 @@ type PromptRulesDraft = Record<PromptRuleKey, PromptRuleDraft>;
 const HISTORY_PAGE_SIZE = 30;
 const PROMPT_RULE_KEYS: PromptRuleKey[] = ['global', 'project', 'agent'];
 
-const tabs: Array<{ id: InspectorTab; label: string }> = [
-  { id: 'overview', label: '概览' },
-  { id: 'history', label: 'History' },
-  { id: 'memory', label: '运行时记忆' },
-  { id: 'settings', label: '设置' },
+const tabs: Array<{ id: InspectorTab; labelKey: string }> = [
+  { id: 'overview', labelKey: 'tabOverview' },
+  { id: 'history', labelKey: 'tabHistory' },
+  { id: 'memory', labelKey: 'tabMemory' },
+  { id: 'settings', labelKey: 'tabSettings' },
 ];
 
 const settingsSections = [
-  { id: 'general', label: '常规', icon: Settings },
-  { id: 'model', label: '模型', icon: Brain },
-  { id: 'telegram', label: 'Telegram', icon: Send },
+  { id: 'general', labelKey: 'sectionGeneral', icon: Settings },
+  { id: 'model', labelKey: 'sectionModel', icon: Brain },
+  { id: 'telegram', labelKey: 'sectionTelegram', icon: Send },
 ] as const;
 
 type SettingsSectionId = typeof settingsSections[number]['id'];
 
 const memorySections = [
-  { id: 'global', label: 'Global' },
-  { id: 'agent', label: 'Agent' },
-  { id: 'preview', label: '预览' },
+  { id: 'global', labelKey: 'memoryGlobal' },
+  { id: 'agent', labelKey: 'memoryAgent' },
+  { id: 'preview', labelKey: 'memoryPreview' },
 ] as const;
 
 type MemorySectionId = typeof memorySections[number]['id'];
@@ -65,10 +66,10 @@ function formatTime(value?: string) {
   if (!value) return '';
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) return value;
-  return new Date(parsed).toLocaleString('zh-CN', { hour12: false });
+  return new Date(parsed).toLocaleString(undefined, { hour12: false });
 }
 
-function compactText(value?: string, fallback = '暂无', limit?: number) {
+function compactText(value?: string, fallback = '', limit?: number) {
   const text = String(value || '').trim();
   if (!text) return fallback;
   if (typeof limit === 'number' && limit > 0) {
@@ -125,9 +126,9 @@ function formatPercent(value?: number) {
   return `${value}%`;
 }
 
-function formatStatusLabel(value?: string) {
+function formatStatusLabel(value: string | undefined, idleLabel: string) {
   const text = String(value || '').trim();
-  if (!text) return '空闲';
+  if (!text) return idleLabel;
   const parts = text.split(/\s+/).filter(Boolean);
   if (parts.length >= 2) {
     const chinese = parts.find((part) => /[\u4e00-\u9fff]/.test(part));
@@ -152,8 +153,8 @@ function pickUsageValue(current?: number, cumulative?: number) {
 
 function createEmptyPromptRuleDraft(): PromptRulesDraft {
   return {
-    global: { content: '', enabled: false, inject_on_request: false, updated_at: '', available: true, label: '全局', key: 'global' },
-    project: { content: '', enabled: false, inject_on_request: false, updated_at: '', available: false, label: '项目', key: '' },
+    global: { content: '', enabled: false, inject_on_request: false, updated_at: '', available: true, label: 'global', key: 'global' },
+    project: { content: '', enabled: false, inject_on_request: false, updated_at: '', available: false, label: 'project', key: '' },
     agent: { content: '', enabled: false, inject_on_request: false, updated_at: '', available: true, label: 'Agent', key: '' },
   };
 }
@@ -178,7 +179,7 @@ function buildPromptRulesDraft(data: any, paneId: string): PromptRulesDraft {
     global: normalizePromptRuleDraft(promptRules.global, base.global),
     project: normalizePromptRuleDraft(promptRules.project, {
       ...base.project,
-      label: promptRules?.project?.label || '项目',
+      label: promptRules?.project?.label || 'project',
       key: promptRules?.project_key || promptRules?.project?.key || '',
       available: !!(promptRules?.project?.available),
     }),
@@ -290,7 +291,7 @@ function shouldShowHistorySnippet(item: any) {
 function InspectorMarkdown({
   text,
   className = '',
-  fallback = '暂无',
+  fallback = '',
   dataId,
   highlightQuery = '',
 }: {
@@ -335,6 +336,7 @@ export default function AgentInspector({
   liveStatus?: string;
   inspectorVersion?: number;
 }) {
+  const { t } = useTranslation('agentInspector');
   const [tab, setTab] = useState<InspectorTab>('overview');
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [queryDraft, setQueryDraft] = useState('');
@@ -467,8 +469,8 @@ export default function AgentInspector({
       notes: { content: '', updated_at: '' },
       runtime_memory: { content: '', enabled: false, updated_at: '' },
       prompt_rules: {
-        global: { content: '', enabled: false, inject_on_request: false, available: true, label: '全局', key: 'global' },
-        project: { content: '', enabled: false, inject_on_request: false, available: false, label: '项目', key: '' },
+        global: { content: '', enabled: false, inject_on_request: false, available: true, label: 'global', key: 'global' },
+        project: { content: '', enabled: false, inject_on_request: false, available: false, label: 'project', key: '' },
         agent: { content: '', enabled: false, inject_on_request: false, available: true, label: paneId, key: paneId },
       },
     });
@@ -543,9 +545,9 @@ export default function AgentInspector({
     try {
       const { data: next } = await apiService.updateAgentInspectorNotes(paneId, notesDraft);
       setData((prev: any) => ({ ...(prev || {}), notes: next.notes }));
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: `${paneId} 备注已保存` }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastNotesSaved', { paneId }) }));
     } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: `错误：${paneId} 备注保存失败` }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastNotesSaveFailed', { paneId }) }));
     } finally {
       setNotesSaving(false);
     }
@@ -569,12 +571,12 @@ export default function AgentInspector({
           overlay_preview: next.prompt_rules?.overlay_preview || '',
           runtime_memory_enabled: next.runtime_memory?.enabled,
           runtime_memory_updated: next.runtime_memory?.updated_at,
-          runtime_memory_preview: compactText(next.runtime_memory?.content, '暂无', 160),
+          runtime_memory_preview: compactText(next.runtime_memory?.content, t('fallbackNone'), 160),
         },
       }));
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: `${paneId} Prompt Rules 已保存` }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastPromptRulesSaved', { paneId }) }));
     } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: `错误：${paneId} Prompt Rules 保存失败` }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastPromptRulesSaveFailed', { paneId }) }));
     } finally {
       setMemorySaving(false);
     }
@@ -636,7 +638,7 @@ export default function AgentInspector({
     setSettingsSaving(true);
     try {
       if (await hasDuplicateTelegramToken()) {
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: '这个 token 已绑，请更换其他 token' }));
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastTokenAlreadyBound') }));
         return;
       }
       const payload = {
@@ -655,9 +657,9 @@ export default function AgentInspector({
       onPanePatch?.(paneId, payload);
       setSettingsData(payload);
       setGeneralSettingsBaseline(serializeGeneralSettings(payload));
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: '已保存', variant: 'success' } }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: t('toastSettingsSaved'), variant: 'success' } }));
     } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: `错误：${paneId} 设置保存失败` }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastSettingsSaveFailed', { paneId }) }));
     } finally {
       setSettingsSaving(false);
     }
@@ -680,9 +682,9 @@ export default function AgentInspector({
       onPanePatch?.(paneId, payload);
       setSettingsData(next);
       setModelSettingsBaseline(serializeModelSettings(next));
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: '已保存', variant: 'success' } }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: t('toastSettingsSaved'), variant: 'success' } }));
     } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: `错误：${paneId} 模型设置保存失败` }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastModelSettingsSaveFailed', { paneId }) }));
     } finally {
       setSettingsSaving(false);
     }
@@ -708,7 +710,7 @@ export default function AgentInspector({
                 data-id="agent-inspector-history-search"
                 value={queryDraft}
                 onChange={(event) => setQueryDraft(event.target.value)}
-                placeholder="搜索 history..."
+                placeholder={t('historySearchPlaceholder')}
                 className="h-10 w-full bg-transparent pl-10 pr-3 text-sm leading-10 text-zinc-100 outline-none placeholder:text-zinc-600"
               />
             </div>
@@ -724,13 +726,13 @@ export default function AgentInspector({
               <div data-id="agent-inspector-overview-summary-grid" className="space-y-2 px-1">
                 <div data-id="agent-inspector-overview-card-status" className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
                   <div className="min-w-0">
-                    <div data-id="agent-inspector-overview-card-status-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">状态</div>
-                    <div data-id="agent-inspector-overview-card-status-value" className="mt-1 text-base font-medium text-zinc-100">{formatStatusLabel(overview.status_label)}</div>
+                    <div data-id="agent-inspector-overview-card-status-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">{t('overviewStatus')}</div>
+                    <div data-id="agent-inspector-overview-card-status-value" className="mt-1 text-base font-medium text-zinc-100">{formatStatusLabel(overview.status_label, t('statusIdle'))}</div>
                   </div>
                   <div className="mt-3 min-w-0">
-                    <div data-id="agent-inspector-overview-card-model-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">模型</div>
+                    <div data-id="agent-inspector-overview-card-model-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">{t('overviewModel')}</div>
                     <div data-id="agent-inspector-overview-card-model-value" className="mt-1 break-all text-sm font-medium leading-5 text-zinc-100">
-                      {compactText(overview.model, '未知')}
+                      {compactText(overview.model, t('modelUnknown'))}
                     </div>
                     {formatProviderLabel(overview.provider) ? (
                       <div data-id="agent-inspector-overview-card-model-meta" className="mt-1 text-[11px] text-zinc-500">
@@ -764,9 +766,9 @@ export default function AgentInspector({
 
               <div data-id="agent-inspector-overview-notes-section" className="space-y-2 px-1">
                 <div className="flex items-center justify-between gap-3 text-[11px] text-zinc-500">
-                  <span data-id="agent-inspector-overview-notes-label" className="uppercase tracking-[0.14em]">备注</span>
+                  <span data-id="agent-inspector-overview-notes-label" className="uppercase tracking-[0.14em]">{t('notesLabel')}</span>
                   <span data-id="agent-inspector-overview-notes-updated" className="truncate">
-                    {notesSaving ? '保存中...' : formatTime(data?.notes?.updated_at)}
+                    {notesSaving ? t('notesSaving') : formatTime(data?.notes?.updated_at)}
                   </span>
                 </div>
                 <textarea
@@ -775,7 +777,7 @@ export default function AgentInspector({
                   onChange={(event) => setNotesDraft(event.target.value)}
                   onBlur={() => { void saveNotes(); }}
                   rows={8}
-                  placeholder="备注..."
+                  placeholder={t('notesPlaceholder')}
                   className="w-full resize-none rounded-lg bg-[#101114] px-3 py-2.5 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-600"
                 />
               </div>
@@ -788,7 +790,7 @@ export default function AgentInspector({
             <>
               <div data-id="agent-inspector-history-list" className="pb-4">
                 {(history.items || []).length === 0 ? (
-                  <EmptyState text={history.reason || (query ? '没有匹配的历史记录' : '这个 agent 还没有 history')} />
+                  <EmptyState text={history.reason || (query ? t('historyNoMatch') : t('historyEmpty'))} />
                 ) : (
                   (history.items || []).map((item: any, index: number) => (
                     <article
@@ -803,7 +805,7 @@ export default function AgentInspector({
                           <InspectorMarkdown
                             dataId="agent-inspector-history-item-question-markdown"
                             text={item.q}
-                            fallback="暂无"
+                            fallback={t('fallbackNone')}
                             highlightQuery={query}
                             className="inspector-markdown inspector-markdown-question break-words [overflow-wrap:anywhere] text-[12px] leading-5 text-zinc-50"
                           />
@@ -815,7 +817,7 @@ export default function AgentInspector({
                           <InspectorMarkdown
                             dataId="agent-inspector-history-item-answer-markdown"
                             text={item.a}
-                            fallback="暂无"
+                            fallback={t('fallbackNone')}
                             highlightQuery={query}
                             className="inspector-markdown inspector-markdown-answer break-words [overflow-wrap:anywhere] text-[12px] leading-5 text-zinc-300"
                           />
@@ -838,7 +840,7 @@ export default function AgentInspector({
                       onClick={() => setHistoryOffset((value) => Math.max(0, value - HISTORY_PAGE_SIZE))}
                       className="rounded-md bg-white/[0.04] px-2 py-1 text-zinc-300 transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-30"
                     >
-                      上一页
+                      {t('historyPrev')}
                     </button>
                     <button
                       type="button"
@@ -847,7 +849,7 @@ export default function AgentInspector({
                       onClick={() => setHistoryOffset((value) => value + HISTORY_PAGE_SIZE)}
                       className="rounded-md bg-white/[0.04] px-2 py-1 text-zinc-300 transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-30"
                     >
-                      下一页
+                      {t('historyNext')}
                     </button>
                   </div>
                 </div>
@@ -863,7 +865,7 @@ export default function AgentInspector({
                   Prompt Rules
                 </div>
                 <div className="text-[12px] leading-5 text-zinc-400">
-                  请求前会按 <code>global -&gt; project -&gt; agent</code> 合并；中文回复由 gateway 统一注入，不再依赖 pane 配置。
+                  <Trans i18nKey="promptRulesIntro" ns="agentInspector" components={{ code: <code /> }} />
                 </div>
               </div>
               <div data-id="agent-inspector-memory-sections" className="scrollbar-zero flex gap-1 overflow-x-auto whitespace-nowrap">
@@ -877,7 +879,7 @@ export default function AgentInspector({
                       memorySection === item.id ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
                     }`}
                   >
-                    <span>{item.label}</span>
+                    <span>{t(item.labelKey)}</span>
                   </button>
                 ))}
               </div>
@@ -886,9 +888,9 @@ export default function AgentInspector({
                   <PromptRuleEditor
                     dataId="agent-inspector-memory-global"
                     title="Global"
-                    subtitle="所有 agent 共用"
+                    subtitle={t('globalSharedHint')}
                     value={promptRulesDraft.global}
-                    placeholder="例如：默认中文回复；输出简洁；优先直接给结论。"
+                    placeholder={t('globalPlaceholder')}
                     onChange={(patch) => patchPromptRule('global', patch)}
                   />
                 )}
@@ -898,14 +900,14 @@ export default function AgentInspector({
                     title="Agent"
                     subtitle={promptRulesDraft.agent.label || paneId}
                     value={promptRulesDraft.agent}
-                    placeholder="例如：只负责 w-20010；先查再改；不要碰 UI。"
+                    placeholder={t('agentPlaceholder')}
                     onChange={(patch) => patchPromptRule('agent', patch)}
                   />
                 )}
                 {memorySection === 'preview' && (
                   <div data-id="agent-inspector-memory-overlay-preview" className="rounded-lg bg-[#101114] px-3 py-2.5 text-[12px] leading-5 text-zinc-400">
-                    <div className="mb-1 text-[11px] uppercase tracking-[0.14em] text-zinc-500">最终注入预览</div>
-                    {compactText(overview.overlay_preview, '当前没有可注入的运行时记忆内容')}
+                    <div className="mb-1 text-[11px] uppercase tracking-[0.14em] text-zinc-500">{t('memoryPreviewTitle')}</div>
+                    {compactText(overview.overlay_preview, t('memoryPreviewEmpty'))}
                   </div>
                 )}
               </div>
@@ -928,7 +930,7 @@ export default function AgentInspector({
                       }`}
                     >
                       <Icon className="h-3.5 w-3.5" />
-                      <span>{item.label}</span>
+                      <span>{t(item.labelKey)}</span>
                     </button>
                   );
                 })}
@@ -936,53 +938,53 @@ export default function AgentInspector({
 
               {settingsSection === 'general' && (
                 <div data-id="agent-inspector-settings-general" className="space-y-5">
-                  <InspectorField label="标题">
-                    <InspectorInput value={settingsData?.title || ''} onChange={(value) => patchSettingsData({ title: value })} onBlur={() => { void saveSettings(); }} placeholder="窗格标题" />
+                  <InspectorField label={t('fieldTitle')}>
+                    <InspectorInput value={settingsData?.title || ''} onChange={(value) => patchSettingsData({ title: value })} onBlur={() => { void saveSettings(); }} placeholder={t('fieldTitlePlaceholder')} />
                   </InspectorField>
-                  <InspectorField label="工作目录" desc="worker 工作区目录" mono>
+                  <InspectorField label={t('fieldWorkspace')} desc={t('fieldWorkspaceDesc')} mono>
                     <InspectorInput value={settingsData?.workspace || ''} onChange={(value) => patchSettingsData({ workspace: value })} placeholder="/home/user/project" mono readOnly />
                   </InspectorField>
-                  <InspectorField label="智能体类型">
+                  <InspectorField label={t('fieldAgentType')}>
                     <div
                       data-id="agent-inspector-settings-agent-types"
                       className="flex items-center gap-3 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200"
                     >
                       <AgentAvatar
                         agentType={settingsData?.agent_type}
-                        title={settingsData?.agent_type || '未设置'}
+                        title={settingsData?.agent_type || t('agentTypeUnset')}
                         variant="select"
                         dataId="agent-inspector-settings-agent-type-avatar"
                       />
-                      <span className="truncate">{settingsData?.agent_type || '未设置'}</span>
+                      <span className="truncate">{settingsData?.agent_type || t('agentTypeUnset')}</span>
                     </div>
                   </InspectorField>
                   <InspectorToggle
-                    label="自动启动"
-                    desc="服务重启后恢复"
+                    label={t('autoStart')}
+                    desc={t('autoStartHint')}
                     checked={settingsData?.active !== false}
                     onChange={(value) => patchSettingsData({ active: value })}
                     onBlur={() => { void saveSettings(); }}
                   />
                   <InspectorToggle
-                    label="启动时允许所有操作"
-                    desc="Codex / Claude / Opencode 追加全部允许操作"
+                    label={t('allowAllActions')}
+                    desc={t('allowAllActionsHint')}
                     checked={!!settingsData?.allow_all_actions}
                     onChange={(value) => patchSettingsData({ allow_all_actions: value })}
                     onBlur={() => { void saveSettings(); }}
                   />
                   <InspectorToggle
-                    label="启用代理"
-                    desc="启动前执行 cicy_proxy_on，并检查 mihomo IN-USER 规则"
+                    label={t('useProxy')}
+                    desc={t('useProxyHint')}
                     checked={!!settingsData?.use_proxy}
                     onChange={(value) => patchSettingsData({ use_proxy: value })}
                     onBlur={() => { void saveSettings(); }}
                   />
                   {settingsData?.use_proxy && (
                     <>
-                      <InspectorField label="代理密码" desc="留空时优先 api_token，不存在时回退 user==pass">
-                        <InspectorInput value={settingsData?.proxy?.password || ''} onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), password: value } })} onBlur={() => { void saveSettings(); }} placeholder="可选，自定义代理密码" mono />
+                      <InspectorField label={t('proxyPassword')} desc={t('proxyPasswordDesc')}>
+                        <InspectorInput value={settingsData?.proxy?.password || ''} onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), password: value } })} onBlur={() => { void saveSettings(); }} placeholder={t('proxyPasswordPlaceholder')} mono />
                       </InspectorField>
-                      <InspectorField label="mihomo 规则" desc="可选，指定必须存在的完整规则，例如 IN-USER,w-10001,proxy-a">
+                      <InspectorField label={t('mihomoRule')} desc={t('mihomoRuleDesc')}>
                         <InspectorInput value={settingsData?.proxy?.rule || ''} onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), rule: value } })} onBlur={() => { void saveSettings(); }} placeholder="IN-USER,w-10001,proxy-a" mono />
                       </InspectorField>
                     </>
@@ -994,18 +996,18 @@ export default function AgentInspector({
                 <div data-id="agent-inspector-settings-model" className="space-y-5">
                   <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
                     <div>
-                      <div className="text-sm font-medium text-zinc-100">启动默认模型</div>
-                      <div className="mt-1 text-xs leading-5 text-zinc-500">同时作为 agent 启动默认模型和网关默认模型。留空时跟随当前 provider 默认值。</div>
+                      <div className="text-sm font-medium text-zinc-100">{t('modelDefaultTitle')}</div>
+                      <div className="mt-1 text-xs leading-5 text-zinc-500">{t('modelDefaultDesc')}</div>
                     </div>
-                    <InspectorField label="Default Model" desc="例如：gpt-5.5 / claude-opus-4-7">
-                      <InspectorInput value={settingsData?.default_model || ''} onChange={(value) => patchSettingsData({ default_model: value })} onBlur={() => { void saveModelSettings(); }} placeholder="留空则跟随当前 agent 默认" mono />
+                    <InspectorField label={t('modelDefaultFieldLabel')} desc={t('modelDefaultFieldDesc')}>
+                      <InspectorInput value={settingsData?.default_model || ''} onChange={(value) => patchSettingsData({ default_model: value })} onBlur={() => { void saveModelSettings(); }} placeholder={t('modelDefaultPlaceholder')} mono />
                     </InspectorField>
                   </div>
 
                   <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
                     <InspectorToggle
-                      label="使用官方认证"
-                      desc="开启后不注入本地 gateway auth"
+                      label={t('officialAuth')}
+                      desc={t('officialAuthHint')}
                       checked={!!settingsData?.use_official_auth}
                       onChange={(value) => patchSettingsData({ use_official_auth: value, runtime_ai: value ? null : settingsData?.runtime_ai || null })}
                       onBlur={() => { void saveModelSettings(); }}
@@ -1015,21 +1017,21 @@ export default function AgentInspector({
                   {!settingsData?.use_official_auth && (
                     <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
                       <div>
-                        <div className="text-sm font-medium text-zinc-100">网关运行时覆盖</div>
-                        <div className="mt-1 text-xs leading-5 text-zinc-500">运行时只覆盖 provider；模型跟随上方默认模型。</div>
+                        <div className="text-sm font-medium text-zinc-100">{t('gatewayOverrideTitle')}</div>
+                        <div className="mt-1 text-xs leading-5 text-zinc-500">{t('gatewayOverrideDesc')}</div>
                       </div>
                       <div className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2 text-xs text-zinc-400">
-                        <div>默认 Provider：{runtimeAIDefault?.provider_label || runtimeAIDefault?.provider_name || '未配置'}</div>
+                        <div>{t('defaultProvider', { name: runtimeAIDefault?.provider_label || runtimeAIDefault?.provider_name || t('defaultProviderEmpty') })}</div>
                       </div>
                       <InspectorToggle
-                        label="启用自定义覆盖"
-                        desc="关闭时完全跟随当前 agent 默认 provider"
+                        label={t('customOverride')}
+                        desc={t('customOverrideDesc')}
                         checked={runtimeAIEnabled}
                         onChange={(value) => patchSettingsData({ runtime_ai: value ? (settingsData?.runtime_ai || { provider_name: '' }) : null })}
                         onBlur={() => { void saveModelSettings(); }}
                       />
                       {runtimeAIEnabled && (
-                        <InspectorField label="Provider" desc="按当前 agent 协议过滤后的可用 provider">
+                        <InspectorField label={t('providerFieldLabel')} desc={t('providerFieldDesc')}>
                           <Select
                             value={settingsData?.runtime_ai?.provider_name || ''}
                             onChange={(value) => {
@@ -1046,7 +1048,7 @@ export default function AgentInspector({
                               }
                             }}
                             options={runtimeAISelectOptions}
-                            placeholder="选择 provider"
+                            placeholder={t('providerSelectPlaceholder')}
                             searchable
                           />
                         </InspectorField>
@@ -1059,16 +1061,16 @@ export default function AgentInspector({
               {settingsSection === 'telegram' && (
                 <div data-id="agent-inspector-settings-telegram" className="space-y-5">
                   <InspectorToggle
-                    label="启用 Telegram"
-                    desc="通过 Telegram 机器人发送通知"
+                    label={t('telegramToggle')}
+                    desc={t('telegramToggleDesc')}
                     checked={!!settingsData?.tg_enable}
                     onChange={(value) => patchSettingsData({ tg_enable: value })}
                   />
-                  <InspectorField label="机器人令牌" desc="保存时会检查这个 token 是否已绑定到其他 agent">
+                  <InspectorField label={t('telegramTokenLabel')} desc={t('telegramTokenDesc')}>
                     <InspectorInput value={settingsData?.tg_token || ''} onChange={(value) => patchSettingsData({ tg_token: value, tg_chat_id: '' })} mono placeholder="1234567890:ABCdef..." />
                   </InspectorField>
-                  <InspectorField label="聊天 ID" desc="配置好 token 后，在 bot 里发一条消息，chat_id 会自动获取。">
-                    <InspectorInput value={settingsData?.tg_chat_id || ''} onChange={() => {}} mono readOnly placeholder="等待 bot 首条消息后自动绑定" />
+                  <InspectorField label={t('telegramChatIdLabel')} desc={t('telegramChatIdDesc')}>
+                    <InspectorInput value={settingsData?.tg_chat_id || ''} onChange={() => {}} mono readOnly placeholder={t('telegramChatIdPlaceholder')} />
                   </InspectorField>
                 </div>
               )}
@@ -1115,6 +1117,7 @@ function PromptRuleEditor({
   placeholder?: string;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation('agentInspector');
   const unavailable = disabled || value.available === false;
   return (
     <section data-id={dataId} className="space-y-2 rounded-lg bg-[#101114] px-3 py-2.5">
@@ -1127,13 +1130,13 @@ function PromptRuleEditor({
       </div>
       <div className="grid grid-cols-2 gap-2">
         <CompactToggle
-          label="启用"
+          labelKey="promptRuleEnable"
           checked={!!value.enabled}
           disabled={unavailable}
           onChange={(checked) => onChange({ enabled: checked })}
         />
         <CompactToggle
-          label="请求时注入"
+          labelKey="promptRuleInject"
           checked={!!value.inject_on_request}
           disabled={unavailable}
           onChange={(checked) => onChange({ inject_on_request: checked })}
@@ -1145,7 +1148,7 @@ function PromptRuleEditor({
         disabled={unavailable}
         onChange={(event) => onChange({ content: event.target.value })}
         rows={6}
-        placeholder={unavailable ? '当前 agent 还没有 project key，暂时不能配置 project scope。' : placeholder}
+        placeholder={unavailable ? t('promptRuleUnavailable', { ns: 'agentInspector' }) : placeholder}
         className="w-full resize-none rounded-lg bg-[#09090b] px-3 py-2.5 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-600 disabled:cursor-not-allowed disabled:text-zinc-600"
       />
     </section>
@@ -1153,16 +1156,17 @@ function PromptRuleEditor({
 }
 
 function CompactToggle({
-  label,
+  labelKey,
   checked,
   onChange,
   disabled,
 }: {
-  label: string;
+  labelKey: string;
   checked: boolean;
   onChange: (value: boolean) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation('agentInspector');
   return (
     <button
       type="button"
@@ -1170,7 +1174,7 @@ function CompactToggle({
       onClick={() => onChange(!checked)}
       className="flex items-center justify-between rounded-lg bg-[#09090b] px-2.5 py-2 text-left text-[12px] text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40"
     >
-      <span>{label}</span>
+      <span>{t(labelKey)}</span>
       <span className={`relative h-5 w-9 rounded-full transition-colors ${checked ? 'bg-blue-600' : 'bg-white/[0.08]'}`}>
         <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${checked ? 'translate-x-4' : 'translate-x-0.5'}`} />
       </span>
