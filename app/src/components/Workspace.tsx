@@ -618,6 +618,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCanvasLocateRequest({ paneId: nextStoredPaneId, nonce: Date.now(), zoomToActual: true });
   }, [canvasPaneIds, paneId, activeTeamPaneId]);
   const activeCliPaneId = canvasPaneIds.includes(activeTeamPaneId[paneId]) ? activeTeamPaneId[paneId] : paneId;
+  // Keep a ref so long-lived effects (chat-ws lifecycle) can read the latest
+  // value at firing time without taking activeCliPaneId as a dep — otherwise
+  // poll-driven auto-switches between agents would tear down + recreate the
+  // WS every time the active pane flipped.
+  const activeCliPaneIdRef = useRef(activeCliPaneId);
+  useEffect(() => { activeCliPaneIdRef.current = activeCliPaneId; }, [activeCliPaneId]);
   useEffect(() => {
     setInspectorPaneId(activeCliPaneId || paneId);
   }, [activeCliPaneId, paneId]);
@@ -855,7 +861,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             const filePath = String(msg.data.path || '').trim();
             if (targetClientId === clientId && filePath) {
               const workspaceState = devStore.getSnapshot().Workspace?.state || {};
-              const runtimeActivePaneId = String(workspaceState.activeCliPaneId || activeCliPaneId || paneId).trim();
+              const runtimeActivePaneId = String(workspaceState.activeCliPaneId || activeCliPaneIdRef.current || paneId).trim();
               const tmuxTarget = runtimeActivePaneId || paneId;
               const normalizedFilePath = `/${filePath.replace(/^\/+/, '')}`;
               const promptText = `file://${normalizedFilePath.replace(/^\/+/, '')}`;
@@ -964,12 +970,17 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       setChatWsConnected(false);
       setNetLatency(null);
       setChatWsState({
-        activeChatPaneId: activeCliPaneId,
+        activeChatPaneId: activeCliPaneIdRef.current,
         chatWsConnected: false,
         chatWsClientId: clientId,
       });
     };
-  }, [activeCliPaneId, broadcastChatWsMessage, pageClientId, paneId, sendChatWsMessage, setChatWsSender, setChatWsState, token, wsClientPlatform, wsClientUserAgent]);
+    // activeCliPaneId is intentionally NOT a dep: switching the active pane
+    // (which can fire on every poll_data when the team membership changes)
+    // must not tear down + recreate the WS. The dedicated useEffect below
+    // sends register_active_channel when the active pane actually changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [broadcastChatWsMessage, pageClientId, paneId, sendChatWsMessage, setChatWsSender, setChatWsState, token, wsClientPlatform, wsClientUserAgent]);
 
   useEffect(() => {
     const clientId = String(chatWsClientId || pageClientId || '').trim();
@@ -1614,8 +1625,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     key={code}
                     type="button"
                     data-id={`membership-language-${code}`}
-                    onClick={() => { void i18n.changeLanguage(code); }}
-                    className={`rounded-md border px-2 py-0.5 font-mono text-[10px] transition-colors ${active ? 'border-white/20 bg-white/10 text-zinc-100' : 'border-white/[0.06] text-zinc-500 hover:border-white/[0.12] hover:text-zinc-200'}`}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void i18n.changeLanguage(code);
+                    }}
+                    className={`cursor-pointer rounded-md border px-2 py-0.5 font-mono text-[10px] transition-colors ${active ? 'border-white/20 bg-white/10 text-zinc-100' : 'border-white/[0.06] text-zinc-500 hover:border-white/[0.12] hover:text-zinc-200'}`}
                   >
                     {t(labelKey, { ns: 'common' })}
                   </button>
