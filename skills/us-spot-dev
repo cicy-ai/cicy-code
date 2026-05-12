@@ -268,12 +268,17 @@ def ensure_sg(vpc_id):
 
 
 def purge_known_hosts(ip):
-    # Re-running this skill recreates the container (fresh sshd host keys) and
-    # may reuse the same IP, so a stale ~/.ssh/known_hosts entry would make
-    # `StrictHostKeyChecking accept-new` fail. Drop any prior entries first.
-    for target in (ip, f"[{ip}]:{SSH_PORT_HOST}", f"[{ip}]:{SSH_PORT_CONTAINER}"):
-        subprocess.run(["ssh-keygen", "-R", target], check=False,
-                       capture_output=True, text=True)
+    # A recreated instance has fresh host keys; ~/.ssh/config now uses the stable
+    # Cloudflare hostname, so stale entries (by IP *and* by that hostname) would
+    # trip StrictHostKeyChecking. Drop them all.
+    names = [ip]
+    h = cf_dns_host()
+    if h:
+        names.append(h)
+    for n in names:
+        for target in (n, f"[{n}]:{SSH_PORT_HOST}", f"[{n}]:{SSH_PORT_CONTAINER}"):
+            subprocess.run(["ssh-keygen", "-R", target], check=False,
+                           capture_output=True, text=True)
 
 
 def _strip_ssh_block(content, host):
