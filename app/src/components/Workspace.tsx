@@ -261,6 +261,12 @@ function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
 
 export default function Workspace({ agentId, onSelectAgent }: Props) {
   const { t, i18n: i18nLive } = useTranslation('workspace');
+  const [currentLang, setCurrentLang] = useState<string>(() => i18nLive.resolvedLanguage ?? i18nLive.language ?? 'en');
+  useEffect(() => {
+    const handler = (lng: string) => setCurrentLang(lng);
+    i18nLive.on('languageChanged', handler);
+    return () => { i18nLive.off('languageChanged', handler); };
+  }, [i18nLive]);
   const {
     setChatWsState,
     setChatWsSender,
@@ -394,11 +400,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [chatSuggestionPending, setChatSuggestionPending] = useState(false);
   const [chatSuggestionSending, setChatSuggestionSending] = useState(false);
   const [filesTargetPaneId, setFilesTargetPaneId] = useState<string | null>(null);
-  const chatWsRef = useRef<WebSocket | null>(null);
-  const chatWsReconnectTimerRef = useRef<number | null>(null);
-  const chatWsPingTimerRef = useRef<number | null>(null);
-  const chatWsPingSentAtRef = useRef<number | null>(null);
-  const chatWsPingRequestIdRef = useRef<string | null>(null);
+  // Refs kept in sync so the chat-ws message handler (a stable useCallback)
+  // can read the latest paneId / pageClientId / openCodeFile without taking
+  // them as deps (which would invalidate the callback on every change and
+  // re-subscribe to the singleton).
+  const paneIdRef = useRef(paneId);
+  const pageClientIdRef = useRef<string>('');
+  useEffect(() => { paneIdRef.current = paneId; }, [paneId]);
+  useEffect(() => { pageClientIdRef.current = pageClientId; }, [pageClientId]);
+  const openCodeFileRef = useRef<((p: string, r?: string) => void) | null>(null);
 
   const membershipCard = useMemo(() => normalizeMembershipCard(globalVar?.membership), [globalVar]);
   const [membershipMenuOpen, setMembershipMenuOpen] = useState(false);
@@ -690,300 +700,202 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     };
   }, [sendChatWsMessage]);
 
+  // === chat-ws ownership lives in services/chatWs.ts (module singleton) ===
+  // React only:
+  //   1. tells the singleton what URL params to use (configure)
+  //   2. tells it the current active agent (setActiveAgent)
+  //   3. subscribes to messages / connection state
+  // The singleton owns the WebSocket lifetime. Re-renders, StrictMode double
+  // mounts, dep churn — none of it disturbs the connection.
+
+  const handleChatWsMessage = useCallback((msg: any) => {
+    if (msg?.type === 'current_updated' || msg?.type === 'status_change' || msg?.type === 'ai_chunk') {
+      console.log('[chat-ws-live]', msg.type, msg.data || {});
+    }
+    const masterPaneId = paneIdRef.current;
+    const pageClientIdNow = chatWs.currentClientId() || pageClientIdRef.current;
+    if (msg?.type === 'user_q') {
+      setChatWsLiveStatus('pending');
+      setChatWsLiveText('');
+      setChatSuggestionText('');
+      setChatSuggestionPending(false);
+      setChatWsState({ activeChatPaneId: masterPaneId, chatWsLiveStatus: 'pending', chatWsLiveText: '' });
+    } else if (msg?.type === 'ai_chunk') {
+      const delta = String(msg.data?.delta || '');
+      if (delta) {
+        setChatWsLiveText((prev) => {
+          const next = `${prev}${delta}`;
+          setChatWsState({ activeChatPaneId: masterPaneId, chatWsLiveStatus: 'streaming', chatWsLiveText: next });
+          return next;
+        });
+      }
+      setChatWsLiveStatus('streaming');
+    } else if (msg?.type === 'status_change' && msg.data) {
+      window.dispatchEvent(new CustomEvent('agent-status-change', { detail: msg.data }));
+      const nextStatus = String(msg.data?.status || '').toLowerCase();
+      if (nextStatus === 'thinking') setChatWsLiveStatus('pending');
+      else if (nextStatus === 'working' || nextStatus === 'tool_call' || nextStatus === 'tool_use') setChatWsLiveStatus('tool_use');
+      else if (nextStatus === 'streaming') setChatWsLiveStatus('streaming');
+      else if (nextStatus === 'idle' || nextStatus === 'done' || nextStatus === 'completed') setChatWsLiveStatus('done');
+      else if (nextStatus === 'failed' || nextStatus === 'error') setChatWsLiveStatus('failed');
+      setChatWsState({ activeChatPaneId: masterPaneId, chatWsLiveStatus: nextStatus === 'thinking' ? 'pending' : nextStatus === 'working' || nextStatus === 'tool_call' || nextStatus === 'tool_use' ? 'tool_use' : nextStatus === 'streaming' ? 'streaming' : nextStatus === 'failed' || nextStatus === 'error' ? 'failed' : 'done' });
+      if (nextStatus === 'idle' || nextStatus === 'done' || nextStatus === 'completed' || nextStatus === 'failed') {
+        setChatWsInspectorVersion((value) => {
+          const next = value + 1;
+          setChatWsState({ chatWsInspectorVersion: next });
+          return next;
+        });
+      }
+    } else if (msg?.type === 'current_updated') {
+      setChatWsHistoryVersion((value) => {
+        const next = value + 1;
+        setChatWsState({ chatWsHistoryVersion: next });
+        return next;
+      });
+      setChatWsInspectorVersion((value) => {
+        const next = value + 1;
+        setChatWsState({ chatWsInspectorVersion: next });
+        return next;
+      });
+    } else if (msg?.type === 'ai_done') {
+      setChatWsLiveStatus('done');
+      setChatWsState({ activeChatPaneId: masterPaneId, chatWsLiveStatus: 'done' });
+      setChatWsHistoryVersion((value) => {
+        const next = value + 1;
+        setChatWsState({ chatWsHistoryVersion: next });
+        return next;
+      });
+      setChatWsInspectorVersion((value) => {
+        const next = value + 1;
+        setChatWsState({ chatWsInspectorVersion: next });
+        return next;
+      });
+      setChatSuggestionPending(true);
+    } else if (msg?.type === 'desktop_event' && msg.data) {
+      window.dispatchEvent(new CustomEvent('agent-desktop-event', { detail: msg.data }));
+    } else if (msg?.type === 'worker_idle' && msg.data) {
+      window.dispatchEvent(new CustomEvent('agent-worker-idle', { detail: msg.data }));
+    } else if (msg?.type === 'webpage_ping') {
+      const versionText = document.getElementById('version')?.textContent?.trim() || config.version;
+      chatWs.send({ type: 'webpage_pong', data: { requestId: msg.data?.requestId, version: versionText } });
+    } else if (msg?.type === 'exec_js' && msg.data?.code) {
+      try {
+        const result = window.eval(msg.data.code);
+        chatWs.send({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, result: String(result) } });
+      } catch (error: any) {
+        chatWs.send({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, error: error?.message || String(error) } });
+      }
+    } else if (msg?.type === 'code.open_file' && msg.data?.path) {
+      openCodeFileRef.current?.(String(msg.data.path || ''), String(msg.data?.requestId || ''));
+    } else if (msg?.type === 'code.send_path' && msg.data?.path) {
+      const targetClientId = String(msg.data?.page_client_id || '').trim();
+      const filePath = String(msg.data.path || '').trim();
+      if (targetClientId === pageClientIdNow && filePath) {
+        const workspaceState = devStore.getSnapshot().Workspace?.state || {};
+        const runtimeActivePaneId = String(workspaceState.activeCliPaneId || activeCliPaneIdRef.current || masterPaneId).trim();
+        const tmuxTarget = runtimeActivePaneId || masterPaneId;
+        const normalizedFilePath = `/${filePath.replace(/^\/+/, '')}`;
+        const promptText = `file://${normalizedFilePath.replace(/^\/+/, '')}`;
+        window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: promptText } }));
+        sendCommandToTmux(promptText, tmuxTarget, false).then(() => {
+          focusTmuxPaneFrame(tmuxTarget);
+        }).catch(() => {
+          window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastSendFilePathFailed') }));
+        });
+      }
+    } else if (msg?.type === 'poll_data' && msg.data) {
+      const data = msg.data;
+      const nextBoundAgents = Array.isArray(data.agents) ? data.agents : [];
+      const nextPollStatuses = data.statuses && typeof data.statuses === 'object' ? data.statuses : {};
+      setBoundAgents((prev) => isDeepEqual(prev, nextBoundAgents) ? prev : nextBoundAgents);
+      setPollStatuses((prev) => isDeepEqual(prev, nextPollStatuses) ? prev : nextPollStatuses);
+      if (data.system_resources && typeof data.system_resources === 'object') {
+        if (!isDeepEqual(systemResourcesRef.current, data.system_resources)) {
+          const nextSystemResources = data.system_resources as SystemResourceSnapshot;
+          systemResourcesRef.current = nextSystemResources;
+          setSystemResources(nextSystemResources);
+        }
+      }
+      if (data.membership && typeof data.membership === 'object') {
+        setGlobalVar((prev: any) => {
+          const base = prev && typeof prev === 'object' ? prev : {};
+          return isDeepEqual(base.membership, data.membership) ? prev : { ...base, membership: data.membership };
+        });
+      }
+      const st = data.statuses?.[fullPaneId] || data.statuses?.[masterPaneId];
+      if (st?.status) setStatus((prev) => prev === st.status ? prev : st.status);
+      if (st?.title) setAgentDetail((prev: any) => {
+        if (prev?.title === st.title) return prev;
+        return prev ? { ...prev, title: st.title } : { title: st.title };
+      });
+      if (st?.contextUsage != null) setContextUsage((prev) => prev === st.contextUsage ? prev : st.contextUsage);
+    }
+    if (msg?.type === 'system_resources' && msg.data && typeof msg.data === 'object') {
+      if (!isDeepEqual(systemResourcesRef.current, msg.data)) {
+        const nextSystemResources = msg.data as SystemResourceSnapshot;
+        systemResourcesRef.current = nextSystemResources;
+        setSystemResources(nextSystemResources);
+      }
+    }
+    broadcastChatWsMessage(msg);
+  }, [broadcastChatWsMessage, fullPaneId, setChatWsState, setGlobalVar, setSystemResources, t]);
+
+  // (1) Drive the singleton's URL params. configure() reconnects only when
+  // URL-affecting params actually change.
   useEffect(() => {
     if (!token || !paneId) {
-      if (chatWsReconnectTimerRef.current !== null) {
-        window.clearTimeout(chatWsReconnectTimerRef.current);
-        chatWsReconnectTimerRef.current = null;
-      }
-      chatWsRef.current?.close();
-      chatWsRef.current = null;
+      chatWs.shutdown();
       setChatWsConnected(false);
       setChatWsClientId(null);
       setNetLatency(null);
       setChatWsLiveStatus('idle');
       setChatWsLiveText('');
-      setChatWsState({
-        activeChatPaneId: null,
-        chatWsConnected: false,
-        chatWsClientId: null,
-        chatWsLiveStatus: 'idle',
-        chatWsLiveText: '',
-      });
+      setChatWsState({ activeChatPaneId: null, chatWsConnected: false, chatWsClientId: null, chatWsLiveStatus: 'idle', chatWsLiveText: '' });
       return;
     }
-    const masterAgentId = paneId.replace(/:.*$/, '');
-    const clientId = pageClientId;
-    const proto = config.apiBase.startsWith('https') ? 'wss' : (window.location.protocol === 'https:' ? 'wss' : 'ws');
-    const base = config.apiBase.replace(/^https?/, proto);
-    const isElectron = typeof (window as any).electronRPC === 'function' ? '1' : '0';
-    let dead = false;
-
-    const connect = () => {
-      if (dead) return;
-      if (chatWsReconnectTimerRef.current !== null) {
-        window.clearTimeout(chatWsReconnectTimerRef.current);
-        chatWsReconnectTimerRef.current = null;
-      }
-      if (chatWsPingTimerRef.current !== null) {
-        window.clearInterval(chatWsPingTimerRef.current);
-        chatWsPingTimerRef.current = null;
-      }
-      chatWsPingSentAtRef.current = null;
-      chatWsPingRequestIdRef.current = null;
-      chatWsRef.current?.close();
-      const ws = new WebSocket(`${base}/api/chat/ws?master_agent_id=${encodeURIComponent(masterAgentId)}&token=${encodeURIComponent(token)}&electron=${isElectron}&client_id=${encodeURIComponent(clientId)}&platform=${encodeURIComponent(wsClientPlatform)}`);
-      chatWsRef.current = ws;
-      const sendLatencyPing = () => {
-        if (dead || chatWsRef.current !== ws || ws.readyState !== WebSocket.OPEN) return;
-        const requestId = `ping-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-        chatWsPingRequestIdRef.current = requestId;
-        chatWsPingSentAtRef.current = performance.now();
-        try {
-          ws.send(JSON.stringify({ type: 'ping', data: { requestId } }));
-        } catch {}
-      };
-      ws.onopen = () => {
-        if (dead || chatWsRef.current !== ws) return;
-        setChatWsConnected(true);
-        setChatWsClientId(clientId);
-        setChatWsState({
-          activeChatPaneId: paneId,
-          chatWsConnected: true,
-          chatWsClientId: clientId,
-        });
-        // 连接建立后立即请求 poll 数据
-        //console.log('[poll_request] WS onopen, sending initial poll_request');
-        try { ws.send(JSON.stringify({ type: 'poll_request' })); } catch (e) { console.warn('[poll_request] onopen send failed:', e); }
-        // NOTE: register_active_channel is sent by the dedicated useEffect below
-        // (triggered once chatWsConnected flips true). Sending it here too caused
-        // duplicate register logs on every connect.
-        sendLatencyPing();
-        chatWsPingTimerRef.current = window.setInterval(sendLatencyPing, 5000);
-      };
-      ws.onmessage = (event) => {
-        if (dead || chatWsRef.current !== ws) return;
-        try {
-          const msg = JSON.parse(String(event.data || ''));
-          if (msg?.type === 'current_updated' || msg?.type === 'status_change' || msg?.type === 'ai_chunk') {
-            console.log('[chat-ws-live]', msg.type, msg.data || {});
-          }
-          if (msg?.type === 'user_q') {
-            setChatWsLiveStatus('pending');
-            setChatWsLiveText('');
-            setChatSuggestionText('');
-            setChatSuggestionPending(false);
-            setChatWsState({
-              activeChatPaneId: paneId,
-              chatWsLiveStatus: 'pending',
-              chatWsLiveText: '',
-            });
-          } else if (msg?.type === 'ai_chunk') {
-            const delta = String(msg.data?.delta || '');
-            if (delta) {
-              setChatWsLiveText((prev) => {
-                const next = `${prev}${delta}`;
-                setChatWsState({ activeChatPaneId: paneId, chatWsLiveStatus: 'streaming', chatWsLiveText: next });
-                return next;
-              });
-            }
-            setChatWsLiveStatus('streaming');
-          } else if (msg?.type === 'status_change' && msg.data) {
-            window.dispatchEvent(new CustomEvent('agent-status-change', { detail: msg.data }));
-            const nextStatus = String(msg.data?.status || '').toLowerCase();
-            if (nextStatus === 'thinking') setChatWsLiveStatus('pending');
-            else if (nextStatus === 'working' || nextStatus === 'tool_call' || nextStatus === 'tool_use') setChatWsLiveStatus('tool_use');
-            else if (nextStatus === 'streaming') setChatWsLiveStatus('streaming');
-            else if (nextStatus === 'idle' || nextStatus === 'done' || nextStatus === 'completed') setChatWsLiveStatus('done');
-            else if (nextStatus === 'failed' || nextStatus === 'error') setChatWsLiveStatus('failed');
-            setChatWsState({ activeChatPaneId: paneId, chatWsLiveStatus: nextStatus === 'thinking' ? 'pending' : nextStatus === 'working' || nextStatus === 'tool_call' || nextStatus === 'tool_use' ? 'tool_use' : nextStatus === 'streaming' ? 'streaming' : nextStatus === 'failed' || nextStatus === 'error' ? 'failed' : 'done' });
-            if (nextStatus === 'idle' || nextStatus === 'done' || nextStatus === 'completed' || nextStatus === 'failed') {
-              setChatWsInspectorVersion((value) => {
-                const next = value + 1;
-                setChatWsState({ chatWsInspectorVersion: next });
-                return next;
-              });
-            }
-          } else if (msg?.type === 'current_updated') {
-            setChatWsHistoryVersion((value) => {
-              const next = value + 1;
-              setChatWsState({ chatWsHistoryVersion: next });
-              return next;
-            });
-            setChatWsInspectorVersion((value) => {
-              const next = value + 1;
-              setChatWsState({ chatWsInspectorVersion: next });
-              return next;
-            });
-          } else if (msg?.type === 'ai_done') {
-            setChatWsLiveStatus('done');
-            setChatWsState({ activeChatPaneId: paneId, chatWsLiveStatus: 'done' });
-            setChatWsHistoryVersion((value) => {
-              const next = value + 1;
-              setChatWsState({ chatWsHistoryVersion: next });
-              return next;
-            });
-            setChatWsInspectorVersion((value) => {
-              const next = value + 1;
-              setChatWsState({ chatWsInspectorVersion: next });
-              return next;
-            });
-            setChatSuggestionPending(true);
-          } else if (msg?.type === 'desktop_event' && msg.data) {
-            window.dispatchEvent(new CustomEvent('agent-desktop-event', { detail: msg.data }));
-          } else if (msg?.type === 'worker_idle' && msg.data) {
-            window.dispatchEvent(new CustomEvent('agent-worker-idle', { detail: msg.data }));
-          } else if (msg?.type === 'webpage_ping') {
-            const versionText = document.getElementById('version')?.textContent?.trim() || config.version;
-            sendChatWsMessage({ type: 'webpage_pong', data: { requestId: msg.data?.requestId, version: versionText } });
-          } else if (msg?.type === 'exec_js' && msg.data?.code) {
-            try {
-              const result = window.eval(msg.data.code);
-              sendChatWsMessage({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, result: String(result) } });
-            } catch (error: any) {
-              sendChatWsMessage({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, error: error?.message || String(error) } });
-            }
-          } else if (msg?.type === 'pong' && msg.data?.requestId) {
-            if (msg.data.requestId === chatWsPingRequestIdRef.current && chatWsPingSentAtRef.current != null) {
-              setNetLatency(Math.max(0, Math.round(performance.now() - chatWsPingSentAtRef.current)));
-              chatWsPingSentAtRef.current = null;
-            }
-          } else if (msg?.type === 'code.open_file' && msg.data?.path) {
-            openCodeFile(String(msg.data.path || ''), String(msg.data?.requestId || ''));
-          } else if (msg?.type === 'code.send_path' && msg.data?.path) {
-            const targetClientId = String(msg.data?.page_client_id || '').trim();
-            const filePath = String(msg.data.path || '').trim();
-            if (targetClientId === clientId && filePath) {
-              const workspaceState = devStore.getSnapshot().Workspace?.state || {};
-              const runtimeActivePaneId = String(workspaceState.activeCliPaneId || activeCliPaneIdRef.current || paneId).trim();
-              const tmuxTarget = runtimeActivePaneId || paneId;
-              const normalizedFilePath = `/${filePath.replace(/^\/+/, '')}`;
-              const promptText = `file://${normalizedFilePath.replace(/^\/+/, '')}`;
-              window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: promptText } }));
-              sendCommandToTmux(promptText, tmuxTarget, false).then(() => {
-                focusTmuxPaneFrame(tmuxTarget);
-              }).catch(() => {
-                window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastSendFilePathFailed') }));
-              });
-            }
-          } else if (msg?.type === 'poll_data' && msg.data) {
-            const data = msg.data;
-            const nextBoundAgents = Array.isArray(data.agents) ? data.agents : [];
-            const nextPollStatuses = data.statuses && typeof data.statuses === 'object' ? data.statuses : {};
-            setBoundAgents((prev) => isDeepEqual(prev, nextBoundAgents) ? prev : nextBoundAgents);
-            setPollStatuses((prev) => isDeepEqual(prev, nextPollStatuses) ? prev : nextPollStatuses);
-            if (data.system_resources && typeof data.system_resources === 'object') {
-              if (!isDeepEqual(systemResourcesRef.current, data.system_resources)) {
-                const nextSystemResources = data.system_resources as SystemResourceSnapshot;
-                systemResourcesRef.current = nextSystemResources;
-                setSystemResources(nextSystemResources);
-              }
-            }
-            if (data.membership && typeof data.membership === 'object') {
-              setGlobalVar((prev: any) => {
-                const base = prev && typeof prev === 'object' ? prev : {};
-                return isDeepEqual(base.membership, data.membership) ? prev : { ...base, membership: data.membership };
-              });
-            }
-            const st = data.statuses?.[fullPaneId] || data.statuses?.[paneId];
-            if (st?.status) setStatus((prev) => prev === st.status ? prev : st.status);
-            if (st?.title) setAgentDetail((prev: any) => {
-              if (prev?.title === st.title) return prev;
-              return prev ? { ...prev, title: st.title } : { title: st.title };
-            });
-            if (st?.contextUsage != null) setContextUsage((prev) => prev === st.contextUsage ? prev : st.contextUsage);
-          }
-          if (msg?.type === 'system_resources' && msg.data && typeof msg.data === 'object') {
-            if (!isDeepEqual(systemResourcesRef.current, msg.data)) {
-              const nextSystemResources = msg.data as SystemResourceSnapshot;
-              systemResourcesRef.current = nextSystemResources;
-              setSystemResources(nextSystemResources);
-            }
-          }
-          broadcastChatWsMessage(msg);
-        } catch {}
-      };
-      ws.onclose = (event) => {
-        if (chatWsRef.current === ws) {
-          chatWsRef.current = null;
-        }
-        if (chatWsPingTimerRef.current !== null) {
-          window.clearInterval(chatWsPingTimerRef.current);
-          chatWsPingTimerRef.current = null;
-        }
-        chatWsPingSentAtRef.current = null;
-        chatWsPingRequestIdRef.current = null;
-        setChatWsConnected(false);
-        setNetLatency(null);
-        setChatWsState({
-          activeChatPaneId: paneId,
-          chatWsConnected: false,
-          chatWsClientId: clientId,
-        });
-        // 4409 = server superseded us with another connection that owns the
-        // same client_id. Auto-reconnecting would just kick out the winner and
-        // start a 1s ping-pong; wait for the BroadcastChannel dedup below to
-        // regenerate pageClientId, which re-fires this effect with a fresh id.
-        const superseded = !!(event && event.code === 4409);
-        if (!dead && !superseded) {
-          chatWsReconnectTimerRef.current = window.setTimeout(connect, 3000);
-        }
-      };
-      ws.onerror = () => ws.close();
-    };
-
-    setChatWsConnected(false);
-    setNetLatency(null);
+    // Match the old behavior: on (re)connect-causing param change clear any
+    // stale live AI text/status. The singleton re-emits chatWsConnected=true
+    // once the WS opens.
     setChatWsLiveStatus('idle');
     setChatWsLiveText('');
-    setChatWsState({
-      activeChatPaneId: paneId,
-      chatWsConnected: false,
-      chatWsClientId: clientId,
-      chatWsLiveStatus: 'idle',
-      chatWsLiveText: '',
+    setChatWsState({ activeChatPaneId: paneId, chatWsLiveStatus: 'idle', chatWsLiveText: '' });
+    chatWs.configure({
+      apiBase: config.apiBase,
+      paneId,
+      token,
+      clientId: pageClientId,
+      platform: wsClientPlatform,
+      userAgent: wsClientUserAgent,
+      isElectron: typeof (window as any).electronRPC === 'function',
     });
-    connect();
-    return () => {
-      dead = true;
-      if (chatWsReconnectTimerRef.current !== null) {
-        window.clearTimeout(chatWsReconnectTimerRef.current);
-        chatWsReconnectTimerRef.current = null;
-      }
-      if (chatWsPingTimerRef.current !== null) {
-        window.clearInterval(chatWsPingTimerRef.current);
-        chatWsPingTimerRef.current = null;
-      }
-      chatWsPingSentAtRef.current = null;
-      chatWsPingRequestIdRef.current = null;
-      if (chatWsRef.current) {
-        const closingWs = chatWsRef.current;
-        chatWsRef.current = null;
-        closingWs.close();
-      }
-      setChatWsConnected(false);
-      setNetLatency(null);
-      setChatWsState({
-        activeChatPaneId: activeCliPaneIdRef.current,
-        chatWsConnected: false,
-        chatWsClientId: clientId,
-      });
-    };
-    // activeCliPaneId is intentionally NOT a dep: switching the active pane
-    // (which can fire on every poll_data when the team membership changes)
-    // must not tear down + recreate the WS. The dedicated useEffect below
-    // sends register_active_channel when the active pane actually changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [broadcastChatWsMessage, pageClientId, paneId, sendChatWsMessage, setChatWsSender, setChatWsState, token, wsClientPlatform, wsClientUserAgent]);
+  }, [paneId, pageClientId, token, wsClientPlatform, wsClientUserAgent, setChatWsState]);
 
+  // (2) Subscribe to messages. Run once for the component lifetime —
+  // handleChatWsMessage is a stable useCallback.
+  useEffect(() => chatWs.subscribe(handleChatWsMessage), [handleChatWsMessage]);
+
+  // (3) Mirror singleton connection state into React.
+  useEffect(() => chatWs.onConnectedChange((connected) => {
+    setChatWsConnected(connected);
+    setChatWsState({ chatWsConnected: connected, activeChatPaneId: paneIdRef.current });
+    if (!connected) {
+      setNetLatency(null);
+    }
+  }), [setChatWsState]);
+
+  useEffect(() => chatWs.onClientIdChange((id) => {
+    setChatWsClientId(id);
+    setChatWsState({ chatWsClientId: id });
+  }), [setChatWsState]);
+
+  useEffect(() => chatWs.onLatencyChange((ms) => { setNetLatency(ms); }), []);
+
+  // Tell the singleton which agent is active. It caches the value and pushes
+  // `register_active_channel` on every (re)connect — no React-side guard
+  // against "connected yet?" timing needed.
   useEffect(() => {
-    const clientId = String(chatWsClientId || pageClientId || '').trim();
-    const agentID = String(activeCliPaneId || '').trim();
-    if (!clientId || !agentID || !chatWsConnected) return;
-    try {
-      sendChatWsMessage({ type: 'register_active_channel', data: { agent_id: agentID, client_id: clientId, channel_type: 'web', platform: wsClientPlatform, user_agent: wsClientUserAgent } });
-    } catch {}
-  }, [activeCliPaneId, chatWsClientId, chatWsConnected, pageClientId, sendChatWsMessage, wsClientPlatform, wsClientUserAgent]);
+    chatWs.setActiveAgent(activeCliPaneId, { platform: wsClientPlatform, user_agent: wsClientUserAgent });
+  }, [activeCliPaneId, wsClientPlatform, wsClientUserAgent]);
 
   useEffect(() => {
     setChatSuggestionText('');
@@ -1017,6 +929,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       }),
     }).catch(() => {});
   }, [pageClientId, paneId, token]);
+
+  // Bind the ref now that openCodeFile is in scope; chat-ws message handler
+  // (declared above for hoisting) reads via openCodeFileRef.current to avoid
+  // capturing it as a dep.
+  useEffect(() => { openCodeFileRef.current = openCodeFile; }, [openCodeFile]);
 
   const handleSendPageClientIdToAgent = useCallback(async () => {
     const currentClientId = String(chatWsClientId || pageClientId || '').trim();
@@ -1477,7 +1394,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                           openedPaneIds={canvasPaneIds.filter(id => id !== paneId)}
                           activePaneId={activeCliPaneId}
                           onRefreshPanes={refreshPanes}
-                          onRefreshPoll={() => { try { chatWsRef.current?.send(JSON.stringify({ type: 'poll_request' })); } catch {} }}
+                          onRefreshPoll={() => { try { chatWs.send({ type: 'poll_request' }); } catch {} }}
                           onOpenSettingsPane={(targetPaneId) => {
                             openPaneInCurrentTerminal(targetPaneId);
                             openInspectorForPane(targetPaneId, 'settings');
@@ -1612,7 +1529,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             <span>{t('language', { ns: 'common' })}</span>
             <div className="flex gap-1">
               {SUPPORTED_LNGS.map((code) => {
-                const active = (i18nLive.resolvedLanguage ?? i18nLive.language) === code;
+                const active = currentLang === code;
                 const labelKey = code === 'zh-CN' ? 'languageChinese' : 'languageEnglish';
                 return (
                   <button
@@ -1622,10 +1539,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => {
                       e.stopPropagation();
-                      console.log('[i18n] changeLanguage ->', code, 'before:', i18nLive.language);
-                      i18nLive.changeLanguage(code)
-                        .then(() => console.log('[i18n] changed, now:', i18nLive.language))
-                        .catch((err) => console.error('[i18n] changeLanguage failed', err));
+                      if (active) return;
+                      void i18nLive.changeLanguage(code);
                     }}
                     className={`cursor-pointer rounded-md border px-2 py-0.5 font-mono text-[10px] transition-colors ${active ? 'border-white/20 bg-white/10 text-zinc-100' : 'border-white/[0.06] text-zinc-500 hover:border-white/[0.12] hover:text-zinc-200'}`}
                   >
