@@ -8,8 +8,15 @@ Usage:
   us-spot-dev --destroy-all            # delete instance AND disk
   us-spot-dev --json                   # JSON output
 
-The persistent data disk (100GB ESSD) survives instance reclaims.
-When spot is recycled, just run `us-spot-dev` again.
+The persistent data disk (100GB ESSD) survives instance reclaims, including
+/data/docker (the Docker data-root) — so on a re-provision the `us-spot-dev`
+image builds from cached layers in seconds. When spot is recycled, just run
+`us-spot-dev` again: it re-points the Cloudflare DNS, rebuilds the container,
+re-bootstraps it, and restarts dev.py — `https://dev.cicy-ai.com` follows along.
+
+TODO(optional): build the image once and push it to Aliyun ACR
+(registry.us-west-1.aliyuncs.com/<ns>/us-spot-dev), then `docker pull` instead
+of `docker build` on a fresh disk (needs `aliyun cr` namespace/repo + auth).
 """
 
 import json, os, subprocess, sys, time, urllib.request, urllib.error
@@ -376,6 +383,11 @@ def bootstrap_container(ip):
         ssh_cicy(ip, "chmod 0755 ~/.local/bin/mihomo")
     ssh_cicy(ip, "cd ~/projects/cicy-skills 2>/dev/null && /usr/local/go/bin/go build -o ~/.local/bin/cicy-hosttools "
                  "./cmd/cicy-hosttools && ln -sf cicy-hosttools ~/.local/bin/cicy-mihomo || true", timeout=240)
+    # bring up proxy_ssh profiles (mihomo's upstream nodes may chain through them), then mihomo
+    ssh_cicy(ip, "[ -f ~/cicy-ai/db/proxy_ssh.json ] && command -v python3 >/dev/null && "
+                 "python3 ~/projects/cicy-code/skills/proxy_ssh list --json 2>/dev/null "
+                 "| python3 -c 'import json,sys; [print(p[\"name\"]) for p in json.load(sys.stdin)]' 2>/dev/null "
+                 "| while read n; do python3 ~/projects/cicy-code/skills/proxy_ssh start \"$n\" 2>/dev/null; done; true", timeout=90)
     # start mihomo if a config exists (stale state from a previous instance lives on the persistent disk)
     ssh_cicy(ip, "[ -f ~/cicy-ai/db/mihomo.yaml ] && [ -x ~/.local/bin/mihomo ] && "
                  "{ ~/.local/bin/cicy-mihomo stop >/dev/null 2>&1; ~/.local/bin/cicy-mihomo start; } || true", timeout=60)
