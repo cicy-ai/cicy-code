@@ -939,7 +939,6 @@ export default function AgentInspector({
               {settingsSection === 'general' && (
                 <div data-id="agent-inspector-settings-general" className="space-y-5">
                   <div data-id="agent-inspector-settings-general-identity" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
-                    <div className="text-sm font-medium text-zinc-100">{t('generalIdentityTitle')}</div>
                     <InspectorField label={t('fieldTitle')}>
                       <InspectorInput value={settingsData?.title || ''} onChange={(value) => patchSettingsData({ title: value })} onBlur={() => { void saveSettings(); }} placeholder={t('fieldTitlePlaceholder')} />
                     </InspectorField>
@@ -963,7 +962,6 @@ export default function AgentInspector({
                   </div>
 
                   <div data-id="agent-inspector-settings-general-behavior" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
-                    <div className="text-sm font-medium text-zinc-100">{t('generalBehaviorTitle')}</div>
                     <InspectorToggle
                       label={t('autoStart')}
                       desc={t('autoStartHint')}
@@ -981,7 +979,6 @@ export default function AgentInspector({
                   </div>
 
                   <div data-id="agent-inspector-settings-general-proxy" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
-                    <div className="text-sm font-medium text-zinc-100">{t('generalProxyTitle')}</div>
                     <InspectorToggle
                       label={t('useProxy')}
                       desc={t('useProxyHint')}
@@ -990,14 +987,9 @@ export default function AgentInspector({
                       onBlur={() => { void saveSettings(); }}
                     />
                     {settingsData?.use_proxy && (
-                      <>
-                        <InspectorField label={t('proxyPassword')}>
-                          <InspectorInput value={settingsData?.proxy?.password || ''} onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), password: value } })} onBlur={() => { void saveSettings(); }} mono />
-                        </InspectorField>
-                        <InspectorField label={t('mihomoRule')} desc={t('mihomoRuleDesc')}>
-                          <InspectorInput value={settingsData?.proxy?.rule || ''} onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), rule: value } })} onBlur={() => { void saveSettings(); }} placeholder="IN-USER,w-10001,proxy-a" mono />
-                        </InspectorField>
-                      </>
+                      <InspectorField label={t('mihomoRule')} desc={t('mihomoRuleDesc')}>
+                        <InspectorInput value={settingsData?.proxy?.rule || ''} onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), rule: value } })} onBlur={() => { void saveSettings(); }} placeholder="IN-USER,w-10001,proxy-a" mono />
+                      </InspectorField>
                     )}
                   </div>
                 </div>
@@ -1006,10 +998,6 @@ export default function AgentInspector({
               {settingsSection === 'model' && (
                 <div data-id="agent-inspector-settings-model" className="space-y-5">
                   <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
-                    <div>
-                      <div className="text-sm font-medium text-zinc-100">{t('modelDefaultTitle')}</div>
-                      <div className="mt-1 text-xs leading-5 text-zinc-500">{t('modelDefaultDesc')}</div>
-                    </div>
                     <InspectorField label={t('modelDefaultFieldLabel')} desc={t('modelDefaultFieldDesc')}>
                       <InspectorInput value={settingsData?.default_model || ''} onChange={(value) => patchSettingsData({ default_model: value })} onBlur={() => { void saveModelSettings(); }} placeholder={t('modelDefaultPlaceholder')} mono />
                     </InspectorField>
