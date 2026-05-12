@@ -26,6 +26,11 @@ void i18n
     interpolation: {escapeValue: false},
     returnNull: false,
     debug: false,
+  })
+  .then(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = i18n.resolvedLanguage ?? i18n.language;
+    }
   });
 
 i18n.on('languageChanged', (lng) => {
@@ -33,5 +38,9 @@ i18n.on('languageChanged', (lng) => {
     document.documentElement.lang = lng;
   }
 });
+
+if (typeof window !== 'undefined' && import.meta.env.DEV) {
+  (window as unknown as {i18n: typeof i18n}).i18n = i18n;
+}
 
 export default i18n;
