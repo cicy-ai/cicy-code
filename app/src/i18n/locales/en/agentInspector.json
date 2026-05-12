@@ -81,5 +81,11 @@
   "toastTokenAlreadyBound": "This token is already bound. Please use a different token.",
   "toastSettingsSaved": "Saved",
   "toastSettingsSaveFailed": "Error: failed to save {{paneId}} settings",
-  "toastModelSettingsSaveFailed": "Error: failed to save {{paneId}} model settings"
+  "toastModelSettingsSaveFailed": "Error: failed to save {{paneId}} model settings",
+  "generalIdentityTitle": "Identity",
+  "generalIdentityDesc": "How this pane shows up in the workspace and which agent runs in it.",
+  "generalBehaviorTitle": "Behavior",
+  "generalBehaviorDesc": "Lifecycle and permissions applied at startup.",
+  "generalProxyTitle": "Proxy",
+  "generalProxyDesc": "Local proxy used by this pane on launch."
 }

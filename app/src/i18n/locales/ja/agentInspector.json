@@ -81,5 +81,11 @@
   "toastTokenAlreadyBound": "This token is already bound. Please use a different token.",
   "toastSettingsSaved": "Saved",
   "toastSettingsSaveFailed": "Error: failed to save {{paneId}} settings",
-  "toastModelSettingsSaveFailed": "Error: failed to save {{paneId}} model settings"
+  "toastModelSettingsSaveFailed": "Error: failed to save {{paneId}} model settings",
+  "generalIdentityTitle": "識別情報",
+  "generalIdentityDesc": "このペインのワークスペースでの表示と実行するエージェント。",
+  "generalBehaviorTitle": "挙動",
+  "generalBehaviorDesc": "起動時のライフサイクルと権限設定。",
+  "generalProxyTitle": "プロキシ",
+  "generalProxyDesc": "起動時にこのペインが利用するローカルプロキシ。"
 }
