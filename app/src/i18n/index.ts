@@ -113,7 +113,7 @@ export type TranslatedLng = (typeof TRANSLATED_LNGS)[number];
  */
 export const SUPPORTED_LNGS = [
   // East Asia
-  'en', 'zh-CN', 'zh-TW', 'zh-HK', 'ja', 'ko',
+  'en', 'zh-CN', 'ja', 'ko',
   // SE Asia
   'vi', 'th', 'id', 'ms', 'tl', 'my', 'km', 'lo',
   // South Asia
@@ -248,8 +248,6 @@ void i18n
     ns: ['common', 'login', 'settings', 'createAgent', 'editPane', 'workspace', 'ui', 'layout', 'chat', 'agentInspector', 'agentProviderRequest', 'agentChat', 'agentTypeDesc', 'apiSwitch', 'desktop', 'devPanel', 'provision', 'agentCanvas', 'teamPanel', 'audit', 'provider', 'im', 'terminal'],
     defaultNS: 'common',
     fallbackLng: {
-      'zh-TW': ['zh-CN', 'en'],
-      'zh-HK': ['zh-CN', 'en'],
       'zh': ['zh-CN', 'en'],
       default: ['en'],
     },
