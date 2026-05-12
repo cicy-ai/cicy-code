@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation, Trans } from 'react-i18next';
-import { SUPPORTED_LNGS, TRANSLATED_LNGS } from '../i18n';
+import { TRANSLATED_LNGS } from '../i18n';
 
 type ToastState = {
   message: string;
@@ -91,7 +91,7 @@ function languageDisplayName(code: string): string {
 // Map BCP-47 language code → ISO 3166-1 alpha-2 country code for the flag emoji.
 // For codes that already carry a region (zh-CN), we use that region directly.
 const LANG_TO_COUNTRY: Record<string, string> = {
-  en: 'US', 'zh-CN': 'CN', 'zh-TW': 'TW', 'zh-HK': 'HK', ja: 'JP', ko: 'KR',
+  en: 'US', 'zh-CN': 'CN', ja: 'JP', ko: 'KR',
   vi: 'VN', th: 'TH', id: 'ID', ms: 'MY', tl: 'PH', my: 'MM', km: 'KH', lo: 'LA',
   hi: 'IN', bn: 'BD', ta: 'IN', te: 'IN', ml: 'IN', kn: 'IN', mr: 'IN', gu: 'IN',
   pa: 'IN', ur: 'PK', ne: 'NP', si: 'LK',
@@ -1591,9 +1591,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 data-id="membership-language-menu"
                 className="mt-1 max-h-60 overflow-y-auto rounded-lg border border-white/[0.06] bg-[#0c0c0e]"
               >
-                {SUPPORTED_LNGS.map((code) => {
+                {TRANSLATED_LNGS.map((code) => {
                   const active = currentLang === code;
-                  const translated = (TRANSLATED_LNGS as readonly string[]).includes(code);
                   return (
                     <button
                       key={code}
@@ -1605,8 +1604,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                         setLangMenuOpen(false);
                         if (!active) void i18nLive.changeLanguage(code);
                       }}
-                      className={`flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/5 ${active ? 'text-zinc-100' : translated ? 'text-zinc-300' : 'text-zinc-500'}`}
-                      title={translated ? code : `${code} — falls back to English`}
+                      className={`flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/5 ${active ? 'text-zinc-100' : 'text-zinc-300'}`}
+                      title={code}
                     >
                       <span className="flex min-w-0 items-center gap-1.5">
                         <span aria-hidden className="text-[12px] leading-none">{flagEmoji(code)}</span>
