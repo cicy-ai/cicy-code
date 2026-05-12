@@ -1,0 +1,20 @@
+{
+  "thinkingStep": "🧠 理解需求...",
+  "designStep": "🎨 设计界面...",
+  "codeStep": "⚙️ 生成代码...",
+  "packageStep": "📦 打包应用...",
+  "appCreated": "✅ 「{{name}}」{{icon}} 已创建！（{{seconds}}s）\n点击桌面图标即可打开。",
+  "createFailed": "创建失败: {{detail}}",
+  "createErrored": "创建出错: {{message}}",
+  "assistantOops": "抱歉，出了点问题。",
+  "assistantConnFailed": "连接失败，请重试。",
+  "statusCreating": "● 创建中",
+  "statusThinking": "● 思考中",
+  "statusIdle": "● 空闲",
+  "emptyHeadline": "让你的智能体帮你构建点什么",
+  "emptySubline": "描述你的需求，AI 会为你创建出来",
+  "creatingApp": "⚡ 正在创建应用...",
+  "placeholderContinue": "继续对话...",
+  "placeholderStart": "帮我做一个能看比特币价格的工具...",
+  "hintEnterToSend": "按 Enter 发送 · AI 驱动"
+}

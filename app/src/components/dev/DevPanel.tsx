@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { useDevStore, devStore } from '../../lib/devStore';
 import { lockPointer, unlockPointer } from '../../lib/pointerLock';
@@ -9,6 +10,7 @@ const SIZE_KEY = 'devpanel_size';
 const OPEN_KEY = 'devpanel_open';
 
 export default function DevPanel() {
+  const { t } = useTranslation('devPanel');
   const [open, setOpen] = useState(() => localStorage.getItem(OPEN_KEY) === '1');
   const stores = useDevStore();
 
@@ -27,6 +29,7 @@ export default function DevPanel() {
 }
 
 function Panel({ stores, onClose }: { stores: Record<string, { state: Record<string, any>; setter?: any }>; onClose: () => void }) {
+  const { t } = useTranslation('devPanel');
   const [pos, setPos] = useState(() => {
     try { return JSON.parse(localStorage.getItem(POS_KEY)!) || { x: window.innerWidth - 460, y: 60 }; } catch { return { x: window.innerWidth - 460, y: 60 }; }
   });
@@ -77,10 +80,10 @@ function Panel({ stores, onClose }: { stores: Record<string, { state: Record<str
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 bg-[#0d0d0f] border-b border-white/[0.06] cursor-move shrink-0" onMouseDown={onDragStart}>
         <Bug className="w-3.5 h-3.5 text-purple-400" />
-        <span className="text-xs font-semibold text-purple-300">开发工具</span>
-        <span className="text-[10px] text-zinc-600 ml-1">{storeNames.length} 个状态库</span>
+        <span className="text-xs font-semibold text-purple-300">{t('title')}</span>
+        <span className="text-[10px] text-zinc-600 ml-1">{t('storesCount', { count: storeNames.length })}</span>
         <div className="flex-1" />
-        <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="筛选..."
+        <input value={filter} onChange={e => setFilter(e.target.value)} placeholder={t('filterPlaceholder')}
           className="w-28 text-[11px] bg-white/[0.04] border border-white/[0.08] rounded px-2 py-0.5 text-zinc-300 outline-none placeholder:text-zinc-700"
           onClick={e => e.stopPropagation()} />
         <button onClick={onClose} className="p-1 rounded hover:bg-white/[0.06] text-zinc-500 hover:text-zinc-300 cursor-pointer">
@@ -95,7 +98,7 @@ function Panel({ stores, onClose }: { stores: Record<string, { state: Record<str
             filter={filter} expanded={expanded} toggle={toggle} />
         ))}
         {storeNames.length === 0 && (
-          <div className="p-4 text-zinc-600 text-center text-[11px]">暂无已注册的状态库</div>
+          <div className="p-4 text-zinc-600 text-center text-[11px]">{t('noStores')}</div>
         )}
       </div>
 
@@ -114,6 +117,7 @@ function StoreSection({ name, state, hasSetter, filter, expanded, toggle }: {
   name: string; state: Record<string, any>; hasSetter: boolean;
   filter: string; expanded: Record<string, boolean>; toggle: (k: string) => void;
 }) {
+  const { t } = useTranslation('devPanel');
   const isOpen = expanded[name] !== false; // default open
   const entries = Object.entries(state);
   const filtered = filter
@@ -126,14 +130,14 @@ function StoreSection({ name, state, hasSetter, filter, expanded, toggle }: {
         className="w-full flex items-center gap-1.5 px-3 py-1.5 hover:bg-white/[0.03] text-left cursor-pointer">
         {isOpen ? <ChevronDown className="w-3 h-3 text-zinc-500" /> : <ChevronRight className="w-3 h-3 text-zinc-500" />}
         <span className="text-purple-400 font-semibold">{name}</span>
-        <span className="text-zinc-700 text-[10px] ml-auto">{entries.length} 项</span>
+        <span className="text-zinc-700 text-[10px] ml-auto">{t('itemsCount', { count: entries.length })}</span>
       </button>
       {isOpen && (
         <div className="pb-1">
           {filtered.map(([key, val]) => (
             <ValueRow key={key} storeName={name} path={key} value={val} hasSetter={hasSetter} depth={0} />
           ))}
-          {filtered.length === 0 && <div className="px-6 py-1 text-zinc-700 text-[10px]">无匹配结果</div>}
+          {filtered.length === 0 && <div className="px-6 py-1 text-zinc-700 text-[10px]">{t('noMatch')}</div>}
         </div>
       )}
     </div>
@@ -143,6 +147,7 @@ function StoreSection({ name, state, hasSetter, filter, expanded, toggle }: {
 function ValueRow({ storeName, path, value, hasSetter, depth }: {
   storeName: string; path: string; value: any; hasSetter: boolean; depth: number;
 }) {
+  const { t } = useTranslation('devPanel');
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState('');
@@ -207,12 +212,12 @@ function ValueRow({ storeName, path, value, hasSetter, depth }: {
 
         <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
           {!isFunc && !isExpandable && (
-            <button onClick={copy} className="p-0.5 rounded hover:bg-white/[0.08] cursor-pointer" title="复制">
+            <button onClick={copy} className="p-0.5 rounded hover:bg-white/[0.08] cursor-pointer" title={t('copy')}>
               {copied ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3 text-zinc-600" />}
             </button>
           )}
           {hasSetter && !isFunc && !isExpandable && (
-            <button onClick={startEdit} className="p-0.5 rounded hover:bg-white/[0.08] cursor-pointer" title="编辑">
+            <button onClick={startEdit} className="p-0.5 rounded hover:bg-white/[0.08] cursor-pointer" title={t('edit')}>
               <Pencil className="w-3 h-3 text-zinc-600" />
             </button>
           )}

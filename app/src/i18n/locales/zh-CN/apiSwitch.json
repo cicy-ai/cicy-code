@@ -1,0 +1,16 @@
+{
+  "errorUrlRequired": "请输入 URL",
+  "errorUrlInvalid": "URL 格式不正确",
+  "errorTokenRequired": "请在 URL 中包含 ?token=xxx",
+  "errorTokenInvalid": "Token 无效",
+  "errorConnect": "连接失败: {{message}}",
+  "errorConnectUnknown": "无法访问",
+  "labelDefault": "默认",
+  "defaultEmpty": "(同源)",
+  "copy": "复制",
+  "copied": "✓ 已复制",
+  "namePlaceholder": "名称",
+  "verifying": "验证中...",
+  "add": "添加",
+  "applyAndReload": "应用并刷新"
+}

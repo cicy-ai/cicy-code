@@ -1,0 +1,10 @@
+{
+  "title": "开发工具",
+  "storesCount": "{{count}} 个状态库",
+  "filterPlaceholder": "筛选...",
+  "noStores": "暂无已注册的状态库",
+  "itemsCount": "{{count}} 项",
+  "noMatch": "无匹配结果",
+  "copy": "复制",
+  "edit": "编辑"
+}

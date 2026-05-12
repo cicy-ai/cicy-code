@@ -1,0 +1,16 @@
+{
+  "copyFailed": "复制失败：{{value}}",
+  "titleUpdateFailed": "错误：标题修改失败",
+  "doubleClickToRename": "双击重命名",
+  "editTitle": "编辑标题",
+  "copiedPaneId": "已复制",
+  "copyMemberId": "复制成员 ID",
+  "dragWindow": "拖拽窗口",
+  "codeServer": "代码服务",
+  "collabOverview": "协作概览",
+  "apiOnlyHint": "该成员当前只支持 API 能力，不提供 ttyd 终端。",
+  "zoomInHint": "缩放到更近或展开窗口以进入实时工作现场。",
+  "clickToConnect": "点击窗口后将按需连接实时 ttyd 工作现场。",
+  "noWorkSession": "暂无可用工作现场",
+  "resizeWindow": "调整窗口大小"
+}

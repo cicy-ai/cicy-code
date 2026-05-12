@@ -1,0 +1,12 @@
+{
+  "step0": "正在创建 Cloudflare Tunnel",
+  "step1": "正在创建服务器",
+  "step2": "正在上传部署脚本",
+  "step3": "正在部署服务",
+  "step4": "正在验证",
+  "disconnectedRetrying": "⚠ 连接已断开，正在重试...",
+  "disconnected": "连接已断开",
+  "title": "正在配置你的工作区",
+  "elapsed": "已耗时 {{seconds}}s",
+  "connecting": "正在连接..."
+}

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import config from '../../config'
@@ -33,10 +35,11 @@ const TOOL_ICONS: Record<string, string> = {
   code: '🧠', web_search: '🌐', web_fetch: '🌐', use_aws: '☁️', use_subagent: '🤖',
 }
 const TOOL_LABELS: Record<string, string> = {
-  fs_read: '读取文件', fs_write: '写入文件', execute_bash: 'Command', grep: 'Search', glob: 'Glob', code: '代码分析', web_search: '网页搜索', web_fetch: '网页抓取', use_aws: 'AWS', use_subagent: 'Subagent',
+  fs_read: i18n.t('toolReadFile', { ns: 'agentChat' }), fs_write: i18n.t('toolWriteFile', { ns: 'agentChat' }), execute_bash: 'Command', grep: 'Search', glob: 'Glob', code: i18n.t('toolCodeAnalysis', { ns: 'agentChat' }), web_search: i18n.t('toolWebSearch', { ns: 'agentChat' }), web_fetch: i18n.t('toolWebFetch', { ns: 'agentChat' }), use_aws: 'AWS', use_subagent: 'Subagent',
 }
 
 const CollapsibleQ = ({ text }: { text: string }) => {
+  const { t } = useTranslation('agentChat')
   const ref = useRef<HTMLDivElement>(null)
   const [collapsed, setCollapsed] = useState(false)
   const [needsCollapse, setNeedsCollapse] = useState(false)
@@ -49,7 +52,7 @@ const CollapsibleQ = ({ text }: { text: string }) => {
         <div ref={ref} className={`chat-markdown px-3.5 py-2 rounded-2xl rounded-br-sm text-base leading-relaxed text-white/90 overflow-hidden transition-all ${collapsed ? 'max-h-[80px]' : ''}`} style={{ background: 'rgba(255,255,255,0.08)' }}>
           <Markdown remarkPlugins={[remarkGfm]}>{text.replace(/^-\n/, '')}</Markdown>
         </div>
-        {needsCollapse && <button onClick={() => setCollapsed(v => !v)} className="text-base text-white/30 hover:text-white/60 mt-1 float-right">{collapsed ? '展开 ▼' : '收起 ▲'}</button>}
+        {needsCollapse && <button onClick={() => setCollapsed(v => !v)} className="text-base text-white/30 hover:text-white/60 mt-1 float-right">{collapsed ? t('expand') : t('collapse')}</button>}
       </div>
     </div>
   )
@@ -95,6 +98,7 @@ const ThinkingBlock = ({ text }: { text: string }) => (
 )
 
 export default function ChatHistoryView({ paneId, token, liveStatus = 'idle', liveText = '', historyVersion = 0, suggestionText = '', suggestionPending = false, suggestionSending = false, onExecuteSuggestion }: ChatHistoryViewProps) {
+  const { t } = useTranslation('agentChat')
   const [chatData, setChatData] = useState<HistoryTurn[]>([])
   const [loading, setLoading] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -124,12 +128,12 @@ export default function ChatHistoryView({ paneId, token, liveStatus = 'idle', li
   const lastTurnStatus = groups.length ? String(groups[groups.length - 1]?.status || '').toLowerCase() : ''
   const stickyWorking = liveStatus === 'pending' || liveStatus === 'tool_use' || liveStatus === 'streaming' || lastTurnStatus === 'pending' || lastTurnStatus === 'tool_use' || lastTurnStatus === 'streaming' || suggestionPending
   const stickyLabel = suggestionPending
-    ? '生成建议中...'
+    ? t('statusSuggesting')
     : liveStatus === 'pending' || lastTurnStatus === 'pending'
-      ? '思考中...'
+      ? t('statusThinking')
       : liveStatus === 'tool_use' || lastTurnStatus === 'tool_use'
-        ? '执行中...'
-        : '输出中...'
+        ? t('statusRunning')
+        : t('statusStreaming')
 
   useEffect(() => {
     requestAnimationFrame(() => {
@@ -144,9 +148,9 @@ export default function ChatHistoryView({ paneId, token, liveStatus = 'idle', li
       <div data-id="chat-history-scroll" ref={scrollRef} className="flex-1 overflow-y-auto pb-20">
         <div data-id="chat-history-list" className="max-w-full mx-auto px-2 py-4">
           {loading ? (
-            <div data-id="chat-history-loading" className="flex flex-col items-center justify-center pt-20 gap-3"><div className="w-6 h-6 border-2 border-vsc-accent/30 border-t-vsc-accent rounded-full animate-spin" /><span className="text-base text-vsc-text-muted">正在加载历史记录...</span></div>
+            <div data-id="chat-history-loading" className="flex flex-col items-center justify-center pt-20 gap-3"><div className="w-6 h-6 border-2 border-vsc-accent/30 border-t-vsc-accent rounded-full animate-spin" /><span className="text-base text-vsc-text-muted">{t('loadingHistory')}</span></div>
           ) : groups.length === 0 ? (
-            <div data-id="chat-history-empty" className="text-center pt-20"><div className="text-2xl mb-2 opacity-20">✦</div><p className="text-xs text-vsc-text-muted">等待对话开始</p></div>
+            <div data-id="chat-history-empty" className="text-center pt-20"><div className="text-2xl mb-2 opacity-20">✦</div><p className="text-xs text-vsc-text-muted">{t('waitingConversation')}</p></div>
           ) : groups.map((r, gi) => {
             const isLatest = gi === groups.length - 1
             const steps = Array.isArray(r?.steps) ? r.steps : []
@@ -186,9 +190,9 @@ export default function ChatHistoryView({ paneId, token, liveStatus = 'idle', li
                       if (!toolsWithArg.length) return null
                       return <div key={si} className="my-2 space-y-1.5">{toolsWithArg.map((t: any, ti: number) => <ToolCard key={ti} tool={t} running={isLast && isRunning && ti === toolsWithArg.length - 1} />)}</div>
                     })}
-                    {isPending && <div className="flex items-center gap-2 py-1.5"><div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" /><span className="text-base text-yellow-400/80 animate-pulse">思考中...</span></div>}
-                    {isRunning && <div className="flex items-center gap-2 py-1.5"><div className="w-3 h-3 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin" /><span className="text-base text-yellow-400/80">执行中{toolCount > 0 ? `（${toolCount} 个工具）` : ''}...</span></div>}
-                    {isStreaming && <div className="flex items-center gap-2 py-1.5"><div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" /><span className="text-base text-blue-400/80">输出中...</span></div>}
+                    {isPending && <div className="flex items-center gap-2 py-1.5"><div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" /><span className="text-base text-yellow-400/80 animate-pulse">{t('statusThinking')}</span></div>}
+                    {isRunning && <div className="flex items-center gap-2 py-1.5"><div className="w-3 h-3 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin" /><span className="text-base text-yellow-400/80">{t('runningTools', { toolPart: toolCount > 0 ? t('runningTool', { count: toolCount }) : '' })}</span></div>}
+                    {isStreaming && <div className="flex items-center gap-2 py-1.5"><div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" /><span className="text-base text-blue-400/80">{t('statusStreaming')}</span></div>}
                   </div>
                 </div>
               </div>
@@ -214,11 +218,11 @@ export default function ChatHistoryView({ paneId, token, liveStatus = 'idle', li
                   onClick={() => { if (onExecuteSuggestion) void onExecuteSuggestion(suggestionText) }}
                   className="shrink-0 rounded-md bg-vsc-accent px-3 py-1.5 text-sm text-white disabled:opacity-60"
                 >
-                  {suggestionSending ? '发送中...' : '执行'}
+                  {suggestionSending ? t('executingSending') : t('executing')}
                 </button>
               </>
             ) : null}
-            {!stickyWorking && !suggestionText ? <div className="text-sm text-zinc-500">空闲</div> : null}
+            {!stickyWorking && !suggestionText ? <div className="text-sm text-zinc-500">{t('idle')}</div> : null}
           </div>
         </div>
       {showTtyd ? (

@@ -2,8 +2,16 @@ import i18n from 'i18next';
 import {initReactI18next} from 'react-i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 
+import enAgentChat from './locales/en/agentChat.json';
 import enAgentInspector from './locales/en/agentInspector.json';
 import enAgentProviderRequest from './locales/en/agentProviderRequest.json';
+import enAgentTypeDesc from './locales/en/agentTypeDesc.json';
+import enApiSwitch from './locales/en/apiSwitch.json';
+import enDesktop from './locales/en/desktop.json';
+import enDevPanel from './locales/en/devPanel.json';
+import enAgentCanvas from './locales/en/agentCanvas.json';
+import enProvision from './locales/en/provision.json';
+import enTeamPanel from './locales/en/teamPanel.json';
 import enChat from './locales/en/chat.json';
 import enCommon from './locales/en/common.json';
 import enCreateAgent from './locales/en/createAgent.json';
@@ -13,8 +21,16 @@ import enLogin from './locales/en/login.json';
 import enSettings from './locales/en/settings.json';
 import enUi from './locales/en/ui.json';
 import enWorkspace from './locales/en/workspace.json';
+import zhAgentChat from './locales/zh-CN/agentChat.json';
 import zhAgentInspector from './locales/zh-CN/agentInspector.json';
 import zhAgentProviderRequest from './locales/zh-CN/agentProviderRequest.json';
+import zhAgentTypeDesc from './locales/zh-CN/agentTypeDesc.json';
+import zhApiSwitch from './locales/zh-CN/apiSwitch.json';
+import zhDesktop from './locales/zh-CN/desktop.json';
+import zhDevPanel from './locales/zh-CN/devPanel.json';
+import zhAgentCanvas from './locales/zh-CN/agentCanvas.json';
+import zhProvision from './locales/zh-CN/provision.json';
+import zhTeamPanel from './locales/zh-CN/teamPanel.json';
 import zhChat from './locales/zh-CN/chat.json';
 import zhCommon from './locales/zh-CN/common.json';
 import zhCreateAgent from './locales/zh-CN/createAgent.json';
@@ -43,6 +59,14 @@ const resources = {
     chat: enChat,
     agentInspector: enAgentInspector,
     agentProviderRequest: enAgentProviderRequest,
+    agentChat: enAgentChat,
+    agentTypeDesc: enAgentTypeDesc,
+    apiSwitch: enApiSwitch,
+    desktop: enDesktop,
+    devPanel: enDevPanel,
+    provision: enProvision,
+    agentCanvas: enAgentCanvas,
+    teamPanel: enTeamPanel,
   },
   'zh-CN': {
     common: zhCommon,
@@ -56,6 +80,14 @@ const resources = {
     chat: zhChat,
     agentInspector: zhAgentInspector,
     agentProviderRequest: zhAgentProviderRequest,
+    agentChat: zhAgentChat,
+    agentTypeDesc: zhAgentTypeDesc,
+    apiSwitch: zhApiSwitch,
+    desktop: zhDesktop,
+    devPanel: zhDevPanel,
+    provision: zhProvision,
+    agentCanvas: zhAgentCanvas,
+    teamPanel: zhTeamPanel,
   },
 };
 
@@ -64,7 +96,7 @@ void i18n
   .use(initReactI18next)
   .init({
     resources,
-    ns: ['common', 'login', 'settings', 'createAgent', 'editPane', 'workspace', 'ui', 'layout', 'chat', 'agentInspector', 'agentProviderRequest'],
+    ns: ['common', 'login', 'settings', 'createAgent', 'editPane', 'workspace', 'ui', 'layout', 'chat', 'agentInspector', 'agentProviderRequest', 'agentChat', 'agentTypeDesc', 'apiSwitch', 'desktop', 'devPanel', 'provision', 'agentCanvas', 'teamPanel'],
     defaultNS: 'common',
     fallbackLng: 'en',
     supportedLngs: [...SUPPORTED_LNGS],

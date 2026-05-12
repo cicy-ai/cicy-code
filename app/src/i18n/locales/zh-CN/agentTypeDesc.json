@@ -1,0 +1,13 @@
+{
+  "claude": "偏稳健，适合分析与写作",
+  "codex": "代码执行和自动修改更强",
+  "opencode": "终端式编码体验，更轻量",
+  "cursor": "适合 Cursor Agent 工作流",
+  "kiro-cli": "适合任务推进与工具流",
+  "copilot": "偏 GitHub 工作流与补全",
+  "cicy-wechat": "适合微信通道与消息协同",
+  "cicy-feishu": "适合飞书通道与办公协同",
+  "openclaw": "适合长连通道与外部集成",
+  "hermes": "默认主控型员工，适合统筹协调",
+  "cicy-claude": "Claude 兼容包装，便于统一接入"
+}

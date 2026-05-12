@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import { useApp } from '../../contexts/AppContext';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -21,7 +23,7 @@ const CollapsibleQ: React.FC<{ text: string }> = ({ text }) => {
         </div>
         {needsCollapse && (
           <button onClick={() => setCollapsed(v => !v)} className="text-base text-white/30 hover:text-white/60 mt-1 float-right">
-            {collapsed ? '展开 ▼' : '收起 ▲'}
+            {collapsed ? i18n.t('expand', { ns: 'agentChat' }) : i18n.t('collapse', { ns: 'agentChat' })}
           </button>
         )}
       </div>
@@ -68,9 +70,9 @@ const TOOL_ICONS: Record<string, string> = {
 };
 
 const TOOL_LABELS: Record<string, string> = {
-  fs_read: '读取文件', fs_write: '写入文件', execute_bash: 'Command',
-  grep: 'Search', glob: 'Glob', code: '代码分析',
-  web_search: '网页搜索', web_fetch: '网页抓取', use_aws: 'AWS', use_subagent: 'Subagent',
+  fs_read: i18n.t('toolReadFile', { ns: 'agentChat' }), fs_write: i18n.t('toolWriteFile', { ns: 'agentChat' }), execute_bash: 'Command',
+  grep: 'Search', glob: 'Glob', code: i18n.t('toolCodeAnalysis', { ns: 'agentChat' }),
+  web_search: i18n.t('toolWebSearch', { ns: 'agentChat' }), web_fetch: i18n.t('toolWebFetch', { ns: 'agentChat' }), use_aws: 'AWS', use_subagent: 'Subagent',
 };
 
 const ToolCard: React.FC<{ tool: any; running?: boolean }> = ({ tool, running }) => {
@@ -117,6 +119,7 @@ const ToolCard: React.FC<{ tool: any; running?: boolean }> = ({ tool, running })
 };
 
 const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, commandPanel, apiOnly = false, headerTabs }) => {
+  const { t } = useTranslation('agentChat')
   const { activeChatPaneId, chatWsHistoryVersion, subscribeChatWs } = useApp();
   const [agentType, setAgentType] = useState('AI');
   const [chatData, setChatData] = useState<any[]>([]);
@@ -262,7 +265,7 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
           window.dispatchEvent(new CustomEvent('agent-status-change', { detail: msg.data }));
         } else if (msg.type === 'worker_idle') {
           const d = msg.data?.data;
-          if (d) setChatData(prev => [...prev, { q: '', a: String(d.message || `🔔 **${d.worker || msg.data.from}** 已完成任务（空闲）`), status: 'done', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0, system: true }]);
+          if (d) setChatData(prev => [...prev, { q: '', a: String(d.message || i18n.t('completedNotice', { ns: 'agentChat', worker: d.worker || msg.data.from })), status: 'done', ts: Date.now()/1000, start_ts: Date.now()/1000, credit: 0, system: true }]);
         } else {
           if (!streamingRef.current) debouncedReload();
         }
@@ -312,12 +315,12 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
           {loading ? (
             <div className="flex flex-col items-center justify-center pt-20 gap-3">
               <div className="w-6 h-6 border-2 border-vsc-accent/30 border-t-vsc-accent rounded-full animate-spin" />
-              <span className="text-base text-vsc-text-muted">正在加载历史记录...</span>
+              <span className="text-base text-vsc-text-muted">{t('loadingHistory')}</span>
             </div>
           ) : groups.length === 0 ? (
             <div className="text-center pt-20">
               <div className="text-2xl mb-2 opacity-20">✦</div>
-              <p className="text-xs text-vsc-text-muted">等待对话开始</p>
+              <p className="text-xs text-vsc-text-muted">{t('waitingConversation')}</p>
             </div>
           ) : groups.map((g, gi) => {
             const { r } = g;
@@ -384,19 +387,19 @@ const ChatView: React.FC<ChatViewProps> = ({ paneId: displayPaneId, token, comma
                     {isPending && (
                       <div className="flex items-center gap-2 py-1.5">
                         <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
-                        <span className="text-base text-yellow-400/80 animate-pulse">思考中...</span>
+                        <span className="text-base text-yellow-400/80 animate-pulse">{t('statusThinking')}</span>
                       </div>
                     )}
                     {isRunning && (
                       <div className="flex items-center gap-2 py-1.5">
                         <div className="w-3 h-3 border border-yellow-400/40 border-t-yellow-400 rounded-full animate-spin" />
-                        <span className="text-base text-yellow-400/80">执行中{toolCount > 0 ? `（${toolCount} 个工具）` : ''}...</span>
+                        <span className="text-base text-yellow-400/80">{t('runningTools', { toolPart: toolCount > 0 ? t('runningTool', { count: toolCount }) : '' })}</span>
                       </div>
                     )}
                     {isStreaming && (
                       <div className="flex items-center gap-2 py-1.5">
                         <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                        <span className="text-base text-blue-400/80">输出中...</span>
+                        <span className="text-base text-blue-400/80">{t('statusStreaming')}</span>
                       </div>
                     )}
                   </div>
