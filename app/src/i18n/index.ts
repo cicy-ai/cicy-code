@@ -7,11 +7,13 @@ import enCreateAgent from './locales/en/createAgent.json';
 import enEditPane from './locales/en/editPane.json';
 import enLogin from './locales/en/login.json';
 import enSettings from './locales/en/settings.json';
+import enWorkspace from './locales/en/workspace.json';
 import zhCommon from './locales/zh-CN/common.json';
 import zhCreateAgent from './locales/zh-CN/createAgent.json';
 import zhEditPane from './locales/zh-CN/editPane.json';
 import zhLogin from './locales/zh-CN/login.json';
 import zhSettings from './locales/zh-CN/settings.json';
+import zhWorkspace from './locales/zh-CN/workspace.json';
 
 export const STORAGE_KEY = 'cicy.lang';
 
@@ -25,6 +27,7 @@ const resources = {
     settings: enSettings,
     createAgent: enCreateAgent,
     editPane: enEditPane,
+    workspace: enWorkspace,
   },
   'zh-CN': {
     common: zhCommon,
@@ -32,6 +35,7 @@ const resources = {
     settings: zhSettings,
     createAgent: zhCreateAgent,
     editPane: zhEditPane,
+    workspace: zhWorkspace,
   },
 };
 
@@ -40,7 +44,7 @@ void i18n
   .use(initReactI18next)
   .init({
     resources,
-    ns: ['common', 'login', 'settings', 'createAgent', 'editPane'],
+    ns: ['common', 'login', 'settings', 'createAgent', 'editPane', 'workspace'],
     defaultNS: 'common',
     fallbackLng: 'en',
     supportedLngs: [...SUPPORTED_LNGS],

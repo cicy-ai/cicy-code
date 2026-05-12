@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation, Trans } from 'react-i18next';
 
 type ToastState = {
   message: string;
@@ -73,14 +74,14 @@ type MembershipCardState = {
 };
 
 function formatDateTime(ms: number) {
-  return new Date(ms).toLocaleString('zh-CN', { hour12: false });
+  return new Date(ms).toLocaleString(undefined, { hour12: false });
 }
 
 function formatClockTime(value: string | null) {
   if (!value) return '';
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) return value;
-  return new Date(parsed).toLocaleTimeString('zh-CN', { hour12: false });
+  return new Date(parsed).toLocaleTimeString(undefined, { hour12: false });
 }
 
 function focusTmuxPaneFrame(paneId: string) {
@@ -210,10 +211,18 @@ function membershipTagTone(level: string | null) {
 const DEFAULT_MEMBERSHIP_CARD: MembershipCardState = {
   userId: 'open-source',
   level: 'open_source',
-  tag: '开源版',
+  tag: '',
   expiresAt: null,
   renewUrl: null,
   upgradeUrl: UPGRADE_URL,
+};
+
+const MEMBERSHIP_TAG_FALLBACK_KEY: Record<MembershipCardState['level'], string> = {
+  open_source: 'tagOpenSource',
+  trial: 'tagTrial',
+  shared: 'tagShared',
+  pro_vm: '',
+  private_deploy: 'tagPrivateDeploy',
 };
 
 function normalizeMembershipLevel(value: unknown): MembershipCardState['level'] {
@@ -222,30 +231,14 @@ function normalizeMembershipLevel(value: unknown): MembershipCardState['level'] 
   return DEFAULT_MEMBERSHIP_CARD.level;
 }
 
-function resolveMembershipTag(level: MembershipCardState['level'], value: unknown): string {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  if (raw) return raw;
-  switch (level) {
-    case 'trial':
-      return '试用';
-    case 'shared':
-      return '共享版';
-    case 'pro_vm':
-      return 'PRO';
-    case 'private_deploy':
-      return '私有版';
-    default:
-      return '开源版';
-  }
-}
-
 function normalizeMembershipCard(value: any): MembershipCardState {
   const base = DEFAULT_MEMBERSHIP_CARD;
   const level = normalizeMembershipLevel(value?.level ?? value?.kind);
+  const apiTag = typeof value?.tag === 'string' && value.tag.trim() ? value.tag.trim() : '';
   return {
     userId: typeof value?.userId === 'string' && value.userId.trim() ? value.userId.trim() : base.userId,
     level,
-    tag: resolveMembershipTag(level, value?.tag),
+    tag: apiTag,
     expiresAt: level === 'open_source' ? null : (typeof value?.expiresAt === 'string' && value.expiresAt.trim() ? value.expiresAt.trim() : base.expiresAt),
     renewUrl: typeof value?.renewUrl === 'string' && value.renewUrl.trim() ? value.renewUrl.trim() : base.renewUrl,
     upgradeUrl: typeof value?.upgradeUrl === 'string' && value.upgradeUrl.trim() ? value.upgradeUrl.trim() : base.upgradeUrl,
@@ -265,6 +258,7 @@ function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
 }
 
 export default function Workspace({ agentId, onSelectAgent }: Props) {
+  const { t } = useTranslation('workspace');
   const {
     setChatWsState,
     setChatWsSender,
@@ -563,7 +557,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     if (isApiOnlyRuntime) return;
     confirm(`Restart ${paneId}?`, async () => {
       setIsRestarting(true);
-      try { await apiService.restartPane(paneId); for (let i = 0; i < 30; i++) { await new Promise(r => setTimeout(r, 1000)); try { const { data } = await apiService.getTtydStatus(paneId); if (data.status === 'running') break; } catch {} } } catch { alert('重启失败'); } finally { setIsRestarting(false); }
+      try { await apiService.restartPane(paneId); for (let i = 0; i < 30; i++) { await new Promise(r => setTimeout(r, 1000)); try { const { data } = await apiService.getTtydStatus(paneId); if (data.status === 'running') break; } catch {} } } catch { alert(t('alertRestartFailed')); } finally { setIsRestarting(false); }
     });
   };
   const handleCapture = async () => { if (isApiOnlyRuntime) return; try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
@@ -866,7 +860,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               sendCommandToTmux(promptText, tmuxTarget, false).then(() => {
                 focusTmuxPaneFrame(tmuxTarget);
               }).catch(() => {
-                window.dispatchEvent(new CustomEvent('show-toast', { detail: '发送文件路径失败' }));
+                window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastSendFilePathFailed') }));
               });
             }
           } else if (msg?.type === 'poll_data' && msg.data) {
@@ -1025,9 +1019,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     try {
       window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: promptText } }));
       await sendCommandToTmux(promptText, tmuxTarget, true);
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '已发送页面 client_id 到当前 agent' }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastClientIdSent') }));
     } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '发送页面 client_id 失败' }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastClientIdFailed') }));
     }
   }, [activeCliPaneId, chatWsClientId, pageClientId, paneId]);
 
@@ -1054,7 +1048,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       document.body.removeChild(textarea);
     }
     if (ok) {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '已复制连接指令' }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastPromptCopied') }));
     }
   }, [chatWsClientId, pageClientId]);
 
@@ -1209,12 +1203,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     cliContentTab: setCliContentTab,
   });
   const cliContentTabs = [
-    { id: 'files', label: '文件' },
-    { id: 'history', label: '历史' },
-    { id: 'tools', label: '工具' },
-    { id: 'brain', label: '提示词' },
-    { id: 'meta', label: '元信息' },
-    { id: 'settings', label: '设置' },
+    { id: 'files', label: t('tabFiles') },
+    { id: 'history', label: t('tabHistory') },
+    { id: 'tools', label: t('tabTools') },
+    { id: 'brain', label: t('tabBrain') },
+    { id: 'meta', label: t('tabMeta') },
+    { id: 'settings', label: t('tabSettings') },
   ];
   const renderCliContentPanel = () => (
     <div
@@ -1266,8 +1260,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               setCliContentOpen(false);
             }}
             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-            title="关闭"
-            aria-label="关闭"
+            title={t('close', { ns: 'common' })}
+            aria-label={t('close', { ns: 'common' })}
           >
             <X className="h-4 w-4" />
           </button>
@@ -1285,12 +1279,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 src={fileCodeServerSrc}
                 codeServer
                 className="h-full w-full border-0 bg-[#0A0A0A]"
-                title="文件"
+                title={t('filesPaneTitle')}
               />
             </div>
           ) : (
             <div data-id="cli-content-files-empty" className="flex h-full items-center justify-center text-sm text-zinc-500">
-              {fileCodeServerWaiting ? '正在连接…' : '当前主 agent 没有可用的文件视图'}
+              {fileCodeServerWaiting ? t('filesConnecting') : t('filesNoViewer')}
             </div>
           )}
         </div>
@@ -1346,8 +1340,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     <>
       <SystemResourceMonitor paneId={paneId} />
       <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} onSendClientId={handleSendPageClientIdToAgent} onCopyPrompt={handleCopyPageConnectPrompt} />
-      <button onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 令牌"><Key className="w-3.5 h-3.5" /></button>
-      <button onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title="API 服务器"><Server className="w-3.5 h-3.5" /></button>
+      <button onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title={t('apiTokenButton')}><Key className="w-3.5 h-3.5" /></button>
+      <button onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title={t('apiServerButton')}><Server className="w-3.5 h-3.5" /></button>
       {contextUsage != null && (
         <div data-id="context-usage" className="flex items-center gap-1.5 rounded-full bg-white/[0.02] px-2 py-0.5">
           <div data-id="context-bar" className="h-1 w-12 overflow-hidden rounded-full bg-white/[0.04]">
@@ -1366,7 +1360,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <ChatView paneId={paneId} token={token!} apiOnly={isApiOnlyRuntime} />
           */}
           <div data-id="chat-view-disabled" className="flex h-full items-center justify-center text-sm text-zinc-500">
-            ChatView 已临时停用
+            {t('chatViewDisabled')}
           </div>
         </div>
       </div>
@@ -1408,9 +1402,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {/* Activity Bar */}
       <div data-id="activity-bar" ref={activityBarRef} className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
-          <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title="团队" onClick={() => toggleLeft('team')} />
-          <SideBtn dataId="btn-providers" active={providersOpen} icon={<Boxes className="w-5 h-5" />} title="AI 供应商" onClick={() => setProvidersOpen(true)} />
-          <SideBtn dataId="btn-im" active={imOpen} icon={<MessageCircle className="w-5 h-5" />} title="IM 平台" onClick={() => setImOpen(true)} />
+          <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} />
+          <SideBtn dataId="btn-providers" active={providersOpen} icon={<Boxes className="w-5 h-5" />} title={t('sidebarProviders')} onClick={() => setProvidersOpen(true)} />
+          <SideBtn dataId="btn-im" active={imOpen} icon={<MessageCircle className="w-5 h-5" />} title={t('sidebarIM')} onClick={() => setImOpen(true)} />
         </div>
         <div data-id="activity-bar-bottom" className="flex w-full flex-col items-center gap-3">
           <button
@@ -1441,13 +1435,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   <div data-id="left-panel-header" className="h-12 border-b border-[var(--vsc-border)] flex items-center px-2 bg-[#0e0e0e] shrink-0 gap-1">
                     {leftActive === 'agents' ? <>
                       <LayoutList className="w-3.5 h-3.5 text-zinc-600" />
-                      <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">智能体</span>
+                      <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelAgents')}</span>
                     </> : leftActive === 'skills' ? <>
                       <Brain className="w-3.5 h-3.5 text-zinc-600" />
-                      <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">技能</span>
+                      <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelSkills')}</span>
                     </> : <>
                       <Users className="w-3.5 h-3.5 text-zinc-600" />
-                      <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">团队</span>
+                      <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelTeam')}</span>
                     </>}
                     <button data-id="left-panel-close" onClick={closeLeftPanel} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"><X className="w-3.5 h-3.5" /></button>
                   </div>
@@ -1539,13 +1533,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           style={{ left: membershipPopoverPos.x, bottom: 12 }}
         >
           <div data-id="membership-dropdown-meta" className={cn('mb-2 rounded-lg border px-3 py-2', membershipTone(membershipCard.level))}>
-            {membershipCard.tag ? (
-              <span className={cn('inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase', membershipTagTone(membershipCard.level))}>
-                {membershipCard.tag}
-              </span>
-            ) : null}
+            {(() => {
+              const fallbackKey = MEMBERSHIP_TAG_FALLBACK_KEY[membershipCard.level];
+              const displayTag = membershipCard.tag
+                || (membershipCard.level === 'pro_vm' ? 'PRO' : (fallbackKey ? t(fallbackKey) : ''));
+              return displayTag ? (
+                <span className={cn('inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase', membershipTagTone(membershipCard.level))}>
+                  {displayTag}
+                </span>
+              ) : null;
+            })()}
             {membershipCard.expiresAt ? (
-              <div className="mt-1 text-[11px] font-mono text-zinc-100">到期时间 {formatDateTime(Date.parse(membershipCard.expiresAt))}</div>
+              <div className="mt-1 text-[11px] font-mono text-zinc-100">{t('membershipExpiresAt', { date: formatDateTime(Date.parse(membershipCard.expiresAt)) })}</div>
             ) : null}
           </div>
           {membershipCard.renewUrl ? (
@@ -1558,7 +1557,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               }}
               className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-sky-100 transition-colors hover:bg-sky-300/10"
             >
-              <span>我要续费</span>
+              <span>{t('membershipRenew')}</span>
               <ExternalLink className="h-3.5 w-3.5" />
             </button>
           ) : null}
@@ -1572,7 +1571,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               }}
               className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-amber-100 transition-colors hover:bg-amber-300/10"
             >
-              <span>我要升级</span>
+              <span>{t('membershipUpgrade')}</span>
               <ExternalLink className="h-3.5 w-3.5" />
             </button>
           ) : null}
@@ -1596,9 +1595,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               window.dispatchEvent(new Event('open-devtools-panel'));
             }}
             className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
-            title="调试工具"
+            title={t('debugTools')}
           >
-            <span>调试工具</span>
+            <span>{t('debugTools')}</span>
             <Bug className="h-3.5 w-3.5" />
           </button>
           <div data-id="membership-version" className="mt-1 flex items-center justify-between rounded-lg px-3 py-2 text-[11px] text-zinc-500">
@@ -1716,6 +1715,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
   onSelectAgent: (id: string) => void; on智能体Change: (a: any[]) => void;
   onOpenSettings: (id: string) => void;
 }) {
+  const { t } = useTranslation('workspace');
   const [search, setSearch] = useState('');
   const [adding, setAdding] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -1755,14 +1755,14 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
         onSelectAgent(id.split(':')[0]);
       }
     } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '创建员工失败' }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastCreateWorkerFailed') }));
     } finally { setAdding(false); }
   };
 
   const handleDelete = (id: string) => {
     const sid = id.split(':')[0];
     if (sid === 'w-10001') return;
-    confirm(<>删除 <span className="text-zinc-100 font-medium">{sid}</span>？</>, async () => {
+    confirm(<Trans i18nKey="drawerConfirmDelete" ns="workspace" values={{ name: sid }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />, async () => {
       try {
         await apiService.deletePane(id);
         const { data: fresh } = await apiService.getPanes();
@@ -1779,12 +1779,12 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
 
   const handleRestart = (id: string, title: string) => {
     const sid = id.split(':')[0];
-    confirm(<>重启 <span className="text-zinc-100 font-medium">{title || sid}</span>？</>, async () => {
+    confirm(<Trans i18nKey="drawerConfirmRestart" ns="workspace" values={{ name: title || sid }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />, async () => {
       try {
         await apiService.restartPane(sid);
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: `${title || sid} 正在重启...` }));
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastWorkerRestarting', { name: title || sid }) }));
       } catch {
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: `错误：${title || sid} 重启失败` }));
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastWorkerRestartFailed', { name: title || sid }) }));
       }
     });
   };
@@ -1806,7 +1806,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
               <input
                 type="search"
-                placeholder="搜索 ID 或标题..."
+                placeholder={t('drawerSearchPlaceholder')}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 className="w-full bg-white/[0.02] border border-[var(--vsc-border)] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-white/[0.08] placeholder:text-zinc-700 text-zinc-400"
@@ -1814,7 +1814,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
             </div>
             <button onClick={() => setCreateDialogOpen(true)} disabled={adding}
               className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-[var(--vsc-border)] text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-              title="添加员工">
+              title={t('drawerAddWorker')}>
               <Plus className="w-4 h-4" />
             </button>
           </div>
@@ -1846,7 +1846,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
                           ? "bg-white/[0.08] text-zinc-200"
                           : "text-zinc-700 opacity-0 group-hover:opacity-100 hover:bg-white/[0.05] hover:text-zinc-300"
                       )}
-                      title="菜单">
+                      title={t('drawerMenu')}>
                       <MoreHorizontal className="w-3.5 h-3.5" />
                     </button>
                     {openMenuId === id ? (
@@ -1864,7 +1864,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
                           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
                         >
                           <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                          <span>打开</span>
+                          <span>{t('drawerOpen')}</span>
                         </button>
                         <button
                           type="button"
@@ -1876,7 +1876,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
                           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
                         >
                           <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-                          <span>重启</span>
+                          <span>{t('drawerRestart')}</span>
                         </button>
                         <button
                           type="button"
@@ -1888,7 +1888,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
                           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
                         >
                           <Settings className="w-3.5 h-3.5 shrink-0" />
-                          <span>设置</span>
+                          <span>{t('drawerSettings')}</span>
                         </button>
                         {!isMaster ? (
                           <button
@@ -1901,7 +1901,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
                             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-red-300 transition-colors cursor-pointer hover:bg-red-500/10 hover:text-red-200"
                           >
                             <X className="w-3.5 h-3.5 shrink-0" />
-                            <span>删除</span>
+                            <span>{t('drawerDelete')}</span>
                           </button>
                         ) : null}
                       </div>
@@ -1932,8 +1932,8 @@ function AgentDrawer({ agents, paneId, onSelectAgent, on智能体Change, onOpenS
         submitting={adding}
         onClose={() => setCreateDialogOpen(false)}
         onSubmit={handleQuickAddMaster}
-        title="创建员工"
-        submitLabel="创建"
+        title={t('drawerCreateTitle')}
+        submitLabel={t('drawerCreateSubmit')}
       />
     </>
   );
@@ -1964,6 +1964,7 @@ function formatLoadValue(value: number | null | undefined) {
 }
 
 function SystemResourceMonitor({ paneId }: { paneId: string }) {
+  const { t } = useTranslation('workspace');
   const { activeChatPaneId, sendChatWsMessage, systemResources } = useApp();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -1995,7 +1996,7 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
   const cpu = formatResourcePct(systemResources?.cpu_usage_pct);
   const memory = formatResourcePct(systemResources?.mem_usage_pct);
   const disk = formatResourcePct(systemResources?.disk_usage_pct);
-  const updatedAt = systemResources?.updated_at ? new Date(systemResources.updated_at).toLocaleTimeString('zh-CN', { hour12: false }) : '--';
+  const updatedAt = systemResources?.updated_at ? new Date(systemResources.updated_at).toLocaleTimeString(undefined, { hour12: false }) : '--';
 
   return (
     <div data-id="system-resource-root" ref={rootRef} className="relative">
@@ -2011,7 +2012,7 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
           }
         }}
         className="flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[10px] font-mono text-zinc-500 transition-colors cursor-pointer hover:border-white/[0.12] hover:text-zinc-300"
-        title="系统资源"
+        title={t('systemResourceTitle')}
       >
         <span data-id="system-resource-summary-cpu">CPU {cpu}</span>
         <span data-id="system-resource-summary-memory">MEM {memory}</span>
@@ -2024,24 +2025,24 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
           className="absolute right-0 top-[calc(100%+8px)] z-[180] min-w-[280px] rounded-2xl border border-white/[0.08] bg-[#111113]/98 p-3 shadow-2xl backdrop-blur-xl"
         >
           <div data-id="system-resource-dropdown-header" className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-medium text-zinc-300">系统资源</span>
+            <span className="text-xs font-medium text-zinc-300">{t('systemResourceTitle')}</span>
             <span data-id="system-resource-updated-at" className="text-[10px] font-mono text-zinc-600">{updatedAt}</span>
           </div>
           <div data-id="system-resource-grid" className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1.5 text-[11px]">
             <span data-id="system-resource-label-cpu" className="text-zinc-600">CPU</span>
             <span data-id="system-resource-value-cpu" className="font-mono text-zinc-300">{cpu} · {systemResources?.cpu_cores ?? '--'} cores</span>
 
-            <span data-id="system-resource-label-memory" className="text-zinc-600">内存</span>
+            <span data-id="system-resource-label-memory" className="text-zinc-600">{t('systemResourceMemory')}</span>
             <span data-id="system-resource-value-memory" className="font-mono text-zinc-300">
               {memory} · {formatResourceBytes(systemResources?.mem_used_bytes)} / {formatResourceBytes(systemResources?.mem_total_bytes)}
             </span>
 
-            <span data-id="system-resource-label-disk" className="text-zinc-600">磁盘</span>
+            <span data-id="system-resource-label-disk" className="text-zinc-600">{t('systemResourceDisk')}</span>
             <span data-id="system-resource-value-disk" className="font-mono text-zinc-300">
               {disk} · {formatResourceBytes(systemResources?.disk_used_bytes)} / {formatResourceBytes(systemResources?.disk_total_bytes)}
             </span>
 
-            <span data-id="system-resource-label-load" className="text-zinc-600">负载</span>
+            <span data-id="system-resource-label-load" className="text-zinc-600">{t('systemResourceLoad')}</span>
             <span data-id="system-resource-value-load" className="font-mono text-zinc-300">
               {formatLoadValue(systemResources?.load_1)} / {formatLoadValue(systemResources?.load_5)} / {formatLoadValue(systemResources?.load_15)}
             </span>
@@ -2053,12 +2054,13 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
 }
 
 function NetworkSignal({ latency, connected = true, clientId, onSendClientId, onCopyPrompt }: { latency: number | null; connected?: boolean; clientId?: string | null; onSendClientId?: () => Promise<void> | void; onCopyPrompt?: () => Promise<void> | void }) {
+  const { t } = useTranslation('workspace');
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [open, setOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const bars = !connected ? 0 : latency === null ? 4 : latency < 100 ? 4 : latency < 200 ? 3 : latency < 500 ? 2 : 1;
   const color = bars >= 4 ? 'bg-emerald-400' : bars === 3 ? 'bg-emerald-400' : bars === 2 ? 'bg-yellow-400' : bars === 1 ? 'bg-red-400' : 'bg-zinc-700';
-  const label = !connected ? '离线' : latency === null ? '在线' : `${latency}ms`;
+  const label = !connected ? t('networkOffline') : latency === null ? t('networkOnline') : `${latency}ms`;
   const copyPlainText = (text: string) => {
     const textarea = document.createElement('textarea');
     textarea.value = text;
@@ -2108,9 +2110,9 @@ function NetworkSignal({ latency, connected = true, clientId, onSendClientId, on
         <div className="absolute right-0 top-full z-[180] min-w-[240px] rounded-lg border border-white/[0.08] bg-[#111113]/98 px-3 py-2 text-[11px] shadow-2xl backdrop-blur-xl">
           <div className="text-zinc-500">WebSocket</div>
           <div className="mt-1 flex items-start gap-2">
-            <div className="min-w-0 flex-1 font-mono text-zinc-200 break-all">{clientId || '未连接 client_id'}</div>
+            <div className="min-w-0 flex-1 font-mono text-zinc-200 break-all">{clientId || t('networkClientIdMissing')}</div>
           </div>
-          <div className="mt-1 text-zinc-500">{connected ? '已连接' : '未连接'}</div>
+          <div className="mt-1 text-zinc-500">{connected ? t('networkConnected') : t('networkDisconnected')}</div>
           <button
             type="button"
             data-id="network-signal-send-client-id"
@@ -2119,7 +2121,7 @@ function NetworkSignal({ latency, connected = true, clientId, onSendClientId, on
             disabled={sending}
           >
             <Send className="h-3.5 w-3.5" />
-            <span>{sending ? '发送中...' : '发送给 Agent'}</span>
+            <span>{sending ? t('networkSending') : t('networkSendClientId')}</span>
           </button>
           <button
             type="button"
@@ -2128,9 +2130,9 @@ function NetworkSignal({ latency, connected = true, clientId, onSendClientId, on
             onClick={() => { void handleCopyPrompt(); }}
           >
             <Copy className="h-3.5 w-3.5" />
-            <span>复制连接指令</span>
+            <span>{t('networkCopyPrompt')}</span>
           </button>
-          {copiedPrompt ? <div className="mt-1 text-emerald-400">已复制连接指令</div> : null}
+          {copiedPrompt ? <div className="mt-1 text-emerald-400">{t('networkPromptCopied')}</div> : null}
         </div>
       ) : null}
     </div>
