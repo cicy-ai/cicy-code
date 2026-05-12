@@ -151,7 +151,17 @@ def ensure_sg(vpc_id):
     return sg_id
 
 
+def purge_known_hosts(ip):
+    # Re-running this skill recreates the container (fresh sshd host keys) and
+    # may reuse the same IP, so a stale ~/.ssh/known_hosts entry would make
+    # `StrictHostKeyChecking accept-new` fail. Drop any prior entries first.
+    for target in (ip, f"[{ip}]:{SSH_PORT_HOST}", f"[{ip}]:{SSH_PORT_CONTAINER}"):
+        subprocess.run(["ssh-keygen", "-R", target], check=False,
+                       capture_output=True, text=True)
+
+
 def update_ssh_config(ip):
+    purge_known_hosts(ip)
     entries = {
         HOST_NAME: f"Host {HOST_NAME}\n    HostName {ip}\n    User root\n    Port {SSH_PORT_HOST}\n    IdentityFile {SSH_KEY}\n    StrictHostKeyChecking accept-new\n",
         HOST_CICY_NAME: f"Host {HOST_CICY_NAME}\n    HostName {ip}\n    User cicy\n    Port {SSH_PORT_CONTAINER}\n    IdentityFile {SSH_KEY}\n    StrictHostKeyChecking accept-new\n",

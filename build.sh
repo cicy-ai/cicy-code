@@ -233,6 +233,11 @@ prepare_embed() {
   if [ "${SKIP_NPM:-0}" != "1" ]; then
     # Build frontend
     cd $APP_DIR && npm ci --silent && npm run build --silent && cd "$ROOT_DIR"
+  elif [ ! -d "$APP_DIR/dist" ]; then
+    # SKIP_NPM reuses an existing app/dist, but on a fresh checkout it does not
+    # exist yet — build it once so the unconditional `cp app/dist` below works.
+    echo "[build] SKIP_NPM=1 but $APP_DIR/dist is missing; building frontend once..."
+    cd $APP_DIR && npm ci --silent && npm run build --silent && cd "$ROOT_DIR"
   fi
   if [ "${SKIP_TTYD_ASSET:-0}" != "1" ]; then
     cd "$API_DIR" && make asset >/dev/null && cd "$ROOT_DIR"
