@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestEnsureGlobalAPITokenCreatesProxyToken(t *testing.T) {
+func TestEnsureGlobalAPITokenSetsAPIToken(t *testing.T) {
 	withTempCicyRoot(t)
 	token, err := ensureGlobalAPIToken(cicyGlobalJSONPath, "keep-me")
 	if err != nil {
@@ -26,22 +26,25 @@ func TestEnsureGlobalAPITokenCreatesProxyToken(t *testing.T) {
 	if anyString(cfg["api_token"]) != "keep-me" {
 		t.Fatalf("api_token = %v", cfg["api_token"])
 	}
-	if anyString(cfg["proxy_token"]) == "" {
-		t.Fatalf("proxy_token should be initialized: %v", cfg["proxy_token"])
+	// proxy_token is no longer managed by cicy-code; the proxy password lives
+	// in ~/cicy-ai/db/mihomo.yaml's globalPassword (seeded by cicy-mihomo).
+	if _, ok := cfg["proxy_token"]; ok {
+		t.Fatalf("proxy_token should not be created when absent, got: %v", cfg["proxy_token"])
 	}
 }
 
-func TestEnsureGlobalAPITokenPreservesProxyToken(t *testing.T) {
+func TestEnsureGlobalAPITokenPreservesExistingProxyToken(t *testing.T) {
+	// Legacy installs may have proxy_token in global.json. We don't manage it
+	// anymore but must not strip it on rewrite.
 	withTempCicyRoot(t)
 	body := `{
   "api_token": "keep-me",
-  "proxy_token": "keep-proxy"
+  "proxy_token": "legacy-value"
 }`
 	if err := os.WriteFile(cicyGlobalJSONPath, []byte(body), 0644); err != nil {
 		t.Fatalf("write global.json: %v", err)
 	}
-	_, err := ensureGlobalAPIToken(cicyGlobalJSONPath, "keep-me")
-	if err != nil {
+	if _, err := ensureGlobalAPIToken(cicyGlobalJSONPath, "different-token"); err != nil {
 		t.Fatalf("ensureGlobalAPIToken error: %v", err)
 	}
 	data, err := os.ReadFile(cicyGlobalJSONPath)
@@ -52,7 +55,7 @@ func TestEnsureGlobalAPITokenPreservesProxyToken(t *testing.T) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		t.Fatalf("decode global.json: %v", err)
 	}
-	if anyString(cfg["proxy_token"]) != "keep-proxy" {
-		t.Fatalf("proxy_token not preserved: %v", cfg["proxy_token"])
+	if anyString(cfg["proxy_token"]) != "legacy-value" {
+		t.Fatalf("legacy proxy_token must be preserved, got: %v", cfg["proxy_token"])
 	}
 }

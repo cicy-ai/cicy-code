@@ -197,6 +197,12 @@ func TestAgentBootLinesClaudeWritesSettingsFileWithoutGatewayAuth(t *testing.T) 
 	if !strings.Contains(script, `  "model": "`) {
 		t.Fatalf("claude login-mode boot lines missing model field: %s", script)
 	}
+	if !strings.Contains(script, "unset ANTHROPIC_BASE_URL") {
+		t.Fatalf("claude login-mode boot lines should unset ANTHROPIC_BASE_URL: %s", script)
+	}
+	if !strings.Contains(script, "unset ANTHROPIC_API_KEY") {
+		t.Fatalf("claude login-mode boot lines should unset ANTHROPIC_API_KEY: %s", script)
+	}
 	if !strings.Contains(script, `claude --settings "$WORKSPACE/.cicy/claude-settings.json"`) {
 		t.Fatalf("claude login-mode boot lines missing claude startup: %s", script)
 	}

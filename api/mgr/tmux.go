@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -2168,6 +2169,12 @@ EOF
 			settingsJSON,
 			`EOF`,
 		)
+		if useOfficialAuth {
+			lines = append(lines,
+				"unset ANTHROPIC_BASE_URL",
+				"unset ANTHROPIC_API_KEY",
+			)
+		}
 		if allowAllActions {
 			lines = append(lines, "clear")
 			lines = append(lines, fmt.Sprintf(`%s --settings "$WORKSPACE/.cicy/%s" --dangerously-skip-permissions`, launchPrefix, settingsFile))
@@ -3674,19 +3681,23 @@ func initPaneEnv(opts paneEnvOpts) {
 	}
 
 	if opts.useProxy {
+		ensureMihomoRuleForAgent(shortID)
+		// Source of truth for the proxy password is mihomo.yaml's globalPassword
+		// (seeded by `cicy-mihomo gen-config` and assumed to exist). Per-pane
+		// proxy.password from configJSON can override it for this agent.
+		password := readMihomoGlobalPassword()
 		if ps := extractProxySettingsFromConfigJSON(opts.configJSON); ps != nil {
-			if strings.TrimSpace(ps.Password) != "" {
-				lines = append(lines, fmt.Sprintf("export CICY_PROXY_PASSWORD=%s", tmuxShellQuote(strings.TrimSpace(ps.Password))))
+			if p := strings.TrimSpace(ps.Password); p != "" {
+				password = p
 			}
 			if strings.TrimSpace(ps.Rule) != "" {
 				lines = append(lines, fmt.Sprintf("export CICY_PROXY_RULE=%s", tmuxShellQuote(strings.TrimSpace(ps.Rule))))
 			}
 		}
+		if password != "" {
+			lines = append(lines, fmt.Sprintf("export CICY_PROXY_PASSWORD=%s", tmuxShellQuote(password)))
+		}
 		lines = append(lines,
-			"if ! __cicy_mihome_has_in_user_rule; then",
-			"  echo \"[cicy] 缺少 mihome IN-USER 规则，请先在后台设置里配置\"",
-			"  exit 1",
-			"fi",
 			"cicy_proxy_on",
 		)
 	}
@@ -4413,4 +4424,148 @@ func handleTmuxList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	J(w, M{"success": true, "output": strings.Join(lines, "\n")})
+}
+
+// ensureMihomoRuleForAgent keeps ~/cicy-ai/db/mihomo.yaml in shape so that an
+// agent's traffic routes through default_proxy_node. The yaml must already
+// have globalPassword set (seeded by `cicy-mihomo gen-config`); we don't
+// manage it here. We only ensure an `IN-USER,<shortID>,default_proxy_node`
+// rule exists before any `MATCH,*` catch-all, so this agent isn't dropped by
+// the default REJECT.
+//
+// Best-effort: missing file/section is a silent no-op; on any change the file
+// is replaced atomically and `cicy-mihomo reload` is invoked.
+func ensureMihomoRuleForAgent(shortID string) {
+	shortID = strings.TrimSpace(shortID)
+	if shortID == "" {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return
+	}
+	path := filepath.Join(home, "cicy-ai", "db", "mihomo.yaml")
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(string(raw), "\n")
+
+	findSection := func(name string) (int, int) {
+		start := -1
+		end := len(lines)
+		for i, line := range lines {
+			if start < 0 {
+				if strings.TrimSpace(line) == name+":" {
+					start = i
+				}
+				continue
+			}
+			if line == "" {
+				continue
+			}
+			if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") && strings.Contains(line, ":") {
+				end = i
+				break
+			}
+		}
+		return start, end
+	}
+	stripListBody := func(s string) string {
+		s = strings.TrimSpace(s)
+		if !strings.HasPrefix(s, "-") {
+			return ""
+		}
+		s = strings.TrimSpace(strings.TrimPrefix(s, "-"))
+		return strings.Trim(s, "\"' ")
+	}
+	mutated := false
+
+	// --- rules block: ensure IN-USER,<shortID>,default_proxy_node exists ---
+	rulesStart, rulesEnd := findSection("rules")
+	if rulesStart >= 0 {
+		desired := fmt.Sprintf("IN-USER,%s,default_proxy_node", shortID)
+		hasRule := false
+		insertRuleAt := rulesEnd
+		for i := rulesStart + 1; i < rulesEnd; i++ {
+			body := stripListBody(lines[i])
+			if body == "" {
+				continue
+			}
+			if body == desired {
+				hasRule = true
+				break
+			}
+			if insertRuleAt == rulesEnd && strings.HasPrefix(body, "MATCH") {
+				insertRuleAt = i
+			}
+		}
+		if !hasRule {
+			newLines := make([]string, 0, len(lines)+1)
+			newLines = append(newLines, lines[:insertRuleAt]...)
+			newLines = append(newLines, "  - "+desired)
+			newLines = append(newLines, lines[insertRuleAt:]...)
+			lines = newLines
+			mutated = true
+		}
+	}
+
+	if !mutated {
+		return
+	}
+
+	out := strings.Join(lines, "\n")
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(out), info.Mode().Perm()); err != nil {
+		log.Printf("[mihomo-rule] write tmp failed: %v", err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		log.Printf("[mihomo-rule] rename failed: %v", err)
+		return
+	}
+	log.Printf("[mihomo-rule] updated %s for %s (auth+rule)", path, shortID)
+
+	// Push the new config into the running mihomo. Best-effort: a short
+	// timeout keeps a hung wrapper from blocking agent startup.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "cicy-mihomo", "reload")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		log.Printf("[mihomo-rule] cicy-mihomo reload failed: %v output=%s", err, strings.TrimSpace(string(out)))
+	} else {
+		log.Printf("[mihomo-rule] cicy-mihomo reload ok")
+	}
+}
+
+// readMihomoGlobalPassword reads the top-level `globalPassword:` value from
+// ~/cicy-ai/db/mihomo.yaml. Returns "" if the file or key is missing — the
+// caller may then skip exporting CICY_PROXY_PASSWORD, but in normal operation
+// the value is seeded by `cicy-mihomo gen-config` and assumed to exist.
+func readMihomoGlobalPassword() string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(home, "cicy-ai", "db", "mihomo.yaml"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+			continue
+		}
+		t := strings.TrimSpace(line)
+		if !strings.HasPrefix(t, "globalPassword:") {
+			continue
+		}
+		v := strings.TrimSpace(strings.TrimPrefix(t, "globalPassword:"))
+		return strings.Trim(v, "\"' ")
+	}
+	return ""
 }

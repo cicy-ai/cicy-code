@@ -205,25 +205,79 @@ async function postSendPath(payload: Record<string, unknown>, displayPath: strin
   });
   if (!response.ok) {
     const text = await response.text().catch(() => '');
-    void vscode.window.showErrorMessage(`发送文件路径失败: ${text || response.status}`);
+    void vscode.window.showErrorMessage(vscode.l10n.t('Failed to send file path: {0}', String(text || response.status)));
     return;
   }
-  void vscode.window.showInformationMessage(`已发送: ${displayPath}`);
+  void vscode.window.showInformationMessage(vscode.l10n.t('Sent: {0}', displayPath));
 }
 
 async function sendPathToCurrentAgent(uri: vscode.Uri): Promise<void> {
   const payload = buildExplorerPayload(uri);
   if (!payload) {
-    void vscode.window.showErrorMessage('未找到当前 workspace folder');
+    void vscode.window.showErrorMessage(vscode.l10n.t('No active workspace folder'));
     return;
   }
   await postSendPath(payload, uri.fsPath);
 }
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return `${bytes}`;
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const display = value >= 100 ? Math.round(value).toString()
+    : value >= 10 ? value.toFixed(1)
+    : value.toFixed(2);
+  return `${display} ${units[unitIndex]}`;
+}
+
+function formatRelativeMtime(ms: number): string {
+  const diff = Date.now() - ms;
+  if (diff < 0) return vscode.l10n.t('in the future');
+  if (diff < 60_000) return vscode.l10n.t('just now');
+  if (diff < 3_600_000) return vscode.l10n.t('{0} minutes ago', String(Math.floor(diff / 60_000)));
+  if (diff < 86_400_000) return vscode.l10n.t('{0} hours ago', String(Math.floor(diff / 3_600_000)));
+  if (diff < 30 * 86_400_000) return vscode.l10n.t('{0} days ago', String(Math.floor(diff / 86_400_000)));
+  return new Date(ms).toLocaleDateString();
+}
+
+function formatAbsoluteMtime(ms: number): string {
+  const d = new Date(ms);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
+async function showFileInfo(uri: vscode.Uri): Promise<void> {
+  try {
+    const stat = await fs.promises.stat(uri.fsPath);
+    if (!stat.isFile()) return;
+    const name = path.basename(uri.fsPath);
+    const sizeStr = formatBytes(stat.size);
+    const mtimeRel = formatRelativeMtime(stat.mtimeMs);
+    const mtimeAbs = formatAbsoluteMtime(stat.mtimeMs);
+    void vscode.window.showInformationMessage(
+      vscode.l10n.t('{0} · {1} ({2} B) · modified {3} ({4})', name, sizeStr, String(stat.size), mtimeRel, mtimeAbs),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || '');
+    void vscode.window.showErrorMessage(vscode.l10n.t('Failed to read file info: {0}', message || uri.fsPath));
+  }
+}
+
 async function sendActiveDocumentToCurrentAgent(): Promise<void> {
   const payload = buildEditorPayload();
   if (!payload) {
-    void vscode.window.showErrorMessage('未找到当前文档');
+    void vscode.window.showErrorMessage(vscode.l10n.t('No active document'));
     return;
   }
   await postSendPath(payload, String(payload.path || ''));
@@ -237,7 +291,7 @@ async function openFileFromHost(rawPath: unknown): Promise<void> {
   }
   const uri = await resolveWorkspaceFileUri(filePath);
   if (!uri) {
-    void vscode.window.showErrorMessage(`打开文件失败: ${filePath}`);
+    void vscode.window.showErrorMessage(vscode.l10n.t('Failed to open file: {0}', filePath));
     throw new Error(filePath);
   }
   await openUriReference(uri, parsed);
@@ -279,8 +333,17 @@ function connectHostOpenFileBridge(context: vscode.ExtensionContext): void {
       scheduleReconnect();
       return;
     }
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       socket = null;
+      // 4409 = superseded by another connection with the same client_id (e.g.
+      // a duplicated browser tab raced for this slot). The new connection is
+      // authoritative; reconnecting would just kick it back out, so we stop.
+      // The other side's pageClientId dedup will eventually settle and the
+      // iframe will reload with a fresh client_id, re-activating this code.
+      if (event && event.code === 4409) {
+        disposed = true;
+        return;
+      }
       scheduleReconnect();
     };
     socket.onerror = () => {
@@ -310,7 +373,7 @@ function connectHostOpenFileBridge(context: vscode.ExtensionContext): void {
             }
           }).catch((error) => {
             const message = error instanceof Error ? error.message : String(error || '');
-            void vscode.window.showErrorMessage(`打开文件失败: ${message || String(payload.data?.path || '')}`);
+            void vscode.window.showErrorMessage(vscode.l10n.t('Failed to open file: {0}', message || String(payload.data?.path || '')));
             try {
               socket?.send(JSON.stringify({
                 type: 'code.open_file_error',
@@ -375,7 +438,11 @@ export function activate(context: vscode.ExtensionContext) {
   const editorDisposable = vscode.commands.registerCommand('cicy.sendActiveDocumentToCurrentAgent', async () => {
     await sendActiveDocumentToCurrentAgent();
   });
-  context.subscriptions.push(explorerDisposable, editorDisposable);
+  const fileInfoDisposable = vscode.commands.registerCommand('cicy.showFileInfo', async (uri: vscode.Uri) => {
+    if (!uri) return;
+    await showFileInfo(uri);
+  });
+  context.subscriptions.push(explorerDisposable, editorDisposable, fileInfoDisposable);
   connectHostOpenFileBridge(context);
 }
 

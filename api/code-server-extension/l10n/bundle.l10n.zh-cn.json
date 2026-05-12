@@ -1,0 +1,14 @@
+{
+  "Failed to send file path: {0}": "发送文件路径失败: {0}",
+  "Sent: {0}": "已发送: {0}",
+  "No active workspace folder": "未找到当前 workspace folder",
+  "No active document": "未找到当前文档",
+  "Failed to open file: {0}": "打开文件失败: {0}",
+  "Failed to read file info: {0}": "读取文件信息失败: {0}",
+  "{0} · {1} ({2} B) · modified {3} ({4})": "{0} · {1} ({2} B) · 修改于 {3} ({4})",
+  "just now": "刚刚",
+  "in the future": "未来",
+  "{0} minutes ago": "{0} 分钟前",
+  "{0} hours ago": "{0} 小时前",
+  "{0} days ago": "{0} 天前"
+}

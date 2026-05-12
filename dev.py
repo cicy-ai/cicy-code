@@ -25,7 +25,9 @@ CICY_PROXY_JSON_PATH = os.path.join(CICY_ROOT_DIR, "proxy.json")
 DOCKER_HOME_DIR = "/home/cicy"
 DOCKER_PROJECTS_DIR = f"{DOCKER_HOME_DIR}/projects"
 LEGACY_PROXY_JSON_PATH = os.path.expanduser("~/proxy.json")
-SQLITE_PATH = os.environ.get("SQLITE_PATH", os.path.join(CICY_ROOT_DIR, "db", "data.db"))
+SQLITE_PATH = os.environ.get(
+    "SQLITE_PATH", os.path.join(CICY_ROOT_DIR, "db", "data.db")
+)
 GLOBAL_JSON_PATH = CICY_GLOBAL_JSON_PATH
 PROXY_JSON_PATH = CICY_PROXY_JSON_PATH
 VERSION_SYNC_SCRIPT = os.path.join(ROOT_DIR, "scripts", "sync-version.py")
@@ -36,6 +38,7 @@ AI_PROVIDER_ALIASES = {
     "cicyai": "cicyAi",
 }
 
+
 def load_global_json():
     try:
         with open(GLOBAL_JSON_PATH, "r", encoding="utf-8") as f:
@@ -43,11 +46,13 @@ def load_global_json():
     except Exception:
         return {}
 
+
 def canonical_ai_provider_name(name):
     value = str(name or "").strip()
     if not value:
         return ""
     return AI_PROVIDER_ALIASES.get(value.lower(), value)
+
 
 def default_ai_provider_config(name, data):
     canonical = canonical_ai_provider_name(name)
@@ -77,17 +82,21 @@ def default_ai_provider_config(name, data):
     }
     return defaults.get(canonical, {})
 
+
 def get_ai_provider_config(provider_name=""):
     data = load_global_json()
     ai = data.get("ai", {})
     provider_map = ai.get("provider", {}) if isinstance(ai, dict) else {}
 
-    selected = canonical_ai_provider_name(
-        provider_name
-        or os.environ.get("CICY_AI_PROVIDER")
-        or (ai.get("currentProvider", "") if isinstance(ai, dict) else "")
+    selected = (
+        canonical_ai_provider_name(
+            provider_name
+            or os.environ.get("CICY_AI_PROVIDER")
+            or (ai.get("currentProvider", "") if isinstance(ai, dict) else "")
+            or "cicyAi"
+        )
         or "cicyAi"
-    ) or "cicyAi"
+    )
 
     config = dict(default_ai_provider_config(selected, data))
     for key, value in provider_map.items() if isinstance(provider_map, dict) else []:
@@ -99,22 +108,36 @@ def get_ai_provider_config(provider_name=""):
         config["apiUrl"] = config["baseUrl"]
     return selected, config
 
+
 def get_ai_env_defaults(provider_name=""):
     selected, config = get_ai_provider_config(provider_name)
     return {
         "CICY_AI_PROVIDER": selected,
         "CICY_API_KEY": os.environ.get("CICY_API_KEY") or config.get("apiKey", ""),
-        "CICY_API_URL": os.environ.get("CICY_API_URL") or config.get("apiUrl", "http://2000.run:6543/v1"),
-        "CICY_ANTHROPIC_URL": os.environ.get("CICY_ANTHROPIC_URL") or config.get("anthropicUrl", "http://2000.run:6543"),
-        "CICY_DEFAULT_OPENCODE_MODEL": os.environ.get("CICY_DEFAULT_OPENCODE_MODEL") or os.environ.get("CICY_DEFAULT_MODEL") or config.get("defaultOpencodeModel") or config.get("defaultModel", "gpt-5.4"),
-        "CICY_DEFAULT_CLAUDE_MODEL": os.environ.get("CICY_DEFAULT_CLAUDE_MODEL") or os.environ.get("CICY_CLAUDE_MODEL") or config.get("defaultClaudeModel") or config.get("claudeModel", "opus[1m]"),
-        "CICY_CODEX_MODEL": os.environ.get("CICY_CODEX_MODEL") or config.get("codexModel", "gpt-5.4"),
-        "CICY_OPENCLAW_MODEL": os.environ.get("CICY_OPENCLAW_MODEL") or config.get("openclawModel", "gpt-5.5"),
-        "CICY_HERMES_MODEL": os.environ.get("CICY_HERMES_MODEL") or config.get("hermesModel", "gpt-5.5"),
+        "CICY_API_URL": os.environ.get("CICY_API_URL")
+        or config.get("apiUrl", "http://2000.run:6543/v1"),
+        "CICY_ANTHROPIC_URL": os.environ.get("CICY_ANTHROPIC_URL")
+        or config.get("anthropicUrl", "http://2000.run:6543"),
+        "CICY_DEFAULT_OPENCODE_MODEL": os.environ.get("CICY_DEFAULT_OPENCODE_MODEL")
+        or os.environ.get("CICY_DEFAULT_MODEL")
+        or config.get("defaultOpencodeModel")
+        or config.get("defaultModel", "gpt-5.4"),
+        "CICY_DEFAULT_CLAUDE_MODEL": os.environ.get("CICY_DEFAULT_CLAUDE_MODEL")
+        or os.environ.get("CICY_CLAUDE_MODEL")
+        or config.get("defaultClaudeModel")
+        or config.get("claudeModel", "opus[1m]"),
+        "CICY_CODEX_MODEL": os.environ.get("CICY_CODEX_MODEL")
+        or config.get("codexModel", "gpt-5.4"),
+        "CICY_OPENCLAW_MODEL": os.environ.get("CICY_OPENCLAW_MODEL")
+        or config.get("openclawModel", "gpt-5.5"),
+        "CICY_HERMES_MODEL": os.environ.get("CICY_HERMES_MODEL")
+        or config.get("hermesModel", "gpt-5.5"),
     }
+
 
 def get_cicy_api_key():
     return get_ai_env_defaults().get("CICY_API_KEY", "")
+
 
 def build_minimal_runtime_global_json():
     source = load_global_json()
@@ -126,6 +149,7 @@ def build_minimal_runtime_global_json():
         data["ai"] = source["ai"]
     return data
 
+
 def load_proxy_json():
     for path in (PROXY_JSON_PATH, LEGACY_PROXY_JSON_PATH):
         try:
@@ -135,6 +159,7 @@ def load_proxy_json():
         except Exception:
             continue
     return {}
+
 
 def build_runtime_proxy_json(shared_host="host.docker.internal"):
     source = load_proxy_json()
@@ -162,36 +187,48 @@ def build_runtime_proxy_json(shared_host="host.docker.internal"):
             continue
         kind = str(item.get("kind", "") or "").strip()
         source_mode = str((item.get("source") or {}).get("mode", "") or "").strip()
-        if kind in ("shared", "shared_only") or source_mode in ("shared", "shared_only"):
+        if kind in ("shared", "shared_only") or source_mode in (
+            "shared",
+            "shared_only",
+        ):
             continue
         shared_name = f"{name}-shared"
         if shared_name in existing_names:
             continue
         scheme = str(item.get("scheme", "") or "socks5").strip() or "socks5"
-        runtime_profiles.append({
-            "name": shared_name,
-            "kind": "shared_only",
-            "scheme": scheme,
-            "local_host": shared_host,
-            "local_port": local_port,
-            "proxy_url": f"{scheme}://{shared_host}:{local_port}",
-            "source": {
-                "mode": "shared",
-                "from": name,
-            },
-        })
+        runtime_profiles.append(
+            {
+                "name": shared_name,
+                "kind": "shared_only",
+                "scheme": scheme,
+                "local_host": shared_host,
+                "local_port": local_port,
+                "proxy_url": f"{scheme}://{shared_host}:{local_port}",
+                "source": {
+                    "mode": "shared",
+                    "from": name,
+                },
+            }
+        )
         existing_names.add(shared_name)
 
     if not runtime_profiles:
         return {}
     return {"ssh_proxies": runtime_profiles}
 
+
 def build_dev_runtime_home(container_name, home_dir=""):
     if home_dir:
         home_dir = os.path.abspath(os.path.expanduser(home_dir))
     else:
         os.makedirs(CICY_DOCKER_HOMES_DIR, exist_ok=True)
-        safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in str(container_name or "").strip()).strip("-") or "cicy-code-dev"
+        safe_name = (
+            "".join(
+                ch if ch.isalnum() or ch in ("-", "_") else "-"
+                for ch in str(container_name or "").strip()
+            ).strip("-")
+            or "cicy-code-dev"
+        )
         home_dir = os.path.join(CICY_DOCKER_HOMES_DIR, safe_name)
     os.makedirs(home_dir, exist_ok=True)
     for source_name in (".tmux.conf", ".cicy_tmux.conf"):
@@ -231,6 +268,7 @@ def build_dev_runtime_home(container_name, home_dir=""):
         proxy_json_path = ""
     return home_dir, global_json_path, proxy_json_path
 
+
 def ensure_docker_home_writable(home_dir, runtime_image):
     os.makedirs(home_dir, exist_ok=True)
     for root, dirs, files in os.walk(home_dir):
@@ -266,6 +304,7 @@ def ensure_docker_home_writable(home_dir, runtime_image):
         cwd=ROOT_DIR,
         capture_output=True,
     )
+
 
 def seed_runtime_home_from_image(image_ref, home_dir):
     openclaw_dir = os.path.join(home_dir, ".openclaw")
@@ -309,10 +348,15 @@ def seed_runtime_home_from_image(image_ref, home_dir):
         print(f"[dev] Seeded runtime home with image OpenClaw assets")
     finally:
         if container_id:
-            subprocess.run(["docker", "rm", "-f", container_id], capture_output=True, cwd=ROOT_DIR)
+            subprocess.run(
+                ["docker", "rm", "-f", container_id], capture_output=True, cwd=ROOT_DIR
+            )
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-def add_optional_file_mount(volume_args, host_path, container_path, label, read_only=True):
+
+def add_optional_file_mount(
+    volume_args, host_path, container_path, label, read_only=True
+):
     resolved = os.path.abspath(os.path.expanduser(host_path))
     if not os.path.isfile(resolved):
         print(f"[dev] Skip mount missing {label}: {resolved}")
@@ -322,6 +366,7 @@ def add_optional_file_mount(volume_args, host_path, container_path, label, read_
     mode_label = "ro" if read_only else "rw"
     print(f"[dev] Mount host {label} ({mode_label}): {resolved} -> {container_path}")
 
+
 def read_api_token_from_file(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -330,6 +375,7 @@ def read_api_token_from_file(path):
     except Exception:
         return ""
 
+
 def get_local_api_token():
     value = os.environ.get("CICY_API_TOKEN", "").strip()
     if value:
@@ -337,13 +383,16 @@ def get_local_api_token():
     data = load_global_json()
     return str(data.get("api_token", "") or "").strip()
 
+
 def get_cicy_cluster():
     data = load_global_json().get("cicy-cluster", {})
     return data if isinstance(data, dict) else {}
 
+
 def get_images_config():
     data = load_global_json().get("images", {})
     return data if isinstance(data, dict) else {}
+
 
 def get_cloudrun_env():
     cluster = get_cicy_cluster()
@@ -370,12 +419,14 @@ def get_cloudrun_env():
             env[key] = str(value)
     return env
 
+
 def mask_secret(value, keep=4):
     if not value:
         return ""
     if len(value) <= keep * 2:
         return "*" * len(value)
     return f"{value[:keep]}...{value[-keep:]}"
+
 
 def validate_cloudrun_env(env):
     required = ["PROJECT", "SERVICE", "REGION", "IMAGE", "CICY_API_TOKEN"]
@@ -385,6 +436,7 @@ def validate_cloudrun_env(env):
         print(f"[dev] checked env and {GLOBAL_JSON_PATH} -> cicy-cluster")
         sys.exit(1)
 
+
 def validate_cloudrun_list_env(env):
     required = ["PROJECT", "REGION"]
     missing = [key for key in required if not env.get(key)]
@@ -392,6 +444,7 @@ def validate_cloudrun_list_env(env):
         print(f"[dev] missing Cloud Run list config: {', '.join(missing)}")
         print(f"[dev] checked env and {GLOBAL_JSON_PATH} -> cicy-cluster")
         sys.exit(1)
+
 
 def print_cloudrun_summary(env):
     print("[dev] Cloud Run config:")
@@ -409,6 +462,7 @@ def print_cloudrun_summary(env):
     print(f"[dev]   api_token={mask_secret(env.get('CICY_API_TOKEN', ''))}")
     print(f"[dev]   api_key={mask_secret(env.get('CICY_API_KEY', ''))}")
 
+
 def print_access_urls(base_url, token, service_url=""):
     if not base_url or not token:
         return
@@ -417,6 +471,7 @@ def print_access_urls(base_url, token, service_url=""):
     print(f"[dev] Open URL: {open_url}")
     if service_url and service_url.rstrip("/") != base_url.rstrip("/"):
         print(f"[dev] Service URL: {service_url.rstrip('/')}/?token={token}")
+
 
 def detect_public_ip():
     for cmd in (
@@ -430,6 +485,7 @@ def detect_public_ip():
         except Exception:
             pass
     return ""
+
 
 def get_version_info():
     try:
@@ -447,6 +503,7 @@ def get_version_info():
         pass
     return {}
 
+
 def run_version_sync(version=""):
     cmd = ["python3", VERSION_SYNC_SCRIPT]
     version = str(version or "").strip()
@@ -462,6 +519,7 @@ def run_version_sync(version=""):
             print(err)
         sys.exit(result.returncode or 1)
     return get_version_info()
+
 
 def get_binary_version():
     info = get_version_info()
@@ -483,6 +541,7 @@ def get_binary_version():
     print("[dev] failed to read version from npm/package.json")
     sys.exit(1)
 
+
 def strip_image_tag(image_ref):
     if not image_ref:
         return ""
@@ -493,6 +552,7 @@ def strip_image_tag(image_ref):
         return image_ref[:colon]
     return image_ref
 
+
 def get_image_tag(image_ref):
     if not image_ref:
         return ""
@@ -500,8 +560,9 @@ def get_image_tag(image_ref):
     slash = image_ref.rfind("/")
     colon = image_ref.rfind(":")
     if colon > slash:
-        return image_ref[colon + 1:]
+        return image_ref[colon + 1 :]
     return ""
+
 
 def load_versions_json():
     path = os.path.join(ROOT_DIR, "versions.json")
@@ -512,14 +573,17 @@ def load_versions_json():
     except Exception:
         return {}
 
+
 def local_default_base_tag():
     return str(load_versions_json().get("base", "") or "").strip() or "latest"
+
 
 def prefer_local_base_image(image_ref):
     value = str(image_ref or "").strip()
     if value.startswith("ghcr.io/cicy-ai/cicy-code-base:"):
         return f"cicy-code-base:{get_image_tag(value) or local_default_base_tag()}"
     return value
+
 
 def local_default_base_image():
     data = load_global_json()
@@ -541,11 +605,14 @@ def local_default_base_image():
             return explicit
     return f"cicy-code-base:{local_default_base_tag()}"
 
+
 def ensure_local_base_image_available():
     base_image = os.environ.get("BASE_IMAGE", "").strip() or local_default_base_image()
     if not base_image.startswith("cicy-code-base:"):
         return
-    inspect = subprocess.run(["docker", "image", "inspect", base_image], capture_output=True, text=True)
+    inspect = subprocess.run(
+        ["docker", "image", "inspect", base_image], capture_output=True, text=True
+    )
     if inspect.returncode == 0:
         return
     tag = get_image_tag(base_image) or local_default_base_tag()
@@ -556,6 +623,7 @@ def ensure_local_base_image_available():
         sys.exit(1)
     return ""
 
+
 def get_dockerhub_username():
     config_path = os.path.expanduser("~/.docker/config.json")
     try:
@@ -563,7 +631,9 @@ def get_dockerhub_username():
             data = json.load(f)
     except Exception:
         return ""
-    auth = ((data.get("auths") or {}).get("https://index.docker.io/v1/") or {}).get("auth", "")
+    auth = ((data.get("auths") or {}).get("https://index.docker.io/v1/") or {}).get(
+        "auth", ""
+    )
     if not auth:
         return ""
     try:
@@ -571,6 +641,7 @@ def get_dockerhub_username():
     except Exception:
         return ""
     return raw.split(":", 1)[0].strip()
+
 
 def get_docker_image_repository():
     explicit = os.environ.get("DOCKER_IMAGE_REPOSITORY", "").strip()
@@ -588,12 +659,14 @@ def get_docker_image_repository():
         return f"{dockerhub_user}/cicy-code-runtime"
     return ""
 
+
 def get_current_runtime_image():
     images = get_images_config()
     runtime_image = images.get("runtime", "")
     if isinstance(runtime_image, dict):
         runtime_image = runtime_image.get("image", "")
     return str(runtime_image or "").strip()
+
 
 def write_cloudrun_image_to_global_json(image_ref, tag):
     data = load_global_json()
@@ -610,6 +683,7 @@ def write_cloudrun_image_to_global_json(image_ref, tag):
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.write("\n")
 
+
 def write_docker_image_to_global_json(image_ref, tag, repository):
     data = load_global_json()
     if not isinstance(data, dict):
@@ -625,13 +699,20 @@ def write_docker_image_to_global_json(image_ref, tag, repository):
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.write("\n")
 
+
 def print_docker_version():
     info = get_version_info()
     files = info.get("files", {}) if isinstance(info, dict) else {}
     package_version = str(info.get("version", "")).strip() or get_binary_version()
     runtime_image = get_current_runtime_image()
-    runtime_repository = strip_image_tag(runtime_image) or get_images_config().get("runtime_repository", "") or get_docker_image_repository()
-    runtime_tag = get_image_tag(runtime_image) or get_images_config().get("runtime_tag", "")
+    runtime_repository = (
+        strip_image_tag(runtime_image)
+        or get_images_config().get("runtime_repository", "")
+        or get_docker_image_repository()
+    )
+    runtime_tag = get_image_tag(runtime_image) or get_images_config().get(
+        "runtime_tag", ""
+    )
     print(f"[dev] package_version={package_version}")
     if files:
         print(f"[dev] mgr_version={files.get('mgr_main_go', '')}")
@@ -641,6 +722,7 @@ def print_docker_version():
     print(f"[dev] current_runtime_image={runtime_image}")
     print(f"[dev] current_runtime_tag={runtime_tag}")
     sys.exit(0)
+
 
 def bump_version(version):
     version = str(version or "").strip()
@@ -658,6 +740,7 @@ def bump_version(version):
         print(f"[dev] tmux_version={files.get('cicy_tmux_conf', '')}")
     sys.exit(0)
 
+
 def set_docker_version(tag):
     tag = str(tag or "").strip()
     if not tag:
@@ -666,7 +749,9 @@ def set_docker_version(tag):
     repository = get_docker_image_repository()
     if not repository:
         print("[dev] missing Docker Hub target repository")
-        print(f"[dev] set DOCKER_IMAGE_REPOSITORY or configure Docker Hub login in ~/.docker/config.json")
+        print(
+            f"[dev] set DOCKER_IMAGE_REPOSITORY or configure Docker Hub login in ~/.docker/config.json"
+        )
         sys.exit(1)
     image_ref = f"{repository}:{tag}"
     write_docker_image_to_global_json(image_ref, tag, repository)
@@ -675,11 +760,13 @@ def set_docker_version(tag):
     print(f"[dev] Updated {GLOBAL_JSON_PATH} -> images.runtime_tag={tag}")
     sys.exit(0)
 
+
 def run_checked(cmd, cwd=None, env=None):
     result = subprocess.run(cmd, cwd=cwd, env=env)
     if result.returncode != 0:
         sys.exit(result.returncode)
     return result
+
 
 def get_pid_on_port(port):
     try:
@@ -692,6 +779,7 @@ def get_pid_on_port(port):
     except Exception:
         return None
 
+
 def is_pid_alive(pid):
     try:
         os.kill(int(pid), 0)
@@ -703,6 +791,7 @@ def is_pid_alive(pid):
     except Exception:
         return False
 
+
 def wait_for_process_exit(pid, timeout=6.0, interval=0.2):
     start = time.time()
     while time.time() - start < timeout:
@@ -710,6 +799,7 @@ def wait_for_process_exit(pid, timeout=6.0, interval=0.2):
             return True
         time.sleep(interval)
     return not is_pid_alive(pid)
+
 
 def kill_process(pid):
     pid = str(pid or "").strip()
@@ -731,6 +821,7 @@ def kill_process(pid):
         return False
     return wait_for_process_exit(pid, timeout=2.0, interval=0.1)
 
+
 def wait_for_probe(url, timeout=180, interval=1):
     start = time.time()
     last_error = None
@@ -743,6 +834,7 @@ def wait_for_probe(url, timeout=180, interval=1):
             last_error = e
         time.sleep(interval)
     raise TimeoutError(f"probe timeout after {timeout}s: {url} ({last_error})")
+
 
 def get_cloudrun_service_url(project, region, service):
     try:
@@ -768,6 +860,7 @@ def get_cloudrun_service_url(project, region, service):
     except Exception:
         pass
     return ""
+
 
 def list_cloudrun_services(project, region):
     try:
@@ -803,6 +896,7 @@ def list_cloudrun_services(project, region):
         print(f"[dev] cloud run list error: {e}")
         sys.exit(1)
 
+
 def run_cloudrun_list():
     env = get_cloudrun_env()
     validate_cloudrun_list_env(env)
@@ -831,7 +925,9 @@ def run_cloudrun_list():
                     ready = cond.get("status", "unknown")
                     break
         latest = status.get("latestReadyRevisionName", "")
-        service_account = spec.get("template", {}).get("spec", {}).get("serviceAccountName", "")
+        service_account = (
+            spec.get("template", {}).get("spec", {}).get("serviceAccountName", "")
+        )
         marker = " *" if name == configured_service else ""
 
         print(f"[dev] Service: {name}{marker}")
@@ -851,13 +947,20 @@ def run_cloudrun_list():
         print(f"[dev] * configured service from env/global.json: {configured_service}")
     sys.exit(0)
 
+
 def run_docker_build(version_override=""):
     info = run_version_sync(version_override)
-    version = str(info.get("version", "")).strip() or str(version_override or "").strip() or get_binary_version()
+    version = (
+        str(info.get("version", "")).strip()
+        or str(version_override or "").strip()
+        or get_binary_version()
+    )
     repository = get_docker_image_repository()
     if not repository:
         print("[dev] missing Docker Hub target repository")
-        print(f"[dev] set DOCKER_IMAGE_REPOSITORY or configure Docker Hub login in ~/.docker/config.json")
+        print(
+            f"[dev] set DOCKER_IMAGE_REPOSITORY or configure Docker Hub login in ~/.docker/config.json"
+        )
         sys.exit(1)
     target_image = f"{repository}:{version}"
     latest_image = f"{repository}:latest"
@@ -872,8 +975,12 @@ def run_docker_build(version_override=""):
     build_env["SKIP_NPM"] = "0"
     build_env["SKIP_TTYD_ASSET"] = "0"
     run_checked(["./build.sh", "assets"], cwd=ROOT_DIR, env=build_env)
-    run_checked(["python3", "./scripts/cos-upload.py", "app"], cwd=ROOT_DIR, env=build_env)
-    run_checked(["python3", "./scripts/cos-upload.py", "ttyd"], cwd=ROOT_DIR, env=build_env)
+    run_checked(
+        ["python3", "./scripts/cos-upload.py", "app"], cwd=ROOT_DIR, env=build_env
+    )
+    run_checked(
+        ["python3", "./scripts/cos-upload.py", "ttyd"], cwd=ROOT_DIR, env=build_env
+    )
     build_env["SKIP_NPM"] = "1"
     build_env["SKIP_TTYD_ASSET"] = "1"
     run_checked(["./build.sh", "docker", version], cwd=ROOT_DIR, env=build_env)
@@ -889,12 +996,23 @@ def run_docker_build(version_override=""):
     print(f"[dev] Next deploy: use {CICY_GLOBAL_JSON_PATH} images.runtime")
     sys.exit(0)
 
-def run_docker(ports, container_name="cicy-code-dev", agents="", mount_projects=True, projects_dir="", mount_home=False, home_dir=""):
+
+def run_docker(
+    ports,
+    container_name="cicy-code-dev",
+    agents="",
+    mount_projects=True,
+    projects_dir="",
+    mount_home=False,
+    home_dir="",
+):
     run_version_sync()
 
     runtime_image = get_current_runtime_image()
     if not runtime_image:
-        print(f"[dev] ERROR: No runtime image configured. Set images.runtime in {CICY_GLOBAL_JSON_PATH}")
+        print(
+            f"[dev] ERROR: No runtime image configured. Set images.runtime in {CICY_GLOBAL_JSON_PATH}"
+        )
         sys.exit(1)
     print(f"[dev] Runtime image: {runtime_image}")
 
@@ -909,7 +1027,9 @@ def run_docker(ports, container_name="cicy-code-dev", agents="", mount_projects=
         sys.exit(1)
 
     # Tag local build as the configured runtime image
-    subprocess.run(["docker", "tag", f"cicy-code:{build_tag}", runtime_image], capture_output=True)
+    subprocess.run(
+        ["docker", "tag", f"cicy-code:{build_tag}", runtime_image], capture_output=True
+    )
     subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
     host_home_path = os.path.abspath(os.path.expanduser(home_dir)) if home_dir else ""
     dev_home_dir, dev_global_json_path, dev_proxy_json_path = build_dev_runtime_home(
@@ -920,7 +1040,9 @@ def run_docker(ports, container_name="cicy-code-dev", agents="", mount_projects=
         ensure_docker_home_writable(dev_home_dir, runtime_image)
 
     # Pull if not available locally
-    result = subprocess.run(["docker", "image", "inspect", runtime_image], capture_output=True)
+    result = subprocess.run(
+        ["docker", "image", "inspect", runtime_image], capture_output=True
+    )
     if result.returncode != 0:
         print(f"[dev] Pulling {runtime_image}...")
         subprocess.run(["docker", "pull", runtime_image])
@@ -943,7 +1065,10 @@ def run_docker(ports, container_name="cicy-code-dev", agents="", mount_projects=
         value = os.environ.get(key, "").strip()
         if value:
             env_vars.extend(["-e", f"{key}={value}"])
-    trial_ttl_seconds = int((os.environ.get("CLOUD_TRIAL_RUNTIME_TTL_SECONDS", "3600") or "3600").strip() or "3600")
+    trial_ttl_seconds = int(
+        (os.environ.get("CLOUD_TRIAL_RUNTIME_TTL_SECONDS", "3600") or "3600").strip()
+        or "3600"
+    )
     trial_expires_at = str(int(time.time()) + trial_ttl_seconds)
     env_vars.extend(["-e", f"CLOUD_TRIAL_RUNTIME_EXPIRES_AT={trial_expires_at}"])
     env_vars.extend(["-e", "CICY_IS_PRO=true"])
@@ -956,35 +1081,62 @@ def run_docker(ports, container_name="cicy-code-dev", agents="", mount_projects=
         volume_args.extend(["-v", f"{dev_home_dir}:{DOCKER_HOME_DIR}"])
         print(f"[dev] Mount runtime home: {dev_home_dir} -> {DOCKER_HOME_DIR}")
     if mount_projects:
-        host_projects_dir = os.path.abspath(os.path.expanduser(projects_dir or HOST_PROJECTS_DIR))
+        host_projects_dir = os.path.abspath(
+            os.path.expanduser(projects_dir or HOST_PROJECTS_DIR)
+        )
         os.makedirs(host_projects_dir, exist_ok=True)
         volume_args.extend(["-v", f"{host_projects_dir}:{DOCKER_PROJECTS_DIR}"])
-        print(f"[dev] Mount host projects: {host_projects_dir} -> {DOCKER_PROJECTS_DIR}")
+        print(
+            f"[dev] Mount host projects: {host_projects_dir} -> {DOCKER_PROJECTS_DIR}"
+        )
     agents_flag = str(agents or "").strip() or "codex"
-    run_cmd = [
-        "docker",
-        "run",
-        "-d",
-        "--name",
-        container_name,
-        "--add-host",
-        "host.docker.internal:host-gateway",
-    ] + env_vars + volume_args + [
-        "-p",
-        f"{ports}:8008",
-        runtime_image,
-        "--public",
-        f"--agents={agents_flag}",
-    ]
+    run_cmd = (
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            container_name,
+            "--add-host",
+            "host.docker.internal:host-gateway",
+        ]
+        + env_vars
+        + volume_args
+        + [
+            "-p",
+            f"{ports}:8008",
+            runtime_image,
+            "--public",
+            f"--agents={agents_flag}",
+        ]
+    )
     print(f"[dev] docker run: {' '.join(run_cmd)}")
     docker_run_started_at = time.time()
     run_result = subprocess.run(run_cmd, cwd=ROOT_DIR)
     if run_result.returncode != 0:
         print("[dev] docker run failed")
         sys.exit(run_result.returncode or 1)
-    subprocess.run(["docker", "cp", dev_global_json_path, f"{container_name}:{CICY_GLOBAL_JSON_PATH}"], capture_output=True, cwd=ROOT_DIR)
+    subprocess.run(
+        [
+            "docker",
+            "cp",
+            dev_global_json_path,
+            f"{container_name}:{CICY_GLOBAL_JSON_PATH}",
+        ],
+        capture_output=True,
+        cwd=ROOT_DIR,
+    )
     if dev_proxy_json_path:
-        subprocess.run(["docker", "cp", dev_proxy_json_path, f"{container_name}:{CICY_PROXY_JSON_PATH}"], capture_output=True, cwd=ROOT_DIR)
+        subprocess.run(
+            [
+                "docker",
+                "cp",
+                dev_proxy_json_path,
+                f"{container_name}:{CICY_PROXY_JSON_PATH}",
+            ],
+            capture_output=True,
+            cwd=ROOT_DIR,
+        )
     print(f"[dev] Docker started on port {ports}")
 
     probe_url = f"http://localhost:{ports}/api/health"
@@ -1014,7 +1166,9 @@ def run_docker(ports, container_name="cicy-code-dev", agents="", mount_projects=
         # Verify token via /api/auth/verify
         verify_url = f"http://localhost:{ports}/api/auth/verify"
         try:
-            req = urllib.request.Request(verify_url, headers={"Authorization": f"Bearer {token}"})
+            req = urllib.request.Request(
+                verify_url, headers={"Authorization": f"Bearer {token}"}
+            )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 verify_data = json.loads(resp.read())
                 if verify_data.get("valid"):
@@ -1031,12 +1185,15 @@ def run_docker(ports, container_name="cicy-code-dev", agents="", mount_projects=
             print_access_urls(public_base_url, token, local_base_url)
         else:
             print_access_urls(local_base_url, token)
-        print(f"[dev] Token available in {time.time() - docker_run_started_at:.1f}s (since docker run)")
+        print(
+            f"[dev] Token available in {time.time() - docker_run_started_at:.1f}s (since docker run)"
+        )
         print(f"[dev] Runtime home: {dev_home_dir}")
         print("[dev] Testing agents...")
         test_agents(container_name, token, ports)
 
     sys.exit(0)
+
 
 def test_agents(container_name, token, port):
     base_url = f"http://localhost:{port}"
@@ -1078,13 +1235,16 @@ def test_agents(container_name, token, port):
 
     print("\n[dev] Agent test completed.")
 
+
 def run_cloudrun():
     env = get_cloudrun_env()
     validate_cloudrun_env(env)
     env["PREBUILD"] = "0"
     env["BUILD_IMAGE"] = "0"
     started_at = time.time()
-    print(f"[dev] Cloud Run trigger started at {time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(started_at))} UTC")
+    print(
+        f"[dev] Cloud Run trigger started at {time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(started_at))} UTC"
+    )
     print_cloudrun_summary(env)
     print("[dev] Deploying to Cloud Run via scripts/deploy-cloudrun.sh")
     result = subprocess.run(
@@ -1099,7 +1259,11 @@ def run_cloudrun():
         project = env.get("PROJECT", "")
         region = env.get("REGION", "")
         service = env.get("SERVICE", "")
-        service_url = get_cloudrun_service_url(project, region, service) if project and region and service else ""
+        service_url = (
+            get_cloudrun_service_url(project, region, service)
+            if project and region and service
+            else ""
+        )
         public_url = env.get("CICY_PUBLIC_URL", "") or service_url
         if service_url:
             probe_url = f"{service_url.rstrip('/')}/api/health"
@@ -1107,7 +1271,9 @@ def run_cloudrun():
             try:
                 probe_delay = wait_for_probe(probe_url, timeout=180, interval=2)
                 total_elapsed = time.time() - started_at
-                print(f"[dev] Cloud Run probe ready in {total_elapsed:.1f}s (since trigger)")
+                print(
+                    f"[dev] Cloud Run probe ready in {total_elapsed:.1f}s (since trigger)"
+                )
                 print(f"[dev] Probe check time after deploy: {probe_delay:.1f}s")
             except Exception as e:
                 print(f"[dev] Probe failed: {e}")
@@ -1115,12 +1281,14 @@ def run_cloudrun():
         print_access_urls(public_url, token, service_url)
     sys.exit(result.returncode)
 
+
 def run_ttyd_assets():
     os.environ["GOPROXY"] = "https://goproxy.cn,direct"
     print("[dev] Rebuilding ttyd embedded assets via `make asset`...")
     run_checked(["make", "asset"], cwd=API_DIR)
     print("[dev] ttyd assets rebuilt.")
     sys.exit(0)
+
 
 def rebuild_ttyd_assets_for_local_dev():
     os.environ["GOPROXY"] = "https://goproxy.cn,direct"
@@ -1130,7 +1298,7 @@ def rebuild_ttyd_assets_for_local_dev():
 
 
 def start_local_dev_detached(cicy_bin):
-    logs_dir = os.path.join(ROOT_DIR, ".dev-logs")
+    logs_dir = os.path.expanduser("~/logs/.dev-logs")
     os.makedirs(logs_dir, exist_ok=True)
     log_path = os.path.join(logs_dir, "cicy-code.log")
     Path(log_path).touch(exist_ok=True)
@@ -1162,6 +1330,7 @@ def start_local_dev_detached(cicy_bin):
         except subprocess.TimeoutExpired:
             tail_proc.kill()
             tail_proc.wait()
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -1317,7 +1486,15 @@ def main():
     args = parser.parse_args()
 
     if args.docker:
-        run_docker(args.port, args.name, args.agents, args.mountProjects, args.projectsDir, args.mountHome, args.homeDir)
+        run_docker(
+            args.port,
+            args.name,
+            args.agents,
+            args.mountProjects,
+            args.projectsDir,
+            args.mountHome,
+            args.homeDir,
+        )
     if args.dockerVersion:
         print_docker_version()
     if args.bumpVersion:
@@ -1336,15 +1513,25 @@ def main():
     existing_pid = get_pid_on_port(PORT)
     if existing_pid:
         try:
-            cmd = subprocess.run(["ps", "-p", existing_pid, "-o", "command="], capture_output=True, text=True).stdout.strip()
+            cmd = subprocess.run(
+                ["ps", "-p", existing_pid, "-o", "command="],
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
             if "cicy-code" in cmd:
-                print(f"[dev] stop existing cicy process on :{PORT} (pid={existing_pid})")
+                print(
+                    f"[dev] stop existing cicy process on :{PORT} (pid={existing_pid})"
+                )
                 if not kill_process(existing_pid):
-                    print(f"[dev] failed to stop existing cicy process pid={existing_pid}")
+                    print(
+                        f"[dev] failed to stop existing cicy process pid={existing_pid}"
+                    )
                     sys.exit(1)
                 still_running_pid = get_pid_on_port(PORT)
                 if still_running_pid:
-                    print(f"[dev] port {PORT} is still in use after stop attempt (pid={still_running_pid})")
+                    print(
+                        f"[dev] port {PORT} is still in use after stop attempt (pid={still_running_pid})"
+                    )
                     sys.exit(1)
             else:
                 print(f"[dev] port {PORT} is in use by non-cicy process: {cmd}")
@@ -1371,6 +1558,7 @@ def main():
     cicy_bin = os.path.join(API_DIR, "cicy-code")
     start_local_dev_detached(cicy_bin)
     sys.exit(0)
+
 
 if __name__ == "__main__":
     main()

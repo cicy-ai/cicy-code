@@ -137,7 +137,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-vsc-text">启用代理</p>
-              <p className="text-xs text-vsc-text-muted">启动前执行 cicy_proxy_on，并检查 mihome 规则</p>
+              <p className="text-xs text-vsc-text-muted">启动前执行 cicy_proxy_on，并检查 mihomo 规则</p>
             </div>
             <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-colors ${pane.use_proxy ? 'bg-orange-600' : 'bg-vsc-bg-active'}`}
               onClick={() => onChange({ ...pane, use_proxy: !pane.use_proxy })}>
@@ -154,7 +154,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ pane, onChange, onSa
                   placeholder="留空时优先 api_token，不存在时回退 user==pass" />
               </div>
               <div>
-                <label className="block text-xs text-vsc-text-secondary mb-1">mihome 规则</label>
+                <label className="block text-xs text-vsc-text-secondary mb-1">mihomo 规则</label>
                 <input type="text" value={pane.proxy?.rule || ''}
                   onChange={e => onChange({ ...pane, proxy: { ...(pane.proxy || {}), rule: e.target.value } })}
                   className="w-full bg-vsc-bg-secondary border border-vsc-border text-vsc-text text-sm font-mono rounded px-2.5 py-1.5 focus:outline-none focus:border-vsc-accent"

@@ -30,7 +30,7 @@ var embeddedTmuxConf string
 //go:embed .cicy_tmux.conf
 var embeddedCicyTmuxConf string
 
-//go:embed resources/cicy-code-server-bridge-0.0.1.vsix
+//go:embed resources/cicy-code-server-bridge-0.0.3.vsix
 var embeddedCodeServerBridgeVSIX []byte
 
 var cicySkillsInstallOnce sync.Once
@@ -1397,7 +1397,7 @@ func installEmbeddedCodeServerExtension(home string, fileName string, payload []
 }
 
 func installBundledCodeServerExtensions(home string) {
-	installEmbeddedCodeServerExtension(home, "cicy-code-server-bridge-0.0.1.vsix", embeddedCodeServerBridgeVSIX)
+	installEmbeddedCodeServerExtension(home, "cicy-code-server-bridge-0.0.3.vsix", embeddedCodeServerBridgeVSIX)
 	installCodeServerExtension(home, "laurenttreguier.vscode-simple-icons")
 }
 

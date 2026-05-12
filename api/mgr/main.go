@@ -445,10 +445,6 @@ func ensureGlobalAPIToken(globalPath string, preferredToken ...string) (string, 
 	if t, ok := cfg["api_token"].(string); ok && strings.TrimSpace(t) != "" {
 		currentToken = strings.TrimSpace(t)
 	}
-	currentProxyToken := ""
-	if t, ok := cfg["proxy_token"].(string); ok && strings.TrimSpace(t) != "" {
-		currentProxyToken = strings.TrimSpace(t)
-	}
 
 	token := ""
 	if len(preferredToken) > 0 {
@@ -462,19 +458,12 @@ func ensureGlobalAPIToken(globalPath string, preferredToken ...string) (string, 
 		rand.Read(b)
 		token = "cicy_" + hex.EncodeToString(b)
 	}
-	proxyToken := currentProxyToken
-	if proxyToken == "" {
-		b := make([]byte, 16)
-		rand.Read(b)
-		proxyToken = "cicy_" + hex.EncodeToString(b)
-	}
 	cfg["api_token"] = token
-	cfg["proxy_token"] = proxyToken
 
 	if err := os.MkdirAll(filepath.Dir(globalPath), 0755); err != nil {
 		return "", err
 	}
-	if currentToken == token && currentProxyToken == proxyToken {
+	if currentToken == token {
 		return token, nil
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
