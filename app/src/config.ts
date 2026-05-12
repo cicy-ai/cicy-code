@@ -128,8 +128,14 @@ const config = {
 console.log('[config] version', config.version);
 
 export const urls = {
-  ttyd:       (paneId: string, token: string, mode = 1) => `${config.ttydBase}/ttyd/${paneId}/?token=${token}&mode=${mode}`,
-  ttydOpen:   (paneId: string, token: string)            => `${config.ttydBase}/ttyd/${paneId}/?token=${token}`,
+  ttyd:       (paneId: string, token: string, mode = 1, lang?: string) => {
+    const base = `${config.ttydBase}/ttyd/${paneId}/?token=${token}&mode=${mode}`;
+    return lang ? `${base}&lang=${encodeURIComponent(lang)}` : base;
+  },
+  ttydOpen:   (paneId: string, token: string, lang?: string) => {
+    const base = `${config.ttydBase}/ttyd/${paneId}/?token=${token}`;
+    return lang ? `${base}&lang=${encodeURIComponent(lang)}` : base;
+  },
   codeServer: (folder: string, token?: string, pageClientId?: string, pagePaneId?: string) => {
     const f = toRuntimeAbsolutePath(folder);
     const params = [`folder=${encodeURIComponent(f)}`];

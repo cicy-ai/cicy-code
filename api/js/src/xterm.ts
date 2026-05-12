@@ -526,7 +526,7 @@ export class Xterm {
         this.inputDisposable = this.term.onData((data: string) => {
             if (this.isComposing) return;
             const normalized = normalizeTerminalInput(data);
-            // 控制字符立即发送
+            // Send control characters immediately
             if (normalized.length === 1 && normalized.charCodeAt(0) < 32 || normalized.charCodeAt(0) === 127 || normalized[0] === '\x1b') {
                 flush();
                 callback(normalized);

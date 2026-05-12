@@ -1,0 +1,22 @@
+{
+  "agentBusy": "智能体正忙，请点击加载按钮强制重置。",
+  "errorCorrectFailed": "修正失败",
+  "errorPrefix": "错误：{{message}}",
+  "agentWorking": "智能体正在工作，请稍候...",
+  "enterSendShiftNewline": "Enter=发送，Shift+Enter=换行",
+  "enterNewlineShiftSend": "Enter=换行，Shift+Enter=发送",
+  "enterSend": "⏎发送",
+  "shiftEnterSend": "⇧⏎发送",
+  "hideVoiceMode": "隐藏语音模式",
+  "showVoiceMode": "显示语音模式",
+  "placeholderCommand": "输入命令...",
+  "clickToStop": "点击停止",
+  "send": "发送",
+  "selectModel": "选择模型",
+  "sendCtrlC": "发送 Ctrl+C 中断（点击两次）",
+  "confirm": "确认？",
+  "compactHistory": "压缩聊天历史以节省上下文（点击两次）",
+  "inputHints": "⌘↵ 发送英文 · ⌘⇧↵ 发送中文 · Esc 关闭",
+  "statusThinking": "思考中...",
+  "statusIdle": "空闲"
+}

@@ -1,0 +1,22 @@
+{
+  "agentBusy": "Agent is busy, click the load button to force reset.",
+  "errorCorrectFailed": "Failed to correct",
+  "errorPrefix": "Error: {{message}}",
+  "agentWorking": "Agent is working, please wait...",
+  "enterSendShiftNewline": "Enter=send, Shift+Enter=newline",
+  "enterNewlineShiftSend": "Enter=newline, Shift+Enter=send",
+  "enterSend": "⏎send",
+  "shiftEnterSend": "⇧⏎send",
+  "hideVoiceMode": "Hide voice mode",
+  "showVoiceMode": "Show voice mode",
+  "placeholderCommand": "Enter command...",
+  "clickToStop": "Click to stop",
+  "send": "Send",
+  "selectModel": "Select model",
+  "sendCtrlC": "Send Ctrl+C interrupt (click twice)",
+  "confirm": "Confirm?",
+  "compactHistory": "Compress chat history to save context (click twice)",
+  "inputHints": "⌘↵ send English · ⌘⇧↵ send Chinese · Esc close",
+  "statusThinking": "Thinking...",
+  "statusIdle": "Idle"
+}

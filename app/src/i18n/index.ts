@@ -13,6 +13,7 @@ import enAgentCanvas from './locales/en/agentCanvas.json';
 import enAudit from './locales/en/audit.json';
 import enIm from './locales/en/im.json';
 import enProvider from './locales/en/provider.json';
+import enTerminal from './locales/en/terminal.json';
 import enProvision from './locales/en/provision.json';
 import enTeamPanel from './locales/en/teamPanel.json';
 import enChat from './locales/en/chat.json';
@@ -35,6 +36,7 @@ import zhAgentCanvas from './locales/zh-CN/agentCanvas.json';
 import zhAudit from './locales/zh-CN/audit.json';
 import zhIm from './locales/zh-CN/im.json';
 import zhProvider from './locales/zh-CN/provider.json';
+import zhTerminal from './locales/zh-CN/terminal.json';
 import zhProvision from './locales/zh-CN/provision.json';
 import zhTeamPanel from './locales/zh-CN/teamPanel.json';
 import zhChat from './locales/zh-CN/chat.json';
@@ -76,6 +78,7 @@ const resources = {
     audit: enAudit,
     provider: enProvider,
     im: enIm,
+    terminal: enTerminal,
   },
   'zh-CN': {
     common: zhCommon,
@@ -100,6 +103,7 @@ const resources = {
     audit: zhAudit,
     provider: zhProvider,
     im: zhIm,
+    terminal: zhTerminal,
   },
 };
 
@@ -108,7 +112,7 @@ void i18n
   .use(initReactI18next)
   .init({
     resources,
-    ns: ['common', 'login', 'settings', 'createAgent', 'editPane', 'workspace', 'ui', 'layout', 'chat', 'agentInspector', 'agentProviderRequest', 'agentChat', 'agentTypeDesc', 'apiSwitch', 'desktop', 'devPanel', 'provision', 'agentCanvas', 'teamPanel', 'audit', 'provider', 'im'],
+    ns: ['common', 'login', 'settings', 'createAgent', 'editPane', 'workspace', 'ui', 'layout', 'chat', 'agentInspector', 'agentProviderRequest', 'agentChat', 'agentTypeDesc', 'apiSwitch', 'desktop', 'devPanel', 'provision', 'agentCanvas', 'teamPanel', 'audit', 'provider', 'im', 'terminal'],
     defaultNS: 'common',
     fallbackLng: 'en',
     supportedLngs: [...SUPPORTED_LNGS],
