@@ -19,7 +19,7 @@ function getCicy(): CicyGlobal {
       devTools: (src?: string) => {
         if (src) {
           const w = Array.from(wvs.values()).find(v => v.src.includes(src));
-          if (w) w.openDevTools(); else console.log('未找到：', src);
+          if (w) w.openDevTools(); else console.log('not found:', src);
         } else {
           wvs.forEach(v => console.log(v.src));
         }

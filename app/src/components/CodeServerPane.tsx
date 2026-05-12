@@ -1,6 +1,7 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useDevRegister } from '../lib/devStore';
 import { toRuntimeAbsolutePath } from '../config';
 import { WebFrame } from './WebFrame';
@@ -27,6 +28,7 @@ export default function CodeServerPane({
   bodyHidden = false,
   className = '',
 }: CodeServerPaneProps) {
+  const { t } = useTranslation('ui');
   const FAVORITE_FOLDERS: string[] = favoriteDirs || [];
   const [showFavorites, setShowFavorites] = useState(false);
   const [favPos, setFavPos] = useState<{ x: number; y: number } | null>(null);
@@ -74,7 +76,7 @@ export default function CodeServerPane({
               setShowFavorites(v => !v);
             }}
             className={BTN_CLS}
-            title="常用文件夹"
+            title={t('codeServerFolders')}
           >
             <ChevronDown className="w-3 h-3" />
           </button>}
@@ -101,7 +103,7 @@ export default function CodeServerPane({
                       data-id={`code-server-favorite-open-${folder}`}
                       onClick={(e) => { e.stopPropagation(); window.open(newWinUrl, '_blank'); setShowFavorites(false); }}
                       className="px-2 py-1.5 text-zinc-600 hover:text-zinc-200 hover:bg-zinc-700/50 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
-                      title="在新窗口打开"
+                      title={t('codeServerOpenInNewWindow')}
                     >
                       <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                     </button>
@@ -119,7 +121,7 @@ export default function CodeServerPane({
       </div>
 
       <div data-id="code-server-body" className="flex-1 relative overflow-hidden" style={{ display: bodyHidden ? 'none' : 'block' }}>
-        <WebFrame src={src} codeServer className="w-full h-full border-0 bg-[#0A0A0A]" title="代码服务" />
+        <WebFrame src={src} codeServer className="w-full h-full border-0 bg-[#0A0A0A]" title={t('codeServerTitle')} />
       </div>
     </div>
   );

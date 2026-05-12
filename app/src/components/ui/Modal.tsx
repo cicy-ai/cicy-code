@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 /* A small, app-styled replacement for window.confirm / window.prompt.
    Usage:
      const { confirm, prompt, node } = useDialogs();
-     ... const ok = await confirm({ title: '删除？', body: <>…</>, danger: true, confirmLabel: '删除' });
-     ... const v  = await prompt({ title: '粘贴 token', placeholder: '123456:ABC…', mono: true });
+     ... const ok = await confirm({ title: 'Delete?', body: <>…</>, danger: true, confirmLabel: 'Delete' });
+     ... const v  = await prompt({ title: 'Paste token', placeholder: '123456:ABC…', mono: true });
    Render {node} once in the component tree. */
 
 type ConfirmOpts = {
@@ -29,6 +30,7 @@ type DialogState =
   | null;
 
 export function useDialogs() {
+  const { t } = useTranslation('ui');
   const [state, setState] = useState<DialogState>(null);
   const [value, setValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -111,7 +113,7 @@ export function useDialogs() {
             </div>
           )}
           <div className="mt-4 flex justify-end gap-2 px-5 pb-4">
-            <button onClick={cancel} className="h-8 rounded-lg px-3 text-[13px] text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-200">{state.opts.cancelLabel || '取消'}</button>
+            <button onClick={cancel} className="h-8 rounded-lg px-3 text-[13px] text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-200">{state.opts.cancelLabel || t('modalCancel')}</button>
             <button
               onClick={submit}
               disabled={promptInvalid}
@@ -121,7 +123,7 @@ export function useDialogs() {
                   : 'h-8 rounded-lg bg-white px-3 text-[13px] font-medium text-[#0b0b0c] transition-colors hover:bg-zinc-200 disabled:bg-white/40'
               }
             >
-              {state.opts.confirmLabel || '确定'}
+              {state.opts.confirmLabel || t('modalConfirm')}
             </button>
           </div>
         </div>

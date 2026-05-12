@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
+import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { useApp } from '../../contexts/AppContext';
 
@@ -907,6 +908,7 @@ function ShellCommandBlock({ text }: { text: string }) {
 }
 
 function ToolCard({ tool, toolId }: { tool: any; toolId: string }) {
+  const { t } = useTranslation('chat');
   const [open, setOpen] = useState(() => toolCardOpenState.get(toolId) ?? false);
   const toolName = String(tool?.name || '').trim();
   const effectiveTool = tool;
@@ -950,7 +952,7 @@ function ToolCard({ tool, toolId }: { tool: any; toolId: string }) {
         <span className="text-xs text-emerald-400/70">✓</span>
         <span className="rounded border border-white/[0.04] bg-white/[0.035] px-1.5 py-0.5 text-xs text-zinc-300">{toolName || 'tool'}</span>
         {!open && displayArg ? <span className="min-w-0 flex-1 truncate text-xs text-zinc-500">{displayArg}</span> : <span className="flex-1" />}
-        <span className="text-[11px] text-zinc-600">{open ? '收起' : '展开'}</span>
+        <span className="text-[11px] text-zinc-600">{open ? t('collapse') : t('expand')}</span>
       </div>
       {showPatchArg ? (
         <div data-id="current-history-tool-arg" className="border-b border-white/[0.04] overflow-x-auto overflow-y-hidden">
@@ -1050,6 +1052,7 @@ export default function CurrentHistoryView({
   open: boolean;
   inspectorVersion?: number;
 }) {
+  const { t } = useTranslation('chat');
   const { subscribeChatWs } = useApp();
   const [items, setItems] = useState<HistoryTurn[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1374,12 +1377,12 @@ export default function CurrentHistoryView({
           {loading ? (
             <div data-id="current-history-loading" className="flex flex-col items-center justify-center gap-3 pt-20">
               <div className="h-6 w-6 animate-spin rounded-full border-2 border-vsc-accent/30 border-t-vsc-accent" />
-              <span className="text-base text-zinc-500">正在加载历史记录...</span>
+              <span className="text-base text-zinc-500">{t('loadingHistory')}</span>
             </div>
           ) : items.length === 0 ? (
             <div data-id="current-history-empty" className="pt-20 text-center">
               <div className="mb-2 text-2xl text-zinc-700">✦</div>
-              <p className="text-xs text-zinc-500">暂无历史</p>
+              <p className="text-xs text-zinc-500">{t('emptyHistory')}</p>
             </div>
           ) : <>
             {canLoadMore ? (
@@ -1391,7 +1394,7 @@ export default function CurrentHistoryView({
                   disabled={loadingMore}
                   className="rounded-md border border-white/[0.07] bg-white/[0.025] px-3 py-1.5 text-xs text-zinc-500 transition-colors hover:border-white/[0.12] hover:text-zinc-300 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {loadingMore ? '加载中...' : '加载更早'}
+                  {loadingMore ? t('loadingMore') : t('loadEarlier')}
                 </button>
               </div>
             ) : null}
