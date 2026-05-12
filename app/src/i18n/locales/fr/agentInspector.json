@@ -53,7 +53,7 @@
   "mihomoRuleDesc": "Optionnel. Règle obligatoire à présent, ex. IN-USER,w-10001,proxy-a",
   "modelDefaultTitle": "Modèle par défaut au démarrage",
   "modelDefaultDesc": "Utilisé comme modèle de démarrage de l'agent et modèle de la gateway. Vide → suit le défaut du provider.",
-  "modelDefaultFieldLabel": "Default Model",
+  "modelDefaultFieldLabel": "Modèle par défaut",
   "modelDefaultFieldDesc": "ex. gpt-5.5 / claude-opus-4-7",
   "modelDefaultPlaceholder": "Vide → suit le défaut de l'agent",
   "officialAuth": "Utiliser l'auth officielle",

@@ -53,7 +53,7 @@
   "mihomoRuleDesc": "Optional. The full rule that must exist, e.g. IN-USER,w-10001,proxy-a",
   "modelDefaultTitle": "Startup default model",
   "modelDefaultDesc": "Used both as the agent's startup default model and as the gateway's default model. Empty falls back to the current provider's default.",
-  "modelDefaultFieldLabel": "Default Model",
+  "modelDefaultFieldLabel": "デフォルトモデル",
   "modelDefaultFieldDesc": "e.g. gpt-5.5 / claude-opus-4-7",
   "modelDefaultPlaceholder": "Empty falls back to the current agent default",
   "officialAuth": "Use official auth",
