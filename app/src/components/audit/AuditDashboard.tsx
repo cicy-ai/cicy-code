@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import { BarChart3, Activity, Zap, Settings, ArrowLeft, RefreshCw, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu } from 'lucide-react';
 import apiService from '../../services/api';
 import config from '../../config';
@@ -50,13 +52,13 @@ const formatCost = (v: number) => v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(
 const formatTokens = (v: number) => v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1_000 ? `${(v / 1_000).toFixed(1)}K` : `${v}`;
 const formatTime = (ts: number) => {
   const d = new Date(ts * 1000);
-  return d.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return d.toLocaleTimeString(undefined, { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 };
 const relativeTime = (ts: number) => {
   const diff = Date.now() / 1000 - ts;
-  if (diff < 60) return `${Math.floor(diff)} 秒前`;
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
-  return `${Math.floor(diff / 3600)} 小时前`;
+  if (diff < 60) return i18n.t('secondsAgo', { ns: 'audit', n: Math.floor(diff) });
+  if (diff < 3600) return i18n.t('minutesAgo', { ns: 'audit', n: Math.floor(diff / 60) });
+  return i18n.t('hoursAgo', { ns: 'audit', n: Math.floor(diff / 3600) });
 };
 
 function CopyButton({ text }: { text: string }) {
@@ -103,6 +105,7 @@ function MiniBarChart({ data, maxValue }: { data: { label: string; value: number
 
 // ── Overview Tab ──
 function OverviewTab({ userId, days, setDays }: { userId: string; days: number; setDays: (d: number) => void }) {
+  const { t } = useTranslation('audit');
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -114,8 +117,8 @@ function OverviewTab({ userId, days, setDays }: { userId: string; days: number; 
       .finally(() => setLoading(false));
   }, [userId, days]);
 
-  if (loading) return <div className="flex items-center justify-center h-64 text-[var(--vsc-text-secondary)]"><RefreshCw size={20} className="animate-spin mr-2" /> 加载中...</div>;
-  if (!data) return <div className="text-center text-[var(--vsc-text-secondary)] py-12">暂无数据</div>;
+  if (loading) return <div className="flex items-center justify-center h-64 text-[var(--vsc-text-secondary)]"><RefreshCw size={20} className="animate-spin mr-2" /> {t('loading')}</div>;
+  if (!data) return <div className="text-center text-[var(--vsc-text-secondary)] py-12">{t('noData')}</div>;
 
   const dailyReversed = [...data.daily].reverse();
   const maxCalls = Math.max(...dailyReversed.map(d => d.calls), 1);
@@ -131,36 +134,36 @@ function OverviewTab({ userId, days, setDays }: { userId: string; days: number; 
         {[7, 14, 30].map(d => (
             <button key={d} onClick={() => setDays(d)}
             className={`px-3 py-1 text-xs rounded-md transition-colors ${days === d ? 'bg-blue-600 text-white' : 'bg-[var(--vsc-bg-hover)] text-[var(--vsc-text-secondary)] hover:text-white'}`}>
-            {d} 天
+            {t('rangeDays', { n: d })}
           </button>
         ))}
       </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard icon={DollarSign} label="总费用" value={formatCost(data.total_cost_usd)} sub={`${days} 天周期`} color="text-emerald-400" />
-        <StatCard icon={Hash} label="API 调用数" value={data.total_calls.toLocaleString()} sub={`${data.monthly_calls.toLocaleString()} 本月`} color="text-blue-400" />
-        <StatCard icon={TrendingUp} label="输入令牌" value={formatTokens(data.total_input)} color="text-purple-400" />
-        <StatCard icon={Cpu} label="输出令牌" value={formatTokens(data.total_output)} color="text-amber-400" />
+        <StatCard icon={DollarSign} label={t('totalCost')} value={formatCost(data.total_cost_usd)} sub={t('rangeSuffix', { days })} color="text-emerald-400" />
+        <StatCard icon={Hash} label={t('apiCalls')} value={data.total_calls.toLocaleString()} sub={t('monthlySuffix', { n: data.monthly_calls.toLocaleString() })} color="text-blue-400" />
+        <StatCard icon={TrendingUp} label={t('inputTokens')} value={formatTokens(data.total_input)} color="text-purple-400" />
+        <StatCard icon={Cpu} label={t('outputTokens')} value={formatTokens(data.total_output)} color="text-amber-400" />
       </div>
 
       {/* Daily charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-4 border border-[var(--vsc-border)]">
-          <h3 className="text-xs font-medium text-[var(--vsc-text-secondary)] mb-3">Daily API 调用数</h3>
+          <h3 className="text-xs font-medium text-[var(--vsc-text-secondary)] mb-3">{t('dailyCalls')}</h3>
           <MiniBarChart data={dailyReversed.map(d => ({ label: d.date.slice(5), value: d.calls }))} maxValue={maxCalls} />
         </div>
         <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-4 border border-[var(--vsc-border)]">
-          <h3 className="text-xs font-medium text-[var(--vsc-text-secondary)] mb-3">每日费用（USD）</h3>
+          <h3 className="text-xs font-medium text-[var(--vsc-text-secondary)] mb-3">{t('dailyCost')}</h3>
           <MiniBarChart data={dailyReversed.map(d => ({ label: d.date.slice(5), value: d.cost_usd }))} maxValue={maxCost} />
         </div>
       </div>
 
       {/* Model breakdown */}
       <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-4 border border-[var(--vsc-border)]">
-        <h3 className="text-xs font-medium text-[var(--vsc-text-secondary)] mb-3">模型分布</h3>
+        <h3 className="text-xs font-medium text-[var(--vsc-text-secondary)] mb-3">{t('modelMix')}</h3>
         {modelEntries.length === 0 ? (
-          <p className="text-[var(--vsc-text-muted)] text-sm">暂无 AI 使用记录</p>
+          <p className="text-[var(--vsc-text-muted)] text-sm">{t('noAIRecords')}</p>
         ) : (
           <div className="space-y-2">
             {modelEntries.map(([model, stat]) => {
@@ -168,7 +171,7 @@ function OverviewTab({ userId, days, setDays }: { userId: string; days: number; 
               return (
                 <div key={model} className="flex items-center gap-3 text-sm">
                   <span className="flex-1 truncate text-[var(--vsc-text)] font-mono text-xs">{model}</span>
-                  <span className="text-[var(--vsc-text-secondary)] text-xs w-16 text-right">{stat.calls} 次</span>
+                  <span className="text-[var(--vsc-text-secondary)] text-xs w-16 text-right">{t('callsCount', { n: stat.calls })}</span>
                   <span className="text-[var(--vsc-text-secondary)] text-xs w-20 text-right">{formatTokens(stat.input_tokens + stat.output_tokens)}</span>
                   <div className="w-24 h-1.5 bg-[var(--vsc-bg-hover)] rounded-full overflow-hidden">
                     <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.max(2, pct)}%` }} />
@@ -184,8 +187,9 @@ function OverviewTab({ userId, days, setDays }: { userId: string; days: number; 
   );
 }
 
-// ── 使用日志 Tab ──
+// ── Usage log tab ──
 function UsageTab({ userId }: { userId: string }) {
+  const { t } = useTranslation('audit');
   const [entries, setEntries] = useState<UsageEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -196,7 +200,7 @@ function UsageTab({ userId }: { userId: string }) {
       .finally(() => setLoading(false));
   }, [userId]);
 
-  if (loading) return <div className="flex items-center justify-center h-64 text-[var(--vsc-text-secondary)]"><RefreshCw size={20} className="animate-spin mr-2" /> 加载中...</div>;
+  if (loading) return <div className="flex items-center justify-center h-64 text-[var(--vsc-text-secondary)]"><RefreshCw size={20} className="animate-spin mr-2" /> {t('loading')}</div>;
 
   const exportCSV = () => {
     const header = 'time,method,host,url,status,provider,model,input_tokens,output_tokens,cost_usd\n';
@@ -215,22 +219,22 @@ function UsageTab({ userId }: { userId: string }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-[var(--vsc-text-secondary)]">{entries.length} 条记录</span>
+        <span className="text-xs text-[var(--vsc-text-secondary)]">{t('recordsCount', { n: entries.length })}</span>
         <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs bg-[var(--vsc-bg-hover)] text-[var(--vsc-text-secondary)] hover:text-white transition-colors">
-          <Download size={12} /> 导出 CSV
+          <Download size={12} /> {t('exportCsv')}
         </button>
       </div>
       <div className="overflow-auto max-h-[calc(100vh-280px)]">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-[var(--vsc-bg)]">
             <tr className="text-[var(--vsc-text-secondary)] border-b border-[var(--vsc-border)]">
-              <th className="text-left py-2 px-2 font-medium">时间</th>
-              <th className="text-left py-2 px-2 font-medium">提供商</th>
-              <th className="text-left py-2 px-2 font-medium">模型</th>
-              <th className="text-right py-2 px-2 font-medium">输入</th>
-              <th className="text-right py-2 px-2 font-medium">输出</th>
-              <th className="text-right py-2 px-2 font-medium">费用</th>
-              <th className="text-center py-2 px-2 font-medium">状态</th>
+              <th className="text-left py-2 px-2 font-medium">{t('colTime')}</th>
+              <th className="text-left py-2 px-2 font-medium">{t('colProvider')}</th>
+              <th className="text-left py-2 px-2 font-medium">{t('colModel')}</th>
+              <th className="text-right py-2 px-2 font-medium">{t('colInput')}</th>
+              <th className="text-right py-2 px-2 font-medium">{t('colOutput')}</th>
+              <th className="text-right py-2 px-2 font-medium">{t('colCost')}</th>
+              <th className="text-center py-2 px-2 font-medium">{t('colStatus')}</th>
             </tr>
           </thead>
           <tbody>
@@ -268,7 +272,7 @@ function UsageTab({ userId }: { userId: string }) {
           </tbody>
         </table>
         {entries.length === 0 && (
-          <div className="text-center py-12 text-[var(--vsc-text-muted)]">暂无流量记录。先配置代理即可开始使用。</div>
+          <div className="text-center py-12 text-[var(--vsc-text-muted)]">{t('noTrafficYet')}</div>
         )}
       </div>
     </div>
@@ -277,6 +281,7 @@ function UsageTab({ userId }: { userId: string }) {
 
 // ── Live Stream Tab ──
 function LiveTab() {
+  const { t } = useTranslation('audit');
   const [events, setEvents] = useState<UsageEntry[]>([]);
   const [connected, setConnected] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -313,9 +318,9 @@ function LiveTab() {
       <div className="flex items-center gap-3">
         <div className={`flex items-center gap-1.5 text-xs ${connected ? 'text-emerald-400' : 'text-red-400'}`}>
           <div className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
-          {connected ? '已连接' : '未连接'}
+          {connected ? t('connected') : t('disconnected')}
         </div>
-        <span className="text-xs text-[var(--vsc-text-muted)]">{events.length} 条事件</span>
+        <span className="text-xs text-[var(--vsc-text-muted)]">{t('eventsCount', { n: events.length })}</span>
       </div>
       <div ref={containerRef} className="overflow-auto max-h-[calc(100vh-280px)] space-y-1">
         {events.map((e, i) => (
@@ -341,8 +346,8 @@ function LiveTab() {
         {events.length === 0 && (
           <div className="text-center py-16 text-[var(--vsc-text-muted)]">
             <Activity size={32} className="mx-auto mb-3 opacity-30" />
-            <p>等待流量中...</p>
-            <p className="text-[10px] mt-1">事件会实时显示在这里</p>
+            <p>{t('waitingTraffic')}</p>
+            <p className="text-[10px] mt-1">{t('eventsLive')}</p>
           </div>
         )}
       </div>
@@ -352,6 +357,7 @@ function LiveTab() {
 
 // ── Setup Tab ──
 function SetupTab({ proxyToken, onRegister }: { proxyToken: string; onRegister: () => void }) {
+  const { t } = useTranslation('audit');
   const [guide, setGuide] = useState<SetupGuide | null>(null);
 
   useEffect(() => {
@@ -368,7 +374,7 @@ function SetupTab({ proxyToken, onRegister }: { proxyToken: string; onRegister: 
     <div className="space-y-6 max-w-2xl">
       {/* Token section */}
       <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-5 border border-[var(--vsc-border)]">
-        <h3 className="text-sm font-semibold text-white mb-3">你的代理令牌</h3>
+        <h3 className="text-sm font-semibold text-white mb-3">{t('proxyTokenTitle')}</h3>
         {proxyToken ? (
           <div className="space-y-3">
             <div className="flex items-center gap-2 bg-black/30 rounded-md px-3 py-2 font-mono text-xs text-emerald-400 overflow-x-auto">
@@ -382,9 +388,9 @@ function SetupTab({ proxyToken, onRegister }: { proxyToken: string; onRegister: 
           </div>
         ) : (
           <div className="space-y-3">
-            <p className="text-sm text-[var(--vsc-text-secondary)]">生成代理令牌后即可开始审计 AI 流量。</p>
+            <p className="text-sm text-[var(--vsc-text-secondary)]">{t('proxyTokenIntro')}</p>
             <button onClick={onRegister} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors">
-              生成令牌
+              {t('generateToken')}
             </button>
           </div>
         )}
@@ -392,20 +398,20 @@ function SetupTab({ proxyToken, onRegister }: { proxyToken: string; onRegister: 
 
       {/* Install CA */}
       <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-5 border border-[var(--vsc-border)]">
-        <h3 className="text-sm font-semibold text-white mb-1">第一步：安装 CA 证书</h3>
-        <p className="text-xs text-[var(--vsc-text-secondary)] mb-3">HTTPS 流量审计需要此证书。请在你的机器上运行：</p>
+        <h3 className="text-sm font-semibold text-white mb-1">{t('step1Title')}</h3>
+        <p className="text-xs text-[var(--vsc-text-secondary)] mb-3">{t('step1Body')}</p>
         <div className="flex items-center gap-2 bg-black/30 rounded-md px-3 py-2 font-mono text-xs text-[var(--vsc-text)]">
           <span>curl -fsSL https://audit.cicy-ai.com/install-ca | bash</span>
           <CopyButton text="curl -fsSL https://audit.cicy-ai.com/install-ca | bash" />
         </div>
         <div className="mt-2 flex gap-3">
-          <a href="/ca.pem" className="text-xs text-[var(--vsc-link)] hover:underline">手动下载 CA 证书</a>
+          <a href="/ca.pem" className="text-xs text-[var(--vsc-link)] hover:underline">{t('manualDownloadCert')}</a>
         </div>
       </div>
 
       {/* Platform guides */}
       <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-5 border border-[var(--vsc-border)]">
-        <h3 className="text-sm font-semibold text-white mb-3">第二步：配置你的工具</h3>
+        <h3 className="text-sm font-semibold text-white mb-3">{t('step2Title')}</h3>
         <div className="space-y-4">
           {(guide?.platforms || defaultPlatforms).map((p, i) => (
             <div key={i}>
@@ -428,17 +434,17 @@ function SetupTab({ proxyToken, onRegister }: { proxyToken: string; onRegister: 
 
       {/* How it works */}
       <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-5 border border-[var(--vsc-border)]">
-        <h3 className="text-sm font-semibold text-white mb-3">工作原理</h3>
+        <h3 className="text-sm font-semibold text-white mb-3">{t('howItWorksTitle')}</h3>
         <div className="text-xs text-[var(--vsc-text-secondary)] space-y-2 leading-relaxed">
-          <p>CiCy Audit 作为透明 HTTPS 代理，位于你的 AI 工具与各家 API 提供商之间。</p>
+          <p>{t('howItWorksIntro')}</p>
           <div className="bg-black/20 rounded-md p-3 font-mono text-[10px] text-[var(--vsc-text-muted)] leading-loose">
-            你的 AI 工具 → CiCy Audit 代理 → AI 提供商（OpenAI、Anthropic 等）<br/>
+            {t('howItWorksDiagram')}<br/>
             &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↓<br/>
-            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;解析令牌、模型与费用<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{t('howItWorksParse')}<br/>
             &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↓<br/>
-            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;仪表盘（你当前所在位置）
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{t('howItWorksDashboard')}
           </div>
-          <p>支持的提供商：OpenAI、Anthropic、Google（Gemini）、DeepSeek、Qwen、Groq、Mistral、OpenRouter、Azure OpenAI、AWS Bedrock。</p>
+          <p>{t('howItWorksProviders')}</p>
         </div>
       </div>
     </div>
@@ -447,7 +453,7 @@ function SetupTab({ proxyToken, onRegister }: { proxyToken: string; onRegister: 
 
 const defaultPlatforms = [
   {
-    name: 'macOS / Linux（CLI 工具）',
+    name: i18n.t('platformMacOS', { ns: 'audit' }),
     steps: [
       'curl -fsSL https://audit.cicy-ai.com/install-ca | bash',
       'export https_proxy=https://YOUR_TOKEN:x@audit.cicy-ai.com:8003',
@@ -456,22 +462,23 @@ const defaultPlatforms = [
   {
     name: 'Cursor / VS Code',
     steps: [
-      '请先安装 CA 证书（见步骤 1）',
-      '添加到 settings.json："http.proxy": "https://YOUR_TOKEN:x@audit.cicy-ai.com:8003"',
+      i18n.t('instInstallCert', { ns: 'audit' }),
+      i18n.t('instAddSettings', { ns: 'audit' }),
     ],
   },
   {
     name: 'Claude Code / Kiro CLI',
     steps: [
-      '请先安装 CA 证书（见步骤 1）',
+      i18n.t('instInstallCert', { ns: 'audit' }),
       'export https_proxy=https://YOUR_TOKEN:x@audit.cicy-ai.com:8003',
-      '像平常一样运行你的 AI 工具——所有流量都会被自动审计',
+      i18n.t('instRunAsUsual', { ns: 'audit' }),
     ],
   },
 ];
 
 // ── Main Dashboard ──
 export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
+  const { t } = useTranslation('audit');
   const [tab, setTab] = useState<Tab>('overview');
   const [userId, setUserId] = useState('');
   const [proxyToken, setProxyToken] = useState('');
@@ -500,15 +507,15 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
         localStorage.setItem('audit_proxy_token', token);
       }
     } catch (err) {
-      console.error('注册审计令牌失败：', err);
+      console.error('Failed to register audit token:', err);
     }
   }, [userId]);
 
   const tabs: { id: Tab; icon: typeof BarChart3; label: string }[] = [
-    { id: 'overview', icon: BarChart3, label: '概览' },
-    { id: 'usage', icon: Clock, label: '使用日志' },
-    { id: 'live', icon: Activity, label: '实时' },
-    { id: 'setup', icon: Settings, label: '配置' },
+    { id: 'overview', icon: BarChart3, label: t('tabOverview') },
+    { id: 'usage', icon: Clock, label: t('tabUsage') },
+    { id: 'live', icon: Activity, label: t('tabLive') },
+    { id: 'setup', icon: Settings, label: t('tabSetup') },
   ];
 
   return (
@@ -523,11 +530,11 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
         <div className="flex items-center gap-2">
           <Zap size={18} className="text-blue-400" />
           <span className="font-semibold text-white text-sm">CiCy Audit</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-medium">测试版</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-medium">{t('betaBadge')}</span>
         </div>
         <div className="flex-1" />
         <span className="text-xs text-[var(--vsc-text-muted)]">
-          {userId && `用户：${userId}`}
+          {userId && t('userBadge', { userId })}
         </span>
       </header>
 
