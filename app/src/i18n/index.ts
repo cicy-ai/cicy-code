@@ -60,7 +60,7 @@ void i18n
     defaultNS: 'common',
     fallbackLng: 'en',
     supportedLngs: [...SUPPORTED_LNGS],
-    nonExplicitSupportedLngs: true,
+    load: 'currentOnly',
     detection: {
       order: ['localStorage', 'navigator'],
       lookupLocalStorage: STORAGE_KEY,
