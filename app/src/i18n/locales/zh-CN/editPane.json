@@ -1,0 +1,13 @@
+{
+  "title": "编辑窗格",
+  "agentDutyLabel": "智能体职责",
+  "agentDutyPlaceholder": "描述这个窗格的智能体职责",
+  "initScriptHintShort": "sleep:N 等待 N 秒，key:X 发送按键",
+  "telegramToggle": "Telegram 通知",
+  "telegramTokenPlaceholder": "机器人令牌",
+  "telegramChatIdPlaceholder": "聊天 ID",
+  "restart": "重启",
+  "delete": "删除",
+  "confirmRestart": "确认重启 {{target}}？",
+  "confirmDelete": "确认删除 {{target}}？"
+}

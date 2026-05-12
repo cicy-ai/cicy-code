@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Loader2, X, Zap } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useApp } from '../contexts/AppContext';
 import { useDevRegister } from '../lib/devStore';
 import AgentTypeSelector from './AgentTypeSelector';
@@ -37,14 +38,19 @@ export default function CreateAgentDialog({
   submitting = false,
   onClose,
   onSubmit,
-  title = '新建员工',
-  submitLabel = '创建',
+  title,
+  submitLabel,
   emptyTitleOnAgentSelect = '',
   dialogClassName = '',
   agentTypeGridClassName = 'grid grid-cols-1 gap-2 sm:grid-cols-2',
 }: Props) {
+  const { t } = useTranslation('createAgent');
+  const { t: ts } = useTranslation('settings');
+  const { t: tc } = useTranslation('common');
   const { agentTypeOptions } = useApp();
   const [values, setValues] = useState<CreateAgentValues>(DEFAULT_VALUES);
+  const resolvedTitle = title ?? t('title');
+  const resolvedSubmitLabel = submitLabel ?? t('submit');
 
   useEffect(() => {
     if (!open) return;
@@ -97,15 +103,15 @@ export default function CreateAgentDialog({
       >
         <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
           <div>
-            <h2 className="text-[15px] font-semibold text-white">{title}</h2>
-            <p className="mt-0.5 text-[11px] text-zinc-600">设置员工名称、智能体类型和权限</p>
+            <h2 className="text-[15px] font-semibold text-white">{resolvedTitle}</h2>
+            <p className="mt-0.5 text-[11px] text-zinc-600">{t('titleHint')}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
             disabled={submitting}
             className="cursor-pointer rounded-lg p-1.5 text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300 disabled:opacity-50"
-            title="关闭"
+            title={tc('close')}
           >
             <X className="h-4 w-4" />
           </button>
@@ -113,20 +119,20 @@ export default function CreateAgentDialog({
 
         <div className="space-y-5 px-5 py-5">
           <div>
-            <label data-id="create-agent-dialog-title-label" className="mb-1.5 block text-[13px] font-medium text-zinc-300">员工名称</label>
+            <label data-id="create-agent-dialog-title-label" className="mb-1.5 block text-[13px] font-medium text-zinc-300">{t('nameLabel')}</label>
             <input
               data-id="create-agent-dialog-title-input"
               autoFocus
               type="text"
               value={values.title}
               onChange={(e) => set({ title: e.target.value })}
-              placeholder="输入员工名称，如：营销经理"
+              placeholder={t('namePlaceholder')}
               className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 outline-none transition-all placeholder:text-zinc-700 focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/20"
             />
           </div>
 
           <div>
-            <label data-id="create-agent-dialog-agent-type-label" className="mb-1.5 block text-[13px] font-medium text-zinc-300">智能体类型</label>
+            <label data-id="create-agent-dialog-agent-type-label" className="mb-1.5 block text-[13px] font-medium text-zinc-300">{t('agentTypeLabel')}</label>
             <AgentTypeSelector
               value={values.agent_type}
               options={agentTypeOptions}
@@ -139,15 +145,15 @@ export default function CreateAgentDialog({
               className={agentTypeGridClassName}
             />
             <div className="mt-2 rounded-xl border border-cyan-400/15 bg-cyan-500/[0.06] px-3 py-2 text-[12px] text-cyan-100/90">
-              当前选择：<span className="font-medium text-cyan-100">{selectedAgent?.label || '未选择'}</span>
-              <span className="ml-1 text-cyan-100/65">{selectedAgent?.description || (agentTypeOptions.length ? '请选择一个智能体类型。' : '当前没有可用智能体类型。')}</span>
+              {t('currentSelection')}<span className="font-medium text-cyan-100">{selectedAgent?.label || t('noSelection')}</span>
+              <span className="ml-1 text-cyan-100/65">{selectedAgent?.description || (agentTypeOptions.length ? t('selectAgentTypeHint') : t('noAgentTypesAvailable'))}</span>
             </div>
           </div>
 
           <div data-id="create-agent-dialog-allow-all-actions" className="flex items-center justify-between py-1">
             <div>
-              <p className="text-[13px] font-medium text-zinc-300">启动时允许所有操作</p>
-              <p className="mt-0.5 text-[11px] text-zinc-600">Codex/Claude 追加危险参数</p>
+              <p className="text-[13px] font-medium text-zinc-300">{ts('allowAllActionsTitle')}</p>
+              <p className="mt-0.5 text-[11px] text-zinc-600">{ts('allowAllActionsHint')}</p>
             </div>
             <button
               type="button"
@@ -160,8 +166,8 @@ export default function CreateAgentDialog({
 
           <div data-id="create-agent-dialog-use-proxy" className="flex items-center justify-between py-1">
             <div>
-              <p className="text-[13px] font-medium text-zinc-300">启用代理</p>
-              <p className="mt-0.5 text-[11px] text-zinc-600">启动前执行 cicy_proxy_on，并检查 mihomo 规则</p>
+              <p className="text-[13px] font-medium text-zinc-300">{ts('proxyToggleTitle')}</p>
+              <p className="mt-0.5 text-[11px] text-zinc-600">{ts('proxyToggleHint')}</p>
             </div>
             <button
               type="button"
@@ -174,8 +180,8 @@ export default function CreateAgentDialog({
 
           <div data-id="create-agent-dialog-use-official-auth" className="flex items-center justify-between py-1">
             <div>
-              <p className="text-[13px] font-medium text-zinc-300">使用官方认证</p>
-              <p className="mt-0.5 text-[11px] text-zinc-600">开启后不注入本地 gateway auth</p>
+              <p className="text-[13px] font-medium text-zinc-300">{ts('officialAuthTitle')}</p>
+              <p className="mt-0.5 text-[11px] text-zinc-600">{ts('officialAuthHint')}</p>
             </div>
             <button
               type="button"
@@ -195,7 +201,7 @@ export default function CreateAgentDialog({
             disabled={submitting}
             className="cursor-pointer rounded-lg bg-white/[0.06] px-4 py-2 text-sm text-zinc-300 transition-all hover:bg-white/[0.1] disabled:opacity-50"
           >
-            取消
+            {tc('cancel')}
           </button>
           <button
             data-id="create-agent-dialog-submit"
@@ -204,7 +210,7 @@ export default function CreateAgentDialog({
             className="flex cursor-pointer items-center gap-2 rounded-lg bg-blue-500/20 px-4 py-2 text-sm font-medium text-blue-300 transition-all hover:bg-blue-500/25 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-            {submitting ? '创建中...' : submitLabel}
+            {submitting ? t('submitting') : resolvedSubmitLabel}
           </button>
         </div>
       </form>

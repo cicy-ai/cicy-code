@@ -3,9 +3,13 @@ import {initReactI18next} from 'react-i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 
 import enCommon from './locales/en/common.json';
+import enCreateAgent from './locales/en/createAgent.json';
+import enEditPane from './locales/en/editPane.json';
 import enLogin from './locales/en/login.json';
 import enSettings from './locales/en/settings.json';
 import zhCommon from './locales/zh-CN/common.json';
+import zhCreateAgent from './locales/zh-CN/createAgent.json';
+import zhEditPane from './locales/zh-CN/editPane.json';
 import zhLogin from './locales/zh-CN/login.json';
 import zhSettings from './locales/zh-CN/settings.json';
 
@@ -15,8 +19,20 @@ export const SUPPORTED_LNGS = ['en', 'zh-CN'] as const;
 export type SupportedLng = (typeof SUPPORTED_LNGS)[number];
 
 const resources = {
-  en: {common: enCommon, login: enLogin, settings: enSettings},
-  'zh-CN': {common: zhCommon, login: zhLogin, settings: zhSettings},
+  en: {
+    common: enCommon,
+    login: enLogin,
+    settings: enSettings,
+    createAgent: enCreateAgent,
+    editPane: enEditPane,
+  },
+  'zh-CN': {
+    common: zhCommon,
+    login: zhLogin,
+    settings: zhSettings,
+    createAgent: zhCreateAgent,
+    editPane: zhEditPane,
+  },
 };
 
 void i18n
@@ -24,7 +40,7 @@ void i18n
   .use(initReactI18next)
   .init({
     resources,
-    ns: ['common', 'login', 'settings'],
+    ns: ['common', 'login', 'settings', 'createAgent', 'editPane'],
     defaultNS: 'common',
     fallbackLng: 'en',
     supportedLngs: [...SUPPORTED_LNGS],

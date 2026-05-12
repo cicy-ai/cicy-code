@@ -1,0 +1,13 @@
+{
+  "title": "新建员工",
+  "titleHint": "设置员工名称、智能体类型和权限",
+  "submit": "创建",
+  "submitting": "创建中...",
+  "nameLabel": "员工名称",
+  "namePlaceholder": "输入员工名称，如：营销经理",
+  "agentTypeLabel": "智能体类型",
+  "currentSelection": "当前选择：",
+  "noSelection": "未选择",
+  "selectAgentTypeHint": "请选择一个智能体类型。",
+  "noAgentTypesAvailable": "当前没有可用智能体类型。"
+}
