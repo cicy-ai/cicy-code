@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -182,25 +181,11 @@ func loadMachineConfig() machineConfigFile {
 	return cfg
 }
 
+// saveMachineConfig is intentionally a no-op: machine state lives in the
+// sqlite `machines` table. The legacy cicy-node.json mirror is no longer
+// written (still read once by loadMachineConfig for backward-compat migration).
 func saveMachineConfig(cfg machineConfigFile) error {
-	if cfg.Machines == nil {
-		cfg.Machines = []machineConfigNode{}
-	}
-	for i := range cfg.Machines {
-		cfg.Machines[i] = normalizeInstanceNode(cfg.Machines[i])
-	}
-	sort.Slice(cfg.Machines, func(i, j int) bool {
-		return cfg.Machines[i].MachineKey < cfg.Machines[j].MachineKey
-	})
-	path := machinesConfigPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0644)
+	return nil
 }
 
 func upsertMachine(machine machineConfigNode) (int64, error) {

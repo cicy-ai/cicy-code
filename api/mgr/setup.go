@@ -1341,9 +1341,6 @@ func ensureCodeServerUserSettings(home string) {
 	if _, ok := settings["workbench.iconTheme"]; !ok {
 		settings["workbench.iconTheme"] = "simple-icons"
 	}
-	if _, ok := settings["locale"]; !ok {
-		settings["locale"] = "zh-cn"
-	}
 
 	payload, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -1353,6 +1350,19 @@ func ensureCodeServerUserSettings(home string) {
 	payload = append(payload, '\n')
 	if err := os.WriteFile(settingsPath, payload, 0644); err != nil {
 		log.Printf("[startup] failed to write code-server settings.json: %v", err)
+	}
+
+	// Ensure argv.json exists without a `locale` key. code-server resolves the
+	// workbench locale as: --locale flag > argv.json `locale` > `vscode.nls.locale`
+	// cookie > Accept-Language. A *missing* argv.json makes it default to "en" and
+	// never consult the cookie, so we create an empty one (only if absent — don't
+	// clobber a locale a user set via "Configure Display Language"). The per-user
+	// language then flows through the cookie set in proxy.handleCodeServer.
+	argvPath := filepath.Join(userDir, "argv.json")
+	if _, err := os.Stat(argvPath); os.IsNotExist(err) {
+		if err := os.WriteFile(argvPath, []byte("{}\n"), 0644); err != nil {
+			log.Printf("[startup] failed to write code-server argv.json: %v", err)
+		}
 	}
 }
 
@@ -1406,6 +1416,92 @@ func installBundledCodeServerExtensions(home string) {
 	installEmbeddedCodeServerExtension(home, "cicy-code-server-bridge-0.0.4.vsix", embeddedCodeServerBridgeVSIX)
 	installEmbeddedCodeServerExtension(home, "MS-CEINTL.vscode-language-pack-zh-hans-1.110.0.vsix", embeddedCodeServerZhHansVSIX)
 	installCodeServerExtension(home, "laurenttreguier.vscode-simple-icons")
+	ensureCodeServerLanguagePacks(home)
+}
+
+// ensureCodeServerLanguagePacks writes <user-data-dir>/languagepacks.json from
+// the installed `vscode-language-pack-*` extensions. `code-server
+// --install-extension` does NOT generate this file (unlike the in-app gallery
+// install), so without it code-server's workbench NLS always falls back to
+// English even when a language pack is present. The locale itself is selected
+// per request via the `vscode.nls.locale` cookie (see proxy.handleCodeServer).
+func ensureCodeServerLanguagePacks(home string) {
+	dataDir := filepath.Join(home, ".local", "share", "code-server")
+	extDir := filepath.Join(dataDir, "extensions")
+	entries, err := os.ReadDir(extDir)
+	if err != nil {
+		return
+	}
+	packs := map[string]any{}
+	for _, e := range entries {
+		if !e.IsDir() || !strings.Contains(e.Name(), "vscode-language-pack-") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(extDir, e.Name(), "package.json"))
+		if err != nil {
+			continue
+		}
+		var pkg struct {
+			Name        string `json:"name"`
+			Publisher   string `json:"publisher"`
+			Version     string `json:"version"`
+			Contributes struct {
+				Localizations []struct {
+					LanguageID            string `json:"languageId"`
+					LanguageName          string `json:"languageName"`
+					LocalizedLanguageName string `json:"localizedLanguageName"`
+					Translations          []struct {
+						ID   string `json:"id"`
+						Path string `json:"path"`
+					} `json:"translations"`
+				} `json:"localizations"`
+			} `json:"contributes"`
+		}
+		if err := json.Unmarshal(raw, &pkg); err != nil || pkg.Name == "" {
+			continue
+		}
+		extID := strings.ToLower(pkg.Publisher + "." + pkg.Name)
+		for _, loc := range pkg.Contributes.Localizations {
+			if loc.LanguageID == "" {
+				continue
+			}
+			translations := map[string]string{}
+			for _, t := range loc.Translations {
+				p := filepath.Join(extDir, e.Name(), filepath.FromSlash(t.Path))
+				if _, err := os.Stat(p); err != nil {
+					continue
+				}
+				translations[t.ID] = p
+			}
+			if translations["vscode"] == "" {
+				continue
+			}
+			label := loc.LocalizedLanguageName
+			if label == "" {
+				label = loc.LanguageName
+			}
+			packs[strings.ToLower(loc.LanguageID)] = map[string]any{
+				"hash":  "cicy-" + extID + "-" + pkg.Version,
+				"label": label,
+				"extensions": []map[string]any{
+					{"extensionIdentifier": map[string]any{"id": extID}, "version": pkg.Version},
+				},
+				"translations": translations,
+			}
+		}
+	}
+	if len(packs) == 0 {
+		return
+	}
+	payload, err := json.Marshal(packs)
+	if err != nil {
+		return
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "languagepacks.json"), payload, 0644); err != nil {
+		log.Printf("[startup] failed to write code-server languagepacks.json: %v", err)
+		return
+	}
+	log.Printf("[startup] code-server languagepacks.json written (%d locale)", len(packs))
 }
 
 func ensureCodeServerAsync() {
