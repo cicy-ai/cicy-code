@@ -1,8 +1,8 @@
 package main
 
 import (
-	_ "embed"
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -181,6 +181,21 @@ func injectCodeServerJS(resp *http.Response) error {
 	return nil
 }
 
+// normalizeVSCodeLocale lowercases and validates a UI language tag (e.g. "zh-CN"
+// -> "zh-cn") for use as the code-server `vscode.nls.locale` cookie value.
+func normalizeVSCodeLocale(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if s == "" || len(s) > 16 {
+		return ""
+	}
+	for _, ch := range s {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-') {
+			return ""
+		}
+	}
+	return s
+}
+
 func handleCodeServer(w http.ResponseWriter, r *http.Request) {
 	if folder := strings.TrimSpace(r.URL.Query().Get("folder")); folder != "" {
 		pageClientID := strings.TrimSpace(r.URL.Query().Get("client_id"))
@@ -196,6 +211,28 @@ func handleCodeServer(w http.ResponseWriter, r *http.Request) {
 			}
 			codeServerPageContextMu.Unlock()
 		}
+	}
+	// Propagate UI language: code-server resolves the workbench locale from the
+	// `vscode.nls.locale` cookie (after --locale / argv.json, which we leave unset).
+	// Mirror the `?lang=` query param the frontend appends (same scheme as ttyd)
+	// into that cookie so switching language in the UI re-localizes code-server.
+	if lang := normalizeVSCodeLocale(r.URL.Query().Get("lang")); lang != "" {
+		existing := r.Cookies()
+		r.Header.Del("Cookie")
+		for _, c := range existing {
+			if c.Name == "vscode.nls.locale" {
+				continue
+			}
+			r.AddCookie(c)
+		}
+		r.AddCookie(&http.Cookie{Name: "vscode.nls.locale", Value: lang})
+		http.SetCookie(w, &http.Cookie{
+			Name:     "vscode.nls.locale",
+			Value:    lang,
+			Path:     "/code/",
+			MaxAge:   31536000,
+			SameSite: http.SameSiteLaxMode,
+		})
 	}
 	r.URL.Path = r.URL.Path[len("/code"):]
 	if r.URL.Path == "" {

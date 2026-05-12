@@ -4427,9 +4427,9 @@ func handleTmuxList(w http.ResponseWriter, r *http.Request) {
 }
 
 // ensureMihomoRuleForAgent keeps ~/cicy-ai/db/mihomo.yaml in shape so that an
-// agent's traffic routes through default_proxy_node. The yaml must already
+// agent's traffic routes through default_proxy_group. The yaml must already
 // have globalPassword set (seeded by `cicy-mihomo gen-config`); we don't
-// manage it here. We only ensure an `IN-USER,<shortID>,default_proxy_node`
+// manage it here. We only ensure an `IN-USER,<shortID>,default_proxy_group`
 // rule exists before any `MATCH,*` catch-all, so this agent isn't dropped by
 // the default REJECT.
 //
@@ -4485,10 +4485,17 @@ func ensureMihomoRuleForAgent(shortID string) {
 	}
 	mutated := false
 
-	// --- rules block: ensure IN-USER,<shortID>,default_proxy_node exists ---
+	// --- rules block: ensure IN-USER,<shortID>,default_proxy_group exists ---
+	//
+	// Idempotence: we treat ANY existing `IN-USER,<shortID>,*` rule as
+	// "already configured", regardless of the target name. This way a manual
+	// retarget (e.g. user edits `default_proxy_node` -> `default_proxy_group`,
+	// or points the agent at a specific proxy) is preserved on subsequent
+	// agent starts instead of being shadowed by a duplicate auto-inserted line.
 	rulesStart, rulesEnd := findSection("rules")
 	if rulesStart >= 0 {
-		desired := fmt.Sprintf("IN-USER,%s,default_proxy_node", shortID)
+		desired := fmt.Sprintf("IN-USER,%s,default_proxy_group", shortID)
+		rulePrefix := fmt.Sprintf("IN-USER,%s,", shortID)
 		hasRule := false
 		insertRuleAt := rulesEnd
 		for i := rulesStart + 1; i < rulesEnd; i++ {
@@ -4496,7 +4503,7 @@ func ensureMihomoRuleForAgent(shortID string) {
 			if body == "" {
 				continue
 			}
-			if body == desired {
+			if strings.HasPrefix(body, rulePrefix) {
 				hasRule = true
 				break
 			}

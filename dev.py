@@ -1297,6 +1297,38 @@ def rebuild_ttyd_assets_for_local_dev():
     print("[dev] ttyd embedded assets refreshed.")
 
 
+APP_DEV_PORT = 8022
+
+
+def ensure_app_dev_server():
+    """Start the Vite dev server (app/, port 8022) in the background if it is not already up."""
+    existing = get_pid_on_port(APP_DEV_PORT)
+    if existing:
+        print(f"[dev] app dev server already running on :{APP_DEV_PORT} (pid={existing})")
+        return
+    app_dir = os.path.join(ROOT_DIR, "app")
+    if not os.path.isdir(os.path.join(app_dir, "node_modules")):
+        print("[dev] installing app dependencies (npm install)...")
+        result = subprocess.run(["npm", "install"], cwd=app_dir)
+        if result.returncode != 0:
+            print("[dev] npm install failed; skipping app dev server")
+            return
+    logs_dir = os.path.expanduser("~/logs/.dev-logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    log_path = os.path.join(logs_dir, "app-dev.log")
+    Path(log_path).touch(exist_ok=True)
+    with open(log_path, "ab", buffering=0) as log_file:
+        process = subprocess.Popen(
+            ["npm", "run", "dev"],
+            cwd=app_dir,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    print(f"[dev] app dev server (vite :{APP_DEV_PORT}) started in background (pid={process.pid})")
+    print(f"[dev] App dev log: {log_path}")
+
+
 def start_local_dev_detached(cicy_bin):
     logs_dir = os.path.expanduser("~/logs/.dev-logs")
     os.makedirs(logs_dir, exist_ok=True)
@@ -1556,6 +1588,7 @@ def main():
         sys.exit(1)
 
     cicy_bin = os.path.join(API_DIR, "cicy-code")
+    ensure_app_dev_server()
     start_local_dev_detached(cicy_bin)
     sys.exit(0)
 
