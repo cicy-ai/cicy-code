@@ -1008,6 +1008,10 @@ def run_docker(
 ):
     run_version_sync()
 
+    # Do not bind-mount any host directories into the dev container.
+    mount_projects = False
+    mount_home = False
+
     runtime_image = get_current_runtime_image()
     if not runtime_image:
         print(
