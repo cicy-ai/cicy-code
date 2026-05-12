@@ -345,13 +345,15 @@ def main():
 
     # 8. format + mount disk, install docker
     print("=== Setting up instance... ===")
-    run_ssh(ip, 'DISK=$(lsblk -ndo NAME | grep "^vd" | grep -v "^vda" | head -1) && '
+    run_ssh(ip, 'set -e; '
+           'DISK=$(lsblk -ndo NAME | grep "^vd" | grep -v "^vda" | head -1); '
            'if [ -n "$DISK" ]; then '
-           '  mkfs.ext4 -F /dev/$DISK && '
-           '  mkdir -p /data && '
-           '  mount /dev/$DISK /data && '
-           '  echo "/dev/$DISK /data ext4 defaults 0 0" >> /etc/fstab; '
-           'fi', timeout=30)
+           '  DEV=/dev/$DISK; '
+           '  blkid "$DEV" >/dev/null 2>&1 || mkfs.ext4 -F "$DEV"; '  # only format a blank disk — never wipe the persistent data
+           '  mkdir -p /data; '
+           '  mountpoint -q /data || mount "$DEV" /data; '
+           '  grep -q " /data " /etc/fstab || echo "$DEV /data ext4 defaults 0 0" >> /etc/fstab; '
+           'fi', timeout=60)
 
     setup_commands = [
         'curl -fsSL https://get.docker.com | sh',
@@ -435,10 +437,13 @@ def main():
     # 12. test
     print("=== Testing ===")
     run_ssh(ip, 'docker ps | grep us-spot-dev', check=False)
-    test = run_ssh(ip, 'ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null '
-                   '-o PasswordAuthentication=no -p 2022 '
-                   '-i /root/.ssh/id_ed25519 cicy@localhost '
-                   '"echo SSH_OK && docker ps -q | wc -l" 2>&1', check=False)
+    # Test the container's sshd + docker access from here (the instance's root
+    # has no private key, so an in-instance `ssh cicy@localhost` can't auth).
+    test = run(["ssh", "-o", "StrictHostKeyChecking=accept-new",
+                "-o", "UserKnownHostsFile=/dev/null", "-o", "BatchMode=yes",
+                "-o", "ConnectTimeout=10", "-p", str(SSH_PORT_CONTAINER),
+                "-i", SSH_KEY, f"cicy@{ip}",
+                "echo SSH_OK && docker ps -q | wc -l"], check=False)
     print(f"  Container test: {test.stdout.strip() if test.returncode == 0 else 'FAILED'}")
 
     # 13. update local configs
