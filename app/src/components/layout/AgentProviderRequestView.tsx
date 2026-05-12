@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Brain, Languages, Search, Wrench } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import apiService from '../../services/api';
 
 export type RequestViewTab = 'tools' | 'brain' | 'meta';
@@ -11,10 +13,10 @@ function formatTime(value?: string) {
   if (!value) return '';
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) return value;
-  return new Date(parsed).toLocaleString('zh-CN', { hour12: false });
+  return new Date(parsed).toLocaleString(undefined, { hour12: false });
 }
 
-function compactText(value: unknown, fallback = '暂无', limit?: number) {
+function compactText(value: unknown, fallback = '', limit?: number) {
   const text = String(value || '').trim();
   if (!text) return fallback;
   if (typeof limit === 'number' && limit > 0) {
@@ -60,7 +62,7 @@ function renderTranslateToggleButton(baseId: string, translationState: Translati
       className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] transition-colors disabled:opacity-50 ${hasTranslation ? 'bg-emerald-500/12 text-emerald-300 hover:bg-emerald-500/18' : 'bg-white/[0.06] text-zinc-300 hover:bg-white/[0.10]'}`}
     >
       <Languages className="h-3.5 w-3.5" />
-      {loading ? '翻译中...' : hasTranslation ? '隐藏译文' : '翻译'}
+      {loading ? i18n.t('translating', { ns: 'agentProviderRequest' }) : hasTranslation ? i18n.t('hideTranslation', { ns: 'agentProviderRequest' }) : i18n.t('translate', { ns: 'agentProviderRequest' })}
     </button>
   );
 }
@@ -80,7 +82,7 @@ function renderTranslatedParagraphs(baseId: string, content: string, translation
           <div data-id={`${safeId}-original-${index}`} className="whitespace-pre-wrap break-words text-[12px] leading-5 text-zinc-300">{part}</div>
           {translated[index] ? (
             <div data-id={`${safeId}-translation-wrap-${index}`} className="rounded-lg border border-emerald-400/15 bg-emerald-400/[0.04] px-3 py-2.5">
-              <div data-id={`${safeId}-translation-label-${index}`} className="mb-1 text-[10px] uppercase tracking-[0.14em] text-emerald-300/80">译文</div>
+              <div data-id={`${safeId}-translation-label-${index}`} className="mb-1 text-[10px] uppercase tracking-[0.14em] text-emerald-300/80">{i18n.t('translationLabel', { ns: 'agentProviderRequest' })}</div>
               <div data-id={`${safeId}-translation-${index}`} className="whitespace-pre-wrap break-words text-[12px] leading-5 text-zinc-300">{translated[index]}</div>
             </div>
           ) : null}
@@ -111,7 +113,7 @@ function renderPromptItems(items: any[], translationState: TranslationState, onT
       {items.map((item: any, index: number) => {
         const cardId = `agent-provider-request-prompt-item-${index}`;
         const translationKey = `brain:prompt-item:${index}`;
-        const text = compactText(item?.text, '暂无');
+        const text = compactText(item?.text, i18n.t('fallbackNone', { ns: 'agentProviderRequest' }));
         return (
           <div key={index} data-id={cardId} className="rounded-lg bg-[#101114] px-3 py-2.5 text-[12px] leading-5 text-zinc-300">
             <div data-id={`agent-provider-request-prompt-item-header-${index}`} className="mb-1 flex items-center justify-between gap-3 text-[11px] text-zinc-500">
@@ -135,7 +137,7 @@ function renderDeveloperCards(items: any[], translationState: TranslationState, 
       {items.map((item: any, index: number) => {
         const cardId = `agent-provider-request-developer-item-${index}`;
         const translationKey = `brain:developer-item:${index}`;
-        const text = compactText(item?.text, '暂无');
+        const text = compactText(item?.text, i18n.t('fallbackNone', { ns: 'agentProviderRequest' }));
         return (
           <div key={index} data-id={cardId} className="rounded-lg bg-[#101114] px-3 py-2.5 text-[12px] leading-5 text-zinc-300">
             <div className="mb-1 flex items-center justify-between gap-3">
@@ -165,7 +167,7 @@ function renderToolProperty(item: any, requiredNames: string[], translatedDescri
       {description ? <div data-id={`agent-provider-request-tool-property-description-${safeName}`} className="mb-1 text-zinc-400">{compactText(description, '', 400)}</div> : null}
       {translatedDescription ? (
         <div data-id={`agent-provider-request-tool-property-translation-wrap-${safeName}`} className="mb-1 rounded-lg border border-emerald-400/15 bg-emerald-400/[0.04] px-3 py-2.5">
-          <div data-id={`agent-provider-request-tool-property-translation-label-${safeName}`} className="mb-1 text-[10px] uppercase tracking-[0.14em] text-emerald-300/80">译文</div>
+          <div data-id={`agent-provider-request-tool-property-translation-label-${safeName}`} className="mb-1 text-[10px] uppercase tracking-[0.14em] text-emerald-300/80">{i18n.t('translationLabel', { ns: 'agentProviderRequest' })}</div>
           <div data-id={`agent-provider-request-tool-property-translation-${safeName}`} className="whitespace-pre-wrap break-words text-[12px] leading-5 text-zinc-300">{translatedDescription}</div>
         </div>
       ) : null}
@@ -224,7 +226,7 @@ function renderToolDetail(tool: any, summaryTranslationState: TranslationState[s
           const hasDescription = String(item?.description || '').trim();
           const translatedDescription = hasDescription ? parameterTranslationState?.translated?.[propertyTranslationIndex++] : undefined;
           return renderToolProperty(item, requiredNames, translatedDescription);
-        })}</div> : <div data-id={`agent-provider-request-tool-parameters-empty-${safeName}`} className="text-sm text-zinc-500">当前没有参数</div>}
+        })}</div> : <div data-id={`agent-provider-request-tool-parameters-empty-${safeName}`} className="text-sm text-zinc-500">{i18n.t('noParameters', { ns: 'agentProviderRequest' })}</div>}
       </div>
     </div>
   );
@@ -267,7 +269,7 @@ function renderToolsWorkspace(items: any[], query: string, selectedName: string 
         className="overflow-y-auto"
         style={{ position: 'absolute', left: 224, right: 12, top: 12, bottom: 12 }}
       >
-        {selected ? renderToolDetail(selected, translationState[`tool:${String(selected?.name || '')}`], translationState[`tool-params:${String(selected?.name || '')}`], onTranslateSummary, onTranslateParameters) : <div data-id="agent-provider-request-tools-detail-empty" className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-sm text-zinc-500">当前没有 tools</div>}
+        {selected ? renderToolDetail(selected, translationState[`tool:${String(selected?.name || '')}`], translationState[`tool-params:${String(selected?.name || '')}`], onTranslateSummary, onTranslateParameters) : <div data-id="agent-provider-request-tools-detail-empty" className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-sm text-zinc-500">{i18n.t('noTools', { ns: 'agentProviderRequest' })}</div>}
       </div>
     </div>
   );
@@ -284,6 +286,7 @@ export default function AgentProviderRequestView({
   tab: RequestViewTab;
   inspectorVersion?: number;
 }) {
+  const { t } = useTranslation('agentProviderRequest');
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [brainTab, setBrainTab] = useState<BrainInnerTab>('instructions');
@@ -340,7 +343,7 @@ export default function AgentProviderRequestView({
     }
   }, [selectedToolName, toolItems]);
 
-  const handleTranslateContent = async (key: string, sourceText: string, errorMessage = '翻译失败') => {
+  const handleTranslateContent = async (key: string, sourceText: string, errorMessage?: string) => {
     const source = String(sourceText || '').trim();
     const parts = splitTextForTranslation(source);
     if (!key || parts.length === 0) return;
@@ -399,14 +402,14 @@ export default function AgentProviderRequestView({
           source,
         },
       }));
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: errorMessage }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: errorMessage || t('errorTranslate') }));
     }
   };
 
   const handleTranslateTool = async (tool: any) => {
     const name = String(tool?.name || '');
     if (!name) return;
-    await handleTranslateContent(`tool:${name}`, String(tool?.description || ''), '工具摘要翻译失败');
+    await handleTranslateContent(`tool:${name}`, String(tool?.description || ''), t('errorTranslateToolSummary'));
   };
 
   const handleTranslateToolParameters = async (tool: any) => {
@@ -416,13 +419,13 @@ export default function AgentProviderRequestView({
       .map((item: any) => String(item?.description || '').trim())
       .filter(Boolean)
       .join('\n\n');
-    await handleTranslateContent(`tool-params:${name}`, source, '参数翻译失败');
+    await handleTranslateContent(`tool-params:${name}`, source, t('errorTranslateParameters'));
   };
 
   if (loading) {
     return (
       <div data-id="agent-provider-request-loading" className="flex h-full items-center justify-center text-sm text-zinc-500">
-        加载中...
+        {t('loading')}
       </div>
     );
   }
@@ -430,7 +433,7 @@ export default function AgentProviderRequestView({
   if (!data || sections.length === 0) {
     return (
       <div data-id="agent-provider-request-empty" className="flex h-full items-center justify-center text-sm text-zinc-500">
-        当前没有可用的请求视图
+        {t('noRequestView')}
       </div>
     );
   }
@@ -443,7 +446,7 @@ export default function AgentProviderRequestView({
     >
       {tab === 'tools' ? (
         <div data-id="agent-provider-request-tools-panel" className="h-full overflow-hidden">
-          {toolItems.length ? renderToolsWorkspace(toolItems, '', selectedToolName, setSelectedToolName, translationState, handleTranslateTool, handleTranslateToolParameters) : <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-sm text-zinc-500">当前没有 tools</div>}
+          {toolItems.length ? renderToolsWorkspace(toolItems, '', selectedToolName, setSelectedToolName, translationState, handleTranslateTool, handleTranslateToolParameters) : <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-sm text-zinc-500">{t('noTools')}</div>}
         </div>
       ) : null}
 
@@ -476,15 +479,15 @@ export default function AgentProviderRequestView({
 
           {isOpenAIStyle ? (
             brainTab === 'developer'
-              ? (developerSection?.items?.length ? renderDeveloperCards(developerSection.items, translationState, (key, text) => handleTranslateContent(key, text, 'Developer 内容翻译失败')) : <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-sm text-zinc-500">当前没有 developer 内容</div>)
-              : (promptSection?.items?.length ? renderPromptItems(promptSection.items, translationState, (key, text) => handleTranslateContent(key, text, 'Instructions 翻译失败')) : (promptSection ? renderBrainCard(compactText(promptSection?.label, 'Instructions'), compactText(promptSection?.text, '暂无'), translationState['brain:instructions-card'], () => handleTranslateContent('brain:instructions-card', compactText(promptSection?.text, '暂无'), 'Instructions 翻译失败'), 'agent-provider-request-brain-card-instructions') : <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-sm text-zinc-500">当前没有 instructions 内容</div>))
+              ? (developerSection?.items?.length ? renderDeveloperCards(developerSection.items, translationState, (key, text) => handleTranslateContent(key, text, t('errorTranslateDeveloper'))) : <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-sm text-zinc-500">{t('noDeveloperContent')}</div>)
+              : (promptSection?.items?.length ? renderPromptItems(promptSection.items, translationState, (key, text) => handleTranslateContent(key, text, t('errorTranslateInstructions'))) : (promptSection ? renderBrainCard(compactText(promptSection?.label, 'Instructions'), compactText(promptSection?.text, t('fallbackNone')), translationState['brain:instructions-card'], () => handleTranslateContent('brain:instructions-card', compactText(promptSection?.text, t('fallbackNone')), t('errorTranslateInstructions')), 'agent-provider-request-brain-card-instructions') : <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-sm text-zinc-500">{t('noInstructionsContent')}</div>))
           ) : (
             promptSection || developerSection ? (
               <div className="space-y-3">
-                {promptSection?.items?.length ? renderPromptItems(promptSection.items, translationState, (key, text) => handleTranslateContent(key, text, 'Brain 内容翻译失败')) : (promptSection ? renderBrainCard(compactText(promptSection?.label, 'Brain'), compactText(promptSection?.text, '暂无'), translationState['brain:prompt-card'], () => handleTranslateContent('brain:prompt-card', compactText(promptSection?.text, '暂无'), 'Brain 内容翻译失败'), 'agent-provider-request-brain-card-prompt') : null)}
-                {developerSection?.items?.length ? renderDeveloperCards(developerSection.items, translationState, (key, text) => handleTranslateContent(key, text, 'Developer 内容翻译失败')) : null}
+                {promptSection?.items?.length ? renderPromptItems(promptSection.items, translationState, (key, text) => handleTranslateContent(key, text, t('errorTranslateBrain'))) : (promptSection ? renderBrainCard(compactText(promptSection?.label, 'Brain'), compactText(promptSection?.text, t('fallbackNone')), translationState['brain:prompt-card'], () => handleTranslateContent('brain:prompt-card', compactText(promptSection?.text, t('fallbackNone')), t('errorTranslateBrain')), 'agent-provider-request-brain-card-prompt') : null)}
+                {developerSection?.items?.length ? renderDeveloperCards(developerSection.items, translationState, (key, text) => handleTranslateContent(key, text, t('errorTranslateDeveloper'))) : null}
               </div>
-            ) : <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-sm text-zinc-500">当前没有 brain 内容</div>
+            ) : <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-sm text-zinc-500">{t('noBrainContent')}</div>
           )}
         </div>
       ) : null}
@@ -492,12 +495,12 @@ export default function AgentProviderRequestView({
       {tab === 'meta' ? (
         <div data-id="agent-provider-request-meta-panel" className="space-y-3">
           <div data-id="agent-provider-request-header" className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-            <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">请求视图</div>
-            <div className="mt-1 text-sm font-medium text-zinc-100">{compactText(data.model, '未知模型')}</div>
+            <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">{t('requestView')}</div>
+            <div className="mt-1 text-sm font-medium text-zinc-100">{compactText(data.model, t('unknownModel'))}</div>
             <div className="mt-1 text-[11px] text-zinc-500">{compactText(data.provider, 'unknown')} · {compactText(data.request_kind, 'generic')}</div>
-            <div className="mt-2 text-[11px] text-zinc-500">更新时间：{formatTime(data.updated_at) || '--'} · Tools {typeof data.tool_count === 'number' ? data.tool_count : 0}</div>
+            <div className="mt-2 text-[11px] text-zinc-500">{t('updatedAt', { time: formatTime(data.updated_at) || '--' })} · Tools {typeof data.tool_count === 'number' ? data.tool_count : 0}</div>
           </div>
-          {metaSection?.items?.length ? renderMetaItems(metaSection.items) : <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-sm text-zinc-500">当前没有 meta</div>}
+          {metaSection?.items?.length ? renderMetaItems(metaSection.items) : <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-sm text-zinc-500">{t('noMeta')}</div>}
         </div>
       ) : null}
     </div>

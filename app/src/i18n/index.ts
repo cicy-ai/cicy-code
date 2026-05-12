@@ -2,6 +2,8 @@ import i18n from 'i18next';
 import {initReactI18next} from 'react-i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 
+import enAgentInspector from './locales/en/agentInspector.json';
+import enAgentProviderRequest from './locales/en/agentProviderRequest.json';
 import enChat from './locales/en/chat.json';
 import enCommon from './locales/en/common.json';
 import enCreateAgent from './locales/en/createAgent.json';
@@ -11,6 +13,8 @@ import enLogin from './locales/en/login.json';
 import enSettings from './locales/en/settings.json';
 import enUi from './locales/en/ui.json';
 import enWorkspace from './locales/en/workspace.json';
+import zhAgentInspector from './locales/zh-CN/agentInspector.json';
+import zhAgentProviderRequest from './locales/zh-CN/agentProviderRequest.json';
 import zhChat from './locales/zh-CN/chat.json';
 import zhCommon from './locales/zh-CN/common.json';
 import zhCreateAgent from './locales/zh-CN/createAgent.json';
@@ -37,6 +41,8 @@ const resources = {
     ui: enUi,
     layout: enLayout,
     chat: enChat,
+    agentInspector: enAgentInspector,
+    agentProviderRequest: enAgentProviderRequest,
   },
   'zh-CN': {
     common: zhCommon,
@@ -48,6 +54,8 @@ const resources = {
     ui: zhUi,
     layout: zhLayout,
     chat: zhChat,
+    agentInspector: zhAgentInspector,
+    agentProviderRequest: zhAgentProviderRequest,
   },
 };
 
@@ -56,7 +64,7 @@ void i18n
   .use(initReactI18next)
   .init({
     resources,
-    ns: ['common', 'login', 'settings', 'createAgent', 'editPane', 'workspace', 'ui', 'layout', 'chat'],
+    ns: ['common', 'login', 'settings', 'createAgent', 'editPane', 'workspace', 'ui', 'layout', 'chat', 'agentInspector', 'agentProviderRequest'],
     defaultNS: 'common',
     fallbackLng: 'en',
     supportedLngs: [...SUPPORTED_LNGS],
