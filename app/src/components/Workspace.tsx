@@ -1612,10 +1612,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                         <span aria-hidden className="text-[12px] leading-none">{flagEmoji(code)}</span>
                         <span className="truncate">{languageDisplayName(code)}</span>
                       </span>
-                      <span className="flex shrink-0 items-center gap-1.5">
-                        {!translated ? <span className="rounded bg-white/[0.04] px-1 py-px text-[9px] font-mono text-zinc-500">en</span> : null}
-                        {active ? <Check className="h-3 w-3 text-emerald-400" /> : null}
-                      </span>
+                      {active ? <Check className="h-3 w-3 shrink-0 text-emerald-400" /> : null}
                     </button>
                   );
                 })}
