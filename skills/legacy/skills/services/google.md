@@ -64,6 +64,6 @@ google calendar events primary 5
 google calendar create "Meeting" "2026-03-10T10:00:00Z" "2026-03-10T11:00:00Z"
 ```
 
-**Project:** `~/projects/cicy-skills/providers/google-node`
-**GitHub:** https://github.com/cicy-ai/cicy-skills
-**Location:** `~/projects/cicy-skills/bin/google`, `~/.local/bin/google`
+**Project:** `~/projects/cicy-code/skills/providers/google-node`
+**GitHub:** https://github.com/cicy-ai/cicy-code (skills/ subtree)
+**Location:** `~/projects/cicy-code/skills/providers/google-node/google.js`, `~/.local/bin/google`

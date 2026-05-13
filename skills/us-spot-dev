@@ -57,7 +57,8 @@ GITHUB_KEY = os.path.expanduser("~/.ssh/id_ed25519_cicy_ai")  # deploy key for g
 RSA_KEY = os.path.expanduser("~/.ssh/id_rsa")                  # used by some proxy_ssh profiles
 CICY_AI_DIR = os.path.expanduser("~/cicy-ai")
 CICY_CODE_REPO = "git@github-cicy-ai:cicy-ai/cicy-code.git"
-CICY_SKILLS_REPO = "git@github-cicy-ai:cicy-ai/cicy-skills.git"
+# cicy-skills source is now vendored under cicy-code/skills/. The
+# standalone cicy-ai/cicy-skills.git repo is frozen — we no longer clone it.
 MIHOMO_LINUX_BIN = os.path.expanduser("~/projects/cicy-mihomo/bin/mihomo-linux-amd64")
 IMAGE_REF = "cicybot/us-spot-dev:latest"   # pre-built image; `us-spot-dev --push-image` rebuilds & pushes it
 VPC_CIDR = "172.19.0.0/16"
@@ -493,12 +494,11 @@ def bootstrap_container(ip):
                             dbdir + "/", f"cicy@{ip}:cicy-ai/db/"],
                            check=False, capture_output=True, text=True)
         ssh_cicy(ip, f"git clone {CICY_CODE_REPO} ~/projects/cicy-code 2>/dev/null || true", timeout=300)
-        ssh_cicy(ip, f"git clone {CICY_SKILLS_REPO} ~/projects/cicy-skills 2>/dev/null || true", timeout=300)
         if os.path.exists(MIHOMO_LINUX_BIN):
             scp_to_cicy(ip, MIHOMO_LINUX_BIN, "~/.local/bin/mihomo")
             ssh_cicy(ip, "chmod 0755 ~/.local/bin/mihomo")
     # always: make sure the cicy-mihomo wrapper exists (binary is pre-installed in the image; build the Go wrapper)
-    ssh_cicy(ip, "[ -x ~/.local/bin/cicy-mihomo ] || { cd ~/projects/cicy-skills 2>/dev/null && "
+    ssh_cicy(ip, "[ -x ~/.local/bin/cicy-mihomo ] || { cd ~/projects/cicy-code/skills 2>/dev/null && "
                  "/usr/local/go/bin/go build -o ~/.local/bin/cicy-hosttools ./cmd/cicy-hosttools "
                  "&& ln -sf cicy-hosttools ~/.local/bin/cicy-mihomo; } || true", timeout=240)
     # bring up proxy_ssh profiles (mihomo's upstream nodes may chain through them), then mihomo
