@@ -417,7 +417,7 @@ body {
   z-index: 9998;
   display: flex;
   align-items: center;
-  height: 28px;
+  height: 36px;
   background: rgba(30,30,30,0.95);
   border-bottom: 1px solid rgba(255,255,255,0.06);
   font-family: var(--cp-mono-font);
@@ -426,7 +426,7 @@ body {
 }
 #fixed-top-action {
   position: fixed;
-  top: -3px;
+  top: 1px;
   right: 6px;
   z-index: 9999;
   display: flex;

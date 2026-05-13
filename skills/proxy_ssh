@@ -181,7 +181,8 @@ def status_text(profile: Dict[str, Any]) -> str:
         if len(parts) != 2:
             continue
         args = parts[1]
-        if not args.startswith("ssh ") and not args.startswith("autossh "):
+        cmd = args.split(None, 1)[0].rsplit("/", 1)[-1]
+        if cmd not in ("ssh", "autossh"):
             continue
         if f"-D {local_port}" not in args and f":{local_port}" not in args:
             continue
@@ -208,7 +209,8 @@ def find_profile_pids(profile: Dict[str, Any]) -> List[int]:
         if len(parts) != 2:
             continue
         pid_text, args = parts
-        if not args.startswith("ssh ") and not args.startswith("autossh "):
+        cmd = args.split(None, 1)[0].rsplit("/", 1)[-1]
+        if cmd not in ("ssh", "autossh"):
             continue
         if f"-D {local_port}" not in args and f":{local_port}" not in args:
             continue
@@ -379,6 +381,24 @@ def command_stop(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_restart(args: argparse.Namespace) -> int:
+    profiles = load_registry_unlocked(proxy_ssh_file_path())
+    profile = find_profile(profiles, args.name)
+    if status_text(profile) == "running":
+        if not stop_profile_processes(profile):
+            raise SystemExit(f"failed to stop profile '{args.name}'")
+        time.sleep(0.5)
+    subprocess.run(["bash", "-lc", profile["start_cmd"]], check=True)
+    time.sleep(1)
+    if status_text(profile) != "running":
+        raise SystemExit(f"failed to restart profile '{args.name}'")
+    if args.json:
+        print_json({"success": True, "name": args.name, "status": "running"})
+    else:
+        print(f"restarted {args.name}")
+    return 0
+
+
 def command_install_autossh(args: argparse.Namespace) -> int:
     import platform
     system = platform.system().lower()
@@ -481,6 +501,11 @@ def build_parser() -> argparse.ArgumentParser:
     stop_parser.add_argument("name", help="Profile name")
     stop_parser.add_argument("--json", action="store_true", help="Print JSON output")
     stop_parser.set_defaults(func=command_stop)
+
+    restart_parser = sub.add_parser("restart", help="Restart one proxy_ssh profile (stop then start)")
+    restart_parser.add_argument("name", help="Profile name")
+    restart_parser.add_argument("--json", action="store_true", help="Print JSON output")
+    restart_parser.set_defaults(func=command_restart)
 
     test_parser = sub.add_parser("test", help="Test one proxy_ssh profile")
     test_parser.add_argument("name", help="Profile name")

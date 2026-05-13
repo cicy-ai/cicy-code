@@ -1,95 +1,70 @@
 import { Terminal as XtermTerminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { WebLinksAddon } from "@xterm/addon-web-links";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { lib } from "libapps";
 import { applyMonoFontVar, isMacPlatform } from "./font";
 import { openExternalLinkWithConfirm, openFileReferencePopup } from "./link_confirm";
 import { normalizeTerminalText } from "./webtty";
+import { scanLinksOnText, type LinkKind } from "./link_detect";
 
 const deviceAttributesRe = /\x1b\[\??[\d;]*c/g;
 const mouseClickRe = /\x1b\[<(?:0|1|2|3|32|33|34|35);\d+;\d+[Mm]|\x1b\[M[\s\S]{3}/g;
-const filenameLinkRe = /(?:\.{1,2}\/|~\/|\/)?(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.[A-Za-z0-9_-]+(?::\d+){0,2}/g;
-const filenameExcludedPrefixes = ["http://", "https://", "ws://", "wss://"];
-const localResourceProtocolUrlRegex = /(?:file|image):\/\/[^\s"'!*(){}|\\\^<>`]*[^\s"':,.!?{}|\\\^~\[\]`()<>]/;
+
 function normalizeTerminalInput(value: string): string {
     return normalizeTerminalText(value);
 }
-function isLikelyFilenameLink(value: string, lineText?: string, matchIndex?: number): boolean {
-    var text = String(value || "").trim();
-    if (!text) {
-        return false;
-    }
-    if (lineText !== undefined && typeof matchIndex === "number") {
-        var lowerLine = lineText.toLowerCase();
-        if ((matchIndex >= 7 && lowerLine.slice(matchIndex - 7, matchIndex) === "file://")
-            || (matchIndex >= 8 && lowerLine.slice(matchIndex - 8, matchIndex) === "image://")) {
-            return false;
-        }
-    }
-    for (var i = 0; i < filenameExcludedPrefixes.length; i += 1) {
-        if (text.indexOf(filenameExcludedPrefixes[i]) === 0) {
-            return false;
-        }
-    }
-    return /\.[A-Za-z0-9_-]+(?::\d+){0,2}$/.test(text);
+
+interface LogicalLine {
+    text: string;
+    /** For each code unit in `text`, the buffer cell that produced it. y is the 0-based bufferLine index, x is the 0-based column. */
+    cellMap: Array<{ y: number; x: number }>;
+    anchorY: number;
+    endY: number;
 }
-function mapStringIndexToBufferPosition(term: XtermTerminal, lineIndex: number, rowIndex: number, stringIndex: number): [number, number] {
+
+const MAX_WRAP_ROWS = 32;
+
+function findAnchorY(term: XtermTerminal, y: number): number {
     const buf = term.buffer.active;
+    let cur = y;
+    while (cur > 0) {
+        const line = buf.getLine(cur);
+        if (!line || !line.isWrapped) break;
+        cur -= 1;
+    }
+    return cur;
+}
+
+function buildLogicalLine(term: XtermTerminal, anchorY: number): LogicalLine | null {
+    const buf = term.buffer.active;
+    if (!buf.getLine(anchorY)) return null;
     const cell = buf.getNullCell();
-    let start = rowIndex;
-    while (stringIndex) {
-        const line = buf.getLine(lineIndex);
-        if (!line) {
-            return [-1, -1];
-        }
-        for (let i = start; i < line.length; ++i) {
-            line.getCell(i, cell);
+    let text = "";
+    const cellMap: Array<{ y: number; x: number }> = [];
+    let endY = anchorY;
+    for (let i = 0; i < MAX_WRAP_ROWS; i += 1) {
+        const ry = anchorY + i;
+        const line = buf.getLine(ry);
+        if (!line) break;
+        if (i > 0 && !line.isWrapped) break;
+        endY = ry;
+        const cols = line.length;
+        for (let x = 0; x < cols; x += 1) {
+            line.getCell(x, cell);
+            if (cell.getWidth() === 0) continue; // wide-char trail half
             const chars = cell.getChars();
-            if (cell.getWidth()) {
-                stringIndex -= chars.length || 1;
-                if (i === line.length - 1 && chars === '') {
-                    const nextLine = buf.getLine(lineIndex + 1);
-                    if (nextLine && nextLine.isWrapped) {
-                        nextLine.getCell(0, cell);
-                        if (cell.getWidth() === 2) {
-                            stringIndex += 1;
-                        }
-                    }
-                }
-            }
-            if (stringIndex < 0) {
-                return [lineIndex, i];
+            const code = chars || " ";
+            for (let k = 0; k < code.length; k += 1) {
+                text += code[k];
+                cellMap.push({ y: ry, x });
             }
         }
-        lineIndex += 1;
-        start = 0;
+        const next = buf.getLine(ry + 1);
+        if (!next || !next.isWrapped) break;
     }
-    return [lineIndex, start];
+    return { text, cellMap, anchorY, endY };
 }
-function collectFilenameLinks(lineText: string, term: XtermTerminal, bufferLineNumber: number): Array<{ text: string, range: { start: { x: number, y: number }, end: { x: number, y: number } } }> {
-    var matches: Array<{ text: string, range: { start: { x: number, y: number }, end: { x: number, y: number } } }> = [];
-    var match: RegExpExecArray | null;
-    filenameLinkRe.lastIndex = 0;
-    while ((match = filenameLinkRe.exec(lineText)) !== null) {
-        var text = match[0];
-        if (!isLikelyFilenameLink(text, lineText, match.index)) {
-            continue;
-        }
-        const [startY, startX] = mapStringIndexToBufferPosition(term, bufferLineNumber - 1, 0, match.index);
-        const [endY, endX] = mapStringIndexToBufferPosition(term, startY, startX, text.length);
-        if (startY === -1 || startX === -1 || endY === -1 || endX === -1) {
-            continue;
-        }
-        matches.push({
-            text: text,
-            range: {
-                start: { x: startX + 1, y: startY + 1 },
-                end: { x: endX, y: endY + 1 },
-            },
-        });
-    }
-    return matches;
-}
+
 const stripModeSequenceRes = [
     /\x1b\[\?1000[hl]/g,
     /\x1b\[\?1002[hl]/g,
@@ -168,6 +143,10 @@ export class Xterm {
         });
         this.fitAddon = new FitAddon();
         this.term.loadAddon(this.fitAddon);
+        // Unicode 11 width tables — correctly measure wide emojis, ZWJ
+        // sequences and skin-tone modifiers so they don't render half-cut.
+        this.term.loadAddon(new Unicode11Addon());
+        this.term.unicode.activeVersion = "11";
         const clearSelection = (): void => {
             this.term.clearSelection();
             var selection = this.elem.ownerDocument.getSelection();
@@ -177,58 +156,63 @@ export class Xterm {
                 } catch {}
             }
         };
-        this.term.loadAddon(new WebLinksAddon((event: MouseEvent, uri: string) => {
+        const handleLinkActivate = (event: MouseEvent, uri: string, kind: LinkKind): void => {
             event.preventDefault();
             event.stopPropagation();
             if ((event as any).stopImmediatePropagation) {
                 (event as any).stopImmediatePropagation();
             }
             clearSelection();
-            if (uri.toLowerCase().indexOf("file://") === 0 || uri.toLowerCase().indexOf("image://") === 0) {
-                openFileReferencePopup(this.elem.ownerDocument, uri);
+            if (kind === "url") {
+                openExternalLinkWithConfirm(this.elem.ownerDocument, uri);
                 return;
             }
-            openExternalLinkWithConfirm(this.elem.ownerDocument, uri);
-        }, { urlRegex: localResourceProtocolUrlRegex }));
-        this.term.loadAddon(new WebLinksAddon((event: MouseEvent, uri: string) => {
-            event.preventDefault();
-            event.stopPropagation();
-            if ((event as any).stopImmediatePropagation) {
-                (event as any).stopImmediatePropagation();
-            }
-            clearSelection();
-            openExternalLinkWithConfirm(this.elem.ownerDocument, uri);
-        }));
+            // "local" (file://, image://) and "file" (bare paths) both route to the file popup.
+            openFileReferencePopup(this.elem.ownerDocument, uri);
+        };
         this.term.registerLinkProvider({
             provideLinks: (bufferLineNumber: number, callback: (links: any[] | undefined) => void): void => {
-                var line = this.term.buffer.active.getLine(bufferLineNumber - 1);
-                if (!line) {
+                const y = bufferLineNumber - 1;
+                const anchorY = findAnchorY(this.term, y);
+                const logical = buildLogicalLine(this.term, anchorY);
+                if (!logical || !logical.text) {
                     callback(undefined);
                     return;
                 }
-                var lineText = line.translateToString(true);
-                var matches = collectFilenameLinks(lineText, this.term, bufferLineNumber);
+                const matches = scanLinksOnText(logical.text);
                 if (!matches.length) {
                     callback(undefined);
                     return;
                 }
-                callback(matches.map((match) => ({
-                    range: match.range,
-                    text: match.text,
-                    decorations: {
-                        underline: true,
-                        pointerCursor: true,
-                    },
-                    activate: (event: MouseEvent, text: string): void => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        if ((event as any).stopImmediatePropagation) {
-                            (event as any).stopImmediatePropagation();
-                        }
-                        clearSelection();
-                        openFileReferencePopup(this.elem.ownerDocument, text);
-                    },
-                })));
+                const cols = this.term.cols;
+                const links: any[] = [];
+                for (const match of matches) {
+                    const startCell = logical.cellMap[match.start];
+                    const endCell = logical.cellMap[match.end - 1];
+                    if (!startCell || !endCell) continue;
+                    if (startCell.y > y || endCell.y < y) continue;
+                    // Clip the link's range to the cells living on the queried row so
+                    // that decoration spans each wrapped segment correctly.
+                    const startX = startCell.y === y ? startCell.x : 0;
+                    const endX = endCell.y === y ? endCell.x : Math.max(0, cols - 1);
+                    const kind = match.kind;
+                    const uri = match.uri;
+                    links.push({
+                        range: {
+                            start: { x: startX + 1, y: y + 1 },
+                            end: { x: endX + 1, y: y + 1 },
+                        },
+                        text: uri,
+                        decorations: {
+                            underline: true,
+                            pointerCursor: true,
+                        },
+                        activate: (event: MouseEvent): void => {
+                            handleLinkActivate(event, uri, kind);
+                        },
+                    });
+                }
+                callback(links.length ? links : undefined);
             },
         });
 

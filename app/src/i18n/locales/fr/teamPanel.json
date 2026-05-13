@@ -17,7 +17,7 @@
   "createTitle": "Créer et lier un nouveau collaborateur",
   "createSubmit": "Créer et lier",
   "createEmptyTitleAgent": "Ingénieur full-stack",
-  "bindMemberPlaceholder": "+ Lier un membre de l'équipe…",
+  "bindMemberPlaceholder": "Lier un membre de l'équipe…",
   "createBindShortLabel": "Créer et lier un nouveau collaborateur",
   "confirmUnbind": "Délier <strong>{{name}}</strong> ?",
   "emptyState": "Liez un membre pour commencer"

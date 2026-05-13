@@ -101,6 +101,14 @@ const api = {
   getSkills: () => http.get('/api/skills'),
   runSkill: (data: any) => http.post('/api/skills/run', data),
 
+  listMarketSkills: (params?: { category?: string; installed?: boolean; q?: string }) =>
+    http.get('/api/skill-market', { params }),
+  getMarketSkill: (name: string) => http.get(`/api/skill-market/${encodeURIComponent(name)}`),
+  installMarketSkill: (name: string, opts?: { force?: boolean }) =>
+    http.post(`/api/skill-market/${encodeURIComponent(name)}/install`, opts || {}),
+  uninstallMarketSkill: (name: string, opts?: { purge_config?: boolean }) =>
+    http.post(`/api/skill-market/${encodeURIComponent(name)}/uninstall`, opts || {}),
+
   getTtydStatus: (id: string) => http.get(`/api/tmux/ttyd/status/${encodeURIComponent(id)}`),
   correctEnglish: (text: string, target = 'zh-CN') => http.post('/api/correctEnglish', { text, target }),
   translateText: (text: string, target = 'zh-CN') => http.post('/api/utils/translateText', { text, target }),

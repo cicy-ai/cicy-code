@@ -1,6 +1,11 @@
 package main
 
-import "net/http"
+import (
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+)
 
 type skillDefinition struct {
 	ID            string    `json:"id"`
@@ -137,5 +142,199 @@ func handleSkillRun(w http.ResponseWriter, r *http.Request) {
 		J(w, M{"success": true, "mode": skill.Mode, "workflow_id": workflowID, "steps": steps})
 	default:
 		httpErr(w, 400, "unsupported skill mode")
+	}
+}
+
+// ── Skill Marketplace (registry-driven; see skills/migrations/SKILL_API.md) ──
+// TODO: this is mock data until internal/registry is built. Replace
+// marketSkills() with registry.List() once registry is in cicy-skills repo.
+
+type marketSkillStatus struct {
+	Installed     bool              `json:"installed"`
+	ConfigPresent bool              `json:"config_present"`
+	RequiresMet   map[string]bool   `json:"requires_met,omitempty"`
+	LastError     string            `json:"last_error,omitempty"`
+	Detail        map[string]string `json:"detail,omitempty"`
+}
+
+type marketSkill struct {
+	Name          string            `json:"name"`
+	Title         string            `json:"title"`
+	Description   string            `json:"description"`
+	Version       string            `json:"version"`
+	Category      string            `json:"category"`
+	Icon          string            `json:"icon"`
+	Tags          []string          `json:"tags,omitempty"`
+	BinaryAliases []string          `json:"binary_aliases"`
+	ConfigFile    string            `json:"config_file,omitempty"`
+	Status        marketSkillStatus `json:"status"`
+}
+
+func marketSkillsCatalog() []marketSkill {
+	return []marketSkill{
+		{Name: "cf-tunnel", Title: "Cloudflare Tunnel", Description: "Manage Cloudflare Tunnel routes and DNS records on this host.", Version: "1.0.0", Category: "network", Icon: "globe", Tags: []string{"cloudflare", "tunnel", "dns"}, BinaryAliases: []string{"cf-tunnel"}, ConfigFile: "~/cicy-ai/db/cf.json"},
+		{Name: "cping", Title: "cping", Description: "Quick network latency check for a domain or IP.", Version: "1.0.0", Category: "network", Icon: "activity", BinaryAliases: []string{"cping"}},
+		{Name: "frp-server", Title: "FRP Server", Description: "Run frps in the background with status, reload, connections.", Version: "1.0.0", Category: "network", Icon: "server", BinaryAliases: []string{"frp-server"}, ConfigFile: "~/data/frp/frps.toml"},
+		{Name: "frp-client", Title: "FRP Client", Description: "Run frpc, with remote management over SSH.", Version: "1.0.0", Category: "network", Icon: "plug", BinaryAliases: []string{"frp-client"}},
+		{Name: "google", Title: "Google Workspace", Description: "Gmail / Sheets / Drive / Calendar via Google APIs.", Version: "1.0.0", Category: "ai", Icon: "mail", Tags: []string{"gmail", "sheets", "drive", "calendar"}, BinaryAliases: []string{"google"}, ConfigFile: "~/cicy-ai/db/google.json"},
+		{Name: "agent-summary", Title: "Agent Summary", Description: "Generate conversation summaries and handoff documents.", Version: "1.0.0", Category: "ai", Icon: "file-text", BinaryAliases: []string{"agent-summary"}},
+		{Name: "agent-webpage", Title: "Agent Webpage", Description: "Talk to the live webpage client for an agent.", Version: "1.0.0", Category: "ai", Icon: "globe", BinaryAliases: []string{"agent-webpage"}},
+		{Name: "agent-code-server", Title: "Code Server", Description: "Open files in the page-bound code-server.", Version: "1.0.0", Category: "ai", Icon: "code", BinaryAliases: []string{"agent-code-server"}},
+		{Name: "cicy-agent", Title: "cicy-agent", Description: "Operate tmux panes and windows on this host.", Version: "1.0.0", Category: "dev", Icon: "terminal", BinaryAliases: []string{"cicy-agent"}, ConfigFile: "~/cicy-ai/db/cicy-agent.json"},
+		{Name: "cicy-ssh", Title: "cicy-ssh", Description: "Manage SSH hosts via ~/.ssh/config.", Version: "1.0.0", Category: "ops", Icon: "key", BinaryAliases: []string{"cicy-ssh"}},
+		{Name: "globalApiToken", Title: "Global API Token", Description: "Show or refresh ~/cicy-ai/global.json api_token.", Version: "1.0.0", Category: "ops", Icon: "shield", BinaryAliases: []string{"globalApiToken"}, ConfigFile: "~/cicy-ai/global.json"},
+		{Name: "docker-build-github-action", Title: "Docker Build (GHCR)", Description: "Build base images on GitHub Actions and push to GHCR.", Version: "1.0.0", Category: "infra", Icon: "package", BinaryAliases: []string{}, ConfigFile: "~/cicy-ai/db/docker-build-ghcr.json"},
+		{Name: "us-spot-proxy", Title: "US Spot Proxy", Description: "Manage Aliyun spot proxy nodes.", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"us-spot-proxy"}, ConfigFile: "~/cicy-ai/db/us-spot-proxy.json"},
+	}
+}
+
+func expandHome(p string) string {
+	if !strings.HasPrefix(p, "~") {
+		return p
+	}
+	h, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	if p == "~" {
+		return h
+	}
+	return filepath.Join(h, strings.TrimPrefix(p, "~/"))
+}
+
+func computeMarketStatus(skill *marketSkill) {
+	binDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	binDir = filepath.Join(binDir, ".local", "bin")
+	installed := false
+	for _, alias := range skill.BinaryAliases {
+		if _, err := os.Lstat(filepath.Join(binDir, alias)); err == nil {
+			installed = true
+			break
+		}
+	}
+	if len(skill.BinaryAliases) == 0 {
+		installed = true
+	}
+	skill.Status.Installed = installed
+	if skill.ConfigFile != "" {
+		if _, err := os.Stat(expandHome(skill.ConfigFile)); err == nil {
+			skill.Status.ConfigPresent = true
+		}
+	} else {
+		skill.Status.ConfigPresent = true
+	}
+}
+
+func handleSkillMarketList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		httpErr(w, 405, "method not allowed")
+		return
+	}
+	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	categoryFilter := strings.TrimSpace(r.URL.Query().Get("category"))
+	installedFilter := r.URL.Query().Get("installed")
+
+	skills := marketSkillsCatalog()
+	out := make([]marketSkill, 0, len(skills))
+	installedCount := 0
+	for i := range skills {
+		computeMarketStatus(&skills[i])
+		s := skills[i]
+		if categoryFilter != "" && s.Category != categoryFilter {
+			continue
+		}
+		if installedFilter == "true" && !s.Status.Installed {
+			continue
+		}
+		if installedFilter == "false" && s.Status.Installed {
+			continue
+		}
+		if q != "" {
+			if !strings.Contains(strings.ToLower(s.Name), q) &&
+				!strings.Contains(strings.ToLower(s.Title), q) &&
+				!strings.Contains(strings.ToLower(s.Description), q) {
+				continue
+			}
+		}
+		if s.Status.Installed {
+			installedCount++
+		}
+		out = append(out, s)
+	}
+	J(w, M{"skills": out, "total": len(out), "installed": installedCount})
+}
+
+func findMarketSkill(name string) *marketSkill {
+	for i, s := range marketSkillsCatalog() {
+		if s.Name == name {
+			skill := marketSkillsCatalog()[i]
+			return &skill
+		}
+	}
+	return nil
+}
+
+func readSkillDoc(name, file string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	for _, profile := range []string{".claude", ".codex", ".opencode"} {
+		p := filepath.Join(home, profile, "skills", name, file)
+		if data, err := os.ReadFile(p); err == nil {
+			return string(data)
+		}
+	}
+	return ""
+}
+
+func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
+	// Routes:
+	//   GET  /api/skill-market/<name>                 → detail (includes skill_md, help_md, tools_md)
+	//   POST /api/skill-market/<name>/install
+	//   POST /api/skill-market/<name>/uninstall
+	path := strings.TrimPrefix(r.URL.Path, "/api/skill-market/")
+	parts := strings.SplitN(path, "/", 2)
+	name := parts[0]
+	if name == "" {
+		httpErr(w, 400, "skill name required")
+		return
+	}
+	skill := findMarketSkill(name)
+	if skill == nil {
+		httpErr(w, 404, "skill not found")
+		return
+	}
+	computeMarketStatus(skill)
+
+	if len(parts) == 1 {
+		// detail GET
+		if r.Method != "GET" {
+			httpErr(w, 405, "method not allowed")
+			return
+		}
+		J(w, M{
+			"skill":    skill,
+			"skill_md": readSkillDoc(skill.Name, "SKILL.md"),
+			"help_md":  readSkillDoc(skill.Name, filepath.Join("references", "help.md")),
+			"tools_md": readSkillDoc(skill.Name, filepath.Join("references", "tools.md")),
+		})
+		return
+	}
+
+	if r.Method != "POST" {
+		httpErr(w, 405, "method not allowed")
+		return
+	}
+	switch parts[1] {
+	case "install":
+		J(w, M{"ok": true, "status": skill.Status, "log": []string{"install not yet wired to registry — see skills/migrations/SKILL_API.md"}})
+	case "uninstall":
+		J(w, M{"ok": true, "log": []string{"uninstall not yet wired to registry — see skills/migrations/SKILL_API.md"}})
+	default:
+		httpErr(w, 400, "unknown action: "+parts[1])
 	}
 }

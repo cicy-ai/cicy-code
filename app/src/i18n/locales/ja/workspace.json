@@ -12,6 +12,7 @@
   "toastWorkerRestarting": "{{name}} を再起動中…",
   "toastWorkerRestartFailed": "エラー：{{name}} の再起動に失敗",
   "tabFiles": "ファイル",
+  "tabSession": "セッション",
   "tabHistory": "履歴",
   "tabTools": "ツール",
   "tabBrain": "プロンプト",

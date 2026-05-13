@@ -1,4 +1,4 @@
-import { Brain, Check, Copy, FileText, Folder, History, Settings, Wrench } from 'lucide-react'
+import { Check, Copy, Folder, MessageSquare, Settings } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
@@ -15,10 +15,7 @@ export default function AgentStack({
   showHeaderButtons = true,
   onOpenPaneSettings,
   onOpenPaneFiles,
-  onOpenPaneHistory,
-  onOpenPaneTools,
-  onOpenPaneBrain,
-  onOpenPaneMeta,
+  onOpenPaneSession,
 }: {
   items: AgentCanvasItem[]
   activePaneId: string
@@ -28,10 +25,7 @@ export default function AgentStack({
   showHeaderButtons?: boolean
   onOpenPaneSettings: (paneId: string) => void
   onOpenPaneFiles: (paneId: string) => void
-  onOpenPaneHistory: (paneId: string) => void
-  onOpenPaneTools: (paneId: string) => void
-  onOpenPaneBrain: (paneId: string) => void
-  onOpenPaneMeta: (paneId: string) => void
+  onOpenPaneSession: (paneId: string) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -55,10 +49,7 @@ export default function AgentStack({
           showHeaderButtons={showHeaderButtons}
           onOpenPaneSettings={onOpenPaneSettings}
           onOpenPaneFiles={onOpenPaneFiles}
-          onOpenPaneHistory={onOpenPaneHistory}
-          onOpenPaneTools={onOpenPaneTools}
-          onOpenPaneBrain={onOpenPaneBrain}
-          onOpenPaneMeta={onOpenPaneMeta}
+          onOpenPaneSession={onOpenPaneSession}
           onClick={() => onActivePaneIdChange(item.paneId)}
         />
       ))}
@@ -74,10 +65,7 @@ function AgentStackCard({
   showHeaderButtons,
   onOpenPaneSettings,
   onOpenPaneFiles,
-  onOpenPaneHistory,
-  onOpenPaneTools,
-  onOpenPaneBrain,
-  onOpenPaneMeta,
+  onOpenPaneSession,
   onClick,
 }: {
   item: AgentCanvasItem;
@@ -87,10 +75,7 @@ function AgentStackCard({
   showHeaderButtons: boolean;
   onOpenPaneSettings: (paneId: string) => void;
   onOpenPaneFiles: (paneId: string) => void;
-  onOpenPaneHistory: (paneId: string) => void;
-  onOpenPaneTools: (paneId: string) => void;
-  onOpenPaneBrain: (paneId: string) => void;
-  onOpenPaneMeta: (paneId: string) => void;
+  onOpenPaneSession: (paneId: string) => void;
   onClick: () => void;
 }) {
   const { t } = useTranslation('layout')
@@ -155,25 +140,10 @@ function AgentStackCard({
     onOpenPaneFiles(item.paneId)
   }, [item.paneId, onOpenPaneFiles])
 
-  const handleOpenHistory = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleOpenSession = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
-    onOpenPaneHistory(item.paneId)
-  }, [item.paneId, onOpenPaneHistory])
-
-  const handleOpenTools = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation()
-    onOpenPaneTools(item.paneId)
-  }, [item.paneId, onOpenPaneTools])
-
-  const handleOpenBrain = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation()
-    onOpenPaneBrain(item.paneId)
-  }, [item.paneId, onOpenPaneBrain])
-
-  const handleOpenMeta = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation()
-    onOpenPaneMeta(item.paneId)
-  }, [item.paneId, onOpenPaneMeta])
+    onOpenPaneSession(item.paneId)
+  }, [item.paneId, onOpenPaneSession])
 
   return (
     <div
@@ -228,44 +198,14 @@ function AgentStackCard({
                 <Folder className="h-4 w-4" />
               </button>
               <button
-                data-id="agent-stack-card-history"
+                data-id="agent-stack-card-session"
                 type="button"
-                onClick={handleOpenHistory}
+                onClick={handleOpenSession}
                 className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                title="History"
-                aria-label="History"
+                title="Session"
+                aria-label="Session"
               >
-                <History className="h-4 w-4" />
-              </button>
-              <button
-                data-id="agent-stack-card-tools"
-                type="button"
-                onClick={handleOpenTools}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                title="Tools"
-                aria-label="Tools"
-              >
-                <Wrench className="h-4 w-4" />
-              </button>
-              <button
-                data-id="agent-stack-card-brain"
-                type="button"
-                onClick={handleOpenBrain}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                title="Brain"
-                aria-label="Brain"
-              >
-                <Brain className="h-4 w-4" />
-              </button>
-              <button
-                data-id="agent-stack-card-meta"
-                type="button"
-                onClick={handleOpenMeta}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                title="Meta"
-                aria-label="Meta"
-              >
-                <FileText className="h-4 w-4" />
+                <MessageSquare className="h-4 w-4" />
               </button>
               <button
                 data-id="agent-stack-card-settings"
