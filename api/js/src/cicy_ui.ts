@@ -166,13 +166,13 @@ body {
 }
 #cp-loading-overlay.cp-fade-out { opacity: 0; pointer-events: none; }
 #cp-loading-spinner {
-  width: 36px;
-  height: 36px;
-  border: 3px solid rgba(255,255,255,0.1);
-  border-top-color: rgba(99,102,241,0.7);
+  width: 32px;
+  height: 32px;
+  border: 2px solid rgba(0,122,204,0.3);
+  border-top-color: #007acc;
   border-radius: 50%;
   animation: cp-spin 0.8s linear infinite;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 #cp-loading-text {
   color: rgba(255,255,255,0.5);
@@ -526,7 +526,7 @@ body {
   min-width: 26px;
   height: 26px;
 }
-#cp-win-restart.restarting { color: rgba(59,130,246,0.8); animation: cp-spin .8s linear infinite; }
+#cp-win-restart.restarting { color: rgba(0,122,204,0.85); pointer-events: none; }
 #cp-more-menu { z-index: 10001; }
 .cp-drop-item {
   background: none;
@@ -603,24 +603,6 @@ body {
 }
 #cp-input::placeholder { color: rgba(255,255,255,0.2); }
 #cp-input:focus { border-color: rgba(99,102,241,0.4); background: rgba(255,255,255,0.04); }
-#cp-send {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(99,102,241,0.15);
-  color: rgba(99,102,241,0.7);
-  transition: all .15s;
-}
-#cp-send:hover { background: rgba(99,102,241,0.3); color: rgba(129,140,248,1); }
-#cp-send:active { transform: scale(0.92); }
 /* ── bottom prompt bar ──────────────────────────────────────────────────
    A compact, single-row composer docked at the bottom. When open, the
    xterm viewport's bottom is pushed up by exactly this bar's footprint
@@ -650,9 +632,9 @@ body.cp-prompt-open { padding-bottom: 74px !important; }
 #cp-prompt #cp-input {
   flex: 1;
   min-width: 0;
-  height: 38px;
+  height: 32px;
   margin: 0;
-  padding: 9px 4px;
+  padding: 7px 10px;
   background: transparent;
   border: none;
   border-radius: 0;
@@ -660,56 +642,65 @@ body.cp-prompt-open { padding-bottom: 74px !important; }
   font-size: 13px;
   font-family: var(--cp-mono-font) !important;
   font-variant-ligatures: none;
-  line-height: 1.45;
+  line-height: 1.3;
   resize: none;
   outline: none;
   box-sizing: border-box;
   scrollbar-width: thin;
+  vertical-align: middle;
 }
 #cp-prompt #cp-input::placeholder { color: rgba(255,255,255,0.28); }
 #cp-prompt #cp-input:focus { background: transparent; border: none; }
 
-#cp-prompt #cp-enter {
-  flex: 0 0 auto;
-  position: static;
-  height: 26px;
-  min-width: 30px;
-  padding: 0 7px;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255,255,255,0.06);
-  color: rgba(255,255,255,0.5);
-  font-family: var(--cp-mono-font);
-  font-size: 12px;
-  line-height: 1;
-  transition: background .15s, color .15s;
-}
-#cp-prompt #cp-enter:hover { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.88); }
-
+/* enter and send share the same 32px height so they read as a paired control */
+#cp-prompt #cp-enter,
 #cp-prompt #cp-send {
   flex: 0 0 auto;
-  position: static;
-  width: 34px;
-  height: 34px;
-  min-width: 34px;
+  height: 32px;
+  min-width: 32px;
   border: none;
-  border-radius: 10px;
   cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  font-family: var(--cp-mono-font);
+  line-height: 1;
+  box-sizing: border-box;
+  padding: 0;
+}
+#cp-prompt #cp-enter {
+  position: static;
+  padding: 0 9px;
+  border-radius: 9px;
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.55);
+  font-size: 12px;
+  transition: background .15s, color .15s;
+}
+#cp-prompt #cp-enter:hover { background: rgba(255,255,255,0.13); color: rgba(255,255,255,0.9); }
+
+#cp-prompt #cp-send {
+  position: relative;
+  width: 32px;
+  border-radius: 9px;
   background: rgba(99,102,241,0.92);
   color: #fff;
   font-size: 14px;
-  line-height: 1;
   transition: background .15s, transform .1s;
 }
 #cp-prompt #cp-send:hover { background: rgba(99,102,241,1); }
 #cp-prompt #cp-send:active { transform: scale(0.9); }
+#cp-prompt #cp-send.sending { pointer-events: none; color: transparent; background: rgba(0,122,204,0.7); }
+#cp-prompt #cp-send.sending::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(0,122,204,0.3);
+  border-top-color: #007acc;
+  border-radius: 50%;
+  animation: cp-spin 0.8s linear infinite;
+}
 
 .fta-btn.active { color: rgba(165,180,252,1) !important; background: rgba(99,102,241,0.28); }
 .fta-btn.active:hover { background: rgba(99,102,241,0.38); }
@@ -1678,6 +1669,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         var prev = input.value;
         input.value = "";
         storage.set(draftKey, "");
+        sendBtn.classList.add("sending");
         sendHTTP(command).catch(function(error: any): void {
             var shouldRestore = !!(error && error.isNetworkError === true);
             writeClientTrace("cp-do-send-error", {
@@ -1693,6 +1685,8 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
                 storage.set(draftKey, prev);
             }
             flashButton(sendBtn);
+        }).finally(function(): void {
+            sendBtn.classList.remove("sending");
         });
     }
 

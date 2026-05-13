@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, Plus, Trash2, Copy, Key, Loader2, Check } from 'lucide-react';
+import { X, Plus, Trash2, Copy, Key, Check } from 'lucide-react';
+import { Spinner } from '../ui/Spinner';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 
@@ -76,7 +77,7 @@ export default function TokenDialog({ onClose }: { onClose: () => void }) {
               className="flex-1 bg-white/[0.03] border border-white/[0.08] text-zinc-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500/40 placeholder:text-zinc-700" />
             <button onClick={create} disabled={creating || !note.trim()}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium disabled:opacity-40 cursor-pointer transition-colors">
-              {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+              {creating ? <Spinner size="xs" /> : <Plus className="w-3.5 h-3.5" />}
               {t('tokenCreateButton')}
             </button>
           </div>
@@ -101,7 +102,7 @@ export default function TokenDialog({ onClose }: { onClose: () => void }) {
         {/* List */}
         <div className="flex-1 overflow-y-auto px-5 py-3">
           {loading ? (
-            <div className="flex items-center justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-zinc-600" /></div>
+            <div className="flex items-center justify-center py-8"><Spinner size="md" /></div>
           ) : tokens.length === 0 ? (
             <p className="text-center text-zinc-600 text-sm py-8">{t('tokenEmptyList')}</p>
           ) : (

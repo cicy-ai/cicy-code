@@ -3,6 +3,7 @@ import { Brain, Languages, Search, Wrench } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import apiService from '../../services/api';
+import { Spinner } from '../ui/Spinner';
 
 export type RequestViewTab = 'tools' | 'brain' | 'meta';
 type BrainInnerTab = 'instructions' | 'developer';
@@ -424,7 +425,8 @@ export default function AgentProviderRequestView({
 
   if (loading) {
     return (
-      <div data-id="agent-provider-request-loading" className="flex h-full items-center justify-center text-sm text-zinc-500">
+      <div data-id="agent-provider-request-loading" className="flex h-full items-center justify-center gap-2 text-sm text-zinc-500">
+        <Spinner size="sm" />
         {t('loading')}
       </div>
     );

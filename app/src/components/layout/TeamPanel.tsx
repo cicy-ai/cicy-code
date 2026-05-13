@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation, Trans } from 'react-i18next';
 import i18n from '../../i18n';
-import { Users, Plus, X, Loader2, ExternalLink, MoreHorizontal, Trash2, RefreshCw } from 'lucide-react';
+import { Users, Plus, X, ExternalLink, MoreHorizontal, Trash2, RefreshCw } from 'lucide-react';
+import { Spinner } from '../ui/Spinner';
 import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
 import { useDialog } from '../../contexts/DialogContext';
@@ -417,7 +418,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
           className="flex items-center text-sm px-2 py-1.5 rounded border border-[var(--vsc-border)] text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors cursor-pointer disabled:opacity-50"
           title={i18n.t('createBindShortLabel', { ns: 'teamPanel' })}
         >
-          {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+          {creating ? <Spinner size="xs" /> : <Plus className="w-3.5 h-3.5" />}
         </button>
       </div>
 

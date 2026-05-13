@@ -2,6 +2,7 @@ import {useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useAuth} from '../contexts/AuthContext';
 import config from '../config';
+import { Spinner } from './ui/Spinner';
 
 export default function Login() {
   const {login} = useAuth();
@@ -61,7 +62,7 @@ export default function Login() {
           >
             {loading ? (
               <span className="flex items-center justify-center gap-2">
-                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <Spinner size="sm" />
                 {t('submitting')}
               </span>
             ) : t('submit')}

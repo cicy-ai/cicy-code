@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm'
 import config from '../../config'
 import { WebFrame } from '../WebFrame'
 import apiService from '../../services/api'
+import { Spinner } from '../ui/Spinner'
 
 type HistoryTurn = {
   q: string
@@ -148,7 +149,7 @@ export default function ChatHistoryView({ paneId, token, liveStatus = 'idle', li
       <div data-id="chat-history-scroll" ref={scrollRef} className="flex-1 overflow-y-auto pb-20">
         <div data-id="chat-history-list" className="max-w-full mx-auto px-2 py-4">
           {loading ? (
-            <div data-id="chat-history-loading" className="flex flex-col items-center justify-center pt-20 gap-3"><div className="w-6 h-6 border-2 border-vsc-accent/30 border-t-vsc-accent rounded-full animate-spin" /><span className="text-base text-vsc-text-muted">{t('loadingHistory')}</span></div>
+            <div data-id="chat-history-loading" className="flex flex-col items-center justify-center pt-20 gap-3"><Spinner size="lg" /><span className="text-base text-vsc-text-muted">{t('loadingHistory')}</span></div>
           ) : groups.length === 0 ? (
             <div data-id="chat-history-empty" className="text-center pt-20"><div className="text-2xl mb-2 opacity-20">✦</div><p className="text-xs text-vsc-text-muted">{t('waitingConversation')}</p></div>
           ) : groups.map((r, gi) => {

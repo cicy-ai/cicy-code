@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import {
-  ArrowLeft, Boxes, Plus, RefreshCw, Save, Trash2, Zap, Eye, EyeOff, Check, X, Loader2,
+  ArrowLeft, Boxes, Plus, RefreshCw, Save, Trash2, Zap, Eye, EyeOff, Check, X,
   Server, Search, ChevronsUpDown, AlertTriangle, Link2, Cpu,
 } from 'lucide-react';
 import apiService from '../../services/api';
 import AgentAvatar from '../AgentAvatar';
 import { useDialogs } from '../ui/Modal';
+import { Spinner } from '../ui/Spinner';
 
 /* ───────────────────────── types ───────────────────────── */
 
@@ -146,7 +147,7 @@ function Btn({ variant = 'secondary', size = 'md', icon, children, busy, classNa
   const sizes = { sm: 'h-7 px-2.5 text-[12px] gap-1', md: 'h-8 px-3 text-[13px] gap-1.5' };
   return (
     <button {...rest} className={cn('inline-flex items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed', sizes[size], styles[variant], className)}>
-      {busy ? <Loader2 size={size === 'sm' ? 12 : 14} className="animate-spin" /> : icon}
+      {busy ? <Spinner size={size === 'sm' ? 'xs' : 'sm'} /> : icon}
       {children}
     </button>
   );
@@ -204,7 +205,7 @@ function ProviderPicker({
           <span className="text-zinc-600">{i18n.t('useFallback', { ns: 'provider' })}</span>
         )}
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          {busy && <Loader2 size={13} className="animate-spin text-zinc-600" />}
+          {busy && <Spinner size="xs" />}
           <ChevronsUpDown size={13} className="text-zinc-600 transition-colors group-hover:text-zinc-400" />
         </span>
       </button>

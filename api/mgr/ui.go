@@ -56,6 +56,15 @@ func serveUI() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
+		// index.html references hashed asset filenames, so we never want
+		// browsers to cache it; the hashed /assets/* are safe forever.
+		p := r.URL.Path
+		switch {
+		case p == "/" || p == "/index.html" || strings.HasSuffix(p, ".html"):
+			w.Header().Set("Cache-Control", "no-cache")
+		case strings.HasPrefix(p, "/assets/"):
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
 		if devProxy != nil {
 			devProxy.ServeHTTP(w, r)
 			return

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { TokenManager } from '../services/tokenManager';
 import config from '../config';
+import { Spinner } from './ui/Spinner';
 
 interface Step {
   step: number;
@@ -116,7 +117,7 @@ export default function ProvisionScreen({ onReady }: { onReady: (backend: string
                   {isDone ? (
                     <span className="text-emerald-400">✓</span>
                   ) : isRunning ? (
-                    <div className="w-4 h-4 border-2 border-blue-500/30 border-t-blue-400 rounded-full animate-spin" />
+                    <Spinner size="sm" />
                   ) : (
                     <span className="text-zinc-700 text-xs">{i + 1}</span>
                   )}
