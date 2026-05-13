@@ -1286,9 +1286,42 @@ def run_cloudrun():
     sys.exit(result.returncode)
 
 
+def npm_ensure_deps(pkg_dir: str) -> bool:
+    """Run `npm install` in pkg_dir when node_modules is missing OR when
+    package.json has been modified after the last install (newer mtime than
+    node_modules/.package-lock.json). Catches the "dep added but never
+    installed" case that bites every fresh clone / git pull.
+    Returns True on success or no-op; False if npm install failed.
+    """
+    pkg_json = os.path.join(pkg_dir, "package.json")
+    if not os.path.isfile(pkg_json):
+        return True
+    node_modules = os.path.join(pkg_dir, "node_modules")
+    marker = os.path.join(node_modules, ".package-lock.json")
+    reason = ""
+    if not os.path.isdir(node_modules):
+        reason = "node_modules missing"
+    elif not os.path.isfile(marker):
+        reason = "no .package-lock.json marker in node_modules"
+    else:
+        try:
+            if os.path.getmtime(pkg_json) > os.path.getmtime(marker):
+                reason = "package.json newer than installed node_modules"
+        except OSError:
+            pass
+    if not reason:
+        return True
+    rel = os.path.relpath(pkg_dir, ROOT_DIR)
+    print(f"[dev] npm install in {rel} ({reason})...")
+    return subprocess.run(["npm", "install"], cwd=pkg_dir).returncode == 0
+
+
 def run_ttyd_assets():
     os.environ["GOPROXY"] = "https://goproxy.cn,direct"
     print("[dev] Rebuilding ttyd embedded assets via `make asset`...")
+    if not npm_ensure_deps(os.path.join(API_DIR, "js")):
+        print("[dev] npm install failed in api/js; aborting")
+        sys.exit(1)
     run_checked(["make", "asset"], cwd=API_DIR)
     print("[dev] ttyd assets rebuilt.")
     sys.exit(0)
@@ -1297,6 +1330,9 @@ def run_ttyd_assets():
 def rebuild_ttyd_assets_for_local_dev():
     os.environ["GOPROXY"] = "https://goproxy.cn,direct"
     print("[dev] Refreshing ttyd embedded assets for local dev...")
+    if not npm_ensure_deps(os.path.join(API_DIR, "js")):
+        print("[dev] npm install failed in api/js; aborting")
+        sys.exit(1)
     run_checked(["make", "asset"], cwd=API_DIR)
     print("[dev] ttyd embedded assets refreshed.")
 
@@ -1306,10 +1342,8 @@ APP_DEV_PORT = 8022
 
 def build_app_dist():
     app_dir = os.path.join(ROOT_DIR, "app")
-    if not os.path.isdir(os.path.join(app_dir, "node_modules")):
-        print("[dev] installing app dependencies (npm install)...")
-        if subprocess.run(["npm", "install"], cwd=app_dir).returncode != 0:
-            print("[dev] npm install failed"); return False
+    if not npm_ensure_deps(app_dir):
+        return False
     print("[dev] building app/dist (npm run build)...")
     return subprocess.run(["npm", "run", "build"], cwd=app_dir).returncode == 0
 
@@ -1321,12 +1355,9 @@ def ensure_app_dev_server():
         print(f"[dev] app dev server already running on :{APP_DEV_PORT} (pid={existing})")
         return
     app_dir = os.path.join(ROOT_DIR, "app")
-    if not os.path.isdir(os.path.join(app_dir, "node_modules")):
-        print("[dev] installing app dependencies (npm install)...")
-        result = subprocess.run(["npm", "install"], cwd=app_dir)
-        if result.returncode != 0:
-            print("[dev] npm install failed; skipping app dev server")
-            return
+    if not npm_ensure_deps(app_dir):
+        print("[dev] npm install failed; skipping app dev server")
+        return
     logs_dir = os.path.expanduser("~/logs/.dev-logs")
     os.makedirs(logs_dir, exist_ok=True)
     log_path = os.path.join(logs_dir, "app-dev.log")
