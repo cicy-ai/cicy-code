@@ -6,17 +6,18 @@ Usage:
   us-spot-dev                          # provision spot + attach persistent disk + setup docker
   us-spot-dev --destroy                # delete instance only, keep disk
   us-spot-dev --destroy-all            # delete instance AND disk
+  us-spot-dev --push-image             # rebuild the container image on the running box and push it
   us-spot-dev --json                   # JSON output
 
 The persistent data disk (100GB ESSD) survives instance reclaims, including
 /data/docker (the Docker data-root) — so on a re-provision the `us-spot-dev`
-image builds from cached layers in seconds. When spot is recycled, just run
-`us-spot-dev` again: it re-points the Cloudflare DNS, rebuilds the container,
-re-bootstraps it, and restarts dev.py — `https://dev.cicy-ai.com` follows along.
-
-TODO(optional): build the image once and push it to Aliyun ACR
-(registry.us-west-1.aliyuncs.com/<ns>/us-spot-dev), then `docker pull` instead
-of `docker build` on a fresh disk (needs `aliyun cr` namespace/repo + auth).
+image is reused instantly. On a fresh disk it `docker pull`s the pre-built
+image (IMAGE_REF, currently on Docker Hub — Aliyun ACR personal edition has no
+CLI support and the EE instance is paid) and only falls back to building it.
+When spot is recycled, just run `us-spot-dev` again: it re-points the Cloudflare
+DNS, brings up the container, re-bootstraps it, and restarts dev.py —
+`https://dev.cicy-ai.com` follows along. Run `us-spot-dev --push-image` after
+changing the Dockerfile to refresh the pre-built image.
 """
 
 import json, os, subprocess, sys, time, urllib.request, urllib.error
@@ -41,6 +42,7 @@ CICY_AI_DIR = os.path.expanduser("~/cicy-ai")
 CICY_CODE_REPO = "git@github-cicy-ai:cicy-ai/cicy-code.git"
 CICY_SKILLS_REPO = "git@github-cicy-ai:cicy-ai/cicy-skills.git"
 MIHOMO_LINUX_BIN = os.path.expanduser("~/projects/cicy-mihomo/bin/mihomo-linux-amd64")
+IMAGE_REF = "cicybot/us-spot-dev:latest"   # pre-built image; `us-spot-dev --push-image` rebuilds & pushes it
 VPC_CIDR = "172.19.0.0/16"
 VSW_CIDR = "172.19.0.0/24"
 VPC_NAME = "us-spot-dev-vpc"
@@ -176,6 +178,98 @@ def run_ssh(host, cmd, **kw):
         ["ssh", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new",
          "-o", "UserKnownHostsFile=/dev/null", "-o", "PasswordAuthentication=no",
          "-i", SSH_KEY, host, cmd], **kw)
+
+
+def image_build_cmd(tag="us-spot-dev:latest"):
+    """`docker build` command (heredoc Dockerfile) — used both on provision (fallback) and by --push-image."""
+    return (
+        f'docker build -t {tag} - << \'DOCKERFILE\'\n'
+        'FROM ghcr.io/cicy-ai/cicy-code-base:1.0.8\n'
+        'USER root\n'
+        'RUN apt-get update && apt-get install -y --no-install-recommends \\\n'
+        '    openssh-server docker.io git make build-essential ca-certificates curl \\\n'
+        '    rsync autossh iproute2 net-tools jq vim less unzip wget gnupg \\\n'
+        '    && rm -rf /var/lib/apt/lists/*\n'
+        '# mihomo binary (for the cicy-mihomo skill); skip if the repo is not reachable\n'
+        'RUN git clone --depth 1 https://github.com/cicy-ai/cicy-mihomo.git /tmp/cicy-mihomo 2>/dev/null \\\n'
+        '    && install -m 0755 /tmp/cicy-mihomo/bin/mihomo-linux-amd64 /usr/local/bin/mihomo \\\n'
+        '    && rm -rf /tmp/cicy-mihomo || echo "[image] mihomo not pre-installed"\n'
+        '# cloudflared (exposes dev.<domain> -> :8008 when CF_TUNNEL_TOKEN is set)\n'
+        'RUN curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o /tmp/cf.deb \\\n'
+        '    && dpkg -i /tmp/cf.deb && rm -f /tmp/cf.deb || echo "[image] cloudflared not pre-installed"\n'
+        '# Go toolchain so dev.py / build.sh can build cicy-code inside the container\n'
+        'RUN curl -fsSL https://go.dev/dl/go1.25.3.linux-amd64.tar.gz | tar -C /usr/local -xz && \\\n'
+        '    ln -sf /usr/local/go/bin/go /usr/local/bin/go && \\\n'
+        '    ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt\n'
+        "RUN { echo 'export PATH=/usr/local/go/bin:$PATH'; echo 'export GOPROXY=https://goproxy.cn,direct'; } > /etc/profile.d/go.sh\n"
+        'ENV PATH=/usr/local/go/bin:$PATH\n'
+        'ENV GOPROXY=https://goproxy.cn,direct\n'
+        'RUN sed -i "s/^#\\?Port.*/Port 2022/" /etc/ssh/sshd_config && \\\n'
+        '    sed -i "s/^#\\?PermitRootLogin.*/PermitRootLogin prohibit-password/" /etc/ssh/sshd_config && \\\n'
+        '    sed -i "s/^#\\?PubkeyAuthentication.*/PubkeyAuthentication yes/" /etc/ssh/sshd_config && \\\n'
+        '    sed -i "s/^#\\?PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config && \\\n'
+        '    mkdir -p /run/sshd\n'
+        'RUN groupdel docker 2>/dev/null; true\n'
+        'COPY <<\'ENTRYPOINT\' /usr/local/bin/spot-entrypoint.sh\n'
+        '#!/bin/bash\n'
+        'set -e\n'
+        'if [ -e /var/run/docker.sock ]; then\n'
+        '    DOCKER_GID=$(stat -c "%g" /var/run/docker.sock)\n'
+        '    if ! getent group $DOCKER_GID >/dev/null 2>&1; then\n'
+        '        groupadd -g $DOCKER_GID docker-host\n'
+        '    fi\n'
+        '    usermod -aG $DOCKER_GID cicy\n'
+        'fi\n'
+        'if [ -d /home/cicy/.ssh ]; then\n'
+        '    chown -R cicy:cicy /home/cicy/.ssh\n'
+        '    chmod 700 /home/cicy/.ssh\n'
+        '    chmod 600 /home/cicy/.ssh/authorized_keys 2>/dev/null || true\n'
+        'fi\n'
+        'chown cicy:cicy /home/cicy 2>/dev/null || true\n'
+        'service ssh start\n'
+        'echo "[spot-dev] SSHD running on port 2022"\n'
+        'if [ -n "$CF_TUNNEL_TOKEN" ] && command -v cloudflared >/dev/null 2>&1; then\n'
+        '    echo "[spot-dev] starting cloudflared tunnel"\n'
+        '    cloudflared tunnel --no-autoupdate run --token "$CF_TUNNEL_TOKEN" >/var/log/cloudflared.log 2>&1 &\n'
+        'fi\n'
+        'tail -f /dev/null\n'
+        'ENTRYPOINT\n'
+        'RUN chmod +x /usr/local/bin/spot-entrypoint.sh\n'
+        'EXPOSE 2022\n'
+        'ENTRYPOINT ["/usr/local/bin/spot-entrypoint.sh"]\n'
+        'DOCKERFILE'
+    )
+
+
+def _registry_creds():
+    """(user, password) for IMAGE_REF's registry: env first, then the macOS Docker keychain helper."""
+    u, p = os.environ.get("DOCKER_REGISTRY_USER", ""), os.environ.get("DOCKER_REGISTRY_PASS", "")
+    if u and p:
+        return u, p
+    try:
+        out = subprocess.run(["docker-credential-desktop", "get"], input="https://index.docker.io/v1/",
+                             capture_output=True, text=True, timeout=10).stdout
+        j = json.loads(out)
+        return j.get("Username", ""), j.get("Secret", "")
+    except Exception:
+        return "", ""
+
+
+def push_image():
+    inst = find_running_instance()
+    if not inst:
+        print("ERROR: no running us-spot-dev instance to build the image on"); sys.exit(1)
+    ip = inst.get("PublicIpAddress", {}).get("IpAddress", [None])[0]
+    user, passwd = _registry_creds()
+    if not user or not passwd:
+        print("ERROR: set DOCKER_REGISTRY_USER and DOCKER_REGISTRY_PASS (or have Docker Desktop logged in)"); sys.exit(1)
+    print(f"=== Building {IMAGE_REF} on {ip} ===")
+    run_ssh(ip, image_build_cmd(IMAGE_REF), timeout=900, check=False)
+    print(f"=== Pushing {IMAGE_REF} ===")
+    import shlex as _shlex
+    run_ssh(ip, f"echo {_shlex.quote(passwd)} | docker login -u {_shlex.quote(user)} --password-stdin "
+                f"&& docker push {IMAGE_REF}", timeout=900, check=False)
+    print(f"  Done. Pre-built image: {IMAGE_REF}")
 
 
 def find_persistent_disk():
@@ -468,6 +562,8 @@ def main():
         destroy(remove_disk=True); return
     if "--destroy" in sys.argv:
         destroy(remove_disk=False); return
+    if "--push-image" in sys.argv:
+        push_image(); return
 
     existing = find_running_instance()
     if existing:
@@ -592,67 +688,12 @@ def main():
         run_ssh(ip, cmd, timeout=180, check=False)
     print("  Docker ready")
 
-    # 9. build and run container
-    print("=== Building us-spot-dev container... ===")
-    build_cmd = (
-        'docker build -t us-spot-dev:latest - << \'DOCKERFILE\'\n'
-        'FROM ghcr.io/cicy-ai/cicy-code-base:1.0.8\n'
-        'USER root\n'
-        'RUN apt-get update && apt-get install -y --no-install-recommends \\\n'
-        '    openssh-server docker.io git make build-essential ca-certificates curl \\\n'
-        '    rsync autossh iproute2 net-tools jq vim less unzip wget gnupg \\\n'
-        '    && rm -rf /var/lib/apt/lists/*\n'
-        '# mihomo binary (for the cicy-mihomo skill); skip if the repo is not reachable\n'
-        'RUN git clone --depth 1 https://github.com/cicy-ai/cicy-mihomo.git /tmp/cicy-mihomo 2>/dev/null \\\n'
-        '    && install -m 0755 /tmp/cicy-mihomo/bin/mihomo-linux-amd64 /usr/local/bin/mihomo \\\n'
-        '    && rm -rf /tmp/cicy-mihomo || echo "[image] mihomo not pre-installed"\n'
-        '# cloudflared (exposes dev.<domain> -> :8008 when CF_TUNNEL_TOKEN is set)\n'
-        'RUN curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o /tmp/cf.deb \\\n'
-        '    && dpkg -i /tmp/cf.deb && rm -f /tmp/cf.deb || echo "[image] cloudflared not pre-installed"\n'
-        '# Go toolchain so dev.py / build.sh can build cicy-code inside the container\n'
-        'RUN curl -fsSL https://go.dev/dl/go1.25.3.linux-amd64.tar.gz | tar -C /usr/local -xz && \\\n'
-        '    ln -sf /usr/local/go/bin/go /usr/local/bin/go && \\\n'
-        '    ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt\n'
-        "RUN { echo 'export PATH=/usr/local/go/bin:$PATH'; echo 'export GOPROXY=https://goproxy.cn,direct'; } > /etc/profile.d/go.sh\n"
-        'ENV PATH=/usr/local/go/bin:$PATH\n'
-        'ENV GOPROXY=https://goproxy.cn,direct\n'
-        'RUN sed -i "s/^#\\?Port.*/Port 2022/" /etc/ssh/sshd_config && \\\n'
-        '    sed -i "s/^#\\?PermitRootLogin.*/PermitRootLogin prohibit-password/" /etc/ssh/sshd_config && \\\n'
-        '    sed -i "s/^#\\?PubkeyAuthentication.*/PubkeyAuthentication yes/" /etc/ssh/sshd_config && \\\n'
-        '    sed -i "s/^#\\?PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config && \\\n'
-        '    mkdir -p /run/sshd\n'
-        'RUN groupdel docker 2>/dev/null; true\n'
-        'COPY <<\'ENTRYPOINT\' /usr/local/bin/spot-entrypoint.sh\n'
-        '#!/bin/bash\n'
-        'set -e\n'
-        'if [ -e /var/run/docker.sock ]; then\n'
-        '    DOCKER_GID=$(stat -c "%g" /var/run/docker.sock)\n'
-        '    if ! getent group $DOCKER_GID >/dev/null 2>&1; then\n'
-        '        groupadd -g $DOCKER_GID docker-host\n'
-        '    fi\n'
-        '    usermod -aG $DOCKER_GID cicy\n'
-        'fi\n'
-        'if [ -d /home/cicy/.ssh ]; then\n'
-        '    chown -R cicy:cicy /home/cicy/.ssh\n'
-        '    chmod 700 /home/cicy/.ssh\n'
-        '    chmod 600 /home/cicy/.ssh/authorized_keys 2>/dev/null || true\n'
-        'fi\n'
-        'chown cicy:cicy /home/cicy 2>/dev/null || true\n'
-        'service ssh start\n'
-        'echo "[spot-dev] SSHD running on port 2022"\n'
-        'if [ -n "$CF_TUNNEL_TOKEN" ] && command -v cloudflared >/dev/null 2>&1; then\n'
-        '    echo "[spot-dev] starting cloudflared tunnel"\n'
-        '    cloudflared tunnel --no-autoupdate run --token "$CF_TUNNEL_TOKEN" >/var/log/cloudflared.log 2>&1 &\n'
-        'fi\n'
-        'tail -f /dev/null\n'
-        'ENTRYPOINT\n'
-        'RUN chmod +x /usr/local/bin/spot-entrypoint.sh\n'
-        'EXPOSE 2022\n'
-        'ENTRYPOINT ["/usr/local/bin/spot-entrypoint.sh"]\n'
-        'DOCKERFILE'
-    )
-    run_ssh(ip, build_cmd, timeout=300, check=False)
-    print("  Image built")
+    # 9. obtain the container image: pull the pre-built one (fast), else build it on the box
+    print("=== Preparing us-spot-dev image... ===")
+    run_ssh(ip, f'docker pull {IMAGE_REF} 2>/dev/null && docker tag {IMAGE_REF} us-spot-dev:latest '
+                f'&& echo "[image] pulled pre-built {IMAGE_REF}" || ( {image_build_cmd()} )',
+            timeout=600, check=False)
+    print("  Image ready")
 
     # 10. prepare /data/cicy for bind mount
     run_ssh(ip, 'mkdir -p /data/cicy/.ssh && '
