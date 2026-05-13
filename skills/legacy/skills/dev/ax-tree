@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""ax-tree - macOS Accessibility UI tree reader (like DOM for screen)"""
+import subprocess, sys
+
+SCRIPT = '''
+import Cocoa, re, json, sys
+from ApplicationServices import (
+    AXUIElementCreateSystemWide,
+    AXUIElementCreateApplication,
+    AXUIElementCopyAttributeValue,
+    AXUIElementCopyAttributeNames,
+)
+
+def ax_get(el, attr):
+    err, val = AXUIElementCopyAttributeValue(el, attr, None)
+    return val if err == 0 else None
+
+def ax_attrs(el):
+    err, names = AXUIElementCopyAttributeNames(el, None)
+    return list(names) if err == 0 and names else []
+
+def parse_axvalue(v):
+    s = str(v)
+    m = re.search(r"x:([\d.]+)\s+y:([\d.]+)", s)
+    if m:
+        return f"{int(float(m.group(1)))},{int(float(m.group(2)))}"
+    m = re.search(r"w:([\d.]+)\s+h:([\d.]+)", s)
+    if m:
+        return f"{int(float(m.group(1)))}x{int(float(m.group(2)))}"
+    return None
+
+def to_dict(el, depth=0, max_depth=10):
+    if depth > max_depth:
+        return None
+    attrs = ax_attrs(el)
+    node = {}
+    for a in ["AXRole", "AXRoleDescription", "AXTitle", "AXValue", "AXDescription", "AXIdentifier"]:
+        if a in attrs:
+            v = ax_get(el, a)
+            if v is not None:
+                try:
+                    node[a.replace("AX","").lower()] = str(v)
+                except:
+                    pass
+    if "AXPosition" in attrs:
+        v = ax_get(el, "AXPosition")
+        if v:
+            p = parse_axvalue(v)
+            if p: node["pos"] = p
+    if "AXSize" in attrs:
+        v = ax_get(el, "AXSize")
+        if v:
+            s = parse_axvalue(v)
+            if s: node["size"] = s
+    children = ax_get(el, "AXChildren") if "AXChildren" in attrs else None
+    if children:
+        kids = []
+        for c in children:
+            d = to_dict(c, depth + 1, max_depth)
+            if d:
+                kids.append(d)
+        if kids:
+            node["children"] = kids
+    return node
+
+def get_all_windows():
+    result = []
+    ws = Cocoa.NSWorkspace.sharedWorkspace()
+    apps = ws.runningApplications()
+    for app in apps:
+        if app.activationPolicy() == 0:
+            pid = app.processIdentifier()
+            ax_app = AXUIElementCreateApplication(pid)
+            wins = ax_get(ax_app, "AXWindows")
+            if wins:
+                for w in wins:
+                    title = ax_get(w, "AXTitle") or ""
+                    result.append({
+                        "app": str(app.localizedName()),
+                        "pid": pid,
+                        "title": str(title),
+                    })
+    return result
+
+mode = sys.argv[1] if len(sys.argv) > 1 else "focused"
+max_d = int(sys.argv[2]) if len(sys.argv) > 2 else 5
+
+if mode == "windows":
+    print(json.dumps(get_all_windows(), ensure_ascii=False, indent=2))
+elif mode == "focused":
+    ws = Cocoa.NSWorkspace.sharedWorkspace()
+    app = ws.frontmostApplication()
+    if not app:
+        print(json.dumps({"error": "no focused app"}))
+        sys.exit(1)
+    ax_app = AXUIElementCreateApplication(app.processIdentifier())
+    tree = to_dict(ax_app, max_depth=max_d)
+    print(json.dumps(tree, ensure_ascii=False, indent=2))
+elif mode.isdigit():
+    ax_app = AXUIElementCreateApplication(int(mode))
+    tree = to_dict(ax_app, max_depth=max_d)
+    print(json.dumps(tree, ensure_ascii=False, indent=2))
+else:
+    print("Usage: ax-tree [focused|windows|<pid>] [max_depth]")
+'''
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        print("ax-tree - macOS Accessibility UI tree reader")
+        print()
+        print("Usage:")
+        print("  ax-tree windows          List all windows")
+        print("  ax-tree focused [depth]  Focused app UI tree (default depth=5)")
+        print("  ax-tree <pid> [depth]    Specific app UI tree")
+        sys.exit(0)
+
+    mode = args[0]
+    depth = args[1] if len(args) > 1 else "5"
+    result = subprocess.run(
+        ["python3", "-c", SCRIPT, mode, depth],
+        capture_output=True, text=True
+    )
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, file=sys.stderr, end="")
+    sys.exit(result.returncode)
+
+if __name__ == "__main__":
+    main()

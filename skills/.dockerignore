@@ -1,0 +1,10 @@
+.git
+.gitignore
+.DS_Store
+.dockerignore
+bin/
+dist/
+cicy-skills
+cicy-skillsd
+node_modules/
+providers/google-node/node_modules/

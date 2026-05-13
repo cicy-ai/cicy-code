@@ -1,0 +1,81 @@
+#!/bin/bash
+# todo - manage todos via GitHub Issues + Project Board
+# Usage:
+#   todo                              # list all
+#   todo feat <title> [--assign <w>]  # add feat
+#   todo fix <title> [--assign <w>]   # add fix
+#   todo add <title> [--assign <w>]   # add todo
+#   todo done <number>                # close issue
+#   todo view <number>                # view issue
+#   todo url                          # open project board URL
+#   todo -h|--help                    # show help
+
+REPO="cicy-dev/Private"
+PROJECT_NUM=4
+PROJECT_OWNER="cicy-dev"
+PROJECT_URL="https://github.com/users/cicy-dev/projects/4"
+
+_add() {
+  local label="$1" title="$2" assign="$3"
+  local extra=""
+  [ -n "$assign" ] && extra="--body \"assigned to: $assign\""
+  url=$(gh issue create --repo $REPO --title "$title" --label "$label" --body "${assign:+assigned to: $assign}" 2>&1)
+  echo "$url"
+  gh project item-add $PROJECT_NUM --owner $PROJECT_OWNER --url "$url" 2>/dev/null
+}
+
+# parse --assign flag from args
+_parse() {
+  local title="" assign=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --assign) assign="$2"; shift 2 ;;
+      *) title="$title $1"; shift ;;
+    esac
+  done
+  echo "${title## }" "|||" "$assign"
+}
+
+case "$1" in
+  feat|fix|todo)
+    label="$1"; shift
+    parsed=$(_parse "$@")
+    title=$(echo "$parsed" | awk -F' \\|\\|\\| ' '{print $1}')
+    assign=$(echo "$parsed" | awk -F' \\|\\|\\| ' '{print $2}')
+    _add "$label" "$title" "$assign"
+    ;;
+  add)
+    shift
+    parsed=$(_parse "$@")
+    title=$(echo "$parsed" | awk -F' \\|\\|\\| ' '{print $1}')
+    assign=$(echo "$parsed" | awk -F' \\|\\|\\| ' '{print $2}')
+    _add todo "$title" "$assign"
+    ;;
+  done)
+    gh issue close "$2" --repo $REPO
+    ;;
+  view)
+    gh issue view "$2" --repo $REPO
+    ;;
+  url)
+    echo "$PROJECT_URL"
+    ;;
+  -h|--help)
+    echo "Usage: todo [command] [args]"
+    echo ""
+    echo "Commands:"
+    echo "  (none)                        List all open todos"
+    echo "  feat <title> [--assign <w>]   Add a feature todo"
+    echo "  fix  <title> [--assign <w>]   Add a fix todo"
+    echo "  add  <title> [--assign <w>]   Add a general todo"
+    echo "  done <number>                 Close/complete a todo"
+    echo "  view <number>                 View a todo"
+    echo "  url                           Show project board URL"
+    echo "  -h, --help                    Show this help"
+    echo ""
+    echo "Repo: $REPO | Project: $PROJECT_URL"
+    ;;
+  *)
+    gh issue list --repo $REPO
+    ;;
+esac

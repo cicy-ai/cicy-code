@@ -1,0 +1,4 @@
+interface:
+  display_name: "GHCR Docker Build"
+  short_description: "Build base Docker images on GitHub Actions"
+  default_prompt: "Create or run a config-driven GitHub Actions build that publishes this base image to GHCR."

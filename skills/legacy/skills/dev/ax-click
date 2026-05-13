@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""ax-click - Click macOS UI elements by role/title/description"""
+import subprocess, sys
+
+SCRIPT = '''
+import Cocoa, re, time, json, sys
+from ApplicationServices import (
+    AXUIElementCreateApplication,
+    AXUIElementCopyAttributeValue,
+    AXUIElementCopyAttributeNames,
+    AXUIElementPerformAction,
+    AXUIElementCopyActionNames,
+)
+from Quartz import (
+    CGEventCreateMouseEvent, CGEventPost, kCGEventLeftMouseDown,
+    kCGEventLeftMouseUp, kCGHIDEventTap,
+)
+
+def ax_get(el, attr):
+    err, val = AXUIElementCopyAttributeValue(el, attr, None)
+    return val if err == 0 else None
+
+def ax_attrs(el):
+    err, names = AXUIElementCopyAttributeNames(el, None)
+    return list(names) if err == 0 and names else []
+
+def parse_axvalue(v):
+    s = str(v)
+    m = re.search(r"x:([\d.]+)\s+y:([\d.]+)", s)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    m = re.search(r"w:([\d.]+)\s+h:([\d.]+)", s)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    return 0, 0
+
+def get_pos_size(el):
+    attrs = ax_attrs(el)
+    x = y = w = h = 0
+    if "AXPosition" in attrs:
+        pos = ax_get(el, "AXPosition")
+        if pos:
+            x, y = parse_axvalue(pos)
+    if "AXSize" in attrs:
+        size = ax_get(el, "AXSize")
+        if size:
+            w, h = parse_axvalue(size)
+    return x, y, w, h
+
+def click_at(x, y):
+    point = (x, y)
+    down = CGEventCreateMouseEvent(None, kCGEventLeftMouseDown, point, 0)
+    up = CGEventCreateMouseEvent(None, kCGEventLeftMouseUp, point, 0)
+    CGEventPost(kCGHIDEventTap, down)
+    time.sleep(0.05)
+    CGEventPost(kCGHIDEventTap, up)
+
+def find_elements(el, match_fn, depth=0, max_depth=10, results=None):
+    if results is None:
+        results = []
+    if depth > max_depth:
+        return results
+    attrs = ax_attrs(el)
+    info = {}
+    for a in ["AXRole", "AXTitle", "AXDescription", "AXRoleDescription", "AXValue", "AXIdentifier"]:
+        if a in attrs:
+            v = ax_get(el, a)
+            if v is not None:
+                info[a] = str(v)
+    if match_fn(info):
+        x, y, w, h = get_pos_size(el)
+        results.append({"el": el, "info": info, "x": x, "y": y, "w": w, "h": h})
+    children = ax_get(el, "AXChildren") if "AXChildren" in attrs else None
+    if children:
+        for c in children:
+            find_elements(c, match_fn, depth + 1, max_depth, results)
+    return results
+
+def make_matcher(query):
+    parts = query.split(":", 1)
+    if len(parts) == 2:
+        key_map = {"role": "AXRole", "title": "AXTitle", "desc": "AXDescription", "id": "AXIdentifier", "value": "AXValue"}
+        k, v = parts
+        ax_key = key_map.get(k, k)
+        return lambda info: v.lower() in info.get(ax_key, "").lower()
+    return lambda info: any(query.lower() in str(val).lower() for val in info.values())
+
+pid = int(sys.argv[1])
+query = sys.argv[2]
+action = sys.argv[3] if len(sys.argv) > 3 else "click"
+
+ax_app = AXUIElementCreateApplication(pid)
+matches = find_elements(ax_app, make_matcher(query))
+
+if not matches:
+    print(json.dumps({"error": "no match", "query": query}))
+    sys.exit(1)
+
+m = matches[0]
+cx = m["x"] + m["w"] / 2
+cy = m["y"] + m["h"] / 2
+desc = {k.replace("AX",""): v for k,v in m["info"].items()}
+desc["center"] = f"{int(cx)},{int(cy)}"
+desc["size"] = f"{int(m['w'])}x{int(m['h'])}"
+desc["matches"] = len(matches)
+
+if action == "click":
+    click_at(cx, cy)
+    desc["action"] = "clicked"
+elif action == "press":
+    err, actions = AXUIElementCopyActionNames(m["el"], None)
+    if err == 0 and "AXPress" in actions:
+        AXUIElementPerformAction(m["el"], "AXPress")
+        desc["action"] = "pressed"
+    else:
+        click_at(cx, cy)
+        desc["action"] = "clicked (no AXPress)"
+elif action == "find":
+    desc["action"] = "found"
+    if len(matches) > 1:
+        desc["all"] = []
+        for mm in matches:
+            d = {k.replace("AX",""): v for k,v in mm["info"].items()}
+            d["center"] = f"{int(mm['x']+mm['w']/2)},{int(mm['y']+mm['h']/2)}"
+            desc["all"].append(d)
+
+print(json.dumps(desc, ensure_ascii=False, indent=2))
+'''
+
+def main():
+    args = sys.argv[1:]
+    if len(args) < 2 or args[0] in ("-h", "--help"):
+        print("ax-click - Click macOS UI elements by search")
+        print()
+        print("Usage:")
+        print("  ax-click <pid> <query> [click|press|find]")
+        print()
+        print("Query formats:")
+        print("  ax-click 641 '关闭按钮'          # fuzzy match any field")
+        print("  ax-click 641 'title:文件'         # match by title")
+        print("  ax-click 641 'role:AXButton'     # match by role")
+        print("  ax-click 641 'desc:关闭'          # match by description")
+        print("  ax-click 641 'id:_NS:895'        # match by identifier")
+        print()
+        print("Actions:")
+        print("  click  - mouse click center (default)")
+        print("  press  - AXPress action")
+        print("  find   - just find, don't click")
+        sys.exit(0)
+
+    pid, query = args[0], args[1]
+    action = args[2] if len(args) > 2 else "click"
+    result = subprocess.run(
+        ["python3", "-c", SCRIPT, pid, query, action],
+        capture_output=True, text=True
+    )
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, file=sys.stderr, end="")
+    sys.exit(result.returncode)
+
+if __name__ == "__main__":
+    main()

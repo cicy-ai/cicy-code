@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# xui - X UI control CLI
+set -euo pipefail
+
+BASE_PORT=13430
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+XUI_PY="$SCRIPT_DIR/xui.py"
+
+# 解析 display: 如果第一个参数是数字则作为 display_id
+if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
+    DISPLAY_NUM="$1"; shift
+else
+    DISPLAY_NUM="${DISPLAY##*:}"
+    DISPLAY_NUM="${DISPLAY_NUM:-1}"
+fi
+PORT=$((BASE_PORT + DISPLAY_NUM))
+API="http://localhost:$PORT"
+
+cmd="${1:-help}"; shift 2>/dev/null || true
+
+case "$cmd" in
+    open)
+        app="${1:?用法: xui [display] open <app>}"
+        curl -s -X POST "$API/api/open" -H 'Content-Type: application/json' -d "{\"app\":\"$app\"}"
+        ;;
+    type)
+        text="${1:?用法: xui [display] type <text>}"
+        curl -s -X POST "$API/api/type" -H 'Content-Type: application/json' -d "{\"text\":\"$text\"}"
+        ;;
+    windows)
+        curl -s "$API/api/windows"
+        ;;
+    screenshot)
+        curl -s "$API/api/screenshot" ${1:+--output "$1"}
+        ;;
+    chrome)
+        action="${1:-start}"; shift 2>/dev/null || true
+        qs="action=$action"
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --proxy=*) qs+="&proxy=${1#*=}" ;;
+                --debug-port=*) qs+="&debug_port=${1#*=}" ;;
+                --profile=*) qs+="&profile=${1#*=}" ;;
+            esac; shift
+        done
+        curl -s "$API/api/chrome?$qs"
+        ;;
+    electron)
+        action="${1:-start}"; shift 2>/dev/null || true
+        qs="action=$action"
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --url=*) qs+="&url=${1#*=}" ;;
+                --port=*) qs+="&port=${1#*=}" ;;
+                --proxy=*) qs+="&proxy=${1#*=}" ;;
+                --no-cache) qs+="&no_cache=true" ;;
+            esac; shift
+        done
+        curl -s --max-time 10 "$API/api/electron?$qs"
+        ;;
+    shell)
+        cmd_str="${1:?用法: xui [display] shell <command>}"
+        curl -s -X POST "$API/api/run_shell" -H 'Content-Type: application/json' -d "{\"cmd\":\"$cmd_str\"}"
+        ;;
+    quick)
+        num="${1:-1}"
+        port=$((BASE_PORT + num))
+        py="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)/xui.py"
+
+        if [[ "$OSTYPE" == darwin* ]]; then
+            # macOS: .command 脚本到桌面
+            f=~/Desktop/xui-$num.command
+            cat > "$f" <<EOF
+#!/bin/bash
+cd "$(dirname "$py")"
+exec python3 "$py" --display :$num --port $port
+EOF
+            chmod +x "$f"
+            echo "✓ macOS 快捷方式: $f"
+
+        elif [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* ]] || command -v powershell.exe &>/dev/null; then
+            # Windows: .bat
+            f=~/Desktop/xui-$num.bat
+            cat > "$f" <<EOF
+@echo off
+cd /d "$(dirname "$py")"
+python "$py" --display :$num --port $port
+EOF
+            echo "✓ Windows 快捷方式: $f"
+
+        else
+            # Linux: .desktop 到桌面 + 应用菜单
+            entry="[Desktop Entry]
+Type=Application
+Name=XUI :$num
+Comment=XUI Display :$num (port $port)
+Exec=python3 $py --display :$num
+Icon=utilities-terminal
+Terminal=true
+Categories=Utility;"
+
+            mkdir -p ~/Desktop ~/.local/share/applications
+            # 获取 xfce dbus session 用于设置信任
+            _dbus=""
+            _pid=$(pgrep -u "$(whoami)" xfce4-session 2>/dev/null | head -1)
+            if [ -n "$_pid" ]; then
+                _dbus=$(grep -z DBUS_SESSION_BUS_ADDRESS /proc/$_pid/environ 2>/dev/null | tr '\0' '\n' | head -1)
+            fi
+            for f in ~/Desktop/xui-$num.desktop ~/.local/share/applications/xui-$num.desktop; do
+                echo "$entry" > "$f"
+                chmod +x "$f"
+                if [ -n "$_dbus" ]; then
+                    export $_dbus
+                    DISPLAY=:$num gio set "$f" "metadata::trusted" true 2>/dev/null
+                fi
+                echo "✓ $f"
+            done
+        fi
+        ;;
+    help|*)
+        cat <<EOF
+xui - X UI control CLI
+
+用法: xui [display_num] <command> [args]
+  display_num 默认取 \$DISPLAY (当前: :$DISPLAY_NUM, 端口: $PORT)
+
+命令:
+  open <app>                          打开应用
+  type <text>                         模拟键盘输入
+  windows                             列出窗口
+  screenshot [output_file]            截图
+  chrome [start|stop|restart]         管理 Chrome
+    --proxy=<addr> --debug-port=<port>
+  electron [start|stop|restart]       管理 Electron
+    --url=<url> --port=<port> --proxy=<addr>
+  shell <command>                     执行 shell 命令
+  quick <display_num>                 安装桌面快捷方式
+EOF
+        ;;
+esac

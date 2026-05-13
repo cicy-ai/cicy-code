@@ -1,0 +1,148 @@
+name: release-go-binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run Go tests
+        run: go test ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            archive_ext: tar.gz
+          - goos: linux
+            goarch: arm64
+            archive_ext: tar.gz
+          - goos: darwin
+            goarch: amd64
+            archive_ext: tar.gz
+          - goos: darwin
+            goarch: arm64
+            archive_ext: tar.gz
+          - goos: windows
+            goarch: amd64
+            archive_ext: zip
+          - goos: windows
+            goarch: arm64
+            archive_ext: zip
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ github.event.inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          version="${tag#v}"
+          bundle="cicy-skills_${tag}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "bundle=$bundle" >> "$GITHUB_OUTPUT"
+
+      - name: Build binaries
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "release/${{ steps.meta.outputs.bundle }}"
+
+          ext=""
+          if [ "${GOOS}" = "windows" ]; then
+            ext=".exe"
+          fi
+
+          go build -ldflags="-X github.com/cicy-ai/cicy-skills/internal/version.Version=${VERSION}" -o "release/${{ steps.meta.outputs.bundle }}/cicy-skills${ext}" ./cmd/cicy-skills
+          go build -ldflags="-X github.com/cicy-ai/cicy-skills/internal/version.Version=${VERSION}" -o "release/${{ steps.meta.outputs.bundle }}/cicy-skillsd${ext}" ./cmd/cicy-skillsd
+          go build -ldflags="-X github.com/cicy-ai/cicy-skills/internal/version.Version=${VERSION}" -o "release/${{ steps.meta.outputs.bundle }}/cicy-hosttools${ext}" ./cmd/cicy-hosttools
+          go build -ldflags="-X github.com/cicy-ai/cicy-skills/internal/version.Version=${VERSION}" -o "release/${{ steps.meta.outputs.bundle }}/stt${ext}" ./cmd/stt
+          go build -ldflags="-X github.com/cicy-ai/cicy-skills/internal/version.Version=${VERSION}" -o "release/${{ steps.meta.outputs.bundle }}/tts${ext}" ./cmd/tts
+
+      - name: Archive release bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          if [ "${{ matrix.archive_ext }}" = "zip" ]; then
+            zip -r "${{ steps.meta.outputs.bundle }}.zip" "${{ steps.meta.outputs.bundle }}"
+          else
+            tar -czf "${{ steps.meta.outputs.bundle }}.tar.gz" "${{ steps.meta.outputs.bundle }}"
+          fi
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.bundle }}
+          path: release/${{ steps.meta.outputs.bundle }}.${{ matrix.archive_ext }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release tag
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ github.event.inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-release
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: |
+            dist-release/**/*.tar.gz
+            dist-release/**/*.zip

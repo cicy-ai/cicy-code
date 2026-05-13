@@ -1149,7 +1149,7 @@ func needsCicySkillsInstall() bool {
 		cicySkillsCommandPath("agent-webpage"),
 		cicySkillsSkillDocPath("codex", "agent-code-server"),
 		cicySkillsSkillDocPath("claude", "agent-code-server"),
-		cicySkillsSkillDocPath("openclaw", "agent-code-server"),
+		cicySkillsSkillDocPath("opencode", "agent-code-server"),
 	}
 	for _, path := range required {
 		if strings.TrimSpace(path) == "" {
@@ -1290,7 +1290,7 @@ fi
 %s
 export CICY_SKILLS_ROOT="$project_root"
 %s install all
-%s agent sync openclaw
+%s agent sync opencode
 `, cicySkillsDir, projectRoot, localProjectRoot, tag, cicySkillsReleaseAPIURL(tag), bundleName, bundleURL, cicySkillsSourceAPIURL(tag), sourceURL, filepath.Join(projectRoot, "dist"), filepath.Join(projectRoot, "dist"), strings.Join(localDistChecks, " && "), strings.Join(localCopyLines, "\n"), strings.Join(buildLines, "\n"), sourceArchiveName, sourceArchiveName, bundleName, bundleName, bundleDir, filepath.Join(projectRoot, "dist"), strings.Join(copyLines, "\n"), npmMirror, cicySkillsDistBinaryPath(), cicySkillsDistBinaryPath())
 	return script, nil
 }

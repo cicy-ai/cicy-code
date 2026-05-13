@@ -1,0 +1,9 @@
+name = "install-cicy-ai"
+main = "src/index.js"
+compatibility_date = "2025-05-08"
+workers_dev = true
+
+[vars]
+SHELL_SCRIPT_URL = "https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.sh"
+POWERSHELL_SCRIPT_URL = "https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.ps1"
+CACHE_MAX_AGE = "300"
