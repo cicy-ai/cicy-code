@@ -239,9 +239,8 @@ func isShellPromptVisible(out string) bool {
 		return false
 	}
 	// Before boot.sh runs the pane may show the system's default shell prompt
-	// (often "%" on macOS zsh, "$" on bash). After ~/.cicy_tmux.conf loads it
-	// becomes "... $". In all cases, wait for a visible prompt terminator before
-	// sending the startup script.
+	// (often "%" on macOS zsh, "$" on bash). Wait for a visible prompt terminator
+	// before sending the startup script.
 	switch {
 	case strings.HasSuffix(last, " $"),
 		strings.HasSuffix(last, "$"),
@@ -2185,24 +2184,27 @@ EOF
 		return lines
 	case "opencode":
 		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("opencode-install-%s.log", shortID))
-		instructionsJSON := ""
-		if replyInChinese {
-			instructionsJSON = `,"instructions":["${WORKSPACE}/.opencode/reply-in-chinese.md"]`
-		}
 		lines := []string{
 			ensureAgentCommandLine("opencode", "OpenCode", opencodeInstallCmd(), installLog),
 			fmt.Sprintf("export CICY_OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
-			`mkdir -p "$WORKSPACE/.opencode/xdg"`,
+			`mkdir -p "$WORKSPACE/.opencode"`,
 		}
 		if replyInChinese {
-			lines = append(lines, `printf 'Always reply in Chinese unless the user explicitly asks for another language.\nKeep code, commands, file paths, environment variables, API identifiers, and other literal tokens unchanged when accuracy matters.\n' > "$WORKSPACE/.opencode/reply-in-chinese.md"`)
+			lines = append(lines,
+				`printf 'Always reply in Chinese unless the user explicitly asks for another language.\nKeep code, commands, file paths, environment variables, API identifiers, and other literal tokens unchanged when accuracy matters.\n' > "$WORKSPACE/.opencode/reply-in-chinese.md"`,
+				`cat > "$WORKSPACE/.opencode/opencode.json" <<EOF
+{"\$schema":"https://opencode.ai/config.json","permission":"allow","instructions":["$WORKSPACE/.opencode/reply-in-chinese.md"],"provider":{"cicyai":{"npm":"@ai-sdk/openai-compatible","api":"openai","name":"cicyAi Gateway","options":{"baseURL":"$CICY_OPENAI_BASE_URL"}}}}
+EOF`,
+			)
 		} else {
-			lines = append(lines, `rm -f "$WORKSPACE/.opencode/reply-in-chinese.md"`)
+			lines = append(lines,
+				`rm -f "$WORKSPACE/.opencode/reply-in-chinese.md"`,
+				`cat > "$WORKSPACE/.opencode/opencode.json" <<EOF
+{"\$schema":"https://opencode.ai/config.json","permission":"allow","provider":{"cicyai":{"npm":"@ai-sdk/openai-compatible","api":"openai","name":"cicyAi Gateway","options":{"baseURL":"$CICY_OPENAI_BASE_URL"}}}}
+EOF`,
+			)
 		}
-		lines = append(lines,
-			`printf '{"\$schema":"https://opencode.ai/config.json","permission":"allow"`+instructionsJSON+`,"provider":{"cicyai":{"npm":"@ai-sdk/openai-compatible","api":"openai","name":"cicyAi Gateway","options":{"baseURL":"%s"}}}}\n' "$CICY_OPENAI_BASE_URL" > "$WORKSPACE/.opencode/opencode.json"`,
-			`XDG_CONFIG_HOME="$WORKSPACE/.opencode/xdg" OPENCODE_CONFIG="$WORKSPACE/.opencode/opencode.json" opencode`,
-		)
+		lines = append(lines, `OPENCODE_CONFIG="$WORKSPACE/.opencode/opencode.json" opencode`)
 		return lines
 	case "kiro-cli":
 		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("kiro-install-%s.log", shortID))
@@ -2349,7 +2351,7 @@ PY
     return 1
   fi
   echo '[cicy] Hermes Agent install completed.'
-	fi`, tmuxShellQuote(hermesBin), installLog, tmuxShellQuote(cicySkillsDefaultGHProxy+"https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"), tmuxShellQuote(installScriptPath), tmuxShellQuote(installScriptPath), tmuxShellQuote(installScriptPath)),
+	fi`, tmuxShellQuote(hermesBin), installLog, tmuxShellQuote(defaultGitHubProxy+"https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"), tmuxShellQuote(installScriptPath), tmuxShellQuote(installScriptPath), tmuxShellQuote(installScriptPath)),
 			fmt.Sprintf("export CICY_HERMES_CONFIG=%s", tmuxShellQuote(configPath)),
 			fmt.Sprintf("export OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
 			fmt.Sprintf("export OPENAI_API_KEY=%s", tmuxShellQuote("cicy-local-gateway")),
@@ -3550,8 +3552,7 @@ func initPaneEnv(opts paneEnvOpts) {
 	}
 
 	lines := []string{
-		"touch ~/.cicy_tmux.conf",
-		"source ~/.cicy_tmux.conf",
+		`[ -f "$HOME/.cicy_tmux.conf" ] && source "$HOME/.cicy_tmux.conf"`,
 		fmt.Sprintf("export X_AGENT_ID=%s", tmuxShellQuote(pid)),
 		fmt.Sprintf("export X_AGENT_SHORT_ID=%s", tmuxShellQuote(shortID)),
 	}
@@ -3627,7 +3628,7 @@ func initPaneEnv(opts paneEnvOpts) {
 	// bash re-entry wrapper because their generated bodies may rely on being sourced
 	// from non-bash shells on macOS.
 	script := "#!/usr/bin/env bash\n\n"
-	if bootAgentNorm == "claude" || bootAgentNorm == "cicy-claude" || bootAgentNorm == "codex" {
+	if bootAgentNorm == "claude" || bootAgentNorm == "cicy-claude" || bootAgentNorm == "codex" || bootAgentNorm == "opencode" {
 		script += strings.Join(lines, "\n") + "\n"
 	} else {
 		script += "if [ -z \"${BASH_VERSION:-}\" ]; then\n" +
@@ -3666,7 +3667,7 @@ func initPaneEnv(opts paneEnvOpts) {
 	// visible/interactive. Wait for the prompt marker before sending boot.sh.
 	if waitForShellPromptReady(pid) {
 		log.Printf("[init] shell prompt ready for %s", shortPaneID(pid))
-		runTmux("send-keys", "-t", pid, "bash ./.cicy/boot.sh", "Enter")
+		runTmux("send-keys", "-t", pid, "source .cicy/boot.sh", "Enter")
 	} else {
 		log.Printf("[init] shell prompt not confirmed for %s, skip auto source .cicy/boot.sh", shortPaneID(pid))
 		return

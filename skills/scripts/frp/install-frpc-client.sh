@@ -29,7 +29,7 @@ Examples:
   FRP_SERVER=1.2.3.4 FRP_TOKEN=xxxx curl -fsSL https://install.cicy-ai.com/frp | bash
   curl -fsSL https://install.cicy-ai.com/frp | bash -s -- --server 1.2.3.4 --token xxxx
   curl -fsSL https://install.cicy-ai.com/frp | bash -s -- --server 1.2.3.4 --token xxxx --remote-port 9503
-  # rerun with no args reuses existing ~/.config/frp/frpc.toml and hot-reloads
+  # rerun with no args reuses existing ~/cicy-ai/db/frpc.toml and hot-reloads
   curl -fsSL https://install.cicy-ai.com/frp | bash
 USAGE
 }
@@ -104,8 +104,15 @@ CURRENT_USER="$(id -un)"
 CURRENT_UID="$(id -u)"
 BIN_DIR="$HOME/.local/bin"
 FRP_DIR="$HOME/.local/frp"
-CFG_DIR="$HOME/.config/frp"
+CFG_DIR="$HOME/cicy-ai/db"
 CFG_FILE="$CFG_DIR/frpc.toml"
+LEGACY_CFG_FILE="$HOME/.config/frp/frpc.toml"
+# Self-migrate: pull an existing legacy config forward on first install.
+if [ ! -f "$CFG_FILE" ] && [ -f "$LEGACY_CFG_FILE" ]; then
+  mkdir -p "$CFG_DIR"
+  mv "$LEGACY_CFG_FILE" "$CFG_FILE"
+  echo "  migrated config: $LEGACY_CFG_FILE -> $CFG_FILE"
+fi
 PID_FILE="$FRP_DIR/frpc.pid"
 LOG_FILE="$FRP_DIR/frpc.log"
 PLIST_LABEL="com.cicy.frpc"

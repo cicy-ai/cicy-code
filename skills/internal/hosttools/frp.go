@@ -249,6 +249,14 @@ func (t *frpTool) stateFile() string {
 func (t *frpTool) defaultConfigCandidates() []string {
 	name := t.binaryName()
 	return []string{
+		// Preferred (new convention): ~/cicy-ai/db/<name>.toml
+		filepath.Join(userHomeDir(), "cicy-ai", "db", name+".toml"),
+		filepath.Join(userHomeDir(), "cicy-ai", "db", name+".yaml"),
+		filepath.Join(userHomeDir(), "cicy-ai", "db", name+".yml"),
+		filepath.Join(userHomeDir(), "cicy-ai", "db", name+".ini"),
+		// Legacy locations kept for backwards compat — wrapper still reads from
+		// these if the new path is missing, but the install script writes to the
+		// preferred path going forward.
 		filepath.Join(userHomeDir(), "data", "frp", name+".toml"),
 		filepath.Join(userHomeDir(), "data", "frp", name+".yaml"),
 		filepath.Join(userHomeDir(), "data", "frp", name+".yml"),

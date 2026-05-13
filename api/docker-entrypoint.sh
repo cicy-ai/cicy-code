@@ -18,7 +18,7 @@ ensure_cicy_base() {
 }
 
 ensure_shell_init_files() {
-  local tmux_line='[ -f "$HOME/.cicy_tmux.conf" ] && . "$HOME/.cicy_tmux.conf"'
+  local tmux_line='[ -f "$HOME/.cicy_tmux.conf" ] && source "$HOME/.cicy_tmux.conf"'
   local cicy_tmux_path="$HOME_DIR/.cicy_tmux.conf"
   local tmux_conf_path="$HOME_DIR/.tmux.conf"
   local proxy_json_path="$HOME_DIR/proxy.json"

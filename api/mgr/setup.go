@@ -1,10 +1,14 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"database/sql"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -36,16 +40,15 @@ var embeddedCodeServerBridgeVSIX []byte
 //go:embed resources/MS-CEINTL.vscode-language-pack-zh-hans-1.110.0.vsix
 var embeddedCodeServerZhHansVSIX []byte
 
+//go:embed cicy_skills_assets.tar.gz
+var embeddedCicySkillsTar []byte
+
 var cicySkillsInstallOnce sync.Once
 
 const (
-	cicySkillsRepoURL        = "https://github.com/cicy-ai/cicy-skills"
-	cicySkillsRepoAPIURL     = "https://api.github.com/repos/cicy-ai/cicy-skills"
-	cicySkillsDefaultVersion = "v0.1.4"
-	cicySkillsDefaultGHProxy = "https://gh-proxy.com/"
-	cicySkillsNPMMirror      = "https://registry.npmmirror.com"
 	cicyDefaultPyPIMirror    = "https://pypi.tuna.tsinghua.edu.cn/simple"
 	cicySkillsInstallLogFile = "cicy-skills-install.log"
+	defaultGitHubProxy       = "https://gh-proxy.com/"
 )
 
 // 获取用户 shell 的 rc 文件路径
@@ -280,8 +283,8 @@ func selectAgents() []string {
 }
 
 func hermesInstallCmd() string {
-	rawScriptURL := cicySkillsDefaultGHProxy + "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
-	archiveURL := cicySkillsDefaultGHProxy + "https://codeload.github.com/NousResearch/hermes-agent/tar.gz/refs/heads/${branch}"
+	rawScriptURL := defaultGitHubProxy + "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
+	archiveURL := defaultGitHubProxy + "https://codeload.github.com/NousResearch/hermes-agent/tar.gz/refs/heads/${branch}"
 	return strings.Join([]string{
 		"export HERMES_HOME=\"$HOME/.hermes\"",
 		"export HERMES_INSTALL_DIR=\"$HOME/.hermes/hermes-agent\"",
@@ -871,35 +874,40 @@ func ensureManagedDotfile(name, embedded string) {
 	}
 }
 
+// ensureShellRCSourcesCicyTmuxConf injects `source ~/.cicy_tmux.conf` into
+// every shell rc the user might land in:
+//   - .bashrc       (bash interactive non-login)
+//   - .bash_profile (bash login — includes `bash -lc`, ssh, tmux new-window)
+//   - .zshrc        (zsh interactive)
+//
+// Idempotent: skip any file that already references .cicy_tmux.conf in any
+// form. PATH and other env are set inside cicy_tmux.conf itself.
 func ensureShellRCSourcesCicyTmuxConf() {
-	rcPath := expandHomePath(shellRC())
-	if strings.TrimSpace(rcPath) == "" {
-		return
-	}
 	line := `[ -f "$HOME/.cicy_tmux.conf" ] && source "$HOME/.cicy_tmux.conf"`
-	current, err := os.ReadFile(rcPath)
-	if os.IsNotExist(err) {
-		if writeErr := os.WriteFile(rcPath, []byte(line+"\n"), 0644); writeErr != nil {
-			log.Fatalf("[startup] failed to write %s: %v", rcPath, writeErr)
-		}
-		log.Printf("[startup] installing %s", rcPath)
-		return
-	}
+	dotForm := `[ -f "$HOME/.cicy_tmux.conf" ] && . "$HOME/.cicy_tmux.conf"`
+	home, err := os.UserHomeDir()
 	if err != nil {
-		log.Fatalf("[startup] failed to read %s: %v", rcPath, err)
-	}
-	if strings.Contains(string(current), line) {
 		return
 	}
-	payload := strings.TrimRight(string(current), "\n")
-	if payload != "" {
-		payload += "\n\n"
+	for _, name := range []string{".bashrc", ".bash_profile", ".zshrc"} {
+		path := filepath.Join(home, name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue // skip if rc doesn't exist
+		}
+		text := string(data)
+		// Strip the legacy `.` (POSIX dot) form left by older entrypoint scripts.
+		if strings.Contains(text, dotForm) {
+			text = strings.ReplaceAll(text, dotForm+"\n", "")
+			text = strings.ReplaceAll(text, dotForm, "")
+		}
+		if !strings.Contains(text, line) {
+			text = strings.TrimRight(text, "\n") + "\n\n" + line + "\n"
+		}
+		if text != string(data) {
+			_ = os.WriteFile(path, []byte(text), 0644)
+		}
 	}
-	payload += line + "\n"
-	if writeErr := os.WriteFile(rcPath, []byte(payload), 0644); writeErr != nil {
-		log.Fatalf("[startup] failed to update %s: %v", rcPath, writeErr)
-	}
-	log.Printf("[startup] updated %s", rcPath)
 }
 
 func ensureSSHKeyPair() {
@@ -1040,87 +1048,12 @@ func ensureSSHConfigFile(path string) {
 	log.Printf("[startup] ensured %s exists", path)
 }
 
-func cicySkillsVersion() string {
-	if v := strings.TrimSpace(os.Getenv("CICY_SKILLS_VERSION")); v != "" {
-		return v
-	}
-	return cicySkillsDefaultVersion
-}
-
-func cicySkillsGitHubProxy() string {
-	value := strings.TrimSpace(os.Getenv("GITHUB_PROXY"))
-	if value == "" {
-		value = cicySkillsDefaultGHProxy
-	}
-	if value == "" {
-		return ""
-	}
-	if !strings.HasSuffix(value, "/") {
-		value += "/"
-	}
-	return value
-}
-
-func cicySkillsBundleName(goos, goarch, tag string) (string, error) {
-	tag = strings.TrimSpace(tag)
-	goos = strings.TrimSpace(goos)
-	goarch = strings.TrimSpace(goarch)
-	if tag == "" || goos == "" || goarch == "" {
-		return "", fmt.Errorf("invalid cicy-skills bundle params: goos=%q goarch=%q tag=%q", goos, goarch, tag)
-	}
-	switch goos {
-	case "linux", "darwin":
-		return fmt.Sprintf("cicy-skills_%s_%s_%s.tar.gz", tag, goos, goarch), nil
-	case "windows":
-		return fmt.Sprintf("cicy-skills_%s_%s_%s.zip", tag, goos, goarch), nil
-	default:
-		return "", fmt.Errorf("unsupported cicy-skills runtime: %s/%s", goos, goarch)
-	}
-}
-
-func cicySkillsBundleURL(tag string) (string, error) {
-	bundle, err := cicySkillsBundleName(runtime.GOOS, runtime.GOARCH, tag)
-	if err != nil {
-		return "", err
-	}
-	return cicySkillsGitHubProxy() + cicySkillsRepoURL + "/releases/download/" + tag + "/" + bundle, nil
-}
-
-func cicySkillsSourceArchiveName(tag string) string {
-	name := strings.TrimSpace(tag)
-	name = strings.TrimPrefix(name, "refs/tags/")
-	if name == "" {
-		name = cicySkillsVersion()
-	}
-	return name + ".tar.gz"
-}
-
-func cicySkillsSourceURL(tag string) string {
-	return cicySkillsGitHubProxy() + cicySkillsRepoURL + "/archive/refs/tags/" + strings.TrimSpace(tag) + ".tar.gz"
-}
-
-func cicySkillsSourceAPIURL(tag string) string {
-	return cicySkillsRepoAPIURL + "/tarball/" + strings.TrimSpace(tag)
-}
-
-func cicySkillsReleaseAPIURL(tag string) string {
-	return cicySkillsRepoAPIURL + "/releases/tags/" + strings.TrimSpace(tag)
-}
-
 func cicySkillsDistBinaryPath() string {
 	return filepath.Join(cicySkillsProjectDir(), "dist", "cicy-skills")
 }
 
 func cicySkillsProjectDir() string {
 	return filepath.Join(cicySkillsDir, "cicy-skills")
-}
-
-func cicySkillsMountedProjectDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return ""
-	}
-	return filepath.Join(home, "projects", "cicy-skills")
 }
 
 func cicySkillsSkillDocPath(profile, skill string) string {
@@ -1140,25 +1073,25 @@ func cicySkillsCommandPath(name string) string {
 }
 
 func needsCicySkillsInstall() bool {
-	required := []string{
-		filepath.Join(cicySkillsProjectDir(), "go.mod"),
-		filepath.Join(cicySkillsProjectDir(), "providers", "google-node", "package.json"),
-		cicySkillsDistBinaryPath(),
-		cicySkillsCommandPath("cicy-skills"),
-		cicySkillsCommandPath("agent-code-server"),
-		cicySkillsCommandPath("agent-webpage"),
-		cicySkillsSkillDocPath("codex", "agent-code-server"),
-		cicySkillsSkillDocPath("claude", "agent-code-server"),
-		cicySkillsSkillDocPath("opencode", "agent-code-server"),
+	// "Installed" means: cicy-skills CLI is reachable and at least the
+	// canonical agent skill (agent-code-server) has SKILL.md emitted into
+	// every supported profile dir. We deliberately DO NOT require the
+	// extracted source tree to live at ~/cicy-ai/skills/cicy-skills/ — a
+	// dev `make install-local-cli` from anywhere else is equally valid.
+	cliPath := cicySkillsCommandPath("cicy-skills")
+	if strings.TrimSpace(cliPath) == "" {
+		return true
 	}
-	for _, path := range required {
-		if strings.TrimSpace(path) == "" {
-			return true
-		}
-		if _, err := os.Stat(path); err != nil {
+	if info, err := os.Stat(cliPath); err != nil || info.Mode()&0o111 == 0 {
+		return true
+	}
+	for _, profile := range []string{"codex", "claude", "opencode"} {
+		if _, err := os.Stat(cicySkillsSkillDocPath(profile, "agent-code-server")); err != nil {
 			return true
 		}
 	}
+	// Stale retired aliases left behind by an older install still mean we
+	// should re-run install to scrub them.
 	for _, name := range []string{"webpage", "webpage-ping", "ipc-ping", "agent-page-ping"} {
 		path := cicySkillsCommandPath(name)
 		if strings.TrimSpace(path) == "" {
@@ -1171,165 +1104,145 @@ func needsCicySkillsInstall() bool {
 	return false
 }
 
-func cicySkillsInstallScript(tag string) (string, error) {
-	bundleName, err := cicySkillsBundleName(runtime.GOOS, runtime.GOARCH, tag)
+// extractEmbeddedCicySkills untars the embedded cicy-skills tarball into dest.
+// The tar carries the original permission bits, so dist/ binaries and shell
+// scripts stay executable. dest is wiped first to avoid version drift.
+func extractEmbeddedCicySkills(dest string) error {
+	if len(embeddedCicySkillsTar) < 64 {
+		return fmt.Errorf("embedded cicy-skills tarball is missing or empty (was the binary built with prepare_skills_embed?)")
+	}
+	if err := os.RemoveAll(dest); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return err
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(embeddedCicySkillsTar))
 	if err != nil {
-		return "", err
+		return fmt.Errorf("gzip: %w", err)
 	}
-	bundleURL, err := cicySkillsBundleURL(tag)
-	if err != nil {
-		return "", err
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("tar: %w", err)
+		}
+		clean := filepath.Clean(hdr.Name)
+		if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+			continue
+		}
+		target := filepath.Join(dest, clean)
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, os.FileMode(hdr.Mode)&0o777|0o700); err != nil {
+				return err
+			}
+		case tar.TypeReg, tar.TypeRegA:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode)&0o777)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				f.Close()
+				return err
+			}
+			if err := f.Close(); err != nil {
+				return err
+			}
+		case tar.TypeSymlink:
+			_ = os.MkdirAll(filepath.Dir(target), 0o755)
+			_ = os.Remove(target)
+			if err := os.Symlink(hdr.Linkname, target); err != nil {
+				return err
+			}
+		}
 	}
-	sourceURL := cicySkillsSourceURL(tag)
-	sourceArchiveName := cicySkillsSourceArchiveName(tag)
-	bundleDir := strings.TrimSuffix(bundleName, ".tar.gz")
-	projectRoot := cicySkillsProjectDir()
-	localProjectRoot := cicySkillsMountedProjectDir()
-	distFiles := []string{"cicy-skills", "cicy-skillsd", "cicy-hosttools", "stt", "tts"}
-	var copyLines []string
-	var localCopyLines []string
-	var localDistChecks []string
-	var buildLines []string
-	for _, name := range distFiles {
-		copyLines = append(copyLines,
-			fmt.Sprintf("cp -f \"$bundle_dir/%s\" %q", name, filepath.Join(projectRoot, "dist", name)),
-			fmt.Sprintf("chmod +x %q", filepath.Join(projectRoot, "dist", name)),
-		)
-		localCopyLines = append(localCopyLines,
-			fmt.Sprintf("    cp -f %q %q", filepath.Join(localProjectRoot, "dist", name), filepath.Join(projectRoot, "dist", name)),
-			fmt.Sprintf("    chmod +x %q", filepath.Join(projectRoot, "dist", name)),
-		)
-		localDistChecks = append(localDistChecks, fmt.Sprintf("[ -x %q ]", filepath.Join(localProjectRoot, "dist", name)))
-		buildLines = append(buildLines, fmt.Sprintf("      CGO_ENABLED=0 GOOS=%q GOARCH=%q go build -o %q ./%s", runtime.GOOS, runtime.GOARCH, filepath.Join(projectRoot, "dist", name), filepath.ToSlash(filepath.Join("cmd", name))))
-	}
-	npmMirror := ""
-	if strings.TrimSpace(os.Getenv("CN_MIRROR")) == "1" {
-		npmMirror = fmt.Sprintf("export NPM_CONFIG_REGISTRY=%q\n", cicySkillsNPMMirror)
-	}
-	script := fmt.Sprintf(`set -e
-root=%q
-project_root=%q
-local_project_root=%q
-tag=%q
-tmp="$(mktemp -d)"
-token="${CICY_SKILLS_GITHUB_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}"
-cleanup() {
-  rm -rf "$tmp"
-}
-trap cleanup EXIT
-
-download_release_bundle() {
-  out="$1"
-  if [ -n "$token" ]; then
-    release_json="$(curl --http1.1 -fsSL -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" %q)"
-    asset_api_url="$(printf '%%s' "$release_json" | python3 - %q <<'PY'
-import json
-import sys
-
-name = sys.argv[1]
-data = json.load(sys.stdin)
-for asset in data.get("assets", []):
-    if asset.get("name") == name:
-        print(asset.get("url", ""))
-        break
-else:
-    raise SystemExit(f"missing release asset: {name}")
-PY
-)"
-    curl --http1.1 -fsSL -H "Authorization: Bearer $token" -H "Accept: application/octet-stream" "$asset_api_url" -o "$out"
-    return
-  fi
-  curl -fsSL %q -o "$out"
-}
-
-download_source_archive() {
-  out="$1"
-  if [ -n "$token" ]; then
-    curl --http1.1 -fsSL -H "Authorization: Bearer $token" -H "Accept: application/octet-stream" %q -o "$out"
-    return
-  fi
-  curl -fsSL %q -o "$out"
-}
-
-mkdir -p "$root" "$project_root" %q
-rm -rf "$project_root"
-mkdir -p "$project_root" %q
-if [ -f "$local_project_root/go.mod" ]; then
-  cp -a "$local_project_root"/. "$project_root"/
-  if %s; then
-%s
-  else
-    (
-      cd "$project_root"
-%s
-    )
-  fi
-else
-  download_source_archive "$tmp/%s"
-  mkdir -p "$tmp/source"
-  tar -xzf "$tmp/%s" -C "$tmp/source"
-  src_dir="$(find "$tmp/source" -mindepth 1 -maxdepth 1 -type d | head -n1)"
-  if [ -z "$src_dir" ] || [ ! -d "$src_dir" ]; then
-    echo "missing extracted cicy-skills source dir" >&2
-    exit 1
-  fi
-
-  download_release_bundle "$tmp/%s"
-  mkdir -p "$tmp/release"
-  tar -xzf "$tmp/%s" -C "$tmp/release"
-  bundle_dir="$tmp/release/%s"
-  if [ ! -d "$bundle_dir" ]; then
-    echo "missing extracted cicy-skills release dir: $bundle_dir" >&2
-    exit 1
-  fi
-
-  cp -a "$src_dir"/. "$project_root"/
-  mkdir -p %q
-%s
-fi
-%s
-export CICY_SKILLS_ROOT="$project_root"
-%s install all
-%s agent sync opencode
-`, cicySkillsDir, projectRoot, localProjectRoot, tag, cicySkillsReleaseAPIURL(tag), bundleName, bundleURL, cicySkillsSourceAPIURL(tag), sourceURL, filepath.Join(projectRoot, "dist"), filepath.Join(projectRoot, "dist"), strings.Join(localDistChecks, " && "), strings.Join(localCopyLines, "\n"), strings.Join(buildLines, "\n"), sourceArchiveName, sourceArchiveName, bundleName, bundleName, bundleDir, filepath.Join(projectRoot, "dist"), strings.Join(copyLines, "\n"), npmMirror, cicySkillsDistBinaryPath(), cicySkillsDistBinaryPath())
-	return script, nil
 }
 
 func ensureCicySkillsAsync() {
 	cicySkillsInstallOnce.Do(func() {
+		// In dev mode the user manages cicy-skills via `make install-local-cli`
+		// from the repo. Re-running the embedded install at every start would
+		// silently overwrite their dev symlinks with the build-time snapshot,
+		// so we stay out of the way entirely.
+		if devMode {
+			log.Printf("[startup] dev mode: skipping cicy-skills bootstrap (manage via make install-local-cli)")
+			return
+		}
 		if !needsCicySkillsInstall() {
 			return
 		}
 		go func() {
-			tag := cicySkillsVersion()
-			script, err := cicySkillsInstallScript(tag)
-			if err != nil {
-				log.Printf("[startup] skipped cicy-skills bootstrap: %v", err)
-				return
-			}
-			if err := os.MkdirAll(cicyStateDir, 0755); err != nil {
+			if err := os.MkdirAll(cicyStateDir, 0o755); err != nil {
 				log.Printf("[startup] failed to create %s for cicy-skills bootstrap: %v", cicyStateDir, err)
 				return
 			}
 			logPath := filepath.Join(cicyStateDir, cicySkillsInstallLogFile)
-			logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+			logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 			if err != nil {
 				log.Printf("[startup] failed to open cicy-skills install log: %v", err)
 				return
 			}
 			defer logFile.Close()
-			log.Printf("[startup] installing cicy-skills in background: root=%s version=%s", cicySkillsDir, tag)
-			cmd := exec.Command("sh", "-lc", script)
-			cmd.Stdout = logFile
-			cmd.Stderr = logFile
-			cmd.Env = os.Environ()
-			if err := cmd.Run(); err != nil {
-				log.Printf("[startup] cicy-skills bootstrap failed: %v (log: %s)", err, logPath)
+
+			projectRoot := cicySkillsProjectDir()
+			log.Printf("[startup] extracting embedded cicy-skills into %s", projectRoot)
+			fmt.Fprintf(logFile, "[%s] extracting embedded cicy-skills into %s\n", time.Now().Format(time.RFC3339), projectRoot)
+			if err := extractEmbeddedCicySkills(projectRoot); err != nil {
+				log.Printf("[startup] cicy-skills extract failed: %v (log: %s)", err, logPath)
+				fmt.Fprintf(logFile, "extract failed: %v\n", err)
 				return
 			}
+
+			// Install Google provider Node deps if missing — only network step,
+			// optional (Google skill is unusable without it but rest still work).
+			providerDir := filepath.Join(projectRoot, "providers", "google-node")
+			if _, err := os.Stat(filepath.Join(providerDir, "package.json")); err == nil {
+				if _, err := os.Stat(filepath.Join(providerDir, "node_modules")); err != nil {
+					fmt.Fprintln(logFile, "running npm install in providers/google-node")
+					cmd := exec.Command("npm", "install", "--silent", "--no-audit", "--no-fund")
+					cmd.Dir = providerDir
+					cmd.Stdout = logFile
+					cmd.Stderr = logFile
+					cmd.Env = os.Environ()
+					if err := cmd.Run(); err != nil {
+						fmt.Fprintf(logFile, "npm install failed (google provider may not work): %v\n", err)
+					}
+				}
+			}
+
+			// Run cicy-skills install all to materialize ~/.local/bin/* symlinks
+			// and SKILL.md files via the registry.
+			distBin := cicySkillsDistBinaryPath()
+			if _, err := os.Stat(distBin); err != nil {
+				log.Printf("[startup] cicy-skills bootstrap: %s missing after extract (log: %s)", distBin, logPath)
+				return
+			}
+			if err := os.Chmod(distBin, 0o755); err != nil {
+				log.Printf("[startup] chmod %s: %v", distBin, err)
+			}
+			log.Printf("[startup] running %s install all", distBin)
+			fmt.Fprintf(logFile, "[%s] running %s install all\n", time.Now().Format(time.RFC3339), distBin)
+			cmd := exec.Command(distBin, "install", "all")
+			cmd.Env = append(os.Environ(), "CICY_SKILLS_ROOT="+projectRoot)
+			cmd.Stdout = logFile
+			cmd.Stderr = logFile
+			if err := cmd.Run(); err != nil {
+				log.Printf("[startup] cicy-skills install all failed: %v (log: %s)", err, logPath)
+				return
+			}
+
 			extendPATH()
+
 			if needsCicySkillsInstall() {
-				log.Printf("[startup] cicy-skills bootstrap incomplete: required commands or docs still missing (log: %s)", logPath)
+				log.Printf("[startup] cicy-skills bootstrap incomplete (log: %s)", logPath)
 				return
 			}
 			log.Printf("[startup] cicy-skills bootstrap completed")

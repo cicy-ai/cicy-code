@@ -88,10 +88,16 @@ switch ($arch) {
 
 $BinDir = Join-Path $HOME '.local\bin'
 $FrpDir = Join-Path $HOME '.local\frp'
-$CfgDir = Join-Path $HOME '.config\frp'
+$CfgDir = Join-Path $HOME 'cicy-ai\db'
 $CfgFile = Join-Path $CfgDir 'frpc.toml'
+$LegacyCfgFile = Join-Path $HOME '.config\frp\frpc.toml'
 $TmpDir = Join-Path $env:TEMP ("frpc-install-" + [guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Force -Path $BinDir, $FrpDir, $CfgDir, $TmpDir
+# Self-migrate: pull an existing legacy config forward on first install.
+if (-not (Test-Path $CfgFile) -and (Test-Path $LegacyCfgFile)) {
+  Move-Item -Path $LegacyCfgFile -Destination $CfgFile
+  Write-Host "  migrated config: $LegacyCfgFile -> $CfgFile"
+}
 
 try {
   Write-Host '[1/5] install frpc'
