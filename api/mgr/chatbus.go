@@ -58,6 +58,7 @@ type chatHub struct {
 	clients      map[string]map[string]*chatClient // master_agent_id -> client_id -> client
 	waiters      map[string]chan ChatEvent
 	agentClients map[string]map[string]struct{} // agent_id -> client_id set
+	lastReject map[string]time.Time // client_id -> last 4409-reject time (for persistent-reconnect supersede)
 }
 
 var hub = &chatHub{
@@ -170,11 +171,28 @@ func (h *chatHub) register(c *chatClient) bool {
 	}
 	existing := h.clients[c.agentID][c.clientID]
 	if existing != nil && existing != c && existing.idleFor() < activeClientGrace {
-		idle := existing.idleFor()
-		h.mu.Unlock()
-		log.Printf("[chat-ws] reject (slot held) master_agent_id=%s client_id=%s existing_idle=%s",
-			c.agentID, c.clientID, idle.Truncate(time.Millisecond))
-		return false
+		if h.lastReject == nil {
+			h.lastReject = make(map[string]time.Time)
+		}
+		last := h.lastReject[c.clientID]
+		if last.IsZero() || time.Since(last) > activeClientGrace {
+			// First reject for this client_id: protect the current holder so a
+			// burst of new instances (iframe reloads, ext-host restarts) can't kick it.
+			h.lastReject[c.clientID] = time.Now()
+			idle := existing.idleFor()
+			h.mu.Unlock()
+			log.Printf("[chat-ws] reject (slot held) master_agent_id=%s client_id=%s existing_idle=%s",
+				c.agentID, c.clientID, idle.Truncate(time.Millisecond))
+			return false
+		}
+		// Same client_id keeps reconnecting despite a recent 4409 — the holder
+		// is almost certainly a stale half-open connection (e.g. left by a
+		// proxy). Let this genuine reconnect take over.
+		log.Printf("[chat-ws] supersede (persistent reconnect) master_agent_id=%s client_id=%s holder_idle=%s",
+			c.agentID, c.clientID, existing.idleFor().Truncate(time.Millisecond))
+	}
+	if h.lastReject != nil {
+		delete(h.lastReject, c.clientID)
 	}
 	var replaced *chatClient
 	if existing != nil && existing != c {
@@ -457,12 +475,12 @@ func (c *chatClient) readPump() {
 	defer hub.unregister(c)
 	c.conn.SetReadLimit(64 * 1024)
 	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+		c.conn.SetReadDeadline(time.Now().Add(35 * time.Second))
 		c.markActive()
 		return nil
 	})
 	for {
-		c.conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+		c.conn.SetReadDeadline(time.Now().Add(35 * time.Second))
 		_, msg, err := c.conn.ReadMessage()
 		if err != nil {
 			return

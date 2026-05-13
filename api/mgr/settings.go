@@ -28,6 +28,9 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		result["home"] = home
 		result["lab_mode"] = labMode
+		result["dev"] = devMode
+		result["preview"] = previewMode
+		result["hot"] = hotMode
 		result["agents"] = effectiveAgentOptions()
 		J(w, result)
 	case "POST":

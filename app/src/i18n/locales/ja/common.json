@@ -7,5 +7,9 @@
   "language": "言語",
   "languageAuto": "自動（ブラウザ）",
   "languageEnglish": "English",
-  "languageChinese": "简体中文"
+  "languageChinese": "简体中文",
+  "wsConnecting": "サーバーに接続中…",
+  "wsConnectingRetry": "サーバーに接続中…（再試行 {{n}}/3）",
+  "wsConnectError": "ネットワークエラー — サーバーに接続できません",
+  "wsReconnect": "再接続"
 }

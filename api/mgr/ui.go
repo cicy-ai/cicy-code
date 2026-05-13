@@ -6,58 +6,80 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
 //go:embed ui
 var uiFS embed.FS
 
+func appDistDir() string {
+	if d := strings.TrimSpace(os.Getenv("CICY_PREVIEW_DIST")); d != "" {
+		return d
+	}
+	return filepath.Join("app", "dist")
+}
+
+func nonAppPath(p string) bool {
+	for _, pre := range []string{"/api/", "/ttyd/", "/code/", "/mitm/", "/pma/", "/static/", "/v1/", "/oauth/"} {
+		if strings.HasPrefix(p, pre) {
+			return true
+		}
+	}
+	return strings.HasPrefix(p, "/stt")
+}
+
+// serveUI picks where the web UI comes from:
+//   --hot      -> reverse-proxy to the vite dev server on :8022 (HMR)
+//   --preview  -> the on-disk app/dist (refresh with `npm run build`)
+//   (neither)  -> the binary-embedded assets (the production build baked in by build.sh)
 func serveUI() http.Handler {
 	sub, _ := fs.Sub(uiFS, "ui")
-	fileServer := http.FileServer(http.FS(sub))
+	embedded := http.FileServer(http.FS(sub))
+
 	var devProxy *httputil.ReverseProxy
-	if devMode {
+	var diskFS http.FileSystem
+	var diskSrv http.Handler
+	switch {
+	case hotMode:
 		if target, err := url.Parse("http://127.0.0.1:8022"); err == nil {
 			devProxy = httputil.NewSingleHostReverseProxy(target)
 		}
+	case previewMode:
+		diskFS = http.Dir(appDistDir())
+		diskSrv = http.FileServer(diskFS)
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// API 请求不走这里
-		if strings.HasPrefix(r.URL.Path, "/api/") ||
-			strings.HasPrefix(r.URL.Path, "/ttyd/") ||
-			strings.HasPrefix(r.URL.Path, "/code/") ||
-			strings.HasPrefix(r.URL.Path, "/mitm/") ||
-			strings.HasPrefix(r.URL.Path, "/pma/") ||
-			strings.HasPrefix(r.URL.Path, "/static/") ||
-			strings.HasPrefix(r.URL.Path, "/v1/") ||
-			strings.HasPrefix(r.URL.Path, "/oauth/") ||
-			strings.HasPrefix(r.URL.Path, "/stt") {
+		if nonAppPath(r.URL.Path) {
 			http.NotFound(w, r)
 			return
 		}
-
 		if devProxy != nil {
 			devProxy.ServeHTTP(w, r)
 			return
 		}
-
-		// 尝试静态文件
 		path := r.URL.Path
 		if path == "/" {
 			path = "/index.html"
 		}
-
-		// 检查文件是否存在
-		f, err := sub.Open(strings.TrimPrefix(path, "/"))
-		if err == nil {
-			f.Close()
-			fileServer.ServeHTTP(w, r)
+		if diskFS != nil {
+			if f, err := diskFS.Open(strings.TrimPrefix(path, "/")); err == nil {
+				f.Close()
+				diskSrv.ServeHTTP(w, r)
+				return
+			}
+			r.URL.Path = "/"
+			diskSrv.ServeHTTP(w, r)
 			return
 		}
-
-		// SPA fallback: 返回 index.html
+		if f, err := sub.Open(strings.TrimPrefix(path, "/")); err == nil {
+			f.Close()
+			embedded.ServeHTTP(w, r)
+			return
+		}
 		r.URL.Path = "/"
-		fileServer.ServeHTTP(w, r)
+		embedded.ServeHTTP(w, r)
 	})
 }

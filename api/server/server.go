@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"html/template"
 	"io/ioutil"
 	"log"
@@ -31,6 +33,7 @@ type Server struct {
 	upgrader      *websocket.Upgrader
 	indexTemplate *template.Template
 	titleTemplate *noesctmpl.Template
+	assetVersion  string
 }
 
 // New creates a new instance of Server.
@@ -57,6 +60,14 @@ func New(factory Factory, options *Options) (*Server, error) {
 		return nil, errors.Wrapf(err, "failed to parse window title format `%s`", options.TitleFormat)
 	}
 
+	// Cache-bust the embedded gotty bundle: a content hash appended as ?v=…
+	// changes whenever the bundle does, so browsers don't serve a stale copy.
+	assetVersion := "dev"
+	if bundle, e := Asset("static/js/gotty-bundle.js"); e == nil {
+		sum := sha256.Sum256(bundle)
+		assetVersion = hex.EncodeToString(sum[:])[:12]
+	}
+
 	var originChekcer func(r *http.Request) bool
 	if options.WSOrigin != "" {
 		matcher, err := regexp.Compile(options.WSOrigin)
@@ -80,6 +91,7 @@ func New(factory Factory, options *Options) (*Server, error) {
 		},
 		indexTemplate: indexTemplate,
 		titleTemplate: titleTemplate,
+		assetVersion:  assetVersion,
 	}, nil
 }
 

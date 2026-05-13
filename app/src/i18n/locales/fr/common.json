@@ -7,5 +7,9 @@
   "language": "Langue",
   "languageAuto": "Auto (navigateur)",
   "languageEnglish": "English",
-  "languageChinese": "简体中文"
+  "languageChinese": "简体中文",
+  "wsConnecting": "Connexion au serveur…",
+  "wsConnectingRetry": "Connexion au serveur… (essai {{n}}/3)",
+  "wsConnectError": "Erreur réseau — serveur injoignable",
+  "wsReconnect": "Reconnecter"
 }

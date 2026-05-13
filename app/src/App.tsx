@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DialogProvider } from './contexts/DialogContext';
-import { AppProvider } from './contexts/AppContext';
+import { AppProvider, useApp } from './contexts/AppContext';
 import Workspace from './components/Workspace';
 import Login from './components/Login';
 import ProvisionScreen from './components/ProvisionScreen';
@@ -10,6 +10,8 @@ import { TokenManager } from './services/tokenManager';
 import DevPanel from './components/dev/DevPanel';
 import apiService from './services/api';
 import config from './config';
+import { useTranslation } from 'react-i18next';
+import { chatWs } from './services/chatWs';
 
 type ViewType = 'desktop' | 'workspace' | 'audit';
 
@@ -23,6 +25,57 @@ function parseHash(): { view: ViewType; agentId: string } {
     return { view: 'workspace', agentId: m ? decodeURIComponent(m[1]).replace(/:.*$/, '') : 'w-10001' };
   }
   return { view: 'desktop', agentId: 'w-10001' };
+}
+
+// After login + token verify, the workspace is only usable once the realtime
+// chat-ws is up (agent status, system stats, live AI all flow over it). Mount
+// the workspace (so it configures/connects the ws) but cover it with a full
+// screen overlay until connected; after a few failed attempts show an error
+// with a "reconnect" button. Once connected once, never block again on a later
+// transient drop (the in-app network indicator shows that, and it auto-retries).
+function WsGate({ children }: { children: any }) {
+  const { t } = useTranslation('common');
+  const { globalLoaded, loadGlobalVar } = useApp();
+  const [connected, setConnected] = useState<boolean>(() => chatWs.isConnected());
+  const [attempts, setAttempts] = useState<number>(() => chatWs.currentAttempts());
+  const [everReady, setEverReady] = useState<boolean>(false);
+
+  useEffect(() => chatWs.onConnectedChange(setConnected), []);
+  useEffect(() => chatWs.onAttemptsChange(setAttempts), []);
+
+  const ready = connected && globalLoaded;
+  useEffect(() => { if (ready) setEverReady(true); }, [ready]);
+
+  const blocking = !ready && !everReady;
+  const shownAttempts = Math.min(attempts, 3);
+  const failed = blocking && attempts >= 3 && !connected;
+  return (
+    <>
+      {children}
+      {blocking ? (
+        <div data-id="ws-connect-gate" className="fixed inset-0 z-[9999] bg-[#0A0A0A] flex flex-col items-center justify-center gap-4">
+          {failed ? (
+            <>
+              <div data-id="ws-connect-error" className="text-sm text-zinc-300">{t('wsConnectError')}</div>
+              <button
+                type="button"
+                data-id="ws-connect-retry"
+                className="rounded-md border border-white/15 bg-white/[0.06] px-4 py-1.5 text-sm text-zinc-200 transition-colors hover:bg-white/[0.10]"
+                onClick={() => { chatWs.forceReconnect(); loadGlobalVar(); }}
+              >
+                {t('wsReconnect')}
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+              <div className="text-xs text-zinc-500">{shownAttempts > 0 ? t('wsConnectingRetry', { n: shownAttempts }) : t('wsConnecting')}</div>
+            </>
+          )}
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 function Main() {
@@ -88,7 +141,7 @@ function Main() {
 
   // #/agent/xxx or default → Workspace
   const agentId = route.view === 'workspace' ? route.agentId : 'w-10001';
-  return <Workspace agentId={agentId} onSelectAgent={selectAgent} />;
+  return <WsGate><Workspace agentId={agentId} onSelectAgent={selectAgent} /></WsGate>;
 }
 
 export default function App() {
