@@ -53,6 +53,8 @@ const LEFT_PANEL_WIDTH = 320;
 const CLI_DRAWER_WIDTH_KEY = 'ws_cliDrawerWidth';
 const CLI_CONTENT_MODE_KEY = 'ws_cliContentMode';
 const cliContentTabKey = (paneId: string) => `TeamPanel:${paneId}.paneId:cliContentTab`;
+const leftPanelKey = (masterAgentId: string) => `ws_leftPanel:${masterAgentId}`;
+const cliContentOpenKey = (masterAgentId: string) => `ws_cliContentOpen:${masterAgentId}`;
 const chatClientIdStorageKey = (masterAgentId: string) => `cicy_chat_client_id:${masterAgentId}`;
 function makePageClientId(masterAgentId: string): string {
   const m = String(masterAgentId || 'w-10001').replace(/[^a-zA-Z0-9_-]/g, '') || 'w';
@@ -325,13 +327,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
 
   const mainTab: 'cli' | 'chat' = 'cli';
   const [leftPanelView, setLeftPanelView] = useState<LeftPanelView>(() => {
-    const v = cache.get('ws_leftPanel', null);
+    const v = cache.get(leftPanelKey(paneId), null);
     if (v === 'team' || v === 'skills') return v;
+    if (v === 'closed') return null;
     return 'team';
   });
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorRequestedTab, setInspectorRequestedTab] = useState<InspectorTab>('overview');
-  const [cliContentOpen, setCliContentOpen] = useState(true);
+  const [cliContentOpen, setCliContentOpen] = useState(() => cache.get(cliContentOpenKey(paneId), false) === true);
   const [cliContentTab, setCliContentTab] = useState<WorkspaceCliContentTab>(() => normalizeCliContentTab(cache.get(cliContentTabKey(paneId), 'files')));
   const [cliContentMode, setCliContentMode] = useState<CliContentMode>('fixed');
   const [cliDrawerWidth, setCliDrawerWidth] = useState(() => clampCliDrawerWidth(Number(cache.get(CLI_DRAWER_WIDTH_KEY, CLI_DRAWER_DEFAULT_WIDTH))));
@@ -475,10 +478,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }, []);
 
   useEffect(() => {
-    cache.set('ws_leftPanel', leftActive === 'team' || leftActive === 'skills' ? leftActive : null);
-  }, [leftActive]);
+    cache.set(leftPanelKey(paneId), leftActive === 'team' || leftActive === 'skills' ? leftActive : 'closed');
+  }, [leftActive, paneId]);
   useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, activeTeamPaneId); }, [activeTeamPaneId]);
   useEffect(() => { cache.set(CLI_DRAWER_WIDTH_KEY, cliDrawerWidth); }, [cliDrawerWidth]);
+  useEffect(() => { cache.set(cliContentOpenKey(paneId), cliContentOpen); }, [cliContentOpen, paneId]);
   useEffect(() => {
     cache.set(CLI_CONTENT_MODE_KEY, 'fixed');
   }, []);
@@ -1175,8 +1179,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       ref={cliContentPanelRef}
       data-id="cli-content-fixed"
       className={cn(
-        'relative flex h-full min-w-0 shrink-0 flex-col bg-[#0b0b0d]',
-        'border-l border-[var(--vsc-border)]'
+        'relative h-full min-w-0 shrink-0 flex-col bg-[#0b0b0d]',
+        'border-l border-[var(--vsc-border)]',
+        cliContentOpen ? 'flex' : 'hidden'
       )}
       style={{ width: `${cliDrawerWidth}px` }}
     >
@@ -1295,7 +1300,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       </div>
     </div>
   );
-  const cliFixedContent = cliContentOpen ? renderCliContentPanel() : null;
+  const cliFixedContent = renderCliContentPanel();
   const stackHeaderControls = (targetPaneId: string) => targetPaneId === activeCliPaneId ? (
     <>
       <SystemResourceMonitor paneId={paneId} />

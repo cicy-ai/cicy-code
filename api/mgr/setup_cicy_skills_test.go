@@ -57,7 +57,7 @@ func TestNeedsCicySkillsInstall(t *testing.T) {
 		filepath.Join(home, ".local", "bin", "agent-webpage"),
 		filepath.Join(home, ".codex", "skills", "agent-code-server", "SKILL.md"),
 		filepath.Join(home, ".claude", "skills", "agent-code-server", "SKILL.md"),
-		filepath.Join(home, ".openclaw", "skills", "agent-code-server", "SKILL.md"),
+		filepath.Join(home, ".opencode", "skills", "agent-code-server", "SKILL.md"),
 	}
 	for _, path := range required {
 		if err := ensureRuntimeDir(filepath.Dir(path), 0755); err != nil {
@@ -103,7 +103,7 @@ func TestCicySkillsInstallScriptIncludesReleaseAndSkillSync(t *testing.T) {
 		"/cicy-skills/dist",
 		"export NPM_CONFIG_REGISTRY=\"https://registry.npmmirror.com\"",
 		"install all",
-		"agent sync openclaw",
+		"agent sync opencode",
 	} {
 		if !strings.Contains(script, part) {
 			t.Fatalf("install script missing %q:\n%s", part, script)

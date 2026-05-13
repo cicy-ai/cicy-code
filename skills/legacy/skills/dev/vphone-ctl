@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""vphone-ctl — Remote control vphone window via Accessibility + screencapture."""
+import subprocess, sys, json, re, time
+
+APP_NAME = "vphone-cli"
+
+def get_window():
+    """Get vphone window position and size."""
+    out = subprocess.check_output(["ax-tree", "windows"], text=True)
+    for w in json.loads(out):
+        if w.get("app") == APP_NAME:
+            return w
+    return None
+
+def get_window_geometry(pid):
+    """Get window pos and size from ax-tree."""
+    out = subprocess.check_output(["ax-tree", str(pid), "1"], text=True)
+    data = json.loads(out)
+    for child in data.get("children", []):
+        if child.get("role") == "AXWindow":
+            pos = child.get("pos", "0,0")
+            size = child.get("size", "0x0")
+            x, y = map(float, pos.split(","))
+            w, h = map(float, size.split("x"))
+            return x, y, w, h
+    return None
+
+def screenshot(output_path="/tmp/vphone_view.png"):
+    """Capture just the vphone window."""
+    w = get_window()
+    if not w:
+        print("vphone window not found", file=sys.stderr)
+        sys.exit(1)
+    geo = get_window_geometry(w["pid"])
+    if not geo:
+        print("cannot get window geometry", file=sys.stderr)
+        sys.exit(1)
+    wx, wy, ww, wh = geo
+    # screencapture -R x,y,w,h captures a region
+    subprocess.run(["screencapture", "-x", "-R", f"{int(wx)},{int(wy)},{int(ww)},{int(wh)}", output_path])
+    print(output_path)
+
+def tap(rx, ry):
+    """Tap at relative coordinates (0.0-1.0) within the vphone window."""
+    w = get_window()
+    if not w:
+        print("vphone window not found", file=sys.stderr)
+        sys.exit(1)
+    geo = get_window_geometry(w["pid"])
+    if not geo:
+        print("cannot get window geometry", file=sys.stderr)
+        sys.exit(1)
+    wx, wy, ww, wh = geo
+    # title bar offset ~28px
+    content_y = wy + 28
+    content_h = wh - 28
+    ax = wx + ww * rx
+    ay = content_y + content_h * ry
+    _click(ax, ay)
+    print(f"tapped ({rx:.2f},{ry:.2f}) -> ({ax:.0f},{ay:.0f})")
+
+def tap_abs(x, y):
+    """Tap at absolute pixel coordinates within the vphone window content."""
+    w = get_window()
+    if not w:
+        print("vphone window not found", file=sys.stderr)
+        sys.exit(1)
+    geo = get_window_geometry(w["pid"])
+    if not geo:
+        print("cannot get window geometry", file=sys.stderr)
+        sys.exit(1)
+    wx, wy, ww, wh = geo
+    ax = wx + x
+    ay = wy + 28 + y  # title bar offset
+    _click(ax, ay)
+    print(f"tapped abs ({x},{y}) -> ({ax:.0f},{ay:.0f})")
+
+def swipe(rx1, ry1, rx2, ry2, duration=0.3):
+    """Swipe from (rx1,ry1) to (rx2,ry2) in relative coords."""
+    w = get_window()
+    if not w:
+        print("vphone window not found", file=sys.stderr)
+        sys.exit(1)
+    geo = get_window_geometry(w["pid"])
+    if not geo:
+        return
+    wx, wy, ww, wh = geo
+    cy = wy + 28
+    ch = wh - 28
+    x1, y1 = wx + ww * rx1, cy + ch * ry1
+    x2, y2 = wx + ww * rx2, cy + ch * ry2
+    _drag(x1, y1, x2, y2, duration)
+    print(f"swiped ({rx1:.2f},{ry1:.2f})->({rx2:.2f},{ry2:.2f})")
+
+def _click(x, y):
+    subprocess.run(["python3", "-c", f"""
+import Quartz, time
+e=Quartz.CGEventCreateMouseEvent(None,Quartz.kCGEventLeftMouseDown,({x},{y}),0)
+Quartz.CGEventPost(Quartz.kCGHIDEventTap,e)
+time.sleep(0.05)
+e2=Quartz.CGEventCreateMouseEvent(None,Quartz.kCGEventLeftMouseUp,({x},{y}),0)
+Quartz.CGEventPost(Quartz.kCGHIDEventTap,e2)
+"""])
+
+def _drag(x1, y1, x2, y2, duration=0.3):
+    steps = max(int(duration * 60), 10)
+    subprocess.run(["python3", "-c", f"""
+import Quartz, time
+x1,y1,x2,y2,steps={x1},{y1},{x2},{y2},{steps}
+e=Quartz.CGEventCreateMouseEvent(None,Quartz.kCGEventLeftMouseDown,(x1,y1),0)
+Quartz.CGEventPost(Quartz.kCGHIDEventTap,e)
+for i in range(1,steps+1):
+    t=i/steps
+    x=x1+(x2-x1)*t; y=y1+(y2-y1)*t
+    e=Quartz.CGEventCreateMouseEvent(None,Quartz.kCGEventLeftMouseDragged,(x,y),0)
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap,e)
+    time.sleep({duration}/steps)
+e=Quartz.CGEventCreateMouseEvent(None,Quartz.kCGEventLeftMouseUp,(x2,y2),0)
+Quartz.CGEventPost(Quartz.kCGHIDEventTap,e)
+"""])
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: vphone-ctl <command> [args]")
+        print("  screenshot [path]     — capture vphone window")
+        print("  tap <rx> <ry>         — tap relative (0-1)")
+        print("  tap-abs <x> <y>       — tap absolute pixel")
+        print("  swipe <rx1> <ry1> <rx2> <ry2> — swipe")
+        print("  info                  — show window info")
+        sys.exit(1)
+
+    cmd = sys.argv[1]
+    if cmd == "screenshot":
+        screenshot(sys.argv[2] if len(sys.argv) > 2 else "/tmp/vphone_view.png")
+    elif cmd == "tap":
+        tap(float(sys.argv[2]), float(sys.argv[3]))
+    elif cmd == "tap-abs":
+        tap_abs(float(sys.argv[2]), float(sys.argv[3]))
+    elif cmd == "swipe":
+        swipe(float(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4]), float(sys.argv[5]))
+    elif cmd == "info":
+        w = get_window()
+        if w:
+            geo = get_window_geometry(w["pid"])
+            print(f"pid: {w['pid']}, title: {w.get('title','')}")
+            if geo: print(f"pos: ({geo[0]},{geo[1]}), size: {geo[2]}x{geo[3]}")
+        else:
+            print("vphone window not found")
+    else:
+        print(f"unknown command: {cmd}")

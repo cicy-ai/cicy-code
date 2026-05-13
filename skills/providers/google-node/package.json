@@ -1,0 +1,21 @@
+{
+  "name": "@cicy-ai/cicy-skills-google-node",
+  "version": "1.0.0",
+  "description": "Embedded Google API Node provider for cicy-skills",
+  "main": "lib.js",
+  "bin": {
+    "gmail": "cli.js",
+    "google": "google.js"
+  },
+  "scripts": {
+    "auth": "node scripts/get-token.js",
+    "test": "node --test test/*.test.js",
+    "test:live": "node test/live.integration.js"
+  },
+  "keywords": ["gmail", "cli", "oauth2"],
+  "author": "cicy-ai",
+  "license": "ISC",
+  "dependencies": {
+    "googleapis": "^171.4.0"
+  }
+}
