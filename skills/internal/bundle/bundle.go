@@ -74,6 +74,13 @@ var (
 		{Name: "tg-bot-check", Source: "legacy/skills/services/tg-bot-check.sh"},
 		{Name: "vphone-ctl", Source: "legacy/skills/dev/vphone-ctl"},
 		{Name: "xui", Source: "legacy/skills/dev/xui"},
+		// Top-level standalone scripts (Python/Bash) — still being Go-ified per
+		// migrations/SKILL_DEV_GUIDE.md. Symlink them onto PATH directly.
+		{Name: "proxy_ssh", Source: "proxy_ssh"},
+		{Name: "us-spot-dev", Source: "us-spot-dev"},
+		{Name: "us-spot-proxy", Source: "us-spot-proxy"},
+		{Name: "cicy-master", Source: "cicy-master"},
+		{Name: "hk-spot-dev", Source: "hk-spot-dev"},
 	}
 	CommandGroups = []CommandGroup{
 		{Name: "Core", Commands: []string{"cicy-skills", "cicy-skillsd", "cicy-hosttools", "stt", "tts"}},
