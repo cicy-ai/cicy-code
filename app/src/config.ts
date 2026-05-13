@@ -24,7 +24,6 @@ function inferApiBase(): string {
     }
   }
 
-  if (hostname === 'dev.cicy-ai.com') return 'https://dev-api.cicy-ai.com';
   if (hostname === 'app.cicy-ai.com' || hostname === 'api.cicy-ai.com' || /^audit\./.test(hostname)) return origin;
   if (isTunnelHost) return managedBase;
 
