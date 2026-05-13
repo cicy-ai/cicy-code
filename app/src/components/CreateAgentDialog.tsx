@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Loader2, X, Zap } from 'lucide-react';
+import { X, Zap } from 'lucide-react';
+import { Spinner } from './ui/Spinner';
 import { useTranslation } from 'react-i18next';
 import { useApp } from '../contexts/AppContext';
 import { useDevRegister } from '../lib/devStore';
@@ -209,7 +210,7 @@ export default function CreateAgentDialog({
             disabled={!canSubmit || agentTypeOptions.length === 0}
             className="flex cursor-pointer items-center gap-2 rounded-lg bg-blue-500/20 px-4 py-2 text-sm font-medium text-blue-300 transition-all hover:bg-blue-500/25 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+            {submitting ? <Spinner size="sm" /> : <Zap className="h-4 w-4" />}
             {submitting ? t('submitting') : resolvedSubmitLabel}
           </button>
         </div>

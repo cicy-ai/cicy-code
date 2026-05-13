@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { useApp } from '../../contexts/AppContext';
+import { Spinner } from '../ui/Spinner';
 
 type HistoryTurn = {
   history_id?: number;
@@ -1376,7 +1377,7 @@ export default function CurrentHistoryView({
         <div data-id="current-history-list" data-agent-id={paneId || ''} className="mx-auto max-w-full px-2 py-4 font-sans text-zinc-300">
           {loading ? (
             <div data-id="current-history-loading" className="flex flex-col items-center justify-center gap-3 pt-20">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-vsc-accent/30 border-t-vsc-accent" />
+              <Spinner size="lg" />
               <span className="text-base text-zinc-500">{t('loadingHistory')}</span>
             </div>
           ) : items.length === 0 ? (

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Position } from '../types';
 import { lockPointer, unlockPointer } from '../lib/pointerLock';
 import { useDevRegister } from '../lib/devStore';
+import { Spinner } from './ui/Spinner';
 
 interface VoiceFloatingButtonProps {
   initialPosition: Position;
@@ -176,7 +177,7 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
           {dragMode ? (
               <Move size={32} className="text-white" />
           ) : isLoading ? (
-              <div className="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+              <Spinner size="lg" className="!h-10 !w-10 !border-4" />
           ) : (
               <Mic size={40} className={`transition-all duration-200 ${isPressed ? 'text-white scale-110' : 'text-vsc-text'}`} />
           )}

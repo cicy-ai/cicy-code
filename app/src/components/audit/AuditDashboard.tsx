@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
-import { BarChart3, Activity, Zap, Settings, ArrowLeft, RefreshCw, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu } from 'lucide-react';
+import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu } from 'lucide-react';
+import { Spinner } from '../ui/Spinner';
 import apiService from '../../services/api';
 import config from '../../config';
 import { TokenManager } from '../../services/tokenManager';
@@ -117,7 +118,7 @@ function OverviewTab({ userId, days, setDays }: { userId: string; days: number; 
       .finally(() => setLoading(false));
   }, [userId, days]);
 
-  if (loading) return <div className="flex items-center justify-center h-64 text-[var(--vsc-text-secondary)]"><RefreshCw size={20} className="animate-spin mr-2" /> {t('loading')}</div>;
+  if (loading) return <div className="flex items-center justify-center h-64 gap-2 text-[var(--vsc-text-secondary)]"><Spinner size="md" /> {t('loading')}</div>;
   if (!data) return <div className="text-center text-[var(--vsc-text-secondary)] py-12">{t('noData')}</div>;
 
   const dailyReversed = [...data.daily].reverse();
@@ -200,7 +201,7 @@ function UsageTab({ userId }: { userId: string }) {
       .finally(() => setLoading(false));
   }, [userId]);
 
-  if (loading) return <div className="flex items-center justify-center h-64 text-[var(--vsc-text-secondary)]"><RefreshCw size={20} className="animate-spin mr-2" /> {t('loading')}</div>;
+  if (loading) return <div className="flex items-center justify-center h-64 gap-2 text-[var(--vsc-text-secondary)]"><Spinner size="md" /> {t('loading')}</div>;
 
   const exportCSV = () => {
     const header = 'time,method,host,url,status,provider,model,input_tokens,output_tokens,cost_usd\n';

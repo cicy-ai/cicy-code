@@ -1,6 +1,6 @@
 import React, { forwardRef, useState, useRef, useEffect, useCallback } from 'react';
-import { Loader2 } from 'lucide-react';
 import { useDevRegister } from '../lib/devStore';
+import { Spinner } from './ui/Spinner';
 import { usePointerLock } from '../lib/pointerLock';
 import { WEB_FRAME_MASK_EVENT, WebFrameMaskEventDetail } from '../lib/webFrameMask';
 
@@ -188,7 +188,7 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
         <>
           {isLoading && (
             <div data-id="web-frame-loading" className="absolute inset-0 flex items-center justify-center bg-vsc-bg z-10">
-              <Loader2 className="animate-spin" />
+              <Spinner size="md" />
             </div>
           )}
           {(pointerLocked || maskActive) && <div data-id="web-frame-interaction-mask" className="absolute inset-0 z-20" />}
@@ -213,7 +213,7 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
         <>
         {isLoading && (
           <div data-id="web-frame-loading" className="absolute inset-0 flex items-center justify-center bg-vsc-bg z-10">
-            <Loader2 className="animate-spin" />
+            <Spinner size="md" />
           </div>
         )}
         {(pointerLocked || maskActive) && <div data-id="web-frame-interaction-mask" className="absolute inset-0 z-20" />}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next';
-import { Loader2, X } from 'lucide-react'
+import { X } from 'lucide-react'
+import { Spinner } from '../ui/Spinner'
 import i18n from '../../i18n'
 import apiService from '../../services/api'
 import { appendHistoryItems, getHistoryMeta, getRecentHistoryItems, replaceHistoryBase, type HistorySyncItem } from '../../lib/historyCache'
@@ -136,7 +137,7 @@ export default function AgentHistoryOverlay({ paneId, open, onClose }: { paneId:
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        {loading ? <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />{t('overlayLoading')}</div> : null}
+        {loading ? <div className="flex items-center gap-2 text-sm text-zinc-500"><Spinner size="sm" />{t('overlayLoading')}</div> : null}
         {error ? <div className="mb-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div> : null}
         <div className="space-y-4">
           {turns.map((turn) => (

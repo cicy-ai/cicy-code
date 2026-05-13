@@ -206,6 +206,9 @@ func (server *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// index.html embeds gotty-bundle.js?v=<hash>; if the html itself is
+	// cached, the browser won't see new hashes — never cache it.
+	w.Header().Set("Cache-Control", "no-cache")
 	w.Write(indexBuf.Bytes())
 }
 

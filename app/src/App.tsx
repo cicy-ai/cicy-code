@@ -12,6 +12,7 @@ import apiService from './services/api';
 import config from './config';
 import { useTranslation } from 'react-i18next';
 import { chatWs } from './services/chatWs';
+import { Spinner } from './components/ui/Spinner';
 
 type ViewType = 'desktop' | 'workspace' | 'audit';
 
@@ -68,7 +69,7 @@ function WsGate({ children }: { children: any }) {
             </>
           ) : (
             <>
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+              <Spinner size="md" />
               <div className="text-xs text-zinc-500">{shownAttempts > 0 ? t('wsConnectingRetry', { n: shownAttempts }) : t('wsConnecting')}</div>
             </>
           )}
@@ -115,10 +116,9 @@ function Main() {
     window.location.reload();
   }, []);
 
-  // Loading spinner
   if (isChecking) return (
     <div data-id="loading-spinner" className="h-screen bg-[#0A0A0A] flex items-center justify-center">
-      <div className="w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
+      <Spinner size="md" />
     </div>
   );
 

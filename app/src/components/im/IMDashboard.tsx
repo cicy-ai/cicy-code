@@ -3,11 +3,12 @@ import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import { createPortal } from 'react-dom';
 import {
-  ArrowLeft, MessageCircle, Plus, RefreshCw, Save, Trash2, Zap, Eye, EyeOff, Check, X, Loader2,
+  ArrowLeft, MessageCircle, Plus, RefreshCw, Save, Trash2, Zap, Eye, EyeOff, Check, X,
   Send, Link2, QrCode, ChevronDown, ExternalLink,
 } from 'lucide-react';
 import apiService from '../../services/api';
 import { useDialogs } from '../ui/Modal';
+import { Spinner } from '../ui/Spinner';
 
 /* ───────────── types ───────────── */
 
@@ -95,7 +96,7 @@ function Btn({ variant = 'secondary', icon, children, busy, className, ...rest }
   };
   return (
     <button {...rest} className={cn('inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-3 text-[13px] transition-colors disabled:cursor-not-allowed', styles[variant], className)}>
-      {busy ? <Loader2 size={14} className="animate-spin" /> : icon}{children}
+      {busy ? <Spinner size="sm" /> : icon}{children}
     </button>
   );
 }
@@ -487,7 +488,7 @@ export default function IMDashboard({ onBack }: { onBack?: () => void }) {
                           {qrUrl ? (
                             <img src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(qrUrl)}`} alt="WeChat login QR" className="h-[180px] w-[180px] rounded-lg bg-white p-1" />
                           ) : (
-                            <div className="grid h-[180px] w-[180px] place-items-center rounded-lg border border-dashed border-white/[0.1] text-[12px] text-zinc-600"><Loader2 size={18} className="animate-spin" /></div>
+                            <div className="grid h-[180px] w-[180px] place-items-center rounded-lg border border-dashed border-white/[0.1] text-[12px] text-zinc-600"><Spinner size="md" /></div>
                           )}
                           <div className="space-y-2 text-[12px] text-zinc-500">
                             <p>{t('wechatStep1')}</p>
@@ -564,7 +565,7 @@ export default function IMDashboard({ onBack }: { onBack?: () => void }) {
                   {wxLogin.qrcodeUrl ? (
                     <img src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(wxLogin.qrcodeUrl)}`} alt="WeChat login QR" className="h-[200px] w-[200px] rounded-lg bg-white p-1" />
                   ) : (
-                    <div className="grid h-[200px] w-[200px] place-items-center rounded-lg border border-dashed border-white/[0.1] text-[12px] text-zinc-600"><Loader2 size={18} className="animate-spin" /></div>
+                    <div className="grid h-[200px] w-[200px] place-items-center rounded-lg border border-dashed border-white/[0.1] text-[12px] text-zinc-600"><Spinner size="md" /></div>
                   )}
                   <div className="text-[13px] text-zinc-300">{wxLogin.detail || (wxLogin.state === 'scaned' ? t('alreadyScanned') : t('scanWithWeChat'))}</div>
                   <div className="text-[11px] text-zinc-600">{t('scanSuccessNote')}</div>
