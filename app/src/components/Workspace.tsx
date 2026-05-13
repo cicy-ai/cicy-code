@@ -949,24 +949,17 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCliContentOpen(true);
     const targetPagePane = String(paneId || '').trim();
     const targetClientId = `${pageClientId}:code-ext`;
-    fetch('/api/chat/push', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    apiService.chatPush({
+      agent_id: targetPagePane,
+      client_id: targetClientId,
+      type: 'host.open_file',
+      data: {
+        path: filePath,
+        requestId: String(requestId || '').trim(),
+        page_client_id: pageClientId,
+        code_client_id: targetClientId,
+        page_pane: targetPagePane,
       },
-      body: JSON.stringify({
-        agent_id: targetPagePane,
-        client_id: targetClientId,
-        type: 'host.open_file',
-        data: {
-          path: filePath,
-          requestId: String(requestId || '').trim(),
-          page_client_id: pageClientId,
-          code_client_id: targetClientId,
-          page_pane: targetPagePane,
-        },
-      }),
     }).catch(() => {});
   }, [pageClientId, paneId, token]);
 

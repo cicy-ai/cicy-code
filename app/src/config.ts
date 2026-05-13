@@ -72,7 +72,7 @@ export function setHostHome(home: string) {
   }
 }
 
-export function inferHostHomeFromPath(path: string | null | undefined): string | null {
+function inferHostHomeFromPath(path: string | null | undefined): string | null {
   const value = (path || '').trim();
   if (!value || value.startsWith('~')) return null;
   const match = value.match(/^(\/(?:home\/[^/]+|root))(?:\/|$)/);
@@ -85,7 +85,7 @@ export function syncHostHomeFromPath(path: string | null | undefined): string | 
   return inferred;
 }
 
-export function toRuntimeAbsolutePath(path: string): string {
+function toRuntimeAbsolutePath(path: string): string {
   return path.replace(/^~(?=\/|$)/, getHostHome());
 }
 

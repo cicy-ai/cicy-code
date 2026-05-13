@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Plus, Trash2, Check } from 'lucide-react';
 import { getApiBase, setApiBase } from '../../config';
+import api from '../../services/api';
 
 const LS_PRESETS = 'cicy_api_presets';
 const TOKEN_KEY = 'api_token';
@@ -68,13 +69,7 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
 
     setTesting(true); setError('');
     try {
-      const res = await fetch(`${baseUrl.replace(/\/$/, '')}/api/auth/verify-token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
-        signal: AbortSignal.timeout(5000),
-      });
-      const data = await res.json();
+      const { data } = await api.verifyTokenAt(baseUrl, token);
       if (!data.valid) { setError(t('errorTokenInvalid')); return; }
     } catch (e: any) {
       setError(t('errorConnect', { message: e.message || t('errorConnectUnknown') })); return;

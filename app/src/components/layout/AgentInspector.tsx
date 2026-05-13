@@ -6,7 +6,7 @@ import { Trans, useTranslation } from 'react-i18next';
 import config from '../../config';
 import apiService from '../../services/api';
 import { TokenManager } from '../../services/tokenManager';
-import type { EditPaneData } from '../EditPaneDialog';
+import type { EditPaneData } from '../../types';
 import AgentAvatar from '../AgentAvatar';
 import Select, { type SelectOption } from '../ui/Select';
 import { normalizeAgentType } from '../../lib/agentType';

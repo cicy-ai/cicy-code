@@ -95,14 +95,14 @@ import jaTerminal from './locales/ja/terminal.json';
 import jaUi from './locales/ja/ui.json';
 import jaWorkspace from './locales/ja/workspace.json';
 
-export const STORAGE_KEY = 'cicy.lang';
+const STORAGE_KEY = 'cicy.lang';
 
 /**
  * Languages we ship full translation bundles for. Adding a new code here
  * requires a matching `locales/<code>/<ns>.json` for every namespace.
  */
 export const TRANSLATED_LNGS = ['en', 'zh-CN', 'fr', 'ja'] as const;
-export type TranslatedLng = (typeof TRANSLATED_LNGS)[number];
+type TranslatedLng = (typeof TRANSLATED_LNGS)[number];
 
 /**
  * Languages offered in the in-app picker. The picker uses Intl.DisplayNames
@@ -111,7 +111,7 @@ export type TranslatedLng = (typeof TRANSLATED_LNGS)[number];
  * i18n.language and <html lang>, but every t() call falls back to English
  * (fallbackLng below).
  */
-export const SUPPORTED_LNGS = [
+const SUPPORTED_LNGS = [
   // East Asia
   'en', 'zh-CN', 'ja', 'ko',
   // SE Asia
@@ -135,7 +135,7 @@ export const SUPPORTED_LNGS = [
   // Africa
   'sw', 'am', 'ha', 'yo', 'ig', 'zu', 'xh', 'af', 'so', 'rw', 'om', 'sn',
 ] as const;
-export type SupportedLng = (typeof SUPPORTED_LNGS)[number];
+type SupportedLng = (typeof SUPPORTED_LNGS)[number];
 
 const resources = {
   en: {

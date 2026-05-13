@@ -86,10 +86,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
       const code = params.get("code");
       if (code && config.isWorkspace) {
         try {
-          const resp = await fetch(
-            `${config.mgrBase}/api/auth/exchange?code=${code}`,
-          );
-          const data = await resp.json();
+          const { data } = await apiService.exchangeOAuthCode(code);
           if (data.status === "ok" && data.token) {
             TokenManager.saveToken(data.token);
             setToken(data.token);

@@ -29,10 +29,6 @@ export function setBackend(url: string | null) {
   else localStorage.removeItem(BACKEND_KEY);
 }
 
-export function getBackend(): string {
-  return localStorage.getItem(BACKEND_KEY) || config.apiBase;
-}
-
 function unwrapTmuxSend<T extends { success?: boolean; error?: string; detail?: string }>(promise: Promise<{ data: T }>) {
   return promise.then((resp) => {
     const errorText = String(resp.data?.error || resp.data?.detail || '').trim();
@@ -48,7 +44,9 @@ function unwrapTmuxSend<T extends { success?: boolean; error?: string; detail?: 
 
 const api = {
   verifyToken: (token?: string) => http.post('/api/auth/verify-token', token ? { token } : null, { baseURL: config.mgrBase }),
+  verifyTokenAt: (baseUrl: string, token: string) => http.post('/api/auth/verify-token', { token }, { baseURL: baseUrl.replace(/\/$/, ''), timeout: 5000 }),
   verifyAuth: (token: string) => http.get('/api/auth/verify', { baseURL: config.isWorkspace ? config.apiBase : config.mgrBase, headers: { Authorization: `Bearer ${token}` } }),
+  exchangeOAuthCode: (code: string) => http.get('/api/auth/exchange', { baseURL: config.mgrBase, params: { code } }),
 
   getPanes: () => {
     if (pendingPanesRequest) return pendingPanesRequest;
@@ -144,6 +142,7 @@ const api = {
   getTrafficStats: (pane: string, minutes = 60, interval = 1) => http.get(`/api/stats/traffic?pane=${pane}&minutes=${minutes}&interval=${interval}`),
   getTrafficRaw: (pane: string) => http.get(`/api/stats/traffic/raw?pane=${pane}`),
   getChatHistory: (pane: string) => http.get(`/api/stats/chat?pane=${pane}`),
+  getChatStatsByAgent: (agentId: string) => http.get('/api/stats/chat', { params: { agent_id: agentId } }),
   getSystemResources: (cfg?: any) => http.get('/api/system/resources', cfg),
 
   getCicyFiles: (pane: string) => http.get(`/api/cicy/files?pane=${pane}`),
@@ -168,6 +167,14 @@ const api = {
   getAuditStatus: () => http.get('/api/audit/status'),
   registerAuditToken: (userId: string, plan = 'free') => http.post('/api/audit/register', { user_id: userId, plan }),
   getSetupGuide: () => http.get('/setup'),
+
+  // desktop "apps"
+  getApps: () => http.get('/api/apps'),
+  createApp: (prompt: string) => http.post('/api/apps/create', { prompt }),
+  aiChat: (messages: Array<{ role: string; content: string }>) => http.post('/api/ai/chat/stream', { messages }),
+
+  // page <-> page client bridge
+  chatPush: (data: any) => http.post('/api/chat/push', data),
 };
 
 export default api;

@@ -1,6 +1,6 @@
 import { assetUrl } from './assets'
 
-export type NormalizedAgentType = '' | 'claude' | 'codex' | 'opencode' | 'cursor' | 'kiro-cli' | 'copilot' | 'cicy-wechat' | 'cicy-feishu' | 'openclaw' | 'hermes' | 'cicy-claude'
+type NormalizedAgentType = '' | 'claude' | 'codex' | 'opencode' | 'cursor' | 'kiro-cli' | 'copilot' | 'cicy-wechat' | 'cicy-feishu' | 'openclaw' | 'hermes' | 'cicy-claude'
 
 export type AgentTypeOption = {
   value: string
@@ -8,7 +8,7 @@ export type AgentTypeOption = {
   description?: string
 }
 
-export type AgentTypeIconMeta = {
+type AgentTypeIconMeta = {
   label: string
   src?: string
   text?: string

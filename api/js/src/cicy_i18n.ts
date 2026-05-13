@@ -25,7 +25,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     tipRestartAgent: "Restart agent",
     tipReloadPage: "Reload page",
     tipPromptArea: "Prompt input area",
-    promptAreaPlaceholder: "请输入提示词",
+    promptAreaPlaceholder: "Enter your prompt…",
     enterSendPromptEnter: "Send prompt with: Enter",
     enterSendPromptShiftEnter: "Send prompt with: Shift+Enter",
     closeCliWindow: "Close CLI window",
