@@ -134,6 +134,7 @@ export class Xterm {
             fontSize: 13,
             convertEol: false,
             allowTransparency: true,
+            allowProposedApi: true,
             scrollback: 20000,
             fontFamily: "var(--cp-mono-font)",
             theme: {
