@@ -1,6 +1,6 @@
 # AGENTS.md
 
-AI Agent 技能手册。技能源文件在 `~/projects/cicy-skills/legacy/skills/`，CLI 入口在 `~/projects/cicy-skills/bin/`，全局软链接在 `~/.local/bin/`。
+AI Agent 技能手册。技能源文件在 `~/projects/cicy-code/skills/legacy/skills/`,CLI 入口直接在 `~/.local/bin/`(由 `cicy-skills install all` 建符号链接)。
 
 `cicy-skills list` 是当前技能清单的准源。
 
@@ -31,10 +31,11 @@ AI Agent 技能手册。技能源文件在 `~/projects/cicy-skills/legacy/skills
 ## 完整 Skills 目录
 
 ```
-~/projects/cicy-skills/
-├── bin/              CLI 入口 symlink
-├── legacy/skills/    技能源文件
-├── providers/        外部 provider
+~/projects/cicy-code/skills/
+├── cmd/              Go 二进制源码(cicy-skills, cicy-hosttools, ...)
+├── internal/         Go 内部包(hosttools 各 skill 实现)
+├── legacy/skills/    技能源文件(legacy 脚本)
+├── providers/        外部 provider(google-node)
 └── Makefile
 ```
 
@@ -116,7 +117,7 @@ google gmail list 5
 
 ## 当前路径
 
-- 仓库: `/home/w3c_offical/projects/cicy-skills/`
+- 仓库: `~/projects/cicy-code/skills/`
 - Workers: `/home/w3c_offical/Private/workers/`
 - Codex skills: `/home/w3c_offical/.codex/skills/`
 - 主控 pane: `w-10001`

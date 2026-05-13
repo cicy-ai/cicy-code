@@ -80,6 +80,16 @@ async function proxyScript(request, env, upstreamUrl, contentType, ctx, variant)
 function rewriteScript(body) {
   return body
     .replaceAll(
+      'https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-code/main/skills/scripts/frp/install-frpc-client.sh',
+      'https://install.cicy-ai.com/frp'
+    )
+    .replaceAll(
+      'https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-code/main/skills/scripts/frp/install-frpc-client.ps1',
+      'https://install.cicy-ai.com/frp'
+    )
+    // Backwards-compat: also rewrite the old cicy-skills URLs if any older
+    // scripts still reference them in the wild.
+    .replaceAll(
       'https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.sh',
       'https://install.cicy-ai.com/frp'
     )

@@ -29,7 +29,8 @@ GITHUB_KEY = os.path.expanduser("~/.ssh/id_ed25519_cicy_ai")
 RSA_KEY = os.path.expanduser("~/.ssh/id_rsa")
 CICY_AI_DIR = os.path.expanduser("~/cicy-ai")
 CICY_CODE_REPO = "git@github-cicy-ai:cicy-ai/cicy-code.git"
-CICY_SKILLS_REPO = "git@github-cicy-ai:cicy-ai/cicy-skills.git"
+# cicy-skills source is now vendored under cicy-code/skills/. The
+# standalone cicy-ai/cicy-skills.git repo is frozen — we no longer clone it.
 MIHOMO_LINUX_BIN = os.path.expanduser("~/projects/cicy-mihomo/bin/mihomo-linux-amd64")
 IMAGE_REF = "cicybot/hk-spot-dev:latest"
 VPC_CIDR = "172.20.0.0/16"
@@ -423,9 +424,8 @@ def bootstrap_container(ip):
                  "StrictHostKeyChecking accept-new\\n' >> ~/.ssh/config; "
                  "touch ~/.ssh/config; chmod 600 ~/.ssh/config")
     ssh_cicy(ip, f"git clone {CICY_CODE_REPO} ~/projects/cicy-code 2>/dev/null || true", timeout=300)
-    ssh_cicy(ip, "[ -x ~/.local/bin/cicy-hosttools ] || { cd ~/projects/cicy-code 2>/dev/null && "
-                 "/usr/local/go/bin/go build -o ~/.local/bin/cicy-hosttools ./skills/cicy-hosttools 2>/dev/null; } || "
-                 "{ cd ~/projects/cicy-skills 2>/dev/null && /usr/local/go/bin/go build -o ~/.local/bin/cicy-hosttools ./cmd/cicy-hosttools 2>/dev/null; } || true; "
+    ssh_cicy(ip, "[ -x ~/.local/bin/cicy-hosttools ] || { cd ~/projects/cicy-code/skills 2>/dev/null && "
+                 "/usr/local/go/bin/go build -o ~/.local/bin/cicy-hosttools ./cmd/cicy-hosttools 2>/dev/null; } || true; "
                  "ln -sf cicy-hosttools ~/.local/bin/cicy-mihomo 2>/dev/null; true", timeout=240)
     # ensure mihomo binary exists (download latest if missing)
     ssh_cicy(ip, "[ -x /usr/local/bin/mihomo ] || (curl -fsSL https://github.com/cicy-ai/cicy-mihomo/releases/latest/download/mihomo-linux-amd64 -o /tmp/mihomo && install -m 0755 /tmp/mihomo /usr/local/bin/mihomo) 2>/dev/null || true", timeout=60)
