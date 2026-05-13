@@ -4,8 +4,7 @@ Provision a US Silicon Valley spot ECS instance with Docker + persistent data di
 
 Usage:
   us-spot-dev                          # provision spot + attach persistent disk + setup docker
-  us-spot-dev --destroy                # delete instance only, keep disk
-  us-spot-dev --destroy-all            # delete instance AND disk
+  us-spot-dev --destroy                # delete the instance (the data disk is always kept)
   us-spot-dev --push-image             # rebuild the container image on the running box and push it
   us-spot-dev --json                   # JSON output
 
@@ -530,9 +529,10 @@ def clean_local_configs():
             pass
 
 
-def destroy(remove_disk=False):
+def destroy():
     # Delete every instance with our name, whatever state it's in (a half-created
-    # one may still be "Starting"/"Pending").
+    # one may still be "Starting"/"Pending"). The persistent data disk is NEVER
+    # deleted — there is intentionally no flag to do so.
     while True:
         inst = find_any_instance()
         if not inst:
@@ -548,27 +548,16 @@ def destroy(remove_disk=False):
         else:
             print("  Deleted."); time.sleep(3)
 
-    if remove_disk:
-        disk = find_persistent_disk()
-        if disk:
-            print(f"  Deleting persistent disk {disk['DiskId']}...")
-            run_aliyun(["ecs", "DeleteDisk", "--region", REGION,
-                        "--DiskId", disk["DiskId"]])
-            print(f"  Disk deleted.")
-    else:
-        disk = find_persistent_disk()
-        if disk:
-            print(f"  Persistent disk {disk['DiskId']} kept (available)")
-
+    disk = find_persistent_disk()
+    if disk:
+        print(f"  Persistent disk {disk['DiskId']} kept (available)")
     clean_local_configs()
     print("\nDone.")
 
 
 def main():
-    if "--destroy-all" in sys.argv:
-        destroy(remove_disk=True); return
     if "--destroy" in sys.argv:
-        destroy(remove_disk=False); return
+        destroy(); return
     if "--push-image" in sys.argv:
         push_image(); return
 
@@ -756,7 +745,7 @@ def main():
         if dev_host:
             print(f"  Dev server: https://{dev_host}  (cloudflared tunnel -> :8008)")
         print(f"  Disk {disk_id} persists across instance reclaims")
-        print(f"  Rebuild: us-spot-dev   |   Destroy: us-spot-dev --destroy   |   --destroy-all")
+        print(f"  Rebuild: us-spot-dev   |   Delete instance (disk kept): us-spot-dev --destroy")
 
 
 if __name__ == "__main__":
