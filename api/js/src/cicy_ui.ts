@@ -426,35 +426,53 @@ body {
 }
 #fixed-top-action {
   position: fixed;
-  top: 0;
-  right: 4px;
+  top: -3px;
+  right: 6px;
   z-index: 9999;
   display: flex;
   flex-direction: row;
   align-items: center;
-  height: 28px;
   gap: 2px;
+  padding: 3px;
+  border-radius: 11px;
+  background: rgba(22,22,28,0.5);
+  border: 1px solid rgba(255,255,255,0.06);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.3);
   font-family: var(--cp-mono-font);
+  opacity: 0.5;
+  transition: opacity .18s ease;
 }
+#fixed-top-action:hover,
+#fixed-top-action:has(.fta-btn.active) { opacity: 1; }
 .fta-sep {
   width: 1px;
   height: 14px;
   background: rgba(255,255,255,0.1);
-  margin: 0 4px;
+  margin: 0 3px;
 }
 .fta-btn {
-  background: none;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
   border: none;
-  border-radius: 4px;
-  color: rgba(255,255,255,0.4);
-  font-size: 12px;
-  padding: 3px 6px;
-  cursor: pointer;
-  transition: all .15s;
-  font-family: var(--cp-mono-font);
+  border-radius: 8px;
+  color: rgba(255,255,255,0.5);
+  font-size: 13px;
   line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--cp-mono-font);
+  transition: background .15s, color .15s, transform .1s;
 }
-.fta-btn:hover { color: rgba(255,255,255,0.9); background: rgba(255,255,255,0.08); }#cp-win-tabs {
+.fta-btn:hover { color: #fff; background: rgba(255,255,255,0.1); }
+.fta-btn:active { transform: scale(0.88); }
+#cp-win-tabs {
   display: flex;
   align-items: center;
   height: 100%;
@@ -503,15 +521,10 @@ body {
 }
 .cp-wtab:hover .cp-wdel { display: inline-flex; }
 .cp-wtab .cp-wdel:hover { background: rgba(239,68,68,0.8); color: #fff; }
-.fta-btn:hover { color: rgba(255,255,255,0.9); background: rgba(255,255,255,0.08); }
 #cp-win-restart {
-  width: 30px;
-  min-width: 30px;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
 }
 #cp-win-restart.restarting { color: rgba(59,130,246,0.8); animation: cp-spin .8s linear infinite; }
 #cp-more-menu { z-index: 10001; }
@@ -608,6 +621,98 @@ body {
 }
 #cp-send:hover { background: rgba(99,102,241,0.3); color: rgba(129,140,248,1); }
 #cp-send:active { transform: scale(0.92); }
+/* ── bottom prompt bar ──────────────────────────────────────────────────
+   A compact, single-row composer docked at the bottom. When open, the
+   xterm viewport's bottom is pushed up by exactly this bar's footprint
+   (height + bottom offset + gap) so nothing is ever covered. */
+#cp-prompt {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  height: 56px;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 14px;
+  box-sizing: border-box;
+  background: rgba(20,20,26,0.94);
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 14px;
+  z-index: 9998;
+  backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  box-shadow: 0 6px 28px rgba(0,0,0,0.5), 0 0 0 0.5px rgba(255,255,255,0.06) inset;
+}
+#cp-prompt.open { display: flex; }
+body.cp-prompt-open { padding-bottom: 74px !important; }
+
+#cp-prompt #cp-input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  margin: 0;
+  padding: 9px 4px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: #e8e8ec;
+  font-size: 13px;
+  font-family: var(--cp-mono-font) !important;
+  font-variant-ligatures: none;
+  line-height: 1.45;
+  resize: none;
+  outline: none;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+}
+#cp-prompt #cp-input::placeholder { color: rgba(255,255,255,0.28); }
+#cp-prompt #cp-input:focus { background: transparent; border: none; }
+
+#cp-prompt #cp-enter {
+  flex: 0 0 auto;
+  position: static;
+  height: 26px;
+  min-width: 30px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.5);
+  font-family: var(--cp-mono-font);
+  font-size: 12px;
+  line-height: 1;
+  transition: background .15s, color .15s;
+}
+#cp-prompt #cp-enter:hover { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.88); }
+
+#cp-prompt #cp-send {
+  flex: 0 0 auto;
+  position: static;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(99,102,241,0.92);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1;
+  transition: background .15s, transform .1s;
+}
+#cp-prompt #cp-send:hover { background: rgba(99,102,241,1); }
+#cp-prompt #cp-send:active { transform: scale(0.9); }
+
+.fta-btn.active { color: rgba(165,180,252,1) !important; background: rgba(99,102,241,0.28); }
+.fta-btn.active:hover { background: rgba(99,102,241,0.38); }
 #cp.collapsed #cp-body, #cp.collapsed #cp-grip { display: none; }
 #cp.collapsed { min-height: 0 !important; height: auto !important; }
 #cp.collapsed #cp-bar { border-bottom: none; }
@@ -1280,6 +1385,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var fixedTop = document.createElement("div");
     fixedTop.id = "fixed-top-action";
     fixedTop.innerHTML =
+        '<button id="cp-kbd" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="' + ttydT("tipPromptArea") + '">⌨</button>' +
         '<button id="cp-win-add" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="' + ttydT("tipAddCliWindow") + '">+</button>' +
         '<button id="cp-win-restart" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="' + ttydT("tipRestartAgent") + '">↻</button>' +
         '<button id="cp-reload" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="' + ttydT("tipReloadPage") + '" onclick="location.reload()">⟳</button>';
@@ -1294,6 +1400,47 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var collapseBtn = (document.getElementById("cp-collapse") || document.createElement("button")) as HTMLButtonElement;
     var restartBtn = document.getElementById("cp-win-restart") as HTMLButtonElement;
     var addWindowBtn = document.getElementById("cp-win-add") as HTMLButtonElement;
+    var kbdBtn = document.getElementById("cp-kbd") as HTMLButtonElement;
+
+    // Bottom prompt area: compose the whole line locally, send it in one HTTP
+    // request — avoids the per-keystroke websocket round-trips that make the
+    // raw terminal feel sluggish on slow links. Reuses the existing composer
+    // wiring below (history, drafts, Enter/Shift+Enter, normalization).
+    input.id = "cp-input";
+    input.setAttribute("placeholder", ttydT("promptAreaPlaceholder"));
+    sendBtn.id = "cp-send";
+    sendBtn.textContent = "➤";
+    enterBtn.id = "cp-enter";
+    var promptArea = document.createElement("div");
+    promptArea.id = "cp-prompt";
+    promptArea.appendChild(input);
+    promptArea.appendChild(enterBtn);
+    promptArea.appendChild(sendBtn);
+    document.body.appendChild(promptArea);
+
+    var promptOpenKey = "cicy_prompt_open_" + paneId;
+    function setPromptOpen(open: boolean): void {
+        promptArea.classList.toggle("open", open);
+        document.body.classList.toggle("cp-prompt-open", open);
+        if (kbdBtn) {
+            kbdBtn.classList.toggle("active", open);
+        }
+        storage.set(promptOpenKey, open);
+        // the terminal box shrank/grew (body padding-bottom) — re-fit xterm
+        window.dispatchEvent(new Event("resize"));
+        if (open) {
+            try {
+                input.focus();
+            } catch (_error) {
+            }
+        }
+    }
+    if (kbdBtn) {
+        kbdBtn.addEventListener("click", function(): void {
+            setPromptOpen(!promptArea.classList.contains("open"));
+        });
+    }
+    setPromptOpen(storage.get(promptOpenKey, false) as boolean);
 
     var historyKey = "cicy_hist_" + paneId;
     var draftKey = "cicy_draft_" + paneId;

@@ -315,6 +315,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setSystemResources,
     globalVar,
     setGlobalVar,
+    isDev,
   } = useApp();
   const { token, hasPermission } = useAuth();
   const { confirm } = useDialog();
@@ -1554,6 +1555,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             <span>GitHub Issues</span>
             <Github className="h-3.5 w-3.5" />
           </button>
+          {isDev ? (
           <button
             type="button"
             data-id="membership-devtools"
@@ -1567,6 +1569,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             <span>{t('debugTools')}</span>
             <Bug className="h-3.5 w-3.5" />
           </button>
+          ) : null}
           <div data-id="membership-language" className="mt-1">
             <button
               type="button"

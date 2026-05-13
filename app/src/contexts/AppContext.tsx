@@ -80,6 +80,9 @@ interface AppContextType {
   agentTypeOptions: AgentTypeOption[];
   setGlobalVar: React.Dispatch<React.SetStateAction<any>>;
   loadGlobalVar: () => Promise<void>;
+  globalLoaded: boolean;
+  globalLoadError: string | null;
+  isDev: boolean;
   updateGlobalVar: (data: any) => Promise<void>;
   
   // Shared chat websocket
@@ -116,6 +119,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [agents, setAgents] = useState<Agent[]>([]);
   const [allPanes, setAllPanes] = useState<Agent[]>([]);
   const [globalVar, setGlobalVar] = useState<any>({});
+  const [globalLoaded, setGlobalLoaded] = useState(false);
+  const [globalLoadError, setGlobalLoadError] = useState<string | null>(null);
   const [systemResources, setSystemResources] = useState<SystemResourceSnapshot | null>(null);
   const agentTypeOptions = useMemo<AgentTypeOption[]>(() => {
     const raw = Array.isArray(globalVar?.agents) ? globalVar.agents : [];
@@ -165,6 +170,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setAllPanes([]);
     setPaneDetail(null);
     setGlobalVar({});
+    setGlobalLoaded(false);
+    setGlobalLoadError(null);
     setAgents([]);
     setError(null);
     setLoading(false);
@@ -278,8 +285,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       const { data } = await apiService.getGlobalSettings();
       setGlobalVar(data);
+      setGlobalLoaded(true);
+      setGlobalLoadError(null);
     } catch (err: any) {
       console.error('Failed to load global settings:', err);
+      setGlobalLoadError(err?.message || 'failed');
     }
   }, [api, token]);
 
@@ -317,6 +327,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setGlobalVar,
     loadGlobalVar,
     updateGlobalVar,
+    globalLoaded,
+    globalLoadError,
+    isDev: !!globalVar?.dev,
     activeChatPaneId: chatWsState.activeChatPaneId,
     chatWsConnected: chatWsState.chatWsConnected,
     chatWsClientId: chatWsState.chatWsClientId,
@@ -353,6 +366,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     agentsCount: agents.length,
     allPanes: allPanes.map(p => ({ pane_id: p.pane_id, title: p.title, status: p.status })),
     globalVar,
+    globalLoaded,
+    isDev: !!globalVar?.dev,
     agentTypeOptions,
     systemResources,
   }, { currentPaneId: (v: string) => selectPane(v), error: setError });

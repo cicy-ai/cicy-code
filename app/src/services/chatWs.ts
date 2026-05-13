@@ -34,6 +34,8 @@ class ChatWsClient {
 
   // Public observed state.
   private connectedState = false;
+  private attemptsState = 0;
+  private attemptsListeners = new Set<NumListener>();
   private clientIdState: string | null = null;
   private latencyState: number | null = null;
 
@@ -57,6 +59,15 @@ class ChatWsClient {
       return;
     }
     this.superseded = false;
+    this.reopen();
+  }
+
+  // Force an immediate fresh reconnect using the last configured params
+  // (used by the connection gate's “reconnect” button).
+  forceReconnect(): void {
+    if (!this.params || !this.params.token || !this.params.paneId) return;
+    this.superseded = false;
+    this.setAttempts(0);
     this.reopen();
   }
 
@@ -91,6 +102,7 @@ class ChatWsClient {
   }
 
   isConnected(): boolean { return this.connectedState; }
+  currentAttempts(): number { return this.attemptsState; }
   currentClientId(): string | null { return this.clientIdState; }
 
   subscribe(fn: MessageListener): () => void {
@@ -102,6 +114,18 @@ class ChatWsClient {
     this.connectedListeners.add(fn);
     try { fn(this.connectedState); } catch {}
     return () => { this.connectedListeners.delete(fn); };
+  }
+
+  onAttemptsChange(fn: NumListener): () => void {
+    this.attemptsListeners.add(fn);
+    try { fn(this.attemptsState); } catch {}
+    return () => { this.attemptsListeners.delete(fn); };
+  }
+
+  private setAttempts(n: number): void {
+    if (this.attemptsState === n) return;
+    this.attemptsState = n;
+    for (const fn of this.attemptsListeners) { try { fn(n); } catch {} }
   }
 
   onClientIdChange(fn: StrListener): () => void {
@@ -190,6 +214,7 @@ class ChatWsClient {
   private connect(): void {
     if (this.superseded) return;
     if (!this.params || !this.params.token || !this.params.paneId) return;
+    this.setAttempts(this.attemptsState + 1);
     let ws: WebSocket;
     try {
       ws = new WebSocket(this.buildUrl());
@@ -201,6 +226,7 @@ class ChatWsClient {
 
     ws.onopen = () => {
       if (this.ws !== ws) return;
+      this.setAttempts(0);
       this.setClientId(this.params?.clientId ?? null);
       this.setConnected(true);
       // Initial poll snapshot.
@@ -244,11 +270,17 @@ class ChatWsClient {
       this.cancelPing();
       this.setConnected(false);
       this.setLatency(null);
-      // 4409 = server superseded us. Don't reconnect; the slot is owned by
-      // another live page. Page-side pageClientId dedup will eventually
-      // regenerate the id and trigger a fresh configure() with a new URL.
+      // 4409 = the slot is currently held by another connection — often a
+      // stale half-open one left by a proxy (Cloudflare). Don't give up
+      // permanently: back off and retry. The server supersedes a stale
+      // holder once the same client keeps retrying.
       if (event && event.code === 4409) {
-        this.superseded = true;
+        if (this.reconnectTimer == null) {
+          this.reconnectTimer = window.setTimeout(() => {
+            this.reconnectTimer = null;
+            this.connect();
+          }, 4000);
+        }
         return;
       }
       this.scheduleReconnect();

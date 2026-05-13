@@ -196,6 +196,7 @@ func (server *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	indexVars := map[string]interface{}{
 		"title":         titleBuf.String(),
 		"static_prefix": ttydStaticPrefix(),
+		"asset_v":       server.assetVersion,
 	}
 
 	indexBuf := new(bytes.Buffer)

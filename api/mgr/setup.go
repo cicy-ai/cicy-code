@@ -800,51 +800,73 @@ func setupAIConfigs() {
 }
 
 func ensureTmuxConf() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatalf("[startup] failed to resolve home dir for .tmux.conf: %v", err)
-	}
-	dst := filepath.Join(home, ".tmux.conf")
-
-	current, err := os.ReadFile(dst)
-	if err == nil && string(current) == embeddedTmuxConf {
-		return
-	}
-	if err == nil && len(current) > 0 {
-		backup := dst + ".bak"
-		if writeErr := os.WriteFile(backup, current, 0644); writeErr != nil {
-			log.Fatalf("[startup] failed to back up %s: %v", dst, writeErr)
-		}
-		log.Printf("[startup] updated %s (backup: %s)", dst, backup)
-	} else {
-		log.Printf("[startup] installing %s", dst)
-	}
-	if writeErr := os.WriteFile(dst, []byte(embeddedTmuxConf), 0644); writeErr != nil {
-		log.Fatalf("[startup] failed to write %s: %v", dst, writeErr)
-	}
+	ensureManagedDotfile(".tmux.conf", embeddedTmuxConf)
 }
 
 func ensureCicyTmuxConf() {
+	ensureManagedDotfile(".cicy_tmux.conf", embeddedCicyTmuxConf)
+}
+
+// ensureManagedDotfile installs ~/<name>:
+//   - --dev: symlink it to <repo>/<name> (the working dir is the repo root in dev
+//     mode), so edits to the source file take effect without a rebuild. Any
+//     existing path is removed first; a real, non-matching file is saved to .bak.
+//   - otherwise: materialize the embedded content, replacing whatever is there —
+//     including a stale dev-mode symlink (we must never write through it).
+func ensureManagedDotfile(name, embedded string) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		log.Fatalf("[startup] failed to resolve home dir for .cicy_tmux.conf: %v", err)
+		log.Fatalf("[startup] failed to resolve home dir for %s: %v", name, err)
 	}
-	dst := filepath.Join(home, ".cicy_tmux.conf")
+	dst := filepath.Join(home, name)
 
-	current, err := os.ReadFile(dst)
-	if err == nil && string(current) == embeddedCicyTmuxConf {
+	backupIfForeign := func() {
+		if info, statErr := os.Lstat(dst); statErr == nil && info.Mode().IsRegular() {
+			if data, readErr := os.ReadFile(dst); readErr == nil && len(data) > 0 && string(data) != embedded {
+				if writeErr := os.WriteFile(dst+".bak", data, 0644); writeErr == nil {
+					log.Printf("[startup] backed up %s -> %s.bak", dst, dst)
+				}
+			}
+		}
+	}
+
+	if devMode {
+		src := name
+		if wd, wdErr := os.Getwd(); wdErr == nil {
+			src = filepath.Join(wd, name)
+		}
+		if abs, absErr := filepath.Abs(src); absErr == nil {
+			src = abs
+		}
+		if info, statErr := os.Lstat(dst); statErr == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				if cur, _ := os.Readlink(dst); cur == src {
+					return
+				}
+			} else {
+				backupIfForeign()
+			}
+			_ = os.Remove(dst)
+		}
+		if linkErr := os.Symlink(src, dst); linkErr != nil {
+			log.Fatalf("[startup] failed to symlink %s -> %s: %v", dst, src, linkErr)
+		}
+		log.Printf("[startup] dev: linked %s -> %s", dst, src)
 		return
 	}
-	if err == nil && len(current) > 0 {
-		backup := dst + ".bak"
-		if writeErr := os.WriteFile(backup, current, 0644); writeErr != nil {
-			log.Fatalf("[startup] failed to back up %s: %v", dst, writeErr)
+
+	if info, statErr := os.Lstat(dst); statErr == nil {
+		if info.Mode()&os.ModeSymlink == 0 {
+			if data, readErr := os.ReadFile(dst); readErr == nil && string(data) == embedded {
+				return
+			}
+			backupIfForeign()
 		}
-		log.Printf("[startup] updated %s (backup: %s)", dst, backup)
+		_ = os.Remove(dst)
 	} else {
 		log.Printf("[startup] installing %s", dst)
 	}
-	if writeErr := os.WriteFile(dst, []byte(embeddedCicyTmuxConf), 0644); writeErr != nil {
+	if writeErr := os.WriteFile(dst, []byte(embedded), 0644); writeErr != nil {
 		log.Fatalf("[startup] failed to write %s: %v", dst, writeErr)
 	}
 }

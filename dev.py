@@ -1304,6 +1304,16 @@ def rebuild_ttyd_assets_for_local_dev():
 APP_DEV_PORT = 8022
 
 
+def build_app_dist():
+    app_dir = os.path.join(ROOT_DIR, "app")
+    if not os.path.isdir(os.path.join(app_dir, "node_modules")):
+        print("[dev] installing app dependencies (npm install)...")
+        if subprocess.run(["npm", "install"], cwd=app_dir).returncode != 0:
+            print("[dev] npm install failed"); return False
+    print("[dev] building app/dist (npm run build)...")
+    return subprocess.run(["npm", "run", "build"], cwd=app_dir).returncode == 0
+
+
 def ensure_app_dev_server():
     """Start the Vite dev server (app/, port 8022) in the background if it is not already up."""
     existing = get_pid_on_port(APP_DEV_PORT)
@@ -1333,7 +1343,7 @@ def ensure_app_dev_server():
     print(f"[dev] App dev log: {log_path}")
 
 
-def start_local_dev_detached(cicy_bin):
+def start_local_dev_detached(cicy_bin, extra=None):
     logs_dir = os.path.expanduser("~/logs/.dev-logs")
     os.makedirs(logs_dir, exist_ok=True)
     log_path = os.path.join(logs_dir, "cicy-code.log")
@@ -1344,7 +1354,7 @@ def start_local_dev_detached(cicy_bin):
 
     with open(log_path, "ab", buffering=0) as log_file:
         process = subprocess.Popen(
-            [cicy_bin, "--public", "--dev", "--lab"],
+            [cicy_bin, "--public", "--dev", "--lab", *(extra or [])],
             env=run_env,
             cwd=ROOT_DIR,
             stdout=log_file,
@@ -1403,6 +1413,17 @@ def main():
     )
 
     local_group = parser.add_argument_group("local dev")
+    local_group.add_argument(
+        "--hot",
+        action="store_true",
+        help="Run the vite dev server on :8022 and proxy the UI to it (HMR). Overrides --preview.",
+    )
+    local_group.add_argument(
+        "--preview",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="(default) build app/dist and serve it from disk via cicy-code --dev --preview; use --no-preview for the vite :8022 dev server.",
+    )
     local_group.add_argument(
         "--ttydAssets",
         "--ttyd-assets",
@@ -1592,8 +1613,15 @@ def main():
         sys.exit(1)
 
     cicy_bin = os.path.join(API_DIR, "cicy-code")
-    ensure_app_dev_server()
-    start_local_dev_detached(cicy_bin)
+    if args.hot:
+        ensure_app_dev_server()   # starts `npm run dev` on :8022 if not already up
+        start_local_dev_detached(cicy_bin, extra=["--hot"])
+    elif args.preview:
+        build_app_dist()          # `npm run build` -> app/dist, served from disk
+        os.environ["CICY_PREVIEW_DIST"] = os.path.join(ROOT_DIR, "app", "dist")
+        start_local_dev_detached(cicy_bin, extra=["--preview"])
+    else:
+        start_local_dev_detached(cicy_bin)   # serve the binary-embedded assets
     sys.exit(0)
 
 

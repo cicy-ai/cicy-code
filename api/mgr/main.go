@@ -27,6 +27,8 @@ var (
 	desktopMode   bool
 	auditMode     bool
 	cnMirror      bool
+	previewMode   bool
+	hotMode       bool
 	containerMode bool
 	desktopCmd    *exec.Cmd
 )
@@ -52,6 +54,8 @@ Options:
   --version, -v           Show version
   --desktop               Start in desktop mode
   --dev                   Development mode
+  --preview               Serve app/dist from disk (run 'npm run build' to refresh)
+  --hot                   Proxy the UI to the vite dev server on :8022 (HMR)
   --lab                   Enable lab mode
   --public                Listen on 0.0.0.0 (default: 127.0.0.1)
   --audit                 Enable audit mode
@@ -69,6 +73,10 @@ Options:
 			desktopMode = true
 		case arg == "--dev":
 			devMode = true
+		case arg == "--preview":
+			previewMode = true
+		case arg == "--hot":
+			hotMode = true
 		case arg == "--lab":
 			labMode = true
 		case arg == "--public":
@@ -409,7 +417,7 @@ Options:
 		}()
 	}
 
-	log.Fatal(http.ListenAndServe(bind+":"+port, globalCORS(http.DefaultServeMux)))
+	log.Fatal(http.ListenAndServe(bind+":"+port, globalCORS(withGzip(http.DefaultServeMux))))
 }
 
 func getFirstToken() string {

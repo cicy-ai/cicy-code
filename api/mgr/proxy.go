@@ -161,6 +161,20 @@ func handleCodeServerPageContext(w http.ResponseWriter, r *http.Request) {
 }
 
 func injectCodeServerJS(resp *http.Response) error {
+	// code-server's versioned static assets (/code/stable-<commit>/static/... and
+	// /code/_static/...) are immutable — make them long-cacheable so Cloudflare
+	// (and the browser) can cache them instead of re-pulling the multi-MB
+	// workbench bundle through the tunnel on every load.
+	if req := resp.Request; req != nil {
+		path := req.URL.Path
+		if (strings.HasPrefix(path, "/stable-") && strings.Contains(path, "/static/")) || strings.HasPrefix(path, "/_static/") {
+			if resp.StatusCode == http.StatusOK {
+				resp.Header.Set("Cache-Control", "public, max-age=31536000, immutable")
+				resp.Header.Del("Pragma")
+				resp.Header.Del("Expires")
+			}
+		}
+	}
 	ct := resp.Header.Get("Content-Type")
 	if !strings.Contains(ct, "text/html") && !strings.Contains(ct, "text/plain") {
 		return nil
