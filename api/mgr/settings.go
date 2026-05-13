@@ -110,7 +110,7 @@ func translateTextViaProvider(text string, target string) (string, error) {
 		model = strings.TrimSpace(cfg.DefaultOpencodeModel)
 	}
 	if model == "" {
-		model = "gpt-5.4"
+		model = "deepseek-v4-flash"
 	}
 	if apiURL == "" || apiKey == "" {
 		return "", fmt.Errorf("translation provider not configured")

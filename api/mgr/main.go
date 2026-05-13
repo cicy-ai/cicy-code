@@ -239,6 +239,8 @@ Options:
 	http.HandleFunc("/api/collab/workflows/", wa(handleCollabWorkflowByID))
 	http.HandleFunc("/api/skills", wa(handleSkills))
 	http.HandleFunc("/api/skills/run", wa(handleSkillRun))
+	http.HandleFunc("/api/skill-market", wa(handleSkillMarketList))
+	http.HandleFunc("/api/skill-market/", wa(handleSkillMarketAction))
 
 	// Runtime aliases
 	http.HandleFunc("/api/runtime/instances", wa(handleRuntimeInstances))

@@ -12,6 +12,7 @@
   "toastWorkerRestarting": "{{name}} redémarre…",
   "toastWorkerRestartFailed": "Erreur : échec du redémarrage de {{name}}",
   "tabFiles": "Fichiers",
+  "tabSession": "Session",
   "tabHistory": "Historique",
   "tabTools": "Outils",
   "tabBrain": "Prompts",

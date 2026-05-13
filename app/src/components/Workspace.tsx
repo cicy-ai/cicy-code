@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation, Trans } from 'react-i18next';
 import { TRANSLATED_LNGS } from '../i18n';
@@ -11,7 +11,8 @@ import { useApp } from '../contexts/AppContext';
 import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
-  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, MessageCircle
+  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, MessageCircle, Package,
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import AgentAvatar from './AgentAvatar';
@@ -25,7 +26,7 @@ import { WebFrame } from './WebFrame';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
 import TeamPanel from './layout/TeamPanel';
-import SkillPanel from './layout/SkillPanel';
+import SkillMarketplacePanel from './layout/SkillMarketplacePanel';
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
 import AgentProviderRequestView, { type RequestViewTab } from './layout/AgentProviderRequestView';
 import TokenDialog from './layout/TokenDialog';
@@ -329,13 +330,21 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [leftPanelView, setLeftPanelView] = useState<LeftPanelView>(() => {
     const v = cache.get(leftPanelKey(paneId), null);
     if (v === 'team' || v === 'skills') return v;
-    if (v === 'closed') return null;
-    return 'team';
+    return null;
   });
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorRequestedTab, setInspectorRequestedTab] = useState<InspectorTab>('overview');
   const [cliContentOpen, setCliContentOpen] = useState(() => cache.get(cliContentOpenKey(paneId), false) === true);
   const [cliContentTab, setCliContentTab] = useState<WorkspaceCliContentTab>(() => normalizeCliContentTab(cache.get(cliContentTabKey(paneId), 'files')));
+  const [lastSessionSubTab, setLastSessionSubTab] = useState<'history' | 'tools' | 'brain' | 'meta'>(() => {
+    const v = cache.get(cliContentTabKey(paneId), 'files');
+    return v === 'tools' || v === 'brain' || v === 'meta' ? v : 'history';
+  });
+  useEffect(() => {
+    if (cliContentTab === 'history' || cliContentTab === 'tools' || cliContentTab === 'brain' || cliContentTab === 'meta') {
+      setLastSessionSubTab(cliContentTab);
+    }
+  }, [cliContentTab]);
   const [cliContentMode, setCliContentMode] = useState<CliContentMode>('fixed');
   const [cliDrawerWidth, setCliDrawerWidth] = useState(() => clampCliDrawerWidth(Number(cache.get(CLI_DRAWER_WIDTH_KEY, CLI_DRAWER_DEFAULT_WIDTH))));
   const [cliDrawerResizing, setCliDrawerResizing] = useState(false);
@@ -478,7 +487,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }, []);
 
   useEffect(() => {
-    cache.set(leftPanelKey(paneId), leftActive === 'team' || leftActive === 'skills' ? leftActive : 'closed');
+    cache.set(leftPanelKey(paneId), leftActive === 'team' || leftActive === 'skills' ? leftActive : null);
   }, [leftActive, paneId]);
   useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, activeTeamPaneId); }, [activeTeamPaneId]);
   useEffect(() => { cache.set(CLI_DRAWER_WIDTH_KEY, cliDrawerWidth); }, [cliDrawerWidth]);
@@ -1168,12 +1177,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   });
   const cliContentTabs = [
     { id: 'files', label: t('tabFiles') },
+    { id: 'session', label: t('tabSession') },
+    { id: 'settings', label: t('tabSettings') },
+  ];
+  const sessionSubTabs: { id: 'history' | 'tools' | 'brain' | 'meta'; label: string }[] = [
     { id: 'history', label: t('tabHistory') },
     { id: 'tools', label: t('tabTools') },
     { id: 'brain', label: t('tabBrain') },
     { id: 'meta', label: t('tabMeta') },
-    { id: 'settings', label: t('tabSettings') },
   ];
+  const isSessionTab = (tab: WorkspaceCliContentTab) => tab === 'history' || tab === 'tools' || tab === 'brain' || tab === 'meta';
   const renderCliContentPanel = () => (
     <div
       ref={cliContentPanelRef}
@@ -1199,23 +1212,29 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         )}
         onMouseDown={handleCliDrawerResizeStart}
       />
-      <div data-id="cli-content-tabs-wrap" className="flex items-center justify-between border-b border-[var(--vsc-border)] px-3 py-2">
+      <div data-id="cli-content-tabs-wrap" className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--vsc-border)] px-3">
         <div data-id="cli-content-tabs" className="flex gap-1 overflow-x-auto whitespace-nowrap scrollbar-none">
-          {cliContentTabs.map((item) => (
-            <button
-              data-id={`cli-content-tab-${item.id}`}
-              key={item.id}
-              type="button"
-              className={`shrink-0 rounded-md px-2.5 py-1.5 text-[11px] leading-5 ${
-                cliContentTab === item.id
-                  ? 'bg-white/[0.08] text-zinc-100'
-                  : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
-              }`}
-              onClick={() => setCliContentTab(item.id as WorkspaceCliContentTab)}
-            >
-              {item.label}
-            </button>
-          ))}
+          {cliContentTabs.map((item) => {
+            const active = item.id === 'session' ? isSessionTab(cliContentTab) : cliContentTab === item.id;
+            return (
+              <button
+                data-id={`cli-content-tab-${item.id}`}
+                key={item.id}
+                type="button"
+                className={`shrink-0 rounded-md px-2.5 py-1.5 text-[12px] font-medium leading-5 tracking-[0.01em] transition-colors ${
+                  active
+                    ? 'bg-white/[0.08] text-zinc-100'
+                    : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
+                }`}
+                onClick={() => {
+                  if (item.id === 'session') setCliContentTab(lastSessionSubTab);
+                  else setCliContentTab(item.id as WorkspaceCliContentTab);
+                }}
+              >
+                {item.label}
+              </button>
+            );
+          })}
         </div>
         <div data-id="cli-content-actions" className="ml-3 flex shrink-0 items-center gap-1">
           <button
@@ -1232,6 +1251,25 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           </button>
         </div>
       </div>
+      {isSessionTab(cliContentTab) ? (
+        <div data-id="cli-content-session-subtabs" className="flex shrink-0 items-center gap-1 border-b border-[var(--vsc-border)] px-3 py-1.5">
+          {sessionSubTabs.map((item) => (
+            <button
+              data-id={`cli-content-session-sub-${item.id}`}
+              key={item.id}
+              type="button"
+              className={`shrink-0 rounded-md px-2 py-1 text-[11px] font-medium leading-4 tracking-[0.01em] transition-colors ${
+                cliContentTab === item.id
+                  ? 'bg-white/[0.06] text-zinc-100'
+                  : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
+              }`}
+              onClick={() => setCliContentTab(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div data-id="cli-content-body" className="min-h-0 flex-1 relative">
         <div
           data-id="cli-content-files-host"
@@ -1349,10 +1387,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             showHeaderButtons={!cliContentOpen}
             onOpenPaneSettings={openPaneSettings}
             onOpenPaneFiles={openPaneFiles}
-            onOpenPaneHistory={openPaneHistory}
-            onOpenPaneTools={(targetPaneId) => openPaneRequestView(targetPaneId, 'tools')}
-            onOpenPaneBrain={(targetPaneId) => openPaneRequestView(targetPaneId, 'brain')}
-            onOpenPaneMeta={(targetPaneId) => openPaneRequestView(targetPaneId, 'meta')}
+            onOpenPaneSession={(targetPaneId) => {
+              if (lastSessionSubTab === 'history') openPaneHistory(targetPaneId);
+              else openPaneRequestView(targetPaneId, lastSessionSubTab);
+            }}
             onActivePaneIdChange={(targetPaneId) => {
               setActiveTeamPaneId(prev => ({ ...prev, [paneId]: targetPaneId }));
             }}
@@ -1369,6 +1407,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <div data-id="activity-bar" ref={activityBarRef} className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
           <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} />
+          <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
           <SideBtn dataId="btn-providers" active={providersOpen} icon={<Boxes className="w-5 h-5" />} title={t('sidebarProviders')} onClick={() => setProvidersOpen(true)} />
           <SideBtn dataId="btn-im" active={imOpen} icon={<MessageCircle className="w-5 h-5" />} title={t('sidebarIM')} onClick={() => setImOpen(true)} />
         </div>
@@ -1443,8 +1482,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                         />
                       </div>
                     ) : (
-                      <div data-id="left-panel-skills-view" className="absolute inset-0 overflow-auto">
-                        <SkillPanel paneId={paneId} bindings={boundAgents} />
+                      <div data-id="left-panel-skills-view" className="absolute inset-0">
+                        <SkillMarketplacePanel paneId={paneId} />
                       </div>
                     )}
                   </div>
@@ -1984,6 +2023,69 @@ function formatLoadValue(value: number | null | undefined) {
   return value.toFixed(2);
 }
 
+function resourceSeverity(pct: number | null | undefined) {
+  if (pct == null || Number.isNaN(pct)) {
+    return { text: 'text-zinc-500', bar: 'bg-zinc-600', track: 'bg-white/[0.04]', value: pct };
+  }
+  if (pct >= 85) return { text: 'text-rose-300', bar: 'bg-rose-400', track: 'bg-rose-500/[0.10]', value: pct };
+  if (pct >= 65) return { text: 'text-amber-300', bar: 'bg-amber-400', track: 'bg-amber-500/[0.10]', value: pct };
+  return { text: 'text-emerald-300', bar: 'bg-emerald-400', track: 'bg-emerald-500/[0.08]', value: pct };
+}
+
+const ResourceChip = memo(function ResourceChip({ label, pct, dataId }: { label: string; pct: number | null | undefined; dataId: string }) {
+  const sev = resourceSeverity(pct);
+  const fillPct = sev.value == null || Number.isNaN(sev.value) ? 0 : Math.max(0, Math.min(100, sev.value));
+  return (
+    <div data-id={dataId} className="flex items-center gap-1.5 leading-none">
+      <div className={`relative h-3 w-[3px] overflow-hidden rounded-full ${sev.track}`}>
+        <div
+          className={`absolute bottom-0 left-0 right-0 ${sev.bar} transition-[height] duration-300`}
+          style={{ height: `${fillPct}%` }}
+        />
+      </div>
+      <span className="text-[10px] tracking-[0.06em] text-zinc-500">{label}</span>
+      <span className={`font-mono text-[11px] tabular-nums ${sev.text}`}>{formatResourcePct(pct)}</span>
+    </div>
+  );
+});
+
+const ResourceRow = memo(function ResourceRow({
+  icon,
+  label,
+  pct,
+  sub,
+  dataId,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  pct: number | null | undefined;
+  sub?: string;
+  dataId: string;
+}) {
+  const sev = resourceSeverity(pct);
+  const fillPct = sev.value == null || Number.isNaN(sev.value) ? 0 : Math.max(0, Math.min(100, sev.value));
+  return (
+    <div data-id={dataId} className="px-1">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-zinc-500">{icon}</span>
+          <span className="text-[11px] font-medium text-zinc-300">{label}</span>
+        </div>
+        <div className="flex items-baseline gap-1.5 shrink-0">
+          {sub ? <span className="font-mono text-[10px] text-zinc-600 truncate max-w-[160px]">{sub}</span> : null}
+          <span className={`font-mono text-[12px] tabular-nums ${sev.text}`}>{formatResourcePct(pct)}</span>
+        </div>
+      </div>
+      <div className={`mt-1.5 h-[3px] w-full overflow-hidden rounded-full ${sev.track}`}>
+        <div
+          className={`h-full ${sev.bar} transition-[width] duration-500`}
+          style={{ width: `${fillPct}%` }}
+        />
+      </div>
+    </div>
+  );
+});
+
 function SystemResourceMonitor({ paneId }: { paneId: string }) {
   const { t } = useTranslation('workspace');
   const { activeChatPaneId, sendChatWsMessage, systemResources } = useApp();
@@ -1991,14 +2093,25 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!open) return;
     const handlePointerDown = (event: PointerEvent) => {
       if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
         setOpen(false);
       }
     };
+    const handleBlur = () => setOpen(false);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
     document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
-  }, []);
+    window.addEventListener('blur', handleBlur);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!paneId || activeChatPaneId !== paneId) return;
@@ -2014,59 +2127,93 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [activeChatPaneId, open, paneId, sendChatWsMessage]);
 
-  const cpu = formatResourcePct(systemResources?.cpu_usage_pct);
-  const memory = formatResourcePct(systemResources?.mem_usage_pct);
-  const disk = formatResourcePct(systemResources?.disk_usage_pct);
+  const cpuPct = systemResources?.cpu_usage_pct;
+  const memPct = systemResources?.mem_usage_pct;
+  const dskPct = systemResources?.disk_usage_pct;
+  const memSub = systemResources?.mem_total_bytes
+    ? `${formatResourceBytes(systemResources?.mem_used_bytes)} / ${formatResourceBytes(systemResources?.mem_total_bytes)}`
+    : undefined;
+  const diskSub = systemResources?.disk_total_bytes
+    ? `${formatResourceBytes(systemResources?.disk_used_bytes)} / ${formatResourceBytes(systemResources?.disk_total_bytes)}`
+    : undefined;
+  const cpuSub = systemResources?.cpu_cores ? `${systemResources.cpu_cores} cores` : undefined;
   const updatedAt = systemResources?.updated_at ? new Date(systemResources.updated_at).toLocaleTimeString(undefined, { hour12: false }) : '--';
+  const isLive = systemResources?.updated_at != null;
 
   return (
     <div data-id="system-resource-root" ref={rootRef} className="relative">
-      <div
+      <button
+        type="button"
         data-id="system-resource-trigger"
-        role="button"
-        tabIndex={0}
         onClick={() => setOpen(prev => !prev)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            setOpen(prev => !prev);
-          }
-        }}
-        className="flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[10px] font-mono text-zinc-500 transition-colors cursor-pointer hover:border-white/[0.12] hover:text-zinc-300"
+        aria-haspopup="dialog"
+        aria-expanded={open}
         title={t('systemResourceTitle')}
+        className={`group/sysres flex h-7 items-center gap-2.5 rounded-md border px-2.5 transition-colors duration-150 cursor-pointer
+          ${open
+            ? 'border-white/[0.14] bg-white/[0.05]'
+            : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.04]'}
+          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/25`}
       >
-        <span data-id="system-resource-summary-cpu">CPU {cpu}</span>
-        <span data-id="system-resource-summary-memory">MEM {memory}</span>
-        <span data-id="system-resource-summary-disk">DSK {disk}</span>
-        <ChevronDown data-id="system-resource-chevron" className={`h-3 w-3 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </div>
+        <ResourceChip label="CPU" pct={cpuPct} dataId="system-resource-summary-cpu" />
+        <span className="h-3 w-px bg-white/[0.06]" aria-hidden />
+        <ResourceChip label="MEM" pct={memPct} dataId="system-resource-summary-memory" />
+        <span className="h-3 w-px bg-white/[0.06]" aria-hidden />
+        <ResourceChip label="DSK" pct={dskPct} dataId="system-resource-summary-disk" />
+        <ChevronDown
+          data-id="system-resource-chevron"
+          className={`h-3 w-3 text-zinc-600 transition-all duration-200 ${open ? 'rotate-180 text-zinc-300' : 'group-hover/sysres:text-zinc-400'}`}
+        />
+      </button>
       {open ? (
         <div
           data-id="system-resource-dropdown"
-          className="absolute right-0 top-[calc(100%+8px)] z-[180] min-w-[280px] rounded-2xl border border-white/[0.08] bg-[#111113]/98 p-3 shadow-2xl backdrop-blur-xl"
+          role="dialog"
+          className="animate-select-in absolute right-0 top-[calc(100%+8px)] z-[180] w-[320px] overflow-hidden rounded-xl border border-white/[0.06] bg-[#141416]/[0.98] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.04)] backdrop-blur-md"
         >
-          <div data-id="system-resource-dropdown-header" className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-medium text-zinc-300">{t('systemResourceTitle')}</span>
-            <span data-id="system-resource-updated-at" className="text-[10px] font-mono text-zinc-600">{updatedAt}</span>
+          <div data-id="system-resource-dropdown-header" className="flex items-center justify-between border-b border-white/[0.05] px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <Activity className="h-3.5 w-3.5 text-zinc-500" />
+              <span className="text-[12px] font-medium text-zinc-200">{t('systemResourceTitle')}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className={`h-1.5 w-1.5 rounded-full ${isLive ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'}`} />
+              <span data-id="system-resource-updated-at" className="font-mono text-[10px] text-zinc-500">{updatedAt}</span>
+            </div>
           </div>
-          <div data-id="system-resource-grid" className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1.5 text-[11px]">
-            <span data-id="system-resource-label-cpu" className="text-zinc-600">CPU</span>
-            <span data-id="system-resource-value-cpu" className="font-mono text-zinc-300">{cpu} · {systemResources?.cpu_cores ?? '--'} cores</span>
-
-            <span data-id="system-resource-label-memory" className="text-zinc-600">{t('systemResourceMemory')}</span>
-            <span data-id="system-resource-value-memory" className="font-mono text-zinc-300">
-              {memory} · {formatResourceBytes(systemResources?.mem_used_bytes)} / {formatResourceBytes(systemResources?.mem_total_bytes)}
-            </span>
-
-            <span data-id="system-resource-label-disk" className="text-zinc-600">{t('systemResourceDisk')}</span>
-            <span data-id="system-resource-value-disk" className="font-mono text-zinc-300">
-              {disk} · {formatResourceBytes(systemResources?.disk_used_bytes)} / {formatResourceBytes(systemResources?.disk_total_bytes)}
-            </span>
-
-            <span data-id="system-resource-label-load" className="text-zinc-600">{t('systemResourceLoad')}</span>
-            <span data-id="system-resource-value-load" className="font-mono text-zinc-300">
-              {formatLoadValue(systemResources?.load_1)} / {formatLoadValue(systemResources?.load_5)} / {formatLoadValue(systemResources?.load_15)}
-            </span>
+          <div className="flex flex-col gap-2.5 p-3">
+            <ResourceRow
+              icon={<Cpu className="h-3.5 w-3.5" />}
+              label="CPU"
+              pct={cpuPct}
+              sub={cpuSub}
+              dataId="system-resource-row-cpu"
+            />
+            <ResourceRow
+              icon={<MemoryStick className="h-3.5 w-3.5" />}
+              label={t('systemResourceMemory')}
+              pct={memPct}
+              sub={memSub}
+              dataId="system-resource-row-memory"
+            />
+            <ResourceRow
+              icon={<HardDrive className="h-3.5 w-3.5" />}
+              label={t('systemResourceDisk')}
+              pct={dskPct}
+              sub={diskSub}
+              dataId="system-resource-row-disk"
+            />
+          </div>
+          <div data-id="system-resource-load" className="flex items-center justify-between border-t border-white/[0.05] bg-white/[0.01] px-3 py-2">
+            <span className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">{t('systemResourceLoad')}</span>
+            <div className="flex items-baseline gap-1 font-mono text-[11px] text-zinc-400">
+              <span className="tabular-nums">{formatLoadValue(systemResources?.load_1)}</span>
+              <span className="text-zinc-700">·</span>
+              <span className="tabular-nums">{formatLoadValue(systemResources?.load_5)}</span>
+              <span className="text-zinc-700">·</span>
+              <span className="tabular-nums">{formatLoadValue(systemResources?.load_15)}</span>
+              <span className="ml-1 text-[9px] tracking-wider text-zinc-700">1m / 5m / 15m</span>
+            </div>
           </div>
         </div>
       ) : null}
@@ -2074,26 +2221,62 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
   );
 }
 
+function networkQuality(connected: boolean, latency: number | null): { bars: 0 | 1 | 2 | 3 | 4; color: string; tone: string; ring: string } {
+  if (!connected) return { bars: 0, color: 'bg-rose-400', tone: 'text-rose-300', ring: 'ring-rose-400/40' };
+  if (latency === null) return { bars: 4, color: 'bg-emerald-400', tone: 'text-emerald-300', ring: 'ring-emerald-400/40' };
+  if (latency < 100) return { bars: 4, color: 'bg-emerald-400', tone: 'text-emerald-300', ring: 'ring-emerald-400/40' };
+  if (latency < 200) return { bars: 3, color: 'bg-emerald-400', tone: 'text-emerald-300', ring: 'ring-emerald-400/40' };
+  if (latency < 500) return { bars: 2, color: 'bg-amber-400', tone: 'text-amber-300', ring: 'ring-amber-400/40' };
+  return { bars: 1, color: 'bg-rose-400', tone: 'text-rose-300', ring: 'ring-rose-400/40' };
+}
+
 function NetworkSignal({ latency, connected = true, clientId, onSendClientId, onCopyPrompt }: { latency: number | null; connected?: boolean; clientId?: string | null; onSendClientId?: () => Promise<void> | void; onCopyPrompt?: () => Promise<void> | void }) {
   const { t } = useTranslation('workspace');
   const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const [copiedId, setCopiedId] = useState(false);
   const [open, setOpen] = useState(false);
   const [sending, setSending] = useState(false);
-  const bars = !connected ? 0 : latency === null ? 4 : latency < 100 ? 4 : latency < 200 ? 3 : latency < 500 ? 2 : 1;
-  const color = bars >= 4 ? 'bg-emerald-400' : bars === 3 ? 'bg-emerald-400' : bars === 2 ? 'bg-yellow-400' : bars === 1 ? 'bg-red-400' : 'bg-zinc-700';
-  const label = !connected ? t('networkOffline') : latency === null ? t('networkOnline') : `${latency}ms`;
-  const copyPlainText = (text: string) => {
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.setAttribute('readonly', 'true');
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    textarea.select();
-    const ok = document.execCommand('copy');
-    document.body.removeChild(textarea);
-    return ok;
-  };
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const handleBlur = () => setOpen(false);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('blur', handleBlur);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
+
+  const q = networkQuality(connected, latency);
+  const latencyLabel = !connected
+    ? t('networkOffline')
+    : latency === null
+      ? t('networkOnline')
+      : `${latency}ms`;
+  const qualityWord = !connected
+    ? t('networkOffline')
+    : latency === null
+      ? t('networkOnline')
+      : latency < 100
+        ? 'Excellent'
+        : latency < 200
+          ? 'Good'
+          : latency < 500
+            ? 'Fair'
+            : 'Poor';
+
   const handleCopyPrompt = async () => {
     if (!onCopyPrompt) return;
     await onCopyPrompt();
@@ -2109,51 +2292,148 @@ function NetworkSignal({ latency, connected = true, clientId, onSendClientId, on
       setSending(false);
     }
   };
+  const handleCopyClientId = async () => {
+    if (!clientId) return;
+    let ok = false;
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(clientId);
+        ok = true;
+      }
+    } catch {}
+    if (!ok) {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = clientId;
+        textarea.setAttribute('readonly', 'true');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        ok = true;
+      } catch {}
+    }
+    if (ok) {
+      setCopiedId(true);
+      window.setTimeout(() => setCopiedId(false), 1200);
+    }
+  };
+
+  const barHeights = [4, 7, 10, 13];
+
   return (
     <div
       data-id="network-signal"
-      className="relative flex h-5 items-center gap-1.5 pr-1"
-      onPointerEnter={() => setOpen(true)}
-      onPointerLeave={() => setOpen(false)}
+      ref={rootRef}
+      className="relative"
     >
-      <div data-id="network-signal-bars" className="flex items-end gap-[2px] h-4">
-        {[6, 8, 10, 12].map((h, i) => (
-          <div key={i} data-id={`network-signal-bar-${i + 1}`} className={`w-[3px] rounded-sm transition-colors ${i < bars ? color : 'bg-zinc-800'}`} style={{ height: h }} />
-        ))}
-      </div>
-      <span
-        data-id="network-signal-label"
-        className="mt-[5px] flex h-4 min-w-[28px] items-center text-[10px] leading-none text-zinc-600"
+      <button
+        type="button"
+        data-id="network-signal-trigger"
+        onClick={() => setOpen(prev => !prev)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={qualityWord}
+        className={`flex h-7 items-center gap-2 rounded-md border px-2 transition-colors duration-150 cursor-pointer
+          ${open
+            ? 'border-white/[0.14] bg-white/[0.05]'
+            : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.04]'}
+          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/25`}
       >
-        {label}
-      </span>
-      {open ? (
-        <div className="absolute right-0 top-full z-[180] min-w-[240px] rounded-lg border border-white/[0.08] bg-[#111113]/98 px-3 py-2 text-[11px] shadow-2xl backdrop-blur-xl">
-          <div className="text-zinc-500">WebSocket</div>
-          <div className="mt-1 flex items-start gap-2">
-            <div className="min-w-0 flex-1 font-mono text-zinc-200 break-all">{clientId || t('networkClientIdMissing')}</div>
+        {!connected ? (
+          <WifiOff data-id="network-signal-icon" className="h-3.5 w-3.5 text-rose-300 animate-pulse" />
+        ) : (
+          <div data-id="network-signal-bars" className="flex h-[13px] items-end gap-[2px]">
+            {barHeights.map((h, i) => (
+              <div
+                key={i}
+                data-id={`network-signal-bar-${i + 1}`}
+                className={`w-[2.5px] rounded-[1px] transition-colors duration-200 ${i < q.bars ? q.color : 'bg-zinc-700/60'}`}
+                style={{ height: h }}
+              />
+            ))}
           </div>
-          <div className="mt-1 text-zinc-500">{connected ? t('networkConnected') : t('networkDisconnected')}</div>
-          <button
-            type="button"
-            data-id="network-signal-send-client-id"
-            className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1.5 text-[11px] text-zinc-200 transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
-            onClick={() => { void handleSend(); }}
-            disabled={sending}
-          >
-            <Send className="h-3.5 w-3.5" />
-            <span>{sending ? t('networkSending') : t('networkSendClientId')}</span>
-          </button>
-          <button
-            type="button"
-            data-id="network-signal-copy-connect-prompt"
-            className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1.5 text-[11px] text-zinc-200 transition-colors hover:bg-white/[0.08]"
-            onClick={() => { void handleCopyPrompt(); }}
-          >
-            <Copy className="h-3.5 w-3.5" />
-            <span>{t('networkCopyPrompt')}</span>
-          </button>
-          {copiedPrompt ? <div className="mt-1 text-emerald-400">{t('networkPromptCopied')}</div> : null}
+        )}
+        <span
+          data-id="network-signal-label"
+          className={`font-mono text-[10px] tabular-nums leading-none ${connected ? 'text-zinc-400' : 'text-rose-300'}`}
+        >
+          {latencyLabel}
+        </span>
+      </button>
+
+      {open ? (
+        <div
+          data-id="network-signal-popover"
+          className="animate-select-in absolute right-0 top-[calc(100%+8px)] z-[180] w-[280px] overflow-hidden rounded-xl border border-white/[0.06] bg-[#141416]/[0.98] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.04)] backdrop-blur-md"
+        >
+          <div className="flex items-center justify-between border-b border-white/[0.05] px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              {connected ? <Wifi className="h-3.5 w-3.5 text-zinc-400" /> : <WifiOff className="h-3.5 w-3.5 text-rose-300" />}
+              <span className="text-[12px] font-medium text-zinc-200">WebSocket</span>
+            </div>
+            <div className={`flex items-center gap-1.5 rounded-full bg-white/[0.04] px-2 py-0.5 ring-1 ${q.ring}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${q.color} ${connected ? 'animate-pulse' : ''}`} />
+              <span className={`text-[10px] font-medium ${q.tone}`}>{connected ? t('networkConnected') : t('networkDisconnected')}</span>
+            </div>
+          </div>
+
+          <div className="px-3 py-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Latency</span>
+              <span className="text-[10px] tracking-wide text-zinc-500">{qualityWord}</span>
+            </div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className={`font-mono text-lg tabular-nums leading-none ${q.tone}`}>
+                {latency != null ? latency : '—'}
+              </span>
+              <span className="text-[11px] text-zinc-600">ms</span>
+            </div>
+          </div>
+
+          <div className="border-t border-white/[0.05] px-3 py-2.5">
+            <span className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Client ID</span>
+            <button
+              type="button"
+              onClick={handleCopyClientId}
+              disabled={!clientId}
+              className="mt-1 group/cid flex w-full items-center gap-1.5 rounded-md border border-white/[0.05] bg-white/[0.02] px-2 py-1.5 text-left transition-colors hover:border-white/[0.10] hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-60"
+              title={clientId ? 'Copy' : ''}
+            >
+              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300">
+                {clientId || t('networkClientIdMissing')}
+              </span>
+              {clientId ? (
+                copiedId
+                  ? <Check className="h-3 w-3 shrink-0 text-emerald-400" />
+                  : <Copy className="h-3 w-3 shrink-0 text-zinc-600 transition-colors group-hover/cid:text-zinc-300" />
+              ) : null}
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-1.5 border-t border-white/[0.05] bg-white/[0.01] p-2">
+            <button
+              type="button"
+              data-id="network-signal-send-client-id"
+              onClick={() => { void handleSend(); }}
+              disabled={sending || !onSendClientId}
+              className="inline-flex items-center justify-center gap-1.5 rounded-md border border-white/[0.06] bg-white/[0.03] px-2 py-1.5 text-[11px] font-medium text-zinc-200 transition-all hover:border-white/[0.12] hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Send className={`h-3 w-3 ${sending ? 'animate-pulse' : ''}`} />
+              <span>{sending ? t('networkSending') : t('networkSendClientId')}</span>
+            </button>
+            <button
+              type="button"
+              data-id="network-signal-copy-connect-prompt"
+              onClick={() => { void handleCopyPrompt(); }}
+              className="inline-flex items-center justify-center gap-1.5 rounded-md border border-white/[0.06] bg-white/[0.03] px-2 py-1.5 text-[11px] font-medium text-zinc-200 transition-all hover:border-white/[0.12] hover:bg-white/[0.06]"
+            >
+              {copiedPrompt ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+              <span>{copiedPrompt ? t('networkPromptCopied') : t('networkCopyPrompt')}</span>
+            </button>
+          </div>
         </div>
       ) : null}
     </div>

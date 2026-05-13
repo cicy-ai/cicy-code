@@ -2186,62 +2186,22 @@ EOF
 	case "opencode":
 		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("opencode-install-%s.log", shortID))
 		instructionsJSON := ""
-		replyInstructionsPath := "${WORKSPACE}/.opencode/reply-in-chinese.md"
 		if replyInChinese {
-			instructionsJSON = fmt.Sprintf(",\n  \"instructions\": [%q]", replyInstructionsPath)
+			instructionsJSON = `,"instructions":["${WORKSPACE}/.opencode/reply-in-chinese.md"]`
 		}
 		lines := []string{
 			ensureAgentCommandLine("opencode", "OpenCode", opencodeInstallCmd(), installLog),
 			fmt.Sprintf("export CICY_OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
-			`export OPENCODE_CONFIG="$WORKSPACE/.opencode/opencode.json"`,
-			`export OPENCODE_CONFIG_ROOT="$WORKSPACE/.opencode/xdg"`,
-			`export CICY_OPENCODE_MARKER="$WORKSPACE/.opencode/running"`,
-			`rm -f "$CICY_OPENCODE_MARKER"`,
-			`mkdir -p "$WORKSPACE/.opencode" "$OPENCODE_CONFIG_ROOT"`,
+			`mkdir -p "$WORKSPACE/.opencode/xdg"`,
 		}
 		if replyInChinese {
-			lines = append(lines, `cat > "$WORKSPACE/.opencode/reply-in-chinese.md" <<'EOF'
-Always reply in Chinese unless the user explicitly asks for another language.
-Keep code, commands, file paths, environment variables, API identifiers, and other literal tokens unchanged when accuracy matters.
-EOF`)
+			lines = append(lines, `printf 'Always reply in Chinese unless the user explicitly asks for another language.\nKeep code, commands, file paths, environment variables, API identifiers, and other literal tokens unchanged when accuracy matters.\n' > "$WORKSPACE/.opencode/reply-in-chinese.md"`)
 		} else {
 			lines = append(lines, `rm -f "$WORKSPACE/.opencode/reply-in-chinese.md"`)
 		}
 		lines = append(lines,
-			`cat > "$OPENCODE_CONFIG" <<EOF
-{
-  "\$schema": "https://opencode.ai/config.json",
-  "permission": "allow"`+instructionsJSON+`,
-  "provider": {
-    "cicyai": {
-      "npm": "@ai-sdk/openai-compatible",
-      "api": "openai",
-      "name": "cicyAi Gateway",
-      "options": {
-        "baseURL": "${CICY_OPENAI_BASE_URL}"
-      }
-    }
-  }
-}
-EOF`,
-		)
-		lines = append(lines, `cicy_run_opencode() {
-  XDG_CONFIG_HOME="$OPENCODE_CONFIG_ROOT" OPENCODE_CONFIG="$OPENCODE_CONFIG" opencode
-}`)
-		lines = append(lines, `cicy_start_opencode() {
-  if [ -f "$CICY_OPENCODE_MARKER" ]; then
-    echo '[cicy] OpenCode is already starting or running.'
-    return 0
-  fi
-  : > "$CICY_OPENCODE_MARKER"
-  cicy_run_opencode
-  status=$?
-  rm -f "$CICY_OPENCODE_MARKER"
-  echo '[cicy] OpenCode exited. Run cicy_start_opencode to relaunch.'
-  return "$status"
-}`)
-		lines = append(lines,
-			`cicy_run_opencode`,
+			`printf '{"\$schema":"https://opencode.ai/config.json","permission":"allow"`+instructionsJSON+`,"provider":{"cicyai":{"npm":"@ai-sdk/openai-compatible","api":"openai","name":"cicyAi Gateway","options":{"baseURL":"%s"}}}}\n' "$CICY_OPENAI_BASE_URL" > "$WORKSPACE/.opencode/opencode.json"`,
+			`XDG_CONFIG_HOME="$WORKSPACE/.opencode/xdg" OPENCODE_CONFIG="$WORKSPACE/.opencode/opencode.json" opencode`,
 		)
 		return lines
 	case "kiro-cli":
@@ -2706,30 +2666,14 @@ func isAgentInputReady(agentType, out string) bool {
 }
 
 func hasLazyStartup(agentType string) bool {
-	switch normalizeAgentType(agentType) {
-	case "opencode":
-		return true
-	default:
-		return false
-	}
+	_ = agentType
+	return false
 }
 
 func lazyAgentMarkerPath(agentType, paneID string) string {
-	shortID := strings.Split(normPaneID(paneID), ":")[0]
-	switch normalizeAgentType(agentType) {
-	case "opencode":
-		var workspace string
-		if err := store.QueryRow("SELECT COALESCE(workspace, '') FROM agent_config WHERE pane_id=?", normPaneID(paneID)).Scan(&workspace); err == nil {
-			workspace = strings.TrimSpace(workspace)
-			if workspace != "" {
-				return filepath.Join(workspace, ".opencode", "running")
-			}
-		}
-		return filepath.Join(cicyWorkersDir, shortID, ".opencode", "running")
-		return filepath.Join(os.TempDir(), fmt.Sprintf("opencode-running-%s", shortID))
-	default:
-		return ""
-	}
+	_ = agentType
+	_ = paneID
+	return ""
 }
 
 func ensurePaneReadyForSend(paneID string, trace *tmuxSendTrace) error {
@@ -2756,41 +2700,9 @@ func ensurePaneReadyForSend(paneID string, trace *tmuxSendTrace) error {
 }
 
 func ensureLazyAgentReady(paneID, agentType string) error {
-	switch normalizeAgentType(agentType) {
-	case "opencode":
-		return ensureLazyOpenCodeReady(paneID)
-	default:
-		return nil
-	}
-}
-
-func ensureLazyOpenCodeReady(paneID string) error {
-	out, err := runTmux("capture-pane", "-t", paneID, "-p", "-S", "-160")
-	if err == nil && isOpenCodeInputReady(out) {
-		return nil
-	}
-
-	markerPath := lazyAgentMarkerPath("opencode", paneID)
-	if markerPath != "" {
-		if _, statErr := os.Stat(markerPath); os.IsNotExist(statErr) {
-			log.Printf("[lazy-agent] %s starting opencode", paneID)
-			sendPaneText(paneID, "cicy_start_opencode")
-		}
-	}
-
-	for i := 0; i < 120; i++ {
-		time.Sleep(500 * time.Millisecond)
-		out, err = runTmux("capture-pane", "-t", paneID, "-p", "-S", "-160")
-		if err != nil {
-			continue
-		}
-		if !isOpenCodeInputReady(out) {
-			continue
-		}
-		return nil
-	}
-
-	return fmt.Errorf("pane %s opencode did not become ready in time", shortPaneID(paneID))
+	_ = paneID
+	_ = agentType
+	return nil
 }
 
 func waitForAgentInputReady(paneID, agentType string, trace *tmuxSendTrace) error {
@@ -3705,7 +3617,7 @@ func initPaneEnv(opts paneEnvOpts) {
 		lines = append(lines, opts.initScript)
 	}
 	bootAgentNorm := normalizeAgentType(opts.agentType)
-	if bootAgentNorm != "claude" && bootAgentNorm != "cicy-claude" && bootAgentNorm != "codex" {
+	if bootAgentNorm != "claude" && bootAgentNorm != "cicy-claude" && bootAgentNorm != "codex" && bootAgentNorm != "opencode" {
 		lines = append(lines, "clear")
 	}
 	lines = append(lines, agentBootLines(opts.agentType, opts.allowAllActions, opts.replyInChinese, useOfficialAuth, shortID, opts.defaultModel)...)

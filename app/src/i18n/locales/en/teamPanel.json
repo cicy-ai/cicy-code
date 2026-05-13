@@ -17,7 +17,7 @@
   "createTitle": "Create and bind a new worker",
   "createSubmit": "Create and bind",
   "createEmptyTitleAgent": "Full-stack engineer",
-  "bindMemberPlaceholder": "+ Bind a team member...",
+  "bindMemberPlaceholder": "Bind a team member…",
   "createBindShortLabel": "Create and bind a new worker",
   "confirmUnbind": "Unbind <strong>{{name}}</strong>?",
   "emptyState": "Bind a team member to get started"

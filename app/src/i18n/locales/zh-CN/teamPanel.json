@@ -17,7 +17,7 @@
   "createTitle": "创建并绑定新员工",
   "createSubmit": "创建并绑定",
   "createEmptyTitleAgent": "全栈软件开发工程师",
-  "bindMemberPlaceholder": "+ 绑定团队成员...",
+  "bindMemberPlaceholder": "绑定团队成员…",
   "createBindShortLabel": "创建并绑定新员工",
   "confirmUnbind": "解绑 <strong>{{name}}</strong>？",
   "emptyState": "先绑定一个团队成员开始"
