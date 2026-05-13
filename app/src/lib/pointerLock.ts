@@ -20,7 +20,7 @@ export function clearPointerLock() {
   notifyPointerLock(false);
 }
 
-export function onPointerLockChange(fn: (locked: boolean) => void) {
+function onPointerLockChange(fn: (locked: boolean) => void) {
   listeners.add(fn);
   return () => { listeners.delete(fn); };
 }

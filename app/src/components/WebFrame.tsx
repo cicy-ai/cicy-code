@@ -4,7 +4,7 @@ import { useDevRegister } from '../lib/devStore';
 import { usePointerLock } from '../lib/pointerLock';
 import { WEB_FRAME_MASK_EVENT, WebFrameMaskEventDetail } from '../lib/webFrameMask';
 
-export const isElectron = navigator.userAgent.includes('Electron');
+const isElectron = navigator.userAgent.includes('Electron');
 
 // Global cicy super object for Electron webview control
 interface CicyWebview { el: HTMLElement; src: string; openDevTools: () => void; getContents: () => any; }

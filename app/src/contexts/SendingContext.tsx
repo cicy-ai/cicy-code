@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useRef, ReactNode } from 'react';
+import { createContext, useState, useCallback, useRef, ReactNode } from 'react';
 import { useDevRegister } from '../lib/devStore';
 
 interface SendingContextType {
@@ -31,5 +31,3 @@ export function SendingProvider({ children }: { children: ReactNode }) {
 
   return <SendingContext.Provider value={{ sending, setSending, checkIdle }}>{children}</SendingContext.Provider>;
 }
-
-export const useSending = () => useContext(SendingContext);

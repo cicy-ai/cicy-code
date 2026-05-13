@@ -1,38 +1,5 @@
-import { useState, useCallback, useEffect } from 'react';
-
-export interface DesktopApp {
-  id: string;
-  type?: 'icon' | 'widget';
-  label: string;
-  emoji: string;
-  url: string;
-  size?: 'sm' | 'md' | 'lg';
-  srcdoc?: string;
-}
-
-const STORAGE_KEY = 'desktop_apps';
-
-export function useDesktopApps(paneId: string) {
-  const [apps, setApps] = useState<DesktopApp[]>(() => {
-    try { return JSON.parse(localStorage.getItem(`${STORAGE_KEY}_${paneId}`) || '[]'); } catch { return []; }
-  });
-
-  useEffect(() => { localStorage.setItem(`${STORAGE_KEY}_${paneId}`, JSON.stringify(apps)); }, [paneId, apps]);
-
-  const addApp = useCallback((app: DesktopApp) => {
-    setApps(prev => {
-      if (prev.find(a => a.id === app.id)) return prev.map(a => a.id === app.id ? { ...a, ...app } : a);
-      return [...prev, app];
-    });
-  }, []);
-
-  const removeApp = useCallback((id: string) => setApps(prev => prev.filter(a => a.id !== id)), []);
-
-  return { apps, addApp, removeApp };
-}
-
 // Call any Electron MCP tool via IPC, fallback null
-export async function electronRPC(tool: string, args: Record<string, any> = {}): Promise<any> {
+async function electronRPC(tool: string, args: Record<string, any> = {}): Promise<any> {
   try {
     const { ipcRenderer } = (window as any).require('electron');
     return await ipcRenderer.invoke('rpc', tool, args);
