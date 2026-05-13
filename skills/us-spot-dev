@@ -445,38 +445,45 @@ def ssh_cicy(ip, cmd, timeout=120, check=False):
 
 
 def bootstrap_container(ip):
-    """Make the fresh container self-sufficient: ssh keys, ~/cicy-ai, cloned repos, dev.py running."""
+    """Bring the container up. On a *fresh* persistent disk: seed ssh keys, ~/cicy-ai,
+    and clone the repos. If the disk already has data, leave it alone — just start the
+    services (the user's edits on the box stay; we don't rsync over them)."""
     print("=== Bootstrapping container ===")
     ssh_cicy(ip, "mkdir -p ~/.ssh ~/cicy-ai/db ~/projects ~/logs ~/.local/bin && chmod 700 ~/.ssh")
-    for k in (GITHUB_KEY, RSA_KEY):
-        if os.path.exists(k):
-            scp_to_cicy(ip, k, "~/.ssh/" + os.path.basename(k))
-            ssh_cicy(ip, f"chmod 600 ~/.ssh/{os.path.basename(k)}")
-    ssh_cicy(ip, "grep -q 'Host github-cicy-ai' ~/.ssh/config 2>/dev/null || "
-                 "printf 'Host github-cicy-ai\\n  HostName github.com\\n  User git\\n  "
-                 "IdentityFile ~/.ssh/id_ed25519_cicy_ai\\n  IdentitiesOnly yes\\n  "
-                 "StrictHostKeyChecking accept-new\\n' >> ~/.ssh/config; "
-                 "touch ~/.ssh/config; chmod 600 ~/.ssh/config")
-    gj = os.path.join(CICY_AI_DIR, "global.json")
-    if os.path.exists(gj):
-        scp_to_cicy(ip, gj, "~/cicy-ai/global.json")
-    dbdir = os.path.join(CICY_AI_DIR, "db")
-    if os.path.isdir(dbdir):
-        subprocess.run(["rsync", "-az", "-e",
-                        " ".join(["ssh"] + _ssh_opts() + ["-p", str(SSH_PORT_CONTAINER), "-i", SSH_KEY]),
-                        "--exclude=*.db", "--exclude=*.db-*", "--exclude=*.lock",
-                        dbdir + "/", f"cicy@{ip}:cicy-ai/db/"],
-                       check=False, capture_output=True, text=True)
-    ssh_cicy(ip, f"[ -d ~/projects/cicy-code/.git ] || git clone {CICY_CODE_REPO} ~/projects/cicy-code; "
-                 "git -C ~/projects/cicy-code pull --ff-only 2>/dev/null || true", timeout=300)
-    ssh_cicy(ip, f"[ -d ~/projects/cicy-skills/.git ] || git clone {CICY_SKILLS_REPO} ~/projects/cicy-skills; "
-                 "git -C ~/projects/cicy-skills pull --ff-only 2>/dev/null || true", timeout=300)
-    # mihomo binary (image pre-install needs the private repo, so push it from here) + cicy-mihomo wrapper
-    if os.path.exists(MIHOMO_LINUX_BIN):
-        scp_to_cicy(ip, MIHOMO_LINUX_BIN, "~/.local/bin/mihomo")
-        ssh_cicy(ip, "chmod 0755 ~/.local/bin/mihomo")
-    ssh_cicy(ip, "cd ~/projects/cicy-skills 2>/dev/null && /usr/local/go/bin/go build -o ~/.local/bin/cicy-hosttools "
-                 "./cmd/cicy-hosttools && ln -sf cicy-hosttools ~/.local/bin/cicy-mihomo || true", timeout=240)
+    populated = ssh_cicy(ip, "test -d ~/projects/cicy-code/.git && test -f ~/cicy-ai/global.json "
+                             "&& echo yes || echo no").stdout.strip().endswith("yes")
+    if populated:
+        print("  persistent disk already populated — skipping data seed (no rsync/scp over it)")
+    else:
+        print("  fresh disk — seeding ssh keys / ~/cicy-ai / repos ...")
+        for k in (GITHUB_KEY, RSA_KEY):
+            if os.path.exists(k):
+                scp_to_cicy(ip, k, "~/.ssh/" + os.path.basename(k))
+                ssh_cicy(ip, f"chmod 600 ~/.ssh/{os.path.basename(k)}")
+        ssh_cicy(ip, "grep -q 'Host github-cicy-ai' ~/.ssh/config 2>/dev/null || "
+                     "printf 'Host github-cicy-ai\\n  HostName github.com\\n  User git\\n  "
+                     "IdentityFile ~/.ssh/id_ed25519_cicy_ai\\n  IdentitiesOnly yes\\n  "
+                     "StrictHostKeyChecking accept-new\\n' >> ~/.ssh/config; "
+                     "touch ~/.ssh/config; chmod 600 ~/.ssh/config")
+        gj = os.path.join(CICY_AI_DIR, "global.json")
+        if os.path.exists(gj):
+            scp_to_cicy(ip, gj, "~/cicy-ai/global.json")
+        dbdir = os.path.join(CICY_AI_DIR, "db")
+        if os.path.isdir(dbdir):
+            subprocess.run(["rsync", "-az", "-e",
+                            " ".join(["ssh"] + _ssh_opts() + ["-p", str(SSH_PORT_CONTAINER), "-i", SSH_KEY]),
+                            "--exclude=*.db", "--exclude=*.db-*", "--exclude=*.lock",
+                            dbdir + "/", f"cicy@{ip}:cicy-ai/db/"],
+                           check=False, capture_output=True, text=True)
+        ssh_cicy(ip, f"git clone {CICY_CODE_REPO} ~/projects/cicy-code 2>/dev/null || true", timeout=300)
+        ssh_cicy(ip, f"git clone {CICY_SKILLS_REPO} ~/projects/cicy-skills 2>/dev/null || true", timeout=300)
+        if os.path.exists(MIHOMO_LINUX_BIN):
+            scp_to_cicy(ip, MIHOMO_LINUX_BIN, "~/.local/bin/mihomo")
+            ssh_cicy(ip, "chmod 0755 ~/.local/bin/mihomo")
+    # always: make sure the cicy-mihomo wrapper exists (binary is pre-installed in the image; build the Go wrapper)
+    ssh_cicy(ip, "[ -x ~/.local/bin/cicy-mihomo ] || { cd ~/projects/cicy-skills 2>/dev/null && "
+                 "/usr/local/go/bin/go build -o ~/.local/bin/cicy-hosttools ./cmd/cicy-hosttools "
+                 "&& ln -sf cicy-hosttools ~/.local/bin/cicy-mihomo; } || true", timeout=240)
     # bring up proxy_ssh profiles (mihomo's upstream nodes may chain through them), then mihomo
     ssh_cicy(ip, "[ -f ~/cicy-ai/db/proxy_ssh.json ] && command -v python3 >/dev/null && "
                  "python3 ~/projects/cicy-code/skills/proxy_ssh list --json 2>/dev/null "
