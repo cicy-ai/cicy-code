@@ -113,3 +113,19 @@ test("scanLinksOnText: multiple links in one line preserve order", () => {
     const r = scanLinksOnText("a https://a.com/x b ./foo.ts c file:///tmp/y");
     assert.deepEqual(r.map(m => m.kind), ["url", "file", "local"]);
 });
+
+test("scanLinksOnText: file:// with absolute path (3 slashes)", () => {
+    const r = scanLinksOnText("see file:///home/cicy/cicy-ai/workers/w-10001/home/.claude/skills/google/SKILL.md for details");
+    assert.equal(r.length, 1);
+    assert.equal(r[0].kind, "local");
+    assert.equal(r[0].uri, "file:///home/cicy/cicy-ai/workers/w-10001/home/.claude/skills/google/SKILL.md");
+});
+
+test("scanLinksOnText: file:// with 2-slash malformed form (host=home)", () => {
+    // Some terminals paste / produce file://home/... (host-relative-looking)
+    // — should still be captured as a single local-protocol link.
+    const r = scanLinksOnText("file://home/cicy/cicy-ai/workers/w-10001/home/.claude/skills/google/SKILL.md");
+    assert.equal(r.length, 1);
+    assert.equal(r[0].kind, "local");
+    assert.equal(r[0].uri, "file://home/cicy/cicy-ai/workers/w-10001/home/.claude/skills/google/SKILL.md");
+});

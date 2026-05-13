@@ -132,7 +132,7 @@ html {
 }
 body {
   margin: 8px !important;
-  padding-top: 28px !important;
+  padding-top: 36px !important;
   padding-left: 8px !important;
 }
 .terminal {
