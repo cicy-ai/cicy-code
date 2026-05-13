@@ -2,21 +2,39 @@
 """
 Provision a US Silicon Valley spot ECS instance with Docker + persistent data disk.
 
+What this is / why:
+  A cheap, disposable US dev box. The trick is the split between two pieces:
+
+    - a PERSISTENT data disk (100GB ESSD, `us-spot-dev-data`) — never deleted.
+      It holds everything that matters: /home/cicy (= /data/cicy: cloned repos,
+      ~/cicy-ai, ~/.claude login state, ~/.local/bin, ...) and /data/docker
+      (the Docker data-root, so images/containers survive too).
+
+    - a SPOT ECS instance — one-time, cheap, billed by usage, and may be
+      reclaimed by Aliyun at any moment.
+
+  When the spot instance gets reclaimed, you don't lose anything: just run
+  `us-spot-dev` again. It boots a fresh spot instance, re-attaches the SAME
+  persistent disk, re-points Cloudflare DNS, brings the container back up,
+  re-bootstraps it, and restarts dev.py — so `https://dev.cicy-ai.com` follows
+  along. Data is intact because it was never on the instance.
+
+  On re-provision the `us-spot-dev` container image is reused instantly off the
+  disk. On a genuinely fresh disk it `docker pull`s the pre-built image
+  (IMAGE_REF, currently on Docker Hub — Aliyun ACR personal edition has no CLI
+  support and the EE instance is paid) and only falls back to building it.
+  Likewise bootstrap only seeds keys/cicy-ai/repos on a fresh disk; if the disk
+  already has data it touches nothing. Run `us-spot-dev --push-image` after
+  changing the Dockerfile to refresh the pre-built image.
+
+  `--destroy` deletes the instance and keeps the disk. There is intentionally
+  no flag to delete the disk.
+
 Usage:
   us-spot-dev                          # provision spot + attach persistent disk + setup docker
   us-spot-dev --destroy                # delete the instance (the data disk is always kept)
   us-spot-dev --push-image             # rebuild the container image on the running box and push it
   us-spot-dev --json                   # JSON output
-
-The persistent data disk (100GB ESSD) survives instance reclaims, including
-/data/docker (the Docker data-root) — so on a re-provision the `us-spot-dev`
-image is reused instantly. On a fresh disk it `docker pull`s the pre-built
-image (IMAGE_REF, currently on Docker Hub — Aliyun ACR personal edition has no
-CLI support and the EE instance is paid) and only falls back to building it.
-When spot is recycled, just run `us-spot-dev` again: it re-points the Cloudflare
-DNS, brings up the container, re-bootstraps it, and restarts dev.py —
-`https://dev.cicy-ai.com` follows along. Run `us-spot-dev --push-image` after
-changing the Dockerfile to refresh the pre-built image.
 """
 
 import json, os, subprocess, sys, time, urllib.request, urllib.error
