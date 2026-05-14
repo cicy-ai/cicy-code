@@ -316,7 +316,7 @@ def seed_runtime_home_from_image(image_ref, home_dir):
     temp_dir = tempfile.mkdtemp(prefix="cicy-openclaw-seed-")
     try:
         result = subprocess.run(
-            ["docker", "create", image_ref, "--public", "--agents=codex"],
+            ["docker", "create", image_ref, "--public", "--agents=claude,codex,opencode"],
             capture_output=True,
             text=True,
             cwd=ROOT_DIR,
@@ -1093,7 +1093,7 @@ def run_docker(
         print(
             f"[dev] Mount host projects: {host_projects_dir} -> {DOCKER_PROJECTS_DIR}"
         )
-    agents_flag = str(agents or "").strip() or "codex"
+    agents_flag = str(agents or "").strip() or "claude,codex,opencode"
     run_cmd = (
         [
             "docker",

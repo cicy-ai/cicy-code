@@ -1,4 +1,4 @@
-import { Check, Copy, Folder, MessageSquare, Settings } from 'lucide-react'
+import { Check, Copy, Folder, MessageSquare, Pencil, Settings } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
@@ -16,6 +16,7 @@ export default function AgentStack({
   onOpenPaneSettings,
   onOpenPaneFiles,
   onOpenPaneSession,
+  onRenamePaneTitle,
 }: {
   items: AgentCanvasItem[]
   activePaneId: string
@@ -26,6 +27,7 @@ export default function AgentStack({
   onOpenPaneSettings: (paneId: string) => void
   onOpenPaneFiles: (paneId: string) => void
   onOpenPaneSession: (paneId: string) => void
+  onRenamePaneTitle?: (paneId: string, nextTitle: string) => Promise<void> | void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -50,6 +52,7 @@ export default function AgentStack({
           onOpenPaneSettings={onOpenPaneSettings}
           onOpenPaneFiles={onOpenPaneFiles}
           onOpenPaneSession={onOpenPaneSession}
+          onRenamePaneTitle={onRenamePaneTitle}
           onClick={() => onActivePaneIdChange(item.paneId)}
         />
       ))}
@@ -66,6 +69,7 @@ function AgentStackCard({
   onOpenPaneSettings,
   onOpenPaneFiles,
   onOpenPaneSession,
+  onRenamePaneTitle,
   onClick,
 }: {
   item: AgentCanvasItem;
@@ -76,14 +80,56 @@ function AgentStackCard({
   onOpenPaneSettings: (paneId: string) => void;
   onOpenPaneFiles: (paneId: string) => void;
   onOpenPaneSession: (paneId: string) => void;
+  onRenamePaneTitle?: (paneId: string, nextTitle: string) => Promise<void> | void;
   onClick: () => void;
 }) {
   const { t } = useTranslation('layout')
   const [copiedPaneId, setCopiedPaneId] = useState(false)
   const copiedPaneTimerRef = useRef<number | null>(null)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
+  const titleInputRef = useRef<HTMLInputElement | null>(null)
+  // IME composition tracking. On Mac's built-in Pinyin IME pressing Enter
+  // emits compositionend → input → keydown in that order, so the keydown
+  // arrives with isComposing=false even though the user's intent was to
+  // confirm the composition. We mark a brief "just-composed" window so the
+  // next Enter keydown is ignored for commit purposes.
+  const composingRef = useRef(false)
+  const justComposedRef = useRef(false)
+  const justComposedTimerRef = useRef<number | null>(null)
+
+  const displayTitle = item.title || item.paneId
+
+  const beginTitleEdit = useCallback(() => {
+    if (!onRenamePaneTitle) return
+    setTitleDraft(displayTitle)
+    setEditingTitle(true)
+  }, [displayTitle, onRenamePaneTitle])
+
+  const commitTitleEdit = useCallback(async () => {
+    const next = titleDraft.trim()
+    setEditingTitle(false)
+    if (!onRenamePaneTitle) return
+    if (!next || next === displayTitle) return
+    try { await onRenamePaneTitle(item.paneId, next) } catch {}
+  }, [titleDraft, displayTitle, onRenamePaneTitle, item.paneId])
+
+  const cancelTitleEdit = useCallback(() => {
+    setEditingTitle(false)
+    setTitleDraft('')
+  }, [])
+
+  useEffect(() => {
+    if (!editingTitle) return
+    const el = titleInputRef.current
+    if (!el) return
+    el.focus()
+    el.select()
+  }, [editingTitle])
 
   useEffect(() => () => {
     if (copiedPaneTimerRef.current !== null) window.clearTimeout(copiedPaneTimerRef.current)
+    if (justComposedTimerRef.current !== null) window.clearTimeout(justComposedTimerRef.current)
   }, [])
 
   const handlePaneIdCopied = useCallback(() => {
@@ -169,7 +215,102 @@ function AgentStackCard({
             variant="stack"
           />
           <div data-id={`agent-stack-card-info-${item.paneId}`} className="min-w-0 flex-1">
-            <div data-id={`agent-stack-card-title-${item.paneId}`} className="truncate text-sm font-medium text-zinc-100">{item.title || item.paneId}</div>
+            <div
+              data-id={`agent-stack-card-title-${item.paneId}`}
+              className="group/title flex h-5 min-w-0 items-center select-none"
+              onDoubleClick={(event) => {
+                if (!onRenamePaneTitle) return
+                event.preventDefault()
+                event.stopPropagation()
+                beginTitleEdit()
+              }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {editingTitle ? (
+                <input
+                  ref={titleInputRef}
+                  data-id={`agent-stack-card-title-input-${item.paneId}`}
+                  type="text"
+                  value={titleDraft}
+                  onChange={(event) => setTitleDraft(event.target.value)}
+                  onBlur={() => { void commitTitleEdit() }}
+                  onCompositionStart={() => {
+                    composingRef.current = true
+                    justComposedRef.current = false
+                    if (justComposedTimerRef.current !== null) {
+                      window.clearTimeout(justComposedTimerRef.current)
+                      justComposedTimerRef.current = null
+                    }
+                  }}
+                  onCompositionEnd={() => {
+                    composingRef.current = false
+                    justComposedRef.current = true
+                    if (justComposedTimerRef.current !== null) {
+                      window.clearTimeout(justComposedTimerRef.current)
+                    }
+                    // 80ms covers the Mac Pinyin IME case where the keydown
+                    // that ended composition fires AFTER compositionend.
+                    justComposedTimerRef.current = window.setTimeout(() => {
+                      justComposedRef.current = false
+                      justComposedTimerRef.current = null
+                    }, 80)
+                  }}
+                  onKeyDown={(event) => {
+                    // The parent card has its own onKeyDown that turns Enter
+                    // and Space into "activate pane". If we let those bubble
+                    // while the user is typing, the card's preventDefault +
+                    // re-render interrupts IME composition and the raw pinyin
+                    // ends up committed instead of the candidate. Stop them
+                    // at the input level unconditionally.
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.stopPropagation()
+                    }
+                    const imeBusy =
+                      composingRef.current ||
+                      justComposedRef.current ||
+                      event.nativeEvent.isComposing ||
+                      event.keyCode === 229
+                    if (event.key === 'Enter') {
+                      if (imeBusy) return
+                      event.preventDefault()
+                      ;(event.currentTarget as HTMLInputElement).blur()
+                    } else if (event.key === 'Escape') {
+                      if (imeBusy) return
+                      event.preventDefault()
+                      cancelTitleEdit()
+                    }
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  className="m-0 block w-full min-w-0 truncate rounded-[3px] border-0 bg-blue-500/[0.10] p-0 text-sm font-medium leading-5 text-zinc-100 outline-none ring-1 ring-blue-500/40 focus:ring-blue-500/60"
+                />
+              ) : (
+                <>
+                  <span className="min-w-0 truncate text-sm font-medium leading-5 text-zinc-100">
+                    {displayTitle}
+                  </span>
+                  {onRenamePaneTitle ? (
+                    <button
+                      type="button"
+                      data-id={`agent-stack-card-title-edit-${item.paneId}`}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        beginTitleEdit()
+                      }}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      title={t('agentStackEditTitle', { defaultValue: 'Rename' })}
+                      aria-label={t('agentStackEditTitle', { defaultValue: 'Rename' })}
+                      className="ml-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-zinc-600 opacity-0 transition-opacity group-hover/title:opacity-100 hover:bg-white/[0.06] hover:text-zinc-200 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/40"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                  ) : null}
+                </>
+              )}
+            </div>
             <div data-id={`agent-stack-card-status-row-${item.paneId}`} className="mt-0.5 flex items-center gap-2 text-[11px] text-zinc-500">
               <span data-id={`agent-stack-card-pane-id-${item.paneId}`} className="font-mono">{item.paneId}</span>
               <button data-id={`agent-stack-card-copy-pane-${item.paneId}`} type="button" onClick={copyPaneId} className="rounded p-0.5 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300">

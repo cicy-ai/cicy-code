@@ -1237,9 +1237,19 @@ PY
 	}
 }
 
-func resolveCodexStartupModel(defaultModel string, aiCfg runtimeAIConfig) string {
+func resolveCodexStartupModel(defaultModel string, aiCfg runtimeAIConfig, shortID string) string {
 	if model := strings.TrimSpace(defaultModel); model != "" {
 		return model
+	}
+	// Honor per-agent runtime_ai override (e.g. user picked DeepSeek for this pane).
+	if shortID != "" {
+		if _, ov, err := resolveRuntimeAIConfigForAgent("openai", shortID); err == nil && ov != nil && strings.TrimSpace(ov.ProviderName) != "" {
+			if provider, ok := loadProviderByKey(ov.ProviderName); ok {
+				if model := strings.TrimSpace(providerDefaultModelForAgentType(provider, "codex")); model != "" {
+					return model
+				}
+			}
+		}
 	}
 	if provider, ok := loadProviderForAgentType("codex"); ok {
 		if model := strings.TrimSpace(providerDefaultModelForAgentType(provider, "codex")); model != "" {
@@ -2115,7 +2125,7 @@ EOF
 	case "codex":
 		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("codex-install-%s.log", shortID))
 		baseURL := openAIRuntimeBaseURL(shortID)
-		model := resolveCodexStartupModel(defaultModel, aiCfg)
+		model := resolveCodexStartupModel(defaultModel, aiCfg, shortID)
 		providerOverride := tmuxShellQuote(`model_provider="custom"`)
 		providerNameOverride := tmuxShellQuote(`model_providers.custom.name="cicy-local"`)
 		baseURLOverride := tmuxShellQuote(`model_providers.custom.base_url="` + baseURL + `"`)

@@ -540,11 +540,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     };
   }, [paneId]);
   const applyPanePatch = useCallback((targetPaneId: string, patch: any) => {
-    setPaneDetails(prev => ({ ...prev, [targetPaneId]: { ...(prev[targetPaneId] || {}), ...patch } }));
-    if (targetPaneId === paneId) {
+    const shortTarget = targetPaneId.split(':')[0];
+    setPaneDetails(prev => ({ ...prev, [shortTarget]: { ...(prev[shortTarget] || {}), ...patch } }));
+    if (shortTarget === paneId.split(':')[0]) {
       setAgentDetail((prev: any) => {
         const next = { ...(prev || {}), ...patch };
-        const workspace = next?.workspace || defaultWorkerWorkspace(targetPaneId);
+        const workspace = next?.workspace || defaultWorkerWorkspace(shortTarget);
         syncHostHomeFromPath(workspace);
         agentWorkspaceRef.current = workspace;
         return next;
@@ -552,8 +553,17 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }
     setAgents(prev => prev.map(a => {
       const id = (a.pane_id || a.id || '').split(':')[0];
-      return id === targetPaneId ? { ...a, ...patch } : a;
+      return id === shortTarget ? { ...a, ...patch } : a;
     }));
+    // TeamPanel's title field comes from boundAgents (poll_data); without this
+    // the panel sticks with the old value until the next poll cycle (~1s).
+    setBoundAgents(prev => prev.map((b: any) => {
+      const id = String(b?.name || b?.pane_id || '').split(':')[0];
+      return id === shortTarget ? { ...b, ...patch } : b;
+    }));
+    // Nudge the server for a fresh poll_data so the other indicators
+    // (status, machine bindings, etc.) also catch up immediately.
+    try { chatWs.send({ type: 'poll_request' }); } catch {}
   }, [paneId]);
   const handleRenamePaneTitle = useCallback(async (targetPaneId: string, nextTitle: string) => {
     await apiService.updatePane(targetPaneId, { title: nextTitle });
@@ -1394,6 +1404,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             onActivePaneIdChange={(targetPaneId) => {
               setActiveTeamPaneId(prev => ({ ...prev, [paneId]: targetPaneId }));
             }}
+            onRenamePaneTitle={handleRenamePaneTitle}
           />
         </div>
       </div>

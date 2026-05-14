@@ -57,7 +57,18 @@ func handleFileExists(w http.ResponseWriter, r *http.Request) {
 
 func translateCachePath(text string, target string) string {
 	hash := sha256.Sum256([]byte(strings.TrimSpace(target) + "\n" + strings.TrimSpace(text)))
-	return filepath.Join(os.TempDir(), "cicy-translate-cache", hex.EncodeToString(hash[:])+".json")
+	// Persistent location under ~/cicy-ai/.cicy/translate-cache/ — survives
+	// container/server restart (the old /tmp path was wiped every reboot).
+	base := filepath.Join(cicyStateDir, "translate-cache")
+	if cicyStateDir == "" {
+		// Fallback if cicyStateDir hasn't been resolved (very early startup).
+		if home, err := os.UserHomeDir(); err == nil {
+			base = filepath.Join(home, "cicy-ai", ".cicy", "translate-cache")
+		} else {
+			base = filepath.Join(os.TempDir(), "cicy-translate-cache")
+		}
+	}
+	return filepath.Join(base, hex.EncodeToString(hash[:])+".json")
 }
 
 func loadCachedTranslation(text string, target string) (string, bool) {
@@ -102,13 +113,19 @@ func translateTextViaProvider(text string, target string) (string, error) {
 	if cached, ok := loadCachedTranslation(text, target); ok {
 		return cached, nil
 	}
-	cfg := loadRuntimeAIConfig()
+	// Prefer the deepseek provider for translation (fast + cheap + reliable);
+	// fall back to whatever the global default AI is if deepseek isn't
+	// configured.
+	cfg, ok := loadRuntimeAIConfigForProvider("deepseek")
+	if !ok || strings.TrimSpace(cfg.APIURL) == "" || strings.TrimSpace(cfg.APIKey) == "" {
+		cfg = loadRuntimeAIConfig()
+	}
 	apiURL := strings.TrimRight(strings.TrimSpace(cfg.APIURL), "/")
 	apiKey := strings.TrimSpace(cfg.APIKey)
-	model := strings.TrimSpace(cfg.CodexModel)
-	if model == "" {
-		model = strings.TrimSpace(cfg.DefaultOpencodeModel)
-	}
+	// Force the flash variant for translation — it's an order of magnitude
+	// faster than pro/v3 and quality is plenty for short paragraph translation.
+	// Override is via env (CICY_TRANSLATE_MODEL) if you need a different one.
+	model := strings.TrimSpace(os.Getenv("CICY_TRANSLATE_MODEL"))
 	if model == "" {
 		model = "deepseek-v4-flash"
 	}

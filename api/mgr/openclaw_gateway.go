@@ -420,7 +420,26 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 		}
 	}
 	proxy.ModifyResponse = func(resp *http.Response) error {
-		if audit == nil || resp == nil || resp.Body == nil {
+		if resp == nil {
+			return nil
+		}
+		if resp.Body != nil && resp.Request != nil &&
+			resp.Request.Header.Get(cicyAdaptResponsesHeader) == "1" &&
+			resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			// Wrap upstream Chat Completions SSE into a Responses event stream
+			// before the audit reader so codex consumes the translated bytes.
+			model := ""
+			if mediaType := resp.Header.Get("Content-Type"); strings.Contains(mediaType, "event-stream") {
+				if id := resp.Request.URL.Query().Get("model"); id != "" {
+					model = id
+				}
+			}
+			resp.Body = newChatCompletionsToResponsesReader(resp.Body, model)
+			resp.Header.Set("Content-Type", "text/event-stream; charset=utf-8")
+			resp.Header.Del("Content-Length")
+			resp.ContentLength = -1
+		}
+		if audit == nil || resp.Body == nil {
 			return nil
 		}
 		audit.recordOutboundRequest(resp.Request)
@@ -468,6 +487,20 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requestBody = agentInspectorRewriteRequestBody(provider, agentID, requestBody)
+
+	// DeepSeek + codex (Responses API) adaptation: DeepSeek only speaks Chat
+	// Completions, so translate the request body and the upstream path; mark
+	// the request so ModifyResponse can wrap the SSE stream the other way.
+	if shouldAdaptDeepSeekForCodex(targetBase.Host, suffix) {
+		if newBody, _, err := transformResponsesRequestToChatCompletions(requestBody); err == nil {
+			requestBody = newBody
+			suffix = rewriteSuffixForDeepSeekChatCompletions(suffix)
+			r.Header.Set(cicyAdaptResponsesHeader, "1")
+		} else {
+			log.Printf("[ai-gateway] deepseek responses->chat translation failed for %s: %v", agentID, err)
+		}
+	}
+
 	r.Body = io.NopCloser(bytes.NewReader(requestBody))
 	r.GetBody = func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(requestBody)), nil

@@ -3,6 +3,7 @@
   "agentStackApiOnly": "Ce membre ne prend en charge que l'API.",
   "agentStackActive": "Terminal en direct activé.",
   "agentStackInactiveHint": "Cliquez pour passer à ce membre et voir son historique à droite.",
+  "agentStackEditTitle": "Renommer",
   "skillPanelTitle": "Compétences collaboratives",
   "skillPanelTarget": "Cible : {{target}}",
   "skillPanelNode": " · nœud {{node}}",

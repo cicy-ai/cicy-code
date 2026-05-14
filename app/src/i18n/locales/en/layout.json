@@ -3,6 +3,7 @@
   "agentStackApiOnly": "This member currently only supports the API surface.",
   "agentStackActive": "Live terminal is active.",
   "agentStackInactiveHint": "Click to switch to this member and see the full history on the right.",
+  "agentStackEditTitle": "Rename",
   "skillPanelTitle": "Collaboration skills",
   "skillPanelTarget": "Target: {{target}}",
   "skillPanelNode": " · node {{node}}",
