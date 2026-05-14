@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type skillDefinition struct {
@@ -177,11 +182,11 @@ func marketSkillsCatalog() []marketSkill {
 		{Name: "frp-server", Title: "FRP Server", Description: "Run frps in the background with status, reload, connections.", Version: "1.0.0", Category: "network", Icon: "server", BinaryAliases: []string{"frp-server"}, ConfigFile: "~/data/frp/frps.toml"},
 		{Name: "frp-client", Title: "FRP Client", Description: "Run frpc, with remote management over SSH.", Version: "1.0.0", Category: "network", Icon: "plug", BinaryAliases: []string{"frp-client"}},
 		{Name: "google", Title: "Google Workspace", Description: "Gmail / Sheets / Drive / Calendar via Google APIs.", Version: "1.0.0", Category: "ai", Icon: "mail", Tags: []string{"gmail", "sheets", "drive", "calendar"}, BinaryAliases: []string{"google"}, ConfigFile: "~/cicy-ai/db/google.json"},
-		{Name: "agent-summary", Title: "Agent Summary", Description: "Generate conversation summaries and handoff documents.", Version: "1.0.0", Category: "ai", Icon: "file-text", BinaryAliases: []string{"agent-summary"}},
+		{Name: "agent-summary", Title: "Agent Summary", Description: "Generate conversation summaries and handoff documents.", Version: "1.0.0", Category: "ai", Icon: "file-text", BinaryAliases: []string{}},
 		{Name: "agent-webpage", Title: "Agent Webpage", Description: "Talk to the live webpage client for an agent.", Version: "1.0.0", Category: "ai", Icon: "globe", BinaryAliases: []string{"agent-webpage"}},
 		{Name: "agent-code-server", Title: "Code Server", Description: "Open files in the page-bound code-server.", Version: "1.0.0", Category: "ai", Icon: "code", BinaryAliases: []string{"agent-code-server"}},
 		{Name: "cicy-agent", Title: "cicy-agent", Description: "Operate tmux panes and windows on this host.", Version: "1.0.0", Category: "dev", Icon: "terminal", BinaryAliases: []string{"cicy-agent"}, ConfigFile: "~/cicy-ai/db/cicy-agent.json"},
-		{Name: "cicy-ssh", Title: "cicy-ssh", Description: "Manage SSH hosts via ~/.ssh/config.", Version: "1.0.0", Category: "ops", Icon: "key", BinaryAliases: []string{"cicy-ssh"}},
+		{Name: "cicy-ssh", Title: "cicy-ssh", Description: "Manage SSH hosts via ~/.ssh/config.", Version: "1.0.0", Category: "ops", Icon: "key", BinaryAliases: []string{}},
 		{Name: "globalApiToken", Title: "Global API Token", Description: "Show or refresh ~/cicy-ai/global.json api_token.", Version: "1.0.0", Category: "ops", Icon: "shield", BinaryAliases: []string{"globalApiToken"}, ConfigFile: "~/cicy-ai/global.json"},
 		{Name: "docker-build-github-action", Title: "Docker Build (GHCR)", Description: "Build base images on GitHub Actions and push to GHCR.", Version: "1.0.0", Category: "infra", Icon: "package", BinaryAliases: []string{}, ConfigFile: "~/cicy-ai/db/docker-build-ghcr.json"},
 		{Name: "us-spot-proxy", Title: "US Spot Proxy", Description: "Manage Aliyun spot proxy nodes.", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"us-spot-proxy"}, ConfigFile: "~/cicy-ai/db/us-spot-proxy.json"},
@@ -208,22 +213,43 @@ func expandHome(p string) string {
 }
 
 func computeMarketStatus(skill *marketSkill) {
-	binDir, err := os.UserHomeDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return
 	}
-	binDir = filepath.Join(binDir, ".local", "bin")
-	installed := false
+	binDir := filepath.Join(home, ".local", "bin")
+
+	symlinkInstalled := false
 	for _, alias := range skill.BinaryAliases {
 		if _, err := os.Lstat(filepath.Join(binDir, alias)); err == nil {
-			installed = true
+			symlinkInstalled = true
 			break
 		}
 	}
 	if len(skill.BinaryAliases) == 0 {
-		installed = true
+		symlinkInstalled = true
 	}
-	skill.Status.Installed = installed
+
+	skillDocInstalled := true
+	if _, ok := agentgenApprovedMarketSkills[skill.Name]; ok {
+		for _, profile := range []string{"claude", "codex", "opencode"} {
+			doc := filepath.Join(home, "."+profile, "skills", skill.Name, "SKILL.md")
+			if _, err := os.Stat(doc); err != nil {
+				skillDocInstalled = false
+				break
+			}
+		}
+	}
+
+	skill.Status.Installed = symlinkInstalled && skillDocInstalled
+
+	for u := range uninstalledSkillsSet() {
+		if u == skill.Name {
+			skill.Status.Installed = false
+			break
+		}
+	}
+
 	if skill.ConfigFile != "" {
 		if _, err := os.Stat(expandHome(skill.ConfigFile)); err == nil {
 			skill.Status.ConfigPresent = true
@@ -316,7 +342,6 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 	computeMarketStatus(skill)
 
 	if len(parts) == 1 {
-		// detail GET
 		if r.Method != "GET" {
 			httpErr(w, 405, "method not allowed")
 			return
@@ -336,10 +361,181 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 	}
 	switch parts[1] {
 	case "install":
-		J(w, M{"ok": true, "status": skill.Status, "log": []string{"install not yet wired to registry — see skills/migrations/SKILL_API.md"}})
+		logs, err := installMarketSkill(skill)
+		if err != nil {
+			J(w, M{"ok": false, "error": err.Error(), "log": logs})
+			return
+		}
+		computeMarketStatus(skill)
+		J(w, M{"ok": true, "status": skill.Status, "log": logs})
 	case "uninstall":
-		J(w, M{"ok": true, "log": []string{"uninstall not yet wired to registry — see skills/migrations/SKILL_API.md"}})
+		logs, err := uninstallMarketSkill(skill)
+		if err != nil {
+			J(w, M{"ok": false, "error": err.Error(), "log": logs})
+			return
+		}
+		computeMarketStatus(skill)
+		J(w, M{"ok": true, "status": skill.Status, "log": logs})
 	default:
 		httpErr(w, 400, "unknown action: "+parts[1])
 	}
+}
+
+// agentgen-approved skills — must stay in sync with
+// skills/internal/agentgen/generate.go ApprovedCodexSkills(). Catalog entries
+// outside this set are symlink-only (proxy_ssh, us-spot-dev, cicy-master,
+// hk-spot-dev) and have no per-profile SKILL.md handling.
+var agentgenApprovedMarketSkills = map[string]struct{}{
+	"agent-code-server":         {},
+	"agent-summary":             {},
+	"agent-webpage":             {},
+	"cf-tunnel":                 {},
+	"cping":                     {},
+	"docker-build-github-action": {},
+	"frp-client":                {},
+	"frp-server":                {},
+	"globalApiToken":            {},
+	"google":                    {},
+	"cicy-ssh":                  {},
+	"cicy-agent":                {},
+	"cicy-mihomo":               {},
+	"us-spot-proxy":             {},
+}
+
+// hosttool aliases — symlink target is dist/cicy-hosttools. Must stay in sync
+// with skills/internal/bundle/bundle.go HosttoolAliases.
+var hosttoolAliasSet = map[string]struct{}{
+	"agent-code-server": {}, "agent-webpage": {}, "cf-tunnel": {},
+	"cf-tunnel-py": {}, "cf-tunnel.py": {}, "cping": {}, "eng": {},
+	"gemini-ask": {}, "gemini-vision": {}, "globalApiToken": {}, "gpt": {},
+	"gpt-chat": {}, "frp-client": {}, "frp-server": {}, "cicy-mihomo": {},
+	"mysql-exec": {}, "tg": {}, "cicy-agent": {}, "todo": {},
+}
+
+// resolveSymlinkSource maps an alias name to the file it should symlink to
+// under the extracted cicy-skills project tree. Returns "" if the alias has
+// no known source (caller should skip without error — some skills like
+// docker-build-github-action ship as SKILL.md only with no binary).
+func resolveSymlinkSource(alias string) string {
+	projectRoot := cicySkillsProjectDir()
+	if _, ok := hosttoolAliasSet[alias]; ok {
+		return filepath.Join(projectRoot, "dist", "cicy-hosttools")
+	}
+	switch alias {
+	case "google":
+		return filepath.Join(projectRoot, "providers", "google-node", "google.js")
+	case "proxy_ssh", "us-spot-dev", "us-spot-proxy", "cicy-master", "hk-spot-dev":
+		return filepath.Join(projectRoot, alias)
+	}
+	return ""
+}
+
+func userBinDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "bin")
+}
+
+func runCicySkillsAgent(action, profile, skillName string, sink *[]string) error {
+	cli := cicySkillsCommandPath("cicy-skills")
+	if cli == "" {
+		return fmt.Errorf("cicy-skills CLI not found")
+	}
+	if info, err := os.Stat(cli); err != nil || info.Mode()&0o111 == 0 {
+		return fmt.Errorf("cicy-skills CLI not executable at %s", cli)
+	}
+	cmd := exec.Command(cli, "agent", action, profile, skillName)
+	cmd.Env = append(os.Environ(), "CICY_SKILLS_ROOT="+cicySkillsProjectDir())
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	line := fmt.Sprintf("[%s] cicy-skills agent %s %s %s",
+		time.Now().Format(time.RFC3339), action, profile, skillName)
+	if trim := strings.TrimSpace(buf.String()); trim != "" {
+		line += " — " + trim
+	}
+	if err != nil {
+		line += fmt.Sprintf(" (error: %v)", err)
+	}
+	*sink = append(*sink, line)
+	if err != nil {
+		return fmt.Errorf("cicy-skills agent %s %s %s: %w", action, profile, skillName, err)
+	}
+	return nil
+}
+
+func installMarketSkill(skill *marketSkill) ([]string, error) {
+	logs := []string{}
+	if _, ok := agentgenApprovedMarketSkills[skill.Name]; ok {
+		for _, profile := range []string{"codex", "claude", "opencode"} {
+			if err := runCicySkillsAgent("install", profile, skill.Name, &logs); err != nil {
+				return logs, err
+			}
+		}
+	} else {
+		logs = append(logs, fmt.Sprintf("skill %q has no per-profile SKILL.md (symlink-only)", skill.Name))
+	}
+
+	binDir := userBinDir()
+	if binDir == "" {
+		return logs, fmt.Errorf("could not resolve user bin directory")
+	}
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return logs, fmt.Errorf("mkdir %s: %w", binDir, err)
+	}
+	for _, alias := range skill.BinaryAliases {
+		source := resolveSymlinkSource(alias)
+		if source == "" {
+			logs = append(logs, fmt.Sprintf("alias %q has no known symlink source — skipped", alias))
+			continue
+		}
+		if _, err := os.Stat(source); err != nil {
+			logs = append(logs, fmt.Sprintf("source missing for alias %q: %s — skipped", alias, source))
+			continue
+		}
+		link := filepath.Join(binDir, alias)
+		_ = os.Remove(link)
+		if err := os.Symlink(source, link); err != nil {
+			return logs, fmt.Errorf("symlink %s -> %s: %w", link, source, err)
+		}
+		logs = append(logs, fmt.Sprintf("linked %s -> %s", link, source))
+	}
+
+	if err := markSkillInstalled(skill.Name); err != nil {
+		log.Printf("[skill-market] markSkillInstalled(%s): %v", skill.Name, err)
+	}
+	return logs, nil
+}
+
+func uninstallMarketSkill(skill *marketSkill) ([]string, error) {
+	logs := []string{}
+	if _, ok := agentgenApprovedMarketSkills[skill.Name]; ok {
+		for _, profile := range []string{"codex", "claude", "opencode"} {
+			if err := runCicySkillsAgent("remove", profile, skill.Name, &logs); err != nil {
+				return logs, err
+			}
+		}
+	} else {
+		logs = append(logs, fmt.Sprintf("skill %q has no per-profile SKILL.md (symlink-only)", skill.Name))
+	}
+
+	binDir := userBinDir()
+	for _, alias := range skill.BinaryAliases {
+		link := filepath.Join(binDir, alias)
+		if err := os.Remove(link); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return logs, fmt.Errorf("remove %s: %w", link, err)
+		}
+		logs = append(logs, fmt.Sprintf("removed %s", link))
+	}
+
+	if err := markSkillUninstalled(skill.Name); err != nil {
+		log.Printf("[skill-market] markSkillUninstalled(%s): %v", skill.Name, err)
+	}
+	return logs, nil
 }

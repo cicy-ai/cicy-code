@@ -1369,6 +1369,10 @@ func doCicySkillsInstall() {
 
 	extendPATH()
 
+	// Honor user-driven uninstalls (skills-state.json) — `install all` would
+	// otherwise resurrect anything the user disabled via the marketplace UI.
+	applySkillsUninstallState(logFile)
+
 	// After cicy-skills install all has linked the cicy-mihomo wrapper
 	// onto PATH, kick off the binary download once (skip if already
 	// present so reboots don't redownload).
@@ -1379,6 +1383,42 @@ func doCicySkillsInstall() {
 		return
 	}
 	log.Printf("[startup] cicy-skills bootstrap completed")
+}
+
+// applySkillsUninstallState re-applies user-driven uninstalls after
+// `cicy-skills install all` has re-materialized every catalog skill. Without
+// this pass, container restarts would resurrect everything the user disabled
+// via the marketplace UI.
+func applySkillsUninstallState(logFile *os.File) {
+	state, err := loadSkillsState()
+	if err != nil {
+		fmt.Fprintf(logFile, "[%s] load skills-state.json: %v\n", time.Now().Format(time.RFC3339), err)
+		return
+	}
+	if len(state.Uninstalled) == 0 {
+		return
+	}
+	catalog := marketSkillsCatalog()
+	byName := make(map[string]*marketSkill, len(catalog))
+	for i := range catalog {
+		byName[catalog[i].Name] = &catalog[i]
+	}
+	for _, name := range state.Uninstalled {
+		skill, ok := byName[name]
+		if !ok {
+			fmt.Fprintf(logFile, "[%s] skipping uninstalled state for unknown skill %q\n", time.Now().Format(time.RFC3339), name)
+			continue
+		}
+		logs, err := uninstallMarketSkill(skill)
+		for _, line := range logs {
+			fmt.Fprintln(logFile, line)
+		}
+		if err != nil {
+			fmt.Fprintf(logFile, "[%s] re-apply uninstall %s: %v\n", time.Now().Format(time.RFC3339), name, err)
+			continue
+		}
+		log.Printf("[startup] re-applied uninstall for skill %s", name)
+	}
 }
 
 // ensureMihomoBinaryInstalled runs `cicy-mihomo install` to download the real
