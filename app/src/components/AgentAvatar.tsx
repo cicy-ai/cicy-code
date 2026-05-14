@@ -74,7 +74,7 @@ export default function AgentAvatar({
         style={mergedStyle}
         title={title}
       >
-        <span className={cn('font-semibold uppercase', textClassName)}>{title.slice(0, 1) || '?'}</span>
+        <span data-id="agent-avatar-fallback-letter" className={cn('font-semibold uppercase', textClassName)}>{title.slice(0, 1) || '?'}</span>
       </div>
     )
   }
@@ -88,12 +88,13 @@ export default function AgentAvatar({
     >
       {icon.src ? (
         <img
+          data-id="agent-avatar-icon"
           src={icon.src}
           alt={icon.label}
           className={cn('object-contain', (normalizedAgentType === 'kiro-cli' || normalizedAgentType === 'cicy-claude') && 'scale-125', variantStyle.icon)}
         />
       ) : (
-        <span className={cn(textClassName)} aria-label={icon.label}>{icon.text}</span>
+        <span data-id="agent-avatar-icon-text" className={cn(textClassName)} aria-label={icon.label}>{icon.text}</span>
       )}
     </div>
   )

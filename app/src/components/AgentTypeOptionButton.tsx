@@ -32,18 +32,18 @@ export default function AgentTypeOptionButton({ value, label, description, selec
         variant="option"
         className={selected ? 'ring-1 ring-cyan-300/40' : 'group-hover:border-white/25'}
       />
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2">
-          <span className={`text-sm font-medium ${selected ? 'text-cyan-100' : 'text-zinc-200'}`}>{label}</span>
+      <span data-id="agent-type-option-button-body" className="min-w-0 flex-1">
+        <span data-id="agent-type-option-button-header" className="flex items-center gap-2">
+          <span data-id="agent-type-option-button-label" className={`text-sm font-medium ${selected ? 'text-cyan-100' : 'text-zinc-200'}`}>{label}</span>
           {selected && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-cyan-300/14 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-200">
+            <span data-id="agent-type-option-button-selected-badge" className="inline-flex items-center gap-1 rounded-full bg-cyan-300/14 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-200">
               <Check className="h-3 w-3" />
               {t('agentTypeSelected')}
             </span>
           )}
         </span>
         {description ? (
-          <span className={`mt-1 block text-[11px] leading-4 ${selected ? 'text-cyan-100/75' : 'text-zinc-500 group-hover:text-zinc-400'}`}>
+          <span data-id="agent-type-option-button-description" className={`mt-1 block text-[11px] leading-4 ${selected ? 'text-cyan-100/75' : 'text-zinc-500 group-hover:text-zinc-400'}`}>
             {description}
           </span>
         ) : null}

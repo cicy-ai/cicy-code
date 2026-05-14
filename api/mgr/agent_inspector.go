@@ -3576,7 +3576,11 @@ func agentInspectorProviderRequestView(agentID string, current aiGatewayCurrentS
 	if len(body) == 0 {
 		return M{}
 	}
-	provider := strings.TrimSpace(aiGatewayFirstNonEmpty(current.Provider, reply.HTTPRequests[0].Provider))
+	replyProvider := ""
+	if len(reply.HTTPRequests) > 0 {
+		replyProvider = reply.HTTPRequests[0].Provider
+	}
+	provider := strings.TrimSpace(aiGatewayFirstNonEmpty(current.Provider, replyProvider))
 	model := strings.TrimSpace(aiGatewayFirstNonEmpty(current.Model, aiGatewayReplyPrimaryModel(reply)))
 	requestKind := "generic"
 	promptLabel := "Prompt"

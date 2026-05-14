@@ -70,7 +70,7 @@ function CopyButton({ text }: { text: string }) {
     setTimeout(() => setCopied(false), 2000);
   };
   return (
-    <button onClick={copy} className="ml-2 p-1 rounded hover:bg-white/10 text-[var(--vsc-text-secondary)] hover:text-white transition-colors">
+    <button data-id="audit-dashboard-copy-button" onClick={copy} className="ml-2 p-1 rounded hover:bg-white/10 text-[var(--vsc-text-secondary)] hover:text-white transition-colors">
       {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
     </button>
   );
@@ -78,26 +78,26 @@ function CopyButton({ text }: { text: string }) {
 
 function StatCard({ icon: Icon, label, value, sub, color = 'text-blue-400' }: { icon: any; label: string; value: string; sub?: string; color?: string }) {
   return (
-    <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-4 border border-[var(--vsc-border)]">
-      <div className="flex items-center gap-2 mb-2">
+    <div data-id="audit-dashboard-stat-card" className="bg-[var(--vsc-bg-secondary)] rounded-lg p-4 border border-[var(--vsc-border)]">
+      <div data-id="audit-dashboard-stat-card-header" className="flex items-center gap-2 mb-2">
         <Icon size={16} className={color} />
-        <span className="text-xs text-[var(--vsc-text-secondary)]">{label}</span>
+        <span data-id="audit-dashboard-stat-card-label" className="text-xs text-[var(--vsc-text-secondary)]">{label}</span>
       </div>
-      <div className="text-xl font-semibold text-white">{value}</div>
-      {sub && <div className="text-xs text-[var(--vsc-text-muted)] mt-1">{sub}</div>}
+      <div data-id="audit-dashboard-stat-card-value" className="text-xl font-semibold text-white">{value}</div>
+      {sub && <div data-id="audit-dashboard-stat-card-sub" className="text-xs text-[var(--vsc-text-muted)] mt-1">{sub}</div>}
     </div>
   );
 }
 
 function MiniBarChart({ data, maxValue }: { data: { label: string; value: number }[]; maxValue: number }) {
   return (
-    <div className="flex items-end gap-1 h-24">
+    <div data-id="audit-dashboard-mini-bar-chart" className="flex items-end gap-1 h-24">
       {data.map((d, i) => (
-        <div key={i} className="flex-1 flex flex-col items-center gap-1">
-          <div className="w-full bg-blue-500/20 rounded-t relative overflow-hidden" style={{ height: maxValue > 0 ? `${Math.max(2, (d.value / maxValue) * 80)}px` : '2px' }}>
-            <div className="absolute bottom-0 w-full bg-blue-500 rounded-t" style={{ height: '100%' }} />
+        <div key={i} data-id={`audit-dashboard-mini-bar-chart-col-${i}`} className="flex-1 flex flex-col items-center gap-1">
+          <div data-id={`audit-dashboard-mini-bar-chart-bar-${i}`} className="w-full bg-blue-500/20 rounded-t relative overflow-hidden" style={{ height: maxValue > 0 ? `${Math.max(2, (d.value / maxValue) * 80)}px` : '2px' }}>
+            <div data-id={`audit-dashboard-mini-bar-chart-bar-fill-${i}`} className="absolute bottom-0 w-full bg-blue-500 rounded-t" style={{ height: '100%' }} />
           </div>
-          <span className="text-[9px] text-[var(--vsc-text-muted)] truncate w-full text-center">{d.label}</span>
+          <span data-id={`audit-dashboard-mini-bar-chart-label-${i}`} className="text-[9px] text-[var(--vsc-text-muted)] truncate w-full text-center">{d.label}</span>
         </div>
       ))}
     </div>
@@ -118,8 +118,8 @@ function OverviewTab({ userId, days, setDays }: { userId: string; days: number; 
       .finally(() => setLoading(false));
   }, [userId, days]);
 
-  if (loading) return <div className="flex items-center justify-center h-64 gap-2 text-[var(--vsc-text-secondary)]"><Spinner size="md" /> {t('loading')}</div>;
-  if (!data) return <div className="text-center text-[var(--vsc-text-secondary)] py-12">{t('noData')}</div>;
+  if (loading) return <div data-id="audit-dashboard-overview-loading" className="flex items-center justify-center h-64 gap-2 text-[var(--vsc-text-secondary)]"><Spinner size="md" /> {t('loading')}</div>;
+  if (!data) return <div data-id="audit-dashboard-overview-empty" className="text-center text-[var(--vsc-text-secondary)] py-12">{t('noData')}</div>;
 
   const dailyReversed = [...data.daily].reverse();
   const maxCalls = Math.max(...dailyReversed.map(d => d.calls), 1);
@@ -129,11 +129,11 @@ function OverviewTab({ userId, days, setDays }: { userId: string; days: number; 
     .sort((a, b) => (b[1].cost || 0) - (a[1].cost || 0));
 
   return (
-    <div className="space-y-6">
+    <div data-id="audit-dashboard-overview" className="space-y-6">
       {/* Period selector */}
-      <div className="flex items-center gap-2">
+      <div data-id="audit-dashboard-overview-period-selector" className="flex items-center gap-2">
         {[7, 14, 30].map(d => (
-            <button key={d} onClick={() => setDays(d)}
+            <button key={d} data-id={`audit-dashboard-overview-period-${d}`} onClick={() => setDays(d)}
             className={`px-3 py-1 text-xs rounded-md transition-colors ${days === d ? 'bg-blue-600 text-white' : 'bg-[var(--vsc-bg-hover)] text-[var(--vsc-text-secondary)] hover:text-white'}`}>
             {t('rangeDays', { n: d })}
           </button>
@@ -141,7 +141,7 @@ function OverviewTab({ userId, days, setDays }: { userId: string; days: number; 
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div data-id="audit-dashboard-overview-stats" className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard icon={DollarSign} label={t('totalCost')} value={formatCost(data.total_cost_usd)} sub={t('rangeSuffix', { days })} color="text-emerald-400" />
         <StatCard icon={Hash} label={t('apiCalls')} value={data.total_calls.toLocaleString()} sub={t('monthlySuffix', { n: data.monthly_calls.toLocaleString() })} color="text-blue-400" />
         <StatCard icon={TrendingUp} label={t('inputTokens')} value={formatTokens(data.total_input)} color="text-purple-400" />
@@ -149,35 +149,35 @@ function OverviewTab({ userId, days, setDays }: { userId: string; days: number; 
       </div>
 
       {/* Daily charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-4 border border-[var(--vsc-border)]">
-          <h3 className="text-xs font-medium text-[var(--vsc-text-secondary)] mb-3">{t('dailyCalls')}</h3>
+      <div data-id="audit-dashboard-overview-daily" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div data-id="audit-dashboard-overview-daily-calls" className="bg-[var(--vsc-bg-secondary)] rounded-lg p-4 border border-[var(--vsc-border)]">
+          <h3 data-id="audit-dashboard-overview-daily-calls-title" className="text-xs font-medium text-[var(--vsc-text-secondary)] mb-3">{t('dailyCalls')}</h3>
           <MiniBarChart data={dailyReversed.map(d => ({ label: d.date.slice(5), value: d.calls }))} maxValue={maxCalls} />
         </div>
-        <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-4 border border-[var(--vsc-border)]">
-          <h3 className="text-xs font-medium text-[var(--vsc-text-secondary)] mb-3">{t('dailyCost')}</h3>
+        <div data-id="audit-dashboard-overview-daily-cost" className="bg-[var(--vsc-bg-secondary)] rounded-lg p-4 border border-[var(--vsc-border)]">
+          <h3 data-id="audit-dashboard-overview-daily-cost-title" className="text-xs font-medium text-[var(--vsc-text-secondary)] mb-3">{t('dailyCost')}</h3>
           <MiniBarChart data={dailyReversed.map(d => ({ label: d.date.slice(5), value: d.cost_usd }))} maxValue={maxCost} />
         </div>
       </div>
 
       {/* Model breakdown */}
-      <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-4 border border-[var(--vsc-border)]">
-        <h3 className="text-xs font-medium text-[var(--vsc-text-secondary)] mb-3">{t('modelMix')}</h3>
+      <div data-id="audit-dashboard-overview-models" className="bg-[var(--vsc-bg-secondary)] rounded-lg p-4 border border-[var(--vsc-border)]">
+        <h3 data-id="audit-dashboard-overview-models-title" className="text-xs font-medium text-[var(--vsc-text-secondary)] mb-3">{t('modelMix')}</h3>
         {modelEntries.length === 0 ? (
-          <p className="text-[var(--vsc-text-muted)] text-sm">{t('noAIRecords')}</p>
+          <p data-id="audit-dashboard-overview-models-empty" className="text-[var(--vsc-text-muted)] text-sm">{t('noAIRecords')}</p>
         ) : (
-          <div className="space-y-2">
+          <div data-id="audit-dashboard-overview-models-list" className="space-y-2">
             {modelEntries.map(([model, stat]) => {
               const pct = data.total_cost_usd > 0 ? ((stat.cost || 0) / data.total_cost_usd) * 100 : 0;
               return (
-                <div key={model} className="flex items-center gap-3 text-sm">
-                  <span className="flex-1 truncate text-[var(--vsc-text)] font-mono text-xs">{model}</span>
-                  <span className="text-[var(--vsc-text-secondary)] text-xs w-16 text-right">{t('callsCount', { n: stat.calls })}</span>
-                  <span className="text-[var(--vsc-text-secondary)] text-xs w-20 text-right">{formatTokens(stat.input_tokens + stat.output_tokens)}</span>
-                  <div className="w-24 h-1.5 bg-[var(--vsc-bg-hover)] rounded-full overflow-hidden">
-                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.max(2, pct)}%` }} />
+                <div key={model} data-id={`audit-dashboard-overview-models-row-${model}`} className="flex items-center gap-3 text-sm">
+                  <span data-id={`audit-dashboard-overview-models-row-${model}-name`} className="flex-1 truncate text-[var(--vsc-text)] font-mono text-xs">{model}</span>
+                  <span data-id={`audit-dashboard-overview-models-row-${model}-calls`} className="text-[var(--vsc-text-secondary)] text-xs w-16 text-right">{t('callsCount', { n: stat.calls })}</span>
+                  <span data-id={`audit-dashboard-overview-models-row-${model}-tokens`} className="text-[var(--vsc-text-secondary)] text-xs w-20 text-right">{formatTokens(stat.input_tokens + stat.output_tokens)}</span>
+                  <div data-id={`audit-dashboard-overview-models-row-${model}-bar`} className="w-24 h-1.5 bg-[var(--vsc-bg-hover)] rounded-full overflow-hidden">
+                    <div data-id={`audit-dashboard-overview-models-row-${model}-bar-fill`} className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.max(2, pct)}%` }} />
                   </div>
-                  <span className="text-white text-xs w-16 text-right font-medium">{formatCost(stat.cost || 0)}</span>
+                  <span data-id={`audit-dashboard-overview-models-row-${model}-cost`} className="text-white text-xs w-16 text-right font-medium">{formatCost(stat.cost || 0)}</span>
                 </div>
               );
             })}
@@ -201,7 +201,7 @@ function UsageTab({ userId }: { userId: string }) {
       .finally(() => setLoading(false));
   }, [userId]);
 
-  if (loading) return <div className="flex items-center justify-center h-64 gap-2 text-[var(--vsc-text-secondary)]"><Spinner size="md" /> {t('loading')}</div>;
+  if (loading) return <div data-id="audit-dashboard-usage-loading" className="flex items-center justify-center h-64 gap-2 text-[var(--vsc-text-secondary)]"><Spinner size="md" /> {t('loading')}</div>;
 
   const exportCSV = () => {
     const header = 'time,method,host,url,status,provider,model,input_tokens,output_tokens,cost_usd\n';
@@ -218,62 +218,62 @@ function UsageTab({ userId }: { userId: string }) {
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-[var(--vsc-text-secondary)]">{t('recordsCount', { n: entries.length })}</span>
-        <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs bg-[var(--vsc-bg-hover)] text-[var(--vsc-text-secondary)] hover:text-white transition-colors">
+    <div data-id="audit-dashboard-usage" className="space-y-3">
+      <div data-id="audit-dashboard-usage-toolbar" className="flex items-center justify-between">
+        <span data-id="audit-dashboard-usage-toolbar-count" className="text-xs text-[var(--vsc-text-secondary)]">{t('recordsCount', { n: entries.length })}</span>
+        <button data-id="audit-dashboard-usage-export-csv" onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs bg-[var(--vsc-bg-hover)] text-[var(--vsc-text-secondary)] hover:text-white transition-colors">
           <Download size={12} /> {t('exportCsv')}
         </button>
       </div>
-      <div className="overflow-auto max-h-[calc(100vh-280px)]">
-        <table className="w-full text-xs">
-          <thead className="sticky top-0 bg-[var(--vsc-bg)]">
-            <tr className="text-[var(--vsc-text-secondary)] border-b border-[var(--vsc-border)]">
-              <th className="text-left py-2 px-2 font-medium">{t('colTime')}</th>
-              <th className="text-left py-2 px-2 font-medium">{t('colProvider')}</th>
-              <th className="text-left py-2 px-2 font-medium">{t('colModel')}</th>
-              <th className="text-right py-2 px-2 font-medium">{t('colInput')}</th>
-              <th className="text-right py-2 px-2 font-medium">{t('colOutput')}</th>
-              <th className="text-right py-2 px-2 font-medium">{t('colCost')}</th>
-              <th className="text-center py-2 px-2 font-medium">{t('colStatus')}</th>
+      <div data-id="audit-dashboard-usage-table-wrap" className="overflow-auto max-h-[calc(100vh-280px)]">
+        <table data-id="audit-dashboard-usage-table" className="w-full text-xs">
+          <thead data-id="audit-dashboard-usage-thead" className="sticky top-0 bg-[var(--vsc-bg)]">
+            <tr data-id="audit-dashboard-usage-thead-row" className="text-[var(--vsc-text-secondary)] border-b border-[var(--vsc-border)]">
+              <th data-id="audit-dashboard-usage-th-time" className="text-left py-2 px-2 font-medium">{t('colTime')}</th>
+              <th data-id="audit-dashboard-usage-th-provider" className="text-left py-2 px-2 font-medium">{t('colProvider')}</th>
+              <th data-id="audit-dashboard-usage-th-model" className="text-left py-2 px-2 font-medium">{t('colModel')}</th>
+              <th data-id="audit-dashboard-usage-th-input" className="text-right py-2 px-2 font-medium">{t('colInput')}</th>
+              <th data-id="audit-dashboard-usage-th-output" className="text-right py-2 px-2 font-medium">{t('colOutput')}</th>
+              <th data-id="audit-dashboard-usage-th-cost" className="text-right py-2 px-2 font-medium">{t('colCost')}</th>
+              <th data-id="audit-dashboard-usage-th-status" className="text-center py-2 px-2 font-medium">{t('colStatus')}</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody data-id="audit-dashboard-usage-tbody">
             {entries.map((e, i) => (
-              <tr key={i} className="border-b border-[var(--vsc-border-subtle)] hover:bg-[var(--vsc-bg-hover)] transition-colors">
-                <td className="py-1.5 px-2 text-[var(--vsc-text-muted)] whitespace-nowrap" title={new Date(e.ts * 1000).toLocaleString()}>
+              <tr key={i} data-id={`audit-dashboard-usage-row-${i}`} className="border-b border-[var(--vsc-border-subtle)] hover:bg-[var(--vsc-bg-hover)] transition-colors">
+                <td data-id={`audit-dashboard-usage-row-${i}-time`} className="py-1.5 px-2 text-[var(--vsc-text-muted)] whitespace-nowrap" title={new Date(e.ts * 1000).toLocaleString()}>
                   {relativeTime(e.ts)}
                 </td>
-                <td className="py-1.5 px-2">
+                <td data-id={`audit-dashboard-usage-row-${i}-provider`} className="py-1.5 px-2">
                   {e.ai_usage ? (
-                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-400">
+                    <span data-id={`audit-dashboard-usage-row-${i}-provider-tag`} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-400">
                       {e.ai_usage.provider}
                     </span>
                   ) : (
-                    <span className="text-[var(--vsc-text-muted)]">{e.host}</span>
+                    <span data-id={`audit-dashboard-usage-row-${i}-host`} className="text-[var(--vsc-text-muted)]">{e.host}</span>
                   )}
                 </td>
-                <td className="py-1.5 px-2 font-mono text-[var(--vsc-text)] truncate max-w-[200px]" title={e.ai_usage?.model || e.url}>
+                <td data-id={`audit-dashboard-usage-row-${i}-model`} className="py-1.5 px-2 font-mono text-[var(--vsc-text)] truncate max-w-[200px]" title={e.ai_usage?.model || e.url}>
                   {e.ai_usage?.model || '-'}
                 </td>
-                <td className="py-1.5 px-2 text-right text-[var(--vsc-text-secondary)]">
+                <td data-id={`audit-dashboard-usage-row-${i}-input`} className="py-1.5 px-2 text-right text-[var(--vsc-text-secondary)]">
                   {e.ai_usage ? formatTokens(e.ai_usage.input_tokens) : '-'}
                 </td>
-                <td className="py-1.5 px-2 text-right text-[var(--vsc-text-secondary)]">
+                <td data-id={`audit-dashboard-usage-row-${i}-output`} className="py-1.5 px-2 text-right text-[var(--vsc-text-secondary)]">
                   {e.ai_usage ? formatTokens(e.ai_usage.output_tokens) : '-'}
                 </td>
-                <td className="py-1.5 px-2 text-right font-medium text-white">
+                <td data-id={`audit-dashboard-usage-row-${i}-cost`} className="py-1.5 px-2 text-right font-medium text-white">
                   {e.ai_usage ? formatCost(e.ai_usage.cost_usd) : '-'}
                 </td>
-                <td className="py-1.5 px-2 text-center">
-                  <span className={`inline-block w-2 h-2 rounded-full ${e.status >= 200 && e.status < 300 ? 'bg-emerald-400' : e.status >= 400 ? 'bg-red-400' : 'bg-yellow-400'}`} />
+                <td data-id={`audit-dashboard-usage-row-${i}-status`} className="py-1.5 px-2 text-center">
+                  <span data-id={`audit-dashboard-usage-row-${i}-status-dot`} className={`inline-block w-2 h-2 rounded-full ${e.status >= 200 && e.status < 300 ? 'bg-emerald-400' : e.status >= 400 ? 'bg-red-400' : 'bg-yellow-400'}`} />
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
         {entries.length === 0 && (
-          <div className="text-center py-12 text-[var(--vsc-text-muted)]">{t('noTrafficYet')}</div>
+          <div data-id="audit-dashboard-usage-empty" className="text-center py-12 text-[var(--vsc-text-muted)]">{t('noTrafficYet')}</div>
         )}
       </div>
     </div>
@@ -315,40 +315,40 @@ function LiveTab() {
   }, [events]);
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-3">
-        <div className={`flex items-center gap-1.5 text-xs ${connected ? 'text-emerald-400' : 'text-red-400'}`}>
-          <div className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
+    <div data-id="audit-dashboard-live" className="space-y-3">
+      <div data-id="audit-dashboard-live-header" className="flex items-center gap-3">
+        <div data-id="audit-dashboard-live-connection" className={`flex items-center gap-1.5 text-xs ${connected ? 'text-emerald-400' : 'text-red-400'}`}>
+          <div data-id="audit-dashboard-live-connection-dot" className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
           {connected ? t('connected') : t('disconnected')}
         </div>
-        <span className="text-xs text-[var(--vsc-text-muted)]">{t('eventsCount', { n: events.length })}</span>
+        <span data-id="audit-dashboard-live-events-count" className="text-xs text-[var(--vsc-text-muted)]">{t('eventsCount', { n: events.length })}</span>
       </div>
-      <div ref={containerRef} className="overflow-auto max-h-[calc(100vh-280px)] space-y-1">
+      <div data-id="audit-dashboard-live-list" ref={containerRef} className="overflow-auto max-h-[calc(100vh-280px)] space-y-1">
         {events.map((e, i) => (
-          <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-md bg-[var(--vsc-bg-secondary)] border border-[var(--vsc-border-subtle)] text-xs hover:border-[var(--vsc-border)] transition-colors">
-            <span className="text-[var(--vsc-text-muted)] w-16 shrink-0">{formatTime(e.ts)}</span>
-            <span className={`shrink-0 w-2 h-2 rounded-full ${e.status >= 200 && e.status < 300 ? 'bg-emerald-400' : 'bg-red-400'}`} />
+          <div key={i} data-id={`audit-dashboard-live-event-${i}`} className="flex items-center gap-3 px-3 py-2 rounded-md bg-[var(--vsc-bg-secondary)] border border-[var(--vsc-border-subtle)] text-xs hover:border-[var(--vsc-border)] transition-colors">
+            <span data-id={`audit-dashboard-live-event-${i}-time`} className="text-[var(--vsc-text-muted)] w-16 shrink-0">{formatTime(e.ts)}</span>
+            <span data-id={`audit-dashboard-live-event-${i}-status-dot`} className={`shrink-0 w-2 h-2 rounded-full ${e.status >= 200 && e.status < 300 ? 'bg-emerald-400' : 'bg-red-400'}`} />
             {e.ai_usage ? (
               <>
-                <span className="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 text-[10px] font-medium shrink-0">{e.ai_usage.provider}</span>
-                <span className="font-mono text-[var(--vsc-text)] truncate">{e.ai_usage.model}</span>
-                <span className="ml-auto shrink-0 text-purple-400">{formatTokens(e.ai_usage.input_tokens)}→{formatTokens(e.ai_usage.output_tokens)}</span>
-                <span className="shrink-0 text-white font-medium">{formatCost(e.ai_usage.cost_usd)}</span>
+                <span data-id={`audit-dashboard-live-event-${i}-provider`} className="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 text-[10px] font-medium shrink-0">{e.ai_usage.provider}</span>
+                <span data-id={`audit-dashboard-live-event-${i}-model`} className="font-mono text-[var(--vsc-text)] truncate">{e.ai_usage.model}</span>
+                <span data-id={`audit-dashboard-live-event-${i}-tokens`} className="ml-auto shrink-0 text-purple-400">{formatTokens(e.ai_usage.input_tokens)}→{formatTokens(e.ai_usage.output_tokens)}</span>
+                <span data-id={`audit-dashboard-live-event-${i}-cost`} className="shrink-0 text-white font-medium">{formatCost(e.ai_usage.cost_usd)}</span>
               </>
             ) : (
               <>
-                <span className="text-[var(--vsc-text-secondary)] truncate flex-1">{e.method} {e.host}{e.url?.split('?')[0]}</span>
-                <span className="ml-auto shrink-0 text-[var(--vsc-text-muted)]">{e.req_kb}KB → {e.res_kb}KB</span>
+                <span data-id={`audit-dashboard-live-event-${i}-url`} className="text-[var(--vsc-text-secondary)] truncate flex-1">{e.method} {e.host}{e.url?.split('?')[0]}</span>
+                <span data-id={`audit-dashboard-live-event-${i}-bytes`} className="ml-auto shrink-0 text-[var(--vsc-text-muted)]">{e.req_kb}KB → {e.res_kb}KB</span>
               </>
             )}
-            <span className="shrink-0 text-[var(--vsc-text-muted)]">{e.user_id}</span>
+            <span data-id={`audit-dashboard-live-event-${i}-user`} className="shrink-0 text-[var(--vsc-text-muted)]">{e.user_id}</span>
           </div>
         ))}
         {events.length === 0 && (
-          <div className="text-center py-16 text-[var(--vsc-text-muted)]">
+          <div data-id="audit-dashboard-live-empty" className="text-center py-16 text-[var(--vsc-text-muted)]">
             <Activity size={32} className="mx-auto mb-3 opacity-30" />
-            <p>{t('waitingTraffic')}</p>
-            <p className="text-[10px] mt-1">{t('eventsLive')}</p>
+            <p data-id="audit-dashboard-live-empty-title">{t('waitingTraffic')}</p>
+            <p data-id="audit-dashboard-live-empty-hint" className="text-[10px] mt-1">{t('eventsLive')}</p>
           </div>
         )}
       </div>
@@ -372,25 +372,25 @@ function SetupTab({ proxyToken, onRegister }: { proxyToken: string; onRegister: 
     : 'https://YOUR_TOKEN:x@audit.cicy-ai.com:8003';
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div data-id="audit-dashboard-setup" className="space-y-6 max-w-2xl">
       {/* Token section */}
-      <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-5 border border-[var(--vsc-border)]">
-        <h3 className="text-sm font-semibold text-white mb-3">{t('proxyTokenTitle')}</h3>
+      <div data-id="audit-dashboard-setup-token-card" className="bg-[var(--vsc-bg-secondary)] rounded-lg p-5 border border-[var(--vsc-border)]">
+        <h3 data-id="audit-dashboard-setup-token-title" className="text-sm font-semibold text-white mb-3">{t('proxyTokenTitle')}</h3>
         {proxyToken ? (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 bg-black/30 rounded-md px-3 py-2 font-mono text-xs text-emerald-400 overflow-x-auto">
-              <span className="shrink-0">{proxyToken}</span>
+          <div data-id="audit-dashboard-setup-token-body" className="space-y-3">
+            <div data-id="audit-dashboard-setup-token-value" className="flex items-center gap-2 bg-black/30 rounded-md px-3 py-2 font-mono text-xs text-emerald-400 overflow-x-auto">
+              <span data-id="audit-dashboard-setup-token-value-text" className="shrink-0">{proxyToken}</span>
               <CopyButton text={proxyToken} />
             </div>
-            <div className="flex items-center gap-2 bg-black/30 rounded-md px-3 py-2 font-mono text-xs text-[var(--vsc-text)] overflow-x-auto">
-              <span>export https_proxy="{proxyUrl}"</span>
+            <div data-id="audit-dashboard-setup-token-export" className="flex items-center gap-2 bg-black/30 rounded-md px-3 py-2 font-mono text-xs text-[var(--vsc-text)] overflow-x-auto">
+              <span data-id="audit-dashboard-setup-token-export-text">export https_proxy="{proxyUrl}"</span>
               <CopyButton text={`export https_proxy="${proxyUrl}"`} />
             </div>
           </div>
         ) : (
-          <div className="space-y-3">
-            <p className="text-sm text-[var(--vsc-text-secondary)]">{t('proxyTokenIntro')}</p>
-            <button onClick={onRegister} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors">
+          <div data-id="audit-dashboard-setup-token-empty" className="space-y-3">
+            <p data-id="audit-dashboard-setup-token-intro" className="text-sm text-[var(--vsc-text-secondary)]">{t('proxyTokenIntro')}</p>
+            <button data-id="audit-dashboard-setup-token-generate" onClick={onRegister} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors">
               {t('generateToken')}
             </button>
           </div>
@@ -398,30 +398,30 @@ function SetupTab({ proxyToken, onRegister }: { proxyToken: string; onRegister: 
       </div>
 
       {/* Install CA */}
-      <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-5 border border-[var(--vsc-border)]">
-        <h3 className="text-sm font-semibold text-white mb-1">{t('step1Title')}</h3>
-        <p className="text-xs text-[var(--vsc-text-secondary)] mb-3">{t('step1Body')}</p>
-        <div className="flex items-center gap-2 bg-black/30 rounded-md px-3 py-2 font-mono text-xs text-[var(--vsc-text)]">
-          <span>curl -fsSL https://audit.cicy-ai.com/install-ca | bash</span>
+      <div data-id="audit-dashboard-setup-ca-card" className="bg-[var(--vsc-bg-secondary)] rounded-lg p-5 border border-[var(--vsc-border)]">
+        <h3 data-id="audit-dashboard-setup-ca-title" className="text-sm font-semibold text-white mb-1">{t('step1Title')}</h3>
+        <p data-id="audit-dashboard-setup-ca-body" className="text-xs text-[var(--vsc-text-secondary)] mb-3">{t('step1Body')}</p>
+        <div data-id="audit-dashboard-setup-ca-command" className="flex items-center gap-2 bg-black/30 rounded-md px-3 py-2 font-mono text-xs text-[var(--vsc-text)]">
+          <span data-id="audit-dashboard-setup-ca-command-text">curl -fsSL https://audit.cicy-ai.com/install-ca | bash</span>
           <CopyButton text="curl -fsSL https://audit.cicy-ai.com/install-ca | bash" />
         </div>
-        <div className="mt-2 flex gap-3">
-          <a href="/ca.pem" className="text-xs text-[var(--vsc-link)] hover:underline">{t('manualDownloadCert')}</a>
+        <div data-id="audit-dashboard-setup-ca-manual" className="mt-2 flex gap-3">
+          <a data-id="audit-dashboard-setup-ca-manual-link" href="/ca.pem" className="text-xs text-[var(--vsc-link)] hover:underline">{t('manualDownloadCert')}</a>
         </div>
       </div>
 
       {/* Platform guides */}
-      <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-5 border border-[var(--vsc-border)]">
-        <h3 className="text-sm font-semibold text-white mb-3">{t('step2Title')}</h3>
-        <div className="space-y-4">
+      <div data-id="audit-dashboard-setup-platforms-card" className="bg-[var(--vsc-bg-secondary)] rounded-lg p-5 border border-[var(--vsc-border)]">
+        <h3 data-id="audit-dashboard-setup-platforms-title" className="text-sm font-semibold text-white mb-3">{t('step2Title')}</h3>
+        <div data-id="audit-dashboard-setup-platforms-list" className="space-y-4">
           {(guide?.platforms || defaultPlatforms).map((p, i) => (
-            <div key={i}>
-              <h4 className="text-xs font-medium text-[var(--vsc-text)] mb-1.5">{p.name}</h4>
-              <div className="space-y-1">
+            <div key={i} data-id={`audit-dashboard-setup-platform-${i}`}>
+              <h4 data-id={`audit-dashboard-setup-platform-${i}-name`} className="text-xs font-medium text-[var(--vsc-text)] mb-1.5">{p.name}</h4>
+              <div data-id={`audit-dashboard-setup-platform-${i}-steps`} className="space-y-1">
                 {p.steps.map((s, j) => (
-                  <div key={j} className="flex items-start gap-2 text-xs">
-                    <span className="text-[var(--vsc-text-muted)] shrink-0 mt-0.5">{j + 1}.</span>
-                    <code className="bg-black/20 rounded px-2 py-1 text-[var(--vsc-text-secondary)] flex-1 break-all">
+                  <div key={j} data-id={`audit-dashboard-setup-platform-${i}-step-${j}`} className="flex items-start gap-2 text-xs">
+                    <span data-id={`audit-dashboard-setup-platform-${i}-step-${j}-num`} className="text-[var(--vsc-text-muted)] shrink-0 mt-0.5">{j + 1}.</span>
+                    <code data-id={`audit-dashboard-setup-platform-${i}-step-${j}-code`} className="bg-black/20 rounded px-2 py-1 text-[var(--vsc-text-secondary)] flex-1 break-all">
                       {s.replace(/YOUR_TOKEN/g, proxyToken || 'YOUR_TOKEN')}
                     </code>
                     {s.includes('export') && <CopyButton text={s.replace(/YOUR_TOKEN/g, proxyToken || 'YOUR_TOKEN')} />}
@@ -434,18 +434,18 @@ function SetupTab({ proxyToken, onRegister }: { proxyToken: string; onRegister: 
       </div>
 
       {/* How it works */}
-      <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-5 border border-[var(--vsc-border)]">
-        <h3 className="text-sm font-semibold text-white mb-3">{t('howItWorksTitle')}</h3>
-        <div className="text-xs text-[var(--vsc-text-secondary)] space-y-2 leading-relaxed">
-          <p>{t('howItWorksIntro')}</p>
-          <div className="bg-black/20 rounded-md p-3 font-mono text-[10px] text-[var(--vsc-text-muted)] leading-loose">
+      <div data-id="audit-dashboard-setup-howitworks-card" className="bg-[var(--vsc-bg-secondary)] rounded-lg p-5 border border-[var(--vsc-border)]">
+        <h3 data-id="audit-dashboard-setup-howitworks-title" className="text-sm font-semibold text-white mb-3">{t('howItWorksTitle')}</h3>
+        <div data-id="audit-dashboard-setup-howitworks-body" className="text-xs text-[var(--vsc-text-secondary)] space-y-2 leading-relaxed">
+          <p data-id="audit-dashboard-setup-howitworks-intro">{t('howItWorksIntro')}</p>
+          <div data-id="audit-dashboard-setup-howitworks-diagram" className="bg-black/20 rounded-md p-3 font-mono text-[10px] text-[var(--vsc-text-muted)] leading-loose">
             {t('howItWorksDiagram')}<br/>
             &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↓<br/>
             &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{t('howItWorksParse')}<br/>
             &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↓<br/>
             &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{t('howItWorksDashboard')}
           </div>
-          <p>{t('howItWorksProviders')}</p>
+          <p data-id="audit-dashboard-setup-howitworks-providers">{t('howItWorksProviders')}</p>
         </div>
       </div>
     </div>
@@ -520,29 +520,29 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
   ];
 
   return (
-    <div className="h-screen flex flex-col bg-[var(--vsc-bg)] text-[var(--vsc-text)]">
+    <div data-id="audit-dashboard-root" className="h-screen flex flex-col bg-[var(--vsc-bg)] text-[var(--vsc-text)]">
       {/* Header */}
-      <header className="flex items-center gap-3 px-4 py-3 border-b border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] shrink-0">
+      <header data-id="audit-dashboard-header" className="flex items-center gap-3 px-4 py-3 border-b border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] shrink-0">
         {onBack && (
-          <button onClick={onBack} className="p-1 rounded hover:bg-[var(--vsc-bg-hover)] text-[var(--vsc-text-secondary)] hover:text-white transition-colors">
+          <button data-id="audit-dashboard-header-back" onClick={onBack} className="p-1 rounded hover:bg-[var(--vsc-bg-hover)] text-[var(--vsc-text-secondary)] hover:text-white transition-colors">
             <ArrowLeft size={16} />
           </button>
         )}
-        <div className="flex items-center gap-2">
+        <div data-id="audit-dashboard-header-brand" className="flex items-center gap-2">
           <Zap size={18} className="text-blue-400" />
-          <span className="font-semibold text-white text-sm">CiCy Audit</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-medium">{t('betaBadge')}</span>
+          <span data-id="audit-dashboard-header-brand-name" className="font-semibold text-white text-sm">CiCy Audit</span>
+          <span data-id="audit-dashboard-header-brand-badge" className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-medium">{t('betaBadge')}</span>
         </div>
-        <div className="flex-1" />
-        <span className="text-xs text-[var(--vsc-text-muted)]">
+        <div data-id="audit-dashboard-header-spacer" className="flex-1" />
+        <span data-id="audit-dashboard-header-user" className="text-xs text-[var(--vsc-text-muted)]">
           {userId && t('userBadge', { userId })}
         </span>
       </header>
 
       {/* Tab bar */}
-      <nav className="flex items-center gap-1 px-4 py-1.5 border-b border-[var(--vsc-border)] bg-[var(--vsc-bg)] shrink-0">
+      <nav data-id="audit-dashboard-tabs" className="flex items-center gap-1 px-4 py-1.5 border-b border-[var(--vsc-border)] bg-[var(--vsc-bg)] shrink-0">
         {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
+          <button key={t.id} data-id={`audit-dashboard-tab-${t.id}`} onClick={() => setTab(t.id)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors ${tab === t.id ? 'bg-[var(--vsc-bg-active)] text-white' : 'text-[var(--vsc-text-secondary)] hover:text-[var(--vsc-text)] hover:bg-[var(--vsc-bg-hover)]'}`}>
             <t.icon size={14} />
             {t.label}
@@ -551,7 +551,7 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
       </nav>
 
       {/* Content */}
-      <main className="flex-1 overflow-auto p-4">
+      <main data-id="audit-dashboard-content" className="flex-1 overflow-auto p-4">
         {tab === 'overview' && <OverviewTab userId={userId} days={days} setDays={setDays} />}
         {tab === 'usage' && <UsageTab userId={userId} />}
         {tab === 'live' && <LiveTab />}

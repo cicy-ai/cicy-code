@@ -107,6 +107,8 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		err = env.runFRPClient(args)
 	case "cicy-mihomo":
 		err = env.runCicyMihomo(args)
+	case "google":
+		err = env.runGoogle(args)
 	default:
 		fmt.Fprintf(stderr, "unsupported host tool: %s\n", cmd)
 		printAvailable(stderr)

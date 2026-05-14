@@ -54,45 +54,45 @@ export default function TokenDialog({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[99999] flex cursor-pointer items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className="relative flex max-h-[80vh] w-[600px] max-w-[92vw] cursor-default flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl"
+    <div data-id="token-dialog-overlay" className="fixed inset-0 z-[99999] flex cursor-pointer items-center justify-center" onClick={onClose}>
+      <div data-id="token-dialog-backdrop" className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div data-id="token-dialog" className="relative flex max-h-[80vh] w-[600px] max-w-[92vw] cursor-default flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl"
         onClick={e => e.stopPropagation()}>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06] shrink-0">
-          <div className="flex items-center gap-2">
+        <div data-id="token-dialog-header" className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06] shrink-0">
+          <div data-id="token-dialog-header-title-wrap" className="flex items-center gap-2">
             <Key className="w-4 h-4 text-zinc-400" />
-            <h2 className="text-[15px] font-semibold text-white">{t('tokenDialogTitle')}</h2>
+            <h2 data-id="token-dialog-title" className="text-[15px] font-semibold text-white">{t('tokenDialogTitle')}</h2>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors cursor-pointer">
+          <button data-id="token-dialog-close" onClick={onClose} className="p-1.5 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Create */}
-        <div className="px-5 py-4 border-b border-white/[0.06] space-y-3 shrink-0">
-          <div className="flex gap-2">
-            <input value={note} onChange={e => setNote(e.target.value)} placeholder={t('tokenNotePlaceholder')}
+        <div data-id="token-dialog-create" className="px-5 py-4 border-b border-white/[0.06] space-y-3 shrink-0">
+          <div data-id="token-dialog-create-row" className="flex gap-2">
+            <input data-id="token-dialog-note-input" value={note} onChange={e => setNote(e.target.value)} placeholder={t('tokenNotePlaceholder')}
               className="flex-1 bg-white/[0.03] border border-white/[0.08] text-zinc-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500/40 placeholder:text-zinc-700" />
-            <button onClick={create} disabled={creating || !note.trim()}
+            <button data-id="token-dialog-create-submit" onClick={create} disabled={creating || !note.trim()}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium disabled:opacity-40 cursor-pointer transition-colors">
               {creating ? <Spinner size="xs" /> : <Plus className="w-3.5 h-3.5" />}
               {t('tokenCreateButton')}
             </button>
           </div>
-          <div className="flex flex-wrap gap-1.5">
+          <div data-id="token-dialog-perms" className="flex flex-wrap gap-1.5">
             {PERMS.map(p => (
-              <button key={p} onClick={() => setPerms(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])}
+              <button key={p} data-id={`token-dialog-perm-${p}`} onClick={() => setPerms(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])}
                 className={`px-2 py-1 rounded text-[11px] font-mono transition-colors cursor-pointer ${
                   perms.includes(p) ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-white/[0.03] text-zinc-600 border border-white/[0.06] hover:text-zinc-400'
                 }`}>{p}</button>
             ))}
           </div>
           {newToken && (
-            <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">
-              <code className="text-xs text-emerald-300 font-mono flex-1 truncate">{newToken}</code>
-              <button onClick={() => { copy(newToken); setNewToken(''); }} className="p-1 text-emerald-400 hover:text-emerald-300 cursor-pointer">
+            <div data-id="token-dialog-new-token" className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">
+              <code data-id="token-dialog-new-token-value" className="text-xs text-emerald-300 font-mono flex-1 truncate">{newToken}</code>
+              <button data-id="token-dialog-new-token-copy" onClick={() => { copy(newToken); setNewToken(''); }} className="p-1 text-emerald-400 hover:text-emerald-300 cursor-pointer">
                 {copied === 'new' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
             </div>
@@ -100,32 +100,32 @@ export default function TokenDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto px-5 py-3">
+        <div data-id="token-dialog-list" className="flex-1 overflow-y-auto px-5 py-3">
           {loading ? (
-            <div className="flex items-center justify-center py-8"><Spinner size="md" /></div>
+            <div data-id="token-dialog-list-loading" className="flex items-center justify-center py-8"><Spinner size="md" /></div>
           ) : tokens.length === 0 ? (
-            <p className="text-center text-zinc-600 text-sm py-8">{t('tokenEmptyList')}</p>
+            <p data-id="token-dialog-list-empty" className="text-center text-zinc-600 text-sm py-8">{t('tokenEmptyList')}</p>
           ) : (
-            <div className="space-y-2">
+            <div data-id="token-dialog-list-rows" className="space-y-2">
               {tokens.map((row: any) => (
-                <div key={row.id} className="flex items-center gap-3 bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5 group">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-zinc-300 font-medium">{row.note || t('tokenUnnamed')}</span>
-                      <span className="text-[10px] text-zinc-600 font-mono">#{row.id}</span>
+                <div key={row.id} data-id={`token-dialog-row-${row.id}`} className="flex items-center gap-3 bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5 group">
+                  <div data-id={`token-dialog-row-${row.id}-info`} className="flex-1 min-w-0">
+                    <div data-id={`token-dialog-row-${row.id}-name-row`} className="flex items-center gap-2">
+                      <span data-id={`token-dialog-row-${row.id}-name`} className="text-sm text-zinc-300 font-medium">{row.note || t('tokenUnnamed')}</span>
+                      <span data-id={`token-dialog-row-${row.id}-id`} className="text-[10px] text-zinc-600 font-mono">#{row.id}</span>
                     </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <code className="text-[11px] text-zinc-600 font-mono truncate max-w-[200px]">{row.token_prefix}</code>
-                      <span className="text-[10px] text-zinc-700">{t('tokenPrefixOnly')}</span>
+                    <div data-id={`token-dialog-row-${row.id}-prefix-row`} className="flex items-center gap-2 mt-1">
+                      <code data-id={`token-dialog-row-${row.id}-prefix`} className="text-[11px] text-zinc-600 font-mono truncate max-w-[200px]">{row.token_prefix}</code>
+                      <span data-id={`token-dialog-row-${row.id}-prefix-label`} className="text-[10px] text-zinc-700">{t('tokenPrefixOnly')}</span>
                     </div>
-                    <div className="flex flex-wrap gap-1 mt-1.5">
+                    <div data-id={`token-dialog-row-${row.id}-perms`} className="flex flex-wrap gap-1 mt-1.5">
                       {(row.perms || '').split(',').filter(Boolean).map((p: string) => (
-                        <span key={p} className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-white/[0.04] text-zinc-500">{p}</span>
+                        <span key={p} data-id={`token-dialog-row-${row.id}-perm-${p}`} className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-white/[0.04] text-zinc-500">{p}</span>
                       ))}
                     </div>
                   </div>
-                  <span className="text-[10px] text-zinc-700 shrink-0">{row.created_at?.slice(0, 10)}</span>
-                  <button onClick={() => remove(row.id)}
+                  <span data-id={`token-dialog-row-${row.id}-created-at`} className="text-[10px] text-zinc-700 shrink-0">{row.created_at?.slice(0, 10)}</span>
+                  <button data-id={`token-dialog-row-${row.id}-remove`} onClick={() => remove(row.id)}
                     className="p-1.5 rounded text-zinc-700 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer opacity-0 group-hover:opacity-100">
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

@@ -91,20 +91,20 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
   const defaultVal = `${DEFAULT_URL}${localStorage.getItem(TOKEN_KEY) ? `?token=${localStorage.getItem(TOKEN_KEY)}` : ''}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex cursor-pointer items-center justify-center bg-black/60" onClick={onClose}>
-      <div className="w-[460px] cursor-default rounded-xl border border-white/10 bg-[#1a1a1a] p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-300"><X className="w-4 h-4" /></button>
+    <div data-id="api-switch-dialog-overlay" className="fixed inset-0 z-50 flex cursor-pointer items-center justify-center bg-black/60" onClick={onClose}>
+      <div data-id="api-switch-dialog" className="w-[460px] cursor-default rounded-xl border border-white/10 bg-[#1a1a1a] p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div data-id="api-switch-dialog-header" className="flex items-center justify-between mb-4">
+          <button data-id="api-switch-dialog-close" onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-300"><X className="w-4 h-4" /></button>
         </div>
 
-        <div className="space-y-1 mb-4">
+        <div data-id="api-switch-dialog-presets" className="space-y-1 mb-4">
           {/* default cannot be removed */}
-          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer group ${current === DEFAULT_URL ? 'bg-white/10' : 'hover:bg-white/5'}`}
+          <div data-id="api-switch-dialog-preset-default" className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer group ${current === DEFAULT_URL ? 'bg-white/10' : 'hover:bg-white/5'}`}
             onClick={() => select(DEFAULT_URL)}>
             <Check className={`w-3.5 h-3.5 shrink-0 ${current === DEFAULT_URL ? 'text-emerald-400' : 'text-transparent'}`} />
-            <span className="text-xs text-zinc-300 w-16 shrink-0">{t('labelDefault')}</span>
-            <span className="text-xs text-zinc-500 font-mono truncate flex-1">{defaultVal || t('defaultEmpty')}</span>
-            <button onClick={e => { e.stopPropagation(); copy(defaultVal, 'default'); }}
+            <span data-id="api-switch-dialog-preset-default-label" className="text-xs text-zinc-300 w-16 shrink-0">{t('labelDefault')}</span>
+            <span data-id="api-switch-dialog-preset-default-value" className="text-xs text-zinc-500 font-mono truncate flex-1">{defaultVal || t('defaultEmpty')}</span>
+            <button data-id="api-switch-dialog-preset-default-copy" onClick={e => { e.stopPropagation(); copy(defaultVal, 'default'); }}
               className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-zinc-300 text-[10px] shrink-0">
               {copied === 'default' ? t('copied') : t('copy')}
             </button>
@@ -113,17 +113,17 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
           {presets.map((p, i) => {
             const { url, token } = parseValue(p.value);
             return (
-              <div key={i} className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer group ${current === url ? 'bg-white/10' : 'hover:bg-white/5'}`}
+              <div key={i} data-id={`api-switch-dialog-preset-${i}`} className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer group ${current === url ? 'bg-white/10' : 'hover:bg-white/5'}`}
                 onClick={() => select(p.value)}>
                 <Check className={`w-3.5 h-3.5 shrink-0 ${current === url ? 'text-emerald-400' : 'text-transparent'}`} />
-                <span className="text-xs text-zinc-300 w-16 shrink-0">{p.label}</span>
-                <span className="text-xs text-zinc-500 font-mono truncate flex-1">{url}</span>
-                {token && <span className="text-[10px] text-zinc-600 shrink-0">🔑</span>}
-                <button onClick={e => { e.stopPropagation(); copy(p.value, `p${i}`); }}
+                <span data-id={`api-switch-dialog-preset-${i}-label`} className="text-xs text-zinc-300 w-16 shrink-0">{p.label}</span>
+                <span data-id={`api-switch-dialog-preset-${i}-value`} className="text-xs text-zinc-500 font-mono truncate flex-1">{url}</span>
+                {token && <span data-id={`api-switch-dialog-preset-${i}-token`} className="text-[10px] text-zinc-600 shrink-0">🔑</span>}
+                <button data-id={`api-switch-dialog-preset-${i}-copy`} onClick={e => { e.stopPropagation(); copy(p.value, `p${i}`); }}
                   className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-zinc-300 text-[10px] shrink-0">
                   {copied === `p${i}` ? t('copied') : t('copy')}
                 </button>
-                <button onClick={e => { e.stopPropagation(); remove(i); }}
+                <button data-id={`api-switch-dialog-preset-${i}-remove`} onClick={e => { e.stopPropagation(); remove(i); }}
                   className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -132,21 +132,21 @@ export function ApiSwitchDialog({ onClose }: { onClose: () => void }) {
           })}
         </div>
 
-        <div className="border-t border-white/5 pt-3 mb-4">
-          <div className="flex gap-2">
-            <input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder={t('namePlaceholder')}
+        <div data-id="api-switch-dialog-add" className="border-t border-white/5 pt-3 mb-4">
+          <div data-id="api-switch-dialog-add-row" className="flex gap-2">
+            <input data-id="api-switch-dialog-add-label-input" value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder={t('namePlaceholder')}
               className="w-20 bg-white/5 border border-white/10 rounded px-2 py-1.5 text-xs text-zinc-300 outline-none focus:border-white/20" />
-            <input value={newUrl} onChange={e => { setNewUrl(e.target.value); setError(''); }} placeholder="https://...?token=xxx"
+            <input data-id="api-switch-dialog-add-url-input" value={newUrl} onChange={e => { setNewUrl(e.target.value); setError(''); }} placeholder="https://...?token=xxx"
               className={`flex-1 bg-white/5 border rounded px-2 py-1.5 text-xs text-zinc-300 font-mono outline-none focus:border-white/20 ${error ? 'border-red-500/60' : 'border-white/10'}`} />
-            <button onClick={add} disabled={testing} className="px-3 bg-white/5 hover:bg-white/10 disabled:opacity-50 rounded text-zinc-300 text-xs flex items-center gap-1">
+            <button data-id="api-switch-dialog-add-submit" onClick={add} disabled={testing} className="px-3 bg-white/5 hover:bg-white/10 disabled:opacity-50 rounded text-zinc-300 text-xs flex items-center gap-1">
               <Plus className="w-3.5 h-3.5" /> {testing ? t('verifying') : t('add')}
             </button>
           </div>
-          {error && <p className="text-red-400 text-[11px] mt-1.5">{error}</p>}
+          {error && <p data-id="api-switch-dialog-add-error" className="text-red-400 text-[11px] mt-1.5">{error}</p>}
         </div>
 
-        <div className="flex justify-end">
-          <button onClick={() => window.location.reload()}
+        <div data-id="api-switch-dialog-footer" className="flex justify-end">
+          <button data-id="api-switch-dialog-apply" onClick={() => window.location.reload()}
             className="px-3 py-1.5 bg-emerald-600/80 hover:bg-emerald-600 text-white text-xs rounded-lg">
             {t('applyAndReload')}
           </button>

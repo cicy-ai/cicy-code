@@ -1353,12 +1353,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     <>
       <SystemResourceMonitor paneId={paneId} />
       <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} onSendClientId={handleSendPageClientIdToAgent} onCopyPrompt={handleCopyPageConnectPrompt} />
-      <button onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title={t('apiTokenButton')}><Key className="w-3.5 h-3.5" /></button>
-      <button onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title={t('apiServerButton')}><Server className="w-3.5 h-3.5" /></button>
+      <button data-id="workspace-token-open" onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title={t('apiTokenButton')}><Key className="w-3.5 h-3.5" /></button>
+      <button data-id="workspace-api-open" onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title={t('apiServerButton')}><Server className="w-3.5 h-3.5" /></button>
       {contextUsage != null && (
         <div data-id="context-usage" className="flex items-center gap-1.5 rounded-full bg-white/[0.02] px-2 py-0.5">
           <div data-id="context-bar" className="h-1 w-12 overflow-hidden rounded-full bg-white/[0.04]">
-            <div className={`h-full rounded-full ${contextUsage > 80 ? 'bg-red-400/60' : contextUsage > 50 ? 'bg-yellow-400/60' : 'bg-emerald-400/60'}`} style={{ width: `${contextUsage}%` }} />
+            <div data-id="context-bar-fill" className={`h-full rounded-full ${contextUsage > 80 ? 'bg-red-400/60' : contextUsage > 50 ? 'bg-yellow-400/60' : 'bg-emerald-400/60'}`} style={{ width: `${contextUsage}%` }} />
           </div>
           <span data-id="context-pct" className="font-mono text-xs leading-none text-zinc-600">{contextUsage}%</span>
         </div>
@@ -1368,7 +1368,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const rightContent = (
     <div data-id="right-tabs" className="h-full relative overflow-hidden">
       <div data-id="chat-tab" className="absolute inset-0 flex justify-center" style={{ display: mainTab === 'chat' ? 'flex' : 'none' }}>
-        <div className="w-full max-w-5xl h-full">
+        <div data-id="chat-tab-inner" className="w-full max-w-5xl h-full">
           {/* ChatView reference kept as a comment, temporarily disabled to block its internal stats/chat requests
           <ChatView paneId={paneId} token={token!} apiOnly={isApiOnlyRuntime} />
           */}
@@ -1451,13 +1451,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   <div data-id="left-panel-header" className="h-12 border-b border-[var(--vsc-border)] flex items-center px-2 bg-[#0e0e0e] shrink-0 gap-1">
                     {leftActive === 'agents' ? <>
                       <LayoutList className="w-3.5 h-3.5 text-zinc-600" />
-                      <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelAgents')}</span>
+                      <span data-id="left-panel-title-agents" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelAgents')}</span>
                     </> : leftActive === 'skills' ? <>
                       <Brain className="w-3.5 h-3.5 text-zinc-600" />
-                      <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelSkills')}</span>
+                      <span data-id="left-panel-title-skills" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelSkills')}</span>
                     </> : <>
                       <Users className="w-3.5 h-3.5 text-zinc-600" />
-                      <span className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelTeam')}</span>
+                      <span data-id="left-panel-title-team" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelTeam')}</span>
                     </>}
                     <button data-id="left-panel-close" onClick={closeLeftPanel} className="p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer"><X className="w-3.5 h-3.5" /></button>
                   </div>
@@ -1494,7 +1494,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       </div>
                     ) : (
                       <div data-id="left-panel-skills-view" className="absolute inset-0">
-                        <SkillMarketplacePanel paneId={paneId} />
+                        <SkillMarketplacePanel paneId={activeCliPaneId || paneId} />
                       </div>
                     )}
                   </div>
@@ -1554,13 +1554,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               const displayTag = membershipCard.tag
                 || (membershipCard.level === 'pro_vm' ? 'PRO' : (fallbackKey ? t(fallbackKey) : ''));
               return displayTag ? (
-                <span className={cn('inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase', membershipTagTone(membershipCard.level))}>
+                <span data-id="membership-dropdown-tag" className={cn('inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase', membershipTagTone(membershipCard.level))}>
                   {displayTag}
                 </span>
               ) : null;
             })()}
             {membershipCard.expiresAt ? (
-              <div className="mt-1 text-[11px] font-mono text-zinc-100">{t('membershipExpiresAt', { date: formatDateTime(Date.parse(membershipCard.expiresAt)) })}</div>
+              <div data-id="membership-dropdown-expires-at" className="mt-1 text-[11px] font-mono text-zinc-100">{t('membershipExpiresAt', { date: formatDateTime(Date.parse(membershipCard.expiresAt)) })}</div>
             ) : null}
           </div>
           {membershipCard.renewUrl ? (
@@ -1573,7 +1573,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               }}
               className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-sky-100 transition-colors hover:bg-sky-300/10"
             >
-              <span>{t('membershipRenew')}</span>
+              <span data-id="membership-renew-btn-label">{t('membershipRenew')}</span>
               <ExternalLink className="h-3.5 w-3.5" />
             </button>
           ) : null}
@@ -1587,7 +1587,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               }}
               className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-amber-100 transition-colors hover:bg-amber-300/10"
             >
-              <span>{t('membershipUpgrade')}</span>
+              <span data-id="membership-upgrade-btn-label">{t('membershipUpgrade')}</span>
               <ExternalLink className="h-3.5 w-3.5" />
             </button>
           ) : null}
@@ -1600,7 +1600,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             }}
             className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
           >
-            <span>GitHub Issues</span>
+            <span data-id="top-bar-github-issues-label">GitHub Issues</span>
             <Github className="h-3.5 w-3.5" />
           </button>
           {isDev ? (
@@ -1614,7 +1614,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
             title={t('debugTools')}
           >
-            <span>{t('debugTools')}</span>
+            <span data-id="membership-devtools-label">{t('debugTools')}</span>
             <Bug className="h-3.5 w-3.5" />
           </button>
           ) : null}
@@ -1630,9 +1630,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               className="flex w-full cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
               title={t('language', { ns: 'common' })}
             >
-              <span>{t('language', { ns: 'common' })}</span>
-              <span className="flex items-center gap-1.5 text-[11px] font-normal text-zinc-400">
-                <span aria-hidden>{flagEmoji(currentLang)}</span>
+              <span data-id="membership-language-trigger-label">{t('language', { ns: 'common' })}</span>
+              <span data-id="membership-language-trigger-value" className="flex items-center gap-1.5 text-[11px] font-normal text-zinc-400">
+                <span data-id="workspace-auto-1" aria-hidden>{flagEmoji(currentLang)}</span>
                 <span data-id="membership-language-current">{languageDisplayName(currentLang)}</span>
                 <ChevronDown className={`h-3 w-3 transition-transform ${langMenuOpen ? 'rotate-180' : ''}`} />
               </span>
@@ -1658,9 +1658,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       className={`flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/5 ${active ? 'text-zinc-100' : 'text-zinc-300'}`}
                       title={code}
                     >
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        <span aria-hidden className="text-[12px] leading-none">{flagEmoji(code)}</span>
-                        <span className="truncate">{languageDisplayName(code)}</span>
+                      <span data-id={`membership-language-${code}-label`} className="flex min-w-0 items-center gap-1.5">
+                        <span data-id="workspace-auto-2" aria-hidden className="text-[12px] leading-none">{flagEmoji(code)}</span>
+                        <span data-id={`membership-language-${code}-name`} className="truncate">{languageDisplayName(code)}</span>
                       </span>
                       {active ? <Check className="h-3 w-3 shrink-0 text-emerald-400" /> : null}
                     </button>
@@ -1670,15 +1670,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             ) : null}
           </div>
           <div data-id="membership-version" className="mt-1 flex items-center justify-between rounded-lg px-3 py-2 text-[11px] text-zinc-500">
-            <span>Version</span>
-            <span id="version" className="font-mono text-zinc-300">{config.version}</span>
+            <span data-id="membership-version-label">Version</span>
+            <span data-id="membership-version-value" id="version" className="font-mono text-zinc-300">{config.version}</span>
           </div>
         </div>,
         document.body
       ) : null}
       {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
       {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
-      {toast && <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 text-sm rounded-lg shadow-lg ${toast.variant === 'success' ? 'bg-green-600 text-white' : 'bg-zinc-800 text-white'}`}>{toast.message}</div>}
+      {toast && <div data-id="workspace-toast" className={`fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 text-sm rounded-lg shadow-lg ${toast.variant === 'success' ? 'bg-green-600 text-white' : 'bg-zinc-800 text-white'}`}>{toast.message}</div>}
       {providersOpen && createPortal(
         <div data-id="providers-overlay" className="fixed inset-0 z-[9000] bg-[#0A0A0A]">
           <ProviderDashboard onBack={() => setProvidersOpen(false)} />
@@ -1700,7 +1700,7 @@ function SideBtn({ dataId, active, icon, title, onClick }: { dataId: string; act
   return (
     <button data-id={dataId} onClick={onClick} className={cn("p-2.5 rounded-xl transition-all relative cursor-pointer", active ? "text-zinc-300 bg-white/[0.06]" : "text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.03]")} title={title}>
       {icon}
-      {active && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-blue-500/60 rounded-r" />}
+      {active && <div data-id={`${dataId}-active-indicator`} className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-blue-500/60 rounded-r" />}
     </button>
   );
 }
@@ -1873,9 +1873,10 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange, onOpenSett
       <div data-id="agent-drawer" className="h-full flex flex-col bg-[#0A0A0A]">
         <div data-id="agent-drawer-toolbar" className="px-3 py-2 border-b border-[var(--vsc-border)] shrink-0 bg-[#0A0A0A]">
           <div data-id="agent-search" className="relative flex gap-2">
-            <div className="relative flex-1">
+            <div data-id="agent-search-input-wrap" className="relative flex-1">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
               <input
+                data-id="agent-search-input"
                 type="search"
                 placeholder={t('drawerSearchPlaceholder')}
                 value={search}
@@ -1883,7 +1884,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange, onOpenSett
                 className="w-full bg-white/[0.02] border border-[var(--vsc-border)] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-white/[0.08] placeholder:text-zinc-700 text-zinc-400"
               />
             </div>
-            <button onClick={() => setCreateDialogOpen(true)} disabled={adding}
+            <button data-id="agent-drawer-add" onClick={() => setCreateDialogOpen(true)} disabled={adding}
               className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-[var(--vsc-border)] text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
               title={t('drawerAddWorker')}>
               <Plus className="w-4 h-4" />
@@ -1935,7 +1936,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange, onOpenSett
                           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
                         >
                           <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                          <span>{t('drawerOpen')}</span>
+                          <span data-id="agent-menu-open-label">{t('drawerOpen')}</span>
                         </button>
                         <button
                           type="button"
@@ -1947,7 +1948,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange, onOpenSett
                           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
                         >
                           <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-                          <span>{t('drawerRestart')}</span>
+                          <span data-id="agent-menu-restart-label">{t('drawerRestart')}</span>
                         </button>
                         <button
                           type="button"
@@ -1959,7 +1960,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange, onOpenSett
                           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
                         >
                           <Settings className="w-3.5 h-3.5 shrink-0" />
-                          <span>{t('drawerSettings')}</span>
+                          <span data-id="agent-menu-settings-label">{t('drawerSettings')}</span>
                         </button>
                         {!isMaster ? (
                           <button
@@ -1972,24 +1973,24 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange, onOpenSett
                             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-red-300 transition-colors cursor-pointer hover:bg-red-500/10 hover:text-red-200"
                           >
                             <X className="w-3.5 h-3.5 shrink-0" />
-                            <span>{t('drawerDelete')}</span>
+                            <span data-id="agent-menu-delete-label">{t('drawerDelete')}</span>
                           </button>
                         ) : null}
                       </div>
                     ) : null}
                   </div>
-                  <div className="flex items-center gap-3 flex-1 min-w-0 text-left">
+                  <div data-id={`agent-row-body-${shortId}`} className="flex items-center gap-3 flex-1 min-w-0 text-left">
                     <AgentAvatar
                       agentType={agent.agent_type}
                       title={agent.title || shortId}
                       dataId="agent-avatar"
                       variant="panel"
                     />
-	                    <div className="flex-1 min-w-0 pr-7">
-	                      <div className="flex items-center gap-1.5">
-	                        <h3 className={cn("text-sm font-medium truncate", isActive ? "text-blue-300" : "text-zinc-300")}>{agent.title || shortId}</h3>
+	                    <div data-id={`agent-row-info-${shortId}`} className="flex-1 min-w-0 pr-7">
+	                      <div data-id={`agent-row-title-row-${shortId}`} className="flex items-center gap-1.5">
+	                        <h3 data-id={`agent-row-title-${shortId}`} className={cn("text-sm font-medium truncate", isActive ? "text-blue-300" : "text-zinc-300")}>{agent.title || shortId}</h3>
 	                      </div>
-	                      <p className={cn("text-xs font-mono mt-0.5 truncate", isActive ? "text-blue-400/50" : "text-zinc-600")}>{shortId}</p>
+	                      <p data-id={`agent-row-id-${shortId}`} className={cn("text-xs font-mono mt-0.5 truncate", isActive ? "text-blue-400/50" : "text-zinc-600")}>{shortId}</p>
 	                    </div>
                   </div>
                 </div>
@@ -2048,14 +2049,15 @@ const ResourceChip = memo(function ResourceChip({ label, pct, dataId }: { label:
   const fillPct = sev.value == null || Number.isNaN(sev.value) ? 0 : Math.max(0, Math.min(100, sev.value));
   return (
     <div data-id={dataId} className="flex items-center gap-1.5 leading-none">
-      <div className={`relative h-3 w-[3px] overflow-hidden rounded-full ${sev.track}`}>
+      <div data-id={`${dataId}-track`} className={`relative h-3 w-[3px] overflow-hidden rounded-full ${sev.track}`}>
         <div
+          data-id={`${dataId}-bar`}
           className={`absolute bottom-0 left-0 right-0 ${sev.bar} transition-[height] duration-300`}
           style={{ height: `${fillPct}%` }}
         />
       </div>
-      <span className="text-[10px] tracking-[0.06em] text-zinc-500">{label}</span>
-      <span className={`font-mono text-[11px] tabular-nums ${sev.text}`}>{formatResourcePct(pct)}</span>
+      <span data-id={`${dataId}-label`} className="text-[10px] tracking-[0.06em] text-zinc-500">{label}</span>
+      <span data-id={`${dataId}-value`} className={`font-mono text-[11px] tabular-nums ${sev.text}`}>{formatResourcePct(pct)}</span>
     </div>
   );
 });
@@ -2077,18 +2079,19 @@ const ResourceRow = memo(function ResourceRow({
   const fillPct = sev.value == null || Number.isNaN(sev.value) ? 0 : Math.max(0, Math.min(100, sev.value));
   return (
     <div data-id={dataId} className="px-1">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-zinc-500">{icon}</span>
-          <span className="text-[11px] font-medium text-zinc-300">{label}</span>
+      <div data-id={`${dataId}-header`} className="flex items-center justify-between gap-2">
+        <div data-id={`${dataId}-label-wrap`} className="flex items-center gap-2 min-w-0">
+          <span data-id={`${dataId}-icon`} className="text-zinc-500">{icon}</span>
+          <span data-id={`${dataId}-label`} className="text-[11px] font-medium text-zinc-300">{label}</span>
         </div>
-        <div className="flex items-baseline gap-1.5 shrink-0">
-          {sub ? <span className="font-mono text-[10px] text-zinc-600 truncate max-w-[160px]">{sub}</span> : null}
-          <span className={`font-mono text-[12px] tabular-nums ${sev.text}`}>{formatResourcePct(pct)}</span>
+        <div data-id={`${dataId}-values`} className="flex items-baseline gap-1.5 shrink-0">
+          {sub ? <span data-id={`${dataId}-sub`} className="font-mono text-[10px] text-zinc-600 truncate max-w-[160px]">{sub}</span> : null}
+          <span data-id={`${dataId}-value`} className={`font-mono text-[12px] tabular-nums ${sev.text}`}>{formatResourcePct(pct)}</span>
         </div>
       </div>
-      <div className={`mt-1.5 h-[3px] w-full overflow-hidden rounded-full ${sev.track}`}>
+      <div data-id={`${dataId}-track`} className={`mt-1.5 h-[3px] w-full overflow-hidden rounded-full ${sev.track}`}>
         <div
+          data-id={`${dataId}-bar`}
           className={`h-full ${sev.bar} transition-[width] duration-500`}
           style={{ width: `${fillPct}%` }}
         />
@@ -2167,9 +2170,9 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/25`}
       >
         <ResourceChip label="CPU" pct={cpuPct} dataId="system-resource-summary-cpu" />
-        <span className="h-3 w-px bg-white/[0.06]" aria-hidden />
+        <span data-id="workspace-auto-3" className="h-3 w-px bg-white/[0.06]" aria-hidden />
         <ResourceChip label="MEM" pct={memPct} dataId="system-resource-summary-memory" />
-        <span className="h-3 w-px bg-white/[0.06]" aria-hidden />
+        <span data-id="workspace-auto-4" className="h-3 w-px bg-white/[0.06]" aria-hidden />
         <ResourceChip label="DSK" pct={dskPct} dataId="system-resource-summary-disk" />
         <ChevronDown
           data-id="system-resource-chevron"
@@ -2183,16 +2186,16 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
           className="animate-select-in absolute right-0 top-[calc(100%+8px)] z-[180] w-[320px] overflow-hidden rounded-xl border border-white/[0.06] bg-[#141416]/[0.98] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.04)] backdrop-blur-md"
         >
           <div data-id="system-resource-dropdown-header" className="flex items-center justify-between border-b border-white/[0.05] px-3 py-2.5">
-            <div className="flex items-center gap-2">
+            <div data-id="system-resource-dropdown-title" className="flex items-center gap-2">
               <Activity className="h-3.5 w-3.5 text-zinc-500" />
-              <span className="text-[12px] font-medium text-zinc-200">{t('systemResourceTitle')}</span>
+              <span data-id="system-resource-dropdown-title-label" className="text-[12px] font-medium text-zinc-200">{t('systemResourceTitle')}</span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className={`h-1.5 w-1.5 rounded-full ${isLive ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'}`} />
+            <div data-id="system-resource-dropdown-status" className="flex items-center gap-1.5">
+              <span data-id="system-resource-dropdown-live-dot" className={`h-1.5 w-1.5 rounded-full ${isLive ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'}`} />
               <span data-id="system-resource-updated-at" className="font-mono text-[10px] text-zinc-500">{updatedAt}</span>
             </div>
           </div>
-          <div className="flex flex-col gap-2.5 p-3">
+          <div data-id="system-resource-rows" className="flex flex-col gap-2.5 p-3">
             <ResourceRow
               icon={<Cpu className="h-3.5 w-3.5" />}
               label="CPU"
@@ -2216,14 +2219,14 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
             />
           </div>
           <div data-id="system-resource-load" className="flex items-center justify-between border-t border-white/[0.05] bg-white/[0.01] px-3 py-2">
-            <span className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">{t('systemResourceLoad')}</span>
-            <div className="flex items-baseline gap-1 font-mono text-[11px] text-zinc-400">
-              <span className="tabular-nums">{formatLoadValue(systemResources?.load_1)}</span>
-              <span className="text-zinc-700">·</span>
-              <span className="tabular-nums">{formatLoadValue(systemResources?.load_5)}</span>
-              <span className="text-zinc-700">·</span>
-              <span className="tabular-nums">{formatLoadValue(systemResources?.load_15)}</span>
-              <span className="ml-1 text-[9px] tracking-wider text-zinc-700">1m / 5m / 15m</span>
+            <span data-id="system-resource-load-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">{t('systemResourceLoad')}</span>
+            <div data-id="system-resource-load-values" className="flex items-baseline gap-1 font-mono text-[11px] text-zinc-400">
+              <span data-id="system-resource-load-1" className="tabular-nums">{formatLoadValue(systemResources?.load_1)}</span>
+              <span data-id="workspace-auto-5" className="text-zinc-700">·</span>
+              <span data-id="system-resource-load-5" className="tabular-nums">{formatLoadValue(systemResources?.load_5)}</span>
+              <span data-id="workspace-auto-6" className="text-zinc-700">·</span>
+              <span data-id="system-resource-load-15" className="tabular-nums">{formatLoadValue(systemResources?.load_15)}</span>
+              <span data-id="system-resource-load-units" className="ml-1 text-[9px] tracking-wider text-zinc-700">1m / 5m / 15m</span>
             </div>
           </div>
         </div>
@@ -2380,40 +2383,41 @@ function NetworkSignal({ latency, connected = true, clientId, onSendClientId, on
           data-id="network-signal-popover"
           className="animate-select-in absolute right-0 top-[calc(100%+8px)] z-[180] w-[280px] overflow-hidden rounded-xl border border-white/[0.06] bg-[#141416]/[0.98] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.04)] backdrop-blur-md"
         >
-          <div className="flex items-center justify-between border-b border-white/[0.05] px-3 py-2.5">
-            <div className="flex items-center gap-2">
+          <div data-id="network-signal-popover-header" className="flex items-center justify-between border-b border-white/[0.05] px-3 py-2.5">
+            <div data-id="network-signal-popover-title" className="flex items-center gap-2">
               {connected ? <Wifi className="h-3.5 w-3.5 text-zinc-400" /> : <WifiOff className="h-3.5 w-3.5 text-rose-300" />}
-              <span className="text-[12px] font-medium text-zinc-200">WebSocket</span>
+              <span data-id="network-signal-popover-title-label" className="text-[12px] font-medium text-zinc-200">WebSocket</span>
             </div>
-            <div className={`flex items-center gap-1.5 rounded-full bg-white/[0.04] px-2 py-0.5 ring-1 ${q.ring}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${q.color} ${connected ? 'animate-pulse' : ''}`} />
-              <span className={`text-[10px] font-medium ${q.tone}`}>{connected ? t('networkConnected') : t('networkDisconnected')}</span>
+            <div data-id="network-signal-popover-status" className={`flex items-center gap-1.5 rounded-full bg-white/[0.04] px-2 py-0.5 ring-1 ${q.ring}`}>
+              <span data-id="network-signal-popover-status-dot" className={`h-1.5 w-1.5 rounded-full ${q.color} ${connected ? 'animate-pulse' : ''}`} />
+              <span data-id="network-signal-popover-status-text" className={`text-[10px] font-medium ${q.tone}`}>{connected ? t('networkConnected') : t('networkDisconnected')}</span>
             </div>
           </div>
 
-          <div className="px-3 py-2.5">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Latency</span>
-              <span className="text-[10px] tracking-wide text-zinc-500">{qualityWord}</span>
+          <div data-id="network-signal-popover-latency" className="px-3 py-2.5">
+            <div data-id="network-signal-popover-latency-header" className="flex items-center justify-between">
+              <span data-id="network-signal-popover-latency-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Latency</span>
+              <span data-id="network-signal-popover-latency-quality" className="text-[10px] tracking-wide text-zinc-500">{qualityWord}</span>
             </div>
-            <div className="mt-1 flex items-baseline gap-2">
-              <span className={`font-mono text-lg tabular-nums leading-none ${q.tone}`}>
+            <div data-id="network-signal-popover-latency-value-wrap" className="mt-1 flex items-baseline gap-2">
+              <span data-id="network-signal-popover-latency-value" className={`font-mono text-lg tabular-nums leading-none ${q.tone}`}>
                 {latency != null ? latency : '—'}
               </span>
-              <span className="text-[11px] text-zinc-600">ms</span>
+              <span data-id="network-signal-popover-latency-unit" className="text-[11px] text-zinc-600">ms</span>
             </div>
           </div>
 
-          <div className="border-t border-white/[0.05] px-3 py-2.5">
-            <span className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Client ID</span>
+          <div data-id="network-signal-popover-client" className="border-t border-white/[0.05] px-3 py-2.5">
+            <span data-id="network-signal-popover-client-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Client ID</span>
             <button
+              data-id="network-signal-popover-client-copy"
               type="button"
               onClick={handleCopyClientId}
               disabled={!clientId}
               className="mt-1 group/cid flex w-full items-center gap-1.5 rounded-md border border-white/[0.05] bg-white/[0.02] px-2 py-1.5 text-left transition-colors hover:border-white/[0.10] hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-60"
               title={clientId ? 'Copy' : ''}
             >
-              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300">
+              <span data-id="network-signal-popover-client-value" className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300">
                 {clientId || t('networkClientIdMissing')}
               </span>
               {clientId ? (
@@ -2424,7 +2428,7 @@ function NetworkSignal({ latency, connected = true, clientId, onSendClientId, on
             </button>
           </div>
 
-          <div className="flex flex-col gap-1.5 border-t border-white/[0.05] bg-white/[0.01] p-2">
+          <div data-id="network-signal-popover-actions" className="flex flex-col gap-1.5 border-t border-white/[0.05] bg-white/[0.01] p-2">
             <button
               type="button"
               data-id="network-signal-send-client-id"
@@ -2433,7 +2437,7 @@ function NetworkSignal({ latency, connected = true, clientId, onSendClientId, on
               className="inline-flex items-center justify-center gap-1.5 rounded-md border border-white/[0.06] bg-white/[0.03] px-2 py-1.5 text-[11px] font-medium text-zinc-200 transition-all hover:border-white/[0.12] hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Send className={`h-3 w-3 ${sending ? 'animate-pulse' : ''}`} />
-              <span>{sending ? t('networkSending') : t('networkSendClientId')}</span>
+              <span data-id="network-signal-send-client-id-label">{sending ? t('networkSending') : t('networkSendClientId')}</span>
             </button>
             <button
               type="button"
@@ -2442,7 +2446,7 @@ function NetworkSignal({ latency, connected = true, clientId, onSendClientId, on
               className="inline-flex items-center justify-center gap-1.5 rounded-md border border-white/[0.06] bg-white/[0.03] px-2 py-1.5 text-[11px] font-medium text-zinc-200 transition-all hover:border-white/[0.12] hover:bg-white/[0.06]"
             >
               {copiedPrompt ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
-              <span>{copiedPrompt ? t('networkPromptCopied') : t('networkCopyPrompt')}</span>
+              <span data-id="network-signal-copy-connect-prompt-label">{copiedPrompt ? t('networkPromptCopied') : t('networkCopyPrompt')}</span>
             </button>
           </div>
         </div>

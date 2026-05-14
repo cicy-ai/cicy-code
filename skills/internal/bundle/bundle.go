@@ -39,6 +39,7 @@ var (
 		"gemini-ask",
 		"gemini-vision",
 		"globalApiToken",
+		"google",
 		"gpt",
 		"gpt-chat",
 		"frp-client",
@@ -49,9 +50,7 @@ var (
 		"cicy-agent",
 		"todo",
 	}
-	ProviderLinks = []LinkSpec{
-		{Name: "google", Source: "providers/google-node/google.js"},
-	}
+	ProviderLinks = []LinkSpec{}
 	DeprecatedProviderLinks = []string{"gmail"}
 	RetiredLocalLinks       = []string{
 		"agent-page-ping",

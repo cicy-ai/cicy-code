@@ -53,13 +53,13 @@ export const DialogProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       {children}
       {/* Generic confirm dialog via Portal */}
       {activeDialog === 'confirm' && confirmState && ReactDOM.createPortal(
-        <div className="fixed inset-0 z-[9999999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="absolute inset-0 cursor-pointer" onClick={() => { confirmState.onCancel?.(); closeDialog(); }} />
-          <div className="relative w-full max-w-xs cursor-default rounded-lg border border-[var(--vsc-border)] bg-[#1e1e1e] p-4 shadow-xl mx-4">
-            <p className="text-sm text-zinc-300 mb-4">{confirmState.message}</p>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => { confirmState.onCancel?.(); closeDialog(); }} className="text-sm px-3 py-1.5 rounded bg-white/[0.06] text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.1] transition-colors cursor-pointer">Cancel</button>
-              <button onClick={() => { confirmState.onConfirm(); closeDialog(); }} className="text-sm px-3 py-1.5 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors cursor-pointer">Confirm</button>
+        <div data-id="dialog-context-confirm-overlay" className="fixed inset-0 z-[9999999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div data-id="dialog-context-confirm-backdrop" className="absolute inset-0 cursor-pointer" onClick={() => { confirmState.onCancel?.(); closeDialog(); }} />
+          <div data-id="dialog-context-confirm-card" className="relative w-full max-w-xs cursor-default rounded-lg border border-[var(--vsc-border)] bg-[#1e1e1e] p-4 shadow-xl mx-4">
+            <p data-id="dialog-context-confirm-message" className="text-sm text-zinc-300 mb-4">{confirmState.message}</p>
+            <div data-id="dialog-context-confirm-actions" className="flex justify-end gap-2">
+              <button data-id="dialog-context-confirm-cancel" onClick={() => { confirmState.onCancel?.(); closeDialog(); }} className="text-sm px-3 py-1.5 rounded bg-white/[0.06] text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.1] transition-colors cursor-pointer">Cancel</button>
+              <button data-id="dialog-context-confirm-confirm" onClick={() => { confirmState.onConfirm(); closeDialog(); }} className="text-sm px-3 py-1.5 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors cursor-pointer">Confirm</button>
             </div>
           </div>
         </div>,

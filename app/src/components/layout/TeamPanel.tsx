@@ -310,7 +310,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
             >
               <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-              <span>{i18n.t('openInNewWindow', { ns: 'teamPanel' })}</span>
+              <span data-id="team-panel-worker-menu-open-label">{i18n.t('openInNewWindow', { ns: 'teamPanel' })}</span>
             </button>
             {onRemove ? (
               <button
@@ -323,7 +323,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors cursor-pointer text-zinc-300 hover:bg-red-500/10 hover:text-red-300"
               >
                 <X className="w-3.5 h-3.5 shrink-0" />
-                <span>{i18n.t('unbind', { ns: 'teamPanel' })}</span>
+                <span data-id="team-panel-worker-menu-unbind-label">{i18n.t('unbind', { ns: 'teamPanel' })}</span>
               </button>
             ) : null}
             <button
@@ -342,7 +342,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               }`}
             >
               <RefreshCw className="w-3.5 h-3.5 shrink-0" />
-              <span>{i18n.t('restart', { ns: 'teamPanel' })}</span>
+              <span data-id="team-panel-worker-menu-restart-label">{i18n.t('restart', { ns: 'teamPanel' })}</span>
             </button>
             {onDelete ? (
               <button
@@ -355,24 +355,24 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-red-300 transition-colors cursor-pointer hover:bg-red-500/10 hover:text-red-200"
               >
                 <Trash2 className="w-3.5 h-3.5 shrink-0" />
-                <span>{i18n.t('delete', { ns: 'teamPanel' })}</span>
+                <span data-id="team-panel-worker-menu-delete-label">{i18n.t('delete', { ns: 'teamPanel' })}</span>
               </button>
             ) : null}
           </div>
         ) : null}
       </div>
-      <div className="flex items-center gap-3 flex-1 min-w-0 text-left">
+      <div data-id="team-panel-worker-body" className="flex items-center gap-3 flex-1 min-w-0 text-left">
         <AgentAvatar
           agentType={agentType}
           title={title}
           dataId="team-panel-worker-agent-avatar"
           variant="panel"
         />
-	        <div className="flex-1 min-w-0 pr-7">
-	          <div className="flex items-center gap-1.5">
-	            <h3 className={`text-sm font-medium truncate ${active ? 'text-blue-300' : 'text-zinc-300'}`}>{title}</h3>
+	        <div data-id="team-panel-worker-info" className="flex-1 min-w-0 pr-7">
+	          <div data-id="team-panel-worker-title-row" className="flex items-center gap-1.5">
+	            <h3 data-id="team-panel-worker-title" className={`text-sm font-medium truncate ${active ? 'text-blue-300' : 'text-zinc-300'}`}>{title}</h3>
 	          </div>
-	          <p className={`text-xs font-mono mt-0.5 truncate ${active ? 'text-blue-400/50' : 'text-zinc-600'}`}>
+	          <p data-id="team-panel-worker-subtitle" className={`text-xs font-mono mt-0.5 truncate ${active ? 'text-blue-400/50' : 'text-zinc-600'}`}>
 	            {subtitle}
           </p>
         </div>

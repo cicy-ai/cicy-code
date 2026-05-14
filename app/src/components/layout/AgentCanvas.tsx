@@ -687,7 +687,7 @@ export default function AgentCanvas({
       onWheel={handleWheel}
       onMouseDown={handleStageMouseDown}
     >
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.09),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_22%)]" />
+      <div data-id="agent-canvas-auto-1" className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.09),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_22%)]" />
       <div
         data-id="agent-canvas-viewport-controls"
         className="absolute left-4 top-4 z-[260] flex items-center gap-2 rounded-full border border-white/[0.08] bg-black/70 px-2 py-1 shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur"
@@ -1111,7 +1111,7 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
               className="rounded p-1 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
               title="OpenClaw"
             >
-              <span className="text-[13px] leading-none" aria-label="OpenClaw">🦞</span>
+              <span data-id="agent-canvas-auto-2" className="text-[13px] leading-none" aria-label="OpenClaw">🦞</span>
             </button>
           ) : null}
           {!item.isApiOnly && onOpenCodeService ? (
@@ -1133,14 +1133,14 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
 
       <div data-id="agent-window-body" className="relative h-[calc(100%-3rem)] bg-black">
         {showOverview ? (
-          <div className="absolute inset-0 flex flex-col justify-between bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.12),transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] p-4">
-            <div>
-              <div className="text-xs uppercase tracking-[0.24em] text-zinc-600">workspace</div>
-              <div className="mt-2 truncate text-sm text-zinc-300">{item.workspace || defaultWorkerWorkspace(item.paneId)}</div>
+          <div data-id="agent-canvas-auto-3" className="absolute inset-0 flex flex-col justify-between bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.12),transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] p-4">
+            <div data-id="agent-canvas-auto-4">
+              <div data-id="agent-canvas-auto-5" className="text-xs uppercase tracking-[0.24em] text-zinc-600">workspace</div>
+              <div data-id="agent-canvas-auto-6" className="mt-2 truncate text-sm text-zinc-300">{item.workspace || defaultWorkerWorkspace(item.paneId)}</div>
             </div>
-            <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3">
-              <div className="text-xs text-zinc-500">{i18n.t('collabOverview', { ns: 'agentCanvas' })}</div>
-              <div className="mt-2 text-sm text-zinc-200">
+            <div data-id="agent-canvas-auto-7" className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3">
+              <div data-id="agent-canvas-auto-8" className="text-xs text-zinc-500">{i18n.t('collabOverview', { ns: 'agentCanvas' })}</div>
+              <div data-id="agent-canvas-auto-9" className="mt-2 text-sm text-zinc-200">
                 {item.isApiOnly
                   ? i18n.t('apiOnlyHint', { ns: 'agentCanvas' })
                   : layout.minimized
@@ -1150,11 +1150,11 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
             </div>
           </div>
         ) : shouldRenderLiveView ? (
-          <div className="absolute inset-0">
+          <div data-id="agent-canvas-auto-10" className="absolute inset-0">
             <WebFrame src={item.ttydSrc} className="h-full w-full border-0 bg-black" title={`canvas-${item.paneId}`} />
           </div>
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500">
+          <div data-id="agent-canvas-auto-11" className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500">
             {i18n.t('noWorkSession', { ns: 'agentCanvas' })}
           </div>
         )}

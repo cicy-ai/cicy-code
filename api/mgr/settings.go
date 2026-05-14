@@ -124,8 +124,11 @@ func translateTextViaProvider(text string, target string) (string, error) {
 	apiKey := strings.TrimSpace(cfg.APIKey)
 	// Force the flash variant for translation — it's an order of magnitude
 	// faster than pro/v3 and quality is plenty for short paragraph translation.
-	// Override is via env (CICY_TRANSLATE_MODEL) if you need a different one.
-	model := strings.TrimSpace(os.Getenv("CICY_TRANSLATE_MODEL"))
+	// Override via ~/cicy-ai/global.json key `translate_model`; otherwise default.
+	model := ""
+	if raw, ok := readGlobalJSONConfig()["translate_model"].(string); ok {
+		model = strings.TrimSpace(raw)
+	}
 	if model == "" {
 		model = "deepseek-v4-flash"
 	}

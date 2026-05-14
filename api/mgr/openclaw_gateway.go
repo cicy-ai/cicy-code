@@ -428,13 +428,16 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 			resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			// Wrap upstream Chat Completions SSE into a Responses event stream
 			// before the audit reader so codex consumes the translated bytes.
-			model := ""
-			if mediaType := resp.Header.Get("Content-Type"); strings.Contains(mediaType, "event-stream") {
-				if id := resp.Request.URL.Query().Get("model"); id != "" {
-					model = id
-				}
-			}
-			resp.Body = newChatCompletionsToResponsesReader(resp.Body, model)
+			resp.Body = newChatCompletionsToResponsesReader(resp.Body, "")
+			resp.Header.Set("Content-Type", "text/event-stream; charset=utf-8")
+			resp.Header.Del("Content-Length")
+			resp.ContentLength = -1
+		}
+		if resp.Body != nil && resp.Request != nil &&
+			resp.Request.Header.Get(cicyAdaptMessagesHeader) == "1" &&
+			resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			// Same direction for claude: Chat Completions SSE → Anthropic Messages.
+			resp.Body = newChatCompletionsToMessagesReader(resp.Body, "")
 			resp.Header.Set("Content-Type", "text/event-stream; charset=utf-8")
 			resp.Header.Del("Content-Length")
 			resp.ContentLength = -1
@@ -488,16 +491,29 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	requestBody = agentInspectorRewriteRequestBody(provider, agentID, requestBody)
 
-	// DeepSeek + codex (Responses API) adaptation: DeepSeek only speaks Chat
-	// Completions, so translate the request body and the upstream path; mark
-	// the request so ModifyResponse can wrap the SSE stream the other way.
-	if shouldAdaptDeepSeekForCodex(targetBase.Host, suffix) {
+	// Codex (Responses API) → Chat Completions adaptation: only api.openai.com
+	// natively serves /v1/responses; for any other upstream we translate the
+	// request body + path, and ModifyResponse wraps the SSE stream the other
+	// way. Header marks the request so ModifyResponse knows to wrap.
+	if shouldAdaptForCodexResponses(targetBase.Host, suffix) {
 		if newBody, _, err := transformResponsesRequestToChatCompletions(requestBody); err == nil {
 			requestBody = newBody
-			suffix = rewriteSuffixForDeepSeekChatCompletions(suffix)
+			suffix = rewriteSuffixForChatCompletions(suffix)
 			r.Header.Set(cicyAdaptResponsesHeader, "1")
 		} else {
-			log.Printf("[ai-gateway] deepseek responses->chat translation failed for %s: %v", agentID, err)
+			log.Printf("[ai-gateway] codex responses->chat translation failed for %s: %v", agentID, err)
+		}
+	}
+
+	// DeepSeek + claude (Anthropic Messages API) adaptation: same shape — DeepSeek
+	// only speaks Chat Completions, so translate request + wrap SSE both ways.
+	if shouldAdaptDeepSeekForAnthropic(targetBase.Host, suffix) {
+		if newBody, _, err := transformMessagesRequestToChatCompletions(requestBody); err == nil {
+			requestBody = newBody
+			suffix = rewriteSuffixForDeepSeekChatCompletionsFromMessages(suffix)
+			r.Header.Set(cicyAdaptMessagesHeader, "1")
+		} else {
+			log.Printf("[ai-gateway] deepseek messages->chat translation failed for %s: %v", agentID, err)
 		}
 	}
 

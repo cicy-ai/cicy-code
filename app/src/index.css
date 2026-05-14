@@ -88,6 +88,16 @@
   }
 }
 
+@keyframes drawerIn {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.animate-drawer-in { animation: drawerIn 0.22s cubic-bezier(0.32, 0.72, 0.32, 1); }
+
 @keyframes selectIn {
   from {
     opacity: 0;

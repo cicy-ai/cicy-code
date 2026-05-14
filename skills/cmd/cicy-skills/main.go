@@ -139,12 +139,6 @@ func runInstall(args []string) {
 	}
 	globalBin := bundle.DefaultGlobalBinDir()
 	switch target {
-	case "google-node":
-		if err := installGoogleNode(root, globalBin); err != nil {
-			fatal(err)
-		}
-		announcePathHint(globalBin)
-		fmt.Println("installed google-node")
 	case "all":
 		if err := installAll(root); err != nil {
 			fatal(err)
@@ -163,11 +157,6 @@ func runRemove(args []string) {
 	}
 	globalBin := bundle.DefaultGlobalBinDir()
 	switch target {
-	case "google-node":
-		if err := bundle.RemoveProvider(globalBin); err != nil {
-			fatal(err)
-		}
-		fmt.Println("removed google-node")
 	case "all":
 		if err := bundle.Remove(globalBin); err != nil {
 			fatal(err)
@@ -189,12 +178,6 @@ func runUpdate(args []string) {
 	}
 	globalBin := bundle.DefaultGlobalBinDir()
 	switch target {
-	case "google-node":
-		if err := installGoogleNode(root, globalBin); err != nil {
-			fatal(err)
-		}
-		announcePathHint(globalBin)
-		fmt.Println("updated google-node")
 	case "all":
 		if err := installAll(root); err != nil {
 			fatal(err)
@@ -212,27 +195,8 @@ func runUpdate(args []string) {
 	}
 }
 
-func installGoogleNode(root, globalBinDir string) error {
-	providerDir := filepath.Join(root, "providers", "google-node")
-	if _, err := os.Stat(filepath.Join(providerDir, "package.json")); err != nil {
-		return fmt.Errorf("google-node provider not found at %s", providerDir)
-	}
-
-	cmd := exec.Command("npm", "install")
-	cmd.Dir = providerDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("npm install google-node: %w", err)
-	}
-	return bundle.InstallProvider(root, globalBinDir)
-}
-
 func installAll(root string) error {
 	globalBin := bundle.DefaultGlobalBinDir()
-	if err := installGoogleNode(root, globalBin); err != nil {
-		return err
-	}
 	if err := bundle.Install(root, globalBin); err != nil {
 		return err
 	}
@@ -692,7 +656,7 @@ func findProjectRoot(start string) (string, bool) {
 }
 
 func isProjectRoot(dir string) bool {
-	if _, err := os.Stat(filepath.Join(dir, "providers", "google-node", "package.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "cmd", "cicy-skills")); err != nil {
 		return false
 	}
 	if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
@@ -754,7 +718,7 @@ func parseNodeFlag(args []string) (string, error) {
 
 func parseInstallTarget(args []string, action string) (string, error) {
 	if len(args) != 1 {
-		return "", fmt.Errorf("usage: cicy-skills %s <google-node|all>", action)
+		return "", fmt.Errorf("usage: cicy-skills %s all", action)
 	}
 	return strings.TrimSpace(args[0]), nil
 }
@@ -849,7 +813,6 @@ Commands:
 Examples:
   cicy-skills help install
   cicy-skills list
-  cicy-skills install google-node
   cicy-skills install all
   cicy-skills update github
   cicy-skills agent help codex google
@@ -896,27 +859,25 @@ Scan configured skill roots and print discovered skills.`, nil
 Print configured nodes. The default node is marked with *.`, nil
 	case "install":
 		return `Usage:
-  cicy-skills install <google-node|all>
+  cicy-skills install all
 
-Install providers and/or the local cicy-skills command bundle.
+Install the local cicy-skills command bundle.
 
 Targets:
-  google-node            Install the embedded Google provider commands
   all                    Install every migrated command into ~/.local/bin
                          and the repo-owned bin directory, then sync approved
                          skills into ~/.codex/skills and ~/.claude/skills`, nil
 	case "remove":
 		return `Usage:
-  cicy-skills remove <google-node|all>
+  cicy-skills remove all
 
-Remove provider or local command links from ~/.local/bin and the repo-owned bin directory.`, nil
+Remove local command links from ~/.local/bin and the repo-owned bin directory.`, nil
 	case "update":
 		return `Usage:
-  cicy-skills update <google-node|all|github>
+  cicy-skills update <all|github>
 
-Refresh provider or local command links.
+Refresh local command links.
 Targets:
-  google-node            Re-run npm install for the embedded Google provider
   all                    Refresh local links and approved skills from the
                          current repo state
   github                 Fetch the latest cicy-skills checkout from GitHub,

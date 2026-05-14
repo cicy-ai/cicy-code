@@ -70,7 +70,7 @@ function WsGate({ children }: { children: any }) {
           ) : (
             <>
               <Spinner size="md" />
-              <div className="text-xs text-zinc-500">{shownAttempts > 0 ? t('wsConnectingRetry', { n: shownAttempts }) : t('wsConnecting')}</div>
+              <div data-id="ws-connecting-label" className="text-xs text-zinc-500">{shownAttempts > 0 ? t('wsConnectingRetry', { n: shownAttempts }) : t('wsConnecting')}</div>
             </>
           )}
         </div>

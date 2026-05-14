@@ -407,8 +407,9 @@ var agentgenApprovedMarketSkills = map[string]struct{}{
 var hosttoolAliasSet = map[string]struct{}{
 	"agent-code-server": {}, "agent-webpage": {}, "cf-tunnel": {},
 	"cf-tunnel-py": {}, "cf-tunnel.py": {}, "cping": {}, "eng": {},
-	"gemini-ask": {}, "gemini-vision": {}, "globalApiToken": {}, "gpt": {},
-	"gpt-chat": {}, "frp-client": {}, "frp-server": {}, "cicy-mihomo": {},
+	"gemini-ask": {}, "gemini-vision": {}, "globalApiToken": {},
+	"google":   {}, // pure-Go google skill (was Node provider; migrated)
+	"gpt":      {}, "gpt-chat": {}, "frp-client": {}, "frp-server": {}, "cicy-mihomo": {},
 	"mysql-exec": {}, "tg": {}, "cicy-agent": {}, "todo": {},
 }
 
@@ -422,8 +423,6 @@ func resolveSymlinkSource(alias string) string {
 		return filepath.Join(projectRoot, "dist", "cicy-hosttools")
 	}
 	switch alias {
-	case "google":
-		return filepath.Join(projectRoot, "providers", "google-node", "google.js")
 	case "proxy_ssh", "us-spot-dev", "us-spot-proxy", "cicy-master", "hk-spot-dev":
 		return filepath.Join(projectRoot, alias)
 	}

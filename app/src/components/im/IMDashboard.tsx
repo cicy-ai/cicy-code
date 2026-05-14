@@ -67,20 +67,20 @@ function stateTone(s: string): { tone: string; label: string } {
 function StatusPill({ state }: { state: string }) {
   const { tone, label } = stateTone(state);
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.04] px-2 py-1 text-[11px] text-zinc-400">
-      <span className={cn('h-1.5 w-1.5 rounded-full', tone)} />{label}
+    <span data-id="im-dashboard-status-pill" className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.04] px-2 py-1 text-[11px] text-zinc-400">
+      <span data-id="im-dashboard-status-pill-dot" className={cn('h-1.5 w-1.5 rounded-full', tone)} />{label}
     </span>
   );
 }
 function SectionHeader({ children }: { children: React.ReactNode }) {
-  return <div className="text-[11px] font-semibold uppercase tracking-[0.13em] text-zinc-500">{children}</div>;
+  return <div data-id="im-dashboard-section-header" className="text-[11px] font-semibold uppercase tracking-[0.13em] text-zinc-500">{children}</div>;
 }
 function Field({ label, help, children }: { label: React.ReactNode; help?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <label className="block">
-      <span className="mb-1.5 block text-[12px] font-medium text-zinc-400">{label}</span>
+    <label data-id="im-dashboard-field" className="block">
+      <span data-id="im-dashboard-field-label" className="mb-1.5 block text-[12px] font-medium text-zinc-400">{label}</span>
       {children}
-      {help && <span className="mt-1.5 block text-[11px] leading-snug text-zinc-600">{help}</span>}
+      {help && <span data-id="im-dashboard-field-help" className="mt-1.5 block text-[11px] leading-snug text-zinc-600">{help}</span>}
     </label>
   );
 }
@@ -95,12 +95,12 @@ function Btn({ variant = 'secondary', icon, children, busy, className, ...rest }
     danger: 'border border-red-500/20 bg-red-500/[0.07] text-red-300 hover:bg-red-500/[0.14]',
   };
   return (
-    <button {...rest} className={cn('inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-3 text-[13px] transition-colors disabled:cursor-not-allowed', styles[variant], className)}>
+    <button data-id="im-dashboard-btn" {...rest} className={cn('inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-3 text-[13px] transition-colors disabled:cursor-not-allowed', styles[variant], className)}>
       {busy ? <Spinner size="sm" /> : icon}{children}
     </button>
   );
 }
-function Skeleton({ className }: { className?: string }) { return <div className={cn('animate-pulse rounded-md bg-white/[0.045]', className)} />; }
+function Skeleton({ className }: { className?: string }) { return <div data-id="im-dashboard-skeleton" className={cn('animate-pulse rounded-md bg-white/[0.045]', className)} />; }
 
 /* ───────────── component ───────────── */
 
@@ -330,68 +330,68 @@ export default function IMDashboard({ onBack }: { onBack?: () => void }) {
   const wechatAddHint = wxLogin ? i18n.t('wechatInProgress', { ns: 'im' }) : i18n.t('wechatPendingLogin', { ns: 'im' });
 
   return (
-    <div className="flex h-screen flex-col bg-[#0A0A0A] text-zinc-300">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-white/[0.06] px-4">
+    <div data-id="im-dashboard-root" className="flex h-screen flex-col bg-[#0A0A0A] text-zinc-300">
+      <header data-id="im-dashboard-header" className="flex h-12 shrink-0 items-center gap-3 border-b border-white/[0.06] px-4">
         {onBack && (
-          <button onClick={onBack} className="-ml-1 grid h-7 w-7 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200" title={t('back')}><ArrowLeft size={16} /></button>
+          <button data-id="im-dashboard-header-back" onClick={onBack} className="-ml-1 grid h-7 w-7 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200" title={t('back')}><ArrowLeft size={16} /></button>
         )}
         <MessageCircle size={16} className="text-zinc-400" />
-        <span className="text-[13px] font-semibold text-white">{t('imPlatforms')}</span>
-        <div className="flex-1" />
-        <span className="text-xs text-zinc-600 tabular-nums">{t('accountsCount', { n: accounts.length })}</span>
-        <button onClick={() => void load(selId ?? undefined)} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200" title={t('refresh')}><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></button>
+        <span data-id="im-dashboard-header-title" className="text-[13px] font-semibold text-white">{t('imPlatforms')}</span>
+        <div data-id="im-dashboard-header-spacer" className="flex-1" />
+        <span data-id="im-dashboard-header-count" className="text-xs text-zinc-600 tabular-nums">{t('accountsCount', { n: accounts.length })}</span>
+        <button data-id="im-dashboard-header-refresh" onClick={() => void load(selId ?? undefined)} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200" title={t('refresh')}><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></button>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div data-id="im-dashboard-body" className="flex flex-1 overflow-hidden">
         {/* rail */}
-        <aside className="flex w-72 shrink-0 flex-col border-r border-white/[0.06] bg-white/[0.01]">
-          <div className="p-2.5">
-            <div ref={addRef} className="relative">
+        <aside data-id="im-dashboard-rail" className="flex w-72 shrink-0 flex-col border-r border-white/[0.06] bg-white/[0.01]">
+          <div data-id="im-dashboard-rail-top" className="p-2.5">
+            <div data-id="im-dashboard-add-wrap" ref={addRef} className="relative">
               <Btn variant="primary" icon={<Plus size={14} />} className="w-full justify-between" onClick={() => setAddOpen((o) => !o)}>
-                <span>{t('addIMAccount')}</span><ChevronDown size={13} className="opacity-60" />
+                <span data-id="im-dashboard-auto-1">{t('addIMAccount')}</span><ChevronDown size={13} className="opacity-60" />
               </Btn>
               {addOpen && (
-                <div className="absolute left-0 right-0 z-50 mt-1.5 rounded-xl border border-white/[0.09] bg-[#141416] p-1 shadow-2xl shadow-black/60">
+                <div data-id="im-dashboard-add-menu" className="absolute left-0 right-0 z-50 mt-1.5 rounded-xl border border-white/[0.09] bg-[#141416] p-1 shadow-2xl shadow-black/60">
                   {(platforms.length ? platforms : [{ kind: 'telegram', label: 'Telegram' }, { kind: 'wechat', label: t('platformWechat') }]).map((p) => {
                     const disabled = p.kind === 'wechat' && wechatAddBlocked;
                     return (
-                      <button key={p.kind} disabled={disabled} title={disabled ? wechatAddHint : undefined}
+                      <button key={p.kind} data-id={`im-dashboard-add-menu-${p.kind}`} disabled={disabled} title={disabled ? wechatAddHint : undefined}
                         onClick={() => { if (disabled) return; void createAccount(p.kind); }}
                         className={cn('flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] transition-colors', disabled ? 'cursor-not-allowed opacity-40' : 'hover:bg-white/[0.06]')}>
-                        <PlatformIcon platform={p.kind} />{p.label}{p.kind === 'wechat' && <span className="ml-auto text-[10px] text-zinc-600">{disabled ? t('notAddable') : t('scanLogin')}</span>}
+                        <PlatformIcon platform={p.kind} />{p.label}{p.kind === 'wechat' && <span data-id={`im-dashboard-add-menu-${p.kind}-hint`} className="ml-auto text-[10px] text-zinc-600">{disabled ? t('notAddable') : t('scanLogin')}</span>}
                       </button>
                     );
                   })}
-                  <div className="px-2.5 py-1 text-[10px] text-zinc-600">{t('discordSoon')}</div>
+                  <div data-id="im-dashboard-add-menu-discord-soon" className="px-2.5 py-1 text-[10px] text-zinc-600">{t('discordSoon')}</div>
                 </div>
               )}
             </div>
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('searchAccount')} className={cn(INPUT, 'mt-2.5 h-8 text-[12px]')} />
+            <input data-id="im-dashboard-search-input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('searchAccount')} className={cn(INPUT, 'mt-2.5 h-8 text-[12px]')} />
           </div>
-          <div className="flex-1 overflow-auto px-2 pb-2">
-            {loading && accounts.length === 0 && [0, 1, 2].map((i) => <div key={i} className="px-2 py-2"><Skeleton className="h-3 w-28" /><Skeleton className="mt-1.5 h-2.5 w-20" /></div>)}
-            {!loading && accounts.length === 0 && <div className="px-3 py-10 text-center text-[12px] leading-relaxed text-zinc-600">{t('noAccountHeadline')}<br />{t('addIMAccount')}</div>}
-            {!loading && accounts.length > 0 && filtered.length === 0 && <div className="px-3 py-10 text-center text-[12px] text-zinc-600">{t('noMatch')}</div>}
-            <ul className="space-y-0.5">
+          <div data-id="im-dashboard-list-wrap" className="flex-1 overflow-auto px-2 pb-2">
+            {loading && accounts.length === 0 && [0, 1, 2].map((i) => <div key={i} data-id={`im-dashboard-skeleton-${i}`} className="px-2 py-2"><Skeleton className="h-3 w-28" /><Skeleton className="mt-1.5 h-2.5 w-20" /></div>)}
+            {!loading && accounts.length === 0 && <div data-id="im-dashboard-list-empty" className="px-3 py-10 text-center text-[12px] leading-relaxed text-zinc-600">{t('noAccountHeadline')}<br />{t('addIMAccount')}</div>}
+            {!loading && accounts.length > 0 && filtered.length === 0 && <div data-id="im-dashboard-list-no-match" className="px-3 py-10 text-center text-[12px] text-zinc-600">{t('noMatch')}</div>}
+            <ul data-id="im-dashboard-list" className="space-y-0.5">
               {filtered.map((a) => {
                 const active = selId === a.id;
                 return (
-                  <li key={a.id}>
-                    <button onClick={() => setSelId(a.id)} className={cn('group relative flex w-full items-center gap-2.5 rounded-lg py-2 pl-3 pr-2 text-left transition-colors', active ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]')}>
-                      {active && <span className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-blue-400" />}
+                  <li key={a.id} data-id={`im-dashboard-list-item-${a.id}`}>
+                    <button data-id={`im-dashboard-list-item-${a.id}-btn`} onClick={() => setSelId(a.id)} className={cn('group relative flex w-full items-center gap-2.5 rounded-lg py-2 pl-3 pr-2 text-left transition-colors', active ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]')}>
+                      {active && <span data-id={`im-dashboard-list-item-${a.id}-active-indicator`} className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-blue-400" />}
                       <PlatformIcon platform={a.platform} size={15} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className={cn('truncate text-[13px]', active ? 'text-white' : 'text-zinc-200')}>{a.name || platformLabel(a.platform)}</span>
-                          {!a.enabled && <span className="rounded bg-white/[0.06] px-1 py-px text-[9px] text-zinc-500">{t('disabledTag')}</span>}
+                      <div data-id={`im-dashboard-list-item-${a.id}-body`} className="min-w-0 flex-1">
+                        <div data-id={`im-dashboard-list-item-${a.id}-name-row`} className="flex items-center gap-1.5">
+                          <span data-id={`im-dashboard-list-item-${a.id}-name`} className={cn('truncate text-[13px]', active ? 'text-white' : 'text-zinc-200')}>{a.name || platformLabel(a.platform)}</span>
+                          {!a.enabled && <span data-id={`im-dashboard-list-item-${a.id}-disabled-tag`} className="rounded bg-white/[0.06] px-1 py-px text-[9px] text-zinc-500">{t('disabledTag')}</span>}
                         </div>
-                        <div className="mt-0.5 flex items-center gap-1.5">
-                          <span className={cn('h-1.5 w-1.5 rounded-full', stateTone(a.state).tone)} />
-                          <span className="truncate text-[11px] text-zinc-600">{stateTone(a.state).label}</span>
-                          {a.bound_pane_id && <span className="shrink-0 rounded bg-blue-500/12 px-1 py-px text-[9px] font-medium text-blue-300">→ {a.bound_pane_id}</span>}
+                        <div data-id={`im-dashboard-list-item-${a.id}-state-row`} className="mt-0.5 flex items-center gap-1.5">
+                          <span data-id={`im-dashboard-list-item-${a.id}-state-dot`} className={cn('h-1.5 w-1.5 rounded-full', stateTone(a.state).tone)} />
+                          <span data-id={`im-dashboard-list-item-${a.id}-state-label`} className="truncate text-[11px] text-zinc-600">{stateTone(a.state).label}</span>
+                          {a.bound_pane_id && <span data-id={`im-dashboard-list-item-${a.id}-bound-pane`} className="shrink-0 rounded bg-blue-500/12 px-1 py-px text-[9px] font-medium text-blue-300">→ {a.bound_pane_id}</span>}
                         </div>
                       </div>
-                      <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); removeAccount(a.id, a.name); }} className="grid h-6 w-6 shrink-0 place-items-center rounded text-zinc-600 opacity-0 transition-all hover:bg-red-500/15 hover:text-red-300 group-hover:opacity-100" title={t('delete')}><Trash2 size={12} /></span>
+                      <span role="button" tabIndex={-1} data-id={`im-dashboard-list-item-${a.id}-remove`} onClick={(e) => { e.stopPropagation(); removeAccount(a.id, a.name); }} className="grid h-6 w-6 shrink-0 place-items-center rounded text-zinc-600 opacity-0 transition-all hover:bg-red-500/15 hover:text-red-300 group-hover:opacity-100" title={t('delete')}><Trash2 size={12} /></span>
                     </button>
                   </li>
                 );
@@ -401,67 +401,67 @@ export default function IMDashboard({ onBack }: { onBack?: () => void }) {
         </aside>
 
         {/* detail */}
-        <main className="flex-1 overflow-auto">
+        <main data-id="im-dashboard-detail" className="flex-1 overflow-auto">
           {!sel ? (
-            <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-              <div className="grid h-12 w-12 place-items-center rounded-xl bg-white/[0.04]"><MessageCircle size={22} className="text-zinc-500" /></div>
-              <div className="mt-3 text-[14px] font-medium text-zinc-200">{loading ? t('loadingText') : accounts.length === 0 ? t('noAccountHeadline') : t('selectAccount')}</div>
-              <div className="mt-1 text-[12px] text-zinc-500">{t('emptyHelp')}</div>
+            <div data-id="im-dashboard-detail-empty" className="flex h-full flex-col items-center justify-center px-6 text-center">
+              <div data-id="im-dashboard-detail-empty-icon" className="grid h-12 w-12 place-items-center rounded-xl bg-white/[0.04]"><MessageCircle size={22} className="text-zinc-500" /></div>
+              <div data-id="im-dashboard-detail-empty-title" className="mt-3 text-[14px] font-medium text-zinc-200">{loading ? t('loadingText') : accounts.length === 0 ? t('noAccountHeadline') : t('selectAccount')}</div>
+              <div data-id="im-dashboard-detail-empty-help" className="mt-1 text-[12px] text-zinc-500">{t('emptyHelp')}</div>
               {accounts.length === 0 && (
-                <div className="mt-4 flex gap-2">
+                <div data-id="im-dashboard-detail-empty-actions" className="mt-4 flex gap-2">
                   <Btn variant="secondary" icon={<Send size={14} />} onClick={() => void createAccount('telegram')}>{t('addTelegram')}</Btn>
                   <Btn variant="secondary" icon={<MessageCircle size={14} />} disabled={wechatAddBlocked} onClick={() => { if (!wechatAddBlocked) void createAccount('wechat'); }}>{t('addWeChat')}</Btn>
                 </div>
               )}
             </div>
           ) : (
-            <div className="mx-auto max-w-[680px] px-8 py-7">
-              <div className="flex items-center gap-2.5">
+            <div data-id="im-dashboard-detail-body" className="mx-auto max-w-[680px] px-8 py-7">
+              <div data-id="im-dashboard-detail-header" className="flex items-center gap-2.5">
                 <PlatformIcon platform={sel.platform} size={17} />
-                <h1 className="truncate text-[17px] font-semibold tracking-tight text-white">{sel.name || platformLabel(sel.platform)}</h1>
+                <h1 data-id="im-dashboard-detail-title" className="truncate text-[17px] font-semibold tracking-tight text-white">{sel.name || platformLabel(sel.platform)}</h1>
                 <StatusPill state={qr?.state || sel.state} />
-                <div className="flex-1" />
+                <div data-id="im-dashboard-detail-header-spacer" className="flex-1" />
                 <Btn variant="danger" icon={<Trash2 size={12} />} className="!h-7 !px-2.5 !text-[12px]" onClick={() => removeAccount(sel.id, sel.name)}>{t('delete')}</Btn>
               </div>
-              {sel.state_detail && <div className="mt-1 text-[11px] text-zinc-600">{sel.state_detail}</div>}
-              <div className="my-5 h-px bg-white/[0.06]" />
+              {sel.state_detail && <div data-id="im-dashboard-detail-state-detail" className="mt-1 text-[11px] text-zinc-600">{sel.state_detail}</div>}
+              <div data-id="im-dashboard-detail-divider" className="my-5 h-px bg-white/[0.06]" />
 
-              <div className="space-y-7">
+              <div data-id="im-dashboard-auto-2" className="space-y-7">
                 {/* ── Telegram ── */}
                 {sel.platform === 'telegram' && (
                   <>
-                    <section className="space-y-3.5">
+                    <section data-id="im-dashboard-auto-3" className="space-y-3.5">
                       <SectionHeader>{t('sectionConnection')}</SectionHeader>
                       <Field label={t('fieldName')}><input value={draftName} onChange={(e) => setDraftName(e.target.value)} className={INPUT} placeholder="My Bot" /></Field>
                       <Field label={t('fieldBotToken')} help={sel.has_secret ? t('botTokenSet', { tail: sel.secret_tail }) : t('botTokenHint')}>
-                        <div className="relative">
+                        <div data-id="im-dashboard-auto-4" className="relative">
                           <Link2 size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
-                          <input type="text" name="cicy-im-tg-token" value={draftToken} onChange={(e) => setDraftToken(e.target.value)} className={cn(INPUT, 'pl-8 pr-9 font-mono')} placeholder={sel.has_secret ? '••••••••' : '123456:ABC-...'} autoComplete="off" spellCheck={false} data-1p-ignore data-lpignore="true" style={showToken ? undefined : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties)} />
-                          <button type="button" onClick={() => setShowToken((s) => !s)} className="absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300">{showToken ? <EyeOff size={13} /> : <Eye size={13} />}</button>
+                          <input data-id="im-dashboard-auto-5" type="text" name="cicy-im-tg-token" value={draftToken} onChange={(e) => setDraftToken(e.target.value)} className={cn(INPUT, 'pl-8 pr-9 font-mono')} placeholder={sel.has_secret ? '••••••••' : '123456:ABC-...'} autoComplete="off" spellCheck={false} data-1p-ignore data-lpignore="true" style={showToken ? undefined : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties)} />
+                          <button data-id="im-dashboard-auto-6" type="button" onClick={() => setShowToken((s) => !s)} className="absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300">{showToken ? <EyeOff size={13} /> : <Eye size={13} />}</button>
                         </div>
                       </Field>
-                      <div className="flex items-center justify-between">
-                        <button onClick={() => setHelpOpen((o) => !o)} className="flex items-center gap-1 text-[11px] text-zinc-500 transition-colors hover:text-zinc-300"><ChevronDown size={12} className={cn('transition-transform', helpOpen && 'rotate-180')} />{tgHelp.title || t('getBotToken')}</button>
-                        <a href={tgHelp.link || 'https://t.me/BotFather'} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/25 bg-sky-500/[0.08] px-2.5 py-1 text-[12px] text-sky-300 transition-colors hover:bg-sky-500/[0.16]"><ExternalLink size={12} /> {t('openBotFather')}</a>
+                      <div data-id="im-dashboard-auto-7" className="flex items-center justify-between">
+                        <button data-id="im-dashboard-auto-8" onClick={() => setHelpOpen((o) => !o)} className="flex items-center gap-1 text-[11px] text-zinc-500 transition-colors hover:text-zinc-300"><ChevronDown size={12} className={cn('transition-transform', helpOpen && 'rotate-180')} />{tgHelp.title || t('getBotToken')}</button>
+                        <a data-id="im-dashboard-auto-9" href={tgHelp.link || 'https://t.me/BotFather'} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/25 bg-sky-500/[0.08] px-2.5 py-1 text-[12px] text-sky-300 transition-colors hover:bg-sky-500/[0.16]"><ExternalLink size={12} /> {t('openBotFather')}</a>
                       </div>
                       {helpOpen && (
-                        <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5 text-[12px] leading-relaxed text-zinc-400">
+                        <div data-id="im-dashboard-auto-10" className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5 text-[12px] leading-relaxed text-zinc-400">
                           {tgHelp.steps || t('botFatherSteps')}
                         </div>
                       )}
                     </section>
 
-                    <section className="space-y-3">
+                    <section data-id="im-dashboard-auto-11" className="space-y-3">
                       <SectionHeader>{t('sectionChatBinding')}</SectionHeader>
                       {chatId ? (
-                        <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2.5 text-[12px] text-emerald-200">
+                        <div data-id="im-dashboard-auto-12" className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2.5 text-[12px] text-emerald-200">
                           <Check size={14} className="text-emerald-400" /> {t('chatBoundTo')} <span className="font-mono">{chatId}</span>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-2.5 text-[12px] text-zinc-400">
+                        <div data-id="im-dashboard-auto-13" className="flex items-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-2.5 text-[12px] text-zinc-400">
                           <QrCode size={14} className="text-zinc-500" /> {t('sendMessageToBind', { bot: '' })}{botUser ? <span className="font-mono text-zinc-300">@{botUser}</span> : t('thisBot')}
-                          <div className="flex-1" />
-                          <button onClick={() => void load(sel.id)} className="grid h-6 w-6 place-items-center rounded text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300" title={t('refreshStatus')}><RefreshCw size={13} /></button>
+                          <div data-id="im-dashboard-auto-14" className="flex-1" />
+                          <button data-id="im-dashboard-auto-15" onClick={() => void load(sel.id)} className="grid h-6 w-6 place-items-center rounded text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-300" title={t('refreshStatus')}><RefreshCw size={13} /></button>
                         </div>
                       )}
                     </section>
@@ -470,27 +470,27 @@ export default function IMDashboard({ onBack }: { onBack?: () => void }) {
 
                 {/* ── WeChat ── */}
                 {sel.platform === 'wechat' && (
-                  <section className="space-y-3.5">
+                  <section data-id="im-dashboard-auto-16" className="space-y-3.5">
                     <SectionHeader>{t('sectionLogin')}</SectionHeader>
                     {wechatConnected ? (
-                      <div className="flex items-center gap-3 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-3 text-[13px] text-emerald-200">
+                      <div data-id="im-dashboard-auto-17" className="flex items-center gap-3 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-3 text-[13px] text-emerald-200">
                         <Check size={16} className="text-emerald-400" />
-                        <div className="min-w-0 flex-1">
-                          <div className="font-medium">{t('loggedIn')}</div>
-                          <div className="text-[11px] text-emerald-300/70">{qr?.nick_name || sel.config?.ilink_user_id || ''}</div>
+                        <div data-id="im-dashboard-auto-18" className="min-w-0 flex-1">
+                          <div data-id="im-dashboard-auto-19" className="font-medium">{t('loggedIn')}</div>
+                          <div data-id="im-dashboard-auto-20" className="text-[11px] text-emerald-300/70">{qr?.nick_name || sel.config?.ilink_user_id || ''}</div>
                         </div>
                         <Btn variant="secondary" busy={busyAct} className="!h-7 !px-2.5 !text-[12px]" onClick={relogin}>{t('logoutRelogin')}</Btn>
                       </div>
                     ) : (
-                      <div className="rounded-lg border border-white/[0.07] bg-white/[0.02] p-4">
-                        <div className="flex items-center gap-2 text-[12px] text-zinc-400"><QrCode size={14} className="text-zinc-500" />{t('wechatScanHint')}{qr?.state ? ` · ${stateTone(qr.state).label}` : ''}</div>
-                        <div className="mt-3 flex items-center gap-4">
+                      <div data-id="im-dashboard-auto-21" className="rounded-lg border border-white/[0.07] bg-white/[0.02] p-4">
+                        <div data-id="im-dashboard-auto-22" className="flex items-center gap-2 text-[12px] text-zinc-400"><QrCode size={14} className="text-zinc-500" />{t('wechatScanHint')}{qr?.state ? ` · ${stateTone(qr.state).label}` : ''}</div>
+                        <div data-id="im-dashboard-auto-23" className="mt-3 flex items-center gap-4">
                           {qrUrl ? (
                             <img src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(qrUrl)}`} alt="WeChat login QR" className="h-[180px] w-[180px] rounded-lg bg-white p-1" />
                           ) : (
-                            <div className="grid h-[180px] w-[180px] place-items-center rounded-lg border border-dashed border-white/[0.1] text-[12px] text-zinc-600"><Spinner size="md" /></div>
+                            <div data-id="im-dashboard-auto-24" className="grid h-[180px] w-[180px] place-items-center rounded-lg border border-dashed border-white/[0.1] text-[12px] text-zinc-600"><Spinner size="md" /></div>
                           )}
-                          <div className="space-y-2 text-[12px] text-zinc-500">
+                          <div data-id="im-dashboard-auto-25" className="space-y-2 text-[12px] text-zinc-500">
                             <p>{t('wechatStep1')}</p>
                             <p>{t('wechatStep2')}</p>
                             <p>{t('wechatStep3')}</p>
@@ -504,72 +504,72 @@ export default function IMDashboard({ onBack }: { onBack?: () => void }) {
                 )}
 
                 {/* Agent binding */}
-                <section className="space-y-3.5">
+                <section data-id="im-dashboard-auto-26" className="space-y-3.5">
                   <SectionHeader>{t('sectionAgentBinding')}</SectionHeader>
                   <Field label={t('fieldBindAgent')} help={t('fieldBindAgentHelp')}>
-                    <select value={sel.bound_pane_id} onChange={(e) => void bind(e.target.value)} className={INPUT} disabled={busyAct}>
+                    <select data-id="im-dashboard-auto-27" value={sel.bound_pane_id} onChange={(e) => void bind(e.target.value)} className={INPUT} disabled={busyAct}>
                       <option value="">{t('unboundOption')}</option>
                       {panes.map((p) => <option key={p.pane_id} value={p.pane_id}>{p.pane_id}{p.title ? ` · ${p.title}` : ''}{p.agent_type ? ` (${p.agent_type})` : ''}</option>)}
                       {sel.bound_pane_id && !panes.some((p) => p.pane_id === sel.bound_pane_id) && <option value={sel.bound_pane_id}>{sel.bound_pane_id}</option>}
                     </select>
                   </Field>
-                  <label className="flex items-center justify-between rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-2.5">
-                    <span className="text-[12px] text-zinc-300">{t('forwardIncoming')}<span className="ml-2 text-[11px] text-zinc-600">{t('forwardOff')}</span></span>
-                    <input type="checkbox" checked={sel.inbound_to_agent} onChange={(e) => void patchSelected({ inbound_to_agent: e.target.checked })} className="h-4 w-4 accent-blue-500" />
+                  <label data-id="im-dashboard-auto-28" className="flex items-center justify-between rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-2.5">
+                    <span data-id="im-dashboard-auto-29" className="text-[12px] text-zinc-300">{t('forwardIncoming')}<span className="ml-2 text-[11px] text-zinc-600">{t('forwardOff')}</span></span>
+                    <input data-id="im-dashboard-auto-30" type="checkbox" checked={sel.inbound_to_agent} onChange={(e) => void patchSelected({ inbound_to_agent: e.target.checked })} className="h-4 w-4 accent-blue-500" />
                   </label>
-                  <label className="flex items-center justify-between rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-2.5">
-                    <span className="text-[12px] text-zinc-300">{t('enabledLabel')}<span className="ml-2 text-[11px] text-zinc-600">{t('disabledOff')}</span></span>
-                    <input type="checkbox" checked={sel.enabled} onChange={(e) => void patchSelected({ enabled: e.target.checked })} className="h-4 w-4 accent-blue-500" />
+                  <label data-id="im-dashboard-auto-31" className="flex items-center justify-between rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-2.5">
+                    <span data-id="im-dashboard-auto-32" className="text-[12px] text-zinc-300">{t('enabledLabel')}<span className="ml-2 text-[11px] text-zinc-600">{t('disabledOff')}</span></span>
+                    <input data-id="im-dashboard-auto-33" type="checkbox" checked={sel.enabled} onChange={(e) => void patchSelected({ enabled: e.target.checked })} className="h-4 w-4 accent-blue-500" />
                   </label>
                 </section>
 
                 {testRes && (
-                  <div className={cn('relative rounded-xl border px-3.5 py-3 text-[12px]', testRes.ok ? 'border-emerald-500/25 bg-emerald-500/[0.07] text-emerald-200' : 'border-red-500/25 bg-red-500/[0.07] text-red-200')}>
-                    <button onClick={() => setTestRes(null)} className="absolute right-2.5 top-2.5 opacity-50 hover:opacity-100"><X size={12} /></button>
-                    <div className="flex items-center gap-1.5 pr-5 font-medium">{testRes.ok ? <Check size={13} /> : <X size={13} />}{testRes.ok ? t('testMessageSent') : t('sendFailed')}{typeof testRes.duration_ms === 'number' && <span className="font-normal opacity-70">· {testRes.duration_ms} ms</span>}</div>
+                  <div data-id="im-dashboard-auto-34" className={cn('relative rounded-xl border px-3.5 py-3 text-[12px]', testRes.ok ? 'border-emerald-500/25 bg-emerald-500/[0.07] text-emerald-200' : 'border-red-500/25 bg-red-500/[0.07] text-red-200')}>
+                    <button data-id="im-dashboard-auto-35" onClick={() => setTestRes(null)} className="absolute right-2.5 top-2.5 opacity-50 hover:opacity-100"><X size={12} /></button>
+                    <div data-id="im-dashboard-auto-36" className="flex items-center gap-1.5 pr-5 font-medium">{testRes.ok ? <Check size={13} /> : <X size={13} />}{testRes.ok ? t('testMessageSent') : t('sendFailed')}{typeof testRes.duration_ms === 'number' && <span className="font-normal opacity-70">· {testRes.duration_ms} ms</span>}</div>
                     {testRes.detail && testRes.detail !== 'ok' && <div className="mt-1 whitespace-pre-wrap break-all opacity-80">{testRes.detail}</div>}
                   </div>
                 )}
               </div>
 
               {/* footer */}
-              <div className="mt-7 flex items-center gap-2 border-t border-white/[0.06] pt-5">
+              <div data-id="im-dashboard-auto-37" className="mt-7 flex items-center gap-2 border-t border-white/[0.06] pt-5">
                 {(sel.platform === 'telegram' || draftName.trim() !== sel.name) && (
                   <Btn variant="primary" icon={<Save size={14} />} busy={saving} disabled={saving} onClick={() => void saveBasics()}>{t('save')}</Btn>
                 )}
                 <Btn variant="secondary" icon={<Zap size={14} />} busy={testing} disabled={testing || !canTest} onClick={() => void runTest()}>{sel.platform === 'wechat' ? t('testSendWeChat') : t('testSend')}</Btn>
-                <div className="flex-1" />
-                <span className="text-[11px] text-zinc-600">{t('agentReplyHint')}</span>
+                <div data-id="im-dashboard-auto-38" className="flex-1" />
+                <span data-id="im-dashboard-auto-39" className="text-[11px] text-zinc-600">{t('agentReplyHint')}</span>
               </div>
             </div>
           )}
         </main>
       </div>
       {wxLogin && createPortal(
-        <div className="fixed inset-0 z-[9999990] flex items-center justify-center bg-black/55 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) closeWeChatScan(); }}>
-          <div className="mx-4 w-full max-w-[420px] rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60">
-            <div className="flex items-center gap-2.5 px-5 pt-5">
+        <div data-id="im-dashboard-auto-40" className="fixed inset-0 z-[9999990] flex items-center justify-center bg-black/55 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) closeWeChatScan(); }}>
+          <div data-id="im-dashboard-auto-41" className="mx-4 w-full max-w-[420px] rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60">
+            <div data-id="im-dashboard-auto-42" className="flex items-center gap-2.5 px-5 pt-5">
               <MessageCircle size={16} className="text-emerald-400" />
-              <div className="text-[14px] font-semibold text-white">{t('addWeChat')}</div>
-              <div className="flex-1" />
-              <button onClick={closeWeChatScan} className="grid h-6 w-6 place-items-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300"><X size={14} /></button>
+              <div data-id="im-dashboard-auto-43" className="text-[14px] font-semibold text-white">{t('addWeChat')}</div>
+              <div data-id="im-dashboard-auto-44" className="flex-1" />
+              <button data-id="im-dashboard-auto-45" onClick={closeWeChatScan} className="grid h-6 w-6 place-items-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300"><X size={14} /></button>
             </div>
-            <div className="px-5 pb-5 pt-3">
+            <div data-id="im-dashboard-auto-46" className="px-5 pb-5 pt-3">
               {(wxLogin.state === 'error' || wxLogin.state === 'expired') ? (
-                <div className="flex flex-col items-center gap-3 py-4 text-center">
-                  <div className="text-[13px] text-red-300">{wxLogin.detail || (wxLogin.state === 'expired' ? t('qrExpired') : t('scanFailed'))}</div>
+                <div data-id="im-dashboard-auto-47" className="flex flex-col items-center gap-3 py-4 text-center">
+                  <div data-id="im-dashboard-auto-48" className="text-[13px] text-red-300">{wxLogin.detail || (wxLogin.state === 'expired' ? t('qrExpired') : t('scanFailed'))}</div>
                   <Btn variant="secondary" icon={<RefreshCw size={14} />} onClick={() => void regenWeChatScan()}>{t('regenerateQr')}</Btn>
                 </div>
               ) : (
-                <div className="flex flex-col items-center gap-3">
+                <div data-id="im-dashboard-auto-49" className="flex flex-col items-center gap-3">
                   {wxLogin.qrcodeUrl ? (
                     <img src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(wxLogin.qrcodeUrl)}`} alt="WeChat login QR" className="h-[200px] w-[200px] rounded-lg bg-white p-1" />
                   ) : (
-                    <div className="grid h-[200px] w-[200px] place-items-center rounded-lg border border-dashed border-white/[0.1] text-[12px] text-zinc-600"><Spinner size="md" /></div>
+                    <div data-id="im-dashboard-auto-50" className="grid h-[200px] w-[200px] place-items-center rounded-lg border border-dashed border-white/[0.1] text-[12px] text-zinc-600"><Spinner size="md" /></div>
                   )}
-                  <div className="text-[13px] text-zinc-300">{wxLogin.detail || (wxLogin.state === 'scaned' ? t('alreadyScanned') : t('scanWithWeChat'))}</div>
-                  <div className="text-[11px] text-zinc-600">{t('scanSuccessNote')}</div>
-                  <div className="flex gap-2">
+                  <div data-id="im-dashboard-auto-51" className="text-[13px] text-zinc-300">{wxLogin.detail || (wxLogin.state === 'scaned' ? t('alreadyScanned') : t('scanWithWeChat'))}</div>
+                  <div data-id="im-dashboard-auto-52" className="text-[11px] text-zinc-600">{t('scanSuccessNote')}</div>
+                  <div data-id="im-dashboard-auto-53" className="flex gap-2">
                     <Btn variant="ghost" icon={<RefreshCw size={13} />} className="!h-7 !px-2.5 !text-[12px]" onClick={() => void regenWeChatScan()}>{t('regenerateAnotherQr')}</Btn>
                   </div>
                 </div>
