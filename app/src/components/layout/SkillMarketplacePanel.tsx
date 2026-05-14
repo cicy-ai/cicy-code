@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -384,10 +384,11 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
     finally { setBusy(false); }
   };
   const handleUninstall = async () => {
+    const cfgPath = data?.skill?.config_file || '~/cicy-ai/db/skills/' + name + '.yaml';
     const ok = await confirm({
-      title: `Uninstall ${data?.skill?.title || name}?`,
-      body: <>This removes the command symlinks and the SKILL.md files. Your config at <code className="font-mono text-xs">{data?.skill?.config_file || '~/cicy-ai/db/skills/' + name + '.yaml'}</code> stays untouched.</>,
-      confirmLabel: 'Uninstall',
+      title: t('marketplaceUninstallConfirmTitle', { title: data?.skill?.title || name }),
+      body: <>{t('marketplaceUninstallConfirmBodyPrefix')} <code className="font-mono text-xs">{cfgPath}</code> {t('marketplaceUninstallConfirmBodySuffix')}</>,
+      confirmLabel: t('marketplaceUninstall'),
       danger: true,
     });
     if (!ok) return;
@@ -395,6 +396,25 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
     try { await onUninstall(); await fetchDetail(); }
     finally { setBusy(false); }
   };
+
+  // Stable sender — referentially identical across renders so memoized
+  // children (MarkdownPane) don't re-render on every parent state tick.
+  const sendToAgent = useCallback(async (text: string) => {
+    const trimmed = (text || '').trim();
+    if (!trimmed || !paneId) return;
+    setSending(true);
+    setSendOk(false);
+    setSendError('');
+    try {
+      await apiService.sendKeys(paneId, trimmed + '\n');
+      setSendOk(true);
+      setTimeout(() => { onClose(); }, 400);
+    } catch (e: any) {
+      setSendError(e?.message || 'send failed');
+    } finally {
+      setSending(false);
+    }
+  }, [paneId, onClose]);
 
   const handleSend = async (textOverride?: string) => {
     const text = (textOverride ?? sendText).trim();
@@ -483,7 +503,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
                 tab === tk ? 'text-zinc-100 border-indigo-400' : 'text-zinc-500 border-transparent hover:text-zinc-300'
               )}
             >
-              {tk === 'help' ? 'Help' : 'Tools'}
+              {tk === 'help' ? t('marketplaceTabHelp') : t('marketplaceTabTools')}
             </button>
           ))}
         </div>
@@ -491,13 +511,13 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4" data-id="skill-detail-body">
           {loading ? (
-            <div className="text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> loading…</div>
+            <div className="text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> {t('marketplaceModalLoading')}</div>
           ) : !skill ? (
-            <div className="text-xs text-zinc-500">No data.</div>
+            <div className="text-xs text-zinc-500">{t('marketplaceNoData')}</div>
           ) : tab === 'help' ? (
-            <MarkdownPane content={data?.help_md || data?.skill_md || ''} onTry={(cmd) => handleSend(cmd)} setSendText={setSendText} />
+            <MarkdownPane content={data?.help_md || data?.skill_md || ''} onTry={sendToAgent} setSendText={setSendText} />
           ) : (
-            <MarkdownPane content={data?.tools_md || ''} onTry={(cmd) => handleSend(cmd)} setSendText={setSendText} />
+            <MarkdownPane content={data?.tools_md || ''} onTry={sendToAgent} setSendText={setSendText} />
           )}
         </div>
 
@@ -506,7 +526,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
           {!skill?.status.installed ? (
             <div className="flex items-center gap-2 text-[11px] text-zinc-500">
               <AlertTriangle className="w-3 h-3" />
-              Install this skill first to send commands to the current agent.
+              {t('marketplaceInstallFirst')}
             </div>
           ) : (
             <>
@@ -516,7 +536,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
                   value={sendText}
                   onChange={(e) => setSendText(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleSend(); } }}
-                  placeholder={`Send to current agent (${paneId})…`}
+                  placeholder={t('marketplaceSendPlaceholder', { pane: paneId || '—' })}
                   rows={2}
                   className="flex-1 resize-none rounded-lg border border-white/[0.09] bg-white/[0.025] px-3 py-2 text-[12px] text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-blue-500/55 focus:bg-white/[0.045] focus:ring-1 focus:ring-blue-500/15"
                 />
@@ -533,12 +553,12 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
                   )}
                 >
                   {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : sendOk ? <Check className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-                  <span className="text-[13px]">{sendOk ? 'Sent' : 'Send to agent'}</span>
+                  <span className="text-[13px]">{sendOk ? t('marketplaceSent') : t('marketplaceSendToAgent')}</span>
                 </button>
               </div>
               {sendError && <div className="text-[11px] text-red-400 mt-1.5">{sendError}</div>}
               <div className="text-[10px] text-zinc-600 mt-1.5">
-                Target pane <code className="font-mono text-zinc-500">{paneId || '(none)'}</code> · ⌘/Ctrl+Enter to send
+                {t('marketplaceSendHint', { pane: paneId || '(none)' })}
               </div>
             </>
           )}
@@ -550,8 +570,8 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
   );
 }
 
-function MarkdownPane({ content, onTry, setSendText }: { content: string; onTry: (cmd: string) => void; setSendText: (s: string) => void }) {
-  const { i18n } = useTranslation('workspace');
+const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText }: { content: string; onTry: (cmd: string) => void; setSendText: (s: string) => void }) {
+  const { t, i18n } = useTranslation('workspace');
   const lang = (i18n.language || 'en').toLowerCase();
   const showTranslate = !lang.startsWith('en') && !!content && content.trim().length > 0;
   const [translated, setTranslated] = useState<string>('');
@@ -577,11 +597,59 @@ function MarkdownPane({ content, onTry, setSendText }: { content: string; onTry:
     }
   };
 
-  if (!content || !content.trim()) {
-    return <div className="text-xs text-zinc-500">No content yet — install the skill to generate this section.</div>;
-  }
-
   const shown = showOriginal || !translated ? content : translated;
+
+  // Memoize the components map so react-markdown doesn't re-parse from scratch
+  // on every parent state change (send button presses, etc.). t/setSendText/onTry
+  // are the only inputs that affect rendered handlers; if the parent gives
+  // stable refs (via useCallback) this map stays referentially identical.
+  const components = useMemo(() => ({
+    h1: (p: any) => <h1 className="text-base font-semibold text-zinc-100 mt-3 mb-2" {...p} />,
+    h2: (p: any) => <h2 className="text-sm font-semibold text-zinc-200 mt-4 mb-2 pb-1 border-b border-white/[0.06]" {...p} />,
+    h3: (p: any) => <h3 className="text-[13px] font-medium text-zinc-200 mt-3 mb-1.5" {...p} />,
+    p: (p: any) => <p className="text-[12px] text-zinc-300 my-1.5" {...p} />,
+    ul: (p: any) => <ul className="text-[12px] text-zinc-300 my-1.5 ml-4 list-disc space-y-1" {...p} />,
+    ol: (p: any) => <ol className="text-[12px] text-zinc-300 my-1.5 ml-4 list-decimal space-y-1" {...p} />,
+    li: (p: any) => <li className="text-[12px] text-zinc-300" {...p} />,
+    a: (p: any) => <a className="text-blue-400 hover:underline" target="_blank" rel="noreferrer" {...p} />,
+    code: ({ children, className, ...props }: any) => {
+      const inline = !(className && /language-/.test(className));
+      const text = String(children).replace(/\n$/, '');
+      if (inline) {
+        return (
+          <button
+            onClick={() => setSendText(text)}
+            className="px-1 py-0.5 rounded bg-white/[0.06] text-[11px] text-amber-200 font-mono hover:bg-white/[0.12] transition-colors"
+            title={t('marketplaceLoadIntoSend')}
+          >
+            {text}
+          </button>
+        );
+      }
+      return (
+        <div className="my-2 rounded-md bg-black/40 border border-white/[0.04] overflow-hidden">
+          <div className="flex items-center justify-end px-2 py-1 border-b border-white/[0.04]">
+            <button onClick={() => onTry(text)} className="text-[10px] text-zinc-400 hover:text-zinc-100 transition-colors inline-flex items-center gap-1">
+              <Send className="w-2.5 h-2.5" /> {t('marketplaceSendToAgent')}
+            </button>
+          </div>
+          <pre className="text-[11px] text-zinc-300 font-mono whitespace-pre-wrap p-2"><code {...props}>{children}</code></pre>
+        </div>
+      );
+    },
+    blockquote: (p: any) => <blockquote className="border-l-2 border-zinc-600 pl-3 my-2 text-zinc-400" {...p} />,
+    hr: () => <hr className="my-3 border-white/[0.06]" />,
+  }), [t, setSendText, onTry]);
+
+  // Memoize the full Markdown render keyed on shown — re-parse only when the
+  // displayed text actually changes (tab switch, translation toggle, fetch).
+  const rendered = useMemo(() => (
+    <Markdown remarkPlugins={[remarkGfm]} components={components}>{shown}</Markdown>
+  ), [shown, components]);
+
+  if (!content || !content.trim()) {
+    return <div className="text-xs text-zinc-500">{t('marketplaceNoContent')}</div>;
+  }
 
   return (
     <div className="relative">
@@ -595,54 +663,15 @@ function MarkdownPane({ content, onTry, setSendText }: { content: string; onTry:
             className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border border-white/[0.08] text-zinc-400 hover:text-zinc-100 hover:border-white/[0.18] disabled:opacity-50 transition-colors"
           >
             {translating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Languages className="w-3 h-3" />}
-            {translating ? 'Translating…' : translated ? (showOriginal ? 'Show translation' : 'Show original') : 'Translate'}
+            {translating
+              ? t('marketplaceTranslating')
+              : translated
+                ? (showOriginal ? t('marketplaceShowTranslation') : t('marketplaceShowOriginal'))
+                : t('marketplaceTranslate')}
           </button>
         </div>
       )}
-    <div className="prose-skill text-[13px] leading-relaxed text-zinc-300">
-      <Markdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          h1: (p) => <h1 className="text-base font-semibold text-zinc-100 mt-3 mb-2" {...p} />,
-          h2: (p) => <h2 className="text-sm font-semibold text-zinc-200 mt-4 mb-2 pb-1 border-b border-white/[0.06]" {...p} />,
-          h3: (p) => <h3 className="text-[13px] font-medium text-zinc-200 mt-3 mb-1.5" {...p} />,
-          p: (p) => <p className="text-[12px] text-zinc-300 my-1.5" {...p} />,
-          ul: (p) => <ul className="text-[12px] text-zinc-300 my-1.5 ml-4 list-disc space-y-1" {...p} />,
-          ol: (p) => <ol className="text-[12px] text-zinc-300 my-1.5 ml-4 list-decimal space-y-1" {...p} />,
-          li: (p) => <li className="text-[12px] text-zinc-300" {...p} />,
-          a: (p) => <a className="text-blue-400 hover:underline" target="_blank" rel="noreferrer" {...p} />,
-          code: ({ children, className, ...props }: any) => {
-            const inline = !(className && /language-/.test(className));
-            const text = String(children).replace(/\n$/, '');
-            if (inline) {
-              return (
-                <button
-                  onClick={() => setSendText(text)}
-                  className="px-1 py-0.5 rounded bg-white/[0.06] text-[11px] text-amber-200 font-mono hover:bg-white/[0.12] transition-colors"
-                  title="Click to load into send box"
-                >
-                  {text}
-                </button>
-              );
-            }
-            return (
-              <div className="my-2 rounded-md bg-black/40 border border-white/[0.04] overflow-hidden">
-                <div className="flex items-center justify-end px-2 py-1 border-b border-white/[0.04]">
-                  <button onClick={() => onTry(text)} className="text-[10px] text-zinc-400 hover:text-zinc-100 transition-colors inline-flex items-center gap-1">
-                    <Send className="w-2.5 h-2.5" /> Send to agent
-                  </button>
-                </div>
-                <pre className="text-[11px] text-zinc-300 font-mono whitespace-pre-wrap p-2"><code {...props}>{children}</code></pre>
-              </div>
-            );
-          },
-          blockquote: (p) => <blockquote className="border-l-2 border-zinc-600 pl-3 my-2 text-zinc-400" {...p} />,
-          hr: () => <hr className="my-3 border-white/[0.06]" />,
-        }}
-      >
-        {shown}
-      </Markdown>
-    </div>
+      <div className="prose-skill text-[13px] leading-relaxed text-zinc-300">{rendered}</div>
     </div>
   );
-}
+});

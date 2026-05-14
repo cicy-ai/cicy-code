@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -100,8 +101,7 @@ func (t *mihomoTool) run(args []string) error {
 		}
 		return t.logs(opts)
 	case "install":
-		_, _ = fmt.Fprintln(t.stdout, t.installGuide())
-		return nil
+		return t.doInstall()
 	case "test":
 		return t.testAll()
 	default:
@@ -137,12 +137,84 @@ Defaults:
 `
 }
 
-func (t *mihomoTool) installGuide() string {
-	return `Install mihomo with CN GitHub mirror:
-  git clone https://gh-proxy.com/https://github.com/cicy-ai/mihomo.git
-  cd mihomo
-  go build
-`
+const defaultMihomoVersion = "v1.10.1"
+const defaultMihomoGitHubProxy = "https://gh-proxy.com/"
+
+// doInstall downloads the platform-matching mihomo binary from
+// cicy-ai/cicy-mihomo releases into ~/.local/bin/mihomo. Overrides:
+//
+//	CICY_MIHOMO_VERSION      pin a specific release tag (default v1.10.1)
+//	GITHUB_PROXY             URL prefix for github.com (default https://gh-proxy.com/)
+//	CICY_MIHOMO_RELEASE_URL  fully-qualified direct download URL — wins over the
+//	                         version + proxy derivation entirely
+func (t *mihomoTool) doInstall() error {
+	version := strings.TrimSpace(os.Getenv("CICY_MIHOMO_VERSION"))
+	if version == "" {
+		version = defaultMihomoVersion
+	}
+	asset := fmt.Sprintf("mihomo-%s-%s", runtime.GOOS, runtime.GOARCH)
+	if runtime.GOOS == "windows" {
+		asset += ".exe"
+	}
+	url := strings.TrimSpace(os.Getenv("CICY_MIHOMO_RELEASE_URL"))
+	if url == "" {
+		proxy := strings.TrimSpace(os.Getenv("GITHUB_PROXY"))
+		if proxy == "" {
+			proxy = defaultMihomoGitHubProxy
+		}
+		if proxy != "" && !strings.HasSuffix(proxy, "/") {
+			proxy += "/"
+		}
+		url = proxy + fmt.Sprintf("https://github.com/cicy-ai/cicy-mihomo/releases/download/%s/%s", version, asset)
+	}
+
+	binDir := filepath.Join(userHomeDir(), ".local", "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return err
+	}
+	target := filepath.Join(binDir, "mihomo")
+	if runtime.GOOS == "windows" {
+		target += ".exe"
+	}
+	tmp := target + ".tmp"
+
+	fmt.Fprintf(t.stdout, "downloading: %s\n", url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := (&http.Client{Timeout: 5 * time.Minute}).Do(req)
+	if err != nil {
+		return fmt.Errorf("download %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("download %s: HTTP %d", url, resp.StatusCode)
+	}
+
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		out.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Chmod(tmp, 0o755); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	fmt.Fprintf(t.stdout, "installed: %s (%s)\n", target, version)
+	return nil
 }
 
 func (t *mihomoTool) stateDir() string {

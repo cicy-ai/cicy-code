@@ -368,7 +368,7 @@ var builtinAgents = []struct {
 	{"cicy-claude", "CiCy"},
 }
 
-var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode", "cursor", "kiro-cli"}
+var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode"}
 
 func effectiveAllowedAgentTypes() []string {
 	if labMode {
@@ -592,7 +592,31 @@ func builtinWorkerSession(port int) string {
 func ensurePrimaryWorkerForBindings(selected []string) {
 }
 
+// ensureWorkerBoundToPrimary inserts a pane_agents row attaching workerSession
+// under primaryWorkerSession (w-10001). Idempotent thanks to the
+// UNIQUE(pane_id, agent_name) constraint. No-op when workerSession is the
+// primary itself.
 func ensureWorkerBoundToPrimary(workerSession string) {
+	workerSession = shortPaneID(strings.TrimSpace(workerSession))
+	if workerSession == "" || workerSession == primaryWorkerSession {
+		return
+	}
+	var existingID int
+	err := store.QueryRow(
+		"SELECT id FROM pane_agents WHERE pane_id=? AND agent_name=?",
+		primaryWorkerSession, workerSession,
+	).Scan(&existingID)
+	if err == nil && existingID > 0 {
+		return
+	}
+	if _, err := store.Exec(
+		"INSERT INTO pane_agents (pane_id, agent_name, status) VALUES (?,?,'active')",
+		primaryWorkerSession, workerSession,
+	); err != nil {
+		log.Printf("[startup] failed to bind %s under %s: %v", workerSession, primaryWorkerSession, err)
+		return
+	}
+	log.Printf("[startup] bound %s under %s", workerSession, primaryWorkerSession)
 }
 
 func createSelectedWorkers(selected []string) {
@@ -607,9 +631,14 @@ func createSelectedWorkers(selected []string) {
 			store.Exec(fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, updated_at=%s WHERE pane_id=?", store.Now()),
 				w.AgentType, w.Title, paneID)
 			fmt.Printf("  ⏭ %s - 已存在，已更新\n", w.Title)
-			continue
+		} else {
+			createBuiltinWorker(w.Port, w.AgentType, w.Title)
 		}
-		createBuiltinWorker(w.Port, w.AgentType, w.Title)
+		// With more than one builtin agent, the non-primary ones get attached
+		// under w-10001 so they appear in the same chat session by default.
+		if len(workers) > 1 {
+			ensureWorkerBoundToPrimary(builtinWorkerSession(w.Port))
+		}
 	}
 	if len(workers) > 0 {
 		setWorkerIndex(workers[len(workers)-1].Port)
@@ -752,11 +781,89 @@ func checkEnv() {
 	}
 
 	selectedAgents := mustSelectedAgents()
+	// If any active worker is configured to route traffic via the local
+	// mihomo proxy, make sure it's running BEFORE we restore tmux/ttyd —
+	// otherwise the workers come up trying to dial a dead :9001.
+	startCicyMihomoIfNeeded()
 	ensureBuiltinAgents(selectedAgents)
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles(selectedAgents)
 	ensureCicySkillsAsync()
 	ensureCodeServer()
+}
+
+// anyActiveAgentUsesProxy returns true if at least one active row in
+// agent_config has a non-empty `proxy` entry in its JSON config.
+func anyActiveAgentUsesProxy() bool {
+	var count int
+	if err := store.QueryRow(
+		`SELECT COUNT(*) FROM agent_config
+		  WHERE active=1
+		    AND COALESCE(config,'') LIKE '%"proxy"%'`,
+	).Scan(&count); err != nil {
+		return false
+	}
+	return count > 0
+}
+
+// startCicyMihomoIfNeeded brings up the local mihomo proxy synchronously when
+// any active worker is configured to route via it. This blocks startup until
+// mihomo is up so the workers don't race a half-started proxy:
+//
+//  1. Synchronously install cicy-skills (so the cicy-mihomo wrapper exists)
+//  2. Synchronously install the mihomo binary (so `cicy-mihomo start` actually works)
+//  3. Start mihomo (no-op if already running)
+func startCicyMihomoIfNeeded() {
+	if !anyActiveAgentUsesProxy() {
+		return
+	}
+	// Step 1: cicy-skills install (no-op if dev mode or already installed).
+	ensureCicySkillsSync()
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	wrapper := filepath.Join(home, ".local", "bin", "cicy-mihomo")
+	if _, err := os.Stat(wrapper); err != nil {
+		log.Printf("[startup] cicy-mihomo wrapper still missing after install — proxy-using workers may fail")
+		return
+	}
+
+	// Step 2: download mihomo binary if missing. ensureMihomoBinaryInstalled
+	// is idempotent (skip when already on disk).
+	logPath := filepath.Join(cicyStateDir, cicySkillsInstallLogFile)
+	_ = os.MkdirAll(cicyStateDir, 0o755)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		log.Printf("[startup] failed to open mihomo install log: %v", err)
+		return
+	}
+	defer logFile.Close()
+	ensureMihomoBinaryInstalled(logFile, logPath)
+
+	// Step 3: start mihomo. Skip if already running. `cicy-mihomo status`
+	// always exits 0, so we parse stdout for "status: running".
+	if out, err := exec.Command(wrapper, "status").Output(); err == nil && strings.Contains(string(out), "status: running") {
+		return
+	}
+	// Generate a default config if one doesn't exist yet (idempotent — fails
+	// loudly when one already exists, which is fine since we ignore the error).
+	mihomoCfg := filepath.Join(home, "cicy-ai", "db", "mihomo.yaml")
+	if _, err := os.Stat(mihomoCfg); os.IsNotExist(err) {
+		if err := exec.Command(wrapper, "gen-config").Run(); err != nil {
+			log.Printf("[startup] cicy-mihomo gen-config failed: %v", err)
+			return
+		}
+	}
+	cmd := exec.Command(wrapper, "start")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		log.Printf("[startup] cicy-mihomo start failed: %v (proxy-using workers may not connect)", err)
+		return
+	}
+	log.Printf("[startup] cicy-mihomo started for proxy-using workers")
 }
 
 func setupAIConfigs() {
@@ -1179,75 +1286,135 @@ func ensureCicySkillsAsync() {
 		if !needsCicySkillsInstall() {
 			return
 		}
-		go func() {
-			if err := os.MkdirAll(cicyStateDir, 0o755); err != nil {
-				log.Printf("[startup] failed to create %s for cicy-skills bootstrap: %v", cicyStateDir, err)
-				return
-			}
-			logPath := filepath.Join(cicyStateDir, cicySkillsInstallLogFile)
-			logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-			if err != nil {
-				log.Printf("[startup] failed to open cicy-skills install log: %v", err)
-				return
-			}
-			defer logFile.Close()
+		go doCicySkillsInstall()
+	})
+}
 
-			projectRoot := cicySkillsProjectDir()
-			log.Printf("[startup] extracting embedded cicy-skills into %s", projectRoot)
-			fmt.Fprintf(logFile, "[%s] extracting embedded cicy-skills into %s\n", time.Now().Format(time.RFC3339), projectRoot)
-			if err := extractEmbeddedCicySkills(projectRoot); err != nil {
-				log.Printf("[startup] cicy-skills extract failed: %v (log: %s)", err, logPath)
-				fmt.Fprintf(logFile, "extract failed: %v\n", err)
-				return
-			}
+// ensureCicySkillsSync runs the bootstrap inline. Safe to call alongside the
+// async path — sync.Once guarantees the work happens at most once. Used when
+// a downstream step (e.g. starting mihomo before workers) needs the wrapper
+// symlinks and dist binaries to definitely be present before continuing.
+func ensureCicySkillsSync() {
+	cicySkillsInstallOnce.Do(func() {
+		if devMode {
+			log.Printf("[startup] dev mode: skipping cicy-skills bootstrap (manage via make install-local-cli)")
+			return
+		}
+		if !needsCicySkillsInstall() {
+			return
+		}
+		doCicySkillsInstall()
+	})
+}
 
-			// Install Google provider Node deps if missing — only network step,
-			// optional (Google skill is unusable without it but rest still work).
-			providerDir := filepath.Join(projectRoot, "providers", "google-node")
-			if _, err := os.Stat(filepath.Join(providerDir, "package.json")); err == nil {
-				if _, err := os.Stat(filepath.Join(providerDir, "node_modules")); err != nil {
-					fmt.Fprintln(logFile, "running npm install in providers/google-node")
-					cmd := exec.Command("npm", "install", "--silent", "--no-audit", "--no-fund")
-					cmd.Dir = providerDir
-					cmd.Stdout = logFile
-					cmd.Stderr = logFile
-					cmd.Env = os.Environ()
-					if err := cmd.Run(); err != nil {
-						fmt.Fprintf(logFile, "npm install failed (google provider may not work): %v\n", err)
-					}
-				}
-			}
+func doCicySkillsInstall() {
+	if err := os.MkdirAll(cicyStateDir, 0o755); err != nil {
+		log.Printf("[startup] failed to create %s for cicy-skills bootstrap: %v", cicyStateDir, err)
+		return
+	}
+	logPath := filepath.Join(cicyStateDir, cicySkillsInstallLogFile)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		log.Printf("[startup] failed to open cicy-skills install log: %v", err)
+		return
+	}
+	defer logFile.Close()
 
-			// Run cicy-skills install all to materialize ~/.local/bin/* symlinks
-			// and SKILL.md files via the registry.
-			distBin := cicySkillsDistBinaryPath()
-			if _, err := os.Stat(distBin); err != nil {
-				log.Printf("[startup] cicy-skills bootstrap: %s missing after extract (log: %s)", distBin, logPath)
-				return
-			}
-			if err := os.Chmod(distBin, 0o755); err != nil {
-				log.Printf("[startup] chmod %s: %v", distBin, err)
-			}
-			log.Printf("[startup] running %s install all", distBin)
-			fmt.Fprintf(logFile, "[%s] running %s install all\n", time.Now().Format(time.RFC3339), distBin)
-			cmd := exec.Command(distBin, "install", "all")
-			cmd.Env = append(os.Environ(), "CICY_SKILLS_ROOT="+projectRoot)
+	projectRoot := cicySkillsProjectDir()
+	log.Printf("[startup] extracting embedded cicy-skills into %s", projectRoot)
+	fmt.Fprintf(logFile, "[%s] extracting embedded cicy-skills into %s\n", time.Now().Format(time.RFC3339), projectRoot)
+	if err := extractEmbeddedCicySkills(projectRoot); err != nil {
+		log.Printf("[startup] cicy-skills extract failed: %v (log: %s)", err, logPath)
+		fmt.Fprintf(logFile, "extract failed: %v\n", err)
+		return
+	}
+
+	// Install Google provider Node deps if missing — only network step,
+	// optional (Google skill is unusable without it but rest still work).
+	providerDir := filepath.Join(projectRoot, "providers", "google-node")
+	if _, err := os.Stat(filepath.Join(providerDir, "package.json")); err == nil {
+		if _, err := os.Stat(filepath.Join(providerDir, "node_modules")); err != nil {
+			fmt.Fprintln(logFile, "running npm install in providers/google-node")
+			cmd := exec.Command("npm", "install", "--silent", "--no-audit", "--no-fund")
+			cmd.Dir = providerDir
 			cmd.Stdout = logFile
 			cmd.Stderr = logFile
+			cmd.Env = os.Environ()
 			if err := cmd.Run(); err != nil {
-				log.Printf("[startup] cicy-skills install all failed: %v (log: %s)", err, logPath)
-				return
+				fmt.Fprintf(logFile, "npm install failed (google provider may not work): %v\n", err)
 			}
+		}
+	}
 
-			extendPATH()
+	// Run cicy-skills install all to materialize ~/.local/bin/* symlinks
+	// and SKILL.md files via the registry.
+	distBin := cicySkillsDistBinaryPath()
+	if _, err := os.Stat(distBin); err != nil {
+		log.Printf("[startup] cicy-skills bootstrap: %s missing after extract (log: %s)", distBin, logPath)
+		return
+	}
+	if err := os.Chmod(distBin, 0o755); err != nil {
+		log.Printf("[startup] chmod %s: %v", distBin, err)
+	}
+	log.Printf("[startup] running %s install all", distBin)
+	fmt.Fprintf(logFile, "[%s] running %s install all\n", time.Now().Format(time.RFC3339), distBin)
+	cmd := exec.Command(distBin, "install", "all")
+	cmd.Env = append(os.Environ(), "CICY_SKILLS_ROOT="+projectRoot)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	if err := cmd.Run(); err != nil {
+		log.Printf("[startup] cicy-skills install all failed: %v (log: %s)", err, logPath)
+		return
+	}
 
-			if needsCicySkillsInstall() {
-				log.Printf("[startup] cicy-skills bootstrap incomplete (log: %s)", logPath)
-				return
-			}
-			log.Printf("[startup] cicy-skills bootstrap completed")
-		}()
-	})
+	extendPATH()
+
+	// After cicy-skills install all has linked the cicy-mihomo wrapper
+	// onto PATH, kick off the binary download once (skip if already
+	// present so reboots don't redownload).
+	ensureMihomoBinaryInstalled(logFile, logPath)
+
+	if needsCicySkillsInstall() {
+		log.Printf("[startup] cicy-skills bootstrap incomplete (log: %s)", logPath)
+		return
+	}
+	log.Printf("[startup] cicy-skills bootstrap completed")
+}
+
+// ensureMihomoBinaryInstalled runs `cicy-mihomo install` to download the real
+// mihomo binary into ~/.local/bin/mihomo after the cicy-skills wrappers have
+// landed. Idempotent: skipped if mihomo is already on PATH or at the canonical
+// install location. Best-effort: a failure here doesn't fail the startup.
+func ensureMihomoBinaryInstalled(logFile *os.File, logPath string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	mihomoTarget := filepath.Join(home, ".local", "bin", "mihomo")
+	if runtime.GOOS == "windows" {
+		mihomoTarget += ".exe"
+	}
+	// Skip if already installed somewhere reasonable.
+	if info, err := os.Stat(mihomoTarget); err == nil && info.Mode()&0o111 != 0 {
+		return
+	}
+	if _, err := exec.LookPath("mihomo"); err == nil {
+		return
+	}
+	wrapper := filepath.Join(home, ".local", "bin", "cicy-mihomo")
+	if _, err := os.Stat(wrapper); err != nil {
+		// wrapper symlink missing — install all didn't run successfully; bail
+		return
+	}
+	log.Printf("[startup] running cicy-mihomo install")
+	fmt.Fprintf(logFile, "[%s] running cicy-mihomo install\n", time.Now().Format(time.RFC3339))
+	cmd := exec.Command(wrapper, "install")
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.Env = os.Environ()
+	if err := cmd.Run(); err != nil {
+		log.Printf("[startup] cicy-mihomo install failed: %v (log: %s — proxy will be unavailable until installed manually)", err, logPath)
+	}
 }
 
 func ensureCodeServer() {

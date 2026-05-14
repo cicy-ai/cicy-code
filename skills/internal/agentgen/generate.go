@@ -41,7 +41,7 @@ func OpenCodeSkillsDir() string {
 }
 
 func ApprovedCodexSkills() []string {
-	return []string{"agent-code-server", "agent-summary", "agent-webpage", "cf-tunnel", "cping", "docker-build-github-action", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent", "us-spot-proxy"}
+	return []string{"agent-code-server", "agent-summary", "agent-webpage", "cf-tunnel", "cping", "docker-build-github-action", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent", "cicy-mihomo", "us-spot-proxy"}
 }
 
 func canonicalCodexSkillName(name string) string {
@@ -70,6 +70,8 @@ func canonicalCodexSkillName(name string) string {
 		return "cicy-ssh"
 	case "cicy-agent", "cicyagent", "cicy_agent":
 		return "cicy-agent"
+	case "cicy-mihomo", "cicymihomo", "cicy_mihomo", "mihomo":
+		return "cicy-mihomo"
 	case "us-spot-proxy", "usspotproxy", "us_spot_proxy", "usspp":
 		return "us-spot-proxy"
 	default:
@@ -317,6 +319,8 @@ func generateCodexSkill(root, targetRoot, skill string) error {
 		return generateCodexSSH(targetRoot)
 	case "cicy-agent":
 		return generateCodexTM(targetRoot)
+	case "cicy-mihomo":
+		return generateCodexCicyMihomo(targetRoot)
 	case "us-spot-proxy":
 		return generateCodexUSSpotProxy(targetRoot)
 	default:
@@ -1933,14 +1937,166 @@ func generateCodexUSSpotProxy(targetRoot string) error {
 	if err := writeText(filepath.Join(refsDir, "help.md"), renderUSSpotProxyHelp()); err != nil {
 		return err
 	}
-	if err := writeText(filepath.Join(refsDir, "commands.md"), renderUSSpotProxyCommands()); err != nil {
+	tools := renderUSSpotProxyCommands()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
 		return err
 	}
-	return nil
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
+func generateCodexCicyMihomo(targetRoot string) error {
+	skillDir := filepath.Join(targetRoot, "cicy-mihomo")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderCicyMihomoSkill()); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderCicyMihomoHelp()); err != nil {
+		return err
+	}
+	tools := renderCicyMihomoCommands()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
+func renderCicyMihomoSkill() string {
+	return `---
+name: cicy-mihomo
+description: Manage a local mihomo proxy on this host with start/stop/reload/status/logs and node speed-testing.
+---
+
+# cicy-mihomo
+
+This skill covers the local ` + "`cicy-mihomo`" + ` wrapper from ` + "`PATH`" + `.
+
+Use this command directly. It controls a local ` + "`mihomo`" + ` (clash-meta) proxy
+process and exposes a SOCKS/mixed port on ` + "`9001`" + `, with the controller
+API on ` + "`127.0.0.1:18009`" + `.
+
+## Scope
+
+Use this skill when the task involves:
+
+- starting / stopping / restarting / reloading mihomo
+- viewing the current config or generating a fresh template
+- tailing mihomo logs
+- speed-testing the configured proxy nodes against fixed targets (anthropic / google / github / cf)
+- installing the mihomo binary itself (` + "`cicy-mihomo install`" + ` downloads from the cicy-ai/cicy-mihomo release)
+
+## Rules
+
+1. Prefer ` + "`cicy-mihomo`" + ` over hand-rolled ` + "`mihomo`" + ` invocations — the wrapper handles pid/log/state in a consistent location.
+2. Config lives at ` + "`~/cicy-ai/db/mihomo.yaml`" + `. Don't move it; the wrapper hard-codes that path.
+3. Hot reload via ` + "`reload`" + ` rather than restart whenever possible — keeps connections alive.
+4. ` + "`test`" + ` reports observational network data; don't over-attribute slowness to a single node from one run.
+
+## Help
+
+Read [help.md](./references/help.md) first for quick usage.
+
+## Tools
+
+Read [tools.md](./references/tools.md) for the full subcommand reference.
+`
+}
+
+func renderCicyMihomoHelp() string {
+	return `# cicy-mihomo Help
+
+## Command
+- primary command: ` + "`cicy-mihomo`" + `
+
+## Quick Start
+- inspect usage: ` + "`cicy-mihomo help`" + `
+- generate a default config: ` + "`cicy-mihomo gen-config`" + `
+- show the current config: ` + "`cicy-mihomo show-config`" + `
+- start in background: ` + "`cicy-mihomo start`" + `
+- check status: ` + "`cicy-mihomo status`" + `
+- hot reload after editing config: ` + "`cicy-mihomo reload`" + `
+- tail recent logs: ` + "`cicy-mihomo logs 200`" + `
+- follow logs live: ` + "`cicy-mihomo logs -f`" + `
+- stop the service: ` + "`cicy-mihomo stop`" + `
+- restart cleanly: ` + "`cicy-mihomo restart`" + `
+- install the mihomo binary (first run): ` + "`cicy-mihomo install`" + `
+- test all proxy nodes: ` + "`cicy-mihomo test`" + `
+
+## Defaults
+- mihomo binary lookup: ` + "`~/.local/bin/mihomo`" + ` (or ` + "`MIHOMO_BIN`" + ` env)
+- config path: ` + "`~/cicy-ai/db/mihomo.yaml`" + `
+- mixed proxy port: ` + "`9001`" + `
+- controller API: ` + "`127.0.0.1:18009`" + `
+- pid / state / log dir: ` + "`~/.local/state/cicy-skills/mihomo/`" + `
+
+## Install env overrides (for ` + "`cicy-mihomo install`" + `)
+- ` + "`CICY_MIHOMO_VERSION`" + ` — pin a release tag (default v1.10.1)
+- ` + "`GITHUB_PROXY`" + ` — URL prefix for github.com (default https://gh-proxy.com/)
+- ` + "`CICY_MIHOMO_RELEASE_URL`" + ` — fully qualified direct download URL
+
+## Rules
+- read the real config in ` + "`~/cicy-ai/db/mihomo.yaml`" + `; do not invent state
+- prefer ` + "`reload`" + ` over ` + "`restart`" + ` for config changes
+- ` + "`test`" + ` is observational — report exact targets and timings, not opinions
+
+## More
+- tool map: [tools.md](./tools.md)
+`
+}
+
+func renderCicyMihomoCommands() string {
+	return `# cicy-mihomo Command Reference
+
+This skill uses the local ` + "`cicy-mihomo`" + ` command from ` + "`PATH`" + `.
+
+## Lifecycle
+
+- ` + "`cicy-mihomo start`" + ` — start mihomo in the background
+- ` + "`cicy-mihomo stop`" + ` — stop the running mihomo
+- ` + "`cicy-mihomo restart`" + ` — stop then start
+- ` + "`cicy-mihomo reload`" + ` — hot reload the config via the controller API (preferred for config-only changes)
+- ` + "`cicy-mihomo status`" + ` — print pid, binary path, config path, log path, port, controller addr
+
+## Config
+
+- ` + "`cicy-mihomo template`" + ` — print a starter mihomo.yaml to stdout
+- ` + "`cicy-mihomo gen-config`" + ` — write the starter config to ` + "`~/cicy-ai/db/mihomo.yaml`" + ` if absent
+- ` + "`cicy-mihomo show-config`" + ` — print the current config (secrets masked)
+
+## Logs
+
+- ` + "`cicy-mihomo logs`" + ` — print the last 100 lines
+- ` + "`cicy-mihomo logs N`" + ` — print the last N lines
+- ` + "`cicy-mihomo logs -f`" + ` — follow the log live
+
+## Binary
+
+- ` + "`cicy-mihomo install`" + ` — download the platform-matching mihomo binary into ` + "`~/.local/bin/mihomo`" + `
+
+## Speed testing
+
+- ` + "`cicy-mihomo test`" + ` — for each configured proxy node, time HTTP requests to fixed targets (anthropic, google, github, cf) and report per-node summary
+
+## Files / ports
+
+- config:     ` + "`~/cicy-ai/db/mihomo.yaml`" + `
+- pid:        ` + "`~/.local/state/cicy-skills/mihomo/pid`" + `
+- state:      ` + "`~/.local/state/cicy-skills/mihomo/state.json`" + `
+- log:        ` + "`~/.local/state/cicy-skills/mihomo/mihomo.log`" + `
+- proxy port: 9001
+- API:        127.0.0.1:18009
+`
 }
 
 func renderUSSpotProxySkill() string {
-	return `# us-spot-proxy
+	return `---
+name: us-spot-proxy
+description: Provision a US Aliyun spot ECS instance with mihomo + vpn_us passthrough and a persistent data disk that outlives the spot instance.
+---
+
+# us-spot-proxy
 
 Provision a US Aliyun spot ECS instance with mihomo + vpn_us passthrough + **persistent data disk**.
 
