@@ -22,7 +22,17 @@ var providersFileMu sync.Mutex
 var providerKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
 // agent types exposed in the provider manager defaults editor.
-var providerDefaultAgentTypes = []string{"claude", "codex"}
+var providerDefaultAgentTypes = []string{"claude", "codex", "opencode"}
+
+// Official cicy-shipped providers — protected from deletion via API.
+var protectedProviderKeys = map[string]bool{
+	"defaultAnthropic": true,
+	"defaultOpenAi":    true,
+}
+
+func isProtectedProviderKey(key string) bool {
+	return protectedProviderKeys[strings.TrimSpace(key)]
+}
 
 func writeGlobalJSONConfig(cfg map[string]any) error {
 	path := globalJSONPath()
@@ -378,6 +388,11 @@ func handleProviderByKey(w http.ResponseWriter, r *http.Request, key string) {
 		}
 		J(w, M{"success": true, "provider": draft})
 	case http.MethodDelete:
+		// Cicy-shipped official providers are not deletable.
+		if isProtectedProviderKey(key) {
+			httpErr(w, 403, "provider is protected and cannot be deleted: "+key)
+			return
+		}
 		providersFileMu.Lock()
 		defer providersFileMu.Unlock()
 		cfg := readGlobalJSONConfig()

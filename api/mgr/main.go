@@ -127,6 +127,12 @@ Options:
 	http.HandleFunc("/api/auth/tokens", wa(handleAuthTokens))
 	http.HandleFunc("/api/auth/tokens/", wa(handleAuthTokenDelete))
 
+	// Proxy (mihomo controller pass-through + lifecycle)
+	http.HandleFunc("/api/proxy/list", authM(handleProxyList))
+	http.HandleFunc("/api/proxy/test", authM(handleProxyTest))
+	http.HandleFunc("/api/proxy/status", authM(handleProxyStatus))
+	http.HandleFunc("/api/proxy/lifecycle", authM(handleProxyLifecycle))
+
 	// Panes
 	http.HandleFunc("/api/panes", authM(handlePanes))
 	http.HandleFunc("/api/panes/create", authM(handleCreatePane))
@@ -214,6 +220,9 @@ Options:
 	http.HandleFunc("/api/agents/pane/", wa(handleAgentsByPane))
 	http.HandleFunc("/api/agents/inspector/", wa(handleAgentInspectorByPane))
 	http.HandleFunc("/api/agents/current-history/", wa(handleAgentCurrentHistoryByPane))
+	http.HandleFunc("/api/agents/current-history-tool/", wa(handleAgentCurrentHistoryToolDetailByPane))
+	http.HandleFunc("/api/agents/history-ids/", wa(handleAgentHistoryIDsByPane))
+	http.HandleFunc("/api/agents/history-turn/", wa(handleAgentHistoryTurnByPane))
 	http.HandleFunc("/api/agents/history-sync/", wa(handleAgentHistorySyncByPane))
 	http.HandleFunc("/api/agents/history-view/", wa(handleAgentHistoryViewByPane))
 	http.HandleFunc("/api/agents/bind", wa(handleAgentBind))
@@ -241,6 +250,11 @@ Options:
 	http.HandleFunc("/api/skills/run", wa(handleSkillRun))
 	http.HandleFunc("/api/skill-market", wa(handleSkillMarketList))
 	http.HandleFunc("/api/skill-market/", wa(handleSkillMarketAction))
+	http.HandleFunc("/api/skill-config/google", wa(handleGoogleSkillConfig))
+	http.HandleFunc("/api/skill-config/google/connect", wa(handleGoogleSkillConfig))
+	// Callback is intentionally unauthed — Google won't carry our Bearer token.
+	// State token enforces same-origin/no-CSRF.
+	http.HandleFunc("/api/skill-config/google/callback", handleGoogleSkillCallback)
 
 	// Runtime aliases
 	http.HandleFunc("/api/runtime/instances", wa(handleRuntimeInstances))

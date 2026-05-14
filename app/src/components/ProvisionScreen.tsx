@@ -87,24 +87,25 @@ export default function ProvisionScreen({ onReady }: { onReady: (backend: string
   const progress = Math.round((currentStep / 5) * 100);
 
   return (
-    <div className="h-screen bg-[#0A0A0A] flex items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-6">
-          <div className="text-4xl mb-3">🚀</div>
-          <h2 className="text-white text-lg font-medium">{t('title')}</h2>
-          <p className="text-zinc-500 text-sm mt-1">{t('elapsed', { seconds: elapsed })}</p>
+    <div data-id="provision-screen-root" className="h-screen bg-[#0A0A0A] flex items-center justify-center px-4">
+      <div data-id="provision-screen-container" className="w-full max-w-md">
+        <div data-id="provision-screen-header" className="text-center mb-6">
+          <div data-id="provision-screen-emoji" className="text-4xl mb-3">🚀</div>
+          <h2 data-id="provision-screen-title" className="text-white text-lg font-medium">{t('title')}</h2>
+          <p data-id="provision-screen-elapsed" className="text-zinc-500 text-sm mt-1">{t('elapsed', { seconds: elapsed })}</p>
         </div>
 
         {/* Progress bar */}
-        <div className="w-full h-1.5 bg-zinc-800 rounded-full mb-6 overflow-hidden">
+        <div data-id="provision-screen-progress" className="w-full h-1.5 bg-zinc-800 rounded-full mb-6 overflow-hidden">
           <div
+            data-id="provision-screen-progress-bar"
             className="h-full bg-blue-500 rounded-full transition-all duration-500"
             style={{ width: `${progress}%` }}
           />
         </div>
 
         {/* Steps */}
-        <div className="space-y-2.5 mb-6">
+        <div data-id="provision-screen-steps" className="space-y-2.5 mb-6">
           {STEP_KEYS.map((stepKey, i) => {
             const label = t(stepKey);
             const s = steps.find(s => s.step === i + 1);
@@ -112,17 +113,17 @@ export default function ProvisionScreen({ onReady }: { onReady: (backend: string
             const isRunning = s && s.status === 'running' && s.step === currentStep;
 
             return (
-              <div key={i} className="flex items-center gap-3">
-                <div className="w-6 h-6 flex items-center justify-center">
+              <div key={i} data-id={`provision-screen-step-${i + 1}`} className="flex items-center gap-3">
+                <div data-id={`provision-screen-step-${i + 1}-icon`} className="w-6 h-6 flex items-center justify-center">
                   {isDone ? (
-                    <span className="text-emerald-400">✓</span>
+                    <span data-id={`provision-screen-step-${i + 1}-check`} className="text-emerald-400">✓</span>
                   ) : isRunning ? (
                     <Spinner size="sm" />
                   ) : (
-                    <span className="text-zinc-700 text-xs">{i + 1}</span>
+                    <span data-id={`provision-screen-step-${i + 1}-number`} className="text-zinc-700 text-xs">{i + 1}</span>
                   )}
                 </div>
-                <span className={`text-sm ${isDone ? 'text-zinc-400' : isRunning ? 'text-white' : 'text-zinc-600'}`}>
+                <span data-id={`provision-screen-step-${i + 1}-label`} className={`text-sm ${isDone ? 'text-zinc-400' : isRunning ? 'text-white' : 'text-zinc-600'}`}>
                   {label}
                 </span>
               </div>
@@ -131,20 +132,20 @@ export default function ProvisionScreen({ onReady }: { onReady: (backend: string
         </div>
 
         {/* Log output */}
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-3 max-h-32 overflow-y-auto font-mono text-xs">
+        <div data-id="provision-screen-logs" className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-3 max-h-32 overflow-y-auto font-mono text-xs">
           {logs.length === 0 ? (
-            <span className="text-zinc-600">{t('connecting')}</span>
+            <span data-id="provision-screen-logs-empty" className="text-zinc-600">{t('connecting')}</span>
           ) : (
             logs.map((l, i) => (
-              <div key={i} className="text-zinc-500 leading-5">{l}</div>
+              <div key={i} data-id={`provision-screen-log-${i}`} className="text-zinc-500 leading-5">{l}</div>
             ))
           )}
-          <div ref={logEndRef} />
+          <div data-id="provision-screen-logs-end" ref={logEndRef} />
         </div>
 
         {error && (
-          <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
-            <p className="text-red-400 text-sm text-center">{error}</p>
+          <div data-id="provision-screen-error" className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
+            <p data-id="provision-screen-error-text" className="text-red-400 text-sm text-center">{error}</p>
           </div>
         )}
       </div>

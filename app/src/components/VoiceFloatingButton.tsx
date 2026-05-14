@@ -157,9 +157,9 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
         {/* Outer Ripple Rings (Visible when pressed and not dragging) */}
         {isPressed && !dragMode && (
           <>
-            <div className="absolute inset-0 rounded-full bg-red-500/30 animate-ping delay-75"></div>
-            <div className="absolute -inset-4 rounded-full border-2 border-red-500/20 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite]"></div>
-            <div className="absolute -inset-8 rounded-full border border-red-500/10 animate-[ping_3s_cubic-bezier(0,0,0.2,1)_infinite]"></div>
+            <div data-id="voice-floating-button-ripple-1" className="absolute inset-0 rounded-full bg-red-500/30 animate-ping delay-75"></div>
+            <div data-id="voice-floating-button-ripple-2" className="absolute -inset-4 rounded-full border-2 border-red-500/20 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite]"></div>
+            <div data-id="voice-floating-button-ripple-3" className="absolute -inset-8 rounded-full border border-red-500/10 animate-[ping_3s_cubic-bezier(0,0,0.2,1)_infinite]"></div>
           </>
         )}
 

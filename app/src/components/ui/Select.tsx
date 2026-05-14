@@ -174,8 +174,8 @@ export default function Select({
   }, [open, filtered, activeIndex, onChange, closeDropdown, setDropdownOpen]);
 
   return (
-    <div ref={ref} className={`relative ${className}`} onKeyDown={handleKeyDown}>
-      <button
+    <div data-id="select-auto-1" ref={ref} className={`relative ${className}`} onKeyDown={handleKeyDown}>
+      <button data-id="select-auto-2"
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -185,18 +185,18 @@ export default function Select({
           setSearch('');
           setActionMenu(null);
         }}
-        className={`group/trigger w-full flex items-center gap-2 text-sm rounded-md px-2.5 py-1.5 text-left transition-colors duration-150 cursor-pointer
+        className={`group/trigger w-full flex items-center gap-2 h-9 text-[13px] rounded-lg px-3 text-left transition-colors duration-150 cursor-pointer
           ${open
-            ? 'bg-white/[0.04] border border-blue-500/40 ring-2 ring-blue-500/10'
-            : 'bg-white/[0.02] border border-[var(--vsc-border)] hover:bg-white/[0.04] hover:border-white/[0.10]'}
+            ? 'bg-white/[0.045] border border-blue-500/55 ring-1 ring-blue-500/15'
+            : 'bg-white/[0.025] border border-white/[0.09] hover:bg-white/[0.04] hover:border-white/[0.14]'}
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/25`}
       >
         {triggerIcon ? (
-          <span className={`shrink-0 transition-colors ${open ? 'text-blue-300' : 'text-zinc-500 group-hover/trigger:text-zinc-300'}`}>
+          <span data-id="select-auto-3" className={`shrink-0 transition-colors ${open ? 'text-blue-300' : 'text-zinc-500 group-hover/trigger:text-zinc-300'}`}>
             {triggerIcon}
           </span>
         ) : null}
-        <span className={`flex-1 truncate ${selected ? 'text-zinc-200' : 'text-zinc-500'}`}>
+        <span data-id="select-auto-4" className={`flex-1 truncate ${selected ? 'text-zinc-200' : 'text-zinc-500'}`}>
           {selected ? selected.label : resolvedPlaceholder}
         </span>
         <ChevronDown className={`w-3.5 h-3.5 transition-all duration-200 ${open ? 'rotate-180 text-zinc-300' : 'text-zinc-500 group-hover/trigger:text-zinc-300'}`} />
@@ -217,9 +217,9 @@ export default function Select({
           style={usePortal && portalRect ? { top: portalRect.top, left: portalRect.left, width: portalRect.width } : undefined}
         >
           {searchable && (
-            <div className="flex items-center gap-2 px-3 py-2.5 border-b border-white/[0.05]">
+            <div data-id="select-auto-5" className="flex items-center gap-2 px-3 py-2.5 border-b border-white/[0.05]">
               <Search className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
-              <input
+              <input data-id="select-auto-6"
                 ref={inputRef}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
@@ -227,7 +227,7 @@ export default function Select({
                 placeholder={t('selectSearchPlaceholder')}
               />
               {search ? (
-                <button
+                <button data-id="select-auto-7"
                   type="button"
                   onClick={() => { setSearch(''); inputRef.current?.focus(); }}
                   className="flex h-5 w-5 items-center justify-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300"
@@ -243,13 +243,13 @@ export default function Select({
             </div>
           )}
 
-          <div ref={listRef} className="max-h-60 overflow-y-auto py-1 hide-scrollbar">
+          <div data-id="select-auto-8" ref={listRef} className="max-h-80 overflow-y-auto py-1 hide-scrollbar">
             {filtered.length ? filtered.map((o, idx) => {
               const actionMenuOpen = actionMenu?.value === o.value;
               const isSelected = o.value === value;
               const isActive = idx === activeIndex;
               return (
-                <div
+                <div data-id="select-auto-9"
                   key={o.value}
                   data-active-row={isActive}
                   role="option"
@@ -259,27 +259,27 @@ export default function Select({
                     ${isSelected ? 'bg-blue-500/[0.12]' : isActive ? 'bg-white/[0.05]' : ''}`}
                 >
                   {isSelected ? (
-                    <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[2px] rounded-r-full bg-blue-400" />
+                    <span data-id="select-auto-10" className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[2px] rounded-r-full bg-blue-400" />
                   ) : null}
-                  <button
+                  <button data-id="select-auto-11"
                     type="button"
                     onClick={() => { onChange(o.value); closeDropdown(); }}
                     className="flex min-w-0 flex-1 items-center gap-2.5 text-left cursor-pointer"
                   >
                     {o.icon ? <span className="shrink-0">{o.icon}</span> : null}
-                    <div className="min-w-0 flex-1">
-                      <span className={`block truncate text-[13px] leading-tight font-medium ${isSelected ? 'text-blue-200' : 'text-zinc-200'}`}>
+                    <div data-id="select-auto-12" className="min-w-0 flex-1">
+                      <span data-id="select-auto-13" className={`block truncate text-[13px] leading-tight font-medium ${isSelected ? 'text-blue-200' : 'text-zinc-200'}`}>
                         {o.label}
                       </span>
                       {o.sub ? (
-                        <span className={`mt-0.5 block truncate font-mono text-[11px] leading-tight ${isSelected ? 'text-blue-300/60' : 'text-zinc-500'}`}>
+                        <span data-id="select-auto-14" className={`mt-0.5 block truncate font-mono text-[11px] leading-tight ${isSelected ? 'text-blue-300/60' : 'text-zinc-500'}`}>
                           {o.sub}
                         </span>
                       ) : null}
                     </div>
                   </button>
                   {o.actions?.length ? (
-                    <div
+                    <div data-id="select-auto-15"
                       className="shrink-0"
                       onMouseDown={(event) => event.stopPropagation()}
                       onClick={(event) => event.stopPropagation()}
@@ -311,11 +311,11 @@ export default function Select({
                 </div>
               );
             }) : (
-              <div className="flex flex-col items-center justify-center gap-1.5 px-4 py-7">
+              <div data-id="select-auto-16" className="flex flex-col items-center justify-center gap-1.5 px-4 py-7">
                 <Search className="w-5 h-5 text-zinc-700" />
                 <p className="text-[13px] text-zinc-500">{t('selectNoResults')}</p>
                 {search ? (
-                  <button
+                  <button data-id="select-auto-17"
                     type="button"
                     onClick={() => { setSearch(''); inputRef.current?.focus(); }}
                     className="mt-1 text-[11px] text-zinc-500 transition-colors hover:text-zinc-300 cursor-pointer"
@@ -328,25 +328,25 @@ export default function Select({
           </div>
 
           {footer ? (
-            <div className="border-t border-white/[0.05] bg-white/[0.01]">
+            <div data-id="select-auto-18" className="border-t border-white/[0.05] bg-white/[0.01]">
               {footer}
             </div>
           ) : null}
 
           {searchable && filtered.length > 0 ? (
-            <div className="hidden md:flex items-center justify-between gap-3 border-t border-white/[0.05] bg-white/[0.01] px-3 py-1.5 text-[10px] text-zinc-600 select-none">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1">
+            <div data-id="select-auto-19" className="hidden md:flex items-center justify-between gap-3 border-t border-white/[0.05] bg-white/[0.01] px-3 py-1.5 text-[10px] text-zinc-600 select-none">
+              <div data-id="select-auto-20" className="flex items-center gap-2">
+                <span data-id="select-auto-21" className="inline-flex items-center gap-1">
                   <kbd className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-white/[0.06] bg-white/[0.02] px-1 font-mono">↑</kbd>
                   <kbd className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-white/[0.06] bg-white/[0.02] px-1 font-mono">↓</kbd>
-                  <span>{t('selectHintNavigate')}</span>
+                  <span data-id="select-auto-22">{t('selectHintNavigate')}</span>
                 </span>
-                <span className="inline-flex items-center gap-1">
+                <span data-id="select-auto-23" className="inline-flex items-center gap-1">
                   <kbd className="inline-flex h-4 items-center justify-center rounded border border-white/[0.06] bg-white/[0.02] px-1 font-mono">↵</kbd>
-                  <span>{t('selectHintSelect')}</span>
+                  <span data-id="select-auto-24">{t('selectHintSelect')}</span>
                 </span>
               </div>
-              <span className="font-mono">{filtered.length}</span>
+              <span data-id="select-auto-25" className="font-mono">{filtered.length}</span>
             </div>
           ) : null}
         </div>
@@ -374,7 +374,7 @@ export default function Select({
               }`}
             >
               {action.icon ? <span className="shrink-0">{action.icon}</span> : null}
-              <span>{action.label}</span>
+              <span data-id="select-auto-26">{action.label}</span>
             </button>
           ))}
         </div>,

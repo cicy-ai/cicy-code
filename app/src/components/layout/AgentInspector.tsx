@@ -10,6 +10,7 @@ import type { EditPaneData } from '../../types';
 import AgentAvatar from '../AgentAvatar';
 import Select, { type SelectOption } from '../ui/Select';
 import { normalizeAgentType } from '../../lib/agentType';
+import { ProxyManagerDialog } from './ProxyManagerDialog';
 
 export type InspectorTab = 'overview' | 'memory' | 'settings' | 'history';
 type InspectorRequestedTab = InspectorTab | 'notes' | 'history';
@@ -258,7 +259,7 @@ function createInspectorMarkdownComponents(query: string) {
 
   return {
     a: ({ href, children, ...props }: any) => (
-      <a {...props} href={href} target="_blank" rel="noreferrer noopener">
+      <a data-id="agent-inspector-auto-1" {...props} href={href} target="_blank" rel="noreferrer noopener">
         {highlightReactNode(children, query)}
       </a>
     ),
@@ -356,6 +357,8 @@ export default function AgentInspector({
   const settingsPaneLoadedRef = useRef<string>('');
   const [generalSettingsBaseline, setGeneralSettingsBaseline] = useState('null');
   const [modelSettingsBaseline, setModelSettingsBaseline] = useState('null');
+  const [proxyTargetOptions, setProxyTargetOptions] = useState<SelectOption[]>([]);
+  const [proxyManagerOpen, setProxyManagerOpen] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(queryDraft.trim()), 220);
@@ -449,6 +452,27 @@ export default function AgentInspector({
       cancelled = true;
     };
   }, [open, paneId, paneTitle]);
+
+  useEffect(() => {
+    // Pull the live mihomo proxies/groups list so the rule Select has real
+    // options. Skip until the user actually opens settings AND has the proxy
+    // toggle on — no point hitting the controller otherwise.
+    if (!open || tab !== 'settings' || !settingsData?.use_proxy) return;
+    let cancelled = false;
+    apiService.getProxyList().then((resp) => {
+      if (cancelled) return;
+      const data = (resp?.data || {}) as { groups?: Array<{ name: string; type: string }>; nodes?: Array<{ name: string; type: string }> };
+      const groupOpts: SelectOption[] = (data.groups || []).map((g) => ({ value: g.name, label: `${g.name} (${g.type})` }));
+      const nodeOpts: SelectOption[] = (data.nodes || []).map((n) => ({ value: n.name, label: `${n.name} (${n.type})` }));
+      setProxyTargetOptions([...groupOpts, ...nodeOpts]);
+    }).catch(() => {
+      if (cancelled) return;
+      setProxyTargetOptions([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, tab, settingsData?.use_proxy]);
 
   useEffect(() => {
     if (!open || !paneId) return;
@@ -701,8 +725,8 @@ export default function AgentInspector({
       <div data-id="agent-inspector-shell" className="flex h-full flex-col">
         {tab === 'history' && (
           <div data-id="agent-inspector-history-search-wrap" className="relative z-20 border-b border-white/[0.06] bg-[#09090b] px-1 pb-2 pt-2">
-            <div className="relative overflow-hidden rounded-xl border border-white/[0.08] bg-[#111215] shadow-[0_10px_24px_rgba(0,0,0,0.28)]">
-              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-zinc-500">
+            <div data-id="agent-inspector-auto-2" className="relative overflow-hidden rounded-xl border border-white/[0.08] bg-[#111215] shadow-[0_10px_24px_rgba(0,0,0,0.28)]">
+              <div data-id="agent-inspector-auto-3" className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-zinc-500">
                 <Search className="h-4 w-4" />
               </div>
               <input
@@ -724,11 +748,11 @@ export default function AgentInspector({
             <div data-id="agent-inspector-overview" className="space-y-4">
               <div data-id="agent-inspector-overview-summary-grid" className="space-y-2 px-1">
                 <div data-id="agent-inspector-overview-card-status" className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-                  <div className="min-w-0">
+                  <div data-id="agent-inspector-auto-4" className="min-w-0">
                     <div data-id="agent-inspector-overview-card-status-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">{t('overviewStatus')}</div>
                     <div data-id="agent-inspector-overview-card-status-value" className="mt-1 text-base font-medium text-zinc-100">{formatStatusLabel(overview.status_label, t('statusIdle'))}</div>
                   </div>
-                  <div className="mt-3 min-w-0">
+                  <div data-id="agent-inspector-auto-5" className="mt-3 min-w-0">
                     <div data-id="agent-inspector-overview-card-model-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">{t('overviewModel')}</div>
                     <div data-id="agent-inspector-overview-card-model-value" className="mt-1 break-all text-sm font-medium leading-5 text-zinc-100">
                       {compactText(overview.model, t('modelUnknown'))}
@@ -741,22 +765,22 @@ export default function AgentInspector({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div data-id="agent-inspector-auto-6" className="grid grid-cols-2 gap-2">
                   <div data-id="agent-inspector-overview-card-input-tokens" className="rounded-xl bg-white/[0.02] px-3 py-2.5">
                     <div data-id="agent-inspector-overview-card-input-tokens-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">In</div>
                     <div data-id="agent-inspector-overview-card-input-tokens-value" className="mt-1 text-sm font-medium text-zinc-100">{formatTokens(displayInputTokens)}</div>
                   </div>
-                  <div className="rounded-xl bg-white/[0.02] px-3 py-2.5">
-                    <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">Out</div>
-                    <div className="mt-1 text-sm font-medium text-zinc-100">{formatTokens(displayOutputTokens)}</div>
+                  <div data-id="agent-inspector-auto-7" className="rounded-xl bg-white/[0.02] px-3 py-2.5">
+                    <div data-id="agent-inspector-auto-8" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">Out</div>
+                    <div data-id="agent-inspector-auto-9" className="mt-1 text-sm font-medium text-zinc-100">{formatTokens(displayOutputTokens)}</div>
                   </div>
                   <div data-id="agent-inspector-overview-card-total-tokens" className="rounded-xl bg-white/[0.02] px-3 py-2.5">
                     <div data-id="agent-inspector-overview-card-total-tokens-label" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">Total</div>
                     <div data-id="agent-inspector-overview-card-total-tokens-value" className="mt-1 text-sm font-medium text-zinc-100">{formatTokens(displayTotalTokens)}</div>
                   </div>
-                  <div className="rounded-xl bg-white/[0.02] px-3 py-2.5">
-                    <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">Cost</div>
-                    <div className="mt-1 text-sm font-medium text-zinc-100">
+                  <div data-id="agent-inspector-auto-10" className="rounded-xl bg-white/[0.02] px-3 py-2.5">
+                    <div data-id="agent-inspector-auto-11" className="text-[10px] uppercase tracking-[0.14em] text-zinc-500">Cost</div>
+                    <div data-id="agent-inspector-auto-12" className="mt-1 text-sm font-medium text-zinc-100">
                       {formatCostEstimate(displayCostCredit)}
                     </div>
                   </div>
@@ -764,7 +788,7 @@ export default function AgentInspector({
               </div>
 
               <div data-id="agent-inspector-overview-notes-section" className="space-y-2 px-1">
-                <div className="flex items-center justify-between gap-3 text-[11px] text-zinc-500">
+                <div data-id="agent-inspector-auto-13" className="flex items-center justify-between gap-3 text-[11px] text-zinc-500">
                   <span data-id="agent-inspector-overview-notes-label" className="uppercase tracking-[0.14em]">{t('notesLabel')}</span>
                   <span data-id="agent-inspector-overview-notes-updated" className="truncate">
                     {notesSaving ? t('notesSaving') : formatTime(data?.notes?.updated_at)}
@@ -831,7 +855,7 @@ export default function AgentInspector({
                   <div data-id="agent-inspector-history-pagination-meta" className="truncate">
                     {historyStart}-{historyEnd} / {history.total}
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div data-id="agent-inspector-auto-14" className="flex items-center gap-1.5">
                     <button
                       type="button"
                       data-id="agent-inspector-history-pagination-prev"
@@ -859,11 +883,11 @@ export default function AgentInspector({
           {tab === 'memory' && (
             <div data-id="agent-inspector-memory-tab" className="space-y-4">
               <div data-id="agent-inspector-memory-summary" className="space-y-1 rounded-lg bg-[#101114] px-3 py-2.5">
-                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-zinc-500">
+                <div data-id="agent-inspector-auto-15" className="flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-zinc-500">
                   <Brain className="h-3.5 w-3.5" />
                   Prompt Rules
                 </div>
-                <div className="text-[12px] leading-5 text-zinc-400">
+                <div data-id="agent-inspector-auto-16" className="text-[12px] leading-5 text-zinc-400">
                   <Trans i18nKey="promptRulesIntro" ns="agentInspector" components={{ code: <code /> }} />
                 </div>
               </div>
@@ -878,7 +902,7 @@ export default function AgentInspector({
                       memorySection === item.id ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
                     }`}
                   >
-                    <span>{t(item.labelKey)}</span>
+                    <span data-id="agent-inspector-auto-17">{t(item.labelKey)}</span>
                   </button>
                 ))}
               </div>
@@ -905,7 +929,7 @@ export default function AgentInspector({
                 )}
                 {memorySection === 'preview' && (
                   <div data-id="agent-inspector-memory-overlay-preview" className="rounded-lg bg-[#101114] px-3 py-2.5 text-[12px] leading-5 text-zinc-400">
-                    <div className="mb-1 text-[11px] uppercase tracking-[0.14em] text-zinc-500">{t('memoryPreviewTitle')}</div>
+                    <div data-id="agent-inspector-auto-18" className="mb-1 text-[11px] uppercase tracking-[0.14em] text-zinc-500">{t('memoryPreviewTitle')}</div>
                     {compactText(overview.overlay_preview, t('memoryPreviewEmpty'))}
                   </div>
                 )}
@@ -929,7 +953,7 @@ export default function AgentInspector({
                       }`}
                     >
                       <Icon className="h-3.5 w-3.5" />
-                      <span>{t(item.labelKey)}</span>
+                      <span data-id="agent-inspector-auto-19">{t(item.labelKey)}</span>
                     </button>
                   );
                 })}
@@ -955,7 +979,7 @@ export default function AgentInspector({
                           variant="select"
                           dataId="agent-inspector-settings-agent-type-avatar"
                         />
-                        <span className="truncate">{settingsData?.agent_type || t('agentTypeUnset')}</span>
+                        <span data-id="agent-inspector-auto-20" className="truncate">{settingsData?.agent_type || t('agentTypeUnset')}</span>
                       </div>
                     </InspectorField>
                   </div>
@@ -977,26 +1001,12 @@ export default function AgentInspector({
                     />
                   </div>
 
-                  <div data-id="agent-inspector-settings-general-proxy" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
-                    <InspectorToggle
-                      label={t('useProxy')}
-                      desc={t('useProxyHint')}
-                      checked={!!settingsData?.use_proxy}
-                      onChange={(value) => patchSettingsData({ use_proxy: value })}
-                      onBlur={() => { void saveSettings(); }}
-                    />
-                    {settingsData?.use_proxy && (
-                      <InspectorField label={t('mihomoRule')} desc={t('mihomoRuleDesc')}>
-                        <InspectorInput value={settingsData?.proxy?.rule || ''} onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), rule: value } })} onBlur={() => { void saveSettings(); }} placeholder="IN-USER,w-10001,proxy-a" mono />
-                      </InspectorField>
-                    )}
-                  </div>
                 </div>
               )}
 
               {settingsSection === 'model' && (
                 <div data-id="agent-inspector-settings-model" className="space-y-5">
-                  <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+                  <div data-id="agent-inspector-settings-model-official-auth" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
                     <InspectorToggle
                       label={t('officialAuth')}
                       desc={t('officialAuthHint')}
@@ -1006,14 +1016,53 @@ export default function AgentInspector({
                     />
                   </div>
 
+                  <div data-id="agent-inspector-settings-model-proxy" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+                    <InspectorToggle
+                      label={t('useProxy')}
+                      desc={t('useProxyHint')}
+                      checked={!!settingsData?.use_proxy}
+                      onChange={(value) => patchSettingsData({ use_proxy: value })}
+                      onBlur={() => { void saveSettings(); }}
+                    />
+                    {settingsData?.use_proxy && (
+                      <>
+                        <InspectorField
+                          label={t('proxyTargetLabel')}
+                          desc={t('proxyTargetDesc')}
+                        >
+                          <Select
+                            value={settingsData?.proxy?.rule || ''}
+                            onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), rule: value } })}
+                            onOpenChange={(opened) => {
+                              if (!opened) {
+                                void saveSettings();
+                              }
+                            }}
+                            options={proxyTargetOptions}
+                            placeholder={t('proxyTargetPlaceholder')}
+                            searchable
+                          />
+                        </InspectorField>
+                        <button
+                          data-id="agent-inspector-settings-model-proxy-manage"
+                          type="button"
+                          onClick={() => setProxyManagerOpen(true)}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-[11px] text-zinc-300 transition-colors hover:bg-white/[0.08]"
+                        >
+                          {t('proxyManageButton')}
+                        </button>
+                      </>
+                    )}
+                  </div>
+
                   {!settingsData?.use_official_auth && (
-                    <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
-                      <div>
-                        <div className="text-sm font-medium text-zinc-100">{t('gatewayOverrideTitle')}</div>
-                        <div className="mt-1 text-xs leading-5 text-zinc-500">{t('gatewayOverrideDesc')}</div>
+                    <div data-id="agent-inspector-settings-model-gateway-override" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+                      <div data-id="agent-inspector-settings-model-gateway-override-header">
+                        <div data-id="agent-inspector-settings-model-gateway-override-title" className="text-sm font-medium text-zinc-100">{t('gatewayOverrideTitle')}</div>
+                        <div data-id="agent-inspector-settings-model-gateway-override-desc" className="mt-1 text-xs leading-5 text-zinc-500">{t('gatewayOverrideDesc')}</div>
                       </div>
-                      <div className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2 text-xs text-zinc-400">
-                        <div>{t('defaultProvider', { name: runtimeAIDefault?.provider_label || runtimeAIDefault?.provider_name || t('defaultProviderEmpty') })}</div>
+                      <div data-id="agent-inspector-settings-model-gateway-default" className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2 text-xs text-zinc-400">
+                        <div data-id="agent-inspector-settings-model-gateway-default-text">{t('defaultProvider', { name: runtimeAIDefault?.provider_label || runtimeAIDefault?.provider_name || t('defaultProviderEmpty') })}</div>
                       </div>
                       <InspectorToggle
                         label={t('customOverride')}
@@ -1048,9 +1097,27 @@ export default function AgentInspector({
                     </div>
                   )}
 
-                  <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+                  <div data-id="agent-inspector-settings-model-default" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
                     <InspectorField label={t('modelDefaultFieldLabel')} desc={t('modelDefaultFieldDesc')}>
-                      <InspectorInput value={settingsData?.default_model || ''} onChange={(value) => patchSettingsData({ default_model: value })} onBlur={() => { void saveModelSettings(); }} placeholder={t('modelDefaultPlaceholder')} mono />
+                      {(() => {
+                        const activeProviderKey = String(settingsData?.runtime_ai?.provider_name || '').trim() || runtimeAIDefault?.provider_name || '';
+                        const activeProvider = runtimeAIProviderOptions.find((p) => p.key === activeProviderKey);
+                        const baseModels = activeProvider?.models || [];
+                        const currentValue = settingsData?.default_model || '';
+                        // Make sure the current value is selectable even if it's not in the provider's list
+                        const optionValues = currentValue && !baseModels.includes(currentValue)
+                          ? [currentValue, ...baseModels]
+                          : baseModels;
+                        return (
+                          <Select
+                            searchable
+                            placeholder={t('modelDefaultPlaceholder')}
+                            value={currentValue}
+                            options={optionValues.map((m) => ({ value: m, label: m }))}
+                            onChange={(v) => { patchSettingsData({ default_model: v }); void saveModelSettings(); }}
+                          />
+                        );
+                      })()}
                     </InspectorField>
                   </div>
                 </div>
@@ -1060,6 +1127,7 @@ export default function AgentInspector({
           )}
         </div>
       </div>
+      <ProxyManagerDialog open={proxyManagerOpen} onClose={() => setProxyManagerOpen(false)} paneId={paneId} />
     </aside>
   );
 }
@@ -1067,8 +1135,8 @@ export default function AgentInspector({
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div data-id="agent-inspector-info-row" className="flex items-start justify-between gap-3">
-      <span className="text-zinc-500">{label}</span>
-      <span className="max-w-[180px] text-right text-zinc-200">{value}</span>
+      <span data-id="agent-inspector-auto-21" className="text-zinc-500">{label}</span>
+      <span data-id="agent-inspector-auto-22" className="max-w-[180px] text-right text-zinc-200">{value}</span>
     </div>
   );
 }
@@ -1102,14 +1170,14 @@ function PromptRuleEditor({
   const unavailable = disabled || value.available === false;
   return (
     <section data-id={dataId} className="space-y-2 rounded-lg bg-[#101114] px-3 py-2.5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[12px] font-medium text-zinc-100">{title}</div>
-          <div className="truncate text-[11px] text-zinc-500">{subtitle || '--'}</div>
+      <div data-id="agent-inspector-auto-23" className="flex items-start justify-between gap-3">
+        <div data-id="agent-inspector-auto-24" className="min-w-0">
+          <div data-id="agent-inspector-auto-25" className="text-[12px] font-medium text-zinc-100">{title}</div>
+          <div data-id="agent-inspector-auto-26" className="truncate text-[11px] text-zinc-500">{subtitle || '--'}</div>
         </div>
-        <div className="shrink-0 text-[11px] text-zinc-600">{formatTime(value.updated_at)}</div>
+        <div data-id="agent-inspector-auto-27" className="shrink-0 text-[11px] text-zinc-600">{formatTime(value.updated_at)}</div>
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div data-id="agent-inspector-auto-28" className="grid grid-cols-2 gap-2">
         <CompactToggle
           labelKey="promptRuleEnable"
           checked={!!value.enabled}
@@ -1149,15 +1217,15 @@ function CompactToggle({
 }) {
   const { t } = useTranslation('agentInspector');
   return (
-    <button
+    <button data-id="agent-inspector-auto-29"
       type="button"
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className="flex items-center justify-between rounded-lg bg-[#09090b] px-2.5 py-2 text-left text-[12px] text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40"
     >
-      <span>{t(labelKey)}</span>
-      <span className={`relative h-5 w-9 rounded-full transition-colors ${checked ? 'bg-blue-600' : 'bg-white/[0.08]'}`}>
-        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${checked ? 'translate-x-4' : 'translate-x-0.5'}`} />
+      <span data-id="agent-inspector-auto-30">{t(labelKey)}</span>
+      <span data-id="agent-inspector-auto-31" className={`relative h-5 w-9 rounded-full transition-colors ${checked ? 'bg-blue-600' : 'bg-white/[0.08]'}`}>
+        <span data-id="agent-inspector-auto-32" className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${checked ? 'translate-x-4' : 'translate-x-0.5'}`} />
       </span>
     </button>
   );
@@ -1175,8 +1243,8 @@ function InspectorField({
   children: React.ReactNode;
 }) {
   return (
-    <div>
-      <label className={`mb-1.5 block text-[13px] font-medium text-zinc-300 ${mono ? 'font-mono' : ''}`}>{label}</label>
+    <div data-id="agent-inspector-auto-33">
+      <label data-id="agent-inspector-auto-34" className={`mb-1.5 block text-[13px] font-medium text-zinc-300 ${mono ? 'font-mono' : ''}`}>{label}</label>
       {children}
       {desc ? <p className="mt-1 text-[11px] text-zinc-600">{desc}</p> : null}
     </div>

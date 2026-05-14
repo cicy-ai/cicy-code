@@ -718,13 +718,13 @@ function EnvironmentContextCard({ context }: { context: EnvironmentContextData }
     { key: 'timezone', label: 'tz', value: context.timezone },
   ].filter((item) => String(item.value || '').trim());
   return (
-    <div className="w-full max-w-[95%] rounded-2xl rounded-br-sm border border-sky-300/[0.10] bg-sky-400/[0.075] px-3 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
-      <div className="mb-2 text-[11px] uppercase tracking-[0.08em] text-sky-200/55">Environment</div>
-      <div className="space-y-1.5">
+    <div data-id="current-history-view-env-context" className="w-full max-w-[95%] rounded-2xl rounded-br-sm border border-sky-300/[0.10] bg-sky-400/[0.075] px-3 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
+      <div data-id="current-history-view-env-context-label" className="mb-2 text-[11px] uppercase tracking-[0.08em] text-sky-200/55">Environment</div>
+      <div data-id="current-history-view-env-context-rows" className="space-y-1.5">
         {items.map((item) => (
-          <div key={item.key} className="flex flex-col gap-1">
-            <div className="text-[11px] text-sky-200/60">{item.label}</div>
-            <div className="rounded-md border border-sky-200/[0.08] bg-black/[0.12] px-2 py-1 font-mono text-xs leading-relaxed text-sky-50/85 break-all">
+          <div key={item.key} data-id={`current-history-view-env-context-row-${item.key}`} className="flex flex-col gap-1">
+            <div data-id={`current-history-view-env-context-row-${item.key}-label`} className="text-[11px] text-sky-200/60">{item.label}</div>
+            <div data-id={`current-history-view-env-context-row-${item.key}-value`} className="rounded-md border border-sky-200/[0.08] bg-black/[0.12] px-2 py-1 font-mono text-xs leading-relaxed text-sky-50/85 break-all">
               {item.value}
             </div>
           </div>
@@ -746,11 +746,11 @@ function CollapsibleQ({ text }: { text: string }) {
   }
   if (xmlBlocks.length) {
     return (
-      <div className="mb-2.5 flex justify-end">
-        <div className="max-w-[95%] flex flex-col gap-2">
-          <pre className="overflow-x-auto rounded-lg border border-sky-300/[0.12] bg-black/[0.25] px-3 py-2 font-mono text-xs leading-relaxed text-sky-100/70 whitespace-pre-wrap">{xmlBlocks.join('\n')}</pre>
+      <div data-id="current-history-view-q-xml" className="mb-2.5 flex justify-end">
+        <div data-id="current-history-view-q-xml-wrap" className="max-w-[95%] flex flex-col gap-2">
+          <pre data-id="current-history-view-q-xml-block" className="overflow-x-auto rounded-lg border border-sky-300/[0.12] bg-black/[0.25] px-3 py-2 font-mono text-xs leading-relaxed text-sky-100/70 whitespace-pre-wrap">{xmlBlocks.join('\n')}</pre>
           {remaining ? (
-            <div className="overflow-hidden rounded-2xl rounded-br-sm border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
+            <div data-id="current-history-view-q-xml-trailing" className="overflow-hidden rounded-2xl rounded-br-sm border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
               <Markdown remarkPlugins={[remarkGfm]}>{remaining}</Markdown>
             </div>
           ) : null}
@@ -759,11 +759,11 @@ function CollapsibleQ({ text }: { text: string }) {
     );
   }
   return (
-    <div className="mb-2.5 flex justify-end">
+    <div data-id="current-history-view-q" className="mb-2.5 flex justify-end">
       {environmentContext ? (
         <EnvironmentContextCard context={environmentContext} />
       ) : (
-        <div className="max-w-[95%] overflow-hidden rounded-2xl rounded-br-sm border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
+        <div data-id="current-history-view-q-body" className="max-w-[95%] overflow-hidden rounded-2xl rounded-br-sm border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
           <Markdown remarkPlugins={[remarkGfm]}>{String(text || '').replace(/^\-\n/, '')}</Markdown>
         </div>
       )}
@@ -782,21 +782,21 @@ function renderPatchLine(line: string, index: number) {
     return null;
   }
   if (line.startsWith('+')) {
-    return <div key={index} className={`${commonClass} bg-emerald-500/[0.08] text-emerald-300/85`}>{line}</div>;
+    return <div key={index} data-id={`current-history-view-patch-line-add-${index}`} className={`${commonClass} bg-emerald-500/[0.08] text-emerald-300/85`}>{line}</div>;
   }
   if (line.startsWith('-')) {
-    return <div key={index} className={`${commonClass} bg-red-500/[0.08] text-red-300/85`}>{line}</div>;
+    return <div key={index} data-id={`current-history-view-patch-line-remove-${index}`} className={`${commonClass} bg-red-500/[0.08] text-red-300/85`}>{line}</div>;
   }
   if (line.startsWith('@@')) {
     return null;
   }
   if (line.startsWith('*** Update File:')) {
-    return <div key={index} className={`${commonClass} bg-white/[0.03] text-zinc-300/90`}>{line.replace('*** Update File:', 'Update:')}</div>;
+    return <div key={index} data-id={`current-history-view-patch-line-update-${index}`} className={`${commonClass} bg-white/[0.03] text-zinc-300/90`}>{line.replace('*** Update File:', 'Update:')}</div>;
   }
   if (line.startsWith('*** ')) {
-    return <div key={index} className={`${commonClass} bg-white/[0.03] text-zinc-300/90`}>{line}</div>;
+    return <div key={index} data-id={`current-history-view-patch-line-marker-${index}`} className={`${commonClass} bg-white/[0.03] text-zinc-300/90`}>{line}</div>;
   }
-  return <div key={index} className={`${commonClass} text-zinc-400/80`}>{line}</div>;
+  return <div key={index} data-id={`current-history-view-patch-line-context-${index}`} className={`${commonClass} text-zinc-400/80`}>{line}</div>;
 }
 
 function shortenToolPath(text: string) {
@@ -900,7 +900,7 @@ function ShellCommandBlock({ text }: { text: string }) {
     return null;
   }
   return (
-    <div className="chat-markdown current-history-markdown">
+    <div data-id="current-history-view-shell-command" className="chat-markdown current-history-markdown">
       <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
         {`~~~bash\n${content}\n~~~`}
       </Markdown>
@@ -950,14 +950,14 @@ function ToolCard({ tool, toolId }: { tool: any; toolId: string }) {
         className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-zinc-500 hover:bg-white/[0.025] hover:text-zinc-400"
         onClick={toggleOpen}
       >
-        <span className="text-xs text-emerald-400/70">✓</span>
-        <span className="rounded border border-white/[0.04] bg-white/[0.035] px-1.5 py-0.5 text-xs text-zinc-300">{toolName || 'tool'}</span>
-        {!open && displayArg ? <span className="min-w-0 flex-1 truncate text-xs text-zinc-500">{displayArg}</span> : <span className="flex-1" />}
-        <span className="text-[11px] text-zinc-600">{open ? t('collapse') : t('expand')}</span>
+        <span data-id="current-history-tool-toggle-status" className="text-xs text-emerald-400/70">✓</span>
+        <span data-id="current-history-tool-toggle-name" className="rounded border border-white/[0.04] bg-white/[0.035] px-1.5 py-0.5 text-xs text-zinc-300">{toolName || 'tool'}</span>
+        {!open && displayArg ? <span data-id="current-history-tool-toggle-arg-preview" className="min-w-0 flex-1 truncate text-xs text-zinc-500">{displayArg}</span> : <span data-id="current-history-tool-toggle-spacer" className="flex-1" />}
+        <span data-id="current-history-tool-toggle-expand" className="text-[11px] text-zinc-600">{open ? t('collapse') : t('expand')}</span>
       </div>
       {showPatchArg ? (
         <div data-id="current-history-tool-arg" className="border-b border-white/[0.04] overflow-x-auto overflow-y-hidden">
-          <div className="min-w-max">
+          <div data-id="current-history-tool-arg-patch" className="min-w-max">
             {patchArg.split('\n').map((line: string, index: number) => renderPatchLine(line, index))}
           </div>
         </div>
@@ -966,14 +966,14 @@ function ToolCard({ tool, toolId }: { tool: any; toolId: string }) {
           {toolName === 'exec_command' ? (
             <ShellCommandBlock text={displayArg} />
           ) : (
-            <div className="font-mono text-sm text-zinc-400/80 whitespace-pre-wrap break-all">{displayArg}</div>
+            <div data-id="current-history-tool-arg-text" className="font-mono text-sm text-zinc-400/80 whitespace-pre-wrap break-all">{displayArg}</div>
           )}
         </div>
       ) : null}
       {open && hasDiff ? (
         <div data-id="current-history-tool-result" className="mx-2 mb-2 max-h-[300px] overflow-y-auto overflow-x-auto rounded border border-white/[0.06] font-mono text-xs">
-          {tool.diff.old ? tool.diff.old.split('\n').map((line: string, index: number) => <div key={`old-${index}`} className="bg-red-500/[0.08] px-2 leading-relaxed whitespace-pre text-red-400/80">- {line}</div>) : null}
-          {tool.diff.new ? tool.diff.new.split('\n').map((line: string, index: number) => <div key={`new-${index}`} className="bg-emerald-500/[0.08] px-2 leading-relaxed whitespace-pre text-emerald-400/80">+ {line}</div>) : null}
+          {tool.diff.old ? tool.diff.old.split('\n').map((line: string, index: number) => <div key={`old-${index}`} data-id={`current-history-tool-diff-old-${index}`} className="bg-red-500/[0.08] px-2 leading-relaxed whitespace-pre text-red-400/80">- {line}</div>) : null}
+          {tool.diff.new ? tool.diff.new.split('\n').map((line: string, index: number) => <div key={`new-${index}`} data-id={`current-history-tool-diff-new-${index}`} className="bg-emerald-500/[0.08] px-2 leading-relaxed whitespace-pre text-emerald-400/80">+ {line}</div>) : null}
         </div>
       ) : open && displayResult ? (
         <pre data-id="current-history-tool-result" className="mx-2 mb-2 max-h-[200px] overflow-y-auto overflow-x-auto rounded bg-emerald-500/[0.04] px-2.5 py-1.5 font-mono text-xs leading-relaxed whitespace-pre text-emerald-300/70">{displayResult}</pre>
@@ -986,7 +986,7 @@ function HistoryTurnIdBadge({ historyId }: { historyId?: number }) {
   const value = Number(historyId || 0);
   if (value <= 0) return null;
   return (
-    <div className="mb-1 px-0.5 font-mono text-[11px] text-zinc-600">
+    <div data-id="current-history-view-turn-id-badge" className="mb-1 px-0.5 font-mono text-[11px] text-zinc-600">
       #{value}
     </div>
   );
@@ -994,8 +994,8 @@ function HistoryTurnIdBadge({ historyId }: { historyId?: number }) {
 
 function ThinkingBlock({ text }: { text: string }) {
   return (
-    <div className="mb-2 rounded-lg border border-amber-300/[0.08] bg-amber-500/[0.05] px-3 py-2">
-      <div className="chat-markdown current-history-markdown text-sm leading-[1.7] text-amber-50/75">
+    <div data-id="current-history-view-thinking-block" className="mb-2 rounded-lg border border-amber-300/[0.08] bg-amber-500/[0.05] px-3 py-2">
+      <div data-id="current-history-view-thinking-block-body" className="chat-markdown current-history-markdown text-sm leading-[1.7] text-amber-50/75">
         <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
       </div>
     </div>
@@ -1004,13 +1004,13 @@ function ThinkingBlock({ text }: { text: string }) {
 
 function PendingThinkingPlaceholder() {
   return (
-    <div className="flex items-center gap-2 px-0.5 py-1 text-sm text-amber-100/65">
-      <div className="flex items-center gap-1">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300/70 [animation-delay:0ms]" />
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300/55 [animation-delay:180ms]" />
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300/40 [animation-delay:360ms]" />
+    <div data-id="current-history-view-pending-placeholder" className="flex items-center gap-2 px-0.5 py-1 text-sm text-amber-100/65">
+      <div data-id="current-history-view-pending-placeholder-dots" className="flex items-center gap-1">
+        <span data-id="current-history-view-pending-placeholder-dot-1" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300/70 [animation-delay:0ms]" />
+        <span data-id="current-history-view-pending-placeholder-dot-2" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300/55 [animation-delay:180ms]" />
+        <span data-id="current-history-view-pending-placeholder-dot-3" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300/40 [animation-delay:360ms]" />
       </div>
-      <span>Thinking...</span>
+      <span data-id="current-history-view-pending-placeholder-label">Thinking...</span>
     </div>
   );
 }
@@ -1378,12 +1378,12 @@ export default function CurrentHistoryView({
           {loading ? (
             <div data-id="current-history-loading" className="flex flex-col items-center justify-center gap-3 pt-20">
               <Spinner size="lg" />
-              <span className="text-base text-zinc-500">{t('loadingHistory')}</span>
+              <span data-id="current-history-loading-text" className="text-base text-zinc-500">{t('loadingHistory')}</span>
             </div>
           ) : items.length === 0 ? (
             <div data-id="current-history-empty" className="pt-20 text-center">
-              <div className="mb-2 text-2xl text-zinc-700">✦</div>
-              <p className="text-xs text-zinc-500">{t('emptyHistory')}</p>
+              <div data-id="current-history-empty-icon" className="mb-2 text-2xl text-zinc-700">✦</div>
+              <p data-id="current-history-empty-text" className="text-xs text-zinc-500">{t('emptyHistory')}</p>
             </div>
           ) : <>
             {canLoadMore ? (
@@ -1430,22 +1430,22 @@ export default function CurrentHistoryView({
                   key={turnKey}
                   className="mb-5"
                 >
-                  <div>
+                  <div data-id={`current-history-turn-assistant-${turnKey}`}>
                     {steps.map((step: any, stepIndex: number) => {
                       if (step.type === 'thinking') {
-                        return <div key={stepIndex}><ThinkingBlock text={step.text} /></div>;
+                        return <div key={stepIndex} data-id={`current-history-turn-step-thinking-${turnKey}-${stepIndex}`}><ThinkingBlock text={step.text} /></div>;
                       }
                       if (step.type === 'text') {
-                        return <div key={stepIndex} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><Markdown remarkPlugins={[remarkGfm]}>{step.text}</Markdown></div>;
+                        return <div key={stepIndex} data-id={`current-history-turn-step-text-${turnKey}-${stepIndex}`} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><Markdown remarkPlugins={[remarkGfm]}>{step.text}</Markdown></div>;
                       }
                       const tools = Array.isArray(step.tools) ? step.tools : [];
-                    return <div key={stepIndex} className="my-2 space-y-1.5">{tools.map((tool: any, toolIndex: number) => {
+                    return <div key={stepIndex} data-id={`current-history-turn-step-tools-${turnKey}-${stepIndex}`} className="my-2 space-y-1.5">{tools.map((tool: any, toolIndex: number) => {
                         const toolId = buildToolCardId(turnKey, stepIndex, tool, toolIndex);
                         return <ToolCard key={toolId} tool={tool} toolId={toolId} />;
                       })}</div>;
                     })}
                     {!hasRenderableAssistantStep && fallbackAnswer ? (
-                      <div className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300">
+                      <div data-id={`current-history-turn-fallback-${turnKey}`} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300">
                         <Markdown remarkPlugins={[remarkGfm]}>{fallbackAnswer}</Markdown>
                       </div>
                     ) : null}

@@ -133,17 +133,28 @@ Defaults:
   binary:   ~/.local/bin/mihomo (or set MIHOMO_BIN)
   config:   ~/cicy-ai/db/mihomo.yaml
   port:     9001
-  api:      127.0.0.1:18009
+  api:      127.0.0.1:19001
+
+Conventions (gen-config writes this layout — see cicy-ai/cicy-mihomo v1.10.2):
+  - globalPassword: any non-empty username + this password authenticates.
+                    Add per-user entries under authentication: only when you
+                    need a different password for that user.
+  - IN-USER-PREFIX,w-,default_proxy_group:
+                    every username starting with "w-" routes via
+                    default_proxy_group. Add IN-USER,<user>,<target> ABOVE
+                    this line to pin one worker to a different proxy.
+  - default_proxy_group is a select group; swap the active node via the
+                    controller (PUT /proxies/default_proxy_group).
 `
 }
 
-const defaultMihomoVersion = "v1.10.1"
+const defaultMihomoVersion = "v1.10.2"
 const defaultMihomoGitHubProxy = "https://gh-proxy.com/"
 
 // doInstall downloads the platform-matching mihomo binary from
 // cicy-ai/cicy-mihomo releases into ~/.local/bin/mihomo. Overrides:
 //
-//	CICY_MIHOMO_VERSION      pin a specific release tag (default v1.10.1)
+//	CICY_MIHOMO_VERSION      pin a specific release tag (default v1.10.2)
 //	GITHUB_PROXY             URL prefix for github.com (default https://gh-proxy.com/)
 //	CICY_MIHOMO_RELEASE_URL  fully-qualified direct download URL — wins over the
 //	                         version + proxy derivation entirely
@@ -299,8 +310,21 @@ func (t *mihomoTool) defaultTemplate() string {
 	// cicy-mihomo's Verify lets any non-empty username through when the
 	// password matches globalPassword, so per-user `authentication:` entries
 	// aren't necessary.
+	//
+	// Routing: IN-USER-PREFIX,w-,default_proxy_group is a catch-all for any
+	// worker username starting with `w-` (added in cicy-mihomo v1.10.2). Pin a
+	// specific worker to a different proxy by adding a more-specific
+	// IN-USER,<user>,<target> rule ABOVE the prefix line. The `default_proxy_group`
+	// indirection is required so the controller PUT /proxies/default_proxy_group
+	// (see selectProxy below) can swap the active node without rewriting rules.
+	//
+	// Out-of-the-box behavior: `default_proxy_node` is a `direct` adapter, so
+	// a worker that turns on the proxy works immediately even before the user
+	// has added any real upstream — traffic just passes through. The user
+	// adds their real proxies under `proxies:` and into `default_proxy_group`
+	// when they want actual upstream routing.
 	password := randomAlphaNum(16)
-	return fmt.Sprintf("mixed-port: 9001\nallow-lan: true\nbind: 0.0.0.0\nmode: rule\nlog-level: debug\n\nexternal-controller: 127.0.0.1:18009\n\nglobalPassword: %q\n\nproxies:\n  - name: \"default_proxy_node\"\n    type: socks5\n    server: 127.0.0.1\n    port: 1084\n\nrules:\n  - IN-USER,w-10001,default_proxy_node\n  - MATCH,REJECT\n", password)
+	return fmt.Sprintf("mixed-port: 9001\nallow-lan: true\nbind: 0.0.0.0\nmode: rule\nlog-level: debug\n\nexternal-controller: 127.0.0.1:19001\n\nglobalPassword: %q\n\nproxies:\n  - name: \"default_proxy_node\"\n    type: direct\n\nproxy-groups:\n  - name: default_proxy_group\n    type: select\n    proxies:\n      - default_proxy_node\n\nrules:\n  - IN-USER-PREFIX,w-,default_proxy_group\n  - MATCH,REJECT\n", password)
 }
 
 func randomAlphaNum(n int) string {
@@ -532,9 +556,8 @@ type proxyEntry struct {
 
 var testURLs = []string{
 	"https://api.anthropic.com",
-	"https://www.google.com",
-	"https://github.com",
-	"https://cloudflare.com",
+	"https://chatgpt.com",
+	"https://api.myip.com",
 }
 
 func (t *mihomoTool) testAll() error {
@@ -547,6 +570,12 @@ func (t *mihomoTool) testAll() error {
 		cfgPath = t.configPath()
 	}
 	proxies := parseProxiesFromConfig(cfgPath)
+	// Auth password for the local mixed port. gen-config writes a random
+	// globalPassword and any non-empty username matches it (IN-USER-PREFIX,w-…
+	// then picks default_proxy_group). Reading it here avoids the previous
+	// hard-coded w-10001:MsZTKFsSCWrQC25d that broke after gen-config changed
+	// the secret.
+	password := readGlobalPasswordFromYAML(cfgPath)
 	_, _ = fmt.Fprintf(t.stdout, "testing %d proxy nodes:\n", len(proxies))
 	// header
 	_, _ = fmt.Fprintf(t.stdout, "%-20s", "")
@@ -562,15 +591,15 @@ func (t *mihomoTool) testAll() error {
 	for _, p := range proxies {
 		_, _ = fmt.Fprintf(t.stdout, "%-20s", p.Name)
 		for _, url := range testURLs {
-			t.testViaLocal(p, url)
+			t.testViaLocal(p, url, password)
 		}
 		_, _ = fmt.Fprintln(t.stdout)
 	}
 	return nil
 }
 
-func (t *mihomoTool) testViaLocal(p proxyEntry, url string) {
-	ctrl := "http://127.0.0.1:18009"
+func (t *mihomoTool) testViaLocal(p proxyEntry, url, password string) {
+	ctrl := "http://127.0.0.1:19001"
 	body := fmt.Sprintf(`{"name":"%s"}`, p.Name)
 	req, _ := http.NewRequest("PUT", ctrl+"/proxies/default_proxy_group", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -583,7 +612,11 @@ func (t *mihomoTool) testViaLocal(p proxyEntry, url string) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	proxyURL := fmt.Sprintf("http://w-10001:MsZTKFsSCWrQC25d@127.0.0.1:9001")
+	if password == "" {
+		_, _ = fmt.Fprintf(t.stdout, " %10s", "no_pass")
+		return
+	}
+	proxyURL := fmt.Sprintf("http://w-test:%s@127.0.0.1:9001", password)
 	cmd := exec.Command("curl", "-sS", "-o", "/dev/null", "-w", "%{time_total}", "--connect-timeout", "8", "--max-time", "15", "-x", proxyURL, url)
 	out, err := cmd.Output()
 	timeStr := strings.TrimSpace(string(out))
@@ -594,6 +627,28 @@ func (t *mihomoTool) testViaLocal(p proxyEntry, url string) {
 	} else {
 		_, _ = fmt.Fprintf(t.stdout, " %10s", timeStr)
 	}
+}
+
+// readGlobalPasswordFromYAML pulls the top-level `globalPassword:` value from
+// the mihomo config without parsing the whole file. Returns "" if the file or
+// key is missing; callers should treat that as "can't auth via local proxy".
+func readGlobalPasswordFromYAML(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+			continue
+		}
+		t := strings.TrimSpace(line)
+		if !strings.HasPrefix(t, "globalPassword:") {
+			continue
+		}
+		v := strings.TrimSpace(strings.TrimPrefix(t, "globalPassword:"))
+		return strings.Trim(v, "\"' ")
+	}
+	return ""
 }
 
 func parseProxiesFromConfig(path string) []proxyEntry {

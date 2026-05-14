@@ -525,13 +525,18 @@ func hasNewProvidersConfig() bool {
 	return loadProvidersConfig() != nil
 }
 
-// applyModelMapping applies the provider's model mapping to the requested model
+// applyModelMapping applies the provider's model mapping to the requested model.
+// Exact-match wins; otherwise the wildcard key "" (if present and non-empty)
+// is used as a default mapping for any model.
 func (p *providerConfig) applyModelMapping(requestedModel string) string {
 	if p.ModelMapping == nil {
 		return requestedModel
 	}
 	if mapped, ok := p.ModelMapping[requestedModel]; ok && mapped != "" {
 		return mapped
+	}
+	if fallback, ok := p.ModelMapping[""]; ok && fallback != "" {
+		return fallback
 	}
 	return requestedModel
 }

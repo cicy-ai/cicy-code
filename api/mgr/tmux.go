@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -3604,10 +3603,11 @@ func initPaneEnv(opts paneEnvOpts) {
 	}
 
 	if opts.useProxy {
-		ensureMihomoRuleForAgent(shortID)
 		// Source of truth for the proxy password is mihomo.yaml's globalPassword
 		// (seeded by `cicy-mihomo gen-config` and assumed to exist). Per-pane
 		// proxy.password from configJSON can override it for this agent.
+		// Routing is handled by the global `IN-USER-PREFIX,w-,default_proxy_group`
+		// rule in mihomo.yaml — no per-agent rule injection needed.
 		password := readMihomoGlobalPassword()
 		if ps := extractProxySettingsFromConfigJSON(opts.configJSON); ps != nil {
 			if p := strings.TrimSpace(ps.Password); p != "" {
@@ -4347,130 +4347,6 @@ func handleTmuxList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	J(w, M{"success": true, "output": strings.Join(lines, "\n")})
-}
-
-// ensureMihomoRuleForAgent keeps ~/cicy-ai/db/mihomo.yaml in shape so that an
-// agent's traffic routes through default_proxy_group. The yaml must already
-// have globalPassword set (seeded by `cicy-mihomo gen-config`); we don't
-// manage it here. We only ensure an `IN-USER,<shortID>,default_proxy_group`
-// rule exists before any `MATCH,*` catch-all, so this agent isn't dropped by
-// the default REJECT.
-//
-// Best-effort: missing file/section is a silent no-op; on any change the file
-// is replaced atomically and `cicy-mihomo reload` is invoked.
-func ensureMihomoRuleForAgent(shortID string) {
-	shortID = strings.TrimSpace(shortID)
-	if shortID == "" {
-		return
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return
-	}
-	path := filepath.Join(home, "cicy-ai", "db", "mihomo.yaml")
-	info, err := os.Stat(path)
-	if err != nil {
-		return
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	lines := strings.Split(string(raw), "\n")
-
-	findSection := func(name string) (int, int) {
-		start := -1
-		end := len(lines)
-		for i, line := range lines {
-			if start < 0 {
-				if strings.TrimSpace(line) == name+":" {
-					start = i
-				}
-				continue
-			}
-			if line == "" {
-				continue
-			}
-			if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") && strings.Contains(line, ":") {
-				end = i
-				break
-			}
-		}
-		return start, end
-	}
-	stripListBody := func(s string) string {
-		s = strings.TrimSpace(s)
-		if !strings.HasPrefix(s, "-") {
-			return ""
-		}
-		s = strings.TrimSpace(strings.TrimPrefix(s, "-"))
-		return strings.Trim(s, "\"' ")
-	}
-	mutated := false
-
-	// --- rules block: ensure IN-USER,<shortID>,default_proxy_group exists ---
-	//
-	// Idempotence: we treat ANY existing `IN-USER,<shortID>,*` rule as
-	// "already configured", regardless of the target name. This way a manual
-	// retarget (e.g. user edits `default_proxy_node` -> `default_proxy_group`,
-	// or points the agent at a specific proxy) is preserved on subsequent
-	// agent starts instead of being shadowed by a duplicate auto-inserted line.
-	rulesStart, rulesEnd := findSection("rules")
-	if rulesStart >= 0 {
-		desired := fmt.Sprintf("IN-USER,%s,default_proxy_group", shortID)
-		rulePrefix := fmt.Sprintf("IN-USER,%s,", shortID)
-		hasRule := false
-		insertRuleAt := rulesEnd
-		for i := rulesStart + 1; i < rulesEnd; i++ {
-			body := stripListBody(lines[i])
-			if body == "" {
-				continue
-			}
-			if strings.HasPrefix(body, rulePrefix) {
-				hasRule = true
-				break
-			}
-			if insertRuleAt == rulesEnd && strings.HasPrefix(body, "MATCH") {
-				insertRuleAt = i
-			}
-		}
-		if !hasRule {
-			newLines := make([]string, 0, len(lines)+1)
-			newLines = append(newLines, lines[:insertRuleAt]...)
-			newLines = append(newLines, "  - "+desired)
-			newLines = append(newLines, lines[insertRuleAt:]...)
-			lines = newLines
-			mutated = true
-		}
-	}
-
-	if !mutated {
-		return
-	}
-
-	out := strings.Join(lines, "\n")
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(out), info.Mode().Perm()); err != nil {
-		log.Printf("[mihomo-rule] write tmp failed: %v", err)
-		return
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		log.Printf("[mihomo-rule] rename failed: %v", err)
-		return
-	}
-	log.Printf("[mihomo-rule] updated %s for %s (auth+rule)", path, shortID)
-
-	// Push the new config into the running mihomo. Best-effort: a short
-	// timeout keeps a hung wrapper from blocking agent startup.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "cicy-mihomo", "reload")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("[mihomo-rule] cicy-mihomo reload failed: %v output=%s", err, strings.TrimSpace(string(out)))
-	} else {
-		log.Printf("[mihomo-rule] cicy-mihomo reload ok")
-	}
 }
 
 // readMihomoGlobalPassword reads the top-level `globalPassword:` value from

@@ -7,7 +7,10 @@ import config from '../config';
 import { useAuth } from './AuthContext';
 
 const APP_VERSION = config.version;
-const URL_PANE_ID = window.location.href.split("/")[4] ? decodeURIComponent(window.location.href.split("/")[4]) : null;
+const URL_PANE_ID = (() => {
+  const m = window.location.hash.match(/[#/]agent\/([^/?#]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+})();
 
 interface Agent {
   pane_id: string;

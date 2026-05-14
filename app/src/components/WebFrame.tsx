@@ -193,6 +193,7 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
           )}
           {(pointerLocked || maskActive) && <div data-id="web-frame-interaction-mask" className="absolute inset-0 z-20" />}
           <webview
+            data-id="web-frame-webview"
             ref={webviewRef as any}
             src={src}
             className={className}

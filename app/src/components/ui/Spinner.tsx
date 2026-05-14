@@ -17,6 +17,7 @@ interface SpinnerProps {
 export function Spinner({ size = 'md', className = '' }: SpinnerProps) {
   return (
     <span
+      data-id="spinner"
       role="status"
       aria-label="Loading"
       className={`inline-block animate-spin rounded-full border-vsc-accent/30 border-t-vsc-accent ${SIZE_MAP[size]} ${className}`}
@@ -38,7 +39,7 @@ export function LoadingOverlay({ text, fullscreen = false, className = '', size 
   return (
     <div data-id="loading-overlay" className={`${wrap} flex flex-col items-center justify-center gap-3 ${className}`}>
       <Spinner size={size} />
-      {text ? <span className="text-sm text-zinc-500">{text}</span> : null}
+      {text ? <span data-id="loading-overlay-text" className="text-sm text-zinc-500">{text}</span> : null}
     </div>
   );
 }
@@ -51,9 +52,9 @@ interface LoadingInlineProps {
 
 export function LoadingInline({ text, size = 'md', className = '' }: LoadingInlineProps) {
   return (
-    <div className={`flex items-center justify-center gap-2 ${className}`}>
+    <div data-id="loading-inline" className={`flex items-center justify-center gap-2 ${className}`}>
       <Spinner size={size} />
-      {text ? <span className="text-sm text-zinc-500">{text}</span> : null}
+      {text ? <span data-id="loading-inline-text" className="text-sm text-zinc-500">{text}</span> : null}
     </div>
   );
 }

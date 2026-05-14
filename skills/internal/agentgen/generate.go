@@ -1975,7 +1975,7 @@ This skill covers the local ` + "`cicy-mihomo`" + ` wrapper from ` + "`PATH`" + 
 
 Use this command directly. It controls a local ` + "`mihomo`" + ` (clash-meta) proxy
 process and exposes a SOCKS/mixed port on ` + "`9001`" + `, with the controller
-API on ` + "`127.0.0.1:18009`" + `.
+API on ` + "`127.0.0.1:19001`" + `.
 
 ## Scope
 
@@ -2028,11 +2028,11 @@ func renderCicyMihomoHelp() string {
 - mihomo binary lookup: ` + "`~/.local/bin/mihomo`" + ` (or ` + "`MIHOMO_BIN`" + ` env)
 - config path: ` + "`~/cicy-ai/db/mihomo.yaml`" + `
 - mixed proxy port: ` + "`9001`" + `
-- controller API: ` + "`127.0.0.1:18009`" + `
+- controller API: ` + "`127.0.0.1:19001`" + `
 - pid / state / log dir: ` + "`~/.local/state/cicy-skills/mihomo/`" + `
 
 ## Install env overrides (for ` + "`cicy-mihomo install`" + `)
-- ` + "`CICY_MIHOMO_VERSION`" + ` — pin a release tag (default v1.10.1)
+- ` + "`CICY_MIHOMO_VERSION`" + ` — pin a release tag (default v1.10.2)
 - ` + "`GITHUB_PROXY`" + ` — URL prefix for github.com (default https://gh-proxy.com/)
 - ` + "`CICY_MIHOMO_RELEASE_URL`" + ` — fully qualified direct download URL
 
@@ -2086,7 +2086,7 @@ This skill uses the local ` + "`cicy-mihomo`" + ` command from ` + "`PATH`" + `.
 - state:      ` + "`~/.local/state/cicy-skills/mihomo/state.json`" + `
 - log:        ` + "`~/.local/state/cicy-skills/mihomo/mihomo.log`" + `
 - proxy port: 9001
-- API:        127.0.0.1:18009
+- API:        127.0.0.1:19001
 `
 }
 

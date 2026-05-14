@@ -1329,22 +1329,7 @@ func doCicySkillsInstall() {
 		return
 	}
 
-	// Install Google provider Node deps if missing — only network step,
-	// optional (Google skill is unusable without it but rest still work).
-	providerDir := filepath.Join(projectRoot, "providers", "google-node")
-	if _, err := os.Stat(filepath.Join(providerDir, "package.json")); err == nil {
-		if _, err := os.Stat(filepath.Join(providerDir, "node_modules")); err != nil {
-			fmt.Fprintln(logFile, "running npm install in providers/google-node")
-			cmd := exec.Command("npm", "install", "--silent", "--no-audit", "--no-fund")
-			cmd.Dir = providerDir
-			cmd.Stdout = logFile
-			cmd.Stderr = logFile
-			cmd.Env = os.Environ()
-			if err := cmd.Run(); err != nil {
-				fmt.Fprintf(logFile, "npm install failed (google provider may not work): %v\n", err)
-			}
-		}
-	}
+	// Google skill is now a pure-Go hosttool — no npm install needed.
 
 	// Run cicy-skills install all to materialize ~/.local/bin/* symlinks
 	// and SKILL.md files via the registry.

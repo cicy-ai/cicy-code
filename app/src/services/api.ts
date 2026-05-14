@@ -109,6 +109,10 @@ const api = {
   uninstallMarketSkill: (name: string, opts?: { purge_config?: boolean }) =>
     http.post(`/api/skill-market/${encodeURIComponent(name)}/uninstall`, opts || {}),
 
+  getGoogleSkillConfig: () => http.get('/api/skill-config/google'),
+  connectGoogleSkillConfig: () => http.post('/api/skill-config/google/connect', {}),
+  disconnectGoogleSkillConfig: () => http.delete('/api/skill-config/google'),
+
   getTtydStatus: (id: string) => http.get(`/api/tmux/ttyd/status/${encodeURIComponent(id)}`),
   correctEnglish: (text: string, target = 'zh-CN') => http.post('/api/correctEnglish', { text, target }),
   translateText: (text: string, target = 'zh-CN') => http.post('/api/utils/translateText', { text, target }),
@@ -183,6 +187,12 @@ const api = {
 
   // page <-> page client bridge
   chatPush: (data: any) => http.post('/api/chat/push', data),
+
+  // mihomo controller pass-through + lifecycle
+  getProxyList: () => http.get('/api/proxy/list'),
+  testProxy: (name: string, urls?: string[]) => http.post('/api/proxy/test', { name, urls }),
+  getProxyStatus: () => http.get('/api/proxy/status'),
+  proxyLifecycle: (action: 'start' | 'stop' | 'restart' | 'reload') => http.post('/api/proxy/lifecycle', { action }),
 };
 
 export default api;

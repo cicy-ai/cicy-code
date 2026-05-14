@@ -87,20 +87,22 @@ export function useDialogs() {
     };
     node = createPortal(
       <div
+        data-id="modal-overlay"
         className="fixed inset-0 z-[9999990] flex items-center justify-center bg-black/55 backdrop-blur-sm animate-[fadeIn_120ms_ease-out]"
         onMouseDown={(e) => { if (e.target === e.currentTarget) cancel(); }}
       >
-        <div className="mx-4 w-full max-w-[420px] overflow-hidden rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60">
-          <div className="flex items-start gap-3 px-5 pt-5">
-            <div className="min-w-0 flex-1">
-              {state.opts.title && <div className="text-[14px] font-semibold text-white">{state.opts.title}</div>}
-              {state.opts.body && <div className="mt-1.5 text-[13px] leading-relaxed text-zinc-400">{state.opts.body}</div>}
+        <div data-id="modal-card" className="mx-4 w-full max-w-[420px] overflow-hidden rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60">
+          <div data-id="modal-header" className="flex items-start gap-3 px-5 pt-5">
+            <div data-id="modal-header-body" className="min-w-0 flex-1">
+              {state.opts.title && <div data-id="modal-title" className="text-[14px] font-semibold text-white">{state.opts.title}</div>}
+              {state.opts.body && <div data-id="modal-body" className="mt-1.5 text-[13px] leading-relaxed text-zinc-400">{state.opts.body}</div>}
             </div>
-            <button onClick={cancel} className="grid h-6 w-6 shrink-0 place-items-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300"><X size={14} /></button>
+            <button data-id="modal-close" onClick={cancel} className="grid h-6 w-6 shrink-0 place-items-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300"><X size={14} /></button>
           </div>
           {state.kind === 'prompt' && (
-            <div className="px-5 pt-3">
+            <div data-id="modal-prompt-wrap" className="px-5 pt-3">
               <input
+                data-id="modal-prompt-input"
                 ref={inputRef}
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
@@ -112,9 +114,10 @@ export function useDialogs() {
               />
             </div>
           )}
-          <div className="mt-4 flex justify-end gap-2 px-5 pb-4">
-            <button onClick={cancel} className="h-8 rounded-lg px-3 text-[13px] text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-200">{state.opts.cancelLabel || t('modalCancel')}</button>
+          <div data-id="modal-actions" className="mt-4 flex justify-end gap-2 px-5 pb-4">
+            <button data-id="modal-cancel" onClick={cancel} className="h-8 rounded-lg px-3 text-[13px] text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-200">{state.opts.cancelLabel || t('modalCancel')}</button>
             <button
+              data-id="modal-confirm"
               onClick={submit}
               disabled={promptInvalid}
               className={

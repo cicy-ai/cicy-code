@@ -287,7 +287,7 @@ function AgentStackCard({
                 />
               ) : (
                 <>
-                  <span className="min-w-0 truncate text-sm font-medium leading-5 text-zinc-100">
+                  <span data-id={`agent-stack-card-title-text-${item.paneId}`} className="min-w-0 truncate text-sm font-medium leading-5 text-zinc-100">
                     {displayTitle}
                   </span>
                   {onRenamePaneTitle ? (
@@ -320,7 +320,7 @@ function AgentStackCard({
             </div>
           </div>
         </div>
-        <div className="ml-3 flex items-center gap-2">
+        <div data-id={`agent-stack-card-header-right-${item.paneId}`} className="ml-3 flex items-center gap-2">
           {headerControls ? (
             <div data-id={`agent-stack-card-header-controls-${item.paneId}`} className="flex h-full items-center gap-3">
               {headerControls}
