@@ -32,11 +32,29 @@ type Policy struct {
 	// pipeline (Phase 3). Defaults applied at load time.
 	Notify NotifyConfig `json:"notify"`
 
-	// Phase 3/5 fields — parsed but ignored in Phase 2.
+	// Preventive controls inline (pre-LLM) blocking. Default off — operators
+	// must explicitly enable. See Phase 3 cut 1.
+	Preventive PreventiveConfig `json:"preventive"`
+
+	// Phase 3/5 fields — parsed but ignored.
 	Retention          map[string]interface{} `json:"retention,omitempty"`
 	ResponsiblePersons map[string]interface{} `json:"responsible_persons,omitempty"`
 	IncidentResponse   map[string]interface{} `json:"incident_response,omitempty"`
 	AIAssist           map[string]interface{} `json:"ai_assist,omitempty"`
+}
+
+// PreventiveConfig gates the inline scanner that runs BEFORE the request is
+// forwarded to the LLM provider. When Enabled and an inline rule fires with
+// a default action of block, the gateway / mitm webhook returns HTTP 451 and
+// no data leaves the host. Default Enabled=false: cicy-code is detective-
+// only out of the box; admins must opt in to preventive.
+//
+// FailMode mirrors Policy.FailMode but applies specifically to the inline
+// scanner. "open" (default) — scanner errors pass-through; "closed" —
+// scanner errors return 503 and block the request (compliance-strict mode).
+type PreventiveConfig struct {
+	Enabled  bool   `json:"enabled"`
+	FailMode string `json:"fail_mode,omitempty"` // open | closed
 }
 
 // NotifyConfig controls when notify-level events trigger channel delivery
@@ -129,7 +147,8 @@ func DefaultPolicy() *Policy {
 			ContentHashes: []string{},
 			Agents:        []string{},
 		},
-		Notify: DefaultNotifyConfig(),
+		Notify:     DefaultNotifyConfig(),
+		Preventive: PreventiveConfig{Enabled: false, FailMode: "open"},
 	}
 }
 
@@ -191,6 +210,12 @@ func LoadPolicy(path string) (*Policy, error) {
 	}
 	if p.Notify.Cooldown.Seconds == 0 {
 		p.Notify.Cooldown.Seconds = def.Cooldown.Seconds
+	}
+	if p.Preventive.FailMode == "" {
+		p.Preventive.FailMode = "open"
+	}
+	if p.Preventive.FailMode != "open" && p.Preventive.FailMode != "closed" {
+		return nil, fmt.Errorf("audit: preventive.fail_mode invalid %q (want open|closed)", p.Preventive.FailMode)
 	}
 	return p, nil
 }

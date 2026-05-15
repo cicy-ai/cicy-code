@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	auditpkg "ttyd-go/mgr/audit"
 )
 
 const (
@@ -522,6 +524,33 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 		return io.NopCloser(bytes.NewReader(requestBody)), nil
 	}
 	r.ContentLength = int64(len(requestBody))
+
+	// Phase 3 inline preventive check — runs only when policy.preventive.enabled.
+	// If an inline block-default rule matches, the proxy short-circuits with
+	// HTTP 451; the LLM never sees the prompt and no detective snapshot is
+	// written for this turn (only the preventive event is recorded).
+	if dec := auditpkg.PreventiveCheck(auditpkg.Envelope{
+		AgentID:       agentID,
+		SourceChannel: auditpkg.SourceGateway,
+		Provider:      provider,
+		Direction:     auditpkg.DirectionOutbound,
+		Payload:       requestBody,
+	}); dec.Action == auditpkg.ActionBlock {
+		ruleIDs := make([]string, 0, len(dec.Findings))
+		for _, f := range dec.Findings {
+			ruleIDs = append(ruleIDs, f.RuleID)
+		}
+		log.Printf("[ai-gateway] preventive block agent=%s rules=%v event=%s", agentID, ruleIDs, dec.EventID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(451)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"blocked":   true,
+			"event_id":  dec.EventID,
+			"reason":    dec.Reason,
+			"rules_hit": ruleIDs,
+		})
+		return
+	}
 
 	audit := newAIGatewayAuditSession(provider, agentID, targetBase, suffix, r.Method, r.Header.Clone(), requestBody)
 	if err := audit.writeStartSnapshots(); err != nil {

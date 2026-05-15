@@ -150,11 +150,12 @@ func handleAuditIngest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	audit.SubmitMitmEvent(audit.Envelope{
+	env := audit.Envelope{
 		AgentID:        req.AgentID,
 		AgentType:      req.AgentType,
 		UserID:         req.UserID,
 		SessionID:      req.SessionID,
+		SourceChannel:  audit.SourceMitm,
 		TurnID:         req.TurnID,
 		ConversationID: req.ConversationID,
 		Provider:       req.Provider,
@@ -162,8 +163,29 @@ func handleAuditIngest(w http.ResponseWriter, r *http.Request) {
 		Direction:      req.Direction,
 		Payload:        payload,
 		PayloadRef:     payloadRef,
-	})
+	}
 
+	// Phase 3 inline preventive check. Runs only when policy.preventive.enabled
+	// is true. If a high-confidence rule blocks, the mitmproxy script that
+	// POSTed this event is expected to honor 451 by dropping the upstream
+	// request — i.e. NOT forward the captured prompt to the LLM provider.
+	if dec := audit.PreventiveCheck(env); dec.Action == audit.ActionBlock {
+		ruleIDs := make([]string, 0, len(dec.Findings))
+		for _, f := range dec.Findings {
+			ruleIDs = append(ruleIDs, f.RuleID)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(451)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"blocked":   true,
+			"event_id":  dec.EventID,
+			"reason":    dec.Reason,
+			"rules_hit": ruleIDs,
+		})
+		return
+	}
+
+	audit.SubmitMitmEvent(env)
 	w.WriteHeader(http.StatusNoContent)
 }
 
