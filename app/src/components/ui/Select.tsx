@@ -358,7 +358,7 @@ export default function Select({
         <div
           ref={actionMenuRef}
           data-id="select-option-more-dropdown"
-          className="fixed z-[260] min-w-[170px] overflow-hidden rounded-lg border border-white/[0.08] bg-[#111113]/[0.98] p-1 shadow-2xl backdrop-blur-md animate-select-in"
+          className="fixed z-[260] min-w-[200px] whitespace-nowrap overflow-hidden rounded-lg border border-white/[0.08] bg-[#111113]/[0.98] p-1 shadow-2xl backdrop-blur-md animate-select-in"
           style={{ top: actionMenu.top, left: actionMenu.left }}
         >
           {actionMenuOption.actions.map((action) => (
@@ -374,7 +374,7 @@ export default function Select({
               }`}
             >
               {action.icon ? <span className="shrink-0">{action.icon}</span> : null}
-              <span data-id="select-auto-26">{action.label}</span>
+              <span data-id="select-auto-26" className="whitespace-nowrap">{action.label}</span>
             </button>
           ))}
         </div>,

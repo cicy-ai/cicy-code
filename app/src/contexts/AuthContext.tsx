@@ -173,10 +173,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     hasToken: !!token,
     authType,
     plan,
-    globalHome,
     provisioning,
     isChecking,
-    perms,
   });
 
   return (

@@ -113,10 +113,11 @@ func translateTextViaProvider(text string, target string) (string, error) {
 	if cached, ok := loadCachedTranslation(text, target); ok {
 		return cached, nil
 	}
-	// Prefer the deepseek provider for translation (fast + cheap + reliable);
-	// fall back to whatever the global default AI is if deepseek isn't
+	// Route through the defaultOpenAi provider (a multi-model OpenAI-compatible
+	// gateway) — translation always goes there and asks for deepseek-v4-flash
+	// by model name. Fall back to the global default AI if defaultOpenAi isn't
 	// configured.
-	cfg, ok := loadRuntimeAIConfigForProvider("deepseek")
+	cfg, ok := loadRuntimeAIConfigForProvider("defaultOpenAi")
 	if !ok || strings.TrimSpace(cfg.APIURL) == "" || strings.TrimSpace(cfg.APIKey) == "" {
 		cfg = loadRuntimeAIConfig()
 	}

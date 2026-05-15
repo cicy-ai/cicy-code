@@ -132,6 +132,12 @@ Options:
 	http.HandleFunc("/api/proxy/test", authM(handleProxyTest))
 	http.HandleFunc("/api/proxy/status", authM(handleProxyStatus))
 	http.HandleFunc("/api/proxy/lifecycle", authM(handleProxyLifecycle))
+	http.HandleFunc("/api/proxy/bind-mode", authM(handleProxyBindMode))
+	http.HandleFunc("/api/proxy/export", authM(handleProxyExport))
+	http.HandleFunc("/api/proxy-ssh/list", authM(handleProxySshList))
+	http.HandleFunc("/api/proxy-ssh/show", authM(handleProxySshShow))
+	http.HandleFunc("/api/proxy-ssh/lifecycle", authM(handleProxySshLifecycle))
+	http.HandleFunc("/api/proxy-ssh/test", authM(handleProxySshTest))
 
 	// Panes
 	http.HandleFunc("/api/panes", authM(handlePanes))
@@ -166,6 +172,7 @@ Options:
 	// Chat
 	http.HandleFunc("/api/chat/push", wa(handleChatPush))
 	http.HandleFunc("/api/chat/ping-client", wa(handleChatPingClient))
+	http.HandleFunc("/api/chat/exec-js", wa(handleChatExecJS))
 	http.HandleFunc("/api/chat/ws", handleChatWS)
 	http.HandleFunc("/code-server-inject.js", serveCodeServerInjectJS)
 	http.HandleFunc("/api/code-server/page-context", wa(handleCodeServerPageContext))
@@ -228,6 +235,7 @@ Options:
 	http.HandleFunc("/api/agents/bind", wa(handleAgentBind))
 	http.HandleFunc("/api/agents/unbind", wa(handleAgentUnbind))
 	http.HandleFunc("/api/agents/unbind/", wa(handleAgentUnbind))
+	http.HandleFunc("/api/agents/reorder", wa(handleAgentReorder))
 
 	// Groups
 	http.HandleFunc("/api/groups", wa(handleGroups))
@@ -252,6 +260,8 @@ Options:
 	http.HandleFunc("/api/skill-market/", wa(handleSkillMarketAction))
 	http.HandleFunc("/api/skill-config/google", wa(handleGoogleSkillConfig))
 	http.HandleFunc("/api/skill-config/google/connect", wa(handleGoogleSkillConfig))
+	http.HandleFunc("/api/skill-config/google/device-connect", wa(handleGoogleSkillConfig))
+	http.HandleFunc("/api/skill-config/google/device-poll", wa(handleGoogleSkillConfig))
 	// Callback is intentionally unauthed — Google won't carry our Bearer token.
 	// State token enforces same-origin/no-CSRF.
 	http.HandleFunc("/api/skill-config/google/callback", handleGoogleSkillCallback)

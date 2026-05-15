@@ -181,7 +181,9 @@ func marketSkillsCatalog() []marketSkill {
 		{Name: "cping", Title: "cping", Description: "Quick network latency check for a domain or IP.", Version: "1.0.0", Category: "network", Icon: "activity", BinaryAliases: []string{"cping"}},
 		{Name: "frp-server", Title: "FRP Server", Description: "Run frps in the background with status, reload, connections.", Version: "1.0.0", Category: "network", Icon: "server", BinaryAliases: []string{"frp-server"}, ConfigFile: "~/data/frp/frps.toml"},
 		{Name: "frp-client", Title: "FRP Client", Description: "Run frpc, with remote management over SSH.", Version: "1.0.0", Category: "network", Icon: "plug", BinaryAliases: []string{"frp-client"}},
-		{Name: "google", Title: "Google Workspace", Description: "Gmail / Sheets / Drive / Calendar via Google APIs.", Version: "1.0.0", Category: "ai", Icon: "mail", Tags: []string{"gmail", "sheets", "drive", "calendar"}, BinaryAliases: []string{"google"}, ConfigFile: "~/cicy-ai/db/google.json"},
+		// google: temporarily delisted — OAuth flow needs a central cicy-ai.com
+		// redirect to support localhost/no-domain workers. Re-add once that's done.
+		// {Name: "google", Title: "Google Workspace", Description: "Gmail / Sheets / Drive / Calendar via Google APIs.", Version: "1.0.0", Category: "ai", Icon: "mail", Tags: []string{"gmail", "sheets", "drive", "calendar"}, BinaryAliases: []string{"google"}, ConfigFile: "~/cicy-ai/db/google.json"},
 		{Name: "agent-summary", Title: "Agent Summary", Description: "Generate conversation summaries and handoff documents.", Version: "1.0.0", Category: "ai", Icon: "file-text", BinaryAliases: []string{}},
 		{Name: "agent-webpage", Title: "Agent Webpage", Description: "Talk to the live webpage client for an agent.", Version: "1.0.0", Category: "ai", Icon: "globe", BinaryAliases: []string{"agent-webpage"}},
 		{Name: "agent-code-server", Title: "Code Server", Description: "Open files in the page-bound code-server.", Version: "1.0.0", Category: "ai", Icon: "code", BinaryAliases: []string{"agent-code-server"}},
@@ -190,7 +192,7 @@ func marketSkillsCatalog() []marketSkill {
 		{Name: "globalApiToken", Title: "Global API Token", Description: "Show or refresh ~/cicy-ai/global.json api_token.", Version: "1.0.0", Category: "ops", Icon: "shield", BinaryAliases: []string{"globalApiToken"}, ConfigFile: "~/cicy-ai/global.json"},
 		{Name: "docker-build-github-action", Title: "Docker Build (GHCR)", Description: "Build base images on GitHub Actions and push to GHCR.", Version: "1.0.0", Category: "infra", Icon: "package", BinaryAliases: []string{}, ConfigFile: "~/cicy-ai/db/docker-build-ghcr.json"},
 		{Name: "us-spot-proxy", Title: "US Spot Proxy", Description: "Manage Aliyun spot proxy nodes.", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"us-spot-proxy"}, ConfigFile: "~/cicy-ai/db/us-spot-proxy.json"},
-		{Name: "cicy-mihomo", Title: "Mihomo Proxy", Description: "Run a local mihomo proxy with start/stop/reload/logs and node speed testing.", Version: "1.0.0", Category: "network", Icon: "shield", Tags: []string{"proxy", "mihomo", "clash"}, BinaryAliases: []string{"cicy-mihomo"}, ConfigFile: "~/cicy-ai/db/mihomo.yaml"},
+		{Name: "cicy-mihomo", Title: "Cicy Mihomo Proxy", Description: "Run a local Cicy Mihomo (mihomo / clash-meta fork) proxy with start/stop/reload/logs, node speed testing, and per-worker auth + routing.", Version: "1.0.0", Category: "network", Icon: "shield", Tags: []string{"proxy", "mihomo", "clash"}, BinaryAliases: []string{"cicy-mihomo"}, ConfigFile: "~/cicy-ai/db/mihomo.yaml"},
 		{Name: "proxy_ssh", Title: "SSH SOCKS Proxy", Description: "Manage local autossh-based SOCKS proxy profiles (start/stop/restart/test).", Version: "1.0.0", Category: "network", Icon: "plug", BinaryAliases: []string{"proxy_ssh"}, ConfigFile: "~/cicy-ai/db/proxy_ssh.json"},
 		{Name: "us-spot-dev", Title: "US Spot Dev", Description: "Provision a US Aliyun spot dev container on a persistent ESSD disk.", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"us-spot-dev"}},
 		{Name: "cicy-master", Title: "CiCy Master", Description: "Manage and sync the multi-node CiCy machine registry from the master CLI.", Version: "1.0.0", Category: "dev", Icon: "server", BinaryAliases: []string{"cicy-master"}, ConfigFile: "~/cicy-ai/db/cicy-master.json"},
@@ -383,8 +385,8 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 
 // agentgen-approved skills — must stay in sync with
 // skills/internal/agentgen/generate.go ApprovedCodexSkills(). Catalog entries
-// outside this set are symlink-only (proxy_ssh, us-spot-dev, cicy-master,
-// hk-spot-dev) and have no per-profile SKILL.md handling.
+// outside this set are symlink-only (us-spot-dev, cicy-master, hk-spot-dev)
+// and have no per-profile SKILL.md handling.
 var agentgenApprovedMarketSkills = map[string]struct{}{
 	"agent-code-server":         {},
 	"agent-summary":             {},
@@ -395,11 +397,12 @@ var agentgenApprovedMarketSkills = map[string]struct{}{
 	"frp-client":                {},
 	"frp-server":                {},
 	"globalApiToken":            {},
-	"google":                    {},
+	// "google":                    {}, // delisted with the marketplace entry above
 	"cicy-ssh":                  {},
 	"cicy-agent":                {},
 	"cicy-mihomo":               {},
 	"us-spot-proxy":             {},
+	"proxy_ssh":                 {},
 }
 
 // hosttool aliases — symlink target is dist/cicy-hosttools. Must stay in sync

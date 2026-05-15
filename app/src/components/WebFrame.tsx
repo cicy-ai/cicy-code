@@ -1,5 +1,4 @@
 import React, { forwardRef, useState, useRef, useEffect, useCallback } from 'react';
-import { useDevRegister } from '../lib/devStore';
 import { Spinner } from './ui/Spinner';
 import { usePointerLock } from '../lib/pointerLock';
 import { WEB_FRAME_MASK_EVENT, WebFrameMaskEventDetail } from '../lib/webFrameMask';
@@ -82,16 +81,6 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
     const useWebview = isElectron && codeServer;
     const pointerLocked = usePointerLock();
     const activeMaskKeysRef = useRef<Set<string>>(new Set());
-    useDevRegister(`WebFrame:${title || src}`, {
-      src,
-      title: title || '',
-      codeServer: !!codeServer,
-      useWebview,
-      isLoading,
-      pointerLocked,
-      maskActive,
-    });
-
     const handleLoad = () => {
       setIsLoading(false);
       onLoad?.();

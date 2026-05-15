@@ -41,7 +41,7 @@ func OpenCodeSkillsDir() string {
 }
 
 func ApprovedCodexSkills() []string {
-	return []string{"agent-code-server", "agent-summary", "agent-webpage", "cf-tunnel", "cping", "docker-build-github-action", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent", "cicy-mihomo", "us-spot-proxy"}
+	return []string{"agent-code-server", "agent-summary", "agent-webpage", "cf-tunnel", "cping", "docker-build-github-action", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent", "cicy-mihomo", "us-spot-proxy", "proxy_ssh"}
 }
 
 func canonicalCodexSkillName(name string) string {
@@ -74,6 +74,8 @@ func canonicalCodexSkillName(name string) string {
 		return "cicy-mihomo"
 	case "us-spot-proxy", "usspotproxy", "us_spot_proxy", "usspp":
 		return "us-spot-proxy"
+	case "proxy_ssh", "proxy-ssh", "proxyssh", "ssh-socks", "ssh_socks":
+		return "proxy_ssh"
 	default:
 		return ""
 	}
@@ -323,6 +325,8 @@ func generateCodexSkill(root, targetRoot, skill string) error {
 		return generateCodexCicyMihomo(targetRoot)
 	case "us-spot-proxy":
 		return generateCodexUSSpotProxy(targetRoot)
+	case "proxy_ssh":
+		return generateCodexProxySSH(targetRoot)
 	default:
 		return fmt.Errorf("skill %q is not implemented", skill)
 	}
@@ -466,6 +470,25 @@ func generateCodexGoogle(targetRoot string) error {
 		return err
 	}
 	tools := renderGoogleCommands()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
+func generateCodexProxySSH(targetRoot string) error {
+	skillDir := filepath.Join(targetRoot, "proxy_ssh")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderProxySSHSkill()); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderProxySSHHelp()); err != nil {
+		return err
+	}
+	tools := renderProxySSHCommands()
 	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
 		return err
 	}
@@ -665,23 +688,34 @@ func writeText(path, text string) error {
 func renderGoogleSkill() string {
 	return fmt.Sprintf(`---
 name: google
-description: Use the local google CLI wrapper for Gmail, Sheets, Drive, and Calendar on this host.
+description: Use the local google CLI wrapper for Gmail, Sheets, Drive, and Calendar on this host. Also exposes `+"`google login`"+` and `+"`google status`"+` for OAuth setup (device-code flow) when authorization is missing or expired.
 ---
 
 # Google
 
 This skill covers the local `+"`google`"+` wrapper from `+"`PATH`"+`.
 
-Use these commands directly from `+"`PATH`"+`. They read real credentials from `+"`~/cicy-ai/global.json`"+`.
+Use these commands directly from `+"`PATH`"+`. They read real credentials from `+"`~/cicy-ai/db/google.json`"+` (created by `+"`google login`"+`).
 
 ## Scope
 
 Use this skill when the task involves:
 
+- **OAuth setup / re-authorization** (`+"`google login`"+`, `+"`google status`"+`) — when the user asks to "connect Google", "authorize", "log in", "bind Google account", or any Google API call fails with an auth error
 - Gmail inbox listing, reading, sending, or verification-code watching
 - Google Sheets read/write/append/create
 - Google Drive list/upload/download/quota work
 - Google Calendar list/events/create
+
+## OAuth Setup (`+"`google login`"+`)
+
+If any Google subcommand reports missing authorization, run `+"`google login`"+` and follow its stdout verbatim. It self-detects three states and prints the right next-step for each:
+
+1. **No OAuth client yet** — it prints step-by-step instructions for the user to create a "TVs and Limited Input devices" OAuth client in Google Cloud Console, copy the Client ID, and save it to `+"`~/cicy-ai/db/google_oauth_client.json`"+`. After they do this, run `+"`google login`"+` again.
+2. **Client configured but not authorized** — it runs the device-code flow inline: prints a `+"`user_code`"+` and a verification URL. Show both to the user clearly, wait while the command polls Google, and report the resulting authorized email when it finishes.
+3. **Already authorized** — it prints the connected email and exits.
+
+Walk the user through one step at a time. Do not skip ahead or assume state — re-run `+"`google login`"+` after each user action and let its output drive the next step.
 
 ## Rules
 
@@ -689,6 +723,7 @@ Use this skill when the task involves:
 2. For unfamiliar subcommands, run `+"`google help`"+` or `+"`google <service> help`"+`.
 3. Use the real token configured on the host. Do not mock Google responses.
 4. Report the concrete command result back to the user.
+5. **Never** invent client IDs, secrets, or refresh tokens — only what `+"`google login`"+` and the user produce together.
 
 ## Help
 
@@ -828,6 +863,8 @@ func renderGoogleHelp() string {
 ## Quick Start
 
 - inspect usage: `+"`google help`"+`
+- check auth status: `+"`google status`"+`
+- start / re-run OAuth setup: `+"`google login`"+` (TV/Limited-Input device-code flow; self-guides through all states)
 - inspect gmail shortcuts: `+"`google gmail help`"+`
 - list recent mail: `+"`google gmail list 5`"+`
 - list spreadsheets: `+"`google sheets list`"+`
@@ -1518,6 +1555,11 @@ Only add ` + "`IdentityFile`" + `, ` + "`ProxyJump`" + `, or other advanced fiel
 func renderGoogleCommands() string {
 	return `# Google Commands
 
+## Auth
+
+- ` + "`google login`" + `  — set up or re-run Google OAuth on this host (device-code flow). Self-detects current state and prints the right next-step. Use whenever the user says "connect Google" / "authorize" / "log in", or when any other ` + "`google ...`" + ` command fails with auth error.
+- ` + "`google status`" + ` — show whether Google is currently authorized (and as which account) without starting the device flow.
+
 ## Gmail
 
 - ` + "`google gmail list [count]`" + `
@@ -1548,6 +1590,112 @@ func renderGoogleCommands() string {
 - ` + "`google calendar list`" + `
 - ` + "`google calendar events [calId] [max]`" + `
 - ` + "`google calendar create <summary> <start> <end>`" + `
+`
+}
+
+func renderProxySSHSkill() string {
+	return `---
+name: proxy_ssh
+description: Use the local proxy_ssh wrapper to manage autossh-based SOCKS5 proxy profiles on this host (list/show/create/delete, start/stop/restart, connectivity test). Each profile pins a local SOCKS port to an SSH target.
+---
+
+# Proxy SSH
+
+This skill covers the local ` + "`proxy_ssh`" + ` wrapper from ` + "`PATH`" + `.
+
+Use this command directly from ` + "`PATH`" + `. It manages real autossh processes and persists profiles in ` + "`~/cicy-ai/db/proxy_ssh.json`" + ` on this host.
+
+## Scope
+
+Use this skill when the task involves:
+
+- Listing or inspecting SOCKS proxy profiles on this host
+- Creating a new SOCKS proxy that tunnels through an SSH host (` + "`ssh -D <port>`" + ` via autossh)
+- Starting / stopping / restarting an existing profile
+- Testing whether a profile's SOCKS port actually reaches the public internet
+- Installing autossh (` + "`proxy_ssh install-autossh`" + `) when the binary is missing
+
+## Rules
+
+1. Prefer the local ` + "`proxy_ssh`" + ` command first; do not invoke ` + "`autossh`" + `/` + "`ssh -D`" + ` by hand unless the user asks for the raw command.
+2. Always reference profiles by their ` + "`name`" + `. Run ` + "`proxy_ssh list`" + ` first if unsure.
+3. When creating a profile, gather: ` + "`name`" + `, ` + "`--local-port`" + `, and either ` + "`--target user@host`" + ` (one-shot) or the trio ` + "`--ssh-host-name`" + ` + ` + "`--ssh-user`" + ` + ` + "`--ssh-port`" + `. Confirm with the user before running.
+4. After ` + "`start`" + `, optionally run ` + "`test <name>`" + ` to confirm egress; report the resulting IP/country back to the user.
+5. Use ` + "`--json`" + ` for scriptable output when chaining with other tools.
+
+## Help
+
+Read [help.md](./references/help.md) first for quick usage, rules, and examples.
+
+## Tools
+
+Read [tools.md](./references/tools.md) for the full tool and command shapes.
+`
+}
+
+func renderProxySSHHelp() string {
+	return `# Proxy SSH Help
+
+## Command
+
+- primary command: ` + "`proxy_ssh`" + `
+- config file: ` + "`~/cicy-ai/db/proxy_ssh.json`" + ` (managed by this command — do not edit by hand)
+
+## Quick Start
+
+- inspect usage: ` + "`proxy_ssh --help`" + ` or ` + "`proxy_ssh <command> --help`" + `
+- list all profiles: ` + "`proxy_ssh list`" + `
+- show one profile: ` + "`proxy_ssh show <name>`" + `
+- create a profile: ` + "`proxy_ssh create <name> --local-port 1080 --target user@example.com`" + `
+- start: ` + "`proxy_ssh start <name>`" + `
+- stop: ` + "`proxy_ssh stop <name>`" + `
+- restart: ` + "`proxy_ssh restart <name>`" + `
+- connectivity test: ` + "`proxy_ssh test <name>`" + `  (reports egress IP / country)
+- delete: ` + "`proxy_ssh delete <name>`" + `  (use ` + "`--force`" + ` to stop first)
+- install autossh: ` + "`proxy_ssh install-autossh`" + `
+
+## Rules
+
+- always reference profiles by ` + "`name`" + ` — run ` + "`proxy_ssh list`" + ` to discover them
+- after ` + "`create`" + ` the profile is **not** auto-started — run ` + "`start`" + ` explicitly
+- ` + "`test`" + ` accepts an optional ` + "`--url`" + ` to override the default probe URL
+- pass ` + "`--json`" + ` to any subcommand for machine-readable output
+
+## More
+
+Read [tools.md](./references/tools.md) for the full subcommand reference with all flags.
+`
+}
+
+// renderProxySSHCommands returns the proxy_ssh tools.md content.
+//
+// tools.md convention (apply to every skill):
+//   - tools.md is rendered in the UI as click-to-send tokens. EVERY inline
+//     `code` span becomes a clickable button that loads the token into the
+//     "Send to agent" textarea. Therefore tools.md MUST contain only real,
+//     send-as-is command strings — no prose, no placeholder annotations like
+//     `<required>` or `--name <value>`, no example flows, no convention text.
+//   - The only allowed content is one H1 title and a single 2-column table:
+//     Command | What it does. The Command column holds a single backticked
+//     copy-pasteable command per row, ready to send to an agent verbatim.
+//   - Detailed usage, flag matrices, and multi-step examples belong in
+//     help.md (which is rendered non-clickable).
+func renderProxySSHCommands() string {
+	return `# Proxy SSH Commands
+
+| Command | What it does |
+|---------|--------------|
+| ` + "`proxy_ssh list`" + ` | List every configured profile |
+| ` + "`proxy_ssh list --json`" + ` | Same, as JSON |
+| ` + "`proxy_ssh show <name>`" + ` | Show one profile's config and runtime state |
+| ` + "`proxy_ssh create <name> --local-port <port> --target user@host`" + ` | Create a profile that tunnels SOCKS5 through an SSH target |
+| ` + "`proxy_ssh delete <name>`" + ` | Remove a profile |
+| ` + "`proxy_ssh delete <name> --force`" + ` | Stop then remove |
+| ` + "`proxy_ssh start <name>`" + ` | Launch the autossh tunnel for a profile |
+| ` + "`proxy_ssh stop <name>`" + ` | Kill the running autossh for a profile |
+| ` + "`proxy_ssh restart <name>`" + ` | Stop then start |
+| ` + "`proxy_ssh test <name>`" + ` | Probe egress IP through the SOCKS port |
+| ` + "`proxy_ssh install-autossh`" + ` | Install autossh via apt or brew when missing |
 `
 }
 
@@ -1966,16 +2114,16 @@ func generateCodexCicyMihomo(targetRoot string) error {
 func renderCicyMihomoSkill() string {
 	return `---
 name: cicy-mihomo
-description: Manage a local mihomo proxy on this host with start/stop/reload/status/logs and node speed-testing.
+description: Cicy Mihomo Proxy — manage the local Cicy Mihomo (mihomo / clash-meta fork) proxy on this host with start/stop/reload/status/logs and node speed-testing.
 ---
 
-# cicy-mihomo
+# Cicy Mihomo Proxy
 
-This skill covers the local ` + "`cicy-mihomo`" + ` wrapper from ` + "`PATH`" + `.
+This skill (` + "`cicy-mihomo`" + `) covers the local ` + "`cicy-mihomo`" + ` wrapper from ` + "`PATH`" + `.
 
-Use this command directly. It controls a local ` + "`mihomo`" + ` (clash-meta) proxy
-process and exposes a SOCKS/mixed port on ` + "`9001`" + `, with the controller
-API on ` + "`127.0.0.1:19001`" + `.
+Use this command directly. It controls a local Cicy Mihomo (a fork of
+` + "`mihomo`" + ` / clash-meta) proxy process and exposes a SOCKS/mixed port on
+` + "`9001`" + `, with the controller API on ` + "`127.0.0.1:19001`" + `.
 
 ## Scope
 
@@ -2005,7 +2153,7 @@ Read [tools.md](./references/tools.md) for the full subcommand reference.
 }
 
 func renderCicyMihomoHelp() string {
-	return `# cicy-mihomo Help
+	return `# Cicy Mihomo Proxy — Help
 
 ## Command
 - primary command: ` + "`cicy-mihomo`" + `
@@ -2047,7 +2195,7 @@ func renderCicyMihomoHelp() string {
 }
 
 func renderCicyMihomoCommands() string {
-	return `# cicy-mihomo Command Reference
+	return `# Cicy Mihomo Proxy — Command Reference
 
 This skill uses the local ` + "`cicy-mihomo`" + ` command from ` + "`PATH`" + `.
 

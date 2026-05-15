@@ -11,6 +11,7 @@ import AgentAvatar from '../AgentAvatar';
 import Select, { type SelectOption } from '../ui/Select';
 import { normalizeAgentType } from '../../lib/agentType';
 import { ProxyManagerDialog } from './ProxyManagerDialog';
+import { useApp } from '../../contexts/AppContext';
 
 export type InspectorTab = 'overview' | 'memory' | 'settings' | 'history';
 type InspectorRequestedTab = InspectorTab | 'notes' | 'history';
@@ -95,10 +96,10 @@ function serializeGeneralSettings(value: EditPaneData | null) {
 function serializeModelSettings(value: EditPaneData | null) {
   return JSON.stringify({
     default_model: String(value?.default_model || ''),
-    use_official_auth: !!value?.use_official_auth,
-    runtime_ai: value?.use_official_auth ? null : (value?.runtime_ai && String(value.runtime_ai.provider_name || '').trim()
+    use_custom_gateway: !!value?.use_custom_gateway,
+    runtime_ai: value?.use_custom_gateway && value?.runtime_ai && String(value.runtime_ai.provider_name || '').trim()
       ? { provider_name: String(value.runtime_ai.provider_name || '').trim() }
-      : null),
+      : null,
   });
 }
 
@@ -337,6 +338,46 @@ export default function AgentInspector({
   inspectorVersion?: number;
 }) {
   const { t } = useTranslation('agentInspector');
+  const {
+    agentDetails,
+    activeAgentDetail,
+    setActiveAgentId,
+    patchAgentDetail: patchSharedAgentDetail,
+    runPaneSaveSerially,
+  } = useApp();
+  // Keep a ref to the live agentDetails map so the fetch effect can decide
+  // whether the cache is "complete enough to skip the fetch" without taking
+  // agentDetails as a dep (which would cause it to refire on every patch).
+  const agentDetailsRef = useRef(agentDetails);
+  useEffect(() => { agentDetailsRef.current = agentDetails; }, [agentDetails]);
+  // Inspector binds its read source to the global activeAgentDetail — same
+  // object the footer ModelPicker / card title / sidebar all read from. There
+  // is ONE state for "the agent currently being inspected", not two parallel
+  // copies. Inspector pushes its paneId into the context's activeAgentId so
+  // opening an inspector for a non-focused pane still routes shared reads here.
+  useEffect(() => {
+    if (!open || !paneId) return;
+    setActiveAgentId(paneId);
+  }, [open, paneId, setActiveAgentId]);
+  const settingsData: any = activeAgentDetail;
+  const runtimeAIProviderOptions = useMemo<RuntimeAIProviderOption[]>(() => {
+    const list = Array.isArray(settingsData?.runtime_ai_provider_options) ? settingsData.runtime_ai_provider_options : [];
+    return list.map((item: any) => ({
+      key: String(item?.key || ''),
+      label: String(item?.label || item?.key || ''),
+      protocol: String(item?.protocol || ''),
+      models: Array.isArray(item?.models) ? item.models.map((m: any) => String(m)) : undefined,
+    })).filter((item: RuntimeAIProviderOption) => item.key);
+  }, [settingsData?.runtime_ai_provider_options]);
+  const runtimeAIDefault = useMemo<RuntimeAIDefaultSummary | null>(() => {
+    const raw = settingsData?.runtime_ai_default;
+    if (!raw || typeof raw !== 'object') return null;
+    return {
+      provider_name: String(raw.provider_name || ''),
+      provider_label: String(raw.provider_label || ''),
+      model: String(raw.model || ''),
+    };
+  }, [settingsData?.runtime_ai_default]);
   const [tab, setTab] = useState<InspectorTab>('overview');
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [queryDraft, setQueryDraft] = useState('');
@@ -349,11 +390,8 @@ export default function AgentInspector({
   const [memorySaving, setMemorySaving] = useState(false);
   const [memorySection, setMemorySection] = useState<MemorySectionId>('global');
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('general');
-  const [settingsData, setSettingsData] = useState<EditPaneData | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
-  const [runtimeAIProviderOptions, setRuntimeAIProviderOptions] = useState<RuntimeAIProviderOption[]>([]);
-  const [runtimeAIDefault, setRuntimeAIDefault] = useState<RuntimeAIDefaultSummary | null>(null);
   const settingsPaneLoadedRef = useRef<string>('');
   const [generalSettingsBaseline, setGeneralSettingsBaseline] = useState('null');
   const [modelSettingsBaseline, setModelSettingsBaseline] = useState('null');
@@ -383,64 +421,40 @@ export default function AgentInspector({
     let cancelled = false;
     const target = `${paneId}:main.0`;
     settingsPaneLoadedRef.current = target;
+    setGeneralSettingsBaseline('null');
+    setModelSettingsBaseline('null');
+    // (B) Skip fetch if context already has a complete entry (Workspace's
+    // fetch effect populates it for the active pane). Avoids the race where
+    // an in-flight fetch lands AFTER an optimistic patch and wipes it.
+    const shortPaneId = paneId.split(':')[0];
+    const cached = agentDetailsRef.current[shortPaneId];
+    if (cached && cached.agent_type && cached.runtime_ai_provider_options) {
+      setGeneralSettingsBaseline(serializeGeneralSettings(cached));
+      setModelSettingsBaseline(serializeModelSettings(cached));
+      return () => { cancelled = true; };
+    }
     setSettingsLoading(true);
     apiService.getPane(paneId).then(({ data: detail }) => {
       if (cancelled || settingsPaneLoadedRef.current !== target) return;
-      const next: EditPaneData = {
-        target,
-        title: String(detail?.title || paneTitle || paneId),
-        agent_duty: String(detail?.agent_duty || ''),
-        agent_type: String(detail?.agent_type || ''),
-        allow_all_actions: !!detail?.allow_all_actions,
-        use_official_auth: !!detail?.use_official_auth,
-        use_proxy: !!detail?.use_proxy,
-        proxy: detail?.proxy && typeof detail.proxy === 'object'
-          ? {
-              password: String(detail.proxy.password || ''),
-              rule: String(detail.proxy.rule || ''),
-            }
-          : null,
-        workspace: String(detail?.workspace || ''),
-        active: detail?.active !== false && detail?.active !== 0,
-        init_script: String(detail?.init_script || ''),
-        tg_enable: !!detail?.tg_enable,
-        tg_token: String(detail?.tg_token || ''),
-        tg_chat_id: String(detail?.tg_chat_id || ''),
-        config: String(detail?.config || '{}'),
-        ttyd_preview: String(detail?.ttyd_preview || ''),
-        role: String(detail?.role || ''),
-        default_model: String(detail?.default_model || ''),
-        runtime_ai: detail?.runtime_ai && typeof detail.runtime_ai === 'object'
-          ? {
-              provider_name: String(detail.runtime_ai.provider_name || ''),
-            }
-          : null,
-      };
-      const providerOptions = Array.isArray(detail?.runtime_ai_provider_options) ? detail.runtime_ai_provider_options : [];
-      setRuntimeAIProviderOptions(providerOptions.map((item: any) => ({
-        key: String(item?.key || ''),
-        label: String(item?.label || item?.key || ''),
-        protocol: String(item?.protocol || ''),
-        models: Array.isArray(item?.models) ? item.models.map((model: any) => String(model)) : undefined,
-      })).filter((item: RuntimeAIProviderOption) => item.key));
-      setRuntimeAIDefault(detail?.runtime_ai_default && typeof detail.runtime_ai_default === 'object' ? {
-        provider_name: String(detail.runtime_ai_default.provider_name || ''),
-        provider_label: String(detail.runtime_ai_default.provider_label || ''),
-        model: String(detail.runtime_ai_default.model || ''),
-      } : null);
-      setSettingsData(next);
-      setGeneralSettingsBaseline(serializeGeneralSettings(next));
-      setModelSettingsBaseline(serializeModelSettings(next));
+      // (B) Merge fetch into existing entry instead of wholesale replace, so
+      // any optimistic patches that landed during the in-flight window are
+      // preserved on overlapping keys (caller's value wins on the second pass
+      // because patch was applied AFTER fetch was kicked off).
+      patchSharedAgentDetail(paneId, detail);
+      setGeneralSettingsBaseline(serializeGeneralSettings(detail));
+      setModelSettingsBaseline(serializeModelSettings(detail));
+      // Legacy callback so Workspace's paneDetails / agents / boundAgents caches
+      // also pick up the full detail.
+      onPanePatch?.(paneId, detail);
     }).catch(() => {
       if (cancelled || settingsPaneLoadedRef.current !== target) return;
-      const fallback: EditPaneData = {
-        target,
+      const fallback: any = {
         title: paneTitle || paneId,
         use_proxy: false,
         proxy: null,
         runtime_ai: null,
       };
-      setSettingsData(fallback);
+      patchSharedAgentDetail(paneId, fallback);
       setGeneralSettingsBaseline(serializeGeneralSettings(fallback));
       setModelSettingsBaseline(serializeModelSettings(fallback));
     }).finally(() => {
@@ -451,7 +465,9 @@ export default function AgentInspector({
     return () => {
       cancelled = true;
     };
-  }, [open, paneId, paneTitle]);
+    // paneTitle is intentionally excluded — it's a cosmetic prop and a
+    // title-only change should not refetch settings (would clobber unsaved edits).
+  }, [open, paneId, patchSharedAgentDetail]);
 
   useEffect(() => {
     // Pull the live mihomo proxies/groups list so the rule Select has real
@@ -536,7 +552,7 @@ export default function AgentInspector({
   const promptRules = data?.prompt_rules || {};
   const history = data?.history || { total: 0, items: [], offset: 0, limit: HISTORY_PAGE_SIZE, has_more: false };
   const normalizedAgentType = normalizeAgentType(settingsData?.agent_type);
-  const modelSettingsEnabled = normalizedAgentType === 'codex' || normalizedAgentType === 'claude';
+  const modelSettingsEnabled = normalizedAgentType === 'codex' || normalizedAgentType === 'claude' || normalizedAgentType === 'opencode';
   const historyStart = history.total > 0 ? Number(history.offset || 0) + 1 : 0;
   const historyEnd = history.total > 0 ? Number(history.offset || 0) + (history.items || []).length : 0;
   const projectKey = String(promptRules?.project_key || promptRulesDraft.project.key || '').trim();
@@ -628,7 +644,7 @@ export default function AgentInspector({
   }, [settingsData?.runtime_ai]);
 
   const patchSettingsData = (patch: Partial<EditPaneData>) => {
-    setSettingsData((prev) => ({ ...(prev || { target: `${paneId}:main.0`, title: paneTitle || paneId, runtime_ai: null }), ...patch }));
+    patchSharedAgentDetail(paneId, patch);
   };
 
   const hasDuplicateTelegramToken = async () => {
@@ -656,31 +672,53 @@ export default function AgentInspector({
     }
   };
 
-  const saveSettings = async () => {
-    if (!settingsData || settingsSaving || !dirtyGeneralSettings) return;
+  const saveSettings = async (overrides?: Partial<EditPaneData>) => {
+    if (!settingsData) return;
+    if (!overrides && !dirtyGeneralSettings) return;
+    // Guard: if the inspector is mid-switch to a new paneId, settingsData may
+    // still hold the previous pane's data. Refuse to save until the fetch for
+    // the current paneId has populated settingsData — otherwise we'd PATCH the
+    // wrong pane with another pane's title/agent_type/etc.
+    const expectedTarget = `${paneId}:main.0`;
+    if (settingsPaneLoadedRef.current !== expectedTarget) return;
+    const merged: EditPaneData = { ...settingsData, ...(overrides || {}) };
     setSettingsSaving(true);
     try {
       if (await hasDuplicateTelegramToken()) {
         window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastTokenAlreadyBound') }));
         return;
       }
-      const payload = {
-        ...settingsData,
-        runtime_ai: settingsData.use_official_auth ? null : (settingsData.runtime_ai && String(settingsData.runtime_ai.provider_name || '').trim()
-          ? { provider_name: String(settingsData.runtime_ai.provider_name || '').trim() }
-          : null),
-        proxy: settingsData.proxy && (String(settingsData.proxy.password || '').trim() || String(settingsData.proxy.rule || '').trim())
-          ? {
-              password: String(settingsData.proxy.password || '').trim(),
-              rule: String(settingsData.proxy.rule || '').trim(),
-            }
-          : null,
+      const proxy = merged.proxy && (String(merged.proxy.password || '').trim() || String(merged.proxy.rule || '').trim())
+        ? {
+            password: String(merged.proxy.password || '').trim(),
+            rule: String(merged.proxy.rule || '').trim(),
+          }
+        : null;
+      // Whitelist editable fields only. Spreading the whole settingsData here
+      // would silently overwrite immutable identity fields (agent_type / workspace
+      // / role / init_script / config) on the server. See bug report 2026-05-14
+      // where switching panes mid-edit corrupted agent_type/title across panes.
+      const payload: Record<string, any> = {
+        title: String(merged.title || '').trim(),
+        active: merged.active !== false,
+        allow_all_actions: !!merged.allow_all_actions,
+        tg_enable: !!merged.tg_enable,
+        tg_token: String(merged.tg_token || '').trim(),
+        tg_chat_id: String(merged.tg_chat_id || '').trim(),
+        use_proxy: !!merged.use_proxy,
+        proxy,
       };
-      await apiService.updatePane(paneId, payload);
+      // Optimistic: broadcast the patch BEFORE the PATCH round-trip so any other
+      // component subscribed to shared agent detail (footer ModelPicker, card title,
+      // etc.) re-renders with the new value immediately instead of waiting for the
+      // server to confirm. If the PATCH fails we toast an error; we don't bother
+      // reverting since the inspector's own local state is the user's intent.
       onPanePatch?.(paneId, payload);
-      setSettingsData(payload);
-      setGeneralSettingsBaseline(serializeGeneralSettings(payload));
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: t('toastSettingsSaved'), variant: 'success' } }));
+      setGeneralSettingsBaseline(serializeGeneralSettings({ ...merged, proxy }));
+      // (A) Per-pane save serialization. Two rapid edits on the same pane will be
+      // sent in click order; if PATCH 1 reorders ahead of PATCH 2 on the wire the
+      // server would otherwise end with PATCH 1's value while the UI shows PATCH 2.
+      await runPaneSaveSerially(paneId, () => apiService.updatePane(paneId, payload));
     } catch {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastSettingsSaveFailed', { paneId }) }));
     } finally {
@@ -688,24 +726,30 @@ export default function AgentInspector({
     }
   };
 
-  const saveModelSettings = async () => {
-    if (!settingsData || settingsSaving || !dirtyModelSettings) return;
+  const saveModelSettings = async (overrides?: Partial<{ default_model: string; use_custom_gateway: boolean; runtime_ai: any }>) => {
+    if (!settingsData) return;
+    if (!overrides && !dirtyModelSettings) return;
+    // Same paneId guard as saveSettings — never PATCH with stale data after a switch.
+    const expectedTarget = `${paneId}:main.0`;
+    if (settingsPaneLoadedRef.current !== expectedTarget) return;
+    const merged = { ...settingsData, ...(overrides || {}) };
     setSettingsSaving(true);
     try {
-      const runtimeAI = settingsData.use_official_auth ? null : (settingsData.runtime_ai && String(settingsData.runtime_ai.provider_name || '').trim()
-        ? { provider_name: String(settingsData.runtime_ai.provider_name || '').trim() }
-        : null);
+      const runtimeAI = merged.use_custom_gateway && merged.runtime_ai && String(merged.runtime_ai.provider_name || '').trim()
+        ? { provider_name: String(merged.runtime_ai.provider_name || '').trim() }
+        : null;
       const payload = {
-        default_model: settingsData.default_model || '',
-        use_official_auth: !!settingsData.use_official_auth,
+        default_model: String(merged.default_model || '').trim(),
+        use_custom_gateway: !!merged.use_custom_gateway,
         runtime_ai: runtimeAI,
       };
-      await apiService.updatePane(paneId, payload);
-      const next = { ...settingsData, runtime_ai: runtimeAI };
+      // Optimistic broadcast first — see saveSettings for rationale. Toggling
+      // use_custom_gateway here updates the footer ModelPicker / card UI instantly
+      // instead of waiting for the PATCH round-trip.
       onPanePatch?.(paneId, payload);
-      setSettingsData(next);
-      setModelSettingsBaseline(serializeModelSettings(next));
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: t('toastSettingsSaved'), variant: 'success' } }));
+      setModelSettingsBaseline(serializeModelSettings({ ...merged, runtime_ai: runtimeAI }));
+      // (A) Serialize alongside saveSettings + ModelPicker — shares the same per-pane queue.
+      await runPaneSaveSerially(paneId, () => apiService.updatePane(paneId, payload));
     } catch {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastModelSettingsSaveFailed', { paneId }) }));
     } finally {
@@ -989,15 +1033,19 @@ export default function AgentInspector({
                       label={t('autoStart')}
                       desc={t('autoStartHint')}
                       checked={settingsData?.active !== false}
-                      onChange={(value) => patchSettingsData({ active: value })}
-                      onBlur={() => { void saveSettings(); }}
+                      onChange={(value) => {
+                        patchSettingsData({ active: value });
+                        void saveSettings({ active: value });
+                      }}
                     />
                     <InspectorToggle
                       label={t('allowAllActions')}
                       desc={t('allowAllActionsHint')}
                       checked={!!settingsData?.allow_all_actions}
-                      onChange={(value) => patchSettingsData({ allow_all_actions: value })}
-                      onBlur={() => { void saveSettings(); }}
+                      onChange={(value) => {
+                        patchSettingsData({ allow_all_actions: value });
+                        void saveSettings({ allow_all_actions: value });
+                      }}
                     />
                   </div>
 
@@ -1006,119 +1054,167 @@ export default function AgentInspector({
 
               {settingsSection === 'model' && (
                 <div data-id="agent-inspector-settings-model" className="space-y-5">
-                  <div data-id="agent-inspector-settings-model-official-auth" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
-                    <InspectorToggle
-                      label={t('officialAuth')}
-                      desc={t('officialAuthHint')}
-                      checked={!!settingsData?.use_official_auth}
-                      onChange={(value) => patchSettingsData({ use_official_auth: value, runtime_ai: value ? null : settingsData?.runtime_ai || null })}
-                      onBlur={() => { void saveModelSettings(); }}
-                    />
-                  </div>
-
                   <div data-id="agent-inspector-settings-model-proxy" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
                     <InspectorToggle
                       label={t('useProxy')}
-                      desc={t('useProxyHint')}
                       checked={!!settingsData?.use_proxy}
-                      onChange={(value) => patchSettingsData({ use_proxy: value })}
-                      onBlur={() => { void saveSettings(); }}
+                      onChange={(value) => {
+                        patchSettingsData({ use_proxy: value });
+                        void saveSettings({ use_proxy: value });
+                      }}
                     />
                     {settingsData?.use_proxy && (
-                      <>
-                        <InspectorField
-                          label={t('proxyTargetLabel')}
-                          desc={t('proxyTargetDesc')}
-                        >
-                          <Select
-                            value={settingsData?.proxy?.rule || ''}
-                            onChange={(value) => patchSettingsData({ proxy: { ...(settingsData?.proxy || {}), rule: value } })}
-                            onOpenChange={(opened) => {
-                              if (!opened) {
-                                void saveSettings();
-                              }
-                            }}
-                            options={proxyTargetOptions}
-                            placeholder={t('proxyTargetPlaceholder')}
-                            searchable
-                          />
-                        </InspectorField>
-                        <button
-                          data-id="agent-inspector-settings-model-proxy-manage"
-                          type="button"
-                          onClick={() => setProxyManagerOpen(true)}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-[11px] text-zinc-300 transition-colors hover:bg-white/[0.08]"
-                        >
-                          {t('proxyManageButton')}
-                        </button>
-                      </>
+                      <InspectorField
+                        label={t('proxyTargetLabel')}
+                        desc={t('proxyTargetDesc')}
+                      >
+                        <div data-id="agent-inspector-settings-model-proxy-row" className="flex items-center gap-2">
+                          <div className="min-w-0 flex-1">
+                            <Select
+                              value={settingsData?.proxy?.rule || ''}
+                              onChange={(value) => {
+                                const nextProxy = { ...(settingsData?.proxy || {}), rule: value };
+                                patchSettingsData({ proxy: nextProxy });
+                                void saveSettings({ proxy: nextProxy });
+                              }}
+                              options={proxyTargetOptions}
+                              placeholder={t('proxyTargetPlaceholder')}
+                              searchable
+                            />
+                          </div>
+                          <button
+                            data-id="agent-inspector-settings-model-proxy-manage"
+                            type="button"
+                            onClick={() => setProxyManagerOpen(true)}
+                            className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-zinc-300 transition-colors hover:bg-white/[0.08]"
+                          >
+                            {t('proxyManageButton')}
+                          </button>
+                        </div>
+                      </InspectorField>
                     )}
                   </div>
 
-                  {!settingsData?.use_official_auth && (
+                  {(['codex', 'claude', 'opencode'].includes(normalizedAgentType)) && (
+                  <div data-id="agent-inspector-settings-model-custom-gateway" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+                    <InspectorToggle
+                      label={t('customGateway')}
+                      desc={t('customGatewayHint')}
+                      checked={!!settingsData?.use_custom_gateway}
+                      onChange={(value) => {
+                        const nextRuntimeAi = value ? (settingsData?.runtime_ai || null) : null;
+                        patchSettingsData({ use_custom_gateway: value, runtime_ai: nextRuntimeAi });
+                        void saveModelSettings({ use_custom_gateway: value, runtime_ai: nextRuntimeAi });
+                      }}
+                    />
+                  </div>
+                  )}
+
+                  {settingsData?.use_custom_gateway && (
                     <div data-id="agent-inspector-settings-model-gateway-override" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
                       <div data-id="agent-inspector-settings-model-gateway-override-header">
                         <div data-id="agent-inspector-settings-model-gateway-override-title" className="text-sm font-medium text-zinc-100">{t('gatewayOverrideTitle')}</div>
                         <div data-id="agent-inspector-settings-model-gateway-override-desc" className="mt-1 text-xs leading-5 text-zinc-500">{t('gatewayOverrideDesc')}</div>
                       </div>
-                      <div data-id="agent-inspector-settings-model-gateway-default" className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2 text-xs text-zinc-400">
-                        <div data-id="agent-inspector-settings-model-gateway-default-text">{t('defaultProvider', { name: runtimeAIDefault?.provider_label || runtimeAIDefault?.provider_name || t('defaultProviderEmpty') })}</div>
-                      </div>
+                      {!runtimeAIEnabled && (
+                        <div data-id="agent-inspector-settings-model-gateway-default" className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2 text-xs text-zinc-400">
+                          {(() => {
+                            const currentProviderKey = String(settingsData?.runtime_ai?.provider_name || '').trim() || runtimeAIDefault?.provider_name || '';
+                            const currentProviderOpt = runtimeAIProviderOptions.find((p) => p.key === currentProviderKey);
+                            const currentProviderLabel = currentProviderOpt?.label || currentProviderKey || t('currentEmpty');
+                            const currentModel = String(settingsData?.default_model || '').trim() || t('currentEmpty');
+                            return (
+                              <div data-id="agent-inspector-settings-model-gateway-default-text" className="text-zinc-200">
+                                {t('currentProviderModel', { name: currentProviderLabel, model: currentModel })}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
                       <InspectorToggle
                         label={t('customOverride')}
-                        desc={t('customOverrideDesc')}
+                        desc={runtimeAIEnabled ? t('customOverrideOnDesc') : t('customOverrideDesc')}
                         checked={runtimeAIEnabled}
-                        onChange={(value) => patchSettingsData({ runtime_ai: value ? (settingsData?.runtime_ai || { provider_name: '' }) : null })}
-                        onBlur={() => { void saveModelSettings(); }}
+                        onChange={(value) => {
+                          if (!value) {
+                            // (C) Override turning OFF: provider falls back to the agent_type
+                            // default. We must also clear the user's previously-chosen model
+                            // if it doesn't belong to the default provider — otherwise the
+                            // gateway will keep rewriting requests to that model and the
+                            // default provider's upstream will reject it.
+                            const defaultProviderKey = String(runtimeAIDefault?.provider_name || '').trim();
+                            const defaultProvider = runtimeAIProviderOptions.find((p) => p.key === defaultProviderKey);
+                            const defaultProviderModels = defaultProvider?.models || [];
+                            const currentModel = String(settingsData?.default_model || '').trim();
+                            const nextModel = currentModel && defaultProviderModels.includes(currentModel)
+                              ? currentModel
+                              : String(runtimeAIDefault?.model || '');
+                            patchSettingsData({ runtime_ai: null, default_model: nextModel });
+                            void saveModelSettings({ runtime_ai: null, default_model: nextModel });
+                            return;
+                          }
+                          // Turning ON: prefill empty provider/model with the agent's current defaults
+                          const currentProvider = String(settingsData?.runtime_ai?.provider_name || '').trim();
+                          const currentModel = String(settingsData?.default_model || '').trim();
+                          const nextProvider = currentProvider || String(runtimeAIDefault?.provider_name || '').trim();
+                          const nextModel = currentModel || String(runtimeAIDefault?.model || '').trim();
+                          const nextRuntimeAi = { provider_name: nextProvider };
+                          patchSettingsData({ runtime_ai: nextRuntimeAi, default_model: nextModel });
+                          if (nextProvider) {
+                            void saveModelSettings({ runtime_ai: nextRuntimeAi, default_model: nextModel });
+                          }
+                        }}
                       />
                       {runtimeAIEnabled && (
-                        <InspectorField label={t('providerFieldLabel')} desc={t('providerFieldDesc')}>
-                          <Select
-                            value={settingsData?.runtime_ai?.provider_name || ''}
-                            onChange={(value) => {
-                              patchSettingsData({
-                                runtime_ai: {
-                                  ...(settingsData?.runtime_ai || {}),
-                                  provider_name: value,
-                                },
-                              });
-                            }}
-                            onOpenChange={(open) => {
-                              if (!open) {
-                                void saveModelSettings();
-                              }
-                            }}
-                            options={runtimeAISelectOptions}
-                            placeholder={t('providerSelectPlaceholder')}
-                            searchable
-                          />
-                        </InspectorField>
+                        <>
+                          <InspectorField label={t('providerFieldLabel')} desc={t('providerFieldDesc')}>
+                            <Select
+                              value={settingsData?.runtime_ai?.provider_name || ''}
+                              onChange={(value) => {
+                                const nextRuntimeAi = { ...(settingsData?.runtime_ai || {}), provider_name: value };
+                                // Switching provider: if the current model isn't in the new provider's list, reset to the new provider's first model
+                                const newProvider = runtimeAIProviderOptions.find((p) => p.key === value);
+                                const newProviderModels = newProvider?.models || [];
+                                const currentModel = String(settingsData?.default_model || '').trim();
+                                const keepModel = currentModel && newProviderModels.includes(currentModel) ? currentModel : (newProviderModels[0] || currentModel);
+                                patchSettingsData({ runtime_ai: nextRuntimeAi, default_model: keepModel });
+                                void saveModelSettings({ runtime_ai: nextRuntimeAi, default_model: keepModel });
+                              }}
+                              options={runtimeAISelectOptions}
+                              placeholder={t('providerSelectPlaceholder')}
+                              searchable
+                            />
+                          </InspectorField>
+                          <InspectorField label={t('modelDefaultFieldLabel')} desc={t('modelDefaultFieldDesc')}>
+                            {(() => {
+                              const activeProviderKey = String(settingsData?.runtime_ai?.provider_name || '').trim() || runtimeAIDefault?.provider_name || '';
+                              const activeProvider = runtimeAIProviderOptions.find((p) => p.key === activeProviderKey);
+                              const baseModels = activeProvider?.models || [];
+                              const currentValue = settingsData?.default_model || '';
+                              const optionValues = currentValue && !baseModels.includes(currentValue)
+                                ? [currentValue, ...baseModels]
+                                : baseModels;
+                              return (
+                                <Select
+                                  searchable
+                                  placeholder={t('modelDefaultPlaceholder')}
+                                  value={currentValue}
+                                  options={optionValues.map((m) => ({ value: m, label: m }))}
+                                  onChange={(v) => { patchSettingsData({ default_model: v }); void saveModelSettings({ default_model: v }); }}
+                                />
+                              );
+                            })()}
+                          </InspectorField>
+                        </>
                       )}
                     </div>
                   )}
 
-                  <div data-id="agent-inspector-settings-model-default" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
-                    <InspectorField label={t('modelDefaultFieldLabel')} desc={t('modelDefaultFieldDesc')}>
-                      {(() => {
-                        const activeProviderKey = String(settingsData?.runtime_ai?.provider_name || '').trim() || runtimeAIDefault?.provider_name || '';
-                        const activeProvider = runtimeAIProviderOptions.find((p) => p.key === activeProviderKey);
-                        const baseModels = activeProvider?.models || [];
-                        const currentValue = settingsData?.default_model || '';
-                        // Make sure the current value is selectable even if it's not in the provider's list
-                        const optionValues = currentValue && !baseModels.includes(currentValue)
-                          ? [currentValue, ...baseModels]
-                          : baseModels;
-                        return (
-                          <Select
-                            searchable
-                            placeholder={t('modelDefaultPlaceholder')}
-                            value={currentValue}
-                            options={optionValues.map((m) => ({ value: m, label: m }))}
-                            onChange={(v) => { patchSettingsData({ default_model: v }); void saveModelSettings(); }}
-                          />
-                        );
-                      })()}
-                    </InspectorField>
+                  <div data-id="agent-inspector-settings-model-restart-hint" className="flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-[11px] leading-5 text-amber-200/90">
+                    <svg viewBox="0 0 16 16" fill="currentColor" className="mt-0.5 h-3.5 w-3.5 shrink-0">
+                      <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm.75 9.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM7.25 4.5a.75.75 0 0 1 1.5 0v4a.75.75 0 0 1-1.5 0v-4Z"/>
+                    </svg>
+                    <span>{t('modelSettingsRestartHint')}</span>
                   </div>
                 </div>
               )}

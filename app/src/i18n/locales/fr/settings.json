@@ -17,8 +17,6 @@
   "agentTypeCurrentNotInList": "valeur actuelle (absente de la liste)",
   "allowAllActionsTitle": "Autoriser toutes les actions au démarrage",
   "allowAllActionsHint": "Ajoute des indicateurs dangereux pour Codex / Claude",
-  "officialAuthTitle": "Utiliser l'auth officielle",
-  "officialAuthHint": "Ne pas injecter l'auth de gateway local",
   "proxyToggleTitle": "Activer le proxy",
   "proxyToggleHint": "Lance cicy_proxy_on avant le démarrage et vérifie les règles mihomo",
   "proxyPasswordLabel": "Mot de passe du proxy",
@@ -30,5 +28,7 @@
   "networkConfigLabel": "Configuration (JSON)",
   "networkExampleTitle": "Exemple :",
   "saveButton": "Enregistrer les modifications",
-  "saving": "Enregistrement…"
+  "saving": "Enregistrement…",
+  "customGatewayTitle": "Utiliser la passerelle locale",
+  "customGatewayHint": "Router via la passerelle IA locale"
 }

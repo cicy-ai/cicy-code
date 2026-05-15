@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import { Check, Copy, Folder, History, Pencil } from 'lucide-react';
 import { normalizeAgentType } from '../../lib/agentType';
-import { useDevRegister } from '../../lib/devStore';
 import { emitWebFrameMaskEvent } from '../../lib/webFrameMask';
 import { defaultWorkerWorkspace } from '../../config';
 import AgentAvatar from '../AgentAvatar';
@@ -607,16 +606,6 @@ export default function AgentCanvas({
       }
     };
   }, [centerPane, isPaneFullyVisible, items, layouts, locateRequest]);
-  useDevRegister(`AgentCanvas:${scopeId}`, {
-    scopeId,
-    itemCount: items.length,
-    activePaneId,
-    viewport,
-    layoutCount: Object.keys(layouts).length,
-    mountedPaneIds,
-    locatePaneId: locateRequest?.paneId || '',
-  });
-
   const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     const stage = stageRef.current;
     if (!stage) return;
@@ -797,19 +786,6 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
       window.clearTimeout(copiedPaneTimerRef.current);
     }
   }, []);
-  useDevRegister(`AgentCanvasWindow:${item.paneId}`, {
-    paneId: item.paneId,
-    title: item.title || item.paneId,
-    isEditingTitle,
-    titleDraft,
-    savingTitle,
-    copiedPaneId,
-    active,
-    liveMounted,
-    shouldRenderLiveView,
-    historyOpen,
-  });
-
   useEffect(() => {
     if (!isEditingTitle) return;
     requestAnimationFrame(() => {

@@ -29,16 +29,38 @@ export function setBackend(url: string | null) {
   else localStorage.removeItem(BACKEND_KEY);
 }
 
-function unwrapTmuxSend<T extends { success?: boolean; error?: string; detail?: string }>(promise: Promise<{ data: T }>) {
+function unwrapTmuxSend<T extends { success?: boolean; error?: string; detail?: string; pane_updated?: boolean; warning?: string; delivered?: boolean }>(promise: Promise<{ data: T }>) {
   return promise.then((resp) => {
     const errorText = String(resp.data?.error || resp.data?.detail || '').trim();
-    if (errorText) {
+    const paneUpdated = !!resp.data?.pane_updated;
+    if (errorText && !paneUpdated) {
       throw new Error(errorText);
     }
-    if (resp.data && resp.data.success === false) {
+    if (resp.data?.success === false && !paneUpdated) {
       throw new Error('tmux send failed');
     }
     return resp;
+  }).catch((err: any) => {
+    // Axios throws on non-2xx. Backend returns 409 with pane_updated:true
+    // whenever it actually pressed Enter (or had Enter pressed as the
+    // forced fallback). That means the prompt is committed to the agent's
+    // buffer regardless of whether the post-Enter confirmation timed out —
+    // tmux can't "un-Enter." Treat any pane_updated:true response as
+    // delivered, and surface the backend's detail string as a non-fatal
+    // warning so the caller can show it alongside the success state.
+    const data = err?.response?.data;
+    if (data?.pane_updated === true) {
+      const detail = String(data?.detail || data?.error || '').trim();
+      return {
+        data: {
+          ...data,
+          success: true,
+          delivered: true,
+          warning: detail || undefined,
+        },
+      } as { data: T };
+    }
+    throw err;
   });
 }
 
@@ -93,6 +115,7 @@ const api = {
   updateAgentPromptRules: (id: string, data: any) => http.put(`/api/agents/inspector/${encodeURIComponent(id)}/prompt-rules`, data),
   bindAgent: (data: any) => http.post('/api/agents/bind', data),
   unbindAgent: (agentId: number) => http.delete(`/api/agents/unbind/${agentId}`),
+  reorderAgents: (paneId: string, agentNames: string[]) => http.post('/api/agents/reorder', { pane_id: paneId, agent_names: agentNames }),
 
   registerMachine: (data: any) => http.post('/api/machines/register', data),
   syncMachines: (data?: any) => http.post('/api/machines/sync', data || {}),
@@ -111,6 +134,8 @@ const api = {
 
   getGoogleSkillConfig: () => http.get('/api/skill-config/google'),
   connectGoogleSkillConfig: () => http.post('/api/skill-config/google/connect', {}),
+  deviceConnectGoogleSkillConfig: () => http.post('/api/skill-config/google/device-connect', {}),
+  devicePollGoogleSkillConfig: (state: string) => http.post('/api/skill-config/google/device-poll', { state }),
   disconnectGoogleSkillConfig: () => http.delete('/api/skill-config/google'),
 
   getTtydStatus: (id: string) => http.get(`/api/tmux/ttyd/status/${encodeURIComponent(id)}`),
@@ -193,6 +218,13 @@ const api = {
   testProxy: (name: string, urls?: string[]) => http.post('/api/proxy/test', { name, urls }),
   getProxyStatus: () => http.get('/api/proxy/status'),
   proxyLifecycle: (action: 'start' | 'stop' | 'restart' | 'reload') => http.post('/api/proxy/lifecycle', { action }),
+  getProxyBindMode: () => http.get('/api/proxy/bind-mode'),
+  setProxyBindMode: (allowLan: boolean) => http.patch('/api/proxy/bind-mode', { allow_lan: allowLan }),
+  getProxyExport: (params?: { ip?: 'local' | 'lan' | 'public' | string; user?: string }) => http.get('/api/proxy/export', { params }),
+  listProxySsh: () => http.get('/api/proxy-ssh/list'),
+  showProxySsh: (name: string) => http.get('/api/proxy-ssh/show', { params: { name } }),
+  proxySshLifecycle: (name: string, action: 'start' | 'stop' | 'restart') => http.post('/api/proxy-ssh/lifecycle', { name, action }),
+  testProxySsh: (name: string) => http.post('/api/proxy-ssh/test', { name }),
 };
 
 export default api;

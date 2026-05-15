@@ -88,7 +88,7 @@ export function useDialogs() {
     node = createPortal(
       <div
         data-id="modal-overlay"
-        className="fixed inset-0 z-[9999990] flex items-center justify-center bg-black/55 backdrop-blur-sm animate-[fadeIn_120ms_ease-out]"
+        className="fixed inset-0 z-[9999999] flex items-center justify-center bg-black/55 backdrop-blur-sm animate-[fadeIn_120ms_ease-out]"
         onMouseDown={(e) => { if (e.target === e.currentTarget) cancel(); }}
       >
         <div data-id="modal-card" className="mx-4 w-full max-w-[420px] overflow-hidden rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60">

@@ -26,6 +26,7 @@ func listAgentsByPane(paneID string) ([]M, error) {
 		query += " WHERE pa.pane_id=?"
 		args = append(args, shortPaneID(normPaneID(paneID)))
 	}
+	query += " ORDER BY COALESCE(pa.sort_order, 0) ASC, pa.id ASC"
 	rows, err := store.Query(query, args...)
 	if err != nil {
 		return nil, err
@@ -341,5 +342,34 @@ func handleAgentUnbind(w http.ResponseWriter, r *http.Request) {
 	if unbindPaneID != "" {
 		go broadcastPollData(unbindPaneID)
 	}
+	J(w, M{"success": true})
+}
+
+func handleAgentReorder(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		PaneID     string   `json:"pane_id"`
+		AgentNames []string `json:"agent_names"`
+	}
+	if err := readBody(r, &req); err != nil {
+		httpErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	paneID := shortPaneID(normPaneID(strings.TrimSpace(req.PaneID)))
+	if paneID == "" {
+		httpErr(w, http.StatusBadRequest, "pane_id required")
+		return
+	}
+	for i, name := range req.AgentNames {
+		shortName := shortPaneID(normPaneID(strings.TrimSpace(name)))
+		if shortName == "" {
+			continue
+		}
+		_, _ = store.Exec("UPDATE pane_agents SET sort_order=? WHERE pane_id=? AND agent_name=?", i, paneID, shortName)
+	}
+	go broadcastPollData(paneID)
 	J(w, M{"success": true})
 }
