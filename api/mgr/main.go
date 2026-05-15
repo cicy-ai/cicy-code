@@ -317,6 +317,7 @@ Options:
 	http.HandleFunc("/api/audit/events/", wa(handleAuditEventByID))
 	http.HandleFunc("/api/audit/stats", wa(handleAuditStats))
 	http.HandleFunc("/api/audit/agents", wa(handleAuditAgents))
+	http.HandleFunc("/api/audit/ingest", wa(handleAuditIngest)) // Channel B: mitmproxy push
 
 	// TTS
 	http.HandleFunc("/api/tts", wa(handleTTS))

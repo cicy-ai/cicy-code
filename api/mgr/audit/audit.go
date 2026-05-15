@@ -102,3 +102,15 @@ func SubmitGatewayInbound(agentID, agentType, userID, sessionID, turnID, convers
 		PayloadRef:     fmt.Sprintf("reply.json#%s", turnID),
 	})
 }
+
+// SubmitMitmEvent is the entry point for mitmproxy-captured events arriving
+// via the /api/audit/ingest webhook. Callers can fill any envelope fields they
+// know; SourceChannel is forced to "mitm" regardless of what they passed.
+//
+// Unlike the gateway helpers, this always runs through the async path: mitm
+// callers should not block on audit.
+func SubmitMitmEvent(env Envelope) {
+	env.SourceChannel = SourceMitm
+	env.Inline = false
+	Submit(context.Background(), env)
+}

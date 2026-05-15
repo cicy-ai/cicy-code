@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -64,6 +66,105 @@ func handleAuditStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	J(w, stats)
+}
+
+// handleAuditIngest is the mitmproxy webhook for Channel B (agents that
+// bypass the cicy AI gateway and talk to external LLM providers directly).
+//
+//	POST /api/audit/ingest
+//	Authorization: Bearer <token>
+//	Content-Type: application/json
+//	{
+//	  "agent_id":         "w-10001",                  // REQUIRED
+//	  "direction":        "outbound" | "inbound",     // REQUIRED
+//	  "payload":          "<request or reply body>",  // REQUIRED
+//	  "payload_encoding": "utf8" | "base64",          // default utf8
+//
+//	  "agent_type":       "claude",                   // optional but recommended
+//	  "user_id":          "u-abc",
+//	  "session_id":       "sess-xyz",
+//	  "turn_id":          "turn_xxx",
+//	  "conversation_id":  "conv_xxx",
+//	  "provider":         "anthropic",
+//	  "model":            "claude-opus-4-7",
+//	  "payload_ref":      "mitm:flow-id-..."          // free-form, for forensics
+//	}
+//
+// Responses:
+//   204 — accepted (event will be processed asynchronously)
+//   400 — bad request (missing required field, bad encoding, ...)
+//   401 — not authenticated (handled by wa() middleware)
+func handleAuditIngest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		AgentID         string `json:"agent_id"`
+		AgentType       string `json:"agent_type"`
+		UserID          string `json:"user_id"`
+		SessionID       string `json:"session_id"`
+		TurnID          string `json:"turn_id"`
+		ConversationID  string `json:"conversation_id"`
+		Provider        string `json:"provider"`
+		Model           string `json:"model"`
+		Direction       string `json:"direction"`
+		Payload         string `json:"payload"`
+		PayloadEncoding string `json:"payload_encoding"`
+		PayloadRef      string `json:"payload_ref"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	if strings.TrimSpace(req.AgentID) == "" {
+		httpErr(w, http.StatusBadRequest, "agent_id_required")
+		return
+	}
+	if req.Direction != audit.DirectionOutbound && req.Direction != audit.DirectionInbound {
+		httpErr(w, http.StatusBadRequest, "direction_must_be_outbound_or_inbound")
+		return
+	}
+
+	var payload []byte
+	switch strings.ToLower(strings.TrimSpace(req.PayloadEncoding)) {
+	case "", "utf8", "utf-8":
+		payload = []byte(req.Payload)
+	case "base64":
+		decoded, err := base64.StdEncoding.DecodeString(req.Payload)
+		if err != nil {
+			httpErr(w, http.StatusBadRequest, "payload_base64_decode_failed")
+			return
+		}
+		payload = decoded
+	default:
+		httpErr(w, http.StatusBadRequest, "unknown_payload_encoding")
+		return
+	}
+
+	payloadRef := req.PayloadRef
+	if payloadRef == "" {
+		payloadRef = "mitm:" + req.Direction + "/" + req.AgentID
+		if req.TurnID != "" {
+			payloadRef += "/" + req.TurnID
+		}
+	}
+
+	audit.SubmitMitmEvent(audit.Envelope{
+		AgentID:        req.AgentID,
+		AgentType:      req.AgentType,
+		UserID:         req.UserID,
+		SessionID:      req.SessionID,
+		TurnID:         req.TurnID,
+		ConversationID: req.ConversationID,
+		Provider:       req.Provider,
+		Model:          req.Model,
+		Direction:      req.Direction,
+		Payload:        payload,
+		PayloadRef:     payloadRef,
+	})
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func handleAuditAgents(w http.ResponseWriter, r *http.Request) {
