@@ -321,11 +321,6 @@ function AgentStackCard({
           </div>
         </div>
         <div data-id={`agent-stack-card-header-right-${item.paneId}`} className="ml-3 flex items-center gap-2">
-          {headerControls ? (
-            <div data-id={`agent-stack-card-header-controls-${item.paneId}`} className="flex h-full items-center gap-3">
-              {headerControls}
-            </div>
-          ) : null}
           {showHeaderButtons ? (
             <div data-id="agent-stack-card-header-buttons" className="flex items-center gap-2">
               <button
@@ -380,6 +375,11 @@ function AgentStackCard({
           </div>
         )}
       </div>
+      {headerControls ? (
+        <div data-id={`agent-stack-card-header-controls-${item.paneId}`} className="flex h-10 shrink-0 items-center justify-end gap-3 border-t border-white/[0.07] bg-[linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.05))] px-3">
+          {headerControls}
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -650,6 +650,29 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
                       </div>
                     </section>
 
+                    {/* Models */}
+                    <section data-id="provider-dashboard-auto-97" className="space-y-3.5">
+                      <SectionHeader>{t('sectionModels')}</SectionHeader>
+                      {(() => {
+                        const availableModels = modelsText.split('\n').map((l) => l.trim()).filter(Boolean);
+                        const currentDefault = draft.defaultModel || '';
+                        return (
+                          <Field label={t('fieldDefaultModel')} help={t('fieldDefaultModelHelp')}>
+                            <Select
+                              searchable
+                              placeholder={t('selectModel')}
+                              value={availableModels.includes(currentDefault) ? currentDefault : ''}
+                              options={availableModels.map((m) => ({ value: m, label: m }))}
+                              onChange={(v) => patchDraft({ defaultModel: v })}
+                            />
+                          </Field>
+                        );
+                      })()}
+                      <Field label={t('fieldAvailableModels')} help={t('fieldAvailableModelsHelp')}>
+                        <textarea data-id="provider-dashboard-auto-103" value={modelsText} onChange={(e) => setModelsText(e.target.value)} rows={4} className={cn(INPUT, 'h-auto resize-y py-2 font-mono leading-relaxed')} placeholder={'gpt-5.5\ngpt-5.4'} />
+                      </Field>
+                    </section>
+
                     {/* Access */}
                     <section data-id="provider-dashboard-auto-89" className="space-y-3.5">
                       <SectionHeader>{t('sectionAccess')}</SectionHeader>
@@ -680,29 +703,6 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
                           </div>
                         </Field>
                       </div>
-                    </section>
-
-                    {/* Models */}
-                    <section data-id="provider-dashboard-auto-97" className="space-y-3.5">
-                      <SectionHeader>{t('sectionModels')}</SectionHeader>
-                      <Field label={t('fieldAvailableModels')} help={t('fieldAvailableModelsHelp')}>
-                        <textarea data-id="provider-dashboard-auto-103" value={modelsText} onChange={(e) => setModelsText(e.target.value)} rows={4} className={cn(INPUT, 'h-auto resize-y py-2 font-mono leading-relaxed')} placeholder={'gpt-5.5\ngpt-5.4'} />
-                      </Field>
-                      {(() => {
-                        const availableModels = modelsText.split('\n').map((l) => l.trim()).filter(Boolean);
-                        const currentDefault = draft.defaultModel || '';
-                        return (
-                          <Field label={t('fieldDefaultModel')} help={t('fieldDefaultModelHelp')}>
-                            <Select
-                              searchable
-                              placeholder={t('selectModel')}
-                              value={availableModels.includes(currentDefault) ? currentDefault : ''}
-                              options={availableModels.map((m) => ({ value: m, label: m }))}
-                              onChange={(v) => patchDraft({ defaultModel: v })}
-                            />
-                          </Field>
-                        );
-                      })()}
                     </section>
 
                     {/* test result */}

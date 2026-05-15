@@ -11,6 +11,22 @@ import {
 import { cn } from '../../lib/utils';
 import apiService from '../../services/api';
 import { useDialogs } from '../ui/Modal';
+import { ProxyManagerDialog } from './ProxyManagerDialog';
+import { ProxySshManagerDialog } from './ProxySshManagerDialog';
+
+// Prompt sent to the active agent when the user clicks "Authorize Google" in
+// the skill detail. The agent uses the `google` skill's `login` tool to drive
+// the OAuth setup conversationally — first guiding the user through creating
+// a Google Cloud OAuth client if needed, then through the device-code flow.
+const GOOGLE_AUTH_PROMPT = [
+  '请用 `google` skill 帮我完成 Google 账号授权。先运行 `google login`,然后严格按它 stdout 里给的步骤一步一步带我走 —— 它会自己判断当前状态(还没配 OAuth client / 已配但没授权 / 已授权),并给出对应指引。',
+  '',
+  '注意:',
+  '- 每一步等我确认完再做下一步,不要一次性把所有步骤都说完。',
+  '- 如果它说要我去 Google Cloud Console 建 OAuth client,要明确告诉我 Application type 必须选 "TVs and Limited Input devices"(Web application 用不了 device flow)。',
+  '- 如果它打印了 user_code 和验证 URL,把它们清楚地展示给我,提醒我浏览器打开 URL 输 code,然后耐心等它轮询出结果。',
+  '- 不要替我跳过任何一步,也不要假设我已经做过 —— 一切以 `google login` 的实时输出为准。',
+].join('\n');
 
 interface InstallStatus {
   installed: boolean;
@@ -79,6 +95,8 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [proxyManagerOpen, setProxyManagerOpen] = useState(false);
+  const [proxySshManagerOpen, setProxySshManagerOpen] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -187,7 +205,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
         <div className="flex-1 overflow-y-auto" data-id="skill-market-list">
           {loading && skills.length === 0 ? (
             <div data-id="skill-marketplace-panel-auto-4" className="p-4 text-xs text-zinc-500 flex items-center gap-2">
-              <Loader2 className="w-3 h-3 animate-spin" /> {t('marketplaceInstalling')}
+              <Loader2 className="w-3 h-3 animate-spin" /> {t('marketplaceModalLoading')}
             </div>
           ) : loadError ? (
             <div data-id="skill-marketplace-panel-auto-5" className="p-4 text-xs">
@@ -229,8 +247,18 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
             const sk = skills.find(s => s.name === selectedName);
             if (sk) await onUninstall(sk);
           }}
+          onOpenProxyManager={() => {
+            setSelectedName(null);
+            setProxyManagerOpen(true);
+          }}
+          onOpenProxySshManager={() => {
+            setSelectedName(null);
+            setProxySshManagerOpen(true);
+          }}
         />
       )}
+      <ProxyManagerDialog open={proxyManagerOpen} onClose={() => setProxyManagerOpen(false)} paneId={paneId} />
+      <ProxySshManagerDialog open={proxySshManagerOpen} onClose={() => setProxySshManagerOpen(false)} />
     </>
   );
 }
@@ -277,12 +305,24 @@ function SkillRow({ skill, selected, onClick }: {
   );
 }
 
-function StatusPill({ installed, needsAttention, hasError }: { installed: boolean; needsAttention: boolean; hasError: boolean }) {
+function StatusPill({ skill }: { skill: MarketSkill }) {
   const { t } = useTranslation('workspace');
-  if (hasError) return <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 inline-flex items-center gap-1"><AlertTriangle className="w-2.5 h-2.5" /> {t('marketplaceError')}</span>;
-  if (needsAttention) return <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 inline-flex items-center gap-1"><AlertTriangle className="w-2.5 h-2.5" /> {t('marketplaceMissingDep')}</span>;
-  if (installed) return <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 inline-flex items-center gap-1"><CheckCircle2 className="w-2.5 h-2.5" /></span>;
-  return null;
+  const status = skill.status;
+  if (!status.installed) return null;
+  if (status.last_error) {
+    return <span title={status.last_error} className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 inline-flex items-center gap-1"><AlertTriangle className="w-2.5 h-2.5" /> {t('marketplaceError')}: {status.last_error}</span>;
+  }
+  if (skill.config_file && !status.config_present) {
+    if (skill.name === 'google') {
+      return <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 inline-flex items-center gap-1"><AlertTriangle className="w-2.5 h-2.5" /> {t('marketplaceNeedsOAuth')}</span>;
+    }
+    return <span title={skill.config_file} className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 inline-flex items-center gap-1"><AlertTriangle className="w-2.5 h-2.5" /> {t('marketplaceMissingConfig')}: <code className="font-mono">{skill.config_file}</code></span>;
+  }
+  const missingDeps = status.requires_met ? Object.entries(status.requires_met).filter(([, met]) => !met).map(([dep]) => dep) : [];
+  if (missingDeps.length > 0) {
+    return <span title={missingDeps.join(', ')} className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 inline-flex items-center gap-1"><AlertTriangle className="w-2.5 h-2.5" /> {t('marketplaceMissingDep')}: {missingDeps.join(', ')}</span>;
+  }
+  return <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 inline-flex items-center gap-1"><CheckCircle2 className="w-2.5 h-2.5" /></span>;
 }
 
 function CategoryBadge({ category }: { category: string }) {
@@ -330,12 +370,14 @@ function InlineStatus({ skill }: { skill: MarketSkill }) {
 
 type Tab = 'help' | 'tools';
 
-function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
+function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpenProxyManager, onOpenProxySshManager }: {
   name: string;
   paneId: string;
   onClose: () => void;
   onInstall: () => Promise<void>;
   onUninstall: () => Promise<void>;
+  onOpenProxyManager: () => void;
+  onOpenProxySshManager: () => void;
 }) {
   const { t } = useTranslation('workspace');
   const [data, setData] = useState<SkillDetailPayload | null>(null);
@@ -350,6 +392,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
   const [googleStatus, setGoogleStatus] = useState<{ connected: boolean; authorized_email?: string; has_shared_client?: boolean } | null>(null);
   const [googleBusy, setGoogleBusy] = useState(false);
   const [googleError, setGoogleError] = useState('');
+  const [googleDevice, setGoogleDevice] = useState<{ state: string; user_code: string; verification_url: string; verification_url_complete: string } | null>(null);
 
   const fetchDetail = useCallback(async () => {
     setLoading(true);
@@ -358,7 +401,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
       const payload = res?.data as SkillDetailPayload;
       setData(payload);
       const sk = payload?.skill;
-      if (sk) setSendText(`Use the \`${sk.name}\` skill: ${sk.description}`);
+      if (sk) setSendText(t('marketplaceTestPrompt', { name: sk.name }));
     } catch {
     } finally {
       setLoading(false);
@@ -382,43 +425,69 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
   const handleGoogleConnect = async () => {
     setGoogleBusy(true);
     setGoogleError('');
+    setGoogleDevice(null);
     try {
-      const res = await apiService.connectGoogleSkillConfig();
-      const authUrl = res?.data?.auth_url as string | undefined;
-      if (!authUrl) {
-        setGoogleError(res?.data?.error || 'no auth_url returned');
+      const res = await apiService.deviceConnectGoogleSkillConfig();
+      const d = res?.data;
+      if (!d?.state || !d?.user_code) {
+        setGoogleError(d?.error || 'no device code returned');
+        setGoogleBusy(false);
         return;
       }
-      const popup = window.open(authUrl, 'cicy-google-oauth', 'width=520,height=640');
-      // Poll status until connected or popup closes
+      const device = {
+        state: d.state as string,
+        user_code: d.user_code as string,
+        verification_url: (d.verification_url as string) || 'https://www.google.com/device',
+        verification_url_complete: (d.verification_url_complete as string) || '',
+      };
+      setGoogleDevice(device);
+      if (device.verification_url_complete) {
+        window.open(device.verification_url_complete, '_blank', 'noopener');
+      }
+      let interval = (d.interval as number) || 5;
       const start = Date.now();
-      const poll = setInterval(async () => {
-        try {
-          const s = await apiService.getGoogleSkillConfig();
-          if (s?.data?.connected) {
-            setGoogleStatus(s.data);
-            clearInterval(poll);
-            try { popup?.close(); } catch {}
-            setGoogleBusy(false);
-            return;
-          }
-        } catch {}
-        if (popup && popup.closed) {
-          clearInterval(poll);
+      const poll = async () => {
+        if (Date.now() - start > 15 * 60 * 1000) {
+          setGoogleError('timed out waiting for Google authorization');
           setGoogleBusy(false);
-          await refreshGoogleStatus();
+          setGoogleDevice(null);
           return;
         }
-        if (Date.now() - start > 5 * 60 * 1000) {
-          clearInterval(poll);
+        try {
+          const r = await apiService.devicePollGoogleSkillConfig(device.state);
+          const p = r?.data;
+          if (p?.connected) {
+            setGoogleBusy(false);
+            setGoogleDevice(null);
+            await refreshGoogleStatus();
+            return;
+          }
+          if (p?.error && p?.error !== 'slow_down') {
+            setGoogleError(String(p.error));
+            setGoogleBusy(false);
+            setGoogleDevice(null);
+            return;
+          }
+          if (p?.interval) interval = p.interval as number;
+        } catch (e: any) {
+          setGoogleError(e?.message || 'poll failed');
           setGoogleBusy(false);
-          setGoogleError('timed out waiting for Google authorization');
+          setGoogleDevice(null);
+          return;
         }
-      }, 1500);
+        setTimeout(poll, interval * 1000);
+      };
+      setTimeout(poll, interval * 1000);
     } catch (e: any) {
-      setGoogleError(e?.message || 'connect failed');
+      setGoogleError(e?.response?.data?.detail || e?.response?.data?.error || e?.message || 'connect failed');
       setGoogleBusy(false);
     }
+  };
+
+  const handleGoogleCancel = () => {
+    setGoogleBusy(false);
+    setGoogleDevice(null);
+    setGoogleError('');
   };
 
   const handleGoogleDisconnect = async () => {
@@ -528,7 +597,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
                 <div className="text-base font-semibold text-zinc-100" data-id="skill-detail-title">
                   {skill?.title || (loading ? '…' : name)}
                 </div>
-                {skill && <StatusPill installed={skill.status.installed} needsAttention={skill.status.installed && (!skill.status.config_present || !!skill.status.last_error)} hasError={!!skill.status.last_error} />}
+                {skill && <StatusPill skill={skill} />}
               </div>
               <div data-id="skill-marketplace-panel-auto-23" className="text-[11px] text-zinc-500 mt-0.5">
                 {skill ? <>v{skill.version} · {t('marketplacePublisher')}</> : ''}
@@ -548,9 +617,24 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
                         {busy && <Loader2 className="w-3 h-3 animate-spin" />}
                         {busy ? t('marketplaceInstalling') : t('marketplaceReinstall')}
                       </button>
-                      <button data-id="skill-detail-uninstall" onClick={handleUninstall} disabled={busy} className="text-[12px] px-3 py-1.5 rounded text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors">
-                        {t('marketplaceUninstall')}
-                      </button>
+                      {skill.name === 'cicy-mihomo' ? (
+                        <button data-id="skill-detail-manage-proxy" onClick={onOpenProxyManager} className="text-[12px] px-3 py-1.5 rounded bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 transition-colors inline-flex items-center gap-1">
+                          <Shield className="w-3 h-3" />
+                          {t('marketplaceManageProxy')}
+                        </button>
+                      ) : skill.name === 'proxy_ssh' ? (
+                        // proxy_ssh is a managed skill — open the dedicated drawer;
+                        // uninstall is intentionally not offered (the wrapper stays
+                        // resident; users can stop individual profiles in the drawer).
+                        <button data-id="skill-detail-manage-proxy-ssh" onClick={onOpenProxySshManager} className="text-[12px] px-3 py-1.5 rounded bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 transition-colors inline-flex items-center gap-1">
+                          <Shield className="w-3 h-3" />
+                          {t('marketplaceManageProxySsh')}
+                        </button>
+                      ) : (
+                        <button data-id="skill-detail-uninstall" onClick={handleUninstall} disabled={busy} className="text-[12px] px-3 py-1.5 rounded text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors">
+                          {t('marketplaceUninstall')}
+                        </button>
+                      )}
                     </>
                   ) : (
                     <button data-id="skill-detail-install" onClick={handleInstall} disabled={busy} className="text-[12px] px-3 py-1.5 rounded bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 disabled:opacity-50 transition-colors inline-flex items-center gap-1">
@@ -558,27 +642,60 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
                       {busy ? t('marketplaceInstalling') : t('marketplaceInstall')}
                     </button>
                   )}
-                  {skill.name === 'google' && (
-                    googleStatus?.connected ? (
-                      <>
-                        <span data-id="skill-detail-google-connected" className="text-[12px] px-2 py-1 rounded bg-emerald-500/15 text-emerald-300 inline-flex items-center gap-1.5">
-                          <CheckCircle2 className="w-3 h-3" />
-                          {googleStatus.authorized_email || 'connected'}
-                        </span>
-                        <button data-id="skill-detail-google-disconnect" onClick={handleGoogleDisconnect} disabled={googleBusy} className="text-[12px] px-2 py-1 rounded text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors">
-                          Disconnect
-                        </button>
-                      </>
-                    ) : (
-                      <button data-id="skill-detail-google-connect" onClick={handleGoogleConnect} disabled={googleBusy || googleStatus?.has_shared_client === false} className="text-[12px] px-3 py-1.5 rounded bg-blue-500/20 text-blue-200 hover:bg-blue-500/30 disabled:opacity-50 transition-colors inline-flex items-center gap-1" title={googleStatus?.has_shared_client === false ? 'No OAuth client configured on this server' : ''}>
-                        {googleBusy && <Loader2 className="w-3 h-3 animate-spin" />}
-                        {googleBusy ? 'Waiting for Google…' : 'Authorize Google'}
+                  {skill.name === 'google' && googleStatus?.connected && (
+                    <>
+                      <span data-id="skill-detail-google-connected" className="text-[12px] px-2 py-1 rounded bg-emerald-500/15 text-emerald-300 inline-flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3 h-3" />
+                        {googleStatus.authorized_email || 'connected'}
+                      </span>
+                      <button data-id="skill-detail-google-disconnect" onClick={handleGoogleDisconnect} disabled={googleBusy} className="text-[12px] px-2 py-1 rounded text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors">
+                        Disconnect
                       </button>
-                    )
+                    </>
+                  )}
+                  {skill.name === 'google' && !googleStatus?.connected && (
+                    <button
+                      data-id="skill-detail-google-connect"
+                      onClick={() => {
+                        apiService.sendCommand(paneId, GOOGLE_AUTH_PROMPT, true).catch(() => {});
+                        onClose();
+                      }}
+                      className="text-[12px] px-3 py-1.5 rounded bg-blue-500/20 text-blue-200 hover:bg-blue-500/30 transition-colors inline-flex items-center gap-1"
+                    >
+                      <Send className="w-3 h-3" />
+                      Authorize Google
+                    </button>
                   )}
                   {skill.name === 'google' && googleError && (
                     <span className="text-[11px] text-rose-300">{googleError}</span>
                   )}
+                </div>
+              )}
+              {skill?.name === 'google' && googleDevice && (
+                <div data-id="skill-detail-google-device" className="mt-3 rounded-lg border border-blue-500/30 bg-blue-500/5 p-3 text-xs text-zinc-200">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-3 h-3 animate-spin text-blue-300" />
+                    <span>Waiting for Google authorization…</span>
+                  </div>
+                  <div className="mt-2 leading-relaxed">
+                    Open <a href={googleDevice.verification_url_complete || googleDevice.verification_url} target="_blank" rel="noopener" className="text-blue-300 underline">{googleDevice.verification_url}</a> and enter this code:
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <code className="font-mono text-base tracking-[0.2em] px-2 py-1 rounded bg-black/30 text-zinc-100">{googleDevice.user_code}</code>
+                    <button
+                      onClick={() => copy(googleDevice.user_code)}
+                      className="text-[11px] px-2 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:border-zinc-500 inline-flex items-center gap-1 transition-colors"
+                    >
+                      {copied === googleDevice.user_code ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      {copied === googleDevice.user_code ? 'Copied' : 'Copy'}
+                    </button>
+                    <button
+                      onClick={handleGoogleCancel}
+                      className="text-[11px] px-2 py-1 rounded text-zinc-400 hover:text-zinc-200 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -612,9 +729,9 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
           ) : !skill ? (
             <div data-id="skill-marketplace-panel-auto-26" className="text-xs text-zinc-500">{t('marketplaceNoData')}</div>
           ) : tab === 'help' ? (
-            <MarkdownPane content={data?.help_md || data?.skill_md || ''} onTry={sendToAgent} setSendText={setSendText} clickable={false} />
+            <MarkdownPane content={data?.help_md || data?.skill_md || ''} onTry={sendToAgent} setSendText={setSendText} skillName={skill.name} clickable={false} />
           ) : (
-            <MarkdownPane content={data?.tools_md || ''} onTry={sendToAgent} setSendText={setSendText} clickable={true} />
+            <MarkdownPane content={data?.tools_md || ''} onTry={sendToAgent} setSendText={setSendText} skillName={skill.name} clickable={true} />
           )}
         </div>
 
@@ -667,7 +784,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall }: {
   );
 }
 
-const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, clickable }: { content: string; onTry: (cmd: string) => void; setSendText: (s: string) => void; clickable: boolean }) {
+const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, skillName, clickable }: { content: string; onTry: (cmd: string) => void; setSendText: (s: string) => void; skillName: string; clickable: boolean }) {
   const { t, i18n } = useTranslation('workspace');
   const lang = (i18n.language || 'en').toLowerCase();
   const showTranslate = !lang.startsWith('en') && !!content && content.trim().length > 0;
@@ -716,7 +833,7 @@ const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, c
         if (clickable) {
           return (
             <button data-id="skill-marketplace-panel-auto-31"
-              onClick={() => setSendText(text)}
+              onClick={() => setSendText(t('marketplaceTestToolPrompt', { name: skillName, command: text }))}
               className="px-1 py-0.5 rounded bg-white/[0.06] text-[11px] text-amber-200 font-mono hover:bg-white/[0.12] transition-colors"
               title={t('marketplaceLoadIntoSend')}
             >
@@ -743,7 +860,7 @@ const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, c
     },
     blockquote: (p: any) => <blockquote className="border-l-2 border-zinc-600 pl-3 my-2 text-zinc-400" {...p} />,
     hr: () => <hr className="my-3 border-white/[0.06]" />,
-  }), [t, setSendText, onTry, clickable]);
+  }), [t, setSendText, onTry, skillName, clickable]);
 
   // Memoize the full Markdown render keyed on shown — re-parse only when the
   // displayed text actually changes (tab switch, translation toggle, fetch).

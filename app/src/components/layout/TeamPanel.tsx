@@ -7,7 +7,6 @@ import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
 import { useDialog } from '../../contexts/DialogContext';
 import { normalizeAgentType } from '../../lib/agentType';
-import { useDevRegister } from '../../lib/devStore';
 import AgentAvatar from '../AgentAvatar';
 import Select from '../ui/Select';
 import CreateAgentDialog, { CreateAgentValues } from '../CreateAgentDialog';
@@ -57,6 +56,9 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   const [creating, setCreating] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
+  const [draggingWid, setDraggingWid] = useState<string | null>(null);
+  const [dragOverWid, setDragOverWid] = useState<string | null>(null);
   const { confirm } = useDialog();
 
   const shortId = (id: string) => (id || '').replace(/:.*$/, '');
@@ -67,16 +69,6 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     document.addEventListener('pointerdown', closeMenu);
     return () => document.removeEventListener('pointerdown', closeMenu);
   }, []);
-  useDevRegister(`TeamPanel:${paneId}`, {
-    paneId,
-    creating,
-    createDialogOpen,
-    openMenuId,
-    boundCount: bindings.length,
-    availableCount: panes.length,
-    activePaneId: activePaneId || paneId,
-  });
-
   const boundIds = new Set(bindings.map(b => shortId(b.name)));
   const available = panes.filter(a => {
     const sid = shortId(a.pane_id);
@@ -114,7 +106,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         title: values.title,
         agent_type: values.agent_type,
         allow_all_actions: values.allow_all_actions,
-        use_official_auth: values.use_official_auth,
+        use_custom_gateway: values.use_custom_gateway,
         use_proxy: values.use_proxy,
       });
       const newId = data?.pane_id || data?.session;
@@ -209,15 +201,64 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
       }
     );
   }, [confirm, onRefreshPanes, onRefreshPoll, showToast]);
+  const orderedBindings = useMemo(() => {
+    if (!dragOrder || dragOrder.length === 0) return bindings;
+    const byWid = new Map(bindings.map(b => [shortId(b.name), b] as const));
+    const result: Binding[] = [];
+    const seen = new Set<string>();
+    for (const wid of dragOrder) {
+      const b = byWid.get(wid);
+      if (b && !seen.has(wid)) {
+        result.push(b);
+        seen.add(wid);
+      }
+    }
+    for (const b of bindings) {
+      const wid = shortId(b.name);
+      if (!seen.has(wid)) result.push(b);
+    }
+    return result;
+  }, [bindings, dragOrder]);
+
   const groupedBindings = useMemo(() => {
     const groups = new Map<string, { machineId?: number; machineLabel?: string; items: Binding[] }>();
-    for (const binding of bindings) {
+    for (const binding of orderedBindings) {
       const key = binding.machine_id ? String(binding.machine_id) : 'local';
       if (!groups.has(key)) groups.set(key, { machineId: binding.machine_id, machineLabel: binding.instance_label || binding.machine_label, items: [] });
       groups.get(key)!.items.push(binding);
     }
     return Array.from(groups.values());
-  }, [bindings]);
+  }, [orderedBindings]);
+
+  const handleReorderDrop = useCallback((groupKey: string, fromWid: string, toWid: string) => {
+    if (!fromWid || !toWid || fromWid === toWid) return;
+    const group = groupedBindings.find(g => (g.machineId ? String(g.machineId) : 'local') === groupKey);
+    if (!group) return;
+    const widsInGroup = group.items.map(b => shortId(b.name));
+    const fromIdx = widsInGroup.indexOf(fromWid);
+    const toIdx = widsInGroup.indexOf(toWid);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const nextGroupOrder = [...widsInGroup];
+    nextGroupOrder.splice(fromIdx, 1);
+    nextGroupOrder.splice(toIdx, 0, fromWid);
+    const overall = orderedBindings.map(b => shortId(b.name));
+    const newOrder: string[] = [];
+    let cursor = 0;
+    for (const wid of overall) {
+      if (widsInGroup.includes(wid)) {
+        newOrder.push(nextGroupOrder[cursor++]);
+      } else {
+        newOrder.push(wid);
+      }
+    }
+    setDragOrder(newOrder);
+    void apiService.reorderAgents(paneId, newOrder).then(() => {
+      onRefreshPoll();
+    }).catch(() => {
+      // best-effort: revert by clearing optimistic order
+      setDragOrder(null);
+    });
+  }, [groupedBindings, orderedBindings, paneId, onRefreshPoll]);
 
   const agentTypeById = useMemo(
     () => new Map(panes.map(agent => [shortId(agent.pane_id), normalizeAgentType(agent.agent_type)])),
@@ -251,6 +292,8 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     onRestart,
     onOpenSettings,
     canRestart = true,
+    groupKey,
+    draggable = false,
   }: {
     wid: string;
     title: string;
@@ -265,16 +308,46 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     onRestart?: () => void;
     onOpenSettings?: () => void;
     canRestart?: boolean;
+    groupKey?: string;
+    draggable?: boolean;
   }) => (
     <div
       key={wid}
       data-id={`team-panel-worker-${wid}`}
       onClick={onClick}
+      draggable={draggable}
+      onDragStart={draggable ? (e) => {
+        setDraggingWid(wid);
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', wid); } catch {}
+      } : undefined}
+      onDragOver={draggable ? (e) => {
+        if (!draggingWid || draggingWid === wid) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (dragOverWid !== wid) setDragOverWid(wid);
+      } : undefined}
+      onDragLeave={draggable ? () => {
+        if (dragOverWid === wid) setDragOverWid(null);
+      } : undefined}
+      onDrop={draggable ? (e) => {
+        e.preventDefault();
+        const fromWid = draggingWid || e.dataTransfer.getData('text/plain');
+        if (fromWid && fromWid !== wid && groupKey) {
+          handleReorderDrop(groupKey, fromWid, wid);
+        }
+        setDraggingWid(null);
+        setDragOverWid(null);
+      } : undefined}
+      onDragEnd={draggable ? () => {
+        setDraggingWid(null);
+        setDragOverWid(null);
+      } : undefined}
       className={`w-full mb-2 flex items-center gap-3 border p-3 rounded-xl transition-all group relative cursor-pointer ${
         active
           ? 'border-blue-500/50 bg-blue-500/[0.08] ring-1 ring-blue-500/20'
           : 'bg-white/[0.02] border-[var(--vsc-border)] hover:border-white/[0.08]'
-      }`}
+      } ${draggingWid === wid ? 'opacity-40' : ''} ${dragOverWid === wid && draggingWid && draggingWid !== wid ? 'ring-2 ring-blue-500/40' : ''}`}
     >
       <div
         data-id={`team-panel-worker-menu-${wid}`}
@@ -298,7 +371,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         {openMenuId === wid ? (
           <div
             data-id="team-panel-worker-menu-dropdown"
-            className="absolute right-0 top-9 min-w-[190px] overflow-hidden rounded-xl border border-white/[0.08] bg-[#111113]/98 p-1.5 shadow-2xl backdrop-blur-xl"
+            className="absolute right-0 top-9 min-w-[220px] overflow-hidden whitespace-nowrap rounded-xl border border-white/[0.08] bg-[#111113]/98 p-1.5 shadow-2xl backdrop-blur-xl"
           >
             <button
               type="button"
@@ -310,7 +383,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
             >
               <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-              <span data-id="team-panel-worker-menu-open-label">{i18n.t('openInNewWindow', { ns: 'teamPanel' })}</span>
+              <span data-id="team-panel-worker-menu-open-label" className="whitespace-nowrap">{i18n.t('openInNewWindow', { ns: 'teamPanel' })}</span>
             </button>
             {onRemove ? (
               <button
@@ -437,7 +510,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
       />
 
 
-      <div className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto hide-scrollbar" data-id="team-panel-worker-list">
+      <div className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto hide-scrollbar select-none" data-id="team-panel-worker-list">
         <div className="p-1.5 border-b border-[var(--vsc-border)]" data-id="team-panel-current-agent">
           {renderAgentCard({
             wid: paneId,
@@ -464,14 +537,16 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         </div>
         {bindings.length > 0 ? (
           <div className="flex w-full min-w-0 flex-col" data-id="team-panel-groups">
-            {groupedBindings.map(group => (
+            {groupedBindings.map(group => {
+              const groupKey = group.machineId ? String(group.machineId) : 'local';
+              return (
               <div
-                key={group.machineId || 'local'}
+                key={groupKey}
                 style={{ padding: 4 }}
                 className={group.machineId ? 'border-b border-[var(--vsc-border)]' : ''}
                 data-id={`team-panel-group-${group.machineLabel || group.machineId || 'local'}`}
               >
-                
+
                 {group.items.map(b => {
                   const wid = shortId(b.name);
                   const s = getStatus(wid);
@@ -485,6 +560,8 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                     subtitle: subtitleParts.join(' · '),
                     active: activePaneId === wid,
                     opened: openedPaneIds.includes(wid),
+                    draggable: true,
+                    groupKey,
                     onClick: () => {
                       if (onLocatePane) {
                         onLocatePane(wid);
@@ -504,7 +581,8 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                   });
                 })}
               </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-zinc-600" data-id="team-panel-empty">

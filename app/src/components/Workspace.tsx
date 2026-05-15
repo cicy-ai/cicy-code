@@ -319,6 +319,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     globalVar,
     setGlobalVar,
     isDev,
+    setActiveAgentId,
+    setAgentDetail: setSharedAgentDetail,
+    patchAgentDetail: patchSharedAgentDetail,
   } = useApp();
   const { token, hasPermission } = useAuth();
   const { confirm } = useDialog();
@@ -382,6 +385,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     window.open(urls.openClaw(token), '_blank');
   };
   const [agentDetail, setAgentDetail] = useState<any>(null);
+  // Mirror the primary pane's detail into AppContext so any other component (footer
+  // ModelPicker, secondary panels, etc.) can subscribe via useApp().activeAgentDetail
+  // and stay in sync without prop-drilling.
+  useEffect(() => {
+    setSharedAgentDetail(paneId, agentDetail);
+  }, [paneId, agentDetail, setSharedAgentDetail]);
   const title = agentDetail?.title || '-';
   const [netLatency, setNetLatency] = useState<number | null>(null);
   const [chatWsConnected, setChatWsConnected] = useState(false);
@@ -542,6 +551,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const applyPanePatch = useCallback((targetPaneId: string, patch: any) => {
     const shortTarget = targetPaneId.split(':')[0];
     setPaneDetails(prev => ({ ...prev, [shortTarget]: { ...(prev[shortTarget] || {}), ...patch } }));
+    patchSharedAgentDetail(shortTarget, patch);
     if (shortTarget === paneId.split(':')[0]) {
       setAgentDetail((prev: any) => {
         const next = { ...(prev || {}), ...patch };
@@ -564,7 +574,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     // Nudge the server for a fresh poll_data so the other indicators
     // (status, machine bindings, etc.) also catch up immediately.
     try { chatWs.send({ type: 'poll_request' }); } catch {}
-  }, [paneId]);
+  }, [paneId, patchSharedAgentDetail]);
   const handleRenamePaneTitle = useCallback(async (targetPaneId: string, nextTitle: string) => {
     await apiService.updatePane(targetPaneId, { title: nextTitle });
     applyPanePatch(targetPaneId, { title: nextTitle });
@@ -700,6 +710,35 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useEffect(() => {
     setInspectorPaneId(activeCliPaneId || paneId);
   }, [activeCliPaneId, paneId]);
+  // Publish the active CLI pane id into AppContext so cross-component consumers
+  // (ModelPicker, other panels) can read activeAgentDetail without prop drilling.
+  useEffect(() => {
+    setActiveAgentId(activeCliPaneId || paneId);
+  }, [activeCliPaneId, paneId, setActiveAgentId]);
+  // Fetch pane detail for the active CLI pane so footer ModelPicker (and other
+  // active-card UI) can read use_custom_gateway/agent_type/provider models for
+  // panes other than the workspace's primary one.
+  useEffect(() => {
+    if (!activeCliPaneId) return;
+    const shortActive = activeCliPaneId.split(':')[0];
+    if (!shortActive) return;
+    // Fetch full pane detail (incl. runtime_ai_provider_options / runtime_ai_default,
+    // which only the GET endpoint returns) for the active CLI pane. Includes the
+    // workspace's primary pane — without it, the footer ModelPicker has nothing
+    // to render its provider list from when sitting on a primary pane.
+    const cached = paneDetails[shortActive];
+    if (cached && cached.runtime_ai_provider_options && cached.agent_type) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await apiService.getPane(activeCliPaneId);
+        if (cancelled || !data) return;
+        setPaneDetails(prev => ({ ...prev, [shortActive]: { ...(prev[shortActive] || {}), ...data } }));
+        setSharedAgentDetail(shortActive, data);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [activeCliPaneId, paneId, paneDetails, setSharedAgentDetail]);
   const openInspectorForPane = useCallback((targetPaneId: string, nextTab: InspectorTab = 'overview') => {
     const cleanPaneId = targetPaneId.replace(/:.*$/, '');
     setInspectorPaneId(cleanPaneId);
@@ -1169,14 +1208,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }, [membershipMenuOpen]);
 
   useDevRegister('Workspace', {
-    paneId: fullPaneId, masterAgentId: paneId, title, status, contextUsage, mouseMode, isRestarting,
-    agentDetail, netLatency,
-    pageClientId, chatWsClientId, chatWsConnected, codeServerReady,
-    membershipCard,
-    membershipMenuOpen,
+    paneId, status, mouseMode, isRestarting,
+    netLatency,
+    pageClientId, chatWsConnected, codeServerReady,
     agentsCount: agents.length,
-    agents: agents.map((a: any) => ({ pane_id: a.pane_id, title: a.title, status: a.status, active: a.active })),
-    activeTeamPaneId,
     activeCliPaneId,
     leftPanel: leftActive, activeWinIdx,
     cliContentMode,
@@ -1351,6 +1386,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const cliFixedContent = renderCliContentPanel();
   const stackHeaderControls = (targetPaneId: string) => targetPaneId === activeCliPaneId ? (
     <>
+      <ModelPicker
+        paneId={activeCliPaneId}
+        agentDetail={paneDetails[activeCliPaneId.split(':')[0]] || (activeCliPaneId.split(':')[0] === paneId.split(':')[0] ? agentDetail : null)}
+        onUpdated={(patch) => applyPanePatch(activeCliPaneId, patch)}
+      />
       <SystemResourceMonitor paneId={paneId} />
       <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} onSendClientId={handleSendPageClientIdToAgent} onCopyPrompt={handleCopyPageConnectPrompt} />
       <button data-id="workspace-token-open" onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title={t('apiTokenButton')}><Key className="w-3.5 h-3.5" /></button>
@@ -1815,7 +1855,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange, onOpenSett
         title: values.title,
         agent_type: values.agent_type,
         allow_all_actions: values.allow_all_actions,
-        use_official_auth: values.use_official_auth,
+        use_custom_gateway: values.use_custom_gateway,
         use_proxy: values.use_proxy,
       });
       const id = data?.pane_id || data?.id;
@@ -2039,9 +2079,9 @@ function resourceSeverity(pct: number | null | undefined) {
   if (pct == null || Number.isNaN(pct)) {
     return { text: 'text-zinc-500', bar: 'bg-zinc-600', track: 'bg-white/[0.04]', value: pct };
   }
-  if (pct >= 85) return { text: 'text-rose-300', bar: 'bg-rose-400', track: 'bg-rose-500/[0.10]', value: pct };
-  if (pct >= 65) return { text: 'text-amber-300', bar: 'bg-amber-400', track: 'bg-amber-500/[0.10]', value: pct };
-  return { text: 'text-emerald-300', bar: 'bg-emerald-400', track: 'bg-emerald-500/[0.08]', value: pct };
+  if (pct >= 85) return { text: 'text-rose-500/70', bar: 'bg-rose-400', track: 'bg-rose-500/[0.10]', value: pct };
+  if (pct >= 65) return { text: 'text-amber-500/70', bar: 'bg-amber-400', track: 'bg-amber-500/[0.10]', value: pct };
+  return { text: 'text-zinc-500', bar: 'bg-emerald-400', track: 'bg-emerald-500/[0.08]', value: pct };
 }
 
 const ResourceChip = memo(function ResourceChip({ label, pct, dataId }: { label: string; pct: number | null | undefined; dataId: string }) {
@@ -2099,6 +2139,143 @@ const ResourceRow = memo(function ResourceRow({
     </div>
   );
 });
+
+function ModelPicker({ paneId, agentDetail, onUpdated }: { paneId: string; agentDetail: any; onUpdated: (patch: any) => void }) {
+  const { runPaneSaveSerially } = useApp();
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
+
+  const useCustomGateway = !!agentDetail?.use_custom_gateway;
+  const agentType = String(agentDetail?.agent_type || '');
+  const eligible = useCustomGateway && ['claude', 'codex', 'opencode'].includes(agentType);
+  if (!eligible) return null;
+
+  const defaultProviderKey = String(agentDetail?.runtime_ai_default?.provider_name || '').trim();
+  const overrideProviderKey = String(agentDetail?.runtime_ai?.provider_name || '').trim();
+  const activeProviderKey = overrideProviderKey || defaultProviderKey;
+  const providerOptions: any[] = agentDetail?.runtime_ai_provider_options || [];
+  const activeProvider = providerOptions.find((p) => p?.key === activeProviderKey);
+  const currentModel = String(agentDetail?.default_model || agentDetail?.runtime_ai_default?.model || '');
+  const displayModel = currentModel || '—';
+
+  const handleSelect = async (providerKey: string, model: string) => {
+    if (saving) return;
+    const sameProvider = providerKey === activeProviderKey;
+    const sameModel = model === currentModel;
+    if (sameProvider && sameModel) { setOpen(false); return; }
+    // Runtime override semantic (mirrors the inspector's gateway-override block):
+    //   - Pick a model under the agent-type's DEFAULT provider → clear runtime_ai
+    //     (no override; gateway routes to the default).
+    //   - Pick a model under ANY other provider → set runtime_ai.provider_name to
+    //     that provider; gateway routes there on the next request.
+    // default_model always reflects the picked model.
+    const runtimeAI = providerKey && providerKey !== defaultProviderKey
+      ? { provider_name: providerKey }
+      : null;
+    const payload: Record<string, any> = { default_model: model, runtime_ai: runtimeAI };
+    setOpen(false);
+    setSaving(true);
+    onUpdated(payload);
+    try {
+      // (A) Per-pane save serialization — shares the same queue as Inspector,
+      // so a rapid sequence of ModelPicker click → Inspector toggle is applied
+      // to the server in click order.
+      await runPaneSaveSerially(paneId, () => apiService.updatePane(paneId, payload));
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: 'Failed to update model' }));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div data-id="model-picker-root" ref={rootRef} className="relative mr-auto">
+      <button
+        type="button"
+        data-id="model-picker-trigger"
+        onClick={() => setOpen(prev => !prev)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={activeProvider?.label || activeProviderKey || 'Provider'}
+        className={`flex h-7 items-center gap-2 rounded-md border px-2.5 transition-colors duration-150 cursor-pointer
+          ${open
+            ? 'border-white/[0.14] bg-white/[0.05]'
+            : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.04]'}
+          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/25`}
+      >
+        <span data-id="model-picker-current" className="max-w-[200px] truncate font-mono text-[11px] text-zinc-300">{displayModel}</span>
+        <ChevronDown
+          data-id="model-picker-chevron"
+          className={`h-3 w-3 text-zinc-600 transition-all duration-200 ${open ? 'rotate-180 text-zinc-300' : ''}`}
+        />
+      </button>
+      {open ? (
+        <div
+          data-id="model-picker-popover"
+          role="dialog"
+          className="animate-select-in absolute left-0 bottom-[calc(100%+8px)] z-[180] w-[300px] overflow-hidden rounded-xl border border-white/[0.06] bg-[#141416]/[0.98] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.04)] backdrop-blur-md"
+        >
+          <div data-id="model-picker-list" className="max-h-[360px] overflow-y-auto py-1">
+            {providerOptions.length === 0 ? (
+              <div className="px-3 py-3 text-[12px] text-zinc-500">No providers</div>
+            ) : providerOptions.map((p: any) => {
+              const pKey = String(p?.key || '');
+              const models: string[] = Array.isArray(p?.models) ? p.models.map((m: any) => String(m)) : [];
+              const isActiveProvider = pKey === activeProviderKey;
+              const isDefaultProvider = pKey === defaultProviderKey;
+              return (
+                <div key={pKey} data-id={`model-picker-provider-${pKey}`} className="border-b border-white/[0.04] last:border-b-0">
+                  <div data-id={`model-picker-provider-header-${pKey}`} className="flex items-center justify-between gap-2 px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`font-medium ${isActiveProvider ? 'text-blue-300' : 'text-zinc-400'}`}>{p?.label || pKey}</span>
+                      {isDefaultProvider ? <span className="rounded bg-zinc-700/40 px-1 py-px text-[9px] font-normal lowercase tracking-normal text-zinc-400">default</span> : null}
+                    </div>
+                    <span className="font-mono text-[9px] text-zinc-600">{p?.protocol || ''}</span>
+                  </div>
+                  {models.length === 0 ? (
+                    <div className="px-3 py-1.5 text-[11px] text-zinc-600">no models</div>
+                  ) : models.map((m) => {
+                    const isCurrent = isActiveProvider && m === currentModel;
+                    return (
+                      <button
+                        key={`${pKey}/${m}`}
+                        type="button"
+                        data-id={`model-picker-item-${pKey}-${m}`}
+                        onClick={() => handleSelect(pKey, m)}
+                        disabled={saving}
+                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-50 ${isCurrent ? 'bg-blue-500/10 text-blue-200' : 'text-zinc-300'}`}
+                      >
+                        <span className="flex-1 truncate font-mono">{m}</span>
+                        {isCurrent ? <Check className="h-3 w-3 shrink-0" /> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function SystemResourceMonitor({ paneId }: { paneId: string }) {
   const { t } = useTranslation('workspace');
@@ -2169,11 +2346,11 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
             : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.04]'}
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/25`}
       >
-        <ResourceChip label="CPU" pct={cpuPct} dataId="system-resource-summary-cpu" />
+        <ResourceChip label="C" pct={cpuPct} dataId="system-resource-summary-cpu" />
         <span data-id="workspace-auto-3" className="h-3 w-px bg-white/[0.06]" aria-hidden />
-        <ResourceChip label="MEM" pct={memPct} dataId="system-resource-summary-memory" />
+        <ResourceChip label="M" pct={memPct} dataId="system-resource-summary-memory" />
         <span data-id="workspace-auto-4" className="h-3 w-px bg-white/[0.06]" aria-hidden />
-        <ResourceChip label="DSK" pct={dskPct} dataId="system-resource-summary-disk" />
+        <ResourceChip label="D" pct={dskPct} dataId="system-resource-summary-disk" />
         <ChevronDown
           data-id="system-resource-chevron"
           className={`h-3 w-3 text-zinc-600 transition-all duration-200 ${open ? 'rotate-180 text-zinc-300' : 'group-hover/sysres:text-zinc-400'}`}
@@ -2183,7 +2360,7 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
         <div
           data-id="system-resource-dropdown"
           role="dialog"
-          className="animate-select-in absolute right-0 top-[calc(100%+8px)] z-[180] w-[320px] overflow-hidden rounded-xl border border-white/[0.06] bg-[#141416]/[0.98] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.04)] backdrop-blur-md"
+          className="animate-select-in absolute right-0 bottom-[calc(100%+8px)] z-[180] w-[320px] overflow-hidden rounded-xl border border-white/[0.06] bg-[#141416]/[0.98] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.04)] backdrop-blur-md"
         >
           <div data-id="system-resource-dropdown-header" className="flex items-center justify-between border-b border-white/[0.05] px-3 py-2.5">
             <div data-id="system-resource-dropdown-title" className="flex items-center gap-2">
@@ -2274,11 +2451,6 @@ function NetworkSignal({ latency, connected = true, clientId, onSendClientId, on
   }, [open]);
 
   const q = networkQuality(connected, latency);
-  const latencyLabel = !connected
-    ? t('networkOffline')
-    : latency === null
-      ? t('networkOnline')
-      : `${latency}ms`;
   const qualityWord = !connected
     ? t('networkOffline')
     : latency === null
@@ -2370,18 +2542,12 @@ function NetworkSignal({ latency, connected = true, clientId, onSendClientId, on
             ))}
           </div>
         )}
-        <span
-          data-id="network-signal-label"
-          className={`font-mono text-[10px] tabular-nums leading-none ${connected ? 'text-zinc-400' : 'text-rose-300'}`}
-        >
-          {latencyLabel}
-        </span>
       </button>
 
       {open ? (
         <div
           data-id="network-signal-popover"
-          className="animate-select-in absolute right-0 top-[calc(100%+8px)] z-[180] w-[280px] overflow-hidden rounded-xl border border-white/[0.06] bg-[#141416]/[0.98] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.04)] backdrop-blur-md"
+          className="animate-select-in absolute right-0 bottom-[calc(100%+8px)] z-[180] w-[280px] overflow-hidden rounded-xl border border-white/[0.06] bg-[#141416]/[0.98] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.04)] backdrop-blur-md"
         >
           <div data-id="network-signal-popover-header" className="flex items-center justify-between border-b border-white/[0.05] px-3 py-2.5">
             <div data-id="network-signal-popover-title" className="flex items-center gap-2">

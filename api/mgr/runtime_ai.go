@@ -183,6 +183,21 @@ func loadPaneAgentType(agentID string) string {
 	return strings.TrimSpace(agentType.String)
 }
 
+// loadPaneDefaultModel returns the default_model for a given agent ID.
+// Used by the gateway request rewriter to hot-swap the model on each request
+// without restarting the CLI.
+func loadPaneDefaultModel(agentID string) string {
+	paneID := normPaneID(agentID)
+	var v sql.NullString
+	if err := store.QueryRow("SELECT default_model FROM agent_config WHERE pane_id=?", paneID).Scan(&v); err != nil {
+		return ""
+	}
+	if !v.Valid {
+		return ""
+	}
+	return strings.TrimSpace(v.String)
+}
+
 func resolveRuntimeAIConfigForAgent(providerProtocol string, agentID string) (runtimeAIConfig, *runtimeAIOverride, error) {
 	// First, try to get provider based on agent type from new providers config
 	agentType := loadPaneAgentType(agentID)

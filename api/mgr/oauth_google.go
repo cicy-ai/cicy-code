@@ -37,10 +37,11 @@ import (
 )
 
 const (
-	googleAuthURL  = "https://accounts.google.com/o/oauth2/v2/auth"
-	googleTokenURL = "https://oauth2.googleapis.com/token"
-	googleUserURL  = "https://openidconnect.googleapis.com/v1/userinfo"
-	googleRevokURL = "https://oauth2.googleapis.com/revoke"
+	googleAuthURL       = "https://accounts.google.com/o/oauth2/v2/auth"
+	googleTokenURL      = "https://oauth2.googleapis.com/token"
+	googleUserURL       = "https://openidconnect.googleapis.com/v1/userinfo"
+	googleRevokURL      = "https://oauth2.googleapis.com/revoke"
+	googleDeviceCodeURL = "https://oauth2.googleapis.com/device/code"
 
 	googleStateTTL = 5 * time.Minute
 )
@@ -66,9 +67,19 @@ type googleStateEntry struct {
 	ExpiresAt   time.Time
 }
 
+type googleDeviceEntry struct {
+	Client     googleOAuthClient
+	DeviceCode string
+	Interval   int
+	ExpiresAt  time.Time
+}
+
 var (
 	googleStateMu    sync.Mutex
 	googleStateStore = map[string]googleStateEntry{}
+
+	googleDeviceMu    sync.Mutex
+	googleDeviceStore = map[string]googleDeviceEntry{}
 )
 
 func googleConfigPath() string {
@@ -80,31 +91,25 @@ func googleOAuthClientFilePath() string {
 }
 
 // loadGoogleOAuthClient returns the shared cicy-ai OAuth client credentials.
-// Returns an empty struct + false if none configured.
+// Source order:
+//  1. env CICY_GOOGLE_OAUTH_CLIENT_ID (+ optional CICY_GOOGLE_OAUTH_CLIENT_SECRET)
+//  2. ~/cicy-ai/db/google_oauth_client.json {client_id, client_secret}
+//
+// For the Device Authorization Grant the client_secret may be empty (TV /
+// Limited Input clients are public). The legacy global.json GMAIL_* keys are
+// intentionally NOT consulted — those refer to the old Web-application client.
 func loadGoogleOAuthClient() (googleOAuthClient, bool) {
 	if id := strings.TrimSpace(os.Getenv("CICY_GOOGLE_OAUTH_CLIENT_ID")); id != "" {
 		secret := strings.TrimSpace(os.Getenv("CICY_GOOGLE_OAUTH_CLIENT_SECRET"))
-		if secret != "" {
-			return googleOAuthClient{ClientID: id, ClientSecret: secret, Source: "env"}, true
-		}
+		return googleOAuthClient{ClientID: id, ClientSecret: secret, Source: "env"}, true
 	}
 	if data, err := os.ReadFile(googleOAuthClientFilePath()); err == nil {
 		var f struct {
 			ClientID     string `json:"client_id"`
 			ClientSecret string `json:"client_secret"`
 		}
-		if json.Unmarshal(data, &f) == nil && f.ClientID != "" && f.ClientSecret != "" {
+		if json.Unmarshal(data, &f) == nil && f.ClientID != "" {
 			return googleOAuthClient{ClientID: f.ClientID, ClientSecret: f.ClientSecret, Source: "db_file"}, true
-		}
-	}
-	if data, err := os.ReadFile(cicyGlobalJSONPath); err == nil {
-		var f map[string]any
-		if json.Unmarshal(data, &f) == nil {
-			id, _ := f["GMAIL_CLIENT_ID"].(string)
-			secret, _ := f["GMAIL_CLIENT_SECRET"].(string)
-			if id != "" && secret != "" {
-				return googleOAuthClient{ClientID: id, ClientSecret: secret, Source: "global_json"}, true
-			}
 		}
 	}
 	return googleOAuthClient{}, false
@@ -232,9 +237,203 @@ func handleGoogleSkillConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		googleConnect(w, r)
+	case path == "/device-connect":
+		if r.Method != "POST" {
+			httpErr(w, 405, "method not allowed")
+			return
+		}
+		googleDeviceConnect(w, r)
+	case path == "/device-poll":
+		if r.Method != "POST" {
+			httpErr(w, 405, "method not allowed")
+			return
+		}
+		googleDevicePoll(w, r)
 	default:
 		httpErr(w, 404, "not found")
 	}
+}
+
+func putGoogleDevice(state string, entry googleDeviceEntry) {
+	googleDeviceMu.Lock()
+	defer googleDeviceMu.Unlock()
+	now := time.Now()
+	for k, v := range googleDeviceStore {
+		if v.ExpiresAt.Before(now) {
+			delete(googleDeviceStore, k)
+		}
+	}
+	googleDeviceStore[state] = entry
+}
+
+func getGoogleDevice(state string) (googleDeviceEntry, bool) {
+	googleDeviceMu.Lock()
+	defer googleDeviceMu.Unlock()
+	entry, ok := googleDeviceStore[state]
+	if !ok {
+		return googleDeviceEntry{}, false
+	}
+	if entry.ExpiresAt.Before(time.Now()) {
+		delete(googleDeviceStore, state)
+		return googleDeviceEntry{}, false
+	}
+	return entry, true
+}
+
+func dropGoogleDevice(state string) {
+	googleDeviceMu.Lock()
+	defer googleDeviceMu.Unlock()
+	delete(googleDeviceStore, state)
+}
+
+// googleDeviceConnect kicks off the OAuth 2.0 Device Authorization Grant.
+// Requires a "TV and Limited Input devices" OAuth client (Web app clients
+// will be rejected by Google with "invalid_client" / "unauthorized_client").
+func googleDeviceConnect(w http.ResponseWriter, _ *http.Request) {
+	client, ok := loadGoogleOAuthClient()
+	if !ok {
+		httpErr(w, 400, "no OAuth client configured — create ~/cicy-ai/db/google_oauth_client.json with {\"client_id\":\"<TV/Limited-Input client_id>\",\"client_secret\":\"\"}")
+		return
+	}
+	form := url.Values{}
+	form.Set("client_id", client.ClientID)
+	form.Set("scope", strings.Join(googleOAuthScopes, " "))
+	resp, err := http.PostForm(googleDeviceCodeURL, form)
+	if err != nil {
+		httpErr(w, 502, "device/code request failed: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		httpErr(w, 502, fmt.Sprintf("device/code %d: %s (the OAuth client may not be of type 'TV and Limited Input devices')", resp.StatusCode, body))
+		return
+	}
+	var dr struct {
+		DeviceCode              string `json:"device_code"`
+		UserCode                string `json:"user_code"`
+		VerificationURL         string `json:"verification_url"`
+		VerificationURLComplete string `json:"verification_url_complete"`
+		ExpiresIn               int    `json:"expires_in"`
+		Interval                int    `json:"interval"`
+	}
+	if err := json.Unmarshal(body, &dr); err != nil || dr.DeviceCode == "" {
+		httpErr(w, 502, "parse device/code response: "+err.Error())
+		return
+	}
+	interval := dr.Interval
+	if interval <= 0 {
+		interval = 5
+	}
+	state := randomStateToken()
+	putGoogleDevice(state, googleDeviceEntry{
+		Client:     client,
+		DeviceCode: dr.DeviceCode,
+		Interval:   interval,
+		ExpiresAt:  time.Now().Add(time.Duration(dr.ExpiresIn) * time.Second),
+	})
+	if dr.VerificationURLComplete == "" && dr.VerificationURL != "" && dr.UserCode != "" {
+		dr.VerificationURLComplete = dr.VerificationURL + "?user_code=" + url.QueryEscape(dr.UserCode)
+	}
+	J(w, M{
+		"state":                     state,
+		"user_code":                 dr.UserCode,
+		"verification_url":          dr.VerificationURL,
+		"verification_url_complete": dr.VerificationURLComplete,
+		"expires_in":                dr.ExpiresIn,
+		"interval":                  interval,
+	})
+}
+
+// googleDevicePoll exchanges the stored device_code for tokens. Returns one of:
+//   - {connected:true, email}     — success
+//   - {pending:true}              — user hasn't approved yet (caller retries)
+//   - {error:"slow_down"}         — caller should back off
+//   - {error:"access_denied"}     — user denied, stop
+//   - {error:"expired_token"}     — device_code expired, restart
+func googleDevicePoll(w http.ResponseWriter, r *http.Request) {
+	state := r.URL.Query().Get("state")
+	if state == "" {
+		body, _ := io.ReadAll(r.Body)
+		var p struct {
+			State string `json:"state"`
+		}
+		_ = json.Unmarshal(body, &p)
+		state = p.State
+	}
+	if state == "" {
+		httpErr(w, 400, "missing state")
+		return
+	}
+	entry, ok := getGoogleDevice(state)
+	if !ok {
+		httpErr(w, 410, "expired or unknown state — please restart authorization")
+		return
+	}
+	form := url.Values{}
+	form.Set("client_id", entry.Client.ClientID)
+	if entry.Client.ClientSecret != "" {
+		form.Set("client_secret", entry.Client.ClientSecret)
+	}
+	form.Set("device_code", entry.DeviceCode)
+	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
+	resp, err := http.PostForm(googleTokenURL, form)
+	if err != nil {
+		httpErr(w, 502, "token poll failed: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		var e struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(body, &e)
+		switch e.Error {
+		case "authorization_pending":
+			J(w, M{"pending": true, "interval": entry.Interval})
+			return
+		case "slow_down":
+			J(w, M{"pending": true, "interval": entry.Interval + 5, "error": "slow_down"})
+			return
+		case "access_denied", "expired_token":
+			dropGoogleDevice(state)
+			J(w, M{"error": e.Error})
+			return
+		default:
+			J(w, M{"error": fmt.Sprintf("%s: %s", e.Error, body)})
+			return
+		}
+	}
+	var tokens struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		IDToken      string `json:"id_token"`
+		ExpiresIn    int    `json:"expires_in"`
+	}
+	if err := json.Unmarshal(body, &tokens); err != nil {
+		httpErr(w, 502, "parse token response: "+err.Error())
+		return
+	}
+	if tokens.RefreshToken == "" {
+		J(w, M{"error": "Google returned no refresh_token — disconnect and retry"})
+		return
+	}
+	dropGoogleDevice(state)
+	email := fetchGoogleUserEmail(tokens.AccessToken)
+	authState := googleAuthState{
+		RefreshToken:     tokens.RefreshToken,
+		AuthorizedEmail:  email,
+		AuthorizedAt:     time.Now().UTC().Format(time.RFC3339),
+		ClientKind:       "shared",
+		ClientIDSnapshot: entry.Client.ClientID,
+	}
+	if err := saveGoogleAuthState(authState); err != nil {
+		httpErr(w, 500, "save google.json: "+err.Error())
+		return
+	}
+	log.Printf("[google-oauth] device-connected: %s (client source: %s)", email, entry.Client.Source)
+	J(w, M{"connected": true, "authorized_email": email})
 }
 
 // handleGoogleSkillCallback is mounted WITHOUT auth — Google's redirect won't
@@ -252,18 +451,18 @@ func googleStatus(w http.ResponseWriter, _ *http.Request) {
 	client, hasClient := loadGoogleOAuthClient()
 	state, _ := loadGoogleAuthState()
 	J(w, M{
-		"connected":        state.RefreshToken != "",
-		"authorized_email": state.AuthorizedEmail,
-		"authorized_at":    state.AuthorizedAt,
+		"connected":         state.RefreshToken != "",
+		"authorized_email":  state.AuthorizedEmail,
+		"authorized_at":     state.AuthorizedAt,
 		"has_shared_client": hasClient,
-		"client_source":   client.Source,
+		"client_source":     client.Source,
 	})
 }
 
 func googleConnect(w http.ResponseWriter, r *http.Request) {
 	client, ok := loadGoogleOAuthClient()
 	if !ok {
-		httpErr(w, 400, "no cicy-ai shared OAuth client configured (set CICY_GOOGLE_OAUTH_CLIENT_ID/SECRET or ~/cicy-ai/db/google_oauth_client.json)")
+		httpErr(w, 400, "no OAuth client configured — create ~/cicy-ai/db/google_oauth_client.json with {\"client_id\":\"<TV/Limited-Input client_id>\",\"client_secret\":\"\"}")
 		return
 	}
 	redirectURI := detectRedirectURI(r)

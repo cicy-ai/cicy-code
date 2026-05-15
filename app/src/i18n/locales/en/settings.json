@@ -17,8 +17,6 @@
   "agentTypeCurrentNotInList": "current value (not in the option list)",
   "allowAllActionsTitle": "Allow all actions on start",
   "allowAllActionsHint": "Appends dangerous flags for Codex/Claude",
-  "officialAuthTitle": "Use official auth",
-  "officialAuthHint": "Skip the local gateway auth injection",
   "proxyToggleTitle": "Enable proxy",
   "proxyToggleHint": "Runs cicy_proxy_on before launch and checks mihomo rules",
   "proxyPasswordLabel": "Proxy password",
@@ -30,5 +28,7 @@
   "networkConfigLabel": "Config (JSON)",
   "networkExampleTitle": "Example:",
   "saveButton": "Save changes",
-  "saving": "Saving..."
+  "saving": "Saving...",
+  "customGatewayTitle": "Use local gateway",
+  "customGatewayHint": "Route this agent through the local AI gateway"
 }

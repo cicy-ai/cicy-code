@@ -17,8 +17,6 @@
   "agentTypeCurrentNotInList": "現在値（候補リストにありません）",
   "allowAllActionsTitle": "起動時にすべての操作を許可",
   "allowAllActionsHint": "Codex / Claude に危険フラグを追加",
-  "officialAuthTitle": "公式認証を使用",
-  "officialAuthHint": "ローカルゲートウェイの認証を注入しません",
   "proxyToggleTitle": "プロキシを有効化",
   "proxyToggleHint": "起動前に cicy_proxy_on を実行し mihomo ルールを確認",
   "proxyPasswordLabel": "プロキシパスワード",
@@ -30,5 +28,7 @@
   "networkConfigLabel": "設定（JSON）",
   "networkExampleTitle": "例：",
   "saveButton": "変更を保存",
-  "saving": "保存中…"
+  "saving": "保存中…",
+  "customGatewayTitle": "ローカル ゲートウェイを使用",
+  "customGatewayHint": "ローカル AI ゲートウェイ経由でルーティング"
 }

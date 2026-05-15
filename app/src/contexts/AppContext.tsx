@@ -66,6 +66,22 @@ interface AppContextType {
   selectPane: (paneId: string) => void;
   clearPane: () => void;
 
+  // Active agent — what the user is currently focused on in the UI. May differ from
+  // currentPaneId when the workspace's card stack has a non-master card focused.
+  // Stored as short id (e.g. "w-10001"), not the ":main.0" form.
+  activeAgentId: string | null;
+  setActiveAgentId: (id: string | null) => void;
+  // Cross-component cache of pane detail rows, keyed by short pane id. Inspector
+  // saves push patches in via patchAgentDetail so any component reading via
+  // useAgentDetail / activeAgentDetail sees the new value without re-fetching.
+  agentDetails: Record<string, any>;
+  setAgentDetail: (paneId: string, detail: any | null) => void;
+  patchAgentDetail: (paneId: string, patch: any) => void;
+  activeAgentDetail: any | null;
+  // Serialize PATCHes per pane so two rapid clicks (e.g. ModelPicker → Inspector)
+  // don't race and leave the server with stale state. Returns the wrapped fn's result.
+  runPaneSaveSerially: <T>(paneId: string, fn: () => Promise<T>) => Promise<T>;
+
   // API Client
   api: typeof apiService | null;
 
@@ -118,6 +134,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return PaneManager.getCurrentPane() || URL_PANE_ID;
   });
   const [paneDetail, setPaneDetail] = useState<any | null>(null);
+  const [activeAgentId, setActiveAgentIdState] = useState<string | null>(null);
+  const [agentDetails, setAgentDetailsState] = useState<Record<string, any>>({});
   const [api, setApi] = useState<typeof apiService | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [allPanes, setAllPanes] = useState<Agent[]>([]);
@@ -296,6 +314,58 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, [api, token]);
 
+  const normalizePaneIdShort = useCallback((id: string | null | undefined): string | null => {
+    if (!id) return null;
+    const trimmed = String(id).trim();
+    if (!trimmed) return null;
+    return trimmed.split(':')[0];
+  }, []);
+
+  const setActiveAgentId = useCallback((id: string | null) => {
+    setActiveAgentIdState(normalizePaneIdShort(id));
+  }, [normalizePaneIdShort]);
+
+  const setAgentDetail = useCallback((paneId: string, detail: any | null) => {
+    const key = normalizePaneIdShort(paneId);
+    if (!key) return;
+    setAgentDetailsState((prev) => {
+      if (detail == null) {
+        if (!(key in prev)) return prev;
+        const { [key]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [key]: detail };
+    });
+  }, [normalizePaneIdShort]);
+
+  const patchAgentDetail = useCallback((paneId: string, patch: any) => {
+    const key = normalizePaneIdShort(paneId);
+    if (!key || !patch || typeof patch !== 'object') return;
+    setAgentDetailsState((prev) => {
+      const current = prev[key] || {};
+      return { ...prev, [key]: { ...current, ...patch } };
+    });
+  }, [normalizePaneIdShort]);
+
+  const activeAgentDetail = useMemo(() => {
+    if (!activeAgentId) return null;
+    return agentDetails[activeAgentId] || null;
+  }, [activeAgentId, agentDetails]);
+
+  // Per-pane save serialization. Any component that PATCHes pane settings
+  // (Inspector / footer ModelPicker / card-title rename / ...) should wrap its
+  // call so concurrent edits to the same pane never get applied out-of-order
+  // on the server. We keep a small map of in-flight Promise chains keyed by
+  // short paneId — each new save awaits the previous one before running.
+  const paneSaveQueuesRef = useRef<Map<string, Promise<unknown>>>(new Map());
+  const runPaneSaveSerially = useCallback(<T,>(paneId: string, fn: () => Promise<T>): Promise<T> => {
+    const key = normalizePaneIdShort(paneId) || String(paneId || '').trim() || '__global__';
+    const prev = paneSaveQueuesRef.current.get(key) || Promise.resolve();
+    const next = prev.then(fn, fn);
+    paneSaveQueuesRef.current.set(key, next.catch(() => undefined));
+    return next as Promise<T>;
+  }, [normalizePaneIdShort]);
+
   const updateGlobalVar = useCallback(async (data: any) => {
     if (!api || !token) return;
     try {
@@ -319,6 +389,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setPaneDetail,
     selectPane,
     clearPane,
+    activeAgentId,
+    setActiveAgentId,
+    agentDetails,
+    setAgentDetail,
+    patchAgentDetail,
+    activeAgentDetail,
+    runPaneSaveSerially,
     api,
     agents,
     loadAgents,
@@ -363,17 +440,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [currentPaneId, allPanes]);
 
   useDevRegister('App', {
-    currentPaneId, allPanesCount: allPanes.length, loading, error,
-    paneDetail,
-    agents: agents.map(a => ({ id: a.pane_id, title: a.title, status: a.status })),
-    agentsCount: agents.length,
-    allPanes: allPanes.map(p => ({ pane_id: p.pane_id, title: p.title, status: p.status })),
-    globalVar,
+    loading,
     globalLoaded,
     isDev: !!globalVar?.dev,
-    agentTypeOptions,
+    agentsCount: agents.length,
+    activeAgentId,
+    activeAgentDetail: activeAgentDetail
+      ? {
+          pane_id: activeAgentDetail.pane_id,
+          title: activeAgentDetail.title,
+          agent_type: activeAgentDetail.agent_type,
+          default_model: activeAgentDetail.default_model,
+          use_custom_gateway: activeAgentDetail.use_custom_gateway,
+          runtime_ai: activeAgentDetail.runtime_ai,
+          active: activeAgentDetail.active,
+        }
+      : null,
+    agentDetailsKeys: Object.keys(agentDetails),
     systemResources,
-  }, { currentPaneId: (v: string) => selectPane(v), error: setError });
+  });
 
   return (
     <AppContext.Provider value={value}>

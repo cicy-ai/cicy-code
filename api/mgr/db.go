@@ -136,6 +136,7 @@ func (d *DB) Migrate() {
 			allow_all_actions INTEGER DEFAULT 0,
 			reply_in_chinese INTEGER DEFAULT 0,
 			use_official_auth INTEGER DEFAULT 0,
+			use_custom_gateway INTEGER DEFAULT 1,
 			machine_id INTEGER,
 			source_kind TEXT DEFAULT 'local',
 			source_ref TEXT DEFAULT ''
@@ -249,8 +250,15 @@ func (d *DB) Migrate() {
 	d.ensureColumn("agent_config", "allow_all_actions", "INTEGER DEFAULT 0")
 	d.ensureColumn("agent_config", "reply_in_chinese", "INTEGER DEFAULT 0")
 	d.ensureColumn("agent_config", "use_official_auth", "INTEGER DEFAULT 0")
+	d.ensureColumn("agent_config", "use_custom_gateway", "INTEGER DEFAULT 1")
+	// One-time migration: inverted semantic — convert use_official_auth → use_custom_gateway.
+	// We force-set every row to the inverse of use_official_auth, but only once
+	// (gated by config_migrations row), so manual edits to use_custom_gateway later
+	// won't be clobbered.
+	d.runOnceMigration("use_custom_gateway_v1", `UPDATE agent_config SET use_custom_gateway = CASE WHEN COALESCE(use_official_auth, 0) = 1 THEN 0 ELSE 1 END`)
 	d.ensureColumn("agent_config", "inspector_notes", "TEXT DEFAULT ''")
 	d.ensureColumn("agent_config", "inspector_notes_updated_at", "TEXT")
+	d.ensureColumn("pane_agents", "sort_order", "INTEGER DEFAULT 0")
 	d.ensureColumn("agent_queue", "step_kind", "TEXT DEFAULT 'message'")
 	d.ensureColumn("agent_queue", "workflow_id", "INTEGER")
 	d.ensureColumn("agent_queue", "parent_id", "INTEGER")
@@ -288,6 +296,22 @@ func (d *DB) ensureColumn(table, col, def string) {
 	if _, err := d.Exec(stmt); err != nil {
 		log.Printf("[db] ensure column error: %v SQL: %s", err, stmt)
 	}
+}
+
+// runOnceMigration runs `sql` exactly once, tracked by `name` in the
+// config_migrations table. Safe to call on every startup.
+func (d *DB) runOnceMigration(name, sql string) {
+	_, _ = d.Exec(`CREATE TABLE IF NOT EXISTS config_migrations (name TEXT PRIMARY KEY, applied_at TEXT)`)
+	var applied string
+	if err := d.QueryRow(`SELECT applied_at FROM config_migrations WHERE name=?`, name).Scan(&applied); err == nil && applied != "" {
+		return
+	}
+	if _, err := d.Exec(sql); err != nil {
+		log.Printf("[db] migration %s failed: %v", name, err)
+		return
+	}
+	_, _ = d.Exec(`INSERT INTO config_migrations(name, applied_at) VALUES(?, datetime('now'))`, name)
+	log.Printf("[db] applied migration %s", name)
 }
 
 func minInt(a, b int) int {

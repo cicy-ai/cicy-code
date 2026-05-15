@@ -17,8 +17,6 @@
   "agentTypeCurrentNotInList": "当前值（不在可选列表中）",
   "allowAllActionsTitle": "启动时允许所有操作",
   "allowAllActionsHint": "Codex/Claude 追加危险参数",
-  "officialAuthTitle": "使用官方认证",
-  "officialAuthHint": "开启后不注入本地 gateway auth",
   "proxyToggleTitle": "启用代理",
   "proxyToggleHint": "启动前执行 cicy_proxy_on，并检查 mihomo 规则",
   "proxyPasswordLabel": "代理密码",
@@ -30,5 +28,7 @@
   "networkConfigLabel": "配置（JSON）",
   "networkExampleTitle": "示例：",
   "saveButton": "保存更改",
-  "saving": "保存中..."
+  "saving": "保存中...",
+  "customGatewayTitle": "使用 本地 网关",
+  "customGatewayHint": "通过 cicy AI 网关路由此 agent"
 }

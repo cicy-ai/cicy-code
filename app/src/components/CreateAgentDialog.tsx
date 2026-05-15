@@ -10,7 +10,7 @@ export interface CreateAgentValues {
   title: string;
   agent_type: string;
   allow_all_actions: boolean;
-  use_official_auth: boolean;
+  use_custom_gateway: boolean;
   use_proxy: boolean;
 }
 
@@ -30,7 +30,7 @@ const DEFAULT_VALUES: CreateAgentValues = {
   title: '',
   agent_type: '',
   allow_all_actions: true,
-  use_official_auth: false,
+  use_custom_gateway: true,
   use_proxy: false,
 };
 
@@ -182,18 +182,18 @@ export default function CreateAgentDialog({
             </button>
           </div>
 
-          <div data-id="create-agent-dialog-use-official-auth" className="flex items-center justify-between py-1">
-            <div data-id="create-agent-dialog-use-official-auth-copy">
-              <p data-id="create-agent-dialog-use-official-auth-title" className="text-[13px] font-medium text-zinc-300">{ts('officialAuthTitle')}</p>
-              <p data-id="create-agent-dialog-use-official-auth-hint" className="mt-0.5 text-[11px] text-zinc-600">{ts('officialAuthHint')}</p>
+          <div data-id="create-agent-dialog-use-custom-gateway" className="flex items-center justify-between py-1">
+            <div data-id="create-agent-dialog-use-custom-gateway-copy">
+              <p data-id="create-agent-dialog-use-custom-gateway-title" className="text-[13px] font-medium text-zinc-300">{ts('customGatewayTitle')}</p>
+              <p data-id="create-agent-dialog-use-custom-gateway-hint" className="mt-0.5 text-[11px] text-zinc-600">{ts('customGatewayHint')}</p>
             </div>
             <button
-              data-id="create-agent-dialog-use-official-auth-toggle"
+              data-id="create-agent-dialog-use-custom-gateway-toggle"
               type="button"
-              onClick={() => set({ use_official_auth: !values.use_official_auth })}
-              className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${values.use_official_auth ? 'bg-blue-600' : 'bg-white/[0.08]'}`}
+              onClick={() => set({ use_custom_gateway: !values.use_custom_gateway })}
+              className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${values.use_custom_gateway ? 'bg-blue-600' : 'bg-white/[0.08]'}`}
             >
-              <div data-id="create-agent-dialog-use-official-auth-toggle-thumb" className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-md transition-transform ${values.use_official_auth ? 'translate-x-[22px]' : 'translate-x-1'}`} />
+              <div data-id="create-agent-dialog-use-custom-gateway-toggle-thumb" className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-md transition-transform ${values.use_custom_gateway ? 'translate-x-[22px]' : 'translate-x-1'}`} />
             </button>
           </div>
         </div>

@@ -793,13 +793,13 @@ func checkEnv() {
 }
 
 // anyActiveAgentUsesProxy returns true if at least one active row in
-// agent_config has a non-empty `proxy` entry in its JSON config.
+// agent_config has the proxy flag flipped on (proxy_enable=1).
 func anyActiveAgentUsesProxy() bool {
 	var count int
 	if err := store.QueryRow(
 		`SELECT COUNT(*) FROM agent_config
 		  WHERE active=1
-		    AND COALESCE(config,'') LIKE '%"proxy"%'`,
+		    AND COALESCE(proxy_enable, 0)=1`,
 	).Scan(&count); err != nil {
 		return false
 	}
@@ -1746,7 +1746,7 @@ func ensureBuiltinAgents(selected []string) {
 		desiredByPaneID[pid] = w
 	}
 
-	rows, err := store.Query("SELECT pane_id, ttyd_port, workspace, COALESCE(init_script,''), COALESCE(config,'{}'), COALESCE(agent_type,''), COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0), COALESCE(use_official_auth,0) FROM agent_config WHERE active=1 ORDER BY ttyd_port ASC, pane_id ASC")
+	rows, err := store.Query("SELECT pane_id, ttyd_port, workspace, COALESCE(init_script,''), COALESCE(config,'{}'), COALESCE(agent_type,''), COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0), COALESCE(use_custom_gateway,0) FROM agent_config WHERE active=1 ORDER BY ttyd_port ASC, pane_id ASC")
 	if err != nil {
 		return
 	}
@@ -1757,9 +1757,9 @@ func ensureBuiltinAgents(selected []string) {
 		var paneID, workspace, initScript, configJSON, agentType string
 		var allowAllActions bool
 		var replyInChinese bool
-		var useOfficialAuth bool
+		var useCustomGateway bool
 		var port int
-		rows.Scan(&paneID, &port, &workspace, &initScript, &configJSON, &agentType, &allowAllActions, &replyInChinese, &useOfficialAuth)
+		rows.Scan(&paneID, &port, &workspace, &initScript, &configJSON, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway)
 		if paneID == "" || port == 0 {
 			continue
 		}

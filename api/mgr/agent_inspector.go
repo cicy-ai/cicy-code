@@ -3367,6 +3367,7 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 	if trimmed == "" {
 		payload := map[string]interface{}{}
 		payload = agentInspectorInjectPrompt(payload, provider, agentID)
+		payload = agentInspectorOverrideModel(payload, agentID)
 		body, err := json.Marshal(payload)
 		if err != nil {
 			return requestBody
@@ -3378,11 +3379,28 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 		return requestBody
 	}
 	payload = agentInspectorInjectPrompt(payload, provider, agentID)
+	payload = agentInspectorOverrideModel(payload, agentID)
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return requestBody
 	}
 	return body
+}
+
+// agentInspectorOverrideModel rewrites the request body's "model" field to the
+// pane's configured default_model so users can hot-swap the model in the UI
+// without restarting the CLI. Skipped when default_model is empty (lets the
+// agent's own model selection pass through unchanged).
+func agentInspectorOverrideModel(payload map[string]interface{}, agentID string) map[string]interface{} {
+	if payload == nil {
+		return payload
+	}
+	model := loadPaneDefaultModel(agentID)
+	if model == "" {
+		return payload
+	}
+	payload["model"] = model
+	return payload
 }
 
 func agentInspectorProviderRequestToolItems(items []interface{}) []M {
