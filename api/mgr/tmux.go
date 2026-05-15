@@ -1252,6 +1252,108 @@ func resolveCodexStartupModel(defaultModel string, aiCfg runtimeAIConfig, shortI
 	return "gpt-5.4"
 }
 
+// resolveOpencodeStartupModel mirrors the codex/claude resolvers but for
+// opencode. Opencode's config file requires us to declare the default model
+// (top-level `model: cicyai/<name>`); without it the CLI falls back to its
+// built-in free DeepSeek provider regardless of what we registered in the
+// `cicyai` provider block.
+func resolveOpencodeStartupModel(defaultModel string, aiCfg runtimeAIConfig, shortID string) string {
+	if model := strings.TrimSpace(defaultModel); model != "" {
+		return model
+	}
+	if shortID != "" {
+		if _, ov, err := resolveRuntimeAIConfigForAgent("openai", shortID); err == nil && ov != nil && strings.TrimSpace(ov.ProviderName) != "" {
+			if provider, ok := loadProviderByKey(ov.ProviderName); ok {
+				if model := strings.TrimSpace(providerDefaultModelForAgentType(provider, "opencode")); model != "" {
+					return model
+				}
+			}
+		}
+	}
+	if provider, ok := loadProviderForAgentType("opencode"); ok {
+		if model := strings.TrimSpace(providerDefaultModelForAgentType(provider, "opencode")); model != "" {
+			return model
+		}
+	}
+	if model := strings.TrimSpace(aiCfg.DefaultOpencodeModel); model != "" {
+		return model
+	}
+	return ""
+}
+
+// opencodeActiveProvider returns the providerConfig currently routing for
+// this opencode pane: runtime_ai override if set, else the agent_type default.
+// Returns nil if neither resolves.
+func opencodeActiveProvider(shortID string) *providerConfig {
+	if shortID != "" {
+		if ov, _ := loadPaneRuntimeAIOverride(shortID); ov != nil && strings.TrimSpace(ov.ProviderName) != "" {
+			if p, ok := loadProviderByKey(ov.ProviderName); ok {
+				return p
+			}
+		}
+	}
+	if p, ok := loadProviderForAgentType("opencode"); ok {
+		return p
+	}
+	return nil
+}
+
+// opencodeActiveProtocol returns "openai" or "anthropic" depending on the
+// active provider's declared protocol. Opencode wires the appropriate ai-sdk
+// adapter and gateway path based on this — without it we'd send anthropic
+// requests to the openai-style gateway, which doesn't translate them.
+func opencodeActiveProtocol(shortID string) string {
+	if p := opencodeActiveProvider(shortID); p != nil {
+		if proto := normalizeAIGatewayProvider(p.Protocol); proto == "anthropic" || proto == "openai" {
+			return proto
+		}
+	}
+	return "openai"
+}
+
+// opencodeActiveProviderModels returns the models declared by the provider
+// currently routing for this pane. The resolvedModel argument is
+// prepended/deduped so it's always in the list even if the provider's
+// models[] array is empty.
+func opencodeActiveProviderModels(shortID string, resolvedModel string) []string {
+	provider := opencodeActiveProvider(shortID)
+	var out []string
+	seen := map[string]bool{}
+	add := func(m string) {
+		m = strings.TrimSpace(m)
+		if m == "" || seen[m] {
+			return
+		}
+		seen[m] = true
+		out = append(out, m)
+	}
+	if resolvedModel != "" {
+		add(resolvedModel)
+	}
+	if provider != nil {
+		for _, m := range provider.Models {
+			add(m)
+		}
+	}
+	return out
+}
+
+// buildOpencodeModelsBlock renders the opencode.json `models` field value as a
+// raw JSON object. Opencode treats keys as model identifiers and the values as
+// per-model overrides — we leave overrides empty since the cicyai provider
+// just forwards verbatim.
+func buildOpencodeModelsBlock(models []string) string {
+	if len(models) == 0 {
+		return "{}"
+	}
+	parts := make([]string, 0, len(models))
+	for _, m := range models {
+		b, _ := json.Marshal(m)
+		parts = append(parts, string(b)+":{}")
+	}
+	return "{" + strings.Join(parts, ",") + "}"
+}
+
 func resolveClaudeStartupModel(defaultModel string, aiCfg runtimeAIConfig, shortID string) string {
 	if model := strings.TrimSpace(defaultModel); model != "" {
 		return model
@@ -2220,23 +2322,49 @@ EOF
 			ensureAgentCommandLine("opencode", "OpenCode", opencodeInstallCmd(), installLog),
 		}
 		if useCustomGateway {
-			lines = append(lines,
-				fmt.Sprintf("export CICY_OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
-				`mkdir -p "$WORKSPACE/.opencode"`,
-			)
+			// Resolve startup model + the active provider's catalog + protocol.
+			// Opencode supports both openai-style and anthropic-style providers;
+			// it picks the right SDK and gateway path depending on the active
+			// provider's declared protocol. Without `model` + `models`, the CLI
+			// silently falls back to its built-in free DeepSeek.
+			model := resolveOpencodeStartupModel(defaultModel, aiCfg, shortID)
+			modelsBlock := buildOpencodeModelsBlock(opencodeActiveProviderModels(shortID, model))
+			topModelField := ""
+			if model != "" {
+				b, _ := json.Marshal("cicyai/" + model)
+				topModelField = `,"model":` + string(b)
+			}
+			var providerBlock string
+			switch opencodeActiveProtocol(shortID) {
+			case "anthropic":
+				lines = append(lines,
+					fmt.Sprintf("export CICY_ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
+					"export ANTHROPIC_API_KEY='cicy-local-gateway'",
+					"unset CICY_OPENAI_BASE_URL",
+				)
+				providerBlock = `"cicyai":{"npm":"@ai-sdk/anthropic","api":"anthropic","name":"cicyAi Gateway","options":{"baseURL":"$CICY_ANTHROPIC_BASE_URL","apiKey":"cicy-local-gateway"},"models":` + modelsBlock + `}`
+			default:
+				lines = append(lines,
+					fmt.Sprintf("export CICY_OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
+					"unset CICY_ANTHROPIC_BASE_URL",
+					"unset ANTHROPIC_API_KEY",
+				)
+				providerBlock = `"cicyai":{"npm":"@ai-sdk/openai-compatible","api":"openai","name":"cicyAi Gateway","options":{"baseURL":"$CICY_OPENAI_BASE_URL"},"models":` + modelsBlock + `}`
+			}
+			lines = append(lines, `mkdir -p "$WORKSPACE/.opencode"`)
 			if replyInChinese {
 				lines = append(lines,
 					`printf 'Always reply in Chinese unless the user explicitly asks for another language.\nKeep code, commands, file paths, environment variables, API identifiers, and other literal tokens unchanged when accuracy matters.\n' > "$WORKSPACE/.opencode/reply-in-chinese.md"`,
-					`cat > "$WORKSPACE/.opencode/opencode.json" <<EOF
-{"\$schema":"https://opencode.ai/config.json","permission":"allow","instructions":["$WORKSPACE/.opencode/reply-in-chinese.md"],"provider":{"cicyai":{"npm":"@ai-sdk/openai-compatible","api":"openai","name":"cicyAi Gateway","options":{"baseURL":"$CICY_OPENAI_BASE_URL"}}}}
-EOF`,
+					fmt.Sprintf(`cat > "$WORKSPACE/.opencode/opencode.json" <<EOF
+{"\$schema":"https://opencode.ai/config.json","permission":"allow","instructions":["$WORKSPACE/.opencode/reply-in-chinese.md"]%s,"provider":{%s}}
+EOF`, topModelField, providerBlock),
 				)
 			} else {
 				lines = append(lines,
 					`rm -f "$WORKSPACE/.opencode/reply-in-chinese.md"`,
-					`cat > "$WORKSPACE/.opencode/opencode.json" <<EOF
-{"\$schema":"https://opencode.ai/config.json","permission":"allow","provider":{"cicyai":{"npm":"@ai-sdk/openai-compatible","api":"openai","name":"cicyAi Gateway","options":{"baseURL":"$CICY_OPENAI_BASE_URL"}}}}
-EOF`,
+					fmt.Sprintf(`cat > "$WORKSPACE/.opencode/opencode.json" <<EOF
+{"\$schema":"https://opencode.ai/config.json","permission":"allow"%s,"provider":{%s}}
+EOF`, topModelField, providerBlock),
 				)
 			}
 			lines = append(lines, `OPENCODE_CONFIG="$WORKSPACE/.opencode/opencode.json" opencode`)
@@ -2247,6 +2375,8 @@ EOF`,
 			`rm -f "$WORKSPACE/.opencode/opencode.json"`,
 			`rm -f "$WORKSPACE/.opencode/reply-in-chinese.md"`,
 			"unset CICY_OPENAI_BASE_URL",
+			"unset CICY_ANTHROPIC_BASE_URL",
+			"unset ANTHROPIC_API_KEY",
 			"unset OPENCODE_CONFIG",
 			"clear",
 			"opencode",

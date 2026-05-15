@@ -192,6 +192,7 @@ func marketSkillsCatalog() []marketSkill {
 		{Name: "globalApiToken", Title: "Global API Token", Description: "Show or refresh ~/cicy-ai/global.json api_token.", Version: "1.0.0", Category: "ops", Icon: "shield", BinaryAliases: []string{"globalApiToken"}, ConfigFile: "~/cicy-ai/global.json"},
 		{Name: "us-spot-proxy", Title: "US Spot Proxy", Description: "Manage Aliyun spot proxy nodes.", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"us-spot-proxy"}, ConfigFile: "~/cicy-ai/db/us-spot-proxy.json"},
 		{Name: "aliyun-cli", Title: "Aliyun CLI", Description: "Bootstrap the official Aliyun CLI on this host. `aliyun-cli` installs the binary and applies a JSON config; after that, use the native `aliyun` command directly for ECS / VPC / RAM / OSS / etc.", Version: "1.0.0", Category: "infra", Icon: "cloud", Tags: []string{"aliyun", "ecs", "cli"}, BinaryAliases: []string{"aliyun-cli"}},
+		{Name: "email", Title: "Email Sender", Description: "Send transactional email via Resend. Bootstrap an api_key + verified from_address (config / status), then `email send --to ... --subject ... --body ...`.", Version: "1.0.0", Category: "infra", Icon: "mail", Tags: []string{"email", "resend", "smtp", "transactional"}, BinaryAliases: []string{"email"}},
 		{Name: "cicy-mihomo", Title: "Cicy Mihomo Proxy", Description: "Run a local Cicy Mihomo (mihomo / clash-meta fork) proxy with start/stop/reload/logs, node speed testing, and per-worker auth + routing.", Version: "1.0.0", Category: "network", Icon: "shield", Tags: []string{"proxy", "mihomo", "clash"}, BinaryAliases: []string{"cicy-mihomo"}, ConfigFile: "~/cicy-ai/db/mihomo.yaml"},
 		{Name: "proxy_ssh", Title: "SSH SOCKS Proxy", Description: "Manage local autossh-based SOCKS proxy profiles (start/stop/restart/test).", Version: "1.0.0", Category: "network", Icon: "plug", BinaryAliases: []string{"proxy_ssh"}, ConfigFile: "~/cicy-ai/db/proxy_ssh.json"},
 		{Name: "us-spot-dev", Title: "US Spot Dev", Description: "Provision a US Aliyun spot dev container on a persistent ESSD disk.", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"us-spot-dev"}},
@@ -403,6 +404,7 @@ var agentgenApprovedMarketSkills = map[string]struct{}{
 	"us-spot-proxy":             {},
 	"proxy_ssh":                 {},
 	"aliyun-cli":                {},
+	"email":                     {},
 }
 
 // hosttool aliases — symlink target is dist/cicy-hosttools. Must stay in sync
@@ -413,7 +415,7 @@ var hosttoolAliasSet = map[string]struct{}{
 	"gemini-ask": {}, "gemini-vision": {}, "globalApiToken": {},
 	"google":   {}, // pure-Go google skill (was Node provider; migrated)
 	"gpt":      {}, "gpt-chat": {}, "frp-client": {}, "frp-server": {}, "cicy-mihomo": {},
-	"mysql-exec": {}, "tg": {}, "cicy-agent": {}, "todo": {}, "aliyun-cli": {},
+	"mysql-exec": {}, "tg": {}, "cicy-agent": {}, "todo": {}, "aliyun-cli": {}, "email": {},
 }
 
 // resolveSymlinkSource maps an alias name to the file it should symlink to

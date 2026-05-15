@@ -269,10 +269,14 @@ func (e *Env) runAliyunConfigOpen() error {
 	cmd := exec.Command("agent-code-server", "open", path)
 	cmd.Stdout = e.Stdout
 	cmd.Stderr = e.Stderr
+	// agent-code-server sends a `code.open_file` event and then waits for the
+	// page-side `code.opened` ack. The send is reliable; the ack is best-effort
+	// and frequently times out even when the file did open. Don't propagate
+	// that exit code — the placeholder JSON is on disk and the open request
+	// was dispatched, so the user can proceed from code-server either way.
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintln(e.Stderr, "")
-		fmt.Fprintf(e.Stderr, "failed to invoke agent-code-server (%v) — fall back to editing directly:\n  $EDITOR %s\n", err, path)
-		return err
+		fmt.Fprintln(e.Stdout, "")
+		fmt.Fprintf(e.Stdout, "agent-code-server returned %v (likely just a missing ack). The file is open in code-server if you see it in the editor; otherwise edit directly:\n  $EDITOR %s\n", err, path)
 	}
 	fmt.Fprintln(e.Stdout, "")
 	fmt.Fprintln(e.Stdout, "After the user saves the AccessKey id and secret, run: aliyun-cli apply")

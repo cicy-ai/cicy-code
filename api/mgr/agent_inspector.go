@@ -3362,12 +3362,16 @@ func agentInspectorInjectPrompt(body map[string]interface{}, provider string, ag
 	return body
 }
 
-func agentInspectorRewriteRequestBody(provider string, agentID string, requestBody []byte) []byte {
+func agentInspectorRewriteRequestBody(provider string, agentID string, requestBody []byte, upstreamHost string) []byte {
+	disableThinking := shouldDisableThinkingForHost(upstreamHost)
 	trimmed := strings.TrimSpace(string(requestBody))
 	if trimmed == "" {
 		payload := map[string]interface{}{}
 		payload = agentInspectorInjectPrompt(payload, provider, agentID)
 		payload = agentInspectorOverrideModel(payload, agentID)
+		if disableThinking {
+			payload = agentInspectorDisableThinking(payload)
+		}
 		body, err := json.Marshal(payload)
 		if err != nil {
 			return requestBody
@@ -3380,11 +3384,40 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 	}
 	payload = agentInspectorInjectPrompt(payload, provider, agentID)
 	payload = agentInspectorOverrideModel(payload, agentID)
+	if disableThinking {
+		payload = agentInspectorDisableThinking(payload)
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return requestBody
 	}
 	return body
+}
+
+// shouldDisableThinkingForHost returns true unless the upstream is the official
+// OpenAI or Anthropic endpoint. Those providers validate thinking signatures
+// strictly (Anthropic) or reject `reasoning_content`/`enable_thinking` outright
+// (OpenAI), so we must not rewrite their request bodies. Everyone else —
+// cicyAi, new-api, DeepSeek direct, Together, SiliconFlow, etc. — either
+// silently strips unknown fields or actively requires the placeholders to
+// satisfy their thinking-mode validators.
+//
+// Matches by exact hostname (case-insensitive, port stripped) — strings.Contains
+// would let lookalikes like api.openai.com.evil.example bypass the rewrite,
+// which is the opposite of what we want for downstreams that DO need it.
+func shouldDisableThinkingForHost(upstreamHost string) bool {
+	h := strings.ToLower(strings.TrimSpace(upstreamHost))
+	if h == "" {
+		return true
+	}
+	if i := strings.IndexByte(h, ':'); i >= 0 {
+		h = h[:i]
+	}
+	switch h {
+	case "api.openai.com", "api.anthropic.com":
+		return false
+	}
+	return true
 }
 
 // agentInspectorOverrideModel rewrites the request body's "model" field to the
@@ -3400,6 +3433,79 @@ func agentInspectorOverrideModel(payload map[string]interface{}, agentID string)
 		return payload
 	}
 	payload["model"] = model
+	return payload
+}
+
+// agentInspectorDisableThinking neutralizes "extended thinking" / "reasoning"
+// across the request body so downstream CLIs (opencode/codex) don't have to
+// echo prior thinking content. DeepSeek (and proxies in front of it) reject
+// follow-up requests with `content[].thinking in the thinking mode must be
+// passed back to the API` when thinking mode is enabled server-side but the
+// assistant's prior turn arrives without it.
+//
+// Belt + braces because cicyAi/new-api front-ends typically strip the
+// `enable_thinking` flag on the way in:
+//  1. Flip every per-request thinking switch off (Anthropic `thinking` config,
+//     OpenAI `enable_thinking`, and the same nested under `extra_body`).
+//  2. Inject empty placeholders into each assistant turn so upstream
+//     validation passes even when the toggle didn't propagate:
+//     - Anthropic content array: prepend `{"type":"thinking","thinking":"",
+//       "signature":""}` when no thinking block is present.
+//     - OpenAI assistant message: set `reasoning_content: ""` when missing.
+func agentInspectorDisableThinking(payload map[string]interface{}) map[string]interface{} {
+	if payload == nil {
+		return payload
+	}
+	delete(payload, "thinking")
+	payload["enable_thinking"] = false
+	if extra, ok := payload["extra_body"].(map[string]interface{}); ok {
+		extra["enable_thinking"] = false
+	}
+	if msgs, ok := payload["messages"].([]interface{}); ok {
+		for _, raw := range msgs {
+			m, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			role, _ := m["role"].(string)
+			if role != "assistant" {
+				continue
+			}
+			// OpenAI chat/completions shape: assistant message echoes need
+			// reasoning_content. Empty string satisfies DeepSeek's validation.
+			if _, exists := m["reasoning_content"]; !exists {
+				m["reasoning_content"] = ""
+			}
+			// Anthropic Messages shape: content is either a string or an array
+			// of blocks. Promote string to array, then ensure a thinking block.
+			content := m["content"]
+			if s, ok := content.(string); ok {
+				m["content"] = []interface{}{
+					map[string]interface{}{"type": "thinking", "thinking": "", "signature": ""},
+					map[string]interface{}{"type": "text", "text": s},
+				}
+				continue
+			}
+			arr, ok := content.([]interface{})
+			if !ok {
+				continue
+			}
+			hasThinking := false
+			for _, c := range arr {
+				if cm, ok := c.(map[string]interface{}); ok {
+					if t, _ := cm["type"].(string); t == "thinking" || t == "redacted_thinking" {
+						hasThinking = true
+						break
+					}
+				}
+			}
+			if !hasThinking {
+				m["content"] = append([]interface{}{
+					map[string]interface{}{"type": "thinking", "thinking": "", "signature": ""},
+				}, arr...)
+			}
+		}
+	}
 	return payload
 }
 
