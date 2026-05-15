@@ -299,7 +299,7 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
     try {
       const resp = await apiService.getProviders();
       const rawSlots: string[] = Array.isArray(resp.data?.agent_type_slots) ? resp.data.agent_type_slots : [];
-      const slots = rawSlots.filter((s) => KNOWN_SLOTS.includes(s));
+      const slots = rawSlots.map((s) => String(s || '').trim()).filter(Boolean);
       const payload: ProvidersResponse = {
         defaults: resp.data?.defaults || {},
         items: Array.isArray(resp.data?.items) ? resp.data.items : [],
@@ -485,21 +485,17 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
         {tab === 'routing' ? (
           /* ═══════════ Agent routing ═══════════ */
           <div data-id="provider-dashboard-auto-38" className="h-full overflow-auto">
-            <div data-id="provider-dashboard-auto-39" className="mx-auto max-w-[760px] px-6 py-8">
-              <h1 className="text-[17px] font-semibold tracking-tight text-white">{t('routingTitle')}</h1>
-              <p className="mt-1 text-[13px] text-zinc-500">{t('routingHelp')}</p>
-
-              <div data-id="provider-dashboard-auto-40" className="mt-6 space-y-3">
-                {loading && items.length === 0 && [0, 1].map((i) => (
-                  <div data-id="provider-dashboard-auto-41" key={i} className={cn(CARD, 'p-5')}>
-                    <div data-id="provider-dashboard-auto-42" className="flex items-center gap-3"><Skeleton className="h-10 w-10 rounded-xl" /><div className="space-y-2"><Skeleton className="h-3.5 w-24" /><Skeleton className="h-3 w-40" /></div></div>
-                    <Skeleton className="mt-5 h-9 w-full rounded-lg" />
-                    <Skeleton className="mt-3 h-3 w-2/3" />
+            <div data-id="provider-dashboard-auto-39" className="px-6 py-6">
+              <div data-id="provider-dashboard-auto-40" className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
+                {loading && items.length === 0 && [0, 1, 2].map((i) => (
+                  <div data-id="provider-dashboard-auto-41" key={i} className={cn(CARD, 'p-4')}>
+                    <div data-id="provider-dashboard-auto-42" className="flex items-center gap-3"><Skeleton className="h-9 w-9 rounded-xl" /><div className="flex-1 space-y-2"><Skeleton className="h-3.5 w-24" /><Skeleton className="h-3 w-32" /></div></div>
+                    <Skeleton className="mt-4 h-9 w-full rounded-lg" />
                   </div>
                 ))}
 
                 {!loading && items.length === 0 && (
-                  <div data-id="provider-dashboard-auto-43" className={cn(CARD, 'flex flex-col items-center px-6 py-14 text-center')}>
+                  <div data-id="provider-dashboard-auto-43" className={cn(CARD, 'col-span-full flex flex-col items-center px-6 py-14 text-center')}>
                     <div data-id="provider-dashboard-auto-44" className="grid h-11 w-11 place-items-center rounded-xl bg-white/[0.04]"><Server size={20} className="text-zinc-500" /></div>
                     <div data-id="provider-dashboard-auto-45" className="mt-3 text-[14px] font-medium text-zinc-200">{t('noProvidersHeadline')}</div>
                     <div data-id="provider-dashboard-auto-46" className="mt-1 text-[12px] text-zinc-500">{t('noProvidersBody')}</div>
@@ -515,52 +511,42 @@ export default function ProviderDashboard({ onBack }: { onBack?: () => void }) {
                   const mismatch = !!provider && !!want && proto(provider) !== want;
                   const tone: 'ok' | 'warn' | 'off' = !provider ? 'off' : mismatch ? 'warn' : 'ok';
                   return (
-                    <div data-id="provider-dashboard-auto-47" key={slot} className={cn(CARD, 'p-5')}>
-                      <div data-id="provider-dashboard-auto-48" className="flex items-start gap-3">
+                    <div data-id="provider-dashboard-auto-47" key={slot} className={cn(CARD, 'flex flex-col p-4')}>
+                      <div data-id="provider-dashboard-auto-48" className="flex items-center gap-3">
                         <AgentAvatar agentType={slot} title={SLOT_LABELS[slot] || slot} variant="panel" />
                         <div data-id="provider-dashboard-auto-49" className="min-w-0 flex-1">
-                          <div data-id="provider-dashboard-auto-50" className="text-[15px] font-semibold text-white">{SLOT_LABELS[slot] || slot}</div>
-                          <div data-id="provider-dashboard-auto-51" className="mt-0.5 text-[12px] text-zinc-500">{t('slotProtocolHint', { desc: SLOT_DESC[slot] || slot, want })}</div>
+                          <div data-id="provider-dashboard-auto-50" className="flex items-center gap-2">
+                            <span data-id="provider-dashboard-auto-51" className="truncate text-[14px] font-semibold text-white">{SLOT_LABELS[slot] || slot}</span>
+                            <StatusDot tone={tone} />
+                          </div>
+                          <div data-id="provider-dashboard-auto-52" className="mt-0.5 truncate text-[11px] text-zinc-500">{SLOT_DESC[slot] || slot}</div>
                         </div>
-                        <span data-id="provider-dashboard-auto-52" className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white/[0.04] px-2 py-1 text-[11px] text-zinc-400">
-                          <StatusDot tone={tone} />
-                          {tone === 'ok' ? t('slotConfigured') : tone === 'warn' ? t('slotProtoMismatch') : t('slotUnconfigured')}
-                        </span>
                       </div>
 
-                      <div data-id="provider-dashboard-auto-53" className="my-4 h-px bg-white/[0.06]" />
-
-                      <div data-id="provider-dashboard-auto-54" className="text-[12px] font-medium text-zinc-400">{t('defaultProviderLabel')}</div>
-                      <div data-id="provider-dashboard-auto-55" className="mt-1.5">
+                      <div data-id="provider-dashboard-auto-55" className="mt-4">
                         <ProviderPicker
                           value={curKey} options={items} restrictToProtocol={want}
-                          emptyHint={t('emptyHintWithProto', { want })}
+                          emptyHint={want ? t('emptyHintWithProto', { want }) : t('noProviders')}
                           busy={savingSlot === slot} disabled={savingSlot === slot}
                           onChange={(k) => void updateDefault(slot, k)}
                         />
                       </div>
 
+                      <div data-id="provider-dashboard-auto-54" className="mt-3 flex min-w-0 items-center gap-1.5 text-[11px] text-zinc-500">
+                        <Cpu size={11} className="shrink-0 text-zinc-600" />
+                        <span data-id="provider-dashboard-auto-58" className="truncate font-mono text-zinc-400">{model || <span className="font-sans text-zinc-600">{SLOT_FALLBACK_MODEL[slot] || '—'}</span>}</span>
+                      </div>
+
                       {mismatch && (
-                        <div data-id="provider-dashboard-auto-56" className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-[12px] text-amber-200">
-                          <AlertTriangle size={13} className="mt-px shrink-0 text-amber-400" />
-                          <span data-id="provider-dashboard-auto-57">{t('protoMismatchInline', { has: proto(provider), slot: SLOT_LABELS[slot] || slot, want })}</span>
+                        <div data-id="provider-dashboard-auto-56" className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-300">
+                          <AlertTriangle size={11} className="shrink-0 text-amber-400" />
+                          <span data-id="provider-dashboard-auto-57" className="truncate">{t('protoMismatchInline', { has: proto(provider), slot: SLOT_LABELS[slot] || slot, want })}</span>
                         </div>
                       )}
-
-                      <dl className="mt-4 grid grid-cols-[3rem_1fr] gap-y-2 text-[12px]">
-                        <dt className="text-zinc-600">{t('upstream')}</dt>
-                        <dd className="truncate font-mono text-zinc-400">{provider?.url || <span className="font-sans text-zinc-600">{t('upstreamFallback')}</span>}</dd>
-                        <dt className="text-zinc-600">{t('modelLabel')}</dt>
-                        <dd className="truncate font-mono text-zinc-300">{model || <span className="font-sans text-zinc-600">{SLOT_FALLBACK_MODEL[slot] || '—'}{t('modelFallbackSuffix')}</span>}</dd>
-                      </dl>
                     </div>
                   );
                 })}
               </div>
-
-              {items.length > 0 && (
-                <p className="mt-5 text-[11px] text-zinc-600">{t('routingFootnote')}</p>
-              )}
             </div>
           </div>
         ) : (

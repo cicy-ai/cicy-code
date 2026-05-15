@@ -159,9 +159,7 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 			if desc, ok := tm["description"]; ok {
 				fn["description"] = desc
 			}
-			if params, ok := tm["parameters"]; ok {
-				fn["parameters"] = params
-			}
+			fn["parameters"] = sanitizeFunctionParameters(tm["parameters"])
 			tools = append(tools, map[string]interface{}{
 				"type":     "function",
 				"function": fn,
@@ -177,6 +175,29 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 
 	out, err := json.Marshal(dst)
 	return out, model, err
+}
+
+// sanitizeFunctionParameters guarantees the JSON Schema is well-formed for
+// strict-validating OpenAI-compatible upstreams. Specifically, DeepSeek (and
+// any new-api / cicyAi style gateway in front of it) returns
+// `Invalid schema for function 'X': null is not of type "array"` when the
+// schema omits `required`. OpenAI proper is lenient; everyone downstream is
+// not. We also normalize `type` to `"object"` and ensure `properties` exists.
+func sanitizeFunctionParameters(p interface{}) map[string]interface{} {
+	out, _ := p.(map[string]interface{})
+	if out == nil {
+		out = map[string]interface{}{}
+	}
+	if v, ok := out["type"]; !ok || v == nil {
+		out["type"] = "object"
+	}
+	if v, ok := out["properties"]; !ok || v == nil {
+		out["properties"] = map[string]interface{}{}
+	}
+	if v, ok := out["required"]; !ok || v == nil {
+		out["required"] = []interface{}{}
+	}
+	return out
 }
 
 func extractTextFromResponsesContent(content interface{}) string {
@@ -686,9 +707,7 @@ func transformMessagesRequestToChatCompletions(body []byte) ([]byte, string, err
 			if desc, ok := tm["description"]; ok {
 				fn["description"] = desc
 			}
-			if schema, ok := tm["input_schema"]; ok {
-				fn["parameters"] = schema
-			}
+			fn["parameters"] = sanitizeFunctionParameters(tm["input_schema"])
 			tools = append(tools, map[string]interface{}{
 				"type":     "function",
 				"function": fn,

@@ -31,6 +31,7 @@ var (
 	HosttoolAliases = []string{
 		"agent-code-server",
 		"agent-webpage",
+		"aliyun-cli",
 		"cf-tunnel",
 		"cf-tunnel-py",
 		"cf-tunnel.py",

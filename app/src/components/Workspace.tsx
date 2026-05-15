@@ -2148,17 +2148,37 @@ function ModelPicker({ paneId, agentDetail, onUpdated }: { paneId: string; agent
 
   useEffect(() => {
     if (!open) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+    const handleOutside = (event: Event) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (rootRef.current && rootRef.current.contains(target)) return;
+      setOpen(false);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
     };
-    document.addEventListener('pointerdown', handlePointerDown);
+    // Capture phase so we fire before any inner element calls stopPropagation
+    // (terminals, canvases, panes elsewhere on the page may swallow pointer
+    // events at bubble phase). mousedown + touchstart cover trackpad/touch and
+    // iframes that don't dispatch pointer events to document.
+    document.addEventListener('pointerdown', handleOutside, true);
+    document.addEventListener('mousedown', handleOutside, true);
+    document.addEventListener('touchstart', handleOutside, true);
     document.addEventListener('keydown', handleKeyDown);
+    // If focus shifts to an iframe (ttyd, code-server), pointerdown never
+    // reaches document — listen for blur on window to detect that.
+    const handleWindowBlur = () => {
+      if (document.activeElement && document.activeElement.tagName === 'IFRAME') {
+        setOpen(false);
+      }
+    };
+    window.addEventListener('blur', handleWindowBlur);
     return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('pointerdown', handleOutside, true);
+      document.removeEventListener('mousedown', handleOutside, true);
+      document.removeEventListener('touchstart', handleOutside, true);
       document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('blur', handleWindowBlur);
     };
   }, [open]);
 
@@ -2174,6 +2194,7 @@ function ModelPicker({ paneId, agentDetail, onUpdated }: { paneId: string; agent
   const activeProvider = providerOptions.find((p) => p?.key === activeProviderKey);
   const currentModel = String(agentDetail?.default_model || agentDetail?.runtime_ai_default?.model || '');
   const displayModel = currentModel || '—';
+  const displayProvider = String(activeProvider?.label || activeProviderKey || '').trim();
 
   const handleSelect = async (providerKey: string, model: string) => {
     if (saving) return;
@@ -2220,7 +2241,15 @@ function ModelPicker({ paneId, agentDetail, onUpdated }: { paneId: string; agent
             : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.04]'}
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/25`}
       >
-        <span data-id="model-picker-current" className="max-w-[200px] truncate font-mono text-[11px] text-zinc-300">{displayModel}</span>
+        <span data-id="model-picker-current" className="flex max-w-[280px] items-center gap-1.5 truncate font-mono text-[11px]">
+          {displayProvider ? (
+            <>
+              <span data-id="model-picker-provider" className="truncate text-zinc-500">{displayProvider}</span>
+              <span data-id="model-picker-sep" className="text-zinc-700">/</span>
+            </>
+          ) : null}
+          <span data-id="model-picker-model" className="truncate text-zinc-300">{displayModel}</span>
+        </span>
         <ChevronDown
           data-id="model-picker-chevron"
           className={`h-3 w-3 text-zinc-600 transition-all duration-200 ${open ? 'rotate-180 text-zinc-300' : ''}`}

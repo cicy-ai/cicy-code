@@ -109,6 +109,8 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		err = env.runCicyMihomo(args)
 	case "google":
 		err = env.runGoogle(args)
+	case "aliyun-cli", "aliyun_cli", "aliyuncli":
+		err = env.runAliyunCLI(args)
 	default:
 		fmt.Fprintf(stderr, "unsupported host tool: %s\n", cmd)
 		printAvailable(stderr)
@@ -216,7 +218,7 @@ type tmConfig struct {
 }
 
 func printAvailable(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, cicy-agent, agent-webpage, agent-code-server, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken, frp-server, frp-client, cicy-mihomo")
+	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, cicy-agent, agent-webpage, agent-code-server, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken, frp-server, frp-client, cicy-mihomo, aliyun-cli")
 }
 
 func (e *Env) apiRequest(ctx context.Context, method, path string, payload any) ([]byte, error) {
