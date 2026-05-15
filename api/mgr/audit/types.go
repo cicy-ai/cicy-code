@@ -120,6 +120,13 @@ type Meta struct {
 	// canonical-hash compatible.
 	AllowlistedBy  string `json:"allowlisted_by,omitempty"`
 	AllowlistMatch string `json:"allowlist_match,omitempty"`
+
+	// NotifySuppressedBy is non-empty when noise governance (P2-T5) blocked
+	// a would-be notification — the event still records action=notify
+	// (intent), but no channel delivery should fire. Values:
+	// "rate_limit" | "cooldown" | "suspended" | "below_min_severity".
+	// omitempty keeps Phase-1 events canonical-hash compatible.
+	NotifySuppressedBy string `json:"notify_suppressed_by,omitempty"`
 }
 
 // Envelope is the caller-supplied input to Pipeline.Submit. The pipeline

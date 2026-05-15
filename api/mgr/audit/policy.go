@@ -28,14 +28,43 @@ type Policy struct {
 	CustomRules   []CustomRule   `json:"custom_rules"`
 	AllowList     AllowList      `json:"allow_list"`
 
-	// Phase 3/5 fields — parsed but ignored in Phase 2. Kept here so
-	// hand-written policy.json files don't fail validation when they include
-	// future fields.
-	Notify             map[string]interface{} `json:"notify,omitempty"`
+	// Notify drives noise governance (P2-T5) and the channel-delivery
+	// pipeline (Phase 3). Defaults applied at load time.
+	Notify NotifyConfig `json:"notify"`
+
+	// Phase 3/5 fields — parsed but ignored in Phase 2.
 	Retention          map[string]interface{} `json:"retention,omitempty"`
 	ResponsiblePersons map[string]interface{} `json:"responsible_persons,omitempty"`
 	IncidentResponse   map[string]interface{} `json:"incident_response,omitempty"`
 	AIAssist           map[string]interface{} `json:"ai_assist,omitempty"`
+}
+
+// NotifyConfig controls when notify-level events trigger channel delivery
+// (Phase 3) and how the noise-governance layer (P2-T5) suppresses repeats.
+//
+//   RateLimit  per (agent, rule_id) sliding window — caps how many notify
+//              events fire within a window; over-cap events are suppressed
+//              with notify_suppressed_by="rate_limit". Defaults: 50 per hour.
+//   Cooldown   per finding-identity hash (agent + rule + preview) — once a
+//              specific value is reported, the same value will not notify
+//              again until the cooldown elapses. Default 24h.
+//   Suspended  emergency switch (§17.4 design): all notifications turn into
+//              notify_suppressed_by="suspended"; events still record.
+type NotifyConfig struct {
+	MinSeverity Severity                 `json:"min_severity,omitempty"`
+	RateLimit   RateLimitConfig          `json:"rate_limit,omitempty"`
+	Cooldown    CooldownConfig           `json:"cooldown,omitempty"`
+	Channels    []map[string]interface{} `json:"channels,omitempty"`
+	Suspended   bool                     `json:"suspended,omitempty"`
+}
+
+type RateLimitConfig struct {
+	WindowSeconds      int `json:"window_seconds"`
+	MaxPerAgentPerRule int `json:"max_per_agent_per_rule"`
+}
+
+type CooldownConfig struct {
+	Seconds int `json:"seconds"`
 }
 
 // RuleOverride changes a builtin rule's runtime properties without altering
@@ -87,7 +116,8 @@ type AllowList struct {
 }
 
 // DefaultPolicy returns the policy used when no policy.json is present.
-// Enabled, fail-open, no overrides, no custom rules, empty allow list.
+// Enabled, fail-open, no overrides, no custom rules, empty allow list,
+// default notify thresholds (50/hour per (agent, rule), 24h cooldown).
 func DefaultPolicy() *Policy {
 	return &Policy{
 		Hash:     "sha256:DEFAULT",
@@ -98,6 +128,22 @@ func DefaultPolicy() *Policy {
 			Paths:         []string{},
 			ContentHashes: []string{},
 			Agents:        []string{},
+		},
+		Notify: DefaultNotifyConfig(),
+	}
+}
+
+// DefaultNotifyConfig returns conservative defaults that won't drown a fresh
+// install in alerts but aren't so loose they hide real signal.
+func DefaultNotifyConfig() NotifyConfig {
+	return NotifyConfig{
+		MinSeverity: SeverityMedium,
+		RateLimit: RateLimitConfig{
+			WindowSeconds:      3600,
+			MaxPerAgentPerRule: 50,
+		},
+		Cooldown: CooldownConfig{
+			Seconds: 86400,
 		},
 	}
 }
@@ -131,6 +177,20 @@ func LoadPolicy(path string) (*Policy, error) {
 	}
 	if p.AllowList.Agents == nil {
 		p.AllowList.Agents = []string{}
+	}
+	// Fill in notify defaults when only a partial block was provided.
+	def := DefaultNotifyConfig()
+	if p.Notify.MinSeverity == "" {
+		p.Notify.MinSeverity = def.MinSeverity
+	}
+	if p.Notify.RateLimit.WindowSeconds == 0 {
+		p.Notify.RateLimit.WindowSeconds = def.RateLimit.WindowSeconds
+	}
+	if p.Notify.RateLimit.MaxPerAgentPerRule == 0 {
+		p.Notify.RateLimit.MaxPerAgentPerRule = def.RateLimit.MaxPerAgentPerRule
+	}
+	if p.Notify.Cooldown.Seconds == 0 {
+		p.Notify.Cooldown.Seconds = def.Cooldown.Seconds
 	}
 	return p, nil
 }

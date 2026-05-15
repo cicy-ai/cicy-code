@@ -40,6 +40,8 @@ type Pipeline struct {
 	debounceMu sync.Mutex
 	debounce   *time.Timer
 
+	noise *noiseTracker
+
 	wg sync.WaitGroup
 }
 
@@ -71,6 +73,7 @@ func NewPipeline(auditRoot, workersRoot string, scanner Scanner, policy *Policy)
 		scanner:   scanner,
 		policy:    policy,
 		machineID: mid,
+		noise:     newNoiseTracker(),
 	}, nil
 }
 
@@ -238,6 +241,25 @@ func (p *Pipeline) process(env Envelope) {
 	e.Decision.Action = decideAction(findings)
 	e.Decision.Applied = true
 	e.Decision.FailMode = FailOpen
+
+	// Noise governance: when the would-be action is notify, ask the
+	// in-memory tracker whether channels should actually be invoked. The
+	// EVENT still records action=notify (intent is preserved for audit
+	// replay); only meta.notify_suppressed_by carries the suppression flag
+	// so future channel-delivery code (Phase 3) can skip accordingly.
+	if e.Decision.Action == ActionNotify && len(findings) > 0 {
+		hash := EventFindingHash(e)
+		reason := p.noise.EvaluateNotify(
+			env.AgentID,
+			topFindingRule(findings),
+			hash,
+			env.submitMonoNs,
+			pol.Notify,
+		)
+		if reason != "" {
+			e.Meta.NotifySuppressedBy = reason
+		}
+	}
 
 	if _, err := p.store.Append(e); err != nil {
 		log.Printf("[audit] store.Append failed agent=%s id=%s: %v", env.AgentID, e.ID, err)
