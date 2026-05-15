@@ -158,12 +158,40 @@ func (p *Pipeline) buildEvent(env Envelope) Event {
 	}
 }
 
-// decideAction is the walking-skeleton decision: log on any finding,
-// no-op otherwise. Phase 3 (Preventive Control) replaces this with full
-// severity-driven action selection.
+// decideAction is the Phase 1 (detective-only) decision: actions degrade to
+// log/notify regardless of rule.DefaultAction. Preventive actions (redact,
+// block) are introduced in Phase 3 (§9 of the design doc).
+//
+//	no findings              -> none
+//	highest severity = low   -> log
+//	highest severity = med+  -> notify (also implies log)
 func decideAction(findings []Finding) Action {
 	if len(findings) == 0 {
 		return ActionNone
 	}
+	top := topSeverity(findings)
+	switch top {
+	case SeverityCritical, SeverityHigh, SeverityMedium:
+		return ActionNotify
+	}
 	return ActionLog
+}
+
+// topSeverity returns the most severe level present across the findings.
+func topSeverity(findings []Finding) Severity {
+	order := map[Severity]int{
+		SeverityCritical: 4,
+		SeverityHigh:     3,
+		SeverityMedium:   2,
+		SeverityLow:      1,
+	}
+	var best Severity = SeverityLow
+	bestRank := 0
+	for _, f := range findings {
+		if r, ok := order[f.Severity]; ok && r > bestRank {
+			bestRank = r
+			best = f.Severity
+		}
+	}
+	return best
 }

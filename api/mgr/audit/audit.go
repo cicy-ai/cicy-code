@@ -37,13 +37,15 @@ func Init() error {
 			globalErr = err
 			return
 		}
-		p, err := NewPipeline(auditRoot, workersRoot, NoopScanner{}, policy)
+		scanner := NewBuiltinScanner()
+		p, err := NewPipeline(auditRoot, workersRoot, scanner, policy)
 		if err != nil {
 			globalErr = err
 			return
 		}
 		globalPipeline = p
-		log.Printf("[audit] initialized root=%s rules_version=%s", auditRoot, RulesVersion)
+		log.Printf("[audit] initialized root=%s rules_version=%s builtin_rules=%d",
+			auditRoot, RulesVersion, len(BuiltinRules()))
 	})
 	return globalErr
 }
