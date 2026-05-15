@@ -105,7 +105,7 @@ func TestLoadResendCredentials_FileFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "email.json"),
-		[]byte(`{"api_key":"re_filekey","from":"file@corp"}`), 0o600); err != nil {
+		[]byte(`{"api_key":"re_filekey","from_address":"file@corp"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	creds, src := loadResendCredentials()

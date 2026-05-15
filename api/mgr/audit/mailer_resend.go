@@ -73,10 +73,11 @@ func (m *ResendMailer) Send(msg EmailMessage) error {
 }
 
 // resendCredentials is the contract for the on-disk credential file at
-// ~/cicy-ai/db/email.json (shared with the host `email` skill).
+// ~/cicy-ai/db/email.json (shared with the host `email` skill — field
+// names match its existing config layout).
 type resendCredentials struct {
 	APIKey  string `json:"api_key"`
-	From    string `json:"from"`
+	From    string `json:"from_address"`
 	ReplyTo string `json:"reply_to,omitempty"`
 }
 
