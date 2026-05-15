@@ -20,19 +20,34 @@ test("isFilenameCandidate: rejects naked domains", () => {
     assert.equal(isFilenameCandidate("a.b.c.d"), false);
 });
 
-test("isFilenameCandidate: accepts path-anchored paths regardless of extension", () => {
-    assert.equal(isFilenameCandidate("./src/foo.ts"), true);
-    assert.equal(isFilenameCandidate("./README"), true);
-    assert.equal(isFilenameCandidate("../docs/api.md"), true);
-    assert.equal(isFilenameCandidate("/etc/passwd"), true);
-    assert.equal(isFilenameCandidate("/usr/local/bin/node"), true);
-    assert.equal(isFilenameCandidate("~/.bashrc"), true);
-    assert.equal(isFilenameCandidate("~/notes/log.txt"), true);
+test("isFilenameCandidate: rejects relative-anchored ./ and ../ paths entirely", () => {
+    // Explicit product rule: these are too noisy in terminal output.
+    assert.equal(isFilenameCandidate("./src/foo.ts"), false);
+    assert.equal(isFilenameCandidate("../docs/api.md"), false);
+    assert.equal(isFilenameCandidate("./README"), false);
+    assert.equal(isFilenameCandidate("./src/foo.ts:42"), false);
+    assert.equal(isFilenameCandidate("./src/foo.ts:42:7"), false);
 });
 
-test("isFilenameCandidate: accepts :line and :line:col suffixes", () => {
-    assert.equal(isFilenameCandidate("./src/foo.ts:42"), true);
-    assert.equal(isFilenameCandidate("./src/foo.ts:42:7"), true);
+test("isFilenameCandidate: accepts absolute/home-anchored paths only when basename has a whitelisted ext or is a known basename", () => {
+    // anchor + whitelisted extension → accept
+    assert.equal(isFilenameCandidate("~/notes/log.txt"), true);
+    assert.equal(isFilenameCandidate("/home/u/log.txt"), true);
+    // anchor + EXACT_BASENAMES match → accept (no ext required)
+    assert.equal(isFilenameCandidate("~/.bashrc"), true);
+    assert.equal(isFilenameCandidate("/home/u/Dockerfile"), true);
+    // anchor with extension-less generic basename → reject. Avoids false
+    // positives on HTTP API paths, kernel/proc paths, and ad-hoc tokens that
+    // happen to start with "/". Some real paths get missed in trade.
+    assert.equal(isFilenameCandidate("/api/agents/bind"), false);
+    assert.equal(isFilenameCandidate("/etc/passwd"), false);
+    assert.equal(isFilenameCandidate("/usr/local/bin/node"), false);
+    assert.equal(isFilenameCandidate("/proc/cpuinfo"), false);
+});
+
+test("isFilenameCandidate: accepts :line and :line:col suffixes on non-relative paths", () => {
+    assert.equal(isFilenameCandidate("/home/u/foo.ts:42"), true);
+    assert.equal(isFilenameCandidate("/home/u/foo.ts:42:7"), true);
     assert.equal(isFilenameCandidate("src/foo.ts:10"), true);
 });
 
@@ -88,9 +103,9 @@ test("scanLinksOnText: detects file:// protocol over filename", () => {
 });
 
 test("scanLinksOnText: detects filenames in plain text", () => {
-    const r = scanLinksOnText("modified ./src/components/Workspace.tsx:1359 and package.json");
+    const r = scanLinksOnText("modified src/components/Workspace.tsx:1359 and package.json");
     const uris = r.map(m => m.uri);
-    assert.deepEqual(uris, ["./src/components/Workspace.tsx:1359", "package.json"]);
+    assert.deepEqual(uris, ["src/components/Workspace.tsx:1359", "package.json"]);
 });
 
 test("scanLinksOnText: does NOT match IPs / domains as files", () => {
@@ -110,7 +125,7 @@ test("scanLinksOnText: empty / whitespace text", () => {
 });
 
 test("scanLinksOnText: multiple links in one line preserve order", () => {
-    const r = scanLinksOnText("a https://a.com/x b ./foo.ts c file:///tmp/y");
+    const r = scanLinksOnText("a https://a.com/x b src/foo.ts c file:///tmp/y");
     assert.deepEqual(r.map(m => m.kind), ["url", "file", "local"]);
 });
 

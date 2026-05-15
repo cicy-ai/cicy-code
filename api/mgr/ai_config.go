@@ -429,8 +429,12 @@ func runtimeAIExpectedProtocolForAgentType(agentType string) string {
 	switch normalizeAgentType(agentType) {
 	case "claude", "cicy-claude", "kiro-cli":
 		return "anthropic"
-	case "codex", "opencode", "openclaw", "hermes":
+	case "codex", "openclaw", "hermes":
 		return "openai"
+	case "opencode":
+		// opencode speaks both protocols (uses @ai-sdk/openai-compatible OR
+		// @ai-sdk/anthropic depending on the active provider) — don't filter.
+		return ""
 	default:
 		return ""
 	}

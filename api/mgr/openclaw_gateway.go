@@ -489,7 +489,7 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "ai_gateway_proxy_read_body_failed")
 		return
 	}
-	requestBody = agentInspectorRewriteRequestBody(provider, agentID, requestBody)
+	requestBody = agentInspectorRewriteRequestBody(provider, agentID, requestBody, targetBase.Host)
 
 	// Codex (Responses API) → Chat Completions adaptation: only api.openai.com
 	// natively serves /v1/responses; for any other upstream we translate the

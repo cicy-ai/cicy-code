@@ -1,7 +1,10 @@
 // Pure link-detection helpers shared by the xterm link provider and the unit
 // tests. No DOM / xterm dependencies — only string scanning.
 
-export const URL_RE = /\b(?:https?|wss?):\/\/[^\s"'<>`]+[^\s"'<>`!?,.;:)\]}]/g;
+// URL detection: anything starting with `http://` or `https://` (no `ws://` /
+// `wss://` — those are protocol-level connection schemes, not user-clickable
+// resources). Trailing punctuation stripped via the negative-set tail.
+export const URL_RE = /\bhttps?:\/\/[^\s"'<>`]+[^\s"'<>`!?,.;:)\]}]/g;
 export const LOCAL_PROTOCOL_RE = /(?:file|image):\/\/[^\s"'!*(){}|\\\^<>`]*[^\s"':,.!?{}|\\\^~\[\]`()<>]/g;
 export const FILENAME_CANDIDATE_RE = /(?:\.{1,2}\/|~\/|\/)?(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+(?::\d+){0,2}/g;
 
@@ -40,18 +43,22 @@ export const EXACT_BASENAMES = new Set<string>([
 
 export function isFilenameCandidate(text: string): boolean {
     if (!text) return false;
+    // Relative-anchored paths (./foo, ../foo) are too noisy in terminal output
+    // — explicit rule: never treat these as clickable files. Users who want
+    // to open the file should drop the leading ./ or use an absolute path.
+    if (/^\.{1,2}\//.test(text)) return false;
     const portStrip = text.replace(/(?::\d+){1,2}$/, "");
     if (!portStrip) return false;
     if (IPV4_RE.test(portStrip)) return false;
     const firstSeg = portStrip.split("/", 1)[0];
     if (/^\d+$/.test(firstSeg) && portStrip.indexOf(".") !== -1) return false;
-    // Path-anchored → accept any tail.
-    if (/^(?:\.{1,2}\/|~\/|\/)/.test(text)) return true;
-    // Has a slash but no anchor (e.g. src/foo.ts) — treat as a relative path
-    // candidate; require a whitelisted extension on the basename.
     const hasSlash = portStrip.indexOf("/") !== -1;
     const basename = portStrip.split("/").pop() || "";
+    // Always allow well-known extension-less names (Dockerfile, Makefile, ...).
     if (EXACT_BASENAMES.has(basename)) return true;
+    // Otherwise require a whitelisted extension on the basename. This rules
+    // out HTTP API paths (/api/agents/bind), kernel/proc paths (/proc/cpuinfo),
+    // and ad-hoc tokens like /tmp/foo that aren't actually files we can open.
     const dotIdx = basename.lastIndexOf(".");
     if (dotIdx <= 0) return false;
     const ext = basename.slice(dotIdx + 1).toLowerCase();

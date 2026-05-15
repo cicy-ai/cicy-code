@@ -41,7 +41,7 @@ func OpenCodeSkillsDir() string {
 }
 
 func ApprovedCodexSkills() []string {
-	return []string{"agent-code-server", "agent-summary", "agent-webpage", "aliyun-cli", "cf-tunnel", "cping", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent", "cicy-mihomo", "us-spot-proxy", "proxy_ssh"}
+	return []string{"agent-code-server", "agent-summary", "agent-webpage", "aliyun-cli", "cf-tunnel", "cping", "email", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent", "cicy-mihomo", "us-spot-proxy", "proxy_ssh"}
 }
 
 func canonicalCodexSkillName(name string) string {
@@ -76,6 +76,8 @@ case "frp-client", "frpclient", "frpc", "frp-client-skill":
 		return "proxy_ssh"
 	case "aliyun-cli", "aliyun_cli", "aliyuncli", "aliyun":
 		return "aliyun-cli"
+	case "email", "email-sender", "emailsender", "mail":
+		return "email"
 	default:
 		return ""
 	}
@@ -327,6 +329,8 @@ func generateCodexSkill(root, targetRoot, skill string) error {
 		return generateCodexProxySSH(targetRoot)
 	case "aliyun-cli":
 		return generateCodexAliyunCLI(targetRoot)
+	case "email":
+		return generateCodexEmail(targetRoot)
 	default:
 		return fmt.Errorf("skill %q is not implemented", skill)
 	}
@@ -508,6 +512,25 @@ func generateCodexAliyunCLI(targetRoot string) error {
 		return err
 	}
 	tools := renderAliyunCLICommands()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
+func generateCodexEmail(targetRoot string) error {
+	skillDir := filepath.Join(targetRoot, "email")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderEmailSkill()); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderEmailHelp()); err != nil {
+		return err
+	}
+	tools := renderEmailCommands()
 	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
 		return err
 	}
@@ -1833,6 +1856,149 @@ Once ` + "`aliyun-cli apply`" + ` has succeeded, the wrapper is out of the loop 
 ## More
 
 Read [tools.md](./references/tools.md) for the bare command list.
+`
+}
+
+func renderEmailSkill() string {
+	return `---
+name: email
+description: Send transactional email from this host via Resend. The ` + "`email`" + ` wrapper is bootstrap + send; subcommands are ` + "`config`" + ` / ` + "`status`" + ` / ` + "`send`" + `. Credentials live in ~/cicy-ai/db/email.json and must never be read by the agent.
+---
+
+# Email Sender (Resend)
+
+> **Wrapper command:** ` + "`email`" + `. Subcommands: ` + "`config`" + ` / ` + "`status`" + ` / ` + "`send`" + `.
+> Backend is the [Resend](https://resend.com) transactional email API. The wrapper signs the request itself — the agent never sees the api_key.
+
+## Credentials: hard rules
+
+- **NEVER cat / Read / grep / print** ` + "`~/cicy-ai/db/email.json`" + `. The api_key is a user secret.
+- When credentials are missing, run ` + "`email config`" + `. It auto-creates a placeholder JSON (id/secret literal ` + "`<paste-your-...-here>`" + ` strings) at ` + "`~/cicy-ai/db/email.json`" + ` (chmod 600) and opens it in code-server. **Do not ask the user to paste the api_key into chat.**
+- After the user fills it in, the wrapper reads the file itself when ` + "`send`" + ` is called — you never need to.
+- ` + "`status`" + ` masks the api_key and never prints the body; trust its output.
+
+## Config shape (illustrative — do not Read the live file)
+
+` + "```json" + `
+{
+  "api_key": "<paste-your-resend-api-key-here>",
+  "from_address": "<paste-your-verified-from-address-here>",
+  "default_to": ""
+}
+` + "```" + `
+
+` + "`default_to`" + ` is optional; if set, ` + "`email send`" + ` without ` + "`--to`" + ` uses it.
+The ` + "`from_address`" + ` must be from a domain you verified in Resend (or ` + "`onboarding@resend.dev`" + ` for quick testing).
+
+## Bootstrap flow
+
+1. ` + "`email status`" + ` — confirms whether the config file is ready.
+2. ` + "`email config`" + ` — opens the bootstrap JSON in code-server (auto-creates a placeholder if missing). Walk the user through the signup steps below; do NOT ask them to paste the api_key into chat.
+3. ` + "`email send --to <addr> --subject \"…\" --body \"…\"`" + ` — fire off a message.
+4. Resend returns an ` + "`id`" + ` on success; the wrapper prints it.
+
+### How the user obtains the credentials
+
+If the user has never used Resend before, walk them through this. They do these steps themselves — you do **not** receive or read the credentials.
+
+1. Go to **[resend.com/signup](https://resend.com/signup)** and create a free account (no credit card).
+2. Open **[resend.com/api-keys](https://resend.com/api-keys)** → click *Create API Key* → copy the ` + "`re_xxxxxxxx…`" + ` value into the ` + "`api_key`" + ` field of the open config.
+3. Pick a ` + "`from_address`" + `:
+   - **Quick test** — use ` + "`onboarding@resend.dev`" + `. This is Resend's shared sandbox sender; it can only mail back to the address the user signed up with.
+   - **Production** — open **[resend.com/domains](https://resend.com/domains)** → *Add Domain* → add the required DNS records → wait for verification → use any address on that domain (e.g. ` + "`noreply@your-domain.com`" + `).
+4. Save the file, then run ` + "`email status`" + ` to confirm it reads as ready.
+
+## Body sources
+
+In order of precedence:
+
+- ` + "`--body-file <path>`" + ` — read plain-text body from a file
+- ` + "`--body <text>`" + ` — inline plain-text body
+- ` + "`--html <html>`" + ` — HTML body (mutually exclusive with ` + "`--body`" + `)
+- piped stdin — if no ` + "`--body`" + `/` + "`--html`" + `/` + "`--body-file`" + ` and stdin is not a TTY, the wrapper reads stdin as plain-text body
+
+## Rules
+
+1. The wrapper is the only thing that touches ` + "`~/cicy-ai/db/email.json`" + `. You do not.
+2. If ` + "`status`" + ` says missing or placeholder, run ` + "`email config`" + ` — never ask the user for the api_key in chat.
+3. ` + "`from_address`" + ` must be a domain verified inside Resend. If sends 403 with a domain-verification error, tell the user; don't try to "fix" the from address.
+4. Resend rate-limits free tier (~100 emails/day). Don't batch-blast.
+
+## Help
+
+Read [help.md](./references/help.md) for the bare command list and a typical session.
+
+## Tools
+
+Read [tools.md](./references/tools.md) for the wrapper's subcommands.
+`
+}
+
+func renderEmailHelp() string {
+	return `# Email Help
+
+## Command
+
+- wrapper: ` + "`email`" + ` (subcommands: ` + "`config`" + ` / ` + "`status`" + ` / ` + "`send`" + `)
+- backend: Resend (https://api.resend.com/emails)
+
+## Bootstrap flow
+
+1. ` + "`email status`" + ` — if missing / placeholder, continue.
+2. ` + "`email config`" + ` — auto-creates ` + "`~/cicy-ai/db/email.json`" + ` (chmod 600) and opens it in code-server. The user pastes the Resend api_key and a verified ` + "`from_address`" + ` into the file directly. Do not ask for the api_key in chat.
+3. ` + "`email send --to user@example.com --subject \"hello\" --body \"world\"`" + ` — send a one-shot plain-text email.
+
+### Getting Resend credentials (for first-time users)
+
+1. **Sign up**: [resend.com/signup](https://resend.com/signup) — free tier, no credit card.
+2. **API key**: [resend.com/api-keys](https://resend.com/api-keys) → *Create API Key* → copy the ` + "`re_xxx…`" + ` value into the ` + "`api_key`" + ` field.
+3. **From address**:
+   - *Quick test* → use ` + "`onboarding@resend.dev`" + ` (Resend's shared sandbox sender; only mails back to your own signup address).
+   - *Production* → [resend.com/domains](https://resend.com/domains) → *Add Domain* → add the DNS records → wait for verification → use ` + "`noreply@your-domain.com`" + `.
+
+` + "`email config`" + ` also prints these steps to the terminal whenever it creates the placeholder.
+
+## Send flag reference
+
+- ` + "`--to <addr>`" + ` — required (or ` + "`default_to`" + ` set in config)
+- ` + "`--subject <text>`" + ` — required
+- ` + "`--body <text>`" + ` — plain-text body
+- ` + "`--body-file <path>`" + ` — read body from file
+- ` + "`--html <html>`" + ` — HTML body (mutually exclusive with ` + "`--body`" + `)
+- ` + "`--from <addr>`" + ` — override the configured ` + "`from_address`" + `
+
+If neither ` + "`--body`" + `/` + "`--html`" + `/` + "`--body-file`" + ` is given and stdin is piped, the wrapper reads stdin as the plain-text body.
+
+## Examples
+
+- ` + "`email send --to a@x.com --subject \"ping\" --body \"hi from $(hostname)\"`" + `
+- ` + "`echo \"build done at $(date)\" | email send --to me@x.com --subject \"build\"`" + `
+- ` + "`email send --to me@x.com --subject \"report\" --body-file /tmp/report.txt`" + `
+- ` + "`email send --to me@x.com --subject \"weekly\" --html \"<h1>Hi</h1><p>...</p>\"`" + `
+
+## Rules
+
+- Never ` + "`cat`" + ` / ` + "`Read`" + ` / ` + "`grep`" + ` ` + "`~/cicy-ai/db/email.json`" + `. The wrapper is the only thing that should touch it.
+- The ` + "`from_address`" + ` must be a domain verified in Resend. ` + "`onboarding@resend.dev`" + ` works for dev/testing.
+- Resend's free tier rate-limits to ~100 emails / day; budget accordingly.
+
+## More
+
+Read [tools.md](./references/tools.md) for the bare command list.
+`
+}
+
+func renderEmailCommands() string {
+	return `# Email Commands
+
+| Command | What it does |
+|---------|--------------|
+| ` + "`email config`" + ` | Open the bootstrap JSON in code-server (auto-creates placeholder when missing) |
+| ` + "`email status`" + ` | Show config state, masked api_key, configured from_address |
+| ` + "`email send --to <addr> --subject <text> --body <text>`" + ` | Send a plain-text email via Resend |
+| ` + "`email send --to <addr> --subject <text> --html <html>`" + ` | Send an HTML email |
+| ` + "`email send --to <addr> --subject <text> --body-file <path>`" + ` | Read the body from a file |
+| ` + "`email send --to <addr> --subject <text> --from <addr>`" + ` | Override the configured from_address |
 `
 }
 

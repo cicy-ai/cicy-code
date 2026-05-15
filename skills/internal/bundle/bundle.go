@@ -36,6 +36,7 @@ var (
 		"cf-tunnel-py",
 		"cf-tunnel.py",
 		"cping",
+		"email",
 		"eng",
 		"gemini-ask",
 		"gemini-vision",

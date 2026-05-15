@@ -29,6 +29,21 @@ function currentToken(): string {
   return String(readCoderQuery().token || '').trim();
 }
 
+interface BridgeConfig {
+  token: string;
+  pagePane: string;
+  pageClientId: string;
+}
+
+function readBridgeConfig(): BridgeConfig | null {
+  const q = readCoderQuery();
+  const token = String(q.token || '').trim();
+  const pagePane = String(q.page_pane || '').trim();
+  const pageClientId = String(q.client_id || '').trim();
+  if (!token || !pagePane || !pageClientId) return null;
+  return { token, pagePane, pageClientId };
+}
+
 function currentWorkspaceFolder(): string {
   const folders = vscode.workspace.workspaceFolders;
   return folders && folders.length > 0 ? folders[0].uri.fsPath : '';
@@ -349,20 +364,32 @@ async function openFileFromHost(rawPath: unknown): Promise<void> {
 }
 
 function connectHostOpenFileBridge(context: vscode.ExtensionContext): void {
-  const token = currentToken();
-  const pagePane = currentPagePane();
-  const pageClientId = currentPageClientId();
-  if (!token || !pagePane || !pageClientId) {
+  // Read coder.json fresh on every (re)connect: the page's `client_id` can
+  // change when the user reloads the cicy-code tab or the BroadcastChannel
+  // tab-dedup elects a new winner. coder.json gets rewritten by code-server
+  // with the new URL query params, so the bridge must always honour the
+  // latest values rather than freezing them at activation time.
+  const cfg = readBridgeConfig();
+  if (!cfg) {
     return;
   }
-  const codeClientId = `${pageClientId}:code-ext`;
-  const base = currentApiBase();
-  const wsProtocol = base.startsWith('https://') ? 'wss://' : 'ws://';
-  const wsHost = base.replace(/^https?:\/\//, '');
-  const wsUrl = `${wsProtocol}${wsHost}/api/chat/ws?agent_id=${encodeURIComponent(pagePane)}&token=${encodeURIComponent(token)}&client_id=${encodeURIComponent(codeClientId)}`;
+  const log = vscode.window.createOutputChannel('CiCy Bridge');
+  context.subscriptions.push(log);
+  log.appendLine(`[bridge] start: agent=${cfg.pagePane} client=${cfg.pageClientId}`);
+
   let disposed = false;
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let currentClientId = cfg.pageClientId;
+  let currentPagePane = cfg.pagePane;
+  let currentCodeClientId = `${currentClientId}:code-ext`;
+
+  const buildUrl = (token: string, agent: string, codeClient: string): string => {
+    const base = currentApiBase();
+    const wsProtocol = base.startsWith('https://') ? 'wss://' : 'ws://';
+    const wsHost = base.replace(/^https?:\/\//, '');
+    return `${wsProtocol}${wsHost}/api/chat/ws?agent_id=${encodeURIComponent(agent)}&token=${encodeURIComponent(token)}&client_id=${encodeURIComponent(codeClient)}`;
+  };
 
   const scheduleReconnect = () => {
     if (disposed || reconnectTimer) {
@@ -378,23 +405,37 @@ function connectHostOpenFileBridge(context: vscode.ExtensionContext): void {
     if (disposed) {
       return;
     }
-    try {
-      socket = new WebSocket(wsUrl);
-    } catch {
+    const fresh = readBridgeConfig();
+    if (!fresh) {
+      // coder.json transiently unreadable (mid-write by code-server) — retry.
       scheduleReconnect();
       return;
     }
+    if (fresh.pageClientId !== currentClientId || fresh.pagePane !== currentPagePane) {
+      log.appendLine(`[bridge] client_id changed: ${currentClientId} -> ${fresh.pageClientId}`);
+      currentClientId = fresh.pageClientId;
+      currentPagePane = fresh.pagePane;
+      currentCodeClientId = `${currentClientId}:code-ext`;
+    }
+    const wsUrl = buildUrl(fresh.token, currentPagePane, currentCodeClientId);
+    try {
+      socket = new WebSocket(wsUrl);
+    } catch (err: any) {
+      log.appendLine(`[bridge] ctor error: ${err?.message || err}`);
+      scheduleReconnect();
+      return;
+    }
+    socket.onopen = () => {
+      log.appendLine(`[bridge] open ws agent=${currentPagePane} client=${currentCodeClientId}`);
+    };
     socket.onclose = (event) => {
       socket = null;
+      log.appendLine(`[bridge] close code=${event?.code} reason=${String(event?.reason || '')}`);
       // 4409 = superseded by another connection with the same client_id (e.g.
-      // a duplicated browser tab raced for this slot). The new connection is
-      // authoritative; reconnecting would just kick it back out, so we stop.
-      // The other side's pageClientId dedup will eventually settle and the
-      // iframe will reload with a fresh client_id, re-activating this code.
-      if (event && event.code === 4409) {
-        disposed = true;
-        return;
-      }
+      // a duplicated browser tab raced for this slot). The other tab is now
+      // authoritative; sleep for a moment then retry — by then the duplicate
+      // should have settled and coder.json may carry a fresh client_id we can
+      // honour. Don't go disposed=true forever, that was the previous bug.
       scheduleReconnect();
     };
     socket.onerror = () => {
@@ -415,9 +456,9 @@ function connectHostOpenFileBridge(context: vscode.ExtensionContext): void {
                 data: {
                   requestId,
                   path: String(payload.data?.path || ''),
-                  page_client_id: pageClientId,
-                  code_client_id: codeClientId,
-                  page_pane: pagePane,
+                  page_client_id: currentClientId,
+                  code_client_id: currentCodeClientId,
+                  page_pane: currentPagePane,
                 },
               }));
             } catch {
@@ -432,9 +473,9 @@ function connectHostOpenFileBridge(context: vscode.ExtensionContext): void {
                   requestId,
                   path: String(payload.data?.path || ''),
                   error: message || String(payload.data?.path || ''),
-                  page_client_id: pageClientId,
-                  code_client_id: codeClientId,
-                  page_pane: pagePane,
+                  page_client_id: currentClientId,
+                  code_client_id: currentCodeClientId,
+                  page_pane: currentPagePane,
                 },
               }));
             } catch {
@@ -448,9 +489,9 @@ function connectHostOpenFileBridge(context: vscode.ExtensionContext): void {
               type: 'code.pong',
               data: {
                 requestId: String(payload.data?.requestId || ''),
-                page_client_id: pageClientId,
-                code_client_id: codeClientId,
-                page_pane: pagePane,
+                page_client_id: currentClientId,
+                code_client_id: currentCodeClientId,
+                page_pane: currentPagePane,
                 version: vscode.version,
               },
             }));
@@ -461,6 +502,31 @@ function connectHostOpenFileBridge(context: vscode.ExtensionContext): void {
       }
     };
   };
+
+  // Also watch coder.json for changes — if the page reloads with a new
+  // client_id while we're still connected on the old one, react immediately
+  // instead of waiting for the next close/reconnect.
+  try {
+    const coderJsonPath = path.join(os.homedir(), '.local', 'share', 'code-server', 'coder.json');
+    const watcher = fs.watch(coderJsonPath, { persistent: false }, () => {
+      const fresh = readBridgeConfig();
+      if (!fresh) return;
+      if (fresh.pageClientId !== currentClientId || fresh.pagePane !== currentPagePane) {
+        log.appendLine(`[bridge] coder.json changed: ${currentClientId} -> ${fresh.pageClientId}, reconnecting`);
+        try { socket?.close(); } catch {}
+      }
+    });
+    context.subscriptions.push({ dispose: () => watcher.close() });
+  } catch (err: any) {
+    log.appendLine(`[bridge] fs.watch failed: ${err?.message || err}`);
+  }
+
+  context.subscriptions.push({
+    dispose: () => {
+      disposed = true;
+      try { socket?.close(); } catch {}
+    },
+  });
 
   connect();
   context.subscriptions.push({
