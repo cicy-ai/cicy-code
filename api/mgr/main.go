@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"ttyd-go/mgr/audit"
 )
 
 var (
@@ -98,6 +100,10 @@ Options:
 	initDB()
 	store.Migrate()
 	defer store.Close()
+
+	if err := audit.Init(); err != nil {
+		log.Printf("[audit] init failed (audit disabled): %v", err)
+	}
 
 	containerMode = isContainerRuntime()
 	if containerMode {

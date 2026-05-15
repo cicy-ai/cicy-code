@@ -436,7 +436,7 @@ cicy-code 是本地优先的多 agent 开发工作区,agent 在日常工作中�
     ├── 2026-05-15.ndjson             # 全局索引(仅元数据)
     └── 2026-05-15.ndjson.idx         # SQLite-FTS 索引(查询加速)
 
-~/cicy-ai/workers/<agent>/history/
+~/cicy-ai/workers/<agent>/.cicy/history/   # 与 gateway 快照同目录(builtinWorkerRuntimeDir)
 ├── current.json                      # 已有,实时快照
 ├── reply.json                        # 已有
 ├── audit.ndjson                      # 该 agent 完整 audit log(append-only)

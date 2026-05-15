@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"ttyd-go/mgr/audit"
 )
 
 type aiGatewayToolCall struct {
@@ -763,7 +765,19 @@ func aiGatewayReplySnapshotPath(agentID string) string {
 func aiGatewayWriteCurrentSnapshot(agentID string, current aiGatewayCurrentSnapshot) error {
 	current.Body = aiGatewayAnnotateCurrentBodyHistoryIDs(aiGatewayCloneJSONValue(current.Body))
 	current.MaxHistoryID = aiGatewayCurrentBodyMaxHistoryID(current.Body)
-	return aiGatewayWriteJSONAtomic(aiGatewayCurrentSnapshotPath(agentID), current)
+	if err := aiGatewayWriteJSONAtomic(aiGatewayCurrentSnapshotPath(agentID), current); err != nil {
+		return err
+	}
+	// Audit: detective hook — fire-and-forget async submit on successful write.
+	if payload, mErr := json.Marshal(current); mErr == nil {
+		audit.SubmitGatewayOutbound(
+			agentID, "", "", "",
+			current.TurnID, current.ConversationID,
+			current.Provider, current.Model,
+			payload,
+		)
+	}
+	return nil
 }
 
 // aiGatewayReplySnapshotLite is a simplified version for reply.json
@@ -797,7 +811,40 @@ func aiGatewayWriteReplySnapshot(agentID string, reply aiGatewayReplySnapshot) e
 		TotalTokens:              reply.TotalTokens,
 		CostCredit:               reply.CostCredit,
 	}
-	return aiGatewayWriteJSONAtomic(aiGatewayReplySnapshotPath(agentID), lite)
+	if err := aiGatewayWriteJSONAtomic(aiGatewayReplySnapshotPath(agentID), lite); err != nil {
+		return err
+	}
+	// Audit: detective hook — inbound (reply) counterpart to outbound submit.
+	// Provider/Model/ConversationID are looked up from the matching current
+	// snapshot file (best-effort; empty if not yet written).
+	if payload, mErr := json.Marshal(lite); mErr == nil {
+		provider, model, convID := aiGatewayLookupCurrentContext(agentID, reply.TurnID)
+		audit.SubmitGatewayInbound(
+			agentID, "", "", "",
+			reply.TurnID, convID,
+			provider, model,
+			payload,
+		)
+	}
+	return nil
+}
+
+// aiGatewayLookupCurrentContext reads provider/model/conversation_id from
+// current.json for the matching turn. Best-effort: returns empty strings
+// if current.json is missing or its turn_id does not match.
+func aiGatewayLookupCurrentContext(agentID, turnID string) (provider, model, conversationID string) {
+	body, err := os.ReadFile(aiGatewayCurrentSnapshotPath(agentID))
+	if err != nil {
+		return "", "", ""
+	}
+	var current aiGatewayCurrentSnapshot
+	if err := json.Unmarshal(body, &current); err != nil {
+		return "", "", ""
+	}
+	if turnID != "" && strings.TrimSpace(current.TurnID) != strings.TrimSpace(turnID) {
+		return "", "", ""
+	}
+	return current.Provider, current.Model, current.ConversationID
 }
 
 func aiGatewayReadReplySnapshotFile(agentID string) (aiGatewayReplySnapshot, error) {
