@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -242,6 +244,99 @@ func handleAuditAllowlistContent(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[audit] FP marked sha=%s reason=%q written=%s", req.SHA256, req.Reason, path)
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAuditAck is the public landing page for incident-email
+// "confirm/解除" links. No bearer auth — the HMAC-signed token IS the
+// proof of identity. Verifies, records a meta_alert_ack event, and
+// returns a minimal HTML page.
+//
+//	GET /api/audit/ack?token=<base64url(payload)>.<hex(hmac)>
+//
+// Possible responses:
+//   200 + HTML: ack recorded
+//   400 + HTML: token missing / malformed
+//   403 + HTML: signature mismatch
+//   410 + HTML: token expired
+//   500 + HTML: store append failed
+//
+// The recorded event keeps the chain intact (it's just one more line in
+// the global index + the "meta-audit" per-agent file).
+func handleAuditAck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		ackHTML(w, http.StatusMethodNotAllowed, "method_not_allowed", "")
+		return
+	}
+	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	if token == "" {
+		ackHTML(w, http.StatusBadRequest, "missing token", "")
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		ackHTML(w, http.StatusInternalServerError, "server: home unresolved", "")
+		return
+	}
+	auditRoot := filepath.Join(home, "cicy-ai", "audit")
+
+	eventID, err := audit.VerifyAckToken(auditRoot, token)
+	if err != nil {
+		status := http.StatusForbidden
+		if strings.Contains(err.Error(), "expired") {
+			status = http.StatusGone
+		} else if strings.Contains(err.Error(), "malformed") || strings.Contains(err.Error(), "decode") {
+			status = http.StatusBadRequest
+		}
+		ackHTML(w, status, err.Error(), "")
+		return
+	}
+
+	ua := r.UserAgent()
+	if len(ua) > 200 {
+		ua = ua[:200]
+	}
+	ip := clientRemoteIP(r)
+	metaID, err := audit.RecordAck(eventID, "", ua, ip)
+	if err != nil {
+		ackHTML(w, http.StatusInternalServerError, "record: "+err.Error(), "")
+		return
+	}
+	log.Printf("[audit] alert ack event=%s meta_event=%s ua=%q ip=%s", eventID, metaID, ua, ip)
+	ackHTML(w, http.StatusOK, "", eventID)
+}
+
+func clientRemoteIP(r *http.Request) string {
+	if v := r.Header.Get("X-Forwarded-For"); v != "" {
+		if i := strings.IndexByte(v, ','); i >= 0 {
+			return strings.TrimSpace(v[:i])
+		}
+		return strings.TrimSpace(v)
+	}
+	return r.RemoteAddr
+}
+
+func ackHTML(w http.ResponseWriter, status int, errMsg, eventID string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	var body string
+	if errMsg != "" {
+		body = `<h2>cicy-code audit: ack failed</h2><p>` + escapeHTML(errMsg) + `</p>`
+	} else {
+		body = `<h2>cicy-code audit: 已确认</h2>
+<p>Event <code>` + escapeHTML(eventID) + `</code> 已被记录为 acknowledged.</p>
+<p>You may close this tab. To view details, log in to the cicy-code audit dashboard.</p>`
+	}
+	_, _ = w.Write([]byte(`<!doctype html>
+<html><head><meta charset="utf-8"><title>cicy-code audit</title>
+<style>body{font:14px/1.5 -apple-system,Segoe UI,sans-serif;max-width:560px;margin:60px auto;padding:0 16px;color:#222}
+h2{color:#0a0a0a;font-weight:600}code{background:#f3f4f6;padding:2px 6px;border-radius:3px}</style>
+</head><body>` + body + `</body></html>`))
+}
+
+func escapeHTML(s string) string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&#39;")
+	return r.Replace(s)
 }
 
 func handleAuditAgents(w http.ResponseWriter, r *http.Request) {

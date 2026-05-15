@@ -319,6 +319,7 @@ Options:
 	http.HandleFunc("/api/audit/agents", wa(handleAuditAgents))
 	http.HandleFunc("/api/audit/ingest", wa(handleAuditIngest)) // Channel B: mitmproxy push
 	http.HandleFunc("/api/audit/allowlist/content", wa(handleAuditAllowlistContent))
+	http.HandleFunc("/api/audit/ack", w(handleAuditAck)) // signed token IS the auth — no Bearer
 
 	// TTS
 	http.HandleFunc("/api/tts", wa(handleTTS))

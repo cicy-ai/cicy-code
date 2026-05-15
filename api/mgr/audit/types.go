@@ -133,6 +133,19 @@ type Meta struct {
 	// Set only on Action=redact events. omitempty preserves backward-
 	// compatible canonical hashes for events without redaction.
 	PreRedactRef string `json:"pre_redact_ref,omitempty"`
+
+	// Category tags meta-audit events that record audit-system actions
+	// rather than agent traffic. Values defined in design §11.3:
+	//   "meta_alert_ack"          — responsible person clicked ack link
+	//   "meta_policy_change"      — policy.json mutated via API (P3)
+	//   "meta_fp_mark"            — false-positive marked from dashboard
+	//   "meta_preredact_access"   — auditor decrypted pre-redact original
+	// Empty (omitted) on regular detective / preventive events.
+	Category string `json:"category,omitempty"`
+
+	// AckEventID references the original incident event that an ack
+	// applies to. Set only on meta_alert_ack events.
+	AckEventID string `json:"ack_event_id,omitempty"`
 }
 
 // Envelope is the caller-supplied input to Pipeline.Submit. The pipeline

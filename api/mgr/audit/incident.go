@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -60,7 +61,17 @@ func (p *Pipeline) dispatchIncident(e Event) {
 		}
 	}
 
-	subject, body := renderIncidentEmail(e, ruleIDs, cfg, ai)
+	// Phase 6 cut 2c: sign a per-event ack URL recipients can click to
+	// record acknowledgement. Best-effort: if signing fails the email
+	// still ships, just without the ack link.
+	ackURL := ""
+	if token, signErr := SignAckToken(p.store.auditRoot, e.ID, AckTokenDefaultTTL); signErr == nil {
+		ackURL = buildPublicURL("/api/audit/ack") + "?token=" + token
+	} else {
+		log.Printf("[audit] ack-token sign failed event=%s: %v", e.ID, signErr)
+	}
+
+	subject, body := renderIncidentEmail(e, ruleIDs, cfg, ai, ackURL)
 	msg := EmailMessage{
 		To:       recipients,
 		Subject:  subject,
@@ -117,8 +128,9 @@ func uniqueRuleIDs(findings []Finding) []string {
 
 // renderIncidentEmail builds a bilingual (zh-CN + en) plain-text email
 // body. When ai is non-nil, its fields replace the placeholder section;
-// otherwise the default placeholder is shown.
-func renderIncidentEmail(e Event, ruleIDs []string, cfg IncidentResponseConfig, ai *AIRemediation) (subject, body string) {
+// otherwise the default placeholder is shown. ackURL, when non-empty,
+// is rendered into the "查阅 / Confirm" section as a clickable URL.
+func renderIncidentEmail(e Event, ruleIDs []string, cfg IncidentResponseConfig, ai *AIRemediation, ackURL string) (subject, body string) {
 	top := topSeverity(e.Findings)
 	topRule := ""
 	if len(ruleIDs) > 0 {
@@ -186,6 +198,12 @@ func renderIncidentEmail(e Event, ruleIDs []string, cfg IncidentResponseConfig, 
 		}
 	}
 
+	// Ack link
+	if ackURL != "" {
+		b.WriteString("\n──────── 确认 / Acknowledge ────────\n")
+		fmt.Fprintf(&b, "  完成处置后请点击以下链接关闭告警(30 天内有效):\n  %s\n", ackURL)
+	}
+
 	// English mirror
 	b.WriteString("\n──────── English summary ────────\n")
 	fmt.Fprintf(&b, "  Severity:   %s\n", strings.ToUpper(string(top)))
@@ -195,6 +213,20 @@ func renderIncidentEmail(e Event, ruleIDs []string, cfg IncidentResponseConfig, 
 	fmt.Fprintf(&b, "  Action:     %s (applied=%v)\n", e.Decision.Action, e.Decision.Applied)
 	b.WriteString("\n— cicy-code audit automated alert. AI suggestions are advisory; act per your enterprise SOP.\n")
 	return subject, b.String()
+}
+
+// buildPublicURL composes a public-facing URL for outbound links. Tries
+// CICY_PUBLIC_URL env first; falls back to http://localhost:8008 (the
+// in-container default API port). Path is appended verbatim.
+func buildPublicURL(path string) string {
+	base := strings.TrimRight(strings.TrimSpace(os.Getenv("CICY_PUBLIC_URL")), "/")
+	if base == "" {
+		base = "http://localhost:8008"
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return base + path
 }
 
 // incidentCooldownTracker keeps a per-finding-hash dispatch timestamp.
