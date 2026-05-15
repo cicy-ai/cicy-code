@@ -166,22 +166,36 @@ func handleAuditIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Phase 3 inline preventive check. Runs only when policy.preventive.enabled
-	// is true. If a high-confidence rule blocks, the mitmproxy script that
-	// POSTed this event is expected to honor 451 by dropping the upstream
-	// request — i.e. NOT forward the captured prompt to the LLM provider.
-	if dec := audit.PreventiveCheck(env); dec.Action == audit.ActionBlock {
+	// is true.
+	//   block  -> 451; mitmproxy script must drop the upstream request
+	//   redact -> 200 + modified payload; mitmproxy script forwards the
+	//             modified body (NOT the original) to the LLM provider
+	//   none   -> standard 204; mitmproxy forwards the original
+	if dec := audit.PreventiveCheck(env); dec.Action != audit.ActionNone {
 		ruleIDs := make([]string, 0, len(dec.Findings))
 		for _, f := range dec.Findings {
 			ruleIDs = append(ruleIDs, f.RuleID)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(451)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"blocked":   true,
+		body := map[string]interface{}{
+			"action":    string(dec.Action),
 			"event_id":  dec.EventID,
 			"reason":    dec.Reason,
 			"rules_hit": ruleIDs,
-		})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch dec.Action {
+		case audit.ActionBlock:
+			body["blocked"] = true
+			w.WriteHeader(451)
+		case audit.ActionRedact:
+			body["payload"] = base64.StdEncoding.EncodeToString(dec.ModifiedPayload)
+			body["payload_encoding"] = "base64"
+			body["pre_redact_ref"] = dec.PreRedactRef
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+		_ = json.NewEncoder(w).Encode(body)
 		return
 	}
 

@@ -6,32 +6,44 @@ import (
 	"encoding/hex"
 	"log"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // PreventiveDecision is the result of an inline-mode scan.
 type PreventiveDecision struct {
-	// Action is the action the preventive layer applied. In Phase 3 cut 1
-	// this is one of:
-	//   ActionBlock — the gateway / webhook should refuse to forward.
-	//   ActionNone  — preventive let it through (either no findings, or
-	//                 preventive is disabled, or no rule's DefaultAction
-	//                 is block).
+	// Action is the action the preventive layer applied:
+	//   ActionBlock  — the gateway / webhook should refuse to forward.
+	//   ActionRedact — caller should swap the request body to
+	//                  ModifiedPayload before forwarding.
+	//   ActionNone   — preventive let it through.
 	Action Action
 
 	// Findings is the set of preventive-relevant hits (inline=true rules).
-	// Empty when Action=none and no inline rules matched.
 	Findings []Finding
 
 	// Reason captures why a non-trivial decision was reached:
-	//   "preventive_disabled" — policy.preventive.enabled is false
-	//   "no_inline_match"     — inline rules ran but none required action
-	//   "block"               — at least one finding mapped to ActionBlock
-	//   "scanner_panic"       — recovered panic, follows fail_mode
+	//   "preventive_disabled"   — policy.preventive.enabled is false
+	//   "allowlisted_<reason>"  — bypassed via policy.allow_list
+	//   "no_inline_match"       — inline rules ran but none required action
+	//   "block"                 — at least one block-default rule matched
+	//   "redact"                — block didn't match but redact-default did
+	//   "scanner_panic"         — recovered panic, follows fail_mode
 	Reason string
 
 	// EventID is the audit event id written for this preventive decision.
-	// Empty for Action=none (the post-write detective hook handles it).
+	// Empty for Action=none.
 	EventID string
+
+	// ModifiedPayload is the request body after substituting matched spans
+	// with "[REDACTED:<rule_id>]". Only set when Action=ActionRedact;
+	// callers MUST forward this (not the original) to the LLM provider.
+	ModifiedPayload []byte
+
+	// PreRedactRef points at the encrypted original payload archived under
+	// ~/cicy-ai/workers/<agent>/.cicy/history/pre-redact/. Used by auditor
+	// tooling to retrieve the unredacted prompt for forensic review.
+	PreRedactRef string
 }
 
 // PreventiveCheck runs only the inline=true subset of the active rule set
@@ -84,40 +96,57 @@ func (p *Pipeline) PreventiveCheck(env Envelope) (dec PreventiveDecision) {
 		}
 	}()
 
-	// Run the full scanner, then keep only findings whose underlying rule
-	// is marked inline=true AND whose default_action is block. The scanner
-	// already implements direction gating and policy overrides.
+	// Run the full scanner, then partition findings by their source rule's
+	// inline action (block / redact / other). Block beats redact when both
+	// would fire on the same turn.
 	allFindings := p.scanner.Scan(env.Payload, env.Direction, pol)
-	inlineFindings := filterInlineBlockFindings(p, allFindings)
-	if len(inlineFindings) == 0 {
-		return PreventiveDecision{Action: ActionNone, Reason: "no_inline_match", Findings: allFindings}
-	}
+	blockFindings, redactFindings := partitionInlineFindings(p, allFindings)
 
-	// Block path: synthesize an audit event with action=block applied=true
-	// and submit synchronously (Inline=true). The post-write detective hook
-	// in the gateway code path will NOT fire because the gateway short-
-	// circuits before writing the snapshot.
-	blockEnv := env
-	blockEnv.Inline = true
-	eventID := p.submitPreventiveBlock(context.Background(), blockEnv, inlineFindings, pol.Preventive.FailMode)
-	return PreventiveDecision{
-		Action:   ActionBlock,
-		Findings: inlineFindings,
-		Reason:   "block",
-		EventID:  eventID,
+	if len(blockFindings) > 0 {
+		eventID := p.submitPreventiveBlock(context.Background(), env, blockFindings, pol.Preventive.FailMode)
+		return PreventiveDecision{
+			Action:   ActionBlock,
+			Findings: blockFindings,
+			Reason:   "block",
+			EventID:  eventID,
+		}
 	}
+	if len(redactFindings) > 0 {
+		// Pre-allocate event_id so the encrypted-archive file lands at its
+		// final canonical name on the first write.
+		preID := "evt_" + uuid.NewString()
+		env.eventID = preID
+		redacted := RedactPayload(env.Payload, redactFindings)
+		ref, err := SavePreRedact(
+			p.store.auditRoot, p.store.workersRoot,
+			env.AgentID, preID, env.Payload,
+		)
+		if err != nil {
+			log.Printf("[audit] pre-redact save failed agent=%s: %v", env.AgentID, err)
+		}
+		eventID := p.submitPreventiveRedact(context.Background(), env, redactFindings, pol.Preventive.FailMode, ref)
+		return PreventiveDecision{
+			Action:          ActionRedact,
+			Findings:        redactFindings,
+			Reason:          "redact",
+			EventID:         eventID,
+			ModifiedPayload: redacted,
+			PreRedactRef:    ref,
+		}
+	}
+	return PreventiveDecision{Action: ActionNone, Reason: "no_inline_match", Findings: allFindings}
 }
 
-// filterInlineBlockFindings keeps the findings whose source rule has both
-// inline=true and DefaultAction=block. Custom rules respect this too.
-func filterInlineBlockFindings(p *Pipeline, findings []Finding) []Finding {
+// partitionInlineFindings groups findings into (block, redact) buckets based
+// on their source rule's Inline + DefaultAction. Findings from non-inline
+// rules are dropped (they belong to detective scanning, not preventive).
+func partitionInlineFindings(p *Pipeline, findings []Finding) (block, redact []Finding) {
 	if len(findings) == 0 {
-		return nil
+		return nil, nil
 	}
-	// Pull the current rule set from the scanner if it's a BuiltinScanner.
 	bs, ok := p.scanner.(*BuiltinScanner)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	bs.mu.RLock()
 	defer bs.mu.RUnlock()
@@ -127,29 +156,35 @@ func filterInlineBlockFindings(p *Pipeline, findings []Finding) []Finding {
 		index[r.ID] = r
 	}
 
-	out := findings[:0]
 	for _, f := range findings {
 		rule, ok := index[f.RuleID]
-		if !ok {
+		if !ok || !rule.Inline {
 			continue
 		}
-		if !rule.Inline || rule.DefaultAction != ActionBlock {
-			continue
+		switch rule.DefaultAction {
+		case ActionBlock:
+			block = append(block, f)
+		case ActionRedact:
+			redact = append(redact, f)
 		}
-		out = append(out, f)
 	}
-	// Clone the slice header so we don't surprise the caller by mutating
-	// their findings backing array.
-	cp := make([]Finding, len(out))
-	copy(cp, out)
-	return cp
+	return block, redact
 }
 
 // submitPreventiveBlock writes a single audit event representing the block
 // decision and returns its event ID. Wraps the same buildEvent + store path
 // the normal pipeline uses, so verify CLI walks the chain transparently.
 func (p *Pipeline) submitPreventiveBlock(ctx context.Context, env Envelope, findings []Finding, failMode string) string {
-	_ = ctx
+	return p.submitPreventive(ctx, env, findings, ActionBlock, failMode, "")
+}
+
+// submitPreventiveRedact writes the redact-decision event. preRedactRef is
+// stamped in meta when known at event-build time.
+func (p *Pipeline) submitPreventiveRedact(ctx context.Context, env Envelope, findings []Finding, failMode, preRedactRef string) string {
+	return p.submitPreventive(ctx, env, findings, ActionRedact, failMode, preRedactRef)
+}
+
+func (p *Pipeline) submitPreventive(_ context.Context, env Envelope, findings []Finding, action Action, failMode, preRedactRef string) string {
 	if env.submitWallNs == 0 {
 		env.submitWallNs = time.Now().UTC().UnixNano()
 	}
@@ -160,12 +195,15 @@ func (p *Pipeline) submitPreventiveBlock(ctx context.Context, env Envelope, find
 	e := p.buildEvent(env, pol)
 	e.Findings = findings
 	e.Decision.EvaluatedInline = true
-	e.Decision.Action = ActionBlock
+	e.Decision.Action = action
 	e.Decision.Applied = true
 	if failMode == "closed" {
 		e.Decision.FailMode = FailClosed
 	} else {
 		e.Decision.FailMode = FailOpen
+	}
+	if preRedactRef != "" {
+		e.Meta.PreRedactRef = preRedactRef
 	}
 	if _, err := p.store.Append(e); err != nil {
 		log.Printf("[audit] preventive append failed agent=%s id=%s: %v", env.AgentID, e.ID, err)

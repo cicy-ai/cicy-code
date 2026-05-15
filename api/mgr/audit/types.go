@@ -127,6 +127,12 @@ type Meta struct {
 	// "rate_limit" | "cooldown" | "suspended" | "below_min_severity".
 	// omitempty keeps Phase-1 events canonical-hash compatible.
 	NotifySuppressedBy string `json:"notify_suppressed_by,omitempty"`
+
+	// PreRedactRef points to the encrypted original payload kept under
+	// ~/cicy-ai/workers/<agent>/.cicy/history/pre-redact/<event_id>.enc.
+	// Set only on Action=redact events. omitempty preserves backward-
+	// compatible canonical hashes for events without redaction.
+	PreRedactRef string `json:"pre_redact_ref,omitempty"`
 }
 
 // Envelope is the caller-supplied input to Pipeline.Submit. The pipeline
@@ -156,4 +162,10 @@ type Envelope struct {
 	// requires fixing time at Submit, not process.
 	submitWallNs int64
 	submitMonoNs int64
+
+	// eventID, when non-empty, is used verbatim as Event.ID. Internal to
+	// the audit package — callers MUST NOT set this; pipeline helpers do
+	// when an event_id is needed before buildEvent (e.g. naming a
+	// pre-redact archive file before persisting the event itself).
+	eventID string
 }

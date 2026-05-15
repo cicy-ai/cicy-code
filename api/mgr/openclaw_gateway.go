@@ -526,30 +526,46 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 	r.ContentLength = int64(len(requestBody))
 
 	// Phase 3 inline preventive check — runs only when policy.preventive.enabled.
-	// If an inline block-default rule matches, the proxy short-circuits with
-	// HTTP 451; the LLM never sees the prompt and no detective snapshot is
-	// written for this turn (only the preventive event is recorded).
-	if dec := auditpkg.PreventiveCheck(auditpkg.Envelope{
+	//   block  -> short-circuit with HTTP 451, no current.json snapshot written
+	//   redact -> swap request body to the redacted version, then continue
+	//             with the standard snapshot + reverse-proxy flow so the LLM
+	//             never sees the original
+	//   none   -> standard flow
+	prevDec := auditpkg.PreventiveCheck(auditpkg.Envelope{
 		AgentID:       agentID,
 		SourceChannel: auditpkg.SourceGateway,
 		Provider:      provider,
 		Direction:     auditpkg.DirectionOutbound,
 		Payload:       requestBody,
-	}); dec.Action == auditpkg.ActionBlock {
-		ruleIDs := make([]string, 0, len(dec.Findings))
-		for _, f := range dec.Findings {
+	})
+	if prevDec.Action == auditpkg.ActionBlock {
+		ruleIDs := make([]string, 0, len(prevDec.Findings))
+		for _, f := range prevDec.Findings {
 			ruleIDs = append(ruleIDs, f.RuleID)
 		}
-		log.Printf("[ai-gateway] preventive block agent=%s rules=%v event=%s", agentID, ruleIDs, dec.EventID)
+		log.Printf("[ai-gateway] preventive block agent=%s rules=%v event=%s", agentID, ruleIDs, prevDec.EventID)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(451)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"blocked":   true,
-			"event_id":  dec.EventID,
-			"reason":    dec.Reason,
+			"event_id":  prevDec.EventID,
+			"reason":    prevDec.Reason,
 			"rules_hit": ruleIDs,
 		})
 		return
+	}
+	if prevDec.Action == auditpkg.ActionRedact {
+		ruleIDs := make([]string, 0, len(prevDec.Findings))
+		for _, f := range prevDec.Findings {
+			ruleIDs = append(ruleIDs, f.RuleID)
+		}
+		log.Printf("[ai-gateway] preventive redact agent=%s rules=%v event=%s", agentID, ruleIDs, prevDec.EventID)
+		requestBody = prevDec.ModifiedPayload
+		r.Body = io.NopCloser(bytes.NewReader(requestBody))
+		r.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(requestBody)), nil
+		}
+		r.ContentLength = int64(len(requestBody))
 	}
 
 	audit := newAIGatewayAuditSession(provider, agentID, targetBase, suffix, r.Method, r.Header.Clone(), requestBody)

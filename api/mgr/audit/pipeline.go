@@ -284,8 +284,12 @@ func (p *Pipeline) buildEvent(env Envelope, pol *Policy) Event {
 	}
 	sum := sha256.Sum256(env.Payload)
 
+	id := env.eventID
+	if id == "" {
+		id = "evt_" + uuid.NewString()
+	}
 	return Event{
-		ID:            "evt_" + uuid.NewString(),
+		ID:            id,
 		SchemaVersion: SchemaVersion,
 		RulesVersion:  RulesVersion,
 		Timestamp:     time.Unix(0, wallNs).UTC().Format(time.RFC3339Nano),
