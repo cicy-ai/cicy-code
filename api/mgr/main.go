@@ -41,6 +41,13 @@ const version = "2.0.1"
 var agentsFlag string
 
 func main() {
+	// `cicy-code audit ...` — CLI subcommand for hash-chain verification etc.
+	// Runs without starting the server (no DB, no HTTP, no Pipeline.Init).
+	// Must be checked BEFORE the flag loop so we don't run server startup.
+	if len(os.Args) >= 2 && os.Args[1] == "audit" {
+		os.Exit(audit.RunCLI(os.Args[2:]))
+	}
+
 	for _, arg := range os.Args[1:] {
 		switch {
 		case arg == "--version" || arg == "-v":
