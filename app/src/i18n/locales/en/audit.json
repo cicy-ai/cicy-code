@@ -79,5 +79,10 @@
   "findingsSecDecision": "Decision",
   "findingsSecChain": "Time & Chain",
   "findingsSecFindings": "Rule findings",
-  "findingsNoFindings": "No findings (walking skeleton scanner is noop)"
+  "findingsNoFindings": "No findings (walking skeleton scanner is noop)",
+  "findingsFpMark": "Mark as FP",
+  "findingsFpBusy": "Submitting...",
+  "findingsFpDone": "✓ Allowlisted",
+  "findingsFpPromptReason": "Optional one-liner: why is this a false positive?",
+  "findingsFpError": "Mark failed, please retry"
 }

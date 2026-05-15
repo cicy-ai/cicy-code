@@ -79,5 +79,10 @@
   "findingsSecDecision": "Décision",
   "findingsSecChain": "Temps & Chaîne",
   "findingsSecFindings": "Détections de règle",
-  "findingsNoFindings": "Aucune détection (scanner walking skeleton est noop)"
+  "findingsNoFindings": "Aucune détection (scanner walking skeleton est noop)",
+  "findingsFpMark": "Marquer FP",
+  "findingsFpBusy": "Envoi...",
+  "findingsFpDone": "✓ Liste blanche",
+  "findingsFpPromptReason": "Une phrase (optionnelle) : pourquoi est-ce un faux positif ?",
+  "findingsFpError": "Échec, réessayez"
 }

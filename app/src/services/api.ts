@@ -223,6 +223,8 @@ const api = {
     to?: string;
   } = {}) => http.get('/api/audit/stats', { params: opts }),
   auditAgents: () => http.get('/api/audit/agents'),
+  auditMarkFalsePositive: (sha256: string, reason: string = '') =>
+    http.post('/api/audit/allowlist/content', { sha256, reason }),
 
   // desktop "apps"
   getApps: () => http.get('/api/apps'),

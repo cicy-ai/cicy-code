@@ -524,6 +524,10 @@ interface AuditEvent {
     scanner_duration_ms: number;
     pipeline_error: string;
     policy_hash: string;
+    allowlisted_by?: string;
+    allowlist_match?: string;
+    notify_suppressed_by?: string;
+    pre_redact_ref?: string;
   };
 }
 
@@ -731,7 +735,7 @@ function FindingsTab() {
           </div>
         </div>
 
-        <FindingsDetailPanel event={selected || null} />
+        <FindingsDetailPanel event={selected || null} onMarkedFP={fetchAll} />
       </div>
     </div>
   );
@@ -746,8 +750,29 @@ function StatPill({ label, value, tone = 'text-zinc-200' }: { label: string; val
   );
 }
 
-function FindingsDetailPanel({ event }: { event: AuditEvent | null }) {
+function FindingsDetailPanel({ event, onMarkedFP }: { event: AuditEvent | null; onMarkedFP?: () => void }) {
   const { t } = useTranslation('audit');
+  const [fpBusy, setFpBusy] = useState(false);
+  const [fpDone, setFpDone] = useState(false);
+
+  useEffect(() => { setFpDone(false); }, [event?.id]);
+
+  const markFP = useCallback(async () => {
+    if (!event) return;
+    const reason = window.prompt(t('findingsFpPromptReason'), '') ?? '';
+    setFpBusy(true);
+    try {
+      await apiService.auditMarkFalsePositive(event.subject.payload_sha256, reason);
+      setFpDone(true);
+      onMarkedFP?.();
+    } catch (err) {
+      console.error('[audit-findings] mark FP failed:', err);
+      window.alert(t('findingsFpError'));
+    } finally {
+      setFpBusy(false);
+    }
+  }, [event, onMarkedFP, t]);
+
   if (!event) {
     return (
       <div data-id="audit-findings-detail-empty" className="rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] flex items-center justify-center text-xs text-[var(--vsc-text-muted)] p-8">
@@ -755,12 +780,30 @@ function FindingsDetailPanel({ event }: { event: AuditEvent | null }) {
       </div>
     );
   }
+  const canMarkFP = event.findings.length > 0 && !event.meta.allowlisted_by;
   return (
     <div data-id="audit-findings-detail" className="rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] flex flex-col min-h-0">
       <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-center gap-2 text-xs">
         <span className="text-[var(--vsc-text-secondary)]">{t('findingsDetailHeader')}</span>
         <code className="font-mono text-[10px] text-[var(--vsc-text-muted)]">{event.id}</code>
         <CopyButton text={event.id} />
+        <div className="flex-1" />
+        {canMarkFP && (
+          <button
+            data-id="audit-findings-mark-fp"
+            disabled={fpBusy || fpDone}
+            onClick={markFP}
+            className={`px-2 py-1 text-[10px] rounded border transition-colors ${
+              fpDone
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 cursor-default'
+                : fpBusy
+                  ? 'border-zinc-700 bg-zinc-800/50 text-zinc-500 cursor-wait'
+                  : 'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'
+            }`}
+          >
+            {fpDone ? t('findingsFpDone') : fpBusy ? t('findingsFpBusy') : t('findingsFpMark')}
+          </button>
+        )}
       </div>
       <div className="flex-1 overflow-auto p-3 space-y-3 text-xs">
         <DetailSection title={t('findingsSecIdentity')} rows={[

@@ -79,5 +79,10 @@
   "findingsSecDecision": "决策",
   "findingsSecChain": "时间与链",
   "findingsSecFindings": "命中规则",
-  "findingsNoFindings": "无命中(walking skeleton scanner 暂为 noop)"
+  "findingsNoFindings": "无命中(walking skeleton scanner 暂为 noop)",
+  "findingsFpMark": "标为误报",
+  "findingsFpBusy": "提交中...",
+  "findingsFpDone": "✓ 已加入白名单",
+  "findingsFpPromptReason": "填写一句话说明(可选):为什么这是误报",
+  "findingsFpError": "标记失败,请重试"
 }

@@ -79,5 +79,10 @@
   "findingsSecDecision": "決定",
   "findingsSecChain": "時刻とチェーン",
   "findingsSecFindings": "ルール検出",
-  "findingsNoFindings": "検出なし (walking skeleton スキャナは noop)"
+  "findingsNoFindings": "検出なし (walking skeleton スキャナは noop)",
+  "findingsFpMark": "誤検知としてマーク",
+  "findingsFpBusy": "送信中...",
+  "findingsFpDone": "✓ 許可リスト追加済み",
+  "findingsFpPromptReason": "一文(任意): なぜ誤検知か",
+  "findingsFpError": "失敗しました。再試行してください"
 }

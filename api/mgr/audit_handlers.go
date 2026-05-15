@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -200,6 +201,46 @@ func handleAuditIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	audit.SubmitMitmEvent(env)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAuditAllowlistContent lets an auditor add the SHA256 of a payload
+// to policy.allow_list.content_hashes so future events with identical
+// content are suppressed. Idempotent; concurrent calls serialized
+// behind audit.AddToAllowList's mutex.
+//
+//	POST /api/audit/allowlist/content
+//	{ "sha256": "sha256:abc...", "reason": "false positive: ..." }
+//
+// Response: 204 on success (added or already present); 400 on bad input;
+// 500 on disk error.
+func handleAuditAllowlistContent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		SHA256 string `json:"sha256"`
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	if !strings.HasPrefix(req.SHA256, "sha256:") {
+		httpErr(w, http.StatusBadRequest, "sha256_must_have_prefix")
+		return
+	}
+	path, err := audit.AddToAllowList(audit.AllowCategoryContentHash, req.SHA256, req.Reason)
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if path == "" {
+		log.Printf("[audit] FP mark idempotent (already in allow_list): sha=%s", req.SHA256)
+	} else {
+		log.Printf("[audit] FP marked sha=%s reason=%q written=%s", req.SHA256, req.Reason, path)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

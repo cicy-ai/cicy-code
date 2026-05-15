@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // Policy is the runtime audit configuration, loaded from
@@ -510,6 +511,108 @@ func (p *Policy) CheckAllowList(agentID, payloadRef, payloadSHA256 string) Allow
 		}
 	}
 	return AllowlistDecision{}
+}
+
+// policyWriteMu serializes read-modify-write to policy.json. The audit
+// pipeline accepts the file as the single source of truth; we never
+// mutate the in-memory *Policy directly — every change goes through the
+// file so fsnotify reload picks it up uniformly.
+var policyWriteMu sync.Mutex
+
+// DefaultPolicyPath returns the conventional policy.json location used by
+// Init. Exposed for tools and HTTP handlers that mutate the policy.
+func DefaultPolicyPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, "cicy-ai", "audit", "policy.json")
+}
+
+// AllowListCategory restricts the public AddToAllowList API to the three
+// supported allow_list sub-arrays. Spelled out as constants so handlers
+// don't pass raw JSON keys.
+type AllowListCategory string
+
+const (
+	AllowCategoryContentHash AllowListCategory = "content_hash"
+	AllowCategoryAgent       AllowListCategory = "agent"
+	AllowCategoryPath        AllowListCategory = "path"
+)
+
+// AddToAllowList atomically appends value to the named allow_list bucket
+// in policy.json. Idempotent: a value that is already present is a no-op
+// (no error, file not rewritten). Returns the *policy.json path written
+// when a change occurred, or "" when nothing changed.
+//
+// The implementation uses map[string]interface{} so unknown / future
+// policy fields are preserved verbatim — operators can edit by hand AND
+// via the API without one clobbering the other.
+func AddToAllowList(category AllowListCategory, value, reason string) (string, error) {
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("audit: allow_list value empty")
+	}
+	var key string
+	switch category {
+	case AllowCategoryContentHash:
+		key = "content_hashes"
+	case AllowCategoryAgent:
+		key = "agents"
+	case AllowCategoryPath:
+		key = "paths"
+	default:
+		return "", fmt.Errorf("audit: unknown allow_list category %q", category)
+	}
+
+	path := DefaultPolicyPath()
+	if path == "" {
+		return "", fmt.Errorf("audit: cannot resolve policy.json path")
+	}
+
+	policyWriteMu.Lock()
+	defer policyWriteMu.Unlock()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", err
+	}
+
+	raw := map[string]interface{}{}
+	if data, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(data, &raw)
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+
+	allowList, _ := raw["allow_list"].(map[string]interface{})
+	if allowList == nil {
+		allowList = map[string]interface{}{}
+	}
+
+	existing, _ := allowList[key].([]interface{})
+	for _, e := range existing {
+		if s, ok := e.(string); ok && s == value {
+			return "", nil // already present, idempotent no-op
+		}
+	}
+	existing = append(existing, value)
+	allowList[key] = existing
+	raw["allow_list"] = allowList
+
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	out = append(out, '\n')
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out, 0o600); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	_ = reason // recorded by the caller (log line + meta-audit event in P5)
+	return path, nil
 }
 
 // expandUserPath resolves a leading "~/" to the current user's home directory.

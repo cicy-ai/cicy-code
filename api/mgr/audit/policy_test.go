@@ -10,6 +10,83 @@ import (
 	"time"
 )
 
+// ── P2-T7 AddToAllowList ──────────────────────────────────────────────
+
+func TestAddToAllowList_NewValue(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	path, err := AddToAllowList(AllowCategoryContentHash, "sha256:abc", "fp from operator")
+	if err != nil {
+		t.Fatalf("AddToAllowList: %v", err)
+	}
+	if path == "" {
+		t.Error("expected non-empty path on first write")
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "sha256:abc") {
+		t.Errorf("policy.json missing added hash: %s", data)
+	}
+}
+
+func TestAddToAllowList_Idempotent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	_, err := AddToAllowList(AllowCategoryContentHash, "sha256:xyz", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Second call should return "" path (idempotent no-op) and no error.
+	path2, err := AddToAllowList(AllowCategoryContentHash, "sha256:xyz", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path2 != "" {
+		t.Errorf("duplicate add should be no-op, got path=%q", path2)
+	}
+}
+
+func TestAddToAllowList_UnknownCategory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	_, err := AddToAllowList("bogus", "x", "")
+	if err == nil || !strings.Contains(err.Error(), "unknown allow_list category") {
+		t.Errorf("expected unknown category error, got %v", err)
+	}
+}
+
+func TestAddToAllowList_PreservesOtherFields(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Pre-seed policy.json with unrelated fields.
+	policyPath := DefaultPolicyPath()
+	_ = os.MkdirAll(filepath.Dir(policyPath), 0o700)
+	seed := `{
+        "version": 1,
+        "preventive": {"enabled": true},
+        "responsible_persons": {"default": ["a@b"]},
+        "custom_rules": [{"id":"custom.x","severity":"low","scan_directions":["outbound"],"match":{"type":"regex","pattern":"x"}}]
+    }`
+	_ = os.WriteFile(policyPath, []byte(seed), 0o600)
+
+	if _, err := AddToAllowList(AllowCategoryContentHash, "sha256:new", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	data, _ := os.ReadFile(policyPath)
+	s := string(data)
+	for _, want := range []string{
+		`"preventive"`, `"responsible_persons"`, `"custom_rules"`, `"sha256:new"`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
+	}
+}
+
 func TestPolicy_LoadMissingFile(t *testing.T) {
 	p, err := LoadPolicy(filepath.Join(t.TempDir(), "no-such.json"))
 	if err != nil {
