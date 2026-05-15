@@ -51,8 +51,26 @@ func Init() error {
 		if werr := p.WatchPolicyFile(policyPath); werr != nil {
 			log.Printf("[audit] policy watcher disabled (no hot reload): %v", werr)
 		}
-		log.Printf("[audit] initialized root=%s rules_version=%s active_rules=%d custom=%d policy_hash=%s",
-			auditRoot, RulesVersion, p.activeRuleCount(), len(policy.CustomRules), policy.Hash)
+		if werr := p.WatchEmailCredentials(); werr != nil {
+			log.Printf("[audit] email-credential watcher disabled: %v", werr)
+		}
+
+		// Phase 6 cut 2a: prefer ResendMailer when credentials and a From
+		// address are both available. Falls back to FileMailer otherwise.
+		mailerName := "FileMailer"
+		mailerDetail := filepath.Join(auditRoot, "email-out")
+		creds, credsSrc := loadResendCredentials()
+		from := resolveEmailFrom(policy, creds)
+		if creds != nil && from != "" {
+			p.SetMailer(NewResendMailer(creds.APIKey, from, creds.ReplyTo))
+			mailerName = "ResendMailer"
+			mailerDetail = "from=" + from + " src=" + credsSrc
+		} else if creds != nil && from == "" {
+			log.Printf("[audit] resend credentials present but no From address (set policy.incident_response.email_from or CICY_RESEND_FROM) — using FileMailer")
+		}
+
+		log.Printf("[audit] initialized root=%s rules_version=%s active_rules=%d custom=%d policy_hash=%s mailer=%s (%s)",
+			auditRoot, RulesVersion, p.activeRuleCount(), len(policy.CustomRules), policy.Hash, mailerName, mailerDetail)
 	})
 	return globalErr
 }

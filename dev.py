@@ -273,6 +273,18 @@ def build_dev_runtime_home(container_name, home_dir=""):
         json.dump(build_full_dev_global_json(), f, ensure_ascii=False, indent=2)
         f.write("\n")
     os.chmod(global_json_path, 0o600)
+
+    # Mirror the host's Resend credential file (used by both the host `email`
+    # skill and the in-container audit ResendMailer) when present. Mode 0600.
+    # The file is later docker-cp'd into the running container.
+    dev_email_json_path = ""
+    host_email_json = os.path.expanduser("~/cicy-ai/db/email.json")
+    if os.path.isfile(host_email_json):
+        dev_db_dir = os.path.join(runtime_root_dir, "db")
+        os.makedirs(dev_db_dir, exist_ok=True)
+        dev_email_json_path = os.path.join(dev_db_dir, "email.json")
+        shutil.copy2(host_email_json, dev_email_json_path)
+        os.chmod(dev_email_json_path, 0o600)
     proxy_json_path = os.path.join(runtime_root_dir, "proxy.json")
     runtime_proxy_json = build_runtime_proxy_json()
     if runtime_proxy_json:
@@ -282,7 +294,7 @@ def build_dev_runtime_home(container_name, home_dir=""):
         os.chmod(proxy_json_path, 0o644)
     else:
         proxy_json_path = ""
-    return home_dir, global_json_path, proxy_json_path
+    return home_dir, global_json_path, proxy_json_path, dev_email_json_path
 
 
 def ensure_docker_home_writable(home_dir, runtime_image):
@@ -1054,7 +1066,7 @@ def run_docker(
     )
     subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
     host_home_path = os.path.abspath(os.path.expanduser(home_dir)) if home_dir else ""
-    dev_home_dir, dev_global_json_path, dev_proxy_json_path = build_dev_runtime_home(
+    dev_home_dir, dev_global_json_path, dev_proxy_json_path, dev_email_json_path = build_dev_runtime_home(
         container_name,
         host_home_path if mount_home and host_home_path else "",
     )
@@ -1155,6 +1167,22 @@ def run_docker(
                 "cp",
                 dev_proxy_json_path,
                 f"{container_name}:{CICY_PROXY_JSON_PATH}",
+            ],
+            capture_output=True,
+            cwd=ROOT_DIR,
+        )
+    if dev_email_json_path:
+        subprocess.run(
+            ["docker", "exec", container_name, "mkdir", "-p", "/home/cicy/cicy-ai/db"],
+            capture_output=True,
+            cwd=ROOT_DIR,
+        )
+        subprocess.run(
+            [
+                "docker",
+                "cp",
+                dev_email_json_path,
+                f"{container_name}:/home/cicy/cicy-ai/db/email.json",
             ],
             capture_output=True,
             cwd=ROOT_DIR,

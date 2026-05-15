@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"log"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -194,6 +195,72 @@ func (p *Pipeline) reload() {
 	}
 	log.Printf("[audit] policy reloaded hash=%s active_rules=%d custom=%d enabled=%v",
 		pol.Hash, p.activeRuleCount(), len(pol.CustomRules), pol.Enabled)
+	// policy.incident_response.email_from might newly resolve to a usable
+	// ResendMailer (or revert to FileMailer if the operator unset it).
+	p.reloadMailer()
+}
+
+// WatchEmailCredentials starts an fsnotify watcher on ~/cicy-ai/db/ so the
+// pipeline hot-swaps to ResendMailer whenever email.json appears or rotates.
+// This is what catches the docker-cp window: audit.Init runs at container
+// startup BEFORE dev.py's `docker cp email.json` lands; the cp triggers
+// a watcher event, we reload creds and swap the mailer in-place.
+// No-op when filesystem watching cannot be initialized.
+func (p *Pipeline) WatchEmailCredentials() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(home, "cicy-ai", "db")
+	if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil {
+		return mkErr
+	}
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	if err := watcher.Add(dir); err != nil {
+		watcher.Close()
+		return err
+	}
+	go func() {
+		for {
+			select {
+			case ev, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				if filepath.Base(ev.Name) != "email.json" {
+					continue
+				}
+				if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) == 0 {
+					continue
+				}
+				// Brief settle so docker cp / atomic writes complete.
+				time.AfterFunc(200*time.Millisecond, p.reloadMailer)
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				log.Printf("[audit] email-credential watcher error: %v", err)
+			}
+		}
+	}()
+	return nil
+}
+
+// reloadMailer re-evaluates the mailer config (creds source + policy
+// EmailFrom) and swaps in ResendMailer when both resolve. Idempotent: if
+// the resolved config is identical to the current state, the swap is a
+// no-op log-line-free operation.
+func (p *Pipeline) reloadMailer() {
+	creds, src := loadResendCredentials()
+	from := resolveEmailFrom(p.CurrentPolicy(), creds)
+	if creds == nil || from == "" {
+		return
+	}
+	p.SetMailer(NewResendMailer(creds.APIKey, from, creds.ReplyTo))
+	log.Printf("[audit] mailer -> ResendMailer from=%s src=%s", from, src)
 }
 
 // Submit ingests an envelope. Wall and monotonic timestamps are captured

@@ -81,6 +81,13 @@ type IncidentResponseConfig struct {
 	OutputDir          string   `json:"output_dir,omitempty"`
 	EmailTemplate      string   `json:"email_template,omitempty"`
 	Languages          []string `json:"languages,omitempty"`
+
+	// EmailFrom is the From: address used by ResendMailer. Sourced from
+	// (in order): this policy field > CICY_RESEND_FROM env > the "from"
+	// field in ~/cicy-ai/db/email.json. When none resolve to a non-empty
+	// string, the audit pipeline keeps FileMailer instead of attempting
+	// to send via Resend.
+	EmailFrom string `json:"email_from,omitempty"`
 }
 
 // DefaultIncidentResponseConfig returns the Phase 6 cut 1 defaults.
