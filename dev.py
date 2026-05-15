@@ -474,9 +474,11 @@ def print_access_urls(base_url, token, service_url=""):
 
 
 def detect_public_ip():
+    # Bypass any HTTP(S)_PROXY env (e.g. 家宽 proxy) so we get this host's real
+    # public IP rather than the proxy's egress IP.
     for cmd in (
-        ["curl", "-fsS", "--max-time", "5", "ifconfig.me"],
-        ["curl", "-fsS", "--max-time", "5", "https://api.ipify.org"],
+        ["curl", "-fsS", "--max-time", "5", "--noproxy", "*", "ifconfig.me"],
+        ["curl", "-fsS", "--max-time", "5", "--noproxy", "*", "https://api.ipify.org"],
     ):
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
