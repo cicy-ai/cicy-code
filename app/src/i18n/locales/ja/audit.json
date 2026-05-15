@@ -84,5 +84,21 @@
   "findingsFpBusy": "送信中...",
   "findingsFpDone": "✓ 許可リスト追加済み",
   "findingsFpPromptReason": "一文(任意): なぜ誤検知か",
-  "findingsFpError": "失敗しました。再試行してください"
+  "findingsFpError": "失敗しました。再試行してください",
+  "tabPolicy": "ポリシー",
+  "policySubGlobal": "グローバル",
+  "policySubAgent": "Per-agent",
+  "policySubEffective": "実効ビュー",
+  "policyAgentSelect": "エージェント:",
+  "policyAgentNone": "エージェントを選択",
+  "policyReload": "再読み込み",
+  "policyReadOnly": "読み取り専用",
+  "policyReset": "リセット",
+  "policySave": "保存",
+  "policySaving": "保存中...",
+  "policyDelete": "Override 削除",
+  "policyDeleted": "Override を削除しました",
+  "policyDeleteConfirm": "{{agent}} の override ファイルを削除しますか？グローバルポリシーにフォールバックします。",
+  "policySaved": "保存しました",
+  "policyErrorJSON": "JSON 構文エラー"
 }

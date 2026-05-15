@@ -84,5 +84,21 @@
   "findingsFpBusy": "Submitting...",
   "findingsFpDone": "✓ Allowlisted",
   "findingsFpPromptReason": "Optional one-liner: why is this a false positive?",
-  "findingsFpError": "Mark failed, please retry"
+  "findingsFpError": "Mark failed, please retry",
+  "tabPolicy": "Policy",
+  "policySubGlobal": "Global",
+  "policySubAgent": "Per-agent",
+  "policySubEffective": "Effective view",
+  "policyAgentSelect": "Agent:",
+  "policyAgentNone": "Select agent",
+  "policyReload": "Reload",
+  "policyReadOnly": "read-only",
+  "policyReset": "Reset",
+  "policySave": "Save",
+  "policySaving": "Saving...",
+  "policyDelete": "Delete override",
+  "policyDeleted": "Override deleted for this agent",
+  "policyDeleteConfirm": "Delete override file for {{agent}}? Falls back to global policy.",
+  "policySaved": "Saved",
+  "policyErrorJSON": "JSON syntax error"
 }

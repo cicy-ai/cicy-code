@@ -529,6 +529,71 @@ func DefaultPolicyPath() string {
 	return filepath.Join(home, "cicy-ai", "audit", "policy.json")
 }
 
+// WriteGlobalPolicy validates and atomically writes a new global policy.
+// Returns the resulting policy_hash on success, "" + error on validation
+// or write failure. fsnotify-driven reload in the running pipeline picks
+// up the change within ~200ms.
+func WriteGlobalPolicy(raw []byte) (string, error) {
+	policyWriteMu.Lock()
+	defer policyWriteMu.Unlock()
+
+	if len(raw) == 0 {
+		return "", fmt.Errorf("audit: empty policy body")
+	}
+	// Validate by parsing through DefaultPolicy() so default fields fill in.
+	p := DefaultPolicy()
+	if err := json.Unmarshal(raw, p); err != nil {
+		return "", fmt.Errorf("audit: parse policy body: %w", err)
+	}
+	if err := validatePolicy(p); err != nil {
+		return "", err
+	}
+
+	path := DefaultPolicyPath()
+	if path == "" {
+		return "", fmt.Errorf("audit: cannot resolve policy.json path")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", err
+	}
+	// Pretty-print so the on-disk file is human-readable.
+	pretty, err := json.MarshalIndent(json.RawMessage(raw), "", "  ")
+	if err != nil {
+		// Fall back to raw bytes if reformatting fails.
+		pretty = raw
+	}
+	pretty = append(pretty, '\n')
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, pretty, 0o600); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+
+	sum := sha256.Sum256(pretty)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+// ReadGlobalPolicyRaw returns the raw bytes of policy.json or an empty
+// "{}" when the file is absent. Never returns DefaultPolicy verbatim —
+// callers want to see what the operator has actually authored.
+func ReadGlobalPolicyRaw() ([]byte, error) {
+	path := DefaultPolicyPath()
+	if path == "" {
+		return nil, fmt.Errorf("audit: cannot resolve policy.json path")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []byte("{}"), nil
+		}
+		return nil, err
+	}
+	return data, nil
+}
+
 // AllowListCategory restricts the public AddToAllowList API to the three
 // supported allow_list sub-arrays. Spelled out as constants so handlers
 // don't pass raw JSON keys.

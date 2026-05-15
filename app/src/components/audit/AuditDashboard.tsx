@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
-import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu, ShieldCheck, RefreshCw, ChevronRight, Filter } from 'lucide-react';
+import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu, ShieldCheck, RefreshCw, ChevronRight, Filter, SlidersHorizontal, Save, RotateCcw, Trash2, AlertCircle } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
 import apiService from '../../services/api';
 import config from '../../config';
 import { TokenManager } from '../../services/tokenManager';
 
-type Tab = 'findings' | 'overview' | 'usage' | 'live' | 'setup';
+type Tab = 'findings' | 'policy' | 'overview' | 'usage' | 'live' | 'setup';
 
 interface DashboardData {
   user_id: string;
@@ -887,6 +887,209 @@ function DetailSection({ title, rows }: { title: string; rows: Array<[string, st
   );
 }
 
+// ── Policy Tab (P2-T7+ Cut A) ──
+
+type PolicySubTab = 'global' | 'agent' | 'effective';
+
+function PolicyTab() {
+  const { t } = useTranslation('audit');
+  const [sub, setSub] = useState<PolicySubTab>('global');
+  const [agents, setAgents] = useState<string[]>([]);
+  const [selectedAgent, setSelectedAgent] = useState<string>('');
+
+  useEffect(() => {
+    apiService.auditAgents()
+      .then(r => {
+        const list = r.data?.agents || [];
+        setAgents(list);
+        if (list.length && !selectedAgent) setSelectedAgent(list[0]);
+      })
+      .catch(err => console.error('[policy] list agents:', err));
+  }, []);
+
+  const subs: { id: PolicySubTab; label: string }[] = [
+    { id: 'global', label: t('policySubGlobal') },
+    { id: 'agent', label: t('policySubAgent') },
+    { id: 'effective', label: t('policySubEffective') },
+  ];
+
+  return (
+    <div data-id="audit-policy-root" className="flex flex-col gap-3 h-full">
+      <div data-id="audit-policy-subtabs" className="flex items-center gap-1 p-1 rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] w-fit">
+        {subs.map(s => (
+          <button key={s.id}
+            data-id={`audit-policy-subtab-${s.id}`}
+            onClick={() => setSub(s.id)}
+            className={`px-3 py-1.5 text-xs rounded transition-colors ${sub === s.id ? 'bg-[var(--vsc-bg-active)] text-white' : 'text-[var(--vsc-text-secondary)] hover:text-[var(--vsc-text)] hover:bg-[var(--vsc-bg-hover)]'}`}>
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {sub === 'global' && <PolicyEditor mode="global" />}
+      {sub === 'agent' && (
+        <PolicyEditor mode="agent" agents={agents} selectedAgent={selectedAgent} onSelectAgent={setSelectedAgent} />
+      )}
+      {sub === 'effective' && (
+        <PolicyEditor mode="effective" agents={agents} selectedAgent={selectedAgent} onSelectAgent={setSelectedAgent} />
+      )}
+    </div>
+  );
+}
+
+interface PolicyEditorProps {
+  mode: 'global' | 'agent' | 'effective';
+  agents?: string[];
+  selectedAgent?: string;
+  onSelectAgent?: (a: string) => void;
+}
+
+function PolicyEditor({ mode, agents = [], selectedAgent = '', onSelectAgent }: PolicyEditorProps) {
+  const { t } = useTranslation('audit');
+  const [raw, setRaw] = useState('');
+  const [original, setOriginal] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [policyHash, setPolicyHash] = useState('');
+
+  const readOnly = mode === 'effective';
+
+  const fetchIt = useCallback(async () => {
+    if ((mode === 'agent' || mode === 'effective') && !selectedAgent) {
+      setRaw(''); setOriginal(''); return;
+    }
+    setLoading(true); setError(''); setInfo('');
+    try {
+      let r;
+      if (mode === 'global') r = await apiService.auditPolicyGetGlobal();
+      else if (mode === 'agent') r = await apiService.auditPolicyGetAgent(selectedAgent);
+      else r = await apiService.auditPolicyGetEffective(selectedAgent);
+      const pretty = typeof r.data === 'string' ? r.data : JSON.stringify(r.data, null, 2);
+      setRaw(pretty);
+      setOriginal(pretty);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [mode, selectedAgent]);
+
+  useEffect(() => { fetchIt(); }, [fetchIt]);
+
+  const dirty = raw !== original;
+
+  const onSave = useCallback(async () => {
+    setError(''); setInfo('');
+    let body = raw;
+    try { JSON.parse(body); } catch (e: any) {
+      setError(t('policyErrorJSON') + ': ' + e.message);
+      return;
+    }
+    setLoading(true);
+    try {
+      let r;
+      if (mode === 'global') r = await apiService.auditPolicyPostGlobal(body);
+      else r = await apiService.auditPolicyPostAgent(selectedAgent, body);
+      const hash = r.data?.policy_hash || '';
+      if (hash) setPolicyHash(hash);
+      setOriginal(raw);
+      setInfo(t('policySaved') + (hash ? ` (${hash.slice(0, 20)}...)` : ''));
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [raw, mode, selectedAgent, t]);
+
+  const onDelete = useCallback(async () => {
+    if (mode !== 'agent' || !selectedAgent) return;
+    if (!window.confirm(t('policyDeleteConfirm', { agent: selectedAgent }))) return;
+    setLoading(true); setError(''); setInfo('');
+    try {
+      await apiService.auditPolicyPostAgent(selectedAgent, '{}');
+      setRaw('{}'); setOriginal('{}');
+      setInfo(t('policyDeleted'));
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [mode, selectedAgent, t]);
+
+  return (
+    <div data-id="audit-policy-editor" className="flex flex-col gap-2 flex-1 min-h-0">
+      {(mode === 'agent' || mode === 'effective') && (
+        <div data-id="audit-policy-agent-bar" className="flex items-center gap-2 p-2 rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)]">
+          <span className="text-xs text-[var(--vsc-text-secondary)]">{t('policyAgentSelect')}</span>
+          <select data-id="audit-policy-agent-select" value={selectedAgent} onChange={e => onSelectAgent?.(e.target.value)}
+            className="text-xs px-2 py-1 rounded bg-[var(--vsc-bg)] border border-[var(--vsc-border)] text-[var(--vsc-text)]">
+            <option value="">{t('policyAgentNone')}</option>
+            {agents.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+          <button data-id="audit-policy-reload" onClick={fetchIt} disabled={loading}
+            className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-[var(--vsc-bg-hover)] hover:bg-[var(--vsc-bg-active)] text-[var(--vsc-text)] transition-colors">
+            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+            {t('policyReload')}
+          </button>
+          {readOnly && <span className="ml-auto text-[10px] text-[var(--vsc-text-muted)]">{t('policyReadOnly')}</span>}
+        </div>
+      )}
+
+      <textarea
+        data-id="audit-policy-textarea"
+        readOnly={readOnly}
+        value={raw}
+        onChange={e => { if (!readOnly) setRaw(e.target.value); }}
+        spellCheck={false}
+        className="flex-1 min-h-[240px] font-mono text-xs p-3 rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] text-[var(--vsc-text)] resize-none focus:outline-none focus:border-blue-500/40"
+      />
+
+      {error && (
+        <div data-id="audit-policy-error" className="flex items-start gap-2 p-2 rounded border border-red-500/30 bg-red-500/10 text-red-300 text-xs">
+          <AlertCircle size={14} className="shrink-0 mt-0.5" />
+          <span className="font-mono">{error}</span>
+        </div>
+      )}
+      {info && !error && (
+        <div data-id="audit-policy-info" className="flex items-center gap-2 p-2 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs">
+          <Check size={14} />
+          <span className="font-mono">{info}</span>
+        </div>
+      )}
+
+      {!readOnly && (
+        <div data-id="audit-policy-actions" className="flex items-center gap-2">
+          {mode === 'agent' && (
+            <button data-id="audit-policy-delete" onClick={onDelete} disabled={loading}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors">
+              <Trash2 size={12} />
+              {t('policyDelete')}
+            </button>
+          )}
+          <div className="flex-1" />
+          <button data-id="audit-policy-reset" disabled={!dirty || loading} onClick={() => setRaw(original)}
+            className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded border transition-colors ${dirty ? 'border-zinc-500/30 bg-zinc-500/10 text-zinc-300 hover:bg-zinc-500/20' : 'border-zinc-700 bg-zinc-800/30 text-zinc-600 cursor-default'}`}>
+            <RotateCcw size={12} />
+            {t('policyReset')}
+          </button>
+          <button data-id="audit-policy-save" disabled={!dirty || loading} onClick={onSave}
+            className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded border transition-colors ${dirty ? 'border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20' : 'border-zinc-700 bg-zinc-800/30 text-zinc-600 cursor-default'}`}>
+            <Save size={12} />
+            {loading ? t('policySaving') : t('policySave')}
+          </button>
+        </div>
+      )}
+
+      {policyHash && (
+        <div className="text-[10px] text-[var(--vsc-text-muted)] font-mono">
+          policy_hash: {policyHash}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Dashboard ──
 export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
   const { t } = useTranslation('audit');
@@ -924,6 +1127,7 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
 
   const tabs: { id: Tab; icon: typeof BarChart3; label: string }[] = [
     { id: 'findings', icon: ShieldCheck, label: t('tabFindings') },
+    { id: 'policy', icon: SlidersHorizontal, label: t('tabPolicy') },
     { id: 'overview', icon: BarChart3, label: t('tabOverview') },
     { id: 'usage', icon: Clock, label: t('tabUsage') },
     { id: 'live', icon: Activity, label: t('tabLive') },
@@ -964,6 +1168,7 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
       {/* Content */}
       <main data-id="audit-dashboard-content" className="flex-1 overflow-auto p-4">
         {tab === 'findings' && <FindingsTab />}
+        {tab === 'policy' && <PolicyTab />}
         {tab === 'overview' && <OverviewTab userId={userId} days={days} setDays={setDays} />}
         {tab === 'usage' && <UsageTab userId={userId} />}
         {tab === 'live' && <LiveTab />}

@@ -84,5 +84,21 @@
   "findingsFpBusy": "提交中...",
   "findingsFpDone": "✓ 已加入白名单",
   "findingsFpPromptReason": "填写一句话说明(可选):为什么这是误报",
-  "findingsFpError": "标记失败,请重试"
+  "findingsFpError": "标记失败,请重试",
+  "tabPolicy": "策略",
+  "policySubGlobal": "全局",
+  "policySubAgent": "Per-agent",
+  "policySubEffective": "生效视图",
+  "policyAgentSelect": "Agent:",
+  "policyAgentNone": "选择 agent",
+  "policyReload": "重载",
+  "policyReadOnly": "只读",
+  "policyReset": "重置",
+  "policySave": "保存",
+  "policySaving": "保存中...",
+  "policyDelete": "删除 override",
+  "policyDeleted": "已删除该 agent 的 override",
+  "policyDeleteConfirm": "确定删除 {{agent}} 的 override 文件?将回退到全局策略。",
+  "policySaved": "已保存",
+  "policyErrorJSON": "JSON 语法错"
 }

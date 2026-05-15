@@ -84,5 +84,21 @@
   "findingsFpBusy": "Envoi...",
   "findingsFpDone": "✓ Liste blanche",
   "findingsFpPromptReason": "Une phrase (optionnelle) : pourquoi est-ce un faux positif ?",
-  "findingsFpError": "Échec, réessayez"
+  "findingsFpError": "Échec, réessayez",
+  "tabPolicy": "Politique",
+  "policySubGlobal": "Global",
+  "policySubAgent": "Par-agent",
+  "policySubEffective": "Vue effective",
+  "policyAgentSelect": "Agent :",
+  "policyAgentNone": "Choisir un agent",
+  "policyReload": "Recharger",
+  "policyReadOnly": "lecture seule",
+  "policyReset": "Réinitialiser",
+  "policySave": "Enregistrer",
+  "policySaving": "Enregistrement...",
+  "policyDelete": "Supprimer override",
+  "policyDeleted": "Override supprimé",
+  "policyDeleteConfirm": "Supprimer le fichier override pour {{agent}} ? Retour à la politique globale.",
+  "policySaved": "Enregistré",
+  "policyErrorJSON": "Erreur syntaxe JSON"
 }

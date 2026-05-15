@@ -126,6 +126,50 @@ func (p *Pipeline) activeRuleCount() int {
 	return -1
 }
 
+// effectivePolicyFor returns the merged global+agent policy for the given
+// agent id, or the global policy unchanged when there is no override file.
+// Read from disk every call: per-agent file is tiny (< 1KB typical) and the
+// OS page cache makes this effectively free for hot agents.
+func (p *Pipeline) effectivePolicyFor(agentID string, global *Policy) *Policy {
+	if agentID == "" {
+		return global
+	}
+	ov, err := LoadAgentOverride(p.store.workersRoot, agentID)
+	if err != nil {
+		log.Printf("[audit] agent override load failed agent=%s, falling back to global: %v",
+			agentID, err)
+		return global
+	}
+	if ov == nil {
+		return global
+	}
+	return MergeIntoEffective(global, ov)
+}
+
+// LoadAgentOverride is the package-level entry the HTTP handler uses to
+// read a per-agent file. Equivalent to (*Pipeline).effectivePolicyFor but
+// without the merge — handlers expose raw override JSON in / out.
+func (p *Pipeline) LoadAgentOverride(agentID string) (*AgentOverride, error) {
+	return LoadAgentOverride(p.store.workersRoot, agentID)
+}
+
+func (p *Pipeline) SaveAgentOverride(agentID string, ov *AgentOverride) error {
+	return SaveAgentOverride(p.store.workersRoot, agentID, ov)
+}
+
+// EffectivePolicyFor is the exported pipeline view of "what does the audit
+// system actually use for events from this agent". Used by /api/audit/policy
+// /effective/{agentID}.
+func (p *Pipeline) EffectivePolicyFor(agentID string) *Policy {
+	return p.effectivePolicyFor(agentID, p.CurrentPolicy())
+}
+
+// WorkersRoot returns the absolute path the pipeline uses for per-agent
+// files. Exposed for handlers and tests.
+func (p *Pipeline) WorkersRoot() string {
+	return p.store.workersRoot
+}
+
 // WatchPolicyFile starts an fsnotify watcher on the parent directory of
 // policyPath and reloads on every WRITE/CREATE/RENAME of the base name.
 // Debounces to 200ms (atomic writes fire CREATE+WRITE in quick succession).
@@ -293,13 +337,15 @@ func (p *Pipeline) process(env Envelope) {
 
 	startedAt := time.Now()
 	pol := p.CurrentPolicy()
-	e := p.buildEvent(env, pol)
+	// L3 per-agent override merge. effectivePolicyFor reads the agent's
+	// audit-overrides.json (if any) and returns a fresh *Policy. nil-safe
+	// when no override file exists.
+	effective := p.effectivePolicyFor(env.AgentID, pol)
+	e := p.buildEvent(env, effective)
 
-	// AllowList check uses agent_id + payload_ref + payload_sha256. If the
-	// event is suppressed we record an empty findings list AND stamp the
-	// reason — the EVENT is still preserved (Detective completeness), the
-	// finding output is silenced.
-	allow := pol.CheckAllowList(env.AgentID, e.Subject.PayloadRef, e.Subject.PayloadSHA256)
+	// AllowList check uses the EFFECTIVE policy (global ∪ agent paths /
+	// content hashes). Suppressed → drop findings, stamp the reason.
+	allow := effective.CheckAllowList(env.AgentID, e.Subject.PayloadRef, e.Subject.PayloadSHA256)
 
 	var findings []Finding
 	scanStart := time.Now()
@@ -308,7 +354,10 @@ func (p *Pipeline) process(env Envelope) {
 		e.Meta.AllowlistedBy = allow.Reason
 		e.Meta.AllowlistMatch = allow.Match
 	} else {
-		findings = p.scanner.Scan(env.Payload, env.Direction, pol)
+		findings = p.scanner.Scan(env.Payload, env.Direction, effective)
+		// Apply effective rules_override after scan: disable specific rules
+		// or re-grade their severity per the merged override list.
+		findings = ApplyRulesOverrideToFindings(findings, effective.RulesOverride)
 	}
 	e.Findings = findings
 	e.Meta.ScannerDurationMs = elapsedMs(scanStart)

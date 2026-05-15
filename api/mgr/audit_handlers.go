@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -337,6 +338,129 @@ h2{color:#0a0a0a;font-weight:600}code{background:#f3f4f6;padding:2px 6px;border-
 func escapeHTML(s string) string {
 	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&#39;")
 	return r.Replace(s)
+}
+
+// handleAuditPolicyGlobal — GET returns raw policy.json bytes; POST
+// validates + atomic writes a new global policy. fsnotify reloads the
+// running pipeline within ~200ms.
+func handleAuditPolicyGlobal(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		raw, err := audit.ReadGlobalPolicyRaw()
+		if err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(raw)
+	case http.MethodPost:
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			httpErr(w, http.StatusBadRequest, "body_read_failed")
+			return
+		}
+		hash, err := audit.WriteGlobalPolicy(body)
+		if err != nil {
+			httpErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		log.Printf("[audit] policy.json updated via API, hash=%s len=%d", hash, len(body))
+		J(w, M{"ok": true, "policy_hash": hash})
+	default:
+		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
+	}
+}
+
+// agentIDFromPath pulls the trailing path segment after a known prefix.
+// Returns "" when the segment is missing or contains a "/" (subpaths
+// not supported here).
+func agentIDFromPath(urlPath, prefix string) string {
+	if !strings.HasPrefix(urlPath, prefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(urlPath, prefix)
+	rest = strings.TrimSuffix(rest, "/")
+	if rest == "" || strings.Contains(rest, "/") {
+		return ""
+	}
+	return rest
+}
+
+// handleAuditPolicyAgent — GET returns the per-agent override JSON (or
+// `{}` if no override); POST atomically writes new contents.
+//
+//   /api/audit/policy/agents/{agent_id}
+func handleAuditPolicyAgent(w http.ResponseWriter, r *http.Request) {
+	agentID := agentIDFromPath(r.URL.Path, "/api/audit/policy/agents/")
+	if agentID == "" {
+		httpErr(w, http.StatusBadRequest, "agent_id_required")
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, "home_unresolved")
+		return
+	}
+	workersRoot := filepath.Join(home, "cicy-ai", "workers")
+
+	switch r.Method {
+	case http.MethodGet:
+		ov, err := audit.LoadAgentOverride(workersRoot, agentID)
+		if err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if ov == nil {
+			_, _ = w.Write([]byte("{}"))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(ov)
+	case http.MethodPost:
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			httpErr(w, http.StatusBadRequest, "body_read_failed")
+			return
+		}
+		ov := &audit.AgentOverride{}
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, ov); err != nil {
+				httpErr(w, http.StatusBadRequest, "invalid_json: "+err.Error())
+				return
+			}
+		}
+		if err := audit.SaveAgentOverride(workersRoot, agentID, ov); err != nil {
+			httpErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		log.Printf("[audit] agent override updated agent=%s len=%d", agentID, len(body))
+		J(w, M{"ok": true, "agent_id": agentID})
+	default:
+		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
+	}
+}
+
+// handleAuditPolicyEffective — read-only view of (global ⊕ per-agent)
+// merged into a single *Policy for the given agent.
+//
+//   GET /api/audit/policy/effective/{agent_id}
+func handleAuditPolicyEffective(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	agentID := agentIDFromPath(r.URL.Path, "/api/audit/policy/effective/")
+	if agentID == "" {
+		httpErr(w, http.StatusBadRequest, "agent_id_required")
+		return
+	}
+	pol := audit.CurrentEffectivePolicy(agentID)
+	if pol == nil {
+		httpErr(w, http.StatusInternalServerError, "pipeline_not_initialized")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(pol)
 }
 
 func handleAuditAgents(w http.ResponseWriter, r *http.Request) {

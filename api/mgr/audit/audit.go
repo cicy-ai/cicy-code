@@ -91,6 +91,16 @@ func Wait() {
 	}
 }
 
+// CurrentEffectivePolicy is the package-level entry HTTP handlers use to
+// expose "what does the audit treat events from this agent as". Returns nil
+// when the pipeline is not initialized.
+func CurrentEffectivePolicy(agentID string) *Policy {
+	if globalPipeline == nil {
+		return nil
+	}
+	return globalPipeline.EffectivePolicyFor(agentID)
+}
+
 // SubmitGatewayOutbound is a convenience wrapper for the cicy AI gateway
 // outbound (request) write callback in ai_gateway_audit.go.
 func SubmitGatewayOutbound(agentID, agentType, userID, sessionID, turnID, conversationID, provider, model string, payload []byte) {

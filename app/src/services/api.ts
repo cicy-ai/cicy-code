@@ -225,6 +225,16 @@ const api = {
   auditAgents: () => http.get('/api/audit/agents'),
   auditMarkFalsePositive: (sha256: string, reason: string = '') =>
     http.post('/api/audit/allowlist/content', { sha256, reason }),
+  auditPolicyGetGlobal: () => http.get('/api/audit/policy'),
+  auditPolicyPostGlobal: (raw: string) =>
+    http.post('/api/audit/policy', raw, { headers: { 'Content-Type': 'application/json' } }),
+  auditPolicyGetAgent: (agentId: string) =>
+    http.get(`/api/audit/policy/agents/${encodeURIComponent(agentId)}`),
+  auditPolicyPostAgent: (agentId: string, raw: string) =>
+    http.post(`/api/audit/policy/agents/${encodeURIComponent(agentId)}`, raw,
+      { headers: { 'Content-Type': 'application/json' } }),
+  auditPolicyGetEffective: (agentId: string) =>
+    http.get(`/api/audit/policy/effective/${encodeURIComponent(agentId)}`),
 
   // desktop "apps"
   getApps: () => http.get('/api/apps'),
