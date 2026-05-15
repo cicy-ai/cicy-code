@@ -158,41 +158,6 @@ func TestCodexInstallCPing(t *testing.T) {
 	}
 }
 
-func TestInstallDockerBuildGitHubActionStaticSkill(t *testing.T) {
-	targetRoot := t.TempDir()
-
-	installed, err := Install("", "claude", targetRoot, []string{"docker-build"})
-	if err != nil {
-		t.Fatalf("Install() error = %v", err)
-	}
-	if len(installed) != 1 || installed[0] != "docker-build-github-action" {
-		t.Fatalf("Install() installed = %#v", installed)
-	}
-
-	skillPath := filepath.Join(targetRoot, "docker-build-github-action", "SKILL.md")
-	data, err := os.ReadFile(skillPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s) error = %v", skillPath, err)
-	}
-	if !strings.Contains(string(data), "docker-build-ghcr.json") {
-		t.Fatalf("SKILL.md missing config-driven usage: %s", string(data))
-	}
-	if !strings.Contains(string(data), "ghcr.io/") {
-		t.Fatalf("SKILL.md missing GHCR guidance: %s", string(data))
-	}
-	if strings.Contains(string(data), "DOCKERHUB_TOKEN") {
-		t.Fatalf("SKILL.md should not mention Docker Hub secrets: %s", string(data))
-	}
-	scriptPath := filepath.Join(targetRoot, "docker-build-github-action", "scripts", "create_workflow.py")
-	if _, err := os.Stat(scriptPath); err != nil {
-		t.Fatalf("script missing: %v", err)
-	}
-	metadataPath := filepath.Join(targetRoot, "docker-build-github-action", "agents", "openai.yaml")
-	if _, err := os.Stat(metadataPath); err != nil {
-		t.Fatalf("agents metadata missing: %v", err)
-	}
-}
-
 func TestCodexInstallGlobalAPIToken(t *testing.T) {
 	targetRoot := t.TempDir()
 
@@ -371,7 +336,6 @@ func TestCodexListShowsExternalDirs(t *testing.T) {
 	foundGoogle := false
 	foundCFTunnel := false
 	foundCPing := false
-	foundDockerBuildGitHubAction := false
 	foundGlobalAPIToken := false
 	foundAgentWebpage := false
 	foundCicySSH := false
@@ -386,9 +350,6 @@ func TestCodexListShowsExternalDirs(t *testing.T) {
 		}
 		if item.Name == "cping" && item.Status == "missing" {
 			foundCPing = true
-		}
-		if item.Name == "docker-build-github-action" && item.Status == "missing" {
-			foundDockerBuildGitHubAction = true
 		}
 		if item.Name == "globalApiToken" && item.Status == "missing" {
 			foundGlobalAPIToken = true
@@ -417,9 +378,6 @@ func TestCodexListShowsExternalDirs(t *testing.T) {
 	}
 	if !foundCPing {
 		t.Fatalf("List() missing cping status: %#v", listed)
-	}
-	if !foundDockerBuildGitHubAction {
-		t.Fatalf("List() missing docker-build-github-action status: %#v", listed)
 	}
 	if !foundGlobalAPIToken {
 		t.Fatalf("List() missing globalApiToken status: %#v", listed)

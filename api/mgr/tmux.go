@@ -731,19 +731,28 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	J(w, resp)
 }
 
-// columns allowed in agent_config UPDATE
+// columns allowed in agent_config UPDATE.
+//
+// Identity / provisioning fields are deliberately NOT in this map:
+//   workspace, agent_type, role, init_script, ttyd_port, node_url
+// — these are set at pane creation (or by bind/unbind, for role) and never via
+// PATCH. Putting them here is a security hole: a buggy or malicious caller
+// passing `workspace` would silently rewrite a pane's filesystem mapping.
+// Bug 2026-05-14 corrupted workspace fields cross-pane because the inspector
+// PATCHed a whole settingsData blob; the frontend was tightened, but the
+// surface area here is the durable defense.
 var paneUpdateCols = map[string]bool{
-	"title": true, "ttyd_port": true, "workspace": true, "init_script": true,
+	"title": true, "agent_duty": true, "config": true, "common_prompt": true,
+	"ttyd_preview": true, "default_model": true, "trust_level": true,
 	"tg_token": true, "tg_chat_id": true, "tg_enable": true, "active": true,
-	"agent_type": true, "agent_duty": true, "config": true, "common_prompt": true,
-	"ttyd_preview": true, "role": true, "default_model": true, "trust_level": true,
-	"allow_all_actions": true,
-	"reply_in_chinese":  true,
+	"allow_all_actions":  true,
+	"reply_in_chinese":   true,
 	"use_custom_gateway": true,
-	"use_proxy":         true,
-	"runtime_ai":        true,
-	"private_mode":      true, "allowed_users": true,
-	"node_url": true, "preview": true,
+	"use_proxy":          true,
+	"runtime_ai":         true,
+	"private_mode":       true,
+	"allowed_users":      true,
+	"preview":            true,
 }
 
 func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {

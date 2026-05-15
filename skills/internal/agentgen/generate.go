@@ -41,7 +41,7 @@ func OpenCodeSkillsDir() string {
 }
 
 func ApprovedCodexSkills() []string {
-	return []string{"agent-code-server", "agent-summary", "agent-webpage", "cf-tunnel", "cping", "docker-build-github-action", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent", "cicy-mihomo", "us-spot-proxy", "proxy_ssh"}
+	return []string{"agent-code-server", "agent-summary", "agent-webpage", "aliyun-cli", "cf-tunnel", "cping", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent", "cicy-mihomo", "us-spot-proxy", "proxy_ssh"}
 }
 
 func canonicalCodexSkillName(name string) string {
@@ -56,9 +56,7 @@ func canonicalCodexSkillName(name string) string {
 		return "cf-tunnel"
 	case "cping":
 		return "cping"
-	case "docker-build-github-action", "dockerbuildgithubaction", "docker_build_github_action", "docker-github-action", "dockerhub-build", "docker-build":
-		return "docker-build-github-action"
-	case "frp-client", "frpclient", "frpc", "frp-client-skill":
+case "frp-client", "frpclient", "frpc", "frp-client-skill":
 		return "frp-client"
 	case "frp-server", "frpserver", "frps", "frp-server-skill":
 		return "frp-server"
@@ -76,6 +74,8 @@ func canonicalCodexSkillName(name string) string {
 		return "us-spot-proxy"
 	case "proxy_ssh", "proxy-ssh", "proxyssh", "ssh-socks", "ssh_socks":
 		return "proxy_ssh"
+	case "aliyun-cli", "aliyun_cli", "aliyuncli", "aliyun":
+		return "aliyun-cli"
 	default:
 		return ""
 	}
@@ -307,8 +307,6 @@ func generateCodexSkill(root, targetRoot, skill string) error {
 		return generateCodexCFTunnel(targetRoot)
 	case "cping":
 		return generateCodexCPing(targetRoot)
-	case "docker-build-github-action":
-		return generateStaticSkill(root, targetRoot, "infra", "docker-build-github-action")
 	case "frp-client":
 		return generateCodexFRPClient(targetRoot)
 	case "frp-server":
@@ -327,6 +325,8 @@ func generateCodexSkill(root, targetRoot, skill string) error {
 		return generateCodexUSSpotProxy(targetRoot)
 	case "proxy_ssh":
 		return generateCodexProxySSH(targetRoot)
+	case "aliyun-cli":
+		return generateCodexAliyunCLI(targetRoot)
 	default:
 		return fmt.Errorf("skill %q is not implemented", skill)
 	}
@@ -489,6 +489,25 @@ func generateCodexProxySSH(targetRoot string) error {
 		return err
 	}
 	tools := renderProxySSHCommands()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
+func generateCodexAliyunCLI(targetRoot string) error {
+	skillDir := filepath.Join(targetRoot, "aliyun-cli")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderAliyunCLISkill()); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderAliyunCLIHelp()); err != nil {
+		return err
+	}
+	tools := renderAliyunCLICommands()
 	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
 		return err
 	}
@@ -1696,6 +1715,139 @@ func renderProxySSHCommands() string {
 | ` + "`proxy_ssh restart <name>`" + ` | Stop then start |
 | ` + "`proxy_ssh test <name>`" + ` | Probe egress IP through the SOCKS port |
 | ` + "`proxy_ssh install-autossh`" + ` | Install autossh via apt or brew when missing |
+`
+}
+
+func renderAliyunCLISkill() string {
+	return `---
+name: aliyun-cli
+description: Install and configure the official Aliyun CLI on this host. The ` + "`aliyun-cli`" + ` wrapper is bootstrap-only (install / config / apply / status); for every real API call (ECS / VPC / RAM / OSS / …) use the native ` + "`aliyun`" + ` CLI directly.
+---
+
+# Aliyun CLI
+
+> **Two different commands. Pick the right one:**
+>
+> - ` + "`aliyun-cli`" + ` — **bootstrap wrapper only**. Four subcommands: ` + "`install`" + ` / ` + "`config`" + ` / ` + "`apply`" + ` / ` + "`status`" + `. **Nothing else.**
+> - ` + "`aliyun`" + ` — **the official Aliyun CLI**. Use this for every real API call: ECS, VPC, RAM, OSS, RDS, security groups, … Once ` + "`aliyun-cli apply`" + ` has been run, ` + "`aliyun`" + ` reads its own state — the wrapper is no longer in the loop.
+>
+> If a task is "install / set up credentials / check setup state" → use ` + "`aliyun-cli`" + `.
+> If a task is "do anything against the Aliyun API" → use ` + "`aliyun`" + ` directly.
+> **The wrapper does NOT proxy ` + "`aliyun ecs ...`" + ` calls. Do not try ` + "`aliyun-cli ecs ...`" + `.**
+
+The wrapper has exactly four jobs:
+
+1. ` + "`install`" + ` — download the official ` + "`aliyun`" + ` binary into ` + "`~/.local/bin`" + `.
+2. ` + "`config`" + ` — open the bootstrap JSON in code-server so the user can fill in id/secret. Auto-creates a placeholder if missing.
+3. ` + "`apply`" + ` — push the JSON into the ` + "`aliyun`" + ` CLI's default profile (one-shot bootstrap).
+4. ` + "`status`" + ` — report install / config state (with the AccessKey id masked).
+
+## Credentials: hard rules
+
+- **NEVER cat / Read / grep / print** the bootstrap JSON or ` + "`~/.aliyun/config.json`" + `. Their contents are user secrets — the wrapper is the only thing that touches them.
+- When credentials are missing, run ` + "`aliyun-cli config`" + `. It auto-creates a placeholder JSON (chmod 600, literal ` + "`<paste-your-...-here>`" + ` placeholders) and opens it in code-server. **Do not ask the user to paste the AccessKey id or secret into chat.**
+- After the user saves the file, run ` + "`aliyun-cli apply`" + ` to push the values into the ` + "`aliyun`" + ` CLI's default profile. The wrapper reads the JSON for you; you do not.
+- Once ` + "`apply`" + ` succeeds the official CLI persists credentials in its own state and the bootstrap JSON is no longer needed at runtime — every later ` + "`aliyun ecs / vpc / ram ...`" + ` call reads from there.
+
+## Placeholder JSON shape (illustrative — never Read the live file)
+
+` + "```json" + `
+{
+  "access_key_id": "<paste-your-access-key-id-here>",
+  "access_key_secret": "<paste-your-access-key-secret-here>",
+  "region_id": "us-west-1"
+}
+` + "```" + `
+
+## Scope
+
+Use this skill when the task involves:
+
+- Installing the Aliyun CLI on a fresh host
+- Bootstrapping credentials (` + "`config`" + ` → user fills in → ` + "`apply`" + `)
+- Confirming the current binary version, profile, and (masked) AK in use
+- Running any Aliyun API call after ` + "`apply`" + ` is done (via plain ` + "`aliyun ...`" + `)
+
+## Rules
+
+1. **Right tool for the job.** ` + "`aliyun-cli`" + ` = install/bootstrap only (4 subcommands). ` + "`aliyun`" + ` = every real API call. Never try to invoke an Aliyun API through ` + "`aliyun-cli`" + ` — it has no such subcommand and will reject it.
+2. If ` + "`aliyun`" + ` is not on PATH, run ` + "`aliyun-cli install`" + ` first.
+3. If ` + "`status`" + ` shows the config is missing or a placeholder, run ` + "`aliyun-cli config`" + ` and let the user fill it in in code-server. Do not ask for credentials in chat.
+4. After the user saves, run ` + "`aliyun-cli apply`" + `. Re-run it any time the JSON changes.
+5. For real API work, call ` + "`aliyun`" + ` directly — e.g. ` + "`aliyun ecs DescribeInstances --region us-west-1`" + `. Do not wrap those calls inside ` + "`aliyun-cli`" + `.
+6. Never echo the access-key id or secret. ` + "`status`" + ` masks the id and never prints the secret — trust the wrapper's output, do not re-read the file yourself.
+
+## Help
+
+Read [help.md](./references/help.md) first for quick usage.
+
+## Tools
+
+Read [tools.md](./references/tools.md) for the wrapper's subcommands.
+`
+}
+
+func renderAliyunCLIHelp() string {
+	return `# Aliyun CLI Help
+
+## Two commands — don't confuse them
+
+| Command | Purpose | Subcommands |
+|---|---|---|
+| ` + "`aliyun-cli`" + ` | **Bootstrap only** — install binary, edit/apply config, report status | ` + "`install`" + ` / ` + "`config`" + ` / ` + "`apply`" + ` / ` + "`status`" + ` |
+| ` + "`aliyun`" + ` | **Native Aliyun CLI** — every real API call goes here | ` + "`ecs`" + ` / ` + "`vpc`" + ` / ` + "`ram`" + ` / ` + "`oss`" + ` / ` + "`rds`" + ` / … |
+
+Once ` + "`aliyun-cli apply`" + ` has succeeded, the wrapper is out of the loop — ` + "`aliyun`" + ` reads its own state.
+
+## Bootstrap flow
+
+1. ` + "`aliyun-cli status`" + ` — confirms whether the binary is installed and whether credentials are ready.
+2. ` + "`aliyun-cli config`" + ` — opens the bootstrap JSON in code-server (auto-creates a placeholder if missing). The user types the AccessKey id and secret directly into the file and saves. **Do not ask for the AK in chat.**
+3. ` + "`aliyun-cli apply`" + ` — applies the JSON to the ` + "`default`" + ` profile via ` + "`aliyun configure set --profile default --mode AK ...`" + `.
+4. Done — every later ` + "`aliyun ecs / vpc / ram ...`" + ` call reads from the CLI's own state.
+
+## Examples
+
+- list ECS instances (after apply): ` + "`aliyun ecs DescribeInstances --region us-west-1`" + `
+- authorize a security group port (after apply): ` + "`aliyun ecs AuthorizeSecurityGroup --region us-west-1 --SecurityGroupId sg-... --IpProtocol tcp --PortRange 80/80 --SourceCidrIp 0.0.0.0/0`" + `
+
+## Placeholder JSON shape (illustrative — never Read the live file)
+
+` + "```json" + `
+{
+  "access_key_id": "<paste-your-access-key-id-here>",
+  "access_key_secret": "<paste-your-access-key-secret-here>",
+  "region_id": "us-west-1"
+}
+` + "```" + `
+
+` + "`region_id`" + ` is optional; defaults to ` + "`cn-hangzhou`" + ` when missing.
+
+## Rules
+
+- **Never** ` + "`cat`" + `, ` + "`Read`" + `, ` + "`grep`" + ` or otherwise print the bootstrap JSON or ` + "`~/.aliyun/config.json`" + `. The wrapper is the only component that touches them.
+- The wrapper does **not** proxy ` + "`aliyun ecs ...`" + ` style calls — call the ` + "`aliyun`" + ` binary directly after ` + "`apply`" + `.
+- If the user changes the config, re-run ` + "`aliyun-cli apply`" + ` so the CLI picks up the new AK / region.
+- ` + "`status`" + ` already masks the AK and never prints the secret; trust its output.
+
+## More
+
+Read [tools.md](./references/tools.md) for the bare command list.
+`
+}
+
+func renderAliyunCLICommands() string {
+	return `# Aliyun CLI Commands
+
+| Command | What it does |
+|---------|--------------|
+| ` + "`aliyun-cli install`" + ` | Download the official Aliyun CLI binary into ~/.local/bin |
+| ` + "`aliyun-cli config`" + ` | Open the bootstrap JSON in code-server (auto-creates placeholder when missing) |
+| ` + "`aliyun-cli apply`" + ` | Push the bootstrap JSON into the CLI default profile |
+| ` + "`aliyun-cli status`" + ` | Show binary version, config state (masked), and active profile |
+| ` + "`aliyun version`" + ` | Print the official Aliyun CLI version |
+| ` + "`aliyun configure list`" + ` | List configured profiles |
+| ` + "`aliyun ecs DescribeRegions`" + ` | List all Aliyun ECS regions |
 `
 }
 

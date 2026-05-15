@@ -293,6 +293,11 @@ func handleAgentBind(w http.ResponseWriter, r *http.Request) {
 	err := store.QueryRow("SELECT id FROM pane_agents WHERE pane_id=? AND agent_name=?", paneID, shortName).Scan(&existingID)
 	switch {
 	case err == nil && existingID > 0:
+		// Idempotent re-bind: still sync workspace links so callers can use
+		// /api/agents/bind as a way to repair a missing/wrong-target symlink.
+		if syncErr := syncBoundAgentWorkspaceLinks(paneID); syncErr != nil {
+			log.Printf("[agent-bind] re-sync after idempotent bind failed: %v", syncErr)
+		}
 		J(w, M{"success": true, "id": existingID, "pane_id": paneID, "agent_name": shortName, "already_bound": true})
 		return
 	case err != nil && err != sql.ErrNoRows:

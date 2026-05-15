@@ -97,6 +97,14 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [proxyManagerOpen, setProxyManagerOpen] = useState(false);
   const [proxySshManagerOpen, setProxySshManagerOpen] = useState(false);
+  // Stable refs for props passed to <SkillDetailModal>. Without these, every
+  // parent re-render (e.g. the 5s WS poll cycle) emits new closures, which
+  // propagates through sendToAgent → MarkdownPane.components → react-markdown
+  // and forces the rendered markdown DOM to be replaced — wiping any text
+  // selection the user has in the help/tools tab.
+  const handleDetailClose = useCallback(() => setSelectedName(null), []);
+  const handleOpenProxyManager = useCallback(() => { setSelectedName(null); setProxyManagerOpen(true); }, []);
+  const handleOpenProxySshManager = useCallback(() => { setSelectedName(null); setProxySshManagerOpen(true); }, []);
 
   const load = async () => {
     setLoading(true);
@@ -238,7 +246,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
         <SkillDetailModal
           name={selectedName}
           paneId={paneId}
-          onClose={() => setSelectedName(null)}
+          onClose={handleDetailClose}
           onInstall={async () => {
             const sk = skills.find(s => s.name === selectedName);
             if (sk) await onInstall(sk);
@@ -247,14 +255,8 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
             const sk = skills.find(s => s.name === selectedName);
             if (sk) await onUninstall(sk);
           }}
-          onOpenProxyManager={() => {
-            setSelectedName(null);
-            setProxyManagerOpen(true);
-          }}
-          onOpenProxySshManager={() => {
-            setSelectedName(null);
-            setProxySshManagerOpen(true);
-          }}
+          onOpenProxyManager={handleOpenProxyManager}
+          onOpenProxySshManager={handleOpenProxySshManager}
         />
       )}
       <ProxyManagerDialog open={proxyManagerOpen} onClose={() => setProxyManagerOpen(false)} paneId={paneId} />

@@ -384,6 +384,16 @@ Options:
 	initHTTPLogConsumer()
 	go syncTelegramPollers()
 	go imManagerStart()
+	// Repair <parent>/workers/<child> symlinks on every boot. Without this
+	// they only get rebuilt on bind/unbind, so a corrupted/missing link
+	// (or one written to the wrong workersDir because workspace was wrong)
+	// would persist indefinitely. Cheap idempotent walk: skip when target
+	// already matches; remove stale managed links whose binding is gone.
+	go func() {
+		if err := syncAllBoundAgentWorkspaceLinks(); err != nil {
+			log.Printf("[startup] syncAllBoundAgentWorkspaceLinks failed: %v", err)
+		}
+	}()
 
 	bind := "127.0.0.1"
 	if publicMode {

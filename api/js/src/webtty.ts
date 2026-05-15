@@ -17,7 +17,8 @@ const fullWidthPunctuationMap: Record<string, string> = {
     "～": "~",
     "。": ".",
     "，": ",",
-    "、": ",",
+    "、": "\\",
+    "｜": "|",
     "》": ">",
     "《": "<",
     "？": "?",
@@ -28,10 +29,15 @@ const fullWidthPunctuationMap: Record<string, string> = {
     "；": ";",
     "：": ":",
     "－": "-",
+    "「": "{",
+    "」": "}",
+    "【": "[",
+    "】": "]",
+    "¥": "$",
 };
 
 export function normalizeTerminalText(value: string): string {
-    return String(value || "").replace(/——|[～。，、》《？！（）；：－…]/g, (char: string) => char === "——" ? "_" : (fullWidthPunctuationMap[char] || char));
+    return String(value || "").replace(/——|[～。，、》《？！（）；：－…「」【】¥｜]/g, (char: string) => char === "——" ? "_" : (fullWidthPunctuationMap[char] || char));
 }
 
 export interface APIRequestMessage {
