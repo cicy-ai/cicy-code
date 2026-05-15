@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -43,7 +44,23 @@ func (p *Pipeline) dispatchIncident(e Event) {
 		return
 	}
 
-	subject, body := renderIncidentEmail(e, ruleIDs, cfg)
+	// Phase 6 cut 2b: best-effort AI remediation. Skipped silently when
+	// disabled or on any failure (timeout / HTTP error / parse error) —
+	// the email still ships with the placeholder section in that case so
+	// recipients are never blocked by AI flakiness.
+	var ai *AIRemediation
+	if cfg.AIRemediation.Enabled {
+		got, err := callAIRemediation(context.Background(), cfg.AIRemediation, e)
+		if err != nil {
+			log.Printf("[audit] ai_remediation skipped event=%s: %v", e.ID, err)
+		} else {
+			ai = got
+			log.Printf("[audit] ai_remediation generated event=%s immediate_actions=%d",
+				e.ID, len(ai.ImmediateActions))
+		}
+	}
+
+	subject, body := renderIncidentEmail(e, ruleIDs, cfg, ai)
 	msg := EmailMessage{
 		To:       recipients,
 		Subject:  subject,
@@ -99,9 +116,9 @@ func uniqueRuleIDs(findings []Finding) []string {
 }
 
 // renderIncidentEmail builds a bilingual (zh-CN + en) plain-text email
-// body. AI summary is a placeholder for cut 1 (cut 2 wires the self-
-// hosted LLM endpoint).
-func renderIncidentEmail(e Event, ruleIDs []string, cfg IncidentResponseConfig) (subject, body string) {
+// body. When ai is non-nil, its fields replace the placeholder section;
+// otherwise the default placeholder is shown.
+func renderIncidentEmail(e Event, ruleIDs []string, cfg IncidentResponseConfig, ai *AIRemediation) (subject, body string) {
 	top := topSeverity(e.Findings)
 	topRule := ""
 	if len(ruleIDs) > 0 {
@@ -140,12 +157,34 @@ func renderIncidentEmail(e Event, ruleIDs []string, cfg IncidentResponseConfig) 
 	}
 
 	b.WriteString("\n──────── AI 摘要 ────────\n")
-	b.WriteString("(AI 辅助未启用 — Phase 6 cut 2 接入企业自托管模型后此处展示自动摘要)\n")
+	if ai != nil && (ai.Summary != "" || ai.SeverityExplain != "") {
+		if ai.Summary != "" {
+			fmt.Fprintf(&b, "%s\n", ai.Summary)
+		}
+		if ai.SeverityExplain != "" {
+			fmt.Fprintf(&b, "\n为什么是 %s:\n%s\n", strings.ToUpper(string(top)), ai.SeverityExplain)
+		}
+	} else {
+		b.WriteString("(AI 辅助未启用或不可用 — 配置 policy.incident_response.ai_remediation 启用)\n")
+	}
 
 	b.WriteString("\n──────── 立即处置 ────────\n")
-	b.WriteString("  □ 登录 dashboard 复核事件真实性\n")
-	b.WriteString("  □ 如确认泄露,立即吊销凭据并断开 agent\n")
-	b.WriteString("  □ 完成处置后到 dashboard 上 ack 该告警\n")
+	if ai != nil && len(ai.ImmediateActions) > 0 {
+		for _, a := range ai.ImmediateActions {
+			fmt.Fprintf(&b, "  □ %s\n", a)
+		}
+	} else {
+		b.WriteString("  □ 登录 dashboard 复核事件真实性\n")
+		b.WriteString("  □ 如确认泄露,立即吊销凭据并断开 agent\n")
+		b.WriteString("  □ 完成处置后到 dashboard 上 ack 该告警\n")
+	}
+
+	if ai != nil && len(ai.LongerTerm) > 0 {
+		b.WriteString("\n──────── 后续加固 ────────\n")
+		for _, a := range ai.LongerTerm {
+			fmt.Fprintf(&b, "  • %s\n", a)
+		}
+	}
 
 	// English mirror
 	b.WriteString("\n──────── English summary ────────\n")

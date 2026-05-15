@@ -83,11 +83,36 @@ type IncidentResponseConfig struct {
 	Languages          []string `json:"languages,omitempty"`
 
 	// EmailFrom is the From: address used by ResendMailer. Sourced from
-	// (in order): this policy field > CICY_RESEND_FROM env > the "from"
-	// field in ~/cicy-ai/db/email.json. When none resolve to a non-empty
-	// string, the audit pipeline keeps FileMailer instead of attempting
-	// to send via Resend.
+	// (in order): this policy field > CICY_RESEND_FROM env > the
+	// "from_address" field in ~/cicy-ai/db/email.json. When none resolve
+	// to a non-empty string, the audit pipeline keeps FileMailer.
 	EmailFrom string `json:"email_from,omitempty"`
+
+	// AIRemediation controls the AI-generated summary + action plan
+	// embedded in incident emails (Phase 6 cut 2b). Default disabled —
+	// must be opted into AND the endpoint must be enterprise-self-hosted
+	// to keep audit findings from leaking to external SaaS LLMs.
+	AIRemediation AIRemediationConfig `json:"ai_remediation,omitempty"`
+}
+
+// AIRemediationConfig wires the incident-email AI summary feature.
+//
+// Hard rule (per design §9.6): the prompt body NEVER contains the
+// original LLM payload. Only:
+//   - severity / agent_id / agent_type / provider / model
+//   - rule_id + masked preview text for each finding
+//   - the action the audit pipeline took (block / redact / log)
+//
+// Endpoint MUST be an OpenAI-compatible /chat/completions URL pointing at
+// an enterprise-trusted model. Default off; default timeout 10s; default
+// max_tokens 600.
+type AIRemediationConfig struct {
+	Enabled        bool   `json:"enabled"`
+	Endpoint       string `json:"endpoint,omitempty"`
+	Model          string `json:"model,omitempty"`
+	APIKey         string `json:"api_key,omitempty"`
+	MaxTokens      int    `json:"max_tokens,omitempty"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
 }
 
 // DefaultIncidentResponseConfig returns the Phase 6 cut 1 defaults.
