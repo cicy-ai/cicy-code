@@ -11,7 +11,7 @@ import { useApp } from '../contexts/AppContext';
 import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
-  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, MessageCircle, Package,
+  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, MessageCircle, Package, ShieldCheck,
   Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -35,6 +35,7 @@ import AgentCanvas, { AgentCanvasItem } from './layout/AgentCanvas';
 import AgentStack from './layout/AgentStack';
 import ProviderDashboard from './providers/ProviderDashboard';
 import IMDashboard from './im/IMDashboard';
+import AuditDashboard from './audit/AuditDashboard';
 import { useDialog } from '../contexts/DialogContext';
 import config, { defaultWorkerWorkspace, getHostHome, syncHostHomeFromPath, toTildePath, urls } from '../config';
 import apiService from '../services/api';
@@ -355,6 +356,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [apiOpen, setApiOpen] = useState(false);
   const [providersOpen, setProvidersOpen] = useState(false);
   const [imOpen, setImOpen] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
 
   const [status, setStatus] = useState('idle');
@@ -1461,6 +1463,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
           <SideBtn dataId="btn-providers" active={providersOpen} icon={<Boxes className="w-5 h-5" />} title={t('sidebarProviders')} onClick={() => setProvidersOpen(true)} />
           <SideBtn dataId="btn-im" active={imOpen} icon={<MessageCircle className="w-5 h-5" />} title={t('sidebarIM')} onClick={() => setImOpen(true)} />
+          <SideBtn dataId="btn-audit" active={auditOpen} icon={<ShieldCheck className="w-5 h-5" />} title={t('sidebarAudit')} onClick={() => setAuditOpen(true)} />
         </div>
         <div data-id="activity-bar-bottom" className="flex w-full flex-col items-center gap-3">
           <button
@@ -1728,6 +1731,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {imOpen && createPortal(
         <div data-id="im-overlay" className="fixed inset-0 z-[9000] bg-[#0A0A0A]">
           <IMDashboard onBack={() => setImOpen(false)} />
+        </div>,
+        document.body,
+      )}
+      {auditOpen && createPortal(
+        <div data-id="audit-overlay" className="fixed inset-0 z-[9000] bg-[#0A0A0A]">
+          <AuditDashboard onBack={() => setAuditOpen(false)} />
         </div>,
         document.body,
       )}
