@@ -112,6 +112,14 @@ type Meta struct {
 	ScannerDurationMs int    `json:"scanner_duration_ms"`
 	PipelineError     string `json:"pipeline_error"`
 	PolicyHash        string `json:"policy_hash"`
+
+	// AllowlistedBy is non-empty when the event was suppressed by an entry in
+	// policy.allow_list. Findings are still empty in this case (the event is
+	// recorded for completeness, but the scanner output is not). Values:
+	// "agent" | "path" | "content_hash". omitempty keeps Phase-1 events
+	// canonical-hash compatible.
+	AllowlistedBy  string `json:"allowlisted_by,omitempty"`
+	AllowlistMatch string `json:"allowlist_match,omitempty"`
 }
 
 // Envelope is the caller-supplied input to Pipeline.Submit. The pipeline

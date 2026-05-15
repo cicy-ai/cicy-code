@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"log"
+	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
 )
 
@@ -19,21 +21,31 @@ const RulesVersion = "2026.05.15-skeleton"
 //
 //  1. Identity bind
 //  2. Timestamp (wall + monotonic)
-//  3. Scan
+//  3. Scan + AllowList suppression
 //  4. Decide
 //  5. Append + Hash (per-agent + global index)
-//  6. Notify (skeleton: log only)
+//  6. Notify (Phase 3 — currently just logs)
 //
 // Submit is fire-and-forget by default; callers do not block on audit.
 type Pipeline struct {
 	store     *Store
 	scanner   Scanner
-	policy    *Policy
 	machineID string
+
+	policyPath string
+	mu         sync.RWMutex
+	policy     *Policy
+
+	watcher    *fsnotify.Watcher
+	debounceMu sync.Mutex
+	debounce   *time.Timer
 
 	wg sync.WaitGroup
 }
 
+// NewPipeline assembles the audit pipeline. The scanner is any Scanner; if it
+// is a *BuiltinScanner, ApplyPolicy will also rebuild its ruleset on reload.
+// A nil initial policy uses DefaultPolicy().
 func NewPipeline(auditRoot, workersRoot string, scanner Scanner, policy *Policy) (*Pipeline, error) {
 	store, err := NewStore(auditRoot, workersRoot)
 	if err != nil {
@@ -43,6 +55,17 @@ func NewPipeline(auditRoot, workersRoot string, scanner Scanner, policy *Policy)
 	if err != nil {
 		return nil, err
 	}
+	if policy == nil {
+		policy = DefaultPolicy()
+	}
+	if scanner == nil {
+		scanner = NewBuiltinScanner()
+	}
+	if bs, ok := scanner.(*BuiltinScanner); ok {
+		if err := bs.SetPolicy(policy); err != nil {
+			return nil, err
+		}
+	}
 	return &Pipeline{
 		store:     store,
 		scanner:   scanner,
@@ -51,12 +74,115 @@ func NewPipeline(auditRoot, workersRoot string, scanner Scanner, policy *Policy)
 	}, nil
 }
 
-// Submit ingests an envelope. Inline submits block until the event is
-// persisted; otherwise it runs on a goroutine.
-//
-// Wall and monotonic timestamps are captured here, not in process(), so that
-// the recorded event time reflects when the caller produced the data
-// (forensic accuracy) rather than when the async pipeline got scheduled.
+// CurrentPolicy returns a snapshot pointer to the active policy. Callers MUST
+// treat the result as read-only.
+func (p *Pipeline) CurrentPolicy() *Policy {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.policy
+}
+
+// ApplyPolicy validates the new policy, rebuilds the scanner rule set, then
+// swaps both into place atomically. Returns an error WITHOUT swapping if any
+// step fails — the previously-active policy keeps serving (forensic safety).
+func (p *Pipeline) ApplyPolicy(pol *Policy) error {
+	if pol == nil {
+		pol = DefaultPolicy()
+	}
+	if bs, ok := p.scanner.(*BuiltinScanner); ok {
+		if err := bs.SetPolicy(pol); err != nil {
+			return err
+		}
+	}
+	p.mu.Lock()
+	p.policy = pol
+	p.mu.Unlock()
+	return nil
+}
+
+// activeRuleCount returns the scanner's current rule count when known,
+// else -1 (NoopScanner / custom scanners do not expose this).
+func (p *Pipeline) activeRuleCount() int {
+	if bs, ok := p.scanner.(*BuiltinScanner); ok {
+		return bs.RuleCount()
+	}
+	return -1
+}
+
+// WatchPolicyFile starts an fsnotify watcher on the parent directory of
+// policyPath and reloads on every WRITE/CREATE/RENAME of the base name.
+// Debounces to 200ms (atomic writes fire CREATE+WRITE in quick succession).
+// Safe to call once per Pipeline; subsequent calls are no-ops.
+func (p *Pipeline) WatchPolicyFile(policyPath string) error {
+	if p.watcher != nil {
+		return nil
+	}
+	p.policyPath = policyPath
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	if err := w.Add(filepath.Dir(policyPath)); err != nil {
+		w.Close()
+		return err
+	}
+	p.watcher = w
+	go p.watchLoop()
+	return nil
+}
+
+func (p *Pipeline) watchLoop() {
+	base := filepath.Base(p.policyPath)
+	for {
+		select {
+		case ev, ok := <-p.watcher.Events:
+			if !ok {
+				return
+			}
+			if filepath.Base(ev.Name) != base {
+				continue
+			}
+			if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) == 0 {
+				continue
+			}
+			p.scheduleReload()
+		case err, ok := <-p.watcher.Errors:
+			if !ok {
+				return
+			}
+			log.Printf("[audit] policy watcher error: %v", err)
+		}
+	}
+}
+
+func (p *Pipeline) scheduleReload() {
+	p.debounceMu.Lock()
+	defer p.debounceMu.Unlock()
+	if p.debounce != nil {
+		p.debounce.Stop()
+	}
+	p.debounce = time.AfterFunc(200*time.Millisecond, p.reload)
+}
+
+func (p *Pipeline) reload() {
+	pol, err := LoadPolicy(p.policyPath)
+	if err != nil {
+		log.Printf("[audit] policy reload failed, keeping previous (hash=%s): %v",
+			p.CurrentPolicy().Hash, err)
+		return
+	}
+	if err := p.ApplyPolicy(pol); err != nil {
+		log.Printf("[audit] policy apply failed, keeping previous (hash=%s): %v",
+			p.CurrentPolicy().Hash, err)
+		return
+	}
+	log.Printf("[audit] policy reloaded hash=%s active_rules=%d custom=%d enabled=%v",
+		pol.Hash, p.activeRuleCount(), len(pol.CustomRules), pol.Enabled)
+}
+
+// Submit ingests an envelope. Wall and monotonic timestamps are captured
+// here, not in process(), so the recorded event time reflects when the
+// caller produced the data rather than when the async pipeline ran.
 func (p *Pipeline) Submit(ctx context.Context, env Envelope) {
 	_ = ctx
 	env.submitWallNs = time.Now().UTC().UnixNano()
@@ -83,10 +209,24 @@ func (p *Pipeline) process(env Envelope) {
 	}()
 
 	startedAt := time.Now()
-	e := p.buildEvent(env)
+	pol := p.CurrentPolicy()
+	e := p.buildEvent(env, pol)
 
+	// AllowList check uses agent_id + payload_ref + payload_sha256. If the
+	// event is suppressed we record an empty findings list AND stamp the
+	// reason — the EVENT is still preserved (Detective completeness), the
+	// finding output is silenced.
+	allow := pol.CheckAllowList(env.AgentID, e.Subject.PayloadRef, e.Subject.PayloadSHA256)
+
+	var findings []Finding
 	scanStart := time.Now()
-	findings := p.scanner.Scan(env.Payload, env.Direction, p.policy)
+	if allow.Suppressed {
+		findings = []Finding{}
+		e.Meta.AllowlistedBy = allow.Reason
+		e.Meta.AllowlistMatch = allow.Match
+	} else {
+		findings = p.scanner.Scan(env.Payload, env.Direction, pol)
+	}
 	e.Findings = findings
 	e.Meta.ScannerDurationMs = elapsedMs(scanStart)
 	if env.Inline {
@@ -111,7 +251,7 @@ func (p *Pipeline) process(env Envelope) {
 	}
 }
 
-func (p *Pipeline) buildEvent(env Envelope) Event {
+func (p *Pipeline) buildEvent(env Envelope, pol *Policy) Event {
 	wallNs := env.submitWallNs
 	if wallNs == 0 {
 		wallNs = time.Now().UTC().UnixNano()
@@ -153,7 +293,7 @@ func (p *Pipeline) buildEvent(env Envelope) Event {
 			FailMode: FailOpen,
 		},
 		Meta: Meta{
-			PolicyHash: p.policy.Hash,
+			PolicyHash: pol.Hash,
 		},
 	}
 }

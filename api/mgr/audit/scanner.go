@@ -1,6 +1,9 @@
 package audit
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 // Scanner produces findings for one payload.
 //
@@ -23,22 +26,62 @@ func (NoopScanner) Scan(payload []byte, direction string, policy *Policy) []Find
 	return []Finding{}
 }
 
-// BuiltinScanner runs the v1 stock rule set against a payload.
+// BuiltinScanner runs the effective rule set (builtin merged with policy
+// overrides and custom rules) against a payload. The active RuleSet is
+// swapped atomically on every policy reload — Scan() readers see either
+// the pre-reload or post-reload set, never a half-built one.
 type BuiltinScanner struct {
-	rules []BuiltinRule
+	builtin []BuiltinRule
+
+	mu  sync.RWMutex
+	set *RuleSet
 }
 
+// NewBuiltinScanner constructs a scanner with the builtin rules loaded and
+// the default (no-override, no-custom) policy applied. Use SetPolicy to
+// install a parsed policy.json.
 func NewBuiltinScanner() *BuiltinScanner {
-	return &BuiltinScanner{rules: BuiltinRules()}
+	builtin := BuiltinRules()
+	set, _ := BuildRuleSet(builtin, DefaultPolicy()) // cannot fail without custom rules
+	return &BuiltinScanner{builtin: builtin, set: set}
+}
+
+// SetPolicy rebuilds the effective rule set under the given policy and swaps
+// it in atomically. If the new policy produces an invalid rule set
+// (regex compile fail, dict_file missing, ...) the swap is skipped and the
+// error is returned; the previously-active rule set keeps serving.
+func (s *BuiltinScanner) SetPolicy(p *Policy) error {
+	rs, err := BuildRuleSet(s.builtin, p)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.set = rs
+	s.mu.Unlock()
+	return nil
+}
+
+// RuleCount returns the current count of active rules (builtin minus
+// disabled, plus custom). Read-only snapshot.
+func (s *BuiltinScanner) RuleCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.set.Rules)
 }
 
 func (s *BuiltinScanner) Scan(payload []byte, direction string, policy *Policy) []Finding {
-	_ = policy
+	if policy != nil && !policy.Enabled {
+		return []Finding{}
+	}
 	if len(payload) == 0 || direction == "" {
 		return []Finding{}
 	}
+	s.mu.RLock()
+	rs := s.set
+	s.mu.RUnlock()
+
 	out := make([]Finding, 0, 4)
-	for _, rule := range s.rules {
+	for _, rule := range rs.Rules {
 		if !directionMatches(rule.ScanDirections, direction) {
 			continue
 		}

@@ -19,10 +19,12 @@ var (
 
 // Init wires up the audit pipeline using the standard cicy-code paths:
 //
-//	~/cicy-ai/audit/      — policy, machine_id, chain state, global index
+//	~/cicy-ai/audit/      — policy.json, machine_id, chain state, global index
 //	~/cicy-ai/workers/    — per-agent audit.ndjson live alongside history
 //
 // Both directories are auto-created with mode 0700. Idempotent.
+// Loads policy.json if present, then starts an fsnotify watcher so edits
+// take effect within ~200ms without a restart.
 func Init() error {
 	globalOnce.Do(func() {
 		home, err := os.UserHomeDir()
@@ -32,10 +34,12 @@ func Init() error {
 		}
 		auditRoot := filepath.Join(home, "cicy-ai", "audit")
 		workersRoot := filepath.Join(home, "cicy-ai", "workers")
-		policy, err := LoadPolicy(filepath.Join(auditRoot, "policy.json"))
+		policyPath := filepath.Join(auditRoot, "policy.json")
+
+		policy, err := LoadPolicy(policyPath)
 		if err != nil {
-			globalErr = err
-			return
+			log.Printf("[audit] policy.json parse failed, falling back to default: %v", err)
+			policy = DefaultPolicy()
 		}
 		scanner := NewBuiltinScanner()
 		p, err := NewPipeline(auditRoot, workersRoot, scanner, policy)
@@ -44,8 +48,11 @@ func Init() error {
 			return
 		}
 		globalPipeline = p
-		log.Printf("[audit] initialized root=%s rules_version=%s builtin_rules=%d",
-			auditRoot, RulesVersion, len(BuiltinRules()))
+		if werr := p.WatchPolicyFile(policyPath); werr != nil {
+			log.Printf("[audit] policy watcher disabled (no hot reload): %v", werr)
+		}
+		log.Printf("[audit] initialized root=%s rules_version=%s active_rules=%d custom=%d policy_hash=%s",
+			auditRoot, RulesVersion, p.activeRuleCount(), len(policy.CustomRules), policy.Hash)
 	})
 	return globalErr
 }
