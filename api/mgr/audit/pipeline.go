@@ -40,7 +40,9 @@ type Pipeline struct {
 	debounceMu sync.Mutex
 	debounce   *time.Timer
 
-	noise *noiseTracker
+	noise            *noiseTracker
+	mailer           Mailer
+	incidentCooldown *incidentCooldownTracker
 
 	wg sync.WaitGroup
 }
@@ -69,12 +71,23 @@ func NewPipeline(auditRoot, workersRoot string, scanner Scanner, policy *Policy)
 		}
 	}
 	return &Pipeline{
-		store:     store,
-		scanner:   scanner,
-		policy:    policy,
-		machineID: mid,
-		noise:     newNoiseTracker(),
+		store:            store,
+		scanner:          scanner,
+		policy:           policy,
+		machineID:        mid,
+		noise:            newNoiseTracker(),
+		mailer:           &FileMailer{OutputDir: filepath.Join(auditRoot, "email-out")},
+		incidentCooldown: newIncidentCooldownTracker(),
 	}, nil
+}
+
+// SetMailer overrides the default FileMailer. Tests + Phase 6 cut 2
+// (SmtpMailer) use this; production code paths can leave the FileMailer
+// in place.
+func (p *Pipeline) SetMailer(m Mailer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.mailer = m
 }
 
 // CurrentPolicy returns a snapshot pointer to the active policy. Callers MUST
@@ -261,7 +274,8 @@ func (p *Pipeline) process(env Envelope) {
 		}
 	}
 
-	if _, err := p.store.Append(e); err != nil {
+	persisted, err := p.store.Append(e)
+	if err != nil {
 		log.Printf("[audit] store.Append failed agent=%s id=%s: %v", env.AgentID, e.ID, err)
 		return
 	}
@@ -271,6 +285,11 @@ func (p *Pipeline) process(env Envelope) {
 			e.ID, env.AgentID, len(findings), e.Decision.Action,
 			e.Meta.ScannerDurationMs, elapsedMs(startedAt))
 	}
+
+	// Phase 6 cut 1: best-effort async incident-email dispatch on
+	// high/critical events. Async so the audit pipeline keeps its
+	// fire-and-forget latency profile.
+	go p.dispatchIncident(persisted)
 }
 
 func (p *Pipeline) buildEvent(env Envelope, pol *Policy) Event {

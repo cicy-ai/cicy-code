@@ -36,11 +36,130 @@ type Policy struct {
 	// must explicitly enable. See Phase 3 cut 1.
 	Preventive PreventiveConfig `json:"preventive"`
 
-	// Phase 3/5 fields — parsed but ignored.
-	Retention          map[string]interface{} `json:"retention,omitempty"`
-	ResponsiblePersons map[string]interface{} `json:"responsible_persons,omitempty"`
-	IncidentResponse   map[string]interface{} `json:"incident_response,omitempty"`
-	AIAssist           map[string]interface{} `json:"ai_assist,omitempty"`
+	// ResponsiblePersons maps an event to a deduplicated recipient list
+	// (Phase 6). Resolution order: by_rule > by_user > by_agent
+	// (wildcard-aware) > by_severity > default.
+	ResponsiblePersons ResponsiblePersonsConfig `json:"responsible_persons"`
+
+	// IncidentResponse gates the high/critical email dispatch (Phase 6).
+	IncidentResponse IncidentResponseConfig `json:"incident_response"`
+
+	// Phase 5 fields — parsed but ignored.
+	Retention map[string]interface{} `json:"retention,omitempty"`
+	AIAssist  map[string]interface{} `json:"ai_assist,omitempty"`
+}
+
+// ResponsiblePersonsConfig maps event identity dimensions to a list of
+// email addresses. All matched lists are unioned and deduplicated.
+//
+// ByAgent keys support a single trailing "*" wildcard:
+//
+//	"w-100*" matches w-1000, w-10042, etc.
+type ResponsiblePersonsConfig struct {
+	Default    []string            `json:"default,omitempty"`
+	BySeverity map[string][]string `json:"by_severity,omitempty"`
+	ByAgent    map[string][]string `json:"by_agent,omitempty"`
+	ByUser     map[string][]string `json:"by_user,omitempty"`
+	ByRule     map[string][]string `json:"by_rule,omitempty"`
+}
+
+// IncidentResponseConfig controls the email dispatch pipeline.
+//
+//	Enabled              gate; default false.
+//	TriggerMinSeverity   high (default) or critical.
+//	CooldownSeconds      per finding-hash; default 1800 (30 min).
+//	OutputDir            FileMailer write target; default
+//	                     ~/cicy-ai/audit/email-out
+//	EmailTemplate        "default" (cut 1) | "corp-template" (future).
+//	Languages            ["zh-CN","en"] subjects/sections (cut 1 always
+//	                     bilingual; field reserved for future per-recipient
+//	                     localization).
+type IncidentResponseConfig struct {
+	Enabled            bool     `json:"enabled"`
+	TriggerMinSeverity Severity `json:"trigger_min_severity,omitempty"`
+	CooldownSeconds    int      `json:"cooldown_seconds,omitempty"`
+	OutputDir          string   `json:"output_dir,omitempty"`
+	EmailTemplate      string   `json:"email_template,omitempty"`
+	Languages          []string `json:"languages,omitempty"`
+}
+
+// DefaultIncidentResponseConfig returns the Phase 6 cut 1 defaults.
+// Note: Enabled stays false; admins must opt in.
+func DefaultIncidentResponseConfig() IncidentResponseConfig {
+	return IncidentResponseConfig{
+		Enabled:            false,
+		TriggerMinSeverity: SeverityHigh,
+		CooldownSeconds:    1800,
+		EmailTemplate:      "default",
+		Languages:          []string{"zh-CN", "en"},
+	}
+}
+
+// Resolve gathers all recipients matching this event and returns them
+// sorted + deduplicated. Returns empty when no rule matches (caller MAY
+// fall back to Default — Resolve already includes Default as the last
+// tier when nothing else matched).
+func (r ResponsiblePersonsConfig) Resolve(severity Severity, agentID, userID string, ruleIDs []string) []string {
+	set := map[string]struct{}{}
+	addAll := func(list []string) {
+		for _, addr := range list {
+			addr = strings.TrimSpace(addr)
+			if addr != "" {
+				set[addr] = struct{}{}
+			}
+		}
+	}
+	for _, rid := range ruleIDs {
+		addAll(r.ByRule[rid])
+	}
+	if userID != "" {
+		addAll(r.ByUser[userID])
+	}
+	if agentID != "" {
+		for pattern, recipients := range r.ByAgent {
+			if matchAgentPattern(pattern, agentID) {
+				addAll(recipients)
+			}
+		}
+	}
+	if severity != "" {
+		addAll(r.BySeverity[string(severity)])
+	}
+	if len(set) == 0 {
+		addAll(r.Default)
+	}
+	out := make([]string, 0, len(set))
+	for addr := range set {
+		out = append(out, addr)
+	}
+	sortStrings(out)
+	return out
+}
+
+// matchAgentPattern returns true if pattern matches agentID. Pattern
+// supports exact match or a single trailing "*" for prefix glob.
+func matchAgentPattern(pattern, agentID string) bool {
+	if pattern == "" {
+		return false
+	}
+	if pattern == agentID {
+		return true
+	}
+	if strings.HasSuffix(pattern, "*") {
+		return strings.HasPrefix(agentID, pattern[:len(pattern)-1])
+	}
+	return false
+}
+
+// sortStrings: avoid pulling sort here just for one call site at top of
+// the package. Tiny in-place insertion sort suffices for typical
+// recipient counts (< 32).
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j] < s[j-1]; j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
 }
 
 // PreventiveConfig gates the inline scanner that runs BEFORE the request is
@@ -147,8 +266,9 @@ func DefaultPolicy() *Policy {
 			ContentHashes: []string{},
 			Agents:        []string{},
 		},
-		Notify:     DefaultNotifyConfig(),
-		Preventive: PreventiveConfig{Enabled: false, FailMode: "open"},
+		Notify:           DefaultNotifyConfig(),
+		Preventive:       PreventiveConfig{Enabled: false, FailMode: "open"},
+		IncidentResponse: DefaultIncidentResponseConfig(),
 	}
 }
 
@@ -216,6 +336,24 @@ func LoadPolicy(path string) (*Policy, error) {
 	}
 	if p.Preventive.FailMode != "open" && p.Preventive.FailMode != "closed" {
 		return nil, fmt.Errorf("audit: preventive.fail_mode invalid %q (want open|closed)", p.Preventive.FailMode)
+	}
+	// Incident-response defaults: never auto-enable, but keep numeric
+	// defaults sane if the operator did enable it with partial config.
+	ir := DefaultIncidentResponseConfig()
+	if p.IncidentResponse.TriggerMinSeverity == "" {
+		p.IncidentResponse.TriggerMinSeverity = ir.TriggerMinSeverity
+	}
+	if !validSeverity(p.IncidentResponse.TriggerMinSeverity) {
+		return nil, fmt.Errorf("audit: incident_response.trigger_min_severity invalid %q", p.IncidentResponse.TriggerMinSeverity)
+	}
+	if p.IncidentResponse.CooldownSeconds == 0 {
+		p.IncidentResponse.CooldownSeconds = ir.CooldownSeconds
+	}
+	if p.IncidentResponse.EmailTemplate == "" {
+		p.IncidentResponse.EmailTemplate = ir.EmailTemplate
+	}
+	if len(p.IncidentResponse.Languages) == 0 {
+		p.IncidentResponse.Languages = ir.Languages
 	}
 	return p, nil
 }

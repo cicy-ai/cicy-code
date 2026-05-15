@@ -205,8 +205,13 @@ func (p *Pipeline) submitPreventive(_ context.Context, env Envelope, findings []
 	if preRedactRef != "" {
 		e.Meta.PreRedactRef = preRedactRef
 	}
-	if _, err := p.store.Append(e); err != nil {
+	persisted, err := p.store.Append(e)
+	if err != nil {
 		log.Printf("[audit] preventive append failed agent=%s id=%s: %v", env.AgentID, e.ID, err)
+		return e.ID
 	}
-	return e.ID
+	// Preventive events ARE the headline forensic record for blocked/
+	// redacted turns — dispatch incident emails on these too.
+	go p.dispatchIncident(persisted)
+	return persisted.ID
 }
