@@ -205,6 +205,25 @@ const api = {
   registerAuditToken: (userId: string, plan = 'free') => http.post('/api/audit/register', { user_id: userId, plan }),
   getSetupGuide: () => http.get('/setup'),
 
+  // Audit pipeline (Phase 1 walking skeleton: events list/detail/stats/agents)
+  auditEvents: (opts: {
+    agent_id?: string;
+    from?: string;
+    to?: string;
+    severity?: string;
+    rule_id?: string;
+    direction?: 'outbound' | 'inbound' | '';
+    limit?: number;
+    offset?: number;
+  } = {}) => http.get('/api/audit/events', { params: opts }),
+  auditEventDetail: (id: string) => http.get(`/api/audit/events/${encodeURIComponent(id)}`),
+  auditStats: (opts: {
+    agent_id?: string;
+    from?: string;
+    to?: string;
+  } = {}) => http.get('/api/audit/stats', { params: opts }),
+  auditAgents: () => http.get('/api/audit/agents'),
+
   // desktop "apps"
   getApps: () => http.get('/api/apps'),
   createApp: (prompt: string) => http.post('/api/apps/create', { prompt }),

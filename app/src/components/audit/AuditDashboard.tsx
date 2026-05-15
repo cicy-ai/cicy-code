@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
-import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu } from 'lucide-react';
+import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu, ShieldCheck, RefreshCw, ChevronRight, Filter } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
 import apiService from '../../services/api';
 import config from '../../config';
 import { TokenManager } from '../../services/tokenManager';
 
-type Tab = 'overview' | 'usage' | 'live' | 'setup';
+type Tab = 'findings' | 'overview' | 'usage' | 'live' | 'setup';
 
 interface DashboardData {
   user_id: string;
@@ -477,10 +477,377 @@ const defaultPlatforms = [
   },
 ];
 
+// ── Findings Tab (Phase 1 walking skeleton) ──
+
+interface AuditEvent {
+  id: string;
+  schema_version: string;
+  rules_version: string;
+  ts: string;
+  ts_monotonic: number;
+  prev_hash: string;
+  self_hash: string;
+  identity: {
+    machine_id: string;
+    agent_id: string;
+    agent_type: string;
+    user_id: string;
+    session_id: string;
+    source_channel: string;
+  };
+  subject: {
+    turn_id: string;
+    conversation_id: string;
+    provider: string;
+    model: string;
+    direction: string;
+    payload_size: number;
+    payload_ref: string;
+    payload_sha256: string;
+  };
+  findings: Array<{
+    rule_id: string;
+    rule_version: string;
+    severity: string;
+    category: string;
+    match_count: number;
+    spans: Array<{ start: number; end: number; preview: string }>;
+  }>;
+  decision: {
+    evaluated_inline: boolean;
+    evaluated_async: boolean;
+    action: string;
+    applied: boolean;
+    fail_mode: string;
+  };
+  meta: {
+    scanner_duration_ms: number;
+    pipeline_error: string;
+    policy_hash: string;
+  };
+}
+
+interface AuditEventsResult {
+  events: AuditEvent[];
+  total: number;
+}
+
+interface AuditStatsResult {
+  total: number;
+  by_severity: Record<string, number>;
+  by_rule: Record<string, number>;
+  by_agent: Record<string, number>;
+  by_action: Record<string, number>;
+  by_direction: Record<string, number>;
+}
+
+const SEVERITY_TONE: Record<string, string> = {
+  low: 'bg-zinc-500/10 text-zinc-300 border-zinc-500/30',
+  medium: 'bg-amber-500/10 text-amber-300 border-amber-500/30',
+  high: 'bg-orange-500/10 text-orange-300 border-orange-500/30',
+  critical: 'bg-red-500/15 text-red-300 border-red-500/40',
+};
+
+function SeverityChip({ severity, count }: { severity: string; count?: number }) {
+  const tone = SEVERITY_TONE[severity] || SEVERITY_TONE.low;
+  return (
+    <span data-id={`audit-findings-severity-${severity}`} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-medium ${tone}`}>
+      {severity.toUpperCase()}{count !== undefined && count > 1 ? ` ×${count}` : ''}
+    </span>
+  );
+}
+
+function eventTopSeverity(e: AuditEvent): string {
+  const order = ['critical', 'high', 'medium', 'low'];
+  for (const s of order) {
+    if (e.findings.some(f => f.severity === s)) return s;
+  }
+  return '';
+}
+
+function formatTs(ts: string): string {
+  if (!ts) return '—';
+  try {
+    const d = new Date(ts);
+    return d.toLocaleString(undefined, { hour12: false });
+  } catch {
+    return ts;
+  }
+}
+
+function FindingsTab() {
+  const { t } = useTranslation('audit');
+  const [agents, setAgents] = useState<string[]>([]);
+  const [filterAgent, setFilterAgent] = useState<string>('');
+  const [filterSeverity, setFilterSeverity] = useState<string>('');
+  const [filterDirection, setFilterDirection] = useState<'' | 'outbound' | 'inbound'>('');
+  const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [total, setTotal] = useState<number>(0);
+  const [stats, setStats] = useState<AuditStatsResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [selectedId, setSelectedId] = useState<string>('');
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [evResp, statsResp, agentsResp] = await Promise.all([
+        apiService.auditEvents({
+          agent_id: filterAgent || undefined,
+          severity: filterSeverity || undefined,
+          direction: filterDirection || undefined,
+          limit: 200,
+        }),
+        apiService.auditStats({ agent_id: filterAgent || undefined }),
+        apiService.auditAgents(),
+      ]);
+      const evData: AuditEventsResult = evResp.data;
+      setEvents(evData.events || []);
+      setTotal(evData.total || 0);
+      setStats(statsResp.data || null);
+      setAgents(agentsResp.data?.agents || []);
+    } catch (err) {
+      console.error('[audit-findings] fetch failed:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [filterAgent, filterSeverity, filterDirection]);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const h = setInterval(fetchAll, 5000);
+    return () => clearInterval(h);
+  }, [autoRefresh, fetchAll]);
+
+  const selected = events.find(e => e.id === selectedId);
+
+  return (
+    <div data-id="audit-findings-root" className="flex flex-col gap-3 h-full">
+      {/* Filter bar */}
+      <div data-id="audit-findings-filters" className="flex flex-wrap items-center gap-2 p-2 rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)]">
+        <div className="flex items-center gap-1.5 text-[var(--vsc-text-secondary)]">
+          <Filter size={14} />
+          <span className="text-xs">{t('findingsFilters')}</span>
+        </div>
+        <select data-id="audit-findings-filter-agent" value={filterAgent} onChange={e => setFilterAgent(e.target.value)}
+          className="text-xs px-2 py-1 rounded bg-[var(--vsc-bg)] border border-[var(--vsc-border)] text-[var(--vsc-text)]">
+          <option value="">{t('findingsAllAgents')}</option>
+          {agents.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <select data-id="audit-findings-filter-severity" value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)}
+          className="text-xs px-2 py-1 rounded bg-[var(--vsc-bg)] border border-[var(--vsc-border)] text-[var(--vsc-text)]">
+          <option value="">{t('findingsAnySeverity')}</option>
+          <option value="critical">CRITICAL</option>
+          <option value="high">HIGH</option>
+          <option value="medium">MEDIUM</option>
+          <option value="low">LOW</option>
+        </select>
+        <select data-id="audit-findings-filter-direction" value={filterDirection} onChange={e => setFilterDirection(e.target.value as any)}
+          className="text-xs px-2 py-1 rounded bg-[var(--vsc-bg)] border border-[var(--vsc-border)] text-[var(--vsc-text)]">
+          <option value="">{t('findingsAnyDirection')}</option>
+          <option value="outbound">outbound</option>
+          <option value="inbound">inbound</option>
+        </select>
+        <div className="flex-1" />
+        <label data-id="audit-findings-autorefresh" className="flex items-center gap-1.5 text-xs text-[var(--vsc-text-secondary)] cursor-pointer">
+          <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} className="cursor-pointer" />
+          {t('findingsAutoRefresh')}
+        </label>
+        <button data-id="audit-findings-refresh-now" onClick={fetchAll}
+          className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-[var(--vsc-bg-hover)] hover:bg-[var(--vsc-bg-active)] text-[var(--vsc-text)] transition-colors">
+          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+          {t('findingsRefresh')}
+        </button>
+      </div>
+
+      {/* Stats strip */}
+      <div data-id="audit-findings-stats" className="grid grid-cols-2 md:grid-cols-5 gap-2">
+        <StatPill label={t('findingsStatTotal')} value={String(stats?.total ?? 0)} tone="text-zinc-200" />
+        <StatPill label="CRITICAL" value={String(stats?.by_severity?.critical ?? 0)} tone="text-red-300" />
+        <StatPill label="HIGH" value={String(stats?.by_severity?.high ?? 0)} tone="text-orange-300" />
+        <StatPill label="MEDIUM" value={String(stats?.by_severity?.medium ?? 0)} tone="text-amber-300" />
+        <StatPill label="LOW" value={String(stats?.by_severity?.low ?? 0)} tone="text-zinc-300" />
+      </div>
+
+      {/* Event list + detail panel */}
+      <div data-id="audit-findings-body" className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_420px] gap-3 min-h-0">
+        <div data-id="audit-findings-list" className="rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] overflow-hidden flex flex-col min-h-0">
+          <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-center justify-between text-xs text-[var(--vsc-text-secondary)]">
+            <span>{t('findingsListHeader', { showing: events.length, total })}</span>
+          </div>
+          <div className="flex-1 overflow-auto">
+            {events.length === 0 ? (
+              <div className="p-8 text-center text-xs text-[var(--vsc-text-muted)]">
+                {loading ? t('loading') : t('findingsEmpty')}
+              </div>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-[var(--vsc-bg-titlebar)] text-[var(--vsc-text-secondary)]">
+                  <tr>
+                    <th className="text-left px-3 py-1.5 font-normal">{t('findingsColTime')}</th>
+                    <th className="text-left px-2 py-1.5 font-normal">{t('findingsColAgent')}</th>
+                    <th className="text-left px-2 py-1.5 font-normal">{t('findingsColDir')}</th>
+                    <th className="text-left px-2 py-1.5 font-normal">{t('findingsColProvider')}</th>
+                    <th className="text-left px-2 py-1.5 font-normal">{t('findingsColSev')}</th>
+                    <th className="text-left px-2 py-1.5 font-normal">{t('findingsColAction')}</th>
+                    <th className="w-4" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {events.map(e => {
+                    const sev = eventTopSeverity(e);
+                    const isSel = e.id === selectedId;
+                    return (
+                      <tr key={e.id}
+                        data-id={`audit-findings-row-${e.id}`}
+                        onClick={() => setSelectedId(e.id)}
+                        className={`border-t border-[var(--vsc-border)] cursor-pointer transition-colors ${isSel ? 'bg-[var(--vsc-bg-active)]' : 'hover:bg-[var(--vsc-bg-hover)]'}`}>
+                        <td className="px-3 py-1.5 whitespace-nowrap text-[var(--vsc-text-muted)] font-mono">{formatTs(e.ts)}</td>
+                        <td className="px-2 py-1.5 whitespace-nowrap">
+                          <span className="text-zinc-200">{e.identity.agent_id || '—'}</span>
+                          {e.identity.agent_type && <span className="text-[10px] text-[var(--vsc-text-muted)] ml-1">{e.identity.agent_type}</span>}
+                        </td>
+                        <td className="px-2 py-1.5 whitespace-nowrap">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${e.subject.direction === 'outbound' ? 'bg-blue-500/10 text-blue-300' : 'bg-emerald-500/10 text-emerald-300'}`}>
+                            {e.subject.direction || '—'}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 whitespace-nowrap text-[var(--vsc-text-secondary)]">
+                          {e.subject.provider || '—'}
+                          {e.subject.model && <span className="text-[10px] text-[var(--vsc-text-muted)] ml-1">{e.subject.model}</span>}
+                        </td>
+                        <td className="px-2 py-1.5 whitespace-nowrap">
+                          {sev ? <SeverityChip severity={sev} count={e.findings.length} /> : <span className="text-[var(--vsc-text-muted)]">—</span>}
+                        </td>
+                        <td className="px-2 py-1.5 whitespace-nowrap text-[var(--vsc-text-secondary)]">{e.decision.action}</td>
+                        <td className="px-1 py-1.5"><ChevronRight size={12} className="text-[var(--vsc-text-muted)]" /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        <FindingsDetailPanel event={selected || null} />
+      </div>
+    </div>
+  );
+}
+
+function StatPill({ label, value, tone = 'text-zinc-200' }: { label: string; value: string; tone?: string }) {
+  return (
+    <div data-id={`audit-findings-stat-${label}`} className="rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wide text-[var(--vsc-text-muted)]">{label}</div>
+      <div className={`text-lg font-semibold tabular-nums ${tone}`}>{value}</div>
+    </div>
+  );
+}
+
+function FindingsDetailPanel({ event }: { event: AuditEvent | null }) {
+  const { t } = useTranslation('audit');
+  if (!event) {
+    return (
+      <div data-id="audit-findings-detail-empty" className="rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] flex items-center justify-center text-xs text-[var(--vsc-text-muted)] p-8">
+        {t('findingsDetailHint')}
+      </div>
+    );
+  }
+  return (
+    <div data-id="audit-findings-detail" className="rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] flex flex-col min-h-0">
+      <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-center gap-2 text-xs">
+        <span className="text-[var(--vsc-text-secondary)]">{t('findingsDetailHeader')}</span>
+        <code className="font-mono text-[10px] text-[var(--vsc-text-muted)]">{event.id}</code>
+        <CopyButton text={event.id} />
+      </div>
+      <div className="flex-1 overflow-auto p-3 space-y-3 text-xs">
+        <DetailSection title={t('findingsSecIdentity')} rows={[
+          ['agent_id', event.identity.agent_id],
+          ['agent_type', event.identity.agent_type],
+          ['user_id', event.identity.user_id],
+          ['session_id', event.identity.session_id],
+          ['source_channel', event.identity.source_channel],
+          ['machine_id', event.identity.machine_id],
+        ]} />
+        <DetailSection title={t('findingsSecSubject')} rows={[
+          ['provider', event.subject.provider],
+          ['model', event.subject.model],
+          ['direction', event.subject.direction],
+          ['turn_id', event.subject.turn_id],
+          ['conversation_id', event.subject.conversation_id],
+          ['payload_size', String(event.subject.payload_size)],
+          ['payload_ref', event.subject.payload_ref],
+          ['payload_sha256', event.subject.payload_sha256],
+        ]} />
+        <DetailSection title={t('findingsSecDecision')} rows={[
+          ['action', event.decision.action],
+          ['applied', String(event.decision.applied)],
+          ['fail_mode', event.decision.fail_mode],
+          ['evaluated_inline', String(event.decision.evaluated_inline)],
+          ['evaluated_async', String(event.decision.evaluated_async)],
+        ]} />
+        <DetailSection title={t('findingsSecChain')} rows={[
+          ['ts', event.ts],
+          ['ts_monotonic', String(event.ts_monotonic)],
+          ['prev_hash', event.prev_hash],
+          ['self_hash', event.self_hash],
+          ['rules_version', event.rules_version],
+          ['policy_hash', event.meta.policy_hash],
+        ]} />
+        <div data-id="audit-findings-detail-findings">
+          <div className="text-[10px] uppercase tracking-wide text-[var(--vsc-text-muted)] mb-1">{t('findingsSecFindings')}</div>
+          {event.findings.length === 0 ? (
+            <div className="text-[var(--vsc-text-muted)]">{t('findingsNoFindings')}</div>
+          ) : (
+            <div className="space-y-1.5">
+              {event.findings.map((f, i) => (
+                <div key={i} className="rounded border border-[var(--vsc-border)] p-2 bg-[var(--vsc-bg)]">
+                  <div className="flex items-center gap-2">
+                    <SeverityChip severity={f.severity} />
+                    <code className="font-mono text-[var(--vsc-text)]">{f.rule_id}</code>
+                    <span className="text-[var(--vsc-text-muted)]">×{f.match_count}</span>
+                  </div>
+                  {f.spans.length > 0 && (
+                    <div className="mt-1 space-y-0.5 text-[var(--vsc-text-secondary)]">
+                      {f.spans.map((s, j) => (
+                        <div key={j} className="font-mono text-[10px]">
+                          [{s.start}:{s.end}] {s.preview}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailSection({ title, rows }: { title: string; rows: Array<[string, string]> }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-[var(--vsc-text-muted)] mb-1">{title}</div>
+      <div className="space-y-0.5">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex gap-2">
+            <span className="text-[var(--vsc-text-muted)] w-32 shrink-0 font-mono text-[10px]">{k}</span>
+            <span className="text-[var(--vsc-text)] break-all font-mono text-[10px]">{v || '—'}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Dashboard ──
 export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
   const { t } = useTranslation('audit');
-  const [tab, setTab] = useState<Tab>('overview');
+  const [tab, setTab] = useState<Tab>('findings');
   const [userId, setUserId] = useState('');
   const [proxyToken, setProxyToken] = useState('');
   const [days, setDays] = useState(7);
@@ -513,6 +880,7 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
   }, [userId]);
 
   const tabs: { id: Tab; icon: typeof BarChart3; label: string }[] = [
+    { id: 'findings', icon: ShieldCheck, label: t('tabFindings') },
     { id: 'overview', icon: BarChart3, label: t('tabOverview') },
     { id: 'usage', icon: Clock, label: t('tabUsage') },
     { id: 'live', icon: Activity, label: t('tabLive') },
@@ -552,6 +920,7 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
 
       {/* Content */}
       <main data-id="audit-dashboard-content" className="flex-1 overflow-auto p-4">
+        {tab === 'findings' && <FindingsTab />}
         {tab === 'overview' && <OverviewTab userId={userId} days={days} setDays={setDays} />}
         {tab === 'usage' && <UsageTab userId={userId} />}
         {tab === 'live' && <LiveTab />}

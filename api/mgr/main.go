@@ -305,6 +305,12 @@ Options:
 	http.HandleFunc("/api/utils/translateText", wa(handleTranslateText))
 	http.HandleFunc("/api/correctEnglish", wa(handleCorrectEnglish))
 
+	// Audit (Phase 1: events list/detail/stats/agents — Findings tab data source)
+	http.HandleFunc("/api/audit/events", wa(handleAuditEvents))
+	http.HandleFunc("/api/audit/events/", wa(handleAuditEventByID))
+	http.HandleFunc("/api/audit/stats", wa(handleAuditStats))
+	http.HandleFunc("/api/audit/agents", wa(handleAuditAgents))
+
 	// TTS
 	http.HandleFunc("/api/tts", wa(handleTTS))
 
