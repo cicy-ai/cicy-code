@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
-import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu, ShieldCheck, RefreshCw, ChevronRight, Filter, SlidersHorizontal, Save, RotateCcw, Trash2, AlertCircle } from 'lucide-react';
+import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu, ShieldCheck, RefreshCw, ChevronRight, Filter, SlidersHorizontal, Save, RotateCcw, Trash2, AlertCircle, FileCode2, FormInput } from 'lucide-react';
+import { PolicyForm, type Policy as PolicyT, type AgentOverride as AgentOverrideT, type FormScope } from './PolicyForm';
 import { Spinner } from '../ui/Spinner';
 import apiService from '../../services/api';
 import config from '../../config';
@@ -952,8 +953,18 @@ function PolicyEditor({ mode, agents = [], selectedAgent = '', onSelectAgent }: 
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [policyHash, setPolicyHash] = useState('');
+  const [viewMode, setViewMode] = useState<'form' | 'json'>('form');
 
   const readOnly = mode === 'effective';
+
+  // Parse raw → object for the form view. Bad JSON falls back to {} but we
+  // surface the error so the operator knows the form is showing stale data.
+  const parsed: PolicyT | AgentOverrideT = (() => {
+    if (!raw.trim()) return {} as any;
+    try { return JSON.parse(raw); }
+    catch { return {} as any; }
+  })();
+  const rawValid = (() => { try { JSON.parse(raw || '{}'); return true; } catch { return false; } })();
 
   const fetchIt = useCallback(async () => {
     if ((mode === 'agent' || mode === 'effective') && !selectedAgent) {
@@ -1017,33 +1028,67 @@ function PolicyEditor({ mode, agents = [], selectedAgent = '', onSelectAgent }: 
     }
   }, [mode, selectedAgent, t]);
 
+  // Map mode → FormScope expected by PolicyForm
+  const formScope: FormScope = mode === 'global' ? 'global' : mode === 'agent' ? 'agent' : 'effective';
+
   return (
     <div data-id="audit-policy-editor" className="flex flex-col gap-2 flex-1 min-h-0">
-      {(mode === 'agent' || mode === 'effective') && (
-        <div data-id="audit-policy-agent-bar" className="flex items-center gap-2 p-2 rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)]">
-          <span className="text-xs text-[var(--vsc-text-secondary)]">{t('policyAgentSelect')}</span>
-          <select data-id="audit-policy-agent-select" value={selectedAgent} onChange={e => onSelectAgent?.(e.target.value)}
-            className="text-xs px-2 py-1 rounded bg-[var(--vsc-bg)] border border-[var(--vsc-border)] text-[var(--vsc-text)]">
-            <option value="">{t('policyAgentNone')}</option>
-            {agents.map(a => <option key={a} value={a}>{a}</option>)}
-          </select>
-          <button data-id="audit-policy-reload" onClick={fetchIt} disabled={loading}
-            className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-[var(--vsc-bg-hover)] hover:bg-[var(--vsc-bg-active)] text-[var(--vsc-text)] transition-colors">
-            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-            {t('policyReload')}
+      <div data-id="audit-policy-toolbar" className="flex items-center gap-2 p-2 rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] flex-wrap">
+        {(mode === 'agent' || mode === 'effective') && (
+          <>
+            <span className="text-xs text-[var(--vsc-text-secondary)]">{t('policyAgentSelect')}</span>
+            <select data-id="audit-policy-agent-select" value={selectedAgent} onChange={e => onSelectAgent?.(e.target.value)}
+              className="text-xs px-2 py-1 rounded bg-[var(--vsc-bg)] border border-[var(--vsc-border)] text-[var(--vsc-text)]">
+              <option value="">{t('policyAgentNone')}</option>
+              {agents.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+            <button data-id="audit-policy-reload" onClick={fetchIt} disabled={loading}
+              className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-[var(--vsc-bg-hover)] hover:bg-[var(--vsc-bg-active)] text-[var(--vsc-text)] transition-colors">
+              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+              {t('policyReload')}
+            </button>
+            {readOnly && <span className="text-[10px] text-[var(--vsc-text-muted)]">{t('policyReadOnly')}</span>}
+          </>
+        )}
+        <div className="flex-1" />
+        <div data-id="audit-policy-view-toggle" className="flex items-center gap-0.5 p-0.5 rounded border border-[var(--vsc-border)] bg-[var(--vsc-bg)]">
+          <button onClick={() => setViewMode('form')}
+            className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded ${viewMode === 'form' ? 'bg-blue-500/15 text-blue-200' : 'text-[var(--vsc-text-secondary)] hover:bg-[var(--vsc-bg-hover)]'}`}>
+            <FormInput size={11} /> {t('policyViewForm')}
           </button>
-          {readOnly && <span className="ml-auto text-[10px] text-[var(--vsc-text-muted)]">{t('policyReadOnly')}</span>}
+          <button onClick={() => setViewMode('json')}
+            className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded ${viewMode === 'json' ? 'bg-blue-500/15 text-blue-200' : 'text-[var(--vsc-text-secondary)] hover:bg-[var(--vsc-bg-hover)]'}`}>
+            <FileCode2 size={11} /> {t('policyViewJSON')}
+          </button>
         </div>
-      )}
+      </div>
 
-      <textarea
-        data-id="audit-policy-textarea"
-        readOnly={readOnly}
-        value={raw}
-        onChange={e => { if (!readOnly) setRaw(e.target.value); }}
-        spellCheck={false}
-        className="flex-1 min-h-[240px] font-mono text-xs p-3 rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] text-[var(--vsc-text)] resize-none focus:outline-none focus:border-blue-500/40"
-      />
+      {viewMode === 'form' ? (
+        <div className="flex-1 min-h-0 overflow-auto pr-1">
+          {rawValid ? (
+            <PolicyForm
+              scope={formScope}
+              policy={parsed}
+              readOnly={readOnly}
+              onChange={next => setRaw(JSON.stringify(next, null, 2))}
+            />
+          ) : (
+            <div className="flex items-center gap-2 p-3 rounded border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs">
+              <AlertCircle size={14} />
+              {t('policyErrorJSON')} — switch to Raw JSON tab to fix.
+            </div>
+          )}
+        </div>
+      ) : (
+        <textarea
+          data-id="audit-policy-textarea"
+          readOnly={readOnly}
+          value={raw}
+          onChange={e => { if (!readOnly) setRaw(e.target.value); }}
+          spellCheck={false}
+          className="flex-1 min-h-[240px] font-mono text-xs p-3 rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] text-[var(--vsc-text)] resize-none focus:outline-none focus:border-blue-500/40"
+        />
+      )}
 
       {error && (
         <div data-id="audit-policy-error" className="flex items-start gap-2 p-2 rounded border border-red-500/30 bg-red-500/10 text-red-300 text-xs">
