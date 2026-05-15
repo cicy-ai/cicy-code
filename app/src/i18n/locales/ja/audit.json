@@ -101,6 +101,7 @@
   "policyDeleteConfirm": "{{agent}} の override ファイルを削除しますか？グローバルポリシーにフォールバックします。",
   "policySaved": "保存しました",
   "policyErrorJSON": "JSON 構文エラー",
+  "policyUnsaved": "未保存",
   "policyViewForm": "フォーム",
   "policyViewJSON": "Raw JSON",
   "policyDirty": "{{n}} 件未保存",

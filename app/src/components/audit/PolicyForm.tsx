@@ -1,20 +1,15 @@
-// PolicyForm — structured editor for audit policy. Drops in alongside the
-// raw-JSON view as a more product-grade entry point for operators.
+// PolicyForm — structured editor for audit policy. Production-grade UI.
 //
-// Per docs/v1/audit-system-design.md §6.2 + §7.1, this form covers the
-// frequently-edited surface area:
-//   - master switches (enabled / preventive / incident_response / notify.suspended)
-//   - rules_override table (10 builtin rules)
-//   - allow_list (agents / paths / content_hashes chip editors)
-//   - responsible_persons (default + by_severity/agent/user/rule chip editors)
-//   - notify.rate_limit + cooldown numeric tuning
-//   - incident_response subform + AI remediation
-// custom_rules creation stays in the raw JSON view; this form lists existing
-// custom rules read-only with a "edit in raw" hint.
+// Cut C goal: feel commercial. Polished primitives, sticky toolbar, dirty
+// state, keyboard shortcut, anchor nav, severity-color-coded badges,
+// empty states with CTAs, smooth transitions, confirm modals.
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, ChevronRight, Plus, X, AlertTriangle, Shield, Mail, Filter, Database, Bell } from 'lucide-react';
+import {
+  ChevronDown, ChevronRight, Plus, X, AlertTriangle, Shield, Mail, Filter,
+  Database, Bell, FileLock2, Sparkles, Inbox,
+} from 'lucide-react';
 
 // ── Type shapes mirroring api/mgr/audit/policy.go ──────────────────────────
 
@@ -104,7 +99,7 @@ export interface AgentOverride {
   responsible_persons?: ResponsiblePersonsConfig;
 }
 
-// ── Builtin rule list (mirrors BuiltinRules() in audit/builtin_rules.go) ──
+// ── Builtin rule list ─────────────────────────────────────────────────────
 
 interface BuiltinRuleMeta {
   id: string;
@@ -128,130 +123,314 @@ export const BUILTIN_RULES: BuiltinRuleMeta[] = [
 const SEVERITY_OPTIONS: Severity[] = ['low', 'medium', 'high', 'critical'];
 const ACTION_OPTIONS: Action[] = ['log', 'notify', 'redact', 'block', 'none'];
 
-// ── Utility components ─────────────────────────────────────────────────────
+// ── UI Primitives ─────────────────────────────────────────────────────────
 
-function Section({
-  id, title, icon: Icon, defaultOpen = true, hint, children,
+/** iOS-style toggle. ~36×20, color reflects state + intent. */
+function Toggle({
+  checked, onChange, disabled, intent = 'primary',
 }: {
-  id: string; title: string; icon?: any; defaultOpen?: boolean; hint?: string; children: React.ReactNode;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  intent?: 'primary' | 'danger';
+}) {
+  const onColor = intent === 'danger' ? 'bg-red-500' : 'bg-blue-500';
+  return (
+    <button type="button" role="switch" aria-checked={checked} disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500/40
+        ${disabled ? 'opacity-40 cursor-not-allowed' : ''}
+        ${checked ? onColor : 'bg-zinc-700'}`}>
+      <span aria-hidden="true"
+        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out
+          ${checked ? 'translate-x-4' : 'translate-x-0.5'}`} />
+    </button>
+  );
+}
+
+const SEVERITY_TONE: Record<string, string> = {
+  critical: 'bg-red-500/15 text-red-300 border-red-500/30',
+  high:     'bg-orange-500/15 text-orange-300 border-orange-500/30',
+  medium:   'bg-amber-500/15 text-amber-300 border-amber-500/30',
+  low:      'bg-zinc-500/15 text-zinc-300 border-zinc-500/30',
+};
+
+/** Color-coded severity chip. */
+function SeverityChip({ value, size = 'sm' }: { value?: string; size?: 'sm' | 'md' }) {
+  const tone = SEVERITY_TONE[(value || '').toLowerCase()] || 'bg-zinc-700/20 text-zinc-400 border-zinc-700';
+  const pad = size === 'md' ? 'px-2 py-0.5 text-[11px]' : 'px-1.5 py-0.5 text-[10px]';
+  return (
+    <span className={`inline-flex items-center font-medium uppercase tracking-wider rounded border ${pad} ${tone}`}>
+      {value || '—'}
+    </span>
+  );
+}
+
+const ACTION_TONE: Record<string, string> = {
+  block:  'bg-red-500/10 text-red-300 border-red-500/25',
+  redact: 'bg-orange-500/10 text-orange-300 border-orange-500/25',
+  notify: 'bg-amber-500/10 text-amber-300 border-amber-500/25',
+  log:    'bg-zinc-600/15 text-zinc-300 border-zinc-600/30',
+  none:   'bg-zinc-700/15 text-zinc-400 border-zinc-700/30',
+};
+function ActionChip({ value }: { value?: string }) {
+  const tone = ACTION_TONE[value || ''] || 'bg-zinc-700/15 text-zinc-400 border-zinc-700/30';
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded border ${tone}`}>
+      {value || '—'}
+    </span>
+  );
+}
+
+/** Section card with collapsible header + counter badge + icon. */
+function SectionCard({
+  id, title, icon: Icon, counter, hint, defaultOpen = true, children,
+}: {
+  id: string;
+  title: string;
+  icon?: any;
+  counter?: number | string;
+  hint?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <section data-id={`audit-policy-section-${id}`} className="rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] overflow-hidden">
+    <section data-id={`audit-policy-section-${id}`}
+      id={`audit-policy-section-${id}`}
+      className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 shadow-sm overflow-hidden scroll-mt-20">
       <button type="button" onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-[var(--vsc-bg-hover)] transition-colors text-left">
-        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        {Icon ? <Icon size={14} className="text-blue-400" /> : null}
-        <span>{title}</span>
-        {hint && <span className="ml-auto text-[10px] font-normal text-[var(--vsc-text-muted)]">{hint}</span>}
+        className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-zinc-800/40 transition-colors text-left">
+        <span className={`flex h-7 w-7 items-center justify-center rounded-md transition-transform duration-150 ${open ? 'rotate-0' : '-rotate-90'} text-zinc-500`}>
+          <ChevronDown size={14} />
+        </span>
+        {Icon && (
+          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-blue-500/10 text-blue-300">
+            <Icon size={14} />
+          </span>
+        )}
+        <span className="text-sm font-medium text-zinc-100">{title}</span>
+        {counter !== undefined && counter !== 0 && (
+          <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-zinc-700/40 text-zinc-300">
+            {counter}
+          </span>
+        )}
+        {hint && <span className="ml-auto text-[11px] text-zinc-500">{hint}</span>}
       </button>
-      {open && <div className="px-3 py-3 border-t border-[var(--vsc-border)] space-y-3">{children}</div>}
+      <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+        <div className="overflow-hidden">
+          <div className="px-4 pb-4 pt-1 space-y-4 border-t border-zinc-800/60">
+            {children}
+          </div>
+        </div>
+      </div>
     </section>
   );
 }
 
-function Switch({ checked, onChange, label, hint, danger }: {
-  checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string; danger?: boolean;
+/** Label + control + hint + error row. */
+function FormRow({
+  label, hint, error, children, className = '',
+}: {
+  label: string;
+  hint?: string;
+  error?: string;
+  children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <label className="flex items-start gap-2 cursor-pointer select-none">
-      <input type="checkbox" checked={!!checked} onChange={e => onChange(e.target.checked)}
-        className="mt-0.5 accent-blue-500" />
-      <div className="flex-1">
-        <div className={`text-xs ${danger && checked ? 'text-red-300' : 'text-[var(--vsc-text)]'}`}>{label}</div>
-        {hint && <div className="text-[10px] text-[var(--vsc-text-muted)] mt-0.5">{hint}</div>}
+    <div className={`grid grid-cols-[180px_1fr] gap-x-4 gap-y-0.5 items-start ${className}`}>
+      <div className="pt-1.5">
+        <label className="text-xs font-medium text-zinc-300">{label}</label>
+        {hint && <p className="mt-1 text-[10px] text-zinc-500 leading-relaxed">{hint}</p>}
       </div>
-    </label>
-  );
-}
-
-function NumberField({ value, onChange, label, hint, min, max, suffix }: {
-  value: number | undefined; onChange: (v: number) => void; label: string; hint?: string;
-  min?: number; max?: number; suffix?: string;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[10px] text-[var(--vsc-text-secondary)]">{label}</span>
-      <div className="flex items-center gap-2">
-        <input type="number" value={value ?? ''} min={min} max={max}
-          onChange={e => onChange(e.target.value === '' ? 0 : Number(e.target.value))}
-          className="text-xs px-2 py-1 rounded bg-[var(--vsc-bg)] border border-[var(--vsc-border)] text-[var(--vsc-text)] w-32" />
-        {suffix && <span className="text-[10px] text-[var(--vsc-text-muted)]">{suffix}</span>}
+      <div>
+        {children}
+        {error && (
+          <p className="mt-1 text-[10px] text-red-300 flex items-center gap-1">
+            <AlertTriangle size={10} />
+            {error}
+          </p>
+        )}
       </div>
-      {hint && <span className="text-[10px] text-[var(--vsc-text-muted)]">{hint}</span>}
     </div>
   );
 }
 
-function TextField({ value, onChange, label, hint, placeholder, type = 'text' }: {
-  value: string | undefined; onChange: (v: string) => void; label: string; hint?: string;
-  placeholder?: string; type?: string;
+/** Switch row: toggle + label + danger styling option. */
+function ToggleRow({
+  label, hint, checked, onChange, disabled, danger,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  danger?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[10px] text-[var(--vsc-text-secondary)]">{label}</span>
-      <input type={type} value={value ?? ''} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-        className="text-xs px-2 py-1 rounded bg-[var(--vsc-bg)] border border-[var(--vsc-border)] text-[var(--vsc-text)] w-full" />
-      {hint && <span className="text-[10px] text-[var(--vsc-text-muted)]">{hint}</span>}
+    <div className={`flex items-start gap-3 p-3 rounded-md border transition-colors
+      ${checked && danger ? 'border-red-500/30 bg-red-500/5' :
+        checked ? 'border-blue-500/30 bg-blue-500/5' :
+        'border-zinc-800/60 bg-zinc-900/30 hover:bg-zinc-800/30'}`}>
+      <Toggle checked={checked} onChange={onChange} disabled={disabled} intent={danger ? 'danger' : 'primary'} />
+      <div className="flex-1 min-w-0">
+        <div className={`text-xs font-medium ${checked && danger ? 'text-red-200' : 'text-zinc-100'}`}>{label}</div>
+        {hint && <p className="mt-0.5 text-[10px] text-zinc-500 leading-relaxed">{hint}</p>}
+      </div>
     </div>
   );
 }
 
-function Select<T extends string>({ value, onChange, options, label, hint }: {
-  value: T | undefined; onChange: (v: T) => void; options: readonly T[];
-  label?: string; hint?: string;
-}) {
+const inputClass =
+  'text-xs px-2.5 py-1.5 rounded-md bg-zinc-900/60 border border-zinc-800 text-zinc-100 ' +
+  'placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 ' +
+  'focus:border-blue-500/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
+
+function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...props} className={`${inputClass} ${props.className || ''}`} />;
+}
+
+function SelectInput(props: React.SelectHTMLAttributes<HTMLSelectElement> & { children: React.ReactNode }) {
+  const { children, ...rest } = props;
   return (
-    <div className="flex flex-col gap-1">
-      {label && <span className="text-[10px] text-[var(--vsc-text-secondary)]">{label}</span>}
-      <select value={value ?? ''} onChange={e => onChange(e.target.value as T)}
-        className="text-xs px-2 py-1 rounded bg-[var(--vsc-bg)] border border-[var(--vsc-border)] text-[var(--vsc-text)]">
-        <option value="">—</option>
-        {options.map(o => <option key={o} value={o}>{o}</option>)}
-      </select>
-      {hint && <span className="text-[10px] text-[var(--vsc-text-muted)]">{hint}</span>}
-    </div>
+    <select {...rest} className={`${inputClass} pr-7 cursor-pointer ${rest.className || ''}`}>
+      {children}
+    </select>
   );
 }
 
-function ChipList({ values, onChange, placeholder, readOnly }: {
-  values: string[] | undefined; onChange: (next: string[]) => void; placeholder?: string; readOnly?: boolean;
+/** ChipInput — comma / enter / blur all add; smooth slide-in. */
+function ChipInput({
+  values, onChange, placeholder, readOnly, tone = 'blue',
+}: {
+  values: string[] | undefined;
+  onChange: (next: string[]) => void;
+  placeholder?: string;
+  readOnly?: boolean;
+  tone?: 'blue' | 'gray';
 }) {
   const [draft, setDraft] = useState('');
   const list = values || [];
-  const add = () => {
-    const t = draft.trim();
-    if (!t) return;
-    if (list.includes(t)) { setDraft(''); return; }
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const commit = useCallback((s: string) => {
+    const t = s.trim();
+    if (!t) return false;
+    if (list.includes(t)) return true;
     onChange([...list, t]);
-    setDraft('');
+    return true;
+  }, [list, onChange]);
+
+  const remove = useCallback((idx: number) => {
+    onChange(list.filter((_, j) => j !== idx));
+  }, [list, onChange]);
+
+  const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      if (commit(draft)) setDraft('');
+    } else if (e.key === 'Backspace' && !draft && list.length > 0) {
+      remove(list.length - 1);
+    }
   };
-  const remove = (i: number) => onChange(list.filter((_, j) => j !== i));
+
+  const onBlur = () => {
+    if (draft.trim()) {
+      if (commit(draft)) setDraft('');
+    }
+  };
+
+  const chipBase = tone === 'blue'
+    ? 'bg-blue-500/10 border-blue-500/30 text-blue-200'
+    : 'bg-zinc-700/30 border-zinc-700 text-zinc-300';
+
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex flex-wrap gap-1.5 min-h-[24px]">
-        {list.map((v, i) => (
-          <span key={`${v}-${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-200 font-mono">
-            {v}
-            {!readOnly && (
-              <button type="button" onClick={() => remove(i)}
-                className="hover:text-red-300 transition-colors">
-                <X size={10} />
-              </button>
-            )}
-          </span>
-        ))}
-        {list.length === 0 && <span className="text-[10px] text-[var(--vsc-text-muted)] italic">empty</span>}
-      </div>
+    <div className={`flex flex-wrap gap-1.5 px-2 py-1.5 rounded-md border bg-zinc-900/60 border-zinc-800 ${readOnly ? 'opacity-90' : 'focus-within:border-blue-500/40 focus-within:ring-2 focus-within:ring-blue-500/20'} transition-colors`}>
+      {list.map((v, i) => (
+        <span key={`${v}-${i}`} className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono rounded border ${chipBase}`}>
+          <span className="truncate max-w-[280px]">{v}</span>
+          {!readOnly && (
+            <button type="button" onClick={() => remove(i)}
+              className="hover:text-red-300 transition-colors"
+              aria-label={`remove ${v}`}>
+              <X size={10} />
+            </button>
+          )}
+        </span>
+      ))}
       {!readOnly && (
-        <div className="flex items-center gap-1">
-          <input value={draft} onChange={e => setDraft(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
-            placeholder={placeholder || 'value…'}
-            className="text-xs px-2 py-1 rounded bg-[var(--vsc-bg)] border border-[var(--vsc-border)] text-[var(--vsc-text)] flex-1 font-mono" />
-          <button type="button" onClick={add}
-            className="px-2 py-1 text-xs rounded border border-[var(--vsc-border)] bg-[var(--vsc-bg-hover)] hover:bg-[var(--vsc-bg-active)] text-[var(--vsc-text)] transition-colors">
-            <Plus size={12} />
+        <input ref={inputRef} value={draft} onChange={e => setDraft(e.target.value)}
+          onKeyDown={onKey} onBlur={onBlur}
+          placeholder={list.length === 0 ? (placeholder || 'value…') : ''}
+          className="flex-1 min-w-[120px] bg-transparent text-xs text-zinc-100 placeholder:text-zinc-600 focus:outline-none font-mono" />
+      )}
+    </div>
+  );
+}
+
+/** Empty state with icon + helper text + optional CTA. */
+function EmptyState({ icon: Icon = Inbox, label, hint }: { icon?: any; label: string; hint?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-6 px-4 rounded-md border border-dashed border-zinc-800 bg-zinc-900/20 text-center">
+      <Icon size={20} className="text-zinc-600 mb-2" />
+      <div className="text-xs text-zinc-400">{label}</div>
+      {hint && <div className="mt-1 text-[10px] text-zinc-600">{hint}</div>}
+    </div>
+  );
+}
+
+/** Keyed chip map editor — key on the left, chip list on the right. */
+function KeyedChipMapEditor({
+  value, onChange, keyPlaceholder, valuePlaceholder, readOnly,
+}: {
+  value: Record<string, string[]> | undefined;
+  onChange: (v: Record<string, string[]>) => void;
+  keyPlaceholder?: string;
+  valuePlaceholder?: string;
+  readOnly?: boolean;
+}) {
+  const [newKey, setNewKey] = useState('');
+  const m = value || {};
+  const keys = Object.keys(m).sort();
+  const addKey = () => {
+    const k = newKey.trim();
+    if (!k || m[k]) { setNewKey(''); return; }
+    onChange({ ...m, [k]: [] });
+    setNewKey('');
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      {keys.length === 0 && <EmptyState label={keyPlaceholder || 'No entries'} hint={readOnly ? undefined : 'Add a key below.'} />}
+      {keys.map(k => (
+        <div key={k} className="grid grid-cols-[180px_1fr_auto] gap-2 items-start">
+          <code className="px-2 py-1.5 text-[11px] text-zinc-300 font-mono bg-zinc-800/40 rounded-md border border-zinc-800 truncate">{k}</code>
+          <ChipInput values={m[k]} placeholder={valuePlaceholder || 'recipient…'} readOnly={readOnly}
+            onChange={next => {
+              const cp = { ...m };
+              if (next.length === 0) delete cp[k];
+              else cp[k] = next;
+              onChange(cp);
+            }} />
+          {!readOnly && (
+            <button type="button"
+              onClick={() => { const cp = { ...m }; delete cp[k]; onChange(cp); }}
+              className="self-center p-1 text-zinc-500 hover:text-red-400 transition-colors"
+              aria-label="remove">
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      ))}
+      {!readOnly && (
+        <div className="flex items-center gap-2">
+          <TextInput value={newKey} onChange={e => setNewKey(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addKey(); } }}
+            placeholder={keyPlaceholder || 'add key (press Enter)…'}
+            className="font-mono w-[180px]" />
+          <button type="button" onClick={addKey}
+            className="inline-flex items-center gap-1 px-2 py-1.5 text-[11px] rounded-md border border-zinc-800 bg-zinc-900/60 text-zinc-300 hover:bg-zinc-800/60 transition-colors">
+            <Plus size={11} /> add row
           </button>
         </div>
       )}
@@ -259,55 +438,7 @@ function ChipList({ values, onChange, placeholder, readOnly }: {
   );
 }
 
-function KeyedChipMapEditor({ value, onChange, keyPlaceholder, valuePlaceholder, readOnly }: {
-  value: Record<string, string[]> | undefined; onChange: (v: Record<string, string[]>) => void;
-  keyPlaceholder?: string; valuePlaceholder?: string; readOnly?: boolean;
-}) {
-  const [newKey, setNewKey] = useState('');
-  const m = value || {};
-  const keys = Object.keys(m).sort();
-  return (
-    <div className="flex flex-col gap-2">
-      {keys.map(k => (
-        <div key={k} className="flex items-center gap-2">
-          <code className="text-[10px] text-[var(--vsc-text-secondary)] min-w-[140px] truncate font-mono">{k}</code>
-          <div className="flex-1">
-            <ChipList values={m[k]} placeholder={valuePlaceholder || 'recipient…'} readOnly={readOnly}
-              onChange={next => {
-                const cp = { ...m, [k]: next };
-                if (next.length === 0) delete cp[k];
-                onChange(cp);
-              }} />
-          </div>
-          {!readOnly && (
-            <button type="button" onClick={() => {
-              const cp = { ...m };
-              delete cp[k];
-              onChange(cp);
-            }} className="text-[var(--vsc-text-muted)] hover:text-red-300 transition-colors">
-              <X size={12} />
-            </button>
-          )}
-        </div>
-      ))}
-      {!readOnly && (
-        <div className="flex items-center gap-1">
-          <input value={newKey} onChange={e => setNewKey(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && newKey.trim()) {
-                onChange({ ...m, [newKey.trim()]: [] });
-                setNewKey('');
-              }
-            }}
-            placeholder={keyPlaceholder || 'add key…'}
-            className="text-xs px-2 py-1 rounded bg-[var(--vsc-bg)] border border-dashed border-[var(--vsc-border)] text-[var(--vsc-text)] flex-1 font-mono" />
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Main form component ───────────────────────────────────────────────────
+// ── Main form ────────────────────────────────────────────────────────────
 
 export type FormScope = 'global' | 'agent' | 'effective';
 
@@ -324,7 +455,6 @@ export function PolicyForm({ scope, policy, onChange, readOnly }: PolicyFormProp
   const isEffective = scope === 'effective';
   const ro = readOnly || isEffective;
 
-  // Type narrowing helpers — agent override only has a subset of fields.
   const p = policy as Policy & AgentOverride;
 
   const set = useCallback((patch: any) => {
@@ -332,7 +462,6 @@ export function PolicyForm({ scope, policy, onChange, readOnly }: PolicyFormProp
     onChange({ ...p, ...patch });
   }, [p, onChange, ro]);
 
-  // rules_override as a map for fast lookups
   const overrideMap = useMemo(() => {
     const m: Record<string, RuleOverride> = {};
     (p.rules_override || []).forEach(r => { m[r.id] = r; });
@@ -342,209 +471,210 @@ export function PolicyForm({ scope, policy, onChange, readOnly }: PolicyFormProp
   const setRuleOverride = (id: string, patch: Partial<RuleOverride>) => {
     const existing = overrideMap[id] || { id };
     const next: RuleOverride = { ...existing, ...patch };
-    // Drop the override entry if it became a no-op (all fields unset/false/empty).
     const isNoop = !next.disabled && !next.severity && !next.default_action;
     const others = (p.rules_override || []).filter(r => r.id !== id);
     if (isNoop) set({ rules_override: others.length ? others : undefined });
     else set({ rules_override: [...others, next] });
   };
 
+  // Counters for section badges
+  const overrideCount = (p.rules_override || []).length;
+  const allowListCount =
+    (p.allow_list?.agents?.length || 0) +
+    (p.allow_list?.paths?.length || 0) +
+    (p.allow_list?.content_hashes?.length || 0);
+  const responsibleCount =
+    (p.responsible_persons?.default?.length || 0) +
+    Object.keys(p.responsible_persons?.by_severity || {}).length +
+    Object.keys(p.responsible_persons?.by_agent || {}).length +
+    Object.keys(p.responsible_persons?.by_user || {}).length +
+    Object.keys(p.responsible_persons?.by_rule || {}).length;
+  const customRuleCount = (p.custom_rules || []).length;
+
   return (
-    <div data-id="audit-policy-form" className="flex flex-col gap-3">
+    <div data-id="audit-policy-form" className="space-y-3">
+      {isAgent && (
+        <div className="flex items-start gap-2.5 p-3 rounded-md border border-blue-500/25 bg-blue-500/5 text-[11px] text-blue-200">
+          <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+          <span className="leading-relaxed">{t('formAgentScopeNote')}</span>
+        </div>
+      )}
+
       {/* ── master switches: GLOBAL only ── */}
       {!isAgent && (
-        <Section id="master" title={t('formSectionMaster')} icon={Shield} defaultOpen={true}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Switch
-              checked={p.enabled ?? true}
-              onChange={v => set({ enabled: v })}
-              label={t('formEnabled')}
-              hint={t('formEnabledHint')}
-            />
-            <Switch
-              checked={p.preventive?.enabled ?? false}
+        <SectionCard id="master" title={t('formSectionMaster')} icon={Shield} defaultOpen>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+            <ToggleRow checked={p.enabled ?? true} onChange={v => set({ enabled: v })}
+              disabled={ro} label={t('formEnabled')} hint={t('formEnabledHint')} />
+            <ToggleRow checked={p.preventive?.enabled ?? false}
               onChange={v => set({ preventive: { ...p.preventive, enabled: v } })}
-              label={t('formPreventiveEnabled')}
-              hint={t('formPreventiveHint')}
-            />
-            <Switch
-              checked={p.incident_response?.enabled ?? false}
+              disabled={ro} label={t('formPreventiveEnabled')} hint={t('formPreventiveHint')} />
+            <ToggleRow checked={p.incident_response?.enabled ?? false}
               onChange={v => set({ incident_response: { ...p.incident_response, enabled: v } })}
-              label={t('formIncidentEnabled')}
-              hint={t('formIncidentHint')}
-            />
-            <Switch
-              checked={p.notify?.suspended ?? false}
+              disabled={ro} label={t('formIncidentEnabled')} hint={t('formIncidentHint')} />
+            <ToggleRow checked={p.notify?.suspended ?? false}
               onChange={v => set({ notify: { ...p.notify, suspended: v } })}
-              label={t('formNotifySuspended')}
-              hint={t('formNotifySuspendedHint')}
-              danger
-            />
+              disabled={ro} label={t('formNotifySuspended')} hint={t('formNotifySuspendedHint')} danger />
           </div>
           {p.preventive?.enabled && (
-            <div className="pt-2 border-t border-[var(--vsc-border)] flex items-center gap-3">
-              <span className="text-[10px] text-[var(--vsc-text-secondary)]">{t('formPreventiveFailMode')}:</span>
-              {(['open', 'closed'] as const).map(m => (
-                <label key={m} className="flex items-center gap-1 text-xs cursor-pointer">
-                  <input type="radio" name="failmode" checked={(p.preventive?.fail_mode || 'open') === m}
-                    onChange={() => set({ preventive: { ...p.preventive, fail_mode: m } })}
-                    className="accent-blue-500" />
-                  <span>{m}</span>
-                </label>
-              ))}
-              <span className="text-[10px] text-[var(--vsc-text-muted)] ml-auto">
-                {(p.preventive?.fail_mode || 'open') === 'open'
-                  ? t('formFailOpenHint')
-                  : t('formFailClosedHint')}
-              </span>
-            </div>
+            <FormRow label={t('formPreventiveFailMode')} hint={
+              (p.preventive?.fail_mode || 'open') === 'open'
+                ? t('formFailOpenHint')
+                : t('formFailClosedHint')
+            }>
+              <div className="flex items-center gap-3">
+                {(['open', 'closed'] as const).map(m => (
+                  <label key={m}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors
+                      ${(p.preventive?.fail_mode || 'open') === m
+                        ? (m === 'open' ? 'bg-blue-500/15 border border-blue-500/40 text-blue-200' : 'bg-red-500/15 border border-red-500/40 text-red-200')
+                        : 'bg-zinc-900/40 border border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                    <input type="radio" name="failmode" className="sr-only"
+                      checked={(p.preventive?.fail_mode || 'open') === m}
+                      disabled={ro}
+                      onChange={() => set({ preventive: { ...p.preventive, fail_mode: m } })} />
+                    {m}
+                  </label>
+                ))}
+              </div>
+            </FormRow>
           )}
-        </Section>
-      )}
-      {isAgent && (
-        <div className="flex items-center gap-2 p-2 rounded-md border border-blue-500/20 bg-blue-500/5 text-[11px] text-blue-200">
-          <AlertTriangle size={12} />
-          <span>{t('formAgentScopeNote')}</span>
-        </div>
+        </SectionCard>
       )}
 
-      {/* ── rules_override table ── */}
-      <Section id="rules" title={t('formSectionRules')} icon={Filter} defaultOpen={true}>
-        <table className="w-full text-xs">
-          <thead className="text-[10px] text-[var(--vsc-text-secondary)] uppercase tracking-wide">
-            <tr>
-              <th className="text-left py-1.5 pr-2">{t('formColRule')}</th>
-              <th className="text-left py-1.5 pr-2">{t('formColSeverity')}</th>
-              <th className="text-left py-1.5 pr-2">{t('formColAction')}</th>
-              <th className="text-left py-1.5 pr-2">{t('formColDisabled')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {BUILTIN_RULES.map(r => {
-              const ov = overrideMap[r.id];
-              return (
-                <tr key={r.id} className="border-t border-[var(--vsc-border)]">
-                  <td className="py-1.5 pr-2">
-                    <code className="font-mono text-[var(--vsc-text)]">{r.id}</code>
-                    <div className="text-[10px] text-[var(--vsc-text-muted)]">
-                      default: {r.severity} / {r.default_action}{r.inline ? ' / inline' : ''}
-                    </div>
-                  </td>
-                  <td className="py-1.5 pr-2">
-                    {ro ? (
-                      <span className="text-[var(--vsc-text-muted)]">{ov?.severity || r.severity}</span>
-                    ) : (
-                      <select value={ov?.severity || ''}
-                        onChange={e => setRuleOverride(r.id, { severity: (e.target.value || undefined) as Severity })}
-                        className="text-xs px-2 py-1 rounded bg-[var(--vsc-bg)] border border-[var(--vsc-border)] text-[var(--vsc-text)]">
-                        <option value="">{r.severity} (default)</option>
-                        {SEVERITY_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    )}
-                  </td>
-                  <td className="py-1.5 pr-2">
-                    {ro ? (
-                      <span className="text-[var(--vsc-text-muted)]">{ov?.default_action || r.default_action}</span>
-                    ) : (
-                      <select value={ov?.default_action || ''}
-                        onChange={e => setRuleOverride(r.id, { default_action: (e.target.value || undefined) as Action })}
-                        className="text-xs px-2 py-1 rounded bg-[var(--vsc-bg)] border border-[var(--vsc-border)] text-[var(--vsc-text)]">
-                        <option value="">{r.default_action} (default)</option>
-                        {ACTION_OPTIONS.map(a => <option key={a} value={a}>{a}</option>)}
-                      </select>
-                    )}
-                  </td>
-                  <td className="py-1.5 pr-2">
-                    <input type="checkbox" disabled={ro}
-                      checked={!!ov?.disabled}
-                      onChange={e => setRuleOverride(r.id, { disabled: e.target.checked || undefined })}
-                      className="accent-red-500" />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </Section>
+      {/* ── rules_override ── */}
+      <SectionCard id="rules" title={t('formSectionRules')} icon={Filter} counter={overrideCount} defaultOpen>
+        <div className="overflow-x-auto rounded-md border border-zinc-800/60">
+          <table className="w-full text-xs">
+            <thead className="text-[10px] text-zinc-500 uppercase tracking-wider bg-zinc-900/40">
+              <tr>
+                <th className="text-left px-3 py-2 font-medium">{t('formColRule')}</th>
+                <th className="text-left px-3 py-2 font-medium w-44">{t('formColSeverity')}</th>
+                <th className="text-left px-3 py-2 font-medium w-44">{t('formColAction')}</th>
+                <th className="text-left px-3 py-2 font-medium w-20">{t('formColDisabled')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {BUILTIN_RULES.map((r, i) => {
+                const ov = overrideMap[r.id];
+                const isOverridden = !!ov && (ov.disabled || ov.severity || ov.default_action);
+                return (
+                  <tr key={r.id}
+                    className={`border-t border-zinc-800/60 transition-colors ${isOverridden ? 'bg-blue-500/[0.03]' : i % 2 ? 'bg-zinc-900/20' : ''}`}>
+                    <td className="px-3 py-2">
+                      <code className="font-mono text-zinc-100 text-[11px]">{r.id}</code>
+                      <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-zinc-500">
+                        <SeverityChip value={r.severity} />
+                        <ActionChip value={r.default_action} />
+                        {r.inline && <span className="text-[10px] text-blue-400">inline</span>}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      {ro ? (
+                        <SeverityChip value={ov?.severity || r.severity} />
+                      ) : (
+                        <SelectInput value={ov?.severity || ''} className="w-full"
+                          onChange={e => setRuleOverride(r.id, { severity: (e.target.value || undefined) as Severity })}>
+                          <option value="">— default ({r.severity}) —</option>
+                          {SEVERITY_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                        </SelectInput>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {ro ? (
+                        <ActionChip value={ov?.default_action || r.default_action} />
+                      ) : (
+                        <SelectInput value={ov?.default_action || ''} className="w-full"
+                          onChange={e => setRuleOverride(r.id, { default_action: (e.target.value || undefined) as Action })}>
+                          <option value="">— default ({r.default_action}) —</option>
+                          {ACTION_OPTIONS.map(a => <option key={a} value={a}>{a}</option>)}
+                        </SelectInput>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <Toggle checked={!!ov?.disabled} disabled={ro} intent="danger"
+                        onChange={v => setRuleOverride(r.id, { disabled: v || undefined })} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
 
       {/* ── allow_list ── */}
-      <Section id="allowlist" title={t('formSectionAllowList')} icon={Database} defaultOpen={false}>
+      <SectionCard id="allowlist" title={t('formSectionAllowList')} icon={Database} counter={allowListCount}>
         <div className="space-y-3">
           {!isAgent && (
-            <div>
-              <div className="text-[10px] text-[var(--vsc-text-secondary)] mb-1">{t('formAllowAgents')}</div>
-              <ChipList values={p.allow_list?.agents} readOnly={ro}
+            <FormRow label="agents" hint={t('formAllowAgents')}>
+              <ChipInput values={p.allow_list?.agents} readOnly={ro}
                 onChange={next => set({ allow_list: { ...p.allow_list, agents: next } })}
                 placeholder="w-trusted-bot" />
-            </div>
+            </FormRow>
           )}
-          <div>
-            <div className="text-[10px] text-[var(--vsc-text-secondary)] mb-1">{t('formAllowPaths')}</div>
-            <ChipList values={p.allow_list?.paths} readOnly={ro}
+          <FormRow label="paths" hint={t('formAllowPaths')}>
+            <ChipInput values={p.allow_list?.paths} readOnly={ro}
               onChange={next => set({ allow_list: { ...p.allow_list, paths: next } })}
               placeholder="mitm:flow-known-fp-" />
-          </div>
-          <div>
-            <div className="text-[10px] text-[var(--vsc-text-secondary)] mb-1">{t('formAllowHashes')}</div>
-            <ChipList values={p.allow_list?.content_hashes} readOnly={ro}
+          </FormRow>
+          <FormRow label="content_hashes" hint={t('formAllowHashes')}>
+            <ChipInput values={p.allow_list?.content_hashes} readOnly={ro}
               onChange={next => set({ allow_list: { ...p.allow_list, content_hashes: next } })}
               placeholder="sha256:..." />
-          </div>
+          </FormRow>
         </div>
-      </Section>
+      </SectionCard>
 
       {/* ── responsible_persons ── */}
-      <Section id="responsible" title={t('formSectionResponsible')} icon={Mail} defaultOpen={false}>
+      <SectionCard id="responsible" title={t('formSectionResponsible')} icon={Mail} counter={responsibleCount}>
         <div className="space-y-4">
-          <div>
-            <div className="text-[10px] text-[var(--vsc-text-secondary)] mb-1">{t('formRespDefault')}</div>
-            <ChipList values={p.responsible_persons?.default} readOnly={ro}
+          <FormRow label="default" hint={t('formRespDefault')}>
+            <ChipInput values={p.responsible_persons?.default} readOnly={ro}
               onChange={next => set({ responsible_persons: { ...p.responsible_persons, default: next } })}
               placeholder="sec@yourcorp.com" />
-          </div>
+          </FormRow>
           {(['by_severity', 'by_rule', isAgent ? null : 'by_agent', isAgent ? null : 'by_user'].filter(Boolean) as string[]).map(k => (
-            <div key={k}>
-              <div className="text-[10px] text-[var(--vsc-text-secondary)] mb-1">{t(`formResp_${k}`)}</div>
+            <FormRow key={k} label={k} hint={t(`formResp_${k}`)}>
               <KeyedChipMapEditor
                 value={(p.responsible_persons as any)?.[k]} readOnly={ro}
                 onChange={next => set({ responsible_persons: { ...p.responsible_persons, [k]: next } })}
                 keyPlaceholder={t(`formResp_${k}_key`)}
                 valuePlaceholder="email@corp"
               />
-            </div>
+            </FormRow>
           ))}
         </div>
-      </Section>
+      </SectionCard>
 
       {/* ── incident_response — GLOBAL only ── */}
       {!isAgent && (
-        <Section id="incident" title={t('formSectionIncident')} icon={Mail} defaultOpen={false}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Select<Severity>
-              value={p.incident_response?.trigger_min_severity}
-              onChange={v => set({ incident_response: { ...p.incident_response, trigger_min_severity: v } })}
-              options={SEVERITY_OPTIONS}
-              label={t('formIncidentTrigger')}
-              hint={t('formIncidentTriggerHint')}
-            />
-            <NumberField
-              value={p.incident_response?.cooldown_seconds}
-              onChange={v => set({ incident_response: { ...p.incident_response, cooldown_seconds: v } })}
-              label={t('formIncidentCooldown')}
-              suffix="s"
-              hint={t('formIncidentCooldownHint')}
-            />
-            <TextField
-              value={p.incident_response?.email_from}
-              onChange={v => set({ incident_response: { ...p.incident_response, email_from: v || undefined } })}
-              label={t('formIncidentFrom')}
-              placeholder="audit@yourcorp.com"
-              hint={t('formIncidentFromHint')}
-            />
+        <SectionCard id="incident" title={t('formSectionIncident')} icon={Mail}>
+          <div className="space-y-4">
+            <FormRow label={t('formIncidentTrigger')} hint={t('formIncidentTriggerHint')}>
+              <SelectInput value={p.incident_response?.trigger_min_severity || ''}
+                onChange={e => set({ incident_response: { ...p.incident_response, trigger_min_severity: (e.target.value || undefined) as Severity } })}>
+                <option value="">— default (high) —</option>
+                {SEVERITY_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+              </SelectInput>
+            </FormRow>
+            <FormRow label={t('formIncidentCooldown')} hint={t('formIncidentCooldownHint')}>
+              <div className="flex items-center gap-2">
+                <TextInput type="number" min={0} value={p.incident_response?.cooldown_seconds ?? ''}
+                  onChange={e => set({ incident_response: { ...p.incident_response, cooldown_seconds: Number(e.target.value || 0) } })}
+                  className="w-32" />
+                <span className="text-[10px] text-zinc-500">seconds</span>
+              </div>
+            </FormRow>
+            <FormRow label={t('formIncidentFrom')} hint={t('formIncidentFromHint')}>
+              <TextInput value={p.incident_response?.email_from || ''}
+                onChange={e => set({ incident_response: { ...p.incident_response, email_from: e.target.value || undefined } })}
+                placeholder="audit@yourcorp.com" className="w-full max-w-md" />
+            </FormRow>
           </div>
 
-          <div className="pt-3 border-t border-[var(--vsc-border)]">
-            <Switch
+          <div className="pt-3 mt-3 border-t border-zinc-800/60">
+            <ToggleRow
               checked={p.incident_response?.ai_remediation?.enabled ?? false}
               onChange={v => set({
                 incident_response: {
@@ -552,121 +682,137 @@ export function PolicyForm({ scope, policy, onChange, readOnly }: PolicyFormProp
                   ai_remediation: { ...p.incident_response?.ai_remediation, enabled: v },
                 },
               })}
+              disabled={ro}
               label={t('formAIEnabled')}
               hint={t('formAIEnabledHint')}
             />
             {p.incident_response?.ai_remediation?.enabled && (
-              <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3 pl-6">
-                <TextField
-                  value={p.incident_response.ai_remediation.endpoint}
-                  onChange={v => set({
-                    incident_response: {
-                      ...p.incident_response,
-                      ai_remediation: { ...p.incident_response?.ai_remediation, endpoint: v },
-                    },
-                  })}
-                  label={t('formAIEndpoint')}
-                  placeholder="https://internal-llm.corp/v1"
-                />
-                <TextField
-                  value={p.incident_response.ai_remediation.model}
-                  onChange={v => set({
-                    incident_response: {
-                      ...p.incident_response,
-                      ai_remediation: { ...p.incident_response?.ai_remediation, model: v },
-                    },
-                  })}
-                  label={t('formAIModel')}
-                  placeholder="internal-fast"
-                />
-                <TextField
-                  value={p.incident_response.ai_remediation.api_key}
-                  onChange={v => set({
-                    incident_response: {
-                      ...p.incident_response,
-                      ai_remediation: { ...p.incident_response?.ai_remediation, api_key: v },
-                    },
-                  })}
-                  label={t('formAIKey')}
-                  type="password"
-                />
-                <NumberField
-                  value={p.incident_response.ai_remediation.timeout_seconds}
-                  onChange={v => set({
-                    incident_response: {
-                      ...p.incident_response,
-                      ai_remediation: { ...p.incident_response?.ai_remediation, timeout_seconds: v },
-                    },
-                  })}
-                  label={t('formAITimeout')}
-                  suffix="s"
-                />
+              <div className="mt-3 pl-12 space-y-3">
+                <FormRow label={t('formAIEndpoint')}>
+                  <TextInput value={p.incident_response.ai_remediation.endpoint || ''}
+                    onChange={e => set({
+                      incident_response: {
+                        ...p.incident_response,
+                        ai_remediation: { ...p.incident_response?.ai_remediation, endpoint: e.target.value },
+                      },
+                    })}
+                    placeholder="https://internal-llm.corp/v1"
+                    className="w-full max-w-md" />
+                </FormRow>
+                <FormRow label={t('formAIModel')}>
+                  <TextInput value={p.incident_response.ai_remediation.model || ''}
+                    onChange={e => set({
+                      incident_response: {
+                        ...p.incident_response,
+                        ai_remediation: { ...p.incident_response?.ai_remediation, model: e.target.value },
+                      },
+                    })}
+                    placeholder="internal-fast"
+                    className="w-full max-w-md" />
+                </FormRow>
+                <FormRow label={t('formAIKey')}>
+                  <TextInput type="password" value={p.incident_response.ai_remediation.api_key || ''}
+                    onChange={e => set({
+                      incident_response: {
+                        ...p.incident_response,
+                        ai_remediation: { ...p.incident_response?.ai_remediation, api_key: e.target.value },
+                      },
+                    })}
+                    placeholder="sk-internal-..."
+                    className="w-full max-w-md font-mono" />
+                </FormRow>
+                <FormRow label={t('formAITimeout')}>
+                  <div className="flex items-center gap-2">
+                    <TextInput type="number" min={1} max={60}
+                      value={p.incident_response.ai_remediation.timeout_seconds ?? ''}
+                      onChange={e => set({
+                        incident_response: {
+                          ...p.incident_response,
+                          ai_remediation: { ...p.incident_response?.ai_remediation, timeout_seconds: Number(e.target.value || 0) },
+                        },
+                      })}
+                      className="w-24" />
+                    <span className="text-[10px] text-zinc-500">seconds</span>
+                  </div>
+                </FormRow>
               </div>
             )}
           </div>
-        </Section>
+        </SectionCard>
       )}
 
-      {/* ── notify rate_limit / cooldown — GLOBAL only ── */}
+      {/* ── notify — GLOBAL only ── */}
       {!isAgent && (
-        <Section id="notify" title={t('formSectionNotify')} icon={Bell} defaultOpen={false}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Select<Severity>
-              value={p.notify?.min_severity}
-              onChange={v => set({ notify: { ...p.notify, min_severity: v } })}
-              options={SEVERITY_OPTIONS}
-              label={t('formNotifyMinSev')}
-              hint={t('formNotifyMinSevHint')}
-            />
-            <NumberField
-              value={p.notify?.cooldown?.seconds}
-              onChange={v => set({ notify: { ...p.notify, cooldown: { seconds: v } } })}
-              label={t('formNotifyCooldown')}
-              suffix="s"
-              hint={t('formNotifyCooldownHint')}
-            />
-            <NumberField
-              value={p.notify?.rate_limit?.window_seconds}
-              onChange={v => set({ notify: { ...p.notify, rate_limit: { ...p.notify?.rate_limit, window_seconds: v } } })}
-              label={t('formNotifyWindow')}
-              suffix="s"
-            />
-            <NumberField
-              value={p.notify?.rate_limit?.max_per_agent_per_rule}
-              onChange={v => set({ notify: { ...p.notify, rate_limit: { ...p.notify?.rate_limit, max_per_agent_per_rule: v } } })}
-              label={t('formNotifyMaxPerAgent')}
-              hint={t('formNotifyMaxPerAgentHint')}
-            />
+        <SectionCard id="notify" title={t('formSectionNotify')} icon={Bell}>
+          <div className="space-y-4">
+            <FormRow label={t('formNotifyMinSev')} hint={t('formNotifyMinSevHint')}>
+              <SelectInput value={p.notify?.min_severity || ''}
+                onChange={e => set({ notify: { ...p.notify, min_severity: (e.target.value || undefined) as Severity } })}>
+                <option value="">— default (medium) —</option>
+                {SEVERITY_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+              </SelectInput>
+            </FormRow>
+            <FormRow label={t('formNotifyCooldown')} hint={t('formNotifyCooldownHint')}>
+              <div className="flex items-center gap-2">
+                <TextInput type="number" min={0} value={p.notify?.cooldown?.seconds ?? ''}
+                  onChange={e => set({ notify: { ...p.notify, cooldown: { seconds: Number(e.target.value || 0) } } })}
+                  className="w-32" />
+                <span className="text-[10px] text-zinc-500">seconds</span>
+              </div>
+            </FormRow>
+            <FormRow label={t('formNotifyWindow')}>
+              <div className="flex items-center gap-2">
+                <TextInput type="number" min={0} value={p.notify?.rate_limit?.window_seconds ?? ''}
+                  onChange={e => set({ notify: { ...p.notify, rate_limit: { ...p.notify?.rate_limit, window_seconds: Number(e.target.value || 0) } } })}
+                  className="w-32" />
+                <span className="text-[10px] text-zinc-500">seconds</span>
+              </div>
+            </FormRow>
+            <FormRow label={t('formNotifyMaxPerAgent')} hint={t('formNotifyMaxPerAgentHint')}>
+              <TextInput type="number" min={0} value={p.notify?.rate_limit?.max_per_agent_per_rule ?? ''}
+                onChange={e => set({ notify: { ...p.notify, rate_limit: { ...p.notify?.rate_limit, max_per_agent_per_rule: Number(e.target.value || 0) } } })}
+                className="w-32" />
+            </FormRow>
           </div>
-        </Section>
+        </SectionCard>
       )}
 
       {/* ── custom_rules — GLOBAL only, read-only summary ── */}
       {!isAgent && (
-        <Section id="custom" title={t('formSectionCustom')}
-          hint={`${(p.custom_rules || []).length} ${t('formCustomCount')}`} defaultOpen={false}>
-          <div className="text-[10px] text-[var(--vsc-text-muted)] italic">
-            {t('formCustomNote')}
-          </div>
+        <SectionCard id="custom" title={t('formSectionCustom')} icon={Sparkles} counter={customRuleCount}
+          hint={t('formCustomNote')}>
           <div className="space-y-2">
-            {(p.custom_rules || []).map((c, i) => (
-              <div key={i} className="rounded border border-[var(--vsc-border)] p-2 text-xs font-mono">
-                <div>
-                  <span className="text-blue-300">{c.id}</span>
-                  <span className="text-[var(--vsc-text-muted)] ml-2">[{c.severity}]</span>
-                  <span className="text-[var(--vsc-text-muted)] ml-2">{c.scan_directions.join('/')}</span>
+            {(p.custom_rules || []).length === 0 ? (
+              <EmptyState icon={FileLock2} label={t('formCustomEmpty')} hint="Use Raw JSON view to author regex / dict_file rules." />
+            ) : (
+              (p.custom_rules || []).map((c, i) => (
+                <div key={i} className="rounded-md border border-zinc-800/60 bg-zinc-900/30 p-3">
+                  <div className="flex items-center gap-2">
+                    <code className="font-mono text-[12px] text-blue-300">{c.id}</code>
+                    <SeverityChip value={c.severity} />
+                    <span className="text-[10px] text-zinc-500">{c.scan_directions.join(' / ')}</span>
+                    {c.label && <span className="text-[10px] text-zinc-400 italic">— {c.label}</span>}
+                  </div>
+                  <div className="mt-2 text-[11px] font-mono text-zinc-400 break-all">
+                    <span className="text-zinc-500">{c.match.type}:</span> {c.match.pattern || c.match.path}
+                  </div>
                 </div>
-                <div className="text-[10px] text-[var(--vsc-text-secondary)] mt-1">
-                  match: {c.match.type} {c.match.pattern || c.match.path}
-                </div>
-              </div>
-            ))}
-            {(p.custom_rules || []).length === 0 && (
-              <div className="text-[10px] text-[var(--vsc-text-muted)] italic">{t('formCustomEmpty')}</div>
+              ))
             )}
           </div>
-        </Section>
+        </SectionCard>
       )}
     </div>
   );
 }
+
+// ── Optional Anchor Nav (used by parent component on wide screens) ────────
+export const POLICY_SECTIONS = [
+  { id: 'master',      labelKey: 'formSectionMaster',      icon: Shield,    globalOnly: true },
+  { id: 'rules',       labelKey: 'formSectionRules',       icon: Filter,    globalOnly: false },
+  { id: 'allowlist',   labelKey: 'formSectionAllowList',   icon: Database,  globalOnly: false },
+  { id: 'responsible', labelKey: 'formSectionResponsible', icon: Mail,      globalOnly: false },
+  { id: 'incident',    labelKey: 'formSectionIncident',    icon: Mail,      globalOnly: true },
+  { id: 'notify',      labelKey: 'formSectionNotify',      icon: Bell,      globalOnly: true },
+  { id: 'custom',      labelKey: 'formSectionCustom',      icon: Sparkles,  globalOnly: true },
+];

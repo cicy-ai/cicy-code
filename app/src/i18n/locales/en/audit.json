@@ -101,6 +101,7 @@
   "policyDeleteConfirm": "Delete override file for {{agent}}? Falls back to global policy.",
   "policySaved": "Saved",
   "policyErrorJSON": "JSON syntax error",
+  "policyUnsaved": "Unsaved",
   "policyViewForm": "Form",
   "policyViewJSON": "Raw JSON",
   "policyDirty": "{{n}} unsaved",

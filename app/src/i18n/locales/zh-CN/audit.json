@@ -101,6 +101,7 @@
   "policyDeleteConfirm": "确定删除 {{agent}} 的 override 文件?将回退到全局策略。",
   "policySaved": "已保存",
   "policyErrorJSON": "JSON 语法错",
+  "policyUnsaved": "未保存",
   "policyViewForm": "表单",
   "policyViewJSON": "Raw JSON",
   "policyDirty": "{{n}} 项未保存",

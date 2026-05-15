@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu, ShieldCheck, RefreshCw, ChevronRight, Filter, SlidersHorizontal, Save, RotateCcw, Trash2, AlertCircle, FileCode2, FormInput } from 'lucide-react';
-import { PolicyForm, type Policy as PolicyT, type AgentOverride as AgentOverrideT, type FormScope } from './PolicyForm';
+import { PolicyForm, POLICY_SECTIONS, type Policy as PolicyT, type AgentOverride as AgentOverrideT, type FormScope } from './PolicyForm';
 import { Spinner } from '../ui/Spinner';
 import apiService from '../../services/api';
 import config from '../../config';
@@ -1031,106 +1031,174 @@ function PolicyEditor({ mode, agents = [], selectedAgent = '', onSelectAgent }: 
   // Map mode → FormScope expected by PolicyForm
   const formScope: FormScope = mode === 'global' ? 'global' : mode === 'agent' ? 'agent' : 'effective';
 
+  // Cmd/Ctrl+S to save (when dirty + not read-only)
+  useEffect(() => {
+    if (readOnly) return;
+    const handler = (e: KeyboardEvent) => {
+      const cmd = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's';
+      if (cmd && dirty && !loading) { e.preventDefault(); onSave(); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [dirty, loading, readOnly, onSave]);
+
+  // Auto-dismiss the "Saved" pill after 4s
+  useEffect(() => {
+    if (!info) return;
+    const h = setTimeout(() => setInfo(''), 4000);
+    return () => clearTimeout(h);
+  }, [info]);
+
+  // Anchor nav: filter sections that apply to this scope
+  const applicableSections = POLICY_SECTIONS.filter(s => !(s.globalOnly && (mode === 'agent')));
+
   return (
-    <div data-id="audit-policy-editor" className="flex flex-col gap-2 flex-1 min-h-0">
-      <div data-id="audit-policy-toolbar" className="flex items-center gap-2 p-2 rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] flex-wrap">
-        {(mode === 'agent' || mode === 'effective') && (
-          <>
-            <span className="text-xs text-[var(--vsc-text-secondary)]">{t('policyAgentSelect')}</span>
-            <select data-id="audit-policy-agent-select" value={selectedAgent} onChange={e => onSelectAgent?.(e.target.value)}
-              className="text-xs px-2 py-1 rounded bg-[var(--vsc-bg)] border border-[var(--vsc-border)] text-[var(--vsc-text)]">
-              <option value="">{t('policyAgentNone')}</option>
-              {agents.map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
-            <button data-id="audit-policy-reload" onClick={fetchIt} disabled={loading}
-              className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-[var(--vsc-bg-hover)] hover:bg-[var(--vsc-bg-active)] text-[var(--vsc-text)] transition-colors">
-              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-              {t('policyReload')}
+    <div data-id="audit-policy-editor" className="flex flex-col flex-1 min-h-0 relative">
+      {/* Sticky top toolbar */}
+      <div data-id="audit-policy-toolbar"
+        className="sticky top-0 z-20 -mx-1 px-1 pb-2 mb-2 bg-gradient-to-b from-[var(--vsc-bg)] via-[var(--vsc-bg)] to-transparent">
+        <div className="flex items-center gap-2 p-2 rounded-lg border border-zinc-800/80 bg-zinc-900/70 backdrop-blur-sm shadow-sm flex-wrap">
+          {(mode === 'agent' || mode === 'effective') && (
+            <>
+              <span className="text-[11px] text-zinc-400 font-medium pl-1">{t('policyAgentSelect')}</span>
+              <select data-id="audit-policy-agent-select" value={selectedAgent} onChange={e => onSelectAgent?.(e.target.value)}
+                className="text-xs px-2.5 py-1.5 rounded-md bg-zinc-900/80 border border-zinc-800 text-zinc-100 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500/40">
+                <option value="">{t('policyAgentNone')}</option>
+                {agents.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+              <button data-id="audit-policy-reload" onClick={fetchIt} disabled={loading}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-md border border-zinc-800 bg-zinc-900/80 text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100 transition-colors">
+                <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+                {t('policyReload')}
+              </button>
+              {readOnly && (
+                <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded bg-zinc-700/40 text-zinc-400 uppercase tracking-wider">
+                  {t('policyReadOnly')}
+                </span>
+              )}
+            </>
+          )}
+
+          {/* dirty indicator */}
+          {dirty && !readOnly && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full bg-blue-500/15 text-blue-200 border border-blue-500/30">
+              <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+              {t('policyUnsaved')}
+            </span>
+          )}
+          {info && !error && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
+              <Check size={10} />
+              {info}
+            </span>
+          )}
+
+          <div className="flex-1" />
+
+          {/* view mode toggle */}
+          <div data-id="audit-policy-view-toggle" className="inline-flex items-center gap-0.5 p-0.5 rounded-md border border-zinc-800 bg-zinc-900/80">
+            <button onClick={() => setViewMode('form')}
+              className={`flex items-center gap-1 px-2.5 py-1 text-[11px] rounded transition-colors ${viewMode === 'form' ? 'bg-blue-500/15 text-blue-200' : 'text-zinc-400 hover:text-zinc-100'}`}>
+              <FormInput size={11} /> {t('policyViewForm')}
             </button>
-            {readOnly && <span className="text-[10px] text-[var(--vsc-text-muted)]">{t('policyReadOnly')}</span>}
-          </>
-        )}
-        <div className="flex-1" />
-        <div data-id="audit-policy-view-toggle" className="flex items-center gap-0.5 p-0.5 rounded border border-[var(--vsc-border)] bg-[var(--vsc-bg)]">
-          <button onClick={() => setViewMode('form')}
-            className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded ${viewMode === 'form' ? 'bg-blue-500/15 text-blue-200' : 'text-[var(--vsc-text-secondary)] hover:bg-[var(--vsc-bg-hover)]'}`}>
-            <FormInput size={11} /> {t('policyViewForm')}
-          </button>
-          <button onClick={() => setViewMode('json')}
-            className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded ${viewMode === 'json' ? 'bg-blue-500/15 text-blue-200' : 'text-[var(--vsc-text-secondary)] hover:bg-[var(--vsc-bg-hover)]'}`}>
-            <FileCode2 size={11} /> {t('policyViewJSON')}
-          </button>
+            <button onClick={() => setViewMode('json')}
+              className={`flex items-center gap-1 px-2.5 py-1 text-[11px] rounded transition-colors ${viewMode === 'json' ? 'bg-blue-500/15 text-blue-200' : 'text-zinc-400 hover:text-zinc-100'}`}>
+              <FileCode2 size={11} /> {t('policyViewJSON')}
+            </button>
+          </div>
+
+          {/* primary actions */}
+          {!readOnly && (
+            <>
+              <button data-id="audit-policy-reset" disabled={!dirty || loading} onClick={() => setRaw(original)}
+                title="Discard changes"
+                className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-md border transition-colors ${dirty && !loading ? 'border-zinc-700 bg-zinc-900/80 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800' : 'border-zinc-800 bg-zinc-900/40 text-zinc-600 cursor-not-allowed'}`}>
+                <RotateCcw size={12} />
+                {t('policyReset')}
+              </button>
+              <button data-id="audit-policy-save" disabled={!dirty || loading} onClick={onSave}
+                title="Cmd/Ctrl+S"
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${dirty && !loading ? 'bg-blue-500/20 text-blue-100 border border-blue-500/40 hover:bg-blue-500/30' : 'bg-zinc-800/40 text-zinc-600 border border-zinc-800 cursor-not-allowed'}`}>
+                <Save size={12} />
+                {loading ? t('policySaving') : t('policySave')}
+              </button>
+              {mode === 'agent' && (
+                <button data-id="audit-policy-delete" onClick={onDelete} disabled={loading}
+                  title="Delete this agent's override file"
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-md border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors">
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </>
+          )}
         </div>
       </div>
 
-      {viewMode === 'form' ? (
-        <div className="flex-1 min-h-0 overflow-auto pr-1">
-          {rawValid ? (
-            <PolicyForm
-              scope={formScope}
-              policy={parsed}
-              readOnly={readOnly}
-              onChange={next => setRaw(JSON.stringify(next, null, 2))}
-            />
-          ) : (
-            <div className="flex items-center gap-2 p-3 rounded border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs">
-              <AlertCircle size={14} />
-              {t('policyErrorJSON')} — switch to Raw JSON tab to fix.
-            </div>
-          )}
-        </div>
-      ) : (
-        <textarea
-          data-id="audit-policy-textarea"
-          readOnly={readOnly}
-          value={raw}
-          onChange={e => { if (!readOnly) setRaw(e.target.value); }}
-          spellCheck={false}
-          className="flex-1 min-h-[240px] font-mono text-xs p-3 rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] text-[var(--vsc-text)] resize-none focus:outline-none focus:border-blue-500/40"
-        />
-      )}
-
       {error && (
-        <div data-id="audit-policy-error" className="flex items-start gap-2 p-2 rounded border border-red-500/30 bg-red-500/10 text-red-300 text-xs">
+        <div data-id="audit-policy-error" className="mb-3 flex items-start gap-2 p-2.5 rounded-md border border-red-500/30 bg-red-500/10 text-red-200 text-xs">
           <AlertCircle size={14} className="shrink-0 mt-0.5" />
-          <span className="font-mono">{error}</span>
-        </div>
-      )}
-      {info && !error && (
-        <div data-id="audit-policy-info" className="flex items-center gap-2 p-2 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs">
-          <Check size={14} />
-          <span className="font-mono">{info}</span>
+          <span className="font-mono break-all">{error}</span>
         </div>
       )}
 
-      {!readOnly && (
-        <div data-id="audit-policy-actions" className="flex items-center gap-2">
-          {mode === 'agent' && (
-            <button data-id="audit-policy-delete" onClick={onDelete} disabled={loading}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors">
-              <Trash2 size={12} />
-              {t('policyDelete')}
-            </button>
+      {/* Layout: anchor nav (xl screens) + content */}
+      <div className="flex-1 min-h-0 flex gap-4 overflow-hidden">
+        {viewMode === 'form' && rawValid && (
+          <nav data-id="audit-policy-anchor-nav"
+            className="hidden xl:flex flex-col gap-0.5 w-44 shrink-0 pt-0.5 pr-1 overflow-auto">
+            {applicableSections.map(s => {
+              const Icon = s.icon;
+              return (
+                <a key={s.id} href={`#audit-policy-section-${s.id}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    document.getElementById(`audit-policy-section-${s.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
+                  className="flex items-center gap-2 px-2.5 py-1.5 text-[11px] rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors">
+                  <Icon size={12} className="text-zinc-500" />
+                  <span>{t(s.labelKey)}</span>
+                </a>
+              );
+            })}
+            {policyHash && (
+              <div className="mt-3 pt-3 border-t border-zinc-800 px-2 text-[9px] text-zinc-600 font-mono break-all leading-relaxed">
+                <div className="text-zinc-500 mb-1">policy_hash</div>
+                {policyHash}
+              </div>
+            )}
+          </nav>
+        )}
+
+        <div className="flex-1 min-w-0 overflow-auto pb-12">
+          {viewMode === 'form' ? (
+            rawValid ? (
+              <PolicyForm
+                scope={formScope}
+                policy={parsed}
+                readOnly={readOnly}
+                onChange={next => setRaw(JSON.stringify(next, null, 2))}
+              />
+            ) : (
+              <div className="flex items-start gap-2 p-3 rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-200 text-xs">
+                <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-medium mb-1">{t('policyErrorJSON')}</div>
+                  <div className="text-amber-300/80">Switch to <strong>Raw JSON</strong> to fix the syntax, then return.</div>
+                </div>
+              </div>
+            )
+          ) : (
+            <textarea
+              data-id="audit-policy-textarea"
+              readOnly={readOnly}
+              value={raw}
+              onChange={e => { if (!readOnly) setRaw(e.target.value); }}
+              spellCheck={false}
+              className="w-full min-h-[400px] font-mono text-xs leading-relaxed p-4 rounded-md border border-zinc-800/80 bg-zinc-900/40 text-zinc-100 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500/40 shadow-sm"
+            />
           )}
-          <div className="flex-1" />
-          <button data-id="audit-policy-reset" disabled={!dirty || loading} onClick={() => setRaw(original)}
-            className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded border transition-colors ${dirty ? 'border-zinc-500/30 bg-zinc-500/10 text-zinc-300 hover:bg-zinc-500/20' : 'border-zinc-700 bg-zinc-800/30 text-zinc-600 cursor-default'}`}>
-            <RotateCcw size={12} />
-            {t('policyReset')}
-          </button>
-          <button data-id="audit-policy-save" disabled={!dirty || loading} onClick={onSave}
-            className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded border transition-colors ${dirty ? 'border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20' : 'border-zinc-700 bg-zinc-800/30 text-zinc-600 cursor-default'}`}>
-            <Save size={12} />
-            {loading ? t('policySaving') : t('policySave')}
-          </button>
         </div>
-      )}
-
-      {policyHash && (
-        <div className="text-[10px] text-[var(--vsc-text-muted)] font-mono">
-          policy_hash: {policyHash}
-        </div>
-      )}
+      </div>
     </div>
   );
 }

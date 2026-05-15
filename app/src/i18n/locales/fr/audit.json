@@ -101,6 +101,7 @@
   "policyDeleteConfirm": "Supprimer le fichier override pour {{agent}} ? Retour à la politique globale.",
   "policySaved": "Enregistré",
   "policyErrorJSON": "Erreur syntaxe JSON",
+  "policyUnsaved": "Non sauvegardé",
   "policyViewForm": "Formulaire",
   "policyViewJSON": "Raw JSON",
   "policyDirty": "{{n}} non sauvegardé",
