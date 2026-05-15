@@ -150,6 +150,22 @@ def build_minimal_runtime_global_json():
     return data
 
 
+def build_full_dev_global_json():
+    """Full host global.json for the dev container (--docker path).
+
+    Includes providers / cf / oauth / membership / etc. so the in-container
+    local AI gateway, IM, and skills have the same configuration as the host.
+    api_token is overridden with the local token so the dev container stays
+    addressable by the same token the host already prints.
+    """
+    source = load_global_json()
+    data = dict(source)
+    token = get_local_api_token()
+    if token:
+        data["api_token"] = token
+    return data
+
+
 def load_proxy_json():
     for path in (PROXY_JSON_PATH, LEGACY_PROXY_JSON_PATH):
         try:
@@ -254,9 +270,9 @@ def build_dev_runtime_home(container_name, home_dir=""):
     os.makedirs(runtime_root_dir, exist_ok=True)
     global_json_path = os.path.join(runtime_root_dir, "global.json")
     with open(global_json_path, "w", encoding="utf-8") as f:
-        json.dump(build_minimal_runtime_global_json(), f, ensure_ascii=False, indent=2)
+        json.dump(build_full_dev_global_json(), f, ensure_ascii=False, indent=2)
         f.write("\n")
-    os.chmod(global_json_path, 0o644)
+    os.chmod(global_json_path, 0o600)
     proxy_json_path = os.path.join(runtime_root_dir, "proxy.json")
     runtime_proxy_json = build_runtime_proxy_json()
     if runtime_proxy_json:
