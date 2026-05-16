@@ -593,11 +593,27 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
         {/* Header */}
         <div className="px-5 pt-5 pb-3 border-b border-white/[0.06] shrink-0" data-id="skill-detail-header">
           <div data-id="skill-marketplace-panel-auto-20" className="flex items-start gap-3">
-            {skill ? <SkillAvatar skill={skill} size="lg" /> : <div className="w-14 h-14 rounded-xl bg-white/5" />}
+            {skill ? <SkillAvatar skill={skill} size="lg" /> : <div className="w-14 h-14 rounded-xl bg-white/[0.07] animate-pulse shrink-0" />}
             <div data-id="skill-marketplace-panel-auto-21" className="flex-1 min-w-0">
+              {loading && !skill ? (
+                <div className="space-y-2 pt-0.5">
+                  <div className="h-4 w-36 rounded-md bg-white/[0.08] animate-pulse" />
+                  <div className="h-3 w-24 rounded-md bg-white/[0.05] animate-pulse" />
+                  <div className="flex gap-1.5 mt-1.5">
+                    <div className="h-4 w-14 rounded bg-white/[0.05] animate-pulse" />
+                    <div className="h-4 w-10 rounded bg-white/[0.05] animate-pulse" />
+                  </div>
+                  <div className="h-3 w-full rounded-md bg-white/[0.05] animate-pulse mt-1" />
+                  <div className="h-3 w-4/5 rounded-md bg-white/[0.05] animate-pulse" />
+                  <div className="flex gap-2 mt-2">
+                    <div className="h-6 w-20 rounded bg-white/[0.05] animate-pulse" />
+                  </div>
+                </div>
+              ) : (
+                <>
               <div data-id="skill-marketplace-panel-auto-22" className="flex items-center gap-2">
                 <div className="text-base font-semibold text-zinc-100" data-id="skill-detail-title">
-                  {skill?.title || (loading ? '…' : name)}
+                  {skill?.title || name}
                 </div>
                 {skill && <StatusPill skill={skill} />}
               </div>
@@ -611,6 +627,8 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
                 </div>
               )}
               {skill && <div className="mt-2 text-xs text-zinc-300 leading-relaxed">{skill.description}</div>}
+                </>
+              )}
               {skill && (
                 <div data-id="skill-marketplace-panel-auto-24" className="mt-3 flex items-center gap-2 flex-wrap">
                   {skill.status.installed ? (
@@ -727,7 +745,20 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4" data-id="skill-detail-body">
           {loading ? (
-            <div data-id="skill-marketplace-panel-auto-25" className="text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> {t('marketplaceModalLoading')}</div>
+            <div data-id="skill-detail-body-skeleton" className="space-y-2.5 py-1 animate-pulse">
+              {[100, 88, 94, 72, 85, 60].map((w, i) => (
+                <div key={i} className="h-3 rounded-md bg-white/[0.06]" style={{ width: `${w}%` }} />
+              ))}
+              <div className="h-5" />
+              <div className="h-3 w-1/3 rounded-md bg-white/[0.08]" />
+              {[82, 68, 90, 55].map((w, i) => (
+                <div key={`b${i}`} className="h-3 rounded-md bg-white/[0.06]" style={{ width: `${w}%` }} />
+              ))}
+              <div className="h-5" />
+              {[76, 88].map((w, i) => (
+                <div key={`c${i}`} className="h-3 rounded-md bg-white/[0.06]" style={{ width: `${w}%` }} />
+              ))}
+            </div>
           ) : !skill ? (
             <div data-id="skill-marketplace-panel-auto-26" className="text-xs text-zinc-500">{t('marketplaceNoData')}</div>
           ) : tab === 'help' ? (
@@ -739,7 +770,12 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
 
         {/* Send to agent — only enabled when skill is installed */}
         <div className="px-5 py-3 border-t border-white/[0.08] bg-[#101012] shrink-0" data-id="skill-detail-send">
-          {!skill?.status.installed ? (
+          {loading ? (
+            <div className="flex items-end gap-2 animate-pulse">
+              <div className="flex-1 h-[52px] rounded-lg bg-white/[0.05]" />
+              <div className="h-[38px] w-24 rounded-lg bg-white/[0.05]" />
+            </div>
+          ) : !skill?.status.installed ? (
             <div data-id="skill-marketplace-panel-auto-27" className="flex items-center gap-2 text-[11px] text-zinc-500">
               <AlertTriangle className="w-3 h-3" />
               {t('marketplaceInstallFirst')}

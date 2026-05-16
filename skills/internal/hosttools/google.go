@@ -63,7 +63,6 @@ func loadGoogleCreds() (googleCreds, error) {
 
 	dbCfg := read(filepath.Join(home, "cicy-ai", "db", "google.json"))
 	sharedClient := read(filepath.Join(home, "cicy-ai", "db", "google_oauth_client.json"))
-	globalJSON := read(filepath.Join(home, "cicy-ai", "global.json"))
 
 	// google_oauth_client.json may be the flat {client_id,client_secret} form
 	// or the nested {"web":{...}} / {"installed":{...}} form from Google Console.
@@ -94,22 +93,14 @@ func loadGoogleCreds() (googleCreds, error) {
 
 	creds := googleCreds{
 		ClientID: pick(
-			func() string { return mapStr(dbCfg, "client_id") },
 			func() string { return mapStr(sharedClient, "client_id") },
-			func() string { return os.Getenv("CICY_GOOGLE_OAUTH_CLIENT_ID") },
-			func() string { return mapStr(globalJSON, "GMAIL_CLIENT_ID") },
-			func() string { return mapStr(globalJSON, "GMAIL_WEB_CLIENT_ID") },
+			func() string { return mapStr(dbCfg, "client_id") },
 		),
 		ClientSecret: pick(
-			func() string { return mapStr(dbCfg, "client_secret") },
 			func() string { return mapStr(sharedClient, "client_secret") },
-			func() string { return os.Getenv("CICY_GOOGLE_OAUTH_CLIENT_SECRET") },
-			func() string { return mapStr(globalJSON, "GMAIL_CLIENT_SECRET") },
-			func() string { return mapStr(globalJSON, "GMAIL_WEB_CLIENT_SECRET") },
 		),
 		RefreshToken: pick(
 			func() string { return mapStr(dbCfg, "refresh_token") },
-			func() string { return mapStr(globalJSON, "GMAIL_REFRESH_TOKEN") },
 		),
 	}
 	if creds.ClientID == "" || creds.ClientSecret == "" || creds.RefreshToken == "" {
