@@ -1405,7 +1405,7 @@ name: cicy-ssh
 description: Use OpenSSH on this host. Trigger when the task mentions ssh, ~/.ssh/config, ssh config hosts, ssh aliases, remote login, jump hosts, or adding/listing/using SSH nodes from local config.
 ---
 
-# cicy-ssh
+# CiCy SSH
 
 This skill is for SSH access and local SSH config management on this host.
 
@@ -1853,7 +1853,7 @@ Token rules:
 }
 
 func renderSSHHelp() string {
-	return `# cicy-ssh Help
+	return `# CiCy SSH Help
 
 ## Primary Files
 
@@ -2508,11 +2508,13 @@ func renderTMCommands() string {
 }
 
 func renderSSHCommands() string {
-	return `# cicy-ssh Commands
+	return `# CiCy SSH Commands
 
 | Command | What it does |
 |---------|--------------|
-| ` + "`grep -E '^Host ' ~/.ssh/config`" + ` | List every Host alias configured |
+| ` + "`ssh-list list`" + ` | List all Host entries from ~/.ssh/config with HostName, user, port |
+| ` + "`ssh-list list --short`" + ` | Print alias names only (one per line) |
+| ` + "`grep -E '^Host ' ~/.ssh/config`" + ` | Raw list of every Host alias configured |
 | ` + "`awk '/^Host /{h=$2}/HostName/{print h\" -> \"$2}' ~/.ssh/config`" + ` | Show alias → HostName mapping |
 | ` + "`ssh -G <alias>`" + ` | Print the effective config for an alias (resolved) |
 | ` + "`ssh <alias>`" + ` | Open an interactive session to a host |

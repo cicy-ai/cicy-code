@@ -195,7 +195,7 @@ func marketSkillsCatalog() []marketSkill {
 		{Name: "agent-webpage", Title: "Agent Webpage", Description: "Talk to the live webpage client for an agent.", Version: "1.0.0", Category: "ai", Icon: "globe", BinaryAliases: []string{"agent-webpage"}},
 		{Name: "agent-code-server", Title: "Code Server", Description: "Open files in the page-bound code-server.", Version: "1.0.0", Category: "ai", Icon: "code", BinaryAliases: []string{"agent-code-server"}},
 		{Name: "cicy-agent", Title: "CiCy Agent", Description: "Operate tmux panes and windows on this host.", Version: "1.0.0", Category: "dev", Icon: "terminal", BinaryAliases: []string{"cicy-agent"}},
-		{Name: "cicy-ssh", Title: "cicy-ssh", Description: "Manage SSH hosts via ~/.ssh/config.", Version: "1.0.0", Category: "ops", Icon: "key", BinaryAliases: []string{}},
+		{Name: "cicy-ssh", Title: "CiCy SSH", Description: "Manage SSH hosts via ~/.ssh/config. Use ssh-list to enumerate configured hosts.", Version: "1.1.0", Category: "ops", Icon: "key", BinaryAliases: []string{"ssh-list"}},
 		{Name: "globalApiToken", Title: "Global API Token", Description: "Show or refresh ~/cicy-ai/global.json api_token.", Version: "1.0.0", Category: "ops", Icon: "shield", BinaryAliases: []string{"globalApiToken"}, ConfigFile: "~/cicy-ai/global.json"},
 		{Name: "us-spot-proxy", Title: "US Spot Proxy", Description: "Manage Aliyun spot proxy nodes.", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"us-spot-proxy"}, ConfigFile: "~/cicy-ai/db/us-spot-proxy.json"},
 		{Name: "aliyun-cli", Title: "Aliyun CLI", Description: "Bootstrap the official Aliyun CLI on this host. `aliyun-cli` installs the binary and applies a JSON config; after that, use the native `aliyun` command directly for ECS / VPC / RAM / OSS / etc.", Version: "1.0.0", Category: "infra", Icon: "cloud", Tags: []string{"aliyun", "ecs", "cli"}, BinaryAliases: []string{"aliyun-cli"}},
@@ -546,6 +546,7 @@ var hosttoolAliasSet = map[string]struct{}{
 	"google":   {}, // pure-Go google skill (was Node provider; migrated)
 	"gpt":      {}, "gpt-chat": {}, "frp-client": {}, "frp-server": {}, "cicy-mihomo": {},
 	"mysql-exec": {}, "tg": {}, "cicy-agent": {}, "todo": {}, "aliyun-cli": {}, "email": {},
+	"ssh-list": {},
 }
 
 // resolveSymlinkSource maps an alias name to the file it should symlink to
