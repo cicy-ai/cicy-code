@@ -365,24 +365,32 @@ def ensure_vswitch(vpc_id):
 
 def ensure_sg(vpc_id):
     existing = find_sg(vpc_id)
-    if existing:
-        return existing["SecurityGroupId"]
-    sg = run_aliyun(["ecs", "CreateSecurityGroup", "--region", REGION,
-                     "--SecurityGroupName", SG_NAME, "--VpcId", vpc_id])
-    sg_id = sg["SecurityGroupId"]
+    sg_id = existing["SecurityGroupId"] if existing else None
+    if not sg_id:
+        sg = run_aliyun(["ecs", "CreateSecurityGroup", "--region", REGION,
+                         "--SecurityGroupName", SG_NAME, "--VpcId", vpc_id])
+        sg_id = sg["SecurityGroupId"]
+    existing_rules = set()
+    try:
+        attr = run_aliyun(["ecs", "DescribeSecurityGroupAttribute", "--region", REGION,
+                           "--SecurityGroupId", sg_id])
+        for p in attr.get("Permissions", {}).get("Permission", []):
+            existing_rules.add(p["PortRange"])
+    except Exception:
+        pass
     rules = [
         ("22/22", "SSH host"),
         (f"{SSH_PORT_CONTAINER}/{SSH_PORT_CONTAINER}", "SSH container"),
         ("8008/8008", "cicy-code API"),
     ]
     for port, desc in rules:
-        try:
-            run_aliyun(["ecs", "AuthorizeSecurityGroup", "--region", REGION,
-                        "--SecurityGroupId", sg_id, "--IpProtocol", "tcp",
-                        "--PortRange", port, "--SourceCidrIp", "0.0.0.0/0",
-                        "--Description", desc])
-        except Exception:
-            pass
+        if port in existing_rules:
+            continue
+        print(f"  add SG rule: {port} ({desc})")
+        run_aliyun(["ecs", "AuthorizeSecurityGroup", "--region", REGION,
+                    "--SecurityGroupId", sg_id, "--IpProtocol", "tcp",
+                    "--PortRange", port, "--SourceCidrIp", "0.0.0.0/0",
+                    "--Description", desc])
     return sg_id
 
 
