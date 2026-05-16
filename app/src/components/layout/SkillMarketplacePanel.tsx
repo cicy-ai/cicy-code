@@ -13,6 +13,7 @@ import apiService from '../../services/api';
 import { useDialogs } from '../ui/Modal';
 import { ProxyManagerDialog } from './ProxyManagerDialog';
 import { ProxySshManagerDialog } from './ProxySshManagerDialog';
+import { FrpServerManagerDialog } from './FrpServerManagerDialog';
 
 // Prompt sent to the active agent when the user clicks "Authorize Google" in
 // the skill detail. The agent uses the `google` skill's `login` tool to drive
@@ -97,6 +98,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [proxyManagerOpen, setProxyManagerOpen] = useState(false);
   const [proxySshManagerOpen, setProxySshManagerOpen] = useState(false);
+  const [frpServerManagerOpen, setFrpServerManagerOpen] = useState(false);
   // Stable refs for props passed to <SkillDetailModal>. Without these, every
   // parent re-render (e.g. the 5s WS poll cycle) emits new closures, which
   // propagates through sendToAgent → MarkdownPane.components → react-markdown
@@ -105,6 +107,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
   const handleDetailClose = useCallback(() => setSelectedName(null), []);
   const handleOpenProxyManager = useCallback(() => { setSelectedName(null); setProxyManagerOpen(true); }, []);
   const handleOpenProxySshManager = useCallback(() => { setSelectedName(null); setProxySshManagerOpen(true); }, []);
+  const handleOpenFrpServerManager = useCallback(() => { setSelectedName(null); setFrpServerManagerOpen(true); }, []);
 
   const load = async () => {
     setLoading(true);
@@ -257,10 +260,12 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
           }}
           onOpenProxyManager={handleOpenProxyManager}
           onOpenProxySshManager={handleOpenProxySshManager}
+          onOpenFrpServerManager={handleOpenFrpServerManager}
         />
       )}
       <ProxyManagerDialog open={proxyManagerOpen} onClose={() => setProxyManagerOpen(false)} paneId={paneId} />
       <ProxySshManagerDialog open={proxySshManagerOpen} onClose={() => setProxySshManagerOpen(false)} />
+      <FrpServerManagerDialog open={frpServerManagerOpen} onClose={() => setFrpServerManagerOpen(false)} />
     </>
   );
 }
@@ -372,7 +377,7 @@ function InlineStatus({ skill }: { skill: MarketSkill }) {
 
 type Tab = 'help' | 'tools';
 
-function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpenProxyManager, onOpenProxySshManager }: {
+function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpenProxyManager, onOpenProxySshManager, onOpenFrpServerManager }: {
   name: string;
   paneId: string;
   onClose: () => void;
@@ -380,6 +385,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
   onUninstall: () => Promise<void>;
   onOpenProxyManager: () => void;
   onOpenProxySshManager: () => void;
+  onOpenFrpServerManager: () => void;
 }) {
   const { t } = useTranslation('workspace');
   const [data, setData] = useState<SkillDetailPayload | null>(null);
@@ -649,6 +655,11 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
                         <button data-id="skill-detail-manage-proxy-ssh" onClick={onOpenProxySshManager} className="text-[12px] px-3 py-1.5 rounded bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 transition-colors inline-flex items-center gap-1">
                           <Shield className="w-3 h-3" />
                           {t('marketplaceManageProxySsh')}
+                        </button>
+                      ) : skill.name === 'frp-server' ? (
+                        <button data-id="skill-detail-manage-frp-server" onClick={onOpenFrpServerManager} className="text-[12px] px-3 py-1.5 rounded bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 transition-colors inline-flex items-center gap-1">
+                          <Server className="w-3 h-3" />
+                          {t('frpServerManagerTitle')}
                         </button>
                       ) : skill.name === 'skill-author' ? null : (
                         <button data-id="skill-detail-uninstall" onClick={handleUninstall} disabled={busy} className="text-[12px] px-3 py-1.5 rounded text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors">
