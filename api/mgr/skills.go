@@ -204,6 +204,7 @@ func marketSkillsCatalog() []marketSkill {
 		{Name: "proxy_ssh", Title: "SSH SOCKS Proxy", Description: "Manage local autossh-based SOCKS proxy profiles (start/stop/restart/test).", Version: "1.0.0", Category: "network", Icon: "plug", BinaryAliases: []string{"proxy_ssh"}, ConfigFile: "~/cicy-ai/db/proxy_ssh.json"},
 		{Name: "us-spot-dev", Title: "US Spot Dev", Description: "Provision a US Aliyun spot dev container on a persistent ESSD disk.", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"us-spot-dev"}},
 		{Name: "hk-spot-dev", Title: "HK Spot Dev", Description: "Provision an HK Aliyun spot dev container (companion to us-spot-dev).", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"hk-spot-dev"}},
+		{Name: "skill-author", Title: "Skill Author", Description: "Author and publish custom Claude/Codex/OpenCode skills under ~/cicy-ai/skills/. Auto-installed; cannot be uninstalled.", Version: "1.0.0", Category: "dev", Icon: "package", Tags: []string{"meta", "scaffold", "author"}, BinaryAliases: []string{"skill-author"}},
 	}
 }
 
