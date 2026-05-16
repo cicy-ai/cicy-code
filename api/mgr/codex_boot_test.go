@@ -103,6 +103,7 @@ func TestAgentBootLinesCodexNormalization(t *testing.T) {
 }
 
 func TestAgentBootLinesCodexUsesCodexDefaultProviderModel(t *testing.T) {
+	withTestStore(t)
 	withTempCicyRoot(t)
 	body := `{
 	  "ai": {
