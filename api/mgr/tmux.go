@@ -4197,6 +4197,14 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		if raw, ok := req["submit"].(bool); ok {
 			submit = raw
 		}
+		// Register the cross-agent callback BEFORE sending the text. The receiver
+		// CLI can react fast enough to start a gateway audit session within the
+		// same wall-clock second the text lands; if registration happened after
+		// the send, that audit session's drain would find an empty pending list
+		// and the hook would never attach.
+		if cbTo, ok := req["callback_to"].(string); ok && strings.TrimSpace(cbTo) != "" {
+			registerReplyCallback(winID, cbTo)
+		}
 		if err := sendTextToPane(winID, text, submit); err != nil {
 			if sendErr, ok := err.(*tmuxSendError); ok {
 				w.Header().Set("Content-Type", "application/json")

@@ -582,11 +582,54 @@ func (e *Env) runTM(args []string) error {
 			return errors.New("Usage: cicy-agent capture <pane>")
 		}
 		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/capture_pane", map[string]any{"pane_id": rest[1]})
-	case "msg":
-		if len(rest) < 3 {
-			return errors.New("Usage: cicy-agent msg <pane> <text>")
+	case "reply", "get_last_reply":
+		// Usage: cicy-agent reply <pane> [--full]
+		// Returns the receiver's most recent gateway reply as structured text.
+		// Without --full: only thinking + final answer text.
+		// With --full: also include tool_use entries (name + JSON input) inline.
+		args := rest[1:]
+		full := false
+		filtered := make([]string, 0, len(args))
+		for _, a := range args {
+			if a == "--full" || a == "-f" {
+				full = true
+				continue
+			}
+			filtered = append(filtered, a)
 		}
-		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send", map[string]any{"pane_id": rest[1], "text": strings.Join(rest[2:], " ")})
+		if len(filtered) < 1 {
+			return errors.New("Usage: cicy-agent reply <pane> [--full]")
+		}
+		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/reply_text", map[string]any{"pane_id": filtered[0], "full": full})
+	case "msg":
+		// Usage: cicy-agent msg <pane> <text> [--callback]
+		// When --callback is set, the sender pane is resolved from the
+		// X_AGENT_SHORT_ID env var (each pane sets this in its boot script)
+		// and passed to the server as callback_to. The server then notifies
+		// this pane once the recipient's next reply turn completes:
+		// "[<recipient>] work done" or "[<recipient>] failed".
+		args := rest[1:]
+		callback := false
+		filtered := make([]string, 0, len(args))
+		for _, a := range args {
+			if a == "--callback" || a == "-c" {
+				callback = true
+				continue
+			}
+			filtered = append(filtered, a)
+		}
+		if len(filtered) < 2 {
+			return errors.New("Usage: cicy-agent msg <pane> <text> [--callback]")
+		}
+		payload := map[string]any{"pane_id": filtered[0], "text": strings.Join(filtered[1:], " ")}
+		if callback {
+			senderID := strings.TrimSpace(os.Getenv("X_AGENT_SHORT_ID"))
+			if senderID == "" {
+				return errors.New("--callback requires X_AGENT_SHORT_ID env var (only set inside cicy panes)")
+			}
+			payload["callback_to"] = senderID
+		}
+		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send", payload)
 	case "msg_wait":
 		if len(rest) < 3 {
 			return errors.New("Usage: cicy-agent msg_wait <pane> <text> [timeout]")
@@ -1278,7 +1321,8 @@ Commands:
   tree                                  Tmux tree
   windows                               Window list
   capture <pane>                        Capture pane output
-  msg <pane> <text>                     Send message with Enter
+  reply <pane> [--full]                 Read last gateway reply as structured text (--full includes tool_use)
+  msg <pane> <text> [--callback]        Send message with Enter (--callback: notify $X_AGENT_SHORT_ID when receiver completes)
   msg_wait <pane> <text> [timeout]
   send-keys <pane> <keys>               Send raw keys
   create <name>                         Create pane

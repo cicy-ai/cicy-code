@@ -37,6 +37,9 @@ type imReplyPushHook struct {
 
 func newReplyHooksForPane(agentID string) []aiGatewayReplyHook {
 	var hooks []aiGatewayReplyHook
+	// Pending cross-agent reply callbacks queued via cicy-agent msg --callback.
+	// Drained at turn start so only this turn's finalize triggers them.
+	hooks = append(hooks, drainCallbackHooksForPane(agentID)...)
 	if h := newTGReplyPushHook(agentID); h != nil {
 		hooks = append(hooks, h)
 	}

@@ -90,9 +90,37 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 			}
 			return r
 		}
+		// First pass: collect every call_id that already has a function_call_output
+		// later in the conversation. DeepSeek (and any strict OpenAI-compatible
+		// upstream) rejects a request whose history contains an assistant message
+		// with tool_calls but no matching tool message — codex sometimes records
+		// a function_call without a function_call_output (e.g. the model called a
+		// tool that doesn't exist in codex's local registry). For each orphan we
+		// synthesize a tool-result with an error stub so the conversation
+		// validates without losing the assistant's intent.
+		fulfilledCallIDs := map[string]bool{}
 		for _, raw := range inputs {
 			m, ok := raw.(map[string]interface{})
 			if !ok {
+				continue
+			}
+			if t, _ := m["type"].(string); t == "function_call_output" {
+				if id, _ := m["call_id"].(string); id != "" {
+					fulfilledCallIDs[id] = true
+				}
+			}
+		}
+		// Use indexed iteration so we can peek at consecutive items. DeepSeek
+		// requires that an assistant message with tool_calls be followed
+		// immediately by tool messages for each call_id — so consecutive
+		// `function_call` items (from a single assistant turn in codex) must
+		// merge into ONE assistant message with multiple tool_calls, then the
+		// matching tool messages follow as a contiguous block.
+		i := 0
+		for i < len(inputs) {
+			m, ok := inputs[i].(map[string]interface{})
+			if !ok {
+				i++
 				continue
 			}
 			typ, _ := m["type"].(string)
@@ -102,9 +130,11 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 			switch typ {
 			case "reasoning":
 				pendingReasoning = extractReasoningSummary(m)
+				i++
 			case "message":
 				role, _ := m["role"].(string)
 				if role == "" {
+					i++
 					continue
 				}
 				// DeepSeek only accepts system/user/assistant/tool — map
@@ -115,6 +145,7 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 				}
 				text := extractTextFromResponsesContent(m["content"])
 				if text == "" {
+					i++
 					continue
 				}
 				msg := map[string]interface{}{
@@ -125,33 +156,81 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 					msg["reasoning_content"] = consumePendingReasoning()
 				}
 				messages = append(messages, msg)
+				i++
 			case "function_call":
-				callID, _ := m["call_id"].(string)
-				name, _ := m["name"].(string)
-				args, _ := m["arguments"].(string)
+				// Greedily consume every consecutive function_call into ONE
+				// assistant message — codex emits them as separate input items
+				// but they were a single assistant turn.
+				toolCalls := []map[string]interface{}{}
+				j := i
+				for j < len(inputs) {
+					mj, ok := inputs[j].(map[string]interface{})
+					if !ok {
+						break
+					}
+					if t, _ := mj["type"].(string); t != "function_call" {
+						break
+					}
+					callID, _ := mj["call_id"].(string)
+					name, _ := mj["name"].(string)
+					args, _ := mj["arguments"].(string)
+					toolCalls = append(toolCalls, map[string]interface{}{
+						"id":   callID,
+						"type": "function",
+						"function": map[string]interface{}{
+							"name":      name,
+							"arguments": args,
+						},
+					})
+					j++
+				}
 				messages = append(messages, map[string]interface{}{
 					"role":              "assistant",
 					"content":           nil,
 					"reasoning_content": consumePendingReasoning(),
-					"tool_calls": []map[string]interface{}{
-						{
-							"id":   callID,
-							"type": "function",
-							"function": map[string]interface{}{
-								"name":      name,
-								"arguments": args,
-							},
-						},
-					},
+					"tool_calls":        toolCalls,
 				})
+				// For each tool_call in this assistant message, ensure a
+				// corresponding tool message follows. We emit them now in
+				// the same order as the tool_calls. If a function_call_output
+				// for the call_id is found later in the input, use its content;
+				// otherwise insert a synthetic stub so the assistant.tool_calls
+				// → tool_messages pair is balanced (DeepSeek rejects orphans).
+				for _, tc := range toolCalls {
+					callID, _ := tc["id"].(string)
+					content := ""
+					// scan ahead in inputs for matching function_call_output
+					for k := j; k < len(inputs); k++ {
+						mk, ok := inputs[k].(map[string]interface{})
+						if !ok {
+							continue
+						}
+						if t, _ := mk["type"].(string); t != "function_call_output" {
+							continue
+						}
+						if id, _ := mk["call_id"].(string); id == callID {
+							content, _ = mk["output"].(string)
+							break
+						}
+					}
+					if content == "" && callID != "" && !fulfilledCallIDs[callID] {
+						content = "Tool call discarded by client — no result produced (e.g. tool not available in local registry)."
+					}
+					messages = append(messages, map[string]interface{}{
+						"role":         "tool",
+						"tool_call_id": callID,
+						"content":      content,
+					})
+				}
+				i = j
 			case "function_call_output":
-				callID, _ := m["call_id"].(string)
-				output, _ := m["output"].(string)
-				messages = append(messages, map[string]interface{}{
-					"role":         "tool",
-					"tool_call_id": callID,
-					"content":      output,
-				})
+				// Already emitted inline with its assistant.tool_calls block
+				// above. Skip — emitting again here would duplicate tool
+				// messages and DeepSeek would reject "unknown tool_call_id"
+				// on the second one.
+				i++
+			default:
+				i++
 			}
 		}
 	}
@@ -171,14 +250,22 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 				// Skip non-function tool types — DeepSeek can't execute them.
 				continue
 			}
+			// Tolerate both Responses-API flat format `{type,name,description,parameters}`
+			// and chat-completions nested format `{type,function:{name,description,parameters}}`.
+			// Gateway tool injection (injectCicyToolDefs) emits the nested shape and may run
+			// before this transform.
+			src := tm
+			if nested, ok := tm["function"].(map[string]interface{}); ok {
+				src = nested
+			}
 			fn := map[string]interface{}{}
-			if name, ok := tm["name"]; ok {
+			if name, ok := src["name"]; ok {
 				fn["name"] = name
 			}
-			if desc, ok := tm["description"]; ok {
+			if desc, ok := src["description"]; ok {
 				fn["description"] = desc
 			}
-			fn["parameters"] = sanitizeFunctionParameters(tm["parameters"])
+			fn["parameters"] = sanitizeFunctionParameters(src["parameters"])
 			tools = append(tools, map[string]interface{}{
 				"type":     "function",
 				"function": fn,
@@ -773,12 +860,27 @@ var _ = url.Parse
 // Anthropic Messages ↔ ChatCompletions adaptation (for claude → DeepSeek)
 // =============================================================================
 
-// shouldAdaptDeepSeekForAnthropic returns true when the upstream is DeepSeek and
-// the client is calling the Anthropic Messages API (claude). DeepSeek only
-// speaks Chat Completions, so we translate both request and streaming response.
-func shouldAdaptDeepSeekForAnthropic(upstreamHost, suffix string) bool {
-	return strings.Contains(strings.ToLower(upstreamHost), "deepseek") &&
-		strings.Contains(strings.ToLower(suffix), "/messages")
+// shouldAdaptDeepSeekForAnthropic returns true when the gateway must translate
+// an incoming Anthropic Messages request into Chat Completions for the upstream.
+// We do this for hosts that only speak Chat Completions natively (vanilla
+// api.deepseek.com). DeepSeek also exposes a dedicated Anthropic-compatible
+// endpoint at `https://api.deepseek.com/anthropic/v1/messages`; when the
+// configured provider URL already points at that path prefix we MUST pass the
+// request through as-is — translating it would rewrite the suffix to
+// `/anthropic/v1/chat/completions`, which DeepSeek does NOT serve (404).
+func shouldAdaptDeepSeekForAnthropic(upstreamHost, basePath, suffix string) bool {
+	if !strings.Contains(strings.ToLower(upstreamHost), "deepseek") {
+		return false
+	}
+	if !strings.Contains(strings.ToLower(suffix), "/messages") {
+		return false
+	}
+	// If upstream base path already includes /anthropic, this is DeepSeek's
+	// native Messages endpoint — pass through, no translation.
+	if strings.Contains(strings.ToLower(basePath), "/anthropic") {
+		return false
+	}
+	return true
 }
 
 func rewriteSuffixForDeepSeekChatCompletionsFromMessages(suffix string) string {

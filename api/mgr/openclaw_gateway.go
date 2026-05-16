@@ -560,7 +560,7 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 
 	// DeepSeek + claude (Anthropic Messages API) adaptation: same shape — DeepSeek
 	// only speaks Chat Completions, so translate request + wrap SSE both ways.
-	if shouldAdaptDeepSeekForAnthropic(targetBase.Host, suffix) {
+	if shouldAdaptDeepSeekForAnthropic(targetBase.Host, targetBase.Path, suffix) {
 		if newBody, _, err := transformMessagesRequestToChatCompletions(requestBody); err == nil {
 			requestBody = newBody
 			suffix = rewriteSuffixForDeepSeekChatCompletionsFromMessages(suffix)
