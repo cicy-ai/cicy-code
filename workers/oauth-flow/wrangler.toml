@@ -1,0 +1,16 @@
+name = "oauth-flow"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# Custom domain — bind oauth-flow.cicy-ai.com to this Worker.
+# DNS for oauth-flow.cicy-ai.com is managed automatically by Workers Custom Domains.
+routes = [
+  { pattern = "oauth-flow.cicy-ai.com", custom_domain = true }
+]
+
+# KV namespace for short-lived (TTL 10min) OAuth codes.
+# Create with: wrangler kv namespace create OAUTH_CODES
+# Then paste the returned id here.
+[[kv_namespaces]]
+binding = "OAUTH_CODES"
+id = "2350c9d627004d5983b28576f63598f7"

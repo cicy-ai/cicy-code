@@ -65,6 +65,17 @@ func loadGoogleCreds() (googleCreds, error) {
 	sharedClient := read(filepath.Join(home, "cicy-ai", "db", "google_oauth_client.json"))
 	globalJSON := read(filepath.Join(home, "cicy-ai", "global.json"))
 
+	// google_oauth_client.json may be the flat {client_id,client_secret} form
+	// or the nested {"web":{...}} / {"installed":{...}} form from Google Console.
+	// Flatten so the picker below can find client_id/client_secret either way.
+	if sharedClient != nil {
+		if inner, ok := sharedClient["web"].(map[string]any); ok {
+			sharedClient = inner
+		} else if inner, ok := sharedClient["installed"].(map[string]any); ok {
+			sharedClient = inner
+		}
+	}
+
 	pick := func(keys ...func() string) string {
 		for _, fn := range keys {
 			if v := strings.TrimSpace(fn()); v != "" {
@@ -203,6 +214,8 @@ func (e *Env) runGoogle(args []string) error {
 		return e.runGoogleCalendar(ctx, cmd, rest)
 	case "login", "status":
 		return e.runGoogleLogin(ctx, service)
+	case "setup", "config":
+		return e.runGoogleSetup()
 	default:
 		printGoogleUsage(e.Stdout)
 		return nil
@@ -218,17 +231,18 @@ func isHelpArg(v string) bool {
 }
 
 func printGoogleUsage(w io.Writer) {
-	fmt.Fprintln(w, "Available services:")
-	fmt.Fprintln(w, "  login      - Authorize this server with Google (OAuth device flow)")
+	fmt.Fprintln(w, "Available commands:")
+	fmt.Fprintln(w, "  setup      - First-time setup: how to create OAuth credentials")
+	fmt.Fprintln(w, "  login      - Authorize this server with your Google account")
 	fmt.Fprintln(w, "  status     - Show current authorization status")
 	fmt.Fprintln(w, "  gmail      - Email management")
 	fmt.Fprintln(w, "  sheets     - Spreadsheet operations")
 	fmt.Fprintln(w, "  drive      - File storage")
 	fmt.Fprintln(w, "  calendar   - Calendar events")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Usage: google <service> <command> [args]")
-	fmt.Fprintln(w, "       google <service> help")
-	fmt.Fprintln(w, "       google help [service]")
+	fmt.Fprintln(w, "Usage: google <command> [args]")
+	fmt.Fprintln(w, "       google <command> help")
+	fmt.Fprintln(w, "First time? Run: google setup")
 }
 
 func printGoogleServiceHelp(w io.Writer, service string) {
@@ -244,6 +258,53 @@ func printGoogleServiceHelp(w io.Writer, service string) {
 	default:
 		printGoogleUsage(w)
 	}
+}
+
+// ── setup ───────────────────────────────────────────────────────────────────
+
+func (e *Env) runGoogleSetup() error {
+	home, _ := os.UserHomeDir()
+	clientPath := filepath.Join(home, "cicy-ai", "db", "google_oauth_client.json")
+	fmt.Fprintln(e.Stdout, "Google Workspace — first-time setup")
+	fmt.Fprintln(e.Stdout, "====================================")
+	fmt.Fprintln(e.Stdout)
+	fmt.Fprintln(e.Stdout, "Each user needs their own Google Cloud OAuth credentials.")
+	fmt.Fprintln(e.Stdout, "The oauth-flow.cicy-ai.com relay is shared, but credentials stay local.")
+	fmt.Fprintln(e.Stdout)
+	fmt.Fprintln(e.Stdout, "Step 1 — Create a Google Cloud project (skip if you have one already):")
+	fmt.Fprintln(e.Stdout, "  https://console.cloud.google.com/projectcreate")
+	fmt.Fprintln(e.Stdout)
+	fmt.Fprintln(e.Stdout, "Step 2 — Enable the APIs you need:")
+	fmt.Fprintln(e.Stdout, "  https://console.cloud.google.com/apis/library")
+	fmt.Fprintln(e.Stdout, "  Enable: Gmail API, Google Drive API, Google Sheets API, Google Calendar API")
+	fmt.Fprintln(e.Stdout)
+	fmt.Fprintln(e.Stdout, "Step 3 — Configure the OAuth consent screen:")
+	fmt.Fprintln(e.Stdout, "  https://console.cloud.google.com/apis/credentials/consent")
+	fmt.Fprintln(e.Stdout, "  User Type: External  |  App name: anything  |  Save and continue through all steps")
+	fmt.Fprintln(e.Stdout, "  Under 'Test users' → Add your Gmail address so you skip the verification warning")
+	fmt.Fprintln(e.Stdout)
+	fmt.Fprintln(e.Stdout, "Step 4 — Create OAuth 2.0 credentials:")
+	fmt.Fprintln(e.Stdout, "  https://console.cloud.google.com/apis/credentials")
+	fmt.Fprintln(e.Stdout, "  Click 'Create credentials' → 'OAuth client ID'")
+	fmt.Fprintln(e.Stdout, "  Application type: Web application  (NOT Desktop or TV)")
+	fmt.Fprintln(e.Stdout, "  Under 'Authorized redirect URIs' → ADD URI:")
+	fmt.Fprintf(e.Stdout, "    %s\n", oauthFlowRedirectURI)
+	fmt.Fprintln(e.Stdout, "  Click Create")
+	fmt.Fprintln(e.Stdout)
+	fmt.Fprintln(e.Stdout, "Step 5 — Download the credentials file:")
+	fmt.Fprintln(e.Stdout, "  On the credentials page, click the download icon (↓) next to your new client")
+	fmt.Fprintln(e.Stdout, "  Save the downloaded JSON file to:")
+	fmt.Fprintf(e.Stdout, "    %s\n", clientPath)
+	fmt.Fprintln(e.Stdout, "  Then set permissions:  chmod 600 ~/cicy-ai/db/google_oauth_client.json")
+	fmt.Fprintln(e.Stdout)
+	fmt.Fprintln(e.Stdout, "  IMPORTANT: Do NOT paste client_id or client_secret into chat.")
+	fmt.Fprintln(e.Stdout, "  Upload / copy the file directly — no secrets in conversation history.")
+	fmt.Fprintln(e.Stdout)
+	fmt.Fprintln(e.Stdout, "Step 6 — Authorize:")
+	fmt.Fprintln(e.Stdout, "  google login")
+	fmt.Fprintln(e.Stdout)
+	fmt.Fprintln(e.Stdout, "Done. Credentials stay local. The relay never sees your client_secret.")
+	return nil
 }
 
 // ── login / status ──────────────────────────────────────────────────────────
@@ -276,32 +337,12 @@ func (e *Env) runGoogleLogin(ctx context.Context, mode string) error {
 	// stdout — speak directly to it.
 	raw, err := os.ReadFile(clientPath)
 	if err != nil {
-		fmt.Fprintln(e.Stdout, "[google login] No OAuth client is configured on this server yet.")
-		fmt.Fprintln(e.Stdout)
-		fmt.Fprintln(e.Stdout, "Please walk the user through these steps, one at a time:")
-		fmt.Fprintln(e.Stdout)
-		fmt.Fprintln(e.Stdout, "  1. Open https://console.cloud.google.com/apis/credentials in their browser")
-		fmt.Fprintln(e.Stdout, "     (signed into the Google account they want to authorize)")
-		fmt.Fprintln(e.Stdout, "  2. Click 'Create credentials' → 'OAuth client ID'")
-		fmt.Fprintln(e.Stdout, "     (if prompted, configure the OAuth consent screen first — User Type: External, app name = anything)")
-		fmt.Fprintln(e.Stdout, "  3. Application type: 'Web application'  (important — Desktop / TV won't work)")
-		fmt.Fprintln(e.Stdout, "  4. Under 'Authorized redirect URIs' click ADD URI and paste:")
-		fmt.Fprintf(e.Stdout, "       %s\n", oauthFlowRedirectURI)
-		fmt.Fprintln(e.Stdout, "  5. Click Create. Copy BOTH the Client ID and Client Secret.")
-		fmt.Fprintln(e.Stdout, "  6. Have them paste both back to you, then write the file:")
-		fmt.Fprintf(e.Stdout, "       cat > %s <<EOF\n", clientPath)
-		fmt.Fprintln(e.Stdout, "       {\"client_id\":\"<paste-id>\",\"client_secret\":\"<paste-secret>\"}")
-		fmt.Fprintln(e.Stdout, "       EOF")
-		fmt.Fprintln(e.Stdout, "       chmod 600 ~/cicy-ai/db/google_oauth_client.json")
-		fmt.Fprintln(e.Stdout, "  7. Run `google login` again to start the authorization")
+		fmt.Fprintln(e.Stdout, "[google login] OAuth client not configured. Run `google setup` to see setup instructions.")
 		return nil
 	}
-	var client struct {
-		ClientID     string `json:"client_id"`
-		ClientSecret string `json:"client_secret"`
-	}
-	if err := json.Unmarshal(raw, &client); err != nil || client.ClientID == "" || client.ClientSecret == "" {
-		return fmt.Errorf("google_oauth_client.json is malformed — expected {\"client_id\":\"...\",\"client_secret\":\"...\"} (Web application type requires both)")
+	client, err := parseGoogleOAuthClient(raw)
+	if err != nil {
+		return err
 	}
 
 	// State 2: already authorized?
@@ -392,6 +433,55 @@ func (e *Env) runGoogleLogin(ctx context.Context, mode string) error {
 	}
 	fmt.Fprintf(e.Stdout, "[google login] ✓ authorized as %s — saved to %s\n", email, statePath)
 	return nil
+}
+
+// googleOAuthClient holds a flattened {client_id, client_secret} pair, regardless
+// of whether the source JSON was flat or nested under a "web"/"installed" key.
+type googleOAuthClient struct {
+	ClientID     string
+	ClientSecret string
+}
+
+// parseGoogleOAuthClient accepts both:
+//   - flat:    {"client_id":"...","client_secret":"..."}
+//   - nested:  {"web":{"client_id":"...","client_secret":"..."}}        (Web app)
+//   - nested:  {"installed":{"client_id":"...","client_secret":"..."}}  (Desktop)
+// The latter two are the format Google Console produces when you click "Download JSON",
+// so accepting them lets the user paste the file contents directly with no editing.
+func parseGoogleOAuthClient(raw []byte) (googleOAuthClient, error) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return googleOAuthClient{}, fmt.Errorf("google_oauth_client.json is not valid JSON: %w", err)
+	}
+	pickFrom := top
+	if inner, ok := top["web"]; ok {
+		var nested map[string]json.RawMessage
+		if err := json.Unmarshal(inner, &nested); err == nil {
+			pickFrom = nested
+		}
+	} else if inner, ok := top["installed"]; ok {
+		var nested map[string]json.RawMessage
+		if err := json.Unmarshal(inner, &nested); err == nil {
+			pickFrom = nested
+		}
+	}
+	getStr := func(k string) string {
+		raw, ok := pickFrom[k]
+		if !ok {
+			return ""
+		}
+		var s string
+		_ = json.Unmarshal(raw, &s)
+		return strings.TrimSpace(s)
+	}
+	out := googleOAuthClient{
+		ClientID:     getStr("client_id"),
+		ClientSecret: getStr("client_secret"),
+	}
+	if out.ClientID == "" || out.ClientSecret == "" {
+		return out, fmt.Errorf("google_oauth_client.json missing client_id or client_secret — expected either {\"client_id\":\"...\",\"client_secret\":\"...\"} or the JSON downloaded from Google Console (which has a top-level \"web\" or \"installed\" key)")
+	}
+	return out, nil
 }
 
 // generateOAuthSession returns ~22 chars of URL-safe base64 random (~128 bits entropy).
