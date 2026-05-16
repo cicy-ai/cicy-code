@@ -14,7 +14,7 @@ from pathlib import Path
 
 REGION = "cn-hongkong"
 ZONE = "cn-hongkong-d"
-INSTANCE_TYPE = "ecs.e-c1m2.large"
+INSTANCE_TYPE = "ecs.u1-c1m8.large"
 IMAGE_ID = "ubuntu_24_04_x64_20G_alibase_20260506.vhd"
 SPOT_STRATEGY = "SpotAsPriceGo"
 SYSTEM_DISK_SIZE = 40
@@ -167,7 +167,10 @@ def image_build_cmd(tag="hk-spot-dev:latest"):
         f'docker build -t {tag} - << \'DOCKERFILE\'\n'
         'FROM ghcr.io/cicy-ai/cicy-code-base:1.0.8\n'
         'USER root\n'
-        'RUN apt-get update && apt-get install -y --no-install-recommends \\\n'
+        # tuna mirrors return 403 from HK; switch to deb.debian.org
+        "RUN cat /etc/apt/sources.list.d/debian.sources | sed 's|mirrors.tuna.tsinghua.edu.cn/debian|deb.debian.org/debian|g' > /tmp/debian.sources && \\\n"
+        '    cp /tmp/debian.sources /etc/apt/sources.list.d/debian.sources && \\\n'
+        '    apt-get update && apt-get install -y --no-install-recommends \\\n'
         '    openssh-server docker.io git make build-essential ca-certificates curl \\\n'
         '    rsync autossh iproute2 net-tools jq vim less unzip wget gnupg \\\n'
         '    && rm -rf /var/lib/apt/lists/*\n'
@@ -313,24 +316,33 @@ def ensure_vswitch(vpc_id):
 
 def ensure_sg(vpc_id):
     existing = find_sg(vpc_id)
-    if existing:
-        return existing["SecurityGroupId"]
-    sg = run_aliyun(["ecs", "CreateSecurityGroup", "--region", REGION,
-                     "--SecurityGroupName", SG_NAME, "--VpcId", vpc_id])
-    sg_id = sg["SecurityGroupId"]
+    sg_id = existing["SecurityGroupId"] if existing else None
+    if not sg_id:
+        sg = run_aliyun(["ecs", "CreateSecurityGroup", "--region", REGION,
+                         "--SecurityGroupName", SG_NAME, "--VpcId", vpc_id])
+        sg_id = sg["SecurityGroupId"]
+    # Get existing port ranges
+    existing_rules = set()
+    try:
+        attr = run_aliyun(["ecs", "DescribeSecurityGroupAttribute", "--region", REGION,
+                           "--SecurityGroupId", sg_id])
+        for p in attr.get("Permissions", {}).get("Permission", []):
+            existing_rules.add(p["PortRange"])
+    except Exception:
+        pass
     rules = [
         ("22/22", "SSH host"),
         (f"{SSH_PORT_CONTAINER}/{SSH_PORT_CONTAINER}", "SSH container"),
         ("8000/9999", "app ports"),
     ]
     for port, desc in rules:
-        try:
-            run_aliyun(["ecs", "AuthorizeSecurityGroup", "--region", REGION,
-                        "--SecurityGroupId", sg_id, "--IpProtocol", "tcp",
-                        "--PortRange", port, "--SourceCidrIp", "0.0.0.0/0",
-                        "--Description", desc])
-        except Exception:
-            pass
+        if port in existing_rules:
+            continue
+        print(f"  add SG rule: {port} ({desc})")
+        run_aliyun(["ecs", "AuthorizeSecurityGroup", "--region", REGION,
+                    "--SecurityGroupId", sg_id, "--IpProtocol", "tcp",
+                    "--PortRange", port, "--SourceCidrIp", "0.0.0.0/0",
+                    "--Description", desc])
     return sg_id
 
 
@@ -404,34 +416,44 @@ def ssh_cicy(ip, cmd, timeout=120, check=False):
 
 
 def bootstrap_container(ip):
-    print("=== Seeding container ===")
+    """Bring the container up. On a fresh persistent disk: seed SSH keys, ~/cicy-ai,
+    and clone repos. If the disk already has data, leave it alone — just start the
+    services (the user's edits on the box stay; we don't rsync over them)."""
+    print("=== Bootstrapping container ===")
     id_rsa_pub = Path(os.path.expanduser("~/.ssh/id_rsa.pub"))
     if id_rsa_pub.exists():
         pub = id_rsa_pub.read_text().strip()
         run_ssh(ip, f'echo {_shlex.quote(pub)} >> /root/.ssh/authorized_keys', timeout=30)
         ssh_cicy(ip, f'echo {_shlex.quote(pub)} >> ~/.ssh/authorized_keys', timeout=30)
     ssh_cicy(ip, "mkdir -p ~/.ssh ~/cicy-ai/db ~/projects ~/.local/bin && chmod 700 ~/.ssh")
-    for src, name in [(GLOBAL_JSON, "global.json"),
-                      (Path(os.path.expanduser("~/cicy-ai/db/proxy_ssh.json")), "proxy_ssh.json"),
-                      (Path(RSA_KEY), "id_rsa")]:
-        if os.path.exists(src):
-            scp_to_cicy(ip, str(src), f"~/cicy-ai/db/{name}" if name != "id_rsa" else f"~/.ssh/{name}")
-    if os.path.exists(RSA_KEY):
-        ssh_cicy(ip, "chmod 600 ~/.ssh/id_rsa")
-    ssh_cicy(ip, "grep -q 'Host github-cicy-ai' ~/.ssh/config 2>/dev/null || "
-                 "printf 'Host github-cicy-ai\\n  HostName github.com\\n  User git\\n  "
-                 "IdentityFile ~/.ssh/id_ed25519_cicy_ai\\n  IdentitiesOnly yes\\n  "
-                 "StrictHostKeyChecking accept-new\\n' >> ~/.ssh/config; "
-                 "touch ~/.ssh/config; chmod 600 ~/.ssh/config")
-    ssh_cicy(ip, f"git clone {CICY_CODE_REPO} ~/projects/cicy-code 2>/dev/null || true", timeout=300)
+    populated = ssh_cicy(ip, "test -d ~/projects/cicy-code/.git && test -f ~/cicy-ai/global.json "
+                             "&& echo yes || echo no").stdout.strip().endswith("yes")
+    if populated:
+        print("  persistent disk already populated — skipping data seed")
+    else:
+        print("  fresh disk — seeding SSH keys / ~/cicy-ai / repos ...")
+        for src, name, dst_path in [(GLOBAL_JSON, "global.json", "~/cicy-ai/db/"),
+                                    (PROXY_SSH_JSON, "proxy_ssh.json", "~/cicy-ai/db/"),
+                                    (Path(RSA_KEY), "id_rsa", "~/.ssh/")]:
+            if not os.path.exists(src):
+                continue
+            scp_to_cicy(ip, str(src), dst_path + name)
+        if os.path.exists(RSA_KEY):
+            ssh_cicy(ip, "chmod 600 ~/.ssh/id_rsa")
+        ssh_cicy(ip, "grep -q 'Host github-cicy-ai' ~/.ssh/config 2>/dev/null || "
+                     "printf 'Host github-cicy-ai\\n  HostName github.com\\n  User git\\n  "
+                     "IdentityFile ~/.ssh/id_rsa\\n  IdentitiesOnly yes\\n  "
+                     "StrictHostKeyChecking accept-new\\n' >> ~/.ssh/config; "
+                     "touch ~/.ssh/config; chmod 600 ~/.ssh/config")
+        ssh_cicy(ip, f"git clone {CICY_CODE_REPO} ~/projects/cicy-code 2>/dev/null || true", timeout=300)
+    # always: ensure cicy-mihomo wrapper is built, mihomo binary exists, gen-config if missing
     ssh_cicy(ip, "[ -x ~/.local/bin/cicy-hosttools ] || { cd ~/projects/cicy-code/skills 2>/dev/null && "
                  "/usr/local/go/bin/go build -o ~/.local/bin/cicy-hosttools ./cmd/cicy-hosttools 2>/dev/null; } || true; "
                  "ln -sf cicy-hosttools ~/.local/bin/cicy-mihomo 2>/dev/null; true", timeout=240)
-    # ensure mihomo binary exists (download latest if missing)
     ssh_cicy(ip, "[ -x /usr/local/bin/mihomo ] || (curl -fsSL https://github.com/cicy-ai/cicy-mihomo/releases/latest/download/mihomo-linux-amd64 -o /tmp/mihomo && install -m 0755 /tmp/mihomo /usr/local/bin/mihomo) 2>/dev/null || true", timeout=60)
-    # remove old broken binary from previous runs
     ssh_cicy(ip, "rm -f ~/.local/bin/mihomo; true", timeout=10)
     ssh_cicy(ip, "[ -f ~/cicy-ai/db/mihomo.yaml ] || ~/.local/bin/cicy-mihomo gen-config 2>/dev/null; true", timeout=30)
+    # always: start proxy_ssh profiles and mihomo
     ssh_cicy(ip, "[ -f ~/cicy-ai/db/proxy_ssh.json ] && command -v python3 >/dev/null && "
                  "python3 ~/projects/cicy-code/skills/proxy_ssh list --json 2>/dev/null "
                  "| python3 -c 'import json,sys; [print(p[\"name\"]) for p in json.load(sys.stdin)]' 2>/dev/null "
@@ -441,7 +463,7 @@ def bootstrap_container(ip):
                  "MIHOMO_BIN=/usr/local/bin/mihomo ~/.local/bin/cicy-mihomo stop >/dev/null 2>&1; "
                  "mkdir -p ~/.local/state/cicy-skills/mihomo; "
                  "MIHOMO_BIN=/usr/local/bin/mihomo ~/.local/bin/cicy-mihomo start || true", timeout=60)
-    print("  Container seeded — global.json / proxy_ssh.json / id_rsa copied, cicy-code cloned, mihomo+proxy_ssh started")
+    print("  Container bootstrapped — cicy-code cloned, mihomo+proxy_ssh started")
 
 
 def clean_local_configs():

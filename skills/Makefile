@@ -16,11 +16,11 @@ help: ## Show available make targets
 
 build-local-binaries: ## Build Linux CLI binaries locally into dist/
 	mkdir -p dist
-	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -o dist/cicy-skills ./cmd/cicy-skills
-	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -o dist/cicy-skillsd ./cmd/cicy-skillsd
-	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -o dist/cicy-hosttools ./cmd/cicy-hosttools
-	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -o dist/stt ./cmd/stt
-	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -o dist/tts ./cmd/tts
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -o dist/cicy-skills ./cmd/cicy-skills
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -o dist/cicy-skillsd ./cmd/cicy-skillsd
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -o dist/cicy-hosttools ./cmd/cicy-hosttools
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -o dist/stt ./cmd/stt
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -o dist/tts ./cmd/tts
 
 install-local-cli: ## Install the full local command bundle into ~/.local/bin using the repo-owned bin dir
 install-local-cli: build-local-binaries
