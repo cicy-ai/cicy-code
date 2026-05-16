@@ -173,6 +173,7 @@ Options:
 	http.HandleFunc("/api/chat/push", wa(handleChatPush))
 	http.HandleFunc("/api/chat/ping-client", wa(handleChatPingClient))
 	http.HandleFunc("/api/chat/exec-js", wa(handleChatExecJS))
+	http.HandleFunc("/api/chat/code-open", wa(handleChatCodeOpen))
 	http.HandleFunc("/api/chat/ws", handleChatWS)
 	http.HandleFunc("/code-server-inject.js", serveCodeServerInjectJS)
 	http.HandleFunc("/api/code-server/page-context", wa(handleCodeServerPageContext))

@@ -4,26 +4,23 @@ package hosttools
 //
 // Subcommands:
 //   install   — download the official aliyun CLI binary into ~/.local/bin
-//   config    — open ~/cicy-ai/db/aliyun.json in code-server for the user to
-//               edit. Auto-creates a placeholder JSON (chmod 600) if missing,
+//   config    — open ~/.aliyun/config.json (the aliyun CLI's own native config
+//               file) in code-server for the user to fill in id/secret. Creates
+//               a native-format scaffold with chmod 600 if the file is missing,
 //               so secrets never have to be pasted into chat or shell history.
-//   apply     — read ~/cicy-ai/db/aliyun.json and `aliyun configure set ...`.
-//               Refuses to apply placeholder values.
-//   status    — report binary path/version + config file state + active
-//               profile. Always masks AccessKey id.
+//   status    — report binary path/version + which profile is active + AK
+//               (always masked). Reads ~/.aliyun/config.json directly.
 //
-// Note: this wrapper's `apply` is distinct from the native `aliyun configure`
-// builtin. We avoid the name `configure` so the two never get confused.
-//
-// Security model: the wrapper is the *only* component that reads the JSON
-// config. Agents must NOT cat/grep the file or print its raw contents. After
-// `configure` succeeds the Aliyun CLI persists credentials at
-// ~/.aliyun/config.json and the bootstrap JSON is no longer needed at runtime.
+// Note: there is intentionally NO middleware JSON at ~/cicy-ai/db/aliyun.json
+// anymore. The aliyun CLI owns its config file and reads from it on every
+// invocation, so any intermediate JSON we maintain would just be one more
+// file to keep in sync. The user edits ~/.aliyun/config.json directly via
+// code-server (or `aliyun configure set` from the shell) — done.
 
 import (
+	"encoding/json"
 	"archive/tar"
 	"compress/gzip"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,21 +32,8 @@ import (
 )
 
 const (
-	aliyunConfigPath  = "cicy-ai/db/aliyun.json"
-	aliyunProfileName = "default"
-	aliyunAKPlaceholder = "<paste-your-access-key-id-here>"
-	aliyunSKPlaceholder = "<paste-your-access-key-secret-here>"
+	aliyunNativeConfigPath = ".aliyun/config.json"
 )
-
-type aliyunConfig struct {
-	AccessKeyID     string `json:"access_key_id"`
-	AccessKeySecret string `json:"access_key_secret"`
-	RegionID        string `json:"region_id"`
-}
-
-func aliyunConfigFile() string {
-	return filepath.Join(userHomeDir(), aliyunConfigPath)
-}
 
 func aliyunBinaryPath() string {
 	if p, err := exec.LookPath("aliyun"); err == nil {
@@ -58,17 +42,81 @@ func aliyunBinaryPath() string {
 	return filepath.Join(userHomeDir(), ".local", "bin", "aliyun")
 }
 
-func loadAliyunConfig() (aliyunConfig, error) {
-	var cfg aliyunConfig
-	data, err := os.ReadFile(aliyunConfigFile())
+func aliyunConfigPath() string {
+	return filepath.Join(userHomeDir(), aliyunNativeConfigPath)
+}
+
+// aliyunProfile is the subset of fields we read from ~/.aliyun/config.json for
+// reporting. The CLI's own struct is larger; we only care about identifying
+// the active profile and showing a masked AK.
+type aliyunProfile struct {
+	Name          string `json:"name"`
+	Mode          string `json:"mode"`
+	AccessKeyID   string `json:"access_key_id"`
+	RegionID      string `json:"region_id"`
+}
+
+type aliyunNativeConfig struct {
+	Current  string          `json:"current"`
+	Profiles []aliyunProfile `json:"profiles"`
+}
+
+func loadAliyunNativeConfig() (aliyunNativeConfig, error) {
+	var cfg aliyunNativeConfig
+	data, err := os.ReadFile(aliyunConfigPath())
 	if err != nil {
 		return cfg, err
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return cfg, fmt.Errorf("parse %s: %w", aliyunConfigFile(), err)
+		return cfg, fmt.Errorf("parse %s: %w", aliyunConfigPath(), err)
 	}
 	return cfg, nil
 }
+
+func aliyunNativePlaceholder() string {
+	return `{
+  "current": "default",
+  "profiles": [
+    {
+      "name": "default",
+      "mode": "AK",
+      "access_key_id": "<paste-your-access-key-id-here>",
+      "access_key_secret": "<paste-your-access-key-secret-here>",
+      "region_id": "us-west-1",
+      "output_format": "json",
+      "language": "en"
+    }
+  ],
+  "meta_path": ""
+}
+`
+}
+
+func isAliyunPlaceholderProfile(p aliyunProfile) bool {
+	ak := strings.TrimSpace(p.AccessKeyID)
+	if ak == "" || strings.HasPrefix(ak, "<") {
+		return true
+	}
+	return false
+}
+
+func (e *Env) writeAliyunPlaceholder() (bool, error) {
+	path := aliyunConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return false, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	if err := os.WriteFile(path, []byte(aliyunNativePlaceholder()), 0o600); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// ── dispatch ───────────────────────────────────────────────────────────────
 
 func (e *Env) runAliyunCLI(args []string) error {
 	if len(args) == 0 || isHelpArg(args[0]) {
@@ -80,8 +128,6 @@ func (e *Env) runAliyunCLI(args []string) error {
 		return e.runAliyunInstall()
 	case "config":
 		return e.runAliyunConfigOpen()
-	case "apply":
-		return e.runAliyunApply()
 	case "status":
 		return e.runAliyunStatus()
 	default:
@@ -95,13 +141,14 @@ func printAliyunUsage(w io.Writer) {
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  install   Download the official `aliyun` CLI binary into ~/.local/bin")
-	fmt.Fprintln(w, "  config    Open ~/cicy-ai/db/aliyun.json in code-server (auto-creates placeholder if missing)")
-	fmt.Fprintln(w, "  apply     Apply ~/cicy-ai/db/aliyun.json to the `aliyun` CLI default profile")
-	fmt.Fprintln(w, "  status    Show binary version, config file state, and active profile")
+	fmt.Fprintln(w, "  config    Open ~/.aliyun/config.json in code-server (auto-creates a placeholder if missing)")
+	fmt.Fprintln(w, "  status    Show binary version + active profile (AccessKey id masked)")
 	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "Typical flow: install → config → (user edits in code-server) → apply → status")
-	fmt.Fprintln(w, "After `apply`, call the `aliyun` CLI directly (e.g. `aliyun ecs DescribeInstances`).")
-	fmt.Fprintln(w, "Agents must NOT cat / Read the config file — the CLI handles credentials itself.")
+	fmt.Fprintln(w, "Typical flow: install → config → (user fills in creds in code-server) → status")
+	fmt.Fprintln(w, "After the user saves config.json, call the `aliyun` CLI directly:")
+	fmt.Fprintln(w, "  aliyun ecs DescribeInstances --region us-west-1")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Agents must NOT cat / Read ~/.aliyun/config.json — the CLI reads it for itself.")
 }
 
 // ── install ────────────────────────────────────────────────────────────────
@@ -201,141 +248,34 @@ func (e *Env) runAliyunInstall() error {
 	return nil
 }
 
-// ── init-config ────────────────────────────────────────────────────────────
-
-func aliyunPlaceholderJSON() string {
-	return `{
-  "access_key_id": "` + aliyunAKPlaceholder + `",
-  "access_key_secret": "` + aliyunSKPlaceholder + `",
-  "region_id": "us-west-1"
-}
-`
-}
-
-func isAliyunPlaceholder(cfg aliyunConfig) bool {
-	ak := strings.TrimSpace(cfg.AccessKeyID)
-	sk := strings.TrimSpace(cfg.AccessKeySecret)
-	if ak == "" || sk == "" {
-		return true
-	}
-	if strings.HasPrefix(ak, "<") || strings.HasPrefix(sk, "<") {
-		return true
-	}
-	return false
-}
-
-func (e *Env) writeAliyunPlaceholder() (bool, error) {
-	path := aliyunConfigFile()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return false, err
-	}
-	if _, err := os.Stat(path); err == nil {
-		return false, nil
-	} else if !os.IsNotExist(err) {
-		return false, err
-	}
-	if err := os.WriteFile(path, []byte(aliyunPlaceholderJSON()), 0o600); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func (e *Env) printAliyunFillInstructions() {
-	fmt.Fprintln(e.Stdout, "")
-	fmt.Fprintln(e.Stdout, "Fill in the AccessKey id and secret WITHOUT pasting them into chat:")
-	fmt.Fprintln(e.Stdout, "  - open in code-server:  aliyun-cli config")
-	fmt.Fprintln(e.Stdout, "  - then apply:           aliyun-cli apply")
-	fmt.Fprintln(e.Stdout, "")
-	fmt.Fprintln(e.Stdout, "Agents must NOT read the config back. After `apply` succeeds the aliyun CLI")
-	fmt.Fprintln(e.Stdout, "persists credentials at ~/.aliyun/config.json — the bootstrap JSON is no longer")
-	fmt.Fprintln(e.Stdout, "needed for normal `aliyun ecs / vpc / ram` calls.")
-}
-
-// ── config (open in code-server, auto-creates placeholder) ─────────────────
+// ── config (open in code-server, auto-creates native-format placeholder) ───
 
 func (e *Env) runAliyunConfigOpen() error {
-	path := aliyunConfigFile()
+	path := aliyunConfigPath()
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			if _, werr := e.writeAliyunPlaceholder(); werr != nil {
 				return fmt.Errorf("config missing and failed to create placeholder: %w", werr)
 			}
-			fmt.Fprintln(e.Stdout, "config was missing — created placeholder (chmod 600)")
+			fmt.Fprintln(e.Stdout, "config was missing — created native-format placeholder (chmod 600)")
 		} else {
 			return err
 		}
 	}
-	fmt.Fprintln(e.Stdout, "opening config in code-server...")
+	fmt.Fprintln(e.Stdout, "opening ~/.aliyun/config.json in code-server...")
 	cmd := exec.Command("agent-code-server", "open", path)
 	cmd.Stdout = e.Stdout
 	cmd.Stderr = e.Stderr
-	// agent-code-server sends a `code.open_file` event and then waits for the
-	// page-side `code.opened` ack. The send is reliable; the ack is best-effort
-	// and frequently times out even when the file did open. Don't propagate
-	// that exit code — the placeholder JSON is on disk and the open request
-	// was dispatched, so the user can proceed from code-server either way.
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintln(e.Stdout, "")
 		fmt.Fprintf(e.Stdout, "agent-code-server returned %v (likely just a missing ack). The file is open in code-server if you see it in the editor; otherwise edit directly:\n  $EDITOR %s\n", err, path)
 	}
 	fmt.Fprintln(e.Stdout, "")
-	fmt.Fprintln(e.Stdout, "After the user saves the AccessKey id and secret, run: aliyun-cli apply")
-	fmt.Fprintln(e.Stdout, "Reminder: do NOT ask for the credentials in chat — only edit them in the file.")
-	return nil
-}
-
-// ── apply (push JSON → aliyun CLI default profile) ─────────────────────────
-
-func (e *Env) runAliyunApply() error {
-	cfg, err := loadAliyunConfig()
-	if err != nil {
-		if os.IsNotExist(err) {
-			created, werr := e.writeAliyunPlaceholder()
-			if werr != nil {
-				return fmt.Errorf("config not found and failed to create placeholder: %w", werr)
-			}
-			if created {
-				fmt.Fprintln(e.Stdout, "config was missing — created placeholder (chmod 600)")
-				e.printAliyunFillInstructions()
-				return fmt.Errorf("config is a placeholder — fill in the AccessKey id/secret (via `aliyun-cli config`) and re-run `aliyun-cli apply`")
-			}
-		}
-		return err
-	}
-	if isAliyunPlaceholder(cfg) {
-		e.printAliyunFillInstructions()
-		return fmt.Errorf("config still contains placeholder values — run `aliyun-cli config` to edit, then re-run `aliyun-cli apply`")
-	}
-	region := strings.TrimSpace(cfg.RegionID)
-	if region == "" {
-		region = "cn-hangzhou"
-	}
-	bin := aliyunBinaryPath()
-	if _, err := os.Stat(bin); err != nil {
-		if p, lerr := exec.LookPath("aliyun"); lerr == nil {
-			bin = p
-		} else {
-			return fmt.Errorf("aliyun CLI not installed — run `aliyun-cli install` first")
-		}
-	}
-	cmd := exec.Command(bin, "configure", "set",
-		"--profile", aliyunProfileName,
-		"--mode", "AK",
-		"--region", region,
-		"--access-key-id", cfg.AccessKeyID,
-		"--access-key-secret", cfg.AccessKeySecret,
-	)
-	out, err := cmd.CombinedOutput()
-	if s := strings.TrimSpace(string(out)); s != "" {
-		fmt.Fprintln(e.Stdout, s)
-	}
-	if err != nil {
-		return fmt.Errorf("aliyun configure set: %w", err)
-	}
-	fmt.Fprintf(e.Stdout, "applied profile %q (region=%s)\n", aliyunProfileName, region)
+	fmt.Fprintln(e.Stdout, "Fill in `access_key_id` and `access_key_secret` (and adjust `region_id` if needed), save the file.")
+	fmt.Fprintln(e.Stdout, "Then call the `aliyun` CLI directly:")
+	fmt.Fprintln(e.Stdout, "  aliyun ecs DescribeInstances --region us-west-1")
 	fmt.Fprintln(e.Stdout, "")
-	fmt.Fprintln(e.Stdout, "The aliyun CLI now owns the credentials at ~/.aliyun/config.json.")
-	fmt.Fprintln(e.Stdout, "The bootstrap JSON is no longer needed for normal `aliyun` calls.")
+	fmt.Fprintln(e.Stdout, "Reminder: never paste the credentials into chat — only edit them in the file.")
 	return nil
 }
 
@@ -360,22 +300,32 @@ func (e *Env) runAliyunStatus() error {
 		}
 	}
 
-	cfgPath := aliyunConfigFile()
+	cfgPath := aliyunConfigPath()
 	if _, err := os.Stat(cfgPath); err != nil {
-		fmt.Fprintln(e.Stdout, "config: missing (run `aliyun-cli config`)")
+		fmt.Fprintln(e.Stdout, "config: ~/.aliyun/config.json missing (run `aliyun-cli config`)")
 	} else {
-		cfg, err := loadAliyunConfig()
+		cfg, err := loadAliyunNativeConfig()
 		if err != nil {
 			fmt.Fprintf(e.Stdout, "config: parse error: %v\n", err)
-		} else if isAliyunPlaceholder(cfg) {
-			fmt.Fprintln(e.Stdout, "config: placeholder — user has not filled in the AccessKey yet (run `aliyun-cli config`)")
 		} else {
-			masked := maskAK(cfg.AccessKeyID)
-			region := cfg.RegionID
-			if region == "" {
-				region = "(default)"
+			fmt.Fprintf(e.Stdout, "config: %s\n", cfgPath)
+			fmt.Fprintf(e.Stdout, "  current_profile: %s\n", cfg.Current)
+			for _, p := range cfg.Profiles {
+				marker := "  "
+				if p.Name == cfg.Current {
+					marker = "* "
+				}
+				state := "ready"
+				if isAliyunPlaceholderProfile(p) {
+					state = "placeholder — user has not filled in the AccessKey yet"
+				}
+				masked := maskAK(p.AccessKeyID)
+				if state != "ready" {
+					fmt.Fprintf(e.Stdout, "%sprofile %s [%s] (%s)\n", marker, p.Name, p.Mode, state)
+				} else {
+					fmt.Fprintf(e.Stdout, "%sprofile %s [%s] access_key_id=%s region=%s\n", marker, p.Name, p.Mode, masked, p.RegionID)
+				}
 			}
-			fmt.Fprintf(e.Stdout, "config: ready\n  access_key_id: %s\n  region_id: %s\n", masked, region)
 		}
 	}
 

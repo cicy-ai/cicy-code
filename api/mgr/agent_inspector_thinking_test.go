@@ -25,7 +25,7 @@ func TestAgentInspectorDisableThinkingSwitchesOff(t *testing.T) {
 	out := agentInspectorDisableThinking(map[string]interface{}{
 		"thinking":        map[string]interface{}{"type": "enabled", "budget_tokens": 1024},
 		"enable_thinking": true,
-	})
+	}, "anthropic")
 	if _, present := out["thinking"]; present {
 		t.Fatalf("`thinking` config should be stripped")
 	}
@@ -44,7 +44,7 @@ func TestAgentInspectorDisableThinkingInjectsAnthropicPlaceholder(t *testing.T) 
 				},
 			},
 		},
-	})
+	}, "anthropic")
 	msgs := out["messages"].([]interface{})
 	content := msgs[0].(map[string]interface{})["content"].([]interface{})
 	if len(content) != 2 {
@@ -61,10 +61,25 @@ func TestAgentInspectorDisableThinkingInjectsOpenAIPlaceholder(t *testing.T) {
 		"messages": []interface{}{
 			map[string]interface{}{"role": "assistant", "content": "hello"},
 		},
-	})
+	}, "openai")
 	msg := out["messages"].([]interface{})[0].(map[string]interface{})
 	if _, ok := msg["reasoning_content"]; !ok {
 		t.Fatalf("OpenAI-style assistant must get reasoning_content placeholder")
+	}
+}
+
+func TestAgentInspectorDisableThinkingOpenAIPreservesContentString(t *testing.T) {
+	// Regression: the previous unconditional injection promoted assistant.content
+	// from string to a [{type:thinking}, {type:text}] array, which DeepSeek's
+	// openai endpoint rejects with `unknown variant 'thinking', expected 'text'`.
+	out := agentInspectorDisableThinking(map[string]interface{}{
+		"messages": []interface{}{
+			map[string]interface{}{"role": "assistant", "content": "hello"},
+		},
+	}, "openai")
+	msg := out["messages"].([]interface{})[0].(map[string]interface{})
+	if msg["content"] != "hello" {
+		t.Fatalf("openai assistant.content must stay a string, got %T %v", msg["content"], msg["content"])
 	}
 }
 
@@ -79,7 +94,7 @@ func TestAgentInspectorDisableThinkingPreservesExistingThinking(t *testing.T) {
 				},
 			},
 		},
-	})
+	}, "anthropic")
 	content := out["messages"].([]interface{})[0].(map[string]interface{})["content"].([]interface{})
 	if len(content) != 2 {
 		t.Fatalf("must not duplicate when thinking already present")
@@ -95,7 +110,7 @@ func TestAgentInspectorDisableThinkingLeavesUserMessages(t *testing.T) {
 		"messages": []interface{}{
 			map[string]interface{}{"role": "user", "content": "hi"},
 		},
-	})
+	}, "openai")
 	msg := out["messages"].([]interface{})[0].(map[string]interface{})
 	if msg["content"] != "hi" {
 		t.Fatalf("user messages must be left alone")

@@ -888,7 +888,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         chatWs.send({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, error: error?.message || String(error) } });
       }
     } else if (msg?.type === 'code.open_file' && msg.data?.path) {
+      // Legacy: kept for backward compat with older callers. New callers should
+      // use the sync /api/chat/code-open endpoint instead — see openCodeFile.
       openCodeFileRef.current?.(String(msg.data.path || ''), String(msg.data?.requestId || ''));
+    } else if (msg?.type === 'code.show_files') {
+      // Pure UX nudge from the new agent-code-server pipeline: bring the Files
+      // panel (which embeds the code-server iframe) to the foreground so the
+      // extension activates and registers its `:code-ext` WS. The actual file
+      // open is then a direct sync POST to that WS — no page-side relay.
+      setCliContentTab('files');
+      setCliContentOpen(true);
     } else if (msg?.type === 'code.send_path' && msg.data?.path) {
       const targetClientId = String(msg.data?.page_client_id || '').trim();
       const filePath = String(msg.data.path || '').trim();

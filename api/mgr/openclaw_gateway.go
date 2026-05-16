@@ -19,7 +19,11 @@ import (
 )
 
 const (
-	aiGatewayMaxAttempts = 3
+	// 5 attempts (4 retries) — needed because cicyAi's thinking-mode race
+	// has empirically ~50% failure rate per call, which would still surface
+	// a user-visible error at 3 attempts (1 - 0.5^3 = 87.5% success). At 5
+	// attempts we cover 1 - 0.5^5 ≈ 96.9%. 429/5xx retries also benefit.
+	aiGatewayMaxAttempts = 5
 )
 
 func firstForwardedHeaderValue(value string) string {
@@ -295,6 +299,34 @@ func aiGatewayShouldRetryStatus(statusCode int) bool {
 	}
 }
 
+// aiGatewayBodyLooksLikeUpstreamFlake reads a (small, error-shaped) response
+// body and checks for known upstream-flake fingerprints we want to retry past.
+// Returns the buffered body so the caller can either discard it (for retry) or
+// reattach it to the response (no match → pass error through to the client).
+//
+// Currently covered:
+//   - cicyAi/new-api's thinking-mode race: same body returns
+//     `content[].thinking in the thinking mode must be passed back` randomly
+//     ~half the time even when the prior assistant has a valid
+//     reasoning_content. Empirically a 3rd / 4th replay succeeds.
+func aiGatewayBodyLooksLikeUpstreamFlake(resp *http.Response) (bool, []byte) {
+	if resp == nil || resp.Body == nil {
+		return false, nil
+	}
+	// Cap at 16 KiB — these errors are tiny JSON objects, anything larger
+	// almost certainly isn't a flake we should silently retry.
+	const limit = 16 * 1024
+	buf, err := io.ReadAll(io.LimitReader(resp.Body, limit))
+	if err != nil {
+		return false, buf
+	}
+	body := strings.ToLower(string(buf))
+	if strings.Contains(body, "thinking mode must be passed back") {
+		return true, buf
+	}
+	return false, buf
+}
+
 func aiGatewayRetryDelay(resp *http.Response, attempt int) time.Duration {
 	if resp != nil {
 		if value := strings.TrimSpace(resp.Header.Get("Retry-After")); value != "" {
@@ -369,12 +401,33 @@ func (t *aiGatewayRetryTransport) RoundTrip(req *http.Request) (*http.Response, 
 			}
 			continue
 		}
-		if !aiGatewayShouldRetryStatus(resp.StatusCode) || attempt >= aiGatewayMaxAttempts {
+		// Beyond the usual 429/5xx, retry 4xx when the body looks like a
+		// known upstream-flake signature (cicyAi's thinking-mode race —
+		// identical body succeeds on retry).
+		shouldRetry := aiGatewayShouldRetryStatus(resp.StatusCode)
+		var flakeBody []byte
+		if !shouldRetry && resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			isFlake, buf := aiGatewayBodyLooksLikeUpstreamFlake(resp)
+			flakeBody = buf
+			if isFlake {
+				shouldRetry = true
+				log.Printf("[ai-gateway] upstream flake detected provider=%s agent=%s status=%d — will retry", t.provider, t.agentID, resp.StatusCode)
+			}
+		}
+		if !shouldRetry || attempt >= aiGatewayMaxAttempts {
+			if flakeBody != nil {
+				// We already drained the body to peek — restore it for the caller.
+				resp.Body.Close()
+				resp.Body = io.NopCloser(bytes.NewReader(flakeBody))
+				resp.ContentLength = int64(len(flakeBody))
+			}
 			return resp, nil
 		}
 		delay := aiGatewayRetryDelay(resp, attempt)
 		log.Printf("[ai-gateway] retrying provider=%s agent=%s path=%s after upstream status=%d (attempt %d/%d, wait=%s)", t.provider, t.agentID, req.URL.Path, resp.StatusCode, attempt+1, aiGatewayMaxAttempts, delay)
-		io.Copy(io.Discard, resp.Body)
+		if flakeBody == nil {
+			io.Copy(io.Discard, resp.Body)
+		}
 		resp.Body.Close()
 		if !aiGatewaySleep(req.Context().Done(), delay) {
 			if lastErr != nil {

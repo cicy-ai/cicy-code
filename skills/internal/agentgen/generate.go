@@ -1744,41 +1744,50 @@ func renderProxySSHCommands() string {
 func renderAliyunCLISkill() string {
 	return `---
 name: aliyun-cli
-description: Install and configure the official Aliyun CLI on this host. The ` + "`aliyun-cli`" + ` wrapper is bootstrap-only (install / config / apply / status); for every real API call (ECS / VPC / RAM / OSS / …) use the native ` + "`aliyun`" + ` CLI directly.
+description: Install and configure the official Aliyun CLI on this host. The ` + "`aliyun-cli`" + ` wrapper is bootstrap-only (install / config / status); for every real API call (ECS / VPC / RAM / OSS / …) use the native ` + "`aliyun`" + ` CLI directly. The CLI's native config at ~/.aliyun/config.json is the single source of truth — no intermediate JSON.
 ---
 
 # Aliyun CLI
 
 > **Two different commands. Pick the right one:**
 >
-> - ` + "`aliyun-cli`" + ` — **bootstrap wrapper only**. Four subcommands: ` + "`install`" + ` / ` + "`config`" + ` / ` + "`apply`" + ` / ` + "`status`" + `. **Nothing else.**
-> - ` + "`aliyun`" + ` — **the official Aliyun CLI**. Use this for every real API call: ECS, VPC, RAM, OSS, RDS, security groups, … Once ` + "`aliyun-cli apply`" + ` has been run, ` + "`aliyun`" + ` reads its own state — the wrapper is no longer in the loop.
+> - ` + "`aliyun-cli`" + ` — **bootstrap wrapper only**. Three subcommands: ` + "`install`" + ` / ` + "`config`" + ` / ` + "`status`" + `. **Nothing else.**
+> - ` + "`aliyun`" + ` — **the official Aliyun CLI**. Use this for every real API call: ECS, VPC, RAM, OSS, RDS, security groups, …
 >
 > If a task is "install / set up credentials / check setup state" → use ` + "`aliyun-cli`" + `.
 > If a task is "do anything against the Aliyun API" → use ` + "`aliyun`" + ` directly.
 > **The wrapper does NOT proxy ` + "`aliyun ecs ...`" + ` calls. Do not try ` + "`aliyun-cli ecs ...`" + `.**
 
-The wrapper has exactly four jobs:
+The wrapper has exactly three jobs:
 
 1. ` + "`install`" + ` — download the official ` + "`aliyun`" + ` binary into ` + "`~/.local/bin`" + `.
-2. ` + "`config`" + ` — open the bootstrap JSON in code-server so the user can fill in id/secret. Auto-creates a placeholder if missing.
-3. ` + "`apply`" + ` — push the JSON into the ` + "`aliyun`" + ` CLI's default profile (one-shot bootstrap).
-4. ` + "`status`" + ` — report install / config state (with the AccessKey id masked).
+2. ` + "`config`" + ` — open the CLI's native config (` + "`~/.aliyun/config.json`" + `) in code-server so the user can fill in id/secret. Auto-creates a native-format placeholder if the file is missing.
+3. ` + "`status`" + ` — report install state + active profile (AccessKey id masked).
+
+There is intentionally **no intermediate JSON** at ` + "`~/cicy-ai/db/aliyun.json`" + ` and **no ` + "`apply`" + ` step**. ` + "`~/.aliyun/config.json`" + ` is the CLI's own native config and is the single source of truth — once the user fills it in, ` + "`aliyun`" + ` reads from it directly on every invocation.
 
 ## Credentials: hard rules
 
-- **NEVER cat / Read / grep / print** the bootstrap JSON or ` + "`~/.aliyun/config.json`" + `. Their contents are user secrets — the wrapper is the only thing that touches them.
-- When credentials are missing, run ` + "`aliyun-cli config`" + `. It auto-creates a placeholder JSON (chmod 600, literal ` + "`<paste-your-...-here>`" + ` placeholders) and opens it in code-server. **Do not ask the user to paste the AccessKey id or secret into chat.**
-- After the user saves the file, run ` + "`aliyun-cli apply`" + ` to push the values into the ` + "`aliyun`" + ` CLI's default profile. The wrapper reads the JSON for you; you do not.
-- Once ` + "`apply`" + ` succeeds the official CLI persists credentials in its own state and the bootstrap JSON is no longer needed at runtime — every later ` + "`aliyun ecs / vpc / ram ...`" + ` call reads from there.
+- **NEVER cat / Read / grep / print** ` + "`~/.aliyun/config.json`" + `. The contents are user secrets — the wrapper is the only thing that touches them.
+- When credentials are missing, run ` + "`aliyun-cli config`" + `. It auto-creates a native-format placeholder (chmod 600, literal ` + "`<paste-your-...-here>`" + ` placeholders) and opens it in code-server. **Do not ask the user to paste the AccessKey id or secret into chat.**
+- After the user saves the file, ` + "`aliyun`" + ` immediately picks it up — no ` + "`apply`" + ` step needed. Run ` + "`aliyun-cli status`" + ` to confirm.
 
-## Placeholder JSON shape (illustrative — never Read the live file)
+## Native config shape (` + "`~/.aliyun/config.json`" + `, aliyun CLI's own format — never Read the live file)
 
 ` + "```json" + `
 {
-  "access_key_id": "<paste-your-access-key-id-here>",
-  "access_key_secret": "<paste-your-access-key-secret-here>",
-  "region_id": "us-west-1"
+  "current": "default",
+  "profiles": [
+    {
+      "name": "default",
+      "mode": "AK",
+      "access_key_id": "<paste-your-access-key-id-here>",
+      "access_key_secret": "<paste-your-access-key-secret-here>",
+      "region_id": "us-west-1",
+      "output_format": "json",
+      "language": "en"
+    }
+  ]
 }
 ` + "```" + `
 
@@ -1787,18 +1796,17 @@ The wrapper has exactly four jobs:
 Use this skill when the task involves:
 
 - Installing the Aliyun CLI on a fresh host
-- Bootstrapping credentials (` + "`config`" + ` → user fills in → ` + "`apply`" + `)
+- Bootstrapping credentials (` + "`config`" + ` → user fills in → done)
 - Confirming the current binary version, profile, and (masked) AK in use
-- Running any Aliyun API call after ` + "`apply`" + ` is done (via plain ` + "`aliyun ...`" + `)
+- Running any Aliyun API call (via plain ` + "`aliyun ...`" + ` directly)
 
 ## Rules
 
-1. **Right tool for the job.** ` + "`aliyun-cli`" + ` = install/bootstrap only (4 subcommands). ` + "`aliyun`" + ` = every real API call. Never try to invoke an Aliyun API through ` + "`aliyun-cli`" + ` — it has no such subcommand and will reject it.
+1. **Right tool for the job.** ` + "`aliyun-cli`" + ` = install/bootstrap only. ` + "`aliyun`" + ` = every real API call. Never try to invoke an Aliyun API through ` + "`aliyun-cli`" + ` — it has no such subcommand and will reject it.
 2. If ` + "`aliyun`" + ` is not on PATH, run ` + "`aliyun-cli install`" + ` first.
-3. If ` + "`status`" + ` shows the config is missing or a placeholder, run ` + "`aliyun-cli config`" + ` and let the user fill it in in code-server. Do not ask for credentials in chat.
-4. After the user saves, run ` + "`aliyun-cli apply`" + `. Re-run it any time the JSON changes.
-5. For real API work, call ` + "`aliyun`" + ` directly — e.g. ` + "`aliyun ecs DescribeInstances --region us-west-1`" + `. Do not wrap those calls inside ` + "`aliyun-cli`" + `.
-6. Never echo the access-key id or secret. ` + "`status`" + ` masks the id and never prints the secret — trust the wrapper's output, do not re-read the file yourself.
+3. If ` + "`status`" + ` shows the config is missing or has placeholder values, run ` + "`aliyun-cli config`" + ` and let the user fill it in via code-server. Do not ask for credentials in chat.
+4. For real API work, call ` + "`aliyun`" + ` directly — e.g. ` + "`aliyun ecs DescribeInstances --region us-west-1`" + `. Do not wrap those calls inside ` + "`aliyun-cli`" + `.
+5. Never echo the access-key id or secret. ` + "`status`" + ` masks the id and never prints the secret — trust the wrapper's output, do not re-read the file yourself.
 
 ## Help
 
@@ -1817,40 +1825,46 @@ func renderAliyunCLIHelp() string {
 
 | Command | Purpose | Subcommands |
 |---|---|---|
-| ` + "`aliyun-cli`" + ` | **Bootstrap only** — install binary, edit/apply config, report status | ` + "`install`" + ` / ` + "`config`" + ` / ` + "`apply`" + ` / ` + "`status`" + ` |
+| ` + "`aliyun-cli`" + ` | **Bootstrap only** — install binary, edit config, report status | ` + "`install`" + ` / ` + "`config`" + ` / ` + "`status`" + ` |
 | ` + "`aliyun`" + ` | **Native Aliyun CLI** — every real API call goes here | ` + "`ecs`" + ` / ` + "`vpc`" + ` / ` + "`ram`" + ` / ` + "`oss`" + ` / ` + "`rds`" + ` / … |
 
-Once ` + "`aliyun-cli apply`" + ` has succeeded, the wrapper is out of the loop — ` + "`aliyun`" + ` reads its own state.
+The aliyun CLI's own native config at ` + "`~/.aliyun/config.json`" + ` is the single source of truth — no middleware JSON, no ` + "`apply`" + ` step.
 
 ## Bootstrap flow
 
-1. ` + "`aliyun-cli status`" + ` — confirms whether the binary is installed and whether credentials are ready.
-2. ` + "`aliyun-cli config`" + ` — opens the bootstrap JSON in code-server (auto-creates a placeholder if missing). The user types the AccessKey id and secret directly into the file and saves. **Do not ask for the AK in chat.**
-3. ` + "`aliyun-cli apply`" + ` — applies the JSON to the ` + "`default`" + ` profile via ` + "`aliyun configure set --profile default --mode AK ...`" + `.
-4. Done — every later ` + "`aliyun ecs / vpc / ram ...`" + ` call reads from the CLI's own state.
+1. ` + "`aliyun-cli status`" + ` — confirms whether the binary is installed and whether the active profile has real credentials.
+2. ` + "`aliyun-cli config`" + ` — opens ` + "`~/.aliyun/config.json`" + ` in code-server (auto-creates a native-format placeholder if missing). The user types the AccessKey id and secret directly into the ` + "`default`" + ` profile and saves. **Do not ask for the AK in chat.**
+3. Done — every ` + "`aliyun ecs / vpc / ram ...`" + ` call reads from the file immediately, no apply needed.
 
 ## Examples
 
-- list ECS instances (after apply): ` + "`aliyun ecs DescribeInstances --region us-west-1`" + `
-- authorize a security group port (after apply): ` + "`aliyun ecs AuthorizeSecurityGroup --region us-west-1 --SecurityGroupId sg-... --IpProtocol tcp --PortRange 80/80 --SourceCidrIp 0.0.0.0/0`" + `
+- list ECS instances: ` + "`aliyun ecs DescribeInstances --region us-west-1`" + `
+- authorize a security group port: ` + "`aliyun ecs AuthorizeSecurityGroup --region us-west-1 --SecurityGroupId sg-... --IpProtocol tcp --PortRange 80/80 --SourceCidrIp 0.0.0.0/0`" + `
 
-## Placeholder JSON shape (illustrative — never Read the live file)
+## Native config shape (` + "`~/.aliyun/config.json`" + ` — illustrative, never Read the live file)
 
 ` + "```json" + `
 {
-  "access_key_id": "<paste-your-access-key-id-here>",
-  "access_key_secret": "<paste-your-access-key-secret-here>",
-  "region_id": "us-west-1"
+  "current": "default",
+  "profiles": [
+    {
+      "name": "default",
+      "mode": "AK",
+      "access_key_id": "<paste-your-access-key-id-here>",
+      "access_key_secret": "<paste-your-access-key-secret-here>",
+      "region_id": "us-west-1",
+      "output_format": "json",
+      "language": "en"
+    }
+  ]
 }
 ` + "```" + `
 
-` + "`region_id`" + ` is optional; defaults to ` + "`cn-hangzhou`" + ` when missing.
-
 ## Rules
 
-- **Never** ` + "`cat`" + `, ` + "`Read`" + `, ` + "`grep`" + ` or otherwise print the bootstrap JSON or ` + "`~/.aliyun/config.json`" + `. The wrapper is the only component that touches them.
-- The wrapper does **not** proxy ` + "`aliyun ecs ...`" + ` style calls — call the ` + "`aliyun`" + ` binary directly after ` + "`apply`" + `.
-- If the user changes the config, re-run ` + "`aliyun-cli apply`" + ` so the CLI picks up the new AK / region.
+- **Never** ` + "`cat`" + `, ` + "`Read`" + `, ` + "`grep`" + ` or otherwise print ` + "`~/.aliyun/config.json`" + `. The wrapper is the only component that touches it.
+- The wrapper does **not** proxy ` + "`aliyun ecs ...`" + ` style calls — call the ` + "`aliyun`" + ` binary directly.
+- Edits to the config take effect immediately (the CLI re-reads on every invocation). No ` + "`apply`" + ` step.
 - ` + "`status`" + ` already masks the AK and never prints the secret; trust its output.
 
 ## More
@@ -1897,16 +1911,34 @@ The ` + "`from_address`" + ` must be from a domain you verified in Resend (or ` 
 3. ` + "`email send --to <addr> --subject \"…\" --body \"…\"`" + ` — fire off a message.
 4. Resend returns an ` + "`id`" + ` on success; the wrapper prints it.
 
-### How the user obtains the credentials
+### Requirements the user must satisfy (the agent cannot do these)
 
-If the user has never used Resend before, walk them through this. They do these steps themselves — you do **not** receive or read the credentials.
+The user picks ONE of the two paths below. Walk them through the steps in chat; **never ask them to paste the api_key back to you** — they edit the file directly.
 
-1. Go to **[resend.com/signup](https://resend.com/signup)** and create a free account (no credit card).
-2. Open **[resend.com/api-keys](https://resend.com/api-keys)** → click *Create API Key* → copy the ` + "`re_xxxxxxxx…`" + ` value into the ` + "`api_key`" + ` field of the open config.
-3. Pick a ` + "`from_address`" + `:
-   - **Quick test** — use ` + "`onboarding@resend.dev`" + `. This is Resend's shared sandbox sender; it can only mail back to the address the user signed up with.
-   - **Production** — open **[resend.com/domains](https://resend.com/domains)** → *Add Domain* → add the required DNS records → wait for verification → use any address on that domain (e.g. ` + "`noreply@your-domain.com`" + `).
-4. Save the file, then run ` + "`email status`" + ` to confirm it reads as ready.
+**Path 1 — Sandbox (no domain needed, mail only to themselves)**
+
+1. Sign up at [resend.com/signup](https://resend.com/signup) (free, no credit card).
+2. Create API key at [resend.com/api-keys](https://resend.com/api-keys) → copy ` + "`re_xxxxxxxx…`" + `.
+3. In the opened ` + "`email.json`" + `:
+   - ` + "`api_key`" + ` = the ` + "`re_xxx`" + ` value
+   - ` + "`from_address`" + ` = ` + "`onboarding@resend.dev`" + `
+4. **Limitation**: Resend's sandbox sender only delivers to the email used at signup. Any other recipient → 403.
+
+**Path 2 — Production (own domain, mail anyone)**
+
+1. Have a domain (Namecheap / Cloudflare / GoDaddy / any registrar).
+2. Sign up at [resend.com/signup](https://resend.com/signup).
+3. Add the domain at [resend.com/domains](https://resend.com/domains) → *Add Domain*. Resend displays 3 TXT records to add at the domain's DNS:
+   - **SPF** (root, type=TXT) — ` + "`v=spf1 include:_spf.resend.com ~all`" + `. If the domain already has an SPF record, **merge** — keep existing includes and add ` + "`include:_spf.resend.com`" + ` (only one SPF record allowed per domain).
+   - **DKIM** (host=` + "`resend._domainkey`" + `, type=TXT) — the long public-key string Resend gives.
+   - **DMARC** (host=` + "`_dmarc`" + `, type=TXT) — ` + "`v=DMARC1; p=none; rua=mailto:<their-email>`" + `.
+4. Wait 5–15 min for DNS to propagate; Resend's domain page must show "verified" (all three green).
+5. Create API key at [resend.com/api-keys](https://resend.com/api-keys) → copy ` + "`re_xxxxxxxx…`" + `.
+6. In ` + "`email.json`" + `:
+   - ` + "`api_key`" + ` = the ` + "`re_xxx`" + ` value
+   - ` + "`from_address`" + ` = any address on the verified domain (e.g. ` + "`noreply@your-domain.com`" + `)
+
+Confirm: ` + "`email status`" + ` → ` + "`config: ready`" + `. If Gmail still bounces with SPF/DKIM errors after Path 2, the DNS records haven't fully propagated yet — wait longer or check with a DMARC analyzer.
 
 ## Body sources
 
@@ -1948,15 +1980,27 @@ func renderEmailHelp() string {
 2. ` + "`email config`" + ` — auto-creates ` + "`~/cicy-ai/db/email.json`" + ` (chmod 600) and opens it in code-server. The user pastes the Resend api_key and a verified ` + "`from_address`" + ` into the file directly. Do not ask for the api_key in chat.
 3. ` + "`email send --to user@example.com --subject \"hello\" --body \"world\"`" + ` — send a one-shot plain-text email.
 
-### Getting Resend credentials (for first-time users)
+### Getting Resend credentials (first-time users do this themselves)
 
-1. **Sign up**: [resend.com/signup](https://resend.com/signup) — free tier, no credit card.
-2. **API key**: [resend.com/api-keys](https://resend.com/api-keys) → *Create API Key* → copy the ` + "`re_xxx…`" + ` value into the ` + "`api_key`" + ` field.
-3. **From address**:
-   - *Quick test* → use ` + "`onboarding@resend.dev`" + ` (Resend's shared sandbox sender; only mails back to your own signup address).
-   - *Production* → [resend.com/domains](https://resend.com/domains) → *Add Domain* → add the DNS records → wait for verification → use ` + "`noreply@your-domain.com`" + `.
+**Sandbox path** (no domain — only mails the signup address):
 
-` + "`email config`" + ` also prints these steps to the terminal whenever it creates the placeholder.
+1. [resend.com/signup](https://resend.com/signup) → free, no credit card.
+2. [resend.com/api-keys](https://resend.com/api-keys) → *Create API Key* → copy ` + "`re_xxx…`" + ` into ` + "`api_key`" + `.
+3. ` + "`from_address`" + ` = ` + "`onboarding@resend.dev`" + ` (sandbox; 403 if you try to send anywhere except your own signup email).
+
+**Production path** (own domain — mail anyone):
+
+1. Have a domain (any registrar).
+2. [resend.com/signup](https://resend.com/signup), then [resend.com/domains](https://resend.com/domains) → *Add Domain*.
+3. Resend gives 3 TXT records — add at the domain's DNS:
+   - **SPF**: ` + "`v=spf1 include:_spf.resend.com ~all`" + ` (merge with any existing SPF — one record per domain).
+   - **DKIM**: at host ` + "`resend._domainkey`" + `, value = public key string from Resend.
+   - **DMARC**: at host ` + "`_dmarc`" + `, value = ` + "`v=DMARC1; p=none; rua=mailto:<your-email>`" + `.
+4. Wait until Resend shows the domain "verified" (~5–15 min after DNS propagation).
+5. [resend.com/api-keys](https://resend.com/api-keys) → copy ` + "`re_xxx…`" + ` into ` + "`api_key`" + `.
+6. ` + "`from_address`" + ` = any address on the verified domain.
+
+` + "`email config`" + ` prints both paths to the terminal whenever it creates the placeholder, so this is also visible from inside a session.
 
 ## Send flag reference
 
@@ -1993,12 +2037,15 @@ func renderEmailCommands() string {
 
 | Command | What it does |
 |---------|--------------|
-| ` + "`email config`" + ` | Open the bootstrap JSON in code-server (auto-creates placeholder when missing) |
-| ` + "`email status`" + ` | Show config state, masked api_key, configured from_address |
-| ` + "`email send --to <addr> --subject <text> --body <text>`" + ` | Send a plain-text email via Resend |
-| ` + "`email send --to <addr> --subject <text> --html <html>`" + ` | Send an HTML email |
-| ` + "`email send --to <addr> --subject <text> --body-file <path>`" + ` | Read the body from a file |
-| ` + "`email send --to <addr> --subject <text> --from <addr>`" + ` | Override the configured from_address |
+| ` + "`email config`" + ` | Open the bootstrap JSON in code-server (auto-creates a placeholder when missing) |
+| ` + "`email status`" + ` | Show config state (api_key masked) and current from_address |
+| ` + "`email send --to <addr> --subject \"<text>\" --body \"<text>\"`" + ` | Send a plain-text email |
+| ` + "`email send --to user@example.com --subject \"hello\" --body \"world\"`" + ` | Concrete send example |
+| ` + "`email send --to <addr> --subject \"<text>\" --html \"<html>\"`" + ` | Send an HTML email |
+| ` + "`email send --to <addr> --subject \"<text>\" --html \"<h1>Hi</h1><p>...</p>\"`" + ` | Concrete HTML example |
+| ` + "`email send --to <addr> --subject \"<text>\" --body-file /tmp/report.txt`" + ` | Read the plain-text body from a file |
+| ` + "`email send --to <addr> --subject \"<text>\" --from <addr>`" + ` | Override the configured from_address (must be a verified domain) |
+| ` + "`echo \"build done at $(date)\" | email send --to <addr> --subject \"build\"`" + ` | Pipe stdin into the body |
 `
 }
 
@@ -2007,232 +2054,181 @@ func renderAliyunCLICommands() string {
 
 | Command | What it does |
 |---------|--------------|
-| ` + "`aliyun-cli install`" + ` | Download the official Aliyun CLI binary into ~/.local/bin |
-| ` + "`aliyun-cli config`" + ` | Open the bootstrap JSON in code-server (auto-creates placeholder when missing) |
-| ` + "`aliyun-cli apply`" + ` | Push the bootstrap JSON into the CLI default profile |
-| ` + "`aliyun-cli status`" + ` | Show binary version, config state (masked), and active profile |
-| ` + "`aliyun version`" + ` | Print the official Aliyun CLI version |
+| ` + "`aliyun-cli install`" + ` | Install the official aliyun CLI binary |
+| ` + "`aliyun-cli config`" + ` | Open ~/.aliyun/config.json in code-server to enter credentials |
+| ` + "`aliyun-cli status`" + ` | Show CLI version and active profile |
 | ` + "`aliyun configure list`" + ` | List configured profiles |
 | ` + "`aliyun ecs DescribeRegions`" + ` | List all Aliyun ECS regions |
+| ` + "`aliyun ecs DescribeInstances --region us-west-1`" + ` | List ECS instances in a region |
+| ` + "`aliyun ecs DescribeInstanceAttribute --InstanceId i-xxx --region us-west-1`" + ` | Show one ECS instance's full details |
+| ` + "`aliyun ecs StartInstance --InstanceId i-xxx --region us-west-1`" + ` | Start an ECS instance |
+| ` + "`aliyun ecs StopInstance --InstanceId i-xxx --region us-west-1`" + ` | Stop an ECS instance |
+| ` + "`aliyun ecs RebootInstance --InstanceId i-xxx --region us-west-1`" + ` | Reboot an ECS instance |
+| ` + "`aliyun ecs DescribeSecurityGroupAttribute --SecurityGroupId sg-xxx --region us-west-1`" + ` | List ingress rules of a security group |
+| ` + "`aliyun ecs AuthorizeSecurityGroup --SecurityGroupId sg-xxx --region us-west-1 --IpProtocol tcp --PortRange 80/80 --SourceCidrIp 0.0.0.0/0`" + ` | Open one inbound port on a security group |
+| ` + "`aliyun ecs RevokeSecurityGroup --SecurityGroupId sg-xxx --region us-west-1 --IpProtocol tcp --PortRange 80/80 --SourceCidrIp 0.0.0.0/0`" + ` | Revoke a previously-opened port rule |
+| ` + "`aliyun ecs DescribeDisks --region us-west-1`" + ` | List ESSD / cloud disks in a region |
+| ` + "`aliyun ecs DescribeSnapshots --region us-west-1`" + ` | List snapshots in a region |
+| ` + "`aliyun ecs DescribeKeyPairs --region us-west-1`" + ` | List SSH key pairs in a region |
+| ` + "`aliyun ecs DescribeAvailableResource --RegionId us-west-1 --DestinationResource InstanceType --SpotStrategy SpotAsPriceGo`" + ` | Show spot-available instance types in a region |
+| ` + "`aliyun vpc DescribeVpcs --region us-west-1`" + ` | List VPCs in a region |
+| ` + "`aliyun vpc DescribeEipAddresses --region us-west-1`" + ` | List elastic IP addresses in a region |
+| ` + "`aliyun oss ls oss://your-bucket/`" + ` | List objects in an OSS bucket |
+| ` + "`aliyun oss cp ./local.file oss://your-bucket/path/`" + ` | Upload a local file to OSS |
+| ` + "`aliyun ram ListUsers`" + ` | List RAM (IAM) users |
 `
 }
 
 func renderCFTunnelCommands() string {
 	return `# Cf Tunnel Commands
 
-## Main
-
-- ` + "`cf-tunnel list`" + `
-- ` + "`cf-tunnel add <port> [port2 ...]`" + `
-- ` + "`cf-tunnel del <port> [port2 ...]`" + `
-
-## Environment
-
-- default environment: ` + "`prod`" + `
-- override environment: ` + "`CF_ENV=dev cf-tunnel list`" + `
-- override environment: ` + "`CF_ENV=dev cf-tunnel add 5174 8010 13000`" + `
-
-## Notes
-
-- hostnames follow the pattern ` + "`g-<port>.<domain>`" + `
-- the command reads Cloudflare config from ` + "`~/cicy-ai/global.json`" + `
-- it manages tunnel routes and DNS records, not the ` + "`cloudflared`" + ` process
+| Command | What it does |
+|---------|--------------|
+| ` + "`cf-tunnel list`" + ` | List configured tunnel routes (prod environment) |
+| ` + "`cf-tunnel add <port>`" + ` | Add a tunnel route for one port |
+| ` + "`cf-tunnel add 5174`" + ` | Add a route for port 5174 |
+| ` + "`cf-tunnel add 5174 8010 13000`" + ` | Add routes for multiple ports at once |
+| ` + "`cf-tunnel del <port>`" + ` | Remove a tunnel route by port |
+| ` + "`cf-tunnel del 5174`" + ` | Remove the route for port 5174 |
+| ` + "`CF_ENV=dev cf-tunnel list`" + ` | List routes in the dev environment |
+| ` + "`CF_ENV=dev cf-tunnel add 5174`" + ` | Add a dev-environment route |
+| ` + "`CF_ENV=dev cf-tunnel del 5174`" + ` | Remove a dev-environment route |
 `
 }
 
 func renderCPingCommands() string {
 	return `# cping Commands
 
-## Main
-
-- ` + "`cping <domain_or_ip>`" + `
-
-## Examples
-
-- ` + "`cping tn.cicy-ai.com`" + `
-- ` + "`cping 35.241.97.128`" + `
-- ` + "`cping baidu.com`" + `
-
-## Notes
-
-- the command may resolve a hostname to an IP before reporting results
-- the output is a quick latency snapshot from this host's perspective
-- use it as a first-pass network check before deeper debugging
+| Command | What it does |
+|---------|--------------|
+| ` + "`cping baidu.com`" + ` | Probe latency to baidu.com from this host (China-edge sanity) |
+| ` + "`cping google.com`" + ` | Probe Google reachability (cross-border check) |
+| ` + "`cping github.com`" + ` | Probe GitHub reachability |
+| ` + "`cping cf.cicy-ai.com`" + ` | Probe our Cloudflare-fronted edge |
+| ` + "`cping tn.cicy-ai.com`" + ` | Probe our Cloudflare tunnel host |
+| ` + "`cping 8.8.8.8`" + ` | Probe an IP directly (skips DNS) |
+| ` + "`cping 1.1.1.1`" + ` | Probe Cloudflare's public DNS |
 `
 }
 
 func renderGlobalAPITokenCommands() string {
 	return `# Global API Token Commands
 
-## Main
-
-- ` + "`globalApiToken show`" + `
-- ` + "`globalApiToken refresh`" + `
-
-## Notes
-
-- both commands operate on ` + "`~/cicy-ai/global.json`" + `
-- ` + "`show`" + ` prints the current ` + "`api_token`" + `
-- ` + "`refresh`" + ` generates a new token and writes it back to ` + "`~/cicy-ai/global.json`" + `
+| Command | What it does |
+|---------|--------------|
+| ` + "`globalApiToken show`" + ` | Print the current api_token from ~/cicy-ai/global.json |
+| ` + "`globalApiToken refresh`" + ` | Generate a new api_token and write it back |
 `
 }
 
 func renderFRPServerCommands() string {
 	return `# FRP Server Commands
 
-## Main
-
-- ` + "`frp-server start [--config PATH] [--bin PATH]`" + `
-- ` + "`frp-server run [--config PATH] [--bin PATH]`" + `
-- ` + "`frp-server stop`" + `
-- ` + "`frp-server restart [--config PATH] [--bin PATH]`" + `
-- ` + "`frp-server status [--config PATH] [--bin PATH]`" + `
-- ` + "`frp-server connections`" + `
-- ` + "`frp-server clients`" + `
-- ` + "`frp-server reload [--config PATH] [--bin PATH]`" + `
-- ` + "`frp-server logs [N]`" + `
-- ` + "`frp-server raw -- <real frps args...>`" + `
-
-## Defaults
-
-- config search: ` + "`~/data/frp/frps.toml`" + `, ` + "`~/data/frp/frps.yaml`" + `, ` + "`~/data/frp/frps.yml`" + `, ` + "`~/data/frp/frps.ini`" + `
-- binary search: ` + "`frps`" + ` on PATH, then common local install locations
-- state dir: ` + "`~/.local/state/cicy-skills/frp/server`" + `
-
-## Port Plan
-
-- use ` + "`bindPort = 9500`" + ` for the public FRP control port
-- keep ` + "`9500/tcp`" + ` open in the firewall for remote clients
-- assign ` + "`remotePort`" + ` from ` + "`9501`" + ` upward
-- reserve ` + "`9501`" + ` as the first smoke-test or bootstrap proxy port
-
-## Notes
-
-- ` + "`start`" + ` runs the server in the background and records pid/config/log state
-- when ` + "`auth.token`" + ` is missing, ` + "`start`" + ` generates a random token automatically
-- ` + "`status`" + ` reports pid, config path, log path, bind address, dashboard address, and live listeners when available
-- ` + "`connections`" + ` reports current process sockets for the live FRP server
-- ` + "`reload`" + ` attempts native reload first and falls back to restart when needed
+| Command | What it does |
+|---------|--------------|
+| ` + "`frp-server start`" + ` | Start frps in the background |
+| ` + "`frp-server stop`" + ` | Stop the running frps |
+| ` + "`frp-server restart`" + ` | Stop then start |
+| ` + "`frp-server status`" + ` | Show pid, config path, bind address, dashboard address |
+| ` + "`frp-server reload`" + ` | Hot-reload config (falls back to restart when needed) |
+| ` + "`frp-server connections`" + ` | List active client connections |
+| ` + "`frp-server clients`" + ` | Alias of connections |
+| ` + "`frp-server logs`" + ` | Tail the last 100 log lines |
+| ` + "`frp-server logs 500`" + ` | Tail the last 500 log lines |
+| ` + "`frp-server logs -f`" + ` | Follow the log live |
+| ` + "`frp-server start --config /path/to/frps.toml`" + ` | Start with a non-default config path |
+| ` + "`frp-server start --bin /path/to/frps`" + ` | Start using a non-default frps binary |
+| ` + "`frp-server raw -- version`" + ` | Pass arbitrary args straight to the underlying frps binary |
 `
 }
 
 func renderFRPClientCommands() string {
 	return `# FRP Client Commands
 
-## Main
-
-- ` + "`frp-client start [--config PATH] [--bin PATH]`" + `
-- ` + "`frp-client run [--config PATH] [--bin PATH]`" + `
-- ` + "`frp-client stop`" + `
-- ` + "`frp-client restart [--config PATH] [--bin PATH]`" + `
-- ` + "`frp-client status [--config PATH] [--bin PATH]`" + `
-- ` + "`frp-client connections`" + `
-- ` + "`frp-client reload [--config PATH] [--bin PATH]`" + `
-- ` + "`frp-client logs [N]`" + `
-- ` + "`frp-client raw -- <real frpc args...>`" + `
-
-## Remote Management Over SSH
-
-- ` + "`ssh ton-mac '~/.local/bin/frpc status -c ~/.config/frp/frpc.toml'`" + `
-- ` + "`ssh ton-mac 'tail -100 ~/.local/frp/frpc.log'`" + `
-- ` + "`ssh ton-mac 'sed -n \"1,160p\" ~/.config/frp/frpc.toml'`" + `
-- ` + "`ssh ton-mac 'launchctl kickstart -k \"gui/$(id -u)/com.cicy.frpc\"'`" + `
-- ` + "`ssh my-linux 'sudo systemctl restart frpc-cicy-$USER.service'`" + `
-
-## Notes
-
-- local wrapper commands manage the current host's own frpc process
-- for a client machine reached through FRP SSH, manage its frpc through ` + "`ssh <host> '<cmd>'`" + `
-- prefer the remote machine's native service manager over ad-hoc background shell jobs
+| Command | What it does |
+|---------|--------------|
+| ` + "`frp-client start`" + ` | Start frpc in the background |
+| ` + "`frp-client stop`" + ` | Stop the running frpc |
+| ` + "`frp-client restart`" + ` | Stop then start |
+| ` + "`frp-client status`" + ` | Show pid, config path, server addr, active proxies |
+| ` + "`frp-client reload`" + ` | Hot-reload config (falls back to restart when needed) |
+| ` + "`frp-client connections`" + ` | List currently active proxy connections |
+| ` + "`frp-client logs`" + ` | Tail the last 100 log lines |
+| ` + "`frp-client logs 500`" + ` | Tail the last 500 log lines |
+| ` + "`frp-client logs -f`" + ` | Follow the log live |
+| ` + "`frp-client start --config /path/to/frpc.toml`" + ` | Start with a non-default config path |
+| ` + "`frp-client start --bin /path/to/frpc`" + ` | Start using a non-default frpc binary |
+| ` + "`frp-client raw -- version`" + ` | Pass arbitrary args straight to the frpc binary |
+| ` + "`ssh <host> '~/.local/bin/frpc status -c ~/.config/frp/frpc.toml'`" + ` | Inspect a remote machine's frpc state over SSH |
+| ` + "`ssh <host> 'tail -100 ~/.local/frp/frpc.log'`" + ` | Tail the remote frpc log over SSH |
+| ` + "`ssh <host> 'sudo systemctl restart frpc-cicy-$USER.service'`" + ` | Restart the remote frpc service unit |
+| ` + "`ssh <host> 'launchctl kickstart -k \"gui/$(id -u)/com.cicy.frpc\"'`" + ` | Restart frpc on a macOS host via launchd |
 `
 }
 
 func renderTMCommands() string {
-	return `# cicy-agent Command Reference
+	return `# cicy-agent Commands
 
-This skill uses the local ` + "`cicy-agent`" + ` command from ` + "`PATH`" + `.
-
-## Main
-
-Use `+"`cicy-agent`"+` for local pane work:
-
-- `+"`cicy-agent ls`"+`
-- `+"`cicy-agent capture w-10001`"+`
-- `+"`cicy-agent msg w-10001 \"hello\"`"+`
-- `+"`cicy-agent send-keys w-10001 Enter`"+`
-- `+"`cicy-agent create my-pane`"+`
-- `+"`cicy-agent restart`"+`
-- `+"`cicy-agent clear w-10001`"+`
-
-Multi-node examples:
-
-- `+"`cicy-agent ls`"+` -> use configured default target
-- `+"`cicy-agent --node dev ls`"+` -> use the `+"`dev`"+` node config
-- `+"`TM_NODE=dev cicy-agent capture w-10001`"+` -> target `+"`dev`"+`
-- `+"`TM_API_BASE=http://127.0.0.1:8021 cicy-agent capture w-10001`"+` -> bypass node selection
-
-Supported `+"`~/cicy-ai/db/cicy-agent.json`"+` keys:
-
-- `+"`default`"+`
-- `+"`api | api_base | url`"+`
-- `+"`port`"+`
-- `+"`nodes.<name>.api | api_base | url`"+`
-- `+"`nodes.<name>.api_token`"+`
-- `+"`nodes.<name>.token`"+` for legacy compatibility
-- `+"`nodes.<name>.port`"+`
-
-Observed `+"`cicy-agent`"+` commands:
-
-- `+"`ls`"+`
-- `+"`tree`"+`
-- `+"`windows`"+`
-- `+"`capture <pane>`"+`
-- `+"`msg <pane> <text>`"+`
-- `+"`msg_wait <pane> <text> [timeout]`"+`
-- `+"`send-keys <pane> <keys>`"+`
-- `+"`create <name>`"+`
-- `+"`restart`"+`
-- `+"`clear <pane>`"+`
-
-## Notes
-
-- avoid `+"`fast-api`"+` for tmux work; use `+"`cicy-agent`"+`
-- the common primary pane is `+"`w-10001`"+`
-- config currently uses `+"`TM_*`"+` env vars and `+"`~/cicy-ai/db/cicy-agent.json`"+`
+| Command | What it does |
+|---------|--------------|
+| ` + "`cicy-agent ls`" + ` | List all tmux panes |
+| ` + "`cicy-agent tree`" + ` | Show panes/windows in a tree view |
+| ` + "`cicy-agent windows`" + ` | List tmux windows |
+| ` + "`cicy-agent capture w-10001`" + ` | Capture the content of pane w-10001 |
+| ` + "`cicy-agent capture <pane>`" + ` | Capture any pane's content |
+| ` + "`cicy-agent msg w-10001 \"hello\"`" + ` | Send text to a pane (no Enter) |
+| ` + "`cicy-agent msg <pane> \"<text>\"`" + ` | Send arbitrary text to any pane |
+| ` + "`cicy-agent msg_wait w-10001 \"hello\" 30`" + ` | Send text and wait up to 30s for a reply |
+| ` + "`cicy-agent send-keys w-10001 Enter`" + ` | Send a raw keystroke (e.g. Enter, C-c) |
+| ` + "`cicy-agent send-keys <pane> <keys>`" + ` | Send any tmux key sequence |
+| ` + "`cicy-agent create my-pane`" + ` | Create a new pane |
+| ` + "`cicy-agent clear w-10001`" + ` | Clear a pane's terminal |
+| ` + "`cicy-agent restart`" + ` | Restart cicy-agent itself |
+| ` + "`cicy-agent --node dev ls`" + ` | Run ` + "`ls`" + ` against the ` + "`dev`" + ` remote node |
+| ` + "`cicy-agent --node dev capture w-10001`" + ` | Capture a remote node's pane |
+| ` + "`TM_NODE=dev cicy-agent ls`" + ` | Env-var form to select a remote node |
+| ` + "`TM_API_BASE=http://127.0.0.1:8021 cicy-agent ls`" + ` | Point at a specific api host:port directly |
 `
 }
 
 func renderSSHCommands() string {
-	return `# cicy-ssh Command Reference
+	return `# cicy-ssh Commands
 
-## Config Discovery
-
-- read ` + "`~/.ssh/config`" + `
-- parse ` + "`Host`" + ` entries to list known nodes
-- inspect ` + "`HostName`" + `, ` + "`User`" + `, ` + "`Port`" + `, ` + "`IdentityFile`" + `, and ` + "`ProxyJump`" + `
-
-## Common Commands
-
-- ` + "`ssh <alias>`" + `
-- ` + "`ssh <alias> '<command>'`" + `
-- ` + "`ssh -J <jump-host> <alias>`" + ` when a one-off jump is needed
-- ` + "`ssh -F ~/.ssh/config <alias>`" + ` when you need to force a specific config file
-
-## Editing Rules
-
-- append or edit host blocks surgically
-- do not replace the whole config file
-- keep new host blocks minimal unless the user asks for more options
+| Command | What it does |
+|---------|--------------|
+| ` + "`grep -E '^Host ' ~/.ssh/config`" + ` | List every Host alias configured |
+| ` + "`awk '/^Host /{h=$2}/HostName/{print h\" -> \"$2}' ~/.ssh/config`" + ` | Show alias → HostName mapping |
+| ` + "`ssh -G <alias>`" + ` | Print the effective config for an alias (resolved) |
+| ` + "`ssh <alias>`" + ` | Open an interactive session to a host |
+| ` + "`ssh <alias> '<command>'`" + ` | Run one command remotely and return output |
+| ` + "`ssh <alias> 'uname -a; uptime'`" + ` | Quick remote info dump |
+| ` + "`ssh <alias> 'tail -100 /var/log/syslog'`" + ` | Tail a remote log file |
+| ` + "`ssh -J <jump-host> <alias>`" + ` | Connect through a one-off jump host |
+| ` + "`ssh -p <port> user@host`" + ` | Connect to a host on a non-default port |
+| ` + "`ssh -F ~/.ssh/config <alias>`" + ` | Force a specific config file |
+| ` + "`ssh-copy-id <alias>`" + ` | Push your public key to a host's authorized_keys |
+| ` + "`scp <alias>:/remote/path ./local/path`" + ` | Download a file from a remote host |
+| ` + "`scp ./local/file <alias>:/remote/path/`" + ` | Upload a file to a remote host |
+| ` + "`rsync -av ./local/ <alias>:/remote/`" + ` | Sync a directory to a remote host |
 `
 }
 
 func renderAgentCodeServerTools() string {
-	return `# Agent Code Server Tools
+	return `# Agent Code Server Commands
 
-- ping [page_client_id] -> checks whether the matching :code-ext client is connected
-- list -> lists current page_client_id values and code-server connectivity
-- clients -> legacy alias of list
-- open <path> [page_client_id] -> direct push code.open_file to the page client; supports file:// and line/column suffixes
+| Command | What it does |
+|---------|--------------|
+| ` + "`agent-code-server ping`" + ` | Confirm the code-server extension is online |
+| ` + "`agent-code-server ping <page_client_id>`" + ` | Same, targeting a specific browser tab |
+| ` + "`agent-code-server list`" + ` | Show connected page clients and ext-side WS status |
+| ` + "`agent-code-server open /home/cicy/cicy-ai/global.json`" + ` | Open an absolute file path in the editor |
+| ` + "`agent-code-server open <path>`" + ` | Open any file by absolute path |
+| ` + "`agent-code-server open <path>:42`" + ` | Open at a specific line |
+| ` + "`agent-code-server open <path>:42:7`" + ` | Open at line:column |
+| ` + "`agent-code-server open <path>:42:7-50:1`" + ` | Open and select a range |
+| ` + "`agent-code-server open file:///abs/path/foo.ts`" + ` | Accept file:// URI form too |
+| ` + "`agent-code-server active`" + ` | JSON: path/language/line/column of the focused editor |
+| ` + "`agent-code-server tabs`" + ` | JSON: every open file tab (path, label, isActive, isDirty, group) |
 `
 }
 
@@ -2339,55 +2335,41 @@ When using `+"`--ai`"+`, the tool saves three files to `+"`~/cicy-ai/workers/<ag
 func renderAgentSummaryTools() string {
 	return `# Agent Summary Commands
 
-## Main
-
-- ` + "`agent-summary <agent-id>`" + ` -> generate text summary (default)
-- ` + "`agent-summary <path-to-current.json>`" + ` -> summary from specific file
-- ` + "`agent-summary <agent-id> --stats`" + ` -> show token stats only
-- ` + "`agent-summary <agent-id> --slim`" + ` -> output slim conversation JSON
-- ` + "`agent-summary <agent-id> --text`" + ` -> output structured text for AI
-- ` + "`agent-summary <agent-id> --ai`" + ` -> generate AI summary (default provider)
-- ` + "`agent-summary <agent-id> --ai --provider=<name>`" + ` -> use specific provider
-- ` + "`agent-summary <agent-id> --ai --model=<model>`" + ` -> use specific model
-- ` + "`agent-summary <agent-id> --ai --prompt='<prompt>'`" + ` -> custom prompt
-
-## Notes
-
-- agent-id is the worker ID like ` + "`w-10019`" + `
-- snapshots are at ` + "`~/cicy-ai/workers/<agent-id>/.cicy/history/current.json`" + `
-- supports both Anthropic and OpenAI API formats
-- AI providers configured in ` + "`~/cicy-ai/global.json`" + `
+| Command | What it does |
+|---------|--------------|
+| ` + "`agent-summary w-10019`" + ` | Plain-text summary of an agent's conversation |
+| ` + "`agent-summary <agent-id>`" + ` | Same, for any worker id |
+| ` + "`agent-summary w-10019 --stats`" + ` | Token usage and message count only |
+| ` + "`agent-summary <agent-id> --stats`" + ` | Stats for any worker |
+| ` + "`agent-summary w-10019 --slim`" + ` | Slim conversation JSON (for piping to other tools) |
+| ` + "`agent-summary w-10019 --text`" + ` | Structured plain-text dump (input for further AI processing) |
+| ` + "`agent-summary w-10019 --ai`" + ` | AI-generated handoff document (uses default provider) |
+| ` + "`agent-summary <agent-id> --ai`" + ` | AI handoff for any worker |
+| ` + "`agent-summary w-10019 --ai --provider=deepseek`" + ` | AI summary via deepseek provider |
+| ` + "`agent-summary w-10019 --ai --model=deepseek-chat`" + ` | AI summary with a specific model |
+| ` + "`agent-summary w-10019 --ai --prompt=\"提炼到 5 个要点\"`" + ` | AI summary with a custom prompt |
+| ` + "`agent-summary /path/to/current.json`" + ` | Summarize a specific snapshot file (skip worker-id lookup) |
 `
 }
 
 func renderAgentWebpageTools() string {
-	return `# Agent Webpage Tools
+	return `# Agent Webpage Commands
 
-## Main
-
-- ` + "`agent-webpage help`" + ` -> print usage and guidance
-- ` + "`agent-webpage tools`" + ` -> print this tool map
-- ` + "`agent-webpage ping [client_id]`" + ` -> sends ` + "`webpage_ping`" + ` directly to ` + "`client_id`" + ` and waits for ` + "`webpage_pong`" + `
-- ` + "`agent-webpage ipc-ping [client_id]`" + ` -> sends ` + "`ipc_ping`" + ` directly to ` + "`client_id`" + ` and waits for ` + "`ipc_pong`" + `
-- ` + "`agent-webpage exec-js '<js>' [client_id]`" + ` -> sends ` + "`exec_js`" + ` directly to ` + "`client_id`" + ` and waits for ` + "`exec_js_result`" + `
-- ` + "`agent-webpage current-active-agent-id [client_id]`" + ` -> prints ` + "`devStore.Workspace.activeCliPaneId`" + ` from the live webpage
-- ` + "`agent-webpage current-master-agent-id [client_id]`" + ` -> prints ` + "`devStore.Workspace.masterAgentId`" + ` from the live webpage
-- ` + "`agent-webpage send <type> <data_json> [client_id] [expect_type]`" + ` -> sends a custom event directly to ` + "`client_id`" + ` and waits for a matching websocket response when possible
-- ` + "`agent-webpage clients`" + ` -> lists connected chat/webpage clients
-
-## Response Rules
-
-- ` + "`ping`" + ` waits for ` + "`webpage_pong`" + `
-- ` + "`ipc-ping`" + ` waits for ` + "`ipc_pong`" + `
-- ` + "`exec-js`" + ` waits for ` + "`exec_js_result`" + `
-- ` + "`send`" + ` injects a ` + "`requestId`" + ` when the payload is a JSON object and waits for a response when it can match by ` + "`requestId`" + ` and/or ` + "`expect_type`" + `
-- when a response is captured, print the real response JSON or result body back to the caller
-
-## Notes
-
-- the preferred target is ` + "`client_id`" + ` such as ` + "`web-abc123`" + `
-- if ` + "`client_id`" + ` is omitted, the command only auto-targets when the current worker agent has exactly one connected client
-- the command resolves the owning ` + "`agent_id`" + ` and then talks to the live chat websocket using ` + "`agent_id + client_id`" + `
+| Command | What it does |
+|---------|--------------|
+| ` + "`agent-webpage clients`" + ` | List currently connected webpage / chat clients |
+| ` + "`agent-webpage ping`" + ` | Round-trip ping to the auto-selected webpage client |
+| ` + "`agent-webpage ping <client_id>`" + ` | Ping a specific webpage client (e.g. web-abc123) |
+| ` + "`agent-webpage ipc-ping`" + ` | Ping the desktop-side IPC bridge of the current webpage |
+| ` + "`agent-webpage ipc-ping <client_id>`" + ` | IPC-ping a specific client |
+| ` + "`agent-webpage exec-js 'document.title'`" + ` | Run JS in the webpage and return the result |
+| ` + "`agent-webpage exec-js '<js>' <client_id>`" + ` | Run JS in a specific webpage client |
+| ` + "`agent-webpage exec-js 'location.href' <client_id>`" + ` | Read a specific webpage's location |
+| ` + "`agent-webpage current-active-agent-id`" + ` | Print ` + "`devStore.Workspace.activeCliPaneId`" + ` from the live webpage |
+| ` + "`agent-webpage current-master-agent-id`" + ` | Print ` + "`devStore.Workspace.masterAgentId`" + ` |
+| ` + "`agent-webpage current-active-agent-id <client_id>`" + ` | Same, targeting a specific client |
+| ` + "`agent-webpage send <type> '<data_json>' <client_id>`" + ` | Send a custom WS event to a client and wait for any reply |
+| ` + "`agent-webpage send <type> '<data_json>' <client_id> <expect_type>`" + ` | Send and wait for a specific reply type |
 `
 }
 
@@ -2513,46 +2495,23 @@ func renderCicyMihomoHelp() string {
 }
 
 func renderCicyMihomoCommands() string {
-	return `# Cicy Mihomo Proxy — Command Reference
+	return `# Cicy Mihomo Commands
 
-This skill uses the local ` + "`cicy-mihomo`" + ` command from ` + "`PATH`" + `.
-
-## Lifecycle
-
-- ` + "`cicy-mihomo start`" + ` — start mihomo in the background
-- ` + "`cicy-mihomo stop`" + ` — stop the running mihomo
-- ` + "`cicy-mihomo restart`" + ` — stop then start
-- ` + "`cicy-mihomo reload`" + ` — hot reload the config via the controller API (preferred for config-only changes)
-- ` + "`cicy-mihomo status`" + ` — print pid, binary path, config path, log path, port, controller addr
-
-## Config
-
-- ` + "`cicy-mihomo template`" + ` — print a starter mihomo.yaml to stdout
-- ` + "`cicy-mihomo gen-config`" + ` — write the starter config to ` + "`~/cicy-ai/db/mihomo.yaml`" + ` if absent
-- ` + "`cicy-mihomo show-config`" + ` — print the current config (secrets masked)
-
-## Logs
-
-- ` + "`cicy-mihomo logs`" + ` — print the last 100 lines
-- ` + "`cicy-mihomo logs N`" + ` — print the last N lines
-- ` + "`cicy-mihomo logs -f`" + ` — follow the log live
-
-## Binary
-
-- ` + "`cicy-mihomo install`" + ` — download the platform-matching mihomo binary into ` + "`~/.local/bin/mihomo`" + `
-
-## Speed testing
-
-- ` + "`cicy-mihomo test`" + ` — for each configured proxy node, time HTTP requests to fixed targets (anthropic, google, github, cf) and report per-node summary
-
-## Files / ports
-
-- config:     ` + "`~/cicy-ai/db/mihomo.yaml`" + `
-- pid:        ` + "`~/.local/state/cicy-skills/mihomo/pid`" + `
-- state:      ` + "`~/.local/state/cicy-skills/mihomo/state.json`" + `
-- log:        ` + "`~/.local/state/cicy-skills/mihomo/mihomo.log`" + `
-- proxy port: 9001
-- API:        127.0.0.1:19001
+| Command | What it does |
+|---------|--------------|
+| ` + "`cicy-mihomo install`" + ` | Download the platform-matching mihomo binary to ~/.local/bin/mihomo |
+| ` + "`cicy-mihomo start`" + ` | Start mihomo in the background |
+| ` + "`cicy-mihomo stop`" + ` | Stop the running mihomo |
+| ` + "`cicy-mihomo restart`" + ` | Stop then start |
+| ` + "`cicy-mihomo reload`" + ` | Hot-reload config via the controller API (no restart) |
+| ` + "`cicy-mihomo status`" + ` | Show pid, binary path, config path, log path, port, controller addr |
+| ` + "`cicy-mihomo template`" + ` | Print a starter mihomo.yaml to stdout |
+| ` + "`cicy-mihomo gen-config`" + ` | Write the starter config to ~/cicy-ai/db/mihomo.yaml when missing |
+| ` + "`cicy-mihomo show-config`" + ` | Print the current config (secrets masked) |
+| ` + "`cicy-mihomo logs`" + ` | Tail the last 100 log lines |
+| ` + "`cicy-mihomo logs 500`" + ` | Tail the last 500 log lines |
+| ` + "`cicy-mihomo logs -f`" + ` | Follow the log live |
+| ` + "`cicy-mihomo test`" + ` | Time HTTP requests through every configured proxy node and report per-node latency |
 `
 }
 
@@ -2618,22 +2577,15 @@ After a spot reclaim, just run ` + "`us-spot-proxy`" + ` and the disk is reattac
 func renderUSSpotProxyCommands() string {
 	return `# us-spot-proxy Commands
 
-## Main
-
-- ` + "`us-spot-proxy`" + ` -> provision + attach + configure + test
-- ` + "`us-spot-proxy --destroy`" + ` -> delete instance (keeps disk)
-- ` + "`us-spot-proxy --destroy-all`" + ` -> delete instance AND disk
-
-## After provisioning
-
-- ` + "`cicy-mihomo reload`" + ` -> pick up the new node in local mihomo
-- ` + "`cicy-mihomo test`" + ` -> test all proxy nodes
-- ` + "`ssh us-spot-proxy 'cat /data/mihomo/mihomo.log | tail -20'`" + ` -> check remote logs
-
-## Config sources
-
-- script: ` + "`~/projects/cicy-code/skills/us-spot-proxy`" + `
-- local mihomo: ` + "`~/cicy-ai/db/mihomo.yaml`" + `
-- remote data: ` + "`/data/mihomo/`" + ` on the spot instance
+| Command | What it does |
+|---------|--------------|
+| ` + "`us-spot-proxy`" + ` | Provision a spot instance and attach the persistent data disk |
+| ` + "`us-spot-proxy --destroy`" + ` | Delete the spot instance (keeps the persistent disk) |
+| ` + "`us-spot-proxy --destroy-all`" + ` | Delete BOTH the spot instance and the persistent disk |
+| ` + "`cicy-mihomo reload`" + ` | After provisioning, reload local mihomo so it sees the new node |
+| ` + "`cicy-mihomo test`" + ` | Speed-test all proxy nodes (including the new us-spot one) |
+| ` + "`ssh us-spot-proxy 'tail -20 /data/mihomo/mihomo.log'`" + ` | Tail the remote mihomo log |
+| ` + "`ssh us-spot-proxy 'systemctl status mihomo'`" + ` | Check the remote mihomo systemd unit |
+| ` + "`ssh us-spot-proxy 'df -h /data'`" + ` | Check free space on the persistent data disk |
 `
 }

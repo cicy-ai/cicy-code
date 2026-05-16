@@ -10,9 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
-
-	"github.com/gorilla/websocket"
 )
 
 func TestRunCFTunnelHelpDoesNotRequireConfig(t *testing.T) {
@@ -379,12 +376,9 @@ func TestRunAgentCodeServerList(t *testing.T) {
 
 func TestRunAgentCodeServerOpenPreservesFileURIAndLine(t *testing.T) {
 	var (
-		pushed   map[string]any
-		upgrader = websocket.Upgrader{}
-		wsMu     sync.Mutex
-		wsConn   *websocket.Conn
-		wsReady  = make(chan struct{})
-		wsOnce   sync.Once
+		uxPush     map[string]any  // async push: code.show_files
+		syncPush   map[string]any  // sync push: host.open_file with wait_ack
+		pushMu     sync.Mutex
 	)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/chat/clients", func(w http.ResponseWriter, r *http.Request) {
@@ -395,45 +389,22 @@ func TestRunAgentCodeServerOpenPreservesFileURIAndLine(t *testing.T) {
 			},
 		})
 	})
-	mux.HandleFunc("/api/chat/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			t.Fatalf("Upgrade() error = %v", err)
-		}
-		wsMu.Lock()
-		wsConn = conn
-		wsMu.Unlock()
-		wsOnce.Do(func() { close(wsReady) })
-	})
+	// Unified /api/chat/push handler. Distinguishes by wait_ack flag: async
+	// pushes are UX hints (code.show_files); sync pushes are the actual work
+	// (host.open_file).
 	mux.HandleFunc("/api/chat/push", func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
-		if err := json.NewDecoder(r.Body).Decode(&pushed); err != nil {
-			t.Fatalf("Decode(push) error = %v", err)
+		var pushed map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&pushed)
+		pushMu.Lock()
+		defer pushMu.Unlock()
+		if pushed["wait_ack"] == true {
+			syncPush = pushed
+			_, _ = w.Write([]byte(`{"success":true,"mode":"sync","type":"code.opened","data":{"path":"/home/cicy/projects/cicy-code/Makefile:8:1-14:18"}}`))
+		} else {
+			uxPush = pushed
+			_, _ = w.Write([]byte(`{"success":true,"mode":"direct"}`))
 		}
-		data, _ := pushed["data"].(map[string]any)
-		select {
-		case <-wsReady:
-		case <-time.After(2 * time.Second):
-			t.Fatal("ws not ready during push")
-		}
-		wsMu.Lock()
-		conn := wsConn
-		wsMu.Unlock()
-		if conn == nil {
-			t.Fatal("wsConn is nil during push")
-		}
-		if err := conn.WriteJSON(map[string]any{
-			"type": "code.opened",
-			"data": map[string]any{
-				"requestId":      data["requestId"],
-				"path":           data["path"],
-				"page_client_id": "web-1",
-				"code_client_id": "web-1:code-ext",
-			},
-		}); err != nil {
-			t.Fatalf("WriteJSON(code.opened) error = %v", err)
-		}
-		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -451,30 +422,32 @@ func TestRunAgentCodeServerOpenPreservesFileURIAndLine(t *testing.T) {
 		t.Fatalf("runAgentCodeServer(open) error = %v", err)
 	}
 
-	if got := pushed["type"]; got != "code.open_file" {
-		t.Fatalf("push type = %v, want code.open_file", got)
+	pushMu.Lock()
+	defer pushMu.Unlock()
+	// Async UX nudge went to the page client
+	if got := uxPush["type"]; got != "code.show_files" {
+		t.Fatalf("ux push type = %v, want code.show_files", got)
 	}
-	if got := pushed["client_id"]; got != "web-1" {
-		t.Fatalf("push client_id = %v, want web-1", got)
+	if got := uxPush["client_id"]; got != "web-1" {
+		t.Fatalf("ux push client_id = %v, want web-1", got)
 	}
-	data, _ := pushed["data"].(map[string]any)
+	// Sync push went to the :code-ext client with wait_ack and the normalised path
+	if got := syncPush["type"]; got != "host.open_file" {
+		t.Fatalf("sync push type = %v, want host.open_file", got)
+	}
+	if got := syncPush["client_id"]; got != "web-1:code-ext" {
+		t.Fatalf("sync push client_id = %v, want web-1:code-ext", got)
+	}
+	if got := syncPush["wait_ack"]; got != true {
+		t.Fatalf("sync push wait_ack = %v, want true", got)
+	}
+	data, _ := syncPush["data"].(map[string]any)
 	if got := data["path"]; got != "/home/cicy/projects/cicy-code/Makefile:8:1-14:18" {
-		t.Fatalf("push data.path = %v, want /home/cicy/projects/cicy-code/Makefile:8:1-14:18", got)
+		t.Fatalf("sync push data.path = %v, want /home/cicy/projects/cicy-code/Makefile:8:1-14:18", got)
 	}
-	wsMu.Lock()
-	_ = wsConn.Close()
-	wsMu.Unlock()
 }
 
 func TestRunAgentCodeServerPingWaitsForPong(t *testing.T) {
-	var (
-		upgrader = websocket.Upgrader{}
-		wsMu     sync.Mutex
-		wsConn   *websocket.Conn
-		wsReady  = make(chan struct{})
-		wsOnce   sync.Once
-	)
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/chat/clients", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -484,46 +457,20 @@ func TestRunAgentCodeServerPingWaitsForPong(t *testing.T) {
 			},
 		})
 	})
-	mux.HandleFunc("/api/chat/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			t.Fatalf("Upgrade() error = %v", err)
-		}
-		wsMu.Lock()
-		wsConn = conn
-		wsMu.Unlock()
-		wsOnce.Do(func() { close(wsReady) })
-	})
+	// Unified /api/chat/push with wait_ack:true. Mock just returns a synthetic
+	// `code.pong`-shaped response (in production, the api would block on a
+	// waiter resolved by the extension's WS reply).
 	mux.HandleFunc("/api/chat/push", func(w http.ResponseWriter, r *http.Request) {
 		var pushed map[string]any
 		defer r.Body.Close()
-		if err := json.NewDecoder(r.Body).Decode(&pushed); err != nil {
-			t.Fatalf("Decode(push) error = %v", err)
+		_ = json.NewDecoder(r.Body).Decode(&pushed)
+		if pushed["wait_ack"] != true {
+			t.Fatalf("expected wait_ack=true, got %v", pushed["wait_ack"])
 		}
-		data, _ := pushed["data"].(map[string]any)
-		select {
-		case <-wsReady:
-		case <-time.After(2 * time.Second):
-			t.Fatal("ws not ready during push")
+		if pushed["type"] != "host.ping" {
+			t.Fatalf("expected type=host.ping, got %v", pushed["type"])
 		}
-		wsMu.Lock()
-		conn := wsConn
-		wsMu.Unlock()
-		if conn == nil {
-			t.Fatal("wsConn is nil during push")
-		}
-		if err := conn.WriteJSON(map[string]any{
-			"type": "code.pong",
-			"data": map[string]any{
-				"requestId":      data["requestId"],
-				"page_client_id": "web-1",
-				"code_client_id": "web-1:code-ext",
-				"version":        "test",
-			},
-		}); err != nil {
-			t.Fatalf("WriteJSON(code.pong) error = %v", err)
-		}
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"success":true,"mode":"sync","type":"code.pong","data":{"version":"test","page_client_id":"web-1","code_client_id":"web-1:code-ext"}}`))
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -543,8 +490,4 @@ func TestRunAgentCodeServerPingWaitsForPong(t *testing.T) {
 	if out := stdout.String(); !strings.Contains(out, "收到 code.pong") {
 		t.Fatalf("ping output missing code.pong confirmation: %q", out)
 	}
-
-	wsMu.Lock()
-	_ = wsConn.Close()
-	wsMu.Unlock()
 }

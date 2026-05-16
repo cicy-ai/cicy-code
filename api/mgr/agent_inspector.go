@@ -3363,14 +3363,15 @@ func agentInspectorInjectPrompt(body map[string]interface{}, provider string, ag
 }
 
 func agentInspectorRewriteRequestBody(provider string, agentID string, requestBody []byte, upstreamHost string) []byte {
-	disableThinking := shouldDisableThinkingForHost(upstreamHost)
+	thirdPartyUpstream := shouldDisableThinkingForHost(upstreamHost)
 	trimmed := strings.TrimSpace(string(requestBody))
 	if trimmed == "" {
 		payload := map[string]interface{}{}
 		payload = agentInspectorInjectPrompt(payload, provider, agentID)
 		payload = agentInspectorOverrideModel(payload, agentID)
-		if disableThinking {
-			payload = agentInspectorDisableThinking(payload)
+		if thirdPartyUpstream {
+			payload = agentInspectorDisableThinking(payload, provider)
+			payload = agentInspectorNormalizeToolChoice(payload, provider)
 		}
 		body, err := json.Marshal(payload)
 		if err != nil {
@@ -3384,14 +3385,71 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 	}
 	payload = agentInspectorInjectPrompt(payload, provider, agentID)
 	payload = agentInspectorOverrideModel(payload, agentID)
-	if disableThinking {
-		payload = agentInspectorDisableThinking(payload)
+	if thirdPartyUpstream {
+		payload = agentInspectorDisableThinking(payload, provider)
+		payload = agentInspectorNormalizeToolChoice(payload, provider)
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return requestBody
 	}
 	return body
+}
+
+// agentInspectorNormalizeToolChoice rewrites `tool_choice` into a shape that
+// DeepSeek-style endpoints actually accept. Their deserializer is implemented
+// in Rust with a tagged-enum that ONLY recognizes `{"type":"function", ...}`;
+// every other shape — Anthropic `{"type":"auto"|"any"|"none"|"tool"}` AND
+// OpenAI's string form `"auto"`/`"required"`/`"none"` AND opencode's hybrid
+// `{"type":"auto"}` — trips
+//   `unknown variant 'auto', expected 'function'`
+// and rejects the whole request. Applies to both gateway protocols since
+// opencode's @ai-sdk/openai-compatible emits the Anthropic-style object shape
+// regardless of the configured `api` protocol.
+//
+// Mapping:
+//   - auto / any / null / unknown / missing → drop (model decides == default)
+//   - tool with name → {"type":"function","function":{"name":<name>}}
+//   - none           → drop and clear `tools` so the model can't try one
+//   - string form    → drop (same default semantics; safer than guessing)
+func agentInspectorNormalizeToolChoice(payload map[string]interface{}, gatewayProtocol string) map[string]interface{} {
+	if payload == nil {
+		return payload
+	}
+	raw, present := payload["tool_choice"]
+	if !present || raw == nil {
+		return payload
+	}
+	tc, ok := raw.(map[string]interface{})
+	if !ok {
+		// String form ("auto"/"none"/"required") — drop; default is "auto".
+		delete(payload, "tool_choice")
+		return payload
+	}
+	typ, _ := tc["type"].(string)
+	switch strings.ToLower(strings.TrimSpace(typ)) {
+	case "function":
+		// Already in the strict shape; leave as-is. May still need to ensure
+		// `function.name` is present, but that's a CLI/SDK problem.
+	case "tool":
+		// Anthropic-style: {"type":"tool","name":"X"} → OpenAI {"type":"function","function":{"name":"X"}}
+		name, _ := tc["name"].(string)
+		if strings.TrimSpace(name) == "" {
+			delete(payload, "tool_choice")
+		} else {
+			payload["tool_choice"] = map[string]interface{}{
+				"type":     "function",
+				"function": map[string]interface{}{"name": name},
+			}
+		}
+	case "none":
+		delete(payload, "tool_choice")
+		delete(payload, "tools")
+	default:
+		// auto / any / unknown — drop, default semantics survive.
+		delete(payload, "tool_choice")
+	}
+	return payload
 }
 
 // shouldDisableThinkingForHost returns true unless the upstream is the official
@@ -3443,16 +3501,19 @@ func agentInspectorOverrideModel(payload map[string]interface{}, agentID string)
 // passed back to the API` when thinking mode is enabled server-side but the
 // assistant's prior turn arrives without it.
 //
-// Belt + braces because cicyAi/new-api front-ends typically strip the
-// `enable_thinking` flag on the way in:
-//  1. Flip every per-request thinking switch off (Anthropic `thinking` config,
-//     OpenAI `enable_thinking`, and the same nested under `extra_body`).
-//  2. Inject empty placeholders into each assistant turn so upstream
-//     validation passes even when the toggle didn't propagate:
-//     - Anthropic content array: prepend `{"type":"thinking","thinking":"",
-//       "signature":""}` when no thinking block is present.
-//     - OpenAI assistant message: set `reasoning_content: ""` when missing.
-func agentInspectorDisableThinking(payload map[string]interface{}) map[string]interface{} {
+// CRITICAL: the message shape diverges between protocols, so injection MUST
+// branch on `gatewayProtocol`:
+//   - OpenAI chat/completions: assistant.content is a string (or content-parts
+//     with type "text"). DO NOT introduce `type:"thinking"` blocks — DeepSeek's
+//     openai endpoint rejects with `unknown variant 'thinking', expected 'text'`.
+//     Only sprinkle `reasoning_content: ""` on assistant messages.
+//   - Anthropic Messages: assistant.content is a string or block array; thinking
+//     blocks are allowed (and required when thinking mode is on upstream).
+//     Promote string → array and prepend an empty thinking block when missing.
+//
+// Top-level switches are flipped off regardless of protocol — harmless extra
+// fields on either side, and cicyAi/new-api front-ends often strip them anyway.
+func agentInspectorDisableThinking(payload map[string]interface{}, gatewayProtocol string) map[string]interface{} {
 	if payload == nil {
 		return payload
 	}
@@ -3461,23 +3522,21 @@ func agentInspectorDisableThinking(payload map[string]interface{}) map[string]in
 	if extra, ok := payload["extra_body"].(map[string]interface{}); ok {
 		extra["enable_thinking"] = false
 	}
-	if msgs, ok := payload["messages"].([]interface{}); ok {
-		for _, raw := range msgs {
-			m, ok := raw.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			role, _ := m["role"].(string)
-			if role != "assistant" {
-				continue
-			}
-			// OpenAI chat/completions shape: assistant message echoes need
-			// reasoning_content. Empty string satisfies DeepSeek's validation.
-			if _, exists := m["reasoning_content"]; !exists {
-				m["reasoning_content"] = ""
-			}
-			// Anthropic Messages shape: content is either a string or an array
-			// of blocks. Promote string to array, then ensure a thinking block.
+	msgs, ok := payload["messages"].([]interface{})
+	if !ok {
+		return payload
+	}
+	for _, raw := range msgs {
+		m, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		role, _ := m["role"].(string)
+		if role != "assistant" {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(gatewayProtocol)) {
+		case "anthropic":
 			content := m["content"]
 			if s, ok := content.(string); ok {
 				m["content"] = []interface{}{
@@ -3503,6 +3562,12 @@ func agentInspectorDisableThinking(payload map[string]interface{}) map[string]in
 				m["content"] = append([]interface{}{
 					map[string]interface{}{"type": "thinking", "thinking": "", "signature": ""},
 				}, arr...)
+			}
+		default:
+			// OpenAI chat/completions: leave content untouched, only attach
+			// reasoning_content so DeepSeek's openai endpoint validation passes.
+			if _, exists := m["reasoning_content"]; !exists {
+				m["reasoning_content"] = ""
 			}
 		}
 	}

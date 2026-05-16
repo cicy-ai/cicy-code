@@ -432,8 +432,8 @@ func runtimeAIExpectedProtocolForAgentType(agentType string) string {
 	case "codex", "openclaw", "hermes":
 		return "openai"
 	case "opencode":
-		// opencode speaks both protocols (uses @ai-sdk/openai-compatible OR
-		// @ai-sdk/anthropic depending on the active provider) — don't filter.
+		// opencode speaks both openai and anthropic protocols natively — pick
+		// the adapter at boot based on the active provider's declared protocol.
 		return ""
 	default:
 		return ""

@@ -498,6 +498,68 @@ function connectHostOpenFileBridge(context: vscode.ExtensionContext): void {
           } catch {
           }
         }
+        if (payload?.type === 'host.active_file' && payload.data) {
+          // Return the path of the currently focused editor tab. Empty path
+          // means no editor is focused (e.g. the welcome page is showing).
+          const requestId = String(payload.data?.requestId || '');
+          const ed = vscode.window.activeTextEditor;
+          const sel = ed?.selection;
+          try {
+            socket?.send(JSON.stringify({
+              type: 'code.active_file',
+              data: {
+                requestId,
+                path: ed ? ed.document.uri.fsPath : '',
+                language: ed ? ed.document.languageId : '',
+                line: sel ? sel.active.line + 1 : 0,
+                column: sel ? sel.active.character + 1 : 0,
+                page_client_id: currentClientId,
+                code_client_id: currentCodeClientId,
+              },
+            }));
+          } catch {
+          }
+        }
+        if (payload?.type === 'host.list_tabs' && payload.data) {
+          // Return all open tabs across all editor groups. We surface only
+          // file-backed tabs (TabInputText / TabInputCustom / TabInputNotebook)
+          // — non-file panes like Settings / Welcome have no path so we skip
+          // them. `isActive` and `isDirty` come from VS Code's tab state.
+          const requestId = String(payload.data?.requestId || '');
+          const tabs: Array<Record<string, unknown>> = [];
+          try {
+            for (const group of vscode.window.tabGroups.all) {
+              for (const t of group.tabs) {
+                let p = '';
+                const inp = t.input as any;
+                if (inp && typeof inp === 'object' && inp.uri && typeof inp.uri.fsPath === 'string') {
+                  p = inp.uri.fsPath;
+                }
+                if (!p) continue;
+                tabs.push({
+                  path: p,
+                  label: t.label,
+                  isActive: t.isActive,
+                  isDirty: t.isDirty,
+                  group: group.viewColumn,
+                });
+              }
+            }
+          } catch {
+          }
+          try {
+            socket?.send(JSON.stringify({
+              type: 'code.tabs',
+              data: {
+                requestId,
+                tabs,
+                page_client_id: currentClientId,
+                code_client_id: currentCodeClientId,
+              },
+            }));
+          } catch {
+          }
+        }
       } catch {
       }
     };

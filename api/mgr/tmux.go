@@ -1281,9 +1281,8 @@ func resolveOpencodeStartupModel(defaultModel string, aiCfg runtimeAIConfig, sho
 	return ""
 }
 
-// opencodeActiveProvider returns the providerConfig currently routing for
-// this opencode pane: runtime_ai override if set, else the agent_type default.
-// Returns nil if neither resolves.
+// opencodeActiveProvider returns the providerConfig currently routing for this
+// opencode pane: runtime_ai override if set, else the agent_type default.
 func opencodeActiveProvider(shortID string) *providerConfig {
 	if shortID != "" {
 		if ov, _ := loadPaneRuntimeAIOverride(shortID); ov != nil && strings.TrimSpace(ov.ProviderName) != "" {
@@ -1298,10 +1297,11 @@ func opencodeActiveProvider(shortID string) *providerConfig {
 	return nil
 }
 
-// opencodeActiveProtocol returns "openai" or "anthropic" depending on the
-// active provider's declared protocol. Opencode wires the appropriate ai-sdk
-// adapter and gateway path based on this — without it we'd send anthropic
-// requests to the openai-style gateway, which doesn't translate them.
+// opencodeActiveProtocol returns "openai" or "anthropic" based on the active
+// provider's declared protocol. Opencode wires the matching @ai-sdk adapter
+// and gateway path; mismatched routing (e.g. anthropic-style upstream behind
+// the openai gateway) would either fail translation or get rejected by the
+// upstream because we don't have an openai→anthropic adapter in the gateway.
 func opencodeActiveProtocol(shortID string) string {
 	if p := opencodeActiveProvider(shortID); p != nil {
 		if proto := normalizeAIGatewayProvider(p.Protocol); proto == "anthropic" || proto == "openai" {
@@ -2322,11 +2322,11 @@ EOF
 			ensureAgentCommandLine("opencode", "OpenCode", opencodeInstallCmd(), installLog),
 		}
 		if useCustomGateway {
-			// Resolve startup model + the active provider's catalog + protocol.
-			// Opencode supports both openai-style and anthropic-style providers;
-			// it picks the right SDK and gateway path depending on the active
-			// provider's declared protocol. Without `model` + `models`, the CLI
-			// silently falls back to its built-in free DeepSeek.
+			// Resolve startup model + active provider's catalog + protocol.
+			// Opencode supports both openai and anthropic SDKs natively; pick
+			// the right adapter and gateway path here. Without `model`+`models`
+			// in the config opencode silently falls back to its built-in free
+			// DeepSeek provider regardless of what we wired up.
 			model := resolveOpencodeStartupModel(defaultModel, aiCfg, shortID)
 			modelsBlock := buildOpencodeModelsBlock(opencodeActiveProviderModels(shortID, model))
 			topModelField := ""
@@ -2334,18 +2334,25 @@ EOF
 				b, _ := json.Marshal("cicyai/" + model)
 				topModelField = `,"model":` + string(b)
 			}
+			// IMPORTANT: opencode's @ai-sdk packages treat baseURL as if it
+			// already contains the `/v1` API version segment — the anthropic
+			// adapter appends `/messages` (not `/v1/messages`), and the
+			// openai-compatible adapter appends `/chat/completions` (not
+			// `/v1/chat/completions`). The official Claude / OpenAI CLIs both
+			// append the full `/v1/...` themselves, so our raw runtime base
+			// URL has no trailing /v1. We tack it on here for opencode only.
 			var providerBlock string
 			switch opencodeActiveProtocol(shortID) {
 			case "anthropic":
 				lines = append(lines,
-					fmt.Sprintf("export CICY_ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID))),
+					fmt.Sprintf("export CICY_ANTHROPIC_BASE_URL=%s", tmuxShellQuote(anthropicRuntimeBaseURL(shortID)+"/v1")),
 					"export ANTHROPIC_API_KEY='cicy-local-gateway'",
 					"unset CICY_OPENAI_BASE_URL",
 				)
 				providerBlock = `"cicyai":{"npm":"@ai-sdk/anthropic","api":"anthropic","name":"cicyAi Gateway","options":{"baseURL":"$CICY_ANTHROPIC_BASE_URL","apiKey":"cicy-local-gateway"},"models":` + modelsBlock + `}`
 			default:
 				lines = append(lines,
-					fmt.Sprintf("export CICY_OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID))),
+					fmt.Sprintf("export CICY_OPENAI_BASE_URL=%s", tmuxShellQuote(openAIRuntimeBaseURL(shortID)+"/v1")),
 					"unset CICY_ANTHROPIC_BASE_URL",
 					"unset ANTHROPIC_API_KEY",
 				)
