@@ -115,6 +115,8 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		err = env.runAliyunCLI(args)
 	case "email":
 		err = env.runEmail(args)
+	case "ssh-list":
+		err = env.runSSH(args)
 	default:
 		fmt.Fprintf(stderr, "unsupported host tool: %s\n", cmd)
 		printAvailable(stderr)

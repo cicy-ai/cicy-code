@@ -52,6 +52,7 @@ var (
 		"tg",
 		"cicy-agent",
 		"todo",
+		"ssh-list",
 	}
 	ProviderLinks = []LinkSpec{}
 	DeprecatedProviderLinks = []string{"gmail"}
