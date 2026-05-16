@@ -20,6 +20,7 @@ var (
 	cicySkillsDir          = filepath.Join(cicyRootDir, "skills")
 	cicyGlobalJSONPath     = filepath.Join(cicyRootDir, "global.json")
 	cicyStateDir           = filepath.Join(cicyRootDir, ".cicy")
+	cicyLogsDir            = resolveCicyPathSpec("~/logs")
 	cicyMachinesConfigPath = filepath.Join(cicyRootDir, "cicy-node.json")
 	cicySharedWorkspaceDir = filepath.Join(cicyRootDir, "shared-workspace")
 )
@@ -86,6 +87,7 @@ func bootstrapCicyPaths() {
 		cicyProjectsDir,
 		cicyWorkersDir,
 		cicySkillsDir,
+		cicyLogsDir,
 	}
 	for _, path := range paths {
 		if err := os.MkdirAll(path, 0755); err != nil {

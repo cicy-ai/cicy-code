@@ -19,7 +19,7 @@ API_DIR = os.path.join(ROOT_DIR, "api")
 CICY_ROOT_DIR = os.path.expanduser("~/cicy-ai")
 CICY_STATE_DIR = os.path.join(CICY_ROOT_DIR, ".cicy")
 HOST_PROJECTS_DIR = os.path.expanduser("~/projects")
-CICY_DOCKER_HOMES_DIR = os.path.join(CICY_ROOT_DIR, "docker-homes")
+CICY_DOCKER_HOMES_DIR = os.path.expanduser("~/docker-homes")
 CICY_GLOBAL_JSON_PATH = os.path.join(CICY_ROOT_DIR, "global.json")
 CICY_PROXY_JSON_PATH = os.path.join(CICY_ROOT_DIR, "proxy.json")
 DOCKER_HOME_DIR = "/home/cicy"
@@ -1515,7 +1515,7 @@ def main():
         "--home-dir",
         dest="homeDir",
         default="",
-        help="Host runtime home directory used with --mountHome. Default: ~/cicy-ai/docker-homes/<container-name>.",
+        help="Host runtime home directory used with --mountHome. Default: ~/docker-homes/<container-name>.",
     )
 
     image_group = parser.add_argument_group("image and version management")

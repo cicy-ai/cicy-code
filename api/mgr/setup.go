@@ -824,8 +824,8 @@ func startCicyMihomoIfNeeded() {
 
 	// Step 2: download mihomo binary if missing. ensureMihomoBinaryInstalled
 	// is idempotent (skip when already on disk).
-	logPath := filepath.Join(cicyStateDir, cicySkillsInstallLogFile)
-	_ = os.MkdirAll(cicyStateDir, 0o755)
+	logPath := filepath.Join(cicyLogsDir, cicySkillsInstallLogFile)
+	_ = os.MkdirAll(cicyLogsDir, 0o755)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		log.Printf("[startup] failed to open mihomo install log: %v", err)
@@ -1368,11 +1368,11 @@ func devModeBootstrapCicySkills() {
 }
 
 func doCicySkillsInstall() {
-	if err := os.MkdirAll(cicyStateDir, 0o755); err != nil {
-		log.Printf("[startup] failed to create %s for cicy-skills bootstrap: %v", cicyStateDir, err)
+	if err := os.MkdirAll(cicyLogsDir, 0o755); err != nil {
+		log.Printf("[startup] failed to create %s for cicy-skills bootstrap: %v", cicyLogsDir, err)
 		return
 	}
-	logPath := filepath.Join(cicyStateDir, cicySkillsInstallLogFile)
+	logPath := filepath.Join(cicyLogsDir, cicySkillsInstallLogFile)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		log.Printf("[startup] failed to open cicy-skills install log: %v", err)
@@ -1741,13 +1741,13 @@ func ensureCodeServerAsync() {
 		return
 	}
 	_ = os.Remove(filepath.Join(home, ".local", "share", "code-server", "coder.json"))
-	if mkErr := os.MkdirAll(filepath.Join(home, ".cicy"), 0755); mkErr != nil {
-		log.Printf("[startup] failed to create ~/.cicy: %v", mkErr)
+	if mkErr := os.MkdirAll(cicyLogsDir, 0755); mkErr != nil {
+		log.Printf("[startup] failed to create ~/logs: %v", mkErr)
 		return
 	}
 	ensureCodeServerUserSettings(home)
 
-	logPath := filepath.Join(home, ".cicy", "code-server.log")
+	logPath := filepath.Join(cicyLogsDir, "code-server.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		log.Printf("[startup] failed to open code-server log: %v", err)

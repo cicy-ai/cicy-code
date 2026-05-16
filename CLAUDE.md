@@ -14,6 +14,11 @@ This file documents the current repo reality for code agents working inside `cic
 
 - Local dev: `python3 dev.py`
 - Refresh ttyd assets only: `python3 dev.py --ttydAssets`
+
+**MANDATORY after any code change**: agents MUST run `python3 dev.py` to rebuild the binary and restart the server before reporting work as done. The user runs the local dev server and expects changes to be live without manually restarting. Never tell the user "you need to restart" — restart it yourself. Do NOT use `--hot` (the user does not want Vite HMR).
+
+For frontend changes: `dev.py` defaults to `SKIP_NPM=1` (uses cached `app/dist`). To pick up frontend source changes, first run `cd app && npm run build`, then `python3 dev.py`.
+
 - Frontend HMR: `cd app && npm ci && npm run dev`
 - Backend manual dev with Vite proxy: `cd api && go run ./mgr/ --dev --public`
 - Go tests: `./build.sh test-go`
