@@ -57,13 +57,11 @@ func handleFileExists(w http.ResponseWriter, r *http.Request) {
 
 func translateCachePath(text string, target string) string {
 	hash := sha256.Sum256([]byte(strings.TrimSpace(target) + "\n" + strings.TrimSpace(text)))
-	// Persistent location under ~/cicy-ai/.cicy/translate-cache/ — survives
-	// container/server restart (the old /tmp path was wiped every reboot).
-	base := filepath.Join(cicyStateDir, "translate-cache")
-	if cicyStateDir == "" {
-		// Fallback if cicyStateDir hasn't been resolved (very early startup).
+	// Persistent location under ~/logs/translate-cache/ — survives restart.
+	base := filepath.Join(cicyLogsDir, "translate-cache")
+	if cicyLogsDir == "" {
 		if home, err := os.UserHomeDir(); err == nil {
-			base = filepath.Join(home, "cicy-ai", ".cicy", "translate-cache")
+			base = filepath.Join(home, "logs", "translate-cache")
 		} else {
 			base = filepath.Join(os.TempDir(), "cicy-translate-cache")
 		}

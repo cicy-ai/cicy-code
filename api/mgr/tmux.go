@@ -124,7 +124,7 @@ func tmuxSendTraceLogPath() string {
 	if err != nil || home == "" {
 		return filepath.Join(os.TempDir(), "cicy-tmux-send.log")
 	}
-	return filepath.Join(home, ".cicy", "tmux-send.log")
+	return filepath.Join(home, "logs", "tmux-send.log")
 }
 
 func tmuxClientTraceLogPath() string {
@@ -132,7 +132,7 @@ func tmuxClientTraceLogPath() string {
 	if err != nil || home == "" {
 		return filepath.Join(os.TempDir(), "cicy-tmux-client-trace.log")
 	}
-	return filepath.Join(home, ".cicy", "tmux-client-trace.log")
+	return filepath.Join(home, "logs", "tmux-client-trace.log")
 }
 
 func (t *tmuxSendTrace) logStep(step string, meta map[string]any, body string) {
@@ -2348,7 +2348,7 @@ EOF
 		}
 		return lines
 	case "codex":
-		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("codex-install-%s.log", shortID))
+		installLog := tmuxHomeJoin("logs", fmt.Sprintf("codex-install-%s.log", shortID))
 		lines := []string{
 			ensureAgentCommandLine("codex", "Codex", codexInstallCmd(), installLog),
 		}
@@ -2390,7 +2390,7 @@ EOF
 		if normalizeAgentType(agentType) == "cicy-claude" {
 			launchPrefix += " --bare"
 		}
-		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("%s-install-%s.log", cmdName, shortID))
+		installLog := tmuxHomeJoin("logs", fmt.Sprintf("%s-install-%s.log", cmdName, shortID))
 		// When the local gateway is bypassed (official login), only honor an
 		// explicitly-set defaultModel — falling back to the provider's gateway
 		// default (e.g. deepseek-*) would force anthropic.com to reject the model.
@@ -2437,7 +2437,7 @@ EOF
 		)
 		return lines
 	case "opencode":
-		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("opencode-install-%s.log", shortID))
+		installLog := tmuxHomeJoin("logs", fmt.Sprintf("opencode-install-%s.log", shortID))
 		lines := []string{
 			ensureAgentCommandLine("opencode", "OpenCode", opencodeInstallCmd(), installLog),
 		}
@@ -2510,7 +2510,7 @@ EOF`, topModelField, providerBlock),
 		)
 		return lines
 	case "kiro-cli":
-		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("kiro-install-%s.log", shortID))
+		installLog := tmuxHomeJoin("logs", fmt.Sprintf("kiro-install-%s.log", shortID))
 		lines := append(kiroCliBootHelperLines(),
 			ensureAgentCommandLineLive("kiro-cli", "Kiro CLI", "__cicy_local_install_kiro", installLog),
 			`mkdir -p "$WORKSPACE/.kiro/steering"`,
@@ -2551,7 +2551,7 @@ fi`,
 		}
 		return lines
 	case "copilot":
-		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("copilot-install-%s.log", shortID))
+		installLog := tmuxHomeJoin("logs", fmt.Sprintf("copilot-install-%s.log", shortID))
 		lines := []string{
 			"mkdir -p ~/.copilot",
 			ensureAgentCommandLine("copilot", "GitHub Copilot", copilotInstallCmd(), installLog),
@@ -2560,7 +2560,7 @@ fi`,
 		}
 		return lines
 	case "cicy-wechat":
-		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("wechat-install-%s.log", shortID))
+		installLog := tmuxHomeJoin("logs", fmt.Sprintf("wechat-install-%s.log", shortID))
 		lines := []string{
 			ensureAgentCommandLine("cicy-wechat", "WeChat", cicyWechatInstallCmd(), installLog),
 			`export DATA_DIR="$WORKSPACE/.cicy-wechat"`,
@@ -2568,14 +2568,14 @@ fi`,
 		}
 		return lines
 	case "cicy-feishu":
-		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("feishu-install-%s.log", shortID))
+		installLog := tmuxHomeJoin("logs", fmt.Sprintf("feishu-install-%s.log", shortID))
 		lines := []string{
 			ensureAgentCommandLine("cicy-feishu", "Feishu", cicyFeishuInstallCmd(), installLog),
 			"cicy-feishu",
 		}
 		return lines
 	case "hermes":
-		installLog := tmuxHomeJoin(".cicy", fmt.Sprintf("hermes-install-%s.log", shortID))
+		installLog := tmuxHomeJoin("logs", fmt.Sprintf("hermes-install-%s.log", shortID))
 		hermesHome := filepath.Join(os.Getenv("HOME"), ".hermes-"+shortID)
 		hermesInstallDir := filepath.Join(hermesHome, "hermes-agent")
 		hermesBin := filepath.Join(hermesInstallDir, "venv", "bin", "hermes")

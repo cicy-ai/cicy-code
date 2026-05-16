@@ -652,7 +652,7 @@ func installMarketSkill(skill *marketSkill) ([]string, error) {
 // three agent profiles if it is not already present. Called on every skill-market
 // list request so new installs get it without a manual install step.
 func ensureSkillAuthorInstalled() {
-	src := filepath.Join(userSkillsRoot(), "skill-author")
+	src := filepath.Join(userSkillsRoot(), "cicy-skills", "skill-author")
 	if _, err := os.Stat(filepath.Join(src, "SKILL.md")); err != nil {
 		return // source not present — nothing to install
 	}

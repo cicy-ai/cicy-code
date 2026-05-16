@@ -281,6 +281,9 @@ func (t *frpTool) defaultLogPath(config string) string {
 	if value := strings.TrimSpace(os.Getenv(t.logEnvName())); value != "" {
 		return expandHostPath(value)
 	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, "logs", t.binaryName()+".log")
+	}
 	if strings.TrimSpace(config) != "" {
 		return filepath.Join(filepath.Dir(config), t.binaryName()+".log")
 	}
