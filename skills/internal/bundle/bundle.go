@@ -32,6 +32,7 @@ var (
 		"agent-code-server",
 		"agent-webpage",
 		"aliyun-cli",
+		"cf",
 		"cf-tunnel",
 		"cf-tunnel-py",
 		"cf-tunnel.py",

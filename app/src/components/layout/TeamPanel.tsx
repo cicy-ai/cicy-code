@@ -6,7 +6,7 @@ import { Spinner } from '../ui/Spinner';
 import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
 import { useDialog } from '../../contexts/DialogContext';
-import { normalizeAgentType } from '../../lib/agentType';
+import { normalizeAgentType, guidanceFilenameForAgentType } from '../../lib/agentType';
 import AgentAvatar from '../AgentAvatar';
 import Select from '../ui/Select';
 import CreateAgentDialog, { CreateAgentValues } from '../CreateAgentDialog';
@@ -101,6 +101,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   const createAndBind = async (values: CreateAgentValues) => {
     setCreating(true);
     try {
+      // master_pane_id 让后端 create 时直接完成绑定 + 写入 master 引用到子 agent 的 CLAUDE.md/AGENTS.md。
       const { data } = await apiService.createPane({
         role: 'worker',
         title: values.title,
@@ -108,10 +109,10 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         allow_all_actions: values.allow_all_actions,
         use_custom_gateway: values.use_custom_gateway,
         use_proxy: values.use_proxy,
+        master_pane_id: paneId,
+        inherit_guidance: values.inherit_guidance,
       });
-      const newId = data?.pane_id || data?.session;
-      if (newId) {
-        await apiService.bindAgent({ pane_id: paneId, agent_name: shortId(newId) });
+      if (data?.pane_id || data?.session) {
         setCreateDialogOpen(false);
         await onRefreshPanes();
         onRefreshPoll();
@@ -507,6 +508,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         emptyTitleOnAgentSelect={i18n.t('createEmptyTitleAgent', { ns: 'teamPanel' })}
         dialogClassName="w-[960px] max-w-[96vw]"
         agentTypeGridClassName="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3"
+        masterAgentType={panes.find(p => shortId(p.pane_id) === paneId)?.agent_type}
       />
 
 

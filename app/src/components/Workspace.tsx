@@ -294,7 +294,7 @@ type WorkspaceCliContentTab = InspectorTab | 'history' | 'files' | RequestViewTa
 type CliContentMode = 'fixed';
 
 function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
-  if (value === 'files' || value === 'history' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'settings') {
+  if (value === 'files' || value === 'history' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'settings' || value === 'memory') {
     return value;
   }
   return 'files';
@@ -1232,6 +1232,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const cliContentTabs = [
     { id: 'files', label: t('tabFiles') },
     { id: 'session', label: t('tabSession') },
+    { id: 'memory', label: t('tabMemory') },
     { id: 'settings', label: t('tabSettings') },
   ];
   const sessionSubTabs: { id: 'history' | 'tools' | 'brain' | 'meta'; label: string }[] = [
@@ -1242,15 +1243,38 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   ];
   const isSessionTab = (tab: WorkspaceCliContentTab) => tab === 'history' || tab === 'tools' || tab === 'brain' || tab === 'meta';
   const renderCliContentPanel = () => (
+    // PERMANENT FIX for code-server iframe activation bug:
+    // The drawer (and the code-server iframe inside it) must stay MOUNTED and
+    // RENDERED whenever fileCodeServerSrc is set, even when the user has not
+    // opened the drawer. VS Code's bridge extension only activates when the
+    // workbench is actually painted; using `hidden` (display:none) here means
+    // the iframe never renders → extension never activates → :code-ext WS never
+    // registers → `agent-code-server open` fails with "client not found" until
+    // the user manually opens the Files tab. We instead keep the panel mounted
+    // and lift it OUT of the flex flow when closed (position:absolute + offscreen
+    // via visibility:hidden + zIndex:-1) so layout is unaffected but the iframe
+    // keeps full dimensions and renders normally.
     <div
       ref={cliContentPanelRef}
       data-id="cli-content-fixed"
       className={cn(
-        'relative h-full min-w-0 shrink-0 flex-col bg-[#0b0b0d]',
-        'border-l border-[var(--vsc-border)]',
-        cliContentOpen ? 'flex' : 'hidden'
+        'h-full min-w-0 shrink-0 flex flex-col bg-[#0b0b0d]',
+        'border-l border-[var(--vsc-border)]'
       )}
-      style={{ width: `${cliDrawerWidth}px` }}
+      style={
+        cliContentOpen
+          ? { width: `${cliDrawerWidth}px`, position: 'relative' }
+          : {
+              width: `${cliDrawerWidth}px`,
+              position: 'absolute',
+              right: 0,
+              top: 0,
+              bottom: 0,
+              visibility: 'hidden',
+              pointerEvents: 'none',
+              zIndex: -1,
+            }
+      }
     >
       {cliDrawerResizing ? (
         <div
@@ -1366,6 +1390,27 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             open={cliContentOpen && (cliContentTab === 'tools' || cliContentTab === 'brain' || cliContentTab === 'meta')}
             tab={cliContentTab === 'tools' || cliContentTab === 'brain' || cliContentTab === 'meta' ? cliContentTab : 'tools'}
             inspectorVersion={chatWsInspectorVersion}
+          />
+        </div>
+        <div
+          data-id="cli-content-memory-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'memory' ? 'block' : 'none' }}
+        >
+          <AgentInspector
+            paneId={activeCliPaneId}
+            paneTitle={
+              paneDetails[activeCliPaneId]?.title
+              || agents.find((item: any) => (item.pane_id || item.id || '').replace(/:.*$/, '') === activeCliPaneId)?.title
+              || activeCliPaneId
+            }
+            open={cliContentOpen && cliContentTab === 'memory'}
+            embedded
+            requestedTab={'memory'}
+            liveStatus={chatWsLiveStatus}
+            inspectorVersion={chatWsInspectorVersion}
+            onPanePatch={applyPanePatch}
+            onClose={() => {}}
           />
         </div>
         <div

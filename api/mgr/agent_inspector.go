@@ -596,6 +596,9 @@ func agentInspectorPromptOverlayFromRules(agentID string, global agentInspectorP
 	appendRule("global-memory", global)
 	appendRule("project-memory", project)
 	appendRule("agent-memory", agent)
+	if filesOverlay := agentInspectorBuildRulesFilesOverlay(agentID); filesOverlay != "" {
+		parts = append(parts, filesOverlay)
+	}
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 
@@ -3235,6 +3238,10 @@ func agentInspectorOverview(agentID string) M {
 		"raw_message_count":        len(rawMessages),
 		"system_prompt_preview":    agentInspectorCompactText(systemPrompt, 220),
 		"overlay_preview":          agentInspectorCompactText(promptRules.Overlay, 220),
+		"overlay_full":             promptRules.Overlay,
+		"rules_files":              agentInspectorRulesFilesBundle(agentID),
+		"inject_rules_files":       gatewayInjectRulesPaneEnabled(agentID),
+		"inject_rules_global":      gatewayInjectRulesGlobalEnabled(),
 		"latest_q":                 latestMessage.Q,
 		"latest_a":                 latestMessage.A,
 		"latest_q_time":            latestMessage.QTime,
@@ -3368,6 +3375,7 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 	if trimmed == "" {
 		payload := map[string]interface{}{}
 		payload = agentInspectorInjectPrompt(payload, provider, agentID)
+		payload = injectCicyToolDefs(payload, provider)
 		payload = agentInspectorOverrideModel(payload, agentID)
 		if thirdPartyUpstream {
 			payload = agentInspectorDisableThinking(payload, provider)
@@ -3384,6 +3392,7 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 		return requestBody
 	}
 	payload = agentInspectorInjectPrompt(payload, provider, agentID)
+	payload = injectCicyToolDefs(payload, provider)
 	payload = agentInspectorOverrideModel(payload, agentID)
 	if thirdPartyUpstream {
 		payload = agentInspectorDisableThinking(payload, provider)
@@ -3402,7 +3411,9 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 // every other shape — Anthropic `{"type":"auto"|"any"|"none"|"tool"}` AND
 // OpenAI's string form `"auto"`/`"required"`/`"none"` AND opencode's hybrid
 // `{"type":"auto"}` — trips
-//   `unknown variant 'auto', expected 'function'`
+//
+//	`unknown variant 'auto', expected 'function'`
+//
 // and rejects the whole request. Applies to both gateway protocols since
 // opencode's @ai-sdk/openai-compatible emits the Anthropic-style object shape
 // regardless of the configured `api` protocol.
@@ -3925,13 +3936,22 @@ func handleAgentInspectorByPane(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodGet && action == "":
 		bundle := agentInspectorBuildBundle(shortID, "", 0, 0)
-		J(w, M{
+		resp := M{
 			"pane_id":               shortID,
 			"pane":                  bundle["pane"],
 			"runtime_memory":        bundle["runtime_memory"],
 			"prompt_rules":          bundle["prompt_rules"],
 			"provider_request_view": bundle["provider_request_view"],
-		})
+			"rules_files":           agentInspectorRulesFilesBundle(shortID),
+			"inject_rules_files":    gatewayInjectRulesPaneEnabled(shortID),
+			"inject_rules_global":   gatewayInjectRulesGlobalEnabled(),
+		}
+		if overview, ok := bundle["overview"].(M); ok {
+			if v, ok := overview["overlay_full"]; ok {
+				resp["overlay_full"] = v
+			}
+		}
+		J(w, resp)
 		return
 	case r.Method == http.MethodPut && action == "notes":
 		var req struct {

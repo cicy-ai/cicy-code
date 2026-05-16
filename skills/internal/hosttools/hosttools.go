@@ -95,6 +95,8 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		err = env.runMySQLExec(args)
 	case "todo":
 		err = env.runTodo(args)
+	case "cf":
+		err = env.runCFAPI(args)
 	case "cf-tunnel", "cf-tunnel-py", "cf-tunnel.py":
 		err = env.runCFTunnel(args)
 	case "cping":
@@ -533,7 +535,7 @@ func (e *Env) runTM(args []string) error {
 		return err
 	}
 	switch cmd {
-	case "ls":
+	case "ls", "tmux-ls":
 		data, err := e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodGet, "/api/tmux/panes", nil)
 		if err != nil {
 			return err
@@ -544,8 +546,30 @@ func (e *Env) runTM(args []string) error {
 		if err := json.Unmarshal(data, &out); err != nil {
 			return err
 		}
+		_, _ = fmt.Fprintln(e.Stdout, "pane_id\tagent_type\ttitle")
+		_, _ = fmt.Fprintln(e.Stdout, "-------\t----------\t-----")
 		for _, pane := range out.Panes {
-			_, _ = fmt.Fprintf(e.Stdout, "%v\t%v\t%v\n", pane["pane_id"], pane["role"], pane["title"])
+			_, _ = fmt.Fprintf(e.Stdout, "%v\t%v\t%v\n", pane["pane_id"], pane["agent_type"], pane["title"])
+		}
+	case "list":
+		data, err := e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodGet, "/api/tmux/panes", nil)
+		if err != nil {
+			return err
+		}
+		var out struct {
+			Panes []map[string]any `json:"panes"`
+		}
+		if err := json.Unmarshal(data, &out); err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, "id\tagent_type\ttitle\tworkspace")
+		_, _ = fmt.Fprintln(e.Stdout, "--\t----------\t-----\t---------")
+		for _, pane := range out.Panes {
+			id := fmt.Sprintf("%v", pane["pane_id"])
+			if len(id) > 7 {
+				id = id[:7]
+			}
+			_, _ = fmt.Fprintf(e.Stdout, "%v\t%v\t%v\t%v\n", id, pane["agent_type"], pane["title"], pane["workspace"])
 		}
 	case "tree":
 		return e.copyAPITo(cfg.API, cfg.Token, http.MethodGet, "/api/tmux/tree", nil)
@@ -2192,366 +2216,6 @@ func (e *Env) runExternal(name string, args ...string) error {
 		return fmt.Errorf("%s", strings.TrimSpace(string(out)))
 	}
 	return nil
-}
-
-func (e *Env) runCFTunnel(args []string) error {
-	if len(args) == 0 || args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
-		_, _ = fmt.Fprintln(e.Stdout, cfTunnelUsage())
-		return nil
-	}
-	cfEnv := envOr("CF_ENV", "prod")
-	cfRoot, _ := e.Global["cf"].(map[string]any)
-	cfg, _ := cfRoot[cfEnv].(map[string]any)
-	if len(cfg) == 0 {
-		return fmt.Errorf("missing cf.%s config in ~/cicy-ai/global.json", cfEnv)
-	}
-	token := strings.TrimSpace(anyString(cfg["api_token"]))
-	accountID := strings.TrimSpace(anyString(cfg["account_id"]))
-	tunnelID := strings.TrimSpace(anyString(cfg["tunnel_id"]))
-	domain := strings.TrimSpace(anyString(cfg["domain"]))
-	zoneID := strings.TrimSpace(anyString(cfg["zone_id"]))
-	if token == "" || accountID == "" || tunnelID == "" || domain == "" || zoneID == "" {
-		return errors.New("incomplete Cloudflare tunnel config")
-	}
-
-	cf := &cfTunnel{
-		token:       token,
-		accountID:   accountID,
-		tunnelID:    tunnelID,
-		tunnelCNAME: tunnelID + ".cfargotunnel.com",
-		domain:      domain,
-		zoneID:      zoneID,
-		http:        e.HTTP,
-		stdout:      e.Stdout,
-	}
-	switch args[0] {
-	case "list":
-		return cf.list()
-	case "add":
-		if len(args) < 2 {
-			return errors.New("Usage: cf-tunnel add <port> [port2 ...]")
-		}
-		return cf.add(parsePorts(args[1:]))
-	case "del":
-		if len(args) < 2 {
-			return errors.New("Usage: cf-tunnel del <port> [port2 ...]")
-		}
-		return cf.del(parsePorts(args[1:]))
-	default:
-		return fmt.Errorf("unknown cf-tunnel command: %s", args[0])
-	}
-}
-
-func cfTunnelUsage() string {
-	return `Usage: cf-tunnel <list|add|del> [ports...]
-
-Commands:
-  list                      List current tunnel routes and local port status
-  add <port> [port2 ...]    Add one or more routes and DNS records
-  del <port> [port2 ...]    Delete one or more routes and DNS records
-
-Environment:
-  CF_ENV=prod|dev           Choose the Cloudflare config from ~/cicy-ai/global.json`
-}
-
-func parsePorts(args []string) []int {
-	var ports []int
-	for _, arg := range args {
-		if n, err := strconv.Atoi(strings.TrimSpace(arg)); err == nil {
-			ports = append(ports, n)
-		}
-	}
-	return ports
-}
-
-type cfTunnel struct {
-	token       string
-	accountID   string
-	tunnelID    string
-	tunnelCNAME string
-	domain      string
-	zoneID      string
-	http        *http.Client
-	stdout      io.Writer
-}
-
-func (c *cfTunnel) hostnameFor(port int) string { return fmt.Sprintf("g-%d.%s", port, c.domain) }
-
-func (c *cfTunnel) api(method, path string, payload any) (map[string]any, error) {
-	endpoint := "https://api.cloudflare.com/client/v4/" + path
-	var body io.Reader
-	if payload != nil {
-		data, err := json.Marshal(payload)
-		if err != nil {
-			return nil, err
-		}
-		body = bytes.NewReader(data)
-	}
-	req, err := http.NewRequest(method, endpoint, body)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	var out map[string]any
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *cfTunnel) getConfig() (map[string]any, error) {
-	out, err := c.api(http.MethodGet, fmt.Sprintf("accounts/%s/cfd_tunnel/%s/configurations", c.accountID, c.tunnelID), nil)
-	if err != nil {
-		return nil, err
-	}
-	if success, _ := out["success"].(bool); !success {
-		return nil, fmt.Errorf("获取配置失败: %v", out["errors"])
-	}
-	result := asMap(out["result"])
-	return asMap(result["config"]), nil
-}
-
-func (c *cfTunnel) putConfig(config map[string]any) error {
-	out, err := c.api(http.MethodPut, fmt.Sprintf("accounts/%s/cfd_tunnel/%s/configurations", c.accountID, c.tunnelID), map[string]any{"config": config})
-	if err != nil {
-		return err
-	}
-	if success, _ := out["success"].(bool); !success {
-		return fmt.Errorf("更新配置失败: %v", out["errors"])
-	}
-	return nil
-}
-
-func (c *cfTunnel) dnsList() ([]map[string]any, error) {
-	var all []map[string]any
-	for page := 1; ; page++ {
-		out, err := c.api(http.MethodGet, fmt.Sprintf("zones/%s/dns_records?type=CNAME&per_page=100&page=%d", c.zoneID, page), nil)
-		if err != nil {
-			return nil, err
-		}
-		if success, _ := out["success"].(bool); !success {
-			return nil, fmt.Errorf("dns list failed: %v", out["errors"])
-		}
-		result, _ := out["result"].([]any)
-		if len(result) == 0 {
-			break
-		}
-		for _, item := range result {
-			all = append(all, asMap(item))
-		}
-		if len(result) < 100 {
-			break
-		}
-	}
-	return all, nil
-}
-
-func (c *cfTunnel) dnsAdd(hostname string) bool {
-	out, err := c.api(http.MethodPost, fmt.Sprintf("zones/%s/dns_records", c.zoneID), map[string]any{
-		"type":    "CNAME",
-		"name":    hostname,
-		"content": c.tunnelCNAME,
-		"proxied": true,
-		"ttl":     1,
-	})
-	if err != nil {
-		return false
-	}
-	if success, _ := out["success"].(bool); success {
-		return true
-	}
-	errorsList, _ := out["errors"].([]any)
-	for _, item := range errorsList {
-		if strings.Contains(strings.ToLower(fmt.Sprint(item)), "already") {
-			return true
-		}
-	}
-	return false
-}
-
-func (c *cfTunnel) dnsDel(hostname string) bool {
-	records, err := c.dnsList()
-	if err != nil {
-		return false
-	}
-	for _, rec := range records {
-		if anyString(rec["name"]) == hostname {
-			out, err := c.api(http.MethodDelete, fmt.Sprintf("zones/%s/dns_records/%s", c.zoneID, anyString(rec["id"])), nil)
-			if err != nil {
-				return false
-			}
-			success, _ := out["success"].(bool)
-			return success
-		}
-	}
-	return false
-}
-
-func (c *cfTunnel) list() error {
-	config, err := c.getConfig()
-	if err != nil {
-		return err
-	}
-	ingress, _ := config["ingress"].([]any)
-	count := 0
-	for _, item := range ingress {
-		if _, ok := asMap(item)["hostname"]; ok {
-			count++
-		}
-	}
-	_, _ = fmt.Fprintf(c.stdout, "📡 Tunnel 路由 (%d 条):\n\n", count)
-	for _, item := range ingress {
-		rule := asMap(item)
-		hostname := anyString(rule["hostname"])
-		if hostname == "" {
-			hostname = "(catch-all)"
-		}
-		service := anyString(rule["service"])
-		status := ""
-		if strings.Contains(service, "localhost:") {
-			parts := strings.Split(service, ":")
-			port, _ := strconv.Atoi(parts[len(parts)-1])
-			if portListening(port) {
-				status = " ✅"
-			} else {
-				status = " ❌"
-			}
-		}
-		_, _ = fmt.Fprintf(c.stdout, "  %s → %s%s\n", hostname, service, status)
-	}
-	return nil
-}
-
-func portListening(port int) bool {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
-}
-
-func (c *cfTunnel) add(ports []int) error {
-	config, err := c.getConfig()
-	if err != nil {
-		return err
-	}
-	ingress, _ := config["ingress"].([]any)
-	catchAll := map[string]any{"service": "http_status:404"}
-	var rules []map[string]any
-	for _, item := range ingress {
-		rule := asMap(item)
-		if anyString(rule["hostname"]) == "" {
-			catchAll = rule
-			continue
-		}
-		rules = append(rules, rule)
-	}
-	existing := map[string]bool{}
-	for _, rule := range rules {
-		existing[anyString(rule["hostname"])] = true
-	}
-	type addItem struct {
-		port     int
-		hostname string
-	}
-	var added []addItem
-	for _, port := range ports {
-		hostname := c.hostnameFor(port)
-		if existing[hostname] {
-			_, _ = fmt.Fprintf(c.stdout, "  ⏭️  %s 已存在 %s\n", hostname, ternary(portListening(port), "✅", "❌ 端口未监听"))
-			continue
-		}
-		if !portListening(port) {
-			_, _ = fmt.Fprintf(c.stdout, "  ⚠️  localhost:%d 未监听，仍然添加路由\n", port)
-		}
-		rules = append(rules, map[string]any{"hostname": hostname, "service": fmt.Sprintf("http://localhost:%d", port)})
-		added = append(added, addItem{port: port, hostname: hostname})
-	}
-	if len(added) == 0 {
-		_, _ = fmt.Fprintln(c.stdout, "\n没有新增路由")
-		return nil
-	}
-	config["ingress"] = append(anySliceFromMap(rules), catchAll)
-	if err := c.putConfig(config); err != nil {
-		return err
-	}
-	for _, item := range added {
-		ok := c.dnsAdd(item.hostname)
-		_, _ = fmt.Fprintf(c.stdout, "  ✅ %s → localhost:%d  DNS:%s\n", item.hostname, item.port, ternary(ok, "✅", "❌"))
-	}
-	_, _ = fmt.Fprintf(c.stdout, "\n🎉 成功添加 %d 条路由\n", len(added))
-	return nil
-}
-
-func (c *cfTunnel) del(ports []int) error {
-	config, err := c.getConfig()
-	if err != nil {
-		return err
-	}
-	ingress, _ := config["ingress"].([]any)
-	catchAll := map[string]any{"service": "http_status:404"}
-	var rules []map[string]any
-	for _, item := range ingress {
-		rule := asMap(item)
-		if anyString(rule["hostname"]) == "" {
-			catchAll = rule
-			continue
-		}
-		rules = append(rules, rule)
-	}
-	toDelete := map[string]bool{}
-	for _, port := range ports {
-		toDelete[c.hostnameFor(port)] = true
-	}
-	var kept []map[string]any
-	var removed []string
-	for _, rule := range rules {
-		if toDelete[anyString(rule["hostname"])] {
-			removed = append(removed, anyString(rule["hostname"]))
-		} else {
-			kept = append(kept, rule)
-		}
-	}
-	if len(removed) == 0 {
-		_, _ = fmt.Fprintln(c.stdout, "没有匹配的路由")
-		return nil
-	}
-	config["ingress"] = append(anySliceFromMap(kept), catchAll)
-	if err := c.putConfig(config); err != nil {
-		return err
-	}
-	for _, hostname := range removed {
-		ok := c.dnsDel(hostname)
-		_, _ = fmt.Fprintf(c.stdout, "  🗑️  %s  DNS:%s\n", hostname, ternary(ok, "✅", "⚠️ 未找到"))
-	}
-	_, _ = fmt.Fprintf(c.stdout, "\n🎉 成功删除 %d 条路由\n", len(removed))
-	return nil
-}
-
-func anySliceFromMap(items []map[string]any) []any {
-	out := make([]any, 0, len(items))
-	for _, item := range items {
-		out = append(out, item)
-	}
-	return out
-}
-
-func ternary(cond bool, a, b string) string {
-	if cond {
-		return a
-	}
-	return b
 }
 
 func (e *Env) runCPing(args []string) error {

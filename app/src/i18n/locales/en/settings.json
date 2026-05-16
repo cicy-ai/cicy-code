@@ -17,6 +17,8 @@
   "agentTypeCurrentNotInList": "current value (not in the option list)",
   "allowAllActionsTitle": "Allow all actions on start",
   "allowAllActionsHint": "Appends dangerous flags for Codex/Claude",
+  "inheritGuidanceTitle": "Inherit master's {{filename}}",
+  "inheritGuidanceHint": "Adds an @{{filename}} reference to the sub agent's rules file so the master's project context is auto-inlined",
   "proxyToggleTitle": "Enable proxy",
   "proxyToggleHint": "Runs cicy_proxy_on before launch and checks mihomo rules",
   "proxyPasswordLabel": "Proxy password",

@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -172,22 +174,27 @@ type marketSkill struct {
 	Tags          []string          `json:"tags,omitempty"`
 	BinaryAliases []string          `json:"binary_aliases"`
 	ConfigFile    string            `json:"config_file,omitempty"`
-	Status        marketSkillStatus `json:"status"`
+	// Source distinguishes built-in marketplace entries (empty string) from
+	// user-authored skills discovered under ~/cicy-ai/skills/<name>/ ("user").
+	// User skills are surfaced for view + delete only — install is done out of
+	// band via the `skill-author` CLI, so the marketplace UI hides their
+	// install/uninstall buttons and shows a "Delete" action instead.
+	Source string            `json:"source,omitempty"`
+	Status marketSkillStatus `json:"status"`
 }
 
 func marketSkillsCatalog() []marketSkill {
 	return []marketSkill{
+		{Name: "cf", Title: "Cloudflare API", Description: "Secure Cloudflare API wrapper: manage DNS, zones, and more via `cf curl`. Token stored in ~/cicy-ai/db/cf.json and never exposed to the agent.", Version: "1.0.0", Category: "network", Icon: "globe", Tags: []string{"cloudflare", "dns", "api"}, BinaryAliases: []string{"cf"}, ConfigFile: "~/cicy-ai/db/cf.json"},
 		{Name: "cf-tunnel", Title: "Cloudflare Tunnel", Description: "Manage Cloudflare Tunnel routes and DNS records on this host.", Version: "1.0.0", Category: "network", Icon: "globe", Tags: []string{"cloudflare", "tunnel", "dns"}, BinaryAliases: []string{"cf-tunnel"}, ConfigFile: "~/cicy-ai/db/cf.json"},
 		{Name: "cping", Title: "cping", Description: "Quick network latency check for a domain or IP.", Version: "1.0.0", Category: "network", Icon: "activity", BinaryAliases: []string{"cping"}},
 		{Name: "frp-server", Title: "FRP Server", Description: "Run frps in the background with status, reload, connections.", Version: "1.0.0", Category: "network", Icon: "server", BinaryAliases: []string{"frp-server"}, ConfigFile: "~/data/frp/frps.toml"},
 		{Name: "frp-client", Title: "FRP Client", Description: "Run frpc, with remote management over SSH.", Version: "1.0.0", Category: "network", Icon: "plug", BinaryAliases: []string{"frp-client"}},
-		// google: temporarily delisted — OAuth flow needs a central cicy-ai.com
-		// redirect to support localhost/no-domain workers. Re-add once that's done.
-		// {Name: "google", Title: "Google Workspace", Description: "Gmail / Sheets / Drive / Calendar via Google APIs.", Version: "1.0.0", Category: "ai", Icon: "mail", Tags: []string{"gmail", "sheets", "drive", "calendar"}, BinaryAliases: []string{"google"}, ConfigFile: "~/cicy-ai/db/google.json"},
+		{Name: "google", Title: "Google Workspace", Description: "Gmail / Sheets / Drive / Calendar via Google APIs. OAuth flow uses oauth-flow.cicy-ai.com as a code relay (Worker never sees client_secret or tokens).", Version: "1.0.0", Category: "ai", Icon: "mail", Tags: []string{"gmail", "sheets", "drive", "calendar"}, BinaryAliases: []string{"google"}, ConfigFile: "~/cicy-ai/db/google.json"},
 		{Name: "agent-summary", Title: "Agent Summary", Description: "Generate conversation summaries and handoff documents.", Version: "1.0.0", Category: "ai", Icon: "file-text", BinaryAliases: []string{}},
 		{Name: "agent-webpage", Title: "Agent Webpage", Description: "Talk to the live webpage client for an agent.", Version: "1.0.0", Category: "ai", Icon: "globe", BinaryAliases: []string{"agent-webpage"}},
 		{Name: "agent-code-server", Title: "Code Server", Description: "Open files in the page-bound code-server.", Version: "1.0.0", Category: "ai", Icon: "code", BinaryAliases: []string{"agent-code-server"}},
-		{Name: "cicy-agent", Title: "cicy-agent", Description: "Operate tmux panes and windows on this host.", Version: "1.0.0", Category: "dev", Icon: "terminal", BinaryAliases: []string{"cicy-agent"}, ConfigFile: "~/cicy-ai/db/cicy-agent.json"},
+		{Name: "cicy-agent", Title: "CiCy Agent", Description: "Operate tmux panes and windows on this host.", Version: "1.0.0", Category: "dev", Icon: "terminal", BinaryAliases: []string{"cicy-agent"}},
 		{Name: "cicy-ssh", Title: "cicy-ssh", Description: "Manage SSH hosts via ~/.ssh/config.", Version: "1.0.0", Category: "ops", Icon: "key", BinaryAliases: []string{}},
 		{Name: "globalApiToken", Title: "Global API Token", Description: "Show or refresh ~/cicy-ai/global.json api_token.", Version: "1.0.0", Category: "ops", Icon: "shield", BinaryAliases: []string{"globalApiToken"}, ConfigFile: "~/cicy-ai/global.json"},
 		{Name: "us-spot-proxy", Title: "US Spot Proxy", Description: "Manage Aliyun spot proxy nodes.", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"us-spot-proxy"}, ConfigFile: "~/cicy-ai/db/us-spot-proxy.json"},
@@ -196,9 +203,124 @@ func marketSkillsCatalog() []marketSkill {
 		{Name: "cicy-mihomo", Title: "Cicy Mihomo Proxy", Description: "Run a local Cicy Mihomo (mihomo / clash-meta fork) proxy with start/stop/reload/logs, node speed testing, and per-worker auth + routing.", Version: "1.0.0", Category: "network", Icon: "shield", Tags: []string{"proxy", "mihomo", "clash"}, BinaryAliases: []string{"cicy-mihomo"}, ConfigFile: "~/cicy-ai/db/mihomo.yaml"},
 		{Name: "proxy_ssh", Title: "SSH SOCKS Proxy", Description: "Manage local autossh-based SOCKS proxy profiles (start/stop/restart/test).", Version: "1.0.0", Category: "network", Icon: "plug", BinaryAliases: []string{"proxy_ssh"}, ConfigFile: "~/cicy-ai/db/proxy_ssh.json"},
 		{Name: "us-spot-dev", Title: "US Spot Dev", Description: "Provision a US Aliyun spot dev container on a persistent ESSD disk.", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"us-spot-dev"}},
-		{Name: "cicy-master", Title: "CiCy Master", Description: "Manage and sync the multi-node CiCy machine registry from the master CLI.", Version: "1.0.0", Category: "dev", Icon: "server", BinaryAliases: []string{"cicy-master"}, ConfigFile: "~/cicy-ai/db/cicy-master.json"},
 		{Name: "hk-spot-dev", Title: "HK Spot Dev", Description: "Provision an HK Aliyun spot dev container (companion to us-spot-dev).", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"hk-spot-dev"}},
 	}
+}
+
+// userSkillsRoot is where users author skills via the `skill-author` CLI.
+// Each subdirectory (other than the reserved `cicy-skills` source dir and
+// any name that collides with a built-in catalog entry) is treated as a
+// user skill and surfaced in the marketplace.
+func userSkillsRoot() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, "cicy-ai", "skills")
+}
+
+// reservedUserSkillDirs are subdirectories of userSkillsRoot() that must
+// never be treated as user skills. cicy-skills itself lives here.
+var reservedUserSkillDirs = map[string]struct{}{
+	"cicy-skills": {},
+}
+
+// parseSkillFrontmatter extracts `name:` and `description:` from the YAML
+// frontmatter block at the top of a SKILL.md file. Returns empty strings
+// if the file is missing or malformed — callers fall back to the directory
+// name and a placeholder description.
+func parseSkillFrontmatter(path string) (name, description string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", ""
+	}
+	lines := strings.Split(string(data), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return "", ""
+	}
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) == "---" {
+			break
+		}
+		if strings.HasPrefix(line, "name:") {
+			name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+		} else if strings.HasPrefix(line, "description:") {
+			description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+		}
+	}
+	return name, description
+}
+
+func titleizeSkillName(name string) string {
+	parts := strings.Split(name, "-")
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(p[:1]) + p[1:]
+	}
+	return strings.Join(parts, " ")
+}
+
+// scanUserSkills walks userSkillsRoot() and returns a marketSkill entry
+// for each user-authored skill (Source="user"). Built-in names and
+// reserved dirs are skipped — the built-in catalog is authoritative.
+func scanUserSkills(builtinNames map[string]struct{}) []marketSkill {
+	root := userSkillsRoot()
+	if root == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var out []marketSkill
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if _, reserved := reservedUserSkillDirs[name]; reserved {
+			continue
+		}
+		if _, isBuiltin := builtinNames[name]; isBuiltin {
+			continue
+		}
+		skillMd := filepath.Join(root, name, "SKILL.md")
+		if _, err := os.Stat(skillMd); err != nil {
+			continue
+		}
+		fmName, fmDesc := parseSkillFrontmatter(skillMd)
+		if fmName == "" {
+			fmName = name
+		}
+		if fmDesc == "" {
+			fmDesc = "User-authored skill (no description provided in SKILL.md frontmatter)."
+		}
+		out = append(out, marketSkill{
+			Name:        fmName,
+			Title:       titleizeSkillName(fmName),
+			Description: fmDesc,
+			Version:     "user",
+			Category:    "user",
+			Icon:        "user",
+			Source:      "user",
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// mergedMarketCatalog returns the built-in catalog with discovered user
+// skills appended. Built-in names win on collisions.
+func mergedMarketCatalog() []marketSkill {
+	builtin := marketSkillsCatalog()
+	names := make(map[string]struct{}, len(builtin))
+	for _, s := range builtin {
+		names[s.Name] = struct{}{}
+	}
+	user := scanUserSkills(names)
+	return append(builtin, user...)
 }
 
 func expandHome(p string) string {
@@ -234,7 +356,10 @@ func computeMarketStatus(skill *marketSkill) {
 	}
 
 	skillDocInstalled := true
-	if _, ok := agentgenApprovedMarketSkills[skill.Name]; ok {
+	_, isAgentgen := agentgenApprovedMarketSkills[skill.Name]
+	// User skills follow the same per-profile-doc check as agentgen skills:
+	// they are "installed" only when SKILL.md exists in all three profiles.
+	if isAgentgen || skill.Source == "user" {
 		for _, profile := range []string{"claude", "codex", "opencode"} {
 			doc := filepath.Join(home, "."+profile, "skills", skill.Name, "SKILL.md")
 			if _, err := os.Stat(doc); err != nil {
@@ -271,7 +396,8 @@ func handleSkillMarketList(w http.ResponseWriter, r *http.Request) {
 	categoryFilter := strings.TrimSpace(r.URL.Query().Get("category"))
 	installedFilter := r.URL.Query().Get("installed")
 
-	skills := marketSkillsCatalog()
+	ensureSkillAuthorInstalled()
+	skills := mergedMarketCatalog()
 	out := make([]marketSkill, 0, len(skills))
 	installedCount := 0
 	for i := range skills {
@@ -302,9 +428,10 @@ func handleSkillMarketList(w http.ResponseWriter, r *http.Request) {
 }
 
 func findMarketSkill(name string) *marketSkill {
-	for i, s := range marketSkillsCatalog() {
+	catalog := mergedMarketCatalog()
+	for i, s := range catalog {
 		if s.Name == name {
-			skill := marketSkillsCatalog()[i]
+			skill := catalog[i]
 			return &skill
 		}
 	}
@@ -392,12 +519,13 @@ var agentgenApprovedMarketSkills = map[string]struct{}{
 	"agent-code-server":         {},
 	"agent-summary":             {},
 	"agent-webpage":             {},
+	"cf":                        {},
 	"cf-tunnel":                 {},
 	"cping":                     {},
 	"frp-client":                {},
 	"frp-server":                {},
 	"globalApiToken":            {},
-	// "google":                    {}, // delisted with the marketplace entry above
+	"google":                    {},
 	"cicy-ssh":                  {},
 	"cicy-agent":                {},
 	"cicy-mihomo":               {},
@@ -405,12 +533,14 @@ var agentgenApprovedMarketSkills = map[string]struct{}{
 	"proxy_ssh":                 {},
 	"aliyun-cli":                {},
 	"email":                     {},
+	"us-spot-dev":               {},
+	"hk-spot-dev":               {},
 }
 
 // hosttool aliases — symlink target is dist/cicy-hosttools. Must stay in sync
 // with skills/internal/bundle/bundle.go HosttoolAliases.
 var hosttoolAliasSet = map[string]struct{}{
-	"agent-code-server": {}, "agent-webpage": {}, "cf-tunnel": {},
+	"agent-code-server": {}, "agent-webpage": {}, "cf": {}, "cf-tunnel": {},
 	"cf-tunnel-py": {}, "cf-tunnel.py": {}, "cping": {}, "eng": {},
 	"gemini-ask": {}, "gemini-vision": {}, "globalApiToken": {},
 	"google":   {}, // pure-Go google skill (was Node provider; migrated)
@@ -428,7 +558,7 @@ func resolveSymlinkSource(alias string) string {
 		return filepath.Join(projectRoot, "dist", "cicy-hosttools")
 	}
 	switch alias {
-	case "proxy_ssh", "us-spot-dev", "us-spot-proxy", "cicy-master", "hk-spot-dev":
+	case "proxy_ssh", "us-spot-dev", "us-spot-proxy", "hk-spot-dev":
 		return filepath.Join(projectRoot, alias)
 	}
 	return ""
@@ -473,6 +603,9 @@ func runCicySkillsAgent(action, profile, skillName string, sink *[]string) error
 
 func installMarketSkill(skill *marketSkill) ([]string, error) {
 	logs := []string{}
+	if skill.Source == "user" {
+		return installUserSkill(skill)
+	}
 	if _, ok := agentgenApprovedMarketSkills[skill.Name]; ok {
 		for _, profile := range []string{"codex", "claude", "opencode"} {
 			if err := runCicySkillsAgent("install", profile, skill.Name, &logs); err != nil {
@@ -514,8 +647,36 @@ func installMarketSkill(skill *marketSkill) ([]string, error) {
 	return logs, nil
 }
 
+// ensureSkillAuthorInstalled auto-installs the skill-author meta-skill into all
+// three agent profiles if it is not already present. Called on every skill-market
+// list request so new installs get it without a manual install step.
+func ensureSkillAuthorInstalled() {
+	src := filepath.Join(userSkillsRoot(), "skill-author")
+	if _, err := os.Stat(filepath.Join(src, "SKILL.md")); err != nil {
+		return // source not present — nothing to install
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	for _, profile := range []string{"claude", "codex", "opencode"} {
+		dst := filepath.Join(home, "."+profile, "skills", "skill-author")
+		if _, err := os.Stat(filepath.Join(dst, "SKILL.md")); err == nil {
+			continue // already installed in this profile
+		}
+		_ = os.RemoveAll(dst)
+		_ = copyTree(src, dst)
+	}
+}
+
 func uninstallMarketSkill(skill *marketSkill) ([]string, error) {
 	logs := []string{}
+	if skill.Name == "skill-author" {
+		return nil, fmt.Errorf("skill-author cannot be uninstalled; use 'skill-author install skill-author' to reinstall")
+	}
+	if skill.Source == "user" {
+		return uninstallUserSkill(skill)
+	}
 	if _, ok := agentgenApprovedMarketSkills[skill.Name]; ok {
 		for _, profile := range []string{"codex", "claude", "opencode"} {
 			if err := runCicySkillsAgent("remove", profile, skill.Name, &logs); err != nil {
@@ -542,4 +703,110 @@ func uninstallMarketSkill(skill *marketSkill) ([]string, error) {
 		log.Printf("[skill-market] markSkillUninstalled(%s): %v", skill.Name, err)
 	}
 	return logs, nil
+}
+
+// installUserSkill copies ~/cicy-ai/skills/<name>/ into all three agent
+// profile directories (.claude / .codex / .opencode). Idempotent — any
+// existing per-profile copy is removed first so edits to the source dir
+// take effect.
+func installUserSkill(skill *marketSkill) ([]string, error) {
+	logs := []string{}
+	root := userSkillsRoot()
+	if root == "" {
+		return logs, fmt.Errorf("could not resolve user skills root")
+	}
+	src := filepath.Join(root, skill.Name)
+	if info, err := os.Stat(src); err != nil || !info.IsDir() {
+		return logs, fmt.Errorf("user skill source missing: %s", src)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return logs, fmt.Errorf("resolve home: %w", err)
+	}
+	for _, profile := range []string{"claude", "codex", "opencode"} {
+		dst := filepath.Join(home, "."+profile, "skills", skill.Name)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return logs, fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
+		}
+		if err := os.RemoveAll(dst); err != nil {
+			return logs, fmt.Errorf("rm %s: %w", dst, err)
+		}
+		if err := copyTree(src, dst); err != nil {
+			return logs, fmt.Errorf("copy %s -> %s: %w", src, dst, err)
+		}
+		logs = append(logs, fmt.Sprintf("installed user skill %s -> %s", skill.Name, dst))
+	}
+	return logs, nil
+}
+
+// uninstallUserSkill deletes the user skill source AND every per-profile
+// copy. This is the marketplace UI's "Delete" action — the user explicitly
+// asked for view + delete only, so uninstall on a user skill is destructive.
+func uninstallUserSkill(skill *marketSkill) ([]string, error) {
+	logs := []string{}
+	root := userSkillsRoot()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return logs, fmt.Errorf("resolve home: %w", err)
+	}
+	// Profile copies first — the source is the source of truth, so removing
+	// it first would leave orphans on disk if a profile rm later fails.
+	for _, profile := range []string{"claude", "codex", "opencode"} {
+		dst := filepath.Join(home, "."+profile, "skills", skill.Name)
+		if err := os.RemoveAll(dst); err != nil {
+			return logs, fmt.Errorf("rm %s: %w", dst, err)
+		}
+		logs = append(logs, fmt.Sprintf("removed %s", dst))
+	}
+	if root != "" {
+		src := filepath.Join(root, skill.Name)
+		if err := os.RemoveAll(src); err != nil {
+			return logs, fmt.Errorf("rm source %s: %w", src, err)
+		}
+		logs = append(logs, fmt.Sprintf("removed source %s", src))
+	}
+	return logs, nil
+}
+
+// copyTree recursively copies src to dst, preserving file modes. Symlinks
+// are recreated as symlinks (cp -a behavior). Used for user-skill install.
+func copyTree(src, dst string) error {
+	info, err := os.Lstat(src)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(src)
+		if err != nil {
+			return err
+		}
+		return os.Symlink(target, dst)
+	}
+	if info.IsDir() {
+		if err := os.MkdirAll(dst, info.Mode().Perm()); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(src)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if err := copyTree(filepath.Join(src, entry.Name()), filepath.Join(dst, entry.Name())); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
 }

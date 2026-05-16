@@ -95,3 +95,21 @@ export function getAgentTypeIconMeta(agentType?: string): AgentTypeIconMeta | nu
   if (!normalized) return null
   return AGENT_TYPE_ICON_MAP[normalized]
 }
+
+// Mirrors guidanceFilenameForAgentType in api/mgr/tmux.go. Returns the per-agent
+// project-rules filename, or null when the agent has none. Keep the two
+// switch tables in sync.
+export function guidanceFilenameForAgentType(agentType?: string): 'CLAUDE.md' | 'AGENTS.md' | null {
+  switch (normalizeAgentType(agentType)) {
+    case 'claude':
+    case 'cicy-claude':
+    case 'kiro-cli':
+      return 'CLAUDE.md'
+    case 'codex':
+    case 'opencode':
+    case 'cursor':
+      return 'AGENTS.md'
+    default:
+      return null
+  }
+}

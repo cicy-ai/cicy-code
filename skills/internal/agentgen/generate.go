@@ -41,7 +41,7 @@ func OpenCodeSkillsDir() string {
 }
 
 func ApprovedCodexSkills() []string {
-	return []string{"agent-code-server", "agent-summary", "agent-webpage", "aliyun-cli", "cf-tunnel", "cping", "email", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent", "cicy-mihomo", "us-spot-proxy", "proxy_ssh"}
+	return []string{"agent-code-server", "agent-summary", "agent-webpage", "aliyun-cli", "cf", "cf-tunnel", "cping", "email", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent", "cicy-mihomo", "us-spot-proxy", "proxy_ssh", "us-spot-dev", "hk-spot-dev"}
 }
 
 func canonicalCodexSkillName(name string) string {
@@ -52,6 +52,8 @@ func canonicalCodexSkillName(name string) string {
 		return "agent-summary"
 	case "agent-webpage", "agentwebpage", "agent_webpage":
 		return "agent-webpage"
+	case "cf":
+		return "cf"
 	case "cf-tunnel":
 		return "cf-tunnel"
 	case "cping":
@@ -78,6 +80,10 @@ case "frp-client", "frpclient", "frpc", "frp-client-skill":
 		return "aliyun-cli"
 	case "email", "email-sender", "emailsender", "mail":
 		return "email"
+	case "us-spot-dev", "usspotdev", "us_spot_dev":
+		return "us-spot-dev"
+	case "hk-spot-dev", "hkspotdev", "hk_spot_dev":
+		return "hk-spot-dev"
 	default:
 		return ""
 	}
@@ -305,6 +311,8 @@ func generateCodexSkill(root, targetRoot, skill string) error {
 		return generateCodexAgentSummary(targetRoot)
 	case "agent-webpage":
 		return generateCodexAgentWebpage(targetRoot)
+	case "cf":
+		return generateCodexCF(targetRoot)
 	case "cf-tunnel":
 		return generateCodexCFTunnel(targetRoot)
 	case "cping":
@@ -331,6 +339,10 @@ func generateCodexSkill(root, targetRoot, skill string) error {
 		return generateCodexAliyunCLI(targetRoot)
 	case "email":
 		return generateCodexEmail(targetRoot)
+	case "us-spot-dev":
+		return generateCodexUSSpotDev(targetRoot)
+	case "hk-spot-dev":
+		return generateCodexHKSpotDev(targetRoot)
 	default:
 		return fmt.Errorf("skill %q is not implemented", skill)
 	}
@@ -421,6 +433,25 @@ func copyFile(src, dst string, perm os.FileMode) error {
 		return err
 	}
 	return out.Close()
+}
+
+func generateCodexCF(targetRoot string) error {
+	skillDir := filepath.Join(targetRoot, "cf")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderCFSkill()); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderCFHelp()); err != nil {
+		return err
+	}
+	tools := renderCFCommands()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
 }
 
 func generateCodexCFTunnel(targetRoot string) error {
@@ -730,42 +761,75 @@ func writeText(path, text string) error {
 func renderGoogleSkill() string {
 	return fmt.Sprintf(`---
 name: google
-description: Use the local google CLI wrapper for Gmail, Sheets, Drive, and Calendar on this host. Also exposes `+"`google login`"+` and `+"`google status`"+` for OAuth setup (device-code flow) when authorization is missing or expired.
+description: Use the local google CLI wrapper for Gmail, Sheets, Drive, and Calendar on this host. ` + "`google login`" + ` runs an OAuth flow via oauth-flow.cicy-ai.com (a code-relay Worker that never sees the user's client_secret or tokens).
 ---
 
-# Google
+# Google Workspace
 
-This skill covers the local `+"`google`"+` wrapper from `+"`PATH`"+`.
+Local `+"`google`"+` wrapper for Gmail / Sheets / Drive / Calendar. All credentials live in two files on this host (chmod 600):
 
-Use these commands directly from `+"`PATH`"+`. They read real credentials from `+"`~/cicy-ai/db/google.json`"+` (created by `+"`google login`"+`).
+- `+"`~/cicy-ai/db/google_oauth_client.json`"+`  — `+"`{client_id, client_secret}`"+` (you create this once)
+- `+"`~/cicy-ai/db/google.json`"+`               — `+"`{refresh_token, ...}`"+` (created by `+"`google login`"+`)
+
+## Hard rules — sensitive data
+
+1. **NEVER cat / Read / grep / print** either file above. The wrapper is the only thing that should touch them.
+2. **NEVER ask the user to paste client_secret, refresh_token, or any auth code into chat.** They go straight from Google → OAuth client config file → wrapper.
+3. The OAuth flow uses `+"`https://oauth-flow.cicy-ai.com`"+` as a code relay. The Worker only briefly holds the single-use authorization code (10 min TTL); it does NOT see client_secret or tokens. Token exchange happens locally on this host.
+4. Do not invent client IDs, secrets, or refresh tokens — only what the user produces in their own Google Cloud Console.
 
 ## Scope
 
-Use this skill when the task involves:
+- **OAuth setup / re-authorization** (`+"`google login`"+`, `+"`google status`"+`) — when the user asks to "connect Google", "authorize", "log in", or any Google API call fails with an auth error
+- Gmail inbox listing, reading, sending, verification-code watching
+- Google Sheets read / write / append / create
+- Google Drive list / upload / download / quota
+- Google Calendar list / events / create
 
-- **OAuth setup / re-authorization** (`+"`google login`"+`, `+"`google status`"+`) — when the user asks to "connect Google", "authorize", "log in", "bind Google account", or any Google API call fails with an auth error
-- Gmail inbox listing, reading, sending, or verification-code watching
-- Google Sheets read/write/append/create
-- Google Drive list/upload/download/quota work
-- Google Calendar list/events/create
+## OAuth Setup — the full flow
 
-## OAuth Setup (`+"`google login`"+`)
+Run `+"`google login`"+` and let its stdout drive the next step. It self-detects three states:
 
-If any Google subcommand reports missing authorization, run `+"`google login`"+` and follow its stdout verbatim. It self-detects three states and prints the right next-step for each:
+### State 1 — No OAuth client yet (first run)
 
-1. **No OAuth client yet** — it prints step-by-step instructions for the user to create a "TVs and Limited Input devices" OAuth client in Google Cloud Console, copy the Client ID, and save it to `+"`~/cicy-ai/db/google_oauth_client.json`"+`. After they do this, run `+"`google login`"+` again.
-2. **Client configured but not authorized** — it runs the device-code flow inline: prints a `+"`user_code`"+` and a verification URL. Show both to the user clearly, wait while the command polls Google, and report the resulting authorized email when it finishes.
-3. **Already authorized** — it prints the connected email and exits.
+`+"`google login`"+` prints exact steps. Walk the user through them one at a time:
 
-Walk the user through one step at a time. Do not skip ahead or assume state — re-run `+"`google login`"+` after each user action and let its output drive the next step.
+1. Open `+"`https://console.cloud.google.com/apis/credentials`"+` in their browser
+   (signed into the Google account they want to authorize)
+2. If prompted, configure the OAuth consent screen first (User Type: External, app name = anything personal)
+3. Click **Create credentials → OAuth client ID**
+4. **Application type: "Web application"** (Desktop / TV won't work — the redirect URI requires Web)
+5. Under **Authorized redirect URIs**, click ADD URI and paste exactly:
+   `+"`https://oauth-flow.cicy-ai.com/callback`"+`
+6. Click Create. The dialog shows **Client ID** and **Client Secret**.
+7. Have the user paste BOTH back to you, then write them to the file:
+   `+"`cat > ~/cicy-ai/db/google_oauth_client.json <<EOF`"+`
+   `+"`{\"client_id\":\"<paste-id>\",\"client_secret\":\"<paste-secret>\"}`"+`
+   `+"`EOF`"+`
+   `+"`chmod 600 ~/cicy-ai/db/google_oauth_client.json`"+`
+8. Re-run `+"`google login`"+` — it advances to State 2.
+
+### State 2 — Client configured, not yet authorized
+
+`+"`google login`"+` generates a session id and prints a one-shot URL:
+
+`+"`https://oauth-flow.cicy-ai.com/start?session=...&client_id=...&scopes=...`"+`
+
+Tell the user: **open that URL in your browser**. They'll see Google's consent screen, click Allow, and the page will say "Success — you can close this tab."
+
+Meanwhile the wrapper polls `+"`oauth-flow.cicy-ai.com/poll`"+` every 2 seconds. When it sees the code, it exchanges it locally (with the client_secret) for a refresh_token and writes it to `+"`~/cicy-ai/db/google.json`"+`. Final line of stdout is `+"`✓ authorized as <email>`"+`.
+
+### State 3 — Already authorized
+
+`+"`google login`"+` prints the connected email and exits. To switch accounts, delete `+"`~/cicy-ai/db/google.json`"+` and re-run `+"`google login`"+`.
 
 ## Rules
 
 1. Prefer the local wrapper commands first.
 2. For unfamiliar subcommands, run `+"`google help`"+` or `+"`google <service> help`"+`.
-3. Use the real token configured on the host. Do not mock Google responses.
+3. Use the real token configured on the host — do not mock Google responses.
 4. Report the concrete command result back to the user.
-5. **Never** invent client IDs, secrets, or refresh tokens — only what `+"`google login`"+` and the user produce together.
+5. Re-run `+"`google login`"+` after each user action and let its stdout drive the next step. Don't skip ahead.
 
 ## Help
 
@@ -896,28 +960,40 @@ Read [tools.md](./references/tools.md) for the supported commands.
 }
 
 func renderGoogleHelp() string {
-	return fmt.Sprintf(`# Google Help
+	return fmt.Sprintf(`# Google Workspace Help
 
 ## Command
 
-- primary command: `+"`google`"+`
+- primary: `+"`google`"+`
+- credentials: `+"`~/cicy-ai/db/google_oauth_client.json`"+` (client_id + client_secret) and `+"`~/cicy-ai/db/google.json`"+` (refresh_token). Both chmod 600. **Never read or print either file.**
+
+## OAuth flow at a glance
+
+1. `+"`google status`"+` — check current auth state.
+2. `+"`google login`"+` — runs the OAuth flow via `+"`oauth-flow.cicy-ai.com`"+`:
+   - if no client config: prints exact steps to create a Web-application OAuth client and add `+"`https://oauth-flow.cicy-ai.com/callback`"+` as a redirect URI
+   - if client configured but not authorized: prints a one-shot `+"`oauth-flow.cicy-ai.com/start?...`"+` URL — the user opens it, authorizes, and the wrapper polls + completes the exchange locally
+   - if already authorized: prints the connected email
+3. After `+"`✓ authorized as <email>`"+`, all `+"`google <service>`"+` subcommands work.
+
+**The Worker only sees the auth code (10 min, single-use). It never sees client_secret or refresh_token. Token exchange happens locally.**
 
 ## Quick Start
 
-- inspect usage: `+"`google help`"+`
-- check auth status: `+"`google status`"+`
-- start / re-run OAuth setup: `+"`google login`"+` (TV/Limited-Input device-code flow; self-guides through all states)
-- inspect gmail shortcuts: `+"`google gmail help`"+`
-- list recent mail: `+"`google gmail list 5`"+`
-- list spreadsheets: `+"`google sheets list`"+`
-- list drive files: `+"`google drive list`"+`
-- list calendars: `+"`google calendar list`"+`
+- check usage:        `+"`google help`"+`
+- check auth status:  `+"`google status`"+`
+- start OAuth setup:  `+"`google login`"+`
+- gmail shortcuts:    `+"`google gmail help`"+`
+- list recent mail:   `+"`google gmail list 5`"+`
+- list spreadsheets:  `+"`google sheets list`"+`
+- list drive files:   `+"`google drive list`"+`
+- list calendars:     `+"`google calendar list`"+`
 
-## Rules
+## Rules — sensitive data
 
-- use the real credentials in `+"`~/cicy-ai/global.json`"+`
-- do not mock Google responses
-- report exact command output or concrete results back to the user
+- Never `+"`cat`"+` / `+"`Read`"+` / `+"`grep`"+` / print `+"`~/cicy-ai/db/google_oauth_client.json`"+` or `+"`~/cicy-ai/db/google.json`"+`.
+- Never ask the user to paste client_secret, refresh_token, or any auth code into chat.
+- The wrapper is the only thing that should touch credentials. Use the real token; do not mock responses.
 
 ## More
 
@@ -949,42 +1025,256 @@ func renderGlobalAPITokenHelp() string {
 `)
 }
 
-func renderCFTunnelSkill() string {
-	return fmt.Sprintf(`---
-name: cf-tunnel
-description: Use the local cf-tunnel wrapper to manage Cloudflare Tunnel routes and DNS on this host.
+func renderCFSkill() string {
+	return `---
+name: cf
+description: Secure Cloudflare API wrapper. Use ` + "`cf curl`" + ` to call any Cloudflare API endpoint — the tool injects the api_token so the agent never sees it. Config lives in ~/cicy-ai/db/cf.json (chmod 600).
 ---
 
-# Cf Tunnel
+# Cloudflare API (cf)
 
-This skill covers the local `+"`cf-tunnel`"+` wrapper from `+"`PATH`"+`.
+> **Wrapper command:** ` + "`cf`" + `. Subcommands: ` + "`config`" + ` / ` + "`status`" + ` / ` + "`curl`" + `.
+> ` + "`cf curl`" + ` injects ` + "`Authorization: Bearer <api_token>`" + ` into every request — the agent never sees the raw token.
 
-Use this command directly from `+"`PATH`"+`. It reads real Cloudflare credentials from `+"`~/cicy-ai/global.json`"+`.
+## Security: hard rules
+
+- **NEVER cat / Read / grep / print** ` + "`~/cicy-ai/db/cf.json`" + `. The api_token is a user secret.
+- When credentials are missing, run ` + "`cf config`" + `. It auto-creates a placeholder (chmod 600) and opens it in code-server. **Do not ask the user to paste the api_token into chat.**
+- Never construct a raw ` + "`curl`" + ` command with ` + "`-H \"Authorization: Bearer ...\"`" + ` using a token you read from the file. Use ` + "`cf curl`" + ` instead.
+- ` + "`cf status`" + ` masks the api_token — trust its output.
+
+## Config shape (illustrative — do not Read the live file)
+
+` + "```json" + `
+{
+  "api_token": "<paste-your-cloudflare-api-token-here>",
+  "account_id": "<paste-your-cloudflare-account-id-here>"
+}
+` + "```" + `
+
+Create the token at https://dash.cloudflare.com/profile/api-tokens.
+Use the **"Edit zone DNS"** template for DNS-only work, or create a custom token with the scopes your task requires.
+
+## Bootstrap flow
+
+1. ` + "`cf status`" + ` — check whether config is ready.
+2. ` + "`cf config`" + ` — opens the placeholder JSON in code-server. Walk the user through the Cloudflare dashboard; **never ask them to paste the token into chat**.
+3. ` + "`cf curl GET /zones`" + ` — verify access by listing zones.
+
+## Using cf curl
+
+` + "`cf curl <METHOD> <PATH> [json-body]`" + `
+
+- ` + "`PATH`" + ` is relative to ` + "`https://api.cloudflare.com/client/v4`" + ` — leading ` + "`/`" + ` optional.
+- ` + "`json-body`" + ` is passed as ` + "`-d`" + ` to curl. Quote it to avoid shell word-splitting.
+- Output is the raw Cloudflare JSON response — parse with ` + "`jq`" + ` as needed.
+
+### Common patterns
+
+` + "```sh" + `
+# List zones
+cf curl GET /zones | jq '.result[] | {id, name}'
+
+# List DNS records for a zone
+cf curl GET /zones/ZONE_ID/dns_records | jq '.result[] | {id, type, name, content}'
+
+# Add an A record
+cf curl POST /zones/ZONE_ID/dns_records \
+  '{"type":"A","name":"sub.example.com","content":"1.2.3.4","ttl":1,"proxied":false}'
+
+# Update a record
+cf curl PATCH /zones/ZONE_ID/dns_records/RECORD_ID \
+  '{"content":"5.6.7.8"}'
+
+# Delete a record
+cf curl DELETE /zones/ZONE_ID/dns_records/RECORD_ID
+
+# List Cloudflare Tunnel configs
+cf curl GET /accounts/ACCOUNT_ID/cfd_tunnel
+` + "```" + `
+
+## Rules
+
+1. ` + "`cf curl`" + ` is the only way to call the Cloudflare API. Do not use raw ` + "`curl`" + ` with the token.
+2. If ` + "`status`" + ` says missing or placeholder, run ` + "`cf config`" + ` — never ask for the token in chat.
+3. Always check ` + "`\"success\": true`" + ` in the response before reporting success.
+4. Zone IDs and record IDs come from API responses — never guess them.
+
+## Help
+
+Read [help.md](./references/help.md) for the bare command list and common examples.
+
+## Tools
+
+Read [tools.md](./references/tools.md) for the subcommand reference.
+`
+}
+
+func renderCFHelp() string {
+	return `# Cloudflare API Help
+
+## Command
+
+- wrapper: ` + "`cf`" + ` (subcommands: ` + "`config`" + ` / ` + "`status`" + ` / ` + "`curl`" + `)
+- base URL: ` + "`https://api.cloudflare.com/client/v4`" + `
+
+## Bootstrap
+
+1. ` + "`cf status`" + ` — if missing or placeholder, continue.
+2. ` + "`cf config`" + ` — auto-creates ` + "`~/cicy-ai/db/cf.json`" + ` (chmod 600) and opens it in code-server.
+   - ` + "`api_token`" + ` — create at https://dash.cloudflare.com/profile/api-tokens
+   - ` + "`account_id`" + ` — visible in the Cloudflare dashboard URL after login
+   - **Do not ask the user to paste the token into chat.**
+3. ` + "`cf curl GET /zones`" + ` — verify access.
+
+## Security reminder
+
+- Never ` + "`cat`" + ` / ` + "`Read`" + ` / ` + "`grep`" + ` ` + "`~/cicy-ai/db/cf.json`" + `.
+- Never pass the raw token to ` + "`curl -H \"Authorization: Bearer ...\"`" + `. Use ` + "`cf curl`" + `.
+
+## curl usage
+
+` + "`cf curl <METHOD> <PATH> [json-body]`" + `
+
+PATH is relative to ` + "`https://api.cloudflare.com/client/v4`" + `. Output is raw JSON.
+
+## Common examples
+
+` + "```sh" + `
+# Zones
+cf curl GET /zones | jq '.result[] | {id, name}'
+
+# DNS records
+cf curl GET /zones/ZONE_ID/dns_records | jq '.result[] | {id, type, name, content}'
+
+# Add record
+cf curl POST /zones/ZONE_ID/dns_records \
+  '{"type":"A","name":"sub.example.com","content":"1.2.3.4","ttl":1,"proxied":false}'
+
+# Update record
+cf curl PATCH /zones/ZONE_ID/dns_records/RECORD_ID '{"content":"new-ip"}'
+
+# Delete record
+cf curl DELETE /zones/ZONE_ID/dns_records/RECORD_ID
+
+# Purge cache
+cf curl POST /zones/ZONE_ID/purge_cache '{"purge_everything":true}'
+
+# Workers / account resources
+cf curl GET /accounts/ACCOUNT_ID/workers/scripts
+` + "```" + `
+
+## Response shape
+
+Every Cloudflare API response:
+` + "```json" + `
+{"success": true/false, "result": ..., "errors": [], "messages": []}
+` + "```" + `
+Always check ` + "`success`" + ` before proceeding.
+
+## More
+
+Read [tools.md](./references/tools.md) for the full subcommand table.
+`
+}
+
+func renderCFCommands() string {
+	return `# Cloudflare API Commands
+
+| Command | What it does |
+|---------|--------------|
+| ` + "`cf config`" + ` | Open ~/cicy-ai/db/cf.json in code-server (auto-creates placeholder) |
+| ` + "`cf status`" + ` | Show config state (api_token masked) |
+| ` + "`cf curl GET /zones`" + ` | List all zones in the account |
+| ` + "`cf curl GET /zones/ZONE_ID/dns_records`" + ` | List DNS records for a zone |
+| ` + "`cf curl POST /zones/ZONE_ID/dns_records '<json>'`" + ` | Create a DNS record |
+| ` + "`cf curl PATCH /zones/ZONE_ID/dns_records/RECORD_ID '<json>'`" + ` | Update a DNS record |
+| ` + "`cf curl DELETE /zones/ZONE_ID/dns_records/RECORD_ID`" + ` | Delete a DNS record |
+| ` + "`cf curl POST /zones/ZONE_ID/purge_cache '{\"purge_everything\":true}'`" + ` | Purge all zone cache |
+| ` + "`cf curl GET /accounts/ACCOUNT_ID/cfd_tunnel`" + ` | List Cloudflare Tunnels |
+| ` + "`cf curl GET /accounts/ACCOUNT_ID/workers/scripts`" + ` | List Workers scripts |
+| ` + "`cf curl GET /accounts/ACCOUNT_ID/pages/projects`" + ` | List Pages projects |
+
+**Security**: never use raw ` + "`curl -H \"Authorization: Bearer ...\"`" + ` with the token — always use ` + "`cf curl`" + `.
+`
+}
+
+func renderCFTunnelSkill() string {
+	return `---
+name: cf-tunnel
+description: Manage Cloudflare Tunnel routes and DNS records on this host. Credentials live in ~/cicy-ai/db/cf.json and must never be read by the agent. Use cf-tunnel config to bootstrap and cf-tunnel status to verify.
+---
+
+# Cloudflare Tunnel
+
+> **Wrapper command:** ` + "`cf-tunnel`" + `. Subcommands: ` + "`config`" + ` / ` + "`status`" + ` / ` + "`daemon`" + ` / ` + "`list`" + ` / ` + "`add`" + ` / ` + "`del`" + `.
+> Credentials live in ` + "`~/cicy-ai/db/cf.json`" + ` (chmod 600). The wrapper reads them — the agent never sees them.
+
+## Credentials: hard rules
+
+- **NEVER cat / Read / grep / print** ` + "`~/cicy-ai/db/cf.json`" + `. The api_token is a user secret.
+- When config is missing or a placeholder, run ` + "`cf-tunnel config`" + `. It auto-creates a placeholder JSON and opens it in code-server. **Do not ask the user to paste the api_token into chat.**
+- ` + "`status`" + ` masks the api_token and never prints the full value; trust its output.
+
+## Config shape (illustrative — do not Read the live file)
+
+` + "```json" + `
+{
+  "prod": {
+    "api_token":  "<paste-your-cloudflare-api-token-here>",
+    "account_id": "<paste-your-cloudflare-account-id-here>",
+    "tunnel_id":  "<paste-your-cloudflare-tunnel-id-here>",
+    "domain":     "<paste-your-domain-here>",
+    "zone_id":    "<paste-your-cloudflare-zone-id-here>"
+  }
+}
+` + "```" + `
+
+A ` + "`dev`" + ` block is optional; use ` + "`CF_ENV=dev cf-tunnel ...`" + ` to target it.
+
+## Bootstrap flow
+
+1. ` + "`cf-tunnel status`" + ` — check whether config and daemon are ready.
+2. ` + "`cf-tunnel config`" + ` — opens ` + "`~/cicy-ai/db/cf.json`" + ` in code-server (auto-creates a placeholder if missing). Walk the user through filling in the five fields. **Never ask them to paste api_token into chat.**
+3. ` + "`cf-tunnel daemon install`" + ` — fetches the tunnel connector token from the CF API, installs the ` + "`cloudflared`" + ` binary if missing, installs and starts it as a systemd service. Run this once per host.
+4. ` + "`cf-tunnel list`" + ` — verify connectivity; lists current tunnel routes.
+5. ` + "`cf-tunnel add 8080`" + ` — add a route for port 8080; hostname will be ` + "`g-8080.<domain>`" + `.
+
+### Fields the user must provide (the agent cannot obtain these)
+
+- **api_token** — Cloudflare API token with *Edit Cloudflare Tunnel* + *Zone DNS Edit* permissions.
+  Create at: Cloudflare dashboard → Profile → API Tokens → Create Token → template "Edit Cloudflare Tunnel".
+- **account_id** — visible in the URL when you're on the Cloudflare dashboard home (` + "`/accounts/<id>`" + `).
+- **tunnel_id** — ID of the existing tunnel (not the name). Find it in Zero Trust → Networks → Tunnels → select tunnel → Overview tab.
+- **domain** — base domain for route hostnames (e.g. ` + "`example.com`" + `); routes become ` + "`g-<port>.example.com`" + `.
+- **zone_id** — Cloudflare Zone ID for that domain (right sidebar of the domain overview page).
 
 ## Scope
 
 Use this skill when the task involves:
 
+- checking whether cloudflared is installed and running as a service
+- installing or managing the cloudflared daemon on this host
 - listing current Cloudflare tunnel routes for this host
-- adding one or more `+"`g-<port>.<domain>`"+` tunnel hostnames that map to local ports
-- deleting one or more existing tunnel routes and DNS records
-- working against `+"`prod`"+` or `+"`dev`"+` Cloudflare config via `+"`CF_ENV`"+`
+- adding one or more ` + "`g-<port>.<domain>`" + ` tunnel hostnames that map to local ports
+- deleting existing tunnel routes and DNS records
+- switching environments via ` + "`CF_ENV=dev`" + `
 
 ## Rules
 
-1. Prefer the local `+"`cf-tunnel`"+` command first.
-2. Use the real Cloudflare config from `+"`~/cicy-ai/global.json`"+`. Do not mock responses.
-3. `+"`cf-tunnel`"+` manages routes and DNS only. Do not kill or manage the `+"`cloudflared`"+` process unless the user explicitly asks.
+1. The wrapper is the only thing that reads ` + "`~/cicy-ai/db/cf.json`" + `. You do not.
+2. If ` + "`status`" + ` says missing or placeholder, run ` + "`cf-tunnel config`" + ` — never ask the user for the api_token in chat.
+3. ` + "`cf-tunnel`" + ` manages routes and DNS only; do not manage the ` + "`cloudflared`" + ` process unless explicitly asked.
 4. Report the exact hostname and port mapping results back to the user.
 
 ## Help
 
-Read [help.md](./references/help.md) first for quick usage, rules, and examples.
+Read [help.md](./references/help.md) for the bare command list.
 
 ## Tools
 
-Read [tools.md](./references/tools.md) for the full tool and command shapes.
-`)
+Read [tools.md](./references/tools.md) for the full command reference.
+`
 }
 
 func renderCPingSkill() string {
@@ -1070,7 +1360,7 @@ name: cicy-agent
 description: Operate tmux panes and windows on this host with the local cicy-agent wrapper.
 ---
 
-# cicy-agent
+# CiCy Agent
 
 This skill is for tmux-style pane and window operations in the CiCy environment.
 
@@ -1154,31 +1444,36 @@ Read [tools.md](./references/tools.md) for the common command shapes.
 }
 
 func renderCFTunnelHelp() string {
-	return fmt.Sprintf(`# Cf Tunnel Help
+	return `# Cloudflare Tunnel Help
 
 ## Command
 
-- primary command: `+"`cf-tunnel`"+`
+- wrapper: ` + "`cf-tunnel`" + ` (subcommands: ` + "`config`" + ` / ` + "`status`" + ` / ` + "`list`" + ` / ` + "`add`" + ` / ` + "`del`" + `)
+- config file: ` + "`~/cicy-ai/db/cf.json`" + ` (chmod 600, never read by agent)
 
 ## Quick Start
 
-- inspect routes: `+"`cf-tunnel list`"+`
-- add one route: `+"`cf-tunnel add 8101`"+`
-- add multiple routes: `+"`cf-tunnel add 5174 8010 13000`"+`
-- delete a route: `+"`cf-tunnel del 8101`"+`
-- use dev config: `+"`CF_ENV=dev cf-tunnel list`"+`
+` + "```sh" + `
+cf-tunnel status                          # check config
+cf-tunnel config                          # bootstrap / open config in code-server
+cf-tunnel list                            # list tunnel routes
+cf-tunnel add 8080                        # add route for port 8080
+cf-tunnel add 5174 8010 13000             # add multiple routes at once
+cf-tunnel del 8080                        # remove route for port 8080
+CF_ENV=dev cf-tunnel list                 # use the dev environment block
+` + "```" + `
 
 ## Rules
 
-- use the real Cloudflare config in `+"`~/cicy-ai/global.json`"+`
-- do not mock Cloudflare responses
-- `+"`cf-tunnel`"+` manages route and DNS state only; it does not manage the `+"`cloudflared`"+` process
-- report exact hostname and port mappings back to the user
+- NEVER cat / Read / grep ` + "`~/cicy-ai/db/cf.json`" + ` — api_token is a secret
+- If status says missing or placeholder, run ` + "`cf-tunnel config`" + ` and walk the user through it
+- ` + "`cf-tunnel`" + ` manages route and DNS state only; it does not manage the ` + "`cloudflared`" + ` process
+- Report exact hostname and port mappings back to the user
 
 ## More
 
 - tool map: [tools.md](./tools.md)
-`)
+`
 }
 
 func renderCPingHelp() string {
@@ -1190,7 +1485,7 @@ func renderCPingHelp() string {
 
 ## Quick Start
 
-- ping a domain: `+"`cping tn.cicy-ai.com`"+`
+- ping a domain: `+"`cping your-domain.com`"+`
 - ping an IP: `+"`cping 35.241.97.128`"+`
 - compare a public hostname: `+"`cping baidu.com`"+`
 
@@ -1490,7 +1785,7 @@ func renderAgentWebpageHelp() string {
 }
 
 func renderTMHelp() string {
-	return fmt.Sprintf(`# cicy-agent Help
+	return fmt.Sprintf(`# CiCy Agent Help
 
 ## Command
 
@@ -2080,17 +2375,38 @@ func renderAliyunCLICommands() string {
 }
 
 func renderCFTunnelCommands() string {
-	return `# Cf Tunnel Commands
+	return `# Cloudflare Tunnel Commands
+
+## Config
 
 | Command | What it does |
 |---------|--------------|
-| ` + "`cf-tunnel list`" + ` | List configured tunnel routes (prod environment) |
-| ` + "`cf-tunnel add <port>`" + ` | Add a tunnel route for one port |
-| ` + "`cf-tunnel add 5174`" + ` | Add a route for port 5174 |
+| ` + "`cf-tunnel config`" + ` | Open ~/cicy-ai/db/cf.json in code-server (auto-creates placeholder) |
+| ` + "`cf-tunnel status`" + ` | Show config + daemon state (api_token / tunnel_token masked) |
+
+## Daemon (cloudflared service)
+
+| Command | What it does |
+|---------|--------------|
+| ` + "`cf-tunnel daemon`" + ` | Show cloudflared install and service status |
+| ` + "`cf-tunnel daemon install`" + ` | Fetch tunnel token, install cloudflared binary if missing, install and start service |
+| ` + "`cf-tunnel daemon uninstall`" + ` | Stop and remove the cloudflared service |
+| ` + "`cf-tunnel daemon start`" + ` | Start the cloudflared service |
+| ` + "`cf-tunnel daemon stop`" + ` | Stop the cloudflared service |
+| ` + "`cf-tunnel daemon restart`" + ` | Restart the cloudflared service |
+| ` + "`cf-tunnel daemon logs`" + ` | Show last 50 lines of cloudflared logs |
+| ` + "`cf-tunnel daemon logs 200`" + ` | Show last 200 lines of cloudflared logs |
+| ` + "`cf-tunnel daemon token`" + ` | Fetch and cache the tunnel connector token in cf.json |
+
+## Routes
+
+| Command | What it does |
+|---------|--------------|
+| ` + "`cf-tunnel list`" + ` | List configured tunnel routes and local port status |
+| ` + "`cf-tunnel add <port>`" + ` | Add a tunnel route and DNS record for the given port |
 | ` + "`cf-tunnel add 5174 8010 13000`" + ` | Add routes for multiple ports at once |
-| ` + "`cf-tunnel del <port>`" + ` | Remove a tunnel route by port |
-| ` + "`cf-tunnel del 5174`" + ` | Remove the route for port 5174 |
-| ` + "`CF_ENV=dev cf-tunnel list`" + ` | List routes in the dev environment |
+| ` + "`cf-tunnel del <port>`" + ` | Remove a tunnel route and DNS record by port |
+| ` + "`CF_ENV=dev cf-tunnel list`" + ` | Use the dev environment block from cf.json |
 | ` + "`CF_ENV=dev cf-tunnel add 5174`" + ` | Add a dev-environment route |
 | ` + "`CF_ENV=dev cf-tunnel del 5174`" + ` | Remove a dev-environment route |
 `
@@ -2104,8 +2420,8 @@ func renderCPingCommands() string {
 | ` + "`cping baidu.com`" + ` | Probe latency to baidu.com from this host (China-edge sanity) |
 | ` + "`cping google.com`" + ` | Probe Google reachability (cross-border check) |
 | ` + "`cping github.com`" + ` | Probe GitHub reachability |
-| ` + "`cping cf.cicy-ai.com`" + ` | Probe our Cloudflare-fronted edge |
-| ` + "`cping tn.cicy-ai.com`" + ` | Probe our Cloudflare tunnel host |
+| ` + "`cping your-domain.com`" + ` | Probe your own domain or tunnel hostname |
+| ` + "`cping cloudflare.com`" + ` | Probe Cloudflare's edge directly |
 | ` + "`cping 8.8.8.8`" + ` | Probe an IP directly (skips DNS) |
 | ` + "`cping 1.1.1.1`" + ` | Probe Cloudflare's public DNS |
 `
@@ -2167,7 +2483,7 @@ func renderFRPClientCommands() string {
 }
 
 func renderTMCommands() string {
-	return `# cicy-agent Commands
+	return `# CiCy Agent Commands
 
 | Command | What it does |
 |---------|--------------|
@@ -2218,17 +2534,23 @@ func renderAgentCodeServerTools() string {
 
 | Command | What it does |
 |---------|--------------|
-| ` + "`agent-code-server ping`" + ` | Confirm the code-server extension is online |
-| ` + "`agent-code-server ping <page_client_id>`" + ` | Same, targeting a specific browser tab |
+| ` + "`agent-code-server ping [page_client_id]`" + ` | Confirm the code-server extension is online (optionally for one tab) |
 | ` + "`agent-code-server list`" + ` | Show connected page clients and ext-side WS status |
-| ` + "`agent-code-server open /home/cicy/cicy-ai/global.json`" + ` | Open an absolute file path in the editor |
-| ` + "`agent-code-server open <path>`" + ` | Open any file by absolute path |
-| ` + "`agent-code-server open <path>:42`" + ` | Open at a specific line |
-| ` + "`agent-code-server open <path>:42:7`" + ` | Open at line:column |
-| ` + "`agent-code-server open <path>:42:7-50:1`" + ` | Open and select a range |
-| ` + "`agent-code-server open file:///abs/path/foo.ts`" + ` | Accept file:// URI form too |
+| ` + "`agent-code-server open <path>`" + ` | Open a file in the editor (see ` + "`open` syntax" + ` below) |
 | ` + "`agent-code-server active`" + ` | JSON: path/language/line/column of the focused editor |
 | ` + "`agent-code-server tabs`" + ` | JSON: every open file tab (path, label, isActive, isDirty, group) |
+
+## ` + "`open`" + ` syntax
+
+` + "`<path>`" + ` accepts an absolute path or a ` + "`file://`" + ` URI, with optional line/column or range suffix:
+
+| Form | Effect |
+|------|--------|
+| ` + "`open /abs/path/foo.ts`" + ` | open the file |
+| ` + "`open /abs/path/foo.ts:42`" + ` | open at line 42 |
+| ` + "`open /abs/path/foo.ts:42:7`" + ` | open at line 42, column 7 |
+| ` + "`open /abs/path/foo.ts:42:7-50:1`" + ` | open and select the range 42:7 → 50:1 |
+| ` + "`open file:///abs/path/foo.ts`" + ` | ` + "`file://`" + ` URI form |
 `
 }
 
@@ -2587,5 +2909,211 @@ func renderUSSpotProxyCommands() string {
 | ` + "`ssh us-spot-proxy 'tail -20 /data/mihomo/mihomo.log'`" + ` | Tail the remote mihomo log |
 | ` + "`ssh us-spot-proxy 'systemctl status mihomo'`" + ` | Check the remote mihomo systemd unit |
 | ` + "`ssh us-spot-proxy 'df -h /data'`" + ` | Check free space on the persistent data disk |
+`
+}
+
+// ── US Spot Dev ──────────────────────────────────────────────────────────────
+
+func generateCodexUSSpotDev(targetRoot string) error {
+	skillDir := filepath.Join(targetRoot, "us-spot-dev")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderUSSpotDevSkill()); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderUSSpotDevHelp()); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "tools.md"), renderUSSpotDevCommands()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func renderUSSpotDevSkill() string {
+	return `---
+name: us-spot-dev
+description: Provision a US (Silicon Valley) Aliyun spot ECS dev box with a persistent ESSD data disk. Use when the user asks to spin up, rebuild, or destroy the US spot dev environment.
+---
+
+# US Spot Dev
+
+Provisions a cheap, disposable US (us-west-1) Aliyun spot ECS instance backed by a **persistent 100 GB ESSD data disk** (` + "`us-spot-dev-data`" + `).
+
+The split keeps everything that matters — ` + "`/home/cicy`" + `, Docker images, ` + "`~/cicy-ai`" + `, repos — on the disk. If the spot instance is reclaimed, re-run ` + "`us-spot-dev`" + ` to get a fresh box with your data intact.
+
+## Scope
+
+Use this skill when the task involves:
+
+- spinning up or re-provisioning the US spot dev instance
+- destroying the instance (while keeping the data disk)
+- rebuilding and pushing the container image
+
+## Rules
+
+1. ` + "`us-spot-dev`" + ` (no args) provisions a new spot instance, attaches the persistent disk, starts Docker and the ` + "`us-spot-dev`" + ` container, then bootstraps cicy on a fresh disk.
+2. The data disk (` + "`us-spot-dev-data`" + `) is **never deleted** by any ` + "`us-spot-dev`" + ` command; it survives ` + "`--destroy`" + `.
+3. Use ` + "`--json`" + ` for scriptable / agent-driven flows.
+4. Read [help.md](./references/help.md) for the full workflow and [tools.md](./references/tools.md) for the command reference.
+`
+}
+
+func renderUSSpotDevHelp() string {
+	return `# US Spot Dev Help
+
+## What it is
+
+A persistent-disk + spot-instance pattern for a cheap US dev box:
+
+- **Persistent disk** ` + "`us-spot-dev-data`" + ` (100 GB ESSD, us-west-1a) — never deleted.
+  Holds ` + "`/home/cicy`" + `, ` + "`/data/docker`" + ` (Docker data-root), repos, ` + "`~/cicy-ai`" + `, SSH state.
+- **Spot instance** (` + "`ecs.e-c1m4.xlarge`" + `, us-west-1a) — disposable. Billed by the hour, may be reclaimed.
+
+On re-provision the Docker image is reused from disk. On a fresh disk ` + "`us-spot-dev`" + ` pulls the pre-built image from Docker Hub.
+
+## Typical workflow
+
+` + "```sh" + `
+# First time / after reclaim: provision
+us-spot-dev
+
+# Tear down instance when not needed (disk kept)
+us-spot-dev --destroy
+
+# After changing Dockerfile: push new image
+us-spot-dev --push-image
+` + "```" + `
+
+## SSH access
+
+After provisioning, ` + "`~/.ssh/config`" + ` is updated with a ` + "`us-spot-dev`" + ` host entry:
+
+` + "```sh" + `
+ssh us-spot-dev
+` + "```" + `
+
+The DNS hostname is derived from the Cloudflare tunnel config and updated automatically.
+
+## Config
+
+No config file required. Credentials come from ` + "`~/cicy-ai/global.json`" + ` (Aliyun AK/SK, Cloudflare token).
+`
+}
+
+func renderUSSpotDevCommands() string {
+	return `# US Spot Dev Commands
+
+| Command | What it does |
+|---------|--------------|
+| ` + "`us-spot-dev`" + ` | Provision spot instance + attach persistent disk + start Docker container |
+| ` + "`us-spot-dev --destroy`" + ` | Delete the spot instance (persistent disk is always kept) |
+| ` + "`us-spot-dev --push-image`" + ` | Rebuild container image on the running box and push to registry |
+| ` + "`us-spot-dev --json`" + ` | Same as above but emit JSON output (agent-friendly) |
+`
+}
+
+// ── HK Spot Dev ──────────────────────────────────────────────────────────────
+
+func generateCodexHKSpotDev(targetRoot string) error {
+	skillDir := filepath.Join(targetRoot, "hk-spot-dev")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderHKSpotDevSkill()); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderHKSpotDevHelp()); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "tools.md"), renderHKSpotDevCommands()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func renderHKSpotDevSkill() string {
+	return `---
+name: hk-spot-dev
+description: Provision an HK (Hong Kong) Aliyun spot ECS dev box with a persistent ESSD data disk. Use when the user asks to spin up, rebuild, or destroy the HK spot dev environment.
+---
+
+# HK Spot Dev
+
+Provisions a cheap, disposable Hong Kong (cn-hongkong) Aliyun spot ECS instance backed by a **persistent 100 GB ESSD data disk** (` + "`hk-spot-dev-data`" + `).
+
+The same persistent-disk pattern as ` + "`us-spot-dev`" + `: if the spot instance is reclaimed, re-run ` + "`hk-spot-dev`" + ` to restore access with data intact.
+
+## Scope
+
+Use this skill when the task involves:
+
+- spinning up or re-provisioning the HK spot dev instance
+- destroying the instance (while keeping the data disk)
+- rebuilding and pushing the container image
+
+## Rules
+
+1. ` + "`hk-spot-dev`" + ` (no args) provisions a new spot instance, attaches the persistent disk, starts Docker and the ` + "`hk-spot-dev`" + ` container, then bootstraps cicy on a fresh disk.
+2. The data disk (` + "`hk-spot-dev-data`" + `) is **never deleted** by any ` + "`hk-spot-dev`" + ` command; it survives ` + "`--destroy`" + `.
+3. Use ` + "`--json`" + ` for scriptable / agent-driven flows.
+4. Read [help.md](./references/help.md) for the full workflow and [tools.md](./references/tools.md) for the command reference.
+`
+}
+
+func renderHKSpotDevHelp() string {
+	return `# HK Spot Dev Help
+
+## What it is
+
+A persistent-disk + spot-instance pattern for a cheap HK dev box:
+
+- **Persistent disk** ` + "`hk-spot-dev-data`" + ` (100 GB ESSD, cn-hongkong-d) — never deleted.
+  Holds ` + "`/home/cicy`" + `, ` + "`/data/docker`" + ` (Docker data-root), repos, ` + "`~/cicy-ai`" + `, SSH state.
+- **Spot instance** (` + "`ecs.u1-c1m8.large`" + `, cn-hongkong-d) — disposable. Billed by the hour, may be reclaimed.
+
+On re-provision the Docker image is reused from disk. On a fresh disk ` + "`hk-spot-dev`" + ` pulls the pre-built image from Docker Hub.
+
+## Typical workflow
+
+` + "```sh" + `
+# First time / after reclaim: provision
+hk-spot-dev
+
+# Tear down instance when not needed (disk kept)
+hk-spot-dev --destroy
+
+# After changing Dockerfile: push new image
+hk-spot-dev --push-image
+` + "```" + `
+
+## SSH access
+
+After provisioning, ` + "`~/.ssh/config`" + ` is updated with a ` + "`hk-spot-dev`" + ` host entry:
+
+` + "```sh" + `
+ssh hk-spot-dev
+` + "```" + `
+
+The DNS hostname is derived from the Cloudflare tunnel config and updated automatically.
+
+## Config
+
+No config file required. Credentials come from ` + "`~/cicy-ai/global.json`" + ` (Aliyun AK/SK, Cloudflare token).
+`
+}
+
+func renderHKSpotDevCommands() string {
+	return `# HK Spot Dev Commands
+
+| Command | What it does |
+|---------|--------------|
+| ` + "`hk-spot-dev`" + ` | Provision spot instance + attach persistent disk + start Docker container |
+| ` + "`hk-spot-dev --destroy`" + ` | Delete the spot instance (persistent disk is always kept) |
+| ` + "`hk-spot-dev --push-image`" + ` | Rebuild container image on the running box and push to registry |
+| ` + "`hk-spot-dev --json`" + ` | Same as above but emit JSON output (agent-friendly) |
 `
 }

@@ -3,8 +3,12 @@
 
 // URL detection: anything starting with `http://` or `https://` (no `ws://` /
 // `wss://` — those are protocol-level connection schemes, not user-clickable
-// resources). Trailing punctuation stripped via the negative-set tail.
-export const URL_RE = /\bhttps?:\/\/[^\s"'<>`]+[^\s"'<>`!?,.;:)\]}]/g;
+// resources). The character classes exclude non-ASCII code units (+)
+// so a URL followed by CJK / emoji / accented text terminates correctly —
+// e.g. `https://example.com/path然后…` stops at "然" rather than swallowing
+// the trailing CJK. Trailing punctuation is further trimmed via the
+// negative-set tail.
+export const URL_RE = /\bhttps?:\/\/[^\s"'<>`-￿]+[^\s"'<>`!?,.;:)\]}-￿]/g;
 export const LOCAL_PROTOCOL_RE = /(?:file|image):\/\/[^\s"'!*(){}|\\\^<>`]*[^\s"':,.!?{}|\\\^~\[\]`()<>]/g;
 export const FILENAME_CANDIDATE_RE = /(?:\.{1,2}\/|~\/|\/)?(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+(?::\d+){0,2}/g;
 
@@ -81,7 +85,14 @@ export interface ScannedMatch {
     kind: LinkKind;
 }
 
-const TRAILING_PUNCT = new Set([".", ",", ";", ":", "!", "?", ")", "]", "}", ">", "”", "’"]);
+const TRAILING_PUNCT = new Set([
+    ".", ",", ";", ":", "!", "?",
+    ")", "]", "}", ">", "”", "’",
+    // Opening brackets at the end of a URL almost always mean the URL was
+    // followed by parenthetical text (e.g. `https://x.com/path(中文…)`).
+    // Strip them so the URL doesn't include the dangling opener.
+    "(", "[", "{", "“", "‘",
+]);
 
 export function trimMatchTrailing(text: string, start: number, end: number): number {
     let e = end;

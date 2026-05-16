@@ -632,7 +632,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
                           <Shield className="w-3 h-3" />
                           {t('marketplaceManageProxySsh')}
                         </button>
-                      ) : (
+                      ) : skill.name === 'skill-author' ? null : (
                         <button data-id="skill-detail-uninstall" onClick={handleUninstall} disabled={busy} className="text-[12px] px-3 py-1.5 rounded text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors">
                           {t('marketplaceUninstall')}
                         </button>
@@ -862,6 +862,32 @@ const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, s
     },
     blockquote: (p: any) => <blockquote className="border-l-2 border-zinc-600 pl-3 my-2 text-zinc-400" {...p} />,
     hr: () => <hr className="my-3 border-white/[0.06]" />,
+    // Tables in tools.md are typically `| Command | Description |` shaped.
+    // The default <table> would collapse columns in this narrow modal and
+    // wrap text awkwardly, so we render each row as a stacked card instead:
+    // first cell (command) on top as a chip, remaining cells below as muted
+    // description text. Inline backticked commands stay clickable via the
+    // `code` renderer above.
+    table: ({ children }: any) => (
+      <div data-id="skill-md-table" className="my-3 rounded-md border border-white/[0.06] divide-y divide-white/[0.04] overflow-hidden bg-black/20">
+        {children}
+      </div>
+    ),
+    thead: () => null,
+    tbody: ({ children }: any) => <>{children}</>,
+    // Each <tr> becomes a card. The CSS variant below targets the *first*
+    // child (the command cell) and the rest (description cells) without
+    // needing to know cell indices at the React level — `[&>*:first-child]`
+    // styles the leading <td>, `[&>*:not(:first-child)]` styles the rest.
+    tr: ({ children }: any) => (
+      <div className="px-3 py-2 hover:bg-white/[0.03]
+        [&>*:first-child]:font-mono [&>*:first-child]:text-amber-200 [&>*:first-child]:text-[12px] [&>*:first-child]:leading-snug [&>*:first-child]:break-words [&>*:first-child]:mb-1
+        [&>*:not(:first-child)]:text-zinc-400 [&>*:not(:first-child)]:text-[11px] [&>*:not(:first-child)]:leading-relaxed">
+        {children}
+      </div>
+    ),
+    th: () => null,
+    td: ({ children }: any) => <div>{children}</div>,
   }), [t, setSendText, onTry, skillName, clickable]);
 
   // Memoize the full Markdown render keyed on shown — re-parse only when the

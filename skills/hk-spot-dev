@@ -44,6 +44,7 @@ HOST_NAME = "hk-spot-dev"
 HOST_CICY_NAME = "hk-spot-dev-cicy"
 
 GLOBAL_JSON = Path(os.path.expanduser("~/cicy-ai/global.json"))
+CF_TUNNEL_JSON = Path(os.path.expanduser("~/cicy-ai/db/cf-tunnel.json"))  # Cloudflare config (set via `cf-tunnel config`)
 CF_HOST_SUB = "hk-spot-dev"
 CF_DEV_SUB = "dev-hk"
 CF_TUNNEL_NAME = "hk-spot-dev"
@@ -54,9 +55,12 @@ PROXY_SSH_JSON = Path(os.path.expanduser("~/cicy-ai/db/proxy_ssh.json"))
 
 def cf_conf():
     try:
-        return json.loads(GLOBAL_JSON.read_text())["cf"]["prod"]
-    except Exception as e:
-        print(f"  (cloudflare config not available in {GLOBAL_JSON}: {e})")
+        return json.loads(CF_TUNNEL_JSON.read_text())["prod"]
+    except FileNotFoundError:
+        print(f"  Cloudflare config missing — run `cf-tunnel config` to set it up")
+        return None
+    except (KeyError, ValueError) as e:
+        print(f"  Cloudflare config invalid ({CF_TUNNEL_JSON}): {e} — run `cf-tunnel config`")
         return None
 
 
