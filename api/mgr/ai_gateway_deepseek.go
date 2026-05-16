@@ -70,6 +70,26 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 	}
 
 	if inputs, ok := src["input"].([]interface{}); ok {
+		// DeepSeek's thinking-mode validator on follow-up turns demands the
+		// assistant's prior `reasoning_content` echoed back as a non-empty
+		// string. It does NOT validate content against what it originally
+		// generated — any non-empty value is accepted. We try hard to ship
+		// the real reasoning (captured via response-side `type:"reasoning"`
+		// roundtrip below); when the upstream emitted no reasoning for a
+		// given assistant turn — or that turn predates the response-side
+		// roundtrip being deployed — we fall back to a single-char placeholder
+		// to satisfy the validator. Empty string is rejected with
+		//   `content[].thinking in the thinking mode must be passed back to the API`.
+		pendingReasoning := ""
+		const reasoningPlaceholder = "."
+		consumePendingReasoning := func() string {
+			r := pendingReasoning
+			pendingReasoning = ""
+			if r == "" {
+				return reasoningPlaceholder
+			}
+			return r
+		}
 		for _, raw := range inputs {
 			m, ok := raw.(map[string]interface{})
 			if !ok {
@@ -80,6 +100,8 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 				typ = "message"
 			}
 			switch typ {
+			case "reasoning":
+				pendingReasoning = extractReasoningSummary(m)
 			case "message":
 				role, _ := m["role"].(string)
 				if role == "" {
@@ -99,11 +121,8 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 					"role":    role,
 					"content": text,
 				}
-				// Assistant turns sent back to DeepSeek must include an empty
-				// reasoning_content when thinking mode is on (belt-and-braces
-				// in case enable_thinking:false isn't honored upstream).
 				if role == "assistant" {
-					msg["reasoning_content"] = ""
+					msg["reasoning_content"] = consumePendingReasoning()
 				}
 				messages = append(messages, msg)
 			case "function_call":
@@ -113,7 +132,7 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 				messages = append(messages, map[string]interface{}{
 					"role":              "assistant",
 					"content":           nil,
-					"reasoning_content": "",
+					"reasoning_content": consumePendingReasoning(),
 					"tool_calls": []map[string]interface{}{
 						{
 							"id":   callID,
@@ -200,6 +219,38 @@ func sanitizeFunctionParameters(p interface{}) map[string]interface{} {
 	return out
 }
 
+// extractReasoningSummary pulls the concatenated reasoning text out of a
+// codex Responses `type:"reasoning"` input item. The item carries `summary`
+// (array of `{type:"summary_text", text:"..."}`) and optionally `content`
+// (rare; same shape). DeepSeek wants the raw text echoed as
+// assistant.reasoning_content on the next turn.
+func extractReasoningSummary(item map[string]interface{}) string {
+	if item == nil {
+		return ""
+	}
+	collect := func(field string) string {
+		parts, ok := item[field].([]interface{})
+		if !ok {
+			return ""
+		}
+		var b strings.Builder
+		for _, p := range parts {
+			pm, ok := p.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if t, ok := pm["text"].(string); ok {
+				b.WriteString(t)
+			}
+		}
+		return b.String()
+	}
+	if s := collect("summary"); s != "" {
+		return s
+	}
+	return collect("content")
+}
+
 func extractTextFromResponsesContent(content interface{}) string {
 	if s, ok := content.(string); ok {
 		return s
@@ -233,6 +284,17 @@ type chatCompletionsToResponsesReader struct {
 
 	responseID string
 	model      string
+
+	// Reasoning (thinking) item state — DeepSeek emits delta.reasoning_content
+	// chunks BEFORE the actual text. We surface those as a Responses
+	// `type:"reasoning"` output item so codex stores the summary; on the next
+	// turn codex echoes the same reasoning back, satisfying DeepSeek's
+	// thinking-mode validator (which rejects empty / mismatched values).
+	reasoningItemID   string
+	reasoningStarted  bool
+	reasoningDoneSent bool
+	accumReasoning    strings.Builder
+	reasoningIndex    int
 
 	// Text (message) item state — created lazily on first content delta.
 	textItemID   string
@@ -335,12 +397,22 @@ func (r *chatCompletionsToResponsesReader) processOneLine() error {
 	}
 	delta, _ := choice["delta"].(map[string]interface{})
 	if delta != nil {
+		if rc, ok := delta["reasoning_content"].(string); ok && rc != "" {
+			r.ensureReasoningStarted()
+			r.emitReasoningDelta(rc)
+			r.accumReasoning.WriteString(rc)
+		}
 		if content, ok := delta["content"].(string); ok && content != "" {
+			// Real content arrived — close the reasoning item first so codex
+			// sees them as separate output_items in the right order.
+			r.finishReasoningOpenItem()
 			r.ensureTextStarted()
 			r.emitTextDelta(content)
 			r.accumText.WriteString(content)
 		}
 		if rawTC, ok := delta["tool_calls"].([]interface{}); ok {
+			// Tool calls also need reasoning to be closed out first.
+			r.finishReasoningOpenItem()
 			for _, raw := range rawTC {
 				tcm, ok := raw.(map[string]interface{})
 				if !ok {
@@ -354,6 +426,75 @@ func (r *chatCompletionsToResponsesReader) processOneLine() error {
 		r.finishOpenItems(finish)
 	}
 	return nil
+}
+
+func (r *chatCompletionsToResponsesReader) ensureReasoningStarted() {
+	if r.reasoningStarted {
+		return
+	}
+	r.reasoningStarted = true
+	r.reasoningItemID = fmt.Sprintf("rs_%d", time.Now().UnixNano())
+	r.reasoningIndex = r.nextOutputIndex
+	r.nextOutputIndex++
+	r.emitEvent("response.output_item.added", map[string]interface{}{
+		"type":         "response.output_item.added",
+		"output_index": r.reasoningIndex,
+		"item": map[string]interface{}{
+			"id":      r.reasoningItemID,
+			"type":    "reasoning",
+			"summary": []interface{}{},
+			"status":  "in_progress",
+		},
+	})
+	r.emitEvent("response.reasoning_summary_part.added", map[string]interface{}{
+		"type":          "response.reasoning_summary_part.added",
+		"output_index":  r.reasoningIndex,
+		"item_id":       r.reasoningItemID,
+		"summary_index": 0,
+		"part":          map[string]interface{}{"type": "summary_text", "text": ""},
+	})
+}
+
+func (r *chatCompletionsToResponsesReader) emitReasoningDelta(delta string) {
+	r.emitEvent("response.reasoning_summary_text.delta", map[string]interface{}{
+		"type":          "response.reasoning_summary_text.delta",
+		"output_index":  r.reasoningIndex,
+		"item_id":       r.reasoningItemID,
+		"summary_index": 0,
+		"delta":         delta,
+	})
+}
+
+func (r *chatCompletionsToResponsesReader) finishReasoningOpenItem() {
+	if !r.reasoningStarted || r.reasoningDoneSent {
+		return
+	}
+	r.reasoningDoneSent = true
+	text := r.accumReasoning.String()
+	r.emitEvent("response.reasoning_summary_text.done", map[string]interface{}{
+		"type":          "response.reasoning_summary_text.done",
+		"output_index":  r.reasoningIndex,
+		"item_id":       r.reasoningItemID,
+		"summary_index": 0,
+		"text":          text,
+	})
+	r.emitEvent("response.reasoning_summary_part.done", map[string]interface{}{
+		"type":          "response.reasoning_summary_part.done",
+		"output_index":  r.reasoningIndex,
+		"item_id":       r.reasoningItemID,
+		"summary_index": 0,
+		"part":          map[string]interface{}{"type": "summary_text", "text": text},
+	})
+	r.emitEvent("response.output_item.done", map[string]interface{}{
+		"type":         "response.output_item.done",
+		"output_index": r.reasoningIndex,
+		"item": map[string]interface{}{
+			"id":      r.reasoningItemID,
+			"type":    "reasoning",
+			"summary": []map[string]interface{}{{"type": "summary_text", "text": text}},
+			"status":  "completed",
+		},
+	})
 }
 
 func (r *chatCompletionsToResponsesReader) emitCreated() {
@@ -491,6 +632,7 @@ func (r *chatCompletionsToResponsesReader) emitTextDelta(delta string) {
 }
 
 func (r *chatCompletionsToResponsesReader) finishOpenItems(finish string) {
+	r.finishReasoningOpenItem()
 	if r.textStarted && !r.textDoneSent {
 		text := r.accumText.String()
 		r.textDoneSent = true
@@ -563,6 +705,16 @@ func (r *chatCompletionsToResponsesReader) emitCompletedAndDone() {
 			r.responseID = fmt.Sprintf("resp_%d", time.Now().UnixNano())
 		}
 		output := make([]map[string]interface{}, 0)
+		if r.reasoningStarted {
+			output = append(output, map[string]interface{}{
+				"id":     r.reasoningItemID,
+				"type":   "reasoning",
+				"status": "completed",
+				"summary": []map[string]interface{}{
+					{"type": "summary_text", "text": r.accumReasoning.String()},
+				},
+			})
+		}
 		if r.textStarted {
 			output = append(output, map[string]interface{}{
 				"id":     r.textItemID,

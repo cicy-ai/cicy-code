@@ -534,9 +534,13 @@ func (c *chatClient) readPump() {
 			}
 			continue
 		}
-		if evt.Type == "webpage_pong" || evt.Type == "exec_js_result" {
-			requestID := strings.TrimSpace(aiGatewayString(aiGatewayMap(evt.Data)["requestId"]))
-			if requestID != "" && hub.resolveWaiter(requestID, evt) {
+		// Generic waiter routing: any incoming WS message whose data.requestId
+		// matches a registered waiter is consumed (not broadcast). This lets
+		// /api/chat/push (with wait_ack), /api/chat/exec-js, /api/chat/code-open
+		// and /api/chat/ping-client all use the same one-shot RPC primitive
+		// without each needing a type allowlist here.
+		if requestID := strings.TrimSpace(aiGatewayString(aiGatewayMap(evt.Data)["requestId"])); requestID != "" {
+			if hub.resolveWaiter(requestID, evt) {
 				continue
 			}
 		}
@@ -779,6 +783,70 @@ func handleChatExecJS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleChatCodeOpen is the sync wrapper for opening a file in the code-server
+// extension. Mirrors handleChatExecJS: register a waiter for `requestId`, push
+// `host.open_file` directly to the `:code-ext` client, then block on the waiter
+// until we see `code.opened` (success) or `code.open_file_error` (failure) come
+// back over that client's own WS — both routed by readPump.
+//
+// This replaces the older "agent-code-server → page → :code-ext" relay where
+// the page's second push silently swallowed 404s when the extension wasn't
+// connected. Now the 404 surfaces straight back to the caller, who can retry
+// (e.g. after asking the user to bring code-server to the foreground) or give
+// up cleanly instead of waiting 15s on a ghost ack.
+func handleChatCodeOpen(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req struct {
+		ClientID string `json:"client_id"`
+		Path     string `json:"path"`
+		Timeout  int    `json:"timeout_ms"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", 400)
+		return
+	}
+	clientID := strings.TrimSpace(req.ClientID)
+	if clientID == "" {
+		http.Error(w, "client_id required", 400)
+		return
+	}
+	path := strings.TrimSpace(req.Path)
+	if path == "" {
+		http.Error(w, "path required", 400)
+		return
+	}
+	timeoutMS := req.Timeout
+	if timeoutMS <= 0 {
+		timeoutMS = 15000
+	}
+	requestID := "code-open-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	ch := hub.registerWaiter(requestID)
+	if !hub.sendToClient(clientID, ChatEvent{Type: "host.open_file", Data: M{"requestId": requestID, "path": path, "code_client_id": clientID}}) {
+		hub.cancelWaiter(requestID)
+		http.Error(w, "client not found", 404)
+		return
+	}
+	select {
+	case evt, ok := <-ch:
+		if !ok {
+			http.Error(w, "waiter canceled", 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": evt.Type == "code.opened",
+			"type":    evt.Type,
+			"data":    evt.Data,
+		})
+	case <-time.After(time.Duration(timeoutMS) * time.Millisecond):
+		hub.cancelWaiter(requestID)
+		http.Error(w, "code-open timeout", 504)
+	}
+}
+
 func handleChatWebhook(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ClientID      string      `json:"client_id"`
@@ -824,7 +892,37 @@ func handleChatWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── HTTP handler: push event to agent/client ──
-
+//
+// Two modes:
+//
+//   1. ASYNC / fire-and-forget (default; ` + "`wait_ack: false`" + ` or omitted)
+//      Sends the message to target ` + "`client_id`" + ` (or broadcasts to all clients
+//      of an agent if no client_id) and returns immediately. The receiver does
+//      NOT acknowledge; any error inside the receiver is invisible. Use this
+//      only when delivery failure is genuinely tolerable:
+//        - UX hints to the page (e.g. ` + "`code.show_files`" + `, ` + "`status_change`" + `)
+//        - One-to-many broadcasts (poll responses, ai chunks, current_updated)
+//
+//   2. SYNC / wait-for-ack (` + "`wait_ack: true`" + `, requires ` + "`client_id`" + `)
+//      Injects a server-generated ` + "`requestId`" + ` into the message's data,
+//      registers a waiter, sends, and BLOCKS until the target client writes
+//      any WS message whose ` + "`data.requestId`" + ` matches. Returns that message
+//      as the HTTP response (or 504 on timeout). The receiver-side convention
+//      is: process the request, then write back a result message carrying the
+//      same ` + "`requestId`" + ` (any type — readPump routes by id, not by type).
+//      Use this when the caller needs to know "did it work?" — open file,
+//      exec JS, ping, etc. Replaces the older "agent A pushes to page, page
+//      relays to extension, no one knows if it landed" pattern that silently
+//      swallowed errors.
+//
+// Either mode returns 404 immediately when the target ` + "`client_id`" + ` isn't
+// connected; the caller can retry, surface the error, or fall back as needed.
+//
+// Companion sync endpoints (` + "`/api/chat/exec-js`" + `, ` + "`/api/chat/ping-client`" + `,
+// ` + "`/api/chat/code-open`" + `) are kept for callers that already use them; they
+// behave identically to ` + "`/api/chat/push`" + ` with ` + "`wait_ack: true`" + ` and a fixed
+// event type, but the unified ` + "`/api/chat/push`" + ` endpoint is now the
+// recommended primitive for new code.
 func handleChatPush(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", 405)
@@ -838,6 +936,13 @@ func handleChatPush(w http.ResponseWriter, r *http.Request) {
 		Pane          string      `json:"pane"`
 		Type          string      `json:"type"`
 		Data          interface{} `json:"data"`
+		// WaitAck switches the handler into sync RPC mode (exec_js style):
+		// the server injects a `requestId` into Data, blocks until the target
+		// client writes back any message whose `data.requestId` matches, and
+		// returns that message as the HTTP response. timeout_ms defaults to
+		// 15000 if WaitAck is set without a TimeoutMS.
+		WaitAck   bool `json:"wait_ack"`
+		TimeoutMS int  `json:"timeout_ms"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -850,6 +955,45 @@ func handleChatPush(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.ClientID != "" {
+		if req.WaitAck {
+			// Sync waiter mode. Caller wants confirmation from the target
+			// client. Inject requestId, register, push, block on the waiter.
+			timeoutMS := req.TimeoutMS
+			if timeoutMS <= 0 {
+				timeoutMS = 15000
+			}
+			requestID := "push-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+			data, _ := req.Data.(map[string]interface{})
+			if data == nil {
+				data = map[string]interface{}{}
+			}
+			data["requestId"] = requestID
+			ch := hub.registerWaiter(requestID)
+			if !hub.sendToClient(req.ClientID, ChatEvent{Type: req.Type, Data: data}) {
+				hub.cancelWaiter(requestID)
+				http.Error(w, "client not found", 404)
+				return
+			}
+			log.Printf("[chat-push] client_id=%s type=%s mode=sync rid=%s", req.ClientID, req.Type, requestID)
+			select {
+			case evt, ok := <-ch:
+				if !ok {
+					http.Error(w, "waiter canceled", 500)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": true,
+					"mode":    "sync",
+					"type":    evt.Type,
+					"data":    evt.Data,
+				})
+			case <-time.After(time.Duration(timeoutMS) * time.Millisecond):
+				hub.cancelWaiter(requestID)
+				http.Error(w, "wait_ack timeout", 504)
+			}
+			return
+		}
 		ok := hub.sendToClient(req.ClientID, ChatEvent{Type: req.Type, Data: req.Data})
 		if !ok {
 			http.Error(w, "client not found", 404)

@@ -1595,10 +1595,10 @@ func (e *Env) runAgentCodeServer(args []string) error {
 	}
 	switch cmd {
 	case "help", "-h", "--help":
-		_, _ = fmt.Fprintln(e.Stdout, "agent-code-server - CiCy code-server open-file tool\n\nCommands:\n  help\n  tools\n  ping [page_client_id]\n  list\n  clients\n  open <path> [page_client_id]\n\nNotes:\n  - target by page_client_id, not agent_id\n  - if omitted, current agent must have exactly one connected page client\n  - ping sends host.ping to the matching :code-ext client and waits for code.pong\n  - open accepts plain paths, file:// paths, and optional :line[:column] or :line:column-endLine:endColumn suffixes\n  - open first tells the page client to show the files drawer, then waits for code.opened from :code-ext")
+		_, _ = fmt.Fprintln(e.Stdout, "agent-code-server - CiCy code-server bridge\n\nCommands:\n  help\n  tools\n  ping [page_client_id]               — confirm extension is online\n  list / clients                      — list connected page clients and :code-ext status\n  open <path> [page_client_id]        — open a file in the focused editor\n  active [page_client_id]             — show the focused editor's file path / language / line / column\n  tabs [page_client_id]               — list all open file tabs (path, label, isActive, isDirty, group)\n\nNotes:\n  - target by page_client_id, not agent_id\n  - if omitted, current agent must have exactly one connected page client\n  - all subcommands talk to :code-ext via POST /api/chat/push with wait_ack:true (sync RPC)\n  - open accepts plain paths, file:// paths, and optional :line[:column] or :line:column-endLine:endColumn suffixes")
 		return nil
 	case "tools":
-		_, _ = fmt.Fprintln(e.Stdout, "# agent-code-server tools\n\n- ping [page_client_id] -> sends host.ping to the matching :code-ext client and waits for code.pong\n- list -> lists current page_client_id values and code-server connectivity\n- clients -> legacy alias of list\n- open <path> [page_client_id] -> asks the page client to open the files drawer and forwards the same requestId to :code-ext; supports file:// and line/column suffixes")
+		_, _ = fmt.Fprintln(e.Stdout, "# agent-code-server tools\n\n- ping [page_client_id] -> confirm extension liveness (host.ping → code.pong)\n- list / clients -> list page clients + :code-ext connectivity\n- open <path> [page_client_id] -> open a file in the editor; supports file:// and :line[:col] suffix\n- active [page_client_id] -> JSON: { path, language, line, column } of the focused editor\n- tabs [page_client_id] -> JSON: { tabs: [{path,label,isActive,isDirty,group},...] } of every file tab")
 		return nil
 	case "ping":
 		pageClientID := ""
@@ -1609,42 +1609,93 @@ func (e *Env) runAgentCodeServer(args []string) error {
 		if err != nil {
 			return err
 		}
-		conn, err := e.wsConnect(target.agentID)
-		if err != nil {
-			return err
-		}
-		defer conn.Close()
-		rid := randomID("code-ping")
-		_, err = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
-			"agent_id":  target.agentID,
-			"client_id": target.codeServerClientID,
-			"type":      "host.ping",
-			"data": map[string]any{
-				"requestId":      rid,
-				"page_client_id": target.pageClientID,
-				"code_client_id": target.codeServerClientID,
-			},
+		// Same unified push + wait_ack pattern as `open`. The extension's
+		// host.ping handler responds with `code.pong` carrying the matching
+		// requestId; readPump routes it back to our waiter.
+		resp, err := e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
+			"client_id":  target.codeServerClientID,
+			"type":       "host.ping",
+			"data":       map[string]any{"code_client_id": target.codeServerClientID},
+			"wait_ack":   true,
+			"timeout_ms": 15000,
 		})
 		if err != nil {
+			if strings.Contains(err.Error(), "client not found") {
+				return fmt.Errorf("code-server extension not connected (no `:code-ext` WS) — open the code-server panel in cicy-code UI and try again")
+			}
 			return err
 		}
-		_, _ = fmt.Fprintf(e.Stdout, "✅ 发送 host.ping → page_client_id=%s code_server_client_id=%s agent_id=%s\n", target.pageClientID, target.codeServerClientID, target.agentID)
-		msg, err := e.waitForMessage(conn, 15*time.Second, func(m map[string]any) bool {
-			data := asMap(m["data"])
-			return anyString(m["type"]) == "code.pong" &&
-				anyString(data["requestId"]) == rid &&
-				anyString(data["code_client_id"]) == target.codeServerClientID
-		})
-		if err != nil {
-			return err
+		var parsed struct {
+			Data struct {
+				Version string `json:"version"`
+			} `json:"data"`
 		}
-		data := asMap(msg["data"])
-		version := strings.TrimSpace(anyString(data["version"]))
+		_ = json.Unmarshal(resp, &parsed)
+		version := strings.TrimSpace(parsed.Data.Version)
 		if version == "" {
 			version = "unknown"
 		}
-		_, _ = fmt.Fprintf(e.Stdout, "✅ 收到 code.pong！code-server 在线 (v%s)\n", version)
+		_, _ = fmt.Fprintf(e.Stdout, "✅ 收到 code.pong! code-server 在线 (v%s)\n", version)
 		return nil
+	case "active", "active-file", "current":
+		// Returns { path, language, line, column } of the focused editor.
+		// Empty path = no editor focused (welcome / settings page showing).
+		pageClientID := ""
+		if len(args) > 0 {
+			pageClientID = args[0]
+		}
+		target, err := e.resolveCodeServerTarget(pageClientID)
+		if err != nil {
+			return err
+		}
+		resp, err := e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
+			"client_id":  target.codeServerClientID,
+			"type":       "host.active_file",
+			"data":       map[string]any{"code_client_id": target.codeServerClientID},
+			"wait_ack":   true,
+			"timeout_ms": 10000,
+		})
+		if err != nil {
+			if strings.Contains(err.Error(), "client not found") {
+				return fmt.Errorf("code-server extension not connected (no `:code-ext` WS) — open the code-server panel in cicy-code UI and try again")
+			}
+			return err
+		}
+		var parsed struct {
+			Data map[string]any `json:"data"`
+		}
+		_ = json.Unmarshal(resp, &parsed)
+		return e.printJSON(parsed.Data)
+	case "tabs":
+		// Returns { tabs: [{path,label,isActive,isDirty,group}, ...] } for all
+		// file-backed tabs across every editor group. Non-file tabs (Settings,
+		// Welcome) are filtered out on the extension side.
+		pageClientID := ""
+		if len(args) > 0 {
+			pageClientID = args[0]
+		}
+		target, err := e.resolveCodeServerTarget(pageClientID)
+		if err != nil {
+			return err
+		}
+		resp, err := e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
+			"client_id":  target.codeServerClientID,
+			"type":       "host.list_tabs",
+			"data":       map[string]any{"code_client_id": target.codeServerClientID},
+			"wait_ack":   true,
+			"timeout_ms": 10000,
+		})
+		if err != nil {
+			if strings.Contains(err.Error(), "client not found") {
+				return fmt.Errorf("code-server extension not connected (no `:code-ext` WS) — open the code-server panel in cicy-code UI and try again")
+			}
+			return err
+		}
+		var parsed struct {
+			Data map[string]any `json:"data"`
+		}
+		_ = json.Unmarshal(resp, &parsed)
+		return e.printJSON(parsed.Data)
 	case "list", "clients":
 		out, err := e.listCodeServerTargets()
 		if err != nil {
@@ -1663,39 +1714,54 @@ func (e *Env) runAgentCodeServer(args []string) error {
 		if err != nil {
 			return err
 		}
-		conn, err := e.wsConnect(target.agentID)
-		if err != nil {
-			return err
-		}
-		defer conn.Close()
-		rid := randomID("code-open")
-		payload := map[string]any{
-			"path":      normalizeCodeServerOpenPath(args[0]),
-			"requestId": rid,
-		}
-		payload["page_client_id"] = target.pageClientID
-		payload["code_client_id"] = target.codeServerClientID
-		_, err = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{"agent_id": target.agentID, "client_id": target.pageClientID, "type": "code.open_file", "data": payload})
-		if err != nil {
-			return err
-		}
-		_, _ = fmt.Fprintf(e.Stdout, "✅ 发送 code.open_file → page_client_id=%s code_server_client_id=%s agent_id=%s\n", target.pageClientID, target.codeServerClientID, target.agentID)
-		msg, err := e.waitForMessage(conn, 15*time.Second, func(m map[string]any) bool {
-			data := asMap(m["data"])
-			if anyString(data["requestId"]) != rid || anyString(data["code_client_id"]) != target.codeServerClientID {
-				return false
-			}
-			typ := anyString(m["type"])
-			return typ == "code.opened" || typ == "code.open_file_error"
+		path := normalizeCodeServerOpenPath(args[0])
+		// UX hint (async push): ask the page to bring the Files panel (which
+		// embeds the code-server iframe) to the foreground. The extension
+		// only activates when its workbench is visible, so this nudges it
+		// awake. Fire-and-forget by design — failure here doesn't block.
+		_, _ = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
+			"agent_id":  target.agentID,
+			"client_id": target.pageClientID,
+			"type":      "code.show_files",
+			"data":      map[string]any{"path": path},
 		})
-		if err != nil {
-			return err
+
+		// Sync RPC (push + wait_ack): the unified /api/chat/push with
+		// wait_ack:true injects requestId into data, sendToClient to :code-ext,
+		// blocks until the extension writes back any message carrying the same
+		// requestId (typically `code.opened` or `code.open_file_error`, but
+		// readPump routes by id, not type). 404 if extension isn't connected
+		// — retry for 30s while UX hint coaxes the iframe to the foreground.
+		payload := map[string]any{
+			"client_id": target.codeServerClientID,
+			"type":      "host.open_file",
+			"data":      map[string]any{"path": path, "code_client_id": target.codeServerClientID},
+			"wait_ack":  true,
+			"timeout_ms": 15000,
 		}
-		if anyString(msg["type"]) == "code.open_file_error" {
-			return fmt.Errorf("code-server open failed: %s", strings.TrimSpace(anyString(asMap(msg["data"])["error"])))
+		var lastErr error
+		deadline := time.Now().Add(30 * time.Second)
+		attempt := 0
+		for {
+			attempt++
+			_, err := e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", payload)
+			if err == nil {
+				_, _ = fmt.Fprintf(e.Stdout, "✅ code-server opened → %s\n", path)
+				return nil
+			}
+			lastErr = err
+			if !strings.Contains(err.Error(), "client not found") {
+				return fmt.Errorf("code-server open failed: %w", err)
+			}
+			if time.Now().After(deadline) {
+				break
+			}
+			if attempt == 1 {
+				_, _ = fmt.Fprintf(e.Stdout, "code-server extension not connected yet (no `:code-ext` WS); retrying for up to 30s — bring the code-server panel to the foreground in cicy-code UI if you haven't already…\n")
+			}
+			time.Sleep(1 * time.Second)
 		}
-		_, _ = fmt.Fprintf(e.Stdout, "✅ 收到 code.opened → %s\n", anyString(asMap(msg["data"])["path"]))
-		return nil
+		return fmt.Errorf("code-server extension never came online after 30s: %v\n→ open the code-server panel in cicy-code UI and try again", lastErr)
 	default:
 		return e.runAgentCodeServer([]string{"help"})
 	}

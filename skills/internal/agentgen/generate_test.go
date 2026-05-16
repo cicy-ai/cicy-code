@@ -153,7 +153,7 @@ func TestCodexInstallCPing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", toolsPath, err)
 	}
-	if !strings.Contains(string(toolsData), "cping <domain_or_ip>") {
+	if !strings.Contains(string(toolsData), "`cping baidu.com`") {
 		t.Fatalf("tools.md missing cping usage: %s", string(toolsData))
 	}
 }
@@ -226,8 +226,8 @@ func TestCodexInstallAgentWebpage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", toolsPath, err)
 	}
-	if !strings.Contains(string(toolsData), "exec_js_result") {
-		t.Fatalf("tools.md missing exec_js_result response mapping: %s", string(toolsData))
+	if !strings.Contains(string(toolsData), "agent-webpage exec-js") {
+		t.Fatalf("tools.md missing exec-js command: %s", string(toolsData))
 	}
 	for _, banned := range []string{"## Aliases", "`webpage ...`", "`webpage-ping [client_id]`"} {
 		if strings.Contains(string(toolsData), banned) {
@@ -271,7 +271,7 @@ func TestCodexInstallCicyAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", toolsPath, err)
 	}
-	if !strings.Contains(string(toolsData), "~/cicy-ai/db/cicy-agent.json") {
+	if !strings.Contains(string(toolsData), "cicy-agent --node dev") {
 		t.Fatalf("tools.md missing node-aware example: %s", string(toolsData))
 	}
 }
@@ -548,7 +548,7 @@ func TestCodexToolsReadsGeneratedCicyAgentTools(t *testing.T) {
 	if !strings.Contains(tools.Path, "cicy-agent/references/tools.md") {
 		t.Fatalf("Tools() path = %q", tools.Path)
 	}
-	if !strings.Contains(tools.Text, "cicy-agent Command Reference") {
+	if !strings.Contains(tools.Text, "cicy-agent Commands") {
 		t.Fatalf("Tools() text = %q", tools.Text)
 	}
 }
@@ -590,7 +590,7 @@ func TestCodexToolsReadsGeneratedSSHTools(t *testing.T) {
 	if !strings.Contains(tools.Path, "cicy-ssh/references/tools.md") {
 		t.Fatalf("Tools() path = %q", tools.Path)
 	}
-	if !strings.Contains(tools.Text, "cicy-ssh Command Reference") {
+	if !strings.Contains(tools.Text, "cicy-ssh Commands") {
 		t.Fatalf("Tools() text = %q", tools.Text)
 	}
 }
@@ -611,7 +611,7 @@ func TestCodexToolsReadsGeneratedTools(t *testing.T) {
 	if !strings.Contains(tools.Path, "agent-webpage/references/tools.md") {
 		t.Fatalf("Tools() path = %q", tools.Path)
 	}
-	for _, want := range []string{"webpage_pong", "current-active-agent-id", "current-master-agent-id"} {
+	for _, want := range []string{"agent-webpage ping", "current-active-agent-id", "current-master-agent-id"} {
 		if !strings.Contains(tools.Text, want) {
 			t.Fatalf("Tools() text missing %q: %q", want, tools.Text)
 		}

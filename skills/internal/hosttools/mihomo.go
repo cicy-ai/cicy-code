@@ -1014,7 +1014,7 @@ func (t *mihomoTool) start() error {
 		return err
 	}
 	defer logFile.Close()
-	cmd := exec.Command(binary, "-d", filepath.Join(userHomeDir(), "cicy-ai"), "-f", configPath)
+	cmd := exec.Command(binary, "-d", filepath.Join(userHomeDir(), "cicy-ai", "db"), "-f", configPath)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Stdin = nil
