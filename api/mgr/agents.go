@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -265,6 +266,64 @@ func handleAgentsByPane(w http.ResponseWriter, r *http.Request) {
 	J(w, agents)
 }
 
+// bindAgentResult mirrors what handleAgentBind returns so the merged
+// create-with-master path can stay consistent with the standalone bind API.
+type bindAgentResult struct {
+	ID           int64
+	PaneID       string
+	AgentName    string
+	AlreadyBound bool
+}
+
+// bindAgentCore inserts a pane_agents row (or detects an existing one), syncs
+// workspace symlinks, and optionally writes the master-reference into the sub's
+// guidance file. Used by both /api/agents/bind and the merged create-with-master
+// path.
+//
+// inheritGuidance controls whether the sub's CLAUDE.md/AGENTS.md picks up an
+// `@<master-path>` reference line. masterAgentTypeHint, when non-empty,
+// overrides the DB-derived master agent_type (useful for remote masters).
+func bindAgentCore(masterPaneID, subShortName string, inheritGuidance bool, masterAgentTypeHint string) (bindAgentResult, error) {
+	masterShort := shortPaneID(normPaneID(strings.TrimSpace(masterPaneID)))
+	subShort := shortPaneID(normPaneID(strings.TrimSpace(subShortName)))
+	if masterShort == "" || subShort == "" {
+		return bindAgentResult{}, fmt.Errorf("pane_id and agent_name required")
+	}
+	var existingID int64
+	err := store.QueryRow(
+		"SELECT id FROM pane_agents WHERE pane_id=? AND agent_name=?",
+		masterShort, subShort,
+	).Scan(&existingID)
+	switch {
+	case err == nil && existingID > 0:
+		if syncErr := syncBoundAgentWorkspaceLinks(masterShort); syncErr != nil {
+			log.Printf("[agent-bind] re-sync after idempotent bind failed: %v", syncErr)
+		}
+		if inheritGuidance {
+			appendMasterReferenceToGuidance(subShort, masterShort, masterAgentTypeHint)
+		}
+		return bindAgentResult{ID: existingID, PaneID: masterShort, AgentName: subShort, AlreadyBound: true}, nil
+	case err != nil && err != sql.ErrNoRows:
+		return bindAgentResult{}, err
+	}
+	res, err := store.Exec(
+		"INSERT INTO pane_agents (pane_id, agent_name, status) VALUES (?,?,'active')",
+		masterShort, subShort,
+	)
+	if err != nil {
+		return bindAgentResult{}, err
+	}
+	if err := syncBoundAgentWorkspaceLinks(masterShort); err != nil {
+		return bindAgentResult{}, err
+	}
+	if inheritGuidance {
+		appendMasterReferenceToGuidance(subShort, masterShort, masterAgentTypeHint)
+	}
+	id, _ := res.LastInsertId()
+	go broadcastPollData(masterShort)
+	return bindAgentResult{ID: id, PaneID: masterShort, AgentName: subShort}, nil
+}
+
 func handleAgentBind(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httpErr(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -279,44 +338,31 @@ func handleAgentBind(w http.ResponseWriter, r *http.Request) {
 
 	paneID, _ := req["pane_id"].(string)
 	agentName, _ := req["agent_name"].(string)
-	paneID = shortPaneID(normPaneID(strings.TrimSpace(paneID)))
-	agentName = strings.TrimSpace(agentName)
-	if paneID == "" || agentName == "" {
+	if strings.TrimSpace(paneID) == "" || strings.TrimSpace(agentName) == "" {
 		httpErr(w, http.StatusBadRequest, "pane_id and agent_name required")
 		return
 	}
-
-	fullAgentName := normPaneID(agentName)
-	shortName := shortPaneID(fullAgentName)
-
-	var existingID int
-	err := store.QueryRow("SELECT id FROM pane_agents WHERE pane_id=? AND agent_name=?", paneID, shortName).Scan(&existingID)
-	switch {
-	case err == nil && existingID > 0:
-		// Idempotent re-bind: still sync workspace links so callers can use
-		// /api/agents/bind as a way to repair a missing/wrong-target symlink.
-		if syncErr := syncBoundAgentWorkspaceLinks(paneID); syncErr != nil {
-			log.Printf("[agent-bind] re-sync after idempotent bind failed: %v", syncErr)
-		}
-		J(w, M{"success": true, "id": existingID, "pane_id": paneID, "agent_name": shortName, "already_bound": true})
-		return
-	case err != nil && err != sql.ErrNoRows:
-		httpErr(w, http.StatusInternalServerError, err.Error())
-		return
+	// Optional: master_agent_type (override) and inherit_guidance (default true).
+	masterAgentType, _ := req["master_agent_type"].(string)
+	inheritGuidance := true
+	if v, ok := req["inherit_guidance"].(bool); ok {
+		inheritGuidance = v
 	}
 
-	res, err := store.Exec("INSERT INTO pane_agents (pane_id, agent_name, status) VALUES (?,?,'active')", paneID, shortName)
+	result, err := bindAgentCore(paneID, agentName, inheritGuidance, masterAgentType)
 	if err != nil {
+		if err.Error() == "pane_id and agent_name required" {
+			httpErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := syncBoundAgentWorkspaceLinks(paneID); err != nil {
-		httpErr(w, http.StatusInternalServerError, err.Error())
-		return
+	resp := M{"success": true, "id": result.ID, "pane_id": result.PaneID, "agent_name": result.AgentName}
+	if result.AlreadyBound {
+		resp["already_bound"] = true
 	}
-	id, _ := res.LastInsertId()
-	go broadcastPollData(paneID)
-	J(w, M{"success": true, "id": id, "pane_id": paneID, "agent_name": shortName})
+	J(w, resp)
 }
 
 func handleAgentUnbind(w http.ResponseWriter, r *http.Request) {

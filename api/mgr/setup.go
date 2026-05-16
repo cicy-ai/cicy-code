@@ -361,8 +361,6 @@ var builtinAgents = []struct {
 	{"cursor", "Cursor"},
 	{"kiro-cli", "Kiro CLI"},
 	{"copilot", "GitHub Copilot"},
-	{"cicy-wechat", "WeChat"},
-	{"cicy-feishu", "Feishu"},
 	{"openclaw", "OpenClaw"},
 	{"hermes", "Hermes Agent"},
 	{"cicy-claude", "CiCy"},
@@ -601,22 +599,14 @@ func ensureWorkerBoundToPrimary(workerSession string) {
 	if workerSession == "" || workerSession == primaryWorkerSession {
 		return
 	}
-	var existingID int
-	err := store.QueryRow(
-		"SELECT id FROM pane_agents WHERE pane_id=? AND agent_name=?",
-		primaryWorkerSession, workerSession,
-	).Scan(&existingID)
-	if err == nil && existingID > 0 {
-		return
-	}
-	if _, err := store.Exec(
-		"INSERT INTO pane_agents (pane_id, agent_name, status) VALUES (?,?,'active')",
-		primaryWorkerSession, workerSession,
-	); err != nil {
+	res, err := bindAgentCore(primaryWorkerSession, workerSession, true, "")
+	if err != nil {
 		log.Printf("[startup] failed to bind %s under %s: %v", workerSession, primaryWorkerSession, err)
 		return
 	}
-	log.Printf("[startup] bound %s under %s", workerSession, primaryWorkerSession)
+	if !res.AlreadyBound {
+		log.Printf("[startup] bound %s under %s", workerSession, primaryWorkerSession)
+	}
 }
 
 func createSelectedWorkers(selected []string) {
@@ -649,17 +639,19 @@ func createBuiltinWorker(port int, agentType, title string) {
 	session := fmt.Sprintf("w-%d", port)
 	token := getFirstToken()
 	if _, err := createManagedPane(paneCreateOpts{
-		session:         session,
-		title:           title,
-		role:            "master",
-		defaultModel:    "",
-		agentType:       agentType,
-		workspace:       builtinWorkerWorkspace(session),
-		initScript:      "",
-		port:            port,
-		token:           token,
-		allowAllActions: true,
-		replyInChinese:  true,
+		session:          session,
+		title:            title,
+		role:             "master",
+		defaultModel:     "",
+		agentType:        agentType,
+		workspace:        builtinWorkerWorkspace(session),
+		initScript:       "",
+		port:             port,
+		token:            token,
+		allowAllActions:  true,
+		replyInChinese:   false,
+		useCustomGateway: true,
+		useProxy:         false,
 	}); err != nil {
 		fmt.Printf("  ❌ %s 创建失败: %v\n", title, err)
 		return
@@ -1180,11 +1172,17 @@ func cicySkillsCommandPath(name string) string {
 }
 
 func needsCicySkillsInstall() bool {
-	// "Installed" means: cicy-skills CLI is reachable and at least the
-	// canonical agent skill (agent-code-server) has SKILL.md emitted into
-	// every supported profile dir. We deliberately DO NOT require the
-	// extracted source tree to live at ~/cicy-ai/skills/cicy-skills/ — a
-	// dev `make install-local-cli` from anywhere else is equally valid.
+	// "Installed" means: cicy-skills CLI is reachable AND every approved
+	// market skill (skipping ones the user explicitly uninstalled) has
+	// SKILL.md emitted into every supported profile dir. Checking every
+	// approved skill — not just agent-code-server — lets us auto-heal
+	// partial installs (e.g. when a previous bootstrap crashed midway, or
+	// when a new skill was added in a binary upgrade and never made it
+	// into the existing profile dirs).
+	//
+	// We deliberately DO NOT require the extracted source tree to live at
+	// ~/cicy-ai/skills/cicy-skills/ — a dev `make install-local-cli` from
+	// anywhere else is equally valid.
 	cliPath := cicySkillsCommandPath("cicy-skills")
 	if strings.TrimSpace(cliPath) == "" {
 		return true
@@ -1192,9 +1190,15 @@ func needsCicySkillsInstall() bool {
 	if info, err := os.Stat(cliPath); err != nil || info.Mode()&0o111 == 0 {
 		return true
 	}
-	for _, profile := range []string{"codex", "claude", "opencode"} {
-		if _, err := os.Stat(cicySkillsSkillDocPath(profile, "agent-code-server")); err != nil {
-			return true
+	uninstalled := uninstalledSkillsSet()
+	for skillName := range agentgenApprovedMarketSkills {
+		if _, skip := uninstalled[skillName]; skip {
+			continue
+		}
+		for _, profile := range []string{"codex", "claude", "opencode"} {
+			if _, err := os.Stat(cicySkillsSkillDocPath(profile, skillName)); err != nil {
+				return true
+			}
 		}
 	}
 	// Stale retired aliases left behind by an older install still mean we
@@ -1275,12 +1279,8 @@ func extractEmbeddedCicySkills(dest string) error {
 
 func ensureCicySkillsAsync() {
 	cicySkillsInstallOnce.Do(func() {
-		// In dev mode the user manages cicy-skills via `make install-local-cli`
-		// from the repo. Re-running the embedded install at every start would
-		// silently overwrite their dev symlinks with the build-time snapshot,
-		// so we stay out of the way entirely.
 		if devMode {
-			log.Printf("[startup] dev mode: skipping cicy-skills bootstrap (manage via make install-local-cli)")
+			devModeBootstrapCicySkills()
 			return
 		}
 		if !needsCicySkillsInstall() {
@@ -1297,7 +1297,7 @@ func ensureCicySkillsAsync() {
 func ensureCicySkillsSync() {
 	cicySkillsInstallOnce.Do(func() {
 		if devMode {
-			log.Printf("[startup] dev mode: skipping cicy-skills bootstrap (manage via make install-local-cli)")
+			devModeBootstrapCicySkills()
 			return
 		}
 		if !needsCicySkillsInstall() {
@@ -1305,6 +1305,66 @@ func ensureCicySkillsSync() {
 		}
 		doCicySkillsInstall()
 	})
+}
+
+// devBootstrapDecision is the route devModeBootstrapCicySkills should take.
+// Extracting it as a value lets tests verify branch selection without
+// actually running extract / install side-effects.
+type devBootstrapDecision int
+
+const (
+	devBootstrapSkipNotNeeded   devBootstrapDecision = iota // already installed, do nothing
+	devBootstrapExtractFresh                                // no source tree → safe to extract embedded snapshot
+	devBootstrapInstallExisting                             // source + dist binary present → run install all
+	devBootstrapWaitForBuild                                // source present but no dist binary → user must build
+)
+
+// chooseDevBootstrapDecision picks the bootstrap route. Pure(-ish): only
+// reads the filesystem, no side-effects, so tests can stage state and
+// assert the choice.
+func chooseDevBootstrapDecision() devBootstrapDecision {
+	if !needsCicySkillsInstall() {
+		return devBootstrapSkipNotNeeded
+	}
+	projectRoot := cicySkillsProjectDir()
+	if _, err := os.Stat(projectRoot); os.IsNotExist(err) {
+		return devBootstrapExtractFresh
+	}
+	distBin := cicySkillsDistBinaryPath()
+	info, err := os.Stat(distBin)
+	if err != nil || info.Mode()&0o111 == 0 {
+		return devBootstrapWaitForBuild
+	}
+	return devBootstrapInstallExisting
+}
+
+// devModeBootstrapCicySkills bootstraps cicy-skills in dev mode without
+// destroying a developer's source checkout. See devBootstrapDecision for
+// the four cases. Crucial invariant: extract is only called when the
+// project tree is fully absent — extractEmbeddedCicySkills RemoveAll's
+// the dest, which would clobber a dev checkout if we got this wrong.
+func devModeBootstrapCicySkills() {
+	projectRoot := cicySkillsProjectDir()
+	switch chooseDevBootstrapDecision() {
+	case devBootstrapSkipNotNeeded:
+		return
+	case devBootstrapExtractFresh:
+		log.Printf("[startup] dev mode: no cicy-skills source at %s — extracting embedded snapshot for first-time setup", projectRoot)
+		doCicySkillsInstall()
+	case devBootstrapWaitForBuild:
+		log.Printf("[startup] dev mode: cicy-skills source at %s but dist binary missing — run `make install-local-cli` from the cicy-skills repo, OR delete %s and restart to let cicy-code re-extract the embedded snapshot", projectRoot, projectRoot)
+	case devBootstrapInstallExisting:
+		log.Printf("[startup] dev mode: bootstrapping cicy-skills via existing dist binary (will not extract embedded snapshot)")
+		cmd := exec.Command(cicySkillsDistBinaryPath(), "install", "all")
+		cmd.Env = append(os.Environ(), "CICY_SKILLS_ROOT="+projectRoot)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("[startup] dev mode: cicy-skills install all failed: %v\n%s", err, string(out))
+			return
+		}
+		extendPATH()
+		log.Printf("[startup] dev mode: cicy-skills install all completed")
+	}
 }
 
 func doCicySkillsInstall() {

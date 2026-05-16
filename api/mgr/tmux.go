@@ -49,21 +49,24 @@ const shellPromptTimeout = 12 * time.Second
 const shellPromptTimeoutDarwin = 20 * time.Second
 
 type paneCreateOpts struct {
-	session         string
-	title           string
-	role            string
-	defaultModel    string
-	agentType       string
-	workspace       string
-	initScript      string
-	port            int
-	token           string
-	allowAllActions bool
-	replyInChinese  bool
+	session          string
+	title            string
+	role             string
+	defaultModel     string
+	agentType        string
+	workspace        string
+	initScript       string
+	port             int
+	token            string
+	allowAllActions  bool
+	replyInChinese   bool
 	useCustomGateway bool
-	useProxy        bool
-	proxyPassword   string
-	proxyRule       string
+	useProxy         bool
+	proxyPassword    string
+	proxyRule        string
+	masterPaneID     string
+	masterAgentType  string
+	inheritGuidance  bool
 }
 
 type startupPromptTask struct {
@@ -445,10 +448,10 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 			"active": active.Int64,
 			"role":   role.String, "default_model": defaultModel.String,
 			"trust_level": trustLevel.String, "agent_type": agentType.String,
-			"allow_all_actions": allowAllActions.Bool,
-			"reply_in_chinese":  replyInChinese.Bool,
+			"allow_all_actions":  allowAllActions.Bool,
+			"reply_in_chinese":   replyInChinese.Bool,
 			"use_custom_gateway": useCustomGateway.Bool,
-			"use_proxy":         useProxy.Bool,
+			"use_proxy":          useProxy.Bool,
 		}
 		if createdAt.Valid {
 			p["created_at"] = createdAt.String
@@ -471,17 +474,20 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 
 func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WinName         *string `json:"win_name"`
-		InitScript      string  `json:"init_script"`
-		Title           string  `json:"title"`
-		AgentType       string  `json:"agent_type"`
-		Role            string  `json:"role"`
-		DefaultModel    string  `json:"default_model"`
-		AllowAllActions bool    `json:"allow_all_actions"`
-		ReplyInChinese  bool    `json:"reply_in_chinese"`
+		WinName          *string `json:"win_name"`
+		InitScript       string  `json:"init_script"`
+		Title            string  `json:"title"`
+		AgentType        string  `json:"agent_type"`
+		Role             string  `json:"role"`
+		DefaultModel     string  `json:"default_model"`
+		AllowAllActions  bool    `json:"allow_all_actions"`
+		ReplyInChinese   bool    `json:"reply_in_chinese"`
 		UseCustomGateway *bool   `json:"use_custom_gateway"`
-		UseProxy        *bool   `json:"use_proxy"`
-		Proxy           any     `json:"proxy"`
+		UseProxy         *bool   `json:"use_proxy"`
+		Proxy            any     `json:"proxy"`
+		MasterPaneID     string  `json:"master_pane_id"`
+		MasterAgentType  string  `json:"master_agent_type"`
+		InheritGuidance  *bool   `json:"inherit_guidance"`
 	}
 	req.AllowAllActions = true
 	req.ReplyInChinese = true
@@ -510,7 +516,11 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 		J(w, M{"success": false, "error": err.Error()})
 		return
 	}
-	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.ReplyInChinese, useCustomGateway, useProxy, proxySettings, req.WinName, token)
+	inheritGuidance := true
+	if req.InheritGuidance != nil {
+		inheritGuidance = *req.InheritGuidance
+	}
+	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.ReplyInChinese, useCustomGateway, useProxy, proxySettings, req.WinName, strings.TrimSpace(req.MasterPaneID), strings.TrimSpace(req.MasterAgentType), inheritGuidance, token)
 	if err != nil {
 		J(w, M{"success": false, "error": err.Error()})
 		return
@@ -518,7 +528,7 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	J(w, result)
 }
 
-func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useProxy bool, proxy *proxySettings, winName *string, token string) (M, error) {
+func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useProxy bool, proxy *proxySettings, winName *string, masterPaneID string, masterAgentType string, inheritGuidance bool, token string) (M, error) {
 	agentType = normalizeAgentType(agentType)
 	if agentType == "" {
 		return M{"success": false}, fmt.Errorf("unsupported agent_type")
@@ -546,21 +556,24 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 		t = title
 	}
 	return createManagedPane(paneCreateOpts{
-		session:         session,
-		title:           t,
-		role:            role,
-		defaultModel:    defaultModel,
-		agentType:       agentType,
-		workspace:       builtinWorkerWorkspace(session),
-		initScript:      initScript,
-		port:            workerIdx,
-		token:           token,
-		allowAllActions: allowAllActions,
-		replyInChinese:  replyInChinese,
+		session:          session,
+		title:            t,
+		role:             role,
+		defaultModel:     defaultModel,
+		agentType:        agentType,
+		workspace:        builtinWorkerWorkspace(session),
+		initScript:       initScript,
+		port:             workerIdx,
+		token:            token,
+		allowAllActions:  allowAllActions,
+		replyInChinese:   replyInChinese,
 		useCustomGateway: useCustomGateway,
-		useProxy:        useProxy,
-		proxyPassword:   proxySettingsPassword(proxy),
-		proxyRule:       proxySettingsRule(proxy),
+		useProxy:         useProxy,
+		proxyPassword:    proxySettingsPassword(proxy),
+		proxyRule:        proxySettingsRule(proxy),
+		masterPaneID:     masterPaneID,
+		masterAgentType:  masterAgentType,
+		inheritGuidance:  inheritGuidance,
 	})
 }
 
@@ -577,6 +590,103 @@ func proxySettingsRule(p *proxySettings) string {
 	return strings.TrimSpace(p.Rule)
 }
 
+// guidanceFilenameForAgentType returns the per-agent guidance filename
+// (CLAUDE.md / AGENTS.md). Returns "" for agents that don't have one.
+func guidanceFilenameForAgentType(agentType string) string {
+	switch normalizeAgentType(agentType) {
+	case "claude", "cicy-claude", "kiro-cli":
+		return "CLAUDE.md"
+	case "codex", "opencode", "cursor":
+		return "AGENTS.md"
+	}
+	return ""
+}
+
+// writeAgentGuidanceFile drops an agent-rules file (CLAUDE.md or AGENTS.md)
+// into the workspace based on the agent type. Existing files are not
+// overwritten so user customisations survive recreate.
+func writeAgentGuidanceFile(workspace, agentType, paneID string) {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return
+	}
+	filename := guidanceFilenameForAgentType(agentType)
+	if filename == "" {
+		return
+	}
+	path := filepath.Join(workspace, filename)
+	if _, err := os.Stat(path); err == nil {
+		return
+	}
+	shortID := strings.Split(paneID, ":")[0]
+	content := fmt.Sprintf("# %s\n\n"+
+		"- 你的 AGENT_ID 是 `%s`\n"+
+		"- 你的当前目录是 `%s`\n"+
+		"- 你的项目目录要询问用户设置\n"+
+		"- 你运行在 tmux 中，可以通过 `cicy-agent` skill 与其他 agent 协作："+
+		"`cicy-agent ls` 发现其他 pane，`cicy-agent msg <pane> <text>` 派发任务或请求支援，"+
+		"`cicy-agent capture <pane>` 查看对方进度。"+
+		"先运行 `cicy-agent help` 查看完整子命令（注意是 `help` 不是 `--help`）\n",
+		filename, shortID, workspace)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		log.Printf("[init] failed to write %s for %s: %v", filename, shortID, err)
+	}
+}
+
+// appendMasterReferenceToGuidance writes a "你的 master 是 ..." line into the
+// sub pane's guidance file, including a pointer to the master's rules file if
+// the master has one. Idempotent: skips if the line already exists.
+//
+// masterAgentTypeHint, when non-empty, overrides the agent_type derived from
+// agent_config — useful when the master lives on a remote node or when the
+// caller already knows the type and wants to avoid a DB lookup.
+func appendMasterReferenceToGuidance(subPaneID, masterPaneID, masterAgentTypeHint string) {
+	subFull := normPaneID(strings.TrimSpace(subPaneID))
+	masterFull := normPaneID(strings.TrimSpace(masterPaneID))
+	if subFull == "" || masterFull == "" || subFull == masterFull {
+		return
+	}
+	var subType, subWorkspace string
+	if err := store.QueryRow(
+		"SELECT COALESCE(agent_type,''), COALESCE(workspace,'') FROM agent_config WHERE pane_id=?",
+		subFull,
+	).Scan(&subType, &subWorkspace); err != nil {
+		return
+	}
+	subFile := guidanceFilenameForAgentType(subType)
+	if subFile == "" || strings.TrimSpace(subWorkspace) == "" {
+		return
+	}
+	subPath := filepath.Join(subWorkspace, subFile)
+	existing, err := os.ReadFile(subPath)
+	if err != nil {
+		return
+	}
+	if strings.Contains(string(existing), "你的 master 是") {
+		return
+	}
+	var masterType, masterWorkspace string
+	_ = store.QueryRow(
+		"SELECT COALESCE(agent_type,''), COALESCE(workspace,'') FROM agent_config WHERE pane_id=?",
+		masterFull,
+	).Scan(&masterType, &masterWorkspace)
+	if hint := strings.TrimSpace(masterAgentTypeHint); hint != "" {
+		masterType = normalizeAgentType(hint)
+	}
+	masterShort := shortPaneID(masterFull)
+	line := fmt.Sprintf("- 你的 master 是 `%s` (agent_type: `%s`)", masterShort, masterType)
+	if masterFile := guidanceFilenameForAgentType(masterType); masterFile != "" && strings.TrimSpace(masterWorkspace) != "" {
+		// `@<absolute-path>` 让 Claude / Codex 自动把 master 规则文件 inline 到上下文；
+		// OpenCode 不会自动解析 `@`，但 prose 形式足以提示它用 Read 工具按需加载。
+		line = fmt.Sprintf("- 你的 master 是 `%s` (agent_type: `%s`)，请参考 master 的规则文件了解项目上下文：@%s",
+			masterShort, masterType, filepath.Join(masterWorkspace, masterFile))
+	}
+	appended := strings.TrimRight(string(existing), "\n") + "\n" + line + "\n"
+	if err := os.WriteFile(subPath, []byte(appended), 0644); err != nil {
+		log.Printf("[guidance] failed to append master ref to %s: %v", subPath, err)
+	}
+}
+
 func createManagedPane(opts paneCreateOpts) (M, error) {
 	workspace := strings.TrimSpace(opts.workspace)
 	if err := ensureRuntimeDir(workspace, 0755); err != nil {
@@ -584,6 +694,7 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 	}
 
 	paneID := opts.session + ":main.0"
+	writeAgentGuidanceFile(workspace, opts.agentType, paneID)
 	runTmux("new-session", "-d", "-s", opts.session, "-n", "main", "-c", workspace)
 	proxyConfigJSON, err := mergeProxySettingsIntoConfigJSON("{}", &proxySettings{Password: opts.proxyPassword, Rule: opts.proxyRule})
 	if err != nil {
@@ -594,23 +705,29 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()),
 		paneID, opts.title, opts.port, workspace, opts.initScript, proxyConfigJSON, opts.role, opts.defaultModel, opts.agentType, opts.allowAllActions, opts.replyInChinese, opts.useCustomGateway, opts.useProxy,
 	)
+	if strings.TrimSpace(opts.masterPaneID) != "" {
+		if _, err := bindAgentCore(opts.masterPaneID, opts.session, opts.inheritGuidance, opts.masterAgentType); err != nil {
+			log.Printf("[create] auto-bind sub=%s under master=%s failed: %v",
+				opts.session, opts.masterPaneID, err)
+		}
+	}
 	if err := startInstance(paneID, opts.port, opts.token); err != nil {
 		return M{"session": opts.session, "pane_id": shortPaneID(paneID)}, err
 	}
 	waitPort(opts.port, 10*time.Second)
 	initPaneEnv(paneEnvOpts{
-		paneID:          paneID,
-		configJSON:      proxyConfigJSON,
-		workspace:       workspace,
-		initScript:      opts.initScript,
-		agentType:       opts.agentType,
-		defaultModel:    opts.defaultModel,
-		allowAllActions: opts.allowAllActions,
-		replyInChinese:  opts.replyInChinese,
+		paneID:           paneID,
+		configJSON:       proxyConfigJSON,
+		workspace:        workspace,
+		initScript:       opts.initScript,
+		agentType:        opts.agentType,
+		defaultModel:     opts.defaultModel,
+		allowAllActions:  opts.allowAllActions,
+		replyInChinese:   opts.replyInChinese,
 		useCustomGateway: opts.useCustomGateway,
-		useProxy:        opts.useProxy,
-		proxyPassword:   opts.proxyPassword,
-		proxyRule:       opts.proxyRule,
+		useProxy:         opts.useProxy,
+		proxyPassword:    opts.proxyPassword,
+		proxyRule:        opts.proxyRule,
 	})
 	return M{
 		"success":          true,
@@ -699,11 +816,11 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		"tg_token": tgToken.String, "tg_chat_id": tgChatID.String, "tg_enable": tgEnable.Bool,
 		"active": active.Int64, "agent_type": agentType.String, "agent_duty": agentDuty.String,
 		"config": config.String, "common_prompt": commonPrompt.String, "ttyd_preview": ttydPreview.String,
-		"allow_all_actions": allowAllActions.Bool,
-		"reply_in_chinese":  replyInChinese.Bool,
+		"allow_all_actions":  allowAllActions.Bool,
+		"reply_in_chinese":   replyInChinese.Bool,
 		"use_custom_gateway": useCustomGateway.Bool,
-		"use_proxy":         useProxy.Bool,
-		"role":              role.String, "default_model": defaultModel.String,
+		"use_proxy":          useProxy.Bool,
+		"role":               role.String, "default_model": defaultModel.String,
 		"trust_level":                 trustLevel.String,
 		"machine_label":               machineLabel.String,
 		"machine_url":                 machineURL.String,
@@ -734,7 +851,9 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 // columns allowed in agent_config UPDATE.
 //
 // Identity / provisioning fields are deliberately NOT in this map:
-//   workspace, agent_type, role, init_script, ttyd_port, node_url
+//
+//	workspace, agent_type, role, init_script, ttyd_port, node_url
+//
 // — these are set at pane creation (or by bind/unbind, for role) and never via
 // PATCH. Putting them here is a security hole: a buggy or malicious caller
 // passing `workspace` would silently rewrite a pane's filesystem mapping.
@@ -753,6 +872,7 @@ var paneUpdateCols = map[string]bool{
 	"private_mode":       true,
 	"allowed_users":      true,
 	"preview":            true,
+	"inject_rules_files": true,
 }
 
 func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
@@ -988,16 +1108,16 @@ func restartPaneCore(paneID, token string) error {
 
 	// Re-run init
 	initPaneEnv(paneEnvOpts{
-		paneID:          paneID,
-		configJSON:      config.String,
-		workspace:       wsExpanded,
-		initScript:      initScript.String,
-		agentType:       agentType.String,
-		defaultModel:    defaultModel.String,
-		allowAllActions: allowAllActions.Bool,
-		replyInChinese:  replyInChinese.Bool,
+		paneID:           paneID,
+		configJSON:       config.String,
+		workspace:        wsExpanded,
+		initScript:       initScript.String,
+		agentType:        agentType.String,
+		defaultModel:     defaultModel.String,
+		allowAllActions:  allowAllActions.Bool,
+		replyInChinese:   replyInChinese.Bool,
 		useCustomGateway: useCustomGateway.Bool,
-		useProxy:        useProxy.Bool,
+		useProxy:         useProxy.Bool,
 	})
 	store.Exec(fmt.Sprintf("UPDATE agent_config SET updated_at=%s WHERE pane_id=?", store.Now()), paneID)
 	return nil
@@ -1005,18 +1125,18 @@ func restartPaneCore(paneID, token string) error {
 
 // initPaneEnv sets up env vars, proxy, workspace, and runs init script in a pane.
 type paneEnvOpts struct {
-	paneID          string
-	configJSON      string // JSON config (projects only)
-	workspace       string // expanded workspace path
-	initScript      string
-	agentType       string
-	defaultModel    string
-	allowAllActions bool
-	replyInChinese  bool
+	paneID           string
+	configJSON       string // JSON config (projects only)
+	workspace        string // expanded workspace path
+	initScript       string
+	agentType        string
+	defaultModel     string
+	allowAllActions  bool
+	replyInChinese   bool
 	useCustomGateway bool
-	useProxy        bool
-	proxyPassword   string
-	proxyRule       string
+	useProxy         bool
+	proxyPassword    string
+	proxyRule        string
 }
 
 func tmuxShellQuote(v string) string {

@@ -4,6 +4,7 @@ import { Spinner } from './ui/Spinner';
 import { useTranslation } from 'react-i18next';
 import { useApp } from '../contexts/AppContext';
 import { useDevRegister } from '../lib/devStore';
+import { guidanceFilenameForAgentType } from '../lib/agentType';
 import AgentTypeSelector from './AgentTypeSelector';
 
 export interface CreateAgentValues {
@@ -12,6 +13,7 @@ export interface CreateAgentValues {
   allow_all_actions: boolean;
   use_custom_gateway: boolean;
   use_proxy: boolean;
+  inherit_guidance: boolean;
 }
 
 interface Props {
@@ -24,6 +26,10 @@ interface Props {
   emptyTitleOnAgentSelect?: string;
   dialogClassName?: string;
   agentTypeGridClassName?: string;
+  // When set, the dialog assumes the new pane will be bound under a master of
+  // this agent_type and shows a "继承 master 的 X.md" toggle (X is derived from
+  // the master's agent_type). When unset, the toggle is hidden.
+  masterAgentType?: string;
 }
 
 const DEFAULT_VALUES: CreateAgentValues = {
@@ -32,6 +38,7 @@ const DEFAULT_VALUES: CreateAgentValues = {
   allow_all_actions: true,
   use_custom_gateway: true,
   use_proxy: false,
+  inherit_guidance: true,
 };
 
 export default function CreateAgentDialog({
@@ -44,6 +51,7 @@ export default function CreateAgentDialog({
   emptyTitleOnAgentSelect = '',
   dialogClassName = '',
   agentTypeGridClassName = 'grid grid-cols-1 gap-2 sm:grid-cols-2',
+  masterAgentType,
 }: Props) {
   const { t } = useTranslation('createAgent');
   const { t: ts } = useTranslation('settings');
@@ -196,6 +204,27 @@ export default function CreateAgentDialog({
               <div data-id="create-agent-dialog-use-custom-gateway-toggle-thumb" className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-md transition-transform ${values.use_custom_gateway ? 'translate-x-[22px]' : 'translate-x-1'}`} />
             </button>
           </div>
+
+          {(() => {
+            const masterFile = guidanceFilenameForAgentType(masterAgentType);
+            if (!masterFile) return null;
+            return (
+              <div data-id="create-agent-dialog-inherit-guidance" className="flex items-center justify-between py-1">
+                <div data-id="create-agent-dialog-inherit-guidance-copy">
+                  <p data-id="create-agent-dialog-inherit-guidance-title" className="text-[13px] font-medium text-zinc-300">{ts('inheritGuidanceTitle', { filename: masterFile })}</p>
+                  <p data-id="create-agent-dialog-inherit-guidance-hint" className="mt-0.5 text-[11px] text-zinc-600">{ts('inheritGuidanceHint', { filename: masterFile })}</p>
+                </div>
+                <button
+                  data-id="create-agent-dialog-inherit-guidance-toggle"
+                  type="button"
+                  onClick={() => set({ inherit_guidance: !values.inherit_guidance })}
+                  className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${values.inherit_guidance ? 'bg-blue-600' : 'bg-white/[0.08]'}`}
+                >
+                  <div data-id="create-agent-dialog-inherit-guidance-toggle-thumb" className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-md transition-transform ${values.inherit_guidance ? 'translate-x-[22px]' : 'translate-x-1'}`} />
+                </button>
+              </div>
+            );
+          })()}
         </div>
 
         <div data-id="create-agent-dialog-actions" className="flex justify-end gap-2 border-t border-white/[0.06] px-5 py-3">

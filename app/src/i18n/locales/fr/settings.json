@@ -17,6 +17,8 @@
   "agentTypeCurrentNotInList": "valeur actuelle (absente de la liste)",
   "allowAllActionsTitle": "Autoriser toutes les actions au démarrage",
   "allowAllActionsHint": "Ajoute des indicateurs dangereux pour Codex / Claude",
+  "inheritGuidanceTitle": "Hériter du {{filename}} du master",
+  "inheritGuidanceHint": "Ajoute une référence @{{filename}} au fichier de règles du sous-agent pour inliner automatiquement le contexte du master",
   "proxyToggleTitle": "Activer le proxy",
   "proxyToggleHint": "Lance cicy_proxy_on avant le démarrage et vérifie les règles mihomo",
   "proxyPasswordLabel": "Mot de passe du proxy",

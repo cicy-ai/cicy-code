@@ -58,6 +58,7 @@ type SettingsSectionId = typeof settingsSections[number]['id'];
 const memorySections = [
   { id: 'global', labelKey: 'memoryGlobal' },
   { id: 'agent', labelKey: 'memoryAgent' },
+  { id: 'rules-files', labelKey: 'memoryRulesFiles' },
   { id: 'preview', labelKey: 'memoryPreview' },
 ] as const;
 
@@ -389,6 +390,7 @@ export default function AgentInspector({
   const [promptRulesDraft, setPromptRulesDraft] = useState<PromptRulesDraft>(() => createEmptyPromptRuleDraft());
   const [memorySaving, setMemorySaving] = useState(false);
   const [memorySection, setMemorySection] = useState<MemorySectionId>('global');
+  const [expandedRulesFile, setExpandedRulesFile] = useState<string | null>(null);
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('general');
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
@@ -512,8 +514,39 @@ export default function AgentInspector({
         project: { content: '', enabled: false, inject_on_request: false, available: false, label: 'project', key: '' },
         agent: { content: '', enabled: false, inject_on_request: false, available: true, label: paneId, key: paneId },
       },
+      rules_files: { items: [], file_count: 0, total_bytes: 0 },
+      inject_rules_files: true,
+      inject_rules_global: true,
+      overlay_full: '',
     });
   }, [open, paneId, paneTitle, query, historyOffset]);
+
+  // Fetch the full inspector bundle so memory preview / rules-files section
+  // have real data. Refires on inspectorVersion bump for live refresh after
+  // saves. Tolerates 404 (pane not yet known to backend).
+  useEffect(() => {
+    if (!open || !paneId) return;
+    let cancelled = false;
+    apiService.getAgentInspector(paneId)
+      .then(({ data: next }) => {
+        if (cancelled || !next) return;
+        setData((prev: any) => ({
+          ...(prev || {}),
+          prompt_rules: next.prompt_rules || prev?.prompt_rules,
+          runtime_memory: next.runtime_memory || prev?.runtime_memory,
+          rules_files: next.rules_files || prev?.rules_files,
+          inject_rules_files: next.inject_rules_files ?? prev?.inject_rules_files,
+          inject_rules_global: next.inject_rules_global ?? prev?.inject_rules_global,
+          overlay_full: next.overlay_full ?? prev?.overlay_full ?? '',
+          overview: {
+            ...(prev?.overview || {}),
+            overlay_preview: next.prompt_rules?.overlay_preview || prev?.overview?.overlay_preview || '',
+          },
+        }));
+      })
+      .catch(() => { /* tolerated */ });
+    return () => { cancelled = true; };
+  }, [open, paneId, inspectorVersion, refreshNonce]);
 
   useEffect(() => {
     if (!open || !paneId) return;
@@ -971,10 +1004,97 @@ export default function AgentInspector({
                     onChange={(patch) => patchPromptRule('agent', patch)}
                   />
                 )}
+                {memorySection === 'rules-files' && (() => {
+                  const rf = data?.rules_files || {};
+                  const items = Array.isArray(rf.items) ? rf.items : [];
+                  const totalBytes = Number(rf.total_bytes || 0);
+                  const globalOn = data?.inject_rules_global !== false;
+                  const paneOn = data?.inject_rules_files !== false;
+                  return (
+                    <div data-id="agent-inspector-memory-rules-files" className="space-y-3">
+                      <div data-id="agent-inspector-rules-files-summary" className="rounded-lg bg-[#101114] px-3 py-2.5 text-[12px] leading-5 text-zinc-400">
+                        <div className="mb-1 text-[11px] uppercase tracking-[0.14em] text-zinc-500">{t('memoryRulesFilesTitle')}</div>
+                        <div className="flex flex-wrap items-center gap-3 text-[12px]">
+                          <span>{t('memoryRulesFilesSummary', { count: items.length, bytes: totalBytes })}</span>
+                          <span className={globalOn ? 'text-emerald-400' : 'text-zinc-500'}>{t('memoryRulesFilesGlobal', { state: globalOn ? 'on' : 'off' })}</span>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await apiService.updatePane(paneId, { inject_rules_files: paneOn ? 0 : 1 });
+                                setRefreshNonce((n) => n + 1);
+                              } catch { /* ignored */ }
+                            }}
+                            className={`rounded-md px-2 py-1 text-[11px] transition-colors ${paneOn ? 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25' : 'bg-white/[0.06] text-zinc-400 hover:bg-white/[0.1]'}`}
+                          >
+                            {t('memoryRulesFilesPane', { state: paneOn ? 'on' : 'off' })}
+                          </button>
+                        </div>
+                      </div>
+                      {items.length === 0 ? (
+                        <div className="rounded-lg bg-[#101114] px-3 py-3 text-[12px] text-zinc-500">
+                          {t('memoryRulesFilesEmpty')}
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {items.map((item: any, idx: number) => {
+                            const isExpanded = expandedRulesFile === item.source;
+                            return (
+                              <div
+                                key={`${item.source}-${idx}`}
+                                className="rounded-md bg-[#101114] text-[12px] text-zinc-400 overflow-hidden"
+                              >
+                                <button
+                                  type="button"
+                                  className="w-full px-3 py-2 text-left hover:bg-white/[0.03] transition-colors"
+                                  onClick={() => setExpandedRulesFile(isExpanded ? null : item.source)}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] uppercase tracking-[0.1em] text-zinc-400">{item.scope || 'rule'}</span>
+                                    <span className="text-[11px] text-zinc-500">
+                                      {item.injected || item.bytes || 0} B
+                                      {item.truncated ? ` · ${t('memoryRulesFilesTruncated')}` : ''}
+                                      <span className="ml-1.5 text-zinc-600">{isExpanded ? '▲' : '▼'}</span>
+                                    </span>
+                                  </div>
+                                  <div className="mt-1 break-all font-mono text-[11px] text-zinc-300">{item.source}</div>
+                                  {item.pane_id ? <div className="mt-0.5 text-[10px] text-zinc-500">pane: {item.pane_id}</div> : null}
+                                </button>
+                                {isExpanded && item.content ? (
+                                  <pre className="border-t border-white/[0.06] px-3 py-2 max-h-[300px] overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-zinc-300">
+                                    {item.content}
+                                  </pre>
+                                ) : null}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 {memorySection === 'preview' && (
                   <div data-id="agent-inspector-memory-overlay-preview" className="rounded-lg bg-[#101114] px-3 py-2.5 text-[12px] leading-5 text-zinc-400">
-                    <div data-id="agent-inspector-auto-18" className="mb-1 text-[11px] uppercase tracking-[0.14em] text-zinc-500">{t('memoryPreviewTitle')}</div>
-                    {compactText(overview.overlay_preview, t('memoryPreviewEmpty'))}
+                    <div className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-[0.14em] text-zinc-500">
+                      <span>{t('memoryPreviewTitle')}</span>
+                      {data?.overlay_full ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard?.writeText(String(data.overlay_full)).catch(() => {});
+                            window.dispatchEvent(new CustomEvent('show-toast', { detail: t('memoryPreviewCopied') }));
+                          }}
+                          className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-zinc-300 hover:bg-white/[0.1]"
+                        >
+                          {t('memoryPreviewCopy')}
+                        </button>
+                      ) : null}
+                    </div>
+                    {data?.overlay_full ? (
+                      <pre className="max-h-[400px] overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-zinc-300">{String(data.overlay_full)}</pre>
+                    ) : (
+                      compactText(overview.overlay_preview, t('memoryPreviewEmpty'))
+                    )}
                   </div>
                 )}
               </div>

@@ -10,6 +10,7 @@ package hosttools
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -247,7 +248,14 @@ func printGoogleServiceHelp(w io.Writer, service string) {
 
 // ── login / status ──────────────────────────────────────────────────────────
 
-const googleDeviceCodeEndpoint = "https://oauth2.googleapis.com/device/code"
+// oauthFlowBaseURL is the central CF Worker that relays OAuth authorization
+// codes back to local cicy-code workers. See workers/oauth-flow/.
+// The Worker NEVER sees client_secret or refresh_token — it only briefly
+// holds single-use auth codes (TTL 10 min). Token exchange happens locally.
+const (
+	oauthFlowBaseURL    = "https://oauth-flow.cicy-ai.com"
+	oauthFlowRedirectURI = oauthFlowBaseURL + "/callback"
+)
 
 var googleLoginScopes = []string{
 	"https://mail.google.com/",
@@ -264,7 +272,7 @@ func (e *Env) runGoogleLogin(ctx context.Context, mode string) error {
 	statePath := filepath.Join(home, "cicy-ai", "db", "google.json")
 
 	// State 1: OAuth client config missing → guide the agent to walk the user
-	// through creating a TV/Limited-Input client. The agent is reading our
+	// through creating a Web-application client. The agent is reading our
 	// stdout — speak directly to it.
 	raw, err := os.ReadFile(clientPath)
 	if err != nil {
@@ -272,22 +280,28 @@ func (e *Env) runGoogleLogin(ctx context.Context, mode string) error {
 		fmt.Fprintln(e.Stdout)
 		fmt.Fprintln(e.Stdout, "Please walk the user through these steps, one at a time:")
 		fmt.Fprintln(e.Stdout)
-		fmt.Fprintln(e.Stdout, "  1. Ask them to open https://console.cloud.google.com/apis/credentials in their browser")
-		fmt.Fprintln(e.Stdout, "     (they need to be signed into the Google account they want to use)")
+		fmt.Fprintln(e.Stdout, "  1. Open https://console.cloud.google.com/apis/credentials in their browser")
+		fmt.Fprintln(e.Stdout, "     (signed into the Google account they want to authorize)")
 		fmt.Fprintln(e.Stdout, "  2. Click 'Create credentials' → 'OAuth client ID'")
-		fmt.Fprintln(e.Stdout, "  3. Application type: 'TVs and Limited Input devices'  (important — Web type won't work)")
-		fmt.Fprintln(e.Stdout, "  4. Give it any name, click Create, copy the Client ID")
-		fmt.Fprintln(e.Stdout, "  5. Have them paste it back to you, then run:")
-		fmt.Fprintf(e.Stdout, "       echo '{\"client_id\":\"<paste-here>\",\"client_secret\":\"\"}' > %s\n", clientPath)
-		fmt.Fprintln(e.Stdout, "  6. Then run `google login` again to start the device-code authorization")
+		fmt.Fprintln(e.Stdout, "     (if prompted, configure the OAuth consent screen first — User Type: External, app name = anything)")
+		fmt.Fprintln(e.Stdout, "  3. Application type: 'Web application'  (important — Desktop / TV won't work)")
+		fmt.Fprintln(e.Stdout, "  4. Under 'Authorized redirect URIs' click ADD URI and paste:")
+		fmt.Fprintf(e.Stdout, "       %s\n", oauthFlowRedirectURI)
+		fmt.Fprintln(e.Stdout, "  5. Click Create. Copy BOTH the Client ID and Client Secret.")
+		fmt.Fprintln(e.Stdout, "  6. Have them paste both back to you, then write the file:")
+		fmt.Fprintf(e.Stdout, "       cat > %s <<EOF\n", clientPath)
+		fmt.Fprintln(e.Stdout, "       {\"client_id\":\"<paste-id>\",\"client_secret\":\"<paste-secret>\"}")
+		fmt.Fprintln(e.Stdout, "       EOF")
+		fmt.Fprintln(e.Stdout, "       chmod 600 ~/cicy-ai/db/google_oauth_client.json")
+		fmt.Fprintln(e.Stdout, "  7. Run `google login` again to start the authorization")
 		return nil
 	}
 	var client struct {
 		ClientID     string `json:"client_id"`
 		ClientSecret string `json:"client_secret"`
 	}
-	if err := json.Unmarshal(raw, &client); err != nil || client.ClientID == "" {
-		return fmt.Errorf("google_oauth_client.json is malformed — expected {\"client_id\":\"...\",\"client_secret\":\"\"}")
+	if err := json.Unmarshal(raw, &client); err != nil || client.ClientID == "" || client.ClientSecret == "" {
+		return fmt.Errorf("google_oauth_client.json is malformed — expected {\"client_id\":\"...\",\"client_secret\":\"...\"} (Web application type requires both)")
 	}
 
 	// State 2: already authorized?
@@ -308,106 +322,129 @@ func (e *Env) runGoogleLogin(ctx context.Context, mode string) error {
 		return nil
 	}
 
-	// State 3: client configured, not authorized → run device flow inline.
-	form := url.Values{}
-	form.Set("client_id", client.ClientID)
-	form.Set("scope", strings.Join(googleLoginScopes, " "))
-	resp, err := http.PostForm(googleDeviceCodeEndpoint, form)
+	// State 3: client configured, not authorized → run loopback flow via
+	// oauth-flow worker:
+	//   1. Generate a session id
+	//   2. Print the /start URL → user opens in browser → grants consent
+	//   3. Google → oauth-flow /callback → KV stores code under session id
+	//   4. We poll /poll until code is ready
+	//   5. Exchange code locally with client_secret to get refresh_token
+	sessionID, err := generateOAuthSession()
 	if err != nil {
-		return fmt.Errorf("device/code request failed: %w", err)
+		return fmt.Errorf("generate session id: %w", err)
 	}
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("device/code %d: %s (your OAuth client may not be 'TVs and Limited Input devices' type)", resp.StatusCode, body)
+	startParams := url.Values{
+		"session":   {sessionID},
+		"client_id": {client.ClientID},
+		"scopes":    {strings.Join(googleLoginScopes, " ")},
 	}
-	var dr struct {
-		DeviceCode              string `json:"device_code"`
-		UserCode                string `json:"user_code"`
-		VerificationURL         string `json:"verification_url"`
-		VerificationURLComplete string `json:"verification_url_complete"`
-		ExpiresIn               int    `json:"expires_in"`
-		Interval                int    `json:"interval"`
-	}
-	if err := json.Unmarshal(body, &dr); err != nil || dr.DeviceCode == "" {
-		return fmt.Errorf("parse device/code: %v", err)
-	}
-	if dr.Interval <= 0 {
-		dr.Interval = 5
-	}
-	verifyURL := dr.VerificationURLComplete
-	if verifyURL == "" {
-		verifyURL = dr.VerificationURL + "?user_code=" + url.QueryEscape(dr.UserCode)
-	}
-	fmt.Fprintln(e.Stdout, "[google login] Tell the user:")
-	fmt.Fprintf(e.Stdout, "  Open this URL in your browser:  %s\n", verifyURL)
-	fmt.Fprintf(e.Stdout, "  If asked, the code is:           %s\n", dr.UserCode)
-	fmt.Fprintln(e.Stdout, "Waiting for them to approve…  (Ctrl-C to cancel)")
+	startURL := oauthFlowBaseURL + "/start?" + startParams.Encode()
 
-	// Poll
-	deadline := time.Now().Add(time.Duration(dr.ExpiresIn) * time.Second)
-	interval := time.Duration(dr.Interval) * time.Second
+	fmt.Fprintln(e.Stdout, "[google login] Tell the user to open this URL in their browser:")
+	fmt.Fprintln(e.Stdout)
+	fmt.Fprintf(e.Stdout, "  %s\n", startURL)
+	fmt.Fprintln(e.Stdout)
+	fmt.Fprintln(e.Stdout, "After they grant access, the page will say 'Success'.")
+	fmt.Fprintln(e.Stdout, "Waiting…  (Ctrl-C to cancel; ~10 min timeout)")
+
+	code, err := pollOAuthFlow(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	// Exchange code → refresh_token (locally — client_secret never leaves this host)
+	pf := url.Values{}
+	pf.Set("client_id", client.ClientID)
+	pf.Set("client_secret", client.ClientSecret)
+	pf.Set("code", code)
+	pf.Set("grant_type", "authorization_code")
+	pf.Set("redirect_uri", oauthFlowRedirectURI)
+	r2, err := http.PostForm(googleTokenEndpoint, pf)
+	if err != nil {
+		return fmt.Errorf("exchange code: %w", err)
+	}
+	b2, _ := io.ReadAll(r2.Body)
+	r2.Body.Close()
+	if r2.StatusCode != 200 {
+		return fmt.Errorf("token exchange %d: %s", r2.StatusCode, b2)
+	}
+	var tk struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.Unmarshal(b2, &tk); err != nil || tk.RefreshToken == "" {
+		return fmt.Errorf("token response missing refresh_token: %s", b2)
+	}
+
+	email := fetchGoogleLoginEmail(tk.AccessToken)
+	out := map[string]string{
+		"refresh_token":    tk.RefreshToken,
+		"authorized_email": email,
+		"authorized_at":    time.Now().UTC().Format(time.RFC3339),
+		"client_id":        client.ClientID,
+	}
+	data, _ := json.MarshalIndent(out, "", "  ")
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(statePath, data, 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintf(e.Stdout, "[google login] ✓ authorized as %s — saved to %s\n", email, statePath)
+	return nil
+}
+
+// generateOAuthSession returns ~22 chars of URL-safe base64 random (~128 bits entropy).
+// Used as both the polling key and the OAuth state parameter (CSRF protection).
+func generateOAuthSession() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// pollOAuthFlow waits for the oauth-flow worker to receive an OAuth code for sessionID.
+// Returns the code on success; errors on timeout / context cancel / unexpected response.
+func pollOAuthFlow(ctx context.Context, sessionID string) (string, error) {
+	pollURL := oauthFlowBaseURL + "/poll?session=" + url.QueryEscape(sessionID)
+	deadline := time.Now().Add(10 * time.Minute)
+	interval := 2 * time.Second
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return "", ctx.Err()
 		case <-time.After(interval):
 		}
-		pf := url.Values{}
-		pf.Set("client_id", client.ClientID)
-		if client.ClientSecret != "" {
-			pf.Set("client_secret", client.ClientSecret)
-		}
-		pf.Set("device_code", dr.DeviceCode)
-		pf.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-		r2, err := http.PostForm(googleTokenEndpoint, pf)
+		req, _ := http.NewRequestWithContext(ctx, "GET", pollURL, nil)
+		resp, err := httpClient.Do(req)
 		if err != nil {
-			continue
+			continue // transient — keep polling
 		}
-		b2, _ := io.ReadAll(r2.Body)
-		r2.Body.Close()
-		if r2.StatusCode != 200 {
-			var e2 struct{ Error string `json:"error"` }
-			_ = json.Unmarshal(b2, &e2)
-			switch e2.Error {
-			case "authorization_pending":
-				continue
-			case "slow_down":
-				interval += 5 * time.Second
-				continue
-			case "access_denied":
-				return fmt.Errorf("user denied authorization")
-			case "expired_token":
-				return fmt.Errorf("device code expired — run `google login` again")
-			default:
-				return fmt.Errorf("token poll: %s", b2)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		switch resp.StatusCode {
+		case 404:
+			continue // pending — keep polling
+		case 200:
+			var pr struct {
+				Status string `json:"status"`
+				Code   string `json:"code"`
 			}
+			if err := json.Unmarshal(body, &pr); err != nil {
+				return "", fmt.Errorf("parse poll response: %w (body=%s)", err, body)
+			}
+			if pr.Status == "ready" && pr.Code != "" {
+				return pr.Code, nil
+			}
+			continue
+		default:
+			return "", fmt.Errorf("oauth-flow /poll returned %d: %s", resp.StatusCode, body)
 		}
-		var tk struct {
-			AccessToken  string `json:"access_token"`
-			RefreshToken string `json:"refresh_token"`
-		}
-		if err := json.Unmarshal(b2, &tk); err != nil || tk.RefreshToken == "" {
-			return fmt.Errorf("token response missing refresh_token: %s", b2)
-		}
-		email := fetchGoogleLoginEmail(tk.AccessToken)
-		out := map[string]string{
-			"refresh_token":    tk.RefreshToken,
-			"authorized_email": email,
-			"authorized_at":    time.Now().UTC().Format(time.RFC3339),
-			"client_id":        client.ClientID,
-		}
-		data, _ := json.MarshalIndent(out, "", "  ")
-		if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(statePath, data, 0o600); err != nil {
-			return err
-		}
-		fmt.Fprintf(e.Stdout, "[google login] ✓ authorized as %s — saved to %s\n", email, statePath)
-		return nil
 	}
-	return fmt.Errorf("timed out waiting for authorization")
+	return "", fmt.Errorf("timed out waiting for authorization (session=%s)", sessionID)
 }
 
 func fetchGoogleLoginEmail(accessToken string) string {

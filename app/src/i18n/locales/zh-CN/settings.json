@@ -17,6 +17,8 @@
   "agentTypeCurrentNotInList": "当前值（不在可选列表中）",
   "allowAllActionsTitle": "启动时允许所有操作",
   "allowAllActionsHint": "Codex/Claude 追加危险参数",
+  "inheritGuidanceTitle": "继承 master 的 {{filename}}",
+  "inheritGuidanceHint": "在子 agent 的规则文件里追加 @{{filename}} 引用，自动 inline master 的项目上下文",
   "proxyToggleTitle": "启用代理",
   "proxyToggleHint": "启动前执行 cicy_proxy_on，并检查 mihomo 规则",
   "proxyPasswordLabel": "代理密码",

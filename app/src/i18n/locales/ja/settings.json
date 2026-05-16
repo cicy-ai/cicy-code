@@ -17,6 +17,8 @@
   "agentTypeCurrentNotInList": "現在値（候補リストにありません）",
   "allowAllActionsTitle": "起動時にすべての操作を許可",
   "allowAllActionsHint": "Codex / Claude に危険フラグを追加",
+  "inheritGuidanceTitle": "master の {{filename}} を継承",
+  "inheritGuidanceHint": "サブエージェントの規則ファイルに @{{filename}} 参照を追加し、master のプロジェクト文脈を自動展開",
   "proxyToggleTitle": "プロキシを有効化",
   "proxyToggleHint": "起動前に cicy_proxy_on を実行し mihomo ルールを確認",
   "proxyPasswordLabel": "プロキシパスワード",

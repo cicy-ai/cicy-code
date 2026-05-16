@@ -258,6 +258,9 @@ func (d *DB) Migrate() {
 	d.runOnceMigration("use_custom_gateway_v1", `UPDATE agent_config SET use_custom_gateway = CASE WHEN COALESCE(use_official_auth, 0) = 1 THEN 0 ELSE 1 END`)
 	d.ensureColumn("agent_config", "inspector_notes", "TEXT DEFAULT ''")
 	d.ensureColumn("agent_config", "inspector_notes_updated_at", "TEXT")
+	// Per-pane gateway injection switch for CLAUDE.md / AGENTS.md files.
+	// Default 1 (on); combined AND with global env CICY_GATEWAY_INJECT_RULES.
+	d.ensureColumn("agent_config", "inject_rules_files", "INTEGER DEFAULT 1")
 	d.ensureColumn("pane_agents", "sort_order", "INTEGER DEFAULT 0")
 	d.ensureColumn("agent_queue", "step_kind", "TEXT DEFAULT 'message'")
 	d.ensureColumn("agent_queue", "workflow_id", "INTEGER")

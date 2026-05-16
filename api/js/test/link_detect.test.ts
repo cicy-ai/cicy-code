@@ -119,6 +119,27 @@ test("scanLinksOnText: trims trailing punctuation", () => {
     assert.equal(r[0].uri, "https://example.com/path");
 });
 
+test("scanLinksOnText: stops URL at non-ASCII (CJK directly after path)", () => {
+    const r = scanLinksOnText("打开 https://console.cloud.google.com/apis/credentials(用你想授权的 账号)");
+    const urls = r.filter(m => m.kind === "url");
+    assert.equal(urls.length, 1);
+    assert.equal(urls[0].uri, "https://console.cloud.google.com/apis/credentials");
+});
+
+test("scanLinksOnText: stops URL at non-ASCII (CJK with no separator)", () => {
+    const r = scanLinksOnText("see https://example.com/path然后继续");
+    const urls = r.filter(m => m.kind === "url");
+    assert.equal(urls.length, 1);
+    assert.equal(urls[0].uri, "https://example.com/path");
+});
+
+test("scanLinksOnText: stops URL at emoji", () => {
+    const r = scanLinksOnText("link https://example.com/x🎉rest");
+    const urls = r.filter(m => m.kind === "url");
+    assert.equal(urls.length, 1);
+    assert.equal(urls[0].uri, "https://example.com/x");
+});
+
 test("scanLinksOnText: empty / whitespace text", () => {
     assert.deepEqual(scanLinksOnText(""), []);
     assert.deepEqual(scanLinksOnText("   "), []);

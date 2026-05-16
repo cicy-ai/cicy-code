@@ -75,6 +75,24 @@ This file documents the current repo reality for code agents working inside `cic
 - Most other WS events are broadcast to other clients of the same agent and are not echoed back to the sender
 - `CICY_RUNTIME_MODE=api-only` or `CICY_RUNTIME_API_ONLY=1` disables tmux/desktop-only interfaces through middleware
 
+## Gateway CLAUDE.md / AGENTS.md injection
+
+Agents using `use_custom_gateway=true` have their `CLAUDE.md` and `AGENTS.md` files automatically injected into every outgoing AI request system prompt. Two layers are collected per request:
+
+1. **Project layer** — `<project>/CLAUDE.md` + `<project>/AGENTS.md` (resolved from `agent_config.config.projects[0]`)
+2. **Workspace layer** — `<workspace>/CLAUDE.md` + `<workspace>/AGENTS.md` (resolved from `agent_config.workspace`)
+
+Files are wrapped in `<project-rules>` / `<workspace-rules>` XML tags and appended after the `prompt_rules` table blocks (`<global-memory>`, `<project-memory>`, `<agent-memory>`). Injection uses mtime+size caching — file changes take effect on the next request without restart.
+
+Key controls:
+- Global switch: `CICY_GATEWAY_INJECT_RULES=0` disables all file injection (default on)
+- Per-agent switch: `agent_config.inject_rules_files` column (1=on, 0=off); toggle via Inspector → Memory → 注入文件
+- Per-file cap: 50KB; total overlay cap: 100KB (project layer dropped first when over budget)
+
+Implementation: `api/mgr/gateway_inject_rules.go`. Design doc: `docs/gateway-inject-rules-files.md`.
+
+**Warning**: Do not write API keys or secrets into CLAUDE.md / AGENTS.md — the content is forwarded verbatim to upstream AI providers.
+
 ## Extension note
 
 There are two extension folders in the repo:
