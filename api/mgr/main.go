@@ -138,6 +138,11 @@ Options:
 	http.HandleFunc("/api/proxy-ssh/show", authM(handleProxySshShow))
 	http.HandleFunc("/api/proxy-ssh/lifecycle", authM(handleProxySshLifecycle))
 	http.HandleFunc("/api/proxy-ssh/test", authM(handleProxySshTest))
+	http.HandleFunc("/api/frp-server/status", authM(handleFrpServerStatus))
+	http.HandleFunc("/api/frp-server/lifecycle", authM(handleFrpServerLifecycle))
+	http.HandleFunc("/api/frp-server/connections", authM(handleFrpServerConnections))
+	http.HandleFunc("/api/frp-server/clients", authM(handleFrpServerClients))
+	http.HandleFunc("/api/frp-server/logs", authM(handleFrpServerLogs))
 
 	// Panes
 	http.HandleFunc("/api/panes", authM(handlePanes))

@@ -225,6 +225,11 @@ const api = {
   showProxySsh: (name: string) => http.get('/api/proxy-ssh/show', { params: { name } }),
   proxySshLifecycle: (name: string, action: 'start' | 'stop' | 'restart') => http.post('/api/proxy-ssh/lifecycle', { name, action }),
   testProxySsh: (name: string) => http.post('/api/proxy-ssh/test', { name }),
+  getFrpServerStatus: () => http.get('/api/frp-server/status'),
+  frpServerLifecycle: (action: 'start' | 'stop' | 'restart' | 'reload') => http.post('/api/frp-server/lifecycle', { action }),
+  getFrpServerConnections: () => http.get('/api/frp-server/connections'),
+  getFrpServerClients: () => http.get('/api/frp-server/clients'),
+  getFrpServerLogs: (lines?: number) => http.get('/api/frp-server/logs', { params: lines ? { lines } : {} }),
 };
 
 export default api;
