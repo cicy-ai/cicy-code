@@ -570,8 +570,32 @@ func globalCORS(next http.Handler) http.Handler {
 func w(h http.HandlerFunc) http.HandlerFunc  { return corsM(h) }
 func wa(h http.HandlerFunc) http.HandlerFunc { return corsM(authM(h)) }
 
+// processStartedAt is captured at startup so /api/health can report uptime.
+var processStartedAt = time.Now()
+
+// handleHealth surfaces what the cicy-desktop homepage card needs to decide
+// "is the local engine healthy and what's it doing right now": version,
+// uptime, a resident-size proxy via runtime.MemStats.Sys, and a quick agent
+// count via listAgentsByPane (same query the chat panel uses). Stays public
+// — no auth, no token — because cicy-desktop probes it before the user has
+// authenticated against any backend.
 func handleHealth(w http.ResponseWriter, r *http.Request) {
-	J(w, M{"status": "ok", "source": "cicy-code"})
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	agentsCount := -1
+	if rows, err := listAgentsByPane("all"); err == nil {
+		agentsCount = len(rows)
+	}
+	J(w, M{
+		"status":       "ok",
+		"source":       "cicy-code",
+		"version":      version,
+		"pid":          os.Getpid(),
+		"uptime_sec":   int(time.Since(processStartedAt).Seconds()),
+		"mem_bytes":    ms.Sys,
+		"goroutines":   runtime.NumGoroutine(),
+		"agents_count": agentsCount,
+	})
 }
 
 func handlePing(w http.ResponseWriter, r *http.Request) {
