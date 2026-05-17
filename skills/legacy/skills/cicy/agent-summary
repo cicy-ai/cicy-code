@@ -19,12 +19,393 @@ AI providers are configured in ~/cicy-ai/global.json
 import json
 import sys
 import os
+import sqlite3
 import urllib.request
 import urllib.error
 from pathlib import Path
 
 WORKERS_DIR = Path.home() / "cicy-ai" / "workers"
 GLOBAL_CONFIG = Path.home() / "cicy-ai" / "global.json"
+DATA_DB = Path.home() / "cicy-ai" / "db" / "data.db"
+CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
+API_BASE = os.environ.get("CICY_API_BASE", "http://127.0.0.1:8008")
+CODEX_DATA = Path.home() / ".codex"
+CODEX_STATE_DB = CODEX_DATA / "state_5.sqlite"
+CODEX_SESSIONS_DIR = CODEX_DATA / "sessions"
+OPENCODE_DB = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+
+
+# --- gateway detection + JSONL fallback ---------------------------------
+#
+# When the cicy-code custom gateway is OFF for a claude pane, there is no
+# .cicy/history/current.json. Claude Code instead writes every turn to
+# ~/.claude/projects/<encoded-cwd>/<session>.jsonl. The helpers below let us
+# pick the right source per agent without a pre-conversion step.
+
+
+def _short_pane_id(pid: str) -> str:
+    return (pid or "").split(":", 1)[0]
+
+
+def _lookup_gateway_api(agent_id: str):
+    try:
+        token = ""
+        if GLOBAL_CONFIG.exists():
+            with open(GLOBAL_CONFIG) as f:
+                token = (json.load(f) or {}).get("api_token", "")
+        req = urllib.request.Request(
+            f"{API_BASE}/api/tmux/panes",
+            headers={"Authorization": f"Bearer {token}"} if token else {},
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        for p in (data.get("panes") or []):
+            if _short_pane_id(p.get("pane_id", "")) == agent_id:
+                return (1 if p.get("use_custom_gateway") else 0), (p.get("agent_type") or "")
+    except Exception:
+        return None, ""
+    return None, ""
+
+
+def _lookup_gateway_db(agent_id: str):
+    if not DATA_DB.exists():
+        return None, ""
+    try:
+        db = sqlite3.connect(f"file:{DATA_DB}?mode=ro", uri=True)
+        cur = db.cursor()
+        cur.execute(
+            "SELECT use_custom_gateway, agent_type FROM agent_config "
+            "WHERE pane_id = ? OR pane_id LIKE ? LIMIT 1",
+            (agent_id, agent_id + ":%"),
+        )
+        row = cur.fetchone()
+        db.close()
+        if not row:
+            return None, ""
+        return int(row[0] or 0), (row[1] or "")
+    except Exception:
+        return None, ""
+
+
+def lookup_gateway(agent_id: str):
+    """Return (use_custom_gateway:int|None, agent_type:str). API first, SQLite fallback."""
+    g, t = _lookup_gateway_api(agent_id)
+    if g is not None:
+        return g, t
+    return _lookup_gateway_db(agent_id)
+
+
+def encode_cwd_for_claude(cwd: str) -> str:
+    # Claude Code maps cwd -> dirname by replacing every '/' with '-'.
+    return (cwd or "").replace("/", "-")
+
+
+def find_jsonl_for_agent(agent_id: str) -> Path:
+    cwd = WORKERS_DIR / agent_id
+    proj_dir = CLAUDE_PROJECTS / encode_cwd_for_claude(str(cwd))
+    if not proj_dir.is_dir():
+        raise FileNotFoundError(f"No Claude project dir: {proj_dir}")
+    candidates = sorted(proj_dir.glob("*.jsonl"),
+                        key=lambda x: x.stat().st_mtime, reverse=True)
+    if not candidates:
+        raise FileNotFoundError(f"No .jsonl in {proj_dir}")
+    return candidates[0]
+
+
+def load_jsonl_as_snapshot(jsonl_path: Path, agent_id: str = "") -> dict:
+    """Parse Claude Code's JSONL log into the same envelope shape as current.json."""
+    messages = []
+    session_id = ""
+    model = ""
+    last_ts = ""
+    cwd_seen = ""
+
+    with open(jsonl_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except Exception:
+                continue
+            t = ev.get("type")
+            if t not in ("user", "assistant"):
+                continue
+            msg = ev.get("message") or {}
+            role = msg.get("role")
+            content = msg.get("content")
+            if role not in ("user", "assistant") or content is None:
+                continue
+            if isinstance(content, str):
+                content = [{"type": "text", "text": content}]
+            messages.append({
+                "role": role,
+                "id": ev.get("uuid", ""),
+                "content": content,
+            })
+            if t == "assistant" and msg.get("model"):
+                model = msg["model"]
+            if ev.get("timestamp"):
+                last_ts = ev["timestamp"]
+            if not session_id:
+                session_id = ev.get("sessionId", "")
+            if not cwd_seen:
+                cwd_seen = ev.get("cwd", "")
+
+    if not agent_id and cwd_seen:
+        agent_id = Path(cwd_seen).name
+
+    return {
+        "provider": "anthropic",
+        "conversation_id": session_id or jsonl_path.stem,
+        "agent_id": agent_id,
+        "model": model,
+        "timestamp": last_ts,
+        "status": "active",
+        "_source": "jsonl",
+        "_jsonl_path": str(jsonl_path),
+        "body": {
+            "system": [],
+            "messages": messages,
+        },
+    }
+
+# --- Codex JSONL loader -------------------------------------------------------
+
+def find_codex_jsonl_for_agent(agent_id: str) -> Path:
+    cwd = str(WORKERS_DIR / agent_id)
+    # Try SQLite index first (fast path)
+    if CODEX_STATE_DB.exists():
+        try:
+            db = sqlite3.connect(f"file:{CODEX_STATE_DB}?mode=ro", uri=True)
+            cur = db.cursor()
+            cur.execute(
+                "SELECT id FROM threads WHERE cwd = ? ORDER BY created_at DESC LIMIT 1",
+                (cwd,)
+            )
+            row = cur.fetchone()
+            db.close()
+            if row:
+                thread_id = row[0]
+                candidates = sorted(
+                    CODEX_SESSIONS_DIR.rglob(f"*{thread_id}*.jsonl"),
+                    key=lambda x: x.stat().st_mtime, reverse=True,
+                )
+                if candidates:
+                    return candidates[0]
+        except Exception:
+            pass
+    # Fallback: scan recent JSONL files for matching CWD in session_meta
+    candidates = sorted(CODEX_SESSIONS_DIR.rglob("*.jsonl"),
+                        key=lambda x: x.stat().st_mtime, reverse=True)
+    for p in candidates[:30]:
+        try:
+            with open(p) as f:
+                first = json.loads(f.readline())
+            if (first.get("type") == "session_meta"
+                    and first.get("payload", {}).get("cwd") == cwd):
+                return p
+        except Exception:
+            continue
+    raise FileNotFoundError(f"No Codex session found for {agent_id} (cwd={cwd})")
+
+
+def load_codex_as_snapshot(agent_id: str) -> dict:
+    """Parse Codex rollout JSONL into the common anthropic-envelope shape."""
+    jsonl_path = find_codex_jsonl_for_agent(agent_id)
+    messages = []
+    session_id = ""
+    model = ""
+    last_ts = ""
+    system_text = ""
+
+    with open(jsonl_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except Exception:
+                continue
+            t = ev.get("type")
+            p = ev.get("payload", {})
+            last_ts = ev.get("timestamp", last_ts)
+
+            if t == "session_meta":
+                session_id = p.get("id", "")
+                system_text = (p.get("base_instructions") or {}).get("text", "")
+                continue
+
+            if t == "turn_context" and p.get("model"):
+                model = p["model"]
+                continue
+
+            if t != "response_item":
+                continue
+
+            pt = p.get("type")
+
+            if pt == "message":
+                role = p.get("role", "")
+                if role not in ("user", "assistant"):
+                    continue  # skip 'developer' (system) messages
+                content = []
+                for block in (p.get("content") or []):
+                    bt = block.get("type", "")
+                    if bt in ("input_text", "output_text"):
+                        content.append({"type": "text", "text": block.get("text", "")})
+                    else:
+                        content.append(block)
+                if content:
+                    messages.append({"role": role, "id": p.get("id", ""), "content": content})
+
+            elif pt == "function_call":
+                args_raw = p.get("arguments", "{}")
+                try:
+                    args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                except Exception:
+                    args = {"raw": str(args_raw)[:200]}
+                messages.append({
+                    "role": "assistant",
+                    "id": p.get("call_id", ""),
+                    "content": [{"type": "tool_use", "name": p.get("name", ""), "input": args}],
+                })
+
+            elif pt == "function_call_output":
+                messages.append({
+                    "role": "user",
+                    "id": p.get("call_id", ""),
+                    "content": [{"type": "tool_result", "output": str(p.get("output", ""))[:2000]}],
+                })
+
+            elif pt == "reasoning":
+                # Content is encrypted — record presence but not content
+                messages.append({
+                    "role": "assistant",
+                    "id": p.get("id", ""),
+                    "content": [{"type": "thinking", "thinking": ""}],
+                })
+
+    return {
+        "provider": "anthropic",
+        "conversation_id": session_id or jsonl_path.stem,
+        "agent_id": agent_id,
+        "model": model,
+        "timestamp": last_ts,
+        "status": "active",
+        "_source": "codex",
+        "_jsonl_path": str(jsonl_path),
+        "body": {
+            "system": [{"type": "text", "text": system_text}] if system_text else [],
+            "messages": messages,
+        },
+    }
+
+
+# --- OpenCode SQLite loader ---------------------------------------------------
+
+def find_opencode_session_id(agent_id: str) -> str:
+    cwd = str(WORKERS_DIR / agent_id)
+    if not OPENCODE_DB.exists():
+        raise FileNotFoundError(f"OpenCode DB not found at {OPENCODE_DB}")
+    db = sqlite3.connect(f"file:{OPENCODE_DB}?mode=ro", uri=True)
+    cur = db.cursor()
+    cur.execute(
+        "SELECT id FROM session WHERE directory = ? ORDER BY time_updated DESC LIMIT 1",
+        (cwd,)
+    )
+    row = cur.fetchone()
+    db.close()
+    if not row:
+        raise FileNotFoundError(f"No OpenCode session for {agent_id} (cwd={cwd})")
+    return row[0]
+
+
+def load_opencode_as_snapshot(agent_id: str) -> dict:
+    """Load the most-recent OpenCode session from SQLite into the common envelope."""
+    import datetime as _dt
+    session_id = find_opencode_session_id(agent_id)
+    db = sqlite3.connect(f"file:{OPENCODE_DB}?mode=ro", uri=True)
+    cur = db.cursor()
+
+    cur.execute("SELECT model, time_updated FROM session WHERE id = ?", (session_id,))
+    sess_row = cur.fetchone()
+    model = ""
+    last_ts = ""
+    if sess_row:
+        try:
+            model = (json.loads(sess_row[0] or "{}")).get("id", "")
+        except Exception:
+            pass
+        ts_ms = sess_row[1] or 0
+        if ts_ms:
+            last_ts = _dt.datetime.fromtimestamp(ts_ms / 1000).isoformat()
+
+    cur.execute(
+        "SELECT id, data FROM message WHERE session_id = ? ORDER BY time_created ASC",
+        (session_id,)
+    )
+    msg_rows = cur.fetchall()
+
+    messages = []
+    for msg_id, msg_data_raw in msg_rows:
+        try:
+            msg_data = json.loads(msg_data_raw) if msg_data_raw else {}
+        except Exception:
+            continue
+        role = msg_data.get("role", "")
+        if role not in ("user", "assistant"):
+            continue
+
+        cur.execute(
+            "SELECT data FROM part WHERE message_id = ? ORDER BY time_created ASC",
+            (msg_id,)
+        )
+        part_rows = cur.fetchall()
+
+        content = []
+        for (part_raw,) in part_rows:
+            try:
+                part = json.loads(part_raw) if part_raw else {}
+            except Exception:
+                continue
+            pt = part.get("type", "")
+            if pt == "text":
+                content.append({"type": "text", "text": part.get("text", "")})
+            elif pt == "reasoning":
+                content.append({"type": "thinking", "thinking": part.get("text", "")})
+            elif pt == "tool":
+                state = part.get("state") or {}
+                content.append({
+                    "type": "tool_use",
+                    "name": part.get("tool", ""),
+                    "input": state.get("input", {}),
+                    "id": part.get("callID", ""),
+                })
+            # step-start / step-finish → skip
+
+        if content:
+            messages.append({"role": role, "id": msg_id, "content": content})
+
+    db.close()
+
+    return {
+        "provider": "anthropic",
+        "conversation_id": session_id,
+        "agent_id": agent_id,
+        "model": model,
+        "timestamp": last_ts,
+        "status": "active",
+        "_source": "opencode",
+        "_db_path": str(OPENCODE_DB),
+        "body": {
+            "system": [],
+            "messages": messages,
+        },
+    }
+
 
 DEFAULT_SUMMARY_PROMPT = """你是一个 AI Agent 工作交接专家。请分析以下会话记录，生成一份完整的工作交接文档，让一个全新的 AI Agent 可以直接接手继续工作。
 
@@ -108,10 +489,13 @@ DEFAULT_SUMMARY_PROMPT = """你是一个 AI Agent 工作交接专家。请分析
 
 
 def find_snapshot(arg: str) -> Path:
-    """Find current.json from agent-id or path."""
+    """Find current.json from agent-id or path.
+
+    Kept for backward compatibility. New callers should use resolve_source(),
+    which understands gateway-OFF claude panes (no current.json, JSONL only).
+    """
     if os.path.isfile(arg):
         return Path(arg)
-    # Try as agent-id
     path = WORKERS_DIR / arg / ".cicy" / "history" / "current.json"
     if path.exists():
         return path
@@ -140,6 +524,53 @@ def load_reply_snapshot(snapshot_path: Path) -> dict:
     return {}
 
 
+def resolve_source(arg: str):
+    """Pick the right conversation source for `arg` (path or agent-id).
+
+    Returns a tuple (data, source_kind, snapshot_path) where:
+      - source_kind is "current" (gateway-written current.json) or "jsonl"
+        (Claude Code native log).
+      - snapshot_path points at the file we loaded (used for sibling lookups
+        like reply.json and the --ai output dir). For JSONL it's the .jsonl
+        path; for current.json it's the current.json path.
+    """
+    # Explicit file path — load as-is and treat as current.json schema.
+    if os.path.isfile(arg):
+        p = Path(arg)
+        return load_snapshot(p), "current", p
+
+    # agent-id branch: gateway flag decides which source is authoritative.
+    gw, atype = lookup_gateway(arg)
+    canonical = WORKERS_DIR / arg / ".cicy" / "history" / "current.json"
+
+    # Gateway on (or unknown agent but current.json present): use the
+    # gateway snapshot — it's the only source kept fresh by the proxy.
+    if gw == 1 or (gw is None and canonical.exists()):
+        if not canonical.exists():
+            raise FileNotFoundError(
+                f"Gateway is ON for {arg} but no snapshot yet at {canonical}"
+            )
+        return load_snapshot(canonical), "current", canonical
+
+    # Gateway off: pick loader by agent_type.
+    atype = (atype or "").lower()
+    if atype == "codex":
+        data = load_codex_as_snapshot(arg)
+        return data, "codex", Path(data["_jsonl_path"])
+    if atype == "opencode":
+        data = load_opencode_as_snapshot(arg)
+        return data, "opencode", OPENCODE_DB
+    # Default (claude / unknown): fall back to Claude Code JSONL.
+    try:
+        jsonl_path = find_jsonl_for_agent(arg)
+    except FileNotFoundError as e:
+        raise FileNotFoundError(
+            f"No source for {arg}: gateway is OFF and no JSONL found ({e})."
+        )
+    data = load_jsonl_as_snapshot(jsonl_path, agent_id=arg)
+    return data, "jsonl", jsonl_path
+
+
 def load_global_config() -> dict:
     if GLOBAL_CONFIG.exists():
         with open(GLOBAL_CONFIG, 'r') as f:
@@ -148,37 +579,54 @@ def load_global_config() -> dict:
 
 
 def get_ai_provider(config: dict, provider_name: str = None) -> dict:
-    """Get AI provider config from global.json."""
-    ai_config = config.get('ai', {})
-    providers = ai_config.get('provider', {})
+    """Get AI provider config from global.json.
+
+    Supports the current schema:
+      providers.items[].{key, name, protocol, url, apiKey, defaultModel, claudeModel}
+      providers.default.claude  -- key of the default claude provider
+    """
+    providers_root = config.get('providers', {})
+    items = providers_root.get('items', [])
+
+    # Build key→item index
+    by_key = {item.get('key', ''): item for item in items if item.get('key')}
 
     if provider_name:
-        if provider_name in providers:
-            return providers[provider_name]
-        raise ValueError(f"Provider '{provider_name}' not found. Available: {list(providers.keys())}")
+        if provider_name in by_key:
+            return by_key[provider_name]
+        # Also try matching by name (case-insensitive)
+        for item in items:
+            if item.get('name', '').lower() == provider_name.lower():
+                return item
+        available = list(by_key.keys())
+        raise ValueError(f"Provider '{provider_name}' not found. Available: {available}")
 
-    # Use current provider
-    current = ai_config.get('currentProvider', '')
-    if current and current in providers:
-        return providers[current]
+    # Use the default claude provider key
+    default_key = providers_root.get('default', {}).get('claude', '')
+    if default_key and default_key in by_key:
+        return by_key[default_key]
 
-    # Fallback to deepseek
-    if 'deepseek' in providers:
-        return providers['deepseek']
+    # Fallback: first item with a working url
+    for item in items:
+        if item.get('url') and item.get('apiKey'):
+            return item
 
     raise ValueError("No AI provider configured")
 
 
 def detect_format(data: dict) -> str:
-    """Detect API format: 'anthropic' or 'openai'."""
+    """Detect API format: 'anthropic', 'openai' (Responses API), or 'openai_chat'."""
     provider = data.get('provider', '')
     if provider == 'anthropic':
         return 'anthropic'
     body = data.get('body', {})
-    if 'messages' in body:
-        return 'anthropic'
     if 'input' in body:
-        return 'openai'
+        return 'openai'  # Responses API
+    if 'messages' in body:
+        # openai provider uses Chat Completions; unknown/other uses Anthropic messages format
+        if provider == 'openai':
+            return 'openai_chat'
+        return 'anthropic'
     return 'unknown'
 
 
@@ -255,6 +703,62 @@ def normalize_messages(data: dict) -> list:
                 messages.append(msg)
 
         return messages
+
+    elif fmt == 'openai_chat':
+        # OpenAI Chat Completions format (used by Codex/OpenCode via gateway).
+        # Roles: system (skip), user (string content), assistant (string or tool_calls), tool (result).
+        messages = []
+        for msg in body.get('messages', []):
+            role = msg.get('role', '')
+            if role == 'system':
+                continue
+            content_raw = msg.get('content')
+            tool_calls = msg.get('tool_calls')
+            tool_call_id = msg.get('tool_call_id')
+
+            content = []
+            if isinstance(content_raw, str) and content_raw:
+                content.append({'type': 'text', 'text': content_raw})
+            elif isinstance(content_raw, list):
+                for block in content_raw:
+                    if isinstance(block, str):
+                        content.append({'type': 'text', 'text': block})
+                    elif isinstance(block, dict):
+                        bt = block.get('type', '')
+                        if bt in ('text', 'input_text', 'output_text'):
+                            content.append({'type': 'text', 'text': block.get('text', '')})
+                        else:
+                            content.append(block)
+
+            if role == 'assistant' and tool_calls:
+                for tc in tool_calls:
+                    fn = tc.get('function', {})
+                    args_raw = fn.get('arguments', '{}')
+                    try:
+                        args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                    except Exception:
+                        args = {'raw': str(args_raw)[:200]}
+                    content.append({
+                        'type': 'tool_use',
+                        'name': fn.get('name', ''),
+                        'input': args,
+                        'id': tc.get('id', ''),
+                    })
+
+            if role == 'tool' and tool_call_id:
+                # Tool result: present as user/tool_result
+                result_content = content_raw if isinstance(content_raw, str) else ''
+                content = [{'type': 'tool_result', 'output': result_content[:2000]}]
+                role = 'user'
+
+            if content:
+                messages.append({
+                    'role': role,
+                    'id': str(msg.get('id', '')),
+                    'content': content,
+                })
+        return messages
+
     return []
 
 
@@ -263,7 +767,7 @@ def extract_slim_messages(messages: list) -> list:
     slim = []
     for msg in messages:
         filtered_content = []
-        for block in msg.get('content', []):
+        for block in (msg.get('content') or []):
             if isinstance(block, dict):
                 btype = block.get('type')
                 if btype in ('tool_result', 'thinking'):
@@ -316,6 +820,10 @@ def compute_stats(data: dict) -> dict:
     if fmt == 'anthropic':
         system = body.get('system', [])
         system_chars = count_chars(system) if system else 0
+    elif fmt == 'openai_chat':
+        # System messages are embedded in body.messages[0] for OpenAI Chat format
+        sys_msgs = [m for m in body.get('messages', []) if m.get('role') == 'system']
+        system_chars = sum(len((m.get('content') or '')) for m in sys_msgs)
     else:
         instructions = body.get('instructions', '')
         system_chars = count_chars(instructions) if instructions else 0
@@ -334,7 +842,7 @@ def compute_stats(data: dict) -> dict:
     tool_use_count = 0
 
     for msg in messages:
-        for block in msg.get('content', []):
+        for block in (msg.get('content') or []):
             if isinstance(block, dict):
                 btype = block.get('type')
                 if btype == 'tool_result':
@@ -406,7 +914,7 @@ def generate_structured_text(messages: list) -> str:
         if role not in ('user', 'assistant'):
             continue
 
-        for block in msg.get('content', []):
+        for block in (msg.get('content') or []):
             if not isinstance(block, dict):
                 continue
 
@@ -457,25 +965,28 @@ def generate_structured_text(messages: list) -> str:
 
 
 def format_tool_action(name: str, inp: dict) -> str:
-    """Format tool action for display."""
-    if name == 'Bash':
-        cmd = inp.get('command', '')[:150]
+    """Format tool action for display. Handles Claude/Codex/OpenCode tool names."""
+    n = (name or "").lower()
+    if n in ('bash', 'exec_command'):
+        cmd = (inp.get('command') or inp.get('cmd') or '')[:150]
         return f"执行命令: {cmd}"
-    elif name == 'exec_command':
-        cmd = inp.get('cmd', '')[:150]
-        return f"执行命令: {cmd}"
-    elif name == 'Read':
-        return f"读取文件: {inp.get('file_path', '')}"
-    elif name == 'Write':
-        return f"写入文件: {inp.get('file_path', '')}"
-    elif name == 'Edit':
-        return f"编辑文件: {inp.get('file_path', '')}"
-    elif name == 'WebSearch':
+    elif n in ('read', 'glob', 'grep'):
+        path = inp.get('file_path') or inp.get('path') or inp.get('pattern') or inp.get('query') or ''
+        return f"读取文件: {path}" if n == 'read' else f"搜索文件: {path}"
+    elif n == 'write':
+        return f"写入文件: {inp.get('file_path') or inp.get('path') or ''}"
+    elif n in ('edit', 'apply_patch'):
+        return f"编辑文件: {inp.get('file_path') or inp.get('path') or ''}"
+    elif n in ('websearch', 'web_search'):
         return f"搜索: {inp.get('query', '')}"
-    elif name == 'WebFetch':
+    elif n in ('webfetch', 'web_fetch'):
         return f"获取网页: {inp.get('url', '')}"
-    elif name == 'Agent':
+    elif n == 'agent':
         return f"启动子代理: {inp.get('description', '')}"
+    elif n == 'skill':
+        return f"调用技能: {inp.get('name', '')}"
+    elif n == 'task':
+        return f"创建任务: {inp.get('description') or inp.get('title') or ''}"
     elif name:
         return f"调用工具: {name}"
     return ""
@@ -492,7 +1003,7 @@ def generate_text_summary(messages: list) -> str:
         texts = []
         tools = []
 
-        for block in msg.get('content', []):
+        for block in (msg.get('content') or []):
             if isinstance(block, dict):
                 btype = block.get('type')
                 if btype == 'text':
@@ -530,99 +1041,96 @@ def generate_text_summary(messages: list) -> str:
 
 
 def call_ai_api(provider_config: dict, model: str, prompt: str, content: str) -> str:
-    """Call AI API to generate summary. Supports both OpenAI and Anthropic formats."""
+    """Call AI API to generate summary.
+
+    Reads provider_config.protocol ('anthropic' | 'openai') and provider_config.url
+    to determine which wire format and endpoint to use.
+    """
     api_key = provider_config.get('apiKey', '')
+    base_url = (provider_config.get('url') or '').rstrip('/')
+    protocol = (provider_config.get('protocol') or 'openai').lower()
 
-    # Check if this is an Anthropic provider (has anthropicUrl)
-    anthropic_url = provider_config.get('anthropicUrl', '')
-    openai_url = provider_config.get('apiUrl', '')
+    if not base_url:
+        raise ValueError("Provider has no url configured")
 
-    if anthropic_url:
-        # Use Anthropic API format
-        api_url = anthropic_url.rstrip('/') + '/v1/messages'
+    if protocol == 'anthropic':
+        # Anthropic Messages API
+        # DeepSeek's anthropic compat lives at /anthropic/v1/messages;
+        # standard Anthropic and other proxies at /v1/messages.
+        if base_url.endswith('/anthropic'):
+            api_url = base_url + '/v1/messages'
+        elif '/v1' in base_url:
+            api_url = base_url + '/messages'
+        else:
+            api_url = base_url + '/v1/messages'
 
         if not model:
-            model = provider_config.get('claudeModel', 'claude-sonnet-4-6')
+            model = provider_config.get('claudeModel') or provider_config.get('defaultModel') or 'claude-sonnet-4-6'
 
         payload = {
             "model": model,
             "max_tokens": 8000,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt + "\n\n" + content
-                }
-            ]
+            "messages": [{"role": "user", "content": prompt + "\n\n" + content}],
         }
-
         headers = {
             "Content-Type": "application/json",
             "x-api-key": api_key,
-            "anthropic-version": "2023-06-01"
+            "anthropic-version": "2023-06-01",
         }
-
         req = urllib.request.Request(
             api_url,
             data=json.dumps(payload).encode('utf-8'),
             headers=headers,
-            method='POST'
+            method='POST',
         )
-
         try:
             with urllib.request.urlopen(req, timeout=300) as resp:
                 result = json.loads(resp.read().decode('utf-8'))
-                # Anthropic format: content[0].text
-                content_blocks = result.get('content', [])
-                if content_blocks and isinstance(content_blocks[0], dict):
-                    return content_blocks[0].get('text', '')
+                blocks = result.get('content', [])
+                # Model may prepend a thinking block; find the first text block.
+                for block in blocks:
+                    if isinstance(block, dict) and block.get('type') == 'text':
+                        return block.get('text', '')
                 return ''
         except urllib.error.HTTPError as e:
-            error_body = e.read().decode('utf-8') if e.fp else ''
-            raise RuntimeError(f"API error {e.code}: {error_body}")
+            body = e.read().decode('utf-8') if e.fp else ''
+            raise RuntimeError(f"API error {e.code}: {body}")
 
     else:
-        # Use OpenAI API format
-        if not openai_url:
-            raise ValueError("API URL not configured")
-
-        api_url = openai_url.rstrip('/')
-        if not api_url.endswith('/chat/completions'):
-            api_url = api_url + '/chat/completions'
+        # OpenAI chat-completions format
+        if '/chat/completions' in base_url:
+            api_url = base_url
+        elif base_url.endswith('/v1'):
+            api_url = base_url + '/chat/completions'
+        else:
+            api_url = base_url + '/chat/completions'
 
         if not model:
-            model = provider_config.get('defaultModel', 'deepseek-chat')
+            model = provider_config.get('defaultModel') or provider_config.get('claudeModel') or 'deepseek-chat'
 
         payload = {
             "model": model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt + "\n\n" + content
-                }
-            ],
+            "messages": [{"role": "user", "content": prompt + "\n\n" + content}],
             "temperature": 0.3,
-            "max_tokens": 4000
+            "max_tokens": 4000,
         }
-
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
+            "Authorization": f"Bearer {api_key}",
         }
-
         req = urllib.request.Request(
             api_url,
             data=json.dumps(payload).encode('utf-8'),
             headers=headers,
-            method='POST'
+            method='POST',
         )
-
         try:
             with urllib.request.urlopen(req, timeout=300) as resp:
                 result = json.loads(resp.read().decode('utf-8'))
                 return result.get('choices', [{}])[0].get('message', {}).get('content', '')
         except urllib.error.HTTPError as e:
-            error_body = e.read().decode('utf-8') if e.fp else ''
-            raise RuntimeError(f"API error {e.code}: {error_body}")
+            body = e.read().decode('utf-8') if e.fp else ''
+            raise RuntimeError(f"API error {e.code}: {body}")
 
 
 def parse_args(argv: list) -> dict:
@@ -659,16 +1167,21 @@ def parse_args(argv: list) -> dict:
 
 
 def get_summary_output_path(snapshot_path: Path, data: dict) -> Path:
-    """Get output path for AI summary: .cicy/history/summary/<conversation_id>.md"""
-    conversation_id = data.get('conversation_id', '')
-    if not conversation_id:
-        conversation_id = 'unknown'
+    """Get output path for AI summary.
 
-    # Find .cicy/history directory from snapshot path
-    history_dir = snapshot_path.parent
-    summary_dir = history_dir / 'summary'
+    - current.json source: <history_dir>/summary/<conversation_id>.md
+    - JSONL source:        <workspace>/.cicy/summary/<conversation_id>.md
+      (kept out of Claude Code's own ~/.claude/projects/ tree.)
+    """
+    conversation_id = data.get('conversation_id', '') or 'unknown'
+
+    if data.get('_source') in ('jsonl', 'codex', 'opencode'):
+        agent_id = data.get('agent_id', '') or Path(snapshot_path).parent.name
+        summary_dir = WORKERS_DIR / agent_id / ".cicy" / "summary"
+    else:
+        summary_dir = snapshot_path.parent / 'summary'
+
     summary_dir.mkdir(parents=True, exist_ok=True)
-
     return summary_dir / f"{conversation_id}.md"
 
 
@@ -685,13 +1198,18 @@ def main():
         sys.exit(1)
 
     try:
-        path = find_snapshot(args['target'])
+        data, source_kind, path = resolve_source(args['target'])
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    data = load_snapshot(path)
-    reply_data = load_reply_snapshot(path)
+    # reply.json is only meaningful when the gateway wrote the snapshot.
+    if source_kind == "current":
+        reply_data = load_reply_snapshot(path)
+    else:
+        reply_data = {}
+        print(f"[source={source_kind}] {path}", file=sys.stderr)
+
     messages = normalize_messages(data)
 
     if args['mode'] == 'stats':
@@ -758,6 +1276,17 @@ def main():
 
         # Get prompt
         prompt = args['prompt'] or DEFAULT_SUMMARY_PROMPT
+
+        # Cap content to ~80 KB so we stay well within upstream context limits.
+        # For long sessions, keep the TAIL (most recent activity) which matters
+        # most for a handoff doc. Prepend a truncation notice so the AI knows.
+        MAX_CONTENT_BYTES = 80_000
+        if len(text.encode('utf-8')) > MAX_CONTENT_BYTES:
+            tail = text.encode('utf-8')[-MAX_CONTENT_BYTES:].decode('utf-8', errors='ignore')
+            # Re-align to a line boundary
+            tail = tail[tail.find('\n') + 1:] if '\n' in tail else tail
+            text = "[会话记录过长，已截取最近部分]\n\n" + tail
+            print(f"content truncated to ~{MAX_CONTENT_BYTES//1000}KB (keeping tail)", file=sys.stderr)
 
         # Call AI API
         print(f"Calling AI ({args['provider'] or 'default'})...", file=sys.stderr)
@@ -885,15 +1414,9 @@ def main():
         summary_provider = args['provider'] or 'default'
         if not summary_model:
             provider_config_for_model = get_ai_provider(config, args['provider'])
-            # Check if we used Anthropic or OpenAI API
-            if provider_config_for_model.get('anthropicUrl') and not provider_config_for_model.get('apiUrl'):
-                # Pure Anthropic provider
-                summary_model = provider_config_for_model.get('claudeModel', 'claude-sonnet-4-6')
-            elif provider_config_for_model.get('apiUrl'):
-                # OpenAI-compatible provider (including deepseek)
-                summary_model = provider_config_for_model.get('defaultModel', 'deepseek-chat')
-            else:
-                summary_model = provider_config_for_model.get('claudeModel', 'claude-sonnet-4-6')
+            summary_model = (provider_config_for_model.get('claudeModel')
+                             or provider_config_for_model.get('defaultModel')
+                             or 'deepseek-chat')
 
         summary_content = f"""# AI Summary
 

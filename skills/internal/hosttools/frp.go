@@ -220,13 +220,6 @@ func (t *frpTool) binEnvName() string {
 	return "FRP_CLIENT_BIN"
 }
 
-func (t *frpTool) configEnvName() string {
-	if t.kind == frpServerKind {
-		return "FRP_SERVER_CONFIG"
-	}
-	return "FRP_CLIENT_CONFIG"
-}
-
 func (t *frpTool) logEnvName() string {
 	if t.kind == frpServerKind {
 		return "FRP_SERVER_LOG"
@@ -246,26 +239,8 @@ func (t *frpTool) stateFile() string {
 	return filepath.Join(t.stateDir(), "state.json")
 }
 
-func (t *frpTool) defaultConfigCandidates() []string {
-	name := t.binaryName()
-	return []string{
-		// Preferred (new convention): ~/cicy-ai/db/<name>.toml
-		filepath.Join(userHomeDir(), "cicy-ai", "db", name+".toml"),
-		filepath.Join(userHomeDir(), "cicy-ai", "db", name+".yaml"),
-		filepath.Join(userHomeDir(), "cicy-ai", "db", name+".yml"),
-		filepath.Join(userHomeDir(), "cicy-ai", "db", name+".ini"),
-		// Legacy locations kept for backwards compat — wrapper still reads from
-		// these if the new path is missing, but the install script writes to the
-		// preferred path going forward.
-		filepath.Join(userHomeDir(), "data", "frp", name+".toml"),
-		filepath.Join(userHomeDir(), "data", "frp", name+".yaml"),
-		filepath.Join(userHomeDir(), "data", "frp", name+".yml"),
-		filepath.Join(userHomeDir(), "data", "frp", name+".ini"),
-		filepath.Join(userHomeDir(), ".config", "frp", name+".toml"),
-		filepath.Join(userHomeDir(), ".config", "frp", name+".yaml"),
-		filepath.Join(userHomeDir(), ".config", "frp", name+".yml"),
-		filepath.Join(userHomeDir(), ".config", "frp", name+".ini"),
-	}
+func (t *frpTool) configPath() string {
+	return filepath.Join(userHomeDir(), "cicy-ai", "db", t.binaryName()+".toml")
 }
 
 func (t *frpTool) defaultBinaryCandidates() []string {
@@ -496,26 +471,17 @@ func (t *frpTool) resolveConfig(override, saved string) (string, error) {
 		}
 		return path, nil
 	}
-	if value := strings.TrimSpace(os.Getenv(t.configEnvName())); value != "" {
-		path := expandHostPath(value)
-		if _, err := os.Stat(path); err != nil {
-			return "", fmt.Errorf("resolve %s config from %s: %w", t.roleLabel(), t.configEnvName(), err)
-		}
-		return path, nil
-	}
 	if value := strings.TrimSpace(saved); value != "" {
 		path := expandHostPath(value)
 		if _, err := os.Stat(path); err == nil {
 			return path, nil
 		}
 	}
-	for _, candidate := range t.defaultConfigCandidates() {
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
+	candidate := t.configPath()
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate, nil
 	}
-	candidates := strings.Join(t.defaultConfigCandidates(), ", ")
-	return "", fmt.Errorf("%s config not found; create one of %s or set %s", t.roleLabel(), candidates, t.configEnvName())
+	return "", fmt.Errorf("%s config not found; create %s", t.roleLabel(), candidate)
 }
 
 func (t *frpTool) maybeResolveConfig(override, saved string) string {
@@ -526,10 +492,10 @@ func (t *frpTool) maybeResolveConfig(override, saved string) string {
 	if strings.TrimSpace(override) != "" {
 		return expandHostPath(override)
 	}
-	if value := strings.TrimSpace(os.Getenv(t.configEnvName())); value != "" {
-		return expandHostPath(value)
+	if strings.TrimSpace(saved) != "" {
+		return saved
 	}
-	return saved
+	return t.configPath()
 }
 
 func (t *frpTool) start(opts frpFlagOptions, extra []string) error {
@@ -1223,10 +1189,9 @@ func cleanFRPConfigValue(value string) string {
 func (t *frpTool) helpText() string {
 	name := t.commandName()
 	binary := t.binaryName()
-	configEnv := t.configEnvName()
 	binEnv := t.binEnvName()
 	logEnv := t.logEnvName()
-	configExamples := strings.Join(t.defaultConfigCandidates(), ", ")
+	configPath := t.configPath()
 	binaryExamples := append([]string{"`" + binary + "` on PATH"}, wrapBackticks(t.defaultBinaryCandidates())...)
 	reloadNote := "reload tries the native FRP reload command first and falls back to restart"
 	connectionsNote := "connections shows current TCP sockets owned by the background process"
@@ -1256,7 +1221,7 @@ Commands:
   raw -- <real %s args...>                  Pass through to the real FRP binary
 
 Defaults:
-  config: %s or %s
+  config: %s
   binary: %s or %s
   log: %s or %s.log next to the config file
   state dir: %s
@@ -1265,7 +1230,7 @@ Notes:
   - start writes pid and state files under %s
   - %s
   - %s
-  - if the real FRP binary is not installed, set %s/%s explicitly`, name, t.roleLabel(), name, binary, binary, binary, configEnv, configExamples, binEnv, strings.Join(binaryExamples, ", "), logEnv, binary, t.stateDir(), t.stateDir(), connectionsNote, reloadNote, configEnv, binEnv)
+  - if the real FRP binary is not installed, set %s explicitly`, name, t.roleLabel(), name, binary, binary, binary, configPath, binEnv, strings.Join(binaryExamples, ", "), logEnv, binary, t.stateDir(), t.stateDir(), connectionsNote, reloadNote, binEnv)
 }
 
 func wrapBackticks(values []string) []string {

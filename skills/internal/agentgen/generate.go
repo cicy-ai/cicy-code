@@ -41,7 +41,7 @@ func OpenCodeSkillsDir() string {
 }
 
 func ApprovedCodexSkills() []string {
-	return []string{"agent-code-server", "agent-summary", "agent-webpage", "aliyun-cli", "cf", "cf-tunnel", "cping", "email", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent", "cicy-mihomo", "us-spot-proxy", "proxy_ssh", "us-spot-dev", "hk-spot-dev"}
+	return []string{"agent-code-server", "agent-summary", "agent-webpage", "aliyun-cli", "cf", "cf-tunnel", "cicy-todo", "cping", "email", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent", "cicy-mihomo", "us-spot-proxy", "proxy_ssh", "us-spot-dev", "hk-spot-dev"}
 }
 
 func canonicalCodexSkillName(name string) string {
@@ -84,6 +84,8 @@ case "frp-client", "frpclient", "frpc", "frp-client-skill":
 		return "us-spot-dev"
 	case "hk-spot-dev", "hkspotdev", "hk_spot_dev":
 		return "hk-spot-dev"
+	case "cicy-todo", "cicytodo", "cicy_todo", "todo":
+		return "cicy-todo"
 	default:
 		return ""
 	}
@@ -343,6 +345,8 @@ func generateCodexSkill(root, targetRoot, skill string) error {
 		return generateCodexUSSpotDev(targetRoot)
 	case "hk-spot-dev":
 		return generateCodexHKSpotDev(targetRoot)
+	case "cicy-todo":
+		return generateCodexCicyTodo(targetRoot)
 	default:
 		return fmt.Errorf("skill %q is not implemented", skill)
 	}
@@ -3117,5 +3121,184 @@ func renderHKSpotDevCommands() string {
 | ` + "`hk-spot-dev --destroy`" + ` | Delete the spot instance (persistent disk is always kept) |
 | ` + "`hk-spot-dev --push-image`" + ` | Rebuild container image on the running box and push to registry |
 | ` + "`hk-spot-dev --json`" + ` | Same as above but emit JSON output (agent-friendly) |
+`
+}
+
+func generateCodexCicyTodo(targetRoot string) error {
+	skillDir := filepath.Join(targetRoot, "cicy-todo")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderCicyTodoSkill()); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderCicyTodoHelp()); err != nil {
+		return err
+	}
+	tools := renderCicyTodoCommands()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
+func renderCicyTodoSkill() string {
+	return `---
+name: cicy-todo
+description: Lightweight per-workspace todo list (todo/doing/done/dropped) backed by YAML at <workspace>/.cicy/todos.yaml. Run "cicy-todo" alone to view own todos; prefix with a pane id like "cicy-todo w-10001" to view/modify another agent's todos.
+---
+
+# Cicy Todo
+
+A minimal todo list that lives **inside each agent's workspace** and is shared between the ` + "`cicy-todo`" + ` CLI and the cicy-code Workspace "Todo" tab — both go through ` + "`/api/todo/*`" + ` so there is one source of truth per worker.
+
+Storage: ` + "`<workspace>/.cicy/todos.yaml`" + `
+
+## Quick start
+
+` + "```sh" + `
+cicy-todo                              # list OWN active todos
+cicy-todo add "Ship the cicy-todo skill"
+cicy-todo start <id-prefix>            # → doing  (on own pane)
+cicy-todo done  <id-prefix>            # → done   (on own pane)
+cicy-todo drop  <id-prefix>            # → dropped (on own pane)
+cicy-todo rm    <id-prefix>            # remove
+
+# View / modify ANOTHER agent's todos: prepend the pane id (w-xxxxx).
+cicy-todo w-10001                      # list w-10001's active todos
+cicy-todo w-10001 add "ship it"        # add a todo to w-10001
+cicy-todo w-10001 done t-1779          # mark w-10001's todo done
+` + "```" + `
+
+` + "`<id-prefix>`" + ` accepts the leading 4–8 chars of an id when unique. The leading pane id (` + "`w-xxxxx`" + `) is optional — without it the command targets the current pane (` + "`$CICY_PANE_ID`" + `, else ` + "`w-10001`" + `). Internally every request carries ` + "`X-Agent-Show-Id: <pane>`" + ` so the backend knows whose todos to act on.
+
+## Scope
+
+Use this skill when:
+
+- the user wants to record / view / change the status of todos for the current worker OR another worker
+- the user asks "what am I working on", "what's w-10001 working on", "what's left", "mark X done"
+- you need to leave a durable note for the next session about pending work
+
+Do **not** use this skill for ephemeral in-conversation task tracking — that's what TaskCreate is for. ` + "`cicy-todo`" + ` is for items that should survive across conversations and be visible in the Workspace UI tab.
+
+## Rules
+
+1. Data is **per pane**: each ` + "`w-xxxxx`" + ` worker has its own ` + "`todos.yaml`" + `. The CLI sends ` + "`X-Agent-Show-Id`" + ` based on the leading positional pane arg (or ` + "`$CICY_PANE_ID`" + ` / ` + "`w-10001`" + ` when no arg given).
+2. CLI is a thin wrapper over the cicy-code REST API; it requires the local cicy-code server to be running on ` + "`$PORT`" + ` (default 8008) and reads ` + "`api_token`" + ` from ` + "`~/cicy-ai/global.json`" + `.
+3. Status set is fixed: ` + "`todo | doing | done | dropped`" + `. Do not invent new states.
+4. The CLI mutates ` + "`todos.yaml`" + ` only via the API — never write to that file from a script directly.
+`
+}
+
+func renderCicyTodoHelp() string {
+	return `# Cicy Todo — Help
+
+## Command
+
+- ` + "`cicy-todo`" + ` (PATH binary, bash script)
+
+## Quick start
+
+` + "```sh" + `
+# OWN pane (= $CICY_PANE_ID, else w-10001)
+cicy-todo                           # list own active todos
+cicy-todo add "Setup CI pipeline"
+cicy-todo list --status=all         # everything
+cicy-todo list --status=done -q ci  # filter by status + keyword
+cicy-todo start  t-1779             # status → doing  (prefix match)
+cicy-todo done   t-1779             # status → done
+cicy-todo drop   t-1779             # status → dropped
+cicy-todo back   t-1779             # status → todo
+cicy-todo rm     t-1779             # remove
+cicy-todo show   t-1779             # full detail
+
+# OTHER agent — leading positional pane id
+cicy-todo w-10001                   # list w-10001's active todos
+cicy-todo w-10001 list --all        # full list for w-10001
+cicy-todo w-10001 add "ship it"     # add a todo to w-10001
+cicy-todo w-10001 done t-1779       # mark w-10001's todo done
+` + "```" + `
+
+## Pane scoping
+
+Each worker (` + "`w-xxxxx`" + `) has its own ` + "`todos.yaml`" + ` under ` + "`<workspace>/.cicy/`" + `. Pane is resolved in this order:
+
+1. Positional pane arg, e.g. ` + "`cicy-todo w-10001 ...`" + ` (recommended)
+2. ` + "`--pane <w-xxxxx>`" + ` flag (equivalent)
+3. ` + "`CICY_PANE_ID`" + ` env var
+4. fallback: ` + "`w-10001`" + `
+
+The resolved pane is sent to the backend as ` + "`X-Agent-Show-Id: <pane>`" + ` on every request.
+
+## Output
+
+- Human: ` + "`id title status updated`" + ` columns
+- Script: pass ` + "`--json`" + ` for raw API responses
+
+## Rules
+
+- Use the local cicy-code REST API; never edit ` + "`todos.yaml`" + ` directly
+- Status values are exactly: ` + "`todo | doing | done | dropped`" + `
+- Empty title is rejected
+- Id matching: full id or unique prefix; multiple matches → list candidates and abort
+`
+}
+
+func renderCicyTodoCommands() string {
+	return `# Cicy Todo — Tool Map
+
+## CLI subcommands
+
+The leading ` + "`[pane]`" + ` is optional — without it the command targets the current pane. With it (` + "`cicy-todo w-10001 ...`" + `) the command targets that agent.
+
+| Command | What it does |
+|---|---|
+| ` + "`cicy-todo`" + `                              | shortcut for ` + "`list`" + ` on own pane |
+| ` + "`cicy-todo w-10001`" + `                      | shortcut for ` + "`list`" + ` on w-10001 |
+| ` + "`cicy-todo [pane] add \"<title>\"`" + `            | create a new todo (status=todo) |
+| ` + "`cicy-todo [pane] list [--status=<s>] [-q <kw>] [--all] [--json]`" + ` | list todos; default hides ` + "`done`" + `+` + "`dropped`" + ` |
+| ` + "`cicy-todo [pane] show <id>`" + `                | full detail for one todo |
+| ` + "`cicy-todo [pane] start <id>`" + `               | transition to ` + "`doing`" + ` |
+| ` + "`cicy-todo [pane] done  <id>`" + `               | transition to ` + "`done`" + ` |
+| ` + "`cicy-todo [pane] drop  <id>`" + `               | transition to ` + "`dropped`" + ` |
+| ` + "`cicy-todo [pane] back  <id>`" + `               | transition back to ` + "`todo`" + ` |
+| ` + "`cicy-todo [pane] edit  <id> \"<new title>\"`" + ` | rename |
+| ` + "`cicy-todo [pane] rm    <id>`" + `               | delete |
+
+Global flags: ` + "`--pane <w-xxxxx>`" + ` (same effect as the positional form); ` + "`--json`" + ` emits raw API response.
+
+## Underlying REST endpoints
+
+All routed through the cicy-code server (default ` + "`http://127.0.0.1:8008`" + `):
+
+| Method | Path | Notes |
+|---|---|---|
+| ` + "`GET`" + `    | ` + "`/api/todo/list[?status=&q=]`" + ` | list + filter |
+| ` + "`GET`" + `    | ` + "`/api/todo/counts`" + `            | per-status counts |
+| ` + "`POST`" + `   | ` + "`/api/todo/add`" + `                | body: ` + "`{title}`" + ` |
+| ` + "`PATCH`" + `  | ` + "`/api/todo/{id}`" + `               | body: ` + "`{status?, title?}`" + ` |
+| ` + "`DELETE`" + ` | ` + "`/api/todo/{id}`" + `               | — |
+
+Headers (every request):
+
+- ` + "`Authorization: Bearer <api_token>`" + ` — from ` + "`~/cicy-ai/global.json:api_token`" + `
+- ` + "`X-Agent-Show-Id: <pane>`" + ` — which agent's ` + "`todos.yaml`" + ` to act on (e.g. ` + "`w-10001`" + `). Set by the CLI from the positional pane arg or ` + "`$CICY_PANE_ID`" + `.
+
+Backwards compat: ` + "`pane_id`" + ` query param / body field is still accepted and overrides the header.
+
+## Storage
+
+- Single file per pane: ` + "`<workspace>/.cicy/todos.yaml`" + `
+- Writes are atomic (` + "`.tmp`" + ` + ` + "`rename`" + `)
+
+## Environment
+
+| Var | Default | Purpose |
+|---|---|---|
+| ` + "`CICY_PANE_ID`" + `     | ` + "`w-10001`" + `             | pane targeted when no positional pane / ` + "`--pane`" + ` |
+| ` + "`CICY_API_PORT`" + `    | ` + "`8008`" + `                | cicy-code listen port |
+| ` + "`CICY_API_TOKEN`" + `   | (read from global.json) | overrides token lookup |
 `
 }

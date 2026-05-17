@@ -267,6 +267,128 @@ Equivalent shell fallback: ` + "`cicy-agent history <pane_id> <index>`" + `.`,
 		},
 	},
 	{
+		Name: "cicy_todo_list",
+		Description: `List todos for a cicy agent's workspace (` + "`<workspace>/.cicy/todos.yaml`" + `, managed by the ` + "`cicy-todo`" + ` CLI / Workspace Todo tab).
+
+Each agent has its own todos file. By default this lists the current agent's todos; pass pane_id to inspect another agent's list. Use this to answer questions like "what's w-10003 working on?" or "what's left on my own list?" without scraping their terminal.
+
+Status set is fixed: ` + "`todo | doing | done | dropped`" + `. The CLI default hides ` + "`done`" + ` + ` + "`dropped`" + `; pass status="all" here to include them, or a specific status to filter.
+
+Returned text is a tab-separated table:
+  id      Short todo id (e.g. ` + "`t-1747440000-3a7b`" + `). Use the full id or a unique 4–8 char prefix when calling cicy_todo_update / cicy_todo_delete.
+  status  todo / doing / done / dropped
+  updated relative time, e.g. ` + "`刚刚 / 12m前 / 2h前 / 3天前 / 5月17日`" + `
+  title   the todo text
+
+Equivalent shell fallback: ` + "`cicy-todo [pane_id] list [--status=<s>] [-q <kw>] [--all]`" + `.`,
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"pane_id": map[string]interface{}{
+					"type":        "string",
+					"description": "Short pane id whose todos to list, e.g. \"w-10003\". Omit (or pass empty) to list the current agent's own todos.",
+				},
+				"status": map[string]interface{}{
+					"type":        "string",
+					"enum":        []interface{}{"all", "todo", "doing", "done", "dropped"},
+					"description": "Filter: \"todo\"/\"doing\"/\"done\"/\"dropped\" for one status, \"all\" for everything. When omitted, returns only the active set (todo + doing).",
+				},
+				"q": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional substring match against the title (case-insensitive).",
+				},
+			},
+			"required":             []interface{}{},
+			"additionalProperties": false,
+		},
+	},
+	{
+		Name: "cicy_todo_add",
+		Description: `Create a new todo (status=todo) in a cicy agent's workspace todos file.
+
+By default the new todo lands on the current agent's list; pass pane_id to add to another agent. The cicy-code Workspace "Todo" tab and the cicy-todo CLI share the same file, so the new entry is immediately visible everywhere.
+
+Returns a single line like ` + "`+ <id>  <title>`" + ` confirming the created todo.
+
+Equivalent shell fallback: ` + "`cicy-todo [pane_id] add \"<title>\"`" + `.`,
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"pane_id": map[string]interface{}{
+					"type":        "string",
+					"description": "Short pane id to add the todo to, e.g. \"w-10003\". Omit to target the current agent.",
+				},
+				"title": map[string]interface{}{
+					"type":        "string",
+					"description": "Todo title — a concise, actionable next step. Empty / whitespace-only titles are rejected.",
+				},
+			},
+			"required":             []interface{}{"title"},
+			"additionalProperties": false,
+		},
+	},
+	{
+		Name: "cicy_todo_update",
+		Description: `Update a todo's status and/or title in a cicy agent's workspace.
+
+Use this to transition a todo through its lifecycle (` + "`todo → doing → done`" + `, or ` + "`→ dropped`" + ` when abandoning it) and to rename items as they become more concrete. At least one of status or title MUST be provided.
+
+The id can be the full ` + "`t-<unix>-<rand>`" + ` form OR a unique 4–8 char prefix. If the prefix matches multiple todos, the call fails — pass more chars.
+
+Returns a single line like ` + "`~ <id>  <status>  <title>`" + ` reflecting the post-update state.
+
+Equivalent shell fallback: ` + "`cicy-todo [pane_id] start|done|drop|back <id>`" + ` for status; ` + "`cicy-todo [pane_id] edit <id> \"<title>\"`" + ` for rename.`,
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"pane_id": map[string]interface{}{
+					"type":        "string",
+					"description": "Short pane id whose todo to update, e.g. \"w-10003\". Omit to target the current agent.",
+				},
+				"id": map[string]interface{}{
+					"type":        "string",
+					"description": "Full todo id or a unique leading prefix (4–8 chars usually suffices).",
+				},
+				"status": map[string]interface{}{
+					"type":        "string",
+					"enum":        []interface{}{"todo", "doing", "done", "dropped"},
+					"description": "New status. Omit to keep the current status.",
+				},
+				"title": map[string]interface{}{
+					"type":        "string",
+					"description": "New title. Omit to keep the current title. Empty / whitespace-only is rejected.",
+				},
+			},
+			"required":             []interface{}{"id"},
+			"additionalProperties": false,
+		},
+	},
+	{
+		Name: "cicy_todo_delete",
+		Description: `Permanently remove a todo from a cicy agent's workspace todos file.
+
+Prefer ` + "`cicy_todo_update`" + ` with status=dropped when the item is "abandoned but worth remembering" — delete is for accidental / no-longer-meaningful entries you don't want surfacing in filtered views either.
+
+The id can be the full ` + "`t-<unix>-<rand>`" + ` form OR a unique prefix.
+
+Equivalent shell fallback: ` + "`cicy-todo [pane_id] rm <id>`" + `.`,
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"pane_id": map[string]interface{}{
+					"type":        "string",
+					"description": "Short pane id whose todo to delete, e.g. \"w-10003\". Omit to target the current agent.",
+				},
+				"id": map[string]interface{}{
+					"type":        "string",
+					"description": "Full todo id or a unique leading prefix (4–8 chars usually suffices).",
+				},
+			},
+			"required":             []interface{}{"id"},
+			"additionalProperties": false,
+		},
+	},
+	{
 		Name: "cicy_agent_capture",
 		Description: `Capture the current visible terminal output of another cicy agent pane.
 

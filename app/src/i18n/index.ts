@@ -11,7 +11,6 @@ import enDesktop from './locales/en/desktop.json';
 import enDevPanel from './locales/en/devPanel.json';
 import enAgentCanvas from './locales/en/agentCanvas.json';
 import enAudit from './locales/en/audit.json';
-import enIm from './locales/en/im.json';
 import enProvider from './locales/en/provider.json';
 import enTerminal from './locales/en/terminal.json';
 import enProvision from './locales/en/provision.json';
@@ -34,7 +33,6 @@ import zhDesktop from './locales/zh-CN/desktop.json';
 import zhDevPanel from './locales/zh-CN/devPanel.json';
 import zhAgentCanvas from './locales/zh-CN/agentCanvas.json';
 import zhAudit from './locales/zh-CN/audit.json';
-import zhIm from './locales/zh-CN/im.json';
 import zhProvider from './locales/zh-CN/provider.json';
 import zhTerminal from './locales/zh-CN/terminal.json';
 import zhProvision from './locales/zh-CN/provision.json';
@@ -61,7 +59,6 @@ import frCreateAgent from './locales/fr/createAgent.json';
 import frDesktop from './locales/fr/desktop.json';
 import frDevPanel from './locales/fr/devPanel.json';
 import frEditPane from './locales/fr/editPane.json';
-import frIm from './locales/fr/im.json';
 import frLayout from './locales/fr/layout.json';
 import frLogin from './locales/fr/login.json';
 import frProvider from './locales/fr/provider.json';
@@ -84,7 +81,6 @@ import jaCreateAgent from './locales/ja/createAgent.json';
 import jaDesktop from './locales/ja/desktop.json';
 import jaDevPanel from './locales/ja/devPanel.json';
 import jaEditPane from './locales/ja/editPane.json';
-import jaIm from './locales/ja/im.json';
 import jaLayout from './locales/ja/layout.json';
 import jaLogin from './locales/ja/login.json';
 import jaProvider from './locales/ja/provider.json';
@@ -160,7 +156,6 @@ const resources = {
     teamPanel: enTeamPanel,
     audit: enAudit,
     provider: enProvider,
-    im: enIm,
     terminal: enTerminal,
   },
   'zh-CN': {
@@ -185,7 +180,6 @@ const resources = {
     teamPanel: zhTeamPanel,
     audit: zhAudit,
     provider: zhProvider,
-    im: zhIm,
     terminal: zhTerminal,
   },
   fr: {
@@ -202,7 +196,6 @@ const resources = {
     desktop: frDesktop,
     devPanel: frDevPanel,
     editPane: frEditPane,
-    im: frIm,
     layout: frLayout,
     login: frLogin,
     provider: frProvider,
@@ -227,7 +220,6 @@ const resources = {
     desktop: jaDesktop,
     devPanel: jaDevPanel,
     editPane: jaEditPane,
-    im: jaIm,
     layout: jaLayout,
     login: jaLogin,
     provider: jaProvider,

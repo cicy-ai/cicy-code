@@ -120,6 +120,7 @@ Options:
 	http.HandleFunc("/api/health", w(handleHealth))
 	http.HandleFunc("/api/ping", w(handlePing))
 	http.HandleFunc("/api/poll", authM(handlePoll))
+	http.HandleFunc("/api/stt", authM(handleSTT))
 
 	// Auth — local token management
 	http.HandleFunc("/api/auth/verify", w(handleAuthVerify))
@@ -220,6 +221,12 @@ Options:
 		handleNotifyStream(w, r)
 	}))
 
+	// Todo
+	http.HandleFunc("/api/todo/list", wa(handleTodoList))
+	http.HandleFunc("/api/todo/add", wa(handleTodoAdd))
+	http.HandleFunc("/api/todo/counts", wa(handleTodoCounts))
+	http.HandleFunc("/api/todo/", wa(handleTodoByID))
+
 	// Queue
 	http.HandleFunc("/api/queue", wa(handleQueue))
 	http.HandleFunc("/api/queue/push", wa(handleQueuePush))
@@ -300,8 +307,6 @@ Options:
 	http.HandleFunc("/api/providers", wa(handleProviders))
 	http.HandleFunc("/api/providers/", wa(handleProvidersSub))
 
-	// IM platforms (Telegram / WeChat)
-	http.HandleFunc("/api/im/", wa(handleIMRoute))
 	http.HandleFunc("/api/file-exists", wa(handleFileExists))
 	http.HandleFunc("/api/utils/file/exists", wa(handleFileExists))
 	http.HandleFunc("/api/utils/translateText", wa(handleTranslateText))
@@ -310,7 +315,7 @@ Options:
 	// TTS
 	http.HandleFunc("/api/tts", wa(handleTTS))
 
-	// Telegram
+	// Telegram (notify-only)
 	http.HandleFunc("/api/tg/send", wa(handleTGSend))
 	http.HandleFunc("/api/tg/photo", wa(handleTGPhoto))
 
@@ -390,8 +395,6 @@ Options:
 	})
 
 	initHTTPLogConsumer()
-	go syncTelegramPollers()
-	go imManagerStart()
 	// Repair <parent>/workers/<child> symlinks on every boot. Without this
 	// they only get rebuilt on bind/unbind, so a corrupted/missing link
 	// (or one written to the wrong workersDir because workspace was wrong)

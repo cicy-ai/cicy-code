@@ -372,9 +372,10 @@ func TestInitPaneEnvScriptBootstrapsCicyTmuxConf(t *testing.T) {
 	sessionEnv := map[string]string{
 		"CICY_AGENT_TYPE": agentNorm,
 	}
+	// boot.sh no longer sources ~/.cicy_tmux.conf — tmux's default-command
+	// invokes bash with --rcfile=~/.cicy_shell_init, which handles that. The
+	// generated boot lines should therefore start straight at the agent env.
 	lines := []string{
-		"touch ~/.cicy_tmux.conf",
-		"source ~/.cicy_tmux.conf",
 		"cd '/tmp/workspace'",
 		"export WORKSPACE='/tmp/workspace'",
 	}
@@ -394,8 +395,8 @@ func TestInitPaneEnvScriptBootstrapsCicyTmuxConf(t *testing.T) {
 		"  return \"$_cicy_boot_status\" 2>/dev/null || exit \"$_cicy_boot_status\"\n" +
 		"fi\n\n" +
 		strings.Join(lines, "\n") + "\n"
-	if !strings.Contains(script, "source ~/.cicy_tmux.conf") {
-		t.Fatalf("boot script missing .cicy_tmux.conf bootstrap: %s", script)
+	if strings.Contains(script, "source ~/.cicy_tmux.conf") || strings.Contains(script, `source "$HOME/.cicy_tmux.conf"`) {
+		t.Fatalf("boot script unexpectedly still re-sources .cicy_tmux.conf: %s", script)
 	}
 	if !strings.Contains(script, "export X_AGENT_ID='w-10001:main.0'") {
 		t.Fatalf("boot script missing X_AGENT_ID: %s", script)

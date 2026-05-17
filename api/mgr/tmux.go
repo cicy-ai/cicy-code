@@ -1000,7 +1000,6 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	_ = res
-	go syncTelegramPollers()
 
 	// Sync agent_duty to workspace/.kiro/steering/duty.md
 	// if duty, ok := filtered["agent_duty"].(string); ok {
@@ -1155,10 +1154,6 @@ func normalizeAgentType(agentType string) string {
 		return "kiro-cli"
 	case "copilot", "github-copilot", "github copilot", "ghcopilot":
 		return "copilot"
-	case "cicy-wechat", "wechat":
-		return "cicy-wechat"
-	case "cicy-feishu", "feishu", "lark":
-		return "cicy-feishu"
 	case "claude", "claude code", "claude-code":
 		return "claude"
 	case "cicy", "cicy-claude":
@@ -1254,6 +1249,31 @@ func ensureAgentCommandLine(commandName, label, installCmd, logPathExpr string) 
 
 func ensureAgentCommandLineLive(commandName, label, installCmd, logPathExpr string) string {
 	return visibleAgentInstallLiveLine(commandName, label, installCmd, logPathExpr)
+}
+
+// claudeUserStatuslineSetupLines emits idempotent shell lines that ensure the
+// user-level ~/.claude/settings.json declares a statusLine command and that the
+// helper script exists. The status line displays the current model + context
+// usage, so it stays visible no matter how long the conversation runs.
+//
+// Runs on every claude launch (after the install check). Safe to re-run: only
+// the script content is overwritten; the settings.json statusLine key is only
+// inserted when missing so user customizations are preserved.
+func claudeUserStatuslineSetupLines() []string {
+	return []string{
+		`mkdir -p "$HOME/.claude"`,
+		`cat > "$HOME/.claude/statusline-command.sh" <<'CICY_STATUSLINE_EOF'`,
+		`#!/usr/bin/env bash`,
+		`input=$(cat)`,
+		`model=$(echo "$input" | jq -r '.model.display_name // .model.id // "Unknown Model"')`,
+		`used_pct=$(echo "$input" | jq -r '.context_window.used_percentage // "?"')`,
+		`total_k=$(echo "$input" | jq -r '(.context_window.context_window_size // 0) / 1000 | floor')`,
+		`printf "\033[1;36m[ %s | Context: %s%% / %sk ]\033[0m" "$model" "$used_pct" "$total_k"`,
+		`CICY_STATUSLINE_EOF`,
+		`chmod +x "$HOME/.claude/statusline-command.sh"`,
+		`[ -f "$HOME/.claude/settings.json" ] || printf '{}\n' > "$HOME/.claude/settings.json"`,
+		`if command -v jq >/dev/null 2>&1 && ! jq -e '.statusLine' "$HOME/.claude/settings.json" >/dev/null 2>&1; then __cicy_tmp=$(mktemp) && jq --arg cmd "bash $HOME/.claude/statusline-command.sh" '. + {statusLine: {type: "command", command: $cmd}}' "$HOME/.claude/settings.json" > "$__cicy_tmp" && mv "$__cicy_tmp" "$HOME/.claude/settings.json"; fi`,
+	}
 }
 
 func kiroCliBootHelperLines() []string {
@@ -2397,6 +2417,12 @@ EOF
 		lines := []string{
 			ensureAgentCommandLine(cmdName, label, installCmd, installLog),
 		}
+		// Vanilla claude reads ~/.claude/settings.json — wire up a statusLine
+		// that shows the current model + context usage so users can always tell
+		// which model is active deep into a long conversation.
+		if cmdName == "claude" {
+			lines = append(lines, claudeUserStatuslineSetupLines()...)
+		}
 		if useCustomGateway {
 			model := resolveClaudeStartupModel(defaultModel, aiCfg, shortID)
 			settingsJSON := "{\n" + `  "env": {
@@ -2557,21 +2583,6 @@ fi`,
 			ensureAgentCommandLine("copilot", "GitHub Copilot", copilotInstallCmd(), installLog),
 			`node -e 'const fs=require("fs"),f=process.env.HOME+"/.copilot/config.json";let c={};try{c=JSON.parse(fs.readFileSync(f))}catch(_){}c.trustedFolders=c.trustedFolders||[];const w=process.env.WORKSPACE||".";if(!c.trustedFolders.includes(w))c.trustedFolders.push(w);fs.writeFileSync(f,JSON.stringify(c,null,2))'`,
 			"copilot --yolo",
-		}
-		return lines
-	case "cicy-wechat":
-		installLog := tmuxHomeJoin("logs", fmt.Sprintf("wechat-install-%s.log", shortID))
-		lines := []string{
-			ensureAgentCommandLine("cicy-wechat", "WeChat", cicyWechatInstallCmd(), installLog),
-			`export DATA_DIR="$WORKSPACE/.cicy-wechat"`,
-			"cicy-wechat",
-		}
-		return lines
-	case "cicy-feishu":
-		installLog := tmuxHomeJoin("logs", fmt.Sprintf("feishu-install-%s.log", shortID))
-		lines := []string{
-			ensureAgentCommandLine("cicy-feishu", "Feishu", cicyFeishuInstallCmd(), installLog),
-			"cicy-feishu",
 		}
 		return lines
 	case "hermes":
@@ -3833,10 +3844,6 @@ func initPaneEnv(opts paneEnvOpts) {
 		// kiro-cli uses ANTHROPIC_BASE_URL directly in boot lines
 	case "copilot":
 		// copilot uses GitHub auth, no gateway env needed
-	case "cicy-wechat":
-		// cicy-wechat handles its own auth
-	case "cicy-feishu":
-	// cicy-feishu uses FEISHU_APP_ID/FEISHU_APP_SECRET env vars
 	case "hermes":
 		sessionEnv["CICY_API_KEY"] = strings.TrimSpace(aiCfg.APIKey)
 		sessionEnv["CICY_API_URL"] = strings.TrimSpace(aiCfg.APIURL)
@@ -3854,8 +3861,9 @@ func initPaneEnv(opts paneEnvOpts) {
 		_, _ = runTmux("set-environment", "-t", shortID, key, value)
 	}
 
+	// ~/.cicy_tmux.conf is already loaded by tmux's default-command via
+	// ~/.cicy_shell_init (bash --rcfile), so we don't re-source it here.
 	lines := []string{
-		`[ -f "$HOME/.cicy_tmux.conf" ] && source "$HOME/.cicy_tmux.conf"`,
 		fmt.Sprintf("export X_AGENT_ID=%s", tmuxShellQuote(pid)),
 		fmt.Sprintf("export X_AGENT_SHORT_ID=%s", tmuxShellQuote(shortID)),
 	}
@@ -3865,7 +3873,7 @@ func initPaneEnv(opts paneEnvOpts) {
 		}
 	}
 	switch agentNorm {
-	case "codex", "claude", "kiro-cli", "copilot", "cicy-wechat", "cicy-feishu", "opencode":
+	case "codex", "claude", "kiro-cli", "copilot", "opencode":
 		// boot lines handle gateway URLs directly
 	default:
 		lines = append(lines,
@@ -4138,14 +4146,22 @@ func sendTextToPaneDirect(winID, text string) error {
 				trace.logStep("pre-submit-enter-fallback", map[string]any{"reason": err.Error()}, "")
 			}
 			if submitErr := submitPromptWithConfirmation(winID, agentType, text, trace); submitErr != nil {
-				trace.logStep("submit-failed", map[string]any{"error": submitErr.Error(), "fallback": "pre-submit-enter"}, "")
-				clearPanePromptInput(winID, trace)
-				return newTmuxSendError("failed to confirm text before submit: "+err.Error()+"; enter fallback also failed: "+submitErr.Error(), http.StatusConflict, true)
+				// submitPromptWithConfirmation already sent Enter (including its own
+				// fallback Enter at the end). We just couldn't visually verify the
+				// submission via terminal scrape. Treat as success: returning an
+				// error here confuses the client because the message almost always
+				// did go through. Do NOT clear the input — if Enter actually
+				// landed, C-u would wipe whatever the agent types next.
+				trace.logStep("submit-warn", map[string]any{"error": submitErr.Error(), "fallback": "pre-submit-enter", "treated_as": "success"}, "")
+				log.Printf("[tmux-send] pane=%s WARN submit not visually confirmed (Enter was sent); treating as success agent=%s preview=%q pre_err=%v submit_err=%v",
+					shortPaneID(winID), normalizeAgentType(agentType), promptPreview(text), err, submitErr)
 			}
 		} else if err := submitPromptWithConfirmation(winID, agentType, text, trace); err != nil {
-			trace.logStep("submit-failed", map[string]any{"error": err.Error()}, "")
-			clearPanePromptInput(winID, trace)
-			return newTmuxSendError(err.Error(), http.StatusConflict, true)
+			// Same rationale: Enter has been sent (possibly multiple times); the
+			// visual confirm just failed. Don't surface as error, don't clear.
+			trace.logStep("submit-warn", map[string]any{"error": err.Error(), "treated_as": "success"}, "")
+			log.Printf("[tmux-send] pane=%s WARN submit not visually confirmed (Enter was sent); treating as success agent=%s preview=%q err=%v",
+				shortPaneID(winID), normalizeAgentType(agentType), promptPreview(text), err)
 		}
 	} else {
 		delay := enterDelay

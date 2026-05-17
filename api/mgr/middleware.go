@@ -35,7 +35,7 @@ func corsM(next http.HandlerFunc) http.HandlerFunc {
 			w.Header().Set("Access-Control-Allow-Origin", o)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, X-Agent-Show-Id")
 		}
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(204)

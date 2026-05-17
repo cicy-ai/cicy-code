@@ -205,6 +205,7 @@ func marketSkillsCatalog() []marketSkill {
 		{Name: "us-spot-dev", Title: "US Spot Dev", Description: "Provision a US Aliyun spot dev container on a persistent ESSD disk.", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"us-spot-dev"}},
 		{Name: "hk-spot-dev", Title: "HK Spot Dev", Description: "Provision an HK Aliyun spot dev container (companion to us-spot-dev).", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"hk-spot-dev"}},
 		{Name: "skill-author", Title: "Skill Author", Description: "Author and publish custom Claude/Codex/OpenCode skills under ~/cicy-ai/skills/. Auto-installed; cannot be uninstalled.", Version: "1.0.0", Category: "dev", Icon: "package", Tags: []string{"meta", "scaffold", "author"}, BinaryAliases: []string{"skill-author"}},
+		{Name: "cicy-todo", Title: "Cicy Todo", Description: "Per-workspace todo list (todo/doing/done/dropped) backed by YAML. CLI (cicy-todo) and the Workspace Todo tab share one file at <workspace>/.cicy/todos.yaml.", Version: "1.0.0", Category: "productivity", Icon: "check-square", Tags: []string{"todo", "task", "workspace"}, BinaryAliases: []string{"cicy-todo"}},
 	}
 }
 
@@ -536,6 +537,7 @@ var agentgenApprovedMarketSkills = map[string]struct{}{
 	"email":                     {},
 	"us-spot-dev":               {},
 	"hk-spot-dev":               {},
+	"cicy-todo":                 {},
 }
 
 // hosttool aliases — symlink target is dist/cicy-hosttools. Must stay in sync
