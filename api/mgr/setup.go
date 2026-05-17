@@ -152,14 +152,6 @@ func kiroCliInstallCmd() string {
 	return "__cicy_install_kiro_cli_with_progress"
 }
 
-func cicyWechatInstallCmd() string {
-	return npmGlobalInstallCmd("cicy-wechat@latest")
-}
-
-func cicyFeishuInstallCmd() string {
-	return npmGlobalInstallCmd("cicy-feishu@latest")
-}
-
 func packageInstallCmd(pkg string) string {
 	if runtime.GOOS == "darwin" {
 		return "brew install " + pkg
@@ -746,7 +738,7 @@ func checkEnv() {
 	ensureSSHKeyPair()
 	ensureTmuxConf()
 	ensureCicyTmuxConf()
-	ensureShellRCSourcesCicyTmuxConf()
+	ensureCicyShellInit()
 
 	setupAIConfigs()
 
@@ -973,40 +965,35 @@ func ensureManagedDotfile(name, embedded string) {
 	}
 }
 
-// ensureShellRCSourcesCicyTmuxConf injects `source ~/.cicy_tmux.conf` into
-// every shell rc the user might land in:
-//   - .bashrc       (bash interactive non-login)
-//   - .bash_profile (bash login — includes `bash -lc`, ssh, tmux new-window)
-//   - .zshrc        (zsh interactive)
+// ensureCicyShellInit writes ~/.cicy_shell_init — the rcfile tmux's
+// default-command points its bash at. Owning the rcfile (instead of relying on
+// the user's ~/.bashrc to auto-source things) is robust against:
+//   - .bashrc not existing on slim containers
+//   - .bashrc being a login-shell skip path (`[[ $- != *i* ]] && return`)
+//   - users whose login shell isn't bash (.bashrc never runs at all)
 //
-// Idempotent: skip any file that already references .cicy_tmux.conf in any
-// form. PATH and other env are set inside cicy_tmux.conf itself.
-func ensureShellRCSourcesCicyTmuxConf() {
-	line := `[ -f "$HOME/.cicy_tmux.conf" ] && source "$HOME/.cicy_tmux.conf"`
-	dotForm := `[ -f "$HOME/.cicy_tmux.conf" ] && . "$HOME/.cicy_tmux.conf"`
+// The wrapper still defers to the user's ~/.bashrc when present so personal
+// customizations (aliases, prompt) still apply. We then unconditionally source
+// ~/.cicy_tmux.conf so PATH/env/functions are always available.
+//
+// Always overwritten — this is a cicy-managed file; users should edit .bashrc
+// or .cicy_tmux.conf, not this shim.
+func ensureCicyShellInit() {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return
 	}
-	for _, name := range []string{".bashrc", ".bash_profile", ".zshrc"} {
-		path := filepath.Join(home, name)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue // skip if rc doesn't exist
-		}
-		text := string(data)
-		// Strip the legacy `.` (POSIX dot) form left by older entrypoint scripts.
-		if strings.Contains(text, dotForm) {
-			text = strings.ReplaceAll(text, dotForm+"\n", "")
-			text = strings.ReplaceAll(text, dotForm, "")
-		}
-		if !strings.Contains(text, line) {
-			text = strings.TrimRight(text, "\n") + "\n\n" + line + "\n"
-		}
-		if text != string(data) {
-			_ = os.WriteFile(path, []byte(text), 0644)
-		}
+	body := `# cicy-managed shell init — sourced by tmux via ` + "`bash --rcfile`" + `.
+# Do NOT edit; cicy-code overwrites this file on startup. Put personal
+# customizations in ~/.bashrc, and cicy-tmux logic in ~/.cicy_tmux.conf.
+[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"
+[ -f "$HOME/.cicy_tmux.conf" ] && . "$HOME/.cicy_tmux.conf"
+`
+	path := filepath.Join(home, ".cicy_shell_init")
+	if existing, readErr := os.ReadFile(path); readErr == nil && string(existing) == body {
+		return
 	}
+	_ = os.WriteFile(path, []byte(body), 0644)
 }
 
 func ensureSSHKeyPair() {

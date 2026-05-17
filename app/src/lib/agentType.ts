@@ -1,6 +1,6 @@
 import { assetUrl } from './assets'
 
-type NormalizedAgentType = '' | 'claude' | 'codex' | 'opencode' | 'cursor' | 'kiro-cli' | 'copilot' | 'cicy-wechat' | 'cicy-feishu' | 'openclaw' | 'hermes' | 'cicy-claude'
+type NormalizedAgentType = '' | 'claude' | 'codex' | 'opencode' | 'cursor' | 'kiro-cli' | 'copilot' | 'openclaw' | 'hermes' | 'cicy-claude'
 
 export type AgentTypeOption = {
   value: string
@@ -21,8 +21,6 @@ export const AGENT_TYPE_OPTIONS: AgentTypeOption[] = [
   { value: 'cursor', label: 'Cursor' },
   { value: 'kiro-cli', label: 'Kiro CLI' },
   { value: 'copilot', label: 'Copilot' },
-  { value: 'cicy-wechat', label: 'WeChat' },
-  { value: 'cicy-feishu', label: 'Feishu' },
   { value: 'openclaw', label: 'OpenClaw' },
   { value: 'hermes', label: 'Hermes' },
   { value: 'cicy-claude', label: 'CiCy' },
@@ -35,8 +33,6 @@ const AGENT_TYPE_ICON_MAP: Record<Exclude<NormalizedAgentType, ''>, AgentTypeIco
   cursor: { label: 'Cursor', src: assetUrl('/assets/logos/cursor.svg') },
   'kiro-cli': { label: 'Kiro', src: assetUrl('/assets/logos/kiro.png') },
   copilot: { label: 'Copilot', src: assetUrl('/assets/logos/copilot.svg') },
-  'cicy-wechat': { label: 'WeChat', text: 'W' },
-  'cicy-feishu': { label: 'Feishu', text: 'F' },
   openclaw: { label: 'OpenClaw', text: '🦞' },
   hermes: { label: 'Hermes', text: 'HE' },
   'cicy-claude': { label: 'CiCy', src: assetUrl('/assets/logos/cicy.svg') },
@@ -62,12 +58,6 @@ export function normalizeAgentType(agentType?: string): NormalizedAgentType {
     case 'github-copilot':
     case 'ghcopilot':
       return 'copilot'
-    case 'cicy-wechat':
-    case 'wechat':
-      return 'cicy-wechat'
-    case 'cicy-feishu':
-    case 'feishu':
-      return 'cicy-feishu'
     case 'gemini':
       return 'codex'
     case 'claude':

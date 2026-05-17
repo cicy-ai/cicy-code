@@ -398,7 +398,7 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		startedAt:      startedAt,
 		current:        current,
 		reply:          reply,
-		replyHooks:     newReplyHooksForPane(agentID),
+		replyHooks:     drainCallbackHooksForPane(agentID),
 	}
 }
 

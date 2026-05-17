@@ -155,21 +155,6 @@ const api = {
   updateProviderDefaults: (defaults: Record<string, string>) => http.put('/api/providers/defaults', { default: defaults }),
   testProvider: (data: any) => http.post('/api/providers/test', data),
 
-  getIMPlatforms: () => http.get('/api/im/platforms'),
-  getIMAccounts: () => http.get('/api/im/accounts'),
-  getIMAccount: (id: number) => http.get(`/api/im/accounts/${id}`),
-  createIMAccount: (data: any) => http.post('/api/im/accounts', data),
-  updateIMAccount: (id: number, data: any) => http.patch(`/api/im/accounts/${id}`, data),
-  deleteIMAccount: (id: number) => http.delete(`/api/im/accounts/${id}`),
-  testIMAccount: (id: number) => http.post(`/api/im/accounts/${id}/test`),
-  bindIMAccount: (id: number, paneId: string) => http.post(`/api/im/accounts/${id}/bind`, { pane_id: paneId }),
-  unbindIMAccount: (id: number) => http.post(`/api/im/accounts/${id}/unbind`),
-  getIMAccountQR: (id: number) => http.get(`/api/im/accounts/${id}/qr`),
-  reloginIMAccount: (id: number) => http.post(`/api/im/accounts/${id}/relogin`),
-  startWeChatLogin: () => http.post('/api/im/wechat/login'),
-  getWeChatLoginStatus: (sessionId: string) => http.get(`/api/im/wechat/login/${encodeURIComponent(sessionId)}`),
-  cancelWeChatLogin: (sessionId: string) => http.post(`/api/im/wechat/login/${encodeURIComponent(sessionId)}/cancel`),
-
   getTokens: () => http.get('/api/auth/tokens'),
   createToken: (data: any) => http.post('/api/auth/tokens', data),
   deleteToken: (id: number) => http.delete(`/api/auth/tokens/${id}`),
@@ -230,6 +215,15 @@ const api = {
   getFrpServerConnections: () => http.get('/api/frp-server/connections'),
   getFrpServerClients: () => http.get('/api/frp-server/clients'),
   getFrpServerLogs: (lines?: number) => http.get('/api/frp-server/logs', { params: lines ? { lines } : {} }),
+
+  listTodos: (paneId: string, params?: { status?: string; q?: string }) =>
+    http.get('/api/todo/list', { params: { pane_id: paneId, ...(params || {}) } }),
+  getTodoCounts: (paneId: string) => http.get('/api/todo/counts', { params: { pane_id: paneId } }),
+  addTodo: (paneId: string, title: string) => http.post('/api/todo/add', { pane_id: paneId, title }),
+  updateTodo: (paneId: string, id: string, patch: { status?: string; title?: string }) =>
+    http.patch(`/api/todo/${encodeURIComponent(id)}`, { pane_id: paneId, ...patch }),
+  deleteTodo: (paneId: string, id: string) =>
+    http.delete(`/api/todo/${encodeURIComponent(id)}`, { params: { pane_id: paneId } }),
 };
 
 export default api;

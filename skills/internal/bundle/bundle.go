@@ -84,6 +84,7 @@ var (
 		{Name: "us-spot-proxy", Source: "us-spot-proxy"},
 		{Name: "cicy-master", Source: "cicy-master"},
 		{Name: "hk-spot-dev", Source: "hk-spot-dev"},
+		{Name: "cicy-todo", Source: "cicy-todo/scripts/cicy-todo"},
 	}
 	CommandGroups = []CommandGroup{
 		{Name: "Core", Commands: []string{"cicy-skills", "cicy-skillsd", "cicy-hosttools", "stt", "tts"}},

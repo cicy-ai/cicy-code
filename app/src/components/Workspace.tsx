@@ -11,7 +11,7 @@ import { useApp } from '../contexts/AppContext';
 import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
-  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, MessageCircle, Package,
+  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package,
   Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -22,6 +22,7 @@ import { SendingProvider } from '../contexts/SendingContext';
 // import ChatView from './chat/ChatView';
 import ChatHistoryView from './chat/ChatHistoryView';
 import CurrentHistoryView from './chat/CurrentHistoryView';
+import TodoPanel from './TodoPanel';
 import { WebFrame } from './WebFrame';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
@@ -34,7 +35,6 @@ import useDesktopEvents from './layout/useDesktopEvents';
 import AgentCanvas, { AgentCanvasItem } from './layout/AgentCanvas';
 import AgentStack from './layout/AgentStack';
 import ProviderDashboard from './providers/ProviderDashboard';
-import IMDashboard from './im/IMDashboard';
 import { useDialog } from '../contexts/DialogContext';
 import config, { defaultWorkerWorkspace, getHostHome, syncHostHomeFromPath, toTildePath, urls } from '../config';
 import apiService from '../services/api';
@@ -290,11 +290,11 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 type LeftPanelView = 'team' | 'skills' | 'agents' | null;
-type WorkspaceCliContentTab = InspectorTab | 'history' | 'files' | RequestViewTab;
+type WorkspaceCliContentTab = InspectorTab | 'history' | 'files' | 'todo' | RequestViewTab;
 type CliContentMode = 'fixed';
 
 function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
-  if (value === 'files' || value === 'history' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'settings' || value === 'memory') {
+  if (value === 'files' || value === 'history' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'settings' || value === 'memory' || value === 'todo') {
     return value;
   }
   return 'files';
@@ -354,7 +354,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [tokenOpen, setTokenOpen] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
   const [providersOpen, setProvidersOpen] = useState(false);
-  const [imOpen, setImOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
 
   const [status, setStatus] = useState('idle');
@@ -1232,6 +1231,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const cliContentTabs = [
     { id: 'files', label: t('tabFiles') },
     { id: 'session', label: t('tabSession') },
+    { id: 'todo', label: t('tabTodo', 'Todo') },
     { id: 'memory', label: t('tabMemory') },
     { id: 'settings', label: t('tabSettings') },
   ];
@@ -1393,6 +1393,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           />
         </div>
         <div
+          data-id="cli-content-todo-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'todo' ? 'block' : 'none' }}
+        >
+          <TodoPanel paneId={activeCliPaneId} active={cliContentOpen && cliContentTab === 'todo'} />
+        </div>
+        <div
           data-id="cli-content-memory-host"
           className="absolute inset-0"
           style={{ display: cliContentTab === 'memory' ? 'block' : 'none' }}
@@ -1514,7 +1521,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} />
           <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
           <SideBtn dataId="btn-providers" active={providersOpen} icon={<Boxes className="w-5 h-5" />} title={t('sidebarProviders')} onClick={() => setProvidersOpen(true)} />
-          <SideBtn dataId="btn-im" active={imOpen} icon={<MessageCircle className="w-5 h-5" />} title={t('sidebarIM')} onClick={() => setImOpen(true)} />
         </div>
         <div data-id="activity-bar-bottom" className="flex w-full flex-col items-center gap-3">
           <button
@@ -1776,12 +1782,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {providersOpen && createPortal(
         <div data-id="providers-overlay" className="fixed inset-0 z-[9000] bg-[#0A0A0A]">
           <ProviderDashboard onBack={() => setProvidersOpen(false)} />
-        </div>,
-        document.body,
-      )}
-      {imOpen && createPortal(
-        <div data-id="im-overlay" className="fixed inset-0 z-[9000] bg-[#0A0A0A]">
-          <IMDashboard onBack={() => setImOpen(false)} />
         </div>,
         document.body,
       )}

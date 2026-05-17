@@ -7,9 +7,17 @@ import (
 	"sync"
 )
 
+// aiGatewayReplyHook is the interface the AI gateway audit session uses to
+// fan out streaming reply events / the final snapshot to attached hooks.
+// Currently only the cross-agent reply callback implements it.
+type aiGatewayReplyHook interface {
+	handleEvents(events []aiGatewayReplyEvent)
+	finalize(reply aiGatewayReplySnapshot)
+}
+
 // Cross-agent reply callback: when agent A sends a message to agent B with
 // callback=true, the CLI passes A's pane_id as callback_to. We queue A onto
-// B's pending list. Each time B starts a new turn, newReplyHooksForPane(B)
+// B's pending list. Each time B starts a new turn, drainCallbackHooksForPane(B)
 // drains the pending list and attaches one callback hook per entry. When B's
 // reply finalizes (status=completed/failed), each hook fires once and writes
 // one line into A's pane: "[<B>] work done" or "[<B>] failed".

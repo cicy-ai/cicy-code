@@ -20,7 +20,7 @@ BUILTIN_SKILLS=(
   frp-client frp-server
   globalApiToken google cicy-ssh cicy-agent cicy-mihomo
   us-spot-proxy us-spot-dev hk-spot-dev proxy_ssh
-  aliyun-cli email
+  aliyun-cli email cicy-todo
 )
 # Reserved directories under ~/cicy-ai/skills/ that must never be treated as
 # user skills:
