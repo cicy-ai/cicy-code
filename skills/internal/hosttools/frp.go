@@ -390,6 +390,53 @@ func processRunning(pid int, expected string) bool {
 	return strings.Contains(text, expected)
 }
 
+// findFrpOrphanPID finds a process owned by the current user whose command line
+// contains both the expected binary name (e.g. "frps") and the absolute config
+// path. Used to adopt an orphan that survived a parent restart so start()
+// doesn't try to bind ports the orphan already holds.
+//
+// Uses `ps -A -o pid=,uid=,command=` for portability — /proc only exists on
+// Linux, but mac (darwin) also needs adopt to work. The output format is
+// stable across Linux ps (procps), busybox ps, and macOS ps.
+func findFrpOrphanPID(expectedBinary, config string) int {
+	bin := strings.ToLower(strings.TrimSpace(expectedBinary))
+	cfg := strings.ToLower(strings.TrimSpace(config))
+	if bin == "" || cfg == "" {
+		return 0
+	}
+	out, err := exec.Command("ps", "-A", "-o", "pid=,uid=,command=").Output()
+	if err != nil {
+		return 0
+	}
+	me := os.Getuid()
+	for _, raw := range strings.Split(string(out), "\n") {
+		line := strings.TrimLeft(raw, " \t")
+		i := strings.IndexAny(line, " \t")
+		if i < 0 {
+			continue
+		}
+		pid, err := strconv.Atoi(line[:i])
+		if err != nil || pid <= 1 {
+			continue
+		}
+		rest := strings.TrimLeft(line[i:], " \t")
+		j := strings.IndexAny(rest, " \t")
+		if j < 0 {
+			continue
+		}
+		uid, err := strconv.Atoi(rest[:j])
+		if err != nil || uid != me {
+			continue
+		}
+		cmd := strings.ToLower(strings.TrimLeft(rest[j:], " \t"))
+		if !strings.Contains(cmd, bin) || !strings.Contains(cmd, cfg) {
+			continue
+		}
+		return pid
+	}
+	return 0
+}
+
 func (t *frpTool) resolveBinary(override, saved string) (string, error) {
 	if value := strings.TrimSpace(override); value != "" {
 		path, err := findExecutable(value)
@@ -463,19 +510,19 @@ func isExecutableFile(path string) bool {
 	return info.Mode().Perm()&0o111 != 0
 }
 
-func (t *frpTool) resolveConfig(override, saved string) (string, error) {
+// resolveConfig hard-pins the config path to either --config flag or the
+// canonical configPath() (~/cicy-ai/db/<binary>.toml). The state file's saved
+// path is intentionally ignored: it caused silent drift back to legacy
+// locations (e.g. ~/data/frp/frpc.yaml) when state survived a config move.
+// The `saved` parameter is kept in the signature only so call sites don't
+// have to change.
+func (t *frpTool) resolveConfig(override, _ string) (string, error) {
 	if value := strings.TrimSpace(override); value != "" {
 		path := expandHostPath(value)
 		if _, err := os.Stat(path); err != nil {
 			return "", fmt.Errorf("resolve %s config from --config: %w", t.roleLabel(), err)
 		}
 		return path, nil
-	}
-	if value := strings.TrimSpace(saved); value != "" {
-		path := expandHostPath(value)
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
-		}
 	}
 	candidate := t.configPath()
 	if _, err := os.Stat(candidate); err == nil {
@@ -491,9 +538,6 @@ func (t *frpTool) maybeResolveConfig(override, saved string) string {
 	}
 	if strings.TrimSpace(override) != "" {
 		return expandHostPath(override)
-	}
-	if strings.TrimSpace(saved) != "" {
-		return saved
 	}
 	return t.configPath()
 }
@@ -528,6 +572,29 @@ func (t *frpTool) start(opts frpFlagOptions, extra []string) error {
 		logPath = t.defaultLogPath(config)
 	}
 	logPath = expandHostPath(logPath)
+
+	// Adopt an orphan that survived a parent restart: if state file is empty
+	// but a matching frps/frpc (same config) is already running, just record it
+	// and return success instead of trying to bind its ports.
+	if orphan := findFrpOrphanPID(t.binaryName(), config); orphan > 0 {
+		adopted := frpState{
+			PID:       orphan,
+			Binary:    binary,
+			Config:    config,
+			Log:       logPath,
+			StartedAt: time.Now().Format(time.RFC3339),
+			ExtraArgs: append([]string(nil), extra...),
+		}
+		if err := t.writeState(adopted); err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(t.stdout, "%s adopted existing process (pid %d)\n", t.commandName(), orphan)
+		_, _ = fmt.Fprintf(t.stdout, "pid: %d\n", orphan)
+		_, _ = fmt.Fprintf(t.stdout, "config: %s\n", config)
+		_, _ = fmt.Fprintf(t.stdout, "log: %s\n", logPath)
+		return nil
+	}
+
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return err
 	}
