@@ -456,15 +456,18 @@ func findMarketSkill(name string) *marketSkill {
 	return nil
 }
 
-func readSkillDoc(name, file string) string {
+func readSkillDoc(skill *marketSkill, file string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
+	candidateDirs := append([]string{skill.Name}, skill.legacyAgentSkillDirs...)
 	for _, profile := range []string{".claude", ".codex", ".opencode"} {
-		p := filepath.Join(home, profile, "skills", name, file)
-		if data, err := os.ReadFile(p); err == nil {
-			return string(data)
+		for _, dir := range candidateDirs {
+			p := filepath.Join(home, profile, "skills", dir, file)
+			if data, err := os.ReadFile(p); err == nil {
+				return string(data)
+			}
 		}
 	}
 	return ""
@@ -496,9 +499,9 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 		}
 		J(w, M{
 			"skill":    skill,
-			"skill_md": readSkillDoc(skill.Name, "SKILL.md"),
-			"help_md":  readSkillDoc(skill.Name, filepath.Join("references", "help.md")),
-			"tools_md": readSkillDoc(skill.Name, filepath.Join("references", "tools.md")),
+			"skill_md": readSkillDoc(skill, "SKILL.md"),
+			"help_md":  readSkillDoc(skill, filepath.Join("references", "help.md")),
+			"tools_md": readSkillDoc(skill, filepath.Join("references", "tools.md")),
 		})
 		return
 	}
