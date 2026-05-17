@@ -9,8 +9,7 @@ type ChatWsParams = {
   token: string;
   clientId: string;        // pageClientId
   platform: string;        // win/darwin/linux
-  userAgent: string;       // navigator.userAgent
-  isElectron: boolean;
+  userAgent: string;       // navigator.userAgent — server derives isElectron from it
 };
 
 type MessageListener = (msg: any) => void;
@@ -50,8 +49,7 @@ class ChatWsClient {
       cur.paneId !== next.paneId ||
       cur.token !== next.token ||
       cur.clientId !== next.clientId ||
-      cur.platform !== next.platform ||
-      cur.isElectron !== next.isElectron;
+      cur.platform !== next.platform;
     this.params = next;
     if (!urlChanged) return;
     if (!next.token || !next.paneId) {
@@ -206,7 +204,6 @@ class ChatWsClient {
     return `${base}/api/chat/ws`
       + `?master_agent_id=${encodeURIComponent(master)}`
       + `&token=${encodeURIComponent(p.token)}`
-      + `&electron=${p.isElectron ? '1' : '0'}`
       + `&client_id=${encodeURIComponent(p.clientId)}`
       + `&platform=${encodeURIComponent(p.platform)}`;
   }

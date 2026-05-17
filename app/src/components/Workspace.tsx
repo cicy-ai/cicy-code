@@ -976,7 +976,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       clientId: pageClientId,
       platform: wsClientPlatform,
       userAgent: wsClientUserAgent,
-      isElectron: typeof (window as any).electronRPC === 'function',
     });
   }, [paneId, pageClientId, token, wsClientPlatform, wsClientUserAgent, setChatWsState]);
 

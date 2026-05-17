@@ -103,6 +103,17 @@ func (c *chatClient) closeWithReason(code int, reason string) {
 	})
 }
 
+// isElectronUserAgent returns true when the given UA string looks like an
+// Electron client. Electron embeds "Electron/<version>" in its UA; cicy-desktop
+// additionally prefixes "ElectronMCP/<version>". Case-insensitive substring
+// match keeps the test robust to future UA tweaks.
+func isElectronUserAgent(ua string) bool {
+	if ua == "" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(ua), "electron")
+}
+
 func (h *chatHub) stats() interface{} {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -344,22 +355,8 @@ func normalizeChatClientPlatform(value string) string {
 	}
 }
 
-func parseChatClientElectronValue(value interface{}) (bool, bool) {
-	switch v := value.(type) {
-	case bool:
-		return v, true
-	case string:
-		switch strings.ToLower(strings.TrimSpace(v)) {
-		case "1", "true", "yes", "y", "on":
-			return true, true
-		case "0", "false", "no", "n", "off":
-			return false, true
-		}
-	}
-	return false, false
-}
 
-func (h *chatHub) updateClientMetadata(clientID string, platform string, userAgent string, electron *bool) {
+func (h *chatHub) updateClientMetadata(clientID string, platform string, userAgent string) {
 	clientID = strings.TrimSpace(clientID)
 	if clientID == "" {
 		return
@@ -376,8 +373,8 @@ func (h *chatHub) updateClientMetadata(clientID string, platform string, userAge
 	if ua := strings.TrimSpace(userAgent); ua != "" {
 		c.userAgent = ua
 	}
-	if electron != nil {
-		c.electron = *electron
+	if userAgent != "" {
+		c.electron = isElectronUserAgent(userAgent)
 	}
 }
 
@@ -522,13 +519,9 @@ func (c *chatClient) readPump() {
 			agentID := normalizeChatAgentValue(aiGatewayFirstNonEmpty(aiGatewayString(data["agent_id"]), aiGatewayString(data["pane_id"])))
 			platform := aiGatewayFirstNonEmpty(aiGatewayString(data["platform"]), aiGatewayString(data["os"]))
 			userAgent := aiGatewayFirstNonEmpty(aiGatewayString(data["user_agent"]), aiGatewayString(data["userAgent"]))
-			var electronPtr *bool
-			if value, ok := parseChatClientElectronValue(data["isElectron"]); ok {
-				electronPtr = &value
-			} else if value, ok := parseChatClientElectronValue(data["electron"]); ok {
-				electronPtr = &value
-			}
-			hub.updateClientMetadata(c.clientID, platform, userAgent, electronPtr)
+			// isElectron is re-derived from userAgent here; the client no longer
+			// supplies it via the message payload.
+			hub.updateClientMetadata(c.clientID, platform, userAgent)
 			if agentID != "" {
 				hub.registerClientAgent(c.clientID, agentID)
 			}
@@ -656,7 +649,9 @@ func handleChatWS(w http.ResponseWriter, r *http.Request) {
 	if remoteAddr == "" {
 		remoteAddr = r.RemoteAddr
 	}
-	isElectron := r.URL.Query().Get("electron") == "1"
+	// isElectron is derived from User-Agent, not a client-supplied query.
+	// "Electron"/"ElectronMCP" appears in the UA of every Electron build.
+	isElectron := isElectronUserAgent(strings.TrimSpace(r.Header.Get("User-Agent")))
 	c := &chatClient{
 		conn:        conn,
 		send:        make(chan []byte, 64),
