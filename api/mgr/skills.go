@@ -181,6 +181,14 @@ type marketSkill struct {
 	// install/uninstall buttons and shows a "Delete" action instead.
 	Source string            `json:"source,omitempty"`
 	Status marketSkillStatus `json:"status"`
+
+	// legacyAgentSkillDirs lists historical on-disk SKILL.md directory names
+	// that older cicy-skills installers may have produced for this market
+	// entry. computeMarketStatus treats SKILL.md presence in EITHER the
+	// canonical Name directory OR any of these aliases as "installed", so
+	// hosts running a stale embedded cicy-skills binary still report a
+	// truthful status. Fresh installs always write to the canonical Name.
+	legacyAgentSkillDirs []string
 }
 
 func marketSkillsCatalog() []marketSkill {
@@ -200,7 +208,7 @@ func marketSkillsCatalog() []marketSkill {
 		{Name: "us-spot-proxy", Title: "US Spot Proxy", Description: "Manage Aliyun spot proxy nodes.", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"us-spot-proxy"}, ConfigFile: "~/cicy-ai/db/us-spot-proxy.json"},
 		{Name: "aliyun-cli", Title: "Aliyun CLI", Description: "Bootstrap the official Aliyun CLI on this host. `aliyun-cli` installs the binary and applies a JSON config; after that, use the native `aliyun` command directly for ECS / VPC / RAM / OSS / etc.", Version: "1.0.0", Category: "infra", Icon: "cloud", Tags: []string{"aliyun", "ecs", "cli"}, BinaryAliases: []string{"aliyun-cli"}},
 		{Name: "email", Title: "Email Sender", Description: "Send transactional email via Resend. Bootstrap an api_key + verified from_address (config / status), then `email send --to ... --subject ... --body ...`.", Version: "1.0.0", Category: "infra", Icon: "mail", Tags: []string{"email", "resend", "smtp", "transactional"}, BinaryAliases: []string{"email"}},
-		{Name: "cicy-mihomo", Title: "Cicy Mihomo Proxy", Description: "Run a local Cicy Mihomo (mihomo / clash-meta fork) proxy with start/stop/reload/logs, node speed testing, and per-worker auth + routing.", Version: "1.0.0", Category: "network", Icon: "shield", Tags: []string{"proxy", "mihomo", "clash"}, BinaryAliases: []string{"cicy-mihomo"}, ConfigFile: "~/cicy-ai/db/mihomo.yaml"},
+		{Name: "cicy-mihomo", Title: "Cicy Mihomo Proxy", Description: "Run a local Cicy Mihomo (mihomo / clash-meta fork) proxy with start/stop/reload/logs, node speed testing, and per-worker auth + routing.", Version: "1.0.0", Category: "network", Icon: "shield", Tags: []string{"proxy", "mihomo", "clash"}, BinaryAliases: []string{"cicy-mihomo"}, ConfigFile: "~/cicy-ai/db/mihomo.yaml", legacyAgentSkillDirs: []string{"mihomo"}},
 		{Name: "proxy_ssh", Title: "SSH SOCKS Proxy", Description: "Manage local autossh-based SOCKS proxy profiles (start/stop/restart/test).", Version: "1.0.0", Category: "network", Icon: "plug", BinaryAliases: []string{"proxy_ssh"}, ConfigFile: "~/cicy-ai/db/proxy_ssh.json"},
 		{Name: "us-spot-dev", Title: "US Spot Dev", Description: "Provision a US Aliyun spot dev container on a persistent ESSD disk.", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"us-spot-dev"}},
 		{Name: "hk-spot-dev", Title: "HK Spot Dev", Description: "Provision an HK Aliyun spot dev container (companion to us-spot-dev).", Version: "1.0.0", Category: "infra", Icon: "cloud", BinaryAliases: []string{"hk-spot-dev"}},
@@ -362,9 +370,17 @@ func computeMarketStatus(skill *marketSkill) {
 	// User skills follow the same per-profile-doc check as agentgen skills:
 	// they are "installed" only when SKILL.md exists in all three profiles.
 	if isAgentgen || skill.Source == "user" {
+		candidateDirs := append([]string{skill.Name}, skill.legacyAgentSkillDirs...)
 		for _, profile := range []string{"claude", "codex", "opencode"} {
-			doc := filepath.Join(home, "."+profile, "skills", skill.Name, "SKILL.md")
-			if _, err := os.Stat(doc); err != nil {
+			profileDocOK := false
+			for _, dir := range candidateDirs {
+				doc := filepath.Join(home, "."+profile, "skills", dir, "SKILL.md")
+				if _, err := os.Stat(doc); err == nil {
+					profileDocOK = true
+					break
+				}
+			}
+			if !profileDocOK {
 				skillDocInstalled = false
 				break
 			}
