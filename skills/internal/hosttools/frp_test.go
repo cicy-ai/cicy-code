@@ -375,3 +375,119 @@ while :; do sleep 1; done
 		}
 	}
 }
+
+func TestResolveConfigIgnoresStateSavedPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// canonical location: ~/cicy-ai/db/frpc.toml — make it exist
+	canonicalDir := filepath.Join(home, "cicy-ai", "db")
+	if err := os.MkdirAll(canonicalDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	canonicalCfg := filepath.Join(canonicalDir, "frpc.toml")
+	if err := os.WriteFile(canonicalCfg, []byte("serverAddr=\"x\"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile canonical: %v", err)
+	}
+
+	// legacy location that also exists — must NOT be picked up via `saved`
+	legacyDir := filepath.Join(home, "data", "frp")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll legacy: %v", err)
+	}
+	legacyCfg := filepath.Join(legacyDir, "frpc.yaml")
+	if err := os.WriteFile(legacyCfg, []byte("serverAddr: y\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile legacy: %v", err)
+	}
+
+	tool := &frpTool{kind: frpClientKind, stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}}
+
+	// saved=legacy → resolveConfig must still pick canonical, NOT legacy.
+	got, err := tool.resolveConfig("", legacyCfg)
+	if err != nil {
+		t.Fatalf("resolveConfig error = %v", err)
+	}
+	if got != canonicalCfg {
+		t.Fatalf("resolveConfig with saved=%q returned %q, want %q (saved should be ignored)", legacyCfg, got, canonicalCfg)
+	}
+
+	// --config override is still honored.
+	got, err = tool.resolveConfig(legacyCfg, "")
+	if err != nil {
+		t.Fatalf("resolveConfig(override) error = %v", err)
+	}
+	if got != legacyCfg {
+		t.Fatalf("resolveConfig(override=%q) returned %q, want %q", legacyCfg, got, legacyCfg)
+	}
+}
+
+func TestFRPServerStartAdoptsOrphan(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfgDir := filepath.Join(home, "data", "frp")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	configPath := filepath.Join(cfgDir, "frps.toml")
+	// pre-fill auth.token so ensureFRPServerToken is a no-op (no config rewrite)
+	configText := "bindAddr = \"0.0.0.0\"\nbindPort = 7000\nauth.method = \"token\"\nauth.token = \"frp_testadopt\"\n"
+	if err := os.WriteFile(configPath, []byte(configText), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	binDir := filepath.Join(home, "fake-bin")
+	frpsPath := filepath.Join(binDir, "frps")
+	writeExecutable(t, frpsPath, `#!/usr/bin/env sh
+set -eu
+trap 'exit 0' TERM INT
+while :; do sleep 1; done
+`)
+
+	// Spawn an "orphan" frps directly (bypassing start()). Its cmdline will
+	// contain both the binary name "frps" and the config path, which is what
+	// findFrpOrphanPID matches on.
+	orphan := exec.Command(frpsPath, "-c", configPath)
+	if err := orphan.Start(); err != nil {
+		t.Fatalf("orphan.Start: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = orphan.Process.Kill()
+		_, _ = orphan.Process.Wait()
+	})
+	// give the kernel a moment to populate /proc/<pid>/cmdline
+	time.Sleep(100 * time.Millisecond)
+
+	// State file is absent → start() should detect orphan and adopt it instead
+	// of trying to spawn a second frps that would fail on bind.
+	var stdout bytes.Buffer
+	env := &Env{Stdout: &stdout, Stderr: &bytes.Buffer{}}
+	if err := env.runFRPServer([]string{"start", "--config", configPath, "--bin", frpsPath}); err != nil {
+		t.Fatalf("runFRPServer(start) error = %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "adopted existing process") {
+		t.Fatalf("start output should mention adopted: %q", out)
+	}
+	if !strings.Contains(out, "pid: "+strconv.Itoa(orphan.Process.Pid)) {
+		t.Fatalf("start output should mention orphan PID %d: %q", orphan.Process.Pid, out)
+	}
+
+	statePath := filepath.Join(home, ".local", "state", "cicy-skills", "frp", "server", "state.json")
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("ReadFile(state): %v", err)
+	}
+	if !strings.Contains(string(data), `"pid": `+strconv.Itoa(orphan.Process.Pid)) {
+		t.Fatalf("state file should record orphan PID %d: %s", orphan.Process.Pid, data)
+	}
+
+	// Subsequent start() should now take the "already running" early-return.
+	stdout.Reset()
+	if err := env.runFRPServer([]string{"start", "--config", configPath, "--bin", frpsPath}); err != nil {
+		t.Fatalf("second runFRPServer(start) error = %v", err)
+	}
+	if out := stdout.String(); !strings.Contains(out, "already running") {
+		t.Fatalf("second start should say already running: %q", out)
+	}
+}
