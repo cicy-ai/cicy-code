@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v2.0.2). Created on the current commit if it does not exist."
+        required: true
 
 jobs:
   release:
@@ -12,6 +17,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -24,29 +31,61 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Cross-compile binaries
-        working-directory: api
+      - name: Build all platform binaries
+        # bash build.sh all runs prepare_embed (builds the cicy-skills tarball
+        # that //go:embed picks up + builds the frontend + ttyd assets) and
+        # then cross-compiles darwin/linux amd64+arm64. Without prepare_embed
+        # the go:embed pattern for cicy_skills_assets.tar.gz fails at compile
+        # time — that was the latent bug the previous release step shipped
+        # with (cross-compile invoked go build directly with no embed prep).
         run: |
-          mkdir -p ../dist
-          GOOS=darwin GOARCH=arm64 go build -o ../dist/cicy-code-darwin-arm64 ./mgr/
-          GOOS=darwin GOARCH=amd64 go build -o ../dist/cicy-code-darwin-amd64 ./mgr/
-          GOOS=linux  GOARCH=amd64 go build -o ../dist/cicy-code-linux-amd64  ./mgr/
-          GOOS=linux  GOARCH=arm64 go build -o ../dist/cicy-code-linux-arm64  ./mgr/
-          ls -lh ../dist/
+          bash build.sh all
+          ls -lh dist/
 
-      - name: Create GitHub Release
+      - name: Resolve tag
+        id: tag
         run: |
-          gh release create "${{ github.ref_name }}" \
-            dist/cicy-code-darwin-amd64 \
-            dist/cicy-code-darwin-arm64 \
-            dist/cicy-code-linux-amd64 \
-            dist/cicy-code-linux-arm64 \
-            --title "${{ github.ref_name }}" \
-            --generate-notes
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          # For workflow_dispatch, create the tag on the current commit if it
+          # does not exist so the release has something to attach to.
+          if ! git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+          # If a release already exists for this tag, upload (clobbering
+          # same-named assets). Otherwise create it.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              dist/cicy-code-darwin-amd64 \
+              dist/cicy-code-darwin-arm64 \
+              dist/cicy-code-linux-amd64 \
+              dist/cicy-code-linux-arm64 \
+              --clobber
+          else
+            gh release create "$TAG" \
+              dist/cicy-code-darwin-amd64 \
+              dist/cicy-code-darwin-arm64 \
+              dist/cicy-code-linux-amd64 \
+              dist/cicy-code-linux-arm64 \
+              --title "$TAG" \
+              --generate-notes
+          fi
 
       - name: Publish to npm
+        # Only publish on real tag pushes — workflow_dispatch snapshots stay
+        # GitHub-release-only to avoid burning npm version numbers.
+        if: github.event_name == 'push'
         run: |
           cd npm
           npm publish
