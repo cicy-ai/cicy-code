@@ -85,6 +85,10 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		err = env.runTM(args)
 	case "agent-webpage":
 		err = env.runAgentWebpage(args)
+	case "agent-desktop":
+		err = env.runAgentDesktop(args)
+	case "agent-chrome":
+		err = env.runAgentChrome(args)
 	case "agent-code-server":
 		err = env.runAgentCodeServer(args)
 	case "gemini-ask":
@@ -224,7 +228,7 @@ type tmConfig struct {
 }
 
 func printAvailable(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, cicy-agent, agent-webpage, agent-code-server, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken, frp-server, frp-client, cicy-mihomo, aliyun-cli, email")
+	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, cicy-agent, agent-webpage, agent-desktop, agent-chrome, agent-code-server, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken, frp-server, frp-client, cicy-mihomo, aliyun-cli, email")
 }
 
 func (e *Env) apiRequest(ctx context.Context, method, path string, payload any) ([]byte, error) {
@@ -1466,6 +1470,644 @@ func (e *Env) resolveWebTarget(clientID string) (string, string, error) {
 		}
 	}
 	return "", "", fmt.Errorf("current agent %s has multiple clients; pass client_id explicitly", agentID)
+}
+
+// resolveCicyDesktopClient finds the connected cicy-desktop client.
+// It prefers clients whose UA contains "ElectronMCP". If clientID is given it
+// is validated against the live client list instead.
+func (e *Env) resolveCicyDesktopClient(clientID string) (agentID, cID string, err error) {
+	clients, err := e.chatClients()
+	if err != nil {
+		return "", "", err
+	}
+
+	// Flatten to a list so we can filter.
+	type entry struct {
+		agentID  string
+		clientID string
+		info     map[string]any
+	}
+	var all []entry
+	for aid, m := range clients {
+		for cid, info := range m {
+			all = append(all, entry{aid, cid, info})
+		}
+	}
+
+	// Explicit client_id given — just validate it exists.
+	if clientID = strings.TrimSpace(clientID); clientID != "" {
+		for _, c := range all {
+			if c.clientID == clientID {
+				return c.agentID, c.clientID, nil
+			}
+		}
+		return "", "", fmt.Errorf("client_id %s not found", clientID)
+	}
+
+	// Auto-select: prefer ElectronMCP clients.
+	var desktop []entry
+	for _, c := range all {
+		ua := strings.ToLower(anyString(c.info["user_agent"]))
+		if strings.Contains(ua, "electronmcp") {
+			desktop = append(desktop, c)
+		}
+	}
+	if len(desktop) == 1 {
+		return desktop[0].agentID, desktop[0].clientID, nil
+	}
+	if len(desktop) > 1 {
+		return "", "", fmt.Errorf("%d cicy-desktop clients connected; pass --client <client_id> to pick one", len(desktop))
+	}
+	// Fallback: any Electron client.
+	for _, c := range all {
+		if isElec, _ := c.info["isElectron"].(bool); isElec {
+			return c.agentID, c.clientID, nil
+		}
+	}
+	return "", "", errors.New("no cicy-desktop client connected")
+}
+
+// desktopRPC calls a tool on the connected cicy-desktop via the desktop_event
+// rpc_call mechanism. The client-side handler in useDesktopEvents.ts awaits
+// electronRPC(tool, args) and dispatches rpc-result back through the WS.
+func (e *Env) desktopRPC(agentID, clientID, tool string, toolArgs any) (string, error) {
+	rid := randomID("drpc")
+	conn, err := e.wsConnect(agentID)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	_, err = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
+		"agent_id":  agentID,
+		"client_id": clientID,
+		"type":      "desktop_event",
+		"data":      map[string]any{"type": "rpc_call", "tool": tool, "args": toolArgs, "requestId": rid},
+	})
+	if err != nil {
+		return "", err
+	}
+	msg, err := e.waitForMessage(conn, 30*time.Second, func(m map[string]any) bool {
+		return anyString(m["type"]) == "rpc_result" && anyString(asMap(m["data"])["requestId"]) == rid
+	})
+	if err != nil {
+		return "", err
+	}
+	data := asMap(msg["data"])
+	if errText := anyString(data["error"]); errText != "" {
+		return "", errors.New(errText)
+	}
+	return anyString(data["result"]), nil
+}
+
+func (e *Env) runAgentDesktop(args []string) error {
+	// Parse --client flag before the command.
+	clientID := ""
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--client" || args[i] == "-c" {
+			clientID = args[i+1]
+			args = append(args[:i], args[i+2:]...)
+			break
+		}
+	}
+
+	cmd := "help"
+	if len(args) > 0 {
+		cmd = args[0]
+		args = args[1:]
+	}
+
+	const helpText = `agent-desktop — control a connected cicy-desktop (Electron) client
+
+Commands:
+  help
+  tools
+  clients                           list connected cicy-desktop clients
+  ping [--client <id>]              verify client is reachable (webpage + IPC)
+  screenshot [--client <id>]        capture window screenshot (base64 PNG)
+  clipboard get [--client <id>]     read system clipboard
+  clipboard set <text> [--client]   write text to system clipboard
+  exec <shell_cmd> [--client <id>]  run a shell command on the desktop
+  windows [--client <id>]           list system windows
+  sysinfo [--client <id>]           OS / hardware summary
+  rpc <tool> [json_args] [--client] raw electronRPC tool call
+
+Options:
+  --client <client_id>  target a specific client (auto-selects ElectronMCP if omitted)`
+
+	switch cmd {
+	case "help", "-h", "--help":
+		_, _ = fmt.Fprintln(e.Stdout, helpText)
+		return nil
+
+	case "tools":
+		_, _ = fmt.Fprintln(e.Stdout, `# agent-desktop tools
+
+- ping [--client <id>] → webpage_ping + ipc_ping to verify full connectivity
+- screenshot [--client <id>] → calls webpage_screenshot_to_clipboard; returns base64 PNG
+- clipboard get [--client <id>] → clipboard_read_text
+- clipboard set <text> [--client <id>] → clipboard_write_text
+- exec <cmd> [--client <id>] → exec_shell on the desktop machine
+- windows [--client <id>] → get_system_windows
+- sysinfo [--client <id>] → get_system_info
+- rpc <tool_name> [json_args] [--client <id>] → raw electronRPC call`)
+		return nil
+
+	case "clients":
+		clients, err := e.chatClients()
+		if err != nil {
+			return err
+		}
+		type row struct {
+			ClientID  string `json:"client_id"`
+			AgentID   string `json:"agent_id"`
+			Platform  string `json:"platform"`
+			UA        string `json:"user_agent"`
+			Uptime    int    `json:"uptime_sec"`
+			IsDesktop bool   `json:"is_cicy_desktop"`
+		}
+		var rows []row
+		for aid, m := range clients {
+			for cid, info := range m {
+				ua := anyString(info["user_agent"])
+				rows = append(rows, row{
+					ClientID:  cid,
+					AgentID:   aid,
+					Platform:  anyString(info["platform"]),
+					UA:        ua,
+					IsDesktop: strings.Contains(strings.ToLower(ua), "electronmcp"),
+				})
+			}
+		}
+		for _, r := range rows {
+			tag := "browser"
+			if r.IsDesktop {
+				tag = "cicy-desktop"
+			}
+			_, _ = fmt.Fprintf(e.Stdout, "[%s] %s (agent=%s platform=%s)\n", tag, r.ClientID, r.AgentID, r.Platform)
+		}
+		if len(rows) == 0 {
+			_, _ = fmt.Fprintln(e.Stdout, "no clients connected")
+		}
+		return nil
+
+	case "ping":
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		// Webpage ping.
+		rid := randomID("webpage-ping")
+		conn, err := e.wsConnect(agentID)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		_, err = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
+			"agent_id":  agentID,
+			"client_id": cID,
+			"type":      "webpage_ping",
+			"data":      map[string]any{"requestId": rid},
+		})
+		if err != nil {
+			return err
+		}
+		msg, err := e.waitForMessage(conn, 10*time.Second, func(m map[string]any) bool {
+			return anyString(m["type"]) == "webpage_pong" && anyString(asMap(m["data"])["requestId"]) == rid
+		})
+		if err != nil {
+			return err
+		}
+		ver := anyString(asMap(msg["data"])["version"])
+		_, _ = fmt.Fprintf(e.Stdout, "✅ webpage ping OK — client=%s version=%s\n", cID, ver)
+
+		// IPC ping.
+		rid2 := randomID("ipc-ping")
+		_, err = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
+			"agent_id":  agentID,
+			"client_id": cID,
+			"type":      "desktop_event",
+			"data":      map[string]any{"type": "ipc_ping", "requestId": rid2},
+		})
+		if err != nil {
+			_, _ = fmt.Fprintf(e.Stdout, "⚠️  ipc ping send failed: %v\n", err)
+			return nil
+		}
+		_, err = e.waitForMessage(conn, 10*time.Second, func(m map[string]any) bool {
+			return anyString(m["type"]) == "ipc_pong" && anyString(asMap(m["data"])["requestId"]) == rid2
+		})
+		if err != nil {
+			_, _ = fmt.Fprintf(e.Stdout, "⚠️  ipc pong timeout: %v\n", err)
+		} else {
+			_, _ = fmt.Fprintln(e.Stdout, "✅ IPC ping OK — Electron main process reachable")
+		}
+		return nil
+
+	case "screenshot":
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		result, err := e.desktopRPC(agentID, cID, "webpage_screenshot_to_clipboard", map[string]any{})
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, result)
+		return nil
+
+	case "clipboard":
+		sub := "get"
+		if len(args) > 0 {
+			sub = args[0]
+			args = args[1:]
+		}
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		switch sub {
+		case "get", "read":
+			result, err := e.desktopRPC(agentID, cID, "clipboard_read_text", map[string]any{})
+			if err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintln(e.Stdout, result)
+		case "set", "write":
+			if len(args) == 0 {
+				return errors.New("usage: agent-desktop clipboard set <text>")
+			}
+			result, err := e.desktopRPC(agentID, cID, "clipboard_write_text", map[string]any{"text": args[0]})
+			if err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintln(e.Stdout, result)
+		default:
+			return fmt.Errorf("unknown clipboard subcommand %q; use get or set", sub)
+		}
+		return nil
+
+	case "exec":
+		if len(args) == 0 {
+			return errors.New("usage: agent-desktop exec <shell_command>")
+		}
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		result, err := e.desktopRPC(agentID, cID, "exec_shell", map[string]any{"command": strings.Join(args, " ")})
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, result)
+		return nil
+
+	case "windows":
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		result, err := e.desktopRPC(agentID, cID, "get_system_windows", map[string]any{"detail": true})
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, result)
+		return nil
+
+	case "sysinfo":
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		result, err := e.desktopRPC(agentID, cID, "get_system_info", map[string]any{})
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, result)
+		return nil
+
+	case "rpc":
+		if len(args) == 0 {
+			return errors.New("usage: agent-desktop rpc <tool_name> [json_args]")
+		}
+		tool := args[0]
+		toolArgs := map[string]any{}
+		if len(args) > 1 {
+			if err := json.Unmarshal([]byte(args[1]), &toolArgs); err != nil {
+				return fmt.Errorf("json_args parse error: %w", err)
+			}
+		}
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		result, err := e.desktopRPC(agentID, cID, tool, toolArgs)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, result)
+		return nil
+
+	default:
+		_, _ = fmt.Fprintf(e.Stderr, "unknown command %q\n\n", cmd)
+		_, _ = fmt.Fprintln(e.Stdout, helpText)
+		return fmt.Errorf("unknown command: %s", cmd)
+	}
+}
+
+// runAgentChrome wraps the cicy-desktop chrome_* tool surface (chrome-launcher
+// + per-profile proxy + ~/Private/chrome.json registry) as a CLI. It rides on
+// the same desktop_event/rpc_call channel as agent-desktop, so it requires a
+// connected cicy-desktop client (auto-selects ElectronMCP if --client omitted).
+func (e *Env) runAgentChrome(args []string) error {
+	clientID := ""
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--client" || args[i] == "-c" {
+			clientID = args[i+1]
+			args = append(args[:i], args[i+2:]...)
+			break
+		}
+	}
+
+	cmd := "help"
+	if len(args) > 0 {
+		cmd = args[0]
+		args = args[1:]
+	}
+
+	const helpText = `agent-chrome — control system Chrome (via cicy-desktop) with per-profile proxy
+
+Commands:
+  help
+  tools
+  profiles [--all]                  list configured profiles (chrome.json + runtime status)
+  profile <accountIdx>              show one profile + live debugger status
+  add [--gmail <addr>] [--org-path <path>] [--launch]
+                                    create a new profile in ~/Private/chrome.json
+  proxy <accountIdx> <url>          set per-profile proxy (takes effect on next launch)
+  proxy <accountIdx> ""             clear per-profile proxy
+  launch <accountIdx> [--url <url>] [--no-activate]
+                                    spawn Chrome with that profile + its proxy
+  close <accountIdx>                kill the Chrome process for that profile
+  targets [--idx <n>]               list CDP page targets (per profile or global)
+  cdp <method> [json_params] [--idx <n>]
+                                    raw Chrome DevTools Protocol call
+  gmails                            chrome_list_gmails
+  github                            chrome_list_github_accounts
+
+Options:
+  --client <client_id>  target a specific cicy-desktop client (auto-selects ElectronMCP if omitted)
+
+Notes:
+  - System Chrome is required on the desktop machine (cicy-desktop probes
+    /Applications/Google Chrome.app, %PROGRAMFILES%\Google\Chrome\Application\chrome.exe,
+    or google-chrome / chromium on Linux). If none found, launch errors with
+    "Chrome/Chromium binary not found".
+  - Each profile gets a dedicated user-data-dir (~/chrome/account_<N>) and CDP
+    port (11000 + N by default), so multiple profiles run concurrently with
+    independent proxies / cookies / extensions.`
+
+	switch cmd {
+	case "help", "-h", "--help":
+		_, _ = fmt.Fprintln(e.Stdout, helpText)
+		return nil
+
+	case "tools":
+		_, _ = fmt.Fprintln(e.Stdout, `# agent-chrome tools
+
+- profiles → chrome_list_profiles                  list all configured profiles + runtime/live status
+- profile <idx> → chrome_get_profile               show one profile
+- add → chrome_add_profile                         provision a new profile dir + chrome.json entry
+- proxy <idx> <url> → chrome_set_profile_proxy     set/clear per-profile proxy
+- launch <idx> → chrome_launch_profile             spawn Chrome (resolves system binary; errors if not installed)
+- close <idx> → chrome_close_profile               kill the Chrome process
+- targets [--idx N] → chrome_get_targets           list pages
+- cdp <method> [params] → chrome_cdp_call          raw CDP escape hatch
+- gmails → chrome_list_gmails
+- github → chrome_list_github_accounts`)
+		return nil
+
+	case "profiles":
+		includeHidden := false
+		for _, a := range args {
+			if a == "--all" {
+				includeHidden = true
+			}
+		}
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		result, err := e.desktopRPC(agentID, cID, "chrome_list_profiles", map[string]any{"includeHidden": includeHidden})
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, result)
+		return nil
+
+	case "profile":
+		if len(args) == 0 {
+			return errors.New("usage: agent-chrome profile <accountIdx>")
+		}
+		idx, err := strconv.Atoi(args[0])
+		if err != nil {
+			return fmt.Errorf("accountIdx must be a number: %w", err)
+		}
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		result, err := e.desktopRPC(agentID, cID, "chrome_get_profile", map[string]any{"accountIdx": idx})
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, result)
+		return nil
+
+	case "add":
+		params := map[string]any{}
+		for i := 0; i < len(args); i++ {
+			switch args[i] {
+			case "--gmail":
+				if i+1 < len(args) {
+					params["gmail"] = args[i+1]
+					i++
+				}
+			case "--org-path":
+				if i+1 < len(args) {
+					params["orgPath"] = args[i+1]
+					i++
+				}
+			case "--launch":
+				params["launchAfterCreate"] = true
+			}
+		}
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		result, err := e.desktopRPC(agentID, cID, "chrome_add_profile", params)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, result)
+		return nil
+
+	case "proxy":
+		if len(args) < 2 {
+			return errors.New(`usage: agent-chrome proxy <accountIdx> <url|"">`)
+		}
+		idx, err := strconv.Atoi(args[0])
+		if err != nil {
+			return fmt.Errorf("accountIdx must be a number: %w", err)
+		}
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		result, err := e.desktopRPC(agentID, cID, "chrome_set_profile_proxy", map[string]any{
+			"accountIdx": idx,
+			"proxy":      args[1],
+		})
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, result)
+		return nil
+
+	case "launch":
+		if len(args) == 0 {
+			return errors.New("usage: agent-chrome launch <accountIdx> [--url <url>] [--no-activate]")
+		}
+		idx, err := strconv.Atoi(args[0])
+		if err != nil {
+			return fmt.Errorf("accountIdx must be a number: %w", err)
+		}
+		params := map[string]any{"accountIdx": idx}
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--url":
+				if i+1 < len(args) {
+					params["url"] = args[i+1]
+					i++
+				}
+			case "--no-activate":
+				params["activateIfRunning"] = false
+			}
+		}
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		result, err := e.desktopRPC(agentID, cID, "chrome_launch_profile", params)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, result)
+		return nil
+
+	case "close":
+		if len(args) == 0 {
+			return errors.New("usage: agent-chrome close <accountIdx>")
+		}
+		idx, err := strconv.Atoi(args[0])
+		if err != nil {
+			return fmt.Errorf("accountIdx must be a number: %w", err)
+		}
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		result, err := e.desktopRPC(agentID, cID, "chrome_close_profile", map[string]any{"accountIdx": idx})
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, result)
+		return nil
+
+	case "targets":
+		params := map[string]any{}
+		for i := 0; i < len(args); i++ {
+			if args[i] == "--idx" && i+1 < len(args) {
+				idx, err := strconv.Atoi(args[i+1])
+				if err != nil {
+					return fmt.Errorf("--idx must be a number: %w", err)
+				}
+				params["accountIdx"] = idx
+				i++
+			}
+		}
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		result, err := e.desktopRPC(agentID, cID, "chrome_get_targets", params)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, result)
+		return nil
+
+	case "cdp":
+		if len(args) == 0 {
+			return errors.New("usage: agent-chrome cdp <method> [json_params] [--idx <n>]")
+		}
+		method := args[0]
+		params := map[string]any{"method": method}
+		for i := 1; i < len(args); i++ {
+			if args[i] == "--idx" && i+1 < len(args) {
+				idx, err := strconv.Atoi(args[i+1])
+				if err != nil {
+					return fmt.Errorf("--idx must be a number: %w", err)
+				}
+				params["accountIdx"] = idx
+				i++
+				continue
+			}
+			cdpParams := map[string]any{}
+			if err := json.Unmarshal([]byte(args[i]), &cdpParams); err != nil {
+				return fmt.Errorf("json_params parse error: %w", err)
+			}
+			params["params"] = cdpParams
+		}
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		result, err := e.desktopRPC(agentID, cID, "chrome_cdp_call", params)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, result)
+		return nil
+
+	case "gmails":
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		result, err := e.desktopRPC(agentID, cID, "chrome_list_gmails", map[string]any{})
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, result)
+		return nil
+
+	case "github":
+		agentID, cID, err := e.resolveCicyDesktopClient(clientID)
+		if err != nil {
+			return err
+		}
+		result, err := e.desktopRPC(agentID, cID, "chrome_list_github_accounts", map[string]any{})
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(e.Stdout, result)
+		return nil
+
+	default:
+		_, _ = fmt.Fprintf(e.Stderr, "unknown command %q\n\n", cmd)
+		_, _ = fmt.Fprintln(e.Stdout, helpText)
+		return fmt.Errorf("unknown command: %s", cmd)
+	}
 }
 
 func (e *Env) printJSON(v any) error {

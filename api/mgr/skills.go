@@ -201,6 +201,8 @@ func marketSkillsCatalog() []marketSkill {
 		{Name: "google", Title: "Google Workspace", Description: "Gmail / Sheets / Drive / Calendar via Google APIs. OAuth flow uses oauth-flow.cicy-ai.com as a code relay (Worker never sees client_secret or tokens).", Version: "1.0.0", Category: "ai", Icon: "mail", Tags: []string{"gmail", "sheets", "drive", "calendar"}, BinaryAliases: []string{"google"}, ConfigFile: "~/cicy-ai/db/google.json"},
 		{Name: "agent-summary", Title: "Agent Summary", Description: "Generate conversation summaries and handoff documents.", Version: "1.0.0", Category: "ai", Icon: "file-text", BinaryAliases: []string{}},
 		{Name: "agent-webpage", Title: "Agent Webpage", Description: "Talk to the live webpage client for an agent.", Version: "1.0.0", Category: "ai", Icon: "globe", BinaryAliases: []string{"agent-webpage"}},
+		{Name: "agent-desktop", Title: "Agent Desktop", Description: "Control a connected cicy-desktop (Electron) client: screenshot, clipboard, exec shell, list windows, raw RPC.", Version: "1.0.0", Category: "ai", Icon: "monitor", BinaryAliases: []string{"agent-desktop"}},
+		{Name: "agent-chrome", Title: "Agent Chrome", Description: "Control system Chrome on a connected cicy-desktop host with per-profile proxy. Auto-discovers Chrome on macOS / Windows / Linux; errors with install hint if not found.", Version: "1.0.0", Category: "ai", Icon: "chrome", BinaryAliases: []string{"agent-chrome"}},
 		{Name: "agent-code-server", Title: "Code Server", Description: "Open files in the page-bound code-server.", Version: "1.0.0", Category: "ai", Icon: "code", BinaryAliases: []string{"agent-code-server"}},
 		{Name: "cicy-agent", Title: "CiCy Agent", Description: "Operate tmux panes and windows on this host.", Version: "1.0.0", Category: "dev", Icon: "terminal", BinaryAliases: []string{"cicy-agent"}},
 		{Name: "cicy-ssh", Title: "CiCy SSH", Description: "Manage SSH hosts via ~/.ssh/config. Use ssh-list to enumerate configured hosts.", Version: "1.1.0", Category: "ops", Icon: "key", BinaryAliases: []string{"ssh-list"}},
@@ -537,7 +539,9 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 // outside this set are symlink-only (us-spot-dev, cicy-master, hk-spot-dev)
 // and have no per-profile SKILL.md handling.
 var agentgenApprovedMarketSkills = map[string]struct{}{
+	"agent-chrome":              {},
 	"agent-code-server":         {},
+	"agent-desktop":             {},
 	"agent-summary":             {},
 	"agent-webpage":             {},
 	"cf":                        {},
@@ -562,7 +566,7 @@ var agentgenApprovedMarketSkills = map[string]struct{}{
 // hosttool aliases — symlink target is dist/cicy-hosttools. Must stay in sync
 // with skills/internal/bundle/bundle.go HosttoolAliases.
 var hosttoolAliasSet = map[string]struct{}{
-	"agent-code-server": {}, "agent-webpage": {}, "cf": {}, "cf-tunnel": {},
+	"agent-chrome": {}, "agent-code-server": {}, "agent-desktop": {}, "agent-webpage": {}, "cf": {}, "cf-tunnel": {},
 	"cf-tunnel-py": {}, "cf-tunnel.py": {}, "cping": {}, "eng": {},
 	"gemini-ask": {}, "gemini-vision": {}, "globalApiToken": {},
 	"google":   {}, // pure-Go google skill (was Node provider; migrated)

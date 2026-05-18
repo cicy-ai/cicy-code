@@ -41,7 +41,7 @@ func OpenCodeSkillsDir() string {
 }
 
 func ApprovedCodexSkills() []string {
-	return []string{"agent-code-server", "agent-summary", "agent-webpage", "aliyun-cli", "cf", "cf-tunnel", "cicy-todo", "cping", "email", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent", "cicy-mihomo", "us-spot-proxy", "proxy_ssh", "us-spot-dev", "hk-spot-dev"}
+	return []string{"agent-chrome", "agent-code-server", "agent-desktop", "agent-summary", "agent-webpage", "aliyun-cli", "cf", "cf-tunnel", "cicy-todo", "cping", "email", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent", "cicy-mihomo", "us-spot-proxy", "proxy_ssh", "us-spot-dev", "hk-spot-dev"}
 }
 
 func canonicalCodexSkillName(name string) string {
@@ -50,6 +50,10 @@ func canonicalCodexSkillName(name string) string {
 		return "agent-code-server"
 	case "agent-summary", "agentsummary", "agent_summary":
 		return "agent-summary"
+	case "agent-chrome", "agentchrome", "agent_chrome":
+		return "agent-chrome"
+	case "agent-desktop", "agentdesktop", "agent_desktop":
+		return "agent-desktop"
 	case "agent-webpage", "agentwebpage", "agent_webpage":
 		return "agent-webpage"
 	case "cf":
@@ -311,6 +315,10 @@ func generateCodexSkill(root, targetRoot, skill string) error {
 		return generateCodexAgentCodeServer(targetRoot)
 	case "agent-summary":
 		return generateCodexAgentSummary(targetRoot)
+	case "agent-chrome":
+		return generateCodexAgentChrome(targetRoot)
+	case "agent-desktop":
+		return generateCodexAgentDesktop(targetRoot)
 	case "agent-webpage":
 		return generateCodexAgentWebpage(targetRoot)
 	case "cf":
@@ -661,6 +669,44 @@ func generateCodexAgentWebpage(targetRoot string) error {
 		return err
 	}
 	tools := renderAgentWebpageTools()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
+func generateCodexAgentDesktop(targetRoot string) error {
+	skillDir := filepath.Join(targetRoot, "agent-desktop")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderAgentDesktopSkill()); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderAgentDesktopHelp()); err != nil {
+		return err
+	}
+	tools := renderAgentDesktopTools()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
+func generateCodexAgentChrome(targetRoot string) error {
+	skillDir := filepath.Join(targetRoot, "agent-chrome")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderAgentChromeSkill()); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderAgentChromeHelp()); err != nil {
+		return err
+	}
+	tools := renderAgentChromeTools()
 	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
 		return err
 	}
@@ -1317,6 +1363,251 @@ Read [help.md](./references/help.md) first for quick usage.
 
 Read [tools.md](./references/tools.md) for the supported command shapes.
 `)
+}
+
+func renderAgentChromeSkill() string {
+	return `---
+name: agent-chrome
+description: Control system Chrome on a connected cicy-desktop host with per-profile proxy support. Auto-discovers Chrome on macOS / Windows / Linux; prompts to install when not found.
+---
+
+# Agent Chrome
+
+This skill drives system-installed Google Chrome (or Chromium) on a connected cicy-desktop host via the Chrome DevTools Protocol. Each profile gets a dedicated user-data-dir and its own proxy.
+
+Rides on the same ` + "`desktop_event`" + ` / ` + "`rpc_call`" + ` channel as ` + "`agent-desktop`" + `, but the work happens inside Chrome rather than Electron-main.
+
+## Scope
+
+Use this skill when the task involves:
+
+- listing / adding / configuring Chrome profiles (each with its own proxy)
+- spawning Chrome for a specific profile (with that profile's proxy applied)
+- inspecting open page targets across profiles
+- making raw CDP calls (` + "`Page.navigate`" + `, ` + "`Runtime.evaluate`" + `, ` + "`Input.dispatchMouseEvent`" + `, …)
+- listing the gmail / github / kiro identities the host's Chrome profiles are signed into
+
+## Rules
+
+1. Each profile maps to ` + "`~/Private/chrome.json`" + ` on the cicy-desktop host, keyed by ` + "`account_<N>`" + `. The CLI accepts the numeric ` + "`accountIdx`" + ` (the ` + "`<N>`" + `).
+2. Per-profile proxy: ` + "`agent-chrome proxy <idx> <url>`" + ` writes the proxy into chrome.json. The next ` + "`launch`" + ` picks it up via ` + "`--proxy-server=<url>`" + `. Pass ` + "`\"\"`" + ` to clear.
+3. ` + "`launch`" + ` resolves system Chrome (Mac: ` + "`/Applications/Google Chrome.app`" + ` etc., Windows: ` + "`%PROGRAMFILES%\\Google\\Chrome\\Application\\chrome.exe`" + `, Linux: ` + "`google-chrome / chromium`" + `). On missing binary it errors with "Chrome/Chromium binary not found" — the user must install Chrome / Chromium first.
+4. Default profile layout: user-data-dir ` + "`~/chrome/account_<N>`" + `, debugger port ` + "`11000 + N`" + ` (or chrome.json override). Profiles run concurrently with independent state.
+5. ` + "`--client <client_id>`" + ` targets a specific cicy-desktop client. With no flag, auto-selects the single ` + "`ElectronMCP`" + ` client (refuses to guess if multiple are connected).
+
+## Help
+
+Read [help.md](./references/help.md) first for quick usage and a worked example.
+
+## Tools
+
+Read [tools.md](./references/tools.md) for the full subcommand reference and the underlying ` + "`chrome_*`" + ` tool each one maps to.
+`
+}
+
+func renderAgentChromeHelp() string {
+	return `# Agent Chrome Help
+
+## Command
+- primary command: ` + "`agent-chrome`" + `
+
+## Quick Start
+
+- inspect usage: ` + "`agent-chrome help`" + `
+- list configured profiles: ` + "`agent-chrome profiles`" + `
+- inspect one profile: ` + "`agent-chrome profile 1`" + `
+- create a new profile (no auto-launch): ` + "`agent-chrome add --gmail alice@example.com`" + `
+- create + launch immediately: ` + "`agent-chrome add --gmail alice@example.com --launch`" + `
+- set a SOCKS5 proxy on profile 1: ` + "`agent-chrome proxy 1 socks5://127.0.0.1:1080`" + `
+- clear the proxy: ` + "`agent-chrome proxy 1 \"\"`" + `
+- launch profile 1 at a URL: ` + "`agent-chrome launch 1 --url https://github.com`" + `
+- close profile 1's Chrome: ` + "`agent-chrome close 1`" + `
+- list page targets for profile 1: ` + "`agent-chrome targets --idx 1`" + `
+- raw CDP call (navigate): ` + "`agent-chrome cdp Page.navigate '{\"url\":\"https://example.com\"}' --idx 1`" + `
+
+## Worked Example: ship a profile with a SOCKS5 proxy
+
+` + "```sh" + `
+agent-chrome add --gmail bob@example.com         # creates account_<N>, writes chrome.json
+# (note the accountIdx returned, e.g. 3)
+agent-chrome proxy 3 socks5://127.0.0.1:1080      # set proxy
+agent-chrome launch 3 --url https://check.proxy   # spawns Chrome with --proxy-server=…
+agent-chrome targets --idx 3                      # list pages
+agent-chrome cdp Runtime.evaluate '{"expression":"location.host","returnByValue":true}' --idx 3
+agent-chrome close 3                              # done
+` + "```" + `
+
+## Architecture
+
+Server-side ` + "`agent-chrome`" + ` posts ` + "`{type: \"desktop_event\", data: {type: \"rpc_call\", tool: \"chrome_*\", args}}`" + ` to ` + "`/api/chat/push`" + `. The cicy-desktop client (Electron-main) registers all ` + "`chrome_*`" + ` tools in ` + "`src/tools/chrome-tools.js`" + ` which spawn / manage Chrome via ` + "`src/chrome/chrome-launcher.js`" + `.
+
+## Errors
+
+- ` + "`Chrome/Chromium binary not found`" + ` — system Chrome is not installed on the cicy-desktop host. Install Google Chrome (Mac: ` + "`brew install --cask google-chrome`" + ` / direct DMG; Windows: chrome.com installer; Linux: distro package or chromium).
+- ` + "`Debugger port <N> is already in use by …`" + ` — another Chrome already holds the CDP port. Either ` + "`close`" + ` the running profile or pick a different ` + "`accountIdx`" + ` (each maps to a unique port).
+- ` + "`no cicy-desktop client connected`" + ` — start cicy-desktop on the target machine; verify with ` + "`agent-desktop clients`" + `.
+
+## More
+
+- tool map: [tools.md](./tools.md)
+`
+}
+
+func renderAgentChromeTools() string {
+	return `# Agent Chrome Commands
+
+Server CLI on the left, cicy-desktop tool that actually runs on the right.
+
+| Command | cicy-desktop tool | What it does |
+|---------|-------------------|--------------|
+| ` + "`agent-chrome profiles [--all]`" + ` | ` + "`chrome_list_profiles`" + ` | List configured profiles with runtime + live debugger status. ` + "`--all`" + ` includes hidden ` + "`__*`" + ` entries. |
+| ` + "`agent-chrome profile <idx>`" + ` | ` + "`chrome_get_profile`" + ` | Show one profile and its live status. |
+| ` + "`agent-chrome add [--gmail X] [--org-path P] [--launch]`" + ` | ` + "`chrome_add_profile`" + ` | Create a new profile (allocates next ` + "`account_<N>`" + ` dir + port + chrome.json entry). |
+| ` + "`agent-chrome proxy <idx> <url>`" + ` | ` + "`chrome_set_profile_proxy`" + ` | Set per-profile proxy; takes effect on next ` + "`launch`" + `. Pass empty string ` + "`\"\"`" + ` to clear. |
+| ` + "`agent-chrome launch <idx> [--url U] [--no-activate]`" + ` | ` + "`chrome_launch_profile`" + ` | Spawn Chrome with ` + "`--user-data-dir=~/chrome/account_<idx>`" + `, ` + "`--remote-debugging-port=<port>`" + `, and ` + "`--proxy-server=<proxy>`" + ` from chrome.json. |
+| ` + "`agent-chrome close <idx>`" + ` | ` + "`chrome_close_profile`" + ` | Kill the Chrome process for that profile. |
+| ` + "`agent-chrome targets [--idx N]`" + ` | ` + "`chrome_get_targets`" + ` | List CDP targets (pages, workers, ...) for one profile or all. |
+| ` + "`agent-chrome cdp <method> [json_params] [--idx N]`" + ` | ` + "`chrome_cdp_call`" + ` | Raw CDP escape hatch — anything not wrapped above. |
+| ` + "`agent-chrome gmails`" + ` | ` + "`chrome_list_gmails`" + ` | Identities signed into Gmail across profiles. |
+| ` + "`agent-chrome github`" + ` | ` + "`chrome_list_github_accounts`" + ` | Identities signed into github.com across profiles. |
+| ` + "`agent-chrome --client <id> <cmd>`" + ` | — | Target a specific cicy-desktop client (otherwise auto-select ElectronMCP). |
+
+## Notes
+
+- All commands print the upstream tool's JSON payload verbatim; parse with ` + "`jq`" + ` when needed.
+- ` + "`chrome_add_profile`" + ` allocates the next ` + "`accountIdx`" + ` from chrome.json. Read the response to learn which index was assigned.
+- ` + "`launch`" + ` returns ` + "`{pid, debuggerPort, webSocketDebuggerUrl, browser, proxy, ...}`" + ` — useful for follow-up ` + "`cdp`" + ` calls.
+- Cross-platform binary discovery (handled inside ` + "`chrome-launcher.js`" + `):
+  - macOS: ` + "`/Applications/Google Chrome.app`" + `, ` + "`~/Applications/Google Chrome.app`" + `, ` + "`/Applications/Chromium.app`" + `
+  - Windows: ` + "`%LOCALAPPDATA%`" + ` / ` + "`%PROGRAMFILES%`" + ` / ` + "`%PROGRAMFILES(X86)%`" + ` under ` + "`Google\\Chrome\\Application\\chrome.exe`" + ` (and Chromium equivalents)
+  - Linux: ` + "`google-chrome`" + ` / ` + "`chromium`" + ` / ` + "`chromium-browser`" + ` from PATH
+`
+}
+
+func renderAgentDesktopSkill() string {
+	return `---
+name: agent-desktop
+description: Control a connected cicy-desktop (Electron) client on this host — screenshot, clipboard, exec shell, list windows, raw electronRPC — via the ` + "`agent-desktop`" + ` wrapper on PATH.
+---
+
+# Agent Desktop
+
+This skill covers the local ` + "`agent-desktop`" + ` wrapper from ` + "`PATH`" + `. It talks to a connected cicy-desktop (Electron) client through the live chat WebSocket and returns the real RPC response from the desktop machine.
+
+Sister to ` + "`agent-webpage`" + `: ` + "`agent-webpage`" + ` runs JS inside the renderer; ` + "`agent-desktop`" + ` invokes Electron-main tools (clipboard, screenshot, shell exec, system info).
+
+## Scope
+
+Use this skill when the task involves:
+
+- checking which cicy-desktop clients are connected for an agent
+- reading or writing the desktop machine's clipboard
+- capturing a screenshot of the active window to clipboard
+- running a shell command on the desktop machine
+- inspecting the desktop's OS / hardware (sysinfo) or window list
+- calling an arbitrary Electron-main tool via raw electronRPC
+
+## Rules
+
+1. Prefer ` + "`agent-desktop`" + ` over hand-rolling ` + "`agent-webpage exec-js`" + ` for desktop-side operations — ` + "`exec-js`" + ` is synchronous (` + "`window.eval`" + `) and cannot await Promises, so it cannot invoke ` + "`electronRPC`" + ` correctly.
+2. Target a specific client by ` + "`--client <client_id>`" + `. When omitted, ` + "`agent-desktop`" + ` auto-selects the single client whose UA contains ` + "`ElectronMCP`" + ` (the cicy-desktop brand); it refuses to guess if multiple are connected.
+3. For response-oriented calls, report the actual returned payload — do not stop at "event sent".
+4. ` + "`agent-desktop windows`" + ` may return ` + "`Unsupported platform`" + ` on Windows because the underlying ` + "`get_system_windows`" + ` tool is not implemented for win32 in cicy-desktop. Use ` + "`agent-desktop exec`" + ` with PowerShell as a fallback.
+5. Run ` + "`agent-desktop help`" + ` and ` + "`agent-desktop tools`" + ` before guessing subcommand shapes.
+
+## Help
+
+Read [help.md](./references/help.md) first for quick usage, rules, and examples.
+
+## Tools
+
+Read [tools.md](./references/tools.md) for the supported subcommands, flags, and response shapes.
+`
+}
+
+func renderAgentDesktopHelp() string {
+	return `# Agent Desktop Help
+
+## Command
+
+- primary command: ` + "`agent-desktop`" + `
+
+## Quick Start
+
+- inspect usage: ` + "`agent-desktop help`" + `
+- inspect tool map: ` + "`agent-desktop tools`" + `
+- list connected clients: ` + "`agent-desktop clients`" + `
+- verify the auto-selected cicy-desktop is reachable (webpage + IPC): ` + "`agent-desktop ping`" + `
+- read the desktop's clipboard: ` + "`agent-desktop clipboard get`" + `
+- write to the desktop's clipboard: ` + "`agent-desktop clipboard set 'hello'`" + `
+- capture a screenshot to clipboard: ` + "`agent-desktop screenshot`" + `
+- run a shell command on the desktop: ` + "`agent-desktop exec 'hostname && whoami'`" + `
+- print OS / hardware summary: ` + "`agent-desktop sysinfo`" + `
+- target a specific client: ` + "`agent-desktop sysinfo --client web-abc123`" + `
+- raw electronRPC call: ` + "`agent-desktop rpc <tool> '{\"key\":\"value\"}'`" + `
+
+## Rules
+
+- use a real connected cicy-desktop client, not mocks
+- auto-select only fires when exactly one ElectronMCP client is connected; otherwise pass ` + "`--client <id>`" + `
+- ` + "`agent-desktop windows`" + ` returns ` + "`Unsupported platform`" + ` on win32; fall back to ` + "`agent-desktop exec`" + ` + PowerShell
+- for ` + "`exec`" + `, the command runs as the cicy-desktop process user (typically the desktop user, not root)
+
+## Architecture
+
+` + "`agent-desktop`" + ` is built on top of an async ` + "`desktop_event`" + ` / ` + "`rpc_call`" + ` mechanism:
+
+1. CLI posts ` + "`{ type: \"desktop_event\", data: { type: \"rpc_call\", tool, args, requestId } }`" + ` to ` + "`/api/chat/push`" + `
+2. Server forwards over WebSocket to the cicy-desktop client
+3. ` + "`useDesktopEvents.ts`" + ` in the renderer awaits ` + "`electronRPC(tool, args)`" + ` and dispatches ` + "`rpc-result`" + ` back through the WS
+4. CLI matches the result by ` + "`requestId`" + ` and prints it
+
+## More
+
+- tool map: [tools.md](./tools.md)
+`
+}
+
+func renderAgentDesktopTools() string {
+	return `# Agent Desktop Commands
+
+| Command | What it does |
+|---------|--------------|
+| ` + "`agent-desktop clients`" + ` | List connected cicy-desktop clients (tagged ` + "`cicy-desktop`" + `) and other webpage clients |
+| ` + "`agent-desktop ping`" + ` | Webpage ping + IPC ping on the auto-selected cicy-desktop |
+| ` + "`agent-desktop ping --client <id>`" + ` | Ping a specific client |
+| ` + "`agent-desktop screenshot`" + ` | Capture active window to clipboard (returns base64 PNG metadata) |
+| ` + "`agent-desktop clipboard get`" + ` | Read the desktop's clipboard text |
+| ` + "`agent-desktop clipboard set <text>`" + ` | Write text to the desktop's clipboard |
+| ` + "`agent-desktop exec <shell_cmd>`" + ` | Run a shell command on the desktop machine; returns ` + "`{stdout, stderr, exitCode}`" + ` |
+| ` + "`agent-desktop windows`" + ` | List system windows (` + "`get_system_windows`" + `); not implemented on win32 |
+| ` + "`agent-desktop sysinfo`" + ` | OS / CPU / memory / network summary (` + "`get_system_info`" + `) |
+| ` + "`agent-desktop rpc <tool> [json_args]`" + ` | Raw electronRPC call to any tool registered in cicy-desktop |
+| ` + "`agent-desktop --client <client_id> <cmd>`" + ` | Target a specific cicy-desktop client (otherwise auto-select ElectronMCP) |
+
+## Examples
+
+` + "```sh" + `
+# Round-trip ping
+agent-desktop ping
+
+# Read & write clipboard
+agent-desktop clipboard set "hello from $(hostname)"
+agent-desktop clipboard get
+
+# Run a Windows-side command via PowerShell
+agent-desktop exec "powershell -Command \"Get-Process | Select-Object -First 5\""
+
+# Raw RPC: ping the Electron tool registry
+agent-desktop rpc ping '{}'
+` + "```" + `
+
+## Notes
+
+- ` + "`rpc <tool>`" + ` accepts any tool name registered in the cicy-desktop binary. Use it for tools without a dedicated subcommand wrapper.
+- Result formatting: if the Electron tool returns ` + "`{content: [{type, text}]}`" + ` (MCP shape), only the ` + "`text`" + ` fields are joined and printed.
+- Timeouts: 30s per RPC call by default.
+`
 }
 
 func renderAgentWebpageSkill() string {

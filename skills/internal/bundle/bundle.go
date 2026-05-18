@@ -29,7 +29,9 @@ var (
 		{Name: "tts", Source: "dist/tts"},
 	}
 	HosttoolAliases = []string{
+		"agent-chrome",
 		"agent-code-server",
+		"agent-desktop",
 		"agent-webpage",
 		"aliyun-cli",
 		"cf",
