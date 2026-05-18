@@ -205,7 +205,7 @@ func handleFrpServerInstallInfo(w http.ResponseWriter, r *http.Request) {
 // regex-free parser — frps.toml is hand-written and shallow, importing a
 // full TOML lib for two scalars is overkill.
 func parseFrpsConfig(path string) (port int, token string) {
-	port = 7000 // frp default
+	port = 9500 // CiCy convention (upstream frp default is 7000)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return
@@ -245,19 +245,14 @@ func buildFrpClientInstallCommand(publicIP string, port int, token string) strin
 	if token == "" {
 		token = "<your-token>"
 	}
-	// One bash block the teammate pastes on their box: install cicy-code
-	// (brings the frp-client wrapper), write ~/cicy-ai/db/frpc.toml, start
-	// frpc. Works on macOS / Linux / WSL.
-	return "# Install cicy-code (brings frp-client) + register against this server\n" +
-		"npm i -g cicy-code@latest\n" +
-		"mkdir -p ~/cicy-ai/db\n" +
-		"cat > ~/cicy-ai/db/frpc.toml <<EOF\n" +
-		"serverAddr = \"" + publicIP + "\"\n" +
-		"serverPort = " + strconv.Itoa(port) + "\n" +
-		"auth.method = \"token\"\n" +
-		"auth.token = \"" + token + "\"\n" +
-		"EOF\n" +
-		"frp-client start\n"
+	// Canonical network-install path: install.cicy-ai.com/frp downloads the
+	// official fatedier/frp release, writes ~/cicy-ai/db/frpc.toml, and
+	// registers as a launchd/systemd service. Works on macOS / Linux / WSL.
+	// Re-running with no args reuses the existing config and hot-reloads.
+	return "curl -fsSL https://install.cicy-ai.com/frp | bash -s -- " +
+		"--server " + publicIP +
+		" --server-port " + strconv.Itoa(port) +
+		" --token " + token + "\n"
 }
 
 func errorf(s string) error {
