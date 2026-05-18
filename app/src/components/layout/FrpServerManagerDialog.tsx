@@ -42,8 +42,11 @@ export function FrpServerManagerDialog({
     server_port?: number;
     token?: string;
     install_command?: string;
+    install_command_bash?: string;
+    install_command_powershell?: string;
   } | null>(null);
   const [installLoading, setInstallLoading] = useState(false);
+  const [installVariant, setInstallVariant] = useState<'bash' | 'powershell'>('bash');
   const [revealToken, setRevealToken] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -428,28 +431,61 @@ export function FrpServerManagerDialog({
                     </dl>
 
                     <div className="border-t border-white/[0.05] pt-3">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-[10px] uppercase tracking-wider text-zinc-500">Run on the client</span>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (!install.install_command) return;
-                            await navigator.clipboard.writeText(install.install_command);
-                            setCopiedKey('cmd'); setTimeout(() => setCopiedKey(null), 1500);
-                          }}
-                          className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100 px-2 py-1 rounded border border-white/[0.06] hover:border-white/[0.12]"
-                        >
-                          {copiedKey === 'cmd'
-                            ? <>✓ Copied</>
-                            : <><Copy className="w-3 h-3" /> Copy</>}
-                        </button>
-                      </div>
-                      <pre className="font-mono text-[11px] text-zinc-300 whitespace-pre-wrap break-words bg-black/40 rounded p-2 max-h-64 overflow-y-auto">
-{install.install_command}
-                      </pre>
-                      <p className="mt-1.5 text-[10px] text-zinc-600 leading-relaxed">
-                        Works on macOS / Linux / WSL. On Windows, run it inside a WSL shell (<code className="text-zinc-400">wsl --install</code> first if needed). The teammate pastes this in a terminal; frpc registers as a launchd / systemd service and connects back here automatically.
-                      </p>
+                      {(() => {
+                        const currentCmd = installVariant === 'powershell'
+                          ? (install.install_command_powershell || install.install_command || '')
+                          : (install.install_command_bash || install.install_command || '');
+                        const tabBase = 'px-2 py-0.5 text-[10px] uppercase tracking-wider rounded transition-colors';
+                        const tabActive = 'bg-white/[0.08] text-zinc-100';
+                        const tabIdle = 'text-zinc-500 hover:text-zinc-300';
+                        return (
+                          <>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <div className="flex items-center gap-1">
+                                <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-1">Run on the client</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setInstallVariant('bash')}
+                                  className={cn(tabBase, installVariant === 'bash' ? tabActive : tabIdle)}
+                                  title="macOS / Linux / WSL"
+                                >
+                                  bash
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setInstallVariant('powershell')}
+                                  className={cn(tabBase, installVariant === 'powershell' ? tabActive : tabIdle)}
+                                  title="Native Windows PowerShell"
+                                >
+                                  PowerShell
+                                </button>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (!currentCmd) return;
+                                  await navigator.clipboard.writeText(currentCmd);
+                                  setCopiedKey('cmd'); setTimeout(() => setCopiedKey(null), 1500);
+                                }}
+                                className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100 px-2 py-1 rounded border border-white/[0.06] hover:border-white/[0.12]"
+                              >
+                                {copiedKey === 'cmd'
+                                  ? <>✓ Copied</>
+                                  : <><Copy className="w-3 h-3" /> Copy</>}
+                              </button>
+                            </div>
+                            <pre className="font-mono text-[11px] text-zinc-300 whitespace-pre-wrap break-words bg-black/40 rounded p-2 max-h-64 overflow-y-auto">
+{currentCmd}
+                            </pre>
+                            <p className="mt-1.5 text-[10px] text-zinc-600 leading-relaxed">
+                              {installVariant === 'powershell'
+                                ? <>Paste into <strong className="text-zinc-400">PowerShell</strong> on Windows. The script self-elevates (UAC prompt) and installs frpc as a Windows service that auto-starts on boot.</>
+                                : <>Paste into a terminal on macOS / Linux / WSL. frpc registers as a launchd / systemd service and connects back here automatically. Re-running with no args reuses the existing config and hot-reloads.</>
+                              }
+                            </p>
+                          </>
+                        );
+                      })()}
                     </div>
                   </>
                 )}
