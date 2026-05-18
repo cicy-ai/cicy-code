@@ -86,6 +86,16 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
       onLoad?.();
     };
 
+    // code-server (VSCode) calls editor.focus() after its bootstrap, which
+    // steals focus from whatever input the user is typing in. Render an
+    // invisible click-mask in front of the iframe that absorbs pointer
+    // events until the user explicitly clicks it. One click dismisses the
+    // mask and the user can use the editor normally. Reapplies on every
+    // src change (new file → new bootstrap → new focus grab).
+    const [pendingActivation, setPendingActivation] = useState(!!codeServer);
+    useEffect(() => { if (codeServer) setPendingActivation(true); }, [src, codeServer]);
+    const dismissActivation = useCallback(() => setPendingActivation(false), []);
+
     const setIframeRef = useCallback((node: HTMLIFrameElement | null) => {
       iframeRef.current = node;
       if (!ref) return;
@@ -181,6 +191,14 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
             </div>
           )}
           {(pointerLocked || maskActive) && <div data-id="web-frame-interaction-mask" className="absolute inset-0 z-20" />}
+          {pendingActivation && (
+            <div
+              data-id="web-frame-activation-mask"
+              className="absolute inset-0 z-30 cursor-pointer"
+              onClick={dismissActivation}
+              title="Click to activate editor"
+            />
+          )}
           <webview
             data-id="web-frame-webview"
             ref={webviewRef as any}
