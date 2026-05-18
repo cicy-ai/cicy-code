@@ -209,10 +209,14 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
           {pendingActivation && (
             <div
               data-id="web-frame-activation-mask"
-              className="absolute inset-0 z-30 cursor-pointer"
+              className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-sm cursor-pointer select-none"
               onClick={dismissActivation}
-              title="Click to activate editor"
-            />
+              onPointerDown={dismissActivation}
+            >
+              <div className="rounded-md border border-white/15 bg-zinc-900/80 px-4 py-2 text-xs font-medium text-zinc-200 shadow-lg">
+                Click to activate editor
+              </div>
+            </div>
           )}
           <webview
             data-id="web-frame-webview"
@@ -221,6 +225,7 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
             className={className}
             style={style}
             onClick={focusEmbeddedFrame as any}
+            {...(pendingActivation ? { inert: "" as any } : {})}
             allowpopups={"" as any}
             partition={`persist:sandbox-0`}
             webpreferences="allowRunningInsecureContent=true"
