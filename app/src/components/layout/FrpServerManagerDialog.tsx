@@ -445,7 +445,7 @@ export function FrpServerManagerDialog({
 {install.install_command}
                       </pre>
                       <p className="mt-1.5 text-[10px] text-zinc-600 leading-relaxed">
-                        Works on macOS / Linux / WSL. The teammate pastes this in a terminal; frp-client connects back here automatically.
+                        Works on macOS / Linux / WSL. On Windows, run it inside a WSL shell (<code className="text-zinc-400">wsl --install</code> first if needed). The teammate pastes this in a terminal; frpc registers as a launchd / systemd service and connects back here automatically.
                       </p>
                     </div>
                   </>
