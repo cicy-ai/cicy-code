@@ -789,15 +789,21 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       const detail = (e as CustomEvent).detail;
       sendChatWsMessage({ type: 'ipc_pong', data: detail });
     };
+    const rpcResultHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      sendChatWsMessage({ type: 'rpc_result', data: detail });
+    };
     window.addEventListener('gemini-vision-result', visionHandler as EventListener);
     window.addEventListener('gemini-ask-result', askHandler as EventListener);
     window.addEventListener('agent-pong', pongHandler as EventListener);
     window.addEventListener('ipc-pong', ipcPongHandler as EventListener);
+    window.addEventListener('rpc-result', rpcResultHandler as EventListener);
     return () => {
       window.removeEventListener('gemini-vision-result', visionHandler as EventListener);
       window.removeEventListener('gemini-ask-result', askHandler as EventListener);
       window.removeEventListener('agent-pong', pongHandler as EventListener);
       window.removeEventListener('ipc-pong', ipcPongHandler as EventListener);
+      window.removeEventListener('rpc-result', rpcResultHandler as EventListener);
     };
   }, [sendChatWsMessage]);
 
@@ -1600,8 +1606,13 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 </div>
               </div>
             ) : null}
-            <div data-testid="right-panel" data-id="right-panel" className="min-w-0 flex-1">
+            <div data-testid="right-panel" data-id="right-panel" className="min-w-0 flex-1 relative">
               {rightContent}
+              {providersOpen && (
+                <div data-id="providers-overlay" className="absolute inset-0 z-30 bg-[#0A0A0A]">
+                  <ProviderDashboard onBack={() => setProvidersOpen(false)} />
+                </div>
+              )}
             </div>
             {cliFixedContent}
           </div>
@@ -1778,12 +1789,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
       {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
       {toast && <div data-id="workspace-toast" className={`fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 text-sm rounded-lg shadow-lg ${toast.variant === 'success' ? 'bg-green-600 text-white' : 'bg-zinc-800 text-white'}`}>{toast.message}</div>}
-      {providersOpen && createPortal(
-        <div data-id="providers-overlay" className="fixed inset-0 z-[9000] bg-[#0A0A0A]">
-          <ProviderDashboard onBack={() => setProvidersOpen(false)} />
-        </div>,
-        document.body,
-      )}
     </div>
     </SendingProvider>
   );

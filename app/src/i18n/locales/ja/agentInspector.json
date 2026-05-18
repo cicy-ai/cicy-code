@@ -100,5 +100,17 @@
   "generalProxyDesc": "起動時にこのペインが利用するローカルプロキシ。",
   "customGateway": "ローカル ゲートウェイを使用",
   "customGatewayHint": "このエージェントをローカル AI ゲートウェイ経由でルーティング(プロバイダ/モデル選択可能)",
-  "modelSettingsRestartHint": "プロキシとローカルゲートウェイの切り替えはエージェント再起動が必要;モデルとプロバイダは即時反映"
+  "modelSettingsRestartHint": "プロキシとローカルゲートウェイの切り替えはエージェント再起動が必要;モデルとプロバイダは即時反映",
+  "webClientsTitle": "ウェブクライアント",
+  "webClientsSubtitle": "接続中のブラウザとデスクトップクライアント",
+  "webClientsRefreshed": "{{time}} 更新 · {{pane}} へ送信",
+  "webClientsEmpty": "オンラインのクライアントなし",
+  "webClientsEmptyHint": "cicy-desktop またはブラウザタブを開いて接続",
+  "webClientsPing": "Ping",
+  "webClientsPinging": "Ping中…",
+  "webClientsPingTimeout": "タイムアウト",
+  "webClientsSend": "送信",
+  "webClientsSending": "送信中…",
+  "webClientsSent": "送信済み",
+  "webClientsTestPrompt": "请用 agent-webpage skill 测试下 clientId: {{clientId}}"
 }

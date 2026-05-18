@@ -162,5 +162,17 @@
   "generalProxyDesc": "此窗格启动时使用的本地代理。",
   "customGateway": "使用 本地 网关",
   "customGatewayHint": "通过本地网关路由此Agent,可选择不同Provider 和模型",
-  "modelSettingsRestartHint": "代理和本地网关切换需重启 agent;模型和供应商实时生效"
+  "modelSettingsRestartHint": "代理和本地网关切换需重启 agent;模型和供应商实时生效",
+  "webClientsTitle": "网页客户端",
+  "webClientsSubtitle": "已连接的浏览器与桌面客户端",
+  "webClientsRefreshed": "{{time}} 刷新 · 发送到 {{pane}}",
+  "webClientsEmpty": "没有在线客户端",
+  "webClientsEmptyHint": "打开 cicy-desktop 或网页即可连入",
+  "webClientsPing": "Ping",
+  "webClientsPinging": "Ping 中…",
+  "webClientsPingTimeout": "超时",
+  "webClientsSend": "发消息",
+  "webClientsSending": "发送中…",
+  "webClientsSent": "已发送",
+  "webClientsTestPrompt": "请用 agent-webpage skill 测试下 clientId: {{clientId}}"
 }
