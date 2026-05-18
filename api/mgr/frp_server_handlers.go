@@ -190,14 +190,17 @@ func handleFrpServerInstallInfo(w http.ResponseWriter, r *http.Request) {
 	cfgPath := filepath.Join(home, "cicy-ai", "db", "frps.toml")
 	port, token := parseFrpsConfig(cfgPath)
 
-	cmd := buildFrpClientInstallCommand(publicIP, port, token)
+	bashCmd := buildFrpClientInstallCommand(publicIP, port, token)
+	psCmd := buildFrpClientInstallCommandPowerShell(publicIP, port, token)
 	J(w, M{
-		"success":         true,
-		"public_ip":       publicIP,
-		"server_port":     port,
-		"token":           token,
-		"config_path":     cfgPath,
-		"install_command": cmd,
+		"success":                    true,
+		"public_ip":                  publicIP,
+		"server_port":                port,
+		"token":                      token,
+		"config_path":                cfgPath,
+		"install_command":            bashCmd, // back-compat: bash
+		"install_command_bash":       bashCmd,
+		"install_command_powershell": psCmd,
 	})
 }
 
@@ -253,6 +256,27 @@ func buildFrpClientInstallCommand(publicIP string, port int, token string) strin
 		"--server " + publicIP +
 		" --server-port " + strconv.Itoa(port) +
 		" --token " + token + "\n"
+}
+
+// buildFrpClientInstallCommandPowerShell emits the native-Windows variant.
+// install.cicy-ai.com is a Cloudflare Worker that does User-Agent content
+// negotiation — PowerShell gets the .ps1 script automatically — so we just
+// download to %TEMP% and exec with the right flags. Self-elevates to install
+// as a Windows service.
+func buildFrpClientInstallCommandPowerShell(publicIP string, port int, token string) string {
+	if publicIP == "" {
+		publicIP = "<your-server-public-ip>"
+	}
+	if token == "" {
+		token = "<your-token>"
+	}
+	return "$u='https://install.cicy-ai.com/frp'; " +
+		"$p=Join-Path $env:TEMP 'install-frpc-client.ps1'; " +
+		"irm $u -OutFile $p; " +
+		"powershell -ExecutionPolicy Bypass -File $p " +
+		"-Server '" + publicIP + "' " +
+		"-ServerPort " + strconv.Itoa(port) + " " +
+		"-Token '" + token + "'\n"
 }
 
 func errorf(s string) error {
