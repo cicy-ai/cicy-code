@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -166,6 +167,97 @@ func handleFrpServerLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	J(w, M{"success": true, "logs": strings.TrimSpace(out)})
+}
+
+// handleFrpServerInstallInfo — GET /api/frp-server/install-info
+//
+// Returns everything a teammate needs to register a frp-client against THIS
+// server: public IPv4 (fetched no-proxy so mihomo egress doesn't leak in),
+// the bindPort from frps.toml, the auth.token, plus a ready-to-paste bash
+// one-liner the user can copy onto the client box. Token is real (this
+// endpoint is auth-protected via authM in main.go), so render it carefully
+// in the UI (masked by default + reveal toggle).
+func handleFrpServerInstallInfo(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+
+	publicIP, err := fetchPublicIPv4(ctx)
+	if err != nil {
+		publicIP = ""
+	}
+
+	home, _ := os.UserHomeDir()
+	cfgPath := filepath.Join(home, "cicy-ai", "db", "frps.toml")
+	port, token := parseFrpsConfig(cfgPath)
+
+	cmd := buildFrpClientInstallCommand(publicIP, port, token)
+	J(w, M{
+		"success":         true,
+		"public_ip":       publicIP,
+		"server_port":     port,
+		"token":           token,
+		"config_path":     cfgPath,
+		"install_command": cmd,
+	})
+}
+
+// parseFrpsConfig pulls bindPort + auth.token from a frps.toml. Tiny
+// regex-free parser — frps.toml is hand-written and shallow, importing a
+// full TOML lib for two scalars is overkill.
+func parseFrpsConfig(path string) (port int, token string) {
+	port = 7000 // frp default
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if v, ok := tomlScalar(line, "bindPort"); ok {
+			if p, err := strconv.Atoi(strings.Trim(v, `"`)); err == nil {
+				port = p
+			}
+		}
+		if v, ok := tomlScalar(line, "auth.token"); ok {
+			token = strings.Trim(v, `"`)
+		}
+	}
+	return
+}
+
+func tomlScalar(line, key string) (string, bool) {
+	if !strings.HasPrefix(line, key+" ") && !strings.HasPrefix(line, key+"=") {
+		return "", false
+	}
+	eq := strings.Index(line, "=")
+	if eq < 0 {
+		return "", false
+	}
+	return strings.TrimSpace(line[eq+1:]), true
+}
+
+func buildFrpClientInstallCommand(publicIP string, port int, token string) string {
+	if publicIP == "" {
+		publicIP = "<your-server-public-ip>"
+	}
+	if token == "" {
+		token = "<your-token>"
+	}
+	// One bash block the teammate pastes on their box: install cicy-code
+	// (brings the frp-client wrapper), write ~/cicy-ai/db/frpc.toml, start
+	// frpc. Works on macOS / Linux / WSL.
+	return "# Install cicy-code (brings frp-client) + register against this server\n" +
+		"npm i -g cicy-code@latest\n" +
+		"mkdir -p ~/cicy-ai/db\n" +
+		"cat > ~/cicy-ai/db/frpc.toml <<EOF\n" +
+		"serverAddr = \"" + publicIP + "\"\n" +
+		"serverPort = " + strconv.Itoa(port) + "\n" +
+		"auth.method = \"token\"\n" +
+		"auth.token = \"" + token + "\"\n" +
+		"EOF\n" +
+		"frp-client start\n"
 }
 
 func errorf(s string) error {

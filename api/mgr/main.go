@@ -144,6 +144,7 @@ Options:
 	http.HandleFunc("/api/frp-server/connections", authM(handleFrpServerConnections))
 	http.HandleFunc("/api/frp-server/clients", authM(handleFrpServerClients))
 	http.HandleFunc("/api/frp-server/logs", authM(handleFrpServerLogs))
+	http.HandleFunc("/api/frp-server/install-info", authM(handleFrpServerInstallInfo))
 
 	// Panes
 	http.HandleFunc("/api/panes", authM(handlePanes))
