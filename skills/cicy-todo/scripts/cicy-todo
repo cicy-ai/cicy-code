@@ -28,7 +28,15 @@ resolve_port() {
 }
 
 resolve_pane() {
-  printf '%s' "${PANE_OVERRIDE:-${CICY_PANE_ID:-w-10001}}"
+  if [[ -n "${PANE_OVERRIDE:-}" ]]; then
+    printf '%s' "$PANE_OVERRIDE"
+    return
+  fi
+  if [[ -n "${CICY_PANE_ID:-}" ]]; then
+    printf '%s' "$CICY_PANE_ID"
+    return
+  fi
+  die "no worker pane specified — pass it explicitly (e.g. \`cicy-todo w-10012 add ...\` or \`--pane w-10012\`)" 2
 }
 
 base_url() {
@@ -43,7 +51,8 @@ api() {
   local url token pane http_code resp tmp
   url="$(base_url)$path"
   token="$(resolve_token)"
-  pane="$(resolve_pane)"
+  pane="$(resolve_pane)" || exit $?
+  [[ -n "$pane" ]] || exit 2
   tmp="$(mktemp)"
   if [[ -n "$body" ]]; then
     http_code=$(curl -sS -o "$tmp" -w '%{http_code}' \

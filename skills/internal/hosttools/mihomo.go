@@ -180,6 +180,10 @@ Conventions (gen-config writes this layout — see cicy-ai/cicy-mihomo v1.10.2):
   - globalPassword: any non-empty username + this password authenticates.
                     Add per-user entries under authentication: only when you
                     need a different password for that user.
+  - skip-auth-prefixes: [127.0.0.1/32, ::1/128] — localhost callers skip the
+                    user/password challenge so the host's own Chrome /
+                    curl can use the proxy at 127.0.0.1:9001 with no creds
+                    (Chrome's --proxy-server doesn't accept inline auth).
   - IN-USER-PREFIX,w-,default_proxy_group:
                     every username starting with "w-" routes via
                     default_proxy_group. Add IN-USER,<user>,<target> ABOVE
@@ -454,8 +458,15 @@ func (t *mihomoTool) defaultTemplate() string {
 	// has added any real upstream — traffic just passes through. The user
 	// adds their real proxies under `proxies:` and into `default_proxy_group`
 	// when they want actual upstream routing.
+	//
+	// skip-auth-prefixes: localhost CIDRs bypass the user/password challenge so
+	// the host's own Chrome / curl / scripts can use the proxy at 127.0.0.1:9001
+	// without inline credentials (Chrome's --proxy-server doesn't accept
+	// user:pass@host:port, so this avoids the ERR_NO_SUPPORTED_PROXIES dance).
+	// Remote callers from other machines still go through normal auth via
+	// globalPassword + a `w-*` username.
 	password := randomAlphaNum(16)
-	return fmt.Sprintf("mixed-port: 9001\nallow-lan: true\nbind: 0.0.0.0\nmode: rule\nlog-level: debug\n\nexternal-controller: 127.0.0.1:19001\n\nglobalPassword: %q\n\nproxies:\n  - name: \"default_proxy_node\"\n    type: direct\n\nproxy-groups:\n  - name: default_proxy_group\n    type: select\n    proxies:\n      - default_proxy_node\n\nrules:\n  - IN-USER-PREFIX,w-,default_proxy_group\n  - MATCH,REJECT\n", password)
+	return fmt.Sprintf("mixed-port: 9001\nallow-lan: true\nbind: 0.0.0.0\nmode: rule\nlog-level: debug\n\nexternal-controller: 127.0.0.1:19001\n\nglobalPassword: %q\n\nskip-auth-prefixes:\n  - 127.0.0.1/32\n  - ::1/128\n\nproxies:\n  - name: \"default_proxy_node\"\n    type: direct\n\nproxy-groups:\n  - name: default_proxy_group\n    type: select\n    proxies:\n      - default_proxy_node\n\nrules:\n  - IN-USER-PREFIX,w-,default_proxy_group\n  - MATCH,REJECT\n", password)
 }
 
 func randomAlphaNum(n int) string {
