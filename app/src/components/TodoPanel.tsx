@@ -257,16 +257,39 @@ export default function TodoPanel({ paneId, active }: Props) {
 
               <div className="min-w-0 flex-1">
                 {isEditing ? (
-                  <input
+                  <textarea
                     autoFocus
+                    rows={1}
                     value={editingDraft}
-                    onChange={(e) => setEditingDraft(e.target.value)}
+                    onChange={(e) => {
+                      setEditingDraft(e.target.value);
+                      // Auto-grow to content height so long titles are
+                      // fully visible during edit, no horizontal scroll.
+                      const el = e.target as HTMLTextAreaElement;
+                      el.style.height = 'auto';
+                      el.style.height = `${el.scrollHeight}px`;
+                    }}
+                    ref={(el) => {
+                      if (!el) return;
+                      // Size to content on mount too.
+                      el.style.height = 'auto';
+                      el.style.height = `${el.scrollHeight}px`;
+                    }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') { e.preventDefault(); submitEdit(t.id); }
-                      if (e.key === 'Escape') { e.preventDefault(); setEditingId(null); setEditingDraft(''); }
+                      // Enter submits; Shift+Enter inserts a newline for
+                      // users who actually need multi-line titles.
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        submitEdit(t.id);
+                      }
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setEditingId(null);
+                        setEditingDraft('');
+                      }
                     }}
                     onBlur={() => submitEdit(t.id)}
-                    className="m-0 block h-5 w-full border-0 bg-transparent p-0 text-[13px] leading-5 text-zinc-100 outline-none"
+                    className="m-0 block w-full resize-none border-0 bg-transparent p-0 text-[13px] leading-5 text-zinc-100 outline-none overflow-hidden"
                   />
                 ) : (
                   <div
