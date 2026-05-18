@@ -217,6 +217,10 @@ const api = {
   getFrpServerLogs: (lines?: number) => http.get('/api/frp-server/logs', { params: lines ? { lines } : {} }),
   getFrpServerInstallInfo: () => http.get('/api/frp-server/install-info'),
 
+  // webpage ws-client management
+  getChatClients: () => http.get('/api/chat/clients'),
+  pingChatClient: (clientId: string) => http.post('/api/chat/ping-client', { client_id: clientId }),
+
   listTodos: (paneId: string, params?: { status?: string; q?: string }) =>
     http.get('/api/todo/list', { params: { pane_id: paneId, ...(params || {}) } }),
   getTodoCounts: (paneId: string) => http.get('/api/todo/counts', { params: { pane_id: paneId } }),

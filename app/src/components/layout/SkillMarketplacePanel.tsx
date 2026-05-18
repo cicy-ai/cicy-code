@@ -14,6 +14,7 @@ import { useDialogs } from '../ui/Modal';
 import { ProxyManagerDialog } from './ProxyManagerDialog';
 import { ProxySshManagerDialog } from './ProxySshManagerDialog';
 import { FrpServerManagerDialog } from './FrpServerManagerDialog';
+import { WebClientsDrawer } from './WebClientsDrawer';
 
 // Prompt sent to the active agent when the user clicks "Authorize Google" in
 // the skill detail. The agent uses the `google` skill's `login` tool to drive
@@ -99,6 +100,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
   const [proxyManagerOpen, setProxyManagerOpen] = useState(false);
   const [proxySshManagerOpen, setProxySshManagerOpen] = useState(false);
   const [frpServerManagerOpen, setFrpServerManagerOpen] = useState(false);
+  const [webClientsOpen, setWebClientsOpen] = useState(false);
   // Stable refs for props passed to <SkillDetailModal>. Without these, every
   // parent re-render (e.g. the 5s WS poll cycle) emits new closures, which
   // propagates through sendToAgent → MarkdownPane.components → react-markdown
@@ -108,6 +110,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
   const handleOpenProxyManager = useCallback(() => { setSelectedName(null); setProxyManagerOpen(true); }, []);
   const handleOpenProxySshManager = useCallback(() => { setSelectedName(null); setProxySshManagerOpen(true); }, []);
   const handleOpenFrpServerManager = useCallback(() => { setSelectedName(null); setFrpServerManagerOpen(true); }, []);
+  const handleOpenWebClients = useCallback(() => { setSelectedName(null); setWebClientsOpen(true); }, []);
 
   const load = async () => {
     setLoading(true);
@@ -261,11 +264,13 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
           onOpenProxyManager={handleOpenProxyManager}
           onOpenProxySshManager={handleOpenProxySshManager}
           onOpenFrpServerManager={handleOpenFrpServerManager}
+          onOpenWebClients={handleOpenWebClients}
         />
       )}
       <ProxyManagerDialog open={proxyManagerOpen} onClose={() => setProxyManagerOpen(false)} paneId={paneId} />
       <ProxySshManagerDialog open={proxySshManagerOpen} onClose={() => setProxySshManagerOpen(false)} />
       <FrpServerManagerDialog open={frpServerManagerOpen} onClose={() => setFrpServerManagerOpen(false)} />
+      <WebClientsDrawer open={webClientsOpen} onClose={() => setWebClientsOpen(false)} paneId={paneId} />
     </>
   );
 }
@@ -377,7 +382,7 @@ function InlineStatus({ skill }: { skill: MarketSkill }) {
 
 type Tab = 'help' | 'tools';
 
-function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpenProxyManager, onOpenProxySshManager, onOpenFrpServerManager }: {
+function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpenProxyManager, onOpenProxySshManager, onOpenFrpServerManager, onOpenWebClients }: {
   name: string;
   paneId: string;
   onClose: () => void;
@@ -386,6 +391,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
   onOpenProxyManager: () => void;
   onOpenProxySshManager: () => void;
   onOpenFrpServerManager: () => void;
+  onOpenWebClients: () => void;
 }) {
   const { t } = useTranslation('workspace');
   const [data, setData] = useState<SkillDetailPayload | null>(null);
@@ -589,13 +595,18 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
 
   const skill = data?.skill;
 
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setPortalTarget(document.querySelector('[data-testid="right-panel"]') as HTMLElement | null);
+  }, []);
+  if (!portalTarget) return null;
+
   return createPortal(
     <div
-      className="fixed inset-0 z-[9999991] flex items-center justify-center bg-black/55 backdrop-blur-sm animate-[fadeIn_120ms_ease-out]"
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      className="absolute inset-0 z-30 animate-[fadeIn_120ms_ease-out]"
       data-id="skill-detail-modal"
     >
-      <div data-id="skill-marketplace-panel-auto-19" className="mx-4 w-full max-w-[760px] h-[80vh] flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#161618] shadow-2xl shadow-black/60">
+      <div data-id="skill-marketplace-panel-auto-19" className="h-full w-full flex flex-col overflow-hidden bg-[#161618]">
         {/* Header */}
         <div className="px-5 pt-5 pb-3 border-b border-white/[0.06] shrink-0" data-id="skill-detail-header">
           <div data-id="skill-marketplace-panel-auto-20" className="flex items-start gap-3">
@@ -660,6 +671,11 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
                         <button data-id="skill-detail-manage-frp-server" onClick={onOpenFrpServerManager} className="text-[12px] px-3 py-1.5 rounded bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 transition-colors inline-flex items-center gap-1">
                           <Server className="w-3 h-3" />
                           {t('frpServerManagerTitle')}
+                        </button>
+                      ) : skill.name === 'agent-webpage' ? (
+                        <button data-id="skill-detail-manage-web-clients" onClick={onOpenWebClients} className="text-[12px] px-3 py-1.5 rounded bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 transition-colors inline-flex items-center gap-1">
+                          <Globe className="w-3 h-3" />
+                          Clients
                         </button>
                       ) : skill.name === 'skill-author' ? null : (
                         <button data-id="skill-detail-uninstall" onClick={handleUninstall} disabled={busy} className="text-[12px] px-3 py-1.5 rounded text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors">
@@ -829,7 +845,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
       </div>
       {confirmNode}
     </div>,
-    document.body
+    portalTarget
   );
 }
 

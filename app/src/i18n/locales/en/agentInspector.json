@@ -178,5 +178,17 @@
   "generalProxyDesc": "Local proxy used by this pane on launch.",
   "customGateway": "Use local gateway",
   "customGatewayHint": "Route this agent through the local AI gateway with selectable providers/models",
-  "modelSettingsRestartHint": "Proxy and local-gateway toggle require restarting the agent; model and provider apply live"
+  "modelSettingsRestartHint": "Proxy and local-gateway toggle require restarting the agent; model and provider apply live",
+  "webClientsTitle": "Webpage Clients",
+  "webClientsSubtitle": "Connected browsers and desktop clients",
+  "webClientsRefreshed": "Refreshed at {{time}} · sending to {{pane}}",
+  "webClientsEmpty": "No clients online",
+  "webClientsEmptyHint": "Open cicy-desktop or a browser tab to connect",
+  "webClientsPing": "Ping",
+  "webClientsPinging": "Pinging…",
+  "webClientsPingTimeout": "Timeout",
+  "webClientsSend": "Send",
+  "webClientsSending": "Sending…",
+  "webClientsSent": "Sent",
+  "webClientsTestPrompt": "请用 agent-webpage skill 测试下 clientId: {{clientId}}"
 }

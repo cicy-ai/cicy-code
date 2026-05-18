@@ -33,6 +33,30 @@ export default function useDesktopEvents(addApp: (app: any) => void) {
         return;
       }
 
+      if (d.type === 'rpc_call') {
+        const rpc = (window as any).electronRPC;
+        if (typeof rpc !== 'function') {
+          window.dispatchEvent(new CustomEvent('rpc-result', { detail: { requestId: d.requestId, error: 'electronRPC not available' } }));
+          return;
+        }
+        try {
+          const raw = await rpc(d.tool, d.args || {});
+          // Extract text content from MCP-style { content: [{ type, text }] } responses.
+          let result: string;
+          if (raw && Array.isArray(raw.content)) {
+            result = raw.content.map((c: any) => c.text ?? '').join('\n');
+          } else if (raw !== null && raw !== undefined) {
+            result = typeof raw === 'string' ? raw : JSON.stringify(raw);
+          } else {
+            result = '';
+          }
+          window.dispatchEvent(new CustomEvent('rpc-result', { detail: { requestId: d.requestId, result } }));
+        } catch (err: any) {
+          window.dispatchEvent(new CustomEvent('rpc-result', { detail: { requestId: d.requestId, error: err.message || String(err) } }));
+        }
+        return;
+      }
+
       if (d.type === 'add_app') {
         addApp({ id: d.id || `app-${Date.now()}`, type: d.widget ? 'widget' : 'icon', label: d.label || 'App', emoji: d.emoji || '📦', url: d.url || '', size: d.size, srcdoc: d.srcdoc });
         if (!d.widget && d.autoOpen !== false) openInElectron(d.url, d.label);

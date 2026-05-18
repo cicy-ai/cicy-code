@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Circle, CircleDot, CheckCircle2, CircleSlash, Trash2, MoreHorizontal, Sparkles, Loader2, GripVertical, Search, ArrowRight, Pencil, X as XIcon } from 'lucide-react';
 import apiService from '../services/api';
 
@@ -54,6 +55,7 @@ export default function TodoPanel({ paneId, active }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingDraft, setEditingDraft] = useState('');
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [aligning, setAligning] = useState<'idle' | 'sending' | 'sent'>('idle');
   // DnD state — id of the card the user is currently dragging, plus the
   // column it's being hovered over. The latter is used purely to highlight
@@ -137,6 +139,7 @@ export default function TodoPanel({ paneId, active }: Props) {
     try {
       await apiService.updateTodo(paneId, id, { status });
       setMenuOpenId(null);
+      setMenuPos(null);
       refresh();
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'update failed');
@@ -147,6 +150,7 @@ export default function TodoPanel({ paneId, active }: Props) {
     try {
       await apiService.deleteTodo(paneId, id);
       setMenuOpenId(null);
+      setMenuPos(null);
       refresh();
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'delete failed');
@@ -287,7 +291,10 @@ export default function TodoPanel({ paneId, active }: Props) {
               </div>
 
               {/* Card list */}
-              <div className="flex-1 space-y-2 overflow-y-auto p-2">
+              <div
+                className="flex-1 space-y-2 overflow-y-auto p-2"
+                onScroll={() => { setMenuOpenId(null); setMenuPos(null); }}
+              >
                 {cards.length === 0 ? (
                   <div className="px-2 py-6 text-center text-[11px] text-zinc-700">{searchQuery ? '无匹配' : '空'}</div>
                 ) : (
@@ -358,23 +365,37 @@ export default function TodoPanel({ paneId, active }: Props) {
                                     <ArrowRight className="h-3 w-3" />
                                   </CardAction>
                                 )}
-                                <div className="relative">
-                                  <CardAction onClick={() => setMenuOpenId(menuOpenId === t.id ? null : t.id)} title="更多">
-                                    <MoreHorizontal className="h-3 w-3" />
-                                  </CardAction>
-                                  {menuOpenId === t.id && (
-                                    <>
-                                      <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)} />
-                                      <div className="absolute right-0 top-6 z-20 min-w-[140px] rounded-md border border-white/[0.08] bg-[#161616] py-1 text-[12px] shadow-xl">
-                                        {COLUMNS.filter((s) => s !== t.status).map((s) => (
-                                          <MenuItem key={s} onClick={() => setStatus(t.id, s)} icon={statusIcon(s)}>移到 {statusLabel(s)}</MenuItem>
-                                        ))}
-                                        <div className="my-1 border-t border-white/[0.06]" />
-                                        <MenuItem onClick={() => remove(t.id)} icon={<Trash2 className="h-3.5 w-3.5" />} danger>删除</MenuItem>
-                                      </div>
-                                    </>
-                                  )}
-                                </div>
+                                <CardAction
+                                  onClick={(e) => {
+                                    if (menuOpenId === t.id) {
+                                      setMenuOpenId(null);
+                                      setMenuPos(null);
+                                    } else {
+                                      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                      setMenuPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+                                      setMenuOpenId(t.id);
+                                    }
+                                  }}
+                                  title="更多"
+                                >
+                                  <MoreHorizontal className="h-3 w-3" />
+                                </CardAction>
+                                {menuOpenId === t.id && menuPos && createPortal(
+                                  <>
+                                    <div className="fixed inset-0 z-[100]" onClick={() => { setMenuOpenId(null); setMenuPos(null); }} />
+                                    <div
+                                      className="fixed z-[101] min-w-[140px] rounded-md border border-white/[0.08] bg-[#161616] py-1 text-[12px] shadow-xl"
+                                      style={{ top: menuPos.top, right: menuPos.right }}
+                                    >
+                                      {COLUMNS.filter((s) => s !== t.status).map((s) => (
+                                        <MenuItem key={s} onClick={() => setStatus(t.id, s)} icon={statusIcon(s)}>移到 {statusLabel(s)}</MenuItem>
+                                      ))}
+                                      <div className="my-1 border-t border-white/[0.06]" />
+                                      <MenuItem onClick={() => remove(t.id)} icon={<Trash2 className="h-3.5 w-3.5" />} danger>删除</MenuItem>
+                                    </div>
+                                  </>,
+                                  document.body
+                                )}
                               </>
                             )}
                           </div>
@@ -398,7 +419,7 @@ export default function TodoPanel({ paneId, active }: Props) {
   );
 }
 
-function CardAction({ children, onClick, title }: { children: React.ReactNode; onClick: () => void; title?: string }) {
+function CardAction({ children, onClick, title }: { children: React.ReactNode; onClick: (e: React.MouseEvent<HTMLButtonElement>) => void; title?: string }) {
   return (
     <button
       onClick={onClick}

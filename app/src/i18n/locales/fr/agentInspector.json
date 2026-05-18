@@ -100,5 +100,17 @@
   "generalProxyDesc": "Proxy local utilisé par ce panneau au démarrage.",
   "customGateway": "Utiliser la passerelle locale",
   "customGatewayHint": "Router cet agent via la passerelle IA locale (fournisseurs/modèles sélectionnables)",
-  "modelSettingsRestartHint": "Le proxy et la bascule de passerelle locale exigent un redémarrage; modèle et provider s'appliquent en direct"
+  "modelSettingsRestartHint": "Le proxy et la bascule de passerelle locale exigent un redémarrage; modèle et provider s'appliquent en direct",
+  "webClientsTitle": "Clients Web",
+  "webClientsSubtitle": "Navigateurs et clients desktop connectés",
+  "webClientsRefreshed": "Actualisé à {{time}} · envoi vers {{pane}}",
+  "webClientsEmpty": "Aucun client en ligne",
+  "webClientsEmptyHint": "Ouvrez cicy-desktop ou un onglet pour vous connecter",
+  "webClientsPing": "Ping",
+  "webClientsPinging": "Ping…",
+  "webClientsPingTimeout": "Délai dépassé",
+  "webClientsSend": "Envoyer",
+  "webClientsSending": "Envoi…",
+  "webClientsSent": "Envoyé",
+  "webClientsTestPrompt": "请用 agent-webpage skill 测试下 clientId: {{clientId}}"
 }
