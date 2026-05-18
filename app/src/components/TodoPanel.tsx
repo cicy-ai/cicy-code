@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Circle, CircleDot, CheckCircle2, CircleSlash, Trash2, MoreHorizontal, Sparkles, Loader2 } from 'lucide-react';
+import { Circle, CircleDot, CheckCircle2, CircleSlash, Trash2, MoreHorizontal, Sparkles, Loader2, GripVertical, Search, ArrowRight, Pencil, X as XIcon } from 'lucide-react';
 import apiService from '../services/api';
 
 // Prompt sent to the current agent when the user clicks "对齐进度".
@@ -34,13 +34,8 @@ interface Counts {
 
 type Filter = 'all' | TodoStatus;
 
-const filterMeta: { key: Filter; label: string }[] = [
-  { key: 'all',     label: '全部' },
-  { key: 'todo',    label: '待办' },
-  { key: 'doing',   label: '进行中' },
-  { key: 'done',    label: '已完成' },
-  { key: 'dropped', label: '废弃' },
-];
+// Kanban column order — fixed left→right, mirrors the natural task lifecycle.
+const COLUMNS: TodoStatus[] = ['todo', 'doing', 'done', 'dropped'];
 
 const POLL_MS = 5000;
 
@@ -52,14 +47,19 @@ interface Props {
 export default function TodoPanel({ paneId, active }: Props) {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [counts, setCounts] = useState<Counts>({ all: 0, todo: 0, doing: 0, done: 0, dropped: 0 });
-  const [filter, setFilter] = useState<Filter>('all');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingDraft, setEditingDraft] = useState('');
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [aligning, setAligning] = useState<'idle' | 'sending' | 'sent'>('idle');
+  // DnD state — id of the card the user is currently dragging, plus the
+  // column it's being hovered over. The latter is used purely to highlight
+  // the target column, not to gate the drop itself.
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverCol, setDragOverCol] = useState<TodoStatus | null>(null);
   const addInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -91,9 +91,22 @@ export default function TodoPanel({ paneId, active }: Props) {
     if (active) requestAnimationFrame(() => addInputRef.current?.focus());
   }, [active]);
 
-  const filtered = useMemo(() => {
-    return todos.filter((t) => filter === 'all' || t.status === filter);
-  }, [todos, filter]);
+  // Filtered & bucketed by column. Search is a case-insensitive substring
+  // match against the title — cheap and predictable on the typical scale
+  // (tens-of-todos per pane).
+  const bucketed = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const visible = q
+      ? todos.filter((t) => t.title.toLowerCase().includes(q))
+      : todos;
+    const out: Record<TodoStatus, Todo[]> = { todo: [], doing: [], done: [], dropped: [] };
+    for (const t of visible) out[t.status].push(t);
+    // Sort within each column: most-recently-updated first.
+    for (const k of COLUMNS) {
+      out[k].sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+    }
+    return out;
+  }, [todos, searchQuery]);
 
   const submitAdd = async () => {
     const title = draftTitle.trim();
@@ -117,16 +130,6 @@ export default function TodoPanel({ paneId, active }: Props) {
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'send align prompt failed');
       setAligning('idle');
-    }
-  };
-
-  const cycleStatus = async (t: Todo) => {
-    const next: TodoStatus = t.status === 'todo' ? 'doing' : t.status === 'doing' ? 'done' : 'todo';
-    try {
-      await apiService.updateTodo(paneId, t.id, { status: next });
-      refresh();
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || 'update failed');
     }
   };
 
@@ -163,9 +166,32 @@ export default function TodoPanel({ paneId, active }: Props) {
     }
   };
 
+  // DnD handlers — wired on the column body. Native HTML5 DnD, no library.
+  const handleDropOn = (status: TodoStatus) => async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverCol(null);
+    const id = e.dataTransfer.getData('text/plain');
+    setDraggingId(null);
+    if (!id) return;
+    const t = todos.find((x) => x.id === id);
+    if (!t || t.status === status) return;
+    try {
+      // Optimistic update — keep the card stuck in its new column while
+      // the request flies. refresh() will reconcile if the server rejects.
+      setTodos((cur) => cur.map((x) => (x.id === id ? { ...x, status, updated_at: new Date().toISOString() } : x)));
+      await apiService.updateTodo(paneId, id, { status });
+      refresh();
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || e?.message || 'update failed');
+      refresh();
+    }
+  };
+
+  const totalVisible = bucketed.todo.length + bucketed.doing.length + bucketed.done.length + bucketed.dropped.length;
+
   return (
     <div data-id="todo-panel" className="absolute inset-0 flex flex-col bg-[#0A0A0A] text-zinc-100">
-      {/* top bar: always-on autofocus input — Enter adds */}
+      {/* HEADER — quick-add input + search + align-with-agent action */}
       <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/[0.06] px-4">
         <Circle className="h-4 w-4 shrink-0 text-zinc-600" />
         <input
@@ -178,36 +204,32 @@ export default function TodoPanel({ paneId, active }: Props) {
             if (e.key === 'Escape') { e.preventDefault(); setDraftTitle(''); }
           }}
           placeholder="想到啥写啥，Enter 即加入"
-          className="m-0 h-6 w-full border-0 bg-transparent p-0 text-[14px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-600"
+          className="m-0 h-6 flex-1 border-0 bg-transparent p-0 text-[14px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-600"
         />
       </div>
 
-      {/* filter chips + align-with-agent action */}
-      <div className="flex h-11 shrink-0 items-center gap-1 border-b border-white/[0.06] px-3">
-        <div className="flex flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap scrollbar-none">
-          {filterMeta.map(({ key, label }) => {
-            const c = counts[key];
-            const active = filter === key;
-            const cls = statusClasses(key);
-            return (
-              <button
-                key={key}
-                onClick={() => setFilter(key)}
-                className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[12px] transition-colors ${
-                  active ? cls.active : cls.idle
-                }`}
-              >
-                <span>{label}</span>
-                <span className={`text-[11px] tabular-nums ${active ? 'text-zinc-400' : 'text-zinc-600'}`}>{c}</span>
-              </button>
-            );
-          })}
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-white/[0.06] px-3">
+        <div className="flex flex-1 items-center gap-2 rounded-md bg-white/[0.04] px-2.5 py-1">
+          <Search className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') setSearchQuery(''); }}
+            placeholder="搜索 todo…"
+            className="m-0 h-5 w-full border-0 bg-transparent p-0 text-[12px] leading-5 text-zinc-200 outline-none placeholder:text-zinc-600"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} className="text-zinc-500 hover:text-zinc-200" title="清空搜索">
+              <XIcon className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
+        <span className="text-[11px] tabular-nums text-zinc-600">{totalVisible}/{counts.all}</span>
         <button
           onClick={sendAlignPrompt}
           disabled={aligning !== 'idle'}
           title="让当前 agent 对照实际进度更新这份 todo 清单"
-          className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[12px] transition-colors ${
+          className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] transition-colors ${
             aligning === 'sent'
               ? 'bg-emerald-500/[0.12] text-emerald-300'
               : aligning === 'sending'
@@ -224,121 +246,172 @@ export default function TodoPanel({ paneId, active }: Props) {
         </button>
       </div>
 
-      {/* list */}
-      <div className="flex-1 overflow-y-auto">
-        {error && (
-          <div className="mx-3 mt-3 rounded-md border border-red-500/30 bg-red-500/[0.08] px-3 py-2 text-[12px] text-red-300">
-            {error}
-            <button onClick={() => { setError(null); refresh(); }} className="ml-2 underline">retry</button>
-          </div>
-        )}
+      {error && (
+        <div className="mx-3 mt-3 shrink-0 rounded-md border border-red-500/30 bg-red-500/[0.08] px-3 py-2 text-[12px] text-red-300">
+          {error}
+          <button onClick={() => { setError(null); refresh(); }} className="ml-2 underline">retry</button>
+        </div>
+      )}
 
-        {!loading && filtered.length === 0 && (
-          <div className="px-8 py-16 text-center text-[13px] text-zinc-600">
-            {todos.length === 0 ? '还没有待办 — 在上方输入框直接打字按 Enter' : '当前筛选下没有匹配的待办'}
-          </div>
-        )}
-
-        {filtered.map((t) => {
-          const isEditing = editingId === t.id;
+      {/* KANBAN — 4 columns. flex-row with min-width on each column so we
+          gracefully horizontal-scroll on narrow panes instead of squishing
+          cards to unreadable width. */}
+      <div className="flex flex-1 gap-3 overflow-x-auto overflow-y-hidden px-3 py-3">
+        {COLUMNS.map((status) => {
+          const cls = statusClasses(status);
+          const cards = bucketed[status];
+          const isDropTarget = dragOverCol === status;
           return (
             <div
-              key={t.id}
-              className="group flex items-center gap-3 border-b border-white/[0.04] px-4 hover:bg-white/[0.02]"
-              style={{ height: 56 }}
+              key={status}
+              data-id={`todo-col-${status}`}
+              onDragOver={(e) => { e.preventDefault(); setDragOverCol(status); }}
+              onDragLeave={(e) => {
+                // Only clear when the pointer actually leaves the column,
+                // not when it crosses between child cards.
+                if ((e.relatedTarget as Node | null) && (e.currentTarget as Node).contains(e.relatedTarget as Node)) return;
+                setDragOverCol(null);
+              }}
+              onDrop={handleDropOn(status)}
+              className={`flex min-w-[240px] flex-1 flex-col rounded-lg border bg-white/[0.015] transition-colors ${
+                isDropTarget ? 'border-white/20 bg-white/[0.04]' : 'border-white/[0.05]'
+              }`}
             >
-              <button
-                onClick={() => cycleStatus(t)}
-                title={`状态: ${t.status}  (点击切换)`}
-                className="flex h-6 w-6 shrink-0 items-center justify-center text-zinc-500 transition-colors hover:text-zinc-200"
-              >
-                {statusIcon(t.status)}
-              </button>
-
-              <div className="min-w-0 flex-1">
-                {isEditing ? (
-                  <textarea
-                    autoFocus
-                    rows={1}
-                    value={editingDraft}
-                    onChange={(e) => {
-                      setEditingDraft(e.target.value);
-                      // Auto-grow to content height so long titles are
-                      // fully visible during edit, no horizontal scroll.
-                      const el = e.target as HTMLTextAreaElement;
-                      el.style.height = 'auto';
-                      el.style.height = `${el.scrollHeight}px`;
-                    }}
-                    ref={(el) => {
-                      if (!el) return;
-                      // Size to content on mount too.
-                      el.style.height = 'auto';
-                      el.style.height = `${el.scrollHeight}px`;
-                    }}
-                    onKeyDown={(e) => {
-                      // Enter submits; Shift+Enter inserts a newline for
-                      // users who actually need multi-line titles.
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        submitEdit(t.id);
-                      }
-                      if (e.key === 'Escape') {
-                        e.preventDefault();
-                        setEditingId(null);
-                        setEditingDraft('');
-                      }
-                    }}
-                    onBlur={() => submitEdit(t.id)}
-                    className="m-0 block w-full resize-none border-0 bg-transparent p-0 text-[13px] leading-5 text-zinc-100 outline-none overflow-hidden"
-                  />
-                ) : (
-                  <div
-                    onClick={() => { setEditingId(t.id); setEditingDraft(t.title); }}
-                    title={t.title}
-                    className={`line-clamp-2 break-words text-[13px] leading-5 ${
-                      t.status === 'done' ? 'text-zinc-500 line-through' :
-                      t.status === 'dropped' ? 'text-zinc-600 line-through' :
-                      'text-zinc-100'
-                    } cursor-text`}
-                  >
-                    {t.title}
-                  </div>
-                )}
-                <div className="mt-1 flex items-center gap-2 text-[11px] text-zinc-600">
-                  <span className={`inline-flex items-center rounded-full px-1.5 py-px text-[10px] font-medium leading-4 ${statusClasses(t.status).badge}`}>
-                    {statusLabel(t.status)}
-                  </span>
-                  <span title={t.updated_at}>{humanTime(t.updated_at)}</span>
+              {/* Column header — colored stripe + icon + label + count */}
+              <div className={`flex items-center justify-between rounded-t-lg px-3 py-2 ${cls.active}`}>
+                <div className="flex items-center gap-2 text-[12px] font-medium">
+                  {statusIcon(status)}
+                  <span>{statusLabel(status)}</span>
                 </div>
+                <span className="text-[11px] tabular-nums opacity-70">{cards.length}</span>
               </div>
 
-              <div className="relative shrink-0 opacity-0 transition-opacity group-hover:opacity-100">
-                <button
-                  onClick={() => setMenuOpenId(menuOpenId === t.id ? null : t.id)}
-                  className="rounded p-1 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200"
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </button>
-                {menuOpenId === t.id && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)} />
-                    <div className="absolute right-0 top-7 z-20 min-w-[140px] rounded-md border border-white/[0.08] bg-[#161616] py-1 text-[12px] shadow-xl">
-                      {t.status !== 'todo'    && <MenuItem onClick={() => setStatus(t.id, 'todo')}    icon={<Circle      className="h-3.5 w-3.5" />}>标记为 待办</MenuItem>}
-                      {t.status !== 'doing'   && <MenuItem onClick={() => setStatus(t.id, 'doing')}   icon={<CircleDot   className="h-3.5 w-3.5" />}>开始 (doing)</MenuItem>}
-                      {t.status !== 'done'    && <MenuItem onClick={() => setStatus(t.id, 'done')}    icon={<CheckCircle2 className="h-3.5 w-3.5" />}>标记为 已完成</MenuItem>}
-                      {t.status !== 'dropped' && <MenuItem onClick={() => setStatus(t.id, 'dropped')} icon={<CircleSlash className="h-3.5 w-3.5" />}>废弃</MenuItem>}
-                      <div className="my-1 border-t border-white/[0.06]" />
-                      <MenuItem onClick={() => remove(t.id)} icon={<Trash2 className="h-3.5 w-3.5" />} danger>删除</MenuItem>
-                    </div>
-                  </>
+              {/* Card list */}
+              <div className="flex-1 space-y-2 overflow-y-auto p-2">
+                {cards.length === 0 ? (
+                  <div className="px-2 py-6 text-center text-[11px] text-zinc-700">{searchQuery ? '无匹配' : '空'}</div>
+                ) : (
+                  cards.map((t) => {
+                    const isEditing = editingId === t.id;
+                    const isBeingDragged = draggingId === t.id;
+                    return (
+                      <article
+                        key={t.id}
+                        draggable={!isEditing}
+                        onDragStart={(e) => { e.dataTransfer.setData('text/plain', t.id); e.dataTransfer.effectAllowed = 'move'; setDraggingId(t.id); }}
+                        onDragEnd={() => { setDraggingId(null); setDragOverCol(null); }}
+                        className={`group relative overflow-hidden rounded-md border bg-[#141417] transition-all ${
+                          isBeingDragged ? 'opacity-40' : 'opacity-100'
+                        } ${cls.cardBorder} hover:border-white/15`}
+                      >
+                        {/* Left status stripe */}
+                        <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${cls.stripe}`} />
+
+                        <div className="flex items-start gap-1.5 pl-3 pr-2 pt-2">
+                          <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-grab text-zinc-700 group-hover:text-zinc-500" />
+                          <div className="min-w-0 flex-1">
+                            {isEditing ? (
+                              <textarea
+                                autoFocus
+                                rows={1}
+                                value={editingDraft}
+                                onChange={(e) => {
+                                  setEditingDraft(e.target.value);
+                                  const el = e.target as HTMLTextAreaElement;
+                                  el.style.height = 'auto';
+                                  el.style.height = `${el.scrollHeight}px`;
+                                }}
+                                ref={(el) => { if (!el) return; el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px`; }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEdit(t.id); }
+                                  if (e.key === 'Escape') { e.preventDefault(); setEditingId(null); setEditingDraft(''); }
+                                }}
+                                onBlur={() => submitEdit(t.id)}
+                                className="m-0 block w-full resize-none border-0 bg-transparent p-0 text-[12px] leading-5 text-zinc-100 outline-none"
+                              />
+                            ) : (
+                              <div
+                                onDoubleClick={() => { setEditingId(t.id); setEditingDraft(t.title); }}
+                                title={t.title}
+                                className={`line-clamp-3 break-words text-[12px] leading-5 ${
+                                  t.status === 'done' ? 'text-zinc-500 line-through' :
+                                  t.status === 'dropped' ? 'text-zinc-600 line-through' :
+                                  'text-zinc-100'
+                                }`}
+                              >
+                                {t.title}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-1.5">
+                          <span className="text-[10px] tabular-nums text-zinc-600" title={t.updated_at}>{humanTime(t.updated_at)}</span>
+                          <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                            {!isEditing && (
+                              <>
+                                <CardAction onClick={() => { setEditingId(t.id); setEditingDraft(t.title); }} title="编辑">
+                                  <Pencil className="h-3 w-3" />
+                                </CardAction>
+                                {t.status !== 'done' && (
+                                  <CardAction onClick={() => setStatus(t.id, advanceStatus(t.status))} title={`→ ${statusLabel(advanceStatus(t.status))}`}>
+                                    <ArrowRight className="h-3 w-3" />
+                                  </CardAction>
+                                )}
+                                <div className="relative">
+                                  <CardAction onClick={() => setMenuOpenId(menuOpenId === t.id ? null : t.id)} title="更多">
+                                    <MoreHorizontal className="h-3 w-3" />
+                                  </CardAction>
+                                  {menuOpenId === t.id && (
+                                    <>
+                                      <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)} />
+                                      <div className="absolute right-0 top-6 z-20 min-w-[140px] rounded-md border border-white/[0.08] bg-[#161616] py-1 text-[12px] shadow-xl">
+                                        {COLUMNS.filter((s) => s !== t.status).map((s) => (
+                                          <MenuItem key={s} onClick={() => setStatus(t.id, s)} icon={statusIcon(s)}>移到 {statusLabel(s)}</MenuItem>
+                                        ))}
+                                        <div className="my-1 border-t border-white/[0.06]" />
+                                        <MenuItem onClick={() => remove(t.id)} icon={<Trash2 className="h-3.5 w-3.5" />} danger>删除</MenuItem>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })
                 )}
               </div>
             </div>
           );
         })}
       </div>
+
+      {!loading && counts.all === 0 && !searchQuery && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-1/2 text-center text-[13px] text-zinc-700">
+          还没有待办 — 在上方输入框直接打字按 Enter
+        </div>
+      )}
     </div>
   );
+}
+
+function CardAction({ children, onClick, title }: { children: React.ReactNode; onClick: () => void; title?: string }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className="rounded p-1 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
+    >
+      {children}
+    </button>
+  );
+}
+
+function advanceStatus(s: TodoStatus): TodoStatus {
+  return s === 'todo' ? 'doing' : s === 'doing' ? 'done' : 'todo';
 }
 
 function MenuItem({ children, onClick, icon, danger = false }: { children: React.ReactNode; onClick: () => void; icon: React.ReactNode; danger?: boolean }) {
@@ -378,38 +451,48 @@ function statusLabel(s: TodoStatus) {
 //   - active:   filled style for selected filter chip
 //   - idle:     muted text for the unselected filter chip
 //   - badge:    pill style for the per-row status indicator
-function statusClasses(s: Filter): { active: string; idle: string; badge: string } {
+function statusClasses(s: Filter): { active: string; idle: string; badge: string; stripe: string; cardBorder: string } {
   switch (s) {
     case 'todo':
       return {
-        active: 'bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/30',
-        idle:   'text-blue-400/70 hover:bg-blue-500/[0.08] hover:text-blue-300',
-        badge:  'bg-blue-500/10 text-blue-300 ring-1 ring-blue-500/20',
+        active:     'bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/30',
+        idle:       'text-blue-400/70 hover:bg-blue-500/[0.08] hover:text-blue-300',
+        badge:      'bg-blue-500/10 text-blue-300 ring-1 ring-blue-500/20',
+        stripe:     'bg-blue-400',
+        cardBorder: 'border-white/[0.06]',
       };
     case 'doing':
       return {
-        active: 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30',
-        idle:   'text-amber-400/70 hover:bg-amber-500/[0.08] hover:text-amber-300',
-        badge:  'bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/20',
+        active:     'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30',
+        idle:       'text-amber-400/70 hover:bg-amber-500/[0.08] hover:text-amber-300',
+        badge:      'bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/20',
+        stripe:     'bg-amber-400',
+        cardBorder: 'border-amber-500/20',
       };
     case 'done':
       return {
-        active: 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30',
-        idle:   'text-emerald-400/70 hover:bg-emerald-500/[0.08] hover:text-emerald-300',
-        badge:  'bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20',
+        active:     'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30',
+        idle:       'text-emerald-400/70 hover:bg-emerald-500/[0.08] hover:text-emerald-300',
+        badge:      'bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20',
+        stripe:     'bg-emerald-400',
+        cardBorder: 'border-white/[0.06]',
       };
     case 'dropped':
       return {
-        active: 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30',
-        idle:   'text-rose-400/60 hover:bg-rose-500/[0.08] hover:text-rose-300',
-        badge:  'bg-rose-500/10 text-rose-400 ring-1 ring-rose-500/20',
+        active:     'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30',
+        idle:       'text-rose-400/60 hover:bg-rose-500/[0.08] hover:text-rose-300',
+        badge:      'bg-rose-500/10 text-rose-400 ring-1 ring-rose-500/20',
+        stripe:     'bg-rose-400',
+        cardBorder: 'border-white/[0.06]',
       };
     case 'all':
     default:
       return {
-        active: 'bg-white/[0.10] text-zinc-100 ring-1 ring-white/15',
-        idle:   'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300',
-        badge:  'bg-white/[0.05] text-zinc-300 ring-1 ring-white/10',
+        active:     'bg-white/[0.10] text-zinc-100 ring-1 ring-white/15',
+        idle:       'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300',
+        badge:      'bg-white/[0.05] text-zinc-300 ring-1 ring-white/10',
+        stripe:     'bg-zinc-500',
+        cardBorder: 'border-white/[0.06]',
       };
   }
 }
