@@ -215,6 +215,7 @@ const api = {
   getFrpServerConnections: () => http.get('/api/frp-server/connections'),
   getFrpServerClients: () => http.get('/api/frp-server/clients'),
   getFrpServerLogs: (lines?: number) => http.get('/api/frp-server/logs', { params: lines ? { lines } : {} }),
+  getFrpServerInstallInfo: () => http.get('/api/frp-server/install-info'),
 
   listTodos: (paneId: string, params?: { status?: string; q?: string }) =>
     http.get('/api/todo/list', { params: { pane_id: paneId, ...(params || {}) } }),

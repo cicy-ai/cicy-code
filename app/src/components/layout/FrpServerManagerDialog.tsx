@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { X, RefreshCw, Play, Square, RotateCw, Loader2, ChevronDown, ChevronRight, Server } from 'lucide-react';
+import { X, RefreshCw, Play, Square, RotateCw, Loader2, ChevronDown, ChevronRight, Server, Copy, Eye, EyeOff, Download } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { cn } from '../../lib/utils';
@@ -36,6 +36,16 @@ export function FrpServerManagerDialog({
   const [actionOutput, setActionOutput] = useState('');
   const [showConnections, setShowConnections] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [showInstall, setShowInstall] = useState(false);
+  const [install, setInstall] = useState<{
+    public_ip?: string;
+    server_port?: number;
+    token?: string;
+    install_command?: string;
+  } | null>(null);
+  const [installLoading, setInstallLoading] = useState(false);
+  const [revealToken, setRevealToken] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
@@ -326,6 +336,120 @@ export function FrpServerManagerDialog({
                 {connections === null
                   ? <span className="text-zinc-500">Loading…</span>
                   : connections || <span className="text-zinc-600">No connections</span>}
+              </div>
+            )}
+          </div>
+
+          {/* Install on a client (collapsible) */}
+          <div data-id="frp-server-install-section">
+            <button
+              type="button"
+              onClick={async () => {
+                const next = !showInstall;
+                setShowInstall(next);
+                if (next && !install) {
+                  setInstallLoading(true);
+                  try {
+                    const resp = await apiService.getFrpServerInstallInfo();
+                    setInstall(resp?.data || null);
+                  } catch (e: any) {
+                    setInstall({ install_command: '# failed to load: ' + (e?.message || 'unknown') });
+                  } finally {
+                    setInstallLoading(false);
+                  }
+                }
+              }}
+              className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              {showInstall ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+              <Download className="w-3 h-3" />
+              Install on a client machine
+            </button>
+            {showInstall && (
+              <div className="mt-2 rounded-lg border border-white/[0.06] bg-black/30 p-3 space-y-3">
+                {installLoading && !install && (
+                  <div className="text-[11px] text-zinc-500 flex items-center gap-2">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Fetching public IP + token…
+                  </div>
+                )}
+                {install && (
+                  <>
+                    <dl className="grid grid-cols-[80px_1fr_auto] gap-x-3 gap-y-1 text-[11px] items-center">
+                      <dt className="text-zinc-500">Server</dt>
+                      <dd className="font-mono text-zinc-200 truncate">
+                        {install.public_ip || <span className="text-zinc-600">(unknown)</span>}:{install.server_port || '?'}
+                      </dd>
+                      <dd>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const v = `${install.public_ip || ''}:${install.server_port || ''}`;
+                            await navigator.clipboard.writeText(v);
+                            setCopiedKey('addr'); setTimeout(() => setCopiedKey(null), 1500);
+                          }}
+                          className="text-zinc-400 hover:text-zinc-200 p-1"
+                          title="Copy"
+                        >
+                          {copiedKey === 'addr' ? '✓' : <Copy className="w-3 h-3" />}
+                        </button>
+                      </dd>
+
+                      <dt className="text-zinc-500">Token</dt>
+                      <dd className="font-mono text-zinc-200 truncate">
+                        {install.token
+                          ? (revealToken ? install.token : install.token.slice(0, 8) + '…' + install.token.slice(-4))
+                          : <span className="text-zinc-600">(missing)</span>}
+                      </dd>
+                      <dd className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setRevealToken(v => !v)}
+                          className="text-zinc-400 hover:text-zinc-200 p-1"
+                          title={revealToken ? 'Hide' : 'Reveal'}
+                        >
+                          {revealToken ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!install.token) return;
+                            await navigator.clipboard.writeText(install.token);
+                            setCopiedKey('token'); setTimeout(() => setCopiedKey(null), 1500);
+                          }}
+                          className="text-zinc-400 hover:text-zinc-200 p-1"
+                          title="Copy token"
+                        >
+                          {copiedKey === 'token' ? '✓' : <Copy className="w-3 h-3" />}
+                        </button>
+                      </dd>
+                    </dl>
+
+                    <div className="border-t border-white/[0.05] pt-3">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] uppercase tracking-wider text-zinc-500">Run on the client</span>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!install.install_command) return;
+                            await navigator.clipboard.writeText(install.install_command);
+                            setCopiedKey('cmd'); setTimeout(() => setCopiedKey(null), 1500);
+                          }}
+                          className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100 px-2 py-1 rounded border border-white/[0.06] hover:border-white/[0.12]"
+                        >
+                          {copiedKey === 'cmd'
+                            ? <>✓ Copied</>
+                            : <><Copy className="w-3 h-3" /> Copy</>}
+                        </button>
+                      </div>
+                      <pre className="font-mono text-[11px] text-zinc-300 whitespace-pre-wrap break-words bg-black/40 rounded p-2 max-h-64 overflow-y-auto">
+{install.install_command}
+                      </pre>
+                      <p className="mt-1.5 text-[10px] text-zinc-600 leading-relaxed">
+                        Works on macOS / Linux / WSL. The teammate pastes this in a terminal; frp-client connects back here automatically.
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
