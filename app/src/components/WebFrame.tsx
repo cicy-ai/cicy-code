@@ -96,6 +96,21 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
     useEffect(() => { if (codeServer) setPendingActivation(true); }, [src, codeServer]);
     const dismissActivation = useCallback(() => setPendingActivation(false), []);
 
+    // The HTML5 `inert` attribute makes a subtree non-focusable AND
+    // unreachable to JS focus() calls — which is what we need to keep
+    // code-server's editor.focus() inside the iframe from yanking focus
+    // out of the host page on initial bootstrap. React's typings don't
+    // fully support it yet, so set it imperatively via the ref.
+    useEffect(() => {
+      const apply = (el: HTMLElement | null) => {
+        if (!el) return;
+        if (pendingActivation) el.setAttribute("inert", "");
+        else el.removeAttribute("inert");
+      };
+      apply(iframeRef.current);
+      apply(webviewRef.current);
+    }, [pendingActivation]);
+
     const setIframeRef = useCallback((node: HTMLIFrameElement | null) => {
       iframeRef.current = node;
       if (!ref) return;
