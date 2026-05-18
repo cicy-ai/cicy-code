@@ -36,7 +36,7 @@ export function FrpServerManagerDialog({
   const [actionOutput, setActionOutput] = useState('');
   const [showConnections, setShowConnections] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
-  const [showInstall, setShowInstall] = useState(false);
+  const [showInstall, setShowInstall] = useState(true);
   const [install, setInstall] = useState<{
     public_ip?: string;
     server_port?: number;
@@ -98,15 +98,28 @@ export function FrpServerManagerDialog({
     await loadClients();
   }, [loadStatus, loadClients]);
 
+  const loadInstallInfo = useCallback(async () => {
+    setInstallLoading(true);
+    try {
+      const resp = await apiService.getFrpServerInstallInfo();
+      setInstall(resp?.data || null);
+    } catch (e: any) {
+      setInstall({ install_command: '# failed to load: ' + (e?.message || 'unknown') });
+    } finally {
+      setInstallLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     refresh();
+    loadInstallInfo();
     setActionOutput('');
     setShowConnections(false);
     setShowLogs(false);
     setConnections(null);
     setLogs(null);
-  }, [open, refresh]);
+  }, [open, refresh, loadInstallInfo]);
 
   useEffect(() => {
     if (!open) return;
@@ -344,20 +357,10 @@ export function FrpServerManagerDialog({
           <div data-id="frp-server-install-section">
             <button
               type="button"
-              onClick={async () => {
+              onClick={() => {
                 const next = !showInstall;
                 setShowInstall(next);
-                if (next && !install) {
-                  setInstallLoading(true);
-                  try {
-                    const resp = await apiService.getFrpServerInstallInfo();
-                    setInstall(resp?.data || null);
-                  } catch (e: any) {
-                    setInstall({ install_command: '# failed to load: ' + (e?.message || 'unknown') });
-                  } finally {
-                    setInstallLoading(false);
-                  }
-                }
+                if (next && !install) loadInstallInfo();
               }}
               className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500 hover:text-zinc-300 transition-colors"
             >
