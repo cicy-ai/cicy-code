@@ -113,6 +113,54 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
       } catch {}
     }, [maskActive, pointerLocked, useWebview]);
 
+    // code-server (VSCode) calls editor.focus() right after bootstrap, which
+    // steals keyboard focus from whatever input the user is typing in and
+    // silently routes their keystrokes into the file editor. To fix this
+    // without breaking code-server's own internals:
+    //   1. Track a "pendingActivation" flag that starts true for codeServer
+    //      iframes and clears on the user's first real click in the frame.
+    //   2. While pending: any focusin whose target is the embedded frame is
+    //      treated as a programmatic grab — we blur it immediately so the
+    //      host page's active input keeps the keyboard.
+    //   3. A mousedown anywhere over the frame's bounding rect is a real
+    //      user gesture — clear the flag, let the next focus stick. No
+    //      visible mask, no inert attribute, code-server keeps working.
+    const [pendingActivation, setPendingActivation] = useState(!!codeServer);
+    useEffect(() => { if (codeServer) setPendingActivation(true); }, [src, codeServer]);
+    useEffect(() => {
+      if (!codeServer || !pendingActivation) return;
+      const onFocusIn = () => {
+        const el = (iframeRef.current as HTMLElement | null) || (webviewRef.current as HTMLElement | null);
+        if (!el) return;
+        if (document.activeElement === el) {
+          try { el.blur(); } catch {}
+        }
+      };
+      const onMouseDown = (e: MouseEvent) => {
+        const el = (iframeRef.current as HTMLElement | null) || (webviewRef.current as HTMLElement | null);
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+          setPendingActivation(false);
+        }
+      };
+      document.addEventListener('focusin', onFocusIn, true);
+      document.addEventListener('mousedown', onMouseDown, true);
+      // Initial yank — code-server typically calls focus() within the first
+      // few hundred ms of bootstrap. Fire a couple of rAFs to catch it
+      // before the user notices the cursor blinking.
+      const t1 = requestAnimationFrame(onFocusIn);
+      const t2 = setTimeout(onFocusIn, 200);
+      const t3 = setTimeout(onFocusIn, 800);
+      return () => {
+        document.removeEventListener('focusin', onFocusIn, true);
+        document.removeEventListener('mousedown', onMouseDown, true);
+        cancelAnimationFrame(t1);
+        clearTimeout(t2);
+        clearTimeout(t3);
+      };
+    }, [codeServer, pendingActivation]);
+
     useEffect(() => {
       const handleMaskEvent = (event: Event) => {
         const detail = (event as CustomEvent<WebFrameMaskEventDetail>).detail;
