@@ -188,14 +188,13 @@ export default function TodoPanel({ paneId, active }: Props) {
           {filterMeta.map(({ key, label }) => {
             const c = counts[key];
             const active = filter === key;
+            const cls = statusClasses(key);
             return (
               <button
                 key={key}
                 onClick={() => setFilter(key)}
                 className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[12px] transition-colors ${
-                  active
-                    ? 'bg-white/[0.08] text-zinc-100'
-                    : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
+                  active ? cls.active : cls.idle
                 }`}
               >
                 <span>{label}</span>
@@ -272,7 +271,8 @@ export default function TodoPanel({ paneId, active }: Props) {
                 ) : (
                   <div
                     onClick={() => { setEditingId(t.id); setEditingDraft(t.title); }}
-                    className={`truncate text-[13px] leading-5 ${
+                    title={t.title}
+                    className={`line-clamp-2 break-words text-[13px] leading-5 ${
                       t.status === 'done' ? 'text-zinc-500 line-through' :
                       t.status === 'dropped' ? 'text-zinc-600 line-through' :
                       'text-zinc-100'
@@ -281,9 +281,10 @@ export default function TodoPanel({ paneId, active }: Props) {
                     {t.title}
                   </div>
                 )}
-                <div className="mt-0.5 flex items-center gap-2 text-[11px] text-zinc-600">
-                  <span>{statusLabel(t.status)}</span>
-                  <span>·</span>
+                <div className="mt-1 flex items-center gap-2 text-[11px] text-zinc-600">
+                  <span className={`inline-flex items-center rounded-full px-1.5 py-px text-[10px] font-medium leading-4 ${statusClasses(t.status).badge}`}>
+                    {statusLabel(t.status)}
+                  </span>
                   <span title={t.updated_at}>{humanTime(t.updated_at)}</span>
                 </div>
               </div>
@@ -346,6 +347,47 @@ function statusLabel(s: TodoStatus) {
     case 'doing':   return '进行中';
     case 'done':    return '已完成';
     case 'dropped': return '废弃';
+  }
+}
+
+// Tailwind class fragments per status — used for the filter chips at the top
+// and the small status badge on each row. Each variant returns:
+//   - active:   filled style for selected filter chip
+//   - idle:     muted text for the unselected filter chip
+//   - badge:    pill style for the per-row status indicator
+function statusClasses(s: Filter): { active: string; idle: string; badge: string } {
+  switch (s) {
+    case 'todo':
+      return {
+        active: 'bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/30',
+        idle:   'text-blue-400/70 hover:bg-blue-500/[0.08] hover:text-blue-300',
+        badge:  'bg-blue-500/10 text-blue-300 ring-1 ring-blue-500/20',
+      };
+    case 'doing':
+      return {
+        active: 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30',
+        idle:   'text-amber-400/70 hover:bg-amber-500/[0.08] hover:text-amber-300',
+        badge:  'bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/20',
+      };
+    case 'done':
+      return {
+        active: 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30',
+        idle:   'text-emerald-400/70 hover:bg-emerald-500/[0.08] hover:text-emerald-300',
+        badge:  'bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20',
+      };
+    case 'dropped':
+      return {
+        active: 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30',
+        idle:   'text-rose-400/60 hover:bg-rose-500/[0.08] hover:text-rose-300',
+        badge:  'bg-rose-500/10 text-rose-400 ring-1 ring-rose-500/20',
+      };
+    case 'all':
+    default:
+      return {
+        active: 'bg-white/[0.10] text-zinc-100 ring-1 ring-white/15',
+        idle:   'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300',
+        badge:  'bg-white/[0.05] text-zinc-300 ring-1 ring-white/10',
+      };
   }
 }
 
