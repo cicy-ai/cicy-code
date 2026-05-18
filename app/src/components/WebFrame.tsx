@@ -86,31 +86,6 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
       onLoad?.();
     };
 
-    // code-server (VSCode) calls editor.focus() after its bootstrap, which
-    // steals focus from whatever input the user is typing in. Render an
-    // invisible click-mask in front of the iframe that absorbs pointer
-    // events until the user explicitly clicks it. One click dismisses the
-    // mask and the user can use the editor normally. Reapplies on every
-    // src change (new file → new bootstrap → new focus grab).
-    const [pendingActivation, setPendingActivation] = useState(!!codeServer);
-    useEffect(() => { if (codeServer) setPendingActivation(true); }, [src, codeServer]);
-    const dismissActivation = useCallback(() => setPendingActivation(false), []);
-
-    // The HTML5 `inert` attribute makes a subtree non-focusable AND
-    // unreachable to JS focus() calls — which is what we need to keep
-    // code-server's editor.focus() inside the iframe from yanking focus
-    // out of the host page on initial bootstrap. React's typings don't
-    // fully support it yet, so set it imperatively via the ref.
-    useEffect(() => {
-      const apply = (el: HTMLElement | null) => {
-        if (!el) return;
-        if (pendingActivation) el.setAttribute("inert", "");
-        else el.removeAttribute("inert");
-      };
-      apply(iframeRef.current);
-      apply(webviewRef.current);
-    }, [pendingActivation]);
-
     const setIframeRef = useCallback((node: HTMLIFrameElement | null) => {
       iframeRef.current = node;
       if (!ref) return;
@@ -206,26 +181,14 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
             </div>
           )}
           {(pointerLocked || maskActive) && <div data-id="web-frame-interaction-mask" className="absolute inset-0 z-20" />}
-          {pendingActivation && (
-            <div
-              data-id="web-frame-activation-mask"
-              className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-sm cursor-pointer select-none"
-              onClick={dismissActivation}
-              onPointerDown={dismissActivation}
-            >
-              <div className="rounded-md border border-white/15 bg-zinc-900/80 px-4 py-2 text-xs font-medium text-zinc-200 shadow-lg">
-                Click to activate editor
-              </div>
-            </div>
-          )}
           <webview
             data-id="web-frame-webview"
             ref={webviewRef as any}
             src={src}
             className={className}
             style={style}
-            onClick={focusEmbeddedFrame as any}
-            {...(pendingActivation ? { inert: "" as any } : {})}
+            onPointerDownCapture={focusEmbeddedFrame as any}
+            onMouseDownCapture={focusEmbeddedFrame as any}
             allowpopups={"" as any}
             partition={`persist:sandbox-0`}
             webpreferences="allowRunningInsecureContent=true"
@@ -250,7 +213,8 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
           src={src}
           className={className}
           style={style}
-          onClick={focusEmbeddedFrame}
+          onPointerDownCapture={focusEmbeddedFrame}
+          onMouseDownCapture={focusEmbeddedFrame}
           onLoad={handleLoad}
           loading={loading}
           allowFullScreen={allowFullScreen}
