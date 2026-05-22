@@ -780,6 +780,7 @@ func checkEnv() {
 var preinstalledSkills = []string{
 	"agent-chrome", "agent-code-server", "agent-desktop", "agent-webpage",
 	"cicy-agent", "cicy-todo", "cicy-mihomo", "cicy-ssh", "proxy_ssh", "globalApiToken",
+	"agent-summary",
 }
 
 func ensurePreinstalledSkills() {
@@ -854,10 +855,9 @@ func anyActiveAgentUsesProxy() bool {
 // caller logs a warning and skips — the user is expected to install the
 // skill once per host.
 func startCicyMihomoIfNeeded() {
-	if !anyActiveAgentUsesProxy() {
-		return
-	}
-
+	// Start mihomo if the skill is installed (wrapper present), regardless
+	// of whether any agent currently uses it as a proxy. This ensures
+	// chrome-profile listeners and MATCH rules are active from the start.
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return
