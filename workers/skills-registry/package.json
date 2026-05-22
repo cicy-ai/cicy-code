@@ -1,0 +1,16 @@
+{
+  "name": "skills-registry",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240821.1",
+    "typescript": "^5.4.0",
+    "wrangler": "^3.78.0"
+  }
+}

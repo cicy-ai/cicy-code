@@ -1,0 +1,26 @@
+name = "skills-registry"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Custom domain — bind skills.cicy-ai.com to this Worker.
+# DNS for skills.cicy-ai.com is managed automatically by Workers Custom Domains.
+routes = [
+  { pattern = "skills.cicy-ai.com", custom_domain = true }
+]
+
+# KV namespace stores manifest index, version lists, catalog.
+# Create with: wrangler kv namespace create SKILLS_KV
+# Then paste the returned id here.
+[[kv_namespaces]]
+binding = "SKILLS_KV"
+id = "0e8c3fb7682646af9afea00ac2fe57bc"
+
+# Secret: ADMIN_TOKEN
+# Set with: echo "<token>" | wrangler secret put ADMIN_TOKEN
+# Used by tools/publish.js (and future GitHub Action) to register new versions.
+
+[vars]
+# Public, non-secret defaults
+DEFAULT_REPO = "cicy-ai/cicy-skills"
+SCHEMA_VERSION = "1"
