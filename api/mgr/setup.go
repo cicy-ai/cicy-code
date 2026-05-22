@@ -107,7 +107,7 @@ func sudoPrefix() string {
 }
 
 func npmGlobalInstallCmd(pkg string) string {
-	return `mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && npm install -g --prefix "$HOME/.npm-global" ` + pkg
+	return `mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && npm install -g --include=optional --prefix "$HOME/.npm-global" ` + pkg
 }
 
 func preinstalledRuntimeInstallCmd(cmd string) string {
@@ -130,7 +130,7 @@ func codexInstallCmd() string {
 }
 
 func opencodeInstallCmd() string {
-	return npmGlobalInstallCmd("opencode-ai@latest")
+	return npmGlobalInstallCmd("--registry=https://registry.npmjs.org opencode-ai@latest")
 }
 
 func cursorInstallCmd() string {
