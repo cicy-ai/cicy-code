@@ -35,7 +35,7 @@ var (
 	desktopCmd    *exec.Cmd
 )
 
-const version = "2.0.1"
+const version = "2.0.7"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -69,7 +69,7 @@ Subcommands:
 Options:
   --help, -h              Show this help
   --version, -v           Show version
-  --desktop               Start in desktop mode
+  --desktop               (removed; use cicy-desktop launcher instead)
   --dev                   Development mode
   --preview               Serve app/dist from disk (run 'npm run build' to refresh)
   --hot                   Proxy the UI to the vite dev server on :8022 (HMR)
