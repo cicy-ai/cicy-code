@@ -12,6 +12,7 @@ import enDevPanel from './locales/en/devPanel.json';
 import enAgentCanvas from './locales/en/agentCanvas.json';
 import enAudit from './locales/en/audit.json';
 import enProvider from './locales/en/provider.json';
+import enIm from './locales/en/im.json';
 import enTerminal from './locales/en/terminal.json';
 import enProvision from './locales/en/provision.json';
 import enTeamPanel from './locales/en/teamPanel.json';
@@ -34,6 +35,7 @@ import zhDevPanel from './locales/zh-CN/devPanel.json';
 import zhAgentCanvas from './locales/zh-CN/agentCanvas.json';
 import zhAudit from './locales/zh-CN/audit.json';
 import zhProvider from './locales/zh-CN/provider.json';
+import zhIm from './locales/zh-CN/im.json';
 import zhTerminal from './locales/zh-CN/terminal.json';
 import zhProvision from './locales/zh-CN/provision.json';
 import zhTeamPanel from './locales/zh-CN/teamPanel.json';
@@ -62,6 +64,7 @@ import frEditPane from './locales/fr/editPane.json';
 import frLayout from './locales/fr/layout.json';
 import frLogin from './locales/fr/login.json';
 import frProvider from './locales/fr/provider.json';
+import frIm from './locales/fr/im.json';
 import frProvision from './locales/fr/provision.json';
 import frSettings from './locales/fr/settings.json';
 import frTeamPanel from './locales/fr/teamPanel.json';
@@ -84,6 +87,7 @@ import jaEditPane from './locales/ja/editPane.json';
 import jaLayout from './locales/ja/layout.json';
 import jaLogin from './locales/ja/login.json';
 import jaProvider from './locales/ja/provider.json';
+import jaIm from './locales/ja/im.json';
 import jaProvision from './locales/ja/provision.json';
 import jaSettings from './locales/ja/settings.json';
 import jaTeamPanel from './locales/ja/teamPanel.json';
@@ -156,6 +160,7 @@ const resources = {
     teamPanel: enTeamPanel,
     audit: enAudit,
     provider: enProvider,
+    im: enIm,
     terminal: enTerminal,
   },
   'zh-CN': {
@@ -180,6 +185,7 @@ const resources = {
     teamPanel: zhTeamPanel,
     audit: zhAudit,
     provider: zhProvider,
+    im: zhIm,
     terminal: zhTerminal,
   },
   fr: {
@@ -199,6 +205,7 @@ const resources = {
     layout: frLayout,
     login: frLogin,
     provider: frProvider,
+    im: frIm,
     provision: frProvision,
     settings: frSettings,
     teamPanel: frTeamPanel,
@@ -223,6 +230,7 @@ const resources = {
     layout: jaLayout,
     login: jaLogin,
     provider: jaProvider,
+    im: jaIm,
     provision: jaProvision,
     settings: jaSettings,
     teamPanel: jaTeamPanel,

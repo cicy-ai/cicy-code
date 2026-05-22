@@ -42,6 +42,8 @@
   "marketplaceManageProxySsh": "Manage SSH proxies",
   "marketplaceReinstall": "Reinstall",
   "marketplaceInstalling": "Installing…",
+  "marketplaceUpdate": "Update",
+  "marketplaceUpdating": "Updating…",
   "marketplaceFailedToLoad": "Couldn't load skills",
   "marketplaceEmpty": "No skills match your filter.",
   "marketplaceCategoryAll": "All",

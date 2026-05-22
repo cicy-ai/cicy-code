@@ -11,7 +11,7 @@ import { useApp } from '../contexts/AppContext';
 import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
-  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package,
+  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle,
   Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -35,6 +35,7 @@ import useDesktopEvents from './layout/useDesktopEvents';
 import AgentCanvas, { AgentCanvasItem } from './layout/AgentCanvas';
 import AgentStack from './layout/AgentStack';
 import ProviderDashboard from './providers/ProviderDashboard';
+import IMDashboard from './im/IMDashboard';
 import { useDialog } from '../contexts/DialogContext';
 import config, { defaultWorkerWorkspace, getHostHome, syncHostHomeFromPath, toTildePath, urls } from '../config';
 import apiService from '../services/api';
@@ -289,7 +290,7 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 }
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
-type LeftPanelView = 'team' | 'skills' | 'agents' | null;
+type LeftPanelView = 'team' | 'skills' | 'agents' | 'providers' | 'im' | null;
 type WorkspaceCliContentTab = InspectorTab | 'history' | 'files' | 'todo' | RequestViewTab;
 type CliContentMode = 'fixed';
 
@@ -353,8 +354,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [cliDrawerResizing, setCliDrawerResizing] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
-  const [providersOpen, setProvidersOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [providersLeftMount, setProvidersLeftMount] = useState<HTMLDivElement | null>(null);
+  const [providersRightMount, setProvidersRightMount] = useState<HTMLDivElement | null>(null);
+  const [imLeftMount, setImLeftMount] = useState<HTMLDivElement | null>(null);
+  const [imRightMount, setImRightMount] = useState<HTMLDivElement | null>(null);
 
   const [status, setStatus] = useState('idle');
   const [contextUsage, setContextUsage] = useState<number | null>(null);
@@ -394,6 +398,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [netLatency, setNetLatency] = useState<number | null>(null);
   const [chatWsConnected, setChatWsConnected] = useState(false);
   const [chatWsClientId, setChatWsClientId] = useState<string | null>(null);
+  // codeServerKey bumps on every WS reconnect so the code-server iframe remounts,
+  // ensuring the extension reconnects with fresh state.
+  const [codeServerKey, setCodeServerKey] = useState(0);
+  useEffect(() => { if (chatWsConnected) { setCodeServerKey(k => k + 1); } }, [chatWsConnected]);
   // code-server (the bridge extension inside the iframe) derives its chat-ws client id from
   // pageClientId; only spin it up once the workspace's own chat-ws has connected, by which point
   // pageClientId is final (the BroadcastChannel dedup below has settled it). One-way latch so a
@@ -646,7 +654,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleCapture = async () => { if (isApiOnlyRuntime) return; try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
   const handleToggleMouse = async () => { if (isApiOnlyRuntime) return; const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
 
-  const toggleLeft = (p: 'team' | 'skills') => {
+  const toggleLeft = (p: 'team' | 'skills' | 'providers' | 'im') => {
     setLeftPanelView(prev => prev === p ? null : p);
   };
 
@@ -1357,11 +1365,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         <div
           data-id="cli-content-files-host"
           className="absolute inset-0"
-          style={{ display: cliContentTab === 'files' ? 'block' : 'none' }}
+          style={cliContentTab === 'files'
+            ? { position: 'relative', width: '100%', height: '100%' }
+            : { position: 'absolute', width: '100%', height: '100%', visibility: 'hidden', pointerEvents: 'none', zIndex: -1 }
+          }
         >
           {fileCodeServerSrc ? (
             <div data-id="cli-content-files-pane" className="relative h-full w-full">
               <WebFrame
+                key={codeServerKey}
                 src={fileCodeServerSrc}
                 codeServer
                 className="h-full w-full border-0 bg-[#0A0A0A]"
@@ -1525,7 +1537,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
           <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} />
           <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
-          <SideBtn dataId="btn-providers" active={providersOpen} icon={<Boxes className="w-5 h-5" />} title={t('sidebarProviders')} onClick={() => setProvidersOpen(true)} />
+          <SideBtn dataId="btn-providers" active={leftActive === 'providers'} icon={<Boxes className="w-5 h-5" />} title={t('sidebarProviders')} onClick={() => toggleLeft('providers')} />
+          <SideBtn dataId="btn-im" active={leftActive === 'im'} icon={<MessageCircle className="w-5 h-5" />} title={t('sidebarIM', 'IM')} onClick={() => toggleLeft('im')} />
         </div>
         <div data-id="activity-bar-bottom" className="flex w-full flex-col items-center gap-3">
           <button
@@ -1560,6 +1573,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     </> : leftActive === 'skills' ? <>
                       <Brain className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-skills" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelSkills')}</span>
+                    </> : leftActive === 'providers' ? <>
+                      <Boxes className="w-3.5 h-3.5 text-zinc-600" />
+                      <span data-id="left-panel-title-providers" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('sidebarProviders')}</span>
+                    </> : leftActive === 'im' ? <>
+                      <MessageCircle className="w-3.5 h-3.5 text-zinc-600" />
+                      <span data-id="left-panel-title-im" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('sidebarIM', 'IM')}</span>
                     </> : <>
                       <Users className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-team" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelTeam')}</span>
@@ -1597,23 +1616,34 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                           }}
                         />
                       </div>
-                    ) : (
+                    ) : leftActive === 'skills' ? (
                       <div data-id="left-panel-skills-view" className="absolute inset-0">
                         <SkillMarketplacePanel paneId={activeCliPaneId || paneId} />
                       </div>
-                    )}
+                    ) : leftActive === 'providers' ? (
+                      <div data-id="left-panel-providers-view" className="absolute inset-0" ref={setProvidersLeftMount} />
+                    ) : leftActive === 'im' ? (
+                      <div data-id="left-panel-im-view" className="absolute inset-0" ref={setImLeftMount} />
+                    ) : null}
                   </div>
                 </div>
               </div>
             ) : null}
             <div data-testid="right-panel" data-id="right-panel" className="min-w-0 flex-1 relative">
               {rightContent}
-              {providersOpen && (
-                <div data-id="providers-overlay" className="absolute inset-0 z-30 bg-[#0A0A0A]">
-                  <ProviderDashboard onBack={() => setProvidersOpen(false)} />
-                </div>
+              {leftActive === 'providers' && (
+                <div data-id="providers-right-mount" ref={setProvidersRightMount} />
+              )}
+              {leftActive === 'im' && (
+                <div data-id="im-right-mount" ref={setImRightMount} />
               )}
             </div>
+            {leftActive === 'providers' && (
+              <ProviderDashboard leftMount={providersLeftMount} rightMount={providersRightMount} />
+            )}
+            {leftActive === 'im' && (
+              <IMDashboard leftMount={imLeftMount} rightMount={imRightMount} />
+            )}
             {cliFixedContent}
           </div>
         </main>

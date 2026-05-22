@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"ttyd-go/skillcmd"
 )
 
 // ── workflow skills (review / qa / ship / investigate / office-hours / document-release) ──
@@ -174,7 +177,7 @@ type marketSkill struct {
 	Name        string   `json:"name"`
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
-	Version     string   `json:"version"`
+	Version     string   `json:"version"`           // latest version available in registry
 	Category    string   `json:"category"`
 	Icon        string   `json:"icon"`
 	Tags        []string `json:"tags,omitempty"`
@@ -183,14 +186,20 @@ type marketSkill struct {
 	// skills under ~/cicy-ai/skills/<name>/ ("user").
 	Source string            `json:"source,omitempty"`
 	Status marketSkillStatus `json:"status"`
+	// Installed-state fields. InstalledVersion is the version recorded in
+	// ~/cicy-ai/skills/installed.json (empty when not installed). HasUpdate
+	// is true when InstalledVersion is non-empty AND lower than Version.
+	InstalledVersion string `json:"installed_version,omitempty"`
+	HasUpdate        bool   `json:"has_update,omitempty"`
 }
 
 const marketRegistryDefaultURL = "https://skills.cicy-ai.com"
 
 var (
 	marketCacheMu       sync.Mutex
-	marketCacheSkills   []marketSkill
-	marketCacheFetched  time.Time
+	// keyed by lang ("" = no Accept-Language → server default)
+	marketCacheByLang   = map[string][]marketSkill{}
+	marketCacheFetched  = map[string]time.Time{}
 	marketCacheTTL      = 5 * time.Minute
 )
 
@@ -201,31 +210,56 @@ func marketRegistryURL() string {
 	return marketRegistryDefaultURL
 }
 
-// fetchRegistrySkills GET /v1/skills, returns the per-skill summary list.
-// Cached for 5 minutes; refresh on miss / expiry. Network failure returns
-// the previous cache (so the UI keeps working briefly when offline).
-func fetchRegistrySkills() ([]marketSkill, error) {
+// preferredLang reads the Accept-Language header (or ?lang= query) from the
+// request and normalizes it to the canonical form we forward to the worker.
+// Returns "" when no preference is supplied.
+func preferredLang(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if q := strings.TrimSpace(r.URL.Query().Get("lang")); q != "" {
+		return q
+	}
+	h := strings.TrimSpace(r.Header.Get("Accept-Language"))
+	if h == "" {
+		return ""
+	}
+	// Accept-Language can be a list ("zh-CN,zh;q=0.9,en;q=0.8"). Take the
+	// first weighted entry.
+	first := strings.SplitN(h, ",", 2)[0]
+	first = strings.SplitN(first, ";", 2)[0]
+	return strings.TrimSpace(first)
+}
+
+// fetchRegistrySkills GET /v1/skills?lang=<lang>, returns the per-skill
+// summary list. Cached per-lang for 5 minutes; refresh on miss / expiry.
+// Network failure returns the previous cache (so the UI keeps working
+// briefly when offline).
+func fetchRegistrySkills(lang string) ([]marketSkill, error) {
 	marketCacheMu.Lock()
 	defer marketCacheMu.Unlock()
 
-	if marketCacheSkills != nil && time.Since(marketCacheFetched) < marketCacheTTL {
-		return marketCacheSkills, nil
+	if cached, ok := marketCacheByLang[lang]; ok && time.Since(marketCacheFetched[lang]) < marketCacheTTL {
+		return cached, nil
 	}
 
 	client := &http.Client{Timeout: 8 * time.Second}
 	u := strings.TrimRight(marketRegistryURL(), "/") + "/v1/skills"
+	if lang != "" {
+		u += "?lang=" + url.QueryEscape(lang)
+	}
 	resp, err := client.Get(u)
 	if err != nil {
-		if marketCacheSkills != nil {
-			return marketCacheSkills, nil
+		if cached, ok := marketCacheByLang[lang]; ok {
+			return cached, nil
 		}
 		return nil, fmt.Errorf("fetch %s: %w", u, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		if marketCacheSkills != nil {
-			return marketCacheSkills, nil
+		if cached, ok := marketCacheByLang[lang]; ok {
+			return cached, nil
 		}
 		return nil, fmt.Errorf("registry %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
@@ -233,30 +267,41 @@ func fetchRegistrySkills() ([]marketSkill, error) {
 		OK   bool `json:"ok"`
 		Data struct {
 			Skills []struct {
-				Name        string   `json:"name"`
-				Version     string   `json:"version"`
-				Title       string   `json:"title"`
-				Description string   `json:"description"`
-				Category    string   `json:"category"`
-				Tags        []string `json:"tags"`
-				Config      struct {
+				Name                 string   `json:"name"`
+				Version              string   `json:"version"`
+				Title                string   `json:"title"`
+				Description          string   `json:"description"`
+				TitleLocalized       string   `json:"title_localized"`
+				DescriptionLocalized string   `json:"description_localized"`
+				Category             string   `json:"category"`
+				Tags                 []string `json:"tags"`
+				Config               struct {
 					Path string `json:"path"`
 				} `json:"config"`
 			} `json:"skills"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		if marketCacheSkills != nil {
-			return marketCacheSkills, nil
+		if cached, ok := marketCacheByLang[lang]; ok {
+			return cached, nil
 		}
 		return nil, fmt.Errorf("decode registry response: %w", err)
 	}
 	out := make([]marketSkill, 0, len(env.Data.Skills))
 	for _, s := range env.Data.Skills {
+		// Use localized title/description when available, fall back to English.
+		title := s.Title
+		if s.TitleLocalized != "" {
+			title = s.TitleLocalized
+		}
+		desc := s.Description
+		if s.DescriptionLocalized != "" {
+			desc = s.DescriptionLocalized
+		}
 		out = append(out, marketSkill{
 			Name:        s.Name,
-			Title:       s.Title,
-			Description: s.Description,
+			Title:       title,
+			Description: desc,
 			Version:     s.Version,
 			Category:    s.Category,
 			Tags:        s.Tags,
@@ -264,18 +309,13 @@ func fetchRegistrySkills() ([]marketSkill, error) {
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	marketCacheSkills = out
-	marketCacheFetched = time.Now()
+	marketCacheByLang[lang] = out
+	marketCacheFetched[lang] = time.Now()
 	return out, nil
 }
 
-func marketSkillsCatalog() []marketSkill {
-	skills, err := fetchRegistrySkills()
-	if err != nil {
-		// Return empty list rather than 500 — UI shows "no skills" cleanly.
-		return nil
-	}
-	return skills
+func marketSkillsCatalog(lang string) ([]marketSkill, error) {
+	return fetchRegistrySkills(lang)
 }
 
 // userSkillsRoot returns ~/cicy-ai/skills (the v2 install root).
@@ -351,6 +391,8 @@ func titleizeSkillName(name string) string {
 // scanUserSkills walks ~/cicy-ai/skills/ and surfaces user-authored skills
 // (those with a SKILL.md in the directory and NOT already in the registry
 // catalog). registryNames is the set of names from fetchRegistrySkills.
+// A directory without SKILL.md is skipped (e.g. v1 leftover source trees
+// like cicy-skills/, .cache/, plus anything without a manifest yet).
 func scanUserSkills(registryNames map[string]struct{}) []marketSkill {
 	root := userSkillsRoot()
 	if root == "" {
@@ -373,6 +415,12 @@ func scanUserSkills(registryNames map[string]struct{}) []marketSkill {
 			continue // registered skills override user copies
 		}
 		skillMD := filepath.Join(root, name, "SKILL.md")
+		// require an actual SKILL.md — directories without a manifest are
+		// not user skills (avoids surfacing v1 mgr's extracted source tree
+		// or other random subdirs).
+		if _, err := os.Stat(skillMD); err != nil {
+			continue
+		}
 		fmName, fmDesc := parseSkillFrontmatter(skillMD)
 		if fmName == "" {
 			fmName = name
@@ -391,14 +439,16 @@ func scanUserSkills(registryNames map[string]struct{}) []marketSkill {
 	return out
 }
 
-func mergedMarketCatalog() []marketSkill {
-	registry := marketSkillsCatalog()
+func mergedMarketCatalog(lang string) (skills []marketSkill, registryErr error) {
+	registry, err := marketSkillsCatalog(lang)
+	registryErr = err
 	registryNames := make(map[string]struct{}, len(registry))
 	for _, s := range registry {
 		registryNames[s.Name] = struct{}{}
 	}
 	user := scanUserSkills(registryNames)
-	return append(registry, user...)
+	skills = append(registry, user...)
+	return
 }
 
 func expandHome(p string) string {
@@ -415,10 +465,10 @@ func expandHome(p string) string {
 	return filepath.Join(h, strings.TrimPrefix(p, "~/"))
 }
 
-// loadInstalledNames returns the set of skill names from
+// loadInstalledNames returns the map name → version from
 // ~/cicy-ai/skills/installed.json (written by `cicy-code skill install`).
-func loadInstalledNames() map[string]struct{} {
-	out := map[string]struct{}{}
+func loadInstalledNames() map[string]string {
+	out := map[string]string{}
 	root := userSkillsRoot()
 	if root == "" {
 		return out
@@ -429,22 +479,67 @@ func loadInstalledNames() map[string]struct{} {
 	}
 	var cfg struct {
 		Skills []struct {
-			Name string `json:"name"`
+			Name    string `json:"name"`
+			Version string `json:"version"`
 		} `json:"skills"`
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return out
 	}
 	for _, s := range cfg.Skills {
-		out[s.Name] = struct{}{}
+		out[s.Name] = s.Version
 	}
 	return out
 }
 
+// versionLess: true if a < b using simple semver comparison. Falls back to
+// string compare for non-numeric segments.
+func versionLess(a, b string) bool {
+	if a == b {
+		return false
+	}
+	splitV := func(v string) []int {
+		v = strings.TrimPrefix(v, "v")
+		// drop pre-release / build suffix (-foo, +foo)
+		if i := strings.IndexAny(v, "-+"); i >= 0 {
+			v = v[:i]
+		}
+		parts := strings.Split(v, ".")
+		out := make([]int, 0, 3)
+		for _, p := range parts {
+			n := 0
+			fmt.Sscanf(p, "%d", &n)
+			out = append(out, n)
+		}
+		return out
+	}
+	pa, pb := splitV(a), splitV(b)
+	for i := 0; i < len(pa) || i < len(pb); i++ {
+		var ai, bi int
+		if i < len(pa) {
+			ai = pa[i]
+		}
+		if i < len(pb) {
+			bi = pb[i]
+		}
+		if ai != bi {
+			return ai < bi
+		}
+	}
+	return false
+}
+
 func computeMarketStatus(skill *marketSkill) {
 	installed := loadInstalledNames()
-	if _, ok := installed[skill.Name]; ok {
+	if v, ok := installed[skill.Name]; ok {
 		skill.Status.Installed = true
+		skill.InstalledVersion = v
+		// HasUpdate when registry version (skill.Version) is newer than
+		// the recorded install. For "user" source skills version == "user"
+		// — never report has_update for those.
+		if skill.Source == "" && skill.Version != "" && skill.Version != v && versionLess(v, skill.Version) {
+			skill.HasUpdate = true
+		}
 	} else if skill.Source == "user" {
 		// User-authored skills with SKILL.md present count as "installed"
 		// for visibility purposes.
@@ -452,12 +547,14 @@ func computeMarketStatus(skill *marketSkill) {
 		if root != "" {
 			if _, err := os.Stat(filepath.Join(root, skill.Name, "SKILL.md")); err == nil {
 				skill.Status.Installed = true
+				skill.InstalledVersion = "user"
 			}
 		}
 	}
 	for u := range uninstalledSkillsSet() {
 		if u == skill.Name {
 			skill.Status.Installed = false
+			skill.HasUpdate = false
 			break
 		}
 	}
@@ -478,8 +575,9 @@ func handleSkillMarketList(w http.ResponseWriter, r *http.Request) {
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	categoryFilter := strings.TrimSpace(r.URL.Query().Get("category"))
 	installedFilter := r.URL.Query().Get("installed")
+	lang := preferredLang(r)
 
-	skills := mergedMarketCatalog()
+	skills, registryErr := mergedMarketCatalog(lang)
 	out := make([]marketSkill, 0, len(skills))
 	installedCount := 0
 	for i := range skills {
@@ -506,11 +604,25 @@ func handleSkillMarketList(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, s)
 	}
-	J(w, M{"skills": out, "total": len(out), "installed": installedCount})
+	registryStatus := "ok"
+	registryErrorMsg := ""
+	if registryErr != nil {
+		registryStatus = "unavailable"
+		registryErrorMsg = registryErr.Error()
+	}
+	J(w, M{
+		"skills":          out,
+		"total":           len(out),
+		"installed":       installedCount,
+		"registry_status": registryStatus,
+		"registry_error":  registryErrorMsg,
+		"registry_url":    marketRegistryURL(),
+		"lang":            lang,
+	})
 }
 
-func findMarketSkill(name string) *marketSkill {
-	catalog := mergedMarketCatalog()
+func findMarketSkill(name, lang string) *marketSkill {
+	catalog, _ := mergedMarketCatalog(lang)
 	for i, s := range catalog {
 		if s.Name == name {
 			skill := catalog[i]
@@ -520,18 +632,46 @@ func findMarketSkill(name string) *marketSkill {
 	return nil
 }
 
-// readSkillDoc reads SKILL.md / references/help.md / references/tools.md from
-// the v2 install location (~/cicy-ai/skills/<name>/).
-func readSkillDoc(skill *marketSkill, file string) string {
+// readSkillDoc reads SKILL.md / references/help.md / references/tools.md.
+// Order:
+//   1. Local install at ~/cicy-ai/skills/<name>/<file> (always English here).
+//   2. Worker /v1/skills/<name>/<version>/files/<file_key> (the v2 publish
+//      flow uploads the doc into KV alongside the manifest, so any registry
+//      skill has these even before install).
+// Worker file keys are: skill_md, help_md, tools_md, readme.
+func readSkillDoc(skill *marketSkill, file, fileKey string) string {
 	root := userSkillsRoot()
-	if root == "" {
+	if root != "" {
+		p := filepath.Join(root, skill.Name, file)
+		if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
+			return string(data)
+		}
+	}
+	// Fallback: pull from worker. Use latest if version is empty.
+	version := skill.Version
+	if version == "" || version == "user" {
 		return ""
 	}
-	p := filepath.Join(root, skill.Name, file)
-	if data, err := os.ReadFile(p); err == nil {
-		return string(data)
+	u := fmt.Sprintf("%s/v1/skills/%s/%s/files/%s",
+		strings.TrimRight(marketRegistryURL(), "/"),
+		url.PathEscape(skill.Name),
+		url.PathEscape(version),
+		url.PathEscape(fileKey),
+	)
+	client := &http.Client{Timeout: 6 * time.Second}
+	resp, err := client.Get(u)
+	if err != nil {
+		return ""
 	}
-	return ""
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ""
+	}
+	return string(body)
 }
 
 // installAdvice describes the v2 self-service install path. Marketplace
@@ -546,9 +686,10 @@ type installAdvice struct {
 
 func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 	// Routes:
-	//   GET  /api/skill-market/<name>                 → detail (includes skill_md, help_md, tools_md)
-	//   POST /api/skill-market/<name>/install         → returns advice (run cicy-code skill install)
-	//   POST /api/skill-market/<name>/uninstall       → returns advice (run cicy-code skill remove)
+	//   GET  /api/skill-market/<name>                  → detail (includes skill_md, help_md, tools_md)
+	//   POST /api/skill-market/<name>/install          → run skillcmd install in-process; return logs+status
+	//   POST /api/skill-market/<name>/uninstall        → run skillcmd remove in-process; return logs+status
+	//   POST /api/skill-market/<name>/update           → run skillcmd update in-process; return logs+status
 	path := strings.TrimPrefix(r.URL.Path, "/api/skill-market/")
 	parts := strings.SplitN(path, "/", 2)
 	name := parts[0]
@@ -556,7 +697,8 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "skill name required")
 		return
 	}
-	skill := findMarketSkill(name)
+	lang := preferredLang(r)
+	skill := findMarketSkill(name, lang)
 	if skill == nil {
 		httpErr(w, 404, "skill not found")
 		return
@@ -570,9 +712,9 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 		}
 		J(w, M{
 			"skill":    skill,
-			"skill_md": readSkillDoc(skill, "SKILL.md"),
-			"help_md":  readSkillDoc(skill, filepath.Join("references", "help.md")),
-			"tools_md": readSkillDoc(skill, filepath.Join("references", "tools.md")),
+			"skill_md": readSkillDoc(skill, "SKILL.md", "skill_md"),
+			"help_md":  readSkillDoc(skill, filepath.Join("references", "help.md"), "help_md"),
+			"tools_md": readSkillDoc(skill, filepath.Join("references", "tools.md"), "tools_md"),
 		})
 		return
 	}
@@ -581,22 +723,112 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 405, "method not allowed")
 		return
 	}
+
 	switch parts[1] {
 	case "install":
+		// User skills (~/cicy-ai/skills/<name> with SKILL.md) are not in the
+		// registry — installing them is a no-op (they're already discovered
+		// by scanUserSkills). Surface a friendly hint for now.
+		if skill.Source == "user" {
+			J(w, M{"ok": true, "info": "user skill is already discovered locally; no install needed."})
+			return
+		}
+		var logBuf strings.Builder
+		res, err := skillcmd.PublicInstall(name, &logBuf)
+		if err != nil {
+			J(w, M{"ok": false, "error": err.Error(), "log": logBuf.String()})
+			return
+		}
+		// drop registry cache so /api/skill-market re-fetch picks up
+		// latest installed version status.
+		invalidateMarketCache()
+		// re-compute status after install
+		updated := findMarketSkill(name, lang)
+		if updated != nil {
+			computeMarketStatus(updated)
+			skill = updated
+		}
+		J(w, M{
+			"ok":          true,
+			"name":        res.Name,
+			"version":     res.Version,
+			"path":        res.Path,
+			"sha256":      res.SHA256,
+			"agents":      res.AgentsSynced,
+			"log":         res.LogText,
+			"skill":       skill,
+		})
+	case "uninstall":
+		if skill.Source == "user" {
+			J(w, M{"ok": false, "error": "user skill — delete the directory under ~/cicy-ai/skills/ manually"})
+			return
+		}
+		var logBuf strings.Builder
+		removed, err := skillcmd.PublicRemove(name, &logBuf)
+		if err != nil {
+			J(w, M{"ok": false, "error": err.Error(), "log": logBuf.String()})
+			return
+		}
+		invalidateMarketCache()
+		updated := findMarketSkill(name, lang)
+		if updated != nil {
+			computeMarketStatus(updated)
+			skill = updated
+		}
+		J(w, M{
+			"ok":      true,
+			"name":    removed.Name,
+			"version": removed.Version,
+			"log":     logBuf.String(),
+			"skill":   skill,
+		})
+	case "update":
+		if skill.Source == "user" {
+			J(w, M{"ok": false, "error": "user skill — edit files directly under ~/cicy-ai/skills/"})
+			return
+		}
+		var logBuf strings.Builder
+		res, err := skillcmd.PublicUpdate(name, &logBuf)
+		if err != nil {
+			J(w, M{"ok": false, "error": err.Error(), "log": logBuf.String()})
+			return
+		}
+		invalidateMarketCache()
+		updated := findMarketSkill(name, lang)
+		if updated != nil {
+			computeMarketStatus(updated)
+			skill = updated
+		}
+		J(w, M{
+			"ok":      true,
+			"name":    res.Name,
+			"from":    res.From,
+			"to":      res.To,
+			"updated": res.Updated,
+			"log":     logBuf.String(),
+			"skill":   skill,
+		})
+	case "advice":
+		// Legacy path — kept so any old client polling `/install` action
+		// pre-binary-update still gets a sensible response. Returns the
+		// CLI command string instead of running anything.
 		J(w, installAdvice{
 			OK:      true,
 			Action:  "install",
 			Command: "cicy-code skill install " + name,
 			Hint:    "Run the command above in a terminal (or via an agent pane) to install this skill.",
 		})
-	case "uninstall":
-		J(w, installAdvice{
-			OK:      true,
-			Action:  "uninstall",
-			Command: "cicy-code skill remove " + name,
-			Hint:    "Run the command above in a terminal (or via an agent pane) to remove this skill.",
-		})
 	default:
 		httpErr(w, 400, "unknown action: "+parts[1])
 	}
+}
+
+// invalidateMarketCache forces the next list/detail fetch to bypass the
+// per-language cache. Called after install/uninstall/update so the UI sees
+// fresh status (and any newly installed_version) immediately.
+func invalidateMarketCache() {
+	marketCacheMu.Lock()
+	defer marketCacheMu.Unlock()
+	marketCacheByLang = map[string][]marketSkill{}
+	marketCacheFetched = map[string]time.Time{}
 }

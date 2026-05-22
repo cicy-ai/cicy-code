@@ -1,6 +1,7 @@
 import axios from 'axios';
 import config from '../config';
 import { TokenManager } from './tokenManager';
+import i18n from '../i18n';
 
 const BACKEND_KEY = 'cicy_backend';
 
@@ -15,6 +16,10 @@ function shortPaneRouteId(id: string) {
 http.interceptors.request.use((cfg) => {
   const token = TokenManager.getToken();
   if (token) cfg.headers.Authorization = `Bearer ${token}`;
+  // Forward the active UI language so backend / worker can localize
+  // catalog text (skill description, title, etc). Falls back to 'en'.
+  const lang = (i18n.resolvedLanguage || i18n.language || 'en').toString();
+  cfg.headers['Accept-Language'] = lang;
   if (!config.isWorkspace) {
     const saved = localStorage.getItem(BACKEND_KEY);
     if (saved && cfg.url && !cfg.url.startsWith('/api/auth/')) {
@@ -131,6 +136,8 @@ const api = {
     http.post(`/api/skill-market/${encodeURIComponent(name)}/install`, opts || {}),
   uninstallMarketSkill: (name: string, opts?: { purge_config?: boolean }) =>
     http.post(`/api/skill-market/${encodeURIComponent(name)}/uninstall`, opts || {}),
+  updateMarketSkill: (name: string) =>
+    http.post(`/api/skill-market/${encodeURIComponent(name)}/update`, {}),
 
   getGoogleSkillConfig: () => http.get('/api/skill-config/google'),
   connectGoogleSkillConfig: () => http.post('/api/skill-config/google/connect', {}),
@@ -154,6 +161,22 @@ const api = {
   deleteProvider: (key: string) => http.delete(`/api/providers/${encodeURIComponent(key)}`),
   updateProviderDefaults: (defaults: Record<string, string>) => http.put('/api/providers/defaults', { default: defaults }),
   testProvider: (data: any) => http.post('/api/providers/test', data),
+
+  // IM (Telegram / WeChat) — restored 2026-05-18
+  getIMPlatforms: () => http.get('/api/im/platforms'),
+  getIMAccounts: () => http.get('/api/im/accounts'),
+  getIMAccount: (id: number) => http.get(`/api/im/accounts/${id}`),
+  createIMAccount: (data: any) => http.post('/api/im/accounts', data),
+  updateIMAccount: (id: number, data: any) => http.patch(`/api/im/accounts/${id}`, data),
+  deleteIMAccount: (id: number) => http.delete(`/api/im/accounts/${id}`),
+  testIMAccount: (id: number) => http.post(`/api/im/accounts/${id}/test`),
+  bindIMAccount: (id: number, paneId: string) => http.post(`/api/im/accounts/${id}/bind`, { pane_id: paneId }),
+  unbindIMAccount: (id: number) => http.post(`/api/im/accounts/${id}/unbind`),
+  getIMAccountQR: (id: number) => http.get(`/api/im/accounts/${id}/qr`),
+  reloginIMAccount: (id: number) => http.post(`/api/im/accounts/${id}/relogin`),
+  startWeChatLogin: () => http.post('/api/im/wechat/login'),
+  getWeChatLoginStatus: (sessionId: string) => http.get(`/api/im/wechat/login/${encodeURIComponent(sessionId)}`),
+  cancelWeChatLogin: (sessionId: string) => http.post(`/api/im/wechat/login/${encodeURIComponent(sessionId)}/cancel`),
 
   getTokens: () => http.get('/api/auth/tokens'),
   createToken: (data: any) => http.post('/api/auth/tokens', data),

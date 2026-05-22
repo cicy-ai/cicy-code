@@ -457,6 +457,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   return (
     <div className="h-full w-full min-w-0 flex flex-col overflow-hidden" data-id="team-panel-root">
       <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-center gap-2 flex-shrink-0" data-id="team-panel-toolbar">
+        <div data-id="team-panel-bind-select">
         <Select
           options={available.map(a => ({
             value: a.pane_id,
@@ -487,6 +488,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
           triggerIcon={<UserPlus className="w-3.5 h-3.5" />}
           dropdownMatchSelector='[data-id="left-panel-team-view"]'
         />
+        </div>
         <button
           data-id="team-panel-create-worker"
           onClick={() => setCreateDialogOpen(true)}

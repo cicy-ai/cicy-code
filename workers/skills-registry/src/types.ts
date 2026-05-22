@@ -30,6 +30,8 @@ export interface Manifest {
   version: string;
   title: string;
   description: string;
+  /** Localized title/description keyed by BCP-47 tag, e.g. "zh-CN" */
+  i18n?: Record<string, { title?: string; description?: string }>;
   category:
     | 'network'
     | 'cloud'
@@ -95,6 +97,9 @@ export interface SkillSummary {
   version: string;
   title: string;
   description: string;
+  /** Present when lang fallback resolves to a non-English value */
+  title_localized?: string;
+  description_localized?: string;
   category: string;
   tags: string[];
   author: string;

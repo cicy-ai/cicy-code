@@ -101,19 +101,16 @@ export async function publish(req: Request, env: Env): Promise<Response> {
   const existing = await getManifest(env, manifest.name, manifest.version);
   if (existing) {
     if (existing.publish?.sha256 === manifest.publish.sha256) {
-      return ok({
-        name: manifest.name,
-        version: manifest.version,
-        idempotent: true,
-        manifest_url: `https://${new URL(req.url).host}/v1/skills/${manifest.name}/${manifest.version}`,
-        download_url: manifest.publish.download_url,
-      });
+      // Same binary — allow re-publishing to update metadata (i18n, tags, etc.)
+      // Fall through to the write path below; it will overwrite the KV entry.
+      // Return idempotent=true at the end to distinguish from a fresh publish.
+    } else {
+      return err(
+        'CONFLICT',
+        `${manifest.name}@${manifest.version} already published with different sha256`,
+        409,
+      );
     }
-    return err(
-      'CONFLICT',
-      `${manifest.name}@${manifest.version} already published with different sha256`,
-      409,
-    );
   }
 
   // ── write KV ─────────────────────────────────────────────────────────
@@ -145,6 +142,7 @@ export async function publish(req: Request, env: Env): Promise<Response> {
   return ok({
     name: manifest.name,
     version: manifest.version,
+    idempotent: !!existing,
     manifest_url: `https://${new URL(req.url).host}/v1/skills/${manifest.name}/${manifest.version}`,
     download_url: manifest.publish.download_url,
   });
@@ -154,7 +152,7 @@ export async function publish(req: Request, env: Env): Promise<Response> {
 
 function validateManifest(m: Manifest): string | null {
   if (!m || typeof m !== 'object') return 'manifest must be an object';
-  if (typeof m.name !== 'string' || !/^[a-z][a-z0-9_-]*$/.test(m.name)) {
+  if (typeof m.name !== 'string' || !/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(m.name)) {
     return `invalid name: ${m.name}`;
   }
   if (m.name.length > 64) return 'name too long';
@@ -183,8 +181,8 @@ function validateManifest(m: Manifest): string | null {
     return 'invalid publish.download_url';
   }
   if (m.config) {
-    if (typeof m.config.path !== 'string' || !m.config.path.startsWith('~/cicy-ai/db/')) {
-      return 'config.path must start with ~/cicy-ai/db/';
+    if (typeof m.config.path !== 'string' || !m.config.path.startsWith('~/cicy-ai/')) {
+      return 'config.path must start with ~/cicy-ai/';
     }
   }
   return null;

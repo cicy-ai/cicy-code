@@ -13,13 +13,21 @@ import config from './config';
 import { useTranslation } from 'react-i18next';
 import { chatWs } from './services/chatWs';
 import { Spinner } from './components/ui/Spinner';
+import SpeedUp from './components/SpeedUp';
+import WSLInstall from './components/WSLInstall';
 
-type ViewType = 'desktop' | 'workspace' | 'audit';
+type ViewType = 'desktop' | 'workspace' | 'audit' | 'speedup' | 'wsl-install';
 
 function parseHash(): { view: ViewType; agentId: string } {
   const hash = window.location.hash;
   if (hash.startsWith('#/audit')) {
     return { view: 'audit', agentId: '' };
+  }
+  if (hash.startsWith('#/speedup')) {
+    return { view: 'speedup', agentId: '' };
+  }
+  if (hash.startsWith('#/wsl-install')) {
+    return { view: 'wsl-install', agentId: '' };
   }
   if (hash.startsWith('#/agent/')) {
     const m = hash.match(/\/agent\/([^/]+)/);
@@ -130,6 +138,12 @@ function Main() {
   }
 
   if (provisioning) return <ProvisionScreen onReady={handleProvisionReady} />;
+
+  // #/speedup and #/wsl-install render before auth — they only call the local
+  // electronRPC bridge and the user may need them before they can even log in
+  // (e.g. CN Windows user who can't reach the cicy-code release first).
+  if (route.view === 'speedup') return <SpeedUp />;
+  if (route.view === 'wsl-install') return <WSLInstall />;
 
   // Not authenticated
   if (!token) return <Login />;

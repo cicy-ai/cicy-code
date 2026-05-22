@@ -37,6 +37,8 @@
   "marketplaceManageProxy": "Gérer le proxy",
   "marketplaceReinstall": "Réinstaller",
   "marketplaceInstalling": "Installation…",
+  "marketplaceUpdate": "Mettre à jour",
+  "marketplaceUpdating": "Mise à jour…",
   "marketplaceFailedToLoad": "Impossible de charger les compétences",
   "marketplaceEmpty": "Aucune compétence correspondant à votre filtre.",
   "marketplaceCategoryAll": "Tous",
