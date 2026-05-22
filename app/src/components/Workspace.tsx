@@ -58,6 +58,8 @@ const cliContentTabKey = (paneId: string) => `TeamPanel:${paneId}.paneId:cliCont
 const leftPanelKey = (masterAgentId: string) => `ws_leftPanel:${masterAgentId}`;
 const cliContentOpenKey = (masterAgentId: string) => `ws_cliContentOpen:${masterAgentId}`;
 const chatClientIdStorageKey = (masterAgentId: string) => `cicy_chat_client_id:${masterAgentId}`;
+const chatClientIdStorage = (): Storage =>
+  typeof (window as any).electronRPC === 'function' ? localStorage : sessionStorage;
 function makePageClientId(masterAgentId: string): string {
   const m = String(masterAgentId || 'w-10001').replace(/[^a-zA-Z0-9_-]/g, '') || 'w';
   return `web-${m}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -414,11 +416,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // a tab is *duplicated* (Chrome copies sessionStorage) — so the two tabs don't fight over the slot.
   const [pageClientId, setPageClientId] = useState<string>(() => {
     try {
-      const cur = sessionStorage.getItem(chatClientIdStorageKey(paneId));
+      const cur = chatClientIdStorage().getItem(chatClientIdStorageKey(paneId));
       if (cur) return cur;
     } catch {}
     const next = makePageClientId(paneId);
-    try { sessionStorage.setItem(chatClientIdStorageKey(paneId), next); } catch {}
+    try { chatClientIdStorage().setItem(chatClientIdStorageKey(paneId), next); } catch {}
     return next;
   });
   const pageClientClaimTsRef = useRef<number>(Date.now() + Math.random());
@@ -426,11 +428,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useEffect(() => {
     let next: string;
     try {
-      next = sessionStorage.getItem(chatClientIdStorageKey(paneId)) || '';
+      next = chatClientIdStorage().getItem(chatClientIdStorageKey(paneId)) || '';
     } catch { next = ''; }
     if (!next) {
       next = makePageClientId(paneId);
-      try { sessionStorage.setItem(chatClientIdStorageKey(paneId), next); } catch {}
+      try { chatClientIdStorage().setItem(chatClientIdStorageKey(paneId), next); } catch {}
     }
     pageClientClaimTsRef.current = Date.now() + Math.random();
     setPageClientId(next);
@@ -449,7 +451,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       if (m.type === 'claim' && m.clientId === pageClientId && typeof m.ts === 'number' && m.ts < myTs) {
         // the other tab claimed this id first → yield, generate a fresh one (triggers chat-ws reconnect)
         const next = makePageClientId(paneId);
-        try { sessionStorage.setItem(chatClientIdStorageKey(paneId), next); } catch {}
+        try { chatClientIdStorage().setItem(chatClientIdStorageKey(paneId), next); } catch {}
         pageClientClaimTsRef.current = Date.now() + Math.random();
         setPageClientId(next);
       }

@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -14,6 +15,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"ttyd-go/skillcmd"
 )
 
 type Tool struct {
@@ -770,6 +773,62 @@ func checkEnv() {
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles(selectedAgents)
 	ensureCodeServer()
+	go ensureFfmpegAsync()
+	go ensurePreinstalledSkills()
+}
+
+var preinstalledSkills = []string{
+	"agent-chrome", "agent-code-server", "agent-desktop", "agent-webpage",
+	"cicy-agent", "cicy-todo", "cicy-mihomo", "cicy-ssh", "proxy_ssh", "globalApiToken",
+}
+
+func ensurePreinstalledSkills() {
+	installed, err := skillcmd.PublicInstalled()
+	if err != nil {
+		log.Printf("[startup] failed to read installed skills: %v", err)
+		return
+	}
+	installedMap := map[string]bool{}
+	for _, s := range installed.Skills {
+		installedMap[s.Name] = true
+	}
+	for _, name := range preinstalledSkills {
+		if installedMap[name] {
+			continue
+		}
+		log.Printf("[startup] pre-installing skill: %s", name)
+		if _, err := skillcmd.PublicInstall(name, io.Discard); err != nil {
+			log.Printf("[startup] skill %s install failed: %v", name, err)
+		} else {
+			log.Printf("[startup] skill %s installed", name)
+		}
+	}
+}
+
+func ensureFfmpegAsync() {
+	extendPATH()
+	if _, err := exec.LookPath("ffmpeg"); err == nil {
+		return
+	}
+	if isContainerRuntime() {
+		return
+	}
+	var installCmd string
+	if runtime.GOOS == "darwin" {
+		// Set Homebrew bottle mirror for faster downloads in China.
+		installCmd = `HOMEBREW_BOTTLE_DOMAIN=https://mirrors.ustc.edu.cn/homebrew-bottles brew install ffmpeg`
+	} else {
+		installCmd = sudoPrefix() + "apt-get install -y ffmpeg"
+	}
+	log.Printf("[startup] installing ffmpeg in background...")
+	cmd := exec.Command("sh", "-c", installCmd)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		log.Printf("[startup] ffmpeg install failed (voice features degraded): %v", err)
+	} else {
+		log.Printf("[startup] ffmpeg installed")
+	}
 }
 
 // anyActiveAgentUsesProxy returns true if at least one active row in
