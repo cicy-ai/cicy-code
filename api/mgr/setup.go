@@ -107,7 +107,10 @@ func sudoPrefix() string {
 }
 
 func npmGlobalInstallCmd(pkg string) string {
-	return `mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && npm install -g --include=optional --prefix "$HOME/.npm-global" ` + pkg
+	// Auto-detect network: try registry.npmjs.org with a 3-second timeout.
+	// If reachable, use it directly; otherwise fall back to npmmirror (China).
+	registry := `$(if curl -s --max-time 3 https://registry.npmjs.org/ >/dev/null 2>&1; then echo https://registry.npmjs.org; else echo https://registry.npmmirror.com; fi)`
+	return `mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && npm install -g --include=optional --registry=` + registry + ` --prefix "$HOME/.npm-global" ` + pkg
 }
 
 func preinstalledRuntimeInstallCmd(cmd string) string {
@@ -122,15 +125,15 @@ func openClawInstallCmd() string {
 }
 
 func claudeInstallCmd() string {
-	return npmGlobalInstallCmd("--registry=https://registry.npmjs.org @anthropic-ai/claude-code@latest")
+	return npmGlobalInstallCmd("@anthropic-ai/claude-code@latest")
 }
 
 func codexInstallCmd() string {
-	return npmGlobalInstallCmd("--registry=https://registry.npmjs.org @openai/codex@latest")
+	return npmGlobalInstallCmd("@openai/codex@latest")
 }
 
 func opencodeInstallCmd() string {
-	return npmGlobalInstallCmd("--registry=https://registry.npmjs.org opencode-ai@latest")
+	return npmGlobalInstallCmd("opencode-ai@latest")
 }
 
 func cursorInstallCmd() string {
