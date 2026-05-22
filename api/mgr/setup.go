@@ -176,10 +176,10 @@ func codeServerInstallCmd() string {
 	if isContainerRuntime() {
 		return ""
 	}
-	if runtime.GOOS == "darwin" {
-		return "brew install code-server"
-	}
-	return "curl -fsSL https://code-server.dev/install.sh | sh"
+	// Use npm so the mirror auto-detection in .cicy_tmux.conf applies
+	// (npmmirror for China, npmjs.org elsewhere). Much faster than
+	// brew or the official install.sh which downloads from GitHub.
+	return npmGlobalInstallCmd("code-server@latest")
 }
 
 func copilotInstallCmd() string {
