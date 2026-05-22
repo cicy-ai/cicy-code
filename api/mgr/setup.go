@@ -1,14 +1,10 @@
 package main
 
 import (
-	"archive/tar"
-	"bytes"
-	"compress/gzip"
 	"database/sql"
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -39,9 +35,6 @@ var embeddedCodeServerBridgeVSIX []byte
 
 //go:embed resources/MS-CEINTL.vscode-language-pack-zh-hans-1.110.0.vsix
 var embeddedCodeServerZhHansVSIX []byte
-
-//go:embed cicy_skills_assets.tar.gz
-var embeddedCicySkillsTar []byte
 
 var cicySkillsInstallOnce sync.Once
 
@@ -772,7 +765,6 @@ func checkEnv() {
 	ensureBuiltinAgents(selectedAgents)
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles(selectedAgents)
-	ensureCicySkillsAsync()
 	ensureCodeServer()
 }
 
@@ -792,17 +784,16 @@ func anyActiveAgentUsesProxy() bool {
 
 // startCicyMihomoIfNeeded brings up the local mihomo proxy synchronously when
 // any active worker is configured to route via it. This blocks startup until
-// mihomo is up so the workers don't race a half-started proxy:
+// mihomo is up so the workers don't race a half-started proxy.
 //
-//  1. Synchronously install cicy-skills (so the cicy-mihomo wrapper exists)
-//  2. Synchronously install the mihomo binary (so `cicy-mihomo start` actually works)
-//  3. Start mihomo (no-op if already running)
+// In v2, cicy-mihomo is installed via `cicy-code skill install cicy-mihomo`
+// rather than auto-installed at startup. If the wrapper is missing the
+// caller logs a warning and skips — the user is expected to install the
+// skill once per host.
 func startCicyMihomoIfNeeded() {
 	if !anyActiveAgentUsesProxy() {
 		return
 	}
-	// Step 1: cicy-skills install (no-op if dev mode or already installed).
-	ensureCicySkillsSync()
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -810,11 +801,11 @@ func startCicyMihomoIfNeeded() {
 	}
 	wrapper := filepath.Join(home, ".local", "bin", "cicy-mihomo")
 	if _, err := os.Stat(wrapper); err != nil {
-		log.Printf("[startup] cicy-mihomo wrapper still missing after install — proxy-using workers may fail")
+		log.Printf("[startup] cicy-mihomo wrapper missing — proxy-using workers may fail. Install with: cicy-code skill install cicy-mihomo")
 		return
 	}
 
-	// Step 2: download mihomo binary if missing. ensureMihomoBinaryInstalled
+	// Step 1: download mihomo binary if missing. ensureMihomoBinaryInstalled
 	// is idempotent (skip when already on disk).
 	logPath := filepath.Join(cicyLogsDir, cicySkillsInstallLogFile)
 	_ = os.MkdirAll(cicyLogsDir, 0o755)
@@ -1134,329 +1125,11 @@ func ensureSSHConfigFile(path string) {
 	log.Printf("[startup] ensured %s exists", path)
 }
 
-func cicySkillsDistBinaryPath() string {
-	return filepath.Join(cicySkillsProjectDir(), "dist", "cicy-skills")
-}
-
-func cicySkillsProjectDir() string {
-	return filepath.Join(cicySkillsDir, "cicy-skills")
-}
-
-func cicySkillsSkillDocPath(profile, skill string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return ""
-	}
-	return filepath.Join(home, "."+profile, "skills", skill, "SKILL.md")
-}
-
-func cicySkillsCommandPath(name string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return ""
-	}
-	return filepath.Join(home, ".local", "bin", name)
-}
-
-func needsCicySkillsInstall() bool {
-	// "Installed" means: cicy-skills CLI is reachable AND every approved
-	// market skill (skipping ones the user explicitly uninstalled) has
-	// SKILL.md emitted into every supported profile dir. Checking every
-	// approved skill — not just agent-code-server — lets us auto-heal
-	// partial installs (e.g. when a previous bootstrap crashed midway, or
-	// when a new skill was added in a binary upgrade and never made it
-	// into the existing profile dirs).
-	//
-	// We deliberately DO NOT require the extracted source tree to live at
-	// ~/cicy-ai/skills/cicy-skills/ — a dev `make install-local-cli` from
-	// anywhere else is equally valid.
-	cliPath := cicySkillsCommandPath("cicy-skills")
-	if strings.TrimSpace(cliPath) == "" {
-		return true
-	}
-	if info, err := os.Stat(cliPath); err != nil || info.Mode()&0o111 == 0 {
-		return true
-	}
-	uninstalled := uninstalledSkillsSet()
-	for skillName := range agentgenApprovedMarketSkills {
-		if _, skip := uninstalled[skillName]; skip {
-			continue
-		}
-		for _, profile := range []string{"codex", "claude", "opencode"} {
-			if _, err := os.Stat(cicySkillsSkillDocPath(profile, skillName)); err != nil {
-				return true
-			}
-		}
-	}
-	// Stale retired aliases left behind by an older install still mean we
-	// should re-run install to scrub them.
-	for _, name := range []string{"webpage", "webpage-ping", "ipc-ping", "agent-page-ping"} {
-		path := cicySkillsCommandPath(name)
-		if strings.TrimSpace(path) == "" {
-			continue
-		}
-		if _, err := os.Stat(path); err == nil {
-			return true
-		}
-	}
-	return false
-}
-
-// extractEmbeddedCicySkills untars the embedded cicy-skills tarball into dest.
-// The tar carries the original permission bits, so dist/ binaries and shell
-// scripts stay executable. dest is wiped first to avoid version drift.
-func extractEmbeddedCicySkills(dest string) error {
-	if len(embeddedCicySkillsTar) < 64 {
-		return fmt.Errorf("embedded cicy-skills tarball is missing or empty (was the binary built with prepare_skills_embed?)")
-	}
-	if err := os.RemoveAll(dest); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		return err
-	}
-	gz, err := gzip.NewReader(bytes.NewReader(embeddedCicySkillsTar))
-	if err != nil {
-		return fmt.Errorf("gzip: %w", err)
-	}
-	defer gz.Close()
-	tr := tar.NewReader(gz)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("tar: %w", err)
-		}
-		clean := filepath.Clean(hdr.Name)
-		if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
-			continue
-		}
-		target := filepath.Join(dest, clean)
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, os.FileMode(hdr.Mode)&0o777|0o700); err != nil {
-				return err
-			}
-		case tar.TypeReg, tar.TypeRegA:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode)&0o777)
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(f, tr); err != nil {
-				f.Close()
-				return err
-			}
-			if err := f.Close(); err != nil {
-				return err
-			}
-		case tar.TypeSymlink:
-			_ = os.MkdirAll(filepath.Dir(target), 0o755)
-			_ = os.Remove(target)
-			if err := os.Symlink(hdr.Linkname, target); err != nil {
-				return err
-			}
-		}
-	}
-}
-
-func ensureCicySkillsAsync() {
-	cicySkillsInstallOnce.Do(func() {
-		if devMode {
-			devModeBootstrapCicySkills()
-			return
-		}
-		if !needsCicySkillsInstall() {
-			return
-		}
-		go doCicySkillsInstall()
-	})
-}
-
-// ensureCicySkillsSync runs the bootstrap inline. Safe to call alongside the
-// async path — sync.Once guarantees the work happens at most once. Used when
-// a downstream step (e.g. starting mihomo before workers) needs the wrapper
-// symlinks and dist binaries to definitely be present before continuing.
-func ensureCicySkillsSync() {
-	cicySkillsInstallOnce.Do(func() {
-		if devMode {
-			devModeBootstrapCicySkills()
-			return
-		}
-		if !needsCicySkillsInstall() {
-			return
-		}
-		doCicySkillsInstall()
-	})
-}
-
-// devBootstrapDecision is the route devModeBootstrapCicySkills should take.
-// Extracting it as a value lets tests verify branch selection without
-// actually running extract / install side-effects.
-type devBootstrapDecision int
-
-const (
-	devBootstrapSkipNotNeeded   devBootstrapDecision = iota // already installed, do nothing
-	devBootstrapExtractFresh                                // no source tree → safe to extract embedded snapshot
-	devBootstrapInstallExisting                             // source + dist binary present → run install all
-	devBootstrapWaitForBuild                                // source present but no dist binary → user must build
-)
-
-// chooseDevBootstrapDecision picks the bootstrap route. Pure(-ish): only
-// reads the filesystem, no side-effects, so tests can stage state and
-// assert the choice.
-func chooseDevBootstrapDecision() devBootstrapDecision {
-	if !needsCicySkillsInstall() {
-		return devBootstrapSkipNotNeeded
-	}
-	projectRoot := cicySkillsProjectDir()
-	if _, err := os.Stat(projectRoot); os.IsNotExist(err) {
-		return devBootstrapExtractFresh
-	}
-	distBin := cicySkillsDistBinaryPath()
-	info, err := os.Stat(distBin)
-	if err != nil || info.Mode()&0o111 == 0 {
-		return devBootstrapWaitForBuild
-	}
-	return devBootstrapInstallExisting
-}
-
-// devModeBootstrapCicySkills bootstraps cicy-skills in dev mode without
-// destroying a developer's source checkout. See devBootstrapDecision for
-// the four cases. Crucial invariant: extract is only called when the
-// project tree is fully absent — extractEmbeddedCicySkills RemoveAll's
-// the dest, which would clobber a dev checkout if we got this wrong.
-func devModeBootstrapCicySkills() {
-	projectRoot := cicySkillsProjectDir()
-	switch chooseDevBootstrapDecision() {
-	case devBootstrapSkipNotNeeded:
-		return
-	case devBootstrapExtractFresh:
-		log.Printf("[startup] dev mode: no cicy-skills source at %s — extracting embedded snapshot for first-time setup", projectRoot)
-		doCicySkillsInstall()
-	case devBootstrapWaitForBuild:
-		log.Printf("[startup] dev mode: cicy-skills source at %s but dist binary missing — run `make install-local-cli` from the cicy-skills repo, OR delete %s and restart to let cicy-code re-extract the embedded snapshot", projectRoot, projectRoot)
-	case devBootstrapInstallExisting:
-		log.Printf("[startup] dev mode: bootstrapping cicy-skills via existing dist binary (will not extract embedded snapshot)")
-		cmd := exec.Command(cicySkillsDistBinaryPath(), "install", "all")
-		cmd.Env = append(os.Environ(), "CICY_SKILLS_ROOT="+projectRoot)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			log.Printf("[startup] dev mode: cicy-skills install all failed: %v\n%s", err, string(out))
-			return
-		}
-		extendPATH()
-		log.Printf("[startup] dev mode: cicy-skills install all completed")
-	}
-}
-
-func doCicySkillsInstall() {
-	if err := os.MkdirAll(cicyLogsDir, 0o755); err != nil {
-		log.Printf("[startup] failed to create %s for cicy-skills bootstrap: %v", cicyLogsDir, err)
-		return
-	}
-	logPath := filepath.Join(cicyLogsDir, cicySkillsInstallLogFile)
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		log.Printf("[startup] failed to open cicy-skills install log: %v", err)
-		return
-	}
-	defer logFile.Close()
-
-	projectRoot := cicySkillsProjectDir()
-	log.Printf("[startup] extracting embedded cicy-skills into %s", projectRoot)
-	fmt.Fprintf(logFile, "[%s] extracting embedded cicy-skills into %s\n", time.Now().Format(time.RFC3339), projectRoot)
-	if err := extractEmbeddedCicySkills(projectRoot); err != nil {
-		log.Printf("[startup] cicy-skills extract failed: %v (log: %s)", err, logPath)
-		fmt.Fprintf(logFile, "extract failed: %v\n", err)
-		return
-	}
-
-	// Google skill is now a pure-Go hosttool — no npm install needed.
-
-	// Run cicy-skills install all to materialize ~/.local/bin/* symlinks
-	// and SKILL.md files via the registry.
-	distBin := cicySkillsDistBinaryPath()
-	if _, err := os.Stat(distBin); err != nil {
-		log.Printf("[startup] cicy-skills bootstrap: %s missing after extract (log: %s)", distBin, logPath)
-		return
-	}
-	if err := os.Chmod(distBin, 0o755); err != nil {
-		log.Printf("[startup] chmod %s: %v", distBin, err)
-	}
-	log.Printf("[startup] running %s install all", distBin)
-	fmt.Fprintf(logFile, "[%s] running %s install all\n", time.Now().Format(time.RFC3339), distBin)
-	cmd := exec.Command(distBin, "install", "all")
-	cmd.Env = append(os.Environ(), "CICY_SKILLS_ROOT="+projectRoot)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	if err := cmd.Run(); err != nil {
-		log.Printf("[startup] cicy-skills install all failed: %v (log: %s)", err, logPath)
-		return
-	}
-
-	extendPATH()
-
-	// Honor user-driven uninstalls (skills-state.json) — `install all` would
-	// otherwise resurrect anything the user disabled via the marketplace UI.
-	applySkillsUninstallState(logFile)
-
-	// After cicy-skills install all has linked the cicy-mihomo wrapper
-	// onto PATH, kick off the binary download once (skip if already
-	// present so reboots don't redownload).
-	ensureMihomoBinaryInstalled(logFile, logPath)
-
-	if needsCicySkillsInstall() {
-		log.Printf("[startup] cicy-skills bootstrap incomplete (log: %s)", logPath)
-		return
-	}
-	log.Printf("[startup] cicy-skills bootstrap completed")
-}
-
-// applySkillsUninstallState re-applies user-driven uninstalls after
-// `cicy-skills install all` has re-materialized every catalog skill. Without
-// this pass, container restarts would resurrect everything the user disabled
-// via the marketplace UI.
-func applySkillsUninstallState(logFile *os.File) {
-	state, err := loadSkillsState()
-	if err != nil {
-		fmt.Fprintf(logFile, "[%s] load skills-state.json: %v\n", time.Now().Format(time.RFC3339), err)
-		return
-	}
-	if len(state.Uninstalled) == 0 {
-		return
-	}
-	catalog := marketSkillsCatalog()
-	byName := make(map[string]*marketSkill, len(catalog))
-	for i := range catalog {
-		byName[catalog[i].Name] = &catalog[i]
-	}
-	for _, name := range state.Uninstalled {
-		skill, ok := byName[name]
-		if !ok {
-			fmt.Fprintf(logFile, "[%s] skipping uninstalled state for unknown skill %q\n", time.Now().Format(time.RFC3339), name)
-			continue
-		}
-		logs, err := uninstallMarketSkill(skill)
-		for _, line := range logs {
-			fmt.Fprintln(logFile, line)
-		}
-		if err != nil {
-			fmt.Fprintf(logFile, "[%s] re-apply uninstall %s: %v\n", time.Now().Format(time.RFC3339), name, err)
-			continue
-		}
-		log.Printf("[startup] re-applied uninstall for skill %s", name)
-	}
-}
-
 // ensureMihomoBinaryInstalled runs `cicy-mihomo install` to download the real
-// mihomo binary into ~/.local/bin/mihomo after the cicy-skills wrappers have
-// landed. Idempotent: skipped if mihomo is already on PATH or at the canonical
-// install location. Best-effort: a failure here doesn't fail the startup.
+// mihomo binary into ~/.local/bin/mihomo after the cicy-mihomo skill wrapper
+// has landed. Idempotent: skipped if mihomo is already on PATH or at the
+// canonical install location. Best-effort: a failure here doesn't fail the
+// startup.
 func ensureMihomoBinaryInstalled(logFile *os.File, logPath string) {
 	home, err := os.UserHomeDir()
 	if err != nil {
