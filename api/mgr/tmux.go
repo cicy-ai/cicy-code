@@ -1273,6 +1273,11 @@ func claudeUserStatuslineSetupLines() []string {
 		`chmod +x "$HOME/.claude/statusline-command.sh"`,
 		`[ -f "$HOME/.claude/settings.json" ] || printf '{}\n' > "$HOME/.claude/settings.json"`,
 		`if command -v jq >/dev/null 2>&1 && ! jq -e '.statusLine' "$HOME/.claude/settings.json" >/dev/null 2>&1; then __cicy_tmp=$(mktemp) && jq --arg cmd "bash $HOME/.claude/statusline-command.sh" '. + {statusLine: {type: "command", command: $cmd}}' "$HOME/.claude/settings.json" > "$__cicy_tmp" && mv "$__cicy_tmp" "$HOME/.claude/settings.json"; fi`,
+		// Pre-set theme to dark and mark onboarding prompts as completed so
+		// claude-code never shows the interactive theme picker or security
+		// notes on first run. Without this the auto-confirm goroutine may
+		// time out during a slow npm install and the pane stays stuck.
+		`if command -v jq >/dev/null 2>&1; then __cicy_tmp=$(mktemp) && jq '. + {"theme":"dark","hasCompletedOnboarding":true,"hasAcknowledgedCostThreshold":true}' "$HOME/.claude/settings.json" > "$__cicy_tmp" && mv "$__cicy_tmp" "$HOME/.claude/settings.json"; fi`,
 	}
 }
 
@@ -3023,7 +3028,7 @@ func ensureLazyAgentReady(paneID, agentType string) error {
 
 func waitForAgentInputReady(paneID, agentType string, trace *tmuxSendTrace) error {
 	agentType = normalizeAgentType(agentType)
-	if agentType == "" || agentType == "opencode" || agentType == "codex" || agentType == "hermes" {
+	if agentType == "" || agentType == "opencode" || agentType == "codex" || agentType == "hermes" || agentType == "kiro-cli" {
 		return nil
 	}
 	if trace != nil {
@@ -3718,7 +3723,11 @@ func autoSendReplyInChinese(paneID, agentType string, enabled bool) {
 func autoConfirmClaudeStartup(paneID string, allowAllActions bool) {
 	go func() {
 		state := claudeAutoConfirmState{}
-		for i := 0; i < 1500; i++ {
+		// maxPolls: 6000 × 200ms = 20 minutes — enough for a slow npm install.
+		// We also reset the counter once we detect the claude process is running
+		// to avoid timing out during a long install before claude even starts.
+		claudeStarted := false
+		for i := 0; i < 6000; i++ {
 			pollInterval := 200 * time.Millisecond
 			if state.currentStage == claudeStageBypassChoice || state.currentStage == claudeStageBypassConfirm {
 				pollInterval = 20 * time.Millisecond
@@ -3729,6 +3738,13 @@ func autoConfirmClaudeStartup(paneID string, allowAllActions bool) {
 				continue
 			}
 			currentCmd, _ := runTmux("display-message", "-p", "-t", paneID, "#{pane_current_command}")
+			cmd := strings.ToLower(strings.TrimSpace(currentCmd))
+			// Reset counter once claude process actually appears, so the
+			// install phase doesn't eat into the timeout budget.
+			if !claudeStarted && (cmd == "claude" || cmd == "cicy-claude") {
+				claudeStarted = true
+				i = 0
+			}
 			action := nextClaudeAutoConfirmAction(&state, out, currentCmd, allowAllActions, time.Now())
 			switch action {
 			case claudeActionStop:
@@ -3776,11 +3792,18 @@ func autoConfirmCodexTrust(paneID string) {
 		var lastAction time.Time
 		enterCount := 0
 		updateSkipCount := 0
-		for i := 0; i < 300; i++ {
+		codexStarted := false
+		for i := 0; i < 6000; i++ {
 			time.Sleep(200 * time.Millisecond)
 			out, err := runTmux("capture-pane", "-t", paneID, "-p")
 			if err != nil {
 				continue
+			}
+			currentCmd, _ := runTmux("display-message", "-p", "-t", paneID, "#{pane_current_command}")
+			cmd := strings.ToLower(strings.TrimSpace(currentCmd))
+			if !codexStarted && cmd == "codex" {
+				codexStarted = true
+				i = 0
 			}
 			if isCodexInputReady(out) {
 				log.Printf("[codex-auto-confirm] %s ready", paneID)

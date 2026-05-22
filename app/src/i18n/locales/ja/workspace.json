@@ -37,6 +37,8 @@
   "marketplaceManageProxy": "プロキシ管理",
   "marketplaceReinstall": "再インストール",
   "marketplaceInstalling": "インストール中…",
+  "marketplaceUpdate": "更新",
+  "marketplaceUpdating": "更新中…",
   "marketplaceFailedToLoad": "スキルの読み込みに失敗しました",
   "marketplaceEmpty": "該当するスキルがありません。",
   "marketplaceCategoryAll": "すべて",

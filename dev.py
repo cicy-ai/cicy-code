@@ -771,15 +771,35 @@ def run_checked(cmd, cwd=None, env=None):
 
 
 def get_pid_on_port(port):
+    # Try lsof first (macOS + Linux with lsof installed)
     try:
         result = subprocess.run(
             ["lsof", "-ti", f"TCP:{port}", "-sTCP:LISTEN"],
             capture_output=True,
             text=True,
         )
-        return result.stdout.strip().split("\n")[0] if result.stdout.strip() else None
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip().split("\n")[0]
+    except FileNotFoundError:
+        pass
     except Exception:
         return None
+    # Fallback: ss (Linux without lsof)
+    try:
+        import re
+        result = subprocess.run(
+            ["ss", "-tlnp", f"sport = :{port}"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                m = re.search(r"pid=(\d+)", line)
+                if m:
+                    return m.group(1)
+    except (FileNotFoundError, Exception):
+        pass
+    return None
 
 
 def is_pid_alive(pid):
@@ -1384,6 +1404,10 @@ def start_local_dev_detached(cicy_bin, extra=None):
 
     run_env = os.environ.copy()
     run_env["PATH"] = f"{API_DIR}:{run_env.get('PATH', '')}"
+    # 开发态默认开启 reply 镜像收集，所有 AI gateway 请求/响应快照写到
+    # ~/cicy-ai/workers/<agent>/.cicy/history/reply_mirror/<turn>_<req>_<ts>.json。
+    # 主路径 reply.json / current.json 行为不变；用于诊断 reply.Items 解析。
+    run_env.setdefault("CICY_GATEWAY_REPLY_MIRROR", "1")
 
     with open(log_path, "ab", buffering=0) as log_file:
         process = subprocess.Popen(
@@ -1456,6 +1480,11 @@ def main():
         action=argparse.BooleanOptionalAction,
         default=True,
         help="(default) build app/dist and serve it from disk via cicy-code --dev --preview; use --no-preview for the vite :8022 dev server.",
+    )
+    local_group.add_argument(
+        "--quick",
+        action="store_true",
+        help="Quick restart: build binary, kill existing on :8008, start cicy-code. Skips ttyd/app/version-sync.",
     )
     local_group.add_argument(
         "--ttydAssets",
@@ -1600,6 +1629,33 @@ def main():
     if args.ttydAssets:
         run_ttyd_assets()
 
+    # --quick: build binary, kill :8008, start. No ttyd/app/version-sync.
+    if args.quick:
+        platform = "darwin" if sys.platform == "darwin" else "linux"
+        os.environ["SKIP_TTYD_ASSET"] = "1"
+        os.environ["SKIP_NPM"] = "1"
+        os.environ["PORT"] = str(PORT)
+        os.environ["SQLITE_PATH"] = SQLITE_PATH
+        os.environ.setdefault("CICY_PUBLIC_URL", "http://43.99.56.150:8008")
+        for key, value in get_ai_env_defaults().items():
+            os.environ[key] = value
+        result = subprocess.run(["./build.sh", "build", platform], cwd=ROOT_DIR)
+        if result.returncode != 0:
+            print("[dev] build failed")
+            sys.exit(1)
+        existing_pid = get_pid_on_port(PORT)
+        if existing_pid:
+            print(f"[dev] kill :{PORT} (pid={existing_pid})")
+            kill_process(existing_pid)
+        cicy_bin = os.path.join(API_DIR, "cicy-code")
+        extra = ["--preview"] if args.preview else []
+        if args.hot:
+            extra = ["--hot"]
+        if args.preview:
+            os.environ["CICY_PREVIEW_DIST"] = os.path.join(ROOT_DIR, "app", "dist")
+        start_local_dev_detached(cicy_bin, extra=extra or None)
+        sys.exit(0)
+
     existing_pid = get_pid_on_port(PORT)
     if existing_pid:
         try:
@@ -1634,6 +1690,7 @@ def main():
     os.environ["PORT"] = str(PORT)
     os.environ["SKIP_NPM"] = "1"
     os.environ["SQLITE_PATH"] = SQLITE_PATH
+    os.environ.setdefault("CICY_PUBLIC_URL", "http://43.99.56.150:8008")
     for key, value in get_ai_env_defaults().items():
         os.environ[key] = value
     if not args.ttydAssets:

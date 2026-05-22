@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"ttyd-go/skillcmd"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -39,6 +41,12 @@ const version = "2.0.1"
 var agentsFlag string
 
 func main() {
+	// Subcommand dispatch — must run before flag parsing.
+	if len(os.Args) >= 2 && os.Args[1] == "skill" {
+		skillcmd.Run(os.Args[2:])
+		return
+	}
+
 	for _, arg := range os.Args[1:] {
 		switch {
 		case arg == "--version" || arg == "-v":
@@ -48,6 +56,15 @@ func main() {
 			fmt.Printf(`cicy-code - AI agent collaboration tool (local, SQLite)
 
 Usage: cicy-code [options]
+       cicy-code skill <subcommand> [args]
+
+Subcommands:
+  skill list                 List available skills from registry
+  skill info <name>          Show skill detail
+  skill install <name>       Install a skill
+  skill remove <name>        Uninstall a skill
+  skill installed            List locally installed skills
+  skill --help               Detailed skill help
 
 Options:
   --help, -h              Show this help
@@ -308,6 +325,9 @@ Options:
 	http.HandleFunc("/api/providers", wa(handleProviders))
 	http.HandleFunc("/api/providers/", wa(handleProvidersSub))
 
+	// IM platforms (Telegram / WeChat)
+	http.HandleFunc("/api/im/", wa(handleIMRoute))
+
 	http.HandleFunc("/api/file-exists", wa(handleFileExists))
 	http.HandleFunc("/api/utils/file/exists", wa(handleFileExists))
 	http.HandleFunc("/api/utils/translateText", wa(handleTranslateText))
@@ -396,6 +416,8 @@ Options:
 	})
 
 	initHTTPLogConsumer()
+	go syncTelegramPollers()
+	go imManagerStart()
 	// Repair <parent>/workers/<child> symlinks on every boot. Without this
 	// they only get rebuilt on bind/unbind, so a corrupted/missing link
 	// (or one written to the wrong workersDir because workspace was wrong)

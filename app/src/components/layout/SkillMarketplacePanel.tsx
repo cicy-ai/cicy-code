@@ -49,6 +49,9 @@ interface MarketSkill {
   binary_aliases?: string[];
   config_file?: string;
   status: InstallStatus;
+  installed_version?: string;
+  has_update?: boolean;
+  source?: string;
 }
 
 interface SkillDetailPayload {
@@ -82,7 +85,7 @@ function SkillAvatar({ skill, size = 'md' }: { skill: MarketSkill; size?: 'sm' |
   const dim = size === 'lg' ? 'w-14 h-14 rounded-xl' : size === 'sm' ? 'w-6 h-6 rounded' : 'w-9 h-9 rounded-lg';
   const ico = size === 'lg' ? 'w-7 h-7' : size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4';
   return (
-    <div data-id="skill-marketplace-panel-auto-1" className={cn('shrink-0 flex items-center justify-center bg-gradient-to-br ring-1', dim, grad)}>
+    <div data-id="skill-avatar-icon" className={cn('shrink-0 flex items-center justify-center bg-gradient-to-br ring-1', dim, grad)}>
       <Icon className={ico} />
     </div>
   );
@@ -161,22 +164,57 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
     setBusy(b => ({ ...b, [skill.name]: true }));
     try {
       const res = await apiService.installMarketSkill(skill.name);
-      const status = res?.data?.status as InstallStatus | undefined;
-      if (status) {
-        setSkills(prev => prev.map(s => s.name === skill.name ? { ...s, status } : s));
+      const data = res?.data;
+      // server returned a fresh skill snapshot — patch in-place to avoid full re-load flicker
+      if (data?.skill) {
+        const fresh = data.skill as MarketSkill;
+        setSkills(prev => prev.map(s => s.name === skill.name ? { ...s, ...fresh } : s));
       } else {
         await load();
       }
-    } catch { await load(); }
+      return data;
+    } catch (e: any) {
+      await load();
+      return { ok: false, error: e?.message || 'install failed' };
+    }
+    finally { setBusy(b => { const { [skill.name]: _, ...rest } = b; return rest; }); }
+  };
+
+  const onUpdate = async (skill: MarketSkill) => {
+    setBusy(b => ({ ...b, [skill.name]: true }));
+    try {
+      const res = await apiService.updateMarketSkill(skill.name);
+      const data = res?.data;
+      if (data?.skill) {
+        const fresh = data.skill as MarketSkill;
+        setSkills(prev => prev.map(s => s.name === skill.name ? { ...s, ...fresh } : s));
+      } else {
+        await load();
+      }
+      return data;
+    } catch (e: any) {
+      await load();
+      return { ok: false, error: e?.message || 'update failed' };
+    }
     finally { setBusy(b => { const { [skill.name]: _, ...rest } = b; return rest; }); }
   };
 
   const onUninstall = async (skill: MarketSkill) => {
     setBusy(b => ({ ...b, [skill.name]: true }));
     try {
-      await apiService.uninstallMarketSkill(skill.name);
+      const res = await apiService.uninstallMarketSkill(skill.name);
+      const data = res?.data;
+      if (data?.skill) {
+        const fresh = data.skill as MarketSkill;
+        setSkills(prev => prev.map(s => s.name === skill.name ? { ...s, ...fresh } : s));
+      } else {
+        await load();
+      }
+      return data;
+    } catch (e: any) {
       await load();
-    } catch {}
+      return { ok: false, error: e?.message || 'uninstall failed' };
+    }
     finally { setBusy(b => { const { [skill.name]: _, ...rest } = b; return rest; }); }
   };
 
@@ -184,7 +222,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
     <>
       <div className="h-full flex flex-col overflow-hidden bg-[#0A0A0A]" data-id="skill-market-root">
         <div className="px-3 py-2 border-b border-[var(--vsc-border)] shrink-0 space-y-2" data-id="skill-market-header">
-          <div data-id="skill-marketplace-panel-auto-2" className="relative">
+          <div data-id="skill-market-search-wrap" className="relative">
             <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
             <input
               data-id="skill-market-search"
@@ -194,7 +232,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
               className="w-full pl-7 pr-2 py-1.5 text-xs bg-[#0e0e0e] border border-[var(--vsc-border)] rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
             />
           </div>
-          <div data-id="skill-marketplace-panel-auto-3" className="flex items-center gap-1 text-[11px]">
+          <div data-id="skill-market-filters" className="flex items-center gap-1 text-[11px]">
             {(['all','installed','available'] as Filter[]).map(f => (
               <button
                 key={f}
@@ -218,21 +256,19 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
 
         <div className="flex-1 overflow-y-auto" data-id="skill-market-list">
           {loading && skills.length === 0 ? (
-            <div data-id="skill-marketplace-panel-auto-4" className="p-4 text-xs text-zinc-500 flex items-center gap-2">
-              <Loader2 className="w-3 h-3 animate-spin" /> {t('marketplaceModalLoading')}
-            </div>
+            <SkillListSkeleton />
           ) : loadError ? (
-            <div data-id="skill-marketplace-panel-auto-5" className="p-4 text-xs">
-              <div data-id="skill-marketplace-panel-auto-6" className="text-red-400 mb-2">{t('marketplaceFailedToLoad')}: {loadError}</div>
-              <button data-id="skill-marketplace-panel-auto-7" onClick={load} className="text-zinc-400 hover:text-zinc-100 underline">{t('marketplaceRetry')}</button>
+            <div data-id="skill-market-error" className="p-4 text-xs">
+              <div data-id="skill-market-error-msg" className="text-red-400 mb-2">{t('marketplaceFailedToLoad')}: {loadError}</div>
+              <button data-id="skill-market-error-retry" onClick={load} className="text-zinc-400 hover:text-zinc-100 underline">{t('marketplaceRetry')}</button>
             </div>
           ) : filtered.length === 0 ? (
-            <div data-id="skill-marketplace-panel-auto-8" className="p-4 text-xs text-zinc-500">{t('marketplaceEmpty')}</div>
+            <div data-id="skill-market-empty" className="p-4 text-xs text-zinc-500">{t('marketplaceEmpty')}</div>
           ) : (
             Object.entries(grouped).sort(([a],[b]) => a.localeCompare(b)).map(([category, list]) => (
               <div key={category} data-id={`skill-market-cat-${category}`}>
-                <div data-id="skill-marketplace-panel-auto-9" className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wider text-zinc-600">{category}</div>
-                <div data-id="skill-marketplace-panel-auto-10">
+                <div data-id="skill-market-cat-label" className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wider text-zinc-600">{category}</div>
+                <div data-id="skill-market-cat-items">
                   {list.map(skill => (
                     <SkillRow
                       key={skill.name}
@@ -255,11 +291,15 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
           onClose={handleDetailClose}
           onInstall={async () => {
             const sk = skills.find(s => s.name === selectedName);
-            if (sk) await onInstall(sk);
+            if (sk) return await onInstall(sk);
           }}
           onUninstall={async () => {
             const sk = skills.find(s => s.name === selectedName);
-            if (sk) await onUninstall(sk);
+            if (sk) return await onUninstall(sk);
+          }}
+          onUpdate={async () => {
+            const sk = skills.find(s => s.name === selectedName);
+            if (sk) return await onUpdate(sk);
           }}
           onOpenProxyManager={handleOpenProxyManager}
           onOpenProxySshManager={handleOpenProxySshManager}
@@ -272,6 +312,44 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
       <FrpServerManagerDialog open={frpServerManagerOpen} onClose={() => setFrpServerManagerOpen(false)} />
       <WebClientsDrawer open={webClientsOpen} onClose={() => setWebClientsOpen(false)} paneId={paneId} />
     </>
+  );
+}
+
+function SkillListSkeleton() {
+  // Mirrors a real SkillRow's 68px height + 3 fake category groups.
+  const groups = [
+    { name: 'network', rows: 3 },
+    { name: 'ai', rows: 2 },
+    { name: 'infra', rows: 2 },
+  ];
+  return (
+    <div data-id="skill-market-skeleton">
+      {groups.map((g) => (
+        <div key={g.name}>
+          <div className="px-3 pt-3 pb-1">
+            <div className="h-2.5 w-16 rounded bg-white/[0.05] animate-pulse" />
+          </div>
+          {Array.from({ length: g.rows }).map((_, i) => (
+            <div
+              key={i}
+              className="h-[68px] px-3 py-2 border-b border-[var(--vsc-border)]/40 flex items-center"
+            >
+              <div className="flex items-start gap-2.5 w-full">
+                <div className="shrink-0 w-9 h-9 rounded-lg bg-white/[0.05] animate-pulse" />
+                <div className="flex-1 min-w-0 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2.5 w-24 rounded bg-white/[0.06] animate-pulse" />
+                    <div className="ml-auto h-2 w-8 rounded bg-white/[0.04] animate-pulse" />
+                  </div>
+                  <div className="h-2 w-full rounded bg-white/[0.04] animate-pulse" />
+                  <div className="h-2 w-3/4 rounded bg-white/[0.04] animate-pulse" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -298,19 +376,29 @@ function SkillRow({ skill, selected, onClick }: {
           : 'hover:bg-white/[0.03] focus:bg-white/[0.05]'
       )}
     >
-      <div data-id="skill-marketplace-panel-auto-11" className="flex items-start gap-2.5 w-full">
+      <div data-id="skill-row-inner" className="flex items-start gap-2.5 w-full">
         <SkillAvatar skill={skill} size="md" />
-        <div data-id="skill-marketplace-panel-auto-12" className="flex-1 min-w-0">
-          <div data-id="skill-marketplace-panel-auto-13" className="flex items-center gap-2 mb-0.5">
-            <div data-id="skill-marketplace-panel-auto-14" className="text-xs font-medium text-zinc-200 truncate">{skill.title}</div>
-            {installed && (
+        <div data-id="skill-row-info" className="flex-1 min-w-0">
+          <div data-id="skill-row-title-row" className="flex items-center gap-2 mb-0.5">
+            <div data-id="skill-row-title" className="text-xs font-medium text-zinc-200 truncate">{skill.title}</div>
+            {installed && !skill.has_update && (
               <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400 inline-flex items-center" data-id={`skill-market-installed-${skill.name}`}>
                 <CheckCircle2 className="w-2.5 h-2.5" />
               </span>
             )}
-            <span data-id="skill-marketplace-panel-auto-15" className="ml-auto text-[10px] text-zinc-600 shrink-0">v{skill.version}</span>
+            {installed && skill.has_update && (
+              <span className="text-[10px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-300 inline-flex items-center gap-0.5" data-id={`skill-market-update-${skill.name}`} title={`${skill.installed_version} → ${skill.version}`}>
+                <RefreshCw className="w-2.5 h-2.5" />
+                <span>v{skill.version}</span>
+              </span>
+            )}
+            <span data-id="skill-row-version" className="ml-auto text-[10px] text-zinc-600 shrink-0">
+              {installed && skill.installed_version && skill.installed_version !== 'user' && !skill.has_update
+                ? `v${skill.installed_version}`
+                : `v${skill.version}`}
+            </span>
           </div>
-          <div data-id="skill-marketplace-panel-auto-16" className="text-[11px] text-zinc-500 line-clamp-2 leading-snug min-h-[2.4em]">{skill.description}</div>
+          <div data-id="skill-row-desc" className="text-[11px] text-zinc-500 line-clamp-2 leading-snug min-h-[2.4em]">{skill.description}</div>
         </div>
       </div>
     </div>
@@ -340,7 +428,7 @@ function StatusPill({ skill }: { skill: MarketSkill }) {
 function CategoryBadge({ category }: { category: string }) {
   const grad = CATEGORY_GRADIENT[category] || CATEGORY_GRADIENT.other;
   return (
-    <span data-id="skill-marketplace-panel-auto-17" className={cn('inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-gradient-to-br ring-1', grad)}>
+    <span data-id="skill-cat-badge" className={cn('inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-gradient-to-br ring-1', grad)}>
       {category}
     </span>
   );
@@ -364,7 +452,7 @@ function InlineStatus({ skill }: { skill: MarketSkill }) {
   return (
     <>
       {pills.map((p, i) => (
-        <span data-id="skill-marketplace-panel-auto-18"
+        <span data-id="skill-inline-status-pill"
           key={i}
           title={p.title || p.label}
           className={cn(
@@ -382,12 +470,13 @@ function InlineStatus({ skill }: { skill: MarketSkill }) {
 
 type Tab = 'help' | 'tools';
 
-function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpenProxyManager, onOpenProxySshManager, onOpenFrpServerManager, onOpenWebClients }: {
+function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpdate, onOpenProxyManager, onOpenProxySshManager, onOpenFrpServerManager, onOpenWebClients }: {
   name: string;
   paneId: string;
   onClose: () => void;
-  onInstall: () => Promise<void>;
-  onUninstall: () => Promise<void>;
+  onInstall: () => Promise<{ log?: string; ok?: boolean; error?: string } | void>;
+  onUninstall: () => Promise<{ log?: string; ok?: boolean; error?: string } | void>;
+  onUpdate: () => Promise<{ log?: string; ok?: boolean; error?: string; from?: string; to?: string; updated?: boolean } | void>;
   onOpenProxyManager: () => void;
   onOpenProxySshManager: () => void;
   onOpenFrpServerManager: () => void;
@@ -398,6 +487,8 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('help');
   const [busy, setBusy] = useState(false);
+  const [installLog, setInstallLog] = useState('');
+  const [installError, setInstallError] = useState('');
   const [sendText, setSendText] = useState('');
   const [sending, setSending] = useState(false);
   const [sendOk, setSendOk] = useState(false);
@@ -540,8 +631,37 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
 
   const handleInstall = async () => {
     setBusy(true);
-    try { await onInstall(); await fetchDetail(); }
-    finally { setBusy(false); }
+    setInstallLog('');
+    setInstallError('');
+    try {
+      const r = await onInstall();
+      if (r && typeof r === 'object') {
+        if (r.log) setInstallLog(r.log);
+        if (r.ok === false) setInstallError(r.error || 'install failed');
+      }
+      await fetchDetail();
+    } catch (e: any) {
+      setInstallError(e?.message || 'install failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const handleUpdate = async () => {
+    setBusy(true);
+    setInstallLog('');
+    setInstallError('');
+    try {
+      const r = await onUpdate();
+      if (r && typeof r === 'object') {
+        if (r.log) setInstallLog(r.log);
+        if (r.ok === false) setInstallError(r.error || 'update failed');
+      }
+      await fetchDetail();
+    } catch (e: any) {
+      setInstallError(e?.message || 'update failed');
+    } finally {
+      setBusy(false);
+    }
   };
   const handleUninstall = async () => {
     const cfgPath = data?.skill?.config_file || '~/cicy-ai/db/skills/' + name + '.yaml';
@@ -553,8 +673,20 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
     });
     if (!ok) return;
     setBusy(true);
-    try { await onUninstall(); await fetchDetail(); }
-    finally { setBusy(false); }
+    setInstallLog('');
+    setInstallError('');
+    try {
+      const r = await onUninstall();
+      if (r && typeof r === 'object') {
+        if (r.log) setInstallLog(r.log);
+        if (r.ok === false) setInstallError(r.error || 'uninstall failed');
+      }
+      await fetchDetail();
+    } catch (e: any) {
+      setInstallError(e?.message || 'uninstall failed');
+    } finally {
+      setBusy(false);
+    }
   };
 
   // Stable sender — referentially identical across renders so memoized
@@ -606,12 +738,12 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
       className="absolute inset-0 z-30 animate-[fadeIn_120ms_ease-out]"
       data-id="skill-detail-modal"
     >
-      <div data-id="skill-marketplace-panel-auto-19" className="h-full w-full flex flex-col overflow-hidden bg-[#161618]">
+      <div data-id="skill-detail-container" className="h-full w-full flex flex-col overflow-hidden bg-[#161618]">
         {/* Header */}
         <div className="px-5 pt-5 pb-3 border-b border-white/[0.06] shrink-0" data-id="skill-detail-header">
-          <div data-id="skill-marketplace-panel-auto-20" className="flex items-start gap-3">
+          <div data-id="skill-detail-header-inner" className="flex items-start gap-3">
             {skill ? <SkillAvatar skill={skill} size="lg" /> : <div className="w-14 h-14 rounded-xl bg-white/[0.07] animate-pulse shrink-0" />}
-            <div data-id="skill-marketplace-panel-auto-21" className="flex-1 min-w-0">
+            <div data-id="skill-detail-meta" className="flex-1 min-w-0">
               {loading && !skill ? (
                 <div className="space-y-2 pt-0.5">
                   <div className="h-4 w-36 rounded-md bg-white/[0.08] animate-pulse" />
@@ -628,14 +760,31 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
                 </div>
               ) : (
                 <>
-              <div data-id="skill-marketplace-panel-auto-22" className="flex items-center gap-2">
+              <div data-id="skill-detail-title-row" className="flex items-center gap-2">
                 <div className="text-base font-semibold text-zinc-100" data-id="skill-detail-title">
                   {skill?.title || name}
                 </div>
                 {skill && <StatusPill skill={skill} />}
               </div>
-              <div data-id="skill-marketplace-panel-auto-23" className="text-[11px] text-zinc-500 mt-0.5">
-                {skill ? <>v{skill.version} · {t('marketplacePublisher')}</> : ''}
+              <div data-id="skill-detail-version-row" className="text-[11px] text-zinc-500 mt-0.5">
+                {skill ? (
+                  <>
+                    {skill.installed_version && skill.installed_version !== 'user' ? (
+                      skill.has_update ? (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="text-amber-300">v{skill.installed_version}</span>
+                          <span>→</span>
+                          <span className="text-emerald-300">v{skill.version}</span>
+                          <span className="ml-1">{t('marketplacePublisher')}</span>
+                        </span>
+                      ) : (
+                        <>installed v{skill.installed_version} · {t('marketplacePublisher')}</>
+                      )
+                    ) : (
+                      <>v{skill.version} · {t('marketplacePublisher')}</>
+                    )}
+                  </>
+                ) : ''}
               </div>
               {skill && (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5" data-id="skill-detail-status-inline">
@@ -644,12 +793,31 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
                 </div>
               )}
               {skill && <div className="mt-2 text-xs text-zinc-300 leading-relaxed">{skill.description}</div>}
+              {(installLog || installError) && (
+                <div data-id="skill-detail-install-log" className="mt-2">
+                  {installError && (
+                    <div className="text-[11px] text-red-400 mb-1 inline-flex items-center gap-1">
+                      <XCircle className="w-3 h-3" />
+                      {installError}
+                    </div>
+                  )}
+                  {installLog && (
+                    <pre className="text-[10px] leading-tight text-zinc-400 bg-black/30 border border-white/[0.05] rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono">
+{installLog}
+                    </pre>
+                  )}
+                </div>
+              )}
                 </>
               )}
               {skill && (
-                <div data-id="skill-marketplace-panel-auto-24" className="mt-3 flex items-center gap-2 flex-wrap">
+                <div data-id="skill-detail-actions" className="mt-3 flex items-center gap-2 flex-wrap">
                   {skill.status.installed ? (
                     <>
+                      <button data-id="skill-detail-update" onClick={handleUpdate} disabled={busy} className={`text-[12px] px-3 py-1.5 rounded disabled:opacity-50 transition-colors inline-flex items-center gap-1 ${skill.has_update ? 'bg-amber-500/20 text-amber-200 hover:bg-amber-500/30' : 'border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500'}`}>
+                        {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                        {busy ? t('marketplaceUpdating') : skill.has_update ? `${t('marketplaceUpdate')} → v${skill.version}` : t('marketplaceUpdate')}
+                      </button>
                       <button data-id="skill-detail-reinstall" onClick={handleInstall} disabled={busy} className="text-[12px] px-3 py-1.5 rounded border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:border-zinc-500 disabled:opacity-50 transition-colors inline-flex items-center gap-1">
                         {busy && <Loader2 className="w-3 h-3 animate-spin" />}
                         {busy ? t('marketplaceInstalling') : t('marketplaceReinstall')}
@@ -787,7 +955,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
               ))}
             </div>
           ) : !skill ? (
-            <div data-id="skill-marketplace-panel-auto-26" className="text-xs text-zinc-500">{t('marketplaceNoData')}</div>
+            <div data-id="skill-detail-no-data" className="text-xs text-zinc-500">{t('marketplaceNoData')}</div>
           ) : tab === 'help' ? (
             <MarkdownPane content={data?.help_md || data?.skill_md || ''} onTry={sendToAgent} setSendText={setSendText} skillName={skill.name} clickable={false} />
           ) : (
@@ -803,13 +971,13 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
               <div className="h-[38px] w-24 rounded-lg bg-white/[0.05]" />
             </div>
           ) : !skill?.status.installed ? (
-            <div data-id="skill-marketplace-panel-auto-27" className="flex items-center gap-2 text-[11px] text-zinc-500">
+            <div data-id="skill-detail-install-first" className="flex items-center gap-2 text-[11px] text-zinc-500">
               <AlertTriangle className="w-3 h-3" />
               {t('marketplaceInstallFirst')}
             </div>
           ) : (
             <>
-              <div data-id="skill-marketplace-panel-auto-28" className="flex items-end gap-2">
+              <div data-id="skill-detail-send-row" className="flex items-end gap-2">
                 <textarea
                   data-id="skill-detail-send-input"
                   value={sendText}
@@ -832,11 +1000,11 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onOpe
                   )}
                 >
                   {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : sendOk ? <Check className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-                  <span data-id="skill-marketplace-panel-auto-29" className="text-[13px]">{sendOk ? t('marketplaceSent') : t('marketplaceSendToAgent')}</span>
+                  <span data-id="skill-detail-send-label" className="text-[13px]">{sendOk ? t('marketplaceSent') : t('marketplaceSendToAgent')}</span>
                 </button>
               </div>
               {sendError && <div className="text-[11px] text-red-400 mt-1.5">{sendError}</div>}
-              <div data-id="skill-marketplace-panel-auto-30" className="text-[10px] text-zinc-600 mt-1.5">
+              <div data-id="skill-detail-send-hint" className="text-[10px] text-zinc-600 mt-1.5">
                 {t('marketplaceSendHint', { pane: paneId || '(none)' })}
               </div>
             </>
@@ -897,7 +1065,7 @@ const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, s
       if (inline) {
         if (clickable) {
           return (
-            <button data-id="skill-marketplace-panel-auto-31"
+            <button data-id="skill-md-inline-code-btn"
               onClick={() => setSendText(t('marketplaceTestToolPrompt', { name: skillName, command: text }))}
               className="px-1 py-0.5 rounded bg-white/[0.06] text-[11px] text-amber-200 font-mono hover:bg-white/[0.12] transition-colors"
               title={t('marketplaceLoadIntoSend')}
@@ -911,10 +1079,10 @@ const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, s
         );
       }
       return (
-        <div data-id="skill-marketplace-panel-auto-32" className="my-2 rounded-md bg-black/40 border border-white/[0.04] overflow-hidden">
+        <div data-id="skill-md-code-block" className="my-2 rounded-md bg-black/40 border border-white/[0.04] overflow-hidden">
           {clickable && (
-            <div data-id="skill-marketplace-panel-auto-33" className="flex items-center justify-end px-2 py-1 border-b border-white/[0.04]">
-              <button data-id="skill-marketplace-panel-auto-34" onClick={() => onTry(text)} className="text-[10px] text-zinc-400 hover:text-zinc-100 transition-colors inline-flex items-center gap-1">
+            <div data-id="skill-md-code-block-actions" className="flex items-center justify-end px-2 py-1 border-b border-white/[0.04]">
+              <button data-id="skill-md-code-block-send" onClick={() => onTry(text)} className="text-[10px] text-zinc-400 hover:text-zinc-100 transition-colors inline-flex items-center gap-1">
                 <Send className="w-2.5 h-2.5" /> {t('marketplaceSendToAgent')}
               </button>
             </div>
@@ -964,9 +1132,9 @@ const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, s
   }
 
   return (
-    <div data-id="skill-marketplace-panel-auto-35" className="relative">
+    <div data-id="skill-md-pane" className="relative">
       {showTranslate && (
-        <div data-id="skill-marketplace-panel-auto-36" className="flex items-center justify-end mb-2 gap-2">
+        <div data-id="skill-md-translate-bar" className="flex items-center justify-end mb-2 gap-2">
           {translateError && <span className="text-[10px] text-red-400">{translateError}</span>}
           <button
             data-id="skill-detail-translate"
@@ -983,7 +1151,7 @@ const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, s
           </button>
         </div>
       )}
-      <div data-id="skill-marketplace-panel-auto-37" className="prose-skill text-[13px] leading-relaxed text-zinc-300">{rendered}</div>
+      <div data-id="skill-md-content" className="prose-skill text-[13px] leading-relaxed text-zinc-300">{rendered}</div>
     </div>
   );
 });

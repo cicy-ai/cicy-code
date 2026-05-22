@@ -167,6 +167,25 @@ type aiGatewayAuditSession struct {
 	reply           aiGatewayReplySnapshot
 	replyHooks      []aiGatewayReplyHook
 	lastStatusPush  string
+	// auxiliary 标记：当前请求是 SUGGESTION MODE 等辅助调用，
+	// 不应该污染 current.json / reply.json，但仍然写 mirror（用于诊断）。
+	auxiliary bool
+	// pendingItem 是流式过程中正在累积的 reply.Items 候选（thinking / text / tool_use）。
+	// 当 stream_kind 或 tool 切换时，旧 pending 会被 flush 到 reply.Items 并立刻刷盘。
+	// 这让前端 / IM 推送能在每个 item 完成时实时看到新内容（而不是等整次 HTTP 完成）。
+	pendingItem *aiGatewayPendingItem
+}
+
+// aiGatewayPendingItem 描述一个尚未 flush 到 reply.Items 的流中 item。
+// 不区分 provider —— 通过 stream_kind / tool 切换识别 block 边界。
+type aiGatewayPendingItem struct {
+	Kind          string // "thinking" | "text" | "tool_use"
+	Thinking      string // for thinking
+	Text          string // for text
+	ToolID        string // stream 累积 key（Codex 用 fc_xxx；Anthropic / OpenAI Chat 用 call_xxx）
+	OutputToolID  string // reply.items 输出用的 tool_id（跟 current.json 中的 tool_use_id 对齐，Codex=call_xxx）
+	ToolName      string // for tool_use
+	Arguments     string // for tool_use (累积的 raw JSON 字符串)
 }
 
 type aiGatewayAuditReadCloser struct {
@@ -340,17 +359,13 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		ActiveRequestIDs: []string{requestID},
 		ConversationIDs:  []string{conversationID},
 	}
-	// If previous reply was updated recently (within 60 seconds), inherit Items
-	// This handles multi-round API calls within the same turn (e.g., tool_use -> tool_result -> continue)
+	// reply.Items 是否继承前一次 reply：完全用语义判断（不用时间窗口）。
+	// 只有当当前请求是 agent 内部的 tool 续传时才继承；用户主动发新 q 一律开新 turn 并清空 Items。
+	isContinuation := aiGatewayIsToolContinuation(payloadMap)
 	var prevItems []map[string]interface{}
-	if prevReply.TurnID != "" && prevReply.UpdatedAt != "" {
-		prevUpdatedAt, err := time.Parse(time.RFC3339, prevReply.UpdatedAt)
-		if err == nil && time.Since(prevUpdatedAt) < 60*time.Second {
-			// Previous reply was updated recently, inherit items
-			prevItems = prevReply.Items
-			// Use the same turn_id as the previous reply
-			turnID = prevReply.TurnID
-		}
+	if prevReply.TurnID != "" && isContinuation {
+		prevItems = prevReply.Items
+		turnID = prevReply.TurnID
 	}
 	if prevItems == nil {
 		prevItems = []map[string]interface{}{}
@@ -387,6 +402,8 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 			},
 		},
 	}
+	// 识别辅助调用（SUGGESTION MODE 等）：这种请求不应污染主 reply.json / current.json。
+	auxiliary := aiGatewayIsAuxiliaryRequest(question, payloadMap)
 	return &aiGatewayAuditSession{
 		agentID:        agentID,
 		provider:       provider,
@@ -398,7 +415,8 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		startedAt:      startedAt,
 		current:        current,
 		reply:          reply,
-		replyHooks:     drainCallbackHooksForPane(agentID),
+		replyHooks:     newReplyHooksForPane(agentID, isContinuation),
+		auxiliary:      auxiliary,
 	}
 }
 
@@ -505,6 +523,10 @@ func (s *aiGatewayAuditSession) writeStartSnapshots() error {
 	if s == nil {
 		return nil
 	}
+	if s.auxiliary {
+		// 辅助调用（SUGGESTION MODE 等）：不清空主 reply 目录，不覆盖 current / reply 主快照。
+		return nil
+	}
 	s.mu.Lock()
 	if err := s.resetReplyDirLocked(); err != nil {
 		s.mu.Unlock()
@@ -594,39 +616,49 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	s.reply.Thinking = parsed.Thinking
 	s.reply.Answer = parsed.Answer
 	s.reply.ToolCalls = parsed.ToolCalls
-	// Accumulate items from this API call
-	if parsed.Thinking != "" {
-		s.reply.Items = append(s.reply.Items, map[string]interface{}{
-			"id":       len(s.reply.Items) + 1,
-			"type":     "thinking",
-			"thinking": parsed.Thinking,
-		})
-	}
-	if parsed.Answer != "" {
-		s.reply.Items = append(s.reply.Items, map[string]interface{}{
-			"id":   len(s.reply.Items) + 1,
-			"type": "text",
-			"text": parsed.Answer,
-		})
-	}
-	for _, tc := range parsed.ToolCalls {
-		// Skip empty tool calls
-		if tc.ToolID == "" && tc.ToolName == "" {
-			continue
+	// reply.Items 由流式过程实时 flush（applyStreamEventsLocked → flushPendingItemLocked）。
+	// HTTP 响应完成时只需 flush 残留的 pendingItem（最后一个 thinking/text/tool_use）。
+	// 字段约定（统一用 Anthropic content block 风格）：
+	//   thinking: {seq, type:"thinking", thinking}
+	//   text:     {seq, type:"text", text}
+	//   tool_use: {seq, type:"tool_use", id, name, input}
+	itemsBeforeFlush := len(s.reply.Items)
+	s.flushPendingItemLocked()
+	// 兜底：若本次 HTTP 流过程中一个 item 都没 flush（比如 non-stream 响应、SSE 解析失败等），
+	// 从 parsed 一次性补全，避免 reply.json 残缺。
+	if len(s.reply.Items) == itemsBeforeFlush {
+		if parsed.Thinking != "" {
+			s.reply.Items = append(s.reply.Items, map[string]interface{}{
+				"id":       len(s.reply.Items) + 1,
+				"type":     "thinking",
+				"thinking": parsed.Thinking,
+			})
 		}
-		var input interface{}
-		if tc.Arguments != "" {
-			if err := json.Unmarshal([]byte(tc.Arguments), &input); err != nil {
-				input = tc.Arguments
+		if parsed.Answer != "" {
+			s.reply.Items = append(s.reply.Items, map[string]interface{}{
+				"id":   len(s.reply.Items) + 1,
+				"type": "text",
+				"text": parsed.Answer,
+			})
+		}
+		for _, tc := range parsed.ToolCalls {
+			if tc.ToolID == "" && tc.ToolName == "" {
+				continue
 			}
+			var input interface{}
+			if tc.Arguments != "" {
+				if err := json.Unmarshal([]byte(tc.Arguments), &input); err != nil {
+					input = tc.Arguments
+				}
+			}
+			s.reply.Items = append(s.reply.Items, map[string]interface{}{
+				"id":      len(s.reply.Items) + 1,
+				"type":    "tool_use",
+				"tool_id": tc.ToolID,
+				"name":    tc.ToolName,
+				"input":   input,
+			})
 		}
-		s.reply.Items = append(s.reply.Items, map[string]interface{}{
-			"id":      len(s.reply.Items) + 1,
-			"type":    "tool_use",
-			"tool_id": tc.ToolID,
-			"name":    tc.ToolName,
-			"input":   input,
-		})
 	}
 	s.reply.Usage = aiGatewayCloneAnyMap(parsed.Usage)
 	// input_tokens: use latest (each request includes full context, so don't accumulate)
@@ -670,8 +702,10 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	s.reply.Status = statusMap.Primary
 	s.reply.StatusMap = statusMap
 
-	if err := aiGatewayWriteReplySnapshot(s.agentID, s.reply); err != nil {
-		log.Printf("[ai-gateway] write reply snapshot failed for %s: %v", s.agentID, err)
+	if !s.auxiliary {
+		if err := aiGatewayWriteReplySnapshot(s.agentID, s.reply); err != nil {
+			log.Printf("[ai-gateway] write reply snapshot failed for %s: %v", s.agentID, err)
+		}
 	}
 	replySnapshot := s.reply
 	replyHooks := s.replyHooks
@@ -699,6 +733,9 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	for _, h := range replyHooks {
 		h.finalize(replySnapshot)
 	}
+	// 调试/数据收集：当 CICY_GATEWAY_REPLY_MIRROR=1 时把本次完整的请求+响应+解析结果
+	// 镜像写到 reply_mirror/ 目录，供后续分析。完全不影响主路径。
+	aiGatewayWriteReplyMirror(s, statusCode, headers, responseBody, parsed, replySnapshot)
 }
 
 func aiGatewayHistoryDir(agentID string) string {
@@ -2306,7 +2343,9 @@ func (s *aiGatewayAuditSession) streamChatEvents(events []aiGatewayReplyEvent) [
 		switch event.Kind {
 		case "sse":
 			streamKind := aiGatewayString(payload["stream_kind"])
-			content := aiGatewayString(payload["content"])
+			// content 必须用 RawString —— SSE chunk 内容前后的空格是有意义的，
+			// 不能 trim（不然 " user"+ " has" 拼成 "userhas"）。
+			content := aiGatewayRawString(payload["content"])
 			if content == "" {
 				continue
 			}
@@ -2355,6 +2394,99 @@ func (s *aiGatewayAuditSession) emitReplyStreamPayload(payload map[string]interf
 	}
 }
 
+// flushPendingItemLocked 把 pendingItem append 到 reply.Items 并立刻刷盘 reply.json。
+// caller 必须持有 s.mu。
+func (s *aiGatewayAuditSession) flushPendingItemLocked() {
+	if s == nil || s.pendingItem == nil {
+		return
+	}
+	pi := s.pendingItem
+	s.pendingItem = nil
+	switch pi.Kind {
+	case "thinking":
+		if strings.TrimSpace(pi.Thinking) == "" {
+			return
+		}
+		s.reply.Items = append(s.reply.Items, map[string]interface{}{
+			"id":       len(s.reply.Items) + 1,
+			"type":     "thinking",
+			"thinking": pi.Thinking,
+		})
+	case "text":
+		if strings.TrimSpace(pi.Text) == "" {
+			return
+		}
+		s.reply.Items = append(s.reply.Items, map[string]interface{}{
+			"id":   len(s.reply.Items) + 1,
+			"type": "text",
+			"text": pi.Text,
+		})
+	case "tool_use":
+		if pi.ToolID == "" && pi.ToolName == "" {
+			return
+		}
+		var input interface{}
+		if pi.Arguments != "" {
+			if err := json.Unmarshal([]byte(pi.Arguments), &input); err != nil {
+				input = pi.Arguments
+			}
+		}
+		// 优先用 OutputToolID（=current.json 中的 tool_use_id；Codex=call_xxx），
+		// 否则 fallback 到 ToolID（stream 累积 key；Codex=fc_xxx）。
+		exposedToolID := pi.OutputToolID
+		if exposedToolID == "" {
+			exposedToolID = pi.ToolID
+		}
+		s.reply.Items = append(s.reply.Items, map[string]interface{}{
+			"id":      len(s.reply.Items) + 1,
+			"type":    "tool_use",
+			"tool_id": exposedToolID,
+			"name":    pi.ToolName,
+			"input":   input,
+		})
+	default:
+		return
+	}
+	if !s.auxiliary {
+		if err := aiGatewayWriteReplySnapshot(s.agentID, s.reply); err != nil {
+			log.Printf("[ai-gateway] flush reply item write failed for %s: %v", s.agentID, err)
+		}
+		// 立即把这个新 item 通知给 reply hooks（IM 推送等），auxiliary 不通知。
+		// 每个 item flush 一次 = 一次 IM 消息（不再 streaming edit 同一条消息）。
+		if len(s.replyHooks) > 0 && len(s.reply.Items) > 0 {
+			latest := s.reply.Items[len(s.reply.Items)-1]
+			items := []map[string]interface{}{aiGatewayCloneAnyMap(latest)}
+			for _, h := range s.replyHooks {
+				h.onItems(items)
+			}
+		}
+	}
+}
+
+// switchPendingItemLocked 在 stream_kind 切换或 tool 切换时调用：
+// 如果 pendingItem 跟新 kind 不一致（或同 kind 但确实是不同的 tool），先 flush 旧的，开一个新的。
+// 注意：Anthropic content_block_delta / OpenAI Chat tool_calls delta 中后续 chunks 不带 ToolID，
+// 所以 toolID 为空时视作当前 pending tool 的延续，不切换。
+func (s *aiGatewayAuditSession) switchPendingItemLocked(kind, toolID, toolName string) {
+	if s.pendingItem != nil && s.pendingItem.Kind == kind {
+		switch kind {
+		case "thinking", "text":
+			return
+		case "tool_use":
+			// 空 toolID = delta 续传，视为当前 tool。
+			// 同 toolID = 同一个 tool。
+			// 不同非空 toolID = 真切换。
+			if toolID == "" || toolID == s.pendingItem.ToolID {
+				return
+			}
+		}
+	}
+	if s.pendingItem != nil {
+		s.flushPendingItemLocked()
+	}
+	s.pendingItem = &aiGatewayPendingItem{Kind: kind, ToolID: toolID, ToolName: toolName}
+}
+
 func (s *aiGatewayAuditSession) applyStreamEventsLocked(events []aiGatewayReplyEvent) *ChatEvent {
 	if s == nil || len(events) == 0 {
 		return nil
@@ -2366,28 +2498,64 @@ func (s *aiGatewayAuditSession) applyStreamEventsLocked(events []aiGatewayReplyE
 		switch event.Kind {
 		case "sse":
 			streamKind := aiGatewayString(payload["stream_kind"])
-			content := aiGatewayString(payload["content"])
+			// content 必须用 RawString —— SSE chunk 内容前后的空格是有意义的，
+			// 不能 trim（不然 " user"+ " has" 拼成 "userhas"）。
+			content := aiGatewayRawString(payload["content"])
 			if content == "" {
 				continue
 			}
 			switch streamKind {
 			case "thinking":
 				s.reply.Thinking += content
+				s.switchPendingItemLocked("thinking", "", "")
+				s.pendingItem.Thinking += content
 				changed = true
 			case "answer":
 				s.reply.Answer += content
+				s.switchPendingItemLocked("text", "", "")
+				s.pendingItem.Text += content
 				changed = true
 			}
 		case "tool_call", "web_search":
 			toolID := strings.TrimSpace(aiGatewayString(payload["tool_id"]))
-			toolName := strings.TrimSpace(aiGatewayFirstNonEmpty(aiGatewayString(payload["tool_name"]), event.Kind))
-			arguments := aiGatewayString(payload["arguments"])
+			// toolName 直接用 payload 中的真实值，不要用 event.Kind 作 fallback
+			// （event.Kind 是 cicy 内部分类 "tool_call" / "web_search"，不是真实工具名）。
+			toolName := strings.TrimSpace(aiGatewayString(payload["tool_name"]))
+			if toolName == "" && event.Kind == "web_search" {
+				toolName = "web_search_call"
+			}
+			// arguments 必须用 RawString — partial_json 中前后空格是 JSON 语法的一部分。
+			arguments := aiGatewayRawString(payload["arguments"])
 			if aiGatewayUpsertStreamToolCall(&s.reply.ToolCalls, aiGatewayToolCall{
 				ToolID:    toolID,
 				ToolName:  toolName,
 				Arguments: arguments,
 			}) {
 				changed = true
+			}
+			// 同步累积到 pendingItem（区分 tool by toolID；空 toolID 时按 toolName 区分）
+			s.switchPendingItemLocked("tool_use", toolID, toolName)
+			// 收到真实 toolName 时总是更新（解决 Codex 第一个 delta 不带 name、
+			// 后续 output_item.added 才带 name 的情况）。
+			if toolName != "" {
+				s.pendingItem.ToolName = toolName
+			}
+			if toolID != "" && s.pendingItem.ToolID == "" {
+				s.pendingItem.ToolID = toolID
+			}
+			// output_tool_id（=current.json 中的 tool_use_id；Codex=call_xxx）一旦有值就记录。
+			if outputToolID := aiGatewayString(payload["output_tool_id"]); outputToolID != "" && s.pendingItem.OutputToolID == "" {
+				s.pendingItem.OutputToolID = outputToolID
+			}
+			// .done 事件携带的 arguments 是已累积的 final 值，需要 replace 而非 append。
+			eventType := aiGatewayString(payload["type"])
+			isCumulative := strings.HasSuffix(eventType, ".done")
+			if isCumulative {
+				if arguments != "" {
+					s.pendingItem.Arguments = arguments
+				}
+			} else {
+				s.pendingItem.Arguments += arguments
 			}
 		}
 	}
@@ -2407,8 +2575,10 @@ func (s *aiGatewayAuditSession) applyStreamEventsLocked(events []aiGatewayReplyE
 	s.current.Status = statusMap.Primary
 	s.reply.Status = statusMap.Primary
 	s.reply.StatusMap = statusMap
-	if err := aiGatewayWriteReplySnapshot(s.agentID, s.reply); err != nil {
-		log.Printf("[ai-gateway] write live reply snapshot failed for %s: %v", s.agentID, err)
+	if !s.auxiliary {
+		if err := aiGatewayWriteReplySnapshot(s.agentID, s.reply); err != nil {
+			log.Printf("[ai-gateway] write live reply snapshot failed for %s: %v", s.agentID, err)
+		}
 	}
 	return s.broadcastStatusLocked()
 }
@@ -2485,6 +2655,28 @@ func aiGatewayReplyEventsFromStreamPayload(payload map[string]interface{}) []aiG
 			},
 		})
 	}
+	// Codex Responses API：output_item.added 携带 function_call 的真实 name，
+	// 但后续的 function_call_arguments.delta 不带 name。emit 一个 tool_call event
+	// 让 stream live 处理（applyStreamEventsLocked）能拿到真实 tool name。
+	//
+	// tool_id 优先用 item.id (fc_xxx) 与 function_call_arguments.delta 的 item_id 对齐，
+	// 否则同一个 tool 会因为 added/delta/done 用不同 ID（call_id vs item_id）被分裂成多条。
+	if payloadType == "response.output_item.added" || payloadType == "response.output_item.done" {
+		item := aiGatewayMap(payload["item"])
+		itemType := aiGatewayString(item["type"])
+		if itemType == "function_call" || itemType == "tool_use" || itemType == "custom_tool_call" {
+			events = append(events, aiGatewayReplyEvent{
+				Kind: "tool_call",
+				Payload: M{
+					"type":            payloadType,
+					"tool_id":         aiGatewayFirstNonEmpty(aiGatewayString(item["id"]), aiGatewayString(item["call_id"])),
+					"output_tool_id":  aiGatewayString(item["call_id"]),
+					"tool_name":       aiGatewayString(item["name"]),
+					"arguments":       aiGatewayString(item["arguments"]),
+				},
+			})
+		}
+	}
 	if payloadType == "response.function_call_arguments.done" || payloadType == "response.custom_tool_call_input.done" {
 		toolName := aiGatewayString(payload["name"])
 		if payloadType == "response.custom_tool_call_input.done" && toolName == "" {
@@ -2497,10 +2689,11 @@ func aiGatewayReplyEventsFromStreamPayload(payload map[string]interface{}) []aiG
 		events = append(events, aiGatewayReplyEvent{
 			Kind: "tool_call",
 			Payload: M{
-				"type":      payloadType,
-				"tool_id":   aiGatewayFirstNonEmpty(aiGatewayString(payload["item_id"]), aiGatewayString(payload["call_id"])),
-				"tool_name": toolName,
-				"arguments": arguments,
+				"type":            payloadType,
+				"tool_id":         aiGatewayFirstNonEmpty(aiGatewayString(payload["item_id"]), aiGatewayString(payload["call_id"])),
+				"output_tool_id":  aiGatewayString(payload["call_id"]),
+				"tool_name":       toolName,
+				"arguments":       arguments,
 			},
 		})
 	}
@@ -2762,20 +2955,72 @@ func (a *aiGatewayStreamAccumulator) mergeSnapshot(snapshot aiGatewayParsedRespo
 }
 
 func (a *aiGatewayStreamAccumulator) updateToolCall(toolID string, toolName string, arguments string, toolIndex *int, replaceArguments bool) *aiGatewayToolCall {
-	key := toolID
-	if key == "" && toolIndex != nil {
-		key = fmt.Sprintf("index:%d", *toolIndex)
+	// 协议差异：
+	//  - Anthropic content_block_start 携带 ToolID + Index；后续 content_block_delta
+	//    只带 Index、不带 ToolID。
+	//  - OpenAI Chat Completions tool_calls 第一段 chunk 携带 ToolID + Index + ToolName；
+	//    后续 chunks 只带 Index 和 arguments delta。
+	// 两种协议都要求"带 ToolID 的 chunk"和"只带 Index 的 chunk"合并到同一条 entry。
+	// 旧实现 key=toolID 优先，后续 chunks 无 ToolID 退到 key="index:N"，造成同一工具
+	// 被分裂为两条 entry（一条只有 ToolID/ToolName / 一条只有 arguments）。
+	//
+	// 新策略：先按 ToolID 找、再按 "index:N" 找；任一 hit 即复用，并把另一种 key 注册为
+	// 别名指向同一 entry，让后续事件用任一标识都能找回。
+	var idKey string
+	if toolID != "" {
+		idKey = toolID
 	}
-	if key == "" {
-		key = fmt.Sprintf("auto:%d", a.autoIndex)
-		a.autoIndex++
+	var indexKey string
+	if toolIndex != nil {
+		indexKey = fmt.Sprintf("index:%d", *toolIndex)
 	}
-	toolCall, ok := a.toolCalls[key]
-	if !ok {
+
+	var (
+		toolCall    *aiGatewayToolCall
+		existingKey string
+	)
+	if idKey != "" {
+		if tc, ok := a.toolCalls[idKey]; ok {
+			toolCall = tc
+			existingKey = idKey
+		}
+	}
+	if toolCall == nil && indexKey != "" {
+		if tc, ok := a.toolCalls[indexKey]; ok {
+			toolCall = tc
+			existingKey = indexKey
+		}
+	}
+
+	if toolCall == nil {
+		// 没找到，新建。primary key 优先用 ToolID（更稳定），其次 Index，最后 auto。
+		primary := idKey
+		if primary == "" {
+			primary = indexKey
+		}
+		if primary == "" {
+			primary = fmt.Sprintf("auto:%d", a.autoIndex)
+			a.autoIndex++
+		}
 		toolCall = &aiGatewayToolCall{ToolID: toolID, ToolName: toolName, Arguments: ""}
-		a.toolCalls[key] = toolCall
-		a.toolOrder = append(a.toolOrder, key)
+		a.toolCalls[primary] = toolCall
+		a.toolOrder = append(a.toolOrder, primary)
+		existingKey = primary
 	}
+
+	// 把另一种标识注册为别名（指向同一 entry），便于后续事件用任一 key 找到。
+	if idKey != "" && idKey != existingKey {
+		if _, ok := a.toolCalls[idKey]; !ok {
+			a.toolCalls[idKey] = toolCall
+		}
+	}
+	if indexKey != "" && indexKey != existingKey {
+		if _, ok := a.toolCalls[indexKey]; !ok {
+			a.toolCalls[indexKey] = toolCall
+		}
+	}
+
+	// 字段补全
 	if toolID != "" && toolCall.ToolID == "" {
 		toolCall.ToolID = toolID
 	}
@@ -2865,16 +3110,22 @@ func aiGatewayExtractStreamDeltas(payload map[string]interface{}) []aiGatewayStr
 			ToolIndex: aiGatewayOptionalInt(payload["output_index"]),
 		}}
 	case "content_block_start":
+		// payload.index 是 Anthropic content block 索引，必须传到 ToolIndex —
+		// 后续 content_block_delta 只带 index 不带 ToolID，靠它把同一 tool_use 的
+		// 多个 input_json_delta chunks 合并到同一个 tool entry。
+		blockIndex := aiGatewayOptionalInt(payload["index"])
 		contentBlock := aiGatewayMap(payload["content_block"])
 		if aiGatewayString(contentBlock["type"]) == "tool_use" {
 			return []aiGatewayStreamDelta{{
-				Kind:     "tool_call",
-				ToolID:   aiGatewayString(contentBlock["id"]),
-				ToolName: aiGatewayString(contentBlock["name"]),
+				Kind:      "tool_call",
+				ToolID:    aiGatewayString(contentBlock["id"]),
+				ToolName:  aiGatewayString(contentBlock["name"]),
+				ToolIndex: blockIndex,
 			}}
 		}
 		return nil
 	case "content_block_delta":
+		blockIndex := aiGatewayOptionalInt(payload["index"])
 		delta := aiGatewayMap(payload["delta"])
 		switch aiGatewayString(delta["type"]) {
 		case "thinking_delta":
@@ -2882,7 +3133,13 @@ func aiGatewayExtractStreamDeltas(payload map[string]interface{}) []aiGatewayStr
 		case "text_delta":
 			return []aiGatewayStreamDelta{{Kind: "answer", Content: aiGatewayRawString(delta["text"])}}
 		case "input_json_delta":
-			return []aiGatewayStreamDelta{{Kind: "tool_call", Content: aiGatewayRawString(delta["input_json"])}}
+			// Anthropic 协议字段是 partial_json；input_json 是历史 fallback。
+			// 必须带 blockIndex，否则各 chunk 没法关联到同一 tool_use。
+			content := aiGatewayRawString(delta["partial_json"])
+			if content == "" {
+				content = aiGatewayRawString(delta["input_json"])
+			}
+			return []aiGatewayStreamDelta{{Kind: "tool_call", Content: content, ToolIndex: blockIndex}}
 		default:
 			return nil
 		}
@@ -2895,7 +3152,7 @@ func aiGatewayExtractStreamDeltas(payload map[string]interface{}) []aiGatewayStr
 	firstChoice := aiGatewayMap(choices[0])
 	delta := aiGatewayMap(firstChoice["delta"])
 	deltas := []aiGatewayStreamDelta{}
-	if reasoning := aiGatewayString(delta["reasoning_content"]); reasoning != "" {
+	if reasoning := aiGatewayRawString(delta["reasoning_content"]); reasoning != "" {
 		deltas = append(deltas, aiGatewayStreamDelta{Kind: "thinking", Content: reasoning})
 	}
 	if content := aiGatewayRawString(delta["content"]); content != "" {
@@ -3081,6 +3338,81 @@ func aiGatewayExtractQuestion(body map[string]interface{}) string {
 		}
 	}
 	return ""
+}
+
+// aiGatewayIsToolContinuation 判断当前请求是不是 agent 内部的 tool 续传（vs 用户主动新 q）。
+// 通过看 body 里 messages/input 的最后一条记录的语义判断：
+//   - Anthropic: 最后一条 role=user 且 content 数组里含 tool_result block → 续传
+//   - OpenAI Chat: 最后一条 role=tool → 续传
+//   - Codex Responses: 最后一条 input item type=function_call_output / tool_result / computer_call_output → 续传
+// 其余情况都视为用户新 q（包括最后一条 role=user 是纯文本、第一条请求等）。
+func aiGatewayIsToolContinuation(body map[string]interface{}) bool {
+	if body == nil {
+		return false
+	}
+	// messages 数组（Anthropic / OpenAI Chat 共用）
+	if messages := aiGatewayExtractMessages(body); len(messages) > 0 {
+		last := messages[len(messages)-1]
+		role := strings.ToLower(strings.TrimSpace(aiGatewayString(last["role"])))
+		switch role {
+		case "tool", "function":
+			// OpenAI Chat 风格：tool_result 是单独的 message，role=tool
+			return true
+		case "user":
+			// Anthropic 风格：tool_result 装在 role=user 的 content 数组里
+			if content, ok := last["content"].([]interface{}); ok {
+				for _, block := range content {
+					if m := aiGatewayMap(block); len(m) > 0 {
+						switch strings.ToLower(strings.TrimSpace(aiGatewayString(m["type"]))) {
+						case "tool_result", "tool_use_result", "function_call_output":
+							return true
+						}
+					}
+				}
+			}
+		}
+		return false
+	}
+	// Codex Responses input 数组
+	if items := aiGatewayExtractInputItems(body); len(items) > 0 {
+		last := aiGatewayMap(items[len(items)-1])
+		if len(last) == 0 {
+			return false
+		}
+		switch strings.ToLower(strings.TrimSpace(aiGatewayString(last["type"]))) {
+		case "function_call_output", "tool_result", "tool_use_result", "computer_call_output", "shell_call_output", "apply_patch_call_output":
+			return true
+		}
+		return false
+	}
+	return false
+}
+
+// aiGatewayIsAuxiliaryRequest 识别 SUGGESTION MODE / 提示猜测等辅助调用。
+// 这类调用不应该污染主 reply.json / current.json（仍然走 mirror 用于诊断）。
+//
+// 判别规则（任一命中即认为是 auxiliary）：
+//   - question 文本以 "[SUGGESTION MODE:" 开头（Claude Code 的 next-step 预测）
+//   - body.metadata.purpose / body.metadata.kind 标记为 suggestion
+func aiGatewayIsAuxiliaryRequest(question string, body map[string]interface{}) bool {
+	if q := strings.TrimSpace(question); q != "" {
+		upper := strings.ToUpper(q)
+		if strings.HasPrefix(upper, "[SUGGESTION MODE") {
+			return true
+		}
+	}
+	if body == nil {
+		return false
+	}
+	if meta := aiGatewayMap(body["metadata"]); len(meta) > 0 {
+		for _, key := range []string{"purpose", "kind", "category"} {
+			val := strings.ToLower(strings.TrimSpace(aiGatewayString(meta[key])))
+			if strings.Contains(val, "suggestion") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func aiGatewayExtractRequestHistory(body map[string]interface{}) (string, interface{}) {

@@ -12,6 +12,7 @@ import (
 // Currently only the cross-agent reply callback implements it.
 type aiGatewayReplyHook interface {
 	handleEvents(events []aiGatewayReplyEvent)
+	onItems(items []map[string]interface{})
 	finalize(reply aiGatewayReplySnapshot)
 }
 
@@ -72,7 +73,7 @@ type replyCallbackHook struct {
 }
 
 func (h *replyCallbackHook) handleEvents(_ []aiGatewayReplyEvent) {}
-
+func (h *replyCallbackHook) onItems(_ []map[string]interface{})    {}
 func (h *replyCallbackHook) finalize(reply aiGatewayReplySnapshot) {
 	if h == nil {
 		return

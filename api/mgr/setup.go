@@ -290,6 +290,7 @@ func selectedAgentConfigs() map[string]Tool {
 		"cicy":     {"cicy", "cicy", cicyInstallCmd(), true, false},
 		"codex":    {"codex", "codex", codexInstallCmd(), true, false},
 		"opencode": {"opencode", "opencode", opencodeInstallCmd(), true, false},
+		"kiro-cli": {"kiro-cli", "kiro-cli", kiroCliInstallCmd(), true, false},
 		"cursor":   {"cursor-agent", "cursor-agent", cursorInstallCmd(), true, false},
 		"hermes":   {"hermes", "hermes", hermesInstallCmd(), true, false},
 	}
@@ -351,7 +352,7 @@ var builtinAgents = []struct {
 	{"cicy-claude", "CiCy"},
 }
 
-var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode"}
+var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode", "kiro-cli"}
 
 func effectiveAllowedAgentTypes() []string {
 	if labMode {

@@ -42,6 +42,8 @@
   "marketplaceManageProxySsh": "管理 SSH 隧道",
   "marketplaceReinstall": "重新安装",
   "marketplaceInstalling": "安装中…",
+  "marketplaceUpdate": "更新",
+  "marketplaceUpdating": "更新中…",
   "marketplaceFailedToLoad": "无法加载技能列表",
   "marketplaceEmpty": "没有匹配的技能。",
   "marketplaceCategoryAll": "全部",

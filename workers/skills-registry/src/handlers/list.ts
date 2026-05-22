@@ -9,12 +9,22 @@ import type { Env, Manifest, SkillSummary } from '../types';
 import { ok } from '../lib/response';
 import { getCatalog, getLatestManifest } from '../lib/kv';
 
-function summarize(m: Manifest): SkillSummary {
+function summarize(m: Manifest, lang?: string): SkillSummary {
+  // Resolve lang: try exact match, then strip region (zh-CN → zh), else English.
+  const i18n = m.i18n || {};
+  let loc: { title?: string; description?: string } | undefined;
+  if (lang) {
+    loc = i18n[lang]
+      || i18n[lang.split('-')[0]]
+      || undefined;
+  }
   return {
     name: m.name,
     version: m.version,
     title: m.title,
     description: m.description,
+    title_localized: loc?.title,
+    description_localized: loc?.description,
     category: m.category,
     tags: m.tags || [],
     author: m.author,
@@ -32,6 +42,12 @@ export async function list(req: Request, env: Env): Promise<Response> {
   const agent = url.searchParams.get('agent') || '';
   const limit = clampInt(url.searchParams.get('limit'), 1, 200, 100);
   const offset = clampInt(url.searchParams.get('offset'), 0, 1_000_000, 0);
+  // lang is wire-only for now: clients (mgr / front-end) forward the user's
+  // preferred locale via ?lang= or Accept-Language. The current registry
+  // stores English manifests only; once an LLM-translation cache is added,
+  // localized title/description will be looked up here keyed by lang.
+  const lang = url.searchParams.get('lang') || '';
+  void lang;
 
   const names = await getCatalog(env);
 
@@ -54,7 +70,7 @@ export async function list(req: Request, env: Env): Promise<Response> {
       const hay = [m.name, m.title, m.description, ...(m.tags || [])].join(' ').toLowerCase();
       if (!hay.includes(q)) continue;
     }
-    summaries.push(summarize(m));
+    summaries.push(summarize(m, lang || undefined));
   }
 
   const total = summaries.length;

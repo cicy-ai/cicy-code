@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -107,6 +108,8 @@ func renderReplyItems(items []map[string]interface{}, full bool) string {
 				continue
 			}
 			name, _ := it["name"].(string)
+			// reply.Items 中 tool_use 的 tool_id 字段是 LLM 返回的原生 tool call id（如 "call_xxx"）。
+			// "id" 字段是 cicy 自加的序号。
 			toolID, _ := it["tool_id"].(string)
 			input := it["input"]
 			var inputStr string
@@ -129,4 +132,99 @@ func renderReplyItems(items []map[string]interface{}, full bool) string {
 		}
 	}
 	return b.String()
+}
+
+
+// renderReplyItemForIM 把单个 reply.json item 渲染成给 IM（TG / WeChat）推送的纯文本。
+// 每个 type 一种格式，用空格 + emoji 让用户在 IM 客户端里更容易扫读。
+//   thinking: "💭 ..."
+//   text:     "..."
+//   tool_use: "🔧 <name>\n```json\n<input json>\n```"
+// 长内容会截断（避免 IM 单条消息撑爆 WeChat ~4096 字符限制）：
+//   - thinking: 1500 char
+//   - text:     2500 char
+//   - tool_use input 内长字符串字段: 800 char
+// 返回空字符串表示 skip（item 内容为空）。
+func renderReplyItemForIM(item map[string]interface{}) string {
+	if item == nil {
+		return ""
+	}
+	typ, _ := item["type"].(string)
+	switch typ {
+	case "thinking":
+		// 不再推送 thinking 到 IM —— 内部思考过程对用户没价值且会刷屏。
+		return ""
+	case "text":
+		txt, _ := item["text"].(string)
+		txt = strings.TrimSpace(txt)
+		if txt == "" {
+			return ""
+		}
+		return imTruncateLongString(txt, 2500)
+	case "tool_use":
+		name, _ := item["name"].(string)
+		var inputStr string
+		switch v := item["input"].(type) {
+		case string:
+			inputStr = imTruncateLongString(v, 800)
+		case nil:
+			inputStr = ""
+		default:
+			// 截断 input 中的长字符串字段（如 Write 工具的 content / Bash 的大命令），
+			// 避免整条 IM 消息撑爆 WeChat 4096 字符限制。
+			truncated := imTruncateInputForIM(v, 800)
+			// 用不 escape HTML 的 encoder + indent，让 ">" "&" "<" 保持原样、
+			// JSON 多行更可读。
+			var buf bytes.Buffer
+			enc := json.NewEncoder(&buf)
+			enc.SetEscapeHTML(false)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(truncated); err == nil {
+				inputStr = strings.TrimRight(buf.String(), "\n")
+			}
+		}
+		if inputStr == "" {
+			return "🔧 " + name
+		}
+		// 用 markdown code block 包起来，让 TG / WeChat / 其他 markdown-aware
+		// 客户端正确渲染（缩进 / 高亮）。
+		return "🔧 " + name + "\n```json\n" + inputStr + "\n```"
+	}
+	return ""
+}
+
+
+// imTruncateLongString 把字符串截到 limit 个 rune，超出则加 "...(N chars total)" 标记。
+func imTruncateLongString(s string, limit int) string {
+	if limit <= 0 {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	return string(runes[:limit]) + fmt.Sprintf("\n...(truncated, %d chars total)", len(runes))
+}
+
+// imTruncateInputForIM 递归截断 tool_use input 中的长字符串字段，保留 JSON 结构。
+// 用于避免 Write 工具的 content / 大命令文本撑爆 IM 单条消息。
+func imTruncateInputForIM(v interface{}, limit int) interface{} {
+	switch x := v.(type) {
+	case string:
+		return imTruncateLongString(x, limit)
+	case []interface{}:
+		out := make([]interface{}, len(x))
+		for i, item := range x {
+			out[i] = imTruncateInputForIM(item, limit)
+		}
+		return out
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(x))
+		for k, val := range x {
+			out[k] = imTruncateInputForIM(val, limit)
+		}
+		return out
+	default:
+		return v
+	}
 }

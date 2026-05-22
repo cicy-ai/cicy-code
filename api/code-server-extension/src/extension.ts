@@ -380,6 +380,7 @@ function connectHostOpenFileBridge(context: vscode.ExtensionContext): void {
   let disposed = false;
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectBackoff = 0;
   let currentClientId = cfg.pageClientId;
   let currentPagePane = cfg.pagePane;
   let currentCodeClientId = `${currentClientId}:code-ext`;
@@ -395,10 +396,13 @@ function connectHostOpenFileBridge(context: vscode.ExtensionContext): void {
     if (disposed || reconnectTimer) {
       return;
     }
+    const delay = reconnectBackoff === 0 ? 200 : Math.min(1000 * Math.pow(1.5, reconnectBackoff - 1), 15000);
+    reconnectBackoff++;
+    log.appendLine(`[bridge] reconnect in ${Math.round(delay)}ms (backoff=${reconnectBackoff - 1})`);
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       connect();
-    }, 1000);
+    }, delay);
   };
 
   const connect = () => {
@@ -426,6 +430,7 @@ function connectHostOpenFileBridge(context: vscode.ExtensionContext): void {
       return;
     }
     socket.onopen = () => {
+      reconnectBackoff = 0;
       log.appendLine(`[bridge] open ws agent=${currentPagePane} client=${currentCodeClientId}`);
     };
     socket.onclose = (event) => {
@@ -449,37 +454,55 @@ function connectHostOpenFileBridge(context: vscode.ExtensionContext): void {
         const payload = JSON.parse(String(event.data || '')) as { type?: string; data?: Record<string, unknown> };
         if (payload?.type === 'host.open_file' && payload.data) {
           const requestId = String(payload.data?.requestId || '');
-          void openFileFromHost(payload.data.path).then(() => {
-            try {
-              socket?.send(JSON.stringify({
-                type: 'code.opened',
-                data: {
-                  requestId,
-                  path: String(payload.data?.path || ''),
-                  page_client_id: currentClientId,
-                  code_client_id: currentCodeClientId,
-                  page_pane: currentPagePane,
-                },
-              }));
-            } catch {
-            }
-          }).catch((error) => {
-            const message = error instanceof Error ? error.message : String(error || '');
-            void vscode.window.showErrorMessage(vscode.l10n.t('Failed to open file: {0}', message || String(payload.data?.path || '')));
+          const rawPath = payload.data.path;
+          const parsed = parseFileReference(rawPath);
+          const filePath = parsed.filePath;
+          if (!filePath) {
             try {
               socket?.send(JSON.stringify({
                 type: 'code.open_file_error',
-                data: {
-                  requestId,
-                  path: String(payload.data?.path || ''),
-                  error: message || String(payload.data?.path || ''),
-                  page_client_id: currentClientId,
-                  code_client_id: currentCodeClientId,
-                  page_pane: currentPagePane,
-                },
+                data: { requestId, path: String(rawPath || ''), error: 'empty path',
+                  page_client_id: currentClientId, code_client_id: currentCodeClientId, page_pane: currentPagePane },
               }));
-            } catch {
+            } catch {}
+            return;
+          }
+          // Resolve the URI first, send code.opened immediately, then open
+          // asynchronously. This avoids blocking the sync RPC on VS Code's
+          // editor rendering (~1-3s), so the CLI gets a fast response.
+          resolveWorkspaceFileUri(filePath).then((uri) => {
+            if (!uri) {
+              try {
+                socket?.send(JSON.stringify({
+                  type: 'code.open_file_error',
+                  data: { requestId, path: filePath, error: filePath,
+                    page_client_id: currentClientId, code_client_id: currentCodeClientId, page_pane: currentPagePane },
+                }));
+              } catch {}
+              return;
             }
+            try {
+              socket?.send(JSON.stringify({
+                type: 'code.opened',
+                data: { requestId, path: String(rawPath || ''),
+                  page_client_id: currentClientId, code_client_id: currentCodeClientId, page_pane: currentPagePane },
+              }));
+            } catch {}
+            // Continue opening in the background — no need to block the response.
+            openUriReference(uri, parsed).catch((error) => {
+              const message = error instanceof Error ? error.message : String(error || '');
+              void vscode.window.showErrorMessage(vscode.l10n.t('Failed to open file: {0}', message || filePath));
+            });
+          }).catch((error) => {
+            const message = error instanceof Error ? error.message : String(error || '');
+            void vscode.window.showErrorMessage(vscode.l10n.t('Failed to open file: {0}', message || filePath));
+            try {
+              socket?.send(JSON.stringify({
+                type: 'code.open_file_error',
+                data: { requestId, path: filePath, error: message || filePath,
+                  page_client_id: currentClientId, code_client_id: currentCodeClientId, page_pane: currentPagePane },
+              }));
+            } catch {}
           });
           return;
         }

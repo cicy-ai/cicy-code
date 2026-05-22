@@ -77,7 +77,7 @@ func startInstance(paneID string, port int, token string) error {
 	opts := &server.Options{
 		Address: "127.0.0.1", Port: fmt.Sprintf("%d", port),
 		PermitWrite:     true,
-		TitleFormat:     "w-1000x@{{ .hostname }}",
+		TitleFormat:     shortPaneID(paneID),
 		EnableReconnect: true, ReconnectTime: 30,
 		Term: "xterm-256color", WSOrigin: ".*", PermitArguments: true,
 		Preferences: &server.HtermPrefernces{
