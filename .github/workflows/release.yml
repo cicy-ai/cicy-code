@@ -52,6 +52,40 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Generate release manifest
+        # manifest.json is the canonical source the cicy-desktop installer
+        # reads to discover the latest version + binary URLs. Hosted as a
+        # release asset so:
+        #   1. It's CN-reachable via ghproxy mirrors (same path as binaries).
+        #   2. GitHub's /releases/latest/download/manifest.json redirects to
+        #      whatever release was tagged "latest" — clients don't need to
+        #      walk git tags.
+        # Also pinned at the v<TAG> URL for clients that want a specific ver.
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          VERSION="${TAG#v}"
+          BASE="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+          cat > dist/manifest.json <<EOF
+          {
+            "version": "${VERSION}",
+            "tag": "${TAG}",
+            "publishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "assets": {
+              "darwin-amd64": "${BASE}/cicy-code-darwin-amd64",
+              "darwin-arm64": "${BASE}/cicy-code-darwin-arm64",
+              "linux-amd64":  "${BASE}/cicy-code-linux-amd64",
+              "linux-arm64":  "${BASE}/cicy-code-linux-arm64"
+            },
+            "sizes": {
+              "darwin-amd64": $(stat -c%s dist/cicy-code-darwin-amd64),
+              "darwin-arm64": $(stat -c%s dist/cicy-code-darwin-arm64),
+              "linux-amd64":  $(stat -c%s dist/cicy-code-linux-amd64),
+              "linux-arm64":  $(stat -c%s dist/cicy-code-linux-arm64)
+            }
+          }
+          EOF
+          cat dist/manifest.json
+
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -71,6 +105,7 @@ jobs:
               dist/cicy-code-darwin-arm64 \
               dist/cicy-code-linux-amd64 \
               dist/cicy-code-linux-arm64 \
+              dist/manifest.json \
               --clobber
           else
             gh release create "$TAG" \
@@ -78,6 +113,7 @@ jobs:
               dist/cicy-code-darwin-arm64 \
               dist/cicy-code-linux-amd64 \
               dist/cicy-code-linux-arm64 \
+              dist/manifest.json \
               --title "$TAG" \
               --generate-notes
           fi
