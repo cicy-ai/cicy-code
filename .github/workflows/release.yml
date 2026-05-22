@@ -97,26 +97,22 @@ jobs:
             git tag "$TAG"
             git push origin "$TAG"
           fi
-          # If a release already exists for this tag, upload (clobbering
-          # same-named assets). Otherwise create it.
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" \
-              dist/cicy-code-darwin-amd64 \
-              dist/cicy-code-darwin-arm64 \
-              dist/cicy-code-linux-amd64 \
-              dist/cicy-code-linux-arm64 \
-              dist/manifest.json \
-              --clobber
-          else
-            gh release create "$TAG" \
-              dist/cicy-code-darwin-amd64 \
-              dist/cicy-code-darwin-arm64 \
-              dist/cicy-code-linux-amd64 \
-              dist/cicy-code-linux-arm64 \
-              dist/manifest.json \
-              --title "$TAG" \
-              --generate-notes
+          # Step 1: ensure release exists (no assets — keep this command simple).
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --generate-notes
           fi
+          # Step 2: upload each asset individually so a failure on one (e.g.
+          # manifest.json) is visible. --clobber overwrites a prior upload of
+          # the same asset name.
+          for f in \
+            dist/cicy-code-darwin-amd64 \
+            dist/cicy-code-darwin-arm64 \
+            dist/cicy-code-linux-amd64 \
+            dist/cicy-code-linux-arm64 \
+            dist/manifest.json; do
+            echo "Uploading $f ..."
+            gh release upload "$TAG" "$f" --clobber
+          done
 
       - name: Publish to npm
         # Only publish on real tag pushes — workflow_dispatch snapshots stay
