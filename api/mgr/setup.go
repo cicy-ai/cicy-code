@@ -122,11 +122,11 @@ func openClawInstallCmd() string {
 }
 
 func claudeInstallCmd() string {
-	return npmGlobalInstallCmd("@anthropic-ai/claude-code@latest")
+	return npmGlobalInstallCmd("--registry=https://registry.npmjs.org @anthropic-ai/claude-code@latest")
 }
 
 func codexInstallCmd() string {
-	return npmGlobalInstallCmd("@openai/codex@latest")
+	return npmGlobalInstallCmd("--registry=https://registry.npmjs.org @openai/codex@latest")
 }
 
 func opencodeInstallCmd() string {
