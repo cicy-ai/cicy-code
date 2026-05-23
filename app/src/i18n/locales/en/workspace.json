@@ -130,5 +130,9 @@
   "marketplaceSidebarHomepage": "Homepage",
   "marketplaceSidebarRepository": "Repository",
   "marketplaceSidebarRelease": "Release",
-  "marketplaceSidebarCopyId": "Copy identifier"
+  "marketplaceSidebarCopyId": "Copy identifier",
+  "marketplaceTabUpdates": "Updates",
+  "marketplaceVersionLatest": "latest",
+  "marketplaceVersionInstalled": "installed",
+  "marketplaceNoUpdates": "No version history available."
 }

@@ -1051,69 +1051,156 @@ function SkillDetailTabs({ data, skill, setSendText, sendToAgent, copy, copied }
   copy: (s: string) => void;
   copied: string;
 }) {
-  const { t } = useTranslation('workspace');
+  const { t, i18n } = useTranslation('workspace');
   const tools = data?.manifest?.tools || [];
   const [tab, setTab] = useState<DetailTab>('help');
+  const [versions, setVersions] = useState<Array<{ version: string; published_at?: string; size?: number }> | null>(null);
+  const [versionsLoading, setVersionsLoading] = useState(false);
 
-  const tabs: { id: DetailTab; label: string }[] = [
+  // Fetch version history when Updates tab opens (registry directly).
+  useEffect(() => {
+    if (tab !== 'updates' || versions !== null) return;
+    setVersionsLoading(true);
+    const url = `https://skills.cicy-ai.com/v1/skills/${encodeURIComponent(skill.name)}/versions`;
+    fetch(url)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        const list = d?.data?.versions || [];
+        // De-duplicate by version (keep newest published_at)
+        const map = new Map<string, { version: string; published_at?: string; size?: number }>();
+        for (const v of list) {
+          const prev = map.get(v.version);
+          if (!prev || (v.published_at && v.published_at > (prev.published_at || ''))) map.set(v.version, v);
+        }
+        setVersions(Array.from(map.values()).sort((a, b) => (b.published_at || '').localeCompare(a.published_at || '')));
+      })
+      .catch(() => setVersions([]))
+      .finally(() => setVersionsLoading(false));
+  }, [tab, skill.name, versions]);
+
+  const tabs: { id: DetailTab; label: string; badge?: string }[] = [
     { id: 'help',    label: t('marketplaceTabHelp',    { defaultValue: 'Help' }) },
-    { id: 'tools',   label: t('marketplaceTabTools',   { defaultValue: 'Tools' }) },
+    { id: 'tools',   label: t('marketplaceTabTools',   { defaultValue: 'Tools' }), badge: tools.length > 0 ? String(tools.length) : undefined },
     { id: 'updates', label: t('marketplaceTabUpdates', { defaultValue: 'Updates' }) },
   ];
 
   return (
-    <div className="@container flex flex-col h-full">
+    <div className="flex flex-col h-full">
       {/* Tab bar */}
       <div className="flex items-center border-b border-white/[0.06] px-5 shrink-0">
-        {tabs.map(({ id, label }) => (
+        {tabs.map(({ id, label, badge }) => (
           <button
             key={id}
+            data-id={`skill-detail-tab-${id}`}
             onClick={() => setTab(id)}
-            className={`mr-4 py-2.5 text-[12px] border-b-2 transition-colors ${
+            className={`mr-4 py-2.5 text-[12px] border-b-2 transition-colors inline-flex items-center gap-1.5 ${
               tab === id
                 ? 'border-blue-400 text-zinc-100 font-medium'
                 : 'border-transparent text-zinc-500 hover:text-zinc-300'
             }`}
           >
-            {label}
-            {id === 'tools' && tools.length > 0 && (
-              <span className="ml-1.5 px-1 rounded bg-white/[0.06] text-zinc-500 text-[10px] font-mono">{tools.length}</span>
-            )}
+            <span>{label}</span>
+            {badge && <span className="px-1 rounded bg-white/[0.06] text-zinc-500 text-[10px] font-mono">{badge}</span>}
           </button>
         ))}
       </div>
 
       {/* Content + sidebar */}
-      <div className="flex-1 overflow-hidden @container">
-        <div className="h-full grid @[768px]:grid-cols-[1fr_240px]">
-          {/* Main content */}
-          <div className="overflow-y-auto px-5 py-4 min-w-0">
-            {tab === 'help' && (
-              <MarkdownPane
-                content={data?.skill_md || data?.help_md || ''}
-                setSendText={setSendText}
-                skillName={skill.name}
-                manifest={data?.manifest || null}
-              />
-            )}
-            {tab === 'tools' && (
-              tools.length > 0
-                ? <SkillToolsPanel tools={tools} skillName={skill.name} installed={skill.status.installed} onSend={sendToAgent} />
-                : <div className="text-xs text-zinc-500">{t('marketplaceNoContent')}</div>
-            )}
-            {tab === 'updates' && (
-              <MarkdownPane
-                content={data?.tools_md || ''}
-                setSendText={setSendText}
-                skillName={skill.name}
-                manifest={data?.manifest || null}
-              />
-            )}
-          </div>
-          {/* Sidebar */}
-          <SkillDetailSidebar skill={skill} manifest={data?.manifest || null} copy={copy} copied={copied} />
+      <div className="flex-1 min-h-0 flex">
+        {/* Main content (scrollable) */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 min-w-0">
+          {tab === 'help' && (
+            (data?.skill_md || data?.help_md)
+              ? <MarkdownPane
+                  content={data?.skill_md || data?.help_md || ''}
+                  setSendText={setSendText}
+                  skillName={skill.name}
+                  manifest={data?.manifest || null}
+                />
+              : <div className="text-xs text-zinc-500">{t('marketplaceNoContent')}</div>
+          )}
+          {tab === 'tools' && (
+            tools.length > 0
+              ? <SkillToolsPanel tools={tools} skillName={skill.name} installed={skill.status.installed} onSend={sendToAgent} />
+              : <div className="text-xs text-zinc-500">{t('marketplaceNoContent')}</div>
+          )}
+          {tab === 'updates' && (
+            <SkillUpdatesPanel
+              skill={skill}
+              versions={versions}
+              loading={versionsLoading}
+              lang={i18n.language || 'en'}
+              t={t}
+            />
+          )}
         </div>
+        {/* Sidebar (fixed width, hidden on narrow) */}
+        <aside className="hidden md:block w-[240px] shrink-0 border-l border-white/[0.06] overflow-y-auto">
+          <SkillDetailSidebar skill={skill} manifest={data?.manifest || null} copy={copy} copied={copied} />
+        </aside>
       </div>
+    </div>
+  );
+}
+
+// SkillUpdatesPanel renders the version history fetched from the registry.
+// Highlights the currently installed version and the latest available.
+function SkillUpdatesPanel({ skill, versions, loading, lang, t }: {
+  skill: MarketSkill;
+  versions: Array<{ version: string; published_at?: string; size?: number }> | null;
+  loading: boolean;
+  lang: string;
+  t: (k: string, opt?: any) => string;
+}) {
+  if (loading) {
+    return (
+      <div className="space-y-2 animate-pulse">
+        {[100, 75, 90, 60].map((w, i) => (
+          <div key={i} className="h-10 rounded-md bg-white/[0.04]" style={{ width: `${w}%` }} />
+        ))}
+      </div>
+    );
+  }
+  if (!versions || versions.length === 0) {
+    return <div className="text-xs text-zinc-500">{t('marketplaceNoUpdates', { defaultValue: 'No version history available.' })}</div>;
+  }
+  return (
+    <div className="space-y-2" data-id="skill-updates-panel">
+      {versions.map((v) => {
+        const isInstalled = skill.installed_version === v.version;
+        const isLatest = skill.version === v.version;
+        return (
+          <div
+            key={v.version + (v.published_at || '')}
+            className={`rounded-md border px-3 py-2 ${
+              isLatest ? 'border-blue-500/40 bg-blue-500/5' : 'border-white/[0.06] bg-black/20'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <span className={`text-[12px] font-mono font-medium ${isLatest ? 'text-blue-300' : 'text-zinc-200'}`}>
+                  v{v.version}
+                </span>
+                {isLatest && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">
+                    {t('marketplaceVersionLatest', { defaultValue: 'latest' })}
+                  </span>
+                )}
+                {isInstalled && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 inline-flex items-center gap-1">
+                    <CheckCircle2 className="w-2.5 h-2.5" />
+                    {t('marketplaceVersionInstalled', { defaultValue: 'installed' })}
+                  </span>
+                )}
+              </div>
+              <div className="text-[10px] text-zinc-500 flex items-center gap-2">
+                {v.size && <span>{formatBytes(v.size)}</span>}
+                {v.published_at && <span>{formatDate(v.published_at, lang)}</span>}
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1344,7 +1431,7 @@ function SkillDetailSidebar({
   return (
     <aside
       data-id="skill-detail-sidebar"
-      className="order-1 @[768px]:order-2 px-5 py-4 @[768px]:py-4 @[768px]:pl-3 @[768px]:pr-5 @[768px]:border-l border-b @[768px]:border-b-0 border-white/[0.06] space-y-3.5 text-[11px]"
+      className="px-4 py-4 space-y-3.5 text-[11px]"
     >
       {/* Identifier */}
       <SidebarSection title={t('marketplaceSidebarIdentifier', { defaultValue: 'Identifier' })} icon={<Hash className="w-3 h-3" />}>

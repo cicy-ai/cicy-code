@@ -129,5 +129,9 @@
   "marketplaceSidebarHomepage": "Page d'accueil",
   "marketplaceSidebarRepository": "Dépôt",
   "marketplaceSidebarRelease": "Version publiée",
-  "marketplaceSidebarCopyId": "Copier l'identifiant"
+  "marketplaceSidebarCopyId": "Copier l'identifiant",
+  "marketplaceTabUpdates": "Mises à jour",
+  "marketplaceVersionLatest": "récent",
+  "marketplaceVersionInstalled": "installé",
+  "marketplaceNoUpdates": "Aucun historique de version."
 }
