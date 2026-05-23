@@ -528,7 +528,8 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
   const [data, setData] = useState<SkillDetailPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('help');
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<'install' | 'update' | 'uninstall' | null>(null);
+  const busy = busyAction !== null;
   const [installLog, setInstallLog] = useState('');
   const [installError, setInstallError] = useState('');
   const [sendText, setSendText] = useState('');
@@ -672,7 +673,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
   const { confirm, node: confirmNode } = useDialogs();
 
   const handleInstall = async () => {
-    setBusy(true);
+    setBusyAction('install');
     setInstallLog('');
     setInstallError('');
     try {
@@ -685,11 +686,11 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
     } catch (e: any) {
       setInstallError(e?.message || 'install failed');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
   const handleUpdate = async () => {
-    setBusy(true);
+    setBusyAction('update');
     setInstallLog('');
     setInstallError('');
     try {
@@ -702,7 +703,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
     } catch (e: any) {
       setInstallError(e?.message || 'update failed');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
   const handleUninstall = async () => {
@@ -714,7 +715,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
       danger: true,
     });
     if (!ok) return;
-    setBusy(true);
+    setBusyAction('uninstall');
     setInstallLog('');
     setInstallError('');
     try {
@@ -727,7 +728,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
     } catch (e: any) {
       setInstallError(e?.message || 'uninstall failed');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -857,12 +858,12 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
                   {skill.status.installed ? (
                     <>
                       <button data-id="skill-detail-update" onClick={handleUpdate} disabled={busy} className={`text-[12px] px-3 py-1.5 rounded disabled:opacity-50 transition-colors inline-flex items-center gap-1 ${skill.has_update ? 'bg-amber-500/20 text-amber-200 hover:bg-amber-500/30' : 'border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500'}`}>
-                        {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                        {busy ? t('marketplaceUpdating') : skill.has_update ? `${t('marketplaceUpdate')} → v${skill.version}` : t('marketplaceUpdate')}
+                        {busyAction === 'update' ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                        {busyAction === 'update' ? t('marketplaceUpdating') : skill.has_update ? `${t('marketplaceUpdate')} → v${skill.version}` : t('marketplaceUpdate')}
                       </button>
                       <button data-id="skill-detail-reinstall" onClick={handleInstall} disabled={busy} className="text-[12px] px-3 py-1.5 rounded border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:border-zinc-500 disabled:opacity-50 transition-colors inline-flex items-center gap-1">
-                        {busy && <Loader2 className="w-3 h-3 animate-spin" />}
-                        {busy ? t('marketplaceInstalling') : t('marketplaceReinstall')}
+                        {busyAction === 'install' && <Loader2 className="w-3 h-3 animate-spin" />}
+                        {busyAction === 'install' ? t('marketplaceInstalling') : t('marketplaceReinstall')}
                       </button>
                       {skill.name === 'cicy-mihomo' ? (
                         <button data-id="skill-detail-manage-proxy" onClick={onOpenProxyManager} className="text-[12px] px-3 py-1.5 rounded bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 transition-colors inline-flex items-center gap-1">
@@ -895,8 +896,8 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
                     </>
                   ) : (
                     <button data-id="skill-detail-install" onClick={handleInstall} disabled={busy} className="text-[12px] px-3 py-1.5 rounded bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 disabled:opacity-50 transition-colors inline-flex items-center gap-1">
-                      {busy && <Loader2 className="w-3 h-3 animate-spin" />}
-                      {busy ? t('marketplaceInstalling') : t('marketplaceInstall')}
+                      {busyAction === 'install' && <Loader2 className="w-3 h-3 animate-spin" />}
+                      {busyAction === 'install' ? t('marketplaceInstalling') : t('marketplaceInstall')}
                     </button>
                   )}
                   {skill.name === 'google' && googleStatus?.connected && (
