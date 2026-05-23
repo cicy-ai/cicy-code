@@ -1,0 +1,15 @@
+name = "desktop-render"
+compatibility_date = "2025-01-01"
+
+# Custom domain — bind desktop.cicy-ai.com to this Worker.
+# DNS for desktop.cicy-ai.com is managed automatically by Workers Custom Domains.
+routes = [
+  { pattern = "desktop.cicy-ai.com", custom_domain = true }
+]
+
+# Static SPA hosting via the Workers Assets binding. The Vite build output
+# lives in ./dist; Workers serves index.html for navigation requests
+# (single-page-app mode) so client-side routes resolve.
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
