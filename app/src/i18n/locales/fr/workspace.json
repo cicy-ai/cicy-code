@@ -112,5 +112,22 @@
   "networkSending": "Envoi…",
   "networkSendClientId": "Envoyer à l'agent",
   "networkCopyPrompt": "Copier la commande de connexion",
-  "networkPromptCopied": "Commande copiée"
+  "networkPromptCopied": "Commande copiée",
+  "tabTodo": "Tâches",
+  "marketplaceSidebarIdentifier": "Identifiant",
+  "marketplaceSidebarVersion": "Version",
+  "marketplaceSidebarInstalled": "Installé",
+  "marketplaceSidebarLastPublished": "Dernière publication",
+  "marketplaceSidebarPublisher": "Éditeur",
+  "marketplaceSidebarSize": "Taille",
+  "marketplaceSidebarLicense": "Licence",
+  "marketplaceSidebarTags": "Étiquettes",
+  "marketplaceSidebarPermissions": "Autorisations",
+  "marketplaceSidebarRuntime": "Runtime",
+  "marketplaceSidebarAgents": "Agents compatibles",
+  "marketplaceSidebarResources": "Ressources",
+  "marketplaceSidebarHomepage": "Page d'accueil",
+  "marketplaceSidebarRepository": "Dépôt",
+  "marketplaceSidebarRelease": "Version publiée",
+  "marketplaceSidebarCopyId": "Copier l'identifiant"
 }
