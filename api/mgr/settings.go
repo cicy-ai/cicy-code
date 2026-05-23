@@ -41,6 +41,10 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		delete(req, "agents")
 		data, _ := json.Marshal(req)
 		store.Exec(store.Upsert("global_vars", "key_name", []string{"key_name", "value"}, []string{"value"}), "global_settings", string(data))
+		// If the user is configuring global settings with CJK content
+		// (workspace dir names, custom titles, etc.), opportunistically
+		// install CJK fonts in the background — once per process.
+		MaybeEnsureCJKFontsForBytes(data)
 		J(w, M{"success": true})
 	}
 }

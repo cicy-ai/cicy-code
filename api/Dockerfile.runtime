@@ -19,8 +19,10 @@ RUN set -eux; \
         > /etc/apt/sources.list.d/debian.sources
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh && \
-    chown -R cicy:cicy /usr/local/lib/node_modules /usr/local/bin
+# Don't chown -R /usr/local/lib/node_modules — it doubles the layer size
+# (~130MB) and cicy doesn't need write access there: global npm installs go
+# to $HOME/.npm-global (configured in base via npm config set prefix).
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 WORKDIR /app
 COPY --chown=cicy:cicy cicy-code-docker /app/cicy-code

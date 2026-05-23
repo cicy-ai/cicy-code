@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -75,6 +76,88 @@ jobs:
             TAG="${{ github.ref_name }}"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      # ── Docker images ─────────────────────────────────────────────────
+      # Two registries:
+      #   ghcr.io/cicy-ai/...                (global users)
+      #   <ALIYUN_REGISTRY>/<NS>/...         (CN users, much faster)
+      #
+      # The ACR step is conditional on the secrets existing — without ACR
+      # creds we still publish to ghcr only. ACR creds:
+      #   ALIYUN_REGISTRY            e.g. registry.cn-hangzhou.aliyuncs.com
+      #   ALIYUN_REGISTRY_NAMESPACE  e.g. cicy-ai
+      #   ALIYUN_REGISTRY_USERNAME   ACR docker login user (NOT access key)
+      #   ALIYUN_REGISTRY_PASSWORD   ACR docker login password
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Aliyun ACR
+        if: ${{ vars.ALIYUN_REGISTRY != '' || secrets.ALIYUN_REGISTRY != '' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.ALIYUN_REGISTRY || secrets.ALIYUN_REGISTRY }}
+          username: ${{ secrets.ALIYUN_REGISTRY_USERNAME }}
+          password: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+
+      - name: Build & push cicy-code-base
+        # The base image (debian + node24 + apt cli tools + cloudflared) is
+        # rebuilt every release. Layer cache keeps subsequent builds fast;
+        # if Dockerfile.runtime.base is unchanged, push only re-stamps the
+        # tag and uploads zero layers.
+        env:
+          BASE_TAG: 1.0.9
+          ALIYUN_REGISTRY: ${{ vars.ALIYUN_REGISTRY || secrets.ALIYUN_REGISTRY }}
+          ALIYUN_NS: ${{ vars.ALIYUN_REGISTRY_NAMESPACE || secrets.ALIYUN_REGISTRY_NAMESPACE || 'cicy-ai' }}
+        run: |
+          set -e
+          # We don't use docker/build-push-action because we want to mirror
+          # the same image to two registries with conditional ACR push.
+          docker build -f api/Dockerfile.runtime.base \
+            -t cicy-code-base:${BASE_TAG} \
+            api/
+          for tag in ${BASE_TAG} latest; do
+            docker tag cicy-code-base:${BASE_TAG} ghcr.io/${{ github.repository_owner }}/cicy-code-base:$tag
+            docker push ghcr.io/${{ github.repository_owner }}/cicy-code-base:$tag
+            if [ -n "$ALIYUN_REGISTRY" ]; then
+              docker tag cicy-code-base:${BASE_TAG} $ALIYUN_REGISTRY/$ALIYUN_NS/cicy-code-base:$tag
+              docker push $ALIYUN_REGISTRY/$ALIYUN_NS/cicy-code-base:$tag
+            fi
+          done
+
+      - name: Build & push cicy-code (runtime)
+        # Runtime = base + cicy-code binary. Tagged with the release version
+        # (no `v` prefix) plus `latest`.
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          BASE_TAG: 1.0.9
+          ALIYUN_REGISTRY: ${{ vars.ALIYUN_REGISTRY || secrets.ALIYUN_REGISTRY }}
+          ALIYUN_NS: ${{ vars.ALIYUN_REGISTRY_NAMESPACE || secrets.ALIYUN_REGISTRY_NAMESPACE || 'cicy-ai' }}
+        run: |
+          set -e
+          # Dockerfile.runtime expects api/cicy-code-docker — build.sh would
+          # cp from api/cicy-code, but we already have dist/cicy-code-linux-amd64.
+          cp dist/cicy-code-linux-amd64 api/cicy-code-docker
+          docker build -f api/Dockerfile.runtime \
+            --build-arg BASE_IMAGE=ghcr.io/${{ github.repository_owner }}/cicy-code-base:${BASE_TAG} \
+            -t cicy-code:${VERSION} \
+            api/
+          rm -f api/cicy-code-docker
+          for tag in ${VERSION} latest; do
+            docker tag cicy-code:${VERSION} ghcr.io/${{ github.repository_owner }}/cicy-code:$tag
+            docker push ghcr.io/${{ github.repository_owner }}/cicy-code:$tag
+            if [ -n "$ALIYUN_REGISTRY" ]; then
+              docker tag cicy-code:${VERSION} $ALIYUN_REGISTRY/$ALIYUN_NS/cicy-code:$tag
+              docker push $ALIYUN_REGISTRY/$ALIYUN_NS/cicy-code:$tag
+            fi
+          done
 
       - name: Generate release manifest
         # manifest.json is the canonical source the cicy-desktop installer

@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim
+FROM node:24-bookworm-slim
 
 ARG BASE_DOCKERFILE_HASH=unknown
 ARG GITHUB_PROXY=https://ghfast.top/
@@ -38,7 +38,6 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
-        ffmpeg \
         git \
         jq \
         openssh-client \
@@ -49,7 +48,6 @@ RUN set -eux; \
         unzip \
         vim \
         procps \
-        fonts-wqy-microhei \
     ; \
     curl -fsSL "${GITHUB_PROXY}https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb" -o /tmp/cloudflared.deb; \
     apt-get install -y /tmp/cloudflared.deb; \
@@ -60,20 +58,13 @@ RUN set -eux; \
     npm cache clean --force; \
     rm -rf /var/lib/apt/lists/* /tmp/npm-cache /root/.npm /root/.cache /tmp/* /var/tmp/*
 
-RUN set -eux; \
-    curl --http1.1 --retry 5 --retry-delay 2 --retry-all-errors -fsSL "${GITHUB_PROXY}https://raw.githubusercontent.com/cdr/code-server/main/install.sh" \
-      | sed \
-          -e "s#https://github.com/coder/code-server/releases/download/#${GITHUB_PROXY}https://github.com/coder/code-server/releases/download/#g" \
-      | sh -s -- --method standalone --prefix /usr/local; \
-    rm -rf \
-        /usr/local/lib/code-server/src \
-        /usr/local/lib/code-server/README.md \
-        /usr/local/lib/code-server/LICENSE \
-        /usr/local/lib/code-server/ThirdPartyNotices.txt \
-        /usr/local/lib/code-server/postinstall.sh \
-        /usr/local/lib/code-server/npm-shrinkwrap.json \
-    ; \
-    rm -rf /tmp/npm-cache /tmp/* /var/tmp/*
+# ffmpeg, code-server, and CJK fonts are NOT preinstalled — they're
+# lazy-installed by setup.go on first need:
+#   - ffmpeg → ensureFfmpegAsync (apt-get install -y ffmpeg) on first
+#     voice/recording feature use; ~150MB extra at runtime.
+#   - code-server → ensureCodeServerAsync (npm i -g code-server) when the
+#     user opens the code-server tab; ~250MB.
+# This keeps the base image lean (~350MB instead of ~1.5GB).
 
 USER cicy
 ENV HOME=$CICY_HOME \
