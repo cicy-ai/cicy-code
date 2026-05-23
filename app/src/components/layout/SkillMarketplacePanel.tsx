@@ -1262,7 +1262,7 @@ function SkillToolsPanel({ tools, skillName, installed, onSend }: {
             <button
               data-id={`skill-tool-send-${tool.name}`}
               disabled={!installed}
-              onClick={() => onSend(tool.prompt || t('marketplaceToolDefaultPrompt', { name: skillName, tool: tool.name, defaultValue: `请用 ${skillName} skill 的 ${tool.name} 工具帮我操作一下` }))}
+              onClick={() => onSend(t('marketplaceTestToolPrompt', { name: skillName, command: tool.example || tool.name }))}
               title={installed ? t('marketplaceSendToAgent') : t('marketplaceInstallFirst')}
               className="shrink-0 text-[10px] px-2 py-1 rounded border border-white/[0.07] text-zinc-500 hover:text-zinc-200 hover:border-zinc-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1"
             >
