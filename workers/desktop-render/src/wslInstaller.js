@@ -285,17 +285,105 @@ async function installWsl(network, emit) {
   const flag = useWebDownload ? "--web-download" : "";
   // --no-launch avoids a UAC prompt for Ubuntu's first-run setup.
   const r = await sh(`wsl --install ${flag} --no-launch -d Ubuntu`, { timeoutMs: DEFAULT_TIMEOUTS.wslInstall });
-  if (!r.ok) {
-    // Retry without --web-download if it failed
-    if (useWebDownload) {
-      emit({ phase: "installing-wsl", message: "Web download failed, retrying with Microsoft Store…" });
-      const r2 = await sh(`wsl --install --no-launch -d Ubuntu`, { timeoutMs: DEFAULT_TIMEOUTS.wslInstall });
-      if (!r2.ok) return { ok: false, error: r2.stderr || `wsl --install exit ${r2.code}` };
-    } else {
-      return { ok: false, error: r.stderr || `wsl --install exit ${r.code}` };
-    }
+  if (r.ok) return { ok: true };
+
+  // Retry path varies by initial flag.
+  if (useWebDownload) {
+    emit({ phase: "installing-wsl", message: "Web download failed, retrying via Microsoft Store…" });
+    const r2 = await sh(`wsl --install --no-launch -d Ubuntu`, { timeoutMs: DEFAULT_TIMEOUTS.wslInstall });
+    if (r2.ok) return { ok: true };
   }
-  return { ok: true };
+
+  // Fallback: download Ubuntu rootfs directly from cloud-images mirror
+  // and `wsl --import`. Works in restricted networks (Myanmar, CN) where
+  // raw.githubusercontent.com (which Microsoft fetches DistributionInfo
+  // from) is unreachable so `wsl --install -d <name>` cannot proceed.
+  emit({ phase: "installing-wsl", message: "Falling back to direct rootfs import…" });
+  const ir = await importUbuntuFromRootfs(network, emit);
+  if (ir.ok) return { ok: true, method: "rootfs-import" };
+
+  return { ok: false, error: r.stderr || ir.error || `wsl --install exit ${r.code}` };
+}
+
+// Last-resort path: download Ubuntu rootfs directly from cloud-images
+// mirrors (NJU > USTC > tuna > cloud-images) and `wsl --import`. Bypasses
+// Microsoft's DistributionInfo manifest fetch + Microsoft Store entirely.
+async function importUbuntuFromRootfs(network, emit) {
+  const baseMirrors = network === "cn"
+    ? [
+        "https://mirror.nju.edu.cn/ubuntu-cloud-images/wsl/jammy/current",
+        "https://mirrors.ustc.edu.cn/ubuntu-cloud-images/wsl/jammy/current",
+        "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cloud-images/wsl/jammy/current",
+        "https://cloud-images.ubuntu.com/wsl/jammy/current",
+      ]
+    : [
+        "https://cloud-images.ubuntu.com/wsl/jammy/current",
+        "https://mirror.nju.edu.cn/ubuntu-cloud-images/wsl/jammy/current",
+        "https://mirrors.ustc.edu.cn/ubuntu-cloud-images/wsl/jammy/current",
+      ];
+  const fileName = "ubuntu-jammy-wsl-amd64-ubuntu22.04lts.rootfs.tar.gz";
+  const urls = baseMirrors.map(b => `${b}/${fileName}`);
+
+  emit({ phase: "installing-wsl", message: "Picking fastest Ubuntu rootfs mirror…" });
+
+  // Parallel HEAD probe → sort by latency.
+  const json = JSON.stringify(urls);
+  const probe = await ps(`
+$ProgressPreference = 'SilentlyContinue'
+$urls = '${json.replace(/'/g, "''")}' | ConvertFrom-Json
+$jobs = @()
+foreach ($u in $urls) {
+  $jobs += Start-Job -ScriptBlock {
+    param($url)
+    try {
+      $sw = [Diagnostics.Stopwatch]::StartNew()
+      $r = Invoke-WebRequest -Uri $url -Method Head -UseBasicParsing -TimeoutSec 5
+      $sw.Stop()
+      if ($r.StatusCode -ge 200) { Write-Output ("OK $($sw.ElapsedMilliseconds) $url") }
+    } catch {}
+  } -ArgumentList $u
+}
+Wait-Job $jobs -Timeout 7 | Out-Null
+$res = @()
+foreach ($j in $jobs) { $r = Receive-Job $j; if ($r) { $res += $r }; Remove-Job $j -Force | Out-Null }
+$res | Sort-Object { [int]($_.Split(' ')[1]) }
+`, { timeoutMs: 12_000 });
+  let ordered = urls;
+  if (probe.ok && probe.stdout) {
+    const sorted = probe.stdout.split("\n")
+      .map(s => s.trim())
+      .filter(s => s.startsWith("OK "))
+      .map(l => l.split(" ").slice(2).join(" "))
+      .filter(Boolean);
+    if (sorted.length) ordered = [...sorted, ...urls.filter(u => !sorted.includes(u))];
+  }
+
+  emit({ phase: "installing-wsl", message: "Downloading Ubuntu rootfs (~350MB, may take a few minutes)…" });
+
+  const orderedJson = JSON.stringify(ordered);
+  const r = await ps(`
+$ProgressPreference = 'SilentlyContinue'
+$tar = Join-Path $env:TEMP 'ubuntu-jammy-wsl.tar.gz'
+$dst = Join-Path $env:LOCALAPPDATA 'WSL\\Ubuntu'
+New-Item -ItemType Directory -Force $dst | Out-Null
+$urls = '${orderedJson.replace(/'/g, "''")}' | ConvertFrom-Json
+$ok = $false
+foreach ($u in $urls) {
+  try {
+    Invoke-WebRequest -Uri $u -OutFile $tar -UseBasicParsing -TimeoutSec 1800
+    if ((Get-Item $tar).Length -gt 50000000) { $ok = $true; Write-Output ("DOWNLOADED " + $u); break }
+  } catch { Write-Output ("FAIL " + $u + " " + $_.Exception.Message) }
+}
+if (-not $ok) { Write-Output "ERR no mirror"; exit 1 }
+& wsl --import Ubuntu $dst $tar --version 2
+if ($LASTEXITCODE -ne 0) { Write-Output ("IMPORT_FAIL " + $LASTEXITCODE); exit 1 }
+Remove-Item -Force $tar -ErrorAction SilentlyContinue
+Write-Output "IMPORTED"
+`, { timeoutMs: 35 * 60_000 });
+  if (!r.ok || !/IMPORTED/.test(r.stdout)) {
+    return { ok: false, error: r.stderr || r.stdout || "rootfs-import failed" };
+  }
+  return { ok: true, method: "rootfs-import" };
 }
 
 async function waitForDistroReady(distro, emit, deadlineMs = DEFAULT_TIMEOUTS.wslBoot) {
