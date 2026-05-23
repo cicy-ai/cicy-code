@@ -1127,6 +1127,7 @@ function SkillDetailTabs({ data, skill, setSendText, sendToAgent, copy, copied }
           {tab === 'updates' && (
             <SkillUpdatesPanel
               skill={skill}
+              manifest={data?.manifest || null}
               versions={versions}
               loading={versionsLoading}
               lang={i18n.language || 'en'}
@@ -1145,8 +1146,10 @@ function SkillDetailTabs({ data, skill, setSendText, sendToAgent, copy, copied }
 
 // SkillUpdatesPanel renders the version history fetched from the registry.
 // Highlights the currently installed version and the latest available.
-function SkillUpdatesPanel({ skill, versions, loading, lang, t }: {
+// Each row links to the matching GitHub release page.
+function SkillUpdatesPanel({ skill, manifest, versions, loading, lang, t }: {
   skill: MarketSkill;
+  manifest: SkillManifest | null;
   versions: Array<{ version: string; published_at?: string; size?: number }> | null;
   loading: boolean;
   lang: string;
@@ -1164,18 +1167,15 @@ function SkillUpdatesPanel({ skill, versions, loading, lang, t }: {
   if (!versions || versions.length === 0) {
     return <div className="text-xs text-zinc-500">{t('marketplaceNoUpdates', { defaultValue: 'No version history available.' })}</div>;
   }
+  const repo = manifest?.publish?.source?.repository;
   return (
     <div className="space-y-2" data-id="skill-updates-panel">
       {versions.map((v) => {
         const isInstalled = skill.installed_version === v.version;
         const isLatest = skill.version === v.version;
-        return (
-          <div
-            key={v.version + (v.published_at || '')}
-            className={`rounded-md border px-3 py-2 ${
-              isLatest ? 'border-blue-500/40 bg-blue-500/5' : 'border-white/[0.06] bg-black/20'
-            }`}
-          >
+        const releaseUrl = repo ? `https://github.com/${repo}/releases/tag/${skill.name}-v${v.version}` : null;
+        const Inner = (
+          <>
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <span className={`text-[12px] font-mono font-medium ${isLatest ? 'text-blue-300' : 'text-zinc-200'}`}>
@@ -1196,8 +1196,30 @@ function SkillUpdatesPanel({ skill, versions, loading, lang, t }: {
               <div className="text-[10px] text-zinc-500 flex items-center gap-2">
                 {v.size && <span>{formatBytes(v.size)}</span>}
                 {v.published_at && <span>{formatDate(v.published_at, lang)}</span>}
+                {releaseUrl && <ExternalLink className="w-3 h-3 opacity-50 group-hover:opacity-100" />}
               </div>
             </div>
+          </>
+        );
+        const baseClass = `block rounded-md border px-3 py-2 transition-colors ${
+          isLatest ? 'border-blue-500/40 bg-blue-500/5' : 'border-white/[0.06] bg-black/20'
+        }`;
+        if (releaseUrl) {
+          return (
+            <a
+              key={v.version + (v.published_at || '')}
+              href={releaseUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`group ${baseClass} hover:border-blue-500/50 hover:bg-blue-500/10`}
+            >
+              {Inner}
+            </a>
+          );
+        }
+        return (
+          <div key={v.version + (v.published_at || '')} className={baseClass}>
+            {Inner}
           </div>
         );
       })}
