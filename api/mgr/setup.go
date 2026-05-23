@@ -171,8 +171,40 @@ func nodeInstallCmd() string {
 	if runtime.GOOS == "darwin" {
 		return "brew install node"
 	}
-	prefix := sudoPrefix()
-	return "curl -fsSL https://deb.nodesource.com/setup_22.x | " + prefix + "bash - && " + prefix + "apt-get install -y nodejs"
+	// Install Node 24 from prebuilt binary tarball under $HOME/.local — no
+	// apt-add-repository, no sudo for the node bits themselves, no
+	// nodesource dependency. Mirror order is auto-picked: probe npmmirror
+	// (CN) first; if reachable, prefer it; else fall back to nodejs.org.
+	// PATH wiring lands in $HOME/.local/bin which baseTools already export.
+	return `set -e
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64) NARCH=x64 ;;
+  aarch64|arm64) NARCH=arm64 ;;
+  *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
+esac
+INDEX_URL=""
+for url in \
+    "https://npmmirror.com/mirrors/node/index.json" \
+    "https://nodejs.org/dist/index.json"; do
+  if curl -fsI --max-time 5 "$url" >/dev/null 2>&1; then INDEX_URL="$url"; break; fi
+done
+[ -n "$INDEX_URL" ] || { echo "no reachable node index" >&2; exit 1; }
+NODE_VER=$(curl -fsSL --max-time 15 "$INDEX_URL" | grep -m1 -oE '"v24\.[0-9]+\.[0-9]+"' | head -1 | tr -d '"')
+[ -n "$NODE_VER" ] || NODE_VER="v24.0.0"
+BASE=$(dirname "$INDEX_URL")
+TARBALL="$BASE/${NODE_VER}/node-${NODE_VER}-linux-${NARCH}.tar.xz"
+echo "  → fetching $TARBALL"
+mkdir -p "$HOME/.local" "$HOME/.local/bin"
+TMP=$(mktemp -t node.XXXXXX.tar.xz)
+curl -fsSL --max-time 300 "$TARBALL" -o "$TMP"
+tar -xJf "$TMP" -C "$HOME/.local"
+rm -f "$TMP"
+ln -sfn "$HOME/.local/node-${NODE_VER}-linux-${NARCH}" "$HOME/.local/node"
+ln -sf "$HOME/.local/node/bin/node" "$HOME/.local/bin/node"
+ln -sf "$HOME/.local/node/bin/npm" "$HOME/.local/bin/npm"
+ln -sf "$HOME/.local/node/bin/npx" "$HOME/.local/bin/npx"
+echo "  → installed $($HOME/.local/bin/node --version)"`
 }
 
 func codeServerInstallCmd() string {

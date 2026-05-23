@@ -2982,7 +2982,10 @@ func isAgentInputReady(agentType, out string) bool {
 	case "openclaw":
 		return isOpenClawInputReady(out)
 	case "kiro-cli", "kiro":
-		return strings.Contains(out, "ask a question or describe a task")
+		// Require both: status bar ("Kiro · auto") and prompt placeholder.
+		// The placeholder alone shows up briefly during boot before kiro is
+		// truly ready to accept input.
+		return strings.Contains(out, "Kiro ·") && strings.Contains(out, "ask a question or describe a task")
 	default:
 		return false
 	}
@@ -4757,28 +4760,56 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 	summaryPath := filepath.Join(summaryDir, "current.summary.md")
 	rawPath := filepath.Join(summaryDir, "current.raw.md")
 	usedPath := ""
-	if data, err := os.ReadFile(summaryPath); err == nil && len(strings.TrimSpace(string(data))) > 0 {
-		usedPath = summaryPath
-	} else {
-		// summary.md missing — try generating with --ai
-		short := shortPaneID(srcID)
-		log.Printf("[fork] %s no summary.md yet, running agent-summary --ai", short)
-		genCmd := exec.Command("agent-summary", short, "--ai")
-		genOut, genErr := genCmd.CombinedOutput()
-		if genErr != nil {
-			log.Printf("[fork] agent-summary --ai failed: %v out=%s", genErr, strings.TrimSpace(string(genOut)))
+	short := shortPaneID(srcID)
+
+	// Step 1: generate summary (synchronous — must complete before creating agent).
+	// Reuse existing raw.md if fresh (< 5 minutes).
+	const summaryFreshness = 5 * time.Minute
+	if info, err := os.Stat(rawPath); err == nil && info.Size() > 0 {
+		if time.Since(info.ModTime()) < summaryFreshness {
+			usedPath = rawPath
+			log.Printf("[fork] %s reusing fresh raw.md (age=%s)", short, time.Since(info.ModTime()).Round(time.Second))
 		}
+	}
+	if usedPath == "" {
+		_ = os.MkdirAll(summaryDir, 0755)
+		log.Printf("[fork] %s generating raw text dump", short)
+		start := time.Now()
+		genCmd := exec.Command("agent-summary", short, "--text")
+		out, genErr := genCmd.Output()
+		if genErr != nil {
+			log.Printf("[fork] agent-summary --text failed: %v", genErr)
+		} else {
+			content := []byte(fmt.Sprintf("# Raw Conversation\n\n- Generated: %s\n\n---\n\n%s\n",
+				time.Now().Format(time.RFC3339), string(out)))
+			if err := os.WriteFile(rawPath, content, 0644); err != nil {
+				log.Printf("[fork] write raw.md failed: %v", err)
+			} else {
+				usedPath = rawPath
+				log.Printf("[fork] %s raw.md written (%d bytes, %s)", short, len(content), time.Since(start).Round(time.Millisecond))
+			}
+		}
+	}
+	if usedPath == "" {
+		// fallback to summary.md if it exists
 		if data, err := os.ReadFile(summaryPath); err == nil && len(strings.TrimSpace(string(data))) > 0 {
 			usedPath = summaryPath
-		} else if _, err := os.Stat(rawPath); err == nil {
-			usedPath = rawPath
 		}
 	}
 	log.Printf("[fork] src=%s usedPath=%s", srcID, usedPath)
 
+	// Step 2: create the fork pane
 	title := strings.TrimSpace(req.Title)
 	if title == "" {
-		title = "Fork of " + shortPaneID(srcID)
+		srcTitle := strings.TrimSpace(srcRole.String) // reuse srcRole field temp — use a real title field
+		// srcRole is role, not title. Load title separately.
+		var titleVal sql.NullString
+		if err := store.QueryRow("SELECT COALESCE(title,'') FROM agent_config WHERE pane_id=?", srcID).Scan(&titleVal); err == nil && titleVal.String != "" {
+			srcTitle = titleVal.String
+		} else {
+			srcTitle = shortPaneID(srcID)
+		}
+		title = "Fork of " + srcTitle
 	}
 	token := loadAPIToken()
 
@@ -4815,29 +4846,40 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 	// agent to read the source's handoff document. Block until done so the
 	// frontend can keep the loading state until the prompt actually lands.
 	promptSent := false
-	if usedPath != "" && newPaneID != "" {
-		prompt := fmt.Sprintf("Please read %s and summary", usedPath)
+	if newPaneID != "" {
+		// Wait for new agent to be ready (typically faster than summary gen)
+		ready := false
 		for i := 0; i < 240; i++ { // up to 2 minutes
 			time.Sleep(500 * time.Millisecond)
 			out, captureErr := runTmux("capture-pane", "-t", newPaneID, "-p")
 			if captureErr != nil {
 				continue
 			}
-			if !isAgentInputReady(srcAgentType.String, out) {
-				continue
+			if isAgentInputReady(srcAgentType.String, out) {
+				ready = true
+				break
 			}
-			// Give the agent a beat after detecting ready
-			time.Sleep(1500 * time.Millisecond)
-			if err := sendTextToPane(newPaneID, prompt, true); err != nil {
-				log.Printf("[fork] %s send prompt failed: %v", newPaneID, err)
-			} else {
-				log.Printf("[fork] %s prompt sent: %s", newPaneID, prompt)
-				promptSent = true
-			}
-			break
 		}
-		if !promptSent {
+		if !ready {
 			log.Printf("[fork] %s timeout waiting for agent ready", newPaneID)
+		} else {
+			// Give the agent a beat after detecting ready
+			time.Sleep(3 * time.Second)
+
+			if usedPath == "" {
+				log.Printf("[fork] %s no summary available — sending generic prompt", newPaneID)
+				if err := sendTextToPane(newPaneID, "Hello, this is a fork. Please continue the work from the source agent.", true); err == nil {
+					promptSent = true
+				}
+			} else {
+				prompt := fmt.Sprintf("Please read %s and summary", usedPath)
+				if err := sendTextToPane(newPaneID, prompt, true); err != nil {
+					log.Printf("[fork] %s send prompt failed: %v", newPaneID, err)
+				} else {
+					log.Printf("[fork] %s prompt sent: %s", newPaneID, prompt)
+					promptSent = true
+				}
+			}
 		}
 	}
 
