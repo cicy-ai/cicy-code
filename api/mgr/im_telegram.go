@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -914,14 +915,22 @@ func (t *telegramTransport) handleCallback(cb *tgCallbackQuery) {
 		if len(parts) > 1 {
 			fromPage, _ = strconv.Atoi(parts[1])
 		}
+		log.Printf("[im] ag_summary pane=%s chat=%s", paneID, chatID)
 		telegramEditMessage(t.token, chatID, msgID, tgT(lang, "summaryRunning"), nil)
+		token := t.token
 		go func() {
 			out, err := runAgentSummary(paneID)
+			log.Printf("[im] ag_summary result pane=%s err=%v len=%d", paneID, err, len(out))
 			kb := [][]map[string]string{{{"text": tgT(lang, "btnBack"), "callback_data": fmt.Sprintf("ag_detail:%s:%d", paneID, fromPage)}}}
 			if err != nil {
-				telegramSendText(t.token, chatID, fmt.Sprintf("❌ summary failed: %v", err), kb)
+				telegramEditMessage(token, chatID, msgID, fmt.Sprintf("❌ summary failed: %v", err), kb)
 			} else {
-				telegramSendText(t.token, chatID, out, kb)
+				// Truncate to Telegram edit limit
+				runes := []rune(out)
+				if len(runes) > 4096 {
+					out = string(runes[:4093]) + "..."
+				}
+				telegramEditMessage(token, chatID, msgID, out, kb)
 			}
 		}()
 	case strings.HasPrefix(cb.Data, "ag_compact:"):
@@ -1114,16 +1123,26 @@ func telegramApplyModel(token, chatID string, msgID int64, providerKey, model, p
 
 // runAgentSummary runs agent-summary for the given paneID and returns the output.
 func runAgentSummary(paneID string) (string, error) {
-	cmd := exec.Command("agent-summary", shortPaneID(paneID))
+	short := shortPaneID(paneID)
+	// Generate AI summary (writes to .cicy/history/summary/)
+	cmd := exec.Command("agent-summary", short, "--ai")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
 	}
-	s := strings.TrimSpace(string(out))
-	if s == "" {
-		s = "(no output)"
+	// Read the generated summary file
+	home, _ := os.UserHomeDir()
+	summaryFile := filepath.Join(home, "cicy-ai", "workers", short, ".cicy", "history", "summary", "current.summary.md")
+	if data, err := os.ReadFile(summaryFile); err == nil {
+		if s := strings.TrimSpace(string(data)); s != "" {
+			return s, nil
+		}
 	}
-	return s, nil
+	// Fallback to stdout output
+	if s := strings.TrimSpace(string(out)); s != "" {
+		return s, nil
+	}
+	return "(no summary generated)", nil
 }
 
 // telegramSendText sends a new message (not edit) with optional inline keyboard.

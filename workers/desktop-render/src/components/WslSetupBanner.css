@@ -1,0 +1,73 @@
+.wsl-banner {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--warn);
+  border-left-width: 3px;
+  border-radius: var(--r-md);
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  animation: banner-in var(--dur-base) var(--ease);
+}
+
+.wsl-banner__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.wsl-banner__icon {
+  width: 36px; height: 36px;
+  display: grid; place-items: center;
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-radius: var(--r-sm);
+  flex-shrink: 0;
+}
+
+.wsl-banner__text { flex: 1; min-width: 0; }
+.wsl-banner__title  { font-size: var(--t-md); font-weight: 600; color: var(--fg); }
+.wsl-banner__subtitle { font-size: var(--t-xs); color: var(--fg-2); margin-top: 2px; }
+
+.wsl-banner__cmd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  background: var(--bg);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-3);
+}
+.wsl-banner__cmd code {
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  color: var(--fg);
+  user-select: text;
+}
+
+.wsl-banner__link {
+  font-size: var(--t-xs);
+  color: var(--fg-3);
+  align-self: flex-start;
+}
+.wsl-banner__link:hover { color: var(--brand); }
+
+.wsl-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.wsl-banner__hint {
+  font-size: var(--t-xs);
+  color: var(--fg-3);
+}
+.wsl-banner__error {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--danger);
+  font-size: var(--t-xs);
+  word-break: break-word;
+}

@@ -20,5 +20,8 @@
   "bindMemberPlaceholder": "Lier un membre de l'équipe…",
   "createBindShortLabel": "Créer et lier un nouveau collaborateur",
   "confirmUnbind": "Délier <strong>{{name}}</strong> ?",
-  "emptyState": "Liez un membre pour commencer"
+  "emptyState": "Liez un membre pour commencer",
+  "fork": "Fork",
+  "toastForkStarted": "Fork en cours...",
+  "toastForkFailed": "Échec du fork"
 }

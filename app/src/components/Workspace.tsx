@@ -1416,7 +1416,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           className="absolute inset-0"
           style={{ display: cliContentTab === 'todo' ? 'block' : 'none' }}
         >
-          <TodoPanel paneId={activeCliPaneId} active={cliContentOpen && cliContentTab === 'todo'} />
+          <TodoPanel paneId={activeCliPaneId} active={cliContentOpen && cliContentTab === 'todo'} isMaster={activeCliPaneId === paneId} />
         </div>
         <div
           data-id="cli-content-memory-host"

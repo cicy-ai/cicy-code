@@ -22,6 +22,7 @@ type Todo struct {
 	ID        string    `yaml:"id" json:"id"`
 	Title     string    `yaml:"title" json:"title"`
 	Status    string    `yaml:"status" json:"status"`
+	CreatorID string    `yaml:"creator_id,omitempty" json:"creator_id,omitempty"`
 	CreatedAt time.Time `yaml:"created_at" json:"created_at"`
 	UpdatedAt time.Time `yaml:"updated_at" json:"updated_at"`
 }
@@ -171,7 +172,7 @@ func resolvePaneWorkspaceForTodo(w http.ResponseWriter, paneID string) (string, 
 	return ws, true
 }
 
-// GET /api/todo/list?pane_id=&status=&q=
+// GET /api/todo/list?pane_id=&status=&q=&all_agents=true
 func handleTodoList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		httpErr(w, 405, "method not allowed")
@@ -179,19 +180,76 @@ func handleTodoList(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	paneID := resolveTodoPane(r, q.Get("pane_id"))
+	status := strings.ToLower(strings.TrimSpace(q.Get("status")))
+	kw := strings.ToLower(strings.TrimSpace(q.Get("q")))
+	allAgents := strings.ToLower(strings.TrimSpace(q.Get("all_agents"))) == "true"
+
+	todoMu.Lock()
+	defer todoMu.Unlock()
+
+	// all_agents: collect from all known workspaces under the master pane.
+	if allAgents {
+		masterWs, ok := resolvePaneWorkspaceForTodo(w, paneID)
+		if !ok {
+			return
+		}
+		// Gather todos from master workspace + all child worker dirs.
+		type TodoWithPane struct {
+			Todo
+			PaneID string `json:"pane_id,omitempty"`
+		}
+		var combined []TodoWithPane
+		masterTodos, _ := loadTodos(masterWs)
+		for _, t := range masterTodos {
+			combined = append(combined, TodoWithPane{Todo: t, PaneID: paneID})
+		}
+		// child workspaces are symlinks in <masterWs>/workers/
+		workersDir := filepath.Join(masterWs, "workers")
+		if entries, err := os.ReadDir(workersDir); err == nil {
+			for _, e := range entries {
+				childWs, err := filepath.EvalSymlinks(filepath.Join(workersDir, e.Name()))
+				if err != nil {
+					childWs = filepath.Join(workersDir, e.Name())
+				}
+				childTodos, _ := loadTodos(childWs)
+				for _, t := range childTodos {
+					combined = append(combined, TodoWithPane{Todo: t, PaneID: e.Name()})
+				}
+			}
+		}
+		// filter
+		out := combined[:0]
+		for _, t := range combined {
+			if status != "" && status != "all" && t.Status != status {
+				continue
+			}
+			if kw != "" && !strings.Contains(strings.ToLower(t.Title), kw) {
+				continue
+			}
+			out = append(out, t)
+		}
+		// sort
+		sort.SliceStable(out, func(i, j int) bool {
+			ri := map[string]int{"doing": 0, "todo": 1, "done": 2, "dropped": 3}
+			riv, rjv := ri[out[i].Status], ri[out[j].Status]
+			if riv != rjv {
+				return riv < rjv
+			}
+			return out[i].UpdatedAt.After(out[j].UpdatedAt)
+		})
+		J(w, M{"todos": out})
+		return
+	}
+
 	ws, ok := resolvePaneWorkspaceForTodo(w, paneID)
 	if !ok {
 		return
 	}
-	todoMu.Lock()
-	defer todoMu.Unlock()
 	all, err := loadTodos(ws)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
 	}
-	status := strings.ToLower(strings.TrimSpace(q.Get("status")))
-	kw := strings.ToLower(strings.TrimSpace(q.Get("q")))
 	out := make([]Todo, 0, len(all))
 	for _, t := range all {
 		if status != "" && status != "all" && t.Status != status {
@@ -239,8 +297,9 @@ func handleTodoAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		PaneID string `json:"pane_id"`
-		Title  string `json:"title"`
+		PaneID    string `json:"pane_id"`
+		Title     string `json:"title"`
+		CreatorID string `json:"creator_id"`
 	}
 	if err := readBody(r, &req); err != nil {
 		httpErr(w, 400, "invalid json")
@@ -267,6 +326,7 @@ func handleTodoAdd(w http.ResponseWriter, r *http.Request) {
 		ID:        newTodoID(),
 		Title:     req.Title,
 		Status:    "todo",
+		CreatorID: strings.TrimSpace(req.CreatorID),
 		CreatedAt: now,
 		UpdatedAt: now,
 	}

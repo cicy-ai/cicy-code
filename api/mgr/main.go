@@ -69,7 +69,6 @@ Subcommands:
 Options:
   --help, -h              Show this help
   --version, -v           Show version
-  --desktop               (removed; use cicy-desktop launcher instead)
   --dev                   Development mode
   --preview               Serve app/dist from disk (run 'npm run build' to refresh)
   --hot                   Proxy the UI to the vite dev server on :8022 (HMR)
@@ -86,8 +85,6 @@ Options:
 	  CS_PORT       code-server port (default: 8002)
 	  SQLITE_PATH   SQLite database file (default: %s)`, defaultSQLitePath())
 			os.Exit(0)
-		case arg == "--desktop":
-			desktopMode = true
 		case arg == "--dev":
 			devMode = true
 		case arg == "--preview":
@@ -172,6 +169,7 @@ Options:
 	http.HandleFunc("/api/tmux/panes", authM(handlePanes))
 	http.HandleFunc("/api/tmux/panes/", authM(handlePaneByID))
 	http.HandleFunc("/api/tmux/create", authM(handleCreatePane))
+	http.HandleFunc("/api/tmux/fork", authM(handleForkPane))
 	http.HandleFunc("/api/tmux/restart_all", authM(handleRestartAll))
 
 	// Tmux
@@ -344,10 +342,6 @@ Options:
 	http.HandleFunc("/api/pair", apiOnlyUnsupported(handlePair))
 	http.HandleFunc("/api/tmux/pair", apiOnlyUnsupported(handlePair))
 
-	// Desktop
-	http.HandleFunc("/api/desktop/status", apiOnlyUnsupported(handleDesktopStatus))
-	http.HandleFunc("/api/desktop/proxy/", apiOnlyUnsupported(handleDesktopProxy))
-
 	// Code-server proxy
 	http.HandleFunc("/api/openclaw/gateway", wa(handleOpenClawGatewayInfo))
 	http.HandleFunc("/api/openclaw/provider/", handleOpenClawProviderProxy)
@@ -479,13 +473,6 @@ Options:
 		log.Println("[shutdown] stopping...")
 		os.Exit(0)
 	}()
-
-	if desktopMode {
-		go func() {
-			time.Sleep(2 * time.Second)
-			ensureDesktop()
-		}()
-	}
 
 	log.Fatal(http.ListenAndServe(bind+":"+port, globalCORS(withGzip(http.DefaultServeMux))))
 }

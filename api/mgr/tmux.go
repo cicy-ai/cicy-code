@@ -2981,6 +2981,8 @@ func isAgentInputReady(agentType, out string) bool {
 		return isOpenCodeInputReady(out)
 	case "openclaw":
 		return isOpenClawInputReady(out)
+	case "kiro-cli", "kiro":
+		return strings.Contains(out, "ask a question or describe a task")
 	default:
 		return false
 	}
@@ -4715,4 +4717,135 @@ func readMihomoGlobalPassword() string {
 		return strings.Trim(v, "\"' ")
 	}
 	return ""
+}
+
+// handleForkPane creates a new pane that inherits the source pane's agent_type,
+// use_custom_gateway, default_model, and proxy/allow settings; once the new
+// agent is ready, the source pane's current.raw.md content is sent as a prompt.
+//
+// POST /api/tmux/fork { source_pane_id: "w-10001", title?: "..." }
+func handleForkPane(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SourcePaneID string `json:"source_pane_id"`
+		Title        string `json:"title"`
+		MasterPaneID string `json:"master_pane_id"`
+	}
+	readBody(r, &req)
+	srcID := normPaneID(strings.TrimSpace(req.SourcePaneID))
+	if srcID == "" {
+		httpErr(w, 400, "source_pane_id required")
+		return
+	}
+	masterID := normPaneID(strings.TrimSpace(req.MasterPaneID))
+
+	// Load source pane config
+	var srcAgentType, srcDefaultModel, srcRole, srcWorkspace sql.NullString
+	var srcAllowAll, srcReplyChinese, srcUseCustomGateway, srcProxyEnable sql.NullBool
+	err := store.QueryRow(`SELECT agent_type, default_model, role, workspace,
+		COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0),
+		COALESCE(use_custom_gateway,0), COALESCE(proxy_enable,0)
+		FROM agent_config WHERE pane_id=?`, srcID).
+		Scan(&srcAgentType, &srcDefaultModel, &srcRole, &srcWorkspace,
+			&srcAllowAll, &srcReplyChinese, &srcUseCustomGateway, &srcProxyEnable)
+	if err != nil {
+		httpErr(w, 404, "source pane not found")
+		return
+	}
+
+	// Read source summary (prefer summary.md > raw.md)
+	summaryDir := filepath.Join(srcWorkspace.String, ".cicy", "history", "summary")
+	summaryPath := filepath.Join(summaryDir, "current.summary.md")
+	rawPath := filepath.Join(summaryDir, "current.raw.md")
+	usedPath := ""
+	if data, err := os.ReadFile(summaryPath); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+		usedPath = summaryPath
+	} else {
+		// summary.md missing — try generating with --ai
+		short := shortPaneID(srcID)
+		log.Printf("[fork] %s no summary.md yet, running agent-summary --ai", short)
+		genCmd := exec.Command("agent-summary", short, "--ai")
+		genOut, genErr := genCmd.CombinedOutput()
+		if genErr != nil {
+			log.Printf("[fork] agent-summary --ai failed: %v out=%s", genErr, strings.TrimSpace(string(genOut)))
+		}
+		if data, err := os.ReadFile(summaryPath); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+			usedPath = summaryPath
+		} else if _, err := os.Stat(rawPath); err == nil {
+			usedPath = rawPath
+		}
+	}
+	log.Printf("[fork] src=%s usedPath=%s", srcID, usedPath)
+
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		title = "Fork of " + shortPaneID(srcID)
+	}
+	token := loadAPIToken()
+
+	// Create the fork pane (binds to master if provided so it shows in master's TeamPanel)
+	result, err := doCreatePane(
+		title,
+		srcRole.String,
+		srcDefaultModel.String,
+		srcAgentType.String,
+		"", // init_script
+		srcAllowAll.Bool,
+		srcReplyChinese.Bool,
+		srcUseCustomGateway.Bool,
+		srcProxyEnable.Bool,
+		nil,            // proxy settings
+		nil,            // win name
+		masterID,       // master pane id
+		srcAgentType.String, // master agent type (use source agent type as hint)
+		false,          // inherit_guidance
+		token,
+	)
+	if err != nil {
+		httpErr(w, 500, "create fork failed: "+err.Error())
+		return
+	}
+
+	newPaneID, _ := result["pane_id"].(string)
+	if newPaneID == "" {
+		newPaneID, _ = result["session"].(string)
+	}
+	newPaneID = normPaneID(newPaneID)
+
+	// Synchronously wait for new agent ready, then send a prompt asking the
+	// agent to read the source's handoff document. Block until done so the
+	// frontend can keep the loading state until the prompt actually lands.
+	promptSent := false
+	if usedPath != "" && newPaneID != "" {
+		prompt := fmt.Sprintf("Please read %s and summary", usedPath)
+		for i := 0; i < 240; i++ { // up to 2 minutes
+			time.Sleep(500 * time.Millisecond)
+			out, captureErr := runTmux("capture-pane", "-t", newPaneID, "-p")
+			if captureErr != nil {
+				continue
+			}
+			if !isAgentInputReady(srcAgentType.String, out) {
+				continue
+			}
+			// Give the agent a beat after detecting ready
+			time.Sleep(1500 * time.Millisecond)
+			if err := sendTextToPane(newPaneID, prompt, true); err != nil {
+				log.Printf("[fork] %s send prompt failed: %v", newPaneID, err)
+			} else {
+				log.Printf("[fork] %s prompt sent: %s", newPaneID, prompt)
+				promptSent = true
+			}
+			break
+		}
+		if !promptSent {
+			log.Printf("[fork] %s timeout waiting for agent ready", newPaneID)
+		}
+	}
+
+	J(w, M{
+		"success":        true,
+		"pane_id":        newPaneID,
+		"source_pane_id": srcID,
+		"prompt_sent":    promptSent,
+		"prompt_path":    usedPath,
+	})
 }

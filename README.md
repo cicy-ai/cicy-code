@@ -107,14 +107,6 @@ npx cicy-code
 
 npm 包在安装阶段按平台下载预编译二进制；启动器 `npm/bin/cicy-code.js`。
 
-### 4. 桌面模式
-
-```bash
-cicy-code --desktop
-```
-
-依赖全局 `electron` 和 `cicy-desktop`，由 npm 启动器与后端 `--desktop` 模式联动。
-
 ## 常用命令
 
 ```bash

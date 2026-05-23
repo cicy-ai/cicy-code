@@ -1,0 +1,90 @@
+/* Design tokens — single source of truth for spacing, type, colors,
+   radius, shadows, motion. Components only reference these vars. */
+
+:root {
+  /* ── spacing ── 4-pt scale */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --sp-8: 64px;
+
+  /* ── type ── 3-step scale */
+  --t-xs: 11px;       /* meta, hints */
+  --t-sm: 13px;       /* body */
+  --t-md: 15px;       /* card titles, primary */
+  --t-lg: 18px;       /* section headers */
+  --t-xl: 22px;       /* page title */
+  --lh-tight: 1.25;
+  --lh-base:  1.5;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Inter", system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+
+  /* ── colors ── single brand, semantic states */
+  --bg:           #0d1117;
+  --bg-elev-1:    #141a23;
+  --bg-elev-2:    #1b222d;
+
+  --hairline:     rgba(255,255,255,0.06);
+  --hairline-2:   rgba(255,255,255,0.10);
+
+  --fg:           #e7e9ee;
+  --fg-2:         #a0a6b3;
+  --fg-3:         #6b727f;
+
+  --brand:        #5b8cff;     /* primary action */
+  --brand-fg:     #ffffff;
+  --brand-soft:   rgba(91,140,255,0.12);
+  --brand-soft-2: rgba(91,140,255,0.20);
+
+  --success:      #4ade80;
+  --warn:         #fbbf24;
+  --danger:       #f87171;
+
+  /* ── aliases (BackendCard etc.) ── */
+  --ok:           #4ade80;
+  --err:          #f87171;
+  --accent-cloud: #f59e0b;
+  --hairline-strong: #2a2f3a;
+
+  --success-soft: rgba(74,222,128,0.12);
+  --warn-soft:    rgba(251,191,36,0.12);
+  --danger-soft:  rgba(248,113,113,0.12);
+
+  /* ── radius ── 2-step */
+  --r-sm: 6px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-pill: 999px;
+
+  /* ── shadows ── */
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.20);
+  --shadow-2: 0 4px 12px rgba(0,0,0,0.25);
+  --shadow-3: 0 12px 32px rgba(0,0,0,0.40);
+
+  /* ── motion ── */
+  --ease:     cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+
+  /* ── focus ── */
+  --focus-ring: 0 0 0 2px var(--brand);
+}
+
+/* light mode override (optional, low priority) */
+@media (prefers-color-scheme: light) {
+  :root.auto-theme {
+    --bg:        #f7f8fa;
+    --bg-elev-1: #ffffff;
+    --bg-elev-2: #ffffff;
+    --hairline:  rgba(0,0,0,0.06);
+    --hairline-2:rgba(0,0,0,0.10);
+    --fg:        #15181f;
+    --fg-2:      #4a5160;
+    --fg-3:      #8a909d;
+  }
+}

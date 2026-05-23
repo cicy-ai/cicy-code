@@ -20,5 +20,8 @@
   "bindMemberPlaceholder": "Bind a team member…",
   "createBindShortLabel": "Create and bind a new worker",
   "confirmUnbind": "Unbind <strong>{{name}}</strong>?",
-  "emptyState": "Bind a team member to get started"
+  "emptyState": "Bind a team member to get started",
+  "fork": "Fork",
+  "toastForkStarted": "Forking agent...",
+  "toastForkFailed": "Fork failed"
 }

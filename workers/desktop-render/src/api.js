@@ -76,6 +76,22 @@ const browserApi = {
       lsSave(list);
       return true;
     },
+    async update(input) {
+      if (!input || !input.id || input.id === "local") return null;
+      const list = lsLoad();
+      const i = list.findIndex(b => b.id === input.id);
+      if (i < 0) return null;
+      const prev = list[i];
+      list[i] = {
+        ...prev,
+        name: input.name !== undefined ? (String(input.name).trim() || prev.name) : prev.name,
+        url:  input.url  !== undefined ? String(input.url).trim() : prev.url,
+        token: input.token === "" || input.token === null ? undefined : (input.token !== undefined ? input.token : prev.token),
+        updatedAt: new Date().toISOString(),
+      };
+      lsSave(list);
+      return list[i];
+    },
     async probe(input) {
       return probeUrl(input.url, input.token);
     },
