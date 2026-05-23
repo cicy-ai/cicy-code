@@ -113,5 +113,22 @@
   "networkSending": "Sending...",
   "networkSendClientId": "Send to Agent",
   "networkCopyPrompt": "Copy connect command",
-  "networkPromptCopied": "Connect command copied"
+  "networkPromptCopied": "Connect command copied",
+  "tabTodo": "Todo",
+  "marketplaceSidebarIdentifier": "Identifier",
+  "marketplaceSidebarVersion": "Version",
+  "marketplaceSidebarInstalled": "Installed",
+  "marketplaceSidebarLastPublished": "Last published",
+  "marketplaceSidebarPublisher": "Publisher",
+  "marketplaceSidebarSize": "Size",
+  "marketplaceSidebarLicense": "License",
+  "marketplaceSidebarTags": "Tags",
+  "marketplaceSidebarPermissions": "Permissions",
+  "marketplaceSidebarRuntime": "Runtime",
+  "marketplaceSidebarAgents": "Compatible agents",
+  "marketplaceSidebarResources": "Resources",
+  "marketplaceSidebarHomepage": "Homepage",
+  "marketplaceSidebarRepository": "Repository",
+  "marketplaceSidebarRelease": "Release",
+  "marketplaceSidebarCopyId": "Copy identifier"
 }

@@ -7,6 +7,7 @@ import {
   Search, Loader2, CheckCircle2, AlertTriangle, RefreshCw, X, Send,
   Globe, Activity, Server, Plug, Mail, FileText, Code, Terminal, Key, Shield, Package, Cloud,
   Copy, Check, XCircle, Languages,
+  ExternalLink, Tag, User, Calendar, HardDrive, Hash, FileCode, BookOpen, ShieldCheck,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import apiService from '../../services/api';
@@ -59,6 +60,35 @@ interface SkillDetailPayload {
   skill_md?: string;
   help_md?: string;
   tools_md?: string;
+  manifest?: SkillManifest | null;
+}
+
+// SkillManifest is the raw v2 manifest as published to the registry. Used by
+// the detail sidebar to render publisher / version / size / homepage / etc.
+// All fields optional — the UI degrades gracefully when missing.
+interface SkillManifest {
+  name?: string;
+  version?: string;
+  title?: string;
+  description?: string;
+  category?: string;
+  tags?: string[];
+  author?: string;
+  homepage?: string;
+  license?: string;
+  runtime?: { node?: string; python?: string };
+  system_requirements?: string[];
+  npm_dependencies?: boolean;
+  entry?: string;
+  permissions?: string[];
+  compatible_agents?: string[];
+  publish?: {
+    published_at?: string;
+    sha256?: string;
+    size?: number;
+    download_url?: string;
+    source?: { type?: string; repository?: string; tag?: string };
+  };
 }
 
 type Filter = 'all' | 'installed' | 'available';
@@ -468,7 +498,7 @@ function InlineStatus({ skill }: { skill: MarketSkill }) {
   );
 }
 
-type Tab = 'help' | 'tools';
+type Tab = 'help' | 'tools'; // legacy, no longer used in UI but kept for type compat
 
 function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpdate, onOpenProxyManager, onOpenProxySshManager, onOpenFrpServerManager, onOpenWebClients }: {
   name: string;
@@ -920,46 +950,43 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="px-5 pt-2 border-b border-white/[0.06] shrink-0 flex items-center gap-1" data-id="skill-detail-tabs">
-          {(['help','tools'] as Tab[]).map(tk => (
-            <button
-              key={tk}
-              data-id={`skill-detail-tab-${tk}`}
-              onClick={() => setTab(tk)}
-              className={cn(
-                'px-3 py-1.5 text-[12px] rounded-t border-b-2 transition-colors -mb-[1px]',
-                tab === tk ? 'text-zinc-100 border-indigo-400' : 'text-zinc-500 border-transparent hover:text-zinc-300'
-              )}
-            >
-              {tk === 'help' ? t('marketplaceTabHelp') : t('marketplaceTabTools')}
-            </button>
-          ))}
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4" data-id="skill-detail-body">
+        {/* Body — markdown content + metadata sidebar (VS Code marketplace style).
+            On wider containers (>768px) the sidebar sits to the right; on
+            narrower portals it stacks below the doc. */}
+        <div className="flex-1 overflow-y-auto" data-id="skill-detail-body">
           {loading ? (
-            <div data-id="skill-detail-body-skeleton" className="space-y-2.5 py-1 animate-pulse">
-              {[100, 88, 94, 72, 85, 60].map((w, i) => (
-                <div key={i} className="h-3 rounded-md bg-white/[0.06]" style={{ width: `${w}%` }} />
-              ))}
-              <div className="h-5" />
-              <div className="h-3 w-1/3 rounded-md bg-white/[0.08]" />
-              {[82, 68, 90, 55].map((w, i) => (
-                <div key={`b${i}`} className="h-3 rounded-md bg-white/[0.06]" style={{ width: `${w}%` }} />
-              ))}
-              <div className="h-5" />
-              {[76, 88].map((w, i) => (
-                <div key={`c${i}`} className="h-3 rounded-md bg-white/[0.06]" style={{ width: `${w}%` }} />
-              ))}
+            <div className="px-5 py-4">
+              <div data-id="skill-detail-body-skeleton" className="space-y-2.5 py-1 animate-pulse">
+                {[100, 88, 94, 72, 85, 60].map((w, i) => (
+                  <div key={i} className="h-3 rounded-md bg-white/[0.06]" style={{ width: `${w}%` }} />
+                ))}
+                <div className="h-5" />
+                <div className="h-3 w-1/3 rounded-md bg-white/[0.08]" />
+                {[82, 68, 90, 55].map((w, i) => (
+                  <div key={`b${i}`} className="h-3 rounded-md bg-white/[0.06]" style={{ width: `${w}%` }} />
+                ))}
+                <div className="h-5" />
+                {[76, 88].map((w, i) => (
+                  <div key={`c${i}`} className="h-3 rounded-md bg-white/[0.06]" style={{ width: `${w}%` }} />
+                ))}
+              </div>
             </div>
           ) : !skill ? (
-            <div data-id="skill-detail-no-data" className="text-xs text-zinc-500">{t('marketplaceNoData')}</div>
-          ) : tab === 'help' ? (
-            <MarkdownPane content={data?.help_md || data?.skill_md || ''} onTry={sendToAgent} setSendText={setSendText} skillName={skill.name} clickable={false} />
+            <div className="px-5 py-4 text-xs text-zinc-500" data-id="skill-detail-no-data">{t('marketplaceNoData')}</div>
           ) : (
-            <MarkdownPane content={data?.tools_md || ''} onTry={sendToAgent} setSendText={setSendText} skillName={skill.name} clickable={true} />
+            <div className="@container">
+              <div data-id="skill-detail-body-grid" className="grid gap-0 @[768px]:grid-cols-[1fr_240px]">
+                <div className="px-5 py-4 min-w-0 order-2 @[768px]:order-1">
+                  <MarkdownPane content={data?.skill_md || data?.help_md || data?.tools_md || ''} onTry={sendToAgent} setSendText={setSendText} skillName={skill.name} clickable={true} />
+                </div>
+                <SkillDetailSidebar
+                  skill={skill}
+                  manifest={data?.manifest || null}
+                  copy={copy}
+                  copied={copied}
+                />
+              </div>
+            </div>
           )}
         </div>
 
@@ -1018,33 +1045,9 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
 }
 
 const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, skillName, clickable }: { content: string; onTry: (cmd: string) => void; setSendText: (s: string) => void; skillName: string; clickable: boolean }) {
-  const { t, i18n } = useTranslation('workspace');
-  const lang = (i18n.language || 'en').toLowerCase();
-  const showTranslate = !lang.startsWith('en') && !!content && content.trim().length > 0;
-  const [translated, setTranslated] = useState<string>('');
-  const [translating, setTranslating] = useState(false);
-  const [translateError, setTranslateError] = useState('');
-  const [showOriginal, setShowOriginal] = useState(true);
+  const { t } = useTranslation('workspace');
 
-  const doTranslate = async () => {
-    if (translated) {
-      setShowOriginal(prev => !prev);
-      return;
-    }
-    setTranslating(true);
-    setTranslateError('');
-    try {
-      const { data } = await apiService.translateText(content, lang);
-      setTranslated(String(data?.text || '').trim());
-      setShowOriginal(false);
-    } catch (e: any) {
-      setTranslateError(e?.message || 'translate failed');
-    } finally {
-      setTranslating(false);
-    }
-  };
-
-  const shown = showOriginal || !translated ? content : translated;
+  const shown = content;
 
   // Memoize the components map so react-markdown doesn't re-parse from scratch
   // on every parent state change (send button presses, etc.). t/setSendText/onTry
@@ -1133,25 +1136,235 @@ const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, s
 
   return (
     <div data-id="skill-md-pane" className="relative">
-      {showTranslate && (
-        <div data-id="skill-md-translate-bar" className="flex items-center justify-end mb-2 gap-2">
-          {translateError && <span className="text-[10px] text-red-400">{translateError}</span>}
-          <button
-            data-id="skill-detail-translate"
-            onClick={doTranslate}
-            disabled={translating}
-            className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border border-white/[0.08] text-zinc-400 hover:text-zinc-100 hover:border-white/[0.18] disabled:opacity-50 transition-colors"
-          >
-            {translating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Languages className="w-3 h-3" />}
-            {translating
-              ? t('marketplaceTranslating')
-              : translated
-                ? (showOriginal ? t('marketplaceShowTranslation') : t('marketplaceShowOriginal'))
-                : t('marketplaceTranslate')}
-          </button>
-        </div>
-      )}
       <div data-id="skill-md-content" className="prose-skill text-[13px] leading-relaxed text-zinc-300">{rendered}</div>
     </div>
   );
 });
+
+
+// SkillDetailSidebar renders a compact metadata column to the right of the
+// markdown body, modeled after the VS Code marketplace detail page.
+//
+// Sections (each only rendered when data is present):
+//   • Identifier        — name + version
+//   • Last published    — formatted publish.published_at
+//   • Publisher         — manifest.author
+//   • Size              — formatted publish.size
+//   • License           — manifest.license
+//   • Categories / Tags — manifest.category + tags
+//   • Permissions       — manifest.permissions
+//   • Compatible agents — manifest.compatible_agents
+//   • Runtime           — manifest.runtime.{node,python}
+//   • Resources         — homepage / repository / release
+//
+// All sections degrade gracefully: when manifest is null (e.g. user-authored
+// skills not in the registry, or registry fetch failed), the sidebar shows
+// only the basics derived from the MarketSkill summary (name + version).
+function SkillDetailSidebar({
+  skill,
+  manifest,
+  copy,
+  copied,
+}: {
+  skill: MarketSkill;
+  manifest: SkillManifest | null;
+  copy: (s: string) => void;
+  copied: string;
+}) {
+  const { t, i18n } = useTranslation();
+  const m = manifest || {};
+  const pub = m.publish || {};
+  const lang = i18n.language || 'en';
+
+  const published = pub.published_at ? formatDate(pub.published_at, lang) : '';
+  const size = typeof pub.size === 'number' ? formatBytes(pub.size) : '';
+  const repoUrl = pub.source?.repository ? `https://github.com/${pub.source.repository}` : '';
+  const releaseUrl = pub.source?.repository && pub.source?.tag
+    ? `https://github.com/${pub.source.repository}/releases/tag/${pub.source.tag}`
+    : '';
+
+  return (
+    <aside
+      data-id="skill-detail-sidebar"
+      className="order-1 @[768px]:order-2 px-5 py-4 @[768px]:py-4 @[768px]:pl-3 @[768px]:pr-5 @[768px]:border-l border-b @[768px]:border-b-0 border-white/[0.06] space-y-3.5 text-[11px]"
+    >
+      {/* Identifier */}
+      <SidebarSection title={t('marketplaceSidebarIdentifier', { defaultValue: 'Identifier' })} icon={<Hash className="w-3 h-3" />}>
+        <button
+          onClick={() => copy(skill.name)}
+          className="group inline-flex items-center gap-1.5 max-w-full text-left font-mono text-[11px] text-zinc-300 hover:text-zinc-100 transition-colors"
+          title={t('marketplaceSidebarCopyId', { defaultValue: 'Copy identifier' })}
+        >
+          <span className="truncate">{skill.name}</span>
+          {copied === skill.name
+            ? <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+            : <Copy className="w-3 h-3 opacity-50 group-hover:opacity-100 shrink-0" />}
+        </button>
+      </SidebarSection>
+
+      {/* Version */}
+      <SidebarSection title={t('marketplaceSidebarVersion', { defaultValue: 'Version' })} icon={<Tag className="w-3 h-3" />}>
+        <div className="text-zinc-300">v{skill.version}</div>
+        {skill.installed_version && skill.installed_version !== 'user' && skill.installed_version !== skill.version && (
+          <div className="text-[10px] text-zinc-500 mt-0.5">
+            {t('marketplaceSidebarInstalled', { defaultValue: 'Installed' })}: v{skill.installed_version}
+          </div>
+        )}
+      </SidebarSection>
+
+      {/* Published */}
+      {published && (
+        <SidebarSection title={t('marketplaceSidebarLastPublished', { defaultValue: 'Last published' })} icon={<Calendar className="w-3 h-3" />}>
+          <div className="text-zinc-300">{published}</div>
+        </SidebarSection>
+      )}
+
+      {/* Publisher */}
+      {m.author && (
+        <SidebarSection title={t('marketplaceSidebarPublisher', { defaultValue: 'Publisher' })} icon={<User className="w-3 h-3" />}>
+          <div className="text-zinc-300">{m.author}</div>
+        </SidebarSection>
+      )}
+
+      {/* Size */}
+      {size && (
+        <SidebarSection title={t('marketplaceSidebarSize', { defaultValue: 'Size' })} icon={<HardDrive className="w-3 h-3" />}>
+          <div className="text-zinc-300">{size}</div>
+        </SidebarSection>
+      )}
+
+      {/* License */}
+      {m.license && (
+        <SidebarSection title={t('marketplaceSidebarLicense', { defaultValue: 'License' })} icon={<FileCode className="w-3 h-3" />}>
+          <div className="text-zinc-300">{m.license}</div>
+        </SidebarSection>
+      )}
+
+      {/* Tags */}
+      {m.tags && m.tags.length > 0 && (
+        <SidebarSection title={t('marketplaceSidebarTags', { defaultValue: 'Tags' })} icon={<Tag className="w-3 h-3" />}>
+          <div className="flex flex-wrap gap-1">
+            {m.tags.map(tag => (
+              <span key={tag} className="px-1.5 py-0.5 rounded bg-white/[0.05] text-zinc-400 text-[10px]">
+                {tag}
+              </span>
+            ))}
+          </div>
+        </SidebarSection>
+      )}
+
+      {/* Permissions */}
+      {m.permissions && m.permissions.length > 0 && (
+        <SidebarSection title={t('marketplaceSidebarPermissions', { defaultValue: 'Permissions' })} icon={<ShieldCheck className="w-3 h-3" />}>
+          <div className="flex flex-wrap gap-1">
+            {m.permissions.map(p => (
+              <span key={p} className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300/90 text-[10px]">
+                {p}
+              </span>
+            ))}
+          </div>
+        </SidebarSection>
+      )}
+
+      {/* Runtime */}
+      {(m.runtime?.node || m.runtime?.python) && (
+        <SidebarSection title={t('marketplaceSidebarRuntime', { defaultValue: 'Runtime' })} icon={<Terminal className="w-3 h-3" />}>
+          {m.runtime?.node && <div className="text-zinc-400 text-[10px]">node {m.runtime.node}</div>}
+          {m.runtime?.python && <div className="text-zinc-400 text-[10px]">python {m.runtime.python}</div>}
+        </SidebarSection>
+      )}
+
+      {/* Compatible agents */}
+      {m.compatible_agents && m.compatible_agents.length > 0 && (
+        <SidebarSection title={t('marketplaceSidebarAgents', { defaultValue: 'Compatible agents' })} icon={<Code className="w-3 h-3" />}>
+          <div className="flex flex-wrap gap-1">
+            {m.compatible_agents.map(a => (
+              <span key={a} className="px-1.5 py-0.5 rounded bg-white/[0.05] text-zinc-400 text-[10px] font-mono">
+                {a === '*' ? 'any' : a}
+              </span>
+            ))}
+          </div>
+        </SidebarSection>
+      )}
+
+      {/* Resources */}
+      {(m.homepage || repoUrl || releaseUrl) && (
+        <SidebarSection title={t('marketplaceSidebarResources', { defaultValue: 'Resources' })} icon={<BookOpen className="w-3 h-3" />}>
+          <div className="space-y-1">
+            {m.homepage && (
+              <ResourceLink href={m.homepage} label={t('marketplaceSidebarHomepage', { defaultValue: 'Homepage' })} />
+            )}
+            {repoUrl && (
+              <ResourceLink href={repoUrl} label={t('marketplaceSidebarRepository', { defaultValue: 'Repository' })} />
+            )}
+            {releaseUrl && (
+              <ResourceLink href={releaseUrl} label={t('marketplaceSidebarRelease', { defaultValue: 'Release' })} />
+            )}
+          </div>
+        </SidebarSection>
+      )}
+
+      {/* SHA256 (collapsed below) */}
+      {pub.sha256 && (
+        <SidebarSection title="SHA-256" icon={<Hash className="w-3 h-3" />}>
+          <button
+            onClick={() => copy(pub.sha256!)}
+            className="group block max-w-full text-left font-mono text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors break-all leading-tight"
+            title="Copy SHA-256"
+          >
+            {pub.sha256.slice(0, 32)}…
+            {copied === pub.sha256
+              ? <Check className="w-3 h-3 text-emerald-400 inline ml-1" />
+              : <Copy className="w-2.5 h-2.5 inline ml-1 opacity-30 group-hover:opacity-80" />}
+          </button>
+        </SidebarSection>
+      )}
+    </aside>
+  );
+}
+
+function SidebarSection({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1" data-sidebar-section={title}>
+      <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-zinc-500">
+        {icon}
+        <span>{title}</span>
+      </div>
+      <div className="pl-4">{children}</div>
+    </div>
+  );
+}
+
+function ResourceLink({ href, label }: { href: string; label: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:underline transition-colors"
+    >
+      <ExternalLink className="w-3 h-3" />
+      <span>{label}</span>
+    </a>
+  );
+}
+
+// formatBytes returns "6.4 KB" / "1.2 MB" style strings.
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+// formatDate localizes an ISO date for sidebar display. Falls back to the
+// raw string on parse failure.
+function formatDate(iso: string, lang: string): string {
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString(lang, { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch {
+    return iso;
+  }
+}

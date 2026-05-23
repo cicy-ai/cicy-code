@@ -674,6 +674,48 @@ func readSkillDoc(skill *marketSkill, file, fileKey string) string {
 	return string(body)
 }
 
+// fetchRegistryManifest GET /v1/skills/<name> from the worker and returns
+// the raw manifest as a generic map (so we can pass through new fields the
+// worker adds without recompiling). Used by the detail handler to surface
+// publisher / homepage / license / size / etc. in the marketplace UI.
+//
+// Returns nil on any error — callers must treat manifest as optional.
+func fetchRegistryManifest(name, lang string) map[string]any {
+	if name == "" {
+		return nil
+	}
+	client := &http.Client{Timeout: 6 * time.Second}
+	u := strings.TrimRight(marketRegistryURL(), "/") + "/v1/skills/" + url.PathEscape(name)
+	if lang != "" {
+		u += "?lang=" + url.QueryEscape(lang)
+	}
+	resp, err := client.Get(u)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Manifest map[string]any `json:"manifest"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return nil
+	}
+	if !env.OK || env.Data.Manifest == nil {
+		return nil
+	}
+	return env.Data.Manifest
+}
+
 // installAdvice describes the v2 self-service install path. Marketplace
 // install/uninstall buttons return this so the agent / user can run the
 // command themselves. Phase 4 will replace this with an agent-driven flow.
@@ -710,11 +752,20 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, 405, "method not allowed")
 			return
 		}
+		// Fetch the full manifest from the worker so the UI can render
+		// publisher / homepage / license / size / runtime / permissions
+		// etc. in the detail sidebar. This is best-effort: registry-side
+		// failures degrade gracefully (UI just won't show the sidebar).
+		var manifest map[string]any
+		if skill.Source != "user" {
+			manifest = fetchRegistryManifest(skill.Name, lang)
+		}
 		J(w, M{
 			"skill":    skill,
 			"skill_md": readSkillDoc(skill, "SKILL.md", "skill_md"),
 			"help_md":  readSkillDoc(skill, filepath.Join("references", "help.md"), "help_md"),
 			"tools_md": readSkillDoc(skill, filepath.Join("references", "tools.md"), "tools_md"),
+			"manifest": manifest,
 		})
 		return
 	}

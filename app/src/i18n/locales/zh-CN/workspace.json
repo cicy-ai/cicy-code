@@ -113,5 +113,22 @@
   "networkSending": "发送中...",
   "networkSendClientId": "发送给 Agent",
   "networkCopyPrompt": "复制连接指令",
-  "networkPromptCopied": "已复制连接指令"
+  "networkPromptCopied": "已复制连接指令",
+  "tabTodo": "待办",
+  "marketplaceSidebarIdentifier": "标识符",
+  "marketplaceSidebarVersion": "版本",
+  "marketplaceSidebarInstalled": "已安装",
+  "marketplaceSidebarLastPublished": "最近发布",
+  "marketplaceSidebarPublisher": "发布者",
+  "marketplaceSidebarSize": "大小",
+  "marketplaceSidebarLicense": "许可证",
+  "marketplaceSidebarTags": "标签",
+  "marketplaceSidebarPermissions": "权限",
+  "marketplaceSidebarRuntime": "运行时",
+  "marketplaceSidebarAgents": "兼容 Agent",
+  "marketplaceSidebarResources": "资源",
+  "marketplaceSidebarHomepage": "主页",
+  "marketplaceSidebarRepository": "仓库",
+  "marketplaceSidebarRelease": "发布版本",
+  "marketplaceSidebarCopyId": "复制标识符"
 }

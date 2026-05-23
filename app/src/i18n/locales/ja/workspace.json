@@ -112,5 +112,22 @@
   "networkSending": "送信中…",
   "networkSendClientId": "エージェントへ送信",
   "networkCopyPrompt": "接続コマンドをコピー",
-  "networkPromptCopied": "接続コマンドをコピーしました"
+  "networkPromptCopied": "接続コマンドをコピーしました",
+  "tabTodo": "タスク",
+  "marketplaceSidebarIdentifier": "識別子",
+  "marketplaceSidebarVersion": "バージョン",
+  "marketplaceSidebarInstalled": "インストール済み",
+  "marketplaceSidebarLastPublished": "最終公開日",
+  "marketplaceSidebarPublisher": "公開者",
+  "marketplaceSidebarSize": "サイズ",
+  "marketplaceSidebarLicense": "ライセンス",
+  "marketplaceSidebarTags": "タグ",
+  "marketplaceSidebarPermissions": "権限",
+  "marketplaceSidebarRuntime": "ランタイム",
+  "marketplaceSidebarAgents": "対応エージェント",
+  "marketplaceSidebarResources": "リソース",
+  "marketplaceSidebarHomepage": "ホームページ",
+  "marketplaceSidebarRepository": "リポジトリ",
+  "marketplaceSidebarRelease": "リリース",
+  "marketplaceSidebarCopyId": "識別子をコピー"
 }
