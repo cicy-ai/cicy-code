@@ -412,7 +412,7 @@ function SkillRow({ skill, selected, onClick }: {
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
       className={cn(
-        'group h-[68px] px-3 py-2 border-b border-[var(--vsc-border)]/40 transition-colors cursor-pointer focus:outline-none flex items-center relative',
+        'group min-h-[68px] px-3 py-2 border-b border-[var(--vsc-border)]/40 transition-colors cursor-pointer focus:outline-none flex items-start relative',
         selected
           ? 'bg-indigo-500/[0.08] before:absolute before:left-0 before:top-1 before:bottom-1 before:w-[2px] before:rounded-r before:bg-indigo-400'
           : 'hover:bg-white/[0.03] focus:bg-white/[0.05]'
@@ -440,7 +440,7 @@ function SkillRow({ skill, selected, onClick }: {
                 : `v${skill.version}`}
             </span>
           </div>
-          <div data-id="skill-row-desc" className="text-[11px] text-zinc-500 line-clamp-2 leading-snug min-h-[2.4em]">{skill.description}</div>
+          <div data-id="skill-row-desc" className="text-[11px] text-zinc-500 leading-snug">{skill.description}</div>
         </div>
       </div>
     </div>
