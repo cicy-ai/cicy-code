@@ -194,6 +194,32 @@ export default function App() {
       return;
     }
     setSidecar((s) => ({ ...s, state: "installing", progress: { phase: "init", message: "Preparing…" }, error: null }));
+
+    // Win32: drive the install entirely from the renderer using
+    // electronRPC.exec_shell. This bypasses the main-process sidecar:install
+    // handler in shipped versions of cicy-desktop, so we can fix wsl install
+    // bugs by deploying the CF Worker — no .exe rebuild required.
+    const isWin = (window.cicy?.platform === "win32") || (typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent));
+    if (isWin) {
+      try {
+        const { windowsInstall, canRunRendererInstall } = await import("./wslInstaller.js");
+        if (canRunRendererInstall()) {
+          const r = await windowsInstall({ onProgress: (ev) => setSidecar((s) => ({ ...s, progress: ev })) });
+          if (r?.ok) {
+            setSidecar({ state: "uptodate", info: { installedVersion: r.version }, progress: null, error: null });
+            pushToast(t("toast.installed", { version: r.version }), "success");
+            await loadHealth(backends);
+            return;
+          }
+          throw new Error("install returned not ok");
+        }
+        // Fall through to ipc-based install if electronRPC missing
+      } catch (e) {
+        setSidecar((s) => ({ ...s, state: "error", error: e.message, progress: null }));
+        return;
+      }
+    }
+
     try {
       const r = await window.cicy.sidecar.install();
       if (r?.ok) {
