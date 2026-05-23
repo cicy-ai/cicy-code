@@ -61,58 +61,24 @@ git status --short
 
 ## 标准流程
 
-### 1. SSH 到 Mac
+### 0. 删除旧测试用户（全新测试必做）
+
+彻底清除上一轮的残留数据：
 
 ```bash
-ssh ton-mac
+ssh mac 'sudo sysadminctl -deleteUser cicy-code 2>/dev/null || true; sudo rm -rf /Users/cicy-code; echo "done"'
 ```
 
-后面也可以继续使用 one-shot SSH 命令，不一定要保持交互 shell。
-
-### 2. 停掉原用户已有 `code-server`
+验证：
 
 ```bash
-ssh ton-mac 'sudo pkill -f code-server || true'
+ssh mac 'id cicy-code 2>&1; ls /Users/cicy-code 2>&1 || echo "目录已删除"'
 ```
 
-可选验证：
+### 1. 清理旧进程
 
 ```bash
-ssh ton-mac 'pgrep -af code-server || true'
-```
-
-预期：没有输出。
-
-### 3. 停掉原用户已有 `tmux`
-
-```bash
-ssh ton-mac 'tmux kill-server || true'
-```
-
-可选验证：
-
-```bash
-ssh ton-mac 'tmux ls || true'
-```
-
-### 4. 停掉占用 `8008` 的原 `cicy-code`
-
-先看谁占着：
-
-```bash
-ssh ton-mac 'lsof -nP -iTCP:8008 -sTCP:LISTEN || true'
-```
-
-直接杀掉占用：
-
-```bash
-ssh ton-mac 'for pid in $(lsof -ti tcp:8008 2>/dev/null); do kill "$pid" || true; done'
-```
-
-可选验证：
-
-```bash
-ssh ton-mac 'lsof -nP -iTCP:8008 -sTCP:LISTEN || true'
+ssh mac 'sudo pkill -f cicy-code 2>/dev/null || true; sudo pkill -f code-server 2>/dev/null || true; sudo pkill -f gotty 2>/dev/null || true; tmux kill-server 2>/dev/null || true; sleep 1; echo "done"'
 ```
 
 ### 5. 创建测试用户 `cicy-code`
@@ -142,52 +108,36 @@ ssh ton-mac 'sudo mkdir -p /Users/cicy-code && sudo chown -R cicy-code:staff /Us
 ssh ton-mac 'id cicy-code && dscl . -read /Users/cicy-code NFSHomeDirectory'
 ```
 
-### 6. 在当前机器交叉编译 macOS 版本
-
-在当前机器直接编译 macOS 产物：
+### 6. Build 并 scp 最新 binary 到 Mac
 
 ```bash
 cd ~/projects/cicy-code
-./build.sh build darwin
+rm -rf api/mgr/ui && cp -r app/dist api/mgr/ui
+cd api && CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -a -buildvcs=false -o cicy-code-darwin ./mgr/
+scp api/cicy-code-darwin mac:/tmp/cicy-code
+ssh mac 'chmod +x /tmp/cicy-code && echo "版本: $(/tmp/cicy-code --version 2>&1 | head -1)"'
+```
+
+### 7. 把 binary 拷给测试用户
+
+binary 已在 `/tmp/cicy-code`，直接移过去：
+
+```bash
+ssh mac 'sudo mkdir -p /Users/cicy-code/bin && sudo mv /tmp/cicy-code /Users/cicy-code/bin/cicy-code && sudo chown cicy-code:staff /Users/cicy-code/bin/cicy-code && sudo chmod +x /Users/cicy-code/bin/cicy-code'
 ```
 
 可选验证：
 
 ```bash
-ls -l ~/projects/cicy-code/api/cicy-code
-file ~/projects/cicy-code/api/cicy-code
-```
-
-### 7. 把 build 后的 binary 拷给测试用户
-
-这里只传单个 binary，不同步整份仓库：
-
-```bash
-ssh ton-mac 'sudo mkdir -p /Users/cicy-code/bin && sudo chown -R cicy-code:staff /Users/cicy-code/bin'
-scp ~/projects/cicy-code/api/cicy-code ton-mac:/tmp/cicy-code
-ssh ton-mac 'sudo mv /tmp/cicy-code /Users/cicy-code/bin/cicy-code && sudo chown cicy-code:staff /Users/cicy-code/bin/cicy-code && sudo chmod +x /Users/cicy-code/bin/cicy-code'
-```
-
-可选验证：
-
-```bash
-ssh ton-mac 'ls -l /Users/cicy-code/bin/cicy-code'
+ssh mac 'ls -l /Users/cicy-code/bin/cicy-code'
 ```
 
 ### 8. 用测试用户启动 `cicy-code`
 
 这里不要再用 `python3 dev.py`，直接跑 build 出来的 binary：
 
-如果要直接以前台方式启动：
-
 ```bash
-ssh ton-mac 'sudo -u cicy-code -H zsh -lc "/Users/cicy-code/bin/cicy-code --public"'
-```
-
-如果只想后台启动，推荐：
-
-```bash
-ssh ton-mac 'sudo -u cicy-code -H sh -lc "mkdir -p /Users/cicy-code/.dev-logs && /Users/cicy-code/bin/cicy-code --public > /Users/cicy-code/.dev-logs/remote.log 2>&1 < /dev/null &"'
+ssh mac 'sudo -u cicy-code -H sh -c "mkdir -p /Users/cicy-code/logs; /Users/cicy-code/bin/cicy-code --public --agents=claude,codex,opencode > /Users/cicy-code/logs/cicy-code.log 2>&1 < /dev/null &"'
 ```
 
 ### 9. 验证进程和端口
@@ -236,15 +186,18 @@ ssh ton-mac 'sudo rm -rf /Users/cicy-code'
 ## 最短命令模板
 
 ```bash
-cd ~/projects/cicy-code
-ssh ton-mac 'sudo pkill -f code-server || true'
-ssh ton-mac 'tmux kill-server || true'
-ssh ton-mac 'pids="$(lsof -ti tcp:8008 2>/dev/null || true)"; if [ -n "$pids" ]; then kill $pids || true; fi'
-ssh ton-mac 'id cicy-code >/dev/null 2>&1 || sudo sysadminctl -addUser cicy-code -fullName "CiCy Code" -password "cicy-code-test" -home /Users/cicy-code'
-ssh ton-mac 'sudo mkdir -p /Users/cicy-code /Users/ton/projects && sudo chown -R cicy-code:staff /Users/cicy-code'
-./build.sh build darwin
-rsync -a --delete ~/projects/cicy-code/ ton-mac:/Users/ton/projects/cicy-code/
-ssh ton-mac 'sudo rsync -a --delete /Users/ton/projects/cicy-code/ /Users/cicy-code/cicy-code/'
-ssh ton-mac 'sudo chown -R cicy-code:staff /Users/cicy-code/cicy-code'
-ssh ton-mac 'sudo -u cicy-code -H zsh -lc "cd /Users/cicy-code/cicy-code && ./api/cicy-code --public --dev"'
+# 0. 删除旧用户
+ssh mac 'sudo sysadminctl -deleteUser cicy-code 2>/dev/null || true; sudo rm -rf /Users/cicy-code'
+# 1-4. 清理旧进程
+ssh mac 'sudo pkill -f cicy-code 2>/dev/null || true; sudo pkill -f code-server 2>/dev/null || true; sudo pkill -f gotty 2>/dev/null || true; tmux kill-server 2>/dev/null || true; sleep 1'
+# 5. 创建用户
+ssh mac 'sudo sysadminctl -addUser cicy-code -fullName "CiCy Code" -password "cicy-code-test" -home /Users/cicy-code; sudo mkdir -p /Users/cicy-code && sudo chown -R cicy-code:staff /Users/cicy-code'
+# 6. 下载最新 binary（ghproxy 加速，自动识别架构）
+# 6. build + scp
+cd ~/projects/cicy-code && SKIP_NPM=1 ./build.sh all 2>&1 | tail -1
+scp dist/cicy-code-darwin-amd64 mac:/tmp/cicy-code && ssh mac 'chmod +x /tmp/cicy-code'
+# 7. 安装给测试用户
+ssh mac 'sudo mkdir -p /Users/cicy-code/bin && sudo mv /tmp/cicy-code /Users/cicy-code/bin/cicy-code && sudo chown cicy-code:staff /Users/cicy-code/bin/cicy-code'
+# 8. 启动
+ssh mac 'sudo -u cicy-code -H sh -c "mkdir -p /Users/cicy-code/logs; /Users/cicy-code/bin/cicy-code --public --agents=claude,codex,opencode > /Users/cicy-code/logs/cicy-code.log 2>&1 < /dev/null &"'; sleep 4; ssh mac 'curl -s http://127.0.0.1:8008/ | head -1'
 ```

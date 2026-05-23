@@ -1,0 +1,250 @@
+/* ── Square BackendCard ─────────────────────────────────────────────────
+   Aspect 1:1, brand-accented top stripe, large name, prominent CTA.
+*/
+.bcard {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background: var(--bg-elev-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  cursor: default;
+  transition: transform var(--dur-base) var(--ease),
+              box-shadow var(--dur-base) var(--ease),
+              border-color var(--dur-base) var(--ease);
+}
+.bcard:hover {
+  transform: translateY(-2px);
+  border-color: var(--hairline-strong, var(--hairline));
+  box-shadow: 0 8px 24px -8px rgba(0,0,0,0.18), 0 1px 0 rgba(255,255,255,0.04) inset;
+}
+
+/* top accent stripe — colored bar that runs across the top edge */
+.bcard__accent {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--brand);
+  opacity: 0.85;
+}
+
+/* Glowing background circle for online cards (subtle) */
+.bcard--online::before {
+  content: "";
+  position: absolute;
+  bottom: -40%;
+  right: -20%;
+  width: 140%;
+  height: 100%;
+  background: radial-gradient(circle at center, var(--brand-soft) 0%, transparent 60%);
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+/* ── top row: status pill + menu ── */
+.bcard__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  z-index: 1;
+}
+.bcard__status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-pill);
+  color: var(--fg-2);
+}
+.bcard__status-pill svg { color: var(--fg-3); }
+.bcard__dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--fg-3);
+  flex-shrink: 0;
+}
+.bcard__dot--up      { background: var(--ok); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 30%, transparent); }
+.bcard__dot--warn    { background: var(--warn); }
+.bcard__dot--down    { background: var(--err); }
+.bcard__dot--unknown { background: var(--fg-3); }
+
+.bcard__menu-trigger { color: var(--fg-3); }
+.bcard__menu-trigger:hover { color: var(--fg); }
+
+/* ── body: name + host + meta ── */
+.bcard__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding-top: var(--sp-3);
+  padding-bottom: var(--sp-3);
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+.bcard__name {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--fg);
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bcard__host {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bcard__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.bcard__ver {
+  font-family: var(--font-mono);
+  color: var(--fg-2);
+  background: var(--bg);
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--hairline);
+}
+.bcard__sep { opacity: 0.4; }
+.bcard__badge {
+  display: inline-flex; align-items: center;
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* ── primary CTA button ── */
+.bcard__cta {
+  position: relative; z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 38px;
+  border: none;
+  border-radius: var(--r-md);
+  background: var(--brand);
+  color: white;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  cursor: pointer;
+  transition: transform 0.1s var(--ease), background var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease);
+  box-shadow: 0 2px 6px -1px color-mix(in srgb, var(--brand) 35%, transparent);
+}
+.bcard__cta:hover {
+  background: color-mix(in srgb, var(--brand) 90%, white);
+  box-shadow: 0 4px 10px -2px color-mix(in srgb, var(--brand) 50%, transparent);
+}
+.bcard__cta:active { transform: translateY(1px); }
+.bcard__cta:disabled {
+  background: var(--bg);
+  color: var(--fg-3);
+  cursor: not-allowed;
+  box-shadow: none;
+  border: 1px solid var(--hairline);
+}
+.bcard__cta--ghost {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--hairline);
+  box-shadow: none;
+}
+.bcard__cta--ghost:hover {
+  background: var(--bg-elev-2, var(--bg));
+  border-color: var(--brand);
+  color: var(--brand);
+}
+.bcard__cta-spinner {
+  width: 14px; height: 14px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: bcard-spin 0.8s linear infinite;
+}
+@keyframes bcard-spin { to { transform: rotate(360deg); } }
+
+/* ── progress overlay — replaces CTA ── */
+.bcard__progress {
+  position: relative; z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.bcard__progress-text {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+}
+.bcard__progress-pct { color: var(--brand); font-weight: 700; }
+.bcard__progress-bar {
+  height: 5px;
+  background: var(--bg);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+}
+.bcard__progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--brand), color-mix(in srgb, var(--brand) 60%, white));
+  transition: width 0.3s var(--ease);
+  border-radius: var(--r-pill);
+}
+.bcard__progress-bar.is-indeterminate .bcard__progress-fill {
+  animation: bcard-indeterminate 1.4s ease-in-out infinite;
+}
+@keyframes bcard-indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.bcard__progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+.bcard__cancel {
+  background: transparent;
+  border: none;
+  color: var(--fg-3);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+}
+.bcard__cancel:hover { color: var(--err); }
+
+/* ── kind variants ── */
+.bcard--local .bcard__accent { background: var(--brand); }
+.bcard--cloud .bcard__accent { background: var(--accent-cloud, #f59e0b); }
+.bcard--cloud .bcard__cta { background: var(--accent-cloud, #f59e0b); box-shadow: 0 2px 6px -1px color-mix(in srgb, var(--accent-cloud, #f59e0b) 35%, transparent); }
+.bcard--cloud .bcard__cta:hover { background: color-mix(in srgb, var(--accent-cloud, #f59e0b) 90%, white); }

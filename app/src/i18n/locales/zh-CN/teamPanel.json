@@ -20,5 +20,8 @@
   "bindMemberPlaceholder": "绑定团队成员…",
   "createBindShortLabel": "创建并绑定新员工",
   "confirmUnbind": "解绑 <strong>{{name}}</strong>？",
-  "emptyState": "先绑定一个团队成员开始"
+  "emptyState": "先绑定一个团队成员开始",
+  "fork": "分身",
+  "toastForkStarted": "正在 fork agent...",
+  "toastForkFailed": "Fork 失败"
 }

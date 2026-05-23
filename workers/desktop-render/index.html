@@ -2,54 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>CiCy Desktop</title>
 </head>
 <body>
-
-<header class="topbar">
-  <div class="brand"><span class="dot"></span> CiCy Desktop <span class="ver" id="topbar-version">v—</span></div>
-  <div class="spacer"></div>
-  <span class="env-pill" id="env-pill" title="Renderer mode">dev</span>
-  <button id="btn-refresh" title="Refresh all">↻ Refresh</button>
-</header>
-
-<main>
-  <div class="section-head">
-    <h2>Local Engine</h2>
-  </div>
-  <div id="local-cards"></div>
-
-  <div class="section-head">
-    <h2>Cloud Engines</h2>
-    <button class="btn-add" id="btn-toggle-add">+ Add cloud</button>
-  </div>
-  <div class="add-form" id="add-form">
-    <div class="grid">
-      <label>Name</label><input id="f-name" placeholder="e.g. Staging cloud" />
-      <label>URL</label><input id="f-url" placeholder="https://cicy.example.com:8008" />
-      <label>Token</label><input id="f-token" placeholder="(optional bearer)" />
-    </div>
-    <div class="footer">
-      <span class="status" id="f-status"></span>
-      <div class="btns">
-        <button class="cancel" id="f-cancel" type="button">Cancel</button>
-        <button id="f-submit" type="button">Probe &amp; Add</button>
-      </div>
-    </div>
-  </div>
-  <div id="cloud-cards"></div>
-
-  <div class="recent">
-    <div class="section-head">
-      <h2>Recent Windows</h2>
-    </div>
-    <div id="recent-list"></div>
-  </div>
-</main>
-
-<div class="toast" id="toast"></div>
-
-<script type="module" src="/src/main.js"></script>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
 </body>
 </html>

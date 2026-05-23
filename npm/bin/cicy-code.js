@@ -6,12 +6,8 @@ const https = require('https');
 
 const pkg = require('../package.json');
 const binPath = path.join(__dirname, 'cicy-code');
-const os = require('os');
-const CICY_ROOT_DIR = path.join(os.homedir(), 'cicy-ai');
-const CICY_GLOBAL_JSON_PATH = path.join(CICY_ROOT_DIR, 'global.json');
 
 const cn = process.argv.includes('--cn') || process.env.CN_MIRROR === '1';
-const desktopMode = process.argv.includes('--desktop');
 
 if (process.argv.includes('--cn')) {
   process.env.CN_MIRROR = '1';
@@ -90,131 +86,11 @@ async function main() {
     process.exit(1);
   }
 
-  // Desktop mode: start API server in background, then launch Electron
-  if (desktopMode) {
-    return launchDesktop();
-  }
-
   const child = spawn(binPath, process.argv.slice(2), {
     stdio: 'inherit',
     env: process.env
   });
   child.on('exit', (code) => process.exit(code || 0));
-}
-
-function getToken() {
-  try {
-    const data = JSON.parse(fs.readFileSync(CICY_GLOBAL_JSON_PATH, 'utf8'));
-    return data.api_token || '';
-  } catch { return ''; }
-}
-
-function waitForServer(port, timeout) {
-  const http = require('http');
-  const start = Date.now();
-  return new Promise((resolve, reject) => {
-    const check = () => {
-      if (Date.now() - start > timeout) return reject(new Error('Server start timeout'));
-      const req = http.get(`http://127.0.0.1:${port}/api/health`, (res) => {
-        resolve();
-      });
-      req.on('error', () => setTimeout(check, 500));
-      req.setTimeout(1000, () => { req.destroy(); setTimeout(check, 500); });
-    };
-    check();
-  });
-}
-
-async function launchDesktop() {
-  const port = process.env.PORT || 8008;
-  const desktopPort = 18101;
-
-  // 0. Kill existing electron/cicy-code and free ports
-  try { execSync(`pkill -f 'electron' 2>/dev/null || true`, { shell: true }); } catch {}
-  try { execSync(`lsof -ti:${desktopPort} | xargs kill -9 2>/dev/null || true`, { shell: true }); } catch {}
-  try { execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null || true`, { shell: true }); } catch {}
-  await new Promise(resolve => setTimeout(resolve, 500));
-
-  // 1. Start API server in background
-  const serverArgs = process.argv.slice(2).filter(a => a !== '--desktop');
-  const isWin = process.platform === 'win32';
-  const server = spawn(isWin ? binPath : 'nohup', isWin ? serverArgs : [binPath, ...serverArgs], {
-    stdio: 'ignore',
-    detached: true,
-    env: { ...process.env, CICY_NO_BROWSER: '1', TERM: process.env.TERM || 'xterm-256color' }
-  });
-  server.on('exit', (code, signal) => console.error(`  ⚠️  Server exited code=${code} signal=${signal}`));
-  server.unref();
-  console.log(`  🚀 Starting cicy-code server (PID: ${server.pid})...`);
-
-  // 2. Wait for server ready
-  try {
-    await waitForServer(port, 30000);
-  } catch {
-    console.error('  ❌ Server failed to start within 30s');
-    process.exit(1);
-  }
-  console.log(`  ✅ Server ready on port ${port}`);
-
-  // 3. Get token
-  const token = getToken();
-  const url = `http://127.0.0.1:${port}/?token=${token}`;
-
-  // 4. Launch Electron via global 'electron' binary (no signing needed)
-  //    cicy-desktop uses official Electron binary + our JS code
-  //    RPC/MCP server starts on desktopPort (18101)
-  let electronBinary = null;
-  try {
-    electronBinary = execSync('which electron 2>/dev/null', { encoding: 'utf8' }).trim();
-  } catch {}
-
-  if (!electronBinary) {
-    console.log('  ⚠️  Electron not found. Installing...');
-    try {
-      execSync('npm install -g electron', { stdio: 'inherit' });
-      electronBinary = execSync('which electron', { encoding: 'utf8' }).trim();
-    } catch {
-      console.error('  ❌ Failed to install Electron. Install manually: npm install -g electron');
-      console.log(`  📱 Fallback: open browser → ${url}`);
-      return;
-    }
-  }
-
-  // Find cicy-desktop package from the global install
-  let desktopDir = null;
-
-  // Check global 'cicy-desktop' package
-  try {
-    const cicyBin = execSync('which cicy 2>/dev/null', { encoding: 'utf8' }).trim();
-    desktopDir = path.resolve(path.dirname(cicyBin), '..', 'lib', 'node_modules', 'cicy-desktop');
-    if (!fs.existsSync(path.join(desktopDir, 'src', 'main.js'))) desktopDir = null;
-  } catch {}
-
-  if (!desktopDir) {
-    console.log('  ⚠️  cicy-desktop not found. Installing...');
-    try {
-      execSync('npm install -g cicy-desktop', { stdio: 'inherit' });
-      const cicyBin = execSync('which cicy', { encoding: 'utf8' }).trim();
-      desktopDir = path.resolve(path.dirname(cicyBin), '..', 'lib', 'node_modules', 'cicy-desktop');
-    } catch {
-      console.error('  ❌ Failed to install cicy-desktop. Install manually: npm install -g cicy-desktop');
-      console.log(`  📱 Fallback: open browser → ${url}`);
-      return;
-    }
-  }
-
-  console.log(`  🖥️  Opening desktop: ${url}`);
-  console.log(`  🔧 RPC/MCP server: http://127.0.0.1:${desktopPort}`);
-
-  const desktop = spawn(electronBinary, [desktopDir, `--url=${url}`, `--port=${desktopPort}`], {
-    stdio: 'inherit',
-    env: { ...process.env, PORT: String(desktopPort) }
-  });
-
-  desktop.on('exit', (code) => {
-    try { process.kill(server.pid); } catch {}
-    process.exit(code || 0);
-  });
 }
 
 main();

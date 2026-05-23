@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation, Trans } from 'react-i18next';
 import i18n from '../../i18n';
-import { Users, Plus, X, ExternalLink, MoreHorizontal, Trash2, RefreshCw, UserPlus } from 'lucide-react';
+import { Users, Plus, X, ExternalLink, MoreHorizontal, Trash2, RefreshCw, UserPlus, GitBranch } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
 import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
@@ -54,6 +55,7 @@ interface Props {
 
 export default function TeamPanel({ paneId, panes = [], bindings = [], statuses = {}, onOpenInCurrentPane, onLocatePane, openedPaneIds = [], activePaneId, onOpenSettingsPane, onRefreshPanes, onRefreshPoll }: Props) {
   const [creating, setCreating] = useState(false);
+  const [forkingId, setForkingId] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [dragOrder, setDragOrder] = useState<string[] | null>(null);
@@ -291,6 +293,8 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     onRemove,
     onDelete,
     onRestart,
+    onFork,
+    forking = false,
     onOpenSettings,
     canRestart = true,
     groupKey,
@@ -307,6 +311,8 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     onRemove?: () => void;
     onDelete?: () => void;
     onRestart?: () => void;
+    onFork?: () => void;
+    forking?: boolean;
     onOpenSettings?: () => void;
     canRestart?: boolean;
     groupKey?: string;
@@ -418,6 +424,27 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               <RefreshCw className="w-3.5 h-3.5 shrink-0" />
               <span data-id="team-panel-worker-menu-restart-label">{i18n.t('restart', { ns: 'teamPanel' })}</span>
             </button>
+            {onFork ? (
+              <button
+                type="button"
+                data-id="team-panel-worker-menu-fork"
+                disabled={forking}
+                onClick={() => {
+                  if (forking) return;
+                  onFork();
+                }}
+                className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
+                  forking ? 'cursor-not-allowed text-zinc-600' : 'cursor-pointer text-zinc-300 hover:bg-white/[0.06]'
+                }`}
+              >
+                {forking ? (
+                  <RefreshCw className="w-3.5 h-3.5 shrink-0 animate-spin" />
+                ) : (
+                  <GitBranch className="w-3.5 h-3.5 shrink-0" />
+                )}
+                <span data-id="team-panel-worker-menu-fork-label">{forking ? i18n.t('toastForkStarted', { ns: 'teamPanel' }) : i18n.t('fork', { ns: 'teamPanel' })}</span>
+              </button>
+            ) : null}
             {onDelete ? (
               <button
                 type="button"
@@ -456,6 +483,16 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
 
   return (
     <div className="h-full w-full min-w-0 flex flex-col overflow-hidden" data-id="team-panel-root">
+      {forkingId ? createPortal(
+        <div data-id="team-panel-fork-loading" className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border border-white/[0.08] bg-[#141416] px-8 py-6 shadow-2xl">
+            <RefreshCw className="w-8 h-8 text-blue-400 animate-spin" />
+            <span className="text-sm text-zinc-200">{i18n.t('toastForkStarted', { ns: 'teamPanel' })}</span>
+            <span className="text-xs text-zinc-500 font-mono">{forkingId}</span>
+          </div>
+        </div>,
+        document.body
+      ) : null}
       <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-center gap-2 flex-shrink-0" data-id="team-panel-toolbar">
         <div data-id="team-panel-bind-select">
         <Select
@@ -580,6 +617,22 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                     onRestart: () => restartPane(wid, getName(b)),
                     onOpenSettings: () => onOpenSettingsPane?.(wid),
                     canRestart: true,
+                    onFork: async () => {
+                      setForkingId(wid);
+                      try {
+                        const { data } = await apiService.forkPane({ source_pane_id: wid, master_pane_id: paneId });
+                        if (data?.pane_id) {
+                          await onRefreshPanes();
+                          onRefreshPoll();
+                        }
+                      } catch {
+                        window.dispatchEvent(new CustomEvent('show-toast', { detail: i18n.t('toastForkFailed', { ns: 'teamPanel' }) }));
+                      } finally {
+                        setForkingId(null);
+                        setOpenMenuId(null);
+                      }
+                    },
+                    forking: forkingId === wid,
                     onRemove: () => confirm(<Trans i18nKey="confirmUnbind" ns="teamPanel" values={{ name: getName(b) }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />, () => unbind(b)),
                     onDelete: () => deletePane(b, getName(b)),
                   });

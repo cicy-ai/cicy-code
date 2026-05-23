@@ -97,6 +97,7 @@ const api = {
   updatePane: (id: string, data: any) => http.patch(`/api/tmux/panes/${encodeURIComponent(id)}`, data),
   deletePane: (id: string) => http.delete(`/api/tmux/panes/${encodeURIComponent(id)}`),
   createPane: (data: any) => http.post('/api/tmux/create', data),
+  forkPane: (data: { source_pane_id: string; title?: string; master_pane_id?: string }) => http.post('/api/tmux/fork', data),
   restartPane: (id: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/restart`),
   capturePane: (id: string, lines = 100) => http.post('/api/tmux/capture_pane', { pane_id: id, lines }),
 
@@ -244,10 +245,10 @@ const api = {
   getChatClients: () => http.get('/api/chat/clients'),
   pingChatClient: (clientId: string) => http.post('/api/chat/ping-client', { client_id: clientId }),
 
-  listTodos: (paneId: string, params?: { status?: string; q?: string }) =>
-    http.get('/api/todo/list', { params: { pane_id: paneId, ...(params || {}) } }),
+  listTodos: (paneId: string, allAgents?: boolean, params?: { status?: string; q?: string }) =>
+    http.get('/api/todo/list', { params: { pane_id: paneId, all_agents: allAgents ? 'true' : undefined, ...(params || {}) } }),
   getTodoCounts: (paneId: string) => http.get('/api/todo/counts', { params: { pane_id: paneId } }),
-  addTodo: (paneId: string, title: string) => http.post('/api/todo/add', { pane_id: paneId, title }),
+  addTodo: (paneId: string, title: string, creatorId?: string) => http.post('/api/todo/add', { pane_id: paneId, title, creator_id: creatorId }),
   updateTodo: (paneId: string, id: string, patch: { status?: string; title?: string }) =>
     http.patch(`/api/todo/${encodeURIComponent(id)}`, { pane_id: paneId, ...patch }),
   deleteTodo: (paneId: string, id: string) =>
