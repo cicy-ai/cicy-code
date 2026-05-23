@@ -793,11 +793,21 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 		// drop registry cache so /api/skill-market re-fetch picks up
 		// latest installed version status.
 		invalidateMarketCache()
-		// re-compute status after install
+		// re-compute status after install — fetch fresh from merged catalog
+		// (cache was just cleared so this fetches new data from registry).
+		// Fall back to the pre-install skill object if lookup fails.
 		updated := findMarketSkill(name, lang)
 		if updated != nil {
 			computeMarketStatus(updated)
+			// Explicitly clear HasUpdate: after a successful install the
+			// installed_version equals the latest, so has_update must be false.
+			updated.HasUpdate = false
 			skill = updated
+		} else {
+			// cache miss — patch the snapshot we already have
+			skill.Status.Installed = true
+			skill.InstalledVersion = skill.Version
+			skill.HasUpdate = false
 		}
 		J(w, M{
 			"ok":          true,
@@ -848,7 +858,12 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 		updated := findMarketSkill(name, lang)
 		if updated != nil {
 			computeMarketStatus(updated)
+			updated.HasUpdate = false
 			skill = updated
+		} else {
+			skill.Status.Installed = true
+			skill.InstalledVersion = skill.Version
+			skill.HasUpdate = false
 		}
 		J(w, M{
 			"ok":      true,
