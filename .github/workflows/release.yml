@@ -80,15 +80,20 @@ jobs:
 
       # ── Docker images ─────────────────────────────────────────────────
       # Two registries:
-      #   ghcr.io/cicy-ai/...                (global users)
-      #   <ALIYUN_REGISTRY>/<NS>/...         (CN users, much faster)
+      #   ghcr.io/<owner>/...                       (global users)
+      #   docker.io/<DOCKERHUB_USERNAME>/...        (CN users — Aliyun
+      #                                              docker mirror points
+      #                                              at Docker Hub, so any
+      #                                              `docker pull` of an
+      #                                              official-style name
+      #                                              transparently goes
+      #                                              through the accelerator)
       #
-      # The ACR step is conditional on the secrets existing — without ACR
-      # creds we still publish to ghcr only. ACR creds:
-      #   ALIYUN_REGISTRY            e.g. registry.cn-hangzhou.aliyuncs.com
-      #   ALIYUN_REGISTRY_NAMESPACE  e.g. cicy-ai
-      #   ALIYUN_REGISTRY_USERNAME   ACR docker login user (NOT access key)
-      #   ALIYUN_REGISTRY_PASSWORD   ACR docker login password
+      # The Docker Hub step is conditional on DOCKERHUB_USERNAME being set —
+      # without it we publish to ghcr only.
+      # Required secrets:
+      #   DOCKERHUB_USERNAME   e.g. cicybot
+      #   DOCKERHUB_TOKEN      PAT from hub.docker.com → Security → Access Tokens
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -99,13 +104,12 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Login to Aliyun ACR
-        if: vars.ALIYUN_REGISTRY != ''
+      - name: Login to Docker Hub
+        if: vars.DOCKERHUB_USERNAME != ''
         uses: docker/login-action@v3
         with:
-          registry: ${{ vars.ALIYUN_REGISTRY }}
-          username: ${{ secrets.ALIYUN_REGISTRY_USERNAME }}
-          password: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build & push cicy-code-base
         # The base image (debian + node24 + apt cli tools + cloudflared) is
@@ -114,21 +118,18 @@ jobs:
         # tag and uploads zero layers.
         env:
           BASE_TAG: 1.0.9
-          ALIYUN_REGISTRY: ${{ vars.ALIYUN_REGISTRY }}
-          ALIYUN_NS: ${{ vars.ALIYUN_REGISTRY_NAMESPACE || 'cicy-ai' }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
         run: |
           set -e
-          # We don't use docker/build-push-action because we want to mirror
-          # the same image to two registries with conditional ACR push.
           docker build -f api/Dockerfile.runtime.base \
             -t cicy-code-base:${BASE_TAG} \
             api/
           for tag in ${BASE_TAG} latest; do
             docker tag cicy-code-base:${BASE_TAG} ghcr.io/${{ github.repository_owner }}/cicy-code-base:$tag
             docker push ghcr.io/${{ github.repository_owner }}/cicy-code-base:$tag
-            if [ -n "$ALIYUN_REGISTRY" ]; then
-              docker tag cicy-code-base:${BASE_TAG} $ALIYUN_REGISTRY/$ALIYUN_NS/cicy-code-base:$tag
-              docker push $ALIYUN_REGISTRY/$ALIYUN_NS/cicy-code-base:$tag
+            if [ -n "$DOCKERHUB_USERNAME" ]; then
+              docker tag cicy-code-base:${BASE_TAG} docker.io/$DOCKERHUB_USERNAME/cicy-code-base:$tag
+              docker push docker.io/$DOCKERHUB_USERNAME/cicy-code-base:$tag
             fi
           done
 
@@ -138,8 +139,7 @@ jobs:
         env:
           VERSION: ${{ steps.tag.outputs.version }}
           BASE_TAG: 1.0.9
-          ALIYUN_REGISTRY: ${{ vars.ALIYUN_REGISTRY }}
-          ALIYUN_NS: ${{ vars.ALIYUN_REGISTRY_NAMESPACE || 'cicy-ai' }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
         run: |
           set -e
           # Dockerfile.runtime expects api/cicy-code-docker — build.sh would
@@ -153,9 +153,9 @@ jobs:
           for tag in ${VERSION} latest; do
             docker tag cicy-code:${VERSION} ghcr.io/${{ github.repository_owner }}/cicy-code:$tag
             docker push ghcr.io/${{ github.repository_owner }}/cicy-code:$tag
-            if [ -n "$ALIYUN_REGISTRY" ]; then
-              docker tag cicy-code:${VERSION} $ALIYUN_REGISTRY/$ALIYUN_NS/cicy-code:$tag
-              docker push $ALIYUN_REGISTRY/$ALIYUN_NS/cicy-code:$tag
+            if [ -n "$DOCKERHUB_USERNAME" ]; then
+              docker tag cicy-code:${VERSION} docker.io/$DOCKERHUB_USERNAME/cicy-code:$tag
+              docker push docker.io/$DOCKERHUB_USERNAME/cicy-code:$tag
             fi
           done
 
