@@ -977,7 +977,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
             <div className="@container">
               <div data-id="skill-detail-body-grid" className="grid gap-0 @[768px]:grid-cols-[1fr_240px]">
                 <div className="px-5 py-4 min-w-0 order-2 @[768px]:order-1">
-                  <MarkdownPane content={data?.skill_md || data?.help_md || data?.tools_md || ''} onTry={sendToAgent} setSendText={setSendText} skillName={skill.name} clickable={true} />
+                  <MarkdownPane content={data?.skill_md || data?.help_md || data?.tools_md || ''} onTry={sendToAgent} setSendText={setSendText} skillName={skill.name} clickable={true} manifest={data?.manifest || null} />
                 </div>
                 <SkillDetailSidebar
                   skill={skill}
@@ -1044,10 +1044,48 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
   );
 }
 
-const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, skillName, clickable }: { content: string; onTry: (cmd: string) => void; setSendText: (s: string) => void; skillName: string; clickable: boolean }) {
+const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, skillName, clickable, manifest }: { content: string; onTry: (cmd: string) => void; setSendText: (s: string) => void; skillName: string; clickable: boolean; manifest?: SkillManifest | null }) {
   const { t } = useTranslation('workspace');
 
   const shown = content;
+
+  // Rewrite relative markdown links (./help.md, tools.md, etc.) to GitHub
+  // blob URLs so References sections actually go somewhere. Without this,
+  // links like `[help.md](./help.md)` 404 because the modal isn't a file
+  // browser. Falls back to the original href when manifest.publish.source
+  // is missing (user-authored skills, registry fetch failure).
+  //
+  // Resolution order:
+  //   1. Match against manifest.files (help.md → manifest.files.help_md path)
+  //   2. Otherwise treat as relative to skills/<name>/
+  const rewriteLink = (href: string | undefined): string | undefined => {
+    if (!href) return href;
+    // Already absolute (http/https/mailto) or fragment — leave alone.
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('#')) return href;
+
+    const repo = manifest?.publish?.source?.repository;
+    const tag = manifest?.publish?.source?.tag;
+    if (!repo || !tag) return href;
+
+    // Drop leading ./ or /
+    let rel = href.replace(/^\.?\//, '');
+
+    // Resolve common file-map aliases via manifest.files. Some skills have
+    // help.md at the skill root, others under references/ — the manifest
+    // is authoritative. Strip the leading "./" or "/" before lookup.
+    const files = (manifest as any)?.files || {};
+    const aliases: Record<string, string | undefined> = {
+      'help.md': files.help_md,
+      'tools.md': files.tools_md,
+      'readme.md': files.readme,
+      'README.md': files.readme,
+      'skill.md': files.skill_md,
+      'SKILL.md': files.skill_md,
+    };
+    if (aliases[rel]) rel = aliases[rel] as string;
+
+    return `https://github.com/${repo}/blob/${tag}/skills/${skillName}/${rel}`;
+  };
 
   // Memoize the components map so react-markdown doesn't re-parse from scratch
   // on every parent state change (send button presses, etc.). t/setSendText/onTry
@@ -1061,7 +1099,22 @@ const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, s
     ul: (p: any) => <ul className="text-[12px] text-zinc-300 my-1.5 ml-4 list-disc space-y-1" {...p} />,
     ol: (p: any) => <ol className="text-[12px] text-zinc-300 my-1.5 ml-4 list-decimal space-y-1" {...p} />,
     li: (p: any) => <li className="text-[12px] text-zinc-300" {...p} />,
-    a: (p: any) => <a className="text-blue-400 hover:underline" target="_blank" rel="noreferrer" {...p} />,
+    a: ({ href, ...p }: any) => {
+      const rewritten = rewriteLink(href);
+      const isExternal = rewritten && /^https?:\/\//i.test(rewritten);
+      return (
+        <a
+          className="text-blue-400 hover:underline inline-flex items-center gap-1"
+          target={isExternal ? '_blank' : undefined}
+          rel={isExternal ? 'noreferrer' : undefined}
+          href={rewritten}
+          {...p}
+        >
+          {p.children}
+          {isExternal && href !== rewritten && <ExternalLink className="w-3 h-3 opacity-60" />}
+        </a>
+      );
+    },
     code: ({ children, className, ...props }: any) => {
       const inline = !(className && /language-/.test(className));
       const text = String(children).replace(/\n$/, '');
@@ -1122,7 +1175,7 @@ const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, s
     ),
     th: () => null,
     td: ({ children }: any) => <div>{children}</div>,
-  }), [t, setSendText, onTry, skillName, clickable]);
+  }), [t, setSendText, onTry, skillName, clickable, manifest]);
 
   // Memoize the full Markdown render keyed on shown — re-parse only when the
   // displayed text actually changes (tab switch, translation toggle, fetch).
