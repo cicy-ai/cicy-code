@@ -82,6 +82,11 @@ interface SkillManifest {
   entry?: string;
   permissions?: string[];
   compatible_agents?: string[];
+  // Structured tool list registered at publish time. Each entry represents
+  // one user-facing operation the skill provides. Shown as a clickable list
+  // in the detail panel so users can test individual tools by sending the
+  // example_prompt to the active agent.
+  tools?: SkillTool[];
   publish?: {
     published_at?: string;
     sha256?: string;
@@ -89,6 +94,13 @@ interface SkillManifest {
     download_url?: string;
     source?: { type?: string; repository?: string; tag?: string };
   };
+}
+
+interface SkillTool {
+  name: string;           // e.g. "cping" or "cf curl"
+  description: string;   // one-line description
+  example?: string;      // literal CLI example for the code chip
+  prompt?: string;       // prompt sent to agent when user clicks "try"
 }
 
 type Filter = 'all' | 'installed' | 'available';
@@ -976,8 +988,11 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
           ) : (
             <div className="@container">
               <div data-id="skill-detail-body-grid" className="grid gap-0 @[768px]:grid-cols-[1fr_240px]">
-                <div className="px-5 py-4 min-w-0 order-2 @[768px]:order-1">
-                  <MarkdownPane content={data?.skill_md || data?.help_md || data?.tools_md || ''} onTry={sendToAgent} setSendText={setSendText} skillName={skill.name} clickable={true} manifest={data?.manifest || null} />
+                <div className="px-5 py-4 min-w-0 order-2 @[768px]:order-1 space-y-0">
+                  <MarkdownPane content={data?.skill_md || data?.help_md || data?.tools_md || ''} setSendText={setSendText} skillName={skill.name} manifest={data?.manifest || null} />
+                  {(data?.manifest?.tools?.length ?? 0) > 0 && (
+                    <SkillToolsPanel tools={data!.manifest!.tools!} skillName={skill.name} installed={skill.status.installed} onSend={sendToAgent} />
+                  )}
                 </div>
                 <SkillDetailSidebar
                   skill={skill}
@@ -1044,7 +1059,56 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
   );
 }
 
-const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, skillName, clickable, manifest }: { content: string; onTry: (cmd: string) => void; setSendText: (s: string) => void; skillName: string; clickable: boolean; manifest?: SkillManifest | null }) {
+// SkillToolsPanel renders the structured tool list from manifest.tools as
+// a VS Code-style command palette. Each tool shows: name (code chip),
+// description, and a "→ Agent" button that sends tool.prompt (or a default
+// prompt) to the currently active agent pane.
+function SkillToolsPanel({ tools, skillName, installed, onSend }: {
+  tools: SkillTool[];
+  skillName: string;
+  installed: boolean;
+  onSend: (prompt: string) => void;
+}) {
+  const { t } = useTranslation('workspace');
+  return (
+    <div data-id="skill-tools-panel" className="mt-1 mb-2">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-500 mb-2">
+        <Terminal className="w-3 h-3" />
+        <span>{t('marketplaceToolsTitle', { defaultValue: 'Tools' })}</span>
+        <span className="px-1 rounded bg-white/[0.05] text-zinc-500 font-mono">{tools.length}</span>
+      </div>
+      <div className="space-y-1.5">
+        {tools.map((tool, i) => (
+          <div key={i} data-id={`skill-tool-${tool.name}`}
+            className="flex items-start justify-between gap-3 rounded-md border border-white/[0.06] bg-black/20 px-3 py-2 hover:bg-black/30 transition-colors group"
+          >
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <code className="text-[11px] text-amber-200 font-mono shrink-0">{tool.name}</code>
+                {tool.example && (
+                  <span className="text-[10px] text-zinc-500 font-mono truncate max-w-[200px]">{tool.example}</span>
+                )}
+              </div>
+              <div className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">{tool.description}</div>
+            </div>
+            <button
+              data-id={`skill-tool-send-${tool.name}`}
+              disabled={!installed}
+              onClick={() => onSend(tool.prompt || t('marketplaceToolDefaultPrompt', { name: skillName, tool: tool.name, defaultValue: `请用 ${skillName} skill 的 ${tool.name} 工具帮我操作一下` }))}
+              title={installed ? t('marketplaceSendToAgent') : t('marketplaceInstallFirst')}
+              className="shrink-0 text-[10px] px-2 py-1 rounded border border-white/[0.07] text-zinc-500 hover:text-zinc-200 hover:border-zinc-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1"
+            >
+              <Send className="w-3 h-3" />
+              <span className="hidden group-hover:inline">Agent</span>
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const MarkdownPane = memo(function MarkdownPane({ content, setSendText, skillName, manifest }: { content: string; setSendText: (s: string) => void; skillName: string; manifest?: SkillManifest | null }) {
   const { t } = useTranslation('workspace');
 
   const shown = content;
@@ -1119,30 +1183,12 @@ const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, s
       const inline = !(className && /language-/.test(className));
       const text = String(children).replace(/\n$/, '');
       if (inline) {
-        if (clickable) {
-          return (
-            <button data-id="skill-md-inline-code-btn"
-              onClick={() => setSendText(t('marketplaceTestToolPrompt', { name: skillName, command: text }))}
-              className="px-1 py-0.5 rounded bg-white/[0.06] text-[11px] text-amber-200 font-mono hover:bg-white/[0.12] transition-colors"
-              title={t('marketplaceLoadIntoSend')}
-            >
-              {text}
-            </button>
-          );
-        }
         return (
           <code className="px-1 py-0.5 rounded bg-white/[0.06] text-[11px] text-amber-200 font-mono">{text}</code>
         );
       }
       return (
         <div data-id="skill-md-code-block" className="my-2 rounded-md bg-black/40 border border-white/[0.04] overflow-hidden">
-          {clickable && (
-            <div data-id="skill-md-code-block-actions" className="flex items-center justify-end px-2 py-1 border-b border-white/[0.04]">
-              <button data-id="skill-md-code-block-send" onClick={() => onTry(text)} className="text-[10px] text-zinc-400 hover:text-zinc-100 transition-colors inline-flex items-center gap-1">
-                <Send className="w-2.5 h-2.5" /> {t('marketplaceSendToAgent')}
-              </button>
-            </div>
-          )}
           <pre className="text-[11px] text-zinc-300 font-mono whitespace-pre-wrap p-2"><code {...props}>{children}</code></pre>
         </div>
       );
@@ -1175,7 +1221,7 @@ const MarkdownPane = memo(function MarkdownPane({ content, onTry, setSendText, s
     ),
     th: () => null,
     td: ({ children }: any) => <div>{children}</div>,
-  }), [t, setSendText, onTry, skillName, clickable, manifest]);
+  }), [t, setSendText, skillName, manifest]);
 
   // Memoize the full Markdown render keyed on shown — re-parse only when the
   // displayed text actually changes (tab switch, translation toggle, fetch).
