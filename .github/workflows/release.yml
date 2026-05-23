@@ -32,15 +32,28 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Patch version strings
-        # Both app/src/config.ts (frontend) and api/mgr/main.go (backend health)
-        # hard-code a version string that must match the release tag.
+        # sync-version.py reads npm/package.json and propagates the version to
+        # app/src/config.ts and api/mgr/main.go. We just bump npm/package.json
+        # and let the script do the rest (it runs via build.sh all → sync_version).
         run: |
           RAW="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}"
           VERSION="${RAW#v}"
-          sed -i "s/const APP_VERSION = '[^']*'/const APP_VERSION = '${VERSION}'/" app/src/config.ts
-          sed -i "s/const version = \"[^\"]*\"/const version = \"${VERSION}\"/" api/mgr/main.go
-          echo "Patched to ${VERSION}:"
-          grep "APP_VERSION\|const version" app/src/config.ts api/mgr/main.go
+          # Patch npm/package.json — sync-version.py reads this as the source of truth
+          python3 -c "
+          import json, sys
+          p = json.load(open('npm/package.json'))
+          p['version'] = sys.argv[1]
+          json.dump(p, open('npm/package.json','w'), indent=2)
+          print('npm/package.json version:', p['version'])
+          " "$VERSION"
+          # Also patch app/package.json for consistency
+          python3 -c "
+          import json, sys
+          p = json.load(open('app/package.json'))
+          p['version'] = sys.argv[1]
+          json.dump(p, open('app/package.json','w'), indent=2)
+          " "$VERSION"
+          echo "Version patched to ${VERSION}"
 
       - name: Build all platform binaries
         # bash build.sh all runs prepare_embed (builds the cicy-skills tarball
