@@ -31,16 +31,16 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Patch app version in config.ts
-        # Keep app/src/config.ts in sync with the release tag so the frontend
-        # UI shows the correct version at runtime. The file contains a
-        # hard-coded APP_VERSION string that is not read from package.json.
+      - name: Patch version strings
+        # Both app/src/config.ts (frontend) and api/mgr/main.go (backend health)
+        # hard-code a version string that must match the release tag.
         run: |
           RAW="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}"
           VERSION="${RAW#v}"
           sed -i "s/const APP_VERSION = '[^']*'/const APP_VERSION = '${VERSION}'/" app/src/config.ts
-          echo "Patched APP_VERSION to ${VERSION} in app/src/config.ts"
-          grep "APP_VERSION" app/src/config.ts
+          sed -i "s/const version = \"[^\"]*\"/const version = \"${VERSION}\"/" api/mgr/main.go
+          echo "Patched to ${VERSION}:"
+          grep "APP_VERSION\|const version" app/src/config.ts api/mgr/main.go
 
       - name: Build all platform binaries
         # bash build.sh all runs prepare_embed (builds the cicy-skills tarball
