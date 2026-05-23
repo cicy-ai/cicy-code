@@ -10,13 +10,19 @@
   align-items: center;
   gap: var(--sp-3);
   height: 44px;
-  padding: 0 var(--sp-4) 0 84px;     /* leave room for macOS traffic lights */
+  /* Default: no extra left padding. macOS gets a traffic-light spacer
+     via the [data-platform="darwin"] override below. Windows / Linux
+     have no native window controls in our hidden-titlebar setup so the
+     content can sit flush-left. */
+  padding: 0 var(--sp-4);
   background: var(--bg-elev-1);
   border-bottom: 1px solid var(--hairline);
   user-select: none;
   flex-shrink: 0;
-  cursor: move;
   -webkit-app-region: drag;          /* Electron: whole topbar is the drag region */
+}
+:root[data-platform="darwin"] .app__topbar {
+  padding-left: 84px;                /* leave room for macOS traffic lights */
 }
 .app__topbar .no-drag,
 .app__topbar button,
