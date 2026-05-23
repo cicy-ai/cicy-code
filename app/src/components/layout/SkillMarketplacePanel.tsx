@@ -1279,7 +1279,9 @@ function SkillToolsPanel({ tools, skillName, installed, onSend }: {
 const MarkdownPane = memo(function MarkdownPane({ content, setSendText, skillName, manifest }: { content: string; setSendText: (s: string) => void; skillName: string; manifest?: SkillManifest | null }) {
   const { t } = useTranslation('workspace');
 
-  const shown = content;
+  const shown = content.startsWith('---')
+    ? content.replace(/^---[\s\S]*?---\n?/, '')
+    : content;
 
   // Rewrite relative markdown links (./help.md, tools.md, etc.) to GitHub
   // blob URLs so References sections actually go somewhere. Without this,
