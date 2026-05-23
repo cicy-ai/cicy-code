@@ -977,31 +977,12 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
                 {[82, 68, 90, 55].map((w, i) => (
                   <div key={`b${i}`} className="h-3 rounded-md bg-white/[0.06]" style={{ width: `${w}%` }} />
                 ))}
-                <div className="h-5" />
-                {[76, 88].map((w, i) => (
-                  <div key={`c${i}`} className="h-3 rounded-md bg-white/[0.06]" style={{ width: `${w}%` }} />
-                ))}
               </div>
             </div>
           ) : !skill ? (
             <div className="px-5 py-4 text-xs text-zinc-500" data-id="skill-detail-no-data">{t('marketplaceNoData')}</div>
           ) : (
-            <div className="@container">
-              <div data-id="skill-detail-body-grid" className="grid gap-0 @[768px]:grid-cols-[1fr_240px]">
-                <div className="px-5 py-4 min-w-0 order-2 @[768px]:order-1 space-y-0">
-                  <MarkdownPane content={data?.skill_md || data?.help_md || data?.tools_md || ''} setSendText={setSendText} skillName={skill.name} manifest={data?.manifest || null} />
-                  {(data?.manifest?.tools?.length ?? 0) > 0 && (
-                    <SkillToolsPanel tools={data!.manifest!.tools!} skillName={skill.name} installed={skill.status.installed} onSend={sendToAgent} />
-                  )}
-                </div>
-                <SkillDetailSidebar
-                  skill={skill}
-                  manifest={data?.manifest || null}
-                  copy={copy}
-                  copied={copied}
-                />
-              </div>
-            </div>
+            <SkillDetailTabs data={data} skill={skill} setSendText={setSendText} sendToAgent={sendToAgent} copy={copy} copied={copied} />
           )}
         </div>
 
@@ -1056,6 +1037,84 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
       {confirmNode}
     </div>,
     portalTarget
+  );
+}
+
+// SkillDetailTabs renders Help / Tools / Updates tabs + sidebar.
+type DetailTab = 'help' | 'tools' | 'updates';
+
+function SkillDetailTabs({ data, skill, setSendText, sendToAgent, copy, copied }: {
+  data: SkillDetailPayload | null;
+  skill: MarketSkill;
+  setSendText: (s: string) => void;
+  sendToAgent: (s: string) => void;
+  copy: (s: string) => void;
+  copied: string;
+}) {
+  const { t } = useTranslation('workspace');
+  const tools = data?.manifest?.tools || [];
+  const [tab, setTab] = useState<DetailTab>('help');
+
+  const tabs: { id: DetailTab; label: string }[] = [
+    { id: 'help',    label: t('marketplaceTabHelp',    { defaultValue: 'Help' }) },
+    { id: 'tools',   label: t('marketplaceTabTools',   { defaultValue: 'Tools' }) },
+    { id: 'updates', label: t('marketplaceTabUpdates', { defaultValue: 'Updates' }) },
+  ];
+
+  return (
+    <div className="@container flex flex-col h-full">
+      {/* Tab bar */}
+      <div className="flex items-center border-b border-white/[0.06] px-5 shrink-0">
+        {tabs.map(({ id, label }) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className={`mr-4 py-2.5 text-[12px] border-b-2 transition-colors ${
+              tab === id
+                ? 'border-blue-400 text-zinc-100 font-medium'
+                : 'border-transparent text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            {label}
+            {id === 'tools' && tools.length > 0 && (
+              <span className="ml-1.5 px-1 rounded bg-white/[0.06] text-zinc-500 text-[10px] font-mono">{tools.length}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Content + sidebar */}
+      <div className="flex-1 overflow-hidden @container">
+        <div className="h-full grid @[768px]:grid-cols-[1fr_240px]">
+          {/* Main content */}
+          <div className="overflow-y-auto px-5 py-4 min-w-0">
+            {tab === 'help' && (
+              <MarkdownPane
+                content={data?.skill_md || data?.help_md || ''}
+                setSendText={setSendText}
+                skillName={skill.name}
+                manifest={data?.manifest || null}
+              />
+            )}
+            {tab === 'tools' && (
+              tools.length > 0
+                ? <SkillToolsPanel tools={tools} skillName={skill.name} installed={skill.status.installed} onSend={sendToAgent} />
+                : <div className="text-xs text-zinc-500">{t('marketplaceNoContent')}</div>
+            )}
+            {tab === 'updates' && (
+              <MarkdownPane
+                content={data?.tools_md || ''}
+                setSendText={setSendText}
+                skillName={skill.name}
+                manifest={data?.manifest || null}
+              />
+            )}
+          </div>
+          {/* Sidebar */}
+          <SkillDetailSidebar skill={skill} manifest={data?.manifest || null} copy={copy} copied={copied} />
+        </div>
+      </div>
+    </div>
   );
 }
 
