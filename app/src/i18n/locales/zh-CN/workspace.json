@@ -66,7 +66,7 @@
   "marketplaceVersion": "版本",
   "marketplaceCategory": "分类",
   "marketplacePublisher": "由 cicy-ai 发布",
-  "marketplaceTabHelp": "帮助",
+  "marketplaceTabHelp": "说明",
   "marketplaceTabTools": "工具",
   "marketplaceTestPrompt": "请帮我测试下 `{{name}}` skill。",
   "marketplaceTestToolPrompt": "请帮我用 `{{name}}` skill 测试下 {{command}}",
@@ -130,5 +130,9 @@
   "marketplaceSidebarHomepage": "主页",
   "marketplaceSidebarRepository": "仓库",
   "marketplaceSidebarRelease": "发布版本",
-  "marketplaceSidebarCopyId": "复制标识符"
+  "marketplaceSidebarCopyId": "复制标识符",
+  "marketplaceTabUpdates": "更新",
+  "marketplaceVersionLatest": "最新",
+  "marketplaceVersionInstalled": "已安装",
+  "marketplaceNoUpdates": "没有版本历史。"
 }

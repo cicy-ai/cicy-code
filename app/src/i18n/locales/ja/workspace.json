@@ -129,5 +129,9 @@
   "marketplaceSidebarHomepage": "ホームページ",
   "marketplaceSidebarRepository": "リポジトリ",
   "marketplaceSidebarRelease": "リリース",
-  "marketplaceSidebarCopyId": "識別子をコピー"
+  "marketplaceSidebarCopyId": "識別子をコピー",
+  "marketplaceTabUpdates": "更新",
+  "marketplaceVersionLatest": "最新",
+  "marketplaceVersionInstalled": "インストール済み",
+  "marketplaceNoUpdates": "バージョン履歴はありません。"
 }
