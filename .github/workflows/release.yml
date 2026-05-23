@@ -100,10 +100,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login to Aliyun ACR
-        if: ${{ vars.ALIYUN_REGISTRY != '' || secrets.ALIYUN_REGISTRY != '' }}
+        if: vars.ALIYUN_REGISTRY != ''
         uses: docker/login-action@v3
         with:
-          registry: ${{ vars.ALIYUN_REGISTRY || secrets.ALIYUN_REGISTRY }}
+          registry: ${{ vars.ALIYUN_REGISTRY }}
           username: ${{ secrets.ALIYUN_REGISTRY_USERNAME }}
           password: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
 
@@ -114,8 +114,8 @@ jobs:
         # tag and uploads zero layers.
         env:
           BASE_TAG: 1.0.9
-          ALIYUN_REGISTRY: ${{ vars.ALIYUN_REGISTRY || secrets.ALIYUN_REGISTRY }}
-          ALIYUN_NS: ${{ vars.ALIYUN_REGISTRY_NAMESPACE || secrets.ALIYUN_REGISTRY_NAMESPACE || 'cicy-ai' }}
+          ALIYUN_REGISTRY: ${{ vars.ALIYUN_REGISTRY }}
+          ALIYUN_NS: ${{ vars.ALIYUN_REGISTRY_NAMESPACE || 'cicy-ai' }}
         run: |
           set -e
           # We don't use docker/build-push-action because we want to mirror
@@ -138,8 +138,8 @@ jobs:
         env:
           VERSION: ${{ steps.tag.outputs.version }}
           BASE_TAG: 1.0.9
-          ALIYUN_REGISTRY: ${{ vars.ALIYUN_REGISTRY || secrets.ALIYUN_REGISTRY }}
-          ALIYUN_NS: ${{ vars.ALIYUN_REGISTRY_NAMESPACE || secrets.ALIYUN_REGISTRY_NAMESPACE || 'cicy-ai' }}
+          ALIYUN_REGISTRY: ${{ vars.ALIYUN_REGISTRY }}
+          ALIYUN_NS: ${{ vars.ALIYUN_REGISTRY_NAMESPACE || 'cicy-ai' }}
         run: |
           set -e
           # Dockerfile.runtime expects api/cicy-code-docker — build.sh would
