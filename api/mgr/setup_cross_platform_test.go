@@ -61,11 +61,21 @@ func TestNodeInstallCmdPlatformBranches(t *testing.T) {
 			t.Fatalf("nodeInstallCmd = %q", cmd)
 		}
 	case "apt":
-		if !strings.Contains(cmd, "https://deb.nodesource.com/setup_22.x") || !strings.Contains(cmd, "apt-get install -y nodejs") {
-			t.Fatalf("nodeInstallCmd = %q", cmd)
+		// Node 24 from prebuilt tarball, with cn-aware mirror probing.
+		if !strings.Contains(cmd, `"v24\.[0-9]+\.[0-9]+"`) {
+			t.Fatalf("nodeInstallCmd should pin Node 24.x: %q", cmd)
+		}
+		if !strings.Contains(cmd, "https://npmmirror.com/mirrors/node/index.json") {
+			t.Fatalf("nodeInstallCmd should probe CN mirror first: %q", cmd)
+		}
+		if !strings.Contains(cmd, "https://nodejs.org/dist/index.json") {
+			t.Fatalf("nodeInstallCmd should fall back to nodejs.org: %q", cmd)
+		}
+		if strings.Contains(cmd, "deb.nodesource.com") || strings.Contains(cmd, "apt-get install -y nodejs") {
+			t.Fatalf("nodeInstallCmd should NOT depend on nodesource/apt: %q", cmd)
 		}
 	default:
-		if strings.Contains(cmd, "deb.nodesource.com/setup_22.x") || strings.Contains(cmd, "apt-get install -y nodejs") {
+		if strings.Contains(cmd, "deb.nodesource.com") || strings.Contains(cmd, "apt-get install -y nodejs") {
 			t.Fatalf("nodeInstallCmd still hardcodes Debian path on %s: %q", expectedPackageManager(), cmd)
 		}
 	}
