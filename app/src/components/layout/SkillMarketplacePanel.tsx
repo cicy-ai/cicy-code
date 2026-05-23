@@ -210,7 +210,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
       // server returned a fresh skill snapshot — patch in-place to avoid full re-load flicker
       if (data?.skill) {
         const fresh = data.skill as MarketSkill;
-        setSkills(prev => prev.map(s => s.name === skill.name ? { ...s, ...fresh } : s));
+        setSkills(prev => prev.map(s => s.name === skill.name ? { ...s, ...fresh, has_update: fresh.has_update ?? false } : s));
       } else {
         await load();
       }
@@ -229,7 +229,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
       const data = res?.data;
       if (data?.skill) {
         const fresh = data.skill as MarketSkill;
-        setSkills(prev => prev.map(s => s.name === skill.name ? { ...s, ...fresh } : s));
+        setSkills(prev => prev.map(s => s.name === skill.name ? { ...s, ...fresh, has_update: fresh.has_update ?? false } : s));
       } else {
         await load();
       }
