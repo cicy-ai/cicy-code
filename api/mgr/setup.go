@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"ttyd-go/skillcmd"
 )
@@ -171,11 +172,12 @@ func nodeInstallCmd() string {
 	if runtime.GOOS == "darwin" {
 		return "brew install node"
 	}
-	// Install Node 24 from prebuilt binary tarball under $HOME/.local — no
-	// apt-add-repository, no sudo for the node bits themselves, no
-	// nodesource dependency. Mirror order is auto-picked: probe npmmirror
-	// (CN) first; if reachable, prefer it; else fall back to nodejs.org.
-	// PATH wiring lands in $HOME/.local/bin which baseTools already export.
+	// Linux: install Node 24 from prebuilt binary tarball under
+	// $HOME/.local — no apt-add-repository, no sudo for the node bits
+	// themselves, no nodesource dependency. Mirror order is auto-picked:
+	// probe npmmirror (CN) first; if reachable, prefer it; else fall back
+	// to nodejs.org. PATH wiring lands in $HOME/.local/bin which baseTools
+	// already export.
 	return `set -e
 ARCH=$(uname -m)
 case "$ARCH" in
@@ -859,8 +861,83 @@ func ensureFfmpegAsync() {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		log.Printf("[startup] ffmpeg install failed (voice features degraded): %v", err)
+		return
+	}
+	log.Printf("[startup] ffmpeg installed")
+}
+
+// CJK font installation is triggered lazily — the first time the AI
+// gateway sees a request body containing Chinese/Japanese/Korean
+// characters. See MaybeEnsureCJKFontsForBytes below. Wrapped in
+// sync.Once so concurrent gateway requests don't double-install.
+var cjkFontsOnce sync.Once
+
+// MaybeEnsureCJKFontsForBytes scans an arbitrary byte slice for CJK
+// Unicode characters (Han / Hiragana / Katakana / Hangul). If found, and
+// CJK fonts are not yet installed, it kicks off a one-shot background
+// install. Safe to call from any hot path — does at most one fc-list
+// probe per process lifetime, then no-op forever after.
+func MaybeEnsureCJKFontsForBytes(b []byte) {
+	if len(b) == 0 || runtime.GOOS == "darwin" || isContainerRuntime() {
+		return
+	}
+	if !containsCJK(b) {
+		return
+	}
+	cjkFontsOnce.Do(func() { go ensureCJKFonts() })
+}
+
+// containsCJK reports whether b contains any rune in the common CJK
+// Unicode blocks. Walks the UTF-8 bytes once with utf8.DecodeRune; bails
+// at the first hit.
+func containsCJK(b []byte) bool {
+	for i := 0; i < len(b); {
+		r, sz := utf8.DecodeRune(b[i:])
+		if sz == 0 {
+			break
+		}
+		i += sz
+		// CJK Unified Ideographs U+4E00–U+9FFF (Han)
+		// CJK Extension A     U+3400–U+4DBF
+		// Hiragana            U+3040–U+309F
+		// Katakana            U+30A0–U+30FF
+		// Hangul Syllables    U+AC00–U+D7AF
+		// Hangul Jamo         U+1100–U+11FF
+		if (r >= 0x4E00 && r <= 0x9FFF) ||
+			(r >= 0x3400 && r <= 0x4DBF) ||
+			(r >= 0x3040 && r <= 0x30FF) ||
+			(r >= 0xAC00 && r <= 0xD7AF) ||
+			(r >= 0x1100 && r <= 0x11FF) {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureCJKFonts installs a CJK font set so ffmpeg / headless renderers
+// can display Chinese, Japanese, and Korean text instead of tofu boxes.
+// Only invoked via MaybeEnsureCJKFontsForBytes once per process.
+func ensureCJKFonts() {
+	if runtime.GOOS == "darwin" || isContainerRuntime() {
+		return
+	}
+	// Quick probe: if any wqy/noto-cjk font already exists, skip.
+	if out, err := exec.Command("sh", "-c", "fc-list 2>/dev/null | grep -iE 'wqy|noto.*cjk|source.han' | head -1").Output(); err == nil && len(strings.TrimSpace(string(out))) > 0 {
+		return
+	}
+	// Debian/Ubuntu: fonts-wqy-microhei is small (~5MB) and has a
+	// permissive license; fonts-noto-cjk is bigger (~200MB) but covers
+	// JP/KR. We install wqy by default; agent can apt-get noto-cjk on
+	// demand if it needs JP/KR coverage.
+	installCmd := sudoPrefix() + "apt-get install -y --no-install-recommends fonts-wqy-microhei fontconfig && fc-cache -f"
+	log.Printf("[ai-gateway] CJK detected — installing fonts-wqy-microhei in background...")
+	cmd := exec.Command("sh", "-c", installCmd)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		log.Printf("[ai-gateway] CJK font install failed (CJK rendering degraded): %v", err)
 	} else {
-		log.Printf("[startup] ffmpeg installed")
+		log.Printf("[ai-gateway] CJK fonts installed")
 	}
 }
 
@@ -871,7 +948,15 @@ func anyActiveAgentUsesProxy() bool {
 	if err := store.QueryRow(
 		`SELECT COUNT(*) FROM agent_config
 		  WHERE active=1
-		    AND COALESCE(proxy_enable, 0)=1`,
+		    AND COALESCE(proxy_enable, 0)=1
+		    AND (
+		      pane_id = 'w-10001:main.0'
+		      OR pane_id IN (
+		        SELECT agent_name || ':main.0'
+		        FROM pane_agents
+		        WHERE pane_id = 'w-10001' AND status='active'
+		      )
+		    )`,
 	).Scan(&count); err != nil {
 		return false
 	}
@@ -1561,7 +1646,22 @@ func ensureBuiltinAgents(selected []string) {
 		desiredByPaneID[pid] = w
 	}
 
-	rows, err := store.Query("SELECT pane_id, ttyd_port, workspace, COALESCE(init_script,''), COALESCE(config,'{}'), COALESCE(agent_type,''), COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0), COALESCE(use_custom_gateway,0) FROM agent_config WHERE active=1 ORDER BY ttyd_port ASC, pane_id ASC")
+	rows, err := store.Query(`
+		SELECT pane_id, ttyd_port, workspace, COALESCE(init_script,''), COALESCE(config,'{}'),
+		       COALESCE(agent_type,''), COALESCE(allow_all_actions,0),
+		       COALESCE(reply_in_chinese,0), COALESCE(use_custom_gateway,0)
+		FROM agent_config
+		WHERE active=1
+		  AND (
+		    pane_id = 'w-10001:main.0'
+		    OR pane_id IN (
+		      SELECT agent_name || ':main.0'
+		      FROM pane_agents
+		      WHERE pane_id = 'w-10001' AND status='active'
+		    )
+		  )
+		ORDER BY ttyd_port ASC, pane_id ASC
+	`)
 	if err != nil {
 		return
 	}
@@ -1586,34 +1686,87 @@ func ensureBuiltinAgents(selected []string) {
 			agentType = desired.AgentType
 		}
 
-		// Ensure tmux session
-		sess := strings.Split(paneID, ":")[0]
-		sessionCreated := false
-		if exec.Command("tmux", "has-session", "-t", sess).Run() != nil {
-			if workspace == "" {
-				workspace = builtinWorkerWorkspace(sess)
-			}
-			ensureAgentToolInstalled(agentType)
-			os.MkdirAll(workspace, 0755)
-			exec.Command("tmux", "new-session", "-d", "-s", sess, "-n", "main", "-c", workspace).Run()
-			log.Printf("[startup] created session %s", sess)
-			sessionCreated = true
-		}
-
-		// Ensure ttyd
-		if !isPortListening(port) {
-			startInstance(paneID, port, token)
-		}
-		if sessionCreated {
-			initPaneEnv(paneEnvOpts{
-				paneID:          paneID,
-				configJSON:      configJSON,
-				workspace:       workspace,
-				initScript:      initScript,
-				agentType:       agentType,
-				allowAllActions: allowAllActions,
-				replyInChinese:  replyInChinese,
-			})
-		}
+		startAgentFromConfig(paneID, port, workspace, initScript, configJSON, agentType, allowAllActions, replyInChinese, useCustomGateway, token)
 	}
+}
+
+// startAgentFromConfig brings up a single agent's tmux session, ttyd port,
+// and pane environment. Idempotent — skips work that's already done.
+func startAgentFromConfig(paneID string, port int, workspace, initScript, configJSON, agentType string,
+	allowAllActions, replyInChinese, useCustomGateway bool, token string) {
+	// Ensure tmux session
+	sess := strings.Split(paneID, ":")[0]
+	sessionCreated := false
+	if exec.Command("tmux", "has-session", "-t", sess).Run() != nil {
+		if workspace == "" {
+			workspace = builtinWorkerWorkspace(sess)
+		}
+		ensureAgentToolInstalled(agentType)
+		os.MkdirAll(workspace, 0755)
+		exec.Command("tmux", "new-session", "-d", "-s", sess, "-n", "main", "-c", workspace).Run()
+		log.Printf("[startup] created session %s", sess)
+		sessionCreated = true
+	}
+
+	// Ensure ttyd
+	if !isPortListening(port) {
+		startInstance(paneID, port, token)
+	}
+	if sessionCreated {
+		initPaneEnv(paneEnvOpts{
+			paneID:          paneID,
+			configJSON:      configJSON,
+			workspace:       workspace,
+			initScript:      initScript,
+			agentType:       agentType,
+			allowAllActions: allowAllActions,
+			replyInChinese:  replyInChinese,
+		})
+	}
+}
+
+// ensureAgentRunningByPaneID looks up a single agent in agent_config and brings
+// it up if its tmux session is missing or its ttyd port isn't listening.
+// Used by bind flows so re-binding a previously killed sub-worker auto-revives it.
+func ensureAgentRunningByPaneID(paneID string) error {
+	if strings.TrimSpace(paneID) == "" {
+		return fmt.Errorf("paneID required")
+	}
+	var workspace, initScript, configJSON, agentType string
+	var allowAllActions, replyInChinese, useCustomGateway bool
+	var port int
+	err := store.QueryRow(`
+		SELECT ttyd_port, COALESCE(workspace,''), COALESCE(init_script,''),
+		       COALESCE(config,'{}'), COALESCE(agent_type,''),
+		       COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0),
+		       COALESCE(use_custom_gateway,0)
+		FROM agent_config
+		WHERE pane_id=? AND active=1
+	`, paneID).Scan(&port, &workspace, &initScript, &configJSON, &agentType,
+		&allowAllActions, &replyInChinese, &useCustomGateway)
+	if err != nil {
+		return fmt.Errorf("agent_config lookup for %s: %w", paneID, err)
+	}
+	if port == 0 {
+		return fmt.Errorf("agent %s has no ttyd_port", paneID)
+	}
+	startAgentFromConfig(paneID, port, workspace, initScript, configJSON, agentType,
+		allowAllActions, replyInChinese, useCustomGateway, getFirstToken())
+	return nil
+}
+
+// stopAgentByPaneID kills the tmux session and ttyd instance for the given
+// agent. Used by unbind flows so removing a binding promptly frees resources.
+// The agent_config row itself is left untouched (active stays as-is).
+func stopAgentByPaneID(paneID string) {
+	paneID = strings.TrimSpace(paneID)
+	if paneID == "" {
+		return
+	}
+	stopInstance(paneID)
+	session := strings.Split(paneID, ":")[0]
+	if session != "" {
+		exec.Command("tmux", "kill-session", "-t", session).Run()
+	}
+	log.Printf("[agent-stop] stopped %s", paneID)
 }
