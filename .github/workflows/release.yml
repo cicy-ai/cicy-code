@@ -15,7 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -79,43 +78,23 @@ jobs:
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       # ── Docker images ─────────────────────────────────────────────────
-      # Two registries:
-      #   ghcr.io/<owner>/...                       (global users)
-      #   docker.io/<DOCKERHUB_USERNAME>/...        (CN users — Aliyun
-      #                                              docker mirror points
-      #                                              at Docker Hub, so any
-      #                                              `docker pull` of an
-      #                                              official-style name
-      #                                              transparently goes
-      #                                              through the accelerator)
+      # Push to Docker Hub. CN users pull through any of the public
+      # dockerhub mirrors (dockerproxy.com, daocloud, etc) — pulls in MM/CN
+      # are 30-60s vs 5+ min from ghcr.io.
       #
-      # The Docker Hub step is conditional on DOCKERHUB_USERNAME being set —
-      # without it we publish to ghcr only.
-      # Required secrets:
-      #   DOCKERHUB_USERNAME   e.g. cicybot
-      #   DOCKERHUB_TOKEN      PAT from hub.docker.com → Security → Access Tokens
+      # Required:
+      #   vars.DOCKERHUB_USERNAME    e.g. cicybot
+      #   secrets.DOCKERHUB_TOKEN    PAT from hub.docker.com → Security
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Login to Docker Hub
-        if: vars.DOCKERHUB_USERNAME != ''
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build & push cicy-code-base
-        # The base image (debian + node24 + apt cli tools + cloudflared) is
-        # rebuilt every release. Layer cache keeps subsequent builds fast;
-        # if Dockerfile.runtime.base is unchanged, push only re-stamps the
-        # tag and uploads zero layers.
         env:
           BASE_TAG: 1.0.9
           DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
@@ -125,38 +104,26 @@ jobs:
             -t cicy-code-base:${BASE_TAG} \
             api/
           for tag in ${BASE_TAG} latest; do
-            docker tag cicy-code-base:${BASE_TAG} ghcr.io/${{ github.repository_owner }}/cicy-code-base:$tag
-            docker push ghcr.io/${{ github.repository_owner }}/cicy-code-base:$tag
-            if [ -n "$DOCKERHUB_USERNAME" ]; then
-              docker tag cicy-code-base:${BASE_TAG} docker.io/$DOCKERHUB_USERNAME/cicy-code-base:$tag
-              docker push docker.io/$DOCKERHUB_USERNAME/cicy-code-base:$tag
-            fi
+            docker tag cicy-code-base:${BASE_TAG} docker.io/$DOCKERHUB_USERNAME/cicy-code-base:$tag
+            docker push docker.io/$DOCKERHUB_USERNAME/cicy-code-base:$tag
           done
 
       - name: Build & push cicy-code (runtime)
-        # Runtime = base + cicy-code binary. Tagged with the release version
-        # (no `v` prefix) plus `latest`.
         env:
           VERSION: ${{ steps.tag.outputs.version }}
           BASE_TAG: 1.0.9
           DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
         run: |
           set -e
-          # Dockerfile.runtime expects api/cicy-code-docker — build.sh would
-          # cp from api/cicy-code, but we already have dist/cicy-code-linux-amd64.
           cp dist/cicy-code-linux-amd64 api/cicy-code-docker
           docker build -f api/Dockerfile.runtime \
-            --build-arg BASE_IMAGE=ghcr.io/${{ github.repository_owner }}/cicy-code-base:${BASE_TAG} \
+            --build-arg BASE_IMAGE=docker.io/$DOCKERHUB_USERNAME/cicy-code-base:${BASE_TAG} \
             -t cicy-code:${VERSION} \
             api/
           rm -f api/cicy-code-docker
           for tag in ${VERSION} latest; do
-            docker tag cicy-code:${VERSION} ghcr.io/${{ github.repository_owner }}/cicy-code:$tag
-            docker push ghcr.io/${{ github.repository_owner }}/cicy-code:$tag
-            if [ -n "$DOCKERHUB_USERNAME" ]; then
-              docker tag cicy-code:${VERSION} docker.io/$DOCKERHUB_USERNAME/cicy-code:$tag
-              docker push docker.io/$DOCKERHUB_USERNAME/cicy-code:$tag
-            fi
+            docker tag cicy-code:${VERSION} docker.io/$DOCKERHUB_USERNAME/cicy-code:$tag
+            docker push docker.io/$DOCKERHUB_USERNAME/cicy-code:$tag
           done
 
       - name: Generate release manifest

@@ -32,6 +32,11 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		result["preview"] = previewMode
 		result["hot"] = hotMode
 		result["agents"] = effectiveAgentOptions()
+		// Mobile QR onboarding: if the operator set CICY_PUBLIC_URL (a
+		// reachable URL — tunneled domain or LAN IP), expose it so the UI
+		// can render a "scan to add to mobile" QR code in the top bar.
+		// Empty string when not configured; the UI hides the icon then.
+		result["public_url"] = strings.TrimSpace(os.Getenv("CICY_PUBLIC_URL"))
 		J(w, result)
 	case "POST":
 		var req M

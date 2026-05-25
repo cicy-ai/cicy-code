@@ -29,6 +29,38 @@ input, textarea, [contenteditable], code, kbd, samp, pre, .selectable {
 body { overflow: hidden; }
 #root { overflow: auto; }
 
+/* ── App-wide custom scrollbars ───────────────────────────────────────
+   Replaces the chunky OS default scrollbar with a thin, semi-transparent
+   thumb that fades in on hover. Applies to every scrollable region —
+   #root (main page scroll), tab panels, the WSL install log, etc.
+   Firefox uses scrollbar-* (limited but native), WebKit/Chromium uses
+   the ::-webkit-scrollbar pseudo-elements (full custom). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg-3, #8b949e) 30%, transparent) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg-3, #8b949e) 25%, transparent);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.15s ease;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--fg-3, #8b949e) 55%, transparent);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 button {
   font: inherit;
   cursor: pointer;

@@ -1,0 +1,14 @@
+{
+  "title": "WSL Ubuntu をインストール（中国対応）",
+  "description": "中国国内の Windows ですか？ <0>wsl --install</0> は raw.githubusercontent.com にアクセスしますが、これがブロックされます。このカードは中国国内のミラーから Ubuntu rootfs をダウンロードし、<1>wsl --import</1> を実行します。",
+  "probingMirrors": "ミラーを測定中…",
+  "rootfsMirrorTitle": "Ubuntu rootfs ミラー",
+  "ghProxyTitle": "GitHub プロキシ（cicy-code ダウンロード用）",
+  "installButton": "Ubuntu + cicy-code をインストール",
+  "downloadingRootfs": "rootfs をダウンロード中…（300+ MB、1 MB/s で約 5 分）",
+  "importingWsl": "WSL にインポート + cicy-code をダウンロード…",
+  "doneMessage": "Ubuntu のインストールと cicy-code のダウンロードが完了しました。<0>wsl -d Ubuntu</0> を実行してください。",
+  "reProbe": "再テスト",
+  "stepFailed": "ステップ失敗（終了コード {{code}}）。出力：\n{{tail}}",
+  "stepTimeout": "ステップが 30 分でタイムアウトしました"
+}

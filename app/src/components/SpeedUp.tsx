@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { detectHost, type HostInfo } from '../lib/speedup/detect';
 import { CN_MIRRORS, categoriesFor, type Category } from '../lib/speedup/mirrors';
 import { probeAll, formatSpeed, type ProbeResult } from '../lib/speedup/probe';
@@ -19,17 +20,8 @@ interface StepLog {
   message?: string;
 }
 
-const CATEGORY_LABEL: Record<Category, string> = {
-  gh: 'GitHub proxy',
-  apt: 'Ubuntu apt',
-  rootfs: 'WSL Ubuntu rootfs',
-  pypi: 'Python (pip)',
-  npm: 'Node (npm)',
-  go: 'Go modules',
-  brew: 'Homebrew',
-};
-
 export default function SpeedUp() {
+  const { t } = useTranslation('speedUp');
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
   const [host, setHost] = useState<HostInfo | null>(null);
@@ -43,7 +35,11 @@ export default function SpeedUp() {
   useEffect(() => { (async () => {
     const persisted = await readPersisted();
     if (persisted && Date.now() - new Date(persisted.ts).getTime() < 7 * 24 * 60 * 60 * 1000) {
-      setSkipReason(`Already configured ${new Date(persisted.ts).toLocaleString()} for ${persisted.os} / ${persisted.region}`);
+      setSkipReason(t('alreadyConfigured', {
+        date: new Date(persisted.ts).toLocaleString(),
+        os: persisted.os,
+        region: persisted.region,
+      }));
       return;
     }
     runDetect();
@@ -121,40 +117,39 @@ export default function SpeedUp() {
 
   return (
     <div data-id="speedup" className="max-w-3xl mx-auto p-6 text-zinc-200">
-      <h2 className="text-lg font-semibold mb-1">Speed up downloads</h2>
+      <h2 className="text-lg font-semibold mb-1">{t('title')}</h2>
       <p className="text-sm text-zinc-500 mb-4">
-        Detect your region and pick the fastest mirror for cicy-code, npm, pip, Go, apt, and Homebrew.
-        All commands run locally via cicy-desktop — no source code changes.
+        {t('description')}
       </p>
 
       {skipReason && phase === 'idle' && (
         <div data-id="speedup-skip" className="rounded border border-zinc-700 bg-zinc-900 p-3 mb-4 text-sm">
           <div className="text-zinc-300">{skipReason}</div>
-          <button className="mt-2 text-xs text-blue-400 hover:underline" onClick={runDetect}>Re-detect anyway</button>
+          <button className="mt-2 text-xs text-blue-400 hover:underline" onClick={runDetect}>{t('reDetect')}</button>
         </div>
       )}
 
       {phase === 'detecting' && (
-        <div className="flex items-center gap-2 text-sm"><Spinner size="sm" /> Detecting host…</div>
+        <div className="flex items-center gap-2 text-sm"><Spinner size="sm" /> {t('detectingHost')}</div>
       )}
 
       {host && (
         <div data-id="speedup-host" className="rounded border border-zinc-800 bg-zinc-900/50 p-3 mb-4 text-xs grid grid-cols-3 gap-2">
-          <div><span className="text-zinc-500">OS</span><div>{host.os}</div></div>
-          <div><span className="text-zinc-500">Region</span><div>{host.region}</div></div>
-          <div><span className="text-zinc-500">WSL</span><div>{host.wsl.installed ? host.wsl.distros.join(', ') : 'not installed'}</div></div>
+          <div><span className="text-zinc-500">{t('fieldOs')}</span><div>{host.os}</div></div>
+          <div><span className="text-zinc-500">{t('fieldRegion')}</span><div>{host.region}</div></div>
+          <div><span className="text-zinc-500">{t('fieldWsl')}</span><div>{host.wsl.installed ? host.wsl.distros.join(', ') : t('wslNotInstalled')}</div></div>
         </div>
       )}
 
       {phase === 'probing' && (
-        <div className="flex items-center gap-2 text-sm mb-3"><Spinner size="sm" /> Probing mirrors…</div>
+        <div className="flex items-center gap-2 text-sm mb-3"><Spinner size="sm" /> {t('probingMirrors')}</div>
       )}
 
       {reports.length > 0 && (
         <div data-id="speedup-reports" className="space-y-3 mb-4">
           {reports.map(r => (
             <div key={r.category} className="rounded border border-zinc-800 bg-zinc-900/50 p-3">
-              <div className="text-sm font-medium mb-2">{CATEGORY_LABEL[r.category]}</div>
+              <div className="text-sm font-medium mb-2">{t(`category.${r.category}`)}</div>
               <div className="space-y-1">
                 {r.results.map(res => (
                   <label key={res.id} className="flex items-center gap-2 text-xs cursor-pointer">
@@ -180,7 +175,7 @@ export default function SpeedUp() {
           data-id="speedup-apply"
           className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm disabled:opacity-50"
           onClick={runApply}
-        >Apply picks</button>
+        >{t('applyButton')}</button>
       )}
 
       {(phase === 'applying' || phase === 'done') && (
@@ -203,13 +198,13 @@ export default function SpeedUp() {
       )}
 
       {phase === 'done' && (
-        <div className="mt-4 text-sm text-emerald-400">All done. Saved to ~/.cicy/speedup.json.</div>
+        <div className="mt-4 text-sm text-emerald-400">{t('doneMessage')}</div>
       )}
 
       {phase === 'error' && error && (
         <div data-id="speedup-error" className="rounded border border-rose-700 bg-rose-900/30 p-3 text-sm">
-          <div className="text-rose-300">Failed: {error}</div>
-          <button className="mt-2 text-xs text-blue-400 hover:underline" onClick={runDetect}>Retry</button>
+          <div className="text-rose-300">{t('failed', { error })}</div>
+          <button className="mt-2 text-xs text-blue-400 hover:underline" onClick={runDetect}>{t('retry')}</button>
         </div>
       )}
     </div>

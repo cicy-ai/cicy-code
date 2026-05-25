@@ -1042,9 +1042,7 @@ func handleDeletePane(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	go func() {
 		defer func() { recover() }()
-		stopInstance(paneID)
-		session := strings.Split(paneID, ":")[0]
-		runTmux("kill-session", "-t", session)
+		stopAgentByPaneID(paneID)
 	}()
 	store.Exec("DELETE FROM pane_agents WHERE pane_id=?", shortID)
 	store.Exec("DELETE FROM pane_agents WHERE agent_name=?", shortID)

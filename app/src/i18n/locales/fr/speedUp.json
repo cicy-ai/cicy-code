@@ -1,0 +1,25 @@
+{
+  "title": "Accélérer les téléchargements",
+  "description": "Détecte votre région et sélectionne le miroir le plus rapide pour cicy-code, npm, pip, Go, apt et Homebrew. Toutes les commandes s'exécutent localement via cicy-desktop — pas de modification du code source.",
+  "alreadyConfigured": "Déjà configuré le {{date}} pour {{os}} / {{region}}",
+  "reDetect": "Re-détecter",
+  "detectingHost": "Détection de l'hôte…",
+  "probingMirrors": "Test des miroirs…",
+  "fieldOs": "OS",
+  "fieldRegion": "Région",
+  "fieldWsl": "WSL",
+  "wslNotInstalled": "non installé",
+  "applyButton": "Appliquer la sélection",
+  "doneMessage": "Terminé. Enregistré dans ~/.cicy/speedup.json.",
+  "failed": "Échec : {{error}}",
+  "retry": "Réessayer",
+  "category": {
+    "gh": "Proxy GitHub",
+    "apt": "Ubuntu apt",
+    "rootfs": "WSL Ubuntu rootfs",
+    "pypi": "Python (pip)",
+    "npm": "Node (npm)",
+    "go": "Modules Go",
+    "brew": "Homebrew"
+  }
+}

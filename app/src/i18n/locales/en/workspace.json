@@ -134,5 +134,12 @@
   "marketplaceTabUpdates": "Updates",
   "marketplaceVersionLatest": "latest",
   "marketplaceVersionInstalled": "installed",
-  "marketplaceNoUpdates": "No version history available."
+  "marketplaceNoUpdates": "No version history available.",
+  "mobileQrTitle": "Open with device",
+  "mobileQrSubtitle": "Scan from the cicy-mobile app to add this workspace.",
+  "mobileQrCopyLink": "Copy link",
+  "mobileQrCopied": "Copied",
+  "mobileQrScanHint": "Scan with your phone camera or CiCy Mobile",
+  "mobileQrOr": "or",
+  "mobileQrOpenDesktop": "Open in CiCy Desktop"
 }

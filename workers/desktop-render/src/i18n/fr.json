@@ -25,7 +25,7 @@
   "status.unknown": "Inconnu",
   "wsl.title_install": "Installer WSL2 pour exécuter cicy-code sur Windows",
   "wsl.title_no_distro": "WSL2 est installé mais aucune distribution Linux n'est présente",
-  "wsl.subtitle": "Cliquez sur « Installer maintenant » ou exécutez la commande manuellement dans un PowerShell administrateur.",
+  "wsl.subtitle": "Cliquez sur « Installer maintenant » pour installer WSL2 + Ubuntu automatiquement.",
   "wsl.recheck": "Re-vérifier",
   "wsl.copy": "Copier",
   "wsl.docs": "Documentation WSL ↗",
@@ -66,5 +66,7 @@
   "modal.token_local_hint": "lu automatiquement depuis ~/cicy-ai/global.json",
   "modal.show_token": "Afficher le token",
   "modal.hide_token": "Masquer le token",
-  "footer.running": "actif"
+  "footer.running": "actif",
+  "wsl.no_exe_title": "Votre version de Windows ne prend pas en charge WSL",
+  "wsl.no_exe_subtitle": "Windows 10 version 1903 ou supérieure est requise. Mettez à jour Windows."
 }

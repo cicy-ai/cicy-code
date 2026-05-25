@@ -133,5 +133,12 @@
   "marketplaceTabUpdates": "更新",
   "marketplaceVersionLatest": "最新",
   "marketplaceVersionInstalled": "インストール済み",
-  "marketplaceNoUpdates": "バージョン履歴はありません。"
+  "marketplaceNoUpdates": "バージョン履歴はありません。",
+  "mobileQrTitle": "デバイスで開く",
+  "mobileQrSubtitle": "cicy-mobile アプリでスキャンしてこのワークスペースを追加。",
+  "mobileQrCopyLink": "リンクをコピー",
+  "mobileQrCopied": "コピー済み",
+  "mobileQrScanHint": "スマホのカメラか CiCy Mobile でスキャン",
+  "mobileQrOr": "または",
+  "mobileQrOpenDesktop": "CiCy Desktop で開く"
 }

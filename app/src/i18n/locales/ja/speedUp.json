@@ -1,0 +1,25 @@
+{
+  "title": "ダウンロードを高速化",
+  "description": "リージョンを検出し、cicy-code、npm、pip、Go、apt、Homebrew の最速ミラーを選択します。すべてのコマンドは cicy-desktop 経由でローカル実行され、ソースコードは変更しません。",
+  "alreadyConfigured": "{{date}} に {{os}} / {{region}} 用に設定済み",
+  "reDetect": "再検出",
+  "detectingHost": "ホストを検出中…",
+  "probingMirrors": "ミラーを測定中…",
+  "fieldOs": "OS",
+  "fieldRegion": "リージョン",
+  "fieldWsl": "WSL",
+  "wslNotInstalled": "未インストール",
+  "applyButton": "選択を適用",
+  "doneMessage": "完了しました。~/.cicy/speedup.json に保存しました。",
+  "failed": "失敗：{{error}}",
+  "retry": "再試行",
+  "category": {
+    "gh": "GitHub プロキシ",
+    "apt": "Ubuntu apt",
+    "rootfs": "WSL Ubuntu rootfs",
+    "pypi": "Python (pip)",
+    "npm": "Node (npm)",
+    "go": "Go モジュール",
+    "brew": "Homebrew"
+  }
+}

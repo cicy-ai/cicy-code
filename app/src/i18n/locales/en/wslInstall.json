@@ -1,0 +1,14 @@
+{
+  "title": "Install WSL Ubuntu (CN-friendly)",
+  "description": "Windows in China? <0>wsl --install</0> talks to raw.githubusercontent.com which is blocked. This card sideloads an Ubuntu rootfs from a CN mirror and runs <1>wsl --import</1> instead.",
+  "probingMirrors": "Probing mirrors…",
+  "rootfsMirrorTitle": "Ubuntu rootfs mirror",
+  "ghProxyTitle": "GitHub proxy (for cicy-code download)",
+  "installButton": "Install Ubuntu + cicy-code",
+  "downloadingRootfs": "Downloading rootfs… (300+ MB, ~5 min on 1 MB/s)",
+  "importingWsl": "Importing into WSL + downloading cicy-code…",
+  "doneMessage": "Ubuntu installed and cicy-code downloaded. Run <0>wsl -d Ubuntu</0> and you should be set.",
+  "reProbe": "Re-probe",
+  "stepFailed": "Step failed (exit {{code}}). Tail:\n{{tail}}",
+  "stepTimeout": "Step timed out after 30 minutes"
+}

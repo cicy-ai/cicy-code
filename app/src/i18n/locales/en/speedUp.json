@@ -1,0 +1,25 @@
+{
+  "title": "Speed up downloads",
+  "description": "Detect your region and pick the fastest mirror for cicy-code, npm, pip, Go, apt, and Homebrew. All commands run locally via cicy-desktop — no source code changes.",
+  "alreadyConfigured": "Already configured {{date}} for {{os}} / {{region}}",
+  "reDetect": "Re-detect anyway",
+  "detectingHost": "Detecting host…",
+  "probingMirrors": "Probing mirrors…",
+  "fieldOs": "OS",
+  "fieldRegion": "Region",
+  "fieldWsl": "WSL",
+  "wslNotInstalled": "not installed",
+  "applyButton": "Apply picks",
+  "doneMessage": "All done. Saved to ~/.cicy/speedup.json.",
+  "failed": "Failed: {{error}}",
+  "retry": "Retry",
+  "category": {
+    "gh": "GitHub proxy",
+    "apt": "Ubuntu apt",
+    "rootfs": "WSL Ubuntu rootfs",
+    "pypi": "Python (pip)",
+    "npm": "Node (npm)",
+    "go": "Go modules",
+    "brew": "Homebrew"
+  }
+}

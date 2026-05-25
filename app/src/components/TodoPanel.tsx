@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Circle, CircleDot, CheckCircle2, CircleSlash, Trash2, MoreHorizontal,
   Sparkles, Loader2, GripVertical, Search, ArrowRight, Pencil, X as XIcon,
@@ -45,6 +46,11 @@ interface Props {
 }
 
 export default function TodoPanel({ paneId, active, isMaster }: Props) {
+  // i18next's `t` is renamed to `tr` because this file uses `t` for the todo
+  // object inside several `.map((t) => ...)` callbacks. Picking a different
+  // name avoids shadowing without renaming dozens of `t.id` / `t.title`
+  // references.
+  const { t: tr } = useTranslation('todoPanel');
   const [todos, setTodos] = useState<Todo[]>([]);
   const [counts, setCounts] = useState<Counts>({ all: 0, todo: 0, doing: 0, done: 0, dropped: 0 });
   const [loading, setLoading] = useState(false);
@@ -163,7 +169,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
       setMenuOpenId(null); setMenuPos(null);
       refresh();
     } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || 'update failed');
+      setError(e?.response?.data?.detail || e?.message || tr('updateFailed'));
     }
   };
 
@@ -202,7 +208,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
       await (apiService as any).updateTodo(t.pane_id || paneId, id, { status });
       refresh();
     } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || 'update failed');
+      setError(e?.response?.data?.detail || e?.message || tr('updateFailed'));
       refresh();
     }
   };
@@ -226,14 +232,14 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
             if (e.key === 'Enter' && !isComposing) { e.preventDefault(); submitAdd(); }
             if (e.key === 'Escape') { e.preventDefault(); setDraftTitle(''); }
           }}
-          placeholder="想到啥写啥，Enter 加入待办"
+          placeholder={tr('quickAddPlaceholder')}
           className="m-0 h-6 flex-1 border-0 bg-transparent p-0 text-[14px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-600"
         />
         {draftTitle && (
           <button
             onClick={submitAdd}
             className="shrink-0 rounded-md bg-blue-500/20 px-2.5 py-1 text-[11px] text-blue-300 hover:bg-blue-500/30"
-          >Enter ↵</button>
+          >{tr('enterShortcut')}</button>
         )}
       </div>
 
@@ -245,7 +251,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Escape') setSearchQuery(''); }}
-            placeholder="搜索…"
+            placeholder={tr('searchPlaceholder')}
             className="m-0 h-5 w-full border-0 bg-transparent p-0 text-[12px] leading-5 text-zinc-200 outline-none placeholder:text-zinc-600"
           />
           {searchQuery && (
@@ -258,19 +264,19 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
         {isMaster && (
           <button
             onClick={() => setShowAllAgents(!showAllAgents)}
-            title={showAllAgents ? '只看自己的待办' : '查看所有 agent 待办'}
+            title={showAllAgents ? tr('viewMineOnly') : tr('viewAllAgents')}
             className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] transition-colors ${
               showAllAgents ? 'bg-purple-500/20 text-purple-300' : 'bg-white/[0.04] text-zinc-400 hover:text-zinc-200'
             }`}
           >
             <Users className="h-3.5 w-3.5" />
-            <span>全部</span>
+            <span>{tr('all')}</span>
           </button>
         )}
         <button
           onClick={sendAlignPrompt}
           disabled={aligning !== 'idle'}
-          title="让当前 agent 对照实际进度更新 todo 清单"
+          title={tr('alignTooltip')}
           className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] transition-colors ${
             aligning === 'sent' ? 'bg-emerald-500/[0.12] text-emerald-300'
             : aligning === 'sending' ? 'bg-white/[0.06] text-zinc-400'
@@ -280,7 +286,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
           {aligning === 'sending' ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
             : aligning === 'sent' ? <CheckCircle2 className="h-3.5 w-3.5" />
             : <Sparkles className="h-3.5 w-3.5" />}
-          <span>{aligning === 'sent' ? '已发送' : aligning === 'sending' ? '发送中' : '对齐进度'}</span>
+          <span>{aligning === 'sent' ? tr('alignSent') : aligning === 'sending' ? tr('alignSending') : tr('alignProgress')}</span>
         </button>
       </div>
 
@@ -291,7 +297,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
             className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] transition-colors ${
               filterAgent === null ? 'bg-purple-500/25 text-purple-200' : 'bg-white/[0.04] text-zinc-400 hover:text-zinc-200'
             }`}
-          >全部</button>
+          >{tr('all')}</button>
           {agentIds.map((id) => (
             <button
               key={id}
@@ -333,7 +339,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
               <div className={`flex items-center justify-between rounded-t-lg px-3 py-2 ${cls.active}`}>
                 <div className="flex items-center gap-2 text-[12px] font-medium">
                   {statusIcon(status)}
-                  <span>{statusLabel(status)}</span>
+                  <span>{tr(`status.${status}`)}</span>
                 </div>
                 <span className="text-[11px] tabular-nums opacity-70">{cards.length}</span>
               </div>
@@ -344,7 +350,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
               >
                 {cards.length === 0 ? (
                   <div className="px-2 py-6 text-center text-[11px] text-zinc-700">
-                    {searchQuery ? '无匹配' : status === 'todo' ? '暂无待办' : '空'}
+                    {searchQuery ? tr('emptyMatch') : status === 'todo' ? tr('emptyTodo') : tr('emptyOther')}
                   </div>
                 ) : cards.map((t) => {
                   const isEditing = editingId === t.id;
@@ -404,9 +410,9 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
 
                       <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-1">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] tabular-nums text-zinc-600" title={t.updated_at}>{humanTime(t.updated_at)}</span>
+                          <span className="text-[10px] tabular-nums text-zinc-600" title={t.updated_at}>{humanTime(t.updated_at, tr)}</span>
                           {t.creator_id && (
-                            <span className="rounded bg-white/[0.05] px-1 py-0.5 text-[9px] text-zinc-600" title={`创建者: ${t.creator_id}`}>
+                            <span className="rounded bg-white/[0.05] px-1 py-0.5 text-[9px] text-zinc-600" title={tr('creatorTooltip', { name: t.creator_id })}>
                               {shortId(t.creator_id)}
                             </span>
                           )}
@@ -422,17 +428,17 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
                               {canSendToAgent && (
                                 <CardAction
                                   onClick={() => sendTodoToAgent(t)}
-                                  title={status === 'doing' ? '发给 agent 继续推进' : '发给 agent 处理'}
+                                  title={status === 'doing' ? tr('sendToAgentDoing') : tr('sendToAgentTodo')}
                                   disabled={isSending}
                                 >
                                   {isSending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
                                 </CardAction>
                               )}
-                              <CardAction onClick={() => { setEditingId(t.id); setEditingDraft(t.title); }} title="编辑">
+                              <CardAction onClick={() => { setEditingId(t.id); setEditingDraft(t.title); }} title={tr('editTooltip')}>
                                 <Pencil className="h-3 w-3" />
                               </CardAction>
                               {t.status !== 'done' && (
-                                <CardAction onClick={() => setStatus(t.id, advanceStatus(t.status), cardPane)} title={`→ ${statusLabel(advanceStatus(t.status))}`}>
+                                <CardAction onClick={() => setStatus(t.id, advanceStatus(t.status), cardPane)} title={tr('advanceStatusHint', { label: tr(`status.${advanceStatus(t.status)}`) })}>
                                   <ArrowRight className="h-3 w-3" />
                                 </CardAction>
                               )}
@@ -445,7 +451,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
                                     setMenuOpenId(t.id);
                                   }
                                 }}
-                                title="更多"
+                                title={tr('moreTooltip')}
                               >
                                 <MoreHorizontal className="h-3 w-3" />
                               </CardAction>
@@ -457,10 +463,10 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
                                     style={{ top: menuPos.top, right: menuPos.right }}
                                   >
                                     {COLUMNS.filter((s) => s !== t.status).map((s) => (
-                                      <MenuItem key={s} onClick={() => setStatus(t.id, s, cardPane)} icon={statusIcon(s)}>移到 {statusLabel(s)}</MenuItem>
+                                      <MenuItem key={s} onClick={() => setStatus(t.id, s, cardPane)} icon={statusIcon(s)}>{tr('moveToStatus', { label: tr(`status.${s}`) })}</MenuItem>
                                     ))}
                                     <div className="my-1 border-t border-white/[0.06]" />
-                                    <MenuItem onClick={() => remove(t.id, cardPane)} icon={<Trash2 className="h-3.5 w-3.5" />} danger>删除</MenuItem>
+                                    <MenuItem onClick={() => remove(t.id, cardPane)} icon={<Trash2 className="h-3.5 w-3.5" />} danger>{tr('deleteAction')}</MenuItem>
                                   </div>
                                 </>,
                                 document.body
@@ -480,8 +486,8 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
 
       {isEmpty && (
         <div className="pointer-events-none absolute inset-x-0 bottom-1/2 text-center">
-          <p className="text-[13px] text-zinc-700">还没有待办</p>
-          <p className="mt-1 text-[11px] text-zinc-800">在上方输入框打字，按 Enter 添加</p>
+          <p className="text-[13px] text-zinc-700">{tr('emptyTitle')}</p>
+          <p className="mt-1 text-[11px] text-zinc-800">{tr('emptyHint')}</p>
         </div>
       )}
     </div>
@@ -535,15 +541,6 @@ function statusIcon(s: TodoStatus) {
   }
 }
 
-function statusLabel(s: TodoStatus) {
-  switch (s) {
-    case 'todo':    return '待办';
-    case 'doing':   return '进行中';
-    case 'done':    return '已完成';
-    case 'dropped': return '废弃';
-  }
-}
-
 function statusClasses(s: string): { active: string; idle: string; badge: string; stripe: string; cardBorder: string } {
   switch (s) {
     case 'todo':
@@ -559,17 +556,17 @@ function statusClasses(s: string): { active: string; idle: string; badge: string
   }
 }
 
-function humanTime(iso: string): string {
+function humanTime(iso: string, tr: (key: string, opts?: Record<string, unknown>) => string): string {
   if (!iso) return '-';
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return iso;
   const diff = Math.max(0, Math.floor((Date.now() - t) / 1000));
-  if (diff < 60)     return '刚刚';
-  if (diff < 3600)   return `${Math.floor(diff / 60)}m前`;
-  if (diff < 86400)  return `${Math.floor(diff / 3600)}h前`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}天前`;
+  if (diff < 60)     return tr('timeJustNow');
+  if (diff < 3600)   return tr('timeMinutesAgo', { n: Math.floor(diff / 60) });
+  if (diff < 86400)  return tr('timeHoursAgo',   { n: Math.floor(diff / 3600) });
+  if (diff < 604800) return tr('timeDaysAgo',    { n: Math.floor(diff / 86400) });
   const d = new Date(iso);
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
+  return tr('timeDateMonth', { month: d.getMonth() + 1, day: d.getDate() });
 }
 
 function shortId(id: string): string {

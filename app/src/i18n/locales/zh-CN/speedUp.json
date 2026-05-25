@@ -1,0 +1,25 @@
+{
+  "title": "加速下载",
+  "description": "检测你的区域并为 cicy-code、npm、pip、Go、apt、Homebrew 挑选最快的镜像源。所有命令通过 cicy-desktop 在本地执行——不修改源代码。",
+  "alreadyConfigured": "已于 {{date}} 配置（{{os}} / {{region}}）",
+  "reDetect": "重新检测",
+  "detectingHost": "检测主机…",
+  "probingMirrors": "测速镜像中…",
+  "fieldOs": "系统",
+  "fieldRegion": "区域",
+  "fieldWsl": "WSL",
+  "wslNotInstalled": "未安装",
+  "applyButton": "应用所选",
+  "doneMessage": "已完成，配置已保存到 ~/.cicy/speedup.json。",
+  "failed": "失败：{{error}}",
+  "retry": "重试",
+  "category": {
+    "gh": "GitHub 代理",
+    "apt": "Ubuntu apt",
+    "rootfs": "WSL Ubuntu rootfs",
+    "pypi": "Python (pip)",
+    "npm": "Node (npm)",
+    "go": "Go modules",
+    "brew": "Homebrew"
+  }
+}

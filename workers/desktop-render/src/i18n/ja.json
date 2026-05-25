@@ -25,7 +25,7 @@
   "status.unknown": "不明",
   "wsl.title_install": "Windows で cicy-code を実行するには WSL2 をインストール",
   "wsl.title_no_distro": "WSL2 は入っていますがディストロがありません",
-  "wsl.subtitle": "「今すぐインストール」をクリックするか、管理者 PowerShell で手動実行してください。",
+  "wsl.subtitle": "「今すぐインストール」をクリックして WSL2 + Ubuntu を自動インストールします。",
   "wsl.recheck": "再確認",
   "wsl.copy": "コピー",
   "wsl.docs": "WSL インストール ↗",
@@ -66,5 +66,7 @@
   "modal.token_local_hint": "~/cicy-ai/global.json から自動取得",
   "modal.show_token": "トークンを表示",
   "modal.hide_token": "トークンを隠す",
-  "footer.running": "実行中"
+  "footer.running": "実行中",
+  "wsl.no_exe_title": "お使いの Windows は WSL に対応していません",
+  "wsl.no_exe_subtitle": "Windows 10 バージョン 1903 以降が必要です。Windows をアップグレードしてください。"
 }

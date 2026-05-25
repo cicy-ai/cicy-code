@@ -133,5 +133,12 @@
   "marketplaceTabUpdates": "Mises à jour",
   "marketplaceVersionLatest": "récent",
   "marketplaceVersionInstalled": "installé",
-  "marketplaceNoUpdates": "Aucun historique de version."
+  "marketplaceNoUpdates": "Aucun historique de version.",
+  "mobileQrTitle": "Ouvrir avec un appareil",
+  "mobileQrSubtitle": "Scannez depuis l'app cicy-mobile pour ajouter cet espace.",
+  "mobileQrCopyLink": "Copier le lien",
+  "mobileQrCopied": "Copié",
+  "mobileQrScanHint": "Scannez avec l'appareil photo ou CiCy Mobile",
+  "mobileQrOr": "ou",
+  "mobileQrOpenDesktop": "Ouvrir dans CiCy Desktop"
 }

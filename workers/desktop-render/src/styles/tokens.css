@@ -22,7 +22,7 @@
   --lh-base:  1.5;
 
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Inter", system-ui, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+  --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", Consolas, SFMono-Regular, "JetBrains Mono", Menlo, "Courier New", monospace;
 
   /* ── colors ── single brand, semantic states */
   --bg:           #0d1117;

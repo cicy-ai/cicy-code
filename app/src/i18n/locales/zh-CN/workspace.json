@@ -134,5 +134,12 @@
   "marketplaceTabUpdates": "更新",
   "marketplaceVersionLatest": "最新",
   "marketplaceVersionInstalled": "已安装",
-  "marketplaceNoUpdates": "没有版本历史。"
+  "marketplaceNoUpdates": "没有版本历史。",
+  "mobileQrTitle": "使用设备打开",
+  "mobileQrSubtitle": "在手机端 cicy-mobile 扫码即可加入这个工作区。",
+  "mobileQrCopyLink": "复制链接",
+  "mobileQrCopied": "已复制",
+  "mobileQrScanHint": "用手机相机或 CiCy Mobile 扫码",
+  "mobileQrOr": "或",
+  "mobileQrOpenDesktop": "用 CiCy Desktop 打开"
 }
