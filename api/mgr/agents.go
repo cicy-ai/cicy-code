@@ -302,6 +302,11 @@ func bindAgentCore(masterPaneID, subShortName string, inheritGuidance bool, mast
 		if inheritGuidance {
 			appendMasterReferenceToGuidance(subShort, masterShort, masterAgentTypeHint)
 		}
+		// Even when already bound, ensure the sub-worker is actually running
+		// so re-binding doubles as a "wake up" gesture.
+		if err := ensureAgentRunningByPaneID(subShort + ":main.0"); err != nil {
+			log.Printf("[agent-bind] ensure sub-worker %s running failed: %v", subShort, err)
+		}
 		return bindAgentResult{ID: existingID, PaneID: masterShort, AgentName: subShort, AlreadyBound: true}, nil
 	case err != nil && err != sql.ErrNoRows:
 		return bindAgentResult{}, err
@@ -318,6 +323,11 @@ func bindAgentCore(masterPaneID, subShortName string, inheritGuidance bool, mast
 	}
 	if inheritGuidance {
 		appendMasterReferenceToGuidance(subShort, masterShort, masterAgentTypeHint)
+	}
+	// If the sub-worker was previously stopped (tmux session killed), bring it
+	// back up so the binding is immediately usable.
+	if err := ensureAgentRunningByPaneID(subShort + ":main.0"); err != nil {
+		log.Printf("[agent-bind] ensure sub-worker %s running failed: %v", subShort, err)
 	}
 	id, _ := res.LastInsertId()
 	go broadcastPollData(masterShort)
@@ -371,9 +381,9 @@ func handleAgentUnbind(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/agents/unbind/")
-	// 先查出 pane_id 用于广播
-	var unbindPaneID string
-	_ = store.QueryRow("SELECT pane_id FROM pane_agents WHERE id=?", id).Scan(&unbindPaneID)
+	// 先查出 pane_id（master）和 agent_name（sub）用于广播和后续 stop
+	var unbindPaneID, unbindSubName string
+	_ = store.QueryRow("SELECT pane_id, agent_name FROM pane_agents WHERE id=?", id).Scan(&unbindPaneID, &unbindSubName)
 	res, err := store.Exec("DELETE FROM pane_agents WHERE id=?", id)
 	if err != nil {
 		httpErr(w, 500, err.Error())
@@ -388,6 +398,19 @@ func handleAgentUnbind(w http.ResponseWriter, r *http.Request) {
 		if err := syncBoundAgentWorkspaceLinks(unbindPaneID); err != nil {
 			httpErr(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+	}
+	// Stop the sub-worker if it's not bound to any other master anymore.
+	if unbindSubName != "" {
+		var remaining int
+		_ = store.QueryRow(
+			"SELECT COUNT(*) FROM pane_agents WHERE agent_name=? AND status='active'",
+			unbindSubName,
+		).Scan(&remaining)
+		if remaining == 0 {
+			stopAgentByPaneID(unbindSubName + ":main.0")
+		} else {
+			log.Printf("[agent-unbind] keep %s alive: still bound to %d master(s)", unbindSubName, remaining)
 		}
 	}
 	if unbindPaneID != "" {

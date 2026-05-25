@@ -25,6 +25,9 @@ import enLogin from './locales/en/login.json';
 import enSettings from './locales/en/settings.json';
 import enUi from './locales/en/ui.json';
 import enWorkspace from './locales/en/workspace.json';
+import enWslInstall from './locales/en/wslInstall.json';
+import enSpeedUp from './locales/en/speedUp.json';
+import enTodoPanel from './locales/en/todoPanel.json';
 import zhAgentChat from './locales/zh-CN/agentChat.json';
 import zhAgentInspector from './locales/zh-CN/agentInspector.json';
 import zhAgentProviderRequest from './locales/zh-CN/agentProviderRequest.json';
@@ -48,6 +51,9 @@ import zhLogin from './locales/zh-CN/login.json';
 import zhSettings from './locales/zh-CN/settings.json';
 import zhUi from './locales/zh-CN/ui.json';
 import zhWorkspace from './locales/zh-CN/workspace.json';
+import zhWslInstall from './locales/zh-CN/wslInstall.json';
+import zhSpeedUp from './locales/zh-CN/speedUp.json';
+import zhTodoPanel from './locales/zh-CN/todoPanel.json';
 import frAgentCanvas from './locales/fr/agentCanvas.json';
 import frAgentChat from './locales/fr/agentChat.json';
 import frAgentInspector from './locales/fr/agentInspector.json';
@@ -71,6 +77,9 @@ import frTeamPanel from './locales/fr/teamPanel.json';
 import frTerminal from './locales/fr/terminal.json';
 import frUi from './locales/fr/ui.json';
 import frWorkspace from './locales/fr/workspace.json';
+import frWslInstall from './locales/fr/wslInstall.json';
+import frSpeedUp from './locales/fr/speedUp.json';
+import frTodoPanel from './locales/fr/todoPanel.json';
 import jaAgentCanvas from './locales/ja/agentCanvas.json';
 import jaAgentChat from './locales/ja/agentChat.json';
 import jaAgentInspector from './locales/ja/agentInspector.json';
@@ -94,6 +103,9 @@ import jaTeamPanel from './locales/ja/teamPanel.json';
 import jaTerminal from './locales/ja/terminal.json';
 import jaUi from './locales/ja/ui.json';
 import jaWorkspace from './locales/ja/workspace.json';
+import jaWslInstall from './locales/ja/wslInstall.json';
+import jaSpeedUp from './locales/ja/speedUp.json';
+import jaTodoPanel from './locales/ja/todoPanel.json';
 
 const STORAGE_KEY = 'cicy.lang';
 
@@ -162,6 +174,9 @@ const resources = {
     provider: enProvider,
     im: enIm,
     terminal: enTerminal,
+    wslInstall: enWslInstall,
+    speedUp: enSpeedUp,
+    todoPanel: enTodoPanel,
   },
   'zh-CN': {
     common: zhCommon,
@@ -187,6 +202,9 @@ const resources = {
     provider: zhProvider,
     im: zhIm,
     terminal: zhTerminal,
+    wslInstall: zhWslInstall,
+    speedUp: zhSpeedUp,
+    todoPanel: zhTodoPanel,
   },
   fr: {
     agentCanvas: frAgentCanvas,
@@ -212,6 +230,9 @@ const resources = {
     terminal: frTerminal,
     ui: frUi,
     workspace: frWorkspace,
+    wslInstall: frWslInstall,
+    speedUp: frSpeedUp,
+    todoPanel: frTodoPanel,
   },
   ja: {
     agentCanvas: jaAgentCanvas,
@@ -237,6 +258,9 @@ const resources = {
     terminal: jaTerminal,
     ui: jaUi,
     workspace: jaWorkspace,
+    wslInstall: jaWslInstall,
+    speedUp: jaSpeedUp,
+    todoPanel: jaTodoPanel,
   },
 };
 
@@ -245,7 +269,7 @@ void i18n
   .use(initReactI18next)
   .init({
     resources,
-    ns: ['common', 'login', 'settings', 'createAgent', 'editPane', 'workspace', 'ui', 'layout', 'chat', 'agentInspector', 'agentProviderRequest', 'agentChat', 'agentTypeDesc', 'apiSwitch', 'desktop', 'devPanel', 'provision', 'agentCanvas', 'teamPanel', 'audit', 'provider', 'im', 'terminal'],
+    ns: ['common', 'login', 'settings', 'createAgent', 'editPane', 'workspace', 'ui', 'layout', 'chat', 'agentInspector', 'agentProviderRequest', 'agentChat', 'agentTypeDesc', 'apiSwitch', 'desktop', 'devPanel', 'provision', 'agentCanvas', 'teamPanel', 'audit', 'provider', 'im', 'terminal', 'wslInstall', 'speedUp', 'todoPanel'],
     defaultNS: 'common',
     fallbackLng: {
       'zh': ['zh-CN', 'en'],

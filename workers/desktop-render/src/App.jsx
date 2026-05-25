@@ -20,11 +20,29 @@ export default function App() {
   const [openingId, setOpeningId] = useState(null);
   const [tab, setTab]               = useState("all"); // "all" | "local" | "cloud"
   const [modalState, setModalState] = useState({ open: false, mode: "add", backend: null });
+  const [appVersion, setAppVersion] = useState(""); // cicy-desktop version, populated in electron mode
+  const [installLog, setInstallLog] = useState(() => loadPersistedLog()); // accumulated lines from windowsInstall onProgress (kind:"log")
+  const [installSteps, setInstallSteps] = useState(() => loadPersistedSteps()); // user-facing step timeline
+
+  // Persist install log only — sidecar state always re-fetches fresh on
+  // mount so we don't show a stale "uptodate" badge if the binary moved
+  // or got broken between sessions.
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(LS_LOG_KEY, JSON.stringify({ at: Date.now(), lines: installLog }));
+    } catch {}
+  }, [installLog]);
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(LS_STEPS_KEY, JSON.stringify({ at: Date.now(), steps: installSteps }));
+    } catch {}
+  }, [installSteps]);
 
 
   const checkWsl = useCallback(async () => {
-    if (apiMode !== "electron" || !window.cicy?.sidecar?.wslStatus) {
-      setWsl({ supported: false });
+    const isWin = window.cicy?.platform === "win32";
+    if (apiMode !== "electron" || !window.cicy?.sidecar?.wslStatus || !isWin) {
+      setWsl(null);
       return;
     }
     setWslChecking(true);
@@ -57,6 +75,9 @@ export default function App() {
   const checkSidecar = useCallback(async () => {
     if (apiMode !== "electron" || !window.cicy?.sidecar) {
       setSidecar({ state: "uptodate", info: null, progress: null, error: null });
+      // Stable state — drop any timeline left over from a previous run.
+      setInstallSteps([]);
+      setInstallLog([]);
       return;
     }
     try {
@@ -72,6 +93,16 @@ export default function App() {
       }
       // Installed — also check if outdated (non-blocking, best-effort).
       setSidecar((s) => ({ ...s, state: "uptodate", info: { installedVersion: status.userVersion } }));
+      // Don't auto-clear installSteps/installLog here — the timeline's
+      // "✓ Installed v…" final entry is still useful info to surface
+      // after the install finishes. The banner shows a Close button on
+      // the done state which is the user's signal to dismiss it.
+      // We do clear partial timelines (no done step) so a stale "still
+      // running" banner doesn't survive a fresh page load.
+      setInstallSteps((steps) => {
+        if (!steps || steps.length === 0) return steps;
+        return steps[steps.length - 1].phase === "done" ? steps : [];
+      });
       try {
         const check = await window.cicy.sidecar.checkLatest();
         if (check.ok && check.latest && check.installedVersion !== check.latest) {
@@ -90,6 +121,13 @@ export default function App() {
       checkSidecar();
       checkWsl();
 
+      // Pull cicy-desktop version (electron mode only) for the topbar badge.
+      if (window.cicy?.app?.getVersion) {
+        try {
+          const v = await window.cicy.app.getVersion();
+          if (v?.desktop) setAppVersion(`v${v.desktop}`);
+        } catch {}
+      }
     })();
   }, [loadBackends, checkSidecar, checkWsl]);
 
@@ -114,23 +152,40 @@ export default function App() {
     });
   }, [checkSidecar]);
 
+  // ── Deep link: cicy://addTeam?title=&url=&token= ──
+  useEffect(() => {
+    if (apiMode !== "electron" || !window.cicy?.deeplink?.onAddTeam) return;
+    return window.cicy.deeplink.onAddTeam(async ({ title, url, token }) => {
+      if (!url) return;
+      // De-duplicate by URL origin
+      const list = await api.backends.list();
+      const exists = list.some((b) => {
+        try { return new URL(b.url || "").origin === new URL(url).origin; } catch { return false; }
+      });
+      if (exists) return;
+      await api.backends.add({ name: title || url, url, token: token || undefined });
+      await loadBackends();
+    });
+  }, [loadBackends]);
+
   // ── Actions ──
   const handleOpen = async (b) => {
     setOpeningId(b.id);
     try {
-      const url = b.resolvedUrl || b.url;
-      if (window.electronRPC && url) {
+      if (window.electronRPC) {
         try {
+          // Resolve fresh URL first (reads latest token from WSL global.json).
+          let url = b.url;
+          if (window.cicy?.backends?.resolveUrl) {
+            url = (await window.cicy.backends.resolveUrl(b.id)) || b.resolvedUrl || b.url;
+          } else {
+            url = b.resolvedUrl || b.url;
+          }
+          // Check if any window is already showing this backend (same origin+path,
+          // ignoring ?token= and other query params).
           const wins = await fetchWindows();
-          const targetOrigin = new URL(url).origin;
-          const existing = wins.find((w) => { try { return w.url && new URL(w.url).origin === targetOrigin; } catch { return false; } });
+          const existing = wins.find((w) => w.url && w.url.toLowerCase() === url.toLowerCase());
           if (existing) {
-            // Reload with the fresh URL (which carries the latest token)
-            // before focusing — the existing window may be on the login
-            // page or have a stale session.
-            try {
-              await window.electronRPC("load_url", { win_id: existing.id, url });
-            } catch {}
             await window.electronRPC("control_electron_BrowserWindow", {
               win_id: existing.id,
               code: "(win.isMinimized() && win.restore(), win.show(), win.focus(), 'focused')",
@@ -193,7 +248,10 @@ export default function App() {
       pushToast(t("toast.install_only_electron"), "error");
       return;
     }
+
     setSidecar((s) => ({ ...s, state: "installing", progress: { phase: "init", message: "Preparing…" }, error: null }));
+    setInstallLog([]);
+    setInstallSteps([]);
 
     // Win32: drive the install entirely from the renderer using
     // electronRPC.exec_shell. This bypasses the main-process sidecar:install
@@ -204,7 +262,41 @@ export default function App() {
       try {
         const { windowsInstall, canRunRendererInstall } = await import("./wslInstaller.js");
         if (canRunRendererInstall()) {
-          const r = await windowsInstall({ onProgress: (ev) => setSidecar((s) => ({ ...s, progress: ev })) });
+          const handleEvent = (ev) => {
+            if (ev?.kind === "log") {
+              // Append + cap at 300 lines so memory stays bounded on slow installs.
+              setInstallLog((l) => {
+                const next = [...l, ev.text];
+                return next.length > 300 ? next.slice(next.length - 300) : next;
+              });
+            } else {
+              setSidecar((s) => ({ ...s, progress: ev }));
+              // Build a user-facing step timeline alongside the raw shell log.
+              // Phase-keyed (not last-only) so concurrent phases — e.g. the
+              // parallel `downloading` + `checking-wsl` — both update their
+              // own row instead of overwriting each other.
+              if (ev?.phase) {
+                setInstallSteps((steps) => {
+                  const idx = steps.findIndex((s) => s.phase === ev.phase);
+                  const merged = (prev) => ({
+                    phase: ev.phase,
+                    message: ev.message || prev?.message || ev.phase,
+                    at: Date.now(),
+                    progress: ev.progress != null ? ev.progress : prev?.progress,
+                    status: ev.status || prev?.status,
+                    error: ev.status === "error" ? (ev.error || ev.message) : prev?.error,
+                  });
+                  if (idx >= 0) {
+                    const next = [...steps];
+                    next[idx] = merged(steps[idx]);
+                    return next;
+                  }
+                  return [...steps, merged(null)];
+                });
+              }
+            }
+          };
+          const r = await windowsInstall({ onProgress: handleEvent });
           if (r?.ok) {
             setSidecar({ state: "uptodate", info: { installedVersion: r.version }, progress: null, error: null });
             pushToast(t("toast.installed", { version: r.version }), "success");
@@ -216,6 +308,17 @@ export default function App() {
         // Fall through to ipc-based install if electronRPC missing
       } catch (e) {
         setSidecar((s) => ({ ...s, state: "error", error: e.message, progress: null }));
+        // Mark the step that was running as failed so the timeline shows
+        // a red ✗ next to it and surfaces a retry button. Subsequent
+        // retries replay the whole windowsInstall — every step is
+        // idempotent (size-checked downloads, "skip if already done"
+        // installs) so resumption "feels" like only the failing step
+        // re-runs even though we're calling the full sequence.
+        setInstallSteps((steps) => {
+          if (!steps.length) return steps;
+          const last = steps[steps.length - 1];
+          return [...steps.slice(0, -1), { ...last, status: "error", error: e.message }];
+        });
         return;
       }
     }
@@ -260,7 +363,16 @@ export default function App() {
     return null; // fall through to default Open button
   })();
 
-  const localProgress = sidecar.state === "installing" ? sidecar.progress : null;
+  // Banner above the cards owns the detailed step / log timeline. The
+  // BackendCard only needs to know "install is happening" so it renders
+  // a minimal placeholder ("安装中…") instead of a duplicate progress
+  // panel. We intentionally strip the rich progress fields here.
+  const localProgress = sidecar.state === "installing"
+    ? { phase: "installing", minimal: true }
+    : null;
+  // Banner gets the full progress object — phase + message + progress
+  // bar + step timeline live there.
+  const bannerProgress = sidecar.state === "installing" ? sidecar.progress : null;
 
   const localMenu = (b) => {
     const items = [];
@@ -297,12 +409,37 @@ export default function App() {
         <div className="app__brand">
           <span className="app__brand-mark" />
           CiCy Desktop
+          {appVersion && (
+            <span style={{ fontSize: 11, opacity: 0.5, marginLeft: 8, fontWeight: 400 }}>
+              {appVersion}
+            </span>
+          )}
+          {/* Worker build stamp — proves which CF Worker deploy is loaded.
+              Format: <git_sha>·<MM-DD HH:mm UTC>. Click to copy full ISO time. */}
+          <span
+            style={{ fontSize: 10, opacity: 0.4, marginLeft: 6, fontWeight: 400, fontFamily: "ui-monospace, monospace", cursor: "pointer" }}
+            title={`Worker build ${__WORKER_BUILD_TIME__} (${__WORKER_GIT_SHA__})`}
+            onClick={() => {
+              try { navigator.clipboard.writeText(`${__WORKER_GIT_SHA__} @ ${__WORKER_BUILD_TIME__}`); } catch {}
+            }}
+          >
+            {__WORKER_GIT_SHA__}·{__WORKER_BUILD_TIME__.slice(5, 16).replace("T", " ")}
+          </span>
         </div>
       </header>
 
       <main className="app__main">
         {/* Windows-only WSL setup card — surfaces above the cards. */}
-        <WslSetupBanner wsl={wsl} onRecheck={checkWsl} recheckLoading={wslChecking} />
+        <WslSetupBanner
+          wsl={wsl}
+          onRecheck={checkWsl}
+          recheckLoading={wslChecking}
+          onInstall={handleInstall}
+          progress={bannerProgress}
+          progressLog={installLog}
+          progressSteps={installSteps}
+          onDismiss={() => { setInstallSteps([]); setInstallLog([]); }}
+        />
 
         {/* Tabs: 全部 / 本地 / 云团队 */}
         <div className="app__tabs">
@@ -372,6 +509,8 @@ export default function App() {
   );
 }
 
+
+
 async function fetchWindows() {
   if (!window.electronRPC) return [];
   try {
@@ -380,4 +519,55 @@ async function fetchWindows() {
     const parsed = JSON.parse(txt);
     return Array.isArray(parsed) ? parsed : [];
   } catch { return []; }
+}
+
+
+// ── persisted install state ─────────────────────────────────────────
+// Survives page reloads (cf-deploy + auto-reload, F5, etc.) so the user
+// doesn't lose visible install progress just because the page refreshed.
+// Only the *display* survives — the running install promise itself is
+// gone after reload, so a state of "installing" is rewritten to
+// "interrupted" on rehydrate. Stored in sessionStorage so a fresh
+// browser session starts clean.
+const LS_LOG_KEY     = "cicy.installLog";
+const LS_STEPS_KEY   = "cicy.installSteps";
+const LS_SIDECAR_KEY = "cicy.sidecar";
+const LS_MAX_AGE_MS  = 24 * 60 * 60 * 1000; // 24h — after that, treat as stale.
+
+function loadPersistedLog() {
+  try {
+    const raw = sessionStorage.getItem(LS_LOG_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!parsed || (Date.now() - (parsed.at || 0)) > LS_MAX_AGE_MS) return [];
+    return Array.isArray(parsed.lines) ? parsed.lines : [];
+  } catch { return []; }
+}
+
+function loadPersistedSteps() {
+  try {
+    const raw = sessionStorage.getItem(LS_STEPS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!parsed || (Date.now() - (parsed.at || 0)) > LS_MAX_AGE_MS) return [];
+    return Array.isArray(parsed.steps) ? parsed.steps : [];
+  } catch { return []; }
+}
+
+function loadPersistedSidecar() {
+  const fallback = { state: "checking", info: null, progress: null, error: null };
+  try {
+    const raw = sessionStorage.getItem(LS_SIDECAR_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    if (!parsed || (Date.now() - (parsed.at || 0)) > LS_MAX_AGE_MS) return fallback;
+    const v = parsed.value || fallback;
+    // The promise that drove "installing" is dead after a reload. Surface
+    // that to the UI as a distinct, non-blocking state so the install
+    // button comes back and the user can retry / inspect the saved log.
+    if (v.state === "installing") {
+      return { ...v, state: "interrupted", error: "page reloaded mid-install" };
+    }
+    return v;
+  } catch { return fallback; }
 }

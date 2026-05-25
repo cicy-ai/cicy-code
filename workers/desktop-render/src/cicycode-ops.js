@@ -57,7 +57,21 @@ function platform() {
 }
 const isWin = () => platform() === "win32";
 
-// ── prereq checks ────────────────────────────────────────────────────
+// ── WSL token reader (Windows only) ──────────────────────────────────
+// Reads api_token from the cicy-code daemon's ~/cicy-ai/global.json inside
+// WSL. Called by api.js to build a token-bearing local URL without relying
+// on the main-process window-manager (which may not have the fix deployed yet).
+async function readWslToken() {
+  if (!isWin()) return "";
+  try {
+    // Use chr() to avoid quote nesting issues across WSL/shell boundaries.
+    const home = String.raw`os.path.expanduser(chr(126)+chr(47)+chr(99)+chr(105)+chr(99)+chr(121)+chr(45)+chr(97)+chr(105)+chr(47)+chr(103)+chr(108)+chr(111)+chr(98)+chr(97)+chr(108)+chr(46)+chr(106)+chr(115)+chr(111)+chr(110))`;
+    const key  = String.raw`chr(97)+chr(112)+chr(105)+chr(95)+chr(116)+chr(111)+chr(107)+chr(101)+chr(110)`;
+    const r = await exec(`wsl -d Ubuntu -- python3 -c "import json,os; d=json.load(open(${home})); print(d.get(${key},chr(110)))"`);
+    const t = r.stdout.trim();
+    return t === "n" ? "" : t;
+  } catch { return ""; }
+}
 async function checkNode() {
   const r = await exec("node --version");
   if (!r.ok) return { ok: false, kind: "node", required: "Node.js 22+", version: null, installUrl: "https://nodejs.org/en/download" };
@@ -69,33 +83,59 @@ async function checkNode() {
 // Windows: WSL status check. `wsl --status` lists default distro + kernel version.
 // Exit 0 + non-empty stdout = installed. Exit non-0 = WSL not enabled.
 async function checkWsl() {
+  // First: verify wsl.exe exists at all (missing on old Win10 builds).
+  const which = await exec("where wsl.exe");
+  if (!which.ok || !which.stdout.trim()) {
+    return {
+      ok: false,
+      kind: "wsl",
+      required: "WSL2 + Ubuntu",
+      version: null,
+      noExe: true,   // wsl.exe itself is missing
+      installUrl: "https://aka.ms/wsl-install",
+      installCommand: null,
+    };
+  }
+
   const r = await exec("wsl --status");
   const installed = r.ok && r.stdout && r.stdout.trim().length > 0;
-  // Try to extract a default distro name; non-critical
   const distroMatch = r.stdout && r.stdout.match(/Default Distribution:\s*(\S+)/i);
+  // `wsl --list --quiet` tells us if any distro is registered.
+  const listR = await exec("wsl --list --quiet");
+  const hasDistro = listR.ok && listR.stdout.trim().length > 0;
   return {
-    ok: installed,
+    ok: installed && hasDistro,
+    installed,
+    hasDistro,
     kind: "wsl",
     required: "WSL2 + Ubuntu",
     version: distroMatch ? distroMatch[1] : (installed ? "WSL2" : null),
     installUrl: "https://learn.microsoft.com/en-us/windows/wsl/install",
-    installCommand: "wsl --install -d Ubuntu",
   };
 }
 
 async function checkPrereq() {
   const plat = platform();
-  const base = isWin() ? await checkWsl() : await checkNode();
-  return { ...base, platform: plat === "win32" ? "windows" : plat };
+  if (isWin()) {
+    // Windows: WSL only — Docker path was removed by request. The wsl
+    // installer drives the entire install flow from the renderer (see
+    // wslInstaller.js), so we surface the WSL prereq state here.
+    const wsl = await checkWsl();
+    return { platform: "windows", ...wsl };
+  }
+  const base = await checkNode();
+  return { ...base, platform: plat };
 }
 
 // ── cicy-code installation state ─────────────────────────────────────
 async function checkCicyCodeInstalled() {
-  // Both WSL and native Unix expose `cicy-code` on PATH after `npm i -g`.
-  // On WSL we shell into wsl. On Mac/Linux we just call directly.
-  const cmd = isWin()
-    ? "wsl bash -lc 'command -v cicy-code >/dev/null && cicy-code --version 2>&1 || true'"
-    : "command -v cicy-code >/dev/null && cicy-code --version 2>&1 || npx --no-install cicy-code --version 2>&1 || true";
+  if (isWin()) {
+    // WSL only: docker inspect path was removed by request.
+    const wr = await exec("wsl bash -lc 'command -v cicy-code >/dev/null && cicy-code --version 2>&1 || true'");
+    const m = wr.stdout && wr.stdout.match(/(\d+\.\d+\.\d+)/);
+    return { installed: !!m, version: m ? m[1] : null, runtime: "wsl" };
+  }
+  const cmd = "command -v cicy-code >/dev/null && cicy-code --version 2>&1 || npx --no-install cicy-code --version 2>&1 || true";
   const r = await exec(cmd);
   const m = r.stdout && r.stdout.match(/(\d+\.\d+\.\d+)/);
   return { installed: !!m, version: m ? m[1] : null };
@@ -110,12 +150,27 @@ function wrap(cmd) {
 }
 
 export const cicycodeOps = {
-  // Real impls — call from main.js handleAction
-  async install() { return exec(wrap("npm i -g cicy-code@latest")); },
-  async upgrade() { return exec(wrap("npm i -g cicy-code@latest")); },
-  async start(port = 8008)   { return exec(wrap(`nohup cicy-code > ${LOG} 2>&1 & disown`)); },
-  async stop()    { return exec(wrap("pkill -f 'cicy-code' || true")); },
-  async uninstall() { return exec(wrap("npm uninstall -g cicy-code")); },
+  async install() {
+    // Windows install runs through wslInstaller.js which is invoked from
+    // App.jsx handleInstall directly — this path is only hit on macOS/Linux.
+    return exec(wrap("npm i -g cicy-code@latest"));
+  },
+  async upgrade() {
+    if (isWin()) {
+      // WSL path: re-run the npm install inside the user's WSL distro.
+      return exec(wrap("npm i -g cicy-code@latest"));
+    }
+    return exec(wrap("npm i -g cicy-code@latest"));
+  },
+  async start(port = 8008) {
+    return exec(wrap(`nohup cicy-code > ${LOG} 2>&1 & disown`));
+  },
+  async stop() {
+    return exec(wrap("pkill -f 'cicy-code' || true"));
+  },
+  async uninstall() {
+    return exec(wrap("npm uninstall -g cicy-code"));
+  },
   async installPrereq() {
     // Windows: trigger WSL install (requires elevated shell — open the
     // Microsoft Store / docs page so the user runs it themselves).
@@ -153,4 +208,4 @@ async function localIPs() {
     .filter(s => /^\d+\.\d+\.\d+\.\d+$/.test(s) && !s.startsWith("127.") && !s.startsWith("169.254."));
 }
 
-export const systemOps = { checkNode, checkWsl, checkPrereq, checkCicyCodeInstalled, localIPs, platform, isWin };
+export const systemOps = { checkNode, checkWsl, checkPrereq, checkCicyCodeInstalled, localIPs, platform, isWin, readWslToken };

@@ -1,0 +1,14 @@
+{
+  "title": "Installer WSL Ubuntu (depuis la Chine)",
+  "description": "Windows en Chine ? <0>wsl --install</0> contacte raw.githubusercontent.com qui est bloqué. Ce panneau télécharge le rootfs Ubuntu depuis un miroir CN et exécute <1>wsl --import</1>.",
+  "probingMirrors": "Test des miroirs…",
+  "rootfsMirrorTitle": "Miroir rootfs Ubuntu",
+  "ghProxyTitle": "Proxy GitHub (pour télécharger cicy-code)",
+  "installButton": "Installer Ubuntu + cicy-code",
+  "downloadingRootfs": "Téléchargement du rootfs… (300+ Mo, ~5 min à 1 Mo/s)",
+  "importingWsl": "Import dans WSL + téléchargement de cicy-code…",
+  "doneMessage": "Ubuntu installé et cicy-code téléchargé. Lancez <0>wsl -d Ubuntu</0> et c'est prêt.",
+  "reProbe": "Re-tester",
+  "stepFailed": "Étape échouée (code {{code}}). Sortie :\n{{tail}}",
+  "stepTimeout": "Étape interrompue après 30 minutes"
+}

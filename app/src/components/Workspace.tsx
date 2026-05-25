@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import AgentAvatar from './AgentAvatar';
+import MobileQRPopover from './MobileQRPopover';
 import { useDevRegister, devStore } from '../lib/devStore';
 import { useAuth } from '../contexts/AuthContext';
 import { SendingProvider } from '../contexts/SendingContext';
@@ -1541,6 +1542,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
           <SideBtn dataId="btn-providers" active={leftActive === 'providers'} icon={<Boxes className="w-5 h-5" />} title={t('sidebarProviders')} onClick={() => toggleLeft('providers')} />
           <SideBtn dataId="btn-im" active={leftActive === 'im'} icon={<MessageCircle className="w-5 h-5" />} title={t('sidebarIM', 'IM')} onClick={() => toggleLeft('im')} />
+          <MobileQRPopover workspaceTitle={topBarTitle} />
         </div>
         <div data-id="activity-bar-bottom" className="flex w-full flex-col items-center gap-3">
           <button
@@ -2187,7 +2189,6 @@ const ResourceChip = memo(function ResourceChip({ label, pct, dataId }: { label:
         />
       </div>
       <span data-id={`${dataId}-label`} className="text-[10px] tracking-[0.06em] text-zinc-500">{label}</span>
-      <span data-id={`${dataId}-value`} className={`font-mono text-[11px] tabular-nums ${sev.text}`}>{formatResourcePct(pct)}</span>
     </div>
   );
 });

@@ -1,0 +1,14 @@
+{
+  "title": "安装 WSL Ubuntu（国内友好）",
+  "description": "在国内用 Windows？<0>wsl --install</0> 会去 raw.githubusercontent.com，被墙。这里改用国内镜像下载 Ubuntu rootfs，再 <1>wsl --import</1>。",
+  "probingMirrors": "正在测速镜像…",
+  "rootfsMirrorTitle": "Ubuntu rootfs 镜像",
+  "ghProxyTitle": "GitHub 代理（下载 cicy-code 用）",
+  "installButton": "安装 Ubuntu + cicy-code",
+  "downloadingRootfs": "下载 rootfs 中…（300+ MB，1 MB/s 大约 5 分钟）",
+  "importingWsl": "导入到 WSL + 下载 cicy-code…",
+  "doneMessage": "Ubuntu 已安装，cicy-code 已下载。运行 <0>wsl -d Ubuntu</0> 即可。",
+  "reProbe": "重新测速",
+  "stepFailed": "步骤失败（退出码 {{code}}）。日志：\n{{tail}}",
+  "stepTimeout": "步骤超过 30 分钟未完成"
+}

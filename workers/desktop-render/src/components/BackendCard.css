@@ -3,7 +3,10 @@
 */
 .bcard {
   position: relative;
-  aspect-ratio: 1 / 1;
+  /* Fixed footprint — does not stretch with window width. The grid is
+     repeat(auto-fill, 200px) so columns are always exactly 200px wide. */
+  width: 200px;
+  height: 200px;
   background: var(--bg-elev-1);
   border: 1px solid var(--hairline);
   border-radius: var(--r-lg);
@@ -243,8 +246,54 @@
 }
 .bcard__cancel:hover { color: var(--err); }
 
+/* Scrollable log panel under the progress bar — surfaces every shell command
+   and its summarized output so the user knows the install is alive. */
+/* When the install log is showing, let the card span the entire grid row
+   so the scrollable log has room (otherwise it's clamped to one card width). */
+.bcard.bcard--has-log {
+  grid-column: 1 / -1;
+}
+
+/* Install-time scrolling shell log. Each entry is one shell command preview
+   and its summarized output so the user knows the install is alive. */
+.bcard__progress-log {
+  margin-top: 10px;
+  max-height: 55vh;
+  min-height: 200px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-3);
+  background: color-mix(in srgb, var(--bg-1, #0d1117) 70%, transparent);
+  border: 1px solid var(--border, #30363d);
+  border-radius: 6px;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
 /* ── kind variants ── */
 .bcard--local .bcard__accent { background: var(--brand); }
 .bcard--cloud .bcard__accent { background: var(--accent-cloud, #f59e0b); }
 .bcard--cloud .bcard__cta { background: var(--accent-cloud, #f59e0b); box-shadow: 0 2px 6px -1px color-mix(in srgb, var(--accent-cloud, #f59e0b) 35%, transparent); }
 .bcard--cloud .bcard__cta:hover { background: color-mix(in srgb, var(--accent-cloud, #f59e0b) 90%, white); }
+
+
+/* Minimal in-progress state — used when the WSL banner above the grid
+   already shows the full step timeline. The card just says "安装中…"
+   to avoid duplicating that information. */
+.bcard__progress--minimal {
+  display: flex;
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1;
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+}
+.bcard__progress--minimal .bcard__cta-spinner {
+  border-color: var(--fg-3) transparent transparent transparent;
+}

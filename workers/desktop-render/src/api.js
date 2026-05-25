@@ -238,8 +238,31 @@ const browserCicycode = {
 // system (preload's stale Docker variants are no longer used).
 import { systemOps, cicycodeOps } from "./cicycode-ops.js";
 
+// On Windows, cicy-code runs in WSL. The main-process window-manager reads the
+// token from the WSL filesystem. As a belt-and-suspenders fix we also patch the
+// local backend's resolvedUrl in the render process so the homepage can connect
+// even when window-manager hasn't been updated yet.
+function wrapBackendsForWsl(backends) {
+  if (!systemOps.isWin()) return backends;
+  return {
+    ...backends,
+    async list() {
+      const [items, wslToken] = await Promise.all([
+        backends.list(),
+        systemOps.readWslToken(),
+      ]);
+      if (!wslToken) return items;
+      return items.map(b => {
+        if (b.kind !== "local") return b;
+        const tokenQs = `?token=${encodeURIComponent(wslToken)}`;
+        return { ...b, resolvedUrl: `http://127.0.0.1:8008/${tokenQs}` };
+      });
+    },
+  };
+}
+
 export const api = {
-  backends:  (eApi && eApi.backends)  || browserApi.backends,
+  backends:  wrapBackendsForWsl((eApi && eApi.backends)  || browserApi.backends),
   windows:   (eApi && eApi.windows)   || browserApi.windows,
   updates:   (eApi && eApi.updates)   || browserApi.updates,
   clipboard: (eApi && eApi.clipboard) || browserApi.clipboard,

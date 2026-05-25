@@ -25,7 +25,7 @@
   "status.unknown": "未知",
   "wsl.title_install": "安装 WSL2 以在 Windows 上运行 cicy-code",
   "wsl.title_no_distro": "WSL2 已装但没有 Linux 发行版",
-  "wsl.subtitle": "点击「立即安装」或在管理员 PowerShell 手动运行命令",
+  "wsl.subtitle": "点击「立即安装」自动安装 WSL2 + Ubuntu。",
   "wsl.recheck": "重新检查",
   "wsl.copy": "复制",
   "wsl.docs": "WSL 安装文档 ↗",
@@ -66,5 +66,7 @@
   "modal.token_local_hint": "自动从 ~/cicy-ai/global.json 读取",
   "modal.show_token": "显示 token",
   "modal.hide_token": "隐藏 token",
-  "footer.running": "运行中"
+  "footer.running": "运行中",
+  "wsl.no_exe_title": "当前 Windows 版本不支持 WSL",
+  "wsl.no_exe_subtitle": "需要 Windows 10 版本 1903 或更高版本。请升级 Windows 后重试。"
 }

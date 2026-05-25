@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { execShell, execShellBackground, tailLog, isLogDone } from '../lib/speedup/rpc';
 import { ROOTFS_MIRRORS, GH_PROXIES } from '../lib/speedup/mirrors';
 import { probeAll, formatSpeed, type ProbeResult } from '../lib/speedup/probe';
@@ -11,6 +12,7 @@ type Phase = 'idle' | 'probing' | 'ready' | 'downloading' | 'importing' | 'done'
 // Ubuntu noble rootfs tarball from a CN mirror and `wsl --import` it. This is
 // the exact recipe we proved out in the session that preceded this commit.
 export default function WSLInstall() {
+  const { t } = useTranslation('wslInstall');
   const [phase, setPhase] = useState<Phase>('idle');
   const [rootfs, setRootfs] = useState<ProbeResult[]>([]);
   const [ghproxy, setGhproxy] = useState<ProbeResult[]>([]);
@@ -91,44 +93,47 @@ chmod +x "$HOME/.cicy/cicy-code"
       setLog(content);
       const { done, exitCode } = isLogDone(content);
       if (done) {
-        if (exitCode !== 0) throw new Error(`Step failed (exit ${exitCode}). Tail:\n${content}`);
+        if (exitCode !== 0) throw new Error(t('stepFailed', { code: exitCode, tail: content }));
         return;
       }
     }
-    throw new Error('Step timed out after 30 minutes');
+    throw new Error(t('stepTimeout'));
   }
 
   return (
     <div data-id="wsl-install" className="max-w-3xl mx-auto p-6 text-zinc-200">
-      <h2 className="text-lg font-semibold mb-1">Install WSL Ubuntu (CN-friendly)</h2>
+      <h2 className="text-lg font-semibold mb-1">{t('title')}</h2>
       <p className="text-sm text-zinc-500 mb-4">
-        Windows in China? <code>wsl --install</code> talks to raw.githubusercontent.com which is blocked.
-        This card sideloads an Ubuntu rootfs from a CN mirror and runs <code>wsl --import</code> instead.
+        <Trans
+          t={t}
+          i18nKey="description"
+          components={[<code key="cmd1" />, <code key="cmd2" />]}
+        />
       </p>
 
       {phase === 'probing' && (
-        <div className="flex items-center gap-2 text-sm"><Spinner size="sm" /> Probing mirrors…</div>
+        <div className="flex items-center gap-2 text-sm"><Spinner size="sm" /> {t('probingMirrors')}</div>
       )}
 
       {rootfs.length > 0 && (
-        <Section title="Ubuntu rootfs mirror" results={rootfs} pick={rootfsPick} setPick={setRootfsPick} />
+        <Section title={t('rootfsMirrorTitle')} results={rootfs} pick={rootfsPick} setPick={setRootfsPick} />
       )}
       {ghproxy.length > 0 && (
-        <Section title="GitHub proxy (for cicy-code download)" results={ghproxy} pick={ghProxyPick} setPick={setGhProxyPick} />
+        <Section title={t('ghProxyTitle')} results={ghproxy} pick={ghProxyPick} setPick={setGhProxyPick} />
       )}
 
       {phase === 'ready' && (
         <button
           className="mt-2 px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm"
           onClick={runInstall}
-        >Install Ubuntu + cicy-code</button>
+        >{t('installButton')}</button>
       )}
 
       {(phase === 'downloading' || phase === 'importing') && (
         <div className="mt-4 text-xs">
           <div className="flex items-center gap-2 mb-2">
             <Spinner size="sm" />
-            <span>{phase === 'downloading' ? 'Downloading rootfs… (300+ MB, ~5 min on 1 MB/s)' : 'Importing into WSL + downloading cicy-code…'}</span>
+            <span>{phase === 'downloading' ? t('downloadingRootfs') : t('importingWsl')}</span>
           </div>
           <pre className="rounded border border-zinc-800 bg-black/50 p-2 max-h-64 overflow-auto whitespace-pre-wrap text-zinc-400">{log || '…'}</pre>
         </div>
@@ -136,14 +141,18 @@ chmod +x "$HOME/.cicy/cicy-code"
 
       {phase === 'done' && (
         <div className="mt-4 text-sm text-emerald-400">
-          Ubuntu installed and cicy-code downloaded. Run <code>wsl -d Ubuntu</code> and you should be set.
+          <Trans
+            t={t}
+            i18nKey="doneMessage"
+            components={[<code key="cmd" />]}
+          />
         </div>
       )}
 
       {phase === 'error' && error && (
         <div className="mt-4 rounded border border-rose-700 bg-rose-900/30 p-3 text-sm">
           <div className="text-rose-300">{error}</div>
-          <button className="mt-2 text-xs text-blue-400 hover:underline" onClick={runProbe}>Re-probe</button>
+          <button className="mt-2 text-xs text-blue-400 hover:underline" onClick={runProbe}>{t('reProbe')}</button>
         </div>
       )}
     </div>

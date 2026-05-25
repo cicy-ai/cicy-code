@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation, Trans } from 'react-i18next';
 import i18n from '../../i18n';
-import { Users, Plus, X, ExternalLink, MoreHorizontal, Trash2, RefreshCw, UserPlus, GitBranch } from 'lucide-react';
+import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, UserPlus, GitBranch } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
 import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
@@ -380,18 +380,6 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
             data-id="team-panel-worker-menu-dropdown"
             className="absolute right-0 top-9 min-w-[220px] overflow-hidden whitespace-nowrap rounded-xl border border-white/[0.08] bg-[#111113]/98 p-1.5 shadow-2xl backdrop-blur-xl"
           >
-            <button
-              type="button"
-              data-id="team-panel-worker-menu-open"
-              onClick={() => {
-                setOpenMenuId(null);
-                window.open(`#/agent/${wid}`, '_blank');
-              }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-300 transition-colors cursor-pointer hover:bg-white/[0.06]"
-            >
-              <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-              <span data-id="team-panel-worker-menu-open-label" className="whitespace-nowrap">{i18n.t('openInNewWindow', { ns: 'teamPanel' })}</span>
-            </button>
             {onRemove ? (
               <button
                 type="button"
@@ -502,12 +490,6 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
             sub: shortId(a.pane_id),
             icon: <AgentAvatar agentType={a.agent_type} title={a.title || shortId(a.pane_id)} variant="select" />,
             actions: [
-              {
-                id: 'open',
-                label: i18n.t('openInNewWindow', { ns: 'teamPanel' }),
-                icon: <ExternalLink className="w-3.5 h-3.5" />,
-                onClick: () => window.open(`#/agent/${shortId(a.pane_id)}`, '_blank'),
-              },
               {
                 id: 'delete',
                 label: i18n.t('delete', { ns: 'teamPanel' }),

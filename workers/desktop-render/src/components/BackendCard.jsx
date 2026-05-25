@@ -25,17 +25,11 @@ import "./BackendCard.css";
 export default function BackendCard({
   backend, health, onOpen, menuItems = [],
   badge, openLoading = false, openDisabled = false,
-  primaryButton, progress, onCancel,
+  primaryButton, progress, progressLog, onCancel,
 }) {
   const t = useT();
   const isLocal = backend.kind === "local";
   const kind = dotKind(health);
-  const ver = health && health.version ? `v${health.version}` : "";
-  const port = backend.port || (isLocal ? "8008" : "");
-  const host = isLocal
-    ? `127.0.0.1${port ? `:${port}` : ""}`
-    : (() => { try { return new URL(backend.url).host; } catch { return backend.url; } })();
-  const uptime = health && health.uptime_sec ? formatUptime(health.uptime_sec) : "";
 
   const hasProgress = !!progress;
   const pct = hasProgress && typeof progress.progress === "number"
@@ -44,7 +38,7 @@ export default function BackendCard({
   const accent = isLocal ? "var(--brand)" : "var(--accent-cloud)";
 
   return (
-    <div className={`bcard ${isLocal ? "bcard--local" : "bcard--cloud"} ${kind === "up" ? "bcard--online" : ""}`}>
+    <div className={`bcard ${isLocal ? "bcard--local" : "bcard--cloud"} ${kind === "up" ? "bcard--online" : ""} ${hasProgress && progressLog && progressLog.length > 0 ? "bcard--has-log" : ""}`}>
       <div className="bcard__accent" style={{ background: accent }} />
 
       <div className="bcard__top">
@@ -61,19 +55,22 @@ export default function BackendCard({
       </div>
 
       <div className="bcard__body">
-        <h3 className="bcard__name" title={backend.name}>{backend.name}</h3>
+        <h3 className="bcard__name" title={isLocal ? t("team.local") : backend.name}>
+          {isLocal ? t("team.local") : backend.name}
+        </h3>
         {badge && <span className="bcard__badge">{badge}</span>}
-        <div className="bcard__host selectable" title={host}>{host}</div>
-        {(ver || uptime) && (
-          <div className="bcard__meta">
-            {ver && <span className="bcard__ver">{ver}</span>}
-            {ver && uptime && <span className="bcard__sep">·</span>}
-            {uptime && <span className="bcard__uptime">{t("card.uptime", { value: uptime })}</span>}
-          </div>
-        )}
       </div>
 
       {hasProgress ? (
+        progress.minimal ? (
+          // Minimal state: just say "安装中…" with a small spinner. The
+          // detailed timeline + progress bar lives in the WSL banner
+          // above the grid; the card avoids duplicating it.
+          <div className="bcard__progress bcard__progress--minimal">
+            <span className="bcard__cta-spinner" />
+            <span>{t("card.installing")}</span>
+          </div>
+        ) : (
         <div className="bcard__progress">
           <div className="bcard__progress-text">
             <span>{progress.message || t("card.installing")}</span>
@@ -92,7 +89,17 @@ export default function BackendCard({
               <button type="button" className="bcard__cancel" onClick={onCancel}>{t("card.cancel")}</button>
             )}
           </div>
+          {progressLog && progressLog.length > 0 && (
+            <pre className="bcard__progress-log" ref={(el) => {
+              // Auto-scroll to the bottom whenever a new line lands. ref callback
+              // runs on every render — cheaper than a useEffect for a leaf div.
+              if (el) el.scrollTop = el.scrollHeight;
+            }}>
+              {progressLog.join("\n")}
+            </pre>
+          )}
         </div>
+        )
       ) : (
         <button
           type="button"
@@ -108,13 +115,6 @@ export default function BackendCard({
       )}
     </div>
   );
-}
-
-function formatUptime(sec) {
-  if (sec < 60)    return `${sec}s`;
-  if (sec < 3600)  return `${Math.floor(sec / 60)}m`;
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
-  return `${Math.floor(sec / 86400)}d`;
 }
 
 function formatBytes(n) {
