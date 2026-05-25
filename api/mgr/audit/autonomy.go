@@ -733,6 +733,14 @@ func decisionsPath() string {
 	return filepath.Join(home, "cicy-ai", "autonomy", "decisions.ndjson")
 }
 
+// decisionsLogMaxBytes triggers rotation of decisions.ndjson when the
+// active file grows past this size. Rotated files are timestamped:
+// decisions.ndjson.2026-05.gz (rotated by month) — but we use the
+// simpler "size threshold → timestamped suffix" strategy here because
+// LLM ticks are infrequent and decisions are not high-volume in
+// absolute terms.
+const decisionsLogMaxBytes = 10 * 1024 * 1024 // 10 MB
+
 func appendDecision(d AutonomyDecision) {
 	decisionsMu.Lock()
 	defer decisionsMu.Unlock()
@@ -741,6 +749,17 @@ func appendDecision(d AutonomyDecision) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		log.Printf("[autonomy] mkdir decisions: %v", err)
 		return
+	}
+	// Rotate if current file is too large. ReadDecisions automatically
+	// pulls from active + most recent rotated archive (see code below).
+	if st, err := os.Stat(path); err == nil && st.Size() > decisionsLogMaxBytes {
+		ts := time.Now().UTC().Format("2006-01-02T15-04-05Z")
+		archive := path + "." + ts
+		if err := os.Rename(path, archive); err != nil {
+			log.Printf("[autonomy] rotate decisions: %v", err)
+		} else {
+			log.Printf("[autonomy] rotated decisions.ndjson → %s", filepath.Base(archive))
+		}
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {

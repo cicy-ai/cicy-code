@@ -170,6 +170,50 @@ func TestMergeAutonomyPatch_RulesOverrideAndAllowList(t *testing.T) {
 	}
 }
 
+func TestAppendDecisionRotatesWhenLarge(t *testing.T) {
+	home := withTempHome(t)
+	path := filepath.Join(home, "cicy-ai", "autonomy", "decisions.ndjson")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed an oversized active file just under threshold-trigger time.
+	bigBlob := make([]byte, decisionsLogMaxBytes+10)
+	for i := range bigBlob {
+		bigBlob[i] = 'x'
+	}
+	if err := os.WriteFile(path, bigBlob, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	appendDecision(AutonomyDecision{ID: "post-rotate", Timestamp: time.Now().UTC()})
+
+	// Active file should now be small (just the one new decision).
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Size() > 1024 {
+		t.Errorf("active file should be small post-rotate, got %d bytes", st.Size())
+	}
+
+	// Rotated archive should exist with the original payload.
+	entries, _ := os.ReadDir(filepath.Dir(path))
+	foundArchive := false
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "decisions.ndjson.") {
+			foundArchive = true
+			info, _ := e.Info()
+			if info.Size() < int64(decisionsLogMaxBytes) {
+				t.Errorf("rotated archive too small: %d bytes", info.Size())
+			}
+		}
+	}
+	if !foundArchive {
+		t.Fatalf("rotated archive not created; entries: %v", entries)
+	}
+}
+
 func TestAppendDecisionAndRead(t *testing.T) {
 	withTempHome(t)
 	d1 := AutonomyDecision{ID: "dec-1", Timestamp: time.Now().UTC(), Trigger: "interval",

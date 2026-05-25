@@ -89,5 +89,6 @@
   "decisionsRevertConfirm": "Confirm revert",
   "decisionsReverting": "Reverting…",
   "decisionsRevertError": "Revert failed",
-  "decisionsGitSHA": "Git commit"
+  "decisionsGitSHA": "Git commit",
+  "decisionsAutoRefresh": "auto-refresh"
 }

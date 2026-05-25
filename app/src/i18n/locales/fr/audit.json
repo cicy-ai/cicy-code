@@ -89,5 +89,6 @@
   "decisionsRevertConfirm": "Confirmer l'annulation",
   "decisionsReverting": "Annulation…",
   "decisionsRevertError": "Échec de l'annulation",
-  "decisionsGitSHA": "Commit git"
+  "decisionsGitSHA": "Commit git",
+  "decisionsAutoRefresh": "auto-actualiser"
 }
