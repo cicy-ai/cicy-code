@@ -11,16 +11,13 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
-	"log"
 	"mime"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -280,82 +277,13 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", 400)
 		return
 	}
-	// open_file: use code-server IPC to open file directly
-	if body.Action == "open_file" && body.File != "" {
-		go openInCodeServer(body.File)
-	}
+	// open_file: forwarded to subscribers via redis pubsub below.
+	// Historically this also POSTed to code-server's IPC socket to open the
+	// file in the workbench; native files replaced that flow — the redis
+	// event already reaches every connected page so the open is handled UI-side.
 	data, _ := json.Marshal(body)
 	redisPublish(redisKey("kiro_notify"), string(data))
 	J(w, M{"success": true})
-}
-
-func findCodeServerRemoteCLI() string {
-	if bin, err := exec.LookPath("code-server"); err == nil {
-		paths := []string{bin}
-		if resolved, resolveErr := filepath.EvalSymlinks(bin); resolveErr == nil && resolved != "" && resolved != bin {
-			paths = append(paths, resolved)
-		}
-		for _, current := range paths {
-			binDir := filepath.Dir(current)
-			candidates := []string{
-				filepath.Clean(filepath.Join(binDir, "..", "lib", "vscode", "bin", "remote-cli", "code-server")),
-				filepath.Clean(filepath.Join(binDir, "..", "lib", "code-server", "lib", "vscode", "bin", "remote-cli", "code-server")),
-				"/usr/lib/code-server/lib/vscode/bin/remote-cli/code-linux.sh",
-			}
-			for _, candidate := range candidates {
-				if _, statErr := os.Stat(candidate); statErr == nil {
-					return candidate
-				}
-			}
-		}
-	}
-	return ""
-}
-
-func openInCodeServer(file string) {
-	remoteCLI := findCodeServerRemoteCLI()
-	if remoteCLI == "" {
-		log.Printf("[code-server] remote CLI not found")
-		return
-	}
-	out, err := exec.Command("bash", "-lc",
-		`find /tmp -name "vscode-ipc-*.sock" -type s -printf "%T@ %p\n" 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2`).Output()
-	if err != nil || len(out) == 0 {
-		log.Printf("[code-server] no IPC socket found")
-		return
-	}
-	sock := strings.TrimSpace(string(out))
-	target := strings.TrimSpace(file)
-	if target == "" {
-		return
-	}
-	if strings.HasPrefix(target, "file://") {
-		target = strings.TrimSpace(strings.TrimPrefix(target, "file://"))
-		if target != "" && !strings.HasPrefix(target, "/") && !strings.HasPrefix(target, "~/") && !strings.HasPrefix(target, "./") && !strings.HasPrefix(target, "../") {
-			target = "/" + strings.TrimLeft(target, "/")
-		}
-	}
-	if matches := regexp.MustCompile(`^(.*?):(\d+):(\d+)-(\d+):(\d+)$`).FindStringSubmatch(target); len(matches) > 0 {
-		target = strings.TrimSpace(matches[1]) + ":" + strings.TrimSpace(matches[2]) + ":" + strings.TrimSpace(matches[3])
-	} else if matches := regexp.MustCompile(`^(.*?):(\d+)(?::(\d+))?$`).FindStringSubmatch(target); len(matches) > 0 {
-		line := strings.TrimSpace(matches[2])
-		column := strings.TrimSpace(matches[3])
-		if column == "" {
-			column = "1"
-		}
-		target = matches[1] + ":" + line + ":" + column
-	}
-	if info, err := os.Stat(target); err == nil && info.IsDir() {
-		return
-	}
-	if !regexp.MustCompile(`:\d+:\d+$`).MatchString(target) {
-		target += ":1:1"
-	}
-	cmd := exec.Command(remoteCLI, "--reuse-window", "--goto", target)
-	cmd.Env = append(os.Environ(), "VSCODE_IPC_HOOK_CLI="+sock)
-	if err := cmd.Run(); err != nil {
-		log.Printf("[code-server] open file error: %v", err)
-	}
 }
 
 func handleNotifyStream(w http.ResponseWriter, r *http.Request) {

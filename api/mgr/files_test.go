@@ -21,13 +21,32 @@ func TestResolveSafePath_EmptyReturnsWorkspace(t *testing.T) {
 	}
 }
 
-func TestResolveSafePath_RejectsAbsolute(t *testing.T) {
+func TestResolveSafePath_AbsoluteOutsideRejected(t *testing.T) {
 	ws := t.TempDir()
-	cases := []string{"/etc/passwd", "/", filepath.Join(ws, "x")}
+	// Absolute paths outside the workspace must still be rejected.
+	cases := []string{"/etc/passwd", "/"}
 	for _, in := range cases {
 		if _, err := resolveSafePath(ws, in); err == nil {
 			t.Fatalf("expected error for absolute path %q", in)
 		}
+	}
+}
+
+func TestResolveSafePath_AbsoluteInsideAccepted(t *testing.T) {
+	ws := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ws, "src"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "src", "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	abs := filepath.Join(ws, "src", "f.txt")
+	got, err := resolveSafePath(ws, abs)
+	if err != nil {
+		t.Fatalf("absolute path inside workspace rejected: %v", err)
+	}
+	if got != abs {
+		t.Fatalf("got %q, want %q", got, abs)
 	}
 }
 

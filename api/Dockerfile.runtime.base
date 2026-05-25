@@ -58,13 +58,12 @@ RUN set -eux; \
     npm cache clean --force; \
     rm -rf /var/lib/apt/lists/* /tmp/npm-cache /root/.npm /root/.cache /tmp/* /var/tmp/*
 
-# ffmpeg, code-server, and CJK fonts are NOT preinstalled — they're
-# lazy-installed by setup.go on first need:
-#   - ffmpeg → ensureFfmpegAsync (apt-get install -y ffmpeg) on first
-#     voice/recording feature use; ~150MB extra at runtime.
-#   - code-server → ensureCodeServerAsync (npm i -g code-server) when the
-#     user opens the code-server tab; ~250MB.
+# ffmpeg and CJK fonts are NOT preinstalled — ffmpeg is lazy-installed by
+# setup.go (ensureFfmpegAsync → apt-get install -y ffmpeg) on first
+# voice/recording feature use; ~150MB extra at runtime.
 # This keeps the base image lean (~350MB instead of ~1.5GB).
+# (Historical note: code-server was also lazy-installed here. It was removed
+# when native files (api/mgr/files.go + app/src/components/files/) shipped.)
 
 USER cicy
 ENV HOME=$CICY_HOME \

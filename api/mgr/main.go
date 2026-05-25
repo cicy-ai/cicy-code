@@ -82,7 +82,6 @@ Options:
 
 	Environment:
 	  PORT          API port (default: 8008)
-	  CS_PORT       code-server port (default: 8002)
 	  SQLITE_PATH   SQLite database file (default: %s)`, defaultSQLitePath())
 			os.Exit(0)
 		case arg == "--dev":
@@ -199,9 +198,6 @@ Options:
 	http.HandleFunc("/api/chat/exec-js", wa(handleChatExecJS))
 	http.HandleFunc("/api/chat/code-open", wa(handleChatCodeOpen))
 	http.HandleFunc("/api/chat/ws", handleChatWS)
-	http.HandleFunc("/code-server-inject.js", serveCodeServerInjectJS)
-	http.HandleFunc("/api/code-server/page-context", wa(handleCodeServerPageContext))
-	http.HandleFunc("/api/code-server/send-path", handleCodeServerSendPath)
 	http.HandleFunc("/api/chat/clients", wa(handleWsClients))
 	http.HandleFunc("/api/chat/debug", wa(handleChatDebug))
 	http.HandleFunc("/api/chat/webhook", corsM(handleChatWebhook))
@@ -212,7 +208,21 @@ Options:
 	http.HandleFunc("/api/fs/read", wa(handleFsRead))
 	http.HandleFunc("/api/fs/write", wa(handleFsWrite))
 	http.HandleFunc("/api/fs/stat", wa(handleFsStat))
+	http.HandleFunc("/api/fs/download", authM(handleFsDownload))
+	http.HandleFunc("/api/fs/upload", authM(handleFsUpload))
 	http.HandleFunc("/api/fs/send-path", wa(handleFsSendPath))
+	http.HandleFunc("/api/fs/rename", wa(handleFsRename))
+	http.HandleFunc("/api/fs/delete", wa(handleFsDelete))
+	http.HandleFunc("/api/fs/mkdir", wa(handleFsMkdir))
+	http.HandleFunc("/api/fs/touch", wa(handleFsTouch))
+	http.HandleFunc("/api/fs/favorites/list", wa(handleFsFavoritesList))
+	http.HandleFunc("/api/fs/favorites/add", wa(handleFsFavoritesAdd))
+	http.HandleFunc("/api/fs/favorites/remove", wa(handleFsFavoritesRemove))
+	http.HandleFunc("/api/fs/search", wa(handleFsSearch))
+	http.HandleFunc("/api/fs/grep", wa(handleFsGrep))
+	http.HandleFunc("/api/fs/diff", wa(handleFsDiff))
+	http.HandleFunc("/api/fs/watch", authM(handleFsWatch))
+	http.HandleFunc("/api/runtime/flags", wa(handleRuntimeFlags))
 
 	// Stats
 	http.HandleFunc("/api/stats/traffic", wa(handleStatsTraffic))
@@ -349,12 +359,9 @@ Options:
 	http.HandleFunc("/api/pair", apiOnlyUnsupported(handlePair))
 	http.HandleFunc("/api/tmux/pair", apiOnlyUnsupported(handlePair))
 
-	// Code-server proxy
 	http.HandleFunc("/api/openclaw/gateway", wa(handleOpenClawGatewayInfo))
 	http.HandleFunc("/api/openclaw/provider/", handleOpenClawProviderProxy)
 	http.HandleFunc("/api/ai-gateway/", handleAIGatewayProxy)
-	http.HandleFunc("/code/", handleCodeServer)
-	http.HandleFunc("/code/auth", handleCodeServerAuth)
 	http.HandleFunc("/mitm/", handleMitmproxyAuth)
 	http.HandleFunc("/mitm", handleMitmproxyAuth)
 	http.HandleFunc("/openclaw/", handleOpenClawAuth)

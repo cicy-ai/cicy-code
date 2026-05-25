@@ -24,6 +24,7 @@ import { SendingProvider } from '../contexts/SendingContext';
 import ChatHistoryView from './chat/ChatHistoryView';
 import CurrentHistoryView from './chat/CurrentHistoryView';
 import TodoPanel from './TodoPanel';
+import FilesView from './files/FilesView';
 import { WebFrame } from './WebFrame';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
@@ -401,16 +402,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [netLatency, setNetLatency] = useState<number | null>(null);
   const [chatWsConnected, setChatWsConnected] = useState(false);
   const [chatWsClientId, setChatWsClientId] = useState<string | null>(null);
-  // codeServerKey bumps on every WS reconnect so the code-server iframe remounts,
-  // ensuring the extension reconnects with fresh state.
-  const [codeServerKey, setCodeServerKey] = useState(0);
-  useEffect(() => { if (chatWsConnected) { setCodeServerKey(k => k + 1); } }, [chatWsConnected]);
-  // code-server (the bridge extension inside the iframe) derives its chat-ws client id from
-  // pageClientId; only spin it up once the workspace's own chat-ws has connected, by which point
-  // pageClientId is final (the BroadcastChannel dedup below has settled it). One-way latch so a
-  // later reconnect doesn't tear the iframe down.
-  const [codeServerReady, setCodeServerReady] = useState(false);
-  useEffect(() => { if (chatWsConnected) setCodeServerReady(true); }, [chatWsConnected]);
   // chat-ws client id, bound to the current master agent (paneId is the short master id, e.g. "w-10001").
   // Kept in sessionStorage so it survives reloads in the same tab; a BroadcastChannel guard below
   // re-generates it if another tab in this browser is already using the same id — which happens when
@@ -1079,17 +1070,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     topBarDetail
     && topBarDetail.capabilities?.supports_tmux === false
   );
-  const filePaneId = paneId;
-  const filePaneDetail = paneDetails[filePaneId] || (filePaneId === paneId ? agentDetail : null);
-  const filePaneWorkspace = defaultWorkerWorkspace(filePaneId);
-  const filePaneIsApiOnlyRuntime = !!(
-    filePaneDetail
-    && filePaneDetail.capabilities?.supports_tmux === false
-  );
-  const fileCodeServerSrc = token && !filePaneIsApiOnlyRuntime && codeServerReady
-    ? urls.codeServer(defaultWorkerWorkspace(paneId), token, pageClientId, paneId, currentLang)
-    : '';
-  const fileCodeServerWaiting = !!token && !filePaneIsApiOnlyRuntime && !codeServerReady;
+  const nativeFilesAgentId = (activeCliPaneId || paneId).split(':')[0];
+  // Workspace folder follows the active agent, not the master. Each agent is
+  // bound to its own workspace in agent_config; the backend /api/fs/* lookup
+  // already keys by agent_id, but the frontend "copy absolute path" feature
+  // needs the right prefix too.
+  const nativeFilesWorkspace =
+    paneDetails[nativeFilesAgentId]?.workspace
+    || (nativeFilesAgentId === paneId ? agentDetail?.workspace : '')
+    || defaultWorkerWorkspace(nativeFilesAgentId);
   const openPaneInCurrentTerminal = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
@@ -1207,7 +1196,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useDevRegister('Workspace', {
     paneId, status, mouseMode, isRestarting,
     netLatency,
-    pageClientId, chatWsConnected, codeServerReady,
+    pageClientId, chatWsConnected,
     agentsCount: agents.length,
     activeCliPaneId,
     leftPanel: leftActive, activeWinIdx,
@@ -1232,17 +1221,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   ];
   const isSessionTab = (tab: WorkspaceCliContentTab) => tab === 'history' || tab === 'tools' || tab === 'brain' || tab === 'meta';
   const renderCliContentPanel = () => (
-    // PERMANENT FIX for code-server iframe activation bug:
-    // The drawer (and the code-server iframe inside it) must stay MOUNTED and
-    // RENDERED whenever fileCodeServerSrc is set, even when the user has not
-    // opened the drawer. VS Code's bridge extension only activates when the
-    // workbench is actually painted; using `hidden` (display:none) here means
-    // the iframe never renders → extension never activates → :code-ext WS never
-    // registers → `agent-code-server open` fails with "client not found" until
-    // the user manually opens the Files tab. We instead keep the panel mounted
-    // and lift it OUT of the flex flow when closed (position:absolute + offscreen
-    // via visibility:hidden + zIndex:-1) so layout is unaffected but the iframe
-    // keeps full dimensions and renders normally.
+    // The drawer keeps the FilesView mounted (and laid out off-screen when
+    // closed) so its chat-ws :code-ext bridge stays connected — agents can
+    // still call agent-code-server open / active / tabs even when the user
+    // hasn't opened the Files tab yet.
     <div
       ref={cliContentPanelRef}
       data-id="cli-content-fixed"
@@ -1346,21 +1328,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             : { position: 'absolute', width: '100%', height: '100%', visibility: 'hidden', pointerEvents: 'none', zIndex: -1 }
           }
         >
-          {fileCodeServerSrc ? (
-            <div data-id="cli-content-files-pane" className="relative h-full w-full">
-              <WebFrame
-                key={codeServerKey}
-                src={fileCodeServerSrc}
-                codeServer
-                className="h-full w-full border-0 bg-[#0A0A0A]"
-                title={t('filesPaneTitle')}
-              />
-            </div>
-          ) : (
-            <div data-id="cli-content-files-empty" className="flex h-full items-center justify-center text-sm text-zinc-500">
-              {fileCodeServerWaiting ? t('filesConnecting') : t('filesNoViewer')}
-            </div>
-          )}
+          <FilesView
+            agentId={nativeFilesAgentId}
+            workspaceFolder={nativeFilesWorkspace}
+            pageClientId={pageClientId}
+            className="h-full w-full"
+          />
         </div>
         <div
           data-id="cli-content-history-host"
