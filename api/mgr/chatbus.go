@@ -128,8 +128,12 @@ func (h *chatHub) stats() interface{} {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	type clientInfo struct {
-		MasterAgentID string `json:"master_agent_id"`
-		ActiveAgentID string `json:"active_agent_id"`
+		// NOTE: these two are cosmetic/metadata for display only. Routing to a
+		// specific client is done via ClientID alone — never reason about
+		// agent ids when targeting a known client. Field names are
+		// intentionally long to make that contract obvious to LLM consumers.
+		MasterAgentID string `json:"non_routing_master_agent_id_display_only"`
+		ActiveAgentID string `json:"non_routing_active_agent_id_display_only"`
 		ClientID      string `json:"client_id"`
 		IsElectron    bool   `json:"isElectron"`
 		Platform      string `json:"platform"`
