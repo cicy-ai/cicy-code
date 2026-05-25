@@ -4,6 +4,18 @@ import Icon from "./Icon.jsx";
 import { useT } from "../i18n";
 import "./WslSetupBanner.css";
 
+// Map well-known error tags from wslInstaller into localized messages.
+// Anything we don't recognize is rendered as-is, so devs still see the
+// raw shell stderr while users get human-readable text for known cases.
+function localizeStepError(raw, t) {
+  if (!raw) return "";
+  let m = String(raw).match(/^RELEASE_NOT_READY:(.+)$/);
+  if (m) return t("wsl.error.release_not_ready", { version: m[1] });
+  m = String(raw).match(/^LOW_DISK_SPACE:(.+):(.+)$/);
+  if (m) return t("wsl.error.low_disk_space", { free: m[1], required: m[2] });
+  return raw;
+}
+
 export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInstall, progress, progressLog, progressSteps, onDismiss }) {
   const t = useT();
   const [installing, setInstalling] = useState(false);
@@ -79,13 +91,18 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
     }
   };
 
+  // When WSL+distro are already set up, the banner is only shown because
+  // an install/upgrade is in progress. Don't show the "please install WSL"
+  // tip — the user already has WSL; we're just updating cicy-code.
+  const isUpgradeMode = wsl.installed && wsl.hasDistro;
+
   return (
     <div className="wsl-banner">
       <div className="wsl-banner__head">
         <div className="wsl-banner__icon"><Icon name="warn" size={18} /></div>
         <div className="wsl-banner__text">
-          <div className="wsl-banner__title">{installFinished ? "安装完成" : title}</div>
-          <div className="wsl-banner__subtitle">{installFinished ? `cicy-code 已就绪，可关闭此面板` : subtitle}</div>
+          <div className="wsl-banner__title">{installFinished ? "安装完成" : (isUpgradeMode ? t("wsl.title_upgrade") : title)}</div>
+          {!isUpgradeMode && <div className="wsl-banner__subtitle">{installFinished ? `cicy-code 已就绪，可关闭此面板` : subtitle}</div>}
         </div>
         {installFinished ? (
           <Button variant="primary" onClick={onDismiss}>
@@ -159,7 +176,7 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
                         <span className="wsl-banner__step-pct"> {Math.round(s.progress * 100)}%</span>
                       )}
                       {failed && s.error && (
-                        <span className="wsl-banner__step-error">{s.error}</span>
+                        <span className="wsl-banner__step-error">{localizeStepError(s.error, t)}</span>
                       )}
                     </span>
                     {failed && !installing && (
@@ -198,7 +215,7 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
                 onClick={() => setShowRawLog((v) => !v)}
                 title="Developer-only shell log"
               >
-                {showRawLog ? "hide details" : "details"}
+                {showRawLog ? t("wsl.hide_log") : t("wsl.show_log")}
               </button>
               {showRawLog && (
                 <pre className="wsl-banner__log" ref={(el) => {

@@ -1059,7 +1059,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const workspaceState = devStore.getSnapshot().Workspace?.state || {};
     const tmuxTarget = String(workspaceState.activeCliPaneId || '').trim();
     if (!currentClientId || !tmuxTarget) return;
-    const promptText = `My browser page clientId: ${currentClientId}. You can communicate with me through the agent-webpage and agent-code-server skills.`;
+    const promptText = `My browser page clientId: ${currentClientId}.`;
     try {
       window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: promptText } }));
       await sendCommandToTmux(promptText, tmuxTarget, true);
@@ -1068,33 +1068,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastClientIdFailed') }));
     }
   }, [activeCliPaneId, chatWsClientId, pageClientId, paneId]);
-
-  const handleCopyPageConnectPrompt = useCallback(async () => {
-    const currentClientId = String(chatWsClientId || pageClientId || '').trim();
-    if (!currentClientId) return;
-    const promptText = `My browser page clientId: ${currentClientId}. You can communicate with me through the agent-webpage and agent-code-server skills.`;
-    let ok = false;
-    try {
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-        await navigator.clipboard.writeText(promptText);
-        ok = true;
-      }
-    } catch {}
-    if (!ok) {
-      const textarea = document.createElement('textarea');
-      textarea.value = promptText;
-      textarea.setAttribute('readonly', 'true');
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      ok = document.execCommand('copy');
-      document.body.removeChild(textarea);
-    }
-    if (ok) {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastPromptCopied') }));
-    }
-  }, [chatWsClientId, pageClientId]);
 
   const topBarPaneId = activeCliPaneId || paneId;
   const topBarDetail = paneDetails[topBarPaneId] || (topBarPaneId === paneId ? agentDetail : null);
@@ -1473,7 +1446,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         onUpdated={(patch) => applyPanePatch(activeCliPaneId, patch)}
       />
       <SystemResourceMonitor paneId={paneId} />
-      <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} onSendClientId={handleSendPageClientIdToAgent} onCopyPrompt={handleCopyPageConnectPrompt} />
+      <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} onSendClientId={handleSendPageClientIdToAgent} />
       <button data-id="workspace-token-open" onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title={t('apiTokenButton')}><Key className="w-3.5 h-3.5" /></button>
       <button data-id="workspace-api-open" onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title={t('apiServerButton')}><Server className="w-3.5 h-3.5" /></button>
       {contextUsage != null && (
@@ -2541,9 +2514,8 @@ function networkQuality(connected: boolean, latency: number | null): { bars: 0 |
   return { bars: 1, color: 'bg-rose-400', tone: 'text-rose-300', ring: 'ring-rose-400/40' };
 }
 
-function NetworkSignal({ latency, connected = true, clientId, onSendClientId, onCopyPrompt }: { latency: number | null; connected?: boolean; clientId?: string | null; onSendClientId?: () => Promise<void> | void; onCopyPrompt?: () => Promise<void> | void }) {
+function NetworkSignal({ latency, connected = true, clientId, onSendClientId }: { latency: number | null; connected?: boolean; clientId?: string | null; onSendClientId?: () => Promise<void> | void }) {
   const { t } = useTranslation('workspace');
-  const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
   const [open, setOpen] = useState(false);
   const [sending, setSending] = useState(false);
@@ -2583,12 +2555,6 @@ function NetworkSignal({ latency, connected = true, clientId, onSendClientId, on
             ? 'Fair'
             : 'Poor';
 
-  const handleCopyPrompt = async () => {
-    if (!onCopyPrompt) return;
-    await onCopyPrompt();
-    setCopiedPrompt(true);
-    window.setTimeout(() => setCopiedPrompt(false), 1200);
-  };
   const handleSend = async () => {
     if (!onSendClientId || sending) return;
     setSending(true);
@@ -2724,15 +2690,6 @@ function NetworkSignal({ latency, connected = true, clientId, onSendClientId, on
             >
               <Send className={`h-3 w-3 ${sending ? 'animate-pulse' : ''}`} />
               <span data-id="network-signal-send-client-id-label">{sending ? t('networkSending') : t('networkSendClientId')}</span>
-            </button>
-            <button
-              type="button"
-              data-id="network-signal-copy-connect-prompt"
-              onClick={() => { void handleCopyPrompt(); }}
-              className="inline-flex items-center justify-center gap-1.5 rounded-md border border-white/[0.06] bg-white/[0.03] px-2 py-1.5 text-[11px] font-medium text-zinc-200 transition-all hover:border-white/[0.12] hover:bg-white/[0.06]"
-            >
-              {copiedPrompt ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
-              <span data-id="network-signal-copy-connect-prompt-label">{copiedPrompt ? t('networkPromptCopied') : t('networkCopyPrompt')}</span>
             </button>
           </div>
         </div>

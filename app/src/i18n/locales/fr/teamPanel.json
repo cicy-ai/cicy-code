@@ -10,7 +10,6 @@
   "confirmDelete": "Supprimer <strong>{{title}}</strong> ?",
   "toastDeleteFailed": "Erreur : échec de suppression de {{title}}",
   "menu": "Menu",
-  "openInNewWindow": "Ouvrir dans une nouvelle fenêtre",
   "unbind": "Délier",
   "restart": "Redémarrer",
   "delete": "Supprimer",

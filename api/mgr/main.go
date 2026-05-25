@@ -207,6 +207,13 @@ Options:
 	http.HandleFunc("/api/chat/webhook", corsM(handleChatWebhook))
 	http.HandleFunc("/api/openclaw/message/send", wa(handleOpenClawMessageSend))
 
+	// Native files (replaces code-server file viewer/editor; see docs/native-files-plan.md)
+	http.HandleFunc("/api/fs/list", wa(handleFsList))
+	http.HandleFunc("/api/fs/read", wa(handleFsRead))
+	http.HandleFunc("/api/fs/write", wa(handleFsWrite))
+	http.HandleFunc("/api/fs/stat", wa(handleFsStat))
+	http.HandleFunc("/api/fs/send-path", wa(handleFsSendPath))
+
 	// Stats
 	http.HandleFunc("/api/stats/traffic", wa(handleStatsTraffic))
 	http.HandleFunc("/api/stats/traffic/raw", wa(handleStatsTrafficRaw))

@@ -32,6 +32,7 @@
   "wsl.install_now": "今すぐインストール",
   "wsl.uac_hint": "管理者権限が必要 — UAC プロンプトが表示される場合があります",
   "wsl.install_failed": "インストール失敗",
+  "wsl.error.release_not_ready": "新バージョン v{version} は公開中です — 数分後に再試行してください",
   "toast.opened": "{name} を開きました",
   "toast.installed": "v{version} をインストールしました",
   "toast.uptodate": "最新です (v{version})",
@@ -68,5 +69,11 @@
   "modal.hide_token": "トークンを隠す",
   "footer.running": "実行中",
   "wsl.no_exe_title": "お使いの Windows は WSL に対応していません",
-  "wsl.no_exe_subtitle": "Windows 10 バージョン 1903 以降が必要です。Windows をアップグレードしてください。"
+  "wsl.no_exe_subtitle": "Windows 10 バージョン 1903 以降が必要です。Windows をアップグレードしてください。",
+  "wsl.title_upgrade": "cicy-code を更新中",
+  "wsl.show_log": "ログ",
+  "wsl.hide_log": "ログを隠す",
+  "card.start": "起動",
+  "toast.start_failed": "起動失敗: {error}",
+  "wsl.error.low_disk_space": "C ドライブの空き容量不足（残り {free}GB、必要 {required}GB）。空きを作って再試行してください。"
 }

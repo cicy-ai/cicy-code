@@ -10,7 +10,6 @@
   "confirmDelete": "Delete <strong>{{title}}</strong>?",
   "toastDeleteFailed": "Error: failed to delete {{title}}",
   "menu": "Menu",
-  "openInNewWindow": "Open in new window",
   "unbind": "Unbind",
   "restart": "Restart",
   "delete": "Delete",
