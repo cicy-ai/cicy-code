@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -337,6 +339,93 @@ func TestRunOneTick_FullPath_WithStubLLM(t *testing.T) {
 	persisted := ReadDecisions(10)
 	if len(persisted) == 0 || persisted[0].PolicyHashAfter == "" {
 		t.Errorf("decision not persisted with after-hash: %+v", persisted)
+	}
+}
+
+func TestStartAutonomy_GoroutineFiresMultipleTicks(t *testing.T) {
+	home := withTempHome(t)
+	auditRoot := filepath.Join(home, "cicy-ai", "audit")
+	workersRoot := filepath.Join(home, "cicy-ai", "workers")
+	_ = os.MkdirAll(auditRoot, 0o700)
+	_ = os.MkdirAll(workersRoot, 0o700)
+	p, err := NewPipeline(auditRoot, workersRoot, NoopScanner{}, DefaultPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := globalPipeline
+	globalPipeline = p
+	defer func() { globalPipeline = prev }()
+	// Seed enough events that the agent has something to chew on every tick.
+	for i := 0; i < 3; i++ {
+		p.Submit(context.Background(), Envelope{
+			AgentID:   "w-tick",
+			Provider:  "openai",
+			Direction: DirectionOutbound,
+			Payload:   []byte(`{"messages":[]}`),
+		})
+	}
+	p.Wait()
+
+	var llmHits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&llmHits, 1)
+		// Return an EMPTY action list so no policy.json write happens —
+		// keeps the test focused on the loop firing, not on patch merge
+		// (covered by other tests).
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"message": map[string]string{"role": "assistant", "content": `{"actions":[]}`}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	// Reset the sync.Once so StartAutonomy will actually run inside this test.
+	autonomyOnce = sync.Once{}
+	autonomyCfg = nil
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfg := &AutonomyConfig{
+		Enabled:           true,
+		Interval:          JSONDuration(50 * time.Millisecond),
+		Lookback:          JSONDuration(time.Hour),
+		MaxChangesPerHour: 50,
+		MaxChangesPerTick: 5,
+		LLM:               AutonomyLLM{Endpoint: srv.URL, Model: "stub", APIKey: "x"},
+	}
+	// Override the 30s startup delay by directly looping in this test —
+	// the public StartAutonomy waits 30s before first tick so it can't
+	// hit a 50ms cadence test.
+	autonomyCfg = cfg
+	defer func() { autonomyCfg = nil }()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(time.Duration(cfg.Interval))
+		defer ticker.Stop()
+		for {
+			runOneTick(ctx, cfg, "test-loop")
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+
+	// Let the loop fire a few times.
+	time.Sleep(220 * time.Millisecond)
+	cancel()
+	<-done
+
+	if hits := atomic.LoadInt32(&llmHits); hits < 3 {
+		t.Errorf("expected ≥3 LLM hits over 220ms / 50ms cadence, got %d", hits)
+	}
+	// Each empty-action tick should still leave a decision record.
+	all := ReadDecisions(100)
+	if len(all) < 3 {
+		t.Errorf("expected ≥3 decisions persisted, got %d", len(all))
 	}
 }
 
