@@ -754,6 +754,10 @@ func handlePaneByID(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasSuffix(path, "/restart") && r.Method == "POST":
 		handleRestartPane(w, r, strings.TrimSuffix(path, "/restart"))
+	case strings.HasSuffix(path, "/relaunch-agent") && r.Method == "POST":
+		handleRelaunchAgent(w, r, strings.TrimSuffix(path, "/relaunch-agent"))
+	case strings.HasSuffix(path, "/update-agent-cli") && r.Method == "POST":
+		handleUpdateAgentCLI(w, r, strings.TrimSuffix(path, "/update-agent-cli"))
 	case strings.HasSuffix(path, "/split") && r.Method == "POST":
 		handleSplitPane(w, r, strings.TrimSuffix(path, "/split"))
 	case strings.HasSuffix(path, "/unsplit") && r.Method == "POST":
@@ -1062,6 +1066,67 @@ func handleRestartPane(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	J(w, M{"success": true, "message": "Pane 软重启完成"})
+}
+
+// handleRelaunchAgent — POST /api/tmux/panes/<paneId>/relaunch-agent
+//
+// Re-sources the pane's boot.sh, which re-exports env vars (gateway URLs,
+// settings.json paths, language/model) and then launches the agent CLI.
+// Intended for the common case where the user pressed Ctrl+C twice and
+// exited the agent: the shell is still alive, the pane still has its
+// workspace cwd, and we just need to start the agent process again.
+//
+// Cheaper than restartPaneCore — no tmux respawn, no kill of background
+// processes, scrollback survives.
+//
+// 400s if the pane isn't configured for an agent at all.
+func handleRelaunchAgent(w http.ResponseWriter, r *http.Request, id string) {
+	paneID := normPaneID(id)
+	agentType := paneAgentType(paneID)
+	if agentType == "" {
+		httpErr(w, http.StatusBadRequest, "agent type not configured for pane")
+		return
+	}
+	// boot.sh lives at <workspace>/.cicy/boot.sh and is the same file the
+	// pane sourced when it was first created. The pane's cwd should still
+	// be the workspace folder (Ctrl+C out of claude/codex leaves the shell
+	// at its startup dir).
+	cmd := "source .cicy/boot.sh"
+	if _, err := runTmux("send-keys", "-t", paneID, cmd, "Enter"); err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	J(w, M{"success": true, "agent": agentType, "command": cmd})
+}
+
+// handleUpdateAgentCLI — POST /api/tmux/panes/<paneId>/update-agent-cli
+//
+// Sends the agent's install/update command (npm install -g <pkg>@latest)
+// to the pane so the user sees real-time download progress in the terminal,
+// using the same UX that .cicy_tmux.conf's __cicy_require_command_live runs
+// on first boot. After it completes the agent process can be relaunched via
+// /relaunch-agent above.
+//
+// Note: we deliberately don't relaunch the agent automatically afterwards —
+// some users prefer to inspect the install output (e.g. "is there a newer
+// version available?") before deciding to restart.
+func handleUpdateAgentCLI(w http.ResponseWriter, r *http.Request, id string) {
+	paneID := normPaneID(id)
+	agentType := paneAgentType(paneID)
+	if agentType == "" {
+		httpErr(w, http.StatusBadRequest, "agent type not configured for pane")
+		return
+	}
+	cfg, ok := selectedAgentConfigs()[agentType]
+	if !ok || cfg.InstallCmd == "" {
+		httpErr(w, http.StatusBadRequest, "no install command for agent: "+agentType)
+		return
+	}
+	if _, err := runTmux("send-keys", "-t", paneID, cfg.InstallCmd, "Enter"); err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	J(w, M{"success": true, "agent": agentType, "command": cfg.InstallCmd})
 }
 
 func restartPaneCore(paneID, token string) error {

@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -72,6 +74,10 @@ func extendPATH() {
 		"/opt/homebrew/bin",
 		"/usr/local/bin",
 		"/usr/bin",
+		// ~/.cicy-ai/bin holds our self-downloaded static binaries
+		// (ffmpeg) so we don't depend on brew/apt being available or
+		// configured. ensureFfmpegAsync populates this on first launch.
+		filepath.Join(home, ".cicy-ai", "bin"),
 		filepath.Join(home, ".npm-global", "bin"),
 		filepath.Join(home, ".local", "bin"),
 		filepath.Join(home, ".opencode", "bin"),
@@ -839,6 +845,16 @@ func ensureFfmpegAsync() {
 	if isContainerRuntime() {
 		return
 	}
+	// Try the static-binary download path first. Works without brew/apt
+	// or any system package manager — pure curl + extract into
+	// ~/.cicy-ai/bin/ffmpeg (already on PATH via extendPATH). Falls back
+	// to brew/apt only if download fails (e.g. mirrors all unreachable).
+	if err := installStaticFfmpeg(); err == nil {
+		log.Printf("[startup] ffmpeg installed (static binary)")
+		return
+	} else {
+		log.Printf("[startup] static ffmpeg install failed (%v), falling back to system package manager...", err)
+	}
 	var installCmd string
 	if runtime.GOOS == "darwin" {
 		// Set Homebrew bottle mirror for faster downloads in China.
@@ -855,6 +871,245 @@ func ensureFfmpegAsync() {
 		return
 	}
 	log.Printf("[startup] ffmpeg installed")
+}
+
+// installStaticFfmpeg downloads a prebuilt ffmpeg binary into
+// $HOME/.cicy-ai/bin/ffmpeg. The destination is on PATH via
+// extendPATH, so `exec.LookPath("ffmpeg")` resolves to it immediately
+// after this returns. Cross-platform: works the same on Linux, macOS,
+// and inside WSL Ubuntu — no brew, no apt, no sudo.
+//
+// Sources picked for stability + China reachability:
+//   - Linux:   johnvansickle.com (mirrored via ghproxy.net for CN)
+//   - macOS:   evermeet.cx (single-binary tarballs, x64 + arm64)
+// Both providers ship truly static builds (no dynamic dependencies)
+// suitable for headless containers/WSL.
+func installStaticFfmpeg() error {
+	if runtime.GOOS == "windows" {
+		// cicy-code on Windows runs inside WSL Ubuntu, so we never hit
+		// this path with GOOS=windows. Reject explicitly to make any
+		// future Windows-native build fail loudly instead of silently
+		// downloading an x86_64 ELF that wouldn't run.
+		return fmt.Errorf("static-ffmpeg install not supported on windows host")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("user-home: %w", err)
+	}
+	binDir := filepath.Join(home, ".cicy-ai", "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		return fmt.Errorf("mkdir bin: %w", err)
+	}
+	dst := filepath.Join(binDir, "ffmpeg")
+
+	// Pick mirror URL list (cn first if we detect cn, else direct).
+	// detectCNNetwork mirrors the wslInstaller probe — Baidu HEAD with
+	// short timeout. Treats unknown as cn so we lean on mirrors when
+	// network detection is inconclusive.
+	urls := staticFfmpegURLs(runtime.GOOS, runtime.GOARCH, detectCNNetwork())
+	if len(urls) == 0 {
+		return fmt.Errorf("no static ffmpeg URL for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "ffmpeg-stage")
+	if err != nil {
+		return fmt.Errorf("mkdir tmp: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	var lastErr error
+	for _, u := range urls {
+		log.Printf("[startup] static ffmpeg: trying %s", u)
+		if err := downloadAndExtractFfmpeg(u, tmpDir, dst); err != nil {
+			lastErr = err
+			log.Printf("[startup] static ffmpeg: %s failed: %v", u, err)
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("all mirrors failed: %w", lastErr)
+}
+
+// staticFfmpegURLs returns ordered candidate URLs for the given
+// platform. CN-friendly mirrors come first when network=="cn".
+//
+// Linux source: BtbN/FFmpeg-Builds on GitHub. Picked over
+// johnvansickle.com because (a) hosted on github → ghproxy.net mirrors
+// actually work, and (b) CN bandwidth to GitHub releases is far better
+// than to johnvansickle's static hosting.
+// macOS source: evermeet.cx is still the canonical Mac static-build
+// provider; we keep it as the primary and don't currently have a
+// github-hosted mirror.
+func staticFfmpegURLs(goos, goarch, network string) []string {
+	switch goos {
+	case "linux":
+		var asset string
+		switch goarch {
+		case "amd64":
+			// lgpl build (~70 MB) is GPL-feature-stripped but keeps
+			// libmp3lame/libopus/libpulse — everything cicy-code's
+			// voice path actually uses. The gpl variant (~200 MB)
+			// bundles vulkan/libplacebo/svt-av1 etc. that we don't use.
+			asset = "ffmpeg-master-latest-linux64-lgpl.tar.xz"
+		case "arm64":
+			asset = "ffmpeg-master-latest-linuxarm64-lgpl.tar.xz"
+		default:
+			return nil
+		}
+		direct := "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/" + asset
+		mirrors := []string{
+			"https://ghproxy.net/" + direct,
+			"https://gh-proxy.com/" + direct,
+		}
+		if network == "cn" || network == "unknown" {
+			return append(mirrors, direct)
+		}
+		return append([]string{direct}, mirrors...)
+	case "darwin":
+		// evermeet ships separate per-arch builds.
+		var path string
+		switch goarch {
+		case "amd64":
+			path = "ffmpeg.zip"
+		case "arm64":
+			path = "ffmpeg-arm64.zip"
+		default:
+			return nil
+		}
+		return []string{"https://evermeet.cx/ffmpeg/getrelease/" + path}
+	}
+	return nil
+}
+
+// downloadAndExtractFfmpeg fetches `url` (a .tar.xz or .zip), extracts
+// the embedded `ffmpeg` binary, and atomically renames it to `dst`.
+// Uses system curl + tar/unzip for portability — no Go-side archive
+// libs needed, and existing cicy-code installs already have these
+// tools (curl is a baseTools required; tar is in coreutils everywhere;
+// unzip is a baseTool too).
+func downloadAndExtractFfmpeg(url, tmpDir, dst string) error {
+	arc := filepath.Join(tmpDir, "archive")
+	// Single-stream download + size sanity check. -L to follow github
+	// redirects, --fail to surface 4xx/5xx as non-zero exit. 300s ≈ 5m
+	// is a generous ceiling for a ~40 MB download even on slow CN
+	// links; we'd rather hit it than have an indefinite hang.
+	dl := exec.Command("curl", "-fL", "--max-time", "300", "-o", arc, url)
+	dl.Stderr = os.Stderr
+	if err := dl.Run(); err != nil {
+		return fmt.Errorf("curl: %w", err)
+	}
+	st, err := os.Stat(arc)
+	if err != nil {
+		return fmt.Errorf("stat archive: %w", err)
+	}
+	if st.Size() < 5*1024*1024 {
+		return fmt.Errorf("archive too small (%d bytes) — likely error page", st.Size())
+	}
+
+	// Extract. Archive layouts vary across providers:
+	//   evermeet.cx (macOS zip): flat — `ffmpeg` at the top
+	//   johnvansickle  (.tar.xz): `ffmpeg-X.Y-amd64-static/ffmpeg`
+	//   BtbN/FFmpeg-Builds (.tar.xz): `<versioned-dir>/bin/ffmpeg`
+	// We dump everything then `find -name ffmpeg -type f` rather than
+	// hard-coding the nested path, which would break next time someone
+	// switches mirrors.
+	var ex *exec.Cmd
+	if strings.HasSuffix(url, ".zip") {
+		ex = exec.Command("sh", "-c", fmt.Sprintf("cd %q && unzip -o -q %q", tmpDir, arc))
+	} else {
+		ex = exec.Command("sh", "-c", fmt.Sprintf("tar -xJf %q -C %q", arc, tmpDir))
+	}
+	ex.Stderr = os.Stderr
+	if err := ex.Run(); err != nil {
+		return fmt.Errorf("extract: %w", err)
+	}
+	found, err := findFile(tmpDir, "ffmpeg")
+	if err != nil {
+		return fmt.Errorf("locate ffmpeg in archive: %w", err)
+	}
+	tmpBin := found
+	if err := os.Chmod(tmpBin, 0755); err != nil {
+		return fmt.Errorf("chmod: %w", err)
+	}
+	// Atomic rename within the same filesystem (~/.cicy-ai/bin is on
+	// the user's home FS, same as tmpDir which we put under /tmp...
+	// wait, that crosses /tmp → /home which may be different mounts).
+	// Use os.Rename and fall back to copy-then-remove if it fails with
+	// EXDEV (cross-device link).
+	if err := os.Rename(tmpBin, dst); err != nil {
+		if !errors.Is(err, syscall.EXDEV) {
+			return fmt.Errorf("rename: %w", err)
+		}
+		if err := copyFile(tmpBin, dst, 0755); err != nil {
+			return fmt.Errorf("copy: %w", err)
+		}
+	}
+	return nil
+}
+
+// detectCNNetwork returns "cn" if we can reach baidu.com within 3s,
+// "global" if we can reach google.com, else "unknown". Mirrors the
+// renderer-side probe so we use consistent mirror priorities across
+// install paths.
+func detectCNNetwork() string {
+	probe := func(url string) bool {
+		c := exec.Command("curl", "-fsI", "--max-time", "3", url)
+		return c.Run() == nil
+	}
+	if probe("https://www.baidu.com/") {
+		return "cn"
+	}
+	if probe("https://www.google.com/generate_204") {
+		return "global"
+	}
+	return "unknown"
+}
+
+// findFile walks `root` and returns the first regular-file match for
+// `name` (basename match). Used to locate the ffmpeg binary inside an
+// extracted archive without hard-coding the provider-specific nested
+// directory layout. Returns os.ErrNotExist if nothing matches.
+func findFile(root, name string) (string, error) {
+	var hit string
+	err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // skip unreadable entries
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if info.Name() == name {
+			hit = p
+			return io.EOF // short-circuit the walk
+		}
+		return nil
+	})
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	if hit == "" {
+		return "", os.ErrNotExist
+	}
+	return hit, nil
+}
+
+// copyFile reads src and writes it to dst with the given mode.
+// Used as a cross-device fallback when os.Rename fails with EXDEV.
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // CJK font installation is triggered lazily — the first time the AI

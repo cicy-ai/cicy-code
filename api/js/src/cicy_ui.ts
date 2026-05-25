@@ -320,7 +320,10 @@ body {
 }
 .cp-tooltip-host.cp-tooltip-multiline::after {
   white-space: pre-line;
-  min-width: 164px;
+  min-width: 260px;
+  max-width: 320px;
+  padding: 8px 12px;
+  line-height: 1.45;
 }
 .cp-tooltip-host.cp-tooltip-left::before {
   left: 6px;
@@ -1086,16 +1089,116 @@ body.cp-prompt-open { padding-bottom: 74px !important; }
 @keyframes cp-pulse { from { opacity: 1; } to { opacity: .4; } }
 @keyframes vm-ping { 0% { transform: translate(-50%, -50%) scale(0.85); opacity: 1; } 100% { transform: translate(-50%, -50%) scale(1.3); opacity: 0; } }
 @keyframes vm-spin { to { transform: rotate(360deg); } }
+.cp-modal-overlay {
+  position: fixed; inset: 0; z-index: 2147483600;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--cp-mono-font);
+  animation: cp-fadein .12s ease-out;
+}
+@keyframes cp-fadein { from { opacity: 0; } to { opacity: 1; } }
+.cp-modal-card {
+  width: 100%; max-width: 360px; margin: 0 16px;
+  background: #161618; border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px; overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+}
+.cp-modal-body { padding: 18px 20px 6px; color: #d4d4d8; font-size: 13px; line-height: 1.5; }
+.cp-modal-title { color: #fff; font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.cp-modal-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px 14px; }
+.cp-modal-btn {
+  height: 30px; padding: 0 12px; border-radius: 8px;
+  border: none; font-size: 13px; cursor: pointer; font-family: inherit;
+  transition: background .12s ease, color .12s ease;
+}
+.cp-modal-btn-cancel { background: transparent; color: #a1a1aa; }
+.cp-modal-btn-cancel:hover { background: rgba(255,255,255,0.05); color: #e4e4e7; }
+.cp-modal-btn-ok { background: #fff; color: #0b0b0c; font-weight: 500; }
+.cp-modal-btn-ok:hover { background: #e4e4e7; }
+.cp-modal-btn-danger { background: rgba(239,68,68,0.18); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); }
+.cp-modal-btn-danger:hover { background: rgba(239,68,68,0.3); color: #fecaca; }
 `;
     document.head.appendChild(style);
 }
 
-// Reveals #cp-win-float when the cursor enters the top 8px strip of the
-// viewport (or is hovering the bar itself). Adds a small hide delay so a
-// quick mouse-flick across the top doesn't strobe the bar in and out.
+// Vanilla-JS modal confirm. Mirrors the React useDialogs().confirm() pattern
+// from app/src/components/ui/Modal.tsx so destructive actions across the
+// whole app (including the ttyd-injected float bar) ask through one
+// consistent dialog instead of inline "click again to confirm" hacks.
+function cpModalConfirm(opts: { title?: string; body: string; confirmLabel?: string; cancelLabel?: string; danger?: boolean }): Promise<boolean> {
+    return new Promise(function(resolve) {
+        var overlay = document.createElement("div");
+        overlay.className = "cp-modal-overlay";
+        var card = document.createElement("div");
+        card.className = "cp-modal-card";
+        var bodyHtml = "";
+        if (opts.title) bodyHtml += '<div class="cp-modal-title">' + escapeHtmlText(opts.title) + '</div>';
+        bodyHtml += '<div>' + escapeHtmlText(opts.body) + '</div>';
+        card.innerHTML =
+            '<div class="cp-modal-body">' + bodyHtml + '</div>' +
+            '<div class="cp-modal-actions">' +
+                '<button type="button" class="cp-modal-btn cp-modal-btn-cancel">' + escapeHtmlText(opts.cancelLabel || "取消") + '</button>' +
+                '<button type="button" class="cp-modal-btn ' + (opts.danger ? 'cp-modal-btn-danger' : 'cp-modal-btn-ok') + '">' + escapeHtmlText(opts.confirmLabel || "确定") + '</button>' +
+            '</div>';
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+
+        var btns = card.querySelectorAll("button");
+        var cancelBtn = btns[0] as HTMLButtonElement;
+        var okBtn = btns[1] as HTMLButtonElement;
+        var done = false;
+        function finish(v: boolean): void {
+            if (done) return;
+            done = true;
+            document.removeEventListener("keydown", onKey, true);
+            overlay.remove();
+            resolve(v);
+        }
+        function onKey(e: KeyboardEvent): void {
+            if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(false); }
+            else if (e.key === "Enter") { e.preventDefault(); finish(true); }
+        }
+        overlay.addEventListener("mousedown", function(e) {
+            if (e.target === overlay) finish(false);
+        });
+        card.addEventListener("mousedown", function(e) { e.stopPropagation(); });
+        cancelBtn.addEventListener("click", function() { finish(false); });
+        okBtn.addEventListener("click", function() { finish(true); });
+        document.addEventListener("keydown", onKey, true);
+        setTimeout(function() { okBtn.focus(); }, 0);
+    });
+}
+
+function escapeHtmlText(s: string): string {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c) {
+        return c === "&" ? "&amp;"
+            : c === "<" ? "&lt;"
+            : c === ">" ? "&gt;"
+            : c === "\"" ? "&quot;"
+            : "&#39;";
+    });
+}
+
+// Reveals #cp-win-float when the cursor enters the top of the viewport, and
+// keeps it shown while the cursor stays within the bar's footprint (or any
+// dropdown / menu it opens). Two thresholds, tuned for low strobe risk:
+//
+//   - Hidden state: only the top REVEAL_PX strip triggers a show. Kept
+//     narrow so users don't accidentally pop the bar while reaching for
+//     terminal content near the top.
+//   - Shown state: the bar's full BAR_HEIGHT_PX plus a margin is the
+//     "stay open" zone. Once visible, the user has to actually move past
+//     the bar (not just inside it) before we start the hide timer.
+//
+// The hide is delayed by HIDE_DELAY_MS so a quick mouse-flick across the
+// top doesn't strobe the bar in and out.
 function setupWinFloatAutoHide(bar: HTMLElement): void {
-    var TRIGGER_PX = 8;
-    var HIDE_DELAY_MS = 250;
+    var REVEAL_PX = 12;        // top strip that triggers reveal when hidden
+    var BAR_HEIGHT_PX = 36;    // matches #cp-win-float css height
+    var KEEP_OPEN_PX = BAR_HEIGHT_PX + 12; // grace margin below bar
+    var HIDE_DELAY_MS = 600;   // long enough to forgive jittery cursors
     var hideTimer: number | null = null;
 
     function reveal(): void {
@@ -1109,18 +1212,25 @@ function setupWinFloatAutoHide(bar: HTMLElement): void {
         if (hideTimer !== null) return;
         hideTimer = window.setTimeout(function() {
             hideTimer = null;
-            // Final guard: don't hide while the user is actively over the bar
-            // (e.g. interacting with a tab dropdown).
-            if (!bar.matches(":hover")) {
+            // Final guard: don't hide while the user is still hovering
+            // the bar (or one of its descendants, e.g. an open tab menu).
+            if (!bar.matches(":hover") && !bar.matches(":focus-within")) {
                 bar.classList.remove("cp-win-float-show");
             }
         }, HIDE_DELAY_MS);
     }
 
     document.addEventListener("mousemove", function(e) {
-        if (e.clientY < TRIGGER_PX) {
+        var shown = bar.classList.contains("cp-win-float-show");
+        // Threshold widens once visible so moving inside the bar's region
+        // counts as "still hovering" even if the bar's :hover state hasn't
+        // caught up on a fast mousemove.
+        var keepShownThreshold = shown ? KEEP_OPEN_PX : REVEAL_PX;
+        if (e.clientY < keepShownThreshold) {
             reveal();
-        } else if (bar.classList.contains("cp-win-float-show") && !bar.matches(":hover")) {
+            return;
+        }
+        if (shown && !bar.matches(":hover") && !bar.matches(":focus-within")) {
             scheduleHide();
         }
     });
@@ -1427,11 +1537,29 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
 
     var fixedTop = document.createElement("div");
     fixedTop.id = "fixed-top-action";
+    // Lucide-style outline SVGs (24x24 viewBox @ 14px) — currentColor stroke
+    // so the existing .fta-btn hover/focus state still controls the icon
+    // tint without per-icon overrides.
+    var svgKbd     = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></svg>';
+    var svgPlus    = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
+    var svgPlay    = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><polygon points="7 4 20 12 7 20 7 4"/></svg>';
+    var svgUpdate  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13"/><path d="m6 10 6-6 6 6"/><path d="M5 21h14"/></svg>';
+    var svgRestart = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>';
+    var svgReload  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>';
+
+    // All buttons share the same tooltip stack: bottom-right anchored,
+    // multiline (cp-tooltip-multiline = pre-line + min-width 164). Tooltips
+    // that mention {agent} are filled in once we learn the pane's
+    // agent_type (fetched right after fixedTop is appended). Until then they
+    // render with the literal placeholder — replaced async below.
+    var tipCls = 'fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom cp-tooltip-multiline';
     fixedTop.innerHTML =
-        '<button id="cp-kbd" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="' + ttydT("tipPromptArea") + '">⌨</button>' +
-        '<button id="cp-win-add" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="' + ttydT("tipAddCliWindow") + '">+</button>' +
-        '<button id="cp-win-restart" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="' + ttydT("tipRestartAgent") + '">↻</button>' +
-        '<button id="cp-reload" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="' + ttydT("tipReloadPage") + '" onclick="location.reload()">⟳</button>';
+        '<button id="cp-kbd" class="' + tipCls + '" data-tooltip="' + ttydT("tipPromptArea") + '">' + svgKbd + '</button>' +
+        '<button id="cp-win-add" class="' + tipCls + '" data-tooltip="' + ttydT("tipAddCliWindow") + '">' + svgPlus + '</button>' +
+        '<button id="cp-agent-launch" class="' + tipCls + '" data-tooltip="' + ttydT("tipLaunchAgent", { agent: "agent" }) + '">' + svgPlay + '</button>' +
+        '<button id="cp-agent-update" class="' + tipCls + '" data-tooltip="' + ttydT("tipUpdateAgent", { agent: "agent" }) + '">' + svgUpdate + '</button>' +
+        '<button id="cp-win-restart" class="' + tipCls + '" data-tooltip="' + ttydT("tipRestartAgent") + '">' + svgRestart + '</button>' +
+        '<button id="cp-reload" class="' + tipCls + '" data-tooltip="' + ttydT("tipReloadPage") + '" onclick="location.reload()">' + svgReload + '</button>';
 
     // Action buttons live inside the floating bar (as its rightmost flex
      // child) so they slide in / out with the tab list — no longer a separate
@@ -1451,8 +1579,24 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var winTabs = document.getElementById("cp-win-tabs") as HTMLElement;
     var collapseBtn = (document.getElementById("cp-collapse") || document.createElement("button")) as HTMLButtonElement;
     var restartBtn = document.getElementById("cp-win-restart") as HTMLButtonElement;
+    var launchBtn = document.getElementById("cp-agent-launch") as HTMLButtonElement;
+    var updateBtn = document.getElementById("cp-agent-update") as HTMLButtonElement;
     var addWindowBtn = document.getElementById("cp-win-add") as HTMLButtonElement;
     var kbdBtn = document.getElementById("cp-kbd") as HTMLButtonElement;
+
+    // Resolve this pane's agent_type once on init so the Launch/Update button
+    // labels can show "启动 codex" / "Update claude" etc. We update the
+    // tooltip in place; the button text stays as the icon glyph.
+    var paneAgentType = "agent";
+    webtty.requestAPI("GET", "/api/tmux/panes/" + paneId, undefined, apiHeaders)
+        .then(function(resp: any) {
+            var t = resp && resp.agent_type ? String(resp.agent_type).trim() : "";
+            if (!t) return;
+            paneAgentType = t;
+            launchBtn.setAttribute("data-tooltip", ttydT("tipLaunchAgent", { agent: t }));
+            updateBtn.setAttribute("data-tooltip", ttydT("tipUpdateAgent", { agent: t }));
+        })
+        .catch(function() { /* leave generic "agent" label */ });
 
     // Bottom prompt area: compose the whole line locally, send it in one HTTP
     // request — avoids the per-keystroke websocket round-trips that make the
@@ -1936,24 +2080,16 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         var closeButton = target.closest(".cp-wdel") as HTMLElement | null;
         if (closeButton !== null) {
             event.stopPropagation();
-            if (closeButton.dataset.confirm) {
-                hideFixedTooltip();
-                apiFetch("DELETE", "", { session: paneId, index: closeButton.dataset.idx }).then(loadWindows);
-            } else {
-                var confirmButton = closeButton;
-                confirmButton.dataset.confirm = "1";
-                confirmButton.textContent = "?";
-                confirmButton.setAttribute("data-tooltip", ttydT("clickAgainToConfirm"));
-                confirmButton.classList.add("cp-confirm");
-                showFixedTooltip(confirmButton, ttydT("clickAgainToConfirm"));
-                setTimeout(function(): void {
-                    delete confirmButton.dataset.confirm;
-                    confirmButton.textContent = "✕";
-                    confirmButton.setAttribute("data-tooltip", ttydT("closeCliWindow"));
-                    confirmButton.classList.remove("cp-confirm");
-                    hideFixedTooltip();
-                }, 2000);
-            }
+            hideFixedTooltip();
+            var idx = closeButton.dataset.idx || "";
+            cpModalConfirm({
+                title: ttydT("closeCliWindow"),
+                body: ttydT("windowConfirmDelete", { idx: idx }) || ("Close window " + idx + "?"),
+                confirmLabel: ttydT("closeCliWindow"),
+                danger: true,
+            }).then(function(ok) {
+                if (ok) apiFetch("DELETE", "", { session: paneId, index: idx }).then(loadWindows);
+            });
             return;
         }
 
@@ -2007,38 +2143,68 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         apiFetch("POST", "", { session: paneId }).then(loadWindows);
     });
 
-    var restartPending = false;
-    var restartTimer = 0;
     restartBtn.addEventListener("click", function(event: MouseEvent): void {
         event.stopPropagation();
-        if (!restartPending) {
-            restartPending = true;
-            restartBtn.textContent = "⚠";
-            restartBtn.style.color = "rgba(239,68,68,0.9)";
-            restartTimer = window.setTimeout(function(): void {
-                restartPending = false;
-                restartBtn.textContent = "↻";
-                restartBtn.style.color = "";
-            }, 2000);
-            return;
-        }
-
-        clearTimeout(restartTimer);
-        restartPending = false;
-        restartBtn.textContent = "↻";
-        restartBtn.style.color = "";
-        if (!webtty.isConnectionOpen()) {
-            flashButton(restartBtn);
-            return;
-        }
-        restartBtn.classList.add("restarting");
-        loading.show(ttydT("restartingAgent"));
-        webtty.requestAPI("POST", "/api/tmux/panes/" + paneId + "/restart", undefined, apiHeaders).catch(function(): void {
-            restartBtn.classList.remove("restarting");
+        cpModalConfirm({
+            title: ttydT("tipRestartAgent"),
+            body: ttydT("restartingAgent") || ("Restart " + paneId + "?"),
+            confirmLabel: ttydT("tipRestartAgent"),
+        }).then(function(ok) {
+            if (!ok) return;
+            if (!webtty.isConnectionOpen()) {
+                flashButton(restartBtn);
+                return;
+            }
+            restartBtn.classList.add("restarting");
+            loading.show(ttydT("restartingAgent"));
+            webtty.requestAPI("POST", "/api/tmux/panes/" + paneId + "/restart", undefined, apiHeaders).catch(function(): void {
+                restartBtn.classList.remove("restarting");
+            });
+            setTimeout(function(): void {
+                restartBtn.classList.remove("restarting");
+            }, 30000);
         });
-        setTimeout(function(): void {
-            restartBtn.classList.remove("restarting");
-        }, 30000);
+    });
+
+    // Re-source .cicy/boot.sh in the pane. Use case: user Ctrl+C'd out of
+    // claude/codex; the shell is alive but the agent's env (gateway URLs,
+    // settings.json) needs to be re-exported before the binary restarts.
+    // Cheaper than the full pane restart above — no tmux respawn, no
+    // scrollback loss.
+    launchBtn.addEventListener("click", function(event: MouseEvent): void {
+        event.stopPropagation();
+        var label = ttydT("tipLaunchAgent", { agent: paneAgentType });
+        cpModalConfirm({
+            title: label,
+            body: ttydT("confirmLaunchAgent", { agent: paneAgentType }),
+            confirmLabel: label,
+        }).then(function(ok) {
+            if (!ok) return;
+            webtty.requestAPI("POST", "/api/tmux/panes/" + paneId + "/relaunch-agent", undefined, apiHeaders).catch(function(): void {
+                flashButton(launchBtn);
+            });
+        });
+    });
+
+    // npm install -g <pkg>@latest — sends the install line straight into the
+    // pane so the user sees the same live progress UX as boot.sh's
+    // first-time install (driven by __cicy_require_command_live in
+    // .cicy_tmux.conf). Update is the same command as install: npm
+    // overwrites the existing prefix link, no separate "update" path needed.
+    updateBtn.addEventListener("click", function(event: MouseEvent): void {
+        event.stopPropagation();
+        var label = ttydT("tipUpdateAgent", { agent: paneAgentType });
+        cpModalConfirm({
+            title: label,
+            body: ttydT("confirmUpdateAgent", { agent: paneAgentType }),
+            confirmLabel: label,
+            danger: true,
+        }).then(function(ok) {
+            if (!ok) return;
+            webtty.requestAPI("POST", "/api/tmux/panes/" + paneId + "/update-agent-cli", undefined, apiHeaders).catch(function(): void {
+                flashButton(updateBtn);
+            });
+        });
     });
 
     document.addEventListener("keydown", function(event: KeyboardEvent): void {

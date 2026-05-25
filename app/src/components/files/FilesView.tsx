@@ -10,7 +10,8 @@ import { fsCacheInvalidatePath } from './fsCache';
 import { CodeExtOps, installCodeExtBridge } from './codeExtBridge';
 import { languageNameForPath } from './language';
 import FileInfoModal from './FileInfoModal';
-import { PromptModal, ConfirmModal } from './Modals';
+import { PromptModal } from './Modals';
+import { useDialogs } from '../ui/Modal';
 
 interface FilesViewProps {
   agentId: string;
@@ -142,8 +143,8 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
   const [favorites, setFavorites] = useState<FsFavorite[]>([]);
   const [infoPath, setInfoPath] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<{ path: string; isDir: boolean } | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ paths: string[]; isDir: boolean } | null>(null);
   const [createTarget, setCreateTarget] = useState<{ parentDir: string; kind: 'file' | 'dir' } | null>(null);
+  const { confirm, node: dialogsNode } = useDialogs();
 
   // --- watcher lifecycle --------------------------------------------------
 
@@ -379,47 +380,72 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
     [agentId, renameTarget, tabs, rebumpDir],
   );
 
-  const handleDeleteConfirm = useCallback(async () => {
-    if (!deleteTarget) return;
-    const { paths, isDir } = deleteTarget;
-    const parentDirs = new Set<string>();
-    // Delete sequentially so errors on one don't poison the rest. (Parallel
-    // would be slightly faster, but order matters for nested deletes since
-    // the backend uses os.RemoveAll for dirs.)
-    for (const p of paths) {
-      try {
-        await fsApi.delete(agentId, p, isDir);
-        fsCacheInvalidatePath(agentId, p);
-        parentDirs.add(fsParent(p));
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn('delete failed', p, e);
-      }
-    }
-    parentDirs.forEach((d) => rebumpDir(d));
-    // Close any open tab whose file got removed (or whose parent dir was removed).
-    setTabs((prev) =>
-      prev.filter((t) => {
-        for (const p of paths) {
-          if (t.path === p || t.path.startsWith(p + '/')) return false;
+  // Confirm-then-delete. Renders the standard modal confirm with a path
+  // summary; on OK runs the same sequential delete + tab/dirty cleanup that
+  // the old <ConfirmModal> wrapper used to drive via state.
+  const handleDeleteRequest = useCallback(
+    async (paths: string[], isDir: boolean) => {
+      if (paths.length === 0) return;
+      const body = (
+        <div className="space-y-1">
+          {paths.length > 1 ? (
+            <>
+              <div>即将删除以下 {paths.length} 项:</div>
+              <ul className="max-h-40 overflow-auto font-mono text-[11px] text-zinc-100 bg-zinc-950 border border-zinc-800 rounded p-2 space-y-0.5">
+                {paths.map((p) => (
+                  <li key={p} className="truncate">{p}</li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <div>即将删除 <span className="font-mono text-zinc-100">{paths[0]}</span></div>
+          )}
+          {isDir && (
+            <div className="text-amber-400">目录及其全部子项都会被递归删除,不可撤销。</div>
+          )}
+        </div>
+      );
+      const title = paths.length > 1
+        ? `删除 ${paths.length} 项`
+        : `删除${isDir ? '文件夹' : '文件'}`;
+      const ok = await confirm({ title, body, confirmLabel: '删除', danger: true });
+      if (!ok) return;
+      const parentDirs = new Set<string>();
+      // Sequential delete so errors on one don't poison the rest.
+      for (const p of paths) {
+        try {
+          await fsApi.delete(agentId, p, isDir);
+          fsCacheInvalidatePath(agentId, p);
+          parentDirs.add(fsParent(p));
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('delete failed', p, e);
         }
-        return true;
-      }),
-    );
-    setDirty((prev) => {
-      const next = { ...prev };
-      for (const k of Object.keys(next)) {
-        for (const p of paths) {
-          if (k.endsWith(`:${p}`) || k.includes(`:${p}/`)) {
-            delete next[k];
-            break;
+      }
+      parentDirs.forEach((d) => rebumpDir(d));
+      setTabs((prev) =>
+        prev.filter((t) => {
+          for (const p of paths) {
+            if (t.path === p || t.path.startsWith(p + '/')) return false;
+          }
+          return true;
+        }),
+      );
+      setDirty((prev) => {
+        const next = { ...prev };
+        for (const k of Object.keys(next)) {
+          for (const p of paths) {
+            if (k.endsWith(`:${p}`) || k.includes(`:${p}/`)) {
+              delete next[k];
+              break;
+            }
           }
         }
-      }
-      return next;
-    });
-    setDeleteTarget(null);
-  }, [agentId, deleteTarget, rebumpDir]);
+        return next;
+      });
+    },
+    [agentId, confirm, rebumpDir],
+  );
 
   const handleUpload = useCallback(
     async (parentDir: string, files: FileList) => {
@@ -543,7 +569,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
           favorites={favorites}
           onRemoveFavorite={handleRemoveFavorite}
           onRename={(path, isDir) => setRenameTarget({ path, isDir })}
-          onDelete={(paths, isDir) => setDeleteTarget({ paths, isDir })}
+          onDelete={(paths, isDir) => handleDeleteRequest(paths, isDir)}
           onNewFile={(parentDir) => setCreateTarget({ parentDir, kind: 'file' })}
           onNewFolder={(parentDir) => setCreateTarget({ parentDir, kind: 'dir' })}
           onUpload={handleUpload}
@@ -665,40 +691,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
         />
       )}
 
-      {deleteTarget && (
-        <ConfirmModal
-          title={
-            deleteTarget.paths.length > 1
-              ? `删除 ${deleteTarget.paths.length} 项`
-              : `删除 ${deleteTarget.isDir ? '文件夹' : '文件'}`
-          }
-          okLabel="删除"
-          destructive
-          description={
-            <div className="space-y-1">
-              {deleteTarget.paths.length > 1 ? (
-                <>
-                  <div>即将删除以下 {deleteTarget.paths.length} 项:</div>
-                  <ul className="max-h-40 overflow-auto font-mono text-[11px] text-zinc-100 bg-zinc-950 border border-zinc-800 rounded p-2 space-y-0.5">
-                    {deleteTarget.paths.map((p) => (
-                      <li key={p} className="truncate">{p}</li>
-                    ))}
-                  </ul>
-                </>
-              ) : (
-                <div>
-                  即将删除 <span className="font-mono text-zinc-100">{deleteTarget.paths[0]}</span>
-                </div>
-              )}
-              {deleteTarget.isDir && (
-                <div className="text-amber-400">目录及其全部子项都会被递归删除,不可撤销。</div>
-              )}
-            </div>
-          }
-          onCancel={() => setDeleteTarget(null)}
-          onConfirm={handleDeleteConfirm}
-        />
-      )}
+      {dialogsNode}
 
       {createTarget && (
         <PromptModal
