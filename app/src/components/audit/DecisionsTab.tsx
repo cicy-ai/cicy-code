@@ -78,6 +78,17 @@ export default function DecisionsTab() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  // Auto-refresh: poll every 30s while the tab is visible. Avoid the
+  // refresh storm when window is hidden / user is on another tab.
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const h = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchAll();
+    }, 30_000);
+    return () => clearInterval(h);
+  }, [autoRefresh, fetchAll]);
+
   const handleRunNow = useCallback(async () => {
     setRunning(true);
     setError('');
@@ -121,6 +132,11 @@ export default function DecisionsTab() {
         </span>
 
         <div className="flex-1" />
+
+        <label data-id="audit-decisions-auto-refresh" className="flex items-center gap-1 text-[10px] text-[var(--vsc-text-secondary)] cursor-pointer select-none">
+          <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} className="cursor-pointer" />
+          {t('decisionsAutoRefresh')}
+        </label>
 
         <button
           data-id="audit-decisions-refresh"

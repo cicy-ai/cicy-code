@@ -89,5 +89,6 @@
   "decisionsRevertConfirm": "确认回滚",
   "decisionsReverting": "回滚中…",
   "decisionsRevertError": "回滚失败",
-  "decisionsGitSHA": "Git commit"
+  "decisionsGitSHA": "Git commit",
+  "decisionsAutoRefresh": "自动刷新"
 }

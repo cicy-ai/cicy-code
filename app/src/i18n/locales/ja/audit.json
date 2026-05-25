@@ -89,5 +89,6 @@
   "decisionsRevertConfirm": "巻き戻しを確認",
   "decisionsReverting": "巻き戻し中…",
   "decisionsRevertError": "巻き戻しに失敗",
-  "decisionsGitSHA": "Git コミット"
+  "decisionsGitSHA": "Git コミット",
+  "decisionsAutoRefresh": "自動更新"
 }
