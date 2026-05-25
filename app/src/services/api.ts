@@ -246,13 +246,28 @@ const api = {
   pingChatClient: (clientId: string) => http.post('/api/chat/ping-client', { client_id: clientId }),
 
   listTodos: (paneId: string, allAgents?: boolean, params?: { status?: string; q?: string }) =>
-    http.get('/api/todo/list', { params: { pane_id: paneId, all_agents: allAgents ? 'true' : undefined, ...(params || {}) } }),
-  getTodoCounts: (paneId: string) => http.get('/api/todo/counts', { params: { pane_id: paneId } }),
-  addTodo: (paneId: string, title: string, creatorId?: string) => http.post('/api/todo/add', { pane_id: paneId, title, creator_id: creatorId }),
+    http.get('/api/todo/list', {
+      headers: { 'X-Agent-Show-Id': shortPaneRouteId(paneId) },
+      params: { pane_id: paneId, all_agents: allAgents ? 'true' : undefined, ...(params || {}) },
+    }),
+  getTodoCounts: (paneId: string) =>
+    http.get('/api/todo/counts', {
+      headers: { 'X-Agent-Show-Id': shortPaneRouteId(paneId) },
+      params: { pane_id: paneId },
+    }),
+  addTodo: (paneId: string, title: string, creatorId?: string) =>
+    http.post('/api/todo/add', { pane_id: paneId, title, creator_id: creatorId }, {
+      headers: { 'X-Agent-Show-Id': shortPaneRouteId(paneId) },
+    }),
   updateTodo: (paneId: string, id: string, patch: { status?: string; title?: string }) =>
-    http.patch(`/api/todo/${encodeURIComponent(id)}`, { pane_id: paneId, ...patch }),
+    http.patch(`/api/todo/${encodeURIComponent(id)}`, { pane_id: paneId, ...patch }, {
+      headers: { 'X-Agent-Show-Id': shortPaneRouteId(paneId) },
+    }),
   deleteTodo: (paneId: string, id: string) =>
-    http.delete(`/api/todo/${encodeURIComponent(id)}`, { params: { pane_id: paneId } }),
+    http.delete(`/api/todo/${encodeURIComponent(id)}`, {
+      headers: { 'X-Agent-Show-Id': shortPaneRouteId(paneId) },
+      params: { pane_id: paneId },
+    }),
 };
 
 export default api;

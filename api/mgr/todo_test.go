@@ -179,9 +179,21 @@ func TestTodoList_MasterCanFilterByPane(t *testing.T) {
 
 func TestTodoList_RequesterHeaderRequired(t *testing.T) {
 	setupTodoTest(t)
-	code, _ := callTodo(t, handleTodoList, "GET", "/api/todo/list", "", nil)
-	if code != 400 {
-		t.Fatalf("expected 400 without header, got %d", code)
+	// No header → treated as master, returns master's todos (empty here).
+	code, resp := callTodo(t, handleTodoList, "GET", "/api/todo/list", "", nil)
+	if code != 200 {
+		t.Fatalf("expected 200 (master fallback) without header, got %d body=%v", code, resp)
+	}
+}
+
+func TestTodoList_NoHeaderActsAsMaster(t *testing.T) {
+	setupTodoTest(t)
+
+	// Add a worker todo via header, then list with no header — should see it.
+	addTodo(t, "w-10025", "from worker", "")
+	all := listTodos(t, "" /* no header */, "all_agents=true")
+	if len(all) != 1 {
+		t.Fatalf("no-header caller should see all (master fallback): %v", all)
 	}
 }
 
