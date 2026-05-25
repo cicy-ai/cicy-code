@@ -236,6 +236,14 @@ const api = {
   auditPolicyGetEffective: (agentId: string) =>
     http.get(`/api/audit/policy/effective/${encodeURIComponent(agentId)}`),
 
+  // Phase 4 policy-agent — LLM suggester
+  auditPolicySuggestionsList: () => http.get('/api/audit/policy/suggestions'),
+  auditPolicySuggestionsGenerate: () => http.post('/api/audit/policy/suggestions/generate'),
+  auditPolicySuggestionsApply: (id: string) =>
+    http.post('/api/audit/policy/suggestions/apply', { id }),
+  auditPolicySuggestionsDismiss: (id: string) =>
+    http.post('/api/audit/policy/suggestions/dismiss', { id }),
+
   // desktop "apps"
   getApps: () => http.get('/api/apps'),
   createApp: (prompt: string) => http.post('/api/apps/create', { prompt }),

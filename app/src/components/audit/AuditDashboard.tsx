@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
-import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu, ShieldCheck, RefreshCw, ChevronRight, Filter, SlidersHorizontal, Save, RotateCcw, Trash2, AlertCircle, FileCode2, FormInput } from 'lucide-react';
+import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu, ShieldCheck, RefreshCw, ChevronRight, Filter, SlidersHorizontal, Save, RotateCcw, Trash2, AlertCircle, FileCode2, FormInput, Sparkles } from 'lucide-react';
 import { PolicyForm, POLICY_SECTIONS, type Policy as PolicyT, type AgentOverride as AgentOverrideT, type FormScope } from './PolicyForm';
+import SuggestionsTab from './SuggestionsTab';
 import { Spinner } from '../ui/Spinner';
 import apiService from '../../services/api';
 import config from '../../config';
 import { TokenManager } from '../../services/tokenManager';
 
-type Tab = 'findings' | 'policy' | 'overview' | 'usage' | 'live' | 'setup';
+type Tab = 'findings' | 'policy' | 'suggestions' | 'overview' | 'usage' | 'live' | 'setup';
 
 interface DashboardData {
   user_id: string;
@@ -1241,6 +1242,7 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
   const tabs: { id: Tab; icon: typeof BarChart3; label: string }[] = [
     { id: 'findings', icon: ShieldCheck, label: t('tabFindings') },
     { id: 'policy', icon: SlidersHorizontal, label: t('tabPolicy') },
+    { id: 'suggestions', icon: Sparkles, label: t('tabSuggestions') },
     { id: 'overview', icon: BarChart3, label: t('tabOverview') },
     { id: 'usage', icon: Clock, label: t('tabUsage') },
     { id: 'live', icon: Activity, label: t('tabLive') },
@@ -1282,6 +1284,7 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
       <main data-id="audit-dashboard-content" className="flex-1 overflow-auto p-4">
         {tab === 'findings' && <FindingsTab />}
         {tab === 'policy' && <PolicyTab />}
+        {tab === 'suggestions' && <SuggestionsTab />}
         {tab === 'overview' && <OverviewTab userId={userId} days={days} setDays={setDays} />}
         {tab === 'usage' && <UsageTab userId={userId} />}
         {tab === 'live' && <LiveTab />}
