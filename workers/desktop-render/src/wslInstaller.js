@@ -23,6 +23,7 @@
 //                          first-launch baseTools check passes instantly
 //   starting            — boot cicy-code + wait for /api/health 200
 //   installing-agents   — pre-warm claude/codex/opencode with native binary
+//   mounting-files      — Desktop shortcut + Quick Access pin to WSL home
 //   done                — final ok
 
 // ── tunables ──────────────────────────────────────────────────────────
@@ -876,6 +877,68 @@ echo "INSTALLED:$ACT"`;
   return { ok: true, version: m ? m[1] : expectVersion };
 }
 
+// ── Windows shell integration ──────────────────────────────────────────
+// Make WSL's /home/cicy obvious from Windows by:
+//   1. Creating a Desktop shortcut "CiCy" → \\wsl$\<distro>\home\cicy
+//   2. Pinning the same UNC path to File Explorer's Quick Access
+// Both are best-effort — failures degrade silently. The renderer's
+// banner already has an "Open WSL Files" button as the primary access
+// point; these shortcuts are for users who close cicy-desktop and want
+// to find their files later without re-launching the homepage.
+async function createWindowsWslShortcuts(wslHomePath, emit) {
+  emit({ phase: "mounting-files", message: "Creating Desktop shortcut + Quick Access pin…", status: "running" });
+  // PowerShell escapes: the UNC path uses backslashes, which inside a
+  // PS single-quoted string survive verbatim. We pass it interpolated
+  // into the script body (JS → PS literal) without further escaping.
+  // .lnk creation via WScript.Shell COM is the standard Windows-shell
+  // idiom; it requires no admin and works on every Windows since 7.
+  // Quick Access pin uses the verb "pintohome" on the Shell32 namespace
+  // — same path File Explorer's right-click "Pin to Quick access" uses.
+  const script = `
+$ErrorActionPreference = 'Continue'
+$target = '${wslHomePath.replace(/'/g, "''")}'
+
+# 1. Desktop shortcut
+try {
+  $desktop = [Environment]::GetFolderPath('Desktop')
+  $lnk = Join-Path $desktop 'CiCy.lnk'
+  $shell = New-Object -ComObject WScript.Shell
+  $sc = $shell.CreateShortcut($lnk)
+  $sc.TargetPath = $target
+  $sc.Description = 'CiCy WSL files (AI agent workspace)'
+  $sc.IconLocation = 'shell32.dll,3'  # generic folder icon
+  $sc.Save()
+  Write-Output "SHORTCUT_OK $lnk"
+} catch { Write-Output "SHORTCUT_FAIL $_" }
+
+# 2. Quick Access pin
+try {
+  $shell = New-Object -ComObject Shell.Application
+  $folder = $shell.Namespace($target)
+  if ($folder) {
+    $folder.Self.InvokeVerb('pintohome')
+    Write-Output "QUICKACCESS_OK"
+  } else {
+    Write-Output "QUICKACCESS_SKIP target unreachable"
+  }
+} catch { Write-Output "QUICKACCESS_FAIL $_" }
+`;
+  const r = await ps(script, { timeoutMs: 15_000 });
+  // Non-fatal regardless — the "Open WSL Files" button in the banner
+  // covers the primary access path. We only surface success/skip in
+  // the timeline detail so the user knows the shortcut was created.
+  if (r.ok && r.stdout.includes("SHORTCUT_OK")) {
+    const pinned = r.stdout.includes("QUICKACCESS_OK");
+    emit({
+      phase: "mounting-files",
+      message: pinned ? "Desktop shortcut + Quick Access pin created" : "Desktop shortcut created",
+      status: "done",
+    });
+  } else {
+    emit({ phase: "mounting-files", message: `Warning: shortcut creation failed — open via the banner button instead`, status: "warning" });
+  }
+}
+
 // ── apt runtime dependency install ─────────────────────────────────────
 // cicy-code's setup.go runs `checkEnvironment()` at first launch and
 // blocks the API server until missing baseTools (unzip, jq, etc.) are
@@ -1237,6 +1300,13 @@ Write-Output "ERR"; exit 1`;
     emit({ phase: "installing-agents", message: "Agent CLIs ready (claude, codex, opencode)", status: "done" });
   }
 
+  // 10. Surface WSL files in Windows shell so novice users can find
+  //     them without typing `\\wsl$\…` into Explorer:
+  //       - Desktop shortcut "CiCy" → wsl home (always created)
+  //       - Quick Access pin in File Explorer (best-effort)
+  const wslHomePath = `\\\\wsl$\\${distro}\\home\\cicy`;
+  await createWindowsWslShortcuts(wslHomePath, emit);
+
   emit({
     phase: "done",
     message: `Installed v${r.version}`,
@@ -1248,7 +1318,7 @@ Write-Output "ERR"; exit 1`;
     // We hand this to the banner so it can render a "Open WSL Files"
     // button that takes the user straight into their cicy-code workspace
     // without them needing to know `\\wsl$\Ubuntu` is a thing.
-    wslHomePath: `\\\\wsl$\\${distro}\\home\\cicy`,
+    wslHomePath,
   });
   return { ok: true, version: r.version, installDir: installDrive.installDir };
   // Note: stagePath is intentionally not deleted — downloadStaged checks
