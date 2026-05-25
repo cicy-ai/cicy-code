@@ -812,6 +812,19 @@ func recentDecisionsCount(window time.Duration) int {
 	return count
 }
 
+// ReadDecisionByID returns one decision by id, or nil if not found.
+// Scans active + rotated archives (newest first).
+func ReadDecisionByID(id string) *AutonomyDecision {
+	all := ReadDecisions(100000)
+	for i := range all {
+		if all[i].ID == id {
+			d := all[i]
+			return &d
+		}
+	}
+	return nil
+}
+
 // ReadDecisions returns the most recent N decisions (newest first) for
 // the operator-facing "what did the agent do" surface.
 func ReadDecisions(limit int) []AutonomyDecision {

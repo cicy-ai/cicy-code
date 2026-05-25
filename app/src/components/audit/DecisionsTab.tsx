@@ -78,6 +78,22 @@ export default function DecisionsTab() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  // Deep linking: on first load, if location.hash matches a decision ID,
+  // select it. Also keep the hash in sync with selectedId so an operator
+  // can copy the URL to share the exact decision under review.
+  useEffect(() => {
+    const fromHash = window.location.hash.replace(/^#/, '');
+    if (fromHash.startsWith('dec-') && !selectedId) setSelectedId(fromHash);
+    // We deliberately run this only on mount; selectedId changes update the hash below.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!selectedId) return;
+    if (window.location.hash !== '#' + selectedId) {
+      window.history.replaceState(null, '', '#' + selectedId);
+    }
+  }, [selectedId]);
+
   // Auto-refresh: poll every 30s while the tab is visible. Avoid the
   // refresh storm when window is hidden / user is on another tab.
   const [autoRefresh, setAutoRefresh] = useState(true);
