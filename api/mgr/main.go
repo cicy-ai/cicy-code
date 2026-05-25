@@ -19,7 +19,10 @@ import (
 	"github.com/gorilla/websocket"
 
 	"ttyd-go/mgr/audit"
+	"ttyd-go/mgr/mitm"
 )
+
+var mitmServer *mitm.Server
 
 var (
 	upgrader      = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
@@ -46,6 +49,9 @@ func main() {
 	// Must be checked BEFORE the flag loop so we don't run server startup.
 	if len(os.Args) >= 2 && os.Args[1] == "audit" {
 		os.Exit(audit.RunCLI(os.Args[2:]))
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "mitm" {
+		os.Exit(mitm.RunCLI(os.Args[2:]))
 	}
 
 	for _, arg := range os.Args[1:] {
@@ -111,6 +117,9 @@ Options:
 	if err := audit.Init(); err != nil {
 		log.Printf("[audit] init failed (audit disabled): %v", err)
 	}
+
+	startMITM()
+	registerPolicySuggesterRoutes()
 
 	containerMode = isContainerRuntime()
 	if containerMode {
