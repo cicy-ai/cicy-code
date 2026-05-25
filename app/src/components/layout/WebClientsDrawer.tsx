@@ -5,8 +5,8 @@ import apiService from '../../services/api';
 import { cn } from '../../lib/utils';
 
 interface WsClient {
-  master_agent_id: string;
-  active_agent_id: string;
+  non_routing_master_agent_id_display_only: string;
+  non_routing_active_agent_id_display_only: string;
   client_id: string;
   isElectron: boolean;
   platform: string;
@@ -185,11 +185,11 @@ function ClientCard({
         {client.remote_addr && (
           <span title="remote addr">{client.remote_addr.split(':')[0]}</span>
         )}
-        {client.master_agent_id && (
-          <span title="master agent">⌂ {client.master_agent_id}</span>
+        {client.non_routing_master_agent_id_display_only && (
+          <span title="master agent (display only — never use for routing)">⌂ {client.non_routing_master_agent_id_display_only}</span>
         )}
-        {client.active_agent_id && client.active_agent_id !== client.master_agent_id && (
-          <span title="active agent">▸ {client.active_agent_id}</span>
+        {client.non_routing_active_agent_id_display_only && client.non_routing_active_agent_id_display_only !== client.non_routing_master_agent_id_display_only && (
+          <span title="active agent (display only — never use for routing)">▸ {client.non_routing_active_agent_id_display_only}</span>
         )}
       </div>
 
