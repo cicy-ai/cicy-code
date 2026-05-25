@@ -92,7 +92,14 @@ export default function App() {
         return;
       }
       // Installed — also check if outdated (non-blocking, best-effort).
-      setSidecar((s) => ({ ...s, state: "uptodate", info: { installedVersion: status.userVersion } }));
+      // Track running state so the local card can show "Start" when the
+      // binary is on disk but the daemon isn't actually listening yet.
+      setSidecar((s) => ({
+        ...s,
+        state: "uptodate",
+        info: { installedVersion: status.userVersion },
+        running: !!status.running,
+      }));
       // Don't auto-clear installSteps/installLog here — the timeline's
       // "✓ Installed v…" final entry is still useful info to surface
       // after the install finishes. The banner shows a Close button on
@@ -113,6 +120,20 @@ export default function App() {
       setSidecar((s) => ({ ...s, state: "error", error: e.message }));
     }
   }, []);
+
+  // Click "启动" — spawn the daemon, then re-check status so the button
+  // flips to "打开" once :8008 is reachable.
+  const handleStart = useCallback(async () => {
+    if (!window.cicy?.sidecar?.start) return;
+    setSidecar((s) => ({ ...s, starting: true }));
+    try {
+      const r = await window.cicy.sidecar.start();
+      if (!r?.ok) pushToast(t("toast.start_failed", { error: r?.error || "unknown" }), "error");
+    } finally {
+      setSidecar((s) => ({ ...s, starting: false }));
+      checkSidecar();
+    }
+  }, [checkSidecar, t]);
 
   // ── Init ──
   useEffect(() => {
@@ -181,10 +202,12 @@ export default function App() {
           } else {
             url = b.resolvedUrl || b.url;
           }
-          // Check if any window is already showing this backend (same origin+path,
-          // ignoring ?token= and other query params).
+          // Check if any window is already showing this backend. Compare by
+          // origin+pathname only — the token in the query string rotates on
+          // every resolveUrl call, so a full-string match would always miss.
           const wins = await fetchWindows();
-          const existing = wins.find((w) => w.url && w.url.toLowerCase() === url.toLowerCase());
+          const targetBase = stripQuery(url);
+          const existing = wins.find((w) => w.url && stripQuery(w.url) === targetBase);
           if (existing) {
             await window.electronRPC("control_electron_BrowserWindow", {
               win_id: existing.id,
@@ -360,6 +383,12 @@ export default function App() {
     if (sidecar.state === "missing")  return { label: t("card.install"), icon: "download", onClick: handleInstall };
     if (sidecar.state === "outdated") return { label: t("card.open"), icon: "open", onClick: () => handleOpen(localCard) };
     if (sidecar.state === "error")    return { label: t("card.retry"), icon: "refresh", onClick: handleInstall, variant: "primary" };
+    // Installed but daemon not reachable on :8008 — show a Start button
+    // that spawns the daemon. Once it binds the port, the next poll flips
+    // sidecar.running and we fall through to the default Open button.
+    if (sidecar.state === "uptodate" && sidecar.running === false) {
+      return { label: t("card.start"), icon: "play", onClick: handleStart, loading: !!sidecar.starting };
+    }
     return null; // fall through to default Open button
   })();
 
@@ -511,8 +540,11 @@ export default function App() {
 
 
 
+function stripQuery(url) {
+  try { const u = new URL(url); return (u.origin + u.pathname).toLowerCase(); } catch { return url.toLowerCase(); }
+}
+
 async function fetchWindows() {
-  if (!window.electronRPC) return [];
   try {
     const res = await window.electronRPC("get_windows", {});
     const txt = (res.content || []).map((c) => c.text).join("");

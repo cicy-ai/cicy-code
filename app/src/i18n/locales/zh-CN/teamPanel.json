@@ -10,7 +10,6 @@
   "confirmDelete": "删除 <strong>{{title}}</strong>？",
   "toastDeleteFailed": "错误：{{title}} 删除失败",
   "menu": "菜单",
-  "openInNewWindow": "新窗口打开",
   "unbind": "解绑",
   "restart": "重启",
   "delete": "删除",

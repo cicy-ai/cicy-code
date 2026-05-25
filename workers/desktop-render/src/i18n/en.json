@@ -32,6 +32,7 @@
   "wsl.install_now": "Install now",
   "wsl.uac_hint": "Requires Administrator — a UAC prompt may appear",
   "wsl.install_failed": "Install failed",
+  "wsl.error.release_not_ready": "New version v{version} is still being published — please try again in a few minutes",
   "toast.opened": "Opened {name}",
   "toast.installed": "Installed v{version}",
   "toast.uptodate": "Up to date (v{version})",
@@ -68,5 +69,11 @@
   "modal.hide_token": "Hide token",
   "footer.running": "running",
   "wsl.no_exe_title": "Your Windows version does not support WSL",
-  "wsl.no_exe_subtitle": "Windows 10 version 1903 or later is required. Please upgrade Windows."
+  "wsl.no_exe_subtitle": "Windows 10 version 1903 or later is required. Please upgrade Windows.",
+  "wsl.title_upgrade": "Updating cicy-code",
+  "wsl.show_log": "log",
+  "wsl.hide_log": "hide log",
+  "card.start": "Start",
+  "toast.start_failed": "Start failed: {error}",
+  "wsl.error.low_disk_space": "Insufficient disk space on C: ({free}GB free, {required}GB required). Free up space and retry."
 }

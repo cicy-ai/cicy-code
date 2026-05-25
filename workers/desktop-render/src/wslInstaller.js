@@ -704,17 +704,58 @@ for U in root cicy; do
   chown -R "$U":"$U" "$H/.local" 2>/dev/null || true
 done
 
-# ── 4) Make cicy the default WSL user ────────────────────────────────
+# ── 4) Set up cicy user's PATH for npm-global and node binaries.
+# When cicy-code spawns agent CLIs (claude/codex/opencode), it runs
+# them through bash and expects to find them on PATH. Without this:
+#   - npm install -g installs to ~/.npm-global/bin but PATH doesn't
+#     include it → cicy-code keeps reinstalling on every agent start
+#   - node downloaded to ~/.local/node-vX.Y.Z is not on PATH → npm
+#     itself isn't found, breaking the whole install chain
+# We append (not prepend) so /usr/local/bin still wins for cicy-code.
+H=/home/cicy
+[ -f "$H/.bashrc" ] || touch "$H/.bashrc"
+if ! grep -q 'CICY_PATH_SETUP' "$H/.bashrc" 2>/dev/null; then
+  cat >> "$H/.bashrc" <<'BASHRC'
+# CICY_PATH_SETUP — added by cicy-desktop installer
+export PATH="$HOME/.npm-global/bin:$PATH"
+# Add the most recent node-vX.Y.Z bin dir under ~/.local (cicy-code
+# downloads node here when bootstrapping a fresh Ubuntu).
+for d in "$HOME"/.local/node-v*-linux-x64/bin; do
+  [ -d "$d" ] && export PATH="$d:$PATH"
+done
+BASHRC
+fi
+# Profile too — login shells (the [boot] command runs as su - cicy).
+[ -f "$H/.profile" ] || touch "$H/.profile"
+if ! grep -q 'CICY_PATH_SETUP' "$H/.profile" 2>/dev/null; then
+  cat >> "$H/.profile" <<'PROFILE'
+# CICY_PATH_SETUP — added by cicy-desktop installer
+export PATH="$HOME/.npm-global/bin:$PATH"
+for d in "$HOME"/.local/node-v*-linux-x64/bin; do
+  [ -d "$d" ] && export PATH="$d:$PATH"
+done
+PROFILE
+fi
+chown cicy:cicy "$H/.bashrc" "$H/.profile" 2>/dev/null || true
+
+# Pre-create npm-global so \`npm install -g\` works without --prefix.
+sudo -u cicy bash -lc 'mkdir -p $HOME/.npm-global/{bin,lib} && npm config set prefix $HOME/.npm-global 2>/dev/null || true' >/dev/null 2>&1 || true
+
+# ── 5) Make cicy the default WSL user ────────────────────────────────
 # Without this, every \`wsl -d Ubuntu\` lands as root and cicy-code
 # refuses to run. /etc/wsl.conf is read at distro boot, so the caller
 # must \`wsl --terminate <distro>\` for this to take effect.
+# systemd=false is intentional: enabling systemd in WSL2 has caused
+# distro-boot failures (E_FAIL with corrupted ext4.vhdx state) in
+# field reports. We use [boot] command to autostart cicy-code instead.
 if ! grep -q '^default=cicy' /etc/wsl.conf 2>/dev/null; then
   cat > /etc/wsl.conf <<'EOF'
 [user]
 default=cicy
 
 [boot]
-systemd=true
+systemd=false
+command=su - cicy -c 'pgrep -f cicy-code >/dev/null 2>&1 || setsid -f $HOME/.local/bin/cicy-code </dev/null >>$HOME/.cicy-code.log 2>&1'
 EOF
 fi
 
@@ -754,6 +795,25 @@ export async function windowsInstall({ onProgress = () => {} } = {}) {
   const network = await detectNetwork();
   emit({ phase: "detecting", message: `Network: ${network}`, network });
 
+  // 1b. Disk-space precheck on C: (or whatever drive holds %APPDATA% +
+  // the WSL distro vhdx). The whole install pipeline writes ~500MB of
+  // staged files plus an ext4.vhdx that grows as agent CLIs install
+  // their own deps. If the user is already near 0 free, bail out
+  // early with a clear error instead of failing mid-install with
+  // confusing ENOSPC / vhdx I/O errors.
+  {
+    const REQUIRED_GB = 5;
+    const dr = await ps(
+      `$d = Get-PSDrive C; Write-Output ([math]::Round($d.Free/1GB,2))`,
+      { timeoutMs: 5_000 }
+    );
+    const freeGb = dr.ok ? parseFloat(dr.stdout.trim()) : NaN;
+    if (Number.isFinite(freeGb) && freeGb < REQUIRED_GB) {
+      throw new Error(`LOW_DISK_SPACE:${freeGb}:${REQUIRED_GB}`);
+    }
+    emit({ phase: "detecting", message: `Free space: ${Number.isFinite(freeGb) ? freeGb + ' GB' : 'unknown'}`, network });
+  }
+
   // 2. Latest manifest
   emit({ phase: "checking", message: "Checking latest version…" });
   const mf = await fetchLatestManifest(network);
@@ -762,13 +822,60 @@ export async function windowsInstall({ onProgress = () => {} } = {}) {
   const assetUrl = mf.assets["linux-amd64"];
   if (!assetUrl) throw new Error("manifest has no linux-amd64 asset");
   const expectSize = (mf.sizes && mf.sizes["linux-amd64"]) || 0;
+
+  // Resolve the staging path early so we can check the local cache before
+  // making any network calls — if we already have a same-size copy of the
+  // target binary on disk, no need to ping GitHub at all.
+  const stagePath = await resolveStagePath(version);
+  let cachedHit = false;
+  if (expectSize > 0) {
+    const probe = await ps(`
+$dst = '${stagePath.replace(/'/g, "''")}'
+if (Test-Path $dst) { Write-Output ((Get-Item $dst).Length) } else { Write-Output 'NONE' }
+`, { timeoutMs: 5_000 });
+    if (probe.ok && probe.stdout.trim() !== "NONE") {
+      cachedHit = parseInt(probe.stdout.trim(), 10) === expectSize;
+    }
+  }
+
+  // Guard: verify the asset actually exists on the server before declaring
+  // a new version is available. Prevents the case where manifest.json was
+  // uploaded first but the binary hasn't finished uploading yet (Release
+  // workflow still in progress). Skip this when we have a verified cached
+  // copy — there's nothing to fetch.
+  if (!cachedHit) {
+    emit({ phase: "checking", message: `Verifying release v${version}…`, status: "running", version });
+    const checkUrls = (network === "cn" || network === "unknown")
+      ? [...GH_MIRRORS.map(m => m + assetUrl), assetUrl]
+      : [assetUrl, ...GH_MIRRORS.map(m => m + assetUrl)];
+    const checkScript = `
+$ProgressPreference='SilentlyContinue'
+$urls = '${JSON.stringify(checkUrls).replace(/'/g,"''")}' | ConvertFrom-Json
+foreach ($u in $urls) {
+  try {
+    $r = Invoke-WebRequest -Uri $u -Method Head -UseBasicParsing -TimeoutSec 6
+    if ($r.StatusCode -lt 400) { Write-Output "OK"; exit 0 }
+  } catch { continue }
+}
+Write-Output "ERR"; exit 1`;
+    const cr = await ps(checkScript, { timeoutMs: 30_000 });
+    if (!cr.ok || !cr.stdout.includes("OK")) {
+      // Stable, identifiable error tag — banner can localize it via t() if
+      // it sees this prefix.
+      const e = new Error(`RELEASE_NOT_READY:${version}`);
+      e.code = "RELEASE_NOT_READY";
+      e.version = version;
+      throw e;
+    }
+  }
+
   emit({ phase: "checking", message: `Latest: v${version}`, version, network });
 
   // ── 3 + 4–5: download cicy-code AND prepare WSL in parallel ──────
   // The two are independent: download is pure network I/O, WSL setup is
   // a local Windows operation. Running them concurrently can cut total
   // install time by the duration of whichever finishes first.
-  const stagePath = await resolveStagePath(version);
+  // stagePath was resolved earlier (during the cache pre-check).
   emit({ phase: "downloading", message: `Downloading cicy-code v${version}…`, status: "running", version, network });
   emit({ phase: "checking-wsl", message: "Checking WSL state…", status: "running" });
 

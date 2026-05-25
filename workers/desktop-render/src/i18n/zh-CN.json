@@ -32,6 +32,7 @@
   "wsl.install_now": "立即安装",
   "wsl.uac_hint": "需要管理员权限，可能弹出 UAC 提示",
   "wsl.install_failed": "安装失败",
+  "wsl.error.release_not_ready": "新版本 v{version} 正在发布中，请几分钟后重试",
   "toast.opened": "已打开 {name}",
   "toast.installed": "已安装 v{version}",
   "toast.uptodate": "已是最新（v{version}）",
@@ -68,5 +69,11 @@
   "modal.hide_token": "隐藏 token",
   "footer.running": "运行中",
   "wsl.no_exe_title": "当前 Windows 版本不支持 WSL",
-  "wsl.no_exe_subtitle": "需要 Windows 10 版本 1903 或更高版本。请升级 Windows 后重试。"
+  "wsl.no_exe_subtitle": "需要 Windows 10 版本 1903 或更高版本。请升级 Windows 后重试。",
+  "wsl.title_upgrade": "正在更新 cicy-code",
+  "wsl.show_log": "日志",
+  "wsl.hide_log": "收起日志",
+  "card.start": "启动",
+  "toast.start_failed": "启动失败：{error}",
+  "wsl.error.low_disk_space": "C 盘空间不足（剩余 {free}GB，至少需要 {required}GB）。请清理后重试。"
 }

@@ -32,6 +32,7 @@
   "wsl.install_now": "Installer maintenant",
   "wsl.uac_hint": "Nécessite des droits Administrateur — une invite UAC peut s'afficher",
   "wsl.install_failed": "Échec de l'installation",
+  "wsl.error.release_not_ready": "La nouvelle version v{version} est en cours de publication — réessayez dans quelques minutes",
   "toast.opened": "{name} ouvert",
   "toast.installed": "Installé v{version}",
   "toast.uptodate": "À jour (v{version})",
@@ -68,5 +69,11 @@
   "modal.hide_token": "Masquer le token",
   "footer.running": "actif",
   "wsl.no_exe_title": "Votre version de Windows ne prend pas en charge WSL",
-  "wsl.no_exe_subtitle": "Windows 10 version 1903 ou supérieure est requise. Mettez à jour Windows."
+  "wsl.no_exe_subtitle": "Windows 10 version 1903 ou supérieure est requise. Mettez à jour Windows.",
+  "wsl.title_upgrade": "Mise à jour de cicy-code",
+  "wsl.show_log": "journal",
+  "wsl.hide_log": "masquer le journal",
+  "card.start": "Démarrer",
+  "toast.start_failed": "Échec du démarrage : {error}",
+  "wsl.error.low_disk_space": "Espace disque insuffisant sur C : ({free}Go libres, {required}Go requis). Libérez de l'espace et réessayez."
 }
