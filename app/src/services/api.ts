@@ -219,6 +219,8 @@ const api = {
   // audit-v2 — autonomous policy agent
   auditAutonomyDecisions: (limit = 100) => http.get(`/api/audit/decisions?limit=${limit}`),
   auditAutonomyRunNow: () => http.post('/api/audit/decisions/run'),
+  auditAutonomyExplain: (id: string) =>
+    http.post(`/api/audit/decisions/explain/${encodeURIComponent(id)}`),
 
   // desktop "apps"
   getApps: () => http.get('/api/apps'),

@@ -76,5 +76,13 @@
   "decisionsSectionActions": "动作 ({{n}})",
   "decisionsSectionLLMRaw": "LLM 原始响应",
   "decisionsEmptyIntro": "Agent 还没运行,或者没有做出决策。手动触发一次看看它会怎么做。",
-  "decisionsEmptyAction": "立即运行一次"
+  "decisionsEmptyAction": "立即运行一次",
+  "decisionsExplain": "解释",
+  "decisionsExplaining": "解释中…",
+  "decisionsExplainTitle": "Agent 解释",
+  "decisionsExplainWhatChanged": "改了什么",
+  "decisionsExplainWhyNow": "为什么现在",
+  "decisionsExplainImpact": "影响范围",
+  "decisionsExplainConfidence": "{{level}} 置信度",
+  "decisionsExplainError": "解释失败"
 }

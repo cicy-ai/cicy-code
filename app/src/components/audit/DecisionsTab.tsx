@@ -13,9 +13,19 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   RefreshCw, PlayCircle, CheckCircle2, XCircle, Clock,
-  Sparkles, FileCode2, AlertCircle,
+  Sparkles, FileCode2, AlertCircle, MessageSquare,
 } from 'lucide-react';
 import apiService from '../../services/api';
+
+interface Explanation {
+  decision_id: string;
+  summary: string;
+  what_changed: string;
+  why_now: string;
+  impact: string;
+  confidence: string;
+  raw_markdown?: string;
+}
 
 interface DecisionAction {
   kind: string;
@@ -233,20 +243,110 @@ function DecisionRow({ decision, selected, onSelect }: { decision: Decision; sel
 
 function DecisionDetail({ decision }: { decision: Decision }) {
   const { t } = useTranslation('audit');
+  const [explanation, setExplanation] = useState<Explanation | null>(null);
+  const [explainLoading, setExplainLoading] = useState(false);
+  const [explainError, setExplainError] = useState('');
+
+  // Reset explanation when switching decisions.
+  useEffect(() => {
+    setExplanation(null);
+    setExplainError('');
+  }, [decision.id]);
+
+  const handleExplain = useCallback(async () => {
+    setExplainLoading(true);
+    setExplainError('');
+    try {
+      const resp = await apiService.auditAutonomyExplain(decision.id);
+      setExplanation(resp.data as Explanation);
+    } catch (err: any) {
+      setExplainError(err?.response?.data || err?.message || 'explain failed');
+    } finally {
+      setExplainLoading(false);
+    }
+  }, [decision.id]);
+
   return (
     <div className="flex flex-col h-full">
-      <div className="px-3 py-2 border-b border-[var(--vsc-border)]">
-        <div className="text-xs font-mono text-white">{decision.id}</div>
-        <div className="flex items-center gap-2 mt-1 text-[10px] text-[var(--vsc-text-muted)]">
-          <span>{formatAbsolute(decision.timestamp)}</span>
-          <span>·</span>
-          <span>{t('decisionsDetailTrigger', { trigger: decision.trigger })}</span>
-          <span>·</span>
-          <span>{t('decisionsDetailEvents', { n: decision.events_considered })}</span>
+      <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-mono text-white">{decision.id}</div>
+          <div className="flex items-center gap-2 mt-1 text-[10px] text-[var(--vsc-text-muted)]">
+            <span>{formatAbsolute(decision.timestamp)}</span>
+            <span>·</span>
+            <span>{t('decisionsDetailTrigger', { trigger: decision.trigger })}</span>
+            <span>·</span>
+            <span>{t('decisionsDetailEvents', { n: decision.events_considered })}</span>
+          </div>
         </div>
+        <button
+          data-id={`audit-decisions-explain-${decision.id}`}
+          onClick={handleExplain}
+          disabled={explainLoading}
+          className="shrink-0 flex items-center gap-1 px-2 py-1 text-xs rounded bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-200 transition-colors disabled:opacity-50"
+        >
+          <MessageSquare size={12} className={explainLoading ? 'animate-pulse' : ''} />
+          {explainLoading ? t('decisionsExplaining') : t('decisionsExplain')}
+        </button>
       </div>
 
       <div className="flex-1 overflow-auto p-3 space-y-3 text-xs">
+        {explainError && (
+          <section className="p-2 rounded border border-red-500/40 bg-red-500/10 text-red-200">
+            <div className="text-[10px] uppercase tracking-wider mb-1">{t('decisionsExplainError')}</div>
+            <div className="font-mono break-all">{explainError}</div>
+          </section>
+        )}
+
+        {explanation && (
+          <section className="p-3 rounded border border-blue-500/40 bg-blue-500/5 space-y-2">
+            <div className="flex items-center gap-2">
+              <MessageSquare size={12} className="text-blue-300 shrink-0" />
+              <span className="text-[10px] uppercase tracking-wider text-blue-300">
+                {t('decisionsExplainTitle')}
+              </span>
+              <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border ${
+                explanation.confidence === 'high' ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' :
+                explanation.confidence === 'medium' ? 'text-amber-300 bg-amber-500/10 border-amber-500/30' :
+                'text-zinc-300 bg-zinc-500/10 border-zinc-500/30'}`}>
+                {t('decisionsExplainConfidence', { level: explanation.confidence })}
+              </span>
+            </div>
+            {explanation.summary && (
+              <div className="text-[var(--vsc-text)] font-medium">{explanation.summary}</div>
+            )}
+            {explanation.what_changed && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-[var(--vsc-text-muted)] mb-0.5">
+                  {t('decisionsExplainWhatChanged')}
+                </div>
+                <div className="text-[var(--vsc-text)] leading-relaxed">{explanation.what_changed}</div>
+              </div>
+            )}
+            {explanation.why_now && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-[var(--vsc-text-muted)] mb-0.5">
+                  {t('decisionsExplainWhyNow')}
+                </div>
+                <div className="text-[var(--vsc-text)] leading-relaxed">{explanation.why_now}</div>
+              </div>
+            )}
+            {explanation.impact && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-[var(--vsc-text-muted)] mb-0.5">
+                  {t('decisionsExplainImpact')}
+                </div>
+                <div className="text-[var(--vsc-text)] leading-relaxed">{explanation.impact}</div>
+              </div>
+            )}
+            {explanation.raw_markdown && (
+              <pre className="text-[10px] p-1.5 rounded bg-[var(--vsc-bg)] border border-[var(--vsc-border)] overflow-auto whitespace-pre-wrap text-[var(--vsc-text-secondary)]">
+                {explanation.raw_markdown}
+              </pre>
+            )}
+          </section>
+        )}
+
         {decision.error && (
           <section className="p-2 rounded border border-red-500/40 bg-red-500/10 text-red-200">
             <div className="text-[10px] uppercase tracking-wider mb-1">{t('decisionsSectionError')}</div>

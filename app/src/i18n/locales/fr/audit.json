@@ -76,5 +76,13 @@
   "decisionsSectionActions": "Actions ({{n}})",
   "decisionsSectionLLMRaw": "Réponse brute du LLM",
   "decisionsEmptyIntro": "L'agent n'a pas encore exécuté de cycle ou n'a pris aucune décision. Déclenchez un cycle manuellement.",
-  "decisionsEmptyAction": "Lancer le premier cycle"
+  "decisionsEmptyAction": "Lancer le premier cycle",
+  "decisionsExplain": "Expliquer",
+  "decisionsExplaining": "Explication…",
+  "decisionsExplainTitle": "Explication de l'agent",
+  "decisionsExplainWhatChanged": "Ce qui a changé",
+  "decisionsExplainWhyNow": "Pourquoi maintenant",
+  "decisionsExplainImpact": "Impact",
+  "decisionsExplainConfidence": "confiance {{level}}",
+  "decisionsExplainError": "Échec de l'explication"
 }
