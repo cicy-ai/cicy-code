@@ -59,12 +59,19 @@ type chatHub struct {
 	waiters      map[string]chan ChatEvent
 	agentClients map[string]map[string]struct{} // agent_id -> client_id set
 	lastReject map[string]time.Time // client_id -> last 4409-reject time (for persistent-reconnect supersede)
+	// bridges maps a "virtual" client_id (e.g. "<pageClientId>:code-ext") to
+	// the real connected page client that owns it. Used by the native-files
+	// :code-ext bridge so agent-code-server's host.* RPCs still resolve to a
+	// connected client without a separate WS. Cleared when the owning client
+	// disconnects.
+	bridges map[string]*chatClient
 }
 
 var hub = &chatHub{
 	clients:      make(map[string]map[string]*chatClient),
 	waiters:      make(map[string]chan ChatEvent),
 	agentClients: make(map[string]map[string]struct{}),
+	bridges:      make(map[string]*chatClient),
 }
 
 func (h *chatHub) ensureMapsLocked() {
@@ -76,6 +83,9 @@ func (h *chatHub) ensureMapsLocked() {
 	}
 	if h.agentClients == nil {
 		h.agentClients = make(map[string]map[string]struct{})
+	}
+	if h.bridges == nil {
+		h.bridges = make(map[string]*chatClient)
 	}
 }
 
@@ -156,6 +166,12 @@ func (h *chatHub) lookupClientLocked(clientID string) *chatClient {
 		if c := bucket[clientID]; c != nil {
 			return c
 		}
+	}
+	// Fall through to bridge aliases — e.g. agent-code-server addressing
+	// "<page>:code-ext" routes to the native-files bridge running inside the
+	// page's existing chat-ws connection.
+	if c := h.bridges[clientID]; c != nil {
+		return c
 	}
 	return nil
 }
@@ -238,6 +254,12 @@ func (h *chatHub) unregister(c *chatClient) {
 		delete(clients, c.clientID)
 		if len(clients) == 0 {
 			delete(h.agentClients, agentID)
+		}
+	}
+	// Drop any bridge aliases this client owned.
+	for alias, owner := range h.bridges {
+		if owner == c {
+			delete(h.bridges, alias)
 		}
 	}
 	h.mu.Unlock()
@@ -512,6 +534,36 @@ func (c *chatClient) readPump() {
 				default:
 				}
 			}
+			continue
+		}
+		if evt.Type == "register_code_ext_bridge" {
+			// Page-side native-files bridge. The page registers an alias
+			// "<pageClientId>:code-ext" → its own connection so agent-code-server
+			// host.* RPCs (which target ":code-ext") reach the page over its
+			// existing chat-ws. data may carry an explicit "alias" too.
+			data := aiGatewayMap(evt.Data)
+			alias := strings.TrimSpace(aiGatewayString(data["alias"]))
+			if alias == "" {
+				alias = c.clientID + ":code-ext"
+			}
+			hub.mu.Lock()
+			hub.ensureMapsLocked()
+			hub.bridges[alias] = c
+			hub.mu.Unlock()
+			log.Printf("[chat-ws] bridge register alias=%s owner=%s", alias, c.clientID)
+			continue
+		}
+		if evt.Type == "unregister_code_ext_bridge" {
+			data := aiGatewayMap(evt.Data)
+			alias := strings.TrimSpace(aiGatewayString(data["alias"]))
+			if alias == "" {
+				alias = c.clientID + ":code-ext"
+			}
+			hub.mu.Lock()
+			if hub.bridges[alias] == c {
+				delete(hub.bridges, alias)
+			}
+			hub.mu.Unlock()
 			continue
 		}
 		if evt.Type == "register_active_channel" {

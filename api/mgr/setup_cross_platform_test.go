@@ -81,27 +81,6 @@ func TestNodeInstallCmdPlatformBranches(t *testing.T) {
 	}
 }
 
-func TestCodeServerInstallCmdPlatformBranches(t *testing.T) {
-	t.Setenv("CICY_RUNTIME_KIND", "")
-	cmd := codeServerInstallCmd()
-	if expectedPackageManager() == "brew" {
-		if cmd != "brew install code-server" {
-			t.Fatalf("codeServerInstallCmd = %q", cmd)
-		}
-		return
-	}
-	if !strings.Contains(cmd, "https://code-server.dev/install.sh") {
-		t.Fatalf("codeServerInstallCmd = %q", cmd)
-	}
-}
-
-func TestCodeServerInstallCmdContainerRuntimeDisabled(t *testing.T) {
-	t.Setenv("CICY_RUNTIME_KIND", "container")
-	if cmd := codeServerInstallCmd(); cmd != "" {
-		t.Fatalf("codeServerInstallCmd in container = %q, want empty", cmd)
-	}
-}
-
 func TestHermesInstallCmdUsesGitHubChinaProxy(t *testing.T) {
 	cmd := hermesInstallCmd()
 	if !strings.Contains(cmd, "https://gh-proxy.com/https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh") {

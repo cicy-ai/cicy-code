@@ -110,7 +110,6 @@ func containerRuntimeCapabilities() map[string]interface{} {
 		"runtime_kind":             "container",
 		"supports_tmux":            true,
 		"supports_ttyd":            true,
-		"supports_code_server":     true,
 		"supports_local_workspace": true,
 		"supports_remote_api":      true,
 	}

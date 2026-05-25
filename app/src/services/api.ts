@@ -75,6 +75,8 @@ const api = {
   verifyAuth: (token: string) => http.get('/api/auth/verify', { baseURL: config.isWorkspace ? config.apiBase : config.mgrBase, headers: { Authorization: `Bearer ${token}` } }),
   exchangeOAuthCode: (code: string) => http.get('/api/auth/exchange', { baseURL: config.mgrBase, params: { code } }),
 
+  getRuntimeFlags: () => http.get('/api/runtime/flags'),
+
   getPanes: () => {
     if (pendingPanesRequest) return pendingPanesRequest;
     pendingPanesRequest = http.get('/api/tmux/panes').finally(() => {

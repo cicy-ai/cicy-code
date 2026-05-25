@@ -4,7 +4,6 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -21,29 +20,12 @@ import (
 	"time"
 )
 
-var codeServerProxy *httputil.ReverseProxy
 var mitmproxyProxy *httputil.ReverseProxy
 var pmaProxy *httputil.ReverseProxy
 var openClawProxy *httputil.ReverseProxy
 var openClawStartMu sync.Mutex
-var codeServerPageContextMu sync.RWMutex
-var codeServerPageContexts = map[string]M{}
-
-//go:embed resources/code-server-inject.html
-var codeServerInjectHTML []byte
-
-//go:embed resources/code-server-inject.js
-var codeServerInjectJS []byte
 
 func init() {
-	csPort := os.Getenv("CS_PORT")
-	if csPort == "" {
-		csPort = "8002"
-	}
-	target, _ := url.Parse("http://127.0.0.1:" + csPort)
-	codeServerProxy = httputil.NewSingleHostReverseProxy(target)
-	codeServerProxy.ModifyResponse = injectCodeServerJS
-
 	mitmTarget, _ := url.Parse("http://127.0.0.1:18889")
 	mitmproxyProxy = httputil.NewSingleHostReverseProxy(mitmTarget)
 
@@ -78,199 +60,6 @@ func init() {
 	}
 }
 
-func loadCodeServerInject() []byte {
-	return codeServerInjectHTML
-}
-
-func loadCodeServerInjectJS() ([]byte, error) {
-	return codeServerInjectJS, nil
-}
-
-func codeServerPort() string {
-	csPort := strings.TrimSpace(os.Getenv("CS_PORT"))
-	if csPort == "" {
-		return "8002"
-	}
-	return csPort
-}
-
-func waitForCodeServerReady() bool {
-	port := mustAtoi(codeServerPort())
-	if isPortListening(port) {
-		return true
-	}
-	return waitPort(port, 20*time.Second)
-}
-
-func serveCodeServerInjectJS(w http.ResponseWriter, r *http.Request) {
-	data, err := loadCodeServerInjectJS()
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(data)
-}
-
-func handleCodeServerPageContext(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodPost:
-		var body struct {
-			Folder       string `json:"folder"`
-			PageClientID string `json:"page_client_id"`
-			PagePane     string `json:"page_pane"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "bad json", 400)
-			return
-		}
-		folder := strings.TrimSpace(body.Folder)
-		pageClientID := strings.TrimSpace(body.PageClientID)
-		pagePane := strings.TrimSpace(body.PagePane)
-		if folder == "" || pageClientID == "" || pagePane == "" {
-			http.Error(w, "folder, page_client_id and page_pane required", 400)
-			return
-		}
-		codeServerPageContextMu.Lock()
-		codeServerPageContexts[folder] = M{
-			"folder":         folder,
-			"page_client_id": pageClientID,
-			"page_pane":      pagePane,
-			"token":          strings.TrimSpace(r.Header.Get("Authorization")),
-		}
-		codeServerPageContextMu.Unlock()
-		J(w, M{"success": true})
-	case http.MethodGet:
-		folder := strings.TrimSpace(r.URL.Query().Get("folder"))
-		if folder == "" {
-			http.Error(w, "folder required", 400)
-			return
-		}
-		codeServerPageContextMu.RLock()
-		ctx, ok := codeServerPageContexts[folder]
-		codeServerPageContextMu.RUnlock()
-		if !ok {
-			http.Error(w, "not found", 404)
-			return
-		}
-		J(w, M{"success": true, "data": ctx})
-	default:
-		http.Error(w, "method not allowed", 405)
-	}
-}
-
-func injectCodeServerJS(resp *http.Response) error {
-	// code-server's versioned static assets (/code/stable-<commit>/static/... and
-	// /code/_static/...) are immutable — make them long-cacheable so Cloudflare
-	// (and the browser) can cache them instead of re-pulling the multi-MB
-	// workbench bundle through the tunnel on every load.
-	if req := resp.Request; req != nil {
-		path := req.URL.Path
-		if (strings.HasPrefix(path, "/stable-") && strings.Contains(path, "/static/")) || strings.HasPrefix(path, "/_static/") {
-			if resp.StatusCode == http.StatusOK {
-				resp.Header.Set("Cache-Control", "public, max-age=31536000, immutable")
-				resp.Header.Del("Pragma")
-				resp.Header.Del("Expires")
-			}
-		}
-	}
-	ct := resp.Header.Get("Content-Type")
-	if !strings.Contains(ct, "text/html") && !strings.Contains(ct, "text/plain") {
-		return nil
-	}
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err != nil {
-		return err
-	}
-	inject := string(loadCodeServerInject())
-	html := strings.Replace(string(body), "<body", inject+"<body", 1)
-	if html == string(body) {
-		html = strings.Replace(string(body), "</head>", inject+"</head>", 1)
-	}
-	resp.Body = io.NopCloser(strings.NewReader(html))
-	resp.ContentLength = int64(len(html))
-	resp.Header.Set("Content-Length", strconv.Itoa(len(html)))
-	return nil
-}
-
-// normalizeVSCodeLocale lowercases and validates a UI language tag (e.g. "zh-CN"
-// -> "zh-cn") for use as the code-server `vscode.nls.locale` cookie value.
-func normalizeVSCodeLocale(raw string) string {
-	s := strings.ToLower(strings.TrimSpace(raw))
-	if s == "" || len(s) > 16 {
-		return ""
-	}
-	for _, ch := range s {
-		if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-') {
-			return ""
-		}
-	}
-	return s
-}
-
-func handleCodeServer(w http.ResponseWriter, r *http.Request) {
-	if folder := strings.TrimSpace(r.URL.Query().Get("folder")); folder != "" {
-		pageClientID := strings.TrimSpace(r.URL.Query().Get("client_id"))
-		pagePane := strings.TrimSpace(r.URL.Query().Get("page_pane"))
-		token := strings.TrimSpace(r.URL.Query().Get("token"))
-		if pageClientID != "" && pagePane != "" {
-			codeServerPageContextMu.Lock()
-			codeServerPageContexts[folder] = M{
-				"folder":         folder,
-				"page_client_id": pageClientID,
-				"page_pane":      pagePane,
-				"token":          token,
-			}
-			codeServerPageContextMu.Unlock()
-		}
-	}
-	// Propagate UI language: code-server resolves the workbench locale from the
-	// `vscode.nls.locale` cookie (after --locale / argv.json, which we leave unset).
-	// Mirror the `?lang=` query param the frontend appends (same scheme as ttyd)
-	// into that cookie so switching language in the UI re-localizes code-server.
-	if lang := normalizeVSCodeLocale(r.URL.Query().Get("lang")); lang != "" {
-		existing := r.Cookies()
-		r.Header.Del("Cookie")
-		for _, c := range existing {
-			if c.Name == "vscode.nls.locale" {
-				continue
-			}
-			r.AddCookie(c)
-		}
-		r.AddCookie(&http.Cookie{Name: "vscode.nls.locale", Value: lang})
-		http.SetCookie(w, &http.Cookie{
-			Name:     "vscode.nls.locale",
-			Value:    lang,
-			Path:     "/code/",
-			MaxAge:   31536000,
-			SameSite: http.SameSiteLaxMode,
-		})
-	}
-	r.URL.Path = r.URL.Path[len("/code"):]
-	if r.URL.Path == "" {
-		r.URL.Path = "/"
-	}
-	r.Header.Del("Authorization")
-
-	if !waitForCodeServerReady() {
-		http.Error(w, "code-server not ready", http.StatusBadGateway)
-		return
-	}
-
-	// WebSocket: hijack 双向代理
-	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		csPort := codeServerPort()
-		wsProxyWithHeaders(w, r, "127.0.0.1:"+csPort, map[string]string{
-			"Origin": "http://127.0.0.1:" + csPort,
-		})
-		return
-	}
-
-	codeServerProxy.ServeHTTP(w, r)
-}
-
 func intFromAny(value any) int {
 	switch v := value.(type) {
 	case int:
@@ -292,62 +81,6 @@ func intFromAny(value any) int {
 	default:
 		return 0
 	}
-}
-
-func handleCodeServerSendPath(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Folder        string `json:"folder"`
-		Path          string `json:"path"`
-		FileName      string `json:"fileName"`
-		SelectionText string `json:"selectionText"`
-		Range         any    `json:"range"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "bad json", 400)
-		return
-	}
-	folder := strings.TrimSpace(body.Folder)
-	path := strings.TrimSpace(body.Path)
-	if folder == "" || path == "" {
-		http.Error(w, "folder and path required", 400)
-		return
-	}
-	codeServerPageContextMu.RLock()
-	ctx, ok := codeServerPageContexts[folder]
-	codeServerPageContextMu.RUnlock()
-	if !ok {
-		http.Error(w, "page context not found", 404)
-		return
-	}
-	pageClientID, _ := ctx["page_client_id"].(string)
-	pagePane, _ := ctx["page_pane"].(string)
-	if pageClientID == "" || pagePane == "" {
-		http.Error(w, "page context incomplete", 404)
-		return
-	}
-	pathForAgent := path
-	if rangeMap, ok := body.Range.(map[string]any); ok {
-		startLine := intFromAny(rangeMap["startLine"])
-		startCharacter := intFromAny(rangeMap["startCharacter"])
-		endLine := intFromAny(rangeMap["endLine"])
-		endCharacter := intFromAny(rangeMap["endCharacter"])
-		if startLine > 0 && startCharacter > 0 && endLine > 0 && endCharacter > 0 {
-			pathForAgent = fmt.Sprintf("%s:%d:%d-%d:%d", path, startLine, startCharacter, endLine, endCharacter)
-		}
-	}
-	ok = hub.sendToClient(pageClientID, ChatEvent{Type: "code.send_path", Data: M{
-		"path":           pathForAgent,
-		"fileName":       strings.TrimSpace(body.FileName),
-		"selectionText":  "",
-		"range":          nil,
-		"page_client_id": pageClientID,
-		"page_pane":      pagePane,
-	}})
-	if !ok {
-		http.Error(w, "workspace client not found", 404)
-		return
-	}
-	J(w, M{"success": true, "page_client_id": pageClientID, "page_pane": pagePane, "path": pathForAgent})
 }
 
 func wsProxy(w http.ResponseWriter, r *http.Request, target string) {
@@ -387,24 +120,6 @@ func wsProxyWithHeaders(w http.ResponseWriter, r *http.Request, target string, h
 	go func() { io.Copy(backend, client); backend.Close() }()
 	io.Copy(client, backend)
 	client.Close()
-}
-
-func handleCodeServerAuth(w http.ResponseWriter, r *http.Request) {
-	// Only verify token for root path, bypass for assets
-	if r.URL.Path == "/code/" || r.URL.Path == "/code" {
-		auth := r.Header.Get("Authorization")
-		token := ""
-		if strings.HasPrefix(auth, "Bearer ") {
-			token = strings.TrimPrefix(auth, "Bearer ")
-		} else {
-			token = r.URL.Query().Get("token")
-		}
-		if token == "" || !verifyToken(token) {
-			httpErr(w, 401, "Not authenticated")
-			return
-		}
-	}
-	handleCodeServer(w, r)
 }
 
 func handleMitmproxy(w http.ResponseWriter, r *http.Request) {

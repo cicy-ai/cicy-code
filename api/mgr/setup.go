@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -13,7 +12,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -33,12 +31,6 @@ var embeddedTmuxConf string
 
 //go:embed .cicy_tmux.conf
 var embeddedCicyTmuxConf string
-
-//go:embed resources/cicy-code-server-bridge-0.0.4.vsix
-var embeddedCodeServerBridgeVSIX []byte
-
-//go:embed resources/MS-CEINTL.vscode-language-pack-zh-hans-1.110.0.vsix
-var embeddedCodeServerZhHansVSIX []byte
 
 var cicySkillsInstallOnce sync.Once
 
@@ -209,16 +201,6 @@ ln -sf "$HOME/.local/node/bin/npx" "$HOME/.local/bin/npx"
 echo "  → installed $($HOME/.local/bin/node --version)"`
 }
 
-func codeServerInstallCmd() string {
-	if isContainerRuntime() {
-		return ""
-	}
-	// Use npm so the mirror auto-detection in .cicy_tmux.conf applies
-	// (npmmirror for China, npmjs.org elsewhere). Much faster than
-	// brew or the official install.sh which downloads from GitHub.
-	return npmGlobalInstallCmd("code-server@latest")
-}
-
 func copilotInstallCmd() string {
 	return npmGlobalInstallCmd("@github/copilot@latest")
 }
@@ -244,7 +226,6 @@ func checkEnvironment() []Tool {
 		{"opencode", "opencode", opencodeInstallCmd(), true, false},
 		{"cursor-agent", "cursor-agent", cursorInstallCmd(), true, false},
 		{"hermes", "hermes", hermesInstallCmd(), true, false},
-		{"code-server", "code-server", codeServerInstallCmd(), true, false},
 	}...)
 
 	fmt.Println("🔍 检查环境依赖...")
@@ -806,7 +787,6 @@ func checkEnv() {
 	ensureBuiltinAgents(selectedAgents)
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles(selectedAgents)
-	ensureCodeServer()
 	go ensureFfmpegAsync()
 	go ensurePreinstalledSkills()
 }
@@ -1342,291 +1322,6 @@ func ensureMihomoBinaryInstalled(logFile *os.File, logPath string) {
 	}
 }
 
-func ensureCodeServer() {
-	go ensureCodeServerAsync()
-}
-
-func ensureCodeServerUserSettings(home string) {
-	userDir := filepath.Join(home, ".local", "share", "code-server", "User")
-	if err := os.MkdirAll(userDir, 0755); err != nil {
-		log.Printf("[startup] failed to create code-server User dir: %v", err)
-		return
-	}
-
-	settingsPath := filepath.Join(userDir, "settings.json")
-	settings := map[string]any{}
-	if raw, err := os.ReadFile(settingsPath); err == nil && strings.TrimSpace(string(raw)) != "" {
-		if err := json.Unmarshal(raw, &settings); err != nil {
-			log.Printf("[startup] failed to parse code-server settings.json, recreating: %v", err)
-			settings = map[string]any{}
-		}
-	}
-
-	if _, ok := settings["workbench.colorTheme"]; !ok {
-		settings["workbench.colorTheme"] = "Default Dark+"
-	}
-	if _, ok := settings["workbench.iconTheme"]; !ok {
-		settings["workbench.iconTheme"] = "simple-icons"
-	}
-
-	payload, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		log.Printf("[startup] failed to marshal code-server settings: %v", err)
-		return
-	}
-	payload = append(payload, '\n')
-	if err := os.WriteFile(settingsPath, payload, 0644); err != nil {
-		log.Printf("[startup] failed to write code-server settings.json: %v", err)
-	}
-
-	// Ensure argv.json exists without a `locale` key. code-server resolves the
-	// workbench locale as: --locale flag > argv.json `locale` > `vscode.nls.locale`
-	// cookie > Accept-Language. A *missing* argv.json makes it default to "en" and
-	// never consult the cookie, so we create an empty one (only if absent — don't
-	// clobber a locale a user set via "Configure Display Language"). The per-user
-	// language then flows through the cookie set in proxy.handleCodeServer.
-	argvPath := filepath.Join(userDir, "argv.json")
-	if _, err := os.Stat(argvPath); os.IsNotExist(err) {
-		if err := os.WriteFile(argvPath, []byte("{}\n"), 0644); err != nil {
-			log.Printf("[startup] failed to write code-server argv.json: %v", err)
-		}
-	}
-
-	// VS Code's web workbench eagerly reads these on load; when they are absent
-	// the requests surface as "Failed to resolve files / 无法读取文件" plus
-	// cascading "Canceled" errors in the browser console. Pre-create them empty
-	// (only if missing — never clobber real state).
-	if err := os.MkdirAll(filepath.Join(userDir, "prompts"), 0755); err != nil {
-		log.Printf("[startup] failed to create code-server User/prompts dir: %v", err)
-	}
-	for _, name := range []string{"extensions.json", "systemExtensionsCache.json"} {
-		p := filepath.Join(userDir, name)
-		if _, err := os.Stat(p); os.IsNotExist(err) {
-			if err := os.WriteFile(p, []byte("[]\n"), 0644); err != nil {
-				log.Printf("[startup] failed to write code-server %s: %v", name, err)
-			}
-		}
-	}
-}
-
-func installCodeServerExtension(home string, extension string) {
-	log.Printf("[startup] installing code-server extension: %s", extension)
-	cmd := exec.Command("code-server", "--install-extension", extension, "--force")
-	cmd.Dir = home
-	var env []string
-	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "PORT=") {
-			continue
-		}
-		env = append(env, kv)
-	}
-	cmd.Env = env
-	output, runErr := cmd.CombinedOutput()
-	if runErr != nil {
-		log.Printf("[startup] failed to install code-server extension %s: %v output=%s", extension, runErr, strings.TrimSpace(string(output)))
-		return
-	}
-	if trimmed := strings.TrimSpace(string(output)); trimmed != "" {
-		log.Printf("[startup] code-server extension installed: %s output=%s", extension, trimmed)
-	}
-}
-
-func installEmbeddedCodeServerExtension(home string, fileName string, payload []byte) {
-	if len(payload) == 0 {
-		log.Printf("[startup] skipped empty embedded code-server extension: %s", fileName)
-		return
-	}
-	tmpFile, err := os.CreateTemp("", "cicy-code-server-extension-*.vsix")
-	if err != nil {
-		log.Printf("[startup] failed to create temp vsix for %s: %v", fileName, err)
-		return
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-	if _, err := tmpFile.Write(payload); err != nil {
-		_ = tmpFile.Close()
-		log.Printf("[startup] failed to write temp vsix for %s: %v", fileName, err)
-		return
-	}
-	if err := tmpFile.Close(); err != nil {
-		log.Printf("[startup] failed to close temp vsix for %s: %v", fileName, err)
-		return
-	}
-	installCodeServerExtension(home, tmpPath)
-}
-
-func installBundledCodeServerExtensions(home string) {
-	installEmbeddedCodeServerExtension(home, "cicy-code-server-bridge-0.0.4.vsix", embeddedCodeServerBridgeVSIX)
-	installEmbeddedCodeServerExtension(home, "MS-CEINTL.vscode-language-pack-zh-hans-1.110.0.vsix", embeddedCodeServerZhHansVSIX)
-	installCodeServerExtension(home, "laurenttreguier.vscode-simple-icons")
-	ensureCodeServerLanguagePacks(home)
-}
-
-// ensureCodeServerLanguagePacks writes <user-data-dir>/languagepacks.json from
-// the installed `vscode-language-pack-*` extensions. `code-server
-// --install-extension` does NOT generate this file (unlike the in-app gallery
-// install), so without it code-server's workbench NLS always falls back to
-// English even when a language pack is present. The locale itself is selected
-// per request via the `vscode.nls.locale` cookie (see proxy.handleCodeServer).
-func ensureCodeServerLanguagePacks(home string) {
-	dataDir := filepath.Join(home, ".local", "share", "code-server")
-	extDir := filepath.Join(dataDir, "extensions")
-	entries, err := os.ReadDir(extDir)
-	if err != nil {
-		return
-	}
-	packs := map[string]any{}
-	for _, e := range entries {
-		if !e.IsDir() || !strings.Contains(e.Name(), "vscode-language-pack-") {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(extDir, e.Name(), "package.json"))
-		if err != nil {
-			continue
-		}
-		var pkg struct {
-			Name        string `json:"name"`
-			Publisher   string `json:"publisher"`
-			Version     string `json:"version"`
-			Contributes struct {
-				Localizations []struct {
-					LanguageID            string `json:"languageId"`
-					LanguageName          string `json:"languageName"`
-					LocalizedLanguageName string `json:"localizedLanguageName"`
-					Translations          []struct {
-						ID   string `json:"id"`
-						Path string `json:"path"`
-					} `json:"translations"`
-				} `json:"localizations"`
-			} `json:"contributes"`
-		}
-		if err := json.Unmarshal(raw, &pkg); err != nil || pkg.Name == "" {
-			continue
-		}
-		extID := strings.ToLower(pkg.Publisher + "." + pkg.Name)
-		for _, loc := range pkg.Contributes.Localizations {
-			if loc.LanguageID == "" {
-				continue
-			}
-			translations := map[string]string{}
-			for _, t := range loc.Translations {
-				p := filepath.Join(extDir, e.Name(), filepath.FromSlash(t.Path))
-				if _, err := os.Stat(p); err != nil {
-					continue
-				}
-				translations[t.ID] = p
-			}
-			if translations["vscode"] == "" {
-				continue
-			}
-			label := loc.LocalizedLanguageName
-			if label == "" {
-				label = loc.LanguageName
-			}
-			packs[strings.ToLower(loc.LanguageID)] = map[string]any{
-				"hash":  "cicy-" + extID + "-" + pkg.Version,
-				"label": label,
-				"extensions": []map[string]any{
-					{"extensionIdentifier": map[string]any{"id": extID}, "version": pkg.Version},
-				},
-				"translations": translations,
-			}
-		}
-	}
-	if len(packs) == 0 {
-		return
-	}
-	payload, err := json.Marshal(packs)
-	if err != nil {
-		return
-	}
-	if err := os.WriteFile(filepath.Join(dataDir, "languagepacks.json"), payload, 0644); err != nil {
-		log.Printf("[startup] failed to write code-server languagepacks.json: %v", err)
-		return
-	}
-	log.Printf("[startup] code-server languagepacks.json written (%d locale)", len(packs))
-}
-
-func ensureCodeServerAsync() {
-	extendPATH()
-	if _, err := exec.LookPath("code-server"); err != nil {
-		installCmd := codeServerInstallCmd()
-		if installCmd == "" {
-			log.Printf("[startup] code-server missing in preinstalled runtime; rebuild the base image")
-			return
-		}
-		fmt.Println("📦 后台安装 code-server...")
-		cmd := exec.Command("sh", "-c", installCmd)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if runErr := cmd.Run(); runErr != nil {
-			log.Printf("[startup] failed to install code-server: %v", runErr)
-			return
-		}
-		extendPATH()
-	}
-
-	csPort := os.Getenv("CS_PORT")
-	if csPort == "" {
-		csPort = "8002"
-	}
-	if isPortListening(mustAtoi(csPort)) {
-		log.Printf("[startup] code-server already running on :%s", csPort)
-		return
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Printf("[startup] failed to resolve home dir for code-server: %v", err)
-		return
-	}
-	_ = os.Remove(filepath.Join(home, ".local", "share", "code-server", "coder.json"))
-	if mkErr := os.MkdirAll(cicyLogsDir, 0755); mkErr != nil {
-		log.Printf("[startup] failed to create ~/logs: %v", mkErr)
-		return
-	}
-	ensureCodeServerUserSettings(home)
-
-	logPath := filepath.Join(cicyLogsDir, "code-server.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		log.Printf("[startup] failed to open code-server log: %v", err)
-		return
-	}
-
-	cmd := exec.Command("code-server", "--bind-addr", "127.0.0.1:"+csPort, "--auth", "none", home)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	var env []string
-	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "PORT=") {
-			continue
-		}
-		env = append(env, kv)
-	}
-	cmd.Env = env
-	cmd.Dir = home
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if startErr := cmd.Start(); startErr != nil {
-		_ = logFile.Close()
-		log.Printf("[startup] failed to start code-server: %v", startErr)
-		return
-	}
-	go func() {
-		defer logFile.Close()
-		if waitErr := cmd.Wait(); waitErr != nil {
-			log.Printf("[startup] code-server exited: %v", waitErr)
-		}
-	}()
-
-	if !waitPort(mustAtoi(csPort), 20*time.Second) {
-		log.Printf("[startup] code-server did not become ready on :%s", csPort)
-		return
-	}
-	log.Printf("[startup] code-server ready on :%s", csPort)
-
-	go installBundledCodeServerExtensions(home)
-}
 
 func mustAtoi(s string) int {
 	var n int

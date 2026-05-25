@@ -13,7 +13,7 @@ import tempfile
 import shutil
 from pathlib import Path
 
-PORT = 8008
+PORT = 8009
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 API_DIR = os.path.join(ROOT_DIR, "api")
 CICY_ROOT_DIR = os.path.expanduser("~/cicy-ai")
