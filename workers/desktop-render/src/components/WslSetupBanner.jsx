@@ -47,6 +47,24 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
   //   - the last step is the explicit "done" phase
   const lastStep = progressSteps && progressSteps[progressSteps.length - 1];
   const installFinished = !installing && lastStep && lastStep.phase === "done";
+  // wsl install path metadata, surfaced on the done step. We use it to
+  // render a "Open WSL Files" button so the user has a one-click route
+  // into their WSL home from Windows File Explorer.
+  const wslHomePath = lastStep && lastStep.wslHomePath;
+  const installDir = lastStep && lastStep.installDir;
+
+  const openWslFiles = async () => {
+    if (!wslHomePath) return;
+    if (window.electronRPC) {
+      // explorer.exe accepts UNC paths directly. Use `start` so the
+      // shell does the path resolution (otherwise CreateProcess wants
+      // a fully-resolved file:// URI).
+      try { await window.electronRPC("exec_shell", { command: `explorer.exe "${wslHomePath}"` }); }
+      catch {}
+    } else if (window.cicy?.shell?.openExternal) {
+      try { await window.cicy.shell.openExternal(`file:///${wslHomePath.replace(/\\\\/g, "/")}`); } catch {}
+    }
+  };
 
   // wsl is ready, but if an install (cicy-code into Ubuntu, etc.) is
   // still running OR has steps to display, keep the banner alive so the
@@ -102,12 +120,27 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
         <div className="wsl-banner__icon"><Icon name="warn" size={18} /></div>
         <div className="wsl-banner__text">
           <div className="wsl-banner__title">{installFinished ? "安装完成" : (isUpgradeMode ? t("wsl.title_upgrade") : title)}</div>
-          {!isUpgradeMode && <div className="wsl-banner__subtitle">{installFinished ? `cicy-code 已就绪，可关闭此面板` : subtitle}</div>}
+          {!isUpgradeMode && (
+            <div className="wsl-banner__subtitle">
+              {installFinished
+                ? (installDir
+                    ? `cicy-code 已就绪 · 文件在 ${installDir}`
+                    : `cicy-code 已就绪，可关闭此面板`)
+                : subtitle}
+            </div>
+          )}
         </div>
         {installFinished ? (
-          <Button variant="primary" onClick={onDismiss}>
-            <Icon name="close" size={14} /> 关闭
-          </Button>
+          <div style={{ display: "flex", gap: 8 }}>
+            {wslHomePath && (
+              <Button variant="ghost" onClick={openWslFiles} title={wslHomePath}>
+                <Icon name="folder" size={14} /> 打开 WSL 文件
+              </Button>
+            )}
+            <Button variant="primary" onClick={onDismiss}>
+              <Icon name="close" size={14} /> 关闭
+            </Button>
+          </div>
         ) : (
           <Button variant="ghost" loading={recheckLoading} onClick={onRecheck}>{t("wsl.recheck")}</Button>
         )}
@@ -271,6 +304,12 @@ function phaseDetail(step /*, t */) {
       if (nm[1] === "global")  return "Global (direct)";
       if (nm[1] === "unknown") return "Unknown (will try mirrors)";
       return nm[1];
+    }
+    // Pick-drive emit: surface the chosen disk + headroom.
+    const dm = m.match(/Install drive:\s*([A-Z]):\s*\(([\d.]+)\s*GB free.*?(\bSSD\b|\bHDD\b|\bsystem\b)?/);
+    if (dm) {
+      const tag = dm[3] === "SSD" ? "SSD" : dm[3] === "HDD" ? "HDD" : "";
+      return `安装到 ${dm[1]}: 盘 (剩余 ${dm[2]} GB${tag ? ", " + tag : ""})`;
     }
     return null;
   }

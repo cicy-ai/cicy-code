@@ -19,6 +19,9 @@
 //   waiting-distro      — first-boot of Ubuntu after fresh install
 //   configuring-apt     — fix /etc/apt/sources.list to a reachable mirror
 //   installing-cicy-code— cp + chmod + --version
+//   installing-deps     — apt-install unzip/jq/CJK fonts so cicy-code's
+//                          first-launch baseTools check passes instantly
+//   starting            — boot cicy-code + wait for /api/health 200
 //   installing-agents   — pre-warm claude/codex/opencode with native binary
 //   done                — final ok
 
@@ -430,8 +433,104 @@ function pickUsableDistro(distros) {
   return null;
 }
 
+// ── pick install drive ─────────────────────────────────────────────────
+// Default WSL install path (Microsoft Store + `wsl --install -d Ubuntu`)
+// always lands the ext4.vhdx under %LOCALAPPDATA%, which is on C:. On
+// machines where C: is a small SSD (typical OEM laptops with separate D:
+// data drives), this fills the system drive within months as Docker
+// images, agent CLIs, and code accumulate inside WSL.
+//
+// Smart-pick algorithm — we score each fixed-NTFS drive and pick the
+// winner, rather than blindly taking max-free-space. The score combines:
+//
+//   1. Non-system bonus (+50 GB equivalent). Prefer D:/E:/etc. over C:
+//      when they have meaningful headroom — keeps the system drive
+//      lean and avoids the "Windows can't update because C: is full"
+//      class of bugs.
+//   2. Absolute free GB. Bigger is better; this is the dominant signal
+//      once the bonus is applied.
+//   3. SSD bonus (+30 GB equivalent). Win32_PhysicalMedia distinguishes
+//      SSD (MediaType=4) from HDD (MediaType=3). WSL on SSD is several
+//      multiples faster for compile / docker-build workloads.
+//
+// A drive must have ≥10 GB free to be considered at all. If nothing
+// qualifies, we fail loudly via the empty-`all` array → LOW_DISK_SPACE.
+// Install path is always `<drive>:\CiCy\WSL\Ubuntu\` — a visible
+// top-level location, not buried in AppData.
+async function pickInstallDrive() {
+  const r = await ps(`
+# Build SSD-letter set from physical media. Best-effort: if WMI fails
+# on older Windows, every drive scores as HDD and we still pick correctly
+# based on free space + non-system bonus.
+$ssdLetters = New-Object System.Collections.Generic.HashSet[string]
+try {
+  $physical = Get-PhysicalDisk -ErrorAction SilentlyContinue
+  if ($physical) {
+    foreach ($p in $physical) {
+      if ($p.MediaType -eq "SSD") {
+        $parts = Get-Partition -DiskNumber $p.DeviceId -ErrorAction SilentlyContinue
+        foreach ($pt in $parts) {
+          if ($pt.DriveLetter) { [void]$ssdLetters.Add(([string]$pt.DriveLetter)) }
+        }
+      }
+    }
+  }
+} catch {}
+
+$drives = Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3" |
+  Where-Object { $_.FileSystem -eq "NTFS" -and $_.FreeSpace -gt 10GB }
+
+$out = @()
+foreach ($d in $drives) {
+  $letter = $d.DeviceID.TrimEnd(":")
+  $freeGB = [math]::Round($d.FreeSpace / 1GB, 1)
+  $totalGB = [math]::Round($d.Size / 1GB, 1)
+  $isNonSystem = ($letter -ne "C")
+  $isSSD = $ssdLetters.Contains($letter)
+  # Composite score, tunable. Non-system bonus (50) is bigger than SSD
+  # bonus (30): we'd rather put WSL on a HDD D: than on the SSD C: if
+  # both are roughly comparable.
+  $score = $freeGB + ($(if ($isNonSystem) { 50 } else { 0 })) + ($(if ($isSSD) { 30 } else { 0 }))
+  $out += [pscustomobject]@{
+    Letter      = $letter
+    FreeGB      = $freeGB
+    TotalGB     = $totalGB
+    IsNonSystem = $isNonSystem
+    IsSSD       = $isSSD
+    Score       = [math]::Round($score, 1)
+  }
+}
+
+if ($out.Count -eq 0) { Write-Output "NONE" } else {
+  $sorted = $out | Sort-Object @{Expression="Score";Descending=$true}, @{Expression="FreeGB";Descending=$true}
+  # Force array form: PS 5.1 ConvertTo-Json emits a bare object when the
+  # input pipeline has one item. Wrapping in a single-element @() lets
+  # the JS side always JSON.parse() to an array.
+  ConvertTo-Json @($sorted) -Compress -Depth 3
+}
+`, { timeoutMs: 12_000 });
+  if (!r.ok || !r.stdout || r.stdout.trim() === "NONE") {
+    return { letter: "C", freeGb: 0, all: [], isSystemDrive: true };
+  }
+  let drives = [];
+  try { drives = JSON.parse(r.stdout); } catch { return { letter: "C", freeGb: 0, all: [], isSystemDrive: true }; }
+  if (!Array.isArray(drives)) drives = [drives];
+  if (drives.length === 0) return { letter: "C", freeGb: 0, all: [], isSystemDrive: true };
+  const best = drives[0];
+  return {
+    letter: best.Letter,
+    freeGb: best.FreeGB,
+    totalGb: best.TotalGB,
+    isSSD: !!best.IsSSD,
+    score: best.Score,
+    all: drives,
+    isSystemDrive: best.Letter === "C",
+    installDir: `${best.Letter}:\\CiCy\\WSL\\Ubuntu`,
+  };
+}
+
 // ── WSL install ───────────────────────────────────────────────────────
-async function installWsl(network, emit) {
+async function installWsl(network, installDrive, emit) {
   // Helper: a "failed" install often actually succeeded — `wsl --install`
   // can register the distro then hang on Microsoft Store metadata, or
   // report ERROR_ALREADY_EXISTS because a previous attempt left it
@@ -445,25 +544,36 @@ async function installWsl(network, emit) {
     return false;
   };
 
-  // China / restricted networks: jump straight to direct rootfs import.
-  // `wsl --install -d Ubuntu` (with or without --web-download) blocks for
-  // 10+ minutes hitting the Microsoft Store / DistributionInfo.json from
-  // raw.githubusercontent.com — both effectively unreachable from CN.
-  // The rootfs path uses NJU/USTC/aliyun mirrors which are fast.
-  if (network === "cn" || network === "unknown") {
+  // Prefer rootfs-import whenever we have a non-system drive available.
+  // Rationale: `wsl --install -d Ubuntu` (Microsoft Store) always lands
+  // the vhdx under %LOCALAPPDATA% on C: and there's no flag to redirect.
+  // Rootfs-import is the only path that lets us pick the install
+  // directory, so if the best drive is D:/E:/etc., we always use it.
+  // Also covers CN / restricted networks where the MS Store path blocks
+  // for 10+ min hitting raw.githubusercontent.com.
+  const preferRootfs = !installDrive.isSystemDrive || network === "cn" || network === "unknown";
+  if (preferRootfs) {
     if (await verifyDistroPresent()) return { ok: true, method: "already-installed" };
-    emit({ phase: "installing-wsl", message: "Importing Ubuntu rootfs from China mirrors (faster than Microsoft Store)…" });
-    const ir = await importUbuntuFromRootfs(network, emit);
-    if (ir.ok) return { ok: true, method: "rootfs-import" };
+    const where = installDrive.isSystemDrive
+      ? "from mirrors (faster than Microsoft Store)"
+      : `to ${installDrive.letter}: drive (${installDrive.freeGb} GB free)`;
+    emit({ phase: "installing-wsl", message: `Importing Ubuntu rootfs ${where}…` });
+    const ir = await importUbuntuFromRootfs(network, installDrive, emit);
+    if (ir.ok) return { ok: true, method: "rootfs-import", installDir: installDrive.installDir };
     if (await verifyDistroPresent()) return { ok: true, method: "already-installed" };
-    // Fall through to the Microsoft Store path if mirrors all failed
-    // (rare, but covers the case where NJU/USTC are also blocked).
+    // Mirrors all unreachable — only fall back to MS Store if we're
+    // landing on C: anyway (Store always picks C:). For non-system
+    // drives, fail loudly so the user knows we can't honor their
+    // disk choice rather than silently dumping to C:.
+    if (!installDrive.isSystemDrive) {
+      return { ok: false, error: ir.error || "All rootfs mirrors unreachable; cannot install to chosen drive" };
+    }
     emit({ phase: "installing-wsl", message: "Rootfs import failed, falling back to Microsoft Store…" });
   }
 
   emit({ phase: "installing-wsl", message: "Installing WSL2 + Ubuntu (5–10 min, requires admin)…" });
-  // global network: try Microsoft Store install first (uses GitHub
-  // direct), web-download if it fails.
+  // global network with C: as chosen drive: try Microsoft Store install
+  // first (uses GitHub direct), web-download if it fails.
   const r = await sh(`wsl --install --no-launch -d Ubuntu`, { timeoutMs: 8 * 60_000 });
   if (r.ok || (await verifyDistroPresent())) return { ok: true };
 
@@ -471,25 +581,24 @@ async function installWsl(network, emit) {
   const r2 = await sh(`wsl --install --web-download --no-launch -d Ubuntu`, { timeoutMs: 8 * 60_000 });
   if (r2.ok || (await verifyDistroPresent())) return { ok: true };
 
-  // Fallback: download Ubuntu rootfs directly from cloud-images mirror
-  // and `wsl --import`. Works in restricted networks (Myanmar, CN) where
-  // raw.githubusercontent.com (which Microsoft fetches DistributionInfo
-  // from) is unreachable so `wsl --install -d <name>` cannot proceed.
-  // (Only reached for global network — cn/unknown already tried this
-  // path first above.)
-  if (network !== "cn" && network !== "unknown") {
-    emit({ phase: "installing-wsl", message: "Falling back to direct rootfs import…" });
-    const ir = await importUbuntuFromRootfs(network, emit);
-    if (ir.ok) return { ok: true, method: "rootfs-import" };
-    return { ok: false, error: r2.stderr || ir.error || `wsl --install exit ${r2.code}` };
-  }
-  return { ok: false, error: r2.stderr || `wsl --install exit ${r2.code}` };
+  // Last resort: rootfs import (only reached for global+system-drive
+  // path — non-system already tried it above).
+  emit({ phase: "installing-wsl", message: "Falling back to direct rootfs import…" });
+  const ir = await importUbuntuFromRootfs(network, installDrive, emit);
+  if (ir.ok) return { ok: true, method: "rootfs-import", installDir: installDrive.installDir };
+  return { ok: false, error: r2.stderr || ir.error || `wsl --install exit ${r2.code}` };
 }
 
-// Last-resort path: download Ubuntu rootfs directly from cloud-images
-// mirrors (NJU > USTC > tuna > cloud-images) and `wsl --import`. Bypasses
-// Microsoft's DistributionInfo manifest fetch + Microsoft Store entirely.
-async function importUbuntuFromRootfs(network, emit) {
+// Direct rootfs install: download Ubuntu rootfs from cloud-images
+// mirrors (NJU > USTC > tuna > cloud-images) and `wsl --import` to the
+// caller-chosen install directory. Bypasses Microsoft Store + the
+// DistributionInfo manifest fetch (raw.githubusercontent.com), so this
+// path also works behind firewalls that block raw.githubusercontent.
+// `installDrive.installDir` controls where the ext4.vhdx ends up — we
+// surface this as a top-level `<drive>:\CiCy\WSL\Ubuntu\` path so the
+// user can find their WSL files from File Explorer without spelunking
+// through AppData.
+async function importUbuntuFromRootfs(network, installDrive, emit) {
   const baseMirrors = network === "cn"
     ? [
         "https://mirror.nju.edu.cn/ubuntu-cloud-images/wsl/jammy/current",
@@ -548,7 +657,7 @@ $ProgressPreference = 'SilentlyContinue'
 # (which still holds a write lock on the previous tar.gz) can't make us
 # fail with "正由另一进程使用". The file is removed at the end.
 $tar = Join-Path $env:TEMP ("ubuntu-jammy-wsl-" + [Guid]::NewGuid().ToString("N").Substring(0,8) + ".tar.gz")
-$dst = Join-Path $env:LOCALAPPDATA 'WSL\\Ubuntu'
+$dst = '${installDrive.installDir.replace(/'/g, "''")}'
 New-Item -ItemType Directory -Force $dst | Out-Null
 $urls = '${orderedJson.replace(/'/g, "''")}' | ConvertFrom-Json
 $ok = $false
@@ -767,21 +876,59 @@ echo "INSTALLED:$ACT"`;
   return { ok: true, version: m ? m[1] : expectVersion };
 }
 
+// ── apt runtime dependency install ─────────────────────────────────────
+// cicy-code's setup.go runs `checkEnvironment()` at first launch and
+// blocks the API server until missing baseTools (unzip, jq, etc.) are
+// apt-installed. On a fresh Ubuntu rootfs this is ~30 seconds of
+// "Installed v2.1.0" → click "open" → nothing-responds limbo.
+//
+// We front-load the apt install here so the API is up the moment the
+// "done" event fires. Skipping ffmpeg (240 MB, async on the cicy-code
+// side anyway — non-blocking even if installed lazily).
+async function installRuntimeDeps(distro, emit) {
+  emit({ phase: "installing-deps", message: "Installing apt packages (unzip, jq, CJK fonts)…", status: "running" });
+  // sudoPrefix mirrors setup.go's logic — apt-get needs root, but the
+  // current user might already be root (fresh rootfs imports run as
+  // root by default before /etc/wsl.conf default=cicy takes effect).
+  const script = `set -e
+SUDO=""
+if [ "$(id -u)" != "0" ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo "; fi
+# Don't run update if we already have one from the apt-mirror config step
+# (timestamp <5 min old). Saves ~10 seconds on warm runs.
+if [ ! -f /var/cache/apt/pkgcache.bin ] || [ $(($(date +%s) - $(stat -c %Y /var/cache/apt/pkgcache.bin))) -gt 300 ]; then
+  DEBIAN_FRONTEND=noninteractive $SUDO apt-get update -qq >/dev/null 2>&1 || true
+fi
+DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y --no-install-recommends \\
+  unzip jq fonts-wqy-microhei fontconfig 2>&1 | tail -3
+`;
+  const r = await wslBash(distro, script, { timeoutMs: 5 * 60_000 });
+  if (!r.ok) {
+    // Non-fatal: cicy-code can apt-install on its own at first launch.
+    // We just lose the "API ready instantly" guarantee.
+    emit({ phase: "installing-deps", message: `Warning: ${summarize(r.stderr, { maxLines: 1 })} — cicy-code will retry`, status: "warning" });
+    return { ok: false, error: r.stderr };
+  }
+  emit({ phase: "installing-deps", message: "Apt packages ready", status: "done" });
+  return { ok: true };
+}
+
 // ── agent CLI install (claude/codex/opencode) ─────────────────────────
 // cicy-code's setup.go installs these lazily on first agent create, but
-// its npm command silently swallows optionalDependencies failures —
-// when the network drops mid-install, npm leaves the wrapper package on
-// disk without its platform-native sibling. The wrapper still prints a
-// version string but actually launching the CLI errors with
-// "native binary not installed". Pre-installing here with strict
-// verification means:
+// its npm command can leave the wrapper package on disk without its
+// platform-native sibling when the network drops mid-install. The
+// wrapper still prints a version string but actually launching the CLI
+// errors with "native binary not installed". Pre-installing here with
+// strict verification means:
 //   - the bug is hot-fixable via CF Worker without re-releasing cicy-code
 //   - first agent start after install is instant (no first-time npm wait)
 //
 // Each upstream wrapper ships platform binaries via optionalDependencies
-// using its own naming convention (see package.json optionalDependencies
-// for each). We pass the platform-native subpackage explicitly as a
-// positional argument so npm cannot quietly skip it.
+// using its own naming convention. npm puts these *nested* inside the
+// wrapper's own node_modules — we verify there, NOT at the top level.
+// We do not pass the native subpackage as a positional install arg:
+// codex's optional deps are npm-aliases to version-tagged builds
+// (`npm:@openai/codex@<v>-linux-x64`), so `@openai/codex-linux-x64@latest`
+// 404s and would kill the whole install command.
 const AGENT_SPECS = {
   claude:   { pkg: "@anthropic-ai/claude-code", nativePrefix: "@anthropic-ai/claude-code-linux-" },
   codex:    { pkg: "@openai/codex",             nativePrefix: "@openai/codex-linux-" },
@@ -796,6 +943,9 @@ async function installAgentClis(distro, network, agents, emit) {
   const registry = (network === "cn" || network === "unknown")
     ? "https://registry.npmmirror.com"
     : "https://registry.npmjs.org";
+  const fallbackRegistry = registry === "https://registry.npmmirror.com"
+    ? "https://registry.npmjs.org"
+    : "https://registry.npmmirror.com";
 
   // WSL is always Linux; map uname -m → npm platform suffix.
   // x86_64 → x64, aarch64/arm64 → arm64. Reject anything else with a
@@ -804,6 +954,31 @@ async function installAgentClis(distro, network, agents, emit) {
   const m = (archProbe.stdout || "").trim();
   const arch = m === "x86_64" ? "x64" : (m === "aarch64" || m === "arm64") ? "arm64" : "";
   if (!arch) return { ok: false, error: `unsupported arch: ${m}` };
+
+  // One install attempt for one agent against a given registry. Returns
+  // { ok, error }. The caller handles retry/fallback policy.
+  async function tryInstall(name, spec, nativePkg, reg) {
+    const script = `
+set -e
+export PATH="$HOME/.npm-global/bin:$HOME/.local/node/bin:$PATH"
+npm install -g --include=optional --fetch-timeout=60000 --fetch-retries=2 \\
+  --registry=${reg} --prefix "$HOME/.npm-global" \\
+  ${spec.pkg}@latest
+`;
+    const r = await wslBash(distro, script, { timeoutMs: 8 * 60_000 });
+    if (!r.ok) {
+      return { ok: false, error: summarize(r.stderr || r.stdout, { maxLines: 2, maxChars: 200 }) };
+    }
+    // The native subpackage lives *inside* the wrapper's own node_modules,
+    // not as a top-level sibling. This is npm's standard placement for
+    // optionalDependencies resolved during install.
+    const verify = `[ -d "$HOME/.npm-global/lib/node_modules/${spec.pkg}/node_modules/${nativePkg}" ] && echo OK || { echo MISSING; exit 1; }`;
+    const v = await wslBash(distro, verify, { timeoutMs: 5_000 });
+    if (!v.ok || !v.stdout.includes("OK")) {
+      return { ok: false, error: `native subpackage missing (${nativePkg})` };
+    }
+    return { ok: true };
+  }
 
   const results = {};
   for (const name of agents) {
@@ -815,33 +990,23 @@ async function installAgentClis(distro, network, agents, emit) {
     const nativePkg = `${spec.nativePrefix}${arch}`;
     emit({ phase: "installing-agents", message: `Installing ${name}…`, status: "running", agent: name });
 
-    // Install wrapper + platform-native sibling in one shot. The native
-    // package is passed positionally — npm can't silently skip it the
-    // way it does for optionalDependencies. fetch-timeout caps a single
-    // tarball retrieval; without it npm's default (5 min) means a stuck
-    // mirror can extend the whole install pipeline by ~20 min.
-    const installScript = `
-set -e
-export PATH="$HOME/.npm-global/bin:$HOME/.local/node/bin:$PATH"
-npm install -g --include=optional --fetch-timeout=60000 --fetch-retries=2 \\
-  --registry=${registry} --prefix "$HOME/.npm-global" \\
-  ${spec.pkg}@latest ${nativePkg}@latest
-`;
-    const r = await wslBash(distro, installScript, { timeoutMs: 8 * 60_000 });
+    // First attempt against the preferred registry.
+    let r = await tryInstall(name, spec, nativePkg, registry);
+
+    // If verification failed (or the install errored), drop the cache
+    // and retry against the fallback registry. The most common cause
+    // we've seen is npmmirror returning a zero-byte tarball whose
+    // sha512 doesn't match — once cached, every retry against the same
+    // mirror reproduces the same failure until the cache is purged.
     if (!r.ok) {
-      results[name] = { ok: false, error: summarize(r.stderr || r.stdout, { maxLines: 2, maxChars: 200 }) };
-      emit({ phase: "installing-agents", message: `${name}: install failed`, status: "error", agent: name });
-      continue;
+      emit({ phase: "installing-agents", message: `${name}: ${r.error}; retrying via ${fallbackRegistry}`, status: "running", agent: name });
+      await wslBash(distro, "npm cache clean --force >/dev/null 2>&1 || true", { timeoutMs: 30_000 });
+      r = await tryInstall(name, spec, nativePkg, fallbackRegistry);
     }
 
-    // Verify the native subpackage actually landed under node_modules.
-    // The wrapper alone is the failure mode we're guarding against —
-    // --version still prints, but the CLI errors on real invocation.
-    const verifyScript = `[ -d "$HOME/.npm-global/lib/node_modules/${nativePkg}" ] && echo OK || { echo MISSING; exit 1; }`;
-    const v = await wslBash(distro, verifyScript, { timeoutMs: 5_000 });
-    if (!v.ok || !v.stdout.includes("OK")) {
-      results[name] = { ok: false, error: `native binary missing (${nativePkg})` };
-      emit({ phase: "installing-agents", message: `${name}: native binary missing`, status: "error", agent: name });
+    if (!r.ok) {
+      results[name] = r;
+      emit({ phase: "installing-agents", message: `${name}: ${r.error}`, status: "error", agent: name });
       continue;
     }
     results[name] = { ok: true, native: nativePkg };
@@ -882,23 +1047,35 @@ export async function windowsInstall({ onProgress = () => {} } = {}) {
   const network = await detectNetwork();
   emit({ phase: "detecting", message: `Network: ${network}`, network });
 
-  // 1b. Disk-space precheck on C: (or whatever drive holds %APPDATA% +
-  // the WSL distro vhdx). The whole install pipeline writes ~500MB of
-  // staged files plus an ext4.vhdx that grows as agent CLIs install
-  // their own deps. If the user is already near 0 free, bail out
-  // early with a clear error instead of failing mid-install with
-  // confusing ENOSPC / vhdx I/O errors.
-  {
-    const REQUIRED_GB = 5;
-    const dr = await ps(
-      `$d = Get-PSDrive C; Write-Output ([math]::Round($d.Free/1GB,2))`,
-      { timeoutMs: 5_000 }
-    );
-    const freeGb = dr.ok ? parseFloat(dr.stdout.trim()) : NaN;
-    if (Number.isFinite(freeGb) && freeGb < REQUIRED_GB) {
-      throw new Error(`LOW_DISK_SPACE:${freeGb}:${REQUIRED_GB}`);
+  // 1b. Pick install drive — auto-select the fixed NTFS drive with the
+  // most free space. On OEM laptops where C: is a small SSD and D: is
+  // a large data drive, the user wants WSL on D:. The picker handles
+  // this without any UI; we surface the choice in the timeline so the
+  // user understands where their files will live.
+  const installDrive = await pickInstallDrive();
+  if (installDrive.all.length === 0) {
+    // No drive has ≥10 GB free. Bail with a clear error rather than
+    // failing mid-install with a confusing ENOSPC / vhdx I/O error.
+    throw new Error(`LOW_DISK_SPACE:0:10`);
+  }
+  emit({
+    phase: "detecting",
+    message: `Install drive: ${installDrive.letter}: (${installDrive.freeGb} GB free of ${installDrive.totalGb} GB, ${installDrive.isSSD ? "SSD" : "HDD"}${installDrive.isSystemDrive ? ", system" : ""})`,
+    network,
+    installDrive: installDrive.letter,
+    installDir: installDrive.installDir,
+    isSSD: installDrive.isSSD,
+  });
+  // Also assert C: has enough headroom for staged downloads + Windows
+  // itself, even when the WSL vhdx lands elsewhere. cicy-code's staged
+  // binary download (~20 MB) plus npm cache + temp files during the
+  // rootfs import can still push C: over the edge on near-full systems.
+  if (installDrive.letter !== "C") {
+    const cFree = (installDrive.all.find(d => d.Letter === "C") || {}).FreeGB;
+    const C_MIN_GB = 2;
+    if (Number.isFinite(cFree) && cFree < C_MIN_GB) {
+      throw new Error(`LOW_DISK_SPACE:${cFree}:${C_MIN_GB}`);
     }
-    emit({ phase: "detecting", message: `Free space: ${Number.isFinite(freeGb) ? freeGb + ' GB' : 'unknown'}`, network });
   }
 
   // 2. Latest manifest
@@ -989,7 +1166,7 @@ Write-Output "ERR"; exit 1`;
   const wslTask = (async () => {
     let wsl = await checkWslStatus();
     if (!wsl.installed || !wsl.usableDistro) {
-      const ins = await installWsl(network, emit);
+      const ins = await installWsl(network, installDrive, emit);
       if (!ins.ok) throw new Error("wsl install: " + ins.error);
       wsl = await checkWslStatus();
       if (!wsl.usableDistro) throw new Error("WSL installed but no usable distro detected — Windows may need a reboot");
@@ -1022,6 +1199,10 @@ Write-Output "ERR"; exit 1`;
   // 7. Copy + verify — depends on BOTH download and WSL being ready.
   const r = await installCicyCodeIntoWsl(distro, actualBinaryPath, version, emit);
   if (!r.ok) throw new Error("install: " + r.error);
+
+  // 7b. Front-load cicy-code's baseTools apt-install so its first launch
+  //     binds :8008 immediately (no 30s "checking environment" stall).
+  await installRuntimeDeps(distro, emit);
 
   // 8. Reload the distro so the new /etc/wsl.conf [user] default=cicy
   //    takes effect. Without this, subsequent `wsl -d <distro>` calls
@@ -1056,8 +1237,20 @@ Write-Output "ERR"; exit 1`;
     emit({ phase: "installing-agents", message: "Agent CLIs ready (claude, codex, opencode)", status: "done" });
   }
 
-  emit({ phase: "done", message: `Installed v${r.version}`, version: r.version, status: "done" });
-  return { ok: true, version: r.version };
+  emit({
+    phase: "done",
+    message: `Installed v${r.version}`,
+    version: r.version,
+    status: "done",
+    installDrive: installDrive.letter,
+    installDir: installDrive.installDir,
+    // UNC path that opens the user's WSL home in Windows File Explorer.
+    // We hand this to the banner so it can render a "Open WSL Files"
+    // button that takes the user straight into their cicy-code workspace
+    // without them needing to know `\\wsl$\Ubuntu` is a thing.
+    wslHomePath: `\\\\wsl$\\${distro}\\home\\cicy`,
+  });
+  return { ok: true, version: r.version, installDir: installDrive.installDir };
   // Note: stagePath is intentionally not deleted — downloadStaged checks
   // size before reuse, so cached files speed up retries / repeat installs.
 }
