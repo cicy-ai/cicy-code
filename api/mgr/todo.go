@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -102,29 +103,14 @@ func loadTodos(workspace string) ([]Todo, error) {
 
 // normaliseTodoTimestamps replaces "YYYY-MM-DD HH:MM:SS" with
 // "YYYY-MM-DDTHH:MM:SS" so the Go yaml parser can decode time.Time.
-var todoTsRE = strings.NewReplacer() // lazy: done inline for readability
+// Python's yaml.safe_dump emits datetime objects in the space-separated
+// form which Go's yaml.v3 cannot parse and which is also ambiguous YAML
+// (the value contains colons, triggering "mapping values are not allowed
+// in this context").
+var todoTsRE = regexp.MustCompile(`(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})`)
 
 func normaliseTodoTimestamps(data []byte) []byte {
-	s := string(data)
-	// Only touch values that look like "YYYY-MM-DD HH:MM:SS"
-	var buf strings.Builder
-	buf.Grow(len(s))
-	i := 0
-	for i < len(s) {
-		// Pattern: 4 digits '-' 2 digits '-' 2 digits ' ' 2 digits ':' 2 digits ':'
-		if i+19 <= len(s) &&
-			s[i+4] == '-' && s[i+7] == '-' && s[i+10] == ' ' &&
-			s[i+13] == ':' && s[i+16] == ':' {
-			buf.WriteString(s[:i+10])
-			buf.WriteByte('T')
-			s = s[i+11:]
-			i = 0
-			continue
-		}
-		buf.WriteByte(s[i])
-		i++
-	}
-	return []byte(buf.String())
+	return todoTsRE.ReplaceAll(data, []byte("${1}T${2}"))
 }
 
 func saveTodos(workspace string, todos []Todo) error {

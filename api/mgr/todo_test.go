@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -349,5 +350,78 @@ func TestTodoStorage_AllInMasterWorkspace(t *testing.T) {
 	workerTodos, _ := loadTodos(workerWs)
 	if len(workerTodos) != 0 {
 		t.Fatalf("worker workspace should be empty, got %d", len(workerTodos))
+	}
+}
+
+func TestNormaliseTodoTimestamps(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "python style → RFC3339",
+			in:   "created_at: 2026-05-25 02:59:48+00:00\n",
+			want: "created_at: 2026-05-25T02:59:48+00:00\n",
+		},
+		{
+			name: "already RFC3339 — unchanged",
+			in:   "created_at: 2026-05-25T02:59:48+00:00\n",
+			want: "created_at: 2026-05-25T02:59:48+00:00\n",
+		},
+		{
+			name: "multiple timestamps in one document",
+			in: "todos:\n- id: a\n  created_at: 2026-01-01 10:20:30+00:00\n  updated_at: 2026-02-02 11:22:33+00:00\n",
+			want: "todos:\n- id: a\n  created_at: 2026-01-01T10:20:30+00:00\n  updated_at: 2026-02-02T11:22:33+00:00\n",
+		},
+		{
+			name: "timestamps without TZ also handled",
+			in:   "created_at: 2026-05-25 02:59:48Z\n",
+			want: "created_at: 2026-05-25T02:59:48Z\n",
+		},
+		{
+			name: "non-timestamp text untouched",
+			in:   "title: hello world 12 34\n",
+			want: "title: hello world 12 34\n",
+		},
+	}
+	for _, c := range cases {
+		got := string(normaliseTodoTimestamps([]byte(c.in)))
+		if got != c.want {
+			t.Errorf("%s:\n got: %q\nwant: %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestLoadTodos_AcceptsPythonTimestampFormat(t *testing.T) {
+	setupTodoTest(t)
+	ws := paneWorkspace(primaryWorkerSession)
+	if ws == "" {
+		t.Skip("master workspace not configured")
+	}
+	if err := os.MkdirAll(workspaceRuntimeDir(ws), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Write a todos.yaml with the Python (space-separated) timestamp form.
+	raw := []byte(`todos:
+- id: t-1
+  title: hello
+  status: todo
+  pane_id: w-10025
+  created_at: 2026-05-25 02:59:48+00:00
+  updated_at: 2026-05-25 02:59:48+00:00
+`)
+	if err := os.WriteFile(todoFilePath(ws), raw, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	todos, err := loadTodos(ws)
+	if err != nil {
+		t.Fatalf("loadTodos with python ts: %v", err)
+	}
+	if len(todos) != 1 || todos[0].ID != "t-1" {
+		t.Fatalf("expected 1 todo with id t-1, got %v", todos)
+	}
+	if todos[0].CreatedAt.IsZero() {
+		t.Fatalf("CreatedAt parsed as zero: %+v", todos[0])
 	}
 }
