@@ -216,6 +216,10 @@ const api = {
   registerAuditToken: (userId: string, plan = 'free') => http.post('/api/audit/register', { user_id: userId, plan }),
   getSetupGuide: () => http.get('/setup'),
 
+  // audit-v2 — autonomous policy agent
+  auditAutonomyDecisions: (limit = 100) => http.get(`/api/audit/decisions?limit=${limit}`),
+  auditAutonomyRunNow: () => http.post('/api/audit/decisions/run'),
+
   // desktop "apps"
   getApps: () => http.get('/api/apps'),
   createApp: (prompt: string) => http.post('/api/apps/create', { prompt }),
