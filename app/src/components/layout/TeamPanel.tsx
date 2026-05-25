@@ -6,7 +6,7 @@ import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, UserPlus, GitBranch 
 import { Spinner } from '../ui/Spinner';
 import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
-import { useDialog } from '../../contexts/DialogContext';
+import { useDialogs } from '../ui/Modal';
 import { normalizeAgentType, guidanceFilenameForAgentType } from '../../lib/agentType';
 import AgentAvatar from '../AgentAvatar';
 import Select from '../ui/Select';
@@ -61,7 +61,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   const [dragOrder, setDragOrder] = useState<string[] | null>(null);
   const [draggingWid, setDraggingWid] = useState<string | null>(null);
   const [dragOverWid, setDragOverWid] = useState<string | null>(null);
-  const { confirm } = useDialog();
+  const { confirm, node: dialogsNode } = useDialogs();
 
   const shortId = (id: string) => (id || '').replace(/:.*$/, '');
   const fullId = (id: string) => id.includes(':') ? id : `${id}:main.0`;
@@ -152,57 +152,56 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     window.dispatchEvent(new CustomEvent('show-toast', { detail }));
   }, []);
 
-  const restartPane = useCallback((wid: string, title: string, disabled?: boolean) => {
+  const restartPane = useCallback(async (wid: string, title: string, disabled?: boolean) => {
     if (disabled) {
       showToast(i18n.t('toastRestartUnsupported', { ns: 'teamPanel', title }));
       return;
     }
-    confirm(
-      <Trans i18nKey="confirmRestart" ns="teamPanel" values={{ title }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
-      async () => {
-        try {
-          await apiService.restartPane(wid);
-          showToast(i18n.t('toastRestarting', { ns: 'teamPanel', title }));
-          onRefreshPanes();
-          onRefreshPoll();
-        } catch {
-          showToast(i18n.t('toastRestartFailed', { ns: 'teamPanel', title }));
-        }
-      }
-    );
+    const ok = await confirm({
+      body: <Trans i18nKey="confirmRestart" ns="teamPanel" values={{ title }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
+    });
+    if (!ok) return;
+    try {
+      await apiService.restartPane(wid);
+      showToast(i18n.t('toastRestarting', { ns: 'teamPanel', title }));
+      onRefreshPanes();
+      onRefreshPoll();
+    } catch {
+      showToast(i18n.t('toastRestartFailed', { ns: 'teamPanel', title }));
+    }
   }, [confirm, onRefreshPanes, onRefreshPoll, showToast]);
-  const deletePane = useCallback((binding: Binding, title: string) => {
+  const deletePane = useCallback(async (binding: Binding, title: string) => {
     const wid = shortId(binding.name);
-    confirm(
-      <Trans i18nKey="confirmDelete" ns="teamPanel" values={{ title }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
-      async () => {
-        try {
-          await apiService.unbindAgent(binding.id);
-          await apiService.deletePane(wid);
-          onOpenInCurrentPane?.(paneId);
-          await onRefreshPanes();
-          onRefreshPoll();
-        } catch {
-          showToast(i18n.t('toastDeleteFailed', { ns: 'teamPanel', title }));
-        }
-      }
-    );
+    const ok = await confirm({
+      body: <Trans i18nKey="confirmDelete" ns="teamPanel" values={{ title }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await apiService.unbindAgent(binding.id);
+      await apiService.deletePane(wid);
+      onOpenInCurrentPane?.(paneId);
+      await onRefreshPanes();
+      onRefreshPoll();
+    } catch {
+      showToast(i18n.t('toastDeleteFailed', { ns: 'teamPanel', title }));
+    }
   }, [confirm, onOpenInCurrentPane, onRefreshPanes, onRefreshPoll, paneId, showToast]);
-  const deleteUnboundPane = useCallback((agent: Agent) => {
+  const deleteUnboundPane = useCallback(async (agent: Agent) => {
     const wid = shortId(agent.pane_id);
     const title = agent.title || wid;
-    confirm(
-      <Trans i18nKey="confirmDelete" ns="teamPanel" values={{ title }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
-      async () => {
-        try {
-          await apiService.deletePane(wid);
-          await onRefreshPanes();
-          onRefreshPoll();
-        } catch {
-          showToast(i18n.t('toastDeleteFailed', { ns: 'teamPanel', title }));
-        }
-      }
-    );
+    const ok = await confirm({
+      body: <Trans i18nKey="confirmDelete" ns="teamPanel" values={{ title }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await apiService.deletePane(wid);
+      await onRefreshPanes();
+      onRefreshPoll();
+    } catch {
+      showToast(i18n.t('toastDeleteFailed', { ns: 'teamPanel', title }));
+    }
   }, [confirm, onRefreshPanes, onRefreshPoll, showToast]);
   const orderedBindings = useMemo(() => {
     if (!dragOrder || dragOrder.length === 0) return bindings;
@@ -615,7 +614,13 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                       }
                     },
                     forking: forkingId === wid,
-                    onRemove: () => confirm(<Trans i18nKey="confirmUnbind" ns="teamPanel" values={{ name: getName(b) }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />, () => unbind(b)),
+                    onRemove: async () => {
+                      const ok = await confirm({
+                        body: <Trans i18nKey="confirmUnbind" ns="teamPanel" values={{ name: getName(b) }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
+                        danger: true,
+                      });
+                      if (ok) unbind(b);
+                    },
                     onDelete: () => deletePane(b, getName(b)),
                   });
                 })}
@@ -630,6 +635,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
           </div>
         )}
       </div>
+      {dialogsNode}
     </div>
   );
 }

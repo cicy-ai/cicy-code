@@ -8,7 +8,7 @@ import {
 } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronRight, ChevronDown, File as FileIcon, Folder, FolderOpen, RefreshCw, Send, Eye, EyeOff, Info, Star, Trash2, Edit3, FilePlus, FolderPlus, Upload, Download, Link as LinkIcon } from 'lucide-react';
-import { fsApi, FsEntry, FsListResponse, FsFavorite, joinFsPath } from './api';
+import { fsApi, FsEntry, FsListResponse, FsFavorite, FsRoot, joinFsPath } from './api';
 import { fsCachePeek, fsCacheSet, fsKey } from './fsCache';
 
 interface FileExplorerProps {
@@ -16,7 +16,10 @@ interface FileExplorerProps {
   workspaceFolder: string;
   /** Currently opened path (highlighted). */
   activePath?: string;
-  onOpenFile: (path: string, entry: FsEntry) => void;
+  /** Open a file. `root` defaults to "workspace" when omitted — non-workspace
+   *  roots come from the multi-root sections (projects / skills / home) and
+   *  are forwarded to the editor so it can scope reads correctly. */
+  onOpenFile: (path: string, entry: FsEntry, root?: string) => void;
   /** Called the first time a directory is successfully listed, so the parent
    *  can subscribe a fsnotify watcher to that path. */
   onDirLoaded?: (path: string) => void;
@@ -118,6 +121,26 @@ export default function FileExplorer({
   const [showHidden, setShowHidden] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
+  // Workspace section is the primary tree but still collapsible — matches
+  // VS Code where every section in the explorer panel has a chevron.
+  const [workspaceExpanded, setWorkspaceExpanded] = useState(true);
+  // Multi-root sections (projects / skills / home). The workspace is always
+  // rendered as the main tree above; this list excludes "workspace".
+  const [extraRoots, setExtraRoots] = useState<FsRoot[]>([]);
+  useEffect(() => {
+    if (!agentId) return;
+    let cancelled = false;
+    fsApi
+      .roots(agentId)
+      .then((rs) => {
+        if (cancelled) return;
+        setExtraRoots(rs.filter((r) => r.id !== 'workspace'));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId]);
   // Multi-select state (independent of "active tab" highlighting).
   // selected.size >= 1 always when something is picked; anchor drives shift+click ranges.
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -393,65 +416,30 @@ export default function FileExplorer({
         />
       )}
       <div ref={scrollRef} data-id="file-explorer-scroll" className="flex-1 overflow-auto">
-        {favorites && favorites.length > 0 && (
-          <div data-id="file-explorer-favorites" className="border-b border-zinc-900 pb-1 mb-1">
-            <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-zinc-500 font-medium">
-              收藏
-            </div>
-            {favorites.map((f) => (
-              <div
-                key={f.path}
-                data-id="file-explorer-favorite"
-                data-path={f.path}
-                className="group flex items-center gap-1 px-2 py-0.5 hover:bg-zinc-800/60 cursor-pointer"
-                onClick={() => {
-                  const entry: FsEntry = {
-                    name: f.name,
-                    is_dir: false,
-                    size: 0,
-                    mtime: 0,
-                    mode: '',
-                  };
-                  onOpenFile(f.path, entry);
-                }}
-                title={f.path}
-              >
-                <Star className="w-3 h-3 text-amber-400 shrink-0" />
-                <span className="truncate text-zinc-200">{f.name}</span>
-                <span className="flex-1" />
-                {onRemoveFavorite && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemoveFavorite(f.path);
-                    }}
-                    className="opacity-0 group-hover:opacity-60 hover:opacity-100 text-zinc-500 hover:text-red-400 text-xs px-1"
-                    title="移除收藏"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-        {rootState?.loading && (
+        <CollapsibleHeader
+          label="WORKSPACE"
+          expanded={workspaceExpanded}
+          onToggle={() => setWorkspaceExpanded((v) => !v)}
+          dataId="file-explorer-section-workspace-header"
+        />
+        {workspaceExpanded && rootState?.loading && (
           <div className="px-3 py-2 text-xs text-zinc-500">加载中…</div>
         )}
-        {rootState?.error && (
+        {workspaceExpanded && rootState?.error && (
           <div className="px-3 py-2 text-xs text-red-400">{rootState.error}</div>
         )}
-        {!rootState?.loading && visible.length === 0 && rootState?.loaded && (
+        {workspaceExpanded && !rootState?.loading && visible.length === 0 && rootState?.loaded && (
           <div className="px-3 py-2 text-xs text-zinc-500">空目录</div>
         )}
         <div
           style={{
-            height: virtualizer.getTotalSize(),
+            height: workspaceExpanded ? virtualizer.getTotalSize() : 0,
             width: '100%',
             position: 'relative',
+            overflow: 'hidden',
           }}
         >
-          {virtualizer.getVirtualItems().map((vi) => {
+          {workspaceExpanded && virtualizer.getVirtualItems().map((vi) => {
             const node = visible[vi.index];
             if (!node) return null;
             const isHeavy = HEAVY_DIR_NAMES.has(node.name);
@@ -512,6 +500,22 @@ export default function FileExplorer({
             );
           })}
         </div>
+        <FavoritesSection
+          favorites={favorites || []}
+          onOpen={(path, name) => {
+            const entry: FsEntry = { name, is_dir: false, size: 0, mtime: 0, mode: '' };
+            onOpenFile(path, entry);
+          }}
+          onRemove={onRemoveFavorite}
+        />
+        {extraRoots.map((r) => (
+          <RemoteSection
+            key={r.id}
+            agentId={agentId}
+            root={r}
+            onOpenFile={(path, entry) => onOpenFile(path, entry, r.id)}
+          />
+        ))}
       </div>
       {menu && (
         <ContextMenu
@@ -732,5 +736,237 @@ function MenuItem({
       {icon}
       <span>{children}</span>
     </button>
+  );
+}
+
+// ── multi-root sections ───────────────────────────────────────────────────
+
+// Collapsible section header with chevron + label + optional right-aligned
+// count badge. Pure UI — caller owns the expanded/collapsed state.
+function CollapsibleHeader({
+  label,
+  expanded,
+  onToggle,
+  count,
+  dataId,
+}: {
+  label: string;
+  expanded: boolean;
+  onToggle: () => void;
+  count?: number;
+  dataId?: string;
+}) {
+  return (
+    <button
+      data-id={dataId}
+      onClick={onToggle}
+      className="w-full flex items-center gap-1 px-2 pt-2 pb-0.5 text-[10px] uppercase tracking-wide text-zinc-500 hover:text-zinc-300 font-medium select-none"
+    >
+      {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+      <span>{label}</span>
+      {typeof count === 'number' && (
+        <span className="ml-1 text-zinc-600 normal-case">({count})</span>
+      )}
+    </button>
+  );
+}
+
+interface FavoritesSectionProps {
+  favorites: FsFavorite[];
+  onOpen: (path: string, name: string) => void;
+  onRemove?: (path: string) => void;
+}
+
+function FavoritesSection({ favorites, onOpen, onRemove }: FavoritesSectionProps) {
+  // The favorites list itself is short (capped by the backend), so unlike
+  // remote sections this expands by default when there's anything in it.
+  const [expanded, setExpanded] = useState(true);
+  if (favorites.length === 0) return null;
+  return (
+    <div data-id="file-explorer-favorites" className="border-t border-zinc-800 mt-1 pt-1">
+      <CollapsibleHeader
+        label="FAVORITES"
+        expanded={expanded}
+        onToggle={() => setExpanded((v) => !v)}
+        count={favorites.length}
+        dataId="file-explorer-favorites-header"
+      />
+      {expanded && favorites.map((f) => (
+        <div
+          key={f.path}
+          data-id="file-explorer-favorite"
+          data-path={f.path}
+          className="group flex items-center gap-1 px-2 py-0.5 hover:bg-zinc-800/60 cursor-pointer"
+          onClick={() => onOpen(f.path, f.name)}
+          title={f.path}
+        >
+          <Star className="w-3 h-3 text-amber-400 shrink-0" />
+          <span className="truncate text-zinc-200">{f.name}</span>
+          <span className="flex-1" />
+          {onRemove && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRemove(f.path); }}
+              className="opacity-0 group-hover:opacity-60 hover:opacity-100 text-zinc-500 hover:text-red-400 text-xs px-1"
+              title="移除收藏"
+            >
+              ×
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+interface RemoteSectionProps {
+  agentId: string;
+  root: FsRoot;
+  onOpenFile: (path: string, entry: FsEntry) => void;
+}
+
+// Lazy-loaded subtree for a non-workspace root (projects / skills / home).
+// First expand kicks off the listing; collapse keeps state so re-expand is
+// instant. Stand-alone state (not shared with the workspace virtualizer) so
+// each section can be developed and reasoned about independently.
+//
+// Hidden files are always shown here — these roots are reference / config
+// locations where dot-prefixed entries (`.bashrc`, `.config`, `.git`, …)
+// are usually the whole point. The workspace tree's eye-toggle still gates
+// dot-files for the active project.
+function RemoteSection({ agentId, root, onOpenFile }: RemoteSectionProps) {
+  const [expanded, setExpanded] = useState(false);
+  // dirs keyed by root-relative path; '' is the root listing.
+  const [dirs, setDirs] = useState<Map<string, DirState>>(new Map());
+
+  const loadDir = useCallback(async (path: string) => {
+    const cur = dirs.get(path);
+    if (cur && (cur.loaded || cur.loading)) return;
+    setDirs((prev) => {
+      const next = new Map(prev);
+      next.set(path, { ...(prev.get(path) ?? emptyDirState()), loading: true, error: '' });
+      return next;
+    });
+    try {
+      const res = await fsApi.list(agentId, path, { hidden: true, root: root.id });
+      setDirs((prev) => {
+        const next = new Map(prev);
+        next.set(path, {
+          ...(prev.get(path) ?? emptyDirState()),
+          loading: false,
+          loaded: true,
+          entries: res.entries,
+          truncated: !!res.truncated,
+          error: '',
+        });
+        return next;
+      });
+    } catch (err) {
+      setDirs((prev) => {
+        const next = new Map(prev);
+        next.set(path, {
+          ...(prev.get(path) ?? emptyDirState()),
+          loading: false,
+          error: (err as Error).message,
+        });
+        return next;
+      });
+    }
+  }, [agentId, dirs, root.id]);
+
+  const handleToggle = useCallback(() => {
+    setExpanded((wasExpanded) => {
+      const next = !wasExpanded;
+      if (next && !dirs.has('')) {
+        // Fire lazy load on first expand; subsequent expands reuse the cache.
+        loadDir('');
+      }
+      return next;
+    });
+  }, [dirs, loadDir]);
+
+  // Showing the tree: walk dirs map starting at '' and render each entry.
+  // Children render only when their parent is expanded. Independent of the
+  // workspace tree's virtualizer; remote trees are expected to stay small
+  // because users rarely expand more than one or two levels here.
+  const renderDir = (parentPath: string, level: number): React.ReactNode => {
+    const ds = dirs.get(parentPath);
+    if (!ds || !ds.loaded) return null;
+    return ds.entries.map((e) => {
+      const childPath = joinFsPath(parentPath, e.name);
+      const childDs = dirs.get(childPath);
+      const isExpanded = !!childDs?.expanded;
+      return (
+        <div key={childPath}>
+          <div
+            data-id="file-explorer-remote-node"
+            data-path={childPath}
+            data-root={root.id}
+            data-is-dir={e.is_dir ? 'true' : 'false'}
+            className="flex items-center gap-1 px-2 py-0.5 hover:bg-zinc-800/60 cursor-pointer"
+            style={{ paddingLeft: 8 + level * 12 }}
+            onClick={() => {
+              if (e.is_dir) {
+                setDirs((prev) => {
+                  const next = new Map(prev);
+                  const cur = prev.get(childPath) ?? emptyDirState();
+                  next.set(childPath, { ...cur, expanded: !cur.expanded });
+                  return next;
+                });
+                if (!childDs?.loaded && !childDs?.loading) loadDir(childPath);
+              } else {
+                onOpenFile(childPath, e);
+              }
+            }}
+            title={childPath}
+          >
+            {e.is_dir ? (
+              isExpanded
+                ? <ChevronDown className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                : <ChevronRight className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+            ) : (
+              <span className="w-3.5 shrink-0" />
+            )}
+            {e.is_dir ? (
+              isExpanded
+                ? <FolderOpen className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                : <Folder className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            ) : (
+              <FileIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+            )}
+            <span className="truncate text-zinc-200">{e.name}</span>
+            {childDs?.loading && (
+              <RefreshCw className="w-3 h-3 animate-spin text-zinc-500" />
+            )}
+          </div>
+          {e.is_dir && isExpanded && renderDir(childPath, level + 1)}
+        </div>
+      );
+    });
+  };
+
+  const rootDs = dirs.get('');
+  return (
+    <div data-id={`file-explorer-section-${root.id}`} className="border-t border-zinc-800 mt-1 pt-1">
+      <CollapsibleHeader
+        label={root.label.toUpperCase()}
+        expanded={expanded}
+        onToggle={handleToggle}
+        dataId={`file-explorer-section-${root.id}-header`}
+      />
+      {expanded && (
+        <>
+          {rootDs?.loading && (
+            <div className="px-3 py-1.5 text-xs text-zinc-500">加载中…</div>
+          )}
+          {rootDs?.error && (
+            <div className="px-3 py-1.5 text-xs text-red-400">{rootDs.error}</div>
+          )}
+          {rootDs?.loaded && rootDs.entries.length === 0 && (
+            <div className="px-3 py-1.5 text-xs text-zinc-500">空目录</div>
+          )}
+          {rootDs?.loaded && renderDir('', 0)}
+        </>
+      )}
+    </div>
   );
 }

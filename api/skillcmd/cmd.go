@@ -206,18 +206,10 @@ func cmdInstall(args []string) error {
 		}
 	}
 
-	// 6. symlink ~/.local/bin/<name> → entry
-	if m.Entry != "" {
-		entryPath := filepath.Join(skillPath, m.Entry)
-		if err := makeSymlink(entryPath, localBinPath(m.Name)); err != nil {
-			// non-fatal; warn
-			if !jsonOut {
-				fmt.Fprintf(os.Stderr, "  warn: symlink ~/.local/bin/%s failed: %v\n", m.Name, err)
-			}
-		}
-		// also bin_aliases
-		for _, alias := range m.BinAliases {
-			_ = makeSymlink(entryPath, localBinPath(alias))
+	// 6. symlink ~/.local/bin/<name> → entry (and bin_aliases)
+	if _, errs := ensureBinSymlinksForSkill(skillPath, &m); len(errs) > 0 && !jsonOut {
+		for _, e := range errs {
+			fmt.Fprintf(os.Stderr, "  warn: symlink failed: %v\n", e)
 		}
 	}
 

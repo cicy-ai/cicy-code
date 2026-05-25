@@ -101,14 +101,10 @@ func PublicInstall(spec string, sink io.Writer) (*InstallResult, error) {
 		}
 	}
 
-	// 6. symlink ~/.local/bin/<name> → entry
-	if m.Entry != "" {
-		entryPath := filepath.Join(skillPath, m.Entry)
-		if err := makeSymlink(entryPath, localBinPath(m.Name)); err != nil {
-			fmt.Fprintf(mw, "  warn: symlink ~/.local/bin/%s failed: %v\n", m.Name, err)
-		}
-		for _, alias := range m.BinAliases {
-			_ = makeSymlink(entryPath, localBinPath(alias))
+	// 6. symlink ~/.local/bin/<name> → entry (and bin_aliases)
+	if _, errs := ensureBinSymlinksForSkill(skillPath, &m); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintf(mw, "  warn: symlink failed: %v\n", e)
 		}
 	}
 

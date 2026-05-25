@@ -17,7 +17,7 @@ interface FilesViewProps {
   /** Absolute workspace folder, e.g. ~/cicy-ai/workers/w-10001 expanded. */
   workspaceFolder: string;
   /** Page-level chat-ws client id. Used to register a ":code-ext" alias so
-   *  agent-code-server's host.* RPCs reach this view over the shared WS. */
+   *  agent-editor's host.* RPCs reach this view over the shared WS. */
   pageClientId?: string;
   className?: string;
 }
@@ -28,6 +28,10 @@ interface Tab {
   id: string;
   kind: TabKind;
   path: string;
+  /** Filesystem root the path is anchored against. Default "workspace" keeps
+   *  existing behavior; other ids (e.g. "projects", "skills", "home") come
+   *  from the multi-root explorer sections and make the editor read-only. */
+  root: string;
   base?: 'head' | 'index';
 }
 
@@ -37,8 +41,8 @@ interface JumpRequest {
   nonce: number;
 }
 
-function makeTabId(kind: TabKind, path: string): string {
-  return `${kind}:${path}`;
+function makeTabId(kind: TabKind, root: string, path: string): string {
+  return `${kind}:${root}:${path}`;
 }
 
 interface PersistedTabs {
@@ -47,7 +51,9 @@ interface PersistedTabs {
 }
 
 const TAB_PERSIST_KEY_PREFIX = 'cicy.files.tabs.';
-const TAB_PERSIST_VERSION = 1;
+// v2: tab ids include the fs root id (multi-root explorer). v1 keys are
+// silently discarded — the user just loses their pre-upgrade open-tab state.
+const TAB_PERSIST_VERSION = 2;
 
 function tabPersistKey(agentId: string): string {
   return `${TAB_PERSIST_KEY_PREFIX}${agentId}`;
@@ -68,10 +74,11 @@ function loadPersistedTabs(agentId: string): PersistedTabs {
       const kind: TabKind = t?.kind === 'diff' ? 'diff' : 'file';
       const path = typeof t?.path === 'string' ? t.path : '';
       if (!path) continue;
-      const id = makeTabId(kind, path);
+      const root = typeof t?.root === 'string' && t.root ? t.root : 'workspace';
+      const id = makeTabId(kind, root, path);
       if (seen.has(id)) continue;
       seen.add(id);
-      tabs.push({ id, kind, path, base: kind === 'diff' ? (t?.base || 'head') : undefined });
+      tabs.push({ id, kind, root, path, base: kind === 'diff' ? (t?.base || 'head') : undefined });
     }
     const activeId = typeof parsed.activeId === 'string' && seen.has(parsed.activeId)
       ? parsed.activeId
@@ -87,7 +94,7 @@ function savePersistedTabs(agentId: string, tabs: Tab[], activeId: string): void
   try {
     const payload = JSON.stringify({
       v: TAB_PERSIST_VERSION,
-      tabs: tabs.map((t) => ({ kind: t.kind, path: t.path, base: t.base })),
+      tabs: tabs.map((t) => ({ kind: t.kind, root: t.root, path: t.path, base: t.base })),
       activeId,
     });
     localStorage.setItem(tabPersistKey(agentId), payload);
@@ -190,9 +197,9 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
   // --- tab helpers --------------------------------------------------------
 
   const openFileTab = useCallback(
-    (path: string, jump?: { line: number; col?: number }) => {
-      const id = makeTabId('file', path);
-      setTabs((prev) => (prev.some((t) => t.id === id) ? prev : [...prev, { id, kind: 'file', path }]));
+    (path: string, root: string = 'workspace', jump?: { line: number; col?: number }) => {
+      const id = makeTabId('file', root, path);
+      setTabs((prev) => (prev.some((t) => t.id === id) ? prev : [...prev, { id, kind: 'file', root, path }]));
       setActiveId(id);
       if (jump) {
         setJumps((prev) => ({
@@ -204,9 +211,11 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
     [],
   );
 
+  // Diff tabs are workspace-only — diff goes through git, which is scoped to
+  // the workspace. Non-workspace files just don't get a "diff" affordance.
   const openDiffTab = useCallback((path: string) => {
-    const id = makeTabId('diff', path);
-    setTabs((prev) => (prev.some((t) => t.id === id) ? prev : [...prev, { id, kind: 'diff', path, base: 'head' }]));
+    const id = makeTabId('diff', 'workspace', path);
+    setTabs((prev) => (prev.some((t) => t.id === id) ? prev : [...prev, { id, kind: 'diff', root: 'workspace', path, base: 'head' }]));
     setActiveId(id);
   }, []);
 
@@ -238,9 +247,54 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
     [activeId],
   );
 
+  // Bulk close helpers — keep state shape consistent with closeTab by routing
+  // through the same per-tab id deletes, only computed in one shot up front.
+  const closeManyTabs = useCallback((idsToClose: string[], keepActiveId?: string) => {
+    if (idsToClose.length === 0) return;
+    const closeSet = new Set(idsToClose);
+    setTabs((prev) => prev.filter((t) => !closeSet.has(t.id)));
+    setActiveId((prev) => {
+      if (keepActiveId !== undefined) return keepActiveId;
+      // Otherwise pick the first surviving tab (or empty if none).
+      return prev && !closeSet.has(prev) ? prev : '';
+    });
+    const drop = (m: Record<string, unknown>) => {
+      const out: Record<string, unknown> = {};
+      for (const k of Object.keys(m)) if (!closeSet.has(k)) out[k] = m[k];
+      return out;
+    };
+    setDirty((prev) => drop(prev) as Record<string, boolean>);
+    setJumps((prev) => drop(prev) as Record<string, JumpRequest>);
+    setReloadKeys((prev) => drop(prev) as Record<string, number>);
+  }, []);
+
+  const closeOtherTabs = useCallback(
+    (keepId: string) => {
+      const ids = tabs.filter((t) => t.id !== keepId).map((t) => t.id);
+      closeManyTabs(ids, keepId);
+    },
+    [tabs, closeManyTabs],
+  );
+
+  const closeTabsToRight = useCallback(
+    (anchorId: string) => {
+      const idx = tabs.findIndex((t) => t.id === anchorId);
+      if (idx < 0) return;
+      const ids = tabs.slice(idx + 1).map((t) => t.id);
+      // Active tab is among them? Then fall back to the anchor.
+      const keep = ids.includes(activeId) ? anchorId : undefined;
+      closeManyTabs(ids, keep);
+    },
+    [tabs, activeId, closeManyTabs],
+  );
+
+  const closeAllTabs = useCallback(() => {
+    closeManyTabs(tabs.map((t) => t.id), '');
+  }, [tabs, closeManyTabs]);
+
   const handleOpenFromExplorer = useCallback(
-    (path: string, _entry: FsEntry) => {
-      openFileTab(path);
+    (path: string, _entry: FsEntry, root: string = 'workspace') => {
+      openFileTab(path, root);
     },
     [openFileTab],
   );
@@ -295,26 +349,28 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
       fsCacheInvalidatePath(agentId, oldPath);
       fsCacheInvalidatePath(agentId, newPath);
       rebumpDir(parent);
-      // Sync any open tab whose path was renamed (file rename or its parent dir).
+      // Sync any open tab whose path was renamed (file rename or its parent
+      // dir). Rename is workspace-only, so only tabs with root === 'workspace'
+      // need updating.
       setTabs((prev) =>
         prev.map((t) => {
-          if (t.path === oldPath) return { ...t, path: newPath, id: makeTabId(t.kind, newPath) };
+          if (t.root !== 'workspace') return t;
+          if (t.path === oldPath) return { ...t, path: newPath, id: makeTabId(t.kind, t.root, newPath) };
           if (t.path.startsWith(oldPath + '/')) {
             const replaced = newPath + t.path.slice(oldPath.length);
-            return { ...t, path: replaced, id: makeTabId(t.kind, replaced) };
+            return { ...t, path: replaced, id: makeTabId(t.kind, t.root, replaced) };
           }
           return t;
         }),
       );
       setActiveId((prev) => {
         if (!prev) return prev;
-        // re-derive activeId in case it referenced the renamed path
         const oldId = prev;
         const oldTab = tabs.find((t) => t.id === oldId);
-        if (!oldTab) return prev;
-        if (oldTab.path === oldPath) return makeTabId(oldTab.kind, newPath);
+        if (!oldTab || oldTab.root !== 'workspace') return prev;
+        if (oldTab.path === oldPath) return makeTabId(oldTab.kind, oldTab.root, newPath);
         if (oldTab.path.startsWith(oldPath + '/')) {
-          return makeTabId(oldTab.kind, newPath + oldTab.path.slice(oldPath.length));
+          return makeTabId(oldTab.kind, oldTab.root, newPath + oldTab.path.slice(oldPath.length));
         }
         return prev;
       });
@@ -435,9 +491,9 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId), [tabs, activeId]);
   const activePath = activeTab?.kind === 'file' ? activeTab.path : '';
 
-  // --- :code-ext bridge for agent-code-server compatibility ---------------
+  // --- :code-ext bridge for agent-editor compatibility ---------------
   // Re-uses the existing chat-ws; the server aliases <pageClientId>:code-ext
-  // to this client on register, so agent-code-server's host.open_file /
+  // to this client on register, so agent-editor's host.open_file /
   // host.active_file / host.list_tabs / host.ping land here instead of the
   // old VSIX extension.
   const opsRef = useRef<CodeExtOps | null>(null);
@@ -473,7 +529,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
 
   return (
     <div data-id="files-view" className={`flex h-full ${className || ''} relative`}>
-      <div data-id="files-view-explorer" className="w-64 shrink-0 border-r border-zinc-800 bg-zinc-950">
+      <div data-id="files-view-explorer" className="w-64 shrink-0 border-r border-zinc-800 bg-[#0A0A0A]">
         <FileExplorer
           agentId={agentId}
           workspaceFolder={workspaceFolder}
@@ -512,8 +568,11 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
           dirty={dirty}
           onSelect={setActiveId}
           onClose={closeTab}
+          onCloseOthers={closeOtherTabs}
+          onCloseRight={closeTabsToRight}
+          onCloseAll={closeAllTabs}
         />
-        <div data-id="files-view-body" className="flex-1 min-h-0 relative">
+        <div data-id="files-view-body" className="flex-1 min-h-0 relative bg-[#0A0A0A]">
           {tabs.length === 0 ? (
             <div data-id="files-view-empty" className="flex items-center justify-center h-full text-sm text-zinc-500">
               <div className="text-center">
@@ -553,6 +612,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
                   <CodeEditor
                     agentId={agentId}
                     path={t.path}
+                    root={t.root}
                     reloadKey={reloadKeys[t.id]}
                     jump={jumps[t.id]}
                     pageClientId={pageClientId}
@@ -561,7 +621,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
                     onCursorChange={(c) => {
                       cursorRef.current[t.id] = { line: c.line, col: c.col };
                     }}
-                    onShowDiff={() => openDiffTab(t.path)}
+                    onShowDiff={t.root === 'workspace' ? () => openDiffTab(t.path) : undefined}
                   />
                 ) : (
                   <DiffView
@@ -666,11 +726,37 @@ interface TabBarProps {
   dirty: Record<string, boolean>;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
+  /** Close every tab except the one with this id. */
+  onCloseOthers: (id: string) => void;
+  /** Close every tab to the right of the one with this id. */
+  onCloseRight: (id: string) => void;
+  /** Close every tab. */
+  onCloseAll: () => void;
 }
 
-function TabBar({ tabs, activeId, dirty, onSelect, onClose }: TabBarProps) {
+interface TabMenuState {
+  x: number;
+  y: number;
+  id: string;
+}
+
+function TabBar({ tabs, activeId, dirty, onSelect, onClose, onCloseOthers, onCloseRight, onCloseAll }: TabBarProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const activeBtnRef = useRef<HTMLDivElement | null>(null);
+  const [menu, setMenu] = useState<TabMenuState | null>(null);
+
+  // Close the context menu on outside click / Escape.
+  useEffect(() => {
+    if (!menu) return;
+    const onPointer = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(null); };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menu]);
 
   // Translate vertical wheel to horizontal scroll on the tab strip so the
   // user can use a normal mouse wheel without holding shift.
@@ -719,8 +805,12 @@ function TabBar({ tabs, activeId, dirty, onSelect, onClose }: TabBarProps) {
                 onClose(t.id);
               }
             }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu({ x: e.clientX, y: e.clientY, id: t.id });
+            }}
             className={`group flex items-center gap-1.5 pl-3 pr-1 py-1.5 border-r border-zinc-800 cursor-pointer shrink-0 min-w-[120px] max-w-[200px] ${
-              active ? 'bg-zinc-950 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/60'
+              active ? 'bg-[#0A0A0A] text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/60'
             }`}
             title={t.path}
           >
@@ -745,6 +835,101 @@ function TabBar({ tabs, activeId, dirty, onSelect, onClose }: TabBarProps) {
           </div>
         );
       })}
+      {menu && (
+        <TabContextMenu
+          x={menu.x}
+          y={menu.y}
+          id={menu.id}
+          tabs={tabs}
+          onClose={() => setMenu(null)}
+          onCloseTab={onClose}
+          onCloseOthers={onCloseOthers}
+          onCloseRight={onCloseRight}
+          onCloseAll={onCloseAll}
+        />
+      )}
     </div>
+  );
+}
+
+interface TabContextMenuProps {
+  x: number;
+  y: number;
+  /** Id of the tab the user right-clicked. */
+  id: string;
+  tabs: Tab[];
+  onClose: () => void;
+  onCloseTab: (id: string) => void;
+  onCloseOthers: (id: string) => void;
+  onCloseRight: (id: string) => void;
+  onCloseAll: () => void;
+}
+
+// VS Code-style tab context menu: Close / Close Others / Close to the Right
+// / Close All. Built on the same viewport-clamped positioning pattern as the
+// editor and file-explorer menus so it never spills off-screen.
+function TabContextMenu({ x, y, id, tabs, onClose, onCloseTab, onCloseOthers, onCloseRight, onCloseAll }: TabContextMenuProps) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState({ x, y });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const maxX = window.innerWidth - r.width - 4;
+    const maxY = window.innerHeight - r.height - 4;
+    setPos({
+      x: Math.max(4, Math.min(x, maxX)),
+      y: Math.max(4, Math.min(y, maxY)),
+    });
+  }, [x, y]);
+  // Disable Close-to-Right if this tab is the rightmost one already.
+  const idx = tabs.findIndex((t) => t.id === id);
+  const hasRight = idx >= 0 && idx < tabs.length - 1;
+  const hasOthers = tabs.length > 1;
+  return (
+    <div
+      ref={ref}
+      data-id="files-tab-context-menu"
+      className="fixed z-[2147483647] min-w-[180px] py-1 rounded-md border border-zinc-700 bg-zinc-900 shadow-xl text-xs text-zinc-200"
+      style={{ left: pos.x, top: pos.y }}
+      // pointerdown bubbles to document BEFORE click fires; without
+      // stopPropagation the document-level "close on outside pointerdown"
+      // listener unmounts the menu before any item's onClick runs.
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <TabMenuItem
+        label="关闭"
+        onClick={() => { onCloseTab(id); onClose(); }}
+      />
+      <TabMenuItem
+        label="关闭其它"
+        disabled={!hasOthers}
+        onClick={() => { onCloseOthers(id); onClose(); }}
+      />
+      <TabMenuItem
+        label="关闭右侧"
+        disabled={!hasRight}
+        onClick={() => { onCloseRight(id); onClose(); }}
+      />
+      <div className="my-1 border-t border-zinc-800" />
+      <TabMenuItem
+        label="全部关闭"
+        onClick={() => { onCloseAll(); onClose(); }}
+      />
+    </div>
+  );
+}
+
+function TabMenuItem({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      data-id={`files-tab-menu-${label}`}
+      disabled={disabled}
+      className="w-full text-left px-3 py-1.5 hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+      onClick={onClick}
+    >
+      {label}
+    </button>
   );
 }

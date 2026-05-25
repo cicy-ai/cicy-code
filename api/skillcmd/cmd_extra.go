@@ -164,10 +164,10 @@ func cmdDev(args []string) error {
 	}
 
 	// symlinks
-	entryPath := filepath.Join(target, m.Entry)
-	_ = makeSymlink(entryPath, localBinPath(m.Name))
-	for _, alias := range m.BinAliases {
-		_ = makeSymlink(entryPath, localBinPath(alias))
+	if _, errs := ensureBinSymlinksForSkill(target, &m); len(errs) > 0 && !jsonOut {
+		for _, e := range errs {
+			fmt.Fprintf(os.Stderr, "  warn: symlink failed: %v\n", e)
+		}
 	}
 
 	// sync agents

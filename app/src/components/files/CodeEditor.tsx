@@ -68,6 +68,11 @@ function classifyForRender(stat: FsStatResponse): EditorMode {
 interface CodeEditorProps {
   agentId: string;
   path: string;
+  /** Filesystem root the path is anchored against (defaults to "workspace").
+   *  Anything other than "workspace" makes the editor read-only: writes,
+   *  rename, diff, and external-change reconciliation all require workspace
+   *  scope on the backend. */
+  root?: string;
   /** Bumps to force a reload from disk (e.g. external watcher event). */
   reloadKey?: number;
   /** When `nonce` changes, scroll/cursor jumps to {line, col}. 1-based. */
@@ -182,6 +187,7 @@ function formatBytes(n: number): string {
 export default function CodeEditor({
   agentId,
   path,
+  root = 'workspace',
   reloadKey,
   jump,
   onDirtyChange,
@@ -297,7 +303,7 @@ export default function CodeEditor({
 
     const fetchBody = (mode: EditorMode) => {
       fsApi
-        .read(agentId, path, { signal: ctl.signal })
+        .read(agentId, path, { signal: ctl.signal, root })
         .then((res) => {
           fsCacheSet('read', readKey, res);
           mergeFreshIntoBuffer(res, mode);
@@ -313,7 +319,7 @@ export default function CodeEditor({
     };
 
     fsApi
-      .stat(agentId, path)
+      .stat(agentId, path, { root })
       .then((stat) => {
         fsCacheSet('stat', statKey, stat);
         const mode = classifyForRender(stat);
@@ -342,7 +348,7 @@ export default function CodeEditor({
       offSub();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId, path, reloadKey, mergeFreshIntoBuffer]);
+  }, [agentId, path, root, reloadKey, mergeFreshIntoBuffer]);
 
   const language = useMemo(() => languageForPath(path), [path]);
 
@@ -440,7 +446,7 @@ export default function CodeEditor({
 
   const handleReload = useCallback(async () => {
     try {
-      const res = await fsApi.read(agentId, path);
+      const res = await fsApi.read(agentId, path, { root });
       fsCacheSet('read', fsKey.read(agentId, path), res);
       const synthStat: FsStatResponse = {
         name: fsBasename(path), path, is_dir: false,
@@ -452,7 +458,7 @@ export default function CodeEditor({
     } catch (err) {
       setBuf((prev) => ({ ...prev, error: friendlyFsError(err) }));
     }
-  }, [agentId, path]);
+  }, [agentId, path, root]);
 
   const handleDownload = useCallback(() => {
     fsApi.download(agentId, path);
@@ -593,7 +599,7 @@ export default function CodeEditor({
         data-id={active ? 'code-editor-image' : 'code-editor-inactive'}
         data-path={path}
         onContextMenu={openMenu}
-        className={`flex flex-col h-full bg-zinc-950 ${className || ''}`}
+        className={`flex flex-col h-full bg-[#0A0A0A] ${className || ''}`}
       >
         <div className="flex-1 overflow-auto flex items-center justify-center bg-zinc-900">
           <img
@@ -624,7 +630,7 @@ export default function CodeEditor({
         data-id={active ? 'code-editor-binary' : 'code-editor-inactive'}
         data-path={path}
         onContextMenu={openMenu}
-        className={`flex flex-col h-full bg-zinc-950 ${className || ''}`}
+        className={`flex flex-col h-full bg-[#0A0A0A] ${className || ''}`}
       >
         <div className="flex-1 flex items-center justify-center">
           <div data-id="code-editor-binary-card" className="text-center text-sm">
@@ -665,13 +671,16 @@ export default function CodeEditor({
   }
 
   const heavy = buf.mode === 'text_large';
+  // Non-workspace roots (projects/skills/home) are read-only at the backend.
+  // Mirror that in the editor so users don't type changes that can never save.
+  const readOnly = heavy || root !== 'workspace';
   return (
     <div
       data-id={rootDataId}
       data-path={path}
       data-mode={buf.mode}
       onContextMenu={openMenu}
-      className={`flex flex-col h-full bg-zinc-950 relative ${className || ''}`}
+      className={`flex flex-col h-full bg-[#0A0A0A] relative ${className || ''}`}
     >
       {dirty && (
         <span
@@ -681,10 +690,32 @@ export default function CodeEditor({
           ●
         </span>
       )}
+      {isMarkdown && (
+        <button
+          data-id="code-editor-md-toggle"
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setPreviewMd((v) => !v); }}
+          // Sits inside the right-click toolbar zone; keep it visually quiet
+          // — translucent border, no fill, brightens on hover. Pulls slightly
+          // farther from the right edge when dirty-dot is visible.
+          className={`absolute top-1 ${dirty ? 'right-6' : 'right-2'} z-10 inline-flex items-center gap-1 px-2 py-0.5 rounded border border-zinc-700/60 bg-zinc-900/70 hover:bg-zinc-800 hover:border-zinc-600 text-[10px] uppercase tracking-wide text-zinc-300 hover:text-zinc-100 transition-colors`}
+          title={previewMd ? '切换到源码' : '切换到预览'}
+          aria-pressed={previewMd}
+        >
+          {previewMd ? <FileCode className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+          <span>{previewMd ? 'Source' : 'Preview'}</span>
+        </button>
+      )}
       {heavy && (
         <div data-id="code-editor-heavy-banner" className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/20 border-b border-amber-800/40 text-xs text-amber-200">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
           <span>大文件 ({formatBytes(buf.size)}) — 只读模式,已关闭语法高亮</span>
+        </div>
+      )}
+      {!heavy && root !== 'workspace' && (
+        <div data-id="code-editor-readonly-banner" className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800/60 border-b border-zinc-700/50 text-[11px] text-zinc-300">
+          <Eye className="w-3 h-3 shrink-0" />
+          <span>只读 — 此文件不在 workspace 内({root}),无法保存修改</span>
         </div>
       )}
       {conflict && (
@@ -741,15 +772,15 @@ export default function CodeEditor({
             value={buf.text}
             height="100%"
             theme={oneDark}
-            extensions={heavy ? [saveKeymap, cursorExt, EditorView.editable.of(false)] : extensions}
+            extensions={readOnly ? [saveKeymap, cursorExt, EditorView.editable.of(false), cmBlendTheme] : extensions}
             onChange={(v) => setBuf((prev) => ({ ...prev, text: v }))}
-            editable={!heavy}
+            editable={!readOnly}
             basicSetup={{
               lineNumbers: true,
-              highlightActiveLine: !heavy,
-              foldGutter: !heavy,
-              bracketMatching: !heavy,
-              closeBrackets: !heavy,
+              highlightActiveLine: !readOnly,
+              foldGutter: !readOnly,
+              bracketMatching: !readOnly,
+              closeBrackets: !readOnly,
               autocompletion: false,
             }}
             style={{ height: '100%' }}

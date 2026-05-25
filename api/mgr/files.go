@@ -38,6 +38,7 @@ import (
 
 var (
 	errMissingAgentID            = errors.New("missing_agent_id")
+	errInvalidRoot               = errors.New("invalid_root")
 	errAgentWorkspaceUnavailable = errors.New("agent_workspace_unavailable")
 	errPathOutsideWorkspace      = errors.New("path_outside_workspace")
 	errPathAbsoluteForbidden     = errors.New("path_absolute_forbidden")
@@ -213,7 +214,8 @@ func isProtectedWritePath(workspace, abs string) bool {
 
 func fsHTTPCode(err error) int {
 	switch {
-	case errors.Is(err, errMissingAgentID):
+	case errors.Is(err, errMissingAgentID),
+		errors.Is(err, errInvalidRoot):
 		return http.StatusBadRequest
 	case errors.Is(err, errAgentWorkspaceUnavailable):
 		return http.StatusNotFound
@@ -261,6 +263,96 @@ func fsResolve(r *http.Request, requested string) (abs, workspace string, err er
 	return abs, workspace, err
 }
 
+// fsRootInfo is the public shape returned by /api/fs/roots — one entry per
+// allowed top-level folder the UI may browse.
+type fsRootInfo struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Path  string `json:"path"`
+}
+
+// fsRoots returns the absolute base paths the UI is allowed to browse for a
+// given agent. "workspace" is always present; the others are stable per-user
+// HOME-anchored paths that the explorer renders as separate sections, à la
+// VS Code multi-root workspaces. Roots whose directory doesn't exist on disk
+// are skipped — the UI simply doesn't render that section.
+//
+// Writes / deletes / renames stay scoped to the workspace root only; the
+// other roots are read-only as far as the HTTP surface is concerned, so an
+// agent UI sharing this server cannot exfiltrate or mutate files outside
+// the workspace by guessing root IDs.
+func fsRoots(agentID string) ([]fsRootInfo, error) {
+	workspace, err := agentWorkspace(agentID)
+	if err != nil {
+		return nil, err
+	}
+	out := []fsRootInfo{{ID: "workspace", Label: "Workspace", Path: workspace}}
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		return out, nil
+	}
+	candidates := []struct {
+		id, label, sub string
+	}{
+		{"projects", "Projects", "projects"},
+		{"skills", "Skills", "cicy-ai/skills"},
+		{"home", "Home", ""},
+	}
+	for _, c := range candidates {
+		p := home
+		if c.sub != "" {
+			p = filepath.Join(home, c.sub)
+		}
+		// Hide a root whose base equals the workspace — avoids duplicate
+		// sections when the agent's workspace literally is $HOME or
+		// ~/projects (rare but possible during local dev).
+		if filepath.Clean(p) == filepath.Clean(workspace) {
+			continue
+		}
+		if info, err := os.Stat(p); err == nil && info.IsDir() {
+			out = append(out, fsRootInfo{ID: c.id, Label: c.label, Path: p})
+		}
+	}
+	return out, nil
+}
+
+// fsResolveRoot is fsResolve generalized to any allowed root. The "root"
+// query param selects which base path the request is anchored against.
+// Defaults to "workspace" for backward compatibility.
+func fsResolveRoot(r *http.Request, requested string) (abs, base string, err error) {
+	q := r.URL.Query()
+	rootID := q.Get("root")
+	if rootID == "" {
+		rootID = "workspace"
+	}
+	roots, err := fsRoots(q.Get("agent_id"))
+	if err != nil {
+		return "", "", err
+	}
+	for _, root := range roots {
+		if root.ID == rootID {
+			abs, err = resolveSafePath(root.Path, requested)
+			return abs, root.Path, err
+		}
+	}
+	return "", "", errInvalidRoot
+}
+
+// handleFsRoots — GET /api/fs/roots?agent_id=…
+// Lists the available roots for the explorer's section bar.
+func handleFsRoots(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	roots, err := fsRoots(r.URL.Query().Get("agent_id"))
+	if err != nil {
+		fsErr(w, err)
+		return
+	}
+	J(w, M{"roots": roots})
+}
+
 // --- list ---------------------------------------------------------------
 
 type fsEntry struct {
@@ -286,7 +378,7 @@ func handleFsList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	showHidden := q.Get("hidden") == "1"
 
-	abs, workspace, err := fsResolve(r, q.Get("path"))
+	abs, base, err := fsResolveRoot(r, q.Get("path"))
 	if err != nil {
 		fsErr(w, err)
 		return
@@ -309,7 +401,7 @@ func handleFsList(w http.ResponseWriter, r *http.Request) {
 
 	max := fsListMaxEntries()
 	out := fsListResponse{
-		Path:    workspaceRel(workspace, abs),
+		Path:    workspaceRel(base, abs),
 		Entries: make([]fsEntry, 0, len(dirEntries)),
 	}
 	for _, de := range dirEntries {
@@ -363,7 +455,7 @@ func handleFsRead(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	abs, _, err := fsResolve(r, r.URL.Query().Get("path"))
+	abs, _, err := fsResolveRoot(r, r.URL.Query().Get("path"))
 	if err != nil {
 		fsErr(w, err)
 		return
@@ -511,7 +603,7 @@ func handleFsStat(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	abs, workspace, err := fsResolve(r, r.URL.Query().Get("path"))
+	abs, base, err := fsResolveRoot(r, r.URL.Query().Get("path"))
 	if err != nil {
 		fsErr(w, err)
 		return
@@ -523,7 +615,7 @@ func handleFsStat(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := fsStatResponse{
 		Name:  filepath.Base(abs),
-		Path:  workspaceRel(workspace, abs),
+		Path:  workspaceRel(base, abs),
 		IsDir: st.IsDir(),
 		Size:  st.Size(),
 		Mtime: st.ModTime().Unix(),

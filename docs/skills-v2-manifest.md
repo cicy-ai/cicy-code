@@ -156,7 +156,7 @@ Registry API 的请求/响应 schema。
 | `network` | 网络工具（cping、cf、frp） |
 | `cloud` | 云服务（aliyun、cf-tunnel） |
 | `ai` | AI 集成（gpt-chat、gemini-ask） |
-| `dev` | 开发工具（agent-code-server、cicy-todo） |
+| `dev` | 开发工具（agent-editor、cicy-todo） |
 | `system` | 系统管理（cicy-mihomo、proxy_ssh） |
 | `productivity` | 生产力（email、google） |
 | `agent` | Agent 控制（agent-chrome、agent-desktop、agent-webpage） |

@@ -7,12 +7,36 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+// skillDownloadClient is a dedicated http.Client for fetching skill release
+// zips. It uses a custom Transport that bypasses HTTP_PROXY for GitHub
+// release CDN hosts (github.com + *.githubusercontent.com).
+//
+// Why: some upstream proxies — notably mihomo's socks5 chain through certain
+// transparent CN mirrors — repack the zip while relaying. The byte-level
+// content is identical but file mtimes inside the zip get rewritten, which
+// changes the sha256 and breaks our publish-time verification. Bypassing the
+// proxy for these specific hosts keeps the bytes intact while leaving all
+// other outbound traffic going through the user's normal proxy setup.
+var skillDownloadClient = &http.Client{
+	Timeout: 5 * time.Minute,
+	Transport: &http.Transport{
+		Proxy: func(req *http.Request) (*url.URL, error) {
+			host := req.URL.Hostname()
+			if host == "github.com" || strings.HasSuffix(host, ".githubusercontent.com") {
+				return nil, nil
+			}
+			return http.ProxyFromEnvironment(req)
+		},
+	},
+}
 
 // downloadAndVerify downloads url to cacheZipPath(name, version), verifies
 // sha256 if provided, and returns the local path.
@@ -30,14 +54,13 @@ func downloadAndVerify(name, version, downloadURL, expectedSHA256 string) (strin
 	}
 
 	// Some hosts return relative redirects; net/http follows them by default.
-	client := &http.Client{Timeout: 5 * time.Minute}
 	req, err := http.NewRequest("GET", downloadURL, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("User-Agent", "cicy-code/skill-installer")
 
-	resp, err := client.Do(req)
+	resp, err := skillDownloadClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("download %s: %w", downloadURL, err)
 	}
