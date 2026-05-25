@@ -183,11 +183,25 @@ audit-v1(audit 分支)有 PolicyForm(818 行表单),给"安全/合规团队"用�
 
 ## 6. HTTP / UI 表面
 
-### 后端
+### 后端 HTTP
 
 ```
-GET  /api/audit/decisions?limit=100   返回 ReadDecisions 结果(newest first)
-POST /api/audit/decisions/run         同步执行一次 tick (trigger="manual")
+GET  /api/audit/decisions?limit=100         返回 ReadDecisions(newest first)
+POST /api/audit/decisions/run               同步执行一次 tick (trigger="manual")
+POST /api/audit/decisions/explain/<id>      LLM 用自然语言解释一次过去的决策
+POST /api/audit/decisions/revert/<id>       通过 git revert 回滚某次决策
+```
+
+### 后端 CLI
+
+`cicy-code audit autonomy <cmd>` — 不依赖 HTTP server,直接操作本机文件:
+
+```
+cicy-code audit autonomy run                同步跑一个 tick(等价于 POST /run)
+cicy-code audit autonomy decisions [--limit=N]   列出最近决策(表格输出)
+cicy-code audit autonomy explain <id>       同步解释,JSON 输出
+cicy-code audit autonomy revert  <id>       同步回滚
+cicy-code audit autonomy show-config        打印生效的 autonomy.json
 ```
 
 ### 前端
@@ -286,9 +300,16 @@ curl -X POST http://127.0.0.1:8008/api/audit/decisions/run -H "Authorization: Be
 
 ---
 
-## 11. 路线图(后续)
+## 11. 已交付(从 v0.1 到现在)
 
-- **policy.json git 自动 commit**:每次 WriteGlobalPolicy 后自动 `git add+commit`,提供天然 audit trail。
-- **"explain" 端点**:人可以问 Agent "为什么 yesterday 改了 X?" — Agent 拉对应 decision + 关联 events 出 markdown 报告。
-- **revert HTTP 接口**:`POST /api/audit/decisions/<id>/revert` 自动算 inverse patch 并 apply。注:仍是 Agent 应用,人触发。
+- ✅ **policy.json git 自动 commit**:每个 applied tick 在 `~/cicy-ai/audit/` 做一次 `git add + commit`,SHA 写回 decision 记录。失败仅 WARN,不阻塞 autonomy。代码 `policy_git.go`。
+- ✅ **"explain" 端点**:`POST /api/audit/decisions/explain/<id>` — LLM 用 forensic role 解释过去的决策,返回 `{summary, what_changed, why_now, impact, confidence}`。LLM 不可用时退化到决策自带 rationale 拼接的 stub。
+- ✅ **revert HTTP 接口**:`POST /api/audit/decisions/revert/<id>` — 通过 `git revert <sha>` 回滚,fsnotify 200ms 内热加载新 policy。同时往 decisions.ndjson append 一条 `trigger=revert` 的新决策,保持时间线完整。
+- ✅ **operator CLI**:`cicy-code audit autonomy {run|decisions|explain|revert|show-config}`。
+
+## 12. 路线图(剩余)
+
 - **多 Agent 协同**:不同 host 的 cicy-code 跑各自的 autonomy,周期性互相对账,出现分歧时 escalate 给中心节点。
+- **policy.json git 远程 push**:目前 git commit 只是本地。可选 push 到 remote 形成跨 host 的策略版本仓库。
+- **decisions.ndjson 滚动归档**:目前 append-only,长期会大。按月归档。
+- **dangerous 操作的可选审批**:把"严重操作必须人审"作为 autonomy.json 里可配的策略,而不是 `forbidden_actions` 二选一。

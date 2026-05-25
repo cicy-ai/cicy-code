@@ -215,6 +215,8 @@ func RunCLI(args []string) int {
 	switch args[0] {
 	case "verify":
 		return runVerifyCmd(args[1:])
+	case "autonomy":
+		return runAutonomyCmd(args[1:])
 	case "help", "-h", "--help":
 		printCLIUsage(os.Stdout)
 		return 0
@@ -314,8 +316,15 @@ Subcommands:
                                     its sibling audit-chain.state; auto-detected
                                     when PATH ends in audit.ndjson.
 
+  autonomy <subcommand>    Autonomous policy agent operator commands:
+                              run                  one tick now (synchronous)
+                              decisions [--limit=N]  list recent decisions
+                              explain <id>         LLM narration of a decision
+                              revert  <id>         git-backed rollback
+                              show-config          dump effective autonomy.json
+
 Exit codes:
-  0 — all chains intact
-  1 — at least one chain has integrity errors
+  0 — success
+  1 — operation reported an error (look at output)
   2 — invocation error (bad args, file not found, ...)`)
 }
