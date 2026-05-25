@@ -16,6 +16,31 @@ function localizeStepError(raw, t) {
   return raw;
 }
 
+// Open Windows Settings → Storage. Uses the `ms-settings:` URI scheme,
+// which any Windows shell handles. We try Electron's shell.openExternal
+// first (the clean path), falling back to exec_shell `start` for older
+// preload bridges where shell isn't exposed.
+async function openStorageSettings() {
+  if (window.cicy?.shell?.openExternal) {
+    try { await window.cicy.shell.openExternal("ms-settings:storagesense"); return; } catch {}
+  }
+  if (window.electronRPC) {
+    try { await window.electronRPC("exec_shell", { command: "start ms-settings:storagesense" }); } catch {}
+  }
+}
+
+// Match an error string to a targeted recovery action ("Open Storage
+// Settings", "Open Docs", etc.). Returning null falls through to a
+// generic retry — every step in wslInstaller is idempotent so re-running
+// the whole flow is always safe.
+function errorRecoveryAction(raw) {
+  if (!raw) return null;
+  if (/^LOW_DISK_SPACE/.test(raw)) {
+    return { label: "打开 Windows 储存设置", onClick: openStorageSettings, icon: "folder" };
+  }
+  return null;
+}
+
 export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInstall, progress, progressLog, progressSteps, onDismiss }) {
   const t = useT();
   const [installing, setInstalling] = useState(false);
@@ -157,7 +182,20 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
 
       {installResult && !installResult.ok && (
         <div className="wsl-banner__error">
-          {t("wsl.install_failed")}: {installResult.error || installResult.stderr || "unknown"}
+          <div>{t("wsl.install_failed")}: {localizeStepError(installResult.error || installResult.stderr, t) || "unknown"}</div>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            {(() => {
+              const action = errorRecoveryAction(installResult.error || installResult.stderr);
+              return action ? (
+                <Button variant="primary" onClick={action.onClick}>
+                  {action.icon && <Icon name={action.icon} size={14} />} {action.label}
+                </Button>
+              ) : null;
+            })()}
+            <Button variant={errorRecoveryAction(installResult.error || installResult.stderr) ? "ghost" : "primary"} loading={installing} onClick={oneClick}>
+              <Icon name="refresh" size={14} /> 重试安装
+            </Button>
+          </div>
         </div>
       )}
 
@@ -212,16 +250,31 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
                         <span className="wsl-banner__step-error">{localizeStepError(s.error, t)}</span>
                       )}
                     </span>
-                    {failed && !installing && (
-                      <button
-                        type="button"
-                        className="wsl-banner__step-retry"
-                        onClick={oneClick}
-                        disabled={installing}
-                      >
-                        重试
-                      </button>
-                    )}
+                    {failed && !installing && (() => {
+                      const recovery = errorRecoveryAction(s.error || s.message);
+                      return (
+                        <div style={{ display: "flex", gap: 6 }}>
+                          {recovery && (
+                            <button
+                              type="button"
+                              className="wsl-banner__step-retry"
+                              onClick={recovery.onClick}
+                              disabled={installing}
+                            >
+                              {recovery.label}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="wsl-banner__step-retry"
+                            onClick={oneClick}
+                            disabled={installing}
+                          >
+                            重试
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </li>
                 );
               })}
@@ -285,6 +338,7 @@ function phaseLabel(phase /*, t */) {
     case "installing-deps":      return "下载运行依赖";
     case "starting":             return "启动 cicy-code";
     case "installing-agents":    return "下载 AI 助手";
+    case "mounting-files":       return "桌面快捷方式";
     case "done":                 return "完成";
     default:                     return phase || "处理中";
   }
