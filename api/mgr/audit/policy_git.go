@@ -35,6 +35,61 @@ var (
 // decision's patches. msg is a short reason string (decision ID + summary).
 // Safe to call with an empty msg or from any goroutine — internally
 // serialized under gitMu.
+//
+// Returns the new HEAD SHA on success ("" if no commit was made / git
+// disabled). Callers should store the SHA on the decision record so a
+// later revert can target the right commit.
+func GitAutoCommitDecisionReturningSHA(commitMsg string) string {
+	GitAutoCommitDecision(commitMsg)
+	repo := auditRepoDir()
+	if repo == "" {
+		return ""
+	}
+	sha, err := gitOutput(repo, "rev-parse", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(sha)
+}
+
+// GitRevertCommit runs `git revert --no-edit <sha>` in the audit repo.
+// Used by the /api/audit/decisions/revert/<id> endpoint. Returns the
+// new HEAD SHA on success.
+func GitRevertCommit(targetSHA string) (string, error) {
+	if gitDisabled {
+		return "", fmt.Errorf("git auto-commit is disabled (git binary missing)")
+	}
+	if targetSHA == "" {
+		return "", fmt.Errorf("empty target sha")
+	}
+	gitMu.Lock()
+	defer gitMu.Unlock()
+	repo := auditRepoDir()
+	if repo == "" {
+		return "", fmt.Errorf("cannot resolve audit repo dir")
+	}
+	if !isGitRepo(repo) {
+		return "", fmt.Errorf("audit dir is not a git repo (no policy mutations to revert)")
+	}
+	if err := runGit(repo, "revert", "--no-edit", targetSHA); err != nil {
+		return "", err
+	}
+	sha, err := gitOutput(repo, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(sha), nil
+}
+
+// gitOutput runs git and returns stdout. Used for query-style ops
+// (rev-parse, log, etc.) that need the output, not just status.
+func gitOutput(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	return string(out), err
+}
+
 func GitAutoCommitDecision(commitMsg string) {
 	if gitDisabled {
 		return
