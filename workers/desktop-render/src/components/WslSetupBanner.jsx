@@ -124,8 +124,8 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
             <div className="wsl-banner__subtitle">
               {installFinished
                 ? (installDir
-                    ? `cicy-code 已就绪 · 文件在 ${installDir}`
-                    : `cicy-code 已就绪，可关闭此面板`)
+                    ? `✨ 准备就绪！点击下方「本地团队」开始使用 · 文件位置：${installDir}`
+                    : `✨ 准备就绪！点击下方「本地团队」开始使用`)
                 : subtitle}
             </div>
           )}
@@ -275,15 +275,16 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
 function phaseLabel(phase /*, t */) {
   switch (phase) {
     case "init":                 return "准备";
-    case "detecting":            return "检测网络";
+    case "detecting":            return "检测网络与磁盘";
     case "checking":             return "查询最新版本";
-    case "downloading":          return "下载 cicy-code";
-    case "checking-wsl":         return "检测 WSL 状态";
-    case "installing-wsl":       return "安装 WSL2 + Ubuntu";
-    case "configuring-apt":      return "配置 apt 源";
-    case "installing-cicy-code": return "安装 cicy-code 到 Ubuntu";
+    case "downloading":          return "下载主程序";
+    case "checking-wsl":         return "检查 Linux 子系统";
+    case "installing-wsl":       return "安装 Linux 子系统";
+    case "configuring-apt":      return "配置软件源";
+    case "installing-cicy-code": return "部署到 Linux";
+    case "installing-deps":      return "下载运行依赖";
     case "starting":             return "启动 cicy-code";
-    case "installing-agents":    return "预装 AI Agent CLI";
+    case "installing-agents":    return "下载 AI 助手";
     case "done":                 return "完成";
     default:                     return phase || "处理中";
   }
@@ -338,13 +339,26 @@ function phaseDetail(step /*, t */) {
   }
   if (step.phase === "installing-agents") {
     // Per-agent messages emit `<name> ✓` or `<name>: …` — surface the
-    // first token as the detail so the timeline reads e.g.
-    // "claude ✓" without re-rendering the parent label.
-    const am = m.match(/^(\S+)\s*(✓|:)/);
-    if (am) return m;
-    if (/ready/i.test(m)) return "全部就绪";
-    if (/Warning/i.test(m)) return "部分失败，首次启动时重试";
+    // current agent name in Chinese so a novice doesn't see raw npm
+    // package identifiers.
+    const am = m.match(/Installing (\S+)/);
+    if (am) {
+      const friendly = { claude: "Claude", codex: "Codex", opencode: "OpenCode" }[am[1]] || am[1];
+      return `正在下载 ${friendly}…`;
+    }
+    const tickMatch = m.match(/^(\S+)\s*✓/);
+    if (tickMatch) {
+      const friendly = { claude: "Claude", codex: "Codex", opencode: "OpenCode" }[tickMatch[1]] || tickMatch[1];
+      return `${friendly} 已就绪`;
+    }
+    if (/ready/i.test(m)) return "Claude / Codex / OpenCode 全部就绪";
+    if (/Warning/i.test(m)) return "部分失败，首次使用时会自动重试";
     return null;
+  }
+  if (step.phase === "installing-deps") {
+    if (/ready|Apt packages ready/i.test(m)) return "完成";
+    if (/Warning/i.test(m)) return "部分失败，cicy-code 会自动补装";
+    return "解压工具 + 中文字体";
   }
   if (step.phase === "done") {
     const vm = m.match(/v([\d.]+)/);
