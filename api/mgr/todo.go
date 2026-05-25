@@ -15,13 +15,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Todo is one task in <workspace>/.cicy/todos.yaml.
+// Todo is one task. ALL todos live in the master pane's workspace
+// (`<masterWs>/.cicy/todos.yaml`) regardless of who created them. The PaneID
+// field records which worker owns the todo; workers can only read/mutate
+// todos with PaneID == their own short pane id, while the master pane sees
+// every todo and may filter by PaneID.
 //
 // Status state machine: todo → doing → done, with dropped as a terminal "abandoned" state.
 type Todo struct {
 	ID        string    `yaml:"id" json:"id"`
 	Title     string    `yaml:"title" json:"title"`
 	Status    string    `yaml:"status" json:"status"`
+	PaneID    string    `yaml:"pane_id,omitempty" json:"pane_id,omitempty"`
 	CreatorID string    `yaml:"creator_id,omitempty" json:"creator_id,omitempty"`
 	CreatedAt time.Time `yaml:"created_at" json:"created_at"`
 	UpdatedAt time.Time `yaml:"updated_at" json:"updated_at"`
@@ -37,6 +42,31 @@ var (
 		"todo": true, "doing": true, "done": true, "dropped": true,
 	}
 )
+
+// ── workspace + identity helpers ───────────────────────────────────────────
+
+// masterWorkspaceForTodo returns the workspace directory of the master pane
+// (w-10001). All todo storage routes through this single workspace.
+func masterWorkspaceForTodo() string {
+	return paneWorkspace(primaryWorkerSession)
+}
+
+// isMasterPaneID reports whether the given short or full pane id refers to
+// the master pane (w-10001).
+func isMasterPaneID(paneID string) bool {
+	return shortPaneID(normPaneID(strings.TrimSpace(paneID))) == primaryWorkerSession
+}
+
+// requesterPaneID returns the short pane id of the caller, derived from the
+// X-Agent-Show-Id header. Empty string if not provided.
+func requesterPaneID(r *http.Request) string {
+	for _, h := range []string{"X-Agent-Show-Id", "X-Agent-Show-ID", "X_AGENT_SHOW_ID"} {
+		if v := strings.TrimSpace(r.Header.Get(h)); v != "" {
+			return shortPaneID(normPaneID(v))
+		}
+	}
+	return ""
+}
 
 func todoFilePath(workspace string) string {
 	return filepath.Join(workspaceRuntimeDir(workspace), "todos.yaml")
@@ -91,7 +121,7 @@ func newTodoID() string {
 }
 
 // resolveTodoID matches a user-supplied id or unique prefix.
-// Returns the full id, the index, or an error describing the ambiguity.
+// Returns the index, or an error describing the ambiguity.
 func resolveTodoID(todos []Todo, idOrPrefix string) (int, error) {
 	idOrPrefix = strings.TrimSpace(idOrPrefix)
 	if idOrPrefix == "" {
@@ -119,7 +149,8 @@ func resolveTodoID(todos []Todo, idOrPrefix string) (int, error) {
 	return -1, fmt.Errorf("ambiguous id %q matches %d todos", idOrPrefix, len(matches))
 }
 
-// sortTodos in-place: doing first, then todo, done, dropped; within each bucket by updated_at desc.
+// sortTodos in-place: doing first, then todo, done, dropped; within each
+// bucket by updated_at desc.
 func sortTodos(todos []Todo) {
 	rank := func(s string) int {
 		switch s {
@@ -143,105 +174,50 @@ func sortTodos(todos []Todo) {
 	})
 }
 
-// resolveTodoPane picks the pane id to act on. Precedence: explicit query/body
-// `pane_id` (when non-empty) > `X-Agent-Show-Id` header. The header is what the
-// CLI uses to address other agents' todos (e.g. `cicy-todo w-10001`).
-func resolveTodoPane(r *http.Request, fromQueryOrBody string) string {
-	if s := strings.TrimSpace(fromQueryOrBody); s != "" {
-		return s
-	}
-	for _, h := range []string{"X-Agent-Show-Id", "X-Agent-Show-ID", "X_AGENT_SHOW_ID"} {
-		if v := strings.TrimSpace(r.Header.Get(h)); v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func resolvePaneWorkspaceForTodo(w http.ResponseWriter, paneID string) (string, bool) {
-	paneID = strings.TrimSpace(paneID)
-	if paneID == "" {
-		httpErr(w, 400, "pane_id required (query pane_id= or header X-Agent-Show-Id)")
-		return "", false
-	}
-	ws := paneWorkspace(paneID)
+// requireMasterWorkspaceForTodo loads (and ensures we have a path to) the
+// master workspace, returning false on error after writing the HTTP response.
+func requireMasterWorkspaceForTodo(w http.ResponseWriter) (string, bool) {
+	ws := masterWorkspaceForTodo()
 	if ws == "" {
-		httpErr(w, 404, "workspace not found for pane "+shortPaneID(normPaneID(paneID)))
+		httpErr(w, 500, "master workspace ("+primaryWorkerSession+") not configured")
 		return "", false
 	}
 	return ws, true
 }
 
-// GET /api/todo/list?pane_id=&status=&q=&all_agents=true
+// ── handlers ───────────────────────────────────────────────────────────────
+
+// GET /api/todo/list?[pane_id=<filter>][&status=][&q=][&all_agents=true]
+//
+// Authorization model:
+//   - Requester is identified via the X-Agent-Show-Id header.
+//   - Master pane (w-10001) sees every todo; the optional pane_id query
+//     parameter narrows the result to one worker. all_agents=true is an
+//     alias for "no filter, return everything" and is the default for
+//     master.
+//   - Any other requester is treated as a worker and the result is
+//     restricted to todos whose PaneID equals the requester's pane id,
+//     regardless of the pane_id query parameter.
 func handleTodoList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		httpErr(w, 405, "method not allowed")
 		return
 	}
 	q := r.URL.Query()
-	paneID := resolveTodoPane(r, q.Get("pane_id"))
+	requester := requesterPaneID(r)
+	if requester == "" {
+		httpErr(w, 400, "X-Agent-Show-Id header required")
+		return
+	}
 	status := strings.ToLower(strings.TrimSpace(q.Get("status")))
 	kw := strings.ToLower(strings.TrimSpace(q.Get("q")))
+	paneFilter := shortPaneID(normPaneID(strings.TrimSpace(q.Get("pane_id"))))
 	allAgents := strings.ToLower(strings.TrimSpace(q.Get("all_agents"))) == "true"
 
 	todoMu.Lock()
 	defer todoMu.Unlock()
 
-	// all_agents: collect from all known workspaces under the master pane.
-	if allAgents {
-		masterWs, ok := resolvePaneWorkspaceForTodo(w, paneID)
-		if !ok {
-			return
-		}
-		// Gather todos from master workspace + all child worker dirs.
-		type TodoWithPane struct {
-			Todo
-			PaneID string `json:"pane_id,omitempty"`
-		}
-		var combined []TodoWithPane
-		masterTodos, _ := loadTodos(masterWs)
-		for _, t := range masterTodos {
-			combined = append(combined, TodoWithPane{Todo: t, PaneID: paneID})
-		}
-		// child workspaces are symlinks in <masterWs>/workers/
-		workersDir := filepath.Join(masterWs, "workers")
-		if entries, err := os.ReadDir(workersDir); err == nil {
-			for _, e := range entries {
-				childWs, err := filepath.EvalSymlinks(filepath.Join(workersDir, e.Name()))
-				if err != nil {
-					childWs = filepath.Join(workersDir, e.Name())
-				}
-				childTodos, _ := loadTodos(childWs)
-				for _, t := range childTodos {
-					combined = append(combined, TodoWithPane{Todo: t, PaneID: e.Name()})
-				}
-			}
-		}
-		// filter
-		out := combined[:0]
-		for _, t := range combined {
-			if status != "" && status != "all" && t.Status != status {
-				continue
-			}
-			if kw != "" && !strings.Contains(strings.ToLower(t.Title), kw) {
-				continue
-			}
-			out = append(out, t)
-		}
-		// sort
-		sort.SliceStable(out, func(i, j int) bool {
-			ri := map[string]int{"doing": 0, "todo": 1, "done": 2, "dropped": 3}
-			riv, rjv := ri[out[i].Status], ri[out[j].Status]
-			if riv != rjv {
-				return riv < rjv
-			}
-			return out[i].UpdatedAt.After(out[j].UpdatedAt)
-		})
-		J(w, M{"todos": out})
-		return
-	}
-
-	ws, ok := resolvePaneWorkspaceForTodo(w, paneID)
+	ws, ok := requireMasterWorkspaceForTodo(w)
 	if !ok {
 		return
 	}
@@ -250,8 +226,20 @@ func handleTodoList(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 500, err.Error())
 		return
 	}
-	out := make([]Todo, 0, len(all))
+
+	out := all[:0:0]
 	for _, t := range all {
+		// Authorization filter: workers see only their own.
+		if !isMasterPaneID(requester) {
+			if t.PaneID != requester {
+				continue
+			}
+		} else {
+			// Master can optionally filter by pane.
+			if !allAgents && paneFilter != "" && t.PaneID != paneFilter {
+				continue
+			}
+		}
 		if status != "" && status != "all" && t.Status != status {
 			continue
 		}
@@ -264,25 +252,44 @@ func handleTodoList(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"todos": out})
 }
 
-// GET /api/todo/counts?pane_id=
+// GET /api/todo/counts
+//
+// Returns counts scoped to the requester (master = global, worker = own).
 func handleTodoCounts(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		httpErr(w, 405, "method not allowed")
 		return
 	}
-	ws, ok := resolvePaneWorkspaceForTodo(w, resolveTodoPane(r, r.URL.Query().Get("pane_id")))
+	requester := requesterPaneID(r)
+	if requester == "" {
+		httpErr(w, 400, "X-Agent-Show-Id header required")
+		return
+	}
+	q := r.URL.Query()
+	paneFilter := shortPaneID(normPaneID(strings.TrimSpace(q.Get("pane_id"))))
+
+	todoMu.Lock()
+	defer todoMu.Unlock()
+
+	ws, ok := requireMasterWorkspaceForTodo(w)
 	if !ok {
 		return
 	}
-	todoMu.Lock()
-	defer todoMu.Unlock()
 	todos, err := loadTodos(ws)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
 	}
-	counts := M{"all": len(todos), "todo": 0, "doing": 0, "done": 0, "dropped": 0}
+	counts := M{"all": 0, "todo": 0, "doing": 0, "done": 0, "dropped": 0}
 	for _, t := range todos {
+		if !isMasterPaneID(requester) {
+			if t.PaneID != requester {
+				continue
+			}
+		} else if paneFilter != "" && t.PaneID != paneFilter {
+			continue
+		}
+		counts["all"] = counts["all"].(int) + 1
 		if _, ok := counts[t.Status]; ok {
 			counts[t.Status] = counts[t.Status].(int) + 1
 		}
@@ -290,7 +297,12 @@ func handleTodoCounts(w http.ResponseWriter, r *http.Request) {
 	J(w, counts)
 }
 
-// POST /api/todo/add  body: {pane_id, title}
+// POST /api/todo/add  body: {title, [pane_id], [creator_id]}
+//
+// The new todo is always saved into the master workspace. PaneID is set to:
+//   - the requester's pane id (default), or
+//   - the body's pane_id when the requester is the master pane (lets the UI
+//     create a todo on behalf of a specific worker).
 func handleTodoAdd(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		httpErr(w, 405, "method not allowed")
@@ -310,12 +322,29 @@ func handleTodoAdd(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "title required")
 		return
 	}
-	ws, ok := resolvePaneWorkspaceForTodo(w, resolveTodoPane(r, req.PaneID))
+	requester := requesterPaneID(r)
+	if requester == "" {
+		httpErr(w, 400, "X-Agent-Show-Id header required")
+		return
+	}
+
+	target := requester
+	bodyPane := shortPaneID(normPaneID(strings.TrimSpace(req.PaneID)))
+	if bodyPane != "" && bodyPane != requester {
+		if !isMasterPaneID(requester) {
+			httpErr(w, 403, "only master pane can create todos for other workers")
+			return
+		}
+		target = bodyPane
+	}
+
+	todoMu.Lock()
+	defer todoMu.Unlock()
+
+	ws, ok := requireMasterWorkspaceForTodo(w)
 	if !ok {
 		return
 	}
-	todoMu.Lock()
-	defer todoMu.Unlock()
 	todos, err := loadTodos(ws)
 	if err != nil {
 		httpErr(w, 500, err.Error())
@@ -326,6 +355,7 @@ func handleTodoAdd(w http.ResponseWriter, r *http.Request) {
 		ID:        newTodoID(),
 		Title:     req.Title,
 		Status:    "todo",
+		PaneID:    target,
 		CreatorID: strings.TrimSpace(req.CreatorID),
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -338,8 +368,12 @@ func handleTodoAdd(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"todo": t})
 }
 
-// PATCH /api/todo/{id}   body: {pane_id, status?, title?}
-// DELETE /api/todo/{id}?pane_id=
+// PATCH /api/todo/{id}    body: {status?, title?, [pane_id]}
+// DELETE /api/todo/{id}
+//
+// Authorization: the requester must be the master pane, or the todo's
+// PaneID must equal the requester's pane id. The pane_id body/query param
+// is accepted but is no longer used to choose a workspace.
 func handleTodoByID(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/todo/")
 	if id == "" || strings.Contains(id, "/") {
@@ -386,12 +420,18 @@ func handleTodoPatch(w http.ResponseWriter, r *http.Request, idOrPrefix string) 
 		}
 		*req.Title = t
 	}
-	ws, ok := resolvePaneWorkspaceForTodo(w, resolveTodoPane(r, req.PaneID))
+	requester := requesterPaneID(r)
+	if requester == "" {
+		httpErr(w, 400, "X-Agent-Show-Id header required")
+		return
+	}
+
+	todoMu.Lock()
+	defer todoMu.Unlock()
+	ws, ok := requireMasterWorkspaceForTodo(w)
 	if !ok {
 		return
 	}
-	todoMu.Lock()
-	defer todoMu.Unlock()
 	todos, err := loadTodos(ws)
 	if err != nil {
 		httpErr(w, 500, err.Error())
@@ -400,6 +440,10 @@ func handleTodoPatch(w http.ResponseWriter, r *http.Request, idOrPrefix string) 
 	idx, err := resolveTodoID(todos, idOrPrefix)
 	if err != nil {
 		httpErr(w, 404, err.Error())
+		return
+	}
+	if !isMasterPaneID(requester) && todos[idx].PaneID != requester {
+		httpErr(w, 403, "todo belongs to another worker")
 		return
 	}
 	if req.Status != nil {
@@ -417,12 +461,17 @@ func handleTodoPatch(w http.ResponseWriter, r *http.Request, idOrPrefix string) 
 }
 
 func handleTodoDelete(w http.ResponseWriter, r *http.Request, idOrPrefix string) {
-	ws, ok := resolvePaneWorkspaceForTodo(w, resolveTodoPane(r, r.URL.Query().Get("pane_id")))
-	if !ok {
+	requester := requesterPaneID(r)
+	if requester == "" {
+		httpErr(w, 400, "X-Agent-Show-Id header required")
 		return
 	}
 	todoMu.Lock()
 	defer todoMu.Unlock()
+	ws, ok := requireMasterWorkspaceForTodo(w)
+	if !ok {
+		return
+	}
 	todos, err := loadTodos(ws)
 	if err != nil {
 		httpErr(w, 500, err.Error())
@@ -431,6 +480,10 @@ func handleTodoDelete(w http.ResponseWriter, r *http.Request, idOrPrefix string)
 	idx, err := resolveTodoID(todos, idOrPrefix)
 	if err != nil {
 		httpErr(w, 404, err.Error())
+		return
+	}
+	if !isMasterPaneID(requester) && todos[idx].PaneID != requester {
+		httpErr(w, 403, "todo belongs to another worker")
 		return
 	}
 	removed := todos[idx]
