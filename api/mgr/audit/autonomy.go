@@ -325,6 +325,10 @@ func runOneTick(ctx context.Context, cfg *AutonomyConfig, trigger string) Autono
 	appendDecision(dec)
 	if applied > 0 {
 		log.Printf("[autonomy] tick applied %d / proposed %d", applied, len(proposals))
+		// Best-effort git commit so each policy mutation has a rollback
+		// point. Failures only log — they don't break the autonomy loop.
+		GitAutoCommitDecision(fmt.Sprintf("autonomy %s: %d applied / %d proposed",
+			dec.ID, applied, len(proposals)))
 	}
 	return dec
 }
