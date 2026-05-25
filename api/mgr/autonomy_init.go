@@ -31,6 +31,7 @@ func startAutonomy() {
 	http.HandleFunc("/api/audit/decisions/run", wa(handleAutonomyRunNow))
 	http.HandleFunc("/api/audit/decisions/explain/", wa(handleAutonomyExplain))
 	http.HandleFunc("/api/audit/decisions/revert/", wa(handleAutonomyRevert))
+	http.HandleFunc("/api/audit/decisions/", wa(handleAutonomyDecisionByID))
 }
 
 func handleAutonomyDecisions(w http.ResponseWriter, r *http.Request) {
@@ -77,6 +78,31 @@ func handleAutonomyExplain(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
+}
+
+// handleAutonomyDecisionByID — GET /api/audit/decisions/<id>
+// Returns a single decision by ID for deep-linking from the UI.
+// Routed via the trailing-slash path. Skip the prefixes that are
+// served by their own handlers (run / explain/ / revert/).
+func handleAutonomyDecisionByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.URL.Path[len("/api/audit/decisions/"):]
+	if id == "" {
+		// Fall back to the list handler to avoid breaking
+		// /api/audit/decisions/  (trailing slash, no id).
+		handleAutonomyDecisions(w, r)
+		return
+	}
+	dec := audit.ReadDecisionByID(id)
+	if dec == nil {
+		http.Error(w, "decision "+id+" not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(dec)
 }
 
 // handleAutonomyRevert — POST /api/audit/decisions/revert/<id>

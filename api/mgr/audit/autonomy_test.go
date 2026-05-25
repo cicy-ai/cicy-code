@@ -232,6 +232,19 @@ func TestAppendDecisionAndRead(t *testing.T) {
 	}
 }
 
+func TestReadDecisionByID(t *testing.T) {
+	withTempHome(t)
+	for _, id := range []string{"dec-1", "dec-2", "dec-3"} {
+		appendDecision(AutonomyDecision{ID: id, Timestamp: time.Now().UTC()})
+	}
+	if got := ReadDecisionByID("dec-2"); got == nil || got.ID != "dec-2" {
+		t.Errorf("ReadDecisionByID hit miss: %+v", got)
+	}
+	if got := ReadDecisionByID("missing"); got != nil {
+		t.Errorf("expected nil for missing id, got %+v", got)
+	}
+}
+
 func TestRecentDecisionsCount_OnlyAppliedWithinWindow(t *testing.T) {
 	withTempHome(t)
 	now := time.Now().UTC()
