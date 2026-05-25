@@ -243,7 +243,7 @@ cd api && make asset
 
 | 二进制 | 用途 |
 |---|---|
-| `cicy-hosttools` | argv[0] 分发的 host 工具集合：`frp-server` / `frp-client` / `cicy-mihomo` / `cf-tunnel` / `cf` / `globalApiToken` / `email` / `aliyun-cli` / `ssh-list` / `agent-code-server` / `tg` / `gpt` / `gemini-ask` / `gemini-vision` / `mysql-exec` / `cping` / `cicy-agent` 等 |
+| `cicy-hosttools` | argv[0] 分发的 host 工具集合：`frp-server` / `frp-client` / `cicy-mihomo` / `cf-tunnel` / `cf` / `globalApiToken` / `email` / `aliyun-cli` / `ssh-list` / `agent-editor` / `tg` / `gpt` / `gemini-ask` / `gemini-vision` / `mysql-exec` / `cping` / `cicy-agent` 等 |
 | `cicy-skills` | skill 安装 / 卸载 / 列表 CLI（前端 skill 市场后端） |
 | `cicy-skillsd` | 常驻 daemon（marketplace 后台事件） |
 | `stt` | 调 Cloudflare Workers AI Whisper 的语音转写 CLI |

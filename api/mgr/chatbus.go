@@ -61,7 +61,7 @@ type chatHub struct {
 	lastReject map[string]time.Time // client_id -> last 4409-reject time (for persistent-reconnect supersede)
 	// bridges maps a "virtual" client_id (e.g. "<pageClientId>:code-ext") to
 	// the real connected page client that owns it. Used by the native-files
-	// :code-ext bridge so agent-code-server's host.* RPCs still resolve to a
+	// :code-ext bridge so agent-editor's host.* RPCs still resolve to a
 	// connected client without a separate WS. Cleared when the owning client
 	// disconnects.
 	bridges map[string]*chatClient
@@ -167,7 +167,7 @@ func (h *chatHub) lookupClientLocked(clientID string) *chatClient {
 			return c
 		}
 	}
-	// Fall through to bridge aliases — e.g. agent-code-server addressing
+	// Fall through to bridge aliases — e.g. agent-editor addressing
 	// "<page>:code-ext" routes to the native-files bridge running inside the
 	// page's existing chat-ws connection.
 	if c := h.bridges[clientID]; c != nil {
@@ -538,7 +538,7 @@ func (c *chatClient) readPump() {
 		}
 		if evt.Type == "register_code_ext_bridge" {
 			// Page-side native-files bridge. The page registers an alias
-			// "<pageClientId>:code-ext" → its own connection so agent-code-server
+			// "<pageClientId>:code-ext" → its own connection so agent-editor
 			// host.* RPCs (which target ":code-ext") reach the page over its
 			// existing chat-ws. data may carry an explicit "alias" too.
 			data := aiGatewayMap(evt.Data)
@@ -836,7 +836,7 @@ func handleChatExecJS(w http.ResponseWriter, r *http.Request) {
 // until we see `code.opened` (success) or `code.open_file_error` (failure) come
 // back over that client's own WS — both routed by readPump.
 //
-// This replaces the older "agent-code-server → page → :code-ext" relay where
+// This replaces the older "agent-editor → page → :code-ext" relay where
 // the page's second push silently swallowed 404s when the extension wasn't
 // connected. Now the 404 surfaces straight back to the caller, who can retry
 // (e.g. after asking the user to bring code-server to the foreground) or give

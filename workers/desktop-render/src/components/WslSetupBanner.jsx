@@ -250,6 +250,7 @@ function phaseLabel(phase /*, t */) {
     case "configuring-apt":      return "配置 apt 源";
     case "installing-cicy-code": return "安装 cicy-code 到 Ubuntu";
     case "starting":             return "启动 cicy-code";
+    case "installing-agents":    return "预装 AI Agent CLI";
     case "done":                 return "完成";
     default:                     return phase || "处理中";
   }
@@ -295,6 +296,16 @@ function phaseDetail(step /*, t */) {
   if (step.phase === "installing-cicy-code") {
     const vm = m.match(/v([\d.]+)/);
     return vm ? `v${vm[1]}` : null;
+  }
+  if (step.phase === "installing-agents") {
+    // Per-agent messages emit `<name> ✓` or `<name>: …` — surface the
+    // first token as the detail so the timeline reads e.g.
+    // "claude ✓" without re-rendering the parent label.
+    const am = m.match(/^(\S+)\s*(✓|:)/);
+    if (am) return m;
+    if (/ready/i.test(m)) return "全部就绪";
+    if (/Warning/i.test(m)) return "部分失败，首次启动时重试";
+    return null;
   }
   if (step.phase === "done") {
     const vm = m.match(/v([\d.]+)/);

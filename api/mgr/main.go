@@ -204,6 +204,7 @@ Options:
 	http.HandleFunc("/api/openclaw/message/send", wa(handleOpenClawMessageSend))
 
 	// Native files (replaces code-server file viewer/editor; see docs/native-files-plan.md)
+	http.HandleFunc("/api/fs/roots", wa(handleFsRoots))
 	http.HandleFunc("/api/fs/list", wa(handleFsList))
 	http.HandleFunc("/api/fs/read", wa(handleFsRead))
 	http.HandleFunc("/api/fs/write", wa(handleFsWrite))

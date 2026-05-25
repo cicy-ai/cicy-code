@@ -132,7 +132,7 @@ html {
 }
 body {
   margin: 8px !important;
-  padding-top: 36px !important;
+  padding-top: 0 !important;
   padding-left: 8px !important;
 }
 .terminal {
@@ -423,12 +423,30 @@ body {
   font-family: var(--cp-mono-font);
   padding: 0 4px;
   gap: 0;
+  /* Auto-hide: fully off-screen by default. A JS-bound mousemove listener
+     (see setupWinFloatAutoHide below) reveals the bar when the cursor is
+     within 8px of the viewport top, or while it's hovering the bar itself.
+     Body padding-top stays at 36px so the terminal layout doesn't shift. */
+  transform: translateY(-36px);
+  opacity: 0;
+  transition: transform .18s ease, opacity .18s ease;
+  pointer-events: none;
+}
+#cp-win-float.cp-win-float-show {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+#cp-win-float:hover,
+#cp-win-float:focus-within {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
 }
 #fixed-top-action {
-  position: fixed;
-  top: 1px;
-  right: 6px;
-  z-index: 9999;
+  /* No longer position: fixed — sits as the rightmost flex child of
+     #cp-win-float so it auto-hides together with the bar. */
+  margin-left: auto;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -441,11 +459,8 @@ body {
   -webkit-backdrop-filter: blur(16px) saturate(1.3);
   box-shadow: 0 2px 12px rgba(0,0,0,0.3);
   font-family: var(--cp-mono-font);
-  opacity: 0.5;
   transition: opacity .18s ease;
 }
-#fixed-top-action:hover,
-#fixed-top-action:has(.fta-btn.active) { opacity: 1; }
 .fta-sep {
   width: 1px;
   height: 14px;
@@ -1075,6 +1090,43 @@ body.cp-prompt-open { padding-bottom: 74px !important; }
     document.head.appendChild(style);
 }
 
+// Reveals #cp-win-float when the cursor enters the top 8px strip of the
+// viewport (or is hovering the bar itself). Adds a small hide delay so a
+// quick mouse-flick across the top doesn't strobe the bar in and out.
+function setupWinFloatAutoHide(bar: HTMLElement): void {
+    var TRIGGER_PX = 8;
+    var HIDE_DELAY_MS = 250;
+    var hideTimer: number | null = null;
+
+    function reveal(): void {
+        if (hideTimer !== null) {
+            clearTimeout(hideTimer);
+            hideTimer = null;
+        }
+        bar.classList.add("cp-win-float-show");
+    }
+    function scheduleHide(): void {
+        if (hideTimer !== null) return;
+        hideTimer = window.setTimeout(function() {
+            hideTimer = null;
+            // Final guard: don't hide while the user is actively over the bar
+            // (e.g. interacting with a tab dropdown).
+            if (!bar.matches(":hover")) {
+                bar.classList.remove("cp-win-float-show");
+            }
+        }, HIDE_DELAY_MS);
+    }
+
+    document.addEventListener("mousemove", function(e) {
+        if (e.clientY < TRIGGER_PX) {
+            reveal();
+        } else if (bar.classList.contains("cp-win-float-show") && !bar.matches(":hover")) {
+            scheduleHide();
+        }
+    });
+    bar.addEventListener("mouseleave", scheduleHide);
+}
+
 function configureTerminal(term: Terminal): void {
     term.configure({
         scrollback: 5000,
@@ -1381,8 +1433,17 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         '<button id="cp-win-restart" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="' + ttydT("tipRestartAgent") + '">↻</button>' +
         '<button id="cp-reload" class="fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom" data-tooltip="' + ttydT("tipReloadPage") + '" onclick="location.reload()">⟳</button>';
 
+    // Action buttons live inside the floating bar (as its rightmost flex
+     // child) so they slide in / out with the tab list — no longer a separate
+     // fixed-positioned overlay above it.
+    winFloat.appendChild(fixedTop);
     document.body.appendChild(winFloat);
-    document.body.appendChild(fixedTop);
+
+    // Auto-hide trigger for the floating tab bar. The bar is fully hidden by
+    // default; this listener reveals it whenever the cursor is within an 8px
+    // strip at the top of the viewport, then schedules a delayed hide once
+    // the cursor leaves both the trigger strip and the bar itself.
+    setupWinFloatAutoHide(winFloat);
 
     var input = (document.getElementById("cp-input") || document.createElement("textarea")) as HTMLTextAreaElement;
     var sendBtn = (document.getElementById("cp-send") || document.createElement("button")) as HTMLButtonElement;

@@ -478,7 +478,7 @@ Skill 在 `manifest.json` 中声明配置：
 | `globalApiToken` | skills/globalApiToken | P0 | 极简 |
 | `cicy-todo` | skills/cicy-todo | P0 | 简（已是 bash） |
 | `agent-chrome` | skills/agent-chrome | P1 | 中 |
-| `agent-code-server` | skills/agent-code-server | P1 | 中 |
+| `agent-editor` | skills/agent-editor | P1 | 中 |
 | `agent-desktop` | skills/agent-desktop | P1 | 中 |
 | `agent-webpage` | skills/agent-webpage | P1 | 中 |
 | `frp-client` | skills/frp-client | P1 | 中 |

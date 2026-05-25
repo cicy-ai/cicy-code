@@ -19,6 +19,7 @@
 //   waiting-distro      — first-boot of Ubuntu after fresh install
 //   configuring-apt     — fix /etc/apt/sources.list to a reachable mirror
 //   installing-cicy-code— cp + chmod + --version
+//   installing-agents   — pre-warm claude/codex/opencode with native binary
 //   done                — final ok
 
 // ── tunables ──────────────────────────────────────────────────────────
@@ -766,6 +767,92 @@ echo "INSTALLED:$ACT"`;
   return { ok: true, version: m ? m[1] : expectVersion };
 }
 
+// ── agent CLI install (claude/codex/opencode) ─────────────────────────
+// cicy-code's setup.go installs these lazily on first agent create, but
+// its npm command silently swallows optionalDependencies failures —
+// when the network drops mid-install, npm leaves the wrapper package on
+// disk without its platform-native sibling. The wrapper still prints a
+// version string but actually launching the CLI errors with
+// "native binary not installed". Pre-installing here with strict
+// verification means:
+//   - the bug is hot-fixable via CF Worker without re-releasing cicy-code
+//   - first agent start after install is instant (no first-time npm wait)
+//
+// Each upstream wrapper ships platform binaries via optionalDependencies
+// using its own naming convention (see package.json optionalDependencies
+// for each). We pass the platform-native subpackage explicitly as a
+// positional argument so npm cannot quietly skip it.
+const AGENT_SPECS = {
+  claude:   { pkg: "@anthropic-ai/claude-code", nativePrefix: "@anthropic-ai/claude-code-linux-" },
+  codex:    { pkg: "@openai/codex",             nativePrefix: "@openai/codex-linux-" },
+  opencode: { pkg: "opencode-ai",               nativePrefix: "opencode-linux-" },
+};
+
+async function installAgentClis(distro, network, agents, emit) {
+  // CN networks must use npmmirror; with registry.npmjs.org the wrapper
+  // download alone can stall for 20+ min before npm gives up on optional
+  // deps, which is the exact path that produces the "wrapper installed,
+  // native missing" state we're trying to prevent.
+  const registry = (network === "cn" || network === "unknown")
+    ? "https://registry.npmmirror.com"
+    : "https://registry.npmjs.org";
+
+  // WSL is always Linux; map uname -m → npm platform suffix.
+  // x86_64 → x64, aarch64/arm64 → arm64. Reject anything else with a
+  // clear error rather than silently picking the wrong package.
+  const archProbe = await wslBash(distro, "uname -m", { timeoutMs: 5_000 });
+  const m = (archProbe.stdout || "").trim();
+  const arch = m === "x86_64" ? "x64" : (m === "aarch64" || m === "arm64") ? "arm64" : "";
+  if (!arch) return { ok: false, error: `unsupported arch: ${m}` };
+
+  const results = {};
+  for (const name of agents) {
+    const spec = AGENT_SPECS[name];
+    if (!spec) {
+      results[name] = { ok: false, error: "unknown agent" };
+      continue;
+    }
+    const nativePkg = `${spec.nativePrefix}${arch}`;
+    emit({ phase: "installing-agents", message: `Installing ${name}…`, status: "running", agent: name });
+
+    // Install wrapper + platform-native sibling in one shot. The native
+    // package is passed positionally — npm can't silently skip it the
+    // way it does for optionalDependencies. fetch-timeout caps a single
+    // tarball retrieval; without it npm's default (5 min) means a stuck
+    // mirror can extend the whole install pipeline by ~20 min.
+    const installScript = `
+set -e
+export PATH="$HOME/.npm-global/bin:$HOME/.local/node/bin:$PATH"
+npm install -g --include=optional --fetch-timeout=60000 --fetch-retries=2 \\
+  --registry=${registry} --prefix "$HOME/.npm-global" \\
+  ${spec.pkg}@latest ${nativePkg}@latest
+`;
+    const r = await wslBash(distro, installScript, { timeoutMs: 8 * 60_000 });
+    if (!r.ok) {
+      results[name] = { ok: false, error: summarize(r.stderr || r.stdout, { maxLines: 2, maxChars: 200 }) };
+      emit({ phase: "installing-agents", message: `${name}: install failed`, status: "error", agent: name });
+      continue;
+    }
+
+    // Verify the native subpackage actually landed under node_modules.
+    // The wrapper alone is the failure mode we're guarding against —
+    // --version still prints, but the CLI errors on real invocation.
+    const verifyScript = `[ -d "$HOME/.npm-global/lib/node_modules/${nativePkg}" ] && echo OK || { echo MISSING; exit 1; }`;
+    const v = await wslBash(distro, verifyScript, { timeoutMs: 5_000 });
+    if (!v.ok || !v.stdout.includes("OK")) {
+      results[name] = { ok: false, error: `native binary missing (${nativePkg})` };
+      emit({ phase: "installing-agents", message: `${name}: native binary missing`, status: "error", agent: name });
+      continue;
+    }
+    results[name] = { ok: true, native: nativePkg };
+    emit({ phase: "installing-agents", message: `${name} ✓`, status: "done", agent: name });
+  }
+
+  const failed = Object.entries(results).filter(([, v]) => !v.ok).map(([k]) => k);
+  if (failed.length) return { ok: false, error: `failed: ${failed.join(", ")}`, results };
+  return { ok: true, results };
+}
+
 // ── stage path ────────────────────────────────────────────────────────
 // Each version gets its own filename so a stale download from an older
 // release doesn't get reused as if it were the new binary.
@@ -956,6 +1043,18 @@ Write-Output "ERR"; exit 1`;
     { timeoutMs: 30_000 }
   );
   emit({ phase: "starting", message: startR.ok ? "cicy-code started" : "started (verify health)", status: "done" });
+
+  // 9. Pre-warm agent CLIs (claude/codex/opencode). Non-fatal: cicy-code's
+  //    own setup.go retries on first agent create if this step fails, so
+  //    a transient npm registry blip here shouldn't block the overall
+  //    install from being marked successful.
+  emit({ phase: "installing-agents", message: "Installing agent CLIs (claude, codex, opencode)…", status: "running" });
+  const ag = await installAgentClis(distro, network, ["claude", "codex", "opencode"], emit);
+  if (!ag.ok) {
+    emit({ phase: "installing-agents", message: `Warning: ${ag.error} — cicy-code will retry on first agent create`, status: "warning" });
+  } else {
+    emit({ phase: "installing-agents", message: "Agent CLIs ready (claude, codex, opencode)", status: "done" });
+  }
 
   emit({ phase: "done", message: `Installed v${r.version}`, version: r.version, status: "done" });
   return { ok: true, version: r.version };

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Plus, Pencil, Trash2, ChevronDown, Check, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
-import { useDialog } from '../../contexts/DialogContext';
+import { useDialogs } from '../ui/Modal';
 
 interface Win { index: string; name: string; active: boolean }
 
@@ -13,7 +13,7 @@ export function WindowManager({ session, onActiveChange }: { session: string; on
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const ref = useRef<HTMLDivElement>(null);
-  const { confirm } = useDialog();
+  const { confirm, node: dialogsNode } = useDialogs();
 
   const load = () => { apiService.listWindows(session).then(({ data }) => { const w = data.windows || []; setWins(w); onActiveChange?.(w.find((x: Win) => x.active) || null); }).catch(() => {}); };
   useEffect(() => { load(); const id = setInterval(load, 5000); return () => clearInterval(id); }, [session]);
@@ -31,7 +31,11 @@ export function WindowManager({ session, onActiveChange }: { session: string; on
   const select = async (idx: string) => { await apiService.selectWindow(session, idx); setOpen(false); setTimeout(load, 500); };
   const create = async () => { await apiService.createWindow(session); load(); };
   const rename = async (idx: string) => { if (!editName.trim()) return; await apiService.renameWindow(session, idx, editName.trim()); setEditing(null); load(); };
-  const del = (idx: string) => { confirm(t('windowConfirmDelete', { idx }), async () => { await apiService.deleteWindow(session, idx); load(); }); };
+  const del = async (idx: string) => {
+    if (!(await confirm({ body: t('windowConfirmDelete', { idx }), danger: true }))) return;
+    await apiService.deleteWindow(session, idx);
+    load();
+  };
 
   return (
     <div data-id="window-manager-auto-1" ref={ref} className="relative z-50">
@@ -74,6 +78,7 @@ export function WindowManager({ session, onActiveChange }: { session: string; on
           </div>
         </div>
       )}
+      {dialogsNode}
     </div>
   );
 }

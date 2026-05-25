@@ -83,6 +83,15 @@ export interface FsDiffResponse {
   mode: 'head' | 'index' | 'mtime';
 }
 
+export interface FsRoot {
+  /** Stable identifier sent back to the API as ?root=… (e.g. "workspace"). */
+  id: string;
+  /** Human label shown as the section header. */
+  label: string;
+  /** Absolute base path on the host — for tooltip / debugging only. */
+  path: string;
+}
+
 export interface FsFavorite {
   path: string;
   name: string;
@@ -175,14 +184,30 @@ function toFsError(err: unknown): FsError {
 }
 
 export const fsApi = {
+  roots: async (agentId: string): Promise<FsRoot[]> => {
+    try {
+      const resp = await http.get('/api/fs/roots', {
+        params: { agent_id: agentId },
+      });
+      return (resp.data?.roots || []) as FsRoot[];
+    } catch (e) {
+      throw toFsError(e);
+    }
+  },
+
   list: async (
     agentId: string,
     path: string = '',
-    opts: { hidden?: boolean; signal?: AbortSignal } = {},
+    opts: { hidden?: boolean; signal?: AbortSignal; root?: string } = {},
   ): Promise<FsListResponse> => {
     try {
       const resp = await http.get('/api/fs/list', {
-        params: { agent_id: agentId, path, hidden: opts.hidden ? '1' : undefined },
+        params: {
+          agent_id: agentId,
+          path,
+          hidden: opts.hidden ? '1' : undefined,
+          root: opts.root,
+        },
         signal: opts.signal,
       });
       return resp.data as FsListResponse;
@@ -194,11 +219,11 @@ export const fsApi = {
   read: async (
     agentId: string,
     path: string,
-    opts: { signal?: AbortSignal } = {},
+    opts: { signal?: AbortSignal; root?: string } = {},
   ): Promise<FsReadResult> => {
     try {
       const resp = await http.get('/api/fs/read', {
-        params: { agent_id: agentId, path },
+        params: { agent_id: agentId, path, root: opts.root },
         signal: opts.signal,
         responseType: 'text',
         transformResponse: [(data) => data],
@@ -238,10 +263,14 @@ export const fsApi = {
     }
   },
 
-  stat: async (agentId: string, path: string): Promise<FsStatResponse> => {
+  stat: async (
+    agentId: string,
+    path: string,
+    opts: { root?: string } = {},
+  ): Promise<FsStatResponse> => {
     try {
       const resp = await http.get('/api/fs/stat', {
-        params: { agent_id: agentId, path },
+        params: { agent_id: agentId, path, root: opts.root },
       });
       return resp.data as FsStatResponse;
     } catch (e) {

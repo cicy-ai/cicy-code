@@ -38,7 +38,7 @@ import AgentCanvas, { AgentCanvasItem } from './layout/AgentCanvas';
 import AgentStack from './layout/AgentStack';
 import ProviderDashboard from './providers/ProviderDashboard';
 import IMDashboard from './im/IMDashboard';
-import { useDialog } from '../contexts/DialogContext';
+import { useDialogs } from './ui/Modal';
 import config, { defaultWorkerWorkspace, getHostHome, syncHostHomeFromPath, toTildePath, urls } from '../config';
 import apiService from '../services/api';
 import { sendCommandToTmux } from '../services/mockApi';
@@ -329,7 +329,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     patchAgentDetail: patchSharedAgentDetail,
   } = useApp();
   const { token, hasPermission } = useAuth();
-  const { confirm } = useDialog();
+  const { confirm, node: dialogsNode } = useDialogs();
   const paneId = agentId || 'w-10001';
   const fullPaneId = `${paneId}:main.0`;
   const initialPaneIdRef = useRef(paneId);
@@ -638,12 +638,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     return () => window.removeEventListener('agent-status-change', handler as EventListener);
   }, []);
 
-  const handleRestart = () => {
+  const handleRestart = async () => {
     if (isApiOnlyRuntime) return;
-    confirm(`Restart ${paneId}?`, async () => {
-      setIsRestarting(true);
-      try { await apiService.restartPane(paneId); for (let i = 0; i < 30; i++) { await new Promise(r => setTimeout(r, 1000)); try { const { data } = await apiService.getTtydStatus(paneId); if (data.status === 'running') break; } catch {} } } catch { alert(t('alertRestartFailed')); } finally { setIsRestarting(false); }
-    });
+    if (!(await confirm({ body: `Restart ${paneId}?` }))) return;
+    setIsRestarting(true);
+    try { await apiService.restartPane(paneId); for (let i = 0; i < 30; i++) { await new Promise(r => setTimeout(r, 1000)); try { const { data } = await apiService.getTtydStatus(paneId); if (data.status === 'running') break; } catch {} } } catch { alert(t('alertRestartFailed')); } finally { setIsRestarting(false); }
   };
   const handleCapture = async () => { if (isApiOnlyRuntime) return; try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
   const handleToggleMouse = async () => { if (isApiOnlyRuntime) return; const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
@@ -899,10 +898,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       // use the sync /api/chat/code-open endpoint instead — see openCodeFile.
       openCodeFileRef.current?.(String(msg.data.path || ''), String(msg.data?.requestId || ''));
     } else if (msg?.type === 'code.show_files') {
-      // Pure UX nudge from the new agent-code-server pipeline: bring the Files
-      // panel (which embeds the code-server iframe) to the foreground so the
-      // extension activates and registers its `:code-ext` WS. The actual file
-      // open is then a direct sync POST to that WS — no page-side relay.
+      // Pure UX nudge from the agent-editor pipeline: bring the Files panel
+      // (which hosts the native editor) to the foreground so the :code-ext
+      // bridge is alive. The actual file open is a direct sync POST to that
+      // WS — no page-side relay.
       setCliContentTab('files');
       setCliContentOpen(true);
     } else if (msg?.type === 'code.send_path' && msg.data?.path) {
@@ -1223,7 +1222,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const renderCliContentPanel = () => (
     // The drawer keeps the FilesView mounted (and laid out off-screen when
     // closed) so its chat-ws :code-ext bridge stays connected — agents can
-    // still call agent-code-server open / active / tabs even when the user
+    // still call agent-editor open / active / tabs even when the user
     // hasn't opened the Files tab yet.
     <div
       ref={cliContentPanelRef}
@@ -1769,6 +1768,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
       {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
       {toast && <div data-id="workspace-toast" className={`fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 text-sm rounded-lg shadow-lg ${toast.variant === 'success' ? 'bg-green-600 text-white' : 'bg-zinc-800 text-white'}`}>{toast.message}</div>}
+      {dialogsNode}
     </div>
     </SendingProvider>
   );
@@ -1869,7 +1869,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange, onOpenSett
   const [adding, setAdding] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const { confirm } = useDialog();
+  const { confirm, node: drawerDialogsNode } = useDialogs();
 
   useEffect(() => {
     const closeMenu = () => setOpenMenuId(null);
@@ -1908,34 +1908,39 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange, onOpenSett
     } finally { setAdding(false); }
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     const sid = id.split(':')[0];
     if (sid === 'w-10001') return;
-    confirm(<Trans i18nKey="drawerConfirmDelete" ns="workspace" values={{ name: sid }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />, async () => {
-      try {
-        await apiService.deletePane(id);
-        const { data: fresh } = await apiService.getPanes();
-        const list = Array.isArray(fresh) ? fresh : fresh?.panes || [];
-        onAgentsChange(list);
-        if (sid === paneId) {
-          const idx = agents.findIndex(a => (a.pane_id || a.id) === id);
-          const next = agents[idx + 1] || agents[idx - 1];
-          onSelectAgent(next ? (next.pane_id || next.id).split(':')[0] : 'w-10001');
-        }
-      } catch {}
+    const ok = await confirm({
+      body: <Trans i18nKey="drawerConfirmDelete" ns="workspace" values={{ name: sid }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
+      danger: true,
     });
+    if (!ok) return;
+    try {
+      await apiService.deletePane(id);
+      const { data: fresh } = await apiService.getPanes();
+      const list = Array.isArray(fresh) ? fresh : fresh?.panes || [];
+      onAgentsChange(list);
+      if (sid === paneId) {
+        const idx = agents.findIndex(a => (a.pane_id || a.id) === id);
+        const next = agents[idx + 1] || agents[idx - 1];
+        onSelectAgent(next ? (next.pane_id || next.id).split(':')[0] : 'w-10001');
+      }
+    } catch {}
   };
 
-  const handleRestart = (id: string, title: string) => {
+  const handleRestart = async (id: string, title: string) => {
     const sid = id.split(':')[0];
-    confirm(<Trans i18nKey="drawerConfirmRestart" ns="workspace" values={{ name: title || sid }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />, async () => {
-      try {
-        await apiService.restartPane(sid);
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastWorkerRestarting', { name: title || sid }) }));
-      } catch {
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastWorkerRestartFailed', { name: title || sid }) }));
-      }
+    const ok = await confirm({
+      body: <Trans i18nKey="drawerConfirmRestart" ns="workspace" values={{ name: title || sid }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
     });
+    if (!ok) return;
+    try {
+      await apiService.restartPane(sid);
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastWorkerRestarting', { name: title || sid }) }));
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastWorkerRestartFailed', { name: title || sid }) }));
+    }
   };
 
   const q = search.toLowerCase();
@@ -2085,6 +2090,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange, onOpenSett
         title={t('drawerCreateTitle')}
         submitLabel={t('drawerCreateSubmit')}
       />
+      {drawerDialogsNode}
     </>
   );
 }

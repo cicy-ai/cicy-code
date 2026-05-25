@@ -100,7 +100,7 @@ export function languageForPath(path: string): Extension[] {
 }
 
 // Display name for a path's language. Used by the :code-ext bridge to populate
-// the `language` field on host.active_file responses so agent-code-server can
+// the `language` field on host.active_file responses so agent-editor can
 // surface it identically to the old VSIX flow.
 export function languageNameForPath(path: string): string {
   const lower = path.toLowerCase();

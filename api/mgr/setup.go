@@ -792,7 +792,7 @@ func checkEnv() {
 }
 
 var preinstalledSkills = []string{
-	"agent-chrome", "agent-code-server", "agent-desktop", "agent-webpage",
+	"agent-chrome", "agent-editor", "agent-desktop", "agent-webpage",
 	"cicy-agent", "cicy-todo", "cicy-mihomo", "cicy-ssh", "proxy_ssh", "globalApiToken",
 	"agent-summary",
 }
@@ -817,6 +817,17 @@ func ensurePreinstalledSkills() {
 		} else {
 			log.Printf("[startup] skill %s installed", name)
 		}
+	}
+	// Backfill ~/.local/bin/<name> symlinks for every recorded skill —
+	// repairs installs that completed but lost their PATH entry (e.g. due
+	// to a transient mkdir/symlink error). Idempotent; quiet on a clean
+	// host. See api/skillcmd/repair.go for rationale.
+	repaired, errs := skillcmd.EnsureBinSymlinks()
+	if len(repaired) > 0 {
+		log.Printf("[startup] repaired skill symlinks in ~/.local/bin: %v", repaired)
+	}
+	for _, e := range errs {
+		log.Printf("[startup] skill symlink repair: %v", e)
 	}
 }
 
