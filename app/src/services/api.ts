@@ -221,6 +221,8 @@ const api = {
   auditAutonomyRunNow: () => http.post('/api/audit/decisions/run'),
   auditAutonomyExplain: (id: string) =>
     http.post(`/api/audit/decisions/explain/${encodeURIComponent(id)}`),
+  auditAutonomyRevert: (id: string) =>
+    http.post(`/api/audit/decisions/revert/${encodeURIComponent(id)}`),
 
   // desktop "apps"
   getApps: () => http.get('/api/apps'),

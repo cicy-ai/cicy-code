@@ -149,6 +149,7 @@ type AutonomyDecision struct {
 	Actions           []AutonomyDecisionAction   `json:"actions"`
 	PolicyHashBefore  string             `json:"policy_hash_before"`
 	PolicyHashAfter   string             `json:"policy_hash_after,omitempty"`
+	GitSHA            string             `json:"git_sha,omitempty"` // set after auto-commit; used by /revert
 	Error             string             `json:"error,omitempty"`
 }
 
@@ -322,14 +323,16 @@ func runOneTick(ctx context.Context, cfg *AutonomyConfig, trigger string) Autono
 			dec.PolicyHashAfter = pol.Hash
 		}
 	}
-	appendDecision(dec)
 	if applied > 0 {
 		log.Printf("[autonomy] tick applied %d / proposed %d", applied, len(proposals))
 		// Best-effort git commit so each policy mutation has a rollback
-		// point. Failures only log — they don't break the autonomy loop.
-		GitAutoCommitDecision(fmt.Sprintf("autonomy %s: %d applied / %d proposed",
-			dec.ID, applied, len(proposals)))
+		// point. The returned SHA goes on the decision so /revert can
+		// target this commit specifically. Failures log + return ""
+		// without blocking the autonomy loop.
+		dec.GitSHA = GitAutoCommitDecisionReturningSHA(fmt.Sprintf(
+			"autonomy %s: %d applied / %d proposed", dec.ID, applied, len(proposals)))
 	}
+	appendDecision(dec)
 	return dec
 }
 

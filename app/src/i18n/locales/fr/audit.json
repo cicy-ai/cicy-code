@@ -84,5 +84,10 @@
   "decisionsExplainWhyNow": "Pourquoi maintenant",
   "decisionsExplainImpact": "Impact",
   "decisionsExplainConfidence": "confiance {{level}}",
-  "decisionsExplainError": "Échec de l'explication"
+  "decisionsExplainError": "Échec de l'explication",
+  "decisionsRevert": "Annuler",
+  "decisionsRevertConfirm": "Confirmer l'annulation",
+  "decisionsReverting": "Annulation…",
+  "decisionsRevertError": "Échec de l'annulation",
+  "decisionsGitSHA": "Commit git"
 }

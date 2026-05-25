@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   RefreshCw, PlayCircle, CheckCircle2, XCircle, Clock,
-  Sparkles, FileCode2, AlertCircle, MessageSquare,
+  Sparkles, FileCode2, AlertCircle, MessageSquare, Undo2,
 } from 'lucide-react';
 import apiService from '../../services/api';
 
@@ -38,7 +38,7 @@ interface DecisionAction {
 interface Decision {
   id: string;
   timestamp: string;
-  trigger: string; // "interval" | "manual"
+  trigger: string; // "interval" | "manual" | "revert"
   events_window_from: string;
   events_window_to: string;
   events_considered: number;
@@ -46,6 +46,7 @@ interface Decision {
   actions: DecisionAction[];
   policy_hash_before: string;
   policy_hash_after?: string;
+  git_sha?: string;
   error?: string;
 }
 
@@ -174,7 +175,7 @@ export default function DecisionsTab() {
 
         <div data-id="audit-decisions-detail" className="rounded-md border border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] overflow-hidden flex flex-col min-h-0">
           {selected ? (
-            <DecisionDetail decision={selected} />
+            <DecisionDetail decision={selected} onAfterAction={fetchAll} />
           ) : (
             <div className="flex-1 flex items-center justify-center text-xs text-[var(--vsc-text-muted)] p-6 text-center">
               {t('decisionsSelectHint')}
@@ -241,17 +242,36 @@ function DecisionRow({ decision, selected, onSelect }: { decision: Decision; sel
   );
 }
 
-function DecisionDetail({ decision }: { decision: Decision }) {
+function DecisionDetail({ decision, onAfterAction }: { decision: Decision; onAfterAction?: () => void }) {
   const { t } = useTranslation('audit');
   const [explanation, setExplanation] = useState<Explanation | null>(null);
   const [explainLoading, setExplainLoading] = useState(false);
   const [explainError, setExplainError] = useState('');
+  const [revertConfirming, setRevertConfirming] = useState(false);
+  const [revertLoading, setRevertLoading] = useState(false);
+  const [revertError, setRevertError] = useState('');
 
-  // Reset explanation when switching decisions.
+  // Reset state when switching decisions.
   useEffect(() => {
     setExplanation(null);
     setExplainError('');
+    setRevertConfirming(false);
+    setRevertError('');
   }, [decision.id]);
+
+  const handleRevert = useCallback(async () => {
+    setRevertLoading(true);
+    setRevertError('');
+    try {
+      await apiService.auditAutonomyRevert(decision.id);
+      setRevertConfirming(false);
+      if (onAfterAction) onAfterAction();
+    } catch (err: any) {
+      setRevertError(err?.response?.data || err?.message || 'revert failed');
+    } finally {
+      setRevertLoading(false);
+    }
+  }, [decision.id, onAfterAction]);
 
   const handleExplain = useCallback(async () => {
     setExplainLoading(true);
@@ -288,6 +308,21 @@ function DecisionDetail({ decision }: { decision: Decision }) {
           <MessageSquare size={12} className={explainLoading ? 'animate-pulse' : ''} />
           {explainLoading ? t('decisionsExplaining') : t('decisionsExplain')}
         </button>
+        {decision.git_sha && (
+          <button
+            data-id={`audit-decisions-revert-${decision.id}`}
+            onClick={() => revertConfirming ? handleRevert() : setRevertConfirming(true)}
+            disabled={revertLoading}
+            className={`shrink-0 flex items-center gap-1 px-2 py-1 text-xs rounded border transition-colors disabled:opacity-50 ${
+              revertConfirming
+                ? 'bg-red-500/30 hover:bg-red-500/40 border-red-500/50 text-red-100'
+                : 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-500/40 text-amber-200'
+            }`}
+          >
+            <Undo2 size={12} className={revertLoading ? 'animate-pulse' : ''} />
+            {revertLoading ? t('decisionsReverting') : revertConfirming ? t('decisionsRevertConfirm') : t('decisionsRevert')}
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-auto p-3 space-y-3 text-xs">
@@ -295,6 +330,20 @@ function DecisionDetail({ decision }: { decision: Decision }) {
           <section className="p-2 rounded border border-red-500/40 bg-red-500/10 text-red-200">
             <div className="text-[10px] uppercase tracking-wider mb-1">{t('decisionsExplainError')}</div>
             <div className="font-mono break-all">{explainError}</div>
+          </section>
+        )}
+
+        {revertError && (
+          <section className="p-2 rounded border border-red-500/40 bg-red-500/10 text-red-200">
+            <div className="text-[10px] uppercase tracking-wider mb-1">{t('decisionsRevertError')}</div>
+            <div className="font-mono break-all">{revertError}</div>
+          </section>
+        )}
+
+        {decision.git_sha && (
+          <section className="text-[10px]">
+            <span className="uppercase tracking-wider text-[var(--vsc-text-muted)]">{t('decisionsGitSHA')}: </span>
+            <code className="font-mono text-[var(--vsc-text-secondary)]">{decision.git_sha}</code>
           </section>
         )}
 

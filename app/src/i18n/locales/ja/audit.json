@@ -84,5 +84,10 @@
   "decisionsExplainWhyNow": "なぜ今",
   "decisionsExplainImpact": "影響範囲",
   "decisionsExplainConfidence": "{{level}} の信頼度",
-  "decisionsExplainError": "説明に失敗"
+  "decisionsExplainError": "説明に失敗",
+  "decisionsRevert": "巻き戻し",
+  "decisionsRevertConfirm": "巻き戻しを確認",
+  "decisionsReverting": "巻き戻し中…",
+  "decisionsRevertError": "巻き戻しに失敗",
+  "decisionsGitSHA": "Git コミット"
 }

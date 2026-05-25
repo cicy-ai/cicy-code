@@ -84,5 +84,10 @@
   "decisionsExplainWhyNow": "为什么现在",
   "decisionsExplainImpact": "影响范围",
   "decisionsExplainConfidence": "{{level}} 置信度",
-  "decisionsExplainError": "解释失败"
+  "decisionsExplainError": "解释失败",
+  "decisionsRevert": "回滚",
+  "decisionsRevertConfirm": "确认回滚",
+  "decisionsReverting": "回滚中…",
+  "decisionsRevertError": "回滚失败",
+  "decisionsGitSHA": "Git commit"
 }

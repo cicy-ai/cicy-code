@@ -30,6 +30,7 @@ func startAutonomy() {
 	http.HandleFunc("/api/audit/decisions", wa(handleAutonomyDecisions))
 	http.HandleFunc("/api/audit/decisions/run", wa(handleAutonomyRunNow))
 	http.HandleFunc("/api/audit/decisions/explain/", wa(handleAutonomyExplain))
+	http.HandleFunc("/api/audit/decisions/revert/", wa(handleAutonomyRevert))
 }
 
 func handleAutonomyDecisions(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +73,28 @@ func handleAutonomyExplain(w http.ResponseWriter, r *http.Request) {
 	result, err := audit.ExplainDecision(r.Context(), id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+// handleAutonomyRevert — POST /api/audit/decisions/revert/<id>
+// Reverts a specific decision via `git revert` in the audit dir. fsnotify
+// in the audit pipeline picks up the resulting policy.json change.
+func handleAutonomyRevert(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.URL.Path[len("/api/audit/decisions/revert/"):]
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	result, err := audit.RevertDecision(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
