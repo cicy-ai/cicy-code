@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
-import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu } from 'lucide-react';
+import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu, Sparkles } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
+import DecisionsTab from './DecisionsTab';
 import apiService from '../../services/api';
 import config from '../../config';
 import { TokenManager } from '../../services/tokenManager';
 
-type Tab = 'overview' | 'usage' | 'live' | 'setup';
+type Tab = 'overview' | 'usage' | 'live' | 'agent' | 'setup';
 
 interface DashboardData {
   user_id: string;
@@ -516,6 +517,7 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
     { id: 'overview', icon: BarChart3, label: t('tabOverview') },
     { id: 'usage', icon: Clock, label: t('tabUsage') },
     { id: 'live', icon: Activity, label: t('tabLive') },
+    { id: 'agent', icon: Sparkles, label: t('tabAgent') },
     { id: 'setup', icon: Settings, label: t('tabSetup') },
   ];
 
@@ -555,6 +557,7 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
         {tab === 'overview' && <OverviewTab userId={userId} days={days} setDays={setDays} />}
         {tab === 'usage' && <UsageTab userId={userId} />}
         {tab === 'live' && <LiveTab />}
+        {tab === 'agent' && <DecisionsTab />}
         {tab === 'setup' && <SetupTab proxyToken={proxyToken} onRegister={handleRegister} />}
       </main>
     </div>

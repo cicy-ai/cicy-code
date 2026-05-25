@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"ttyd-go/mgr/audit"
+	"ttyd-go/mgr/mitm"
 	"ttyd-go/skillcmd"
 
 	"github.com/gorilla/websocket"
@@ -45,6 +47,12 @@ func main() {
 	if len(os.Args) >= 2 && os.Args[1] == "skill" {
 		skillcmd.Run(os.Args[2:])
 		return
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "audit" {
+		os.Exit(audit.RunCLI(os.Args[2:]))
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "mitm" {
+		os.Exit(mitm.RunCLI(os.Args[2:]))
 	}
 
 	for _, arg := range os.Args[1:] {
@@ -111,6 +119,12 @@ Options:
 	initDB()
 	store.Migrate()
 	defer store.Close()
+
+	if err := audit.Init(); err != nil {
+		log.Printf("[audit] init failed (audit disabled): %v", err)
+	}
+	startMITM()
+	startAutonomy()
 
 	containerMode = isContainerRuntime()
 	if containerMode {
