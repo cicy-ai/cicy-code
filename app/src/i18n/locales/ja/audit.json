@@ -76,5 +76,13 @@
   "decisionsSectionActions": "アクション ({{n}})",
   "decisionsSectionLLMRaw": "LLM 生レスポンス",
   "decisionsEmptyIntro": "エージェントはまだ実行されていません。手動で実行して動作を確認してください。",
-  "decisionsEmptyAction": "最初の実行をトリガー"
+  "decisionsEmptyAction": "最初の実行をトリガー",
+  "decisionsExplain": "説明",
+  "decisionsExplaining": "説明中…",
+  "decisionsExplainTitle": "エージェントの説明",
+  "decisionsExplainWhatChanged": "変更内容",
+  "decisionsExplainWhyNow": "なぜ今",
+  "decisionsExplainImpact": "影響範囲",
+  "decisionsExplainConfidence": "{{level}} の信頼度",
+  "decisionsExplainError": "説明に失敗"
 }

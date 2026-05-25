@@ -76,5 +76,13 @@
   "decisionsSectionActions": "Actions ({{n}})",
   "decisionsSectionLLMRaw": "LLM raw response",
   "decisionsEmptyIntro": "The autonomous policy agent has not run yet, or has not made any decisions. Trigger a tick manually to see what it would do.",
-  "decisionsEmptyAction": "Run first tick"
+  "decisionsEmptyAction": "Run first tick",
+  "decisionsExplain": "Explain",
+  "decisionsExplaining": "Explaining…",
+  "decisionsExplainTitle": "Agent explanation",
+  "decisionsExplainWhatChanged": "What changed",
+  "decisionsExplainWhyNow": "Why now",
+  "decisionsExplainImpact": "Impact",
+  "decisionsExplainConfidence": "{{level}} confidence",
+  "decisionsExplainError": "Explain failed"
 }

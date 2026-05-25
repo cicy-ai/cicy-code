@@ -29,6 +29,7 @@ func startAutonomy() {
 
 	http.HandleFunc("/api/audit/decisions", wa(handleAutonomyDecisions))
 	http.HandleFunc("/api/audit/decisions/run", wa(handleAutonomyRunNow))
+	http.HandleFunc("/api/audit/decisions/explain/", wa(handleAutonomyExplain))
 }
 
 func handleAutonomyDecisions(w http.ResponseWriter, r *http.Request) {
@@ -58,4 +59,21 @@ func handleAutonomyRunNow(w http.ResponseWriter, r *http.Request) {
 	dec := audit.RunOneTickNow(r.Context(), "manual")
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(dec)
+}
+
+// handleAutonomyExplain — POST /api/audit/decisions/explain/<id>
+// Returns a structured human-readable narrative of a past decision.
+func handleAutonomyExplain(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Path[len("/api/audit/decisions/explain/"):]
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	result, err := audit.ExplainDecision(r.Context(), id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
 }
