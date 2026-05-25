@@ -92,6 +92,11 @@ type aiGatewayCurrentSnapshot struct {
 	RequestIDs       []string            `json:"request_ids"`
 	ActiveRequestIDs []string            `json:"active_request_ids"`
 	ConversationIDs  []string            `json:"conversation_ids"`
+
+	// SourceChannel routes the audit submit. Empty / "gateway" → existing
+	// SubmitGateway* path. "mitm" → SubmitMitmEvent. Set by MITM-originated
+	// sessions (see api/mgr/mitm_audit_adapter.go). Serialized for forensics.
+	SourceChannel string `json:"source,omitempty"`
 }
 
 type aiGatewayReplySnapshot struct {
@@ -503,6 +508,15 @@ func (s *aiGatewayAuditSession) recordOutboundRequest(req *http.Request) {
 	})
 }
 
+// setSourceChannel marks this session's snapshots as originating from a
+// non-gateway source (currently "mitm"). Must be called before
+// writeStartSnapshots, so the audit submit routes correctly.
+func (s *aiGatewayAuditSession) setSourceChannel(source string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.current.SourceChannel = source
+}
+
 func (s *aiGatewayAuditSession) writeStartSnapshots() error {
 	if s == nil {
 		return nil
@@ -770,12 +784,25 @@ func aiGatewayWriteCurrentSnapshot(agentID string, current aiGatewayCurrentSnaps
 	}
 	// Audit: detective hook — fire-and-forget async submit on successful write.
 	if payload, mErr := json.Marshal(current); mErr == nil {
-		audit.SubmitGatewayOutbound(
-			agentID, "", "", "",
-			current.TurnID, current.ConversationID,
-			current.Provider, current.Model,
-			payload,
-		)
+		if current.SourceChannel == "mitm" {
+			audit.SubmitMitmEvent(audit.Envelope{
+				AgentID:        agentID,
+				TurnID:         current.TurnID,
+				ConversationID: current.ConversationID,
+				Provider:       current.Provider,
+				Model:          current.Model,
+				Direction:      audit.DirectionOutbound,
+				Payload:        payload,
+				PayloadRef:     fmt.Sprintf("current.json#%s", current.TurnID),
+			})
+		} else {
+			audit.SubmitGatewayOutbound(
+				agentID, "", "", "",
+				current.TurnID, current.ConversationID,
+				current.Provider, current.Model,
+				payload,
+			)
+		}
 	}
 	return nil
 }
@@ -815,16 +842,29 @@ func aiGatewayWriteReplySnapshot(agentID string, reply aiGatewayReplySnapshot) e
 		return err
 	}
 	// Audit: detective hook — inbound (reply) counterpart to outbound submit.
-	// Provider/Model/ConversationID are looked up from the matching current
-	// snapshot file (best-effort; empty if not yet written).
+	// Provider/Model/ConversationID/Source are looked up from the matching
+	// current snapshot file (best-effort; empty if not yet written).
 	if payload, mErr := json.Marshal(lite); mErr == nil {
-		provider, model, convID := aiGatewayLookupCurrentContext(agentID, reply.TurnID)
-		audit.SubmitGatewayInbound(
-			agentID, "", "", "",
-			reply.TurnID, convID,
-			provider, model,
-			payload,
-		)
+		provider, model, convID, source := aiGatewayLookupCurrentContextFull(agentID, reply.TurnID)
+		if source == "mitm" {
+			audit.SubmitMitmEvent(audit.Envelope{
+				AgentID:        agentID,
+				TurnID:         reply.TurnID,
+				ConversationID: convID,
+				Provider:       provider,
+				Model:          model,
+				Direction:      audit.DirectionInbound,
+				Payload:        payload,
+				PayloadRef:     fmt.Sprintf("reply.json#%s", reply.TurnID),
+			})
+		} else {
+			audit.SubmitGatewayInbound(
+				agentID, "", "", "",
+				reply.TurnID, convID,
+				provider, model,
+				payload,
+			)
+		}
 	}
 	return nil
 }
@@ -833,18 +873,25 @@ func aiGatewayWriteReplySnapshot(agentID string, reply aiGatewayReplySnapshot) e
 // current.json for the matching turn. Best-effort: returns empty strings
 // if current.json is missing or its turn_id does not match.
 func aiGatewayLookupCurrentContext(agentID, turnID string) (provider, model, conversationID string) {
+	provider, model, conversationID, _ = aiGatewayLookupCurrentContextFull(agentID, turnID)
+	return
+}
+
+// aiGatewayLookupCurrentContextFull also returns SourceChannel so the
+// reply submit can route to SubmitMitmEvent for MITM-originated turns.
+func aiGatewayLookupCurrentContextFull(agentID, turnID string) (provider, model, conversationID, sourceChannel string) {
 	body, err := os.ReadFile(aiGatewayCurrentSnapshotPath(agentID))
 	if err != nil {
-		return "", "", ""
+		return "", "", "", ""
 	}
 	var current aiGatewayCurrentSnapshot
 	if err := json.Unmarshal(body, &current); err != nil {
-		return "", "", ""
+		return "", "", "", ""
 	}
 	if turnID != "" && strings.TrimSpace(current.TurnID) != strings.TrimSpace(turnID) {
-		return "", "", ""
+		return "", "", "", ""
 	}
-	return current.Provider, current.Model, current.ConversationID
+	return current.Provider, current.Model, current.ConversationID, current.SourceChannel
 }
 
 func aiGatewayReadReplySnapshotFile(agentID string) (aiGatewayReplySnapshot, error) {
