@@ -179,21 +179,25 @@ func TestTodoList_MasterCanFilterByPane(t *testing.T) {
 
 func TestTodoList_RequesterHeaderRequired(t *testing.T) {
 	setupTodoTest(t)
-	// No header → treated as master, returns master's todos (empty here).
-	code, resp := callTodo(t, handleTodoList, "GET", "/api/todo/list", "", nil)
-	if code != 200 {
-		t.Fatalf("expected 200 (master fallback) without header, got %d body=%v", code, resp)
+	// No header → 400. We deliberately do NOT default to master to prevent
+	// silent fallback writes landing under w-10001.
+	code, _ := callTodo(t, handleTodoList, "GET", "/api/todo/list", "", nil)
+	if code != 400 {
+		t.Fatalf("expected 400 without header, got %d", code)
 	}
 }
 
-func TestTodoList_NoHeaderActsAsMaster(t *testing.T) {
+func TestTodoAdd_RequesterHeaderRequired(t *testing.T) {
 	setupTodoTest(t)
-
-	// Add a worker todo via header, then list with no header — should see it.
-	addTodo(t, "w-10025", "from worker", "")
-	all := listTodos(t, "" /* no header */, "all_agents=true")
-	if len(all) != 1 {
-		t.Fatalf("no-header caller should see all (master fallback): %v", all)
+	code, _ := callTodo(t, handleTodoAdd, "POST", "/api/todo/add", "",
+		map[string]interface{}{"title": "anonymous"})
+	if code != 400 {
+		t.Fatalf("expected 400 without header, got %d", code)
+	}
+	// Confirm no todo was written.
+	all := listTodos(t, "w-10001", "all_agents=true")
+	if len(all) != 0 {
+		t.Fatalf("anonymous add should have been rejected, but found todos: %v", all)
 	}
 }
 

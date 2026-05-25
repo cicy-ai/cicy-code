@@ -245,29 +245,44 @@ const api = {
   getChatClients: () => http.get('/api/chat/clients'),
   pingChatClient: (clientId: string) => http.post('/api/chat/ping-client', { client_id: clientId }),
 
-  listTodos: (paneId: string, allAgents?: boolean, params?: { status?: string; q?: string }) =>
-    http.get('/api/todo/list', {
-      headers: { 'X-Agent-Show-Id': shortPaneRouteId(paneId) },
+  listTodos: (paneId: string, allAgents?: boolean, params?: { status?: string; q?: string }) => {
+    const pid = shortPaneRouteId(paneId);
+    if (!pid) return Promise.reject(new Error('paneId required for listTodos'));
+    return http.get('/api/todo/list', {
+      headers: { 'X-Agent-Show-Id': pid },
       params: { pane_id: paneId, all_agents: allAgents ? 'true' : undefined, ...(params || {}) },
-    }),
-  getTodoCounts: (paneId: string) =>
-    http.get('/api/todo/counts', {
-      headers: { 'X-Agent-Show-Id': shortPaneRouteId(paneId) },
+    });
+  },
+  getTodoCounts: (paneId: string) => {
+    const pid = shortPaneRouteId(paneId);
+    if (!pid) return Promise.reject(new Error('paneId required for getTodoCounts'));
+    return http.get('/api/todo/counts', {
+      headers: { 'X-Agent-Show-Id': pid },
       params: { pane_id: paneId },
-    }),
-  addTodo: (paneId: string, title: string, creatorId?: string) =>
-    http.post('/api/todo/add', { pane_id: paneId, title, creator_id: creatorId }, {
-      headers: { 'X-Agent-Show-Id': shortPaneRouteId(paneId) },
-    }),
-  updateTodo: (paneId: string, id: string, patch: { status?: string; title?: string }) =>
-    http.patch(`/api/todo/${encodeURIComponent(id)}`, { pane_id: paneId, ...patch }, {
-      headers: { 'X-Agent-Show-Id': shortPaneRouteId(paneId) },
-    }),
-  deleteTodo: (paneId: string, id: string) =>
-    http.delete(`/api/todo/${encodeURIComponent(id)}`, {
-      headers: { 'X-Agent-Show-Id': shortPaneRouteId(paneId) },
+    });
+  },
+  addTodo: (paneId: string, title: string, creatorId?: string) => {
+    const pid = shortPaneRouteId(paneId);
+    if (!pid) return Promise.reject(new Error('paneId required for addTodo'));
+    return http.post('/api/todo/add', { pane_id: paneId, title, creator_id: creatorId }, {
+      headers: { 'X-Agent-Show-Id': pid },
+    });
+  },
+  updateTodo: (paneId: string, id: string, patch: { status?: string; title?: string }) => {
+    const pid = shortPaneRouteId(paneId);
+    if (!pid) return Promise.reject(new Error('paneId required for updateTodo'));
+    return http.patch(`/api/todo/${encodeURIComponent(id)}`, { pane_id: paneId, ...patch }, {
+      headers: { 'X-Agent-Show-Id': pid },
+    });
+  },
+  deleteTodo: (paneId: string, id: string) => {
+    const pid = shortPaneRouteId(paneId);
+    if (!pid) return Promise.reject(new Error('paneId required for deleteTodo'));
+    return http.delete(`/api/todo/${encodeURIComponent(id)}`, {
+      headers: { 'X-Agent-Show-Id': pid },
       params: { pane_id: paneId },
-    }),
+    });
+  },
 };
 
 export default api;

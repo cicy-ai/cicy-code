@@ -58,16 +58,17 @@ func isMasterPaneID(paneID string) bool {
 }
 
 // requesterPaneID returns the short pane id of the caller, derived from the
-// X-Agent-Show-Id header. When the header is absent the caller is treated
-// as the master pane (the browser UI uses this — it shares the api_token
-// already, so this is no looser than existing auth).
+// X-Agent-Show-Id header. Returns empty string when the header is absent —
+// callers MUST provide it. We deliberately do NOT fall back to the master
+// pane: a silent default makes it too easy for a script or buggy client
+// without the header to create todos under w-10001 by accident.
 func requesterPaneID(r *http.Request) string {
 	for _, h := range []string{"X-Agent-Show-Id", "X-Agent-Show-ID", "X_AGENT_SHOW_ID"} {
 		if v := strings.TrimSpace(r.Header.Get(h)); v != "" {
 			return shortPaneID(normPaneID(v))
 		}
 	}
-	return primaryWorkerSession
+	return ""
 }
 
 func todoFilePath(workspace string) string {
@@ -86,6 +87,9 @@ func loadTodos(workspace string) ([]Todo, error) {
 	if len(strings.TrimSpace(string(data))) == 0 {
 		return []Todo{}, nil
 	}
+	// Normalise timestamps written by the Python migration script:
+	// "2026-05-25 02:59:48+00:00" → "2026-05-25T02:59:48+00:00"
+	data = normaliseTodoTimestamps(data)
 	var f todoFile
 	if err := yaml.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
@@ -94,6 +98,33 @@ func loadTodos(workspace string) ([]Todo, error) {
 		return []Todo{}, nil
 	}
 	return f.Todos, nil
+}
+
+// normaliseTodoTimestamps replaces "YYYY-MM-DD HH:MM:SS" with
+// "YYYY-MM-DDTHH:MM:SS" so the Go yaml parser can decode time.Time.
+var todoTsRE = strings.NewReplacer() // lazy: done inline for readability
+
+func normaliseTodoTimestamps(data []byte) []byte {
+	s := string(data)
+	// Only touch values that look like "YYYY-MM-DD HH:MM:SS"
+	var buf strings.Builder
+	buf.Grow(len(s))
+	i := 0
+	for i < len(s) {
+		// Pattern: 4 digits '-' 2 digits '-' 2 digits ' ' 2 digits ':' 2 digits ':'
+		if i+19 <= len(s) &&
+			s[i+4] == '-' && s[i+7] == '-' && s[i+10] == ' ' &&
+			s[i+13] == ':' && s[i+16] == ':' {
+			buf.WriteString(s[:i+10])
+			buf.WriteByte('T')
+			s = s[i+11:]
+			i = 0
+			continue
+		}
+		buf.WriteByte(s[i])
+		i++
+	}
+	return []byte(buf.String())
 }
 
 func saveTodos(workspace string, todos []Todo) error {
@@ -207,6 +238,10 @@ func handleTodoList(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	requester := requesterPaneID(r)
+	if requester == "" {
+		httpErr(w, 400, "X-Agent-Show-Id header required")
+		return
+	}
 	status := strings.ToLower(strings.TrimSpace(q.Get("status")))
 	kw := strings.ToLower(strings.TrimSpace(q.Get("q")))
 	paneFilter := shortPaneID(normPaneID(strings.TrimSpace(q.Get("pane_id"))))
@@ -259,6 +294,10 @@ func handleTodoCounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requester := requesterPaneID(r)
+	if requester == "" {
+		httpErr(w, 400, "X-Agent-Show-Id header required")
+		return
+	}
 	q := r.URL.Query()
 	paneFilter := shortPaneID(normPaneID(strings.TrimSpace(q.Get("pane_id"))))
 
@@ -317,6 +356,10 @@ func handleTodoAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requester := requesterPaneID(r)
+	if requester == "" {
+		httpErr(w, 400, "X-Agent-Show-Id header required")
+		return
+	}
 
 	target := requester
 	bodyPane := shortPaneID(normPaneID(strings.TrimSpace(req.PaneID)))
@@ -411,6 +454,10 @@ func handleTodoPatch(w http.ResponseWriter, r *http.Request, idOrPrefix string) 
 		*req.Title = t
 	}
 	requester := requesterPaneID(r)
+	if requester == "" {
+		httpErr(w, 400, "X-Agent-Show-Id header required")
+		return
+	}
 
 	todoMu.Lock()
 	defer todoMu.Unlock()
@@ -448,6 +495,10 @@ func handleTodoPatch(w http.ResponseWriter, r *http.Request, idOrPrefix string) 
 
 func handleTodoDelete(w http.ResponseWriter, r *http.Request, idOrPrefix string) {
 	requester := requesterPaneID(r)
+	if requester == "" {
+		httpErr(w, 400, "X-Agent-Show-Id header required")
+		return
+	}
 	todoMu.Lock()
 	defer todoMu.Unlock()
 	ws, ok := requireMasterWorkspaceForTodo(w)
