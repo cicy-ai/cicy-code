@@ -18,8 +18,9 @@ type Server struct {
 	hook    AuditHook
 	breaker BreakerHook
 
-	listener net.Listener
-	wg       sync.WaitGroup
+	listener     net.Listener
+	httpListener net.Listener
+	wg           sync.WaitGroup
 
 	// shutdown coordination
 	closing chan struct{}
@@ -31,7 +32,8 @@ type Server struct {
 //
 // hook    — receives audit events; pass nil to disable audit submission.
 // breaker — receives PreventiveCheck calls; pass nil to disable inline
-//           blocking (all turns pass through to upstream).
+//
+//	blocking (all turns pass through to upstream).
 func NewServer(cfg *Config, hook AuditHook, breaker BreakerHook) (*Server, error) {
 	if cfg == nil {
 		return nil, errors.New("mitm: nil config")
@@ -77,11 +79,22 @@ func (s *Server) Start(ctx context.Context) error {
 		return fmt.Errorf("mitm: listen %s: %w", s.cfg.SOCKS5Listen, err)
 	}
 	s.listener = ln
-	log.Printf("[mitm] listening on %s, node=%s, final_hop=%v, whitelist=%v",
+	log.Printf("[mitm] listening on %s (socks5), node=%s, final_hop=%v, whitelist=%v",
 		s.cfg.SOCKS5Listen, s.cfg.Node.ID, s.cfg.Node.FinalHop, s.cfg.Hosts.Whitelist)
-
 	s.wg.Add(1)
-	go s.acceptLoop(ctx)
+	go s.acceptLoop(ctx, ln, s.handleConn)
+
+	// HTTP CONNECT listener for node-based CLIs that can't do SOCKS5.
+	if s.cfg.HTTPConnectListen != "" {
+		hln, err := net.Listen("tcp", s.cfg.HTTPConnectListen)
+		if err != nil {
+			return fmt.Errorf("mitm: listen %s: %w", s.cfg.HTTPConnectListen, err)
+		}
+		s.httpListener = hln
+		log.Printf("[mitm] listening on %s (http connect)", s.cfg.HTTPConnectListen)
+		s.wg.Add(1)
+		go s.acceptLoop(ctx, hln, s.handleConnHTTP)
+	}
 	return nil
 }
 
@@ -99,13 +112,16 @@ func (s *Server) Stop() {
 	if s.listener != nil {
 		_ = s.listener.Close()
 	}
+	if s.httpListener != nil {
+		_ = s.httpListener.Close()
+	}
 	s.wg.Wait()
 }
 
-func (s *Server) acceptLoop(ctx context.Context) {
+func (s *Server) acceptLoop(ctx context.Context, ln net.Listener, handle func(context.Context, net.Conn)) {
 	defer s.wg.Done()
 	for {
-		conn, err := s.listener.Accept()
+		conn, err := ln.Accept()
 		if err != nil {
 			select {
 			case <-s.closing:
@@ -124,20 +140,33 @@ func (s *Server) acceptLoop(ctx context.Context) {
 		go func() {
 			defer s.wg.Done()
 			defer conn.Close()
-			s.handleConn(ctx, conn)
+			handle(ctx, conn)
 		}()
 	}
 }
 
 func (s *Server) handleConn(ctx context.Context, raw net.Conn) {
-	// SOCKS5 handshake
 	req, err := readSOCKS5Handshake(raw, 10*time.Second)
 	if err != nil {
 		log.Printf("[mitm] socks5 handshake from %s: %v", raw.RemoteAddr(), err)
 		return
 	}
+	s.serveRequest(ctx, req)
+}
 
-	identity := InferIdentity(s.cfg.Identity.Rules, raw.RemoteAddr(), raw.LocalAddr(), req.Username, req.Host)
+func (s *Server) handleConnHTTP(ctx context.Context, raw net.Conn) {
+	req, err := readHTTPConnect(raw, 10*time.Second)
+	if err != nil {
+		log.Printf("[mitm] http connect from %s: %v", raw.RemoteAddr(), err)
+		return
+	}
+	s.serveRequest(ctx, req)
+}
+
+// serveRequest runs the shared post-handshake path (identity → whitelist →
+// TLS terminate → pump) for both the SOCKS5 and HTTP CONNECT front-ends.
+func (s *Server) serveRequest(ctx context.Context, req *SOCKS5Request) {
+	identity := InferIdentity(s.cfg.Identity.Rules, req.Conn.RemoteAddr(), req.Conn.LocalAddr(), req.Username, req.Host)
 	hostPort := req.HostPort()
 
 	if !s.cfg.IsWhitelisted(req.Host) {

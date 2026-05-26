@@ -23,22 +23,25 @@ var mitmServer *mitm.Server
 // traffic through the MITM. Empty unless MITM is enabled+running.
 var (
 	mitmSOCKS5Addr string
+	mitmHTTPAddr   string
 	mitmCACertPath string
 )
 
 // mitmAgentProxyBootLines returns boot export lines that route a non-gateway
-// agent's outbound HTTPS through the local MITM, using the agent's pane id as
-// the SOCKS5 username so the MITM's socks5_username identity rule attributes
-// every captured turn (and its reply callback) to the right agent. Also adds
-// the MITM CA for node-based CLIs. Returns nil unless MITM is running (it is
-// disabled by default), so the common boot path is unchanged.
+// agent's outbound HTTPS through the local MITM's HTTP CONNECT listener, using
+// the agent's pane id as the proxy-auth username so the MITM's socks5_username
+// identity rule attributes every captured turn (and its reply callback) to the
+// right agent. node-based CLIs (claude/opencode/codex via undici) honor
+// HTTP(S)_PROXY but reject SOCKS5, so we use the http:// proxy here. Also adds
+// the MITM CA. Returns nil unless MITM is running (disabled by default), so the
+// common boot path is unchanged.
 func mitmAgentProxyBootLines() []string {
-	if mitmServer == nil || mitmSOCKS5Addr == "" {
+	if mitmServer == nil || mitmHTTPAddr == "" {
 		return nil
 	}
 	lines := []string{
-		fmt.Sprintf(`export ALL_PROXY="socks5h://${X_AGENT_SHORT_ID}@%s"`, mitmSOCKS5Addr),
-		fmt.Sprintf(`export HTTPS_PROXY="socks5h://${X_AGENT_SHORT_ID}@%s"`, mitmSOCKS5Addr),
+		fmt.Sprintf(`export HTTPS_PROXY="http://${X_AGENT_SHORT_ID}:x@%s"`, mitmHTTPAddr),
+		fmt.Sprintf(`export HTTP_PROXY="http://${X_AGENT_SHORT_ID}:x@%s"`, mitmHTTPAddr),
 	}
 	if mitmCACertPath != "" {
 		lines = append(lines, fmt.Sprintf(`export NODE_EXTRA_CA_CERTS="%s"`, mitmCACertPath))
@@ -73,6 +76,7 @@ func startMITM() {
 	}
 	mitmServer = srv
 	mitmSOCKS5Addr = cfg.SOCKS5Listen
+	mitmHTTPAddr = cfg.HTTPConnectListen
 	mitmCACertPath = cfg.CA.CertPath
 
 	// CA cert download — operator runs `cicy-code mitm install-ca` which

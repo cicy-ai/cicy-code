@@ -73,7 +73,7 @@ func startTestServer(t *testing.T, breaker BreakerHook, upstreamHandler http.Han
 	}
 	srv.listener = ln
 	srv.wg.Add(1)
-	go srv.acceptLoop(context.Background())
+	go srv.acceptLoop(context.Background(), ln, srv.handleConn)
 
 	mitmAddr := ln.Addr().String()
 	clientPool := x509.NewCertPool()
