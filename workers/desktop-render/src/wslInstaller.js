@@ -801,19 +801,18 @@ sudo_or_root mv -f "$TMP" "$DST"
 ACT=$("$DST" --version 2>/dev/null | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1 || echo unknown)
 sudo_or_root sh -c "printf '%s' \\"$ACT\\" > /usr/local/bin/cicy-code.version" || true
 
-# ── 3) Mirror the binary into both root's and cicy's $HOME/.local/bin
+# ── 3) Mirror the binary into cicy's $HOME/.local/bin
 # cicy-desktop's main process probes $HOME/.local/bin/cicy-code under
 # the default user to decide if the install completed. Symlink there
 # (rather than copying) keeps everything pointing at /usr/local/bin so
-# upgrades stay atomic.
-for U in root cicy; do
-  H=$(eval echo "~$U")
-  [ -d "$H" ] || continue
-  mkdir -p "$H/.local/bin"
-  ln -sfn "$DST" "$H/.local/bin/cicy-code"
-  printf '%s' "$ACT" > "$H/.local/bin/cicy-code.version"
-  chown -R "$U":"$U" "$H/.local" 2>/dev/null || true
-done
+# upgrades stay atomic. We only mirror for cicy — root doesn't need it
+# (cicy-code binary is already in /usr/local/bin which is on root's
+# PATH, and the /etc/wsl.conf [boot] command su's to cicy anyway).
+H=/home/cicy
+sudo_or_root mkdir -p "$H/.local/bin"
+sudo_or_root ln -sfn "$DST" "$H/.local/bin/cicy-code"
+sudo_or_root sh -c "printf '%s' '$ACT' > '$H/.local/bin/cicy-code.version'"
+sudo_or_root chown -R cicy:cicy "$H/.local" 2>/dev/null || true
 
 # ── 4) Set up cicy user's PATH for npm-global and node binaries.
 # When cicy-code spawns agent CLIs (claude/codex/opencode), it runs
