@@ -22,14 +22,19 @@ import (
 // ~/cicy-ai/mitm/config.json. A minimum valid config is {"enabled": true}
 // — all other fields fall back to defaults.
 type Config struct {
-	Enabled      bool           `json:"enabled"`
-	SOCKS5Listen string         `json:"socks5_listen"`
-	CA           CAConfig       `json:"ca"`
-	Hosts        HostsConfig    `json:"hosts"`
-	Node         NodeConfig     `json:"node"`
-	Upstream     UpstreamConfig `json:"upstream"`
-	Identity     IdentityConfig `json:"identity"`
-	Audit        AuditConfig    `json:"audit"`
+	Enabled      bool   `json:"enabled"`
+	SOCKS5Listen string `json:"socks5_listen"`
+	// HTTPConnectListen is an HTTP CONNECT proxy listener (parallel to SOCKS5).
+	// Node-based agent CLIs (claude / opencode / codex via undici) honor
+	// HTTPS_PROXY but do NOT support SOCKS5 ("UnsupportedProxyProtocol"), so
+	// they connect here. Identity = Proxy-Authorization username.
+	HTTPConnectListen string         `json:"http_connect_listen"`
+	CA                CAConfig       `json:"ca"`
+	Hosts             HostsConfig    `json:"hosts"`
+	Node              NodeConfig     `json:"node"`
+	Upstream          UpstreamConfig `json:"upstream"`
+	Identity          IdentityConfig `json:"identity"`
+	Audit             AuditConfig    `json:"audit"`
 }
 
 // CAConfig controls the dynamic CA used to sign leaf certs.
@@ -58,12 +63,12 @@ type NodeConfig struct {
 //   - "mihomo": dial via mihomo SOCKS5 (still real host, system CA pool).
 //   - "chain":  dial next MITM node's SOCKS5 port (trust_ca CA pool).
 type UpstreamConfig struct {
-	Mode         string         `json:"mode"`
-	MihomoSOCKS5 string         `json:"mihomo_socks5,omitempty"`
-	MihomoAuth   string         `json:"mihomo_auth,omitempty"`
-	Chain        *ChainConfig   `json:"chain,omitempty"`
-	DialTimeout  Duration       `json:"dial_timeout,omitempty"`
-	TLSTimeout   Duration       `json:"tls_timeout,omitempty"`
+	Mode         string       `json:"mode"`
+	MihomoSOCKS5 string       `json:"mihomo_socks5,omitempty"`
+	MihomoAuth   string       `json:"mihomo_auth,omitempty"`
+	Chain        *ChainConfig `json:"chain,omitempty"`
+	DialTimeout  Duration     `json:"dial_timeout,omitempty"`
+	TLSTimeout   Duration     `json:"tls_timeout,omitempty"`
 }
 
 // ChainConfig is the upstream.chain block (mode=chain only).
@@ -83,10 +88,10 @@ type IdentityConfig struct {
 // IdentityRule is a single inference step. The Kind field selects which
 // other fields are honored.
 //
-//   kind=socks5_username  → read SOCKS5 USERNAME field (RFC 1929)
-//   kind=port_map         → look up Map[inboundPort]
-//   kind=client_ip        → look up Map[clientIP]
-//   kind=fallback         → use Value (supports {host} placeholder)
+//	kind=socks5_username  → read SOCKS5 USERNAME field (RFC 1929)
+//	kind=port_map         → look up Map[inboundPort]
+//	kind=client_ip        → look up Map[clientIP]
+//	kind=fallback         → use Value (supports {host} placeholder)
 type IdentityRule struct {
 	Kind  string            `json:"kind"`
 	Map   map[string]string `json:"map,omitempty"`
@@ -161,6 +166,9 @@ func (c *Config) applyDefaults() {
 	home, _ := os.UserHomeDir()
 	if c.SOCKS5Listen == "" {
 		c.SOCKS5Listen = "127.0.0.1:1085"
+	}
+	if c.HTTPConnectListen == "" {
+		c.HTTPConnectListen = "127.0.0.1:1087"
 	}
 	if c.CA.CertPath == "" {
 		c.CA.CertPath = filepath.Join(home, "cicy-ai", "db", "mitm-ca.crt")

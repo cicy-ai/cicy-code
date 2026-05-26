@@ -39,7 +39,7 @@ func startMITMServer(t *testing.T, cfg *Config, hook AuditHook, upstreamCA *x509
 	}
 	srv.listener = ln
 	srv.wg.Add(1)
-	go srv.acceptLoop(context.Background())
+	go srv.acceptLoop(context.Background(), ln, srv.handleConn)
 	return ln.Addr().String(), srv
 }
 
@@ -246,7 +246,7 @@ func TestMITM_ChainLoopDetection(t *testing.T) {
 	}
 	srv.listener = ln
 	srv.wg.Add(1)
-	go srv.acceptLoop(context.Background())
+	go srv.acceptLoop(context.Background(), ln, srv.handleConn)
 	defer srv.Stop()
 
 	clientPool := x509.NewCertPool()

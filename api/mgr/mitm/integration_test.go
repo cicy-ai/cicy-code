@@ -178,7 +178,7 @@ func TestMITM_EndToEnd(t *testing.T) {
 	}
 	srv.listener = ln
 	srv.wg.Add(1)
-	go srv.acceptLoop(context.Background())
+	go srv.acceptLoop(context.Background(), ln, srv.handleConn)
 	defer srv.Stop()
 
 	mitmAddr := ln.Addr().String()
