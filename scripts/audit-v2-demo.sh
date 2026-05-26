@@ -79,7 +79,9 @@ bind: 127.0.0.1
 mode: rule
 log-level: info
 external-controller: 127.0.0.1:19002
-skip-auth-prefixes: [127.0.0.1/32, ::1/128]
+skip-auth-prefixes:
+  - 127.0.0.1/32
+  - ::1/128
 proxies:
   - name: cicy_mitm
     type: socks5
