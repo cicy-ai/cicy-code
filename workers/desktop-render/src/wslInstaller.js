@@ -21,8 +21,10 @@
 //   installing-cicy-code— cp + chmod + --version
 //   installing-deps     — apt-install unzip/jq/CJK fonts so cicy-code's
 //                          first-launch baseTools check passes instantly
-//   starting            — boot cicy-code + wait for /api/health 200
-//   installing-agents   — pre-warm claude/codex/opencode with native binary
+//   picking-agents      — pause for user to choose claude / codex / opencode
+//                          (no pre-install — cicy-code installs lazily on first
+//                           agent create with the picked set passed via --agents)
+//   starting            — boot cicy-code --agents=<csv> + wait for /api/health 200
 //   mounting-files      — Desktop shortcut + Quick Access pin to WSL home
 //   done                — final ok
 
@@ -141,7 +143,12 @@ function clean(s) {
 async function ps(scriptText, opts = {}) {
   // Avoid quoting hell by passing the script as base64 through -EncodedCommand.
   // PowerShell expects UTF-16LE base64.
-  _emit({ kind: "log", text: `$ powershell:\n${summarize(scriptText, { maxLines: 5, maxChars: 400 })}` });
+  // silent: skip the log preview entirely — used by tight polling loops
+  // (e.g. download progress) where every call would otherwise spam the
+  // shell log with a 5-line script preview per tick.
+  if (!opts.silent) {
+    _emit({ kind: "log", text: `$ powershell:\n${summarize(scriptText, { maxLines: 5, maxChars: 400 })}` });
+  }
   // Force PowerShell to emit UTF-8 to stdout/stderr so cicy-desktop's
   // exec_shell (which decodes as UTF-8) doesn't garble Chinese / box-drawing
   // characters from `wsl --list`, `chcp` etc. The chcp call mirrors the same
@@ -649,15 +656,27 @@ $res | Sort-Object { [int]($_.Split(' ')[1]) }
     if (sorted.length) ordered = [...sorted, ...urls.filter(u => !sorted.includes(u))];
   }
 
-  emit({ phase: "installing-wsl", message: "Downloading Ubuntu rootfs (~350MB, may take a few minutes)…" });
+  emit({ phase: "installing-wsl", message: "Downloading Ubuntu rootfs (~350MB, may take a few minutes)…", status: "running", progress: 0 });
+
+  // Generate the temp filename in JS so the JS-side poller can stat
+  // exactly the file PS is writing into. PS used to mint a fresh GUID
+  // inside the script, but then JS had no way to know which file to
+  // poll for size → no live progress.
+  const tarSuffix = Math.random().toString(16).slice(2, 10);
+  const tarName = `ubuntu-jammy-wsl-${tarSuffix}.tar.gz`;
+
+  // Ubuntu 22.04 rootfs is ~350 MB across mirrors. Used purely for the
+  // progress bar denominator — we don't reject a download for size, the
+  // PS script has its own 50 MB minimum sanity check.
+  const ROOTFS_BYTES = 350 * 1024 * 1024;
 
   const orderedJson = JSON.stringify(ordered);
-  const r = await ps(`
+  const downloadPromise = ps(`
 $ProgressPreference = 'SilentlyContinue'
 # Per-attempt unique temp filename so a stale earlier download process
 # (which still holds a write lock on the previous tar.gz) can't make us
 # fail with "正由另一进程使用". The file is removed at the end.
-$tar = Join-Path $env:TEMP ("ubuntu-jammy-wsl-" + [Guid]::NewGuid().ToString("N").Substring(0,8) + ".tar.gz")
+$tar = Join-Path $env:TEMP '${tarName}'
 $dst = '${installDrive.installDir.replace(/'/g, "''")}'
 New-Item -ItemType Directory -Force $dst | Out-Null
 $urls = '${orderedJson.replace(/'/g, "''")}' | ConvertFrom-Json
@@ -675,6 +694,42 @@ Remove-Item -Force $tar -ErrorAction SilentlyContinue
 if ($importExit -ne 0) { Write-Output ("IMPORT_FAIL " + $importExit); exit 1 }
 Write-Output "IMPORTED"
 `, { timeoutMs: 35 * 60_000 });
+
+  // Poll the temp file size while the download runs. Each tick is a
+  // silent PS that reads (Get-Item ...).Length — silent so the shell
+  // log doesn't get spammed with a 5-line script preview every 3 s.
+  // We emit a partial progress event (0–0.98) into the same
+  // `installing-wsl` phase so the timeline shows a live percentage on
+  // the step header. Capped at 0.98 so the bar stays visibly active
+  // until `wsl --import` (which can't be metered) actually finishes.
+  let downloadDone = false;
+  const poller = (async () => {
+    while (!downloadDone) {
+      await new Promise((res) => setTimeout(res, 3000));
+      if (downloadDone) break;
+      try {
+        const r = await ps(
+          `$f=Join-Path $env:TEMP '${tarName}'; if (Test-Path $f) { (Get-Item $f).Length } else { 0 }`,
+          { timeoutMs: 5_000, silent: true }
+        );
+        const bytes = parseInt((r.stdout || "0").trim(), 10) || 0;
+        if (bytes > 0) {
+          const pct = Math.min(0.98, bytes / ROOTFS_BYTES);
+          const mb = (bytes / 1024 / 1024).toFixed(1);
+          emit({
+            phase: "installing-wsl",
+            message: `Downloading Ubuntu rootfs… ${mb} MB`,
+            status: "running",
+            progress: pct,
+          });
+        }
+      } catch {/* swallow — poller failures shouldn't break install */}
+    }
+  })();
+
+  const r = await downloadPromise;
+  downloadDone = true;
+  await poller; // let the loop exit cleanly on next sleep tick
   if (!r.ok || !/IMPORTED/.test(r.stdout)) {
     return { ok: false, error: r.stderr || r.stdout || "rootfs-import failed" };
   }
@@ -952,16 +1007,35 @@ async function installRuntimeDeps(distro, emit) {
   // sudoPrefix mirrors setup.go's logic — apt-get needs root, but the
   // current user might already be root (fresh rootfs imports run as
   // root by default before /etc/wsl.conf default=cicy takes effect).
-  const script = `set -e
+  //
+  // `set -o pipefail` so `apt | tail` doesn't mask apt's exit code, plus
+  // a per-package dpkg check after install — apt-get can exit 0 while
+  // some packages silently fail (e.g. missing from configured mirror).
+  // Reporting "done" with packages missing leaves cicy-code to apt-fight
+  // with our background apt-get update and the UI lies about readiness.
+  const script = `set -eo pipefail
 SUDO=""
 if [ "$(id -u)" != "0" ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo "; fi
+PKGS="unzip jq fonts-wqy-microhei fontconfig"
 # Don't run update if we already have one from the apt-mirror config step
 # (timestamp <5 min old). Saves ~10 seconds on warm runs.
 if [ ! -f /var/cache/apt/pkgcache.bin ] || [ $(($(date +%s) - $(stat -c %Y /var/cache/apt/pkgcache.bin))) -gt 300 ]; then
   DEBIAN_FRONTEND=noninteractive $SUDO apt-get update -qq >/dev/null 2>&1 || true
 fi
-DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y --no-install-recommends \\
-  unzip jq fonts-wqy-microhei fontconfig 2>&1 | tail -3
+APT_OUT=$(DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y --no-install-recommends $PKGS 2>&1) || {
+  echo "$APT_OUT" | tail -5 >&2
+  exit 1
+}
+MISSING=""
+for p in $PKGS; do
+  dpkg -s "$p" >/dev/null 2>&1 || MISSING="$MISSING $p"
+done
+if [ -n "$MISSING" ]; then
+  echo "$APT_OUT" | tail -5 >&2
+  echo "PACKAGES_MISSING:$MISSING" >&2
+  exit 2
+fi
+echo "$APT_OUT" | tail -3
 `;
   const r = await wslBash(distro, script, { timeoutMs: 5 * 60_000 });
   if (!r.ok) {
@@ -974,9 +1048,64 @@ DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y --no-install-recommends 
   return { ok: true };
 }
 
+// Rewrite /etc/wsl.conf's [boot] command so cicy-code is launched with
+// --agents=<csv> at every distro start (and on the post-install
+// `wsl --terminate` we do below). Without this the user's agent
+// selection only sticks for the current launch — next reboot they'd lose
+// it. Idempotent: replaces the whole [boot] section.
+async function applyAgentsToBoot(distro, agents, emit) {
+  const csv = (Array.isArray(agents) ? agents : []).join(",");
+  const bootCmd = `pgrep -f cicy-code >/dev/null 2>&1 || setsid -f $HOME/.local/bin/cicy-code ${csv ? `--agents=${csv} ` : ""}</dev/null >>$HOME/.cicy-code.log 2>&1`;
+  // Use sed to replace just the [boot] block — keeps [user] etc. intact.
+  // python3 is the cleanest tool, but not always present at this stage;
+  // fall back to awk which IS guaranteed by base-files in every Ubuntu.
+  const script = `set -e
+SUDO=""
+if [ "$(id -u)" != "0" ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo "; fi
+F=/etc/wsl.conf
+$SUDO touch "$F"
+$SUDO cp "$F" "$F.bak.$(date +%s)" 2>/dev/null || true
+$SUDO awk -v cmd=${JSON.stringify(bootCmd)} '
+BEGIN { in_boot=0; printed=0 }
+/^\\[boot\\]/ { in_boot=1; print; print "systemd=false"; print "command=su - cicy -c \\047" cmd "\\047"; printed=1; next }
+/^\\[/ && in_boot { in_boot=0 }
+in_boot { next }
+{ print }
+END {
+  if (!printed) {
+    print ""
+    print "[boot]"
+    print "systemd=false"
+    print "command=su - cicy -c \\047" cmd "\\047"
+  }
+}
+' "$F" > /tmp/wsl.conf.new
+$SUDO mv /tmp/wsl.conf.new "$F"
+$SUDO chmod 644 "$F"
+echo OK
+`;
+  const r = await wslBash(distro, script, { timeoutMs: 15_000 });
+  if (!r.ok || !/OK/.test(r.stdout || "")) {
+    // Non-fatal: cicy-code can still be started ad-hoc this session, the
+    // user just won't get persistent --agents across reboots.
+    emit?.({ phase: "starting", message: `Warning: wsl.conf agent update failed (${r.stderr || "unknown"})`, status: "warning" });
+    return { ok: false };
+  }
+  return { ok: true };
+}
+
 // ── agent CLI install (claude/codex/opencode) ─────────────────────────
-// cicy-code's setup.go installs these lazily on first agent create, but
-// its npm command can leave the wrapper package on disk without its
+// Kept for reference / future "manual install" UI. NOT called from
+// windowsInstall anymore — installer used to pre-warm all three CLIs
+// before the install was reported done, which added ~3–5 minutes and
+// failed often on flaky networks. cicy-code's own setup.go now installs
+// the requested subset (from --agents) lazily on first agent create, so
+// the UI flips to "ready" the moment :8008 binds, and the user picks
+// claude / codex / opencode in the drawer before start.
+//
+// Original npm-install logic referenced below — preserved because the
+// nested-native-binary verify dance is non-obvious. cicy-code's setup.go
+// uses the same approach internally.
 // platform-native sibling when the network drops mid-install. The
 // wrapper still prints a version string but actually launching the CLI
 // errors with "native binary not installed". Pre-installing here with
@@ -1099,7 +1228,12 @@ async function cleanupStage(path) {
 }
 
 // ── main flow ─────────────────────────────────────────────────────────
-export async function windowsInstall({ onProgress = () => {} } = {}) {
+// onPickAgents: async ({ defaults, available }) → string[]
+// Called once between deps-install and start-cicy-code. UI shows a checkbox
+// picker; we await user confirmation, then pass the selected list to cicy-code
+// via --agents=<csv>. cicy-code installs only those CLIs lazily on first
+// agent create, so the installer doesn't block on npm. Default: all three.
+export async function windowsInstall({ onProgress = () => {}, onPickAgents } = {}) {
   const emit = (e) => { try { onProgress(e); } catch {} };
   setEmit(emit);
   assertRPC();
@@ -1266,11 +1400,41 @@ Write-Output "ERR"; exit 1`;
   //     binds :8008 immediately (no 30s "checking environment" stall).
   await installRuntimeDeps(distro, emit);
 
-  // 8. Reload the distro so the new /etc/wsl.conf [user] default=cicy
-  //    takes effect. Without this, subsequent `wsl -d <distro>` calls
-  //    still land as root and cicy-code refuses to start. Then start
-  //    cicy-code under the new default user so :8008 is up by the time
-  //    the UI flips to "uptodate".
+  // 8. Ask the user which AI agents to enable BEFORE starting cicy-code.
+  //    We pre-install nothing — cicy-code's setup.go installs only the
+  //    requested CLIs lazily on first agent create. This shaves 3–5 min
+  //    off install time and avoids the "60% of users get blocked because
+  //    one of three CLIs failed via flaky npm" problem.
+  //
+  //    Default: claude (single most-used CLI). User multi-selects via
+  //    the drawer; we await their choice before continuing.
+  const AVAILABLE_AGENTS = ["claude", "codex", "opencode"];
+  let pickedAgents = ["claude"];
+  if (typeof onPickAgents === "function") {
+    emit({ phase: "picking-agents", message: "Waiting for agent selection…", status: "running" });
+    try {
+      const picked = await onPickAgents({ defaults: pickedAgents, available: AVAILABLE_AGENTS });
+      if (Array.isArray(picked) && picked.length > 0) {
+        // Filter to known agents only — don't trust UI to send valid
+        // names; an unknown agent passed to --agents would break startup.
+        pickedAgents = picked.filter((a) => AVAILABLE_AGENTS.includes(a));
+        if (pickedAgents.length === 0) pickedAgents = ["claude"];
+      }
+    } catch (e) {
+      emit({ phase: "picking-agents", message: `pick error: ${e.message} — using default (claude)`, status: "warning" });
+    }
+    emit({ phase: "picking-agents", message: `Agents: ${pickedAgents.join(", ")}`, status: "done", agents: pickedAgents });
+  }
+
+  // 9. Persist the agent selection in /etc/wsl.conf [boot] so cicy-code
+  //    starts with the same flag on every reboot. Idempotent — replaces
+  //    the [boot] section in-place.
+  await applyAgentsToBoot(distro, pickedAgents, emit);
+
+  // 10. Reload the distro so the new /etc/wsl.conf [user] default=cicy
+  //     AND [boot] command take effect, then start cicy-code under the
+  //     new default user so :8008 is up by the time the UI flips to
+  //     "uptodate".
   emit({ phase: "starting", message: `Restarting ${distro} so default user takes effect…`, status: "running" });
   // Make Ubuntu the *default* distro so `wsl.exe -e bash` (no -d) — used
   // by cicy-desktop's main process to read $HOME/cicy-ai/global.json for
@@ -1281,25 +1445,12 @@ Write-Output "ERR"; exit 1`;
   await sh(`wsl --terminate ${distro}`, { timeoutMs: 15_000 });
   // First post-terminate command takes a few seconds while wsl service
   // re-initialises — that's also when the new wsl.conf is parsed.
-  const startR = await sh(
-    `wsl -d ${distro} -- bash -lc "pgrep -f cicy-code >/dev/null 2>&1 || setsid -f /usr/local/bin/cicy-code </dev/null >>~/.cicy-code.log 2>&1 ; sleep 1 ; pgrep -fa cicy-code | head -1"`,
-    { timeoutMs: 30_000 }
-  );
-  emit({ phase: "starting", message: startR.ok ? "cicy-code started" : "started (verify health)", status: "done" });
+  const agentsArg = pickedAgents.join(",");
+  const startCmd = `wsl -d ${distro} -- bash -lc "pgrep -f cicy-code >/dev/null 2>&1 || setsid -f /usr/local/bin/cicy-code --agents=${agentsArg} </dev/null >>~/.cicy-code.log 2>&1 ; sleep 1 ; pgrep -fa cicy-code | head -1"`;
+  const startR = await sh(startCmd, { timeoutMs: 30_000 });
+  emit({ phase: "starting", message: startR.ok ? `cicy-code started (--agents=${agentsArg})` : "started (verify health)", status: "done", agents: pickedAgents });
 
-  // 9. Pre-warm agent CLIs (claude/codex/opencode). Non-fatal: cicy-code's
-  //    own setup.go retries on first agent create if this step fails, so
-  //    a transient npm registry blip here shouldn't block the overall
-  //    install from being marked successful.
-  emit({ phase: "installing-agents", message: "Installing agent CLIs (claude, codex, opencode)…", status: "running" });
-  const ag = await installAgentClis(distro, network, ["claude", "codex", "opencode"], emit);
-  if (!ag.ok) {
-    emit({ phase: "installing-agents", message: `Warning: ${ag.error} — cicy-code will retry on first agent create`, status: "warning" });
-  } else {
-    emit({ phase: "installing-agents", message: "Agent CLIs ready (claude, codex, opencode)", status: "done" });
-  }
-
-  // 10. Surface WSL files in Windows shell so novice users can find
+  // 11. Surface WSL files in Windows shell so novice users can find
   //     them without typing `\\wsl$\…` into Explorer:
   //       - Desktop shortcut "CiCy" → wsl home (always created)
   //       - Quick Access pin in File Explorer (best-effort)

@@ -67,8 +67,19 @@ async function readWslToken() {
     // Use chr() to avoid quote nesting issues across WSL/shell boundaries.
     const home = String.raw`os.path.expanduser(chr(126)+chr(47)+chr(99)+chr(105)+chr(99)+chr(121)+chr(45)+chr(97)+chr(105)+chr(47)+chr(103)+chr(108)+chr(111)+chr(98)+chr(97)+chr(108)+chr(46)+chr(106)+chr(115)+chr(111)+chr(110))`;
     const key  = String.raw`chr(97)+chr(112)+chr(105)+chr(95)+chr(116)+chr(111)+chr(107)+chr(101)+chr(110)`;
-    const r = await exec(`wsl -d Ubuntu -- python3 -c "import json,os; d=json.load(open(${home})); print(d.get(${key},chr(110)))"`);
-    const t = r.stdout.trim();
+    // Cap at 4 s — a `wsl --unregister` mid-session leaves the wsl
+    // service in a state where `wsl -d Ubuntu …` hangs forever, and
+    // since api.backends.list() awaits this in Promise.all, a hang here
+    // freezes the entire App init (no checkWsl, no banner, blank UI).
+    // Token enrichment is purely a convenience — losing it just means
+    // the local team URL doesn't carry ?token=…, which the cicy-code
+    // window-manager backfills anyway.
+    const execPromise = exec(`wsl -d Ubuntu -- python3 -c "import json,os; d=json.load(open(${home})); print(d.get(${key},chr(110)))"`);
+    const timeoutPromise = new Promise((resolve) =>
+      setTimeout(() => resolve({ ok: false, stdout: "", stderr: "timeout" }), 4000)
+    );
+    const r = await Promise.race([execPromise, timeoutPromise]);
+    const t = (r.stdout || "").trim();
     return t === "n" ? "" : t;
   } catch { return ""; }
 }

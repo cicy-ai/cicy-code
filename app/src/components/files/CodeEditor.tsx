@@ -7,9 +7,13 @@ import { oneDark } from '@codemirror/theme-one-dark';
 // default background and gutter color so the editor area picks up whatever
 // bg the parent uses. Keeps syntax colors from oneDark intact.
 const cmBlendTheme = EditorView.theme({
-  '&': { backgroundColor: 'transparent', color: '#e4e4e7' },
+  // oneDark paints &/.cm-gutters with #282c34/#21252b. Those rules have the
+  // same specificity as ours and CodeMirror's StyleModule source order is not
+  // guaranteed, so plain overrides lose intermittently and the editor shows a
+  // gray panel against the #0A0A0A chrome. !important forces the blend to win.
+  '&': { backgroundColor: 'transparent !important', color: '#e4e4e7' },
   '.cm-gutters': {
-    backgroundColor: 'transparent',
+    backgroundColor: 'transparent !important',
     borderRight: '1px solid rgba(255,255,255,0.04)',
     color: 'rgba(228,228,231,0.35)',
   },

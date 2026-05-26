@@ -8,6 +8,14 @@ import { fsApi, FsDiffResponse, fsBasename } from './api';
 import { fsCachePeek, fsCacheSet, fsKey } from './fsCache';
 import { languageForPath } from './language';
 
+// Match CodeEditor: drop oneDark's #282c34/#21252b backgrounds so the diff
+// panes blend into the #0A0A0A chrome. !important is required because
+// oneDark's same-specificity rules otherwise win the cascade.
+const cmBlendTheme = EditorView.theme({
+  '&': { backgroundColor: 'transparent !important' },
+  '.cm-gutters': { backgroundColor: 'transparent !important' },
+});
+
 interface Props {
   agentId: string;
   path: string;
@@ -42,6 +50,7 @@ export default function DiffView({ agentId, path, base = 'head', onClose, active
       const lang = languageForPath(path);
       const common = [
         oneDark,
+        cmBlendTheme,
         lineNumbers(),
         EditorView.editable.of(false),
         EditorState.readOnly.of(true),
@@ -125,7 +134,7 @@ export default function DiffView({ agentId, path, base = 'head', onClose, active
           {error}
         </div>
       ) : (
-        <div ref={host} data-id="diff-view-host" className="flex-1 overflow-auto" />
+        <div ref={host} data-id="diff-view-host" className="flex-1 overflow-auto bg-[#0A0A0A]" />
       )}
     </div>
   );

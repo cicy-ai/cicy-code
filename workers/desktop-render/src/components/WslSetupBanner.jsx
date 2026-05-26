@@ -1,8 +1,18 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Button from "./Button.jsx";
 import Icon from "./Icon.jsx";
 import { useT } from "../i18n";
 import "./WslSetupBanner.css";
+
+// Friendly display metadata for each agent CLI. Mapped from the bare
+// npm name to a short human label + one-sentence description. The list
+// stays in sync with wslInstaller.js's AVAILABLE_AGENTS — adding a new
+// agent there needs an entry here too.
+const AGENT_META = {
+  claude:   { name: "Claude",   desc: "Anthropic Claude Code CLI（最常用）" },
+  codex:    { name: "Codex",    desc: "OpenAI Codex CLI" },
+  opencode: { name: "OpenCode", desc: "开源多模型 CLI（本地推理友好）" },
+};
 
 // Map well-known error tags from wslInstaller into localized messages.
 // Anything we don't recognize is rendered as-is, so devs still see the
@@ -41,29 +51,47 @@ function errorRecoveryAction(raw) {
   return null;
 }
 
-export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInstall, progress, progressLog, progressSteps, onDismiss }) {
+export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInstall, progress, progressLog, progressSteps, onDismiss, pickAgents }) {
   const t = useT();
   const [installing, setInstalling] = useState(false);
   const [installResult, setInstallResult] = useState(null);
   const [showRawLog, setShowRawLog] = useState(false);
+  // Agent picker — only consulted when installer reaches phase=picking-agents.
+  // `pickAgents` is an object the parent App.jsx fills with { defaults,
+  // available, resolve } when wslInstaller awaits onPickAgents(). Without
+  // it the picker section is invisible. Default selection mirrors the
+  // installer's: claude only (single most-used CLI).
+  const [picked, setPicked] = useState(() => new Set((pickAgents?.defaults || ["claude"])));
+
+  // Sync local picked set whenever a new pick request arrives. The
+  // parent rotates `pickAgents` (new identity → new request) when the
+  // installer hits picking-agents, even if the defaults stay the same
+  // across runs. Without this useEffect, re-running install on a fresh
+  // distro would silently keep stale checkboxes from a previous run.
+  useEffect(() => {
+    if (pickAgents?.defaults) setPicked(new Set(pickAgents.defaults));
+  }, [pickAgents]);
 
   if (!wsl) return null;
   // wsl.exe itself missing — link user to official docs, nothing to run.
   if (wsl.supported === false) {
     return (
-      <div className="wsl-banner is-error">
-        <div className="wsl-banner__head">
-          <div className="wsl-banner__icon"><Icon name="warn" size={18} /></div>
-          <div className="wsl-banner__text">
-            <div className="wsl-banner__title">{t("wsl.no_exe_title")}</div>
-            <div className="wsl-banner__subtitle">{t("wsl.no_exe_subtitle")}</div>
+      <>
+        <div className="wsl-drawer-backdrop" />
+        <div className="wsl-banner is-error">
+          <div className="wsl-banner__head">
+            <div className="wsl-banner__icon"><Icon name="warn" size={18} /></div>
+            <div className="wsl-banner__text">
+              <div className="wsl-banner__title">{t("wsl.no_exe_title")}</div>
+              <div className="wsl-banner__subtitle">{t("wsl.no_exe_subtitle")}</div>
+            </div>
+            <Button variant="ghost" loading={recheckLoading} onClick={onRecheck}>{t("wsl.recheck")}</Button>
           </div>
-          <Button variant="ghost" loading={recheckLoading} onClick={onRecheck}>{t("wsl.recheck")}</Button>
+          <Button variant="primary" onClick={() => window.cicy?.shell?.openExternal("https://aka.ms/wsl-install")}>
+            {t("wsl.docs")} ↗
+          </Button>
         </div>
-        <Button variant="primary" onClick={() => window.cicy?.shell?.openExternal("https://aka.ms/wsl-install")}>
-          {t("wsl.docs")} ↗
-        </Button>
-      </div>
+      </>
     );
   }
   // Anatomy of "this install is finished":
@@ -92,10 +120,12 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
   };
 
   // wsl is ready, but if an install (cicy-code into Ubuntu, etc.) is
-  // still running OR has steps to display, keep the banner alive so the
-  // user can watch the timeline. Once everything is idle and steps are
-  // cleared, the banner hides itself.
-  const hasActiveInstall = installing || (progressSteps && progressSteps.length > 0);
+  // still running OR has steps to display OR is awaiting an agent pick,
+  // keep the drawer alive so the user can watch the timeline / pick.
+  // Once everything is idle and steps are cleared, the drawer hides
+  // itself.
+  const awaitingPick = !!(pickAgents && typeof pickAgents.resolve === "function");
+  const hasActiveInstall = installing || awaitingPick || (progressSteps && progressSteps.length > 0);
   if (wsl.installed && wsl.hasDistro && !hasActiveInstall) return null;
 
   const cmd = "wsl --install -d Ubuntu";
@@ -139,9 +169,32 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
   // tip — the user already has WSL; we're just updating cicy-code.
   const isUpgradeMode = wsl.installed && wsl.hasDistro;
 
+  // Agent picker is the gating step right before cicy-code starts.
+  // Parent supplies pickAgents={ defaults, available, resolve } when
+  // wslInstaller.js awaits onPickAgents(). The user picks their CLIs,
+  // hits "Start", and we resolve the promise to unblock the install.
+  const pickerVisible = !!(pickAgents && typeof pickAgents.resolve === "function");
+  const togglePick = (key) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+  const confirmPick = () => {
+    // Empty selection would make cicy-code start with no agents — guard
+    // it client-side too even though wslInstaller.js falls back to
+    // claude. Users hitting "Start" with nothing checked clearly didn't
+    // mean to ship a brain-dead cicy-code, so default to claude.
+    const out = picked.size > 0 ? [...picked] : ["claude"];
+    pickAgents.resolve(out);
+  };
+
   return (
-    <div className="wsl-banner">
-      <div className="wsl-banner__head">
+    <>
+      <div className="wsl-drawer-backdrop" />
+      <div className="wsl-banner">
+        <div className="wsl-banner__head">
         <div className="wsl-banner__icon"><Icon name="warn" size={18} /></div>
         <div className="wsl-banner__text">
           <div className="wsl-banner__title">{installFinished ? "安装完成" : (isUpgradeMode ? t("wsl.title_upgrade") : title)}</div>
@@ -155,6 +208,15 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
             </div>
           )}
         </div>
+        {/* Header CTA: shown only when the user has something useful to do.
+            - installFinished: "open files" + close
+            - installing / awaitingPick: nothing (timeline shows progress)
+            - idle (initial / failed / interrupted): recheck button so the
+              user can re-detect WSL after fixing it manually
+            「重新检查」 during an active install is noise — the installer
+            already knows, and clicking it can race the in-flight check.
+            We also surface it when a reload left a stale half-finished
+            timeline: idleWithStaleTimeline reveals it again. */}
         {installFinished ? (
           <div style={{ display: "flex", gap: 8 }}>
             {wslHomePath && (
@@ -166,38 +228,114 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
               <Icon name="close" size={14} /> 关闭
             </Button>
           </div>
-        ) : (
+        ) : (!installing && !awaitingPick) ? (
           <Button variant="ghost" loading={recheckLoading} onClick={onRecheck}>{t("wsl.recheck")}</Button>
-        )}
+        ) : null}
       </div>
 
-      {/* Hide the install button once we're done — the close button in
-          the head is the only relevant action. */}
-      {!installFinished && <div className="wsl-banner__actions">
-        <Button variant="primary" loading={installing} onClick={oneClick}>
-          <Icon name="download" size={14} /> {t("wsl.install_now")}
-        </Button>
-        <span className="wsl-banner__hint">{t("wsl.uac_hint")}</span>
-      </div>}
-
-      {installResult && !installResult.ok && (
-        <div className="wsl-banner__error">
-          <div>{t("wsl.install_failed")}: {localizeStepError(installResult.error || installResult.stderr, t) || "unknown"}</div>
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            {(() => {
-              const action = errorRecoveryAction(installResult.error || installResult.stderr);
-              return action ? (
-                <Button variant="primary" onClick={action.onClick}>
-                  {action.icon && <Icon name={action.icon} size={14} />} {action.label}
-                </Button>
-              ) : null;
-            })()}
-            <Button variant={errorRecoveryAction(installResult.error || installResult.stderr) ? "ghost" : "primary"} loading={installing} onClick={oneClick}>
-              <Icon name="refresh" size={14} /> 重试安装
+      {/* Install CTA — hidden while an install is actively running or
+          the agent picker is open. Visible in three cases:
+            1. fresh state (no timeline yet)
+            2. timeline exists but ended in error (retry)
+            3. timeline exists but stalled mid-flight (reload during
+               install) — last step status is neither "done" nor "error";
+               treat as interrupted and let the user re-trigger.
+          Without case 3 a reload mid-install would leave the user with
+          no way to continue except clearing the timeline manually. */}
+      {(() => {
+        if (installFinished || installing || awaitingPick) return null;
+        const last = progressSteps && progressSteps[progressSteps.length - 1];
+        const hasError = last && last.status === "error";
+        const interrupted = last && last.status !== "done" && last.status !== "error";
+        const showInstall = !last || hasError || interrupted;
+        if (!showInstall) return null;
+        return (
+          <div className="wsl-banner__actions">
+            <Button variant="primary" loading={installing} onClick={oneClick}>
+              <Icon name="download" size={14} /> {hasError || interrupted ? "重试安装" : t("wsl.install_now")}
             </Button>
+            <span className="wsl-banner__hint">{t("wsl.uac_hint")}</span>
           </div>
+        );
+      })()}
+
+      {pickerVisible && (
+        <div className="wsl-banner__pick">
+          <div className="wsl-banner__pick-title">选择 AI 助手</div>
+          <div className="wsl-banner__pick-hint">
+            勾选要启用的 CLI，首次创建对应 agent 时自动安装。可多选，建议至少保留 Claude。
+          </div>
+          <div className="wsl-banner__pick-options">
+            {(pickAgents.available || ["claude", "codex", "opencode"]).map((k) => {
+              const meta = AGENT_META[k] || { name: k, desc: "" };
+              const checked = picked.has(k);
+              return (
+                <label
+                  key={k}
+                  className={`wsl-banner__pick-row ${checked ? "is-checked" : ""}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => togglePick(k)}
+                  />
+                  <span className="wsl-banner__pick-row-text">
+                    <span className="wsl-banner__pick-row-name">{meta.name}</span>
+                    <span className="wsl-banner__pick-row-desc">{meta.desc}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <Button
+            className="wsl-banner__pick-confirm"
+            variant="primary"
+            disabled={picked.size === 0}
+            onClick={confirmPick}
+          >
+            启动 cicy-code（{picked.size > 0 ? [...picked].join(", ") : "claude"}）
+          </Button>
         </div>
       )}
+
+      {/* Prominent top-level failure banner.
+          Surfaces the FIRST failed step + its raw stderr at the top so
+          the user doesn't have to scan the timeline to find the red ✗.
+          Sources merged from two places: the installResult error (whole-
+          install throw, including pre-step setup errors) AND the first
+          step in progressSteps that carries status=error. */}
+      {(() => {
+        const failedStep = (progressSteps || []).find((s) => s.status === "error");
+        const rawErr = installResult && !installResult.ok
+          ? (installResult.error || installResult.stderr)
+          : (failedStep && (failedStep.error || failedStep.message));
+        if (!rawErr) return null;
+        const recovery = errorRecoveryAction(rawErr);
+        return (
+          <div className="wsl-banner__failure">
+            <div className="wsl-banner__failure-head">
+              <Icon name="warn" size={14} />
+              <span>{t("wsl.install_failed")}</span>
+              {failedStep && (
+                <span className="wsl-banner__failure-step">· {phaseLabel(failedStep.phase, t)}</span>
+              )}
+            </div>
+            <div className="wsl-banner__failure-msg">
+              {localizeStepError(rawErr, t) || "unknown"}
+            </div>
+            <div className="wsl-banner__failure-actions">
+              {recovery && (
+                <Button variant="primary" onClick={recovery.onClick}>
+                  {recovery.icon && <Icon name={recovery.icon} size={14} />} {recovery.label}
+                </Button>
+              )}
+              <Button variant={recovery ? "ghost" : "primary"} loading={installing} onClick={oneClick}>
+                <Icon name="refresh" size={14} /> 重试安装
+              </Button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Live install progress + scrolling shell log. progress is the
           phase/message object emitted by wslInstaller.js; progressLog is
@@ -314,7 +452,8 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
           )}
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -336,8 +475,8 @@ function phaseLabel(phase /*, t */) {
     case "configuring-apt":      return "配置软件源";
     case "installing-cicy-code": return "部署到 Linux";
     case "installing-deps":      return "下载运行依赖";
+    case "picking-agents":       return "选择 AI 助手";
     case "starting":             return "启动 cicy-code";
-    case "installing-agents":    return "下载 AI 助手";
     case "mounting-files":       return "桌面快捷方式";
     case "done":                 return "完成";
     default:                     return phase || "处理中";
@@ -391,22 +530,20 @@ function phaseDetail(step /*, t */) {
     const vm = m.match(/v([\d.]+)/);
     return vm ? `v${vm[1]}` : null;
   }
-  if (step.phase === "installing-agents") {
-    // Per-agent messages emit `<name> ✓` or `<name>: …` — surface the
-    // current agent name in Chinese so a novice doesn't see raw npm
-    // package identifiers.
-    const am = m.match(/Installing (\S+)/);
+  if (step.phase === "picking-agents") {
+    if (Array.isArray(step.agents) && step.agents.length > 0) {
+      const friendly = step.agents.map((a) => ({ claude: "Claude", codex: "Codex", opencode: "OpenCode" }[a] || a)).join(", ");
+      return friendly;
+    }
+    if (/Waiting/i.test(m)) return "请在右侧选择";
+    return null;
+  }
+  if (step.phase === "starting") {
+    const am = m.match(/--agents=(\S+)/);
     if (am) {
-      const friendly = { claude: "Claude", codex: "Codex", opencode: "OpenCode" }[am[1]] || am[1];
-      return `正在下载 ${friendly}…`;
+      const friendly = am[1].split(",").map((a) => ({ claude: "Claude", codex: "Codex", opencode: "OpenCode" }[a] || a)).join(", ");
+      return friendly;
     }
-    const tickMatch = m.match(/^(\S+)\s*✓/);
-    if (tickMatch) {
-      const friendly = { claude: "Claude", codex: "Codex", opencode: "OpenCode" }[tickMatch[1]] || tickMatch[1];
-      return `${friendly} 已就绪`;
-    }
-    if (/ready/i.test(m)) return "Claude / Codex / OpenCode 全部就绪";
-    if (/Warning/i.test(m)) return "部分失败，首次使用时会自动重试";
     return null;
   }
   if (step.phase === "installing-deps") {
