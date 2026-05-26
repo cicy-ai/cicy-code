@@ -481,7 +481,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         document.body
       ) : null}
       <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-center gap-2 flex-shrink-0" data-id="team-panel-toolbar">
-        <div data-id="team-panel-bind-select">
+        <div data-id="team-panel-bind-select" className="flex-1 min-w-0">
         <Select
           options={available.map(a => ({
             value: a.pane_id,

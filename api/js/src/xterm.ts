@@ -2,7 +2,7 @@ import { Terminal as XtermTerminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { lib } from "libapps";
-import { applyMonoFontVar, isMacPlatform } from "./font";
+import { applyMonoFontVar, isMacPlatform, isWindowsPlatform } from "./font";
 import { openExternalLinkWithConfirm, openFileReferencePopup } from "./link_confirm";
 import { normalizeTerminalText } from "./webtty";
 import { scanLinksOnText, type LinkKind } from "./link_detect";
@@ -278,11 +278,22 @@ export class Xterm {
         };
 
         this.term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
-            var isCopyShortcut = String(event.key).toLowerCase() === "c" && !event.altKey && (isMacPlatform() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey);
+            var key = String(event.key).toLowerCase();
+            var isCopyShortcut = key === "c" && !event.altKey && (isMacPlatform() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey);
             if (isCopyShortcut) {
                 var selection = this.elem.ownerDocument.getSelection();
                 var hasDocumentSelection = !!selection && !selection.isCollapsed && String(selection).length > 0;
                 return !(hasDocumentSelection || this.term.hasSelection());
+            }
+            // Windows users expect Ctrl+V to paste (same as every other Windows app).
+            // xterm.js's default keydown handler converts Ctrl+V → \x16 and calls
+            // preventDefault, which kills the browser's native paste event on the
+            // hidden textarea. Returning false here skips xterm's processing so the
+            // textarea receives the paste event and `showPasteDialog` below runs.
+            // Mac (Cmd+V) already works because meta-V is not intercepted. Linux
+            // is left alone (Ctrl+Shift+V or middle-click remain the paste path).
+            if (isWindowsPlatform() && key === "v" && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+                return false;
             }
             return true;
         });

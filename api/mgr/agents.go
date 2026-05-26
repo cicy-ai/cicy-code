@@ -68,40 +68,6 @@ func normalizeLegacyWorkspacePath(value string) string {
 
 var managedWorkerLinkPattern = regexp.MustCompile(`^w-\d+$`)
 
-func ensureWorkspaceHomeLink(workspace string) error {
-	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		return nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	home = strings.TrimSpace(home)
-	if home == "" {
-		return nil
-	}
-	linkPath := filepath.Join(workspace, "home")
-	currentTarget, readErr := os.Readlink(linkPath)
-	if readErr == nil {
-		if currentTarget == home {
-			return nil
-		}
-		if err := os.Remove(linkPath); err != nil {
-			return err
-		}
-	} else if readErr != nil && !os.IsNotExist(readErr) {
-		info, statErr := os.Lstat(linkPath)
-		if statErr == nil && info.Mode()&os.ModeSymlink == 0 {
-			return nil
-		}
-	}
-	if err := os.Symlink(home, linkPath); err != nil {
-		return err
-	}
-	return nil
-}
-
 func listBoundAgentWorkspaces(paneID string) ([]boundAgentWorkspace, error) {
 	paneID = shortPaneID(normPaneID(strings.TrimSpace(paneID)))
 	if paneID == "" {
@@ -153,9 +119,6 @@ func syncBoundAgentWorkspaceLinks(parentPaneID string) error {
 	parentWorkspace := runtimePathToHostPath(paneWorkspace(parentPaneID))
 	if parentWorkspace == "" {
 		return nil
-	}
-	if err := ensureWorkspaceHomeLink(parentWorkspace); err != nil {
-		return err
 	}
 	workersDir := filepath.Join(parentWorkspace, "workers")
 	if err := os.MkdirAll(workersDir, 0755); err != nil {

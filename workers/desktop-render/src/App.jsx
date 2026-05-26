@@ -23,6 +23,11 @@ export default function App() {
   const [appVersion, setAppVersion] = useState(""); // cicy-desktop version, populated in electron mode
   const [installLog, setInstallLog] = useState(() => loadPersistedLog()); // accumulated lines from windowsInstall onProgress (kind:"log")
   const [installSteps, setInstallSteps] = useState(() => loadPersistedSteps()); // user-facing step timeline
+  // Agent picker handshake: wslInstaller awaits onPickAgents() and we
+  // stash the resolver here. WslSetupBanner reads pickAgents, renders
+  // the checkbox UI, and calls resolve() on click. Null when no pick
+  // is pending.
+  const [pickAgents, setPickAgents] = useState(null);
 
   // Persist install log only — sidecar state always re-fetches fresh on
   // mount so we don't show a stale "uptodate" badge if the binary moved
@@ -319,7 +324,22 @@ export default function App() {
               }
             }
           };
-          const r = await windowsInstall({ onProgress: handleEvent });
+          const r = await windowsInstall({
+            onProgress: handleEvent,
+            // wslInstaller awaits this callback right before starting
+            // cicy-code. We surface the agent picker UI via state and
+            // resolve the promise once the user clicks "Start".
+            onPickAgents: ({ defaults, available }) => new Promise((resolve) => {
+              setPickAgents({
+                defaults,
+                available,
+                resolve: (picked) => {
+                  setPickAgents(null);
+                  resolve(picked);
+                },
+              });
+            }),
+          });
           if (r?.ok) {
             setSidecar({ state: "uptodate", info: { installedVersion: r.version }, progress: null, error: null });
             pushToast(t("toast.installed", { version: r.version }), "success");
@@ -331,6 +351,11 @@ export default function App() {
         // Fall through to ipc-based install if electronRPC missing
       } catch (e) {
         setSidecar((s) => ({ ...s, state: "error", error: e.message, progress: null }));
+        // Clear any orphaned agent-pick promise — if the installer threw
+        // while the user was still on the picker step, leaving pickAgents
+        // populated would freeze the drawer in pick mode forever even
+        // after the error timeline rendered.
+        setPickAgents(null);
         // Mark the step that was running as failed so the timeline shows
         // a red ✗ next to it and surfaces a retry button. Subsequent
         // retries replay the whole windowsInstall — every step is
@@ -467,6 +492,7 @@ export default function App() {
           progress={bannerProgress}
           progressLog={installLog}
           progressSteps={installSteps}
+          pickAgents={pickAgents}
           onDismiss={() => { setInstallSteps([]); setInstallLog([]); }}
         />
 

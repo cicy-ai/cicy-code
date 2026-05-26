@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, GitCompare, FileText } from 'lucide-react';
+import { X, GitCompare, FileText, Files, FileSearch, Search } from 'lucide-react';
 import FileExplorer from './FileExplorer';
 import CodeEditor from './CodeEditor';
 import DiffView from './DiffView';
@@ -45,6 +45,11 @@ interface JumpRequest {
 function makeTabId(kind: TabKind, root: string, path: string): string {
   return `${kind}:${root}:${path}`;
 }
+
+const IS_MAC = typeof navigator !== 'undefined'
+  && /mac|darwin/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
+const MOD_KEY = IS_MAC ? '⌘' : 'Ctrl';
+const KBD_CLS = 'inline-flex h-5 min-w-[20px] items-center justify-center rounded border border-white/[0.07] bg-white/[0.03] px-1.5 text-[10px] font-mono text-zinc-400 select-none';
 
 interface PersistedTabs {
   tabs: Tab[];
@@ -600,11 +605,37 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
         />
         <div data-id="files-view-body" className="flex-1 min-h-0 relative bg-[#0A0A0A]">
           {tabs.length === 0 ? (
-            <div data-id="files-view-empty" className="flex items-center justify-center h-full text-sm text-zinc-500">
-              <div className="text-center">
-                <div>没有打开的文件</div>
-                <div className="text-xs text-zinc-600 mt-1">
-                  Cmd/Ctrl+P 快速打开 · Cmd/Ctrl+Shift+F 全文搜索
+            <div data-id="files-view-empty" className="flex items-center justify-center h-full">
+              <div className="flex w-full max-w-[280px] flex-col items-center px-6 text-center">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/[0.06] bg-white/[0.02] text-zinc-600">
+                  <Files size={28} strokeWidth={1.5} />
+                </div>
+                <div className="mt-4 text-sm font-medium text-zinc-300">没有打开的文件</div>
+                <div className="mt-1.5 text-xs leading-relaxed text-zinc-500">
+                  在左侧文件树中选择文件,或用快捷键快速定位
+                </div>
+                <div className="mt-5 w-full space-y-1.5">
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.05] bg-white/[0.015] px-3 py-2">
+                    <span className="flex items-center gap-2 text-xs text-zinc-400">
+                      <FileSearch size={14} strokeWidth={1.75} className="shrink-0 text-zinc-500" />
+                      按名称快速打开
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <kbd className={KBD_CLS}>{MOD_KEY}</kbd>
+                      <kbd className={KBD_CLS}>P</kbd>
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.05] bg-white/[0.015] px-3 py-2">
+                    <span className="flex items-center gap-2 text-xs text-zinc-400">
+                      <Search size={14} strokeWidth={1.75} className="shrink-0 text-zinc-500" />
+                      全文搜索内容
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <kbd className={KBD_CLS}>{MOD_KEY}</kbd>
+                      <kbd className={KBD_CLS}>Shift</kbd>
+                      <kbd className={KBD_CLS}>F</kbd>
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>

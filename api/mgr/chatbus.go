@@ -515,11 +515,6 @@ func (c *chatClient) readPump() {
 		}
 		// poll_request: 回复当前 poll 数据给请求方
 		if evt.Type == "poll_request" {
-			if workspace := paneWorkspace(c.agentID); strings.TrimSpace(workspace) != "" {
-				if err := ensureWorkspaceHomeLink(workspace); err != nil {
-					log.Printf("[poll_request] ensure workspace home link failed master_agent_id=%s workspace=%s err=%v", c.agentID, workspace, err)
-				}
-			}
 			data := buildPollData(c.agentID)
 			reply := ChatEvent{Type: "poll_data", Data: data}
 			if b, err := json.Marshal(reply); err == nil {

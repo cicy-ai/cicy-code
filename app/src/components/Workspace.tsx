@@ -12,7 +12,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ListChecks
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import AgentAvatar from './AgentAvatar';
@@ -294,7 +294,7 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 }
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
-type LeftPanelView = 'team' | 'skills' | 'agents' | 'providers' | 'im' | null;
+type LeftPanelView = 'team' | 'skills' | 'agents' | 'providers' | 'im' | 'todo' | null;
 type WorkspaceCliContentTab = InspectorTab | 'history' | 'files' | 'todo' | RequestViewTab;
 type CliContentMode = 'fixed';
 
@@ -354,6 +354,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }
   }, [cliContentTab]);
   const [cliContentMode, setCliContentMode] = useState<CliContentMode>('fixed');
+  // Whether the `cicy-todo` skill is installed on the local host. Gates the
+  // Todo button in the activity bar and the Todo tab in cliContentTabs. The
+  // marketplace panel dispatches `cicy:skills-changed` after install/uninstall;
+  // we re-fetch on that signal so the UI updates without a page reload.
+  const [todoSkillInstalled, setTodoSkillInstalled] = useState<boolean>(false);
   const [cliDrawerWidth, setCliDrawerWidth] = useState(() => clampCliDrawerWidth(Number(cache.get(CLI_DRAWER_WIDTH_KEY, CLI_DRAWER_DEFAULT_WIDTH))));
   const [cliDrawerResizing, setCliDrawerResizing] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
@@ -511,6 +516,33 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useEffect(() => {
     cache.set(cliContentTabKey(paneId), cliContentTab);
   }, [cliContentTab, paneId]);
+  // Watch the cicy-todo install status. Fetch once on mount + on every
+  // `cicy:skills-changed` window event (dispatched by SkillMarketplacePanel
+  // after install/uninstall/update). Auto-collapse the left Todo drawer and
+  // reset the cli-content tab if the skill gets uninstalled while open.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchInstalled = async () => {
+      try {
+        const res: any = await apiService.listMarketSkills();
+        const skills = Array.isArray(res?.data?.skills) ? res.data.skills : [];
+        const todo = skills.find((s: any) => s?.name === 'cicy-todo');
+        if (!cancelled) setTodoSkillInstalled(!!todo?.status?.installed);
+      } catch {
+        if (!cancelled) setTodoSkillInstalled(false);
+      }
+    };
+    fetchInstalled();
+    const onChange = () => { fetchInstalled(); };
+    window.addEventListener('cicy:skills-changed', onChange);
+    return () => { cancelled = true; window.removeEventListener('cicy:skills-changed', onChange); };
+  }, []);
+  useEffect(() => {
+    if (!todoSkillInstalled) {
+      if (leftPanelView === 'todo') setLeftPanelView(null);
+      if (cliContentTab === 'todo') setCliContentTab('files');
+    }
+  }, [todoSkillInstalled, leftPanelView, cliContentTab]);
   useEffect(() => { cache.set('ws_voiceBtnPos', voiceBtnPos); }, [voiceBtnPos]);
   useEffect(() => { cache.set('agent_panelPos', panelPos); }, [panelPos]);
   useEffect(() => { cache.set('agent_panelSize', panelSize); }, [panelSize]);
@@ -647,7 +679,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleCapture = async () => { if (isApiOnlyRuntime) return; try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
   const handleToggleMouse = async () => { if (isApiOnlyRuntime) return; const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
 
-  const toggleLeft = (p: 'team' | 'skills' | 'providers' | 'im') => {
+  const toggleLeft = (p: 'team' | 'skills' | 'providers' | 'im' | 'todo') => {
     setLeftPanelView(prev => prev === p ? null : p);
   };
 
@@ -1208,7 +1240,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const cliContentTabs = [
     { id: 'files', label: t('tabFiles') },
     { id: 'session', label: t('tabSession') },
-    { id: 'todo', label: t('tabTodo', 'Todo') },
+    ...(todoSkillInstalled ? [{ id: 'todo', label: t('tabTodo', 'Todo') }] : []),
     { id: 'memory', label: t('tabMemory') },
     { id: 'settings', label: t('tabSettings') },
   ];
@@ -1485,6 +1517,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
           <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} />
           <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
+          {todoSkillInstalled ? (
+            <SideBtn dataId="btn-todo" active={leftActive === 'todo'} icon={<ListChecks className="w-5 h-5" />} title={t('sidebarTodo', 'Todo')} onClick={() => toggleLeft('todo')} />
+          ) : null}
           <SideBtn dataId="btn-providers" active={leftActive === 'providers'} icon={<Boxes className="w-5 h-5" />} title={t('sidebarProviders')} onClick={() => toggleLeft('providers')} />
           <SideBtn dataId="btn-im" active={leftActive === 'im'} icon={<MessageCircle className="w-5 h-5" />} title={t('sidebarIM', 'IM')} onClick={() => toggleLeft('im')} />
           <MobileQRPopover workspaceTitle={topBarTitle} />
