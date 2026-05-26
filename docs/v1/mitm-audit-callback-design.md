@@ -55,8 +55,8 @@ current.json / reply.json / 审计已有。点燃 callback 的唯一实质工作
 
 ## 5. 前置依赖(均与"改请求"无关,符合不碰请求的约束)
 
-1. **身份解析**:MITM 必须把"这条 SOCKS5 连接"映射到正确的 agent pane ID(`mitm/identity.go`)→ 才能写对 agent 的 reply、把 callback 发给对的 pane。**待定:** 怎么带身份(每 agent 独立 SOCKS5 端口 / 凭证 / 注入 trace header)。
-2. **流量真经过 MITM**:要审计的 agent(如官方 Opus 主程)进程要真的走 `ALL_PROXY/HTTPS_PROXY=socks5://127.0.0.1:1085`(或经 mihomo 兜住)+ 信任 cicy CA。claude 的 boot.sh 现在是直连,需补。
+1. **身份解析(已定):SOCKS5 username = `$X_AGENT_SHORT_ID`**。MITM 的 `socks5_username` 规则(默认启用,`mitm/config.go`)直接取 username 作 AgentID,`StartTurn` 收到的就是对的 pane → reply 写对、callback 发对,无需改 `identity.go`。
+2. **流量真经过 MITM(已接 boot)**:非网关 agent 的启动注入 `ALL_PROXY=socks5h://${X_AGENT_SHORT_ID}@<mitm>` + `HTTPS_PROXY` + `NODE_EXTRA_CA_CERTS=<mitm-ca>`(`mitmAgentProxyBootLines`,`mitm_init.go`,接在 tmux.go 官方登录路径);MITM 关闭时为 no-op(默认关)。**仍需 live 验**:claude/codex CLI 是否遵守 `ALL_PROXY/HTTPS_PROXY`,以及 CA 信任是否覆盖其 HTTP 客户端。
 
 ---
 

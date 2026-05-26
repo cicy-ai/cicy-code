@@ -2526,6 +2526,13 @@ EOF
 			fmt.Sprintf(`rm -f "$WORKSPACE/.cicy/%s"`, settingsFile),
 			"unset ANTHROPIC_BASE_URL",
 			"unset ANTHROPIC_API_KEY",
+		)
+		// Route this non-gateway agent's HTTPS through the local MITM (when
+		// enabled) so its turns are audited and it can answer cross-agent
+		// callbacks. Keyed to this pane via SOCKS5 username = $X_AGENT_SHORT_ID
+		// (the socks5_username identity rule). No-op when MITM is off (default).
+		lines = append(lines, mitmAgentProxyBootLines()...)
+		lines = append(lines,
 			"clear",
 			launchCmd,
 		)
