@@ -187,6 +187,32 @@ def cmd_history(_):
     subprocess.run([git, "-C", str(AUDIT_DIR), "log", "--oneline", "-n", "20"], check=False)
 
 
+def cmd_readiness(_):
+    r = api("GET", "/api/audit/readiness")
+    print("响应链路就绪度:")
+    print(f"  事件响应开关 (incident_enabled):  {r.get('incident_enabled')}")
+    print(f"  责任人已配 (responsible_persons): {r.get('responsible_persons_configured')}")
+    print(f"  邮件可投递 (mail_deliverable):    {r.get('mail_deliverable')}  [mailer={r.get('mailer_kind')}, from={r.get('email_from') or '-'}]")
+    print(f"  实时拦截 (preventive):            {r.get('preventive_enabled')}")
+    print(f"  AI 研判 (ai_remediation):         {r.get('ai_remediation_enabled')}")
+    print(f"  IM 接入 (im_bound):               {r.get('im_bound')}")
+    gaps = r.get("gaps") or []
+    if gaps:
+        print("缺口 (补齐才能形成响应闭环):")
+        for g in gaps:
+            print(f"  ✗ {g}")
+    else:
+        print("  ✓ 响应链路完整")
+
+
+def cmd_notify(args):
+    body = {"event_id": args.event_id}
+    if args.note:
+        body["note"] = args.note
+    res = api("POST", "/api/audit/notify", body)
+    print(f"ok  已通知责任人  event={res.get('event_id', args.event_id)}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Audit policy admin client.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -213,6 +239,13 @@ def main():
     sp.set_defaults(func=cmd_recent)
 
     sub.add_parser("history").set_defaults(func=cmd_history)
+
+    sub.add_parser("readiness").set_defaults(func=cmd_readiness)
+
+    sp = sub.add_parser("notify", help="Escalate an event to its responsible person(s).")
+    sp.add_argument("event_id")
+    sp.add_argument("--note", default="", help="Advisor's own assessment, prepended to the email.")
+    sp.set_defaults(func=cmd_notify)
 
     args = ap.parse_args()
     args.func(args)

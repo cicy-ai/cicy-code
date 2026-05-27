@@ -18,27 +18,45 @@ import (
 type AIRemediation struct {
 	Summary          string   `json:"summary"`
 	SeverityExplain  string   `json:"severity_explain"`
-	ImmediateActions []string `json:"immediate_actions"`
+	ImmediateActions []string `json:"immediate_actions"` // 受众=责任人/owner:处置已发生的泄露(revoke/rotate/排查)
+	AgentGuidance    []string `json:"agent_guidance"`    // 受众=涉事 agent:行为修正,从源头治本
 	LongerTerm       []string `json:"longer_term"`
 }
 
-const aiSystemPrompt = `You are a senior security incident response advisor.
-You receive structured metadata about a data-protection audit finding from
-the cicy-code audit system. Your job: produce a JSON object with these
+const aiSystemPrompt = `You are a senior security incident-response advisor for an
+AI-agent platform. You receive structured metadata about a data-protection
+audit finding from the cicy-code audit system. Produce a JSON object with these
 exact fields and nothing else:
 
-  summary             A one-sentence bilingual (zh-CN + en) description.
-  severity_explain    Why this severity level is correct, in 1-2 sentences.
-  immediate_actions   2-5 specific actions the responder MUST do within
-                      the SLA window (1h for high, 15min for critical).
-                      Each item is a complete imperative sentence.
+  summary             One-sentence bilingual (zh-CN + en) description of what
+                      was caught.
+  severity_explain    Why this severity is correct, in 1-2 sentences.
+  immediate_actions   2-5 actions for the RESPONSIBLE PERSON / owner to contain
+                      the leak that already happened (damage control). For
+                      credential/secret/API-key findings this MUST include
+                      revoking the leaked credential, rotating/re-issuing it,
+                      and auditing its recent use. Example: "Revoke the leaked
+                      GitHub token immediately and issue a new one; review its
+                      recent API calls for misuse." Each item a complete
+                      imperative sentence.
+  agent_guidance      1-4 actions for the OFFENDING AGENT ITSELF to fix its own
+                      behaviour so it stops happening at the source (root cause).
+                      Be concrete to what it did. Example: if the agent passed a
+                      token in plaintext to curl → "Stop putting the token on the
+                      command line; read it from an environment variable
+                      ($GITHUB_TOKEN) or a secrets file instead." Each item a
+                      complete imperative sentence addressed to the agent.
   longer_term         1-3 longer-term hardening suggestions.
 
 Constraints:
   - Output ONLY the JSON object. No prose, no markdown fences.
-  - You will NEVER receive the original prompt payload. Reason about the
-    rule id + masked preview alone.
-  - Suggestions are advisory; the recipient applies enterprise SOP.`
+  - You will NEVER receive the original prompt payload. Reason about the rule
+    id + masked preview alone.
+  - immediate_actions = contain the consequence (stop the bleeding);
+    agent_guidance = change the behaviour (cure the cause). Keep them distinct.
+  - Every item must be a concrete, executable step — never vague advice like
+    "be careful with secrets".
+  - Suggestions are advisory; recipients apply enterprise SOP.`
 
 // aiHTTPClient is the minimal interface used by callAIRemediation. The
 // production path uses *http.Client; tests inject a stub.

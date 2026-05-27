@@ -10,10 +10,12 @@ import (
 	"time"
 )
 
-// dispatchIncident is the main entry called by pipeline.process AFTER an
-// event has been appended. It evaluates the incident-response config,
-// checks cooldown (separate from notify cooldown), resolves recipients,
-// renders an email, and hands it to the mailer.
+// dispatchIncident is called by pipeline.process AFTER an event is appended.
+// New architecture: the backend does NOT decide the response itself — it
+// forwards the finding to the w-10000 audit advisor, which triages and
+// orchestrates everything (notify the offending agent / escalate to the owner
+// via cicy-policy notify / tune policy). The owner email is sent only when the
+// advisor explicitly calls SendOwnerIncident (POST /api/audit/notify).
 //
 // Best-effort: any failure logs but does not propagate.
 func (p *Pipeline) dispatchIncident(e Event) {
@@ -25,7 +27,6 @@ func (p *Pipeline) dispatchIncident(e Event) {
 	if !severityMeetsTrigger(e, cfg.TriggerMinSeverity) {
 		return
 	}
-
 	hash := EventFindingHash(e)
 	if hash == "" {
 		return
@@ -33,45 +34,43 @@ func (p *Pipeline) dispatchIncident(e Event) {
 	if p.incidentCooldown.alreadyDispatched(hash, time.Duration(cfg.CooldownSeconds)*time.Second) {
 		return
 	}
+	if forwardFindingToAdvisor(e) {
+		p.incidentCooldown.markDispatched(hash)
+	}
+}
 
+// SendOwnerIncident renders and emails the incident to the responsible
+// person(s). Invoked when the advisor (w-10000) escalates to a human via
+// POST /api/audit/notify. `note` is the advisor's own assessment (e.g. "GitHub
+// token leaked — revoke + rotate now"), prepended to the email body.
+func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
+	pol := p.CurrentPolicy()
+	cfg := pol.IncidentResponse
 	ruleIDs := uniqueRuleIDs(e.Findings)
 	recipients := pol.ResponsiblePersons.Resolve(
-		topSeverity(e.Findings),
-		e.Identity.AgentID,
-		e.Identity.UserID,
-		ruleIDs,
+		topSeverity(e.Findings), e.Identity.AgentID, e.Identity.UserID, ruleIDs,
 	)
 	if len(recipients) == 0 {
-		return
+		return fmt.Errorf("no responsible person resolved for event %s (configure policy.incident_response.responsible_persons)", e.ID)
 	}
-
-	// Phase 6 cut 2b: best-effort AI remediation. Skipped silently when
-	// disabled or on any failure (timeout / HTTP error / parse error) —
-	// the email still ships with the placeholder section in that case so
-	// recipients are never blocked by AI flakiness.
 	var ai *AIRemediation
 	if cfg.AIRemediation.Enabled {
-		got, err := callAIRemediation(context.Background(), cfg.AIRemediation, e)
-		if err != nil {
-			log.Printf("[audit] ai_remediation skipped event=%s: %v", e.ID, err)
-		} else {
+		if got, err := callAIRemediation(context.Background(), cfg.AIRemediation, e); err == nil {
 			ai = got
-			log.Printf("[audit] ai_remediation generated event=%s immediate_actions=%d",
-				e.ID, len(ai.ImmediateActions))
+		} else {
+			log.Printf("[audit] ai_remediation skipped event=%s: %v", e.ID, err)
 		}
 	}
-
-	// Phase 6 cut 2c: sign a per-event ack URL recipients can click to
-	// record acknowledgement. Best-effort: if signing fails the email
-	// still ships, just without the ack link.
 	ackURL := ""
 	if token, signErr := SignAckToken(p.store.auditRoot, e.ID, AckTokenDefaultTTL); signErr == nil {
 		ackURL = buildPublicURL("/api/audit/ack") + "?token=" + token
 	} else {
 		log.Printf("[audit] ack-token sign failed event=%s: %v", e.ID, signErr)
 	}
-
 	subject, body := renderIncidentEmail(e, ruleIDs, cfg, ai, ackURL)
+	if n := strings.TrimSpace(note); n != "" {
+		body = "审计顾问 (w-10000) 研判:\n" + n + "\n\n" + body
+	}
 	msg := EmailMessage{
 		To:       recipients,
 		Subject:  subject,
@@ -81,12 +80,26 @@ func (p *Pipeline) dispatchIncident(e Event) {
 		Severity: topSeverity(e.Findings),
 	}
 	if err := p.mailer.Send(msg); err != nil {
-		log.Printf("[audit] incident email send failed event=%s: %v", e.ID, err)
-		return
+		return fmt.Errorf("send incident email: %w", err)
 	}
-	p.incidentCooldown.markDispatched(hash)
-	log.Printf("[audit] incident email dispatched event=%s severity=%s recipients=%v",
-		e.ID, msg.Severity, recipients)
+	log.Printf("[audit] owner incident dispatched (advisor-triggered) event=%s recipients=%v", e.ID, recipients)
+	return nil
+}
+
+// SendOwnerIncidentByID loads an event and escalates it to its responsible
+// person(s). Called by POST /api/audit/notify when the advisor escalates.
+func SendOwnerIncidentByID(eventID, note string) error {
+	if globalPipeline == nil {
+		return fmt.Errorf("audit pipeline not initialized")
+	}
+	e, err := GetEventByID(eventID)
+	if err != nil {
+		return err
+	}
+	if e == nil {
+		return fmt.Errorf("event %s not found", eventID)
+	}
+	return globalPipeline.SendOwnerIncident(*e, note)
 }
 
 // severityMeetsTrigger returns true when the event's top finding severity
