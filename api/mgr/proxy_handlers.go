@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -28,6 +29,30 @@ func mihomoController() string {
 		return strings.TrimRight(v, "/")
 	}
 	return "http://127.0.0.1:" + defaultMihomoControllerPort
+}
+
+// mihomoControllerAlive reports whether mihomo's external controller actually
+// answers — the AUTHORITATIVE liveness check, independent of the wrapper's PID
+// file (which goes stale across a restart). Polls until `within` elapses so it
+// can be used right after a start to wait for mihomo to come up.
+func mihomoControllerAlive(within time.Duration) bool {
+	deadline := time.Now().Add(within)
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, mihomoController()+"/version", nil)
+		resp, err := http.DefaultClient.Do(req)
+		cancel()
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return true
+			}
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
 }
 
 // mihomoMixedAddr returns "host:port" for the mihomo mixed proxy port, used
@@ -343,6 +368,108 @@ func setMihomoGroupSelection(group, member string) error {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// curlExitIP fetches the egress IP + area from api.myip.com, optionally through
+// proxyURL ("" = direct, --noproxy so env proxies don't leak in). 1-second
+// budget per probe (caller spec). Reports elapsed_ms so the 🌍 panel can show
+// timing. Both sides of the comparison use the SAME service so IPs are
+// apples-to-apples.
+func curlExitIP(ctx context.Context, via, proxyURL string) M {
+	// 5s budget: a real overseas node (e.g. a US socks5) needs ~1.3s round-trip
+	// to api.myip.com, so a 1s cap would always time it out. The direct side
+	// still returns in ~0.3s; elapsed_ms reports the true latency regardless.
+	args := []string{"-sS", "-m", "5", "--connect-timeout", "4"}
+	if proxyURL != "" {
+		args = append(args, "-x", proxyURL)
+	} else {
+		args = append(args, "--noproxy", "*")
+	}
+	args = append(args, "https://api.myip.com")
+	start := time.Now()
+	out, err := exec.CommandContext(ctx, "curl", args...).Output()
+	elapsed := time.Since(start).Milliseconds()
+	if err != nil {
+		return M{"via": via, "ok": false, "error": "fetch: " + strings.TrimSpace(err.Error()), "elapsed_ms": elapsed}
+	}
+	var p struct {
+		IP      string `json:"ip"`
+		Country string `json:"country"`
+		CC      string `json:"cc"`
+	}
+	if json.Unmarshal(out, &p) == nil && p.IP != "" {
+		return M{"via": via, "ok": true, "ip": p.IP, "area": p.Country, "cc": p.CC, "elapsed_ms": elapsed}
+	}
+	return M{"via": via, "ok": true, "raw": strings.TrimSpace(string(out)), "elapsed_ms": elapsed}
+}
+
+// handleProxyExitInfo — GET /api/proxy/exit-info
+//
+// Powers the 🌍 panel. Fires TWO probes to api.myip.com in parallel, 1s each:
+// one through the local mihomo (the global proxy at 127.0.0.1:9001, no auth →
+// current default_proxy_group selection) and one direct (no proxy). Returns
+// ip + area + elapsed_ms for each. If the two IPs match it collapses to ONE
+// group (proxy is effectively direct); if they differ it returns BOTH groups
+// (proxy is changing the exit IP — a real node is active).
+func handleProxyExitInfo(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	var proxy, direct M
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); proxy = curlExitIP(ctx, "proxy", "http://"+mihomoMixedAddr()) }()
+	go func() { defer wg.Done(); direct = curlExitIP(ctx, "direct", "") }()
+	wg.Wait()
+
+	pIP, _ := proxy["ip"].(string)
+	dIP, _ := direct["ip"].(string)
+	match := pIP != "" && pIP == dIP
+	groups := []M{}
+	if match {
+		both := proxy
+		both["via"] = "both"
+		groups = append(groups, both)
+	} else {
+		groups = append(groups, proxy, direct)
+	}
+	J(w, M{
+		"success": true,
+		"match":   match,
+		"groups":  groups,
+		"current": readMihomoGroupSelection("default_proxy_group"),
+	})
+}
+
+// handleProxySelect — POST /api/proxy/select  Body: {"group":"...","member":"..."}
+//
+// The global-proxy switch: changes which node a mihomo proxy-group selects, so
+// all traffic flowing through that group (i.e. the global proxy) now exits via
+// the chosen node — or DIRECT. Applied via the controller (live, no restart).
+// group defaults to default_proxy_group (what the global proxy + worker traffic
+// routes through).
+func handleProxySelect(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Group  string `json:"group"`
+		Member string `json:"member"`
+	}
+	if err := readBody(r, &req); err != nil {
+		httpErr(w, 400, "bad body: "+err.Error())
+		return
+	}
+	group := strings.TrimSpace(req.Group)
+	if group == "" {
+		group = "default_proxy_group"
+	}
+	member := strings.TrimSpace(req.Member)
+	if member == "" {
+		httpErr(w, 400, "member required")
+		return
+	}
+	if err := setMihomoGroupSelection(group, member); err != nil {
+		httpErr(w, 502, "select failed: "+err.Error())
+		return
+	}
+	J(w, M{"success": true, "group": group, "member": member, "now": readMihomoGroupSelection(group)})
 }
 
 // cicyMihomoBin resolves the wrapper binary path. CICY_MIHOMO_BIN overrides;

@@ -1265,10 +1265,15 @@ func startCicyMihomoIfNeeded() {
 	defer logFile.Close()
 	ensureMihomoBinaryInstalled(logFile, logPath)
 
-	// Step 3: start mihomo. Skip if already running. `cicy-mihomo status`
-	// always exits 0, so we parse stdout for "status: running".
-	if out, err := exec.Command(wrapper, "status").Output(); err == nil && strings.Contains(string(out), "status: running") {
-		return
+	// Step 3: guarantee mihomo is actually up. The wrapper tracks liveness via a
+	// PID file that goes STALE across a container/process restart — the old pid
+	// may be dead or reused — so `cicy-mihomo status`/`start` can wrongly report
+	// "already running" and skip launching, leaving :9001 dead. cicy-code MUST
+	// bring mihomo up, so we ignore the wrapper's PID bookkeeping and check the
+	// controller for REAL liveness; when it's not actually answering we clear the
+	// stale PID file and (re)start, verifying after each attempt.
+	if mihomoControllerAlive(2 * time.Second) {
+		return // already actually running
 	}
 	// Generate a default config if one doesn't exist yet (idempotent — fails
 	// loudly when one already exists, which is fine since we ignore the error).
@@ -1279,14 +1284,22 @@ func startCicyMihomoIfNeeded() {
 			return
 		}
 	}
-	cmd := exec.Command(wrapper, "start")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		log.Printf("[startup] cicy-mihomo start failed: %v (proxy-using workers may not connect)", err)
-		return
+	stalePidFile := filepath.Join(home, ".local", "state", "cicy-skills", "mihomo", "pid")
+	for attempt := 1; attempt <= 3; attempt++ {
+		// Clear any stale PID so the wrapper doesn't short-circuit to
+		// "already running" against a dead/reused pid and skip the launch.
+		_ = os.Remove(stalePidFile)
+		cmd := exec.Command(wrapper, "start")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		_ = cmd.Run() // exit status is unreliable (stale-pid quirk); verify via controller
+		if mihomoControllerAlive(6 * time.Second) {
+			log.Printf("[startup] cicy-mihomo started for proxy-using workers")
+			return
+		}
+		log.Printf("[startup] cicy-mihomo not up after start attempt %d/3; retrying", attempt)
 	}
-	log.Printf("[startup] cicy-mihomo started for proxy-using workers")
+	log.Printf("[startup] cicy-mihomo failed to come up after 3 attempts (proxy-using workers may not connect)")
 }
 
 func setupAIConfigs() {
@@ -1745,6 +1758,12 @@ func startAgentFromConfig(paneID string, port int, workspace, initScript, config
 			agentType:       agentType,
 			allowAllActions: allowAllActions,
 			replyInChinese:  replyInChinese,
+			// Forward use_custom_gateway from the agent config so the regenerated
+			// boot.sh matches it. Without this it defaulted to false on every
+			// session-recreate (i.e. container restart), clobbering a gateway
+			// agent's boot.sh into the non-gateway (official-login + MITM) path
+			// even though use_custom_gateway=true in the DB.
+			useCustomGateway: useCustomGateway,
 		})
 	}
 }

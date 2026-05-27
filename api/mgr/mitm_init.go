@@ -39,9 +39,19 @@ func mitmAgentProxyBootLines() []string {
 	if mitmServer == nil || mitmHTTPAddr == "" {
 		return nil
 	}
+	// Export the FULL set (upper+lower, incl. ALL_PROXY) so a non-gateway
+	// agent's MITM proxy completely overrides the global mihomo proxy that
+	// .cicy_tmux.conf sets on every shell (HTTP/HTTPS/ALL_PROXY=127.0.0.1:9001).
+	// If we only set HTTP(S)_PROXY, ALL_PROXY/lowercase would leak the agent's
+	// traffic straight to mihomo, bypassing MITM capture.
+	mitmURL := fmt.Sprintf("http://${X_AGENT_SHORT_ID}:x@%s", mitmHTTPAddr)
 	lines := []string{
-		fmt.Sprintf(`export HTTPS_PROXY="http://${X_AGENT_SHORT_ID}:x@%s"`, mitmHTTPAddr),
-		fmt.Sprintf(`export HTTP_PROXY="http://${X_AGENT_SHORT_ID}:x@%s"`, mitmHTTPAddr),
+		fmt.Sprintf(`export HTTPS_PROXY="%s"`, mitmURL),
+		fmt.Sprintf(`export HTTP_PROXY="%s"`, mitmURL),
+		fmt.Sprintf(`export ALL_PROXY="%s"`, mitmURL),
+		fmt.Sprintf(`export https_proxy="%s"`, mitmURL),
+		fmt.Sprintf(`export http_proxy="%s"`, mitmURL),
+		fmt.Sprintf(`export all_proxy="%s"`, mitmURL),
 	}
 	if mitmCACertPath != "" {
 		lines = append(lines, fmt.Sprintf(`export NODE_EXTRA_CA_CERTS="%s"`, mitmCACertPath))

@@ -162,6 +162,8 @@ Options:
 	http.HandleFunc("/api/proxy/lifecycle", authM(handleProxyLifecycle))
 	http.HandleFunc("/api/proxy/bind-mode", authM(handleProxyBindMode))
 	http.HandleFunc("/api/proxy/export", authM(handleProxyExport))
+	http.HandleFunc("/api/proxy/exit-info", authM(handleProxyExitInfo))
+	http.HandleFunc("/api/proxy/select", authM(handleProxySelect))
 	http.HandleFunc("/api/proxy-ssh/list", authM(handleProxySshList))
 	http.HandleFunc("/api/proxy-ssh/show", authM(handleProxySshShow))
 	http.HandleFunc("/api/proxy-ssh/lifecycle", authM(handleProxySshLifecycle))
