@@ -6,8 +6,8 @@ package audit
 type ResponseReadiness struct {
 	IncidentEnabled      bool     `json:"incident_enabled"`
 	ResponsiblePersons   bool     `json:"responsible_persons_configured"`
-	MailerKind           string   `json:"mailer_kind"`      // "resend" | "file"
-	MailDeliverable      bool     `json:"mail_deliverable"` // true only for resend (file = spool to disk, nobody reads it)
+	MailerKind           string   `json:"mailer_kind"`      // "resend" | "gmail" | "file"
+	MailDeliverable      bool     `json:"mail_deliverable"` // true for resend/gmail (file = spool to disk, nobody reads it)
 	EmailFrom            string   `json:"email_from"`
 	AIRemediationEnabled bool     `json:"ai_remediation_enabled"`
 	PreventiveEnabled    bool     `json:"preventive_enabled"`
@@ -41,7 +41,7 @@ func GetResponseReadiness() ResponseReadiness {
 	r.EmailFrom = cfg.EmailFrom
 	r.AIRemediationEnabled = cfg.AIRemediation.Enabled
 	r.PreventiveEnabled = pol.Preventive.Enabled
-	r.MailDeliverable = r.MailerKind == "resend"
+	r.MailDeliverable = r.MailerKind == "resend" || r.MailerKind == "gmail"
 
 	if !r.IncidentEnabled {
 		r.Gaps = append(r.Gaps, "事件响应总开关未开 (incident_response.enabled) — 命中也不会触发任何响应")
@@ -50,7 +50,7 @@ func GetResponseReadiness() ResponseReadiness {
 		r.Gaps = append(r.Gaps, "未配置责任人 (responsible_persons) — 严重事件无人接收")
 	}
 	if !r.MailDeliverable {
-		r.Gaps = append(r.Gaps, "邮件仅落盘、未真正投递 (需 Resend 凭证 + incident_response.email_from) — 责任人收不到")
+		r.Gaps = append(r.Gaps, "邮件仅落盘、未真正投递 (需 Resend 凭证+email_from,或 Gmail OAuth GMAIL_* in global.json) — 责任人收不到")
 	}
 	if !r.PreventiveEnabled {
 		r.Gaps = append(r.Gaps, "实时拦截未开 (preventive.enabled) — 只审计、不阻断正在发生的泄露")

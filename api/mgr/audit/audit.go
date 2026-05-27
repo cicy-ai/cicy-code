@@ -66,12 +66,21 @@ func Init() error {
 		mailerDetail := filepath.Join(auditRoot, "email-out")
 		creds, credsSrc := loadResendCredentials()
 		from := resolveEmailFrom(policy, creds)
-		if creds != nil && from != "" {
+		gcreds := loadGmailCredentials()
+		switch {
+		case creds != nil && from != "":
+			// Resend wins when fully configured (verified domain → best deliverability).
 			p.SetMailer(NewResendMailer(creds.APIKey, from, creds.ReplyTo))
 			mailerName = "ResendMailer"
 			mailerDetail = "from=" + from + " src=" + credsSrc
 			responseMailerKind = "resend"
-		} else if creds != nil && from == "" {
+		case gcreds != nil:
+			// Gmail OAuth: no verified domain needed — sends as the authenticated account.
+			p.SetMailer(NewGmailMailer(gcreds))
+			mailerName = "GmailMailer"
+			mailerDetail = "oauth (GMAIL_* in global.json)"
+			responseMailerKind = "gmail"
+		case creds != nil && from == "":
 			log.Printf("[audit] resend credentials present but no From address (set policy.incident_response.email_from or CICY_RESEND_FROM) — using FileMailer")
 		}
 
