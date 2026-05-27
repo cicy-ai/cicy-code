@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, Fragment } from 'react';
 import { X, RefreshCw, Play, Square, RotateCw, Loader2, ChevronDown, ChevronRight, Server, Copy, Eye, EyeOff, Download } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
@@ -34,6 +34,7 @@ export function FrpServerManagerDialog({
   const [error, setError] = useState('');
   const [actionPending, setActionPending] = useState<LifecycleAction | null>(null);
   const [actionOutput, setActionOutput] = useState('');
+  const [actionFailed, setActionFailed] = useState(false);
   const [showConnections, setShowConnections] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [showInstall, setShowInstall] = useState(true);
@@ -118,6 +119,7 @@ export function FrpServerManagerDialog({
     refresh();
     loadInstallInfo();
     setActionOutput('');
+    setActionFailed(false);
     setShowConnections(false);
     setShowLogs(false);
     setConnections(null);
@@ -134,17 +136,24 @@ export function FrpServerManagerDialog({
   const runAction = useCallback(async (action: LifecycleAction) => {
     setActionPending(action);
     setActionOutput('');
+    setActionFailed(false);
     try {
       const resp = await apiService.frpServerLifecycle(action);
-      const data = resp?.data as { output?: string; error?: string };
-      setActionOutput(data?.output || data?.error || '');
+      const data = resp?.data as { success?: boolean; output?: string; error?: string };
+      const failed = data?.success === false;
+      setActionFailed(failed);
+      setActionOutput(data?.output || data?.error || (failed ? 'action failed' : 'done'));
+      if (failed) { setShowLogs(true); await loadLogs(); }
     } catch (e: any) {
+      setActionFailed(true);
       setActionOutput(String(e?.response?.data?.detail || e?.message || 'failed'));
+      setShowLogs(true);
+      await loadLogs();
     } finally {
       setActionPending(null);
       await refresh();
     }
-  }, [refresh]);
+  }, [refresh, loadLogs]);
 
   const toggleConnections = useCallback(async () => {
     const next = !showConnections;
@@ -236,10 +245,10 @@ export function FrpServerManagerDialog({
                   const v = info[k];
                   if (!v) return null;
                   return (
-                    <>
-                      <dt key={`${k}-k`} className="text-zinc-500 whitespace-nowrap">{k}</dt>
-                      <dd key={`${k}-v`} className="font-mono text-zinc-300 truncate" title={v}>{v}</dd>
-                    </>
+                    <Fragment key={k}>
+                      <dt className="text-zinc-500 whitespace-nowrap">{k}</dt>
+                      <dd className="font-mono text-zinc-300 truncate" title={v}>{v}</dd>
+                    </Fragment>
                   );
                 })}
               </dl>
@@ -284,7 +293,15 @@ export function FrpServerManagerDialog({
 
           {/* Action output */}
           {actionOutput && (
-            <div data-id="frp-server-action-output" className="rounded-lg border border-white/[0.06] bg-black/30 px-3 py-2 text-[11px] font-mono text-zinc-300 whitespace-pre-wrap">
+            <div
+              data-id="frp-server-action-output"
+              className={cn(
+                'rounded-lg border px-3 py-2 text-[11px] font-mono whitespace-pre-wrap',
+                actionFailed
+                  ? 'border-red-500/30 bg-red-500/10 text-red-200'
+                  : 'border-emerald-500/25 bg-emerald-500/[0.07] text-emerald-100'
+              )}
+            >
               {actionOutput}
             </div>
           )}
