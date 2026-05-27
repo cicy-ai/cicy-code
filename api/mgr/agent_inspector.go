@@ -3369,6 +3369,56 @@ func agentInspectorInjectPrompt(body map[string]interface{}, provider string, ag
 	return body
 }
 
+// agentInspectorNormalizeAnthropicSystem coerces an Anthropic request's `system`
+// field into the TextBlock-array form ([{"type":"text","text":...}]). The real
+// Anthropic API accepts a bare string, but stricter Anthropic-compatible gateways
+// (new-api behind gateway.cicy-ai.com, deepseek's /anthropic endpoint, …) reject
+// anything that isn't an array of internally-tagged TextBlocks with:
+//
+//	system: invalid type: string ..., expected internally tagged enum TextBlock
+//
+// Our prompt injection can also leave `system` as a string or a string/object
+// mix. Normalizing here keeps strict gateways and real Anthropic both happy.
+func agentInspectorNormalizeAnthropicSystem(body map[string]interface{}) map[string]interface{} {
+	if body == nil {
+		return body
+	}
+	raw, ok := body["system"]
+	if !ok || raw == nil {
+		return body
+	}
+	textBlock := func(text string) map[string]interface{} {
+		return map[string]interface{}{"type": "text", "text": text}
+	}
+	switch cur := raw.(type) {
+	case string:
+		if strings.TrimSpace(cur) == "" {
+			delete(body, "system")
+			return body
+		}
+		body["system"] = []interface{}{textBlock(cur)}
+	case []interface{}:
+		out := make([]interface{}, 0, len(cur))
+		for _, el := range cur {
+			switch e := el.(type) {
+			case string:
+				if strings.TrimSpace(e) != "" {
+					out = append(out, textBlock(e))
+				}
+			case map[string]interface{}:
+				if _, hasType := e["type"]; !hasType {
+					e["type"] = "text"
+				}
+				out = append(out, e)
+			default:
+				out = append(out, el)
+			}
+		}
+		body["system"] = out
+	}
+	return body
+}
+
 func agentInspectorRewriteRequestBody(provider string, agentID string, requestBody []byte, upstreamHost string) []byte {
 	thirdPartyUpstream := shouldDisableThinkingForHost(upstreamHost)
 	trimmed := strings.TrimSpace(string(requestBody))
@@ -3377,6 +3427,9 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 		payload = agentInspectorInjectPrompt(payload, provider, agentID)
 		payload = injectCicyToolDefs(payload, provider)
 		payload = agentInspectorOverrideModel(payload, agentID)
+		if provider == "anthropic" {
+			payload = agentInspectorNormalizeAnthropicSystem(payload)
+		}
 		if thirdPartyUpstream {
 			payload = agentInspectorDisableThinking(payload, provider)
 			payload = agentInspectorNormalizeToolChoice(payload, provider)
@@ -3394,6 +3447,9 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 	payload = agentInspectorInjectPrompt(payload, provider, agentID)
 	payload = injectCicyToolDefs(payload, provider)
 	payload = agentInspectorOverrideModel(payload, agentID)
+	if provider == "anthropic" {
+		payload = agentInspectorNormalizeAnthropicSystem(payload)
+	}
 	if thirdPartyUpstream {
 		payload = agentInspectorDisableThinking(payload, provider)
 		payload = agentInspectorNormalizeToolChoice(payload, provider)
