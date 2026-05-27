@@ -147,6 +147,12 @@ def build_minimal_runtime_global_json():
         data["api_token"] = token
     if "ai" in source and isinstance(source["ai"], dict):
         data["ai"] = source["ai"]
+    # Carry the host's providers block (incl. real API keys) into the dev
+    # container's global.json via docker cp, so the container runs on the
+    # operator's own keys. The Go backend no longer hardcodes any default key;
+    # with providers already present, ensureDefaultProviders() is a no-op.
+    if isinstance(source.get("providers"), dict):
+        data["providers"] = source["providers"]
     return data
 
 
