@@ -37,8 +37,9 @@ type GmailMailer struct {
 // NewGmailMailer builds a network-backed GmailMailer from OAuth credentials.
 func NewGmailMailer(creds *gmailCredentials) *GmailMailer {
 	return &GmailMailer{api: &gmailHTTPClient{
-		creds:  creds,
-		client: &http.Client{Timeout: 15 * time.Second},
+		creds:     creds,
+		client:    &http.Client{Timeout: 15 * time.Second},
+		fromEmail: creds.From, // pre-seed: skip the profile API call when known
 	}}
 }
 
@@ -87,6 +88,7 @@ type gmailCredentials struct {
 	ClientID     string
 	ClientSecret string
 	RefreshToken string
+	From         string // authorized account email (db/google.json); empty in legacy path
 }
 
 type gmailHTTPClient struct {
@@ -200,20 +202,101 @@ func (g *gmailHTTPClient) sendRaw(rawB64URL string) (string, error) {
 	return sr.ID, nil
 }
 
-// loadGmailCredentials reads the GMAIL_* OAuth fields from
-// ~/cicy-ai/global.json. Returns nil unless all three are present, so a
-// half-configured file silently falls back to the next mailer.
+// loadGmailCredentials resolves the Gmail OAuth credentials, preferring the
+// canonical db/ location the in-product "Connect Google" flow writes, and
+// falling back to the legacy global.json GMAIL_* keys. db/ is preferred
+// because it persists across redeploys (global.json gets reseeded) and is the
+// source of truth oauth_google.go uses. Returns nil when nothing resolves.
 func loadGmailCredentials() *gmailCredentials {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
 	}
-	data, err := os.ReadFile(filepath.Join(home, "cicy-ai", "global.json"))
+	root := filepath.Join(home, "cicy-ai")
+	if c := loadGmailFromDB(filepath.Join(root, "db")); c != nil {
+		return c
+	}
+	return loadGmailFromGlobalJSON(filepath.Join(root, "global.json"))
+}
+
+// oauthClientCreds matches one client entry; google_oauth_client.json is
+// Google's downloaded format, wrapping creds under "web" or "installed".
+type oauthClientCreds struct {
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+}
+
+type googleOAuthClientFile struct {
+	Web          *oauthClientCreds `json:"web"`
+	Installed    *oauthClientCreds `json:"installed"`
+	ClientID     string            `json:"client_id"`     // un-wrapped form
+	ClientSecret string            `json:"client_secret"` // un-wrapped form
+}
+
+// loadGmailFromDB reads db/google.json (refresh_token, authorized_email,
+// client_id) + db/google_oauth_client.json (client_secret). Env
+// CICY_GOOGLE_OAUTH_CLIENT_ID/SECRET override the on-disk client.
+func loadGmailFromDB(dbDir string) *gmailCredentials {
+	data, err := os.ReadFile(filepath.Join(dbDir, "google.json"))
+	if err != nil {
+		return nil
+	}
+	var gs struct {
+		RefreshToken    string `json:"refresh_token"`
+		AuthorizedEmail string `json:"authorized_email"`
+		ClientID        string `json:"client_id"`
+	}
+	if json.Unmarshal(data, &gs) != nil || strings.TrimSpace(gs.RefreshToken) == "" {
+		return nil
+	}
+	clientID, clientSecret := strings.TrimSpace(gs.ClientID), ""
+	if oc, err := os.ReadFile(filepath.Join(dbDir, "google_oauth_client.json")); err == nil {
+		var f googleOAuthClientFile
+		if json.Unmarshal(oc, &f) == nil {
+			cc := f.Web
+			if cc == nil {
+				cc = f.Installed
+			}
+			if cc != nil {
+				if clientID == "" {
+					clientID = strings.TrimSpace(cc.ClientID)
+				}
+				clientSecret = strings.TrimSpace(cc.ClientSecret)
+			} else {
+				if clientID == "" {
+					clientID = strings.TrimSpace(f.ClientID)
+				}
+				clientSecret = strings.TrimSpace(f.ClientSecret)
+			}
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("CICY_GOOGLE_OAUTH_CLIENT_ID")); v != "" {
+		clientID = v
+	}
+	if v := strings.TrimSpace(os.Getenv("CICY_GOOGLE_OAUTH_CLIENT_SECRET")); v != "" {
+		clientSecret = v
+	}
+	if clientID == "" || clientSecret == "" {
+		return nil
+	}
+	return &gmailCredentials{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		RefreshToken: strings.TrimSpace(gs.RefreshToken),
+		From:         strings.TrimSpace(gs.AuthorizedEmail),
+	}
+}
+
+// loadGmailFromGlobalJSON reads the legacy GMAIL_* keys (old get-token.js
+// workflow). The refresh token pairs with the web client that minted it, so
+// prefer GMAIL_WEB_* over the desktop client fields.
+func loadGmailFromGlobalJSON(path string) *gmailCredentials {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
 	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if json.Unmarshal(data, &raw) != nil {
 		return nil
 	}
 	get := func(k string) string {
@@ -222,9 +305,6 @@ func loadGmailCredentials() *gmailCredentials {
 		}
 		return ""
 	}
-	// The refresh token must be paired with the OAuth client that minted it.
-	// Prefer the web client (GMAIL_WEB_*) since that's the flow these tokens
-	// come from; fall back to the installed/desktop client fields.
 	clientID, clientSecret := get("GMAIL_WEB_CLIENT_ID"), get("GMAIL_WEB_CLIENT_SECRET")
 	if clientID == "" || clientSecret == "" {
 		clientID, clientSecret = get("GMAIL_CLIENT_ID"), get("GMAIL_CLIENT_SECRET")

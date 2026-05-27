@@ -309,7 +309,7 @@ func (p *Pipeline) reloadMailer() {
 	if gcreds := loadGmailCredentials(); gcreds != nil {
 		p.SetMailer(NewGmailMailer(gcreds))
 		responseMailerKind = "gmail"
-		log.Printf("[audit] mailer -> GmailMailer (oauth, GMAIL_* in global.json)")
+		log.Printf("[audit] mailer -> GmailMailer (oauth, db/google.json or legacy GMAIL_*)")
 		return
 	}
 }
