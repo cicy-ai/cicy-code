@@ -1111,6 +1111,7 @@ body.cp-prompt-open { padding-bottom: 74px !important; }
 .cp-modal-btn {
   height: 30px; padding: 0 12px; border-radius: 8px;
   border: none; font-size: 13px; cursor: pointer; font-family: inherit;
+  white-space: nowrap;
   transition: background .12s ease, color .12s ease;
 }
 .cp-modal-btn-cancel { background: transparent; color: #a1a1aa; }
@@ -2085,7 +2086,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             cpModalConfirm({
                 title: ttydT("closeCliWindow"),
                 body: ttydT("windowConfirmDelete", { idx: idx }) || ("Close window " + idx + "?"),
-                confirmLabel: ttydT("closeCliWindow"),
+                confirmLabel: ttydT("close"),
                 danger: true,
             }).then(function(ok) {
                 if (ok) apiFetch("DELETE", "", { session: paneId, index: idx }).then(loadWindows);
@@ -2146,9 +2147,9 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     restartBtn.addEventListener("click", function(event: MouseEvent): void {
         event.stopPropagation();
         cpModalConfirm({
-            title: ttydT("tipRestartAgent"),
-            body: ttydT("restartingAgent") || ("Restart " + paneId + "?"),
-            confirmLabel: ttydT("tipRestartAgent"),
+            title: ttydT("restartPaneTitle"),
+            body: ttydT("confirmRestartAgent"),
+            confirmLabel: ttydT("actionRestart"),
         }).then(function(ok) {
             if (!ok) return;
             if (!webtty.isConnectionOpen()) {
@@ -2173,11 +2174,10 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     // scrollback loss.
     launchBtn.addEventListener("click", function(event: MouseEvent): void {
         event.stopPropagation();
-        var label = ttydT("tipLaunchAgent", { agent: paneAgentType });
         cpModalConfirm({
-            title: label,
+            title: ttydT("launchAgentTitle", { agent: paneAgentType }),
             body: ttydT("confirmLaunchAgent", { agent: paneAgentType }),
-            confirmLabel: label,
+            confirmLabel: ttydT("actionLaunch"),
         }).then(function(ok) {
             if (!ok) return;
             webtty.requestAPI("POST", "/api/tmux/panes/" + paneId + "/relaunch-agent", undefined, apiHeaders).catch(function(): void {
@@ -2193,11 +2193,10 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     // overwrites the existing prefix link, no separate "update" path needed.
     updateBtn.addEventListener("click", function(event: MouseEvent): void {
         event.stopPropagation();
-        var label = ttydT("tipUpdateAgent", { agent: paneAgentType });
         cpModalConfirm({
-            title: label,
+            title: ttydT("updateAgentTitle", { agent: paneAgentType }),
             body: ttydT("confirmUpdateAgent", { agent: paneAgentType }),
-            confirmLabel: label,
+            confirmLabel: ttydT("actionUpdate"),
             danger: true,
         }).then(function(ok) {
             if (!ok) return;
