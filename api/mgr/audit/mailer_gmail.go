@@ -202,21 +202,18 @@ func (g *gmailHTTPClient) sendRaw(rawB64URL string) (string, error) {
 	return sr.ID, nil
 }
 
-// loadGmailCredentials resolves the Gmail OAuth credentials, preferring the
-// canonical db/ location the in-product "Connect Google" flow writes, and
-// falling back to the legacy global.json GMAIL_* keys. db/ is preferred
-// because it persists across redeploys (global.json gets reseeded) and is the
-// source of truth oauth_google.go uses. Returns nil when nothing resolves.
+// loadGmailCredentials resolves the Gmail OAuth credentials from the canonical
+// db/ location the in-product "Connect Google" flow writes (db/google.json +
+// db/google_oauth_client.json, per oauth_google.go). The legacy global.json
+// GMAIL_* keys are intentionally NOT consulted — db/ is the single source of
+// truth and persists across redeploys. Returns nil when db/ has no usable
+// credentials.
 func loadGmailCredentials() *gmailCredentials {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
 	}
-	root := filepath.Join(home, "cicy-ai")
-	if c := loadGmailFromDB(filepath.Join(root, "db")); c != nil {
-		return c
-	}
-	return loadGmailFromGlobalJSON(filepath.Join(root, "global.json"))
+	return loadGmailFromDB(filepath.Join(home, "cicy-ai", "db"))
 }
 
 // oauthClientCreds matches one client entry; google_oauth_client.json is
@@ -285,39 +282,6 @@ func loadGmailFromDB(dbDir string) *gmailCredentials {
 		RefreshToken: strings.TrimSpace(gs.RefreshToken),
 		From:         strings.TrimSpace(gs.AuthorizedEmail),
 	}
-}
-
-// loadGmailFromGlobalJSON reads the legacy GMAIL_* keys (old get-token.js
-// workflow). The refresh token pairs with the web client that minted it, so
-// prefer GMAIL_WEB_* over the desktop client fields.
-func loadGmailFromGlobalJSON(path string) *gmailCredentials {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var raw map[string]any
-	if json.Unmarshal(data, &raw) != nil {
-		return nil
-	}
-	get := func(k string) string {
-		if v, ok := raw[k].(string); ok {
-			return strings.TrimSpace(v)
-		}
-		return ""
-	}
-	clientID, clientSecret := get("GMAIL_WEB_CLIENT_ID"), get("GMAIL_WEB_CLIENT_SECRET")
-	if clientID == "" || clientSecret == "" {
-		clientID, clientSecret = get("GMAIL_CLIENT_ID"), get("GMAIL_CLIENT_SECRET")
-	}
-	c := &gmailCredentials{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		RefreshToken: get("GMAIL_REFRESH_TOKEN"),
-	}
-	if c.ClientID == "" || c.ClientSecret == "" || c.RefreshToken == "" {
-		return nil
-	}
-	return c
 }
 
 func gmailClip(s string, n int) string {
