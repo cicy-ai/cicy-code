@@ -115,7 +115,9 @@ func TestLoadGmailCredentials_PrefersDB(t *testing.T) {
 	}
 }
 
-func TestLoadGmailCredentials_LegacyFallback(t *testing.T) {
+// global.json GMAIL_* is NOT a fallback — only db/ counts. A box with legacy
+// keys but no db/google.json must resolve to nil (operator must re-OAuth).
+func TestLoadGmailCredentials_GlobalJSONIgnored(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("CICY_GOOGLE_OAUTH_CLIENT_ID", "")
@@ -126,12 +128,8 @@ func TestLoadGmailCredentials_LegacyFallback(t *testing.T) {
 	os.WriteFile(filepath.Join(home, "cicy-ai", "global.json"),
 		[]byte(`{"GMAIL_WEB_CLIENT_ID":"cid_g","GMAIL_WEB_CLIENT_SECRET":"sec_g","GMAIL_REFRESH_TOKEN":"rt_g"}`), 0o600)
 
-	c := loadGmailCredentials()
-	if c == nil || c.RefreshToken != "rt_g" || c.ClientID != "cid_g" || c.ClientSecret != "sec_g" {
-		t.Fatalf("legacy fallback failed: %+v", c)
-	}
-	if c.From != "" {
-		t.Errorf("legacy From should be empty, got %q", c.From)
+	if c := loadGmailCredentials(); c != nil {
+		t.Errorf("global.json must not be a fallback, got %+v", c)
 	}
 }
 

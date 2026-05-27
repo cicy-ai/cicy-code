@@ -78,7 +78,7 @@ func Init() error {
 			// Gmail OAuth: no verified domain needed — sends as the authenticated account.
 			p.SetMailer(NewGmailMailer(gcreds))
 			mailerName = "GmailMailer"
-			mailerDetail = "oauth (db/google.json or legacy GMAIL_*)"
+			mailerDetail = "oauth (db/google.json)"
 			responseMailerKind = "gmail"
 		case creds != nil && from == "":
 			log.Printf("[audit] resend credentials present but no From address (set policy.incident_response.email_from or CICY_RESEND_FROM) — using FileMailer")
