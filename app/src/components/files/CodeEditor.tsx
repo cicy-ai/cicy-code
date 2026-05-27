@@ -752,12 +752,6 @@ export default function CodeEditor({
           <span>大文件 ({formatBytes(buf.size)}) — 只读模式,已关闭语法高亮</span>
         </div>
       )}
-      {!heavy && root !== 'workspace' && (
-        <div data-id="code-editor-readonly-banner" className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800/60 border-b border-zinc-700/50 text-[11px] text-zinc-300">
-          <Eye className="w-3 h-3 shrink-0" />
-          <span>只读 — 此文件不在 workspace 内({root}),无法保存修改</span>
-        </div>
-      )}
       {conflict && (
         <div className="flex items-center gap-3 px-3 py-2 bg-amber-900/30 border-b border-amber-700/40 text-xs text-amber-200">
           <AlertTriangle className="w-4 h-4 shrink-0" />

@@ -240,6 +240,9 @@ const api = {
   getProxyBindMode: () => http.get('/api/proxy/bind-mode'),
   setProxyBindMode: (allowLan: boolean) => http.patch('/api/proxy/bind-mode', { allow_lan: allowLan }),
   getProxyExport: (params?: { ip?: 'local' | 'lan' | 'public' | string; user?: string }) => http.get('/api/proxy/export', { params }),
+  // 🌍 global-proxy panel: exit-IP comparison (direct vs via mihomo) + the switch
+  getProxyExitInfo: () => http.get('/api/proxy/exit-info'),
+  selectProxy: (member: string, group?: string) => http.post('/api/proxy/select', { member, group }),
   listProxySsh: () => http.get('/api/proxy-ssh/list'),
   showProxySsh: (name: string) => http.get('/api/proxy-ssh/show', { params: { name } }),
   proxySshLifecycle: (name: string, action: 'start' | 'stop' | 'restart') => http.post('/api/proxy-ssh/lifecycle', { name, action }),

@@ -29,6 +29,7 @@ import { WebFrame } from './WebFrame';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
 import TeamPanel from './layout/TeamPanel';
+import GlobalProxyIndicator from './layout/GlobalProxyIndicator';
 import SkillMarketplacePanel from './layout/SkillMarketplacePanel';
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
 import AgentProviderRequestView, { type RequestViewTab } from './layout/AgentProviderRequestView';
@@ -1091,6 +1092,26 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }
   }, [activeCliPaneId, chatWsClientId, pageClientId, paneId]);
 
+  // Delegate proxy-node management to the current agent: send it a prompt to use
+  // the cicy-mihomo skill to add/edit nodes in mihomo.yaml and reload. The agent
+  // owns the skill, so node management stays inside the agent loop.
+  const handleManageNodesViaSkill = useCallback(async () => {
+    const workspaceState = devStore.getSnapshot().Workspace?.state || {};
+    const tmuxTarget = String(workspaceState.activeCliPaneId || activeCliPaneId || '').trim();
+    if (!tmuxTarget) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '没有可发送的当前 agent' }));
+      return;
+    }
+    const promptText = '用 cicy-mihomo skill 帮我管理代理节点：编辑 ~/cicy-ai/db/mihomo.yaml 的 proxies 添加/修改节点并加入 default_proxy_group，然后 `cicy-mihomo restart` 生效（控制器 reload 受 SAFE_PATHS 限制，要用 restart）。要加的节点信息先跟我确认。';
+    try {
+      window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: promptText } }));
+      await sendCommandToTmux(promptText, tmuxTarget, true);
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '已发送给当前 agent' }));
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '发送失败' }));
+    }
+  }, [activeCliPaneId]);
+
   const topBarPaneId = activeCliPaneId || paneId;
   const topBarDetail = paneDetails[topBarPaneId] || (topBarPaneId === paneId ? agentDetail : null);
   const topBarTitle = topBarDetail?.title
@@ -1451,6 +1472,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       />
       <SystemResourceMonitor paneId={paneId} />
       <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} onSendClientId={handleSendPageClientIdToAgent} />
+      <GlobalProxyIndicator placement="up" onManageNodes={handleManageNodesViaSkill} />
       <button data-id="workspace-token-open" onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title={t('apiTokenButton')}><Key className="w-3.5 h-3.5" /></button>
       <button data-id="workspace-api-open" onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title={t('apiServerButton')}><Server className="w-3.5 h-3.5" /></button>
       {contextUsage != null && (
