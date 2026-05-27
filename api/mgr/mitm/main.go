@@ -40,7 +40,7 @@ type Server struct {
 // breaker — receives PreventiveCheck calls; pass nil to disable inline
 //
 //	blocking (all turns pass through to upstream).
-func NewServer(cfg *Config, hook AuditHook, breaker BreakerHook) (*Server, error) {
+func NewServer(cfg *Config, hook AuditHook, breaker BreakerHook, egress ...EgressFunc) (*Server, error) {
 	if cfg == nil {
 		return nil, errors.New("mitm: nil config")
 	}
@@ -51,7 +51,11 @@ func NewServer(cfg *Config, hook AuditHook, breaker BreakerHook) (*Server, error
 	if err != nil {
 		return nil, err
 	}
-	dialer, err := NewDialer(cfg.Upstream)
+	var eg EgressFunc
+	if len(egress) > 0 {
+		eg = egress[0]
+	}
+	dialer, err := NewDialer(cfg.Upstream, eg)
 	if err != nil {
 		return nil, err
 	}

@@ -18,14 +18,23 @@ import (
 // Dialer wraps the upstream-dial logic; one instance per running MITM
 // node. Construct with NewDialer.
 type Dialer struct {
-	cfg   UpstreamConfig
-	cas   *x509.CertPool // for chain mode trust_ca; nil otherwise (system pool)
-	chain bool
+	cfg    UpstreamConfig
+	cas    *x509.CertPool // for chain mode trust_ca; nil otherwise (system pool)
+	chain  bool
+	egress EgressFunc // optional dynamic global-egress override; see EgressFunc
 }
 
-// NewDialer reads the upstream config and pre-loads any trust_ca file.
-func NewDialer(cfg UpstreamConfig) (*Dialer, error) {
-	d := &Dialer{cfg: cfg}
+// EgressFunc, when set on a Dialer, is consulted on every DialTCP. If it
+// returns enabled=true, the dial is routed through the given SOCKS5 proxy (the
+// local mihomo mixed port) instead of the static upstream mode — this is how
+// the "global egress via mihomo" switch in global.json takes effect live,
+// without restarting MITM. auth is "" for the local mihomo (no auth needed).
+type EgressFunc func() (enabled bool, socks5Addr string, auth string)
+
+// NewDialer reads the upstream config and pre-loads any trust_ca file. egress
+// may be nil (no dynamic global-egress override).
+func NewDialer(cfg UpstreamConfig, egress EgressFunc) (*Dialer, error) {
+	d := &Dialer{cfg: cfg, egress: egress}
 	if cfg.Mode == "chain" {
 		if cfg.Chain == nil {
 			return nil, errors.New("mitm: chain mode requires upstream.chain")
@@ -48,6 +57,18 @@ func NewDialer(cfg UpstreamConfig) (*Dialer, error) {
 // hostPort. The caller is responsible for any TLS layering on top.
 // Honors the configured upstream mode.
 func (d *Dialer) DialTCP(ctx context.Context, hostPort string) (net.Conn, error) {
+	// Dynamic global egress (global.json mihomo_global_egress): when enabled,
+	// route every dial through the local mihomo mixed port so the exit IP is
+	// whatever node mihomo currently has selected. Overrides the static mode;
+	// when off, fall through to the configured mode (direct by default).
+	if d.egress != nil {
+		if enabled, addr, auth := d.egress(); enabled {
+			if addr == "" {
+				return nil, fmt.Errorf("mitm: global egress enabled but no mihomo socks5 addr")
+			}
+			return d.dialViaSOCKS5(ctx, addr, auth, hostPort)
+		}
+	}
 	switch d.cfg.Mode {
 	case "direct", "":
 		return d.dialDirect(ctx, hostPort)
