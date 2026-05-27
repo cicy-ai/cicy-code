@@ -300,11 +300,18 @@ func (p *Pipeline) WatchEmailCredentials() error {
 func (p *Pipeline) reloadMailer() {
 	creds, src := loadResendCredentials()
 	from := resolveEmailFrom(p.CurrentPolicy(), creds)
-	if creds == nil || from == "" {
+	if creds != nil && from != "" {
+		p.SetMailer(NewResendMailer(creds.APIKey, from, creds.ReplyTo))
+		responseMailerKind = "resend"
+		log.Printf("[audit] mailer -> ResendMailer from=%s src=%s", from, src)
 		return
 	}
-	p.SetMailer(NewResendMailer(creds.APIKey, from, creds.ReplyTo))
-	log.Printf("[audit] mailer -> ResendMailer from=%s src=%s", from, src)
+	if gcreds := loadGmailCredentials(); gcreds != nil {
+		p.SetMailer(NewGmailMailer(gcreds))
+		responseMailerKind = "gmail"
+		log.Printf("[audit] mailer -> GmailMailer (oauth, GMAIL_* in global.json)")
+		return
+	}
 }
 
 // Submit ingests an envelope. Wall and monotonic timestamps are captured
