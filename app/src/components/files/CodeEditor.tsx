@@ -69,6 +69,27 @@ function classifyForRender(stat: FsStatResponse): EditorMode {
   return 'binary';
 }
 
+// Stable basicSetup objects (module-level so their identity never changes).
+// @uiw/react-codemirror reconfigures the editor when basicSetup changes by
+// reference, so passing a fresh inline object on every render would force a
+// reconfigure each time — catastrophic on large docs.
+const BASIC_SETUP_EDIT = {
+  lineNumbers: true,
+  highlightActiveLine: true,
+  foldGutter: true,
+  bracketMatching: true,
+  closeBrackets: true,
+  autocompletion: false,
+} as const;
+const BASIC_SETUP_READONLY = {
+  lineNumbers: true,
+  highlightActiveLine: false,
+  foldGutter: false,
+  bracketMatching: false,
+  closeBrackets: false,
+  autocompletion: false,
+} as const;
+
 interface CodeEditorProps {
   agentId: string;
   path: string;
@@ -522,7 +543,11 @@ export default function CodeEditor({
     () =>
       EditorView.updateListener.of((u) => {
         if (!onCursorChange) return;
-        if (!u.selectionSet && !u.docChanged && !u.viewportChanged) return;
+        // React only to selection/content changes — NOT viewportChanged.
+        // Firing on scroll bubbled a cursor event up to the parent on every
+        // scroll frame, re-rendering the editor (and, for read-only large
+        // files, reconfiguring CodeMirror) — which froze the UI on big files.
+        if (!u.selectionSet && !u.docChanged) return;
         const sel = u.state.selection.main;
         try {
           const startLine = u.state.doc.lineAt(sel.from);
@@ -551,6 +576,17 @@ export default function CodeEditor({
   const extensions = useMemo(
     () => [...language, saveKeymap, cursorExt, cmBlendTheme],
     [language, saveKeymap, cursorExt],
+  );
+  // Read-only variant (large `text_large` files + non-workspace roots): no
+  // language parser, not editable. MUST be memoized — building this array
+  // inline in the JSX made @uiw/react-codemirror reconfigure the whole editor
+  // on every render, so any re-render of a large read-only file (scroll,
+  // cursor, parent update) re-ran a full reconfigure and dragged the UI to a
+  // halt. Dropping `language` here is also what makes the "syntax highlight
+  // off" banner actually true.
+  const readonlyExtensions = useMemo(
+    () => [saveKeymap, cursorExt, EditorView.editable.of(false), cmBlendTheme],
+    [saveKeymap, cursorExt],
   );
 
   if (!path) {
@@ -776,17 +812,10 @@ export default function CodeEditor({
             value={buf.text}
             height="100%"
             theme={oneDark}
-            extensions={readOnly ? [saveKeymap, cursorExt, EditorView.editable.of(false), cmBlendTheme] : extensions}
+            extensions={readOnly ? readonlyExtensions : extensions}
             onChange={(v) => setBuf((prev) => ({ ...prev, text: v }))}
             editable={!readOnly}
-            basicSetup={{
-              lineNumbers: true,
-              highlightActiveLine: !readOnly,
-              foldGutter: !readOnly,
-              bracketMatching: !readOnly,
-              closeBrackets: !readOnly,
-              autocompletion: false,
-            }}
+            basicSetup={readOnly ? BASIC_SETUP_READONLY : BASIC_SETUP_EDIT}
             style={{ height: '100%' }}
           />
         )}

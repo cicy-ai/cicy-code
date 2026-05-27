@@ -10,6 +10,19 @@ interface Props {
   className?: string;
 }
 
+// react-markdown renders the WHOLE document to a (non-virtualized) DOM tree and
+// runs rehype-highlight on every code block — synchronously, on the main thread.
+// Past a few hundred KB that locks the UI hard. Markdown files also open in
+// preview by default, so a large .md froze the page on open. Above this soft cap
+// we show an opt-in instead of auto-rendering.
+const MARKDOWN_PREVIEW_SOFT_MAX = 256 * 1024; // chars (~bytes for ASCII)
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
 /**
  * Polished markdown renderer for the CodeEditor preview pane.
  *
@@ -23,6 +36,34 @@ interface Props {
  * - Heading anchors via auto-generated id (slugified text), with a hover-only "#"
  */
 export default function MarkdownPreview({ source, className = '' }: Props) {
+  const [forceRender, setForceRender] = useState(false);
+
+  // Guard: don't auto-render an oversized document (would freeze the UI).
+  if (source.length > MARKDOWN_PREVIEW_SOFT_MAX && !forceRender) {
+    return (
+      <div
+        data-id="code-editor-markdown-preview-too-large"
+        className={`h-full overflow-auto flex items-center justify-center px-8 py-6 ${className}`}
+      >
+        <div className="max-w-md text-center">
+          <div className="text-sm text-zinc-200 mb-1">
+            大文件 Markdown（{formatBytes(source.length)}）
+          </div>
+          <div className="text-xs text-zinc-500 mb-4 leading-5">
+            渲染整篇预览会卡住界面。建议切换到「源码」查看；如确需预览,可强制渲染（可能短暂卡顿）。
+          </div>
+          <button
+            type="button"
+            onClick={() => setForceRender(true)}
+            className="px-3 py-1.5 rounded-md border border-amber-700/50 bg-amber-900/20 text-amber-200 text-xs hover:bg-amber-900/40 transition-colors"
+          >
+            仍要渲染预览
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       data-id="code-editor-markdown-preview"
