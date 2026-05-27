@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"database/sql"
 	_ "embed"
 	"errors"
@@ -786,10 +788,15 @@ func checkEnv() {
 	}
 
 	selectedAgents := mustSelectedAgents()
-	// If any active worker is configured to route traffic via the local
-	// mihomo proxy, make sure it's running BEFORE we restore tmux/ttyd —
-	// otherwise the workers come up trying to dial a dead :9001.
-	startCicyMihomoIfNeeded()
+	// Bring up the local mihomo proxy in the BACKGROUND. It used to run
+	// synchronously here (so proxy-routed workers wouldn't dial a dead :9001
+	// on boot), but on a fresh runtime `cicy-mihomo install` downloads a
+	// binary over a possibly-throttled link — that blocked checkEnv(), which
+	// runs before http.ListenAndServe, so the API didn't bind for minutes and
+	// the desktop "open" landed on a login page. A fresh runtime has no
+	// proxy-routed workers yet, and existing ones tolerate a brief proxy gap,
+	// so backgrounding it is safe and gets :8008 serving immediately.
+	go startCicyMihomoIfNeeded()
 	ensureBuiltinAgents(selectedAgents)
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles(selectedAgents)
@@ -1572,6 +1579,19 @@ func ensureMihomoBinaryInstalled(logFile *os.File, logPath string) {
 	if _, err := exec.LookPath("mihomo"); err == nil {
 		return
 	}
+	// Fast path: this build embeds the mihomo binary (gzip). Decompress it
+	// straight to the target — no network, instant, works offline / behind a
+	// firewall. The committed placeholder is ~20 bytes, so anything over 1 MB
+	// is a real embedded binary. Falls through to the download on failure or
+	// when only the placeholder is present (dev builds).
+	if len(embeddedMihomoGz) > 1<<20 {
+		if err := installEmbeddedMihomo(mihomoTarget); err == nil {
+			log.Printf("[startup] installed embedded mihomo → %s", mihomoTarget)
+			return
+		} else {
+			log.Printf("[startup] embedded mihomo install failed (%v), falling back to cicy-mihomo install", err)
+		}
+	}
 	wrapper := filepath.Join(home, ".local", "bin", "cicy-mihomo")
 	if _, err := os.Stat(wrapper); err != nil {
 		// wrapper symlink missing — install all didn't run successfully; bail
@@ -1586,6 +1606,34 @@ func ensureMihomoBinaryInstalled(logFile *os.File, logPath string) {
 	if err := cmd.Run(); err != nil {
 		log.Printf("[startup] cicy-mihomo install failed: %v (log: %s — proxy will be unavailable until installed manually)", err, logPath)
 	}
+}
+
+// installEmbeddedMihomo decompresses the build-time-embedded mihomo binary
+// (embeddedMihomoGz) straight to target, atomically and executable. No network.
+func installEmbeddedMihomo(target string) error {
+	gz, err := gzip.NewReader(bytes.NewReader(embeddedMihomoGz))
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	tmp := target + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(f, gz); err != nil { //nolint:gosec // trusted embedded asset
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, target)
 }
 
 

@@ -319,9 +319,50 @@ build_docker_base() {
   echo "✅ Base Docker image built: cicy-code-base:${tag}"
 }
 
+# ── Embed the platform-matching mihomo proxy binary (gzip) into api/mgr ──
+# So cicy-code's first startup decompresses mihomo from itself instead of
+# downloading ~29MB from gh-proxy.com (which blocked the API bind). The
+# committed mihomo_bin.gz is a ~20-byte placeholder; we overwrite it per
+# platform here, and restore the placeholder after build_all. Set
+# SKIP_MIHOMO_EMBED=1 to keep the placeholder (falls back to runtime download).
+MIHOMO_EMBED_VERSION="${CICY_MIHOMO_VERSION:-v1.10.3}"
+prepare_mihomo_embed() {
+  local os=$1 arch=$2
+  local embed="$API_DIR/mgr/mihomo_bin.gz"
+  if [ "${SKIP_MIHOMO_EMBED:-0}" = "1" ]; then
+    [ -s "$embed" ] || (printf '' | gzip > "$embed")
+    return 0
+  fi
+  local cache="$ROOT_DIR/dist/.mihomo-cache"
+  mkdir -p "$cache"
+  local raw="$cache/mihomo-${os}-${arch}-${MIHOMO_EMBED_VERSION}"
+  if [ ! -s "$raw" ]; then
+    local rel="https://github.com/cicy-ai/cicy-mihomo/releases/download/${MIHOMO_EMBED_VERSION}/mihomo-${os}-${arch}"
+    # Try direct GitHub first (fast on CI / GitHub's network), then the
+    # gh-proxy mirror (for CN dev boxes where direct is slow/blocked).
+    local fetched=0
+    for url in "$rel" "${GITHUB_PROXY:-https://gh-proxy.com/}${rel}"; do
+      echo "⬇️  fetching mihomo to embed: $url"
+      if curl -fsSL --max-time 600 -o "$raw.tmp" "$url"; then fetched=1; mv "$raw.tmp" "$raw"; break; fi
+    done
+    if [ "$fetched" != "1" ]; then
+      echo "⚠️  mihomo fetch failed — embedding placeholder (runtime will download)"
+      printf '' | gzip > "$embed"
+      return 0
+    fi
+  fi
+  gzip -c "$raw" > "$embed"
+  echo "📦 embedded mihomo-${os}-${arch} → mihomo_bin.gz ($(du -h "$embed" | cut -f1))"
+}
+
+restore_mihomo_placeholder() {
+  printf '' | gzip > "$API_DIR/mgr/mihomo_bin.gz"
+}
+
 # ── Build single binary ──
 build_one() {
   local os=${1:-linux} arch=${2:-amd64} out=${3:-$API_DIR/cicy-code}
+  prepare_mihomo_embed "$os" "$arch"
   local ldflags="-s -w"
   if [ -n "${CICY_APP_CDN_PREFIX:-}" ]; then
     ldflags="$ldflags -X main.BuiltAppCDNPrefix=${CICY_APP_CDN_PREFIX}"
@@ -340,6 +381,7 @@ build_all() {
   build_one linux   arm64  $DIST_DIR/cicy-code-linux-arm64
   build_one darwin  amd64  $DIST_DIR/cicy-code-darwin-amd64
   build_one darwin  arm64  $DIST_DIR/cicy-code-darwin-arm64
+  restore_mihomo_placeholder  # don't leave a 13MB gz in the tracked tree
   echo ""; ls -lh $DIST_DIR/
 }
 
