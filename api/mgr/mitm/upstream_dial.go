@@ -8,12 +8,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// errMihomoUnreachable marks a global-egress dial that failed because the local
+// mihomo SOCKS5 proxy could not be reached (TCP connect failed) — as opposed to
+// mihomo being up and rejecting the CONNECT. DialTCP fails open to direct only
+// for this case.
+var errMihomoUnreachable = errors.New("mitm: mihomo unreachable")
 
 // Dialer wraps the upstream-dial logic; one instance per running MITM
 // node. Construct with NewDialer.
@@ -66,7 +73,22 @@ func (d *Dialer) DialTCP(ctx context.Context, hostPort string) (net.Conn, error)
 			if addr == "" {
 				return nil, fmt.Errorf("mitm: global egress enabled but no mihomo socks5 addr")
 			}
-			return d.dialViaSOCKS5(ctx, addr, auth, hostPort)
+			conn, err := d.dialViaSOCKS5(ctx, addr, auth, hostPort)
+			if err == nil {
+				return conn, nil
+			}
+			// Fail-open: only when the local mihomo itself is UNREACHABLE (not
+			// started yet, crashed, mid-restart) do we fall back to a direct
+			// dial — otherwise global-egress-on (which now defaults on) would
+			// break every request whenever mihomo is briefly down. The exit IP
+			// degrades to the box's own IP instead of mihomo's selected node.
+			// A reachable mihomo that REJECTS the route (e.g. an explicit
+			// fail-closed reject node) is honored, not bypassed.
+			if errors.Is(err, errMihomoUnreachable) {
+				log.Printf("[mitm] global egress on but mihomo unreachable (%v); failing open to direct for %s", err, hostPort)
+				return d.dialDirect(ctx, hostPort)
+			}
+			return nil, err
 		}
 	}
 	switch d.cfg.Mode {
@@ -128,7 +150,9 @@ func (d *Dialer) dialViaSOCKS5(ctx context.Context, proxyAddr, auth, targetHostP
 	dl := net.Dialer{Timeout: time.Duration(d.cfg.DialTimeout)}
 	conn, err := dl.DialContext(ctx, "tcp", proxyAddr)
 	if err != nil {
-		return nil, fmt.Errorf("mitm: dial socks5 proxy %s: %w", proxyAddr, err)
+		// Wrap as errMihomoUnreachable so DialTCP can distinguish "proxy down"
+		// (fail open to direct) from "proxy up but rejected the CONNECT" (honor).
+		return nil, fmt.Errorf("%w: dial socks5 proxy %s: %v", errMihomoUnreachable, proxyAddr, err)
 	}
 	if err := socks5ClientHandshake(conn, auth, targetHostPort); err != nil {
 		_ = conn.Close()

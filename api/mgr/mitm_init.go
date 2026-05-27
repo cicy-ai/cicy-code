@@ -49,16 +49,27 @@ func mitmAgentProxyBootLines() []string {
 	return lines
 }
 
-// mitmEgressResolver implements mitm.EgressFunc. When global.json has
-// mihomo_global_egress=true, MITM routes its upstream dials (intercept +
-// passthrough) through the local mihomo mixed port, so the exit IP follows
-// whatever node mihomo currently has selected. Read live on every dial — toggle
-// the flag in global.json and it takes effect on the next request, no restart.
-// The local mihomo needs no proxy auth, so auth is empty.
+// mitmEgressResolver implements mitm.EgressFunc. MITM routes its upstream dials
+// (intercept + passthrough) through the local mihomo mixed port, so the exit IP
+// follows whatever node mihomo currently has selected. Read live on every dial —
+// toggle the flag in global.json and it takes effect on the next request, no
+// restart. The local mihomo needs no proxy auth, so auth is empty.
+//
+// Default ON: route through mihomo unless explicitly turned off
+// (mihomo_global_egress:false). Safe by construction —
+//   - DialTCP fails open to a direct dial when mihomo is unreachable, so a
+//     first-boot box (mihomo not up yet) or a mihomo restart never breaks agent
+//     traffic; and
+//   - the default mihomo node is 'direct' (cicy-mihomo template), so even once
+//     mihomo is up, traffic exits the box's own IP until a real egress node is
+//     configured.
+//
+// So on first install everything works, and dropping in a real node changes the
+// exit IP with no flag flip. Set mihomo_global_egress:false to force MITM to
+// bypass mihomo entirely (static upstream.mode, direct by default).
 func mitmEgressResolver() (enabled bool, socks5Addr string, auth string) {
 	cfg := readGlobalJSONConfig()
-	on, _ := cfg["mihomo_global_egress"].(bool)
-	if !on {
+	if v, ok := cfg["mihomo_global_egress"].(bool); ok && !v {
 		return false, "", ""
 	}
 	return true, mihomoMixedAddr(), ""

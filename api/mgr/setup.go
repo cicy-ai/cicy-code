@@ -1235,8 +1235,22 @@ func startCicyMihomoIfNeeded() {
 	}
 	wrapper := filepath.Join(home, ".local", "bin", "cicy-mihomo")
 	if _, err := os.Stat(wrapper); err != nil {
-		log.Printf("[startup] cicy-mihomo wrapper missing — proxy-using workers may fail. Install with: cicy-code skill install cicy-mihomo")
-		return
+		// The cicy-mihomo skill is normally installed by ensurePreinstalledSkills(),
+		// which runs asynchronously (go ...) and races this synchronous startup
+		// path — on a fresh boot the wrapper isn't on disk yet, so mihomo would
+		// never come up (and with global egress defaulting on, MITM would fail
+		// open to direct forever). Install it synchronously here (idempotent) and
+		// re-check before giving up.
+		log.Printf("[startup] cicy-mihomo wrapper missing — installing skill synchronously")
+		if _, ierr := skillcmd.PublicInstall("cicy-mihomo", io.Discard); ierr != nil {
+			log.Printf("[startup] cicy-mihomo install failed: %v — proxy-using workers may fail. Install with: cicy-code skill install cicy-mihomo", ierr)
+			return
+		}
+		_, _ = skillcmd.EnsureBinSymlinks()
+		if _, err := os.Stat(wrapper); err != nil {
+			log.Printf("[startup] cicy-mihomo wrapper still missing after install — skipping mihomo start")
+			return
+		}
 	}
 
 	// Step 1: download mihomo binary if missing. ensureMihomoBinaryInstalled
