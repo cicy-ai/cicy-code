@@ -12,7 +12,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ListChecks
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import AgentAvatar from './AgentAvatar';
@@ -1517,14 +1517,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
           <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} />
           <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
-          {todoSkillInstalled ? (
-            <SideBtn dataId="btn-todo" active={leftActive === 'todo'} icon={<ListChecks className="w-5 h-5" />} title={t('sidebarTodo', 'Todo')} onClick={() => toggleLeft('todo')} />
-          ) : null}
           <SideBtn dataId="btn-providers" active={leftActive === 'providers'} icon={<Boxes className="w-5 h-5" />} title={t('sidebarProviders')} onClick={() => toggleLeft('providers')} />
           <SideBtn dataId="btn-im" active={leftActive === 'im'} icon={<MessageCircle className="w-5 h-5" />} title={t('sidebarIM', 'IM')} onClick={() => toggleLeft('im')} />
-          <MobileQRPopover workspaceTitle={topBarTitle} />
         </div>
         <div data-id="activity-bar-bottom" className="flex w-full flex-col items-center gap-3">
+          <MobileQRPopover workspaceTitle={topBarTitle} />
           <button
             ref={membershipTriggerRef}
             type="button"
