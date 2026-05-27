@@ -388,7 +388,11 @@ func (q *startupPromptQueue) run() {
 }
 
 func (q *startupPromptQueue) process(task startupPromptTask) bool {
-	for i := 0; i < 180; i++ {
+	// Up to ~180s. opencode/codex cold-start (4 agents booting at once on a
+	// fresh container + first gateway handshake) can take well over 90s to
+	// reach the ready prompt; the old 180-iteration (~90s) cap timed out and
+	// dropped the audit-policy self-intro.
+	for i := 0; i < 360; i++ {
 		if !q.isCurrent(task) {
 			log.Printf("[startup-prompt] %s superseded before ready", task.paneID)
 			return false
@@ -3065,10 +3069,14 @@ func isCodexInputReady(out string) bool {
 }
 
 func isOpenCodeInputReady(out string) bool {
-	return strings.Contains(out, "OpenCode ") &&
-		(strings.Contains(out, "ctrl+p commands") ||
-			strings.Contains(out, "Ask anything") ||
-			strings.Contains(out, "Build  "))
+	// The ready/splash screen shows the input box ("Ask anything...") and the
+	// status bar ("ctrl+p commands"), but NOT necessarily the literal
+	// "OpenCode " string — on opencode 1.15.x the bottom bar reads just the
+	// version ("1.15.11") until the first turn. Requiring "OpenCode " here made
+	// the startup prompt (reply-in-chinese / audit self-intro) time out forever.
+	// Either ready marker is enough to know the input box accepts text.
+	return strings.Contains(out, "ctrl+p commands") ||
+		strings.Contains(out, "Ask anything")
 }
 
 func isOpenClawInputReady(out string) bool {
