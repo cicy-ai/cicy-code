@@ -623,7 +623,21 @@ async function installWsl(network, installDrive, emit) {
 // user can find their WSL files from File Explorer without spelunking
 // through AppData.
 async function importUbuntuFromRootfs(network, installDrive, emit) {
-  const baseMirrors = network === "cn"
+  // Prefer our PRE-BAKED rootfs (~155MB image with node + mihomo + cicy-code +
+  // base tools + apt mirror + wsl.conf baked in) so first boot has zero runtime
+  // downloads and the API binds in seconds. Sources, fastest-first:
+  //   - COS (Tencent ap-shanghai): CN-native, no GFW/gh-proxy → seconds in CN.
+  //     gh-proxy can't reliably stream 155MB, so COS is the cn primary.
+  //   - GitHub release (cicy-ai/cicy-rootfs): international / global primary.
+  //   - gh-proxy mirror of the GitHub release: extra cn fallback.
+  // The stock Ubuntu cloud-image mirrors remain as a last-resort fallback (a
+  // bare distro the post-import steps then provision the slow way).
+  const COS = "https://cicy-1372193042.cos.ap-shanghai.myqcloud.com/rootfs/v2.1.3/cicy-rootfs-amd64.tar.gz";
+  const GH  = "https://github.com/cicy-ai/cicy-rootfs/releases/download/v2.1.3/cicy-rootfs-amd64.tar.gz";
+  const prebakedUrls = network === "cn"
+    ? [COS, "https://gh-proxy.com/" + GH, GH]
+    : [GH, COS, "https://gh-proxy.com/" + GH];
+  const ubuntuBase = network === "cn"
     ? [
         "https://mirror.nju.edu.cn/ubuntu-cloud-images/wsl/jammy/current",
         "https://mirrors.ustc.edu.cn/ubuntu-cloud-images/wsl/jammy/current",
@@ -636,14 +650,21 @@ async function importUbuntuFromRootfs(network, installDrive, emit) {
         "https://mirrors.ustc.edu.cn/ubuntu-cloud-images/wsl/jammy/current",
       ];
   const fileName = "ubuntu-jammy-wsl-amd64-ubuntu22.04lts.rootfs.tar.gz";
-  const urls = baseMirrors.map(b => `${b}/${fileName}`);
+  const urls = [...prebakedUrls, ...ubuntuBase.map(b => `${b}/${fileName}`)];
 
-  emit({ phase: "installing-wsl", message: "Picking fastest Ubuntu rootfs mirror…" });
+  emit({ phase: "installing-wsl", message: "Picking fastest runtime image mirror…" });
 
-  // curl HEAD probes → fastest mirror first.
-  const ordered = await curlOrder(urls);
+  // curl HEAD probes → fastest mirror first. Keep the pre-baked image ahead of
+  // the bare-Ubuntu fallback even if a probe is flaky (don't let a slow HEAD on
+  // our release demote it below the 350MB bare image).
+  const probed = await curlOrder(urls);
+  const ordered = [
+    ...prebakedUrls.filter((u) => probed.includes(u)),
+    ...probed.filter((u) => !prebakedUrls.includes(u)),
+    ...prebakedUrls.filter((u) => !probed.includes(u)),
+  ];
 
-  emit({ phase: "installing-wsl", message: "Downloading Ubuntu rootfs (~350MB, may take a few minutes)…", status: "running", progress: 0 });
+  emit({ phase: "installing-wsl", message: "Downloading runtime image…", status: "running", progress: 0 });
 
   // Resolve %TEMP% once so the JS poller can stat the exact file curl writes.
   const tarName = "ubuntu-jammy-wsl-amd64.tar.gz";
@@ -651,9 +672,10 @@ async function importUbuntuFromRootfs(network, installDrive, emit) {
   const tmpDir = (tmpProbe.stdout || "").trim() || "C:\\Windows\\Temp";
   const tarPath = `${tmpDir}\\${tarName}`;
 
-  // Ubuntu 22.04 rootfs is ~350 MB across mirrors. Progress-bar denominator
-  // only — we don't reject on size here, just sanity-check >50 MB after.
-  const ROOTFS_BYTES = 350 * 1024 * 1024;
+  // Progress-bar denominator only (we don't reject on size, just sanity-check
+  // >50 MB after). Our pre-baked image is ~155 MB; the bare-Ubuntu fallback is
+  // ~350 MB but the bar just caps at 0.98 if it runs longer.
+  const ROOTFS_BYTES = 155 * 1024 * 1024;
 
   await makeDir(installDrive.installDir);
   await delFile(tarPath); // drop any stale/locked leftover before fetching
@@ -702,7 +724,7 @@ async function importUbuntuFromRootfs(network, installDrive, emit) {
           const mb = (bytes / 1024 / 1024).toFixed(1);
           emit({
             phase: "installing-wsl",
-            message: `Downloading Ubuntu rootfs… ${mb} MB`,
+            message: `Downloading runtime image… ${mb} MB`,
             status: "running",
             progress: pct,
           });
@@ -1449,17 +1471,32 @@ export async function windowsInstall({ onProgress = () => {}, onPickAgents } = {
   const wsl = wslRes.value;
   const distro = wsl.usableDistro;
 
-  // 6. Apt mirror — depends on WSL being ready (not on cicy-code download).
-  const apt = await ensureAptSourcesReachable(distro, network, emit);
-  if (!apt.ok) emit({ phase: "configuring-apt", message: `Warning: apt mirror config failed (${apt.error}), continuing` });
+  // Detect our pre-baked rootfs via the marker baked into the image. When
+  // present, node + mihomo + cicy-code + base tools + apt mirror are ALL
+  // already inside the image, so the apt-config / binary-copy / deps-install
+  // steps below are redundant — skip straight to agent selection + start.
+  const marker = (await wslBash(distro, "cat /etc/cicy-rootfs-version 2>/dev/null || echo NO", { timeoutMs: 20_000 })).stdout.trim();
+  const isPrebaked = marker && marker !== "NO";
 
-  // 7. Copy + verify — depends on BOTH download and WSL being ready.
-  const r = await installCicyCodeIntoWsl(distro, actualBinaryPath, version, emit);
-  if (!r.ok) throw new Error("install: " + r.error);
+  let installedVersion = version;
+  if (isPrebaked) {
+    emit({ phase: "configuring-apt", message: "运行环境已预置", status: "done" });
+    emit({ phase: "installing-cicy-code", message: `已内置 ${marker}`, status: "done", version });
+    emit({ phase: "installing-deps", message: "运行依赖已内置", status: "done" });
+  } else {
+    // 6. Apt mirror — depends on WSL being ready (not on cicy-code download).
+    const apt = await ensureAptSourcesReachable(distro, network, emit);
+    if (!apt.ok) emit({ phase: "configuring-apt", message: `Warning: apt mirror config failed (${apt.error}), continuing` });
 
-  // 7b. Front-load cicy-code's baseTools apt-install so its first launch
-  //     binds :8008 immediately (no 30s "checking environment" stall).
-  await installRuntimeDeps(distro, emit);
+    // 7. Copy + verify — depends on BOTH download and WSL being ready.
+    const r = await installCicyCodeIntoWsl(distro, actualBinaryPath, version, emit);
+    if (!r.ok) throw new Error("install: " + r.error);
+    installedVersion = r.version;
+
+    // 7b. Front-load cicy-code's baseTools apt-install so its first launch
+    //     binds :8008 immediately (no 30s "checking environment" stall).
+    await installRuntimeDeps(distro, emit);
+  }
 
   // 8. Ask the user which AI agents to enable BEFORE starting cicy-code.
   //    We pre-install nothing — cicy-code's setup.go installs only the
@@ -1547,13 +1584,13 @@ export async function windowsInstall({ onProgress = () => {}, onPickAgents } = {
   //     reachable via Explorer's network path for anyone who needs them.
   emit({
     phase: "done",
-    message: `Installed v${r.version}`,
-    version: r.version,
+    message: `Installed v${installedVersion}`,
+    version: installedVersion,
     status: "done",
     installDrive: installDrive.letter,
     installDir: installDrive.installDir,
   });
-  return { ok: true, version: r.version, installDir: installDrive.installDir };
+  return { ok: true, version: installedVersion, installDir: installDrive.installDir };
   // Note: stagePath is intentionally not deleted — downloadStaged checks
   // size before reuse, so cached files speed up retries / repeat installs.
 }
