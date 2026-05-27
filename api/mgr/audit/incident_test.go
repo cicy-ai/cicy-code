@@ -1,11 +1,11 @@
 package audit
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -81,58 +81,53 @@ func TestSeverityMeetsTrigger(t *testing.T) {
 	}
 }
 
+// ── dispatchIncident: forwards to the w-10000 advisor (SOAR contract) ──
+//
+// Since the architecture change, dispatchIncident does NOT email the owner.
+// It forwards a masked finding brief to w-10000, which triages and decides
+// the response (notify offending agent / escalate via SendOwnerIncident /
+// tune policy). These tests assert the forward — the owner-email path is
+// covered separately by the TestSendOwnerIncident_* tests.
+
 func TestDispatchIncident_DisabledNoop(t *testing.T) {
 	pol := DefaultPolicy()
 	pol.IncidentResponse.Enabled = false
 	p, _ := preventiveFixture(t, pol)
-	emailDir := dispatchEmailDir(t, p)
+	fc := captureForwarder(t)
 
 	p.dispatchIncident(Event{
 		ID:       "evt_x",
 		Identity: Identity{AgentID: "w-x"},
 		Findings: []Finding{{RuleID: "r", Severity: SeverityHigh, Spans: []Span{{Preview: "p"}}}},
 	})
-	files := listFiles(t, emailDir)
-	if len(files) != 0 {
-		t.Errorf("disabled: should not write any .eml, got %v", files)
+	if fc.count() != 0 {
+		t.Errorf("disabled: should not forward, got %d", fc.count())
 	}
 }
 
-func TestDispatchIncident_HighSeverityWritesEML(t *testing.T) {
+func TestDispatchIncident_HighSeverityForwardsToAdvisor(t *testing.T) {
 	pol := DefaultPolicy()
 	pol.IncidentResponse.Enabled = true
 	pol.IncidentResponse.TriggerMinSeverity = SeverityHigh
 	pol.ResponsiblePersons.Default = []string{"sec@corp"}
 	p, _ := preventiveFixture(t, pol)
-	emailDir := dispatchEmailDir(t, p)
+	fc := captureForwarder(t)
 
 	p.dispatchIncident(Event{
 		ID:        "evt_x123",
 		Timestamp: "2026-05-15T08:00:00Z",
 		Identity:  Identity{AgentID: "w-x", AgentType: "claude"},
-		Findings:  []Finding{{RuleID: "secret.aws_akid", Severity: SeverityHigh, MatchCount: 1, Spans: []Span{{Preview: "AKIA****MPLE"}}}},
+		Findings:  []Finding{{RuleID: "secret.aws_akid", Severity: SeverityHigh, Category: "secret", MatchCount: 1, Spans: []Span{{Preview: "AKIA****MPLE"}}}},
 		Decision:  Decision{Action: ActionRedact, Applied: true},
 	})
-	path := filepath.Join(emailDir, "evt_x123.eml")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("expected .eml file at %s: %v", path, err)
+	if fc.count() != 1 {
+		t.Fatalf("high severity: want 1 forward, got %d", fc.count())
 	}
-	s := string(data)
-	if !strings.Contains(s, "To: sec@corp") {
-		t.Error("missing default recipient")
-	}
-	if !strings.Contains(s, "[CICY-AUDIT][HIGH]") {
-		t.Errorf("subject wrong, body: %s", s[:200])
-	}
-	if !strings.Contains(s, "AKIA****MPLE") {
-		t.Error("missing finding preview in body")
-	}
-	if !strings.Contains(s, "English summary") {
-		t.Error("missing bilingual section")
-	}
-	if !strings.Contains(s, "X-Cicy-Audit-Event: evt_x123") {
-		t.Error("missing X-Cicy-Audit-Event header")
+	brief := fc.last()
+	for _, want := range []string{"evt_x123", "w-x", "secret.aws_akid", "AKIA****MPLE", "待处置"} {
+		if !strings.Contains(brief, want) {
+			t.Errorf("brief missing %q in:\n%s", want, brief)
+		}
 	}
 }
 
@@ -142,16 +137,15 @@ func TestDispatchIncident_BelowTriggerNoop(t *testing.T) {
 	pol.IncidentResponse.TriggerMinSeverity = SeverityHigh
 	pol.ResponsiblePersons.Default = []string{"sec@corp"}
 	p, _ := preventiveFixture(t, pol)
-	emailDir := dispatchEmailDir(t, p)
+	fc := captureForwarder(t)
 
 	p.dispatchIncident(Event{
 		ID:       "evt_low",
 		Identity: Identity{AgentID: "w-x"},
 		Findings: []Finding{{RuleID: "pii.phone_cn", Severity: SeverityLow, MatchCount: 1, Spans: []Span{{Preview: "1380****0000"}}}},
 	})
-	files := listFiles(t, emailDir)
-	if len(files) != 0 {
-		t.Errorf("below-trigger: should not write any .eml, got %v", files)
+	if fc.count() != 0 {
+		t.Errorf("below-trigger: should not forward, got %d", fc.count())
 	}
 }
 
@@ -162,24 +156,98 @@ func TestDispatchIncident_CooldownDedupes(t *testing.T) {
 	pol.IncidentResponse.CooldownSeconds = 3600
 	pol.ResponsiblePersons.Default = []string{"sec@corp"}
 	p, _ := preventiveFixture(t, pol)
-	emailDir := dispatchEmailDir(t, p)
+	fc := captureForwarder(t)
 
 	finding := Finding{RuleID: "secret.aws_akid", Severity: SeverityHigh, MatchCount: 1, Spans: []Span{{Preview: "AKIA****MPLE"}}}
-	// First event — should write .eml
-	p.dispatchIncident(Event{
-		ID:       "evt_a",
-		Identity: Identity{AgentID: "w-x"},
-		Findings: []Finding{finding},
+	// First event — forwards once.
+	p.dispatchIncident(Event{ID: "evt_a", Identity: Identity{AgentID: "w-x"}, Findings: []Finding{finding}})
+	// Second event with SAME finding hash — suppressed by cooldown.
+	p.dispatchIncident(Event{ID: "evt_b", Identity: Identity{AgentID: "w-x"}, Findings: []Finding{finding}})
+	if fc.count() != 1 {
+		t.Errorf("cooldown: want 1 forward, got %d", fc.count())
+	}
+}
+
+func TestPipeline_PreventiveBlock_ForwardsToAdvisor(t *testing.T) {
+	pol := DefaultPolicy()
+	pol.Preventive.Enabled = true
+	pol.IncidentResponse.Enabled = true
+	pol.IncidentResponse.TriggerMinSeverity = SeverityHigh
+	pol.ResponsiblePersons.Default = []string{"sec@corp"}
+	p, _ := preventiveFixture(t, pol)
+	fc := captureForwarder(t)
+
+	dec := p.PreventiveCheck(Envelope{
+		AgentID:       "w-block",
+		SourceChannel: SourceGateway,
+		Direction:     DirectionOutbound,
+		Payload:       []byte("-----BEGIN RSA PRIVATE KEY-----"),
 	})
-	// Second event with SAME finding hash — should NOT write (cooldown)
-	p.dispatchIncident(Event{
-		ID:       "evt_b",
+	if dec.Action != ActionBlock {
+		t.Fatalf("expected block, got %v", dec.Action)
+	}
+	// dispatchIncident runs in a goroutine after the block.
+	waitForForwardCount(t, fc, 1)
+	if !strings.Contains(fc.last(), "secret.private_key") {
+		t.Errorf("brief missing rule, got:\n%s", fc.last())
+	}
+}
+
+// ── SendOwnerIncident: the owner-email path (advisor-triggered) ──
+//
+// This is what the EML-generation logic became after dispatchIncident stopped
+// emailing directly. w-10000 calls it via POST /api/audit/notify.
+
+func TestSendOwnerIncident_WritesEML(t *testing.T) {
+	pol := DefaultPolicy()
+	pol.IncidentResponse.Enabled = true
+	pol.ResponsiblePersons.Default = []string{"sec@corp"}
+	p, _ := preventiveFixture(t, pol)
+	emailDir := dispatchEmailDir(t, p)
+
+	err := p.SendOwnerIncident(Event{
+		ID:        "evt_owner1",
+		Timestamp: "2026-05-15T08:00:00Z",
+		Identity:  Identity{AgentID: "w-x", AgentType: "claude"},
+		Findings:  []Finding{{RuleID: "secret.aws_akid", Severity: SeverityHigh, Category: "secret", MatchCount: 1, Spans: []Span{{Preview: "AKIA****MPLE"}}}},
+		Decision:  Decision{Action: ActionRedact, Applied: true},
+	}, "GitHub token leaked — revoke + rotate now")
+	if err != nil {
+		t.Fatalf("SendOwnerIncident: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(emailDir, "evt_owner1.eml"))
+	if err != nil {
+		t.Fatalf("expected .eml file: %v", err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"To: sec@corp",
+		"[CICY-AUDIT][HIGH]",
+		"AKIA****MPLE",                  // masked finding preview
+		"English summary",              // bilingual section
+		"X-Cicy-Audit-Event: evt_owner1",
+		"审计顾问 (w-10000) 研判",        // advisor note header
+		"GitHub token leaked",          // advisor note body prepended
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
+	}
+}
+
+func TestSendOwnerIncident_NoRecipients(t *testing.T) {
+	pol := DefaultPolicy()
+	pol.IncidentResponse.Enabled = true
+	// no responsible_persons configured → nothing resolves
+	p, _ := preventiveFixture(t, pol)
+
+	err := p.SendOwnerIncident(Event{
+		ID:       "evt_norcpt",
 		Identity: Identity{AgentID: "w-x"},
-		Findings: []Finding{finding},
-	})
-	files := listFiles(t, emailDir)
-	if len(files) != 1 {
-		t.Errorf("cooldown: want 1 .eml, got %d (%v)", len(files), files)
+		Findings: []Finding{{RuleID: "secret.aws_akid", Severity: SeverityHigh, MatchCount: 1}},
+	}, "")
+	if err == nil {
+		t.Error("expected error when no responsible person resolves")
 	}
 }
 
@@ -215,63 +283,57 @@ func TestFileMailer_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestPipeline_PreventiveBlock_TriggersIncidentEmail(t *testing.T) {
-	pol := DefaultPolicy()
-	pol.Preventive.Enabled = true
-	pol.IncidentResponse.Enabled = true
-	pol.IncidentResponse.TriggerMinSeverity = SeverityHigh
-	pol.ResponsiblePersons.Default = []string{"sec@corp"}
-	p, _ := preventiveFixture(t, pol)
-	emailDir := dispatchEmailDir(t, p)
-
-	dec := p.PreventiveCheck(Envelope{
-		AgentID:       "w-block",
-		SourceChannel: SourceGateway,
-		Direction:     DirectionOutbound,
-		Payload:       []byte("-----BEGIN RSA PRIVATE KEY-----"),
-	})
-	if dec.Action != ActionBlock {
-		t.Fatalf("expected block, got %v", dec.Action)
-	}
-
-	// dispatchIncident runs in a goroutine. Wait briefly.
-	waitForFile(t, filepath.Join(emailDir, dec.EventID+".eml"))
-}
-
 // ── helpers ──
 
-func dispatchEmailDir(t *testing.T, p *Pipeline) string {
-	t.Helper()
-	dir := filepath.Join(p.store.auditRoot, "email-out")
-	return dir
+// forwardCapture is a thread-safe stub for the advisor-forward channel.
+type forwardCapture struct {
+	mu     sync.Mutex
+	briefs []string
 }
 
-func listFiles(t *testing.T, dir string) []string {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		t.Fatal(err)
-	}
-	out := make([]string, 0, len(entries))
-	for _, e := range entries {
-		out = append(out, e.Name())
-	}
-	return out
+func (fc *forwardCapture) count() int {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	return len(fc.briefs)
 }
 
-func waitForFile(t *testing.T, path string) {
+func (fc *forwardCapture) last() string {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	if len(fc.briefs) == 0 {
+		return ""
+	}
+	return fc.briefs[len(fc.briefs)-1]
+}
+
+// captureForwarder installs a capturing advisor-forward channel and restores
+// the previous one on cleanup.
+func captureForwarder(t *testing.T) *forwardCapture {
 	t.Helper()
-	for i := 0; i < 30; i++ {
-		if _, err := os.Stat(path); err == nil {
+	fc := &forwardCapture{}
+	prev := findingForwarder
+	findingForwarder = func(brief string) error {
+		fc.mu.Lock()
+		fc.briefs = append(fc.briefs, brief)
+		fc.mu.Unlock()
+		return nil
+	}
+	t.Cleanup(func() { findingForwarder = prev })
+	return fc
+}
+
+func waitForForwardCount(t *testing.T, fc *forwardCapture, want int) {
+	t.Helper()
+	for i := 0; i < 50; i++ {
+		if fc.count() >= want {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Errorf("file never appeared: %s", path)
+	t.Fatalf("advisor forwards: want >=%d got %d", want, fc.count())
 }
 
-// Stub: avoid an extra import in this test file alone.
-var _ = context.Background
+func dispatchEmailDir(t *testing.T, p *Pipeline) string {
+	t.Helper()
+	return filepath.Join(p.store.auditRoot, "email-out")
+}
