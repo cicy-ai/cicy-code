@@ -70,9 +70,10 @@ type paneCreateOpts struct {
 }
 
 type startupPromptTask struct {
-	paneID    string
-	agentType string
-	seq       int64
+	paneID     string
+	agentType  string
+	seq        int64
+	customText string // overrides the default "reply in chinese" payload (e.g. audit-policy self-intro)
 }
 
 type startupPromptQueue struct {
@@ -316,14 +317,22 @@ func (q *startupPromptQueue) start() {
 }
 
 func (q *startupPromptQueue) enqueue(paneID, agentType string) {
+	q.enqueueText(paneID, agentType, "")
+}
+
+// enqueueText is like enqueue but uses a caller-provided opening prompt
+// instead of the default "reply in chinese" (e.g. the audit-policy admin
+// self-introduction).
+func (q *startupPromptQueue) enqueueText(paneID, agentType, text string) {
 	q.start()
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.seqByPane[paneID]++
 	q.pending[paneID] = startupPromptTask{
-		paneID:    paneID,
-		agentType: agentType,
-		seq:       q.seqByPane[paneID],
+		paneID:     paneID,
+		agentType:  agentType,
+		seq:        q.seqByPane[paneID],
+		customText: text,
 	}
 	q.cond.Signal()
 }
@@ -401,8 +410,12 @@ func (q *startupPromptQueue) process(task startupPromptTask) bool {
 			log.Printf("[startup-prompt] %s superseded during final wait", task.paneID)
 			return false
 		}
-		log.Printf("[startup-prompt] %s send reply_in_chinese", task.paneID)
-		sendPaneText(task.paneID, "reply in chinese")
+		payload := task.customText
+		if payload == "" {
+			payload = "reply in chinese"
+		}
+		log.Printf("[startup-prompt] %s send opening prompt", task.paneID)
+		sendPaneText(task.paneID, payload)
 		return true
 	}
 	if q.isCurrent(task) {
@@ -442,6 +455,12 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 		var useCustomGateway sql.NullBool
 		var useProxy sql.NullBool
 		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway, &useProxy)
+		// Hide the dedicated audit-policy admin pane (w-10000) from the
+		// general agent listing — surfaced only inside the Audit Dashboard
+		// Assistant tab. Bypass with ?include_hidden=1.
+		if r.URL.Query().Get("include_hidden") != "1" && IsAuditPolicyPane(paneID.String) {
+			continue
+		}
 		p := M{
 			"pane_id": paneID.String, "title": title.String, "ttyd_port": port.Int64,
 			"workspace": workspace.String, "init_script": initScript.String,

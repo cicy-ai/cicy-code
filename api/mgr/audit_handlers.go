@@ -15,11 +15,17 @@ import (
 	"ttyd-go/mgr/audit"
 )
 
-// Routes registered in main.go:
-//   GET /api/audit/events                — list events with filters
-//   GET /api/audit/events/{id}           — single event detail
-//   GET /api/audit/stats                 — aggregations
-//   GET /api/audit/agents                — agents that have any events
+// Routes registered in main.go (all wa() = bearer-auth, except ack):
+//   GET  /api/audit/events                    — list events with filters
+//   GET  /api/audit/events/{id}               — single event detail
+//   GET  /api/audit/stats                     — aggregations
+//   GET  /api/audit/agents                    — agents that have any events
+//   POST /api/audit/ingest                    — mitmproxy webhook (Channel B)
+//   POST /api/audit/allowlist/content         — mark a content SHA as false-positive
+//   GET/POST /api/audit/policy                — read / write global policy.json
+//   GET/POST /api/audit/policy/agents/{id}    — read / write per-agent override
+//   GET  /api/audit/policy/effective/{id}     — merged (global ⊕ agent) view
+//   GET  /api/audit/ack?token=...             — PUBLIC incident-email ack landing
 
 func handleAuditEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
