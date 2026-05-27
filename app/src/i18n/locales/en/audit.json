@@ -90,5 +90,9 @@
   "decisionsReverting": "Reverting…",
   "decisionsRevertError": "Revert failed",
   "decisionsGitSHA": "Git commit",
-  "decisionsAutoRefresh": "auto-refresh"
+  "decisionsAutoRefresh": "auto-refresh",
+  "tabAssistant": "Assistant",
+  "assistantNoToken": "No token — log in first.",
+  "assistantHeaderBefore": "Audit Policy Assistant · agent ",
+  "assistantHeaderAfter": " · tell it what to change in plain language (read / add rules / allow-list / roll back, etc.)"
 }

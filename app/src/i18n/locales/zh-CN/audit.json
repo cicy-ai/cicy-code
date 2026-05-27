@@ -90,5 +90,9 @@
   "decisionsReverting": "回滚中…",
   "decisionsRevertError": "回滚失败",
   "decisionsGitSHA": "Git commit",
-  "decisionsAutoRefresh": "自动刷新"
+  "decisionsAutoRefresh": "自动刷新",
+  "tabAssistant": "助手",
+  "assistantNoToken": "未登录 — 请先登录。",
+  "assistantHeaderBefore": "审计策略助手 · 智能体 ",
+  "assistantHeaderAfter": " · 用自然语言告诉它要改什么(读 / 加规则 / allow-list / 回滚等)"
 }

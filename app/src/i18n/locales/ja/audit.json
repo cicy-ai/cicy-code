@@ -90,5 +90,9 @@
   "decisionsReverting": "巻き戻し中…",
   "decisionsRevertError": "巻き戻しに失敗",
   "decisionsGitSHA": "Git コミット",
-  "decisionsAutoRefresh": "自動更新"
+  "decisionsAutoRefresh": "自動更新",
+  "tabAssistant": "アシスタント",
+  "assistantNoToken": "トークンがありません — 先にログインしてください。",
+  "assistantHeaderBefore": "監査ポリシーアシスタント · エージェント ",
+  "assistantHeaderAfter": " · 変更したい内容を自然言語で伝えてください(読み取り / ルール追加 / 許可リスト / ロールバック など)"
 }
