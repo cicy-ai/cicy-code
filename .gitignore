@@ -18,6 +18,7 @@ __pycache__/
 mitmproxy/__pycache__/
 app/worker/public/
 api/cicy-code
+api/cicy-code-docker
 api/global.json
 audit-worker/.wrangler/
 
