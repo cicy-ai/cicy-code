@@ -260,8 +260,9 @@
   gap: 4px;
   font-size: var(--t-sm);
   flex-shrink: 0;
-  max-height: 50%;
+  max-height: 55vh;
   overflow-y: auto;
+  scrollbar-width: thin;
 }
 .wsl-banner__step {
   display: flex;

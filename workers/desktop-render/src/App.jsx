@@ -343,7 +343,9 @@ export default function App() {
           if (r?.ok) {
             setSidecar({ state: "uptodate", info: { installedVersion: r.version }, progress: null, error: null });
             pushToast(t("toast.installed", { version: r.version }), "success");
-            await loadHealth(backends);
+            const freshList = await loadBackends();
+            await loadHealth(freshList);
+            checkWsl();
             return;
           }
           throw new Error("install returned not ok");
@@ -376,7 +378,9 @@ export default function App() {
       if (r?.ok) {
         setSidecar({ state: "uptodate", info: { installedVersion: r.version }, progress: null, error: null });
         pushToast(t("toast.installed", { version: r.version }), "success");
-        await loadHealth(backends);
+        const freshList = await loadBackends();
+        await loadHealth(freshList);
+        checkWsl();
       } else {
         setSidecar((s) => ({ ...s, state: "error", error: r?.error || "unknown", progress: null }));
       }
@@ -589,7 +593,6 @@ async function fetchWindows() {
 // browser session starts clean.
 const LS_LOG_KEY     = "cicy.installLog";
 const LS_STEPS_KEY   = "cicy.installSteps";
-const LS_SIDECAR_KEY = "cicy.sidecar";
 const LS_MAX_AGE_MS  = 24 * 60 * 60 * 1000; // 24h — after that, treat as stale.
 
 function loadPersistedLog() {
@@ -612,20 +615,3 @@ function loadPersistedSteps() {
   } catch { return []; }
 }
 
-function loadPersistedSidecar() {
-  const fallback = { state: "checking", info: null, progress: null, error: null };
-  try {
-    const raw = sessionStorage.getItem(LS_SIDECAR_KEY);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw);
-    if (!parsed || (Date.now() - (parsed.at || 0)) > LS_MAX_AGE_MS) return fallback;
-    const v = parsed.value || fallback;
-    // The promise that drove "installing" is dead after a reload. Surface
-    // that to the UI as a distinct, non-blocking state so the install
-    // button comes back and the user can retry / inspect the saved log.
-    if (v.state === "installing") {
-      return { ...v, state: "interrupted", error: "page reloaded mid-install" };
-    }
-    return v;
-  } catch { return fallback; }
-}
