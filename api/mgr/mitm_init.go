@@ -49,6 +49,21 @@ func mitmAgentProxyBootLines() []string {
 	return lines
 }
 
+// mitmEgressResolver implements mitm.EgressFunc. When global.json has
+// mihomo_global_egress=true, MITM routes its upstream dials (intercept +
+// passthrough) through the local mihomo mixed port, so the exit IP follows
+// whatever node mihomo currently has selected. Read live on every dial — toggle
+// the flag in global.json and it takes effect on the next request, no restart.
+// The local mihomo needs no proxy auth, so auth is empty.
+func mitmEgressResolver() (enabled bool, socks5Addr string, auth string) {
+	cfg := readGlobalJSONConfig()
+	on, _ := cfg["mihomo_global_egress"].(bool)
+	if !on {
+		return false, "", ""
+	}
+	return true, mihomoMixedAddr(), ""
+}
+
 // startMITM is called once at server startup, after audit.Init.
 // Safe to call when MITM is disabled — it logs and returns.
 func startMITM() {
@@ -62,7 +77,7 @@ func startMITM() {
 		return
 	}
 
-	srv, err := mitm.NewServer(cfg, mitmAuditAdapter{}, mitmBreakerAdapter{})
+	srv, err := mitm.NewServer(cfg, mitmAuditAdapter{}, mitmBreakerAdapter{}, mitmEgressResolver)
 	if err != nil {
 		log.Printf("[mitm] init failed: %v", err)
 		return
