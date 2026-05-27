@@ -90,5 +90,9 @@
   "decisionsReverting": "Annulation…",
   "decisionsRevertError": "Échec de l'annulation",
   "decisionsGitSHA": "Commit git",
-  "decisionsAutoRefresh": "auto-actualiser"
+  "decisionsAutoRefresh": "auto-actualiser",
+  "tabAssistant": "Assistant",
+  "assistantNoToken": "Aucun jeton — connectez-vous d'abord.",
+  "assistantHeaderBefore": "Assistant de politique d'audit · agent ",
+  "assistantHeaderAfter": " · dites-lui quoi changer en langage naturel (lire / ajouter des règles / liste d'autorisation / annuler, etc.)"
 }
