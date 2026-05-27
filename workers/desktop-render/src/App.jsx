@@ -44,21 +44,12 @@ export default function App() {
   }, [installSteps]);
 
 
+  // Docker model: WSL state is irrelevant (on Windows, Docker Desktop manages
+  // WSL2 itself). Always clear it so no WSL-specific banner ("WSL not
+  // supported / not installed") ever shows — sidecar.state (from dockerStatus)
+  // drives the whole flow now.
   const checkWsl = useCallback(async () => {
-    const isWin = window.cicy?.platform === "win32";
-    if (apiMode !== "electron" || !window.cicy?.sidecar?.wslStatus || !isWin) {
-      setWsl(null);
-      return;
-    }
-    setWslChecking(true);
-    try {
-      const s = await window.cicy.sidecar.wslStatus();
-      setWsl(s);
-    } catch (e) {
-      setWsl({ supported: true, installed: false, error: e.message });
-    } finally {
-      setWslChecking(false);
-    }
+    setWsl(null);
   }, []);
 
   // ── Loaders ──
@@ -78,49 +69,42 @@ export default function App() {
   }, [backends]);
 
   const checkSidecar = useCallback(async () => {
-    if (apiMode !== "electron" || !window.cicy?.sidecar) {
+    // Web / cloud mode (no Electron RPC) — nothing local to manage.
+    if (apiMode !== "electron" || typeof window.electronRPC !== "function") {
       setSidecar({ state: "uptodate", info: null, progress: null, error: null });
-      // Stable state — drop any timeline left over from a previous run.
       setInstallSteps([]);
       setInstallLog([]);
       return;
     }
+    // Docker model: determine state from the renderer via `docker` over
+    // exec_shell (no main-process sidecar API — fixes ship via the CF Worker).
     try {
-      const status = await window.cicy.sidecar.status();
-      if (!status.userInstalled) {
-        const check = await window.cicy.sidecar.checkLatest();
-        if (!check.ok) {
-          setSidecar((s) => ({ ...s, state: "error", error: check.error }));
-        } else {
-          setSidecar((s) => ({ ...s, state: "missing", info: check }));
-        }
+      const { dockerStatus } = await import("./dockerInstaller.js");
+      const st = await dockerStatus();
+      // Docker CLI absent → first thing the user needs is Docker Desktop;
+      // the install flow guides that download, so surface "install".
+      // Also: image not here and no container yet → needs install.
+      if (!st.dockerInstalled || (!st.imagePresent && !st.containerExists)) {
+        setSidecar((s) => ({ ...s, state: "missing", info: null, running: false, error: null }));
         return;
       }
-      // Installed — also check if outdated (non-blocking, best-effort).
-      // Track running state so the local card can show "Start" when the
-      // binary is on disk but the daemon isn't actually listening yet.
+      // Installed. running = container up AND actually serving :8008, so the
+      // "Open" button only shows when the workspace will really load. When the
+      // daemon is down or the container is stopped, running:false → "Start"
+      // (handleStart → ensureRunning, which also boots Docker Desktop).
       setSidecar((s) => ({
         ...s,
-        state: "uptodate",
-        info: { installedVersion: status.userVersion },
-        running: !!status.running,
+        state: st.updateAvailable ? "outdated" : "uptodate",
+        info: { installedVersion: st.version, latest: st.target },
+        running: !!(st.containerRunning && st.healthy),
+        dockerDown: !st.dockerRunning,
+        error: null,
       }));
-      // Don't auto-clear installSteps/installLog here — the timeline's
-      // "✓ Installed v…" final entry is still useful info to surface
-      // after the install finishes. The banner shows a Close button on
-      // the done state which is the user's signal to dismiss it.
-      // We do clear partial timelines (no done step) so a stale "still
-      // running" banner doesn't survive a fresh page load.
+      // Drop a stale partial install timeline (keep a completed one's "done").
       setInstallSteps((steps) => {
         if (!steps || steps.length === 0) return steps;
         return steps[steps.length - 1].phase === "done" ? steps : [];
       });
-      try {
-        const check = await window.cicy.sidecar.checkLatest();
-        if (check.ok && check.latest && check.installedVersion !== check.latest) {
-          setSidecar((s) => ({ ...s, state: "outdated", info: check }));
-        }
-      } catch {}
     } catch (e) {
       setSidecar((s) => ({ ...s, state: "error", error: e.message }));
     }
@@ -129,11 +113,18 @@ export default function App() {
   // Click "启动" — spawn the daemon, then re-check status so the button
   // flips to "打开" once :8008 is reachable.
   const handleStart = useCallback(async () => {
-    if (!window.cicy?.sidecar?.start) return;
+    if (typeof window.electronRPC !== "function") return;
     setSidecar((s) => ({ ...s, starting: true }));
     try {
-      const r = await window.cicy.sidecar.start();
-      if (!r?.ok) pushToast(t("toast.start_failed", { error: r?.error || "unknown" }), "error");
+      // ensureRunning: boot Docker Desktop if needed → start/create the
+      // container → wait for :8008. Idempotent. If the image isn't here yet
+      // (needsInstall), fall through to the full install flow.
+      const { ensureRunning } = await import("./dockerInstaller.js");
+      const r = await ensureRunning({ onProgress: () => {} });
+      if (r?.needsInstall) { await handleInstall(); return; }
+      if (!r?.ok) pushToast(t("toast.start_failed", { error: "engine not ready" }), "error");
+    } catch (e) {
+      pushToast(t("toast.start_failed", { error: e.message }), "error");
     } finally {
       setSidecar((s) => ({ ...s, starting: false }));
       checkSidecar();
@@ -199,6 +190,22 @@ export default function App() {
     setOpeningId(b.id);
     try {
       if (window.electronRPC) {
+        // Local Docker backend: make sure the container is actually running
+        // before reading its token / opening it. Handles the common cases —
+        // post-reboot (container auto-restarts but maybe still booting),
+        // stopped container, or Docker Desktop not started yet. No-op when
+        // already healthy. If the image isn't installed yet, divert to install.
+        if (b.id === "local") {
+          try {
+            const { ensureRunning } = await import("./dockerInstaller.js");
+            const r = await ensureRunning({ onProgress: () => {} });
+            if (r?.needsInstall) { setOpeningId(null); await handleInstall(); return; }
+          } catch (e) {
+            pushToast(t("toast.start_failed", { error: e.message }), "error");
+            setOpeningId(null);
+            return;
+          }
+        }
         try {
           // Obtain the access token — and we WILL obtain it. The token always
           // physically exists in the WSL runtime (~/cicy-ai/global.json, written
@@ -218,7 +225,7 @@ export default function App() {
             if (!hasToken(url) && b.id === "local") {
               try {
                 const rr = await window.electronRPC("exec_shell", {
-                  command: 'wsl -e bash -lc "cat ~/cicy-ai/global.json 2>/dev/null"',
+                  command: 'docker exec cicy cat /home/cicy/cicy-ai/global.json 2>/dev/null',
                   timeout_ms: 9000,
                 });
                 let out = (rr?.content || []).map((c) => c.text).join("");
@@ -382,14 +389,14 @@ export default function App() {
         : [],
     );
 
-    // Win32: drive the install entirely from the renderer using
-    // electronRPC.exec_shell. This bypasses the main-process sidecar:install
-    // handler in shipped versions of cicy-desktop, so we can fix wsl install
-    // bugs by deploying the CF Worker — no .exe rebuild required.
-    const isWin = (window.cicy?.platform === "win32") || (typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent));
-    if (isWin) {
+    // All platforms (Win/Mac/Linux): drive the install from the renderer via
+    // electronRPC.exec_shell using Docker. Bypasses the main-process
+    // sidecar:install handler, so install fixes ship via the CF Worker —
+    // no .exe rebuild required. Docker is uniform across OSes (on Windows
+    // Docker Desktop runs on WSL2/Hyper-V under the hood).
+    {
       try {
-        const { windowsInstall, canRunRendererInstall } = await import("./wslInstaller.js");
+        const { dockerInstall, canRunRendererInstall } = await import("./dockerInstaller.js");
         if (canRunRendererInstall()) {
           const handleEvent = (ev) => {
             if (ev?.kind === "log") {
@@ -435,11 +442,11 @@ export default function App() {
               }
             }
           };
-          const r = await windowsInstall({
+          const r = await dockerInstall({
             onProgress: handleEvent,
-            // wslInstaller awaits this callback right before starting
-            // cicy-code. We surface the agent picker UI via state and
-            // resolve the promise once the user clicks "Start".
+            // dockerInstaller awaits this callback right before pulling/
+            // running the container. We surface the agent picker UI via
+            // state and resolve the promise once the user clicks "Start".
             onPickAgents: ({ defaults, available }) => new Promise((resolve) => {
               setPickAgents({
                 defaults,

@@ -492,12 +492,21 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
 // the user sees a clean step list. `t` is reserved for future i18n —
 // for now Chinese is hard-coded since the timeline is windows-install
 // specific and only ever runs in zh-CN UI.
-function phaseLabel(phase /*, t */) {
-  // Product-language labels: a first-time user is here to *use* the product,
-  // not to learn that it runs on WSL/Ubuntu/apt. We never surface "Linux
-  // 子系统 / 软件源 / cicy-code" — just plain "运行环境 / AI 引擎" steps.
+function phaseLabel(phase, t) {
+  // Product-language labels via i18n: a first-time user is here to *use* the
+  // product, not to learn it runs on Docker/Ubuntu. The active (Docker) path
+  // is fully translated; the legacy WSL phases keep their zh strings (dead
+  // code path, never reached now that install is Docker-only).
+  const tr = (k, zh) => (typeof t === "function" ? t(k) : zh);
   switch (phase) {
-    case "init":                 return "准备中";
+    case "init":                 return tr("installphase.init", "准备中");
+    // Docker install path (active)
+    case "checking-docker":      return tr("installphase.checking_docker", "检查 Docker");
+    case "pulling":              return tr("installphase.pulling", "拉取运行镜像");
+    case "picking-agents":       return tr("installphase.picking_agents", "选择 AI 助手");
+    case "starting":             return tr("installphase.starting", "启动 AI 引擎");
+    case "done":                 return tr("installphase.done", "全部就绪");
+    // WSL install path (legacy, zh-only)
     case "detecting":            return "检查运行环境";
     case "checking":             return "获取最新版本";
     case "downloading":          return "下载核心组件";
@@ -507,10 +516,7 @@ function phaseLabel(phase /*, t */) {
     case "configuring-apt":      return "优化下载线路";
     case "installing-cicy-code": return "安装 AI 引擎";
     case "installing-deps":      return "安装运行依赖";
-    case "picking-agents":       return "选择 AI 助手";
-    case "starting":             return "启动 AI 引擎";
     case "mounting-files":       return "收尾";
-    case "done":                 return "全部就绪";
     default:                     return phase || "处理中";
   }
 }

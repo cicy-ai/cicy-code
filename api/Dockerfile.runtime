@@ -36,5 +36,22 @@ ENV HOME=/home/cicy \
     TERM=xterm-256color \
     COLORTERM=truecolor \
     PATH="/home/cicy/.npm-global/bin:/home/cicy/.local/bin:/home/cicy/.opencode/bin:${PATH}"
+
+# Pre-install the Claude Code agent CLI so the first worker launch has `claude`
+# on PATH instantly — no first-open `npm install` (which stalls for minutes when
+# npmjs is slow/blocked, e.g. in CN). npmmirror is the reliable registry.
+# claude-code ships its ~229MB native binary TWICE (bin/claude.exe is a full
+# copy of node_modules/.../claude-code-linux-x64/claude); replace the copy with
+# a relative symlink to keep the image ~229MB smaller.
+RUN set -eux; \
+    npm install -g --registry=https://registry.npmmirror.com @anthropic-ai/claude-code@latest; \
+    CC="$(npm root -g)/@anthropic-ai/claude-code"; \
+    if [ -f "$CC/node_modules/@anthropic-ai/claude-code-linux-x64/claude" ] && [ -f "$CC/bin/claude.exe" ]; then \
+      ln -sf ../node_modules/@anthropic-ai/claude-code-linux-x64/claude "$CC/bin/claude.exe"; \
+    fi; \
+    npm cache clean --force; \
+    rm -rf /home/cicy/.npm /tmp/npm-cache /tmp/* 2>/dev/null || true; \
+    claude --version
+
 EXPOSE 8008
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
