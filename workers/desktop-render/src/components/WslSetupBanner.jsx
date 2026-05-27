@@ -502,6 +502,7 @@ function phaseLabel(phase, t) {
     case "init":                 return tr("installphase.init", "准备中");
     // Docker install path (active)
     case "checking-docker":      return tr("installphase.checking_docker", "检查 Docker");
+    case "installing-docker":    return tr("installphase.installing_docker", "安装 Docker");
     case "pulling":              return tr("installphase.pulling", "拉取运行镜像");
     case "picking-agents":       return tr("installphase.picking_agents", "选择 AI 助手");
     case "starting":             return tr("installphase.starting", "启动 AI 引擎");

@@ -103,5 +103,14 @@
   "docker.subtitle": "Le premier lancement récupère une image runtime (~350 Mo), entièrement automatique. Ensuite, c'est prêt — aucune configuration requise.",
   "docker.starting_desktop": "Démarrage de Docker Desktop…",
   "docker.waiting_daemon": "En attente de Docker…",
-  "docker.engine_starting": "Démarrage du moteur IA…"
+  "docker.engine_starting": "Démarrage du moteur IA…",
+  "installphase.installing_docker": "Installer Docker",
+  "docker.dl_desktop": "Téléchargement de Docker Desktop (~630 Mo)…",
+  "docker.dl_done": "Docker Desktop téléchargé",
+  "docker.dl_failed": "Échec du téléchargement de Docker Desktop — téléchargez-le et installez-le manuellement",
+  "docker.installing_desktop": "Installation de Docker Desktop (cliquez sur Oui dans la fenêtre)…",
+  "docker.installed_restart": "Docker Desktop installé — redémarrez votre PC puis rouvrez cette application",
+  "docker.desktop_ready": "Docker Desktop prêt",
+  "docker.mac_first_run": "Lancement de Docker Desktop — terminez la configuration initiale dans la fenêtre (acceptez les conditions + saisissez votre mot de passe admin)…",
+  "docker.mac_finish_setup": "Terminez la configuration de Docker Desktop dans sa fenêtre, puis rouvrez cette application"
 }

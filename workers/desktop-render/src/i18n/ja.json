@@ -103,5 +103,14 @@
   "docker.subtitle": "初回はランタイムイメージ（約 350 MB）を取得します。すべて自動で、完了後はすぐ使えます。設定は不要です。",
   "docker.starting_desktop": "Docker Desktop を起動中…",
   "docker.waiting_daemon": "Docker を待機中…",
-  "docker.engine_starting": "AI エンジンを起動中…"
+  "docker.engine_starting": "AI エンジンを起動中…",
+  "installphase.installing_docker": "Docker をインストール",
+  "docker.dl_desktop": "Docker Desktop をダウンロード中（約 630MB）…",
+  "docker.dl_done": "Docker Desktop のダウンロード完了",
+  "docker.dl_failed": "Docker Desktop のダウンロードに失敗 — 手動でダウンロード・インストールしてください",
+  "docker.installing_desktop": "Docker Desktop をインストール中（ダイアログで「はい」をクリック）…",
+  "docker.installed_restart": "Docker Desktop をインストールしました — PC を再起動してから本アプリを開き直してください",
+  "docker.desktop_ready": "Docker Desktop 準備完了",
+  "docker.mac_first_run": "Docker Desktop を起動中 — 表示されたウィンドウで初回設定(規約に同意 + 管理者パスワード入力)を完了してください…",
+  "docker.mac_finish_setup": "Docker Desktop の初回設定をウィンドウで完了してから、本アプリを開き直してください"
 }

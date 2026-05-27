@@ -103,5 +103,14 @@
   "docker.subtitle": "首次使用需要拉取一次运行镜像（约 350 MB），全程自动完成。完成后即可开始使用，无需任何配置。",
   "docker.starting_desktop": "正在启动 Docker Desktop…",
   "docker.waiting_daemon": "等待 Docker 就绪…",
-  "docker.engine_starting": "正在启动 AI 引擎，请稍候…"
+  "docker.engine_starting": "正在启动 AI 引擎，请稍候…",
+  "installphase.installing_docker": "安装 Docker",
+  "docker.dl_desktop": "正在下载 Docker Desktop（约 630MB）…",
+  "docker.dl_done": "Docker Desktop 下载完成",
+  "docker.dl_failed": "Docker Desktop 下载失败，请手动下载安装",
+  "docker.installing_desktop": "正在安装 Docker Desktop（请在弹窗里点「是」）…",
+  "docker.installed_restart": "Docker Desktop 已安装，可能需要重启电脑后再打开本应用",
+  "docker.desktop_ready": "Docker Desktop 已就绪",
+  "docker.mac_first_run": "正在启动 Docker Desktop，请在弹窗里完成首次设置(接受条款 + 输入管理员密码)…",
+  "docker.mac_finish_setup": "请在 Docker Desktop 窗口完成首次设置后,重新打开本应用"
 }
