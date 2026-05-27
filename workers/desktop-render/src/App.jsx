@@ -306,14 +306,24 @@ export default function App() {
               if (ev?.phase) {
                 setInstallSteps((steps) => {
                   const idx = steps.findIndex((s) => s.phase === ev.phase);
-                  const merged = (prev) => ({
-                    phase: ev.phase,
-                    message: ev.message || prev?.message || ev.phase,
-                    at: Date.now(),
-                    progress: ev.progress != null ? ev.progress : prev?.progress,
-                    status: ev.status || prev?.status,
-                    error: ev.status === "error" ? (ev.error || ev.message) : prev?.error,
-                  });
+                  const merged = (prev) => {
+                    const base = {
+                      phase: ev.phase,
+                      message: ev.message || prev?.message || ev.phase,
+                      at: Date.now(),
+                      progress: ev.progress != null ? ev.progress : prev?.progress,
+                      status: ev.status || prev?.status,
+                      error: ev.status === "error" ? (ev.error || ev.message) : prev?.error,
+                    };
+                    // Preserve extra metadata across updates to the same phase —
+                    // later emits overwrite message but we still want e.g.
+                    // network (from detecting) + wslHomePath (from done).
+                    for (const k of ["network","installDrive","installDir","isSSD","version","agents","wslHomePath"]) {
+                      if (ev[k] != null) base[k] = ev[k];
+                      else if (prev?.[k] != null) base[k] = prev[k];
+                    }
+                    return base;
+                  };
                   if (idx >= 0) {
                     const next = [...steps];
                     next[idx] = merged(steps[idx]);
