@@ -2456,7 +2456,13 @@ EOF
 			return lines
 		}
 		// Official login path: drop local-gateway env so codex uses its own auth/config.
-		lines = append(lines, "unset OPENAI_API_KEY", "clear")
+		lines = append(lines, "unset OPENAI_API_KEY")
+		// Route this non-gateway codex's HTTPS through the local MITM (when
+		// enabled) so its turns are audited and it can answer cross-agent
+		// callbacks. Keyed via proxy-auth username = $X_AGENT_SHORT_ID. No-op
+		// when MITM is off (default). Parity with the claude/opencode paths.
+		lines = append(lines, mitmAgentProxyBootLines()...)
+		lines = append(lines, "clear")
 		if allowAllActions {
 			lines = append(lines, "codex --dangerously-bypass-approvals-and-sandbox")
 		} else {
@@ -2606,6 +2612,13 @@ EOF`, topModelField, providerBlock),
 			"unset CICY_ANTHROPIC_BASE_URL",
 			"unset ANTHROPIC_API_KEY",
 			"unset OPENCODE_CONFIG",
+		)
+		// Route this non-gateway opencode's HTTPS through the local MITM (when
+		// enabled) so its turns are audited and it can answer cross-agent
+		// callbacks. Keyed via proxy-auth username = $X_AGENT_SHORT_ID. No-op
+		// when MITM is off (default). Parity with the claude official path.
+		lines = append(lines, mitmAgentProxyBootLines()...)
+		lines = append(lines,
 			"clear",
 			"opencode",
 		)
