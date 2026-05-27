@@ -2658,6 +2658,10 @@ EOF`)
   done
 fi`,
 		)
+		// Route this non-gateway kiro-cli's HTTPS through the local MITM (when
+		// enabled) so its turns are audited; no-op when MITM is off (default).
+		// Parity with the codex/claude/opencode official-login paths.
+		lines = append(lines, mitmAgentProxyBootLines()...)
 		if allowAllActions {
 			lines = append(lines, "kiro-cli chat --trust-all-tools")
 		} else {
@@ -2670,8 +2674,12 @@ fi`,
 			"mkdir -p ~/.copilot",
 			ensureAgentCommandLine("copilot", "GitHub Copilot", copilotInstallCmd(), installLog),
 			`node -e 'const fs=require("fs"),f=process.env.HOME+"/.copilot/config.json";let c={};try{c=JSON.parse(fs.readFileSync(f))}catch(_){}c.trustedFolders=c.trustedFolders||[];const w=process.env.WORKSPACE||".";if(!c.trustedFolders.includes(w))c.trustedFolders.push(w);fs.writeFileSync(f,JSON.stringify(c,null,2))'`,
-			"copilot --yolo",
 		}
+		// Route this non-gateway copilot's HTTPS through the local MITM (when
+		// enabled) so its turns are audited; no-op when MITM is off (default).
+		// Parity with the codex/claude/opencode official-login paths.
+		lines = append(lines, mitmAgentProxyBootLines()...)
+		lines = append(lines, "copilot --yolo")
 		return lines
 	case "hermes":
 		installLog := tmuxHomeJoin("logs", fmt.Sprintf("hermes-install-%s.log", shortID))
