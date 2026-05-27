@@ -57,7 +57,7 @@ const DEFAULT_TIMEOUTS = {
   shellLong:  120_000,
   download:   120_000,
   wslInstall: 15 * 60_000,
-  wslBoot:    90_000,
+  wslBoot:    180_000,
 };
 
 // ── shell helpers ─────────────────────────────────────────────────────
@@ -164,6 +164,73 @@ async function ps(scriptText, opts = {}) {
   return sh(`powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64}`, { ...opts, silent: true });
 }
 
+// ── fast cmd.exe / curl.exe helpers ─────────────────────────────────────
+// On some Windows machines AV real-time scanning throttles powershell.exe
+// startup to 30–60 s, which blows past every install-step timeout. cmd.exe
+// and curl.exe (native since Win10 1803) start instantly, so all network
+// fetches and simple file ops go through them instead of PowerShell.
+
+// Run a cmd.exe builtin. exec_shell already runs inside a shell, so the
+// nested `cmd /d /c "…"` is unwrapped by cmd's /s parsing (verified).
+async function cmdExec(cmdLine, opts = {}) {
+  if (!opts.silent) _emit({ kind: "log", text: `$ cmd: ${previewCmd(cmdLine)}` });
+  return sh(`cmd /d /c "${cmdLine}"`, { ...opts, silent: true });
+}
+
+// File size in bytes, or -1 if the file is missing.
+async function fileSize(path) {
+  const p = path.replace(/"/g, "");
+  const r = await cmdExec(
+    `if exist "${p}" (for %I in ("${p}") do @echo SZ=%~zI) else (echo NONE)`,
+    { timeoutMs: 12_000, silent: true },
+  );
+  const m = (r.stdout || "").match(/SZ=(\d+)/);
+  return m ? parseInt(m[1], 10) : -1;
+}
+
+async function makeDir(path) {
+  const p = path.replace(/"/g, "");
+  return cmdExec(`if not exist "${p}" mkdir "${p}"`, { timeoutMs: 12_000, silent: true });
+}
+
+async function delFile(path) {
+  const p = path.replace(/"/g, "");
+  return cmdExec(`del /f /q "${p}" 2>nul & exit /b 0`, { timeoutMs: 12_000, silent: true });
+}
+
+// Fetch text from the first reachable URL via curl.exe. { ok, body, url }.
+async function curlText(urls, { connectTimeout = 10, maxTime = 25, timeoutMs = 35_000 } = {}) {
+  for (const u of (Array.isArray(urls) ? urls : [urls])) {
+    _emit({ kind: "log", text: `$ curl ${previewCmd(u)}` });
+    const r = await sh(
+      `curl.exe -fsSL --connect-timeout ${connectTimeout} --max-time ${maxTime} "${u}"`,
+      { timeoutMs, silent: true },
+    );
+    if (r.ok && r.stdout && r.stdout.trim()) return { ok: true, body: r.stdout.trim(), url: u };
+    _emit({ kind: "log", text: `! curl miss (${u.split("/")[2] || u})` });
+  }
+  return { ok: false };
+}
+
+// Order URLs fastest-first via sequential curl HEAD probes (each starts
+// instantly, so even 4 probes finish in a few seconds). Unreachable URLs
+// drop to the back rather than being removed — they stay as last-resort.
+async function curlOrder(urls, { connectTimeout = 8, maxTime = 14, timeoutMs = 22_000 } = {}) {
+  const timed = [];
+  for (const u of urls) {
+    const r = await sh(
+      `curl.exe -sI -o NUL --connect-timeout ${connectTimeout} --max-time ${maxTime} -w "%{http_code} %{time_total}" "${u}"`,
+      { timeoutMs, silent: true },
+    );
+    const m = (r.stdout || "").trim().match(/(\d{3})\s+([\d.]+)/);
+    const code = m ? parseInt(m[1], 10) : 0;
+    if (r.ok && code >= 200 && code < 400) timed.push({ u, t: parseFloat(m[2]) || 999 });
+  }
+  timed.sort((a, b) => a.t - b.t);
+  const ok = timed.map((x) => x.u);
+  return ok.length ? [...ok, ...urls.filter((u) => !ok.includes(u))] : urls;
+}
+
 async function wslBash(distro, script, opts = {}) {
   // Ship the bash script through base64 to avoid Windows quoting hell.
   // Use TextEncoder for proper UTF-8.
@@ -181,25 +248,31 @@ async function wslExec(distro, args, opts = {}) {
 }
 
 // ── network detection ─────────────────────────────────────────────────
+// Cached for the page session so a retry resumes instantly instead of
+// re-spending ~30s on probes. Only a confident cn/global result is cached;
+// "unknown" (likely a transient probe failure) is always re-tried.
+let _cachedNetwork = null;
+// Agent selection cached for the page session (resume path — see picking-agents).
+let _cachedAgents = null;
 async function detectNetwork() {
-  // Sequential probe — Start-Job's cold start on Windows is 1–2 s before
-  // the script body even runs, which made the previous parallel race
-  // routinely time out before either response arrived. Trying baidu
-  // first gets cn-network users the fast path; falling back to google
+  if (_cachedNetwork) return _cachedNetwork;
+  // curl.exe HEAD probes — start instantly (powershell.exe can take 30–60 s
+  // to spawn under AV scanning). baidu first → cn fast path; google fallback
   // distinguishes global vs offline.
-  const r = await ps(`
-$ProgressPreference = 'SilentlyContinue'
-try {
-  $r = Invoke-WebRequest 'https://www.baidu.com/' -Method Head -UseBasicParsing -TimeoutSec 4
-  if ($r.StatusCode -eq 200) { Write-Output 'cn'; exit 0 }
-} catch {}
-try {
-  $r = Invoke-WebRequest 'https://www.google.com/generate_204' -UseBasicParsing -TimeoutSec 4
-  if ($r.StatusCode -eq 204) { Write-Output 'global'; exit 0 }
-} catch {}
-Write-Output 'unknown'
-`, { timeoutMs: 12_000 });
-  return r.ok ? r.stdout.trim() : "unknown";
+  // Generous --max-time: on AV-heavy machines curl's own TLS+spawn can take
+  // 8–12 s even for a fast endpoint. Too tight a limit aborts mid-handshake
+  // and reports http_code 000 (looks like "no network").
+  const cn = await sh(
+    `curl.exe -sI -o NUL --connect-timeout 8 --max-time 14 -w "%{http_code}" "https://www.baidu.com/"`,
+    { timeoutMs: 22_000, silent: true },
+  );
+  if (cn.ok && /^2\d\d/.test((cn.stdout || "").trim())) return (_cachedNetwork = "cn");
+  const gl = await sh(
+    `curl.exe -sI -o NUL --connect-timeout 8 --max-time 14 -w "%{http_code}" "https://www.google.com/generate_204"`,
+    { timeoutMs: 22_000, silent: true },
+  );
+  if (gl.ok && /^20[04]/.test((gl.stdout || "").trim())) return (_cachedNetwork = "global");
+  return "unknown";
 }
 
 // ── manifest fetch ────────────────────────────────────────────────────
@@ -212,23 +285,10 @@ function manifestUrls(network) {
 
 async function fetchLatestManifest(network) {
   const urls = manifestUrls(network);
-  const json = JSON.stringify(urls);
-  const r = await ps(`
-$ProgressPreference = 'SilentlyContinue'
-$urls = '${json.replace(/'/g, "''")}' | ConvertFrom-Json
-foreach ($u in $urls) {
+  const r = await curlText(urls, { connectTimeout: 10, maxTime: 20, timeoutMs: 30_000 });
+  if (!r.ok) return { ok: false, error: "no reachable manifest" };
   try {
-    $m = Invoke-RestMethod -Uri $u -UseBasicParsing -TimeoutSec 8
-    Write-Output ('OK ' + ($m | ConvertTo-Json -Depth 6 -Compress))
-    exit 0
-  } catch { continue }
-}
-Write-Output 'ERR no reachable manifest'
-exit 1
-`, { timeoutMs: 60_000 });
-  if (!r.ok || !r.stdout.startsWith("OK ")) return { ok: false, error: r.stdout || r.stderr || "unreachable" };
-  try {
-    const m = JSON.parse(r.stdout.slice(3));
+    const m = JSON.parse(r.body);
     if (!m.version || !m.assets) return { ok: false, error: "manifest malformed" };
     return { ok: true, version: m.version, assets: m.assets, sizes: m.sizes || {} };
   } catch (e) {
@@ -238,60 +298,16 @@ exit 1
 
 // ── download with mirror race ────────────────────────────────────────
 async function downloadStaged({ assetUrl, network, dstPath, expectSize = 0, expectMin = 1_000_000 }) {
-  // 0a. Reuse exact cached file if present and size matches expected.
+  // 0. Reuse exact cached file if present and size matches expected.
   if (expectSize && expectSize > 0) {
-    const probe = await ps(`
-$dst = '${dstPath.replace(/'/g, "''")}'
-if (Test-Path $dst) {
-  Write-Output ((Get-Item $dst).Length)
-} else {
-  Write-Output 'NONE'
-}
-`, { timeoutMs: 5_000 });
-    if (probe.ok) {
-      const out = probe.stdout.trim();
-      if (out !== "NONE") {
-        const localSize = parseInt(out, 10) || 0;
-        if (localSize === expectSize) {
-          _emit({ kind: "log", text: `(reusing cached download: ${(localSize / 1024 / 1024).toFixed(1)} MB)` });
-          return { ok: true, size: localSize, url: dstPath, path: dstPath, reused: true };
-        }
-        _emit({ kind: "log", text: `(cached file size ${localSize} != expected ${expectSize}, redownloading)` });
-        await ps(`Remove-Item -Force '${dstPath.replace(/'/g, "''")}' -ErrorAction SilentlyContinue`,
-          { timeoutMs: 5_000 });
-      }
+    const localSize = await fileSize(dstPath);
+    if (localSize === expectSize) {
+      _emit({ kind: "log", text: `(reusing cached download: ${(localSize / 1024 / 1024).toFixed(1)} MB)` });
+      return { ok: true, size: localSize, url: dstPath, path: dstPath, reused: true };
     }
-
-    // 0b. Look for any sibling staged file in the same directory whose
-    //     size matches expected (e.g. an unversioned `cicy-code-staged`
-    //     left over from earlier installer versions). If we find one,
-    //     rename it to the new versioned path — saves re-downloading
-    //     ~19 MB when the binary already exists from a prior install.
-    const stage = await ps(`
-$dst = '${dstPath.replace(/'/g, "''")}'
-$dir = Split-Path $dst
-$want = ${expectSize}
-if (Test-Path $dir) {
-  Get-ChildItem -File $dir -ErrorAction SilentlyContinue | Where-Object { $_.Length -eq $want } | Select-Object -First 1 -ExpandProperty FullName
-}
-`, { timeoutMs: 5_000 });
-    if (stage.ok && stage.stdout.trim()) {
-      const found = stage.stdout.trim();
-      _emit({ kind: "log", text: `(found existing ${expectSize}-byte staged file: ${found.split(/[\\\/]/).pop()}, reusing)` });
-      const mv = await ps(`
-$src = '${found.replace(/'/g, "''")}'
-$dst = '${dstPath.replace(/'/g, "''")}'
-# dst might be locked by an old download process — drop it then move.
-try {
-  Move-Item -Force $src $dst
-} catch {
-  Remove-Item -Force $dst -ErrorAction SilentlyContinue
-  Move-Item -Force $src $dst
-}
-`, { timeoutMs: 5_000 });
-      if (mv.ok) {
-        return { ok: true, size: expectSize, url: dstPath, path: dstPath, reused: true };
-      }
+    if (localSize > 0) {
+      _emit({ kind: "log", text: `(cached file size ${localSize} != expected ${expectSize}, redownloading)` });
+      await delFile(dstPath);
     }
   }
 
@@ -303,104 +319,53 @@ try {
     ? [...GH_MIRRORS.map(m => m + assetUrl), assetUrl]
     : [assetUrl, ...GH_MIRRORS.map(m => m + assetUrl)];
 
-  // 2. Parallel HEAD probe to pick the fastest reachable mirror.
-  const json = JSON.stringify(urls);
-  const probe = await ps(`
-$ProgressPreference = 'SilentlyContinue'
-$urls = '${json.replace(/'/g, "''")}' | ConvertFrom-Json
-$jobs = @()
-foreach ($u in $urls) {
-  $jobs += Start-Job -ScriptBlock {
-    param($url)
-    try {
-      $sw = [Diagnostics.Stopwatch]::StartNew()
-      $r = Invoke-WebRequest -Uri $url -Method Head -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 5
-      $sw.Stop()
-      if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 400) {
-        Write-Output ("OK $($sw.ElapsedMilliseconds) $url")
-      }
-    } catch {}
-  } -ArgumentList $u
-}
-Wait-Job $jobs -Timeout 7 | Out-Null
-$results = @()
-foreach ($j in $jobs) { $r = Receive-Job $j; if ($r) { $results += $r }; Remove-Job $j -Force | Out-Null }
-$results | Sort-Object { [int]($_.Split(' ')[1]) }
-`, { timeoutMs: 12_000 });
-
-  let ordered = urls;
-  if (probe.ok && probe.stdout) {
-    const lines = probe.stdout.split("\n").map(s => s.trim()).filter(s => s.startsWith("OK "));
-    const sorted = lines.map(l => l.split(" ").slice(2).join(" ")).filter(Boolean);
-    if (sorted.length) ordered = [...sorted, ...urls.filter(u => !sorted.includes(u))];
-  }
+  // 2. Order mirrors fastest-first (curl HEAD probes).
+  const ordered = await curlOrder(urls);
 
   // 3. Sequential download from fastest, fall through on failure.
-  for (let i = 0; i < ordered.length; i++) {
-    const url = ordered[i];
+  await makeDir(dstPath.replace(/[\\\/][^\\\/]*$/, ""));
+  for (const url of ordered) {
     // Download into a per-attempt .part file so a stale earlier download
     // process that still has a write lock on `dst` can't block us.
-    // After download completes, try to atomically place it at dst; if
-    // dst is locked we just use the .part path directly — the rest of
-    // the installer doesn't care about the filename, only the bytes.
-    const partPath = dstPath + `.part-${Date.now()}-${i}`;
-    const r = await ps(`
-$ProgressPreference = 'SilentlyContinue'
-$dst  = '${dstPath.replace(/'/g, "''")}'
-$part = '${partPath.replace(/'/g, "''")}'
-$url  = '${url.replace(/'/g, "''")}'
-New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null
-try {
-  Invoke-WebRequest -Uri $url -OutFile $part -UseBasicParsing -TimeoutSec 120
-  $size = (Get-Item $part).Length
-  $finalPath = $part
-  try {
-    Move-Item -Force $part $dst
-    $finalPath = $dst
-  } catch {
-    try {
-      Remove-Item -Force $dst -ErrorAction Stop
-      Move-Item -Force $part $dst
-      $finalPath = $dst
-    } catch {
-      # dst still locked; keep the .part path. The bytes are correct.
+    const partPath = dstPath + `.part-${Date.now()}`;
+    _emit({ kind: "log", text: `$ curl ↓ ${previewCmd(url)}` });
+    const dl = await sh(
+      `curl.exe -fL --connect-timeout 15 --max-time 600 -o "${partPath}" "${url}"`,
+      { timeoutMs: DEFAULT_TIMEOUTS.download, silent: true },
+    );
+    if (!dl.ok) { await delFile(partPath); continue; }
+    const size = await fileSize(partPath);
+    if (size < expectMin) { await delFile(partPath); continue; }
+    // If manifest gave us an exact size, reject mismatched bytes — a
+    // truncated or HTML error page from a flaky mirror wouldn't trip
+    // expectMin but would fail size equality.
+    if (expectSize && expectSize > 0 && size !== expectSize) {
+      _emit({ kind: "log", text: `(downloaded ${size} != expected ${expectSize}, trying next mirror)` });
+      await delFile(partPath);
+      continue;
     }
-  }
-  Write-Output "OK $size $finalPath"
-} catch {
-  Remove-Item -Force $part -ErrorAction SilentlyContinue
-  Write-Output "FAIL $($_.Exception.Message)"
-  exit 1
-}
-`, { timeoutMs: DEFAULT_TIMEOUTS.download });
-    if (r.ok && r.stdout.startsWith("OK ")) {
-      const m = r.stdout.match(/OK (\d+) (.+)/);
-      const size = parseInt(m?.[1] || "0", 10);
-      const actualPath = m?.[2]?.trim() || dstPath;
-      if (size < expectMin) continue;
-      // If manifest gave us an exact size, reject mismatched bytes — a
-      // truncated or HTML error page from a flaky mirror wouldn't trip
-      // expectMin but would fail size equality.
-      if (expectSize && expectSize > 0 && size !== expectSize) {
-        _emit({ kind: "log", text: `(downloaded ${size} != expected ${expectSize}, trying next mirror)` });
-        continue;
-      }
-      return { ok: true, size, url, path: actualPath };
-    }
+    // Atomically place the .part at dst; if dst is locked, keep the .part
+    // path — the rest of the installer only cares about the bytes.
+    const mv = await cmdExec(
+      `move /y "${partPath}" "${dstPath}"`,
+      { timeoutMs: 12_000, silent: true },
+    );
+    const finalPath = mv.ok ? dstPath : partPath;
+    return { ok: true, size, url, path: finalPath };
   }
   return { ok: false, error: "all mirrors failed" };
 }
 
 // ── WSL detection ─────────────────────────────────────────────────────
 async function checkWslStatus() {
-  const status = await sh("wsl --status", { timeoutMs: 8_000 });
+  const status = await sh("wsl --status", { timeoutMs: 20_000 });
   if (!status.ok) return { installed: false, supported: true };
 
   // Detect default version
   const m = status.stdout.match(/Default Version:\s*(\d)/i);
   const defaultVer = m ? parseInt(m[1], 10) : 2;
 
-  const list = await sh("wsl -l -v", { timeoutMs: 8_000 });
+  const list = await sh("wsl -l -v", { timeoutMs: 20_000 });
   if (!list.ok || !list.stdout.trim()) {
     return { installed: true, supported: true, hasDistro: false, defaultVer };
   }
@@ -530,30 +495,9 @@ async function enumerateFixedNtfsDrives() {
     TotalGB: Math.round((Number(sizeBytes) / 1073741824) * 10) / 10,
   });
 
-  // Mechanism 1 — CIM via PowerShell. Fast, modern, no Storage module.
-  // Pipe-delimited rows so we never depend on ConvertTo-Json quirks.
-  try {
-    const r = await ps(`
-$rows = @()
-Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction SilentlyContinue |
-  Where-Object { $_.FileSystem -eq "NTFS" } |
-  ForEach-Object { $rows += ($_.DeviceID.TrimEnd(":") + "|" + [int64]$_.FreeSpace + "|" + [int64]$_.Size) }
-Write-Output ("ROWS:" + ($rows -join ";"))
-`, { timeoutMs: 15_000 });
-    if (r.ok && r.stdout && r.stdout.indexOf("ROWS:") >= 0) {
-      const body = r.stdout.slice(r.stdout.indexOf("ROWS:") + 5).trim();
-      const out = [];
-      for (const part of body.split(";")) {
-        const [letter, free, size] = part.split("|");
-        if (letter && free) out.push(toObj(letter, free, size));
-      }
-      if (out.length) return out;
-    }
-  } catch {}
-
-  // Mechanism 2 — wmic. Deprecated on 24H2+ but present (and responsive) on
-  // the machines where it matters, including ones where PowerShell has gone
-  // unresponsive. /format:list gives robust key=value blocks.
+  // Mechanism 1 — wmic via cmd.exe. Starts instantly (powershell.exe can
+  // take 30–60 s to spawn under AV scanning). /format:list gives robust
+  // key=value blocks. Deprecated on 24H2+ but present on most machines.
   try {
     const r = await sh(
       `wmic logicaldisk where "DriveType=3" get DeviceID,FileSystem,FreeSpace,Size /format:list`,
@@ -575,33 +519,38 @@ Write-Output ("ROWS:" + ($rows -join ";"))
     }
   } catch {}
 
+  // Mechanism 2 — CIM via PowerShell. Fallback for 24H2+ where wmic is gone.
+  // Pipe-delimited rows so we never depend on ConvertTo-Json quirks.
+  try {
+    const r = await ps(`
+$rows = @()
+Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction SilentlyContinue |
+  Where-Object { $_.FileSystem -eq "NTFS" } |
+  ForEach-Object { $rows += ($_.DeviceID.TrimEnd(":") + "|" + [int64]$_.FreeSpace + "|" + [int64]$_.Size) }
+Write-Output ("ROWS:" + ($rows -join ";"))
+`, { timeoutMs: 45_000 });
+    if (r.ok && r.stdout && r.stdout.indexOf("ROWS:") >= 0) {
+      const body = r.stdout.slice(r.stdout.indexOf("ROWS:") + 5).trim();
+      const out = [];
+      for (const part of body.split(";")) {
+        const [letter, free, size] = part.split("|");
+        if (letter && free) out.push(toObj(letter, free, size));
+      }
+      if (out.length) return out;
+    }
+  } catch {}
+
   return null;
 }
 
-// Best-effort SSD detection — a scoring tiebreaker only. Runs as its own
-// short call so the slow/fragile Storage module can never block or fail the
-// drive selection above. Returns a Set of SSD drive letters (may be empty).
+// Best-effort SSD detection — a scoring tiebreaker only. Uses wmic (cmd,
+// instant) since the only reliable SSD signal (Get-PhysicalDisk MediaType)
+// needs PowerShell, which can be minutes-slow under AV scanning. wmic can't
+// distinguish SSD/HDD reliably, so we simply skip the bonus on machines
+// where it'd cost a 40 s+ PowerShell spawn. Returns a Set (may be empty);
+// drive selection still works on free-space + non-system-drive scoring.
 async function detectSsdLetters() {
-  const ssd = new Set();
-  try {
-    const r = await ps(`
-$letters = @()
-try {
-  Get-PhysicalDisk -ErrorAction SilentlyContinue | Where-Object { $_.MediaType -eq "SSD" } | ForEach-Object {
-    Get-Partition -DiskNumber $_.DeviceId -ErrorAction SilentlyContinue | ForEach-Object {
-      if ($_.DriveLetter) { $letters += [string]$_.DriveLetter }
-    }
-  }
-} catch {}
-Write-Output ("SSD:" + ($letters -join ","))
-`, { timeoutMs: 8_000 });
-    if (r.ok && r.stdout && r.stdout.indexOf("SSD:") >= 0) {
-      r.stdout.slice(r.stdout.indexOf("SSD:") + 4).trim()
-        .split(",").map((s) => s.trim()).filter(Boolean)
-        .forEach((l) => ssd.add(l));
-    }
-  } catch {}
-  return ssd;
+  return new Set();
 }
 
 // ── WSL install ───────────────────────────────────────────────────────
@@ -691,94 +640,63 @@ async function importUbuntuFromRootfs(network, installDrive, emit) {
 
   emit({ phase: "installing-wsl", message: "Picking fastest Ubuntu rootfs mirror…" });
 
-  // Parallel HEAD probe → sort by latency.
-  const json = JSON.stringify(urls);
-  const probe = await ps(`
-$ProgressPreference = 'SilentlyContinue'
-$urls = '${json.replace(/'/g, "''")}' | ConvertFrom-Json
-$jobs = @()
-foreach ($u in $urls) {
-  $jobs += Start-Job -ScriptBlock {
-    param($url)
-    try {
-      $sw = [Diagnostics.Stopwatch]::StartNew()
-      $r = Invoke-WebRequest -Uri $url -Method Head -UseBasicParsing -TimeoutSec 5
-      $sw.Stop()
-      if ($r.StatusCode -ge 200) { Write-Output ("OK $($sw.ElapsedMilliseconds) $url") }
-    } catch {}
-  } -ArgumentList $u
-}
-Wait-Job $jobs -Timeout 7 | Out-Null
-$res = @()
-foreach ($j in $jobs) { $r = Receive-Job $j; if ($r) { $res += $r }; Remove-Job $j -Force | Out-Null }
-$res | Sort-Object { [int]($_.Split(' ')[1]) }
-`, { timeoutMs: 12_000 });
-  let ordered = urls;
-  if (probe.ok && probe.stdout) {
-    const sorted = probe.stdout.split("\n")
-      .map(s => s.trim())
-      .filter(s => s.startsWith("OK "))
-      .map(l => l.split(" ").slice(2).join(" "))
-      .filter(Boolean);
-    if (sorted.length) ordered = [...sorted, ...urls.filter(u => !sorted.includes(u))];
-  }
+  // curl HEAD probes → fastest mirror first.
+  const ordered = await curlOrder(urls);
 
   emit({ phase: "installing-wsl", message: "Downloading Ubuntu rootfs (~350MB, may take a few minutes)…", status: "running", progress: 0 });
 
-  // Generate the temp filename in JS so the JS-side poller can stat
-  // exactly the file PS is writing into. PS used to mint a fresh GUID
-  // inside the script, but then JS had no way to know which file to
-  // poll for size → no live progress.
+  // Resolve %TEMP% once so the JS poller can stat the exact file curl writes.
   const tarName = "ubuntu-jammy-wsl-amd64.tar.gz";
+  const tmpProbe = await cmdExec(`echo %TEMP%`, { timeoutMs: 12_000, silent: true });
+  const tmpDir = (tmpProbe.stdout || "").trim() || "C:\\Windows\\Temp";
+  const tarPath = `${tmpDir}\\${tarName}`;
 
-  // Ubuntu 22.04 rootfs is ~350 MB across mirrors. Used purely for the
-  // progress bar denominator — we don't reject a download for size, the
-  // PS script has its own 50 MB minimum sanity check.
+  // Ubuntu 22.04 rootfs is ~350 MB across mirrors. Progress-bar denominator
+  // only — we don't reject on size here, just sanity-check >50 MB after.
   const ROOTFS_BYTES = 350 * 1024 * 1024;
 
-  const orderedJson = JSON.stringify(ordered);
-  const downloadPromise = ps(`
-$ProgressPreference = 'SilentlyContinue'
-# Per-attempt unique temp filename so a stale earlier download process
-# (which still holds a write lock on the previous tar.gz) can't make us
-# fail with "正由另一进程使用". The file is removed at the end.
-$tar = Join-Path $env:TEMP '${tarName}'
-$dst = '${installDrive.installDir.replace(/'/g, "''")}'
-New-Item -ItemType Directory -Force $dst | Out-Null
-$urls = '${orderedJson.replace(/'/g, "''")}' | ConvertFrom-Json
-$ok = $false
-foreach ($u in $urls) {
-  try {
-    Invoke-WebRequest -Uri $u -OutFile $tar -UseBasicParsing -TimeoutSec 1800
-    if ((Get-Item $tar).Length -gt 50000000) { $ok = $true; Write-Output ("DOWNLOADED " + $u); break }
-  } catch { Write-Output ("FAIL " + $u + " " + $_.Exception.Message) }
-}
-if (-not $ok) { Remove-Item -Force $tar -ErrorAction SilentlyContinue; Write-Output "ERR no mirror"; exit 1 }
-& wsl --import Ubuntu $dst $tar --version 2
-$importExit = $LASTEXITCODE
-Remove-Item -Force $tar -ErrorAction SilentlyContinue
-if ($importExit -ne 0) { Write-Output ("IMPORT_FAIL " + $importExit); exit 1 }
-Write-Output "IMPORTED"
-`, { timeoutMs: 35 * 60_000 });
+  await makeDir(installDrive.installDir);
+  await delFile(tarPath); // drop any stale/locked leftover before fetching
 
-  // Poll the temp file size while the download runs. Each tick is a
-  // silent PS that reads (Get-Item ...).Length — silent so the shell
-  // log doesn't get spammed with a 5-line script preview every 3 s.
-  // We emit a partial progress event (0–0.98) into the same
-  // `installing-wsl` phase so the timeline shows a live percentage on
-  // the step header. Capped at 0.98 so the bar stays visibly active
-  // until `wsl --import` (which can't be metered) actually finishes.
+  // Download via curl (sequential mirror fallthrough), then wsl --import.
+  // curl runs as its own RPC so the JS poller can read the growing file.
+  // `downloading` gates the size poller: once the tarball is fully fetched
+  // we flip it off so the poller stops spamming "下载中 …%" over the
+  // (unmeterable, multi-minute) import — otherwise the bar looks frozen at
+  // 93% and the user thinks it hung.
+  let downloading = true;
+  const downloadPromise = (async () => {
+    let fetched = false;
+    for (const u of ordered) {
+      _emit({ kind: "log", text: `$ curl ↓ ${previewCmd(u)}` });
+      const dl = await sh(
+        `curl.exe -fL --connect-timeout 15 --max-time 1800 -o "${tarPath}" "${u}"`,
+        { timeoutMs: 32 * 60_000, silent: true },
+      );
+      if (dl.ok && (await fileSize(tarPath)) > 50_000_000) { fetched = true; break; }
+    }
+    if (!fetched) { downloading = false; await delFile(tarPath); return { ok: false, error: "no reachable rootfs mirror" }; }
+    downloading = false;
+    emit({ phase: "installing-wsl", message: "正在导入运行环境…", status: "running", progress: 0.98 });
+    const imp = await sh(
+      `wsl --import Ubuntu "${installDrive.installDir}" "${tarPath}" --version 2`,
+      { timeoutMs: 20 * 60_000 },
+    );
+    await delFile(tarPath);
+    if (!imp.ok) return { ok: false, error: imp.stderr || imp.stdout || `wsl --import exit ${imp.code}` };
+    return { ok: true };
+  })();
+
+  // Poll the temp file size while the download runs → live progress bar.
+  // Capped at 0.98 so the bar stays active until `wsl --import` finishes.
   let downloadDone = false;
   const poller = (async () => {
     while (!downloadDone) {
       await new Promise((res) => setTimeout(res, 3000));
       if (downloadDone) break;
+      if (!downloading) continue; // import in progress — don't overwrite its message
       try {
-        const r = await ps(
-          `$f=Join-Path $env:TEMP '${tarName}'; if (Test-Path $f) { (Get-Item $f).Length } else { 0 }`,
-          { timeoutMs: 5_000, silent: true }
-        );
-        const bytes = parseInt((r.stdout || "0").trim(), 10) || 0;
+        const bytes = await fileSize(tarPath);
         if (bytes > 0) {
           const pct = Math.min(0.98, bytes / ROOTFS_BYTES);
           const mb = (bytes / 1024 / 1024).toFixed(1);
@@ -796,18 +714,31 @@ Write-Output "IMPORTED"
   const r = await downloadPromise;
   downloadDone = true;
   await poller; // let the loop exit cleanly on next sleep tick
-  if (!r.ok || !/IMPORTED/.test(r.stdout)) {
-    return { ok: false, error: r.stderr || r.stdout || "rootfs-import failed" };
-  }
+  if (!r.ok) return { ok: false, error: r.error || "rootfs-import failed" };
   return { ok: true, method: "rootfs-import" };
 }
 
 async function waitForDistroReady(distro, emit, deadlineMs = DEFAULT_TIMEOUTS.wslBoot) {
   const start = Date.now();
+  let shutdownTries = 0;
   while (Date.now() - start < deadlineMs) {
-    const r = await wslExec(distro, ["true"], { timeoutMs: 10_000 });
+    const r = await wslExec(distro, ["true"], { timeoutMs: 20_000 });
     if (r.ok) return { ok: true };
-    emit({ phase: "waiting-distro", message: `Waiting for ${distro} to boot…` });
+    // A freshly imported distro very often throws `Wsl/Service/E_UNEXPECTED`
+    // (or just hangs) until the WSL2 lightweight VM is cycled once. A single
+    // `wsl --shutdown` reliably clears it. We do this proactively on the
+    // first failure rather than burning the whole deadline retrying a VM
+    // that will never come up on its own. Bounded to 2 cycles.
+    const out = (r.stderr || "") + (r.stdout || "");
+    const stuck = /E_UNEXPECTED|Wsl\/Service|HRESULT|0x8/i.test(out);
+    if (shutdownTries < 2 && (stuck || Date.now() - start > 20_000)) {
+      shutdownTries++;
+      emit({ phase: "waiting-distro", message: "正在重启运行环境…", status: "running" });
+      await sh("wsl --shutdown", { timeoutMs: 30_000 });
+      await new Promise(res => setTimeout(res, 6_000));
+      continue;
+    }
+    emit({ phase: "waiting-distro", message: "正在启动运行环境…", status: "running" });
     await new Promise(res => setTimeout(res, 3_000));
   }
   return { ok: false, error: `${distro} did not boot in ${Math.round(deadlineMs / 1000)}s` };
@@ -1043,7 +974,11 @@ try {
   }
 } catch { Write-Output "QUICKACCESS_FAIL $_" }
 `;
-  const r = await ps(script, { timeoutMs: 15_000 });
+  // Only step that genuinely needs PowerShell (WScript.Shell / Shell.Application
+  // COM for .lnk + Quick Access pin — no cmd/curl equivalent). Generous
+  // timeout so a slow (AV-throttled) powershell.exe spawn still completes;
+  // failure is non-fatal and handled below.
+  const r = await ps(script, { timeoutMs: 75_000 });
   // Non-fatal regardless — the "Open WSL Files" button in the banner
   // covers the primary access path. We only surface success/skip in
   // the timeline detail so the user knows the shortcut was created.
@@ -1103,15 +1038,67 @@ if [ -n "$MISSING" ]; then
 fi
 echo "$APT_OUT" | tail -3
 `;
-  const r = await wslBash(distro, script, { timeoutMs: 5 * 60_000 });
+  // Run the apt packages AND the Node.js pre-install concurrently — Node is
+  // the long pole of cicy-code's first-launch checkEnvironment() (it blocks
+  // the :8008 bind until node is on PATH). Front-loading it here, overlapped
+  // with apt + the user's agent-pick think-time, turns the later "启动 AI
+  // 引擎" step from a 3–5 min wait into a near-instant health check.
+  const [r] = await Promise.all([
+    wslBash(distro, script, { timeoutMs: 5 * 60_000 }),
+    preinstallNode(distro, emit),
+  ]);
   if (!r.ok) {
     // Non-fatal: cicy-code can apt-install on its own at first launch.
     // We just lose the "API ready instantly" guarantee.
     emit({ phase: "installing-deps", message: `Warning: ${summarize(r.stderr, { maxLines: 1 })} — cicy-code will retry`, status: "warning" });
     return { ok: false, error: r.stderr };
   }
-  emit({ phase: "installing-deps", message: "Apt packages ready", status: "done" });
+  emit({ phase: "installing-deps", message: "运行依赖已就绪", status: "done" });
   return { ok: true };
+}
+
+// Best-effort Node.js pre-install — mirrors api/mgr/setup.go nodeInstallCmd
+// (Node 24 prebuilt tarball into $HOME/.local, npmmirror→nodejs.org). Lands
+// `node` on $HOME/.local/bin which cicy-code's extendPATH() exports, so its
+// checkEnvironment() finds node already present and skips the slow install,
+// binding :8008 immediately. Purely an optimization: if anything here fails,
+// cicy-code installs node itself at first launch (just slower). Never throws.
+async function preinstallNode(distro, emit) {
+  emit({ phase: "installing-deps", message: "正在预装运行依赖（Node.js）…", status: "running" });
+  const script = `set -e
+if command -v node >/dev/null 2>&1 && [ -x "$HOME/.local/bin/node" ]; then echo NODE_OK; exit 0; fi
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64) NARCH=x64 ;;
+  aarch64|arm64) NARCH=arm64 ;;
+  *) exit 1 ;;
+esac
+INDEX_URL=""
+for url in "https://npmmirror.com/mirrors/node/index.json" "https://nodejs.org/dist/index.json"; do
+  if curl -fsI --max-time 6 "$url" >/dev/null 2>&1; then INDEX_URL="$url"; break; fi
+done
+[ -n "$INDEX_URL" ] || exit 1
+NODE_VER=$(curl -fsSL --max-time 15 "$INDEX_URL" | grep -m1 -oE '"v24\\.[0-9]+\\.[0-9]+"' | head -1 | tr -d '"')
+[ -n "$NODE_VER" ] || NODE_VER="v24.0.0"
+BASE=$(dirname "$INDEX_URL")
+TARBALL="$BASE/\${NODE_VER}/node-\${NODE_VER}-linux-\${NARCH}.tar.xz"
+mkdir -p "$HOME/.local" "$HOME/.local/bin"
+TMP=$(mktemp -t node.XXXXXX.tar.xz)
+curl -fsSL --max-time 300 "$TARBALL" -o "$TMP"
+tar -xJf "$TMP" -C "$HOME/.local"
+rm -f "$TMP"
+ln -sfn "$HOME/.local/node-\${NODE_VER}-linux-\${NARCH}" "$HOME/.local/node"
+ln -sf "$HOME/.local/node/bin/node" "$HOME/.local/bin/node"
+ln -sf "$HOME/.local/node/bin/npm" "$HOME/.local/bin/npm"
+ln -sf "$HOME/.local/node/bin/npx" "$HOME/.local/bin/npx"
+"$HOME/.local/bin/node" --version >/dev/null 2>&1 || exit 1
+echo NODE_OK`;
+  try {
+    const r = await wslBash(distro, script, { timeoutMs: 6 * 60_000 });
+    if (!(r.ok && /NODE_OK/.test(r.stdout))) {
+      _emit({ kind: "log", text: "(node pre-install skipped/failed — cicy-code will install it at first launch)" });
+    }
+  } catch {/* non-fatal optimization */}
 }
 
 // Rewrite /etc/wsl.conf's [boot] command so cicy-code is launched with
@@ -1280,17 +1267,16 @@ npm install -g --include=optional --fetch-timeout=60000 --fetch-retries=2 \\
 // release doesn't get reused as if it were the new binary.
 async function resolveStagePath(version) {
   const safe = String(version || "unknown").replace(/[^A-Za-z0-9._-]/g, "_");
-  const r = await ps(`
-$dir = Join-Path $env:APPDATA 'CiCy Desktop\\cicy-code\\wsl-stage'
-New-Item -ItemType Directory -Force $dir | Out-Null
-Write-Output (Join-Path $dir 'cicy-code-v${safe}-staged')
-`, { timeoutMs: 5_000 });
-  if (!r.ok) throw new Error("stage path resolution failed");
-  return r.stdout.trim();
+  // Resolve %APPDATA% via cmd (instant) then build + mkdir the stage dir.
+  const r = await cmdExec(`echo %APPDATA%`, { timeoutMs: 12_000, silent: true });
+  if (!r.ok || !r.stdout.trim()) throw new Error("stage path resolution failed");
+  const dir = `${r.stdout.trim()}\\CiCy Desktop\\cicy-code\\wsl-stage`;
+  await makeDir(dir);
+  return `${dir}\\cicy-code-v${safe}-staged`;
 }
 
 async function cleanupStage(path) {
-  await ps(`Remove-Item -Force '${path.replace(/'/g, "''")}' -ErrorAction SilentlyContinue`, { timeoutMs: 5_000 });
+  await delFile(path);
 }
 
 // ── main flow ─────────────────────────────────────────────────────────
@@ -1362,13 +1348,7 @@ export async function windowsInstall({ onProgress = () => {}, onPickAgents } = {
   const stagePath = await resolveStagePath(version);
   let cachedHit = false;
   if (expectSize > 0) {
-    const probe = await ps(`
-$dst = '${stagePath.replace(/'/g, "''")}'
-if (Test-Path $dst) { Write-Output ((Get-Item $dst).Length) } else { Write-Output 'NONE' }
-`, { timeoutMs: 5_000 });
-    if (probe.ok && probe.stdout.trim() !== "NONE") {
-      cachedHit = parseInt(probe.stdout.trim(), 10) === expectSize;
-    }
+    cachedHit = (await fileSize(stagePath)) === expectSize;
   }
 
   // Guard: verify the asset actually exists on the server before declaring
@@ -1381,18 +1361,16 @@ if (Test-Path $dst) { Write-Output ((Get-Item $dst).Length) } else { Write-Outpu
     const checkUrls = (network === "cn" || network === "unknown")
       ? [...GH_MIRRORS.map(m => m + assetUrl), assetUrl]
       : [assetUrl, ...GH_MIRRORS.map(m => m + assetUrl)];
-    const checkScript = `
-$ProgressPreference='SilentlyContinue'
-$urls = '${JSON.stringify(checkUrls).replace(/'/g,"''")}' | ConvertFrom-Json
-foreach ($u in $urls) {
-  try {
-    $r = Invoke-WebRequest -Uri $u -Method Head -UseBasicParsing -TimeoutSec 6
-    if ($r.StatusCode -lt 400) { Write-Output "OK"; exit 0 }
-  } catch { continue }
-}
-Write-Output "ERR"; exit 1`;
-    const cr = await ps(checkScript, { timeoutMs: 30_000 });
-    if (!cr.ok || !cr.stdout.includes("OK")) {
+    let reachable = false;
+    for (const u of checkUrls) {
+      const r = await sh(
+        `curl.exe -sI -o NUL --connect-timeout 8 --max-time 14 -w "%{http_code}" "${u}"`,
+        { timeoutMs: 22_000, silent: true },
+      );
+      const code = parseInt((r.stdout || "").trim(), 10) || 0;
+      if (r.ok && code >= 200 && code < 400) { reachable = true; break; }
+    }
+    if (!reachable) {
       // Stable, identifiable error tag — banner can localize it via t() if
       // it sees this prefix.
       const e = new Error(`RELEASE_NOT_READY:${version}`);
@@ -1437,6 +1415,11 @@ Write-Output "ERR"; exit 1`;
     if (!wsl.installed || !wsl.usableDistro) {
       const ins = await installWsl(network, installDrive, emit);
       if (!ins.ok) throw new Error("wsl install: " + (ins.error || "failed"));
+      // Explicit "done" so the installing-wsl step settles to ✓ — the
+      // download poller's last emit is a "running" tick, so without this
+      // the step would linger at "•" (looking stuck) even though import
+      // succeeded and later steps advance.
+      emit({ phase: "installing-wsl", message: "运行环境已就绪", status: "done", progress: 1 });
       wsl = await checkWslStatus();
       if (!wsl.usableDistro) throw new Error("WSL installed but no usable distro detected — Windows may need a reboot");
     }
@@ -1444,6 +1427,9 @@ Write-Output "ERR"; exit 1`;
     // pre-existing distros that may be stopped or in a degraded state.
     const w = await waitForDistroReady(wsl.usableDistro, emit);
     if (!w.ok) throw new Error(w.error);
+    // Settle waiting-distro to ✓ — its last emit was a "running" boot tick,
+    // so without this it lingers at "•" even though the distro is up.
+    emit({ phase: "waiting-distro", message: "运行环境已启动", status: "done", progress: 1 });
     emit({ phase: "checking-wsl", message: `Using distro: ${wsl.usableDistro}`, status: "done" });
     return wsl;
   })();
@@ -1485,7 +1471,12 @@ Write-Output "ERR"; exit 1`;
   //    the drawer; we await their choice before continuing.
   const AVAILABLE_AGENTS = ["claude", "codex", "opencode"];
   let pickedAgents = ["claude"];
-  if (typeof onPickAgents === "function") {
+  if (_cachedAgents && _cachedAgents.length > 0) {
+    // Resume path: the user already chose on an earlier attempt — don't
+    // make them pick again, just reuse it so retry continues seamlessly.
+    pickedAgents = _cachedAgents;
+    emit({ phase: "picking-agents", message: `Agents: ${pickedAgents.join(", ")}`, status: "done", agents: pickedAgents });
+  } else if (typeof onPickAgents === "function") {
     emit({ phase: "picking-agents", message: "Waiting for agent selection…", status: "running" });
     try {
       const picked = await onPickAgents({ defaults: pickedAgents, available: AVAILABLE_AGENTS });
@@ -1498,6 +1489,7 @@ Write-Output "ERR"; exit 1`;
     } catch (e) {
       emit({ phase: "picking-agents", message: `pick error: ${e.message} — using default (claude)`, status: "warning" });
     }
+    _cachedAgents = pickedAgents;
     emit({ phase: "picking-agents", message: `Agents: ${pickedAgents.join(", ")}`, status: "done", agents: pickedAgents });
   }
 
@@ -1510,7 +1502,7 @@ Write-Output "ERR"; exit 1`;
   //     AND [boot] command take effect, then start cicy-code under the
   //     new default user so :8008 is up by the time the UI flips to
   //     "uptodate".
-  emit({ phase: "starting", message: `Restarting ${distro} so default user takes effect…`, status: "running" });
+  emit({ phase: "starting", message: "正在启动 AI 引擎…", status: "running" });
   // Make Ubuntu the *default* distro so `wsl.exe -e bash` (no -d) — used
   // by cicy-desktop's main process to read $HOME/cicy-ai/global.json for
   // the auto-login token — lands in Ubuntu, not docker-desktop (which
@@ -1523,26 +1515,36 @@ Write-Output "ERR"; exit 1`;
   const agentsArg = pickedAgents.join(",");
   const startCmd = `wsl -d ${distro} -- bash -lc "pgrep -f cicy-code >/dev/null 2>&1 || setsid -f /usr/local/bin/cicy-code --agents=${agentsArg} </dev/null >>~/.cicy-code.log 2>&1 ; sleep 1 ; pgrep -fa cicy-code | head -1"`;
   await sh(startCmd, { timeoutMs: 30_000 });
-  emit({ phase: "starting", message: "等待 cicy-code API 就绪…", status: "running" });
-  // Poll :8008 from within WSL — uses bash /dev/tcp so no curl dep.
-  // Capped at 30s; non-fatal — a timeout just means the API is slower
-  // on this machine but the process IS running (pgrep confirmed above).
+  // First launch runs cicy-code's checkEnvironment() before binding :8008.
+  // We front-loaded Node.js + apt deps in installRuntimeDeps, so this is now
+  // usually seconds — but we still MUST wait for a real 200 from /api/health
+  // (never a fake "done") in case the pre-install fell back to lazy install.
+  emit({ phase: "starting", message: "正在启动 AI 引擎，请稍候…", status: "running" });
   let _apiUp = false;
-  const _hDeadline = Date.now() + 30_000;
+  const _hDeadline = Date.now() + 8 * 60_000;
   while (Date.now() < _hDeadline) {
-    const _hc = await sh(`wsl -d ${distro} -- bash -c "(echo >/dev/tcp/localhost/8008) 2>/dev/null && echo OK || echo FAIL"`, { timeoutMs: 8_000, silent: true });
-    if (_hc.ok && /OK/.test(_hc.stdout)) { _apiUp = true; break; }
-    await new Promise(r => setTimeout(r, 3_000));
+    const _hc = await sh(
+      `wsl -d ${distro} -- bash -lc "curl -s -o /dev/null -w '%{http_code}' --max-time 4 http://localhost:8008/api/health 2>/dev/null || echo 000"`,
+      { timeoutMs: 15_000, silent: true },
+    );
+    if (_hc.ok && /200/.test(_hc.stdout)) { _apiUp = true; break; }
+    const _left = Math.max(0, Math.round((_hDeadline - Date.now()) / 1000));
+    emit({ phase: "starting", message: `正在配置运行环境，请稍候…（最多约 ${Math.ceil(_left / 60)} 分钟）`, status: "running" });
+    await new Promise(r => setTimeout(r, 5_000));
   }
-  emit({ phase: "starting", message: _apiUp ? `cicy-code 已就绪（agents: ${agentsArg}）` : "cicy-code 已启动（API 验证超时，首次启动可能更慢）", status: "done", agents: pickedAgents });
+  emit({
+    phase: "starting",
+    message: _apiUp ? "AI 引擎已就绪" : "AI 引擎仍在后台配置，稍后会自动就绪",
+    status: _apiUp ? "done" : "warning",
+    agents: pickedAgents,
+  });
 
-  // 11. Surface WSL files in Windows shell so novice users can find
-  //     them without typing `\\wsl$\…` into Explorer:
-  //       - Desktop shortcut "CiCy" → wsl home (always created)
-  //       - Quick Access pin in File Explorer (best-effort)
-  const wslHomePath = `\\\\wsl$\\${distro}\\home\\cicy`;
-  await createWindowsWslShortcuts(wslHomePath, emit);
-
+  // 11. Done. We deliberately do NOT create a Desktop shortcut / Quick
+  //     Access pin to the WSL home: a first-time user is here to use the
+  //     AI product, not to browse Linux files — a "\\wsl$\Ubuntu" folder
+  //     shortcut just adds confusion. (It was also the slowest remaining
+  //     PowerShell step, ~75s on AV-throttled machines.) Files stay
+  //     reachable via Explorer's network path for anyone who needs them.
   emit({
     phase: "done",
     message: `Installed v${r.version}`,
@@ -1550,11 +1552,6 @@ Write-Output "ERR"; exit 1`;
     status: "done",
     installDrive: installDrive.letter,
     installDir: installDrive.installDir,
-    // UNC path that opens the user's WSL home in Windows File Explorer.
-    // We hand this to the banner so it can render a "Open WSL Files"
-    // button that takes the user straight into their cicy-code workspace
-    // without them needing to know `\\wsl$\Ubuntu` is a thing.
-    wslHomePath,
   });
   return { ok: true, version: r.version, installDir: installDrive.installDir };
   // Note: stagePath is intentionally not deleted — downloadStaged checks

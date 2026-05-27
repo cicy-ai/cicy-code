@@ -200,12 +200,68 @@ export default function App() {
     try {
       if (window.electronRPC) {
         try {
-          // Resolve fresh URL first (reads latest token from WSL global.json).
-          let url = b.url;
-          if (window.cicy?.backends?.resolveUrl) {
-            url = (await window.cicy.backends.resolveUrl(b.id)) || b.resolvedUrl || b.url;
-          } else {
-            url = b.resolvedUrl || b.url;
+          // Obtain the access token — and we WILL obtain it. The token always
+          // physically exists in the WSL runtime (~/cicy-ai/global.json, written
+          // by cicy-code on first run); a miss only means the distro is asleep
+          // or still booting, and the read itself wakes it. So we retry until we
+          // have a tokened URL rather than ever opening a "paste your token"
+          // login page. Two sources, both retried:
+          //   1. resolveUrl (the desktop's own resolver, handles local+remote)
+          //   2. direct read of global.json over `wsl` (local backend fallback;
+          //      the wsl invocation also boots a stopped distro)
+          let url = b.resolvedUrl || b.url;
+          const hasToken = (u) => /[?&]token=/.test(u || "");
+          for (let i = 0; i < 30 && !hasToken(url); i++) {
+            if (window.cicy?.backends?.resolveUrl) {
+              try { url = (await window.cicy.backends.resolveUrl(b.id)) || url; } catch (e) {}
+            }
+            if (!hasToken(url) && b.id === "local") {
+              try {
+                const rr = await window.electronRPC("exec_shell", {
+                  command: 'wsl -e bash -lc "cat ~/cicy-ai/global.json 2>/dev/null"',
+                  timeout_ms: 9000,
+                });
+                let out = (rr?.content || []).map((c) => c.text).join("");
+                try { out = JSON.parse(out).stdout || out; } catch (e) {}
+                const tm = out.match(/"api_token"\s*:\s*"([^"]+)"/);
+                if (tm) url = "http://127.0.0.1:8008/?token=" + tm[1];
+              } catch (e) {}
+            }
+            if (hasToken(url)) break;
+            // Tell the user we're waking the runtime rather than silently hanging.
+            if (i === 0) pushToast("正在唤醒运行环境…", "info");
+            await new Promise((r) => setTimeout(r, 2500));
+          }
+          if (!hasToken(url)) {
+            // ~75s of retries and still nothing readable — the runtime is
+            // genuinely broken (not just asleep). Surface it instead of opening
+            // a dead login window.
+            pushToast("无法获取访问令牌，请重启应用后重试", "error");
+            return;
+          }
+          // Wait for the backend to actually be SERVING before opening — and
+          // GATE the open on it. Being able to read the token (above) only
+          // means the distro booted; cicy-code still needs to bind :8008,
+          // which on a first cold start trails the (slow) cicy-mihomo binary
+          // download. Opening before the server answers strands the window on
+          // a connection-error / login page that no in-window reload can fix
+          // until the server is up. A warm backend answers on the first probe
+          // (instant). If it never comes up, we DON'T open a dead window — we
+          // tell the user it's still starting. Generous bound (~5 min) so even
+          // a first-ever cold start (mihomo download) is covered.
+          {
+            const origin = (url.match(/^https?:\/\/[^/]+/) || [])[0];
+            let apiUp = !origin; // non-http (shouldn't happen) → don't block
+            for (let i = 0; origin && i < 150 && !apiUp; i++) {
+              try { apiUp = (await fetch(origin + "/api/health", { cache: "no-store" })).ok; } catch (e) {}
+              if (apiUp) break;
+              if (i === 0) pushToast("正在启动运行环境，请稍候…", "info");
+              await new Promise((r) => setTimeout(r, 2000));
+            }
+            if (!apiUp) {
+              pushToast("运行环境启动较慢，请稍后重新点击打开", "error");
+              return;
+            }
           }
           // Check if any window is already showing this backend. Compare by
           // origin+pathname only — the token in the query string rotates on
@@ -213,15 +269,50 @@ export default function App() {
           const wins = await fetchWindows();
           const targetBase = stripQuery(url);
           const existing = wins.find((w) => w.url && stripQuery(w.url) === targetBase);
-          if (existing) {
-            await window.electronRPC("control_electron_BrowserWindow", {
-              win_id: existing.id,
-              code: "(win.isMinimized() && win.restore(), win.show(), win.focus(), 'focused')",
-            });
-            pushToast(t("toast.opened", { name: b.name }));
-            return;
+          let targetWid = existing ? existing.id : null;
+          if (targetWid == null) {
+            const opened = await window.electronRPC("open_window", { url, reuseWindow: false });
+            const openedTxt = (opened?.content || []).map((c) => c.text).join("");
+            const m = openedTxt.match(/ID:\s*(\d+)/);
+            targetWid = m ? parseInt(m[1], 10) : null;
           }
-          await window.electronRPC("open_window", { url, reuseWindow: false });
+          // GUARANTEE the user lands authenticated — never on the "paste your
+          // token" login page. The cicy-code SPA's "token from ?token=" auto-
+          // login is racy on a brand-new window / just-started backend, but a
+          // `webContents.loadURL` of the same tokened URL reliably consumes the
+          // token (proven). We drive the retry from the RENDERER with short
+          // RPC calls + real awaits — a single long-running main-process loop
+          // proved unreliable (the RPC reply times out and the in-window loop
+          // gets abandoned mid-flight, so loadURL never actually fires). Each
+          // iteration: check localStorage.api_token; if absent, loadURL the
+          // tokened URL. An already-authenticated live session passes the first
+          // check and is never reloaded.
+          if (targetWid != null) {
+            try {
+              await window.electronRPC("control_electron_BrowserWindow", {
+                win_id: targetWid,
+                code: "(win.isMinimized()&&win.restore(),win.show(),win.focus(),'shown')",
+              });
+            } catch (e) {}
+            for (let i = 0; i < 12; i++) {
+              let authed = false;
+              try {
+                const cr = await window.electronRPC("control_electron_BrowserWindow", {
+                  win_id: targetWid,
+                  code: "win.webContents.executeJavaScript(\"!!localStorage.getItem('api_token')\")",
+                });
+                authed = /true/.test((cr?.content || []).map((c) => c.text).join(""));
+              } catch (e) {}
+              if (authed) break;
+              try {
+                await window.electronRPC("control_electron_BrowserWindow", {
+                  win_id: targetWid,
+                  code: "win.webContents.loadURL(" + JSON.stringify(url) + ")",
+                });
+              } catch (e) {}
+              await new Promise((r) => setTimeout(r, 2000));
+            }
+          }
           pushToast(t("toast.opened", { name: b.name }));
           return;
         } catch (e) {
@@ -279,7 +370,17 @@ export default function App() {
 
     setSidecar((s) => ({ ...s, state: "installing", progress: { phase: "init", message: "Preparing…" }, error: null }));
     setInstallLog([]);
-    setInstallSteps([]);
+    // Don't wipe the step timeline on retry — keep the completed (✓) steps
+    // visible and let the re-run update each phase row in place, so a retry
+    // visibly RESUMES from where it failed instead of starting blank. We only
+    // clear the error flag on each surviving step so stale ✗ marks don't
+    // linger; the installer's idempotency (cached download, existing distro,
+    // cached network + agent pick) means resumed steps fly past instantly.
+    setInstallSteps((steps) =>
+      Array.isArray(steps)
+        ? steps.map((s) => (s.status === "error" ? { ...s, status: "running", error: null } : s))
+        : [],
+    );
 
     // Win32: drive the install entirely from the renderer using
     // electronRPC.exec_shell. This bypasses the main-process sidecar:install

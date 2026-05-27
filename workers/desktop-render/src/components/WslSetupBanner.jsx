@@ -9,9 +9,9 @@ import "./WslSetupBanner.css";
 // stays in sync with wslInstaller.js's AVAILABLE_AGENTS — adding a new
 // agent there needs an entry here too.
 const AGENT_META = {
-  claude:   { name: "Claude",   desc: "Anthropic Claude Code CLI（最常用）" },
-  codex:    { name: "Codex",    desc: "OpenAI Codex CLI" },
-  opencode: { name: "OpenCode", desc: "开源多模型 CLI（本地推理友好）" },
+  claude:   { name: "Claude",   desc: "Anthropic 出品，最常用，推荐新手" },
+  codex:    { name: "Codex",    desc: "OpenAI 出品" },
+  opencode: { name: "OpenCode", desc: "开源、支持多种模型" },
 };
 
 // Map error strings from wslInstaller into plain Chinese that any user
@@ -205,7 +205,14 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
   const togglePick = (key) => {
     setPicked((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
+      if (next.has(key)) {
+        // Must keep at least one assistant selected — refuse to uncheck the
+        // last remaining one (no "zero agents" state the user can get stuck in).
+        if (next.size <= 1) return prev;
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
       return next;
     });
   };
@@ -225,13 +232,11 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
         <div className="wsl-banner__head">
         <div className="wsl-banner__icon"><Icon name="warn" size={18} /></div>
         <div className="wsl-banner__text">
-          <div className="wsl-banner__title">{installFinished ? "安装完成" : (isUpgradeMode ? t("wsl.title_upgrade") : title)}</div>
+          <div className="wsl-banner__title">{installFinished ? "🎉 全部就绪" : (isUpgradeMode ? t("wsl.title_upgrade") : title)}</div>
           {!isUpgradeMode && (
             <div className="wsl-banner__subtitle">
               {installFinished
-                ? (installDir
-                    ? `✨ 准备就绪！点击下方「本地团队」开始使用 · 文件位置：${installDir}`
-                    : `✨ 准备就绪！点击下方「本地团队」开始使用`)
+                ? `✨ 全部就绪！可以开始使用了。`
                 : subtitle}
             </div>
           )}
@@ -247,13 +252,8 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
             timeline: idleWithStaleTimeline reveals it again. */}
         {installFinished ? (
           <div style={{ display: "flex", gap: 8 }}>
-            {wslHomePath && (
-              <Button variant="ghost" onClick={openWslFiles} title={wslHomePath}>
-                <Icon name="folder" size={14} /> 打开 WSL 文件
-              </Button>
-            )}
             <Button variant="primary" onClick={onDismiss}>
-              <Icon name="close" size={14} /> 关闭
+              关闭
             </Button>
           </div>
         ) : (!installing && !awaitingPick) ? (
@@ -291,7 +291,7 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
         <div className="wsl-banner__pick">
           <div className="wsl-banner__pick-title">选择 AI 助手</div>
           <div className="wsl-banner__pick-hint">
-            勾选要启用的 CLI，首次创建对应 agent 时自动安装。可多选，建议至少保留 Claude。
+            选择你想使用的 AI 助手（至少一个，可多选）。首次使用时会自动为你准备好，新手建议先用 Claude。
           </div>
           <div className="wsl-banner__pick-options">
             {(pickAgents.available || ["claude", "codex", "opencode"]).map((k) => {
@@ -321,7 +321,7 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
             disabled={picked.size === 0}
             onClick={confirmPick}
           >
-            启动 cicy-code（{picked.size > 0 ? [...picked].join(", ") : "claude"}）
+            开始使用（{picked.size > 0 ? [...picked].map((k) => (AGENT_META[k]?.name || k)).join("、") : "Claude"}）
           </Button>
         </div>
       )}
@@ -493,21 +493,24 @@ export default function WslSetupBanner({ wsl, onRecheck, recheckLoading, onInsta
 // for now Chinese is hard-coded since the timeline is windows-install
 // specific and only ever runs in zh-CN UI.
 function phaseLabel(phase /*, t */) {
+  // Product-language labels: a first-time user is here to *use* the product,
+  // not to learn that it runs on WSL/Ubuntu/apt. We never surface "Linux
+  // 子系统 / 软件源 / cicy-code" — just plain "运行环境 / AI 引擎" steps.
   switch (phase) {
-    case "init":                 return "准备";
-    case "detecting":            return "检测网络与磁盘";
-    case "checking":             return "查询最新版本";
-    case "downloading":          return "下载主程序";
-    case "checking-wsl":         return "检查 Linux 子系统";
-    case "installing-wsl":       return "安装 Linux 子系统";
-    case "waiting-distro":       return "等待 Linux 子系统启动";
-    case "configuring-apt":      return "配置软件源";
-    case "installing-cicy-code": return "部署到 Linux";
-    case "installing-deps":      return "下载运行依赖";
+    case "init":                 return "准备中";
+    case "detecting":            return "检查运行环境";
+    case "checking":             return "获取最新版本";
+    case "downloading":          return "下载核心组件";
+    case "checking-wsl":         return "准备运行环境";
+    case "installing-wsl":       return "安装运行环境";
+    case "waiting-distro":       return "启动运行环境";
+    case "configuring-apt":      return "优化下载线路";
+    case "installing-cicy-code": return "安装 AI 引擎";
+    case "installing-deps":      return "安装运行依赖";
     case "picking-agents":       return "选择 AI 助手";
-    case "starting":             return "启动 cicy-code";
-    case "mounting-files":       return "桌面快捷方式";
-    case "done":                 return "完成";
+    case "starting":             return "启动 AI 引擎";
+    case "mounting-files":       return "收尾";
+    case "done":                 return "全部就绪";
     default:                     return phase || "处理中";
   }
 }
@@ -518,12 +521,15 @@ function phaseLabel(phase /*, t */) {
 function phaseDetail(step /*, t */) {
   const m = step.message || "";
   if (step.phase === "detecting") {
-    const netMap = { cn: "国内网络", global: "国际网络", unknown: "网络未知" };
-    const netLabel = step.network ? (netMap[step.network] || step.network) : null;
-    const dm = m.match(/Install drive:\s*([A-Z]):\s*\(([\d.]+)\s*GB free.*?(\bSSD\b|\bHDD\b)?/);
-    const diskLabel = dm
-      ? `${dm[1]}: 盘 ${dm[2]} GB${dm[3] ? " " + dm[3] : ""}`
+    // Global-facing product: never label the user's network as "国内/国际"
+    // (a user outside China isn't on a "domestic" network). The cn/global
+    // result is used internally only — to pick the fastest mirror order.
+    // To the user we just confirm connectivity + the chosen install drive.
+    const netLabel = step.network
+      ? (step.network === "unknown" ? null : "网络已连接")
       : null;
+    const dm = m.match(/Install drive:\s*([A-Z]):\s*\(([\d.]+)\s*GB free.*?(\bSSD\b|\bHDD\b)?/);
+    const diskLabel = dm ? `${dm[1]}: 盘 ${dm[2]} GB 可用` : null;
     if (netLabel && diskLabel) return `${netLabel} · ${diskLabel}`;
     if (diskLabel) return diskLabel;
     if (netLabel) return netLabel;
@@ -541,15 +547,13 @@ function phaseDetail(step /*, t */) {
     return null; // mid-download — only the bar / percentage matters
   }
   if (step.phase === "checking-wsl") {
-    const um = m.match(/Using distro:\s*(\S+)/);
-    if (um) return um[1];
     return null;
   }
   if (step.phase === "installing-wsl") {
+    if (/导入|Importing|wsl --import/i.test(m)) return "正在导入运行环境（约 3–8 分钟）…";
     const dlm = m.match(/Downloading Ubuntu rootfs.*?([\d.]+)\s*MB/i);
     if (dlm) return `下载中 ${dlm[1]} / ~350 MB`;
-    if (/Importing|wsl --import/i.test(m)) return "导入 Ubuntu 镜像…";
-    return "需要管理员权限，约 5–10 分钟";
+    return "需要管理员授权，约 5–10 分钟";
   }
   if (step.phase === "waiting-distro") {
     return "首次启动约需一分钟，请稍候…";
@@ -576,8 +580,8 @@ function phaseDetail(step /*, t */) {
   }
   if (step.phase === "installing-deps") {
     if (/ready|Apt packages ready/i.test(m)) return "完成";
-    if (/Warning/i.test(m)) return "部分失败，cicy-code 会自动补装";
-    return "解压工具 + 中文字体";
+    if (/Warning/i.test(m)) return "将自动补装，不影响使用";
+    return "安装运行依赖中…";
   }
   if (step.phase === "done") {
     const vm = m.match(/v([\d.]+)/);
