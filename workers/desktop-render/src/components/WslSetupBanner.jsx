@@ -472,6 +472,7 @@ function phaseLabel(phase /*, t */) {
     case "downloading":          return "下载主程序";
     case "checking-wsl":         return "检查 Linux 子系统";
     case "installing-wsl":       return "安装 Linux 子系统";
+    case "waiting-distro":       return "等待 Linux 子系统启动";
     case "configuring-apt":      return "配置软件源";
     case "installing-cicy-code": return "部署到 Linux";
     case "installing-deps":      return "下载运行依赖";
@@ -524,7 +525,13 @@ function phaseDetail(step /*, t */) {
     return null;
   }
   if (step.phase === "installing-wsl") {
+    const dlm = m.match(/Downloading Ubuntu rootfs.*?([\d.]+)\s*MB/i);
+    if (dlm) return `下载中 ${dlm[1]} / ~350 MB`;
+    if (/Importing|wsl --import/i.test(m)) return "导入 Ubuntu 镜像…";
     return "需要管理员权限，约 5–10 分钟";
+  }
+  if (step.phase === "waiting-distro") {
+    return "首次启动约需一分钟，请稍候…";
   }
   if (step.phase === "installing-cicy-code") {
     const vm = m.match(/v([\d.]+)/);

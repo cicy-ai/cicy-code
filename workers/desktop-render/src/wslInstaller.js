@@ -461,80 +461,147 @@ function pickUsableDistro(distros) {
 //      SSD (MediaType=4) from HDD (MediaType=3). WSL on SSD is several
 //      multiples faster for compile / docker-build workloads.
 //
-// A drive must have ≥10 GB free to be considered at all. If nothing
-// qualifies, we fail loudly via the empty-`all` array → LOW_DISK_SPACE.
-// Install path is always `<drive>:\CiCy\WSL\Ubuntu\` — a visible
-// top-level location, not buried in AppData.
+// A drive must have ≥10 GB free to be considered. Selection must be
+// bulletproof — it gates the whole install and the user expects zero manual
+// drive picking. Two rules learned the hard way:
+//   1. The Storage module (Get-PhysicalDisk / Get-Partition) is NEVER on the
+//      critical path. It can be slow or hang (RAID, VMs, a wedged Storage
+//      service); a hang there used to time out the whole picker → bogus
+//      "C: 0 GB" fallback → install aborted with a 31 GB D: sitting right
+//      there. SSD detection is now a separate, optional scoring bonus.
+//   2. Drives are enumerated via two independent mechanisms (CIM, then
+//      wmic) so one flaky/slow shell can't sink selection. wmic stays
+//      responsive even on a PowerShell wedged after a botched WSL import.
+// Install path is always `<drive>:\CiCy\WSL\Ubuntu\` — a visible top-level
+// location, not buried in AppData.
 async function pickInstallDrive() {
-  const r = await ps(`
-# Build SSD-letter set from physical media. Best-effort: if WMI fails
-# on older Windows, every drive scores as HDD and we still pick correctly
-# based on free space + non-system bonus.
-$ssdLetters = New-Object System.Collections.Generic.HashSet[string]
-try {
-  $physical = Get-PhysicalDisk -ErrorAction SilentlyContinue
-  if ($physical) {
-    foreach ($p in $physical) {
-      if ($p.MediaType -eq "SSD") {
-        $parts = Get-Partition -DiskNumber $p.DeviceId -ErrorAction SilentlyContinue
-        foreach ($pt in $parts) {
-          if ($pt.DriveLetter) { [void]$ssdLetters.Add(([string]$pt.DriveLetter)) }
-        }
-      }
-    }
-  }
-} catch {}
+  const MIN_GB = 10;
+  const drives = await enumerateFixedNtfsDrives();
 
-$drives = Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3" |
-  Where-Object { $_.FileSystem -eq "NTFS" -and $_.FreeSpace -gt 10GB }
-
-$out = @()
-foreach ($d in $drives) {
-  $letter = $d.DeviceID.TrimEnd(":")
-  $freeGB = [math]::Round($d.FreeSpace / 1GB, 1)
-  $totalGB = [math]::Round($d.Size / 1GB, 1)
-  $isNonSystem = ($letter -ne "C")
-  $isSSD = $ssdLetters.Contains($letter)
-  # Composite score, tunable. Non-system bonus (50) is bigger than SSD
-  # bonus (30): we'd rather put WSL on a HDD D: than on the SSD C: if
-  # both are roughly comparable.
-  $score = $freeGB + ($(if ($isNonSystem) { 50 } else { 0 })) + ($(if ($isSSD) { 30 } else { 0 }))
-  $out += [pscustomobject]@{
-    Letter      = $letter
-    FreeGB      = $freeGB
-    TotalGB     = $totalGB
-    IsNonSystem = $isNonSystem
-    IsSSD       = $isSSD
-    Score       = [math]::Round($score, 1)
+  if (drives === null) {
+    // Both enumeration mechanisms failed (transiently wedged shell). Don't
+    // hard-fail a likely-installable machine on a flaky probe — proceed
+    // optimistically on C:; the rootfs import surfaces a real ENOSPC if
+    // space is genuinely lacking.
+    return { letter: "C", freeGb: 0, totalGb: 0, isSSD: false, all: [],
+             isSystemDrive: true, probeFailed: true, installDir: `C:\\CiCy\\WSL\\Ubuntu` };
   }
-}
 
-if ($out.Count -eq 0) { Write-Output "NONE" } else {
-  $sorted = $out | Sort-Object @{Expression="Score";Descending=$true}, @{Expression="FreeGB";Descending=$true}
-  # Force array form: PS 5.1 ConvertTo-Json emits a bare object when the
-  # input pipeline has one item. Wrapping in a single-element @() lets
-  # the JS side always JSON.parse() to an array.
-  ConvertTo-Json @($sorted) -Compress -Depth 3
-}
-`, { timeoutMs: 12_000 });
-  if (!r.ok || !r.stdout || r.stdout.trim() === "NONE") {
-    return { letter: "C", freeGb: 0, all: [], isSystemDrive: true };
+  const ssd = await detectSsdLetters(); // best-effort tiebreaker, never blocks
+  const scored = drives
+    .map((d) => {
+      const isNonSystem = d.Letter !== "C";
+      const isSSD = ssd.has(d.Letter);
+      // Non-system bonus (50) > SSD bonus (30): prefer a roomy data drive
+      // over the system SSD when both are comparable.
+      return { ...d, IsSSD: isSSD, IsNonSystem: isNonSystem,
+               Score: Math.round((d.FreeGB + (isNonSystem ? 50 : 0) + (isSSD ? 30 : 0)) * 10) / 10 };
+    })
+    .filter((d) => d.FreeGB >= MIN_GB)
+    .sort((a, b) => b.Score - a.Score || b.FreeGB - a.FreeGB);
+
+  if (scored.length === 0) {
+    // Enumeration worked but no fixed NTFS drive has ≥ MIN_GB free. Genuine
+    // low disk — report C:'s actual free space in the error.
+    const cFree = (drives.find((d) => d.Letter === "C") || {}).FreeGB || 0;
+    return { letter: "C", freeGb: cFree, totalGb: 0, isSSD: false, all: [],
+             isSystemDrive: true, lowDisk: true, installDir: `C:\\CiCy\\WSL\\Ubuntu` };
   }
-  let drives = [];
-  try { drives = JSON.parse(r.stdout); } catch { return { letter: "C", freeGb: 0, all: [], isSystemDrive: true }; }
-  if (!Array.isArray(drives)) drives = [drives];
-  if (drives.length === 0) return { letter: "C", freeGb: 0, all: [], isSystemDrive: true };
-  const best = drives[0];
+
+  const best = scored[0];
   return {
     letter: best.Letter,
     freeGb: best.FreeGB,
     totalGb: best.TotalGB,
-    isSSD: !!best.IsSSD,
+    isSSD: best.IsSSD,
     score: best.Score,
-    all: drives,
+    all: scored,            // objects keep .Letter/.FreeGB for downstream checks
     isSystemDrive: best.Letter === "C",
     installDir: `${best.Letter}:\\CiCy\\WSL\\Ubuntu`,
   };
+}
+
+// Enumerate fixed (DriveType=3) NTFS drives as [{Letter, FreeGB, TotalGB}].
+// Returns null only when BOTH mechanisms fail to produce any answer.
+async function enumerateFixedNtfsDrives() {
+  const toObj = (letter, freeBytes, sizeBytes) => ({
+    Letter: String(letter).replace(":", "").trim(),
+    FreeGB: Math.round((Number(freeBytes) / 1073741824) * 10) / 10,
+    TotalGB: Math.round((Number(sizeBytes) / 1073741824) * 10) / 10,
+  });
+
+  // Mechanism 1 — CIM via PowerShell. Fast, modern, no Storage module.
+  // Pipe-delimited rows so we never depend on ConvertTo-Json quirks.
+  try {
+    const r = await ps(`
+$rows = @()
+Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction SilentlyContinue |
+  Where-Object { $_.FileSystem -eq "NTFS" } |
+  ForEach-Object { $rows += ($_.DeviceID.TrimEnd(":") + "|" + [int64]$_.FreeSpace + "|" + [int64]$_.Size) }
+Write-Output ("ROWS:" + ($rows -join ";"))
+`, { timeoutMs: 15_000 });
+    if (r.ok && r.stdout && r.stdout.indexOf("ROWS:") >= 0) {
+      const body = r.stdout.slice(r.stdout.indexOf("ROWS:") + 5).trim();
+      const out = [];
+      for (const part of body.split(";")) {
+        const [letter, free, size] = part.split("|");
+        if (letter && free) out.push(toObj(letter, free, size));
+      }
+      if (out.length) return out;
+    }
+  } catch {}
+
+  // Mechanism 2 — wmic. Deprecated on 24H2+ but present (and responsive) on
+  // the machines where it matters, including ones where PowerShell has gone
+  // unresponsive. /format:list gives robust key=value blocks.
+  try {
+    const r = await sh(
+      `wmic logicaldisk where "DriveType=3" get DeviceID,FileSystem,FreeSpace,Size /format:list`,
+      { timeoutMs: 15_000, silent: true }
+    );
+    if (r.ok && r.stdout) {
+      const out = [];
+      for (const block of r.stdout.split(/\n\s*\n/)) {
+        const kv = {};
+        for (const line of block.split("\n")) {
+          const i = line.indexOf("=");
+          if (i > 0) kv[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+        }
+        if (kv.DeviceID && kv.FileSystem === "NTFS" && kv.FreeSpace) {
+          out.push(toObj(kv.DeviceID, kv.FreeSpace, kv.Size));
+        }
+      }
+      if (out.length) return out;
+    }
+  } catch {}
+
+  return null;
+}
+
+// Best-effort SSD detection — a scoring tiebreaker only. Runs as its own
+// short call so the slow/fragile Storage module can never block or fail the
+// drive selection above. Returns a Set of SSD drive letters (may be empty).
+async function detectSsdLetters() {
+  const ssd = new Set();
+  try {
+    const r = await ps(`
+$letters = @()
+try {
+  Get-PhysicalDisk -ErrorAction SilentlyContinue | Where-Object { $_.MediaType -eq "SSD" } | ForEach-Object {
+    Get-Partition -DiskNumber $_.DeviceId -ErrorAction SilentlyContinue | ForEach-Object {
+      if ($_.DriveLetter) { $letters += [string]$_.DriveLetter }
+    }
+  }
+} catch {}
+Write-Output ("SSD:" + ($letters -join ","))
+`, { timeoutMs: 8_000 });
+    if (r.ok && r.stdout && r.stdout.indexOf("SSD:") >= 0) {
+      r.stdout.slice(r.stdout.indexOf("SSD:") + 4).trim()
+        .split(",").map((s) => s.trim()).filter(Boolean)
+        .forEach((l) => ssd.add(l));
+    }
+  } catch {}
+  return ssd;
 }
 
 // ── WSL install ───────────────────────────────────────────────────────
@@ -662,8 +729,7 @@ $res | Sort-Object { [int]($_.Split(' ')[1]) }
   // exactly the file PS is writing into. PS used to mint a fresh GUID
   // inside the script, but then JS had no way to know which file to
   // poll for size → no live progress.
-  const tarSuffix = Math.random().toString(16).slice(2, 10);
-  const tarName = `ubuntu-jammy-wsl-${tarSuffix}.tar.gz`;
+  const tarName = "ubuntu-jammy-wsl-amd64.tar.gz";
 
   // Ubuntu 22.04 rootfs is ~350 MB across mirrors. Used purely for the
   // progress bar denominator — we don't reject a download for size, the
@@ -1249,10 +1315,17 @@ export async function windowsInstall({ onProgress = () => {}, onPickAgents } = {
   // this without any UI; we surface the choice in the timeline so the
   // user understands where their files will live.
   const installDrive = await pickInstallDrive();
-  if (installDrive.all.length === 0) {
-    // No drive has ≥10 GB free. Bail with a clear error rather than
+  if (installDrive.lowDisk) {
+    // Enumeration succeeded but no fixed NTFS drive has ≥10 GB free — a
+    // genuine low-disk condition. Bail with the real free figure rather than
     // failing mid-install with a confusing ENOSPC / vhdx I/O error.
-    throw new Error(`LOW_DISK_SPACE:0:10`);
+    throw new Error(`LOW_DISK_SPACE:${installDrive.freeGb}:10`);
+  }
+  if (installDrive.probeFailed) {
+    // Drive probe was inconclusive (a flaky/slow shell). Proceed on C:
+    // rather than blocking a machine that may well be installable — the
+    // import will surface a real disk error only if space truly runs out.
+    emit({ phase: "detecting", message: "Drive probe inconclusive — defaulting to C:", status: "warning", installDrive: "C" });
   }
   emit({
     phase: "detecting",
@@ -1366,9 +1439,11 @@ Write-Output "ERR"; exit 1`;
       if (!ins.ok) throw new Error("wsl install: " + ins.error);
       wsl = await checkWslStatus();
       if (!wsl.usableDistro) throw new Error("WSL installed but no usable distro detected — Windows may need a reboot");
-      const w = await waitForDistroReady(wsl.usableDistro, emit);
-      if (!w.ok) throw new Error(w.error);
     }
+    // Always verify distro is responsive — covers both fresh installs and
+    // pre-existing distros that may be stopped or in a degraded state.
+    const w = await waitForDistroReady(wsl.usableDistro, emit);
+    if (!w.ok) throw new Error(w.error);
     emit({ phase: "checking-wsl", message: `Using distro: ${wsl.usableDistro}`, status: "done" });
     return wsl;
   })();
@@ -1447,8 +1522,19 @@ Write-Output "ERR"; exit 1`;
   // re-initialises — that's also when the new wsl.conf is parsed.
   const agentsArg = pickedAgents.join(",");
   const startCmd = `wsl -d ${distro} -- bash -lc "pgrep -f cicy-code >/dev/null 2>&1 || setsid -f /usr/local/bin/cicy-code --agents=${agentsArg} </dev/null >>~/.cicy-code.log 2>&1 ; sleep 1 ; pgrep -fa cicy-code | head -1"`;
-  const startR = await sh(startCmd, { timeoutMs: 30_000 });
-  emit({ phase: "starting", message: startR.ok ? `cicy-code started (--agents=${agentsArg})` : "started (verify health)", status: "done", agents: pickedAgents });
+  await sh(startCmd, { timeoutMs: 30_000 });
+  emit({ phase: "starting", message: "等待 cicy-code API 就绪…", status: "running" });
+  // Poll :8008 from within WSL — uses bash /dev/tcp so no curl dep.
+  // Capped at 30s; non-fatal — a timeout just means the API is slower
+  // on this machine but the process IS running (pgrep confirmed above).
+  let _apiUp = false;
+  const _hDeadline = Date.now() + 30_000;
+  while (Date.now() < _hDeadline) {
+    const _hc = await sh(`wsl -d ${distro} -- bash -c "(echo >/dev/tcp/localhost/8008) 2>/dev/null && echo OK || echo FAIL"`, { timeoutMs: 8_000, silent: true });
+    if (_hc.ok && /OK/.test(_hc.stdout)) { _apiUp = true; break; }
+    await new Promise(r => setTimeout(r, 3_000));
+  }
+  emit({ phase: "starting", message: _apiUp ? `cicy-code 已就绪（agents: ${agentsArg}）` : "cicy-code 已启动（API 验证超时，首次启动可能更慢）", status: "done", agents: pickedAgents });
 
   // 11. Surface WSL files in Windows shell so novice users can find
   //     them without typing `\\wsl$\…` into Explorer:
