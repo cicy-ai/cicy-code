@@ -175,6 +175,19 @@ Options:
 	http.HandleFunc("/api/frp-server/logs", authM(handleFrpServerLogs))
 	http.HandleFunc("/api/frp-server/install-info", authM(handleFrpServerInstallInfo))
 
+	// Audit — forensic event viewer + policy editor + mitmproxy ingest webhook.
+	// (Autonomy decision routes are registered separately in startAutonomy.)
+	http.HandleFunc("/api/audit/events", wa(handleAuditEvents))
+	http.HandleFunc("/api/audit/events/", wa(handleAuditEventByID))
+	http.HandleFunc("/api/audit/stats", wa(handleAuditStats))
+	http.HandleFunc("/api/audit/agents", wa(handleAuditAgents))
+	http.HandleFunc("/api/audit/ingest", wa(handleAuditIngest))
+	http.HandleFunc("/api/audit/allowlist/content", wa(handleAuditAllowlistContent))
+	http.HandleFunc("/api/audit/policy", wa(handleAuditPolicyGlobal))
+	http.HandleFunc("/api/audit/policy/agents/", wa(handleAuditPolicyAgent))
+	http.HandleFunc("/api/audit/policy/effective/", wa(handleAuditPolicyEffective))
+	http.HandleFunc("/api/audit/ack", w(handleAuditAck)) // public: the HMAC-signed token is the auth
+
 	// Panes
 	http.HandleFunc("/api/panes", authM(handlePanes))
 	http.HandleFunc("/api/panes/create", authM(handleCreatePane))

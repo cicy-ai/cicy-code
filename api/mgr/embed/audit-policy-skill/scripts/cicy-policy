@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""cicy-policy — thin client for the audit-policy admin skill.
+
+Talks to cicy-code on $PORT (default 8008), authenticated with
+~/cicy-ai/global.json#api_token. Same backend the UI Audit dashboard
+uses; this just gives the agent a stable command surface.
+
+Usage:
+  cicy-policy show                                  # full policy JSON
+  cicy-policy summary                               # one-screen human view
+  cicy-policy patch '<json>'                        # merge JSON into policy
+  cicy-policy set <key.path> <value>                # set one field
+  cicy-policy unset <key.path>                      # remove one field
+  cicy-policy recent [--rule RULE] [--limit N]      # recent matched events
+  cicy-policy history                               # git log of audit dir
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import urllib.request
+import urllib.error
+from pathlib import Path
+
+GLOBAL_JSON = Path.home() / "cicy-ai" / "global.json"
+AUDIT_DIR = Path.home() / "cicy-ai" / "audit"
+
+
+def load_token() -> str:
+    try:
+        with open(GLOBAL_JSON) as f:
+            tok = json.load(f).get("api_token", "")
+            if tok:
+                return tok
+    except FileNotFoundError:
+        pass
+    sys.exit(f"error: api_token not found in {GLOBAL_JSON}")
+
+
+def base_url() -> str:
+    port = os.environ.get("PORT") or "8008"
+    return f"http://127.0.0.1:{port}"
+
+
+def api(method: str, path: str, body: dict | None = None, timeout: float = 15.0) -> dict:
+    url = f"{base_url()}{path}"
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("Authorization", f"Bearer {load_token()}")
+    if body is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+            if not raw:
+                return {}
+            return json.loads(raw)
+    except urllib.error.HTTPError as e:
+        sys.exit(f"error: HTTP {e.code} on {path}: {e.read().decode(errors='replace')[:400]}")
+    except urllib.error.URLError as e:
+        sys.exit(f"error: cannot reach {url}: {e}")
+
+
+def cmd_show(_):
+    policy = api("GET", "/api/audit/policy")
+    print(json.dumps(policy, indent=2, ensure_ascii=False))
+
+
+def cmd_summary(_):
+    p = api("GET", "/api/audit/policy")
+    print(f"enabled:        {p.get('enabled', True)}")
+    print(f"fail_mode:      {p.get('fail_mode', 'open')}")
+    ov = p.get("rules_override") or []
+    cr = p.get("custom_rules") or []
+    al = p.get("allow_list") or {}
+    pv = p.get("preventive") or {}
+    ir = p.get("incident_response") or {}
+    print(f"rules_override: {len(ov)} rule(s)")
+    for r in ov:
+        bits = []
+        if r.get("disabled"):
+            bits.append("DISABLED")
+        if r.get("severity"):
+            bits.append(f"severity={r['severity']}")
+        if r.get("default_action"):
+            bits.append(f"action={r['default_action']}")
+        print(f"  - {r.get('id')}  {' '.join(bits)}")
+    print(f"custom_rules:   {len(cr)} rule(s)")
+    for r in cr:
+        m = r.get("match") or {}
+        print(f"  - {r.get('id')}  severity={r.get('severity')} action={r.get('default_action','-')} "
+              f"match={m.get('type','?')}({m.get('pattern','')[:40] + ('…' if len(m.get('pattern',''))>40 else '')})")
+    print(f"allow_list:     paths={len(al.get('paths') or [])} hashes={len(al.get('content_hashes') or [])} agents={al.get('agents') or []}")
+    print(f"preventive:     enabled={pv.get('enabled', False)} fail_mode={pv.get('fail_mode','open')}")
+    print(f"incident_email: enabled={ir.get('enabled', False)} min={ir.get('trigger_min_severity','high')} cooldown={ir.get('cooldown_seconds',1800)}s")
+
+
+def deep_merge(dst: dict, src: dict) -> dict:
+    """Merge src into dst. Lists are *replaced*, not appended — caller passes
+    the full intended list. Dicts merge key-by-key."""
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            deep_merge(dst[k], v)
+        else:
+            dst[k] = v
+    return dst
+
+
+def cmd_patch(args):
+    try:
+        patch = json.loads(args.patch_json)
+    except json.JSONDecodeError as e:
+        sys.exit(f"error: invalid JSON: {e}")
+    if not isinstance(patch, dict):
+        sys.exit("error: patch must be a JSON object")
+    current = api("GET", "/api/audit/policy")
+    merged = deep_merge(current, patch)
+    res = api("POST", "/api/audit/policy", merged)
+    print(f"ok  hash={res.get('policy_hash','?')}")
+
+
+def parse_value(v: str):
+    """Parse a CLI value as JSON if possible, otherwise as string."""
+    try:
+        return json.loads(v)
+    except json.JSONDecodeError:
+        return v
+
+
+def cmd_set(args):
+    parts = args.key.split(".")
+    val = parse_value(args.value)
+    patch: dict = {}
+    cur: dict = patch
+    for p in parts[:-1]:
+        cur[p] = {}
+        cur = cur[p]
+    cur[parts[-1]] = val
+    args.patch_json = json.dumps(patch)
+    cmd_patch(args)
+
+
+def cmd_unset(args):
+    parts = args.key.split(".")
+    current = api("GET", "/api/audit/policy")
+    cur = current
+    for p in parts[:-1]:
+        if not isinstance(cur, dict) or p not in cur:
+            sys.exit(f"error: key {args.key!r} not present")
+        cur = cur[p]
+    if not isinstance(cur, dict) or parts[-1] not in cur:
+        sys.exit(f"error: key {args.key!r} not present")
+    del cur[parts[-1]]
+    res = api("POST", "/api/audit/policy", current)
+    print(f"ok  hash={res.get('policy_hash','?')}")
+
+
+def cmd_recent(args):
+    qs = f"limit={args.limit}"
+    if args.rule:
+        qs += f"&rule={args.rule}"
+    if args.agent:
+        qs += f"&agent_id={args.agent}"
+    data = api("GET", f"/api/audit/events?{qs}")
+    events = data.get("events") or []
+    if not events:
+        print("(no matching events)")
+        return
+    for e in events:
+        ident = e.get("identity") or {}
+        findings = e.get("findings") or []
+        print(f"{e.get('ts','')}  agent={ident.get('agent_id','')}  rules={[f.get('rule_id') for f in findings]}")
+
+
+def cmd_history(_):
+    if not (AUDIT_DIR / ".git").exists():
+        print("(no git history in ~/cicy-ai/audit — autonomy hasn't auto-committed yet)")
+        return
+    git = shutil.which("git")
+    if not git:
+        sys.exit("error: git not on PATH")
+    subprocess.run([git, "-C", str(AUDIT_DIR), "log", "--oneline", "-n", "20"], check=False)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Audit policy admin client.")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("show").set_defaults(func=cmd_show)
+    sub.add_parser("summary").set_defaults(func=cmd_summary)
+
+    sp = sub.add_parser("patch", help="Deep-merge JSON into policy.")
+    sp.add_argument("patch_json")
+    sp.set_defaults(func=cmd_patch)
+
+    sp = sub.add_parser("set", help="Set one key (dot.path).")
+    sp.add_argument("key")
+    sp.add_argument("value")
+    sp.set_defaults(func=cmd_set)
+
+    sp = sub.add_parser("unset", help="Remove one key (dot.path).")
+    sp.add_argument("key")
+    sp.set_defaults(func=cmd_unset)
+
+    sp = sub.add_parser("recent", help="List recent events optionally filtered by rule/agent.")
+    sp.add_argument("--rule")
+    sp.add_argument("--agent")
+    sp.add_argument("--limit", type=int, default=10)
+    sp.set_defaults(func=cmd_recent)
+
+    sub.add_parser("history").set_defaults(func=cmd_history)
+
+    args = ap.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

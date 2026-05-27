@@ -801,6 +801,7 @@ func checkEnv() {
 	ensureBuiltinAgents(selectedAgents)
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles(selectedAgents)
+	setupAuditPolicyAgent()
 	go ensureFfmpegAsync()
 	go ensurePreinstalledSkills()
 }

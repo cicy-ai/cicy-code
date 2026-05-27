@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
-import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu, Sparkles } from 'lucide-react';
+import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu, Sparkles, MessageSquare } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
 import DecisionsTab from './DecisionsTab';
+import AssistantTab from './AssistantTab';
 import apiService from '../../services/api';
 import config from '../../config';
 import { TokenManager } from '../../services/tokenManager';
 
-type Tab = 'overview' | 'usage' | 'live' | 'agent' | 'setup';
+type Tab = 'assistant' | 'overview' | 'usage' | 'live' | 'agent' | 'setup';
 
 interface DashboardData {
   user_id: string;
@@ -481,7 +482,7 @@ const defaultPlatforms = [
 // ── Main Dashboard ──
 export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
   const { t } = useTranslation('audit');
-  const [tab, setTab] = useState<Tab>('overview');
+  const [tab, setTab] = useState<Tab>('assistant');
   const [userId, setUserId] = useState('');
   const [proxyToken, setProxyToken] = useState('');
   const [days, setDays] = useState(7);
@@ -514,6 +515,7 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
   }, [userId]);
 
   const tabs: { id: Tab; icon: typeof BarChart3; label: string }[] = [
+    { id: 'assistant', icon: MessageSquare, label: t('tabAssistant', 'Assistant') },
     { id: 'overview', icon: BarChart3, label: t('tabOverview') },
     { id: 'usage', icon: Clock, label: t('tabUsage') },
     { id: 'live', icon: Activity, label: t('tabLive') },
@@ -553,7 +555,8 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
       </nav>
 
       {/* Content */}
-      <main data-id="audit-dashboard-content" className="flex-1 overflow-auto p-4">
+      <main data-id="audit-dashboard-content" className={tab === 'assistant' ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 overflow-auto p-4'}>
+        {tab === 'assistant' && <AssistantTab />}
         {tab === 'overview' && <OverviewTab userId={userId} days={days} setDays={setDays} />}
         {tab === 'usage' && <UsageTab userId={userId} />}
         {tab === 'live' && <LiveTab />}

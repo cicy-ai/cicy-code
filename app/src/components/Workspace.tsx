@@ -12,7 +12,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import AgentAvatar from './AgentAvatar';
@@ -1541,6 +1541,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
           <SideBtn dataId="btn-providers" active={leftActive === 'providers'} icon={<Boxes className="w-5 h-5" />} title={t('sidebarProviders')} onClick={() => toggleLeft('providers')} />
           <SideBtn dataId="btn-im" active={leftActive === 'im'} icon={<MessageCircle className="w-5 h-5" />} title={t('sidebarIM', 'IM')} onClick={() => toggleLeft('im')} />
+          <SideBtn dataId="btn-audit" active={false} icon={<ShieldCheck className="w-5 h-5" />} title="Audit" onClick={() => { window.location.hash = '#/audit'; }} />
         </div>
         <div data-id="activity-bar-bottom" className="flex w-full flex-col items-center gap-3">
           <MobileQRPopover workspaceTitle={topBarTitle} />
@@ -1734,6 +1735,19 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <ExternalLink className="h-3.5 w-3.5" />
             </button>
           ) : null}
+          <button
+            type="button"
+            data-id="top-bar-audit-dashboard"
+            onClick={() => {
+              setMembershipMenuOpen(false);
+              window.location.hash = '#/audit';
+            }}
+            className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+            title="Audit Dashboard"
+          >
+            <span data-id="top-bar-audit-dashboard-label">Audit</span>
+            <ShieldCheck className="h-3.5 w-3.5" />
+          </button>
           <button
             type="button"
             data-id="top-bar-github-issues"
