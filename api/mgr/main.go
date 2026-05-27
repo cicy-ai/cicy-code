@@ -187,6 +187,8 @@ Options:
 	http.HandleFunc("/api/audit/policy/agents/", wa(handleAuditPolicyAgent))
 	http.HandleFunc("/api/audit/policy/effective/", wa(handleAuditPolicyEffective))
 	http.HandleFunc("/api/audit/ack", w(handleAuditAck)) // public: the HMAC-signed token is the auth
+	http.HandleFunc("/api/audit/readiness", wa(handleAuditReadiness))
+	http.HandleFunc("/api/audit/notify", wa(handleAuditNotify))
 
 	// Panes
 	http.HandleFunc("/api/panes", authM(handlePanes))

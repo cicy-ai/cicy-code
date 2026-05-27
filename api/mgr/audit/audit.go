@@ -15,6 +15,11 @@ var (
 	globalOnce     sync.Once
 	globalPipeline *Pipeline
 	globalErr      error
+
+	// responseMailerKind records whether the active mailer can actually reach
+	// humans ("resend") or only spools to disk ("file"). Read by the readiness
+	// check so w-10000 can warn when owner notifications won't reach anyone.
+	responseMailerKind = "file"
 )
 
 // Init wires up the audit pipeline using the standard cicy-code paths:
@@ -65,6 +70,7 @@ func Init() error {
 			p.SetMailer(NewResendMailer(creds.APIKey, from, creds.ReplyTo))
 			mailerName = "ResendMailer"
 			mailerDetail = "from=" + from + " src=" + credsSrc
+			responseMailerKind = "resend"
 		} else if creds != nil && from == "" {
 			log.Printf("[audit] resend credentials present but no From address (set policy.incident_response.email_from or CICY_RESEND_FROM) — using FileMailer")
 		}
