@@ -550,10 +550,10 @@ function phaseDetail(step /*, t */) {
     return null;
   }
   if (step.phase === "installing-wsl") {
-    if (/导入|Importing|wsl --import/i.test(m)) return "正在导入运行环境（约 3–8 分钟）…";
-    const dlm = m.match(/Downloading Ubuntu rootfs.*?([\d.]+)\s*MB/i);
-    if (dlm) return `下载中 ${dlm[1]} / ~350 MB`;
-    return "需要管理员授权，约 5–10 分钟";
+    if (/导入|Importing|wsl --import/i.test(m)) return "正在导入运行环境…";
+    const dlm = m.match(/Downloading runtime image.*?([\d.]+)\s*MB/i);
+    if (dlm) return `下载中 ${dlm[1]} / ~155 MB`;
+    return "需要管理员授权，约 2–3 分钟";
   }
   if (step.phase === "waiting-distro") {
     return "首次启动约需一分钟，请稍候…";
