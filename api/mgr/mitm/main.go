@@ -22,6 +22,12 @@ type Server struct {
 	httpListener net.Listener
 	wg           sync.WaitGroup
 
+	// seenUpstreams dedups the "seen host" discovery log so each distinct
+	// (agent, host:port, mode) tuple is logged only once per process. Lets the
+	// operator discover which upstreams non-gateway agents hit (different model
+	// providers under official login) and decide what to whitelist.
+	seenUpstreams sync.Map
+
 	// shutdown coordination
 	closing chan struct{}
 }
@@ -169,7 +175,24 @@ func (s *Server) serveRequest(ctx context.Context, req *SOCKS5Request) {
 	identity := InferIdentity(s.cfg.Identity.Rules, req.Conn.RemoteAddr(), req.Conn.LocalAddr(), req.Username, req.Host)
 	hostPort := req.HostPort()
 
-	if !s.cfg.IsWhitelisted(req.Host) {
+	intercepted := s.cfg.IsWhitelisted(req.Host)
+	mode := "passthrough"
+	if intercepted {
+		mode = "intercept"
+	}
+	// Discovery log: record each distinct (agent, host, mode) once. Under
+	// official login a worker may hit several different provider hosts; this
+	// surfaces them (deduped) so the operator knows what to whitelist.
+	agentLabel := identity.AgentID
+	if agentLabel == "" {
+		agentLabel = "?"
+	}
+	seenKey := agentLabel + "\x00" + hostPort + "\x00" + mode
+	if _, dup := s.seenUpstreams.LoadOrStore(seenKey, struct{}{}); !dup {
+		log.Printf("[mitm] seen upstream agent=%s host=%s mode=%s", agentLabel, hostPort, mode)
+	}
+
+	if !intercepted {
 		// Non-MITM passthrough.
 		if err := passthrough(ctx, req.Conn, hostPort, s.dialer.DialTCP); err != nil {
 			log.Printf("[mitm] passthrough %s: %v", hostPort, err)
