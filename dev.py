@@ -1025,6 +1025,28 @@ def run_docker_build(version_override=""):
     sys.exit(0)
 
 
+def _public_url_with_port(url, port):
+    """Rewrite CICY_PUBLIC_URL to the externally-published host port.
+
+    The dev container listens on 8008 internally but is published on --port
+    (default 8026). CICY_PUBLIC_URL gets baked into in-app links (e.g. the
+    incident-email ack URL); keeping the internal :8008 makes those links 404
+    from outside. Only rewrites when the URL has an explicit port — a bare
+    domain (production reverse-proxy) is left untouched.
+    """
+    try:
+        from urllib.parse import urlsplit, urlunsplit
+
+        p = urlsplit(url)
+        if not p.hostname or p.port is None:
+            return url
+        return urlunsplit(
+            (p.scheme or "http", f"{p.hostname}:{port}", p.path, p.query, p.fragment)
+        )
+    except Exception:
+        return url
+
+
 def run_docker(
     ports,
     container_name="cicy-code-dev",
@@ -1095,8 +1117,11 @@ def run_docker(
     ]
     for key in passthrough_env_keys:
         value = os.environ.get(key, "").strip()
-        if value:
-            env_vars.extend(["-e", f"{key}={value}"])
+        if not value:
+            continue
+        if key == "CICY_PUBLIC_URL":
+            value = _public_url_with_port(value, ports)
+        env_vars.extend(["-e", f"{key}={value}"])
     trial_ttl_seconds = int(
         (os.environ.get("CLOUD_TRIAL_RUNTIME_TTL_SECONDS", "3600") or "3600").strip()
         or "3600"
