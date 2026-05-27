@@ -13,6 +13,9 @@ Usage:
   cicy-policy unset <key.path>                      # remove one field
   cicy-policy recent [--rule RULE] [--limit N]      # recent matched events
   cicy-policy history                               # git log of audit dir
+  cicy-policy template list                         # curated policy templates
+  cicy-policy template diff <name>                  # what a template would change
+  cicy-policy template apply <name> [--yes]         # preview / apply a template
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from pathlib import Path
 
 GLOBAL_JSON = Path.home() / "cicy-ai" / "global.json"
 AUDIT_DIR = Path.home() / "cicy-ai" / "audit"
+TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 
 def load_token() -> str:
@@ -213,6 +217,116 @@ def cmd_notify(args):
     print(f"ok  已通知责任人  event={res.get('event_id', args.event_id)}")
 
 
+# ── policy templates (curated starting points) ──────────────────────────────
+
+def load_template(name: str) -> dict:
+    f = TEMPLATES_DIR / f"{name}.json"
+    if not f.exists():
+        avail = ", ".join(sorted(p.stem for p in TEMPLATES_DIR.glob("*.json"))) or "(none)"
+        sys.exit(f"error: template {name!r} not found. available: {avail}")
+    try:
+        return json.loads(f.read_text())
+    except json.JSONDecodeError as e:
+        sys.exit(f"error: template {name!r} is invalid JSON: {e}")
+
+
+def _render_val(v) -> str:
+    if isinstance(v, list):
+        ids = [x.get("id") for x in v if isinstance(x, dict) and x.get("id")]
+        if ids:
+            return f"[{len(v)} 条: {', '.join(ids)}]"
+    return json.dumps(v, ensure_ascii=False)
+
+
+def _flatten(d: dict, prefix: str = "") -> dict:
+    """Flatten nested dicts to dotted keys; lists are kept as leaf values
+    (deep_merge replaces lists wholesale, so we diff them as a unit)."""
+    out: dict = {}
+    for k, v in d.items():
+        key = f"{prefix}.{k}" if prefix else k
+        if isinstance(v, dict):
+            out.update(_flatten(v, key))
+        else:
+            out[key] = v
+    return out
+
+
+def _template_changes(tpl: dict):
+    """Return [(dotted_key, current, new), ...] for keys the template alters."""
+    pol = tpl.get("policy") or {}
+    current = api("GET", "/api/audit/policy")
+    flat_new = _flatten(pol)
+    flat_cur = _flatten(current)
+    changes = []
+    for k, newv in flat_new.items():
+        curv = flat_cur.get(k, None)
+        if curv != newv:
+            changes.append((k, curv, newv))
+    return changes
+
+
+def _print_changes(changes):
+    for k, curv, newv in changes:
+        cur_s = "<未设>" if curv is None else _render_val(curv)
+        print(f"  {k}:  {cur_s}  →  {_render_val(newv)}")
+
+
+def cmd_template_list(_):
+    files = sorted(TEMPLATES_DIR.glob("*.json"))
+    if not files:
+        print(f"(no templates in {TEMPLATES_DIR})")
+        return
+    print("可用策略模板:")
+    for f in files:
+        try:
+            t = json.loads(f.read_text())
+        except json.JSONDecodeError:
+            continue
+        print(f"\n  ▸ {t.get('name', f.stem)}  —  {t.get('title','')}")
+        if t.get("summary"):
+            print(f"    {t['summary']}")
+        if t.get("use_when"):
+            print(f"    适用: {t['use_when']}")
+    print("\n看改动: cicy-policy template diff <name>   应用: cicy-policy template apply <name> --yes")
+
+
+def cmd_template_show(args):
+    print(json.dumps(load_template(args.name), indent=2, ensure_ascii=False))
+
+
+def cmd_template_diff(args):
+    t = load_template(args.name)
+    changes = _template_changes(t)
+    print(f"模板 {t.get('name')} ({t.get('title','')}) 将改动 {len(changes)} 处:")
+    if not changes:
+        print("  (当前策略已与模板一致,无改动)")
+        return
+    _print_changes(changes)
+    if t.get("tradeoffs"):
+        print(f"\n权衡: {t['tradeoffs']}")
+    print("\n注意: 列表字段(rules_override / custom_rules)是整体替换、非追加 —— 已有自定义规则先 cicy-policy show 确认不会被覆盖。")
+
+
+def cmd_template_apply(args):
+    t = load_template(args.name)
+    changes = _template_changes(t)
+    if not changes:
+        print(f"模板 {t.get('name')} 与当前策略一致,无需应用。")
+        return
+    if not args.yes:
+        print(f"模板 {t.get('name')} ({t.get('title','')}) 将改动 {len(changes)} 处(预览,未写入):")
+        _print_changes(changes)
+        if t.get("tradeoffs"):
+            print(f"\n权衡: {t['tradeoffs']}")
+        print(f"\n确认无误后写入: cicy-policy template apply {args.name} --yes")
+        return
+    current = api("GET", "/api/audit/policy")
+    merged = deep_merge(current, t.get("policy") or {})
+    res = api("POST", "/api/audit/policy", merged)
+    print(f"ok  已应用模板 {t.get('name')}  hash={res.get('policy_hash','?')}")
+    print("回滚: cicy-policy unset <key.path> 逐项撤销,或 cicy-code audit autonomy revert <id>")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Audit policy admin client.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -246,6 +360,20 @@ def main():
     sp.add_argument("event_id")
     sp.add_argument("--note", default="", help="Advisor's own assessment, prepended to the email.")
     sp.set_defaults(func=cmd_notify)
+
+    tp = sub.add_parser("template", help="Apply a curated policy template.")
+    tpsub = tp.add_subparsers(dest="tcmd", required=True)
+    tpsub.add_parser("list", help="List available templates.").set_defaults(func=cmd_template_list)
+    sp = tpsub.add_parser("show", help="Print a template's full JSON.")
+    sp.add_argument("name")
+    sp.set_defaults(func=cmd_template_show)
+    sp = tpsub.add_parser("diff", help="Show what a template would change vs current policy.")
+    sp.add_argument("name")
+    sp.set_defaults(func=cmd_template_diff)
+    sp = tpsub.add_parser("apply", help="Preview (default) or write (--yes) a template.")
+    sp.add_argument("name")
+    sp.add_argument("--yes", action="store_true", help="actually write (default: preview only)")
+    sp.set_defaults(func=cmd_template_apply)
 
     args = ap.parse_args()
     args.func(args)

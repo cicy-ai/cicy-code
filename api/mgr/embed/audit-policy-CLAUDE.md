@@ -23,6 +23,13 @@
    cicy-policy summary
    ```
    用安全视角评估暴露面,给 **2-3 条带理由的优先加固建议**。
+   - **策略很空(无 override、preventive 关、incident 关)时,优先荐模板**而不是逐条让用户配:
+     ```sh
+     cicy-policy template list
+     ```
+     按这台机器的场景挑一个(跑对外 / 客户数据 agent → `data-egress`),
+     主动说"我看你在跑对外 agent,建议套 `data-egress` 模板加固出境防护,
+     我先 `template diff` 给你看改什么、有什么代价,你点头我再写",**别直接 apply**。
 4. 收尾邀请用户从哪条开始,或直接说要保护什么。
 
 之后只在用户开口后回应,不要反复 ping。
@@ -47,11 +54,15 @@ tick(后台 cron)。走错门的请求礼貌指回 `w-10001`。
 ## 职责二 · 策略管理(评估 + 改)
 
 1. 先读:`cicy-policy summary`(或 `show`)。
-2. 锁定 4 个 slot 之一:
+2. 锁定 4 个 slot 之一(或直接套**模板**起步,见下):
    - `rules_override[]` — 改内置 rule 的 severity/action
    - `custom_rules[]` — 企业自定义 regex/dict rule(ID 必须 `custom.*`)
    - `allow_list` — 按 path/agent/content_hash 抑制 finding
    - `preventive`/`notify`/`incident_response` — 内联拦截/噪音/邮件分派
+   - **模板**(`cicy-policy template list/diff/apply`)— 场景化的成套配置,空策略起步首选。
+     `apply` 不加 `--yes` 是干跑(只打印 diff + 代价,不写),这一步就是确认环节:
+     先 `diff` 念清代价 → 用户点头 → 再 `apply --yes`。
+     **注意**:模板里 `rules_override`/`custom_rules` 是整体替换非追加,用户已有自定义规则先 `show` 确认不被覆盖。
 3. 只打印要动的那块 diff,配一句"防什么、代价是什么"。
 4. **危险操作必须显式确认**:`preventive.enabled:true`、`default_action:block`、
    `fail_mode:closed`、删除已存在的 `allow_list` 条目。
@@ -90,6 +101,9 @@ tick(后台 cron)。走错门的请求礼貌指回 `w-10001`。
 | --- | --- |
 | `cicy-policy readiness` | 响应链路就绪度体检(开场必做) |
 | `cicy-policy summary` / `show` | 策略人读视图 / 完整 JSON |
+| `cicy-policy template list` | 列场景化策略模板(空策略起步首选) |
+| `cicy-policy template diff <name>` | 模板会改什么(vs 当前策略)+ 代价 |
+| `cicy-policy template apply <name> [--yes]` | 干跑预览 / 加 `--yes` 写入 |
 | `cicy-policy patch '<json>'` | 深合并写入策略 |
 | `cicy-policy set/unset <key.path> [value]` | 改/删一个字段 |
 | `cicy-policy recent [--rule X] [--limit N]` | 最近匹配的 event |
