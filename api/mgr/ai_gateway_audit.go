@@ -366,6 +366,10 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	if prevReply.TurnID != "" && isContinuation {
 		prevItems = prevReply.Items
 		turnID = prevReply.TurnID
+		// This continuation request carries the tool_result blocks for the
+		// tool_use items we just inherited; fold the outputs back onto them so
+		// reply.json shows each tool call's result.
+		prevItems = aiGatewayInjectToolResultsIntoItems(prevItems, payloadMap)
 	}
 	if prevItems == nil {
 		prevItems = []map[string]interface{}{}
@@ -1323,6 +1327,61 @@ func aiGatewayExtractToolResultsFromRequest(payload map[string]interface{}) []ma
 	return steps
 }
 
+// aiGatewayInjectToolResultsIntoItems folds the tool RESULTS carried in a
+// tool-continuation request body back onto the inherited tool_use items, so
+// reply.json shows each tool call's output next to the call.
+//
+// Why here: a tool_use produced in turn N's response has no result yet — the
+// CLI runs the tool and sends the output back in the *next* request of the same
+// turn (a continuation, role=user with tool_result blocks / role=tool message /
+// function_call_output input item). newAIGatewayAuditSession inherits the prior
+// turn's Items on a continuation; this matches each tool_result to its tool_use
+// by tool_id and attaches the output there. Shared by the gateway proxy and the
+// MITM adapter — both construct the session through newAIGatewayAuditSession.
+//
+// Items are mutated in place (they come from a freshly-loaded prevReply). The
+// pass is idempotent: a tool_use that already has a non-empty output is left
+// alone, so repeated continuations don't clobber an earlier result.
+func aiGatewayInjectToolResultsIntoItems(items []map[string]interface{}, body map[string]interface{}) []map[string]interface{} {
+	if len(items) == 0 || len(body) == 0 {
+		return items
+	}
+	results := map[string]interface{}{}
+	for _, step := range aiGatewayExtractToolResultsFromRequest(M{"body": body}) {
+		if aiGatewayString(step["kind"]) != "tool_result" {
+			continue
+		}
+		id := strings.TrimSpace(aiGatewayString(step["tool_id"]))
+		if id == "" {
+			continue
+		}
+		if _, dup := results[id]; !dup {
+			results[id] = step["output"]
+		}
+	}
+	if len(results) == 0 {
+		return items
+	}
+	for _, item := range items {
+		if aiGatewayString(item["type"]) != "tool_use" {
+			continue
+		}
+		id := strings.TrimSpace(aiGatewayString(item["tool_id"]))
+		if id == "" {
+			continue
+		}
+		output, ok := results[id]
+		if !ok {
+			continue
+		}
+		if existing := strings.TrimSpace(aiGatewayFlattenPromptValue(item["output"])); existing != "" {
+			continue
+		}
+		item["output"] = output
+	}
+	return items
+}
+
 func aiGatewayToolCallsFromMessage(item map[string]interface{}) []map[string]interface{} {
 	if aiGatewayString(item["role"]) != "assistant" {
 		return nil
@@ -2273,6 +2332,27 @@ func aiGatewayBuildMessageToolCalls(events []map[string]interface{}, reply aiGat
 
 	for _, item := range reply.ToolCalls {
 		_ = appendCall(item.ToolID, item.ToolName, aiGatewayCompactText(item.Arguments, 12000), "", 0)
+	}
+
+	// Backfill outputs from reply.Items: tool_use items now carry the result that
+	// arrived in the continuation request (aiGatewayInjectToolResultsIntoItems).
+	// The event-based timeline (steps) is disabled, so this is the live source of
+	// tool outputs. Only fill outputs — inputs/names already came from the loops
+	// above — to avoid duplicating tool calls.
+	for _, item := range reply.Items {
+		if aiGatewayString(item["type"]) != "tool_use" {
+			continue
+		}
+		output := aiGatewayCompactText(aiGatewayFlattenPromptValue(item["output"]), 12000)
+		if strings.TrimSpace(output) == "" {
+			continue
+		}
+		id := strings.TrimSpace(aiGatewayString(item["tool_id"]))
+		if existing := byID[id]; existing != nil {
+			existing.Output = mergeField(existing.Output, output)
+			continue
+		}
+		_ = appendCall(id, aiGatewayString(item["name"]), aiGatewayCompactText(aiGatewayJSONString(item["input"]), 12000), output, 0)
 	}
 
 	clean := make([]aiGatewayMessageToolCall, 0, len(out))
