@@ -1353,7 +1353,7 @@ export async function windowsInstall({ onProgress = () => {}, onPickAgents } = {
   if (!mf.ok) throw new Error("manifest fetch failed: " + mf.error);
   const version = mf.version;
   const assetUrl = mf.assets["linux-amd64"];
-  if (!assetUrl) throw new Error("manifest has no linux-amd64 asset");
+  if (!assetUrl) throw new Error("manifest has no linux-amd64 asset");  // dev-only, never seen by users
   const expectSize = (mf.sizes && mf.sizes["linux-amd64"]) || 0;
 
   // Resolve the staging path early so we can check the local cache before
@@ -1415,7 +1415,7 @@ Write-Output "ERR"; exit 1`;
   let actualBinaryPath = stagePath;
   const downloadTask = (async () => {
     const dl = await downloadStaged({ assetUrl, network, dstPath: stagePath, expectSize });
-    if (!dl.ok) throw new Error("download failed: " + dl.error);
+    if (!dl.ok) throw new Error("download failed: " + (dl.error || "all mirrors failed"));
     // dl.path is the actual on-disk filename — usually equals stagePath
     // but may be a `.part-*` fallback if stagePath was locked by a stale
     // download process from an earlier interrupted install.
@@ -1436,7 +1436,7 @@ Write-Output "ERR"; exit 1`;
     let wsl = await checkWslStatus();
     if (!wsl.installed || !wsl.usableDistro) {
       const ins = await installWsl(network, installDrive, emit);
-      if (!ins.ok) throw new Error("wsl install: " + ins.error);
+      if (!ins.ok) throw new Error("wsl install: " + (ins.error || "failed"));
       wsl = await checkWslStatus();
       if (!wsl.usableDistro) throw new Error("WSL installed but no usable distro detected — Windows may need a reboot");
     }

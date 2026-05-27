@@ -14,16 +14,44 @@ const AGENT_META = {
   opencode: { name: "OpenCode", desc: "开源多模型 CLI（本地推理友好）" },
 };
 
-// Map well-known error tags from wslInstaller into localized messages.
-// Anything we don't recognize is rendered as-is, so devs still see the
-// raw shell stderr while users get human-readable text for known cases.
+// Map error strings from wslInstaller into plain Chinese that any user
+// can understand. Never show raw technical strings (timeouts, stack traces,
+// PowerShell stderr) to end users. Dev details are in the raw shell log.
 function localizeStepError(raw, t) {
   if (!raw) return "";
-  let m = String(raw).match(/^RELEASE_NOT_READY:(.+)$/);
+  const s = String(raw);
+
+  // Structured tags thrown by wslInstaller
+  let m = s.match(/^RELEASE_NOT_READY:(.+)$/);
   if (m) return t("wsl.error.release_not_ready", { version: m[1] });
-  m = String(raw).match(/^LOW_DISK_SPACE:(.+):(.+)$/);
+  m = s.match(/^LOW_DISK_SPACE:(.+):(.+)$/);
   if (m) return t("wsl.error.low_disk_space", { free: m[1], required: m[2] });
-  return raw;
+
+  // Network / download failures
+  if (/manifest fetch failed|no reachable manifest/i.test(s))
+    return "无法获取安装信息，请检查网络连接后重试。";
+  if (/client-side timeout|timed out|timeout/i.test(s))
+    return "网络连接超时，请检查网络后重试。";
+  if (/download failed|all mirrors failed/i.test(s))
+    return "下载失败，所有下载地址均无法访问，请检查网络连接。";
+
+  // WSL / distro errors
+  if (/no usable distro|Windows may need a reboot/i.test(s))
+    return "未检测到可用的 Linux 子系统，请重启电脑后再试。";
+  if (/did not boot in/i.test(s))
+    return "Linux 子系统启动超时，请重试或重启电脑。";
+  if (/wsl install:/i.test(s))
+    return "Linux 子系统安装失败，" + s.replace(/^wsl install:\s*/i, "");
+  if (/import.*fail|IMPORT_FAIL/i.test(s))
+    return "Ubuntu 镜像导入失败，请重试。";
+
+  // Generic installer failure
+  if (/install returned not ok/i.test(s))
+    return "安装未能完成，请重试。";
+  if (/manifest|stderr|exitCode|client-side/i.test(s))
+    return "安装过程中出现错误，请点击重试。";
+
+  return s;
 }
 
 // Open Windows Settings → Storage. Uses the `ms-settings:` URI scheme,
