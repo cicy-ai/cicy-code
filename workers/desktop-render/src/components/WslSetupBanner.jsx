@@ -518,22 +518,15 @@ function phaseLabel(phase /*, t */) {
 function phaseDetail(step /*, t */) {
   const m = step.message || "";
   if (step.phase === "detecting") {
-    const nm = m.match(/Network:\s*(\S+)/);
-    if (nm) {
-      // Region-neutral labels — the original "国内/海外" wording assumes
-      // the user is in China. Just say which probe succeeded; the user
-      // can read either the English tag or the parenthetical hint.
-      if (nm[1] === "cn")      return "China (mirrors)";
-      if (nm[1] === "global")  return "Global (direct)";
-      if (nm[1] === "unknown") return "Unknown (will try mirrors)";
-      return nm[1];
-    }
-    // Pick-drive emit: surface the chosen disk + headroom.
-    const dm = m.match(/Install drive:\s*([A-Z]):\s*\(([\d.]+)\s*GB free.*?(\bSSD\b|\bHDD\b|\bsystem\b)?/);
-    if (dm) {
-      const tag = dm[3] === "SSD" ? "SSD" : dm[3] === "HDD" ? "HDD" : "";
-      return `安装到 ${dm[1]}: 盘 (剩余 ${dm[2]} GB${tag ? ", " + tag : ""})`;
-    }
+    const netMap = { cn: "国内网络", global: "国际网络", unknown: "网络未知" };
+    const netLabel = step.network ? (netMap[step.network] || step.network) : null;
+    const dm = m.match(/Install drive:\s*([A-Z]):\s*\(([\d.]+)\s*GB free.*?(\bSSD\b|\bHDD\b)?/);
+    const diskLabel = dm
+      ? `${dm[1]}: 盘 ${dm[2]} GB${dm[3] ? " " + dm[3] : ""}`
+      : null;
+    if (netLabel && diskLabel) return `${netLabel} · ${diskLabel}`;
+    if (diskLabel) return diskLabel;
+    if (netLabel) return netLabel;
     return null;
   }
   if (step.phase === "checking") {
