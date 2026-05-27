@@ -11,6 +11,30 @@ import { ChevronRight, ChevronDown, File as FileIcon, Folder, FolderOpen, Refres
 import { fsApi, FsEntry, FsListResponse, FsFavorite, FsRoot, joinFsPath } from './api';
 import { fsCachePeek, fsCacheSet, fsKey } from './fsCache';
 
+// Copy text to the clipboard, with an execCommand fallback for INSECURE origins
+// (navigator.clipboard is undefined over plain http://<ip>:port — which is how
+// the dev container UI is served — so "复制路径" silently no-ops without this).
+function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => fallbackCopyText(text));
+    return;
+  }
+  fallbackCopyText(text);
+}
+function fallbackCopyText(text: string) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  } catch { /* ignore */ }
+}
+
 interface FileExplorerProps {
   agentId: string;
   workspaceFolder: string;
@@ -79,9 +103,17 @@ function emptyDirState(): DirState {
 interface ContextMenuState {
   x: number;
   y: number;
+  /** For the workspace tree this is the workspace-relative path. For an extra
+   *  root it's the root-relative path; `root` then carries that root so the
+   *  copy-path action can resolve the correct absolute path. */
   path: string;
   name: string;
   isDir: boolean;
+  /** Set only when the menu was opened on an extra-root (projects / skills /
+   *  home) node. Non-workspace roots are read-only, so the menu hides every
+   *  mutating action and resolves copy-path against `root.path` instead of
+   *  `workspaceFolder`. Undefined ⇒ workspace tree (full menu). */
+  root?: FsRoot;
 }
 
 export default function FileExplorer({
@@ -374,18 +406,32 @@ export default function FileExplorer({
     [agentId, pageClientId],
   );
 
-  // Copy one or many paths (newline-separated) to the clipboard. Always
-  // formats as workspace-absolute since the inline "复制相对路径" option
-  // was retired in favor of a single, more useful action.
-  const handleCopyPath = useCallback((paths: string[]) => {
-    const root = workspaceFolder ? workspaceFolder.replace(/\/$/, '') : '';
+  // Copy one or many paths (newline-separated) to the clipboard, formatted as
+  // absolute. `base` is the root's absolute base path: `workspaceFolder` for
+  // the workspace tree, or the extra root's `FsRoot.path` for projects / skills
+  // / home — the supplied paths are relative to whichever base is passed.
+  const handleCopyPath = useCallback((paths: string[], base: string) => {
+    const root = base ? base.replace(/\/$/, '') : '';
     const joined = paths
       .map((p) => (root ? `${root}/${p}` : p))
       .join('\n');
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(joined).catch(() => {});
-    }
-  }, [workspaceFolder]);
+    copyTextToClipboard(joined);
+  }, []);
+
+  // Open the context menu for an extra-root (projects / skills / home) node.
+  // These roots are read-only, so the menu render hides every mutating action;
+  // `root` is carried so copy-path / send resolve against the right base.
+  const handleRemoteContextMenu = useCallback(
+    (e: React.MouseEvent, root: FsRoot, path: string, name: string, isDir: boolean) => {
+      e.preventDefault();
+      // Extra-root nodes live outside the workspace multi-select model, so
+      // clear that selection to keep the menu acting on this single node.
+      setSelected(new Set());
+      setAnchor(null);
+      setMenu({ x: e.clientX, y: e.clientY, path, name, isDir, root });
+    },
+    [],
+  );
 
   const rootState = dirs.get(ROOT_PATH);
 
@@ -514,10 +560,27 @@ export default function FileExplorer({
             agentId={agentId}
             root={r}
             onOpenFile={(path, entry) => onOpenFile(path, entry, r.id)}
+            onContextMenu={handleRemoteContextMenu}
           />
         ))}
       </div>
-      {menu && (
+      {menu && menu.root ? (
+        // Extra-root (projects / skills / home) node: read-only. Only the
+        // non-mutating actions are wired; rename/delete/new/upload/download and
+        // the workspace-scoped favorite/file-info handlers are intentionally
+        // omitted because those parent handlers resolve against the workspace
+        // root only and there's no root-aware contract for them here.
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          selectionCount={1}
+          onSendToAgent={() => handleSendToAgent(menu.path)}
+          // Resolve copy-path against the extra root's absolute base so the
+          // copied path points at the actual file (not under workspaceFolder).
+          onCopyPath={() => handleCopyPath([menu.path], menu.root!.path)}
+          onClose={() => setMenu(null)}
+        />
+      ) : menu ? (
         <ContextMenu
           x={menu.x}
           y={menu.y}
@@ -529,7 +592,7 @@ export default function FileExplorer({
             const targets = selected.size > 1 && selected.has(menu.path)
               ? Array.from(selected)
               : [menu.path];
-            handleCopyPath(targets);
+            handleCopyPath(targets, workspaceFolder);
           }}
           onShowFileInfo={onShowFileInfo && !menu.isDir ? () => onShowFileInfo(menu.path) : undefined}
           onAddFavorite={onAddFavorite ? () => onAddFavorite(menu.path) : undefined}
@@ -546,7 +609,7 @@ export default function FileExplorer({
           onDownload={onDownload && !menu.isDir ? () => onDownload(menu.path) : undefined}
           onClose={() => setMenu(null)}
         />
-      )}
+      ) : null}
     </div>
   );
 }
@@ -822,6 +885,10 @@ interface RemoteSectionProps {
   agentId: string;
   root: FsRoot;
   onOpenFile: (path: string, entry: FsEntry) => void;
+  /** Right-click on a node in this section. The parent opens the (read-only)
+   *  context menu, carrying `root` so copy-path resolves against the right base.
+   *  `path` is root-relative; same value the open handler receives. */
+  onContextMenu?: (e: React.MouseEvent, root: FsRoot, path: string, name: string, isDir: boolean) => void;
 }
 
 // Lazy-loaded subtree for a non-workspace root (projects / skills / home).
@@ -833,7 +900,7 @@ interface RemoteSectionProps {
 // locations where dot-prefixed entries (`.bashrc`, `.config`, `.git`, …)
 // are usually the whole point. The workspace tree's eye-toggle still gates
 // dot-files for the active project.
-function RemoteSection({ agentId, root, onOpenFile }: RemoteSectionProps) {
+function RemoteSection({ agentId, root, onOpenFile, onContextMenu }: RemoteSectionProps) {
   const [expanded, setExpanded] = useState(false);
   // dirs keyed by root-relative path; '' is the root listing.
   const [dirs, setDirs] = useState<Map<string, DirState>>(new Map());
@@ -904,6 +971,11 @@ function RemoteSection({ agentId, root, onOpenFile }: RemoteSectionProps) {
             data-is-dir={e.is_dir ? 'true' : 'false'}
             className="flex items-center gap-1 px-2 py-0.5 hover:bg-zinc-800/60 cursor-pointer"
             style={{ paddingLeft: 8 + level * 12 }}
+            onContextMenu={
+              onContextMenu
+                ? (ev) => onContextMenu(ev, root, childPath, e.name, e.is_dir)
+                : undefined
+            }
             onClick={() => {
               if (e.is_dir) {
                 setDirs((prev) => {
