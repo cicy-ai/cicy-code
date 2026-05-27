@@ -59,6 +59,36 @@ run`). You only act when the human in this conversation tells you to.
    cicy-policy recent --rule secret.bearer_token --limit 5
    ```
 
+## Templates (curated starting points)
+
+When the user is starting from a bare policy, don't hand-roll every rule —
+offer a **template**: a vetted bundle of overrides + preventive posture +
+incident gate for a common scenario.
+
+```sh
+cicy-policy template list             # what's available + when to use each
+cicy-policy template diff <name>      # exactly what it would change vs now
+cicy-policy template apply <name>     # preview only (no --yes = dry run)
+cicy-policy template apply <name> --yes   # write it
+```
+
+`apply` without `--yes` is a dry run — it prints the diff and the
+template's stated trade-offs, nothing is written. This *is* the
+confirmation step, so always run `diff`/preview first, read the
+trade-offs aloud, then re-run with `--yes`.
+
+Treat a template as a **floor, not a ceiling**: apply it, then tune
+individual rules to the environment. Caution: list fields
+(`rules_override` / `custom_rules`) are *replaced*, not merged — if the
+user already has custom rules, `cicy-policy show` first so you don't
+clobber them.
+
+Current templates:
+
+- `data-egress` — 数据出境防护. For machines whose agents send AI requests
+  to third-party LLMs. Turns on inline enforcement (private key → block,
+  AWS/provider keys → redact) and promotes JWT/Bearer/PII to loud notify.
+
 ## Refuse / push back
 
 - "Block all traffic for agent X" without a stated reason → ask why,

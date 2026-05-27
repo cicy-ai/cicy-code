@@ -1,0 +1,33 @@
+{
+  "name": "data-egress",
+  "title": "数据出境防护",
+  "summary": "防止 agent 把客户 PII / 凭证 / 源码喂给第三方 LLM。开启内联拦截:私钥出境直接阻断,AWS/Provider 密钥内联脱敏(请求不中断);JWT/Bearer/PII 升级为高优告警并转 w-10000 研判。",
+  "use_when": "这台机器跑对外或处理客户数据的 agent,AI 请求经第三方 LLM(OpenAI / Anthropic / 国产大模型)出境。最贴 cicy MITM 审计场景。",
+  "tradeoffs": "preventive.enabled=true 会内联改写出境请求:私钥触发 451 阻断(打断该次请求);AWS/Provider 密钥被替换为 <redacted:…> 后放行(请求继续,密钥不外泄)。建议先观察 1-2 天 notify 噪音,确认无误伤再长期保留。incident_response 已开但未配责任人——命中会转 w-10000 研判,要真发责任人邮件需另补 responsible_persons + Resend 凭证(见 cicy-policy readiness)。",
+  "policy": {
+    "enabled": true,
+    "preventive": { "enabled": true, "fail_mode": "open" },
+    "rules_override": [
+      { "id": "secret.jwt", "severity": "high", "default_action": "notify" },
+      { "id": "secret.bearer_token", "severity": "high", "default_action": "notify" },
+      { "id": "secret.high_entropy", "severity": "medium", "default_action": "notify" },
+      { "id": "pii.id_card_cn", "severity": "high", "default_action": "notify" },
+      { "id": "pii.bank_card", "severity": "high", "default_action": "notify" },
+      { "id": "pii.phone_cn", "severity": "medium", "default_action": "notify" }
+    ],
+    "custom_rules": [
+      {
+        "id": "custom.provider_api_key",
+        "label": "第三方 LLM/SaaS API Key (sk- 前缀)",
+        "category": "secret",
+        "severity": "high",
+        "scan_directions": ["outbound"],
+        "inline": true,
+        "default_action": "redact",
+        "match": { "type": "regex", "pattern": "sk-[A-Za-z0-9_-]{20,}" }
+      }
+    ],
+    "notify": { "min_severity": "medium" },
+    "incident_response": { "enabled": true, "trigger_min_severity": "high", "cooldown_seconds": 1800 }
+  }
+}
