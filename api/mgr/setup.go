@@ -763,6 +763,7 @@ func checkEnv() {
 	ensureCicyTmuxConf()
 	ensureCicyShellInit()
 
+	ensureDefaultProviders()
 	setupAIConfigs()
 
 	var count int

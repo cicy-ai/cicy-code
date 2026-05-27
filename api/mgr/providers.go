@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -51,6 +52,69 @@ func writeGlobalJSONConfig(cfg map[string]any) error {
 		return err
 	}
 	return os.Rename(tmpPath, path)
+}
+
+// defaultProvidersBlockJSON is the providers block seeded into global.json the
+// first time an instance boots without any configured providers — it wires
+// claude/codex/opencode to the CiCyAi gateway by default.
+const defaultProvidersBlockJSON = `{
+  "default": {
+    "claude": "defaultAnthropic",
+    "codex": "defaultOpenAi",
+    "opencode": "defaultOpenAi",
+    "stt": "cloudflare-ai"
+  },
+  "items": [
+    {
+      "key": "defaultAnthropic",
+      "name": "CiCyAi",
+      "apiKey": "",
+      "defaultModel": "deepseek-v4-pro",
+      "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
+      "protocol": "anthropic",
+      "url": "https://gateway.cicy-ai.com"
+    },
+    {
+      "key": "defaultOpenAi",
+      "name": "CiCyAi",
+      "apiKey": "",
+      "defaultModel": "deepseek-v4-pro",
+      "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
+      "protocol": "openai",
+      "url": "https://gateway.cicy-ai.com"
+    }
+  ]
+}`
+
+// ensureDefaultProviders seeds the CiCyAi default providers into global.json on
+// the first boot of an instance that has no providers.items yet. Idempotent and
+// non-destructive: once any providers exist (seeded here or added via the
+// dashboard), it leaves them untouched so operator edits are never clobbered.
+func ensureDefaultProviders() {
+	providersFileMu.Lock()
+	defer providersFileMu.Unlock()
+
+	cfg := readGlobalJSONConfig()
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+	if existing, ok := cfg["providers"].(map[string]any); ok {
+		if items, ok := existing["items"].([]any); ok && len(items) > 0 {
+			return // operator already has providers — never clobber
+		}
+	}
+
+	var block map[string]any
+	if err := json.Unmarshal([]byte(defaultProvidersBlockJSON), &block); err != nil {
+		log.Printf("[setup] default providers seed parse failed: %v", err)
+		return
+	}
+	cfg["providers"] = block
+	if err := writeGlobalJSONConfig(cfg); err != nil {
+		log.Printf("[setup] default providers seed write failed: %v", err)
+		return
+	}
+	log.Printf("[setup] seeded default providers (CiCyAi gateway) into global.json")
 }
 
 func providersBlock(cfg map[string]any) map[string]any {
