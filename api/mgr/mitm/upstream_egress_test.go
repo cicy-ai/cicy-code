@@ -147,6 +147,32 @@ func TestDialerDynamicEgressRoutesThroughMihomo(t *testing.T) {
 	}
 }
 
+// global egress ON but mihomo UNREACHABLE (proxy port closed) → DialTCP fails
+// OPEN to a direct dial so traffic still flows. This is the safety net that
+// makes egress-default-on non-catastrophic when mihomo is down (boot race,
+// restart, crash) — the dial succeeds against the backend without the proxy.
+func TestDialerEgressFailsOpenWhenMihomoUnreachable(t *testing.T) {
+	backend := egressStartEcho(t)
+	// A guaranteed-closed port: bind then immediately release so nothing listens.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	deadAddr := ln.Addr().String()
+	_ = ln.Close()
+
+	d, err := NewDialer(UpstreamConfig{Mode: "direct", DialTimeout: Duration(2 * time.Second)},
+		func() (bool, string, string) { return true, deadAddr, "" })
+	if err != nil {
+		t.Fatalf("NewDialer: %v", err)
+	}
+	conn, err := d.DialTCP(context.Background(), backend)
+	if err != nil {
+		t.Fatalf("DialTCP should fail open to direct when mihomo is down, got: %v", err)
+	}
+	egressRoundtrip(t, conn)
+}
+
 // global egress OFF → DialTCP uses the static mode (direct) and never touches
 // the socks5 proxy.
 func TestDialerEgressDisabledGoesDirect(t *testing.T) {
