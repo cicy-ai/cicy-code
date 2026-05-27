@@ -103,5 +103,14 @@
   "docker.subtitle": "First run pulls a runtime image (~350 MB), fully automatic. Then you're ready to go — no configuration needed.",
   "docker.starting_desktop": "Starting Docker Desktop…",
   "docker.waiting_daemon": "Waiting for Docker…",
-  "docker.engine_starting": "Starting AI engine…"
+  "docker.engine_starting": "Starting AI engine…",
+  "installphase.installing_docker": "Install Docker",
+  "docker.dl_desktop": "Downloading Docker Desktop (~630MB)…",
+  "docker.dl_done": "Docker Desktop downloaded",
+  "docker.dl_failed": "Docker Desktop download failed — please download and install it manually",
+  "docker.installing_desktop": "Installing Docker Desktop (click Yes on the prompt)…",
+  "docker.installed_restart": "Docker Desktop installed — you may need to restart your PC, then reopen this app",
+  "docker.desktop_ready": "Docker Desktop ready",
+  "docker.mac_first_run": "Launching Docker Desktop — finish the first-run setup in the window (accept terms + enter your admin password)…",
+  "docker.mac_finish_setup": "Finish the Docker Desktop setup in its window, then reopen this app"
 }
