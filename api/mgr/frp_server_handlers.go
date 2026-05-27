@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"os/exec"
@@ -190,18 +191,53 @@ func handleFrpServerInstallInfo(w http.ResponseWriter, r *http.Request) {
 	cfgPath := filepath.Join(home, "cicy-ai", "db", "frps.toml")
 	port, token := parseFrpsConfig(cfgPath)
 
-	bashCmd := buildFrpClientInstallCommand(publicIP, port, token)
-	psCmd := buildFrpClientInstallCommandPowerShell(publicIP, port, token)
+	remotePort := nextFreeFrpRemotePort(ctx)
+	proxyName := "cli-" + strconv.Itoa(remotePort)
+	bashCmd := buildFrpClientInstallCommand(publicIP, port, token, remotePort, proxyName)
+	psCmd := buildFrpClientInstallCommandPowerShell(publicIP, port, token, remotePort, proxyName)
 	J(w, M{
 		"success":                    true,
 		"public_ip":                  publicIP,
 		"server_port":                port,
 		"token":                      token,
+		"remote_port":                remotePort,
+		"proxy_name":                 proxyName,
 		"config_path":                cfgPath,
 		"install_command":            bashCmd, // back-compat: bash
 		"install_command_bash":       bashCmd,
 		"install_command_powershell": psCmd,
 	})
+}
+
+// nextFreeFrpRemotePort returns the next unused remote TCP port for a NEW frp
+// client, so installing multiple clients doesn't collide on the fixed default.
+// It asks frps (via `frp-server clients --json`) which remote ports are already
+// taken and returns the first free port at/above the CiCy base (9502). Falls
+// back to the base when frps can't be queried.
+func nextFreeFrpRemotePort(ctx context.Context) int {
+	const base = 9502
+	used := map[int]bool{}
+	if out, err := runFrpServer(ctx, "clients", "--json"); err == nil {
+		var parsed struct {
+			Data struct {
+				Clients []struct {
+					RemotePort int `json:"remote_port"`
+				} `json:"clients"`
+			} `json:"data"`
+		}
+		if json.Unmarshal([]byte(strings.TrimSpace(out)), &parsed) == nil {
+			for _, c := range parsed.Data.Clients {
+				if c.RemotePort > 0 {
+					used[c.RemotePort] = true
+				}
+			}
+		}
+	}
+	p := base
+	for used[p] {
+		p++
+	}
+	return p
 }
 
 // parseFrpsConfig pulls bindPort + auth.token from a frps.toml. Tiny
@@ -241,7 +277,7 @@ func tomlScalar(line, key string) (string, bool) {
 	return strings.TrimSpace(line[eq+1:]), true
 }
 
-func buildFrpClientInstallCommand(publicIP string, port int, token string) string {
+func buildFrpClientInstallCommand(publicIP string, port int, token string, remotePort int, name string) string {
 	if publicIP == "" {
 		publicIP = "<your-server-public-ip>"
 	}
@@ -252,10 +288,19 @@ func buildFrpClientInstallCommand(publicIP string, port int, token string) strin
 	// official fatedier/frp release, writes ~/cicy-ai/db/frpc.toml, and
 	// registers as a launchd/systemd service. Works on macOS / Linux / WSL.
 	// Re-running with no args reuses the existing config and hot-reloads.
-	return "curl -fsSL https://install.cicy-ai.com/frp | bash -s -- " +
+	// --remote-port + --name are server-assigned (next free port / unique name)
+	// so each new client lands on a distinct port instead of colliding on 9502.
+	cmd := "curl -fsSL https://install.cicy-ai.com/frp | bash -s -- " +
 		"--server " + publicIP +
 		" --server-port " + strconv.Itoa(port) +
-		" --token " + token + "\n"
+		" --token " + token
+	if remotePort > 0 {
+		cmd += " --remote-port " + strconv.Itoa(remotePort)
+	}
+	if name != "" {
+		cmd += " --name " + name
+	}
+	return cmd + "\n"
 }
 
 // buildFrpClientInstallCommandPowerShell emits the native-Windows variant.
@@ -263,20 +308,27 @@ func buildFrpClientInstallCommand(publicIP string, port int, token string) strin
 // negotiation — PowerShell gets the .ps1 script automatically — so we just
 // download to %TEMP% and exec with the right flags. Self-elevates to install
 // as a Windows service.
-func buildFrpClientInstallCommandPowerShell(publicIP string, port int, token string) string {
+func buildFrpClientInstallCommandPowerShell(publicIP string, port int, token string, remotePort int, name string) string {
 	if publicIP == "" {
 		publicIP = "<your-server-public-ip>"
 	}
 	if token == "" {
 		token = "<your-token>"
 	}
-	return "$u='https://install.cicy-ai.com/frp'; " +
+	cmd := "$u='https://install.cicy-ai.com/frp'; " +
 		"$p=Join-Path $env:TEMP 'install-frpc-client.ps1'; " +
 		"irm $u -OutFile $p; " +
 		"powershell -ExecutionPolicy Bypass -File $p " +
 		"-Server '" + publicIP + "' " +
 		"-ServerPort " + strconv.Itoa(port) + " " +
-		"-Token '" + token + "'\n"
+		"-Token '" + token + "'"
+	if remotePort > 0 {
+		cmd += " -RemotePort " + strconv.Itoa(remotePort)
+	}
+	if name != "" {
+		cmd += " -Name '" + name + "'"
+	}
+	return cmd + "\n"
 }
 
 func errorf(s string) error {
