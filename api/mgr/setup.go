@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"compress/gzip"
 	"database/sql"
 	_ "embed"
@@ -9,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1579,18 +1579,19 @@ func ensureMihomoBinaryInstalled(logFile *os.File, logPath string) {
 	if _, err := exec.LookPath("mihomo"); err == nil {
 		return
 	}
-	// Fast path: this build embeds the mihomo binary (gzip). Decompress it
-	// straight to the target — no network, instant, works offline / behind a
-	// firewall. The committed placeholder is ~20 bytes, so anything over 1 MB
-	// is a real embedded binary. Falls through to the download on failure or
-	// when only the placeholder is present (dev builds).
-	if len(embeddedMihomoGz) > 1<<20 {
-		if err := installEmbeddedMihomo(mihomoTarget); err == nil {
-			log.Printf("[startup] installed embedded mihomo → %s", mihomoTarget)
-			return
-		} else {
-			log.Printf("[startup] embedded mihomo install failed (%v), falling back to cicy-mihomo install", err)
-		}
+	// Preferred path: pull the mihomo binary from our COS mirror. We host it
+	// ourselves (instead of embedding in this binary or hitting the GitHub
+	// release at runtime) for two reasons: COS is CN-fast and reachable when
+	// GitHub is blocked, and — critically — the cicy-mihomo GitHub release's
+	// amd64 asset is built with GOAMD64=v3, which SIGILLs / refuses to run on
+	// pre-AVX2 CPUs (Xeon E5 v2, many cloud VMs, some WSL2). The COS copy is
+	// the GOAMD64=v1 baseline build, which runs on every x86-64. Falls through
+	// to the cicy-mihomo wrapper install on any failure.
+	if err := downloadMihomoFromCOS(mihomoTarget); err == nil {
+		log.Printf("[startup] installed mihomo (v1 baseline) from COS → %s", mihomoTarget)
+		return
+	} else {
+		log.Printf("[startup] COS mihomo download failed (%v), falling back to cicy-mihomo install", err)
 	}
 	wrapper := filepath.Join(home, ".local", "bin", "cicy-mihomo")
 	if _, err := os.Stat(wrapper); err != nil {
@@ -1608,10 +1609,27 @@ func ensureMihomoBinaryInstalled(logFile *os.File, logPath string) {
 	}
 }
 
-// installEmbeddedMihomo decompresses the build-time-embedded mihomo binary
-// (embeddedMihomoGz) straight to target, atomically and executable. No network.
-func installEmbeddedMihomo(target string) error {
-	gz, err := gzip.NewReader(bytes.NewReader(embeddedMihomoGz))
+// COS-hosted mihomo (GOAMD64=v1 baseline, gzip). Versioned path so we can roll
+// the binary without touching this code. amd64 only — arm64 has no GOAMD64
+// microarch split, so the arm64 GitHub asset is fine and the wrapper handles it.
+const cosMihomoAmd64URL = "https://cicy-1372193042.cos.ap-shanghai.myqcloud.com/mihomo/v1.10.3/mihomo-linux-amd64.gz"
+
+// downloadMihomoFromCOS fetches the gzipped v1-baseline mihomo from COS and
+// decompresses it to target, atomically and executable.
+func downloadMihomoFromCOS(target string) error {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		return fmt.Errorf("COS mihomo mirror only hosts linux/amd64 (got %s/%s)", runtime.GOOS, runtime.GOARCH)
+	}
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Get(cosMihomoAmd64URL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("COS mihomo HTTP %d", resp.StatusCode)
+	}
+	gz, err := gzip.NewReader(resp.Body)
 	if err != nil {
 		return err
 	}
@@ -1624,7 +1642,7 @@ func installEmbeddedMihomo(target string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, gz); err != nil { //nolint:gosec // trusted embedded asset
+	if _, err := io.Copy(f, gz); err != nil { //nolint:gosec // trusted COS asset
 		f.Close()
 		os.Remove(tmp)
 		return err
