@@ -50,7 +50,7 @@ func GetResponseReadiness() ResponseReadiness {
 		r.Gaps = append(r.Gaps, "未配置责任人 (responsible_persons) — 严重事件无人接收")
 	}
 	if !r.MailDeliverable {
-		r.Gaps = append(r.Gaps, "邮件仅落盘、未真正投递 (需 Resend 凭证+email_from,或 Gmail OAuth GMAIL_* in global.json) — 责任人收不到")
+		r.Gaps = append(r.Gaps, "邮件仅落盘、未真正投递 (需 Resend 凭证+email_from,或在 db/google.json 接 Gmail OAuth) — 责任人收不到")
 	}
 	if !r.PreventiveEnabled {
 		r.Gaps = append(r.Gaps, "实时拦截未开 (preventive.enabled) — 只审计、不阻断正在发生的泄露")

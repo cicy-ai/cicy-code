@@ -3,6 +3,8 @@ package audit
 import (
 	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -80,5 +82,63 @@ func TestGmailMailer_SendError(t *testing.T) {
 	m := &GmailMailer{api: &stubGmailAPI{from: "x@y", sendErr: errGmailStub}}
 	if err := m.Send(EmailMessage{To: []string{"a@b"}, EventID: "e"}); err == nil {
 		t.Error("expected propagated send error")
+	}
+}
+
+// credential resolution prefers the canonical db/ location over legacy global.json.
+func TestLoadGmailCredentials_PrefersDB(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CICY_GOOGLE_OAUTH_CLIENT_ID", "")
+	t.Setenv("CICY_GOOGLE_OAUTH_CLIENT_SECRET", "")
+	db := filepath.Join(home, "cicy-ai", "db")
+	if err := os.MkdirAll(db, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(db, "google.json"),
+		[]byte(`{"refresh_token":"rt_db","authorized_email":"sec@corp.com","client_id":"cid_db"}`), 0o600)
+	os.WriteFile(filepath.Join(db, "google_oauth_client.json"),
+		[]byte(`{"web":{"client_id":"cid_db","client_secret":"secret_db"}}`), 0o600)
+	// legacy global.json also present — must be ignored in favour of db/.
+	os.WriteFile(filepath.Join(home, "cicy-ai", "global.json"),
+		[]byte(`{"GMAIL_WEB_CLIENT_ID":"cid_g","GMAIL_WEB_CLIENT_SECRET":"sec_g","GMAIL_REFRESH_TOKEN":"rt_g"}`), 0o600)
+
+	c := loadGmailCredentials()
+	if c == nil {
+		t.Fatal("expected creds from db/")
+	}
+	if c.RefreshToken != "rt_db" || c.ClientID != "cid_db" || c.ClientSecret != "secret_db" {
+		t.Errorf("db creds wrong: %+v", c)
+	}
+	if c.From != "sec@corp.com" {
+		t.Errorf("From should be authorized_email, got %q", c.From)
+	}
+}
+
+func TestLoadGmailCredentials_LegacyFallback(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CICY_GOOGLE_OAUTH_CLIENT_ID", "")
+	t.Setenv("CICY_GOOGLE_OAUTH_CLIENT_SECRET", "")
+	if err := os.MkdirAll(filepath.Join(home, "cicy-ai"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(home, "cicy-ai", "global.json"),
+		[]byte(`{"GMAIL_WEB_CLIENT_ID":"cid_g","GMAIL_WEB_CLIENT_SECRET":"sec_g","GMAIL_REFRESH_TOKEN":"rt_g"}`), 0o600)
+
+	c := loadGmailCredentials()
+	if c == nil || c.RefreshToken != "rt_g" || c.ClientID != "cid_g" || c.ClientSecret != "sec_g" {
+		t.Fatalf("legacy fallback failed: %+v", c)
+	}
+	if c.From != "" {
+		t.Errorf("legacy From should be empty, got %q", c.From)
+	}
+}
+
+func TestLoadGmailCredentials_None(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if loadGmailCredentials() != nil {
+		t.Error("expected nil when nothing configured")
 	}
 }
