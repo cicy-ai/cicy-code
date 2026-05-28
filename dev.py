@@ -976,6 +976,127 @@ def run_cloudrun_list():
     sys.exit(0)
 
 
+def _cos_upload_docker_image(image_ref, version):
+    """Save docker image as gzip tar and upload to COS via multipart.
+
+    COS key: images/cicy-code-{version}.tar.gz
+    Uses stdlib only (no requests dependency). Signing follows the same
+    pattern as scripts/cos-upload.py: q-url-param-list empty, sign only
+    the object path so COS accepts both plain and multipart requests.
+    """
+    import hashlib, hmac, math, re, urllib.parse
+    try:
+        conf = json.load(open(CICY_GLOBAL_JSON_PATH)).get("tencent", {})
+        sid, skey = conf.get("secret_id", ""), conf.get("secret_key", "")
+        bucket, region = conf.get("bucket", ""), conf.get("region", "")
+        if not all([sid, skey, bucket, region]):
+            print("[dev] COS credentials missing — skipping docker image upload")
+            return False
+    except Exception as e:
+        print(f"[dev] COS config error: {e} — skipping docker image upload")
+        return False
+
+    host = f"{bucket}.cos.{region}.myqcloud.com"
+    cos_key = f"/images/cicy-code-{version}.tar.gz"
+
+    def _sign(method):
+        """Sign with empty header/param lists — same as cos-upload.py."""
+        now = int(time.time())
+        key_time = f"{now};{now + 3600}"
+        sign_key = hmac.new(skey.encode(), key_time.encode(), hashlib.sha1).hexdigest()
+        http_str = f"{method.lower()}\n{cos_key}\n\n\n"
+        sha = hashlib.sha1(http_str.encode()).hexdigest()
+        str_to_sign = f"sha1\n{key_time}\n{sha}\n"
+        sig = hmac.new(sign_key.encode(), str_to_sign.encode(), hashlib.sha1).hexdigest()
+        return (f"q-sign-algorithm=sha1&q-ak={sid}&q-sign-time={key_time}"
+                f"&q-key-time={key_time}&q-header-list=&q-url-param-list=&q-signature={sig}")
+
+    # Bypass any system proxy (mihomo/shadowsocks) — COS is reachable directly
+    # from CN and proxies can drop long-lived SSL connections on large uploads.
+    _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def _request(url, method, data=None, extra_headers=None, timeout=60):
+        headers = {"Host": host, "Authorization": _sign(method)}
+        if extra_headers:
+            headers.update(extra_headers)
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        return _opener.open(req, timeout=timeout)
+
+    tmp = os.path.join(tempfile.gettempdir(), f"cicy-code-{version}.tar.gz")
+    try:
+        print(f"[dev] Saving docker image {image_ref} → {tmp}")
+        # Use shell pipeline: docker save | gzip > file.  Simpler and avoids
+        # Python gzip-stream buffering issues that can corrupt the output.
+        ret = subprocess.run(
+            f'docker save {image_ref} | gzip -6 > {tmp}',
+            shell=True, check=False,
+        )
+        if ret.returncode != 0:
+            print(f"[dev] docker save failed (exit {ret.returncode})")
+            return False
+
+        size = os.path.getsize(tmp)
+        print(f"[dev] Saved {size // 1024 // 1024}MB → uploading to COS {cos_key}")
+
+        # Multipart: 16 MB chunks (COS min part size is 1 MB except last)
+        CHUNK = 16 * 1024 * 1024
+        n_parts = math.ceil(size / CHUNK)
+
+        # 1. Initiate
+        with _request(f"https://{host}{cos_key}?uploads", "POST", data=b"", timeout=30) as r:
+            upload_id = re.search(r"<UploadId>([^<]+)</UploadId>", r.read().decode()).group(1)
+
+        # 2. Upload parts (3 retries per part on transient errors)
+        etags = []
+        with open(tmp, "rb") as fh:
+            for i in range(n_parts):
+                part_num = i + 1
+                data = fh.read(CHUNK)
+                uid_enc = urllib.parse.quote(upload_id, safe="")
+                url = f"https://{host}{cos_key}?partNumber={part_num}&uploadId={uid_enc}"
+                for attempt in range(3):
+                    try:
+                        with _request(url, "PUT", data=data,
+                                      extra_headers={"Content-Length": str(len(data))},
+                                      timeout=300) as r:
+                            etags.append((part_num, r.headers.get("ETag", "")))
+                        break
+                    except Exception as e:
+                        if attempt == 2:
+                            raise
+                        print(f"[dev] COS part {part_num} attempt {attempt+1} failed: {e}, retrying...")
+                        time.sleep(3)
+                mb_done = min((part_num * CHUNK) // 1024 // 1024, size // 1024 // 1024)
+                print(f"[dev] COS part {part_num}/{n_parts} uploaded ({mb_done}MB)")
+
+        # 3. Complete
+        parts_xml = "".join(
+            f"<Part><PartNumber>{n}</PartNumber><ETag>{e}</ETag></Part>"
+            for n, e in etags
+        )
+        body = f"<CompleteMultipartUpload>{parts_xml}</CompleteMultipartUpload>".encode()
+        uid_enc = urllib.parse.quote(upload_id, safe="")
+        with _request(f"https://{host}{cos_key}?uploadId={uid_enc}", "POST",
+                      data=body,
+                      extra_headers={"Content-Type": "application/xml",
+                                     "Content-Length": str(len(body))},
+                      timeout=60) as r:
+            resp = r.read().decode()
+        if "CompleteMultipartUploadResult" in resp:
+            cos_url = f"https://{host}{cos_key}"
+            print(f"[dev] COS upload done → {cos_url}")
+            return cos_url
+        print(f"[dev] COS complete unexpected response: {resp[:200]}")
+        return False
+    except Exception as e:
+        print(f"[dev] COS upload error: {e}")
+        return False
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+            print(f"[dev] Cleaned up {tmp}")
+
+
 def run_docker_build(version_override=""):
     info = run_version_sync(version_override)
     version = (
@@ -1016,6 +1137,12 @@ def run_docker_build(version_override=""):
     run_checked(["docker", "tag", f"cicy-code:{version}", latest_image], cwd=ROOT_DIR)
     run_checked(["docker", "push", target_image], cwd=ROOT_DIR)
     run_checked(["docker", "push", latest_image], cwd=ROOT_DIR)
+
+    # Save the tagged image (cicybot/cicy-code:X.Y.Z) to COS as a CN fallback
+    # tarball.  Must save from target_image — NOT from cicy-code:version — so the
+    # `docker load` on the client produces the right repo name and `docker run`
+    # finds it without an extra `docker tag` step.
+    _cos_upload_docker_image(target_image, version)
 
     write_docker_image_to_global_json(target_image, version, repository)
     print(f"[dev] Updated {GLOBAL_JSON_PATH} -> images.runtime={target_image}")
