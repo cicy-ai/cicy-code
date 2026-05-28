@@ -16,6 +16,10 @@ Usage:
   cicy-policy template list                         # curated policy templates
   cicy-policy template diff <name>                  # what a template would change
   cicy-policy template apply <name> [--yes]         # preview / apply a template
+  cicy-policy channel status                        # notification channels + deliverability
+  cicy-policy channel smtp --host H --port P ...    # configure SMTP (db/smtp.json)
+  cicy-policy channel test --to <email>             # test-send through active channels
+  cicy-policy channel wechat                        # start WeChat QR bind
 """
 
 from __future__ import annotations
@@ -26,8 +30,10 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 import urllib.error
+import urllib.parse
 from pathlib import Path
 
 GLOBAL_JSON = Path.home() / "cicy-ai" / "global.json"
@@ -327,6 +333,79 @@ def cmd_template_apply(args):
     print("回滚: cicy-policy unset <key.path> 逐项撤销,或 cicy-code audit autonomy revert <id>")
 
 
+# ── notification channels (help the operator add SMTP / WeChat) ──────────────
+
+DB_DIR = Path.home() / "cicy-ai" / "db"
+
+
+def cmd_channel_status(_):
+    r = api("GET", "/api/audit/readiness")
+    print("通知渠道状态:")
+    deliver = "✓ 可投递" if r.get("mail_deliverable") else "✗ 仅落盘(没人收)"
+    line = f"  邮件: mailer={r.get('mailer_kind')}  {deliver}"
+    if r.get("email_from"):
+        line += f"  from={r.get('email_from')}"
+    print(line)
+    print(f"  微信: {'✓ 已绑定' if r.get('im_bound') else '✗ 未绑定'}")
+    print("\n配置: cicy-policy channel smtp --host ... --port ...  |  channel wechat")
+    print("验证: cicy-policy channel test --to <安全员邮箱>")
+
+
+def cmd_channel_smtp(args):
+    cfg = {
+        "host": args.host,
+        "port": args.port,
+        "username": args.user or "",
+        "password": args.password or "",
+        "from": args.sender or args.user or "",
+        "tls": args.tls or "",
+    }
+    DB_DIR.mkdir(parents=True, exist_ok=True)
+    p = DB_DIR / "smtp.json"
+    p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
+    try:
+        p.chmod(0o600)
+    except OSError:
+        pass
+    print(f"ok  已写 {p}")
+    print(f"  host={cfg['host']}:{cfg['port']}  from={cfg['from']}  tls={cfg['tls'] or '(按端口推断)'}")
+    print("  已触发热加载;用  cicy-policy channel test --to <安全员邮箱>  验证真发")
+
+
+def cmd_channel_test(args):
+    res = api("POST", "/api/audit/channels/test", {"to": args.to or ""})
+    print(res.get("summary", "(无结果)"))
+    if not res.get("ok"):
+        print("⚠ 有渠道发送失败: " + str(res.get("error", "")))
+
+
+def cmd_channel_wechat(_):
+    s = api("POST", "/api/im/wechat/login")
+    sid, qr = s.get("session_id"), s.get("qrcode_url", "")
+    if not qr:
+        sys.exit("error: 未取到二维码: " + json.dumps(s, ensure_ascii=False)[:300])
+    render = "https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=8&data=" + urllib.parse.quote(qr)
+    # flush=True so w-10000 (reading piped output) sees the QR link immediately,
+    # not buffered behind the poll loop.
+    print("微信绑定 —— 用手机微信扫码:", flush=True)
+    print("  浏览器打开此链接看二维码再扫: " + render, flush=True)
+    print("  (或在 Dashboard 的 IM 面板里扫,效果一样)", flush=True)
+    print("等待扫码确认中(最多 ~90s)…", flush=True)
+    for i in range(30):
+        time.sleep(3)
+        st = api("GET", f"/api/im/wechat/login/{sid}")
+        state, acc = st.get("state", ""), st.get("account_id") or 0
+        if state in ("created", "connected") or acc:
+            print(f"✓ 微信绑定完成 (state={state}, account_id={acc}) —— 之后审计告警会同时发微信", flush=True)
+            return
+        if state in ("expired", "error"):
+            print(f"✗ 绑定失败 state={state}: {st.get('detail', '')}", flush=True)
+            return
+        if i % 4 == 0:
+            print(f"  …{state or 'waiting'}", flush=True)
+    print("超时未完成。重试 cicy-policy channel wechat,或去 IM 面板扫。", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Audit policy admin client.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -374,6 +453,22 @@ def main():
     sp.add_argument("name")
     sp.add_argument("--yes", action="store_true", help="actually write (default: preview only)")
     sp.set_defaults(func=cmd_template_apply)
+
+    ch = sub.add_parser("channel", help="Configure notification channels (smtp/wechat).")
+    chsub = ch.add_subparsers(dest="chcmd", required=True)
+    chsub.add_parser("status", help="Show channel config + deliverability.").set_defaults(func=cmd_channel_status)
+    sp = chsub.add_parser("smtp", help="Configure SMTP (writes db/smtp.json).")
+    sp.add_argument("--host", required=True)
+    sp.add_argument("--port", type=int, required=True)
+    sp.add_argument("--user")
+    sp.add_argument("--password")
+    sp.add_argument("--from", dest="sender", help="From address (default: --user)")
+    sp.add_argument("--tls", choices=["starttls", "implicit", "none"])
+    sp.set_defaults(func=cmd_channel_smtp)
+    sp = chsub.add_parser("test", help="Send a test alert through active channels.")
+    sp.add_argument("--to", default="", help="recipient email for the test")
+    sp.set_defaults(func=cmd_channel_test)
+    chsub.add_parser("wechat", help="Start WeChat QR bind (scan to add WeChat channel).").set_defaults(func=cmd_channel_wechat)
 
     args = ap.parse_args()
     args.func(args)

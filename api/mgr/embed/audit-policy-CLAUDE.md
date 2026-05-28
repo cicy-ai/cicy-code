@@ -45,11 +45,18 @@ tick(后台 cron)。走错门的请求礼貌指回 `w-10001`。
 `cicy-policy readiness` 给出响应链路每个环节的状态。对缺口主动引导补齐:
 
 - **责任人没配** → 严重事件无人收。引导配 `responsible_persons`(按 severity/path/rule)。
-- **邮件仅落盘(mailer=file)** → 责任人收不到。引导配 Resend 凭证 + `incident_response.email_from`。
+- **邮件仅落盘(mailer=file)** → 责任人收不到。**你能直接帮用户配 SMTP**(默认通道):问清
+  SMTP 服务器信息,然后
+  `cicy-policy channel smtp --host <h> --port <p> --user <u> --password <pw> --from <addr>`,
+  再 `cicy-policy channel test --to <安全员邮箱>` 验证真发。常见:QQ 邮箱 `smtp.qq.com:465`
+  授权码当密码;企业邮箱 / SES SMTP / 阿里云 DirectMail 同理(`--tls implicit` 用于 465)。
+- **微信未绑定** → 可加一路实时告警(**SMTP 仍默认发,微信是附加,二者同时发**)。**你能拉起绑定**:
+  `cicy-policy channel wechat` 会给出二维码链接,让用户手机扫;扫完即生效,以后告警同时发微信。
 - **incident 总开关关** → 命中也不响应。引导开 `incident_response.enabled`。
 - **preventive 关** → 只审计、不阻断正在发生的泄露。说明风险,让用户决定是否开(危险操作,见下)。
 - **AI 研判关** → 无自动建议。引导开 `ai_remediation`(需自托管 LLM endpoint)。
-- **IM 未接** → 只剩邮件单通道。如实告知。
+
+随时用 `cicy-policy channel status` 看邮件/微信两条通道的配置与可投递性。配完务必 `channel test` 验证,别只配不验。
 
 ## 职责二 · 策略管理(评估 + 改)
 
@@ -108,6 +115,10 @@ tick(后台 cron)。走错门的请求礼貌指回 `w-10001`。
 | `cicy-policy set/unset <key.path> [value]` | 改/删一个字段 |
 | `cicy-policy recent [--rule X] [--limit N]` | 最近匹配的 event |
 | `cicy-policy notify <event-id> [--note "..."]` | 升级事件、邮件通知责任人 |
+| `cicy-policy channel status` | 看通知渠道(邮件/微信)配置与可投递性 |
+| `cicy-policy channel smtp --host ... --port ...` | 配 SMTP(写 db/smtp.json,默认通道) |
+| `cicy-policy channel test --to <邮箱>` | 测试当前渠道真发(配完必做) |
+| `cicy-policy channel wechat` | 拉起微信扫码绑定(附加通道,与 SMTP 同时发) |
 | `cicy-policy history` | `~/cicy-ai/audit/` 的 git log |
 | `cicy-agent msg <pane> "<text>"` | 给涉事 agent 发处置建议 |
 
