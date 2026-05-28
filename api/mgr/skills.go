@@ -469,25 +469,23 @@ func expandHome(p string) string {
 // ~/cicy-ai/skills/installed.json (written by `cicy-code skill install`).
 func loadInstalledNames() map[string]string {
 	out := map[string]string{}
-	root := userSkillsRoot()
-	if root == "" {
-		return out
+	for name, s := range loadInstalledFull() {
+		out[name] = s.Version
 	}
-	data, err := os.ReadFile(filepath.Join(root, "installed.json"))
-	if err != nil {
-		return out
-	}
-	var cfg struct {
-		Skills []struct {
-			Name    string `json:"name"`
-			Version string `json:"version"`
-		} `json:"skills"`
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	return out
+}
+
+// loadInstalledFull is the richer variant: name → full InstalledSkill entry,
+// so callers can read source.type (registry vs "local" override / `skill dev`)
+// and other metadata. Returns an empty map on missing/corrupt installed.json.
+func loadInstalledFull() map[string]skillcmd.InstalledSkill {
+	out := map[string]skillcmd.InstalledSkill{}
+	cfg, err := skillcmd.PublicInstalled()
+	if err != nil || cfg == nil {
 		return out
 	}
 	for _, s := range cfg.Skills {
-		out[s.Name] = s.Version
+		out[s.Name] = s
 	}
 	return out
 }
@@ -530,14 +528,20 @@ func versionLess(a, b string) bool {
 }
 
 func computeMarketStatus(skill *marketSkill) {
-	installed := loadInstalledNames()
-	if v, ok := installed[skill.Name]; ok {
+	installed := loadInstalledFull()
+	if entry, ok := installed[skill.Name]; ok {
 		skill.Status.Installed = true
-		skill.InstalledVersion = v
-		// HasUpdate when registry version (skill.Version) is newer than
-		// the recorded install. For "user" source skills version == "user"
-		// — never report has_update for those.
-		if skill.Source == "" && skill.Version != "" && skill.Version != v && versionLess(v, skill.Version) {
+		skill.InstalledVersion = entry.Version
+		// installed.json source.type == "local" means the user has either
+		// `skill dev`'d this name or ejected the registry copy. Surface that
+		// so the UI shows a "local" tag and we suppress update prompts below.
+		if skill.Source == "" && entry.Source.Type == "local" {
+			skill.Source = "local"
+		}
+		// HasUpdate when registry version (skill.Version) is newer than the
+		// recorded install. Skip for "user"-authored AND "local"-ejected
+		// skills — both are user-managed and shouldn't be auto-updated.
+		if skill.Source == "" && skill.Version != "" && skill.Version != entry.Version && versionLess(entry.Version, skill.Version) {
 			skill.HasUpdate = true
 		}
 	} else if skill.Source == "user" {
@@ -871,6 +875,43 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 			"from":    res.From,
 			"to":      res.To,
 			"updated": res.Updated,
+			"log":     logBuf.String(),
+			"skill":   skill,
+		})
+	case "eject":
+		// Convert an installed registry skill into a local-source one: files
+		// stay in place under ~/cicy-ai/skills/<name>/, but installed.json
+		// gets source.type="local" so the skill is treated as user-managed
+		// (no auto-update, surfaced as Source="local" in this catalog).
+		if skill.Source == "user" {
+			J(w, M{"ok": false, "error": "user-authored skill — already local, nothing to eject"})
+			return
+		}
+		if !skill.Status.Installed {
+			J(w, M{"ok": false, "error": "skill not installed — install first, then eject"})
+			return
+		}
+		var logBuf strings.Builder
+		ejected, err := skillcmd.PublicEject(name, &logBuf)
+		if err != nil {
+			J(w, M{"ok": false, "error": err.Error(), "log": logBuf.String()})
+			return
+		}
+		invalidateMarketCache()
+		updated := findMarketSkill(name, lang)
+		if updated != nil {
+			computeMarketStatus(updated)
+			skill = updated
+		} else {
+			skill.Source = "local"
+			skill.HasUpdate = false
+		}
+		J(w, M{
+			"ok":      true,
+			"name":    name,
+			"version": ejected.Version,
+			"source":  "local",
+			"path":    ejected.Source.Path,
 			"log":     logBuf.String(),
 			"skill":   skill,
 		})
