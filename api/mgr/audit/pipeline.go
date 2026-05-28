@@ -312,6 +312,12 @@ func (p *Pipeline) reloadMailer() {
 		log.Printf("[audit] mailer -> GmailMailer (oauth, db/google.json)")
 		return
 	}
+	if scfg := loadSmtpCredentials(); scfg != nil {
+		p.SetMailer(NewSmtpMailer(scfg))
+		responseMailerKind = "smtp"
+		log.Printf("[audit] mailer -> SmtpMailer (%s, db/smtp.json)", scfg.Host)
+		return
+	}
 }
 
 // Submit ingests an envelope. Wall and monotonic timestamps are captured
