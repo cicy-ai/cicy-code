@@ -11,7 +11,7 @@
 > What's left here:
 > - `cmd/stt` and `cmd/tts` — voice binaries (still built by ttyd-go's release pipeline)
 > - `internal/voice`, `internal/voicecmd` — supporting packages for stt/tts
-> - free-standing Bash / Node skill scripts (`skill-author`, `cicy-todo`,
+> - free-standing Bash / Node skill scripts (`cicy-todo`,
 >   `cicy-master`, `proxy_ssh`, `us-spot-*`, `hk-spot-dev`, `cicy-code`,
 >   `cf/`) — these are skill payloads that didn't migrate to v2 yet.
 
@@ -27,4 +27,4 @@ make test-go                     # run voice tests
 Take any of the Bash / Node scripts in this directory, package them under
 `~/projects/cicy-skills/skills/<name>/` per the v2 manifest schema, and
 publish via `node tools/publish.js skills/<name>`. See the v2 monorepo's
-`skill-author/` skill for the authoring flow.
+`CONTRIBUTING.md` and `GOVERNANCE.md` for the authoring and publish flow.
