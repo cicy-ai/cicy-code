@@ -67,6 +67,7 @@ func Init() error {
 		creds, credsSrc := loadResendCredentials()
 		from := resolveEmailFrom(policy, creds)
 		gcreds := loadGmailCredentials()
+		scfg := loadSmtpCredentials()
 		switch {
 		case creds != nil && from != "":
 			// Resend wins when fully configured (verified domain → best deliverability).
@@ -80,6 +81,12 @@ func Init() error {
 			mailerName = "GmailMailer"
 			mailerDetail = "oauth (db/google.json)"
 			responseMailerKind = "gmail"
+		case scfg != nil:
+			// Generic SMTP relay (company server / SES SMTP / Aliyun DirectMail / …).
+			p.SetMailer(NewSmtpMailer(scfg))
+			mailerName = "SmtpMailer"
+			mailerDetail = "smtp " + scfg.Host + " (db/smtp.json)"
+			responseMailerKind = "smtp"
 		case creds != nil && from == "":
 			log.Printf("[audit] resend credentials present but no From address (set policy.incident_response.email_from or CICY_RESEND_FROM) — using FileMailer")
 		}
