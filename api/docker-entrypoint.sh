@@ -351,12 +351,17 @@ build_app_argv() {
     *" --public "*) ;;
     *) set -- --public "$@" ;;
   esac
-  if [ -n "${CICY_TEAM_TOKEN:-}" ]; then
-    case " $* " in
-      *" --agents="*) ;;
-      *) set -- --agents=all "$@" ;;
-    esac
-  fi
+  # Add --agents from CICY_TEAM_TOKEN (all agents) or CICY_AGENTS env var
+  case " $* " in
+    *" --agents="*) ;;
+    *)
+      if [ -n "${CICY_TEAM_TOKEN:-}" ]; then
+        set -- --agents=all "$@"
+      elif [ -n "${CICY_AGENTS:-}" ]; then
+        set -- --agents="${CICY_AGENTS}" "$@"
+      fi
+      ;;
+  esac
   printf '%s\0' "$@"
 }
 
