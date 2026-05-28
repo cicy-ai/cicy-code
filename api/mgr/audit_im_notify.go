@@ -10,9 +10,8 @@ import (
 // Wire the audit pipeline's optional IM (WeChat) notification channel to the
 // existing IM send path. SMTP stays the default; WeChat is additive and only
 // fires when an account is bound (via the IM dashboard QR-scan flow).
-// securityOfficerPaneID is the built-in security-officer agent (w-1000), which
-// audit incidents escalate to alongside email/WeChat.
-const securityOfficerPaneID = "w-1000:main.0"
+// securityOfficerPaneID lives in audit_security_officer_worker.go (the file
+// that owns the agent's identity + bootstrap).
 
 func init() {
 	audit.SetIMNotifier(auditWeChatNotify)

@@ -462,7 +462,7 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 		// Hide the dedicated audit-policy admin pane (w-10000) from the
 		// general agent listing — surfaced only inside the Audit Dashboard
 		// Assistant tab. Bypass with ?include_hidden=1.
-		if r.URL.Query().Get("include_hidden") != "1" && IsAuditPolicyPane(paneID.String) {
+		if r.URL.Query().Get("include_hidden") != "1" && isBuiltinAgent(paneID.String) {
 			continue
 		}
 		p := M{
