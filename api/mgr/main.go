@@ -190,6 +190,7 @@ Options:
 	http.HandleFunc("/api/audit/readiness", wa(handleAuditReadiness))
 	http.HandleFunc("/api/audit/notify", wa(handleAuditNotify))
 	http.HandleFunc("/api/audit/channels/test", wa(handleAuditChannelsTest))
+	http.HandleFunc("/api/im/wechat/prompt", wa(handleWeChatBindPrompt))
 
 	// Panes
 	http.HandleFunc("/api/panes", authM(handlePanes))

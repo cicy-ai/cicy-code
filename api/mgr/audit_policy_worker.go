@@ -28,7 +28,7 @@ const (
 	auditPolicyPaneID     = "w-10000:main.0"
 	auditPolicyShortPane  = "w-10000"
 	auditPolicyPort       = 10000
-	auditPolicyAgentType  = "opencode"
+	auditPolicyAgentType  = "claude"
 	auditPolicyRole       = "audit-policy-admin"
 	auditPolicyTitle      = "Audit Policy Admin"
 	auditPolicySkillName  = "cicy-audit-policy"

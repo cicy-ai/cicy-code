@@ -69,3 +69,17 @@ func handleAuditChannelsTest(w http.ResponseWriter, r *http.Request) {
 	}
 	J(w, M{"ok": true, "summary": summary})
 }
+
+// handleWeChatBindPrompt — POST /api/im/wechat/prompt. Broadcasts a
+// `wechat_bind_request` chat-WS event to all connected UI clients so the
+// frontend pops the WeChat bind (QR-scan) modal — anywhere the operator is.
+// Lets w-10000 (`cicy-policy channel wechat`) pull up the modal in the
+// browser instead of printing a QR link in its terminal.
+func handleWeChatBindPrompt(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	hub.broadcastAll(ChatEvent{Type: "wechat_bind_request"})
+	J(w, M{"ok": true})
+}
