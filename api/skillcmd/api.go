@@ -186,6 +186,41 @@ func PublicRemove(name string, sink io.Writer) (*InstalledSkill, error) {
 	return &removed, nil
 }
 
+// PublicEject converts an installed registry skill into a local-source one.
+// Files stay in place under ~/cicy-ai/skills/<name>/; only the installed.json
+// entry's source is rewritten to {type:"local", path:<dir>}. Future
+// `skill update` will skip it (matches the existing local-source rule in
+// PublicUpdate), and the user can freely edit the directory as a hand-managed
+// override of the registry version. Refuses if not installed or already
+// source.type="local".
+func PublicEject(name string, sink io.Writer) (*InstalledSkill, error) {
+	if sink == nil {
+		sink = io.Discard
+	}
+	cfg, err := loadInstalled()
+	if err != nil {
+		return nil, err
+	}
+	entry := findInstalled(cfg, name)
+	if entry == nil {
+		return nil, fmt.Errorf("skill not installed: %s", name)
+	}
+	if entry.Source.Type == "local" {
+		return nil, fmt.Errorf("skill already local-source — nothing to eject")
+	}
+	dir := skillDir(name)
+	if _, err := os.Stat(dir); err != nil {
+		return nil, fmt.Errorf("skill dir missing at %s — reinstall before ejecting", dir)
+	}
+	entry.Source = InstalledSource{Type: "local", Path: dir}
+	upsertInstalled(cfg, *entry)
+	if err := writeInstalled(cfg); err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(sink, "✓ ejected %s@%s → local (%s)\n", name, entry.Version, dir)
+	return entry, nil
+}
+
 // PublicUpdate updates a skill to the latest registry version. Returns
 // the From/To version pair, whether an update happened, and the new
 // install record (nil if no update was performed).

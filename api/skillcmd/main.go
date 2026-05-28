@@ -17,6 +17,7 @@ Usage:
   cicy-code skill remove <name> [--json]
   cicy-code skill installed [--json]
   cicy-code skill dev <path> [--json]
+  cicy-code skill eject <name> [--json]
   cicy-code skill --help
 
 Environment:
@@ -58,6 +59,8 @@ func Run(args []string) {
 		err = cmdInstalled(rest)
 	case "dev":
 		err = cmdDev(rest)
+	case "eject":
+		err = cmdEject(rest)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n\n", cmd)
 		fmt.Fprint(os.Stderr, Usage)

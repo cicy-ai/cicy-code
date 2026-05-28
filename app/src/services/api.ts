@@ -141,6 +141,8 @@ const api = {
     http.post(`/api/skill-market/${encodeURIComponent(name)}/uninstall`, opts || {}),
   updateMarketSkill: (name: string) =>
     http.post(`/api/skill-market/${encodeURIComponent(name)}/update`, {}),
+  ejectMarketSkill: (name: string) =>
+    http.post(`/api/skill-market/${encodeURIComponent(name)}/eject`, {}),
 
   getGoogleSkillConfig: () => http.get('/api/skill-config/google'),
   connectGoogleSkillConfig: () => http.post('/api/skill-config/google/connect', {}),

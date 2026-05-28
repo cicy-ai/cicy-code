@@ -241,6 +241,28 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
     finally { setBusy(b => { const { [skill.name]: _, ...rest } = b; return rest; }); }
   };
 
+  // Eject: keep the installed files in ~/cicy-ai/skills/<name>/ but rewrite
+  // installed.json source to "local", so the skill becomes user-managed
+  // (no auto-update) and surfaces with `source: "local"` in the catalog.
+  const onEject = async (skill: MarketSkill) => {
+    setBusy(b => ({ ...b, [skill.name]: true }));
+    try {
+      const res = await (apiService as any).ejectMarketSkill(skill.name);
+      const data = res?.data;
+      if (data?.skill) {
+        const fresh = data.skill as MarketSkill;
+        setSkills(prev => prev.map(s => s.name === skill.name ? { ...s, ...fresh } : s));
+      } else {
+        await load();
+      }
+      return data;
+    } catch (e: any) {
+      await load();
+      return { ok: false, error: e?.message || 'eject failed' };
+    }
+    finally { setBusy(b => { const { [skill.name]: _, ...rest } = b; return rest; }); }
+  };
+
   const onUninstall = async (skill: MarketSkill) => {
     setBusy(b => ({ ...b, [skill.name]: true }));
     try {
@@ -342,6 +364,10 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
           onUpdate={async () => {
             const sk = skills.find(s => s.name === selectedName);
             if (sk) return await onUpdate(sk);
+          }}
+          onEject={async () => {
+            const sk = skills.find(s => s.name === selectedName);
+            if (sk) return await onEject(sk);
           }}
           onOpenProxyManager={handleOpenProxyManager}
           onOpenProxySshManager={handleOpenProxySshManager}
@@ -512,13 +538,14 @@ function InlineStatus({ skill }: { skill: MarketSkill }) {
 
 type Tab = 'help' | 'tools'; // legacy, no longer used in UI but kept for type compat
 
-function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpdate, onOpenProxyManager, onOpenProxySshManager, onOpenFrpServerManager, onOpenWebClients }: {
+function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpdate, onEject, onOpenProxyManager, onOpenProxySshManager, onOpenFrpServerManager, onOpenWebClients }: {
   name: string;
   paneId: string;
   onClose: () => void;
   onInstall: () => Promise<{ log?: string; ok?: boolean; error?: string } | void>;
   onUninstall: () => Promise<{ log?: string; ok?: boolean; error?: string } | void>;
   onUpdate: () => Promise<{ log?: string; ok?: boolean; error?: string; from?: string; to?: string; updated?: boolean } | void>;
+  onEject: () => Promise<{ log?: string; ok?: boolean; error?: string; source?: string; path?: string } | void>;
   onOpenProxyManager: () => void;
   onOpenProxySshManager: () => void;
   onOpenFrpServerManager: () => void;
@@ -528,7 +555,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
   const [data, setData] = useState<SkillDetailPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('help');
-  const [busyAction, setBusyAction] = useState<'install' | 'update' | 'uninstall' | null>(null);
+  const [busyAction, setBusyAction] = useState<'install' | 'update' | 'uninstall' | 'eject' | null>(null);
   const busy = busyAction !== null;
   const [installLog, setInstallLog] = useState('');
   const [installError, setInstallError] = useState('');
@@ -732,6 +759,30 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
     }
   };
 
+  const handleEject = async () => {
+    const ok = await confirm({
+      title: t('marketplaceEjectConfirmTitle', { defaultValue: 'Eject to local?', title: data?.skill?.title || name }),
+      body: t('marketplaceEjectConfirmBody', { defaultValue: 'The skill files stay in place under ~/cicy-ai/skills/' + name + '/, but the installed.json source is rewritten to local — future skill updates will skip it. You can re-install any time to restore the registry version.' }),
+      confirmLabel: t('marketplaceEject', { defaultValue: 'Eject' }),
+    });
+    if (!ok) return;
+    setBusyAction('eject');
+    setInstallLog('');
+    setInstallError('');
+    try {
+      const r = await onEject();
+      if (r && typeof r === 'object') {
+        if (r.log) setInstallLog(r.log);
+        if (r.ok === false) setInstallError(r.error || 'eject failed');
+      }
+      await fetchDetail();
+    } catch (e: any) {
+      setInstallError(e?.message || 'eject failed');
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   // Stable sender — referentially identical across renders so memoized
   // children (MarkdownPane) don't re-render on every parent state tick.
   const sendToAgent = useCallback(async (text: string) => {
@@ -808,6 +859,20 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
                   {skill?.title || name}
                 </div>
                 {skill && <StatusPill skill={skill} />}
+                {skill?.source === 'local' && (
+                  <span
+                    data-id="skill-detail-source-local"
+                    title={t('marketplaceSourceLocalTooltip', { defaultValue: 'Local override — installed.json source=local; no auto-update.' })}
+                    className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-200 leading-none"
+                  >local</span>
+                )}
+                {skill?.source === 'user' && (
+                  <span
+                    data-id="skill-detail-source-user"
+                    title={t('marketplaceSourceUserTooltip', { defaultValue: 'User-authored skill under ~/cicy-ai/skills/' })}
+                    className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-700/40 text-zinc-300 leading-none"
+                  >user</span>
+                )}
               </div>
               <div data-id="skill-detail-version-row" className="text-[11px] text-zinc-500 mt-0.5">
                 {skill ? (
@@ -889,9 +954,23 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
                           Clients
                         </button>
                       ) : (
-                        <button data-id="skill-detail-uninstall" onClick={handleUninstall} disabled={busy} className="text-[12px] px-3 py-1.5 rounded text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors">
-                          {t('marketplaceUninstall')}
-                        </button>
+                        <>
+                          {!skill.source && (
+                            <button
+                              data-id="skill-detail-eject"
+                              onClick={handleEject}
+                              disabled={busy}
+                              title={t('marketplaceEjectTooltip', { defaultValue: 'Convert to a local override; files stay editable, no auto-update.' })}
+                              className="text-[12px] px-3 py-1.5 rounded bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 disabled:opacity-50 transition-colors inline-flex items-center gap-1"
+                            >
+                              {busyAction === 'eject' && <Loader2 className="w-3 h-3 animate-spin" />}
+                              {busyAction === 'eject' ? t('marketplaceEjecting', { defaultValue: 'Ejecting…' }) : t('marketplaceEject', { defaultValue: 'Eject' })}
+                            </button>
+                          )}
+                          <button data-id="skill-detail-uninstall" onClick={handleUninstall} disabled={busy} className="text-[12px] px-3 py-1.5 rounded text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors">
+                            {t('marketplaceUninstall')}
+                          </button>
+                        </>
                       )}
                     </>
                   ) : (

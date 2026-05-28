@@ -290,3 +290,32 @@ func cmdSearch(args []string) error {
 	fmt.Printf("\n%d skill(s) match %q.\n", resp.Total, q)
 	return nil
 }
+
+// ── eject ──────────────────────────────────────────────────────────────────
+//
+// `cicy-code skill eject <name>` — convert an installed registry skill into a
+// local-source one. Files stay in place under ~/cicy-ai/skills/<name>/; only
+// the installed.json entry's source flips to {type:"local", path:<dir>},
+// matching what `skill dev` records. Future `skill update` then skips it.
+
+func cmdEject(args []string) error {
+	jsonOut := contains(args, "--json")
+	pos, _ := positional(args)
+	if len(pos) == 0 {
+		return fmt.Errorf("usage: cicy-code skill eject <name>")
+	}
+	name := pos[0]
+	entry, err := PublicEject(name, os.Stdout)
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		emitJSON(map[string]interface{}{
+			"ok":      true,
+			"name":    entry.Name,
+			"version": entry.Version,
+			"source":  entry.Source,
+		})
+	}
+	return nil
+}
