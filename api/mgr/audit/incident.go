@@ -50,9 +50,6 @@ func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
 	recipients := pol.ResponsiblePersons.Resolve(
 		topSeverity(e.Findings), e.Identity.AgentID, e.Identity.UserID, ruleIDs,
 	)
-	if len(recipients) == 0 {
-		return fmt.Errorf("no responsible person resolved for event %s (configure policy.incident_response.responsible_persons)", e.ID)
-	}
 	var ai *AIRemediation
 	if cfg.AIRemediation.Enabled {
 		if got, err := callAIRemediation(context.Background(), cfg.AIRemediation, e); err == nil {
@@ -67,22 +64,49 @@ func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
 	} else {
 		log.Printf("[audit] ack-token sign failed event=%s: %v", e.ID, signErr)
 	}
-	subject, body := renderIncidentEmail(e, ruleIDs, cfg, ai, ackURL)
-	if n := strings.TrimSpace(note); n != "" {
-		body = "审计顾问 (w-10000) 研判:\n" + n + "\n\n" + body
+
+	// Channel 1 (default): email to the responsible person(s).
+	emailed := false
+	var emailErr error
+	if len(recipients) > 0 {
+		subject, body := renderIncidentEmail(e, ruleIDs, cfg, ai, ackURL)
+		if n := strings.TrimSpace(note); n != "" {
+			body = "审计顾问 (w-10000) 研判:\n" + n + "\n\n" + body
+		}
+		if err := p.mailer.Send(EmailMessage{
+			To:       recipients,
+			Subject:  subject,
+			Body:     body,
+			EventID:  e.ID,
+			AgentID:  e.Identity.AgentID,
+			Severity: topSeverity(e.Findings),
+		}); err != nil {
+			emailErr = fmt.Errorf("send incident email: %w", err)
+		} else {
+			emailed = true
+			log.Printf("[audit] owner incident dispatched (advisor-triggered) event=%s recipients=%v", e.ID, recipients)
+		}
+	} else {
+		emailErr = fmt.Errorf("no responsible person resolved for event %s (configure policy.incident_response.responsible_persons)", e.ID)
 	}
-	msg := EmailMessage{
-		To:       recipients,
-		Subject:  subject,
-		Body:     body,
-		EventID:  e.ID,
-		AgentID:  e.Identity.AgentID,
-		Severity: topSeverity(e.Findings),
+
+	// Channel 2 (additive, optional): WeChat to the bound account owner. Fires
+	// alongside email — best-effort, never blocks the email outcome.
+	imSent := false
+	if imChannelBound() {
+		if sent, err := notifyIMChannel(renderIMIncident(e, note, ackURL)); err != nil {
+			log.Printf("[audit] IM(wechat) notify failed event=%s: %v", e.ID, err)
+		} else if sent {
+			imSent = true
+			log.Printf("[audit] IM(wechat) notify sent event=%s", e.ID)
+		}
 	}
-	if err := p.mailer.Send(msg); err != nil {
-		return fmt.Errorf("send incident email: %w", err)
+
+	// Success if any channel delivered. Only when nothing went out do we surface
+	// the email-side reason (the default channel) to the caller.
+	if !emailed && !imSent {
+		return emailErr
 	}
-	log.Printf("[audit] owner incident dispatched (advisor-triggered) event=%s recipients=%v", e.ID, recipients)
 	return nil
 }
 

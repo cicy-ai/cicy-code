@@ -28,7 +28,7 @@ func (r ResponsiblePersonsConfig) Configured() bool {
 func GetResponseReadiness() ResponseReadiness {
 	r := ResponseReadiness{
 		MailerKind: responseMailerKind,
-		IMBound:    false, // no audit IM integration yet — wired later
+		IMBound:    imChannelBound(), // WeChat (optional, additive) bound?
 	}
 	if globalPipeline == nil {
 		r.Gaps = []string{"审计子系统未初始化"}
@@ -59,7 +59,7 @@ func GetResponseReadiness() ResponseReadiness {
 		r.Gaps = append(r.Gaps, "AI 研判未开 (ai_remediation) — 无自动处置建议")
 	}
 	if !r.IMBound {
-		r.Gaps = append(r.Gaps, "IM 未接入 — 当前只能邮件单通道")
+		r.Gaps = append(r.Gaps, "微信未绑定 — SMTP 仍默认发;在 IM 面板扫码绑微信可加一路实时告警(可选)")
 	}
 	return r
 }
