@@ -888,7 +888,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
                           <Globe className="w-3 h-3" />
                           Clients
                         </button>
-                      ) : skill.name === 'skill-author' ? null : (
+                      ) : (
                         <button data-id="skill-detail-uninstall" onClick={handleUninstall} disabled={busy} className="text-[12px] px-3 py-1.5 rounded text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors">
                           {t('marketplaceUninstall')}
                         </button>

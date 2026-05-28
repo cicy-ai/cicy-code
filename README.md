@@ -37,7 +37,6 @@ cicy-code/
 │   ├── cicy-code           bash CLI：调当前节点的 cicy-code 后端
 │   ├── cicy-master         python CLI：管理 ~/Private/cicy-node.json 节点表
 │   ├── cicy-todo/          每工作区 todo 列表 skill（前端 Todo tab 对端）
-│   ├── skill-author/       生成 / 打包新 skill 的元 skill
 │   ├── proxy_ssh/          ssh 子代理 skill 脚本
 │   ├── us-spot-dev/, hk-spot-dev/, us-spot-proxy/  spot/dev 节点 provisioning
 │   ├── cf/                 install-worker for Cloudflare Worker dev
@@ -307,7 +306,7 @@ pane 是核心运行单位，典型 ID 形态：
 - `~/cicy-ai/.cicy/`
 - `~/cicy-ai/workers/`
 - `~/cicy-ai/projects/`
-- `~/cicy-ai/skills/`（含 `cicy-skills/skill-author/`）
+- `~/cicy-ai/skills/`（用户本地 skill）
 - `~/cicy-ai/shared-workspace/`
 - `~/cicy-ai/cicy-node.json`
 
@@ -358,7 +357,7 @@ export CICY_NODES_FILE=~/cicy-ai/cicy-node.json
 3. `cicy-skills` 把所需文件 link 到 `~/.local/bin/`、`~/.claude/skills/<name>/` 等
 4. agent 启动时 `agentgen` 按当前已安装的 skill 列表生成 SKILL.md
 
-已落地的 skill 示例：`google`（多用户 OAuth）、`email`（Resend）、`aliyun-cli`、`frp-server` / `frp-client`、`cf` / `cf-tunnel`、`cicy-mihomo`、`proxy_ssh`（重命名 CiCy SSH）、`ssh-list`、`cicy-todo`、`skill-author`。
+已落地的 skill 示例：`google`（多用户 OAuth）、`email`（Resend）、`aliyun-cli`、`frp-server` / `frp-client`、`cf` / `cf-tunnel`、`cicy-mihomo`、`proxy_ssh`（重命名 CiCy SSH）、`ssh-list`、`cicy-todo`。
 
 ## managed runtime / Docker
 
