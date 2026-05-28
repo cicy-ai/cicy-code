@@ -380,30 +380,15 @@ def cmd_channel_test(args):
 
 
 def cmd_channel_wechat(_):
-    s = api("POST", "/api/im/wechat/login")
-    sid, qr = s.get("session_id"), s.get("qrcode_url", "")
-    if not qr:
-        sys.exit("error: 未取到二维码: " + json.dumps(s, ensure_ascii=False)[:300])
-    render = "https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=8&data=" + urllib.parse.quote(qr)
-    # flush=True so w-10000 (reading piped output) sees the QR link immediately,
-    # not buffered behind the poll loop.
-    print("微信绑定 —— 用手机微信扫码:", flush=True)
-    print("  浏览器打开此链接看二维码再扫: " + render, flush=True)
-    print("  (或在 Dashboard 的 IM 面板里扫,效果一样)", flush=True)
-    print("等待扫码确认中(最多 ~90s)…", flush=True)
-    for i in range(30):
-        time.sleep(3)
-        st = api("GET", f"/api/im/wechat/login/{sid}")
-        state, acc = st.get("state", ""), st.get("account_id") or 0
-        if state in ("created", "connected") or acc:
-            print(f"✓ 微信绑定完成 (state={state}, account_id={acc}) —— 之后审计告警会同时发微信", flush=True)
-            return
-        if state in ("expired", "error"):
-            print(f"✗ 绑定失败 state={state}: {st.get('detail', '')}", flush=True)
-            return
-        if i % 4 == 0:
-            print(f"  …{state or 'waiting'}", flush=True)
-    print("超时未完成。重试 cicy-policy channel wechat,或去 IM 面板扫。", flush=True)
+    # Pop the WeChat QR modal in the operator's browser via a WS broadcast,
+    # rather than printing a QR link in this terminal. The frontend handles
+    # the scan + bind; once bound, audit alerts also push to WeChat.
+    res = api("POST", "/api/im/wechat/prompt")
+    if res.get("ok"):
+        print("已在 Dashboard 前端弹出微信扫码窗口 —— 请在浏览器里用手机微信扫码绑定。")
+        print("绑定后审计告警会同时推送微信(SMTP 仍默认发)。")
+    else:
+        print("拉起失败: " + json.dumps(res, ensure_ascii=False)[:300])
 
 
 def main():

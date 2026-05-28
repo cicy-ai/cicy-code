@@ -39,6 +39,7 @@ import AgentCanvas, { AgentCanvasItem } from './layout/AgentCanvas';
 import AgentStack from './layout/AgentStack';
 import ProviderDashboard from './providers/ProviderDashboard';
 import IMDashboard from './im/IMDashboard';
+import WeChatBindModal from './im/WeChatBindModal';
 import { useDialogs } from './ui/Modal';
 import config, { defaultWorkerWorkspace, getHostHome, syncHostHomeFromPath, toTildePath, urls } from '../config';
 import apiService from '../services/api';
@@ -916,6 +917,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       window.dispatchEvent(new CustomEvent('agent-desktop-event', { detail: msg.data }));
     } else if (msg?.type === 'worker_idle' && msg.data) {
       window.dispatchEvent(new CustomEvent('agent-worker-idle', { detail: msg.data }));
+    } else if (msg?.type === 'wechat_bind_request') {
+      // audit advisor (w-10000) asked the UI to pop the WeChat bind modal
+      window.dispatchEvent(new CustomEvent('open-wechat-bind'));
     } else if (msg?.type === 'webpage_ping') {
       const versionText = document.getElementById('version')?.textContent?.trim() || config.version;
       chatWs.send({ type: 'webpage_pong', data: { requestId: msg.data?.requestId, version: versionText } });
@@ -1837,6 +1841,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
       {toast && <div data-id="workspace-toast" className={`fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 text-sm rounded-lg shadow-lg ${toast.variant === 'success' ? 'bg-green-600 text-white' : 'bg-zinc-800 text-white'}`}>{toast.message}</div>}
       {dialogsNode}
+      <WeChatBindModal />
     </div>
     </SendingProvider>
   );
