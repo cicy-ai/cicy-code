@@ -246,19 +246,21 @@ export default function App() {
             pushToast("无法获取访问令牌，请重启应用后重试", "error");
             return;
           }
-          // Wait for the backend to actually be SERVING before opening — and
-          // GATE the open on it. Being able to read the token (above) only
-          // means the distro booted; cicy-code still needs to bind :8008,
-          // which on a first cold start trails the (slow) cicy-mihomo binary
-          // download. Opening before the server answers strands the window on
-          // a connection-error / login page that no in-window reload can fix
-          // until the server is up. A warm backend answers on the first probe
-          // (instant). If it never comes up, we DON'T open a dead window — we
-          // tell the user it's still starting. Generous bound (~5 min) so even
-          // a first-ever cold start (mihomo download) is covered.
-          {
+          // For LOCAL ONLY: gate the open on /api/health. The local cicy-code
+          // container can take minutes to bind :8008 on a cold first start
+          // (cicy-mihomo download trails the API listener). Opening before
+          // the server answers strands the window on a connection-error
+          // / login page that no in-window reload can fix until the server
+          // is up. A warm backend answers on the first probe (instant).
+          //
+          // Remote backends are skipped: they're just a cloud URL the user
+          // typed in, no local supervisor to wake up. Also, the homepage
+          // ships over https://desktop.cicy-ai.com so a renderer-side
+          // fetch() against an http://… remote is blocked by mixed-content
+          // (Failed to fetch), which would falsely fail the gate.
+          if (b.id === "local") {
             const origin = (url.match(/^https?:\/\/[^/]+/) || [])[0];
-            let apiUp = !origin; // non-http (shouldn't happen) → don't block
+            let apiUp = !origin;
             for (let i = 0; origin && i < 150 && !apiUp; i++) {
               try { apiUp = (await fetch(origin + "/api/health", { cache: "no-store" })).ok; } catch (e) {}
               if (apiUp) break;
