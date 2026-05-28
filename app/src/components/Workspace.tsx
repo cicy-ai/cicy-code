@@ -361,6 +361,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // marketplace panel dispatches `cicy:skills-changed` after install/uninstall;
   // we re-fetch on that signal so the UI updates without a page reload.
   const [todoSkillInstalled, setTodoSkillInstalled] = useState<boolean>(false);
+  // Pending-todo count (status todo + doing on the active pane) for the red
+  // badge on the Todo tab.
+  const [todoCount, setTodoCount] = useState<number>(0);
   const [cliDrawerWidth, setCliDrawerWidth] = useState(() => clampCliDrawerWidth(Number(cache.get(CLI_DRAWER_WIDTH_KEY, CLI_DRAWER_DEFAULT_WIDTH))));
   const [cliDrawerResizing, setCliDrawerResizing] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
@@ -741,6 +744,34 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // WS every time the active pane flipped.
   const activeCliPaneIdRef = useRef(activeCliPaneId);
   useEffect(() => { activeCliPaneIdRef.current = activeCliPaneId; }, [activeCliPaneId]);
+  // Keep the Todo-tab badge count fresh: fetch on mount / pane switch / install
+  // flip, poll every 10s, and refresh immediately on `cicy:todos-changed`
+  // (dispatched by TodoPanel after add/status/delete). Count = todo + doing.
+  useEffect(() => {
+    if (!todoSkillInstalled) { setTodoCount(0); return; }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const res: any = await apiService.getTodoCounts(activeCliPaneId);
+        const c = res?.data || {};
+        if (!cancelled) setTodoCount((Number(c.todo) || 0) + (Number(c.doing) || 0));
+      } catch { /* keep previous count on transient error */ }
+    };
+    refresh();
+    const id = window.setInterval(refresh, 10000);
+    // TodoPanel carries fresh counts in the event detail; use them directly
+    // when they're for the active pane, otherwise refetch.
+    const onChange = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d && d.paneId === activeCliPaneId) {
+        setTodoCount((Number(d.todo) || 0) + (Number(d.doing) || 0));
+      } else {
+        refresh();
+      }
+    };
+    window.addEventListener('cicy:todos-changed', onChange);
+    return () => { cancelled = true; window.clearInterval(id); window.removeEventListener('cicy:todos-changed', onChange); };
+  }, [todoSkillInstalled, activeCliPaneId]);
   useEffect(() => {
     setInspectorPaneId(activeCliPaneId || paneId);
   }, [activeCliPaneId, paneId]);
@@ -1336,7 +1367,17 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   else setCliContentTab(item.id as WorkspaceCliContentTab);
                 }}
               >
-                {item.label}
+                <span className="inline-flex items-center gap-1.5">
+                  {item.label}
+                  {item.id === 'todo' && todoCount > 0 && (
+                    <span
+                      data-id="cli-content-tab-todo-badge"
+                      className="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white tabular-nums"
+                    >
+                      {todoCount > 99 ? '99+' : todoCount}
+                    </span>
+                  )}
+                </span>
               </button>
             );
           })}

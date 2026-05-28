@@ -78,8 +78,14 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
         (apiService as any).getTodoCounts(paneId),
       ]);
       setTodos(listRes.data?.todos || []);
-      setCounts(countsRes.data || { all: 0, todo: 0, doing: 0, done: 0, dropped: 0 });
+      const c = countsRes.data || { all: 0, todo: 0, doing: 0, done: 0, dropped: 0 };
+      setCounts(c);
       setError(null);
+      // Let the Todo-tab badge (in Workspace) update immediately after any
+      // load/mutation, carrying the fresh counts so it needn't refetch.
+      window.dispatchEvent(new CustomEvent('cicy:todos-changed', {
+        detail: { paneId, todo: c.todo || 0, doing: c.doing || 0 },
+      }));
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'failed to load todos');
     } finally {
