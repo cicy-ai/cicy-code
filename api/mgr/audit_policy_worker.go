@@ -161,13 +161,17 @@ func ensureAuditPolicyPane() error {
 
 	if err == nil && port > 0 {
 		// Already provisioned — refresh metadata then revive session/ttyd.
+		// w-10000 is a trusted internal admin agent — it must run its own tools
+		// (cicy-policy, cicy-agent msg, shell) without permission prompts, or its
+		// loop stalls. Force allow_all_actions on, upgrading older rows too.
 		store.Exec(
-			fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, role=?, updated_at=%s WHERE pane_id=?", store.Now()),
+			fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, role=?, allow_all_actions=1, updated_at=%s WHERE pane_id=?", store.Now()),
 			auditPolicyAgentType, auditPolicyTitle, auditPolicyRole, auditPolicyPaneID,
 		)
+		_ = allowAllActions
 		token := getFirstToken()
 		startAgentFromConfig(auditPolicyPaneID, port, workspace, initScript, configJSON,
-			auditPolicyAgentType, allowAllActions, replyInChinese, useCustomGateway, token)
+			auditPolicyAgentType, true, replyInChinese, useCustomGateway, token)
 		return nil
 	}
 
@@ -181,7 +185,7 @@ func ensureAuditPolicyPane() error {
 		workspace:        builtinWorkerWorkspace(auditPolicyShortPane),
 		port:             auditPolicyPort,
 		token:            token,
-		allowAllActions:  false,
+		allowAllActions:  true, // trusted admin agent — run its tools without prompts
 		replyInChinese:   true,
 		useCustomGateway: true,
 	})
