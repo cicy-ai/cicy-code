@@ -48,3 +48,24 @@ func handleAuditNotify(w http.ResponseWriter, r *http.Request) {
 	}
 	J(w, M{"ok": true, "event_id": eventID})
 }
+
+// handleAuditChannelsTest — POST /api/audit/channels/test {to}. Sends a
+// synthetic test alert through the active channels (email + WeChat if bound)
+// so the operator can confirm delivery without a real finding. Used by
+// `cicy-policy channel test` when w-10000 helps set up notifications.
+func handleAuditChannelsTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		To string `json:"to"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	summary, err := audit.SendTestNotificationGlobal(req.To)
+	if err != nil {
+		J(w, M{"ok": false, "summary": summary, "error": err.Error()})
+		return
+	}
+	J(w, M{"ok": true, "summary": summary})
+}

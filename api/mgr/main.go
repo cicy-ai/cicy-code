@@ -37,7 +37,7 @@ var (
 	desktopCmd    *exec.Cmd
 )
 
-const version = "2.1.2"
+const version = "2.1.3"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -189,6 +189,7 @@ Options:
 	http.HandleFunc("/api/audit/ack", w(handleAuditAck)) // public: the HMAC-signed token is the auth
 	http.HandleFunc("/api/audit/readiness", wa(handleAuditReadiness))
 	http.HandleFunc("/api/audit/notify", wa(handleAuditNotify))
+	http.HandleFunc("/api/audit/channels/test", wa(handleAuditChannelsTest))
 
 	// Panes
 	http.HandleFunc("/api/panes", authM(handlePanes))

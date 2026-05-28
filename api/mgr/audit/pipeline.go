@@ -274,7 +274,9 @@ func (p *Pipeline) WatchEmailCredentials() error {
 				if !ok {
 					return
 				}
-				if filepath.Base(ev.Name) != "email.json" {
+				switch filepath.Base(ev.Name) {
+				case "email.json", "smtp.json", "google.json", "google_oauth_client.json":
+				default:
 					continue
 				}
 				if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) == 0 {

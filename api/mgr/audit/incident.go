@@ -110,6 +110,53 @@ func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
 	return nil
 }
 
+// SendTestNotification sends a synthetic alert through the currently-active
+// channels (email mailer + WeChat if bound) so an operator can verify delivery
+// without triggering a real finding. Returns a human-readable summary of what
+// was attempted; err is non-nil only when a configured channel actually failed.
+func (p *Pipeline) SendTestNotification(to string) (string, error) {
+	to = strings.TrimSpace(to)
+	var results []string
+	var lastErr error
+	if to != "" {
+		msg := EmailMessage{
+			To:       []string{to},
+			Subject:  "[CICY-AUDIT][TEST] 通知渠道连通性测试",
+			Body:     "这是一封 cicy-code 审计「通知渠道」测试邮件。\n收到即说明邮件投递通道(" + responseMailerKind + ")工作正常。\n\n— cicy-code audit · w-10000",
+			EventID:  fmt.Sprintf("test-%d", time.Now().Unix()),
+			AgentID:  "w-10000",
+			Severity: SeverityLow,
+		}
+		if err := p.mailer.Send(msg); err != nil {
+			results = append(results, fmt.Sprintf("邮件(%s)→%s: 失败 %v", responseMailerKind, to, err))
+			lastErr = err
+		} else {
+			results = append(results, fmt.Sprintf("邮件(%s)→%s: 已发", responseMailerKind, to))
+		}
+	} else {
+		results = append(results, "邮件: 跳过(未给收件人 to)")
+	}
+	if imChannelBound() {
+		if sent, err := notifyIMChannel("【审计通知测试】这是一条 cicy-code 审计「通知渠道」微信测试消息,收到即说明微信通道正常。"); err != nil {
+			results = append(results, "微信: 失败 "+err.Error())
+			lastErr = err
+		} else if sent {
+			results = append(results, "微信: 已发")
+		}
+	} else {
+		results = append(results, "微信: 未绑定(跳过)")
+	}
+	return strings.Join(results, "\n"), lastErr
+}
+
+// SendTestNotificationGlobal runs SendTestNotification on the global pipeline.
+func SendTestNotificationGlobal(to string) (string, error) {
+	if globalPipeline == nil {
+		return "", fmt.Errorf("audit pipeline not initialized")
+	}
+	return globalPipeline.SendTestNotification(to)
+}
+
 // SendOwnerIncidentByID loads an event and escalates it to its responsible
 // person(s). Called by POST /api/audit/notify when the advisor escalates.
 func SendOwnerIncidentByID(eventID, note string) error {

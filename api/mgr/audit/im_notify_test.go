@@ -74,6 +74,24 @@ func TestSendOwnerIncident_BothChannels(t *testing.T) {
 	}
 }
 
+// SendTestNotification reports per-channel outcome (email via mailer + WeChat
+// when bound) without needing a real finding.
+func TestSendTestNotification(t *testing.T) {
+	p, _ := preventiveFixture(t, DefaultPolicy())
+	SetIMBoundCheck(func() bool { return false })
+	t.Cleanup(func() { SetIMBoundCheck(nil) })
+	summary, err := p.SendTestNotification("officer@corp")
+	if err != nil {
+		t.Fatalf("test notify: %v", err)
+	}
+	if !strings.Contains(summary, "已发") || !strings.Contains(summary, "officer@corp") {
+		t.Errorf("email not reported sent: %q", summary)
+	}
+	if !strings.Contains(summary, "微信: 未绑定") {
+		t.Errorf("should note wechat unbound: %q", summary)
+	}
+}
+
 // With neither email recipients nor a bound IM channel, it still errors.
 func TestSendOwnerIncident_NoChannelErrors(t *testing.T) {
 	pol := DefaultPolicy()
