@@ -92,7 +92,7 @@ func TestSendTestNotification(t *testing.T) {
 	}
 }
 
-// Escalation to the w-1000 security-officer agent fires alongside email/WeChat
+// Escalation to the w-9501 security-officer agent fires alongside email/WeChat
 // (additive). With email+officer wired, both run; success when either delivers.
 func TestSendOwnerIncident_SecurityOfficerEscalation(t *testing.T) {
 	pol := DefaultPolicy()
@@ -110,7 +110,7 @@ func TestSendOwnerIncident_SecurityOfficerEscalation(t *testing.T) {
 	}, "test note"); err != nil {
 		t.Fatalf("escalation: %v", err)
 	}
-	for _, want := range []string{"w-1000", "secret.aws_akid", "test note", "AKIA****MPLE"} {
+	for _, want := range []string{"w-9501", "secret.aws_akid", "test note", "AKIA****MPLE"} {
 		if !strings.Contains(gotOfficer, want) {
 			t.Errorf("officer text missing %q in:\n%s", want, gotOfficer)
 		}

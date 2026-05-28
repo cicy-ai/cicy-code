@@ -102,15 +102,15 @@ func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
 		}
 	}
 
-	// Channel 3 (additive): escalate to the security-officer agent w-1000. Fires
+	// Channel 3 (additive): escalate to the security-officer agent w-9501. Fires
 	// alongside email + WeChat — the officer is an agent, email/WeChat reach humans.
 	officerNotified := false
 	if called, err := notifySecurityOfficer(renderSecurityOfficerEscalation(e, note, ackURL)); called {
 		if err != nil {
-			log.Printf("[audit] security-officer(w-1000) escalation failed event=%s: %v", e.ID, err)
+			log.Printf("[audit] security-officer(w-9501) escalation failed event=%s: %v", e.ID, err)
 		} else {
 			officerNotified = true
-			log.Printf("[audit] security-officer(w-1000) escalated event=%s", e.ID)
+			log.Printf("[audit] security-officer(w-9501) escalated event=%s", e.ID)
 		}
 	}
 
