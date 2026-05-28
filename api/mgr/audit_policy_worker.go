@@ -40,12 +40,13 @@ var auditPolicySkillFS embed.FS
 //go:embed embed/audit-policy-CLAUDE.md
 var auditPolicyGuidance []byte
 
-// auditPolicyIntroPrompt is the first turn we feed w-10000 so it opens
-// proactively. Kept as a clean operational kickoff — no "按 CLAUDE.md 段落"
-// / "不要等我说话" meta-instruction leaking into the chat; the detailed
-// startup routine lives in the agent's CLAUDE.md. Fires once per process
-// (in-memory queue), so a fresh container re-greets the operator.
-const auditPolicyIntroPrompt = "上岗开场(中文,主动):先一句话亮明身份与职责,再体检响应链路就绪度,给出 2-3 条优先加固建议。"
+// auditPolicyIntroPrompt is the minimal first-turn trigger that makes w-10000
+// open proactively. The actual startup routine (pick session language first,
+// then readiness + recommendations) lives in the agent's CLAUDE.md, which is
+// injected into the gateway request system prompt — so this stays a clean,
+// English, one-line trigger rather than a meta-instruction leaking into chat.
+// Fires once per process (in-memory queue); a fresh container re-greets.
+const auditPolicyIntroPrompt = "A new operator session has started — open with your startup briefing now."
 
 // setupAuditPolicyAgent installs the skill into ~/cicy-ai/skills/,
 // creates the w-10000 pane if missing, then queues the opening
@@ -163,14 +164,16 @@ func ensureAuditPolicyPane() error {
 		// w-10000 is a trusted internal admin agent — it must run its own tools
 		// (cicy-policy, cicy-agent msg, shell) without permission prompts, or its
 		// loop stalls. Force allow_all_actions on, upgrading older rows too.
+		// Global platform: w-10000 defaults to English and asks the operator to
+		// pick the session language (see CLAUDE.md), so don't force Chinese.
 		store.Exec(
-			fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, role=?, allow_all_actions=1, updated_at=%s WHERE pane_id=?", store.Now()),
+			fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, role=?, allow_all_actions=1, reply_in_chinese=0, updated_at=%s WHERE pane_id=?", store.Now()),
 			auditPolicyAgentType, auditPolicyTitle, auditPolicyRole, auditPolicyPaneID,
 		)
-		_ = allowAllActions
+		_, _ = allowAllActions, replyInChinese
 		token := getFirstToken()
 		startAgentFromConfig(auditPolicyPaneID, port, workspace, initScript, configJSON,
-			auditPolicyAgentType, true, replyInChinese, useCustomGateway, token)
+			auditPolicyAgentType, true, false, useCustomGateway, token)
 		return nil
 	}
 
@@ -184,8 +187,8 @@ func ensureAuditPolicyPane() error {
 		workspace:        builtinWorkerWorkspace(auditPolicyShortPane),
 		port:             auditPolicyPort,
 		token:            token,
-		allowAllActions:  true, // trusted admin agent — run its tools without prompts
-		replyInChinese:   true,
+		allowAllActions:  true,  // trusted admin agent — run its tools without prompts
+		replyInChinese:   false, // global platform — English default, operator picks language
 		useCustomGateway: true,
 	})
 	if err != nil {
