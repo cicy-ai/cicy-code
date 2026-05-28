@@ -55,7 +55,7 @@ type Policy struct {
 //
 // ByAgent keys support a single trailing "*" wildcard:
 //
-//	"w-100*" matches w-1000, w-10042, etc.
+//	"w-1*" matches w-10000, w-10042, etc.
 type ResponsiblePersonsConfig struct {
 	Default    []string            `json:"default,omitempty"`
 	BySeverity map[string][]string `json:"by_severity,omitempty"`

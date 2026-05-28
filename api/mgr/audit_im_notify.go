@@ -19,7 +19,7 @@ func init() {
 	audit.SetSecurityOfficerNotifier(notifySecurityOfficerAgent)
 }
 
-// notifySecurityOfficerAgent delivers an incident escalation to the w-1000
+// notifySecurityOfficerAgent delivers an incident escalation to the w-9501
 // security-officer agent's pane (same cross-agent path cicy-agent msg uses).
 func notifySecurityOfficerAgent(text string) error {
 	return sendTextToPane(securityOfficerPaneID, text, true)
