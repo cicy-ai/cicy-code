@@ -40,13 +40,12 @@ var auditPolicySkillFS embed.FS
 //go:embed embed/audit-policy-CLAUDE.md
 var auditPolicyGuidance []byte
 
-// auditPolicyIntroPrompt is the message we feed the agent the first time
-// w-10000's Claude CLI is interactive. Tells it to follow the
-// "启动自我介绍" section in CLAUDE.md without waiting for the human to
-// type. The queue is in-memory only, so this fires once per cicy-code
-// process — restart the container = the user sees the intro again
-// (intentional; fresh dashboards should feel guided).
-const auditPolicyIntroPrompt = "请按 CLAUDE.md 中「启动自我介绍」段落用中文先做一次自我介绍,主动开口,不要等我说话。"
+// auditPolicyIntroPrompt is the first turn we feed w-10000 so it opens
+// proactively. Kept as a clean operational kickoff — no "按 CLAUDE.md 段落"
+// / "不要等我说话" meta-instruction leaking into the chat; the detailed
+// startup routine lives in the agent's CLAUDE.md. Fires once per process
+// (in-memory queue), so a fresh container re-greets the operator.
+const auditPolicyIntroPrompt = "上岗开场(中文,主动):先一句话亮明身份与职责,再体检响应链路就绪度,给出 2-3 条优先加固建议。"
 
 // setupAuditPolicyAgent installs the skill into ~/cicy-ai/skills/,
 // creates the w-10000 pane if missing, then queues the opening
