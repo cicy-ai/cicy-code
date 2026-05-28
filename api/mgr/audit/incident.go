@@ -102,9 +102,21 @@ func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
 		}
 	}
 
+	// Channel 3 (additive): escalate to the security-officer agent w-1000. Fires
+	// alongside email + WeChat — the officer is an agent, email/WeChat reach humans.
+	officerNotified := false
+	if called, err := notifySecurityOfficer(renderSecurityOfficerEscalation(e, note, ackURL)); called {
+		if err != nil {
+			log.Printf("[audit] security-officer(w-1000) escalation failed event=%s: %v", e.ID, err)
+		} else {
+			officerNotified = true
+			log.Printf("[audit] security-officer(w-1000) escalated event=%s", e.ID)
+		}
+	}
+
 	// Success if any channel delivered. Only when nothing went out do we surface
 	// the email-side reason (the default channel) to the caller.
-	if !emailed && !imSent {
+	if !emailed && !imSent && !officerNotified {
 		return emailErr
 	}
 	return nil

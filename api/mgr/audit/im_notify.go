@@ -19,6 +19,29 @@ func SetIMBoundCheck(fn func() bool) { imBoundCheck = fn }
 
 func imChannelBound() bool { return imBoundCheck != nil && imBoundCheck() }
 
+// securityOfficerNotifier escalates an incident to the security-officer agent
+// (w-1000). Injected by the main package (sendTextToPane → w-1000). nil = off.
+// This fires alongside email + WeChat — the security officer is an agent, the
+// email/WeChat reach the human responsible persons.
+var securityOfficerNotifier func(text string) error
+
+// SetSecurityOfficerNotifier wires the "escalate to the w-1000 security officer" path.
+func SetSecurityOfficerNotifier(fn func(text string) error) { securityOfficerNotifier = fn }
+
+func notifySecurityOfficer(text string) (bool, error) {
+	if securityOfficerNotifier == nil {
+		return false, nil
+	}
+	return true, securityOfficerNotifier(text)
+}
+
+// renderSecurityOfficerEscalation is what the w-1000 security-officer agent
+// receives. Marks it as a take-ownership escalation, then the standard brief.
+func renderSecurityOfficerEscalation(e Event, note, ackURL string) string {
+	return "[w-10000] 安全事件升级 · 你是安全员(w-1000),请接管处置 / Security escalation — own this incident\n" +
+		renderIMIncident(e, note, ackURL)
+}
+
 func notifyIMChannel(text string) (bool, error) {
 	if imNotifier == nil {
 		return false, nil
