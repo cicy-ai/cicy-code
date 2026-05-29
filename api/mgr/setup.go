@@ -847,11 +847,21 @@ func checkEnv() {
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles(selectedAgents)
 	setupAuditPolicyAgent()                  // → w-6001 SecOps Lead (merged 2.1.8)
-	setupTeamHelperAgent()                   // no-op in --helper=1 mode; otherwise owns w-6002
+	// Team Helper (w-6002) is no longer pre-created here. It bootstraps
+	// lazily on the first /api/chat/ws connection (see
+	// ensureBuiltinPaneLazy in audit_team_helper_worker.go) — saves the
+	// boot cost for users who never open the drawer, and self-heals
+	// when agent_config was wiped.
 	go ensureFfmpegAsync()
 	go ensurePreinstalledSkills()
 }
 
+// NOTE: agent-teams is intentionally NOT here. It's only useful inside
+// w-6002 (Team Helper) when there's a connected cicy-desktop webview
+// (Electron) on the other end of the chat WebSocket; preinstalling it
+// for every pane would put dead weight on user workers that have no
+// reason to manage local teams. setupTeamHelperAgent installs it
+// targeted at w-6002 instead.
 var preinstalledSkills = []string{
 	"agent-chrome", "agent-editor", "agent-desktop", "agent-webpage",
 	"cicy-agent", "cicy-todo", "cicy-mihomo", "cicy-ssh", "proxy_ssh", "globalApiToken",

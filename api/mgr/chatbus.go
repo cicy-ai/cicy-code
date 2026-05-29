@@ -709,6 +709,13 @@ func handleChatWS(w http.ResponseWriter, r *http.Request) {
 		clientID = "ws-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	}
 
+	// Lazy-bootstrap built-in panes that the user hasn't created yet.
+	// Today: w-6002 Team Helper. If the desktop drawer's webview connects
+	// before the pane exists (cicy-code upgraded from a pre-2.1.8 build,
+	// or the user wiped agent_config), spin it up here instead of forcing
+	// a `cicy-code restart`. Idempotent + cheap when the pane already exists.
+	ensureBuiltinPaneLazy(agentID)
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
