@@ -174,13 +174,20 @@ func handleProxyList(w http.ResponseWriter, r *http.Request) {
 		}
 		if isMihomoGroupType(p.Type) {
 			item["now"] = p.Now
-			// Filter out builtin members so the UI doesn't get DIRECT/REJECT
-			// noise in group expand views.
+			// Filter ONLY GLOBAL from group members (it's mihomo's auto-rollup
+			// of every proxy+group, would appear as a self-reference and is
+			// never in user config). DIRECT / REJECT / REJECT-DROP are valid
+			// user choices when the operator deliberately puts them in
+			// `proxy-groups[].proxies` — DIRECT = "this group bypasses proxy",
+			// REJECT = "drop this group's traffic" — so they must reach the UI
+			// to be switchable. Stripping them was the cause of "I added DIRECT
+			// to default_proxy_group but the panel still shows only one option".
 			cleanMembers := make([]string, 0, len(p.All))
 			for _, m := range p.All {
-				if !isMihomoBuiltinName(m) {
-					cleanMembers = append(cleanMembers, m)
+				if m == "GLOBAL" {
+					continue
 				}
+				cleanMembers = append(cleanMembers, m)
 			}
 			item["members"] = cleanMembers
 			groups = append(groups, item)
