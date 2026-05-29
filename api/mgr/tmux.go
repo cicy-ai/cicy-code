@@ -1146,6 +1146,17 @@ func handleUpdateAgentCLI(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 
+	// Optional post-install hint string from the client. The frontend looks up
+	// the localized "✅ Update complete — restart {agent}" message via its
+	// i18n table (cicy_i18n.ts → updateCompleteRestartHint) and passes it in
+	// the body so the server doesn't need to duplicate the translations.
+	var body struct {
+		PostInstallHint string `json:"post_install_hint"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+
 	// Open a new tmux window in the same session so the install output is
 	// visible without interrupting the running agent in the current pane.
 	session := strings.Split(paneID, ":")[0]
@@ -1168,11 +1179,19 @@ func handleUpdateAgentCLI(w http.ResponseWriter, r *http.Request, id string) {
 	// shell prompt is ready and appear as text rather than being executed.
 	time.Sleep(800 * time.Millisecond)
 	newPane := strings.TrimSpace(string(out)) + ".0"
-	if _, err := runTmux("send-keys", "-t", newPane, cfg.InstallCmd, "Enter"); err != nil {
+
+	fullCmd := cfg.InstallCmd
+	if hint := strings.TrimSpace(body.PostInstallHint); hint != "" {
+		// Chain with && so the hint only prints when npm install succeeds.
+		// Single-quote-escape the hint for safe bash embedding.
+		quoted := "'" + strings.ReplaceAll(hint, "'", `'"'"'`) + "'"
+		fullCmd += ` && printf '\n%s\n' ` + quoted
+	}
+	if _, err := runTmux("send-keys", "-t", newPane, fullCmd, "Enter"); err != nil {
 		httpErr(w, http.StatusInternalServerError, "send-keys: "+err.Error())
 		return
 	}
-	J(w, M{"success": true, "agent": agentType, "command": cfg.InstallCmd})
+	J(w, M{"success": true, "agent": agentType, "command": fullCmd})
 }
 
 func restartPaneCore(paneID, token string) error {

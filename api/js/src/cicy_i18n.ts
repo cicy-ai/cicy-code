@@ -30,6 +30,11 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     confirmLaunchAgent: "Re-source `.cicy/boot.sh` in this pane? Env vars get refreshed and {agent} restarts.",
     confirmUpdateAgent: "Run `npm install -g <pkg>@latest` for {agent} in this pane? Progress prints live in the terminal.",
     confirmRestartAgent: "Kill and respawn this tmux pane? Scrollback is lost.",
+    // Echoed in the update window after npm install succeeds — the install
+    // runs async and the agent in the original pane is still on the old
+    // version, so the user has to take a manual restart step. Sent to the
+    // server as request body so localization stays in one place (here).
+    updateCompleteRestartHint: "✅ Update complete — click the ▶ Launch button in the top bar to restart {agent} with the new version.",
     restartPaneTitle: "Restart pane",
     launchAgentTitle: "Launch {agent}",
     updateAgentTitle: "Update {agent}",
@@ -86,6 +91,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     confirmLaunchAgent: "在当前 pane 重新 source `.cicy/boot.sh`? 环境变量会刷新,{agent} 重新启动。",
     confirmUpdateAgent: "在当前 pane 执行 npm install -g <pkg>@latest 更新 {agent}? 实时进度直接打在终端里。",
     confirmRestartAgent: "销毁并重建当前 tmux pane?滚动历史会丢失。",
+    updateCompleteRestartHint: "✅ 升级完成 — 点击顶栏的 ▶ 启动按钮重启 {agent} 启用新版本。",
     restartPaneTitle: "重启 Pane",
     launchAgentTitle: "启动 {agent}",
     updateAgentTitle: "更新 {agent}",
