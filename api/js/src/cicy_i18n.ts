@@ -70,6 +70,11 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     filePath: "File path",
     filePathHint: "Detected a file path in the terminal.",
     open: "Open",
+    windowConfirmDelete: "Close window {idx}?",
+    confirm: "Confirm",
+    imagePasteEyebrow: "Image Paste",
+    filePasteEyebrow: "File Paste",
+    voiceMode: "Voice Mode",
   },
   "zh-CN": {
     tipAddCliWindow: "新建 CLI Window\n\n在当前 session 新开一个 tmux window。\n快捷键: prefix + c",
@@ -121,6 +126,11 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     filePath: "文件路径",
     filePathHint: "终端里检测到一个文件路径。",
     open: "打开",
+    windowConfirmDelete: "关闭 Window {idx}?",
+    confirm: "确定",
+    imagePasteEyebrow: "图片粘贴",
+    filePasteEyebrow: "文件粘贴",
+    voiceMode: "语音模式",
   },
 };
 
