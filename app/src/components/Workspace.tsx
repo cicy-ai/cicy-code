@@ -955,12 +955,26 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       const versionText = document.getElementById('version')?.textContent?.trim() || config.version;
       chatWs.send({ type: 'webpage_pong', data: { requestId: msg.data?.requestId, version: versionText } });
     } else if (msg?.type === 'exec_js' && msg.data?.code) {
-      try {
-        const result = window.eval(msg.data.code);
-        chatWs.send({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, result: String(result) } });
-      } catch (error: any) {
-        chatWs.send({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, error: error?.message || String(error) } });
-      }
+      // Async-aware: if the expression resolves to a Promise (e.g. an
+      // `(async () => {...})()` IIFE), wait for it and send the resolved
+      // value back. Objects are JSON-stringified so the caller can parse
+      // structured payloads — String({x:1}) would have collapsed to the
+      // unhelpful "[object Object]".
+      void (async () => {
+        try {
+          let result: any = window.eval(msg.data.code);
+          if (result && typeof result.then === 'function') {
+            result = await result;
+          }
+          const payload =
+            result === null || result === undefined ? ''
+            : typeof result === 'object' ? JSON.stringify(result)
+            : String(result);
+          chatWs.send({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, result: payload } });
+        } catch (error: any) {
+          chatWs.send({ type: 'exec_js_result', data: { requestId: msg.data?.requestId, error: error?.message || String(error) } });
+        }
+      })();
     } else if (msg?.type === 'code.open_file' && msg.data?.path) {
       // Legacy: kept for backward compat with older callers. New callers should
       // use the sync /api/chat/code-open endpoint instead — see openCodeFile.
@@ -1583,10 +1597,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <div data-id="activity-bar" ref={activityBarRef} className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
           <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} />
-          <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
-          <SideBtn dataId="btn-providers" active={leftActive === 'providers'} icon={<Boxes className="w-5 h-5" />} title={t('sidebarProviders')} onClick={() => toggleLeft('providers')} />
-          <SideBtn dataId="btn-im" active={leftActive === 'im'} icon={<MessageCircle className="w-5 h-5" />} title={t('sidebarIM', 'IM')} onClick={() => toggleLeft('im')} />
-          <SideBtn dataId="btn-audit" active={false} icon={<ShieldCheck className="w-5 h-5" />} title="Audit" onClick={() => { window.location.hash = '#/audit'; }} />
+          {/* Helper-mode trial container hides Skills / Providers (gateway) /
+              IM / Audit from the activity bar — the drawer should stay
+              laser-focused on the install chat. See helperMode in cicy-code
+              setup.go and /api/settings/global → helper_mode. */}
+          {!globalVar?.helper_mode && (
+            <>
+              <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
+              <SideBtn dataId="btn-providers" active={leftActive === 'providers'} icon={<Boxes className="w-5 h-5" />} title={t('sidebarProviders')} onClick={() => toggleLeft('providers')} />
+              <SideBtn dataId="btn-im" active={leftActive === 'im'} icon={<MessageCircle className="w-5 h-5" />} title={t('sidebarIM', 'IM')} onClick={() => toggleLeft('im')} />
+              <SideBtn dataId="btn-audit" active={false} icon={<ShieldCheck className="w-5 h-5" />} title="Audit" onClick={() => { window.location.hash = '#/audit'; }} />
+            </>
+          )}
         </div>
         <div data-id="activity-bar-bottom" className="flex w-full flex-col items-center gap-3">
           <MobileQRPopover workspaceTitle={topBarTitle} />
@@ -1595,10 +1617,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             type="button"
             data-id="activity-bar-membership-trigger"
             onClick={handleToggleMembershipMenu}
-            className={cn('group flex h-10 w-10 items-center justify-center rounded-xl border transition-all cursor-pointer', membershipTone(membershipCard.level), membershipMenuOpen ? 'text-zinc-100 shadow-[0_12px_30px_rgba(0,0,0,0.28)]' : 'text-zinc-400 hover:text-zinc-100 hover:border-white/[0.14]')}
+            className={cn('group flex h-10 w-10 items-center justify-center rounded-xl transition-all cursor-pointer', membershipTone(membershipCard.level), membershipMenuOpen ? 'text-zinc-100 shadow-[0_12px_30px_rgba(0,0,0,0.28)]' : 'text-zinc-400 hover:text-zinc-100')}
             title={membershipCard.userId}
           >
-            <User className="h-4 w-4" />
+            <Settings className="h-4 w-4" />
           </button>
         </div>
       </div>
@@ -1780,19 +1802,21 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <ExternalLink className="h-3.5 w-3.5" />
             </button>
           ) : null}
-          <button
-            type="button"
-            data-id="top-bar-audit-dashboard"
-            onClick={() => {
-              setMembershipMenuOpen(false);
-              window.location.hash = '#/audit';
-            }}
-            className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
-            title="Audit Dashboard"
-          >
-            <span data-id="top-bar-audit-dashboard-label">Audit</span>
-            <ShieldCheck className="h-3.5 w-3.5" />
-          </button>
+          {!globalVar?.helper_mode && (
+            <button
+              type="button"
+              data-id="top-bar-audit-dashboard"
+              onClick={() => {
+                setMembershipMenuOpen(false);
+                window.location.hash = '#/audit';
+              }}
+              className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+              title="Audit Dashboard"
+            >
+              <span data-id="top-bar-audit-dashboard-label">Audit</span>
+              <ShieldCheck className="h-3.5 w-3.5" />
+            </button>
+          )}
           <button
             type="button"
             data-id="top-bar-github-issues"

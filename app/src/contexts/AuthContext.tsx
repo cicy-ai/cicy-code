@@ -112,22 +112,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
         } catch {}
       }
 
-      // Normal token flow (dev mode or saved token)
+      // Normal token flow (dev mode or saved token).
+      // URL token preempts everything: if it's there, we commit it to
+      // localStorage BEFORE the verify round-trip so any axios call that
+      // races init() (api.ts reads TokenManager.getToken() per request)
+      // sees the URL token, not a stale cached one. Verify failure
+      // still clears localStorage at the bottom.
       const urlToken = params.get("token");
+      if (urlToken) {
+        TokenManager.saveToken(urlToken);
+        const url = new URL(window.location.href);
+        url.searchParams.delete("token");
+        window.history.replaceState({}, "", url.toString());
+      }
       const t = urlToken || TokenManager.getToken();
       if (t) {
         try {
           const ok = await handleVerify(t);
-          if (ok) {
-            TokenManager.saveToken(t);
-            if (urlToken) {
-              const url = new URL(window.location.href);
-              url.searchParams.delete("token");
-              window.history.replaceState({}, "", url.toString());
-            }
-          } else {
-            TokenManager.clearToken();
-          }
+          if (!ok) TokenManager.clearToken();
         } catch {
           TokenManager.clearToken();
         }

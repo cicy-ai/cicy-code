@@ -411,6 +411,23 @@ func effectiveAgentOptions() []M {
 const primaryWorkerSession = "w-10001"
 const primaryWorkerPaneID = "w-10001:main.0"
 
+// Team-Helper mode (--helper=1): a single OpenCode-backed pane on port 6002
+// titled "Team Helper". Used by the cicy-cloud trial helper container — the
+// 30-min agent that walks brand-new users through installing Docker +
+// cicy-code on their own machine. Sits in the built-in range
+// (w-6001…w-10000); w-6001 is reserved for the security officer.
+const helperWorkerPort = 6002
+const helperWorkerSession = "w-6002"
+const helperWorkerPaneID = "w-6002:main.0"
+
+func helperModeBuiltinWorker() builtinWorker {
+	return builtinWorker{
+		Port:      helperWorkerPort,
+		AgentType: "opencode",
+		Title:     "Team Helper",
+	}
+}
+
 type builtinWorker struct {
 	Port      int
 	AgentType string
@@ -418,7 +435,14 @@ type builtinWorker struct {
 }
 
 // selectedBuiltinWorkers assigns ports starting from 10001 in the order of selected.
+// In --helper=1 mode the regular --agents list is ignored entirely and we
+// return a single Team Helper worker on w-6002. That keeps the trial helper
+// container shape predictable: every user lands on the same pane id, every
+// caller (the desktop drawer, AGENTS.md, the chat session) targets that id.
 func selectedBuiltinWorkers(selected []string) []builtinWorker {
+	if helperMode {
+		return []builtinWorker{helperModeBuiltinWorker()}
+	}
 	workers := make([]builtinWorker, 0, len(selected))
 	for i, agentType := range selected {
 		agentType = normalizeAgentType(agentType)
@@ -653,6 +677,13 @@ func createSelectedWorkers(selected []string) {
 func createBuiltinWorker(port int, agentType, title string) {
 	session := fmt.Sprintf("w-%d", port)
 	token := getFirstToken()
+	// Team Helper (--helper=1) opts OUT of our /api/ai-gateway — the trial
+	// container is shared / free / 30-min, we don't want any of its traffic
+	// billed to a real user's quota. use_custom_gateway=0 makes opencode
+	// fall through to its built-in free provider (Big Pickle / OpenCode Zen),
+	// reachable without a cicy api_token. Non-helper builtins still use
+	// our gateway as normal.
+	useCustomGateway := !helperMode
 	if _, err := createManagedPane(paneCreateOpts{
 		session:          session,
 		title:            title,
@@ -665,13 +696,21 @@ func createBuiltinWorker(port int, agentType, title string) {
 		token:            token,
 		allowAllActions:  true,
 		replyInChinese:   false,
-		useCustomGateway: true,
+		useCustomGateway: useCustomGateway,
 		useProxy:         false,
 	}); err != nil {
 		fmt.Printf("  ❌ %s 创建失败: %v\n", title, err)
 		return
 	}
 	fmt.Printf("  ✅ %s (w-%d, port %d)\n", title, port, port)
+	// First-boot path: server-side auto-kick for the Team Helper. The
+	// restart path (startAgentFromConfig) has the same goroutine; both
+	// fire-and-forget, the watcher detects an already-input-ready pane
+	// in well under its 60s budget so the duplicate is harmless.
+	if helperMode && normalizeAgentType(agentType) == "opencode" {
+		paneID := session + ":main.0"
+		go watchHelperOpencodeReadyAndKick(paneID)
+	}
 }
 
 func runSetup() {
@@ -772,7 +811,13 @@ func checkEnv() {
 	}
 	effectiveAgentList := effectiveAgentsFlag()
 	if count == 0 {
-		if isContainerRuntime() {
+		switch {
+		case helperMode:
+			// Team-Helper mode short-circuits everything else: one
+			// opencode pane on w-6002 titled "Team Helper", independent
+			// of --agents.
+			createSelectedWorkers([]string{"opencode"})
+		case isContainerRuntime():
 			// Preinstalled container runtime must never block on interactive setup.
 			// Respect explicit --agents=... when provided; otherwise keep the default
 			// footprint minimal with only w-10001 Claude.
@@ -781,9 +826,9 @@ func checkEnv() {
 			} else {
 				createSelectedWorkers([]string{"claude"})
 			}
-		} else if effectiveAgentList != "" {
+		case effectiveAgentList != "":
 			runSetupWithAgents(effectiveAgentList)
-		} else {
+		default:
 			runSetup()
 		}
 	}
@@ -803,6 +848,7 @@ func checkEnv() {
 	syncBuiltinAgentTitles(selectedAgents)
 	setupAuditPolicyAgent()
 	setupSecurityOfficerAgent()
+	setupTeamHelperAgent() // no-op in --helper=1 mode; otherwise owns w-6002
 	go ensureFfmpegAsync()
 	go ensurePreinstalledSkills()
 }
@@ -1767,6 +1813,15 @@ func startAgentFromConfig(paneID string, port int, workspace, initScript, config
 			// even though use_custom_gateway=true in the DB.
 			useCustomGateway: useCustomGateway,
 		})
+		// --helper=1 Team Helper: server-side auto-kick. The desktop's
+		// USER_CONTEXT push raced opencode's boot — fixed at 6s timeout
+		// from the renderer, which sometimes missed (opencode not ready)
+		// or doubled (webview did-finish-load fired twice). Watching the
+		// pane for opencode's splash is exact: send "start" once when the
+		// TUI is provably accepting input. See watchHelperOpencodeReadyAndKick.
+		if helperMode && normalizeAgentType(agentType) == "opencode" {
+			go watchHelperOpencodeReadyAndKick(paneID)
+		}
 	}
 }
 
