@@ -92,30 +92,10 @@ func TestSendTestNotification(t *testing.T) {
 	}
 }
 
-// Escalation to the w-6001 security-officer agent fires alongside email/WeChat
-// (additive). With email+officer wired, both run; success when either delivers.
-func TestSendOwnerIncident_SecurityOfficerEscalation(t *testing.T) {
-	pol := DefaultPolicy()
-	pol.IncidentResponse.Enabled = true
-	pol.ResponsiblePersons.Default = []string{"sec@corp"}
-	p, _ := preventiveFixture(t, pol)
-	var gotOfficer string
-	SetSecurityOfficerNotifier(func(text string) error { gotOfficer = text; return nil })
-	t.Cleanup(func() { SetSecurityOfficerNotifier(nil) })
-
-	if err := p.SendOwnerIncident(Event{
-		ID:       "evt_so1",
-		Identity: Identity{AgentID: "w-x"},
-		Findings: []Finding{{RuleID: "secret.aws_akid", Severity: SeverityHigh, MatchCount: 1, Spans: []Span{{Preview: "AKIA****MPLE"}}}},
-	}, "test note"); err != nil {
-		t.Fatalf("escalation: %v", err)
-	}
-	for _, want := range []string{"w-6001", "secret.aws_akid", "test note", "AKIA****MPLE"} {
-		if !strings.Contains(gotOfficer, want) {
-			t.Errorf("officer text missing %q in:\n%s", want, gotOfficer)
-		}
-	}
-}
+// 2.1.8: TestSendOwnerIncident_SecurityOfficerEscalation removed — the audit
+// advisor (w-6001) now owns human coordination, so SendOwnerIncident has only
+// two channels (email + WeChat); there's no security-officer agent to escalate
+// to. The merge is exercised by TestSendOwnerIncident_BothChannels above.
 
 // With neither email recipients nor a bound IM channel, it still errors.
 func TestSendOwnerIncident_NoChannelErrors(t *testing.T) {

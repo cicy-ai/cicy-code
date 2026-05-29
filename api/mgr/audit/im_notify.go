@@ -19,28 +19,9 @@ func SetIMBoundCheck(fn func() bool) { imBoundCheck = fn }
 
 func imChannelBound() bool { return imBoundCheck != nil && imBoundCheck() }
 
-// securityOfficerNotifier escalates an incident to the security-officer agent
-// (w-6001). Injected by the main package (sendTextToPane → w-6001). nil = off.
-// This fires alongside email + WeChat — the security officer is an agent, the
-// email/WeChat reach the human responsible persons.
-var securityOfficerNotifier func(text string) error
-
-// SetSecurityOfficerNotifier wires the "escalate to the w-6001 security officer" path.
-func SetSecurityOfficerNotifier(fn func(text string) error) { securityOfficerNotifier = fn }
-
-func notifySecurityOfficer(text string) (bool, error) {
-	if securityOfficerNotifier == nil {
-		return false, nil
-	}
-	return true, securityOfficerNotifier(text)
-}
-
-// renderSecurityOfficerEscalation is what the w-6001 security-officer agent
-// receives. Marks it as a take-ownership escalation, then the standard brief.
-func renderSecurityOfficerEscalation(e Event, note, ackURL string) string {
-	return "[w-10000] 安全事件升级 · 你是安全员(w-6001),请接管处置 / Security escalation — own this incident\n" +
-		renderIMIncident(e, note, ackURL)
-}
+// 2.1.8: removed securityOfficerNotifier / renderSecurityOfficerEscalation —
+// the audit advisor (w-6001) now also owns human coordination, so there is
+// no cross-agent escalation hop. Channel 3 in SendOwnerIncident is gone.
 
 func notifyIMChannel(text string) (bool, error) {
 	if imNotifier == nil {

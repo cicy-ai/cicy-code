@@ -81,10 +81,10 @@ func TestSeverityMeetsTrigger(t *testing.T) {
 	}
 }
 
-// ── dispatchIncident: forwards to the w-10000 advisor (SOAR contract) ──
+// ── dispatchIncident: forwards to the w-6001 advisor (SOAR contract) ──
 //
 // Since the architecture change, dispatchIncident does NOT email the owner.
-// It forwards a masked finding brief to w-10000, which triages and decides
+// It forwards a masked finding brief to w-6001, which triages and decides
 // the response (notify offending agent / escalate via SendOwnerIncident /
 // tune policy). These tests assert the forward — the owner-email path is
 // covered separately by the TestSendOwnerIncident_* tests.
@@ -196,7 +196,7 @@ func TestPipeline_PreventiveBlock_ForwardsToAdvisor(t *testing.T) {
 // ── SendOwnerIncident: the owner-email path (advisor-triggered) ──
 //
 // This is what the EML-generation logic became after dispatchIncident stopped
-// emailing directly. w-10000 calls it via POST /api/audit/notify.
+// emailing directly. w-6001 calls it via POST /api/audit/notify.
 
 func TestSendOwnerIncident_WritesEML(t *testing.T) {
 	pol := DefaultPolicy()
@@ -226,7 +226,7 @@ func TestSendOwnerIncident_WritesEML(t *testing.T) {
 		"AKIA****MPLE",                  // masked finding preview
 		"English summary",              // bilingual section
 		"X-Cicy-Audit-Event: evt_owner1",
-		"审计顾问 (w-10000) 研判",        // advisor note header
+		"审计顾问 (w-6001) 研判",        // advisor note header
 		"GitHub token leaked",          // advisor note body prepended
 	} {
 		if !strings.Contains(s, want) {

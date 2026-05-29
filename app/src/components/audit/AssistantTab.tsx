@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { urls } from '../../config';
 import { TokenManager } from '../../services/tokenManager';
 
-const AUDIT_AGENT_PANE = 'w-10000:main.0';
+const AUDIT_AGENT_PANE = 'w-6001:main.0';
 
 export default function AssistantTab() {
   const { t } = useTranslation('audit');
@@ -21,7 +21,7 @@ export default function AssistantTab() {
   return (
     <div data-id="audit-assistant-root" className="h-full w-full flex flex-col">
       <div data-id="audit-assistant-hint" className="px-3 py-2 text-[11px] text-[var(--vsc-text-muted)] border-b border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] shrink-0">
-        {t('assistantHeaderBefore')}<code>w-10000</code>{t('assistantHeaderAfter')}
+        {t('assistantHeaderBefore')}<code>w-6001</code>{t('assistantHeaderAfter')}
       </div>
       <div data-id="audit-assistant-frame-wrap" className="flex-1 min-h-0">
         <iframe

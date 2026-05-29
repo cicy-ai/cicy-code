@@ -459,7 +459,7 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 		var useCustomGateway sql.NullBool
 		var useProxy sql.NullBool
 		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway, &useProxy)
-		// Hide the dedicated audit-policy admin pane (w-10000) from the
+		// Hide the dedicated audit-policy admin pane (w-6001) from the
 		// general agent listing — surfaced only inside the Audit Dashboard
 		// Assistant tab. Bypass with ?include_hidden=1.
 		if r.URL.Query().Get("include_hidden") != "1" && isBuiltinAgent(paneID.String) {

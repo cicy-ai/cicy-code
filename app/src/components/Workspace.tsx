@@ -949,7 +949,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     } else if (msg?.type === 'worker_idle' && msg.data) {
       window.dispatchEvent(new CustomEvent('agent-worker-idle', { detail: msg.data }));
     } else if (msg?.type === 'wechat_bind_request') {
-      // audit advisor (w-10000) asked the UI to pop the WeChat bind modal
+      // audit advisor (w-6001) asked the UI to pop the WeChat bind modal
       window.dispatchEvent(new CustomEvent('open-wechat-bind'));
     } else if (msg?.type === 'webpage_ping') {
       const versionText = document.getElementById('version')?.textContent?.trim() || config.version;

@@ -12,9 +12,12 @@ package main
 //     AGENTS.md on top. We must not overwrite that.
 //   - In normal mode (every other cicy-code install) we own w-6002.
 //
-// Convention: built-in / system agents live in w-6001…w-10000 (4000
-// slots). w-6001 = security officer, w-6002 = team helper, w-10000 =
-// audit policy admin. User workers start at w-10001.
+// Built-in agents (2.1.8+):
+//   - w-6002  = team helper (this file)
+//   - w-6001 = SecOps Lead (audit advisor + security officer, merged from
+//               the previous w-10000 + w-6001 split)
+// User workers continue to start at w-10001. The pane-hide logic is
+// isBuiltinAgent in audit_policy_worker.go.
 
 import (
 	_ "embed"
@@ -42,7 +45,7 @@ var teamHelperGuidance []byte
 const teamHelperIntroPrompt = "A new user session has started — open with your greeting from AGENTS.md now."
 
 // setupTeamHelperAgent provisions w-6002 alongside the security officer
-// (w-6001) and audit admin (w-10000). Called from checkEnv on every
+// (w-6001 SecOps Lead). Called from checkEnv on every
 // startup; idempotent — refreshes AGENTS.md and revives the pane.
 //
 // In --helper=1 mode this is a no-op: the trial container creates w-6002

@@ -4,7 +4,7 @@ import apiService from '../../services/api';
 
 // Global WeChat-bind modal. Opened by a WS-driven 'open-wechat-bind' window
 // event (Workspace dispatches it on a `wechat_bind_request` chat-WS message),
-// so the audit advisor (w-10000) can pop the QR-scan modal in the operator's
+// so the audit advisor (w-6001) can pop the QR-scan modal in the operator's
 // browser — anywhere in the app — instead of printing a CLI link. Self-
 // contained: reuses /api/im/wechat/login + status poll, portals to body.
 

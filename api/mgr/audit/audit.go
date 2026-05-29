@@ -18,7 +18,7 @@ var (
 
 	// responseMailerKind records whether the active mailer can actually reach
 	// humans ("resend") or only spools to disk ("file"). Read by the readiness
-	// check so w-10000 can warn when owner notifications won't reach anyone.
+	// check so w-6001 can warn when owner notifications won't reach anyone.
 	responseMailerKind = "file"
 )
 
