@@ -487,10 +487,12 @@ func probeExitIPRace(parent context.Context, curlBaseArgs []string) (M, bool, in
 // so the 🌍 panel can show timing; both sides of the comparison use the same
 // probe pool so IPs are apples-to-apples.
 func curlExitIP(ctx context.Context, via, proxyURL string) M {
-	// 5s budget: a real overseas node (e.g. a US socks5) needs ~1.3s round-trip
-	// to api.myip.com, so a 1s cap would always time it out. The direct side
-	// still returns in ~0.3s; elapsed_ms reports the true latency regardless.
-	base := []string{"-sS", "-m", "5", "--connect-timeout", "4"}
+	// 8s budget: a CN-Mobile→ssh-tunnel→Linux-mihomo→trans-Pacific-socks5 chain
+	// (Mac dev → HK relay → US exit) tops out at ~3.5-5s end-to-end and was
+	// failing intermittently at the old 5s cap. handleProxyExitInfo's outer
+	// ctx is also 8s, so this uses the full available budget. The direct
+	// side still returns in ~0.3s; elapsed_ms reports the true latency.
+	base := []string{"-sS", "-m", "8", "--connect-timeout", "5"}
 	if proxyURL != "" {
 		base = append(base, "-x", proxyURL)
 	} else {
@@ -529,7 +531,10 @@ func curlExitIP(ctx context.Context, via, proxyURL string) M {
 // if they differ it returns BOTH groups (proxy is changing the exit IP — a
 // real node is active).
 func handleProxyExitInfo(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	// 10s outer ctx vs the 8s per-probe curl budget — 2s headroom so a probe
+	// that runs the full 8s isn't racing the ctx firing SIGKILL before curl
+	// can write the body back.
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	var proxy, direct M
 	var wg sync.WaitGroup
