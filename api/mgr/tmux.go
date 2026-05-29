@@ -4242,6 +4242,69 @@ func sendTextToPane(winID, text string, submit bool) error {
 	return <-req.result
 }
 
+// watchHelperOpencodeReadyAndKick fires the Team Helper auto-trigger when BOTH
+// readiness signals are present:
+//
+//  1. opencode TUI accepts input — detected by the literal "Ask anything"
+//     line in the pane buffer
+//  2. The desktop drawer's webview has actually connected its chat WebSocket
+//     — detected by hub.hasWebpageClientForAgent(master)
+//
+// Sending "start" before signal #2 leaves the agent's
+// `agent-webpage clients` call returning empty, so it skips language probing
+// and locks to the English fallback — the user opens the drawer to a wrong-
+// language greeting. Gating on both signals removes that race.
+//
+// Total budget 90 s (longer than before because the drawer may take a few
+// seconds to load over a slow uplink). If we never see signal #2 inside the
+// budget, we still fire so the agent at least greets in English instead of
+// hanging silently.
+func watchHelperOpencodeReadyAndKick(paneID string) {
+	paneID = normPaneID(paneID)
+	const (
+		pollInterval = 500 * time.Millisecond
+		maxAttempts  = 180 // 90 s total
+		readyNeedle  = "Ask anything"
+	)
+	masterAgent := strings.Split(paneID, ":")[0]
+	opencodeReady := false
+	for i := 0; i < maxAttempts; i++ {
+		time.Sleep(pollInterval)
+		if !opencodeReady {
+			out, err := runTmux("capture-pane", "-t", paneID, "-p")
+			if err == nil && strings.Contains(out, readyNeedle) {
+				opencodeReady = true
+				log.Printf("[helper-kick] opencode ready on %s, waiting for webpage client…", shortPaneID(paneID))
+			}
+		}
+		if !opencodeReady {
+			continue
+		}
+		if !hub.hasWebpageClientForAgent(masterAgent) {
+			continue
+		}
+		// Both signals true. Tiny grace so the desktop SPA is past its
+		// initial render burst (else the WS pipe can drop the first
+		// inbound message under render-thread contention).
+		time.Sleep(400 * time.Millisecond)
+		if err := sendTextToPane(paneID, "start", true); err != nil {
+			log.Printf("[helper-kick] send start to %s failed: %v", shortPaneID(paneID), err)
+			return
+		}
+		log.Printf("[helper-kick] sent 'start' to %s after %dms (both signals)", shortPaneID(paneID), (i+1)*int(pollInterval/time.Millisecond))
+		return
+	}
+	// Budget exhausted. Fire anyway if opencode at least is ready — better
+	// to greet in English than hang the drawer silently.
+	if opencodeReady {
+		if err := sendTextToPane(paneID, "start", true); err == nil {
+			log.Printf("[helper-kick] sent 'start' to %s after timeout (no webpage client — will fall back to English)", shortPaneID(paneID))
+			return
+		}
+	}
+	log.Printf("[helper-kick] opencode on %s never reached ready in 90s — no auto-start sent", shortPaneID(paneID))
+}
+
 func sendTextToPaneDirect(winID, text string) error {
 	winID = normPaneID(winID)
 	text = strings.ReplaceAll(text, "\r\n", "\n")

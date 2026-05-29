@@ -34,10 +34,11 @@ var (
 	previewMode   bool
 	hotMode       bool
 	containerMode bool
+	helperMode    bool   // --helper=1 → ships a single Team Helper agent on w-6002
 	desktopCmd    *exec.Cmd
 )
 
-const version = "2.1.7"
+const version = "2.1.8"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -84,9 +85,13 @@ Options:
   --public                Listen on 0.0.0.0 (default: 127.0.0.1)
   --audit                 Enable audit mode
   --cn                    Use Chinese mirrors
+  --helper=1              Team-Helper mode: ship a single OpenCode "Team
+                          Helper" agent on w-6002 using the local AI
+                          gateway. Overrides --agents.
   --agents=LIST           Comma-separated agents to install (skip interactive)
                           e.g. --agents=hermes
                           Use --agents=all for all agents
+                          IGNORED when --helper=1 is set
 
 	Environment:
 	  PORT          API port (default: 8008)
@@ -108,6 +113,9 @@ Options:
 		case arg == "--cn":
 			cnMirror = true
 			os.Setenv("CN_MIRROR", "1")
+		case arg == "--helper" || arg == "--helper=1":
+			helperMode = true
+			os.Setenv("CICY_HELPER", "1")
 		case strings.HasPrefix(arg, "--agents="):
 			agentsFlag = strings.TrimPrefix(arg, "--agents=")
 		}

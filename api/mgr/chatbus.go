@@ -165,6 +165,30 @@ func handleWsClients(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(hub.stats())
 }
 
+// hasWebpageClientForAgent reports whether at least one non-bridge webpage
+// client is currently registered for the given master agent. Used by the
+// Team Helper auto-kick so we don't send "start" before the user's desktop
+// drawer webview has actually connected — otherwise the agent's
+// `agent-webpage clients` call would return empty and the language probe
+// would skip straight to the English fallback.
+func (h *chatHub) hasWebpageClientForAgent(masterAgentID string) bool {
+	if strings.TrimSpace(masterAgentID) == "" {
+		return false
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	bucket := h.clients[masterAgentID]
+	for clientID := range bucket {
+		// :code-ext is the native-files bridge alias, not a real webpage
+		// client — skip it for the readiness check.
+		if strings.HasSuffix(clientID, ":code-ext") {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 func (h *chatHub) lookupClientLocked(clientID string) *chatClient {
 	for _, bucket := range h.clients {
 		if c := bucket[clientID]; c != nil {

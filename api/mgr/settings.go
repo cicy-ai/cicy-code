@@ -31,6 +31,10 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		result["dev"] = devMode
 		result["preview"] = previewMode
 		result["hot"] = hotMode
+		// Team-Helper mode: read by the SPA to hide left-sidebar entries
+		// (audit / im / gateway / skills) so the trial drawer stays
+		// laser-focused on the chat pane.
+		result["helper_mode"] = helperMode
 		result["agents"] = effectiveAgentOptions()
 		// Mobile QR onboarding: if the operator set CICY_PUBLIC_URL (a
 		// reachable URL — tunneled domain or LAN IP), expose it so the UI
@@ -43,6 +47,7 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		readBody(r, &req)
 		delete(req, "home")
 		delete(req, "lab_mode")
+		delete(req, "helper_mode")
 		delete(req, "agents")
 		data, _ := json.Marshal(req)
 		store.Exec(store.Upsert("global_vars", "key_name", []string{"key_name", "value"}, []string{"value"}), "global_settings", string(data))
