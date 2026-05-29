@@ -2200,7 +2200,12 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             danger: true,
         }).then(function(ok) {
             if (!ok) return;
-            webtty.requestAPI("POST", "/api/tmux/panes/" + paneId + "/update-agent-cli", undefined, apiHeaders).catch(function(): void {
+            // Pass the localized "update complete, restart {agent}" hint
+            // from JS i18n so the server can echo it after npm install
+            // succeeds — lands in the new tmux window's terminal, not as a
+            // JS toast (the install runs async and we don't wait on it).
+            var postHint = ttydT("updateCompleteRestartHint", { agent: paneAgentType });
+            webtty.requestAPI("POST", "/api/tmux/panes/" + paneId + "/update-agent-cli", { post_install_hint: postHint }, apiHeaders).catch(function(): void {
                 flashButton(updateBtn);
             });
         });
