@@ -1,14 +1,14 @@
 package main
 
-// audit_security_officer_worker.go reserves w-9501 as a dedicated "Security
+// audit_security_officer_worker.go reserves w-6001 as a dedicated "Security
 // Officer" agent — the human-coordination layer that audit incidents escalate
 // to (alongside email/WeChat). Created on first startup, hidden from the regular
 // agent list, distinct from w-10000 (audit policy admin / SecOps Lead).
 //
-// Convention: built-in / system agents live in w-9501…w-10000 (500 slots).
-// w-9501 = security officer (first); w-9502…w-9999 reserved for future built-ins;
+// Convention: built-in / system agents live in w-6001…w-10000 (4000 slots).
+// w-6001 = security officer (first); w-6002…w-9999 reserved for future built-ins;
 // w-10000 = audit policy admin (boundary). User workers start at w-10001.
-// The pane-hide logic uses isBuiltinAgent (id in [9501, 10000]) so future
+// The pane-hide logic uses isBuiltinAgent (id in [6001, 10000]) so future
 // built-in agents are auto-hidden from the regular agent list.
 
 import (
@@ -24,11 +24,11 @@ import (
 const (
 	// securityOfficerPaneID is the built-in security-officer pane. Defined here
 	// (not in audit_im_notify.go) so the worker file owns the agent identity.
-	// w-9501 lives in the built-in range (w-9501…w-10000); port 9501 = id, keeping
+	// w-6001 lives in the built-in range (w-6001…w-10000); port 6001 = id, keeping
 	// the "port == numeric id" convention every other built-in / user worker uses.
-	securityOfficerPaneID     = "w-9501:main.0"
-	securityOfficerShortPane  = "w-9501"
-	securityOfficerPort       = 9501
+	securityOfficerPaneID     = "w-6001:main.0"
+	securityOfficerShortPane  = "w-6001"
+	securityOfficerPort       = 6001
 	securityOfficerAgentType  = "claude"
 	securityOfficerRole       = "security-officer"
 	securityOfficerTitle      = "Security Officer"
@@ -42,7 +42,7 @@ var securityOfficerGuidance []byte
 // injected via the gateway. Kept clean to avoid meta-instruction leakage.
 const securityOfficerIntroPrompt = "A new operator session has started — open with your startup briefing now."
 
-// setupSecurityOfficerAgent provisions w-9501 alongside the audit admin
+// setupSecurityOfficerAgent provisions w-6001 alongside the audit admin
 // (w-10000). Called from checkEnv on every startup; idempotent — refreshes
 // CLAUDE.md and revives the pane.
 func setupSecurityOfficerAgent() {
@@ -57,7 +57,7 @@ func setupSecurityOfficerAgent() {
 	log.Printf("[security-officer] queued self-intro for %s", securityOfficerPaneID)
 }
 
-// writeSecurityOfficerGuidance drops the embedded role doc into w-9501's
+// writeSecurityOfficerGuidance drops the embedded role doc into w-6001's
 // workspace every startup so a binary upgrade always wins.
 func writeSecurityOfficerGuidance() error {
 	ws := builtinWorkerWorkspace(securityOfficerShortPane)
@@ -71,7 +71,7 @@ func writeSecurityOfficerGuidance() error {
 	return os.WriteFile(filepath.Join(ws, filename), securityOfficerGuidance, 0o644)
 }
 
-// ensureSecurityOfficerPane creates the w-9501 pane on first run and revives
+// ensureSecurityOfficerPane creates the w-6001 pane on first run and revives
 // it (with the latest agent_type / role / permission flags) on subsequent runs.
 // Always idempotent — like ensureAuditPolicyPane.
 func ensureSecurityOfficerPane() error {
@@ -123,8 +123,8 @@ func ensureSecurityOfficerPane() error {
 }
 
 // isBuiltinAgent reports whether a pane id belongs to a built-in / system
-// agent. Built-in range is w-9501…w-10000 (500 slots). w-9501 = security
-// officer, w-9502…w-9999 reserved for future built-ins, w-10000 = audit admin.
+// agent. Built-in range is w-6001…w-10000 (4000 slots). w-6001 = security
+// officer, w-6002…w-9999 reserved for future built-ins, w-10000 = audit admin.
 // User workers start at w-10001 and are NOT built-in. Used by the pane-list
 // to hide built-ins from the regular agent list (?include_hidden=1 to bypass).
 func isBuiltinAgent(paneID string) bool {
@@ -136,5 +136,5 @@ func isBuiltinAgent(paneID string) bool {
 	if err != nil {
 		return false
 	}
-	return n >= 9501 && n <= 10000
+	return n >= 6001 && n <= 10000
 }
