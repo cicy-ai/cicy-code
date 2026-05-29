@@ -1155,12 +1155,19 @@ func handleUpdateAgentCLI(w http.ResponseWriter, r *http.Request, id string) {
 		workspace = cicyWorkersDir
 	}
 	wsExpanded := expandHome(workspace)
-	winArgs := []string{"new-window", "-c", wsExpanded, "-t", session, "-n", "update-" + agentType}
-	if _, err := runTmux(winArgs...); err != nil {
+	// -P -F prints the new window's target (session:index) so we can send
+	// keys to the exact pane even when multiple same-named windows exist.
+	winArgs := []string{"new-window", "-P", "-F", "#{session_name}:#{window_index}", "-c", wsExpanded, "-t", session, "-n", "update-" + agentType}
+	out, err := runTmux(winArgs...)
+	if err != nil {
 		httpErr(w, http.StatusInternalServerError, "new-window: "+err.Error())
 		return
 	}
-	newPane := session + ":update-" + agentType + ".0"
+	// Give bash a moment to finish initializing before we send the command,
+	// otherwise the keystrokes land in the terminal input buffer before the
+	// shell prompt is ready and appear as text rather than being executed.
+	time.Sleep(800 * time.Millisecond)
+	newPane := strings.TrimSpace(string(out)) + ".0"
 	if _, err := runTmux("send-keys", "-t", newPane, cfg.InstallCmd, "Enter"); err != nil {
 		httpErr(w, http.StatusInternalServerError, "send-keys: "+err.Error())
 		return
