@@ -1140,8 +1140,8 @@ function cpModalConfirm(opts: { title?: string; body: string; confirmLabel?: str
         card.innerHTML =
             '<div class="cp-modal-body">' + bodyHtml + '</div>' +
             '<div class="cp-modal-actions">' +
-                '<button type="button" class="cp-modal-btn cp-modal-btn-cancel">' + escapeHtmlText(opts.cancelLabel || "取消") + '</button>' +
-                '<button type="button" class="cp-modal-btn ' + (opts.danger ? 'cp-modal-btn-danger' : 'cp-modal-btn-ok') + '">' + escapeHtmlText(opts.confirmLabel || "确定") + '</button>' +
+                '<button type="button" class="cp-modal-btn cp-modal-btn-cancel">' + escapeHtmlText(opts.cancelLabel || ttydT("cancel")) + '</button>' +
+                '<button type="button" class="cp-modal-btn ' + (opts.danger ? 'cp-modal-btn-danger' : 'cp-modal-btn-ok') + '">' + escapeHtmlText(opts.confirmLabel || ttydT("confirm")) + '</button>' +
             '</div>';
         overlay.appendChild(card);
         document.body.appendChild(overlay);
@@ -2217,7 +2217,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var micButton = document.createElement("button");
     micButton.id = "cp-mic";
     micButton.className = "fta-btn";
-    micButton.title = "Voice Mode";
+    micButton.title = ttydT("voiceMode");
     micButton.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" x2="12" y1="19" y2="22"></line></svg>';
     document.body.appendChild(micButton);
 
@@ -2599,7 +2599,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         var heading = document.createElement("div");
         var eyebrow = document.createElement("div");
         eyebrow.id = "cp-file-paste-eyebrow";
-        eyebrow.textContent = files.length === 1 && String(files[0].type || "").match(/^image\//) ? "Image Paste" : "File Paste";
+        eyebrow.textContent = files.length === 1 && String(files[0].type || "").match(/^image\//) ? ttydT("imagePasteEyebrow") : ttydT("filePasteEyebrow");
         var title = document.createElement("h3");
         title.id = "cp-file-paste-title";
         title.textContent = files.length === 1 && String(files[0].type || "").match(/^image\//) ? ttydT("sendPastedImage") : ttydT("sendPastedFiles");

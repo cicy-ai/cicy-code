@@ -110,11 +110,29 @@ func sudoPrefix() string {
 	return ""
 }
 
+// npmPkgDir strips the version suffix from an npm package spec to get the
+// node_modules directory name: "@anthropic-ai/claude-code@latest" → "@anthropic-ai/claude-code".
+func npmPkgDir(pkg string) string {
+	if len(pkg) > 0 && pkg[0] == '@' {
+		if i := strings.LastIndex(pkg, "@"); i > 0 {
+			return pkg[:i]
+		}
+		return pkg
+	}
+	if i := strings.Index(pkg, "@"); i > 0 {
+		return pkg[:i]
+	}
+	return pkg
+}
+
 func npmGlobalInstallCmd(pkg string) string {
 	// Auto-detect network: try registry.npmjs.org with a 3-second timeout.
 	// If reachable, use it directly; otherwise fall back to npmmirror (China).
 	registry := `$(if curl -s --max-time 3 https://registry.npmjs.org/ >/dev/null 2>&1; then echo https://registry.npmjs.org; else echo https://registry.npmmirror.com; fi)`
-	return `mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && npm install -g --include=optional --registry=` + registry + ` --prefix "$HOME/.npm-global" ` + pkg
+	// Pre-remove the old package directory so npm's atomic rename-to-temp
+	// doesn't fail with ENOTEMPTY on macOS when the directory is non-empty.
+	rmOld := `rm -rf "$HOME/.npm-global/lib/node_modules/` + npmPkgDir(pkg) + `"`
+	return `mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && ` + rmOld + ` && npm install -g --include=optional --registry=` + registry + ` --prefix "$HOME/.npm-global" ` + pkg
 }
 
 func preinstalledRuntimeInstallCmd(cmd string) string {

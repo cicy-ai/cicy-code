@@ -1145,8 +1145,24 @@ func handleUpdateAgentCLI(w http.ResponseWriter, r *http.Request, id string) {
 		httpErr(w, http.StatusBadRequest, "no install command for agent: "+agentType)
 		return
 	}
-	if _, err := runTmux("send-keys", "-t", paneID, cfg.InstallCmd, "Enter"); err != nil {
-		httpErr(w, http.StatusInternalServerError, err.Error())
+
+	// Open a new tmux window in the same session so the install output is
+	// visible without interrupting the running agent in the current pane.
+	session := strings.Split(paneID, ":")[0]
+	var workspace string
+	store.QueryRow("SELECT COALESCE(workspace,'') FROM agent_config WHERE pane_id=?", paneID).Scan(&workspace)
+	if workspace == "" {
+		workspace = cicyWorkersDir
+	}
+	wsExpanded := expandHome(workspace)
+	winArgs := []string{"new-window", "-c", wsExpanded, "-t", session, "-n", "update-" + agentType}
+	if _, err := runTmux(winArgs...); err != nil {
+		httpErr(w, http.StatusInternalServerError, "new-window: "+err.Error())
+		return
+	}
+	newPane := session + ":update-" + agentType + ".0"
+	if _, err := runTmux("send-keys", "-t", newPane, cfg.InstallCmd, "Enter"); err != nil {
+		httpErr(w, http.StatusInternalServerError, "send-keys: "+err.Error())
 		return
 	}
 	J(w, M{"success": true, "agent": agentType, "command": cfg.InstallCmd})
