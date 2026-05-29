@@ -21,12 +21,12 @@ function detectLang(): Lang {
 
 const STRINGS: Record<Lang, Record<string, string>> = {
   en: {
-    tipAddCliWindow: "New CLI window\n\nOpen a fresh tmux window in this session.\nShortcut: prefix + c",
+    tipAddCliWindow: "New CLI window\n\nOpen a fresh tmux window in this session.",
     tipRestartAgent: "Restart pane (full)\n\nKills the tmux pane and respawns it from\nscratch. Loses scrollback. Use when the\nshell is wedged.",
     tipLaunchAgent: "Launch {agent}\n\nRe-source .cicy/boot.sh in the current\nshell, re-export env, restart {agent}.\nUse after Ctrl+C-ing out of the agent.",
     tipUpdateAgent: "Update {agent}\n\nnpm install -g <pkg>@latest. Progress\nprints live in the terminal. Restart {agent}\nafter it finishes.",
-    tipReloadPage: "Reload page\n\nReload this cicy-code UI tab.\nShortcut: F5 / Cmd+R",
-    tipPromptArea: "Prompt input area\n\nClick to focus the bottom prompt box —\ntype + Enter sends to the agent.\nShortcut: Ctrl/Cmd + /",
+    tipReloadPage: "Reload page\n\nReload this cicy-code UI tab.",
+    tipPromptArea: "Prompt input area\n\nClick to focus the bottom prompt box —\ntype + Enter sends to the agent.",
     confirmLaunchAgent: "Re-source `.cicy/boot.sh` in this pane? Env vars get refreshed and {agent} restarts.",
     confirmUpdateAgent: "Run `npm install -g <pkg>@latest` for {agent} in this pane? Progress prints live in the terminal.",
     confirmRestartAgent: "Kill and respawn this tmux pane? Scrollback is lost.",
@@ -82,12 +82,12 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     voiceMode: "Voice Mode",
   },
   "zh-CN": {
-    tipAddCliWindow: "新建 CLI Window\n\n在当前 session 新开一个 tmux window。\n快捷键: prefix + c",
+    tipAddCliWindow: "新建 CLI Window\n\n在当前 session 新开一个 tmux window。",
     tipRestartAgent: "重启整个 Pane\n\n销毁当前 tmux pane 后从头重建,\n滚动历史会丢失。Shell 卡死时用。",
     tipLaunchAgent: "启动 {agent}\n\n重新 source .cicy/boot.sh,\n刷新环境变量后启动 {agent} 进程。\n适合 Ctrl+C 误退 agent 后用。",
     tipUpdateAgent: "更新 {agent}\n\nnpm install -g <pkg>@latest,\n实时进度直接打到终端。\n装完后建议点 ▶ 重启 {agent}。",
-    tipReloadPage: "刷新页面\n\n刷新当前 cicy-code UI 标签。\n快捷键: F5 / Cmd+R",
-    tipPromptArea: "Prompt 输入区\n\n点这里聚焦底部 Prompt 输入框,\n输入后回车直接发给 agent。\n快捷键: Ctrl/Cmd + /",
+    tipReloadPage: "刷新页面\n\n刷新当前 cicy-code UI 标签。",
+    tipPromptArea: "Prompt 输入区\n\n点这里聚焦底部 Prompt 输入框,\n输入后回车直接发给 agent。",
     confirmLaunchAgent: "在当前 pane 重新 source `.cicy/boot.sh`? 环境变量会刷新,{agent} 重新启动。",
     confirmUpdateAgent: "在当前 pane 执行 npm install -g <pkg>@latest 更新 {agent}? 实时进度直接打在终端里。",
     confirmRestartAgent: "销毁并重建当前 tmux pane?滚动历史会丢失。",
