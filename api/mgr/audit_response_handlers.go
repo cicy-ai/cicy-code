@@ -10,7 +10,7 @@ import (
 
 // handleAuditReadiness — GET /api/audit/readiness. Snapshot of whether the
 // incident-response chain is wired end to end (owner configured? mail
-// deliverable? IM bound? preventive on? AI研判 on?). w-10000 calls this on
+// deliverable? IM bound? preventive on? AI研判 on?). w-6001 calls this on
 // startup to体检 and surface the gaps to the operator.
 func handleAuditReadiness(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -21,7 +21,7 @@ func handleAuditReadiness(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAuditNotify — POST /api/audit/notify {event_id, note}. Escalates an
-// event to its responsible person(s) by email. Called by w-10000 (via
+// event to its responsible person(s) by email. Called by w-6001 (via
 // `cicy-policy notify`) when it decides a finding warrants human attention.
 // note = the advisor's own assessment, prepended to the email.
 func handleAuditNotify(w http.ResponseWriter, r *http.Request) {
@@ -52,7 +52,7 @@ func handleAuditNotify(w http.ResponseWriter, r *http.Request) {
 // handleAuditChannelsTest — POST /api/audit/channels/test {to}. Sends a
 // synthetic test alert through the active channels (email + WeChat if bound)
 // so the operator can confirm delivery without a real finding. Used by
-// `cicy-policy channel test` when w-10000 helps set up notifications.
+// `cicy-policy channel test` when w-6001 helps set up notifications.
 func handleAuditChannelsTest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -73,7 +73,7 @@ func handleAuditChannelsTest(w http.ResponseWriter, r *http.Request) {
 // handleWeChatBindPrompt — POST /api/im/wechat/prompt. Broadcasts a
 // `wechat_bind_request` chat-WS event to all connected UI clients so the
 // frontend pops the WeChat bind (QR-scan) modal — anywhere the operator is.
-// Lets w-10000 (`cicy-policy channel wechat`) pull up the modal in the
+// Lets w-6001 (`cicy-policy channel wechat`) pull up the modal in the
 // browser instead of printing a QR link in its terminal.
 func handleWeChatBindPrompt(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

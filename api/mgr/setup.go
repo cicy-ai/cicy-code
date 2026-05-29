@@ -414,8 +414,8 @@ const primaryWorkerPaneID = "w-10001:main.0"
 // Team-Helper mode (--helper=1): a single OpenCode-backed pane on port 6002
 // titled "Team Helper". Used by the cicy-cloud trial helper container — the
 // 30-min agent that walks brand-new users through installing Docker +
-// cicy-code on their own machine. Sits in the built-in range
-// (w-6001…w-10000); w-6001 is reserved for the security officer.
+// cicy-code on their own machine. One of the two built-in agents (the other
+// is w-6001 SecOps Lead); user workers continue to start at w-10001.
 const helperWorkerPort = 6002
 const helperWorkerSession = "w-6002"
 const helperWorkerPaneID = "w-6002:main.0"
@@ -846,9 +846,8 @@ func checkEnv() {
 	ensureBuiltinAgents(selectedAgents)
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles(selectedAgents)
-	setupAuditPolicyAgent()
-	setupSecurityOfficerAgent()
-	setupTeamHelperAgent() // no-op in --helper=1 mode; otherwise owns w-6002
+	setupAuditPolicyAgent()                  // → w-6001 SecOps Lead (merged 2.1.8)
+	setupTeamHelperAgent()                   // no-op in --helper=1 mode; otherwise owns w-6002
 	go ensureFfmpegAsync()
 	go ensurePreinstalledSkills()
 }

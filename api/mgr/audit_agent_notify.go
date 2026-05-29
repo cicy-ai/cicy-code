@@ -11,7 +11,7 @@ func init() {
 	audit.SetFindingForwarder(forwardAuditFindingToAdvisor)
 }
 
-// forwardAuditFindingToAdvisor delivers a finding brief to the w-10000 audit
+// forwardAuditFindingToAdvisor delivers a finding brief to the w-6001 audit
 // advisor pane — the same delivery `cicy-agent msg` uses (sendTextToPane → the
 // advisor receives it as an incoming message). The advisor (an AI agent) then
 // triages and orchestrates the whole response with its own skills: notify the

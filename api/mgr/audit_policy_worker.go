@@ -1,13 +1,20 @@
 package main
 
-// audit_policy_worker.go reserves w-10000 as a dedicated "Audit Policy
-// Admin" agent — created on first startup, hidden from the regular
-// agent list, and surfaced inside the Audit Dashboard "Assistant" tab.
+// audit_policy_worker.go reserves w-6001 as the single "SecOps Lead" agent —
+// the merged audit-advisor + security-officer role. Created on first startup,
+// hidden from the regular agent list, surfaced inside the Audit Dashboard
+// "Assistant" tab.
+//
+// 2.1.8: the previously-separate security-officer agent was merged in,
+// and the resulting single audit agent moved from w-10000 → w-6001 (port 6001,
+// reclaiming the slot the security officer used to hold). One pane handles
+// detection triage, policy edits, turnkey channel setup, AND human coordination
+// on escalations.
 //
 // This is a singleton role:
-//   - fixed pane_id     "w-10000:main.0"
-//   - fixed ttyd port   10000
-//   - fixed workspace   ~/cicy-ai/workers/w-10000
+//   - fixed pane_id     "w-6001:main.0"
+//   - fixed ttyd port   6001
+//   - fixed workspace   ~/cicy-ai/workers/w-6001
 //   - fixed agent_type  "claude"
 //   - role              "audit-policy-admin" (used to filter out of /api/panes)
 //
@@ -25,12 +32,12 @@ import (
 )
 
 const (
-	auditPolicyPaneID     = "w-10000:main.0"
-	auditPolicyShortPane  = "w-10000"
-	auditPolicyPort       = 10000
+	auditPolicyPaneID     = "w-6001:main.0"
+	auditPolicyShortPane  = "w-6001"
+	auditPolicyPort       = 6001
 	auditPolicyAgentType  = "claude"
 	auditPolicyRole       = "audit-policy-admin"
-	auditPolicyTitle      = "Audit Policy Admin"
+	auditPolicyTitle      = "SecOps Lead"
 	auditPolicySkillName  = "cicy-audit-policy"
 )
 
@@ -40,7 +47,7 @@ var auditPolicySkillFS embed.FS
 //go:embed embed/audit-policy-CLAUDE.md
 var auditPolicyGuidance []byte
 
-// auditPolicyIntroPrompt is the minimal first-turn trigger that makes w-10000
+// auditPolicyIntroPrompt is the minimal first-turn trigger that makes w-6001
 // open proactively. The actual startup routine (pick session language first,
 // then readiness + recommendations) lives in the agent's CLAUDE.md, which is
 // injected into the gateway request system prompt — so this stays a clean,
@@ -49,7 +56,7 @@ var auditPolicyGuidance []byte
 const auditPolicyIntroPrompt = "A new operator session has started — open with your startup briefing now."
 
 // setupAuditPolicyAgent installs the skill into ~/cicy-ai/skills/,
-// creates the w-10000 pane if missing, then queues the opening
+// creates the w-6001 pane if missing, then queues the opening
 // self-introduction. Safe to call on every startup.
 func setupAuditPolicyAgent() {
 	if err := installAuditPolicySkill(); err != nil {
@@ -124,7 +131,7 @@ func installAuditPolicySkill() error {
 }
 
 // writeAuditPolicyGuidance refreshes the agent-rules file inside
-// w-10000's workspace every startup (AGENTS.md for opencode/codex,
+// w-6001's workspace every startup (AGENTS.md for opencode/codex,
 // CLAUDE.md for claude), so a newer build's prompt always wins. The
 // workspace itself is created lazily by createManagedPane.
 func writeAuditPolicyGuidance() error {
@@ -139,7 +146,7 @@ func writeAuditPolicyGuidance() error {
 	return os.WriteFile(filepath.Join(ws, filename), auditPolicyGuidance, 0o644)
 }
 
-// ensureAuditPolicyPane creates the w-10000 pane on first run. On
+// ensureAuditPolicyPane creates the w-6001 pane on first run. On
 // subsequent runs the row already exists in agent_config, but the
 // underlying tmux session and ttyd are NOT recreated by
 // ensureBuiltinAgents (which only revives panes bound to w-10001).
@@ -161,10 +168,10 @@ func ensureAuditPolicyPane() error {
 
 	if err == nil && port > 0 {
 		// Already provisioned — refresh metadata then revive session/ttyd.
-		// w-10000 is a trusted internal admin agent — it must run its own tools
+		// w-6001 is a trusted internal admin agent — it must run its own tools
 		// (cicy-policy, cicy-agent msg, shell) without permission prompts, or its
 		// loop stalls. Force allow_all_actions on, upgrading older rows too.
-		// Global platform: w-10000 defaults to English and asks the operator to
+		// Global platform: w-6001 defaults to English and asks the operator to
 		// pick the session language (see CLAUDE.md), so don't force Chinese.
 		store.Exec(
 			fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, role=?, allow_all_actions=1, reply_in_chinese=0, updated_at=%s WHERE pane_id=?", store.Now()),
@@ -199,9 +206,21 @@ func ensureAuditPolicyPane() error {
 }
 
 // IsAuditPolicyPane reports whether a pane id (full or short) refers
-// to the dedicated audit-policy agent. Used by /api/panes to hide it
-// from the regular agent list.
+// to the dedicated audit-policy / SecOps agent.
 func IsAuditPolicyPane(paneID string) bool {
 	short := strings.Split(paneID, ":")[0]
 	return short == auditPolicyShortPane
+}
+
+// isBuiltinAgent reports whether a pane id belongs to a built-in / system
+// agent. Used by /api/panes to hide built-ins from the regular agent list
+// (?include_hidden=1 to bypass). Built-ins are now:
+//   - w-6001 — SecOps Lead (audit advisor + security officer, merged 2.1.8)
+//   - w-6002  — Team Helper
+// 2.1.7's "[6001, 10000] range" check is replaced by an explicit-id check:
+// w-10001+ are user workers and must NOT be hidden, and there are only two
+// built-ins to enumerate.
+func isBuiltinAgent(paneID string) bool {
+	short := strings.Split(paneID, ":")[0]
+	return short == auditPolicyShortPane || short == teamHelperShortPane
 }

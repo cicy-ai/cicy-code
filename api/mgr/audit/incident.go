@@ -12,7 +12,7 @@ import (
 
 // dispatchIncident is called by pipeline.process AFTER an event is appended.
 // New architecture: the backend does NOT decide the response itself — it
-// forwards the finding to the w-10000 audit advisor, which triages and
+// forwards the finding to the w-6001 audit advisor, which triages and
 // orchestrates everything (notify the offending agent / escalate to the owner
 // via cicy-policy notify / tune policy). The owner email is sent only when the
 // advisor explicitly calls SendOwnerIncident (POST /api/audit/notify).
@@ -40,7 +40,7 @@ func (p *Pipeline) dispatchIncident(e Event) {
 }
 
 // SendOwnerIncident renders and emails the incident to the responsible
-// person(s). Invoked when the advisor (w-10000) escalates to a human via
+// person(s). Invoked when the advisor (w-6001) escalates to a human via
 // POST /api/audit/notify. `note` is the advisor's own assessment (e.g. "GitHub
 // token leaked — revoke + rotate now"), prepended to the email body.
 func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
@@ -71,7 +71,7 @@ func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
 	if len(recipients) > 0 {
 		subject, body := renderIncidentEmail(e, ruleIDs, cfg, ai, ackURL)
 		if n := strings.TrimSpace(note); n != "" {
-			body = "审计顾问 (w-10000) 研判:\n" + n + "\n\n" + body
+			body = "审计顾问 (w-6001) 研判:\n" + n + "\n\n" + body
 		}
 		if err := p.mailer.Send(EmailMessage{
 			To:       recipients,
@@ -102,21 +102,13 @@ func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
 		}
 	}
 
-	// Channel 3 (additive): escalate to the security-officer agent w-6001. Fires
-	// alongside email + WeChat — the officer is an agent, email/WeChat reach humans.
-	officerNotified := false
-	if called, err := notifySecurityOfficer(renderSecurityOfficerEscalation(e, note, ackURL)); called {
-		if err != nil {
-			log.Printf("[audit] security-officer(w-6001) escalation failed event=%s: %v", e.ID, err)
-		} else {
-			officerNotified = true
-			log.Printf("[audit] security-officer(w-6001) escalated event=%s", e.ID)
-		}
-	}
+	// 2.1.8: Channel 3 (escalate to w-6001 security officer) removed — the audit
+	// advisor (w-6001) now owns human coordination itself, so the cross-agent
+	// hop is redundant. SendOwnerIncident remains additive across email + WeChat.
 
 	// Success if any channel delivered. Only when nothing went out do we surface
 	// the email-side reason (the default channel) to the caller.
-	if !emailed && !imSent && !officerNotified {
+	if !emailed && !imSent {
 		return emailErr
 	}
 	return nil
@@ -134,9 +126,9 @@ func (p *Pipeline) SendTestNotification(to string) (string, error) {
 		msg := EmailMessage{
 			To:       []string{to},
 			Subject:  "[CICY-AUDIT][TEST] 通知渠道连通性测试",
-			Body:     "这是一封 cicy-code 审计「通知渠道」测试邮件。\n收到即说明邮件投递通道(" + responseMailerKind + ")工作正常。\n\n— cicy-code audit · w-10000",
+			Body:     "这是一封 cicy-code 审计「通知渠道」测试邮件。\n收到即说明邮件投递通道(" + responseMailerKind + ")工作正常。\n\n— cicy-code audit · w-6001",
 			EventID:  fmt.Sprintf("test-%d", time.Now().Unix()),
-			AgentID:  "w-10000",
+			AgentID:  "w-6001",
 			Severity: SeverityLow,
 		}
 		if err := p.mailer.Send(msg); err != nil {
