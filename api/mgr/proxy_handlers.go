@@ -200,9 +200,10 @@ func handleProxyList(w http.ResponseWriter, r *http.Request) {
 // HEAD and returns the rtt without changing the active selection).
 //
 // Also runs an exit-IP probe: it temporarily PUTs the named proxy into
-// `default_proxy_group`, fetches https://api.myip.com through the mihomo
-// mixed port, then restores the previous selection. Concurrent tests can
-// race on the selection — accept that for a debugging tool; callers are
+// `default_proxy_group`, races the ipExitProbes pool (api.myip.com +
+// api.ip.sb/geoip — whichever responds first) through the mihomo mixed
+// port, then restores the previous selection. Concurrent tests can race
+// on the selection — accept that for a debugging tool; callers are
 // expected to not fan out N tests in parallel.
 func handleProxyTest(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -271,14 +272,15 @@ func mihomoDelayProbe(parent context.Context, name, target string) M {
 	return M{"url": target, "ok": true, "delay_ms": d.Delay}
 }
 
-// mihomoExitIPProbe runs an actual HTTP request to api.myip.com through the
-// mihomo mixed port, routed via `name`. It does this by briefly mutating the
+// mihomoExitIPProbe runs an actual HTTP request through the mihomo mixed
+// port, routed via `name`, racing every entry in ipExitProbes and taking
+// whichever returns first. It does this by briefly mutating the
 // `default_proxy_group` selection (PUT /proxies/default_proxy_group), then
-// running curl with the mihomo proxy URL, then restoring the previous
-// selection. Returns {ok, ip, country, cc} on success.
+// running the probe race with the mihomo proxy URL, then restoring the
+// previous selection. Returns {ok, ip, country, cc, source[, asn, city]}.
 //
-// curl is used (vs http.Client) so we get robust auth + CONNECT semantics
-// without re-implementing CONNECT-via-proxy here.
+// curl is used inside the race (vs http.Client) so we get robust auth +
+// CONNECT semantics without re-implementing CONNECT-via-proxy here.
 func mihomoExitIPProbe(name string) M {
 	password := readMihomoGlobalPasswordFromYAML()
 	if password == "" {
@@ -308,25 +310,25 @@ func mihomoExitIPProbe(name string) M {
 	proxyURL := fmt.Sprintf("http://w-proxytest:%s@%s", password, mihomoMixedAddr())
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "curl",
-		"-sS", "-m", "8",
-		"-x", proxyURL,
-		"https://api.myip.com",
-	)
-	out, err := cmd.Output()
-	if err != nil {
-		return M{"ok": false, "error": "fetch: " + strings.TrimSpace(err.Error())}
+	base := []string{"-sS", "-m", "8", "-x", proxyURL}
+	parsed, ok, _ := probeExitIPRace(ctx, base)
+	if !ok {
+		return M{"ok": false, "error": "all exit-IP probes failed"}
 	}
-	body := strings.TrimSpace(string(out))
-	var parsed struct {
-		IP      string `json:"ip"`
-		Country string `json:"country"`
-		CC      string `json:"cc"`
+	out := M{
+		"ok":      true,
+		"ip":      parsed["ip"],
+		"country": parsed["country"],
+		"cc":      parsed["cc"],
+		"source":  parsed["source"],
 	}
-	if json.Unmarshal([]byte(body), &parsed) == nil && parsed.IP != "" {
-		return M{"ok": true, "ip": parsed.IP, "country": parsed.Country, "cc": parsed.CC}
+	if asn, has := parsed["asn"]; has {
+		out["asn"] = asn
 	}
-	return M{"ok": true, "raw": body}
+	if city, has := parsed["city"]; has {
+		out["city"] = city
+	}
+	return out
 }
 
 // readMihomoGroupSelection returns the currently-selected member of a group,
@@ -370,47 +372,155 @@ func setMihomoGroupSelection(group, member string) error {
 	return nil
 }
 
-// curlExitIP fetches the egress IP + area from api.myip.com, optionally through
-// proxyURL ("" = direct, --noproxy so env proxies don't leak in). 1-second
-// budget per probe (caller spec). Reports elapsed_ms so the 🌍 panel can show
-// timing. Both sides of the comparison use the SAME service so IPs are
-// apples-to-apples.
+// ── exit-IP probe sources (race the first responder) ────────────────────
+//
+// api.myip.com used to be the single source; it'd occasionally 5xx / time
+// out and the whole 🌍 panel would degrade. We now race a small list and
+// take whoever returns a parseable IP first — cancel the stragglers.
+// Both endpoints work from CN-friendly networks; the three big
+// Cloudflare-fronted alternatives (ifconfig.co, ipapi.co, freeipapi.com)
+// return WAF challenges to curl UA so they're not in the race.
+//
+// To add a third source: append to ipExitProbes with a parser that maps
+// whatever JSON it returns into the common {ip, country, cc, source[, asn,
+// city]} shape — the callers (curlExitIP / mihomoExitIPProbe) rename keys
+// to fit their existing output contract.
+
+type ipExitProbe struct {
+	name  string
+	url   string
+	parse func(body []byte) (M, bool)
+}
+
+var ipExitProbes = []ipExitProbe{
+	{
+		name: "myip.com",
+		url:  "https://api.myip.com",
+		parse: func(body []byte) (M, bool) {
+			var p struct {
+				IP, Country, CC string
+			}
+			if json.Unmarshal(body, &p) != nil || p.IP == "" {
+				return nil, false
+			}
+			return M{"ip": p.IP, "country": p.Country, "cc": p.CC, "source": "myip.com"}, true
+		},
+	},
+	{
+		name: "ip.sb",
+		url:  "https://api.ip.sb/geoip",
+		parse: func(body []byte) (M, bool) {
+			var p struct {
+				IP              string `json:"ip"`
+				Country         string `json:"country"`
+				CountryCode     string `json:"country_code"`
+				City            string `json:"city"`
+				ASN             int    `json:"asn"`
+				ASNOrganization string `json:"asn_organization"`
+			}
+			if json.Unmarshal(body, &p) != nil || p.IP == "" {
+				return nil, false
+			}
+			m := M{"ip": p.IP, "country": p.Country, "cc": p.CountryCode, "source": "ip.sb"}
+			if p.City != "" {
+				m["city"] = p.City
+			}
+			if p.ASNOrganization != "" {
+				m["asn"] = fmt.Sprintf("AS%d %s", p.ASN, p.ASNOrganization)
+			}
+			return m, true
+		},
+	},
+}
+
+// probeExitIPRace fans out the same curlBaseArgs (proxy/--noproxy/timeouts)
+// to every entry in ipExitProbes in parallel and returns the first one whose
+// body parses to a non-empty IP. Stragglers get cancelled via a shared ctx
+// (curl picks up the kill via signal). Returns (m, true, elapsedMs) on first
+// success, or (nil, false, elapsedMs) when every probe failed within budget.
+//
+// The returned M is the parser's raw common shape — callers (curlExitIP,
+// mihomoExitIPProbe) rename keys + add their own outer fields (via, ok,
+// elapsed_ms) before returning to the HTTP layer.
+func probeExitIPRace(parent context.Context, curlBaseArgs []string) (M, bool, int64) {
+	start := time.Now()
+	raceCtx, cancel := context.WithCancel(parent)
+	defer cancel()
+	type result struct {
+		m  M
+		ok bool
+	}
+	results := make(chan result, len(ipExitProbes))
+	for _, p := range ipExitProbes {
+		p := p
+		go func() {
+			args := append([]string{}, curlBaseArgs...)
+			args = append(args, p.url)
+			out, err := exec.CommandContext(raceCtx, "curl", args...).Output()
+			if err != nil {
+				results <- result{ok: false}
+				return
+			}
+			m, ok := p.parse(out)
+			results <- result{m: m, ok: ok}
+		}()
+	}
+	for i := 0; i < len(ipExitProbes); i++ {
+		r := <-results
+		if r.ok {
+			return r.m, true, time.Since(start).Milliseconds()
+		}
+	}
+	return nil, false, time.Since(start).Milliseconds()
+}
+
+// curlExitIP fetches the egress IP + area through whichever of ipExitProbes
+// responds first, optionally via proxyURL ("" = direct, --noproxy so env
+// proxies don't leak in). 5s budget for the whole race. Reports elapsed_ms
+// so the 🌍 panel can show timing; both sides of the comparison use the same
+// probe pool so IPs are apples-to-apples.
 func curlExitIP(ctx context.Context, via, proxyURL string) M {
 	// 5s budget: a real overseas node (e.g. a US socks5) needs ~1.3s round-trip
 	// to api.myip.com, so a 1s cap would always time it out. The direct side
 	// still returns in ~0.3s; elapsed_ms reports the true latency regardless.
-	args := []string{"-sS", "-m", "5", "--connect-timeout", "4"}
+	base := []string{"-sS", "-m", "5", "--connect-timeout", "4"}
 	if proxyURL != "" {
-		args = append(args, "-x", proxyURL)
+		base = append(base, "-x", proxyURL)
 	} else {
-		args = append(args, "--noproxy", "*")
+		base = append(base, "--noproxy", "*")
 	}
-	args = append(args, "https://api.myip.com")
-	start := time.Now()
-	out, err := exec.CommandContext(ctx, "curl", args...).Output()
-	elapsed := time.Since(start).Milliseconds()
-	if err != nil {
-		return M{"via": via, "ok": false, "error": "fetch: " + strings.TrimSpace(err.Error()), "elapsed_ms": elapsed}
+	parsed, ok, elapsed := probeExitIPRace(ctx, base)
+	if !ok {
+		return M{"via": via, "ok": false, "error": "all exit-IP probes failed", "elapsed_ms": elapsed}
 	}
-	var p struct {
-		IP      string `json:"ip"`
-		Country string `json:"country"`
-		CC      string `json:"cc"`
+	out := M{
+		"via":        via,
+		"ok":         true,
+		"ip":         parsed["ip"],
+		"area":       parsed["country"], // existing 🌍-panel shape uses 'area' for country
+		"cc":         parsed["cc"],
+		"source":     parsed["source"],
+		"elapsed_ms": elapsed,
 	}
-	if json.Unmarshal(out, &p) == nil && p.IP != "" {
-		return M{"via": via, "ok": true, "ip": p.IP, "area": p.Country, "cc": p.CC, "elapsed_ms": elapsed}
+	if asn, has := parsed["asn"]; has {
+		out["asn"] = asn
 	}
-	return M{"via": via, "ok": true, "raw": strings.TrimSpace(string(out)), "elapsed_ms": elapsed}
+	if city, has := parsed["city"]; has {
+		out["city"] = city
+	}
+	return out
 }
 
 // handleProxyExitInfo — GET /api/proxy/exit-info
 //
-// Powers the 🌍 panel. Fires TWO probes to api.myip.com in parallel, 1s each:
-// one through the local mihomo (the global proxy at 127.0.0.1:9001, no auth →
-// current default_proxy_group selection) and one direct (no proxy). Returns
-// ip + area + elapsed_ms for each. If the two IPs match it collapses to ONE
-// group (proxy is effectively direct); if they differ it returns BOTH groups
-// (proxy is changing the exit IP — a real node is active).
+// Powers the 🌍 panel. Fires TWO race-groups to the ipExitProbes pool
+// (api.myip.com + api.ip.sb/geoip — whichever responds first) in parallel,
+// 5s each: one through the local mihomo (the global proxy at 127.0.0.1:9001,
+// no auth → current default_proxy_group selection) and one direct (no proxy).
+// Returns ip + area + cc + source [+ asn + city] + elapsed_ms for each. If
+// the two IPs match it collapses to ONE group (proxy is effectively direct);
+// if they differ it returns BOTH groups (proxy is changing the exit IP — a
+// real node is active).
 func handleProxyExitInfo(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
