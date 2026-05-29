@@ -275,13 +275,17 @@ body {
   transform: translateX(-50%) translateY(4px);
   padding: 6px 8px;
   border-radius: 8px;
-  background: rgba(34,37,46,0.97);
-  border: 1px solid rgba(255,255,255,0.08);
+  /* Match cp-drop / cp-modal surface tone so tooltips read as part of the
+     same dark chrome layer instead of a slightly-blue oddball. */
+  background: rgba(22,22,26,0.97);
+  border: 1px solid rgba(255,255,255,0.09);
   color: rgba(255,255,255,0.92);
   font-size: 11px;
   line-height: 1.2;
   white-space: nowrap;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
   pointer-events: none;
   opacity: 0;
   transition: opacity .12s ease, transform .12s ease;
@@ -293,9 +297,9 @@ body {
   bottom: calc(100% + 4px);
   width: 8px;
   height: 8px;
-  background: rgba(34,37,46,0.97);
-  border-right: 1px solid rgba(255,255,255,0.08);
-  border-bottom: 1px solid rgba(255,255,255,0.08);
+  background: rgba(22,22,26,0.97);
+  border-right: 1px solid rgba(255,255,255,0.09);
+  border-bottom: 1px solid rgba(255,255,255,0.09);
   transform: translateX(-50%) rotate(45deg);
   pointer-events: none;
   opacity: 0;
