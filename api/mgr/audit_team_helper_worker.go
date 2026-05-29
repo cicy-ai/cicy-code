@@ -22,9 +22,14 @@ package main
 import (
 	_ "embed"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
+
+	"ttyd-go/skillcmd"
 )
 
 const (
@@ -44,13 +49,20 @@ var teamHelperGuidance []byte
 // AGENTS.md and produce the locked-language greeting defined there.
 const teamHelperIntroPrompt = "A new user session has started — open with your greeting from AGENTS.md now."
 
-// setupTeamHelperAgent provisions w-6002 alongside the security officer
-// (w-6001 SecOps Lead). Called from checkEnv on every
-// startup; idempotent — refreshes AGENTS.md and revives the pane.
+// setupTeamHelperAgent provisions w-6002 alongside the audit-policy admin
+// (w-6001 SecOps Lead, merged in 2.1.8). Called lazily from
+// ensureBuiltinPaneLazy on the first chat-ws connect to w-6002;
+// idempotent — refreshes AGENTS.md and revives the pane.
 //
 // In --helper=1 mode this is a no-op: the trial container creates w-6002
 // itself (via createSelectedWorkers) and ships its own install-protocol
 // AGENTS.md via Dockerfile COPY, which we must leave untouched.
+//
+// Side-effect: installs the `agent-teams` skill from the public registry
+// so the Team Helper agent has a stable CLI for window.cicy.localTeams.*
+// instead of hand-rolling agent-webpage exec-js. Scoped to this setup
+// (NOT in preinstalledSkills) because the skill is only useful when a
+// cicy-desktop webview is connected to a w-6002 pane.
 func setupTeamHelperAgent() {
 	if helperMode {
 		return
@@ -62,8 +74,30 @@ func setupTeamHelperAgent() {
 		log.Printf("[team-helper] pane bootstrap failed: %v", err)
 		return
 	}
+	go ensureAgentTeamsSkill()
 	replyInChineseStartupQueue.enqueueText(teamHelperPaneID, teamHelperAgentType, teamHelperIntroPrompt)
 	log.Printf("[team-helper] queued self-intro for %s", teamHelperPaneID)
+}
+
+// ensureAgentTeamsSkill installs `agent-teams` from the public skill
+// registry if it isn't already on disk. Runs in a goroutine because the
+// network round-trip can be slow on fresh hosts; the helper's first few
+// turns will work without it and just fall back to raw agent-webpage
+// exec-js as the AGENTS.md backup path documents.
+func ensureAgentTeamsSkill() {
+	installed, err := skillcmd.PublicInstalled()
+	if err == nil {
+		for _, s := range installed.Skills {
+			if s.Name == "agent-teams" {
+				return
+			}
+		}
+	}
+	if _, err := skillcmd.PublicInstall("agent-teams", io.Discard); err != nil {
+		log.Printf("[team-helper] agent-teams skill install failed: %v", err)
+		return
+	}
+	log.Printf("[team-helper] agent-teams skill installed")
 }
 
 // writeTeamHelperGuidance drops the embedded persona doc into w-6002's
@@ -119,11 +153,63 @@ func ensureTeamHelperPane() error {
 		token:            token,
 		allowAllActions:  true,
 		replyInChinese:   false,
-		useCustomGateway: false, // long-running local helper uses the user's own provider config
+		useCustomGateway: false, // Team Helper — trial AND local — always rides the Big Pickle Zen gateway, never the user's custom gateway. The persona is a built-in "service" provided by cicy-code (manage install/upgrade/token/team — see embed/team-helper-AGENTS.md), so we don't want it burning the user's own provider quota. Distinct from regular w-10001+ user workers and w-6001 SecOps Lead, which both use the user's gateway (useCustomGateway:=true / !helperMode).
 	})
 	if err != nil {
 		return err
 	}
 	log.Printf("[team-helper] created %s (port %d, role=%s)", teamHelperPaneID, teamHelperPort, teamHelperRole)
 	return nil
+}
+
+// ── lazy bootstrap (built-in panes) ─────────────────────────────────────
+//
+// Instead of pre-creating w-6002 at every checkEnv() boot, we let the
+// pane materialise on first demand. The desktop drawer's <webview> dials
+// /api/chat/ws?agent_id=w-6002 the moment the user clicks "Open Helper";
+// chatbus.handleChatWS invokes ensureBuiltinPaneLazy(agent_id) right
+// before the upgrade. If the requested id is a known built-in and the
+// row is missing, we run the same setup routine setup.go used to call
+// at startup — but only this once, only when actually needed.
+//
+// Idempotent + safe to call on every WS connect: a single sync.Once per
+// pane id keeps the heavy work to exactly one execution per process,
+// and setupTeamHelperAgent itself short-circuits if the row already
+// exists.
+
+var lazyBuiltinOnce sync.Map // key = short pane id (e.g. "w-6002") → *sync.Once
+
+func ensureBuiltinPaneLazy(agentID string) {
+	if agentID == "" {
+		return
+	}
+	// helperMode (cloud trial container) builds its own w-6002 via
+	// createSelectedWorkers + Dockerfile-baked AGENTS.md. Don't double-up.
+	if helperMode {
+		return
+	}
+	short := strings.Split(agentID, ":")[0]
+	switch short {
+	case teamHelperShortPane:
+		// known built-in
+	default:
+		return
+	}
+
+	// Quick existence check — if the pane already has a config row, skip
+	// the heavy path entirely. Avoids hitting setupTeamHelperAgent's
+	// embedded-file write + UPDATE on every WS reconnect.
+	var port int
+	if err := store.QueryRow(
+		"SELECT ttyd_port FROM agent_config WHERE pane_id=?", teamHelperPaneID,
+	).Scan(&port); err == nil && port > 0 {
+		return
+	}
+
+	onceI, _ := lazyBuiltinOnce.LoadOrStore(short, &sync.Once{})
+	once := onceI.(*sync.Once)
+	once.Do(func() {
+		log.Printf("[team-helper] lazy bootstrap on first request to %s", agentID)
+		setupTeamHelperAgent()
+	})
 }
