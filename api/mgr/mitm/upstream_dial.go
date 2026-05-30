@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -29,6 +30,20 @@ type Dialer struct {
 	cas    *x509.CertPool // for chain mode trust_ca; nil otherwise (system pool)
 	chain  bool
 	egress EgressFunc // optional dynamic global-egress override; see EgressFunc
+
+	// transport pools upstream connections (HTTP keep-alive) so the pump can
+	// reuse a host's TLS connection across requests instead of re-handshaking
+	// every turn. DialTLSContext routes through DialTLS, so the egress (mihomo)
+	// and chain logic — and the HTTP/1.1 ALPN pin — are preserved. Built once in
+	// NewDialer; used via RoundTrip.
+	transport *http.Transport
+}
+
+// RoundTrip sends req over a pooled upstream connection and returns the
+// response. The caller is responsible for reading + closing resp.Body (which
+// returns the connection to the idle pool for reuse).
+func (d *Dialer) RoundTrip(req *http.Request) (*http.Response, error) {
+	return d.transport.RoundTrip(req)
 }
 
 // EgressFunc, when set on a Dialer, is consulted on every DialTCP. If it
@@ -57,6 +72,23 @@ func NewDialer(cfg UpstreamConfig, egress EgressFunc) (*Dialer, error) {
 		d.cas = pool
 		d.chain = true
 	}
+	// Pooled upstream transport. DialTLSContext hands back an already-TLS'd conn
+	// from DialTLS (egress + chain + http/1.1 ALPN inside), so Transport does no
+	// TLS of its own and just pools/reuses these conns. DisableCompression keeps
+	// the body bytes byte-identical end-to-end (no auto gzip/gunzip) for the
+	// audit tee and the client; ForceAttemptHTTP2 off keeps the HTTP/1.1 framing
+	// the SSE audit parser expects.
+	d.transport = &http.Transport{
+		DialTLSContext: func(ctx context.Context, _ /*network*/ string, addr string) (net.Conn, error) {
+			return d.DialTLS(ctx, addr)
+		},
+		MaxIdleConns:          64,
+		MaxIdleConnsPerHost:   8,
+		IdleConnTimeout:       90 * time.Second,
+		ResponseHeaderTimeout: 0,
+		ForceAttemptHTTP2:     false,
+		DisableCompression:    true,
+	}
 	return d, nil
 }
 
@@ -64,10 +96,10 @@ func NewDialer(cfg UpstreamConfig, egress EgressFunc) (*Dialer, error) {
 // hostPort. The caller is responsible for any TLS layering on top.
 // Honors the configured upstream mode.
 func (d *Dialer) DialTCP(ctx context.Context, hostPort string) (net.Conn, error) {
-	// Dynamic global egress (global.json mihomo_global_egress): when enabled,
-	// route every dial through the local mihomo mixed port so the exit IP is
-	// whatever node mihomo currently has selected. Overrides the static mode;
-	// when off, fall through to the configured mode (direct by default).
+	// Global egress: route every dial through the local mihomo mixed port so the
+	// exit IP is whatever node mihomo currently has selected. The host resolver
+	// (mitmEgressResolver) always enables this; it overrides the static mode. If
+	// the resolver ever returns disabled, fall through to the configured mode.
 	if d.egress != nil {
 		if enabled, addr, auth := d.egress(); enabled {
 			if addr == "" {
