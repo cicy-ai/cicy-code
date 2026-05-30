@@ -7,10 +7,16 @@ package main
 // See docs/v1/mitm-system-design.md for the full design.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 
 	"ttyd-go/mgr/mitm"
 )
@@ -116,8 +122,57 @@ func startMITM() {
 	mitmCACertPath = cfg.CA.CertPath
 
 	// CA cert download — operator runs `cicy-code mitm install-ca` which
-	// fetches this endpoint and installs into the OS trust store.
+	// fetches this endpoint and installs into the OS trust store. `/ca.pem` is
+	// the same local MITM CA, exposed at the short path the audit dashboard's
+	// "install CA" card links to (so the manual-download link works against a
+	// self-hosted node instead of the central audit service).
 	http.HandleFunc("/api/mitm/ca", w(handleMITMCA))
+	http.HandleFunc("/ca.pem", w(handleMITMCA))
+	http.HandleFunc("/api/mitm/ca-status", w(handleMITMCAStatus))
+}
+
+// handleMITMCAStatus reports whether this node's MITM CA is trusted in the OS
+// trust store. The agent inspector calls it when a codex / kiro-cli pane is
+// switched to non-gateway: those run their real HTTP from a Rust binary that
+// reads the OS store (unlike node agents, which trust the CA via
+// NODE_EXTRA_CA_CERTS automatically), so on a host without the CA installed
+// their MITM-intercepted TLS would fail. Linux installs it automatically; macOS
+// needs the one-time `cicy-code mitm install-ca`.
+func handleMITMCAStatus(rw http.ResponseWriter, r *http.Request) {
+	resp := map[string]any{
+		"enabled":   mitmServer != nil,
+		"platform":  runtime.GOOS,
+		"installed": false,
+		"command":   "cicy-code mitm install-ca",
+	}
+	if mitmServer != nil {
+		resp["installed"] = mitmCATrustedInOS()
+	}
+	rw.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(rw).Encode(resp)
+}
+
+// mitmCATrustedInOS checks the platform trust store for this node's MITM CA,
+// using the same signals as ensureMITMCAInSystemTrust (Linux: the installed copy
+// matches; macOS: a trust setting exists).
+func mitmCATrustedInOS() bool {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return false
+	}
+	srcBytes, err := os.ReadFile(filepath.Join(home, "cicy-ai", "db", "mitm-ca.crt"))
+	if err != nil {
+		return false
+	}
+	switch runtime.GOOS {
+	case "linux":
+		cur, err := os.ReadFile("/usr/local/share/ca-certificates/cicy-mitm.crt")
+		return err == nil && bytes.Equal(cur, srcBytes)
+	case "darwin":
+		out, err := exec.Command("security", "dump-trust-settings", "-d").CombinedOutput()
+		return err == nil && bytes.Contains(bytes.ToLower(out), []byte("cicy-mitm"))
+	}
+	return false
 }
 
 func handleMITMCA(rw http.ResponseWriter, r *http.Request) {

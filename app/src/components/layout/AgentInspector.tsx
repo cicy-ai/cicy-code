@@ -599,6 +599,30 @@ export default function AgentInspector({
   const history = data?.history || { total: 0, items: [], offset: 0, limit: HISTORY_PAGE_SIZE, has_more: false };
   const normalizedAgentType = normalizeAgentType(settingsData?.agent_type);
   const modelSettingsEnabled = normalizedAgentType === 'codex' || normalizedAgentType === 'claude' || normalizedAgentType === 'opencode';
+
+  // Cert-install nudge: codex / kiro-cli are Rust and read the OS trust store, so
+  // when they run NON-gateway (official login → MITM) the host needs the MITM CA
+  // installed. node agents (claude / opencode) trust it via NODE_EXTRA_CA_CERTS,
+  // so they don't need this. Check the install status on demand + on a refresh.
+  const certNudgeRelevant = !settingsData?.use_custom_gateway &&
+    (normalizedAgentType === 'codex' || normalizedAgentType === 'kiro-cli');
+  const [caStatus, setCaStatus] = useState<{ enabled: boolean; installed: boolean; platform: string; command: string } | null>(null);
+  const [caChecking, setCaChecking] = useState(false);
+  const checkCaStatus = useCallback(async () => {
+    setCaChecking(true);
+    try {
+      const { data } = await apiService.getMitmCaStatus();
+      setCaStatus(data || null);
+    } catch {
+      setCaStatus(null);
+    } finally {
+      setCaChecking(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (certNudgeRelevant) void checkCaStatus();
+    else setCaStatus(null);
+  }, [certNudgeRelevant, checkCaStatus]);
   const historyStart = history.total > 0 ? Number(history.offset || 0) + 1 : 0;
   const historyEnd = history.total > 0 ? Number(history.offset || 0) + (history.items || []).length : 0;
   const projectKey = String(promptRules?.project_key || promptRulesDraft.project.key || '').trim();
@@ -1240,6 +1264,40 @@ export default function AgentInspector({
                         void saveModelSettings({ use_custom_gateway: value, runtime_ai: nextRuntimeAi });
                       }}
                     />
+                  </div>
+                  )}
+
+                  {certNudgeRelevant && (
+                  <div data-id="agent-inspector-settings-ca-nudge" className="space-y-2 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div data-id="agent-inspector-settings-ca-nudge-title" className="text-sm font-medium text-zinc-100">{t('caNudgeTitle')}</div>
+                      <button
+                        data-id="agent-inspector-settings-ca-refresh"
+                        onClick={() => void checkCaStatus()}
+                        disabled={caChecking}
+                        className="shrink-0 rounded-lg border border-white/10 px-2 py-1 text-[11px] text-zinc-300 transition-colors hover:bg-white/5 disabled:opacity-50"
+                      >{caChecking ? t('caNudgeChecking') : t('caNudgeRefresh')}</button>
+                    </div>
+                    {caStatus?.installed ? (
+                      <div data-id="agent-inspector-settings-ca-ok" className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2 text-[11px] text-emerald-200/90">
+                        <span>✓</span><span>{t('caNudgeInstalled')}</span>
+                      </div>
+                    ) : (
+                      <div data-id="agent-inspector-settings-ca-missing" className="space-y-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-[11px] leading-5 text-amber-200/90">
+                        <div data-id="agent-inspector-settings-ca-missing-text">{t('caNudgeMissing')}</div>
+                        <div className="flex items-center gap-2 rounded-lg bg-black/30 px-2 py-1 font-mono text-[11px] text-zinc-200">
+                          <span data-id="agent-inspector-settings-ca-command" className="flex-1 break-all">{caStatus?.command || 'cicy-code mitm install-ca'}</span>
+                          <button
+                            data-id="agent-inspector-settings-ca-copy"
+                            onClick={() => { try { void navigator.clipboard.writeText(caStatus?.command || 'cicy-code mitm install-ca'); } catch { /* noop */ } }}
+                            className="shrink-0 rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-white/5"
+                          >{t('caNudgeCopy')}</button>
+                        </div>
+                        {caStatus?.platform === 'darwin' && (
+                          <div data-id="agent-inspector-settings-ca-mac-note" className="text-[10px] text-amber-200/70">{t('caNudgeMacNote')}</div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   )}
 
