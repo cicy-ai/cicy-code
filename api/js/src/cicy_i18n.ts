@@ -23,8 +23,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
   en: {
     tipAddCliWindow: "New CLI window\n\nOpen a fresh tmux window in this session.",
     tipRestartAgent: "Restart pane (full)\n\nKills the tmux pane and respawns it from\nscratch. Loses scrollback. Use when the\nshell is wedged.",
-    tipLaunchAgent: "Launch {agent}\n\nRe-source .cicy/boot.sh,\nlaunch Agent.",
-    tipUpdateAgent: "Update {agent}\n\nUpdate Agent to the latest official release.",
+    tipLaunchAgent: "Launch Agent\n\nRe-source .cicy/boot.sh,\nlaunch Agent.",
+    tipUpdateAgent: "Update Agent\n\nUpdate Agent to the latest official release.",
     tipReloadPage: "Reload page\n\nReload this cicy-code UI tab.",
     tipPromptArea: "Prompt input area\n\nClick to focus the bottom prompt box —\ntype + Enter sends to the agent.\nUse this when the slow-network server-side\nIME makes typing directly in the terminal\nunreliable.",
     confirmLaunchAgent: "Re-source `.cicy/boot.sh` in this pane? Env vars get refreshed and {agent} restarts.",
@@ -84,8 +84,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
   "zh-CN": {
     tipAddCliWindow: "新建 CLI Window\n\n在当前 session 新开一个 tmux window。",
     tipRestartAgent: "重启整个 Pane\n\n销毁当前 tmux pane 后从头重建,\n滚动历史会丢失。Shell 卡死时用。",
-    tipLaunchAgent: "启动 {agent}\n\n重新 source .cicy/boot.sh,\n启动 Agent。",
-    tipUpdateAgent: "更新 {agent}\n\n更新 Agent 到官方最新版。",
+    tipLaunchAgent: "启动 Agent\n\n重新 source .cicy/boot.sh,\n启动 Agent。",
+    tipUpdateAgent: "更新 Agent\n\n更新 Agent 到官方最新版。",
     tipReloadPage: "刷新页面\n\n刷新当前 cicy-code UI 标签。",
     tipPromptArea: "Prompt 输入区\n\n点这里聚焦底部 Prompt 输入框,\n输入后回车直接发给 agent。\n用于网络较慢时服务端输入法\n在终端里直接打字不稳的情况。",
     confirmLaunchAgent: "在当前 pane 重新 source `.cicy/boot.sh`? 环境变量会刷新,{agent} 重新启动。",
