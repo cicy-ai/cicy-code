@@ -1690,42 +1690,90 @@ func resolveClaudeStartupModel(defaultModel string, aiCfg runtimeAIConfig, short
 // listed so either gateway default resolves cleanly. Schema mirrors a single
 // entry of codex-rs/models-manager/models.json. Context window 131072 (128K)
 // matches DeepSeek V4. Bump here if the gateway changes the served window.
-const codexModelCatalogJSON = `{
-  "models": [
-    {
-      "slug": "deepseek-v4-pro",
-      "display_name": "DeepSeek V4 Pro",
-      "context_window": 131072,
-      "max_context_window": 131072,
-      "input_modalities": ["text"],
-      "supports_parallel_tool_calls": true,
-      "apply_patch_tool_type": "freeform",
-      "default_reasoning_level": "medium",
-      "supported_reasoning_levels": [
-        {"effort": "medium", "description": "Balances speed and reasoning depth"},
-        {"effort": "high", "description": "Greater reasoning depth for complex problems"}
-      ],
-      "supported_in_api": true,
-      "visibility": "list"
-    },
-    {
-      "slug": "deepseek-v4-flash",
-      "display_name": "DeepSeek V4 Flash",
-      "context_window": 131072,
-      "max_context_window": 131072,
-      "input_modalities": ["text"],
-      "supports_parallel_tool_calls": true,
-      "apply_patch_tool_type": "freeform",
-      "default_reasoning_level": "low",
-      "supported_reasoning_levels": [
-        {"effort": "low", "description": "Fast responses with lighter reasoning"},
-        {"effort": "medium", "description": "Balances speed and reasoning depth"}
-      ],
-      "supported_in_api": true,
-      "visibility": "list"
-    }
-  ]
-}`
+// codexCatalogBuildScript is a boot-time Python snippet that teaches Codex
+// about the gateway's DeepSeek slugs so it stops warning "Model metadata for
+// `deepseek-v4-*` not found. Defaulting to fallback metadata; this can degrade
+// performance".
+//
+// Why clone instead of hand-write: a Codex catalog entry deserializes into a
+// large struct with many required fields — including `base_instructions`, which
+// holds Codex's entire ~21KB system prompt. A hand-written entry either fails to
+// parse (Codex then refuses to start, worse than the warning) or has to embed
+// Codex's proprietary prompt and goes stale on every release. Instead we read
+// Codex's OWN embedded models.json out of the installed binary, clone a real
+// entry (gpt-5.5), and only swap identity + DeepSeek-specific capabilities. This
+// is always schema-valid for the installed version and self-heals on `@latest`
+// updates. argv[1] = output path; on any error it writes nothing and exits 0 so
+// the caller falls back to launching Codex without a catalog.
+const codexCatalogBuildScript = `import json, glob, os, sys
+out = sys.argv[1]
+try:
+    pats = [
+        os.path.expanduser("~/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-*/vendor/*/bin/codex"),
+        "/home/cicy/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-*/vendor/*/bin/codex",
+    ]
+    bins = []
+    for p in pats:
+        bins = glob.glob(p)
+        if bins:
+            break
+    data = open(bins[0], "rb").read()
+    m = data.find(b'"models": [')
+    start = data.rfind(b"{", 0, m)
+    depth = 0; i = start; instr = False; esc = False; end = None
+    while i < len(data):
+        c = data[i:i+1]
+        if instr:
+            if esc: esc = False
+            elif c == b"\\": esc = True
+            elif c == b'"': instr = False
+        else:
+            if c == b'"': instr = True
+            elif c == b"{": depth += 1
+            elif c == b"}":
+                depth -= 1
+                if depth == 0:
+                    end = i+1; break
+        i += 1
+    models = json.loads(data[start:end].decode("utf-8"))["models"]
+    tpl = next((x for x in models if x.get("slug") == "gpt-5.5"), models[0])
+    def mk(slug, name, level):
+        e = json.loads(json.dumps(tpl))
+        e["slug"] = slug
+        e["display_name"] = name
+        e["context_window"] = 131072
+        e["max_context_window"] = 131072
+        e["input_modalities"] = ["text"]
+        e["visibility"] = "list"
+        e["default_reasoning_level"] = level
+        if "minimal_client_version" in e: e["minimal_client_version"] = "0.0.0"
+        if "supports_search_tool" in e: e["supports_search_tool"] = False
+        if "supports_reasoning_summaries" in e: e["supports_reasoning_summaries"] = False
+        if "support_verbosity" in e: e["support_verbosity"] = False
+        return e
+    result = {"models": [
+        mk("deepseek-v4-pro", "DeepSeek V4 Pro", "medium"),
+        mk("deepseek-v4-flash", "DeepSeek V4 Flash", "low"),
+    ]}
+    tmp = out + ".tmp"
+    open(tmp, "w").write(json.dumps(result))
+    os.replace(tmp, out)
+except Exception as ex:
+    sys.stderr.write("[cicy] codex model catalog skipped: %s\n" % ex)
+    sys.exit(0)
+`
+
+// codexCatalogBuildLines returns boot lines that (re)generate the DeepSeek model
+// catalog at catalogPath by cloning Codex's own embedded entry. Safe to run
+// every boot; on failure it leaves no file so the launch falls back cleanly.
+func codexCatalogBuildLines(catalogPath string) []string {
+	dir := filepath.Dir(catalogPath)
+	return []string{
+		fmt.Sprintf("mkdir -p %s", tmuxShellQuote(dir)),
+		fmt.Sprintf("python3 - %s <<'CICY_CODEX_CATALOG_PY' 2>/dev/null || true", tmuxShellQuote(catalogPath)),
+		codexCatalogBuildScript + "CICY_CODEX_CATALOG_PY",
+	}
+}
 
 func agentBootLines(agentType string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, shortID string, defaultModel string) []string {
 	aiCfg := loadRuntimeAIConfig()
@@ -2584,25 +2632,23 @@ EOF
 			providerNameOverride := tmuxShellQuote(`model_providers.custom.name="cicy-local"`)
 			baseURLOverride := tmuxShellQuote(`model_providers.custom.base_url="` + baseURL + `"`)
 			modelArg := tmuxShellQuote(model)
-			// Write a local model catalog so Codex has real metadata for the
-			// gateway's DeepSeek slugs (pro + flash) instead of warning and
-			// falling back to a conservative guess. Path is absolute (manager
-			// and panes share $HOME) so the -c value needs no shell expansion.
-			catalogDir := expandHome("~/.cicy")
-			catalogPath := filepath.Join(catalogDir, "codex-models.json")
+			// Build a local model catalog (cloned from Codex's own embedded
+			// metadata) so the gateway's DeepSeek slugs resolve cleanly. Stored
+			// under the persistent state dir ~/cicy-ai/db.
+			catalogPath := filepath.Join(expandHome("~/cicy-ai/db"), "codex-models.json")
 			catalogOverride := tmuxShellQuote(`model_catalog_json="` + catalogPath + `"`)
-			lines = append(lines,
-				fmt.Sprintf("mkdir -p %s", tmuxShellQuote(catalogDir)),
-				fmt.Sprintf("cat > %s <<'CICY_CODEX_MODELS_EOF'", tmuxShellQuote(catalogPath)),
-				codexModelCatalogJSON,
-				"CICY_CODEX_MODELS_EOF",
-			)
+			lines = append(lines, codexCatalogBuildLines(catalogPath)...)
 			lines = append(lines, "export OPENAI_API_KEY='cicy-local-gateway'", "clear")
+			bypass := ""
 			if allowAllActions {
-				lines = append(lines, fmt.Sprintf("codex -m %s -c %s -c %s -c %s -c %s --dangerously-bypass-approvals-and-sandbox", modelArg, providerOverride, providerNameOverride, baseURLOverride, catalogOverride))
-			} else {
-				lines = append(lines, fmt.Sprintf("codex -m %s -c %s -c %s -c %s -c %s", modelArg, providerOverride, providerNameOverride, baseURLOverride, catalogOverride))
+				bypass = " --dangerously-bypass-approvals-and-sandbox"
 			}
+			base := fmt.Sprintf("codex -m %s -c %s -c %s -c %s", modelArg, providerOverride, providerNameOverride, baseURLOverride)
+			// Only attach the catalog when its build succeeded (file present and
+			// non-empty); otherwise launch Codex without it so a failed catalog
+			// build never blocks startup.
+			lines = append(lines, fmt.Sprintf("if [ -s %s ]; then %s -c %s%s; else %s%s; fi",
+				tmuxShellQuote(catalogPath), base, catalogOverride, bypass, base, bypass))
 			return lines
 		}
 		// Official login path: drop local-gateway env so codex uses its own auth/config.
