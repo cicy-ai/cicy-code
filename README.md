@@ -323,7 +323,7 @@ pane 是核心运行单位，典型 ID 形态：
    - 来自 `api/mgr/paths.go`
    - `api/mgr/machines.go` 读写
 2. **skills CLI 默认文件**：`~/Private/cicy-node.json`
-   - `skills/cicy-code` 与 `skills/cicy-master` 默认值
+   - `skills/cicy-api` 与 `skills/cicy-master` 默认值
    - 可用 `CICY_NODES_FILE` 改写
 
 如果希望 skills 与后端同一份：
@@ -409,7 +409,7 @@ Docker 容器的 host home 现在挂到 `~/docker-homes/<container-name>`（默�
 4. 改 `skills/`（hosttools / SKILL.md）后 `cd skills && make build-local-binaries`
 5. 正式构建走 `./build.sh`
 6. 节点注册表管理走 `skills/cicy-master`
-7. 节点 API 调用走 `skills/cicy-code`
+7. 节点 API 调用走 `skills/cicy-api`(原 `skills/cicy-code`,5/30 重命名避免与 cicy-code 二进制撞名)
 
 ## 许可证
 

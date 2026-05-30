@@ -1,6 +1,11 @@
 #!/bin/bash
-# cicy-code - 分布式 cicy-code API CLI client
-# Usage: cicy-code [-n <node>] <command> [args]
+# cicy-api - thin REST client for the cicy-code server /api/* surface.
+#
+# Renamed from `cicy-code` in May 2026 to disambiguate from the same-name
+# Go binary on PATH (the cicy-code server CLI, npm package `cicy-code`).
+# Same node-resolution + curl wrapping, just a non-overloaded name.
+#
+# Usage: cicy-api [-n <node>] <command> [args]
 set -euo pipefail
 
 NODES_FILE="${CICY_NODES_FILE:-$HOME/Private/cicy-node.json}"
@@ -73,7 +78,7 @@ PY
 }
 
 if [ -n "$NODE" ] || [ -f "$NODES_FILE" ]; then
-  _URL=$(_node_get url) || { echo "❌ 实例 '${NODE:-default}' 不存在，用 cicy-code instances 查看"; exit 1; }
+  _URL=$(_node_get url) || { echo "❌ 实例 '${NODE:-default}' 不存在，用 cicy-api instances 查看"; exit 1; }
   _TOKEN=$(_node_get token)
   API="${_URL}"
   TOKEN="${_TOKEN}"
@@ -396,8 +401,11 @@ case "$cmd" in
     get "/api/utils/file/exists?path=${1:?path required}"
     ;;
   help|*)
-    cat <<HELP
-Usage: cicy-code [-n <instance>] <command> [args]
+    # heredoc delimiter quoted ('HELP') so backticks in the body are NOT
+    # treated as command substitution — previously the `cicy-code` in the
+    # help text actually executed the same-name Go binary on PATH.
+    cat <<'HELP'
+Usage: cicy-api [-n <instance>] <command> [args]
 
 Generic API:
   api <METHOD> <path> [json]         通用 API 调用
