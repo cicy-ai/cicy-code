@@ -245,9 +245,6 @@ func sanitizeProviderDraft(raw map[string]any, existing map[string]any) (map[str
 		out["defaultModel"] = ""
 	}
 
-	if v, ok := getStr(raw, "statusLabel"); ok {
-		out["statusLabel"] = strings.TrimSpace(v)
-	}
 
 	if rawDM, ok := raw["defaultModels"]; ok {
 		dm := map[string]any{}
