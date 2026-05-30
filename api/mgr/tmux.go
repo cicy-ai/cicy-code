@@ -1737,12 +1737,12 @@ try:
         i += 1
     models = json.loads(data[start:end].decode("utf-8"))["models"]
     tpl = next((x for x in models if x.get("slug") == "gpt-5.5"), models[0])
-    def mk(slug, name, level):
+    def mk(slug, name, level, window):
         e = json.loads(json.dumps(tpl))
         e["slug"] = slug
         e["display_name"] = name
-        e["context_window"] = 131072
-        e["max_context_window"] = 131072
+        e["context_window"] = window
+        e["max_context_window"] = window
         e["input_modalities"] = ["text"]
         e["visibility"] = "list"
         e["default_reasoning_level"] = level
@@ -1752,8 +1752,8 @@ try:
         if "support_verbosity" in e: e["support_verbosity"] = False
         return e
     result = {"models": [
-        mk("deepseek-v4-pro", "DeepSeek V4 Pro", "medium"),
-        mk("deepseek-v4-flash", "DeepSeek V4 Flash", "low"),
+        mk("deepseek-v4-pro", "DeepSeek V4 Pro", "medium", 2097152),
+        mk("deepseek-v4-flash", "DeepSeek V4 Flash", "low", 131072),
     ]}
     tmp = out + ".tmp"
     open(tmp, "w").write(json.dumps(result))
