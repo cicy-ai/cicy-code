@@ -63,22 +63,28 @@ func TestAgentBootLinesCodexModelCatalog(t *testing.T) {
 	lines := agentBootLines("codex", true, false, true, "w-10001", "deepseek-v4-pro")
 	script := strings.Join(lines, "\n")
 
-	// Catalog file must be written and referenced so Codex stops warning
-	// "Model metadata for deepseek-v4-* not found".
-	if !strings.Contains(script, "codex-models.json") {
-		t.Error("missing codex model catalog file write")
+	// Catalog is generated at boot (cloned from Codex's own embedded metadata)
+	// and written under the persistent state dir, then referenced so Codex
+	// stops warning "Model metadata for deepseek-v4-* not found".
+	if !strings.Contains(script, "cicy-ai/db/codex-models.json") {
+		t.Error("catalog should be written under ~/cicy-ai/db")
 	}
 	if !strings.Contains(script, `model_catalog_json="`) {
 		t.Error("missing -c model_catalog_json override")
 	}
-	// Both gateway slugs (pro + flash) must be present in the catalog body.
+	// The generator must define both gateway slugs (pro + flash).
 	for _, slug := range []string{"deepseek-v4-pro", "deepseek-v4-flash"} {
-		if !strings.Contains(script, `"slug": "`+slug+`"`) {
-			t.Errorf("catalog missing entry for %s", slug)
+		if !strings.Contains(script, slug) {
+			t.Errorf("catalog generator missing entry for %s", slug)
 		}
 	}
+	// A failed catalog build must not block startup — launch is guarded by a
+	// non-empty-file check with a plain-codex fallback.
+	if !strings.Contains(script, "if [ -s ") || !strings.Contains(script, "; else codex -m ") {
+		t.Error("codex launch should fall back to no-catalog when build fails")
+	}
 
-	// Non-gateway codex must NOT write the catalog (it uses official config).
+	// Non-gateway codex must NOT inject the catalog (it uses official config).
 	off := strings.Join(agentBootLines("codex", true, false, false, "w-10001", ""), "\n")
 	if strings.Contains(off, "model_catalog_json") {
 		t.Error("non-gateway codex should not inject a model catalog")
