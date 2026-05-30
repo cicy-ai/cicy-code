@@ -3,7 +3,7 @@ const LS_API_BASE = 'cicy_api_base';
 const SS_HOST_HOME = 'cicy_host_home';
 const DEFAULT_CICY_ROOT = '~/cicy-ai';
 const DEFAULT_HOST_HOME = import.meta.env.VITE_HOST_HOME || DEFAULT_CICY_ROOT;
-const APP_VERSION = '2.1.19';
+const APP_VERSION = '2.1.20';
 
 function inferApiBase(): string {
   const envBase = import.meta.env.VITE_API_BASE || '';
