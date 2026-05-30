@@ -529,17 +529,14 @@ func handleFsWrite(w http.ResponseWriter, r *http.Request) {
 		fsErr(w, errFileTooLarge)
 		return
 	}
-	workspace, err := agentWorkspace(r.URL.Query().Get("agent_id"))
+	// Resolve against the requested root (workspace/projects/skills/home) so
+	// files under any root are writable, mirroring the read path.
+	abs, base, err := fsResolveRoot(r, req.Path)
 	if err != nil {
 		fsErr(w, err)
 		return
 	}
-	abs, err := resolveSafePath(workspace, req.Path)
-	if err != nil {
-		fsErr(w, err)
-		return
-	}
-	if isProtectedWritePath(workspace, abs) {
+	if isProtectedWritePath(base, abs) {
 		fsErr(w, errPathWriteForbidden)
 		return
 	}

@@ -412,7 +412,7 @@ export default function CodeEditor({
     if (!dirty && !conflict) return;
     setSaving(true);
     try {
-      const res = await fsApi.write(agentId, path, buf.text, buf.mtime);
+      const res = await fsApi.write(agentId, path, buf.text, buf.mtime, { root });
       setBuf((prev) => ({
         ...prev,
         savedText: prev.text,
@@ -440,12 +440,12 @@ export default function CodeEditor({
     } finally {
       setSaving(false);
     }
-  }, [agentId, path, buf.text, buf.mtime, buf.mime, buf.encoding, buf.loading, dirty, conflict, saving]);
+  }, [agentId, path, root, buf.text, buf.mtime, buf.mime, buf.encoding, buf.loading, dirty, conflict, saving]);
 
   const handleForceSave = useCallback(async () => {
     setSaving(true);
     try {
-      const res = await fsApi.write(agentId, path, buf.text);
+      const res = await fsApi.write(agentId, path, buf.text, undefined, { root });
       setBuf((prev) => ({
         ...prev,
         savedText: prev.text,
@@ -467,7 +467,7 @@ export default function CodeEditor({
     } finally {
       setSaving(false);
     }
-  }, [agentId, path, buf.text, buf.mime]);
+  }, [agentId, path, root, buf.text, buf.mime]);
 
   const handleReload = useCallback(async () => {
     try {
@@ -711,9 +711,10 @@ export default function CodeEditor({
   }
 
   const heavy = buf.mode === 'text_large';
-  // Non-workspace roots (projects/skills/home) are read-only at the backend.
-  // Mirror that in the editor so users don't type changes that can never save.
-  const readOnly = heavy || root !== 'workspace';
+  // Editable across all roots (workspace/projects/skills/home); the backend
+  // resolves writes per-root. Only oversized files stay read-only (the editor
+  // can't safely hold them).
+  const readOnly = heavy;
   return (
     <div
       data-id={rootDataId}

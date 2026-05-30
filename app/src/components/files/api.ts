@@ -250,12 +250,13 @@ export const fsApi = {
     path: string,
     content: string,
     expectedMtime?: number,
+    opts: { root?: string } = {},
   ): Promise<FsWriteResult> => {
     try {
       const resp = await http.post(
         '/api/fs/write',
         { path, content, expected_mtime: expectedMtime ?? 0 },
-        { params: { agent_id: agentId } },
+        { params: { agent_id: agentId, root: opts.root } },
       );
       return resp.data as FsWriteResult;
     } catch (e) {
