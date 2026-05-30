@@ -89,6 +89,8 @@
   "mappingAllOpus": "All Opus models",
   "mappingAllSonnet": "All Sonnet models",
   "mappingAllHaiku": "All Haiku models",
+  "fieldStatusLabel": "Status line label",
+  "fieldStatusLabelHelp": "Shown in claude's status line behind the local gateway instead of the real upstream model name. Leave empty to show the actual model.",
   "testEachModel": "Test each model",
   "fieldModelMapping": "Model mapping",
   "fieldModelMappingHelp": "One per line: from = to",

@@ -24,6 +24,7 @@ interface ProviderRecord {
   defaultModels?: Record<string, string>;
   models?: string[];
   modelMapping?: Record<string, string>;
+  statusLabel?: string;
 }
 
 interface ProvidersResponse {
@@ -67,7 +68,7 @@ function errText(err: any): string {
   return String(err?.response?.data?.detail || err?.message || err || i18n.t('errorUnknown', { ns: 'provider' }));
 }
 function emptyDraft(): ProviderRecord {
-  return { key: '', name: '', url: '', apiKey: '', protocol: 'openai', defaultModel: '', defaultModels: {}, models: [], modelMapping: {} };
+  return { key: '', name: '', url: '', apiKey: '', protocol: 'openai', defaultModel: '', defaultModels: {}, models: [], modelMapping: {}, statusLabel: '' };
 }
 function proto(p?: ProviderRecord | string | null): string {
   if (!p) return '';
@@ -89,9 +90,10 @@ type MappingRow = { from: string; to: string };
 function rowsToMapping(rows: MappingRow[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const r of rows) {
+    const from = (r.from || '').trim();
     const to = (r.to || '').trim();
-    if (!to) continue; // a rule with no target is incomplete — drop it
-    out[(r.from || '').trim()] = to;
+    if (!from || !to) continue; // incomplete rule — drop it (matches backend)
+    out[from] = to;
   }
   return out;
 }
@@ -109,6 +111,7 @@ function editorSnapshot(d: ProviderRecord, modelsText: string, mappingRows: Mapp
     apiKey: d.apiKey || '',
     protocol: proto(d) || 'openai',
     defaultModel: (d.defaultModel || '').trim(),
+    statusLabel: (d.statusLabel || '').trim(),
     defaultModels: compactDM(d.defaultModels),
     models: modelsText.split('\n').map((s) => s.trim()).filter(Boolean),
     modelMapping: rowsToMapping(mappingRows),
@@ -313,7 +316,7 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
     setShowApiKey(false);
     const next: ProviderRecord = p ? {
       key: p.key, name: p.name || '', url: p.url || '', apiKey: p.apiKey || '',
-      protocol: proto(p) || 'openai', defaultModel: p.defaultModel || '',
+      protocol: proto(p) || 'openai', defaultModel: p.defaultModel || '', statusLabel: p.statusLabel || '',
       defaultModels: { ...(p.defaultModels || {}) }, models: [...(p.models || [])], modelMapping: { ...(p.modelMapping || {}) },
     } : emptyDraft();
     const mt = (next.models || []).join('\n');
@@ -380,6 +383,7 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
     apiKey: (draft.apiKey || '').trim(),
     protocol: proto(draft) || 'openai',
     defaultModel: (draft.defaultModel || '').trim(),
+    statusLabel: (draft.statusLabel || '').trim(),
     defaultModels: compactDM(draft.defaultModels),
     models: modelsText.split('\n').map((s) => s.trim()).filter(Boolean),
     modelMapping: rowsToMapping(mappingRows),
@@ -671,7 +675,6 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
                   // Friendly "from" suggestions: catch-all, family prefixes, common
                   // Anthropic/OpenAI model ids, plus this provider's own models.
                   const fromSuggest: SelectOption[] = [
-                    { value: '', label: t('mappingCatchAll') },
                     { value: 'claude-opus*', label: t('mappingAllOpus') },
                     { value: 'claude-sonnet*', label: t('mappingAllSonnet') },
                     { value: 'claude-haiku*', label: t('mappingAllHaiku') },
@@ -710,6 +713,9 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
                     </div>
                   );
                 })()}
+              </Field>
+              <Field label={t('fieldStatusLabel')} help={t('fieldStatusLabelHelp')}>
+                <input value={draft.statusLabel || ''} onChange={(e) => patchDraft({ statusLabel: e.target.value })} className={INPUT} placeholder="Opus 4.8 (1M context)" />
               </Field>
             </section>
 
