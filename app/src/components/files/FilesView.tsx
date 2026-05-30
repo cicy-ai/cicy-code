@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, GitCompare, FileText, Files, FileSearch, Search } from 'lucide-react';
+import { X, GitCompare, FileText, Files, FileSearch, Search, PanelLeftOpen } from 'lucide-react';
 import FileExplorer from './FileExplorer';
 import CodeEditor from './CodeEditor';
 import DiffView from './DiffView';
@@ -140,6 +140,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
   const [jumps, setJumps] = useState<Record<string, JumpRequest>>({});
   const [quickOpen, setQuickOpen] = useState(false);
   const [search, setSearch] = useState(false);
+  const [explorerCollapsed, setExplorerCollapsed] = useState(false);
   const [reloadKeys, setReloadKeys] = useState<Record<string, number>>({});
   const [explorerNonce, setExplorerNonce] = useState<Record<string, number>>({});
   const watchRef = useRef<FsWatch | null>(null);
@@ -560,8 +561,9 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
 
   return (
     <div data-id="files-view" className={`flex h-full ${className || ''} relative`}>
-      <div data-id="files-view-explorer" className="w-64 shrink-0 border-r border-zinc-800 bg-[#0A0A0A]">
+      <div data-id="files-view-explorer" className={`${explorerCollapsed ? 'hidden' : 'w-64'} shrink-0 border-r border-zinc-800 bg-[#0A0A0A]`}>
         <FileExplorer
+          onCollapse={() => setExplorerCollapsed(true)}
           agentId={agentId}
           workspaceFolder={workspaceFolder}
           activePath={activePath}
@@ -593,16 +595,30 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
       />
 
       <div data-id="files-view-main" className="flex-1 min-w-0 flex flex-col">
-        <TabBar
-          tabs={tabs}
-          activeId={activeId}
-          dirty={dirty}
-          onSelect={setActiveId}
-          onClose={closeTab}
-          onCloseOthers={closeOtherTabs}
-          onCloseRight={closeTabsToRight}
-          onCloseAll={closeAllTabs}
-        />
+        <div className="flex items-stretch min-w-0">
+          {explorerCollapsed && (
+            <button
+              data-id="files-view-explorer-expand"
+              className="shrink-0 flex items-center justify-center px-2 border-r border-zinc-800 bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              onClick={() => setExplorerCollapsed(false)}
+              title="显示文件树"
+            >
+              <PanelLeftOpen className="w-4 h-4" />
+            </button>
+          )}
+          <div className="flex-1 min-w-0">
+            <TabBar
+              tabs={tabs}
+              activeId={activeId}
+              dirty={dirty}
+              onSelect={setActiveId}
+              onClose={closeTab}
+              onCloseOthers={closeOtherTabs}
+              onCloseRight={closeTabsToRight}
+              onCloseAll={closeAllTabs}
+            />
+          </div>
+        </div>
         <div data-id="files-view-body" className="flex-1 min-h-0 relative bg-[#0A0A0A]">
           {tabs.length === 0 ? (
             <div data-id="files-view-empty" className="flex items-center justify-center h-full">
