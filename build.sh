@@ -146,10 +146,12 @@ configure_cdn_env() {
   fi
 
   export CICY_APP_CDN_PREFIX="${cos_base}/app/v${app_version}"
+  export CICY_APP_VITE_BASE="https://cicy-ai.com/cos-assets/v${app_version}"
   export CICY_TTYD_CDN_PREFIX="${cos_base}/ttyd/v${ttyd_version}"
 
   echo "🌐 CDN=1"
   echo "   APP_CDN_PREFIX=${CICY_APP_CDN_PREFIX}"
+  echo "   APP_VITE_BASE=${CICY_APP_VITE_BASE}"
   echo "   TTYD_CDN_PREFIX=${CICY_TTYD_CDN_PREFIX}"
 }
 

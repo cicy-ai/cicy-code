@@ -7,9 +7,10 @@ export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   const isDev = mode === 'development';
   const appCdnPrefix = (process.env.CICY_APP_CDN_PREFIX || '').replace(/\/+$/, '');
+  const viteBase = (process.env.CICY_APP_VITE_BASE || appCdnPrefix || '').replace(/\/+$/, '');
   const defaultCicyRoot = '~/cicy-ai';
   return {
-    base: isDev ? '/' : (appCdnPrefix ? `${appCdnPrefix}/` : '/'),
+    base: isDev ? '/' : (viteBase ? `${viteBase}/` : '/'),
     plugins: [react(), tailwindcss()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
