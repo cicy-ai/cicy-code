@@ -280,7 +280,9 @@ func sanitizeProviderDraft(raw map[string]any, existing map[string]any) (map[str
 				toStr, _ := to.(string)
 				from = strings.TrimSpace(from)
 				toStr = strings.TrimSpace(toStr)
-				if from == "" || toStr == "" {
+				// Empty "from" is the valid catch-all key (applyModelMapping
+				// honors it); only a missing target drops the rule.
+				if toStr == "" {
 					continue
 				}
 				mapping[from] = toStr

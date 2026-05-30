@@ -80,7 +80,29 @@ function resolveModelFor(p: ProviderRecord | null | undefined, agentType: string
 function compactDM(dm?: Record<string, string>): Record<string, string> {
   return Object.fromEntries(Object.entries(dm || {}).filter(([, v]) => String(v || '').trim()).map(([k, v]) => [k, String(v).trim()]));
 }
-function editorSnapshot(d: ProviderRecord, modelsText: string): string {
+// Model mapping is edited as free text, one "from = to" rule per line. "from"
+// may end with "*" for a prefix match (e.g. "claude-sonnet* = claude-opus-4-7").
+// An empty "from" ("= deepseek-v4-pro") is the catch-all. Parses to the
+// Record<string,string> the backend's applyModelMapping consumes.
+function parseModelMapping(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of text.split('\n')) {
+    const i = line.indexOf('=');
+    if (i < 0) continue;
+    const from = line.slice(0, i).trim();
+    const to = line.slice(i + 1).trim();
+    if (!to) continue;
+    out[from] = to;
+  }
+  return out;
+}
+
+function mappingToText(map?: Record<string, string>): string {
+  if (!map) return '';
+  return Object.entries(map).map(([k, v]) => `${k} = ${v}`).join('\n');
+}
+
+function editorSnapshot(d: ProviderRecord, modelsText: string, mappingText: string): string {
   return JSON.stringify({
     key: d.key.trim(),
     name: (d.name || '').trim(),
@@ -90,7 +112,7 @@ function editorSnapshot(d: ProviderRecord, modelsText: string): string {
     defaultModel: (d.defaultModel || '').trim(),
     defaultModels: compactDM(d.defaultModels),
     models: modelsText.split('\n').map((s) => s.trim()).filter(Boolean),
-    modelMapping: d.modelMapping || {},
+    modelMapping: parseModelMapping(mappingText),
   });
 }
 
@@ -269,6 +291,7 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
   const [isNew, setIsNew] = useState(false);
   const [draft, setDraft] = useState<ProviderRecord>(emptyDraft());
   const [modelsText, setModelsText] = useState('');
+  const [mappingText, setMappingText] = useState('');
   const [baseline, setBaseline] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -295,7 +318,8 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
       defaultModels: { ...(p.defaultModels || {}) }, models: [...(p.models || [])], modelMapping: { ...(p.modelMapping || {}) },
     } : emptyDraft();
     const mt = (next.models || []).join('\n');
-    setDraft(next); setModelsText(mt); setBaseline(editorSnapshot(next, mt));
+    const mp = mappingToText(next.modelMapping);
+    setDraft(next); setModelsText(mt); setMappingText(mp); setBaseline(editorSnapshot(next, mt, mp));
   }, []);
 
   const load = useCallback(async (preserve?: string): Promise<ProvidersResponse | null> => {
@@ -335,7 +359,7 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
   }, [isNew, selectedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- dirty ---- */
-  const snapshot = useMemo(() => editorSnapshot(draft, modelsText), [draft, modelsText]);
+  const snapshot = useMemo(() => editorSnapshot(draft, modelsText, mappingText), [draft, modelsText, mappingText]);
   const dirty = snapshot !== baseline;
   const canSave = (isNew || dirty) && !!draft.key.trim() && !!(draft.url || '').trim() && (proto(draft) === 'openai' || proto(draft) === 'anthropic');
 
@@ -359,8 +383,8 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
     defaultModel: (draft.defaultModel || '').trim(),
     defaultModels: compactDM(draft.defaultModels),
     models: modelsText.split('\n').map((s) => s.trim()).filter(Boolean),
-    modelMapping: draft.modelMapping || {},
-  }), [draft, modelsText]);
+    modelMapping: parseModelMapping(mappingText),
+  }), [draft, modelsText, mappingText]);
 
   const save = useCallback(async () => {
     const payload = buildPayload();
@@ -641,6 +665,9 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
               })()}
               <Field label={t('fieldAvailableModels')} help={t('fieldAvailableModelsHelp')}>
                 <textarea value={modelsText} onChange={(e) => setModelsText(e.target.value)} rows={4} className={cn(INPUT, 'h-auto resize-y py-2 font-mono leading-relaxed')} placeholder={'gpt-5.5\ngpt-5.4'} />
+              </Field>
+              <Field label={t('fieldModelMapping')} help={t('fieldModelMappingHelp')}>
+                <textarea value={mappingText} onChange={(e) => setMappingText(e.target.value)} rows={3} className={cn(INPUT, 'h-auto resize-y py-2 font-mono leading-relaxed')} placeholder={'claude-opus-4-8 = claude-opus-4-7\nclaude-sonnet* = claude-opus-4-7'} />
               </Field>
             </section>
 

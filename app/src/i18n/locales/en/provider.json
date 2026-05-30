@@ -78,6 +78,8 @@
   "otherAgentDefaults": "Other agent default models (kept): {{list}}",
   "fieldAvailableModels": "Available models",
   "fieldAvailableModelsHelp": "One per line, display only",
+  "fieldModelMapping": "Model mapping",
+  "fieldModelMappingHelp": "One rule per line: from = to. Rewrites the requested model before it reaches the upstream relay (e.g. a model the relay has no channel for). 'from' may end with * for a prefix match; empty 'from' is the catch-all. Leave empty for no rewriting.",
   "testEachModel": "Test each model",
   "fieldModelMapping": "Model mapping",
   "fieldModelMappingHelp": "One per line: from = to",
