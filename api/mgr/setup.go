@@ -1376,6 +1376,97 @@ func startCicyMihomoIfNeeded() {
 	log.Printf("[startup] cicy-mihomo failed to come up after 3 attempts (proxy-using workers may not connect)")
 }
 
+// ensureMITMConfig seeds ~/cicy-ai/mitm/config.json with {"enabled": true} on
+// first boot, so non-gateway agents (codex/opencode/claude official login) are
+// routed through the local MITM and audited by default. If the file already
+// exists it is left untouched — the operator's explicit config always wins,
+// including a deliberate {"enabled": false}.
+//
+// Must run BEFORE startMITM() (main.go) so the very first boot already brings
+// the MITM up; that's why it's invoked there rather than from checkEnv().
+// Path matches mitm.DefaultConfigPath() (~/cicy-ai/mitm/config.json).
+func ensureMITMConfig() {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		log.Printf("[mitm] resolve home failed (skip seed): %v", err)
+		return
+	}
+	dir := filepath.Join(home, "cicy-ai", "mitm")
+	path := filepath.Join(dir, "config.json")
+	if _, err := os.Stat(path); err == nil {
+		return // already configured — never clobber
+	} else if !os.IsNotExist(err) {
+		log.Printf("[mitm] stat config failed (skip seed): %v", err)
+		return
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("[mitm] mkdir config dir failed (skip seed): %v", err)
+		return
+	}
+	if err := os.WriteFile(path, []byte("{\"enabled\": true}\n"), 0o644); err != nil {
+		log.Printf("[mitm] seed config write failed: %v", err)
+		return
+	}
+	log.Printf("[mitm] seeded default config (enabled) at %s", path)
+}
+
+// ensureMITMCAInSystemTrust appends the MITM CA to the OS system trust store on
+// Linux so NON-node agents trust the intercepted TLS. node agents (opencode /
+// claude via undici) already trust it via NODE_EXTRA_CA_CERTS, but codex and
+// kiro-cli do their real HTTP from a Rust binary that ignores that env — on
+// Linux those read /etc/ssl/certs, which update-ca-certificates populates.
+//
+// Why the system store and not SSL_CERT_FILE in boot: update-ca-certificates
+// APPENDS our CA to the existing bundle, so real roots (needed for passthrough
+// hosts and npm/etc.) keep working. Pointing SSL_CERT_FILE at the bare MITM CA
+// would REPLACE the bundle and break TLS to every non-intercepted host.
+//
+// Idempotent (skips when the installed copy already matches), best-effort (logs
+// and returns on any failure — never blocks boot), Linux-only. Agents run inside
+// the Linux runtime container even when the host is macOS, so the container's
+// trust store is what matters; a native-macOS install still needs a manual
+// `cicy-code mitm install-ca` (Keychain requires interactive/sudo-GUI auth).
+// Must run AFTER startMITM() (main.go), which generates the CA on first start.
+func ensureMITMCAInSystemTrust() {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return
+	}
+	src := filepath.Join(home, "cicy-ai", "db", "mitm-ca.crt")
+	srcBytes, err := os.ReadFile(src)
+	if err != nil {
+		return // MITM disabled / CA not generated — nothing to install
+	}
+	const dst = "/usr/local/share/ca-certificates/cicy-mitm.crt"
+	if cur, err := os.ReadFile(dst); err == nil && bytes.Equal(cur, srcBytes) {
+		return // already installed this exact CA
+	}
+	// Install needs root; fall back to passwordless sudo when unprivileged.
+	runRoot := func(name string, args ...string) error {
+		if os.Geteuid() != 0 {
+			args = append([]string{"-n", name}, args...)
+			name = "sudo"
+		}
+		out, err := exec.Command(name, args...).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%s: %v: %s", name, err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	if err := runRoot("cp", src, dst); err != nil {
+		log.Printf("[mitm] system-trust install skipped (need root/sudo): %v", err)
+		return
+	}
+	if err := runRoot("update-ca-certificates"); err != nil {
+		log.Printf("[mitm] system-trust install: update-ca-certificates failed: %v", err)
+		return
+	}
+	log.Printf("[mitm] installed MITM CA into system trust store (%s) — codex/kiro Rust TLS now trusts it", dst)
+}
+
 func setupAIConfigs() {
 	cfg := loadRuntimeAIConfig()
 	apiKey := cfg.APIKey

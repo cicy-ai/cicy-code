@@ -188,6 +188,12 @@ func (c *Config) applyDefaults() {
 			"api.openai.com",
 			"api.deepseek.com",
 			"generativelanguage.googleapis.com",
+			// opencode official login (Zen) routes model turns through
+			// opencode.ai; without it the host is seen but passthrough'd, so
+			// non-gateway opencode never lands in current.json/reply.json.
+			// Exact-match only (see IsWhitelisted) — host observed as
+			// "opencode.ai:443" in the MITM upstream logs.
+			"opencode.ai",
 		}
 	}
 	if c.Node.MaxHops == 0 {
