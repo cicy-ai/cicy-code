@@ -1682,6 +1682,51 @@ func resolveClaudeStartupModel(defaultModel string, aiCfg runtimeAIConfig, short
 	return "claude-opus-4-7"
 }
 
+// codexModelCatalogJSON is a local model catalog (codex `model_catalog_json`)
+// that teaches Codex about the gateway's DeepSeek slugs. Without it Codex warns
+// "Model metadata for `deepseek-v4-*` not found. Defaulting to fallback
+// metadata; this can degrade performance" and falls back to a conservative
+// guess (wrong context window, parallel tool calls off). Both pro and flash are
+// listed so either gateway default resolves cleanly. Schema mirrors a single
+// entry of codex-rs/models-manager/models.json. Context window 131072 (128K)
+// matches DeepSeek V4. Bump here if the gateway changes the served window.
+const codexModelCatalogJSON = `{
+  "models": [
+    {
+      "slug": "deepseek-v4-pro",
+      "display_name": "DeepSeek V4 Pro",
+      "context_window": 131072,
+      "max_context_window": 131072,
+      "input_modalities": ["text"],
+      "supports_parallel_tool_calls": true,
+      "apply_patch_tool_type": "freeform",
+      "default_reasoning_level": "medium",
+      "supported_reasoning_levels": [
+        {"effort": "medium", "description": "Balances speed and reasoning depth"},
+        {"effort": "high", "description": "Greater reasoning depth for complex problems"}
+      ],
+      "supported_in_api": true,
+      "visibility": "list"
+    },
+    {
+      "slug": "deepseek-v4-flash",
+      "display_name": "DeepSeek V4 Flash",
+      "context_window": 131072,
+      "max_context_window": 131072,
+      "input_modalities": ["text"],
+      "supports_parallel_tool_calls": true,
+      "apply_patch_tool_type": "freeform",
+      "default_reasoning_level": "low",
+      "supported_reasoning_levels": [
+        {"effort": "low", "description": "Fast responses with lighter reasoning"},
+        {"effort": "medium", "description": "Balances speed and reasoning depth"}
+      ],
+      "supported_in_api": true,
+      "visibility": "list"
+    }
+  ]
+}`
+
 func agentBootLines(agentType string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, shortID string, defaultModel string) []string {
 	aiCfg := loadRuntimeAIConfig()
 	switch normalizeAgentType(agentType) {
@@ -2539,11 +2584,24 @@ EOF
 			providerNameOverride := tmuxShellQuote(`model_providers.custom.name="cicy-local"`)
 			baseURLOverride := tmuxShellQuote(`model_providers.custom.base_url="` + baseURL + `"`)
 			modelArg := tmuxShellQuote(model)
+			// Write a local model catalog so Codex has real metadata for the
+			// gateway's DeepSeek slugs (pro + flash) instead of warning and
+			// falling back to a conservative guess. Path is absolute (manager
+			// and panes share $HOME) so the -c value needs no shell expansion.
+			catalogDir := expandHome("~/.cicy")
+			catalogPath := filepath.Join(catalogDir, "codex-models.json")
+			catalogOverride := tmuxShellQuote(`model_catalog_json="` + catalogPath + `"`)
+			lines = append(lines,
+				fmt.Sprintf("mkdir -p %s", tmuxShellQuote(catalogDir)),
+				fmt.Sprintf("cat > %s <<'CICY_CODEX_MODELS_EOF'", tmuxShellQuote(catalogPath)),
+				codexModelCatalogJSON,
+				"CICY_CODEX_MODELS_EOF",
+			)
 			lines = append(lines, "export OPENAI_API_KEY='cicy-local-gateway'", "clear")
 			if allowAllActions {
-				lines = append(lines, fmt.Sprintf("codex -m %s -c %s -c %s -c %s --dangerously-bypass-approvals-and-sandbox", modelArg, providerOverride, providerNameOverride, baseURLOverride))
+				lines = append(lines, fmt.Sprintf("codex -m %s -c %s -c %s -c %s -c %s --dangerously-bypass-approvals-and-sandbox", modelArg, providerOverride, providerNameOverride, baseURLOverride, catalogOverride))
 			} else {
-				lines = append(lines, fmt.Sprintf("codex -m %s -c %s -c %s -c %s", modelArg, providerOverride, providerNameOverride, baseURLOverride))
+				lines = append(lines, fmt.Sprintf("codex -m %s -c %s -c %s -c %s -c %s", modelArg, providerOverride, providerNameOverride, baseURLOverride, catalogOverride))
 			}
 			return lines
 		}

@@ -59,6 +59,32 @@ func TestAgentBootLinesCodexAllowAllActions(t *testing.T) {
 	}
 }
 
+func TestAgentBootLinesCodexModelCatalog(t *testing.T) {
+	lines := agentBootLines("codex", true, false, true, "w-10001", "deepseek-v4-pro")
+	script := strings.Join(lines, "\n")
+
+	// Catalog file must be written and referenced so Codex stops warning
+	// "Model metadata for deepseek-v4-* not found".
+	if !strings.Contains(script, "codex-models.json") {
+		t.Error("missing codex model catalog file write")
+	}
+	if !strings.Contains(script, `model_catalog_json="`) {
+		t.Error("missing -c model_catalog_json override")
+	}
+	// Both gateway slugs (pro + flash) must be present in the catalog body.
+	for _, slug := range []string{"deepseek-v4-pro", "deepseek-v4-flash"} {
+		if !strings.Contains(script, `"slug": "`+slug+`"`) {
+			t.Errorf("catalog missing entry for %s", slug)
+		}
+	}
+
+	// Non-gateway codex must NOT write the catalog (it uses official config).
+	off := strings.Join(agentBootLines("codex", true, false, false, "w-10001", ""), "\n")
+	if strings.Contains(off, "model_catalog_json") {
+		t.Error("non-gateway codex should not inject a model catalog")
+	}
+}
+
 func TestAgentBootLinesCodexRestrictedActions(t *testing.T) {
 	lines := agentBootLines("codex", false, false, true, "w-10001", "gpt-5.5")
 
