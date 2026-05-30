@@ -38,7 +38,7 @@ var (
 	desktopCmd    *exec.Cmd
 )
 
-const version = "2.1.41"
+const version = "2.1.42"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -131,7 +131,9 @@ Options:
 	if err := audit.Init(); err != nil {
 		log.Printf("[audit] init failed (audit disabled): %v", err)
 	}
+	ensureMITMConfig() // seed ~/cicy-ai/mitm/config.json (enabled) before startMITM reads it
 	startMITM()
+	ensureMITMCAInSystemTrust() // trust the (now-generated) MITM CA for codex/kiro Rust TLS
 	startAutonomy()
 
 	containerMode = isContainerRuntime()
