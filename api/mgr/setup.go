@@ -76,11 +76,10 @@ func extendPATH() {
 		"/opt/homebrew/bin",
 		"/usr/local/bin",
 		"/usr/bin",
-		// ~/.cicy-ai/bin holds our self-downloaded static binaries
-		// (ffmpeg) so we don't depend on brew/apt being available or
-		// configured. ensureFfmpegAsync populates this on first launch.
-		filepath.Join(home, ".cicy-ai", "bin"),
 		filepath.Join(home, ".npm-global", "bin"),
+		// ~/.local/bin holds our self-downloaded static binaries (ffmpeg,
+		// node, mihomo) so we don't depend on brew/apt being available or
+		// configured. ensureFfmpegAsync populates ffmpeg on first launch.
 		filepath.Join(home, ".local", "bin"),
 		filepath.Join(home, ".opencode", "bin"),
 	}
@@ -930,7 +929,7 @@ func ensureFfmpegAsync() {
 	}
 	// Try the static-binary download path first. Works without brew/apt
 	// or any system package manager — pure curl + extract into
-	// ~/.cicy-ai/bin/ffmpeg (already on PATH via extendPATH). Falls back
+	// ~/.local/bin/ffmpeg (already on PATH via extendPATH). Falls back
 	// to brew/apt only if download fails (e.g. mirrors all unreachable).
 	if err := installStaticFfmpeg(); err == nil {
 		log.Printf("[startup] ffmpeg installed (static binary)")
@@ -957,7 +956,7 @@ func ensureFfmpegAsync() {
 }
 
 // installStaticFfmpeg downloads a prebuilt ffmpeg binary into
-// $HOME/.cicy-ai/bin/ffmpeg. The destination is on PATH via
+// $HOME/.local/bin/ffmpeg. The destination is on PATH via
 // extendPATH, so `exec.LookPath("ffmpeg")` resolves to it immediately
 // after this returns. Cross-platform: works the same on Linux, macOS,
 // and inside WSL Ubuntu — no brew, no apt, no sudo.
@@ -979,7 +978,7 @@ func installStaticFfmpeg() error {
 	if err != nil {
 		return fmt.Errorf("user-home: %w", err)
 	}
-	binDir := filepath.Join(home, ".cicy-ai", "bin")
+	binDir := filepath.Join(home, ".local", "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		return fmt.Errorf("mkdir bin: %w", err)
 	}
@@ -1114,7 +1113,7 @@ func downloadAndExtractFfmpeg(url, tmpDir, dst string) error {
 	if err := os.Chmod(tmpBin, 0755); err != nil {
 		return fmt.Errorf("chmod: %w", err)
 	}
-	// Atomic rename within the same filesystem (~/.cicy-ai/bin is on
+	// Atomic rename within the same filesystem (~/.local/bin is on
 	// the user's home FS, same as tmpDir which we put under /tmp...
 	// wait, that crosses /tmp → /home which may be different mounts).
 	// Use os.Rename and fall back to copy-then-remove if it fails with
