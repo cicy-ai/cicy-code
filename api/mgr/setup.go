@@ -1410,27 +1410,29 @@ func ensureMITMConfig() {
 	log.Printf("[mitm] seeded default config (enabled) at %s", path)
 }
 
-// ensureMITMCAInSystemTrust installs the MITM CA into the OS system trust store
-// so NON-node agents trust the intercepted TLS. node agents (opencode / claude
-// via undici) already trust it via NODE_EXTRA_CA_CERTS, but codex and kiro-cli
-// do their real HTTP from a Rust binary that ignores that env — those read the
-// platform trust store (Linux: /etc/ssl/certs; macOS: Keychain).
+// ensureMITMCAInSystemTrust installs the MITM CA into the LINUX system trust
+// store so NON-node agents trust the intercepted TLS. node agents (opencode /
+// claude via undici) already trust it via NODE_EXTRA_CA_CERTS, but codex and
+// kiro-cli do their real HTTP from a Rust binary that ignores that env and reads
+// /etc/ssl/certs instead, which update-ca-certificates populates.
 //
-// Why the system store and not SSL_CERT_FILE in boot: the OS installers APPEND
-// our CA to the existing bundle, so real roots (needed for passthrough hosts and
-// npm/etc.) keep working. Pointing SSL_CERT_FILE at the bare MITM CA would
-// REPLACE the bundle and break TLS to every non-intercepted host.
+// Linux-only on purpose. macOS root-CA trust calls SecTrustSettingsSetTrustSettings,
+// which REQUIRES an interactive GUI authorization even as root — a detached
+// daemon can't do it silently, and a half-done attempt only leaves an untrusted
+// cert in the keychain. So native-macOS users install manually via the audit
+// dashboard's "install CA" card (downloads /ca.pem = this node's MITM CA and
+// shows `cicy-code mitm install-ca`). The common docker-on-macOS deployment is
+// unaffected — agents there run in the Linux container and hit this path.
+//
+// Why the system store and not SSL_CERT_FILE in boot: update-ca-certificates
+// APPENDS our CA to the bundle, so real roots (passthrough hosts, npm, etc.)
+// keep working; pointing SSL_CERT_FILE at the bare MITM CA would REPLACE the
+// bundle and break TLS to every non-intercepted host.
 //
 // Idempotent, best-effort (logs and returns on any failure — never blocks boot).
-// Linux is fully automatic. macOS needs root to touch the System keychain; with
-// passwordless sudo it's silent, otherwise it logs the one-time manual command
-// (Keychain modification by a normal user pops a GUI prompt, which we avoid).
-// Note the common deployment runs agents inside the Linux runtime container even
-// on a macOS host — there the Linux path applies; the darwin path only matters
-// for a native-macOS install.
 // Must run AFTER startMITM() (main.go), which generates the CA on first start.
 func ensureMITMCAInSystemTrust() {
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+	if runtime.GOOS != "linux" {
 		return
 	}
 	home, err := os.UserHomeDir()
@@ -1441,6 +1443,10 @@ func ensureMITMCAInSystemTrust() {
 	srcBytes, err := os.ReadFile(src)
 	if err != nil {
 		return // MITM disabled / CA not generated — nothing to install
+	}
+	const dst = "/usr/local/share/ca-certificates/cicy-mitm.crt"
+	if cur, err := os.ReadFile(dst); err == nil && bytes.Equal(cur, srcBytes) {
+		return // already installed this exact CA
 	}
 	// Install needs root; fall back to passwordless sudo when unprivileged.
 	runRoot := func(name string, args ...string) error {
@@ -1454,36 +1460,15 @@ func ensureMITMCAInSystemTrust() {
 		}
 		return nil
 	}
-
-	switch runtime.GOOS {
-	case "linux":
-		const dst = "/usr/local/share/ca-certificates/cicy-mitm.crt"
-		if cur, err := os.ReadFile(dst); err == nil && bytes.Equal(cur, srcBytes) {
-			return // already installed this exact CA
-		}
-		if err := runRoot("cp", src, dst); err != nil {
-			log.Printf("[mitm] system-trust install skipped (need root/sudo): %v", err)
-			return
-		}
-		if err := runRoot("update-ca-certificates"); err != nil {
-			log.Printf("[mitm] system-trust install: update-ca-certificates failed: %v", err)
-			return
-		}
-		log.Printf("[mitm] installed MITM CA into system trust store (%s) — codex/kiro Rust TLS now trusts it", dst)
-	case "darwin":
-		const sysKeychain = "/Library/Keychains/System.keychain"
-		// Idempotent: skip if a cicy-mitm CA is already trusted in the System
-		// keychain (find-certificate exits 0 when a match is found).
-		if exec.Command("security", "find-certificate", "-c", "cicy-mitm", sysKeychain).Run() == nil {
-			return
-		}
-		if err := runRoot("security", "add-trusted-cert", "-d", "-r", "trustRoot", "-k", sysKeychain, src); err != nil {
-			log.Printf("[mitm] macOS system-trust install skipped (no passwordless sudo); run once manually: "+
-				"sudo security add-trusted-cert -d -r trustRoot -k %s %s  (err: %v)", sysKeychain, src, err)
-			return
-		}
-		log.Printf("[mitm] installed MITM CA into macOS System keychain — codex/kiro Rust TLS now trusts it")
+	if err := runRoot("cp", src, dst); err != nil {
+		log.Printf("[mitm] system-trust install skipped (need root/sudo): %v", err)
+		return
 	}
+	if err := runRoot("update-ca-certificates"); err != nil {
+		log.Printf("[mitm] system-trust install: update-ca-certificates failed: %v", err)
+		return
+	}
+	log.Printf("[mitm] installed MITM CA into system trust store (%s) — codex/kiro Rust TLS now trusts it", dst)
 }
 
 func setupAIConfigs() {

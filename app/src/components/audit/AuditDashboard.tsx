@@ -404,9 +404,10 @@ function SetupTab({ proxyToken, onRegister }: { proxyToken: string; onRegister: 
         <h3 data-id="audit-dashboard-setup-ca-title" className="text-sm font-semibold text-white mb-1">{t('step1Title')}</h3>
         <p data-id="audit-dashboard-setup-ca-body" className="text-xs text-[var(--vsc-text-secondary)] mb-3">{t('step1Body')}</p>
         <div data-id="audit-dashboard-setup-ca-command" className="flex items-center gap-2 bg-black/30 rounded-md px-3 py-2 font-mono text-xs text-[var(--vsc-text)]">
-          <span data-id="audit-dashboard-setup-ca-command-text">curl -fsSL https://audit.cicy-ai.com/install-ca | bash</span>
-          <CopyButton text="curl -fsSL https://audit.cicy-ai.com/install-ca | bash" />
+          <span data-id="audit-dashboard-setup-ca-command-text">cicy-code mitm install-ca</span>
+          <CopyButton text="cicy-code mitm install-ca" />
         </div>
+        <p data-id="audit-dashboard-setup-ca-macos-note" className="mt-2 text-[11px] text-[var(--vsc-text-muted)] leading-relaxed">{t('caMacNote')}</p>
         <div data-id="audit-dashboard-setup-ca-manual" className="mt-2 flex gap-3">
           <a data-id="audit-dashboard-setup-ca-manual-link" href="/ca.pem" className="text-xs text-[var(--vsc-link)] hover:underline">{t('manualDownloadCert')}</a>
         </div>
@@ -458,8 +459,8 @@ const defaultPlatforms = [
   {
     name: i18n.t('platformMacOS', { ns: 'audit' }),
     steps: [
-      'curl -fsSL https://audit.cicy-ai.com/install-ca | bash',
-      'export https_proxy=https://YOUR_TOKEN:x@audit.cicy-ai.com:8003',
+      'cicy-code mitm install-ca',
+      i18n.t('caMacNote', { ns: 'audit' }),
     ],
   },
   {

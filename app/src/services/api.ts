@@ -103,6 +103,10 @@ const api = {
   restartPane: (id: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/restart`),
   capturePane: (id: string, lines = 100) => http.post('/api/tmux/capture_pane', { pane_id: id, lines }),
 
+  // MITM CA install status (whether this node's CA is trusted in the OS store).
+  // Used by the inspector to nudge non-gateway codex/kiro users to install it.
+  getMitmCaStatus: () => http.get('/api/mitm/ca-status'),
+
   sendCommand: (winId: string, text: string, submit = true) => unwrapTmuxSend(http.post('/api/tmux/send', { win_id: winId, text, submit })),
   sendKeys: (winId: string, keys: string) => unwrapTmuxSend(http.post('/api/tmux/send-keys', { win_id: winId, keys })),
   toggleMouse: (mode: string, paneId: string) => http.post(`/api/tmux/mouse/${mode}`, null, { params: { pane_id: paneId } }),
