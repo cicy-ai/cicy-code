@@ -1561,8 +1561,8 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     fixedTop.innerHTML =
         '<button id="cp-kbd" class="' + tipCls + '" data-tooltip="' + ttydT("tipPromptArea") + '">' + svgKbd + '</button>' +
         '<button id="cp-win-add" class="' + tipCls + '" data-tooltip="' + ttydT("tipAddCliWindow") + '">' + svgPlus + '</button>' +
-        '<button id="cp-agent-launch" class="' + tipCls + '" data-tooltip="' + ttydT("tipLaunchAgent", { agent: "agent" }) + '">' + svgPlay + '</button>' +
-        '<button id="cp-agent-update" class="' + tipCls + '" data-tooltip="' + ttydT("tipUpdateAgent", { agent: "agent" }) + '">' + svgUpdate + '</button>' +
+        '<button id="cp-agent-launch" class="' + tipCls + '" data-tooltip="' + ttydT("tipLaunchAgent") + '">' + svgPlay + '</button>' +
+        '<button id="cp-agent-update" class="' + tipCls + '" data-tooltip="' + ttydT("tipUpdateAgent") + '">' + svgUpdate + '</button>' +
         '<button id="cp-win-restart" class="' + tipCls + '" data-tooltip="' + ttydT("tipRestartAgent") + '">' + svgRestart + '</button>' +
         '<button id="cp-reload" class="' + tipCls + '" data-tooltip="' + ttydT("tipReloadPage") + '" onclick="location.reload()">' + svgReload + '</button>';
 
@@ -1589,19 +1589,18 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var addWindowBtn = document.getElementById("cp-win-add") as HTMLButtonElement;
     var kbdBtn = document.getElementById("cp-kbd") as HTMLButtonElement;
 
-    // Resolve this pane's agent_type once on init so the Launch/Update button
-    // labels can show "启动 codex" / "Update claude" etc. We update the
-    // tooltip in place; the button text stays as the icon glyph.
+    // Resolve this pane's agent_type once on init so the Launch/Update confirm
+    // dialogs can show the concrete agent name ("启动 codex" / "Update claude").
+    // The toolbar tooltips themselves are static ("启动 Agent" / "更新 Agent") —
+    // no per-pane substitution there.
     var paneAgentType = "agent";
     webtty.requestAPI("GET", "/api/tmux/panes/" + paneId, undefined, apiHeaders)
         .then(function(resp: any) {
             var t = resp && resp.agent_type ? String(resp.agent_type).trim() : "";
             if (!t) return;
             paneAgentType = t;
-            launchBtn.setAttribute("data-tooltip", ttydT("tipLaunchAgent", { agent: t }));
-            updateBtn.setAttribute("data-tooltip", ttydT("tipUpdateAgent", { agent: t }));
         })
-        .catch(function() { /* leave generic "agent" label */ });
+        .catch(function() { /* leave generic "agent" label for the dialogs */ });
 
     // Bottom prompt area: compose the whole line locally, send it in one HTTP
     // request — avoids the per-keystroke websocket round-trips that make the
