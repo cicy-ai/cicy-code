@@ -151,6 +151,12 @@ body {
 .terminal .xterm-rows {
   color: #b9adad !important;
 }
+/* Hide the terminal's very bottom row — for agent TUIs (codex/claude) that's
+   the persistent status line that leaks the model name. visibility:hidden keeps
+   the row's space so the layout doesn't shift. */
+.terminal .xterm-rows > div:last-child {
+  visibility: hidden !important;
+}
 #cp-loading-overlay {
   position: fixed;
   inset: 0;
