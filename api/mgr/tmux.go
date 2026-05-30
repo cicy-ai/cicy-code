@@ -1157,8 +1157,10 @@ func handleUpdateAgentCLI(w http.ResponseWriter, r *http.Request, id string) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 	}
 
-	// Open a new tmux window in the same session so the install output is
-	// visible without interrupting the running agent in the current pane.
+	// Run the install in a dedicated update window so the output is visible
+	// without interrupting the running agent in the current pane. Reuse a
+	// single fixed window per agent — repeated clicks must NOT pile up a row
+	// of duplicate "update-<agent>" windows.
 	session := strings.Split(paneID, ":")[0]
 	var workspace string
 	store.QueryRow("SELECT COALESCE(workspace,'') FROM agent_config WHERE pane_id=?", paneID).Scan(&workspace)
@@ -1166,19 +1168,44 @@ func handleUpdateAgentCLI(w http.ResponseWriter, r *http.Request, id string) {
 		workspace = cicyWorkersDir
 	}
 	wsExpanded := expandHome(workspace)
-	// -P -F prints the new window's target (session:index) so we can send
-	// keys to the exact pane even when multiple same-named windows exist.
-	winArgs := []string{"new-window", "-P", "-F", "#{session_name}:#{window_index}", "-c", wsExpanded, "-t", session, "-n", "update-" + agentType}
-	out, err := runTmux(winArgs...)
-	if err != nil {
-		httpErr(w, http.StatusInternalServerError, "new-window: "+err.Error())
-		return
+	windowName := "update-" + agentType
+
+	// Look for an already-open update window for this agent.
+	var winTarget string // session:index of the reused/created window
+	if out, err := runTmux("list-windows", "-t", session, "-F", "#{window_index} #{window_name}"); err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if idx, name, ok := strings.Cut(line, " "); ok && name == windowName {
+				winTarget = session + ":" + idx
+				break
+			}
+		}
 	}
-	// Give bash a moment to finish initializing before we send the command,
-	// otherwise the keystrokes land in the terminal input buffer before the
-	// shell prompt is ready and appear as text rather than being executed.
-	time.Sleep(800 * time.Millisecond)
-	newPane := strings.TrimSpace(string(out)) + ".0"
+
+	var newPane string
+	if winTarget != "" {
+		// Reuse the existing window: interrupt any prior install still
+		// running, clear the scrollback, and bring it to the foreground.
+		newPane = winTarget + ".0"
+		runTmux("send-keys", "-t", newPane, "C-c")
+		time.Sleep(150 * time.Millisecond)
+		runTmux("send-keys", "-t", newPane, "clear", "Enter")
+		runTmux("select-window", "-t", winTarget)
+		time.Sleep(150 * time.Millisecond)
+	} else {
+		// -P -F prints the new window's target (session:index) so we can send
+		// keys to the exact pane even when multiple same-named windows exist.
+		winArgs := []string{"new-window", "-P", "-F", "#{session_name}:#{window_index}", "-c", wsExpanded, "-t", session, "-n", windowName}
+		out, err := runTmux(winArgs...)
+		if err != nil {
+			httpErr(w, http.StatusInternalServerError, "new-window: "+err.Error())
+			return
+		}
+		// Give bash a moment to finish initializing before we send the command,
+		// otherwise the keystrokes land in the terminal input buffer before the
+		// shell prompt is ready and appear as text rather than being executed.
+		time.Sleep(800 * time.Millisecond)
+		newPane = strings.TrimSpace(string(out)) + ".0"
+	}
 
 	fullCmd := cfg.InstallCmd
 	if hint := strings.TrimSpace(body.PostInstallHint); hint != "" {
