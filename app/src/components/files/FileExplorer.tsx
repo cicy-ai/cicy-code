@@ -7,7 +7,7 @@ import {
   useTransition,
 } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ChevronRight, ChevronDown, File as FileIcon, Folder, FolderOpen, RefreshCw, Send, Eye, EyeOff, Info, Star, Trash2, Edit3, FilePlus, FolderPlus, Upload, Download, Link as LinkIcon } from 'lucide-react';
+import { ChevronRight, ChevronDown, File as FileIcon, Folder, FolderOpen, RefreshCw, Send, Eye, EyeOff, Info, Star, Trash2, Edit3, FilePlus, FolderPlus, Upload, Download, Link as LinkIcon, PanelLeftClose } from 'lucide-react';
 import { fsApi, FsEntry, FsListResponse, FsFavorite, FsRoot, joinFsPath } from './api';
 import { fsCachePeek, fsCacheSet, fsKey } from './fsCache';
 
@@ -71,6 +71,8 @@ interface FileExplorerProps {
   onUpload?: (parentDir: string, files: FileList) => void;
   /** Trigger a direct download of the given workspace-relative file path. */
   onDownload?: (path: string) => void;
+  /** Collapse (hide) the explorer panel — wired to the FILES header button. */
+  onCollapse?: () => void;
   className?: string;
 }
 
@@ -134,6 +136,7 @@ export default function FileExplorer({
   onNewFolder,
   onUpload,
   onDownload,
+  onCollapse,
   className,
 }: FileExplorerProps) {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -443,6 +446,7 @@ export default function FileExplorer({
         onRefresh={() => startTransition(() => setRefreshKey((k) => k + 1))}
         onNewFile={onNewFile ? () => onNewFile('') : undefined}
         onNewFolder={onNewFolder ? () => onNewFolder('') : undefined}
+        onCollapse={onCollapse}
       />
       {onUpload && (
         <input
@@ -620,12 +624,21 @@ interface HeaderProps {
   onRefresh: () => void;
   onNewFile?: () => void;
   onNewFolder?: () => void;
+  onCollapse?: () => void;
 }
 
-function Header({ showHidden, onToggleHidden, onRefresh, onNewFile, onNewFolder }: HeaderProps) {
+function Header({ showHidden, onToggleHidden, onRefresh, onNewFile, onNewFolder, onCollapse }: HeaderProps) {
   return (
     <div data-id="file-explorer-header" className="flex items-center gap-1 px-2 h-9 border-b border-zinc-800 bg-zinc-900 text-xs text-zinc-300">
-      <span className="font-medium">FILES</span>
+      <button
+        data-id="file-explorer-collapse"
+        className="flex items-center gap-1 px-1 py-0.5 rounded font-medium hover:bg-zinc-800"
+        onClick={onCollapse}
+        title="收起文件树"
+      >
+        <PanelLeftClose className="w-3.5 h-3.5" />
+        <span>FILES</span>
+      </button>
       <span className="flex-1" />
       {onNewFile && (
         <button
