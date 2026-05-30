@@ -143,6 +143,9 @@ func extractRuntimeAIFromConfigJSON(configJSON string) *runtimeAIOverride {
 }
 
 func loadPaneRuntimeAIOverride(agentID string) (*runtimeAIOverride, error) {
+	if store == nil {
+		return nil, nil
+	}
 	paneID := normPaneID(agentID)
 	var config sql.NullString
 	if err := store.QueryRow("SELECT config FROM agent_config WHERE pane_id=?", paneID).Scan(&config); err != nil {

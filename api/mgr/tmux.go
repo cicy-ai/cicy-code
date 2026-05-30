@@ -1700,13 +1700,21 @@ func resolveClaudeStartupModel(defaultModel string, aiCfg runtimeAIConfig, short
 // holds Codex's entire ~21KB system prompt. A hand-written entry either fails to
 // parse (Codex then refuses to start, worse than the warning) or has to embed
 // Codex's proprietary prompt and goes stale on every release. Instead we read
-// Codex's OWN embedded models.json out of the installed binary, clone a real
-// entry (gpt-5.5), and only swap identity + DeepSeek-specific capabilities. This
-// is always schema-valid for the installed version and self-heals on `@latest`
-// updates. argv[1] = output path; on any error it writes nothing and exits 0 so
-// the caller falls back to launching Codex without a catalog.
+// Codex's OWN embedded models.json out of the installed binary and build a
+// catalog covering exactly the provider's configured models: a slug Codex
+// already knows (gpt-*) is kept verbatim (correct metadata), an unknown slug
+// (deepseek-*) is cloned from a real entry with identity + capabilities swapped.
+//
+// This is important for the /model picker: Codex restricts /model to the slugs
+// present in model_catalog_json, so the catalog MUST list every model the user
+// expects to pick — not just DeepSeek — or the rest vanish from the picker.
+//
+// argv[1] = output path; argv[2] = JSON array of wanted model slugs. On any
+// error (or empty result) it writes nothing and exits 0 so the caller falls
+// back to launching Codex without a catalog.
 const codexCatalogBuildScript = `import json, glob, os, sys
 out = sys.argv[1]
+wanted = json.loads(sys.argv[2]) if len(sys.argv) > 2 else []
 try:
     pats = [
         os.path.expanduser("~/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-*/vendor/*/bin/codex"),
@@ -1736,41 +1744,89 @@ try:
                     end = i+1; break
         i += 1
     models = json.loads(data[start:end].decode("utf-8"))["models"]
-    tpl = next((x for x in models if x.get("slug") == "gpt-5.5"), models[0])
-    def mk(slug, name, level, window):
+    by_slug = {x.get("slug"): x for x in models}
+    tpl = by_slug.get("gpt-5.5") or models[0]
+    def clone(slug):
         e = json.loads(json.dumps(tpl))
         e["slug"] = slug
-        e["display_name"] = name
-        e["context_window"] = window
-        e["max_context_window"] = window
+        e["display_name"] = slug
+        win = 2097152 if slug == "deepseek-v4-pro" else 131072
+        e["context_window"] = win
+        e["max_context_window"] = win
         e["input_modalities"] = ["text"]
         e["visibility"] = "list"
-        e["default_reasoning_level"] = level
+        e["default_reasoning_level"] = "low" if "flash" in slug else "medium"
         if "minimal_client_version" in e: e["minimal_client_version"] = "0.0.0"
         if "supports_search_tool" in e: e["supports_search_tool"] = False
         if "supports_reasoning_summaries" in e: e["supports_reasoning_summaries"] = False
         if "support_verbosity" in e: e["support_verbosity"] = False
         return e
-    result = {"models": [
-        mk("deepseek-v4-pro", "DeepSeek V4 Pro", "medium", 2097152),
-        mk("deepseek-v4-flash", "DeepSeek V4 Flash", "low", 131072),
-    ]}
+    result, seen = [], set()
+    for slug in wanted:
+        slug = (slug or "").strip()
+        if not slug or slug in seen:
+            continue
+        seen.add(slug)
+        result.append(by_slug[slug] if slug in by_slug else clone(slug))
+    if not result:
+        sys.exit(0)
     tmp = out + ".tmp"
-    open(tmp, "w").write(json.dumps(result))
+    open(tmp, "w").write(json.dumps({"models": result}))
     os.replace(tmp, out)
 except Exception as ex:
     sys.stderr.write("[cicy] codex model catalog skipped: %s\n" % ex)
     sys.exit(0)
 `
 
-// codexCatalogBuildLines returns boot lines that (re)generate the DeepSeek model
-// catalog at catalogPath by cloning Codex's own embedded entry. Safe to run
-// every boot; on failure it leaves no file so the launch falls back cleanly.
-func codexCatalogBuildLines(catalogPath string) []string {
+// codexActiveProvider returns the provider currently routing for this codex
+// pane: runtime_ai override if set, else the agent_type default.
+func codexActiveProvider(shortID string) *providerConfig {
+	if shortID != "" {
+		if ov, _ := loadPaneRuntimeAIOverride(shortID); ov != nil && strings.TrimSpace(ov.ProviderName) != "" {
+			if p, ok := loadProviderByKey(ov.ProviderName); ok {
+				return p
+			}
+		}
+	}
+	if p, ok := loadProviderForAgentType("codex"); ok {
+		return p
+	}
+	return nil
+}
+
+// codexCatalogModels returns the slugs the codex /model picker should offer:
+// the resolved startup model plus the active provider's declared models,
+// deduped and order-preserving.
+func codexCatalogModels(shortID string, resolvedModel string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(m string) {
+		m = strings.TrimSpace(m)
+		if m == "" || seen[m] {
+			return
+		}
+		seen[m] = true
+		out = append(out, m)
+	}
+	add(resolvedModel)
+	if provider := codexActiveProvider(shortID); provider != nil {
+		for _, m := range provider.Models {
+			add(m)
+		}
+	}
+	return out
+}
+
+// codexCatalogBuildLines returns boot lines that (re)generate the codex model
+// catalog at catalogPath, covering wantedModels (gpt-* kept verbatim from
+// Codex's own metadata, deepseek-* cloned). Safe to run every boot; on failure
+// it leaves no file so the launch falls back cleanly.
+func codexCatalogBuildLines(catalogPath string, wantedModels []string) []string {
 	dir := filepath.Dir(catalogPath)
+	spec, _ := json.Marshal(wantedModels)
 	return []string{
 		fmt.Sprintf("mkdir -p %s", tmuxShellQuote(dir)),
-		fmt.Sprintf("python3 - %s <<'CICY_CODEX_CATALOG_PY' 2>/dev/null || true", tmuxShellQuote(catalogPath)),
+		fmt.Sprintf("python3 - %s %s <<'CICY_CODEX_CATALOG_PY' 2>/dev/null || true", tmuxShellQuote(catalogPath), tmuxShellQuote(string(spec))),
 		codexCatalogBuildScript + "CICY_CODEX_CATALOG_PY",
 	}
 }
@@ -2632,12 +2688,13 @@ EOF
 			providerNameOverride := tmuxShellQuote(`model_providers.custom.name="cicy-local"`)
 			baseURLOverride := tmuxShellQuote(`model_providers.custom.base_url="` + baseURL + `"`)
 			modelArg := tmuxShellQuote(model)
-			// Build a local model catalog (cloned from Codex's own embedded
-			// metadata) so the gateway's DeepSeek slugs resolve cleanly. Stored
-			// under the persistent state dir ~/cicy-ai/db.
+			// Build a local model catalog covering the provider's configured
+			// models so they all show in /model (gpt-* kept from Codex's own
+			// metadata, deepseek-* cloned). Stored under the persistent state
+			// dir ~/cicy-ai/db.
 			catalogPath := filepath.Join(expandHome("~/cicy-ai/db"), "codex-models.json")
 			catalogOverride := tmuxShellQuote(`model_catalog_json="` + catalogPath + `"`)
-			lines = append(lines, codexCatalogBuildLines(catalogPath)...)
+			lines = append(lines, codexCatalogBuildLines(catalogPath, codexCatalogModels(shortID, model))...)
 			lines = append(lines, "export OPENAI_API_KEY='cicy-local-gateway'", "clear")
 			bypass := ""
 			if allowAllActions {

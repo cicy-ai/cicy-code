@@ -72,11 +72,14 @@ func TestAgentBootLinesCodexModelCatalog(t *testing.T) {
 	if !strings.Contains(script, `model_catalog_json="`) {
 		t.Error("missing -c model_catalog_json override")
 	}
-	// The generator must define both gateway slugs (pro + flash).
-	for _, slug := range []string{"deepseek-v4-pro", "deepseek-v4-flash"} {
-		if !strings.Contains(script, slug) {
-			t.Errorf("catalog generator missing entry for %s", slug)
-		}
+	// The wanted-models list (passed to the generator) must include the
+	// resolved startup model so /model lists it.
+	if !strings.Contains(script, "deepseek-v4-pro") {
+		t.Error("catalog generator should be fed the resolved model deepseek-v4-pro")
+	}
+	// pro gets the 2M context-window branch in the generator.
+	if !strings.Contains(script, "2097152") {
+		t.Error("generator should set deepseek-v4-pro context window to 2M")
 	}
 	// A failed catalog build must not block startup — launch is guarded by a
 	// non-empty-file check with a plain-codex fallback.
