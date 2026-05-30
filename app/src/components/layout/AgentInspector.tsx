@@ -1,4 +1,4 @@
-import { Children, cloneElement, isValidElement, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { Children, cloneElement, isValidElement, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Brain, Search, Settings } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -470,6 +470,19 @@ export default function AgentInspector({
     // paneTitle is intentionally excluded — it's a cosmetic prop and a
     // title-only change should not refetch settings (would clobber unsaved edits).
   }, [open, paneId, patchSharedAgentDetail]);
+
+  // Force a fresh pane-detail fetch (incl. runtime_ai_provider_options) on
+  // demand, bypassing the cache guard above. Wired to the provider/model
+  // Selects' open handlers so edits to providers/models in global.json appear
+  // the moment the dropdown is opened, not only after a full page reload.
+  const refreshDetailNow = useCallback(() => {
+    if (!paneId) return;
+    apiService.getPane(paneId).then(({ data: detail }) => {
+      if (!detail) return;
+      patchSharedAgentDetail(paneId, detail);
+      onPanePatch?.(paneId, detail);
+    }).catch(() => {});
+  }, [paneId, patchSharedAgentDetail, onPanePatch]);
 
   useEffect(() => {
     // Pull the live mihomo proxies/groups list so the rule Select has real
@@ -1303,6 +1316,7 @@ export default function AgentInspector({
                               options={runtimeAISelectOptions}
                               placeholder={t('providerSelectPlaceholder')}
                               searchable
+                              onOpenChange={(o) => { if (o) refreshDetailNow(); }}
                             />
                           </InspectorField>
                           <InspectorField label={t('modelDefaultFieldLabel')} desc={t('modelDefaultFieldDesc')}>
@@ -1321,6 +1335,7 @@ export default function AgentInspector({
                                   value={currentValue}
                                   options={optionValues.map((m) => ({ value: m, label: m }))}
                                   onChange={(v) => { patchSettingsData({ default_model: v }); void saveModelSettings({ default_model: v }); }}
+                                  onOpenChange={(o) => { if (o) refreshDetailNow(); }}
                                 />
                               );
                             })()}
