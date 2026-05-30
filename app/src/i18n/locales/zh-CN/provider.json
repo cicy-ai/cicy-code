@@ -78,6 +78,8 @@
   "otherAgentDefaults": "其他 agent 默认模型（保留）：{{list}}",
   "fieldAvailableModels": "可用模型",
   "fieldAvailableModelsHelp": "每行一个，仅用于展示",
+  "fieldModelMapping": "模型映射",
+  "fieldModelMappingHelp": "每行一条规则：来源 = 目标。在请求发往上游中转前重写模型名（用于中转没有对应 channel 的型号）。来源可用 * 结尾做前缀匹配；来源留空表示兜底全部。留空则不做任何重写。",
   "testEachModel": "测试各模型",
   "fieldModelMapping": "模型映射",
   "fieldModelMappingHelp": "每行 from = to",
