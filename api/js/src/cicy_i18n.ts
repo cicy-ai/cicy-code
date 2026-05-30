@@ -28,7 +28,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     tipReloadPage: "Reload page\n\nReload this cicy-code UI tab.",
     tipPromptArea: "Prompt input area\n\nClick to focus the bottom prompt box —\ntype + Enter sends to the agent.\nUse this when the slow-network server-side\nIME makes typing directly in the terminal\nunreliable.",
     confirmLaunchAgent: "Re-source `.cicy/boot.sh` in this pane? Env vars get refreshed and {agent} restarts.",
-    confirmUpdateAgent: "Run `npm install -g <pkg>@latest` for {agent} in this pane? Progress prints live in the terminal.",
+    confirmUpdateAgent: "Update Agent to the latest official release?",
     confirmRestartAgent: "Kill and respawn this tmux pane? Scrollback is lost.",
     // Echoed in the update window after npm install succeeds — the install
     // runs async and the agent in the original pane is still on the old
@@ -89,7 +89,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     tipReloadPage: "刷新页面\n\n刷新当前 cicy-code UI 标签。",
     tipPromptArea: "Prompt 输入区\n\n点这里聚焦底部 Prompt 输入框,\n输入后回车直接发给 agent。\n用于网络较慢时服务端输入法\n在终端里直接打字不稳的情况。",
     confirmLaunchAgent: "在当前 pane 重新 source `.cicy/boot.sh`? 环境变量会刷新,{agent} 重新启动。",
-    confirmUpdateAgent: "在当前 pane 执行 npm install -g <pkg>@latest 更新 {agent}? 实时进度直接打在终端里。",
+    confirmUpdateAgent: "更新到官方最新版?",
     confirmRestartAgent: "销毁并重建当前 tmux pane?滚动历史会丢失。",
     updateCompleteRestartHint: "✅ 升级完成 — 点击顶栏的 ▶ 启动按钮重启 {agent} 启用新版本。",
     restartPaneTitle: "重启 Pane",
