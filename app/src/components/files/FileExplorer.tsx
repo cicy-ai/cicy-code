@@ -632,12 +632,11 @@ function Header({ showHidden, onToggleHidden, onRefresh, onNewFile, onNewFolder,
     <div data-id="file-explorer-header" className="flex items-center gap-1 px-2 h-9 border-b border-zinc-800 bg-zinc-900 text-xs text-zinc-300">
       <button
         data-id="file-explorer-collapse"
-        className="flex items-center gap-1 px-1 py-0.5 rounded font-medium hover:bg-zinc-800"
+        className="flex items-center px-1.5 py-0.5 rounded hover:bg-zinc-800"
         onClick={onCollapse}
         title="收起文件树"
       >
         <PanelLeftClose className="w-3.5 h-3.5" />
-        <span>FILES</span>
       </button>
       <span className="flex-1" />
       {onNewFile && (
