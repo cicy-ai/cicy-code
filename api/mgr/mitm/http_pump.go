@@ -125,37 +125,38 @@ func pumpHTTP(
 		stripChainHeaders(req)
 	}
 
-	// Dial upstream
-	hostPort := net.JoinHostPort(host, strconv.Itoa(port))
-	upstream, err := dialer.DialTLS(ctx, hostPort)
+	// Forward upstream over a POOLED keep-alive connection (dialer.RoundTrip),
+	// so the MITM↔upstream TLS handshake is reused across turns instead of paid
+	// per request. Adapt the server-read request into a client request:
+	//   - absolute URL with host:port so the Transport dials the right upstream;
+	//   - RequestURI cleared (RoundTrip rejects a set RequestURI);
+	//   - Close=false so the upstream conn returns to the idle pool.
+	// The Host header is preserved from the original request.
+	req = req.WithContext(ctx)
+	req.URL.Scheme = "https"
+	req.URL.Host = net.JoinHostPort(host, strconv.Itoa(port))
+	req.RequestURI = ""
+	req.Close = false
+	if req.Host == "" {
+		req.Host = host
+	}
+
+	resp, err := dialer.RoundTrip(req)
 	if err != nil {
 		turn.Fail(err)
-		writeSyntheticError(client, 502, fmt.Sprintf("upstream dial failed: %v", err), cfg.Node.ID)
+		writeSyntheticError(client, 502, fmt.Sprintf("upstream request failed: %v", err), cfg.Node.ID)
 		return err
 	}
-	defer upstream.Close()
 
-	// Write request to upstream. req.Write writes origin-form path + Host
-	// header + body, handling content-length / chunked correctly.
-	if err := req.Write(upstream); err != nil {
-		turn.Fail(err)
-		return fmt.Errorf("mitm: forward request: %w", err)
-	}
-
-	// Read upstream response
-	upstreamBr := bufio.NewReader(upstream)
-	resp, err := http.ReadResponse(upstreamBr, req)
-	if err != nil {
-		turn.Fail(err)
-		return fmt.Errorf("mitm: read upstream response: %w", err)
-	}
-
-	// Wrap response body with audit reader so SSE events are parsed as
-	// they stream through to the client.
+	// Wrap response body with audit reader so SSE events are parsed as they
+	// stream through to the client. Closing it drains + returns the upstream
+	// conn to the idle pool for reuse.
 	resp.Body = turn.WrapResponseBody(resp.Body, resp.StatusCode, resp.Header.Clone(), resp.ContentLength)
 	defer resp.Body.Close()
 
-	// Force connection close after this response (Phase 1 single-turn).
+	// Tell the CLIENT to close after this turn — client side stays single-turn
+	// (phase A pools the upstream side only). This is independent of upstream
+	// reuse, which the Transport manages from the upstream response + drained body.
 	resp.Close = true
 	resp.Header.Set("Connection", "close")
 

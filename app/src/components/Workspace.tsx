@@ -1365,13 +1365,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {cliDrawerResizing ? (
         <div
           data-id="cli-content-resize-overlay"
-          className="fixed inset-0 z-[279] cursor-col-resize"
+          className="fixed inset-0 z-[40] cursor-col-resize"
         />
       ) : null}
       <div
         data-id="cli-content-resize-handle"
         className={cn(
-          'absolute top-0 bottom-0 z-[280] w-1 cursor-col-resize bg-transparent transition-colors hover:bg-blue-400/70 active:bg-blue-400/80',
+          // z-40: above the panel content but BELOW every dropdown/popover
+          // (Select portal z-200/260, menus z-180/220) and modal (z-10000+),
+          // so the thin handle never pokes through an open dropdown/modal.
+          'absolute top-0 bottom-0 z-[40] w-1 cursor-col-resize bg-transparent transition-colors hover:bg-blue-400/70 active:bg-blue-400/80',
           'left-0'
         )}
         onMouseDown={handleCliDrawerResizeStart}
