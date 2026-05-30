@@ -151,10 +151,13 @@ body {
 .terminal .xterm-rows {
   color: #b9adad !important;
 }
-/* Hide the terminal's very bottom row — for agent TUIs (codex/claude) that's
-   the persistent status line that leaks the model name. visibility:hidden keeps
-   the row's space so the layout doesn't shift. */
-.terminal .xterm-rows > div:last-child {
+/* Hide the agent (codex) bottom status row that leaks the model name. The row
+   has a distinctive span sequence: <colored model> <dim " · "> <colored cwd>.
+   Match that structure via :has() (colored + dim + colored) so it's robust to
+   the codex theme's exact colors, and so we hit exactly that line — it isn't
+   the literal last child (xterm pads empty rows below it). visibility:hidden
+   keeps the row's space so the layout doesn't shift. */
+.terminal .xterm-rows > div:has(> [class*="xterm-fg-"] + .xterm-dim + [class*="xterm-fg-"]) {
   visibility: hidden !important;
 }
 #cp-loading-overlay {
