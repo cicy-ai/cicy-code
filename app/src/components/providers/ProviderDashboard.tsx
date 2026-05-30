@@ -10,7 +10,7 @@ import apiService from '../../services/api';
 import AgentAvatar from '../AgentAvatar';
 import { useDialogs } from '../ui/Modal';
 import { Spinner } from '../ui/Spinner';
-import Select from '../ui/Select';
+import Select, { type SelectOption } from '../ui/Select';
 
 /* ───────────────────────── types ───────────────────────── */
 
@@ -80,29 +80,28 @@ function resolveModelFor(p: ProviderRecord | null | undefined, agentType: string
 function compactDM(dm?: Record<string, string>): Record<string, string> {
   return Object.fromEntries(Object.entries(dm || {}).filter(([, v]) => String(v || '').trim()).map(([k, v]) => [k, String(v).trim()]));
 }
-// Model mapping is edited as free text, one "from = to" rule per line. "from"
-// may end with "*" for a prefix match (e.g. "claude-sonnet* = claude-opus-4-7").
-// An empty "from" ("= deepseek-v4-pro") is the catch-all. Parses to the
-// Record<string,string> the backend's applyModelMapping consumes.
-function parseModelMapping(text: string): Record<string, string> {
+// A model-mapping rule edited as a structured row: "when the agent requests
+// `from`, send `to` upstream instead". `from` may end with "*" for a prefix
+// match, or be empty for the catch-all. Rows are the editable shape; they
+// collapse to the Record<string,string> the backend's applyModelMapping reads.
+type MappingRow = { from: string; to: string };
+
+function rowsToMapping(rows: MappingRow[]): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const line of text.split('\n')) {
-    const i = line.indexOf('=');
-    if (i < 0) continue;
-    const from = line.slice(0, i).trim();
-    const to = line.slice(i + 1).trim();
-    if (!to) continue;
-    out[from] = to;
+  for (const r of rows) {
+    const to = (r.to || '').trim();
+    if (!to) continue; // a rule with no target is incomplete — drop it
+    out[(r.from || '').trim()] = to;
   }
   return out;
 }
 
-function mappingToText(map?: Record<string, string>): string {
-  if (!map) return '';
-  return Object.entries(map).map(([k, v]) => `${k} = ${v}`).join('\n');
+function mappingToRows(map?: Record<string, string>): MappingRow[] {
+  if (!map) return [];
+  return Object.entries(map).map(([from, to]) => ({ from, to }));
 }
 
-function editorSnapshot(d: ProviderRecord, modelsText: string, mappingText: string): string {
+function editorSnapshot(d: ProviderRecord, modelsText: string, mappingRows: MappingRow[]): string {
   return JSON.stringify({
     key: d.key.trim(),
     name: (d.name || '').trim(),
@@ -112,7 +111,7 @@ function editorSnapshot(d: ProviderRecord, modelsText: string, mappingText: stri
     defaultModel: (d.defaultModel || '').trim(),
     defaultModels: compactDM(d.defaultModels),
     models: modelsText.split('\n').map((s) => s.trim()).filter(Boolean),
-    modelMapping: parseModelMapping(mappingText),
+    modelMapping: rowsToMapping(mappingRows),
   });
 }
 
@@ -291,7 +290,7 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
   const [isNew, setIsNew] = useState(false);
   const [draft, setDraft] = useState<ProviderRecord>(emptyDraft());
   const [modelsText, setModelsText] = useState('');
-  const [mappingText, setMappingText] = useState('');
+  const [mappingRows, setMappingRows] = useState<MappingRow[]>([]);
   const [baseline, setBaseline] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -318,8 +317,8 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
       defaultModels: { ...(p.defaultModels || {}) }, models: [...(p.models || [])], modelMapping: { ...(p.modelMapping || {}) },
     } : emptyDraft();
     const mt = (next.models || []).join('\n');
-    const mp = mappingToText(next.modelMapping);
-    setDraft(next); setModelsText(mt); setMappingText(mp); setBaseline(editorSnapshot(next, mt, mp));
+    const rows = mappingToRows(next.modelMapping);
+    setDraft(next); setModelsText(mt); setMappingRows(rows); setBaseline(editorSnapshot(next, mt, rows));
   }, []);
 
   const load = useCallback(async (preserve?: string): Promise<ProvidersResponse | null> => {
@@ -359,7 +358,7 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
   }, [isNew, selectedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- dirty ---- */
-  const snapshot = useMemo(() => editorSnapshot(draft, modelsText, mappingText), [draft, modelsText, mappingText]);
+  const snapshot = useMemo(() => editorSnapshot(draft, modelsText, mappingRows), [draft, modelsText, mappingRows]);
   const dirty = snapshot !== baseline;
   const canSave = (isNew || dirty) && !!draft.key.trim() && !!(draft.url || '').trim() && (proto(draft) === 'openai' || proto(draft) === 'anthropic');
 
@@ -383,8 +382,8 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
     defaultModel: (draft.defaultModel || '').trim(),
     defaultModels: compactDM(draft.defaultModels),
     models: modelsText.split('\n').map((s) => s.trim()).filter(Boolean),
-    modelMapping: parseModelMapping(mappingText),
-  }), [draft, modelsText, mappingText]);
+    modelMapping: rowsToMapping(mappingRows),
+  }), [draft, modelsText, mappingRows]);
 
   const save = useCallback(async () => {
     const payload = buildPayload();
@@ -667,7 +666,50 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
                 <textarea value={modelsText} onChange={(e) => setModelsText(e.target.value)} rows={4} className={cn(INPUT, 'h-auto resize-y py-2 font-mono leading-relaxed')} placeholder={'gpt-5.5\ngpt-5.4'} />
               </Field>
               <Field label={t('fieldModelMapping')} help={t('fieldModelMappingHelp')}>
-                <textarea value={mappingText} onChange={(e) => setMappingText(e.target.value)} rows={3} className={cn(INPUT, 'h-auto resize-y py-2 font-mono leading-relaxed')} placeholder={'claude-opus-4-8 = claude-opus-4-7\nclaude-sonnet* = claude-opus-4-7'} />
+                {(() => {
+                  const availableModels = modelsText.split('\n').map((l) => l.trim()).filter(Boolean);
+                  // Friendly "from" suggestions: catch-all, family prefixes, common
+                  // Anthropic/OpenAI model ids, plus this provider's own models.
+                  const fromSuggest: SelectOption[] = [
+                    { value: '', label: t('mappingCatchAll') },
+                    { value: 'claude-opus*', label: t('mappingAllOpus') },
+                    { value: 'claude-sonnet*', label: t('mappingAllSonnet') },
+                    { value: 'claude-haiku*', label: t('mappingAllHaiku') },
+                    ...['claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-haiku-4-5-20251001', 'gpt-5.5', 'gpt-5.4'].map((m) => ({ value: m, label: m })),
+                    ...availableModels.map((m) => ({ value: m, label: m })),
+                  ].filter((o, i, arr) => arr.findIndex((x) => x.value === o.value) === i);
+                  const toOptions: SelectOption[] = availableModels.map((m) => ({ value: m, label: m }));
+                  const setRow = (idx: number, patch: Partial<MappingRow>) =>
+                    setMappingRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+                  const removeRow = (idx: number) => setMappingRows((prev) => prev.filter((_, i) => i !== idx));
+                  return (
+                    <div data-id="provider-model-mapping" className="space-y-2">
+                      {mappingRows.length === 0 ? (
+                        <div className="rounded-lg border border-dashed border-white/[0.08] px-3 py-2.5 text-[12px] text-zinc-600">{t('mappingEmpty')}</div>
+                      ) : mappingRows.map((row, idx) => (
+                        <div key={idx} data-id={`provider-model-mapping-row-${idx}`} className="flex items-center gap-2">
+                          <div className="min-w-0 flex-1">
+                            <Select searchable allowCustom placeholder={t('mappingFromPlaceholder')} value={row.from}
+                              options={fromSuggest} onChange={(v) => setRow(idx, { from: v })} />
+                          </div>
+                          <span className="shrink-0 text-zinc-600">→</span>
+                          <div className="min-w-0 flex-1">
+                            <Select searchable allowCustom placeholder={t('mappingToPlaceholder')} value={row.to}
+                              options={toOptions} onChange={(v) => setRow(idx, { to: v })} />
+                          </div>
+                          <button type="button" data-id={`provider-model-mapping-remove-${idx}`} onClick={() => removeRow(idx)}
+                            className="shrink-0 flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-300" title={t('mappingRemove')}>
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+                      <button type="button" data-id="provider-model-mapping-add" onClick={() => setMappingRows((prev) => [...prev, { from: '', to: '' }])}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-1.5 text-[12px] text-zinc-300 transition-colors hover:bg-white/[0.06]">
+                        <Plus size={13} /> {t('mappingAdd')}
+                      </button>
+                    </div>
+                  );
+                })()}
               </Field>
             </section>
 
