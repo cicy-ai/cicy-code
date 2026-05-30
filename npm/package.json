@@ -1,6 +1,9 @@
 {
-  "name": "cicy-code",
-  "version": "2.1.40",
+  "name": "@cicy-ai/cicy-code",
+  "publishConfig": {
+    "access": "public"
+  },
+  "version": "2.1.41",
   "description": "CiCy Code - AI-powered development environment",
   "bin": {
     "cicy-code": "bin/cicy-code.js"
