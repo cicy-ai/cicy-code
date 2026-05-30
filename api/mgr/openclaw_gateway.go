@@ -588,6 +588,55 @@ func aiGatewayExtractLastUserText(obj map[string]interface{}) string {
 	return ""
 }
 
+// aiGatewayActiveProvider returns the providerConfig currently routing for this
+// agent: the per-pane runtime_ai override if set, else the agent_type default.
+// Returns nil when no provider can be resolved (legacy/empty config).
+func aiGatewayActiveProvider(agentID string) *providerConfig {
+	key := ""
+	if agentType := loadPaneAgentType(agentID); agentType != "" {
+		key = loadDefaultProviderKeyForAgentType(agentType)
+	}
+	if ov, _ := loadPaneRuntimeAIOverride(agentID); ov != nil && strings.TrimSpace(ov.ProviderName) != "" {
+		key = ov.ProviderName
+	}
+	if key == "" {
+		return nil
+	}
+	if p, ok := loadProviderByKey(key); ok {
+		return p
+	}
+	return nil
+}
+
+// applyGatewayModelMapping rewrites the "model" field of a JSON request body
+// using the active provider's modelMapping. No-op when there's no mapping, no
+// model field, or the mapped value is unchanged.
+func applyGatewayModelMapping(agentID string, body []byte) []byte {
+	p := aiGatewayActiveProvider(agentID)
+	if p == nil || len(p.ModelMapping) == 0 {
+		return body
+	}
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return body
+	}
+	cur, ok := m["model"].(string)
+	if !ok || cur == "" {
+		return body
+	}
+	mapped := p.applyModelMapping(cur)
+	if mapped == cur {
+		return body
+	}
+	m["model"] = mapped
+	out, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	log.Printf("[ai-gateway] %s model remapped %s -> %s", agentID, cur, mapped)
+	return out
+}
+
 func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 	if !isLoopbackRemote(r.RemoteAddr) {
 		httpErr(w, 403, "ai_gateway_proxy_loopback_only")
@@ -619,6 +668,10 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "ai_gateway_proxy_read_body_failed")
 		return
 	}
+	// Apply the active provider's model mapping so models the upstream relay
+	// has no channel for (a newer claude-opus-4-8, Claude Code's background
+	// claude-sonnet-* small model, …) get rewritten onto a model it serves.
+	requestBody = applyGatewayModelMapping(agentID, requestBody)
 	requestBody = agentInspectorRewriteRequestBody(provider, agentID, requestBody, targetBase.Host)
 	requestBody = aiGatewayStripForGreeting(requestBody)
 

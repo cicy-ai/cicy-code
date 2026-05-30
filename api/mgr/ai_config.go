@@ -530,14 +530,32 @@ func hasNewProvidersConfig() bool {
 }
 
 // applyModelMapping applies the provider's model mapping to the requested model.
-// Exact-match wins; otherwise the wildcard key "" (if present and non-empty)
-// is used as a default mapping for any model.
+// Resolution order: exact match wins; then prefix keys ending in "*"
+// ("claude-sonnet*") with the longest matching prefix; then the wildcard key ""
+// (if present and non-empty) as a catch-all default. Used to route models the
+// upstream relay doesn't have a channel for (e.g. a newer claude-opus-4-8, or
+// Claude Code's background small-model claude-sonnet-*) onto a model it does.
 func (p *providerConfig) applyModelMapping(requestedModel string) string {
 	if p.ModelMapping == nil {
 		return requestedModel
 	}
 	if mapped, ok := p.ModelMapping[requestedModel]; ok && mapped != "" {
 		return mapped
+	}
+	bestPrefixLen := -1
+	bestPrefixVal := ""
+	for k, v := range p.ModelMapping {
+		if v == "" || !strings.HasSuffix(k, "*") {
+			continue
+		}
+		prefix := strings.TrimSuffix(k, "*")
+		if strings.HasPrefix(requestedModel, prefix) && len(prefix) > bestPrefixLen {
+			bestPrefixLen = len(prefix)
+			bestPrefixVal = v
+		}
+	}
+	if bestPrefixLen >= 0 {
+		return bestPrefixVal
 	}
 	if fallback, ok := p.ModelMapping[""]; ok && fallback != "" {
 		return fallback
