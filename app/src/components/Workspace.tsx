@@ -804,6 +804,20 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     })();
     return () => { cancelled = true; };
   }, [activeCliPaneId, paneId, paneDetails, setSharedAgentDetail]);
+  // Force a re-fetch of a pane's detail (incl. runtime_ai_provider_options),
+  // bypassing the cache guard above. Wired to the ModelPicker's open handler so
+  // edits to providers/models in global.json show up the moment the list is
+  // opened, instead of only after a full page reload.
+  const refreshPaneDetail = useCallback(async (targetPaneId: string) => {
+    const short = targetPaneId.split(':')[0];
+    if (!short) return;
+    try {
+      const { data } = await apiService.getPane(targetPaneId);
+      if (!data) return;
+      setPaneDetails(prev => ({ ...prev, [short]: { ...(prev[short] || {}), ...data } }));
+      setSharedAgentDetail(short, data);
+    } catch {}
+  }, [setSharedAgentDetail]);
   const openInspectorForPane = useCallback((targetPaneId: string, nextTab: InspectorTab = 'overview') => {
     const cleanPaneId = targetPaneId.replace(/:.*$/, '');
     setInspectorPaneId(cleanPaneId);
@@ -1528,6 +1542,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         paneId={activeCliPaneId}
         agentDetail={paneDetails[activeCliPaneId.split(':')[0]] || (activeCliPaneId.split(':')[0] === paneId.split(':')[0] ? agentDetail : null)}
         onUpdated={(patch) => applyPanePatch(activeCliPaneId, patch)}
+        onOpen={() => refreshPaneDetail(activeCliPaneId)}
       />
       <SystemResourceMonitor paneId={paneId} />
       <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} onSendClientId={handleSendPageClientIdToAgent} />
@@ -2321,7 +2336,7 @@ const ResourceRow = memo(function ResourceRow({
   );
 });
 
-function ModelPicker({ paneId, agentDetail, onUpdated }: { paneId: string; agentDetail: any; onUpdated: (patch: any) => void }) {
+function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: string; agentDetail: any; onUpdated: (patch: any) => void; onOpen?: () => void }) {
   const { runPaneSaveSerially } = useApp();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -2412,7 +2427,7 @@ function ModelPicker({ paneId, agentDetail, onUpdated }: { paneId: string; agent
       <button
         type="button"
         data-id="model-picker-trigger"
-        onClick={() => setOpen(prev => !prev)}
+        onClick={() => setOpen(prev => { const next = !prev; if (next) onOpen?.(); return next; })}
         aria-haspopup="dialog"
         aria-expanded={open}
         title={activeProvider?.label || activeProviderKey || 'Provider'}
