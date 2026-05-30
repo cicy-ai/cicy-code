@@ -245,6 +245,10 @@ func sanitizeProviderDraft(raw map[string]any, existing map[string]any) (map[str
 		out["defaultModel"] = ""
 	}
 
+	if v, ok := getStr(raw, "statusLabel"); ok {
+		out["statusLabel"] = strings.TrimSpace(v)
+	}
+
 	if rawDM, ok := raw["defaultModels"]; ok {
 		dm := map[string]any{}
 		if m, ok := rawDM.(map[string]any); ok {
@@ -280,9 +284,7 @@ func sanitizeProviderDraft(raw map[string]any, existing map[string]any) (map[str
 				toStr, _ := to.(string)
 				from = strings.TrimSpace(from)
 				toStr = strings.TrimSpace(toStr)
-				// Empty "from" is the valid catch-all key (applyModelMapping
-				// honors it); only a missing target drops the rule.
-				if toStr == "" {
+				if from == "" || toStr == "" {
 					continue
 				}
 				mapping[from] = toStr

@@ -89,6 +89,8 @@
   "mappingAllOpus": "所有 Opus 模型",
   "mappingAllSonnet": "所有 Sonnet 模型",
   "mappingAllHaiku": "所有 Haiku 模型",
+  "fieldStatusLabel": "状态栏标签",
+  "fieldStatusLabelHelp": "本地网关下,claude 状态栏显示这个标签而不是真实上游模型名。留空则显示实际模型。",
   "testEachModel": "测试各模型",
   "fieldModelMapping": "模型映射",
   "fieldModelMappingHelp": "每行 from = to",

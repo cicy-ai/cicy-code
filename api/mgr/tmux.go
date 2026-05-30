@@ -1414,13 +1414,40 @@ func ensureAgentCommandLineLive(commandName, label, installCmd, logPathExpr stri
 // Runs on every claude launch (after the install check). Safe to re-run: only
 // the script content is overwritten; the settings.json statusLine key is only
 // inserted when missing so user customizations are preserved.
-func claudeUserStatuslineSetupLines() []string {
+// claudeActiveProvider returns the provider routing for this claude pane:
+// per-pane runtime_ai override if set, else the agent_type default. Used to read
+// the operator-configured StatusLabel for the status line.
+func claudeActiveProvider(shortID string) *providerConfig {
+	if shortID != "" {
+		if ov, _ := loadPaneRuntimeAIOverride(shortID); ov != nil && strings.TrimSpace(ov.ProviderName) != "" {
+			if p, ok := loadProviderByKey(ov.ProviderName); ok {
+				return p
+			}
+		}
+	}
+	if p, ok := loadProviderForAgentType("claude"); ok {
+		return p
+	}
+	return nil
+}
+
+func claudeUserStatuslineSetupLines(brandLabel string) []string {
+	// Behind the local gateway the upstream model varies (deepseek / opus-4-7 /
+	// …) but the product is presented as one offering, so show a fixed brand
+	// label instead of claude's resolved per-request model. brandLabel == ""
+	// (official-login path) keeps claude's real .model.display_name.
+	modelLine := `model=$(echo "$input" | jq -r '.model.display_name // .model.id // "Unknown Model"')`
+	if brandLabel != "" {
+		// Written verbatim into the heredoc; double-quote so spaces/parens in
+		// the label ("Opus 4.8 (1M context)") survive as a single bash value.
+		modelLine = `model="` + strings.ReplaceAll(brandLabel, `"`, `\"`) + `"`
+	}
 	return []string{
 		`mkdir -p "$HOME/.claude"`,
 		`cat > "$HOME/.claude/statusline-command.sh" <<'CICY_STATUSLINE_EOF'`,
 		`#!/usr/bin/env bash`,
 		`input=$(cat)`,
-		`model=$(echo "$input" | jq -r '.model.display_name // .model.id // "Unknown Model"')`,
+		modelLine,
 		`used_pct=$(echo "$input" | jq -r '.context_window.used_percentage // "?"')`,
 		`total_k=$(echo "$input" | jq -r '(.context_window.context_window_size // 0) / 1000 | floor')`,
 		`printf "\033[1;36m[ %s | Context: %s%% / %sk ]\033[0m" "$model" "$used_pct" "$total_k"`,
@@ -2748,7 +2775,16 @@ EOF
 		// that shows the current model + context usage so users can always tell
 		// which model is active deep into a long conversation.
 		if cmdName == "claude" {
-			lines = append(lines, claudeUserStatuslineSetupLines()...)
+			brand := ""
+			if useCustomGateway {
+				// Behind the local gateway, show the provider's configured
+				// status label instead of the real upstream model name — empty
+				// (unset) keeps claude's own model display.
+				if p := claudeActiveProvider(shortID); p != nil {
+					brand = strings.TrimSpace(p.StatusLabel)
+				}
+			}
+			lines = append(lines, claudeUserStatuslineSetupLines(brand)...)
 		}
 		if useCustomGateway {
 			model := resolveClaudeStartupModel(defaultModel, aiCfg, shortID)
