@@ -1,6 +1,6 @@
 {
   "name": "cicy-code",
-  "version": "2.1.15",
+  "version": "2.1.16",
   "description": "CiCy Code - AI-powered development environment",
   "bin": {
     "cicy-code": "bin/cicy-code.js"

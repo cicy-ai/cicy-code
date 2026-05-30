@@ -23,7 +23,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
   en: {
     tipAddCliWindow: "New CLI window\n\nOpen a fresh tmux window in this session.",
     tipRestartAgent: "Restart pane (full)\n\nKills the tmux pane and respawns it from\nscratch. Loses scrollback. Use when the\nshell is wedged.",
-    tipLaunchAgent: "Launch {agent}\n\nRe-source .cicy/boot.sh in the current\nshell, re-export env, restart {agent}.\nUse after Ctrl+C-ing out of the agent.",
+    tipLaunchAgent: "Launch {agent}\n\nRe-source .cicy/boot.sh,\nlaunch Agent.",
     tipUpdateAgent: "Update {agent}\n\nnpm install -g <pkg>@latest. Progress\nprints live in the terminal. Restart {agent}\nafter it finishes.",
     tipReloadPage: "Reload page\n\nReload this cicy-code UI tab.",
     tipPromptArea: "Prompt input area\n\nClick to focus the bottom prompt box —\ntype + Enter sends to the agent.\nUse this when the slow-network server-side\nIME makes typing directly in the terminal\nunreliable.",
@@ -84,7 +84,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
   "zh-CN": {
     tipAddCliWindow: "新建 CLI Window\n\n在当前 session 新开一个 tmux window。",
     tipRestartAgent: "重启整个 Pane\n\n销毁当前 tmux pane 后从头重建,\n滚动历史会丢失。Shell 卡死时用。",
-    tipLaunchAgent: "启动 {agent}\n\n重新 source .cicy/boot.sh,\n刷新环境变量后启动 {agent} 进程。\n适合 Ctrl+C 误退 agent 后用。",
+    tipLaunchAgent: "启动 {agent}\n\n重新 source .cicy/boot.sh,\n启动 Agent。",
     tipUpdateAgent: "更新 {agent}\n\nnpm install -g <pkg>@latest,\n实时进度直接打到终端。\n装完后建议点 ▶ 重启 {agent}。",
     tipReloadPage: "刷新页面\n\n刷新当前 cicy-code UI 标签。",
     tipPromptArea: "Prompt 输入区\n\n点这里聚焦底部 Prompt 输入框,\n输入后回车直接发给 agent。\n用于网络较慢时服务端输入法\n在终端里直接打字不稳的情况。",
