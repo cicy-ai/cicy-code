@@ -268,3 +268,36 @@ func TestHandleProviderTestDraftValidation(t *testing.T) {
 		t.Fatalf("expected ok=false for empty url, got %v", result)
 	}
 }
+
+func TestApplyModelMappingResolution(t *testing.T) {
+	p := &providerConfig{ModelMapping: map[string]string{
+		"claude-opus-4-8": "claude-opus-4-7", // exact
+		"claude-sonnet*":  "deepseek-v4-flash", // prefix
+		"claude-haiku*":   "deepseek-v4-flash",
+	}}
+	cases := map[string]string{
+		"claude-opus-4-8":   "claude-opus-4-7",   // exact wins
+		"claude-opus-4-7":   "claude-opus-4-7",   // unmapped -> unchanged
+		"claude-sonnet-4-6": "deepseek-v4-flash", // prefix
+		"claude-sonnet-4-5": "deepseek-v4-flash",
+		"claude-haiku-4-5":  "deepseek-v4-flash",
+		"deepseek-v4-pro":   "deepseek-v4-pro", // unrelated -> unchanged
+	}
+	for in, want := range cases {
+		if got := p.applyModelMapping(in); got != want {
+			t.Errorf("applyModelMapping(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// Wildcard "" catch-all + longest-prefix-wins.
+	p2 := &providerConfig{ModelMapping: map[string]string{
+		"":              "deepseek-v4-pro",
+		"claude-sonnet*": "x",
+		"claude-sonnet-4*": "y", // longer prefix should win
+	}}
+	if got := p2.applyModelMapping("claude-sonnet-4-6"); got != "y" {
+		t.Errorf("longest-prefix: got %q want y", got)
+	}
+	if got := p2.applyModelMapping("anything-else"); got != "deepseek-v4-pro" {
+		t.Errorf("wildcard catch-all: got %q want deepseek-v4-pro", got)
+	}
+}
