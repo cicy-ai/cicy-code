@@ -168,14 +168,16 @@ func ensureTeamHelperPane() error {
 // pane materialise on first demand. The desktop drawer's <webview> dials
 // /api/chat/ws?agent_id=w-6002 the moment the user clicks "Open Helper";
 // chatbus.handleChatWS invokes ensureBuiltinPaneLazy(agent_id) right
-// before the upgrade. If the requested id is a known built-in and the
-// row is missing, we run the same setup routine setup.go used to call
-// at startup — but only this once, only when actually needed.
+// before the upgrade.
 //
-// Idempotent + safe to call on every WS connect: a single sync.Once per
-// pane id keeps the heavy work to exactly one execution per process,
-// and setupTeamHelperAgent itself short-circuits if the row already
-// exists.
+// sync.Once ensures setupTeamHelperAgent runs exactly once per process
+// instance. After a daemon restart the Once resets, so the pane is
+// always (re)started — whether or not a DB row already existed. This
+// fixes the "ttyd not listening after restart" bug where the old DB
+// existence pre-check prevented startAgentFromConfig from running.
+// setupTeamHelperAgent / ensureTeamHelperPane are idempotent: they update
+// the existing DB row and call startAgentFromConfig (which skips
+// already-running tmux sessions and ttyd listeners).
 
 var lazyBuiltinOnce sync.Map // key = short pane id (e.g. "w-6002") → *sync.Once
 
@@ -193,16 +195,6 @@ func ensureBuiltinPaneLazy(agentID string) {
 	case teamHelperShortPane:
 		// known built-in
 	default:
-		return
-	}
-
-	// Quick existence check — if the pane already has a config row, skip
-	// the heavy path entirely. Avoids hitting setupTeamHelperAgent's
-	// embedded-file write + UPDATE on every WS reconnect.
-	var port int
-	if err := store.QueryRow(
-		"SELECT ttyd_port FROM agent_config WHERE pane_id=?", teamHelperPaneID,
-	).Scan(&port); err == nil && port > 0 {
 		return
 	}
 

@@ -30,10 +30,6 @@ type providerConfig struct {
 	DefaultModels map[string]string `json:"defaultModels"`
 	ModelMapping  map[string]string `json:"modelMapping"`
 	Models        []string          `json:"models"`
-	// StatusLabel, when set, is shown in claude's status line behind the local
-	// gateway instead of the real upstream model name. Operator-configurable
-	// (no hardcoded product label in code).
-	StatusLabel string `json:"statusLabel"`
 }
 
 type runtimeAIProviderOption struct {
@@ -327,7 +323,6 @@ func loadProvidersConfig() *providersConfig {
 						APIKey:        cfgStringValue(itemMap, "apiKey"),
 						Protocol:      cfgStringValue(itemMap, "protocol"),
 						DefaultModel:  cfgStringValue(itemMap, "defaultModel"),
-						StatusLabel:   cfgStringValue(itemMap, "statusLabel"),
 						DefaultModels: make(map[string]string),
 						ModelMapping:  make(map[string]string),
 						Models:        []string{},
