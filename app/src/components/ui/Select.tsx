@@ -26,6 +26,9 @@ interface Props {
   onOpenChange?: (open: boolean) => void;
   placeholder?: string;
   searchable?: boolean;
+  /** Allow choosing a typed value that isn't in `options` (shown as a synthetic
+   * top entry while searching). Lets the From field accept models no list knows. */
+  allowCustom?: boolean;
   className?: string;
   dropdownClassName?: string;
   triggerIcon?: React.ReactNode;
@@ -41,6 +44,7 @@ export default function Select({
   onOpenChange,
   placeholder,
   searchable = false,
+  allowCustom = false,
   className = '',
   dropdownClassName = '',
   triggerIcon,
@@ -128,10 +132,15 @@ export default function Select({
   }, [actionMenu]);
 
   const filtered = useMemo(() => {
-    if (!search) return options;
-    const q = search.toLowerCase();
-    return options.filter(o => o.label.toLowerCase().includes(q) || o.sub?.toLowerCase().includes(q));
-  }, [options, search]);
+    const q = search.trim();
+    const base = !q ? options : options.filter(o => o.label.toLowerCase().includes(q.toLowerCase()) || o.sub?.toLowerCase().includes(q.toLowerCase()));
+    // allowCustom: offer the typed value as a selectable entry when it doesn't
+    // exactly match an existing option, so users can enter arbitrary models.
+    if (allowCustom && q && !options.some(o => o.value === q)) {
+      return [{ value: q, label: q, sub: t('selectUseCustom', 'use this value') }, ...base];
+    }
+    return base;
+  }, [options, search, allowCustom, t]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -196,8 +205,8 @@ export default function Select({
             {triggerIcon}
           </span>
         ) : null}
-        <span data-id="select-auto-4" className={`flex-1 truncate ${selected ? 'text-zinc-200' : 'text-zinc-500'}`}>
-          {selected ? selected.label : resolvedPlaceholder}
+        <span data-id="select-auto-4" className={`flex-1 truncate ${selected || (allowCustom && value) ? 'text-zinc-200' : 'text-zinc-500'}`}>
+          {selected ? selected.label : (allowCustom && value ? value : resolvedPlaceholder)}
         </span>
         <ChevronDown className={`w-3.5 h-3.5 transition-all duration-200 ${open ? 'rotate-180 text-zinc-300' : 'text-zinc-500 group-hover/trigger:text-zinc-300'}`} />
       </button>
