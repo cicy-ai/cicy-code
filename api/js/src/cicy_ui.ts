@@ -156,8 +156,11 @@ body {
    Match that structure via :has() (colored + dim + colored) so it's robust to
    the codex theme's exact colors, and so we hit exactly that line — it isn't
    the literal last child (xterm pads empty rows below it). visibility:hidden
-   keeps the row's space so the layout doesn't shift. */
-.terminal .xterm-rows > div:has(> [class*="xterm-fg-"] + .xterm-dim + [class*="xterm-fg-"]) {
+   keeps the row's space so the layout doesn't shift.
+   Scoped to body.cp-hide-agent-status, which init only sets when this pane is
+   codex AND on the local gateway — official-login / non-codex panes keep the
+   row (the model name there is the user's own choice, not a leaked gateway). */
+body.cp-hide-agent-status .terminal .xterm-rows > div:has(> [class*="xterm-fg-"] + .xterm-dim + [class*="xterm-fg-"]) {
   visibility: hidden !important;
 }
 #cp-loading-overlay {
@@ -1603,13 +1606,33 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     // The toolbar tooltips themselves are static ("启动 Agent" / "更新 Agent") —
     // no per-pane substitution there.
     var paneAgentType = "agent";
-    webtty.requestAPI("GET", "/api/tmux/panes/" + paneId, undefined, apiHeaders)
-        .then(function(resp: any) {
-            var t = resp && resp.agent_type ? String(resp.agent_type).trim() : "";
-            if (!t) return;
-            paneAgentType = t;
-        })
-        .catch(function() { /* leave generic "agent" label for the dialogs */ });
+    var paneMetaResolved = false;
+    // requestAPI tunnels over the terminal WebSocket — at mount time the socket
+    // is usually NOT open yet, so it resolves null and we'd never learn the
+    // agent_type / gateway flag. Make this idempotent and also fire it from the
+    // connection-open handler below so it lands once the socket is live.
+    function resolvePaneMeta(): void {
+        if (paneMetaResolved) return;
+        if (!webtty.isConnectionOpen()) return;
+        webtty.requestAPI("GET", "/api/tmux/panes/" + paneId, undefined, apiHeaders)
+            .then(function(resp: any) {
+                if (!resp) return; // socket raced closed — retry on next open
+                paneMetaResolved = true;
+                var t = resp.agent_type ? String(resp.agent_type).trim() : "";
+                if (t) paneAgentType = t;
+                // Only suppress the leaked model-name status row when this pane
+                // is codex AND routed through the local gateway. Official-login
+                // codex (the user's own model choice) and non-codex panes keep
+                // it. (opencode adaptation was dropped — its status row layout
+                // can't be hidden cleanly without false-hitting scrollback.)
+                var onGateway = !!resp.use_custom_gateway;
+                if (t.toLowerCase() === "codex" && onGateway) {
+                    document.body.classList.add("cp-hide-agent-status");
+                }
+            })
+            .catch(function() { /* leave generic "agent" label for the dialogs */ });
+    }
+    resolvePaneMeta();
 
     // Bottom prompt area: compose the whole line locally, send it in one HTTP
     // request — avoids the per-keystroke websocket round-trips that make the
@@ -2860,6 +2883,9 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             restartBtn.classList.remove("restarting");
             loading.hide();
             loadWindows();
+            // Socket is now live — resolve agent_type / gateway flag (the mount-
+            // time attempt returned null because the socket wasn't open yet).
+            resolvePaneMeta();
         }
     });
 }
