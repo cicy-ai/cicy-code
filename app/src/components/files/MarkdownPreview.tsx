@@ -1,4 +1,4 @@
-import { useState, useCallback, createElement, type ComponentProps } from 'react';
+import { memo, useState, useCallback, createElement, type ComponentProps } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -35,7 +35,11 @@ function formatBytes(n: number): string {
  * - Copy-to-clipboard button on every fenced code block
  * - Heading anchors via auto-generated id (slugified text), with a hover-only "#"
  */
-export default function MarkdownPreview({ source, className = '' }: Props) {
+// Memoized: only re-render when the markdown source (or className) actually
+// changes. react-markdown re-parses + re-highlights the whole document on every
+// render, so without this any parent re-render (cache revalidation, cursor move,
+// save-state change) would rebuild the preview DOM.
+function MarkdownPreview({ source, className = '' }: Props) {
   const [forceRender, setForceRender] = useState(false);
 
   // Guard: don't auto-render an oversized document (would freeze the UI).
@@ -217,6 +221,8 @@ export default function MarkdownPreview({ source, className = '' }: Props) {
     </div>
   );
 }
+
+export default memo(MarkdownPreview);
 
 // --- helpers ---------------------------------------------------------------
 
