@@ -53,7 +53,7 @@ func (mitmAuditAdapter) StartTurn(provider, agentID string, target *url.URL, met
 	}
 
 	// newAIGatewayAuditSession wires replyHooks via newReplyHooksForPane →
-	// drainCallbackHooksForPane internally, so we must NOT drain callbacks here.
+	// peekCallbackHooksForPane internally, so we must NOT touch callbacks here.
 	sess := newAIGatewayAuditSession(provider, agentID, base, suffix, method, headers, body)
 	if err := sess.writeStartSnapshots(); err != nil {
 		log.Printf("[mitm] write current snapshot for %s: %v", agentID, err)
