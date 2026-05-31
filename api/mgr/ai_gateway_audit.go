@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -167,9 +168,12 @@ type aiGatewayAuditSession struct {
 	reply           aiGatewayReplySnapshot
 	replyHooks      []aiGatewayReplyHook
 	lastStatusPush  string
-	// auxiliary 标记：当前请求是 SUGGESTION MODE 等辅助调用，
+	// auxiliary 标记：当前请求是 SUGGESTION MODE / 标题生成等辅助调用，
 	// 不应该污染 current.json / reply.json，但仍然写 mirror（用于诊断）。
 	auxiliary bool
+	// auxKind 进一步区分辅助调用类型：""=主请求，"suggestion"=下一步预测，
+	// "title"=会话标题生成（单独落到 title.json，见 completeFromResponse）。
+	auxKind string
 	// pendingItem 是流式过程中正在累积的 reply.Items 候选（thinking / text / tool_use）。
 	// 当 stream_kind 或 tool 切换时，旧 pending 会被 flush 到 reply.Items 并立刻刷盘。
 	// 这让前端 / IM 推送能在每个 item 完成时实时看到新内容（而不是等整次 HTTP 完成）。
@@ -406,8 +410,8 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 			},
 		},
 	}
-	// 识别辅助调用（SUGGESTION MODE 等）：这种请求不应污染主 reply.json / current.json。
-	auxiliary := aiGatewayIsAuxiliaryRequest(question, payloadMap)
+	// 识别辅助调用（SUGGESTION MODE / 标题生成等）：这种请求不应污染主 reply.json / current.json。
+	auxKind := aiGatewayAuxiliaryKind(question, payloadMap)
 	return &aiGatewayAuditSession{
 		agentID:        agentID,
 		provider:       provider,
@@ -420,7 +424,8 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		current:        current,
 		reply:          reply,
 		replyHooks:     newReplyHooksForPane(agentID, isContinuation),
-		auxiliary:      auxiliary,
+		auxiliary:      auxKind != "",
+		auxKind:        auxKind,
 	}
 }
 
@@ -572,6 +577,31 @@ func (s *aiGatewayAuditSession) completeFromError(err error) {
 	s.completeFromResponse(502, http.Header{"Content-Type": []string{"application/json"}}, nil, err)
 }
 
+// aiGatewayMaybeGunzip returns the gzip-decompressed body when the upstream sent
+// Content-Encoding: gzip (or the body carries the gzip magic 1F 8B). Used so the
+// audit parser sees plaintext; the original bytes still reach the client. Falls
+// back to the input on any error so a bad/partial stream never loses the body.
+func aiGatewayMaybeGunzip(headers http.Header, body []byte) []byte {
+	if len(body) < 2 {
+		return body
+	}
+	enc := strings.ToLower(headers.Get("Content-Encoding"))
+	isGzip := strings.Contains(enc, "gzip") || (body[0] == 0x1f && body[1] == 0x8b)
+	if !isGzip {
+		return body
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(body))
+	if err != nil {
+		return body
+	}
+	defer zr.Close()
+	out, err := io.ReadAll(zr)
+	if err != nil || len(out) == 0 {
+		return body
+	}
+	return out
+}
+
 func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers http.Header, responseBody []byte, responseErr error) {
 	if s == nil {
 		return
@@ -584,6 +614,11 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	s.finalized = true
 
 	updatedAt := time.Now().UTC().Format(time.RFC3339)
+	// Upstreams that honor the client's Accept-Encoding return a gzip body. The
+	// audit pipeline passes those bytes through to the client untouched, but here
+	// we must parse PLAINTEXT — otherwise the gzip blob lands in reply.json's item
+	// text and renders as mojibake. Decompress for parsing only.
+	responseBody = aiGatewayMaybeGunzip(headers, responseBody)
 	parsed := aiGatewayParseResponse(headers, responseBody)
 	failed := responseErr != nil || statusCode >= 400
 	status := "completed"
@@ -710,6 +745,9 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 		if err := aiGatewayWriteReplySnapshot(s.agentID, s.reply); err != nil {
 			log.Printf("[ai-gateway] write reply snapshot failed for %s: %v", s.agentID, err)
 		}
+	} else if s.auxKind == "title" {
+		// 标题生成请求：不碰主 reply.json，单独落到 title.json。
+		aiGatewayWriteTitleFile(s.agentID, s.turnID, s.model, status, parsed.Answer, updatedAt)
 	}
 	replySnapshot := s.reply
 	replyHooks := s.replyHooks
@@ -3468,31 +3506,93 @@ func aiGatewayIsToolContinuation(body map[string]interface{}) bool {
 	return false
 }
 
-// aiGatewayIsAuxiliaryRequest 识别 SUGGESTION MODE / 提示猜测等辅助调用。
-// 这类调用不应该污染主 reply.json / current.json（仍然走 mirror 用于诊断）。
-//
-// 判别规则（任一命中即认为是 auxiliary）：
-//   - question 文本以 "[SUGGESTION MODE:" 开头（Claude Code 的 next-step 预测）
-//   - body.metadata.purpose / body.metadata.kind 标记为 suggestion
+// aiGatewayIsAuxiliaryRequest 判断当前请求是否是辅助调用（不应污染主 reply.json）。
 func aiGatewayIsAuxiliaryRequest(question string, body map[string]interface{}) bool {
+	return aiGatewayAuxiliaryKind(question, body) != ""
+}
+
+// aiGatewayAuxiliaryKind 识别 SUGGESTION MODE / 标题生成等辅助调用并返回其类型。
+// 这类调用不应该污染主 reply.json / current.json；其中 "title" 还会单独落到 title.json。
+//
+// 返回值：
+//   - ""           主请求（用户可见的那一轮）
+//   - "suggestion" Claude Code 的 next-step 预测 / metadata 标记为 suggestion
+//   - "title"      CLI（opencode 等）在新会话首条消息后另发的"生成会话标题"请求
+func aiGatewayAuxiliaryKind(question string, body map[string]interface{}) string {
 	if q := strings.TrimSpace(question); q != "" {
-		upper := strings.ToUpper(q)
-		if strings.HasPrefix(upper, "[SUGGESTION MODE") {
-			return true
+		if strings.HasPrefix(strings.ToUpper(q), "[SUGGESTION MODE") {
+			return "suggestion"
 		}
 	}
 	if body == nil {
-		return false
+		return ""
 	}
 	if meta := aiGatewayMap(body["metadata"]); len(meta) > 0 {
 		for _, key := range []string{"purpose", "kind", "category"} {
 			val := strings.ToLower(strings.TrimSpace(aiGatewayString(meta[key])))
 			if strings.Contains(val, "suggestion") {
-				return true
+				return "suggestion"
 			}
 		}
 	}
-	return false
+	if aiGatewayLooksLikeTitleRequest(body) {
+		return "title"
+	}
+	return ""
+}
+
+// aiGatewayLooksLikeTitleRequest 识别"会话标题生成"请求。opencode 等 CLI 在新会话
+// 首条消息后会另发一个独立请求，其 system 指令就是 "You are a title generator..."。
+// 这类请求和主回答请求并发，共享同一 agent 的 current.json / reply.json 会互相覆盖，
+// 所以单独识别出来落到 title.json。
+//
+// 关键：只在 **system 指令**上做前缀锚定匹配，绝不扫 messages/user 内容。否则一段
+// 正常对话只要文本里**提到**"you are a title generator"（比如在讨论这个功能本身），
+// 就会被误判成标题请求，导致它的主 reply.json / current.json 被跳过——这正是之前
+// 把网关下的 current.json/reply.json"改坏"的根因。
+func aiGatewayLooksLikeTitleRequest(body map[string]interface{}) bool {
+	if body == nil {
+		return false
+	}
+	sys := strings.ToLower(strings.TrimSpace(aiGatewayTitleSystemInstruction(body)))
+	return strings.HasPrefix(sys, "you are a title generator")
+}
+
+// aiGatewayTitleSystemInstruction 取出请求的 system 指令文本（仅 system，不含对话内容）。
+// 兼容 Anthropic 顶层 system（string 或 block 数组）与 OpenAI chat 的首条 system 消息。
+func aiGatewayTitleSystemInstruction(body map[string]interface{}) string {
+	if v, ok := body["system"]; ok && v != nil {
+		if t := strings.TrimSpace(aiGatewayFlattenPromptValue(v)); t != "" {
+			return t
+		}
+	}
+	for _, m := range aiGatewayExtractMessages(body) {
+		if strings.EqualFold(strings.TrimSpace(aiGatewayString(m["role"])), "system") {
+			return strings.TrimSpace(aiGatewayFlattenPromptValue(m["content"]))
+		}
+	}
+	return ""
+}
+
+// aiGatewayWriteTitleFile 把会话标题生成的结果落到 agent 的 title.json（独立于
+// 主 reply.json）。title 取自解析出的 answer 文本。
+func aiGatewayWriteTitleFile(agentID, turnID, model, status, title, updatedAt string) {
+	title = strings.TrimSpace(title)
+	payload := M{
+		"turn_id":    turnID,
+		"model":      model,
+		"status":     status,
+		"title":      title,
+		"updated_at": updatedAt,
+	}
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return
+	}
+	path := filepath.Join(aiGatewayHistoryDir(agentID), "title.json")
+	if err := os.WriteFile(path, raw, 0644); err != nil {
+		log.Printf("[ai-gateway] write title.json failed for %s: %v", agentID, err)
+	}
 }
 
 func aiGatewayExtractRequestHistory(body map[string]interface{}) (string, interface{}) {
