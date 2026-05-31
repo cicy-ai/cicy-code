@@ -3425,7 +3425,6 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 	if trimmed == "" {
 		payload := map[string]interface{}{}
 		payload = agentInspectorInjectPrompt(payload, provider, agentID)
-		payload = injectCicyToolDefs(payload, provider)
 		payload = agentInspectorOverrideModel(payload, agentID)
 		if provider == "anthropic" {
 			payload = agentInspectorNormalizeAnthropicSystem(payload)
@@ -3445,7 +3444,6 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 		return requestBody
 	}
 	payload = agentInspectorInjectPrompt(payload, provider, agentID)
-	payload = injectCicyToolDefs(payload, provider)
 	payload = agentInspectorOverrideModel(payload, agentID)
 	if provider == "anthropic" {
 		payload = agentInspectorNormalizeAnthropicSystem(payload)
