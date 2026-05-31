@@ -7,7 +7,7 @@ import {
   Search, Loader2, CheckCircle2, AlertTriangle, RefreshCw, X, Send,
   Globe, Activity, Server, Plug, Mail, FileText, Code, Terminal, Key, Shield, Package, Cloud,
   Copy, Check, XCircle, Languages,
-  ExternalLink, Tag, User, Calendar, HardDrive, Hash, FileCode, BookOpen, ShieldCheck,
+  ExternalLink, Tag, User, Calendar, HardDrive, Hash, FileCode, BookOpen, ShieldCheck, Lock,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import apiService from '../../services/api';
@@ -53,6 +53,9 @@ interface MarketSkill {
   installed_version?: string;
   has_update?: boolean;
   source?: string;
+  // Name of the private registry this skill came from (e.g. "team-a"). Empty
+  // for the public registry. When set, the row shows a private badge.
+  registry_source?: string;
 }
 
 interface SkillDetailPayload {
@@ -142,6 +145,7 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [registriesOpen, setRegistriesOpen] = useState(false);
   const [proxyManagerOpen, setProxyManagerOpen] = useState(false);
   const [proxySshManagerOpen, setProxySshManagerOpen] = useState(false);
   const [frpServerManagerOpen, setFrpServerManagerOpen] = useState(false);
@@ -312,7 +316,16 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
                 {f === 'available' && `${t('marketplaceAvailable')} ${counts.total - counts.installed}`}
               </button>
             ))}
-            <button data-id="skill-market-refresh" onClick={load} className="ml-auto p-1 text-zinc-500 hover:text-zinc-300 rounded" title={t('marketplaceRetry')}>
+            <button
+              data-id="skill-market-registries"
+              onClick={() => setRegistriesOpen(true)}
+              className="ml-auto p-1 text-zinc-500 hover:text-zinc-300 rounded inline-flex items-center gap-1"
+              title="私有库 / Private registries"
+            >
+              <Lock className="w-3 h-3" />
+              <span className="text-[10px]">私有库</span>
+            </button>
+            <button data-id="skill-market-refresh" onClick={load} className="p-1 text-zinc-500 hover:text-zinc-300 rounded" title={t('marketplaceRetry')}>
               <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
             </button>
           </div>
@@ -347,6 +360,13 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
           )}
         </div>
       </div>
+
+      {registriesOpen && (
+        <RegistriesDialog
+          onClose={() => setRegistriesOpen(false)}
+          onChanged={load}
+        />
+      )}
 
       {selectedName && (
         <SkillDetailModal
@@ -421,6 +441,328 @@ function SkillListSkeleton() {
   );
 }
 
+// RegistriesDialog manages the private-registry source list. This is the UI
+// entry point teammates use to add a team's registry by pasting its address +
+// token; afterwards private skills appear in the marketplace (badged).
+interface RegistrySourceView {
+  name: string;
+  url: string;
+  has_token: boolean;
+  public: boolean;
+}
+
+function RegistriesDialog({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+  const [tab, setTab] = useState<'connect' | 'host'>('connect');
+  const [sources, setSources] = useState<RegistrySourceView[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [name, setName] = useState('');
+  const [url, setUrl] = useState('');
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiService.listSkillRegistries();
+      setSources((res?.data?.sources || []) as RegistrySourceView[]);
+    } catch (e: any) {
+      setError(e?.message || 'failed to load sources');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const add = async () => {
+    if (!url.trim()) { setError('请填写地址 URL'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      await apiService.addSkillRegistry({ name: name.trim(), url: url.trim(), token: token.trim() });
+      setName(''); setUrl(''); setToken('');
+      await refresh();
+      onChanged();
+    } catch (e: any) {
+      setError(e?.response?.data?.error || e?.message || 'add failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (key: string) => {
+    setBusy(true);
+    setError('');
+    try {
+      await apiService.removeSkillRegistry(key);
+      await refresh();
+      onChanged();
+    } catch (e: any) {
+      setError(e?.response?.data?.error || e?.message || 'remove failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return createPortal(
+    <div
+      data-id="skill-registries-overlay"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        data-id="skill-registries-dialog"
+        className="w-[460px] max-h-[80vh] flex flex-col bg-[#0e0e0e] border border-[var(--vsc-border)] rounded-lg shadow-xl overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-4 py-3 border-b border-[var(--vsc-border)] flex items-center gap-2">
+          <Lock className="w-4 h-4 text-violet-300" />
+          <div className="text-sm font-medium text-zinc-100">私有 Skill 库</div>
+          <button onClick={onClose} className="ml-auto p-1 text-zinc-500 hover:text-zinc-200 rounded" data-id="skill-registries-close">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="px-4 pt-3 flex items-center gap-1 text-[11px]" data-id="skill-registries-tabs">
+          <button onClick={() => setTab('connect')} className={cn('px-2 py-0.5 rounded', tab === 'connect' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300')}>连接私有库</button>
+          <button onClick={() => setTab('host')} className={cn('px-2 py-0.5 rounded', tab === 'host' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300')}>托管本地库</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {tab === 'connect' && <>
+          <p className="text-[11px] text-zinc-500 leading-relaxed">
+            把同事给你的「地址 + token」加进来,该团队的私有 skill 就会出现在列表里(带 🔒 徽章)。公开库默认已在,无需配置。
+          </p>
+
+          {/* current sources */}
+          <div data-id="skill-registries-list" className="space-y-1.5">
+            {loading ? (
+              <div className="text-[11px] text-zinc-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> 加载中…</div>
+            ) : sources.map(s => (
+              <div key={s.name} data-id={`skill-registry-${s.name}`} className="flex items-center gap-2 px-2.5 py-1.5 rounded bg-white/[0.03] border border-[var(--vsc-border)]/40">
+                <span className={cn('text-[10px] px-1 py-0.5 rounded inline-flex items-center gap-0.5', s.public ? 'bg-zinc-500/15 text-zinc-300' : 'bg-violet-500/15 text-violet-300')}>
+                  {s.public ? <Globe className="w-2.5 h-2.5" /> : <Lock className="w-2.5 h-2.5" />}
+                  {s.name}
+                </span>
+                <span className="text-[11px] text-zinc-500 truncate flex-1" title={s.url}>{s.url}</span>
+                {s.has_token && <Key className="w-3 h-3 text-zinc-600" />}
+                {!s.public && (
+                  <button
+                    data-id={`skill-registry-remove-${s.name}`}
+                    onClick={() => remove(s.name)}
+                    disabled={busy}
+                    className="p-0.5 text-zinc-600 hover:text-red-400 rounded disabled:opacity-40"
+                    title="移除"
+                  >
+                    <XCircle className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* add form */}
+          <div className="space-y-2 pt-2 border-t border-[var(--vsc-border)]/40">
+            <div className="text-[11px] font-medium text-zinc-400">添加私有库</div>
+            <input
+              data-id="skill-registry-add-url"
+              value={url}
+              onChange={e => setUrl(e.target.value)}
+              placeholder="地址 URL,如 http://team-host:8787"
+              className="w-full px-2 py-1.5 text-xs bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+            />
+            <div className="flex gap-2">
+              <input
+                data-id="skill-registry-add-name"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="名称(可选,如 team-a)"
+                className="flex-1 px-2 py-1.5 text-xs bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+              />
+              <input
+                data-id="skill-registry-add-token"
+                value={token}
+                onChange={e => setToken(e.target.value)}
+                placeholder="token(可选)"
+                type="password"
+                className="flex-1 px-2 py-1.5 text-xs bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+              />
+            </div>
+            {error && <div data-id="skill-registry-error" className="text-[11px] text-red-400">{error}</div>}
+            <button
+              data-id="skill-registry-add-btn"
+              onClick={add}
+              disabled={busy || !url.trim()}
+              className="w-full px-3 py-1.5 text-xs rounded bg-violet-500/20 text-violet-200 hover:bg-violet-500/30 disabled:opacity-40 inline-flex items-center justify-center gap-1"
+            >
+              {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lock className="w-3 h-3" />}
+              添加
+            </button>
+          </div>
+          </>}
+
+          {tab === 'host' && <LocalRegistryPanel onChanged={onChanged} />}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// LocalRegistryPanel — host your own private registry on this machine: start/
+// stop the in-process server, see/copy the token + LAN share URLs, publish
+// local skill directories, and list what's published.
+function LocalRegistryPanel({ onChanged }: { onChanged: () => void }) {
+  const [status, setStatus] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [port, setPort] = useState('8787');
+  const [publishPath, setPublishPath] = useState('');
+  const [copied, setCopied] = useState('');
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiService.getLocalRegistry();
+      setStatus(res?.data || null);
+      if (res?.data?.port) setPort(String(res.data.port));
+    } catch (e: any) {
+      setError(e?.message || 'failed');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const copy = (text: string, key: string) => {
+    navigator.clipboard?.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(''), 1200);
+  };
+
+  const start = async () => {
+    setBusy(true); setError('');
+    try {
+      await apiService.startLocalRegistry({ port: Number(port) || 8787 });
+      await refresh();
+      onChanged();
+    } catch (e: any) { setError(e?.response?.data?.detail || e?.message || 'start failed'); }
+    finally { setBusy(false); }
+  };
+  const stop = async () => {
+    setBusy(true); setError('');
+    try { await apiService.stopLocalRegistry(); await refresh(); }
+    catch (e: any) { setError(e?.response?.data?.detail || e?.message || 'stop failed'); }
+    finally { setBusy(false); }
+  };
+  const publish = async () => {
+    if (!publishPath.trim()) return;
+    setBusy(true); setError('');
+    try {
+      await apiService.publishLocalRegistry(publishPath.trim());
+      setPublishPath('');
+      await refresh();
+      onChanged();
+    } catch (e: any) { setError(e?.response?.data?.detail || e?.message || 'publish failed'); }
+    finally { setBusy(false); }
+  };
+
+  if (loading && !status) {
+    return <div className="text-[11px] text-zinc-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> 加载中…</div>;
+  }
+  const running = !!status?.running;
+  const skills = (status?.skills || []) as { name: string; version: string }[];
+  const shareUrls = (status?.share_urls || []) as string[];
+
+  return (
+    <div className="space-y-3" data-id="local-registry-panel">
+      <p className="text-[11px] text-zinc-500 leading-relaxed">
+        在本机托管一个私有 skill 库,把下面的「地址 + token」发给同事,他们在「连接私有库」里填进去即可使用。
+      </p>
+
+      <div className="flex items-center gap-2">
+        <span className={cn('text-[10px] px-1.5 py-0.5 rounded inline-flex items-center gap-1', running ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-400')}>
+          <Server className="w-2.5 h-2.5" /> {running ? '运行中' : '已停止'}
+        </span>
+        <input
+          data-id="local-registry-port"
+          value={port}
+          onChange={e => setPort(e.target.value)}
+          disabled={running}
+          className="w-20 px-2 py-1 text-xs bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-zinc-300 disabled:opacity-50 focus:outline-none focus:border-zinc-500"
+          placeholder="端口"
+        />
+        {running ? (
+          <button data-id="local-registry-stop" onClick={stop} disabled={busy} className="px-3 py-1 text-xs rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 disabled:opacity-40">停止</button>
+        ) : (
+          <button data-id="local-registry-start" onClick={start} disabled={busy} className="px-3 py-1 text-xs rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-40 inline-flex items-center gap-1">
+            {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Server className="w-3 h-3" />} 启动
+          </button>
+        )}
+      </div>
+
+      {error && <div className="text-[11px] text-red-400">{error}</div>}
+
+      {running && (
+        <>
+          {/* token */}
+          <div className="space-y-1">
+            <div className="text-[11px] text-zinc-400">读取 token(发给同事)</div>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 px-2 py-1 text-[11px] bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-violet-300 truncate font-mono">{status?.token}</code>
+              <button onClick={() => copy(status?.token, 'token')} className="p-1 text-zinc-500 hover:text-zinc-200 rounded" title="复制">
+                {copied === 'token' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </div>
+
+          {/* share urls */}
+          {shareUrls.length > 0 && (
+            <div className="space-y-1">
+              <div className="text-[11px] text-zinc-400">局域网地址</div>
+              {shareUrls.map(u => (
+                <div key={u} className="flex items-center gap-2">
+                  <code className="flex-1 px-2 py-1 text-[11px] bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-zinc-300 truncate font-mono">{u}</code>
+                  <button onClick={() => copy(u, u)} className="p-1 text-zinc-500 hover:text-zinc-200 rounded" title="复制">
+                    {copied === u ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* publish */}
+          <div className="space-y-2 pt-2 border-t border-[var(--vsc-border)]/40">
+            <div className="text-[11px] font-medium text-zinc-400">发布 skill 到本地库</div>
+            <div className="flex gap-2">
+              <input
+                data-id="local-registry-publish-path"
+                value={publishPath}
+                onChange={e => setPublishPath(e.target.value)}
+                placeholder="skill 目录绝对路径"
+                className="flex-1 px-2 py-1.5 text-xs bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+              />
+              <button data-id="local-registry-publish-btn" onClick={publish} disabled={busy || !publishPath.trim()} className="px-3 py-1.5 text-xs rounded bg-violet-500/20 text-violet-200 hover:bg-violet-500/30 disabled:opacity-40">发布</button>
+            </div>
+            {skills.length > 0 && (
+              <div className="space-y-1 pt-1">
+                {skills.map(s => (
+                  <div key={s.name} className="text-[11px] text-zinc-500 flex items-center gap-1.5">
+                    <Package className="w-3 h-3 text-zinc-600" /> {s.name} <span className="text-zinc-700">v{s.version}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function SkillRow({ skill, selected, onClick }: {
   skill: MarketSkill;
   selected: boolean;
@@ -449,6 +791,16 @@ function SkillRow({ skill, selected, onClick }: {
         <div data-id="skill-row-info" className="flex-1 min-w-0">
           <div data-id="skill-row-title-row" className="flex items-center gap-2 mb-0.5">
             <div data-id="skill-row-title" className="text-xs font-medium text-zinc-200 truncate">{skill.title}</div>
+            {skill.registry_source && (
+              <span
+                className="text-[10px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-300 inline-flex items-center gap-0.5 shrink-0"
+                data-id={`skill-market-private-${skill.name}`}
+                title={`私有库: ${skill.registry_source}`}
+              >
+                <Lock className="w-2.5 h-2.5" />
+                <span>{skill.registry_source}</span>
+              </span>
+            )}
             {installed && !skill.has_update && (
               <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400 inline-flex items-center" data-id={`skill-market-installed-${skill.name}`}>
                 <CheckCircle2 className="w-2.5 h-2.5" />

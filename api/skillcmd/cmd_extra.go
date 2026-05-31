@@ -43,8 +43,6 @@ func cmdUpdate(args []string) error {
 	}
 	results := []updateResult{}
 
-	r := NewRegistry()
-
 	for _, name := range targets {
 		entry := findInstalled(cfg, name)
 		if entry == nil {
@@ -55,7 +53,12 @@ func cmdUpdate(args []string) error {
 			results = append(results, updateResult{Name: name, From: entry.Version, Error: "local source — use 'skill dev' to refresh"})
 			continue
 		}
-		// fetch latest
+		// fetch latest from whichever source currently has it
+		r, err := registryForSkill(name, "")
+		if err != nil {
+			results = append(results, updateResult{Name: name, From: entry.Version, Error: err.Error()})
+			continue
+		}
 		d, err := r.GetDetail(name)
 		if err != nil {
 			results = append(results, updateResult{Name: name, From: entry.Version, Error: err.Error()})
@@ -263,31 +266,31 @@ func cmdSearch(args []string) error {
 	q := strings.Join(pos, " ")
 	jsonOut := contains(args, "--json")
 
-	r := NewRegistry()
-	resp, err := r.ListSkills(q, "", "", 0, 0)
+	items, err := mergedCatalog(q, "", "")
 	if err != nil {
 		return err
 	}
 
 	if jsonOut {
-		emitJSON(map[string]interface{}{"ok": true, "data": resp})
+		emitJSON(map[string]interface{}{"ok": true, "data": items})
 		return nil
 	}
 
-	if resp.Total == 0 {
+	if len(items) == 0 {
 		fmt.Printf("(no skills match %q)\n", q)
 		return nil
 	}
-	fmt.Printf("%-22s %-8s %-12s %s\n", "NAME", "VERSION", "CATEGORY", "DESCRIPTION")
-	fmt.Println(strings.Repeat("-", 80))
-	for _, s := range resp.Skills {
+	fmt.Printf("%-22s %-8s %-12s %-10s %s\n", "NAME", "VERSION", "CATEGORY", "SOURCE", "DESCRIPTION")
+	fmt.Println(strings.Repeat("-", 90))
+	for _, it := range items {
+		s := it.Summary
 		desc := s.Description
-		if len(desc) > 60 {
-			desc = desc[:57] + "..."
+		if len(desc) > 48 {
+			desc = desc[:45] + "..."
 		}
-		fmt.Printf("%-22s %-8s %-12s %s\n", s.Name, s.Version, s.Category, desc)
+		fmt.Printf("%-22s %-8s %-12s %-10s %s\n", s.Name, s.Version, s.Category, it.Source, desc)
 	}
-	fmt.Printf("\n%d skill(s) match %q.\n", resp.Total, q)
+	fmt.Printf("\n%d skill(s) match %q.\n", len(items), q)
 	return nil
 }
 

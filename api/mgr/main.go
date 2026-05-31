@@ -350,6 +350,10 @@ Options:
 	http.HandleFunc("/api/skills/run", wa(handleSkillRun))
 	http.HandleFunc("/api/skill-market", wa(handleSkillMarketList))
 	http.HandleFunc("/api/skill-market/", wa(handleSkillMarketAction))
+	http.HandleFunc("/api/skill-registries", wa(handleSkillRegistries))
+	http.HandleFunc("/api/skill-registries/", wa(handleSkillRegistries))
+	http.HandleFunc("/api/local-registry", wa(handleLocalRegistry))
+	http.HandleFunc("/api/local-registry/", wa(handleLocalRegistry))
 	http.HandleFunc("/api/skill-config/google", wa(handleGoogleSkillConfig))
 	http.HandleFunc("/api/skill-config/google/connect", wa(handleGoogleSkillConfig))
 	http.HandleFunc("/api/skill-config/google/device-connect", wa(handleGoogleSkillConfig))
@@ -531,6 +535,8 @@ Options:
 		log.Println("[shutdown] stopping...")
 		os.Exit(0)
 	}()
+
+	maybeAutostartLocalRegistry()
 
 	log.Fatal(http.ListenAndServe(bind+":"+port, globalCORS(withGzip(http.DefaultServeMux))))
 }

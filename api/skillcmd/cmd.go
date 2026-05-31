@@ -33,31 +33,31 @@ func cmdList(args []string) error {
 	cat := flagValue(args, "--category")
 	agent := flagValue(args, "--agent")
 
-	r := NewRegistry()
-	resp, err := r.ListSkills(q, cat, agent, 0, 0)
+	items, err := mergedCatalog(q, cat, agent)
 	if err != nil {
 		return err
 	}
 
 	if jsonOut {
-		emitJSON(map[string]interface{}{"ok": true, "data": resp})
+		emitJSON(map[string]interface{}{"ok": true, "data": items})
 		return nil
 	}
 
-	if resp.Total == 0 {
+	if len(items) == 0 {
 		fmt.Println("(no skills found)")
 		return nil
 	}
-	fmt.Printf("%-22s %-8s %-12s %s\n", "NAME", "VERSION", "CATEGORY", "DESCRIPTION")
-	fmt.Println(strings.Repeat("-", 80))
-	for _, s := range resp.Skills {
+	fmt.Printf("%-22s %-8s %-12s %-10s %s\n", "NAME", "VERSION", "CATEGORY", "SOURCE", "DESCRIPTION")
+	fmt.Println(strings.Repeat("-", 90))
+	for _, it := range items {
+		s := it.Summary
 		desc := s.Description
-		if len(desc) > 60 {
-			desc = desc[:57] + "..."
+		if len(desc) > 48 {
+			desc = desc[:45] + "..."
 		}
-		fmt.Printf("%-22s %-8s %-12s %s\n", s.Name, s.Version, s.Category, desc)
+		fmt.Printf("%-22s %-8s %-12s %-10s %s\n", s.Name, s.Version, s.Category, it.Source, desc)
 	}
-	fmt.Printf("\n%d skill(s).\n", resp.Total)
+	fmt.Printf("\n%d skill(s).\n", len(items))
 	return nil
 }
 
@@ -72,11 +72,14 @@ func cmdInfo(args []string) error {
 	if len(target) == 0 {
 		return fmt.Errorf("missing <name>")
 	}
-	name, version := parseNameVersion(target[0])
+	source, spec := splitSourceSkill(target[0])
+	name, version := parseNameVersion(spec)
 
-	r := NewRegistry()
+	r, err := registryForSkill(name, source)
+	if err != nil {
+		return err
+	}
 	var d *SkillDetail
-	var err error
 	if version == "" {
 		d, err = r.GetDetail(name)
 	} else {
@@ -148,12 +151,15 @@ func cmdInstall(args []string) error {
 	if len(target) == 0 {
 		return fmt.Errorf("usage: cicy-code skill install <name>[@<version>]")
 	}
-	name, wantVersion := parseNameVersion(target[0])
+	source, spec := splitSourceSkill(target[0])
+	name, wantVersion := parseNameVersion(spec)
 
-	// 1. resolve manifest
-	r := NewRegistry()
+	// 1. resolve manifest (pick the source that has the skill)
+	r, err := registryForSkill(name, source)
+	if err != nil {
+		return err
+	}
 	var d *SkillDetail
-	var err error
 	if wantVersion == "" {
 		d, err = r.GetDetail(name)
 	} else {
@@ -168,22 +174,23 @@ func cmdInstall(args []string) error {
 	}
 
 	if !jsonOut {
-		fmt.Printf("→ installing %s@%s\n", m.Name, m.Version)
+		fmt.Printf("→ installing %s@%s (from %s)\n", m.Name, m.Version, r.Name)
 		fmt.Printf("  url:    %s\n", m.Publish.DownloadURL)
 		fmt.Printf("  sha256: %s\n", m.Publish.SHA256)
 	}
 
 	// 2. download + verify
-	zipPath, err := downloadAndVerify(m.Name, m.Version, m.Publish.DownloadURL, m.Publish.SHA256)
+	zipPath, err := downloadAndVerify(m.Name, m.Version, m.Publish.DownloadURL, m.Publish.SHA256, r)
 	if err != nil {
 		return fmt.Errorf("download: %w", err)
 	}
 
-	// 3. extract
-	if err := ensureDir(skillsRoot()); err != nil {
+	// 3. extract — into the source-based layout (public flat / private/ / team/<src>/)
+	parent := installParentDir(r)
+	if err := ensureDir(parent); err != nil {
 		return err
 	}
-	skillPath, err := extractZip(zipPath, m.Name, skillsRoot())
+	skillPath, err := extractZip(zipPath, m.Name, parent)
 	if err != nil {
 		return fmt.Errorf("extract: %w", err)
 	}
@@ -237,6 +244,7 @@ func cmdInstall(args []string) error {
 		},
 		SHA256:       m.Publish.SHA256,
 		AgentsSynced: synced,
+		InstallDir:   skillPath,
 	})
 	if err := writeInstalled(cfg); err != nil {
 		return err
@@ -279,8 +287,13 @@ func cmdRemove(args []string) error {
 		return fmt.Errorf("skill not installed: %s", name)
 	}
 
-	// 1. remove skill dir
-	_ = os.RemoveAll(skillDir(name))
+	// 1. remove skill dir (source-based layout aware)
+	dir := skillDir(name)
+	if entry.InstallDir != "" {
+		dir = entry.InstallDir
+	}
+	_ = os.RemoveAll(dir)
+	pruneEmptyInstallParents(dir)
 
 	// 2. remove ~/.local/bin/<name>
 	_ = os.Remove(localBinPath(name))

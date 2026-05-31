@@ -108,12 +108,17 @@ type InstalledConfig struct {
 }
 
 type InstalledSkill struct {
-	Name          string             `json:"name"`
-	Version       string             `json:"version"`
-	InstalledAt   time.Time          `json:"installed_at"`
-	Source        InstalledSource    `json:"source"`
-	SHA256        string             `json:"sha256,omitempty"`
-	AgentsSynced  []string           `json:"agents_synced,omitempty"`
+	Name         string          `json:"name"`
+	Version      string          `json:"version"`
+	InstalledAt  time.Time       `json:"installed_at"`
+	Source       InstalledSource `json:"source"`
+	SHA256       string          `json:"sha256,omitempty"`
+	AgentsSynced []string        `json:"agents_synced,omitempty"`
+	// InstallDir is the on-disk directory the skill was extracted to. With the
+	// source-based layout this is ~/cicy-ai/skills/<name> (public),
+	// .../private/<name> (own local registry), or .../team/<src>/<name>.
+	// Empty for legacy installs → callers fall back to the flat skillDir(name).
+	InstallDir string `json:"install_dir,omitempty"`
 }
 
 type InstalledSource struct {
