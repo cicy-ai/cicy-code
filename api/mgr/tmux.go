@@ -5235,6 +5235,22 @@ func readMihomoGlobalPassword() string {
 // use_custom_gateway, default_model, and proxy/allow settings; once the new
 // agent is ready, the source pane's current.raw.md content is sent as a prompt.
 //
+// forkInheritPrompt is sent to a freshly-forked agent. It reframes the source's
+// conversation dump as the fork's OWN inherited memory (not a document to
+// review), so the fork resumes the work instead of summarizing it and reporting
+// back to the source agent. Args: %s = source agent id, %s = path to the dump.
+const forkInheritPrompt = `You are a fork of agent %s — its continuation, not a fresh assistant.
+
+The file %s contains that agent's COMPLETE prior conversation. It is now YOUR OWN memory and working context. Read it to absorb everything so far: the task, the decisions already made, the current state, and what still remains to be done.
+
+Strict rules:
+- Treat the file as your own history — NOT as a document handed to you to review.
+- Do NOT write or output a summary of it.
+- Do NOT message, notify, report to, or reply to anyone about it — not the source agent, not a master/supervisor, not the user. Stay silent about the handoff.
+- Do NOT describe or comment on the file's contents.
+
+Once you have absorbed the context, silently take over exactly where the source agent left off and continue its unfinished work. If the very next step is genuinely ambiguous, stop and wait for instructions rather than asking or reporting.`
+
 // POST /api/tmux/fork { source_pane_id: "w-10001", title?: "..." }
 func handleForkPane(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -5264,46 +5280,26 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read source summary (prefer summary.md > raw.md)
+	// Step 1: regenerate the source's raw basic-conversation dump (synchronous —
+	// must finish before the fork is prompted to read it). agent-summary now
+	// writes <conversation_id>.md + a stable current.md symlink itself and is a
+	// cheap local parse (no AI), so just regenerate and hand the fork current.md.
 	summaryDir := filepath.Join(srcWorkspace.String, ".cicy", "history", "summary")
-	summaryPath := filepath.Join(summaryDir, "current.summary.md")
-	rawPath := filepath.Join(summaryDir, "current.raw.md")
 	usedPath := ""
 	short := shortPaneID(srcID)
 
-	// Step 1: generate summary (synchronous — must complete before creating agent).
-	// Reuse existing raw.md if fresh (< 5 minutes).
-	const summaryFreshness = 5 * time.Minute
-	if info, err := os.Stat(rawPath); err == nil && info.Size() > 0 {
-		if time.Since(info.ModTime()) < summaryFreshness {
-			usedPath = rawPath
-			log.Printf("[fork] %s reusing fresh raw.md (age=%s)", short, time.Since(info.ModTime()).Round(time.Second))
-		}
+	_ = os.MkdirAll(summaryDir, 0755)
+	start := time.Now()
+	if out, genErr := exec.Command("agent-summary", short).Output(); genErr != nil {
+		log.Printf("[fork] agent-summary failed: %v", genErr)
+	} else {
+		log.Printf("[fork] %s summary generated -> %s (%s)", short, strings.TrimSpace(string(out)), time.Since(start).Round(time.Millisecond))
 	}
-	if usedPath == "" {
-		_ = os.MkdirAll(summaryDir, 0755)
-		log.Printf("[fork] %s generating raw text dump", short)
-		start := time.Now()
-		genCmd := exec.Command("agent-summary", short, "--text")
-		out, genErr := genCmd.Output()
-		if genErr != nil {
-			log.Printf("[fork] agent-summary --text failed: %v", genErr)
-		} else {
-			content := []byte(fmt.Sprintf("# Raw Conversation\n\n- Generated: %s\n\n---\n\n%s\n",
-				time.Now().Format(time.RFC3339), string(out)))
-			if err := os.WriteFile(rawPath, content, 0644); err != nil {
-				log.Printf("[fork] write raw.md failed: %v", err)
-			} else {
-				usedPath = rawPath
-				log.Printf("[fork] %s raw.md written (%d bytes, %s)", short, len(content), time.Since(start).Round(time.Millisecond))
-			}
-		}
-	}
-	if usedPath == "" {
-		// fallback to summary.md if it exists
-		if data, err := os.ReadFile(summaryPath); err == nil && len(strings.TrimSpace(string(data))) > 0 {
-			usedPath = summaryPath
-		}
+	// Hand the fork the stable current.md symlink (always points at the latest
+	// dump). os.Stat follows the link, so Size()>0 means the target has content.
+	cur := filepath.Join(summaryDir, "current.md")
+	if info, err := os.Stat(cur); err == nil && info.Size() > 0 {
+		usedPath = cur
 	}
 	log.Printf("[fork] src=%s usedPath=%s", srcID, usedPath)
 
@@ -5381,7 +5377,7 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 					promptSent = true
 				}
 			} else {
-				prompt := fmt.Sprintf("Please read %s and summary", usedPath)
+				prompt := fmt.Sprintf(forkInheritPrompt, short, usedPath)
 				if err := sendTextToPane(newPaneID, prompt, true); err != nil {
 					log.Printf("[fork] %s send prompt failed: %v", newPaneID, err)
 				} else {
