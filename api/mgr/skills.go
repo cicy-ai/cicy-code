@@ -184,8 +184,12 @@ type marketSkill struct {
 	ConfigFile  string   `json:"config_file,omitempty"`
 	// Source distinguishes registry skills (empty string) from user-authored
 	// skills under ~/cicy-ai/skills/<name>/ ("user").
-	Source string            `json:"source,omitempty"`
-	Status marketSkillStatus `json:"status"`
+	Source string `json:"source,omitempty"`
+	// RegistrySource names the private registry a skill came from (the source
+	// label in registries.json, e.g. "team-a"). Empty for the public registry.
+	// The UI renders a badge when this is set.
+	RegistrySource string            `json:"registry_source,omitempty"`
+	Status         marketSkillStatus `json:"status"`
 	// Installed-state fields. InstalledVersion is the version recorded in
 	// ~/cicy-ai/skills/installed.json (empty when not installed). HasUpdate
 	// is true when InstalledVersion is non-empty AND lower than Version.
@@ -208,6 +212,19 @@ func marketRegistryURL() string {
 		return v
 	}
 	return marketRegistryDefaultURL
+}
+
+// authedGet issues a GET with an optional bearer token (for private
+// registries). Token is scoped by the caller (same-origin as the source URL).
+func authedGet(client *http.Client, rawURL, token string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return client.Do(req)
 }
 
 // preferredLang reads the Accept-Language header (or ?lang= query) from the
@@ -244,69 +261,90 @@ func fetchRegistrySkills(lang string) ([]marketSkill, error) {
 	}
 
 	client := &http.Client{Timeout: 8 * time.Second}
-	u := strings.TrimRight(marketRegistryURL(), "/") + "/v1/skills"
-	if lang != "" {
-		u += "?lang=" + url.QueryEscape(lang)
+	// Query every configured source (public + private). Merge by name in
+	// precedence order (later source wins), matching the CLI.
+	byName := map[string]marketSkill{}
+	anyOK := false
+	var lastErr error
+	for _, src := range skillcmd.ClientSources() {
+		u := strings.TrimRight(src.URL, "/") + "/v1/skills"
+		if lang != "" {
+			u += "?lang=" + url.QueryEscape(lang)
+		}
+		resp, err := authedGet(client, u, src.Token)
+		if err != nil {
+			lastErr = fmt.Errorf("fetch %s: %w", u, err)
+			continue
+		}
+		func() {
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				lastErr = fmt.Errorf("registry %q %d: %s", src.Name, resp.StatusCode, strings.TrimSpace(string(body)))
+				return
+			}
+			var env struct {
+				OK   bool `json:"ok"`
+				Data struct {
+					Skills []struct {
+						Name                 string   `json:"name"`
+						Version              string   `json:"version"`
+						Title                string   `json:"title"`
+						Description          string   `json:"description"`
+						TitleLocalized       string   `json:"title_localized"`
+						DescriptionLocalized string   `json:"description_localized"`
+						Category             string   `json:"category"`
+						Tags                 []string `json:"tags"`
+						Config               struct {
+							Path string `json:"path"`
+						} `json:"config"`
+					} `json:"skills"`
+				} `json:"data"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+				lastErr = fmt.Errorf("decode %q: %w", src.Name, err)
+				return
+			}
+			anyOK = true
+			// private = any source other than the public registry
+			regSource := ""
+			if src.URL != marketRegistryDefaultURL {
+				regSource = src.Name
+			}
+			for _, s := range env.Data.Skills {
+				title := s.Title
+				if s.TitleLocalized != "" {
+					title = s.TitleLocalized
+				}
+				desc := s.Description
+				if s.DescriptionLocalized != "" {
+					desc = s.DescriptionLocalized
+				}
+				byName[s.Name] = marketSkill{ // later source wins
+					Name:           s.Name,
+					Title:          title,
+					Description:    desc,
+					Version:        s.Version,
+					Category:       s.Category,
+					Tags:           s.Tags,
+					ConfigFile:     s.Config.Path,
+					RegistrySource: regSource,
+				}
+			}
+		}()
 	}
-	resp, err := client.Get(u)
-	if err != nil {
+	if !anyOK {
 		if cached, ok := marketCacheByLang[lang]; ok {
 			return cached, nil
 		}
-		return nil, fmt.Errorf("fetch %s: %w", u, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		if cached, ok := marketCacheByLang[lang]; ok {
-			return cached, nil
+		if lastErr != nil {
+			return nil, lastErr
 		}
-		return nil, fmt.Errorf("registry %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("no registry sources reachable")
 	}
-	var env struct {
-		OK   bool `json:"ok"`
-		Data struct {
-			Skills []struct {
-				Name                 string   `json:"name"`
-				Version              string   `json:"version"`
-				Title                string   `json:"title"`
-				Description          string   `json:"description"`
-				TitleLocalized       string   `json:"title_localized"`
-				DescriptionLocalized string   `json:"description_localized"`
-				Category             string   `json:"category"`
-				Tags                 []string `json:"tags"`
-				Config               struct {
-					Path string `json:"path"`
-				} `json:"config"`
-			} `json:"skills"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		if cached, ok := marketCacheByLang[lang]; ok {
-			return cached, nil
-		}
-		return nil, fmt.Errorf("decode registry response: %w", err)
-	}
-	out := make([]marketSkill, 0, len(env.Data.Skills))
-	for _, s := range env.Data.Skills {
-		// Use localized title/description when available, fall back to English.
-		title := s.Title
-		if s.TitleLocalized != "" {
-			title = s.TitleLocalized
-		}
-		desc := s.Description
-		if s.DescriptionLocalized != "" {
-			desc = s.DescriptionLocalized
-		}
-		out = append(out, marketSkill{
-			Name:        s.Name,
-			Title:       title,
-			Description: desc,
-			Version:     s.Version,
-			Category:    s.Category,
-			Tags:        s.Tags,
-			ConfigFile:  s.Config.Path,
-		})
+	out := make([]marketSkill, 0, len(byName))
+	for _, s := range byName {
+		out = append(out, s)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	marketCacheByLang[lang] = out
@@ -337,6 +375,8 @@ var reservedUserSkillDirs = map[string]struct{}{
 	".cache":         {},
 	"installed.json": {},
 	"agents.json":    {},
+	"private":        {}, // own local-registry installs (source-based layout)
+	"team":           {}, // other teams' private-registry installs
 }
 
 func parseSkillFrontmatter(path string) (name, description string) {
@@ -656,26 +696,32 @@ func readSkillDoc(skill *marketSkill, file, fileKey string) string {
 	if version == "" || version == "user" {
 		return ""
 	}
-	u := fmt.Sprintf("%s/v1/skills/%s/%s/files/%s",
-		strings.TrimRight(marketRegistryURL(), "/"),
-		url.PathEscape(skill.Name),
-		url.PathEscape(version),
-		url.PathEscape(fileKey),
-	)
 	client := &http.Client{Timeout: 6 * time.Second}
-	resp, err := client.Get(u)
-	if err != nil {
-		return ""
+	// Try each source (reverse precedence: private first) until one serves it.
+	srcs := skillcmd.ClientSources()
+	for i := len(srcs) - 1; i >= 0; i-- {
+		src := srcs[i]
+		u := fmt.Sprintf("%s/v1/skills/%s/%s/files/%s",
+			strings.TrimRight(src.URL, "/"),
+			url.PathEscape(skill.Name),
+			url.PathEscape(version),
+			url.PathEscape(fileKey),
+		)
+		resp, err := authedGet(client, u, src.Token)
+		if err != nil {
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			continue
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err == nil && len(body) > 0 {
+			return string(body)
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return ""
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return ""
-	}
-	return string(body)
+	return ""
 }
 
 // fetchRegistryManifest GET /v1/skills/<name> from the worker and returns
@@ -689,35 +735,38 @@ func fetchRegistryManifest(name, lang string) map[string]any {
 		return nil
 	}
 	client := &http.Client{Timeout: 6 * time.Second}
-	u := strings.TrimRight(marketRegistryURL(), "/") + "/v1/skills/" + url.PathEscape(name)
-	if lang != "" {
-		u += "?lang=" + url.QueryEscape(lang)
+	// Try each source (reverse precedence: private first).
+	srcs := skillcmd.ClientSources()
+	for i := len(srcs) - 1; i >= 0; i-- {
+		src := srcs[i]
+		u := strings.TrimRight(src.URL, "/") + "/v1/skills/" + url.PathEscape(name)
+		if lang != "" {
+			u += "?lang=" + url.QueryEscape(lang)
+		}
+		resp, err := authedGet(client, u, src.Token)
+		if err != nil {
+			continue
+		}
+		body, rerr := io.ReadAll(resp.Body)
+		status := resp.StatusCode
+		resp.Body.Close()
+		if status != http.StatusOK || rerr != nil {
+			continue
+		}
+		var env struct {
+			OK   bool `json:"ok"`
+			Data struct {
+				Manifest map[string]any `json:"manifest"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(body, &env); err != nil {
+			continue
+		}
+		if env.OK && env.Data.Manifest != nil {
+			return env.Data.Manifest
+		}
 	}
-	resp, err := client.Get(u)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil
-	}
-	var env struct {
-		OK   bool `json:"ok"`
-		Data struct {
-			Manifest map[string]any `json:"manifest"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &env); err != nil {
-		return nil
-	}
-	if !env.OK || env.Data.Manifest == nil {
-		return nil
-	}
-	return env.Data.Manifest
+	return nil
 }
 
 // installAdvice describes the v2 self-service install path. Marketplace
@@ -728,6 +777,80 @@ type installAdvice struct {
 	Action  string `json:"action"`
 	Command string `json:"command"`
 	Hint    string `json:"hint"`
+}
+
+// handleSkillRegistries manages the client-side private registry source list
+// (~/cicy-ai/registries.json) so the marketplace UI has an entry point to add
+// a team's private registry by pasting its address + token.
+//
+// Routes:
+//   GET    /api/skill-registries            → list sources (tokens redacted)
+//   POST   /api/skill-registries            → {name,url,token} add/upsert
+//   DELETE /api/skill-registries/<name>     → remove by name or url
+func handleSkillRegistries(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		type srcView struct {
+			Name     string `json:"name"`
+			URL      string `json:"url"`
+			HasToken bool   `json:"has_token"`
+			Public   bool   `json:"public"`
+		}
+		srcs := skillcmd.ClientSources()
+		out := make([]srcView, 0, len(srcs))
+		for _, s := range srcs {
+			out = append(out, srcView{
+				Name:     s.Name,
+				URL:      s.URL,
+				HasToken: s.Token != "",
+				Public:   s.URL == marketRegistryDefaultURL,
+			})
+		}
+		J(w, M{"sources": out})
+
+	case "POST":
+		var body struct {
+			Name  string `json:"name"`
+			URL   string `json:"url"`
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			httpErr(w, 400, "invalid JSON body")
+			return
+		}
+		if strings.TrimSpace(body.URL) == "" {
+			httpErr(w, 400, "url required")
+			return
+		}
+		if _, err := skillcmd.AddSource(body.Name, body.URL, body.Token); err != nil {
+			httpErr(w, 500, err.Error())
+			return
+		}
+		invalidateMarketCache()
+		J(w, M{"ok": true})
+
+	case "DELETE":
+		key := strings.TrimPrefix(r.URL.Path, "/api/skill-registries/")
+		key = strings.Trim(key, "/")
+		if key == "" {
+			httpErr(w, 400, "source name required")
+			return
+		}
+		removed, err := skillcmd.RemoveSource(key)
+		if err != nil {
+			httpErr(w, 500, err.Error())
+			return
+		}
+		if !removed {
+			httpErr(w, 404, "no registry source matching "+key)
+			return
+		}
+		invalidateMarketCache()
+		J(w, M{"ok": true})
+
+	default:
+		httpErr(w, 405, "method not allowed")
+	}
 }
 
 func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {

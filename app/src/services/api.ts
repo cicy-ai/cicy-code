@@ -148,6 +148,21 @@ const api = {
   ejectMarketSkill: (name: string) =>
     http.post(`/api/skill-market/${encodeURIComponent(name)}/eject`, {}),
 
+  // Private registry sources (~/cicy-ai/registries.json)
+  listSkillRegistries: () => http.get('/api/skill-registries'),
+  addSkillRegistry: (data: { name?: string; url: string; token?: string }) =>
+    http.post('/api/skill-registries', data),
+  removeSkillRegistry: (nameOrUrl: string) =>
+    http.delete(`/api/skill-registries/${encodeURIComponent(nameOrUrl)}`),
+
+  // Host a local private registry (in-process on the daemon)
+  getLocalRegistry: () => http.get('/api/local-registry'),
+  startLocalRegistry: (data?: { port?: number; dir?: string; token?: string }) =>
+    http.post('/api/local-registry/start', data || {}),
+  stopLocalRegistry: () => http.post('/api/local-registry/stop', {}),
+  publishLocalRegistry: (path: string) =>
+    http.post('/api/local-registry/publish', { path }),
+
   getGoogleSkillConfig: () => http.get('/api/skill-config/google'),
   connectGoogleSkillConfig: () => http.post('/api/skill-config/google/connect', {}),
   deviceConnectGoogleSkillConfig: () => http.post('/api/skill-config/google/device-connect', {}),

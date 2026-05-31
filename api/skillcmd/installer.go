@@ -39,8 +39,11 @@ var skillDownloadClient = &http.Client{
 }
 
 // downloadAndVerify downloads url to cacheZipPath(name, version), verifies
-// sha256 if provided, and returns the local path.
-func downloadAndVerify(name, version, downloadURL, expectedSHA256 string) (string, error) {
+// sha256 if provided, and returns the local path. If reg is non-nil and the
+// download URL is on the same host as the registry, the registry's bearer
+// token is attached — scoped so a private token never leaks to GitHub (where
+// public-skill assets live).
+func downloadAndVerify(name, version, downloadURL, expectedSHA256 string, reg *Registry) (string, error) {
 	if err := ensureDir(cacheDir()); err != nil {
 		return "", err
 	}
@@ -59,6 +62,9 @@ func downloadAndVerify(name, version, downloadURL, expectedSHA256 string) (strin
 		return "", err
 	}
 	req.Header.Set("User-Agent", "cicy-code/skill-installer")
+	if reg != nil && reg.Token != "" && sameHost(downloadURL, reg.BaseURL) {
+		req.Header.Set("Authorization", "Bearer "+reg.Token)
+	}
 
 	resp, err := skillDownloadClient.Do(req)
 	if err != nil {
@@ -95,6 +101,16 @@ func downloadAndVerify(name, version, downloadURL, expectedSHA256 string) (strin
 		return "", err
 	}
 	return dest, nil
+}
+
+// sameHost reports whether two URLs share the same host:port.
+func sameHost(a, b string) bool {
+	ua, err1 := url.Parse(a)
+	ub, err2 := url.Parse(b)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return strings.EqualFold(ua.Host, ub.Host)
 }
 
 // fileSHA256 computes sha256 of a local file (hex). Returns "" if missing.

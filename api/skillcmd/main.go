@@ -18,11 +18,18 @@ Usage:
   cicy-code skill installed [--json]
   cicy-code skill dev <path> [--json]
   cicy-code skill eject <name> [--json]
+  cicy-code skill registry <serve|publish|add|remove|sources> ...
   cicy-code skill --help
 
 Environment:
-  CICY_SKILLS_REGISTRY   Override registry base URL (default: https://skills.cicy-ai.com)
-  CICY_SKILLS_ROOT       Override skills root dir (default: ~/cicy-ai/skills)
+  CICY_SKILLS_REGISTRY        Override registry base URL — single source, ignores
+                              registries.json (default: https://skills.cicy-ai.com)
+  CICY_SKILLS_REGISTRY_TOKEN  Bearer token for the CICY_SKILLS_REGISTRY override
+  CICY_SKILLS_ROOT            Override skills root dir (default: ~/cicy-ai/skills)
+
+Private registries: a client can query multiple registries (the public one plus
+per-team private ones). Manage them with "skill registry add/remove/sources"
+(stored in ~/cicy-ai/registries.json). Host your own with "skill registry serve".
 
 Source: github.com/cicy-ai/cicy-skills
 Spec:   docs/skills-v2-design.md
@@ -61,6 +68,9 @@ func Run(args []string) {
 		err = cmdDev(rest)
 	case "eject":
 		err = cmdEject(rest)
+	case "registry":
+		RunRegistry(rest)
+		return
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n\n", cmd)
 		fmt.Fprint(os.Stderr, Usage)

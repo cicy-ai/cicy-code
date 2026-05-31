@@ -884,6 +884,9 @@ var preinstalledSkills = []string{
 	"agent-chrome", "agent-editor", "agent-desktop", "agent-webpage",
 	"cicy-agent", "cicy-todo", "cicy-mihomo", "cicy-ssh", "proxy_ssh", "globalApiToken",
 	"agent-summary",
+	// Skill ecosystem conventions (private dev / team install / public PR) —
+	// every agent should know these by default.
+	"cicy-skill-spec",
 }
 
 func ensurePreinstalledSkills() {
@@ -917,6 +920,18 @@ func ensurePreinstalledSkills() {
 	}
 	for _, e := range errs {
 		log.Printf("[startup] skill symlink repair: %v", e)
+	}
+
+	// Re-surface installed skills into each detected agent's skills dir
+	// (~/.<agent>/skills/). Backfills dirs wiped by an agent CLI reset, or
+	// agents that appeared after the skills were installed (e.g. opencode's
+	// ~/.opencode/skills coming up empty). Idempotent. See repair.go.
+	surfaced, serrs := skillcmd.EnsureAgentSurfacing()
+	if len(surfaced) > 0 {
+		log.Printf("[startup] surfaced skills to agents: %v", surfaced)
+	}
+	for _, e := range serrs {
+		log.Printf("[startup] skill surfacing: %v", e)
 	}
 }
 

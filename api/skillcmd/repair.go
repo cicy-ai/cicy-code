@@ -27,11 +27,10 @@ import (
 	"path/filepath"
 )
 
-// readSkillManifest loads <skillsRoot>/<name>/manifest.json from disk.
-// Used by backfill — install-time code paths already have the manifest in
-// memory.
-func readSkillManifest(name string) (*Manifest, error) {
-	p := filepath.Join(skillDir(name), "manifest.json")
+// readSkillManifestAt loads <dir>/manifest.json from disk. Used by backfill —
+// install-time code paths already have the manifest in memory.
+func readSkillManifestAt(dir string) (*Manifest, error) {
+	p := filepath.Join(dir, "manifest.json")
 	data, err := os.ReadFile(p)
 	if err != nil {
 		return nil, err
@@ -112,14 +111,93 @@ func EnsureBinSymlinks() (repaired []string, errs []error) {
 		return nil, []error{err}
 	}
 	for _, s := range cfg.Skills {
-		m, err := readSkillManifest(s.Name)
+		dir := s.InstallDir
+		if dir == "" {
+			dir = skillDir(s.Name)
+		}
+		m, err := readSkillManifestAt(dir)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: read manifest: %w", s.Name, err))
 			continue
 		}
-		fixed, perr := ensureBinSymlinksForSkill(skillDir(s.Name), m)
+		fixed, perr := ensureBinSymlinksForSkill(dir, m)
 		repaired = append(repaired, fixed...)
 		errs = append(errs, perr...)
 	}
 	return repaired, errs
+}
+
+// EnsureAgentSurfacing re-surfaces every installed skill into each *detected*
+// agent's skills dir (~/.<agent>/skills/<name>/). Idempotent — syncToAgents
+// rewrites the symlinks each call.
+//
+// Why this exists: skills are surfaced only at install time. If an agent dir is
+// later wiped (an agent CLI resets ~/.opencode), or an agent is installed AFTER
+// the skills were (so they only synced to the agents present then), the already
+// installed skills are never re-surfaced — `skill update` is a no-op at the same
+// version and `ensurePreinstalledSkills` skips already-installed skills. This is
+// the surfacing analogue of EnsureBinSymlinks, run on server startup. It also
+// rewrites installed.json's agents_synced to match what's actually on disk.
+func EnsureAgentSurfacing() (surfaced []string, errs []error) {
+	cfg, err := loadInstalled()
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, []error{err}
+	}
+	agents, aerr := loadAgentsConfig()
+	if aerr != nil || agents == nil || len(agents.Agents) == 0 {
+		return nil, nil
+	}
+	changed := false
+	for i := range cfg.Skills {
+		s := &cfg.Skills[i]
+		// Note: local (skill dev / ejected) skills are surfaced too — they are
+		// real skills the agent should see, and cmdDev already syncs them to
+		// every agent. Surfacing only refreshes symlinks, so it's safe to
+		// re-run for them; skipping them would leave e.g. a dev'd skill
+		// missing from agents that appeared after it was installed.
+		dir := s.InstallDir
+		if dir == "" {
+			dir = skillDir(s.Name)
+		}
+		m, err := readSkillManifestAt(dir)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: read manifest: %w", s.Name, err))
+			continue
+		}
+		before := append([]string(nil), s.AgentsSynced...)
+		synced := syncToAgents(s.Name, dir, m, agents)
+		for _, a := range synced {
+			if !contains(before, a) {
+				surfaced = append(surfaced, s.Name+"→"+a)
+			}
+		}
+		if !sameStringSet(before, synced) {
+			s.AgentsSynced = synced
+			changed = true
+		}
+	}
+	if changed {
+		_ = writeInstalled(cfg)
+	}
+	return surfaced, errs
+}
+
+// sameStringSet reports whether a and b contain the same elements (order-insensitive).
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, x := range a {
+		seen[x] = true
+	}
+	for _, y := range b {
+		if !seen[y] {
+			return false
+		}
+	}
+	return true
 }

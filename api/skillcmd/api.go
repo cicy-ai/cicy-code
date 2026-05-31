@@ -45,12 +45,15 @@ func PublicInstall(spec string, sink io.Writer) (*InstallResult, error) {
 	buf := &bytes.Buffer{}
 	mw := io.MultiWriter(sink, buf)
 
-	name, wantVersion := parseNameVersion(spec)
+	source, skillSpec := splitSourceSkill(spec)
+	name, wantVersion := parseNameVersion(skillSpec)
 
-	// 1. resolve manifest
-	r := NewRegistry()
+	// 1. resolve manifest (pick the source that has the skill)
+	r, err := registryForSkill(name, source)
+	if err != nil {
+		return nil, err
+	}
 	var d *SkillDetail
-	var err error
 	if wantVersion == "" {
 		d, err = r.GetDetail(name)
 	} else {
@@ -70,17 +73,18 @@ func PublicInstall(spec string, sink io.Writer) (*InstallResult, error) {
 
 	// 2. download + verify
 	fmt.Fprintln(mw, "  downloading...")
-	zipPath, err := downloadAndVerify(m.Name, m.Version, m.Publish.DownloadURL, m.Publish.SHA256)
+	zipPath, err := downloadAndVerify(m.Name, m.Version, m.Publish.DownloadURL, m.Publish.SHA256, r)
 	if err != nil {
 		return nil, fmt.Errorf("download: %w", err)
 	}
 
-	// 3. extract
-	if err := ensureDir(skillsRoot()); err != nil {
+	// 3. extract — source-based layout (public flat / private/ / team/<src>/)
+	parent := installParentDir(r)
+	if err := ensureDir(parent); err != nil {
 		return nil, err
 	}
 	fmt.Fprintln(mw, "  extracting...")
-	skillPath, err := extractZip(zipPath, m.Name, skillsRoot())
+	skillPath, err := extractZip(zipPath, m.Name, parent)
 	if err != nil {
 		return nil, fmt.Errorf("extract: %w", err)
 	}
@@ -132,6 +136,7 @@ func PublicInstall(spec string, sink io.Writer) (*InstallResult, error) {
 		},
 		SHA256:       m.Publish.SHA256,
 		AgentsSynced: synced,
+		InstallDir:   skillPath,
 	}
 	upsertInstalled(cfg, entry)
 	if err := writeInstalled(cfg); err != nil {
@@ -168,8 +173,13 @@ func PublicRemove(name string, sink io.Writer) (*InstalledSkill, error) {
 		return nil, fmt.Errorf("skill not installed: %s", name)
 	}
 
-	// 1. remove skill dir
-	_ = os.RemoveAll(skillDir(name))
+	// 1. remove skill dir (source-based layout aware)
+	dir := skillDir(name)
+	if entry.InstallDir != "" {
+		dir = entry.InstallDir
+	}
+	_ = os.RemoveAll(dir)
+	pruneEmptyInstallParents(dir)
 	// 2. remove ~/.local/bin/<name>
 	_ = os.Remove(localBinPath(name))
 	// 3. remove agent skills dirs
@@ -209,6 +219,9 @@ func PublicEject(name string, sink io.Writer) (*InstalledSkill, error) {
 		return nil, fmt.Errorf("skill already local-source — nothing to eject")
 	}
 	dir := skillDir(name)
+	if entry.InstallDir != "" {
+		dir = entry.InstallDir
+	}
 	if _, err := os.Stat(dir); err != nil {
 		return nil, fmt.Errorf("skill dir missing at %s — reinstall before ejecting", dir)
 	}
@@ -248,7 +261,10 @@ func PublicUpdate(name string, sink io.Writer) (*UpdateResult, error) {
 		return nil, fmt.Errorf("local source — use 'skill dev' to refresh")
 	}
 
-	r := NewRegistry()
+	r, err := registryForSkill(name, "")
+	if err != nil {
+		return nil, err
+	}
 	d, err := r.GetDetail(name)
 	if err != nil {
 		return nil, err
