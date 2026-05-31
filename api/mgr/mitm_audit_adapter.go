@@ -17,10 +17,12 @@ package main
 // ndjson the autonomy loop queries; the gateway has its own audit path).
 
 import (
+	"encoding/json"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 
 	"ttyd-go/mgr/audit"
@@ -30,6 +32,18 @@ import (
 type mitmAuditAdapter struct{}
 
 func (mitmAuditAdapter) StartTurn(provider, agentID string, target *url.URL, method string, headers http.Header, body []byte) mitm.AuditTurn {
+	// MITM intercepts an entire whitelisted host (e.g. api.anthropic.com), so it
+	// sees ALL traffic to that host — not just model turns. Claude Code, codex,
+	// opencode etc. also hit telemetry (/api/event_logging), token-counting
+	// (count_tokens), model listing, OAuth, etc. on the same host. Those are NOT
+	// AI requests and must never land in current.json / reply.json (they'd
+	// overwrite the real /v1/messages turn with an empty snapshot). Only audit
+	// genuine inference calls. The local gateway path doesn't need this — only AI
+	// requests are ever routed through it.
+	if !mitmIsAIInferenceRequest(target, body) {
+		return mitmNoopTurn{}
+	}
+
 	// Split the full target into base (scheme+host) + suffix (path[?query]) so
 	// the session reconstructs the URL without path munging.
 	base := &url.URL{Scheme: target.Scheme, Host: target.Host}
@@ -99,9 +113,56 @@ func (m *mitmScannerReadCloser) Close() error {
 	m.turn.mu.Lock()
 	body := m.turn.scanBuf
 	m.turn.mu.Unlock()
+	// Feed the scanner plaintext when the upstream gzipped the body, matching the
+	// reply.json parse path — otherwise PII/secret scans run over gzip bytes.
+	body = aiGatewayMaybeGunzip(m.rc.headers, body)
 	mitmSubmitAudit(m.turn.sess, audit.DirectionInbound, body, "reply.json")
 	return err
 }
+
+// mitmIsAIInferenceRequest reports whether an intercepted MITM request is an
+// actual model-inference call (Anthropic /v1/messages, OpenAI /chat/completions
+// or /responses, legacy /completions). It is deliberately strict so non-AI
+// traffic that shares the same whitelisted host — telemetry (/api/event_logging),
+// token counting (count_tokens), model listing (/models), OAuth, etc. — is NOT
+// recorded into current.json / reply.json.
+//
+// Signal: an inference request is a JSON body carrying a "model" plus one of
+// messages / input / prompt. That cleanly excludes event_logging (no model) and
+// count_tokens (excluded by path even though it carries model+messages).
+func mitmIsAIInferenceRequest(target *url.URL, body []byte) bool {
+	if target == nil || len(body) == 0 {
+		return false
+	}
+	p := strings.ToLower(target.Path)
+	switch {
+	case strings.Contains(p, "/event_logging"),
+		strings.Contains(p, "count_tokens"),
+		strings.HasSuffix(p, "/models"),
+		strings.Contains(p, "/models/"):
+		return false
+	}
+	var b map[string]interface{}
+	if json.Unmarshal(body, &b) != nil {
+		return false
+	}
+	if _, ok := b["model"]; !ok {
+		return false
+	}
+	_, hasMessages := b["messages"]
+	_, hasInput := b["input"]
+	_, hasPrompt := b["prompt"]
+	return hasMessages || hasInput || hasPrompt
+}
+
+// mitmNoopTurn is returned for non-inference MITM requests: it does nothing, so
+// no session is opened and current.json / reply.json are left untouched.
+type mitmNoopTurn struct{}
+
+func (mitmNoopTurn) WrapResponseBody(inner io.ReadCloser, _ int, _ http.Header, _ int64) io.ReadCloser {
+	return inner
+}
+func (mitmNoopTurn) Fail(error) {}
 
 // mitmSubmitAudit feeds the raw payload to the audit-v2 scanner with the
 // session's identity so secrets/PII findings land in the per-agent ndjson.
