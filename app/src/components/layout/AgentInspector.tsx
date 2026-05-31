@@ -7,10 +7,8 @@ import config from '../../config';
 import apiService from '../../services/api';
 import { TokenManager } from '../../services/tokenManager';
 import type { EditPaneData } from '../../types';
-import AgentAvatar from '../AgentAvatar';
 import Select, { type SelectOption } from '../ui/Select';
 import { normalizeAgentType } from '../../lib/agentType';
-import { ProxyManagerDialog } from './ProxyManagerDialog';
 import { useApp } from '../../contexts/AppContext';
 
 export type InspectorTab = 'overview' | 'memory' | 'settings' | 'history';
@@ -50,7 +48,6 @@ const tabs: Array<{ id: InspectorTab; labelKey: string }> = [
 
 const settingsSections = [
   { id: 'general', labelKey: 'sectionGeneral', icon: Settings },
-  { id: 'model', labelKey: 'sectionModel', icon: Brain },
 ] as const;
 
 type SettingsSectionId = typeof settingsSections[number]['id'];
@@ -397,8 +394,6 @@ export default function AgentInspector({
   const settingsPaneLoadedRef = useRef<string>('');
   const [generalSettingsBaseline, setGeneralSettingsBaseline] = useState('null');
   const [modelSettingsBaseline, setModelSettingsBaseline] = useState('null');
-  const [proxyTargetOptions, setProxyTargetOptions] = useState<SelectOption[]>([]);
-  const [proxyManagerOpen, setProxyManagerOpen] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(queryDraft.trim()), 220);
@@ -484,26 +479,6 @@ export default function AgentInspector({
     }).catch(() => {});
   }, [paneId, patchSharedAgentDetail, onPanePatch]);
 
-  useEffect(() => {
-    // Pull the live mihomo proxies/groups list so the rule Select has real
-    // options. Skip until the user actually opens settings AND has the proxy
-    // toggle on — no point hitting the controller otherwise.
-    if (!open || tab !== 'settings' || !settingsData?.use_proxy) return;
-    let cancelled = false;
-    apiService.getProxyList().then((resp) => {
-      if (cancelled) return;
-      const data = (resp?.data || {}) as { groups?: Array<{ name: string; type: string }>; nodes?: Array<{ name: string; type: string }> };
-      const groupOpts: SelectOption[] = (data.groups || []).map((g) => ({ value: g.name, label: `${g.name} (${g.type})` }));
-      const nodeOpts: SelectOption[] = (data.nodes || []).map((n) => ({ value: n.name, label: `${n.name} (${n.type})` }));
-      setProxyTargetOptions([...groupOpts, ...nodeOpts]);
-    }).catch(() => {
-      if (cancelled) return;
-      setProxyTargetOptions([]);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, tab, settingsData?.use_proxy]);
 
   useEffect(() => {
     if (!open || !paneId) return;
@@ -642,11 +617,6 @@ export default function AgentInspector({
     return serializeModelSettings(settingsData) !== modelSettingsBaseline;
   }, [modelSettingsBaseline, settingsData]);
 
-  useEffect(() => {
-    if (settingsSection === 'model' && !modelSettingsEnabled) {
-      setSettingsSection('general');
-    }
-  }, [modelSettingsEnabled, settingsSection]);
 
   const saveNotes = async () => {
     if (notesSaving || !dirtyNotes) return;
@@ -709,9 +679,6 @@ export default function AgentInspector({
     }));
   }, [runtimeAIProviderOptions]);
 
-  const runtimeAIEnabled = useMemo(() => {
-    return settingsData?.runtime_ai != null;
-  }, [settingsData?.runtime_ai]);
 
   const patchSettingsData = (patch: Partial<EditPaneData>) => {
     patchSharedAgentDetail(paneId, patch);
@@ -1141,7 +1108,7 @@ export default function AgentInspector({
           {tab === 'settings' && (
             <div data-id="agent-inspector-settings-tab" className="space-y-4">
               <div data-id="agent-inspector-settings-sections" className="scrollbar-zero flex gap-1 overflow-x-auto whitespace-nowrap">
-                {settingsSections.filter((item) => item.id !== 'model' || modelSettingsEnabled).map((item) => {
+                {settingsSections.map((item) => {
                   const Icon = item.icon;
                   return (
                     <button
@@ -1163,38 +1130,12 @@ export default function AgentInspector({
               {settingsSection === 'general' && (
                 <div data-id="agent-inspector-settings-general" className="space-y-5">
                   <div data-id="agent-inspector-settings-general-identity" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
-                    <InspectorField label={t('fieldTitle')}>
+                    <InspectorField label={t('fieldTitle')} mutedLabel>
                       <InspectorInput value={settingsData?.title || ''} onChange={(value) => patchSettingsData({ title: value })} onBlur={() => { void saveSettings(); }} placeholder={t('fieldTitlePlaceholder')} />
-                    </InspectorField>
-                    <InspectorField label={t('fieldWorkspace')} desc={t('fieldWorkspaceDesc')} mono>
-                      <InspectorInput value={settingsData?.workspace || ''} onChange={(value) => patchSettingsData({ workspace: value })} placeholder="/home/user/project" mono readOnly />
-                    </InspectorField>
-                    <InspectorField label={t('fieldAgentType')}>
-                      <div
-                        data-id="agent-inspector-settings-agent-types"
-                        className="flex items-center gap-3 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200"
-                      >
-                        <AgentAvatar
-                          agentType={settingsData?.agent_type}
-                          title={settingsData?.agent_type || t('agentTypeUnset')}
-                          variant="select"
-                          dataId="agent-inspector-settings-agent-type-avatar"
-                        />
-                        <span data-id="agent-inspector-auto-20" className="truncate">{settingsData?.agent_type || t('agentTypeUnset')}</span>
-                      </div>
                     </InspectorField>
                   </div>
 
                   <div data-id="agent-inspector-settings-general-behavior" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
-                    <InspectorToggle
-                      label={t('autoStart')}
-                      desc={t('autoStartHint')}
-                      checked={settingsData?.active !== false}
-                      onChange={(value) => {
-                        patchSettingsData({ active: value });
-                        void saveSettings({ active: value });
-                      }}
-                    />
                     <InspectorToggle
                       label={t('allowAllActions')}
                       desc={t('allowAllActionsHint')}
@@ -1209,49 +1150,8 @@ export default function AgentInspector({
                 </div>
               )}
 
-              {settingsSection === 'model' && (
+              {settingsSection === 'general' && modelSettingsEnabled && (
                 <div data-id="agent-inspector-settings-model" className="space-y-5">
-                  <div data-id="agent-inspector-settings-model-proxy" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
-                    <InspectorToggle
-                      label={t('useProxy')}
-                      checked={!!settingsData?.use_proxy}
-                      onChange={(value) => {
-                        patchSettingsData({ use_proxy: value });
-                        void saveSettings({ use_proxy: value });
-                      }}
-                    />
-                    {settingsData?.use_proxy && (
-                      <InspectorField
-                        label={t('proxyTargetLabel')}
-                        desc={t('proxyTargetDesc')}
-                      >
-                        <div data-id="agent-inspector-settings-model-proxy-row" className="flex items-center gap-2">
-                          <div className="min-w-0 flex-1">
-                            <Select
-                              value={settingsData?.proxy?.rule || ''}
-                              onChange={(value) => {
-                                const nextProxy = { ...(settingsData?.proxy || {}), rule: value };
-                                patchSettingsData({ proxy: nextProxy });
-                                void saveSettings({ proxy: nextProxy });
-                              }}
-                              options={proxyTargetOptions}
-                              placeholder={t('proxyTargetPlaceholder')}
-                              searchable
-                            />
-                          </div>
-                          <button
-                            data-id="agent-inspector-settings-model-proxy-manage"
-                            type="button"
-                            onClick={() => setProxyManagerOpen(true)}
-                            className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-zinc-300 transition-colors hover:bg-white/[0.08]"
-                          >
-                            {t('proxyManageButton')}
-                          </button>
-                        </div>
-                      </InspectorField>
-                    )}
-                  </div>
-
                   {(['codex', 'claude', 'opencode'].includes(normalizedAgentType)) && (
                   <div data-id="agent-inspector-settings-model-custom-gateway" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
                     <InspectorToggle
@@ -1259,9 +1159,21 @@ export default function AgentInspector({
                       desc={t('customGatewayHint')}
                       checked={!!settingsData?.use_custom_gateway}
                       onChange={(value) => {
-                        const nextRuntimeAi = value ? (settingsData?.runtime_ai || null) : null;
-                        patchSettingsData({ use_custom_gateway: value, runtime_ai: nextRuntimeAi });
-                        void saveModelSettings({ use_custom_gateway: value, runtime_ai: nextRuntimeAi });
+                        if (!value) {
+                          // Gateway OFF: keep the configured provider/model so re-enabling restores it.
+                          patchSettingsData({ use_custom_gateway: false });
+                          void saveModelSettings({ use_custom_gateway: false });
+                          return;
+                        }
+                        // Gateway ON: seed runtime_ai with the agent's default provider/model when
+                        // unset; keep it untouched when the user already configured one.
+                        const currentProvider = String(settingsData?.runtime_ai?.provider_name || '').trim();
+                        const nextProvider = currentProvider || String(runtimeAIDefault?.provider_name || '').trim();
+                        const currentModel = String(settingsData?.default_model || '').trim();
+                        const nextModel = currentModel || String(runtimeAIDefault?.model || '').trim();
+                        const nextRuntimeAi = nextProvider ? { provider_name: nextProvider } : (settingsData?.runtime_ai || null);
+                        patchSettingsData({ use_custom_gateway: true, runtime_ai: nextRuntimeAi, default_model: nextModel });
+                        void saveModelSettings({ use_custom_gateway: true, runtime_ai: nextRuntimeAi, default_model: nextModel });
                       }}
                     />
                   </div>
@@ -1301,113 +1213,68 @@ export default function AgentInspector({
                   </div>
                   )}
 
-                  {settingsData?.use_custom_gateway && (
-                    <div data-id="agent-inspector-settings-model-gateway-override" className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+                  {(
+                    <div data-id="agent-inspector-settings-model-gateway-override" className={`space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3 ${!settingsData?.use_custom_gateway ? 'opacity-50 pointer-events-none select-none' : ''}`}>
                       <div data-id="agent-inspector-settings-model-gateway-override-header">
                         <div data-id="agent-inspector-settings-model-gateway-override-title" className="text-sm font-medium text-zinc-100">{t('gatewayOverrideTitle')}</div>
                         <div data-id="agent-inspector-settings-model-gateway-override-desc" className="mt-1 text-xs leading-5 text-zinc-500">{t('gatewayOverrideDesc')}</div>
                       </div>
-                      {!runtimeAIEnabled && (
-                        <div data-id="agent-inspector-settings-model-gateway-default" className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2 text-xs text-zinc-400">
-                          {(() => {
-                            const currentProviderKey = String(settingsData?.runtime_ai?.provider_name || '').trim() || runtimeAIDefault?.provider_name || '';
-                            const currentProviderOpt = runtimeAIProviderOptions.find((p) => p.key === currentProviderKey);
-                            const currentProviderLabel = currentProviderOpt?.label || currentProviderKey || t('currentEmpty');
-                            const currentModel = String(settingsData?.default_model || '').trim() || t('currentEmpty');
-                            return (
-                              <div data-id="agent-inspector-settings-model-gateway-default-text" className="text-zinc-200">
-                                {t('currentProviderModel', { name: currentProviderLabel, model: currentModel })}
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      )}
-                      <InspectorToggle
-                        label={t('customOverride')}
-                        desc={runtimeAIEnabled ? t('customOverrideOnDesc') : t('customOverrideDesc')}
-                        checked={runtimeAIEnabled}
-                        onChange={(value) => {
-                          if (!value) {
-                            // (C) Override turning OFF: provider falls back to the agent_type
-                            // default. We must also clear the user's previously-chosen model
-                            // if it doesn't belong to the default provider — otherwise the
-                            // gateway will keep rewriting requests to that model and the
-                            // default provider's upstream will reject it.
-                            const defaultProviderKey = String(runtimeAIDefault?.provider_name || '').trim();
-                            const defaultProvider = runtimeAIProviderOptions.find((p) => p.key === defaultProviderKey);
-                            const defaultProviderModels = defaultProvider?.models || [];
+                      <InspectorField label={t('providerFieldLabel')} desc={t('providerFieldDesc')}>
+                        <Select
+                          value={settingsData?.runtime_ai?.provider_name || runtimeAIDefault?.provider_name || ''}
+                          onChange={(value) => {
+                            const nextRuntimeAi = { ...(settingsData?.runtime_ai || {}), provider_name: value };
+                            // Switching provider: if the current model isn't in the new provider's list, reset to its first model
+                            const newProvider = runtimeAIProviderOptions.find((p) => p.key === value);
+                            const newProviderModels = newProvider?.models || [];
                             const currentModel = String(settingsData?.default_model || '').trim();
-                            const nextModel = currentModel && defaultProviderModels.includes(currentModel)
-                              ? currentModel
-                              : String(runtimeAIDefault?.model || '');
-                            patchSettingsData({ runtime_ai: null, default_model: nextModel });
-                            void saveModelSettings({ runtime_ai: null, default_model: nextModel });
-                            return;
-                          }
-                          // Turning ON: prefill empty provider/model with the agent's current defaults
-                          const currentProvider = String(settingsData?.runtime_ai?.provider_name || '').trim();
-                          const currentModel = String(settingsData?.default_model || '').trim();
-                          const nextProvider = currentProvider || String(runtimeAIDefault?.provider_name || '').trim();
-                          const nextModel = currentModel || String(runtimeAIDefault?.model || '').trim();
-                          const nextRuntimeAi = { provider_name: nextProvider };
-                          patchSettingsData({ runtime_ai: nextRuntimeAi, default_model: nextModel });
-                          if (nextProvider) {
-                            void saveModelSettings({ runtime_ai: nextRuntimeAi, default_model: nextModel });
-                          }
-                        }}
-                      />
-                      {runtimeAIEnabled && (
-                        <>
-                          <InspectorField label={t('providerFieldLabel')} desc={t('providerFieldDesc')}>
+                            const keepModel = currentModel && newProviderModels.includes(currentModel) ? currentModel : (newProviderModels[0] || currentModel);
+                            patchSettingsData({ runtime_ai: nextRuntimeAi, default_model: keepModel });
+                            void saveModelSettings({ runtime_ai: nextRuntimeAi, default_model: keepModel });
+                          }}
+                          options={runtimeAISelectOptions}
+                          placeholder={t('providerSelectPlaceholder')}
+                          searchable
+                          onOpenChange={(o) => { if (o) refreshDetailNow(); }}
+                        />
+                      </InspectorField>
+                      <InspectorField label={t('modelDefaultFieldLabel')} desc={t('modelDefaultFieldDesc')}>
+                        {(() => {
+                          const activeProviderKey = String(settingsData?.runtime_ai?.provider_name || '').trim() || runtimeAIDefault?.provider_name || '';
+                          const activeProvider = runtimeAIProviderOptions.find((p) => p.key === activeProviderKey);
+                          const baseModels = activeProvider?.models || [];
+                          const currentValue = settingsData?.default_model || runtimeAIDefault?.model || '';
+                          const optionValues = currentValue && !baseModels.includes(currentValue)
+                            ? [currentValue, ...baseModels]
+                            : baseModels;
+                          return (
                             <Select
-                              value={settingsData?.runtime_ai?.provider_name || ''}
-                              onChange={(value) => {
-                                const nextRuntimeAi = { ...(settingsData?.runtime_ai || {}), provider_name: value };
-                                // Switching provider: if the current model isn't in the new provider's list, reset to the new provider's first model
-                                const newProvider = runtimeAIProviderOptions.find((p) => p.key === value);
-                                const newProviderModels = newProvider?.models || [];
-                                const currentModel = String(settingsData?.default_model || '').trim();
-                                const keepModel = currentModel && newProviderModels.includes(currentModel) ? currentModel : (newProviderModels[0] || currentModel);
-                                patchSettingsData({ runtime_ai: nextRuntimeAi, default_model: keepModel });
-                                void saveModelSettings({ runtime_ai: nextRuntimeAi, default_model: keepModel });
-                              }}
-                              options={runtimeAISelectOptions}
-                              placeholder={t('providerSelectPlaceholder')}
                               searchable
+                              placeholder={t('modelDefaultPlaceholder')}
+                              value={currentValue}
+                              options={optionValues.map((m) => ({ value: m, label: m }))}
+                              onChange={(v) => { patchSettingsData({ default_model: v }); void saveModelSettings({ default_model: v }); }}
                               onOpenChange={(o) => { if (o) refreshDetailNow(); }}
                             />
-                          </InspectorField>
-                          <InspectorField label={t('modelDefaultFieldLabel')} desc={t('modelDefaultFieldDesc')}>
-                            {(() => {
-                              const activeProviderKey = String(settingsData?.runtime_ai?.provider_name || '').trim() || runtimeAIDefault?.provider_name || '';
-                              const activeProvider = runtimeAIProviderOptions.find((p) => p.key === activeProviderKey);
-                              const baseModels = activeProvider?.models || [];
-                              const currentValue = settingsData?.default_model || '';
-                              const optionValues = currentValue && !baseModels.includes(currentValue)
-                                ? [currentValue, ...baseModels]
-                                : baseModels;
-                              return (
-                                <Select
-                                  searchable
-                                  placeholder={t('modelDefaultPlaceholder')}
-                                  value={currentValue}
-                                  options={optionValues.map((m) => ({ value: m, label: m }))}
-                                  onChange={(v) => { patchSettingsData({ default_model: v }); void saveModelSettings({ default_model: v }); }}
-                                  onOpenChange={(o) => { if (o) refreshDetailNow(); }}
-                                />
-                              );
-                            })()}
-                          </InspectorField>
-                        </>
-                      )}
+                          );
+                        })()}
+                      </InspectorField>
                     </div>
                   )}
 
-                  <div data-id="agent-inspector-settings-model-restart-hint" className="flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-[11px] leading-5 text-amber-200/90">
-                    <svg viewBox="0 0 16 16" fill="currentColor" className="mt-0.5 h-3.5 w-3.5 shrink-0">
-                      <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm.75 9.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM7.25 4.5a.75.75 0 0 1 1.5 0v4a.75.75 0 0 1-1.5 0v-4Z"/>
-                    </svg>
-                    <span>{t('modelSettingsRestartHint')}</span>
+                  <div data-id="agent-inspector-settings-model-restart-hint" className="space-y-1.5">
+                    <div data-id="agent-inspector-settings-model-restart-hint-gateway" className="flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-[11px] leading-5 text-amber-200/90">
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="mt-0.5 h-3.5 w-3.5 shrink-0">
+                        <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm.75 9.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM7.25 4.5a.75.75 0 0 1 1.5 0v4a.75.75 0 0 1-1.5 0v-4Z"/>
+                      </svg>
+                      <span>{t('modelRestartHintGateway')}</span>
+                    </div>
+                    <div data-id="agent-inspector-settings-model-restart-hint-live" className="flex items-start gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2 text-[11px] leading-5 text-emerald-200/90">
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="mt-0.5 h-3.5 w-3.5 shrink-0">
+                        <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-6.5 6.5a.75.75 0 0 1-1.06 0l-3-3a.75.75 0 1 1 1.06-1.06L6.75 10.19l5.97-5.97a.75.75 0 0 1 1.06 0Z"/>
+                      </svg>
+                      <span>{t('modelRestartHintLive')}</span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1416,7 +1283,6 @@ export default function AgentInspector({
           )}
         </div>
       </div>
-      <ProxyManagerDialog open={proxyManagerOpen} onClose={() => setProxyManagerOpen(false)} paneId={paneId} />
     </aside>
   );
 }
@@ -1524,16 +1390,18 @@ function InspectorField({
   label,
   desc,
   mono,
+  mutedLabel,
   children,
 }: {
   label: string;
   desc?: string;
   mono?: boolean;
+  mutedLabel?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div data-id="agent-inspector-auto-33">
-      <label data-id="agent-inspector-auto-34" className={`mb-1.5 block text-[13px] font-medium text-zinc-300 ${mono ? 'font-mono' : ''}`}>{label}</label>
+      <label data-id="agent-inspector-auto-34" className={`mb-1.5 block ${mutedLabel ? 'text-[11px] font-normal text-zinc-500' : 'text-[13px] font-medium text-zinc-300'} ${mono ? 'font-mono' : ''}`}>{label}</label>
       {children}
       {desc ? <p className="mt-1 text-[11px] text-zinc-600">{desc}</p> : null}
     </div>

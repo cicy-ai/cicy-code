@@ -947,12 +947,15 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 		}
 		filtered["config"] = normalizedConfig
 	}
+	var pendingRuntimeAI *runtimeAIOverride
+	_, runtimeAIInReq := req["runtime_ai"]
 	if rawRuntimeAI, ok := req["runtime_ai"]; ok {
 		ov, err := runtimeAIOverrideFromAny(rawRuntimeAI)
 		if err != nil {
 			httpErr(w, 400, err.Error())
 			return
 		}
+		pendingRuntimeAI = ov
 		var configStr string
 		if rawConfig, ok := filtered["config"]; ok {
 			configStr, _ = rawConfig.(string)
@@ -997,6 +1000,58 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 		filtered["config"] = nextConfig
 	}
 	delete(filtered, "proxy")
+	// ③+① Provider-protocol guard + default_model clamp. Whenever the runtime_ai
+	// provider or the default_model changes, ensure (③) the chosen provider's
+	// protocol matches the agent_type's expected protocol, and (①) the model is
+	// one the provider actually serves — otherwise the gateway would rewrite
+	// requests to a model the upstream rejects (the deepseek-alias incident).
+	if _, defaultModelInReq := filtered["default_model"]; runtimeAIInReq || defaultModelInReq {
+		agentType := loadPaneAgentType(paneID)
+		providerKey := ""
+		if runtimeAIInReq {
+			if pendingRuntimeAI != nil && !pendingRuntimeAI.Empty() {
+				providerKey = strings.TrimSpace(pendingRuntimeAI.ProviderName)
+			}
+		} else if existing, _ := loadPaneRuntimeAIOverride(paneID); existing != nil && !existing.Empty() {
+			providerKey = strings.TrimSpace(existing.ProviderName)
+		}
+		if providerKey == "" {
+			providerKey = loadDefaultProviderKeyForAgentType(agentType)
+		}
+		if provider, ok := loadProviderByKey(providerKey); ok && provider != nil {
+			// ③ protocol must match — only enforced when the provider is changing.
+			if runtimeAIInReq {
+				expected := runtimeAIExpectedProtocolForAgentType(agentType)
+				actual := normalizeAIGatewayProvider(provider.Protocol)
+				if expected != "" && actual != "" && actual != expected {
+					httpErr(w, 400, ErrRuntimeAIProviderMismatch.Error())
+					return
+				}
+			}
+			// ① clamp default_model to the provider's served models.
+			effModel := ""
+			if raw, ok := filtered["default_model"]; ok {
+				effModel, _ = raw.(string)
+			} else {
+				effModel = loadPaneDefaultModel(paneID)
+			}
+			effModel = strings.TrimSpace(effModel)
+			if effModel != "" && len(provider.Models) > 0 {
+				served := false
+				for _, m := range provider.Models {
+					if strings.TrimSpace(m) == effModel {
+						served = true
+						break
+					}
+				}
+				if !served {
+					if fallback := providerDefaultModelForAgentType(provider, agentType); fallback != "" {
+						filtered["default_model"] = fallback
+					}
+				}
+			}
+		}
+	}
 	if rawUseCustomGateway, ok := filtered["use_custom_gateway"]; ok {
 		useCustomGateway, ok := rawUseCustomGateway.(bool)
 		if !ok {
@@ -1005,6 +1060,11 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 		}
 		filtered["use_custom_gateway"] = useCustomGateway
 	}
+	// DEPRECATED: use_proxy / proxy_enable is the per-agent HTTP egress proxy.
+	// Global mihomo now handles egress for every agent, so this is rarely needed.
+	// The UI hides it by default (collapsed, marked deprecated). Kept functional
+	// for the rare per-agent case; candidate for removal in a later version if no
+	// demand surfaces.
 	if rawUseProxy, ok := filtered["use_proxy"]; ok {
 		useProxy, ok := rawUseProxy.(bool)
 		if !ok {
@@ -2812,6 +2872,16 @@ EOF
 		lines := []string{
 			ensureAgentCommandLine("opencode", "OpenCode", opencodeInstallCmd(), installLog),
 		}
+		// Isolate only opencode's XDG STATE per workspace so the active-model file
+		// (model.json, which otherwise overrides opencode.json's `model`) is per-agent
+		// — that's what makes gateway/non-gateway model switches stick correctly.
+		// DATA (~/.local/share/opencode: sessions, opencode.db, official-login auth)
+		// stays GLOBAL on purpose, so agents share login and don't re-auth per agent.
+		// Config is already per-workspace via OPENCODE_CONFIG.
+		lines = append(lines,
+			`export XDG_STATE_HOME="$WORKSPACE/.opencode/xdg/state"`,
+			`mkdir -p "$XDG_STATE_HOME/opencode"`,
+		)
 		if useCustomGateway {
 			// Resolve startup model + active provider's catalog + protocol.
 			// Opencode supports both openai and anthropic SDKs natively; pick
@@ -2865,6 +2935,19 @@ EOF`, topModelField, providerBlock),
 EOF`, topModelField, providerBlock),
 				)
 			}
+			// Force opencode's persisted active model to match the gateway model.
+			// opencode remembers the last-picked model in ~/.local/state/opencode/
+			// model.json (recent[0]) and it OVERRIDES opencode.json's `model` field —
+			// so without this, switching gateway/non-gateway and restarting leaves
+			// opencode stuck on the previously selected model. Writing it here makes
+			// the boot config authoritative (provider key "cicyai" matches opencode.json).
+			if model != "" {
+				mid, _ := json.Marshal(model)
+				modelState := `{"recent":[{"providerID":"cicyai","modelID":` + string(mid) + `}],"favorite":[],"variant":{}}`
+				lines = append(lines,
+					fmt.Sprintf("cat > \"$XDG_STATE_HOME/opencode/model.json\" <<'EOF'\n%s\nEOF", modelState),
+				)
+			}
 			lines = append(lines, `OPENCODE_CONFIG="$WORKSPACE/.opencode/opencode.json" opencode`)
 			return lines
 		}
@@ -2876,6 +2959,10 @@ EOF`, topModelField, providerBlock),
 			"unset CICY_ANTHROPIC_BASE_URL",
 			"unset ANTHROPIC_API_KEY",
 			"unset OPENCODE_CONFIG",
+			// Clear a stale gateway active-model: if opencode's persisted model.json
+			// still points at the cicyai (gateway) provider, drop it so opencode falls
+			// back to its own default instead of a provider that no longer exists here.
+			`if [ -f "$XDG_STATE_HOME/opencode/model.json" ] && grep -q '"providerID":"cicyai"' "$XDG_STATE_HOME/opencode/model.json"; then rm -f "$XDG_STATE_HOME/opencode/model.json"; fi`,
 		)
 		// Route this non-gateway opencode's HTTPS through the local MITM (when
 		// enabled) so its turns are audited and it can answer cross-agent

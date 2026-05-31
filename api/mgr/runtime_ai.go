@@ -231,6 +231,19 @@ func resolveRuntimeAIConfigForAgent(providerProtocol string, agentID string) (ru
 		if !ok {
 			return cfg, ov, ErrRuntimeAIProviderNotFound
 		}
+		// The overridden provider's protocol must match the request path
+		// (/anthropic vs /openai). A mismatch means runtime_ai points at an
+		// incompatible provider — most commonly an opencode cross-protocol provider
+		// switch that hasn't been followed by a pane restart (the boot-time
+		// opencode.json adapter + base path are stale). Surface a clear 409 instead
+		// of forwarding a body the upstream will reject.
+		if pc, pok := loadProviderByKey(ov.ProviderName); pok && pc != nil {
+			actual := normalizeAIGatewayProvider(pc.Protocol)
+			want := normalizeAIGatewayProvider(providerProtocol)
+			if actual != "" && want != "" && actual != want {
+				return cfg, ov, ErrRuntimeAIProviderMismatch
+			}
+		}
 		cfg = specific
 	}
 	return cfg, ov, nil
