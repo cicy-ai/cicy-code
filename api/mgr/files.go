@@ -135,15 +135,17 @@ func agentWorkspace(agentID string) (string, error) {
 
 // --- path safety ---------------------------------------------------------
 
-// resolveSafePath turns a request path into an absolute path guaranteed to
-// live inside the workspace.
+// resolveSafePath turns a request path into an absolute path. Relative paths
+// resolve against the agent's workspace; the confinement boundary, however, is
+// the user's whole HOME dir — the editor is allowed to open/edit files across
+// agent workspaces, projects and fork handoff summaries, not just its own
+// workspace. Only paths that escape home (e.g. /etc) are rejected.
 //
 // Rules:
 //   - empty / "." / "./" => workspace root
-//   - relative paths     => joined onto workspace, ".." escapes rejected
-//   - absolute paths     => accepted if they resolve INSIDE workspace,
-//                           rejected otherwise (errPathOutsideWorkspace)
-//   - symlinks whose real target lies outside workspace => rejected
+//   - relative paths     => joined onto workspace
+//   - absolute paths     => accepted if they resolve INSIDE home
+//   - anything (incl. a symlink target) escaping home => rejected
 //
 // For non-existent paths (typical on write of a new file), the parent
 // directory's real path is verified instead.
@@ -152,22 +154,35 @@ func resolveSafePath(workspace, requested string) (string, error) {
 	if clean == "" || clean == "." || clean == "./" {
 		return workspace, nil
 	}
+	home, _ := os.UserHomeDir()
+	// Expand a leading ~ to the user's home dir so "~/.claude.json" opens (the
+	// editor passes the literal path; without this it resolves relative to the
+	// workspace and 404s).
+	if home != "" && (clean == "~" || strings.HasPrefix(clean, "~/")) {
+		clean = filepath.Join(home, strings.TrimPrefix(clean[1:], "/"))
+	}
 	clean = strings.TrimPrefix(clean, "./")
 	var joined string
 	if filepath.IsAbs(clean) {
-		// Absolute paths: accepted as long as they live inside the workspace.
-		// We still funnel through Clean + Rel + EvalSymlinks below, identical
-		// to the relative branch, so agent-supplied abs paths get the same
-		// safety checks (escape, symlink) as anything else.
 		joined = filepath.Clean(clean)
 	} else {
 		joined = filepath.Clean(filepath.Join(workspace, clean))
 	}
-	rel, err := filepath.Rel(workspace, joined)
-	if err != nil {
-		return "", errPathOutsideWorkspace
+	// Confinement: allow anything inside the agent's own workspace OR anywhere
+	// under the user's home dir. The home allowance is what lifts the
+	// per-workspace editor limit (cross-agent files, projects, fork summaries);
+	// keeping the workspace allowance covers workspaces mounted outside home.
+	escapes := func(base, target string) bool {
+		if base == "" {
+			return true
+		}
+		rel, err := filepath.Rel(base, target)
+		return err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	outside := func(target string) bool {
+		return escapes(workspace, target) && escapes(home, target)
+	}
+	if outside(joined) {
 		return "", errPathOutsideWorkspace
 	}
 	real, err := filepath.EvalSymlinks(joined)
@@ -175,17 +190,12 @@ func resolveSafePath(workspace, requested string) (string, error) {
 		if !os.IsNotExist(err) {
 			return "", err
 		}
-		parent := filepath.Dir(joined)
-		if realParent, perr := filepath.EvalSymlinks(parent); perr == nil {
-			if rel2, err2 := filepath.Rel(workspace, realParent); err2 != nil ||
-				rel2 == ".." || strings.HasPrefix(rel2, ".."+string(filepath.Separator)) {
-				return "", errPathSymlinkEscape
-			}
+		if realParent, perr := filepath.EvalSymlinks(filepath.Dir(joined)); perr == nil && outside(realParent) {
+			return "", errPathSymlinkEscape
 		}
 		return joined, nil
 	}
-	if relReal, err := filepath.Rel(workspace, real); err != nil ||
-		relReal == ".." || strings.HasPrefix(relReal, ".."+string(filepath.Separator)) {
+	if outside(real) {
 		return "", errPathSymlinkEscape
 	}
 	return real, nil
