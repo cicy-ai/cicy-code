@@ -263,10 +263,12 @@ function Heading({
   }[level];
   return createElement(
     `h${level}`,
-    { id, className: `${sizes} text-zinc-100 group scroll-mt-4` },
+    { id, className: `${sizes} text-zinc-100 group scroll-mt-4 relative` },
+    // Absolutely positioned in the left gutter so the hidden anchor doesn't
+    // occupy inline space and indent / notch the heading text when not hovered.
     <a
       href={`#${id}`}
-      className="opacity-0 group-hover:opacity-50 hover:!opacity-100 mr-2 text-sky-400 no-underline"
+      className="absolute -left-5 opacity-0 transition-opacity group-hover:opacity-50 hover:!opacity-100 text-sky-400 no-underline font-normal select-none"
       aria-label="permalink"
     >
       #
