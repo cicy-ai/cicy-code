@@ -264,6 +264,16 @@ export default function CodeEditor({
   const mergeFreshIntoBuffer = useCallback((res: FsReadResult, mode: EditorMode) => {
     setBuf((prev) => {
       if (prev.text === prev.savedText) {
+        // Identical content — common when the fs cache revalidates with no real
+        // change. Don't rebuild the buffer: a new text reference would re-render
+        // and re-parse the whole markdown preview on every revalidation ("the
+        // preview DOM keeps refreshing"). Refresh only mtime/size, keeping the
+        // same text reference so memoized consumers can bail out.
+        if (prev.text === res.text) {
+          return prev.mtime === res.mtime && prev.size === res.size
+            ? prev
+            : { ...prev, mtime: res.mtime, size: res.size };
+        }
         return bufferFromRead(res, mode);
       }
       if (prev.savedText === res.text) {
