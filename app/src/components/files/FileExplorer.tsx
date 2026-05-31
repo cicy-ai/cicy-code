@@ -153,7 +153,9 @@ export default function FileExplorer({
     m.set(ROOT_PATH, { ...emptyDirState(), expanded: true });
     return m;
   });
-  const [showHidden, setShowHidden] = useState(false);
+  // Default to showing ALL files/folders, including dotfiles (.git, .cicy, …).
+  // The Eye/EyeOff toggle in the header still lets the operator hide them.
+  const [showHidden, setShowHidden] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   // Workspace section is the primary tree but still collapsible — matches
