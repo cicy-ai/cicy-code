@@ -555,6 +555,21 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
             onRestart: () => restartPane(paneId, currentAgent.title),
             onOpenSettings: () => onOpenSettingsPane?.(paneId),
             canRestart: true,
+            onFork: async () => {
+              setForkingId(paneId);
+              try {
+                const { data } = await apiService.forkPane({ source_pane_id: paneId, master_pane_id: paneId });
+                if (data?.pane_id) {
+                  await onRefreshPanes();
+                  onRefreshPoll();
+                }
+              } catch {
+                window.dispatchEvent(new CustomEvent('show-toast', { detail: i18n.t('toastForkFailed', { ns: 'teamPanel' }) }));
+              } finally {
+                setForkingId(null);
+                setOpenMenuId(null);
+              }
+            },
           })}
         </div>
         {bindings.length > 0 ? (
