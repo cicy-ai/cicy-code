@@ -135,8 +135,13 @@ configure_cdn_env() {
     return
   fi
 
-  local cos_base app_version ttyd_version
+  local cos_base r2_base app_version ttyd_version
   cos_base="$(cos_base_url)"
+  # R2 (Cloudflare) is the new global asset origin, replacing Tencent COS for
+  # app assets. COS returns 451 to overseas IPs and freezes the bucket on
+  # arrears; R2 has a permanent free tier and no ICP filter. ttyd/mihomo/rootfs
+  # stay on COS until their data is migrated to R2 (switching them now → 404).
+  r2_base="https://r2.deepfetch.de5.net"
   app_version="$(versions_json_value app)"
   ttyd_version="$(versions_json_value ttyd)"
 
@@ -145,8 +150,13 @@ configure_cdn_env() {
     exit 1
   fi
 
-  export CICY_APP_CDN_PREFIX="${cos_base}/app/v${app_version}"
-  export CICY_APP_VITE_BASE="https://cicy-ai.com/cos-assets/v${app_version}"
+  # app SPA → R2 direct (data already migrated to r2.deepfetch.de5.net/app/v3/).
+  # VITE_BASE is the <script src> base in the built HTML; CDN_PREFIX is the Go
+  # binary's BuiltAppCDNPrefix. Both point at R2 now.
+  export CICY_APP_CDN_PREFIX="${r2_base}/app/v${app_version}"
+  export CICY_APP_VITE_BASE="${r2_base}/app/v${app_version}"
+  # ttyd still on COS — its data is not yet on R2 (switching → 404). TODO:
+  # migrate ttyd/v* to R2 then change this to ${r2_base}/ttyd/v${ttyd_version}.
   export CICY_TTYD_CDN_PREFIX="${cos_base}/ttyd/v${ttyd_version}"
 
   echo "🌐 CDN=1"
