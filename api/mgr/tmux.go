@@ -2813,6 +2813,13 @@ EOF
 		lines := []string{
 			ensureAgentCommandLine(cmdName, label, installCmd, installLog),
 		}
+		// Auto-trust this workspace so Claude Code skips its "Do you trust this
+		// folder?" prompt on first launch (which otherwise blocks readiness —
+		// notably for freshly-forked agents whose workspace was never trusted).
+		// Trust is read from ~/.claude.json projects[<cwd>].hasTrustDialogAccepted,
+		// NOT from --settings, so we check-and-add the entry there. Idempotent;
+		// non-fatal if node/write is unavailable (falls back to the prompt).
+		lines = append(lines, `node -e 'const fs=require("fs"),f=process.env.HOME+"/.claude.json";let c={};try{c=JSON.parse(fs.readFileSync(f,"utf8"))}catch(_){}c.projects=c.projects||{};const w=process.env.WORKSPACE;if(w){const p=c.projects[w]||{};p.hasTrustDialogAccepted=true;p.hasCompletedProjectOnboarding=true;c.projects[w]=p;fs.writeFileSync(f,JSON.stringify(c,null,2))}' 2>/dev/null || true`)
 		// Vanilla claude reads ~/.claude/settings.json — wire up a statusLine
 		// that shows the current model + context usage so users can always tell
 		// which model is active deep into a long conversation.
@@ -5347,52 +5354,53 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 	}
 	newPaneID = normPaneID(newPaneID)
 
-	// Synchronously wait for new agent ready, then send a prompt asking the
-	// agent to read the source's handoff document. Block until done so the
-	// frontend can keep the loading state until the prompt actually lands.
-	promptSent := false
+	// Wait for the new agent to become ready, then seed it with the inherit
+	// prompt — in the BACKGROUND. The pane already exists, so the HTTP response
+	// returns now and the UI clears its fork-loading overlay immediately;
+	// blocking here (up to ~2 minutes for the agent to boot) kept the overlay
+	// spinning long after the fork was created.
 	if newPaneID != "" {
-		// Wait for new agent to be ready (typically faster than summary gen)
-		ready := false
-		for i := 0; i < 240; i++ { // up to 2 minutes
-			time.Sleep(500 * time.Millisecond)
-			out, captureErr := runTmux("capture-pane", "-t", newPaneID, "-p")
-			if captureErr != nil {
-				continue
+		go func() {
+			ready := false
+			for i := 0; i < 240; i++ { // up to 2 minutes
+				time.Sleep(500 * time.Millisecond)
+				out, captureErr := runTmux("capture-pane", "-t", newPaneID, "-p")
+				if captureErr != nil {
+					continue
+				}
+				if isAgentInputReady(srcAgentType.String, out) {
+					ready = true
+					break
+				}
 			}
-			if isAgentInputReady(srcAgentType.String, out) {
-				ready = true
-				break
+			if !ready {
+				log.Printf("[fork] %s timeout waiting for agent ready", newPaneID)
+				return
 			}
-		}
-		if !ready {
-			log.Printf("[fork] %s timeout waiting for agent ready", newPaneID)
-		} else {
-			// Give the agent a beat after detecting ready
+			// Give the agent a beat after detecting ready.
 			time.Sleep(3 * time.Second)
-
 			if usedPath == "" {
 				log.Printf("[fork] %s no summary available — sending generic prompt", newPaneID)
-				if err := sendTextToPane(newPaneID, "Hello, this is a fork. Please continue the work from the source agent.", true); err == nil {
-					promptSent = true
+				if err := sendTextToPane(newPaneID, "Hello, this is a fork. Please continue the work from the source agent.", true); err != nil {
+					log.Printf("[fork] %s send generic prompt failed: %v", newPaneID, err)
 				}
-			} else {
-				prompt := fmt.Sprintf(forkInheritPrompt, short, usedPath)
-				if err := sendTextToPane(newPaneID, prompt, true); err != nil {
-					log.Printf("[fork] %s send prompt failed: %v", newPaneID, err)
-				} else {
-					log.Printf("[fork] %s prompt sent: %s", newPaneID, prompt)
-					promptSent = true
-				}
+				return
 			}
-		}
+			prompt := fmt.Sprintf(forkInheritPrompt, short, usedPath)
+			if err := sendTextToPane(newPaneID, prompt, true); err != nil {
+				log.Printf("[fork] %s send prompt failed: %v", newPaneID, err)
+			} else {
+				log.Printf("[fork] %s inherit prompt sent", newPaneID)
+			}
+		}()
 	}
 
+	// pending: the agent exists; the inherit prompt is delivered asynchronously.
 	J(w, M{
 		"success":        true,
 		"pane_id":        newPaneID,
 		"source_pane_id": srcID,
-		"prompt_sent":    promptSent,
+		"prompt_pending": newPaneID != "",
 		"prompt_path":    usedPath,
 	})
 }
