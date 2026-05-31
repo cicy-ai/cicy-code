@@ -107,13 +107,18 @@ func listBoundAgentWorkspaces(paneID string) ([]boundAgentWorkspace, error) {
 	return items, nil
 }
 
+// syncBoundAgentWorkspaceLinks is DISABLED: we no longer auto-create a
+// `workers/` directory under a parent agent's workspace, nor symlink bound child
+// agents into it. The function is kept (call sites unchanged) only to TEAR DOWN
+// any artifacts left over from when the feature was enabled — it removes the
+// managed `w-NNNN` symlinks (never real files/dirs) and drops the `workers/`
+// directory if it ends up empty. It never creates anything.
 func syncBoundAgentWorkspaceLinks(parentPaneID string) error {
 	parentPaneID = normPaneID(strings.TrimSpace(parentPaneID))
 	if parentPaneID == "" {
 		return nil
 	}
 	if nodeURL(parentPaneID) != "" {
-		log.Printf("[poll_links] skip remote parent=%s", shortPaneID(parentPaneID))
 		return nil
 	}
 	parentWorkspace := runtimePathToHostPath(paneWorkspace(parentPaneID))
@@ -121,72 +126,29 @@ func syncBoundAgentWorkspaceLinks(parentPaneID string) error {
 		return nil
 	}
 	workersDir := filepath.Join(parentWorkspace, "workers")
-	if err := os.MkdirAll(workersDir, 0755); err != nil {
-		return err
-	}
-	items, err := listBoundAgentWorkspaces(parentPaneID)
-	if err != nil {
-		return err
-	}
-	desired := map[string]string{}
-	for _, item := range items {
-		if item.shortID == "" || item.workspace == "" {
-			continue
-		}
-		if item.machineID > 0 || (item.sourceKind != "" && item.sourceKind != "local") {
-			log.Printf("[poll_links] skip remote child parent=%s child=%s machine_id=%d source_kind=%s", shortPaneID(parentPaneID), item.shortID, item.machineID, item.sourceKind)
-			continue
-		}
-		linkPath := filepath.Join(workersDir, item.shortID)
-		targetPath := runtimePathToHostPath(item.workspace)
-		desired[item.shortID] = targetPath
-		currentTarget, readErr := os.Readlink(linkPath)
-		if readErr == nil {
-			if currentTarget == targetPath {
-				continue
-			}
-			if err := os.Remove(linkPath); err != nil {
-				return err
-			}
-		} else if !os.IsNotExist(readErr) {
-			if info, statErr := os.Lstat(linkPath); statErr == nil && info.Mode()&os.ModeSymlink == 0 {
-				log.Printf("[poll_links] skip conflicting path parent=%s child=%s path=%s", shortPaneID(parentPaneID), item.shortID, linkPath)
-				continue
-			}
-		}
-		if err := os.Symlink(targetPath, linkPath); err != nil {
-			return err
-		}
-		log.Printf("[poll_links] synced child link parent=%s child=%s target=%s", shortPaneID(parentPaneID), item.shortID, targetPath)
-	}
 	entries, err := os.ReadDir(workersDir)
 	if err != nil {
-		return err
+		// No workers/ dir (the common case once disabled) → nothing to do.
+		return nil
 	}
 	for _, entry := range entries {
 		name := entry.Name()
 		if !managedWorkerLinkPattern.MatchString(name) {
 			continue
 		}
-		if _, ok := desired[name]; ok {
-			continue
-		}
 		linkPath := filepath.Join(workersDir, name)
-		info, err := os.Lstat(linkPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return err
-		}
-		if info.Mode()&os.ModeSymlink == 0 {
-			log.Printf("[poll_links] skip non-symlink stale candidate parent=%s child=%s path=%s", shortPaneID(parentPaneID), name, linkPath)
+		info, lerr := os.Lstat(linkPath)
+		if lerr != nil || info.Mode()&os.ModeSymlink == 0 {
+			// Only ever remove our own symlinks, never real dirs/files.
 			continue
 		}
-		if err := os.Remove(linkPath); err != nil {
-			return err
+		if err := os.Remove(linkPath); err == nil {
+			log.Printf("[poll_links] removed legacy child link parent=%s child=%s", shortPaneID(parentPaneID), name)
 		}
-		log.Printf("[poll_links] removed stale child link parent=%s child=%s", shortPaneID(parentPaneID), name)
+	}
+	// Drop the now-empty workers/ dir (it only ever held our symlinks).
+	if remaining, rerr := os.ReadDir(workersDir); rerr == nil && len(remaining) == 0 {
+		_ = os.Remove(workersDir)
 	}
 	return nil
 }
