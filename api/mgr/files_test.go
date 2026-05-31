@@ -151,6 +151,46 @@ func TestResolveSafePath_AllowsInternalSymlink(t *testing.T) {
 	}
 }
 
+// Deleting a symlink (even one pointing at a directory) must drop the link
+// itself, never follow it to the target. resolveSafeLeaf returns the link node
+// (unlike resolveSafePath, which EvalSymlinks the leaf to its target).
+func TestResolveSafeLeaf_DoesNotFollowLeafSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on windows")
+	}
+	ws := t.TempDir()
+	target := filepath.Join(ws, "real")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	link := filepath.Join(ws, "linkdir")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	got, err := resolveSafeLeaf(ws, "linkdir")
+	if err != nil {
+		t.Fatalf("resolveSafeLeaf: %v", err)
+	}
+	if got != link {
+		t.Fatalf("want link path %q, got %q (it followed the symlink)", link, got)
+	}
+
+	// Removing the resolved leaf drops the link and leaves the target intact.
+	if err := os.Remove(got); err != nil {
+		t.Fatalf("remove link: %v", err)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatalf("link still present after delete")
+	}
+	if _, err := os.Stat(filepath.Join(target, "f.txt")); err != nil {
+		t.Fatalf("target directory was destroyed by deleting the link: %v", err)
+	}
+}
+
 func TestIsProtectedWritePath(t *testing.T) {
 	ws := t.TempDir()
 	cases := map[string]bool{
