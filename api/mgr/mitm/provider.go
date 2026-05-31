@@ -17,6 +17,8 @@ func ProviderFromHost(host string) string {
 		return "openai"
 	case strings.HasSuffix(host, "deepseek.com"):
 		return "openai" // deepseek uses OpenAI-compatible chat completions
+	case strings.HasSuffix(host, "opencode.ai"):
+		return "openai" // OpenCode Zen — OpenAI-compatible chat completions
 	case strings.HasSuffix(host, "googleapis.com"):
 		return "google"
 	case strings.HasSuffix(host, "x.ai"):
