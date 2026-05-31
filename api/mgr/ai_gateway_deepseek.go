@@ -251,9 +251,8 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 				continue
 			}
 			// Tolerate both Responses-API flat format `{type,name,description,parameters}`
-			// and chat-completions nested format `{type,function:{name,description,parameters}}`.
-			// Gateway tool injection (injectCicyToolDefs) emits the nested shape and may run
-			// before this transform.
+			// and chat-completions nested format `{type,function:{name,description,parameters}}`,
+			// since upstream callers emit either shape.
 			src := tm
 			if nested, ok := tm["function"].(map[string]interface{}); ok {
 				src = nested
