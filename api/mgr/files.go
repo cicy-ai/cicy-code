@@ -191,6 +191,39 @@ func resolveSafePath(workspace, requested string) (string, error) {
 	return real, nil
 }
 
+// resolveSafeLeaf validates that `requested` lives inside the workspace WITHOUT
+// following a final-component symlink, returning the literal leaf path. Delete
+// and rename must act on the link node itself, not its target: resolveSafePath
+// EvalSymlinks the whole path, so deleting a symlink with it would remove what
+// the link points at and leave the link dangling. The parent chain is still
+// resolved so a symlinked parent dir can't smuggle the leaf outside.
+func resolveSafeLeaf(workspace, requested string) (string, error) {
+	clean := strings.TrimSpace(requested)
+	if clean == "" || clean == "." || clean == "./" {
+		return "", errPathOutsideWorkspace
+	}
+	clean = strings.TrimPrefix(clean, "./")
+	var joined string
+	if filepath.IsAbs(clean) {
+		joined = filepath.Clean(clean)
+	} else {
+		joined = filepath.Clean(filepath.Join(workspace, clean))
+	}
+	rel, err := filepath.Rel(workspace, joined)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errPathOutsideWorkspace
+	}
+	// The leaf is left unresolved (so a leaf symlink is acted on as a link), but
+	// the parent chain must still stay inside the workspace.
+	if realParent, perr := filepath.EvalSymlinks(filepath.Dir(joined)); perr == nil {
+		if rel2, rerr := filepath.Rel(workspace, realParent); rerr != nil ||
+			rel2 == ".." || strings.HasPrefix(rel2, ".."+string(filepath.Separator)) {
+			return "", errPathSymlinkEscape
+		}
+	}
+	return joined, nil
+}
+
 // isProtectedWritePath blocks writes to dirs we never want the UI to touch.
 func isProtectedWritePath(workspace, abs string) bool {
 	rel, err := filepath.Rel(workspace, abs)
@@ -410,13 +443,6 @@ func handleFsList(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		info, infoErr := de.Info()
-		// Skip symlinks entirely — DirEntry.IsDir reports the link itself
-		// instead of the target, which made every link-to-dir confusingly
-		// unclickable, and resolveSafePath rejects links that point outside
-		// the workspace with a 403. Hiding them is simpler than supporting them.
-		if infoErr == nil && info.Mode()&fs.ModeSymlink != 0 {
-			continue
-		}
 		var (
 			size  int64
 			mtime int64
@@ -427,12 +453,28 @@ func handleFsList(w http.ResponseWriter, r *http.Request) {
 			mtime = info.ModTime().Unix()
 			mode = info.Mode().String()
 		}
+		isDir := de.IsDir()
+		isSymlink := infoErr == nil && info.Mode()&fs.ModeSymlink != 0
+		// Symlinks: DirEntry.Info()/IsDir() describe the link itself, not its
+		// target — that's why links used to be hidden. Follow the link with
+		// os.Stat so a link-to-dir is navigable and a link-to-file is sized like
+		// its target; mark it so the UI can show it as a link. A broken or
+		// out-of-workspace link still lists (a click on the latter 403s in
+		// resolveSafePath, same as before).
+		if isSymlink {
+			if tinfo, terr := os.Stat(filepath.Join(abs, name)); terr == nil {
+				isDir = tinfo.IsDir()
+				size = tinfo.Size()
+				mtime = tinfo.ModTime().Unix()
+			}
+		}
 		out.Entries = append(out.Entries, fsEntry{
-			Name:  name,
-			IsDir: de.IsDir(),
-			Size:  size,
-			Mtime: mtime,
-			Mode:  mode,
+			Name:      name,
+			IsDir:     isDir,
+			Size:      size,
+			Mtime:     mtime,
+			Mode:      mode,
+			IsSymlink: isSymlink,
 		})
 		if len(out.Entries) >= max {
 			out.Truncated = true
@@ -891,7 +933,10 @@ func handleFsDelete(w http.ResponseWriter, r *http.Request) {
 		fsErr(w, err)
 		return
 	}
-	abs, err := resolveSafePath(workspace, req.Path)
+	// resolveSafeLeaf (not resolveSafePath): delete must act on the path itself,
+	// not a symlink's target — otherwise deleting a link removes what it points
+	// at and orphans the link.
+	abs, err := resolveSafeLeaf(workspace, req.Path)
 	if err != nil {
 		fsErr(w, err)
 		return
@@ -904,7 +949,9 @@ func handleFsDelete(w http.ResponseWriter, r *http.Request) {
 		fsErr(w, errPathWriteForbidden)
 		return
 	}
-	st, statErr := os.Stat(abs)
+	// Lstat, not Stat: a symlink (even one pointing at a directory) is a single
+	// link node — remove the link, never recurse into or delete its target.
+	st, statErr := os.Lstat(abs)
 	if statErr != nil {
 		fsErr(w, statErr)
 		return
@@ -1020,10 +1067,14 @@ func handleFsTouch(w http.ResponseWriter, r *http.Request) {
 
 // --- favorites ----------------------------------------------------------
 
-// Favorites are persisted as a small JSON file at the workspace root —
-// keeps them in the same place users can git-ignore, lives near the actual
-// files, and avoids per-host central state.
-const fsFavoritesFile = ".cicy-favorites.json"
+// Favorites are persisted as a small JSON file under the workspace's .cicy/
+// dir — keeps per-agent UI state together under .cicy/ instead of littering the
+// workspace root, lives near the actual files, and avoids per-host central state.
+const fsFavoritesFile = ".cicy/favorites.json"
+
+// Legacy location (workspace root). Read as a fallback and removed on the next
+// save so existing favorites migrate into .cicy/ without being lost.
+const fsFavoritesFileLegacy = ".cicy-favorites.json"
 
 type fsFavorite struct {
 	Path  string `json:"path"`  // workspace-relative
@@ -1039,14 +1090,25 @@ func favoritesPath(workspace string) string {
 	return filepath.Join(workspace, fsFavoritesFile)
 }
 
+func favoritesPathLegacy(workspace string) string {
+	return filepath.Join(workspace, fsFavoritesFileLegacy)
+}
+
 func loadFavorites(workspace string) (*fsFavoritesFileShape, error) {
 	p := favoritesPath(workspace)
 	data, err := os.ReadFile(p)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &fsFavoritesFileShape{Items: []fsFavorite{}}, nil
+			// Fall back to the legacy workspace-root file if it's still around
+			// (migrated to .cicy/ on the next save).
+			if legacy, lerr := os.ReadFile(favoritesPathLegacy(workspace)); lerr == nil {
+				data = legacy
+			} else {
+				return &fsFavoritesFileShape{Items: []fsFavorite{}}, nil
+			}
+		} else {
+			return nil, err
 		}
-		return nil, err
 	}
 	var out fsFavoritesFileShape
 	if err := json.Unmarshal(data, &out); err != nil {
@@ -1063,6 +1125,9 @@ func saveFavorites(workspace string, f *fsFavoritesFileShape) error {
 	if f.Items == nil {
 		f.Items = []fsFavorite{}
 	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
@@ -1072,7 +1137,12 @@ func saveFavorites(workspace string, f *fsFavoritesFileShape) error {
 		os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, p)
+	if err := os.Rename(tmp, p); err != nil {
+		return err
+	}
+	// Migrated into .cicy/ — drop the legacy workspace-root file if present.
+	_ = os.Remove(favoritesPathLegacy(workspace))
+	return nil
 }
 
 func handleFsFavoritesList(w http.ResponseWriter, r *http.Request) {
