@@ -62,7 +62,7 @@ func imReplyItemID(item map[string]interface{}) int {
 //     imRegisterReplyPushForInbound 会重新 register。
 func newReplyHooksForPane(agentID string, isContinuation bool) []aiGatewayReplyHook {
 	var hooks []aiGatewayReplyHook
-	hooks = append(hooks, drainCallbackHooksForPane(agentID)...)
+	hooks = append(hooks, peekCallbackHooksForPane(agentID)...)
 	// 注：老的 tgReplyPushHook（基于 agent_config.tg_token 字段）已废弃。
 	// TG 走和 WeChat 一样的通用 imReplyPushHook 路径：
 	//   imRegisterReplyPushForInbound (IM 进来时) → imPeek/Drain (这里) → attach hook
