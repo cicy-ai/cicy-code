@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2, Send, Megaphone, AtSign, X, Loader2, CheckCircle2, MessageSquare,
-  Plus, Minus, Maximize2, Crown, Inbox,
+  Plus, Minus, Maximize2, Crown, Inbox, UserPlus, Sparkles, ChevronRight, Power, Users,
 } from 'lucide-react';
 
 /*
@@ -18,6 +18,7 @@ type Status = 'idle' | 'working' | 'done';
 
 interface Worker {
   id: string; name: string; role: string; emoji: string; accent: string;
+  model: string; ctx: number; ctxK: number;   // 模型 + 上下文用量(%) + 上下文窗口(k)
   status: Status; script: Line[]; shown: number; startedAt: number;
   x: number; y: number; w: number; h: number;
 }
@@ -28,34 +29,34 @@ interface ChatMsg { id: number; kind: ChatKind; from?: string; to?: string; text
 const SELF = 'w-10001';
 const MIN_W = 240, MIN_H = 168;
 
-const W = (id: string, name: string, role: string, emoji: string, accent: string, status: Status, x: number, y: number, script: Line[]): Worker =>
-  ({ id, name, role, emoji, accent, status, script, shown: status === 'working' ? 0 : script.length, startedAt: 0, x, y, w: 312, h: 232 });
+const W = (id: string, name: string, role: string, emoji: string, accent: string, model: string, ctx: number, ctxK: number, status: Status, x: number, y: number, script: Line[]): Worker =>
+  ({ id, name, role, emoji, accent, model, ctx, ctxK, status, script, shown: status === 'working' ? 0 : script.length, startedAt: 0, x, y, w: 312, h: 248 });
 
 const INIT_WORKERS: Worker[] = [
-  W('w-10010', '架构师 Aria', 'dev-senior', '🏛️', 'sky', 'working', 36, 32, [
+  W('w-10010', '架构师 Aria', 'dev-senior', '🏛️', 'sky', 'deepseek-v4-pro', 42, 256, 'working', 36, 32, [
     { t: 'thinking', s: '把"画布"拆成 3 张卡：数据层 / 渲染层 / 画布层。' },
     { t: 'text', s: '定义 LiteAgentCard props + digest 端点契约。' },
     { t: 'thinking', s: 'tool_result 不传，payload 小一个数量级。' },
     { t: 'text', s: '接口写进 docs，交给 Finn。' },
     { t: 'text', s: '✅ 完成：技术任务卡 + 接口契约。' },
   ]),
-  W('w-10011', '前端 Finn', 'dev-junior', '🎨', 'violet', 'working', 384, 32, [
+  W('w-10011', '前端 Finn', 'dev-junior', '🎨', 'violet', 'deepseek-v4-pro', 61, 256, 'working', 384, 32, [
     { t: 'thinking', s: '复用 normalize，搭可拖拽/缩放的 window。' },
     { t: 'text', s: '左栏指挥台 + 右栏画布。' },
     { t: 'thinking', s: '选中 window → prompt 自动 @ 它。' },
     { t: 'text', s: '加 drag handle + resize 抓手。' },
     { t: 'text', s: '✅ 完成：可拖拽缩放的办公室画布。' },
   ]),
-  W('w-10012', '测试 Quinn', 'qa', '🧪', 'emerald', 'working', 732, 32, [
+  W('w-10012', '测试 Quinn', 'qa', '🧪', 'emerald', 'gpt-5.5', 38, 400, 'working', 732, 32, [
     { t: 'thinking', s: '核对验收标准：N window 同屏不卡。' },
     { t: 'text', s: '跑 20 window 压力，盯帧率。' },
     { t: 'thinking', s: 'thinking 太长要截断。' },
     { t: 'text', s: 'FAIL：离屏 window 仍在轮询，需门控。' },
   ]),
-  W('w-10013', '运维 Ops', 'ops', '🚀', 'amber', 'idle', 210, 296, [
+  W('w-10013', '运维 Ops', 'ops', '🚀', 'amber', 'deepseek-v4-pro', 8, 256, 'idle', 210, 296, [
     { t: 'text', s: '待构建产物，准备部署。' },
   ]),
-  W('w-10014', '安全 Sage', 'reviewer', '🛡️', 'rose', 'working', 558, 296, [
+  W('w-10014', '安全 Sage', 'reviewer', '🛡️', 'rose', 'claude-haiku-4-5', 84, 200, 'working', 558, 296, [
     { t: 'thinking', s: '扫一遍有没有把 token 渲进 window。' },
     { t: 'text', s: 'text+thinking 不含工具入参，攻击面更小。' },
     { t: 'text', s: '✅ 完成：安全结论 PASS。' },
@@ -91,6 +92,37 @@ function Avatar({ emoji, accent, size = 30, status }: { emoji: string; accent: s
   );
 }
 
+/* ── 候选成员（存在但未加入/未开启 = 离线）── */
+interface Cand { id: string; name: string; role: string; emoji: string; accent: string; model: string; script: Line[] }
+/* ── 模版成员（我们提供的角色预设，点击按模版创建新成员）── */
+interface Tmpl { key: string; name: string; role: string; emoji: string; accent: string; model: string; script: Line[] }
+
+const GENERIC_SCRIPT: Line[] = [
+  { t: 'thinking', s: '读取任务卡与验收标准…' },
+  { t: 'text', s: '开始执行。' },
+  { t: 'thinking', s: '检查边界条件与依赖。' },
+  { t: 'text', s: '✅ 完成，等待验收。' },
+];
+
+const INIT_CANDIDATES: Cand[] = [
+  { id: 'w-10015', name: '文案 Wendy', role: 'writer', emoji: '✍️', accent: 'violet', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
+  { id: 'w-10016', name: '数据 Dана', role: 'analyst', emoji: '📊', accent: 'sky', model: 'gpt-5.5', script: GENERIC_SCRIPT },
+  { id: 'w-10017', name: '设计 Deo', role: 'designer', emoji: '🎭', accent: 'rose', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
+];
+
+const TEMPLATES: Tmpl[] = [
+  { key: 'arch', name: '架构师', role: 'dev-senior', emoji: '🏛️', accent: 'sky', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
+  { key: 'be', name: '后端开发', role: 'dev', emoji: '🛠️', accent: 'violet', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
+  { key: 'fe', name: '前端开发', role: 'dev-junior', emoji: '🎨', accent: 'violet', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
+  { key: 'qa', name: '测试', role: 'qa', emoji: '🧪', accent: 'emerald', model: 'gpt-5.5', script: GENERIC_SCRIPT },
+  { key: 'ops', name: '运维', role: 'ops', emoji: '🚀', accent: 'amber', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
+  { key: 'sec', name: '安全', role: 'reviewer', emoji: '🛡️', accent: 'rose', model: 'claude-haiku-4-5', script: GENERIC_SCRIPT },
+];
+
+function makeWorker(id: string, name: string, role: string, emoji: string, accent: string, model: string, slot: number, script: Line[]): Worker {
+  return { id, name, role, emoji, accent, model, ctx: 5, ctxK: 256, status: 'idle', script, shown: 0, startedAt: 0, w: 312, h: 248, x: 36 + (slot % 3) * 372, y: 32 + Math.floor(slot / 3) * 280 };
+}
+
 export default function Office() {
   const [workers, setWorkers] = useState<Worker[]>(() => {
     const t0 = Date.now();
@@ -107,6 +139,9 @@ export default function Office() {
   const [chat, setChat] = useState<ChatMsg[]>([
     { id: 1, kind: 'note', text: '拖标题移动卡片、拖右下角缩放、空白拖拽平移、滚轮缩放。点 worker 自动 @ 派任务，或切广播。', ts: hhmm(Date.now()) },
   ]);
+  const [candidates, setCandidates] = useState<Cand[]>(INIT_CANDIDATES);
+  const [rosterOpen, setRosterOpen] = useState(true);
+  const idSeq = useRef(20);
   const seq = useRef(2);
   const chatRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -121,7 +156,10 @@ export default function Office() {
     const t = window.setInterval(() => {
       const ts = Date.now();
       setWorkers((prev) => prev.map((w) => {
-        if (w.status === 'working') return w.shown < w.script.length ? { ...w, shown: w.shown + 1 } : { ...w, status: 'done' };
+        if (w.status === 'working') {
+          const ctx = Math.min(99, w.ctx + 1 + Math.floor(Math.random() * 3));   // 上下文随干活增长
+          return w.shown < w.script.length ? { ...w, shown: w.shown + 1, ctx } : { ...w, status: 'done', ctx };
+        }
         if (w.status === 'done' && Math.random() < 0.08) return { ...w, status: 'working', shown: 0, startedAt: ts };
         return w;
       }));
@@ -182,6 +220,16 @@ export default function Office() {
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   const onChange = (v: string) => { setText(v); if (mode === 'single') setMentionOpen(/(^|\s)@$/.test(v)); };
   const pickMention = (w: Worker) => { setSelectedId(w.id); setMode('single'); setText((v) => v.replace(/@$/, '')); setMentionOpen(false); inputRef.current?.focus(); };
+  const joinCandidate = (c: Cand) => {
+    setCandidates((prev) => prev.filter((x) => x.id !== c.id));
+    setWorkers((prev) => [...prev, makeWorker(c.id, c.name, c.role, c.emoji, c.accent, c.model, prev.length, c.script)]);
+    push({ kind: 'note', text: `已加入并启用 ${c.name}（${c.id}）` });
+  };
+  const createFromTemplate = (t: Tmpl) => {
+    const id = `w-100${idSeq.current++}`;
+    setWorkers((prev) => [...prev, makeWorker(id, t.name, t.role, t.emoji, t.accent, t.model, prev.length, t.script)]);
+    push({ kind: 'note', text: `已按模版「${t.name}」创建 ${id}` });
+  };
   const canSend = text.trim() && (mode === 'broadcast' || !!target);
 
   return (
@@ -262,6 +310,49 @@ export default function Office() {
           <div className="text-center text-[10px] text-zinc-600">{Math.round(zoom * 100)}%</div>
         </div>
       </main>
+
+      {/* 右栏：成员库（候选 + 模版） */}
+      {rosterOpen ? (
+        <aside data-id="office-roster" className="flex w-[268px] min-w-[268px] shrink-0 flex-col border-l border-white/[0.06] bg-[#0b0b0c]">
+          <div className="flex h-14 shrink-0 items-center gap-2 border-b border-white/[0.06] px-4">
+            <Users className="h-4 w-4 text-zinc-400" />
+            <span className="text-[13px] font-semibold text-zinc-100">成员库</span>
+            <button data-id="office-roster-close" onClick={() => setRosterOpen(false)} className="ml-auto rounded p-1 text-zinc-500 hover:bg-white/10 hover:text-zinc-200"><ChevronRight className="h-4 w-4" /></button>
+          </div>
+          <div className="flex-1 space-y-5 overflow-auto px-3 py-3.5">
+            <section data-id="office-roster-candidates">
+              <div className="mb-2 flex items-center gap-1.5 px-1 text-[11px] font-medium uppercase tracking-wide text-zinc-600"><Power className="h-3 w-3" /> 候选 · 未开启<span className="ml-auto normal-case text-zinc-700">{candidates.length}</span></div>
+              {candidates.length === 0 ? <div className="px-1 text-[11.5px] text-zinc-700">全部已加入</div> : (
+                <div className="space-y-1.5">
+                  {candidates.map((c) => (
+                    <div key={c.id} data-id={`office-cand-${c.id}`} className="flex items-center gap-2.5 rounded-xl border border-white/[0.06] bg-white/[0.02] px-2.5 py-2">
+                      <span className="opacity-50 grayscale"><Avatar emoji={c.emoji} accent={c.accent} size={28} /></span>
+                      <span className="min-w-0 flex-1"><span className="block truncate text-[12.5px] text-zinc-300">{c.name}</span><span className="font-mono text-[10.5px] text-zinc-600">{c.id} · 离线</span></span>
+                      <button data-id={`office-cand-join-${c.id}`} onClick={() => joinCandidate(c)} className="inline-flex items-center gap-1 rounded-lg bg-white/[0.06] px-2 py-1 text-[11.5px] text-zinc-200 transition-colors hover:bg-white/[0.12]"><UserPlus className="h-3.5 w-3.5" /> 加入</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+            <section data-id="office-roster-templates">
+              <div className="mb-2 flex items-center gap-1.5 px-1 text-[11px] font-medium uppercase tracking-wide text-zinc-600"><Sparkles className="h-3 w-3" /> 模版 · 点击创建<span className="ml-auto normal-case text-zinc-700">{TEMPLATES.length}</span></div>
+              <div className="space-y-1.5">
+                {TEMPLATES.map((t) => (
+                  <div key={t.key} data-id={`office-tmpl-${t.key}`} className="flex items-center gap-2.5 rounded-xl border border-dashed border-white/[0.09] bg-white/[0.015] px-2.5 py-2">
+                    <Avatar emoji={t.emoji} accent={t.accent} size={28} />
+                    <span className="min-w-0 flex-1"><span className="block truncate text-[12.5px] text-zinc-300">{t.name}</span><span className="block truncate text-[10.5px] text-zinc-600">{t.role}</span></span>
+                    <button data-id={`office-tmpl-create-${t.key}`} onClick={() => createFromTemplate(t)} className="inline-flex items-center gap-1 rounded-lg bg-sky-500/15 px-2 py-1 text-[11.5px] text-sky-300 transition-colors hover:bg-sky-500/25"><Plus className="h-3.5 w-3.5" /> 创建</button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        </aside>
+      ) : (
+        <button data-id="office-roster-open" onClick={() => setRosterOpen(true)}
+          className="absolute right-0 top-1/2 z-30 flex -translate-y-1/2 items-center gap-1.5 rounded-l-lg border border-r-0 border-white/10 bg-[#16161a]/90 px-2 py-3 text-[11px] text-zinc-400 backdrop-blur transition-colors hover:text-zinc-100"
+          style={{ writingMode: 'vertical-rl' }}><Users className="h-3.5 w-3.5" /> 成员库</button>
+      )}
     </div>
   );
 }
@@ -306,6 +397,8 @@ function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResiz
   useEffect(() => { const n = bodyRef.current; if (n) n.scrollTop = n.scrollHeight; }, [w.shown]);
   const done = w.status === 'done';
   const working = w.status === 'working';
+  const ctxColor = w.ctx > 85 ? 'bg-rose-400' : w.ctx > 60 ? 'bg-amber-400' : 'bg-zinc-400/60';
+  const ctxText = w.ctx > 85 ? 'text-rose-300' : w.ctx > 60 ? 'text-amber-300' : 'text-zinc-500';
 
   return (
     <div data-id={`office-window-${w.id}`}
@@ -330,7 +423,15 @@ function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResiz
           <span className="text-[10.5px] text-zinc-600">空闲</span>
         )}
       </div>
-      <div className="mx-3 h-px bg-white/[0.05]" />
+      {/* meta：模型 + 上下文用量 */}
+      <div data-id={`office-window-meta-${w.id}`} className="flex items-center gap-2 border-b border-white/[0.05] px-3 py-1.5">
+        <span className="truncate rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400" title={`模型 ${w.model}`}>{w.model}</span>
+        <div className="ml-auto flex items-center gap-1.5" title={`上下文 ${w.ctx}% · 窗口 ${w.ctxK}k`}>
+          <span className="text-[10px] text-zinc-600">ctx</span>
+          <div className="h-1 w-14 overflow-hidden rounded-full bg-white/10"><div className={`h-full rounded-full ${ctxColor} transition-all`} style={{ width: `${w.ctx}%` }} /></div>
+          <span className={`text-[10px] tabular-nums ${ctxText}`}>{w.ctx}%</span>
+        </div>
+      </div>
       <div ref={bodyRef} data-id={`office-window-body-${w.id}`} className="flex-1 space-y-2 overflow-auto px-3 py-2.5">
         {lines.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-1 text-zinc-700"><Inbox className="h-5 w-5" /><span className="text-[11px]">等待派活</span></div>
