@@ -142,7 +142,13 @@ configure_cdn_env() {
   # filter, no 451 to overseas IPs. Both app and ttyd are served from R2 under
   # --cdn (ttyd/v* must be published to R2 for the terminal bundle to resolve).
   r2_base="https://r2.deepfetch.de5.net"
-  app_version="$(versions_json_value app)"
+  # App assets get a PER-RELEASE R2 directory (/app/v<full-version>, e.g.
+  # /app/v2.1.52) so each release's hashed bundles + logos live in their own
+  # path — no cross-version collision, and a fresh path is never cache-poisoned
+  # by a prior version's wrong-MIME upload. (Was a shared /app/v3 keyed off
+  # versions.json, which mixed every release's assets in one dir.) ttyd keeps
+  # its own independent bundle version since it rarely changes.
+  app_version="$(node -p "require('${ROOT_DIR}/npm/package.json').version" 2>/dev/null || versions_json_value app)"
   ttyd_version="$(versions_json_value ttyd)"
 
   # Bake the R2 prefixes into EVERY build (best-effort). A binary always knows
