@@ -130,39 +130,35 @@ cos_base_url() {
 configure_cdn_env() {
   export CICY_APP_CDN_PREFIX=""
   export CICY_TTYD_CDN_PREFIX=""
+  # IMPORTANT: never export CICY_APP_VITE_BASE here. The SPA is always built with
+  # vite base '/' so the embedded index.html references local /assets/… and works
+  # in the default (local) runtime mode. The R2 switch is done at RUNTIME by the
+  # `cicy-code --cdn` flag, which rewrites the index's asset URLs to the baked-in
+  # BuiltAppCDNPrefix. So we only bake the prefixes into the binary (via ldflags
+  # in build_one); we do NOT change how vite emits the HTML.
 
-  if [ "${CDN:-0}" != "1" ]; then
-    return
-  fi
-
-  local cos_base r2_base app_version ttyd_version
-  cos_base="$(cos_base_url)"
-  # R2 (Cloudflare) is the new global asset origin, replacing Tencent COS for
-  # app assets. COS returns 451 to overseas IPs and freezes the bucket on
-  # arrears; R2 has a permanent free tier and no ICP filter. ttyd/mihomo/rootfs
-  # stay on COS until their data is migrated to R2 (switching them now → 404).
+  local r2_base app_version ttyd_version
+  # R2 (Cloudflare) is the global asset origin: permanent free tier, no ICP
+  # filter, no 451 to overseas IPs. Both app and ttyd are served from R2 under
+  # --cdn (ttyd/v* must be published to R2 for the terminal bundle to resolve).
   r2_base="https://r2.deepfetch.de5.net"
   app_version="$(versions_json_value app)"
   ttyd_version="$(versions_json_value ttyd)"
 
-  if [ -z "$app_version" ] || [ -z "$ttyd_version" ]; then
-    echo "❌ CDN=1 requires versions.json to define app and ttyd versions" >&2
-    exit 1
+  # Bake the R2 prefixes into EVERY build (best-effort). A binary always knows
+  # where its CDN assets live; `--cdn` decides whether to use them at runtime.
+  # If versions.json lacks a field, leave that prefix empty → `--cdn` falls back
+  # to local for that asset (harmless).
+  if [ -n "$app_version" ]; then
+    export CICY_APP_CDN_PREFIX="${r2_base}/app/v${app_version}"
+  fi
+  if [ -n "$ttyd_version" ]; then
+    export CICY_TTYD_CDN_PREFIX="${r2_base}/ttyd/v${ttyd_version}"
   fi
 
-  # app SPA → R2 direct (data already migrated to r2.deepfetch.de5.net/app/v3/).
-  # VITE_BASE is the <script src> base in the built HTML; CDN_PREFIX is the Go
-  # binary's BuiltAppCDNPrefix. Both point at R2 now.
-  export CICY_APP_CDN_PREFIX="${r2_base}/app/v${app_version}"
-  export CICY_APP_VITE_BASE="${r2_base}/app/v${app_version}"
-  # ttyd still on COS — its data is not yet on R2 (switching → 404). TODO:
-  # migrate ttyd/v* to R2 then change this to ${r2_base}/ttyd/v${ttyd_version}.
-  export CICY_TTYD_CDN_PREFIX="${cos_base}/ttyd/v${ttyd_version}"
-
-  echo "🌐 CDN=1"
-  echo "   APP_CDN_PREFIX=${CICY_APP_CDN_PREFIX}"
-  echo "   APP_VITE_BASE=${CICY_APP_VITE_BASE}"
-  echo "   TTYD_CDN_PREFIX=${CICY_TTYD_CDN_PREFIX}"
+  echo "🌐 CDN prefixes baked (activate at runtime with: cicy-code --cdn)"
+  echo "   APP_CDN_PREFIX=${CICY_APP_CDN_PREFIX:-<none>}"
+  echo "   TTYD_CDN_PREFIX=${CICY_TTYD_CDN_PREFIX:-<none>}"
 }
 
 acquire_build_embed_lock() {
@@ -432,7 +428,7 @@ case "${1:-build}" in
     echo "Environment variables:"
     echo "  SKIP_NPM=1     Skip npm ci + npm run build (reuse existing app/dist)"
     echo "  SKIP_TTYD_ASSET=1  Skip ttyd bindata refresh (reuse existing api/server/asset.go)"
-    echo "  CDN=1          Build app/ttyd asset URLs with COS CDN prefix from ${GLOBAL_JSON}.tencent"
+    echo "  (CDN is now a runtime flag: cicy-code --cdn; R2 prefixes are baked into every build)"
     echo "  BASE_IMAGE     Base image for docker command"
     echo "  NO_CACHE=1     Disable Docker layer cache"
     exit 0
@@ -449,7 +445,7 @@ case "${1:-build}" in
     echo "Env vars:"
     echo "  SKIP_NPM=1     Skip npm ci + npm run build (reuse existing app/dist)"
     echo "  SKIP_TTYD_ASSET=1  Skip ttyd bindata refresh (reuse existing api/server/asset.go)"
-    echo "  CDN=1          Build app/ttyd asset URLs with COS CDN prefix from ${GLOBAL_JSON}.tencent"
+    echo "  (CDN is now a runtime flag: cicy-code --cdn; R2 prefixes are baked into every build)"
     echo "  BASE_IMAGE     Base image for docker command"
     echo "  NO_CACHE=1     Disable Docker layer cache"
     exit 1

@@ -15,7 +15,7 @@
   "delete": "Delete",
   "createTitle": "Create and bind a new worker",
   "createSubmit": "Create and bind",
-  "createEmptyTitleAgent": "Full-stack engineer",
+  "createEmptyTitleAgent": "名称未設定",
   "bindMemberPlaceholder": "チームメンバーをバインド…",
   "createBindShortLabel": "Create and bind a new worker",
   "confirmUnbind": "Unbind <strong>{{name}}</strong>?",

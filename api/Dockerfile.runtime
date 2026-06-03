@@ -32,9 +32,13 @@ RUN chown -R cicy:cicy /app && \
     grep -Fqx '[ -f "$HOME/.cicy_tmux.conf" ] && source "$HOME/.cicy_tmux.conf"' /home/cicy/.bashrc || \
       printf '%s\n' '[ -f "$HOME/.cicy_tmux.conf" ] && source "$HOME/.cicy_tmux.conf"' >> /home/cicy/.bashrc
 USER cicy
+# ENABLE_CDN=true makes the entrypoint launch cicy-code with --cdn, serving the
+# App SPA + ttyd bundle from Cloudflare R2 (assets must be published to R2 for
+# the running version). Default off → embedded local assets.
 ENV HOME=/home/cicy \
     TERM=xterm-256color \
     COLORTERM=truecolor \
+    ENABLE_CDN=false \
     PATH="/home/cicy/.npm-global/bin:/home/cicy/.local/bin:/home/cicy/.opencode/bin:${PATH}"
 
 # Pre-install the Claude Code agent CLI so the first worker launch has `claude`

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // setupTodoTest installs an isolated cicy root, store, and inserts a master
@@ -418,10 +419,49 @@ func TestLoadTodos_AcceptsPythonTimestampFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadTodos with python ts: %v", err)
 	}
-	if len(todos) != 1 || todos[0].ID != "t-1" {
-		t.Fatalf("expected 1 todo with id t-1, got %v", todos)
+	// The legacy "t-1" id is migrated to the stable integer "1" on load.
+	if len(todos) != 1 || todos[0].ID != "1" {
+		t.Fatalf("expected 1 todo with migrated id 1, got %v", todos)
 	}
 	if todos[0].CreatedAt.IsZero() {
 		t.Fatalf("CreatedAt parsed as zero: %+v", todos[0])
+	}
+}
+
+func TestMigrateTodoIDs_AssignsStableIntegers(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	todos := []Todo{
+		{ID: "t-300-aaaa", Title: "third", CreatedAt: now.Add(2 * time.Hour)},
+		{ID: "t-100-bbbb", Title: "first", CreatedAt: now},
+		{ID: "5", Title: "already numeric", CreatedAt: now.Add(time.Hour)},
+		{ID: "t-200-cccc", Title: "second", CreatedAt: now.Add(90 * time.Minute)},
+	}
+	if !migrateTodoIDs(todos) {
+		t.Fatalf("expected migration to report a change")
+	}
+	// Legacy ids are numbered by created_at ascending, continuing after the
+	// highest existing numeric id (5). The pre-existing numeric id is untouched.
+	byTitle := map[string]string{}
+	for _, td := range todos {
+		byTitle[td.Title] = td.ID
+	}
+	want := map[string]string{
+		"already numeric": "5",
+		"first":           "6",
+		"second":          "7",
+		"third":           "8",
+	}
+	for title, id := range want {
+		if byTitle[title] != id {
+			t.Fatalf("title %q: want id %s, got %s (all=%v)", title, id, byTitle[title], byTitle)
+		}
+	}
+	// Idempotent: a second pass changes nothing.
+	if migrateTodoIDs(todos) {
+		t.Fatalf("expected second migration pass to be a no-op")
+	}
+	// nextTodoID continues after the max.
+	if got := nextTodoID(todos); got != "9" {
+		t.Fatalf("nextTodoID: want 9, got %s", got)
 	}
 }

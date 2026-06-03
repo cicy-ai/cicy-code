@@ -113,6 +113,8 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         use_proxy: values.use_proxy,
         master_pane_id: paneId,
         inherit_guidance: values.inherit_guidance,
+        project_template: values.project_template,
+        role_template: values.role_template,
       });
       if (data?.pane_id || data?.session) {
         setCreateDialogOpen(false);

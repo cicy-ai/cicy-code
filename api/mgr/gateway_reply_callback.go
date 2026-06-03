@@ -22,7 +22,7 @@ type aiGatewayReplyHook interface {
 // attaches one callback hook per entry WITHOUT consuming it. The entry is removed
 // only when its hook fires — at B's final reply (status=completed with no
 // tool_calls) or a failure — writing one line into A's pane:
-// "[<B>] ✅ work done" or "[<B>] ❌ failed".
+// "✅ [<B>] work done" or "❌ [<B>] failed".
 
 var (
 	pendingCallbackMu sync.Mutex
@@ -136,11 +136,12 @@ func (h *replyCallbackHook) finalize(reply aiGatewayReplySnapshot) {
 	}
 
 	short := shortPaneID(h.receiverPaneID)
-	verdict := "✅ work done"
+	emoji, verdict := "✅", "work done"
 	if status == "failed" {
-		verdict = "❌ failed"
+		emoji, verdict = "❌", "failed"
 	}
-	notice := fmt.Sprintf("[%s] %s", short, verdict)
+	// emoji first, then sender, so the outcome is the very first thing seen.
+	notice := fmt.Sprintf("%s [%s] %s", emoji, short, verdict)
 	if err := sendTextToPane(h.callbackTo, notice, true); err != nil {
 		log.Printf("[reply-callback] send failed pane=%s -> %s: %v", short, shortPaneID(h.callbackTo), err)
 	} else {

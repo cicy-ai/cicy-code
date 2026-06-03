@@ -109,7 +109,10 @@ interface AppContextType {
   chatWsConnected: boolean;
   chatWsClientId: string | null;
   chatWsLiveStatus: string;
-  chatWsLiveText: string;
+  // chatWsLiveText is intentionally NOT exposed: it changes on every streamed
+  // token and has no render consumer, so threading it through the provider
+  // value would re-render every useApp() consumer per token. It still lives in
+  // the internal chatWsState (written via setChatWsState).
   chatWsHistoryVersion: number;
   chatWsInspectorVersion: number;
   setChatWsState: (next: Partial<ChatWsState>) => void;
@@ -216,34 +219,34 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     api.getPane(currentPaneId).then(({ data }) => setPaneDetail(data)).catch(() => setPaneDetail(null));
   }, [api, currentPaneId, isChecking, token]);
 
-  const login = (newToken: string) => authLogin(newToken);
+  const login = useCallback((newToken: string) => authLogin(newToken), [authLogin]);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     authLogout();
     PaneManager.clearCurrentPane();
     setCurrentPaneId(null);
     setApi(null);
     setAgents([]);
     setSystemResources(null);
-  };
+  }, [authLogout]);
 
-  const selectPane = async (paneId: string) => {
+  const selectPane = useCallback(async (paneId: string) => {
     PaneManager.setCurrentPane(paneId);
     setCurrentPaneId(paneId);
-  };
+  }, []);
 
-  const clearPane = () => {
+  const clearPane = useCallback(() => {
     PaneManager.clearCurrentPane();
     setCurrentPaneId(null);
-  };
+  }, []);
 
-  const updatePane = (paneId: string, updates: Partial<Agent>) => {
-    setAllPanes(prev => prev.map(p => 
+  const updatePane = useCallback((paneId: string, updates: Partial<Agent>) => {
+    setAllPanes(prev => prev.map(p =>
       p.pane_id === paneId ? { ...p, ...updates } : p
     ));
-  };
+  }, []);
 
-  const loadAgents = async () => {
+  const loadAgents = useCallback(async () => {
     if (!api || !token) return;
     try {
       setLoading(true);
@@ -255,9 +258,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     } finally {
       setLoading(false);
     }
-  };
+  }, [api, token]);
 
-  const removeAgent = async (paneId: string, agentId?: number) => {
+  const removeAgent = useCallback(async (paneId: string, agentId?: number) => {
     if (!api || !token) return;
     try {
       // Unbind if has agent ID
@@ -266,13 +269,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
       await api.deleteAgent(paneId);
       // Update local state
-      setAgents(agents.filter(a => a.pane_id !== paneId));
+      setAgents(prev => prev.filter(a => a.pane_id !== paneId));
       setError(null);
     } catch (err: any) {
       setError(err.message);
       throw err;
     }
-  };
+  }, [api, token]);
 
   const setChatWsState = useCallback((next: Partial<ChatWsState>) => {
     setChatWsStateValue(prev => ({ ...prev, ...next }));
@@ -378,13 +381,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, [api, token]);
 
-  const value: AppContextType = {
+  // Memoized so the provider value keeps a stable identity across renders that
+  // don't change any consumed field. Critically, chatWsState.chatWsLiveText is
+  // NOT a dependency: it changes on every streamed token but is not part of the
+  // value, so a live conversation no longer re-renders every useApp() consumer
+  // (Workspace, panels, ...) per token. Real changes (status, history/inspector
+  // version, agents, settings) still flow through because they ARE deps.
+  const currentPane = allPanes.find(p => p.pane_id === currentPaneId);
+  const value = useMemo<AppContextType>(() => ({
     token,
     isAuthenticated: !!token,
     login,
     logout,
     currentPaneId,
-    currentPane: allPanes.find(p => p.pane_id === currentPaneId),
+    currentPane,
     paneDetail,
     setPaneDetail,
     selectPane,
@@ -414,7 +424,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     chatWsConnected: chatWsState.chatWsConnected,
     chatWsClientId: chatWsState.chatWsClientId,
     chatWsLiveStatus: chatWsState.chatWsLiveStatus,
-    chatWsLiveText: chatWsState.chatWsLiveText,
     chatWsHistoryVersion: chatWsState.chatWsHistoryVersion,
     chatWsInspectorVersion: chatWsState.chatWsInspectorVersion,
     setChatWsState,
@@ -427,7 +436,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     loading,
     error,
     setError,
-  };
+  }), [
+    token, login, logout, currentPaneId, currentPane, paneDetail, setPaneDetail,
+    selectPane, clearPane, activeAgentId, setActiveAgentId, agentDetails,
+    setAgentDetail, patchAgentDetail, activeAgentDetail, runPaneSaveSerially,
+    api, agents, loadAgents, removeAgent, allPanes, updatePane, globalVar,
+    agentTypeOptions, setGlobalVar, loadGlobalVar, updateGlobalVar, globalLoaded,
+    globalLoadError,
+    chatWsState.activeChatPaneId, chatWsState.chatWsConnected,
+    chatWsState.chatWsClientId, chatWsState.chatWsLiveStatus,
+    chatWsState.chatWsHistoryVersion, chatWsState.chatWsInspectorVersion,
+    setChatWsState, setChatWsSender, sendChatWsMessage, subscribeChatWs,
+    broadcastChatWsMessage, systemResources, setSystemResources, loading, error,
+    setError,
+  ]);
 
   // Debug: Log context changes
   React.useEffect(() => {

@@ -32,6 +32,13 @@ import (
 type mitmAuditAdapter struct{}
 
 func (mitmAuditAdapter) StartTurn(provider, agentID string, target *url.URL, method string, headers http.Header, body []byte) mitm.AuditTurn {
+	// Decompress the request body up front: codex (Rust/reqwest) sends it
+	// zstd-encoded, others may use gzip. The inference gate and the session both
+	// json-parse the body, so a compressed body would be unparseable → classified
+	// as non-inference → no current.json/reply.json. The real (still-compressed)
+	// request reaches the upstream via the MITM pump; this decoded copy is
+	// audit-only.
+	body = aiGatewayMaybeGunzip(headers, body)
 	// MITM intercepts an entire whitelisted host (e.g. api.anthropic.com), so it
 	// sees ALL traffic to that host — not just model turns. Claude Code, codex,
 	// opencode etc. also hit telemetry (/api/event_logging), token-counting
@@ -175,6 +182,7 @@ func mitmSubmitAudit(s *aiGatewayAuditSession, dir string, payload []byte, ref s
 		TurnID:         s.turnID,
 		ConversationID: s.conversationID,
 		Provider:       s.provider,
+		Model:          s.model,
 		Direction:      dir,
 		Payload:        append([]byte(nil), payload...),
 		PayloadRef:     ref,

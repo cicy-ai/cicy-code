@@ -15,7 +15,7 @@
   "delete": "Supprimer",
   "createTitle": "Créer et lier un nouveau collaborateur",
   "createSubmit": "Créer et lier",
-  "createEmptyTitleAgent": "Ingénieur full-stack",
+  "createEmptyTitleAgent": "Sans nom",
   "bindMemberPlaceholder": "Lier un membre de l'équipe…",
   "createBindShortLabel": "Créer et lier un nouveau collaborateur",
   "confirmUnbind": "Délier <strong>{{name}}</strong> ?",

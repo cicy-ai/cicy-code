@@ -976,51 +976,34 @@ def run_cloudrun_list():
     sys.exit(0)
 
 
-def _cos_upload_docker_image(image_ref, version):
-    """Save docker image as gzip tar and upload to COS via multipart.
+def _r2_upload_docker_image(image_ref, version):
+    """Save the docker image as a gzip tar and upload it to Cloudflare R2.
 
-    COS key: images/cicy-code-{version}.tar.gz
-    Uses stdlib only (no requests dependency). Signing follows the same
-    pattern as scripts/cos-upload.py: q-url-param-list empty, sign only
-    the object path so COS accepts both plain and multipart requests.
+    R2 key: images/cicy-code-latest.tar.gz — a SINGLE overwriting "latest"
+    snapshot (R2 keeps exactly one image tar, not per-version files that pile
+    up forever). The version is still tracked via Docker Hub tags and
+    global.json; this tar is just "whatever was built last". Upload goes through
+    the `cicy-r2` CLI (which wraps `wrangler r2 object put` and reads
+    ~/cicy-ai/db/r2.json).
+
+    wrangler's single-PUT cap is ~300 MiB. The current image gzips to ~240 MB,
+    so it fits; the size guard below aborts early with guidance if a future
+    image exceeds that (R2 multipart would then need S3 credentials added to
+    r2.json — the Bearer token alone can't do S3 multipart).
     """
-    import hashlib, hmac, math, re, urllib.parse
+    import shutil
+    if not shutil.which("cicy-r2"):
+        print("[dev] cicy-r2 not on PATH — skipping docker image upload")
+        return False
     try:
-        conf = json.load(open(CICY_GLOBAL_JSON_PATH)).get("tencent", {})
-        sid, skey = conf.get("secret_id", ""), conf.get("secret_key", "")
-        bucket, region = conf.get("bucket", ""), conf.get("region", "")
-        if not all([sid, skey, bucket, region]):
-            print("[dev] COS credentials missing — skipping docker image upload")
-            return False
+        r2conf = json.load(open(os.path.expanduser("~/cicy-ai/db/r2.json")))
+        public_url = str(r2conf.get("public_url", "https://r2.deepfetch.de5.net")).rstrip("/")
     except Exception as e:
-        print(f"[dev] COS config error: {e} — skipping docker image upload")
+        print(f"[dev] r2.json config error: {e} — skipping docker image upload")
         return False
 
-    host = f"{bucket}.cos.{region}.myqcloud.com"
-    cos_key = f"/images/cicy-code-{version}.tar.gz"
-
-    def _sign(method):
-        """Sign with empty header/param lists — same as cos-upload.py."""
-        now = int(time.time())
-        key_time = f"{now};{now + 3600}"
-        sign_key = hmac.new(skey.encode(), key_time.encode(), hashlib.sha1).hexdigest()
-        http_str = f"{method.lower()}\n{cos_key}\n\n\n"
-        sha = hashlib.sha1(http_str.encode()).hexdigest()
-        str_to_sign = f"sha1\n{key_time}\n{sha}\n"
-        sig = hmac.new(sign_key.encode(), str_to_sign.encode(), hashlib.sha1).hexdigest()
-        return (f"q-sign-algorithm=sha1&q-ak={sid}&q-sign-time={key_time}"
-                f"&q-key-time={key_time}&q-header-list=&q-url-param-list=&q-signature={sig}")
-
-    # Bypass any system proxy (mihomo/shadowsocks) — COS is reachable directly
-    # from CN and proxies can drop long-lived SSL connections on large uploads.
-    _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-
-    def _request(url, method, data=None, extra_headers=None, timeout=60):
-        headers = {"Host": host, "Authorization": _sign(method)}
-        if extra_headers:
-            headers.update(extra_headers)
-        req = urllib.request.Request(url, data=data, method=method, headers=headers)
-        return _opener.open(req, timeout=timeout)
+    key = "images/cicy-code-latest.tar.gz"  # single overwriting latest snapshot
+    WRANGLER_PUT_LIMIT = 300 * 1024 * 1024  # wrangler r2 object put single-PUT cap
 
     tmp = os.path.join(tempfile.gettempdir(), f"cicy-code-{version}.tar.gz")
     try:
@@ -1036,60 +1019,29 @@ def _cos_upload_docker_image(image_ref, version):
             return False
 
         size = os.path.getsize(tmp)
-        print(f"[dev] Saved {size // 1024 // 1024}MB → uploading to COS {cos_key}")
+        print(f"[dev] Saved {size // 1024 // 1024}MB → uploading to R2 {key}")
+        if size > WRANGLER_PUT_LIMIT:
+            print(f"[dev] image is {size // 1024 // 1024}MB > 300MB wrangler single-PUT limit;")
+            print("[dev] R2 multipart needs S3 credentials in ~/cicy-ai/db/r2.json — aborting upload")
+            return False
 
-        # Multipart: 16 MB chunks (COS min part size is 1 MB except last)
-        CHUNK = 16 * 1024 * 1024
-        n_parts = math.ceil(size / CHUNK)
-
-        # 1. Initiate
-        with _request(f"https://{host}{cos_key}?uploads", "POST", data=b"", timeout=30) as r:
-            upload_id = re.search(r"<UploadId>([^<]+)</UploadId>", r.read().decode()).group(1)
-
-        # 2. Upload parts (3 retries per part on transient errors)
-        etags = []
-        with open(tmp, "rb") as fh:
-            for i in range(n_parts):
-                part_num = i + 1
-                data = fh.read(CHUNK)
-                uid_enc = urllib.parse.quote(upload_id, safe="")
-                url = f"https://{host}{cos_key}?partNumber={part_num}&uploadId={uid_enc}"
-                for attempt in range(3):
-                    try:
-                        with _request(url, "PUT", data=data,
-                                      extra_headers={"Content-Length": str(len(data))},
-                                      timeout=300) as r:
-                            etags.append((part_num, r.headers.get("ETag", "")))
-                        break
-                    except Exception as e:
-                        if attempt == 2:
-                            raise
-                        print(f"[dev] COS part {part_num} attempt {attempt+1} failed: {e}, retrying...")
-                        time.sleep(3)
-                mb_done = min((part_num * CHUNK) // 1024 // 1024, size // 1024 // 1024)
-                print(f"[dev] COS part {part_num}/{n_parts} uploaded ({mb_done}MB)")
-
-        # 3. Complete
-        parts_xml = "".join(
-            f"<Part><PartNumber>{n}</PartNumber><ETag>{e}</ETag></Part>"
-            for n, e in etags
-        )
-        body = f"<CompleteMultipartUpload>{parts_xml}</CompleteMultipartUpload>".encode()
-        uid_enc = urllib.parse.quote(upload_id, safe="")
-        with _request(f"https://{host}{cos_key}?uploadId={uid_enc}", "POST",
-                      data=body,
-                      extra_headers={"Content-Type": "application/xml",
-                                     "Content-Length": str(len(body))},
-                      timeout=60) as r:
-            resp = r.read().decode()
-        if "CompleteMultipartUploadResult" in resp:
-            cos_url = f"https://{host}{cos_key}"
-            print(f"[dev] COS upload done → {cos_url}")
-            return cos_url
-        print(f"[dev] COS complete unexpected response: {resp[:200]}")
+        # Upload via cicy-r2 (wrangler r2 object put), 3 retries on transient failure.
+        last_err = ""
+        for attempt in range(3):
+            r = subprocess.run(["cicy-r2", "put", key, tmp], capture_output=True, text=True)
+            if r.returncode == 0:
+                r2_url = f"{public_url}/{key}"
+                print(f"[dev] R2 upload done → {r2_url}")
+                return r2_url
+            lines = (r.stderr or r.stdout or "").strip().splitlines()
+            last_err = lines[-1] if lines else ""
+            if attempt < 2:
+                print(f"[dev] R2 upload attempt {attempt+1} failed: {last_err}, retrying...")
+                time.sleep(3)
+        print(f"[dev] R2 upload failed: {last_err}")
         return False
     except Exception as e:
-        print(f"[dev] COS upload error: {e}")
+        print(f"[dev] R2 upload error: {e}")
         return False
     finally:
         if os.path.exists(tmp):
@@ -1125,10 +1077,10 @@ def run_docker_build(version_override=""):
     build_env["SKIP_TTYD_ASSET"] = "0"
     run_checked(["./build.sh", "assets"], cwd=ROOT_DIR, env=build_env)
     run_checked(
-        ["python3", "./scripts/cos-upload.py", "app"], cwd=ROOT_DIR, env=build_env
+        ["python3", "./scripts/r2-upload.py", "app"], cwd=ROOT_DIR, env=build_env
     )
     run_checked(
-        ["python3", "./scripts/cos-upload.py", "ttyd"], cwd=ROOT_DIR, env=build_env
+        ["python3", "./scripts/r2-upload.py", "ttyd"], cwd=ROOT_DIR, env=build_env
     )
     build_env["SKIP_NPM"] = "1"
     build_env["SKIP_TTYD_ASSET"] = "1"
@@ -1138,11 +1090,11 @@ def run_docker_build(version_override=""):
     run_checked(["docker", "push", target_image], cwd=ROOT_DIR)
     run_checked(["docker", "push", latest_image], cwd=ROOT_DIR)
 
-    # Save the tagged image (cicybot/cicy-code:X.Y.Z) to COS as a CN fallback
+    # Save the tagged image (cicybot/cicy-code:X.Y.Z) to R2 as a global fallback
     # tarball.  Must save from target_image — NOT from cicy-code:version — so the
     # `docker load` on the client produces the right repo name and `docker run`
     # finds it without an extra `docker tag` step.
-    _cos_upload_docker_image(target_image, version)
+    _r2_upload_docker_image(target_image, version)
 
     write_docker_image_to_global_json(target_image, version, repository)
     print(f"[dev] Updated {GLOBAL_JSON_PATH} -> images.runtime={target_image}")

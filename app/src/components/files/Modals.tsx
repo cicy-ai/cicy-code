@@ -77,7 +77,11 @@ export function PromptModal({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') submit();
+              // Ignore Enter while an IME composition is active — pressing Enter
+              // to pick a Chinese/Japanese candidate must confirm the candidate,
+              // not submit the form. isComposing covers it; keyCode 229 is the
+              // Safari/legacy fallback that fires before compositionend.
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) submit();
               if (e.key === 'Escape') onCancel();
             }}
             placeholder={placeholder}

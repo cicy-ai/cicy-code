@@ -448,6 +448,17 @@ func imBuildTransport(acc *imAccount) (botTransport, error) {
 
 /* ───────────────────────── inbound routing ───────────────────────── */
 
+// imPaneSessionOnline reports whether the pane's tmux session is currently
+// running. A pane id like "w-10054:main.0" lives in session "w-10054".
+func imPaneSessionOnline(paneID string) bool {
+	session := strings.Split(normPaneID(paneID), ":")[0]
+	if session == "" {
+		return false
+	}
+	_, err := runTmux("has-session", "-t", session)
+	return err == nil
+}
+
 func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	if acc == nil || tr == nil {
 		return
@@ -528,6 +539,15 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	if pane == "" || !acc.InboundToAgent {
 		log.Printf("[im] account=%d inbound dropped (bound=%q inbound=%t): %q", acc.ID, acc.BoundPaneID, acc.InboundToAgent, text)
 		return
+	}
+	// If the bound agent's tmux session isn't running (offline), fall back to the
+	// master pane w-10001 so the message still reaches an agent instead of failing.
+	if !imPaneSessionOnline(pane) {
+		fallback := normPaneID("w-10001")
+		if pane != fallback && imPaneSessionOnline(fallback) {
+			log.Printf("[im] account=%d bound pane=%s offline → fallback to %s", acc.ID, shortPaneID(pane), shortPaneID(fallback))
+			pane = fallback
+		}
 	}
 
 	// 注：旧 streaming edit 模式会先发一条 "Thinking..." 占位让后续 edit。
@@ -1116,6 +1136,14 @@ func handleIMAccountByID(w http.ResponseWriter, r *http.Request, id int64, actio
 		default:
 			httpErr(w, 405, "method not allowed")
 		}
+	case "secret":
+		// reveal the full stored token on explicit request (eye toggle in the UI).
+		// not included in the account list/detail maps — fetched only when the user asks.
+		if r.Method != http.MethodGet {
+			httpErr(w, 405, "method not allowed")
+			return
+		}
+		J(w, M{"secret": acc.Secret})
 	case "test":
 		if r.Method != http.MethodPost {
 			httpErr(w, 405, "method not allowed")

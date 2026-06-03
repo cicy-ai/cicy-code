@@ -55,6 +55,29 @@ var auditPolicyGuidance []byte
 // Fires once per process (in-memory queue); a fresh container re-greets.
 const auditPolicyIntroPrompt = "A new operator session has started — open with your startup briefing now."
 
+// removeAuditPolicyPane stops and removes the w-6001 SecOps pane when the audit
+// master switch is OFF. Mirrors handleDeletePane's core (stop agent + clean the
+// registry tables) so a previously-created w-6001 doesn't linger after audit is
+// turned off. No-op when the pane doesn't exist.
+func removeAuditPolicyPane() {
+	paneID := normPaneID(auditPolicyPaneID)
+	shortID := shortPaneID(paneID)
+	var n int
+	store.QueryRow("SELECT COUNT(1) FROM agent_config WHERE pane_id=?", paneID).Scan(&n)
+	if n == 0 {
+		return
+	}
+	log.Printf("[audit] OFF — stopping existing %s", shortID)
+	func() {
+		defer func() { recover() }()
+		stopAgentByPaneID(paneID)
+	}()
+	store.Exec("DELETE FROM pane_agents WHERE pane_id=?", shortID)
+	store.Exec("DELETE FROM pane_agents WHERE agent_name=?", shortID)
+	store.Exec("DELETE FROM group_windows WHERE win_id=?", paneID)
+	store.Exec("DELETE FROM agent_config WHERE pane_id=?", paneID)
+}
+
 // setupAuditPolicyAgent installs the skill into ~/cicy-ai/skills/,
 // creates the w-6001 pane if missing, then queues the opening
 // self-introduction. Safe to call on every startup.

@@ -1,5 +1,5 @@
 import { Children, cloneElement, isValidElement, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Brain, Search, Settings } from 'lucide-react';
+import { Search, Settings } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Trans, useTranslation } from 'react-i18next';
@@ -10,10 +10,10 @@ import type { EditPaneData } from '../../types';
 import Select, { type SelectOption } from '../ui/Select';
 import { normalizeAgentType } from '../../lib/agentType';
 import { useApp } from '../../contexts/AppContext';
+import MemoryView from './MemoryView';
 
 export type InspectorTab = 'overview' | 'memory' | 'settings' | 'history';
 type InspectorRequestedTab = InspectorTab | 'notes' | 'history';
-type PromptRuleKey = 'global' | 'project' | 'agent';
 type RuntimeAIProviderOption = {
   key: string;
   label: string;
@@ -25,19 +25,7 @@ type RuntimeAIDefaultSummary = {
   provider_label?: string;
   model?: string;
 };
-type PromptRuleDraft = {
-  content: string;
-  enabled: boolean;
-  inject_on_request: boolean;
-  updated_at?: string;
-  available?: boolean;
-  label?: string;
-  key?: string;
-};
-type PromptRulesDraft = Record<PromptRuleKey, PromptRuleDraft>;
-
 const HISTORY_PAGE_SIZE = 30;
-const PROMPT_RULE_KEYS: PromptRuleKey[] = ['global', 'project', 'agent'];
 
 const tabs: Array<{ id: InspectorTab; labelKey: string }> = [
   { id: 'overview', labelKey: 'tabOverview' },
@@ -51,15 +39,6 @@ const settingsSections = [
 ] as const;
 
 type SettingsSectionId = typeof settingsSections[number]['id'];
-
-const memorySections = [
-  { id: 'global', labelKey: 'memoryGlobal' },
-  { id: 'agent', labelKey: 'memoryAgent' },
-  { id: 'rules-files', labelKey: 'memoryRulesFiles' },
-  { id: 'preview', labelKey: 'memoryPreview' },
-] as const;
-
-type MemorySectionId = typeof memorySections[number]['id'];
 
 function formatTime(value?: string) {
   if (!value) return '';
@@ -148,61 +127,6 @@ function pickUsageValue(current?: number, cumulative?: number) {
   if (typeof current === 'number' && Number.isFinite(current) && current === 0) return current;
   if (typeof cumulative === 'number' && Number.isFinite(cumulative) && cumulative === 0) return cumulative;
   return undefined;
-}
-
-function createEmptyPromptRuleDraft(): PromptRulesDraft {
-  return {
-    global: { content: '', enabled: false, inject_on_request: false, updated_at: '', available: true, label: 'global', key: 'global' },
-    project: { content: '', enabled: false, inject_on_request: false, updated_at: '', available: false, label: 'project', key: '' },
-    agent: { content: '', enabled: false, inject_on_request: false, updated_at: '', available: true, label: 'Agent', key: '' },
-  };
-}
-
-function normalizePromptRuleDraft(raw: any, fallback: Partial<PromptRuleDraft> = {}): PromptRuleDraft {
-  return {
-    content: String(raw?.content || fallback.content || ''),
-    enabled: !!(raw?.enabled ?? fallback.enabled),
-    inject_on_request: !!(raw?.inject_on_request ?? fallback.inject_on_request),
-    updated_at: String(raw?.updated_at || fallback.updated_at || ''),
-    available: raw?.available ?? fallback.available ?? true,
-    label: String(raw?.label || fallback.label || ''),
-    key: String(raw?.key || fallback.key || ''),
-  };
-}
-
-function buildPromptRulesDraft(data: any, paneId: string): PromptRulesDraft {
-  const base = createEmptyPromptRuleDraft();
-  const promptRules = data?.prompt_rules || {};
-  const runtimeMemory = data?.runtime_memory || {};
-  return {
-    global: normalizePromptRuleDraft(promptRules.global, base.global),
-    project: normalizePromptRuleDraft(promptRules.project, {
-      ...base.project,
-      label: promptRules?.project?.label || 'project',
-      key: promptRules?.project_key || promptRules?.project?.key || '',
-      available: !!(promptRules?.project?.available),
-    }),
-    agent: normalizePromptRuleDraft(promptRules.agent, {
-      ...base.agent,
-      content: runtimeMemory?.content || '',
-      enabled: !!runtimeMemory?.enabled,
-      inject_on_request: promptRules?.agent?.inject_on_request ?? !!runtimeMemory?.enabled,
-      updated_at: runtimeMemory?.updated_at || '',
-      label: promptRules?.agent?.label || paneId,
-      key: promptRules?.agent?.key || paneId,
-      available: true,
-    }),
-  };
-}
-
-function serializePromptRulesDraft(value: PromptRulesDraft) {
-  return JSON.stringify(PROMPT_RULE_KEYS.map((key) => ({
-    key,
-    content: value[key]?.content || '',
-    enabled: !!value[key]?.enabled,
-    inject_on_request: !!value[key]?.inject_on_request,
-    available: value[key]?.available !== false,
-  })));
 }
 
 function normalizeHistoryText(value?: string) {
@@ -377,17 +301,12 @@ export default function AgentInspector({
     };
   }, [settingsData?.runtime_ai_default]);
   const [tab, setTab] = useState<InspectorTab>('overview');
-  const [refreshNonce, setRefreshNonce] = useState(0);
   const [queryDraft, setQueryDraft] = useState('');
   const [query, setQuery] = useState('');
   const [historyOffset, setHistoryOffset] = useState(0);
   const [data, setData] = useState<any>(null);
   const [notesDraft, setNotesDraft] = useState('');
   const [notesSaving, setNotesSaving] = useState(false);
-  const [promptRulesDraft, setPromptRulesDraft] = useState<PromptRulesDraft>(() => createEmptyPromptRuleDraft());
-  const [memorySaving, setMemorySaving] = useState(false);
-  const [memorySection, setMemorySection] = useState<MemorySectionId>('global');
-  const [expandedRulesFile, setExpandedRulesFile] = useState<string | null>(null);
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('general');
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
@@ -408,10 +327,6 @@ export default function AgentInspector({
     if (!requestedTab) return;
     setTab(requestedTab === 'notes' || requestedTab === 'history' ? 'overview' : requestedTab);
   }, [paneId, requestedTab]);
-
-  useEffect(() => {
-    setMemorySection('global');
-  }, [paneId]);
 
   useEffect(() => {
     if (!open || !paneId) return;
@@ -496,45 +411,8 @@ export default function AgentInspector({
       history: { total: 0, items: [], offset: 0, limit: HISTORY_PAGE_SIZE, has_more: false },
       history_view: [],
       notes: { content: '', updated_at: '' },
-      runtime_memory: { content: '', enabled: false, updated_at: '' },
-      prompt_rules: {
-        global: { content: '', enabled: false, inject_on_request: false, available: true, label: 'global', key: 'global' },
-        project: { content: '', enabled: false, inject_on_request: false, available: false, label: 'project', key: '' },
-        agent: { content: '', enabled: false, inject_on_request: false, available: true, label: paneId, key: paneId },
-      },
-      rules_files: { items: [], file_count: 0, total_bytes: 0 },
-      inject_rules_files: true,
-      inject_rules_global: true,
-      overlay_full: '',
     });
   }, [open, paneId, paneTitle, query, historyOffset]);
-
-  // Fetch the full inspector bundle so memory preview / rules-files section
-  // have real data. Refires on inspectorVersion bump for live refresh after
-  // saves. Tolerates 404 (pane not yet known to backend).
-  useEffect(() => {
-    if (!open || !paneId) return;
-    let cancelled = false;
-    apiService.getAgentInspector(paneId)
-      .then(({ data: next }) => {
-        if (cancelled || !next) return;
-        setData((prev: any) => ({
-          ...(prev || {}),
-          prompt_rules: next.prompt_rules || prev?.prompt_rules,
-          runtime_memory: next.runtime_memory || prev?.runtime_memory,
-          rules_files: next.rules_files || prev?.rules_files,
-          inject_rules_files: next.inject_rules_files ?? prev?.inject_rules_files,
-          inject_rules_global: next.inject_rules_global ?? prev?.inject_rules_global,
-          overlay_full: next.overlay_full ?? prev?.overlay_full ?? '',
-          overview: {
-            ...(prev?.overview || {}),
-            overlay_preview: next.prompt_rules?.overlay_preview || prev?.overview?.overlay_preview || '',
-          },
-        }));
-      })
-      .catch(() => { /* tolerated */ });
-    return () => { cancelled = true; };
-  }, [open, paneId, inspectorVersion, refreshNonce]);
 
   useEffect(() => {
     if (!open || !paneId) return;
@@ -562,15 +440,10 @@ export default function AgentInspector({
   }, [data?.notes?.content, paneId]);
 
   useEffect(() => {
-    setPromptRulesDraft(buildPromptRulesDraft(data, paneId));
-  }, [data?.prompt_rules, data?.runtime_memory?.content, data?.runtime_memory?.enabled, data?.runtime_memory?.updated_at, paneId]);
-
-  useEffect(() => {
     setSettingsSection('general');
   }, [paneId]);
 
   const overview = data?.overview || {};
-  const promptRules = data?.prompt_rules || {};
   const history = data?.history || { total: 0, items: [], offset: 0, limit: HISTORY_PAGE_SIZE, has_more: false };
   const normalizedAgentType = normalizeAgentType(settingsData?.agent_type);
   const modelSettingsEnabled = normalizedAgentType === 'codex' || normalizedAgentType === 'claude' || normalizedAgentType === 'opencode';
@@ -600,16 +473,12 @@ export default function AgentInspector({
   }, [certNudgeRelevant, checkCaStatus]);
   const historyStart = history.total > 0 ? Number(history.offset || 0) + 1 : 0;
   const historyEnd = history.total > 0 ? Number(history.offset || 0) + (history.items || []).length : 0;
-  const projectKey = String(promptRules?.project_key || promptRulesDraft.project.key || '').trim();
   const displayInputTokens = pickUsageValue(overview.input_tokens, overview.cumulative_input_tokens);
   const displayOutputTokens = pickUsageValue(overview.output_tokens, overview.cumulative_output_tokens);
   const displayTotalTokens = pickUsageValue(overview.total_tokens, overview.cumulative_total_tokens);
   const displayCostCredit = pickUsageValue(overview.cost_credit, overview.cumulative_cost_credit);
 
   const dirtyNotes = useMemo(() => notesDraft !== (data?.notes?.content || ''), [data?.notes?.content, notesDraft]);
-  const dirtyMemory = useMemo(() => {
-    return serializePromptRulesDraft(promptRulesDraft) !== serializePromptRulesDraft(buildPromptRulesDraft(data, paneId));
-  }, [data, paneId, promptRulesDraft]);
   const dirtyGeneralSettings = useMemo(() => {
     return serializeGeneralSettings(settingsData) !== generalSettingsBaseline;
   }, [generalSettingsBaseline, settingsData]);
@@ -630,45 +499,6 @@ export default function AgentInspector({
     } finally {
       setNotesSaving(false);
     }
-  };
-
-  const saveRuntimeMemory = async () => {
-    if (memorySaving || !dirtyMemory) return;
-    setMemorySaving(true);
-    try {
-      const { data: next } = await apiService.updateAgentPromptRules(paneId, {
-        global: promptRulesDraft.global,
-        project: promptRulesDraft.project,
-        agent: promptRulesDraft.agent,
-      });
-      setData((prev: any) => ({
-        ...(prev || {}),
-        prompt_rules: next.prompt_rules,
-        runtime_memory: next.runtime_memory,
-        overview: {
-          ...(prev?.overview || {}),
-          overlay_preview: next.prompt_rules?.overlay_preview || '',
-          runtime_memory_enabled: next.runtime_memory?.enabled,
-          runtime_memory_updated: next.runtime_memory?.updated_at,
-          runtime_memory_preview: compactText(next.runtime_memory?.content, t('fallbackNone'), 160),
-        },
-      }));
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastPromptRulesSaved', { paneId }) }));
-    } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('toastPromptRulesSaveFailed', { paneId }) }));
-    } finally {
-      setMemorySaving(false);
-    }
-  };
-
-  const patchPromptRule = (scope: PromptRuleKey, patch: Partial<PromptRuleDraft>) => {
-    setPromptRulesDraft((prev) => ({
-      ...prev,
-      [scope]: {
-        ...prev[scope],
-        ...patch,
-      },
-    }));
   };
 
   const runtimeAISelectOptions = useMemo<SelectOption[]>(() => {
@@ -823,7 +653,11 @@ export default function AgentInspector({
 
         <div
           data-id="agent-inspector-content"
-          className={`relative flex-1 overflow-y-auto px-[10px] pb-4 ${tab === 'history' ? 'pt-0' : 'pt-2'}`}
+          className={`relative flex-1 ${
+            tab === 'memory'
+              ? 'overflow-hidden' // memory tab is full-bleed; MemoryView owns its own scroll
+              : `overflow-y-auto px-[10px] pb-4 ${tab === 'history' ? 'pt-0' : 'pt-2'}`
+          }`}
         >
           {tab === 'overview' && (
             <div data-id="agent-inspector-overview" className="space-y-4">
@@ -962,146 +796,8 @@ export default function AgentInspector({
           )}
 
           {tab === 'memory' && (
-            <div data-id="agent-inspector-memory-tab" className="space-y-4">
-              <div data-id="agent-inspector-memory-summary" className="space-y-1 rounded-lg bg-[#101114] px-3 py-2.5">
-                <div data-id="agent-inspector-auto-15" className="flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-zinc-500">
-                  <Brain className="h-3.5 w-3.5" />
-                  Prompt Rules
-                </div>
-                <div data-id="agent-inspector-auto-16" className="text-[12px] leading-5 text-zinc-400">
-                  <Trans i18nKey="promptRulesIntro" ns="agentInspector" components={{ code: <code /> }} />
-                </div>
-              </div>
-              <div data-id="agent-inspector-memory-sections" className="scrollbar-zero flex gap-1 overflow-x-auto whitespace-nowrap">
-                {memorySections.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    data-id={`agent-inspector-memory-section-${item.id}`}
-                    onClick={() => setMemorySection(item.id)}
-                    className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] leading-5 transition-colors ${
-                      memorySection === item.id ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
-                    }`}
-                  >
-                    <span data-id="agent-inspector-auto-17">{t(item.labelKey)}</span>
-                  </button>
-                ))}
-              </div>
-              <div data-id="agent-inspector-memory-rules" className="space-y-3">
-                {memorySection === 'global' && (
-                  <PromptRuleEditor
-                    dataId="agent-inspector-memory-global"
-                    title="Global"
-                    subtitle={t('globalSharedHint')}
-                    value={promptRulesDraft.global}
-                    placeholder={t('globalPlaceholder')}
-                    onChange={(patch) => patchPromptRule('global', patch)}
-                  />
-                )}
-                {memorySection === 'agent' && (
-                  <PromptRuleEditor
-                    dataId="agent-inspector-memory-agent"
-                    title="Agent"
-                    subtitle={promptRulesDraft.agent.label || paneId}
-                    value={promptRulesDraft.agent}
-                    placeholder={t('agentPlaceholder')}
-                    onChange={(patch) => patchPromptRule('agent', patch)}
-                  />
-                )}
-                {memorySection === 'rules-files' && (() => {
-                  const rf = data?.rules_files || {};
-                  const items = Array.isArray(rf.items) ? rf.items : [];
-                  const totalBytes = Number(rf.total_bytes || 0);
-                  const globalOn = data?.inject_rules_global !== false;
-                  const paneOn = data?.inject_rules_files !== false;
-                  return (
-                    <div data-id="agent-inspector-memory-rules-files" className="space-y-3">
-                      <div data-id="agent-inspector-rules-files-summary" className="rounded-lg bg-[#101114] px-3 py-2.5 text-[12px] leading-5 text-zinc-400">
-                        <div className="mb-1 text-[11px] uppercase tracking-[0.14em] text-zinc-500">{t('memoryRulesFilesTitle')}</div>
-                        <div className="flex flex-wrap items-center gap-3 text-[12px]">
-                          <span>{t('memoryRulesFilesSummary', { count: items.length, bytes: totalBytes })}</span>
-                          <span className={globalOn ? 'text-emerald-400' : 'text-zinc-500'}>{t('memoryRulesFilesGlobal', { state: globalOn ? 'on' : 'off' })}</span>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                await apiService.updatePane(paneId, { inject_rules_files: paneOn ? 0 : 1 });
-                                setRefreshNonce((n) => n + 1);
-                              } catch { /* ignored */ }
-                            }}
-                            className={`rounded-md px-2 py-1 text-[11px] transition-colors ${paneOn ? 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25' : 'bg-white/[0.06] text-zinc-400 hover:bg-white/[0.1]'}`}
-                          >
-                            {t('memoryRulesFilesPane', { state: paneOn ? 'on' : 'off' })}
-                          </button>
-                        </div>
-                      </div>
-                      {items.length === 0 ? (
-                        <div className="rounded-lg bg-[#101114] px-3 py-3 text-[12px] text-zinc-500">
-                          {t('memoryRulesFilesEmpty')}
-                        </div>
-                      ) : (
-                        <div className="space-y-1.5">
-                          {items.map((item: any, idx: number) => {
-                            const isExpanded = expandedRulesFile === item.source;
-                            return (
-                              <div
-                                key={`${item.source}-${idx}`}
-                                className="rounded-md bg-[#101114] text-[12px] text-zinc-400 overflow-hidden"
-                              >
-                                <button
-                                  type="button"
-                                  className="w-full px-3 py-2 text-left hover:bg-white/[0.03] transition-colors"
-                                  onClick={() => setExpandedRulesFile(isExpanded ? null : item.source)}
-                                >
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] uppercase tracking-[0.1em] text-zinc-400">{item.scope || 'rule'}</span>
-                                    <span className="text-[11px] text-zinc-500">
-                                      {item.injected || item.bytes || 0} B
-                                      {item.truncated ? ` · ${t('memoryRulesFilesTruncated')}` : ''}
-                                      <span className="ml-1.5 text-zinc-600">{isExpanded ? '▲' : '▼'}</span>
-                                    </span>
-                                  </div>
-                                  <div className="mt-1 break-all font-mono text-[11px] text-zinc-300">{item.source}</div>
-                                  {item.pane_id ? <div className="mt-0.5 text-[10px] text-zinc-500">pane: {item.pane_id}</div> : null}
-                                </button>
-                                {isExpanded && item.content ? (
-                                  <pre className="border-t border-white/[0.06] px-3 py-2 max-h-[300px] overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-zinc-300">
-                                    {item.content}
-                                  </pre>
-                                ) : null}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-                {memorySection === 'preview' && (
-                  <div data-id="agent-inspector-memory-overlay-preview" className="rounded-lg bg-[#101114] px-3 py-2.5 text-[12px] leading-5 text-zinc-400">
-                    <div className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-[0.14em] text-zinc-500">
-                      <span>{t('memoryPreviewTitle')}</span>
-                      {data?.overlay_full ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard?.writeText(String(data.overlay_full)).catch(() => {});
-                            window.dispatchEvent(new CustomEvent('show-toast', { detail: t('memoryPreviewCopied') }));
-                          }}
-                          className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-zinc-300 hover:bg-white/[0.1]"
-                        >
-                          {t('memoryPreviewCopy')}
-                        </button>
-                      ) : null}
-                    </div>
-                    {data?.overlay_full ? (
-                      <pre className="max-h-[400px] overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-zinc-300">{String(data.overlay_full)}</pre>
-                    ) : (
-                      compactText(overview.overlay_preview, t('memoryPreviewEmpty'))
-                    )}
-                  </div>
-                )}
-              </div>
+            <div data-id="agent-inspector-memory-tab" className="h-full">
+              <MemoryView agentId={paneId} className="h-full w-full" />
             </div>
           )}
 
@@ -1301,88 +997,6 @@ function EmptyState({ text }: { text: string }) {
     <div data-id="agent-inspector-empty-state" className="rounded-2xl border border-dashed border-white/[0.08] px-4 py-8 text-center text-sm text-zinc-600">
       {text}
     </div>
-  );
-}
-
-function PromptRuleEditor({
-  dataId,
-  title,
-  subtitle,
-  value,
-  onChange,
-  placeholder,
-  disabled,
-}: {
-  dataId: string;
-  title: string;
-  subtitle?: string;
-  value: PromptRuleDraft;
-  onChange: (patch: Partial<PromptRuleDraft>) => void;
-  placeholder?: string;
-  disabled?: boolean;
-}) {
-  const { t } = useTranslation('agentInspector');
-  const unavailable = disabled || value.available === false;
-  return (
-    <section data-id={dataId} className="space-y-2 rounded-lg bg-[#101114] px-3 py-2.5">
-      <div data-id="agent-inspector-auto-23" className="flex items-start justify-between gap-3">
-        <div data-id="agent-inspector-auto-24" className="min-w-0">
-          <div data-id="agent-inspector-auto-25" className="text-[12px] font-medium text-zinc-100">{title}</div>
-          <div data-id="agent-inspector-auto-26" className="truncate text-[11px] text-zinc-500">{subtitle || '--'}</div>
-        </div>
-        <div data-id="agent-inspector-auto-27" className="shrink-0 text-[11px] text-zinc-600">{formatTime(value.updated_at)}</div>
-      </div>
-      <div data-id="agent-inspector-auto-28" className="grid grid-cols-2 gap-2">
-        <CompactToggle
-          labelKey="promptRuleEnable"
-          checked={!!value.enabled}
-          disabled={unavailable}
-          onChange={(checked) => onChange({ enabled: checked })}
-        />
-        <CompactToggle
-          labelKey="promptRuleInject"
-          checked={!!value.inject_on_request}
-          disabled={unavailable}
-          onChange={(checked) => onChange({ inject_on_request: checked })}
-        />
-      </div>
-      <textarea
-        data-id={`${dataId}-textarea`}
-        value={value.content}
-        disabled={unavailable}
-        onChange={(event) => onChange({ content: event.target.value })}
-        rows={6}
-        placeholder={unavailable ? t('promptRuleUnavailable', { ns: 'agentInspector' }) : placeholder}
-        className="w-full resize-none rounded-lg bg-[#09090b] px-3 py-2.5 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-600 disabled:cursor-not-allowed disabled:text-zinc-600"
-      />
-    </section>
-  );
-}
-
-function CompactToggle({
-  labelKey,
-  checked,
-  onChange,
-  disabled,
-}: {
-  labelKey: string;
-  checked: boolean;
-  onChange: (value: boolean) => void;
-  disabled?: boolean;
-}) {
-  const { t } = useTranslation('agentInspector');
-  return (
-    <button data-id="agent-inspector-auto-29"
-      type="button"
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className="flex items-center justify-between rounded-lg bg-[#09090b] px-2.5 py-2 text-left text-[12px] text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40"
-    >
-      <span data-id="agent-inspector-auto-30">{t(labelKey)}</span>
-      <span data-id="agent-inspector-auto-31" className={`relative h-5 w-9 rounded-full transition-colors ${checked ? 'bg-blue-600' : 'bg-white/[0.08]'}`}>
-        <span data-id="agent-inspector-auto-32" className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${checked ? 'translate-x-4' : 'translate-x-0.5'}`} />
-      </span>
-    </button>
   );
 }
 

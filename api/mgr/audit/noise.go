@@ -38,8 +38,17 @@ func (n *noiseTracker) EvaluateNotify(
 	agentID, ruleID, findingHash string,
 	nowNs int64,
 	cfg NotifyConfig,
+	severity Severity,
 ) string {
-	if cfg.Suspended {
+	// Severity-aware suppression. Noise controls (cooldown / rate limit) exist
+	// to stop a chatty rule from spamming — they must NEVER silence a real
+	// high-impact leak. A critical finding pierces everything (incl. an
+	// explicit Suspend); a high finding pierces the automatic controls but
+	// still respects a deliberate operator Suspend.
+	critical := severity == SeverityCritical
+	high := critical || severity == SeverityHigh
+
+	if cfg.Suspended && !critical {
 		return "suspended"
 	}
 	if n == nil {
@@ -48,16 +57,19 @@ func (n *noiseTracker) EvaluateNotify(
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	// 1. Cooldown — same finding identity within the cooldown window.
-	if findingHash != "" && cfg.Cooldown.Seconds > 0 {
+	// 1. Cooldown — silences EVERY repeat of the same finding for the whole
+	// window. This is the dangerous silencer for a real leak, so high and
+	// critical findings pierce it (you always hear about a serious match).
+	if !high && findingHash != "" && cfg.Cooldown.Seconds > 0 {
 		cdNs := int64(cfg.Cooldown.Seconds) * int64(time.Second)
 		if last, ok := n.cooldown[findingHash]; ok && nowNs-last < cdNs {
 			return "cooldown"
 		}
 	}
 
-	// 2. Rate limit — sliding window per (agent, rule).
-	if cfg.RateLimit.WindowSeconds > 0 && cfg.RateLimit.MaxPerAgentPerRule > 0 {
+	// 2. Rate limit — per-(agent, rule) flood control. Kept for high (a noisy
+	// serious rule can still flood); only a critical finding pierces it.
+	if !critical && cfg.RateLimit.WindowSeconds > 0 && cfg.RateLimit.MaxPerAgentPerRule > 0 {
 		windowNs := int64(cfg.RateLimit.WindowSeconds) * int64(time.Second)
 		cutoff := nowNs - windowNs
 		key := agentID + "|" + ruleID

@@ -85,7 +85,7 @@ func setupTeamHelperAgent() {
 // turns will work without it and just fall back to raw agent-webpage
 // exec-js as the AGENTS.md backup path documents.
 func ensureAgentTeamsSkill() {
-	installed, err := skillcmd.PublicInstalled()
+	installed, err := skillcmd.InstalledSkills()
 	if err == nil {
 		for _, s := range installed.Skills {
 			if s.Name == "agent-teams" {
@@ -93,7 +93,7 @@ func ensureAgentTeamsSkill() {
 			}
 		}
 	}
-	if _, err := skillcmd.PublicInstall("agent-teams", io.Discard); err != nil {
+	if _, err := skillcmd.InstallSkill("agent-teams", io.Discard); err != nil {
 		log.Printf("[team-helper] agent-teams skill install failed: %v", err)
 		return
 	}

@@ -48,7 +48,7 @@ func writeGlobalJSONConfig(cfg map[string]any) error {
 		return err
 	}
 	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, append(body, '\n'), 0644); err != nil {
+	if err := os.WriteFile(tmpPath, append(body, '\n'), 0600); err != nil { // holds api_token + registry token
 		return err
 	}
 	return os.Rename(tmpPath, path)

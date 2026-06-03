@@ -136,8 +136,8 @@ export function fsCacheClearAgent(agentId: string): void {
 // --- key builders -------------------------------------------------------
 
 export const fsKey = {
-  list: (agentId: string, path: string, hidden: boolean) =>
-    `${agentId}:${path}:${hidden ? 1 : 0}`,
+  list: (agentId: string, path: string, hidden: boolean, root = 'workspace') =>
+    `${agentId}:${root}:${path}:${hidden ? 1 : 0}`,
   read: (agentId: string, path: string) => `${agentId}:${path}`,
   stat: (agentId: string, path: string) => `${agentId}:${path}`,
   diff: (agentId: string, path: string, base: string) =>

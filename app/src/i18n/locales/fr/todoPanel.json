@@ -15,6 +15,7 @@
   "status": {
     "todo": "À faire",
     "doing": "En cours",
+    "test": "Test",
     "done": "Fait",
     "dropped": "Abandonné"
   },
@@ -34,5 +35,15 @@
   "timeDaysAgo": "il y a {{n}}j",
   "timeDateMonth": "{{day}}/{{month}}",
   "updateFailed": "échec de la mise à jour",
-  "retry": "réessayer"
+  "retry": "réessayer",
+  "saving": "en cours",
+  "refreshTooltip": "Actualiser",
+  "promptTodo": "Veuillez traiter la tâche suivante ; une fois terminée, déplacez-la vers la voie de test avec `cicy-todo test {{id}}` (en attente de validation — ne la marquez pas terminée vous-même) :\n\n{{title}}",
+  "promptDoing": "Veuillez continuer à faire avancer la tâche en cours ; une fois terminée, déplacez-la vers la voie de test avec `cicy-todo test {{id}}` (en attente de validation — ne la marquez pas terminée vous-même) :\n\n{{title}}",
+  "alignPrompt": "Veuillez réconcilier l'avancement des tâches (données dans `<workspace>/.cicy/todos.yaml`, via `cicy-todo`) :\n\n1. Lancez d'abord `cicy-todo list --all` pour la liste complète.\n2. Terminées : `cicy-todo done <id>`\n3. Inutiles : `cicy-todo drop <id>`\n4. Inachevées : ajustez ou découpez selon l'état actuel.\n\nRapportez une ligne : N terminées / N ajustées / N ajoutées.",
+  "assignTooltip": "Assigner à un worker (transférer et envoyer)",
+  "assignHeader": "Assigner à",
+  "assignNoWorkers": "Aucun worker disponible",
+  "viewListTooltip": "Passer en vue liste",
+  "viewKanbanTooltip": "Passer en vue tableau"
 }

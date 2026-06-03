@@ -35,7 +35,7 @@
 }
 
 @theme {
-  --font-sans: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC", "Microsoft YaHei", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   --font-mono: "SFMono-Regular", "JetBrains Mono", "Cascadia Mono", "Cascadia Code", "Source Code Pro", "Consolas", "Liberation Mono", ui-monospace, monospace;
 }
 

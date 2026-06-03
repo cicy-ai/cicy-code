@@ -181,6 +181,12 @@ func putCOSActiveVersionFileOnce() error {
 }
 
 func startCOSActiveVersionHeartbeat() {
+	// The R2 prefixes are now baked into every build, so gate the heartbeat on
+	// the runtime --cdn flag — only report active versions when actually serving
+	// via CDN. Preserves the default (local) mode's no-heartbeat behavior.
+	if !cdnMode {
+		return
+	}
 	appPrefix := strings.TrimSpace(BuiltAppCDNPrefix)
 	ttydPrefix := strings.TrimSpace(ttydserver.BuiltTTYDCDNPrefix)
 	if appPrefix == "" && ttydPrefix == "" {

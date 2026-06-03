@@ -342,17 +342,19 @@ export const fsApi = {
   /** Build a direct-download URL for /api/fs/download. The browser hits this
    *  URL via an anchor click; the backend streams raw bytes and sets
    *  Content-Disposition so the file is saved instead of previewed. */
-  downloadUrl: (agentId: string, path: string): string => {
+  downloadUrl: (agentId: string, path: string, root?: string): string => {
     const token = TokenManager.getToken() || '';
     const base = (config.apiBase || '').replace(/\/$/, '');
-    const qs = new URLSearchParams({ agent_id: agentId, path, token });
+    const params: Record<string, string> = { agent_id: agentId, path, token };
+    if (root) params.root = root;
+    const qs = new URLSearchParams(params);
     return `${base}/api/fs/download?${qs.toString()}`;
   },
 
-  /** Trigger a browser save dialog for the given workspace-relative path. */
-  download: (agentId: string, path: string): void => {
+  /** Trigger a browser save dialog for the given path (optionally rooted). */
+  download: (agentId: string, path: string, root?: string): void => {
     const a = document.createElement('a');
-    a.href = fsApi.downloadUrl(agentId, path);
+    a.href = fsApi.downloadUrl(agentId, path, root);
     a.rel = 'noopener';
     a.style.display = 'none';
     document.body.appendChild(a);
@@ -360,13 +362,13 @@ export const fsApi = {
     setTimeout(() => a.remove(), 0);
   },
 
-  /** Upload a single File to a workspace path. If targetPath is empty or ends
-   *  with '/' the backend keeps the original filename. */
+  /** Upload a single File to a path under the given root (default workspace).
+   *  If targetPath is empty or ends with '/' the backend keeps the filename. */
   upload: async (
     agentId: string,
     targetPath: string,
     file: File,
-    opts: { overwrite?: boolean; onProgress?: (loaded: number, total: number) => void } = {},
+    opts: { overwrite?: boolean; root?: string; onProgress?: (loaded: number, total: number) => void } = {},
   ): Promise<{ path: string; size: number; mtime: number }> => {
     const form = new FormData();
     form.append('file', file);
@@ -376,6 +378,7 @@ export const fsApi = {
           agent_id: agentId,
           path: targetPath,
           overwrite: opts.overwrite ? '1' : undefined,
+          root: opts.root,
         },
         onUploadProgress: (evt) => {
           if (opts.onProgress && evt.total) opts.onProgress(evt.loaded, evt.total);
@@ -387,48 +390,48 @@ export const fsApi = {
     }
   },
 
-  rename: async (agentId: string, from: string, to: string): Promise<void> => {
+  rename: async (agentId: string, from: string, to: string, opts: { root?: string } = {}): Promise<void> => {
     try {
       await http.post(
         '/api/fs/rename',
         { from, to },
-        { params: { agent_id: agentId } },
+        { params: { agent_id: agentId, root: opts.root } },
       );
     } catch (e) {
       throw toFsError(e);
     }
   },
 
-  delete: async (agentId: string, path: string, recursive = false): Promise<void> => {
+  delete: async (agentId: string, path: string, recursive = false, opts: { root?: string } = {}): Promise<void> => {
     try {
       await http.post(
         '/api/fs/delete',
         { path, recursive },
-        { params: { agent_id: agentId } },
+        { params: { agent_id: agentId, root: opts.root } },
       );
     } catch (e) {
       throw toFsError(e);
     }
   },
 
-  mkdir: async (agentId: string, path: string): Promise<void> => {
+  mkdir: async (agentId: string, path: string, opts: { root?: string } = {}): Promise<void> => {
     try {
       await http.post(
         '/api/fs/mkdir',
         { path },
-        { params: { agent_id: agentId } },
+        { params: { agent_id: agentId, root: opts.root } },
       );
     } catch (e) {
       throw toFsError(e);
     }
   },
 
-  touch: async (agentId: string, path: string): Promise<void> => {
+  touch: async (agentId: string, path: string, opts: { root?: string } = {}): Promise<void> => {
     try {
       await http.post(
         '/api/fs/touch',
         { path },
-        { params: { agent_id: agentId } },
+        { params: { agent_id: agentId, root: opts.root } },
       );
     } catch (e) {
       throw toFsError(e);

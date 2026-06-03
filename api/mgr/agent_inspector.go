@@ -42,33 +42,6 @@ type agentInspectorTextFile struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-type agentInspectorRuntimeMemoryFile struct {
-	Enabled   bool   `json:"enabled"`
-	Content   string `json:"content"`
-	UpdatedAt string `json:"updated_at"`
-}
-
-type agentInspectorPromptRule struct {
-	Scope           string `json:"scope"`
-	Key             string `json:"key,omitempty"`
-	Label           string `json:"label,omitempty"`
-	Content         string `json:"content"`
-	Enabled         bool   `json:"enabled"`
-	InjectOnRequest bool   `json:"inject_on_request"`
-	UpdatedAt       string `json:"updated_at,omitempty"`
-	Available       bool   `json:"available"`
-}
-
-type agentInspectorPromptRules struct {
-	Global      agentInspectorPromptRule `json:"global"`
-	Project     agentInspectorPromptRule `json:"project"`
-	Agent       agentInspectorPromptRule `json:"agent"`
-	ProjectKey  string                   `json:"project_key,omitempty"`
-	Overlay     string                   `json:"overlay_preview,omitempty"`
-	OverlayPath string                   `json:"overlay_path,omitempty"`
-	UpdatedAt   string                   `json:"updated_at,omitempty"`
-}
-
 type agentInspectorHistoryItem struct {
 	ID         int      `json:"id"`
 	Q          string   `json:"q,omitempty"`
@@ -330,117 +303,6 @@ func agentInspectorNotesPath(agentID string) string {
 	return filepath.Join(aiGatewayHistoryDir(agentID), "inspector_notes.json")
 }
 
-func agentInspectorRuntimeMemoryPath(agentID string) string {
-	return filepath.Join(aiGatewayHistoryDir(agentID), "runtime_memory.json")
-}
-
-func agentInspectorPromptRulesPath(agentID string) string {
-	return filepath.Join(aiGatewayHistoryDir(agentID), "prompt_rules.json")
-}
-
-func agentInspectorPaneKeys(agentID string) []string {
-	shortID := shortPaneID(agentID)
-	fullID := normPaneID(agentID)
-	return []string{fullID, shortID, shortID + ":main.0"}
-}
-
-func agentInspectorLoadPaneConfig(agentID string) (string, string, string) {
-	keys := agentInspectorPaneKeys(agentID)
-	var workspace, configJSON, sourceRef string
-	_ = store.QueryRow(
-		`SELECT COALESCE(workspace, ''), COALESCE(config, '{}'), COALESCE(source_ref, '')
-		 FROM agent_config
-		 WHERE pane_id IN (?,?,?)
-		 ORDER BY CASE
-		   WHEN pane_id=? THEN 0
-		   WHEN pane_id=? THEN 1
-		   ELSE 2
-		 END
-		 LIMIT 1`,
-		keys[0], keys[1], keys[2],
-		keys[0], keys[2],
-	).Scan(&workspace, &configJSON, &sourceRef)
-	return workspace, configJSON, sourceRef
-}
-
-func agentInspectorProjectKey(agentID string) string {
-	workspace, configJSON, sourceRef := agentInspectorLoadPaneConfig(agentID)
-	var cfg struct {
-		Projects []string `json:"projects"`
-		Project  string   `json:"project"`
-	}
-	if strings.TrimSpace(configJSON) != "" {
-		_ = json.Unmarshal([]byte(configJSON), &cfg)
-	}
-	if len(cfg.Projects) > 0 && strings.TrimSpace(cfg.Projects[0]) != "" {
-		return strings.TrimSpace(cfg.Projects[0])
-	}
-	if strings.TrimSpace(cfg.Project) != "" {
-		return strings.TrimSpace(cfg.Project)
-	}
-	if strings.TrimSpace(sourceRef) != "" {
-		return strings.TrimSpace(sourceRef)
-	}
-	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		return ""
-	}
-	clean := filepath.Clean(workspace)
-	if matched, _ := regexp.MatchString(`/workers/w-\d+$`, clean); matched {
-		return ""
-	}
-	return clean
-}
-
-func agentInspectorLoadPromptRule(scopeType string, scopeKey string) agentInspectorPromptRule {
-	rule := agentInspectorPromptRule{
-		Scope:     scopeType,
-		Key:       scopeKey,
-		Available: strings.TrimSpace(scopeKey) != "",
-	}
-	if !rule.Available {
-		return rule
-	}
-	var enabled, inject int
-	err := store.QueryRow(
-		"SELECT COALESCE(content, ''), COALESCE(enabled, 0), COALESCE(inject_on_request, 0), COALESCE(updated_at, '') FROM prompt_rules WHERE scope_type=? AND scope_key=?",
-		scopeType,
-		scopeKey,
-	).Scan(&rule.Content, &enabled, &inject, &rule.UpdatedAt)
-	if err != nil {
-		return rule
-	}
-	rule.Enabled = enabled != 0
-	rule.InjectOnRequest = inject != 0
-	return rule
-}
-
-func agentInspectorSavePromptRule(scopeType string, scopeKey string, rule agentInspectorPromptRule) (agentInspectorPromptRule, error) {
-	rule.Scope = scopeType
-	rule.Key = scopeKey
-	rule.Available = strings.TrimSpace(scopeKey) != ""
-	if !rule.Available {
-		return rule, nil
-	}
-	rule.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	_, err := store.Exec(
-		`INSERT INTO prompt_rules (scope_type, scope_key, content, enabled, inject_on_request, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(scope_type, scope_key) DO UPDATE SET
-		   content=excluded.content,
-		   enabled=excluded.enabled,
-		   inject_on_request=excluded.inject_on_request,
-		   updated_at=excluded.updated_at`,
-		scopeType,
-		scopeKey,
-		rule.Content,
-		boolToInt(rule.Enabled),
-		boolToInt(rule.InjectOnRequest),
-		rule.UpdatedAt,
-	)
-	return rule, err
-}
-
 func boolToInt(value bool) int {
 	if value {
 		return 1
@@ -514,97 +376,6 @@ func agentInspectorSaveNotes(agentID string, content string) (agentInspectorText
 		return agentInspectorTextFile{}, os.ErrNotExist
 	}
 	return record, nil
-}
-
-func agentInspectorLoadRuntimeMemory(agentID string) agentInspectorRuntimeMemoryFile {
-	memory := agentInspectorRuntimeMemoryFile{}
-	if err := agentInspectorReadJSON(agentInspectorRuntimeMemoryPath(agentID), &memory); err != nil {
-		return agentInspectorRuntimeMemoryFile{}
-	}
-	return memory
-}
-
-func agentInspectorRuntimeMemoryFromRule(rule agentInspectorPromptRule) agentInspectorRuntimeMemoryFile {
-	return agentInspectorRuntimeMemoryFile{
-		Enabled:   rule.Enabled,
-		Content:   rule.Content,
-		UpdatedAt: rule.UpdatedAt,
-	}
-}
-
-func agentInspectorRuleLabel(scopeType string, scopeKey string) string {
-	switch scopeType {
-	case "global":
-		return "全局"
-	case "project":
-		if strings.TrimSpace(scopeKey) == "" {
-			return "项目"
-		}
-		return scopeKey
-	case "agent":
-		return shortPaneID(scopeKey)
-	default:
-		return scopeType
-	}
-}
-
-func agentInspectorPromptRulesBundle(agentID string) agentInspectorPromptRules {
-	projectKey := agentInspectorProjectKey(agentID)
-	global := agentInspectorLoadPromptRule("global", "global")
-	project := agentInspectorLoadPromptRule("project", projectKey)
-	agent := agentInspectorLoadPromptRule("agent", shortPaneID(agentID))
-	if strings.TrimSpace(agent.Content) == "" && !agent.Enabled && !agent.InjectOnRequest {
-		legacy := agentInspectorLoadRuntimeMemory(agentID)
-		if strings.TrimSpace(legacy.Content) != "" || legacy.Enabled {
-			agent.Content = legacy.Content
-			agent.Enabled = legacy.Enabled
-			agent.InjectOnRequest = legacy.Enabled
-			agent.UpdatedAt = legacy.UpdatedAt
-			agent.Available = true
-			agent.Scope = "agent"
-			agent.Key = shortPaneID(agentID)
-		}
-	}
-	global.Label = agentInspectorRuleLabel("global", global.Key)
-	project.Label = agentInspectorRuleLabel("project", project.Key)
-	agent.Label = agentInspectorRuleLabel("agent", agent.Key)
-	overlay := agentInspectorPromptOverlayFromRules(agentID, global, project, agent)
-	bundle := agentInspectorPromptRules{
-		Global:      global,
-		Project:     project,
-		Agent:       agent,
-		ProjectKey:  projectKey,
-		Overlay:     overlay,
-		OverlayPath: agentInspectorPromptRulesPath(agentID),
-	}
-	for _, ts := range []string{global.UpdatedAt, project.UpdatedAt, agent.UpdatedAt} {
-		if strings.TrimSpace(ts) != "" && ts > bundle.UpdatedAt {
-			bundle.UpdatedAt = ts
-		}
-	}
-	return bundle
-}
-
-func agentInspectorPromptOverlayFromRules(agentID string, global agentInspectorPromptRule, project agentInspectorPromptRule, agent agentInspectorPromptRule) string {
-	parts := []string{}
-	appendRule := func(tag string, rule agentInspectorPromptRule) {
-		if !rule.Available || !rule.Enabled || !rule.InjectOnRequest || strings.TrimSpace(rule.Content) == "" {
-			return
-		}
-		parts = append(parts, "<"+tag+">\n"+strings.TrimSpace(rule.Content)+"\n</"+tag+">")
-	}
-	appendRule("global-memory", global)
-	appendRule("project-memory", project)
-	appendRule("agent-memory", agent)
-	if filesOverlay := agentInspectorBuildRulesFilesOverlay(agentID); filesOverlay != "" {
-		parts = append(parts, filesOverlay)
-	}
-	return strings.TrimSpace(strings.Join(parts, "\n\n"))
-}
-
-func agentInspectorSyncPromptRuleFiles(agentID string) {
-	bundle := agentInspectorPromptRulesBundle(agentID)
-	_ = agentInspectorWriteJSON(agentInspectorPromptRulesPath(agentID), bundle)
 }
 
 func agentInspectorLoadCurrent(agentID string) aiGatewayCurrentSnapshot {
@@ -2529,9 +2300,178 @@ func handleAgentHistoryIDsByPane(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Best-effort: surface the agent's current model/provider so the chat view
+	// can show which model is answering.
+	model := ""
+	provider := ""
+	if snapshot, snapErr := aiGatewayReadCurrentSnapshot(paneID); snapErr == nil {
+		model = strings.TrimSpace(snapshot.Model)
+		provider = strings.TrimSpace(snapshot.Provider)
+	}
 	J(w, M{
 		"id":              maxID,
 		"conversation_id": resolvedConversationID,
+		"model":           model,
+		"provider":        provider,
+	})
+}
+
+// handleAgentCurrentReplyByPane surfaces the in-progress turn straight from
+// reply.json so the history view can POLL it (no live WS push). The history
+// view loads its committed turns from current.json as before; while reply.json
+// is not complete it polls this endpoint and renders the reply as a temporary
+// trailing group. Once `complete` is true the caller folds the just-finished
+// turn into the committed list (a normal current.json ranged fetch) and drops
+// the temporary group.
+//
+// `history_id` is the id the reply's ANSWER occupies = current.json's max id + 1
+// (current.json always ends on the latest user question q_last, whose id == maxID;
+// its answer is still in reply.json and will take the next slot maxID+1 once
+// committed). The caller's committed list ends at q_last (committedMaxId == maxID),
+// so this answer attaches right after it: history_id == committedMaxId+1. That is
+// also why `history_id > committedMaxId` cleanly gates whether the reply is the
+// live tail for the latest turn vs an already-migrated one.
+// aiGatewayCommittedAssistantTexts collects the trimmed text of every assistant
+// message already in current.json (the committed history). The live reply tail
+// uses this to avoid re-rendering an assistant paragraph the committed list
+// already shows (codex multi-round: intermediate assistant text is committed
+// mid-turn yet still present in reply.Items).
+// aiGatewayCommittedTurnStart returns the index just AFTER the last REAL user
+// question (skipping tool_result messages, which are role:user but not a new
+// question). Scoping the live-tail dedup to the current turn this way is what
+// keeps it from blanking a live reply that merely reuses a phrase from an old
+// turn — while still covering ALL of the current turn's committed steps. The
+// earlier version stopped at the last role:user message of ANY kind, so a
+// tool-ending turn (last message = tool_result) yielded an EMPTY set and the
+// live tail re-rendered the whole turn (duplicated thinking + texts).
+func aiGatewayCommittedTurnStart(items []map[string]interface{}) int {
+	for i := len(items) - 1; i >= 0; i-- {
+		if aiGatewayString(items[i]["role"]) == "user" && !aiGatewayItemIsToolResult(items[i]) {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func aiGatewayCommittedAssistantTexts(current aiGatewayCurrentSnapshot) map[string]bool {
+	items := agentHistoryCurrentBodyItems(current)
+	start := aiGatewayCommittedTurnStart(items)
+	set := map[string]bool{}
+	for _, item := range items[start:] {
+		if aiGatewayString(item["role"]) != "assistant" {
+			continue
+		}
+		if s := strings.TrimSpace(aiGatewayString(item["content"])); s != "" {
+			set[s] = true
+		}
+		for _, part := range aiGatewaySlice(item["content"]) {
+			if t := strings.TrimSpace(aiGatewayContentPartToText(part)); t != "" {
+				set[t] = true
+			}
+		}
+	}
+	return set
+}
+
+// aiGatewayCommittedAssistantThinking mirrors aiGatewayCommittedAssistantTexts
+// for thinking blocks: the current turn's already-committed thinking must be
+// excluded from the live tail, or the history view (which now renders committed
+// thinking) shows it twice — once in the committed turn, once in the tail.
+func aiGatewayCommittedAssistantThinking(current aiGatewayCurrentSnapshot) map[string]bool {
+	items := agentHistoryCurrentBodyItems(current)
+	start := aiGatewayCommittedTurnStart(items)
+	set := map[string]bool{}
+	for _, item := range items[start:] {
+		if aiGatewayString(item["role"]) != "assistant" {
+			continue
+		}
+		for _, part := range aiGatewaySlice(item["content"]) {
+			m := aiGatewayMap(part)
+			if aiGatewayString(m["type"]) != "thinking" {
+				continue
+			}
+			if t := strings.TrimSpace(aiGatewayString(m["thinking"])); t != "" {
+				set[t] = true
+			}
+		}
+	}
+	return set
+}
+
+func handleAgentCurrentReplyByPane(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/agents/current-reply/")
+	paneID := shortPaneID(strings.Trim(path, "/"))
+	if paneID == "" {
+		httpErr(w, http.StatusBadRequest, "pane id required")
+		return
+	}
+	conversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
+	current := agentInspectorLoadCurrent(paneID)
+	reply := agentInspectorLoadReply(paneID)
+	resolvedConversationID, maxID, err := agentHistoryCurrentMaxID(paneID, conversationID)
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if resolvedConversationID == "" {
+		resolvedConversationID = aiGatewayFirstNonEmpty(strings.TrimSpace(current.ConversationID), conversationID)
+	}
+	status := strings.ToLower(strings.TrimSpace(reply.Status))
+	// reply.json has no active turn ("") or has reached a terminal state →
+	// nothing left to stream. Everything else (streaming/thinking/working/
+	// tool_call/pending/…) is still in flight.
+	complete := status == "" || status == "idle" || status == "done" || isAIGatewayReplyTerminal(status)
+	// The answer sits one slot past q_last. Only +1 when there's actually a
+	// conversation/turn to attach to (maxID > 0); an empty agent stays at 0.
+	answerID := maxID
+	if maxID > 0 {
+		answerID = maxID + 1
+	}
+	// reply.json persists the answer as structured `items` (content blocks), NOT
+	// as a flat field — aiGatewayReplySnapshotLite has no answer/thinking, so
+	// reply.Answer/Thinking read back EMPTY for every provider. Derive the display
+	// text from items (the canonical source). For codex / OpenAI Responses the
+	// text only ever lives in items, so this is the only way to surface it.
+	//
+	// Exclude assistant text already committed to current.json: a codex agentic
+	// turn commits its intermediate assistant text mid-turn (current.json id N)
+	// while reply.Items still carries that same block plus the continuation —
+	// without this the committed turn AND the live tail render the same paragraph.
+	committed := aiGatewayCommittedAssistantTexts(current)
+	answer := strings.TrimSpace(reply.Answer)
+	if answer == "" {
+		answer = aiGatewayReplyItemsText(reply.Items, "text", committed)
+	}
+	// Exclude the current turn's already-committed thinking so the live tail
+	// doesn't duplicate the thinking the committed turn already renders.
+	committedThinking := aiGatewayCommittedAssistantThinking(current)
+	thinking := strings.TrimSpace(reply.Thinking)
+	if thinking == "" {
+		thinking = aiGatewayReplyItemsText(reply.Items, "thinking", committedThinking)
+	}
+	J(w, M{
+		"pane_id":                    paneID,
+		"conversation_id":            resolvedConversationID,
+		// reply.json's self-described conversation (the conversation the live-tail
+		// ANSWER actually belongs to). The history view attaches the tail only when
+		// this matches committed; on mismatch the agent has rotated conversations
+		// and the view must rebind (see docs §11 / INV-8).
+		"reply_conversation_id": strings.TrimSpace(reply.ConversationID),
+		"history_id":                 answerID,
+		"turn_id":                    strings.TrimSpace(reply.TurnID),
+		"status":                     status,
+		"complete":                   complete,
+		"question":                   aiGatewayCurrentQuestion(current),
+		"answer":                     answer,
+		"thinking":                   thinking,
+		"updated_at":                 strings.TrimSpace(reply.UpdatedAt),
+		"model":                      aiGatewayFirstNonEmpty(aiGatewayReplyPrimaryModel(reply), strings.TrimSpace(current.Model)),
+		"input_tokens":               reply.InputTokens,
+		"output_tokens":              reply.OutputTokens,
+		"cache_read_input_tokens":    reply.CacheReadInputTokens,
+		"cache_creation_input_tokens": reply.CacheCreationInputTokens,
+		"total_tokens":               reply.TotalTokens,
+		"cost_credit":                reply.CostCredit,
 	})
 }
 
@@ -3147,7 +3087,6 @@ func agentInspectorOverview(agentID string) M {
 	rawMessages := agentInspectorBuildSnapshotHistory(agentID, current, reply)
 	messages, _, historyReason := agentInspectorHistoryData(agentID)
 	notes := agentInspectorLoadNotes(agentID)
-	promptRules := agentInspectorPromptRulesBundle(agentID)
 	systemPrompt := ""
 	if body, err := os.ReadFile(aiGatewaySystemPromptPath(agentID)); err == nil {
 		systemPrompt = string(body)
@@ -3237,11 +3176,6 @@ func agentInspectorOverview(agentID string) M {
 		"history_total":            len(messages),
 		"raw_message_count":        len(rawMessages),
 		"system_prompt_preview":    agentInspectorCompactText(systemPrompt, 220),
-		"overlay_preview":          agentInspectorCompactText(promptRules.Overlay, 220),
-		"overlay_full":             promptRules.Overlay,
-		"rules_files":              agentInspectorRulesFilesBundle(agentID),
-		"inject_rules_files":       gatewayInjectRulesPaneEnabled(agentID),
-		"inject_rules_global":      gatewayInjectRulesGlobalEnabled(),
 		"latest_q":                 latestMessage.Q,
 		"latest_a":                 latestMessage.A,
 		"latest_q_time":            latestMessage.QTime,
@@ -3254,119 +3188,7 @@ func agentInspectorOverview(agentID string) M {
 		"notes_updated_at":         notes.UpdatedAt,
 		"notes_preview":            agentInspectorCompactText(notes.Content, 160),
 		"history_available":        len(messages) > 0 || (runtimeManaged && (strings.TrimSpace(currentQuestion) != "" || strings.TrimSpace(reply.Answer) != "")),
-		"runtime_memory_enabled":   promptRules.Agent.Enabled,
-		"runtime_memory_updated":   promptRules.Agent.UpdatedAt,
-		"runtime_memory_preview":   agentInspectorCompactText(promptRules.Agent.Content, 160),
 	}
-}
-
-func agentInspectorBuildPromptOverlay(agentID string) string {
-	rules := agentInspectorPromptRulesBundle(agentID)
-	return rules.Overlay
-}
-
-func agentInspectorUpsertPromptText(existing string, injected string) string {
-	existing = strings.TrimSpace(existing)
-	injected = strings.TrimSpace(injected)
-	if injected == "" {
-		return existing
-	}
-	if existing == "" {
-		return injected
-	}
-	if strings.Contains(strings.ToLower(existing), strings.ToLower(injected)) {
-		return existing
-	}
-	return injected + "\n\n" + existing
-}
-
-func agentInspectorDeveloperInputItem(text string) M {
-	return M{
-		"role": "developer",
-		"content": []M{
-			{
-				"type": "input_text",
-				"text": text,
-			},
-		},
-	}
-}
-
-func agentInspectorSystemMessage(text string) M {
-	return M{
-		"role":    "system",
-		"content": text,
-	}
-}
-
-func agentInspectorPromptExistsInItems(items []interface{}, injected string) bool {
-	needle := strings.ToLower(strings.TrimSpace(injected))
-	if needle == "" {
-		return false
-	}
-	for _, raw := range items {
-		item := aiGatewayMap(raw)
-		if len(item) == 0 {
-			continue
-		}
-		role := strings.ToLower(strings.TrimSpace(aiGatewayString(item["role"])))
-		if role != "system" && role != "developer" {
-			continue
-		}
-		content := strings.ToLower(strings.TrimSpace(aiGatewayFlattenPromptValue(item["content"])))
-		if strings.Contains(content, needle) {
-			return true
-		}
-	}
-	return false
-}
-
-func agentInspectorInjectPrompt(body map[string]interface{}, provider string, agentID string) map[string]interface{} {
-	injected := agentInspectorBuildPromptOverlay(agentID)
-	if strings.TrimSpace(injected) == "" {
-		return body
-	}
-	if body == nil {
-		return map[string]interface{}{"instructions": injected}
-	}
-
-	switch current := body["instructions"].(type) {
-	case string:
-		body["instructions"] = agentInspectorUpsertPromptText(current, injected)
-		return body
-	}
-
-	if provider == "anthropic" {
-		switch current := body["system"].(type) {
-		case string:
-			body["system"] = agentInspectorUpsertPromptText(current, injected)
-			return body
-		case []interface{}:
-			body["system"] = append([]interface{}{injected}, current...)
-			return body
-		}
-		body["system"] = injected
-		return body
-	}
-
-	if messages := aiGatewaySlice(body["messages"]); len(messages) > 0 {
-		if agentInspectorPromptExistsInItems(messages, injected) {
-			return body
-		}
-		body["messages"] = append([]interface{}{agentInspectorSystemMessage(injected)}, messages...)
-		return body
-	}
-
-	if inputItems := aiGatewaySlice(body["input"]); len(inputItems) > 0 {
-		if agentInspectorPromptExistsInItems(inputItems, injected) {
-			return body
-		}
-		body["input"] = append([]interface{}{agentInspectorDeveloperInputItem(injected)}, inputItems...)
-		return body
-	}
-
-	body["instructions"] = injected
-	return body
 }
 
 // agentInspectorNormalizeAnthropicSystem coerces an Anthropic request's `system`
@@ -3424,7 +3246,9 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 	trimmed := strings.TrimSpace(string(requestBody))
 	if trimmed == "" {
 		payload := map[string]interface{}{}
-		payload = agentInspectorInjectPrompt(payload, provider, agentID)
+		// Memory/rules injection retired: agents read their own CLAUDE.md /
+		// AGENTS.md natively, so the gateway no longer rewrites the prompt.
+		// Keeps gateway and non-gateway paths consistent.
 		payload = agentInspectorOverrideModel(payload, agentID)
 		if provider == "anthropic" {
 			payload = agentInspectorNormalizeAnthropicSystem(payload)
@@ -3443,7 +3267,8 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 	if err := json.Unmarshal(requestBody, &payload); err != nil {
 		return requestBody
 	}
-	payload = agentInspectorInjectPrompt(payload, provider, agentID)
+	// Memory/rules injection retired (see above) — gateway no longer rewrites
+	// the prompt; agents read their own guidance files natively.
 	payload = agentInspectorOverrideModel(payload, agentID)
 	if provider == "anthropic" {
 		payload = agentInspectorNormalizeAnthropicSystem(payload)
@@ -3953,8 +3778,6 @@ func agentInspectorLoadPaneDetail(agentID string) M {
 
 func agentInspectorBuildBundle(agentID string, query string, limit int, offset int) M {
 	shortID := shortPaneID(normPaneID(agentID))
-	promptRules := agentInspectorPromptRulesBundle(shortID)
-	agentInspectorSyncPromptRuleFiles(shortID)
 	current := agentInspectorLoadCurrent(shortID)
 	reply := agentInspectorLoadReply(shortID)
 	records, _, _ := agentInspectorSnapshotHistoryData(shortID, current, reply, agentInspectorPaneRuntimeManaged(shortID))
@@ -3963,8 +3786,6 @@ func agentInspectorBuildBundle(agentID string, query string, limit int, offset i
 		"overview":              agentInspectorOverview(shortID),
 		"history":               agentInspectorBuildHistory(shortID, query, limit, offset),
 		"notes":                 agentInspectorLoadNotes(shortID),
-		"runtime_memory":        agentInspectorRuntimeMemoryFromRule(promptRules.Agent),
-		"prompt_rules":          promptRules,
 		"pane":                  agentInspectorLoadPaneDetail(shortID),
 		"history_view":          agentInspectorBuildChatTurnsFromRecords(records, current, reply),
 		"provider_request_view": agentInspectorProviderRequestView(shortID, current, reply),
@@ -3993,17 +3814,7 @@ func handleAgentInspectorByPane(w http.ResponseWriter, r *http.Request) {
 		resp := M{
 			"pane_id":               shortID,
 			"pane":                  bundle["pane"],
-			"runtime_memory":        bundle["runtime_memory"],
-			"prompt_rules":          bundle["prompt_rules"],
 			"provider_request_view": bundle["provider_request_view"],
-			"rules_files":           agentInspectorRulesFilesBundle(shortID),
-			"inject_rules_files":    gatewayInjectRulesPaneEnabled(shortID),
-			"inject_rules_global":   gatewayInjectRulesGlobalEnabled(),
-		}
-		if overview, ok := bundle["overview"].(M); ok {
-			if v, ok := overview["overlay_full"]; ok {
-				resp["overlay_full"] = v
-			}
 		}
 		J(w, resp)
 		return
@@ -4021,86 +3832,6 @@ func handleAgentInspectorByPane(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		J(w, M{"success": true, "notes": record})
-		return
-	case r.Method == http.MethodPut && action == "runtime-memory":
-		var req struct {
-			Content string `json:"content"`
-			Enabled *bool  `json:"enabled"`
-		}
-		if err := readBody(r, &req); err != nil {
-			httpErr(w, 400, "invalid request body")
-			return
-		}
-		current := agentInspectorPromptRulesBundle(shortID).Agent
-		enabled := current.Enabled
-		if req.Enabled != nil {
-			enabled = *req.Enabled
-		}
-		saved, err := agentInspectorSavePromptRule("agent", shortID, agentInspectorPromptRule{
-			Content:         req.Content,
-			Enabled:         enabled,
-			InjectOnRequest: enabled,
-		})
-		if err != nil {
-			httpErr(w, 500, err.Error())
-			return
-		}
-		agentInspectorSyncPromptRuleFiles(shortID)
-		J(w, M{
-			"success":        true,
-			"runtime_memory": agentInspectorRuntimeMemoryFromRule(saved),
-			"prompt_rules":   agentInspectorPromptRulesBundle(shortID),
-		})
-		return
-	case r.Method == http.MethodPut && action == "prompt-rules":
-		var req struct {
-			Global  *agentInspectorPromptRule `json:"global"`
-			Project *agentInspectorPromptRule `json:"project"`
-			Agent   *agentInspectorPromptRule `json:"agent"`
-		}
-		if err := readBody(r, &req); err != nil {
-			httpErr(w, 400, "invalid request body")
-			return
-		}
-
-		bundle := agentInspectorPromptRulesBundle(shortID)
-		if req.Global != nil {
-			if _, err := agentInspectorSavePromptRule("global", "global", agentInspectorPromptRule{
-				Content:         req.Global.Content,
-				Enabled:         req.Global.Enabled,
-				InjectOnRequest: req.Global.InjectOnRequest,
-			}); err != nil {
-				httpErr(w, 500, err.Error())
-				return
-			}
-		}
-		if req.Project != nil && bundle.Project.Available {
-			if _, err := agentInspectorSavePromptRule("project", bundle.Project.Key, agentInspectorPromptRule{
-				Content:         req.Project.Content,
-				Enabled:         req.Project.Enabled,
-				InjectOnRequest: req.Project.InjectOnRequest,
-			}); err != nil {
-				httpErr(w, 500, err.Error())
-				return
-			}
-		}
-		if req.Agent != nil {
-			if _, err := agentInspectorSavePromptRule("agent", shortID, agentInspectorPromptRule{
-				Content:         req.Agent.Content,
-				Enabled:         req.Agent.Enabled,
-				InjectOnRequest: req.Agent.InjectOnRequest,
-			}); err != nil {
-				httpErr(w, 500, err.Error())
-				return
-			}
-		}
-		agentInspectorSyncPromptRuleFiles(shortID)
-		next := agentInspectorPromptRulesBundle(shortID)
-		J(w, M{
-			"success":        true,
-			"prompt_rules":   next,
-			"runtime_memory": agentInspectorRuntimeMemoryFromRule(next.Agent),
-		})
 		return
 	default:
 		httpErr(w, 404, "not found")

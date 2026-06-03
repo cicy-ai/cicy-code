@@ -198,7 +198,6 @@ cd skills && make install-local-cli
 - `api/mgr/skills.go`、`api/mgr/skill_market*.go`：skill 注册表与市场 API
 - `api/mgr/frp_server_handlers.go`：FRP server 抽屉式管理（脱敏，不暴露 config 原文）
 - `api/mgr/gateway_reply_callback.go`、`gateway_reply_text.go`、`gateway_chat_history.go`、`gateway_cicy_tools.go`：跨 agent reply、结构化 reply/history 工具
-- `api/mgr/gateway_inject_rules.go`：AI gateway 注入规则
 - `api/mgr/ai_gateway_*.go`：OpenClaw / DeepSeek / Codex / Claude provider 适配
 - `api/mgr/stt.go`、`api/mgr/tts.go`：语音转写 / 合成代理
 - `api/mgr/todo.go`：`/api/todo/*`，对应 `cicy-todo` CLI 与前端 Todo tab

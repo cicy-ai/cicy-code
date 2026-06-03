@@ -29,6 +29,7 @@ type regServer struct {
 	readToken  string // "" = open (rely on network isolation)
 	adminToken string // "" = admin endpoints disabled
 	publicURL  string // "" = derive scheme+host from each request
+	pathPrefix string // e.g. "/registry" when mounted under a path on a shared mux
 	nowFn      func() string
 }
 
@@ -148,7 +149,9 @@ func (s *regServer) middleware(next http.Handler) http.Handler {
 // configured --public-url, else derived from the request (proxy-aware).
 func (s *regServer) baseURL(r *http.Request) string {
 	if s.publicURL != "" {
-		return s.publicURL
+		// publicURL is an origin (scheme+host); add the mount prefix so
+		// download_url is reachable through "<public>/registry/...".
+		return s.publicURL + s.pathPrefix
 	}
 	scheme := "http"
 	if r.TLS != nil {
@@ -157,7 +160,11 @@ func (s *regServer) baseURL(r *http.Request) string {
 	if xf := r.Header.Get("X-Forwarded-Proto"); xf != "" {
 		scheme = xf
 	}
-	return scheme + "://" + r.Host
+	// pathPrefix is non-empty when this handler is mounted under a path on a
+	// shared mux (e.g. "/registry" on the cicy-code daemon). The request path
+	// has already been stripped of the prefix by the time it reaches us, so we
+	// re-add it here to keep download_url reachable.
+	return scheme + "://" + r.Host + s.pathPrefix
 }
 
 // resolveVersion turns "latest" into the latest non-yanked version.

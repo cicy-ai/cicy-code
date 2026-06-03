@@ -15,6 +15,7 @@
   "status": {
     "todo": "Todo",
     "doing": "Doing",
+    "test": "Test",
     "done": "Done",
     "dropped": "Dropped"
   },
@@ -34,5 +35,15 @@
   "timeDaysAgo": "{{n}}d ago",
   "timeDateMonth": "{{month}}/{{day}}",
   "updateFailed": "update failed",
-  "retry": "retry"
+  "retry": "retry",
+  "saving": "saving",
+  "refreshTooltip": "Refresh",
+  "promptTodo": "Please handle the following todo; when finished, move it to the test lane with `cicy-todo test {{id}}` (awaiting review — don't mark it done yourself):\n\n{{title}}",
+  "promptDoing": "Please keep advancing the following in-progress task; when finished, move it to the test lane with `cicy-todo test {{id}}` (awaiting review — don't mark it done yourself):\n\n{{title}}",
+  "alignPrompt": "Please reconcile the current todo progress (data lives in `<workspace>/.cicy/todos.yaml`, operated via `cicy-todo`):\n\n1. First run `cicy-todo list --all` to fetch the full list.\n2. Completed: `cicy-todo done <id>`\n3. No longer needed: `cicy-todo drop <id>`\n4. Unfinished: judge by current state, split or adjust.\n\nReport one line when done: N completed / N adjusted / N added.",
+  "assignTooltip": "Assign to a worker (hand off & send)",
+  "assignHeader": "Assign to",
+  "assignNoWorkers": "No workers available",
+  "viewListTooltip": "Switch to list view",
+  "viewKanbanTooltip": "Switch to board view"
 }

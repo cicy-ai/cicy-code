@@ -8,6 +8,11 @@ const BACKEND_KEY = 'cicy_backend';
 const http = axios.create({ baseURL: config.apiBase });
 let pendingPanesRequest: Promise<any> | null = null;
 const pendingPaneDetailRequests = new Map<string, Promise<any>>();
+// MemoryView mounts two effects that both read the agent's own template on
+// open (one for the filename label, one for the content) — without coalescing
+// that's two identical GET /api/memory/templates/agent/:id requests. Share the
+// in-flight promise so concurrent identical reads collapse to one round-trip.
+const pendingMemoryTemplateRequests = new Map<string, Promise<any>>();
 
 function shortPaneRouteId(id: string) {
   return String(id || '').replace(/:main\.0$/, '');
@@ -107,6 +112,23 @@ const api = {
   // Used by the inspector to nudge non-gateway codex/kiro users to install it.
   getMitmCaStatus: () => http.get('/api/mitm/ca-status'),
 
+  // Memory templates (global + project) — backs the create-agent dialog.
+  listMemoryTemplates: () => http.get('/api/memory/templates'),
+  getMemoryTemplate: (scope: string, name?: string) => {
+    const url = `/api/memory/templates/${scope}${name ? `/${encodeURIComponent(name)}` : ''}`;
+    const cached = pendingMemoryTemplateRequests.get(url);
+    if (cached) return cached;
+    const request = http.get(url).finally(() => {
+      pendingMemoryTemplateRequests.delete(url);
+    });
+    pendingMemoryTemplateRequests.set(url, request);
+    return request;
+  },
+  saveMemoryTemplate: (scope: string, name: string, content: string) =>
+    http.put(`/api/memory/templates/${scope}${name ? `/${encodeURIComponent(name)}` : ''}`, { content }),
+  deleteMemoryTemplate: (scope: string, name: string) =>
+    http.delete(`/api/memory/templates/${scope}/${encodeURIComponent(name)}`),
+
   sendCommand: (winId: string, text: string, submit = true) => unwrapTmuxSend(http.post('/api/tmux/send', { win_id: winId, text, submit })),
   sendKeys: (winId: string, keys: string) => unwrapTmuxSend(http.post('/api/tmux/send-keys', { win_id: winId, keys })),
   toggleMouse: (mode: string, paneId: string) => http.post(`/api/tmux/mouse/${mode}`, null, { params: { pane_id: paneId } }),
@@ -117,14 +139,14 @@ const api = {
   deleteAgent: (id: string) => http.delete(`/api/agents/${encodeURIComponent(id)}`),
   getAgentsByPane: (id: string) => http.get(`/api/agents/pane/${encodeURIComponent(id)}`),
   getAgentInspector: (id: string, params?: { q?: string; limit?: number; offset?: number }) => http.get(`/api/agents/inspector/${encodeURIComponent(id)}`, { params }),
+  getAgentUsageLog: (id: string, limit = 200) => http.get(`/api/agents/usage-log/${encodeURIComponent(id)}`, { params: { limit } }),
+  getAgentUsageAnalysis: (id: string) => http.get(`/api/agents/usage-analysis/${encodeURIComponent(id)}`),
   getAgentHistoryIDs: (id: string, params?: { conversation_id?: string }) => http.get(`/api/agents/history-ids/${encodeURIComponent(id)}`, { params }),
+  getAgentCurrentReply: (id: string, params?: { conversation_id?: string }) => http.get(`/api/agents/current-reply/${encodeURIComponent(id)}`, { params }),
   getAgentCurrentHistory: (id: string, params?: { limit?: number; before?: number; conversation_id?: string }) => http.get(`/api/agents/current-history/${encodeURIComponent(id)}`, { params }),
   getAgentCurrentHistoryTool: (id: string, params: { history_id?: number; step_index: number; tool_index: number; live?: 1 }) => http.get(`/api/agents/current-history-tool/${encodeURIComponent(id)}`, { params }),
-  getAgentHistorySync: (id: string, params?: { cursor?: string; limit?: number }) => http.get(`/api/agents/history-sync/${encodeURIComponent(id)}`, { params }),
   getAgentHistoryView: (id: string) => http.get(`/api/agents/history-view/${encodeURIComponent(id)}`),
   updateAgentInspectorNotes: (id: string, content: string) => http.put(`/api/agents/inspector/${encodeURIComponent(id)}/notes`, { content }),
-  updateAgentRuntimeMemory: (id: string, data: { content: string; enabled: boolean }) => http.put(`/api/agents/inspector/${encodeURIComponent(id)}/runtime-memory`, data),
-  updateAgentPromptRules: (id: string, data: any) => http.put(`/api/agents/inspector/${encodeURIComponent(id)}/prompt-rules`, data),
   bindAgent: (data: any) => http.post('/api/agents/bind', data),
   unbindAgent: (agentId: number) => http.delete(`/api/agents/unbind/${agentId}`),
   reorderAgents: (paneId: string, agentNames: string[]) => http.post('/api/agents/reorder', { pane_id: paneId, agent_names: agentNames }),
@@ -155,13 +177,13 @@ const api = {
   removeSkillRegistry: (nameOrUrl: string) =>
     http.delete(`/api/skill-registries/${encodeURIComponent(nameOrUrl)}`),
 
-  // Host a local private registry (in-process on the daemon)
+  // The node's always-on self-hosted registry (mounted at :8008/registry).
   getLocalRegistry: () => http.get('/api/local-registry'),
-  startLocalRegistry: (data?: { port?: number; dir?: string; token?: string }) =>
-    http.post('/api/local-registry/start', data || {}),
-  stopLocalRegistry: () => http.post('/api/local-registry/stop', {}),
-  publishLocalRegistry: (path: string) =>
-    http.post('/api/local-registry/publish', { path }),
+  rotateLocalRegistry: () => http.post('/api/local-registry/rotate', {}),
+  publishLocalRegistry: (name: string) =>
+    http.post('/api/local-registry/publish', { name }),
+  unpublishLocalRegistry: (name: string) =>
+    http.post('/api/local-registry/unpublish', { name }),
 
   getGoogleSkillConfig: () => http.get('/api/skill-config/google'),
   connectGoogleSkillConfig: () => http.post('/api/skill-config/google/connect', {}),
@@ -196,6 +218,7 @@ const api = {
   testIMAccount: (id: number) => http.post(`/api/im/accounts/${id}/test`),
   bindIMAccount: (id: number, paneId: string) => http.post(`/api/im/accounts/${id}/bind`, { pane_id: paneId }),
   unbindIMAccount: (id: number) => http.post(`/api/im/accounts/${id}/unbind`),
+  getIMAccountSecret: (id: number) => http.get(`/api/im/accounts/${id}/secret`),
   getIMAccountQR: (id: number) => http.get(`/api/im/accounts/${id}/qr`),
   reloginIMAccount: (id: number) => http.post(`/api/im/accounts/${id}/relogin`),
   startWeChatLogin: () => http.post('/api/im/wechat/login'),
@@ -236,6 +259,22 @@ const api = {
   getAuditStatus: () => http.get('/api/audit/status'),
   registerAuditToken: (userId: string, plan = 'free') => http.post('/api/audit/register', { user_id: userId, plan }),
   getSetupGuide: () => http.get('/setup'),
+
+  // audit-v2 — local audit events (findings + decision/action) for the guard widget
+  getAuditEvents: (params: { agent_id?: string; severity?: string; rule_id?: string; from?: string; to?: string; limit?: number; offset?: number } = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && String(v) !== '') q.set(k, String(v));
+    });
+    const qs = q.toString();
+    return http.get(`/api/audit/events${qs ? `?${qs}` : ''}`);
+  },
+  // audit-v2 — the effective policy.json (authored by the w-6001 SecOps agent)
+  getAuditPolicy: () => http.get('/api/audit/policy'),
+  // audit-v2 — adjudicate one alert (real leak vs false positive)
+  auditTriage: (input: Record<string, any>) => http.post('/api/audit/triage', input),
+  // audit-v2 — fetch the redacted snapshot archived for a notify alert
+  getAuditSnapshot: (ref: string) => http.get('/api/audit/snapshot', { params: { ref } }),
 
   // audit-v2 — autonomous policy agent
   auditAutonomyDecisions: (limit = 100) => http.get(`/api/audit/decisions?limit=${limit}`),
@@ -302,7 +341,7 @@ const api = {
       headers: { 'X-Agent-Show-Id': pid },
     });
   },
-  updateTodo: (paneId: string, id: string, patch: { status?: string; title?: string }) => {
+  updateTodo: (paneId: string, id: string, patch: { status?: string; title?: string; assignee?: string }) => {
     const pid = shortPaneRouteId(paneId);
     if (!pid) return Promise.reject(new Error('paneId required for updateTodo'));
     return http.patch(`/api/todo/${encodeURIComponent(id)}`, { pane_id: paneId, ...patch }, {

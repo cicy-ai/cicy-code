@@ -27,6 +27,62 @@ import (
 //   GET  /api/audit/policy/effective/{id}     — merged (global ⊕ agent) view
 //   GET  /api/audit/ack?token=...             — PUBLIC incident-email ack landing
 
+// auditEnabled is the master switch for the whole audit subsystem. It lives in
+// the global_settings blob (read/written via /api/settings/global), so a UI
+// toggle persists it. Default OFF: when not true the audit pipeline is never
+// initialized (MITM collection + scanning + the preventive breaker all no-op
+// via the nil-pipeline guards) and the w-6001 SecOps agent is not created.
+func auditEnabled() bool {
+	var val []byte
+	if err := store.QueryRow("SELECT `value` FROM global_vars WHERE `key_name`='global_settings'").Scan(&val); err != nil || len(val) == 0 {
+		return false
+	}
+	var m map[string]any
+	if json.Unmarshal(val, &m) != nil {
+		return false
+	}
+	b, _ := m["audit_enabled"].(bool)
+	return b
+}
+
+// handleAuditTriage adjudicates one alert (real leak vs false positive) using
+// the configured LLM, falling back to a deterministic heuristic. POST body is
+// an audit.TriageInput (the enriched finding the UI already holds).
+func handleAuditTriage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var in audit.TriageInput
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in); err != nil {
+		httpErr(w, http.StatusBadRequest, "bad_request")
+		return
+	}
+	J(w, audit.TriageFinding(r.Context(), in))
+}
+
+// handleAuditSnapshot returns the redacted, plaintext request snapshot archived
+// for a notify alert (meta.snapshot_ref). Secrets are already masked, so this
+// is safe to read for review / compliance.
+func handleAuditSnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	ref := r.URL.Query().Get("ref")
+	if ref == "" {
+		httpErr(w, http.StatusBadRequest, "missing_ref")
+		return
+	}
+	data, err := audit.ReadSnapshot(ref)
+	if err != nil {
+		httpErr(w, http.StatusNotFound, "snapshot_not_found")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(data)
+}
+
 func handleAuditEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")

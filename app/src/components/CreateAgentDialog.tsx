@@ -4,8 +4,8 @@ import { Spinner } from './ui/Spinner';
 import { useTranslation } from 'react-i18next';
 import { useApp } from '../contexts/AppContext';
 import { useDevRegister } from '../lib/devStore';
-import { guidanceFilenameForAgentType } from '../lib/agentType';
 import AgentTypeSelector from './AgentTypeSelector';
+import apiService from '../services/api';
 
 export interface CreateAgentValues {
   title: string;
@@ -14,6 +14,11 @@ export interface CreateAgentValues {
   use_custom_gateway: boolean;
   use_proxy: boolean;
   inherit_guidance: boolean;
+  /** Project-template slug to seed the agent's memory file with (global is
+   *  always added). Empty = global only. */
+  project_template: string;
+  /** Role-library template slug (架构 §5). Empty = none. */
+  role_template: string;
 }
 
 interface Props {
@@ -38,7 +43,9 @@ const DEFAULT_VALUES: CreateAgentValues = {
   allow_all_actions: true,
   use_custom_gateway: true,
   use_proxy: false,
-  inherit_guidance: true,
+  inherit_guidance: false,
+  project_template: '',
+  role_template: '',
 };
 
 export default function CreateAgentDialog({
@@ -51,7 +58,6 @@ export default function CreateAgentDialog({
   emptyTitleOnAgentSelect = '',
   dialogClassName = '',
   agentTypeGridClassName = 'grid grid-cols-1 gap-2 sm:grid-cols-2',
-  masterAgentType,
 }: Props) {
   const { t } = useTranslation('createAgent');
   const { t: ts } = useTranslation('settings');
@@ -61,12 +67,23 @@ export default function CreateAgentDialog({
   const resolvedTitle = title ?? t('title');
   const resolvedSubmitLabel = submitLabel ?? t('submit');
 
+  // Template selection only — management lives in the Inspector 记忆 tab. Global
+  // is always added; project/role are optional. (~/cicy-ai/memory/{projects,agents}/*.md)
+  const [projectTemplates, setProjectTemplates] = useState<string[]>([]);
+  const [roleTemplates, setRoleTemplates] = useState<string[]>([]);
+
   useEffect(() => {
     if (!open) return;
     setValues({
       ...DEFAULT_VALUES,
       agent_type: agentTypeOptions[0]?.value || 'claude',
     });
+    apiService.listMemoryTemplates()
+      .then((res) => {
+        setProjectTemplates(Array.isArray(res.data?.projects) ? res.data.projects : []);
+        setRoleTemplates(Array.isArray(res.data?.roles) ? res.data.roles : []);
+      })
+      .catch(() => {});
   }, [agentTypeOptions, open]);
   useDevRegister('CreateAgentDialog', {
     open,
@@ -160,6 +177,38 @@ export default function CreateAgentDialog({
             </div>
           </div>
 
+          <div data-id="create-agent-dialog-templates-field" className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1.5 block text-[13px] font-medium text-zinc-300">{t('templateProjectLabel')}</label>
+              <select
+                data-id="create-agent-dialog-project-template-select"
+                value={values.project_template}
+                onChange={(e) => set({ project_template: e.target.value })}
+                className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 outline-none transition-all focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/20"
+              >
+                <option value="">{t('templateNone')}</option>
+                {projectTemplates.map((slug) => (
+                  <option key={slug} value={slug}>{slug}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-[13px] font-medium text-zinc-300">{t('templateRoleLabel')}</label>
+              <select
+                data-id="create-agent-dialog-role-template-select"
+                value={values.role_template}
+                onChange={(e) => set({ role_template: e.target.value })}
+                className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 outline-none transition-all focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/20"
+              >
+                <option value="">{t('templateNone')}</option>
+                {roleTemplates.map((slug) => (
+                  <option key={slug} value={slug}>{slug}</option>
+                ))}
+              </select>
+            </div>
+            <p className="col-span-2 text-[11px] text-zinc-600">{t('templateHint')}</p>
+          </div>
+
           <div data-id="create-agent-dialog-allow-all-actions" className="flex items-center justify-between py-1">
             <div data-id="create-agent-dialog-allow-all-actions-copy">
               <p data-id="create-agent-dialog-allow-all-actions-title" className="text-[13px] font-medium text-zinc-300">{ts('allowAllActionsTitle')}</p>
@@ -175,20 +224,7 @@ export default function CreateAgentDialog({
             </button>
           </div>
 
-          <div data-id="create-agent-dialog-use-proxy" className="flex items-center justify-between py-1">
-            <div data-id="create-agent-dialog-use-proxy-copy">
-              <p data-id="create-agent-dialog-use-proxy-title" className="text-[13px] font-medium text-zinc-300">{ts('proxyToggleTitle')}</p>
-              <p data-id="create-agent-dialog-use-proxy-hint" className="mt-0.5 text-[11px] text-zinc-600">{ts('proxyToggleHint')}</p>
-            </div>
-            <button
-              data-id="create-agent-dialog-use-proxy-toggle"
-              type="button"
-              onClick={() => set({ use_proxy: !values.use_proxy })}
-              className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${values.use_proxy ? 'bg-blue-600' : 'bg-white/[0.08]'}`}
-            >
-              <div data-id="create-agent-dialog-use-proxy-toggle-thumb" className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-md transition-transform ${values.use_proxy ? 'translate-x-[22px]' : 'translate-x-1'}`} />
-            </button>
-          </div>
+          {/* use_proxy toggle hidden per product decision — defaults to false. */}
 
           <div data-id="create-agent-dialog-use-custom-gateway" className="flex items-center justify-between py-1">
             <div data-id="create-agent-dialog-use-custom-gateway-copy">
@@ -205,26 +241,9 @@ export default function CreateAgentDialog({
             </button>
           </div>
 
-          {(() => {
-            const masterFile = guidanceFilenameForAgentType(masterAgentType);
-            if (!masterFile) return null;
-            return (
-              <div data-id="create-agent-dialog-inherit-guidance" className="flex items-center justify-between py-1">
-                <div data-id="create-agent-dialog-inherit-guidance-copy">
-                  <p data-id="create-agent-dialog-inherit-guidance-title" className="text-[13px] font-medium text-zinc-300">{ts('inheritGuidanceTitle', { filename: masterFile })}</p>
-                  <p data-id="create-agent-dialog-inherit-guidance-hint" className="mt-0.5 text-[11px] text-zinc-600">{ts('inheritGuidanceHint', { filename: masterFile })}</p>
-                </div>
-                <button
-                  data-id="create-agent-dialog-inherit-guidance-toggle"
-                  type="button"
-                  onClick={() => set({ inherit_guidance: !values.inherit_guidance })}
-                  className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors ${values.inherit_guidance ? 'bg-blue-600' : 'bg-white/[0.08]'}`}
-                >
-                  <div data-id="create-agent-dialog-inherit-guidance-toggle-thumb" className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-md transition-transform ${values.inherit_guidance ? 'translate-x-[22px]' : 'translate-x-1'}`} />
-                </button>
-              </div>
-            );
-          })()}
+          {/* Inheritance retired: every agent is seeded with a self-contained
+              guidance file from the global template, so there is no master-rules
+              inheritance toggle. */}
         </div>
 
         <div data-id="create-agent-dialog-actions" className="flex justify-end gap-2 border-t border-white/[0.06] px-5 py-3">

@@ -15,6 +15,7 @@
   "status": {
     "todo": "待办",
     "doing": "进行中",
+    "test": "测试",
     "done": "已完成",
     "dropped": "已弃"
   },
@@ -27,12 +28,27 @@
   "moreTooltip": "更多",
   "deleteAction": "删除",
   "emptyTitle": "还没有待办",
-  "emptyHint": "在上方输入框打字，按 Enter 添加",
+  "emptyHint": "在下方输入框打字，按 Enter 添加",
   "timeJustNow": "刚刚",
   "timeMinutesAgo": "{{n}}m前",
   "timeHoursAgo": "{{n}}h前",
   "timeDaysAgo": "{{n}}天前",
   "timeDateMonth": "{{month}}月{{day}}日",
   "updateFailed": "更新失败",
-  "retry": "重试"
+  "retry": "重试",
+  "saving": "保存中",
+  "refreshTooltip": "刷新",
+  "promptTodo": "请处理以下待办任务，做完后用 cicy-todo test {{id}} 移到测试泳道（等待验收，不要自己标完成）：\n\n{{title}}",
+  "promptDoing": "请继续推进以下进行中的任务，做完后用 cicy-todo test {{id}} 移到测试泳道（等待验收，不要自己标完成）：\n\n{{title}}",
+  "promptBatch": "请一起处理下面这 {{count}} 个 todo（统筹安排、可并行或按依赖顺序，逐条用 cicy-todo 跟踪状态，每条做完后 cicy-todo test <id> 移到测试泳道等待验收，不要自己标完成）：\n\n{{list}}\n\n开始前先简单说一下你的处理顺序，然后逐条推进。",
+  "batchSelected": "已选 {{n}} 条",
+  "batchSend": "发送给 agent",
+  "batchSendTooltip": "把选中的 todo 一次性发给 agent 一起处理",
+  "batchClear": "取消选择",
+  "alignPrompt": "请对齐当前 todo 进度（数据在 `<workspace>/.cicy/todos.yaml`，通过 `cicy-todo` 操作）：\n\n1. 先用 `cicy-todo list --all` 拉到完整列表。\n2. 已完成的：`cicy-todo done <id>`\n3. 不再需要的：`cicy-todo drop <id>`\n4. 没完成的：结合当前情况判断，拆细或调整。\n\n做完简单汇报一行：完成 N 条 / 调整 N 条 / 新增 N 条。",
+  "assignTooltip": "指派给 worker（移交并发送）",
+  "assignHeader": "指派给",
+  "assignNoWorkers": "暂无可指派的 worker",
+  "viewListTooltip": "切换到列表视图",
+  "viewKanbanTooltip": "切换到泳池视图"
 }

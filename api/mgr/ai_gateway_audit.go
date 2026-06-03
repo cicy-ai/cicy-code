@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 type aiGatewayToolCall struct {
@@ -95,6 +97,7 @@ type aiGatewayCurrentSnapshot struct {
 
 type aiGatewayReplySnapshot struct {
 	TurnID                   string                   `json:"turn_id"`
+	ConversationID           string                   `json:"conversation_id,omitempty"` // self-describing: which conversation this reply belongs to (history view rebinds on change)
 	Status                   string                   `json:"status"`
 	StartedAt                string                   `json:"started_at"`
 	UpdatedAt                string                   `json:"updated_at"`
@@ -116,6 +119,7 @@ type aiGatewayReplySnapshot struct {
 	LastTotalTokens          int                      `json:"last_total_tokens,omitempty"`
 	LastCostCredit           float64                  `json:"last_cost_credit,omitempty"`
 	Models                   []string                 `json:"models"`
+	Model                    string                   `json:"model,omitempty"` // primary model, persisted in lite snapshot for round-trip
 	RequestCount             int                      `json:"request_count"`
 	StatusMap                aiGatewayStatusMap       `json:"status_map"`
 }
@@ -163,6 +167,9 @@ type aiGatewayAuditSession struct {
 	conversationID  string
 	question        string
 	startedAt       time.Time
+	// firstByteAt is stamped when the first upstream response byte arrives
+	// (≈ reply start / time-to-first-token for streaming). Zero until then.
+	firstByteAt     time.Time
 	replyEventIndex int
 	current         aiGatewayCurrentSnapshot
 	reply           aiGatewayReplySnapshot
@@ -178,6 +185,20 @@ type aiGatewayAuditSession struct {
 	// 当 stream_kind 或 tool 切换时，旧 pending 会被 flush 到 reply.Items 并立刻刷盘。
 	// 这让前端 / IM 推送能在每个 item 完成时实时看到新内容（而不是等整次 HTTP 完成）。
 	pendingItem *aiGatewayPendingItem
+	// pushedItems 记录已经通过 reply hooks（IM 推送等）发出去的 reply.Items 数量。
+	// 流式实时 flush（flushPendingItemLocked）每发一个 item 就把它推到这个水位；
+	// completeFromResponse 在 HTTP 结束时把"还没推过"的 items（例如非流式响应、
+	// SSE 解析失败而走 fallback 一次性补全的 items）补推一遍，确保 IM 一定收到回复。
+	pushedItems int
+	// comp* 是请求时算出的"缓存前缀指纹"，用于缓存命中诊断（见 agent_cache_diag.go）。
+	compSystemHash   string
+	compToolsHash    string
+	compFirstMsgHash string
+	compToolsCount   int
+	compMsgCount     int
+	compSystemEst    int
+	compToolsEst     int
+	compHistoryEst   int
 }
 
 // aiGatewayPendingItem 描述一个尚未 flush 到 reply.Items 的流中 item。
@@ -198,9 +219,10 @@ type aiGatewayAuditReadCloser struct {
 	statusCode int
 	headers    http.Header
 	buf        bytes.Buffer
-	ssePending string
-	isStream   bool
-	once       sync.Once
+	ssePending  string
+	isStream    bool
+	startMarked bool
+	once        sync.Once
 }
 
 type aiGatewayStreamAccumulator struct {
@@ -261,6 +283,13 @@ func aiGatewayMergeUsage(base map[string]interface{}, extra map[string]interface
 		out = map[string]interface{}{}
 	}
 	for key, raw := range extra {
+		// Preserve nested detail maps (e.g. input_tokens_details.cached_tokens
+		// for OpenAI Responses) — they carry the cache-hit count and would
+		// otherwise be dropped here, defeating aiGatewayNormalizeOpenAIUsage.
+		if m := aiGatewayMap(raw); m != nil {
+			out[key] = aiGatewayCloneAnyMap(m)
+			continue
+		}
 		if key == "total_tokens" || key == "totalTokens" {
 			if value := aiGatewayInt(raw); value > 0 {
 				out[key] = value
@@ -288,6 +317,13 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	prevReply := aiGatewayLoadReplySnapshot(agentID)
 	prevInputTokens, prevOutputTokens, prevTotalTokens := aiGatewayReplyTotals(prevReply)
 	prevCostCredit := aiGatewayReplyCostCredit(prevReply)
+	// Carry the previous turn's cache split too. We already carry input/output
+	// for display continuity during the (multi-second for large contexts)
+	// prefill window before message_start arrives; carrying cache keeps the
+	// hit-rate consistent instead of showing a misleading "huge input, 0% cache"
+	// until the real numbers stream in and overwrite these.
+	prevCacheRead := prevReply.CacheReadInputTokens
+	prevCacheCreate := prevReply.CacheCreationInputTokens
 	payloadValue := interface{}(M{})
 	var payloadMap map[string]interface{}
 	trimmedBody := bytes.TrimSpace(requestBody)
@@ -378,8 +414,21 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	if prevItems == nil {
 		prevItems = []map[string]interface{}{}
 	}
+	// Token/cost totals accumulate WITHIN a turn (the tool loop re-calls the API
+	// many times, each producing independent output). They must NOT bleed across
+	// turns, or output/cost grow without bound over the whole conversation (this
+	// is what made a single turn report ~562k output / $40+). Inherit them only
+	// for tool-continuation requests; a fresh user turn starts its counters at
+	// zero. Input/cache are still carried for display continuity during the
+	// prefill window — they're a single-request snapshot that message_start
+	// overwrites within seconds, so they can't accumulate.
+	inheritOutput, inheritTotal, inheritCost := 0, prevInputTokens, 0.0
+	if isContinuation {
+		inheritOutput, inheritTotal, inheritCost = prevOutputTokens, prevTotalTokens, prevCostCredit
+	}
 	reply := aiGatewayReplySnapshot{
 		TurnID:           turnID,
+		ConversationID:   conversationID,
 		Status:           "thinking",
 		StartedAt:        startedAtISO,
 		UpdatedAt:        startedAtISO,
@@ -390,9 +439,11 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		HTTPRequests:     []aiGatewayRequestSpan{requestSpan},
 		Usage:            map[string]interface{}{},
 		InputTokens:      prevInputTokens,
-		OutputTokens:     prevOutputTokens,
-		TotalTokens:      prevTotalTokens,
-		CostCredit:       prevCostCredit,
+		OutputTokens:     inheritOutput,
+		TotalTokens:      inheritTotal,
+		CostCredit:       inheritCost,
+		CacheReadInputTokens:     prevCacheRead,
+		CacheCreationInputTokens: prevCacheCreate,
 		LastUsage:        aiGatewayCloneAnyMap(prevReply.LastUsage),
 		LastInputTokens:  prevReply.LastInputTokens,
 		LastOutputTokens: prevReply.LastOutputTokens,
@@ -412,6 +463,12 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	}
 	// 识别辅助调用（SUGGESTION MODE / 标题生成等）：这种请求不应污染主 reply.json / current.json。
 	auxKind := aiGatewayAuxiliaryKind(question, payloadMap)
+	// 缓存前缀指纹（用于缓存命中诊断）：在请求时对 system / tools / 首消息做轻量 hash。
+	compMessages, _ := payloadMap["messages"].([]interface{})
+	var firstMsg interface{}
+	if len(compMessages) > 0 {
+		firstMsg = compMessages[0]
+	}
 	return &aiGatewayAuditSession{
 		agentID:        agentID,
 		provider:       provider,
@@ -423,10 +480,28 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		startedAt:      startedAt,
 		current:        current,
 		reply:          reply,
+		// 继承自上一次续传的 items 已经被上一个 session 推送过，本 session 只推本次 HTTP
+		// 新产生的 items（见 completeFromResponse 的 backstop）。
+		pushedItems:    len(prevItems),
 		replyHooks:     newReplyHooksForPane(agentID, isContinuation),
 		auxiliary:      auxKind != "",
 		auxKind:        auxKind,
+		compSystemHash:   hashJSON(payloadMap["system"]),
+		compToolsHash:    hashJSON(payloadMap["tools"]),
+		compFirstMsgHash: hashJSON(firstMsg),
+		compToolsCount:   aiGatewayLen(payloadMap["tools"]),
+		compMsgCount:     len(compMessages),
+		compSystemEst:    estJSONTokens(payloadMap["system"]),
+		compToolsEst:     estJSONTokens(payloadMap["tools"]),
+		compHistoryEst:   estJSONTokens(payloadMap["messages"]),
 	}
+}
+
+func aiGatewayLen(v interface{}) int {
+	if arr, ok := v.([]interface{}); ok {
+		return len(arr)
+	}
+	return 0
 }
 
 func newAIGatewayAuditReadCloser(inner io.ReadCloser, audit *aiGatewayAuditSession, statusCode int, headers http.Header, contentLength int64) *aiGatewayAuditReadCloser {
@@ -446,6 +521,10 @@ func newAIGatewayAuditReadCloser(inner io.ReadCloser, audit *aiGatewayAuditSessi
 func (r *aiGatewayAuditReadCloser) Read(p []byte) (int, error) {
 	n, err := r.inner.Read(p)
 	if n > 0 {
+		if !r.startMarked {
+			r.startMarked = true
+			r.audit.markResponseStarted()
+		}
 		_, _ = r.buf.Write(p[:n])
 		if r.isStream {
 			r.ssePending += string(p[:n])
@@ -501,6 +580,19 @@ func (r *aiGatewayAuditReadCloser) handleSSELine(line string) {
 		return
 	}
 	r.audit.emitReplyStreamPayload(payload)
+}
+
+// markResponseStarted stamps the first-byte time once (≈ reply start). Safe to
+// call repeatedly; only the first non-zero stamp sticks.
+func (s *aiGatewayAuditSession) markResponseStarted() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.firstByteAt.IsZero() {
+		s.firstByteAt = time.Now()
+	}
+	s.mu.Unlock()
 }
 
 func (s *aiGatewayAuditSession) recordOutboundRequest(req *http.Request) {
@@ -577,15 +669,33 @@ func (s *aiGatewayAuditSession) completeFromError(err error) {
 	s.completeFromResponse(502, http.Header{"Content-Type": []string{"application/json"}}, nil, err)
 }
 
-// aiGatewayMaybeGunzip returns the gzip-decompressed body when the upstream sent
-// Content-Encoding: gzip (or the body carries the gzip magic 1F 8B). Used so the
+// aiGatewayMaybeGunzip returns the decompressed body when the peer sent
+// Content-Encoding: gzip/zstd (detected by header OR magic bytes). Used so the
 // audit parser sees plaintext; the original bytes still reach the client. Falls
 // back to the input on any error so a bad/partial stream never loses the body.
+//
+// zstd matters for request bodies: codex (Rust/reqwest) zstd-compresses its
+// request to chatgpt.com/backend-api/codex/responses, so without this the audit
+// gate json.Unmarshal's compressed bytes, fails, and never opens a session
+// (no current.json/reply.json). gzip covers the Node-CLI / upstream case.
 func aiGatewayMaybeGunzip(headers http.Header, body []byte) []byte {
-	if len(body) < 2 {
+	if len(body) < 4 {
 		return body
 	}
 	enc := strings.ToLower(headers.Get("Content-Encoding"))
+	// zstd magic: 28 B5 2F FD
+	if strings.Contains(enc, "zstd") || (body[0] == 0x28 && body[1] == 0xb5 && body[2] == 0x2f && body[3] == 0xfd) {
+		dec, err := zstd.NewReader(nil)
+		if err != nil {
+			return body
+		}
+		defer dec.Close()
+		out, err := dec.DecodeAll(body, nil)
+		if err != nil || len(out) == 0 {
+			return body
+		}
+		return out
+	}
 	isGzip := strings.Contains(enc, "gzip") || (body[0] == 0x1f && body[1] == 0x8b)
 	if !isGzip {
 		return body
@@ -600,6 +710,110 @@ func aiGatewayMaybeGunzip(headers http.Header, body []byte) []byte {
 		return body
 	}
 	return out
+}
+
+// aiGatewayReplyItemsText flattens reply.Items content blocks of one kind
+// ("text" / "thinking") into a single string. Each item is a whole block in
+// Anthropic content-block shape ({type, text} / {type, thinking}), so the field
+// key equals the kind. Used to surface reply text when a provider (codex /
+// OpenAI Responses) only populated the structured items.
+//
+// `exclude` (trimmed text → true) drops blocks already shown elsewhere. codex
+// agentic turns emit intermediate assistant text that gets committed mid-turn
+// into current.json while reply.Items still holds that same block plus the
+// continuation; passing the committed assistant texts here prevents the live
+// tail from repeating a paragraph the committed list already renders.
+func aiGatewayReplyItemsText(items []map[string]interface{}, kind string, exclude map[string]bool) string {
+	parts := make([]string, 0, len(items))
+	for _, it := range items {
+		if aiGatewayString(it["type"]) != kind {
+			continue
+		}
+		v := strings.TrimSpace(aiGatewayString(it[kind]))
+		if v == "" {
+			continue
+		}
+		if exclude != nil && exclude[v] {
+			continue
+		}
+		parts = append(parts, v)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// aiGatewayDedupShadowToolCallItems collapses codex's tool-call double-record.
+// codex (Responses) reports ONE call as two output items: the real one keyed by
+// call id (call_…) with the true tool name, and a SHADOW keyed by item id
+// (fc_… / ctc_…) carrying the same input but an EMPTY name (function_call, e.g.
+// exec_command) or the literal "custom_tool_call" (custom tools like
+// apply_patch). The shadow is dropped when a sibling tool_use has the same input
+// AND a real name.
+//
+// Safety: only tool_use items whose name is empty or exactly "custom_tool_call"
+// are ever removed, and only when a real-named sibling with the same input
+// exists. Real tool names (apply_patch, exec_command, function names, …) are
+// never touched, so gateway / function_call / anthropic paths are no-ops (they
+// don't emit nameless shadows). Repeated real calls with identical input keep
+// all their real-named records — only the nameless shadows are dropped.
+func aiGatewayDedupShadowToolCallItems(items []map[string]interface{}) []map[string]interface{} {
+	isShadowName := func(name string) bool { return name == "" || name == "custom_tool_call" }
+	realInputs := map[string]bool{}
+	for _, it := range items {
+		if aiGatewayString(it["type"]) != "tool_use" {
+			continue
+		}
+		if isShadowName(strings.TrimSpace(aiGatewayString(it["name"]))) {
+			continue
+		}
+		if in := aiGatewayToolInputKey(it["input"]); in != "" {
+			realInputs[in] = true
+		}
+	}
+	if len(realInputs) == 0 {
+		return items
+	}
+	out := make([]map[string]interface{}, 0, len(items))
+	for _, it := range items {
+		if aiGatewayString(it["type"]) == "tool_use" && isShadowName(strings.TrimSpace(aiGatewayString(it["name"]))) {
+			if in := aiGatewayToolInputKey(it["input"]); in != "" && realInputs[in] {
+				continue // nameless/generic shadow of a real-named call → drop
+			}
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
+// aiGatewayToolInputKey produces a stable equality key for a tool_use input so
+// codex's real/shadow double-records can be matched. It must NOT use
+// aiGatewayFlattenPromptValue: that helper only pulls text/content/input/output/
+// thinking, so a real exec_command input ({"cmd": "...", "workdir": "...", …})
+// flattens to "" and the shadow is never matched (the bug it replaced). Canonical
+// JSON is exact and deterministic — Go sorts map keys when marshaling, and any
+// JSON-string argument is re-marshaled so a map and its stringified form collapse
+// to the same key.
+func aiGatewayToolInputKey(input interface{}) string {
+	switch v := input.(type) {
+	case nil:
+		return ""
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return ""
+		}
+		var parsed interface{}
+		if json.Unmarshal([]byte(trimmed), &parsed) == nil {
+			if b, err := json.Marshal(parsed); err == nil {
+				return string(b)
+			}
+		}
+		return trimmed
+	default:
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
+		return strings.TrimSpace(aiGatewayFlattenPromptValue(v))
+	}
 }
 
 func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers http.Header, responseBody []byte, responseErr error) {
@@ -699,7 +913,22 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 			})
 		}
 	}
-	s.reply.Usage = aiGatewayCloneAnyMap(parsed.Usage)
+	// Collapse the codex apply_patch double-record. One custom_tool_call carries
+	// BOTH an item id (ctc_…) and a call id (call_…): the input-stream events key
+	// it by item id with a generic "custom_tool_call" name, the output-item events
+	// key it by call id with the real name. When those land in different SSE flush
+	// batches the live path emits TWO tool_use items for one call. Drop the
+	// generic "custom_tool_call"-named copy when a sibling tool_use has the same
+	// input — "custom_tool_call" is the item *type*, never a real tool name, so
+	// gateway / function_call / anthropic items (apply_patch, exec_command, real
+	// function names, …) are never matched.
+	s.reply.Items = aiGatewayDedupShadowToolCallItems(s.reply.Items)
+	// Keep the provider's raw usage object verbatim for auditability (the UI's
+	// "raw usage" panel reads it). Don't let an empty parse wipe the usage we
+	// already captured live from message_start during streaming.
+	if len(parsed.Usage) > 0 {
+		s.reply.Usage = aiGatewayCloneAnyMap(parsed.Usage)
+	}
 	// input_tokens: use latest (each request includes full context, so don't accumulate)
 	// output_tokens: accumulate (each request produces independent output)
 	// cache tokens: use latest (same as input_tokens)
@@ -723,6 +952,63 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	}
 	s.reply.RequestCount = len(aiGatewayFilterPrimaryRequests(s.reply.HTTPRequests))
 	_ = s.writeReplyEventLocked("request_complete", aiGatewayCloneJSONValue(requestSpan))
+
+	// Per-request usage log (backs the 分析 → 用量 UI tab). Skip auxiliary calls
+	// (suggestion / title) so the table maps 1:1 to real conversation requests.
+	if !s.auxiliary {
+		totalTokens := requestSpan.TotalTokens
+		if totalTokens == 0 {
+			totalTokens = requestSpan.InputTokens + requestSpan.OutputTokens
+		}
+		usageStatus := "completed"
+		if failed {
+			usageStatus = "failed"
+		}
+		// reply 开始 = 首字节时刻；非流式/未打点时回退到总耗时。
+		replyStartMS := latencyMS
+		if !s.firstByteAt.IsZero() {
+			replyStartMS = int(s.firstByteAt.Sub(s.startedAt).Milliseconds())
+		}
+		aiGatewayAppendUsageLog(s.agentID, agentUsageLogRecord{
+			TS:                       updatedAt,
+			ConversationID:           s.conversationID,
+			TurnID:                   s.turnID,
+			RequestID:                s.requestID,
+			Provider:                 s.provider,
+			Model:                    s.model,
+			Status:                   usageStatus,
+			StatusCode:               statusCode,
+			ReplyStartMS:             replyStartMS,
+			LatencyMS:                latencyMS,
+			InputTokens:              requestSpan.InputTokens,
+			OutputTokens:             requestSpan.OutputTokens,
+			CacheReadInputTokens:     cacheRead,
+			CacheCreationInputTokens: cacheCreate,
+			TotalTokens:              totalTokens,
+			CostCredit:               requestSpan.CostCredit,
+		})
+		// Cache-diagnosis fingerprint: request-time prefix hashes + this
+		// request's actual cache outcome (see agent_cache_diag.go).
+		hitRate := 0.0
+		if requestSpan.InputTokens > 0 {
+			hitRate = float64(cacheRead) / float64(requestSpan.InputTokens)
+		}
+		aiGatewayAppendComposition(s.agentID, agentCompositionRecord{
+			TS:                   updatedAt,
+			RequestID:            s.requestID,
+			SystemHash:           s.compSystemHash,
+			ToolsHash:            s.compToolsHash,
+			FirstMsgHash:         s.compFirstMsgHash,
+			ToolsCount:           s.compToolsCount,
+			MsgCount:             s.compMsgCount,
+			SystemEst:            s.compSystemEst,
+			ToolsEst:             s.compToolsEst,
+			HistoryEst:           s.compHistoryEst,
+			InputTokens:          requestSpan.InputTokens,
+			CacheReadInputTokens: cacheRead,
+			HitRate:              hitRate,
+		})
+	}
 
 	if failed {
 		errorText := aiGatewayExtractErrorText(responseBody, responseErr)
@@ -751,6 +1037,23 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	}
 	replySnapshot := s.reply
 	replyHooks := s.replyHooks
+	// 补推 backstop：流式实时 flush 走 flushPendingItemLocked → onItems，但非流式
+	// 响应（或 SSE 解析失败而走 fallback 一次性补全 items 的 turn）不经过那条路径，
+	// 这些 items 从没推给 reply hooks。这里把 pushedItems 水位之后的 items 补推一遍，
+	// 保证 IM（TG / WeChat）一定能收到 agent 回复。clone 出来在解锁后再发，避免持锁做网络 I/O。
+	var pendingHookItems []map[string]interface{}
+	if !s.auxiliary && len(replyHooks) > 0 {
+		if s.pushedItems < 0 {
+			s.pushedItems = 0
+		}
+		if s.pushedItems > len(s.reply.Items) {
+			s.pushedItems = len(s.reply.Items)
+		}
+		for _, it := range s.reply.Items[s.pushedItems:] {
+			pendingHookItems = append(pendingHookItems, aiGatewayCloneAnyMap(it))
+		}
+		s.pushedItems = len(s.reply.Items)
+	}
 	statusEvent := s.broadcastStatusLocked()
 	currentUpdatedData := M{
 		"agent_id":        s.agentID,
@@ -772,6 +1075,13 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	}
 	hub.publishAgent(s.agentID, currentUpdatedEvent)
 	notifyWorkerReplyFinished(s.agentID, replySnapshot.Status)
+	// 先补推没推过的 items（见上面 backstop 注释），再 finalize 收尾。
+	if len(pendingHookItems) > 0 {
+		log.Printf("[im] reply backstop push agent=%s items=%d (live flush missed)", s.agentID, len(pendingHookItems))
+		for _, h := range replyHooks {
+			h.onItems(pendingHookItems)
+		}
+	}
 	for _, h := range replyHooks {
 		h.finalize(replySnapshot)
 	}
@@ -798,7 +1108,7 @@ func aiGatewayHistoryDir(agentID string) string {
 		if err := os.MkdirAll(newDir, 0755); err != nil {
 			break
 		}
-		for _, name := range []string{"current.json", "system_prompt.txt", "prompt_rules.json"} {
+		for _, name := range []string{"current.json", "system_prompt.txt"} {
 			oldPath := filepath.Join(oldDir, name)
 			newPath := filepath.Join(newDir, name)
 			if _, err := os.Stat(oldPath); err != nil {
@@ -849,10 +1159,12 @@ func aiGatewayWriteCurrentSnapshot(agentID string, current aiGatewayCurrentSnaps
 // Contains native content blocks format (like body.messages in current.json)
 type aiGatewayReplySnapshotLite struct {
 	TurnID                   string                   `json:"turn_id"`
+	ConversationID           string                   `json:"conversation_id,omitempty"`
 	Status                   string                   `json:"status"`
 	StartedAt                string                   `json:"started_at"`
 	UpdatedAt                string                   `json:"updated_at"`
 	Items                    []map[string]interface{} `json:"items"`
+	Model                    string                   `json:"model,omitempty"`
 	InputTokens              int                      `json:"input_tokens"`
 	OutputTokens             int                      `json:"output_tokens"`
 	CacheCreationInputTokens int                      `json:"cache_creation_input_tokens"`
@@ -865,10 +1177,12 @@ func aiGatewayWriteReplySnapshot(agentID string, reply aiGatewayReplySnapshot) e
 	aiGatewayStoreLiveReplySnapshot(agentID, reply)
 	lite := aiGatewayReplySnapshotLite{
 		TurnID:                   reply.TurnID,
+		ConversationID:           reply.ConversationID,
 		Status:                   reply.Status,
 		StartedAt:                reply.StartedAt,
 		UpdatedAt:                reply.UpdatedAt,
 		Items:                    reply.Items,
+		Model:                    aiGatewayReplyPrimaryModel(reply),
 		InputTokens:              reply.InputTokens,
 		OutputTokens:             reply.OutputTokens,
 		CacheCreationInputTokens: reply.CacheCreationInputTokens,
@@ -2128,6 +2442,10 @@ func aiGatewayReplyPrimaryModel(reply aiGatewayReplySnapshot) string {
 			return strings.TrimSpace(req.Model)
 		}
 	}
+	// Persisted in lite snapshot for round-trip (no Models/HTTPRequests on disk)
+	if strings.TrimSpace(reply.Model) != "" {
+		return strings.TrimSpace(reply.Model)
+	}
 	return ""
 }
 
@@ -2497,7 +2815,17 @@ func (s *aiGatewayAuditSession) emitReplyStreamPayload(payload map[string]interf
 	for _, event := range events {
 		_ = s.writeReplyEventLocked(event.Kind, event.Payload)
 	}
+	// Real-time cache/input usage (from message_start) → reply.json immediately.
+	usageUpdated := s.applyStreamUsageLocked(payload)
 	statusEvent := s.applyStreamEventsLocked(events)
+	// applyStreamEventsLocked only flushes reply.json on a CONTENT change; if the
+	// only thing that changed this chunk was usage (e.g. the message_start event),
+	// flush here so the cache numbers land in reply.json without waiting.
+	if usageUpdated && !s.auxiliary {
+		if err := aiGatewayWriteReplySnapshot(s.agentID, s.reply); err != nil {
+			log.Printf("[ai-gateway] live usage reply snapshot failed for %s: %v", s.agentID, err)
+		}
+	}
 	chatEvents := s.streamChatEvents(events)
 	replyHooks := s.replyHooks
 	s.mu.Unlock()
@@ -2578,6 +2906,8 @@ func (s *aiGatewayAuditSession) flushPendingItemLocked() {
 				h.onItems(items)
 			}
 		}
+		// 标记：到此为止的 items 都已通过 hooks 推送过，避免 completeFromResponse 补推时重复。
+		s.pushedItems = len(s.reply.Items)
 	}
 }
 
@@ -2603,6 +2933,53 @@ func (s *aiGatewayAuditSession) switchPendingItemLocked(kind, toolID, toolName s
 		s.flushPendingItemLocked()
 	}
 	s.pendingItem = &aiGatewayPendingItem{Kind: kind, ToolID: toolID, ToolName: toolName}
+}
+
+// aiGatewayStreamUsageMap pulls the usage object out of a streaming SSE payload.
+// Anthropic puts it on message_start as message.usage (input + cache tokens are
+// known up-front) and on message_delta as usage (output tokens). OpenAI-style
+// streams carry a top-level usage on the final chunk.
+func aiGatewayStreamUsageMap(payload map[string]interface{}) map[string]interface{} {
+	if msg, ok := payload["message"].(map[string]interface{}); ok {
+		if u, ok := msg["usage"].(map[string]interface{}); ok {
+			return u
+		}
+	}
+	if u, ok := payload["usage"].(map[string]interface{}); ok {
+		return u
+	}
+	return nil
+}
+
+// applyStreamUsageLocked records input + cache tokens from a streaming usage
+// payload onto s.reply IN REAL TIME, so reply.json (and anything that reads it,
+// like the usage-analysis report) reflects cache hits the moment message_start
+// arrives — instead of only at turn completion. Output tokens are intentionally
+// left to completeFromResponse (it accumulates them) to avoid double counting.
+// Returns true if anything changed. Caller must hold s.mu.
+func (s *aiGatewayAuditSession) applyStreamUsageLocked(payload map[string]interface{}) bool {
+	u := aiGatewayStreamUsageMap(payload)
+	if u == nil {
+		return false
+	}
+	inTok, _, _ := aiGatewayUsageTotals(u)
+	cacheCreate, cacheRead := aiGatewayCacheTokens(u)
+	changed := false
+	if inTok > 0 && inTok != s.reply.InputTokens {
+		s.reply.InputTokens = inTok
+		changed = true
+	}
+	if (cacheCreate > 0 || cacheRead > 0) && (cacheCreate != s.reply.CacheCreationInputTokens || cacheRead != s.reply.CacheReadInputTokens) {
+		s.reply.CacheCreationInputTokens = cacheCreate
+		s.reply.CacheReadInputTokens = cacheRead
+		changed = true
+	}
+	if changed {
+		s.reply.TotalTokens = s.reply.InputTokens + s.reply.OutputTokens
+		s.reply.Usage = aiGatewayCloneAnyMap(u)
+		s.reply.LastUsage = aiGatewayCloneAnyMap(u)
+	}
+	return changed
 }
 
 func (s *aiGatewayAuditSession) applyStreamEventsLocked(events []aiGatewayReplyEvent) *ChatEvent {
@@ -2925,7 +3302,14 @@ func aiGatewayCloneHeader(header http.Header) map[string][]string {
 
 func aiGatewayParseResponse(headers http.Header, body []byte) aiGatewayParsedResponse {
 	contentType := strings.ToLower(strings.TrimSpace(headers.Get("Content-Type")))
-	if strings.Contains(contentType, "text/event-stream") || bytes.HasPrefix(bytes.TrimSpace(body), []byte("data:")) {
+	trimmed := bytes.TrimSpace(body)
+	// SSE detection: codex's ChatGPT-backend stream begins with an "event:" line
+	// (not "data:") and the Content-Type may be absent through MITM, so match
+	// either prefix in addition to the content type. Without this the whole SSE
+	// is json.Unmarshal'd as one blob, fails, and usage/answer are lost.
+	if strings.Contains(contentType, "text/event-stream") ||
+		bytes.HasPrefix(trimmed, []byte("data:")) ||
+		bytes.HasPrefix(trimmed, []byte("event:")) {
 		return aiGatewayParseStreamResponse(body)
 	}
 	var payload map[string]interface{}
@@ -2940,6 +3324,7 @@ func aiGatewayParseResponse(headers http.Header, body []byte) aiGatewayParsedRes
 	if len(parsed.Usage) == 0 {
 		parsed.Usage = aiGatewayCloneAnyMap(aiGatewayMap(payload["usage"]))
 	}
+	parsed.Usage = aiGatewayNormalizeOpenAIUsage(parsed.Usage)
 	return parsed
 }
 
@@ -2985,8 +3370,47 @@ func aiGatewayParseStreamResponse(body []byte) aiGatewayParsedResponse {
 		Thinking:  strings.Join(acc.thinkingParts, ""),
 		Answer:    strings.Join(acc.answerParts, ""),
 		ToolCalls: acc.toolCallsInOrder(),
-		Usage:     aiGatewayCloneAnyMap(acc.usage),
+		Usage:     aiGatewayNormalizeOpenAIUsage(aiGatewayCloneAnyMap(acc.usage)),
 	}
+}
+
+// aiGatewayNormalizeOpenAIUsage flattens OpenAI-style cached-token reporting into
+// the canonical Anthropic-shaped fields the rest of the pipeline (cache stats,
+// hit-rate, display) understands. OpenAI Responses puts the cache hit at
+// usage.input_tokens_details.cached_tokens (Chat: prompt_tokens_details), and
+// its input_tokens already INCLUDES those cached tokens. Anthropic instead
+// reports input_tokens = uncached-only + a separate cache_read_input_tokens. So
+// we lift cached → cache_read_input_tokens and subtract it from input_tokens,
+// making input_tokens uncached-only like Anthropic. No-op for Anthropic usage.
+func aiGatewayNormalizeOpenAIUsage(usage map[string]interface{}) map[string]interface{} {
+	if len(usage) == 0 {
+		return usage
+	}
+	cached := 0
+	if d := aiGatewayMap(usage["input_tokens_details"]); d != nil {
+		cached = aiGatewayInt(d["cached_tokens"])
+	}
+	if cached == 0 {
+		if d := aiGatewayMap(usage["prompt_tokens_details"]); d != nil {
+			cached = aiGatewayInt(d["cached_tokens"])
+		}
+	}
+	if cached <= 0 {
+		return usage
+	}
+	// Don't double-apply if a canonical cache field is already present.
+	if aiGatewayInt(usage["cache_read_input_tokens"]) > 0 {
+		return usage
+	}
+	usage["cache_read_input_tokens"] = cached
+	in := aiGatewayInt(usage["input_tokens"])
+	if in == 0 {
+		in = aiGatewayInt(usage["prompt_tokens"])
+	}
+	if in > cached {
+		usage["input_tokens"] = in - cached
+	}
+	return usage
 }
 
 func (a *aiGatewayStreamAccumulator) handleResponsesEvent(payload map[string]interface{}) bool {
@@ -3498,7 +3922,14 @@ func aiGatewayIsToolContinuation(body map[string]interface{}) bool {
 			return false
 		}
 		switch strings.ToLower(strings.TrimSpace(aiGatewayString(last["type"]))) {
-		case "function_call_output", "tool_result", "tool_use_result", "computer_call_output", "shell_call_output", "apply_patch_call_output":
+		case "function_call_output", "tool_result", "tool_use_result", "computer_call_output",
+			"shell_call_output", "local_shell_call_output", "apply_patch_call_output",
+			// codex emits apply_patch (and other built-in tools) as a
+			// `custom_tool_call`; its result is `custom_tool_call_output`. Without
+			// this case the continuation request after an apply_patch is misread as
+			// a NEW turn, wiping the accumulated reply.Items mid-turn (the items
+			// then re-accumulate only from that point → lost/“reordered” history).
+			"custom_tool_call_output":
 			return true
 		}
 		return false
@@ -3526,6 +3957,13 @@ func aiGatewayAuxiliaryKind(question string, body map[string]interface{}) string
 	}
 	if body == nil {
 		return ""
+	}
+	// Claude Code's quota / availability health-check: the CLI fires a 1-token
+	// ping (the literal "quota" prompt) to probe Claude Max quota. max_tokens==1
+	// is never a real conversation turn — without this gate the probe lands in
+	// current/reply.json and renders as a stray "quota" turn in history.
+	if _, ok := body["max_tokens"]; ok && aiGatewayInt(body["max_tokens"]) == 1 {
+		return "probe"
 	}
 	if meta := aiGatewayMap(body["metadata"]); len(meta) > 0 {
 		for _, key := range []string{"purpose", "kind", "category"} {
@@ -3768,31 +4206,15 @@ func aiGatewayEstimateCostCredit(model string, usage map[string]interface{}) flo
 	if strings.TrimSpace(model) == "" || len(usage) == 0 {
 		return 0
 	}
-	pricing := map[string][2]float64{
-		"gpt-5.4":           {5.0, 15.0},
-		"gpt-5":             {5.0, 15.0},
-		"gpt-4.1":           {2.0, 8.0},
-		"claude-sonnet-4-6": {3.0, 15.0},
-		"claude-haiku-4-5":  {0.8, 4.0},
-		"claude-opus-4-6":   {15.0, 75.0},
-	}
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	var matched *[2]float64
-	for key, value := range pricing {
-		if strings.Contains(normalized, key) {
-			v := value
-			matched = &v
-			break
-		}
-	}
-	if matched == nil {
-		return 0
-	}
-	inputTokens := float64(aiGatewayInputTokenValue(usage))
-	outputTokens := float64(aiGatewayOutputTokenValue(usage))
-	inputCost := (inputTokens / 1_000_000.0) * matched[0]
-	outputCost := (outputTokens / 1_000_000.0) * matched[1]
-	return float64(int((inputCost+outputCost)*1_000_000+0.5)) / 1_000_000
+	// Price each input bucket at its own tier (cache reads are ~10× cheaper than
+	// fresh input). `input_tokens` (raw key) is the FRESH count in Anthropic
+	// usage, with cache read/write reported separately — see estimateModelCostTokens.
+	fresh := aiGatewayTokenValue(usage, "input_tokens", "prompt_tokens", "inputTokens")
+	cacheRead := aiGatewayTokenValue(usage, "cache_read_input_tokens", "cacheReadInputTokens")
+	cacheWrite := aiGatewayTokenValue(usage, "cache_creation_input_tokens", "cacheCreationInputTokens")
+	output := aiGatewayOutputTokenValue(usage)
+	cost, _ := estimateModelCostTokens(model, fresh, cacheRead, cacheWrite, output)
+	return cost
 }
 
 func aiGatewayLoadReplySnapshot(agentID string) aiGatewayReplySnapshot {

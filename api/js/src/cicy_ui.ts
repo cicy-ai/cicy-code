@@ -131,9 +131,8 @@ html {
   overflow: hidden !important;
 }
 body {
-  margin: 8px !important;
-  padding-top: 0 !important;
-  padding-left: 8px !important;
+  margin: 0 !important;
+  padding: 8px !important;
 }
 .terminal {
   font-size: 13px !important;
@@ -145,6 +144,11 @@ body {
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
 ::-webkit-scrollbar-corner { background: transparent; }
+/* Slim down xterm's (VS Code-style) vertical scrollbar — the default slider is
+   too wide. Scope to .vertical so the horizontal scrollbar's thumb length is
+   untouched; !important overrides the inline width xterm sets via JS. */
+.xterm .xterm-scrollable-element > .scrollbar.vertical,
+.xterm .xterm-scrollable-element > .scrollbar.vertical > .slider { width: 5px !important; }
 .xterm-overlay { display: none !important; }
 .xterm-reconnect-overlay div:not(.xterm-reconnect-spinner) { display: none !important; }
 .xterm-reconnect-overlay button { display: block !important; }
@@ -828,83 +832,6 @@ body.cp-prompt-open { padding-bottom: 74px !important; }
   box-shadow: 0 0 40px rgba(99,102,241,0.2);
 }
 #vm-overlay.processing #vm-icon { color: rgba(129,140,248,0.8); animation: vm-spin 1.5s linear infinite; }
-#cp-paste-confirm-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 10003;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  padding: 24px;
-  background: rgba(0,0,0,0.55);
-  box-sizing: border-box;
-}
-#cp-paste-confirm-modal {
-  width: min(760px, 100%);
-  margin-left: 0;
-  max-height: min(80vh, 720px);
-  border-radius: 14px;
-  background: #111214;
-  border: 1px solid rgba(255,255,255,0.08);
-  box-shadow: 0 24px 80px rgba(0,0,0,0.45);
-  padding: 18px;
-  color: #f5f5f5;
-  font-family: var(--cp-mono-font);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-#cp-paste-confirm-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-}
-#cp-paste-confirm-desc {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: rgba(255,255,255,0.72);
-}
-#cp-paste-confirm-body {
-  min-height: 160px;
-  max-height: min(52vh, 520px);
-  overflow: auto;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.06);
-  color: #8bd5ff;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  width: 100%;
-  resize: vertical;
-  box-sizing: border-box;
-  font-family: var(--cp-mono-font);
-}
-#cp-paste-confirm-actions {
-  display: flex;
-  justify-content: flex-start;
-  gap: 10px;
-}
-.cp-paste-confirm-btn {
-  appearance: none;
-  border: none;
-  border-radius: 10px;
-  padding: 9px 14px;
-  font-size: 13px;
-  cursor: pointer;
-  font-family: var(--cp-mono-font);
-}
-#cp-paste-confirm-cancel {
-  background: rgba(255,255,255,0.08);
-  color: rgba(255,255,255,0.86);
-}
-#cp-paste-confirm-send {
-  background: #2f6df6;
-  color: #fff;
-}
 #cp-file-paste-overlay {
   position: fixed;
   inset: 0;
@@ -1682,6 +1609,13 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var tempDraft = "";
     var enterToSend = storage.get("cicy_enter_to_send", true) as boolean;
 
+    // Send target follows the ACTIVE tmux window, not the bound main pane. The
+    // ttyd view already follows the active window (select-window), but sends
+    // were hardcoded to "<session>:main.0" — so after switching windows, typed
+    // or pasted input landed in window 0 instead of the one on screen. Updated
+    // by renderWindowTabs whenever the active window changes.
+    var currentSendTarget = paneId;
+
     function writeClientTrace(eventName: string, meta?: any): void {
         var entry: any = {
             event: eventName,
@@ -1733,7 +1667,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         return ok;
     }
 
-    function sendHTTP(command: string): Promise<any> {
+    function sendHTTP(command: string, submit?: boolean): Promise<any> {
         if (!webtty.isConnectionOpen()) {
             writeClientTrace("cp-send-http-skipped-closed", {
                 command_len: command.length,
@@ -1748,12 +1682,12 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             command_len: command.length,
             command_preview: clipTracePreview(command, 160),
             has_fetch: typeof fetchImpl === "function",
+            submit: submit !== false,
         });
+        var body: any = { pane_id: currentSendTarget, text: command };
+        if (submit === false) { body.submit = false; }
         if (typeof fetchImpl !== "function") {
-            return webtty.requestAPI("POST", "/api/tmux/send", {
-                pane_id: paneId,
-                text: command
-            }, apiHeaders).then(function(payload: any): any {
+            return webtty.requestAPI("POST", "/api/tmux/send", body, apiHeaders).then(function(payload: any): any {
                 writeClientTrace("cp-send-http-response", {
                     mode: "webtty-request-api",
                     success: payload && payload.success,
@@ -1766,10 +1700,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         return fetchImpl("/api/tmux/send", {
             method: "POST",
             headers: apiHeaders,
-            body: JSON.stringify({
-                pane_id: paneId,
-                text: command
-            })
+            body: JSON.stringify(body)
         }).then(function(response: any): Promise<any> {
             if (!response || !response.ok) {
                 var status = response ? response.status : 0;
@@ -1832,7 +1763,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         writeClientTrace("cp-send-key-request", { key: key, has_fetch: typeof fetchImpl === "function" });
         if (typeof fetchImpl !== "function") {
             return webtty.requestAPI("POST", "/api/tmux/send-keys", {
-                win_id: paneId,
+                win_id: currentSendTarget,
                 keys: key
             }, apiHeaders);
         }
@@ -1840,7 +1771,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             method: "POST",
             headers: apiHeaders,
             body: JSON.stringify({
-                win_id: paneId,
+                win_id: currentSendTarget,
                 keys: key
             })
         }).then(function(response: any): Promise<any> {
@@ -1985,6 +1916,10 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             pendingExists = false;
         }
         var activeIndex = pendingExists ? optimisticActiveIndex : serverActiveIndex;
+        // Route sends to the active window's pane (e.g. "w-10001:1"); window 0
+        // (main) keeps the original "<session>:main.0" target unchanged.
+        var session = String(paneId).split(":")[0];
+        currentSendTarget = (!activeIndex || activeIndex === "0") ? paneId : (session + ":" + activeIndex);
         winTabs.innerHTML = windows.map(function(win: any): string {
             var close = win.index === "0" ? "" : '<span class="cp-wdel" data-idx="' + win.index + '" data-tooltip="' + ttydT("closeCliWindow") + '">✕</span>';
             var active = String(win.index) === activeIndex ? " active" : "";
@@ -2715,98 +2650,21 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         sendBtn.focus();
     }
 
-    function openPasteConfirmDialog(titleText: string, descriptionText: string, bodyValue: string, onSend: (bodyValue: string) => void): void {
-        var existing = document.getElementById("cp-paste-confirm-overlay");
-        if (existing && existing.parentNode) {
-            existing.parentNode.removeChild(existing);
-        }
-        var overlay = document.createElement("div");
-        overlay.id = "cp-paste-confirm-overlay";
-        var modal = document.createElement("div");
-        modal.id = "cp-paste-confirm-modal";
-        var title = document.createElement("h3");
-        title.id = "cp-paste-confirm-title";
-        title.textContent = titleText;
-        var desc = document.createElement("p");
-        desc.id = "cp-paste-confirm-desc";
-        desc.textContent = descriptionText;
-        var body = document.createElement("textarea");
-        body.id = "cp-paste-confirm-body";
-        body.value = bodyValue || "";
-        var actions = document.createElement("div");
-        actions.id = "cp-paste-confirm-actions";
-        var cancelBtn = document.createElement("button");
-        cancelBtn.id = "cp-paste-confirm-cancel";
-        cancelBtn.className = "cp-paste-confirm-btn";
-        cancelBtn.textContent = ttydT("cancel");
-        var sendBtnEl = document.createElement("button");
-        sendBtnEl.id = "cp-paste-confirm-send";
-        sendBtnEl.className = "cp-paste-confirm-btn";
-        sendBtnEl.textContent = ttydT("send");
-        actions.appendChild(cancelBtn);
-        actions.appendChild(sendBtnEl);
-        modal.appendChild(title);
-        modal.appendChild(desc);
-        modal.appendChild(body);
-        modal.appendChild(actions);
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
-
-        function close(): void {
-            document.removeEventListener("keydown", onKeyDown, true);
-            if (overlay.parentNode) {
-                overlay.parentNode.removeChild(overlay);
-            }
-        }
-        function onKeyDown(event: KeyboardEvent): void {
-            if (event.key === "Escape") {
-                event.preventDefault();
-                close();
-            }
-        }
-        overlay.addEventListener("click", function(event: MouseEvent): void {
-            if (event.target === overlay) {
-                close();
-            }
-        });
-        cancelBtn.addEventListener("click", function(): void {
-            close();
-        });
-        sendBtnEl.addEventListener("click", function(): void {
-            var nextValue = body.value || "";
-            close();
-            onSend(nextValue);
-        });
-        document.addEventListener("keydown", onKeyDown, true);
-        body.focus();
-        try {
-            body.setSelectionRange(body.value.length, body.value.length);
-        } catch (_error) {
-        }
-    }
-
     function sendPastedText(command: string): void {
-        if (!command) {
+        // Product decision: pasted text that would otherwise pop a confirm
+        // modal (multi-line or >100 chars) is submitted directly via HTTP — no
+        // dialog. (File/image paste still uses its own preview dialog.)
+        var finalCommand = normalizePromptPunctuation(command || "");
+        if (!finalCommand) {
             return;
         }
-        openPasteConfirmDialog(
-            ttydT("sendPastedText"),
-            ttydT("pastedTextDetected"),
-            command,
-            function(bodyValue: string): void {
-                var finalCommand = normalizePromptPunctuation(bodyValue || "");
-                if (!finalCommand) {
-                    return;
-                }
-                writeClientTrace("cp-paste-http", {
-                    command_len: finalCommand.length,
-                    command_preview: clipTracePreview(finalCommand, 160),
-                });
-                sendHTTP(finalCommand).catch(function(): void {
-                    flashButton(restartBtn);
-                });
-            }
-        );
+        writeClientTrace("cp-paste-http", {
+            command_len: finalCommand.length,
+            command_preview: clipTracePreview(finalCommand, 160),
+        });
+        sendHTTP(finalCommand, false).catch(function(): void {
+            flashButton(sendBtn);
+        });
     }
 
     function sendPastedFiles(files: File[]): void {

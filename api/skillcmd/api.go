@@ -35,10 +35,10 @@ type InstallResult struct {
 	LogText      string         `json:"log_text"`
 }
 
-// PublicInstall downloads + extracts + symlinks + agent-syncs + records
+// InstallSkill downloads + extracts + symlinks + agent-syncs + records
 // installed.json. Logs each step to `sink`. Returns the recorded
 // InstalledSkill on success.
-func PublicInstall(spec string, sink io.Writer) (*InstallResult, error) {
+func InstallSkill(spec string, sink io.Writer) (*InstallResult, error) {
 	if sink == nil {
 		sink = io.Discard
 	}
@@ -159,8 +159,8 @@ func PublicInstall(spec string, sink io.Writer) (*InstallResult, error) {
 	}, nil
 }
 
-// PublicRemove uninstalls a skill, returning the removed entry.
-func PublicRemove(name string, sink io.Writer) (*InstalledSkill, error) {
+// RemoveSkill uninstalls a skill, returning the removed entry.
+func RemoveSkill(name string, sink io.Writer) (*InstalledSkill, error) {
 	if sink == nil {
 		sink = io.Discard
 	}
@@ -200,7 +200,7 @@ func PublicRemove(name string, sink io.Writer) (*InstalledSkill, error) {
 // Files stay in place under ~/cicy-ai/skills/<name>/; only the installed.json
 // entry's source is rewritten to {type:"local", path:<dir>}. Future
 // `skill update` will skip it (matches the existing local-source rule in
-// PublicUpdate), and the user can freely edit the directory as a hand-managed
+// UpdateSkill), and the user can freely edit the directory as a hand-managed
 // override of the registry version. Refuses if not installed or already
 // source.type="local".
 func PublicEject(name string, sink io.Writer) (*InstalledSkill, error) {
@@ -234,7 +234,7 @@ func PublicEject(name string, sink io.Writer) (*InstalledSkill, error) {
 	return entry, nil
 }
 
-// PublicUpdate updates a skill to the latest registry version. Returns
+// UpdateSkill updates a skill to the latest registry version. Returns
 // the From/To version pair, whether an update happened, and the new
 // install record (nil if no update was performed).
 type UpdateResult struct {
@@ -245,7 +245,7 @@ type UpdateResult struct {
 	Installed InstalledSkill `json:"installed,omitempty"`
 }
 
-func PublicUpdate(name string, sink io.Writer) (*UpdateResult, error) {
+func UpdateSkill(name string, sink io.Writer) (*UpdateResult, error) {
 	if sink == nil {
 		sink = io.Discard
 	}
@@ -276,7 +276,7 @@ func PublicUpdate(name string, sink io.Writer) (*UpdateResult, error) {
 	}
 
 	fmt.Fprintf(sink, "→ updating %s: %s → %s\n", name, entry.Version, latest)
-	res, err := PublicInstall(name, sink)
+	res, err := InstallSkill(name, sink)
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +286,7 @@ func PublicUpdate(name string, sink io.Writer) (*UpdateResult, error) {
 	}, nil
 }
 
-// PublicInstalled returns the current installed.json contents.
-func PublicInstalled() (*InstalledConfig, error) {
+// InstalledSkills returns the current installed.json contents.
+func InstalledSkills() (*InstalledConfig, error) {
 	return loadInstalled()
 }

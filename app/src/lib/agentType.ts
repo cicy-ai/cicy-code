@@ -87,18 +87,20 @@ export function getAgentTypeIconMeta(agentType?: string): AgentTypeIconMeta | nu
 }
 
 // Mirrors guidanceFilenameForAgentType in api/mgr/tmux.go. Returns the per-agent
-// project-rules filename, or null when the agent has none. Keep the two
-// switch tables in sync.
-export function guidanceFilenameForAgentType(agentType?: string): 'CLAUDE.md' | 'AGENTS.md' | null {
+// guidance file path (relative to the workspace), or null when the agent has
+// none. kiro reads .kiro/steering/*.md, not CLAUDE.md. Keep the two switch
+// tables in sync.
+export function guidanceFilenameForAgentType(agentType?: string): string | null {
   switch (normalizeAgentType(agentType)) {
     case 'claude':
     case 'cicy-claude':
-    case 'kiro-cli':
       return 'CLAUDE.md'
     case 'codex':
     case 'opencode':
     case 'cursor':
       return 'AGENTS.md'
+    case 'kiro-cli':
+      return '.kiro/steering/memory.md'
     default:
       return null
   }
