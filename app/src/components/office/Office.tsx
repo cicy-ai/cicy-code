@@ -3,7 +3,7 @@ import {
   Building2, Send, Megaphone, AtSign, X, Loader2, CheckCircle2, MessageSquare,
   Plus, Minus, Maximize2, Crown, Inbox, UserPlus, ChevronRight, Power, Users, Store,
 } from 'lucide-react';
-import TemplateMarket, { MarketTmpl } from './TemplateMarket';
+import TemplateMarket, { MarketTmpl, TeamTmpl } from './TemplateMarket';
 
 /*
  * Office — 「办公室」（data-id="office"）。
@@ -222,6 +222,11 @@ export default function Office() {
     push({ kind: 'note', text: `${note} ${id}` });
   };
   const pickFromMarket = (t: MarketTmpl) => spawn(t.name, t.role, t.emoji, t.accent, t.model, `已从模版市场添加「${t.name}」`);
+  const pickTeam = (team: TeamTmpl) => {
+    const base = idSeq.current; idSeq.current += team.members.length;
+    setWorkers((prev) => [...prev, ...team.members.map((m, i) => makeWorker(`w-100${base + i}`, m.name, m.role, m.emoji, m.accent, m.model, prev.length + i, GENERIC_SCRIPT))]);
+    push({ kind: 'note', text: `已组建「${team.name}」（${team.members.length} 名成员）` });
+  };
   const canSend = text.trim() && (mode === 'broadcast' || !!target);
 
   return (
@@ -343,7 +348,7 @@ export default function Office() {
           style={{ writingMode: 'vertical-rl' }}><Users className="h-3.5 w-3.5" /> 成员库</button>
       )}
 
-      <TemplateMarket open={marketOpen} onClose={() => setMarketOpen(false)} onPick={pickFromMarket} />
+      <TemplateMarket open={marketOpen} onClose={() => setMarketOpen(false)} onPick={pickFromMarket} onPickTeam={pickTeam} />
     </div>
   );
 }
