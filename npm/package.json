@@ -1,10 +1,14 @@
 {
-  "name": "@cicyai/cicy-code",
+  "name": "cicy-code",
   "publishConfig": {
     "access": "public"
   },
   "version": "2.1.46",
   "description": "CiCy Code - AI-powered development environment",
+  "author": {
+    "name": "cicybot",
+    "email": "support@cicy-ai.com"
+  },
   "bin": {
     "cicy-code": "bin/cicy-code.js"
   },
@@ -12,7 +16,7 @@
     "postinstall": "node scripts/install.js"
   },
   "files": [
-    "bin/",
+    "bin/cicy-code.js",
     "scripts/"
   ],
   "repository": {
