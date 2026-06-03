@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, X, Monitor, Tablet, Smartphone } from 'lucide-react';
+import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, X, Monitor, Tablet, Smartphone, Package, ArrowUp } from 'lucide-react';
 import { WebFrame } from './WebFrame';
 import {
   ARTIFACT_WEBVIEW_ID,
@@ -66,6 +66,7 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
   const [preview, setPreviewState] = useState<PreviewMode>(loadPreview);
 
   const elRef = useRef<any>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const urlRef = useRef<string>(BLANK);
   urlRef.current = url;
   const previewRef = useRef<PreviewMode>(preview);
@@ -120,6 +121,7 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
   const goBack = () => { const el = elRef.current; if (electron && el?.goBack) try { el.goBack(); } catch {} };
   const goForward = () => { const el = elRef.current; if (electron && el?.goForward) try { el.goForward(); } catch {} };
   const openExternal = () => { if (url && url !== BLANK) window.open(url, '_blank', 'noopener'); };
+  const focusUrlInput = () => { requestActivate(); inputRef.current?.focus(); };
 
   const hasUrl = url && url !== BLANK;
   const dim = PREVIEW_DIMS[preview];
@@ -178,6 +180,7 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
           <input
             data-id="artifact-url-input"
             type="text"
+            ref={inputRef}
             value={inputUrl}
             onChange={(e) => setInputUrl(e.target.value)}
             placeholder={t('artifactUrlPlaceholder', 'Enter a URL to open in the artifact frame')}
@@ -226,8 +229,27 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
           </div>
         </div>
         {!hasUrl && (
-          <div data-id="artifact-empty" className="absolute inset-0 flex items-center justify-center bg-vsc-bg px-6 text-center text-xs text-zinc-500">
-            {t('artifactEmpty', 'No artifact open. Enter a URL above, or let an agent open one via the artifact skill.')}
+          <div data-id="artifact-empty" className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.08),transparent_45%),var(--vsc-bg)] px-6 text-center">
+            <div data-id="artifact-empty-icon" className="flex h-16 w-16 items-center justify-center rounded-2xl border border-[var(--vsc-border)] bg-white/[0.03] text-zinc-500 shadow-inner">
+              <Package className="h-8 w-8" />
+            </div>
+            <div data-id="artifact-empty-text" className="flex flex-col items-center gap-1.5">
+              <div data-id="artifact-empty-title" className="text-sm font-medium text-zinc-200">
+                {t('artifactEmptyTitle', 'Artifact preview')}
+              </div>
+              <div data-id="artifact-empty-desc" className="max-w-[22rem] text-xs leading-relaxed text-zinc-500">
+                {t('artifactEmpty', 'No artifact open. Enter a URL above, or let an agent open one via the artifact skill.')}
+              </div>
+            </div>
+            <button
+              data-id="artifact-empty-cta"
+              type="button"
+              onClick={focusUrlInput}
+              className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-[var(--vsc-border)] bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100"
+            >
+              <ArrowUp className="h-3.5 w-3.5" />
+              {t('artifactEmptyCta', 'Enter a URL to open')}
+            </button>
           </div>
         )}
       </div>

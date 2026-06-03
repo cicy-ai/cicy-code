@@ -28,6 +28,8 @@
   "artifactPreviewWeb": "网页",
   "artifactPreviewPortal": "门户",
   "artifactPreviewMobile": "手机",
+  "artifactEmptyTitle": "产物预览",
+  "artifactEmptyCta": "输入网址打开",
   "artifactEmpty": "暂无产物。在上方输入网址,或让 agent 通过 artifact skill 打开。",
   "filesPaneTitle": "文件",
   "filesConnecting": "正在连接…",

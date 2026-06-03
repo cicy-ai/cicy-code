@@ -28,6 +28,8 @@
   "artifactPreviewWeb": "Web",
   "artifactPreviewPortal": "Portal",
   "artifactPreviewMobile": "Mobile",
+  "artifactEmptyTitle": "Artifact preview",
+  "artifactEmptyCta": "Enter a URL to open",
   "artifactEmpty": "No artifact open. Enter a URL above, or let an agent open one via the artifact skill.",
   "filesPaneTitle": "Files",
   "filesConnecting": "Connecting…",
