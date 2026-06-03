@@ -12,7 +12,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, Building2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import AgentAvatar from './AgentAvatar';
@@ -28,6 +28,7 @@ import { WebFrame } from './WebFrame';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
 import TeamPanel from './layout/TeamPanel';
+import MeetingRoom from './office/MeetingRoom';
 import GlobalProxyIndicator from './layout/GlobalProxyIndicator';
 import SkillMarketplacePanel from './layout/SkillMarketplacePanel';
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
@@ -297,7 +298,7 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 }
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
-type LeftPanelView = 'team' | 'skills' | 'agents' | 'providers' | 'im' | 'todo' | null;
+type LeftPanelView = 'team' | 'skills' | 'agents' | 'providers' | 'im' | 'todo' | 'office' | null;
 type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | RequestViewTab;
 type CliContentMode = 'fixed';
 
@@ -330,6 +331,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setActiveAgentId,
     setAgentDetail: setSharedAgentDetail,
     patchAgentDetail: patchSharedAgentDetail,
+    shellPanelOpen,
+    toggleShellPanel,
   } = useApp();
   const { token, hasPermission } = useAuth();
   const { confirm, node: dialogsNode } = useDialogs();
@@ -366,7 +369,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // clobber a cache-restored 'todo'/'memory' tab while the async check is still
   // in flight, or the restored current tab is lost on every reload.
   const [todoSkillInstalled, setTodoSkillInstalled] = useState<boolean | null>(null);
-  // Pending-todo count (status todo + doing on the active pane) for the red
+  // Pending-todo count (status todo on the active pane) for the red
   // badge on the Todo tab.
   const [todoCount, setTodoCount] = useState<number>(0);
   const [cliDrawerWidth, setCliDrawerWidth] = useState(() => clampCliDrawerWidth(Number(cache.get(CLI_DRAWER_WIDTH_KEY, CLI_DRAWER_DEFAULT_WIDTH))));
@@ -691,7 +694,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleCapture = async () => { if (isApiOnlyRuntime) return; try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
   const handleToggleMouse = async () => { if (isApiOnlyRuntime) return; const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
 
-  const toggleLeft = (p: 'team' | 'skills' | 'providers' | 'im' | 'todo') => {
+  const toggleLeft = (p: 'team' | 'skills' | 'providers' | 'im' | 'todo' | 'office') => {
     setLeftPanelView(prev => prev === p ? null : p);
   };
 
@@ -753,7 +756,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useEffect(() => { activeCliPaneIdRef.current = activeCliPaneId; }, [activeCliPaneId]);
   // Keep the Todo-tab badge count fresh: fetch on mount / pane switch / install
   // flip, poll every 10s, and refresh immediately on `cicy:todos-changed`
-  // (dispatched by TodoPanel after add/status/delete). Count = todo + doing.
+  // (dispatched by TodoPanel after add/status/delete). Count = pending todos.
   useEffect(() => {
     if (!todoSkillInstalled) { setTodoCount(0); return; }
     let cancelled = false;
@@ -761,7 +764,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       try {
         const res: any = await apiService.getTodoCounts(activeCliPaneId);
         const c = res?.data || {};
-        if (!cancelled) setTodoCount((Number(c.todo) || 0) + (Number(c.doing) || 0));
+        if (!cancelled) setTodoCount(Number(c.todo) || 0);
       } catch { /* keep previous count on transient error */ }
     };
     refresh();
@@ -771,7 +774,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const onChange = (e: Event) => {
       const d = (e as CustomEvent).detail;
       if (d && d.paneId === activeCliPaneId) {
-        setTodoCount((Number(d.todo) || 0) + (Number(d.doing) || 0));
+        setTodoCount(Number(d.todo) || 0);
       } else {
         refresh();
       }
@@ -1574,6 +1577,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         onUpdated={(patch) => applyPanePatch(activeCliPaneId, patch)}
         onOpen={() => refreshPaneDetail(activeCliPaneId)}
       />
+      <button
+        type="button"
+        data-id="workspace-shell-toggle"
+        onClick={toggleShellPanel}
+        aria-pressed={shellPanelOpen}
+        title={t('shellPanelToggle', { defaultValue: 'Shell 终端' })}
+        className={`p-1 rounded transition-colors cursor-pointer ${shellPanelOpen ? 'text-emerald-400' : 'text-zinc-600 hover:text-zinc-300'}`}
+      >
+        <Terminal className="w-3.5 h-3.5" />
+      </button>
       <SystemResourceMonitor paneId={paneId} />
       <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} onSendClientId={handleSendPageClientIdToAgent} />
       <GlobalProxyIndicator placement="up" onManageNodes={handleManageNodesViaSkill} />
@@ -1588,7 +1601,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>
       )}
     </>
-  ) : null, [activeCliPaneId, paneId, paneDetails, agentDetail, applyPanePatch, refreshPaneDetail, netLatency, chatWsConnected, chatWsClientId, handleSendPageClientIdToAgent, handleManageNodesViaSkill, contextUsage, t]);
+  ) : null, [activeCliPaneId, paneId, paneDetails, agentDetail, applyPanePatch, refreshPaneDetail, netLatency, chatWsConnected, chatWsClientId, handleSendPageClientIdToAgent, handleManageNodesViaSkill, contextUsage, shellPanelOpen, toggleShellPanel, t]);
   // Memoized so the stack's `items` keeps a stable identity across the
   // per-token Workspace re-renders a live conversation triggers (those tokens
   // touch chat-live state the stack never reads). Combined with React.memo on
@@ -1651,6 +1664,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <div data-id="activity-bar" ref={activityBarRef} className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
           <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} />
+          <SideBtn dataId="btn-office" active={leftActive === 'office'} icon={<Building2 className="w-5 h-5" />} title={t('sidebarOffice', { defaultValue: '办公室' })} onClick={() => toggleLeft('office')} />
           {/* Helper-mode trial container hides Skills / Providers (gateway) /
               IM / Audit from the activity bar — the drawer should stay
               laser-focused on the install chat. See helperMode in cicy-code
@@ -1683,7 +1697,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         {/* Content */}
         <main data-id="content-area" className="flex-1 relative overflow-hidden">
           <div data-id="main-layout" className="flex h-full min-w-0">
-            {leftActive ? (
+            {leftActive && leftActive !== 'office' ? (
               <div
                 data-testid="left-panel"
                 data-id="left-panel"
@@ -1754,7 +1768,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               </div>
             ) : null}
             <div data-testid="right-panel" data-id="right-panel" className="min-w-0 flex-1 relative">
-              {rightContent}
+              {leftActive === 'office' ? <MeetingRoom /> : rightContent}
               {leftActive === 'providers' && (
                 <div data-id="providers-right-mount" ref={setProvidersRightMount} />
               )}

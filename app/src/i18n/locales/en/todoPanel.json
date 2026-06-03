@@ -14,7 +14,6 @@
   "emptyOther": "Empty",
   "status": {
     "todo": "Todo",
-    "doing": "Doing",
     "test": "Test",
     "done": "Done",
     "dropped": "Dropped"
@@ -28,7 +27,7 @@
   "moreTooltip": "More",
   "deleteAction": "Delete",
   "emptyTitle": "No todos yet",
-  "emptyHint": "Type in the box above and press Enter to add",
+  "emptyHint": "Type in the box below and press Enter to add",
   "timeJustNow": "just now",
   "timeMinutesAgo": "{{n}}m ago",
   "timeHoursAgo": "{{n}}h ago",
@@ -40,6 +39,11 @@
   "refreshTooltip": "Refresh",
   "promptTodo": "Please handle the following todo; when finished, move it to the test lane with `cicy-todo test {{id}}` (awaiting review — don't mark it done yourself):\n\n{{title}}",
   "promptDoing": "Please keep advancing the following in-progress task; when finished, move it to the test lane with `cicy-todo test {{id}}` (awaiting review — don't mark it done yourself):\n\n{{title}}",
+  "promptBatch": "Please handle these {{count}} todos together (plan them out — run in parallel or in dependency order, track each with cicy-todo, and when each is finished move it to the test lane with `cicy-todo test <id>` for review; don't mark them done yourself):\n\n{{list}}\n\nBriefly outline your order of attack first, then work through them one by one.",
+  "batchSelected": "{{n}} selected",
+  "batchSend": "Send to agent",
+  "batchSendTooltip": "Send the selected todos to the agent to handle together",
+  "batchClear": "Clear selection",
   "alignPrompt": "Please reconcile the current todo progress (data lives in `<workspace>/.cicy/todos.yaml`, operated via `cicy-todo`):\n\n1. First run `cicy-todo list --all` to fetch the full list.\n2. Completed: `cicy-todo done <id>`\n3. No longer needed: `cicy-todo drop <id>`\n4. Unfinished: judge by current state, split or adjust.\n\nReport one line when done: N completed / N adjusted / N added.",
   "assignTooltip": "Assign to a worker (hand off & send)",
   "assignHeader": "Assign to",

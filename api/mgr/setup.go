@@ -2028,6 +2028,7 @@ func stopAgentByPaneID(paneID string) {
 	stopInstance(paneID)
 	session := strings.Split(paneID, ":")[0]
 	if session != "" {
+		stopShellSession(session) // tear down the grouped shell session + its ttyd
 		exec.Command("tmux", "kill-session", "-t", session).Run()
 	}
 	log.Printf("[agent-stop] stopped %s", paneID)

@@ -14,7 +14,6 @@
   "emptyOther": "Vide",
   "status": {
     "todo": "À faire",
-    "doing": "En cours",
     "test": "Test",
     "done": "Fait",
     "dropped": "Abandonné"
@@ -28,7 +27,7 @@
   "moreTooltip": "Plus",
   "deleteAction": "Supprimer",
   "emptyTitle": "Aucune tâche pour l'instant",
-  "emptyHint": "Tapez dans la zone au-dessus et appuyez sur Entrée",
+  "emptyHint": "Tapez dans la zone ci-dessous et appuyez sur Entrée",
   "timeJustNow": "à l'instant",
   "timeMinutesAgo": "il y a {{n}}m",
   "timeHoursAgo": "il y a {{n}}h",
@@ -40,6 +39,11 @@
   "refreshTooltip": "Actualiser",
   "promptTodo": "Veuillez traiter la tâche suivante ; une fois terminée, déplacez-la vers la voie de test avec `cicy-todo test {{id}}` (en attente de validation — ne la marquez pas terminée vous-même) :\n\n{{title}}",
   "promptDoing": "Veuillez continuer à faire avancer la tâche en cours ; une fois terminée, déplacez-la vers la voie de test avec `cicy-todo test {{id}}` (en attente de validation — ne la marquez pas terminée vous-même) :\n\n{{title}}",
+  "promptBatch": "Veuillez traiter ensemble ces {{count}} tâches (planifiez-les — en parallèle ou selon l'ordre des dépendances, suivez chacune avec cicy-todo, et une fois terminée déplacez-la vers la voie de test avec `cicy-todo test <id>` pour validation ; ne les marquez pas terminées vous-même) :\n\n{{list}}\n\nIndiquez d'abord brièvement votre ordre d'attaque, puis traitez-les une par une.",
+  "batchSelected": "{{n}} sélectionné(s)",
+  "batchSend": "Envoyer à l'agent",
+  "batchSendTooltip": "Envoyer les tâches sélectionnées à l'agent pour les traiter ensemble",
+  "batchClear": "Effacer la sélection",
   "alignPrompt": "Veuillez réconcilier l'avancement des tâches (données dans `<workspace>/.cicy/todos.yaml`, via `cicy-todo`) :\n\n1. Lancez d'abord `cicy-todo list --all` pour la liste complète.\n2. Terminées : `cicy-todo done <id>`\n3. Inutiles : `cicy-todo drop <id>`\n4. Inachevées : ajustez ou découpez selon l'état actuel.\n\nRapportez une ligne : N terminées / N ajustées / N ajoutées.",
   "assignTooltip": "Assigner à un worker (transférer et envoyer)",
   "assignHeader": "Assigner à",

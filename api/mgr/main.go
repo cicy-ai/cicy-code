@@ -448,6 +448,7 @@ Options:
 	// WebSocket terminal proxy
 	http.HandleFunc("/ws", handleWSProxy)
 	http.HandleFunc("/ttyd/", handleTtydProxy)
+	http.HandleFunc("/ttyd-shell/", handleTtydShellProxy)
 
 	// UI (SPA)
 	http.Handle("/", serveUI())

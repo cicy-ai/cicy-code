@@ -58,6 +58,11 @@ interface AppContextType {
   login: (token: string) => Promise<boolean>;
   logout: () => void;
 
+  // Shell panel (agent-card bottom terminal) global toggle
+  shellPanelOpen: boolean;
+  setShellPanelOpen: (open: boolean) => void;
+  toggleShellPanel: () => void;
+
   // Pane Selection
   currentPaneId: string | null;
   currentPane: Agent | undefined;
@@ -170,6 +175,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const chatWsListenersRef = useRef(new Set<(msg: ChatWsMessage) => void>());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [shellPanelOpen, setShellPanelOpen] = useState(false);
 
   // Keep API client lifecycle aligned with AuthContext to avoid unauthenticated
   // requests racing ahead of token verification.
@@ -436,6 +442,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     loading,
     error,
     setError,
+    shellPanelOpen,
+    setShellPanelOpen,
+    toggleShellPanel: () => setShellPanelOpen(prev => !prev),
   }), [
     token, login, logout, currentPaneId, currentPane, paneDetail, setPaneDetail,
     selectPane, clearPane, activeAgentId, setActiveAgentId, agentDetails,
@@ -448,7 +457,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     chatWsState.chatWsHistoryVersion, chatWsState.chatWsInspectorVersion,
     setChatWsState, setChatWsSender, sendChatWsMessage, subscribeChatWs,
     broadcastChatWsMessage, systemResources, setSystemResources, loading, error,
-    setError,
+    setError, shellPanelOpen,
   ]);
 
   // Debug: Log context changes

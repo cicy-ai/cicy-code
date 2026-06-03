@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  Circle, CircleDot, CheckCircle2, CircleSlash, Trash2, MoreHorizontal,
+  Circle, CheckCircle2, CircleSlash, Trash2, MoreHorizontal,
   Sparkles, Loader2, GripVertical, Search, ArrowRight, ArrowUp, Pencil, X as XIcon,
-  Send, Users, RefreshCw, FlaskConical, UserPlus, LayoutGrid, List as ListIcon,
+  Send, Users, RefreshCw, FlaskConical, UserPlus, LayoutGrid, List as ListIcon, Check,
 } from 'lucide-react';
 import apiService from '../services/api';
 
@@ -12,7 +12,7 @@ import apiService from '../services/api';
 // (alignPrompt) live in the todoPanel locale files so the text the UI sends
 // follows the operator's UI language. They use {{id}} / {{title}} interpolation.
 
-export type TodoStatus = 'todo' | 'doing' | 'test' | 'done' | 'dropped';
+export type TodoStatus = 'todo' | 'test' | 'done' | 'dropped';
 
 interface Todo {
   id: string;
@@ -28,13 +28,12 @@ interface Todo {
 interface Counts {
   all: number;
   todo: number;
-  doing: number;
   test: number;
   done: number;
   dropped: number;
 }
 
-const COLUMNS: TodoStatus[] = ['todo', 'doing', 'test', 'done', 'dropped'];
+const COLUMNS: TodoStatus[] = ['todo', 'test', 'done', 'dropped'];
 const POLL_MS = 5000;
 
 interface Props {
@@ -50,7 +49,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
   // references.
   const { t: tr } = useTranslation('todoPanel');
   const [todos, setTodos] = useState<Todo[]>([]);
-  const [counts, setCounts] = useState<Counts>({ all: 0, todo: 0, doing: 0, test: 0, done: 0, dropped: 0 });
+  const [counts, setCounts] = useState<Counts>({ all: 0, todo: 0, test: 0, done: 0, dropped: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
@@ -62,6 +61,8 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
   const [aligning, setAligning] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [sendingTodoId, setSendingTodoId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchSending, setBatchSending] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<TodoStatus | null>(null);
   const [showAllAgents, setShowAllAgents] = useState(false);
@@ -94,13 +95,13 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
         (apiService as any).getTodoCounts(paneId),
       ]);
       setTodos(listRes.data?.todos || []);
-      const c = countsRes.data || { all: 0, todo: 0, doing: 0, test: 0, done: 0, dropped: 0 };
+      const c = countsRes.data || { all: 0, todo: 0, test: 0, done: 0, dropped: 0 };
       setCounts(c);
       setError(null);
       // Let the Todo-tab badge (in Workspace) update immediately after any
       // load/mutation, carrying the fresh counts so it needn't refetch.
       window.dispatchEvent(new CustomEvent('cicy:todos-changed', {
-        detail: { paneId, todo: c.todo || 0, doing: c.doing || 0 },
+        detail: { paneId, todo: c.todo || 0 },
       }));
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'failed to load todos');
@@ -137,7 +138,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
     if (showAllAgents && filterAgent) {
       visible = visible.filter((t) => (t.pane_id || paneId) === filterAgent);
     }
-    const out: Record<TodoStatus, Todo[]> = { todo: [], doing: [], test: [], done: [], dropped: [] };
+    const out: Record<TodoStatus, Todo[]> = { todo: [], test: [], done: [], dropped: [] };
     for (const t of visible) {
       if (out[t.status]) out[t.status].push(t);
     }
@@ -180,7 +181,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
     setAssignMenuId(null); setAssignMenuPos(null);
     if (assigningId) return;
     setAssigningId(todo.id);
-    const prompt = (todo.status === 'doing' || todo.status === 'test')
+    const prompt = (todo.status === 'test')
       ? tr('promptDoing', { id: todo.id, title: todo.title })
       : tr('promptTodo', { id: todo.id, title: todo.title });
     try {
@@ -243,10 +244,48 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
     }
   };
 
+  const toggleSelect = (id: string) => setSelectedIds((cur) => {
+    const next = new Set(cur);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const clearSelection = () => setSelectedIds(new Set());
+
+  // Drop selections whose todo disappeared (deleted elsewhere / poll refresh),
+  // so the batch bar count never references a card that's no longer on screen.
+  useEffect(() => {
+    setSelectedIds((cur) => {
+      if (cur.size === 0) return cur;
+      const live = new Set(todos.map((t) => t.id));
+      let changed = false;
+      const next = new Set<string>();
+      cur.forEach((id) => { if (live.has(id)) next.add(id); else changed = true; });
+      return changed ? next : cur;
+    });
+  }, [todos]);
+
+  // Batch-dispatch: bundle every selected todo into ONE prompt so the agent
+  // plans and works them together, rather than firing one message per todo.
+  const batchSendToAgent = async () => {
+    if (batchSending || !paneId || selectedIds.size === 0) return;
+    setBatchSending(true);
+    const chosen = todos.filter((t) => selectedIds.has(t.id));
+    const list = chosen.map((t, i) => `${i + 1}. [${t.id}] ${t.title}`).join('\n');
+    const prompt = tr('promptBatch', { count: chosen.length, list });
+    try {
+      await (apiService as any).sendCommand(paneId, prompt, true);
+      clearSelection();
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || e?.message || 'batch send failed');
+    } finally {
+      setBatchSending(false);
+    }
+  };
+
   const sendTodoToAgent = async (todo: Todo) => {
     if (sendingTodoId || !paneId) return;
     setSendingTodoId(todo.id);
-    const prompt = (todo.status === 'doing' || todo.status === 'test')
+    const prompt = (todo.status === 'test')
       ? tr('promptDoing', { id: todo.id, title: todo.title })
       : tr('promptTodo', { id: todo.id, title: todo.title });
     try {
@@ -449,8 +488,9 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
                   const isEditing = editingId === t.id;
                   const isBeingDragged = draggingId === t.id;
                   const isSending = sendingTodoId === t.id;
+                  const isSelected = selectedIds.has(t.id);
                   const cardPane = t.pane_id || paneId;
-                  const canSendToAgent = status === 'todo' || status === 'doing' || status === 'test';
+                  const canSendToAgent = status === 'todo' || status === 'test';
                   return (
                     <article
                       key={t.id}
@@ -459,11 +499,25 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
                       onDragEnd={() => { setDraggingId(null); setDragOverCol(null); }}
                       className={`group relative overflow-hidden rounded-md border bg-[#141417] transition-all ${
                         isBeingDragged ? 'opacity-40' : t._pending ? 'opacity-60' : 'opacity-100'
-                      } ${cls.cardBorder} hover:border-white/15`}
+                      } ${isSelected ? 'border-blue-500/60 ring-1 ring-blue-500/40' : `${cls.cardBorder} hover:border-white/15`}`}
                     >
                       <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${cls.stripe}`} />
 
-                      <div className="flex items-start gap-1.5 pl-3 pr-2 pt-2">
+                      <div className="flex items-start gap-2 pl-2.5 pr-2 pt-2.5">
+                        {/* Big multi-select checkbox for batch dispatch */}
+                        <button
+                          data-id={`todo-panel-card-checkbox-${t.id}`}
+                          onClick={(e) => { e.stopPropagation(); toggleSelect(t.id); }}
+                          aria-pressed={isSelected}
+                          title={tr('batchSendTooltip')}
+                          className={`mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border transition-colors ${
+                            isSelected
+                              ? 'border-blue-500 bg-blue-500 text-white'
+                              : 'border-white/25 bg-white/[0.02] text-transparent hover:border-blue-400/70'
+                          }`}
+                        >
+                          <Check className="h-3 w-3" strokeWidth={3} />
+                        </button>
                         <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-grab text-zinc-700 group-hover:text-zinc-500" />
                         <div className="min-w-0 flex-1">
                           {isEditing ? (
@@ -532,7 +586,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
                               {canSendToAgent && (
                                 <CardAction
                                   onClick={() => sendTodoToAgent(t)}
-                                  title={status === 'doing' ? tr('sendToAgentDoing') : tr('sendToAgentTodo')}
+                                  title={status === 'test' ? tr('sendToAgentDoing') : tr('sendToAgentTodo')}
                                   disabled={isSending}
                                 >
                                   {isSending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
@@ -646,6 +700,32 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
         </div>
       )}
 
+      {/* BATCH BAR — appears when ≥1 todo is checked, dispatches them together */}
+      {selectedIds.size > 0 && (
+        <div
+          data-id="todo-panel-batch-bar"
+          className="flex shrink-0 items-center gap-3 border-t border-blue-500/20 bg-blue-500/[0.07] px-3 py-2.5"
+        >
+          <span className="text-[12px] font-medium text-blue-200">{tr('batchSelected', { n: selectedIds.size })}</span>
+          <button
+            data-id="todo-panel-batch-clear"
+            onClick={clearSelection}
+            className="text-[12px] text-zinc-400 transition-colors hover:text-zinc-200"
+          >{tr('batchClear')}</button>
+          <div className="flex-1" />
+          <button
+            data-id="todo-panel-batch-send"
+            onClick={batchSendToAgent}
+            disabled={batchSending}
+            title={tr('batchSendTooltip')}
+            className="flex items-center gap-1.5 rounded-lg bg-blue-500 px-3 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-blue-400 disabled:opacity-60"
+          >
+            {batchSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+            <span>{tr('batchSend')}</span>
+          </button>
+        </div>
+      )}
+
       {/* COMPOSER — prompt-style task input, pinned to the bottom */}
       <div data-id="todo-panel-composer" className="shrink-0 border-t border-white/[0.06] bg-[#0A0A0A] px-3 py-3">
         <div
@@ -702,7 +782,7 @@ function CardAction({ children, onClick, title, disabled }: {
 }
 
 export function advanceStatus(s: TodoStatus): TodoStatus {
-  return s === 'todo' ? 'doing' : s === 'doing' ? 'test' : s === 'test' ? 'done' : 'todo';
+  return s === 'todo' ? 'test' : s === 'test' ? 'done' : 'todo';
 }
 
 function MenuItem({ children, onClick, icon, danger = false }: {
@@ -724,7 +804,6 @@ function MenuItem({ children, onClick, icon, danger = false }: {
 function statusIcon(s: TodoStatus) {
   switch (s) {
     case 'todo':    return <Circle       className="h-4 w-4" />;
-    case 'doing':   return <CircleDot    className="h-4 w-4 text-amber-400" />;
     case 'test':    return <FlaskConical className="h-4 w-4 text-cyan-400" />;
     case 'done':    return <CheckCircle2 className="h-4 w-4 text-emerald-400" />;
     case 'dropped': return <CircleSlash  className="h-4 w-4" />;
@@ -735,8 +814,6 @@ export function statusClasses(s: string): { active: string; idle: string; badge:
   switch (s) {
     case 'todo':
       return { active: 'bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/30', idle: 'text-blue-400/70', badge: 'bg-blue-500/10 text-blue-300', stripe: 'bg-blue-400', cardBorder: 'border-white/[0.06]' };
-    case 'doing':
-      return { active: 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30', idle: 'text-amber-400/70', badge: 'bg-amber-500/10 text-amber-300', stripe: 'bg-amber-400', cardBorder: 'border-amber-500/20' };
     case 'test':
       return { active: 'bg-cyan-500/15 text-cyan-300 ring-1 ring-cyan-500/30', idle: 'text-cyan-400/70', badge: 'bg-cyan-500/10 text-cyan-300', stripe: 'bg-cyan-400', cardBorder: 'border-cyan-500/20' };
     case 'done':

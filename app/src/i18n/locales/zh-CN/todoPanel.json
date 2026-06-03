@@ -14,7 +14,6 @@
   "emptyOther": "空",
   "status": {
     "todo": "待办",
-    "doing": "进行中",
     "test": "测试",
     "done": "已完成",
     "dropped": "已弃"

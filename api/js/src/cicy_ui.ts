@@ -1183,7 +1183,7 @@ function setupWinFloatAutoHide(bar: HTMLElement): void {
 
 function configureTerminal(term: Terminal): void {
     term.configure({
-        scrollback: 5000,
+        scrollback: 500,
         fontFamily: monoFontStack(),
     });
 
@@ -1485,7 +1485,6 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     // so the existing .fta-btn hover/focus state still controls the icon
     // tint without per-icon overrides.
     var svgKbd     = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></svg>';
-    var svgPlus    = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
     var svgPlay    = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><polygon points="7 4 20 12 7 20 7 4"/></svg>';
     var svgUpdate  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13"/><path d="m6 10 6-6 6 6"/><path d="M5 21h14"/></svg>';
     var svgRestart = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>';
@@ -1499,7 +1498,6 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var tipCls = 'fta-btn cp-tooltip-host cp-tooltip-right cp-tooltip-bottom cp-tooltip-multiline';
     fixedTop.innerHTML =
         '<button id="cp-kbd" class="' + tipCls + '" data-tooltip="' + ttydT("tipPromptArea") + '">' + svgKbd + '</button>' +
-        '<button id="cp-win-add" class="' + tipCls + '" data-tooltip="' + ttydT("tipAddCliWindow") + '">' + svgPlus + '</button>' +
         '<button id="cp-agent-launch" class="' + tipCls + '" data-tooltip="' + ttydT("tipLaunchAgent") + '">' + svgPlay + '</button>' +
         '<button id="cp-agent-update" class="' + tipCls + '" data-tooltip="' + ttydT("tipUpdateAgent") + '">' + svgUpdate + '</button>' +
         '<button id="cp-win-restart" class="' + tipCls + '" data-tooltip="' + ttydT("tipRestartAgent") + '">' + svgRestart + '</button>' +
@@ -1515,7 +1513,15 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     // default; this listener reveals it whenever the cursor is within an 8px
     // strip at the top of the viewport, then schedules a delayed hide once
     // the cursor leaves both the trigger strip and the bar itself.
-    setupWinFloatAutoHide(winFloat);
+    // When embedded as a host-side bottom panel (?bottom=1), the host supplies
+    // its own window tabs, so hide gotty's floating bar entirely and skip the
+    // hover-reveal listener.
+    var isBottomPanel = /[?&]bottom=1(?:&|$)/.test(location.search);
+    if (isBottomPanel) {
+        winFloat.style.display = "none";
+    } else {
+        setupWinFloatAutoHide(winFloat);
+    }
 
     var input = (document.getElementById("cp-input") || document.createElement("textarea")) as HTMLTextAreaElement;
     var sendBtn = (document.getElementById("cp-send") || document.createElement("button")) as HTMLButtonElement;
@@ -1525,7 +1531,6 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     var restartBtn = document.getElementById("cp-win-restart") as HTMLButtonElement;
     var launchBtn = document.getElementById("cp-agent-launch") as HTMLButtonElement;
     var updateBtn = document.getElementById("cp-agent-update") as HTMLButtonElement;
-    var addWindowBtn = document.getElementById("cp-win-add") as HTMLButtonElement;
     var kbdBtn = document.getElementById("cp-kbd") as HTMLButtonElement;
 
     // Resolve this pane's agent_type once on init so the Launch/Update confirm
@@ -1920,11 +1925,9 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
         // (main) keeps the original "<session>:main.0" target unchanged.
         var session = String(paneId).split(":")[0];
         currentSendTarget = (!activeIndex || activeIndex === "0") ? paneId : (session + ":" + activeIndex);
-        winTabs.innerHTML = windows.map(function(win: any): string {
-            var close = win.index === "0" ? "" : '<span class="cp-wdel" data-idx="' + win.index + '" data-tooltip="' + ttydT("closeCliWindow") + '">✕</span>';
-            var active = String(win.index) === activeIndex ? " active" : "";
-            return '<button class="cp-wtab' + active + '" data-idx="' + win.index + '">' + win.name + "." + win.index + close + "</button>";
-        }).join("");
+        // Window tabs are not shown — the UI no longer surfaces per-window tabs
+        // (send-routing above still follows the active window). Keep the bar empty.
+        winTabs.innerHTML = "";
     }
 
     var windowsLoadPending = false;
@@ -2108,10 +2111,6 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
                 hideFixedTooltip();
             }
         }
-    });
-
-    addWindowBtn.addEventListener("click", function(): void {
-        apiFetch("POST", "", { session: paneId }).then(loadWindows);
     });
 
     restartBtn.addEventListener("click", function(event: MouseEvent): void {

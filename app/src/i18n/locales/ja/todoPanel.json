@@ -14,7 +14,6 @@
   "emptyOther": "空",
   "status": {
     "todo": "TODO",
-    "doing": "進行中",
     "test": "テスト",
     "done": "完了",
     "dropped": "中止"
@@ -28,7 +27,7 @@
   "moreTooltip": "その他",
   "deleteAction": "削除",
   "emptyTitle": "TODO はまだありません",
-  "emptyHint": "上の入力欄に入力して Enter で追加",
+  "emptyHint": "下の入力欄に入力して Enter で追加",
   "timeJustNow": "今",
   "timeMinutesAgo": "{{n}}分前",
   "timeHoursAgo": "{{n}}時間前",
@@ -40,6 +39,11 @@
   "refreshTooltip": "更新",
   "promptTodo": "次の TODO を処理してください。完了したら `cicy-todo test {{id}}` でテストレーンに移してください（検収待ち、自分で完了にしないこと）：\n\n{{title}}",
   "promptDoing": "進行中の次のタスクを引き続き進めてください。完了したら `cicy-todo test {{id}}` でテストレーンに移してください（検収待ち、自分で完了にしないこと）：\n\n{{title}}",
+  "promptBatch": "次の {{count}} 件の TODO をまとめて処理してください（全体を計画し、並行または依存順で進め、各タスクを cicy-todo で管理し、完了ごとに `cicy-todo test <id>` でテストレーンに移して検収待ちにしてください。自分で完了にしないこと）：\n\n{{list}}\n\nまず処理順を簡単に示してから、一つずつ進めてください。",
+  "batchSelected": "{{n}} 件選択中",
+  "batchSend": "agent に送信",
+  "batchSendTooltip": "選択した TODO をまとめて agent に送信して処理させる",
+  "batchClear": "選択を解除",
   "alignPrompt": "現在の TODO 進捗を整合してください（データは `<workspace>/.cicy/todos.yaml`、`cicy-todo` で操作）：\n\n1. まず `cicy-todo list --all` で全リストを取得。\n2. 完了：`cicy-todo done <id>`\n3. 不要：`cicy-todo drop <id>`\n4. 未完了：現状に応じて分割・調整。\n\n完了後に一行で報告：完了 N 件 / 調整 N 件 / 追加 N 件。",
   "assignTooltip": "worker に割り当て（移管して送信）",
   "assignHeader": "割り当て先",

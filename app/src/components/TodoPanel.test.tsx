@@ -41,15 +41,14 @@ const mkTodo = (over: Partial<any> = {}) => ({
 beforeEach(() => {
   vi.clearAllMocks();
   api.getPanes.mockResolvedValue({ data: [] });
-  api.getTodoCounts.mockResolvedValue({ data: { all: 0, todo: 0, doing: 0, test: 0, done: 0, dropped: 0 } });
+  api.getTodoCounts.mockResolvedValue({ data: { all: 0, todo: 0, test: 0, done: 0, dropped: 0 } });
   api.listTodos.mockResolvedValue({ data: { todos: [] } });
 });
 
 // ── pure helpers ─────────────────────────────────────────────────────────────
 describe('advanceStatus', () => {
-  it('walks the todo → doing → test → done lifecycle', () => {
-    expect(advanceStatus('todo')).toBe('doing');
-    expect(advanceStatus('doing')).toBe('test');
+  it('walks the todo → test → done lifecycle', () => {
+    expect(advanceStatus('todo')).toBe('test');
     expect(advanceStatus('test')).toBe('done');
   });
   it('wraps done/dropped back to todo', () => {
@@ -69,10 +68,10 @@ describe('shortId', () => {
 
 describe('statusClasses', () => {
   it('returns a distinct stripe colour for every status incl. test', () => {
-    const stripes = (['todo', 'doing', 'test', 'done', 'dropped'] as TodoStatus[]).map(
+    const stripes = (['todo', 'test', 'done', 'dropped'] as TodoStatus[]).map(
       (s) => statusClasses(s).stripe,
     );
-    expect(new Set(stripes).size).toBe(5); // all distinct
+    expect(new Set(stripes).size).toBe(4); // all distinct
     expect(statusClasses('test').stripe).toBe('bg-cyan-400');
   });
 });
@@ -96,16 +95,16 @@ describe('humanTime', () => {
 
 // ── component ────────────────────────────────────────────────────────────────
 describe('<TodoPanel />', () => {
-  it('renders all five status columns including the test lane', async () => {
+  it('renders all four status columns including the test lane', async () => {
     render(<TodoPanel paneId="w-10001" active isMaster />);
     await waitFor(() => expect(api.listTodos).toHaveBeenCalled());
-    for (const key of ['status.todo', 'status.doing', 'status.test', 'status.done', 'status.dropped']) {
+    for (const key of ['status.todo', 'status.test', 'status.done', 'status.dropped']) {
       expect(screen.getByText(key)).toBeInTheDocument();
     }
   });
 
   it('buckets a server todo into its status column', async () => {
-    api.listTodos.mockResolvedValue({ data: { todos: [mkTodo({ id: '7', title: 'wire up auth', status: 'doing' })] } });
+    api.listTodos.mockResolvedValue({ data: { todos: [mkTodo({ id: '7', title: 'wire up auth', status: 'test' })] } });
     render(<TodoPanel paneId="w-10001" active isMaster />);
     expect(await screen.findByText('wire up auth')).toBeInTheDocument();
     // its stable id is shown on the card

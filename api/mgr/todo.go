@@ -21,7 +21,7 @@ import (
 // todos with PaneID == their own short pane id, while the master pane sees
 // every todo and may filter by PaneID.
 //
-// Status state machine: todo → doing → done, with dropped as a terminal "abandoned" state.
+// Status state machine: todo → test → done, with dropped as a terminal "abandoned" state.
 type Todo struct {
 	ID        string    `yaml:"id" json:"id"`
 	Title     string    `yaml:"title" json:"title"`
@@ -39,7 +39,7 @@ type todoFile struct {
 var (
 	todoMu          sync.Mutex
 	todoValidStatus = map[string]bool{
-		"todo": true, "doing": true, "test": true, "done": true, "dropped": true,
+		"todo": true, "test": true, "done": true, "dropped": true,
 	}
 )
 
@@ -100,10 +100,30 @@ func loadTodos(workspace string) ([]Todo, error) {
 	// One-time migration: legacy random ids ("t-<unix>-<hex>") are replaced
 	// with stable, monotonic integer ids. Idempotent — once every id is a
 	// positive integer this is a no-op and nothing is rewritten.
-	if migrateTodoIDs(f.Todos) {
+	changed := migrateTodoIDs(f.Todos)
+	// The "doing" status was retired (lifecycle is now todo → test → done).
+	// Fold any leftover "doing" todos back to "todo" so they stay visible
+	// instead of falling into an unknown bucket. Idempotent.
+	if migrateDoingStatus(f.Todos) {
+		changed = true
+	}
+	if changed {
 		_ = saveTodos(workspace, f.Todos)
 	}
 	return f.Todos, nil
+}
+
+// migrateDoingStatus rewrites the retired "doing" status to "todo". Returns
+// true if at least one todo changed.
+func migrateDoingStatus(todos []Todo) bool {
+	changed := false
+	for i := range todos {
+		if todos[i].Status == "doing" {
+			todos[i].Status = "todo"
+			changed = true
+		}
+	}
+	return changed
 }
 
 // migrateTodoIDs assigns sequential integer ids to any todo whose id is not
@@ -210,23 +230,21 @@ func resolveTodoID(todos []Todo, idOrPrefix string) (int, error) {
 	return -1, fmt.Errorf("ambiguous id %q matches %d todos", idOrPrefix, len(matches))
 }
 
-// sortTodos in-place: doing first, then todo, done, dropped; within each
+// sortTodos in-place: todo first, then test, done, dropped; within each
 // bucket by updated_at desc.
 func sortTodos(todos []Todo) {
 	rank := func(s string) int {
 		switch s {
-		case "doing":
+		case "todo":
 			return 0
 		case "test":
 			return 1
-		case "todo":
-			return 2
 		case "done":
-			return 3
+			return 2
 		case "dropped":
-			return 4
+			return 3
 		}
-		return 5
+		return 4
 	}
 	sort.SliceStable(todos, func(i, j int) bool {
 		ri, rj := rank(todos[i].Status), rank(todos[j].Status)
@@ -343,7 +361,7 @@ func handleTodoCounts(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 500, err.Error())
 		return
 	}
-	counts := M{"all": 0, "todo": 0, "doing": 0, "test": 0, "done": 0, "dropped": 0}
+	counts := M{"all": 0, "todo": 0, "test": 0, "done": 0, "dropped": 0}
 	for _, t := range todos {
 		if !isMasterPaneID(requester) {
 			if t.PaneID != requester {

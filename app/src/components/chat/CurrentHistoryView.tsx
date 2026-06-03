@@ -36,9 +36,15 @@ const toolCardOpenState = new Map<string, boolean>();
 const currentHistoryPendingRequests = new Map<string, Promise<any>>();
 const currentHistoryRecentResponses = new Map<string, { at: number; data: any }>();
 const CURRENT_HISTORY_TOOL_DB_NAME = 'cicy-current-history-tool-cache';
-const CURRENT_HISTORY_TOOL_DB_VERSION = 2;
+const CURRENT_HISTORY_TOOL_DB_VERSION = 3;
 const CURRENT_HISTORY_TOOL_STORE = 'tool_details';
 const CURRENT_HISTORY_TURN_STORE = 'history_turns';
+// Prompts-only question list, cached per conversation so reopening the
+// prompts-only view paints instantly instead of re-paging the whole history.
+// Unlike the turn cache (positional ids drift → read-untrusted, INV-9), this
+// entry stores the live `maxId` it was built at; a mismatch (new turns /
+// compaction) invalidates it, so it's safe to read-trust while maxId holds.
+const CURRENT_HISTORY_PROMPTS_STORE = 'prompts_only';
 const CURRENT_HISTORY_PAGE_SIZE = 5;
 // Number of contiguous item ids loaded per page (one ranged fetch). Kept under
 // the backend's max page limit (100). Each turn spans a few ids, so this is
@@ -75,6 +81,9 @@ function openCurrentHistoryToolDB(): Promise<IDBDatabase | null> {
       if (!db.objectStoreNames.contains(CURRENT_HISTORY_TURN_STORE)) {
         const store = db.createObjectStore(CURRENT_HISTORY_TURN_STORE, { keyPath: 'key' });
         store.createIndex('by_pane', 'paneId', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(CURRENT_HISTORY_PROMPTS_STORE)) {
+        db.createObjectStore(CURRENT_HISTORY_PROMPTS_STORE, { keyPath: 'key' });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -144,6 +153,50 @@ async function getCurrentHistoryTurnsByIDsFromIndexedDB(paneId: string, conversa
   } catch {
     return [];
   }
+}
+
+function buildPromptsCacheKey(paneId: string, conversationId: string) {
+  return `${paneId}:${conversationId}`;
+}
+
+interface PromptsCacheEntry { maxId: number; prompts: HistoryTurn[]; }
+
+async function getPromptsCacheFromIndexedDB(paneId: string, conversationId: string): Promise<PromptsCacheEntry | null> {
+  if (!conversationId) return null;
+  const db = await openCurrentHistoryToolDB();
+  if (!db || !db.objectStoreNames.contains(CURRENT_HISTORY_PROMPTS_STORE)) return null;
+  try {
+    return await new Promise<PromptsCacheEntry | null>((resolve) => {
+      const tx = db.transaction(CURRENT_HISTORY_PROMPTS_STORE, 'readonly');
+      const store = tx.objectStore(CURRENT_HISTORY_PROMPTS_STORE);
+      const request = store.get(buildPromptsCacheKey(paneId, conversationId));
+      request.onsuccess = () => {
+        const r = request.result;
+        if (r && Array.isArray(r.prompts)) resolve({ maxId: Number(r.maxId || 0), prompts: r.prompts as HistoryTurn[] });
+        else resolve(null);
+      };
+      request.onerror = () => resolve(null);
+      tx.onabort = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function setPromptsCacheToIndexedDB(paneId: string, conversationId: string, maxId: number, prompts: HistoryTurn[]) {
+  if (!conversationId || maxId <= 0) return;
+  const db = await openCurrentHistoryToolDB();
+  if (!db || !db.objectStoreNames.contains(CURRENT_HISTORY_PROMPTS_STORE)) return;
+  try {
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(CURRENT_HISTORY_PROMPTS_STORE, 'readwrite');
+      const store = tx.objectStore(CURRENT_HISTORY_PROMPTS_STORE);
+      store.put({ key: buildPromptsCacheKey(paneId, conversationId), paneId, conversationId, maxId, prompts, updatedAt: Date.now() });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    });
+  } catch {}
 }
 
 function buildIdRange(lo: number, hi: number): number[] {
@@ -1591,6 +1644,12 @@ export default function CurrentHistoryView({
   const [nextBefore, setNextBefore] = useState<number | null>(null);
   const [conversationId, setConversationId] = useState('');
   const [model, setModel] = useState('');
+  // Prompts-only: question turns hydrated from IndexedDB for instant paint.
+  // cachedPromptMaxIdRef holds the maxId the cache was built at — when it still
+  // matches the live maxId, the cache is authoritative and the eager backfill
+  // is skipped (no re-paging the history just to show the questions again).
+  const [cachedPromptTurns, setCachedPromptTurns] = useState<HistoryTurn[]>([]);
+  const cachedPromptMaxIdRef = useRef(0);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);  // external link awaiting confirm (#25)
   // The in-flight turn (polled from reply.json) lives OUTSIDE `items` as a
   // temporary trailing group, so refreshing it never re-renders the committed
@@ -2098,27 +2157,81 @@ export default function CurrentHistoryView({
     return () => io.disconnect();
   }, [open, canLoadMore, conversationId, nextBefore]);
 
+  // committedMaxId == max history id in the loaded window (== q_last id). Defined
+  // here (before the prompts-only effects) so they can gate on it.
+  const committedMaxId = useMemo(
+    () => items.reduce((m, t) => Math.max(m, Number(t?.history_id || 0)), 0),
+    [items],
+  );
+
+  // Prompts-only display list: union of the cached question turns and the live
+  // window's user turns (live wins on id collision), deduped by history_id and
+  // ordered. The cache supplies older questions instantly; `items` keeps the
+  // newest ones fresh. Non-prompts-only renders the window as-is.
+  const displayItems = useMemo(() => {
+    if (!promptsOnly) return items;
+    const map = new Map<number, HistoryTurn>();
+    for (const t of cachedPromptTurns) {
+      const id = Number(t?.history_id || 0);
+      if (id > 0 && t?.role === 'user') map.set(id, t);
+    }
+    for (const t of items) {
+      const id = Number(t?.history_id || 0);
+      if (id > 0 && t?.role === 'user') map.set(id, t);
+    }
+    return Array.from(map.values()).sort((a, b) => Number(a?.history_id || 0) - Number(b?.history_id || 0));
+  }, [promptsOnly, items, cachedPromptTurns]);
+
+  // Hydrate the prompts cache (instant paint) whenever prompts-only is on for the
+  // current conversation. Cleared when prompts-only is off / no conversation.
+  useEffect(() => {
+    if (!open || !promptsOnly || !conversationId) {
+      setCachedPromptTurns([]);
+      cachedPromptMaxIdRef.current = 0;
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const cache = await getPromptsCacheFromIndexedDB(paneId, conversationId);
+      if (cancelled) return;
+      setCachedPromptTurns(cache?.prompts || []);
+      cachedPromptMaxIdRef.current = cache?.maxId || 0;
+    })();
+    return () => { cancelled = true; };
+  }, [open, promptsOnly, paneId, conversationId]);
+
   // Prompts-only keeps just the user questions. The committed window is only the
   // last CURRENT_HISTORY_WINDOW raw items, which holds at most a question or two
   // (and sometimes none — a long assistant/tool round fills it). The "加载更早"
   // IntersectionObserver above can't backfill an empty/short list: a
-  // permanently-intersecting sentinel never re-fires. So while prompts-only is
-  // on, eagerly page earlier windows until PROMPTS_ONLY_MIN_QUESTIONS prompts are
-  // loaded (or we hit the start); beyond that the normal scroll-up sentinel pages
-  // more on demand. Each loadMore updates `items`, re-running this effect.
+  // permanently-intersecting sentinel never re-fires. So eagerly page earlier
+  // windows until PROMPTS_ONLY_MIN_QUESTIONS prompts are loaded (or we hit the
+  // start) — BUT skip that entirely when the cache built at the live maxId
+  // already lists the questions (the whole point of caching: don't re-page).
   useEffect(() => {
     if (!open || !promptsOnly || loading || loadingMore || !canLoadMore) return;
-    const questionCount = items.reduce((n, t) => (t?.role === 'user' ? n + 1 : n), 0);
+    if (cachedPromptMaxIdRef.current > 0 && cachedPromptMaxIdRef.current === committedMaxId) return;
+    const questionCount = displayItems.reduce((n, t) => (t?.role === 'user' ? n + 1 : n), 0);
     if (questionCount >= PROMPTS_ONLY_MIN_QUESTIONS) return;
     loadMoreFnRef.current();
-  }, [open, promptsOnly, items, loading, loadingMore, canLoadMore]);
+  }, [open, promptsOnly, displayItems, loading, loadingMore, canLoadMore, committedMaxId]);
 
-  // Memoized on `items` only: while a turn streams (only `liveTurn` changes),
+  // Persist the assembled question list, keyed by the live maxId so new turns /
+  // a compaction (maxId shifts) invalidate it on the next open (docs §11/INV-9).
+  useEffect(() => {
+    if (!open || !promptsOnly || !conversationId || committedMaxId <= 0) return;
+    const prompts = displayItems.filter((t) => t?.role === 'user');
+    if (!prompts.length) return;
+    cachedPromptMaxIdRef.current = committedMaxId;
+    void setPromptsCacheToIndexedDB(paneId, conversationId, committedMaxId, prompts);
+  }, [open, promptsOnly, paneId, conversationId, committedMaxId, displayItems]);
+
+  // Memoized on `displayItems`: while a turn streams (only `liveTurn` changes),
   // these element refs stay identical, so React skips re-rendering every
   // committed history row (no Markdown re-parse per token).
-  const renderedTurns = useMemo(() => items.map((turn, index) => {
+  const renderedTurns = useMemo(() => displayItems.map((turn, index) => {
     const turnKey = turn?.history_id || `${turn?.text || turn?.q || 'turn'}-${index}`;
-    const isLatestTurn = index === items.length - 1;
+    const isLatestTurn = index === displayItems.length - 1;
     const steps = getVisibleHistorySteps(turn, isLatestTurn);
     const itemId = Number(turn?.history_id || 0);
     // Prompts-only: render just the user questions, drop everything else.
@@ -2173,17 +2286,13 @@ export default function CurrentHistoryView({
       );
     }
     return null;
-  }), [items, promptsOnly]);
+  }), [displayItems, promptsOnly]);
 
   // Part 2 — the live tail (reply.json's answer for the latest turn). It is the
   // ANSWER to committed's last turn (q_last), so it renders answer-only and sits
-  // right after the committed list. committedMaxId == q_last id; the tail's id ==
-  // committedMaxId + 1, so `> committedMaxId` gates it (and dedups against an
-  // already-migrated turn after switching away and back / reconcile).
-  const committedMaxId = useMemo(
-    () => items.reduce((m, t) => Math.max(m, Number(t?.history_id || 0)), 0),
-    [items],
-  );
+  // right after the committed list. committedMaxId (defined above) == q_last id;
+  // the tail's id == committedMaxId + 1, so `> committedMaxId` gates it (and
+  // dedups against an already-migrated turn after switching away and back).
   const liveVisible = !promptsOnly && !!liveTurn && Number(liveTurn.history_id || 0) > committedMaxId;
   const liveTurnSteps = liveVisible && Array.isArray(liveTurn?.steps) ? liveTurn!.steps : [];
   const renderedLiveTurn = liveVisible && liveTurn ? (
@@ -2214,7 +2323,7 @@ export default function CurrentHistoryView({
         </div>
       ) : (
       <>
-      <div data-id="current-history-scroll" ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div data-id="current-history-scroll" ref={scrollRef} className="flex-1 overflow-y-auto fade-scroll-y">
         <div data-id="current-history-list" data-agent-id={paneId || ''} className="mx-auto w-full max-w-3xl px-4 py-6 font-sans text-zinc-300">
           {loading ? (
             <div data-id="current-history-loading" className="space-y-6 py-2" aria-busy="true">
