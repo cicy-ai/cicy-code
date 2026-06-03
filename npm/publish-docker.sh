@@ -3,8 +3,13 @@
 #
 # Docker images are too big for npm (a 242 MB tarball gets HTTP 413 from the
 # registry), and the image is just a slowly-changing base environment — so it
-# lives on R2 and is published OCCASIONALLY (run this by hand when the env
-# changes), NOT on every release. Per-version binaries ship via npm.
+# lives on R2 and is published OCCASIONALLY, NOT on every release.
+#
+# RE-UPLOAD TRIGGER: only when the Dockerfile / base environment actually
+# changes (api/Dockerfile.runtime.base, api/Dockerfile.runtime, or their
+# system deps). A plain cicy-code version bump does NOT need a re-upload —
+# the per-version binary is installed inside the container via `npx cicy-code`
+# at runtime, so the base image stays valid across releases.
 #
 # Uploads two keys so callers can pin or float:
 #   /docker/cicy-code-<version>.tar.gz   (immutable, pinnable)
