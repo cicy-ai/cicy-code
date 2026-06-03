@@ -38,8 +38,18 @@ done
 [ -n "$best" ] || best="https://registry.npmjs.org"
 echo "cicy-code: using $best (${best_ms}ms)"
 
+# Resolve the authoritative latest version from npmjs, then pin it. npmmirror
+# syncs new *versions* within seconds but its `latest` dist-tag lags by
+# minutes — so an unpinned `npm i` against npmmirror can fetch a stale version
+# right after a release. Pinning the npmjs-resolved version sidesteps that (the
+# version itself is already mirrored on npmmirror, just not tagged latest yet).
+ver=$(curl -fsSL --max-time 8 "https://registry.npmjs.org/$PKG/latest" 2>/dev/null \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(s).version||""))}catch{}})' 2>/dev/null || echo "")
+spec="$PKG"; [ -n "$ver" ] && spec="$PKG@$ver"
+echo "cicy-code: installing $spec"
+
 # Global install so `cicy-code` lands on PATH. The chosen registry serves
 # both the main package and the matching platform binary sub-package.
-npm install -g "$PKG" --registry="$best"
+npm install -g "$spec" --registry="$best"
 
 echo "cicy-code: installed. Run:  cicy-code --help"
