@@ -10,6 +10,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/klauspost/compress v1.18.6
 	github.com/kr/pty v0.0.0-20150511174710-5cf931ef8f76
 	github.com/pkg/errors v0.8.1-0.20161029093637-248dadf4e906
 	github.com/resend/resend-go/v3 v3.7.0

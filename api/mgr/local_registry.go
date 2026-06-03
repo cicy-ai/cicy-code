@@ -1,42 +1,50 @@
 package main
 
-// local_registry.go — host a private skill registry in-process.
+// local_registry.go — the node's always-on self-hosted skill registry.
 //
-// The registry server (api/skillcmd) is just an http.Handler, so instead of
-// spawning `cicy-code skill registry serve` as a child process we run it on its
-// own port inside this daemon and own the lifecycle here. Config is persisted
-// to ~/cicy-ai/local-registry.json and auto-started on daemon boot when enabled,
-// so "turn on my team's registry" survives restarts.
+// Every cicy-code daemon hosts a private registry, permanently, mounted on its
+// own :8008 mux under "/registry". There is no start/stop. To share it you hand
+// a teammate the node's public address + a read token; they subscribe with a
+// URL + a team name (which becomes their install sub-path).
+//
+// "我的库" lists the node's own skills (~/cicy-ai/skills/private/*) and lets each
+// be toggled public — publishing it into the registry so subscribers can pull.
+//
+// The read token lives in ~/cicy-ai/global.json (key "skill_registry_token"),
+// generated on first boot. The registry is never open by default.
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
-	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"ttyd-go/skillcmd"
 )
 
+// localRegMountPrefix is where the registry is mounted on the daemon mux.
+const localRegMountPrefix = "/registry"
+
+// globalRegTokenKey is the global.json key holding the registry read token.
+const globalRegTokenKey = "skill_registry_token"
+
+// localRegistryConfig (~/cicy-ai/local-registry.json) holds non-secret-ish bits.
+// The read token now lives in global.json; Token here is read once for legacy
+// migration only.
 type localRegistryConfig struct {
-	Enabled    bool   `json:"enabled"`
-	Port       int    `json:"port"`
 	Dir        string `json:"dir"`
-	Token      string `json:"token"`
-	AdminToken string `json:"admin_token"`
+	Token      string `json:"token"`       // legacy: migrated into global.json on boot
+	AdminToken string `json:"admin_token"` // optional: gate remote publish/yank
 }
 
 var (
-	localRegMu     sync.Mutex
-	localRegSrv    *http.Server
-	localRegCfgMem localRegistryConfig
+	localRegMu      sync.Mutex
+	localRegHandler http.Handler // always non-nil after ensureLocalRegistry; StripPrefix-wrapped
 )
 
 func localRegistryConfigPath() string {
@@ -45,13 +53,9 @@ func localRegistryConfigPath() string {
 }
 
 func loadLocalRegConfig() localRegistryConfig {
-	cfg := localRegistryConfig{Port: 8787, Dir: skillcmd.DefaultLocalRegistryDir()}
-	data, err := os.ReadFile(localRegistryConfigPath())
-	if err == nil {
+	cfg := localRegistryConfig{Dir: skillcmd.DefaultLocalRegistryDir()}
+	if data, err := os.ReadFile(localRegistryConfigPath()); err == nil {
 		_ = json.Unmarshal(data, &cfg)
-	}
-	if cfg.Port == 0 {
-		cfg.Port = 8787
 	}
 	if cfg.Dir == "" {
 		cfg.Dir = skillcmd.DefaultLocalRegistryDir()
@@ -64,7 +68,7 @@ func saveLocalRegConfig(cfg localRegistryConfig) error {
 		return err
 	}
 	b, _ := json.MarshalIndent(cfg, "", "  ")
-	return os.WriteFile(localRegistryConfigPath(), b, 0o600) // holds tokens
+	return os.WriteFile(localRegistryConfigPath(), b, 0o600)
 }
 
 func genToken() string {
@@ -73,81 +77,119 @@ func genToken() string {
 	return hex.EncodeToString(b)
 }
 
-// startLocalRegistryLocked starts the in-process server. Caller holds localRegMu.
-func startLocalRegistryLocked(cfg localRegistryConfig) error {
-	if localRegSrv != nil {
-		// already running — stop first for a clean restart
-		_ = localRegSrv.Close()
-		localRegSrv = nil
+// regReadToken returns the registry read token from global.json ("" if unset).
+func regReadToken() string {
+	cfg := readGlobalJSONConfig()
+	if t, ok := cfg[globalRegTokenKey].(string); ok {
+		return strings.TrimSpace(t)
 	}
-	handler, err := skillcmd.NewRegistryHandler(cfg.Dir, cfg.Token, cfg.AdminToken, "")
+	return ""
+}
+
+// regSetToken persists the registry read token into global.json (read-modify-
+// write under the shared lock so we don't stomp other keys like api_token).
+func regSetToken(tok string) error {
+	providersFileMu.Lock()
+	defer providersFileMu.Unlock()
+	cfg := readGlobalJSONConfig()
+	cfg[globalRegTokenKey] = tok
+	return writeGlobalJSONConfig(cfg)
+}
+
+// daemonPort mirrors main()'s PORT resolution (default 8008).
+func daemonPort() string {
+	if p := os.Getenv("PORT"); p != "" {
+		return p
+	}
+	return "8008"
+}
+
+// selfPublicURL is the node's externally-reachable origin — the public URL the
+// daemon was launched with (CICY_PUBLIC_URL, injected by dev.py).
+func selfPublicURL() string {
+	if u := strings.TrimRight(os.Getenv("CICY_PUBLIC_URL"), "/"); u != "" {
+		return u
+	}
+	return "http://localhost:" + daemonPort()
+}
+
+// shareAddress is the full registry base a teammate subscribes to.
+func shareAddress() string { return selfPublicURL() + localRegMountPrefix }
+
+// shareURL is the single copy-paste share link: the address with the read token
+// embedded as ?token=…. The subscriber pastes just this (the client extracts
+// the token and sends it as a Bearer header, never as a query param).
+func shareURL(token string) string {
+	if token == "" {
+		return shareAddress()
+	}
+	return shareAddress() + "?token=" + neturl.QueryEscape(token)
+}
+
+// armLocalRegistryLocked (re)builds the mounted handler. Caller holds localRegMu.
+func armLocalRegistryLocked(cfg localRegistryConfig, token string) error {
+	h, err := skillcmd.NewRegistryHandlerWithPrefix(cfg.Dir, token, cfg.AdminToken, selfPublicURL(), localRegMountPrefix)
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{Addr: fmt.Sprintf(":%d", cfg.Port), Handler: handler}
-	ln, err := net.Listen("tcp", srv.Addr)
-	if err != nil {
-		return fmt.Errorf("listen :%d: %w", cfg.Port, err)
-	}
-	localRegSrv = srv
-	localRegCfgMem = cfg
-	go func() { _ = srv.Serve(ln) }()
+	localRegHandler = http.StripPrefix(localRegMountPrefix, h)
 	return nil
 }
 
-func stopLocalRegistryLocked() {
-	if localRegSrv == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	_ = localRegSrv.Shutdown(ctx)
-	localRegSrv = nil
-}
-
-// maybeAutostartLocalRegistry is called at daemon boot.
-func maybeAutostartLocalRegistry() {
-	cfg := loadLocalRegConfig()
-	if !cfg.Enabled {
-		return
-	}
+// ensureLocalRegistry runs once at daemon boot. Resolves the read token (from
+// global.json, migrating a legacy local-registry.json token, else generating
+// one) and arms the handler. The registry is always on — no enable/disable.
+func ensureLocalRegistry() {
 	localRegMu.Lock()
 	defer localRegMu.Unlock()
-	if err := startLocalRegistryLocked(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "[local-registry] autostart failed: %v\n", err)
+	// global.json holds secrets (api_token, registry read token) — keep it
+	// owner-only even if a previous version wrote it world-readable.
+	_ = os.Chmod(cicyGlobalJSONPath, 0o600)
+	cfg := loadLocalRegConfig()
+	tok := regReadToken()
+	if tok == "" {
+		if strings.TrimSpace(cfg.Token) != "" {
+			tok = strings.TrimSpace(cfg.Token) // migrate legacy token → global.json
+		} else {
+			tok = genToken()
+		}
+		_ = regSetToken(tok)
 	}
+	// Don't let a migrated token linger as a duplicate secret in
+	// local-registry.json — global.json is now the source of truth.
+	if strings.TrimSpace(cfg.Token) != "" {
+		cfg.Token = ""
+		_ = saveLocalRegConfig(cfg)
+	}
+	_ = armLocalRegistryLocked(cfg, tok)
 }
 
-// lanShareURLs returns http://<lan-ip>:<port> candidates to hand to teammates.
-func lanShareURLs(port int) []string {
-	var urls []string
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return urls
+// serveLocalRegistry is mounted at /registry/ on the daemon mux.
+func serveLocalRegistry(w http.ResponseWriter, r *http.Request) {
+	localRegMu.Lock()
+	h := localRegHandler
+	localRegMu.Unlock()
+	if h == nil {
+		localRegMu.Lock()
+		_ = armLocalRegistryLocked(loadLocalRegConfig(), regReadToken())
+		h = localRegHandler
+		localRegMu.Unlock()
 	}
-	for _, a := range addrs {
-		ipnet, ok := a.(*net.IPNet)
-		if !ok || ipnet.IP.IsLoopback() {
-			continue
-		}
-		ip4 := ipnet.IP.To4()
-		if ip4 == nil {
-			continue
-		}
-		urls = append(urls, fmt.Sprintf("http://%s:%d", ip4.String(), port))
+	if h == nil {
+		httpErr(w, 500, "local registry unavailable")
+		return
 	}
-	return urls
+	h.ServeHTTP(w, r)
 }
 
-// handleLocalRegistry: GET status / POST start|stop|publish.
+// handleLocalRegistry: manage the always-on registry (no start/stop).
 //
-//	GET  /api/local-registry            → status
-//	POST /api/local-registry/start      → {port?,dir?,token?,admin_token?}
-//	POST /api/local-registry/stop
-//	POST /api/local-registry/publish    → {path}
+//	GET  /api/local-registry            → status (address, token, my skills)
+//	POST /api/local-registry/rotate     → rotate the read token (invalidates old)
+//	POST /api/local-registry/publish    → {name} share a private skill (publish)
+//	POST /api/local-registry/unpublish  → {name} stop sharing (remove)
 func handleLocalRegistry(w http.ResponseWriter, r *http.Request) {
-	action := strings.TrimPrefix(r.URL.Path, "/api/local-registry")
-	action = strings.Trim(action, "/")
+	action := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/local-registry"), "/")
 
 	localRegMu.Lock()
 	defer localRegMu.Unlock()
@@ -156,80 +198,108 @@ func handleLocalRegistry(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "GET" && action == "":
 		writeLocalRegStatus(w)
 
-	case r.Method == "POST" && action == "start":
-		var body localRegistryConfig
-		_ = readBody(r, &body)
-		cfg := loadLocalRegConfig()
-		if body.Port != 0 {
-			cfg.Port = body.Port
-		}
-		if strings.TrimSpace(body.Dir) != "" {
-			cfg.Dir = strings.TrimSpace(body.Dir)
-		}
-		if strings.TrimSpace(body.Token) != "" {
-			cfg.Token = strings.TrimSpace(body.Token)
-		}
-		if cfg.Token == "" {
-			cfg.Token = genToken() // default: protect with a generated read token
-		}
-		if strings.TrimSpace(body.AdminToken) != "" {
-			cfg.AdminToken = strings.TrimSpace(body.AdminToken)
-		}
-		cfg.Enabled = true
-		if err := startLocalRegistryLocked(cfg); err != nil {
+	case r.Method == "POST" && action == "rotate":
+		tok := genToken()
+		if err := regSetToken(tok); err != nil {
 			httpErr(w, 500, err.Error())
 			return
 		}
-		if err := saveLocalRegConfig(cfg); err != nil {
+		if err := armLocalRegistryLocked(loadLocalRegConfig(), tok); err != nil {
 			httpErr(w, 500, err.Error())
 			return
 		}
-		writeLocalRegStatus(w)
-
-	case r.Method == "POST" && action == "stop":
-		stopLocalRegistryLocked()
-		cfg := loadLocalRegConfig()
-		cfg.Enabled = false
-		_ = saveLocalRegConfig(cfg)
 		writeLocalRegStatus(w)
 
 	case r.Method == "POST" && action == "publish":
 		var body struct {
+			Name string `json:"name"`
 			Path string `json:"path"`
 		}
-		if err := readBody(r, &body); err != nil || strings.TrimSpace(body.Path) == "" {
-			httpErr(w, 400, "path required")
-			return
+		_ = readBody(r, &body)
+		path := strings.TrimSpace(body.Path)
+		if path == "" {
+			name := strings.TrimSpace(body.Name)
+			if name == "" {
+				httpErr(w, 400, "name or path required")
+				return
+			}
+			path = filepath.Join(skillcmd.PrivateSkillsDir(), name)
 		}
 		cfg := loadLocalRegConfig()
-		name, version, err := skillcmd.PublishToDir(cfg.Dir, strings.TrimSpace(body.Path))
+		name, version, err := skillcmd.PublishToDir(cfg.Dir, path)
 		if err != nil {
 			httpErr(w, 400, err.Error())
 			return
 		}
-		J(w, M{"ok": true, "name": name, "version": version})
+		_ = name
+		_ = version
+		writeLocalRegStatus(w)
+
+	case r.Method == "POST" && action == "unpublish":
+		var body struct {
+			Name string `json:"name"`
+		}
+		if err := readBody(r, &body); err != nil || strings.TrimSpace(body.Name) == "" {
+			httpErr(w, 400, "name required")
+			return
+		}
+		cfg := loadLocalRegConfig()
+		if err := skillcmd.UnpublishFromDir(cfg.Dir, strings.TrimSpace(body.Name)); err != nil {
+			httpErr(w, 400, err.Error())
+			return
+		}
+		writeLocalRegStatus(w)
+
+	// Back-compat no-ops (the registry is always on now).
+	case r.Method == "POST" && (action == "start" || action == "stop"):
+		writeLocalRegStatus(w)
 
 	default:
 		httpErr(w, 405, "method not allowed")
 	}
 }
 
-// writeLocalRegStatus emits the current host status. Caller holds localRegMu.
+// mySkillView is one row in the "我的库" list: a private skill + whether it is
+// currently published (shared) into the registry.
+type mySkillView struct {
+	Name        string `json:"name"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
+	Version     string `json:"version"`
+	Published   bool   `json:"published"`
+}
+
+// writeLocalRegStatus emits the always-on registry's status. Caller holds localRegMu.
 func writeLocalRegStatus(w http.ResponseWriter) {
 	cfg := loadLocalRegConfig()
-	running := localRegSrv != nil
-	// when running, reflect the live config (port/dir/token may differ from disk
-	// only transiently, but they're persisted on start so this matches)
-	if running {
-		cfg = localRegCfgMem
+	published := map[string]bool{}
+	for _, s := range skillcmd.LocalRegistrySkills(cfg.Dir) {
+		published[s.Name] = true
 	}
+	mine := []mySkillView{}
+	for _, s := range skillcmd.ListPrivateSkills() {
+		v := mySkillView{Name: s.Name, Version: s.Version, Published: published[s.Name]}
+		if ms := privateMarketSkill(s.Name); ms != nil {
+			v.Title = ms.Title
+			v.Description = ms.Description
+			v.Category = ms.Category
+			if v.Version == "" {
+				v.Version = ms.Version
+			}
+		}
+		mine = append(mine, v)
+	}
+	tok := regReadToken()
 	J(w, M{
-		"running":    running,
-		"port":       cfg.Port,
+		"always_on":  true,
+		"address":    shareAddress(),
+		"share_url":  shareURL(tok), // single copy-paste link (token embedded)
+		"mount_path": localRegMountPrefix,
+		"port":       daemonPort(),
 		"dir":        cfg.Dir,
-		"token":      cfg.Token, // host's own session; needed to share
+		"token":      tok,
 		"has_admin":  cfg.AdminToken != "",
-		"skills":     skillcmd.LocalRegistrySkills(cfg.Dir),
-		"share_urls": lanShareURLs(cfg.Port),
+		"my_skills":  mine,
 	})
 }

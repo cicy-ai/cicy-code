@@ -100,5 +100,5 @@
   "scanWithWeChat": "Scan QR code in WeChat ClawBot Mini Program",
   "scanSuccessNote": "After scanning, the account is added automatically. Token is permanent — no re-scan needed after backend restart.",
   "regenerateAnotherQr": "Get a new QR code",
-  "fieldBindAgentHelpNoGateway": "After binding, IM messages are forwarded to the agent, but replies will not be pushed back to IM (only opencode / codex / claude support reply push). Each agent can only be bound to one account per platform."
+  "fieldBindAgentHelpNoGateway": "After binding, IM messages are forwarded to the agent and its replies are pushed back to IM (non-gateway agents are captured via the local MITM audit). If the agent is offline, messages fall back to w-10001. Each agent can only be bound to one account per platform."
 }

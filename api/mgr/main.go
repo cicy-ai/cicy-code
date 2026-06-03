@@ -18,6 +18,7 @@ import (
 
 	"ttyd-go/mgr/audit"
 	"ttyd-go/mgr/mitm"
+	ttydserver "ttyd-go/server"
 	"ttyd-go/skillcmd"
 
 	"github.com/gorilla/websocket"
@@ -33,6 +34,7 @@ var (
 	cnMirror      bool
 	previewMode   bool
 	hotMode       bool
+	cdnMode       bool
 	containerMode bool
 	helperMode    bool   // --helper=1 → ships a single Team Helper agent on w-6002
 	desktopCmd    *exec.Cmd
@@ -81,6 +83,10 @@ Options:
   --dev                   Development mode
   --preview               Serve app/dist from disk (run 'npm run build' to refresh)
   --hot                   Proxy the UI to the vite dev server on :8022 (HMR)
+  --cdn                   Serve the App SPA + ttyd bundle from Cloudflare R2
+                          (default: embedded local assets). The R2 version
+                          prefixes are baked into every build; this flag only
+                          activates them.
   --lab                   Enable lab mode
   --public                Listen on 0.0.0.0 (default: 127.0.0.1)
   --audit                 Enable audit mode
@@ -103,6 +109,8 @@ Options:
 			previewMode = true
 		case arg == "--hot":
 			hotMode = true
+		case arg == "--cdn":
+			cdnMode = true
 		case arg == "--lab":
 			labMode = true
 		case arg == "--public":
@@ -121,6 +129,10 @@ Options:
 		}
 	}
 
+	// --cdn activates the baked-in R2 prefixes for the ttyd bundle (the App SPA
+	// is handled in serveUI via cdnMode). Off → ttydStaticPrefix() returns ".".
+	ttydserver.CDNEnabled = cdnMode
+
 	ensureRuntimeUnprivileged()
 	initKV()
 	initRedis()
@@ -128,8 +140,14 @@ Options:
 	store.Migrate()
 	defer store.Close()
 
-	if err := audit.Init(); err != nil {
-		log.Printf("[audit] init failed (audit disabled): %v", err)
+	if auditEnabled() {
+		if err := audit.Init(); err != nil {
+			log.Printf("[audit] init failed: %v", err)
+		} else {
+			log.Printf("[audit] enabled (audit_enabled=true) — collection + scanning active")
+		}
+	} else {
+		log.Printf("[audit] OFF (set \"audit_enabled\": true in global.json to enable) — no collection, no scanning, no w-6001")
 	}
 	ensureMITMConfig() // seed ~/cicy-ai/mitm/config.json (enabled) before startMITM reads it
 	startMITM()
@@ -189,6 +207,8 @@ Options:
 	// (Autonomy decision routes are registered separately in startAutonomy.)
 	http.HandleFunc("/api/audit/events", wa(handleAuditEvents))
 	http.HandleFunc("/api/audit/events/", wa(handleAuditEventByID))
+	http.HandleFunc("/api/audit/triage", wa(handleAuditTriage))
+	http.HandleFunc("/api/audit/snapshot", wa(handleAuditSnapshot))
 	http.HandleFunc("/api/audit/stats", wa(handleAuditStats))
 	http.HandleFunc("/api/audit/agents", wa(handleAuditAgents))
 	http.HandleFunc("/api/audit/ingest", wa(handleAuditIngest))
@@ -298,6 +318,10 @@ Options:
 		handleNotifyStream(w, r)
 	}))
 
+	// Memory templates (global + project, backs create-agent dialog)
+	http.HandleFunc("/api/memory/templates", wa(handleMemoryTemplates))
+	http.HandleFunc("/api/memory/templates/", wa(handleMemoryTemplateByName))
+
 	// Todo
 	http.HandleFunc("/api/todo/list", wa(handleTodoList))
 	http.HandleFunc("/api/todo/add", wa(handleTodoAdd))
@@ -319,8 +343,11 @@ Options:
 	http.HandleFunc("/api/agents/pane/", wa(handleAgentsByPane))
 	http.HandleFunc("/api/agents/inspector/", wa(handleAgentInspectorByPane))
 	http.HandleFunc("/api/agents/current-history/", wa(handleAgentCurrentHistoryByPane))
+	http.HandleFunc("/api/agents/usage-log/", wa(handleAgentUsageLogByPane))
+	http.HandleFunc("/api/agents/usage-analysis/", wa(handleAgentUsageAnalysisByPane))
 	http.HandleFunc("/api/agents/current-history-tool/", wa(handleAgentCurrentHistoryToolDetailByPane))
 	http.HandleFunc("/api/agents/history-ids/", wa(handleAgentHistoryIDsByPane))
+	http.HandleFunc("/api/agents/current-reply/", wa(handleAgentCurrentReplyByPane))
 	http.HandleFunc("/api/agents/history-turn/", wa(handleAgentHistoryTurnByPane))
 	http.HandleFunc("/api/agents/history-sync/", wa(handleAgentHistorySyncByPane))
 	http.HandleFunc("/api/agents/history-view/", wa(handleAgentHistoryViewByPane))
@@ -354,6 +381,9 @@ Options:
 	http.HandleFunc("/api/skill-registries/", wa(handleSkillRegistries))
 	http.HandleFunc("/api/local-registry", wa(handleLocalRegistry))
 	http.HandleFunc("/api/local-registry/", wa(handleLocalRegistry))
+	// Private registry mounted on the daemon's own port (no daemon auth wrapper;
+	// it enforces its own read token). Share "<daemon URL>/registry" + token.
+	http.HandleFunc(localRegMountPrefix+"/", serveLocalRegistry)
 	http.HandleFunc("/api/skill-config/google", wa(handleGoogleSkillConfig))
 	http.HandleFunc("/api/skill-config/google/connect", wa(handleGoogleSkillConfig))
 	http.HandleFunc("/api/skill-config/google/device-connect", wa(handleGoogleSkillConfig))
@@ -536,7 +566,7 @@ Options:
 		os.Exit(0)
 	}()
 
-	maybeAutostartLocalRegistry()
+	ensureLocalRegistry() // always-on self-hosted skill registry at /registry
 
 	log.Fatal(http.ListenAndServe(bind+":"+port, globalCORS(withGzip(http.DefaultServeMux))))
 }

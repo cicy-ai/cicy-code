@@ -225,7 +225,12 @@ func (h *chatHub) register(c *chatClient) bool {
 		h.clients[c.agentID] = make(map[string]*chatClient)
 	}
 	existing := h.clients[c.agentID][c.clientID]
-	if existing != nil && existing != c && existing.idleFor() < activeClientGrace {
+	// A holder whose send buffer is full is a stuck/dead consumer (its write
+	// pump isn't draining — e.g. a half-open conn behind a proxy). Don't let the
+	// grace window protect it; let this genuine reconnect supersede it, otherwise
+	// it lingers forever and breaks server→client RPC (exec-js, push, etc.).
+	existingStuck := existing != nil && len(existing.send) >= cap(existing.send)
+	if existing != nil && existing != c && existing.idleFor() < activeClientGrace && !existingStuck {
 		if h.lastReject == nil {
 			h.lastReject = make(map[string]time.Time)
 		}

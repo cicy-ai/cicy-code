@@ -9,5 +9,9 @@
   "currentSelection": "Selected:",
   "noSelection": "Not selected",
   "selectAgentTypeHint": "Please pick an agent type.",
-  "noAgentTypesAvailable": "No agent types available right now."
+  "noAgentTypesAvailable": "No agent types available right now.",
+  "templateProjectLabel": "Project memory",
+  "templateRoleLabel": "Role library",
+  "templateNone": "None",
+  "templateHint": "The global template is always added; project/role are optional and copied into the new agent's memory file. Manage templates in the Inspector \"Memory\" tab."
 }

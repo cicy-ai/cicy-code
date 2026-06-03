@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
-import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu, Sparkles, MessageSquare } from 'lucide-react';
+import { BarChart3, Activity, Zap, Settings, ArrowLeft, Download, Copy, Check, DollarSign, Hash, Clock, TrendingUp, Cpu, Sparkles, MessageSquare, Minimize2, X, ShieldCheck } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
 import DecisionsTab from './DecisionsTab';
 import AssistantTab from './AssistantTab';
+import AuditLogTab from './AuditLogTab';
+import PolicyTab from './PolicyTab';
 import apiService from '../../services/api';
 import config from '../../config';
 import { TokenManager } from '../../services/tokenManager';
@@ -358,12 +360,51 @@ function LiveTab() {
   );
 }
 
-// ── Setup Tab ──
+// ── Local Setup (on-host MITM) ──
+// The cloud setup flow (proxy token + audit.cicy-ai.com) does not apply to a
+// local install: on-host agent traffic is already audited through the built-in
+// MITM. So locally we only surface the one real prerequisite — trusting the CA —
+// using local endpoints, and never call /setup or /api/audit/register (both
+// 404 off the cloud gateway).
+function LocalSetupTab() {
+  const { t } = useTranslation('audit');
+  const [caTrusted, setCaTrusted] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    apiService.getMitmCaStatus()
+      .then(r => setCaTrusted(!!(r.data?.trusted ?? r.data?.installed ?? r.data?.ok)))
+      .catch(() => setCaTrusted(null));
+  }, []);
+
+  return (
+    <div data-id="audit-setup-local" className="space-y-4 max-w-2xl">
+      <div className="flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-300">
+        <ShieldCheck size={16} />{t('localAutoAudited', '本机 agent 流量已通过内置 MITM 自动接入审计,无需配置代理。')}
+      </div>
+      <div className="bg-[var(--vsc-bg-secondary)] rounded-lg p-5 border border-[var(--vsc-border)]">
+        <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+          {t('localCaTitle', '信任本机 CA 证书')}
+          {caTrusted === true && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">{t('localCaTrusted', '已信任')}</span>}
+          {caTrusted === false && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">{t('localCaUntrusted', '未信任')}</span>}
+        </h3>
+        <p className="text-xs text-[var(--vsc-text-secondary)] mb-3">{t('localCaBody', '部分客户端(codex / kiro 等)需信任本机 CA,HTTPS 流量才能被审计扫描。')}</p>
+        <div className="flex items-center gap-2 bg-black/30 rounded-md px-3 py-2 font-mono text-xs text-[var(--vsc-text)]">
+          <span>cicy-code mitm install-ca</span>
+          <CopyButton text="cicy-code mitm install-ca" />
+        </div>
+        <div className="mt-2"><a href="/ca.pem" className="text-xs text-[var(--vsc-link)] hover:underline">{t('manualDownloadCert', '手动下载证书')}</a></div>
+      </div>
+    </div>
+  );
+}
+
+// ── Setup Tab (cloud) ──
 function SetupTab({ proxyToken, onRegister }: { proxyToken: string; onRegister: () => void }) {
   const { t } = useTranslation('audit');
   const [guide, setGuide] = useState<SetupGuide | null>(null);
 
   useEffect(() => {
+    if (!config.isAudit) return; // cloud-only endpoint; skip on local installs
     apiService.getSetupGuide()
       .then(r => setGuide(r.data?.data))
       .catch(() => {});
@@ -481,9 +522,23 @@ const defaultPlatforms = [
 ];
 
 // ── Main Dashboard ──
-export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
+type DashVariant = 'page' | 'embedded';
+interface AuditDashboardProps {
+  onBack?: () => void;
+  /** 'page' (default) = standalone #/audit route; 'embedded' = inside the
+   *  guard's maximized overlay (no h-screen, minimize/close header). */
+  variant?: DashVariant;
+  /** Subset + order of tabs to expose. Omitted = all tabs. */
+  tabs?: Tab[];
+  defaultTab?: Tab;
+  onClose?: () => void;
+  onMinimize?: () => void;
+}
+
+export default function AuditDashboard({ onBack, variant = 'page', tabs: tabsAllow, defaultTab, onClose, onMinimize }: AuditDashboardProps) {
   const { t } = useTranslation('audit');
-  const [tab, setTab] = useState<Tab>('assistant');
+  const embedded = variant === 'embedded';
+  const [tab, setTab] = useState<Tab>(defaultTab || tabsAllow?.[0] || 'assistant');
   const [userId, setUserId] = useState('');
   const [proxyToken, setProxyToken] = useState('');
   const [days, setDays] = useState(7);
@@ -515,33 +570,46 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
     }
   }, [userId]);
 
-  const tabs: { id: Tab; icon: typeof BarChart3; label: string }[] = [
-    { id: 'assistant', icon: MessageSquare, label: t('tabAssistant', 'Assistant') },
+  const allTabs: { id: Tab; icon: typeof BarChart3; label: string }[] = [
+    { id: 'assistant', icon: MessageSquare, label: embedded ? t('tabGuardChat', '守护') : t('tabAssistant', 'Assistant') },
     { id: 'overview', icon: BarChart3, label: t('tabOverview') },
     { id: 'usage', icon: Clock, label: t('tabUsage') },
-    { id: 'live', icon: Activity, label: t('tabLive') },
-    { id: 'agent', icon: Sparkles, label: t('tabAgent') },
-    { id: 'setup', icon: Settings, label: t('tabSetup') },
+    { id: 'live', icon: Activity, label: embedded ? t('tabLogs', '日志') : t('tabLive') },
+    { id: 'agent', icon: Sparkles, label: embedded ? t('tabPolicy', '策略') : t('tabAgent') },
+    { id: 'setup', icon: Settings, label: embedded ? t('tabInstall', '接入') : t('tabSetup') },
   ];
+  const tabs = tabsAllow
+    ? tabsAllow.map((id) => allTabs.find((x) => x.id === id)).filter((x): x is typeof allTabs[number] => !!x)
+    : allTabs;
 
   return (
-    <div data-id="audit-dashboard-root" className="h-screen flex flex-col bg-[var(--vsc-bg)] text-[var(--vsc-text)]">
+    <div data-id="audit-dashboard-root" className={`${embedded ? 'h-full' : 'h-screen'} flex flex-col bg-[var(--vsc-bg)] text-[var(--vsc-text)]`}>
       {/* Header */}
       <header data-id="audit-dashboard-header" className="flex items-center gap-3 px-4 py-3 border-b border-[var(--vsc-border)] bg-[var(--vsc-bg-titlebar)] shrink-0">
-        {onBack && (
+        {onBack && !embedded && (
           <button data-id="audit-dashboard-header-back" onClick={onBack} className="p-1 rounded hover:bg-[var(--vsc-bg-hover)] text-[var(--vsc-text-secondary)] hover:text-white transition-colors">
             <ArrowLeft size={16} />
           </button>
         )}
+        {embedded && onMinimize && (
+          <button data-id="audit-dashboard-header-minimize" onClick={onMinimize} title={t('guardMinimize', '缩小')} className="p-1 rounded hover:bg-[var(--vsc-bg-hover)] text-[var(--vsc-text-secondary)] hover:text-white transition-colors">
+            <Minimize2 size={16} />
+          </button>
+        )}
         <div data-id="audit-dashboard-header-brand" className="flex items-center gap-2">
-          <Zap size={18} className="text-blue-400" />
-          <span data-id="audit-dashboard-header-brand-name" className="font-semibold text-white text-sm">CiCy Audit</span>
+          {embedded ? <ShieldCheck size={18} className="text-emerald-400" /> : <Zap size={18} className="text-blue-400" />}
+          <span data-id="audit-dashboard-header-brand-name" className="font-semibold text-white text-sm">{embedded ? t('guardTitle') : 'CiCy Audit'}</span>
           <span data-id="audit-dashboard-header-brand-badge" className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-medium">{t('betaBadge')}</span>
         </div>
         <div data-id="audit-dashboard-header-spacer" className="flex-1" />
         <span data-id="audit-dashboard-header-user" className="text-xs text-[var(--vsc-text-muted)]">
           {userId && t('userBadge', { userId })}
         </span>
+        {embedded && onClose && (
+          <button data-id="audit-dashboard-header-close" onClick={onClose} title={t('guardHide')} className="p-1 rounded hover:bg-[var(--vsc-bg-hover)] text-[var(--vsc-text-secondary)] hover:text-white transition-colors">
+            <X size={16} />
+          </button>
+        )}
       </header>
 
       {/* Tab bar */}
@@ -560,9 +628,13 @@ export default function AuditDashboard({ onBack }: { onBack?: () => void }) {
         {tab === 'assistant' && <AssistantTab />}
         {tab === 'overview' && <OverviewTab userId={userId} days={days} setDays={setDays} />}
         {tab === 'usage' && <UsageTab userId={userId} />}
-        {tab === 'live' && <LiveTab />}
-        {tab === 'agent' && <DecisionsTab />}
-        {tab === 'setup' && <SetupTab proxyToken={proxyToken} onRegister={handleRegister} />}
+        {/* /api/audit/live SSE only exists on the cloud audit gateway; on a
+            local install use the REST events endpoint instead of a dead SSE. */}
+        {tab === 'live' && (config.isAudit ? <LiveTab /> : <AuditLogTab />)}
+        {tab === 'agent' && (embedded ? <PolicyTab /> : <DecisionsTab />)}
+        {/* Cloud setup (proxy token / register) 404s on a local install — show
+            the local MITM CA setup instead. */}
+        {tab === 'setup' && (config.isAudit ? <SetupTab proxyToken={proxyToken} onRegister={handleRegister} /> : <LocalSetupTab />)}
       </main>
     </div>
   );

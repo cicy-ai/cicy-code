@@ -9,5 +9,9 @@
   "currentSelection": "当前选择：",
   "noSelection": "未选择",
   "selectAgentTypeHint": "请选择一个智能体类型。",
-  "noAgentTypesAvailable": "当前没有可用智能体类型。"
+  "noAgentTypesAvailable": "当前没有可用智能体类型。",
+  "templateProjectLabel": "项目记忆",
+  "templateRoleLabel": "角色库",
+  "templateNone": "无",
+  "templateHint": "全局模板默认加入;项目/角色可选,拷入新 agent 的记忆文件。模板在 Inspector「记忆」tab 管理。"
 }

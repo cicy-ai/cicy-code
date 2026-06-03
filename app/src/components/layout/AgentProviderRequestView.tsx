@@ -5,7 +5,7 @@ import i18n from '../../i18n';
 import apiService from '../../services/api';
 import { Spinner } from '../ui/Spinner';
 
-export type RequestViewTab = 'tools' | 'brain' | 'meta';
+export type RequestViewTab = 'tools' | 'brain' | 'meta' | 'usage' | 'analysis';
 type BrainInnerTab = 'instructions' | 'developer';
 type TranslationEntry = { translated: string[]; loading: boolean; source: string };
 type TranslationState = Record<string, TranslationEntry>;
@@ -54,16 +54,23 @@ function renderTranslateToggleButton(baseId: string, translationState: Translati
   const translated = translationState?.translated || [];
   const loading = !!translationState?.loading;
   const hasTranslation = translated.some((part) => String(part || '').trim());
+  // Icon-only: the label lives in the tooltip / aria-label, not on screen.
+  const label = loading
+    ? i18n.t('translating', { ns: 'agentProviderRequest' })
+    : hasTranslation
+      ? i18n.t('hideTranslation', { ns: 'agentProviderRequest' })
+      : i18n.t('translate', { ns: 'agentProviderRequest' });
   return (
     <button
       type="button"
       data-id={`${safeId}-translate`}
       onClick={onTranslate}
       disabled={loading}
-      className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] transition-colors disabled:opacity-50 ${hasTranslation ? 'bg-emerald-500/12 text-emerald-300 hover:bg-emerald-500/18' : 'bg-white/[0.06] text-zinc-300 hover:bg-white/[0.10]'}`}
+      title={label}
+      aria-label={label}
+      className={`inline-flex items-center justify-center rounded-md p-1 transition-colors disabled:opacity-50 ${hasTranslation ? 'bg-emerald-500/12 text-emerald-300 hover:bg-emerald-500/18' : 'bg-white/[0.06] text-zinc-300 hover:bg-white/[0.10]'}`}
     >
-      <Languages className="h-3.5 w-3.5" />
-      {loading ? i18n.t('translating', { ns: 'agentProviderRequest' }) : hasTranslation ? i18n.t('hideTranslation', { ns: 'agentProviderRequest' }) : i18n.t('translate', { ns: 'agentProviderRequest' })}
+      {loading ? <Spinner size="xs" /> : <Languages className="h-3.5 w-3.5" />}
     </button>
   );
 }
@@ -280,11 +287,12 @@ export default function AgentProviderRequestView({
   paneId,
   open,
   tab,
-  inspectorVersion,
 }: {
   paneId: string;
   open: boolean;
   tab: RequestViewTab;
+  // Still accepted from callers for API compatibility, but intentionally
+  // unused: the snapshot is navigation-driven, not refreshed per chat turn.
   inspectorVersion?: number;
 }) {
   const { t } = useTranslation('agentProviderRequest');
@@ -294,6 +302,12 @@ export default function AgentProviderRequestView({
   const [selectedToolName, setSelectedToolName] = useState<string | null>(null);
   const [translationState, setTranslationState] = useState<TranslationState>({});
 
+  // Only fetch the provider-request snapshot when the user navigates to a view
+  // that needs it (open becomes true for the tools/brain/meta tabs) or switches
+  // agent (paneId changes). It deliberately does NOT depend on inspectorVersion:
+  // the server bumps that on every status_change / current_updated / ai_done, so
+  // depending on it fired a fresh GET /api/agents/inspector/:id (×3 at end-of-turn)
+  // throughout a live conversation. The snapshot is navigation-driven, not live.
   useEffect(() => {
     if (!open || !paneId) return;
     let cancelled = false;
@@ -314,7 +328,7 @@ export default function AgentProviderRequestView({
     return () => {
       cancelled = true;
     };
-  }, [open, paneId, inspectorVersion]);
+  }, [open, paneId]);
 
   const sections = useMemo(() => Array.isArray(data?.sections) ? data.sections : [], [data]);
   const promptSection = useMemo(() => sections.find((section: any) => section?.type === 'prompt') || null, [sections]);

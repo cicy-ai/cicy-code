@@ -194,6 +194,11 @@ func (c *Config) applyDefaults() {
 			// Exact-match only (see IsWhitelisted) — host observed as
 			// "opencode.ai:443" in the MITM upstream logs.
 			"opencode.ai",
+			// codex "Sign in with ChatGPT" (OAuth) routes model turns through
+			// chatgpt.com/backend-api/codex/responses (NOT api.openai.com). codex
+			// is Rust and trusts the MITM CA via the system store
+			// (ensureMITMCAInSystemTrust in setup.go), so interception works.
+			"chatgpt.com",
 		}
 	}
 	if c.Node.MaxHops == 0 {

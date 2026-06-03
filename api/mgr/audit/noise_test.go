@@ -13,7 +13,7 @@ func TestNoise_Suspended(t *testing.T) {
 	n := newNoiseTracker()
 	cfg := DefaultNotifyConfig()
 	cfg.Suspended = true
-	got := n.EvaluateNotify("a", "r", "h", 1, cfg)
+	got := n.EvaluateNotify("a", "r", "h", 1, cfg, SeverityMedium)
 	if got != "suspended" {
 		t.Errorf("suspended: got %q want suspended", got)
 	}
@@ -27,12 +27,12 @@ func TestNoise_RateLimit(t *testing.T) {
 	cfg.Cooldown.Seconds = 0 // disable cooldown for this test
 
 	for i := 1; i <= 3; i++ {
-		if reason := n.EvaluateNotify("agent-1", "rule.x", "h"+string(rune(i)), int64(i), cfg); reason != "" {
+		if reason := n.EvaluateNotify("agent-1", "rule.x", "h"+string(rune(i)), int64(i), cfg, SeverityMedium); reason != "" {
 			t.Errorf("call %d: unexpected suppress %q", i, reason)
 		}
 	}
 	// 4th call within window must be rate-limited.
-	if reason := n.EvaluateNotify("agent-1", "rule.x", "h4", 4, cfg); reason != "rate_limit" {
+	if reason := n.EvaluateNotify("agent-1", "rule.x", "h4", 4, cfg, SeverityMedium); reason != "rate_limit" {
 		t.Errorf("4th call: got %q want rate_limit", reason)
 	}
 }
@@ -44,14 +44,14 @@ func TestNoise_RateLimit_DistinctAgentsIndependent(t *testing.T) {
 	cfg.RateLimit.MaxPerAgentPerRule = 1
 	cfg.Cooldown.Seconds = 0
 
-	if reason := n.EvaluateNotify("agent-A", "rule.x", "h1", 1, cfg); reason != "" {
+	if reason := n.EvaluateNotify("agent-A", "rule.x", "h1", 1, cfg, SeverityMedium); reason != "" {
 		t.Errorf("A: %q want \"\"", reason)
 	}
-	if reason := n.EvaluateNotify("agent-B", "rule.x", "h2", 2, cfg); reason != "" {
+	if reason := n.EvaluateNotify("agent-B", "rule.x", "h2", 2, cfg, SeverityMedium); reason != "" {
 		t.Errorf("B same rule should be independent: %q", reason)
 	}
 	// Same agent again should hit limit.
-	if reason := n.EvaluateNotify("agent-A", "rule.x", "h3", 3, cfg); reason != "rate_limit" {
+	if reason := n.EvaluateNotify("agent-A", "rule.x", "h3", 3, cfg, SeverityMedium); reason != "rate_limit" {
 		t.Errorf("A second: %q want rate_limit", reason)
 	}
 }
@@ -62,19 +62,19 @@ func TestNoise_Cooldown(t *testing.T) {
 	cfg.Cooldown.Seconds = 100
 	cfg.RateLimit.MaxPerAgentPerRule = 1000 // effectively disabled
 
-	if reason := n.EvaluateNotify("a", "r", "fh-1", 0, cfg); reason != "" {
+	if reason := n.EvaluateNotify("a", "r", "fh-1", 0, cfg, SeverityMedium); reason != "" {
 		t.Errorf("first: %q want \"\"", reason)
 	}
 	// 50s later — within 100s cooldown.
-	if reason := n.EvaluateNotify("a", "r", "fh-1", 50*int64(1e9), cfg); reason != "cooldown" {
+	if reason := n.EvaluateNotify("a", "r", "fh-1", 50*int64(1e9), cfg, SeverityMedium); reason != "cooldown" {
 		t.Errorf("within cooldown: %q want cooldown", reason)
 	}
 	// Different finding hash — must NOT be cooled down.
-	if reason := n.EvaluateNotify("a", "r", "fh-2", 50*int64(1e9), cfg); reason != "" {
+	if reason := n.EvaluateNotify("a", "r", "fh-2", 50*int64(1e9), cfg, SeverityMedium); reason != "" {
 		t.Errorf("different hash within window: %q want \"\"", reason)
 	}
 	// 101s later — cooldown expired.
-	if reason := n.EvaluateNotify("a", "r", "fh-1", 101*int64(1e9), cfg); reason != "" {
+	if reason := n.EvaluateNotify("a", "r", "fh-1", 101*int64(1e9), cfg, SeverityMedium); reason != "" {
 		t.Errorf("after cooldown: %q want \"\"", reason)
 	}
 }
@@ -119,13 +119,10 @@ func TestPipeline_Cooldown_EndToEnd(t *testing.T) {
 	p, workersRoot := setupPipelineWithPolicy(t, pol)
 
 	payload := []byte("call 13800138000")
-	for i := 0; i < 2; i++ {
-		// pii.phone_cn defaults to LOW severity → action=log → cooldown
-		// won't trigger. Override to HIGH so action=notify, then cooldown
-		// kicks in on repeats.
-	}
-	// Use phone_cn promoted to high so action=notify.
-	pol.RulesOverride = []RuleOverride{{ID: "pii.phone_cn", Severity: SeverityHigh}}
+	// pii.phone_cn defaults to LOW → action=log. Promote to MEDIUM so the
+	// action becomes notify AND the finding stays cooldown-suppressible
+	// (high/critical deliberately pierce cooldown so real leaks aren't muted).
+	pol.RulesOverride = []RuleOverride{{ID: "pii.phone_cn", Severity: SeverityMedium}}
 	if err := p.ApplyPolicy(pol); err != nil {
 		t.Fatal(err)
 	}
@@ -193,6 +190,57 @@ func TestPipeline_RateLimit_EndToEnd(t *testing.T) {
 	}
 	if events[2].Meta.NotifySuppressedBy != "rate_limit" {
 		t.Errorf("third should be rate-limited, got %q", events[2].Meta.NotifySuppressedBy)
+	}
+}
+
+func TestNoise_SeverityPiercing(t *testing.T) {
+	// Critical pierces an explicit suspend; high still respects it.
+	{
+		n := newNoiseTracker()
+		cfg := DefaultNotifyConfig()
+		cfg.Suspended = true
+		if r := n.EvaluateNotify("a", "r", "h", 1, cfg, SeverityCritical); r != "" {
+			t.Errorf("critical should pierce suspend, got %q", r)
+		}
+		if r := n.EvaluateNotify("a", "r", "h", 2, cfg, SeverityHigh); r != "suspended" {
+			t.Errorf("high should respect suspend, got %q", r)
+		}
+	}
+
+	// High pierces cooldown; medium is muted by it.
+	{
+		n := newNoiseTracker()
+		cfg := DefaultNotifyConfig()
+		cfg.Cooldown.Seconds = 100
+		cfg.RateLimit.WindowSeconds = 0 // isolate cooldown
+		n.EvaluateNotify("a", "r", "fh", 0, cfg, SeverityMedium) // anchor
+		if r := n.EvaluateNotify("a", "r", "fh", 10*int64(1e9), cfg, SeverityMedium); r != "cooldown" {
+			t.Errorf("medium should cooldown, got %q", r)
+		}
+		if r := n.EvaluateNotify("a", "r", "fh", 11*int64(1e9), cfg, SeverityHigh); r != "" {
+			t.Errorf("high should pierce cooldown, got %q", r)
+		}
+		if r := n.EvaluateNotify("a", "r", "fh", 12*int64(1e9), cfg, SeverityCritical); r != "" {
+			t.Errorf("critical should pierce cooldown, got %q", r)
+		}
+	}
+
+	// High is still flood-limited; critical pierces rate limit.
+	{
+		n := newNoiseTracker()
+		cfg := DefaultNotifyConfig()
+		cfg.Cooldown.Seconds = 0 // isolate rate limit
+		cfg.RateLimit.WindowSeconds = 3600
+		cfg.RateLimit.MaxPerAgentPerRule = 1
+		if r := n.EvaluateNotify("a", "rr", "h1", 1, cfg, SeverityHigh); r != "" {
+			t.Errorf("first high should pass, got %q", r)
+		}
+		if r := n.EvaluateNotify("a", "rr", "h2", 2, cfg, SeverityHigh); r != "rate_limit" {
+			t.Errorf("second high should rate_limit, got %q", r)
+		}
+		if r := n.EvaluateNotify("a", "rr", "h3", 3, cfg, SeverityCritical); r != "" {
+			t.Errorf("critical should pierce rate_limit, got %q", r)
+		}
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
@@ -18,6 +19,11 @@ import (
 )
 
 var BuiltTTYDCDNPrefix string
+
+// CDNEnabled toggles whether the ttyd UI references its bundle from the baked-in
+// CDN prefix (BuiltTTYDCDNPrefix) or from the locally-served "." path. Set once
+// at startup from the --cdn flag. Off by default → local embedded assets.
+var CDNEnabled bool
 
 func (server *Server) generateHandleWS(ctx context.Context, cancel context.CancelFunc, counter *counter) http.HandlerFunc {
 	once := new(int64)
@@ -95,6 +101,40 @@ func (server *Server) generateHandleWS(ctx context.Context, cancel context.Cance
 }
 
 func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn) error {
+	// Keepalive: reap dead/half-open peers. A mobile TG webview (or any tab)
+	// can vanish without sending a TCP FIN; without this the webtty master
+	// read loop blocks on conn.Read forever, tty.Run never returns, and the
+	// deferred slave.Close()/conn.Close() never run — so the backend
+	// `tmux attach` lingers as a ghost client that wedges the shared tmux
+	// window to its stale size. Server-driven pings plus a pong-extended read
+	// deadline force conn.Read to error out within ~pongWait of the peer going
+	// away, which unblocks tty.Run and lets the deferred closes fire.
+	const (
+		pongWait   = 60 * time.Second
+		pingPeriod = 25 * time.Second
+	)
+	conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+	pingCtx, stopPing := context.WithCancel(ctx)
+	defer stopPing()
+	go func() {
+		ticker := time.NewTicker(pingPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-pingCtx.Done():
+				return
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second)); err != nil {
+					return
+				}
+			}
+		}
+	}()
+
 	typ, initLine, err := conn.ReadMessage()
 	if err != nil {
 		return errors.Wrapf(err, "failed to authenticate websocket connection")
@@ -224,6 +264,9 @@ func (server *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func ttydStaticPrefix() string {
+	if !CDNEnabled {
+		return "."
+	}
 	prefix := strings.TrimRight(BuiltTTYDCDNPrefix, "/")
 	if prefix == "" {
 		return "."

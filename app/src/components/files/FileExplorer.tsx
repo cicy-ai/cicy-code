@@ -8,7 +8,7 @@ import {
 } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronRight, ChevronDown, File as FileIcon, Folder, FolderOpen, RefreshCw, Send, Eye, EyeOff, Info, Star, Trash2, Edit3, FilePlus, FolderPlus, Upload, Download, Link as LinkIcon, PanelLeftClose } from 'lucide-react';
-import { fsApi, FsEntry, FsListResponse, FsFavorite, FsRoot, joinFsPath } from './api';
+import { fsApi, FsEntry, FsListResponse, FsFavorite, FsRoot, joinFsPath, fsParent, fsBasename } from './api';
 import { fsCachePeek, fsCacheSet, fsKey } from './fsCache';
 
 // Copy text to the clipboard, with an execCommand fallback for INSECURE origins
@@ -61,18 +61,29 @@ interface FileExplorerProps {
   onRemoveFavorite?: (path: string) => void;
   /** CRUD handlers (rename/delete/mkdir/touch). Each may be undefined to hide
    *  the corresponding context-menu entry. */
-  onRename?: (path: string, isDir: boolean) => void;
+  /** The optional trailing `root` is the fs root id the path belongs to; it
+   *  defaults to the workspace and is passed through for extra-root (projects /
+   *  skills / home) context-menu actions. */
+  onRename?: (path: string, isDir: boolean, root?: string) => void;
   /** Single or multi delete. The handler decides confirm/dialog. */
-  onDelete?: (paths: string[], isDir: boolean) => void;
-  onNewFile?: (parentDir: string) => void;
-  onNewFolder?: (parentDir: string) => void;
+  onDelete?: (paths: string[], isDir: boolean, root?: string) => void;
+  onNewFile?: (parentDir: string, root?: string) => void;
+  onNewFolder?: (parentDir: string, root?: string) => void;
+  /** Move one or more root-relative paths into `destDir` (drag-and-drop).
+   *  The handler performs fsApi.rename(from → destDir/basename) per source and
+   *  refreshes the affected directories. Undefined ⇒ drag-to-move disabled. */
+  onMove?: (sources: string[], destDir: string, root?: string) => void;
   /** Upload files into the given directory (handler responsible for iterating
    *  the FileList and calling fsApi.upload). */
-  onUpload?: (parentDir: string, files: FileList) => void;
-  /** Trigger a direct download of the given workspace-relative file path. */
-  onDownload?: (path: string) => void;
+  onUpload?: (parentDir: string, files: FileList, root?: string) => void;
+  /** Trigger a direct download of the given file path under `root`. */
+  onDownload?: (path: string, root?: string) => void;
   /** Collapse (hide) the explorer panel — wired to the FILES header button. */
   onCollapse?: () => void;
+  /** When set, the primary tree is anchored to this fs root (e.g. "memory")
+   *  instead of the workspace, and the extra-root sections are hidden. The CRUD
+   *  handlers from the parent must operate on the same root. */
+  scopeRoot?: string;
   className?: string;
 }
 
@@ -134,16 +145,23 @@ export default function FileExplorer({
   onDelete,
   onNewFile,
   onNewFolder,
+  onMove,
   onUpload,
   onDownload,
   onCollapse,
+  scopeRoot,
   className,
 }: FileExplorerProps) {
+  // When scopeRoot is set the primary tree is anchored to that fs root (e.g.
+  // "memory") instead of the workspace, and the extra-root sections are hidden.
+  const primaryRoot = scopeRoot || 'workspace';
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const pendingUploadDirRef = useRef<string>('');
-  const triggerUpload = useCallback((parentDir: string) => {
+  const pendingUploadRootRef = useRef<string | undefined>(undefined);
+  const triggerUpload = useCallback((parentDir: string, root?: string) => {
     if (!onUpload || !uploadInputRef.current) return;
     pendingUploadDirRef.current = parentDir;
+    pendingUploadRootRef.current = root;
     uploadInputRef.current.value = '';
     uploadInputRef.current.click();
   }, [onUpload]);
@@ -171,7 +189,9 @@ export default function FileExplorer({
       .roots(agentId)
       .then((rs) => {
         if (cancelled) return;
-        setExtraRoots(rs.filter((r) => r.id !== 'workspace'));
+        // Exclude 'workspace' (rendered as the main tree above) and 'memory'
+        // (managed via the dedicated Memory view, not the file explorer).
+        setExtraRoots(rs.filter((r) => r.id !== 'workspace' && r.id !== 'memory'));
       })
       .catch(() => {});
     return () => {
@@ -193,7 +213,7 @@ export default function FileExplorer({
       const cur = dirs.get(dirPath);
       if (!opts.force && cur && (cur.loaded || cur.loading)) return;
 
-      const key = fsKey.list(agentId, dirPath, showHidden);
+      const key = fsKey.list(agentId, dirPath, showHidden, primaryRoot);
       const cached = fsCachePeek<FsListResponse>('list', key);
       setDirs((prev) => {
         const next = new Map(prev);
@@ -215,7 +235,7 @@ export default function FileExplorer({
       if (cached) onDirLoaded?.(dirPath);
 
       try {
-        const res = await fsApi.list(agentId, dirPath, { hidden: showHidden });
+        const res = await fsApi.list(agentId, dirPath, { hidden: showHidden, root: primaryRoot });
         fsCacheSet('list', key, res);
         setDirs((prev) => {
           const next = new Map(prev);
@@ -250,7 +270,7 @@ export default function FileExplorer({
         });
       }
     },
-    [agentId, dirs, showHidden, onDirLoaded],
+    [agentId, dirs, showHidden, onDirLoaded, primaryRoot],
   );
 
   // External (watcher-driven) refresh: when dirRefreshNonce bumps for a dir
@@ -370,10 +390,10 @@ export default function FileExplorer({
       } else {
         const ds = dirs.get(node.path.includes('/') ? node.path.slice(0, node.path.lastIndexOf('/')) : ROOT_PATH);
         const entry = ds?.entries.find((e) => e.name === node.name);
-        if (entry) onOpenFile(node.path, entry);
+        if (entry) onOpenFile(node.path, entry, primaryRoot);
       }
     },
-    [anchor, dirs, onOpenFile, toggleExpand, visible],
+    [anchor, dirs, onOpenFile, toggleExpand, visible, primaryRoot],
   );
 
   const handleContextMenu = useCallback((e: React.MouseEvent, node: VisibleNode) => {
@@ -386,6 +406,132 @@ export default function FileExplorer({
     }
     setMenu({ x: e.clientX, y: e.clientY, path: node.path, name: node.name, isDir: node.isDir });
   }, [selected]);
+
+  // --- drag-and-drop move ------------------------------------------------
+  // The paths being dragged (the dragged node, or the whole multi-selection
+  // when the dragged node is part of it). Held in a ref because dataTransfer
+  // isn't readable during dragover (only on drop).
+  const dragSourcesRef = useRef<string[]>([]);
+  // The section/root the active drag originated from. Moves are confined to the
+  // SAME section: a drop is only honored when the target's root === this. Guards
+  // against cross-section moves (e.g. two explorers on screen, or a future drag
+  // source in another section) — a stale/foreign source ref won't match.
+  const dragSourceRootRef = useRef<string>('');
+  // Custom MIME marking the drag as an internal cicy-fs move from `primaryRoot`,
+  // readable on drop to reject foreign / cross-section sources cross-instance.
+  const DRAG_ROOT_MIME = 'application/x-cicy-fs-root';
+  // The directory currently hovered as a drop target (for highlight). null when
+  // not dragging or hovering a non-droppable spot. ROOT_PATH ('') = workspace root.
+  const [dragOverDir, setDragOverDir] = useState<string | null>(null);
+
+  // True only when the active drag belongs to THIS section (same root). Used to
+  // gate every drop/highlight so a move can never cross sections.
+  const dragIsSameSection = useCallback(
+    () => dragSourcesRef.current.length > 0 && dragSourceRootRef.current === primaryRoot,
+    [primaryRoot],
+  );
+
+  // A move into `destDir` is invalid when the source is already there, is the
+  // dest itself, or is an ancestor of the dest (can't move a dir into its own
+  // subtree). Returns true when at least one source can actually move.
+  const canDropInto = useCallback((sources: string[], destDir: string) => {
+    return sources.some((from) => {
+      if (from === destDir) return false;
+      if (fsParent(from) === destDir) return false;
+      if (destDir === from || destDir.startsWith(from + '/')) return false;
+      return true;
+    });
+  }, []);
+
+  const handleDragStart = useCallback(
+    (e: React.DragEvent, node: VisibleNode) => {
+      if (!onMove || scopeRoot) return;
+      // Drag the whole selection when the grabbed node is part of a multi-select;
+      // otherwise just this node (and make it the selection for visual feedback).
+      const sources = selected.has(node.path) && selected.size > 1
+        ? Array.from(selected)
+        : [node.path];
+      if (!(selected.has(node.path) && selected.size > 1)) {
+        setSelected(new Set([node.path]));
+        setAnchor(node.path);
+      }
+      dragSourcesRef.current = sources;
+      dragSourceRootRef.current = primaryRoot;
+      e.dataTransfer.effectAllowed = 'move';
+      // Some browsers require a payload for the drag to start.
+      try { e.dataTransfer.setData('text/plain', sources.join('\n')); } catch {}
+      try { e.dataTransfer.setData(DRAG_ROOT_MIME, primaryRoot); } catch {}
+    },
+    [onMove, scopeRoot, selected, primaryRoot],
+  );
+
+  const handleDragOverNode = useCallback(
+    (e: React.DragEvent, node: VisibleNode) => {
+      if (!onMove || !dragIsSameSection()) return;
+      const destDir = node.isDir ? node.path : fsParent(node.path);
+      if (!canDropInto(dragSourcesRef.current, destDir)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      setDragOverDir(destDir);
+    },
+    [onMove, canDropInto],
+  );
+
+  // Reject a foreign / cross-section drop: the drag started in another root (or
+  // didn't originate from a cicy-fs move at all). Clears any highlight state.
+  const isForeignDrop = useCallback(
+    (e: React.DragEvent) => {
+      if (dragIsSameSection()) return false;
+      const fromMime = (() => { try { return e.dataTransfer.getData(DRAG_ROOT_MIME); } catch { return ''; } })();
+      return fromMime !== primaryRoot;
+    },
+    [dragIsSameSection, primaryRoot],
+  );
+
+  const resetDragState = useCallback(() => {
+    setDragOverDir(null);
+    dragSourcesRef.current = [];
+    dragSourceRootRef.current = '';
+  }, []);
+
+  const handleDropNode = useCallback(
+    (e: React.DragEvent, node: VisibleNode) => {
+      if (!onMove) return;
+      if (isForeignDrop(e)) { resetDragState(); return; }
+      const destDir = node.isDir ? node.path : fsParent(node.path);
+      const sources = dragSourcesRef.current;
+      e.preventDefault();
+      e.stopPropagation();
+      resetDragState();
+      if (canDropInto(sources, destDir)) onMove(sources, destDir);
+    },
+    [onMove, canDropInto, isForeignDrop, resetDragState],
+  );
+
+  // Dropping onto empty space / the workspace section background = move to root.
+  const handleDragOverRoot = useCallback(
+    (e: React.DragEvent) => {
+      if (!onMove || scopeRoot || !dragIsSameSection()) return;
+      if (!canDropInto(dragSourcesRef.current, ROOT_PATH)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      setDragOverDir(ROOT_PATH);
+    },
+    [onMove, scopeRoot, canDropInto, dragIsSameSection],
+  );
+
+  const handleDropRoot = useCallback(
+    (e: React.DragEvent) => {
+      if (!onMove || scopeRoot) return;
+      if (isForeignDrop(e)) { resetDragState(); return; }
+      const sources = dragSourcesRef.current;
+      e.preventDefault();
+      resetDragState();
+      if (canDropInto(sources, ROOT_PATH)) onMove(sources, ROOT_PATH);
+    },
+    [onMove, scopeRoot, canDropInto, isForeignDrop, resetDragState],
+  );
 
   // Close context menu on outside click / escape
   useEffect(() => {
@@ -460,7 +606,7 @@ export default function FileExplorer({
           onChange={(e) => {
             const files = e.target.files;
             if (files && files.length > 0) {
-              onUpload(pendingUploadDirRef.current, files);
+              onUpload(pendingUploadDirRef.current, files, pendingUploadRootRef.current);
             }
             // Reset so picking the same file again still fires onChange.
             e.target.value = '';
@@ -469,13 +615,13 @@ export default function FileExplorer({
       )}
       <div ref={scrollRef} data-id="file-explorer-scroll" className="flex-1 overflow-auto">
         <CollapsibleHeader
-          label="WORKSPACE"
+          label={scopeRoot ? scopeRoot.toUpperCase() : 'WORKSPACE'}
           expanded={workspaceExpanded}
           onToggle={() => setWorkspaceExpanded((v) => !v)}
           dataId="file-explorer-section-workspace-header"
         />
-        {workspaceExpanded && rootState?.loading && (
-          <div className="px-3 py-2 text-xs text-zinc-500">加载中…</div>
+        {workspaceExpanded && rootState?.loading && !rootState?.loaded && (
+          <TreeSkeleton rows={7} />
         )}
         {workspaceExpanded && rootState?.error && (
           <div className="px-3 py-2 text-xs text-red-400">{rootState.error}</div>
@@ -484,12 +630,18 @@ export default function FileExplorer({
           <div className="px-3 py-2 text-xs text-zinc-500">空目录</div>
         )}
         <div
+          data-id="file-explorer-root-dropzone"
+          data-drop-target={onMove && dragOverDir === ROOT_PATH ? 'true' : 'false'}
+          onDragOver={onMove ? handleDragOverRoot : undefined}
+          onDragLeave={onMove ? () => setDragOverDir((d) => (d === ROOT_PATH ? null : d)) : undefined}
+          onDrop={onMove ? handleDropRoot : undefined}
           style={{
             height: workspaceExpanded ? virtualizer.getTotalSize() : 0,
             width: '100%',
             position: 'relative',
             overflow: 'hidden',
           }}
+          className={onMove && dragOverDir === ROOT_PATH ? 'ring-1 ring-inset ring-sky-500/60' : ''}
         >
           {workspaceExpanded && virtualizer.getVirtualItems().map((vi) => {
             const node = visible[vi.index];
@@ -498,6 +650,11 @@ export default function FileExplorer({
             const isActive = node.path === activePath;
             const isSelected = selected.has(node.path);
             const childState = node.isDir ? dirs.get(node.path) : undefined;
+            // The directory this node represents as a drop target (a file drops
+            // into its parent); highlight when it's the active drop target.
+            const nodeDropDir = node.isDir ? node.path : fsParent(node.path);
+            const isDropTarget = !!onMove && dragOverDir !== null && dragOverDir === nodeDropDir;
+            const draggable = !!onMove && !scopeRoot;
             return (
               <div
                 key={node.path}
@@ -506,6 +663,11 @@ export default function FileExplorer({
                 data-is-dir={node.isDir ? 'true' : 'false'}
                 data-active={isActive ? 'true' : 'false'}
                 data-selected={isSelected ? 'true' : 'false'}
+                data-drop-target={isDropTarget ? 'true' : 'false'}
+                draggable={draggable}
+                onDragStart={draggable ? (e) => handleDragStart(e, node) : undefined}
+                onDragOver={onMove ? (e) => handleDragOverNode(e, node) : undefined}
+                onDrop={onMove ? (e) => handleDropNode(e, node) : undefined}
                 style={{
                   position: 'absolute',
                   top: 0,
@@ -515,7 +677,9 @@ export default function FileExplorer({
                   height: vi.size,
                 }}
                 className={`flex items-center gap-1 px-2 cursor-pointer hover:bg-zinc-800/60 ${
-                  isSelected ? 'bg-sky-900/40 ring-1 ring-inset ring-sky-700/40' : isActive ? 'bg-zinc-800' : ''
+                  isDropTarget
+                    ? 'bg-sky-800/50 ring-1 ring-inset ring-sky-500'
+                    : isSelected ? 'bg-sky-900/40 ring-1 ring-inset ring-sky-700/40' : isActive ? 'bg-zinc-800' : ''
                 } ${isHeavy ? 'opacity-60' : ''}`}
                 onClick={(e) => handleNodeClick(node, e)}
                 onContextMenu={(e) => handleContextMenu(e, node)}
@@ -552,38 +716,48 @@ export default function FileExplorer({
             );
           })}
         </div>
-        <FavoritesSection
-          favorites={favorites || []}
-          onOpen={(path, name) => {
-            const entry: FsEntry = { name, is_dir: false, size: 0, mtime: 0, mode: '' };
-            onOpenFile(path, entry);
-          }}
-          onRemove={onRemoveFavorite}
-        />
-        {extraRoots.map((r) => (
+        {!scopeRoot && (
+          <FavoritesSection
+            favorites={favorites || []}
+            onOpen={(path, name) => {
+              const entry: FsEntry = { name, is_dir: false, size: 0, mtime: 0, mode: '' };
+              onOpenFile(path, entry);
+            }}
+            onRemove={onRemoveFavorite}
+          />
+        )}
+        {!scopeRoot && extraRoots.map((r) => (
           <RemoteSection
             key={r.id}
             agentId={agentId}
             root={r}
             onOpenFile={(path, entry) => onOpenFile(path, entry, r.id)}
             onContextMenu={handleRemoteContextMenu}
+            onMove={onMove}
           />
         ))}
       </div>
       {menu && menu.root ? (
-        // Extra-root (projects / skills / home) node: read-only. Only the
-        // non-mutating actions are wired; rename/delete/new/upload/download and
-        // the workspace-scoped favorite/file-info handlers are intentionally
-        // omitted because those parent handlers resolve against the workspace
-        // root only and there's no root-aware contract for them here.
+        // Extra-root (projects / skills / home) node: the SAME full menu as the
+        // workspace tree. The parent CRUD handlers are root-aware — each takes a
+        // trailing root id (here menu.root.id), and the backend resolves the
+        // path against that root's base. Paths from RemoteSection are relative
+        // to the root, matching what the handlers expect. (Favorite/file-info
+        // stay workspace-only — they have no root-aware contract.)
         <ContextMenu
           x={menu.x}
           y={menu.y}
           selectionCount={1}
           onSendToAgent={() => handleSendToAgent(menu.path)}
-          // Resolve copy-path against the extra root's absolute base so the
+          // Copy-path resolves against the extra root's absolute base so the
           // copied path points at the actual file (not under workspaceFolder).
           onCopyPath={() => handleCopyPath([menu.path], menu.root!.path)}
+          onRename={onRename ? () => onRename(menu.path, menu.isDir, menu.root!.id) : undefined}
+          onDelete={onDelete ? () => onDelete([menu.path], menu.isDir, menu.root!.id) : undefined}
+          onNewFile={onNewFile ? () => onNewFile(menu.isDir ? menu.path : fsParent(menu.path), menu.root!.id) : undefined}
+          onNewFolder={onNewFolder ? () => onNewFolder(menu.isDir ? menu.path : fsParent(menu.path), menu.root!.id) : undefined}
+          onUpload={onUpload ? () => triggerUpload(menu.isDir ? menu.path : fsParent(menu.path), menu.root!.id) : undefined}
+          onDownload={onDownload && !menu.isDir ? () => onDownload(menu.path, menu.root!.id) : undefined}
           onClose={() => setMenu(null)}
         />
       ) : menu ? (
@@ -616,6 +790,38 @@ export default function FileExplorer({
           onClose={() => setMenu(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+// Skeleton placeholder shown while a section's directory listing loads — a few
+// pulsing rows mimicking the tree layout (icon chip + name bar of varying
+// width/indent). Far less jarring than a "加载中…" text flashing in and out.
+function TreeSkeleton({ rows = 6, dense = false }: { rows?: number; dense?: boolean }) {
+  // Deterministic per-row shape so the skeleton looks like a real varied tree
+  // without re-randomizing on every render (which would itself flicker).
+  const SHAPES = [
+    { indent: 0, w: 'w-28' },
+    { indent: 1, w: 'w-20' },
+    { indent: 1, w: 'w-32' },
+    { indent: 0, w: 'w-24' },
+    { indent: 2, w: 'w-16' },
+    { indent: 1, w: 'w-28' },
+    { indent: 0, w: 'w-20' },
+    { indent: 1, w: 'w-24' },
+  ];
+  return (
+    <div data-id="file-explorer-skeleton" className="animate-pulse select-none" aria-hidden="true">
+      {Array.from({ length: rows }).map((_, i) => {
+        const s = SHAPES[i % SHAPES.length];
+        return (
+          <div key={i} className={`flex items-center gap-2 px-2 ${dense ? 'py-1' : 'py-1.5'}`}>
+            <span style={{ paddingLeft: s.indent * 12 }} />
+            <span className="w-3.5 h-3.5 rounded-sm bg-zinc-800 shrink-0" />
+            <span className={`h-3 rounded bg-zinc-800 ${s.w}`} />
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -899,10 +1105,13 @@ interface RemoteSectionProps {
   agentId: string;
   root: FsRoot;
   onOpenFile: (path: string, entry: FsEntry) => void;
-  /** Right-click on a node in this section. The parent opens the (read-only)
-   *  context menu, carrying `root` so copy-path resolves against the right base.
-   *  `path` is root-relative; same value the open handler receives. */
+  /** Right-click on a node in this section. The parent opens the context menu,
+   *  carrying `root` so the actions resolve against the right base. `path` is
+   *  root-relative; same value the open handler receives. */
   onContextMenu?: (e: React.MouseEvent, root: FsRoot, path: string, name: string, isDir: boolean) => void;
+  /** Drag-to-move within this root (root-aware). Mirrors the workspace tree:
+   *  drop a node onto a directory to relocate it there. Undefined ⇒ disabled. */
+  onMove?: (sources: string[], destDir: string, root?: string) => void | Promise<void>;
 }
 
 // Lazy-loaded subtree for a non-workspace root (projects / skills / home).
@@ -914,14 +1123,17 @@ interface RemoteSectionProps {
 // locations where dot-prefixed entries (`.bashrc`, `.config`, `.git`, …)
 // are usually the whole point. The workspace tree's eye-toggle still gates
 // dot-files for the active project.
-function RemoteSection({ agentId, root, onOpenFile, onContextMenu }: RemoteSectionProps) {
+function RemoteSection({ agentId, root, onOpenFile, onContextMenu, onMove }: RemoteSectionProps) {
   const [expanded, setExpanded] = useState(false);
   // dirs keyed by root-relative path; '' is the root listing.
   const [dirs, setDirs] = useState<Map<string, DirState>>(new Map());
+  // Drag-to-move state, local to this section (moves never cross roots).
+  const [dragPath, setDragPath] = useState<string | null>(null);
+  const [dragOverDir, setDragOverDir] = useState<string | null>(null);
 
-  const loadDir = useCallback(async (path: string) => {
+  const loadDir = useCallback(async (path: string, force = false) => {
     const cur = dirs.get(path);
-    if (cur && (cur.loaded || cur.loading)) return;
+    if (!force && cur && (cur.loaded || cur.loading)) return;
     setDirs((prev) => {
       const next = new Map(prev);
       next.set(path, { ...(prev.get(path) ?? emptyDirState()), loading: true, error: '' });
@@ -965,6 +1177,22 @@ function RemoteSection({ agentId, root, onOpenFile, onContextMenu }: RemoteSecti
     });
   }, [dirs, loadDir]);
 
+  // Drop `dragPath` into `destDir` (root-relative). Guards against no-op and
+  // moving a dir into itself / its own descendant, then force-reloads the
+  // affected dirs (this section owns its own state, so the parent's
+  // workspace-scoped refresh doesn't reach it).
+  const doMove = useCallback(async (destDir: string) => {
+    const from = dragPath;
+    setDragPath(null);
+    setDragOverDir(null);
+    if (!onMove || !from) return;
+    if (fsParent(from) === destDir) return;                         // already here
+    if (destDir === from || destDir.startsWith(from + '/')) return; // into self/descendant
+    await onMove([from], destDir, root.id);
+    await loadDir(fsParent(from), true);
+    await loadDir(destDir, true);
+  }, [dragPath, onMove, root.id, loadDir]);
+
   // Showing the tree: walk dirs map starting at '' and render each entry.
   // Children render only when their parent is expanded. Independent of the
   // workspace tree's virtualizer; remote trees are expected to stay small
@@ -983,7 +1211,29 @@ function RemoteSection({ agentId, root, onOpenFile, onContextMenu }: RemoteSecti
             data-path={childPath}
             data-root={root.id}
             data-is-dir={e.is_dir ? 'true' : 'false'}
-            className="flex items-center gap-1 px-2 py-0.5 hover:bg-zinc-800/60 cursor-pointer"
+            draggable={!!onMove}
+            onDragStart={onMove ? (ev) => {
+              ev.stopPropagation();
+              ev.dataTransfer.setData('text/plain', childPath);
+              ev.dataTransfer.effectAllowed = 'move';
+              setDragPath(childPath);
+            } : undefined}
+            onDragEnd={onMove ? () => { setDragPath(null); setDragOverDir(null); } : undefined}
+            // Directories are drop targets (move INTO them); files are not.
+            onDragOver={onMove && e.is_dir ? (ev) => {
+              if (!dragPath || dragPath === childPath || childPath.startsWith(dragPath + '/')) return;
+              ev.preventDefault();
+              ev.stopPropagation();
+              setDragOverDir(childPath);
+            } : undefined}
+            onDragLeave={onMove && e.is_dir ? (ev) => {
+              if ((ev.relatedTarget as Node | null) && (ev.currentTarget as Node).contains(ev.relatedTarget as Node)) return;
+              setDragOverDir((d) => (d === childPath ? null : d));
+            } : undefined}
+            onDrop={onMove && e.is_dir ? (ev) => { ev.preventDefault(); ev.stopPropagation(); void doMove(childPath); } : undefined}
+            className={`flex items-center gap-1 px-2 py-0.5 hover:bg-zinc-800/60 cursor-pointer ${
+              dragOverDir === childPath ? 'ring-1 ring-inset ring-sky-500/60' : ''
+            }`}
             style={{ paddingLeft: 8 + level * 12 }}
             onContextMenu={
               onContextMenu
@@ -1040,9 +1290,18 @@ function RemoteSection({ agentId, root, onOpenFile, onContextMenu }: RemoteSecti
         dataId={`file-explorer-section-${root.id}-header`}
       />
       {expanded && (
-        <>
-          {rootDs?.loading && (
-            <div className="px-3 py-1.5 text-xs text-zinc-500">加载中…</div>
+        <div
+          // Drop onto the section background (not a folder) = move to root.
+          onDragOver={onMove ? (ev) => {
+            if (!dragPath || fsParent(dragPath) === '') return;
+            ev.preventDefault();
+            setDragOverDir('');
+          } : undefined}
+          onDrop={onMove ? (ev) => { ev.preventDefault(); void doMove(''); } : undefined}
+          className={dragOverDir === '' ? 'ring-1 ring-inset ring-sky-500/60' : ''}
+        >
+          {rootDs?.loading && !rootDs?.loaded && (
+            <TreeSkeleton rows={4} dense />
           )}
           {rootDs?.error && (
             <div className="px-3 py-1.5 text-xs text-red-400">{rootDs.error}</div>
@@ -1051,7 +1310,7 @@ function RemoteSection({ agentId, root, onOpenFile, onContextMenu }: RemoteSecti
             <div className="px-3 py-1.5 text-xs text-zinc-500">空目录</div>
           )}
           {rootDs?.loaded && renderDir('', 0)}
-        </>
+        </div>
       )}
     </div>
   );

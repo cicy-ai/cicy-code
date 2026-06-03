@@ -31,6 +31,7 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		result["dev"] = devMode
 		result["preview"] = previewMode
 		result["hot"] = hotMode
+		result["cdn"] = cdnMode
 		// Team-Helper mode: read by the SPA to hide left-sidebar entries
 		// (audit / im / gateway / skills) so the trial drawer stays
 		// laser-focused on the chat pane.
@@ -125,25 +126,28 @@ func translateTextViaProvider(text string, target string) (string, error) {
 	if cached, ok := loadCachedTranslation(text, target); ok {
 		return cached, nil
 	}
-	// Route through the defaultOpenAi provider (a multi-model OpenAI-compatible
-	// gateway) — translation always goes there and asks for deepseek-v4-flash
-	// by model name. Fall back to the global default AI if defaultOpenAi isn't
-	// configured.
-	cfg, ok := loadRuntimeAIConfigForProvider("defaultOpenAi")
+	// Route translation through the defaultAnthropic provider (CiCyAi gateway)
+	// and ask for deepseek-v4-pro by model name. Fall back to defaultOpenAi, then
+	// the global default AI, if defaultAnthropic isn't configured. The gateway is
+	// OpenAI-compatible at <url>/v1/chat/completions for both providers, so the
+	// request shape below works regardless of which one resolves.
+	cfg, ok := loadRuntimeAIConfigForProvider("defaultAnthropic")
+	if !ok || strings.TrimSpace(cfg.APIURL) == "" || strings.TrimSpace(cfg.APIKey) == "" {
+		cfg, ok = loadRuntimeAIConfigForProvider("defaultOpenAi")
+	}
 	if !ok || strings.TrimSpace(cfg.APIURL) == "" || strings.TrimSpace(cfg.APIKey) == "" {
 		cfg = loadRuntimeAIConfig()
 	}
 	apiURL := strings.TrimRight(strings.TrimSpace(cfg.APIURL), "/")
 	apiKey := strings.TrimSpace(cfg.APIKey)
-	// Force the flash variant for translation — it's an order of magnitude
-	// faster than pro/v3 and quality is plenty for short paragraph translation.
-	// Override via ~/cicy-ai/global.json key `translate_model`; otherwise default.
+	// Use the pro variant for translation quality. Override via
+	// ~/cicy-ai/global.json key `translate_model`; otherwise default to pro.
 	model := ""
 	if raw, ok := readGlobalJSONConfig()["translate_model"].(string); ok {
 		model = strings.TrimSpace(raw)
 	}
 	if model == "" {
-		model = "deepseek-v4-flash"
+		model = "deepseek-v4-pro"
 	}
 	if apiURL == "" || apiKey == "" {
 		return "", fmt.Errorf("translation provider not configured")

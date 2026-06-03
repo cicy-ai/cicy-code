@@ -100,5 +100,5 @@
   "scanWithWeChat": "在微信 ClawBot 小程序中扫描二维码",
   "scanSuccessNote": "扫码成功后此账号自动加入列表，token 永久有效，后端重启无需重新扫码。",
   "regenerateAnotherQr": "换一个二维码",
-  "fieldBindAgentHelpNoGateway": "绑定后 IM 可向 agent 发送消息，但 agent 的回复不会推送到 IM（仅 opencode / codex / claude 支持回复推送）。每个 agent 同一平台只能绑一个账号。"
+  "fieldBindAgentHelpNoGateway": "绑定后 IM 可向 agent 发送消息，agent 的回复也会推送到 IM（非网关 agent 经本地 MITM 审计捕获回复）。若该 agent 不在线，消息会转给 w-10001。每个 agent 同一平台只能绑一个账号。"
 }

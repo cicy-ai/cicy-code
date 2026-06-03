@@ -20,6 +20,9 @@ interface FilesViewProps {
   /** Page-level chat-ws client id. Used to register a ":code-ext" alias so
    *  agent-editor's host.* RPCs reach this view over the shared WS. */
   pageClientId?: string;
+  /** When set, the explorer + all CRUD are anchored to this fs root (e.g.
+   *  "memory") instead of the workspace, and only that root's tree is shown. */
+  scopeRoot?: string;
   className?: string;
 }
 
@@ -116,7 +119,10 @@ function savePersistedTabs(agentId: string, tabs: Tab[], activeId: string): void
  *   - per-file dirty state lifted from CodeEditor
  *   - fsnotify watcher for explorer refresh + external-change detection
  */
-export default function FilesView({ agentId, workspaceFolder, pageClientId, className }: FilesViewProps) {
+export default function FilesView({ agentId, workspaceFolder, pageClientId, scopeRoot, className }: FilesViewProps) {
+  // Default fs root for this view's CRUD + tab open. "workspace" preserves the
+  // Files-tab behavior; a scopeRoot (e.g. "memory") anchors everything there.
+  const fsRoot = scopeRoot || 'workspace';
   // Hydrate from localStorage so reload preserves the open tab set + active.
   // Keyed by agentId so different agents have independent tab sets.
   const initialPersist = useMemo(() => loadPersistedTabs(agentId), [agentId]);
@@ -148,8 +154,8 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
   const cursorRef = useRef<Record<string, { line: number; col: number }>>({});
   const [favorites, setFavorites] = useState<FsFavorite[]>([]);
   const [infoPath, setInfoPath] = useState<string | null>(null);
-  const [renameTarget, setRenameTarget] = useState<{ path: string; isDir: boolean } | null>(null);
-  const [createTarget, setCreateTarget] = useState<{ parentDir: string; kind: 'file' | 'dir' } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{ path: string; isDir: boolean; root: string } | null>(null);
+  const [createTarget, setCreateTarget] = useState<{ parentDir: string; kind: 'file' | 'dir'; root: string } | null>(null);
   const { confirm, node: dialogsNode } = useDialogs();
 
   // --- watcher lifecycle --------------------------------------------------
@@ -201,10 +207,21 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
     watchRef.current.subscribe(dir);
   }, []);
 
+  // Watch every open file's parent dir — not just dirs expanded in the
+  // explorer. A file opened via quick-open / the cicy:open-file event lives in
+  // a folder that may never be expanded, so without this its external edits
+  // wouldn't bump reloadKey and the clean-adopt / dirty-banner reconciliation
+  // in CodeEditor would never fire. Subscription is idempotent.
+  useEffect(() => {
+    for (const t of tabs) {
+      if (t.kind === 'file') subscribeDir(fsParent(t.path));
+    }
+  }, [tabs, subscribeDir]);
+
   // --- tab helpers --------------------------------------------------------
 
   const openFileTab = useCallback(
-    (path: string, root: string = 'workspace', jump?: { line: number; col?: number }) => {
+    (path: string, root: string = fsRoot, jump?: { line: number; col?: number }) => {
       const id = makeTabId('file', root, path);
       setTabs((prev) => (prev.some((t) => t.id === id) ? prev : [...prev, { id, kind: 'file', root, path }]));
       setActiveId(id);
@@ -217,6 +234,20 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
     },
     [],
   );
+
+  // markdown history 里点击文件链接 → 打开到编辑器 tab(Workspace 负责揭示文件视图)。
+  useEffect(() => {
+    const handler = (e: Event) => {
+      let p = String((e as CustomEvent).detail?.path || '').trim();
+      if (!p) return;
+      if (p.startsWith('file://')) p = p.slice(7);
+      const m = p.match(/^(.*?):(\d+)(?::(\d+))?$/);
+      if (m) openFileTab(m[1], fsRoot, { line: Number(m[2]), col: m[3] ? Number(m[3]) : 1 });
+      else openFileTab(p);
+    };
+    window.addEventListener('cicy:open-file', handler as EventListener);
+    return () => window.removeEventListener('cicy:open-file', handler as EventListener);
+  }, [openFileTab, fsRoot]);
 
   // Diff tabs are workspace-only — diff goes through git, which is scoped to
   // the workspace. Non-workspace files just don't get a "diff" affordance.
@@ -345,6 +376,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
   const handleRenameSubmit = useCallback(
     async (newName: string) => {
       if (!renameTarget) return;
+      const root = renameTarget.root;
       const oldPath = renameTarget.path;
       const parent = fsParent(oldPath);
       const newPath = joinFsPath(parent, newName);
@@ -352,16 +384,15 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
         setRenameTarget(null);
         return;
       }
-      await fsApi.rename(agentId, oldPath, newPath);
+      await fsApi.rename(agentId, oldPath, newPath, { root });
       fsCacheInvalidatePath(agentId, oldPath);
       fsCacheInvalidatePath(agentId, newPath);
       rebumpDir(parent);
-      // Sync any open tab whose path was renamed (file rename or its parent
-      // dir). Rename is workspace-only, so only tabs with root === 'workspace'
-      // need updating.
+      // Sync any open tab in the SAME root whose path was renamed (the file
+      // itself or a parent dir).
       setTabs((prev) =>
         prev.map((t) => {
-          if (t.root !== 'workspace') return t;
+          if (t.root !== root) return t;
           if (t.path === oldPath) return { ...t, path: newPath, id: makeTabId(t.kind, t.root, newPath) };
           if (t.path.startsWith(oldPath + '/')) {
             const replaced = newPath + t.path.slice(oldPath.length);
@@ -374,7 +405,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
         if (!prev) return prev;
         const oldId = prev;
         const oldTab = tabs.find((t) => t.id === oldId);
-        if (!oldTab || oldTab.root !== 'workspace') return prev;
+        if (!oldTab || oldTab.root !== root) return prev;
         if (oldTab.path === oldPath) return makeTabId(oldTab.kind, oldTab.root, newPath);
         if (oldTab.path.startsWith(oldPath + '/')) {
           return makeTabId(oldTab.kind, oldTab.root, newPath + oldTab.path.slice(oldPath.length));
@@ -386,11 +417,69 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
     [agentId, renameTarget, tabs, rebumpDir],
   );
 
+  // Drag-and-drop move: relocate each source into destDir via fsApi.rename
+  // (from → destDir/basename). Workspace-only, same as rename. Refreshes the
+  // source parents + destDir and rewrites any open tab whose path moved.
+  const handleMove = useCallback(
+    async (sources: string[], destDir: string, root: string = fsRoot) => {
+      const pairs: Array<{ from: string; to: string }> = [];
+      for (const from of sources) {
+        const to = joinFsPath(destDir, fsBasename(from));
+        if (to === from) continue;                       // same place
+        if (fsParent(from) === destDir) continue;        // already here
+        if (destDir === from || destDir.startsWith(from + '/')) continue; // into self/descendant
+        pairs.push({ from, to });
+      }
+      if (pairs.length === 0) return;
+      const affectedDirs = new Set<string>();
+      const moved: Array<{ from: string; to: string }> = [];
+      // Sequential so one failure (e.g. destination_exists) doesn't poison the rest.
+      for (const { from, to } of pairs) {
+        try {
+          await fsApi.rename(agentId, from, to, { root });
+          fsCacheInvalidatePath(agentId, from);
+          fsCacheInvalidatePath(agentId, to);
+          affectedDirs.add(fsParent(from));
+          affectedDirs.add(destDir);
+          moved.push({ from, to });
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('move failed', from, '→', to, e);
+        }
+      }
+      affectedDirs.forEach((d) => rebumpDir(d));
+      if (moved.length === 0) return;
+      // Rewrite open tabs / active id whose path (or ancestor) just moved.
+      const remap = (p: string): string | null => {
+        for (const { from, to } of moved) {
+          if (p === from) return to;
+          if (p.startsWith(from + '/')) return to + p.slice(from.length);
+        }
+        return null;
+      };
+      setTabs((prev) =>
+        prev.map((t) => {
+          if (t.root !== root) return t;
+          const np = remap(t.path);
+          return np ? { ...t, path: np, id: makeTabId(t.kind, t.root, np) } : t;
+        }),
+      );
+      setActiveId((prev) => {
+        if (!prev) return prev;
+        const oldTab = tabs.find((t) => t.id === prev);
+        if (!oldTab || oldTab.root !== root) return prev;
+        const np = remap(oldTab.path);
+        return np ? makeTabId(oldTab.kind, oldTab.root, np) : prev;
+      });
+    },
+    [agentId, fsRoot, rebumpDir, tabs],
+  );
+
   // Confirm-then-delete. Renders the standard modal confirm with a path
   // summary; on OK runs the same sequential delete + tab/dirty cleanup that
   // the old <ConfirmModal> wrapper used to drive via state.
   const handleDeleteRequest = useCallback(
-    async (paths: string[], isDir: boolean) => {
+    async (paths: string[], isDir: boolean, root: string = fsRoot) => {
       if (paths.length === 0) return;
       const body = (
         <div className="space-y-1">
@@ -420,7 +509,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
       // Sequential delete so errors on one don't poison the rest.
       for (const p of paths) {
         try {
-          await fsApi.delete(agentId, p, isDir);
+          await fsApi.delete(agentId, p, isDir, { root });
           fsCacheInvalidatePath(agentId, p);
           parentDirs.add(fsParent(p));
         } catch (e) {
@@ -431,6 +520,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
       parentDirs.forEach((d) => rebumpDir(d));
       setTabs((prev) =>
         prev.filter((t) => {
+          if (t.root !== root) return true; // only close tabs in the affected root
           for (const p of paths) {
             if (t.path === p || t.path.startsWith(p + '/')) return false;
           }
@@ -450,16 +540,16 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
         return next;
       });
     },
-    [agentId, confirm, rebumpDir],
+    [agentId, confirm, rebumpDir, fsRoot],
   );
 
   const handleUpload = useCallback(
-    async (parentDir: string, files: FileList) => {
+    async (parentDir: string, files: FileList, root: string = fsRoot) => {
       const arr = Array.from(files);
       for (const f of arr) {
         const target = joinFsPath(parentDir, f.name);
         try {
-          await fsApi.upload(agentId, target, f);
+          await fsApi.upload(agentId, target, f, { root });
           fsCacheInvalidatePath(agentId, target);
         } catch (e) {
           // Surface as a toast-style alert; could be wired to a snackbar later.
@@ -469,26 +559,27 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
       }
       rebumpDir(parentDir);
     },
-    [agentId, rebumpDir],
+    [agentId, rebumpDir, fsRoot],
   );
 
-  const handleDownload = useCallback((path: string) => {
-    fsApi.download(agentId, path);
-  }, [agentId]);
+  const handleDownload = useCallback((path: string, root: string = fsRoot) => {
+    fsApi.download(agentId, path, root);
+  }, [agentId, fsRoot]);
 
   const handleCreateSubmit = useCallback(
     async (name: string) => {
       if (!createTarget) return;
+      const root = createTarget.root;
       const newPath = joinFsPath(createTarget.parentDir, name);
       if (createTarget.kind === 'file') {
-        await fsApi.touch(agentId, newPath);
+        await fsApi.touch(agentId, newPath, { root });
       } else {
-        await fsApi.mkdir(agentId, newPath);
+        await fsApi.mkdir(agentId, newPath, { root });
       }
       fsCacheInvalidatePath(agentId, newPath);
       rebumpDir(createTarget.parentDir);
       if (createTarget.kind === 'file') {
-        openFileTab(newPath);
+        openFileTab(newPath, root);
       }
       setCreateTarget(null);
     },
@@ -531,7 +622,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
   const opsRef = useRef<CodeExtOps | null>(null);
   opsRef.current = {
     openFile: async (path, line, col) => {
-      openFileTab(path, line ? { line, col } : undefined);
+      openFileTab(path, fsRoot, line ? { line, col } : undefined);
     },
     getActiveFile: () => {
       const cur = activeId ? cursorRef.current[activeId] : undefined;
@@ -566,6 +657,7 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
           onCollapse={() => setExplorerCollapsed(true)}
           agentId={agentId}
           workspaceFolder={workspaceFolder}
+          scopeRoot={scopeRoot}
           activePath={activePath}
           onOpenFile={handleOpenFromExplorer}
           onDirLoaded={subscribeDir}
@@ -575,10 +667,11 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
           onAddFavorite={handleAddFavorite}
           favorites={favorites}
           onRemoveFavorite={handleRemoveFavorite}
-          onRename={(path, isDir) => setRenameTarget({ path, isDir })}
-          onDelete={(paths, isDir) => handleDeleteRequest(paths, isDir)}
-          onNewFile={(parentDir) => setCreateTarget({ parentDir, kind: 'file' })}
-          onNewFolder={(parentDir) => setCreateTarget({ parentDir, kind: 'dir' })}
+          onRename={(path, isDir, root = fsRoot) => setRenameTarget({ path, isDir, root })}
+          onDelete={(paths, isDir, root = fsRoot) => handleDeleteRequest(paths, isDir, root)}
+          onNewFile={(parentDir, root = fsRoot) => setCreateTarget({ parentDir, kind: 'file', root })}
+          onNewFolder={(parentDir, root = fsRoot) => setCreateTarget({ parentDir, kind: 'dir', root })}
+          onMove={handleMove}
           onUpload={handleUpload}
           onDownload={handleDownload}
         />
@@ -589,13 +682,25 @@ export default function FilesView({ agentId, workspaceFolder, pageClientId, clas
         open={search}
         onClose={() => setSearch(false)}
         onPick={(path, line, col) => {
-          openFileTab(path, { line, col });
+          openFileTab(path, fsRoot, { line, col });
           setSearch(false);
         }}
       />
 
       <div data-id="files-view-main" className="flex-1 min-w-0 flex flex-col">
-        <div className="flex items-stretch min-w-0">
+        <div
+          data-id="files-view-topbar"
+          // When there are tabs, TabBar provides the h-9 strip + border and the
+          // expand button stretches to match. With no tabs TabBar renders
+          // nothing, so the row would collapse to a tiny floating button — give
+          // the row its own h-9 toolbar strip (only when the button is shown,
+          // i.e. explorer collapsed) so the button sits in a proper aligned bar.
+          className={`flex items-stretch min-w-0 ${
+            explorerCollapsed && tabs.length === 0
+              ? 'h-9 border-b border-zinc-800 bg-zinc-900'
+              : ''
+          }`}
+        >
           {explorerCollapsed && (
             <button
               data-id="files-view-explorer-expand"
@@ -859,15 +964,15 @@ function TabBar({ tabs, activeId, dirty, onSelect, onClose, onCloseOthers, onClo
             ) : (
               <FileText className="w-3 h-3 text-zinc-500 shrink-0" />
             )}
-            <span data-id="files-tab-label" className="truncate">{fsBasename(t.path)}</span>
-            {dirty[t.id] && <span data-id="files-tab-dirty" className="text-amber-400">●</span>}
+            <span data-id="files-tab-label" className="truncate flex-1 min-w-0">{fsBasename(t.path)}</span>
+            {dirty[t.id] && <span data-id="files-tab-dirty" className="shrink-0 text-amber-400">●</span>}
             <button
               data-id="files-tab-close"
               onClick={(e) => {
                 e.stopPropagation();
                 onClose(t.id);
               }}
-              className="opacity-50 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-700"
+              className="shrink-0 opacity-50 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-700"
               title="关闭 (Cmd/Ctrl+W)"
             >
               <X className="w-3 h-3" />

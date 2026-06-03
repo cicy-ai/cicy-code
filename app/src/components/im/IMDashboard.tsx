@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import {
   Plus, Save, Trash2, Zap, Eye, EyeOff, Check, X,
-  Send, MessageCircle, QrCode, RefreshCw, Search, ExternalLink, ChevronDown,
+  Send, MessageCircle, QrCode, RefreshCw, Search, ExternalLink, ChevronDown, Loader2,
 } from 'lucide-react';
 import apiService from '../../services/api';
 import { useDialogs } from '../ui/Modal';
@@ -159,6 +159,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
   const [baseline, setBaseline] = useState('');
   const [panes, setPanes] = useState<PaneOpt[]>([]);
   const [showSecret, setShowSecret] = useState(false);
+  const [secretLoading, setSecretLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testRes, setTestRes] = useState<TestResult | null>(null);
@@ -203,10 +204,32 @@ export default function IMDashboard({ leftMount, rightMount }: {
 
   useEffect(() => { loadEditor(selected); }, [selected, loadEditor]);
 
-  /* ---- panes for bind picker — local-gateway only ---- */
-  // IM reply push hooks fire inside the local gateway (ai_gateway_audit.go).
-  // Agents that don't use the custom gateway never invoke that code, so binding
-  // an IM account to them would silently no-op. Filter strictly per user req.
+  // Eye toggle: hiding is instant. Revealing, when the field is still empty but a
+  // token is stored server-side, fetches the full token on demand and fills it in.
+  // Filling the stored token is NOT treated as an edit (baseline is bumped to match),
+  // so the form stays clean and Save won't needlessly resend it.
+  const toggleSecret = useCallback(async () => {
+    if (showSecret) { setShowSecret(false); return; }
+    if (!draft.secret && selected?.has_secret) {
+      setSecretLoading(true);
+      try {
+        const res = await apiService.getIMAccountSecret(selected.id);
+        const full = String((res as any)?.data?.secret || '');
+        if (full) {
+          setDraft((d) => ({ ...d, secret: full }));
+          setBaseline((b) => { try { const o = JSON.parse(b); o.secret = full; return JSON.stringify(o); } catch { return b; } });
+        }
+      } catch { /* ignore — still reveal whatever's typed */ }
+      finally { setSecretLoading(false); }
+    }
+    setShowSecret(true);
+  }, [showSecret, draft.secret, selected]);
+
+  /* ---- panes for bind picker — any agent, gateway or not ---- */
+  // Reply push works on BOTH paths now: the local gateway (ai_gateway_audit.go)
+  // and the non-gateway MITM audit, so binding no longer depends on
+  // use_custom_gateway. Show every claude / opencode / codex agent regardless of
+  // gateway mode. (Non-gateway help text still flags the push caveat.)
   useEffect(() => {
     apiService.getPanes().then((r: any) => {
       const raw = Array.isArray(r.data?.panes) ? r.data.panes : (Array.isArray(r.data) ? r.data : []);
@@ -215,7 +238,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
         title: String(p.title || p.name || ''),
         agent_type: String(p.agent_type || p.agentType || ''),
         use_custom_gateway: !!(p.use_custom_gateway ?? p.useCustomGateway),
-      })).filter((p: PaneOpt) => p.pane_id && p.use_custom_gateway && ['claude', 'opencode', 'codex'].includes(p.agent_type));
+      })).filter((p: PaneOpt) => p.pane_id && ['claude', 'opencode', 'codex'].includes(p.agent_type));
       setPanes(list);
     }).catch(() => {});
   }, []);
@@ -452,7 +475,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
             title: String(p.title || p.name || ''),
             agent_type: String(p.agent_type || p.agentType || ''),
             use_custom_gateway: !!(p.use_custom_gateway ?? p.useCustomGateway),
-          })).filter((p: PaneOpt) => p.pane_id && p.use_custom_gateway);
+          })).filter((p: PaneOpt) => p.pane_id && ['claude', 'opencode', 'codex'].includes(p.agent_type));
           setPanes(list);
         } catch {}
       } catch (e) {
@@ -543,7 +566,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
           title: String(p.title || p.name || ''),
           agent_type: String(p.agent_type || p.agentType || ''),
           use_custom_gateway: !!(p.use_custom_gateway ?? p.useCustomGateway),
-        })).filter((p: any) => p.pane_id && p.use_custom_gateway));
+        })).filter((p: any) => p.pane_id && ['claude', 'opencode', 'codex'].includes(p.agent_type)));
       } catch {}
     }
   };
@@ -828,8 +851,8 @@ export default function IMDashboard({ leftMount, rightMount }: {
                         data-1p-ignore data-lpignore="true"
                         style={showSecret ? undefined : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties)}
                       />
-                      <button data-id="im-detail-secret-toggle" type="button" onClick={() => setShowSecret((s) => !s)} className="absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300" title={showSecret ? t('hide') : t('show')}>
-                        {showSecret ? <EyeOff size={13} /> : <Eye size={13} />}
+                      <button data-id="im-detail-secret-toggle" type="button" disabled={secretLoading} onClick={toggleSecret} className="absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300 disabled:opacity-50" title={showSecret ? t('hide') : t('show')}>
+                        {secretLoading ? <Loader2 size={13} className="animate-spin" /> : showSecret ? <EyeOff size={13} /> : <Eye size={13} />}
                       </button>
                     </div>
                   </Field>

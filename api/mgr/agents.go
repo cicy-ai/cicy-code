@@ -224,9 +224,10 @@ func bindAgentCore(masterPaneID, subShortName string, inheritGuidance bool, mast
 		if syncErr := syncBoundAgentWorkspaceLinks(masterShort); syncErr != nil {
 			log.Printf("[agent-bind] re-sync after idempotent bind failed: %v", syncErr)
 		}
-		if inheritGuidance {
-			appendMasterReferenceToGuidance(subShort, masterShort, masterAgentTypeHint)
-		}
+		// Inheritance retired: agents no longer inject a master-rules reference.
+		// Each agent owns a self-contained guidance file seeded from the global
+		// template. (inheritGuidance/masterAgentTypeHint kept for API compat.)
+		_ = inheritGuidance
 		// Even when already bound, ensure the sub-worker is actually running
 		// so re-binding doubles as a "wake up" gesture.
 		if err := ensureAgentRunningByPaneID(subShort + ":main.0"); err != nil {
@@ -246,9 +247,8 @@ func bindAgentCore(masterPaneID, subShortName string, inheritGuidance bool, mast
 	if err := syncBoundAgentWorkspaceLinks(masterShort); err != nil {
 		return bindAgentResult{}, err
 	}
-	if inheritGuidance {
-		appendMasterReferenceToGuidance(subShort, masterShort, masterAgentTypeHint)
-	}
+	// Inheritance retired (see above): no master-rules reference is appended.
+	_ = masterAgentTypeHint
 	// If the sub-worker was previously stopped (tmux session killed), bring it
 	// back up so the binding is immediately usable.
 	if err := ensureAgentRunningByPaneID(subShort + ":main.0"); err != nil {

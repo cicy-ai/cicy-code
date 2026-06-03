@@ -16,9 +16,6 @@
   "selectClear": "クリア",
   "selectHintNavigate": "移動",
   "selectHintSelect": "選択",
-  "codeServerFolders": "よく使うフォルダ",
-  "codeServerOpenInNewWindow": "新しいウィンドウで開く",
-  "codeServerTitle": "Code server",
   "windowConfirmDelete": "ウィンドウ {{idx}} を削除しますか？",
   "windowCreateButton": "新しいウィンドウ"
 }

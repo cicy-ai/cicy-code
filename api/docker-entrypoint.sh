@@ -362,6 +362,16 @@ build_app_argv() {
       fi
       ;;
   esac
+  # ENABLE_CDN=true → serve the App SPA + ttyd bundle from Cloudflare R2.
+  # The R2 prefixes are baked into every binary; --cdn just activates them.
+  case " $* " in
+    *" --cdn "*) ;;
+    *)
+      case "${ENABLE_CDN:-}" in
+        1|true|TRUE|True|yes|YES|on|ON) set -- --cdn "$@" ;;
+      esac
+      ;;
+  esac
   printf '%s\0' "$@"
 }
 

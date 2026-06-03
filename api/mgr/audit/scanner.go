@@ -13,6 +13,9 @@ import (
 // builtin set.
 type Scanner interface {
 	Scan(payload []byte, direction string, policy *Policy) []Finding
+	// ScanInline runs only the inline (block/redact) rules — the cheap subset
+	// the synchronous preventive path needs before forwarding a request.
+	ScanInline(payload []byte, direction string, policy *Policy) []Finding
 }
 
 // NoopScanner is the empty-result implementation, kept for tests and for the
@@ -23,6 +26,10 @@ func (NoopScanner) Scan(payload []byte, direction string, policy *Policy) []Find
 	_ = payload
 	_ = direction
 	_ = policy
+	return []Finding{}
+}
+
+func (NoopScanner) ScanInline(payload []byte, direction string, policy *Policy) []Finding {
 	return []Finding{}
 }
 
@@ -70,6 +77,19 @@ func (s *BuiltinScanner) RuleCount() int {
 }
 
 func (s *BuiltinScanner) Scan(payload []byte, direction string, policy *Policy) []Finding {
+	return s.scan(payload, direction, policy, false)
+}
+
+// ScanInline scans ONLY the inline (block / redact) rules. It runs on the
+// preventive path, which is synchronous and blocks the request before it is
+// forwarded to the model — so it must stay cheap. Skipping the detective-only
+// rules (high_entropy and the rest) keeps the blocking cost to a few ms of
+// light regexes instead of the full ~1s scan a request would otherwise wait on.
+func (s *BuiltinScanner) ScanInline(payload []byte, direction string, policy *Policy) []Finding {
+	return s.scan(payload, direction, policy, true)
+}
+
+func (s *BuiltinScanner) scan(payload []byte, direction string, policy *Policy, inlineOnly bool) []Finding {
 	if policy != nil && !policy.Enabled {
 		return []Finding{}
 	}
@@ -80,12 +100,43 @@ func (s *BuiltinScanner) Scan(payload []byte, direction string, policy *Policy) 
 	rs := s.set
 	s.mu.RUnlock()
 
+	// Content-aware pass: index JSON string values once, then scan only the
+	// segments OUTSIDE benign protocol fields (Anthropic thinking signatures,
+	// base64 image data). Those blobs are the bulk of the body, so skipping
+	// them makes the scan both faster and noise-free. Each rule's matches are
+	// translated back to global offsets and tagged with their field path.
+	// ranges == nil (non-JSON) → one whole-payload segment → original behaviour.
+	ranges := indexJSONStrings(payload)
+	segments := scanSegments(ranges, payload)
+	// Concatenate the non-benign segments into ONE buffer so each rule scans a
+	// single time (not once per segment). Matches are mapped back to global
+	// payload offsets via segMap.
+	buf, segMap := buildScanBuffer(segments, payload)
+
 	out := make([]Finding, 0, 4)
 	for _, rule := range rs.Rules {
+		// Preventive path only needs the inline block/redact rules; skip the
+		// expensive detective-only rules so blocking latency stays minimal.
+		if inlineOnly && !(rule.Inline && (rule.DefaultAction == ActionBlock || rule.DefaultAction == ActionRedact)) {
+			continue
+		}
 		if !directionMatches(rule.ScanDirections, direction) {
 			continue
 		}
-		spans := rule.Detect(payload)
+		local := rule.Detect(buf)
+		if len(local) == 0 {
+			continue
+		}
+		spans := make([]Span, 0, len(local))
+		for _, ls := range local {
+			gs, ge, ok := mapToGlobal(ls.Start, ls.End, segMap)
+			if !ok {
+				continue
+			}
+			ls.Start, ls.End = gs, ge
+			spans = append(spans, ls)
+		}
+		spans = applyStructure(spans, ranges, payload)
 		if len(spans) == 0 {
 			continue
 		}

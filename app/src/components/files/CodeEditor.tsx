@@ -749,12 +749,11 @@ export default function CodeEditor({
           // Sits inside the right-click toolbar zone; keep it visually quiet
           // — translucent border, no fill, brightens on hover. Pulls slightly
           // farther from the right edge when dirty-dot is visible.
-          className={`absolute top-1 ${dirty ? 'right-6' : 'right-2'} z-10 inline-flex items-center gap-1 px-2 py-0.5 rounded border border-zinc-700/60 bg-zinc-900/70 hover:bg-zinc-800 hover:border-zinc-600 text-[10px] uppercase tracking-wide text-zinc-300 hover:text-zinc-100 transition-colors`}
+          className={`absolute top-1 ${dirty ? 'right-6' : 'right-2'} z-10 inline-flex items-center justify-center p-1 rounded border border-zinc-700/60 bg-zinc-900/70 hover:bg-zinc-800 hover:border-zinc-600 text-zinc-300 hover:text-zinc-100 transition-colors`}
           title={previewMd ? '切换到源码' : '切换到预览'}
           aria-pressed={previewMd}
         >
-          {previewMd ? <FileCode className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-          <span>{previewMd ? 'Source' : 'Preview'}</span>
+          {previewMd ? <FileCode className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
         </button>
       )}
       {heavy && (

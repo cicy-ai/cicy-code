@@ -819,6 +819,9 @@ func checkEnv() {
 	ensureTmuxConf()
 	ensureCicyTmuxConf()
 	ensureCicyShellInit()
+	// Seed ~/cicy-ai/memory/global.md with the default template on first boot so
+	// the memory editor and agent-creation always have a base layer to compose.
+	ensureGlobalMemoryTemplate()
 
 	ensureDefaultProviders()
 	setupAIConfigs()
@@ -864,7 +867,11 @@ func checkEnv() {
 	ensureBuiltinAgents(selectedAgents)
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles(selectedAgents)
-	setupAuditPolicyAgent()                  // → w-6001 SecOps Lead (merged 2.1.8)
+	if auditEnabled() {
+		setupAuditPolicyAgent() // → w-6001 SecOps Lead; created only when the audit switch is on
+	} else {
+		removeAuditPolicyPane() // switch off → stop/remove any lingering w-6001
+	}
 	// Team Helper (w-6002) is no longer pre-created here. It bootstraps
 	// lazily on the first /api/chat/ws connection (see
 	// ensureBuiltinPaneLazy in audit_team_helper_worker.go) — saves the
@@ -890,7 +897,7 @@ var preinstalledSkills = []string{
 }
 
 func ensurePreinstalledSkills() {
-	installed, err := skillcmd.PublicInstalled()
+	installed, err := skillcmd.InstalledSkills()
 	if err != nil {
 		log.Printf("[startup] failed to read installed skills: %v", err)
 		return
@@ -904,7 +911,7 @@ func ensurePreinstalledSkills() {
 			continue
 		}
 		log.Printf("[startup] pre-installing skill: %s", name)
-		if _, err := skillcmd.PublicInstall(name, io.Discard); err != nil {
+		if _, err := skillcmd.InstallSkill(name, io.Discard); err != nil {
 			log.Printf("[startup] skill %s install failed: %v", name, err)
 		} else {
 			log.Printf("[startup] skill %s installed", name)
@@ -1332,7 +1339,7 @@ func startCicyMihomoIfNeeded() {
 		// open to direct forever). Install it synchronously here (idempotent) and
 		// re-check before giving up.
 		log.Printf("[startup] cicy-mihomo wrapper missing — installing skill synchronously")
-		if _, ierr := skillcmd.PublicInstall("cicy-mihomo", io.Discard); ierr != nil {
+		if _, ierr := skillcmd.InstallSkill("cicy-mihomo", io.Discard); ierr != nil {
 			log.Printf("[startup] cicy-mihomo install failed: %v — proxy-using workers may fail. Install with: cicy-code skill install cicy-mihomo", ierr)
 			return
 		}

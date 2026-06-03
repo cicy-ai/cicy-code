@@ -96,10 +96,11 @@ func (p *Pipeline) PreventiveCheck(env Envelope) (dec PreventiveDecision) {
 		}
 	}()
 
-	// Run the full scanner, then partition findings by their source rule's
-	// inline action (block / redact / other). Block beats redact when both
-	// would fire on the same turn.
-	allFindings := p.scanner.Scan(env.Payload, env.Direction, pol)
+	// Scan ONLY the inline rules — this path is synchronous and blocks the
+	// request before it reaches the model, so it must not pay for the
+	// detective-only rules (high_entropy etc.). Then partition by block/redact;
+	// block beats redact when both fire on the same turn.
+	allFindings := p.scanner.ScanInline(env.Payload, env.Direction, pol)
 	blockFindings, redactFindings := partitionInlineFindings(p, allFindings)
 
 	if len(blockFindings) > 0 {

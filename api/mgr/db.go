@@ -212,15 +212,6 @@ func (d *DB) Migrate() {
 			perms TEXT NOT NULL, note TEXT,
 			expires_at TEXT, created_at TEXT DEFAULT (datetime('now'))
 		)`,
-		`CREATE TABLE IF NOT EXISTS prompt_rules (
-			scope_type TEXT NOT NULL,
-			scope_key TEXT NOT NULL,
-			content TEXT DEFAULT '',
-			enabled INTEGER DEFAULT 0,
-			inject_on_request INTEGER DEFAULT 0,
-			updated_at TEXT DEFAULT (datetime('now')),
-			PRIMARY KEY(scope_type, scope_key)
-		)`,
 		`CREATE TABLE IF NOT EXISTS im_accounts (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			platform TEXT NOT NULL,
@@ -258,9 +249,10 @@ func (d *DB) Migrate() {
 	d.runOnceMigration("use_custom_gateway_v1", `UPDATE agent_config SET use_custom_gateway = CASE WHEN COALESCE(use_official_auth, 0) = 1 THEN 0 ELSE 1 END`)
 	d.ensureColumn("agent_config", "inspector_notes", "TEXT DEFAULT ''")
 	d.ensureColumn("agent_config", "inspector_notes_updated_at", "TEXT")
-	// Per-pane gateway injection switch for CLAUDE.md / AGENTS.md files.
-	// Default 1 (on); combined AND with global env CICY_GATEWAY_INJECT_RULES.
-	d.ensureColumn("agent_config", "inject_rules_files", "INTEGER DEFAULT 1")
+	// Memory-template selections made at creation time, persisted so forks can
+	// inherit the same project/role layers (see composeAgentMemory).
+	d.ensureColumn("agent_config", "project_template", "TEXT DEFAULT ''")
+	d.ensureColumn("agent_config", "role_template", "TEXT DEFAULT ''")
 	d.ensureColumn("pane_agents", "sort_order", "INTEGER DEFAULT 0")
 	d.ensureColumn("agent_queue", "step_kind", "TEXT DEFAULT 'message'")
 	d.ensureColumn("agent_queue", "workflow_id", "INTEGER")

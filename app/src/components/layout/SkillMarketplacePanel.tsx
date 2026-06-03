@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -8,6 +8,7 @@ import {
   Globe, Activity, Server, Plug, Mail, FileText, Code, Terminal, Key, Shield, Package, Cloud,
   Copy, Check, XCircle, Languages,
   ExternalLink, Tag, User, Calendar, HardDrive, Hash, FileCode, BookOpen, ShieldCheck, Lock,
+  Compass, Users, RotateCw,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import apiService from '../../services/api';
@@ -145,7 +146,9 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [selectedName, setSelectedName] = useState<string | null>(null);
-  const [registriesOpen, setRegistriesOpen] = useState(false);
+  // Three-pillar hub: Discover (browse+install across all sources) / Publish
+  // (my always-on self-hosted registry) / Subscribe (registries others shared).
+  const [hubTab, setHubTab] = useState<'discover' | 'publish' | 'subscribe'>('discover');
   const [proxyManagerOpen, setProxyManagerOpen] = useState(false);
   const [proxySshManagerOpen, setProxySshManagerOpen] = useState(false);
   const [frpServerManagerOpen, setFrpServerManagerOpen] = useState(false);
@@ -289,84 +292,109 @@ export default function SkillMarketplacePanel({ paneId }: { paneId: string }) {
   return (
     <>
       <div className="h-full flex flex-col overflow-hidden bg-[#0A0A0A]" data-id="skill-market-root">
-        <div className="px-3 py-2 border-b border-[var(--vsc-border)] shrink-0 space-y-2" data-id="skill-market-header">
-          <div data-id="skill-market-search-wrap" className="relative">
-            <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
-            <input
-              data-id="skill-market-search"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder={t('marketplaceSearchPlaceholder')}
-              className="w-full pl-7 pr-2 py-1.5 text-xs bg-[#0e0e0e] border border-[var(--vsc-border)] rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
-            />
-          </div>
-          <div data-id="skill-market-filters" className="flex items-center gap-1 text-[11px]">
-            {(['all','installed','available'] as Filter[]).map(f => (
+        {/* three-pillar hub tabs */}
+        <div className="px-2 pt-1.5 border-b border-[var(--vsc-border)] shrink-0 flex items-center gap-0.5" data-id="skill-hub-tabs">
+          {(['discover', 'publish', 'subscribe'] as const).map((key) => {
+            const Icon = key === 'discover' ? Compass : key === 'publish' ? Server : Users;
+            const label = key === 'discover'
+              ? t('marketplaceTabDiscover')
+              : key === 'publish' ? t('marketplaceTabPublish') : t('marketplaceTabSubscribe');
+            return (
               <button
-                key={f}
-                data-id={`skill-market-filter-${f}`}
-                onClick={() => setFilter(f)}
+                key={key}
+                data-id={`skill-hub-tab-${key}`}
+                onClick={() => setHubTab(key)}
                 className={cn(
-                  'px-2 py-0.5 rounded transition-colors',
-                  filter === f ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+                  'px-2.5 py-1.5 text-[11px] rounded-t inline-flex items-center gap-1 border-b-2 -mb-px transition-colors',
+                  hubTab === key
+                    ? 'text-zinc-100 border-violet-400'
+                    : 'text-zinc-500 border-transparent hover:text-zinc-300'
                 )}
               >
-                {f === 'all' && `${t('marketplaceAll')} ${counts.total}`}
-                {f === 'installed' && `${t('marketplaceInstalled')} ${counts.installed}`}
-                {f === 'available' && `${t('marketplaceAvailable')} ${counts.total - counts.installed}`}
+                <Icon className="w-3 h-3" /> {label}
               </button>
-            ))}
-            <button
-              data-id="skill-market-registries"
-              onClick={() => setRegistriesOpen(true)}
-              className="ml-auto p-1 text-zinc-500 hover:text-zinc-300 rounded inline-flex items-center gap-1"
-              title="私有库 / Private registries"
-            >
-              <Lock className="w-3 h-3" />
-              <span className="text-[10px]">私有库</span>
-            </button>
-            <button data-id="skill-market-refresh" onClick={load} className="p-1 text-zinc-500 hover:text-zinc-300 rounded" title={t('marketplaceRetry')}>
-              <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
-            </button>
-          </div>
+            );
+          })}
         </div>
 
-        <div className="flex-1 overflow-y-auto" data-id="skill-market-list">
-          {loading && skills.length === 0 ? (
-            <SkillListSkeleton />
-          ) : loadError ? (
-            <div data-id="skill-market-error" className="p-4 text-xs">
-              <div data-id="skill-market-error-msg" className="text-red-400 mb-2">{t('marketplaceFailedToLoad')}: {loadError}</div>
-              <button data-id="skill-market-error-retry" onClick={load} className="text-zinc-400 hover:text-zinc-100 underline">{t('marketplaceRetry')}</button>
-            </div>
-          ) : filtered.length === 0 ? (
-            <div data-id="skill-market-empty" className="p-4 text-xs text-zinc-500">{t('marketplaceEmpty')}</div>
-          ) : (
-            Object.entries(grouped).sort(([a],[b]) => a.localeCompare(b)).map(([category, list]) => (
-              <div key={category} data-id={`skill-market-cat-${category}`}>
-                <div data-id="skill-market-cat-label" className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wider text-zinc-600">{category}</div>
-                <div data-id="skill-market-cat-items">
-                  {list.map(skill => (
-                    <SkillRow
-                      key={skill.name}
-                      skill={skill}
-                      selected={selectedName === skill.name}
-                      onClick={() => setSelectedName(skill.name)}
-                    />
-                  ))}
-                </div>
+        {hubTab === 'discover' && (
+          <>
+            <div className="px-3 py-2 border-b border-[var(--vsc-border)] shrink-0 space-y-2" data-id="skill-market-header">
+              <div data-id="skill-market-search-wrap" className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                <input
+                  data-id="skill-market-search"
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder={t('marketplaceSearchPlaceholder')}
+                  className="w-full pl-7 pr-2 py-1.5 text-xs bg-[#0e0e0e] border border-[var(--vsc-border)] rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+                />
               </div>
-            ))
-          )}
-        </div>
-      </div>
+              <div data-id="skill-market-filters" className="flex items-center gap-1 text-[11px]">
+                {(['all','installed','available'] as Filter[]).map(f => (
+                  <button
+                    key={f}
+                    data-id={`skill-market-filter-${f}`}
+                    onClick={() => setFilter(f)}
+                    className={cn(
+                      'px-2 py-0.5 rounded transition-colors',
+                      filter === f ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+                    )}
+                  >
+                    {f === 'all' && `${t('marketplaceAll')} ${counts.total}`}
+                    {f === 'installed' && `${t('marketplaceInstalled')} ${counts.installed}`}
+                    {f === 'available' && `${t('marketplaceAvailable')} ${counts.total - counts.installed}`}
+                  </button>
+                ))}
+                <button data-id="skill-market-refresh" onClick={load} className="ml-auto p-1 text-zinc-500 hover:text-zinc-300 rounded" title={t('marketplaceRetry')}>
+                  <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
+                </button>
+              </div>
+            </div>
 
-      {registriesOpen && (
-        <RegistriesDialog
-          onClose={() => setRegistriesOpen(false)}
-          onChanged={load}
-        />
-      )}
+            <div className="flex-1 overflow-y-auto" data-id="skill-market-list">
+              {loading && skills.length === 0 ? (
+                <SkillListSkeleton />
+              ) : loadError ? (
+                <div data-id="skill-market-error" className="p-4 text-xs">
+                  <div data-id="skill-market-error-msg" className="text-red-400 mb-2">{t('marketplaceFailedToLoad')}: {loadError}</div>
+                  <button data-id="skill-market-error-retry" onClick={load} className="text-zinc-400 hover:text-zinc-100 underline">{t('marketplaceRetry')}</button>
+                </div>
+              ) : filtered.length === 0 ? (
+                <div data-id="skill-market-empty" className="p-4 text-xs text-zinc-500">{t('marketplaceEmpty')}</div>
+              ) : (
+                Object.entries(grouped).sort(([a],[b]) => a.localeCompare(b)).map(([category, list]) => (
+                  <div key={category} data-id={`skill-market-cat-${category}`}>
+                    <div data-id="skill-market-cat-label" className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wider text-zinc-600">{category}</div>
+                    <div data-id="skill-market-cat-items">
+                      {list.map(skill => (
+                        <SkillRow
+                          key={skill.name}
+                          skill={skill}
+                          selected={selectedName === skill.name}
+                          onClick={() => setSelectedName(skill.name)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </>
+        )}
+
+        {hubTab === 'publish' && (
+          <div className="flex-1 overflow-y-auto p-4" data-id="skill-hub-publish">
+            <PublishPanel onChanged={load} onOpenDetail={(n) => setSelectedName(n)} />
+          </div>
+        )}
+
+        {hubTab === 'subscribe' && (
+          <div className="flex-1 overflow-y-auto p-4" data-id="skill-hub-subscribe">
+            <SubscribePanel onChanged={load} />
+          </div>
+        )}
+      </div>
 
       {selectedName && (
         <SkillDetailModal
@@ -441,9 +469,9 @@ function SkillListSkeleton() {
   );
 }
 
-// RegistriesDialog manages the private-registry source list. This is the UI
-// entry point teammates use to add a team's registry by pasting its address +
-// token; afterwards private skills appear in the marketplace (badged).
+// SubscribePanel — registries others shared with you. Add by pasting their
+// address + token; their skills then appear in Discover (badged by source).
+// Multiple peers supported; the public registry is always present (built-in).
 interface RegistrySourceView {
   name: string;
   url: string;
@@ -451,13 +479,12 @@ interface RegistrySourceView {
   public: boolean;
 }
 
-function RegistriesDialog({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
-  const [tab, setTab] = useState<'connect' | 'host'>('connect');
+function SubscribePanel({ onChanged }: { onChanged: () => void }) {
+  const { t } = useTranslation('workspace');
   const [sources, setSources] = useState<RegistrySourceView[]>([]);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
-  const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -476,12 +503,14 @@ function RegistriesDialog({ onClose, onChanged }: { onClose: () => void; onChang
   useEffect(() => { refresh(); }, [refresh]);
 
   const add = async () => {
-    if (!url.trim()) { setError('请填写地址 URL'); return; }
+    if (!url.trim()) { setError(t('subscribeErrUrl')); return; }
+    if (!name.trim()) { setError(t('subscribeErrName')); return; }
     setBusy(true);
     setError('');
     try {
-      await apiService.addSkillRegistry({ name: name.trim(), url: url.trim(), token: token.trim() });
-      setName(''); setUrl(''); setToken('');
+      // url may carry ?token=… (the share link); backend extracts it.
+      await apiService.addSkillRegistry({ name: name.trim(), url: url.trim() });
+      setName(''); setUrl('');
       await refresh();
       onChanged();
     } catch (e: any) {
@@ -505,41 +534,13 @@ function RegistriesDialog({ onClose, onChanged }: { onClose: () => void; onChang
     }
   };
 
-  return createPortal(
-    <div
-      data-id="skill-registries-overlay"
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        data-id="skill-registries-dialog"
-        className="w-[460px] max-h-[80vh] flex flex-col bg-[#0e0e0e] border border-[var(--vsc-border)] rounded-lg shadow-xl overflow-hidden"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="px-4 py-3 border-b border-[var(--vsc-border)] flex items-center gap-2">
-          <Lock className="w-4 h-4 text-violet-300" />
-          <div className="text-sm font-medium text-zinc-100">私有 Skill 库</div>
-          <button onClick={onClose} className="ml-auto p-1 text-zinc-500 hover:text-zinc-200 rounded" data-id="skill-registries-close">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="px-4 pt-3 flex items-center gap-1 text-[11px]" data-id="skill-registries-tabs">
-          <button onClick={() => setTab('connect')} className={cn('px-2 py-0.5 rounded', tab === 'connect' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300')}>连接私有库</button>
-          <button onClick={() => setTab('host')} className={cn('px-2 py-0.5 rounded', tab === 'host' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300')}>托管本地库</button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {tab === 'connect' && <>
-          <p className="text-[11px] text-zinc-500 leading-relaxed">
-            把同事给你的「地址 + token」加进来,该团队的私有 skill 就会出现在列表里(带 🔒 徽章)。公开库默认已在,无需配置。
-          </p>
-
+  return (
+    <div className="space-y-4" data-id="subscribe-panel">
           {/* current sources */}
           <div data-id="skill-registries-list" className="space-y-1.5">
             {loading ? (
-              <div className="text-[11px] text-zinc-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> 加载中…</div>
-            ) : sources.map(s => (
+              <div className="text-[11px] text-zinc-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> {t('marketplaceModalLoading')}</div>
+            ) : sources.filter(s => !s.public).map(s => (
               <div key={s.name} data-id={`skill-registry-${s.name}`} className="flex items-center gap-2 px-2.5 py-1.5 rounded bg-white/[0.03] border border-[var(--vsc-border)]/40">
                 <span className={cn('text-[10px] px-1 py-0.5 rounded inline-flex items-center gap-0.5', s.public ? 'bg-zinc-500/15 text-zinc-300' : 'bg-violet-500/15 text-violet-300')}>
                   {s.public ? <Globe className="w-2.5 h-2.5" /> : <Lock className="w-2.5 h-2.5" />}
@@ -553,7 +554,7 @@ function RegistriesDialog({ onClose, onChanged }: { onClose: () => void; onChang
                     onClick={() => remove(s.name)}
                     disabled={busy}
                     className="p-0.5 text-zinc-600 hover:text-red-400 rounded disabled:opacity-40"
-                    title="移除"
+                    title={t('subscribeRemove')}
                   >
                     <XCircle className="w-3.5 h-3.5" />
                   </button>
@@ -564,62 +565,45 @@ function RegistriesDialog({ onClose, onChanged }: { onClose: () => void; onChang
 
           {/* add form */}
           <div className="space-y-2 pt-2 border-t border-[var(--vsc-border)]/40">
-            <div className="text-[11px] font-medium text-zinc-400">添加私有库</div>
+            <div className="text-[11px] font-medium text-zinc-400">{t('subscribeAddTitle')}</div>
             <input
               data-id="skill-registry-add-url"
               value={url}
               onChange={e => setUrl(e.target.value)}
-              placeholder="地址 URL,如 http://team-host:8787"
+              placeholder={t('subscribeUrlPlaceholder')}
               className="w-full px-2 py-1.5 text-xs bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
             />
-            <div className="flex gap-2">
-              <input
-                data-id="skill-registry-add-name"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="名称(可选,如 team-a)"
-                className="flex-1 px-2 py-1.5 text-xs bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
-              />
-              <input
-                data-id="skill-registry-add-token"
-                value={token}
-                onChange={e => setToken(e.target.value)}
-                placeholder="token(可选)"
-                type="password"
-                className="flex-1 px-2 py-1.5 text-xs bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
-              />
-            </div>
+            <input
+              data-id="skill-registry-add-name"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder={t('subscribeNamePlaceholder')}
+              className="w-full px-2 py-1.5 text-xs bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+            />
             {error && <div data-id="skill-registry-error" className="text-[11px] text-red-400">{error}</div>}
             <button
               data-id="skill-registry-add-btn"
               onClick={add}
-              disabled={busy || !url.trim()}
+              disabled={busy || !url.trim() || !name.trim()}
               className="w-full px-3 py-1.5 text-xs rounded bg-violet-500/20 text-violet-200 hover:bg-violet-500/30 disabled:opacity-40 inline-flex items-center justify-center gap-1"
             >
               {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lock className="w-3 h-3" />}
-              添加
+              {t('subscribeAdd')}
             </button>
           </div>
-          </>}
-
-          {tab === 'host' && <LocalRegistryPanel onChanged={onChanged} />}
-        </div>
-      </div>
-    </div>,
-    document.body
+    </div>
   );
 }
 
-// LocalRegistryPanel — host your own private registry on this machine: start/
-// stop the in-process server, see/copy the token + LAN share URLs, publish
-// local skill directories, and list what's published.
-function LocalRegistryPanel({ onChanged }: { onChanged: () => void }) {
+// PublishPanel — this node's always-on self-hosted registry (no start/stop).
+// Share its address + read token with others; publish/yank your private skills.
+// The address is the node's public URL (CICY_PUBLIC_URL) + "/registry".
+function PublishPanel({ onChanged, onOpenDetail }: { onChanged: () => void; onOpenDetail: (name: string) => void }) {
+  const { t } = useTranslation('workspace');
   const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [port, setPort] = useState('8787');
-  const [publishPath, setPublishPath] = useState('');
   const [copied, setCopied] = useState('');
 
   const refresh = useCallback(async () => {
@@ -627,7 +611,6 @@ function LocalRegistryPanel({ onChanged }: { onChanged: () => void }) {
     try {
       const res = await apiService.getLocalRegistry();
       setStatus(res?.data || null);
-      if (res?.data?.port) setPort(String(res.data.port));
     } catch (e: any) {
       setError(e?.message || 'failed');
     } finally {
@@ -643,130 +626,99 @@ function LocalRegistryPanel({ onChanged }: { onChanged: () => void }) {
     setTimeout(() => setCopied(''), 1200);
   };
 
-  const start = async () => {
+  const rotate = async () => {
+    if (!window.confirm(t('publishRotateConfirm'))) return;
     setBusy(true); setError('');
-    try {
-      await apiService.startLocalRegistry({ port: Number(port) || 8787 });
-      await refresh();
-      onChanged();
-    } catch (e: any) { setError(e?.response?.data?.detail || e?.message || 'start failed'); }
+    try { await apiService.rotateLocalRegistry(); await refresh(); onChanged(); }
+    catch (e: any) { setError(e?.response?.data?.detail || e?.message || 'rotate failed'); }
     finally { setBusy(false); }
   };
-  const stop = async () => {
-    setBusy(true); setError('');
-    try { await apiService.stopLocalRegistry(); await refresh(); }
-    catch (e: any) { setError(e?.response?.data?.detail || e?.message || 'stop failed'); }
-    finally { setBusy(false); }
-  };
-  const publish = async () => {
-    if (!publishPath.trim()) return;
+  const setShared = async (name: string, on: boolean) => {
     setBusy(true); setError('');
     try {
-      await apiService.publishLocalRegistry(publishPath.trim());
-      setPublishPath('');
+      if (on) await apiService.publishLocalRegistry(name);
+      else await apiService.unpublishLocalRegistry(name);
       await refresh();
       onChanged();
-    } catch (e: any) { setError(e?.response?.data?.detail || e?.message || 'publish failed'); }
+    } catch (e: any) { setError(e?.response?.data?.detail || e?.message || (on ? 'share failed' : 'unshare failed')); }
     finally { setBusy(false); }
   };
 
   if (loading && !status) {
-    return <div className="text-[11px] text-zinc-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> 加载中…</div>;
+    return <div className="text-[11px] text-zinc-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> {t('marketplaceModalLoading')}</div>;
   }
-  const running = !!status?.running;
-  const skills = (status?.skills || []) as { name: string; version: string }[];
-  const shareUrls = (status?.share_urls || []) as string[];
+  const shareLink = status?.share_url || '';
+  const skills = (status?.my_skills || []) as { name: string; title?: string; description?: string; category?: string; version: string; published: boolean }[];
 
   return (
-    <div className="space-y-3" data-id="local-registry-panel">
-      <p className="text-[11px] text-zinc-500 leading-relaxed">
-        在本机托管一个私有 skill 库,把下面的「地址 + token」发给同事,他们在「连接私有库」里填进去即可使用。
-      </p>
-
-      <div className="flex items-center gap-2">
-        <span className={cn('text-[10px] px-1.5 py-0.5 rounded inline-flex items-center gap-1', running ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-400')}>
-          <Server className="w-2.5 h-2.5" /> {running ? '运行中' : '已停止'}
-        </span>
-        <input
-          data-id="local-registry-port"
-          value={port}
-          onChange={e => setPort(e.target.value)}
-          disabled={running}
-          className="w-20 px-2 py-1 text-xs bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-zinc-300 disabled:opacity-50 focus:outline-none focus:border-zinc-500"
-          placeholder="端口"
-        />
-        {running ? (
-          <button data-id="local-registry-stop" onClick={stop} disabled={busy} className="px-3 py-1 text-xs rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 disabled:opacity-40">停止</button>
-        ) : (
-          <button data-id="local-registry-start" onClick={start} disabled={busy} className="px-3 py-1 text-xs rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-40 inline-flex items-center gap-1">
-            {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Server className="w-3 h-3" />} 启动
-          </button>
-        )}
-      </div>
-
+    <div className="space-y-4" data-id="publish-panel">
       {error && <div className="text-[11px] text-red-400">{error}</div>}
 
-      {running && (
-        <>
-          {/* token */}
-          <div className="space-y-1">
-            <div className="text-[11px] text-zinc-400">读取 token(发给同事)</div>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 px-2 py-1 text-[11px] bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-violet-300 truncate font-mono">{status?.token}</code>
-              <button onClick={() => copy(status?.token, 'token')} className="p-1 text-zinc-500 hover:text-zinc-200 rounded" title="复制">
-                {copied === 'token' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              </button>
-            </div>
-          </div>
+      {/* share card — one link (token embedded) to copy & send */}
+      <div className="space-y-1.5 p-2.5 rounded bg-white/[0.03] border border-[var(--vsc-border)]/40" data-id="publish-share">
+        <div className="text-[11px] text-zinc-400">{t('publishShareLabel')}</div>
+        <div className="flex items-center gap-2">
+          <code className="flex-1 px-2 py-1 text-[11px] bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-violet-300 truncate font-mono" data-id="publish-share-url">{shareLink || '—'}</code>
+          <button onClick={() => copy(shareLink, 'link')} disabled={!shareLink} className="p-1 text-zinc-500 hover:text-zinc-200 rounded disabled:opacity-40" title={t('publishCopyLink')}>
+            {copied === 'link' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+          <button onClick={rotate} disabled={busy} className="p-1 text-zinc-500 hover:text-amber-300 rounded disabled:opacity-40" title={t('publishRefreshToken')}>
+            <RotateCw className={cn('w-3.5 h-3.5', busy && 'animate-spin')} />
+          </button>
+        </div>
+      </div>
 
-          {/* share urls */}
-          {shareUrls.length > 0 && (
-            <div className="space-y-1">
-              <div className="text-[11px] text-zinc-400">局域网地址</div>
-              {shareUrls.map(u => (
-                <div key={u} className="flex items-center gap-2">
-                  <code className="flex-1 px-2 py-1 text-[11px] bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-zinc-300 truncate font-mono">{u}</code>
-                  <button onClick={() => copy(u, u)} className="p-1 text-zinc-500 hover:text-zinc-200 rounded" title="复制">
-                    {copied === u ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* publish */}
-          <div className="space-y-2 pt-2 border-t border-[var(--vsc-border)]/40">
-            <div className="text-[11px] font-medium text-zinc-400">发布 skill 到本地库</div>
-            <div className="flex gap-2">
-              <input
-                data-id="local-registry-publish-path"
-                value={publishPath}
-                onChange={e => setPublishPath(e.target.value)}
-                placeholder="skill 目录绝对路径"
-                className="flex-1 px-2 py-1.5 text-xs bg-[#0a0a0a] border border-[var(--vsc-border)] rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
-              />
-              <button data-id="local-registry-publish-btn" onClick={publish} disabled={busy || !publishPath.trim()} className="px-3 py-1.5 text-xs rounded bg-violet-500/20 text-violet-200 hover:bg-violet-500/30 disabled:opacity-40">发布</button>
-            </div>
-            {skills.length > 0 && (
-              <div className="space-y-1 pt-1">
-                {skills.map(s => (
-                  <div key={s.name} className="text-[11px] text-zinc-500 flex items-center gap-1.5">
-                    <Package className="w-3 h-3 text-zinc-600" /> {s.name} <span className="text-zinc-700">v{s.version}</span>
+      {/* my skills — toggle each to share into my registry */}
+      <div className="space-y-2 pt-1">
+        {skills.length > 0 ? (
+          <div className="-mx-4 pt-1" data-id="publish-list">
+            {skills.map(s => (
+              <SkillRow
+                key={s.name}
+                selected={false}
+                onClick={() => onOpenDetail(s.name)}
+                skill={{
+                  name: s.name,
+                  title: s.title || s.name,
+                  description: s.description || '',
+                  version: s.version,
+                  category: s.category || 'other',
+                  source: 'private',
+                  tags: [],
+                  status: { installed: false, config_present: true },
+                } as unknown as MarketSkill}
+                trailing={
+                  <div className="flex items-center gap-2">
+                    {s.published && <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400">{t('publishedBadge')}</span>}
+                    <button
+                      data-id={`publish-toggle-${s.name}`}
+                      onClick={() => setShared(s.name, !s.published)}
+                      disabled={busy}
+                      role="switch"
+                      aria-checked={s.published}
+                      title={s.published ? t('publishToggleOff') : t('publishToggleOn')}
+                      className={cn('relative w-9 h-5 rounded-full transition-colors shrink-0 disabled:opacity-40', s.published ? 'bg-emerald-500/70' : 'bg-zinc-600/50')}
+                    >
+                      <span className={cn('absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all', s.published ? 'left-[18px]' : 'left-0.5')} />
+                    </button>
                   </div>
-                ))}
-              </div>
-            )}
+                }
+              />
+            ))}
           </div>
-        </>
-      )}
+        ) : (
+          <div className="text-[11px] text-zinc-600 pt-1">{t('publishEmpty')}</div>
+        )}
+      </div>
     </div>
   );
 }
 
-function SkillRow({ skill, selected, onClick }: {
+function SkillRow({ skill, selected, onClick, trailing }: {
   skill: MarketSkill;
   selected: boolean;
   onClick: () => void;
+  trailing?: ReactNode;
 }) {
   const installed = skill.status.installed;
 
@@ -808,7 +760,6 @@ function SkillRow({ skill, selected, onClick }: {
             )}
             {installed && skill.has_update && (
               <span className="text-[10px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-300 inline-flex items-center gap-0.5" data-id={`skill-market-update-${skill.name}`} title={`${skill.installed_version} → ${skill.version}`}>
-                <RefreshCw className="w-2.5 h-2.5" />
                 <span>v{skill.version}</span>
               </span>
             )}
@@ -820,6 +771,7 @@ function SkillRow({ skill, selected, onClick }: {
           </div>
           <div data-id="skill-row-desc" className="text-[11px] text-zinc-500 leading-snug">{skill.description}</div>
         </div>
+        {trailing && <div className="shrink-0 self-center" onClick={(e) => e.stopPropagation()}>{trailing}</div>}
       </div>
     </div>
   );
@@ -1270,7 +1222,13 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
               )}
                 </>
               )}
-              {skill && (
+              {skill && skill.source === 'private' && (
+                <div data-id="skill-detail-private-note" className="mt-3 text-[11px] text-zinc-500 inline-flex items-center gap-1.5">
+                  <Lock className="w-3 h-3 text-violet-300" />
+                  {t('publishPrivateNote', { defaultValue: '私有库 skill —— 在「我的库」用「公开」开关分享给别人' })}
+                </div>
+              )}
+              {skill && skill.source !== 'private' && (
                 <div data-id="skill-detail-actions" className="mt-3 flex items-center gap-2 flex-wrap">
                   {skill.status.installed ? (
                     <>
@@ -1426,10 +1384,12 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
               <div className="h-[38px] w-24 rounded-lg bg-white/[0.05]" />
             </div>
           ) : !skill?.status.installed ? (
-            <div data-id="skill-detail-install-first" className="flex items-center gap-2 text-[11px] text-zinc-500">
-              <AlertTriangle className="w-3 h-3" />
-              {t('marketplaceInstallFirst')}
-            </div>
+            skill?.source === 'private' ? null : (
+              <div data-id="skill-detail-install-first" className="flex items-center gap-2 text-[11px] text-zinc-500">
+                <AlertTriangle className="w-3 h-3" />
+                {t('marketplaceInstallFirst')}
+              </div>
+            )
           ) : (
             <>
               <div data-id="skill-detail-send-row" className="flex items-end gap-2">

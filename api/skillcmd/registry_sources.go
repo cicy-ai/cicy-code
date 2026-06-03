@@ -18,12 +18,21 @@ package skillcmd
 import (
 	"encoding/json"
 	"fmt"
+	neturl "net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
 const publicSourceName = "public"
+
+// validSourceName guards the source name, which is used both as a key in
+// registries.json AND as a filesystem path component (~/cicy-ai/skills/team/
+// <name>/). Allowing '.', '-', '_' covers host-derived defaults like
+// "dev.example.com"; requiring a leading alphanumeric and disallowing '/'
+// blocks path traversal (".."/"a/b").
+var validSourceName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
 // registrySource is one entry in registries.json.
 type registrySource struct {
@@ -113,12 +122,36 @@ func ClientSources() []SourceInfo {
 // The public source is seeded first if the file is empty. Returns whether an
 // existing same-name entry was replaced. Shared by the CLI and the HTTP API.
 func AddSource(name, rawURL, token string) (replaced bool, err error) {
-	url := strings.TrimRight(strings.TrimSpace(rawURL), "/")
+	rawURL = strings.TrimSpace(rawURL)
+	// A share link is a single URL with the token embedded as ?token=…, so the
+	// subscriber pastes one thing. Extract it (an explicit token arg still wins)
+	// and strip it from the stored URL — the client sends it as a Bearer header,
+	// never as a query param.
+	if rawURL != "" {
+		if pu, perr := neturl.Parse(rawURL); perr == nil {
+			if q := pu.Query(); q.Get("token") != "" {
+				if token == "" {
+					token = q.Get("token")
+				}
+				q.Del("token")
+				pu.RawQuery = q.Encode()
+				rawURL = pu.String()
+			}
+		}
+	}
+	url := strings.TrimRight(rawURL, "/")
 	if url == "" {
 		return false, fmt.Errorf("url required")
 	}
+	name = strings.TrimSpace(name)
 	if name == "" {
 		name = hostLabel(url)
+	}
+	if name == publicSourceName {
+		return false, fmt.Errorf("source name %q is reserved", name)
+	}
+	if !validSourceName.MatchString(name) {
+		return false, fmt.Errorf("invalid source name %q (use letters, digits, '.', '-', '_'; no '/')", name)
 	}
 	srcs, err := loadSources()
 	if err != nil {

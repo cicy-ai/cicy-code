@@ -337,6 +337,7 @@ func fsRoots(agentID string) ([]fsRootInfo, error) {
 	candidates := []struct {
 		id, label, sub string
 	}{
+		{"memory", "Memory", "cicy-ai/memory"},
 		{"projects", "Projects", "projects"},
 		{"skills", "Skills", "cicy-ai/skills"},
 		{"home", "Home", ""},
@@ -379,6 +380,27 @@ func fsResolveRoot(r *http.Request, requested string) (abs, base string, err err
 		}
 	}
 	return "", "", errInvalidRoot
+}
+
+// fsRootBase returns the absolute base directory for the request's "root"
+// query param (default "workspace"). Used by handlers that need the root path
+// itself (e.g. delete via resolveSafeLeaf) rather than a resolved sub-path.
+func fsRootBase(r *http.Request) (string, error) {
+	q := r.URL.Query()
+	rootID := q.Get("root")
+	if rootID == "" {
+		rootID = "workspace"
+	}
+	roots, err := fsRoots(q.Get("agent_id"))
+	if err != nil {
+		return "", err
+	}
+	for _, root := range roots {
+		if root.ID == rootID {
+			return root.Path, nil
+		}
+	}
+	return "", errInvalidRoot
 }
 
 // handleFsRoots — GET /api/fs/roots?agent_id=…
@@ -712,6 +734,7 @@ func handleRuntimeFlags(w http.ResponseWriter, r *http.Request) {
 	}
 	J(w, M{
 		"use_native_files": useNativeFiles(),
+		"audit_enabled":    auditEnabled(),
 	})
 }
 
@@ -727,7 +750,9 @@ func handleFsDownload(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	abs, _, err := fsResolve(r, r.URL.Query().Get("path"))
+	// Root-aware: honor ?root= so downloads work for any allowed root, matching
+	// the explorer's full context menu. Defaults to the workspace root.
+	abs, _, err := fsResolveRoot(r, r.URL.Query().Get("path"))
 	if err != nil {
 		fsErr(w, err)
 		return
@@ -785,7 +810,10 @@ func handleFsUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	workspace, err := agentWorkspace(q.Get("agent_id"))
+	// Root-aware: honor ?root= so uploads can target any allowed root (projects
+	// / skills / home), matching the explorer's full context menu. Defaults to
+	// the workspace root.
+	workspace, err := fsRootBase(r)
 	if err != nil {
 		fsErr(w, err)
 		return
@@ -877,7 +905,7 @@ func handleFsRename(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "invalid_body")
 		return
 	}
-	workspace, err := agentWorkspace(r.URL.Query().Get("agent_id"))
+	workspace, err := fsRootBase(r)
 	if err != nil {
 		fsErr(w, err)
 		return
@@ -938,7 +966,7 @@ func handleFsDelete(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "invalid_body")
 		return
 	}
-	workspace, err := agentWorkspace(r.URL.Query().Get("agent_id"))
+	base, err := fsRootBase(r)
 	if err != nil {
 		fsErr(w, err)
 		return
@@ -946,16 +974,16 @@ func handleFsDelete(w http.ResponseWriter, r *http.Request) {
 	// resolveSafeLeaf (not resolveSafePath): delete must act on the path itself,
 	// not a symlink's target — otherwise deleting a link removes what it points
 	// at and orphans the link.
-	abs, err := resolveSafeLeaf(workspace, req.Path)
+	abs, err := resolveSafeLeaf(base, req.Path)
 	if err != nil {
 		fsErr(w, err)
 		return
 	}
-	if abs == workspace {
+	if abs == base {
 		httpErr(w, http.StatusBadRequest, "cannot_delete_root")
 		return
 	}
-	if isProtectedWritePath(workspace, abs) {
+	if isProtectedWritePath(base, abs) {
 		fsErr(w, errPathWriteForbidden)
 		return
 	}
@@ -984,7 +1012,7 @@ func handleFsDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	J(w, M{"success": true, "path": workspaceRel(workspace, abs)})
+	J(w, M{"success": true, "path": workspaceRel(base, abs)})
 }
 
 type fsMkdirRequest struct {
@@ -1001,7 +1029,7 @@ func handleFsMkdir(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "invalid_body")
 		return
 	}
-	workspace, err := agentWorkspace(r.URL.Query().Get("agent_id"))
+	workspace, err := fsRootBase(r)
 	if err != nil {
 		fsErr(w, err)
 		return
@@ -1040,7 +1068,7 @@ func handleFsTouch(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "invalid_body")
 		return
 	}
-	workspace, err := agentWorkspace(r.URL.Query().Get("agent_id"))
+	workspace, err := fsRootBase(r)
 	if err != nil {
 		fsErr(w, err)
 		return

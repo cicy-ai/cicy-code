@@ -98,6 +98,19 @@ type Span struct {
 	Start   int    `json:"start"`
 	End     int    `json:"end"`
 	Preview string `json:"preview"`
+	// Path is the JSON location of the match within the request body, e.g.
+	// "messages[2].content[0].text". Empty for non-JSON bodies. It is the
+	// single most decisive triage signal — it tells a human/agent whether a
+	// match sits in user content, a tool argument, an auth header, or a
+	// provider protocol field. omitempty keeps pre-structure events
+	// canonical-hash compatible.
+	Path string `json:"path,omitempty"`
+	// Context is a short window of the surrounding field value with the match
+	// itself masked — e.g. "...call the api at sk-a****b9 then...". It lets a
+	// human/agent judge a match in situ (is it wrapped in base64? quoted in a
+	// log line? a header value?) without exposing the secret. omitempty keeps
+	// pre-structure events canonical-hash compatible.
+	Context string `json:"context,omitempty"`
 }
 
 type Decision struct {
@@ -133,6 +146,13 @@ type Meta struct {
 	// Set only on Action=redact events. omitempty preserves backward-
 	// compatible canonical hashes for events without redaction.
 	PreRedactRef string `json:"pre_redact_ref,omitempty"`
+
+	// SnapshotRef points to a REDACTED, plaintext snapshot of the request kept
+	// under ~/cicy-ai/workers/<agent>/.cicy/history/snapshots/<event_id>.json.
+	// Set on Action=notify events (which don't archive an encrypted original)
+	// so the alert can be reviewed / audited later without re-exposing the
+	// matched secret. omitempty preserves backward-compatible canonical hashes.
+	SnapshotRef string `json:"snapshot_ref,omitempty"`
 
 	// Category tags meta-audit events that record audit-system actions
 	// rather than agent traffic. Values defined in design §11.3:

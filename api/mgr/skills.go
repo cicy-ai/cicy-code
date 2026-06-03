@@ -197,7 +197,8 @@ type marketSkill struct {
 	HasUpdate        bool   `json:"has_update,omitempty"`
 }
 
-const marketRegistryDefaultURL = "https://skills.cicy-ai.com"
+// single source of truth for the public registry URL (shared with skillcmd)
+const marketRegistryDefaultURL = skillcmd.DefaultRegistry
 
 var (
 	marketCacheMu       sync.Mutex
@@ -520,7 +521,7 @@ func loadInstalledNames() map[string]string {
 // and other metadata. Returns an empty map on missing/corrupt installed.json.
 func loadInstalledFull() map[string]skillcmd.InstalledSkill {
 	out := map[string]skillcmd.InstalledSkill{}
-	cfg, err := skillcmd.PublicInstalled()
+	cfg, err := skillcmd.InstalledSkills()
 	if err != nil || cfg == nil {
 		return out
 	}
@@ -673,7 +674,60 @@ func findMarketSkill(name, lang string) *marketSkill {
 			return &skill
 		}
 	}
-	return nil
+	// Fall back to a private skill (~/cicy-ai/skills/private/<name>): these are
+	// excluded from the merged catalog (they're not for public discovery) but
+	// must still be viewable from the "我的库" tab.
+	return privateMarketSkill(name)
+}
+
+// privateMarketSkill builds a marketSkill from a skill dir under PrivateSkillsDir.
+func privateMarketSkill(name string) *marketSkill {
+	data, err := os.ReadFile(filepath.Join(skillcmd.PrivateSkillsDir(), name, "manifest.json"))
+	if err != nil {
+		return nil
+	}
+	var m struct {
+		Name        string   `json:"name"`
+		Title       string   `json:"title"`
+		Description string   `json:"description"`
+		Category    string   `json:"category"`
+		Version     string   `json:"version"`
+		Tags        []string `json:"tags"`
+		Config      struct {
+			Path string `json:"path"`
+		} `json:"config"`
+	}
+	if json.Unmarshal(data, &m) != nil || m.Name == "" {
+		return nil
+	}
+	title := m.Title
+	if title == "" {
+		title = titleizeSkillName(m.Name)
+	}
+	return &marketSkill{
+		Name:        m.Name,
+		Title:       title,
+		Description: m.Description,
+		Version:     m.Version,
+		Category:    m.Category,
+		Tags:        m.Tags,
+		ConfigFile:  m.Config.Path,
+		Source:      "private",
+	}
+}
+
+// readPrivateManifest returns the raw manifest map for a private skill (for the
+// detail sidebar), or nil if absent.
+func readPrivateManifest(name string) map[string]any {
+	data, err := os.ReadFile(filepath.Join(skillcmd.PrivateSkillsDir(), name, "manifest.json"))
+	if err != nil {
+		return nil
+	}
+	var m map[string]any
+	if json.Unmarshal(data, &m) != nil {
+		return nil
+	}
+	return m
 }
 
 // readSkillDoc reads SKILL.md / references/help.md / references/tools.md.
@@ -688,6 +742,13 @@ func readSkillDoc(skill *marketSkill, file, fileKey string) string {
 	if root != "" {
 		p := filepath.Join(root, skill.Name, file)
 		if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
+			return string(data)
+		}
+	}
+	// Private skills live under ~/cicy-ai/skills/private/<name>/ (excluded from
+	// the flat root above) — read their docs from there.
+	if pp := filepath.Join(skillcmd.PrivateSkillsDir(), skill.Name, file); pp != "" {
+		if data, err := os.ReadFile(pp); err == nil && len(data) > 0 {
 			return string(data)
 		}
 	}
@@ -884,7 +945,9 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 		// etc. in the detail sidebar. This is best-effort: registry-side
 		// failures degrade gracefully (UI just won't show the sidebar).
 		var manifest map[string]any
-		if skill.Source != "user" {
+		if skill.Source == "private" {
+			manifest = readPrivateManifest(skill.Name)
+		} else if skill.Source != "user" {
 			manifest = fetchRegistryManifest(skill.Name, lang)
 		}
 		J(w, M{
@@ -912,7 +975,7 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var logBuf strings.Builder
-		res, err := skillcmd.PublicInstall(name, &logBuf)
+		res, err := skillcmd.InstallSkill(name, &logBuf)
 		if err != nil {
 			J(w, M{"ok": false, "error": err.Error(), "log": logBuf.String()})
 			return
@@ -952,7 +1015,7 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var logBuf strings.Builder
-		removed, err := skillcmd.PublicRemove(name, &logBuf)
+		removed, err := skillcmd.RemoveSkill(name, &logBuf)
 		if err != nil {
 			J(w, M{"ok": false, "error": err.Error(), "log": logBuf.String()})
 			return
@@ -976,7 +1039,7 @@ func handleSkillMarketAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var logBuf strings.Builder
-		res, err := skillcmd.PublicUpdate(name, &logBuf)
+		res, err := skillcmd.UpdateSkill(name, &logBuf)
 		if err != nil {
 			J(w, M{"ok": false, "error": err.Error(), "log": logBuf.String()})
 			return

@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/http/httputil"
@@ -21,8 +22,28 @@ func appDistDir() string {
 	return filepath.Join("app", "dist")
 }
 
+// cdnRewriteIndex rewrites the App SPA index.html so its root-absolute asset
+// references point at the baked-in R2 prefix instead of the local origin. Only
+// active under --cdn with a non-empty BuiltAppCDNPrefix; otherwise a no-op. The
+// built index uses relative root paths (vite base '/') — `="/assets/…"` and
+// `="/favicon…"` — so a targeted prefix-prepend covers <script>, <link>,
+// modulepreload, and the favicon without touching anything else.
+func cdnRewriteIndex(b []byte) []byte {
+	if !cdnMode {
+		return b
+	}
+	prefix := strings.TrimRight(strings.TrimSpace(BuiltAppCDNPrefix), "/")
+	if prefix == "" {
+		return b
+	}
+	s := string(b)
+	s = strings.ReplaceAll(s, `="/assets/`, `="`+prefix+`/assets/`)
+	s = strings.ReplaceAll(s, `="/favicon`, `="`+prefix+`/favicon`)
+	return []byte(s)
+}
+
 func nonAppPath(p string) bool {
-	for _, pre := range []string{"/api/", "/ttyd/", "/code/", "/mitm/", "/pma/", "/static/", "/v1/", "/oauth/"} {
+	for _, pre := range []string{"/api/", "/ttyd/", "/mitm/", "/pma/", "/static/", "/v1/", "/oauth/"} {
 		if strings.HasPrefix(p, pre) {
 			return true
 		}
@@ -73,22 +94,61 @@ func serveUI() http.Handler {
 		if path == "/" {
 			path = "/index.html"
 		}
+
+		// Under --cdn we rewrite the index's asset URLs to R2 at serve time.
+		// Only the index needs this; hashed /assets/* are still served locally
+		// as a fallback (the browser fetches them from R2 in cdn mode).
+		rewriteActive := cdnMode && strings.TrimSpace(BuiltAppCDNPrefix) != ""
+		serveIndex := func() {
+			if rewriteActive {
+				var b []byte
+				var err error
+				if diskFS != nil {
+					if f, ferr := diskFS.Open("index.html"); ferr == nil {
+						b, err = io.ReadAll(f)
+						f.Close()
+					} else {
+						err = ferr
+					}
+				} else {
+					b, err = fs.ReadFile(sub, "index.html")
+				}
+				if err == nil {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					w.Write(cdnRewriteIndex(b))
+					return
+				}
+			}
+			r.URL.Path = "/"
+			if diskSrv != nil {
+				diskSrv.ServeHTTP(w, r)
+			} else {
+				embedded.ServeHTTP(w, r)
+			}
+		}
+
 		if diskFS != nil {
 			if f, err := diskFS.Open(strings.TrimPrefix(path, "/")); err == nil {
 				f.Close()
+				if path == "/index.html" && rewriteActive {
+					serveIndex()
+					return
+				}
 				diskSrv.ServeHTTP(w, r)
 				return
 			}
-			r.URL.Path = "/"
-			diskSrv.ServeHTTP(w, r)
+			serveIndex()
 			return
 		}
 		if f, err := sub.Open(strings.TrimPrefix(path, "/")); err == nil {
 			f.Close()
+			if path == "/index.html" && rewriteActive {
+				serveIndex()
+				return
+			}
 			embedded.ServeHTTP(w, r)
 			return
 		}
-		r.URL.Path = "/"
-		embedded.ServeHTTP(w, r)
+		serveIndex()
 	})
 }

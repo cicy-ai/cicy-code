@@ -100,5 +100,5 @@
   "scanWithWeChat": "Scan with WeChat",
   "scanSuccessNote": "After scanning, this WeChat is added to the list automatically; the login state lives in ~/cicy-ai/db/ and is restored on backend restart.",
   "regenerateAnotherQr": "Get a new QR code",
-  "fieldBindAgentHelpNoGateway": "Après liaison, l'IM peut envoyer des messages à l'agent, mais les réponses ne seront pas transmises à l'IM (seuls opencode / codex / claude supportent la transmission des réponses). Chaque agent ne peut être lié qu'à un seul compte par plateforme."
+  "fieldBindAgentHelpNoGateway": "Après liaison, l'IM envoie les messages à l'agent et ses réponses sont transmises à l'IM (les agents hors passerelle sont capturés via l'audit MITM local). Si l'agent est hors ligne, les messages sont redirigés vers w-10001. Chaque agent ne peut être lié qu'à un seul compte par plateforme."
 }

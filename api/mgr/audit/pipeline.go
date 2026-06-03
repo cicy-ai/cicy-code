@@ -399,9 +399,23 @@ func (p *Pipeline) process(env Envelope) {
 			hash,
 			env.submitMonoNs,
 			pol.Notify,
+			topSeverity(findings),
 		)
 		if reason != "" {
 			e.Meta.NotifySuppressedBy = reason
+		}
+	}
+
+	// Archive a redacted snapshot for notify alerts so they can be reviewed /
+	// audited later without re-exposing the secret. (block/redact already keep
+	// an encrypted original via pre-redact; notify previously kept nothing.)
+	if e.Decision.Action == ActionNotify && len(findings) > 0 && !allow.Suppressed {
+		redacted := RedactPayload(env.Payload, findings)
+		ref, err := SaveSnapshot(p.store.workersRoot, env.AgentID, e.ID, redacted)
+		if err != nil {
+			log.Printf("[audit] snapshot save failed agent=%s id=%s: %v", env.AgentID, e.ID, err)
+		} else {
+			e.Meta.SnapshotRef = ref
 		}
 	}
 

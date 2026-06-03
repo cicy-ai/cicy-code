@@ -1,12 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
-import { Check, Copy, Folder, History, Pencil } from 'lucide-react';
+import { Check, Copy, Pencil } from 'lucide-react';
 import { normalizeAgentType } from '../../lib/agentType';
 import { emitWebFrameMaskEvent } from '../../lib/webFrameMask';
+import { lockPointer, unlockPointer } from '../../lib/pointerLock';
 import { defaultWorkerWorkspace } from '../../config';
 import AgentAvatar from '../AgentAvatar';
-import AgentHistoryOverlay from '../chat/AgentHistoryOverlay';
+import { WebFrame } from '../WebFrame';
 
 export interface AgentCanvasItem {
   paneId: string;
@@ -26,7 +27,6 @@ interface AgentCanvasProps {
   items: AgentCanvasItem[];
   activePaneId: string;
   onActivePaneIdChange: (paneId: string) => void;
-  onOpenCodeServicePane?: (paneId: string, workspace?: string) => void;
   onOpenOpenClaw?: () => void;
   onRenamePaneTitle?: (paneId: string, title: string) => Promise<void>;
   onOpenSettingsPane?: (paneId: string) => void;
@@ -208,7 +208,6 @@ export default function AgentCanvas({
   items,
   activePaneId,
   onActivePaneIdChange,
-  onOpenCodeServicePane,
   onOpenOpenClaw,
   onRenamePaneTitle,
   onOpenSettingsPane,
@@ -722,7 +721,6 @@ export default function AgentCanvas({
               zoom={viewport.zoom}
               onFocus={() => focusPane(item.paneId)}
               onLayoutChange={(patch) => updateLayout(item.paneId, patch)}
-              onOpenCodeService={onOpenCodeServicePane ? () => onOpenCodeServicePane(item.paneId, item.workspace) : undefined}
               onOpenOpenClaw={normalizeAgentType(item.agentType) === 'openclaw' ? onOpenOpenClaw : undefined}
               onRenameTitle={onRenamePaneTitle ? (title) => onRenamePaneTitle(item.paneId, title) : undefined}
               onOpenSettings={onOpenSettingsPane ? () => onOpenSettingsPane(item.paneId) : undefined}
@@ -743,7 +741,6 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
   zoom,
   onFocus,
   onLayoutChange,
-  onOpenCodeService,
   onOpenOpenClaw,
   onRenameTitle,
   onOpenSettings,
@@ -756,7 +753,6 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
   zoom: number;
   onFocus: () => void;
   onLayoutChange: (patch: Partial<WindowLayout>) => void;
-  onOpenCodeService?: () => void;
   onOpenOpenClaw?: () => void;
   onRenameTitle?: (title: string) => Promise<void>;
   onOpenSettings?: () => void;
@@ -771,7 +767,6 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
   const [titleDraft, setTitleDraft] = useState(item.title || item.paneId);
   const [savingTitle, setSavingTitle] = useState(false);
   const [copiedPaneId, setCopiedPaneId] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const copiedPaneTimerRef = useRef<number | null>(null);
   const titleCommitInFlightRef = useRef(false);
@@ -1062,20 +1057,6 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
           title={i18n.t('dragWindow', { ns: 'agentCanvas' })}
         />
         <div data-id="agent-window-header-right" className="flex items-center gap-1">
-          {!item.isApiOnly ? (
-            <button
-              type="button"
-              data-id="agent-window-history"
-              onClick={(event) => {
-                event.stopPropagation();
-                setHistoryOpen((value) => !value);
-              }}
-              className={`rounded p-1 transition-colors ${historyOpen ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200'}`}
-              title="History"
-            >
-              <History className="h-3.5 w-3.5" />
-            </button>
-          ) : null}
           {onOpenOpenClaw ? (
             <button
               type="button"
@@ -1088,20 +1069,6 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
               title="OpenClaw"
             >
               <span data-id="agent-canvas-auto-2" className="text-[13px] leading-none" aria-label="OpenClaw">🦞</span>
-            </button>
-          ) : null}
-          {!item.isApiOnly && onOpenCodeService ? (
-            <button
-              type="button"
-              data-id="agent-window-code-service"
-              onClick={(event) => {
-                event.stopPropagation();
-                onOpenCodeService();
-              }}
-              className="rounded p-1 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
-              title={i18n.t('codeServer', { ns: 'agentCanvas' })}
-            >
-              <Folder className="h-3.5 w-3.5" />
             </button>
           ) : null}
         </div>
@@ -1134,7 +1101,6 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
             {i18n.t('noWorkSession', { ns: 'agentCanvas' })}
           </div>
         )}
-        <AgentHistoryOverlay paneId={item.paneId} open={historyOpen} onClose={() => setHistoryOpen(false)} />
         <button
           type="button"
           data-id="agent-window-resize-handle"
@@ -1185,7 +1151,6 @@ const AgentCanvasWindow = memo(function AgentCanvasWindow({
     prev.layout.minimized === next.layout.minimized &&
     prev.onFocus === next.onFocus &&
     prev.onLayoutChange === next.onLayoutChange &&
-    prev.onOpenCodeService === next.onOpenCodeService &&
     prev.onOpenOpenClaw === next.onOpenOpenClaw &&
     prev.onRenameTitle === next.onRenameTitle &&
     prev.onOpenSettings === next.onOpenSettings

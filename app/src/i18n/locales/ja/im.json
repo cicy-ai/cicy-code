@@ -100,5 +100,5 @@
   "scanWithWeChat": "Scan with WeChat",
   "scanSuccessNote": "After scanning, this WeChat is added to the list automatically; the login state lives in ~/cicy-ai/db/ and is restored on backend restart.",
   "regenerateAnotherQr": "Get a new QR code",
-  "fieldBindAgentHelpNoGateway": "バインド後、IMからエージェントにメッセージを送信できますが、返信はIMに配信されません（opencode / codex / claude のみ返信プッシュをサポート）。各エージェントは同じプラットフォームに1アカウントのみバインド可能です。"
+  "fieldBindAgentHelpNoGateway": "バインド後、IMからエージェントにメッセージを送信でき、返信もIMに配信されます（非ゲートウェイのエージェントはローカルMITM監査で取得）。エージェントがオフラインの場合は w-10001 に転送されます。各エージェントは同じプラットフォームに1アカウントのみバインド可能です。"
 }

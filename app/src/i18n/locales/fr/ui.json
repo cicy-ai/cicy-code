@@ -16,9 +16,6 @@
   "selectClear": "Effacer",
   "selectHintNavigate": "naviguer",
   "selectHintSelect": "choisir",
-  "codeServerFolders": "Dossiers fréquents",
-  "codeServerOpenInNewWindow": "Ouvrir dans une nouvelle fenêtre",
-  "codeServerTitle": "Code server",
   "windowConfirmDelete": "Supprimer la fenêtre {{idx}} ?",
   "windowCreateButton": "Nouvelle fenêtre"
 }

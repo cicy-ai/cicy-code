@@ -6,7 +6,6 @@
   "copiedPaneId": "Copied",
   "copyMemberId": "Copy member ID",
   "dragWindow": "Drag window",
-  "codeServer": "Code server",
   "collabOverview": "Collaboration overview",
   "apiOnlyHint": "This member currently only supports the API surface; no ttyd terminal.",
   "zoomInHint": "Zoom in closer or expand the window to enter the live work session.",

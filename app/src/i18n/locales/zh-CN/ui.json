@@ -17,9 +17,6 @@
   "selectClear": "清除",
   "selectHintNavigate": "切换",
   "selectHintSelect": "选择",
-  "codeServerFolders": "常用文件夹",
-  "codeServerOpenInNewWindow": "在新窗口打开",
-  "codeServerTitle": "代码服务",
   "windowConfirmDelete": "删除窗口 {{idx}}？",
   "windowCreateButton": "新建窗口"
 }

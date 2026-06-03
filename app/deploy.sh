@@ -1,5 +1,5 @@
 #!/bin/bash
-# App 部署: Build + COS + Worker
+# App 部署: Build + R2 + Worker
 set -e
 cd "$(dirname "$0")"
 
@@ -25,8 +25,8 @@ echo "=== App v$VER ==="
 
 sed -i "s/^const VER = .*/const VER = '$VER';/" app-worker.js
 
-echo "=== 1/2 COS Assets ==="
-python3 ../scripts/cos-upload.py app
+echo "=== 1/2 R2 Assets ==="
+python3 ../scripts/r2-upload.py app
 
 echo "=== 2/2 Worker ==="
 CLOUDFLARE_ACCOUNT_ID=$CF_ACCOUNT CLOUDFLARE_API_TOKEN=$CF_TOKEN \

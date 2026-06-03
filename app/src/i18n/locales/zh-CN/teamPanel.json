@@ -15,7 +15,7 @@
   "delete": "删除",
   "createTitle": "创建并绑定新员工",
   "createSubmit": "创建并绑定",
-  "createEmptyTitleAgent": "全栈软件开发工程师",
+  "createEmptyTitleAgent": "未命名",
   "bindMemberPlaceholder": "绑定团队成员…",
   "createBindShortLabel": "创建并绑定新员工",
   "confirmUnbind": "解绑 <strong>{{name}}</strong>？",

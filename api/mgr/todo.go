@@ -1,14 +1,13 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,7 +39,7 @@ type todoFile struct {
 var (
 	todoMu          sync.Mutex
 	todoValidStatus = map[string]bool{
-		"todo": true, "doing": true, "done": true, "dropped": true,
+		"todo": true, "doing": true, "test": true, "done": true, "dropped": true,
 	}
 )
 
@@ -98,7 +97,43 @@ func loadTodos(workspace string) ([]Todo, error) {
 	if f.Todos == nil {
 		return []Todo{}, nil
 	}
+	// One-time migration: legacy random ids ("t-<unix>-<hex>") are replaced
+	// with stable, monotonic integer ids. Idempotent — once every id is a
+	// positive integer this is a no-op and nothing is rewritten.
+	if migrateTodoIDs(f.Todos) {
+		_ = saveTodos(workspace, f.Todos)
+	}
 	return f.Todos, nil
+}
+
+// migrateTodoIDs assigns sequential integer ids to any todo whose id is not
+// already a positive integer (legacy "t-<unix>-<hex>" ids). Legacy todos are
+// numbered by created_at ascending, continuing after the highest existing
+// numeric id so any previously-assigned numbers stay stable. Returns true if
+// at least one id changed.
+func migrateTodoIDs(todos []Todo) bool {
+	max := 0
+	var legacy []int
+	for i, t := range todos {
+		if n, err := strconv.Atoi(t.ID); err == nil && n > 0 {
+			if n > max {
+				max = n
+			}
+		} else {
+			legacy = append(legacy, i)
+		}
+	}
+	if len(legacy) == 0 {
+		return false
+	}
+	sort.SliceStable(legacy, func(a, b int) bool {
+		return todos[legacy[a]].CreatedAt.Before(todos[legacy[b]].CreatedAt)
+	})
+	for _, i := range legacy {
+		max++
+		todos[i].ID = strconv.Itoa(max)
+	}
+	return true
 }
 
 // normaliseTodoTimestamps replaces "YYYY-MM-DD HH:MM:SS" with
@@ -133,10 +168,17 @@ func saveTodos(workspace string, todos []Todo) error {
 	return os.Rename(tmp, final)
 }
 
-func newTodoID() string {
-	var b [2]byte
-	rand.Read(b[:])
-	return fmt.Sprintf("t-%d-%s", time.Now().Unix(), hex.EncodeToString(b[:]))
+// nextTodoID returns the next auto-incrementing integer id as a string,
+// computed as max(existing numeric ids)+1. All todos live in one master file,
+// so a single global counter is sufficient and ids never collide or shift.
+func nextTodoID(todos []Todo) string {
+	max := 0
+	for _, t := range todos {
+		if n, err := strconv.Atoi(t.ID); err == nil && n > max {
+			max = n
+		}
+	}
+	return strconv.Itoa(max + 1)
 }
 
 // resolveTodoID matches a user-supplied id or unique prefix.
@@ -175,14 +217,16 @@ func sortTodos(todos []Todo) {
 		switch s {
 		case "doing":
 			return 0
-		case "todo":
+		case "test":
 			return 1
-		case "done":
+		case "todo":
 			return 2
-		case "dropped":
+		case "done":
 			return 3
+		case "dropped":
+			return 4
 		}
-		return 4
+		return 5
 	}
 	sort.SliceStable(todos, func(i, j int) bool {
 		ri, rj := rank(todos[i].Status), rank(todos[j].Status)
@@ -299,7 +343,7 @@ func handleTodoCounts(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 500, err.Error())
 		return
 	}
-	counts := M{"all": 0, "todo": 0, "doing": 0, "done": 0, "dropped": 0}
+	counts := M{"all": 0, "todo": 0, "doing": 0, "test": 0, "done": 0, "dropped": 0}
 	for _, t := range todos {
 		if !isMasterPaneID(requester) {
 			if t.PaneID != requester {
@@ -371,7 +415,7 @@ func handleTodoAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	t := Todo{
-		ID:        newTodoID(),
+		ID:        nextTodoID(todos),
 		Title:     req.Title,
 		Status:    "todo",
 		PaneID:    target,
@@ -411,17 +455,26 @@ func handleTodoByID(w http.ResponseWriter, r *http.Request) {
 
 func handleTodoPatch(w http.ResponseWriter, r *http.Request, idOrPrefix string) {
 	var req struct {
-		PaneID string  `json:"pane_id"`
-		Status *string `json:"status"`
-		Title  *string `json:"title"`
+		PaneID   string  `json:"pane_id"`
+		Status   *string `json:"status"`
+		Title    *string `json:"title"`
+		Assignee *string `json:"assignee"` // reassign ownership (master only)
 	}
 	if err := readBody(r, &req); err != nil {
 		httpErr(w, 400, "invalid json")
 		return
 	}
-	if req.Status == nil && req.Title == nil {
+	if req.Status == nil && req.Title == nil && req.Assignee == nil {
 		httpErr(w, 400, "no fields to update")
 		return
+	}
+	var assignee string
+	if req.Assignee != nil {
+		assignee = shortPaneID(normPaneID(strings.TrimSpace(*req.Assignee)))
+		if assignee == "" {
+			httpErr(w, 400, "assignee cannot be empty")
+			return
+		}
 	}
 	if req.Status != nil {
 		s := strings.ToLower(strings.TrimSpace(*req.Status))
@@ -464,6 +517,14 @@ func handleTodoPatch(w http.ResponseWriter, r *http.Request, idOrPrefix string) 
 	if !isMasterPaneID(requester) && todos[idx].PaneID != requester {
 		httpErr(w, 403, "todo belongs to another worker")
 		return
+	}
+	// Reassigning ownership to another worker is a master-only operation.
+	if req.Assignee != nil {
+		if !isMasterPaneID(requester) {
+			httpErr(w, 403, "only master pane can reassign todos")
+			return
+		}
+		todos[idx].PaneID = assignee
 	}
 	if req.Status != nil {
 		todos[idx].Status = *req.Status

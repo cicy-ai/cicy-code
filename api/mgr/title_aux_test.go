@@ -69,6 +69,11 @@ func TestAiGatewayAuxiliaryKind(t *testing.T) {
 		{"suggestion-meta", "hi", suggestionMeta, "suggestion"},
 		{"discuss-title-feature-not-title", "", discussTitleFeature, ""},
 		{"anthropic-main-mentions-title-not-title", "", anthropicMain, ""},
+		// Claude Code quota health-check: max_tokens:1 + "quota" → probe (auxiliary),
+		// must NOT pollute current/reply.json as a stray "quota" turn.
+		{"quota-probe", "quota", map[string]interface{}{"model": "claude-haiku-4-5-20251001", "max_tokens": 1, "messages": []interface{}{map[string]interface{}{"role": "user", "content": "quota"}}}, "probe"},
+		// A real turn with a normal max_tokens is NOT a probe.
+		{"normal-max-tokens-not-probe", "实现归并排序", map[string]interface{}{"max_tokens": 8000, "messages": []interface{}{map[string]interface{}{"role": "user", "content": "实现归并排序"}}}, ""},
 	}
 	for _, c := range cases {
 		if got := aiGatewayAuxiliaryKind(c.question, c.body); got != c.want {

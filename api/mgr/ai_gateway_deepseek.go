@@ -49,6 +49,19 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 	}
 	if s, ok := src["stream"].(bool); ok {
 		dst["stream"] = s
+		if s {
+			// Ask the upstream to include usage in the terminal stream chunk
+			// (OpenAI `stream_options.include_usage`). OpenAI-compatible upstreams
+			// (DeepSeek, one-api, …) compute usage server-side for billing but do
+			// NOT emit it into the stream unless this is set — so without it the
+			// gateway/audit sees zero tokens and no cache. Preserve any caller-set
+			// value, otherwise default it on.
+			if _, ok := src["stream_options"]; ok {
+				dst["stream_options"] = src["stream_options"]
+			} else {
+				dst["stream_options"] = map[string]interface{}{"include_usage": true}
+			}
+		}
 	}
 	for _, k := range []string{"temperature", "top_p", "max_tokens", "stop"} {
 		if v, ok := src[k]; ok {
@@ -392,6 +405,12 @@ type chatCompletionsToResponsesReader struct {
 	// Tool call state per upstream "index" (slot).
 	toolCalls       map[int]*toolCallState
 	nextOutputIndex int
+
+	// usage captured from the upstream's terminal chunk (chat-completions shape:
+	// prompt_tokens / completion_tokens / prompt_tokens_details.cached_tokens or
+	// deepseek's prompt_cache_hit_tokens). Forwarded into response.completed so
+	// codex AND the audit see real tokens + cache.
+	usage map[string]interface{}
 }
 
 type toolCallState struct {
@@ -471,6 +490,12 @@ func (r *chatCompletionsToResponsesReader) processOneLine() error {
 			r.responseID = fmt.Sprintf("resp_%d", time.Now().UnixNano())
 		}
 		r.emitCreated()
+	}
+
+	// Capture usage — DeepSeek/one-api send it on the terminal chunk (often with
+	// an empty choices array), so read it before the choices guard below.
+	if u, ok := chunk["usage"].(map[string]interface{}); ok && len(u) > 0 {
+		r.usage = u
 	}
 
 	choices, ok := chunk["choices"].([]interface{})
@@ -825,18 +850,98 @@ func (r *chatCompletionsToResponsesReader) emitCompletedAndDone() {
 				"status":    "completed",
 			})
 		}
+		respObj := map[string]interface{}{
+			"id":     r.responseID,
+			"object": "response",
+			"status": "completed",
+			"model":  r.model,
+			"output": output,
+		}
+		if u := chatUsageToResponsesUsage(r.usage); u != nil {
+			respObj["usage"] = u
+		}
 		r.emitEvent("response.completed", map[string]interface{}{
-			"type": "response.completed",
-			"response": map[string]interface{}{
-				"id":     r.responseID,
-				"object": "response",
-				"status": "completed",
-				"model":  r.model,
-				"output": output,
-			},
+			"type":     "response.completed",
+			"response": respObj,
 		})
 		r.out.WriteString("data: [DONE]\n\n")
 	}
+}
+
+// chatUsageToResponsesUsage maps a chat-completions usage object to the OpenAI
+// Responses shape (input_tokens / output_tokens / input_tokens_details.
+// cached_tokens) so the gateway's audit usage parser + aiGatewayNormalizeOpenAIUsage
+// pick up tokens and cache uniformly. Handles DeepSeek's cache fields:
+// prompt_tokens_details.cached_tokens and the flat prompt_cache_hit_tokens.
+func chatUsageToResponsesUsage(u map[string]interface{}) map[string]interface{} {
+	if len(u) == 0 {
+		return nil
+	}
+	num := func(m map[string]interface{}, k string) (float64, bool) {
+		v, ok := m[k].(float64)
+		return v, ok
+	}
+	out := map[string]interface{}{}
+	if v, ok := num(u, "prompt_tokens"); ok {
+		out["input_tokens"] = v
+	}
+	if v, ok := num(u, "completion_tokens"); ok {
+		out["output_tokens"] = v
+	}
+	if v, ok := num(u, "total_tokens"); ok {
+		out["total_tokens"] = v
+	}
+	cached := 0.0
+	if d, ok := u["prompt_tokens_details"].(map[string]interface{}); ok {
+		if c, ok := num(d, "cached_tokens"); ok {
+			cached = c
+		}
+	}
+	if cached == 0 {
+		if c, ok := num(u, "prompt_cache_hit_tokens"); ok {
+			cached = c
+		}
+	}
+	if cached > 0 {
+		out["input_tokens_details"] = map[string]interface{}{"cached_tokens": cached}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// chatUsageToAnthropicUsage maps chat-completions usage into the Anthropic usage
+// shape (input_tokens is uncached-only, with a separate cache_read_input_tokens),
+// so claude clients and the audit's Anthropic usage path record tokens + cache.
+// DeepSeek's prompt_tokens INCLUDES cached, so we subtract.
+func chatUsageToAnthropicUsage(u map[string]interface{}) map[string]interface{} {
+	if len(u) == 0 {
+		return nil
+	}
+	num := func(m map[string]interface{}, k string) float64 {
+		v, _ := m[k].(float64)
+		return v
+	}
+	prompt := num(u, "prompt_tokens")
+	completion := num(u, "completion_tokens")
+	cached := 0.0
+	if d, ok := u["prompt_tokens_details"].(map[string]interface{}); ok {
+		cached = num(d, "cached_tokens")
+	}
+	if cached == 0 {
+		cached = num(u, "prompt_cache_hit_tokens")
+	}
+	input := prompt - cached
+	if input < 0 {
+		input = 0
+	}
+	out := map[string]interface{}{"output_tokens": completion}
+	out["input_tokens"] = input
+	if cached > 0 {
+		out["cache_read_input_tokens"] = cached
+	}
+	return out
 }
 
 func (r *chatCompletionsToResponsesReader) emitEvent(eventType string, data interface{}) {
@@ -901,6 +1006,15 @@ func transformMessagesRequestToChatCompletions(body []byte) ([]byte, string, err
 	}
 	if s, ok := src["stream"].(bool); ok {
 		dst["stream"] = s
+		if s {
+			// Ask the upstream to stream usage (see the Responses path) so the
+			// claude→DeepSeek conversion can surface tokens + cache instead of 0.
+			if _, ok := src["stream_options"]; ok {
+				dst["stream_options"] = src["stream_options"]
+			} else {
+				dst["stream_options"] = map[string]interface{}{"include_usage": true}
+			}
+		}
 	}
 	for _, k := range []string{"temperature", "top_p", "max_tokens", "stop_sequences"} {
 		if v, ok := src[k]; ok {
@@ -1120,9 +1234,13 @@ type chatCompletionsToMessagesReader struct {
 	accumText        strings.Builder
 
 	// Tool-call blocks (per upstream "index" slot)
-	toolBlocks      map[int]*anthropicToolBlock
-	nextBlockIndex  int
-	finishReason    string
+	toolBlocks     map[int]*anthropicToolBlock
+	nextBlockIndex int
+	finishReason   string
+
+	// usage captured from the upstream terminal chunk → surfaced (Anthropic shape)
+	// in the final message_delta so tokens + cache reach claude and the audit.
+	usage map[string]interface{}
 }
 
 type anthropicToolBlock struct {
@@ -1201,6 +1319,12 @@ func (r *chatCompletionsToMessagesReader) processOneLine() error {
 			r.messageID = fmt.Sprintf("msg_%d", time.Now().UnixNano())
 		}
 		r.emitMessageStart()
+	}
+
+	// Usage rides the terminal chunk (often with empty choices) — capture before
+	// the choices guard.
+	if u, ok := chunk["usage"].(map[string]interface{}); ok && len(u) > 0 {
+		r.usage = u
 	}
 
 	choices, ok := chunk["choices"].([]interface{})
@@ -1397,15 +1521,17 @@ func (r *chatCompletionsToMessagesReader) emitFinalizers() {
 	case "content_filter":
 		stopReason = "stop_sequence"
 	}
+	usage := chatUsageToAnthropicUsage(r.usage)
+	if usage == nil {
+		usage = map[string]interface{}{"output_tokens": 0}
+	}
 	r.emitEvent("message_delta", map[string]interface{}{
 		"type": "message_delta",
 		"delta": map[string]interface{}{
 			"stop_reason":   stopReason,
 			"stop_sequence": nil,
 		},
-		"usage": map[string]interface{}{
-			"output_tokens": 0,
-		},
+		"usage": usage,
 	})
 	r.emitEvent("message_stop", map[string]interface{}{
 		"type": "message_stop",

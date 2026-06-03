@@ -36,8 +36,8 @@ python3 dev.py --dockerBuild --dockerBuildVersion <version>
 
 1. 再次同步版本号
 2. `./build.sh assets`
-3. `python3 ./scripts/cos-upload.py app`
-4. `python3 ./scripts/cos-upload.py ttyd`
+3. `python3 ./scripts/r2-upload.py app`
+4. `python3 ./scripts/r2-upload.py ttyd`
 5. `./build.sh docker <version>`
 6. 给目标仓库打 tag
 7. push `<version>` 与 `latest`

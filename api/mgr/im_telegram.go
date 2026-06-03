@@ -763,8 +763,9 @@ func telegramAgentDetailKeyboard(paneID string, fromPage int, lang string) (stri
 
 	var rows [][]map[string]string
 	adminMode := fromPage == -1
-	// Only show bind button for local-gateway agents with compatible types (not in admin mode)
-	canBind := !adminMode && agent.UseCustomGateway && (agent.AgentType == "claude" || agent.AgentType == "opencode" || agent.AgentType == "codex")
+	// Show bind button for any compatible agent type, gateway or not (reply push
+	// works on both the local gateway and the non-gateway MITM audit path).
+	canBind := !adminMode && (agent.AgentType == "claude" || agent.AgentType == "opencode" || agent.AgentType == "codex")
 	if canBind {
 		rows = append(rows, []map[string]string{
 			{"text": tgT(lang, "btnSwitch"), "callback_data": fmt.Sprintf("ag_bind:%s:%d", paneID, fromPage)},

@@ -15,6 +15,7 @@
   "status": {
     "todo": "TODO",
     "doing": "進行中",
+    "test": "テスト",
     "done": "完了",
     "dropped": "中止"
   },
@@ -34,5 +35,15 @@
   "timeDaysAgo": "{{n}}日前",
   "timeDateMonth": "{{month}}月{{day}}日",
   "updateFailed": "更新に失敗",
-  "retry": "再試行"
+  "retry": "再試行",
+  "saving": "保存中",
+  "refreshTooltip": "更新",
+  "promptTodo": "次の TODO を処理してください。完了したら `cicy-todo test {{id}}` でテストレーンに移してください（検収待ち、自分で完了にしないこと）：\n\n{{title}}",
+  "promptDoing": "進行中の次のタスクを引き続き進めてください。完了したら `cicy-todo test {{id}}` でテストレーンに移してください（検収待ち、自分で完了にしないこと）：\n\n{{title}}",
+  "alignPrompt": "現在の TODO 進捗を整合してください（データは `<workspace>/.cicy/todos.yaml`、`cicy-todo` で操作）：\n\n1. まず `cicy-todo list --all` で全リストを取得。\n2. 完了：`cicy-todo done <id>`\n3. 不要：`cicy-todo drop <id>`\n4. 未完了：現状に応じて分割・調整。\n\n完了後に一行で報告：完了 N 件 / 調整 N 件 / 追加 N 件。",
+  "assignTooltip": "worker に割り当て（移管して送信）",
+  "assignHeader": "割り当て先",
+  "assignNoWorkers": "割り当て可能な worker がありません",
+  "viewListTooltip": "リスト表示に切替",
+  "viewKanbanTooltip": "ボード表示に切替"
 }

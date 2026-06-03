@@ -3,20 +3,16 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Circle, CircleDot, CheckCircle2, CircleSlash, Trash2, MoreHorizontal,
-  Sparkles, Loader2, GripVertical, Search, ArrowRight, Pencil, X as XIcon,
-  Send, Users,
+  Sparkles, Loader2, GripVertical, Search, ArrowRight, ArrowUp, Pencil, X as XIcon,
+  Send, Users, RefreshCw, FlaskConical, UserPlus, LayoutGrid, List as ListIcon,
 } from 'lucide-react';
 import apiService from '../services/api';
 
-// Prompt for "发给 agent" — 待办
-const PROMPT_TODO = (title: string) =>
-  `请处理以下待办任务，完成后用 cicy-todo done <id> 标记完成：\n\n${title}`;
+// The "发给 agent" prompts (promptTodo / promptDoing) and the align prompt
+// (alignPrompt) live in the todoPanel locale files so the text the UI sends
+// follows the operator's UI language. They use {{id}} / {{title}} interpolation.
 
-// Prompt for "发给 agent" — 进行中
-const PROMPT_DOING = (title: string) =>
-  `请继续推进以下进行中的任务，有进展后及时更新状态：\n\n${title}`;
-
-type TodoStatus = 'todo' | 'doing' | 'done' | 'dropped';
+export type TodoStatus = 'todo' | 'doing' | 'test' | 'done' | 'dropped';
 
 interface Todo {
   id: string;
@@ -26,17 +22,19 @@ interface Todo {
   created_at: string;
   updated_at: string;
   pane_id?: string; // only present in all_agents mode
+  _pending?: boolean; // optimistic card awaiting server confirmation
 }
 
 interface Counts {
   all: number;
   todo: number;
   doing: number;
+  test: number;
   done: number;
   dropped: number;
 }
 
-const COLUMNS: TodoStatus[] = ['todo', 'doing', 'done', 'dropped'];
+const COLUMNS: TodoStatus[] = ['todo', 'doing', 'test', 'done', 'dropped'];
 const POLL_MS = 5000;
 
 interface Props {
@@ -52,7 +50,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
   // references.
   const { t: tr } = useTranslation('todoPanel');
   const [todos, setTodos] = useState<Todo[]>([]);
-  const [counts, setCounts] = useState<Counts>({ all: 0, todo: 0, doing: 0, done: 0, dropped: 0 });
+  const [counts, setCounts] = useState<Counts>({ all: 0, todo: 0, doing: 0, test: 0, done: 0, dropped: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
@@ -62,13 +60,31 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [aligning, setAligning] = useState<'idle' | 'sending' | 'sent'>('idle');
+  const [manualRefreshing, setManualRefreshing] = useState(false);
   const [sendingTodoId, setSendingTodoId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<TodoStatus | null>(null);
   const [showAllAgents, setShowAllAgents] = useState(false);
   const [filterAgent, setFilterAgent] = useState<string | null>(null); // null = all
+  const [assignMenuId, setAssignMenuId] = useState<string | null>(null);
+  const [assignMenuPos, setAssignMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const [workerPanes, setWorkerPanes] = useState<{ id: string; title: string }[]>([]);
+  const [assigningId, setAssigningId] = useState<string | null>(null);
   const [isComposing, setIsComposing] = useState(false);
-  const addInputRef = useRef<HTMLInputElement>(null);
+  const [viewMode, setViewMode] = useState<'kanban' | 'list'>(
+    () => ((typeof localStorage !== 'undefined' && localStorage.getItem('cicy:todo-view')) as 'kanban' | 'list') || 'kanban',
+  );
+  const addInputRef = useRef<HTMLTextAreaElement>(null);
+  // Auto-grow the composer textarea up to 2 lines (24px line-height), then scroll.
+  const autoGrowComposer = (el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 48)}px`;
+  };
+  useEffect(() => { try { localStorage.setItem('cicy:todo-view', viewMode); } catch { /* ignore */ } }, [viewMode]);
+  // Keep the composer's height in sync with its value — covers both typing and
+  // the programmatic clear after submit (controlled value → '' collapses to 1 line).
+  useEffect(() => { autoGrowComposer(addInputRef.current); }, [draftTitle]);
 
   const refresh = useCallback(async () => {
     if (!paneId) return;
@@ -78,7 +94,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
         (apiService as any).getTodoCounts(paneId),
       ]);
       setTodos(listRes.data?.todos || []);
-      const c = countsRes.data || { all: 0, todo: 0, doing: 0, done: 0, dropped: 0 };
+      const c = countsRes.data || { all: 0, todo: 0, doing: 0, test: 0, done: 0, dropped: 0 };
       setCounts(c);
       setError(null);
       // Let the Todo-tab badge (in Workspace) update immediately after any
@@ -93,11 +109,21 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
     }
   }, [paneId, showAllAgents]);
 
+  // The 5s poll replaces `todos` and re-sorts by updated_at. If that lands
+  // while the user is mid-edit or mid-drag, the card jumps under them. Freeze
+  // the poll during those interactions; the next tick (or any explicit refresh
+  // after the mutation) picks the changes back up.
+  const interactingRef = useRef(false);
+  useEffect(() => { interactingRef.current = editingId !== null || draggingId !== null; }, [editingId, draggingId]);
+
   useEffect(() => {
     if (!active) return;
     setLoading(true);
     refresh();
-    const t = setInterval(refresh, POLL_MS);
+    const t = setInterval(() => {
+      if (interactingRef.current) return;
+      refresh();
+    }, POLL_MS);
     return () => clearInterval(t);
   }, [active, refresh]);
 
@@ -111,15 +137,63 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
     if (showAllAgents && filterAgent) {
       visible = visible.filter((t) => (t.pane_id || paneId) === filterAgent);
     }
-    const out: Record<TodoStatus, Todo[]> = { todo: [], doing: [], done: [], dropped: [] };
+    const out: Record<TodoStatus, Todo[]> = { todo: [], doing: [], test: [], done: [], dropped: [] };
     for (const t of visible) {
       if (out[t.status]) out[t.status].push(t);
     }
     for (const k of COLUMNS) {
-      out[k].sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+      // Sort by created_at (stable), NOT updated_at. updated_at changes on every
+      // edit / status flip / assign, which would yank the card to the top of its
+      // column mid-interaction ("编辑时位移"). created_at never changes, so a card
+      // keeps its position when you edit it. New todos (created_at = now) and the
+      // optimistic insert both sort to the top, which matches the prepend.
+      out[k].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
     }
     return out;
   }, [todos, searchQuery, showAllAgents, filterAgent, paneId]);
+
+  // Worker list for the "assign" picker (master only). These are the master's
+  // bound team workers — the same set shown in the Team panel (via
+  // /api/agents/pane/<master>), NOT every pane on the host. Each entry's `name`
+  // is the worker's short pane id; `pane_id` here is the master, so we key off
+  // `name`.
+  useEffect(() => {
+    if (!active || !isMaster) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await (apiService as any).getAgentsByPane(paneId);
+        const raw = Array.isArray(res?.data) ? res.data : res?.data?.agents || [];
+        const list = raw
+          .map((b: any) => ({ id: shortId(String(b.name || '')), title: String(b.title || '') }))
+          .filter((p: any) => p.id && p.id !== paneId);
+        // de-dupe by short id
+        const seen = new Set<string>();
+        const uniq = list.filter((p: any) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
+        if (!cancelled) setWorkerPanes(uniq);
+      } catch { /* picker just shows empty */ }
+    })();
+    return () => { cancelled = true; };
+  }, [active, isMaster, paneId]);
+
+  const assignTodo = async (todo: Todo, workerPane: string) => {
+    setAssignMenuId(null); setAssignMenuPos(null);
+    if (assigningId) return;
+    setAssigningId(todo.id);
+    const prompt = (todo.status === 'doing' || todo.status === 'test')
+      ? tr('promptDoing', { id: todo.id, title: todo.title })
+      : tr('promptTodo', { id: todo.id, title: todo.title });
+    try {
+      // Move ownership to the worker, then dispatch the task to its pane.
+      await (apiService as any).updateTodo(paneId, todo.id, { assignee: workerPane });
+      await (apiService as any).sendCommand(workerPane, prompt, true);
+      await refresh();
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || e?.message || 'assign failed');
+    } finally {
+      setAssigningId(null);
+    }
+  };
 
   // distinct agent ids from loaded todos (all_agents mode)
   const agentIds = useMemo(() => {
@@ -134,10 +208,23 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
     const title = draftTitle.trim();
     if (!title) return;
     setDraftTitle('');
+    // Optimistic insert: show the card immediately with a pending marker so
+    // there's no perceptible lag between Enter and the card appearing. The
+    // temp id (tmp-*) is replaced wholesale when the next refresh returns the
+    // server's real list (which carries the real auto-increment id).
+    const nowIso = new Date().toISOString();
+    const tmpId = `tmp-${Date.now()}`;
+    const optimistic: Todo = {
+      id: tmpId, title, status: 'todo', pane_id: paneId,
+      created_at: nowIso, updated_at: nowIso, _pending: true,
+    };
+    setTodos((cur) => [optimistic, ...cur]);
     try {
       await (apiService as any).addTodo(paneId, title, paneId);
-      refresh();
+      await refresh();
     } catch (e: any) {
+      // Roll back the optimistic card on failure.
+      setTodos((cur) => cur.filter((x) => x.id !== tmpId));
       setError(e?.response?.data?.detail || e?.message || 'add failed');
     }
   };
@@ -145,7 +232,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
   const sendAlignPrompt = async () => {
     if (aligning !== 'idle' || !paneId) return;
     setAligning('sending');
-    const ALIGN_PROMPT = `请对齐当前 todo 进度（数据在 \`<workspace>/.cicy/todos.yaml\`，通过 \`cicy-todo\` 操作）：\n\n1. 先用 \`cicy-todo list --all\` 拉到完整列表。\n2. 已完成的：\`cicy-todo done <id-prefix>\`\n3. 不再需要的：\`cicy-todo drop <id-prefix>\`\n4. 没完成的：结合当前情况判断，拆细或调整。\n\n做完简单汇报一行：完成 N 条 / 调整 N 条 / 新增 N 条。`;
+    const ALIGN_PROMPT = tr('alignPrompt');
     try {
       await (apiService as any).sendCommand(paneId, ALIGN_PROMPT, true);
       setAligning('sent');
@@ -159,7 +246,9 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
   const sendTodoToAgent = async (todo: Todo) => {
     if (sendingTodoId || !paneId) return;
     setSendingTodoId(todo.id);
-    const prompt = todo.status === 'doing' ? PROMPT_DOING(todo.title) : PROMPT_TODO(todo.title);
+    const prompt = (todo.status === 'doing' || todo.status === 'test')
+      ? tr('promptDoing', { id: todo.id, title: todo.title })
+      : tr('promptTodo', { id: todo.id, title: todo.title });
     try {
       await (apiService as any).sendCommand(paneId, prompt, true);
     } catch (e: any) {
@@ -224,31 +313,6 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
 
   return (
     <div data-id="todo-panel" className="absolute inset-0 flex flex-col bg-[#0A0A0A] text-zinc-100">
-      {/* HEADER — quick-add */}
-      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/[0.06] px-4">
-        <Circle className="h-4 w-4 shrink-0 text-zinc-600" />
-        <input
-          ref={addInputRef}
-          autoFocus
-          value={draftTitle}
-          onChange={(e) => setDraftTitle(e.target.value)}
-          onCompositionStart={() => setIsComposing(true)}
-          onCompositionEnd={() => setIsComposing(false)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !isComposing) { e.preventDefault(); submitAdd(); }
-            if (e.key === 'Escape') { e.preventDefault(); setDraftTitle(''); }
-          }}
-          placeholder={tr('quickAddPlaceholder')}
-          className="m-0 h-6 flex-1 border-0 bg-transparent p-0 text-[14px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-600"
-        />
-        {draftTitle && (
-          <button
-            onClick={submitAdd}
-            className="shrink-0 rounded-md bg-blue-500/20 px-2.5 py-1 text-[11px] text-blue-300 hover:bg-blue-500/30"
-          >{tr('enterShortcut')}</button>
-        )}
-      </div>
-
       {/* TOOLBAR */}
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-white/[0.06] px-3">
         <div className="flex flex-1 items-center gap-2 rounded-md bg-white/[0.04] px-2.5 py-1">
@@ -279,6 +343,25 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
             <span>{tr('all')}</span>
           </button>
         )}
+        <button
+          onClick={() => setViewMode((m) => (m === 'kanban' ? 'list' : 'kanban'))}
+          title={viewMode === 'kanban' ? tr('viewListTooltip') : tr('viewKanbanTooltip')}
+          className="flex shrink-0 items-center justify-center rounded-md bg-white/[0.04] p-1.5 text-zinc-400 transition-colors hover:bg-white/[0.1] hover:text-zinc-100"
+        >
+          {viewMode === 'kanban' ? <ListIcon className="h-3.5 w-3.5" /> : <LayoutGrid className="h-3.5 w-3.5" />}
+        </button>
+        <button
+          onClick={async () => {
+            if (manualRefreshing) return;
+            setManualRefreshing(true);
+            try { await refresh(); } finally { setManualRefreshing(false); }
+          }}
+          disabled={manualRefreshing}
+          title={tr('refreshTooltip')}
+          className="flex shrink-0 items-center justify-center rounded-md bg-white/[0.04] p-1.5 text-zinc-400 transition-colors hover:bg-white/[0.1] hover:text-zinc-100 disabled:opacity-50"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${manualRefreshing ? 'animate-spin' : ''}`} />
+        </button>
         <button
           onClick={sendAlignPrompt}
           disabled={aligning !== 'idle'}
@@ -323,12 +406,16 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
         </div>
       )}
 
-      {/* KANBAN */}
-      <div className="flex flex-1 gap-3 overflow-x-auto overflow-y-hidden px-3 py-3">
+      {/* BOARD — kanban (columns side by side) or list (sections stacked) */}
+      <div className={viewMode === 'kanban'
+        ? 'flex flex-1 gap-3 overflow-x-auto overflow-y-hidden px-3 py-3'
+        : 'flex flex-1 flex-col gap-3 overflow-y-auto px-3 py-3'}>
         {COLUMNS.map((status) => {
           const cls = statusClasses(status);
           const cards = bucketed[status];
           const isDropTarget = dragOverCol === status;
+          // In list mode, hide empty sections to keep the single column tidy.
+          if (viewMode === 'list' && cards.length === 0) return null;
           return (
             <div
               key={status}
@@ -338,9 +425,9 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
                 setDragOverCol(null);
               }}
               onDrop={handleDropOn(status)}
-              className={`flex min-w-[220px] flex-1 flex-col rounded-lg border bg-white/[0.015] transition-colors ${
-                isDropTarget ? 'border-white/20 bg-white/[0.04]' : 'border-white/[0.05]'
-              }`}
+              className={`flex flex-col rounded-lg border bg-white/[0.015] transition-colors ${
+                viewMode === 'kanban' ? 'min-w-[280px] flex-1' : 'w-full shrink-0'
+              } ${isDropTarget ? 'border-white/20 bg-white/[0.04]' : 'border-white/[0.05]'}`}
             >
               <div className={`flex items-center justify-between rounded-t-lg px-3 py-2 ${cls.active}`}>
                 <div className="flex items-center gap-2 text-[12px] font-medium">
@@ -351,8 +438,8 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
               </div>
 
               <div
-                className="flex-1 space-y-2 overflow-y-auto p-2"
-                onScroll={() => { setMenuOpenId(null); setMenuPos(null); }}
+                className={`space-y-2 p-2 ${viewMode === 'kanban' ? 'flex-1 overflow-y-auto' : ''}`}
+                onScroll={() => { setMenuOpenId(null); setMenuPos(null); setAssignMenuId(null); setAssignMenuPos(null); }}
               >
                 {cards.length === 0 ? (
                   <div className="px-2 py-6 text-center text-[11px] text-zinc-700">
@@ -363,15 +450,15 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
                   const isBeingDragged = draggingId === t.id;
                   const isSending = sendingTodoId === t.id;
                   const cardPane = t.pane_id || paneId;
-                  const canSendToAgent = status === 'todo' || status === 'doing';
+                  const canSendToAgent = status === 'todo' || status === 'doing' || status === 'test';
                   return (
                     <article
                       key={t.id}
-                      draggable={!isEditing}
+                      draggable={!isEditing && !t._pending}
                       onDragStart={(e) => { e.dataTransfer.setData('text/plain', t.id); e.dataTransfer.effectAllowed = 'move'; setDraggingId(t.id); }}
                       onDragEnd={() => { setDraggingId(null); setDragOverCol(null); }}
                       className={`group relative overflow-hidden rounded-md border bg-[#141417] transition-all ${
-                        isBeingDragged ? 'opacity-40' : 'opacity-100'
+                        isBeingDragged ? 'opacity-40' : t._pending ? 'opacity-60' : 'opacity-100'
                       } ${cls.cardBorder} hover:border-white/15`}
                     >
                       <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${cls.stripe}`} />
@@ -417,6 +504,17 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
                       <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-1">
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] tabular-nums text-zinc-600" title={t.updated_at}>{humanTime(t.updated_at, tr)}</span>
+                          {t._pending ? (
+                            <span className="flex items-center gap-1 rounded bg-white/[0.04] px-1 py-0.5 text-[9px] text-zinc-500">
+                              <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                              {tr('saving')}
+                            </span>
+                          ) : (
+                            <span
+                              className="cursor-default select-all rounded bg-white/[0.04] px-1 py-0.5 font-mono text-[9px] text-zinc-600"
+                              title={t.id}
+                            >{t.id}</span>
+                          )}
                           {t.creator_id && (
                             <span className="rounded bg-white/[0.05] px-1 py-0.5 text-[9px] text-zinc-600" title={tr('creatorTooltip', { name: t.creator_id })}>
                               {shortId(t.creator_id)}
@@ -440,6 +538,50 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
                                   {isSending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
                                 </CardAction>
                               )}
+                              {isMaster && canSendToAgent && (
+                                <CardAction
+                                  onClick={(e) => {
+                                    if (assignMenuId === t.id) { setAssignMenuId(null); setAssignMenuPos(null); }
+                                    else {
+                                      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                      const menuH = Math.min(280, 36 + workerPanes.length * 30 + 8);
+                                      const below = r.bottom + 4;
+                                      const flipUp = below + menuH > window.innerHeight - 8;
+                                      const top = flipUp ? Math.max(8, r.top - 4 - menuH) : below;
+                                      setAssignMenuPos({ top, right: window.innerWidth - r.right });
+                                      setAssignMenuId(t.id);
+                                    }
+                                  }}
+                                  title={tr('assignTooltip')}
+                                  disabled={assigningId === t.id}
+                                >
+                                  {assigningId === t.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserPlus className="h-3 w-3" />}
+                                </CardAction>
+                              )}
+                              {assignMenuId === t.id && assignMenuPos && createPortal(
+                                <>
+                                  <div className="fixed inset-0 z-[100]" onClick={() => { setAssignMenuId(null); setAssignMenuPos(null); }} />
+                                  <div
+                                    className="fixed z-[101] max-h-[280px] min-w-[180px] overflow-y-auto rounded-md border border-white/[0.08] bg-[#161616] py-1 text-[12px] shadow-xl"
+                                    style={{ top: assignMenuPos.top, right: assignMenuPos.right }}
+                                  >
+                                    <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-zinc-600">{tr('assignHeader')}</div>
+                                    {workerPanes.length === 0 ? (
+                                      <div className="px-3 py-1.5 text-zinc-600">{tr('assignNoWorkers')}</div>
+                                    ) : workerPanes.map((wp) => (
+                                      <button
+                                        key={wp.id}
+                                        onClick={() => assignTodo(t, wp.id)}
+                                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-zinc-200 transition-colors hover:bg-white/[0.06]"
+                                      >
+                                        <span className="font-mono text-[11px] text-purple-300">{wp.id}</span>
+                                        {wp.title && wp.title !== '未命名' && <span className="truncate text-[11px] text-zinc-500">{wp.title}</span>}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </>,
+                                document.body
+                              )}
                               <CardAction onClick={() => { setEditingId(t.id); setEditingDraft(t.title); }} title={tr('editTooltip')}>
                                 <Pencil className="h-3 w-3" />
                               </CardAction>
@@ -453,7 +595,14 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
                                   if (menuOpenId === t.id) { setMenuOpenId(null); setMenuPos(null); }
                                   else {
                                     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                    setMenuPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+                                    // Menu has (3 move items + 1 delete) rows + a divider; estimate its
+                                    // height and flip it above the button when there isn't room below,
+                                    // so cards near the bottom edge don't get their menu clipped.
+                                    const menuH = 4 * 30 + 9 + 8;
+                                    const below = r.bottom + 4;
+                                    const flipUp = below + menuH > window.innerHeight - 8;
+                                    const top = flipUp ? Math.max(8, r.top - 4 - menuH) : below;
+                                    setMenuPos({ top, right: window.innerWidth - r.right });
                                     setMenuOpenId(t.id);
                                   }
                                 }}
@@ -496,6 +645,40 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
           <p className="mt-1 text-[11px] text-zinc-800">{tr('emptyHint')}</p>
         </div>
       )}
+
+      {/* COMPOSER — prompt-style task input, pinned to the bottom */}
+      <div data-id="todo-panel-composer" className="shrink-0 border-t border-white/[0.06] bg-[#0A0A0A] px-3 py-3">
+        <div
+          data-id="todo-panel-composer-field"
+          className="flex items-end gap-2 rounded-2xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 transition-colors focus-within:border-white/20 focus-within:bg-white/[0.05]"
+        >
+          <textarea
+            ref={addInputRef}
+            data-id="todo-panel-composer-input"
+            rows={1}
+            value={draftTitle}
+            onChange={(e) => setDraftTitle(e.target.value)}
+            onCompositionStart={() => setIsComposing(true)}
+            onCompositionEnd={() => setIsComposing(false)}
+            onKeyDown={(e) => {
+              // Enter sends, Shift+Enter inserts a newline (prompt-style).
+              if (e.key === 'Enter' && !e.shiftKey && !isComposing) { e.preventDefault(); submitAdd(); }
+              if (e.key === 'Escape') { e.preventDefault(); setDraftTitle(''); }
+            }}
+            placeholder={tr('quickAddPlaceholder')}
+            className="m-0 max-h-12 min-h-[24px] flex-1 resize-none border-0 bg-transparent p-0 text-[14px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-600"
+          />
+          <button
+            data-id="todo-panel-composer-send"
+            onClick={submitAdd}
+            disabled={!draftTitle.trim()}
+            title={tr('quickAddPlaceholder')}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-blue-500 text-white transition-colors hover:bg-blue-400 disabled:bg-white/[0.06] disabled:text-zinc-600"
+          >
+            <ArrowUp className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -518,8 +701,8 @@ function CardAction({ children, onClick, title, disabled }: {
   );
 }
 
-function advanceStatus(s: TodoStatus): TodoStatus {
-  return s === 'todo' ? 'doing' : s === 'doing' ? 'done' : 'todo';
+export function advanceStatus(s: TodoStatus): TodoStatus {
+  return s === 'todo' ? 'doing' : s === 'doing' ? 'test' : s === 'test' ? 'done' : 'todo';
 }
 
 function MenuItem({ children, onClick, icon, danger = false }: {
@@ -542,17 +725,20 @@ function statusIcon(s: TodoStatus) {
   switch (s) {
     case 'todo':    return <Circle       className="h-4 w-4" />;
     case 'doing':   return <CircleDot    className="h-4 w-4 text-amber-400" />;
+    case 'test':    return <FlaskConical className="h-4 w-4 text-cyan-400" />;
     case 'done':    return <CheckCircle2 className="h-4 w-4 text-emerald-400" />;
     case 'dropped': return <CircleSlash  className="h-4 w-4" />;
   }
 }
 
-function statusClasses(s: string): { active: string; idle: string; badge: string; stripe: string; cardBorder: string } {
+export function statusClasses(s: string): { active: string; idle: string; badge: string; stripe: string; cardBorder: string } {
   switch (s) {
     case 'todo':
       return { active: 'bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/30', idle: 'text-blue-400/70', badge: 'bg-blue-500/10 text-blue-300', stripe: 'bg-blue-400', cardBorder: 'border-white/[0.06]' };
     case 'doing':
       return { active: 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30', idle: 'text-amber-400/70', badge: 'bg-amber-500/10 text-amber-300', stripe: 'bg-amber-400', cardBorder: 'border-amber-500/20' };
+    case 'test':
+      return { active: 'bg-cyan-500/15 text-cyan-300 ring-1 ring-cyan-500/30', idle: 'text-cyan-400/70', badge: 'bg-cyan-500/10 text-cyan-300', stripe: 'bg-cyan-400', cardBorder: 'border-cyan-500/20' };
     case 'done':
       return { active: 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30', idle: 'text-emerald-400/70', badge: 'bg-emerald-500/10 text-emerald-300', stripe: 'bg-emerald-400', cardBorder: 'border-white/[0.06]' };
     case 'dropped':
@@ -562,7 +748,7 @@ function statusClasses(s: string): { active: string; idle: string; badge: string
   }
 }
 
-function humanTime(iso: string, tr: (key: string, opts?: Record<string, unknown>) => string): string {
+export function humanTime(iso: string, tr: (key: string, opts?: Record<string, unknown>) => string): string {
   if (!iso) return '-';
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return iso;
@@ -575,7 +761,7 @@ function humanTime(iso: string, tr: (key: string, opts?: Record<string, unknown>
   return tr('timeDateMonth', { month: d.getMonth() + 1, day: d.getDate() });
 }
 
-function shortId(id: string): string {
+export function shortId(id: string): string {
   // w-10001:main.0 → w-10001, or just trim long ids
   return id.split(':')[0];
 }

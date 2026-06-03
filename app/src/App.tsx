@@ -5,6 +5,7 @@ import Workspace from './components/Workspace';
 import Login from './components/Login';
 import ProvisionScreen from './components/ProvisionScreen';
 import AuditDashboard from './components/audit/AuditDashboard';
+import AuditGuardFab from './components/audit/AuditGuardFab';
 import { TokenManager } from './services/tokenManager';
 import DevPanel from './components/dev/DevPanel';
 import apiService from './services/api';
@@ -55,8 +56,13 @@ function WsGate({ children }: { children: any }) {
   useEffect(() => { if (ready) setEverReady(true); }, [ready]);
 
   const blocking = !ready && !everReady;
-  const shownAttempts = Math.min(attempts, 3);
-  const failed = blocking && attempts >= 3 && !connected;
+  // attempts is incremented BEFORE each connect, so the very first connection
+  // is attempts === 1 — that's the initial connect, NOT a retry. Only show the
+  // "retry n/3" text once we're actually retrying (attempts > 1); the n shown
+  // is the retry count (attempts - 1), so the 2nd attempt reads "retry 1/3".
+  const retrying = !connected && attempts > 1;
+  const shownRetry = Math.min(attempts - 1, 3);
+  const failed = blocking && attempts >= 4 && !connected;
   return (
     <>
       {children}
@@ -77,7 +83,7 @@ function WsGate({ children }: { children: any }) {
           ) : (
             <>
               <Spinner size="md" />
-              <div data-id="ws-connecting-label" className="text-xs text-zinc-500">{shownAttempts > 0 ? t('wsConnectingRetry', { n: shownAttempts }) : t('wsConnecting')}</div>
+              <div data-id="ws-connecting-label" className="text-xs text-zinc-500">{retrying ? t('wsConnectingRetry', { n: shownRetry }) : t('wsConnecting')}</div>
             </>
           )}
         </div>
@@ -154,7 +160,7 @@ function Main() {
 
   // #/agent/xxx or default → Workspace
   const agentId = route.view === 'workspace' ? route.agentId : 'w-10001';
-  return <WsGate><Workspace agentId={agentId} onSelectAgent={selectAgent} /></WsGate>;
+  return <WsGate><Workspace agentId={agentId} onSelectAgent={selectAgent} /><AuditGuardFab /></WsGate>;
 }
 
 export default function App() {

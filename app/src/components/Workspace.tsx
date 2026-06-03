@@ -12,7 +12,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import AgentAvatar from './AgentAvatar';
@@ -22,7 +22,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { SendingProvider } from '../contexts/SendingContext';
 // import ChatView from './chat/ChatView';
 import ChatHistoryView from './chat/ChatHistoryView';
-import CurrentHistoryView from './chat/CurrentHistoryView';
 import TodoPanel from './TodoPanel';
 import FilesView from './files/FilesView';
 import { WebFrame } from './WebFrame';
@@ -33,6 +32,8 @@ import GlobalProxyIndicator from './layout/GlobalProxyIndicator';
 import SkillMarketplacePanel from './layout/SkillMarketplacePanel';
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
 import AgentProviderRequestView, { type RequestViewTab } from './layout/AgentProviderRequestView';
+import AgentUsageLogView from './layout/AgentUsageLogView';
+import AgentUsageAnalysisView from './layout/AgentUsageAnalysisView';
 import TokenDialog from './layout/TokenDialog';
 import useDesktopEvents from './layout/useDesktopEvents';
 import AgentCanvas, { AgentCanvasItem } from './layout/AgentCanvas';
@@ -297,11 +298,11 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 type LeftPanelView = 'team' | 'skills' | 'agents' | 'providers' | 'im' | 'todo' | null;
-type WorkspaceCliContentTab = InspectorTab | 'history' | 'files' | 'todo' | RequestViewTab;
+type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | RequestViewTab;
 type CliContentMode = 'fixed';
 
 function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
-  if (value === 'files' || value === 'history' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'settings' || value === 'memory' || value === 'todo') {
+  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'todo') {
     return value;
   }
   return 'files';
@@ -346,12 +347,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [inspectorRequestedTab, setInspectorRequestedTab] = useState<InspectorTab>('overview');
   const [cliContentOpen, setCliContentOpen] = useState(() => cache.get(cliContentOpenKey(paneId), false) === true);
   const [cliContentTab, setCliContentTab] = useState<WorkspaceCliContentTab>(() => normalizeCliContentTab(cache.get(cliContentTabKey(paneId), 'files')));
-  const [lastSessionSubTab, setLastSessionSubTab] = useState<'history' | 'tools' | 'brain' | 'meta'>(() => {
+  const [lastSessionSubTab, setLastSessionSubTab] = useState<RequestViewTab>(() => {
     const v = cache.get(cliContentTabKey(paneId), 'files');
-    return v === 'tools' || v === 'brain' || v === 'meta' ? v : 'history';
+    return v === 'tools' || v === 'brain' || v === 'meta' || v === 'usage' || v === 'analysis' ? v : 'analysis';
   });
   useEffect(() => {
-    if (cliContentTab === 'history' || cliContentTab === 'tools' || cliContentTab === 'brain' || cliContentTab === 'meta') {
+    if (cliContentTab === 'tools' || cliContentTab === 'brain' || cliContentTab === 'meta' || cliContentTab === 'usage' || cliContentTab === 'analysis') {
       setLastSessionSubTab(cliContentTab);
     }
   }, [cliContentTab]);
@@ -360,7 +361,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // Todo button in the activity bar and the Todo tab in cliContentTabs. The
   // marketplace panel dispatches `cicy:skills-changed` after install/uninstall;
   // we re-fetch on that signal so the UI updates without a page reload.
-  const [todoSkillInstalled, setTodoSkillInstalled] = useState<boolean>(false);
+  // null = install status not yet checked. Distinguishing "pending" from
+  // "confirmed not installed" matters: the reset-todo-tab effect below must NOT
+  // clobber a cache-restored 'todo'/'memory' tab while the async check is still
+  // in flight, or the restored current tab is lost on every reload.
+  const [todoSkillInstalled, setTodoSkillInstalled] = useState<boolean | null>(null);
   // Pending-todo count (status todo + doing on the active pane) for the red
   // badge on the Todo tab.
   const [todoCount, setTodoCount] = useState<number>(0);
@@ -543,7 +548,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     return () => { cancelled = true; window.removeEventListener('cicy:skills-changed', onChange); };
   }, []);
   useEffect(() => {
-    if (!todoSkillInstalled) {
+    // Only reset once the skill is CONFIRMED absent (=== false). While the
+    // check is pending (null) leave a cache-restored 'todo' tab alone.
+    if (todoSkillInstalled === false) {
       if (leftPanelView === 'todo') setLeftPanelView(null);
       if (cliContentTab === 'todo') setCliContentTab('files');
     }
@@ -896,9 +903,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // mounts, dep churn — none of it disturbs the connection.
 
   const handleChatWsMessage = useCallback((msg: any) => {
-    if (msg?.type === 'current_updated' || msg?.type === 'status_change' || msg?.type === 'ai_chunk') {
-      console.log('[chat-ws-live]', msg.type, msg.data || {});
-    }
     const masterPaneId = paneIdRef.current;
     const pageClientIdNow = chatWs.currentClientId() || pageClientIdRef.current;
     if (msg?.type === 'user_q') {
@@ -1207,14 +1211,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCliContentTab('settings');
     setCliContentOpen(true);
   }, [paneId]);
-  const openPaneHistory = useCallback((targetPaneId: string) => {
-    const clean = targetPaneId.replace(/:.*$/, '');
-    if (!clean) return;
-    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
-    setCliContentMode('fixed');
-    setCliContentTab('history');
-    setCliContentOpen(true);
-  }, [paneId]);
   const openPaneFiles = useCallback((targetPaneId: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
@@ -1227,6 +1223,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCliContentTab('files');
     setCliContentOpen(true);
   }, [paneId]);
+  // markdown history 里点击文件链接 → 揭示文件视图(FilesView 自己监听同一事件打开 tab)。
+  useEffect(() => {
+    const reveal = () => {
+      setCliContentMode('fixed');
+      setCliContentTab('files');
+      setCliContentOpen(true);
+    };
+    window.addEventListener('cicy:open-file', reveal as EventListener);
+    return () => window.removeEventListener('cicy:open-file', reveal as EventListener);
+  }, []);
   const openPaneRequestView = useCallback((targetPaneId: string, nextTab: RequestViewTab) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
@@ -1237,6 +1243,22 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
     setCliContentMode('fixed');
     setCliContentTab(nextTab);
+    setCliContentOpen(true);
+  }, [paneId]);
+  const openPaneTodo = useCallback((targetPaneId: string) => {
+    const clean = targetPaneId.replace(/:.*$/, '');
+    if (!clean) return;
+    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
+    setCliContentMode('fixed');
+    setCliContentTab('todo');
+    setCliContentOpen(true);
+  }, [paneId]);
+  const openPaneMemory = useCallback((targetPaneId: string) => {
+    const clean = targetPaneId.replace(/:.*$/, '');
+    if (!clean) return;
+    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
+    setCliContentMode('fixed');
+    setCliContentTab('memory');
     setCliContentOpen(true);
   }, [paneId]);
   const handleCliDrawerResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
@@ -1321,20 +1343,21 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     cliContentMode: setCliContentMode,
     cliContentTab: setCliContentTab,
   });
-  const cliContentTabs = [
-    { id: 'files', label: t('tabFiles') },
-    { id: 'session', label: t('tabSession') },
-    ...(todoSkillInstalled ? [{ id: 'todo', label: t('tabTodo', 'Todo') }] : []),
-    { id: 'memory', label: t('tabMemory') },
-    { id: 'settings', label: t('tabSettings') },
+  const cliContentTabs: { id: string; label: string; icon: React.ReactNode }[] = [
+    ...(todoSkillInstalled ? [{ id: 'todo', label: t('tabTodo', 'Todo'), icon: <ListTodo className="h-3.5 w-3.5" /> }] : []),
+    { id: 'files', label: t('tabFiles'), icon: <Folder className="h-3.5 w-3.5" /> },
+    { id: 'session', label: t('tabSession'), icon: <LineChart className="h-3.5 w-3.5" /> },
+    { id: 'memory', label: t('tabMemory'), icon: <Brain className="h-3.5 w-3.5" /> },
+    { id: 'settings', label: t('tabSettings'), icon: <Settings className="h-3.5 w-3.5" /> },
   ];
-  const sessionSubTabs: { id: 'history' | 'tools' | 'brain' | 'meta'; label: string }[] = [
-    { id: 'history', label: t('tabHistory') },
+  const sessionSubTabs: { id: RequestViewTab; label: string }[] = [
+    { id: 'analysis', label: t('tabAnalysis', '分析') },
+    { id: 'usage', label: t('tabUsage', '用量') },
+    { id: 'meta', label: t('tabMeta') },
     { id: 'tools', label: t('tabTools') },
     { id: 'brain', label: t('tabBrain') },
-    { id: 'meta', label: t('tabMeta') },
   ];
-  const isSessionTab = (tab: WorkspaceCliContentTab) => tab === 'history' || tab === 'tools' || tab === 'brain' || tab === 'meta';
+  const isSessionTab = (tab: WorkspaceCliContentTab) => tab === 'tools' || tab === 'brain' || tab === 'meta' || tab === 'usage' || tab === 'analysis';
   const renderCliContentPanel = () => (
     // The drawer keeps the FilesView mounted (and laid out off-screen when
     // closed) so its chat-ws :code-ext bridge stays connected — agents can
@@ -1388,7 +1411,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 data-id={`cli-content-tab-${item.id}`}
                 key={item.id}
                 type="button"
-                className={`shrink-0 rounded-md px-2.5 py-1.5 text-[12px] font-medium leading-5 tracking-[0.01em] transition-colors ${
+                className={`shrink-0 select-none rounded-md px-2.5 py-1.5 text-[12px] font-medium leading-5 tracking-[0.01em] transition-colors ${
                   active
                     ? 'bg-white/[0.08] text-zinc-100'
                     : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
@@ -1399,6 +1422,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 }}
               >
                 <span className="inline-flex items-center gap-1.5">
+                  <span data-id={`cli-content-tab-icon-${item.id}`} className="shrink-0 opacity-80">{item.icon}</span>
                   {item.label}
                   {item.id === 'todo' && todoCount > 0 && (
                     <span
@@ -1464,17 +1488,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           />
         </div>
         <div
-          data-id="cli-content-history-host"
-          className="absolute inset-0"
-          style={{ display: cliContentTab === 'history' ? 'block' : 'none' }}
-        >
-          <CurrentHistoryView
-            paneId={activeCliPaneId}
-            open={cliContentOpen && cliContentTab === 'history'}
-            inspectorVersion={chatWsInspectorVersion}
-          />
-        </div>
-        <div
           data-id="cli-content-request-view-host"
           className="absolute inset-0"
           style={{ display: cliContentTab === 'tools' || cliContentTab === 'brain' || cliContentTab === 'meta' ? 'block' : 'none' }}
@@ -1485,6 +1498,20 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             tab={cliContentTab === 'tools' || cliContentTab === 'brain' || cliContentTab === 'meta' ? cliContentTab : 'tools'}
             inspectorVersion={chatWsInspectorVersion}
           />
+        </div>
+        <div
+          data-id="cli-content-usage-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'usage' ? 'block' : 'none' }}
+        >
+          <AgentUsageLogView paneId={activeCliPaneId} active={cliContentOpen && cliContentTab === 'usage'} />
+        </div>
+        <div
+          data-id="cli-content-analysis-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'analysis' ? 'block' : 'none' }}
+        >
+          <AgentUsageAnalysisView paneId={activeCliPaneId} active={cliContentOpen && cliContentTab === 'analysis'} />
         </div>
         <div
           data-id="cli-content-todo-host"
@@ -1539,7 +1566,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     </div>
   );
   const cliFixedContent = renderCliContentPanel();
-  const stackHeaderControls = (targetPaneId: string) => targetPaneId === activeCliPaneId ? (
+  const stackHeaderControls = useCallback((targetPaneId: string) => targetPaneId === activeCliPaneId ? (
     <>
       <ModelPicker
         paneId={activeCliPaneId}
@@ -1561,7 +1588,28 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>
       )}
     </>
-  ) : null;
+  ) : null, [activeCliPaneId, paneId, paneDetails, agentDetail, applyPanePatch, refreshPaneDetail, netLatency, chatWsConnected, chatWsClientId, handleSendPageClientIdToAgent, handleManageNodesViaSkill, contextUsage, t]);
+  // Memoized so the stack's `items` keeps a stable identity across the
+  // per-token Workspace re-renders a live conversation triggers (those tokens
+  // touch chat-live state the stack never reads). Combined with React.memo on
+  // AgentStack, the panel + its ttyd iframes skip those renders entirely.
+  const stackItems = useMemo(() => buildCanvasItems({
+    paneId,
+    token,
+    canvasPaneIds,
+    agents,
+    boundAgents,
+    paneDetails,
+    pollStatuses,
+    agentDetail,
+    lang: currentLang,
+  }), [paneId, token, canvasPaneIds, agents, boundAgents, paneDetails, pollStatuses, agentDetail, currentLang]);
+  const handleStackOpenSession = useCallback((targetPaneId: string) => {
+    openPaneRequestView(targetPaneId, lastSessionSubTab);
+  }, [openPaneRequestView, lastSessionSubTab]);
+  const handleStackActivePaneIdChange = useCallback((targetPaneId: string) => {
+    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: targetPaneId }));
+  }, [paneId]);
   const rightContent = (
     <div data-id="right-tabs" className="h-full relative overflow-hidden">
       <div data-id="chat-tab" className="absolute inset-0 flex justify-center" style={{ display: mainTab === 'chat' ? 'flex' : 'none' }}>
@@ -1577,31 +1625,19 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       <div data-id="cli-tab" className="absolute inset-0 flex" style={{ display: mainTab === 'cli' ? 'flex' : 'none' }}>
         <div data-id="cli-agent-stack" className="relative h-full min-w-0 flex-1 overflow-hidden bg-[#09090b]">
           <AgentStack
-            items={buildCanvasItems({
-              paneId,
-              token,
-              canvasPaneIds,
-              agents,
-              boundAgents,
-              paneDetails,
-              pollStatuses,
-              agentDetail,
-              lang: currentLang,
-            })}
+            items={stackItems}
             activePaneId={activeCliPaneId}
             settingsShortcutActive={cliContentOpen && cliContentTab === 'settings'}
             renderHeaderControls={stackHeaderControls}
             showHeaderButtons={!cliContentOpen}
             onOpenPaneSettings={openPaneSettings}
             onOpenPaneFiles={openPaneFiles}
-            onOpenPaneSession={(targetPaneId) => {
-              if (lastSessionSubTab === 'history') openPaneHistory(targetPaneId);
-              else openPaneRequestView(targetPaneId, lastSessionSubTab);
-            }}
-            onActivePaneIdChange={(targetPaneId) => {
-              setActiveTeamPaneId(prev => ({ ...prev, [paneId]: targetPaneId }));
-            }}
+            onOpenPaneSession={handleStackOpenSession}
+            onOpenPaneTodo={todoSkillInstalled ? openPaneTodo : undefined}
+            onOpenPaneMemory={openPaneMemory}
+            onActivePaneIdChange={handleStackActivePaneIdChange}
             onRenamePaneTitle={handleRenamePaneTitle}
+            todoCount={todoCount}
           />
         </div>
       </div>
@@ -1624,7 +1660,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
               <SideBtn dataId="btn-providers" active={leftActive === 'providers'} icon={<Boxes className="w-5 h-5" />} title={t('sidebarProviders')} onClick={() => toggleLeft('providers')} />
               <SideBtn dataId="btn-im" active={leftActive === 'im'} icon={<MessageCircle className="w-5 h-5" />} title={t('sidebarIM', 'IM')} onClick={() => toggleLeft('im')} />
-              <SideBtn dataId="btn-audit" active={false} icon={<ShieldCheck className="w-5 h-5" />} title="Audit" onClick={() => { window.location.hash = '#/audit'; }} />
             </>
           )}
         </div>
@@ -2051,6 +2086,8 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange, onOpenSett
         allow_all_actions: values.allow_all_actions,
         use_custom_gateway: values.use_custom_gateway,
         use_proxy: values.use_proxy,
+        project_template: values.project_template,
+        role_template: values.role_template,
       });
       const id = data?.pane_id || data?.id;
       if (id) {

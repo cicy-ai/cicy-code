@@ -20,10 +20,10 @@ import (
 // enterDelay is the pause between sending text and pressing Enter.
 // Heavy TUIs (Copilot, OpenCode) need time to render text in the input buffer.
 // TODO: make this per-agent-type once agent detection is reliable.
-const enterDelay = 600 * time.Millisecond
+const enterDelay = 300 * time.Millisecond
 const chunkedPromptRuneSize = 80
 const chunkedPromptChunkDelay = 30 * time.Millisecond
-const chunkedPromptEnterDelay = 1 * time.Second
+const chunkedPromptEnterDelay = 500 * time.Millisecond
 const promptConfirmPollInterval = 150 * time.Millisecond
 const codexPromptConfirmPollInterval = 60 * time.Millisecond
 const codexPromptConfirmStabilizeDelay = 40 * time.Millisecond
@@ -67,6 +67,8 @@ type paneCreateOpts struct {
 	masterPaneID     string
 	masterAgentType  string
 	inheritGuidance  bool
+	projectTemplate  string
+	roleTemplate     string
 }
 
 type startupPromptTask struct {
@@ -511,6 +513,8 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 		MasterPaneID     string  `json:"master_pane_id"`
 		MasterAgentType  string  `json:"master_agent_type"`
 		InheritGuidance  *bool   `json:"inherit_guidance"`
+		ProjectTemplate  string  `json:"project_template"`
+		RoleTemplate     string  `json:"role_template"`
 	}
 	req.AllowAllActions = true
 	req.ReplyInChinese = true
@@ -543,7 +547,7 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	if req.InheritGuidance != nil {
 		inheritGuidance = *req.InheritGuidance
 	}
-	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.ReplyInChinese, useCustomGateway, useProxy, proxySettings, req.WinName, strings.TrimSpace(req.MasterPaneID), strings.TrimSpace(req.MasterAgentType), inheritGuidance, token)
+	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.ReplyInChinese, useCustomGateway, useProxy, proxySettings, req.WinName, strings.TrimSpace(req.MasterPaneID), strings.TrimSpace(req.MasterAgentType), inheritGuidance, strings.TrimSpace(req.ProjectTemplate), strings.TrimSpace(req.RoleTemplate), token)
 	if err != nil {
 		J(w, M{"success": false, "error": err.Error()})
 		return
@@ -551,7 +555,7 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	J(w, result)
 }
 
-func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useProxy bool, proxy *proxySettings, winName *string, masterPaneID string, masterAgentType string, inheritGuidance bool, token string) (M, error) {
+func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useProxy bool, proxy *proxySettings, winName *string, masterPaneID string, masterAgentType string, inheritGuidance bool, projectTemplate string, roleTemplate string, token string) (M, error) {
 	agentType = normalizeAgentType(agentType)
 	if agentType == "" {
 		return M{"success": false}, fmt.Errorf("unsupported agent_type")
@@ -597,6 +601,8 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 		masterPaneID:     masterPaneID,
 		masterAgentType:  masterAgentType,
 		inheritGuidance:  inheritGuidance,
+		projectTemplate:  projectTemplate,
+		roleTemplate:     roleTemplate,
 	})
 }
 
@@ -613,100 +619,48 @@ func proxySettingsRule(p *proxySettings) string {
 	return strings.TrimSpace(p.Rule)
 }
 
-// guidanceFilenameForAgentType returns the per-agent guidance filename
-// (CLAUDE.md / AGENTS.md). Returns "" for agents that don't have one.
+// guidanceFilenameForAgentType returns the per-agent guidance file path,
+// relative to the workspace. Returns "" for agents that don't have one.
+// kiro reads .kiro/steering/*.md, not CLAUDE.md — give it its own path.
 func guidanceFilenameForAgentType(agentType string) string {
 	switch normalizeAgentType(agentType) {
-	case "claude", "cicy-claude", "kiro-cli":
+	case "claude", "cicy-claude":
 		return "CLAUDE.md"
 	case "codex", "opencode", "cursor":
 		return "AGENTS.md"
+	case "kiro-cli":
+		return filepath.Join(".kiro", "steering", "memory.md")
 	}
 	return ""
 }
 
-// writeAgentGuidanceFile drops an agent-rules file (CLAUDE.md or AGENTS.md)
-// into the workspace based on the agent type. Existing files are not
-// overwritten so user customisations survive recreate.
-func writeAgentGuidanceFile(workspace, agentType, paneID string) {
+// writeAgentGuidanceFile drops the agent's native guidance file (CLAUDE.md /
+// AGENTS.md / .kiro/steering/memory.md) into the workspace, seeded with the
+// composed memory template: global (always) + the selected project template
+// (~/cicy-ai/memory/{global.md, projects/<slug>.md}). The content is COPIED in
+// — self-contained, no inheritance, no gateway injection. Existing files are
+// not overwritten so user customisations survive recreate.
+func writeAgentGuidanceFile(workspace, agentType, paneID, projectTemplate, roleTemplate string) {
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" {
 		return
 	}
-	filename := guidanceFilenameForAgentType(agentType)
-	if filename == "" {
+	rel := guidanceFilenameForAgentType(agentType)
+	if rel == "" {
 		return
 	}
-	path := filepath.Join(workspace, filename)
+	path := filepath.Join(workspace, rel)
 	if _, err := os.Stat(path); err == nil {
 		return
 	}
 	shortID := strings.Split(paneID, ":")[0]
-	content := fmt.Sprintf("# %s\n\n"+
-		"- 你的 AGENT_ID 是 `%s`\n"+
-		"- 你的当前目录是 `%s`\n"+
-		"- 你的项目目录要询问用户设置\n"+
-		"- 你运行在 tmux 中，可以通过 `cicy-agent` skill 与其他 agent 协作："+
-		"`cicy-agent ls` 发现其他 pane，`cicy-agent msg <pane> <text>` 派发任务或请求支援，"+
-		"`cicy-agent capture <pane>` 查看对方进度。"+
-		"先运行 `cicy-agent help` 查看完整子命令（注意是 `help` 不是 `--help`）\n",
-		filename, shortID, workspace)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		log.Printf("[init] failed to mkdir for %s (%s): %v", rel, shortID, err)
+		return
+	}
+	content := composeAgentMemory(paneID, workspace, agentType, projectTemplate, roleTemplate)
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		log.Printf("[init] failed to write %s for %s: %v", filename, shortID, err)
-	}
-}
-
-// appendMasterReferenceToGuidance writes a "你的 master 是 ..." line into the
-// sub pane's guidance file, including a pointer to the master's rules file if
-// the master has one. Idempotent: skips if the line already exists.
-//
-// masterAgentTypeHint, when non-empty, overrides the agent_type derived from
-// agent_config — useful when the master lives on a remote node or when the
-// caller already knows the type and wants to avoid a DB lookup.
-func appendMasterReferenceToGuidance(subPaneID, masterPaneID, masterAgentTypeHint string) {
-	subFull := normPaneID(strings.TrimSpace(subPaneID))
-	masterFull := normPaneID(strings.TrimSpace(masterPaneID))
-	if subFull == "" || masterFull == "" || subFull == masterFull {
-		return
-	}
-	var subType, subWorkspace string
-	if err := store.QueryRow(
-		"SELECT COALESCE(agent_type,''), COALESCE(workspace,'') FROM agent_config WHERE pane_id=?",
-		subFull,
-	).Scan(&subType, &subWorkspace); err != nil {
-		return
-	}
-	subFile := guidanceFilenameForAgentType(subType)
-	if subFile == "" || strings.TrimSpace(subWorkspace) == "" {
-		return
-	}
-	subPath := filepath.Join(subWorkspace, subFile)
-	existing, err := os.ReadFile(subPath)
-	if err != nil {
-		return
-	}
-	if strings.Contains(string(existing), "你的 master 是") {
-		return
-	}
-	var masterType, masterWorkspace string
-	_ = store.QueryRow(
-		"SELECT COALESCE(agent_type,''), COALESCE(workspace,'') FROM agent_config WHERE pane_id=?",
-		masterFull,
-	).Scan(&masterType, &masterWorkspace)
-	if hint := strings.TrimSpace(masterAgentTypeHint); hint != "" {
-		masterType = normalizeAgentType(hint)
-	}
-	masterShort := shortPaneID(masterFull)
-	line := fmt.Sprintf("- 你的 master 是 `%s` (agent_type: `%s`)", masterShort, masterType)
-	if masterFile := guidanceFilenameForAgentType(masterType); masterFile != "" && strings.TrimSpace(masterWorkspace) != "" {
-		// `@<absolute-path>` 让 Claude / Codex 自动把 master 规则文件 inline 到上下文；
-		// OpenCode 不会自动解析 `@`，但 prose 形式足以提示它用 Read 工具按需加载。
-		line = fmt.Sprintf("- 你的 master 是 `%s` (agent_type: `%s`)，请参考 master 的规则文件了解项目上下文：@%s",
-			masterShort, masterType, filepath.Join(masterWorkspace, masterFile))
-	}
-	appended := strings.TrimRight(string(existing), "\n") + "\n" + line + "\n"
-	if err := os.WriteFile(subPath, []byte(appended), 0644); err != nil {
-		log.Printf("[guidance] failed to append master ref to %s: %v", subPath, err)
+		log.Printf("[init] failed to write %s for %s: %v", rel, shortID, err)
 	}
 }
 
@@ -717,16 +671,16 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 	}
 
 	paneID := opts.session + ":main.0"
-	writeAgentGuidanceFile(workspace, opts.agentType, paneID)
+	writeAgentGuidanceFile(workspace, opts.agentType, paneID, opts.projectTemplate, opts.roleTemplate)
 	runTmux("new-session", "-d", "-s", opts.session, "-n", "main", "-c", workspace)
 	proxyConfigJSON, err := mergeProxySettingsIntoConfigJSON("{}", &proxySettings{Password: opts.proxyPassword, Rule: opts.proxyRule})
 	if err != nil {
 		return M{"success": false}, err
 	}
 	store.Exec(
-		fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese, use_custom_gateway, proxy_enable, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()),
-		paneID, opts.title, opts.port, workspace, opts.initScript, proxyConfigJSON, opts.role, opts.defaultModel, opts.agentType, opts.allowAllActions, opts.replyInChinese, opts.useCustomGateway, opts.useProxy,
+		fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese, use_custom_gateway, proxy_enable, project_template, role_template, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,%s,%s)`, store.Now(), store.Now()),
+		paneID, opts.title, opts.port, workspace, opts.initScript, proxyConfigJSON, opts.role, opts.defaultModel, opts.agentType, opts.allowAllActions, opts.replyInChinese, opts.useCustomGateway, opts.useProxy, opts.projectTemplate, opts.roleTemplate,
 	)
 	if strings.TrimSpace(opts.masterPaneID) != "" {
 		if _, err := bindAgentCore(opts.masterPaneID, opts.session, opts.inheritGuidance, opts.masterAgentType); err != nil {
@@ -899,7 +853,6 @@ var paneUpdateCols = map[string]bool{
 	"private_mode":       true,
 	"allowed_users":      true,
 	"preview":            true,
-	"inject_rules_files": true,
 }
 
 func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
@@ -5275,13 +5228,16 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 
 	// Load source pane config
 	var srcAgentType, srcDefaultModel, srcRole, srcWorkspace sql.NullString
+	var srcProjectTemplate, srcRoleTemplate sql.NullString
 	var srcAllowAll, srcReplyChinese, srcUseCustomGateway, srcProxyEnable sql.NullBool
 	err := store.QueryRow(`SELECT agent_type, default_model, role, workspace,
 		COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0),
-		COALESCE(use_custom_gateway,0), COALESCE(proxy_enable,0)
+		COALESCE(use_custom_gateway,0), COALESCE(proxy_enable,0),
+		COALESCE(project_template,''), COALESCE(role_template,'')
 		FROM agent_config WHERE pane_id=?`, srcID).
 		Scan(&srcAgentType, &srcDefaultModel, &srcRole, &srcWorkspace,
-			&srcAllowAll, &srcReplyChinese, &srcUseCustomGateway, &srcProxyEnable)
+			&srcAllowAll, &srcReplyChinese, &srcUseCustomGateway, &srcProxyEnable,
+			&srcProjectTemplate, &srcRoleTemplate)
 	if err != nil {
 		httpErr(w, 404, "source pane not found")
 		return
@@ -5341,6 +5297,8 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		masterID,       // master pane id
 		srcAgentType.String, // master agent type (use source agent type as hint)
 		false,          // inherit_guidance
+		srcProjectTemplate.String, // inherit the source agent's project template (composed in if the file still exists)
+		srcRoleTemplate.String,    // inherit the source agent's role template
 		token,
 	)
 	if err != nil {
@@ -5361,9 +5319,17 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 	// spinning long after the fork was created.
 	if newPaneID != "" {
 		go func() {
+			// Poll readiness tightly so we send the prompt the moment the
+			// fork's input box is live. The old 500ms cadence + fixed 3s
+			// grace made the prompt land seconds after the agent was already
+			// idle and waiting. sendTextToPane re-validates readiness through
+			// the pane-send worker (ensurePaneReadyForSend), so a short grace
+			// is enough — the send path will still wait if we're slightly early.
+			waitStart := time.Now()
 			ready := false
-			for i := 0; i < 240; i++ { // up to 2 minutes
-				time.Sleep(500 * time.Millisecond)
+			deadline := time.Now().Add(2 * time.Minute)
+			for time.Now().Before(deadline) {
+				time.Sleep(150 * time.Millisecond)
 				out, captureErr := runTmux("capture-pane", "-t", newPaneID, "-p")
 				if captureErr != nil {
 					continue
@@ -5377,8 +5343,11 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 				log.Printf("[fork] %s timeout waiting for agent ready", newPaneID)
 				return
 			}
-			// Give the agent a beat after detecting ready.
-			time.Sleep(3 * time.Second)
+			log.Printf("[fork] %s ready after %s", newPaneID, time.Since(waitStart).Round(time.Millisecond))
+			// Small grace so the input box is past its first-render burst; the
+			// send worker re-checks readiness, so this only needs to cover the
+			// brief window where the box is drawn but not yet accepting paste.
+			time.Sleep(500 * time.Millisecond)
 			if usedPath == "" {
 				log.Printf("[fork] %s no summary available — sending generic prompt", newPaneID)
 				if err := sendTextToPane(newPaneID, "Hello, this is a fork. Please continue the work from the source agent.", true); err != nil {
