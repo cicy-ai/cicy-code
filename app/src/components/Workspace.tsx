@@ -25,6 +25,8 @@ import ChatHistoryView from './chat/ChatHistoryView';
 import TodoPanel from './TodoPanel';
 import FilesView from './files/FilesView';
 import { WebFrame } from './WebFrame';
+import ArtifactPanel from './ArtifactPanel';
+import { installArtifactBridge } from '../lib/artifactBridge';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
 import TeamPanel from './layout/TeamPanel';
@@ -299,11 +301,11 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 type LeftPanelView = 'team' | 'skills' | 'agents' | 'providers' | 'im' | 'todo' | 'office' | null;
-type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | RequestViewTab;
+type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'artifact' | RequestViewTab;
 type CliContentMode = 'fixed';
 
 function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
-  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'todo') {
+  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'todo' || value === 'artifact') {
     return value;
   }
   return 'files';
@@ -360,6 +362,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }
   }, [cliContentTab]);
   const [cliContentMode, setCliContentMode] = useState<CliContentMode>('fixed');
+  // Install the agent-facing window.cicyArtifact bridge as soon as the
+  // workspace mounts, so an agent can open the 产物 tab via exec_js even before
+  // the user has visited it. (ArtifactPanel also (re)registers its controller.)
+  useEffect(() => { installArtifactBridge(); }, []);
   // Whether the `cicy-todo` skill is installed on the local host. Gates the
   // Todo button in the activity bar and the Todo tab in cliContentTabs. The
   // marketplace panel dispatches `cicy:skills-changed` after install/uninstall;
@@ -1351,6 +1357,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     { id: 'files', label: t('tabFiles'), icon: <Folder className="h-3.5 w-3.5" /> },
     { id: 'session', label: t('tabSession'), icon: <LineChart className="h-3.5 w-3.5" /> },
     { id: 'memory', label: t('tabMemory'), icon: <Brain className="h-3.5 w-3.5" /> },
+    { id: 'artifact', label: t('tabArtifact', '产物'), icon: <Package className="h-3.5 w-3.5" /> },
     { id: 'settings', label: t('tabSettings'), icon: <Settings className="h-3.5 w-3.5" /> },
   ];
   const sessionSubTabs: { id: RequestViewTab; label: string }[] = [
@@ -1414,7 +1421,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 data-id={`cli-content-tab-${item.id}`}
                 key={item.id}
                 type="button"
-                className={`shrink-0 select-none rounded-md px-2.5 py-1.5 text-[12px] font-medium leading-5 tracking-[0.01em] transition-colors ${
+                className={`relative shrink-0 select-none rounded-md px-2.5 py-1.5 text-[12px] font-medium leading-5 tracking-[0.01em] transition-colors ${
                   active
                     ? 'bg-white/[0.08] text-zinc-100'
                     : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
@@ -1427,15 +1434,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 <span className="inline-flex items-center gap-1.5">
                   <span data-id={`cli-content-tab-icon-${item.id}`} className="shrink-0 opacity-80">{item.icon}</span>
                   {item.label}
-                  {item.id === 'todo' && todoCount > 0 && (
-                    <span
-                      data-id="cli-content-tab-todo-badge"
-                      className="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white tabular-nums"
-                    >
-                      {todoCount > 99 ? '99+' : todoCount}
-                    </span>
-                  )}
                 </span>
+                {item.id === 'todo' && todoCount > 0 && (
+                  <span
+                    data-id="cli-content-tab-todo-badge"
+                    className="pointer-events-none absolute right-0 top-0 inline-flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-red-500 px-[3px] text-[9px] font-semibold leading-none text-white tabular-nums"
+                  >
+                    {todoCount > 99 ? '99+' : todoCount}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -1542,6 +1549,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             inspectorVersion={chatWsInspectorVersion}
             onPanePatch={applyPanePatch}
             onClose={() => {}}
+          />
+        </div>
+        <div
+          data-id="cli-content-artifact-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'artifact' ? 'block' : 'none' }}
+        >
+          <ArtifactPanel
+            active={cliContentOpen && cliContentTab === 'artifact'}
+            requestActivate={() => setCliContentTab('artifact')}
           />
         </div>
         <div
