@@ -1,4 +1,4 @@
-import { Brain, Check, Copy, Folder, History, LineChart, ListTodo, Pencil, Settings, X } from 'lucide-react'
+import { Brain, Check, Copy, Folder, History, LineChart, ListTodo, Package, Pencil, Settings, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
@@ -22,6 +22,7 @@ function AgentStack({
   onOpenPaneSession,
   onOpenPaneTodo,
   onOpenPaneMemory,
+  onOpenPaneArtifact,
   onRenamePaneTitle,
   todoCount = 0,
 }: {
@@ -36,6 +37,7 @@ function AgentStack({
   onOpenPaneSession: (paneId: string) => void
   onOpenPaneTodo?: (paneId: string) => void
   onOpenPaneMemory?: (paneId: string) => void
+  onOpenPaneArtifact?: (paneId: string) => void
   onRenamePaneTitle?: (paneId: string, nextTitle: string) => Promise<void> | void
   // Pending-todo count for the active pane; shown as a badge on its todo button.
   todoCount?: number
@@ -149,6 +151,7 @@ function AgentStack({
           onOpenPaneSession={onOpenPaneSession}
           onOpenPaneTodo={onOpenPaneTodo}
           onOpenPaneMemory={onOpenPaneMemory}
+          onOpenPaneArtifact={onOpenPaneArtifact}
           onRenamePaneTitle={onRenamePaneTitle}
           todoCount={activePaneId === item.paneId ? todoCount : 0}
           onClick={() => onActivePaneIdChange(item.paneId)}
@@ -239,6 +242,7 @@ function AgentStackCard({
   onOpenPaneSession,
   onOpenPaneTodo,
   onOpenPaneMemory,
+  onOpenPaneArtifact,
   onRenamePaneTitle,
   todoCount = 0,
   onClick,
@@ -255,6 +259,7 @@ function AgentStackCard({
   onOpenPaneSession: (paneId: string) => void;
   onOpenPaneTodo?: (paneId: string) => void;
   onOpenPaneMemory?: (paneId: string) => void;
+  onOpenPaneArtifact?: (paneId: string) => void;
   onRenamePaneTitle?: (paneId: string, nextTitle: string) => Promise<void> | void;
   todoCount?: number;
   onClick: () => void;
@@ -381,6 +386,11 @@ function AgentStackCard({
     event.stopPropagation()
     onOpenPaneMemory?.(item.paneId)
   }, [item.paneId, onOpenPaneMemory])
+
+  const handleOpenArtifact = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    onOpenPaneArtifact?.(item.paneId)
+  }, [item.paneId, onOpenPaneArtifact])
 
   return (
     <div
@@ -583,6 +593,18 @@ function AgentStackCard({
                 aria-label="Memory"
               >
                 <Brain className="h-4 w-4" />
+              </button>
+            )}
+            {onOpenPaneArtifact && (
+              <button
+                data-id="agent-stack-card-artifact"
+                type="button"
+                onClick={handleOpenArtifact}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
+                title="产物"
+                aria-label="Artifact"
+              >
+                <Package className="h-4 w-4" />
               </button>
             )}
             <button

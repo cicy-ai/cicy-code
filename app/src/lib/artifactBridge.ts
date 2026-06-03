@@ -39,6 +39,10 @@ export interface ArtifactController {
   reload(): void;
   /** blank the frame. */
   clear(): void;
+  /** set the preview viewport: 'web' | 'portal' | 'mobile' (persisted). */
+  setPreview(mode: string): void;
+  /** current preview viewport. */
+  getPreview(): string;
 }
 
 let controller: ArtifactController | null = null;
@@ -101,6 +105,10 @@ export function installArtifactBridge() {
     clear() { requireController().clear(); return 'ok'; },
     isElectron(): boolean { return !!controller && controller.isElectron(); },
 
+    // — preview viewport: 'web' | 'portal' | 'mobile' (persisted) —
+    setPreview(mode: string) { requireController().setPreview(String(mode)); return 'ok'; },
+    getPreview(): string { return requireController().getPreview(); },
+
     getUrl(): string {
       const c = requireController();
       const el = c.getEl();
@@ -118,6 +126,7 @@ export function installArtifactBridge() {
         url: c ? (this as any).getUrl?.() ?? c.stateUrl() : '',
         hasBridge: !!desktopBridge(),
         hasCdp: !!(desktopBridge() && desktopBridge().cdp),
+        preview: c ? c.getPreview() : '',
         bufferedEvents: events.length,
       };
     },
