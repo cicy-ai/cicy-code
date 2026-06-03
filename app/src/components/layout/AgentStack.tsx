@@ -1,22 +1,14 @@
-import { Brain, Check, Copy, Folder, History, LineChart, ListTodo, Pencil, Settings, Terminal } from 'lucide-react'
+import { Brain, Check, Copy, Folder, History, LineChart, ListTodo, Pencil, Settings, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
 import apiService from '../../services/api'
 import AgentAvatar from '../AgentAvatar'
 import { WebFrame } from '../WebFrame'
+import { ShellPanel } from '../terminal/ShellPanel'
 import CurrentHistoryView from '../chat/CurrentHistoryView'
 import type { AgentCanvasItem } from './AgentCanvas'
-
-type AgentStackView = 'cli' | 'history'
-const agentStackViewKey = (paneId: string) => `cicy_agentStackView:${paneId}`
-function readAgentStackView(paneId: string): AgentStackView {
-  try {
-    return localStorage.getItem(agentStackViewKey(paneId)) === 'history' ? 'history' : 'cli'
-  } catch {
-    return 'cli'
-  }
-}
 
 function AgentStack({
   items,
@@ -49,6 +41,47 @@ function AgentStack({
   todoCount?: number
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const { t } = useTranslation('layout')
+
+  // History popover is OWNED here (not per-card) so it follows the active agent:
+  // switching agents switches the history shown. `historyPaneId` = the agent
+  // whose history is open (null = closed).
+  const [historyPaneId, setHistoryPaneId] = useState<string | null>(null)
+  const [historyPos, setHistoryPos] = useState<{ top: number; left: number; arrowLeft: number } | null>(null)
+  const [historySize, setHistorySize] = useState<{ width: number; height: number }>({ width: 460, height: 480 })
+  const [promptsOnly, setPromptsOnly] = useState(false)
+  const historySizeRef = useRef(historySize)
+  useEffect(() => { historySizeRef.current = historySize }, [historySize])
+
+  // Anchor the popover under a card's History button (centered, clamped to the
+  // viewport); the arrow tracks the button center. Returns null if the button
+  // isn't on screen yet.
+  const computeHistoryPos = useCallback((paneId: string) => {
+    const btn = document.querySelector<HTMLElement>(`[data-id="agent-stack-card-view-tab-history-${paneId}"]`)
+    if (!btn) return null
+    const rect = btn.getBoundingClientRect()
+    const W = historySizeRef.current.width
+    const margin = 8
+    const center = rect.left + rect.width / 2
+    const left = Math.max(margin, Math.min(center - W / 2, window.innerWidth - W - margin))
+    const arrowLeft = Math.max(16, Math.min(W - 16, center - left))
+    return { top: rect.bottom + 10, left, arrowLeft }
+  }, [])
+
+  const toggleHistory = useCallback((paneId: string) => {
+    setHistoryPaneId((cur) => {
+      if (cur === paneId) return null
+      const pos = computeHistoryPos(paneId)
+      if (pos) {
+        setHistoryPos(pos)
+        // Fit the popover height to the space below the button (definite px, so
+        // CurrentHistoryView's h-full scroll container gets a bounded height).
+        const fit = Math.max(240, Math.min(Math.round(window.innerHeight * 0.7), window.innerHeight - pos.top - 16))
+        setHistorySize((s) => ({ width: s.width, height: fit }))
+      }
+      return paneId
+    })
+  }, [computeHistoryPos])
 
   useEffect(() => {
     const container = containerRef.current
@@ -57,6 +90,49 @@ function AgentStack({
     if (!target) return
     target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
   }, [activePaneId])
+
+  // Switching the active agent switches the open history to that agent, and
+  // re-anchors to its button once the active card has scrolled into view.
+  useEffect(() => {
+    if (!historyPaneId || !activePaneId || historyPaneId === activePaneId) return
+    setHistoryPaneId(activePaneId)
+    const id = window.setTimeout(() => {
+      const pos = computeHistoryPos(activePaneId)
+      if (pos) setHistoryPos(pos)
+    }, 320)
+    return () => window.clearTimeout(id)
+  }, [activePaneId, historyPaneId, computeHistoryPos])
+
+  // Esc closes the popover.
+  useEffect(() => {
+    if (!historyPaneId) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setHistoryPaneId(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [historyPaneId])
+
+  // Drag the bottom-right corner to resize the popover.
+  const startResize = useCallback((event: React.PointerEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const startX = event.clientX
+    const startY = event.clientY
+    const startW = historySizeRef.current.width
+    const startH = historySizeRef.current.height
+    const anchorLeft = historyPos?.left ?? 0
+    const anchorTop = historyPos?.top ?? 0
+    const onMove = (ev: PointerEvent) => {
+      const width = Math.max(320, Math.min(startW + (ev.clientX - startX), window.innerWidth - anchorLeft - 8))
+      const height = Math.max(220, Math.min(startH + (ev.clientY - startY), window.innerHeight - anchorTop - 8))
+      setHistorySize({ width, height })
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }, [historyPos])
 
   return (
     <div data-id="agent-stack" ref={containerRef} className="relative h-full overflow-hidden bg-[#09090b]">
@@ -76,8 +152,70 @@ function AgentStack({
           onRenamePaneTitle={onRenamePaneTitle}
           todoCount={activePaneId === item.paneId ? todoCount : 0}
           onClick={() => onActivePaneIdChange(item.paneId)}
+          onToggleHistory={() => toggleHistory(item.paneId)}
+          historyActive={historyPaneId === item.paneId}
         />
       ))}
+      {historyPaneId && historyPos ? createPortal(
+        <>
+          {/* invisible catcher: click outside the popover closes it */}
+          <div data-id="agent-stack-history-popover-catcher" className="fixed inset-0 z-[120]" onClick={() => setHistoryPaneId(null)} />
+          <div
+            data-id={`agent-stack-card-history-popover-${historyPaneId}`}
+            onClick={(event) => event.stopPropagation()}
+            className="fixed z-[121] flex flex-col rounded-2xl border border-white/[0.1] bg-[#0b0b0d] shadow-2xl"
+            style={{ top: historyPos.top, left: historyPos.left, width: historySize.width, height: historySize.height }}
+          >
+            {/* up-arrow pointing at the History button */}
+            <div
+              data-id="agent-stack-card-history-popover-arrow"
+              className="absolute -top-[6px] h-3 w-3 rotate-45 border-l border-t border-white/[0.1] bg-[#0b0b0d]"
+              style={{ left: historyPos.arrowLeft - 6 }}
+            />
+            <div data-id="agent-stack-card-history-popover-header" className="relative flex shrink-0 items-center gap-2.5 rounded-t-2xl border-b border-white/[0.06] px-4 py-2.5">
+              <History className="h-4 w-4 shrink-0 text-zinc-400" />
+              <span className="text-sm font-semibold text-zinc-200">{t('agentStackViewSession', { defaultValue: '历史' })}</span>
+              <span className="truncate text-xs text-zinc-600">{historyPaneId}</span>
+              <div className="flex-1" />
+              <label
+                data-id={`agent-stack-card-history-prompts-only-${historyPaneId}`}
+                className="inline-flex cursor-pointer select-none items-center gap-1.5 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200"
+              >
+                <input
+                  type="checkbox"
+                  data-id={`agent-stack-card-history-prompts-only-input-${historyPaneId}`}
+                  checked={promptsOnly}
+                  onChange={(event) => setPromptsOnly(event.target.checked)}
+                  className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
+                />
+                {t('agentStackPromptsOnly', { defaultValue: '只显示 prompt' })}
+              </label>
+              <button
+                type="button"
+                data-id="agent-stack-card-history-popover-close"
+                onClick={() => setHistoryPaneId(null)}
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div data-id="agent-stack-card-history-popover-body" className="min-h-0 flex-1 overflow-hidden rounded-b-2xl">
+              <CurrentHistoryView key={historyPaneId} paneId={historyPaneId} open promptsOnly={promptsOnly} />
+            </div>
+            {/* resize handle (drag the bottom-right corner) */}
+            <div
+              data-id="agent-stack-card-history-popover-resize"
+              onPointerDown={startResize}
+              className="absolute bottom-0 right-0 flex h-4 w-4 cursor-se-resize items-end justify-end rounded-br-2xl p-1"
+              style={{ touchAction: 'none' }}
+            >
+              <svg width="8" height="8" viewBox="0 0 8 8" className="text-zinc-600"><path d="M8 0v8H0" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" /></svg>
+            </div>
+          </div>
+        </>,
+        document.body,
+      ) : null}
     </div>
   )
 }
@@ -104,6 +242,8 @@ function AgentStackCard({
   onRenamePaneTitle,
   todoCount = 0,
   onClick,
+  onToggleHistory,
+  historyActive,
 }: {
   item: AgentCanvasItem;
   active: boolean;
@@ -118,17 +258,13 @@ function AgentStackCard({
   onRenamePaneTitle?: (paneId: string, nextTitle: string) => Promise<void> | void;
   todoCount?: number;
   onClick: () => void;
+  onToggleHistory: () => void;
+  historyActive: boolean;
 }) {
   const { t } = useTranslation('layout')
-  // Per-agent CLI/会话 toggle, bound to the pane id in localStorage so it
-  // survives refresh / re-mount. The card is keyed by paneId upstream, so this
-  // instance's paneId is stable — the lazy initializer restores the right value.
-  const [view, setView] = useState<AgentStackView>(() => readAgentStackView(item.paneId))
-  // History "只显示 prompt" toggle — show only the user's questions.
-  const [promptsOnly, setPromptsOnly] = useState(false)
-  useEffect(() => {
-    try { localStorage.setItem(agentStackViewKey(item.paneId), view) } catch {}
-  }, [view, item.paneId])
+  // History opens as a single shared popover owned by AgentStack (so switching
+  // the active agent switches the history too). This card only toggles it and
+  // reflects whether its own history is the one currently shown.
   const [copiedPaneId, setCopiedPaneId] = useState(false)
   const copiedPaneTimerRef = useRef<number | null>(null)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -377,28 +513,22 @@ function AgentStackCard({
         </div>
         <div
           data-id={`agent-stack-card-view-tabs-${item.paneId}`}
-          className="ml-2 inline-flex shrink-0 items-center gap-0.5 rounded-lg border border-white/[0.08] bg-black/40 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_1px_2px_rgba(0,0,0,0.4)]"
+          className="ml-2 inline-flex shrink-0 items-center"
           onClick={(event) => event.stopPropagation()}
         >
-          {(['cli', 'history'] as const).map((id) => {
-            const Icon = id === 'cli' ? Terminal : History
-            return (
-            <button
-              key={id}
-              data-id={`agent-stack-card-view-tab-${id}-${item.paneId}`}
-              type="button"
-              onClick={(event) => { event.stopPropagation(); setView(id) }}
-              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-[11px] font-semibold leading-none tracking-[0.02em] transition-all ${
-                view === id
-                  ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white shadow-[0_1px_3px_rgba(37,99,235,0.5)] ring-1 ring-blue-400/50'
-                  : 'text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100'
-              }`}
-            >
-              <Icon className="h-3 w-3" />
-              {id === 'cli' ? t('agentStackViewCli', { defaultValue: 'CLI' }) : t('agentStackViewSession', { defaultValue: '历史' })}
-            </button>
-            )
-          })}
+          <button
+            data-id={`agent-stack-card-view-tab-history-${item.paneId}`}
+            type="button"
+            onClick={(event) => { event.stopPropagation(); onToggleHistory() }}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1 text-[11px] font-semibold leading-none tracking-[0.02em] transition-all ${
+              historyActive
+                ? 'border-blue-400/50 bg-gradient-to-b from-blue-500 to-blue-600 text-white shadow-[0_1px_3px_rgba(37,99,235,0.5)]'
+                : 'border-white/[0.08] bg-black/40 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100'
+            }`}
+          >
+            <History className="h-3 w-3" />
+            {t('agentStackViewSession', { defaultValue: '历史' })}
+          </button>
         </div>
         <div data-id={`agent-stack-card-header-right-${item.paneId}`} className="ml-2 flex items-center gap-1">
           {showHeaderButtons ? (
@@ -477,11 +607,10 @@ function AgentStackCard({
           <div
             data-id={`agent-stack-card-terminal-${item.paneId}`}
             className="h-full w-full"
-            style={view === 'cli' ? undefined : { visibility: 'hidden', pointerEvents: 'none' }}
           >
             <WebFrame src={item.ttydSrc} className="h-full w-full border-0 bg-black" title={`stack-${item.paneId}`} />
           </div>
-        ) : view === 'cli' ? (
+        ) : (
           <div data-id={`agent-stack-card-empty-${item.paneId}`} className="absolute inset-0 flex flex-col justify-between bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.12),transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] p-4">
             <div data-id={`agent-stack-card-workspace-${item.paneId}`}>
               <div data-id={`agent-stack-card-workspace-label-${item.paneId}`} className="text-xs uppercase tracking-[0.24em] text-zinc-600">workspace</div>
@@ -491,44 +620,15 @@ function AgentStackCard({
               {item.isApiOnly ? t('agentStackApiOnly') : active ? t('agentStackActive') : t('agentStackInactiveHint')}
             </div>
           </div>
-        ) : null}
-        {view === 'history' ? (
-          <div data-id={`agent-stack-card-history-${item.paneId}`} className="absolute inset-0 flex flex-col bg-[#0b0b0d]">
-            <div data-id={`agent-stack-card-history-body-${item.paneId}`} className="min-h-0 flex-1">
-              <CurrentHistoryView paneId={item.paneId} open={active} promptsOnly={promptsOnly} />
-            </div>
-            <div data-id={`agent-stack-card-history-back-bar-${item.paneId}`} className="relative flex shrink-0 items-center justify-center border-t border-white/[0.05] px-4 py-3">
-              <button
-                type="button"
-                data-id={`agent-stack-card-history-back-${item.paneId}`}
-                onClick={(event) => { event.stopPropagation(); setView('cli') }}
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/[0.10] bg-white/[0.04] px-5 py-2.5 text-sm font-medium text-zinc-300 transition-colors hover:border-white/[0.18] hover:bg-white/[0.07] hover:text-zinc-100"
-              >
-                <Terminal className="h-4 w-4" />
-                {t('agentStackBackToCli', { defaultValue: '返回 CLI' })}
-              </button>
-              <label
-                data-id={`agent-stack-card-history-prompts-only-${item.paneId}`}
-                onClick={(event) => event.stopPropagation()}
-                className="absolute right-4 top-1/2 inline-flex -translate-y-1/2 cursor-pointer select-none items-center gap-1.5 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200"
-              >
-                <input
-                  type="checkbox"
-                  data-id={`agent-stack-card-history-prompts-only-input-${item.paneId}`}
-                  checked={promptsOnly}
-                  onChange={(event) => { event.stopPropagation(); setPromptsOnly(event.target.checked) }}
-                  className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
-                />
-                {t('agentStackPromptsOnly', { defaultValue: '只显示 prompt' })}
-              </label>
-            </div>
-          </div>
-        ) : null}
+        )}
       </div>
       {headerControls ? (
         <div data-id={`agent-stack-card-header-controls-${item.paneId}`} className="flex h-10 shrink-0 items-center justify-end gap-3 border-t border-white/[0.04] bg-black/[0.18] px-3">
           {headerControls}
         </div>
+      ) : null}
+      {!item.isApiOnly && item.ttydSrc ? (
+        <ShellPanel agentId={item.paneId} ttydSrc={item.ttydSrc} active={active} />
       ) : null}
     </div>
   )

@@ -164,7 +164,13 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// HTTP reverse proxy
-	targetURL := fmt.Sprintf("http://127.0.0.1:%d%s", inst.Port, subPath)
+	proxyHTTP(w, r, inst.Port, subPath)
+}
+
+// proxyHTTP reverse-proxies a non-WS request to a local ttyd instance port.
+// Shared by handleTtydProxy and handleTtydShellProxy.
+func proxyHTTP(w http.ResponseWriter, r *http.Request, port int, subPath string) {
+	targetURL := fmt.Sprintf("http://127.0.0.1:%d%s", port, subPath)
 	if rawQuery := strings.TrimSpace(r.URL.RawQuery); rawQuery != "" {
 		targetURL += "?" + rawQuery
 	}

@@ -67,6 +67,17 @@
     width: 0;
     height: 0;
   }
+  /* Invisible scrollbar + soft vertical fade at the top/bottom edges, so
+     content dissolves into the container rather than ending on a hard line. */
+  .fade-scroll-y {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  }
+  .fade-scroll-y::-webkit-scrollbar {
+    display: none;
+  }
   .animate-slide-in-left {
     animation: slideInLeft 0.2s ease-out forwards;
   }

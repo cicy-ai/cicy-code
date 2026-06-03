@@ -239,9 +239,9 @@ export default function AgentUsageAnalysisView({ paneId, active }: { paneId: str
   const [loading, setLoading] = useState(false);
   const loadedRef = useRef(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (silent = false) => {
     if (!paneId) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const { data: next } = await apiService.getAgentUsageAnalysis(paneId);
       setData(next || null);
@@ -249,12 +249,20 @@ export default function AgentUsageAnalysisView({ paneId, active }: { paneId: str
       /* keep last good */
     } finally {
       loadedRef.current = true;
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [paneId]);
 
   useEffect(() => { loadedRef.current = false; setData(null); }, [paneId]);
   useEffect(() => { if (active && paneId) refresh(); }, [active, paneId, refresh]);
+
+  // Auto-refresh once per second while the view is active. Silent so the data
+  // updates live without the spinner flickering or blanking on transient errors.
+  useEffect(() => {
+    if (!active || !paneId) return;
+    const id = window.setInterval(() => { refresh(true); }, 1000);
+    return () => window.clearInterval(id);
+  }, [active, paneId, refresh]);
 
   const k = data?.kpis;
   const segments = data?.breakdown?.segments || [];
@@ -289,7 +297,7 @@ export default function AgentUsageAnalysisView({ paneId, active }: { paneId: str
         <button
           data-id="agent-usage-analysis-refresh"
           type="button"
-          onClick={refresh}
+          onClick={() => refresh()}
           className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
           title={t('anRefresh', '刷新')}
           aria-label={t('anRefresh', '刷新')}

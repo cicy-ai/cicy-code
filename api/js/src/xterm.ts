@@ -135,7 +135,7 @@ export class Xterm {
             convertEol: false,
             allowTransparency: true,
             allowProposedApi: true,
-            scrollback: 20000,
+            scrollback: 500,
             fontFamily: "var(--cp-mono-font)",
             theme: {
                 background: "#000000",

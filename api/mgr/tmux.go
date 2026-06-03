@@ -4806,6 +4806,11 @@ func handleWindows(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, 400, "session required")
 			return
 		}
+		// Shell panel polls the grouped session (w-<n>-sh); create it lazily so
+		// tabs populate even before the shell WebFrame has mounted.
+		if strings.HasSuffix(s, "-sh") {
+			ensureShellSession(strings.TrimSuffix(s, "-sh"))
+		}
 		wo, err := runTmux("list-windows", "-t", s, "-F", "#{window_index}|#{window_name}|#{window_active}")
 		if err != nil {
 			J(w, M{"windows": []M{}})
@@ -4830,7 +4835,10 @@ func handleWindows(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, 400, "session required")
 			return
 		}
-		workersDir := filepath.Join(cicyWorkersDir, body.Session)
+		// New windows from the shell panel target the grouped session
+		// (w-<n>-sh) so the agent's view isn't moved; their cwd should still be
+		// the real agent workspace, so strip the "-sh" suffix for the dir.
+		workersDir := filepath.Join(cicyWorkersDir, strings.TrimSuffix(body.Session, "-sh"))
 		_ = os.MkdirAll(workersDir, 0755)
 		args := []string{"new-window", "-c", workersDir, "-t", body.Session}
 		if body.Name != "" {
