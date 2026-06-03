@@ -24,9 +24,12 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # to $HOME/.npm-global (configured in base via npm config set prefix).
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-WORKDIR /app
-COPY --chown=cicy:cicy cicy-code-docker /app/cicy-code
-RUN chown -R cicy:cicy /app && \
+WORKDIR /home/cicy
+# No baked cicy-code binary: this is a stable BASE environment. The entrypoint
+# installs cicy-code from npm (npmmirror) at startup, so the image only needs
+# rebuilding when the Dockerfile / base deps change — not on every cicy-code
+# release. Pin with CICY_CODE_VERSION; the version floats with npm otherwise.
+RUN set -eux; \
     mkdir -p /home/cicy/cicy-ai /home/cicy/cicy-ai/.cicy /home/cicy/cicy-ai/projects /home/cicy/cicy-ai/workers /home/cicy/cicy-ai/skills && chown -R cicy:cicy /home/cicy/cicy-ai && \
     touch /home/cicy/.bashrc && \
     grep -Fqx '[ -f "$HOME/.cicy_tmux.conf" ] && source "$HOME/.cicy_tmux.conf"' /home/cicy/.bashrc || \

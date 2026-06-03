@@ -343,6 +343,24 @@ start_cloudflared() {
   fi
 }
 
+# Install cicy-code from npm at startup so the image stays a stable base
+# environment (no baked binary) and the version floats with npm. CN-friendly
+# via npmmirror. Pin with CICY_CODE_VERSION; override registry with NPM_REGISTRY.
+# If a `cicy-code` is already on PATH (e.g. a legacy baked image) and no version
+# is pinned, reuse it.
+ensure_cicy_code() {
+  local reg="${NPM_REGISTRY:-https://registry.npmmirror.com}"
+  local spec="cicy-code"
+  if [ -n "${CICY_CODE_VERSION:-}" ]; then
+    spec="cicy-code@${CICY_CODE_VERSION}"
+  elif command -v cicy-code >/dev/null 2>&1; then
+    log "cicy-code already on PATH; skipping install"
+    return 0
+  fi
+  log "installing ${spec} from ${reg}"
+  npm install -g "$spec" --registry="$reg"
+}
+
 build_app_argv() {
   if [ "$#" -eq 0 ]; then
     set -- --public
@@ -382,10 +400,11 @@ main() {
   ensure_runtime_api_token
   ensure_legacy_home_links
   start_cloudflared
+  ensure_cicy_code
 
   mapfile -d '' app_argv < <(build_app_argv "$@")
   log "starting cicy-code"
-  exec /app/cicy-code "${app_argv[@]}"
+  exec cicy-code "${app_argv[@]}"
 }
 
 main "$@"
