@@ -1270,6 +1270,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCliContentTab('memory');
     setCliContentOpen(true);
   }, [paneId]);
+  const openPaneArtifact = useCallback((targetPaneId: string) => {
+    const clean = targetPaneId.replace(/:.*$/, '');
+    if (!clean) return;
+    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
+    setCliContentMode('fixed');
+    setCliContentTab('artifact');
+    setCliContentOpen(true);
+  }, [paneId]);
   const handleCliDrawerResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1665,6 +1673,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             onOpenPaneSession={handleStackOpenSession}
             onOpenPaneTodo={todoSkillInstalled ? openPaneTodo : undefined}
             onOpenPaneMemory={openPaneMemory}
+            onOpenPaneArtifact={openPaneArtifact}
             onActivePaneIdChange={handleStackActivePaneIdChange}
             onRenamePaneTitle={handleRenamePaneTitle}
             todoCount={todoCount}

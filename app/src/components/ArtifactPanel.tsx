@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, X, Monitor, Tablet, Smartphone } from 'lucide-react';
 import { WebFrame } from './WebFrame';
 import {
   ARTIFACT_WEBVIEW_ID,
@@ -16,6 +16,24 @@ import {
 // from the agent's exec_js channel. See app/src/lib/artifactBridge.ts.
 
 const BLANK = 'about:blank';
+
+// Preview viewport presets. `web` fills the host; the others constrain the
+// frame to a device-sized box so the loaded page renders at that viewport
+// (responsive sites pick up their mobile/tablet layout). Persisted so the
+// chosen mode survives reloads/remounts.
+type PreviewMode = 'web' | 'portal' | 'mobile';
+const PREVIEW_KEY = 'cicy_artifact_preview';
+const PREVIEW_DIMS: Record<PreviewMode, { w: number; h: number } | null> = {
+  web: null,
+  portal: { w: 768, h: 1024 },
+  mobile: { w: 390, h: 844 },
+};
+function loadPreview(): PreviewMode {
+  try {
+    const v = JSON.parse(localStorage.getItem(PREVIEW_KEY)!);
+    return v === 'mobile' || v === 'portal' ? v : 'web';
+  } catch { return 'web'; }
+}
 
 // cicy-desktop injects window.cicy into its trusted cicy-code windows; its
 // presence is how the app already detects Electron (see MobileQRPopover).
@@ -45,10 +63,13 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
   const [url, setUrl] = useState<string>(BLANK);
   const [inputUrl, setInputUrl] = useState<string>('');
   const [iframeKey, setIframeKey] = useState(0);
+  const [preview, setPreviewState] = useState<PreviewMode>(loadPreview);
 
   const elRef = useRef<any>(null);
   const urlRef = useRef<string>(BLANK);
   urlRef.current = url;
+  const previewRef = useRef<PreviewMode>(preview);
+  previewRef.current = preview;
 
   const load = useCallback((raw: string) => {
     const next = normalizeUrl(raw);
@@ -58,6 +79,12 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
     // the key so re-loading the *same* url forces a fresh mount.
     if (!electron) setIframeKey((k) => k + 1);
   }, [electron]);
+
+  // Persisted preview-mode setter.
+  const applyPreview = useCallback((m: PreviewMode) => {
+    setPreviewState(m);
+    try { localStorage.setItem(PREVIEW_KEY, JSON.stringify(m)); } catch { /* ignore */ }
+  }, []);
 
   // Register the controller for window.cicyArtifact while mounted.
   useEffect(() => {
@@ -73,10 +100,12 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
         setIframeKey((k) => k + 1);
       },
       clear: () => load(BLANK),
+      setPreview: (m: string) => { if (m === 'web' || m === 'portal' || m === 'mobile') applyPreview(m); },
+      getPreview: () => previewRef.current,
     };
     registerArtifactController(controller);
     return () => unregisterArtifactController(controller);
-  }, [electron, load, requestActivate]);
+  }, [electron, load, requestActivate, applyPreview]);
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,6 +122,35 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
   const openExternal = () => { if (url && url !== BLANK) window.open(url, '_blank', 'noopener'); };
 
   const hasUrl = url && url !== BLANK;
+  const dim = PREVIEW_DIMS[preview];
+
+  // The frame element — kept identical across preview modes so switching mode
+  // only resizes its container (no remount → no reload of the loaded page).
+  const frameEl = electron
+    ? React.createElement('webview', {
+        'data-id': 'artifact-webview',
+        id: ARTIFACT_WEBVIEW_ID,
+        ref: (node: any) => { elRef.current = node; },
+        src: url,
+        allowpopups: 'true',
+        style: { display: 'flex', width: '100%', height: '100%' },
+        className: 'h-full w-full border-0 bg-white',
+      })
+    : (
+      <WebFrame
+        key={iframeKey}
+        ref={(node: HTMLIFrameElement | null) => { elRef.current = node; }}
+        src={url}
+        title="artifact"
+        className="h-full w-full border-0 bg-white"
+      />
+    );
+
+  const previewModes: [PreviewMode, typeof Monitor, string, string][] = [
+    ['web', Monitor, t('artifactPreviewWeb', 'Web'), 'Web'],
+    ['portal', Tablet, t('artifactPreviewPortal', 'Portal'), 'Portal'],
+    ['mobile', Smartphone, t('artifactPreviewMobile', 'Mobile'), 'Mobile'],
+  ];
 
   return (
     <div data-id="artifact-panel" className={'flex h-full w-full flex-col bg-vsc-bg ' + (className || '')}>
@@ -127,6 +185,21 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
             className="h-6 w-full rounded border border-[var(--vsc-border)] bg-black/20 px-2 text-xs text-zinc-200 outline-none focus:border-zinc-500"
           />
         </form>
+        <div data-id="artifact-preview-modes" className="flex shrink-0 items-center gap-0.5 rounded border border-[var(--vsc-border)] p-0.5">
+          {previewModes.map(([m, Icon, label]) => (
+            <button
+              key={m}
+              data-id={`artifact-preview-${m}`}
+              type="button"
+              onClick={() => applyPreview(m)}
+              aria-pressed={preview === m}
+              title={label}
+              className={'rounded p-1 transition-colors ' + (preview === m ? 'bg-white/[0.15] text-zinc-100' : 'text-zinc-400 hover:bg-white/10 hover:text-zinc-200')}
+            >
+              <Icon className="h-3.5 w-3.5" />
+            </button>
+          ))}
+        </div>
         <button data-id="artifact-open-external" type="button" onClick={openExternal} disabled={!hasUrl}
           title={t('artifactOpenExternal', 'Open in browser')}
           className="rounded p-1 text-zinc-400 hover:bg-white/10 hover:text-zinc-200 disabled:opacity-30">
@@ -140,29 +213,22 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
       </div>
 
       <div data-id="artifact-frame-host" className="relative min-h-0 flex-1">
-        {!hasUrl ? (
-          <div data-id="artifact-empty" className="flex h-full w-full items-center justify-center px-6 text-center text-xs text-zinc-500">
+        <div
+          data-id="artifact-frame-stage"
+          className={'absolute inset-0 ' + (dim ? 'flex items-start justify-center overflow-auto bg-[#0c0d10] p-3' : '')}
+        >
+          <div
+            data-id="artifact-frame-viewport"
+            className={dim ? 'shrink-0 overflow-hidden rounded-lg border border-[var(--vsc-border)] bg-white shadow-lg' : 'h-full w-full'}
+            style={dim ? { width: dim.w, height: `min(${dim.h}px, 100%)`, maxWidth: '100%' } : undefined}
+          >
+            {frameEl}
+          </div>
+        </div>
+        {!hasUrl && (
+          <div data-id="artifact-empty" className="absolute inset-0 flex items-center justify-center bg-vsc-bg px-6 text-center text-xs text-zinc-500">
             {t('artifactEmpty', 'No artifact open. Enter a URL above, or let an agent open one via the artifact skill.')}
           </div>
-        ) : electron ? (
-          React.createElement('webview', {
-            'data-id': 'artifact-webview',
-            id: ARTIFACT_WEBVIEW_ID,
-            ref: (node: any) => { elRef.current = node; },
-            src: url,
-            allowpopups: 'true',
-            // a bare <webview> is inline by default; make it fill the host.
-            style: { display: active ? 'flex' : 'flex', width: '100%', height: '100%' },
-            className: 'h-full w-full border-0 bg-white',
-          })
-        ) : (
-          <WebFrame
-            key={iframeKey}
-            ref={(node: HTMLIFrameElement | null) => { elRef.current = node; }}
-            src={url}
-            title="artifact"
-            className="h-full w-full border-0 bg-white"
-          />
         )}
       </div>
     </div>
