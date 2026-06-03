@@ -211,3 +211,25 @@ jobs:
         run: |
           cd npm
           bash publish-all.sh "${{ steps.tag.outputs.version }}" --from ../dist
+
+      - name: Upload bootstrap installer to R2
+        # Keep the one-liner installer (curl -fsSL https://r2.deepfetch.de5.net/code | sh)
+        # in sync with each release: upload npm/install.sh to the R2 bucket
+        # under key "code" via wrangler — the same command the cicy-r2 CLI runs
+        # locally (`wrangler r2 object put <bucket>/<key> --file <f>`), with the
+        # account/token in env. R2 is the CN-friendly host (no ICP filter, CF
+        # edge cache, no arrears freeze like COS).
+        #
+        # Required:
+        #   vars.R2_ACCOUNT_ID    Cloudflare account id (3cd74d293cda341378bb80ea52ff247d)
+        #   secrets.R2_API_TOKEN  CF API token with R2 object-write on cicy-assets-poc
+        if: github.event_name == 'push'
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.R2_API_TOKEN }}
+        run: |
+          npx --yes wrangler@3.114.17 r2 object put \
+            cicy-assets-poc/code \
+            --file=npm/install.sh \
+            --content-type=text/x-shellscript
+          echo "Uploaded npm/install.sh -> https://r2.deepfetch.de5.net/code"
