@@ -248,25 +248,24 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
         </div>
         {!hasUrl && (
           <div data-id="artifact-empty" className="absolute inset-0 z-20 flex items-center justify-center bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.08),transparent_45%),var(--vsc-bg)] p-6">
-            {/* A faux browser window standing in for where the artifact will
-                render — no real <webview>/<iframe> is mounted until a URL is set. */}
-            <div data-id="artifact-empty-mock" className="flex w-[min(560px,94%)] flex-col overflow-hidden rounded-xl border border-[var(--vsc-border)] bg-[#0e0f13] shadow-2xl">
-              <div data-id="artifact-empty-mock-bar" className="flex items-center gap-2 border-b border-[var(--vsc-border)] bg-white/[0.03] px-3 py-2">
-                <span data-id="artifact-empty-mock-dots" className="flex shrink-0 items-center gap-1.5">
-                  <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
-                  <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
-                  <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
+            {/* A faux phone standing in for where the artifact will render —
+                no real <webview>/<iframe> is mounted until a URL is set. */}
+            <div
+              data-id="artifact-empty-mock"
+              className="flex w-[248px] max-w-[88%] flex-col overflow-hidden rounded-[2.2rem] border-[7px] border-[#17181c] bg-[#0e0f13] shadow-2xl ring-1 ring-white/[0.06]"
+              style={{ height: 'min(480px, 92%)' }}
+            >
+              {/* status bar + notch */}
+              <div data-id="artifact-empty-mock-statusbar" className="relative flex shrink-0 items-center justify-between px-5 py-2 text-[10px] font-medium text-zinc-500">
+                <span data-id="artifact-empty-mock-clock">9:41</span>
+                <span data-id="artifact-empty-mock-notch" className="absolute left-1/2 top-1.5 h-4 w-16 -translate-x-1/2 rounded-full bg-black/70" />
+                <span data-id="artifact-empty-mock-status-icons" className="flex items-center gap-1">
+                  <span className="h-2 w-3 rounded-[2px] bg-zinc-600" />
+                  <span className="h-2 w-2 rounded-full bg-zinc-600" />
                 </span>
-                <button
-                  data-id="artifact-empty-mock-address"
-                  type="button"
-                  onClick={focusUrlInput}
-                  className="ml-2 flex-1 truncate rounded-md border border-[var(--vsc-border)] bg-black/30 px-2.5 py-1 text-left text-[11px] text-zinc-500 transition-colors hover:border-zinc-500 hover:text-zinc-300"
-                >
-                  {t('artifactUrlPlaceholder', 'Enter a URL to open in the artifact frame')}
-                </button>
               </div>
-              <div data-id="artifact-empty-mock-body" className="flex flex-col items-center justify-center gap-4 px-6 py-12 text-center">
+              {/* body */}
+              <div data-id="artifact-empty-mock-body" className="flex flex-1 flex-col items-center justify-center gap-4 px-5 py-6 text-center">
                 <div data-id="artifact-empty-icon" className="flex h-16 w-16 items-center justify-center rounded-2xl border border-[var(--vsc-border)] bg-white/[0.03] text-zinc-500 shadow-inner">
                   <Package className="h-8 w-8" />
                 </div>
@@ -274,7 +273,7 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
                   <div data-id="artifact-empty-title" className="text-sm font-medium text-zinc-200">
                     {t('artifactEmptyTitle', 'Artifact preview')}
                   </div>
-                  <div data-id="artifact-empty-desc" className="max-w-[22rem] text-xs leading-relaxed text-zinc-500">
+                  <div data-id="artifact-empty-desc" className="text-xs leading-relaxed text-zinc-500">
                     {t('artifactEmpty', 'No artifact open. Enter a URL above, or let an agent open one via the artifact skill.')}
                   </div>
                 </div>
@@ -282,11 +281,15 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
                   data-id="artifact-empty-cta"
                   type="button"
                   onClick={focusUrlInput}
-                  className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-[var(--vsc-border)] bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100"
+                  className="mt-1 inline-flex items-center gap-1.5 rounded-full border border-[var(--vsc-border)] bg-white/[0.03] px-4 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100"
                 >
                   <ArrowUp className="h-3.5 w-3.5" />
                   {t('artifactEmptyCta', 'Enter a URL to open')}
                 </button>
+              </div>
+              {/* home indicator */}
+              <div data-id="artifact-empty-mock-home" className="flex shrink-0 justify-center pb-2 pt-1">
+                <span className="h-1 w-20 rounded-full bg-white/15" />
               </div>
             </div>
           </div>
