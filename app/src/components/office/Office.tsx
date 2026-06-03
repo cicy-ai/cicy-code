@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Building2, Send, Megaphone, AtSign, X, Loader2, CheckCircle2, CircleDot, MessageSquare,
-  Plus, Minus, Maximize2,
+  Building2, Send, Megaphone, AtSign, X, Loader2, CheckCircle2, MessageSquare,
+  Plus, Minus, Maximize2, Crown, Inbox,
 } from 'lucide-react';
 
 /*
  * Office — 「办公室」（data-id="office"）。
- * 左栏：命令对话（上=history，下=prompt，自动 @ 选中的 worker，可广播）。
- * 右侧：可平移/缩放的画布，每个 worker = 一张可拖动 + 可缩放的 chat window，
- *       只显示 thinking + text（不拉 tool 结果）；头像 = agent avatar。
+ * 左栏：指挥台（总控对话，上=history，下=prompt，自动 @ 选中 worker，可广播）。
+ * 右侧：可平移/缩放画布，每个 worker = 可拖动+可缩放的 chat window，
+ *       只显示 thinking + text（不拉 tool 结果），头像 = agent avatar + 状态环。
  * 纯 UI 原型，mock 实时流（先不接接口）。
  */
 
@@ -18,81 +18,94 @@ type Status = 'idle' | 'working' | 'done';
 
 interface Worker {
   id: string; name: string; role: string; emoji: string; accent: string;
-  status: Status; script: Line[]; shown: number;
-  x: number; y: number; w: number; h: number;   // 画布坐标 + 尺寸
+  status: Status; script: Line[]; shown: number; startedAt: number;
+  x: number; y: number; w: number; h: number;
 }
 
-type ChatKind = 'you' | 'dispatch' | 'broadcast' | 'done' | 'note';
+type ChatKind = 'dispatch' | 'broadcast' | 'done' | 'note';
 interface ChatMsg { id: number; kind: ChatKind; from?: string; to?: string; text: string; ts: string }
 
 const SELF = 'w-10001';
-const MIN_W = 220, MIN_H = 150;
+const MIN_W = 240, MIN_H = 168;
 
 const W = (id: string, name: string, role: string, emoji: string, accent: string, status: Status, x: number, y: number, script: Line[]): Worker =>
-  ({ id, name, role, emoji, accent, status, script, shown: status === 'working' ? 0 : script.length, x, y, w: 300, h: 220 });
+  ({ id, name, role, emoji, accent, status, script, shown: status === 'working' ? 0 : script.length, startedAt: 0, x, y, w: 312, h: 232 });
 
 const INIT_WORKERS: Worker[] = [
-  W('w-10010', '架构师 Aria', 'dev-senior', '🏛️', 'sky', 'working', 40, 40, [
+  W('w-10010', '架构师 Aria', 'dev-senior', '🏛️', 'sky', 'working', 36, 32, [
     { t: 'thinking', s: '把"画布"拆成 3 张卡：数据层 / 渲染层 / 画布层。' },
     { t: 'text', s: '定义 LiteAgentCard props + digest 端点契约。' },
     { t: 'thinking', s: 'tool_result 不传，payload 小一个数量级。' },
     { t: 'text', s: '接口写进 docs，交给 Finn。' },
     { t: 'text', s: '✅ 完成：技术任务卡 + 接口契约。' },
   ]),
-  W('w-10011', '前端 Finn', 'dev-junior', '🎨', 'violet', 'working', 372, 40, [
+  W('w-10011', '前端 Finn', 'dev-junior', '🎨', 'violet', 'working', 384, 32, [
     { t: 'thinking', s: '复用 normalize，搭可拖拽/缩放的 window。' },
-    { t: 'text', s: '左栏命令对话 + 右栏画布。' },
+    { t: 'text', s: '左栏指挥台 + 右栏画布。' },
     { t: 'thinking', s: '选中 window → prompt 自动 @ 它。' },
-    { t: 'text', s: '加 drag handle + resize 角。' },
+    { t: 'text', s: '加 drag handle + resize 抓手。' },
     { t: 'text', s: '✅ 完成：可拖拽缩放的办公室画布。' },
   ]),
-  W('w-10012', '测试 Quinn', 'qa', '🧪', 'emerald', 'working', 704, 40, [
+  W('w-10012', '测试 Quinn', 'qa', '🧪', 'emerald', 'working', 732, 32, [
     { t: 'thinking', s: '核对验收标准：N window 同屏不卡。' },
     { t: 'text', s: '跑 20 window 压力，盯帧率。' },
     { t: 'thinking', s: 'thinking 太长要截断。' },
     { t: 'text', s: 'FAIL：离屏 window 仍在轮询，需门控。' },
   ]),
-  W('w-10013', '运维 Ops', 'ops', '🚀', 'orange', 'idle', 206, 292, [
+  W('w-10013', '运维 Ops', 'ops', '🚀', 'amber', 'idle', 210, 296, [
     { t: 'text', s: '待构建产物，准备部署。' },
   ]),
-  W('w-10014', '安全 Sage', 'reviewer', '🛡️', 'rose', 'working', 538, 292, [
+  W('w-10014', '安全 Sage', 'reviewer', '🛡️', 'rose', 'working', 558, 296, [
     { t: 'thinking', s: '扫一遍有没有把 token 渲进 window。' },
     { t: 'text', s: 'text+thinking 不含工具入参，攻击面更小。' },
     { t: 'text', s: '✅ 完成：安全结论 PASS。' },
   ]),
 ];
 
-const ACCENT: Record<string, { grad: string; ring: string; chip: string; dot: string }> = {
-  sky:     { grad: 'from-sky-500/40 to-sky-700/20',         ring: 'ring-sky-400/40',     chip: 'bg-sky-500/15 text-sky-300',       dot: 'text-sky-400' },
-  violet:  { grad: 'from-violet-500/40 to-violet-700/20',   ring: 'ring-violet-400/40',  chip: 'bg-violet-500/15 text-violet-300', dot: 'text-violet-400' },
-  emerald: { grad: 'from-emerald-500/40 to-emerald-700/20', ring: 'ring-emerald-400/40', chip: 'bg-emerald-500/15 text-emerald-300', dot: 'text-emerald-400' },
-  orange:  { grad: 'from-orange-500/40 to-orange-700/20',   ring: 'ring-orange-400/40',  chip: 'bg-orange-500/15 text-orange-300', dot: 'text-orange-400' },
-  rose:    { grad: 'from-rose-500/40 to-rose-700/20',       ring: 'ring-rose-400/40',    chip: 'bg-rose-500/15 text-rose-300',     dot: 'text-rose-400' },
+const ACCENT: Record<string, { grad: string; ring: string; chip: string; bar: string; ping: string }> = {
+  sky:     { grad: 'from-sky-500/40 to-sky-700/15',         ring: 'ring-sky-400/50',     chip: 'text-sky-300',     bar: 'bg-sky-400/50',     ping: 'ring-sky-400/60' },
+  violet:  { grad: 'from-violet-500/40 to-violet-700/15',   ring: 'ring-violet-400/50',  chip: 'text-violet-300',  bar: 'bg-violet-400/50',  ping: 'ring-violet-400/60' },
+  emerald: { grad: 'from-emerald-500/40 to-emerald-700/15', ring: 'ring-emerald-400/50', chip: 'text-emerald-300', bar: 'bg-emerald-400/50', ping: 'ring-emerald-400/60' },
+  amber:   { grad: 'from-amber-500/40 to-amber-700/15',     ring: 'ring-amber-400/50',   chip: 'text-amber-300',   bar: 'bg-amber-400/50',   ping: 'ring-amber-400/60' },
+  rose:    { grad: 'from-rose-500/40 to-rose-700/15',       ring: 'ring-rose-400/50',    chip: 'text-rose-300',    bar: 'bg-rose-400/50',    ping: 'ring-rose-400/60' },
 };
-const STATUS_META: Record<Status, { label: string }> = { idle: { label: '空闲' }, working: { label: '工作中' }, done: { label: '完成' } };
 const Z_MIN = 0.4, Z_MAX = 1.8;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+const hhmm = (ms: number) => { const d = new Date(ms); const p = (n: number) => String(n).padStart(2, '0'); return `${p(d.getHours())}:${p(d.getMinutes())}`; };
+const elapsed = (from: number, now: number) => {
+  if (!from) return '';
+  const s = Math.max(0, Math.floor((now - from) / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${p2(s % 60)}s`;
+};
+const p2 = (n: number) => String(n).padStart(2, '0');
 
-function nowStamp(): string {
-  const d = new Date(); const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-function Avatar({ emoji, accent, size = 28 }: { emoji: string; accent: string; size?: number }) {
+/* ── avatar：emoji + 状态环（working 脉冲 / done 绿环 / idle 灰）── */
+function Avatar({ emoji, accent, size = 30, status }: { emoji: string; accent: string; size?: number; status?: Status }) {
   const acc = ACCENT[accent] ?? ACCENT.sky;
-  return <span className={`grid shrink-0 place-items-center rounded-full bg-gradient-to-br ${acc.grad} ring-1 ring-white/10`} style={{ width: size, height: size, fontSize: size * 0.5 }}>{emoji}</span>;
+  const ring = status === 'done' ? 'ring-2 ring-emerald-400/70' : status === 'working' ? `ring-2 ${acc.ring}` : 'ring-1 ring-white/10';
+  return (
+    <span className="relative inline-grid shrink-0 place-items-center" style={{ width: size, height: size }}>
+      {status === 'working' && <span className={`absolute inset-0 rounded-full ring-2 ${acc.ping} animate-ping opacity-40`} />}
+      <span className={`grid h-full w-full place-items-center rounded-full bg-gradient-to-br ${acc.grad} ${ring}`} style={{ fontSize: size * 0.5 }}>{emoji}</span>
+    </span>
+  );
 }
 
 export default function Office() {
-  const [workers, setWorkers] = useState<Worker[]>(INIT_WORKERS);
+  const [workers, setWorkers] = useState<Worker[]>(() => {
+    const t0 = Date.now();
+    return INIT_WORKERS.map((w) => (w.status === 'working' ? { ...w, startedAt: t0 } : w));
+  });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hoverId, setHoverId] = useState<string | null>(null);
   const [mode, setMode] = useState<'single' | 'broadcast'>('single');
   const [text, setText] = useState('');
   const [mentionOpen, setMentionOpen] = useState(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
+  const [now, setNow] = useState(() => Date.now());
   const [chat, setChat] = useState<ChatMsg[]>([
-    { id: 1, kind: 'note', text: '办公室就绪。拖动卡片标题可移动、拖右下角可缩放、拖空白处平移画布、滚轮缩放。点某 worker 自动 @ 派任务，或切广播。', ts: nowStamp() },
+    { id: 1, kind: 'note', text: '拖标题移动卡片、拖右下角缩放、空白拖拽平移、滚轮缩放。点 worker 自动 @ 派任务，或切广播。', ts: hhmm(Date.now()) },
   ]);
   const seq = useRef(2);
   const chatRef = useRef<HTMLDivElement>(null);
@@ -101,39 +114,31 @@ export default function Office() {
 
   const byId = useMemo(() => Object.fromEntries(workers.map((w) => [w.id, w])), [workers]);
   const target = selectedId ? byId[selectedId] : null;
+  const online = workers.filter((w) => w.status !== 'idle').length;
 
+  // mock 实时流 + 计时
   useEffect(() => {
     const t = window.setInterval(() => {
+      const ts = Date.now();
       setWorkers((prev) => prev.map((w) => {
         if (w.status === 'working') return w.shown < w.script.length ? { ...w, shown: w.shown + 1 } : { ...w, status: 'done' };
-        if (w.status === 'done' && Math.random() < 0.1) return { ...w, status: 'working', shown: 0 };
+        if (w.status === 'done' && Math.random() < 0.08) return { ...w, status: 'working', shown: 0, startedAt: ts };
         return w;
       }));
     }, 1200);
-    return () => window.clearInterval(t);
+    const c = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => { window.clearInterval(t); window.clearInterval(c); };
   }, []);
 
   useEffect(() => { const n = chatRef.current; if (n) n.scrollTop = n.scrollHeight; }, [chat]);
 
-  const push = (m: Omit<ChatMsg, 'id' | 'ts'>) => setChat((c) => [...c, { id: seq.current++, ts: nowStamp(), ...m }]);
+  const push = (m: Omit<ChatMsg, 'id' | 'ts'>) => setChat((c) => [...c, { id: seq.current++, ts: hhmm(Date.now()), ...m }]);
 
-  const selectWorker = (w?: Worker) => {
-    if (!w) return;
-    setSelectedId(w.id); setMode('single'); setMentionOpen(false); inputRef.current?.focus();
-  };
+  const selectWorker = (w?: Worker) => { if (!w) return; setSelectedId(w.id); setMode('single'); setMentionOpen(false); inputRef.current?.focus(); };
 
-  // 画布交互
-  const onPointerDownBg = (e: React.PointerEvent) => {
-    dragRef.current = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: pan.x, oy: pan.y, ow: 0, oh: 0, moved: false };
-  };
-  const startMove = (e: React.PointerEvent, w: Worker) => {
-    e.stopPropagation();
-    dragRef.current = { kind: 'move', id: w.id, sx: e.clientX, sy: e.clientY, ox: w.x, oy: w.y, ow: w.w, oh: w.h, moved: false };
-  };
-  const startResize = (e: React.PointerEvent, w: Worker) => {
-    e.stopPropagation();
-    dragRef.current = { kind: 'resize', id: w.id, sx: e.clientX, sy: e.clientY, ox: w.x, oy: w.y, ow: w.w, oh: w.h, moved: false };
-  };
+  const onPointerDownBg = (e: React.PointerEvent) => { dragRef.current = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: pan.x, oy: pan.y, ow: 0, oh: 0, moved: false }; };
+  const startMove = (e: React.PointerEvent, w: Worker) => { e.stopPropagation(); dragRef.current = { kind: 'move', id: w.id, sx: e.clientX, sy: e.clientY, ox: w.x, oy: w.y, ow: w.w, oh: w.h, moved: false }; };
+  const startResize = (e: React.PointerEvent, w: Worker) => { e.stopPropagation(); dragRef.current = { kind: 'resize', id: w.id, sx: e.clientX, sy: e.clientY, ox: w.x, oy: w.y, ow: w.w, oh: w.h, moved: false }; };
   useEffect(() => {
     const move = (e: PointerEvent) => {
       const d = dragRef.current; if (!d) return;
@@ -148,8 +153,7 @@ export default function Office() {
       if (d && !d.moved) { if (d.kind === 'move' && d.id) selectWorker(byId[d.id]); else if (d.kind === 'pan') setSelectedId(null); }
       dragRef.current = null;
     };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
   }, [zoom, byId]);
 
@@ -167,16 +171,14 @@ export default function Office() {
       setWorkers((prev) => prev.map((w) => (w.id === who ? { ...w, status: 'done' } : w)));
     }, 2600);
   };
-
   const send = () => {
     const body = text.trim(); if (!body) return;
     if (mode === 'broadcast') { push({ kind: 'broadcast', text: body }); setText(''); return; }
     if (!target) return;
     push({ kind: 'dispatch', to: target.id, text: body });
-    setWorkers((prev) => prev.map((w) => (w.id === target.id ? { ...w, status: 'working', shown: 0 } : w)));
+    setWorkers((prev) => prev.map((w) => (w.id === target.id ? { ...w, status: 'working', shown: 0, startedAt: Date.now() } : w)));
     setText(''); simulateDone(target.id);
   };
-
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   const onChange = (v: string) => { setText(v); if (mode === 'single') setMentionOpen(/(^|\s)@$/.test(v)); };
   const pickMention = (w: Worker) => { setSelectedId(w.id); setMode('single'); setText((v) => v.replace(/@$/, '')); setMentionOpen(false); inputRef.current?.focus(); };
@@ -184,67 +186,79 @@ export default function Office() {
 
   return (
     <div data-id="office" className="absolute inset-0 flex bg-[#0A0A0A] text-zinc-300">
-      {/* 左栏：命令对话 */}
-      <aside data-id="office-command" className="flex w-[336px] min-w-[336px] shrink-0 flex-col border-r border-[var(--vsc-border)] bg-[#0c0c0c]">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--vsc-border)] px-4">
-          <Building2 className="h-4 w-4 text-sky-400" />
-          <span className="text-sm font-semibold text-zinc-100">办公室</span>
-          <span className="text-[11px] text-zinc-500">· 总控 {SELF}</span>
+      {/* 左栏：指挥台 */}
+      <aside data-id="office-command" className="flex w-[340px] min-w-[340px] shrink-0 flex-col border-r border-white/[0.06] bg-[#0b0b0c]">
+        <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-white/[0.06] px-4">
+          <span className="relative">
+            <span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-amber-400/40 to-amber-600/15 text-base ring-1 ring-amber-300/30">🏢</span>
+            <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-[#0b0b0c]" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1 text-[13px] font-semibold text-zinc-100"><Crown className="h-3 w-3 text-amber-400" /> 办公室 · 总控</div>
+            <div className="font-mono text-[11px] text-zinc-500">{SELF} · 在线 {online}/{workers.length}</div>
+          </div>
         </div>
-        <div ref={chatRef} data-id="office-command-history" className="flex-1 space-y-2.5 overflow-auto px-3 py-3">
+
+        <div ref={chatRef} data-id="office-command-history" className="flex-1 space-y-3 overflow-auto px-3.5 py-3.5">
           {chat.map((m) => <CommandMsg key={m.id} m={m} byId={byId} />)}
         </div>
-        <div data-id="office-command-prompt" className="shrink-0 border-t border-[var(--vsc-border)] bg-[#0d0d0d] px-3 py-3">
+
+        <div data-id="office-command-prompt" className="shrink-0 border-t border-white/[0.06] bg-[#0d0d0e] px-3.5 py-3">
           <div className="relative">
-            <div data-id="office-mode" className="mb-2 inline-flex items-center gap-1 rounded-lg bg-white/[0.04] p-0.5 text-[12px]">
-              <button data-id="office-mode-single" onClick={() => setMode('single')} className={`inline-flex items-center gap-1 rounded-md px-2 py-1 ${mode === 'single' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}><MessageSquare className="h-3.5 w-3.5" /> 单聊</button>
-              <button data-id="office-mode-broadcast" onClick={() => { setMode('broadcast'); setMentionOpen(false); }} className={`inline-flex items-center gap-1 rounded-md px-2 py-1 ${mode === 'broadcast' ? 'bg-amber-500/20 text-amber-200' : 'text-zinc-500 hover:text-zinc-300'}`}><Megaphone className="h-3.5 w-3.5" /> 广播</button>
+            <div data-id="office-mode" className="mb-2 inline-flex items-center gap-0.5 rounded-lg bg-white/[0.04] p-0.5 text-[12px]">
+              <button data-id="office-mode-single" onClick={() => setMode('single')} className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 transition-colors ${mode === 'single' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}><MessageSquare className="h-3.5 w-3.5" /> 单聊</button>
+              <button data-id="office-mode-broadcast" onClick={() => { setMode('broadcast'); setMentionOpen(false); }} className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 transition-colors ${mode === 'broadcast' ? 'bg-amber-500/20 text-amber-200' : 'text-zinc-500 hover:text-zinc-300'}`}><Megaphone className="h-3.5 w-3.5" /> 广播</button>
             </div>
             {mentionOpen && mode === 'single' && (
-              <div data-id="office-mention" className="absolute bottom-full left-0 mb-2 w-full overflow-hidden rounded-xl border border-white/10 bg-[#141414] shadow-2xl">
+              <div data-id="office-mention" className="absolute bottom-full left-0 mb-2 w-full overflow-hidden rounded-xl border border-white/10 bg-[#16161a] shadow-2xl">
                 {workers.map((w) => (
-                  <button key={w.id} data-id={`office-mention-${w.id}`} onClick={() => pickMention(w)} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.06]">
-                    <Avatar emoji={w.emoji} accent={w.accent} size={22} /><span className="text-[13px] text-zinc-200">{w.name}</span><span className="ml-auto font-mono text-[11px] text-zinc-500">{w.id}</span>
+                  <button key={w.id} data-id={`office-mention-${w.id}`} onClick={() => pickMention(w)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-white/[0.06]">
+                    <Avatar emoji={w.emoji} accent={w.accent} size={24} status={w.status} /><span className="text-[13px] text-zinc-200">{w.name}</span><span className="ml-auto font-mono text-[11px] text-zinc-500">{w.id}</span>
                   </button>
                 ))}
               </div>
             )}
-            <div data-id="office-target" className="mb-2 flex items-center gap-1.5">
+            <div data-id="office-target" className="mb-2 flex min-h-[26px] items-center gap-1.5">
               {mode === 'broadcast' ? (
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-[12px] text-amber-200"><Megaphone className="h-3 w-3" /> 广播 · 全体（{workers.length}）</span>
               ) : target ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/15 py-1 pl-1.5 pr-1.5 text-[12px] text-sky-300"><Avatar emoji={target.emoji} accent={target.accent} size={18} /><span className="font-mono">{target.id}</span><button data-id="office-target-clear" onClick={() => setSelectedId(null)} className="rounded-full p-0.5 hover:bg-white/10"><X className="h-3 w-3" /></button></span>
-              ) : (<span className="text-[12px] text-zinc-600">点画布里的 worker，或 @ 选择</span>)}
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.06] py-1 pl-1 pr-2 text-[12px] text-zinc-200"><Avatar emoji={target.emoji} accent={target.accent} size={20} status={target.status} /><span className="font-medium">{target.name}</span><span className="font-mono text-[11px] text-zinc-500">{target.id}</span><button data-id="office-target-clear" onClick={() => setSelectedId(null)} className="rounded-full p-0.5 text-zinc-500 hover:bg-white/10 hover:text-zinc-200"><X className="h-3 w-3" /></button></span>
+              ) : (<span className="text-[12px] text-zinc-600">点画布里的 worker，或输入 @ 选择</span>)}
             </div>
-            <div className="flex items-end gap-2 rounded-xl border border-white/10 bg-[#111] px-3 py-2 focus-within:border-white/20">
+            <div className="flex items-end gap-2 rounded-2xl border border-white/10 bg-[#121214] px-3 py-2.5 transition-colors focus-within:border-white/25">
               <textarea ref={inputRef} data-id="office-input" rows={1} value={text} onChange={(e) => onChange(e.target.value)} onKeyDown={onKeyDown}
-                placeholder={mode === 'broadcast' ? '向全体广播…（Enter）' : target ? `给 ${target.name} 派任务…（Enter）` : '@ 选择 worker…'}
+                placeholder={mode === 'broadcast' ? '向全体广播…（Enter）' : target ? `给 ${target.name} 派任务…（Enter 发送）` : '输入 @ 选择 worker…'}
                 className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent text-[13px] leading-6 text-zinc-200 outline-none placeholder:text-zinc-600" />
-              <button data-id="office-send" onClick={send} disabled={!canSend} className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white transition-colors disabled:cursor-not-allowed disabled:bg-white/[0.06] disabled:text-zinc-600 ${mode === 'broadcast' ? 'bg-amber-500/90 hover:bg-amber-400' : 'bg-sky-500/90 hover:bg-sky-400'}`}>{mode === 'broadcast' ? <Megaphone className="h-4 w-4" /> : <Send className="h-4 w-4" />}</button>
+              <button data-id="office-send" onClick={send} disabled={!canSend} className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl text-white transition-all disabled:cursor-not-allowed disabled:bg-white/[0.06] disabled:text-zinc-600 ${mode === 'broadcast' ? 'bg-amber-500 hover:bg-amber-400' : 'bg-sky-500 hover:bg-sky-400'} ${canSend ? 'shadow-lg' : ''}`}>{mode === 'broadcast' ? <Megaphone className="h-4 w-4" /> : <Send className="h-4 w-4" />}</button>
             </div>
           </div>
         </div>
       </aside>
 
-      {/* 右侧：可拖拽/缩放的画布 */}
-      <main data-id="office-canvas" className="relative min-w-0 flex-1 overflow-hidden bg-[#080808]"
-        style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px)', backgroundSize: `${24 * zoom}px ${24 * zoom}px`, backgroundPosition: `${pan.x}px ${pan.y}px` }}
+      {/* 右侧：画布 */}
+      <main data-id="office-canvas" className="relative min-w-0 flex-1 overflow-hidden bg-[#060608]"
+        style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.045) 1px, transparent 1px)', backgroundSize: `${26 * zoom}px ${26 * zoom}px`, backgroundPosition: `${pan.x}px ${pan.y}px` }}
         onPointerDown={onPointerDownBg} onWheel={onWheel}>
+        {/* 暗角增加纵深 */}
+        <div className="pointer-events-none absolute inset-0" style={{ boxShadow: 'inset 0 0 160px 40px rgba(0,0,0,0.55)' }} />
+
         <div data-id="office-canvas-layer" className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
           {workers.map((w) => (
-            <WorkerWindow key={w.id} w={w} selected={selectedId === w.id}
+            <WorkerWindow key={w.id} w={w} now={now} selected={selectedId === w.id} hovered={hoverId === w.id}
+              onHover={(h) => setHoverId((cur) => (h ? w.id : cur === w.id ? null : cur))}
               onMoveStart={(e) => startMove(e, w)} onResizeStart={(e) => startResize(e, w)} />
           ))}
         </div>
 
-        <div data-id="office-canvas-stats" className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 text-[11px] text-zinc-500">
-          <span className="rounded-md bg-white/[0.04] px-2 py-1">{workers.length} 个 worker</span>
-          <span className="rounded-md bg-white/[0.03] px-2 py-1 text-zinc-600">只显示 thinking + text · tool 结果不拉</span>
+        <div data-id="office-canvas-topbar" className="pointer-events-none absolute left-4 top-4 flex items-center gap-2 text-[11px]">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-2.5 py-1 text-zinc-300 backdrop-blur"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> 团队工作台 · 在线 {online}/{workers.length}</span>
+          <span className="rounded-full border border-white/[0.06] bg-black/30 px-2.5 py-1 text-zinc-600 backdrop-blur">仅 thinking + text · 不拉 tool 结果</span>
         </div>
+
         <div data-id="office-canvas-controls" className="absolute bottom-4 right-4 flex flex-col gap-1.5">
-          <button data-id="office-zoom-in" onClick={() => setZoom((z) => clamp(z * 1.15, Z_MIN, Z_MAX))} className="grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-[#141414] text-zinc-400 hover:text-zinc-100"><Plus className="h-4 w-4" /></button>
-          <button data-id="office-zoom-out" onClick={() => setZoom((z) => clamp(z / 1.15, Z_MIN, Z_MAX))} className="grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-[#141414] text-zinc-400 hover:text-zinc-100"><Minus className="h-4 w-4" /></button>
-          <button data-id="office-zoom-reset" onClick={() => { setPan({ x: 0, y: 0 }); setZoom(1); }} title="复位" className="grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-[#141414] text-zinc-400 hover:text-zinc-100"><Maximize2 className="h-4 w-4" /></button>
+          <button data-id="office-zoom-in" onClick={() => setZoom((z) => clamp(z * 1.15, Z_MIN, Z_MAX))} className="grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-[#16161a]/90 text-zinc-400 backdrop-blur transition-colors hover:text-zinc-100"><Plus className="h-4 w-4" /></button>
+          <button data-id="office-zoom-out" onClick={() => setZoom((z) => clamp(z / 1.15, Z_MIN, Z_MAX))} className="grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-[#16161a]/90 text-zinc-400 backdrop-blur transition-colors hover:text-zinc-100"><Minus className="h-4 w-4" /></button>
+          <button data-id="office-zoom-reset" onClick={() => { setPan({ x: 0, y: 0 }); setZoom(1); }} title="复位" className="grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-[#16161a]/90 text-zinc-400 backdrop-blur transition-colors hover:text-zinc-100"><Maximize2 className="h-4 w-4" /></button>
           <div className="text-center text-[10px] text-zinc-600">{Math.round(zoom * 100)}%</div>
         </div>
       </main>
@@ -253,61 +267,90 @@ export default function Office() {
 }
 
 function CommandMsg({ m, byId }: { m: ChatMsg; byId: Record<string, Worker> }) {
-  if (m.kind === 'note') return <div data-id={`office-msg-${m.id}`} className="text-center text-[11.5px] leading-relaxed text-zinc-600">{m.text}</div>;
+  if (m.kind === 'note') return <div data-id={`office-msg-${m.id}`} className="px-2 text-center text-[11.5px] leading-relaxed text-zinc-600">{m.text}</div>;
   if (m.kind === 'broadcast') return (
-    <div data-id={`office-msg-${m.id}`} className="rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-2.5 py-1.5 text-[12.5px] text-amber-50/90"><span className="mr-1 text-[11px] text-amber-300/80">📢 广播 · 全体</span><div className="whitespace-pre-wrap">{m.text}</div></div>
+    <div data-id={`office-msg-${m.id}`} className="overflow-hidden rounded-xl border border-amber-500/20 bg-amber-500/[0.06]">
+      <div className="flex items-center gap-1 border-b border-amber-500/15 px-2.5 py-1 text-[10.5px] text-amber-300/90"><Megaphone className="h-3 w-3" /> 广播 · 全体 <span className="ml-auto font-mono text-amber-300/50">{m.ts}</span></div>
+      <div className="px-2.5 py-1.5 text-[12.5px] leading-relaxed text-amber-50/90 whitespace-pre-wrap">{m.text}</div>
+    </div>
   );
   if (m.kind === 'dispatch') {
     const w = m.to ? byId[m.to] : null;
     return (
-      <div data-id={`office-msg-${m.id}`} className="flex flex-col items-end gap-0.5">
-        <div className="flex items-center gap-1 text-[11px] text-zinc-500"><AtSign className="h-3 w-3" /><span className="font-mono">{m.to}</span>{w && <span>{w.name}</span>}</div>
-        <div className="max-w-[88%] rounded-lg rounded-tr-sm bg-sky-500/15 px-2.5 py-1.5 text-[12.5px] text-sky-100 whitespace-pre-wrap">{m.text}</div>
+      <div data-id={`office-msg-${m.id}`} className="flex flex-col items-end gap-1">
+        <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">派给 {w && <Avatar emoji={w.emoji} accent={w.accent} size={16} />}<span className="text-zinc-400">{w?.name ?? m.to}</span></div>
+        <div className="max-w-[86%] rounded-2xl rounded-tr-md bg-sky-500/90 px-3 py-1.5 text-[12.5px] leading-relaxed text-white shadow-sm whitespace-pre-wrap">{m.text}</div>
       </div>
     );
   }
   const w = m.from ? byId[m.from] : null;
   return (
-    <div data-id={`office-msg-${m.id}`} className="flex items-center gap-1.5">
-      {w && <Avatar emoji={w.emoji} accent={w.accent} size={20} />}
-      <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/10 px-2 py-1 text-[12px] text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> {m.text}</span>
-      <span className="ml-auto text-[10px] text-zinc-700">{m.ts}</span>
+    <div data-id={`office-msg-${m.id}`} className="flex items-center gap-2">
+      {w && <Avatar emoji={w.emoji} accent={w.accent} size={22} status="done" />}
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] text-zinc-500">{w?.name ?? m.from}</div>
+        <div className="inline-flex items-center gap-1 text-[12px] text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> {m.text} <span className="text-zinc-600">· 待验收</span></div>
+      </div>
+      <span className="self-start font-mono text-[10px] text-zinc-700">{m.ts}</span>
     </div>
   );
 }
 
-function WorkerWindow({ w, selected, onMoveStart, onResizeStart }: {
-  w: Worker; selected: boolean; onMoveStart: (e: React.PointerEvent) => void; onResizeStart: (e: React.PointerEvent) => void;
+function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResizeStart }: {
+  w: Worker; now: number; selected: boolean; hovered: boolean;
+  onHover: (h: boolean) => void; onMoveStart: (e: React.PointerEvent) => void; onResizeStart: (e: React.PointerEvent) => void;
 }) {
   const acc = ACCENT[w.accent] ?? ACCENT.sky;
   const lines = w.script.slice(0, w.shown).slice(-12);
   const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => { const n = bodyRef.current; if (n) n.scrollTop = n.scrollHeight; }, [w.shown]);
+  const done = w.status === 'done';
+  const working = w.status === 'working';
 
   return (
     <div data-id={`office-window-${w.id}`}
-      className={`absolute flex flex-col overflow-hidden rounded-xl border bg-[#0e0e0e] shadow-xl ${selected ? `ring-2 ${acc.ring} border-transparent` : 'border-white/[0.08]'}`}
-      style={{ left: w.x, top: w.y, width: w.w, height: w.h, zIndex: selected ? 50 : 10 }}>
-      <div data-id={`office-window-header-${w.id}`} onPointerDown={onMoveStart} className="flex shrink-0 cursor-grab items-center gap-2 border-b border-white/[0.06] bg-white/[0.02] px-3 py-2 active:cursor-grabbing">
-        <Avatar emoji={w.emoji} accent={w.accent} size={30} />
-        <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium text-zinc-200">{w.name}</span><span className="font-mono text-[10.5px] text-zinc-500">{w.id} · {w.role}</span></span>
-        <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] ${acc.chip}`}>
-          {w.status === 'working' ? <Loader2 className="h-3 w-3 animate-spin" /> : w.status === 'done' ? <CheckCircle2 className="h-3 w-3" /> : <CircleDot className={`h-3 w-3 ${acc.dot}`} />}
-          {STATUS_META[w.status].label}
+      onPointerEnter={() => onHover(true)} onPointerLeave={() => onHover(false)}
+      className={`absolute flex flex-col overflow-hidden rounded-2xl border bg-[#0e0e11] transition-[box-shadow,transform,border-color] duration-150
+        ${selected ? `ring-2 ${acc.ring} border-transparent -translate-y-0.5 shadow-2xl` : hovered ? 'border-white/15 shadow-2xl' : 'border-white/[0.07] shadow-xl'}`}
+      style={{ left: w.x, top: w.y, width: w.w, height: w.h, zIndex: selected ? 60 : hovered ? 40 : 10 }}>
+      {/* 角色色条 */}
+      <div className={`h-[3px] w-full ${done ? 'bg-emerald-400/60' : acc.bar}`} />
+      <div data-id={`office-window-header-${w.id}`} onPointerDown={onMoveStart}
+        className={`flex shrink-0 cursor-grab items-center gap-2.5 px-3 py-2.5 active:cursor-grabbing ${done ? 'bg-emerald-500/[0.05]' : 'bg-white/[0.015]'}`}>
+        <Avatar emoji={w.emoji} accent={w.accent} size={32} status={w.status} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13px] font-semibold text-zinc-100">{w.name}</span>
+          <span className="font-mono text-[10.5px] text-zinc-500">{w.id} · {w.role}</span>
         </span>
+        {done ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10.5px] font-medium text-emerald-300"><CheckCircle2 className="h-3 w-3" /> 待验收</span>
+        ) : working ? (
+          <span className={`inline-flex items-center gap-1 text-[10.5px] ${acc.chip}`}><Loader2 className="h-3 w-3 animate-spin" /> {elapsed(w.startedAt, now)}</span>
+        ) : (
+          <span className="text-[10.5px] text-zinc-600">空闲</span>
+        )}
       </div>
-      <div ref={bodyRef} data-id={`office-window-body-${w.id}`} className="flex-1 space-y-1.5 overflow-auto px-3 py-2">
-        {lines.length === 0 ? <div className="text-[11.5px] text-zinc-600">待派活…</div> : lines.map((ln, i) => (
-          ln.t === 'thinking'
-            ? <div key={i} className="border-l-2 border-amber-300/25 pl-2 text-[11.5px] leading-relaxed text-amber-50/55">{ln.s}</div>
-            : <div key={i} className="text-[12px] leading-relaxed text-zinc-300">{ln.s}</div>
-        ))}
+      <div className="mx-3 h-px bg-white/[0.05]" />
+      <div ref={bodyRef} data-id={`office-window-body-${w.id}`} className="flex-1 space-y-2 overflow-auto px-3 py-2.5">
+        {lines.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center gap-1 text-zinc-700"><Inbox className="h-5 w-5" /><span className="text-[11px]">等待派活</span></div>
+        ) : lines.map((ln, i) => {
+          const isLast = i === lines.length - 1;
+          return ln.t === 'thinking' ? (
+            <div key={i} className="border-l-2 border-amber-300/25 pl-2 text-[11.5px] italic leading-relaxed text-amber-50/50">
+              {ln.s}{isLast && working && <span className="ml-0.5 animate-pulse text-amber-200/70">▍</span>}
+            </div>
+          ) : (
+            <div key={i} className="text-[12px] leading-relaxed text-zinc-300">
+              {ln.s}{isLast && working && <span className="ml-0.5 animate-pulse text-zinc-400">▍</span>}
+            </div>
+          );
+        })}
       </div>
-      {w.status === 'done' && <div className="shrink-0 border-t border-emerald-500/15 bg-emerald-500/[0.06] px-3 py-1 text-[10.5px] text-emerald-300/90">✅ work done · 等总控验收</div>}
-      {/* resize 角 */}
+      {/* resize 抓手：悬停/选中才显露 */}
       <div data-id={`office-window-resize-${w.id}`} onPointerDown={onResizeStart}
-        className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize"
-        style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(255,255,255,0.25) 50%)' }} />
+        className={`absolute bottom-1 right-1 h-3.5 w-3.5 cursor-nwse-resize rounded-sm transition-opacity ${hovered || selected ? 'opacity-100' : 'opacity-0'}`}
+        style={{ background: 'linear-gradient(135deg, transparent 45%, rgba(255,255,255,0.4) 45%, rgba(255,255,255,0.4) 55%, transparent 55%, transparent 70%, rgba(255,255,255,0.4) 70%, rgba(255,255,255,0.4) 80%, transparent 80%)' }} />
     </div>
   );
 }
