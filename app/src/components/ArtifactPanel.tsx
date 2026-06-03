@@ -16,6 +16,21 @@ import {
 // from the agent's exec_js channel. See app/src/lib/artifactBridge.ts.
 
 const BLANK = 'about:blank';
+const URL_KEY = 'cicy_artifact_url';
+
+// The last-opened artifact URL is persisted so it survives reloads/remounts.
+function loadStoredUrl(): string {
+  try {
+    const v = JSON.parse(localStorage.getItem(URL_KEY)!);
+    return typeof v === 'string' && v ? v : BLANK;
+  } catch { return BLANK; }
+}
+function storeUrl(u: string) {
+  try {
+    if (!u || u === BLANK) localStorage.removeItem(URL_KEY);
+    else localStorage.setItem(URL_KEY, JSON.stringify(u));
+  } catch { /* ignore */ }
+}
 
 // Preview viewport presets. `web` fills the host; the others constrain the
 // frame to a device-sized box so the loaded page renders at that viewport
@@ -60,8 +75,8 @@ interface Props {
 export default function ArtifactPanel({ active, requestActivate, className }: Props) {
   const { t } = useTranslation('workspace');
   const [electron] = useState(detectElectron);
-  const [url, setUrl] = useState<string>(BLANK);
-  const [inputUrl, setInputUrl] = useState<string>('');
+  const [url, setUrl] = useState<string>(loadStoredUrl);
+  const [inputUrl, setInputUrl] = useState<string>(() => { const u = loadStoredUrl(); return u === BLANK ? '' : u; });
   const [iframeKey, setIframeKey] = useState(0);
   const [preview, setPreviewState] = useState<PreviewMode>(loadPreview);
 
@@ -76,6 +91,7 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
     const next = normalizeUrl(raw);
     setUrl(next);
     setInputUrl(next === BLANK ? '' : next);
+    storeUrl(next);
     // Electron <webview> picks up the src change; for the iframe we also bump
     // the key so re-loading the *same* url forces a fresh mount.
     if (!electron) setIframeKey((k) => k + 1);
@@ -220,36 +236,59 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
           data-id="artifact-frame-stage"
           className={'absolute inset-0 ' + (dim ? 'flex items-start justify-center overflow-auto bg-[#0c0d10] p-3' : '')}
         >
-          <div
-            data-id="artifact-frame-viewport"
-            className={dim ? 'shrink-0 overflow-hidden rounded-lg border border-[var(--vsc-border)] bg-white shadow-lg' : 'h-full w-full'}
-            style={dim ? { width: dim.w, height: `min(${dim.h}px, 100%)`, maxWidth: '100%' } : undefined}
-          >
-            {frameEl}
-          </div>
+          {hasUrl && (
+            <div
+              data-id="artifact-frame-viewport"
+              className={dim ? 'shrink-0 overflow-hidden rounded-lg border border-[var(--vsc-border)] bg-white shadow-lg' : 'h-full w-full'}
+              style={dim ? { width: dim.w, height: `min(${dim.h}px, 100%)`, maxWidth: '100%' } : undefined}
+            >
+              {frameEl}
+            </div>
+          )}
         </div>
         {!hasUrl && (
-          <div data-id="artifact-empty" className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.08),transparent_45%),var(--vsc-bg)] px-6 text-center">
-            <div data-id="artifact-empty-icon" className="flex h-16 w-16 items-center justify-center rounded-2xl border border-[var(--vsc-border)] bg-white/[0.03] text-zinc-500 shadow-inner">
-              <Package className="h-8 w-8" />
-            </div>
-            <div data-id="artifact-empty-text" className="flex flex-col items-center gap-1.5">
-              <div data-id="artifact-empty-title" className="text-sm font-medium text-zinc-200">
-                {t('artifactEmptyTitle', 'Artifact preview')}
+          <div data-id="artifact-empty" className="absolute inset-0 z-20 flex items-center justify-center bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.08),transparent_45%),var(--vsc-bg)] p-6">
+            {/* A faux browser window standing in for where the artifact will
+                render — no real <webview>/<iframe> is mounted until a URL is set. */}
+            <div data-id="artifact-empty-mock" className="flex w-[min(560px,94%)] flex-col overflow-hidden rounded-xl border border-[var(--vsc-border)] bg-[#0e0f13] shadow-2xl">
+              <div data-id="artifact-empty-mock-bar" className="flex items-center gap-2 border-b border-[var(--vsc-border)] bg-white/[0.03] px-3 py-2">
+                <span data-id="artifact-empty-mock-dots" className="flex shrink-0 items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
+                </span>
+                <button
+                  data-id="artifact-empty-mock-address"
+                  type="button"
+                  onClick={focusUrlInput}
+                  className="ml-2 flex-1 truncate rounded-md border border-[var(--vsc-border)] bg-black/30 px-2.5 py-1 text-left text-[11px] text-zinc-500 transition-colors hover:border-zinc-500 hover:text-zinc-300"
+                >
+                  {t('artifactUrlPlaceholder', 'Enter a URL to open in the artifact frame')}
+                </button>
               </div>
-              <div data-id="artifact-empty-desc" className="max-w-[22rem] text-xs leading-relaxed text-zinc-500">
-                {t('artifactEmpty', 'No artifact open. Enter a URL above, or let an agent open one via the artifact skill.')}
+              <div data-id="artifact-empty-mock-body" className="flex flex-col items-center justify-center gap-4 px-6 py-12 text-center">
+                <div data-id="artifact-empty-icon" className="flex h-16 w-16 items-center justify-center rounded-2xl border border-[var(--vsc-border)] bg-white/[0.03] text-zinc-500 shadow-inner">
+                  <Package className="h-8 w-8" />
+                </div>
+                <div data-id="artifact-empty-text" className="flex flex-col items-center gap-1.5">
+                  <div data-id="artifact-empty-title" className="text-sm font-medium text-zinc-200">
+                    {t('artifactEmptyTitle', 'Artifact preview')}
+                  </div>
+                  <div data-id="artifact-empty-desc" className="max-w-[22rem] text-xs leading-relaxed text-zinc-500">
+                    {t('artifactEmpty', 'No artifact open. Enter a URL above, or let an agent open one via the artifact skill.')}
+                  </div>
+                </div>
+                <button
+                  data-id="artifact-empty-cta"
+                  type="button"
+                  onClick={focusUrlInput}
+                  className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-[var(--vsc-border)] bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100"
+                >
+                  <ArrowUp className="h-3.5 w-3.5" />
+                  {t('artifactEmptyCta', 'Enter a URL to open')}
+                </button>
               </div>
             </div>
-            <button
-              data-id="artifact-empty-cta"
-              type="button"
-              onClick={focusUrlInput}
-              className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-[var(--vsc-border)] bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100"
-            >
-              <ArrowUp className="h-3.5 w-3.5" />
-              {t('artifactEmptyCta', 'Enter a URL to open')}
-            </button>
           </div>
         )}
       </div>
