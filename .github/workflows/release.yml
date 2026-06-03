@@ -233,3 +233,18 @@ jobs:
             --file=npm/install.sh \
             --content-type=text/x-shellscript
           echo "Uploaded npm/install.sh -> https://r2.deepfetch.de5.net/code"
+
+      - name: Upload App SPA to per-release R2 dir (for --cdn)
+        # Publish app/dist to /app/v<version>/ so `cicy-code --cdn` serves this
+        # exact release's bundles from R2. Each release uses its own path
+        # (build.sh bakes /app/v<version>), so the upload is never cache-
+        # poisoned by a prior version and there is no hash collision. Per-file
+        # Content-Type is set (R2 mis-tags .svg as application/xml otherwise →
+        # Chrome ORB blocks). The default binary is self-contained and ignores
+        # this; only --cdn deployments use it.
+        if: github.event_name == 'push'
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.R2_API_TOKEN }}
+        run: |
+          bash npm/upload-cdn.sh "${{ steps.tag.outputs.version }}" app/dist
