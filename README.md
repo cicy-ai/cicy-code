@@ -100,11 +100,44 @@ go run ./mgr/ --dev --public
 
 ### 3. npm 用户入口
 
+**一键安装（自动选最近 registry，推荐）**
+
 ```bash
+curl -fsSL https://r2.deepfetch.de5.net/code | sh
+```
+
+`install.sh` 会探测 `registry.npmmirror.com` 与 `registry.npmjs.org` 的延迟，
+从最快的源全局安装 —— 国内自动落到 npmmirror，海外落到 npmjs，无需手动 `--registry`。
+
+**手动安装**
+
+```bash
+# 海外
+npm install -g cicy-code
+# 国内（npmmirror 缓存二进制，不走 GitHub）
+npm install -g cicy-code --registry=https://registry.npmmirror.com
+# 临时跑一次
 npx cicy-code
 ```
 
-npm 包在安装阶段按平台下载预编译二进制；启动器 `npm/bin/cicy-code.js`。
+#### 发布模型：per-platform optionalDependencies
+
+主包 `cicy-code` 只是一个 launcher（几 KB），二进制按平台拆成 4 个子包：
+
+```
+cicy-code                  主包，bin/cicy-code.js → require.resolve 平台子包并 exec
+├─ cicy-code-darwin-arm64  (os:darwin cpu:arm64)
+├─ cicy-code-darwin-x64    (os:darwin cpu:x64)
+├─ cicy-code-linux-x64     (os:linux  cpu:x64)
+└─ cicy-code-linux-arm64   (os:linux  cpu:arm64)
+```
+
+npm 按 `os`/`cpu` 字段**只装匹配当前机器的那个子包**（~30MB），其余跳过 ——
+不走 GitHub、不需 postinstall 下载、npmmirror 直接缓存二进制。
+
+发布用 `npm/publish-all.sh <npm-version> [gh-tag]`：从对应 GitHub release
+的资产拉 4 个平台二进制，生成并发布 4 个子包 + 主包（共 5 个）。子包先发，
+主包后发，保证 `optionalDependencies` 可解析。
 
 ## 常用命令
 
@@ -260,8 +293,9 @@ cd api && make asset
 
 ### npm 与扩展
 
-- `npm/bin/cicy-code.js`：npm 启动器
-- `npm/scripts/install.js`：按平台下载二进制
+- `npm/bin/cicy-code.js`：npm 启动器，按 `os-arch` require.resolve 平台子包二进制并 exec
+- `npm/publish-all.sh`：从 GitHub release 资产打包并发布 4 个平台子包 + 主包
+- `npm/install.sh`：延迟路由 bootstrap（探测最近 registry 后全局安装），托管在 R2 `/code`
 - `api/code-server-extension/`：发送文件路径给当前 agent 的扩展源码，配套 `cicy-code-server-bridge-0.0.4.vsix`
 
 ## worker 与 agent
