@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   X, Search, Check, Plus, LayoutGrid, Code2, PenTool, BarChart3, Megaphone,
-  ShoppingCart, Palette, Briefcase, Headphones, Store, Users, Sparkles,
+  ShoppingCart, Palette, Briefcase, Headphones, Store, Users, Sparkles, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 
 /*
@@ -158,13 +158,15 @@ const TEAMS: TeamTmpl[] = [
 ];
 
 export default function TemplateMarket({ open, onClose, onPick, onPickTeam }: {
-  open: boolean; onClose: () => void; onPick: (t: MarketTmpl) => void; onPickTeam: (t: TeamTmpl) => void;
+  open: 'team' | 'agent' | null; onClose: () => void; onPick: (t: MarketTmpl) => void; onPickTeam: (t: TeamTmpl) => void;
 }) {
   const [view, setView] = useState<'team' | 'agent'>('team');
   const [cat, setCat] = useState('all');
   const [q, setQ] = useState('');
   const [added, setAdded] = useState<Set<string>>(new Set());
   const [builtTeams, setBuiltTeams] = useState<Set<string>>(new Set());
+  const [previewKey, setPreviewKey] = useState<string | null>(null);
+  useEffect(() => { if (open) { setView(open); setCat('all'); setQ(''); setPreviewKey(null); } }, [open]);
 
   const cats = view === 'team' ? TEAM_CATS : AGENT_CATS;
   const counts = useMemo(() => {
@@ -184,9 +186,10 @@ export default function TemplateMarket({ open, onClose, onPick, onPickTeam }: {
   }, [cat, q]);
 
   if (!open) return null;
-  const switchView = (v: 'team' | 'agent') => { setView(v); setCat('all'); setQ(''); };
+  const switchView = (v: 'team' | 'agent') => { setView(v); setCat('all'); setQ(''); setPreviewKey(null); };
   const pickAgent = (t: MarketTmpl) => { onPick(t); setAdded((s) => new Set(s).add(t.key)); };
   const buildTeam = (t: TeamTmpl) => { onPickTeam(t); setBuiltTeams((s) => new Set(s).add(t.key)); };
+  const previewTeam = previewKey ? TEAMS.find((t) => t.key === previewKey) || null : null;
 
   return (
     <div data-id="template-market" className="absolute inset-0 z-[200] flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm" onPointerDown={onClose}>
@@ -226,37 +229,59 @@ export default function TemplateMarket({ open, onClose, onPick, onPickTeam }: {
           </header>
 
           {view === 'team' ? (
+            previewTeam ? (
+              <div data-id="market-team-detail" className="flex-1 overflow-auto px-6 py-5">
+                <button data-id="market-team-back" onClick={() => setPreviewKey(null)} className="mb-4 inline-flex items-center gap-1 text-[12.5px] text-zinc-400 transition-colors hover:text-zinc-100"><ChevronLeft className="h-4 w-4" /> 返回团队</button>
+                <div className={`mb-5 flex items-center gap-4 rounded-2xl bg-gradient-to-r ${COVER[previewTeam.accent] ?? COVER.sky} p-5`}>
+                  <span className={`grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-gradient-to-br ${GRAD[previewTeam.accent] ?? GRAD.sky} text-3xl ring-1 ring-white/15`}>{previewTeam.emoji}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[18px] font-semibold text-zinc-50">{previewTeam.name}</div>
+                    <div className="mb-1 flex items-center gap-2 text-[12px] text-zinc-400">{previewTeam.members.length} 名成员 {previewTeam.tags.map((tag) => <span key={tag} className="rounded-md bg-white/10 px-1.5 py-0.5 text-[10.5px]">{tag}</span>)}</div>
+                    <p className="text-[12.5px] leading-relaxed text-zinc-300">{previewTeam.desc}</p>
+                  </div>
+                </div>
+                <div className="mb-2.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-500"><Users className="h-3 w-3" /> 阵容预览</div>
+                <div className="mb-6 grid gap-2.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(264px, 1fr))' }}>
+                  {previewTeam.members.map((mm, i) => (
+                    <div key={i} data-id={`market-member-${i}`} className="flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-[#101014] px-3 py-2.5">
+                      <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br ${GRAD[mm.accent] ?? GRAD.sky} text-lg ring-1 ring-white/10`}>{mm.emoji}</span>
+                      <div className="min-w-0 flex-1"><div className="truncate text-[13px] font-medium text-zinc-100">{mm.name}</div><div className="truncate font-mono text-[11px] text-zinc-500">{mm.role}</div></div>
+                      <span className="truncate rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-[10px] text-zinc-500" title={`默认模型 ${mm.model}`}>{mm.model}</span>
+                    </div>
+                  ))}
+                </div>
+                <button data-id={`market-build-${previewTeam.key}`} onClick={() => buildTeam(previewTeam)} className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-5 py-2.5 text-[13.5px] font-medium transition-colors ${builtTeams.has(previewTeam.key) ? 'bg-emerald-500/15 text-emerald-300' : 'bg-sky-500 text-white hover:bg-sky-400'}`}>
+                  {builtTeams.has(previewTeam.key) ? <><Check className="h-4 w-4" /> 已组建（可再次组建）</> : <><Users className="h-4 w-4" /> 组建团队 · {previewTeam.members.length} 人加入办公室</>}
+                </button>
+              </div>
+            ) : (
             <div data-id="market-team-grid" className="flex-1 overflow-auto px-6 py-5">
               {teams.length === 0 ? <div className="grid h-full place-items-center text-[13px] text-zinc-600">没有匹配的团队</div> : (
                 <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}>
-                  {teams.map((t) => {
-                    const built = builtTeams.has(t.key);
-                    return (
-                      <div key={t.key} data-id={`market-team-${t.key}`} className="group flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#101014] transition-colors hover:border-white/20">
-                        <div className={`relative flex h-20 items-center gap-3 bg-gradient-to-r ${COVER[t.accent] ?? COVER.sky} px-4`}>
-                          <span className={`grid h-12 w-12 place-items-center rounded-xl bg-gradient-to-br ${GRAD[t.accent] ?? GRAD.sky} text-2xl ring-1 ring-white/15`}>{t.emoji}</span>
-                          <div className="min-w-0"><div className="truncate text-[15px] font-semibold text-zinc-50">{t.name}</div><div className="text-[11px] text-zinc-400">{t.members.length} 名成员</div></div>
-                        </div>
-                        <div className="flex flex-1 flex-col px-4 pb-3.5 pt-3">
-                          <p className="mb-3 line-clamp-2 min-h-[34px] text-[12px] leading-relaxed text-zinc-400">{t.desc}</p>
-                          <div className="mb-3 flex items-center">
-                            <div className="flex">
-                              {t.members.slice(0, 6).map((mm, i) => (
-                                <span key={i} title={`${mm.name} · ${mm.role}`} className={`grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br ${GRAD[mm.accent] ?? GRAD.sky} text-sm ring-2 ring-[#101014] ${i > 0 ? '-ml-2' : ''}`}>{mm.emoji}</span>
-                              ))}
-                            </div>
-                            <div className="ml-2 flex flex-wrap gap-1">{t.tags.map((tag) => <span key={tag} className="rounded-md bg-white/[0.05] px-1.5 py-0.5 text-[10.5px] text-zinc-500">{tag}</span>)}</div>
+                  {teams.map((t) => (
+                    <button key={t.key} data-id={`market-team-${t.key}`} onClick={() => setPreviewKey(t.key)} className="group flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#101014] text-left transition-colors hover:border-white/20">
+                      <div className={`relative flex h-20 items-center gap-3 bg-gradient-to-r ${COVER[t.accent] ?? COVER.sky} px-4`}>
+                        <span className={`grid h-12 w-12 place-items-center rounded-xl bg-gradient-to-br ${GRAD[t.accent] ?? GRAD.sky} text-2xl ring-1 ring-white/15`}>{t.emoji}</span>
+                        <div className="min-w-0"><div className="truncate text-[15px] font-semibold text-zinc-50">{t.name}</div><div className="text-[11px] text-zinc-400">{t.members.length} 名成员</div></div>
+                        <ChevronRight className="ml-auto h-4 w-4 text-zinc-400" />
+                      </div>
+                      <div className="flex flex-1 flex-col px-4 pb-3.5 pt-3">
+                        <p className="mb-3 line-clamp-2 min-h-[34px] text-[12px] leading-relaxed text-zinc-400">{t.desc}</p>
+                        <div className="flex items-center">
+                          <div className="flex">
+                            {t.members.slice(0, 6).map((mm, i) => (
+                              <span key={i} title={`${mm.name} · ${mm.role}`} className={`grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br ${GRAD[mm.accent] ?? GRAD.sky} text-sm ring-2 ring-[#101014] ${i > 0 ? '-ml-2' : ''}`}>{mm.emoji}</span>
+                            ))}
                           </div>
-                          <button data-id={`market-build-${t.key}`} onClick={() => buildTeam(t)} className={`mt-auto inline-flex w-full items-center justify-center gap-1.5 rounded-xl py-2 text-[13px] font-medium transition-colors ${built ? 'bg-emerald-500/15 text-emerald-300' : 'bg-sky-500 text-white hover:bg-sky-400'}`}>
-                            {built ? <><Check className="h-4 w-4" /> 已组建（可再建）</> : <><Users className="h-4 w-4" /> 一键组建团队</>}
-                          </button>
+                          <span className="ml-auto text-[11px] text-sky-300">查看阵容 ›</span>
                         </div>
                       </div>
-                    );
-                  })}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
+            )
           ) : (
             <div data-id="market-grid" className="flex-1 overflow-auto px-6 py-5">
               {agents.length === 0 ? <div className="grid h-full place-items-center text-[13px] text-zinc-600">没有匹配的模版</div> : (

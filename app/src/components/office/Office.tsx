@@ -131,7 +131,7 @@ export default function Office() {
   ]);
   const [candidates, setCandidates] = useState<Cand[]>(INIT_CANDIDATES);
   const [rosterOpen, setRosterOpen] = useState(true);
-  const [marketOpen, setMarketOpen] = useState(false);
+  const [market, setMarket] = useState<'team' | 'agent' | null>(null);
   const idSeq = useRef(20);
   const seq = useRef(2);
   const chatRef = useRef<HTMLDivElement>(null);
@@ -331,15 +331,20 @@ export default function Office() {
                 </div>
               )}
             </section>
-            <button data-id="office-open-market" onClick={() => setMarketOpen(true)}
-              className="flex w-full items-center gap-3 rounded-xl border border-sky-400/20 bg-sky-500/10 px-3 py-3 text-left transition-colors hover:border-sky-400/40 hover:bg-sky-500/15">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-sky-500/20 text-sky-300"><Store className="h-5 w-5" /></span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[13px] font-medium text-zinc-100">Agent 模版市场</span>
-                <span className="block text-[11px] text-zinc-500">浏览各行各业的预置 agent</span>
-              </span>
-              <ChevronRight className="h-4 w-4 text-zinc-500" />
-            </button>
+            <div className="space-y-2">
+              <button data-id="office-open-team-market" onClick={() => setMarket('team')}
+                className="flex w-full items-center gap-3 rounded-xl border border-sky-400/20 bg-sky-500/10 px-3 py-3 text-left transition-colors hover:border-sky-400/40 hover:bg-sky-500/15">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-sky-500/20 text-sky-300"><Users className="h-5 w-5" /></span>
+                <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-zinc-100">团队市场</span><span className="block text-[11px] text-zinc-500">一键组建整支班子</span></span>
+                <ChevronRight className="h-4 w-4 text-zinc-500" />
+              </button>
+              <button data-id="office-open-agent-market" onClick={() => setMarket('agent')}
+                className="flex w-full items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-3 text-left transition-colors hover:border-white/15 hover:bg-white/[0.05]">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-zinc-300"><Store className="h-5 w-5" /></span>
+                <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-zinc-100">Agent 市场</span><span className="block text-[11px] text-zinc-500">各行各业单个 agent 模版</span></span>
+                <ChevronRight className="h-4 w-4 text-zinc-500" />
+              </button>
+            </div>
           </div>
         </aside>
       ) : (
@@ -348,7 +353,7 @@ export default function Office() {
           style={{ writingMode: 'vertical-rl' }}><Users className="h-3.5 w-3.5" /> 成员库</button>
       )}
 
-      <TemplateMarket open={marketOpen} onClose={() => setMarketOpen(false)} onPick={pickFromMarket} onPickTeam={pickTeam} />
+      <TemplateMarket open={market} onClose={() => setMarket(null)} onPick={pickFromMarket} onPickTeam={pickTeam} />
     </div>
   );
 }
