@@ -28,6 +28,8 @@
   "artifactPreviewWeb": "ウェブ",
   "artifactPreviewPortal": "ポータル",
   "artifactPreviewMobile": "モバイル",
+  "artifactEmptyTitle": "成果物プレビュー",
+  "artifactEmptyCta": "URL を入力して開く",
   "artifactEmpty": "成果物がありません。上に URL を入力するか、エージェントが artifact skill で開きます。",
   "filesPaneTitle": "ファイル",
   "filesConnecting": "接続中…",
