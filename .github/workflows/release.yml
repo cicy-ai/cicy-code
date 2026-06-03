@@ -82,54 +82,12 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      # ── Docker images ─────────────────────────────────────────────────
-      # Push to Docker Hub. CN users pull through any of the public
-      # dockerhub mirrors (dockerproxy.com, daocloud, etc) — pulls in MM/CN
-      # are 30-60s vs 5+ min from ghcr.io.
-      #
-      # Required:
-      #   vars.DOCKERHUB_USERNAME    e.g. cicybot
-      #   secrets.DOCKERHUB_TOKEN    PAT from hub.docker.com → Security
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build & push cicy-code-base
-        env:
-          BASE_TAG: 1.0.9
-          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
-        run: |
-          set -e
-          docker build -f api/Dockerfile.runtime.base \
-            -t cicy-code-base:${BASE_TAG} \
-            api/
-          for tag in ${BASE_TAG} latest; do
-            docker tag cicy-code-base:${BASE_TAG} docker.io/$DOCKERHUB_USERNAME/cicy-code-base:$tag
-            docker push docker.io/$DOCKERHUB_USERNAME/cicy-code-base:$tag
-          done
-
-      - name: Build & push cicy-code (runtime)
-        env:
-          VERSION: ${{ steps.tag.outputs.version }}
-          BASE_TAG: 1.0.9
-          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
-        run: |
-          set -e
-          cp dist/cicy-code-linux-amd64 api/cicy-code-docker
-          docker build -f api/Dockerfile.runtime \
-            --build-arg BASE_IMAGE=docker.io/$DOCKERHUB_USERNAME/cicy-code-base:${BASE_TAG} \
-            -t cicy-code:${VERSION} \
-            api/
-          rm -f api/cicy-code-docker
-          for tag in ${VERSION} latest; do
-            docker tag cicy-code:${VERSION} docker.io/$DOCKERHUB_USERNAME/cicy-code:$tag
-            docker push docker.io/$DOCKERHUB_USERNAME/cicy-code:$tag
-          done
+      # Docker images are NOT built here anymore. The image is now a stable
+      # base environment (installs cicy-code from npm at startup — no baked
+      # binary), so it only changes when the Dockerfile / base deps change.
+      # It's built + pushed + saved-to-R2 by .github/workflows/docker-image.yml
+      # (triggered on api/Dockerfile* / docker-entrypoint.sh changes), NOT on
+      # every release.
 
       - name: Generate release manifest
         # manifest.json is the canonical source the cicy-desktop installer

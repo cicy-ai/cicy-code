@@ -1,0 +1,82 @@
+name: Docker base image
+
+# The cicy-code Docker image is a STABLE base environment: it installs
+# cicy-code from npm at startup (docker-entrypoint.sh) instead of baking a
+# per-version binary. So it only needs rebuilding when the Dockerfile / base
+# deps / entrypoint change — NOT on every cicy-code release. This workflow is
+# therefore decoupled from release.yml and triggers only on those paths.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/Dockerfile.runtime'
+      - 'api/Dockerfile.runtime.base'
+      - 'api/docker-entrypoint.sh'
+      - 'npm/publish-docker.sh'
+      - 'npm/docker/load.sh'
+      - '.github/workflows/docker-image.yml'
+  workflow_dispatch:
+    inputs:
+      base_tag:
+        description: 'Base-env image tag (e.g. 1.1.0)'
+        required: false
+        default: '1.1.0'
+
+env:
+  BASE_TAG: ${{ github.event.inputs.base_tag || '1.1.0' }}
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        # vars.DOCKERHUB_USERNAME (e.g. cicybot) + secrets.DOCKERHUB_TOKEN
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & push cicy-code-base
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+        run: |
+          set -e
+          docker build -f api/Dockerfile.runtime.base -t cicy-code-base:${BASE_TAG} api/
+          for tag in ${BASE_TAG} latest; do
+            docker tag cicy-code-base:${BASE_TAG} docker.io/$DOCKERHUB_USERNAME/cicy-code-base:$tag
+            docker push docker.io/$DOCKERHUB_USERNAME/cicy-code-base:$tag
+          done
+
+      - name: Build & push cicy-code (base env, npx-installs cicy-code at runtime)
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+        run: |
+          set -e
+          # No binary COPY — the entrypoint installs cicy-code from npm.
+          docker build -f api/Dockerfile.runtime \
+            --build-arg BASE_IMAGE=docker.io/$DOCKERHUB_USERNAME/cicy-code-base:${BASE_TAG} \
+            -t cicy-code:${BASE_TAG} api/
+          for tag in ${BASE_TAG} latest; do
+            docker tag cicy-code:${BASE_TAG} docker.io/$DOCKERHUB_USERNAME/cicy-code:$tag
+            docker push docker.io/$DOCKERHUB_USERNAME/cicy-code:$tag
+          done
+
+      - name: Save image to R2 (CN-friendly docker load)
+        # docker save | gzip -> R2 /docker/cicy-code-<base_tag>.tar.gz + latest +
+        # load.sh, so CN users `curl …/docker/load.sh | sh` without Docker Hub.
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.R2_API_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+        run: |
+          bash npm/publish-docker.sh "${BASE_TAG}" "docker.io/$DOCKERHUB_USERNAME/cicy-code:${BASE_TAG}"
