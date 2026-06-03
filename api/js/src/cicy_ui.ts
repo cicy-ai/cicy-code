@@ -149,6 +149,8 @@ body {
    untouched; !important overrides the inline width xterm sets via JS. */
 .xterm .xterm-scrollable-element > .scrollbar.vertical,
 .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider { width: 5px !important; }
+/* Hide the xterm scrollbar thumb entirely. */
+.slider { display: none !important; }
 .xterm-overlay { display: none !important; }
 .xterm-reconnect-overlay div:not(.xterm-reconnect-spinner) { display: none !important; }
 .xterm-reconnect-overlay button { display: block !important; }

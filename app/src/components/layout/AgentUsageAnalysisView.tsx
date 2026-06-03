@@ -94,6 +94,18 @@ function fmtGap(sec?: number): string {
   if (sec < 3600) return `${Math.round(sec / 60)}m`;
   return `${(sec / 3600).toFixed(1)}h`;
 }
+// "updated N ago" for the live header indicator. `ms` = elapsed since the last
+// real change; ticks every second from the poll loop.
+function fmtAgo(ms: number, t: (k: string, d?: any) => string): string {
+  const s = Math.floor(ms / 1000);
+  if (s < 1) return t('anUpdatedNow', '刚刚更新');
+  let rel: string;
+  if (s < 60) rel = `${s}s`;
+  else if (s < 3600) rel = `${Math.floor(s / 60)}m`;
+  else if (s < 86400) rel = `${Math.floor(s / 3600)}h`;
+  else rel = `${Math.floor(s / 86400)}d`;
+  return t('anUpdatedAgo', { defaultValue: '更新于 {{rel}} 前', rel });
+}
 function diagChangedLabel(c: string, t: (k: string, d?: string) => string): string {
   if (c === 'system') return t('anDiagSystem', 'system 变');
   if (c === 'tools') return t('anDiagTools', 'tools 变');
@@ -238,13 +250,33 @@ export default function AgentUsageAnalysisView({ paneId, active }: { paneId: str
   const [data, setData] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(false);
   const loadedRef = useRef(false);
+  // When the usage numbers last actually changed (not just re-fetched), so the
+  // header can show a live "updated Ns ago". `nowTick` forces a re-render each
+  // second so that relative time keeps ticking even when nothing changes.
+  const [changedAt, setChangedAt] = useState<number | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const lastSigRef = useRef('');
 
   const refresh = useCallback(async (silent = false) => {
     if (!paneId) return;
     if (!silent) setLoading(true);
     try {
       const { data: next } = await apiService.getAgentUsageAnalysis(paneId);
-      setData(next || null);
+      // Mid-update the analysis can transiently be empty: reply.json not yet
+      // written, current.json missing between requests, or tokens still 0. Only
+      // commit a snapshot that actually has usage — otherwise keep the last good
+      // one on screen rather than blanking / zeroing it out.
+      if (next && next.kpis && Number(next.kpis.total_tokens || 0) > 0) {
+        // Stamp "updated" only when the numbers actually moved, so the "Ns ago"
+        // reflects real activity rather than every silent poll.
+        const k = next.kpis as any;
+        const sig = `${next.model || ''}|${k.total_tokens || 0}|${k.input_tokens || 0}|${k.output_tokens || 0}|${k.turn_requests || 0}|${k.cost_credit || 0}`;
+        if (sig !== lastSigRef.current) {
+          lastSigRef.current = sig;
+          setChangedAt(Date.now());
+        }
+        setData(next);
+      }
     } catch {
       /* keep last good */
     } finally {
@@ -253,16 +285,19 @@ export default function AgentUsageAnalysisView({ paneId, active }: { paneId: str
     }
   }, [paneId]);
 
-  useEffect(() => { loadedRef.current = false; setData(null); }, [paneId]);
+  useEffect(() => { loadedRef.current = false; setData(null); setChangedAt(null); lastSigRef.current = ''; }, [paneId]);
   useEffect(() => { if (active && paneId) refresh(); }, [active, paneId, refresh]);
 
   // Auto-refresh once per second while the view is active. Silent so the data
   // updates live without the spinner flickering or blanking on transient errors.
+  // The same tick advances `nowTick` so the "updated Ns ago" label stays live.
   useEffect(() => {
     if (!active || !paneId) return;
-    const id = window.setInterval(() => { refresh(true); }, 1000);
+    const id = window.setInterval(() => { refresh(true); setNowTick(Date.now()); }, 1000);
     return () => window.clearInterval(id);
   }, [active, paneId, refresh]);
+
+  const updatedAgo = changedAt == null ? '' : fmtAgo(Math.max(0, nowTick - changedAt), t);
 
   const k = data?.kpis;
   const segments = data?.breakdown?.segments || [];
@@ -292,6 +327,11 @@ export default function AgentUsageAnalysisView({ paneId, active }: { paneId: str
         {k?.turn_requests && k.turn_requests > 0 ? (
           <span data-id="agent-usage-analysis-turnreqs" className="text-[11px] text-zinc-500" title={t('anTurnScope', '统计口径：最近一轮（一次用户提问触发的全部请求）')}>
             {t('anTurnLabel', '本轮')} · {k.turn_requests} {t('anTurnReqs', '次请求')}
+          </span>
+        ) : null}
+        {updatedAgo ? (
+          <span data-id="agent-usage-analysis-updated-ago" className="ml-auto text-[11px] text-zinc-500 tabular-nums" title={changedAt ? new Date(changedAt).toLocaleString() : undefined}>
+            {updatedAgo}
           </span>
         ) : null}
         <button

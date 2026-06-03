@@ -227,6 +227,32 @@ func (d *DB) Migrate() {
 			updated_at TEXT DEFAULT (datetime('now'))
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_im_accounts_bound ON im_accounts(bound_pane_id)`,
+		// Per-AI-request usage, one row per completed gateway request. Replaces the
+		// per-agent usage.jsonl files so usage can be aggregated across ALL agents.
+		`CREATE TABLE IF NOT EXISTS usage_log (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			pane_id TEXT NOT NULL,
+			ts TEXT NOT NULL,
+			conversation_id TEXT DEFAULT '',
+			turn_id TEXT DEFAULT '',
+			request_id TEXT DEFAULT '',
+			provider TEXT DEFAULT '',
+			model TEXT DEFAULT '',
+			status TEXT DEFAULT '',
+			status_code INTEGER DEFAULT 0,
+			reply_start_ms INTEGER DEFAULT 0,
+			latency_ms INTEGER DEFAULT 0,
+			input_tokens INTEGER DEFAULT 0,
+			output_tokens INTEGER DEFAULT 0,
+			cache_read_input_tokens INTEGER DEFAULT 0,
+			cache_creation_input_tokens INTEGER DEFAULT 0,
+			total_tokens INTEGER DEFAULT 0,
+			cost_credit REAL DEFAULT 0,
+			created_at TEXT DEFAULT (datetime('now'))
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_log_pane ON usage_log(pane_id, id)`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_log_ts ON usage_log(ts)`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_log_model ON usage_log(model)`,
 		fmt.Sprintf("INSERT OR IGNORE INTO global_vars (key_name, value) VALUES ('worker_index', '%d')", defaultWorkerIndex),
 	}
 	for _, s := range stmts {
