@@ -59,11 +59,14 @@ sync_npmmirror() {
   local pkg="$1" want="$2"
   [ -n "$DRY" ] && { echo "    [dry-run] would sync $pkg on npmmirror"; return 0; }
   curl -s --max-time 20 -X PUT "$MIRROR/-/package/$pkg/syncs" >/dev/null 2>&1 || true
+  # Success = the exact version is installable on npmmirror (its tarball is
+  # mirrored). We poll the version endpoint, NOT dist-tags.latest: npmmirror
+  # syncs versions quickly but its `latest` tag lags behind by minutes, so a
+  # tag check would false-negative even though `npm i pkg@want` already works.
   for _ in $(seq 1 12); do
-    sleep 10
-    cur=$(curl -s --max-time 10 -H 'Accept: application/vnd.npm.install-v1+json' "$MIRROR/$pkg" \
-      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s)["dist-tags"].latest)}catch{console.log("?")}})' 2>/dev/null || echo "?")
-    if [ "$cur" = "$want" ]; then echo "    ✓ npmmirror synced $pkg@$want"; return 0; fi
+    sleep 8
+    code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' "$MIRROR/$pkg/$want" 2>/dev/null || echo 000)
+    if [ "$code" = "200" ]; then echo "    ✓ npmmirror has $pkg@$want (installable)"; return 0; fi
   done
   echo "    ! npmmirror sync for $pkg@$want still pending (will catch up on its own)"
 }
