@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2, Send, Megaphone, AtSign, X, Loader2, CheckCircle2, MessageSquare,
-  Plus, Minus, Maximize2, Crown, Inbox, UserPlus, Sparkles, ChevronRight, Power, Users, Store,
+  Plus, Minus, Maximize2, Crown, Inbox, UserPlus, ChevronRight, Power, Users, Store,
 } from 'lucide-react';
 import TemplateMarket, { MarketTmpl } from './TemplateMarket';
 
@@ -95,8 +95,6 @@ function Avatar({ emoji, accent, size = 30, status }: { emoji: string; accent: s
 
 /* ── 候选成员（存在但未加入/未开启 = 离线）── */
 interface Cand { id: string; name: string; role: string; emoji: string; accent: string; model: string; script: Line[] }
-/* ── 模版成员（我们提供的角色预设，点击按模版创建新成员）── */
-interface Tmpl { key: string; name: string; role: string; emoji: string; accent: string; model: string; script: Line[] }
 
 const GENERIC_SCRIPT: Line[] = [
   { t: 'thinking', s: '读取任务卡与验收标准…' },
@@ -109,15 +107,6 @@ const INIT_CANDIDATES: Cand[] = [
   { id: 'w-10015', name: '文案 Wendy', role: 'writer', emoji: '✍️', accent: 'violet', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
   { id: 'w-10016', name: '数据 Dана', role: 'analyst', emoji: '📊', accent: 'sky', model: 'gpt-5.5', script: GENERIC_SCRIPT },
   { id: 'w-10017', name: '设计 Deo', role: 'designer', emoji: '🎭', accent: 'rose', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
-];
-
-const TEMPLATES: Tmpl[] = [
-  { key: 'arch', name: '架构师', role: 'dev-senior', emoji: '🏛️', accent: 'sky', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
-  { key: 'be', name: '后端开发', role: 'dev', emoji: '🛠️', accent: 'violet', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
-  { key: 'fe', name: '前端开发', role: 'dev-junior', emoji: '🎨', accent: 'violet', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
-  { key: 'qa', name: '测试', role: 'qa', emoji: '🧪', accent: 'emerald', model: 'gpt-5.5', script: GENERIC_SCRIPT },
-  { key: 'ops', name: '运维', role: 'ops', emoji: '🚀', accent: 'amber', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
-  { key: 'sec', name: '安全', role: 'reviewer', emoji: '🛡️', accent: 'rose', model: 'claude-haiku-4-5', script: GENERIC_SCRIPT },
 ];
 
 function makeWorker(id: string, name: string, role: string, emoji: string, accent: string, model: string, slot: number, script: Line[]): Worker {
@@ -232,7 +221,6 @@ export default function Office() {
     setWorkers((prev) => [...prev, makeWorker(id, name, role, emoji, accent, model, prev.length, GENERIC_SCRIPT)]);
     push({ kind: 'note', text: `${note} ${id}` });
   };
-  const createFromTemplate = (t: Tmpl) => spawn(t.name, t.role, t.emoji, t.accent, t.model, `已按模版「${t.name}」创建`);
   const pickFromMarket = (t: MarketTmpl) => spawn(t.name, t.role, t.emoji, t.accent, t.model, `已从模版市场添加「${t.name}」`);
   const canSend = text.trim() && (mode === 'broadcast' || !!target);
 
@@ -338,21 +326,15 @@ export default function Office() {
                 </div>
               )}
             </section>
-            <section data-id="office-roster-templates">
-              <div className="mb-2 flex items-center gap-1.5 px-1 text-[11px] font-medium uppercase tracking-wide text-zinc-600">
-                <Sparkles className="h-3 w-3" /> 模版
-                <button data-id="office-open-market" onClick={() => setMarketOpen(true)} className="ml-auto inline-flex items-center gap-1 rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[10.5px] normal-case text-sky-300 transition-colors hover:bg-sky-500/25"><Store className="h-3 w-3" /> 模版市场</button>
-              </div>
-              <div className="space-y-1.5">
-                {TEMPLATES.map((t) => (
-                  <div key={t.key} data-id={`office-tmpl-${t.key}`} className="flex items-center gap-2.5 rounded-xl border border-dashed border-white/[0.09] bg-white/[0.015] px-2.5 py-2">
-                    <Avatar emoji={t.emoji} accent={t.accent} size={28} />
-                    <span className="min-w-0 flex-1"><span className="block truncate text-[12.5px] text-zinc-300">{t.name}</span><span className="block truncate text-[10.5px] text-zinc-600">{t.role}</span></span>
-                    <button data-id={`office-tmpl-create-${t.key}`} onClick={() => createFromTemplate(t)} className="inline-flex items-center gap-1 rounded-lg bg-sky-500/15 px-2 py-1 text-[11.5px] text-sky-300 transition-colors hover:bg-sky-500/25"><Plus className="h-3.5 w-3.5" /> 创建</button>
-                  </div>
-                ))}
-              </div>
-            </section>
+            <button data-id="office-open-market" onClick={() => setMarketOpen(true)}
+              className="flex w-full items-center gap-3 rounded-xl border border-sky-400/20 bg-sky-500/10 px-3 py-3 text-left transition-colors hover:border-sky-400/40 hover:bg-sky-500/15">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-sky-500/20 text-sky-300"><Store className="h-5 w-5" /></span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-medium text-zinc-100">Agent 模版市场</span>
+                <span className="block text-[11px] text-zinc-500">浏览各行各业的预置 agent</span>
+              </span>
+              <ChevronRight className="h-4 w-4 text-zinc-500" />
+            </button>
           </div>
         </aside>
       ) : (
