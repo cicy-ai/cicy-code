@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2, Send, Megaphone, AtSign, X, Loader2, CheckCircle2, MessageSquare,
-  Plus, Minus, Maximize2, Crown, Inbox, UserPlus, Sparkles, ChevronRight, Power, Users,
+  Plus, Minus, Maximize2, Crown, Inbox, UserPlus, Sparkles, ChevronRight, Power, Users, Store,
 } from 'lucide-react';
+import TemplateMarket, { MarketTmpl } from './TemplateMarket';
 
 /*
  * Office — 「办公室」（data-id="office"）。
@@ -141,6 +142,7 @@ export default function Office() {
   ]);
   const [candidates, setCandidates] = useState<Cand[]>(INIT_CANDIDATES);
   const [rosterOpen, setRosterOpen] = useState(true);
+  const [marketOpen, setMarketOpen] = useState(false);
   const idSeq = useRef(20);
   const seq = useRef(2);
   const chatRef = useRef<HTMLDivElement>(null);
@@ -225,11 +227,13 @@ export default function Office() {
     setWorkers((prev) => [...prev, makeWorker(c.id, c.name, c.role, c.emoji, c.accent, c.model, prev.length, c.script)]);
     push({ kind: 'note', text: `已加入并启用 ${c.name}（${c.id}）` });
   };
-  const createFromTemplate = (t: Tmpl) => {
+  const spawn = (name: string, role: string, emoji: string, accent: string, model: string, note: string) => {
     const id = `w-100${idSeq.current++}`;
-    setWorkers((prev) => [...prev, makeWorker(id, t.name, t.role, t.emoji, t.accent, t.model, prev.length, t.script)]);
-    push({ kind: 'note', text: `已按模版「${t.name}」创建 ${id}` });
+    setWorkers((prev) => [...prev, makeWorker(id, name, role, emoji, accent, model, prev.length, GENERIC_SCRIPT)]);
+    push({ kind: 'note', text: `${note} ${id}` });
   };
+  const createFromTemplate = (t: Tmpl) => spawn(t.name, t.role, t.emoji, t.accent, t.model, `已按模版「${t.name}」创建`);
+  const pickFromMarket = (t: MarketTmpl) => spawn(t.name, t.role, t.emoji, t.accent, t.model, `已从模版市场添加「${t.name}」`);
   const canSend = text.trim() && (mode === 'broadcast' || !!target);
 
   return (
@@ -335,7 +339,10 @@ export default function Office() {
               )}
             </section>
             <section data-id="office-roster-templates">
-              <div className="mb-2 flex items-center gap-1.5 px-1 text-[11px] font-medium uppercase tracking-wide text-zinc-600"><Sparkles className="h-3 w-3" /> 模版 · 点击创建<span className="ml-auto normal-case text-zinc-700">{TEMPLATES.length}</span></div>
+              <div className="mb-2 flex items-center gap-1.5 px-1 text-[11px] font-medium uppercase tracking-wide text-zinc-600">
+                <Sparkles className="h-3 w-3" /> 模版
+                <button data-id="office-open-market" onClick={() => setMarketOpen(true)} className="ml-auto inline-flex items-center gap-1 rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[10.5px] normal-case text-sky-300 transition-colors hover:bg-sky-500/25"><Store className="h-3 w-3" /> 模版市场</button>
+              </div>
               <div className="space-y-1.5">
                 {TEMPLATES.map((t) => (
                   <div key={t.key} data-id={`office-tmpl-${t.key}`} className="flex items-center gap-2.5 rounded-xl border border-dashed border-white/[0.09] bg-white/[0.015] px-2.5 py-2">
@@ -353,6 +360,8 @@ export default function Office() {
           className="absolute right-0 top-1/2 z-30 flex -translate-y-1/2 items-center gap-1.5 rounded-l-lg border border-r-0 border-white/10 bg-[#16161a]/90 px-2 py-3 text-[11px] text-zinc-400 backdrop-blur transition-colors hover:text-zinc-100"
           style={{ writingMode: 'vertical-rl' }}><Users className="h-3.5 w-3.5" /> 成员库</button>
       )}
+
+      <TemplateMarket open={marketOpen} onClose={() => setMarketOpen(false)} onPick={pickFromMarket} />
     </div>
   );
 }
