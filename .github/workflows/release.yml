@@ -38,13 +38,18 @@ jobs:
         run: |
           RAW="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}"
           VERSION="${RAW#v}"
-          # Patch npm/package.json — sync-version.py reads this as the source of truth
+          # Patch npm/package.json — sync-version.py reads this as the source of
+          # truth. Also lockstep the per-platform optionalDependencies to the
+          # release version so the main launcher and its 4 binary sub-packages
+          # all publish at the same version (publish-all.sh builds the subs).
           python3 -c "
           import json, sys
           p = json.load(open('npm/package.json'))
           p['version'] = sys.argv[1]
+          for k in list(p.get('optionalDependencies', {})):
+              p['optionalDependencies'][k] = sys.argv[1]
           json.dump(p, open('npm/package.json','w'), indent=2)
-          print('npm/package.json version:', p['version'])
+          print('npm/package.json version:', p['version'], '| optionalDeps ->', sys.argv[1])
           " "$VERSION"
           # Also patch app/package.json for consistency
           python3 -c "
@@ -188,12 +193,21 @@ jobs:
             gh release upload "$TAG" "$f" --clobber
           done
 
-      - name: Publish to npm
+      - name: Publish to npm (5 packages + CN sync)
         # Only publish on real tag pushes — workflow_dispatch snapshots stay
         # GitHub-release-only to avoid burning npm version numbers.
+        #
+        # publish-all.sh publishes the main launcher + the four per-platform
+        # binary sub-packages (cicy-code-{darwin,linux}-{arm64,x64}, esbuild-
+        # style optionalDependencies), reusing the binaries already built in
+        # dist/ (--from), then auto-triggers the npmmirror (CN) cache sync for
+        # each so CN users resolve the new version without lag.
+        #
+        # secrets.NPM_TOKEN must be a Granular Access Token with "Bypass 2FA"
+        # enabled (classic automation tokens 403 against cicybot's 2FA policy).
         if: github.event_name == 'push'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           cd npm
-          npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          bash publish-all.sh "${{ steps.tag.outputs.version }}" --from ../dist
