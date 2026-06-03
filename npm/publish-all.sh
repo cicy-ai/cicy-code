@@ -16,12 +16,15 @@
 # (their version stays whatever the main package's optionalDependencies pin).
 set -euo pipefail
 
-VERSION="${1:?usage: publish-all.sh <npm-version> [gh-tag] [--main-only] [--dry-run]}"
+VERSION="${1:?usage: publish-all.sh <npm-version> [gh-tag] [--from DIR] [--main-only] [--dry-run]}"
 GH_TAG="v$VERSION"; case "${2:-}" in v*) GH_TAG="$2";; esac
-DRY=""; MAIN_ONLY=""
+DRY=""; MAIN_ONLY=""; FROM_DIR=""
+prev=""
 for a in "$@"; do
   [ "$a" = "--dry-run" ] && DRY="--dry-run"
   [ "$a" = "--main-only" ] && MAIN_ONLY=1
+  [ "$prev" = "--from" ] && FROM_DIR="$a"
+  prev="$a"
 done
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -76,9 +79,14 @@ if [ -z "$MAIN_ONLY" ]; then
   for key in "${!ASSET[@]}"; do
     os="${key%-*}"; cpu="${key#*-}"; pkg="cicy-code-$key"; dir="$BUILD/$pkg"
     mkdir -p "$dir"
-    echo "  - $pkg  (os:$os cpu:$cpu)  <- ${ASSET[$key]}"
-    code=$(curl -sL -o "$dir/cicy-code" -w "%{http_code}" --max-time 120 "$REL/${ASSET[$key]}")
-    [ "$code" = "200" ] || { echo "    !! download failed http=$code"; exit 1; }
+    if [ -n "$FROM_DIR" ]; then
+      echo "  - $pkg  (os:$os cpu:$cpu)  <- $FROM_DIR/${ASSET[$key]} (local)"
+      cp "$FROM_DIR/${ASSET[$key]}" "$dir/cicy-code" || { echo "    !! missing $FROM_DIR/${ASSET[$key]}"; exit 1; }
+    else
+      echo "  - $pkg  (os:$os cpu:$cpu)  <- ${ASSET[$key]} (GH $GH_TAG)"
+      code=$(curl -sL -o "$dir/cicy-code" -w "%{http_code}" --max-time 120 "$REL/${ASSET[$key]}")
+      [ "$code" = "200" ] || { echo "    !! download failed http=$code"; exit 1; }
+    fi
     chmod 755 "$dir/cicy-code"
     sz=$(stat -c%s "$dir/cicy-code" 2>/dev/null || stat -f%z "$dir/cicy-code")
     [ "$sz" -gt 1000000 ] || { echo "    !! binary too small ($sz bytes)"; exit 1; }
@@ -103,7 +111,24 @@ else
 fi
 
 echo "==> Publishing main package cicy-code@$VERSION ${DRY:+(dry-run)} + npmmirror sync"
-publish_dir "$HERE" "cicy-code" "$VERSION"
+if [ -n "$MAIN_ONLY" ]; then
+  # Launcher-only patch: publish $HERE as-is (version + optionalDependencies
+  # pin are whatever is committed — bump package.json before running).
+  publish_dir "$HERE" "cicy-code" "$VERSION"
+else
+  # Full release: stage the launcher into .build so version + every
+  # optionalDependency lockstep to $VERSION without mutating the repo file.
+  MAIN="$BUILD/cicy-code"; mkdir -p "$MAIN/bin"
+  cp "$HERE/bin/cicy-code.js" "$MAIN/bin/cicy-code.js"
+  node -e '
+    const fs=require("fs");
+    const p=JSON.parse(fs.readFileSync(process.argv[1]));
+    p.version=process.argv[2];
+    for(const k of Object.keys(p.optionalDependencies||{})) p.optionalDependencies[k]=process.argv[2];
+    fs.writeFileSync(process.argv[3], JSON.stringify(p,null,2)+"\n");
+  ' "$HERE/package.json" "$VERSION" "$MAIN/package.json"
+  publish_dir "$MAIN" "cicy-code" "$VERSION"
+fi
 
 [ -n "$NPMRC" ] && rm -f "$NPMRC"
 echo "==> Done."
