@@ -1,71 +1,46 @@
 #!/usr/bin/env bash
-# Package the cicy-code runtime Docker image as an npm package and publish it,
-# then auto-trigger the npmmirror (CN) cache sync. Lets CN users get the image
-# via `npx cicy-code-docker` (fetched from npmmirror — fast, no Docker Hub
-# pull) which `docker load`s it locally.
+# Upload the cicy-code runtime image to R2 as a base-environment tarball.
 #
-# Usage:
-#   NPM_TOKEN=xxx ./publish-docker.sh <version> [image-ref] [--dry-run]
-# image-ref defaults to docker.io/cicybot/cicy-code:<version>.
+# Docker images are too big for npm (a 242 MB tarball gets HTTP 413 from the
+# registry), and the image is just a slowly-changing base environment — so it
+# lives on R2 and is published OCCASIONALLY (run this by hand when the env
+# changes), NOT on every release. Per-version binaries ship via npm.
+#
+# Uploads two keys so callers can pin or float:
+#   /docker/cicy-code-<version>.tar.gz   (immutable, pinnable)
+#   /docker/cicy-code-latest.tar.gz      (what load.sh pulls by default)
+# Also (re)uploads load.sh so `curl …/docker/load.sh | sh` stays current.
+#
+# Usage (needs R2 creds in env, e.g. from ~/cicy-ai/db/r2.json):
+#   CLOUDFLARE_ACCOUNT_ID=.. CLOUDFLARE_API_TOKEN=.. ./publish-docker.sh <version> [image-ref]
 set -euo pipefail
 
-VERSION="${1:?usage: publish-docker.sh <version> [image-ref] [--dry-run]}"
-IMAGE="docker.io/cicybot/cicy-code:${VERSION}"
-case "${2:-}" in ""|--dry-run) ;; *) IMAGE="$2" ;; esac
-DRY=""; for a in "$@"; do [ "$a" = "--dry-run" ] && DRY="--dry-run"; done
-
+VERSION="${1:?usage: publish-docker.sh <version> [image-ref]}"
+IMAGE="${2:-docker.io/cicybot/cicy-code:${VERSION}}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-BUILD="$HERE/.build-docker/cicy-code-docker"
-MIRROR="https://registry.npmmirror.com"
-REPO_URL="git+https://github.com/cicy-ai/cicy-code.git"
-PKG="cicy-code-docker"
+BUCKET="cicy-assets-poc"
+WR="npx --yes wrangler@3.114.17"
+TMP="$(mktemp -d)"
+TAR="$TMP/cicy-code.tar.gz"
 
-rm -rf "$HERE/.build-docker"; mkdir -p "$BUILD"
-cp "$HERE/docker/load.js" "$BUILD/load.js"
+: "${CLOUDFLARE_ACCOUNT_ID:?set CLOUDFLARE_ACCOUNT_ID}"
+: "${CLOUDFLARE_API_TOKEN:?set CLOUDFLARE_API_TOKEN}"
 
-echo "==> docker save $IMAGE | gzip -> cicy-code.tar.gz"
-docker save "$IMAGE" | gzip > "$BUILD/cicy-code.tar.gz"
-sz=$(stat -c%s "$BUILD/cicy-code.tar.gz" 2>/dev/null || stat -f%z "$BUILD/cicy-code.tar.gz")
-[ "$sz" -gt 1000000 ] || { echo "    !! tarball too small ($sz bytes) — bad save"; exit 1; }
-echo "    tarball: $(awk "BEGIN{printf \"%.0f MB\", $sz/1024/1024}")"
+echo "==> docker save $IMAGE | gzip"
+docker save "$IMAGE" | gzip > "$TAR"
+sz=$(stat -c%s "$TAR" 2>/dev/null || stat -f%z "$TAR")
+[ "$sz" -gt 1000000 ] || { echo "!! tarball too small ($sz bytes)"; exit 1; }
+echo "    $(awk "BEGIN{printf \"%.0f MB\", $sz/1024/1024}")"
 
-cat > "$BUILD/package.json" <<JSON
-{
-  "name": "$PKG",
-  "version": "$VERSION",
-  "description": "cicy-code runtime Docker image as a docker-load tarball — pull via npm/npmmirror (CN-friendly, no Docker Hub). Run: npx cicy-code-docker",
-  "bin": { "cicy-code-docker": "load.js" },
-  "files": ["load.js", "cicy-code.tar.gz"],
-  "keywords": ["cicy", "docker", "image", "cn", "npmmirror"],
-  "license": "MIT",
-  "author": { "name": "cicybot", "email": "support@cicy-ai.com" },
-  "repository": { "type": "git", "url": "$REPO_URL" }
+put() {  # <local> <key> <content-type>
+  echo "==> R2 put $2"
+  $WR r2 object put "$BUCKET/$2" --file="$1" --content-type="$3" >/dev/null 2>&1 \
+    && echo "    https://r2.deepfetch.de5.net/$2" || { echo "    !! failed"; exit 1; }
 }
-JSON
 
-# Auth
-NPMRC=""
-if [ -z "$DRY" ]; then
-  : "${NPM_TOKEN:?set NPM_TOKEN to publish (or pass --dry-run)}"
-  NPMRC="$(mktemp)"; umask 077
-  printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$NPMRC"
-fi
-PUB=(npm publish --registry https://registry.npmjs.org --access public)
-[ -n "$NPMRC" ] && PUB+=(--userconfig "$NPMRC")
-[ -n "$DRY" ] && PUB+=(--dry-run)
+put "$TAR" "docker/cicy-code-${VERSION}.tar.gz" "application/gzip"
+put "$TAR" "docker/cicy-code-latest.tar.gz"     "application/gzip"
+put "$HERE/docker/load.sh" "docker/load.sh"     "text/x-shellscript"
 
-echo "==> Publishing $PKG@$VERSION ${DRY:+(dry-run)} ($(awk "BEGIN{printf \"%.0f MB\", $sz/1024/1024}"))"
-( cd "$BUILD" && "${PUB[@]}" ) 2>&1 | grep -iE "^\+ |E40[0-9]|error|notice .*publishing|Tarball" || true
-
-# Auto-trigger npmmirror sync (success = version installable on npmmirror).
-if [ -z "$DRY" ]; then
-  curl -s --max-time 20 -X PUT "$MIRROR/-/package/$PKG/syncs" >/dev/null 2>&1 || true
-  for _ in $(seq 1 15); do
-    sleep 10
-    code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' "$MIRROR/$PKG/$VERSION" 2>/dev/null || echo 000)
-    if [ "$code" = "200" ]; then echo "    ✓ npmmirror has $PKG@$VERSION"; break; fi
-  done
-fi
-
-[ -n "$NPMRC" ] && rm -f "$NPMRC"
-echo "==> Done. Pull: npx cicy-code-docker@$VERSION   (CN: --registry=https://registry.npmmirror.com)"
+rm -rf "$TMP"
+echo "==> Done. Pull:  curl -fsSL https://r2.deepfetch.de5.net/docker/load.sh | sh"
