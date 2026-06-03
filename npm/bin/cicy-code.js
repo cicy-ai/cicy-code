@@ -1,96 +1,34 @@
 #!/usr/bin/env node
-const { spawn, execSync } = require('child_process');
-const path = require('path');
+// Thin launcher: resolves the prebuilt binary that ships in the
+// platform-specific optionalDependency (cicy-code-<os>-<cpu>) and execs it.
+// No network, no postinstall download — npm installs only the sub-package
+// matching the current os/cpu (the others are skipped via their os/cpu
+// fields), so a CN user pulls just their ~30MB slice from npmmirror.
+const { spawn } = require('child_process');
 const fs = require('fs');
-const https = require('https');
 
-const pkg = require('../package.json');
-const binPath = path.join(__dirname, 'cicy-code');
+const platformPkg = `cicy-code-${process.platform}-${process.arch}`;
 
-const cn = process.argv.includes('--cn') || process.env.CN_MIRROR === '1';
-
-if (process.argv.includes('--cn')) {
-  process.env.CN_MIRROR = '1';
+let binPath;
+try {
+  // require.resolve finds the binary inside the installed sub-package,
+  // wherever the package manager hoisted it.
+  binPath = require.resolve(`${platformPkg}/cicy-code`);
+} catch {
+  console.error(`cicy-code: no prebuilt binary for ${process.platform}-${process.arch}.`);
+  console.error(`The optional dependency "${platformPkg}" is not installed.`);
+  console.error(`Supported platforms: darwin-arm64, darwin-x64, linux-x64, linux-arm64.`);
+  console.error(`Reinstall: npm install -g cicy-code` +
+    ` (in China add --registry=https://registry.npmmirror.com)`);
+  process.exit(1);
 }
 
-if (cn) {
-  console.log('  [mirror] Using Chinese mirrors (npm + GitHub proxy)');
-}
+// npm restores the 0755 mode from the tarball, but chmod defensively in case
+// a mirror or extraction stripped the exec bit.
+try { fs.chmodSync(binPath, 0o755); } catch {}
 
-// Check for updates
-function checkUpdate() {
-  const registry = cn
-    ? 'https://registry.npmmirror.com/cicy-code/latest'
-    : 'https://registry.npmjs.org/cicy-code/latest';
-  if (cn) console.log(`  [mirror] Registry: registry.npmmirror.com`);
-  return new Promise((resolve) => {
-    https.get(registry, (res) => {
-      let data = '';
-      res.on('data', (c) => data += c);
-      res.on('end', () => {
-        try {
-          const latest = JSON.parse(data).version;
-          if (latest && latest !== pkg.version) {
-            resolve(latest);
-          } else {
-            resolve(null);
-          }
-        } catch { resolve(null); }
-      });
-    }).on('error', () => resolve(null));
-  });
-}
-
-async function main() {
-  // Check update (non-blocking, timeout 3s)
-  const latest = await Promise.race([
-    checkUpdate(),
-    new Promise(r => setTimeout(() => r(null), 3000))
-  ]);
-
-  if (latest && !process.env.CICY_SKIP_UPDATE) {
-    console.log(`\n  Update available: ${pkg.version} → ${latest}`);
-    console.log(`  Updating...\n`);
-    try {
-      const npmCmd = cn
-        ? `npm install -g cicy-code@${latest} --registry=https://registry.npmmirror.com`
-        : `npm install -g cicy-code@${latest}`;
-      execSync(npmCmd, { stdio: 'inherit' });
-      console.log(`\n  Updated to ${latest}! Restarting...\n`);
-      // Re-exec with new version
-      const child = spawn('cicy-code', process.argv.slice(2), { stdio: 'inherit', env: process.env });
-      child.on('exit', (code) => process.exit(code || 0));
-      return;
-    } catch (e) {
-      console.log(`  Update failed, running current version.\n`);
-    }
-  }
-
-  // Install globally if not already
-  try {
-    const globalBin = execSync('npm prefix -g', { encoding: 'utf8' }).trim() + '/bin/cicy-code';
-    if (!fs.existsSync(globalBin)) throw new Error('not installed');
-  } catch {
-    console.log('  Installing cicy-code globally...');
-    try {
-      const npmCmd = cn
-        ? 'npm install -g cicy-code --registry=https://registry.npmmirror.com'
-        : 'npm install -g cicy-code';
-      execSync(npmCmd, { stdio: 'inherit' });
-      console.log('  Installed! You can now run: cicy-code\n');
-    } catch {}
-  }
-
-  if (!fs.existsSync(binPath)) {
-    console.error('Binary not found. Reinstall: npm install -g cicy-code');
-    process.exit(1);
-  }
-
-  const child = spawn(binPath, process.argv.slice(2), {
-    stdio: 'inherit',
-    env: process.env
-  });
-  child.on('exit', (code) => process.exit(code || 0));
-}
-
-main();
+const child = spawn(binPath, process.argv.slice(2), { stdio: 'inherit', env: process.env });
+child.on('exit', (code, signal) => {
+  if (signal) process.kill(process.pid, signal);
+  else process.exit(code == null ? 0 : code);
+});
