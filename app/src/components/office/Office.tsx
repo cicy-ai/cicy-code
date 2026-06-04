@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2, Send, Megaphone, AtSign, X, Loader2, CheckCircle2, MessageSquare,
-  Plus, Minus, Maximize2, Crown, Inbox, UserPlus, ChevronRight, Power, Users, Store,
+  Plus, Minus, Maximize2, Crown, Inbox, UserPlus, ChevronRight, Power, Users, Store, Copy, Check,
 } from 'lucide-react';
 import TemplateMarket, { MarketTmpl, TeamTmpl } from './TemplateMarket';
 
@@ -31,7 +31,7 @@ const SELF = 'w-10001';
 const MIN_W = 240, MIN_H = 168;
 
 const W = (id: string, name: string, role: string, emoji: string, accent: string, model: string, ctx: number, ctxK: number, status: Status, x: number, y: number, script: Line[]): Worker =>
-  ({ id, name, role, emoji, accent, model, ctx, ctxK, status, script, shown: status === 'working' ? 0 : script.length, startedAt: 0, x, y, w: 312, h: 248 });
+  ({ id, name, role, emoji, accent, model, ctx, ctxK, status, script, shown: status === 'working' ? 0 : script.length, startedAt: 0, x, y, w: 360, h: 248 });
 
 const INIT_WORKERS: Worker[] = [
   W('w-10010', '架构师 Aria', 'dev-senior', '🏛️', 'sky', 'deepseek-v4-pro', 42, 256, 'working', 36, 32, [
@@ -110,7 +110,7 @@ const INIT_CANDIDATES: Cand[] = [
 ];
 
 function makeWorker(id: string, name: string, role: string, emoji: string, accent: string, model: string, slot: number, script: Line[]): Worker {
-  return { id, name, role, emoji, accent, model, ctx: 5, ctxK: 256, status: 'idle', script, shown: 0, startedAt: 0, w: 312, h: 248, x: 36 + (slot % 3) * 372, y: 32 + Math.floor(slot / 3) * 280 };
+  return { id, name, role, emoji, accent, model, ctx: 5, ctxK: 256, status: 'idle', script, shown: 0, startedAt: 0, w: 360, h: 248, x: 36 + (slot % 3) * 372, y: 32 + Math.floor(slot / 3) * 280 };
 }
 
 export default function Office() {
@@ -400,6 +400,8 @@ function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResiz
   const working = w.status === 'working';
   const ctxColor = w.ctx > 85 ? 'bg-rose-400' : w.ctx > 60 ? 'bg-amber-400' : 'bg-zinc-400/60';
   const ctxText = w.ctx > 85 ? 'text-rose-300' : w.ctx > 60 ? 'text-amber-300' : 'text-zinc-500';
+  const [copied, setCopied] = useState(false);
+  const copyId = (e: React.MouseEvent) => { e.stopPropagation(); try { navigator.clipboard?.writeText(w.id); } catch { /* noop */ } setCopied(true); window.setTimeout(() => setCopied(false), 1200); };
 
   return (
     <div data-id={`office-window-${w.id}`}
@@ -410,11 +412,17 @@ function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResiz
       {/* 角色色条 */}
       <div className={`h-[3px] w-full ${done ? 'bg-emerald-400/60' : acc.bar}`} />
       <div data-id={`office-window-header-${w.id}`} onPointerDown={onMoveStart}
-        className={`flex shrink-0 cursor-grab items-center gap-2.5 px-3 py-2.5 active:cursor-grabbing ${done ? 'bg-emerald-500/[0.05]' : 'bg-white/[0.015]'}`}>
+        className={`flex shrink-0 cursor-grab select-none items-center gap-2.5 px-3 py-2.5 active:cursor-grabbing ${done ? 'bg-emerald-500/[0.05]' : 'bg-white/[0.015]'}`}>
         <Avatar emoji={w.emoji} accent={w.accent} size={32} status={w.status} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-semibold text-zinc-100">{w.name}</span>
-          <span className="font-mono text-[10.5px] text-zinc-500">{w.id} · {w.role}</span>
+          <span className="flex items-center gap-1 font-mono text-[10.5px] text-zinc-500">
+            <button data-id={`office-window-copyid-${w.id}`} onPointerDown={(e) => e.stopPropagation()} onClick={copyId}
+              title="复制 agent id" className="inline-flex items-center gap-0.5 rounded px-0.5 transition-colors hover:bg-white/10 hover:text-zinc-300">
+              {w.id}{copied ? <Check className="h-2.5 w-2.5 text-emerald-400" /> : <Copy className="h-2.5 w-2.5 opacity-50" />}
+            </button>
+            · {w.role}
+          </span>
         </span>
         {done ? (
           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10.5px] font-medium text-emerald-300"><CheckCircle2 className="h-3 w-3" /> 待验收</span>
