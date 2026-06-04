@@ -248,7 +248,12 @@ export default function Office() {
   }, [selectWorker]);
 
   const onWheel = (e: React.WheelEvent) => {
-    const next = clamp(zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1), Z_MIN, Z_MAX);
+    // 缩放与滚动量成比例并把单次倍率夹在 ±4%，避免滚轮一格跳太多/太灵敏。
+    // deltaMode=1(行)的鼠标 deltaY 很小，乘 16 归一到像素量级。
+    const delta = e.deltaY * (e.deltaMode === 1 ? 16 : 1);
+    const factor = clamp(Math.exp(-delta * 0.0015), 0.96, 1.04);
+    const next = clamp(zoom * factor, Z_MIN, Z_MAX);
+    if (next === zoom) return;
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
     setPan((p) => ({ x: cx - (cx - p.x) * (next / zoom), y: cy - (cy - p.y) * (next / zoom) }));
