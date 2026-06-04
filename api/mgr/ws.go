@@ -2,17 +2,14 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -38,66 +35,9 @@ type wsAPIResponse struct {
 	Error  string      `json:"error,omitempty"`
 }
 
-func handleWSProxy(w http.ResponseWriter, r *http.Request) {
-	paneID := strings.TrimPrefix(r.URL.Path, "/api/ws/")
-	inst := getInstance(paneID)
-	if inst == nil {
-		httpErr(w, 404, "pane not found")
-		return
-	}
-
-	clientConn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		return
-	}
-	defer clientConn.Close()
-
-	ttydConn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://localhost:%d/ws", inst.Port), nil)
-	if err != nil {
-		return
-	}
-	defer ttydConn.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go func() {
-		for {
-			mt, msg, err := ttydConn.ReadMessage()
-			if err != nil {
-				cancel()
-				return
-			}
-			if err := clientConn.WriteMessage(mt, msg); err != nil {
-				cancel()
-				return
-			}
-		}
-	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			mt, msg, err := clientConn.ReadMessage()
-			if err != nil {
-				return
-			}
-			if mt == websocket.TextMessage {
-				msg = filterDAQuery(msg)
-				if msg == nil {
-					continue
-				}
-			}
-			if err := ttydConn.WriteMessage(mt, msg); err != nil {
-				return
-			}
-		}
-	}
-}
-
-// handleTtydProxy proxies /ttyd/{pane_id}/* to the embedded ttyd-go instance
+// handleTtydProxy serves /ttyd/{pane_id}/* directly: index.html, the shared
+// static bundle, the auth/config shims, and the webtty WebSocket — all in
+// process, with no per-pane port or reverse proxy. See ttyd_inline.go.
 func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/ttyd/")
 	parts := strings.SplitN(path, "/", 2)
@@ -107,175 +47,24 @@ func handleTtydProxy(w http.ResponseWriter, r *http.Request) {
 		subPath = "/" + parts[1]
 	}
 
-	// Token required only for root page; assets and WS skip auth (WS only reachable after page load)
+	// Token required only for the root page; assets + WS follow after load.
 	if subPath == "/" {
 		token := r.URL.Query().Get("token")
-		if token == "" {
+		if token == "" || !verifyToken(token) {
 			httpErr(w, 401, "token required")
-			return
-		}
-		if !verifyToken(token) {
-			httpErr(w, 401, "invalid token")
 			return
 		}
 	}
 
-	// Check pane exists in DB and is active
+	// Pane must exist and be active. ttyd_port is no longer used at runtime —
+	// the row's presence is all we check.
 	var dbPort int
 	if err := store.QueryRow("SELECT ttyd_port FROM agent_config WHERE pane_id=? AND active=1", paneID).Scan(&dbPort); err != nil {
 		httpErr(w, 404, "pane not found or inactive")
 		return
 	}
 
-	inst := getInstance(paneID)
-	if inst == nil {
-		if subPath == "/" {
-			token := r.URL.Query().Get("token")
-			readyInst, err := ensureInstanceReady(paneID, token, 5*time.Second)
-			if err != nil {
-				httpErr(w, 500, "failed to start ttyd: "+err.Error())
-				return
-			}
-			inst = readyInst
-		} else {
-			inst = waitForInstanceReady(paneID, 5*time.Second)
-			if inst == nil {
-				httpErr(w, 503, "instance starting")
-				return
-			}
-		}
-	} else {
-		readyInst := waitForInstanceReady(paneID, 5*time.Second)
-		if readyInst == nil {
-			httpErr(w, 503, "instance unavailable")
-			return
-		}
-		inst = readyInst
-	}
-	if inst == nil {
-		httpErr(w, 503, "instance unavailable")
-		return
-	}
-
-	// WebSocket upgrade
-	if subPath == "/ws" {
-		proxyWS(w, r, paneID, inst.Port)
-		return
-	}
-
-	// HTTP reverse proxy
-	proxyHTTP(w, r, inst.Port, subPath)
-}
-
-// proxyHTTP reverse-proxies a non-WS request to a local ttyd instance port.
-// Shared by handleTtydProxy and handleTtydShellProxy.
-func proxyHTTP(w http.ResponseWriter, r *http.Request, port int, subPath string) {
-	targetURL := fmt.Sprintf("http://127.0.0.1:%d%s", port, subPath)
-	if rawQuery := strings.TrimSpace(r.URL.RawQuery); rawQuery != "" {
-		targetURL += "?" + rawQuery
-	}
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, nil)
-	if err != nil {
-		httpErr(w, 500, err.Error())
-		return
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		httpErr(w, 502, err.Error())
-		return
-	}
-	defer resp.Body.Close()
-
-	for k, vs := range resp.Header {
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
-}
-
-func proxyWS(w http.ResponseWriter, r *http.Request, paneID string, port int) {
-	// Must pass through subprotocol ("webtty") from client to ttyd-go
-	respHeader := http.Header{}
-	if protos := websocket.Subprotocols(r); len(protos) > 0 {
-		respHeader.Set("Sec-WebSocket-Protocol", protos[0])
-	}
-	clientConn, err := upgrader.Upgrade(w, r, respHeader)
-	if err != nil {
-		log.Printf("[ws-proxy] upgrade error: %v", err)
-		return
-	}
-	defer clientConn.Close()
-
-	ttydURL := fmt.Sprintf("ws://127.0.0.1:%d/ws", port)
-	dialer := websocket.Dialer{Subprotocols: websocket.Subprotocols(r)}
-	ttydConn, _, err := dialer.Dial(ttydURL, nil)
-	if err != nil {
-		log.Printf("[ws-proxy] dial ttyd error: %v", err)
-		return
-	}
-	defer ttydConn.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var clientWriteMu sync.Mutex
-	writeClient := func(mt int, data []byte) error {
-		clientWriteMu.Lock()
-		defer clientWriteMu.Unlock()
-		return clientConn.WriteMessage(mt, data)
-	}
-
-	go func() {
-		for {
-			mt, msg, err := ttydConn.ReadMessage()
-			if err != nil {
-				cancel()
-				return
-			}
-			if mt == websocket.TextMessage && bytes.Contains(msg, []byte("0;276;0c")) {
-				log.Printf("[ws-proxy] DA response ttyd→client: %q", msg[:minInt(len(msg), 120)])
-			}
-			if err := writeClient(mt, msg); err != nil {
-				cancel()
-				return
-			}
-		}
-	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			mt, msg, err := clientConn.ReadMessage()
-			if err != nil {
-				return
-			}
-			if mt == websocket.TextMessage {
-				if len(msg) > 1 && msg[0] == '6' {
-					if err := handleWSAPIRequest(writeClient, paneID, msg[1:]); err != nil {
-						log.Printf("[ws-proxy] ws api error: %v", err)
-					}
-					continue
-				}
-				msg = filterDAQuery(msg)
-				if msg == nil {
-					continue
-				}
-				// Log mouse sequences
-				if len(msg) > 1 && msg[0] == '0' {
-					payload := string(msg[1:])
-					if strings.Contains(payload, "\x1b[<") || strings.Contains(payload, "\x1b[M") {
-						log.Printf("[ws-proxy] mouse: %q", payload)
-					}
-				}
-			}
-			if err := ttydConn.WriteMessage(mt, msg); err != nil {
-				return
-			}
-		}
-	}
+	serveTtydHTTP(w, r, paneID, subPath, shortPaneID(paneID), paneID)
 }
 
 func handleWSAPIRequest(writeClient func(int, []byte) error, paneID string, payload []byte) error {

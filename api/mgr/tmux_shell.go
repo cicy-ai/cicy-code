@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // The "shell panel" lets the UI show a second terminal next to the agent's main
@@ -56,7 +55,8 @@ func stopShellSession(session string) {
 		return
 	}
 	grouped := shellGroupedName(session)
-	stopInstance(grouped)
+	// No ttyd instance to stop now; killing the tmux session EOFs any live
+	// attach, which tears down its webtty session.
 	exec.Command("tmux", "kill-session", "-t", grouped).Run()
 }
 
@@ -90,39 +90,7 @@ func handleTtydShellProxy(w http.ResponseWriter, r *http.Request) {
 
 	grouped := ensureShellSession(session)
 
-	inst := getInstance(grouped)
-	if inst == nil {
-		if subPath == "/" {
-			token := r.URL.Query().Get("token")
-			readyInst, err := ensureInstanceReady(grouped, token, 5*time.Second)
-			if err != nil {
-				httpErr(w, 500, "failed to start ttyd: "+err.Error())
-				return
-			}
-			inst = readyInst
-		} else {
-			inst = waitForInstanceReady(grouped, 5*time.Second)
-			if inst == nil {
-				httpErr(w, 503, "instance starting")
-				return
-			}
-		}
-	} else {
-		readyInst := waitForInstanceReady(grouped, 5*time.Second)
-		if readyInst == nil {
-			httpErr(w, 503, "instance unavailable")
-			return
-		}
-		inst = readyInst
-	}
-	if inst == nil {
-		httpErr(w, 503, "instance unavailable")
-		return
-	}
-
-	if subPath == "/ws" {
-		proxyWS(w, r, grouped, inst.Port)
-		return
-	}
-	proxyHTTP(w, r, inst.Port, subPath)
+	// Serve in-process, attached to the grouped shell session. Title + ws-api
+	// pane both use the grouped name, matching the old proxyWS(grouped, ...).
+	serveTtydHTTP(w, r, grouped, subPath, grouped, grouped)
 }
