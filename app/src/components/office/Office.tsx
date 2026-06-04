@@ -20,7 +20,7 @@ import apiService from '../../services/api';
 type Status = 'idle' | 'working';
 
 interface Worker {
-  id: string; name: string; role: string;
+  id: string; name: string; role: string; agentType: string;   // agentType = CLI 类型(claude/codex/opencode...)，决定头像图标
   model: string; ctx: number; ctxK: number;   // 模型 + 上下文用量(%) + 上下文窗口(k)
   status: Status; thinking: string; answer: string; startedAt: number;
   x: number; y: number; w: number; h: number;
@@ -72,8 +72,8 @@ function agentTypeForModel(model: string): string {
 
 /* ── avatar：现成的 agent 官方图标 + 状态环（working 黄脉冲 / idle 绿 / 其它灰）。
  *    直接拿 getAgentTypeIconMeta 自渲染方形图标,避免 AgentAvatar 内部固定 h-8 w-8 被我外层尺寸挤变形。 */
-function Avatar({ model, name, size = 30, status }: { model: string; name: string; size?: number; status?: Status }) {
-  const icon = getAgentTypeIconMeta(agentTypeForModel(model));
+function Avatar({ model, agentType, name, size = 30, status }: { model: string; agentType?: string; name: string; size?: number; status?: Status }) {
+  const icon = getAgentTypeIconMeta(agentType || agentTypeForModel(model));
   const ring = status === 'working' ? 'ring-2 ring-amber-400/70' : status === 'idle' ? 'ring-2 ring-emerald-400/50' : 'ring-1 ring-white/10';
   const inner = Math.round(size * 0.6);
   return (
@@ -97,8 +97,8 @@ interface Cand { id: string; name: string; role: string; model: string }
 const COLS = 3, GAP_X = 428, GAP_Y = 284, ORIGIN_X = 32, ORIGIN_Y = 64;
 const slotPos = (slot: number) => ({ x: ORIGIN_X + (slot % COLS) * GAP_X, y: ORIGIN_Y + Math.floor(slot / COLS) * GAP_Y });
 
-function makeWorker(id: string, name: string, role: string, model: string, slot: number): Worker {
-  return { id, name, role, model, ctx: 0, ctxK: modelWindowK(model), status: 'idle', thinking: '', answer: '', startedAt: 0, w: 400, h: 248, ...slotPos(slot) };
+function makeWorker(id: string, name: string, role: string, model: string, slot: number, agentType = ''): Worker {
+  return { id, name, role, agentType, model, ctx: 0, ctxK: modelWindowK(model), status: 'idle', thinking: '', answer: '', startedAt: 0, w: 400, h: 248, ...slotPos(slot) };
 }
 
 export default function Office() {
@@ -159,6 +159,7 @@ export default function Office() {
             title: String(p.title || p.pane_id || '').trim(),
             role: String(p.role || p.agent_type || '').trim(),
             model: String(p.default_model || p.model || '').trim(),
+            agentType: String(p.agent_type || '').trim(),
           }))
           .filter((p) => p.id && p.id !== SELF && (subIds ? subIds.has(p.id) : true));
         if (cancelled) return;
@@ -166,8 +167,8 @@ export default function Office() {
           const prevById = new Map(prev.map((w) => [w.id, w]));
           return team.map((p, i) => {
             const ex = prevById.get(p.id);
-            if (ex) return { ...ex, name: p.title || ex.name, role: p.role || ex.role, model: p.model || ex.model };
-            return makeWorker(p.id, p.title || p.id, p.role, p.model, i);
+            if (ex) return { ...ex, name: p.title || ex.name, role: p.role || ex.role, model: p.model || ex.model, agentType: p.agentType || ex.agentType };
+            return makeWorker(p.id, p.title || p.id, p.role, p.model, i, p.agentType);
           });
         });
         setLoaded(true);
@@ -359,7 +360,7 @@ export default function Office() {
               <div data-id="office-mention" className="absolute bottom-full left-0 mb-2 w-full overflow-hidden rounded-xl border border-white/10 bg-[#16161a] shadow-2xl">
                 {workers.map((w) => (
                   <button key={w.id} data-id={`office-mention-${w.id}`} onClick={() => pickMention(w)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-white/[0.06]">
-                    <Avatar model={w.model} name={w.name} size={24} status={w.status} /><span className="text-[13px] text-zinc-200">{w.name}</span><span className="ml-auto font-mono text-[11px] text-zinc-500">{w.id}</span>
+                    <Avatar model={w.model} agentType={w.agentType} name={w.name} size={24} status={w.status} /><span className="text-[13px] text-zinc-200">{w.name}</span><span className="ml-auto font-mono text-[11px] text-zinc-500">{w.id}</span>
                   </button>
                 ))}
               </div>
@@ -368,7 +369,7 @@ export default function Office() {
               {mode === 'broadcast' ? (
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-[12px] text-amber-200"><Megaphone className="h-3 w-3" /> 广播 · 全体（{workers.length}）</span>
               ) : target ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.06] py-1 pl-1 pr-2 text-[12px] text-zinc-200"><Avatar model={target.model} name={target.name} size={20} status={target.status} /><span className="font-medium">{target.name}</span><span className="font-mono text-[11px] text-zinc-500">{target.id}</span><button data-id="office-target-clear" onClick={() => setSelectedId(null)} className="rounded-full p-0.5 text-zinc-500 hover:bg-white/10 hover:text-zinc-200"><X className="h-3 w-3" /></button></span>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.06] py-1 pl-1 pr-2 text-[12px] text-zinc-200"><Avatar model={target.model} agentType={target.agentType} name={target.name} size={20} status={target.status} /><span className="font-medium">{target.name}</span><span className="font-mono text-[11px] text-zinc-500">{target.id}</span><button data-id="office-target-clear" onClick={() => setSelectedId(null)} className="rounded-full p-0.5 text-zinc-500 hover:bg-white/10 hover:text-zinc-200"><X className="h-3 w-3" /></button></span>
               ) : (<span className="text-[12px] text-zinc-600">点画布里的 worker，或输入 @ 选择</span>)}
             </div>
             <div className="flex items-end gap-2 rounded-2xl border border-white/10 bg-[#121214] px-3 py-2.5 transition-colors focus-within:border-white/25">
@@ -436,7 +437,7 @@ const CommandMsg = memo(function CommandMsg({ m, byId }: { m: ChatMsg; byId: Rec
     const w = m.to ? byId[m.to] : null;
     return (
       <div data-id={`office-msg-${m.id}`} className="flex flex-col items-end gap-1">
-        <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">派给 {w && <Avatar model={w.model} name={w.name} size={16} />}<span className="text-zinc-400">{w?.name ?? m.to}</span></div>
+        <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">派给 {w && <Avatar model={w.model} agentType={w.agentType} name={w.name} size={16} />}<span className="text-zinc-400">{w?.name ?? m.to}</span></div>
         <div className="max-w-[86%] rounded-2xl rounded-tr-md bg-sky-500/90 px-3 py-1.5 text-[12.5px] leading-relaxed text-white shadow-sm whitespace-pre-wrap">{m.text}</div>
       </div>
     );
@@ -444,7 +445,7 @@ const CommandMsg = memo(function CommandMsg({ m, byId }: { m: ChatMsg; byId: Rec
   const w = m.from ? byId[m.from] : null;
   return (
     <div data-id={`office-msg-${m.id}`} className="flex items-center gap-2">
-      {w && <Avatar model={w.model} name={w.name} size={22} />}
+      {w && <Avatar model={w.model} agentType={w.agentType} name={w.name} size={22} />}
       <div className="min-w-0 flex-1">
         <div className="text-[11px] text-zinc-500">{w?.name ?? m.from}</div>
         <div className="inline-flex items-center gap-1 text-[12px] text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> {m.text}</div>
@@ -477,7 +478,7 @@ const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onH
       <div className={`h-[3px] w-full ${working ? 'bg-amber-400/60' : 'bg-emerald-400/45'}`} />
       <div data-id={`office-window-header-${w.id}`} onPointerDown={(e) => onMoveStart(e, w.id)}
         className="flex shrink-0 cursor-grab select-none items-center gap-2.5 bg-white/[0.015] px-3 py-2.5 active:cursor-grabbing">
-        <Avatar model={w.model} name={w.name} size={32} status={w.status} />
+        <Avatar model={w.model} agentType={w.agentType} name={w.name} size={32} status={w.status} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-semibold text-zinc-100">{w.name}</span>
           <span className="flex items-center gap-1 font-mono text-[10.5px] text-zinc-500">
