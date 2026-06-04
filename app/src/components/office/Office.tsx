@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2, Send, Megaphone, AtSign, X, Loader2, CheckCircle2, MessageSquare,
   Plus, Minus, Maximize2, Crown, Inbox, UserPlus, ChevronRight, Power, Users, Store, Copy, Check,
 } from 'lucide-react';
 import TemplateMarket, { MarketTmpl, TeamTmpl } from './TemplateMarket';
+import AgentAvatar from '../AgentAvatar';
 
 /*
  * Office — 「办公室」（data-id="office"）。
@@ -64,13 +65,6 @@ const INIT_WORKERS: Worker[] = [
   ]),
 ];
 
-const ACCENT: Record<string, { grad: string; ring: string; chip: string; bar: string; ping: string }> = {
-  sky:     { grad: 'from-sky-500/40 to-sky-700/15',         ring: 'ring-sky-400/50',     chip: 'text-sky-300',     bar: 'bg-sky-400/50',     ping: 'ring-sky-400/60' },
-  violet:  { grad: 'from-violet-500/40 to-violet-700/15',   ring: 'ring-violet-400/50',  chip: 'text-violet-300',  bar: 'bg-violet-400/50',  ping: 'ring-violet-400/60' },
-  emerald: { grad: 'from-emerald-500/40 to-emerald-700/15', ring: 'ring-emerald-400/50', chip: 'text-emerald-300', bar: 'bg-emerald-400/50', ping: 'ring-emerald-400/60' },
-  amber:   { grad: 'from-amber-500/40 to-amber-700/15',     ring: 'ring-amber-400/50',   chip: 'text-amber-300',   bar: 'bg-amber-400/50',   ping: 'ring-amber-400/60' },
-  rose:    { grad: 'from-rose-500/40 to-rose-700/15',       ring: 'ring-rose-400/50',    chip: 'text-rose-300',    bar: 'bg-rose-400/50',    ping: 'ring-rose-400/60' },
-};
 const Z_MIN = 0.4, Z_MAX = 1.8;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const hhmm = (ms: number) => { const d = new Date(ms); const p = (n: number) => String(n).padStart(2, '0'); return `${p(d.getHours())}:${p(d.getMinutes())}`; };
@@ -81,14 +75,28 @@ const elapsed = (from: number, now: number) => {
 };
 const p2 = (n: number) => String(n).padStart(2, '0');
 
-/* ── avatar：emoji + 状态环（working 脉冲 / done 绿环 / idle 灰）── */
-function Avatar({ emoji, accent, size = 30, status }: { emoji: string; accent: string; size?: number; status?: Status }) {
-  const acc = ACCENT[accent] ?? ACCENT.sky;
+/* 模型 → 现成的 agent avatar 类型（claude-symbol / openai / cicy ...），复用 AgentAvatar 的官方图标。 */
+function agentTypeForModel(model: string): string {
+  const m = (model || '').toLowerCase();
+  if (m.includes('claude')) return 'claude';
+  if (m.includes('gpt') || m.includes('openai') || /\bo[0-9]\b/.test(m)) return 'codex';
+  if (m.includes('gemini')) return 'codex';
+  if (m.includes('cursor')) return 'cursor';
+  if (m.includes('kiro')) return 'kiro-cli';
+  if (m.includes('copilot')) return 'copilot';
+  if (m.includes('opencode')) return 'opencode';
+  return 'cicy-claude';   // deepseek 及其它走自家 CiCy 图标
+}
+
+/* ── avatar：现成的 agent avatar + 状态环（working 黄脉冲 / idle 绿 / 其它灰）── */
+function Avatar({ model, name, size = 30, status }: { model: string; name: string; size?: number; status?: Status }) {
   const ring = status === 'working' ? 'ring-2 ring-amber-400/70' : status === 'idle' ? 'ring-2 ring-emerald-400/50' : 'ring-1 ring-white/10';
   return (
     <span className="relative inline-grid shrink-0 place-items-center" style={{ width: size, height: size }}>
       {status === 'working' && <span className="absolute inset-0 rounded-full ring-2 ring-amber-400/70 animate-ping opacity-40" />}
-      <span className={`grid h-full w-full place-items-center rounded-full bg-gradient-to-br ${acc.grad} ${ring}`} style={{ fontSize: size * 0.5 }}>{emoji}</span>
+      <AgentAvatar agentType={agentTypeForModel(model)} title={name}
+        className={`!h-full !w-full !rounded-full !border-transparent ${ring}`}
+        style={{ padding: size * 0.18 }} />
     </span>
   );
 }
@@ -142,6 +150,9 @@ export default function Office() {
   const chatRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const dragRef = useRef<null | { kind: 'pan' | 'move' | 'resize'; id?: string; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; moved: boolean }>(null);
+  // 给「稳定回调 / 全局拖拽监听」读最新值,避免把 workers/zoom 进依赖导致每帧重建 listener。
+  const workersRef = useRef(workers); workersRef.current = workers;
+  const zoomRef = useRef(zoom); zoomRef.current = zoom;
 
   const byId = useMemo(() => Object.fromEntries(workers.map((w) => [w.id, w])), [workers]);
   const target = selectedId ? byId[selectedId] : null;
@@ -168,28 +179,36 @@ export default function Office() {
 
   const push = (m: Omit<ChatMsg, 'id' | 'ts'>) => setChat((c) => [...c, { id: seq.current++, ts: hhmm(Date.now()), ...m }]);
 
-  const selectWorker = (w?: Worker) => { if (!w) return; setSelectedId(w.id); setMode('single'); setMentionOpen(false); inputRef.current?.focus(); };
+  // 稳定回调（[] 依赖,读 ref 取最新值）→ 传给 memo 化的 WorkerWindow,避免每次 render/计时都让全部窗口重渲染。
+  const selectWorker = useCallback((id?: string) => { if (!id) return; setSelectedId(id); setMode('single'); setMentionOpen(false); inputRef.current?.focus(); }, []);
+  const onHover = useCallback((id: string, h: boolean) => setHoverId((cur) => (h ? id : cur === id ? null : cur)), []);
+  const startMove = useCallback((e: React.PointerEvent, id: string) => {
+    e.stopPropagation(); const w = workersRef.current.find((x) => x.id === id); if (!w) return;
+    dragRef.current = { kind: 'move', id, sx: e.clientX, sy: e.clientY, ox: w.x, oy: w.y, ow: w.w, oh: w.h, moved: false };
+  }, []);
+  const startResize = useCallback((e: React.PointerEvent, id: string) => {
+    e.stopPropagation(); const w = workersRef.current.find((x) => x.id === id); if (!w) return;
+    dragRef.current = { kind: 'resize', id, sx: e.clientX, sy: e.clientY, ox: w.x, oy: w.y, ow: w.w, oh: w.h, moved: false };
+  }, []);
 
   const onPointerDownBg = (e: React.PointerEvent) => { dragRef.current = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: pan.x, oy: pan.y, ow: 0, oh: 0, moved: false }; };
-  const startMove = (e: React.PointerEvent, w: Worker) => { e.stopPropagation(); dragRef.current = { kind: 'move', id: w.id, sx: e.clientX, sy: e.clientY, ox: w.x, oy: w.y, ow: w.w, oh: w.h, moved: false }; };
-  const startResize = (e: React.PointerEvent, w: Worker) => { e.stopPropagation(); dragRef.current = { kind: 'resize', id: w.id, sx: e.clientX, sy: e.clientY, ox: w.x, oy: w.y, ow: w.w, oh: w.h, moved: false }; };
   useEffect(() => {
     const move = (e: PointerEvent) => {
       const d = dragRef.current; if (!d) return;
-      const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
+      const dx = e.clientX - d.sx, dy = e.clientY - d.sy, z = zoomRef.current;
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) d.moved = true;
       if (d.kind === 'pan') setPan({ x: d.ox + dx, y: d.oy + dy });
-      else if (d.kind === 'move') setWorkers((prev) => prev.map((w) => w.id === d.id ? { ...w, x: d.ox + dx / zoom, y: d.oy + dy / zoom } : w));
-      else setWorkers((prev) => prev.map((w) => w.id === d.id ? { ...w, w: Math.max(MIN_W, d.ow + dx / zoom), h: Math.max(MIN_H, d.oh + dy / zoom) } : w));
+      else if (d.kind === 'move') setWorkers((prev) => prev.map((w) => w.id === d.id ? { ...w, x: d.ox + dx / z, y: d.oy + dy / z } : w));
+      else setWorkers((prev) => prev.map((w) => w.id === d.id ? { ...w, w: Math.max(MIN_W, d.ow + dx / z), h: Math.max(MIN_H, d.oh + dy / z) } : w));
     };
     const up = () => {
       const d = dragRef.current;
-      if (d && !d.moved) { if (d.kind === 'move' && d.id) selectWorker(byId[d.id]); else if (d.kind === 'pan') setSelectedId(null); }
+      if (d && !d.moved) { if (d.kind === 'move' && d.id) selectWorker(d.id); else if (d.kind === 'pan') setSelectedId(null); }
       dragRef.current = null;
     };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-  }, [zoom, byId]);
+  }, [selectWorker]);
 
   const onWheel = (e: React.WheelEvent) => {
     const next = clamp(zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1), Z_MIN, Z_MAX);
@@ -279,7 +298,7 @@ export default function Office() {
                   <div className="space-y-1.5">
                     {candidates.map((c) => (
                       <div key={c.id} data-id={`office-cand-${c.id}`} className="flex items-center gap-2.5 rounded-xl border border-white/[0.06] bg-white/[0.02] px-2.5 py-2">
-                        <span className="opacity-50 grayscale"><Avatar emoji={c.emoji} accent={c.accent} size={28} /></span>
+                        <span className="opacity-50 grayscale"><Avatar model={c.model} name={c.name} size={28} /></span>
                         <span className="min-w-0 flex-1"><span className="block truncate text-[12.5px] text-zinc-300">{c.name}</span><span className="font-mono text-[10.5px] text-zinc-600">{c.id} · 离线</span></span>
                         <button data-id={`office-cand-join-${c.id}`} onClick={() => joinCandidate(c)} className="inline-flex items-center gap-1 rounded-lg bg-white/[0.06] px-2 py-1 text-[11.5px] text-zinc-200 transition-colors hover:bg-white/[0.12]"><UserPlus className="h-3.5 w-3.5" /> 加入</button>
                       </div>
@@ -301,7 +320,7 @@ export default function Office() {
               <div data-id="office-mention" className="absolute bottom-full left-0 mb-2 w-full overflow-hidden rounded-xl border border-white/10 bg-[#16161a] shadow-2xl">
                 {workers.map((w) => (
                   <button key={w.id} data-id={`office-mention-${w.id}`} onClick={() => pickMention(w)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-white/[0.06]">
-                    <Avatar emoji={w.emoji} accent={w.accent} size={24} status={w.status} /><span className="text-[13px] text-zinc-200">{w.name}</span><span className="ml-auto font-mono text-[11px] text-zinc-500">{w.id}</span>
+                    <Avatar model={w.model} name={w.name} size={24} status={w.status} /><span className="text-[13px] text-zinc-200">{w.name}</span><span className="ml-auto font-mono text-[11px] text-zinc-500">{w.id}</span>
                   </button>
                 ))}
               </div>
@@ -310,7 +329,7 @@ export default function Office() {
               {mode === 'broadcast' ? (
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-[12px] text-amber-200"><Megaphone className="h-3 w-3" /> 广播 · 全体（{workers.length}）</span>
               ) : target ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.06] py-1 pl-1 pr-2 text-[12px] text-zinc-200"><Avatar emoji={target.emoji} accent={target.accent} size={20} status={target.status} /><span className="font-medium">{target.name}</span><span className="font-mono text-[11px] text-zinc-500">{target.id}</span><button data-id="office-target-clear" onClick={() => setSelectedId(null)} className="rounded-full p-0.5 text-zinc-500 hover:bg-white/10 hover:text-zinc-200"><X className="h-3 w-3" /></button></span>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.06] py-1 pl-1 pr-2 text-[12px] text-zinc-200"><Avatar model={target.model} name={target.name} size={20} status={target.status} /><span className="font-medium">{target.name}</span><span className="font-mono text-[11px] text-zinc-500">{target.id}</span><button data-id="office-target-clear" onClick={() => setSelectedId(null)} className="rounded-full p-0.5 text-zinc-500 hover:bg-white/10 hover:text-zinc-200"><X className="h-3 w-3" /></button></span>
               ) : (<span className="text-[12px] text-zinc-600">点画布里的 worker，或输入 @ 选择</span>)}
             </div>
             <div className="flex items-end gap-2 rounded-2xl border border-white/10 bg-[#121214] px-3 py-2.5 transition-colors focus-within:border-white/25">
@@ -332,9 +351,9 @@ export default function Office() {
 
         <div data-id="office-canvas-layer" className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
           {workers.map((w) => (
-            <WorkerWindow key={w.id} w={w} now={now} selected={selectedId === w.id} hovered={hoverId === w.id}
-              onHover={(h) => setHoverId((cur) => (h ? w.id : cur === w.id ? null : cur))}
-              onMoveStart={(e) => startMove(e, w)} onResizeStart={(e) => startResize(e, w)} />
+            <WorkerWindow key={w.id} w={w} now={w.status === 'working' ? now : 0}
+              selected={selectedId === w.id} hovered={hoverId === w.id}
+              onHover={onHover} onMoveStart={startMove} onResizeStart={startResize} />
           ))}
         </div>
 
@@ -356,7 +375,7 @@ export default function Office() {
   );
 }
 
-function CommandMsg({ m, byId }: { m: ChatMsg; byId: Record<string, Worker> }) {
+const CommandMsg = memo(function CommandMsg({ m, byId }: { m: ChatMsg; byId: Record<string, Worker> }) {
   if (m.kind === 'note') return <div data-id={`office-msg-${m.id}`} className="px-2 text-center text-[11.5px] leading-relaxed text-zinc-600">{m.text}</div>;
   if (m.kind === 'broadcast') return (
     <div data-id={`office-msg-${m.id}`} className="overflow-hidden rounded-xl border border-amber-500/20 bg-amber-500/[0.06]">
@@ -368,7 +387,7 @@ function CommandMsg({ m, byId }: { m: ChatMsg; byId: Record<string, Worker> }) {
     const w = m.to ? byId[m.to] : null;
     return (
       <div data-id={`office-msg-${m.id}`} className="flex flex-col items-end gap-1">
-        <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">派给 {w && <Avatar emoji={w.emoji} accent={w.accent} size={16} />}<span className="text-zinc-400">{w?.name ?? m.to}</span></div>
+        <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">派给 {w && <Avatar model={w.model} name={w.name} size={16} />}<span className="text-zinc-400">{w?.name ?? m.to}</span></div>
         <div className="max-w-[86%] rounded-2xl rounded-tr-md bg-sky-500/90 px-3 py-1.5 text-[12.5px] leading-relaxed text-white shadow-sm whitespace-pre-wrap">{m.text}</div>
       </div>
     );
@@ -376,7 +395,7 @@ function CommandMsg({ m, byId }: { m: ChatMsg; byId: Record<string, Worker> }) {
   const w = m.from ? byId[m.from] : null;
   return (
     <div data-id={`office-msg-${m.id}`} className="flex items-center gap-2">
-      {w && <Avatar emoji={w.emoji} accent={w.accent} size={22} />}
+      {w && <Avatar model={w.model} name={w.name} size={22} />}
       <div className="min-w-0 flex-1">
         <div className="text-[11px] text-zinc-500">{w?.name ?? m.from}</div>
         <div className="inline-flex items-center gap-1 text-[12px] text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> {m.text}</div>
@@ -384,13 +403,12 @@ function CommandMsg({ m, byId }: { m: ChatMsg; byId: Record<string, Worker> }) {
       <span className="self-start font-mono text-[10px] text-zinc-700">{m.ts}</span>
     </div>
   );
-}
+});
 
-function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResizeStart }: {
+const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResizeStart }: {
   w: Worker; now: number; selected: boolean; hovered: boolean;
-  onHover: (h: boolean) => void; onMoveStart: (e: React.PointerEvent) => void; onResizeStart: (e: React.PointerEvent) => void;
+  onHover: (id: string, h: boolean) => void; onMoveStart: (e: React.PointerEvent, id: string) => void; onResizeStart: (e: React.PointerEvent, id: string) => void;
 }) {
-  const acc = ACCENT[w.accent] ?? ACCENT.sky;
   const lines = w.script.slice(0, w.shown).slice(-12);
   const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => { const n = bodyRef.current; if (n) n.scrollTop = n.scrollHeight; }, [w.shown]);
@@ -402,15 +420,15 @@ function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResiz
 
   return (
     <div data-id={`office-window-${w.id}`}
-      onPointerEnter={() => onHover(true)} onPointerLeave={() => onHover(false)}
+      onPointerEnter={() => onHover(w.id, true)} onPointerLeave={() => onHover(w.id, false)}
       className={`absolute flex flex-col overflow-hidden rounded-2xl border bg-[#0e0e11] transition-[box-shadow,transform,border-color] duration-150
         ${selected ? 'ring-2 ring-white/30 border-transparent -translate-y-0.5 shadow-2xl' : hovered ? 'border-white/15 shadow-2xl' : 'border-white/[0.07] shadow-xl'}`}
       style={{ left: w.x, top: w.y, width: w.w, height: w.h, zIndex: selected ? 60 : hovered ? 40 : 10 }}>
       {/* 状态色条：thinking 黄 / idle 绿 */}
       <div className={`h-[3px] w-full ${working ? 'bg-amber-400/60' : 'bg-emerald-400/45'}`} />
-      <div data-id={`office-window-header-${w.id}`} onPointerDown={onMoveStart}
+      <div data-id={`office-window-header-${w.id}`} onPointerDown={(e) => onMoveStart(e, w.id)}
         className="flex shrink-0 cursor-grab select-none items-center gap-2.5 bg-white/[0.015] px-3 py-2.5 active:cursor-grabbing">
-        <Avatar emoji={w.emoji} accent={w.accent} size={32} status={w.status} />
+        <Avatar model={w.model} name={w.name} size={32} status={w.status} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-semibold text-zinc-100">{w.name}</span>
           <span className="flex items-center gap-1 font-mono text-[10.5px] text-zinc-500">
@@ -453,9 +471,9 @@ function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResiz
         })}
       </div>
       {/* resize 抓手：悬停/选中才显露 */}
-      <div data-id={`office-window-resize-${w.id}`} onPointerDown={onResizeStart}
+      <div data-id={`office-window-resize-${w.id}`} onPointerDown={(e) => onResizeStart(e, w.id)}
         className={`absolute bottom-1 right-1 h-3.5 w-3.5 cursor-nwse-resize rounded-sm transition-opacity ${hovered || selected ? 'opacity-100' : 'opacity-0'}`}
         style={{ background: 'linear-gradient(135deg, transparent 45%, rgba(255,255,255,0.4) 45%, rgba(255,255,255,0.4) 55%, transparent 55%, transparent 70%, rgba(255,255,255,0.4) 70%, rgba(255,255,255,0.4) 80%, transparent 80%)' }} />
     </div>
   );
-}
+});
