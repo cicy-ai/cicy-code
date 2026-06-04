@@ -84,10 +84,10 @@ const p2 = (n: number) => String(n).padStart(2, '0');
 /* ── avatar：emoji + 状态环（working 脉冲 / done 绿环 / idle 灰）── */
 function Avatar({ emoji, accent, size = 30, status }: { emoji: string; accent: string; size?: number; status?: Status }) {
   const acc = ACCENT[accent] ?? ACCENT.sky;
-  const ring = status === 'working' ? `ring-2 ${acc.ring}` : 'ring-1 ring-white/10';
+  const ring = status === 'working' ? 'ring-2 ring-amber-400/70' : status === 'idle' ? 'ring-2 ring-emerald-400/50' : 'ring-1 ring-white/10';
   return (
     <span className="relative inline-grid shrink-0 place-items-center" style={{ width: size, height: size }}>
-      {status === 'working' && <span className={`absolute inset-0 rounded-full ring-2 ${acc.ping} animate-ping opacity-40`} />}
+      {status === 'working' && <span className="absolute inset-0 rounded-full ring-2 ring-amber-400/70 animate-ping opacity-40" />}
       <span className={`grid h-full w-full place-items-center rounded-full bg-gradient-to-br ${acc.grad} ${ring}`} style={{ fontSize: size * 0.5 }}>{emoji}</span>
     </span>
   );
@@ -110,7 +110,7 @@ const INIT_CANDIDATES: Cand[] = [
 ];
 
 // 统一布点：360 宽窗 + 28 横向间距 / 248 高窗 + 36 纵向间距，3 列。所有 window(初始/新增/团队)共用,保证不重叠。
-const COLS = 3, GAP_X = 388, GAP_Y = 284, ORIGIN_X = 32, ORIGIN_Y = 24;
+const COLS = 3, GAP_X = 388, GAP_Y = 284, ORIGIN_X = 32, ORIGIN_Y = 64;
 const slotPos = (slot: number) => ({ x: ORIGIN_X + (slot % COLS) * GAP_X, y: ORIGIN_Y + Math.floor(slot / COLS) * GAP_Y });
 
 function makeWorker(id: string, name: string, role: string, emoji: string, accent: string, model: string, slot: number, script: Line[]): Worker {
@@ -422,9 +422,9 @@ function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResiz
           </span>
         </span>
         {working ? (
-          <span className={`inline-flex items-center gap-1 text-[10.5px] ${acc.chip}`}><Loader2 className="h-3 w-3 animate-spin" /> thinking · {elapsed(w.startedAt, now)}</span>
+          <span className="inline-flex items-center gap-1 text-[10.5px] text-amber-300"><Loader2 className="h-3 w-3 animate-spin" /> thinking · {elapsed(w.startedAt, now)}</span>
         ) : (
-          <span className="text-[10.5px] text-zinc-600">idle</span>
+          <span className="inline-flex items-center gap-1 text-[10.5px] text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> idle</span>
         )}
       </div>
       {/* meta：模型 + 上下文用量 */}
