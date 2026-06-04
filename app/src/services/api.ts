@@ -141,6 +141,7 @@ const api = {
   getAgentInspector: (id: string, params?: { q?: string; limit?: number; offset?: number }) => http.get(`/api/agents/inspector/${encodeURIComponent(id)}`, { params }),
   getAgentUsageLog: (id: string, limit = 200) => http.get(`/api/agents/usage-log/${encodeURIComponent(id)}`, { params: { limit } }),
   getAgentUsageAnalysis: (id: string) => http.get(`/api/agents/usage-analysis/${encodeURIComponent(id)}`),
+  getAgentUsageBlock: (id: string, idx: number) => http.get(`/api/agents/usage-block/${encodeURIComponent(id)}`, { params: { idx } }),
   getAgentHistoryIDs: (id: string, params?: { conversation_id?: string }) => http.get(`/api/agents/history-ids/${encodeURIComponent(id)}`, { params }),
   getAgentCurrentReply: (id: string, params?: { conversation_id?: string }) => http.get(`/api/agents/current-reply/${encodeURIComponent(id)}`, { params }),
   getAgentCurrentHistory: (id: string, params?: { limit?: number; before?: number; conversation_id?: string }) => http.get(`/api/agents/current-history/${encodeURIComponent(id)}`, { params }),

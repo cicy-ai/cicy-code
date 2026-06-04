@@ -345,6 +345,7 @@ Options:
 	http.HandleFunc("/api/agents/current-history/", wa(handleAgentCurrentHistoryByPane))
 	http.HandleFunc("/api/agents/usage-log/", wa(handleAgentUsageLogByPane))
 	http.HandleFunc("/api/agents/usage-analysis/", wa(handleAgentUsageAnalysisByPane))
+	http.HandleFunc("/api/agents/usage-block/", wa(handleAgentUsageBlockByPane))
 	http.HandleFunc("/api/agents/current-history-tool/", wa(handleAgentCurrentHistoryToolDetailByPane))
 	http.HandleFunc("/api/agents/history-ids/", wa(handleAgentHistoryIDsByPane))
 	http.HandleFunc("/api/agents/current-reply/", wa(handleAgentCurrentReplyByPane))

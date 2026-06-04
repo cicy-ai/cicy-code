@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { Download, Loader2, RefreshCw } from 'lucide-react';
 import apiService from '../../services/api';
 
 // Usage analysis (P1): KPI cards + cache-efficiency gauge + this-request token
@@ -256,6 +256,32 @@ export default function AgentUsageAnalysisView({ paneId, active }: { paneId: str
   useEffect(() => { loadedRef.current = false; setData(null); }, [paneId]);
   useEffect(() => { if (active && paneId) refresh(); }, [active, paneId, refresh]);
 
+  // Download the full (untruncated) content of one history block by its message
+  // index — the panel only carries a short preview. Pulls messages[idx] from
+  // current.json via the backend and saves it as a .txt.
+  const [dlIdx, setDlIdx] = useState<number | null>(null);
+  const downloadBlock = useCallback(async (idx: number) => {
+    if (!paneId) return;
+    setDlIdx(idx);
+    try {
+      const { data } = await apiService.getAgentUsageBlock(paneId, idx);
+      const text = typeof data?.text === 'string' ? data.text : '';
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${paneId}-block-${idx + 1}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      /* ignore */
+    } finally {
+      setDlIdx(null);
+    }
+  }, [paneId]);
+
   // Auto-refresh once per second while the view is active. Silent so the data
   // updates live without the spinner flickering or blanking on transient errors.
   useEffect(() => {
@@ -509,6 +535,16 @@ export default function AgentUsageAnalysisView({ paneId, active }: { paneId: str
                         <span className="min-w-0 flex-1 truncate text-zinc-400" title={b.preview}>{b.preview || '—'}</span>
                         <span className="shrink-0 text-zinc-500 tabular-nums">{fmtPct(b.pct)}</span>
                         <span className="w-12 shrink-0 text-right text-zinc-200 tabular-nums" title={fmtFull(b.tokens)}>{fmtNum(b.tokens)}</span>
+                        <button
+                          type="button"
+                          data-id={`agent-usage-history-top-dl-${b.idx}`}
+                          onClick={() => downloadBlock(b.idx)}
+                          disabled={dlIdx === b.idx}
+                          title={t('anBlockDownload', '下载这一段完整内容')}
+                          className="shrink-0 rounded p-0.5 text-zinc-600 transition-colors hover:bg-white/[0.08] hover:text-zinc-200 disabled:opacity-40"
+                        >
+                          {dlIdx === b.idx ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                        </button>
                       </div>
                     ))}
                   </div>

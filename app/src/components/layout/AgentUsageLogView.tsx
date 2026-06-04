@@ -364,16 +364,16 @@ export default function AgentUsageLogView({ paneId, active }: { paneId: string; 
         {/* spike alert banner */}
         {spikeRec ? (
           <div data-id="agent-usage-spike-alert" className="mb-1.5 flex items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/[0.08] px-2 py-1 text-[11px] text-red-300">
-            <span className="font-semibold">⚠ {t('usageSpike', 'Token 暴增')}</span>
+            <span className="font-semibold">⚠ {isCost ? t('usageSpikeCost', '成本暴增') : t('usageSpike', 'Token 暴增')}</span>
             <span className="text-red-300/80">
-              {fmtTime(spikeRec.ts)} · {fmtNum(spikeVal)} · {ratio.toFixed(1)}× {t('usageMedian', '中位')}
+              {fmtTime(spikeRec.ts)} · {fmtMetric(spikeVal)} · {ratio.toFixed(1)}× {t('usageMedian', '中位')}
               {spike.count > 1 ? ` · ${t('usageSpikeMore', '共')} ${spike.count}` : ''}
             </span>
           </div>
         ) : (
           <div data-id="agent-usage-spike-ok" className="mb-1.5 flex items-center gap-1.5 px-0.5 text-[11px] text-zinc-500">
             <span className="text-emerald-400/80">✓ {t('usageStable', '用量平稳')}</span>
-            <span className="text-zinc-600">{t('usageMedian', '中位')} {fmtNum(spike.median)} · {t('usageSpikeThreshold', '阈值')} {SPIKE_FACTOR}×</span>
+            <span className="text-zinc-600">{t('usageMedian', '中位')} {fmtMetric(spike.median)} · {t('usageSpikeThreshold', '阈值')} {SPIKE_FACTOR}×</span>
           </div>
         )}
         {/* per-request bars; spikes flagged red. '总量' stays stacked so a spike
@@ -383,10 +383,11 @@ export default function AgentUsageLogView({ paneId, active }: { paneId: string; 
             const total = metricVal(r, 'total');
             const val = spike.vals[i];
             const isSpike = spike.flags[i];
-            const colH = metric === 'total' ? (total / chartMax) * 100 : (val / chartMax) * 100;
-            const tip = `${fmtTime(r.ts)} · ${t('usageColTotal', '总计')} ${fmtFull(total)}\n` +
+            const colH = metric === 'total' ? (total / maxTotal) * 100 : isCost ? (val / maxCost) * 100 : (val / maxTotal) * 100;
+            const costLine = (r.cost_credit || 0) > 0 ? ` · ${t('usageMetricCost', '成本')} ${fmtCost(r.cost_credit)}` : '';
+            const tip = `${fmtTime(r.ts)} · ${t('usageColTotal', '总计')} ${fmtFull(total)}${costLine}\n` +
               SEG.map(s => `${s.label} ${fmtFull(s.get(r))}`).join(' · ') +
-              (isSpike ? `\n⚠ ${t('usageSpike', 'Token 暴增')} (${(val / (spike.median || 1)).toFixed(1)}× ${t('usageMedian', '中位')})` : '');
+              (isSpike ? `\n⚠ ${isCost ? t('usageSpikeCost', '成本暴增') : t('usageSpike', 'Token 暴增')} (${(val / (spike.median || 1)).toFixed(1)}× ${t('usageMedian', '中位')})` : '');
             return (
               <div
                 key={`${r.request_id || ''}-${r.ts || ''}-${i}`}
