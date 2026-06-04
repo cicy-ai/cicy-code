@@ -384,11 +384,18 @@ func setMihomoGroupSelection(group, member string) error {
 // api.myip.com used to be the single source; it'd occasionally 5xx / time
 // out and the whole 🌍 panel would degrade. We now race a small list and
 // take whoever returns a parseable IP first — cancel the stragglers.
-// Both endpoints work from CN-friendly networks; the three big
-// Cloudflare-fronted alternatives (ifconfig.co, ipapi.co, freeipapi.com)
-// return WAF challenges to curl UA so they're not in the race.
 //
-// To add a third source: append to ipExitProbes with a parser that maps
+// The catch: api.myip.com / api.ip.sb are *foreign* and unreachable from a
+// mainland-China network when probing **direct** (no proxy) — so the 🌍 panel's
+// "direct" side couldn't get IP/area without a VPN. We therefore also race two
+// China-reachable sources (ipip.net, ip.cn) that resolve without 翻墙. Because
+// it's a first-responder race, the CN sources win on a direct CN probe while
+// the foreign ones win (or tie) when probing through an overseas proxy — both
+// report whatever IP actually hits them, so the comparison stays consistent.
+// (The Cloudflare-fronted alternatives ifconfig.co / ipapi.co / freeipapi.com
+// return WAF challenges to curl's UA, so they're deliberately not in the race.)
+//
+// To add another source: append to ipExitProbes with a parser that maps
 // whatever JSON it returns into the common {ip, country, cc, source[, asn,
 // city]} shape — the callers (curlExitIP / mihomoExitIPProbe) rename keys
 // to fit their existing output contract.
@@ -434,6 +441,68 @@ var ipExitProbes = []ipExitProbe{
 			}
 			if p.ASNOrganization != "" {
 				m["asn"] = fmt.Sprintf("AS%d %s", p.ASN, p.ASNOrganization)
+			}
+			return m, true
+		},
+	},
+	{
+		// ipip.net — reachable from mainland China without 翻墙.
+		// {"ret":"ok","data":{"ip":"1.2.3.4","location":["中国","江苏","南京","","电信"]}}
+		name: "ipip.net",
+		url:  "https://myip.ipip.net/json",
+		parse: func(body []byte) (M, bool) {
+			var p struct {
+				Ret  string `json:"ret"`
+				Data struct {
+					IP       string   `json:"ip"`
+					Location []string `json:"location"`
+				} `json:"data"`
+			}
+			if json.Unmarshal(body, &p) != nil || p.Data.IP == "" {
+				return nil, false
+			}
+			country, city := "", ""
+			if loc := p.Data.Location; len(loc) > 0 {
+				country = loc[0]
+				if len(loc) > 2 {
+					city = loc[2]
+				}
+			}
+			cc := ""
+			if strings.Contains(country, "中国") || strings.EqualFold(country, "China") {
+				cc = "CN"
+			}
+			m := M{"ip": p.Data.IP, "country": country, "cc": cc, "source": "ipip.net"}
+			if city != "" {
+				m["city"] = city
+			}
+			return m, true
+		},
+	},
+	{
+		// ip.cn — second China-reachable fallback.
+		// {"rs":1,"code":0,"address":"中国 北京市 ...","ip":"1.2.3.4","isp":"..."}
+		name: "ip.cn",
+		url:  "https://www.ip.cn/api/index?ip=&type=0",
+		parse: func(body []byte) (M, bool) {
+			var p struct {
+				IP      string `json:"ip"`
+				Address string `json:"address"`
+			}
+			if json.Unmarshal(body, &p) != nil || p.IP == "" {
+				return nil, false
+			}
+			country := strings.TrimSpace(p.Address)
+			if f := strings.Fields(country); len(f) > 0 {
+				country = f[0]
+			}
+			cc := ""
+			if strings.Contains(p.Address, "中国") {
+				cc = "CN"
+			}
+			m := M{"ip": p.IP, "country": country, "cc": cc, "source": "ip.cn"}
+			if p.Address != "" {
+				m["city"] = strings.TrimSpace(p.Address)
 			}
 			return m, true
 		},
@@ -624,14 +693,14 @@ func runCicyMihomo(ctx context.Context, sub string) (string, error) {
 // "status: running".
 func parseMihomoStatusOutput(out string) M {
 	info := M{
-		"running":      false,
-		"pid":          "",
-		"binary":       "",
-		"config":       "",
-		"log":          "",
-		"started_at":   "",
-		"controller":   "",
-		"version":      "",
+		"running":    false,
+		"pid":        "",
+		"binary":     "",
+		"config":     "",
+		"log":        "",
+		"started_at": "",
+		"controller": "",
+		"version":    "",
 	}
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
@@ -1052,17 +1121,17 @@ func handleProxyExport(w http.ResponseWriter, r *http.Request) {
 	}
 	allowLAN, _ := readMihomoAllowLAN()
 	J(w, M{
-		"success":    true,
-		"ip_mode":    mode,
-		"host":       host,
-		"port":       port,
-		"user":       user,
-		"password":   password,
-		"proxy_url":  proxyURL,
-		"lines":      lines,
-		"script":     strings.Join(lines, "\n"),
-		"lan_ips":    lanIPs,
-		"allow_lan":  allowLAN,
+		"success":   true,
+		"ip_mode":   mode,
+		"host":      host,
+		"port":      port,
+		"user":      user,
+		"password":  password,
+		"proxy_url": proxyURL,
+		"lines":     lines,
+		"script":    strings.Join(lines, "\n"),
+		"lan_ips":   lanIPs,
+		"allow_lan": allowLAN,
 	})
 }
 
