@@ -4,7 +4,7 @@ import {
   Plus, Minus, Maximize2, Crown, Inbox, UserPlus, ChevronRight, Power, Users, Store, Copy, Check,
 } from 'lucide-react';
 import TemplateMarket, { MarketTmpl, TeamTmpl } from './TemplateMarket';
-import AgentAvatar from '../AgentAvatar';
+import { getAgentTypeIconMeta } from '../../lib/agentType';
 
 /*
  * Office — 「办公室」（data-id="office"）。
@@ -88,15 +88,22 @@ function agentTypeForModel(model: string): string {
   return 'cicy-claude';   // deepseek 及其它走自家 CiCy 图标
 }
 
-/* ── avatar：现成的 agent avatar + 状态环（working 黄脉冲 / idle 绿 / 其它灰）── */
+/* ── avatar：现成的 agent 官方图标 + 状态环（working 黄脉冲 / idle 绿 / 其它灰）。
+ *    直接拿 getAgentTypeIconMeta 自渲染方形图标,避免 AgentAvatar 内部固定 h-8 w-8 被我外层尺寸挤变形。 */
 function Avatar({ model, name, size = 30, status }: { model: string; name: string; size?: number; status?: Status }) {
+  const icon = getAgentTypeIconMeta(agentTypeForModel(model));
   const ring = status === 'working' ? 'ring-2 ring-amber-400/70' : status === 'idle' ? 'ring-2 ring-emerald-400/50' : 'ring-1 ring-white/10';
+  const inner = Math.round(size * 0.6);
   return (
     <span className="relative inline-grid shrink-0 place-items-center" style={{ width: size, height: size }}>
       {status === 'working' && <span className="absolute inset-0 rounded-full ring-2 ring-amber-400/70 animate-ping opacity-40" />}
-      <AgentAvatar agentType={agentTypeForModel(model)} title={name}
-        className={`!h-full !w-full !rounded-full !border-transparent ${ring}`}
-        style={{ padding: size * 0.18 }} />
+      <span className={`grid h-full w-full place-items-center overflow-hidden rounded-full bg-zinc-100 ${ring}`}>
+        {icon?.src ? (
+          <img src={icon.src} alt={name} className="object-contain" style={{ width: inner, height: inner }} />
+        ) : (
+          <span className="font-semibold leading-none text-zinc-700" style={{ fontSize: Math.round(size * 0.42) }}>{icon?.text ?? (name.trim()[0] || '?')}</span>
+        )}
+      </span>
     </span>
   );
 }
