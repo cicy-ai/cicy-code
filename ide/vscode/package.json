@@ -1,0 +1,106 @@
+{
+  "name": "cicy-code",
+  "displayName": "cicy-code",
+  "description": "Embed your cicy-code team workspace (multi-agent terminals, files, artifacts) inside VS Code.",
+  "version": "0.0.0",
+  "publisher": "cicy",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cicy-ai/cicy-code.git",
+    "directory": "ide/vscode"
+  },
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "cicy",
+    "agent",
+    "terminal",
+    "ai",
+    "remote"
+  ],
+  "icon": "media/icon.png",
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onUri"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cicyCode",
+          "title": "cicy-code",
+          "icon": "media/sidebar.svg"
+        }
+      ]
+    },
+    "views": {
+      "cicyCode": [
+        {
+          "id": "cicyCode.workspace",
+          "name": "Workspace",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "cicy-code.setTeam",
+        "title": "cicy-code: Set Team (URL + token)"
+      },
+      {
+        "command": "cicy-code.switchTeam",
+        "title": "cicy-code: Switch Team"
+      },
+      {
+        "command": "cicy-code.openPanel",
+        "title": "cicy-code: Open Workspace in Editor"
+      },
+      {
+        "command": "cicy-code.reload",
+        "title": "cicy-code: Reload Workspace"
+      },
+      {
+        "command": "cicy-code.signOut",
+        "title": "cicy-code: Sign Out (clear token)"
+      }
+    ],
+    "configuration": {
+      "title": "cicy-code",
+      "properties": {
+        "cicyCode.teams": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Known cicy-code teams. Each entry is `{ \"name\": string, \"url\": string }`. Tokens are NOT stored here — they live in VS Code SecretStorage. Use the **cicy-code: Set Team** command to add one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "url": { "type": "string" }
+            },
+            "required": ["url"]
+          }
+        },
+        "cicyCode.activeTeamUrl": {
+          "type": "string",
+          "default": "",
+          "description": "URL of the currently active team (must match one of cicyCode.teams)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.84.0",
+    "typescript": "^5.4.0"
+  }
+}
