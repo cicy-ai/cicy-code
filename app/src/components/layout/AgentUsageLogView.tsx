@@ -27,6 +27,23 @@ interface UsageRecord {
 }
 
 type GroupMode = 'request' | 'conversation';
+type Metric = 'total' | 'input' | 'output' | 'cacheRead' | 'cacheWrite';
+
+// Per-request value for a chart metric. NB: input_tokens already includes the
+// caches, so 'input' is the *fresh* (uncached) portion and 'total' = input +
+// output (caches are a subset of input, not additive).
+function metricVal(r: UsageRecord, m: Metric): number {
+  const cr = r.cache_read_input_tokens || 0;
+  const cw = r.cache_creation_input_tokens || 0;
+  const inp = r.input_tokens || 0;
+  switch (m) {
+    case 'total': return inp + (r.output_tokens || 0);
+    case 'input': return Math.max(0, inp - cr - cw);
+    case 'output': return r.output_tokens || 0;
+    case 'cacheRead': return cr;
+    case 'cacheWrite': return cw;
+  }
+}
 
 interface ConversationAgg {
   conversationId: string;
@@ -103,6 +120,7 @@ export default function AgentUsageLogView({ paneId, active }: { paneId: string; 
   const [records, setRecords] = useState<UsageRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [groupMode, setGroupMode] = useState<GroupMode>('request');
+  const [metric, setMetric] = useState<Metric>('total');
   const [page, setPage] = useState(0);
   const loadedOnceRef = useRef(false);
 
@@ -172,6 +190,37 @@ export default function AgentUsageLogView({ paneId, active }: { paneId: string; 
     return Array.from(byId.values());
   }, [records]);
 
+  // Per-request stacked-bar chart data: most recent ~60 requests, oldest→newest
+  // (records arrive newest-first). Each bar is one request, stacked by token
+  // kind; bar height is the request's total scaled to the tallest bar shown.
+  const chartRecs = useMemo(() => records.slice(0, 60).reverse(), [records]);
+  // Chart height is always scaled to the request total so dimensions stay
+  // comparable when toggling; spike detection runs on the *selected* metric.
+  const chartMax = useMemo(
+    () => Math.max(1, ...chartRecs.map(r => metricVal(r, 'total'))),
+    [chartRecs],
+  );
+
+  // Spike detection on the selected metric: flag any request whose value far
+  // exceeds the window's median (robust to outliers). This is the whole point
+  // of the view — surface token surges and let the user re-cut by dimension.
+  const SPIKE_FACTOR = 2.5;
+  const spike = useMemo(() => {
+    const vals = chartRecs.map(r => metricVal(r, metric));
+    const nz = vals.filter(v => v > 0).slice().sort((a, b) => a - b);
+    const median = nz.length ? nz[Math.floor(nz.length / 2)] : 0;
+    const threshold = median > 0 ? median * SPIKE_FACTOR : Infinity;
+    const flags = vals.map(v => median > 0 && v > threshold);
+    let latest = -1;
+    let biggest = -1;
+    for (let i = 0; i < flags.length; i++) {
+      if (!flags[i]) continue;
+      latest = i;
+      if (biggest < 0 || vals[i] > vals[biggest]) biggest = i;
+    }
+    return { vals, median, threshold, flags, latest, biggest, count: flags.filter(Boolean).length };
+  }, [chartRecs, metric]);
+
   // Pagination over whichever list the current mode shows.
   const sourceLen = groupMode === 'conversation' ? conversations.length : records.length;
   const pageCount = Math.max(1, Math.ceil(sourceLen / PAGE_SIZE));
@@ -231,6 +280,99 @@ export default function AgentUsageLogView({ paneId, active }: { paneId: string; 
     </div>
   );
 
+  // Composition segments for the stacked '总量' view (bottom→top).
+  const SEG = [
+    { key: 'cacheRead', color: '#34d399', label: t('usageColCacheRead', '输入缓存'), get: (r: UsageRecord) => r.cache_read_input_tokens || 0 },
+    { key: 'cacheWrite', color: '#38bdf8', label: t('usageColCacheWrite', '输出缓存'), get: (r: UsageRecord) => r.cache_creation_input_tokens || 0 },
+    { key: 'input', color: '#818cf8', label: t('usageFreshInput', '新输入'), get: (r: UsageRecord) => Math.max(0, (r.input_tokens || 0) - (r.cache_read_input_tokens || 0) - (r.cache_creation_input_tokens || 0)) },
+    { key: 'output', color: '#fbbf24', label: t('usageColOutput', '输出'), get: (r: UsageRecord) => r.output_tokens || 0 },
+  ];
+  const METRICS: { key: Metric; label: string; color: string }[] = [
+    { key: 'total', label: t('usageMetricTotal', '总量'), color: '#a78bfa' },
+    { key: 'input', label: t('usageFreshInput', '新输入'), color: '#818cf8' },
+    { key: 'output', label: t('usageColOutput', '输出'), color: '#fbbf24' },
+    { key: 'cacheRead', label: t('usageColCacheRead', '输入缓存'), color: '#34d399' },
+    { key: 'cacheWrite', label: t('usageColCacheWrite', '输出缓存'), color: '#38bdf8' },
+  ];
+  const SPIKE_COLOR = '#f87171';
+  const metricColor = METRICS.find(m => m.key === metric)?.color || '#a78bfa';
+
+  const renderChart = () => {
+    const spikeRec = spike.latest >= 0 ? chartRecs[spike.latest] : null;
+    const spikeVal = spike.latest >= 0 ? spike.vals[spike.latest] : 0;
+    const ratio = spike.median > 0 ? spikeVal / spike.median : 0;
+    return (
+      <div data-id="agent-usage-chart" className="shrink-0 border-b border-[var(--vsc-border)] px-3 py-2">
+        {/* dimension selector — re-cut the same curve by token kind */}
+        <div data-id="agent-usage-chart-metrics" className="mb-1.5 flex flex-wrap items-center gap-1">
+          {METRICS.map(m => (
+            <button
+              key={m.key}
+              data-id={`agent-usage-metric-${m.key}`}
+              type="button"
+              onClick={() => setMetric(m.key)}
+              className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] leading-5 transition-colors ${
+                metric === m.key ? 'bg-white/[0.10] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
+              }`}
+            >
+              <span className="h-2 w-2 rounded-sm" style={{ background: m.color }} />
+              {m.label}
+            </button>
+          ))}
+          <span className="ml-auto text-[11px] text-zinc-600">{t('usageRecent', '最近')} {chartRecs.length}</span>
+        </div>
+        {/* spike alert banner */}
+        {spikeRec ? (
+          <div data-id="agent-usage-spike-alert" className="mb-1.5 flex items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/[0.08] px-2 py-1 text-[11px] text-red-300">
+            <span className="font-semibold">⚠ {t('usageSpike', 'Token 暴增')}</span>
+            <span className="text-red-300/80">
+              {fmtTime(spikeRec.ts)} · {fmtNum(spikeVal)} · {ratio.toFixed(1)}× {t('usageMedian', '中位')}
+              {spike.count > 1 ? ` · ${t('usageSpikeMore', '共')} ${spike.count}` : ''}
+            </span>
+          </div>
+        ) : (
+          <div data-id="agent-usage-spike-ok" className="mb-1.5 flex items-center gap-1.5 px-0.5 text-[11px] text-zinc-500">
+            <span className="text-emerald-400/80">✓ {t('usageStable', '用量平稳')}</span>
+            <span className="text-zinc-600">{t('usageMedian', '中位')} {fmtNum(spike.median)} · {t('usageSpikeThreshold', '阈值')} {SPIKE_FACTOR}×</span>
+          </div>
+        )}
+        {/* per-request bars; spikes flagged red. '总量' stays stacked so a spike
+            also reveals its composition. */}
+        <div data-id="agent-usage-chart-bars" className="flex h-[96px] items-end gap-px">
+          {chartRecs.map((r, i) => {
+            const total = metricVal(r, 'total');
+            const val = spike.vals[i];
+            const isSpike = spike.flags[i];
+            const colH = metric === 'total' ? (total / chartMax) * 100 : (val / chartMax) * 100;
+            const tip = `${fmtTime(r.ts)} · ${t('usageColTotal', '总计')} ${fmtFull(total)}\n` +
+              SEG.map(s => `${s.label} ${fmtFull(s.get(r))}`).join(' · ') +
+              (isSpike ? `\n⚠ ${t('usageSpike', 'Token 暴增')} (${(val / (spike.median || 1)).toFixed(1)}× ${t('usageMedian', '中位')})` : '');
+            return (
+              <div
+                key={`${r.request_id || ''}-${r.ts || ''}-${i}`}
+                data-id={`agent-usage-chart-bar-${i}`}
+                className={`flex h-full min-w-[2px] flex-1 flex-col-reverse justify-start overflow-hidden rounded-sm bg-white/[0.03] hover:bg-white/[0.06] ${isSpike ? 'ring-1 ring-red-400/70' : ''}`}
+                title={tip}
+              >
+                <div className="flex w-full flex-col-reverse" style={{ height: `${colH}%` }}>
+                  {metric === 'total' ? (
+                    SEG.map(s => {
+                      const v = s.get(r);
+                      if (v <= 0) return null;
+                      return <div key={s.key} style={{ flexGrow: v, background: isSpike ? SPIKE_COLOR : s.color }} />;
+                    })
+                  ) : (
+                    <div style={{ flexGrow: 1, background: isSpike ? SPIKE_COLOR : metricColor }} />
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   if (loading && !records.length) {
     return (
       <div data-id="agent-usage-log" className="flex h-full w-full flex-col overflow-hidden">
@@ -254,6 +396,7 @@ export default function AgentUsageLogView({ paneId, active }: { paneId: string; 
   return (
     <div data-id="agent-usage-log" className="flex h-full w-full flex-col overflow-hidden">
       {renderToolbar()}
+      {groupMode === 'request' ? renderChart() : null}
       {groupMode === 'conversation' ? (
         <div data-id="agent-usage-conv-scroll" className="min-h-0 flex-1 overflow-auto">
           <table data-id="agent-usage-conv-table" className="min-w-full whitespace-nowrap border-collapse text-[12px] tabular-nums">
