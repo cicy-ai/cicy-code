@@ -1149,10 +1149,85 @@ func aiGatewayReplySnapshotPath(agentID string) string {
 	return filepath.Join(aiGatewayHistoryDir(agentID), "reply.json")
 }
 
+// sanitizeConvID makes a conversation id safe as a directory name; empty → "_nil".
+func sanitizeConvID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "_nil"
+	}
+	return strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, id)
+}
+
+// aiGatewayConversationDir is the per-conversation snapshot dir:
+//   .cicy/history/chat/<conversation_id>/
+func aiGatewayConversationDir(agentID, convID string) string {
+	return filepath.Join(aiGatewayHistoryDir(agentID), "chat", sanitizeConvID(convID))
+}
+
+// ensureRelSymlink makes linkPath a symlink to relTarget (relative to linkPath's
+// dir), replacing whatever is there atomically. Returns an error if the platform
+// can't create symlinks, so the caller can fall back to a plain file write.
+func ensureRelSymlink(linkPath, relTarget string) error {
+	if cur, err := os.Readlink(linkPath); err == nil && cur == relTarget {
+		return nil
+	}
+	tmp := fmt.Sprintf("%s.lnktmp.%d", linkPath, time.Now().UnixNano())
+	_ = os.Remove(tmp)
+	if err := os.Symlink(relTarget, tmp); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, linkPath); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// aiGatewayWriteSnapshotFile writes a per-conversation snapshot under
+// chat/<conv>/<name> and repoints the canonical history/<name> symlink to it, so
+// every (unchanged) reader of the canonical path transparently sees the active
+// conversation. Conversations no longer overwrite each other. On platforms
+// without symlink support it falls back to writing the canonical path directly.
+func aiGatewayWriteSnapshotFile(agentID, name, convID string, value interface{}) error {
+	canonical := filepath.Join(aiGatewayHistoryDir(agentID), name)
+	// One-time migration: if the canonical path is still a real file (pre-split
+	// layout), relocate it into its own conversation dir so its snapshot isn't
+	// lost when we replace it with a symlink. Cheap no-op once it's a symlink.
+	if fi, err := os.Lstat(canonical); err == nil && fi.Mode().IsRegular() {
+		if data, e := os.ReadFile(canonical); e == nil {
+			var probe struct {
+				ConversationID string `json:"conversation_id"`
+			}
+			_ = json.Unmarshal(data, &probe)
+			legacy := filepath.Join(aiGatewayConversationDir(agentID, probe.ConversationID), name)
+			if _, e2 := os.Stat(legacy); os.IsNotExist(e2) {
+				_ = os.MkdirAll(filepath.Dir(legacy), 0755)
+				_ = os.WriteFile(legacy, data, 0644)
+			}
+		}
+	}
+	realPath := filepath.Join(aiGatewayConversationDir(agentID, convID), name)
+	if err := aiGatewayWriteJSONAtomic(realPath, value); err != nil {
+		return err
+	}
+	relTarget := filepath.Join("chat", sanitizeConvID(convID), name)
+	if err := ensureRelSymlink(canonical, relTarget); err != nil {
+		// Symlink unsupported (e.g. Windows without privilege): keep every reader
+		// working by writing the canonical path directly (legacy behavior).
+		return aiGatewayWriteJSONAtomic(canonical, value)
+	}
+	return nil
+}
+
 func aiGatewayWriteCurrentSnapshot(agentID string, current aiGatewayCurrentSnapshot) error {
 	current.Body = aiGatewayAnnotateCurrentBodyHistoryIDs(aiGatewayCloneJSONValue(current.Body))
 	current.MaxHistoryID = aiGatewayCurrentBodyMaxHistoryID(current.Body)
-	return aiGatewayWriteJSONAtomic(aiGatewayCurrentSnapshotPath(agentID), current)
+	return aiGatewayWriteSnapshotFile(agentID, "current.json", current.ConversationID, current)
 }
 
 // aiGatewayReplySnapshotLite is a simplified version for reply.json
@@ -1190,7 +1265,7 @@ func aiGatewayWriteReplySnapshot(agentID string, reply aiGatewayReplySnapshot) e
 		TotalTokens:              reply.TotalTokens,
 		CostCredit:               reply.CostCredit,
 	}
-	return aiGatewayWriteJSONAtomic(aiGatewayReplySnapshotPath(agentID), lite)
+	return aiGatewayWriteSnapshotFile(agentID, "reply.json", reply.ConversationID, lite)
 }
 
 func aiGatewayReadReplySnapshotFile(agentID string) (aiGatewayReplySnapshot, error) {

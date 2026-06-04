@@ -1845,6 +1845,47 @@ func codexCatalogBuildLines(catalogPath string, wantedModels []string) []string 
 	}
 }
 
+// claudeResumeBootLines emits boot.sh shell that sets $CICY_RESUME to
+// "--resume <id>" when the agent's last conversation is resumable, else leaves
+// it empty (fresh start). Resumable means: the (symlinked) current.json carries
+// a real session id — NOT the 8-hex gateway fallback — AND claude's own
+// transcript for it exists under ~/.claude/projects/*/<id>.jsonl. The id IS
+// current.json's conversation_id (== claude's session_id == the .jsonl name).
+// All decided inside boot.sh; no send-keys.
+func claudeResumeBootLines() []string {
+	return []string{
+		`CICY_RESUME=""`,
+		`_cid=""`,
+		`if [ -f "$WORKSPACE/.cicy/history/current.json" ]; then _cid=$(sed -n 's/.*"conversation_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$WORKSPACE/.cicy/history/current.json" | head -1); fi`,
+		`case "$_cid" in`,
+		`  ""|[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;`,
+		`  *) ls "$HOME"/.claude/projects/*/"$_cid".jsonl >/dev/null 2>&1 && CICY_RESUME="--resume $_cid" && echo "[cicy] resuming claude session $_cid" ;;`,
+		`esac`,
+		`unset _cid`,
+	}
+}
+
+// codexResumeBootLines emits boot.sh shell that sets $CODEX_RESUME to
+// "resume --last" when the agent's workspace already has a codex session, else
+// empty (fresh start). codex records cwd in every rollout and filters `resume`
+// by cwd by default, so `codex resume --last` continues THIS workspace's most
+// recent session. We scan only to decide whether one exists (so `--last` never
+// fails/​drops to a picker when there's none). conversation_id is deliberately
+// NOT used: codex's captured id is unreliable (often the 8-hex gateway
+// fallback). `codex resume` accepts the same -m/-c/--dangerously-bypass flags
+// as plain codex, so the gateway overrides still apply.
+func codexResumeBootLines() []string {
+	return []string{
+		`CODEX_RESUME=""`,
+		`_n=0`,
+		`for _f in $(ls -t "$HOME"/.codex/sessions/*/*/*/rollout-*.jsonl 2>/dev/null); do`,
+		`  _n=$((_n+1)); [ "$_n" -gt 80 ] && break`,
+		`  if head -1 "$_f" 2>/dev/null | grep -Eq "\"cwd\"[[:space:]]*:[[:space:]]*\"$WORKSPACE\""; then CODEX_RESUME="resume --last"; echo "[cicy] resuming codex session in $WORKSPACE"; break; fi`,
+		`done`,
+		`unset _n _f`,
+	}
+}
+
 func agentBootLines(agentType string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, shortID string, defaultModel string) []string {
 	aiCfg := loadRuntimeAIConfig()
 	switch normalizeAgentType(agentType) {
@@ -2695,6 +2736,9 @@ EOF
 		lines := []string{
 			ensureAgentCommandLine("codex", "Codex", codexInstallCmd(), installLog),
 		}
+		// Resume this workspace's most recent codex session when one exists
+		// (sets $CODEX_RESUME = "resume --last" or empty). Decided in boot.sh.
+		lines = append(lines, codexResumeBootLines()...)
 		if useCustomGateway {
 			baseURL := openAIRuntimeBaseURL(shortID)
 			model := resolveCodexStartupModel(defaultModel, aiCfg, shortID)
@@ -2714,7 +2758,7 @@ EOF
 			if allowAllActions {
 				bypass = " --dangerously-bypass-approvals-and-sandbox"
 			}
-			base := fmt.Sprintf("codex -m %s -c %s -c %s -c %s", modelArg, providerOverride, providerNameOverride, baseURLOverride)
+			base := fmt.Sprintf("codex $CODEX_RESUME -m %s -c %s -c %s -c %s", modelArg, providerOverride, providerNameOverride, baseURLOverride)
 			// Only attach the catalog when its build succeeded (file present and
 			// non-empty); otherwise launch Codex without it so a failed catalog
 			// build never blocks startup.
@@ -2731,9 +2775,9 @@ EOF
 		lines = append(lines, mitmAgentProxyBootLines()...)
 		lines = append(lines, "clear")
 		if allowAllActions {
-			lines = append(lines, "codex --dangerously-bypass-approvals-and-sandbox")
+			lines = append(lines, "codex $CODEX_RESUME --dangerously-bypass-approvals-and-sandbox")
 		} else {
-			lines = append(lines, "codex")
+			lines = append(lines, "codex $CODEX_RESUME")
 		}
 		return lines
 	case "claude", "cicy-claude":
@@ -2773,6 +2817,14 @@ EOF
 			// line (only context usage).
 			lines = append(lines, claudeUserStatuslineSetupLines(useCustomGateway)...)
 		}
+		// Resume the last conversation when its transcript exists (decided in
+		// boot.sh; sets $CICY_RESUME). Only plain claude — cicy-claude --bare is
+		// left untouched. Empty $CICY_RESUME ⇒ unchanged fresh-start behavior.
+		resumeArg := ""
+		if cmdName == "claude" {
+			lines = append(lines, claudeResumeBootLines()...)
+			resumeArg = " $CICY_RESUME"
+		}
 		if useCustomGateway {
 			model := resolveClaudeStartupModel(defaultModel, aiCfg, shortID)
 			settingsJSON := "{\n" + `  "env": {
@@ -2789,9 +2841,9 @@ EOF
 				"clear",
 			)
 			if allowAllActions {
-				lines = append(lines, fmt.Sprintf(`%s --settings "$WORKSPACE/.cicy/%s" --dangerously-skip-permissions`, launchPrefix, settingsFile))
+				lines = append(lines, fmt.Sprintf(`%s --settings "$WORKSPACE/.cicy/%s" --dangerously-skip-permissions%s`, launchPrefix, settingsFile, resumeArg))
 			} else {
-				lines = append(lines, fmt.Sprintf(`%s --settings "$WORKSPACE/.cicy/%s"`, launchPrefix, settingsFile))
+				lines = append(lines, fmt.Sprintf(`%s --settings "$WORKSPACE/.cicy/%s"%s`, launchPrefix, settingsFile, resumeArg))
 			}
 			return lines
 		}
@@ -2804,6 +2856,7 @@ EOF
 		if allowAllActions {
 			launchCmd += " --dangerously-skip-permissions"
 		}
+		launchCmd += resumeArg
 		lines = append(lines,
 			fmt.Sprintf(`rm -f "$WORKSPACE/.cicy/%s"`, settingsFile),
 			"unset ANTHROPIC_BASE_URL",
