@@ -42,7 +42,12 @@ func TestTtydInlineSmoke(t *testing.T) {
 	}
 	defer c.Close()
 
-	// gotty init handshake — serveTTY swallows this first message.
+	// Mirror the real frontend opening order: a resize ('3') BEFORE the gotty
+	// init handshake ('{'). serveTTY must drop the '{' wherever it appears (not
+	// just swallow the first message) — the regression that broke terminals.
+	if err := c.WriteMessage(websocket.TextMessage, []byte(`3{"columns":80,"rows":24}`)); err != nil {
+		t.Fatalf("send resize: %v", err)
+	}
 	if err := c.WriteMessage(websocket.TextMessage, []byte(`{"AuthToken":"","Arguments":""}`)); err != nil {
 		t.Fatalf("send init: %v", err)
 	}
