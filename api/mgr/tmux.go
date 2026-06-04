@@ -688,10 +688,8 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 				opts.session, opts.masterPaneID, err)
 		}
 	}
-	if err := startInstance(paneID, opts.port, opts.token); err != nil {
-		return M{"session": opts.session, "pane_id": shortPaneID(paneID)}, err
-	}
-	waitPort(opts.port, 10*time.Second)
+	// ttyd is served on demand inline (no per-pane port/server); nothing to
+	// start or wait for here. ttyd_port stays in the DB as unused metadata.
 	initPaneEnv(paneEnvOpts{
 		paneID:           paneID,
 		configJSON:       proxyConfigJSON,
@@ -1247,8 +1245,8 @@ func restartPaneCore(paneID, token string) error {
 		return fmt.Errorf("pane %s not found in db", paneID)
 	}
 
-	// Kill old ttyd
-	stopInstance(paneID)
+	// Clean up any stray external ttyd from older versions (inline serving has
+	// no external process, but an upgrade-in-place may leave one listening).
 	if port.Valid {
 		exec.Command("bash", "-c", fmt.Sprintf("pkill -f 'ttyd.*-p %d '", port.Int64)).Run()
 	}
@@ -1265,13 +1263,7 @@ func restartPaneCore(paneID, token string) error {
 	}
 	wsExpanded := strings.Replace(ws, "~", home, 1)
 	exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", wsExpanded).Run()
-
-	// Restart ttyd-go
-	p := int(port.Int64)
-	if err := startInstance(paneID, p, token); err != nil {
-		return err
-	}
-	waitPort(p, 10*time.Second)
+	// ttyd is served on demand inline; nothing to restart.
 
 	// Re-run init
 	initPaneEnv(paneEnvOpts{
@@ -5075,13 +5067,9 @@ func handleTtydStatus(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 404, "pane_id not found")
 		return
 	}
-	// Check if port is listening
-	listening := false
-	if inst := getInstance(paneID); inst != nil {
-		listening = true
-	}
+	// ttyd is served on demand inline; "running" = at least one live viewer.
 	status := "stopped"
-	if listening {
+	if ttydActiveCount(paneID) > 0 {
 		status = "running"
 	}
 	J(w, M{"pane_id": paneID, "port": port.Int64, "status": status})

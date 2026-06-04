@@ -482,7 +482,6 @@ func fullSyncOnce() {
 		json.Unmarshal([]byte(prevRaw), &prevMap)
 	}
 
-	token := getFirstToken()
 	statusMap := map[string]paneSt{}
 	restored := 0
 	for pid, cfg := range cache {
@@ -497,13 +496,7 @@ func fullSyncOnce() {
 			ws = strings.Replace(ws, "~", os.Getenv("HOME"), 1)
 			exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", ws).Run()
 		}
-		// Ensure ttyd instance is running
-		if port, _ := strconv.Atoi(cfg["ttyd_port"]); port > 0 {
-			if !isPortListening(port) {
-				log.Printf("[watcher] ttyd port %d not listening for %s, starting instance", port, pid)
-				startInstance(pid, port, token)
-			}
-		}
+		// ttyd is served on demand inline; no per-pane instance to ensure.
 		if ensurePipe(pid) {
 			restored++
 		}

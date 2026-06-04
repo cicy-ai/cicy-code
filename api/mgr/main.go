@@ -445,8 +445,7 @@ Options:
 	http.HandleFunc("/openclaw/", handleOpenClawAuth)
 	http.HandleFunc("/openclaw", handleOpenClawAuth)
 
-	// WebSocket terminal proxy
-	http.HandleFunc("/ws", handleWSProxy)
+	// In-process ttyd terminals (no per-pane port; see ttyd_inline.go)
 	http.HandleFunc("/ttyd/", handleTtydProxy)
 	http.HandleFunc("/ttyd-shell/", handleTtydShellProxy)
 

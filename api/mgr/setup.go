@@ -1955,10 +1955,7 @@ func startAgentFromConfig(paneID string, port int, workspace, initScript, config
 		sessionCreated = true
 	}
 
-	// Ensure ttyd
-	if !isPortListening(port) {
-		startInstance(paneID, port, token)
-	}
+	// ttyd is served on demand inline; no per-pane instance to ensure.
 	if sessionCreated {
 		initPaneEnv(paneEnvOpts{
 			paneID:          paneID,
@@ -2025,10 +2022,10 @@ func stopAgentByPaneID(paneID string) {
 	if paneID == "" {
 		return
 	}
-	stopInstance(paneID)
+	// No ttyd instance to stop; killing the tmux session EOFs any live attach.
 	session := strings.Split(paneID, ":")[0]
 	if session != "" {
-		stopShellSession(session) // tear down the grouped shell session + its ttyd
+		stopShellSession(session) // tear down the grouped shell session
 		exec.Command("tmux", "kill-session", "-t", session).Run()
 	}
 	log.Printf("[agent-stop] stopped %s", paneID)
