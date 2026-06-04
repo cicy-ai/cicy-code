@@ -109,14 +109,19 @@ const INIT_CANDIDATES: Cand[] = [
   { id: 'w-10017', name: '设计 Deo', role: 'designer', emoji: '🎭', accent: 'rose', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
 ];
 
+// 统一布点：360 宽窗 + 28 横向间距 / 248 高窗 + 36 纵向间距，3 列。所有 window(初始/新增/团队)共用,保证不重叠。
+const COLS = 3, GAP_X = 388, GAP_Y = 284, ORIGIN_X = 32, ORIGIN_Y = 24;
+const slotPos = (slot: number) => ({ x: ORIGIN_X + (slot % COLS) * GAP_X, y: ORIGIN_Y + Math.floor(slot / COLS) * GAP_Y });
+
 function makeWorker(id: string, name: string, role: string, emoji: string, accent: string, model: string, slot: number, script: Line[]): Worker {
-  return { id, name, role, emoji, accent, model, ctx: 5, ctxK: 256, status: 'idle', script, shown: 0, startedAt: 0, w: 360, h: 248, x: 36 + (slot % 3) * 372, y: 32 + Math.floor(slot / 3) * 280 };
+  return { id, name, role, emoji, accent, model, ctx: 5, ctxK: 256, status: 'idle', script, shown: 0, startedAt: 0, w: 360, h: 248, ...slotPos(slot) };
 }
 
 export default function Office() {
   const [workers, setWorkers] = useState<Worker[]>(() => {
     const t0 = Date.now();
-    return INIT_WORKERS.map((w) => (w.status === 'working' ? { ...w, startedAt: t0 } : w));
+    // 用统一网格重新布点,避免初始窗口互相重叠(加宽到 360 后旧间距会叠)。
+    return INIT_WORKERS.map((w, i) => ({ ...w, ...slotPos(i), startedAt: w.status === 'working' ? t0 : 0 }));
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
