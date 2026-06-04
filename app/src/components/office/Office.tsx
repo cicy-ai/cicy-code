@@ -100,7 +100,7 @@ const GENERIC_SCRIPT: Line[] = [
   { t: 'thinking', s: '读取任务卡与验收标准…' },
   { t: 'text', s: '开始执行。' },
   { t: 'thinking', s: '检查边界条件与依赖。' },
-  { t: 'text', s: '✅ 完成，等待验收。' },
+  { t: 'text', s: '✅ 完成。' },
 ];
 
 const INIT_CANDIDATES: Cand[] = [
