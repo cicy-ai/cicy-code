@@ -1,0 +1,10 @@
+# VS Code extension build output
+vscode/out/
+vscode/*.vsix
+
+# JetBrains plugin build output
+jetbrains/.gradle/
+jetbrains/build/
+
+# NOTE: jetbrains/gradle/wrapper/gradle-wrapper.jar IS committed on purpose —
+# it is required to bootstrap the build. Do not add a blanket *.jar ignore.

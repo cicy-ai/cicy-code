@@ -1,0 +1,33 @@
+<idea-plugin>
+    <id>ai.cicy.code</id>
+    <name>cicy-code</name>
+    <vendor email="support@cicy.ai" url="https://cicy.ai">cicy-ai</vendor>
+
+    <description><![CDATA[
+        Embed your <b>cicy-code team workspace</b> — multi-agent terminals,
+        native files, artifacts — inside a JetBrains IDE tool window.
+        <br/><br/>
+        cicy-code is a SaaS. This plugin runs nothing locally; it renders a
+        team you have already created/joined (configured by URL + token in
+        <i>Settings → Tools → cicy-code</i>). Editing, LSP and debugging stay in
+        the IDE; the cicy-code panel gives you the agent workspace beside it.
+    ]]></description>
+
+    <!-- JCEF (the embedded browser) ships in the platform; no extra module
+         needed beyond com.intellij.modules.platform. -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationService serviceImplementation="ai.cicy.code.CicySettings"/>
+        <applicationConfigurable
+            parentId="tools"
+            instance="ai.cicy.code.CicyConfigurable"
+            id="ai.cicy.code.settings"
+            displayName="cicy-code"/>
+        <toolWindow
+            id="cicy-code"
+            anchor="right"
+            icon="AllIcons.Toolwindows.WebToolWindow"
+            factoryClass="ai.cicy.code.CicyToolWindowFactory"/>
+    </extensions>
+</idea-plugin>
