@@ -1,0 +1,162 @@
+name: IDE Extensions
+
+# Publishes the cicy-code IDE clients to their marketplaces:
+#   - VS Code  -> Visual Studio Marketplace (vsce)  + Open VSX (ovsx)
+#   - JetBrains -> JetBrains Marketplace (gradle publishPlugin)
+#
+# This is DECOUPLED from the main `Release` workflow (which ships the Go
+# binary + npm packages). The IDE extensions are thin SaaS-team shells: they
+# only render a configured team URL in a webview/JCEF tool window, so they
+# version on their own cadence and trigger on their own tag prefix `ide-v*`.
+#
+# Expected repo layout (jobs no-op gracefully until these land):
+#   ide/vscode/      VS Code extension      (package.json, builds a .vsix)
+#   ide/jetbrains/   JetBrains plugin       (Gradle, buildPlugin/publishPlugin)
+#
+# Required repo secrets:
+#   VSCE_PAT                         Azure DevOps PAT, scope Marketplace>Manage
+#   OVSX_TOKEN                       open-vsx.org access token (Eclipse account)
+#   JETBRAINS_MARKETPLACE_TOKEN      plugins.jetbrains.com author token
+# Optional (JetBrains plugin signing — required for marketplace upload):
+#   JETBRAINS_CERTIFICATE_CHAIN      PEM cert chain
+#   JETBRAINS_PRIVATE_KEY            PEM private key
+#   JETBRAINS_PRIVATE_KEY_PASSWORD   key password
+
+on:
+  push:
+    tags:
+      - 'ide-v*'        # e.g. ide-v0.1.0
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Extension version (e.g. 0.1.0). Defaults to tag minus the ide-v prefix."
+        required: false
+      dry_run:
+        description: "Build/package only, do NOT publish to any marketplace."
+        type: boolean
+        default: false
+
+jobs:
+  # ------------------------------------------------------------------ detect
+  # Keep the publish jobs green BEFORE the extension code lands: only run a
+  # marketplace job if its source directory actually exists in the repo.
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      vscode: ${{ steps.check.outputs.vscode }}
+      jetbrains: ${{ steps.check.outputs.jetbrains }}
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          [ -f ide/vscode/package.json ] && echo "vscode=true"  >> "$GITHUB_OUTPUT" || echo "vscode=false"  >> "$GITHUB_OUTPUT"
+          [ -d ide/jetbrains ]           && echo "jetbrains=true" >> "$GITHUB_OUTPUT" || echo "jetbrains=false" >> "$GITHUB_OUTPUT"
+      - id: ver
+        run: |
+          RAW="${{ github.event.inputs.version || github.ref_name }}"
+          VERSION="${RAW#ide-v}"          # strip tag prefix if present
+          VERSION="${VERSION#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved extension version: ${VERSION}"
+
+  # ------------------------------------------------------------------ vscode
+  vscode:
+    needs: detect
+    if: needs.detect.outputs.vscode == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ide/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Pin version from tag
+        # package.json version is the marketplace source of truth; force it to
+        # the release version so vsce/ovsx don't re-publish a stale number.
+        run: |
+          VERSION="${{ needs.detect.outputs.version }}"
+          node -e "const fs=require('fs');const p=require('./package.json');p.version=process.argv[1];fs.writeFileSync('./package.json',JSON.stringify(p,null,2));console.log('vscode ext version ->',p.version);" "$VERSION"
+
+      - name: Package .vsix
+        run: npx --yes @vscode/vsce package --no-dependencies -o cicy-code.vsix
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cicy-code-vsix
+          path: ide/vscode/cicy-code.vsix
+
+      - name: Publish to Visual Studio Marketplace
+        if: ${{ github.event_name == 'push' && !inputs.dry_run }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx --yes @vscode/vsce publish --no-dependencies --packagePath cicy-code.vsix
+
+      - name: Publish to Open VSX
+        # Open VSX is where code-server / Cursor / VSCodium / Gitpod users get
+        # extensions — the MS marketplace license forbids those clients. Ship
+        # the SAME .vsix to both.
+        if: ${{ github.event_name == 'push' && !inputs.dry_run }}
+        env:
+          OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
+        run: npx --yes ovsx publish cicy-code.vsix -p "$OVSX_TOKEN"
+
+  # --------------------------------------------------------------- jetbrains
+  jetbrains:
+    needs: detect
+    if: needs.detect.outputs.jetbrains == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ide/jetbrains
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Pin version from tag
+        # gradle.properties `pluginVersion` drives the built plugin + the
+        # marketplace upload. Patch it in place.
+        run: |
+          VERSION="${{ needs.detect.outputs.version }}"
+          if grep -q '^pluginVersion' gradle.properties; then
+            sed -i "s/^pluginVersion=.*/pluginVersion=${VERSION}/" gradle.properties
+          else
+            echo "pluginVersion=${VERSION}" >> gradle.properties
+          fi
+          grep '^pluginVersion' gradle.properties
+
+      - name: Build plugin
+        run: ./gradlew buildPlugin --no-daemon
+
+      - name: Verify plugin (IntelliJ plugin-verifier)
+        # JetBrains rejects uploads that fail the verifier; catch it in CI.
+        run: ./gradlew verifyPlugin --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cicy-code-jetbrains
+          path: ide/jetbrains/build/distributions/*.zip
+
+      - name: Publish to JetBrains Marketplace
+        # NOTE: the VERY FIRST version of a plugin must be uploaded manually on
+        # plugins.jetbrains.com and pass human review (1-2 business days).
+        # Once the plugin exists, this auto-publishes every subsequent version.
+        # Until then this step will fail — expected; that's why it isn't fatal
+        # to the artifact upload above.
+        if: ${{ github.event_name == 'push' && !inputs.dry_run }}
+        env:
+          PUBLISH_TOKEN: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
+          CERTIFICATE_CHAIN: ${{ secrets.JETBRAINS_CERTIFICATE_CHAIN }}
+          PRIVATE_KEY: ${{ secrets.JETBRAINS_PRIVATE_KEY }}
+          PRIVATE_KEY_PASSWORD: ${{ secrets.JETBRAINS_PRIVATE_KEY_PASSWORD }}
+        run: ./gradlew publishPlugin --no-daemon
