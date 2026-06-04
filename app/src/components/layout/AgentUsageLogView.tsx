@@ -24,14 +24,16 @@ interface UsageRecord {
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
   total_tokens?: number;
+  cost_credit?: number;
 }
 
 type GroupMode = 'request' | 'conversation';
-type Metric = 'total' | 'input' | 'output' | 'cacheRead' | 'cacheWrite';
+type Metric = 'cost' | 'total' | 'input' | 'output' | 'cacheRead' | 'cacheWrite';
 
-// Per-request value for a chart metric. NB: input_tokens already includes the
+// Per-request value for a *token* metric. NB: input_tokens already includes the
 // caches, so 'input' is the *fresh* (uncached) portion and 'total' = input +
-// output (caches are a subset of input, not additive).
+// output (caches are a subset of input, not additive). 'cost' is handled
+// separately (it needs cost_credit / a cost-equivalent fallback).
 function metricVal(r: UsageRecord, m: Metric): number {
   const cr = r.cache_read_input_tokens || 0;
   const cw = r.cache_creation_input_tokens || 0;
@@ -42,7 +44,28 @@ function metricVal(r: UsageRecord, m: Metric): number {
     case 'output': return r.output_tokens || 0;
     case 'cacheRead': return cr;
     case 'cacheWrite': return cw;
+    case 'cost': return 0; // resolved via costVal() in the component
   }
+}
+
+// Cost-equivalent tokens — fallback when a model has no confirmed price tier
+// (cost_credit == 0). Uses the Anthropic-constant cache ratios (read 0.1×,
+// write 1.25× of input) and a 5× output weight. Approximate for non-Anthropic
+// providers, so it's surfaced as "估算", never as a real price.
+function effTokens(r: UsageRecord): number {
+  const cr = r.cache_read_input_tokens || 0;
+  const cw = r.cache_creation_input_tokens || 0;
+  const fresh = Math.max(0, (r.input_tokens || 0) - cr - cw);
+  return fresh + 0.1 * cr + 1.25 * cw + 5 * (r.output_tokens || 0);
+}
+
+// Compact USD formatter for per-request cost ($0.373 → "$0.37", tiny → "$0.004").
+function fmtCost(v?: number): string {
+  if (!v || v <= 0) return '$0';
+  if (v < 0.01) return `$${v.toFixed(3)}`;
+  if (v < 1) return `$${v.toFixed(2)}`;
+  if (v < 100) return `$${v.toFixed(2)}`;
+  return `$${Math.round(v)}`;
 }
 
 interface ConversationAgg {
@@ -120,7 +143,7 @@ export default function AgentUsageLogView({ paneId, active }: { paneId: string; 
   const [records, setRecords] = useState<UsageRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [groupMode, setGroupMode] = useState<GroupMode>('request');
-  const [metric, setMetric] = useState<Metric>('total');
+  const [metric, setMetric] = useState<Metric>('cost');
   const [page, setPage] = useState(0);
   const loadedOnceRef = useRef(false);
 
@@ -194,19 +217,32 @@ export default function AgentUsageLogView({ paneId, active }: { paneId: string; 
   // (records arrive newest-first). Each bar is one request, stacked by token
   // kind; bar height is the request's total scaled to the tallest bar shown.
   const chartRecs = useMemo(() => records.slice(0, 60).reverse(), [records]);
-  // Chart height is always scaled to the request total so dimensions stay
-  // comparable when toggling; spike detection runs on the *selected* metric.
-  const chartMax = useMemo(
-    () => Math.max(1, ...chartRecs.map(r => metricVal(r, 'total'))),
+
+  // 'cost' is the rigorous spike signal: each request is billed independently
+  // (cache reads are NOT deduped — you pay a reduced rate every re-read), so
+  // cost_credit is additive and catches cache-creation blow-ups that raw token
+  // counts miss. Fall back to cost-equivalent tokens ("估算") only when the
+  // model has no confirmed price (cost_credit == 0 across the window).
+  const costMode: 'real' | 'eff' = useMemo(
+    () => (chartRecs.some(r => (r.cost_credit || 0) > 0) ? 'real' : 'eff'),
     [chartRecs],
   );
+  const valOf = useCallback(
+    (r: UsageRecord, m: Metric) => (m === 'cost' ? (costMode === 'real' ? (r.cost_credit || 0) : effTokens(r)) : metricVal(r, m)),
+    [costMode],
+  );
+  const isCost = metric === 'cost';
+  // Token dims scale to the request total (so parts read as parts); cost scales
+  // to its own max.
+  const maxTotal = useMemo(() => Math.max(1, ...chartRecs.map(r => metricVal(r, 'total'))), [chartRecs]);
+  const maxCost = useMemo(() => Math.max(1e-9, ...chartRecs.map(r => valOf(r, 'cost'))), [chartRecs, valOf]);
 
   // Spike detection on the selected metric: flag any request whose value far
-  // exceeds the window's median (robust to outliers). This is the whole point
-  // of the view — surface token surges and let the user re-cut by dimension.
+  // exceeds the window's median (robust to outliers). For 'cost' this surfaces
+  // real spend surges; token dims let the user pinpoint the cause.
   const SPIKE_FACTOR = 2.5;
   const spike = useMemo(() => {
-    const vals = chartRecs.map(r => metricVal(r, metric));
+    const vals = chartRecs.map(r => valOf(r, metric));
     const nz = vals.filter(v => v > 0).slice().sort((a, b) => a - b);
     const median = nz.length ? nz[Math.floor(nz.length / 2)] : 0;
     const threshold = median > 0 ? median * SPIKE_FACTOR : Infinity;
@@ -219,7 +255,7 @@ export default function AgentUsageLogView({ paneId, active }: { paneId: string; 
       if (biggest < 0 || vals[i] > vals[biggest]) biggest = i;
     }
     return { vals, median, threshold, flags, latest, biggest, count: flags.filter(Boolean).length };
-  }, [chartRecs, metric]);
+  }, [chartRecs, metric, valOf]);
 
   // Pagination over whichever list the current mode shows.
   const sourceLen = groupMode === 'conversation' ? conversations.length : records.length;
@@ -288,6 +324,7 @@ export default function AgentUsageLogView({ paneId, active }: { paneId: string; 
     { key: 'output', color: '#fbbf24', label: t('usageColOutput', '输出'), get: (r: UsageRecord) => r.output_tokens || 0 },
   ];
   const METRICS: { key: Metric; label: string; color: string }[] = [
+    { key: 'cost', label: costMode === 'real' ? t('usageMetricCost', '成本') : `${t('usageMetricCost', '成本')}(${t('usageEstimated', '估算')})`, color: '#fb923c' },
     { key: 'total', label: t('usageMetricTotal', '总量'), color: '#a78bfa' },
     { key: 'input', label: t('usageFreshInput', '新输入'), color: '#818cf8' },
     { key: 'output', label: t('usageColOutput', '输出'), color: '#fbbf24' },
@@ -296,6 +333,9 @@ export default function AgentUsageLogView({ paneId, active }: { paneId: string; 
   ];
   const SPIKE_COLOR = '#f87171';
   const metricColor = METRICS.find(m => m.key === metric)?.color || '#a78bfa';
+  // Format a value in the units of the selected metric: USD for real cost,
+  // token counts otherwise (cost-equivalent fallback is still token-ish).
+  const fmtMetric = (v: number) => (isCost && costMode === 'real' ? fmtCost(v) : fmtNum(v));
 
   const renderChart = () => {
     const spikeRec = spike.latest >= 0 ? chartRecs[spike.latest] : null;
