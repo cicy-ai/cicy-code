@@ -31,7 +31,7 @@ const SELF = 'w-10001';
 const MIN_W = 240, MIN_H = 168;
 
 const W = (id: string, name: string, role: string, emoji: string, accent: string, model: string, ctx: number, ctxK: number, status: Status, x: number, y: number, script: Line[]): Worker =>
-  ({ id, name, role, emoji, accent, model, ctx, ctxK, status, script, shown: status === 'working' ? 0 : script.length, startedAt: 0, x, y, w: 360, h: 248 });
+  ({ id, name, role, emoji, accent, model, ctx, ctxK, status, script, shown: status === 'working' ? 0 : script.length, startedAt: 0, x, y, w: 400, h: 248 });
 
 const INIT_WORKERS: Worker[] = [
   W('w-10010', '架构师 Aria', 'dev-senior', '🏛️', 'sky', 'deepseek-v4-pro', 42, 256, 'working', 36, 32, [
@@ -109,12 +109,12 @@ const INIT_CANDIDATES: Cand[] = [
   { id: 'w-10017', name: '设计 Deo', role: 'designer', emoji: '🎭', accent: 'rose', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
 ];
 
-// 统一布点：360 宽窗 + 28 横向间距 / 248 高窗 + 36 纵向间距，3 列。所有 window(初始/新增/团队)共用,保证不重叠。
-const COLS = 3, GAP_X = 388, GAP_Y = 284, ORIGIN_X = 32, ORIGIN_Y = 64;
+// 统一布点：400 宽窗 + 28 横向间距 / 248 高窗 + 36 纵向间距，3 列。所有 window(初始/新增/团队)共用,保证不重叠。
+const COLS = 3, GAP_X = 428, GAP_Y = 284, ORIGIN_X = 32, ORIGIN_Y = 64;
 const slotPos = (slot: number) => ({ x: ORIGIN_X + (slot % COLS) * GAP_X, y: ORIGIN_Y + Math.floor(slot / COLS) * GAP_Y });
 
 function makeWorker(id: string, name: string, role: string, emoji: string, accent: string, model: string, slot: number, script: Line[]): Worker {
-  return { id, name, role, emoji, accent, model, ctx: 5, ctxK: 256, status: 'idle', script, shown: 0, startedAt: 0, w: 360, h: 248, ...slotPos(slot) };
+  return { id, name, role, emoji, accent, model, ctx: 5, ctxK: 256, status: 'idle', script, shown: 0, startedAt: 0, w: 400, h: 248, ...slotPos(slot) };
 }
 
 export default function Office() {
@@ -135,7 +135,7 @@ export default function Office() {
     { id: 1, kind: 'note', text: '拖标题移动卡片、拖右下角缩放、空白拖拽平移、滚轮缩放。点 worker 自动 @ 派任务，或切广播。', ts: hhmm(Date.now()) },
   ]);
   const [candidates, setCandidates] = useState<Cand[]>(INIT_CANDIDATES);
-  const [rosterOpen, setRosterOpen] = useState(true);
+  const [rosterOpen, setRosterOpen] = useState(false);
   const [market, setMarket] = useState<'team' | 'agent' | null>(null);
   const idSeq = useRef(20);
   const seq = useRef(2);
@@ -404,10 +404,10 @@ function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResiz
     <div data-id={`office-window-${w.id}`}
       onPointerEnter={() => onHover(true)} onPointerLeave={() => onHover(false)}
       className={`absolute flex flex-col overflow-hidden rounded-2xl border bg-[#0e0e11] transition-[box-shadow,transform,border-color] duration-150
-        ${selected ? `ring-2 ${acc.ring} border-transparent -translate-y-0.5 shadow-2xl` : hovered ? 'border-white/15 shadow-2xl' : 'border-white/[0.07] shadow-xl'}`}
+        ${selected ? 'ring-2 ring-white/30 border-transparent -translate-y-0.5 shadow-2xl' : hovered ? 'border-white/15 shadow-2xl' : 'border-white/[0.07] shadow-xl'}`}
       style={{ left: w.x, top: w.y, width: w.w, height: w.h, zIndex: selected ? 60 : hovered ? 40 : 10 }}>
-      {/* 角色色条 */}
-      <div className={`h-[3px] w-full ${acc.bar}`} />
+      {/* 状态色条：thinking 黄 / idle 绿 */}
+      <div className={`h-[3px] w-full ${working ? 'bg-amber-400/60' : 'bg-emerald-400/45'}`} />
       <div data-id={`office-window-header-${w.id}`} onPointerDown={onMoveStart}
         className="flex shrink-0 cursor-grab select-none items-center gap-2.5 bg-white/[0.015] px-3 py-2.5 active:cursor-grabbing">
         <Avatar emoji={w.emoji} accent={w.accent} size={32} status={w.status} />
