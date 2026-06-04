@@ -19,11 +19,37 @@ import apiService from '../../services/api';
 
 type Status = 'idle' | 'working';
 
+// 一条历史 = 一个 turn 里抽出的 thinking+text（不含 tool 结果）；user=用户提问，assistant=agent 输出。
+interface Entry { id: number; role: 'user' | 'assistant'; thinking: string; text: string; live?: boolean }
+
 interface Worker {
   id: string; name: string; role: string; agentType: string;   // agentType = CLI 类型(claude/codex/opencode...)，决定头像图标
   model: string; ctx: number; ctxK: number;   // 模型 + 上下文用量(%) + 上下文窗口(k)
-  status: Status; thinking: string; answer: string; startedAt: number;
+  status: Status; entries: Entry[]; sig: string; startedAt: number;   // entries=最近若干 turn 的历史；sig 用于跳过无变化重渲染
   x: number; y: number; w: number; h: number;
+}
+
+// 从 current-history 的一个 item 里抽 thinking+text（跳过 tool_use/tool_result）。返回 null = 该 turn 无可显示文本。
+function extractEntry(item: any): Entry | null {
+  const role: 'user' | 'assistant' = item?.role === 'user' ? 'user' : 'assistant';
+  let thinking = '', text = '';
+  const content = item?.content;
+  if (typeof content === 'string') {
+    text = content;
+  } else if (Array.isArray(content)) {
+    for (const c of content) {
+      const t = c?.type;
+      if (t === 'thinking' || t === 'reasoning') thinking += String(c?.thinking || c?.text || '');
+      else if (t === 'text' || t === 'output_text') text += String(c?.text || '');
+      // 跳过 tool_use / tool_result / image 等
+    }
+  } else if (typeof item?.text === 'string') {
+    text = item.text;
+  }
+  thinking = thinking.trim().slice(-900);
+  text = text.trim().slice(-1600);
+  if (!thinking && !text) return null;
+  return { id: Number(item?.history_id) || 0, role, thinking, text };
 }
 
 type ChatKind = 'dispatch' | 'broadcast' | 'done' | 'note';
@@ -98,7 +124,7 @@ const COLS = 3, GAP_X = 428, GAP_Y = 284, ORIGIN_X = 32, ORIGIN_Y = 64;
 const slotPos = (slot: number) => ({ x: ORIGIN_X + (slot % COLS) * GAP_X, y: ORIGIN_Y + Math.floor(slot / COLS) * GAP_Y });
 
 function makeWorker(id: string, name: string, role: string, model: string, slot: number, agentType = ''): Worker {
-  return { id, name, role, agentType, model, ctx: 0, ctxK: modelWindowK(model), status: 'idle', thinking: '', answer: '', startedAt: 0, w: 400, h: 248, ...slotPos(slot) };
+  return { id, name, role, agentType, model, ctx: 0, ctxK: modelWindowK(model), status: 'idle', entries: [], sig: '', startedAt: 0, w: 400, h: 248, ...slotPos(slot) };
 }
 
 export default function Office() {
@@ -179,36 +205,49 @@ export default function Office() {
     return () => { cancelled = true; window.clearInterval(t); };
   }, []);
 
-  // 真实实时：轮询每个 agent 的 current-reply（status/model/token/thinking/answer）。每 2s。
+  // 真实实时：每个 agent 取 current-history(最近若干 turn) + current-reply(实时状态/进行中turn)。每 2.5s。
   useEffect(() => {
     let cancelled = false;
+    const HISTORY_LIMIT = 8;
     const poll = async () => {
       const ws = workersRef.current;
       if (!ws.length) return;
       await Promise.all(ws.map(async (w) => {
         try {
-          const res: any = await apiService.getAgentCurrentReply(w.id);
-          const d: any = res?.data || {};
+          const [hRes, rRes]: any[] = await Promise.all([
+            (apiService as any).getAgentCurrentHistory(w.id, { limit: HISTORY_LIMIT }).catch(() => null),
+            apiService.getAgentCurrentReply(w.id).catch(() => null),
+          ]);
           if (cancelled) return;
+          const items: any[] = hRes?.data?.items || [];
+          const entries: Entry[] = [];
+          for (const it of items) { const e = extractEntry(it); if (e) entries.push(e); }
+          const d: any = rRes?.data || {};
           const working = isWorkingStatus(d.status) && d.complete !== true;
+          // 进行中的那一轮（还没落历史）追加为 live 条目，避免和已落历史重复。
+          if (working) {
+            const t = String(d.thinking || '').trim().slice(-900);
+            const a = String(d.answer || '').trim().slice(-1600);
+            const liveId = Number(d.history_id) || (entries.length ? entries[entries.length - 1].id + 1 : 1);
+            if ((t || a) && !entries.some((e) => e.id === liveId)) entries.push({ id: liveId, role: 'assistant', thinking: t, text: a, live: true });
+          }
           const model = String(d.model || w.model || '');
           const winK = modelWindowK(model);
           const inTok = (d.input_tokens || 0) + (d.cache_read_input_tokens || 0) + (d.cache_creation_input_tokens || 0);
-          const ctx = winK > 0 ? clamp(Math.round((inTok / (winK * 1000)) * 100), 0, 99) : 0;
-          const thinking = String(d.thinking || '').slice(-1600);
-          const answer = String(d.answer || '').slice(-2400);
+          const ctx = winK > 0 && inTok > 0 ? clamp(Math.round((inTok / (winK * 1000)) * 100), 0, 99) : 0;
+          const sig = `${working ? 1 : 0}|${model}|${ctx}|` + entries.map((e) => `${e.id}:${e.role[0]}:${e.thinking.length}:${e.text.length}:${e.live ? 1 : 0}`).join(',');
           setWorkers((prev) => prev.map((x) => {
             if (x.id !== w.id) return x;
+            if (x.sig === sig) return x;   // 无变化 → 保持引用,memo 跳过重渲染
             const status: Status = working ? 'working' : 'idle';
             const startedAt = status === 'working' && x.status !== 'working' ? Date.now() : x.startedAt;
-            if (x.status === status && x.thinking === thinking && x.answer === answer && x.model === model && x.ctx === ctx && x.ctxK === winK) return x;
-            return { ...x, status, thinking, answer, model, ctx, ctxK: winK, startedAt };
+            return { ...x, status, entries, sig, model, ctx, ctxK: winK, startedAt };
           }));
-        } catch { /* 该 agent 还没 reply / 404 → 保持现状(idle) */ }
+        } catch { /* 该 agent 还没数据 / 404 → 保持现状 */ }
       }));
     };
     poll();
-    const t = window.setInterval(poll, 2000);
+    const t = window.setInterval(poll, 2500);
     return () => { cancelled = true; window.clearInterval(t); };
   }, []);
 
@@ -465,9 +504,9 @@ const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onH
   onHover: (id: string, h: boolean) => void; onMoveStart: (e: React.PointerEvent, id: string) => void; onResizeStart: (e: React.PointerEvent, id: string) => void;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { const n = bodyRef.current; if (n) n.scrollTop = n.scrollHeight; }, [w.thinking, w.answer]);
+  useEffect(() => { const n = bodyRef.current; if (n) n.scrollTop = n.scrollHeight; }, [w.sig]);
   const working = w.status === 'working';
-  const hasStream = !!(w.thinking || w.answer);
+  const entries = w.entries;
   const ctxColor = w.ctx > 85 ? 'bg-rose-400' : w.ctx > 60 ? 'bg-amber-400' : 'bg-zinc-400/60';
   const ctxText = w.ctx > 85 ? 'text-rose-300' : w.ctx > 60 ? 'text-amber-300' : 'text-zinc-500';
   const [copied, setCopied] = useState(false);
@@ -509,23 +548,32 @@ const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onH
           <span className={`text-[10px] tabular-nums ${ctxText}`}>{w.ctx}%</span>
         </div>
       </div>
-      <div ref={bodyRef} data-id={`office-window-body-${w.id}`} className="flex-1 space-y-2 overflow-auto px-3 py-2.5">
-        {!hasStream ? (
+      <div ref={bodyRef} data-id={`office-window-body-${w.id}`} className="flex-1 space-y-3 overflow-auto px-3 py-2.5">
+        {entries.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-1 text-zinc-700"><Inbox className="h-5 w-5" /><span className="text-[11px]">{working ? '思考中…' : '空闲 · 等待派活'}</span></div>
-        ) : (
-          <>
-            {w.thinking && (
-              <div data-id={`office-window-thinking-${w.id}`} className="whitespace-pre-wrap border-l-2 border-amber-300/25 pl-2 text-[11.5px] italic leading-relaxed text-amber-50/50">
-                {w.thinking}{working && !w.answer && <span className="ml-0.5 animate-pulse text-amber-200/70">▍</span>}
-              </div>
-            )}
-            {w.answer && (
-              <div data-id={`office-window-answer-${w.id}`} className="whitespace-pre-wrap text-[12px] leading-relaxed text-zinc-300">
-                {w.answer}{working && <span className="ml-0.5 animate-pulse text-zinc-400">▍</span>}
-              </div>
-            )}
-          </>
-        )}
+        ) : entries.map((e, i) => {
+          const isLast = i === entries.length - 1;
+          if (e.role === 'user') return (
+            <div key={`${e.id}-${i}`} data-id={`office-window-entry-${w.id}-${i}`} className="flex justify-end">
+              <div className="max-w-[88%] whitespace-pre-wrap rounded-xl rounded-tr-sm bg-sky-500/15 px-2 py-1 text-[11.5px] leading-relaxed text-sky-100/80">{e.text.slice(0, 600)}</div>
+            </div>
+          );
+          return (
+            <div key={`${e.id}-${i}`} data-id={`office-window-entry-${w.id}-${i}`} className="space-y-1.5 border-l border-white/[0.06] pl-2">
+              {e.thinking && (
+                <div className="whitespace-pre-wrap text-[11px] italic leading-relaxed text-amber-50/45">
+                  {e.thinking}{e.live && working && !e.text && <span className="ml-0.5 animate-pulse text-amber-200/70">▍</span>}
+                </div>
+              )}
+              {e.text && (
+                <div className="whitespace-pre-wrap text-[12px] leading-relaxed text-zinc-300">
+                  {e.text}{e.live && working && <span className="ml-0.5 animate-pulse text-zinc-400">▍</span>}
+                </div>
+              )}
+              {isLast && e.live && working && !e.thinking && !e.text && <span className="animate-pulse text-amber-200/70">▍</span>}
+            </div>
+          );
+        })}
       </div>
       {/* resize 抓手：悬停/选中才显露 */}
       <div data-id={`office-window-resize-${w.id}`} onPointerDown={(e) => onResizeStart(e, w.id)}
