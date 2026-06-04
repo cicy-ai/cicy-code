@@ -387,11 +387,12 @@ func setMihomoGroupSelection(group, member string) error {
 //
 // The catch: api.myip.com / api.ip.sb are *foreign* and unreachable from a
 // mainland-China network when probing **direct** (no proxy) — so the 🌍 panel's
-// "direct" side couldn't get IP/area without a VPN. We therefore also race two
-// China-reachable sources (ipip.net, ip.cn) that resolve without 翻墙. Because
-// it's a first-responder race, the CN sources win on a direct CN probe while
-// the foreign ones win (or tie) when probing through an overseas proxy — both
-// report whatever IP actually hits them, so the comparison stays consistent.
+// "direct" side couldn't get IP/area without a VPN. ipip.net (myip.ipip.net)
+// fixes both sides: it's a domestic site reachable from China without 翻墙 AND
+// it correctly reports a foreign egress IP when probing through an overseas
+// proxy, so one source covers 国内+国外. Because it's a first-responder race,
+// ipip.net wins on a direct CN probe while the foreign sources win (or tie)
+// abroad — both report whatever IP actually hits them, so it stays consistent.
 // (The Cloudflare-fronted alternatives ifconfig.co / ipapi.co / freeipapi.com
 // return WAF challenges to curl's UA, so they're deliberately not in the race.)
 //
@@ -475,34 +476,6 @@ var ipExitProbes = []ipExitProbe{
 			m := M{"ip": p.Data.IP, "country": country, "cc": cc, "source": "ipip.net"}
 			if city != "" {
 				m["city"] = city
-			}
-			return m, true
-		},
-	},
-	{
-		// ip.cn — second China-reachable fallback.
-		// {"rs":1,"code":0,"address":"中国 北京市 ...","ip":"1.2.3.4","isp":"..."}
-		name: "ip.cn",
-		url:  "https://www.ip.cn/api/index?ip=&type=0",
-		parse: func(body []byte) (M, bool) {
-			var p struct {
-				IP      string `json:"ip"`
-				Address string `json:"address"`
-			}
-			if json.Unmarshal(body, &p) != nil || p.IP == "" {
-				return nil, false
-			}
-			country := strings.TrimSpace(p.Address)
-			if f := strings.Fields(country); len(f) > 0 {
-				country = f[0]
-			}
-			cc := ""
-			if strings.Contains(p.Address, "中国") {
-				cc = "CN"
-			}
-			m := M{"ip": p.IP, "country": country, "cc": cc, "source": "ip.cn"}
-			if p.Address != "" {
-				m["city"] = strings.TrimSpace(p.Address)
 			}
 			return m, true
 		},
