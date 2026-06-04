@@ -5,23 +5,24 @@ import {
 } from 'lucide-react';
 import TemplateMarket, { MarketTmpl, TeamTmpl } from './TemplateMarket';
 import { getAgentTypeIconMeta } from '../../lib/agentType';
+import apiService from '../../services/api';
 
 /*
  * Office — 「办公室」（data-id="office"）。
  * 左栏：指挥台（总控对话，上=history，下=prompt，自动 @ 选中 worker，可广播）。
  * 右侧：可平移/缩放画布，每个 worker = 可拖动+可缩放的 chat window，
  *       只显示 thinking + text（不拉 tool 结果），头像 = agent avatar + 状态环。
- * 纯 UI 原型，mock 实时流（先不接接口）。
+ * 接真实数据：成员 = w-10001 的子 agent（无则取全部 pane）；轮询
+ * /api/agents/current-reply 取每个 agent 的 status / model / token / thinking / answer。
+ * 派任务走 /api/tmux/send（sendCommand）真实下发到对应 pane。
  */
 
-type LineType = 'thinking' | 'text';
-interface Line { t: LineType; s: string }
 type Status = 'idle' | 'working';
 
 interface Worker {
-  id: string; name: string; role: string; emoji: string; accent: string;
+  id: string; name: string; role: string;
   model: string; ctx: number; ctxK: number;   // 模型 + 上下文用量(%) + 上下文窗口(k)
-  status: Status; script: Line[]; shown: number; startedAt: number;
+  status: Status; thinking: string; answer: string; startedAt: number;
   x: number; y: number; w: number; h: number;
 }
 
@@ -31,39 +32,20 @@ interface ChatMsg { id: number; kind: ChatKind; from?: string; to?: string; text
 const SELF = 'w-10001';
 const MIN_W = 240, MIN_H = 168;
 
-const W = (id: string, name: string, role: string, emoji: string, accent: string, model: string, ctx: number, ctxK: number, status: Status, x: number, y: number, script: Line[]): Worker =>
-  ({ id, name, role, emoji, accent, model, ctx, ctxK, status, script, shown: status === 'working' ? 0 : script.length, startedAt: 0, x, y, w: 400, h: 248 });
+const shortId = (id: string) => String(id || '').replace(/:main\.0$/, '');
 
-const INIT_WORKERS: Worker[] = [
-  W('w-10010', '架构师 Aria', 'dev-senior', '🏛️', 'sky', 'deepseek-v4-pro', 42, 256, 'working', 36, 32, [
-    { t: 'thinking', s: '把"画布"拆成 3 张卡：数据层 / 渲染层 / 画布层。' },
-    { t: 'text', s: '定义 LiteAgentCard props + digest 端点契约。' },
-    { t: 'thinking', s: 'tool_result 不传，payload 小一个数量级。' },
-    { t: 'text', s: '接口写进 docs，交给 Finn。' },
-    { t: 'text', s: '✅ 完成：技术任务卡 + 接口契约。' },
-  ]),
-  W('w-10011', '前端 Finn', 'dev-junior', '🎨', 'violet', 'deepseek-v4-pro', 61, 256, 'working', 384, 32, [
-    { t: 'thinking', s: '复用 normalize，搭可拖拽/缩放的 window。' },
-    { t: 'text', s: '左栏指挥台 + 右栏画布。' },
-    { t: 'thinking', s: '选中 window → prompt 自动 @ 它。' },
-    { t: 'text', s: '加 drag handle + resize 抓手。' },
-    { t: 'text', s: '✅ 完成：可拖拽缩放的办公室画布。' },
-  ]),
-  W('w-10012', '测试 Quinn', 'qa', '🧪', 'emerald', 'gpt-5.5', 38, 400, 'working', 732, 32, [
-    { t: 'thinking', s: '核对验收标准：N window 同屏不卡。' },
-    { t: 'text', s: '跑 20 window 压力，盯帧率。' },
-    { t: 'thinking', s: 'thinking 太长要截断。' },
-    { t: 'text', s: 'FAIL：离屏 window 仍在轮询，需门控。' },
-  ]),
-  W('w-10013', '运维 Ops', 'ops', '🚀', 'amber', 'deepseek-v4-pro', 8, 256, 'idle', 210, 296, [
-    { t: 'text', s: '待构建产物，准备部署。' },
-  ]),
-  W('w-10014', '安全 Sage', 'reviewer', '🛡️', 'rose', 'claude-haiku-4-5', 84, 200, 'working', 558, 296, [
-    { t: 'thinking', s: '扫一遍有没有把 token 渲进 window。' },
-    { t: 'text', s: 'text+thinking 不含工具入参，攻击面更小。' },
-    { t: 'text', s: '✅ 完成：安全结论 PASS。' },
-  ]),
-];
+// 模型上下文窗口(k tokens)，用于把 input_tokens 估成上下文占用 %。粗映射，未知给 200k。
+function modelWindowK(model: string): number {
+  const m = (model || '').toLowerCase();
+  if (m.includes('gemini')) return 1000;
+  if (m.includes('claude')) return 200;
+  if (m.includes('gpt') || m.includes('o1') || m.includes('o3') || m.includes('o4')) return 256;
+  if (m.includes('deepseek')) return 128;
+  return 200;
+}
+// current-reply.status → 是否在干活
+const WORKING_STATES = new Set(['streaming', 'thinking', 'working', 'tool_call', 'running', 'generating', 'busy']);
+const isWorkingStatus = (s: string) => WORKING_STATES.has(String(s || '').toLowerCase());
 
 const Z_MIN = 0.4, Z_MAX = 1.8;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -108,36 +90,20 @@ function Avatar({ model, name, size = 30, status }: { model: string; name: strin
   );
 }
 
-/* ── 候选成员（存在但未加入/未开启 = 离线）── */
-interface Cand { id: string; name: string; role: string; emoji: string; accent: string; model: string; script: Line[] }
+/* ── 候选成员（从市场/模版新增、尚未真实存在的占位 agent = 离线）── */
+interface Cand { id: string; name: string; role: string; model: string }
 
-const GENERIC_SCRIPT: Line[] = [
-  { t: 'thinking', s: '读取任务卡与验收标准…' },
-  { t: 'text', s: '开始执行。' },
-  { t: 'thinking', s: '检查边界条件与依赖。' },
-  { t: 'text', s: '✅ 完成。' },
-];
-
-const INIT_CANDIDATES: Cand[] = [
-  { id: 'w-10015', name: '文案 Wendy', role: 'writer', emoji: '✍️', accent: 'violet', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
-  { id: 'w-10016', name: '数据 Dана', role: 'analyst', emoji: '📊', accent: 'sky', model: 'gpt-5.5', script: GENERIC_SCRIPT },
-  { id: 'w-10017', name: '设计 Deo', role: 'designer', emoji: '🎭', accent: 'rose', model: 'deepseek-v4-pro', script: GENERIC_SCRIPT },
-];
-
-// 统一布点：400 宽窗 + 28 横向间距 / 248 高窗 + 36 纵向间距，3 列。所有 window(初始/新增/团队)共用,保证不重叠。
+// 统一布点：400 宽窗 + 28 横向间距 / 248 高窗 + 36 纵向间距，3 列。所有 window 共用,保证不重叠。
 const COLS = 3, GAP_X = 428, GAP_Y = 284, ORIGIN_X = 32, ORIGIN_Y = 64;
 const slotPos = (slot: number) => ({ x: ORIGIN_X + (slot % COLS) * GAP_X, y: ORIGIN_Y + Math.floor(slot / COLS) * GAP_Y });
 
-function makeWorker(id: string, name: string, role: string, emoji: string, accent: string, model: string, slot: number, script: Line[]): Worker {
-  return { id, name, role, emoji, accent, model, ctx: 5, ctxK: 256, status: 'idle', script, shown: 0, startedAt: 0, w: 400, h: 248, ...slotPos(slot) };
+function makeWorker(id: string, name: string, role: string, model: string, slot: number): Worker {
+  return { id, name, role, model, ctx: 0, ctxK: modelWindowK(model), status: 'idle', thinking: '', answer: '', startedAt: 0, w: 400, h: 248, ...slotPos(slot) };
 }
 
 export default function Office() {
-  const [workers, setWorkers] = useState<Worker[]>(() => {
-    const t0 = Date.now();
-    // 用统一网格重新布点,避免初始窗口互相重叠(加宽到 360 后旧间距会叠)。
-    return INIT_WORKERS.map((w, i) => ({ ...w, ...slotPos(i), startedAt: w.status === 'working' ? t0 : 0 }));
-  });
+  const [workers, setWorkers] = useState<Worker[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [mode, setMode] = useState<'single' | 'broadcast'>('single');
@@ -149,7 +115,7 @@ export default function Office() {
   const [chat, setChat] = useState<ChatMsg[]>([
     { id: 1, kind: 'note', text: '拖标题移动卡片、拖右下角缩放、空白拖拽平移、滚轮缩放。点 worker 自动 @ 派任务，或切广播。', ts: hhmm(Date.now()) },
   ]);
-  const [candidates, setCandidates] = useState<Cand[]>(INIT_CANDIDATES);
+  const [candidates, setCandidates] = useState<Cand[]>([]);
   const [rosterOpen, setRosterOpen] = useState(false);
   const [market, setMarket] = useState<'team' | 'agent' | null>(null);
   const idSeq = useRef(20);
@@ -165,21 +131,84 @@ export default function Office() {
   const target = selectedId ? byId[selectedId] : null;
   const online = workers.filter((w) => w.status !== 'idle').length;
 
-  // mock 实时流 + 计时
+  // 计时（仅 working 窗口用到 elapsed）
   useEffect(() => {
-    const t = window.setInterval(() => {
-      const ts = Date.now();
-      setWorkers((prev) => prev.map((w) => {
-        if (w.status === 'working') {
-          const ctx = Math.min(99, w.ctx + 1 + Math.floor(Math.random() * 3));   // 上下文随干活增长
-          return w.shown < w.script.length ? { ...w, shown: w.shown + 1, ctx } : { ...w, status: 'idle', ctx };
-        }
-        if (w.status === 'idle' && Math.random() < 0.08) return { ...w, status: 'working', shown: 0, startedAt: ts };
-        return w;
-      }));
-    }, 1200);
     const c = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => { window.clearInterval(t); window.clearInterval(c); };
+    return () => window.clearInterval(c);
+  }, []);
+
+  // 真实成员：w-10001 的子 agent（pane_agents）；无则取全部 pane（排除自己）。每 15s 刷新名单。
+  useEffect(() => {
+    let cancelled = false;
+    const loadTeam = async () => {
+      try {
+        const panesRes = await apiService.getPanes();
+        const pd: any = panesRes.data;
+        const panes: any[] = Array.isArray(pd) ? pd : (pd?.panes || []);
+        let subIds: Set<string> | null = null;
+        try {
+          const subRes: any = await (apiService as any).getAgentsByPane(SELF);
+          const sd = subRes?.data;
+          const subs: any[] = Array.isArray(sd) ? sd : (sd?.agents || []);
+          const ids = subs.map((b: any) => shortId(String(b.name || ''))).filter(Boolean);
+          if (ids.length) subIds = new Set(ids);
+        } catch { /* 没有子 agent 关系表数据 → 退回全部 pane */ }
+        const team = panes
+          .map((p: any) => ({
+            id: shortId(String(p.pane_id || p.id || '')),
+            title: String(p.title || p.pane_id || '').trim(),
+            role: String(p.role || p.agent_type || '').trim(),
+            model: String(p.default_model || p.model || '').trim(),
+          }))
+          .filter((p) => p.id && p.id !== SELF && (subIds ? subIds.has(p.id) : true));
+        if (cancelled) return;
+        setWorkers((prev) => {
+          const prevById = new Map(prev.map((w) => [w.id, w]));
+          return team.map((p, i) => {
+            const ex = prevById.get(p.id);
+            if (ex) return { ...ex, name: p.title || ex.name, role: p.role || ex.role, model: p.model || ex.model };
+            return makeWorker(p.id, p.title || p.id, p.role, p.model, i);
+          });
+        });
+        setLoaded(true);
+      } catch { if (!cancelled) setLoaded(true); }
+    };
+    loadTeam();
+    const t = window.setInterval(loadTeam, 15000);
+    return () => { cancelled = true; window.clearInterval(t); };
+  }, []);
+
+  // 真实实时：轮询每个 agent 的 current-reply（status/model/token/thinking/answer）。每 2s。
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      const ws = workersRef.current;
+      if (!ws.length) return;
+      await Promise.all(ws.map(async (w) => {
+        try {
+          const res: any = await apiService.getAgentCurrentReply(w.id);
+          const d: any = res?.data || {};
+          if (cancelled) return;
+          const working = isWorkingStatus(d.status) && d.complete !== true;
+          const model = String(d.model || w.model || '');
+          const winK = modelWindowK(model);
+          const inTok = (d.input_tokens || 0) + (d.cache_read_input_tokens || 0) + (d.cache_creation_input_tokens || 0);
+          const ctx = winK > 0 ? clamp(Math.round((inTok / (winK * 1000)) * 100), 0, 99) : 0;
+          const thinking = String(d.thinking || '').slice(-1600);
+          const answer = String(d.answer || '').slice(-2400);
+          setWorkers((prev) => prev.map((x) => {
+            if (x.id !== w.id) return x;
+            const status: Status = working ? 'working' : 'idle';
+            const startedAt = status === 'working' && x.status !== 'working' ? Date.now() : x.startedAt;
+            if (x.status === status && x.thinking === thinking && x.answer === answer && x.model === model && x.ctx === ctx && x.ctxK === winK) return x;
+            return { ...x, status, thinking, answer, model, ctx, ctxK: winK, startedAt };
+          }));
+        } catch { /* 该 agent 还没 reply / 404 → 保持现状(idle) */ }
+      }));
+    };
+    poll();
+    const t = window.setInterval(poll, 2000);
+    return () => { cancelled = true; window.clearInterval(t); };
   }, []);
 
   useEffect(() => { const n = chatRef.current; if (n) n.scrollTop = n.scrollHeight; }, [chat]);
@@ -225,38 +254,41 @@ export default function Office() {
     setZoom(next);
   };
 
-  const simulateDone = (who: string, t = '✅ 完成') => {
-    window.setTimeout(() => {
-      push({ kind: 'done', from: who, text: t });
-      setWorkers((prev) => prev.map((w) => (w.id === who ? { ...w, status: 'idle' } : w)));
-    }, 2600);
-  };
   const send = () => {
     const body = text.trim(); if (!body) return;
-    if (mode === 'broadcast') { push({ kind: 'broadcast', text: body }); setText(''); return; }
+    if (mode === 'broadcast') {
+      push({ kind: 'broadcast', text: body });
+      const ids = workersRef.current.map((w) => w.id);
+      setWorkers((prev) => prev.map((w) => ({ ...w, status: 'working', startedAt: Date.now() })));
+      ids.forEach((id) => { (apiService as any).sendCommand(id, body, true).catch(() => { /* pane 不可达忽略 */ }); });
+      setText(''); return;
+    }
     if (!target) return;
-    push({ kind: 'dispatch', to: target.id, text: body });
-    setWorkers((prev) => prev.map((w) => (w.id === target.id ? { ...w, status: 'working', shown: 0, startedAt: Date.now() } : w)));
-    setText(''); simulateDone(target.id);
+    const id = target.id;
+    push({ kind: 'dispatch', to: id, text: body });
+    setWorkers((prev) => prev.map((w) => (w.id === id ? { ...w, status: 'working', startedAt: Date.now() } : w)));
+    (apiService as any).sendCommand(id, body, true).catch(() => { /* pane 不可达忽略 */ });
+    setText('');
   };
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   const onChange = (v: string) => { setText(v); if (mode === 'single') setMentionOpen(/(^|\s)@$/.test(v)); };
   const pickMention = (w: Worker) => { setSelectedId(w.id); setMode('single'); setText((v) => v.replace(/@$/, '')); setMentionOpen(false); inputRef.current?.focus(); };
   const joinCandidate = (c: Cand) => {
     setCandidates((prev) => prev.filter((x) => x.id !== c.id));
-    setWorkers((prev) => [...prev, makeWorker(c.id, c.name, c.role, c.emoji, c.accent, c.model, prev.length, c.script)]);
-    push({ kind: 'note', text: `已加入并启用 ${c.name}（${c.id}）` });
+    setWorkers((prev) => [...prev, makeWorker(c.id, c.name, c.role, c.model, prev.length)]);
+    push({ kind: 'note', text: `已加入 ${c.name}（${c.id}）` });
   };
-  const spawn = (name: string, role: string, emoji: string, accent: string, model: string, note: string) => {
+  // 市场/模版新增的是占位 agent（尚未真实创建），轮询取不到 reply 会保持 idle/空。
+  const spawn = (name: string, role: string, model: string, note: string) => {
     const id = `w-100${idSeq.current++}`;
-    setWorkers((prev) => [...prev, makeWorker(id, name, role, emoji, accent, model, prev.length, GENERIC_SCRIPT)]);
-    push({ kind: 'note', text: `${note} ${id}` });
+    setWorkers((prev) => [...prev, makeWorker(id, name, role, model, prev.length)]);
+    push({ kind: 'note', text: `${note} ${id}（占位，未真实创建）` });
   };
-  const pickFromMarket = (t: MarketTmpl) => spawn(t.name, t.role, t.emoji, t.accent, t.model, `已从模版市场添加「${t.name}」`);
+  const pickFromMarket = (t: MarketTmpl) => spawn(t.name, t.role, t.model, `已从模版市场添加「${t.name}」`);
   const pickTeam = (team: TeamTmpl) => {
     const base = idSeq.current; idSeq.current += team.members.length;
-    setWorkers((prev) => [...prev, ...team.members.map((m, i) => makeWorker(`w-100${base + i}`, m.name, m.role, m.emoji, m.accent, m.model, prev.length + i, GENERIC_SCRIPT))]);
-    push({ kind: 'note', text: `已组建「${team.name}」（${team.members.length} 名成员）` });
+    setWorkers((prev) => [...prev, ...team.members.map((m, i) => makeWorker(`w-100${base + i}`, m.name, m.role, m.model, prev.length + i))]);
+    push({ kind: 'note', text: `已组建「${team.name}」（${team.members.length} 名成员，占位）` });
   };
   const canSend = text.trim() && (mode === 'broadcast' || !!target);
 
@@ -364,6 +396,16 @@ export default function Office() {
           ))}
         </div>
 
+        {workers.length === 0 && (
+          <div data-id="office-canvas-empty" className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-zinc-600">
+            {!loaded ? (
+              <><Loader2 className="h-6 w-6 animate-spin" /><span className="text-[13px]">加载团队…</span></>
+            ) : (
+              <><Users className="h-7 w-7 opacity-50" /><span className="text-[13px]">还没有成员 agent</span><span className="text-[11.5px] text-zinc-700">从左下「成员库」的市场添加，或用 cicy-agent 起子 agent</span></>
+            )}
+          </div>
+        )}
+
         <div data-id="office-canvas-topbar" className="pointer-events-none absolute left-4 top-4 flex items-center gap-2 text-[11px]">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-2.5 py-1 text-zinc-300 backdrop-blur"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> 团队工作台 · 在线 {online}/{workers.length}</span>
           <span className="rounded-full border border-white/[0.06] bg-black/30 px-2.5 py-1 text-zinc-600 backdrop-blur">仅 thinking + text · 不拉 tool 结果</span>
@@ -416,10 +458,10 @@ const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onH
   w: Worker; now: number; selected: boolean; hovered: boolean;
   onHover: (id: string, h: boolean) => void; onMoveStart: (e: React.PointerEvent, id: string) => void; onResizeStart: (e: React.PointerEvent, id: string) => void;
 }) {
-  const lines = w.script.slice(0, w.shown).slice(-12);
   const bodyRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { const n = bodyRef.current; if (n) n.scrollTop = n.scrollHeight; }, [w.shown]);
+  useEffect(() => { const n = bodyRef.current; if (n) n.scrollTop = n.scrollHeight; }, [w.thinking, w.answer]);
   const working = w.status === 'working';
+  const hasStream = !!(w.thinking || w.answer);
   const ctxColor = w.ctx > 85 ? 'bg-rose-400' : w.ctx > 60 ? 'bg-amber-400' : 'bg-zinc-400/60';
   const ctxText = w.ctx > 85 ? 'text-rose-300' : w.ctx > 60 ? 'text-amber-300' : 'text-zinc-500';
   const [copied, setCopied] = useState(false);
@@ -462,20 +504,22 @@ const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onH
         </div>
       </div>
       <div ref={bodyRef} data-id={`office-window-body-${w.id}`} className="flex-1 space-y-2 overflow-auto px-3 py-2.5">
-        {lines.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-1 text-zinc-700"><Inbox className="h-5 w-5" /><span className="text-[11px]">等待派活</span></div>
-        ) : lines.map((ln, i) => {
-          const isLast = i === lines.length - 1;
-          return ln.t === 'thinking' ? (
-            <div key={i} className="border-l-2 border-amber-300/25 pl-2 text-[11.5px] italic leading-relaxed text-amber-50/50">
-              {ln.s}{isLast && working && <span className="ml-0.5 animate-pulse text-amber-200/70">▍</span>}
-            </div>
-          ) : (
-            <div key={i} className="text-[12px] leading-relaxed text-zinc-300">
-              {ln.s}{isLast && working && <span className="ml-0.5 animate-pulse text-zinc-400">▍</span>}
-            </div>
-          );
-        })}
+        {!hasStream ? (
+          <div className="flex h-full flex-col items-center justify-center gap-1 text-zinc-700"><Inbox className="h-5 w-5" /><span className="text-[11px]">{working ? '思考中…' : '空闲 · 等待派活'}</span></div>
+        ) : (
+          <>
+            {w.thinking && (
+              <div data-id={`office-window-thinking-${w.id}`} className="whitespace-pre-wrap border-l-2 border-amber-300/25 pl-2 text-[11.5px] italic leading-relaxed text-amber-50/50">
+                {w.thinking}{working && !w.answer && <span className="ml-0.5 animate-pulse text-amber-200/70">▍</span>}
+              </div>
+            )}
+            {w.answer && (
+              <div data-id={`office-window-answer-${w.id}`} className="whitespace-pre-wrap text-[12px] leading-relaxed text-zinc-300">
+                {w.answer}{working && <span className="ml-0.5 animate-pulse text-zinc-400">▍</span>}
+              </div>
+            )}
+          </>
+        )}
       </div>
       {/* resize 抓手：悬停/选中才显露 */}
       <div data-id={`office-window-resize-${w.id}`} onPointerDown={(e) => onResizeStart(e, w.id)}
