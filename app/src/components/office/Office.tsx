@@ -15,7 +15,7 @@ import TemplateMarket, { MarketTmpl, TeamTmpl } from './TemplateMarket';
 
 type LineType = 'thinking' | 'text';
 interface Line { t: LineType; s: string }
-type Status = 'idle' | 'working' | 'done';
+type Status = 'idle' | 'working';
 
 interface Worker {
   id: string; name: string; role: string; emoji: string; accent: string;
@@ -84,7 +84,7 @@ const p2 = (n: number) => String(n).padStart(2, '0');
 /* ── avatar：emoji + 状态环（working 脉冲 / done 绿环 / idle 灰）── */
 function Avatar({ emoji, accent, size = 30, status }: { emoji: string; accent: string; size?: number; status?: Status }) {
   const acc = ACCENT[accent] ?? ACCENT.sky;
-  const ring = status === 'done' ? 'ring-2 ring-emerald-400/70' : status === 'working' ? `ring-2 ${acc.ring}` : 'ring-1 ring-white/10';
+  const ring = status === 'working' ? `ring-2 ${acc.ring}` : 'ring-1 ring-white/10';
   return (
     <span className="relative inline-grid shrink-0 place-items-center" style={{ width: size, height: size }}>
       {status === 'working' && <span className={`absolute inset-0 rounded-full ring-2 ${acc.ping} animate-ping opacity-40`} />}
@@ -154,9 +154,9 @@ export default function Office() {
       setWorkers((prev) => prev.map((w) => {
         if (w.status === 'working') {
           const ctx = Math.min(99, w.ctx + 1 + Math.floor(Math.random() * 3));   // 上下文随干活增长
-          return w.shown < w.script.length ? { ...w, shown: w.shown + 1, ctx } : { ...w, status: 'done', ctx };
+          return w.shown < w.script.length ? { ...w, shown: w.shown + 1, ctx } : { ...w, status: 'idle', ctx };
         }
-        if (w.status === 'done' && Math.random() < 0.08) return { ...w, status: 'working', shown: 0, startedAt: ts };
+        if (w.status === 'idle' && Math.random() < 0.08) return { ...w, status: 'working', shown: 0, startedAt: ts };
         return w;
       }));
     }, 1200);
@@ -199,10 +199,10 @@ export default function Office() {
     setZoom(next);
   };
 
-  const simulateDone = (who: string, t = '✅ work done') => {
+  const simulateDone = (who: string, t = '✅ 完成') => {
     window.setTimeout(() => {
       push({ kind: 'done', from: who, text: t });
-      setWorkers((prev) => prev.map((w) => (w.id === who ? { ...w, status: 'done' } : w)));
+      setWorkers((prev) => prev.map((w) => (w.id === who ? { ...w, status: 'idle' } : w)));
     }, 2600);
   };
   const send = () => {
@@ -251,6 +251,44 @@ export default function Office() {
 
         <div ref={chatRef} data-id="office-command-history" className="flex-1 space-y-3 overflow-auto px-3.5 py-3.5">
           {chat.map((m) => <CommandMsg key={m.id} m={m} byId={byId} />)}
+        </div>
+
+        {/* 成员库（候选 + 市场入口）—— 折叠区,在 prompt 之上 */}
+        <div data-id="office-roster" className="shrink-0 border-t border-white/[0.06]">
+          <button data-id="office-roster-toggle" onClick={() => setRosterOpen((v) => !v)} className="flex w-full items-center gap-1.5 px-3.5 py-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500 transition-colors hover:text-zinc-300">
+            <Users className="h-3.5 w-3.5" /> 成员库
+            <ChevronRight className={`ml-auto h-3.5 w-3.5 transition-transform ${rosterOpen ? 'rotate-90' : ''}`} />
+          </button>
+          {rosterOpen && (
+            <div className="max-h-[42vh] space-y-2.5 overflow-auto px-3 pb-3">
+              <button data-id="office-open-team-market" onClick={() => setMarket('team')}
+                className="flex w-full items-center gap-3 rounded-xl border border-sky-400/20 bg-sky-500/10 px-3 py-2.5 text-left transition-colors hover:border-sky-400/40 hover:bg-sky-500/15">
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-500/20 text-sky-300"><Users className="h-4 w-4" /></span>
+                <span className="min-w-0 flex-1"><span className="block text-[12.5px] font-medium text-zinc-100">团队市场</span><span className="block text-[11px] text-zinc-500">一键组建整支班子</span></span>
+                <ChevronRight className="h-4 w-4 text-zinc-500" />
+              </button>
+              <button data-id="office-open-agent-market" onClick={() => setMarket('agent')}
+                className="flex w-full items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2.5 text-left transition-colors hover:border-white/15 hover:bg-white/[0.05]">
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-zinc-300"><Store className="h-4 w-4" /></span>
+                <span className="min-w-0 flex-1"><span className="block text-[12.5px] font-medium text-zinc-100">Agent 市场</span><span className="block text-[11px] text-zinc-500">各行各业单个 agent 模版</span></span>
+                <ChevronRight className="h-4 w-4 text-zinc-500" />
+              </button>
+              <section data-id="office-roster-candidates" className="pt-0.5">
+                <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[11px] font-medium uppercase tracking-wide text-zinc-600"><Power className="h-3 w-3" /> 候选 · 未开启<span className="ml-auto normal-case text-zinc-700">{candidates.length}</span></div>
+                {candidates.length === 0 ? <div className="px-1 text-[11.5px] text-zinc-700">全部已加入</div> : (
+                  <div className="space-y-1.5">
+                    {candidates.map((c) => (
+                      <div key={c.id} data-id={`office-cand-${c.id}`} className="flex items-center gap-2.5 rounded-xl border border-white/[0.06] bg-white/[0.02] px-2.5 py-2">
+                        <span className="opacity-50 grayscale"><Avatar emoji={c.emoji} accent={c.accent} size={28} /></span>
+                        <span className="min-w-0 flex-1"><span className="block truncate text-[12.5px] text-zinc-300">{c.name}</span><span className="font-mono text-[10.5px] text-zinc-600">{c.id} · 离线</span></span>
+                        <button data-id={`office-cand-join-${c.id}`} onClick={() => joinCandidate(c)} className="inline-flex items-center gap-1 rounded-lg bg-white/[0.06] px-2 py-1 text-[11.5px] text-zinc-200 transition-colors hover:bg-white/[0.12]"><UserPlus className="h-3.5 w-3.5" /> 加入</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
         </div>
 
         <div data-id="office-command-prompt" className="shrink-0 border-t border-white/[0.06] bg-[#0d0d0e] px-3.5 py-3">
@@ -313,51 +351,6 @@ export default function Office() {
         </div>
       </main>
 
-      {/* 右栏：成员库（候选 + 模版） */}
-      {rosterOpen ? (
-        <aside data-id="office-roster" className="flex w-[268px] min-w-[268px] shrink-0 flex-col border-l border-white/[0.06] bg-[#0b0b0c]">
-          <div className="flex h-14 shrink-0 items-center gap-2 border-b border-white/[0.06] px-4">
-            <Users className="h-4 w-4 text-zinc-400" />
-            <span className="text-[13px] font-semibold text-zinc-100">成员库</span>
-            <button data-id="office-roster-close" onClick={() => setRosterOpen(false)} className="ml-auto rounded p-1 text-zinc-500 hover:bg-white/10 hover:text-zinc-200"><ChevronRight className="h-4 w-4" /></button>
-          </div>
-          <div className="flex-1 space-y-5 overflow-auto px-3 py-3.5">
-            <section data-id="office-roster-candidates">
-              <div className="mb-2 flex items-center gap-1.5 px-1 text-[11px] font-medium uppercase tracking-wide text-zinc-600"><Power className="h-3 w-3" /> 候选 · 未开启<span className="ml-auto normal-case text-zinc-700">{candidates.length}</span></div>
-              {candidates.length === 0 ? <div className="px-1 text-[11.5px] text-zinc-700">全部已加入</div> : (
-                <div className="space-y-1.5">
-                  {candidates.map((c) => (
-                    <div key={c.id} data-id={`office-cand-${c.id}`} className="flex items-center gap-2.5 rounded-xl border border-white/[0.06] bg-white/[0.02] px-2.5 py-2">
-                      <span className="opacity-50 grayscale"><Avatar emoji={c.emoji} accent={c.accent} size={28} /></span>
-                      <span className="min-w-0 flex-1"><span className="block truncate text-[12.5px] text-zinc-300">{c.name}</span><span className="font-mono text-[10.5px] text-zinc-600">{c.id} · 离线</span></span>
-                      <button data-id={`office-cand-join-${c.id}`} onClick={() => joinCandidate(c)} className="inline-flex items-center gap-1 rounded-lg bg-white/[0.06] px-2 py-1 text-[11.5px] text-zinc-200 transition-colors hover:bg-white/[0.12]"><UserPlus className="h-3.5 w-3.5" /> 加入</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-            <div className="space-y-2">
-              <button data-id="office-open-team-market" onClick={() => setMarket('team')}
-                className="flex w-full items-center gap-3 rounded-xl border border-sky-400/20 bg-sky-500/10 px-3 py-3 text-left transition-colors hover:border-sky-400/40 hover:bg-sky-500/15">
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-sky-500/20 text-sky-300"><Users className="h-5 w-5" /></span>
-                <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-zinc-100">团队市场</span><span className="block text-[11px] text-zinc-500">一键组建整支班子</span></span>
-                <ChevronRight className="h-4 w-4 text-zinc-500" />
-              </button>
-              <button data-id="office-open-agent-market" onClick={() => setMarket('agent')}
-                className="flex w-full items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-3 text-left transition-colors hover:border-white/15 hover:bg-white/[0.05]">
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-zinc-300"><Store className="h-5 w-5" /></span>
-                <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-zinc-100">Agent 市场</span><span className="block text-[11px] text-zinc-500">各行各业单个 agent 模版</span></span>
-                <ChevronRight className="h-4 w-4 text-zinc-500" />
-              </button>
-            </div>
-          </div>
-        </aside>
-      ) : (
-        <button data-id="office-roster-open" onClick={() => setRosterOpen(true)}
-          className="absolute right-0 top-1/2 z-30 flex -translate-y-1/2 items-center gap-1.5 rounded-l-lg border border-r-0 border-white/10 bg-[#16161a]/90 px-2 py-3 text-[11px] text-zinc-400 backdrop-blur transition-colors hover:text-zinc-100"
-          style={{ writingMode: 'vertical-rl' }}><Users className="h-3.5 w-3.5" /> 成员库</button>
-      )}
-
       <TemplateMarket open={market} onClose={() => setMarket(null)} onPick={pickFromMarket} onPickTeam={pickTeam} />
     </div>
   );
@@ -383,10 +376,10 @@ function CommandMsg({ m, byId }: { m: ChatMsg; byId: Record<string, Worker> }) {
   const w = m.from ? byId[m.from] : null;
   return (
     <div data-id={`office-msg-${m.id}`} className="flex items-center gap-2">
-      {w && <Avatar emoji={w.emoji} accent={w.accent} size={22} status="done" />}
+      {w && <Avatar emoji={w.emoji} accent={w.accent} size={22} />}
       <div className="min-w-0 flex-1">
         <div className="text-[11px] text-zinc-500">{w?.name ?? m.from}</div>
-        <div className="inline-flex items-center gap-1 text-[12px] text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> {m.text} <span className="text-zinc-600">· 待验收</span></div>
+        <div className="inline-flex items-center gap-1 text-[12px] text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> {m.text}</div>
       </div>
       <span className="self-start font-mono text-[10px] text-zinc-700">{m.ts}</span>
     </div>
@@ -401,7 +394,6 @@ function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResiz
   const lines = w.script.slice(0, w.shown).slice(-12);
   const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => { const n = bodyRef.current; if (n) n.scrollTop = n.scrollHeight; }, [w.shown]);
-  const done = w.status === 'done';
   const working = w.status === 'working';
   const ctxColor = w.ctx > 85 ? 'bg-rose-400' : w.ctx > 60 ? 'bg-amber-400' : 'bg-zinc-400/60';
   const ctxText = w.ctx > 85 ? 'text-rose-300' : w.ctx > 60 ? 'text-amber-300' : 'text-zinc-500';
@@ -415,9 +407,9 @@ function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResiz
         ${selected ? `ring-2 ${acc.ring} border-transparent -translate-y-0.5 shadow-2xl` : hovered ? 'border-white/15 shadow-2xl' : 'border-white/[0.07] shadow-xl'}`}
       style={{ left: w.x, top: w.y, width: w.w, height: w.h, zIndex: selected ? 60 : hovered ? 40 : 10 }}>
       {/* 角色色条 */}
-      <div className={`h-[3px] w-full ${done ? 'bg-emerald-400/60' : acc.bar}`} />
+      <div className={`h-[3px] w-full ${acc.bar}`} />
       <div data-id={`office-window-header-${w.id}`} onPointerDown={onMoveStart}
-        className={`flex shrink-0 cursor-grab select-none items-center gap-2.5 px-3 py-2.5 active:cursor-grabbing ${done ? 'bg-emerald-500/[0.05]' : 'bg-white/[0.015]'}`}>
+        className="flex shrink-0 cursor-grab select-none items-center gap-2.5 bg-white/[0.015] px-3 py-2.5 active:cursor-grabbing">
         <Avatar emoji={w.emoji} accent={w.accent} size={32} status={w.status} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-semibold text-zinc-100">{w.name}</span>
@@ -429,12 +421,10 @@ function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResiz
             · {w.role}
           </span>
         </span>
-        {done ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10.5px] font-medium text-emerald-300"><CheckCircle2 className="h-3 w-3" /> 待验收</span>
-        ) : working ? (
-          <span className={`inline-flex items-center gap-1 text-[10.5px] ${acc.chip}`}><Loader2 className="h-3 w-3 animate-spin" /> {elapsed(w.startedAt, now)}</span>
+        {working ? (
+          <span className={`inline-flex items-center gap-1 text-[10.5px] ${acc.chip}`}><Loader2 className="h-3 w-3 animate-spin" /> thinking · {elapsed(w.startedAt, now)}</span>
         ) : (
-          <span className="text-[10.5px] text-zinc-600">空闲</span>
+          <span className="text-[10.5px] text-zinc-600">idle</span>
         )}
       </div>
       {/* meta：模型 + 上下文用量 */}
