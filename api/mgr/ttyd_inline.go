@@ -194,14 +194,6 @@ func serveTTY(w http.ResponseWriter, r *http.Request, tmuxTarget, title, apiPane
 		return nil
 	})
 
-	// Consume the gotty init handshake (first text message: {AuthToken,Arguments}).
-	// Credentials are empty (as in the old per-pane setup), so no auth check; the
-	// /ttyd/ root page already gated on mgr's real token. Swallowing it here keeps
-	// the JSON out of webtty's protocol parser.
-	if _, _, err := clientConn.ReadMessage(); err != nil {
-		return
-	}
-
 	factory, err := localcommand.NewFactory(
 		"tmux", []string{"attach", "-t", tmuxTarget},
 		&localcommand.Options{CloseSignal: 1, CloseTimeout: -1},
@@ -287,6 +279,16 @@ func serveTTY(w http.ResponseWriter, r *http.Request, tmuxTarget, title, apiPane
 				return
 			}
 			if mt == websocket.TextMessage {
+				// The gotty init/auth handshake is a bare JSON object
+				// ({"AuthToken":...,"Arguments":...}). webtty protocol messages
+				// always start with a digit type byte (0-6), never '{', so any
+				// '{'-leading message is a handshake and must NOT reach webtty.
+				// The frontend sends a '6' ws-api call BEFORE the init and may
+				// re-send the handshake on reconnect, so we can't just swallow
+				// the first message — we drop every '{'-leading one.
+				if len(msg) > 0 && msg[0] == '{' {
+					continue
+				}
 				if len(msg) > 1 && msg[0] == '6' {
 					if err := handleWSAPIRequest(writeClient, apiPane, msg[1:]); err != nil {
 						log.Printf("[ttyd] ws api error: %v", err)
