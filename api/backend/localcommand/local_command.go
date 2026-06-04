@@ -3,6 +3,7 @@ package localcommand
 import (
 	"os"
 	"os/exec"
+	"runtime"
 	"syscall"
 	"time"
 	"unsafe"
@@ -30,7 +31,22 @@ type LocalCommand struct {
 
 func New(command string, argv []string, options ...Option) (*LocalCommand, error) {
 	cmd := exec.Command(command, argv...)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	// Force a UTF-8 locale on the ttyd pty. tmux derives the attach client's
+	// UTF-8 flag from LC_*/LANG (via nl_langinfo(CODESET)); without a UTF-8
+	// locale it flags utf8=0 and down-converts block-drawing glyphs (e.g. the
+	// Claude Code logo ▐▛███▜▌, ❯ ⏵⏵ ← ✗) to "_". The locale must be one that's
+	// actually installed for setlocale to resolve: en_US.UTF-8 on macOS,
+	// C.UTF-8 on Linux. Appended after os.Environ() so it overrides any
+	// non-UTF-8 LANG inherited from the cicy-code process.
+	utf8loc := "en_US.UTF-8"
+	if runtime.GOOS == "linux" {
+		utf8loc = "C.UTF-8"
+	}
+	cmd.Env = append(os.Environ(),
+		"TERM=xterm-256color",
+		"LANG="+utf8loc,
+		"LC_ALL="+utf8loc,
+	)
 
 	pty, err := pty.Start(cmd)
 	if err != nil {

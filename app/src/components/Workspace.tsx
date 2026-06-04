@@ -30,7 +30,7 @@ import { installArtifactBridge } from '../lib/artifactBridge';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
 import TeamPanel from './layout/TeamPanel';
-import MeetingRoom from './office/MeetingRoom';
+import Office from './office/Office';
 import GlobalProxyIndicator from './layout/GlobalProxyIndicator';
 import SkillMarketplacePanel from './layout/SkillMarketplacePanel';
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
@@ -1794,7 +1794,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               </div>
             ) : null}
             <div data-testid="right-panel" data-id="right-panel" className="min-w-0 flex-1 relative">
-              {leftActive === 'office' ? <MeetingRoom /> : rightContent}
+              {leftActive === 'office' ? <Office /> : rightContent}
               {leftActive === 'providers' && (
                 <div data-id="providers-right-mount" ref={setProvidersRightMount} />
               )}
