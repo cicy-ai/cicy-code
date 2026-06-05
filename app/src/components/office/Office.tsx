@@ -25,8 +25,9 @@ interface Entry { id: number; role: 'user' | 'assistant'; thinking: string; text
 interface Worker {
   id: string; name: string; role: string; agentType: string;   // agentType = CLI 类型(claude/codex/opencode...)，决定头像图标
   model: string; ctx: number; ctxK: number;   // 模型 + 上下文用量(%) + 上下文窗口(k)
-  status: Status; entries: Entry[]; sig: string; startedAt: number;   // entries=最近若干 turn 的历史；sig 用于跳过无变化重渲染
-  x: number; y: number; w: number; h: number;
+  tokens: number; cost: number;   // 累计 token 总量 + 累计成本($，来自 reply.cost_credit)
+  status: Status; entries: Entry[]; live: Entry | null; histLoaded: boolean; sig: string; startedAt: number;
+  x: number; y: number; w: number; h: number;   // entries=已落历史(慢轮询)；live=进行中 turn(快轮询)；sig 跳过无变化重渲染
 }
 
 // 从 current-history 的一个 item 里抽 agent 自己的 thinking+text。
@@ -147,7 +148,19 @@ const COLS = 3, GAP_X = 428, GAP_Y = 284, ORIGIN_X = 32, ORIGIN_Y = 64;
 const slotPos = (slot: number) => ({ x: ORIGIN_X + (slot % COLS) * GAP_X, y: ORIGIN_Y + Math.floor(slot / COLS) * GAP_Y });
 
 function makeWorker(id: string, name: string, role: string, model: string, slot: number, agentType = ''): Worker {
-  return { id, name, role, agentType, model, ctx: 0, ctxK: modelWindowK(model), status: 'idle', entries: [], sig: '', startedAt: 0, w: 400, h: 248, ...slotPos(slot) };
+  return { id, name, role, agentType, model, ctx: 0, ctxK: modelWindowK(model), tokens: 0, cost: 0, status: 'idle', entries: [], live: null, histLoaded: false, sig: '', startedAt: 0, w: 400, h: 248, ...slotPos(slot) };
+}
+
+// 成本格式化:≥$0.01 两位小数,更小的给 4 位,0 显示为空(改用 token 兜底)。
+function fmtCost(c: number): string {
+  if (!c || c <= 0) return '';
+  if (c >= 0.01) return `$${c.toFixed(2)}`;
+  return `$${c.toFixed(4)}`;
+}
+function fmtTokens(n: number): string {
+  if (!n || n <= 0) return '';
+  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
+  return String(n);
 }
 
 export default function Office() {
@@ -175,6 +188,7 @@ export default function Office() {
   // 给「稳定回调 / 全局拖拽监听」读最新值,避免把 workers/zoom 进依赖导致每帧重建 listener。
   const workersRef = useRef(workers); workersRef.current = workers;
   const zoomRef = useRef(zoom); zoomRef.current = zoom;
+  const histAtRef = useRef<Map<string, number>>(new Map());   // 每个 agent 上次拉 current-history 的时间戳(慢轮询节流)
 
   const byId = useMemo(() => Object.fromEntries(workers.map((w) => [w.id, w])), [workers]);
   const target = selectedId ? byId[selectedId] : null;
@@ -228,49 +242,67 @@ export default function Office() {
     return () => { cancelled = true; window.clearInterval(t); };
   }, []);
 
-  // 真实实时：每个 agent 取 current-history(最近若干 turn) + current-reply(实时状态/进行中turn)。每 2.5s。
+  // 真实实时（分两档轮询，控住后端压力）：
+  //  · 快(2s)：current-reply —— 读小文件 reply.json,拿 status/model/上下文 token/累计 cost/进行中 turn。
+  //  · 慢(每 ~10s 或一轮结束时)：current-history —— 要解析大文件 current.json,只在必要时拉。
   useEffect(() => {
     let cancelled = false;
     const HISTORY_LIMIT = 8;
+    const HISTORY_MIN_GAP = 10000;
     const poll = async () => {
+      if (document.hidden) return;   // 页面不可见(最小化/切走)时不打后端
       const ws = workersRef.current;
       if (!ws.length) return;
+      const nowTs = Date.now();
       await Promise.all(ws.map(async (w) => {
         try {
-          const [hRes, rRes]: any[] = await Promise.all([
-            (apiService as any).getAgentCurrentHistory(w.id, { limit: HISTORY_LIMIT }).catch(() => null),
-            apiService.getAgentCurrentReply(w.id).catch(() => null),
-          ]);
+          // 快:current-reply(轻)
+          const rRes: any = await apiService.getAgentCurrentReply(w.id).catch(() => null);
           if (cancelled) return;
-          const items: any[] = hRes?.data?.items || [];
-          const entries: Entry[] = [];
-          for (const it of items) { const e = extractEntry(it); if (e) entries.push(e); }
           const d: any = rRes?.data || {};
           const working = isWorkingStatus(d.status) && d.complete !== true;
-          // 进行中的那一轮（还没落历史）追加为 live 条目，避免和已落历史重复。
-          if (working) {
-            const t = String(d.thinking || '').trim().slice(-900);
-            const a = String(d.answer || '').trim().slice(-1600);
-            const liveId = Number(d.history_id) || (entries.length ? entries[entries.length - 1].id + 1 : 1);
-            if ((t || a) && !entries.some((e) => e.id === liveId)) entries.push({ id: liveId, role: 'assistant', thinking: t, text: a, live: true });
-          }
           const model = String(d.model || w.model || '');
           const winK = modelWindowK(model);
           const inTok = (d.input_tokens || 0) + (d.cache_read_input_tokens || 0) + (d.cache_creation_input_tokens || 0);
-          const ctx = winK > 0 && inTok > 0 ? clamp(Math.round((inTok / (winK * 1000)) * 100), 0, 99) : 0;
-          const sig = `${working ? 1 : 0}|${model}|${ctx}|` + entries.map((e) => `${e.id}:${e.role[0]}:${e.thinking.length}:${e.text.length}:${e.live ? 1 : 0}`).join(',');
+          const ctx = winK > 0 && inTok > 0 ? clamp(Math.round((inTok / (winK * 1000)) * 100), 0, 99) : w.ctx;
+          const tokens = Number(d.total_tokens || 0) || (inTok + Number(d.output_tokens || 0));
+          const cost = Number(d.cost_credit || 0) || w.cost;
+          // 进行中那一轮 → live(快轮询实时更新)
+          let live: Entry | null = null;
+          if (working) {
+            const t = String(d.thinking || '').trim().slice(-900);
+            const a = String(d.answer || '').trim().slice(-1600);
+            if (t || a) live = { id: Number(d.history_id) || 9e9, role: 'assistant', thinking: t, text: a, live: true };
+          }
+          // 慢:current-history(重) —— 首次 / 距上次>10s / 这一刻刚结束一轮(working→idle) 才拉
+          const lastH = histAtRef.current.get(w.id) || 0;
+          const turnEnded = w.status === 'working' && !working;
+          let entries = w.entries;
+          let histLoaded = w.histLoaded;
+          if (!histLoaded || turnEnded || nowTs - lastH > HISTORY_MIN_GAP) {
+            const hRes: any = await (apiService as any).getAgentCurrentHistory(w.id, { limit: HISTORY_LIMIT }).catch(() => null);
+            if (!cancelled && hRes) {
+              const items: any[] = hRes?.data?.items || [];
+              const es: Entry[] = [];
+              for (const it of items) { const e = extractEntry(it); if (e) es.push(e); }
+              entries = es; histLoaded = true; histAtRef.current.set(w.id, nowTs);
+            }
+          }
+          if (cancelled) return;
+          const liveSig = live ? `${live.id}:${live.thinking.length}:${live.text.length}` : '-';
+          const sig = `${working ? 1 : 0}|${model}|${ctx}|${tokens}|${cost}|L:${liveSig}|` + entries.map((e) => `${e.id}:${e.thinking.length}:${e.text.length}`).join(',');
           setWorkers((prev) => prev.map((x) => {
             if (x.id !== w.id) return x;
-            if (x.sig === sig) return x;   // 无变化 → 保持引用,memo 跳过重渲染
+            if (x.sig === sig && x.histLoaded) return x;   // 无变化 → 保持引用,memo 跳过重渲染
             const status: Status = working ? 'working' : 'idle';
             const startedAt = status === 'working' && x.status !== 'working' ? Date.now() : x.startedAt;
-            return { ...x, status, entries, sig, model, ctx, ctxK: winK, startedAt };
+            return { ...x, status, entries, live, model, ctx, ctxK: winK, tokens, cost, histLoaded, sig, startedAt };
           }));
         } catch { /* 该 agent 还没数据 / 404 → 保持现状 */ }
       }));
     };
     poll();
-    const t = window.setInterval(poll, 2500);
+    const t = window.setInterval(poll, 2000);
     return () => { cancelled = true; window.clearInterval(t); };
   }, []);
 
@@ -529,7 +561,10 @@ const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onH
   const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => { const n = bodyRef.current; if (n) n.scrollTop = n.scrollHeight; }, [w.sig]);
   const working = w.status === 'working';
-  const entries = w.entries;
+  // 已落历史 + 进行中 live(按 id 去重,避免提交瞬间重复)
+  const entries = w.live && !w.entries.some((e) => e.id === w.live!.id) ? [...w.entries, w.live] : w.entries;
+  const costStr = fmtCost(w.cost);
+  const tokStr = fmtTokens(w.tokens);
   const ctxColor = w.ctx > 85 ? 'bg-rose-400' : w.ctx > 60 ? 'bg-amber-400' : 'bg-zinc-400/60';
   const ctxText = w.ctx > 85 ? 'text-rose-300' : w.ctx > 60 ? 'text-amber-300' : 'text-zinc-500';
   const [copied, setCopied] = useState(false);
@@ -564,14 +599,17 @@ const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onH
           <span className="inline-flex items-center gap-1 text-[10.5px] text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> idle</span>
         )}
       </div>
-      {/* meta：模型 + 上下文用量 */}
+      {/* meta：模型 + 上下文用量 + 累计成本 */}
       <div data-id={`office-window-meta-${w.id}`} className="flex items-center gap-2 border-b border-white/[0.05] px-3 py-1.5">
-        <span className="truncate rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400" title={`模型 ${w.model}`}>{w.model}</span>
-        <div className="ml-auto flex items-center gap-1.5" title={`上下文 ${w.ctx}% · 窗口 ${w.ctxK}k`}>
+        <span className="min-w-0 shrink truncate rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400" title={`模型 ${w.model}`}>{w.model || '—'}</span>
+        <div data-id={`office-window-ctx-${w.id}`} className="ml-auto flex shrink-0 items-center gap-1.5" title={`上下文 ${w.ctx}%${tokStr ? ` · ${tokStr} tok` : ''} · 窗口 ${w.ctxK}k`}>
           <span className="text-[10px] text-zinc-600">ctx</span>
-          <div className="h-1 w-14 overflow-hidden rounded-full bg-white/10"><div className={`h-full rounded-full ${ctxColor} transition-all`} style={{ width: `${w.ctx}%` }} /></div>
+          <div className="h-1 w-12 overflow-hidden rounded-full bg-white/10"><div className={`h-full rounded-full ${ctxColor} transition-all`} style={{ width: `${w.ctx}%` }} /></div>
           <span className={`text-[10px] tabular-nums ${ctxText}`}>{w.ctx}%</span>
         </div>
+        <span data-id={`office-window-cost-${w.id}`} className="shrink-0 font-mono text-[10px] tabular-nums text-emerald-300/80" title={costStr ? `累计成本 ${costStr}` : (tokStr ? `累计 ${tokStr} tokens(成本未知)` : '暂无用量')}>
+          {costStr || (tokStr ? `${tokStr}t` : '$0')}
+        </span>
       </div>
       <div ref={bodyRef} data-id={`office-window-body-${w.id}`} onWheel={(e) => e.stopPropagation()} className="flex-1 space-y-3 overflow-auto px-3 py-2.5">
         {entries.length === 0 ? (
