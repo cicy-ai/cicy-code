@@ -272,9 +272,15 @@ export default function Office() {
           const d: any = rRes?.data || {};
           const working = isWorkingStatus(d.status) && d.complete !== true;
           const model = String(d.model || w.model || '');
-          const inTok = promptTokens(d);   // 整段 prompt(含 cache,不重复计数)= 当前上下文占用
-          const winK = modelWindowK(model);   // opus 4.8 = 1M
-          const ctx = winK > 0 && inTok > 0 ? clamp(Math.round((inTok / (winK * 1000)) * 100), 0, 100) : w.ctx;
+          const inTok = promptTokens(d);   // 整段 prompt(含 cache)
+          // 优先用 Claude Code 自报的权威用量(statusline 落盘的 context_used_pct,和 pane 完全一致);
+          // 没有(老 worker / codex 未落盘)才回退 input_tokens/窗口 估算。
+          const realPct = d.context_used_pct;
+          const useReal = typeof realPct === 'number' && realPct >= 0;
+          const winK = useReal && d.context_window_size ? Math.round(d.context_window_size / 1000) : modelWindowK(model);
+          const ctx = useReal
+            ? clamp(Math.round(realPct), 0, 100)
+            : (winK > 0 && inTok > 0 ? clamp(Math.round((inTok / (winK * 1000)) * 100), 0, 100) : w.ctx);
           const tokens = inTok;
           const cost = Number(d.cost_credit || 0) || w.cost;
           // 进行中那一轮 → live(快轮询实时更新)

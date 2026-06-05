@@ -2449,6 +2449,7 @@ func handleAgentCurrentReplyByPane(w http.ResponseWriter, r *http.Request) {
 	if thinking == "" {
 		thinking = aiGatewayReplyItemsText(reply.Items, "thinking", committedThinking)
 	}
+	ctxUsedPct, ctxWindowSize := agentInspectorReadContextWindow(paneID)
 	J(w, M{
 		"pane_id":                    paneID,
 		"conversation_id":            resolvedConversationID,
@@ -2472,7 +2473,27 @@ func handleAgentCurrentReplyByPane(w http.ResponseWriter, r *http.Request) {
 		"cache_creation_input_tokens": reply.CacheCreationInputTokens,
 		"total_tokens":               reply.TotalTokens,
 		"cost_credit":                reply.CostCredit,
+		// Claude Code 自报的权威上下文用量(statusline 落盘的 context.json)。和 pane 状态栏一致;
+		// 优先于用 input_tokens 反推(后者含 cache_read 重复计数)。缺失时为 null/0。
+		"context_used_pct":           ctxUsedPct,
+		"context_window_size":        ctxWindowSize,
 	})
+}
+
+// agentInspectorReadContextWindow 读 worker 的 .cicy/history/context.json(claude statusline 脚本落盘的
+// Claude Code 真实上下文用量),返回 (usedPct, windowSize)。缺失/不可读时返回 (nil, 0)。
+func agentInspectorReadContextWindow(agentID string) (interface{}, int) {
+	var cw struct {
+		UsedPct    *float64 `json:"used_pct"`
+		WindowSize int      `json:"window_size"`
+	}
+	if err := agentInspectorReadJSON(filepath.Join(aiGatewayHistoryDir(agentID), "context.json"), &cw); err != nil {
+		return nil, 0
+	}
+	if cw.UsedPct == nil {
+		return nil, cw.WindowSize
+	}
+	return *cw.UsedPct, cw.WindowSize
 }
 
 func handleAgentHistoryTurnByPane(w http.ResponseWriter, r *http.Request) {

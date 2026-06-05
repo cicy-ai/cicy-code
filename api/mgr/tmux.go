@@ -1437,6 +1437,12 @@ func claudeUserStatuslineSetupLines(hideModel bool) []string {
 		modelLine,
 		`used_pct=$(echo "$input" | jq -r '.context_window.used_percentage | if . == null then "?" else (.|round|tostring) end')`,
 		`total=$(echo "$input" | jq -r '(.context_window.context_window_size // 0) as $n | if $n >= 1000000 then (($n/1000000)|tostring)+"M" elif $n >= 1000 then (($n/1000)|floor|tostring)+"k" else ($n|tostring) end')`,
+		// 把 Claude Code 给 statusline 的真实上下文用量落盘到该 worker 的 .cicy/history/context.json
+		// (= aiGatewayHistoryDir,和 reply.json 同目录),供 office 读取——和 pane 状态栏完全一致;
+		// reply.json 的 input_tokens 含 cache_read 重复计数算不准。statusline 脚本是所有 worker 共享的一份,
+		// 落盘路径必须运行时从 JSON 的 cwd 推,不能写死。
+		`__cicy_cw=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // ""')`,
+		`[ -n "$__cicy_cw" ] && [ -d "$__cicy_cw/.cicy/history" ] && echo "$input" | jq -c '{used_pct: .context_window.used_percentage, window_size: .context_window.context_window_size, model: (.model.display_name // .model.id // "")}' > "$__cicy_cw/.cicy/history/context.json" 2>/dev/null || true`,
 		printfLine,
 		`CICY_STATUSLINE_EOF`,
 		`chmod +x "$HOME/.claude/statusline-command.sh"`,
