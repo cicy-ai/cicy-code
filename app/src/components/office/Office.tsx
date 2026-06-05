@@ -84,6 +84,22 @@ const elapsed = (from: number, now: number) => {
 };
 const p2 = (n: number) => String(n).padStart(2, '0');
 
+// http(非安全上下文)下 navigator.clipboard 不可用,回退到隐藏 textarea + execCommand。返回是否真复制成功。
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    if (window.isSecureContext && navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* 落到 execCommand */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed'; ta.style.top = '0'; ta.style.left = '0'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch { return false; }
+}
+
 /* 模型 → 现成的 agent avatar 类型（claude-symbol / openai / cicy ...），复用 AgentAvatar 的官方图标。 */
 function agentTypeForModel(model: string): string {
   const m = (model || '').toLowerCase();
@@ -511,7 +527,10 @@ const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onH
   const ctxColor = w.ctx > 85 ? 'bg-rose-400' : w.ctx > 60 ? 'bg-amber-400' : 'bg-zinc-400/60';
   const ctxText = w.ctx > 85 ? 'text-rose-300' : w.ctx > 60 ? 'text-amber-300' : 'text-zinc-500';
   const [copied, setCopied] = useState(false);
-  const copyId = (e: React.MouseEvent) => { e.stopPropagation(); try { navigator.clipboard?.writeText(w.id); } catch { /* noop */ } setCopied(true); window.setTimeout(() => setCopied(false), 1200); };
+  const copyId = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    void copyTextToClipboard(w.id).then((ok) => { if (ok) { setCopied(true); window.setTimeout(() => setCopied(false), 1200); } });
+  };
 
   return (
     <div data-id={`office-window-${w.id}`}
@@ -531,7 +550,6 @@ const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onH
               title="复制 agent id" className="inline-flex items-center gap-0.5 rounded px-0.5 transition-colors hover:bg-white/10 hover:text-zinc-300">
               {w.id}{copied ? <Check className="h-2.5 w-2.5 text-emerald-400" /> : <Copy className="h-2.5 w-2.5 opacity-50" />}
             </button>
-            · {w.role}
           </span>
         </span>
         {working ? (
