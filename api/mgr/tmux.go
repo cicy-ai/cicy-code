@@ -1424,10 +1424,10 @@ func claudeUserStatuslineSetupLines(hideModel bool) []string {
 	// status line — show context usage only. Official-login path keeps claude's
 	// real .model.display_name.
 	modelLine := `model=$(echo "$input" | jq -r '.model.display_name // .model.id // "Unknown Model"')`
-	printfLine := `printf "\033[1;36m[ %s | Context: %s%% / %sk ]\033[0m" "$model" "$used_pct" "$total_k"`
+	printfLine := `printf "\033[1;36m[ %s | Context: %s%% / %s ]\033[0m" "$model" "$used_pct" "$total"`
 	if hideModel {
 		modelLine = `:`
-		printfLine = `printf "\033[1;36m[ Context: %s%% / %sk ]\033[0m" "$used_pct" "$total_k"`
+		printfLine = `printf "\033[1;36m[ Context: %s%% / %s ]\033[0m" "$used_pct" "$total"`
 	}
 	return []string{
 		`mkdir -p "$HOME/.claude"`,
@@ -1435,8 +1435,8 @@ func claudeUserStatuslineSetupLines(hideModel bool) []string {
 		`#!/usr/bin/env bash`,
 		`input=$(cat)`,
 		modelLine,
-		`used_pct=$(echo "$input" | jq -r '.context_window.used_percentage // "?"')`,
-		`total_k=$(echo "$input" | jq -r '(.context_window.context_window_size // 0) / 1000 | floor')`,
+		`used_pct=$(echo "$input" | jq -r '.context_window.used_percentage | if . == null then "?" else (.|round|tostring) end')`,
+		`total=$(echo "$input" | jq -r '(.context_window.context_window_size // 0) as $n | if $n >= 1000000 then (($n/1000000)|tostring)+"M" elif $n >= 1000 then (($n/1000)|floor|tostring)+"k" else ($n|tostring) end')`,
 		printfLine,
 		`CICY_STATUSLINE_EOF`,
 		`chmod +x "$HOME/.claude/statusline-command.sh"`,
