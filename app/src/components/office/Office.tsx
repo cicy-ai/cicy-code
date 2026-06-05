@@ -619,7 +619,8 @@ const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onH
           {costStr || (tokStr ? `${tokStr}t` : '$0')}
         </span>
       </div>
-      <div ref={bodyRef} data-id={`office-window-body-${w.id}`} onWheel={(e) => e.stopPropagation()} className="flex-1 space-y-3 overflow-auto px-3 py-2.5">
+      <div ref={bodyRef} data-id={`office-window-body-${w.id}`} onWheel={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}
+        className="flex-1 cursor-text select-text space-y-3 overflow-auto px-3 py-2.5 [user-select:text]">
         {entries.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-1 text-zinc-700"><Inbox className="h-5 w-5" /><span className="text-[11px]">{working ? '思考中…' : '空闲 · 等待派活'}</span></div>
         ) : entries.map((e, i) => {
