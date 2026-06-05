@@ -84,8 +84,14 @@ const elapsed = (from: number, now: number) => {
 };
 const p2 = (n: number) => String(n).padStart(2, '0');
 
-// http(非安全上下文)下 navigator.clipboard 不可用,回退到隐藏 textarea + execCommand。返回是否真复制成功。
+// 复制 agent id。office 多在 cicy-desktop 里以 http(非安全上下文)打开,navigator.clipboard 与
+// execCommand 都被禁;优先走 cicy-desktop 注入的 electronRPC 桥(clipboard_write_text),
+// 再回退 navigator.clipboard / execCommand 以兼容普通浏览器/https。返回是否真复制成功。
 async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    const rpc = (window as unknown as { electronRPC?: (tool: string, args: Record<string, unknown>) => Promise<unknown> }).electronRPC;
+    if (typeof rpc === 'function') { await rpc('clipboard_write_text', { text }); return true; }
+  } catch { /* 落到 web 方案 */ }
   try {
     if (window.isSecureContext && navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
   } catch { /* 落到 execCommand */ }
