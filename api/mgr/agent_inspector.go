@@ -2480,20 +2480,164 @@ func handleAgentCurrentReplyByPane(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// agentInspectorReadContextWindow 读 worker 的 .cicy/history/context.json(claude statusline 脚本落盘的
-// Claude Code 真实上下文用量),返回 (usedPct, windowSize)。缺失/不可读时返回 (nil, 0)。
+// agentInspectorReadContextWindow 返回该 worker 的权威上下文用量 (usedPct, windowSize)。
+// claude:读 statusline 脚本落盘的 .cicy/history/context.json;
+// codex:读它最近一条匹配 cwd 的 rollout 里的 token_count(last_token_usage + model_context_window)。
+// 都拿不到时返回 (nil, 0),调用方回退到 input_tokens/窗口 估算。
 func agentInspectorReadContextWindow(agentID string) (interface{}, int) {
 	var cw struct {
 		UsedPct    *float64 `json:"used_pct"`
 		WindowSize int      `json:"window_size"`
 	}
-	if err := agentInspectorReadJSON(filepath.Join(aiGatewayHistoryDir(agentID), "context.json"), &cw); err != nil {
-		return nil, 0
-	}
-	if cw.UsedPct == nil {
+	if err := agentInspectorReadJSON(filepath.Join(aiGatewayHistoryDir(agentID), "context.json"), &cw); err == nil {
+		if cw.UsedPct != nil {
+			return *cw.UsedPct, cw.WindowSize
+		}
 		return nil, cw.WindowSize
 	}
-	return *cw.UsedPct, cw.WindowSize
+	return agentCodexContextWindow(agentID)
+}
+
+type codexRolloutCacheEntry struct {
+	path string
+	at   time.Time
+}
+
+var codexRolloutCache = struct {
+	sync.Mutex
+	m map[string]codexRolloutCacheEntry
+}{m: map[string]codexRolloutCacheEntry{}}
+
+// agentCodexContextWindow 从 codex 的 rollout 取上下文用量。该 agent 不是 codex / 没 rollout 时返回 (nil, 0)。
+func agentCodexContextWindow(agentID string) (interface{}, int) {
+	path := codexRolloutForWorkspace(builtinWorkerWorkspace(agentID))
+	if path == "" {
+		return nil, 0
+	}
+	used, win := codexLastTokenCount(path)
+	if win <= 0 || used < 0 {
+		return nil, win
+	}
+	pct := float64(used) / float64(win) * 100
+	if pct < 0 {
+		pct = 0
+	} else if pct > 100 {
+		pct = 100
+	}
+	return pct, win
+}
+
+// codexRolloutForWorkspace 找 ~/.codex/sessions 下最近一条 cwd 命中该 workspace 的 rollout(按 mtime,
+// 扫描上限 60 个),结果缓存 30s 以免每次 poll 都 glob。
+func codexRolloutForWorkspace(workspace string) string {
+	if workspace == "" {
+		return ""
+	}
+	codexRolloutCache.Lock()
+	defer codexRolloutCache.Unlock()
+	if e, ok := codexRolloutCache.m[workspace]; ok && time.Since(e.at) < 30*time.Second {
+		if e.path == "" {
+			return ""
+		}
+		if _, err := os.Stat(e.path); err == nil {
+			return e.path
+		}
+	}
+	home, _ := os.UserHomeDir()
+	files, _ := filepath.Glob(filepath.Join(home, ".codex", "sessions", "*", "*", "*", "rollout-*.jsonl"))
+	type fm struct {
+		f string
+		t time.Time
+	}
+	fms := make([]fm, 0, len(files))
+	for _, f := range files {
+		if st, err := os.Stat(f); err == nil {
+			fms = append(fms, fm{f, st.ModTime()})
+		}
+	}
+	sort.Slice(fms, func(i, j int) bool { return fms[i].t.After(fms[j].t) })
+	target := `"` + workspace + `"`
+	found := ""
+	for i, x := range fms {
+		if i >= 60 {
+			break
+		}
+		if strings.Contains(string(agentInspectorReadFileHead(x.f, 4096)), target) {
+			found = x.f
+			break
+		}
+	}
+	codexRolloutCache.m[workspace] = codexRolloutCacheEntry{path: found, at: time.Now()}
+	return found
+}
+
+// codexLastTokenCount 从 rollout 末尾往前找最后一个 token_count 事件,返回 (last_token_usage.input_tokens, model_context_window)。
+func codexLastTokenCount(path string) (int, int) {
+	tail := agentInspectorReadFileTail(path, 256*1024)
+	if len(tail) == 0 {
+		return -1, 0
+	}
+	lines := strings.Split(string(tail), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		ln := lines[i]
+		if !strings.Contains(ln, `"token_count"`) {
+			continue
+		}
+		var ev struct {
+			Payload struct {
+				Info *codexTokenInfo `json:"info"`
+			} `json:"payload"`
+			Info *codexTokenInfo `json:"info"`
+		}
+		if json.Unmarshal([]byte(ln), &ev) != nil {
+			continue
+		}
+		info := ev.Payload.Info
+		if info == nil {
+			info = ev.Info
+		}
+		if info != nil && info.Window > 0 {
+			return info.Last.InputTokens, info.Window
+		}
+	}
+	return -1, 0
+}
+
+type codexTokenInfo struct {
+	Last struct {
+		InputTokens int `json:"input_tokens"`
+	} `json:"last_token_usage"`
+	Window int `json:"model_context_window"`
+}
+
+func agentInspectorReadFileHead(path string, n int) []byte {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	buf := make([]byte, n)
+	m, _ := f.Read(buf)
+	return buf[:m]
+}
+
+func agentInspectorReadFileTail(path string, max int64) []byte {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil
+	}
+	start := int64(0)
+	if st.Size() > max {
+		start = st.Size() - max
+	}
+	buf := make([]byte, st.Size()-start)
+	m, _ := f.ReadAt(buf, start)
+	return buf[:m]
 }
 
 func handleAgentHistoryTurnByPane(w http.ResponseWriter, r *http.Request) {
