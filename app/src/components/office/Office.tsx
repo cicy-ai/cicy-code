@@ -29,9 +29,10 @@ interface Worker {
   x: number; y: number; w: number; h: number;
 }
 
-// 从 current-history 的一个 item 里抽 thinking+text（跳过 tool_use/tool_result）。返回 null = 该 turn 无可显示文本。
+// 从 current-history 的一个 item 里抽 agent 自己的 thinking+text。
+// 只取 assistant 轮：过滤 user/system/tool 注入(如自动 recap、system-reminder、工具结果),窗口只展示 agent 输出。
 function extractEntry(item: any): Entry | null {
-  const role: 'user' | 'assistant' = item?.role === 'user' ? 'user' : 'assistant';
+  if (item?.role !== 'assistant') return null;
   let thinking = '', text = '';
   const content = item?.content;
   if (typeof content === 'string') {
@@ -49,7 +50,7 @@ function extractEntry(item: any): Entry | null {
   thinking = thinking.trim().slice(-900);
   text = text.trim().slice(-1600);
   if (!thinking && !text) return null;
-  return { id: Number(item?.history_id) || 0, role, thinking, text };
+  return { id: Number(item?.history_id) || 0, role: 'assistant', thinking, text };
 }
 
 type ChatKind = 'dispatch' | 'broadcast' | 'done' | 'note';
@@ -553,11 +554,6 @@ const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onH
           <div className="flex h-full flex-col items-center justify-center gap-1 text-zinc-700"><Inbox className="h-5 w-5" /><span className="text-[11px]">{working ? '思考中…' : '空闲 · 等待派活'}</span></div>
         ) : entries.map((e, i) => {
           const isLast = i === entries.length - 1;
-          if (e.role === 'user') return (
-            <div key={`${e.id}-${i}`} data-id={`office-window-entry-${w.id}-${i}`} className="flex justify-end">
-              <div className="max-w-[88%] whitespace-pre-wrap rounded-xl rounded-tr-sm bg-sky-500/15 px-2 py-1 text-[11.5px] leading-relaxed text-sky-100/80">{e.text.slice(0, 600)}</div>
-            </div>
-          );
           return (
             <div key={`${e.id}-${i}`} data-id={`office-window-entry-${w.id}-${i}`} className="space-y-1.5 border-l border-white/[0.06] pl-2">
               {e.thinking && (
