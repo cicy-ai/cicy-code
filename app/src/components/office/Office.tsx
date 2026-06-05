@@ -66,7 +66,9 @@ const shortId = (id: string) => String(id || '').replace(/:main\.0$/, '');
 function modelWindowK(model: string): number {
   const m = (model || '').toLowerCase();
   if (m.includes('gemini')) return 1000;
-  if (m.includes('opus')) return 1000;   // opus 4.x 这边走 1M 上下文
+  // opus-4-8 的 1M beta 有效窗口实测约 2M:w-10053 input_tokens 到 1.075M 仍在跑,
+  // 且各 agent input_tokens/2M 与 Claude Code pane 的 Context% 完全吻合(54/30/26/7)。
+  if (m.includes('opus')) return 2000;
   if (m.includes('claude')) return 200;
   if (m.includes('gpt') || m.includes('o1') || m.includes('o3') || m.includes('o4')) return 256;
   if (m.includes('deepseek')) return 128;
