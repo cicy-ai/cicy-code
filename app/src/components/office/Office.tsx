@@ -62,14 +62,22 @@ const MIN_W = 240, MIN_H = 168;
 
 const shortId = (id: string) => String(id || '').replace(/:main\.0$/, '');
 
-// 模型上下文窗口(k tokens)，用于把 input_tokens 估成上下文占用 %。粗映射，未知给 200k。
+// 模型基础上下文窗口(k tokens)。粗映射，未知给 200k。
 function modelWindowK(model: string): number {
   const m = (model || '').toLowerCase();
   if (m.includes('gemini')) return 1000;
+  if (m.includes('opus')) return 1000;   // opus 4.x 这边走 1M 上下文
   if (m.includes('claude')) return 200;
   if (m.includes('gpt') || m.includes('o1') || m.includes('o3') || m.includes('o4')) return 256;
   if (m.includes('deepseek')) return 128;
   return 200;
+}
+// 动态推断窗口:基础窗口,但实际 input 已超出则升档(如 claude 开了 1M beta),避免一直顶 99%。inTokK = input tokens / 1000。
+function ctxWindowK(model: string, inTokK: number): number {
+  const base = modelWindowK(model);
+  if (inTokK <= base) return base;
+  for (const wK of [256, 400, 1000, 2000]) if (wK >= inTokK && wK >= base) return wK;
+  return Math.max(Math.ceil(inTokK / 100) * 100, base);
 }
 // current-reply.status → 是否在干活
 const WORKING_STATES = new Set(['streaming', 'thinking', 'working', 'tool_call', 'running', 'generating', 'busy']);
@@ -262,8 +270,8 @@ export default function Office() {
           const d: any = rRes?.data || {};
           const working = isWorkingStatus(d.status) && d.complete !== true;
           const model = String(d.model || w.model || '');
-          const winK = modelWindowK(model);
           const inTok = (d.input_tokens || 0) + (d.cache_read_input_tokens || 0) + (d.cache_creation_input_tokens || 0);
+          const winK = ctxWindowK(model, inTok / 1000);
           const ctx = winK > 0 && inTok > 0 ? clamp(Math.round((inTok / (winK * 1000)) * 100), 0, 99) : w.ctx;
           const tokens = Number(d.total_tokens || 0) || (inTok + Number(d.output_tokens || 0));
           const cost = Number(d.cost_credit || 0) || w.cost;
