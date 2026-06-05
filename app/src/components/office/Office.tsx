@@ -223,12 +223,13 @@ export default function Office() {
           const ids = subs.map((b: any) => shortId(String(b.name || ''))).filter(Boolean);
           if (ids.length) subIds = new Set(ids);
         } catch { /* 没有子 agent 关系表数据 → 退回全部 pane */ }
+        // 注意:不带 pane 的 default_model —— 那是 cicy 配置项(网关路由用),非网关下对不上实际。
+        // 模型只认 current-reply(reply.json)里真实跑的那个,拉到前显示 '—'。
         const team = panes
           .map((p: any) => ({
             id: shortId(String(p.pane_id || p.id || '')),
             title: String(p.title || p.pane_id || '').trim(),
             role: String(p.role || p.agent_type || '').trim(),
-            model: String(p.default_model || p.model || '').trim(),
             agentType: String(p.agent_type || '').trim(),
           }))
           .filter((p) => p.id && p.id !== SELF && (subIds ? subIds.has(p.id) : true));
@@ -237,8 +238,8 @@ export default function Office() {
           const prevById = new Map(prev.map((w) => [w.id, w]));
           return team.map((p, i) => {
             const ex = prevById.get(p.id);
-            if (ex) return { ...ex, name: p.title || ex.name, role: p.role || ex.role, model: p.model || ex.model, agentType: p.agentType || ex.agentType };
-            return makeWorker(p.id, p.title || p.id, p.role, p.model, i, p.agentType);
+            if (ex) return { ...ex, name: p.title || ex.name, role: p.role || ex.role, agentType: p.agentType || ex.agentType };
+            return makeWorker(p.id, p.title || p.id, p.role, '', i, p.agentType);
           });
         });
         setLoaded(true);
