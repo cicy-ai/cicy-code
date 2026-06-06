@@ -156,6 +156,12 @@ export default function Select({
   const actionMenuOption = actionMenu ? options.find(o => o.value === actionMenu.value) : null;
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Ignore keys fired while an IME composition is active — e.g. pressing Enter
+    // to confirm a Chinese/Japanese candidate in the search box. Without this,
+    // that Enter would select the active option and close the dropdown instead
+    // of just committing the composed text. (keyCode 229 covers browsers that
+    // don't set isComposing on the confirming keydown.)
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (!open) {
       if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
         e.preventDefault();
