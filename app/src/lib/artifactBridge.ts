@@ -112,7 +112,7 @@ export function installArtifactBridge() {
     getUrl(): string {
       const c = requireController();
       const el = c.getEl();
-      if (c.isElectron() && el && typeof el.getURL === 'function') {
+      if (el && typeof el.getURL === 'function') {
         try { return el.getURL() || c.stateUrl(); } catch { /* fallthrough */ }
       }
       return c.stateUrl();
@@ -122,7 +122,7 @@ export function installArtifactBridge() {
       const c = controller;
       return {
         mounted: !!c,
-        electron: !!c && c.isElectron(),
+        electron: !!c && (c.isElectron() || c.getEl()?.tagName === 'WEBVIEW'),
         url: c ? (this as any).getUrl?.() ?? c.stateUrl() : '',
         hasBridge: !!desktopBridge(),
         hasCdp: !!(desktopBridge() && desktopBridge().cdp),
@@ -135,7 +135,7 @@ export function installArtifactBridge() {
     async execJs(code: string): Promise<any> {
       const c = requireController();
       const el = c.getEl();
-      if (c.isElectron() && el && typeof el.executeJavaScript === 'function') {
+      if (el && typeof el.executeJavaScript === 'function') {
         return await el.executeJavaScript(String(code), true);
       }
       const b = desktopBridge();
@@ -152,7 +152,7 @@ export function installArtifactBridge() {
     async call(method: string, ...args: any[]): Promise<any> {
       const c = requireController();
       const el = c.getEl();
-      if (c.isElectron() && el && typeof el[method] === 'function') {
+      if (el && typeof el[method] === 'function') {
         return await awaitMaybe(el[method](...args));
       }
       const b = desktopBridge();
@@ -173,7 +173,7 @@ export function installArtifactBridge() {
     async capture(): Promise<string> {
       const c = requireController();
       const el = c.getEl();
-      if (c.isElectron() && el && typeof el.capturePage === 'function') {
+      if (el && typeof el.capturePage === 'function') {
         const img = await el.capturePage();
         return img && typeof img.toDataURL === 'function' ? img.toDataURL() : String(img);
       }
@@ -186,10 +186,14 @@ export function installArtifactBridge() {
     async pdf(opts: any = {}): Promise<string> {
       const c = requireController();
       const el = c.getEl();
-      if (c.isElectron() && el && typeof el.printToPDF === 'function') {
+      if (el && typeof el.printToPDF === 'function') {
         const buf = await el.printToPDF(opts);
-        // Buffer/Uint8Array in the trusted renderer (nodeIntegration:true).
-        if (buf && typeof buf.toString === 'function') { try { return buf.toString('base64'); } catch { /* fallthrough */ } }
+        // Node Buffer only in a nodeIntegration renderer; a plain Uint8Array's
+        // toString('base64') is NOT base64 (it joins numbers), so only trust
+        // toString for real Buffers and btoa-encode everything else.
+        if (buf && buf.constructor && buf.constructor.name === 'Buffer' && typeof buf.toString === 'function') {
+          try { return buf.toString('base64'); } catch { /* fallthrough */ }
+        }
         try {
           let bin = '';
           const u8 = new Uint8Array(buf);

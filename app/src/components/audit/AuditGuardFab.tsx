@@ -8,6 +8,7 @@ import apiService from '../../services/api';
 import Select, { type SelectOption } from '../ui/Select';
 import { useAuditHits } from './useAuditHits';
 import AuditDashboard from './AuditDashboard';
+import { WebFrame } from '../WebFrame';
 
 const GUARD_PANE = 'w-6001:main.0';
 const OPEN_KEY = 'cicy.auditGuard.open';
@@ -266,10 +267,9 @@ function AuditGuardFabInner() {
           </div>
         </div>
 
-        <div data-id="audit-guard-panel-frame-wrap" className="flex-1 min-h-0 bg-black">
+        <div data-id="audit-guard-panel-frame-wrap" className="relative flex-1 min-h-0 bg-black">
           {src && (
-            <iframe
-              data-id="audit-guard-panel-frame"
+            <WebFrame
               src={src}
               className="h-full w-full border-0 bg-black"
               title="audit-guard-chat"
