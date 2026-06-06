@@ -324,7 +324,7 @@ func (h *chatHub) broadcastExcept(agentID string, evt ChatEvent, except *chatCli
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	n := len(h.clients[agentID])
-	if evt.Type != "system_resources" && evt.Type != "ai_chunk" && evt.Type != "status_change" {
+	if evt.Type != "system_resources" && evt.Type != "ai_chunk" && evt.Type != "status_change" && evt.Type != "thinking_chunk" {
 		log.Printf("[chat-ws] broadcast master_agent_id=%s type=%s clients=%d", agentID, evt.Type, n)
 	}
 	for _, c := range h.clients[agentID] {
@@ -446,7 +446,7 @@ func (h *chatHub) publishAgent(agentID string, evt ChatEvent) {
 		clientIDs = append(clientIDs, clientID)
 	}
 	h.mu.RUnlock()
-	if evt.Type != "system_resources" && evt.Type != "ai_chunk" && evt.Type != "status_change" {
+	if evt.Type != "system_resources" && evt.Type != "ai_chunk" && evt.Type != "status_change" && evt.Type != "thinking_chunk" {
 		log.Printf("[chat-ws] publish agent_id=%s type=%s clients=%d", agentID, evt.Type, len(clientIDs))
 	}
 	for _, clientID := range clientIDs {
@@ -525,7 +525,11 @@ func (c *chatClient) writePump() {
 
 func (c *chatClient) readPump() {
 	defer hub.unregister(c)
-	c.conn.SetReadLimit(64 * 1024)
+	// 8MB: exec_js results carry artifact screenshots/PDFs as base64 (a
+	// capturePage dataURL is easily 100KB-2MB). The old 64KB cap made gorilla
+	// kill the connection on the oversized ack — capture/pdf 504'd and the
+	// client got disconnected.
+	c.conn.SetReadLimit(8 * 1024 * 1024)
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(35 * time.Second))
 		c.markActive()
