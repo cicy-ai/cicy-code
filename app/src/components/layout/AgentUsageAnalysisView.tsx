@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download, Loader2, RefreshCw } from 'lucide-react';
 import apiService from '../../services/api';
+import { ModelTag } from '../../lib/modelTag';
 
 // Usage analysis (P1): KPI cards + cache-efficiency gauge + this-request token
 // composition, derived from current.json / reply.json via /usage-analysis. SVG/
@@ -312,7 +313,7 @@ export default function AgentUsageAnalysisView({ paneId, active }: { paneId: str
     <div data-id="agent-usage-analysis" className="flex h-full w-full flex-col overflow-hidden">
       <div data-id="agent-usage-analysis-header" className="flex shrink-0 items-center gap-2 border-b border-[var(--vsc-border)] px-3 py-1.5">
         {data?.model ? (
-          <span data-id="agent-usage-analysis-model" className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[11px] text-zinc-300">{data.model}</span>
+          <ModelTag model={data.model} />
         ) : null}
         {k?.status ? <span className="text-[11px] text-zinc-500">{k.status}</span> : null}
         {k?.turn_requests && k.turn_requests > 0 ? (

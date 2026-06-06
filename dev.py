@@ -1104,6 +1104,20 @@ def run_docker_build(version_override=""):
     sys.exit(0)
 
 
+def _configured_public_url():
+    """Public URL for in-app links, read from global.json ("public_url").
+
+    The box-specific domain lives in config, never hardcoded in this launcher:
+    different deployments (and re-provisioned spot boxes) carry different domains.
+    Returns "" when unset so the caller can fall back to whatever is in the env.
+    """
+    try:
+        with open(GLOBAL_JSON_PATH) as f:
+            return str(json.load(f).get("public_url", "") or "").strip()
+    except Exception:
+        return ""
+
+
 def _public_url_with_port(url, port):
     """Rewrite CICY_PUBLIC_URL to the externally-published host port.
 
@@ -1746,7 +1760,9 @@ def main():
         os.environ["SKIP_NPM"] = "1"
         os.environ["PORT"] = str(PORT)
         os.environ["SQLITE_PATH"] = SQLITE_PATH
-        os.environ.setdefault("CICY_PUBLIC_URL", "http://43.99.56.150:8008")
+        os.environ["CICY_PUBLIC_URL"] = (
+            _configured_public_url() or os.environ.get("CICY_PUBLIC_URL", "")
+        )
         for key, value in get_ai_env_defaults().items():
             os.environ[key] = value
         result = subprocess.run(["./build.sh", "build", platform], cwd=ROOT_DIR)
@@ -1800,7 +1816,7 @@ def main():
     os.environ["PORT"] = str(PORT)
     os.environ["SKIP_NPM"] = "1"
     os.environ["SQLITE_PATH"] = SQLITE_PATH
-    os.environ.setdefault("CICY_PUBLIC_URL", "http://43.99.56.150:8008")
+    os.environ.setdefault("CICY_PUBLIC_URL", "https://app-1001.cicy-ai.com")
     for key, value in get_ai_env_defaults().items():
         os.environ[key] = value
     if not args.ttydAssets:

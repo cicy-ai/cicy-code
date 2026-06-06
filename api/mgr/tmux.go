@@ -630,6 +630,8 @@ func guidanceFilenameForAgentType(agentType string) string {
 		return "AGENTS.md"
 	case "kiro-cli":
 		return filepath.Join(".kiro", "steering", "memory.md")
+	case "dispatcher":
+		return "AGENTS.md"
 	}
 	return ""
 }
@@ -659,6 +661,20 @@ func writeAgentGuidanceFile(workspace, agentType, paneID, projectTemplate, roleT
 		return
 	}
 	content := composeAgentMemory(paneID, workspace, agentType, projectTemplate, roleTemplate)
+	// The dispatcher is a lite customizable agent, not a coding CLI — the global
+	// template's tmux/skill instructions don't apply. Its AGENTS.md IS its role
+	// definition (profile frontmatter + persona, see agent_lite.go). Seed it
+	// from the chosen role template (客服/销售/宣传/…) when one is picked,
+	// otherwise the default dispatcher (PM) charter.
+	if normalizeAgentType(agentType) == "dispatcher" {
+		seed := defaultDispatcherCharter
+		if slug := sanitizeTemplateSlug(roleTemplate); slug != "" {
+			if rt := strings.TrimSpace(loadTemplateFile(roleTemplatePath(slug))); rt != "" {
+				seed = rt
+			}
+		}
+		content = substituteTemplatePlaceholders(seed, paneID, workspace, agentType)
+	}
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		log.Printf("[init] failed to write %s for %s: %v", rel, shortID, err)
 	}
@@ -1322,6 +1338,8 @@ func normalizeAgentType(agentType string) string {
 		return "opencode"
 	case "hermes", "hermes-agent", "hermes agent":
 		return "hermes"
+	case "dispatcher", "secretary":
+		return "dispatcher"
 	default:
 		return ""
 	}
@@ -3030,6 +3048,18 @@ fi`,
 			lines = append(lines, "kiro-cli chat")
 		}
 		return lines
+	case "dispatcher":
+		// The dispatcher needs no external CLI — its pane runs a tiny REPL out
+		// of this very binary (dispatcher_repl.go); the server side owns the
+		// LLM traffic and tools (agent_dispatcher.go) via the unified gateway.
+		exePath, err := os.Executable()
+		if err != nil || strings.TrimSpace(exePath) == "" {
+			exePath = "cicy-code"
+		}
+		return []string{
+			"clear",
+			fmt.Sprintf("%s dispatcher-repl --agent %s", tmuxShellQuote(exePath), tmuxShellQuote(shortID)),
+		}
 	case "copilot":
 		installLog := tmuxHomeJoin("logs", fmt.Sprintf("copilot-install-%s.log", shortID))
 		lines := []string{
@@ -3443,6 +3473,9 @@ func isAgentInputReady(agentType, out string) bool {
 		// The placeholder alone shows up briefly during boot before kiro is
 		// truly ready to accept input.
 		return strings.Contains(out, "Kiro ·") && strings.Contains(out, "ask a question or describe a task")
+	case "dispatcher":
+		// The REPL prints this banner immediately on start (dispatcher_repl.go).
+		return strings.Contains(out, "● Dispatcher")
 	default:
 		return false
 	}
@@ -3490,7 +3523,9 @@ func ensureLazyAgentReady(paneID, agentType string) error {
 
 func waitForAgentInputReady(paneID, agentType string, trace *tmuxSendTrace) error {
 	agentType = normalizeAgentType(agentType)
-	if agentType == "" || agentType == "opencode" || agentType == "codex" || agentType == "hermes" || agentType == "kiro-cli" {
+	// dispatcher: the REPL reads buffered stdin — input sent at any moment is
+	// consumed on the next loop iteration, so there is no "not ready" state.
+	if agentType == "" || agentType == "opencode" || agentType == "codex" || agentType == "hermes" || agentType == "kiro-cli" || agentType == "dispatcher" {
 		return nil
 	}
 	if trace != nil {

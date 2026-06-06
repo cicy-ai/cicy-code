@@ -17,5 +17,8 @@
   "selectHintNavigate": "naviguer",
   "selectHintSelect": "choisir",
   "windowConfirmDelete": "Supprimer la fenêtre {{idx}} ?",
-  "windowCreateButton": "Nouvelle fenêtre"
+  "windowCreateButton": "Nouvelle fenêtre",
+  "webFrameCopy": "Copier",
+  "webFramePaste": "Coller",
+  "webFrameReload": "Recharger"
 }

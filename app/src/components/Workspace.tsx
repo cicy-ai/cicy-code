@@ -12,9 +12,10 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, Building2
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { ModelTag } from '../lib/modelTag';
 import AgentAvatar from './AgentAvatar';
 import MobileQRPopover from './MobileQRPopover';
 import { useDevRegister, devStore } from '../lib/devStore';
@@ -26,12 +27,12 @@ import TodoPanel from './TodoPanel';
 import FilesView from './files/FilesView';
 import { WebFrame } from './WebFrame';
 import ArtifactPanel from './ArtifactPanel';
-import { installArtifactBridge } from '../lib/artifactBridge';
+import { installArtifactBridge, ARTIFACT_WEBVIEW_ID } from '../lib/artifactBridge';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
 import TeamPanel from './layout/TeamPanel';
-import Office from './office/Office';
 import GlobalProxyIndicator from './layout/GlobalProxyIndicator';
+import { ProxyManagerDialog } from './layout/ProxyManagerDialog';
 import SkillMarketplacePanel from './layout/SkillMarketplacePanel';
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
 import AgentProviderRequestView, { type RequestViewTab } from './layout/AgentProviderRequestView';
@@ -39,7 +40,7 @@ import AgentUsageLogView from './layout/AgentUsageLogView';
 import AgentUsageAnalysisView from './layout/AgentUsageAnalysisView';
 import TokenDialog from './layout/TokenDialog';
 import useDesktopEvents from './layout/useDesktopEvents';
-import AgentCanvas, { AgentCanvasItem } from './layout/AgentCanvas';
+import type { AgentCanvasItem } from './layout/AgentStack';
 import AgentStack from './layout/AgentStack';
 import ProviderDashboard from './providers/ProviderDashboard';
 import IMDashboard from './im/IMDashboard';
@@ -79,6 +80,55 @@ const TEAM_TERMINAL_ACTIVE_KEY = 'ws_teamTerminalActive';
 const GITHUB_ISSUES_URL = 'https://github.com/cicy-ai/cicy-code/issues';
 const UPGRADE_URL = 'https://cicy-ai.com/team/upgrade';
 const RENEW_URL = 'https://cicy-ai.com/team/pay';
+
+// Bottom-left button of the artifact host: send this page's connection info
+// (chat-WS client id + the artifact webview's webContentsId) to the active
+// agent so it can drive the artifact frame via the artifact skill.
+function ArtifactSendToAgentBtn({ paneId }: { paneId: string }) {
+  const { t } = useTranslation('workspace');
+  const [state, setState] = useState<'idle' | 'sending' | 'ok'>('idle');
+  const send = async () => {
+    if (state === 'sending' || !paneId) return;
+    setState('sending');
+    let wcid = '';
+    try {
+      // ArtifactPanel's own webview only mounts when the desktop preload
+      // injects window.cicy; older desktops fall back to WebFrame, which (in
+      // Electron) renders a web-frame-webview — query both.
+      const el: any = document.getElementById(ARTIFACT_WEBVIEW_ID)
+        || document.querySelector('[data-id="cli-content-artifact-host"] [data-id="web-frame-webview"]');
+      if (el?.getWebContentsId) wcid = String(el.getWebContentsId());
+    } catch { /* webview not ready / not Electron */ }
+    const cid = chatWs.currentClientId() || '';
+    const text = t('artifactSendAgentPrompt', {
+      clientId: cid || '未知',
+      webContentsId: wcid || '未知(非Electron或产物页未加载)',
+      defaultValue:
+        '我的 client id: {{clientId}}，我的 webContentsId: {{webContentsId}}。请用产物(artifact) skill 与我连接：先跑 `artifact snapshot` 读取并测试当前页面（DOM 快照，不要截图——截图吃 token），确认能连上、能读到页面元素后再继续操作。',
+    });
+    try {
+      await apiService.sendCommand(paneId, text, true);
+      setState('ok');
+      setTimeout(() => setState('idle'), 1500);
+    } catch {
+      setState('idle');
+    }
+  };
+  return (
+    <button
+      data-id="cli-content-artifact-send-agent"
+      type="button"
+      onClick={send}
+      className="absolute bottom-2 left-2 z-20 select-none rounded-md border border-white/10 bg-black/60 px-2.5 py-1.5 text-xs text-zinc-300 shadow-lg backdrop-blur transition-colors hover:bg-black/80 hover:text-white"
+    >
+      {state === 'ok'
+        ? t('artifactSendAgentDone', { defaultValue: '已发送 ✓' })
+        : state === 'sending'
+          ? t('artifactSendAgentSending', { defaultValue: '发送中…' })
+          : t('artifactSendAgent', { defaultValue: '发送给 Agent' })}
+    </button>
+  );
+}
 
 type MembershipCardState = {
   userId: string;
@@ -345,8 +395,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const mainTab: 'cli' | 'chat' = 'cli';
   const [leftPanelView, setLeftPanelView] = useState<LeftPanelView>(() => {
     const v = cache.get(leftPanelKey(paneId), null);
-    if (v === 'team' || v === 'skills') return v;
-    return null;
+    // 刷新后恢复上次打开的左栏面板(含办公室);'todo' 若技能未装会被下方 effect 关掉
+    const ok: LeftPanelView[] = ['team', 'skills', 'office', 'providers', 'im', 'agents', 'todo'];
+    return ok.includes(v) ? v : null;
   });
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorRequestedTab, setInspectorRequestedTab] = useState<InspectorTab>('overview');
@@ -382,6 +433,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [cliDrawerResizing, setCliDrawerResizing] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
+  const [proxyManagerOpen, setProxyManagerOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [providersLeftMount, setProvidersLeftMount] = useState<HTMLDivElement | null>(null);
   const [providersRightMount, setProvidersRightMount] = useState<HTMLDivElement | null>(null);
@@ -515,13 +567,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const addApp = (window as any).__desktopAddApp || (() => {});
   useDesktopEvents(addApp);
 
-  const leftActive = leftPanelView;
+  // Office entry retired — coerce a stale cached 'office' panel state to
+  // closed so users whose per-pane cache still says 'office' aren't stuck on
+  // a view with no button.
+  const leftActive = leftPanelView === 'office' ? null : leftPanelView;
   const closeLeftPanel = useCallback(() => {
     setLeftPanelView(null);
   }, []);
 
   useEffect(() => {
-    cache.set(leftPanelKey(paneId), leftActive === 'team' || leftActive === 'skills' ? leftActive : null);
+    cache.set(leftPanelKey(paneId), leftActive);
   }, [leftActive, paneId]);
   useEffect(() => { cache.set(TEAM_TERMINAL_ACTIVE_KEY, activeTeamPaneId); }, [activeTeamPaneId]);
   useEffect(() => { cache.set(CLI_DRAWER_WIDTH_KEY, cliDrawerWidth); }, [cliDrawerWidth]);
@@ -1168,25 +1223,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }
   }, [activeCliPaneId, chatWsClientId, pageClientId, paneId]);
 
-  // Delegate proxy-node management to the current agent: send it a prompt to use
-  // the cicy-mihomo skill to add/edit nodes in mihomo.yaml and reload. The agent
-  // owns the skill, so node management stays inside the agent loop.
-  const handleManageNodesViaSkill = useCallback(async () => {
-    const workspaceState = devStore.getSnapshot().Workspace?.state || {};
-    const tmuxTarget = String(workspaceState.activeCliPaneId || activeCliPaneId || '').trim();
-    if (!tmuxTarget) {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '没有可发送的当前 agent' }));
-      return;
-    }
-    const promptText = '用 cicy-mihomo skill 帮我管理代理节点：编辑 ~/cicy-ai/db/mihomo.yaml 的 proxies 添加/修改节点并加入 default_proxy_group，然后 `cicy-mihomo restart` 生效（控制器 reload 受 SAFE_PATHS 限制，要用 restart）。要加的节点信息先跟我确认。';
-    try {
-      window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: promptText } }));
-      await sendCommandToTmux(promptText, tmuxTarget, true);
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '已发送给当前 agent' }));
-    } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '发送失败' }));
-    }
-  }, [activeCliPaneId]);
+  // "管理节点" opens the same ProxyManagerDialog drawer the skill-detail page
+  // uses (data-id="skill-detail-manage-proxy") — direct UI management, no
+  // agent round-trip.
+  const handleOpenProxyManager = useCallback(() => setProxyManagerOpen(true), []);
 
   const topBarPaneId = activeCliPaneId || paneId;
   const topBarDetail = paneDetails[topBarPaneId] || (topBarPaneId === paneId ? agentDetail : null);
@@ -1383,7 +1423,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     // hasn't opened the Files tab yet.
     <div
       ref={cliContentPanelRef}
-      data-id="cli-content-fixed"
+      data-id="right-panel"
       className={cn(
         'h-full min-w-0 shrink-0 flex flex-col bg-[#0b0b0d]',
         'border-l border-[var(--vsc-border)]'
@@ -1566,8 +1606,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         >
           <ArtifactPanel
             active={cliContentOpen && cliContentTab === 'artifact'}
-            requestActivate={() => setCliContentTab('artifact')}
+            requestActivate={() => {
+              // `artifact open` must surface the frame even when the right
+              // drawer is closed: open the drawer AND switch to its tab.
+              setCliContentOpen(true);
+              setCliContentTab('artifact');
+            }}
           />
+          <ArtifactSendToAgentBtn paneId={activeCliPaneId} />
         </div>
         <div
           data-id="cli-content-settings-host"
@@ -1602,6 +1648,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         onUpdated={(patch) => applyPanePatch(activeCliPaneId, patch)}
         onOpen={() => refreshPaneDetail(activeCliPaneId)}
       />
+      {/* Dispatcher cards pin the model picker to the far LEFT of the bottom
+          bar; the spacer pushes the remaining controls right. */}
+      {String((paneDetails[activeCliPaneId.split(':')[0]] || (activeCliPaneId.split(':')[0] === paneId.split(':')[0] ? agentDetail : null))?.agent_type || '') === 'dispatcher' ? (
+        <div data-id="stack-controls-model-spacer" className="flex-1" />
+      ) : null}
       <button
         type="button"
         data-id="workspace-shell-toggle"
@@ -1614,7 +1665,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       </button>
       <SystemResourceMonitor paneId={paneId} />
       <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} onSendClientId={handleSendPageClientIdToAgent} />
-      <GlobalProxyIndicator placement="up" onManageNodes={handleManageNodesViaSkill} />
+      <GlobalProxyIndicator placement="up" onManageNodes={handleOpenProxyManager} />
       <button data-id="workspace-token-open" onClick={() => setTokenOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title={t('apiTokenButton')}><Key className="w-3.5 h-3.5" /></button>
       <button data-id="workspace-api-open" onClick={() => setApiOpen(true)} className="hidden p-1 text-zinc-600 hover:text-zinc-300 rounded transition-colors cursor-pointer" title={t('apiServerButton')}><Server className="w-3.5 h-3.5" /></button>
       {contextUsage != null && (
@@ -1626,7 +1677,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>
       )}
     </>
-  ) : null, [activeCliPaneId, paneId, paneDetails, agentDetail, applyPanePatch, refreshPaneDetail, netLatency, chatWsConnected, chatWsClientId, handleSendPageClientIdToAgent, handleManageNodesViaSkill, contextUsage, shellPanelOpen, toggleShellPanel, t]);
+  ) : null, [activeCliPaneId, paneId, paneDetails, agentDetail, applyPanePatch, refreshPaneDetail, netLatency, chatWsConnected, chatWsClientId, handleSendPageClientIdToAgent, handleOpenProxyManager, contextUsage, shellPanelOpen, toggleShellPanel, t]);
   // Memoized so the stack's `items` keeps a stable identity across the
   // per-token Workspace re-renders a live conversation triggers (those tokens
   // touch chat-live state the stack never reads). Combined with React.memo on
@@ -1689,8 +1740,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {/* Activity Bar */}
       <div data-id="activity-bar" ref={activityBarRef} className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
+          {/* Office entry retired (2026-06-05) — the dispatcher (PM) chat now
+              lives directly in the team agent card (DispatcherChat). The
+              Office component itself is kept on disk for potential revival. */}
           <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} />
-          <SideBtn dataId="btn-office" active={leftActive === 'office'} icon={<Building2 className="w-5 h-5" />} title={t('sidebarOffice', { defaultValue: '办公室' })} onClick={() => toggleLeft('office')} />
           {/* Helper-mode trial container hides Skills / Providers (gateway) /
               IM / Audit from the activity bar — the drawer should stay
               laser-focused on the install chat. See helperMode in cicy-code
@@ -1723,7 +1776,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         {/* Content */}
         <main data-id="content-area" className="flex-1 relative overflow-hidden">
           <div data-id="main-layout" className="flex h-full min-w-0">
-            {leftActive && leftActive !== 'office' ? (
+            {leftActive ? (
               <div
                 data-testid="left-panel"
                 data-id="left-panel"
@@ -1753,6 +1806,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     {leftActive === 'agents' ? (
                       <div data-id="left-panel-agents-view" className="absolute inset-0 overflow-auto">
                         <AgentDrawer agents={agents} paneId={paneId}
+                          statuses={pollStatuses}
                           onSelectAgent={onSelectAgent}
                           onAgentsChange={setAgents}
                           onOpenSettings={(targetPaneId) => {
@@ -1793,8 +1847,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 </div>
               </div>
             ) : null}
-            <div data-testid="right-panel" data-id="right-panel" className="min-w-0 flex-1 relative">
-              {leftActive === 'office' ? <Office /> : rightContent}
+            <div data-testid="mid-panel" data-id="mid-panel" className="min-w-0 flex-1 relative">
+              {rightContent}
               {leftActive === 'providers' && (
                 <div data-id="providers-right-mount" ref={setProvidersRightMount} />
               )}
@@ -1997,6 +2051,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       ) : null}
       {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
       {apiOpen && <ApiSwitchDialog onClose={() => setApiOpen(false)} />}
+      <ProxyManagerDialog open={proxyManagerOpen} onClose={() => setProxyManagerOpen(false)} paneId={activeCliPaneId || paneId} />
       {toast && <div data-id="workspace-toast" className={`fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 text-sm rounded-lg shadow-lg ${toast.variant === 'success' ? 'bg-green-600 text-white' : 'bg-zinc-800 text-white'}`}>{toast.message}</div>}
       {dialogsNode}
       <WeChatBindModal />
@@ -2090,8 +2145,9 @@ function buildCanvasItems({
   });
 }
 
-function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange, onOpenSettings }: {
+function AgentDrawer({ agents, paneId, statuses = {}, onSelectAgent, onAgentsChange, onOpenSettings }: {
   agents: any[]; paneId: string;
+  statuses?: Record<string, any>;
   onSelectAgent: (id: string) => void; onAgentsChange: (a: any[]) => void;
   onOpenSettings: (id: string) => void;
 }) {
@@ -2214,6 +2270,13 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange, onOpenSett
               const shortId = id?.replace(':main.0', '') || id;
               const isMaster = id?.includes('10001');
               const isActive = id === paneId || id?.startsWith(paneId + ':') || paneId?.startsWith(id + ':');
+              // reply.json turn status: completed → green, failed → red,
+              // anything else (a turn in flight) → pulsing yellow.
+              const replyStatus = getPaneStatus(statuses, shortId)?.status;
+              const statusDotCls = !replyStatus ? 'bg-zinc-700'
+                : replyStatus === 'completed' ? 'bg-emerald-700'
+                : replyStatus === 'failed' ? 'bg-red-700'
+                : 'bg-yellow-600 animate-pulse';
               return (
                 <div key={id} data-id={`agent-${id}`}
                   className={cn("w-full flex items-center gap-3 border p-3 rounded-xl transition-all group relative",
@@ -2304,6 +2367,7 @@ function AgentDrawer({ agents, paneId, onSelectAgent, onAgentsChange, onOpenSett
                     />
 	                    <div data-id={`agent-row-info-${shortId}`} className="flex-1 min-w-0 pr-7">
 	                      <div data-id={`agent-row-title-row-${shortId}`} className="flex items-center gap-1.5">
+	                        <span data-id={`agent-row-status-dot-${shortId}`} title={replyStatus || ''} className={cn("h-2 w-2 rounded-full shrink-0", statusDotCls)} />
 	                        <h3 data-id={`agent-row-title-${shortId}`} className={cn("text-sm font-medium truncate", isActive ? "text-blue-300" : "text-zinc-300")}>{agent.title || shortId}</h3>
 	                      </div>
 	                      <p data-id={`agent-row-id-${shortId}`} className={cn("text-xs font-mono mt-0.5 truncate", isActive ? "text-blue-400/50" : "text-zinc-600")}>{shortId}</p>
@@ -2460,7 +2524,10 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
 
   const useCustomGateway = !!agentDetail?.use_custom_gateway;
   const agentType = String(agentDetail?.agent_type || '');
-  const eligible = useCustomGateway && ['claude', 'codex', 'opencode'].includes(agentType);
+  // The dispatcher always talks through the local gateway by construction, so
+  // it is eligible regardless of the use_custom_gateway flag.
+  const eligible = agentType === 'dispatcher'
+    || (useCustomGateway && ['claude', 'codex', 'opencode'].includes(agentType));
   if (!eligible) return null;
 
   const defaultProviderKey = String(agentDetail?.runtime_ai_default?.provider_name || '').trim();
@@ -2524,7 +2591,11 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
               <span data-id="model-picker-sep" className="text-zinc-700">/</span>
             </>
           ) : null}
-          <span data-id="model-picker-model" className="truncate text-zinc-300">{displayModel}</span>
+          {currentModel ? (
+            <ModelTag model={currentModel} className="shrink-0" />
+          ) : (
+            <span data-id="model-picker-model" className="truncate text-zinc-300">{displayModel}</span>
+          )}
         </span>
         <ChevronDown
           data-id="model-picker-chevron"

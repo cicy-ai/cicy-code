@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -626,6 +627,40 @@ func (c *chatClient) readPump() {
 	}
 }
 
+// pollAgentStatuses reads each agent's gateway reply snapshot
+// (`<runtime>/history/reply.json`) and returns a map of full pane id →
+// {status, updated_at}. reply.json's status is the live turn state written by
+// the AI gateway: "thinking" while a turn is in flight, then "completed" or
+// "failed". Agents without a snapshot are simply absent from the map.
+func pollAgentStatuses(paneID string, agents []M) M {
+	statuses := M{}
+	seen := map[string]bool{}
+	add := func(id string) {
+		short := shortPaneID(normPaneID(strings.TrimSpace(id)))
+		if short == "" || seen[short] {
+			return
+		}
+		seen[short] = true
+		data, err := os.ReadFile(aiGatewayReplySnapshotPath(short))
+		if err != nil {
+			return
+		}
+		var snap struct {
+			Status    string `json:"status"`
+			UpdatedAt string `json:"updated_at"`
+		}
+		if json.Unmarshal(data, &snap) != nil || strings.TrimSpace(snap.Status) == "" {
+			return
+		}
+		statuses[short+":main.0"] = M{"status": snap.Status, "updated_at": snap.UpdatedAt}
+	}
+	add(paneID)
+	for _, a := range agents {
+		add(aiGatewayString(a["name"]))
+	}
+	return statuses
+}
+
 // buildPollData 构造 poll 响应数据，与 handlePoll 返回格式一致
 func buildPollData(paneID string) M {
 	agents, _ := listAgentsByPane(paneID)
@@ -637,7 +672,7 @@ func buildPollData(paneID string) M {
 		"success":          true,
 		"pane_id":          shortPaneID(normPaneID(paneID)),
 		"agents":           agents,
-		"statuses":         M{},
+		"statuses":         pollAgentStatuses(paneID, agents),
 		"system_resources": systemResources.getLatest(),
 		"server_time":      time.Now().UTC().Format(time.RFC3339),
 	}

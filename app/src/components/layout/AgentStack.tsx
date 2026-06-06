@@ -8,7 +8,22 @@ import AgentAvatar from '../AgentAvatar'
 import { WebFrame } from '../WebFrame'
 import { ShellPanel } from '../terminal/ShellPanel'
 import CurrentHistoryView from '../chat/CurrentHistoryView'
-import type { AgentCanvasItem } from './AgentCanvas'
+import DispatcherChat from '../chat/DispatcherChat'
+// AgentCanvasItem outlived its namesake: the draggable-canvas component was
+// dead code (never rendered, tree-shaken) and was deleted 2026-06-05; the
+// item shape lives on as the stack's card model.
+export interface AgentCanvasItem {
+  paneId: string;
+  title: string;
+  agentType?: string;
+  status?: string;
+  contextUsage?: number | null;
+  machineLabel?: string;
+  ttydSrc?: string;
+  workspace?: string;
+  isPrimary?: boolean;
+  isApiOnly?: boolean;
+}
 
 function AgentStack({
   items,
@@ -394,16 +409,12 @@ function AgentStackCard({
 
   return (
     <div
-      role="button"
-      tabIndex={0}
       data-id={`agent-stack-card-${item.paneId}`}
       onClick={onClick}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          onClick()
-        }
-      }}
+      // No role="button"/tabIndex/keyboard activation: only the ACTIVE card is
+      // ever visible (display:none switching), so key-activating it was a
+      // no-op — and its Space/Enter preventDefault swallowed keystrokes from
+      // inputs inside the card (e.g. the dispatcher prompt).
       className={`absolute inset-0 overflow-hidden text-left transition-colors ${active ? 'flex flex-col bg-[#0c0d10]' : 'hidden'}`}
       style={{ display: active ? 'flex' : 'none' }}
     >
@@ -521,6 +532,9 @@ function AgentStackCard({
             </div>
           </div>
         </div>
+        {/* Dispatcher cards ARE the history view — the popover toggle is
+            redundant there. */}
+        {item.agentType !== 'dispatcher' ? (
         <div
           data-id={`agent-stack-card-view-tabs-${item.paneId}`}
           className="ml-2 inline-flex shrink-0 items-center"
@@ -540,6 +554,7 @@ function AgentStackCard({
             {t('agentStackViewSession', { defaultValue: '历史' })}
           </button>
         </div>
+        ) : null}
         <div data-id={`agent-stack-card-header-right-${item.paneId}`} className="ml-2 flex items-center gap-1">
           {showHeaderButtons ? (
           <div data-id="agent-stack-card-header-buttons" className="flex items-center gap-1">
@@ -623,7 +638,12 @@ function AgentStackCard({
         </div>
       </div>
       <div data-id={`agent-stack-card-body-${item.paneId}`} className="relative min-h-0 flex-1 bg-black">
-        {!item.isApiOnly && item.ttydSrc ? (
+        {item.agentType === 'dispatcher' ? (
+          // Dispatcher (PM) agents are chat-first on the web: history view +
+          // prompt bar instead of the raw REPL terminal. The input feeds the
+          // same /api/tmux/send pipe, so the terminal/TG channels stay in sync.
+          <DispatcherChat paneId={item.paneId} active={active} />
+        ) : !item.isApiOnly && item.ttydSrc ? (
           // Keep the terminal mounted while History is showing so its ttyd
           // WebSocket isn't torn down (and re-attached) on every toggle.
           <div

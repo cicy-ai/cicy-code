@@ -57,6 +57,18 @@ func main() {
 	if len(os.Args) >= 2 && os.Args[1] == "mitm" {
 		os.Exit(mitm.RunCLI(os.Args[2:]))
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "dispatcher-repl" {
+		os.Exit(runDispatcherREPL(os.Args[2:]))
+	}
+
+	// The SERVER must never route its own outbound HTTP through the per-agent
+	// MITM proxy. If it was launched from an agent's shell (操作事故 2026-06-05:
+	// a restart via an agent pane leaked HTTPS_PROXY=http://w-10064:x@127.0.0.1:1087
+	// into the process), every gateway upstream call gets re-intercepted by our
+	// own MITM and double-audited under THAT agent's identity — wrong-agent
+	// current.json/usage entries and a flood of fresh conversation_ids. Strip
+	// any loopback agent-MITM proxy env up front.
+	sanitizeAgentMitmProxyEnv()
 
 	for _, arg := range os.Args[1:] {
 		switch {
@@ -441,6 +453,7 @@ Options:
 	http.HandleFunc("/api/openclaw/gateway", wa(handleOpenClawGatewayInfo))
 	http.HandleFunc("/api/openclaw/provider/", handleOpenClawProviderProxy)
 	http.HandleFunc("/api/ai-gateway/", handleAIGatewayProxy)
+	http.HandleFunc("/api/dispatcher/chat", handleDispatcherChat) // loopback-only, like the AI gateway
 	http.HandleFunc("/mitm/", handleMitmproxyAuth)
 	http.HandleFunc("/mitm", handleMitmproxyAuth)
 	http.HandleFunc("/openclaw/", handleOpenClawAuth)

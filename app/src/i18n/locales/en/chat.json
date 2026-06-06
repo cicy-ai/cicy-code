@@ -4,5 +4,7 @@
   "loadingHistory": "Loading history...",
   "emptyHistory": "No history yet",
   "loadingMore": "Loading...",
-  "loadEarlier": "Load earlier"
+  "loadEarlier": "Load earlier",
+  "toolExitCodeNoOutput": "Exited with code {{code}} · no output",
+  "toolExitNoOutput": "Exited · no output"
 }

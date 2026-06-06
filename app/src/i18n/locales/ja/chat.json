@@ -4,5 +4,7 @@
   "loadingHistory": "履歴を読み込み中…",
   "emptyHistory": "履歴はまだありません",
   "loadingMore": "読み込み中…",
-  "loadEarlier": "古いものを読む"
+  "loadEarlier": "古いものを読む",
+  "toolExitCodeNoOutput": "終了コード {{code}} · 出力なし",
+  "toolExitNoOutput": "終了 · 出力なし"
 }

@@ -3,13 +3,13 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Circle, CheckCircle2, CircleSlash, Trash2, MoreHorizontal,
-  Sparkles, Loader2, GripVertical, Search, ArrowRight, ArrowUp, Pencil, X as XIcon,
+  Loader2, GripVertical, Search, ArrowRight, ArrowUp, Pencil, X as XIcon,
   Send, Users, RefreshCw, FlaskConical, UserPlus, LayoutGrid, List as ListIcon, Check,
 } from 'lucide-react';
 import apiService from '../services/api';
 
-// The "发给 agent" prompts (promptTodo / promptDoing) and the align prompt
-// (alignPrompt) live in the todoPanel locale files so the text the UI sends
+// The "发给 agent" prompts (promptTodo / promptDoing) live in the todoPanel
+// locale files so the text the UI sends
 // follows the operator's UI language. They use {{id}} / {{title}} interpolation.
 
 export type TodoStatus = 'todo' | 'test' | 'done' | 'dropped';
@@ -58,7 +58,6 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
   const [editingDraft, setEditingDraft] = useState('');
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
-  const [aligning, setAligning] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [sendingTodoId, setSendingTodoId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -230,20 +229,6 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
     }
   };
 
-  const sendAlignPrompt = async () => {
-    if (aligning !== 'idle' || !paneId) return;
-    setAligning('sending');
-    const ALIGN_PROMPT = tr('alignPrompt');
-    try {
-      await (apiService as any).sendCommand(paneId, ALIGN_PROMPT, true);
-      setAligning('sent');
-      setTimeout(() => setAligning('idle'), 2500);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || 'send align prompt failed');
-      setAligning('idle');
-    }
-  };
-
   const toggleSelect = (id: string) => setSelectedIds((cur) => {
     const next = new Set(cur);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -401,21 +386,6 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
         >
           <RefreshCw className={`h-3.5 w-3.5 ${manualRefreshing ? 'animate-spin' : ''}`} />
         </button>
-        <button
-          onClick={sendAlignPrompt}
-          disabled={aligning !== 'idle'}
-          title={tr('alignTooltip')}
-          className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] transition-colors ${
-            aligning === 'sent' ? 'bg-emerald-500/[0.12] text-emerald-300'
-            : aligning === 'sending' ? 'bg-white/[0.06] text-zinc-400'
-            : 'bg-white/[0.04] text-zinc-300 hover:bg-white/[0.1] hover:text-zinc-100'
-          }`}
-        >
-          {aligning === 'sending' ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            : aligning === 'sent' ? <CheckCircle2 className="h-3.5 w-3.5" />
-            : <Sparkles className="h-3.5 w-3.5" />}
-          <span>{aligning === 'sent' ? tr('alignSent') : aligning === 'sending' ? tr('alignSending') : tr('alignProgress')}</span>
-        </button>
       </div>
 
       {showAllAgents && agentIds.length > 1 && (
@@ -465,7 +435,7 @@ export default function TodoPanel({ paneId, active, isMaster }: Props) {
               }}
               onDrop={handleDropOn(status)}
               className={`flex flex-col rounded-lg border bg-white/[0.015] transition-colors ${
-                viewMode === 'kanban' ? 'min-w-[280px] flex-1' : 'w-full shrink-0'
+                viewMode === 'kanban' ? 'min-w-[360px] flex-1' : 'w-full shrink-0'
               } ${isDropTarget ? 'border-white/20 bg-white/[0.04]' : 'border-white/[0.05]'}`}
             >
               <div className={`flex items-center justify-between rounded-t-lg px-3 py-2 ${cls.active}`}>

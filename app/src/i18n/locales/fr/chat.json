@@ -4,5 +4,7 @@
   "loadingHistory": "Chargement de l'historique…",
   "emptyHistory": "Aucun historique",
   "loadingMore": "Chargement…",
-  "loadEarlier": "Charger plus ancien"
+  "loadEarlier": "Charger plus ancien",
+  "toolExitCodeNoOutput": "Code de sortie {{code}} · aucune sortie",
+  "toolExitNoOutput": "Terminé · aucune sortie"
 }

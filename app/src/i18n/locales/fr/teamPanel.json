@@ -22,5 +22,7 @@
   "emptyState": "Liez un membre pour commencer",
   "fork": "Fork",
   "toastForkStarted": "Fork en cours...",
-  "toastForkFailed": "Échec du fork"
+  "toastForkFailed": "Échec du fork",
+  "gatewayBadgeOn": "Mode passerelle (AI gateway local)",
+  "gatewayBadgeOff": "Connexion officielle (directe)"
 }

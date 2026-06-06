@@ -9,7 +9,6 @@ import enAgentTypeDesc from './locales/en/agentTypeDesc.json';
 import enApiSwitch from './locales/en/apiSwitch.json';
 import enDesktop from './locales/en/desktop.json';
 import enDevPanel from './locales/en/devPanel.json';
-import enAgentCanvas from './locales/en/agentCanvas.json';
 import enAudit from './locales/en/audit.json';
 import enProvider from './locales/en/provider.json';
 import enIm from './locales/en/im.json';
@@ -35,7 +34,6 @@ import zhAgentTypeDesc from './locales/zh-CN/agentTypeDesc.json';
 import zhApiSwitch from './locales/zh-CN/apiSwitch.json';
 import zhDesktop from './locales/zh-CN/desktop.json';
 import zhDevPanel from './locales/zh-CN/devPanel.json';
-import zhAgentCanvas from './locales/zh-CN/agentCanvas.json';
 import zhAudit from './locales/zh-CN/audit.json';
 import zhProvider from './locales/zh-CN/provider.json';
 import zhIm from './locales/zh-CN/im.json';
@@ -54,7 +52,6 @@ import zhWorkspace from './locales/zh-CN/workspace.json';
 import zhWslInstall from './locales/zh-CN/wslInstall.json';
 import zhSpeedUp from './locales/zh-CN/speedUp.json';
 import zhTodoPanel from './locales/zh-CN/todoPanel.json';
-import frAgentCanvas from './locales/fr/agentCanvas.json';
 import frAgentChat from './locales/fr/agentChat.json';
 import frAgentInspector from './locales/fr/agentInspector.json';
 import frAgentProviderRequest from './locales/fr/agentProviderRequest.json';
@@ -80,7 +77,6 @@ import frWorkspace from './locales/fr/workspace.json';
 import frWslInstall from './locales/fr/wslInstall.json';
 import frSpeedUp from './locales/fr/speedUp.json';
 import frTodoPanel from './locales/fr/todoPanel.json';
-import jaAgentCanvas from './locales/ja/agentCanvas.json';
 import jaAgentChat from './locales/ja/agentChat.json';
 import jaAgentInspector from './locales/ja/agentInspector.json';
 import jaAgentProviderRequest from './locales/ja/agentProviderRequest.json';
@@ -168,7 +164,6 @@ const resources = {
     desktop: enDesktop,
     devPanel: enDevPanel,
     provision: enProvision,
-    agentCanvas: enAgentCanvas,
     teamPanel: enTeamPanel,
     audit: enAudit,
     provider: enProvider,
@@ -196,7 +191,6 @@ const resources = {
     desktop: zhDesktop,
     devPanel: zhDevPanel,
     provision: zhProvision,
-    agentCanvas: zhAgentCanvas,
     teamPanel: zhTeamPanel,
     audit: zhAudit,
     provider: zhProvider,
@@ -207,7 +201,6 @@ const resources = {
     todoPanel: zhTodoPanel,
   },
   fr: {
-    agentCanvas: frAgentCanvas,
     agentChat: frAgentChat,
     agentInspector: frAgentInspector,
     agentProviderRequest: frAgentProviderRequest,
@@ -235,7 +228,6 @@ const resources = {
     todoPanel: frTodoPanel,
   },
   ja: {
-    agentCanvas: jaAgentCanvas,
     agentChat: jaAgentChat,
     agentInspector: jaAgentInspector,
     agentProviderRequest: jaAgentProviderRequest,
@@ -269,7 +261,7 @@ void i18n
   .use(initReactI18next)
   .init({
     resources,
-    ns: ['common', 'login', 'settings', 'createAgent', 'editPane', 'workspace', 'ui', 'layout', 'chat', 'agentInspector', 'agentProviderRequest', 'agentChat', 'agentTypeDesc', 'apiSwitch', 'desktop', 'devPanel', 'provision', 'agentCanvas', 'teamPanel', 'audit', 'provider', 'im', 'terminal', 'wslInstall', 'speedUp', 'todoPanel'],
+    ns: ['common', 'login', 'settings', 'createAgent', 'editPane', 'workspace', 'ui', 'layout', 'chat', 'agentInspector', 'agentProviderRequest', 'agentChat', 'agentTypeDesc', 'apiSwitch', 'desktop', 'devPanel', 'provision', 'teamPanel', 'audit', 'provider', 'im', 'terminal', 'wslInstall', 'speedUp', 'todoPanel'],
     defaultNS: 'common',
     fallbackLng: {
       'zh': ['zh-CN', 'en'],

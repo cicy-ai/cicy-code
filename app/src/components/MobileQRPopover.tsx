@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Smartphone, X, Copy, Check, Monitor } from 'lucide-react';
+import { Smartphone, X, Copy, Check, Monitor, Globe, Send } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
 import { TokenManager } from '../services/tokenManager';
@@ -159,9 +159,41 @@ export default function MobileQRPopover(_props: Props) {
 
                   <div
                     data-id="mobile-qr-canvas"
-                    className="relative flex aspect-square w-full items-center justify-center rounded-xl bg-white p-3 shadow-[0_2px_12px_rgba(0,0,0,0.35)] ring-1 ring-black/5"
+                    className="relative mx-auto flex aspect-square w-44 items-center justify-center rounded-xl bg-white p-2.5 shadow-[0_2px_12px_rgba(0,0,0,0.35)] ring-1 ring-black/5"
                   >
-                    <QRCodeSVG value={payload} size={260} level="M" includeMargin={false} />
+                    <QRCodeSVG value={payload} size={168} level="M" includeMargin={false} />
+                  </div>
+
+                  {/* Three ways to open this on a phone — compact one-liners. */}
+                  <div data-id="mobile-qr-methods" className="mt-4 flex flex-col gap-1.5">
+                    {([
+                      { id: 'web', Icon: Globe, title: t('mobileQrMethodWebTitle'), desc: t('mobileQrMethodWebDesc') },
+                      { id: 'pwa', Icon: Smartphone, title: t('mobileQrMethodPwaTitle'), desc: t('mobileQrMethodPwaDesc') },
+                      { id: 'mini', Icon: Send, title: t('mobileQrMethodMiniTitle'), desc: t('mobileQrMethodMiniDesc') },
+                    ] as const).map(({ id, Icon, title, desc }) => (
+                      <div key={id} data-id={`mobile-qr-method-${id}`} className="flex items-center gap-2 text-[12px]">
+                        <Icon className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+                        <span className="shrink-0 font-medium text-zinc-200">{title}</span>
+                        <span className="truncate text-zinc-500" title={desc}>{desc}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* The URL itself — deployment's public_url (config-driven), with token. */}
+                  <div
+                    data-id="mobile-qr-url"
+                    className="mt-3 flex items-center gap-2 rounded-lg border border-white/[0.06] bg-black/30 px-3 py-1.5"
+                  >
+                    <span className="shrink-0 text-[10px] uppercase tracking-[0.16em] text-zinc-600">
+                      {t('mobileQrUrlLabel')}
+                    </span>
+                    <span
+                      data-id="mobile-qr-url-value"
+                      className="truncate font-mono text-[12px] text-zinc-300"
+                      title={payload}
+                    >
+                      {payload}
+                    </span>
                   </div>
 
                   {/* Divider only shown when the desktop button is visible. */}

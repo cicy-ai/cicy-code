@@ -8,6 +8,8 @@ import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
 import { useDialogs } from '../ui/Modal';
 import { normalizeAgentType, guidanceFilenameForAgentType } from '../../lib/agentType';
+import { metricsFromCurrentReply, type AgentLiveMetrics } from '../../lib/agentMetrics';
+import { ModelTag } from '../../lib/modelTag';
 import AgentAvatar from '../AgentAvatar';
 import Select from '../ui/Select';
 import CreateAgentDialog, { CreateAgentValues } from '../CreateAgentDialog';
@@ -23,6 +25,7 @@ interface Agent {
   machine_label?: string;
   source_kind?: string;
   source_ref?: string;
+  use_custom_gateway?: boolean;
 }
 
 interface StatusInfo { status?: string; isThinking?: boolean; title?: string; }
@@ -51,6 +54,56 @@ interface Props {
   onOpenSettingsPane?: (paneId: string) => void;
   onRefreshPanes: () => Promise<void>;
   onRefreshPoll: () => void;
+}
+
+// Live header metrics (status/model/context/cost) for every card in the
+// panel, polled from /api/agents/current-reply at 3s — the Office window
+// header's data pipe, productized for the team list. Skips network work when
+// the tab is hidden; sig-compare keeps unchanged agents referentially stable
+// so cards don't re-render on every tick.
+function useTeamLiveMetrics(wids: string[]) {
+  const [metrics, setMetrics] = useState<Record<string, AgentLiveMetrics>>({});
+  const key = wids.join(',');
+  useEffect(() => {
+    if (!key) return;
+    let cancelled = false;
+    const ids = key.split(',').filter(Boolean);
+    const poll = async () => {
+      if (document.hidden) return;
+      await Promise.all(ids.map(async (wid) => {
+        try {
+          const res: any = await apiService.getAgentCurrentReply(wid).catch(() => null);
+          if (cancelled || !res?.data) return;
+          setMetrics((prev) => {
+            const next = metricsFromCurrentReply(res.data, prev[wid]);
+            if (prev[wid]?.sig === next.sig) return prev;
+            return { ...prev, [wid]: next };
+          });
+        } catch { /* agent 还没数据 → 保持现状 */ }
+      }));
+    };
+    poll();
+    const t = window.setInterval(poll, 3000);
+    return () => { cancelled = true; window.clearInterval(t); };
+  }, [key]);
+  return metrics;
+}
+
+const fmtCost = (cost: number) => cost >= 100 ? `$${Math.round(cost)}` : cost >= 0.05 ? `$${cost.toFixed(1)}` : '$0';
+
+// 上下文用量圆环:一个"未满的圆"代替进度条。颜色阈值与全局一致(<50 绿 /<80 黄 /≥80 红)。
+function CtxRing({ pct }: { pct: number }) {
+  const r = 4.5;
+  const c = 2 * Math.PI * r;
+  // 低位用中性灰(不抢眼),只在值得注意时变色:>50 黄,>80 红。暗色调
+  // (yellow-600 / red-700),和状态点一个亮度档。
+  const color = pct > 80 ? '#b91c1c' : pct > 50 ? '#ca8a04' : '#71717a';
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" className="-rotate-90 shrink-0">
+      <circle cx="6" cy="6" r={r} fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth="2.5" />
+      <circle cx="6" cy="6" r={r} fill="none" stroke={color} strokeWidth="2.5" strokeDasharray={`${Math.max(0.5, (pct / 100) * c)} ${c}`} strokeLinecap="round" />
+    </svg>
+  );
 }
 
 export default function TeamPanel({ paneId, panes = [], bindings = [], statuses = {}, onOpenInCurrentPane, onLocatePane, openedPaneIds = [], activePaneId, onOpenSettingsPane, onRefreshPanes, onRefreshPoll }: Props) {
@@ -130,19 +183,16 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
 
   const getStatus = (id: string): StatusInfo => statuses[fullId(id)] || statuses[id] || {};
 
+  // reply.json turn status: "completed" | "failed" | anything else = in flight
+  // ("thinking"). Green when done, red when failed, pulsing yellow otherwise.
   const statusDot = (s: StatusInfo) => {
-    if (s.isThinking || s.status === 'thinking') return 'bg-yellow-500 animate-pulse';
-    if (s.status === 'tool_use') return 'bg-blue-500 animate-pulse';
-    if (s.status === 'idle' || s.status === 'text') return 'bg-emerald-500';
-    return 'bg-zinc-600';
+    if (!s.status) return 'bg-zinc-700';
+    if (s.status === 'completed') return 'bg-emerald-700';
+    if (s.status === 'failed') return 'bg-red-700';
+    return 'bg-yellow-600 animate-pulse';
   };
 
-  const statusLabel = (s: StatusInfo) => {
-    if (s.isThinking || s.status === 'thinking') return i18n.t('statusThinking', { ns: 'teamPanel' });
-    if (s.status === 'tool_use') return i18n.t('statusRunning', { ns: 'teamPanel' });
-    if (s.status === 'idle' || s.status === 'text') return i18n.t('statusIdle', { ns: 'teamPanel' });
-    return '';
-  };
+  // (textual status label retired — the live-metrics dot carries status now)
 
   const getName = (binding: Binding) => {
     const wid = shortId(binding.name);
@@ -268,11 +318,25 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     () => new Map(panes.map(agent => [shortId(agent.pane_id), normalizeAgentType(agent.agent_type)])),
     [panes]
   );
+  // 网关/官方登录标识：use_custom_gateway 来自 /api/tmux/list。
+  const gatewayById = useMemo(
+    () => new Map(panes.map(agent => [shortId(agent.pane_id), !!agent.use_custom_gateway])),
+    [panes]
+  );
+
+  // Current pane + every bound worker, deduped + sorted so the poll effect's
+  // key is stable across reorders.
+  const liveWids = useMemo(() => {
+    const ids = [paneId, ...bindings.map(b => shortId(b.name))].filter(Boolean);
+    return Array.from(new Set(ids)).sort();
+  }, [paneId, bindings]);
+  const liveMetrics = useTeamLiveMetrics(liveWids);
 
   const currentAgent = useMemo(() => {
     const agent = panes.find(a => shortId(a.pane_id) === paneId);
     const status = getStatus(paneId);
-    const subtitleParts = [paneId, statusLabel(status)].filter(Boolean);
+    // 状态文字由指标行的彩点承担,副标题只留 id(+机器),model 由渲染层并入同一行。
+    const subtitleParts: string[] = [paneId];
     if (agent?.machine_label) subtitleParts.push(agent.machine_label);
     return {
       title: agent?.title || status.title || paneId,
@@ -286,6 +350,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     wid,
     title,
     agentType,
+    gateway,
     status,
     subtitle,
     active = false,
@@ -304,6 +369,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     wid: string;
     title: string;
     agentType?: string;
+    gateway?: boolean;
     status: StatusInfo;
     subtitle: string;
     active?: boolean;
@@ -451,7 +517,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
           </div>
         ) : null}
       </div>
-      <div data-id="team-panel-worker-body" className="flex items-center gap-3 flex-1 min-w-0 text-left">
+      <div data-id="team-panel-worker-body" className="flex items-start gap-3 flex-1 min-w-0 text-left">
         <AgentAvatar
           agentType={agentType}
           title={title}
@@ -461,10 +527,49 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
 	        <div data-id="team-panel-worker-info" className="flex-1 min-w-0 pr-7">
 	          <div data-id="team-panel-worker-title-row" className="flex items-center gap-1.5">
 	            <h3 data-id="team-panel-worker-title" className={`text-sm font-medium truncate ${active ? 'text-blue-300' : 'text-zinc-300'}`}>{title}</h3>
+	            {/* 网关标识：实心蓝点=本地网关，空心环=官方登录。刻意低调，悬停看说明。 */}
+	            <span
+	              data-id="team-panel-worker-gateway"
+	              className={`h-1.5 w-1.5 shrink-0 rounded-full ${gateway ? 'bg-sky-400/60' : 'border border-zinc-600/60'}`}
+	              title={gateway
+	                ? i18n.t('gatewayBadgeOn', { ns: 'teamPanel', defaultValue: '网关模式（本地 AI Gateway）' })
+	                : i18n.t('gatewayBadgeOff', { ns: 'teamPanel', defaultValue: '官方登录（直连）' })}
+	            />
 	          </div>
-	          <p data-id="team-panel-worker-subtitle" className={`text-xs font-mono mt-0.5 truncate ${active ? 'text-blue-400/50' : 'text-zinc-600'}`}>
-	            {subtitle}
-          </p>
+          {(() => {
+            // 第二行(也是最后一行):状态点 · id(+机器) · model · 上下文圆环 · 成本。
+            // 固定高度,数据未到时只有 id,到了原地补齐,不跳版。
+            const m = liveMetrics[wid];
+            return (
+              <div data-id={`team-panel-worker-metrics-${wid}`} className={`mt-0.5 flex h-4 min-w-0 items-center gap-1.5 font-mono text-xs ${active ? 'text-blue-400/50' : 'text-zinc-600'}`}>
+                <span
+                  data-id="team-panel-worker-metrics-status"
+                  className="relative flex h-2 w-2 shrink-0"
+                  title={m?.working ? i18n.t('metricsWorking', { ns: 'teamPanel', defaultValue: '工作中' }) : i18n.t('metricsIdle', { ns: 'teamPanel', defaultValue: '空闲' })}
+                >
+                  {/* thinking = 黄 + ping;idle = 绿呼吸;未知(首拉前) = 灰 */}
+                  {m?.working ? (
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-yellow-600 opacity-60" />
+                  ) : null}
+                  <span className={`relative inline-flex h-2 w-2 rounded-full ${m ? (m.working ? 'bg-yellow-600' : 'bg-emerald-700') : 'bg-zinc-700'}`} />
+                </span>
+                <span data-id="team-panel-worker-subtitle" className="min-w-0 truncate">
+                  {subtitle}
+                </span>
+                {m?.model ? <ModelTag model={m.model} className="shrink-0" /> : null}
+                {m && m.ctx > 0 ? (
+                  <span data-id="team-panel-worker-metrics-ctx" className="flex shrink-0 items-center" title={i18n.t('metricsContext', { ns: 'teamPanel', defaultValue: '上下文' }) + ` ${m.ctx}% / ${m.ctxK}k`}>
+                    <CtxRing pct={m.ctx} />
+                  </span>
+                ) : null}
+                {m && m.cost > 0 ? (
+                  <span data-id="team-panel-worker-metrics-cost" className="shrink-0" title={i18n.t('metricsCost', { ns: 'teamPanel', defaultValue: '累计成本' })}>
+                    {fmtCost(m.cost)}
+                  </span>
+                ) : null}
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>
@@ -540,6 +645,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
             wid: paneId,
             title: currentAgent.title,
             agentType: currentAgent.agentType,
+            gateway: gatewayById.get(paneId),
             status: currentAgent.status,
             subtitle: currentAgent.subtitle,
             active: (activePaneId || paneId) === paneId,
@@ -589,12 +695,13 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                 {group.items.map(b => {
                   const wid = shortId(b.name);
                   const s = getStatus(wid);
-                  const subtitleParts = [wid, statusLabel(s)].filter(Boolean);
+                  const subtitleParts: string[] = [wid];
                   if (b.instance_label || b.machine_label) subtitleParts.push(b.instance_label || b.machine_label || '');
                   return renderAgentCard({
                     wid,
                     title: getName(b),
                     agentType: normalizeAgentType(b.agent_type) || agentTypeById.get(wid) || '',
+                    gateway: gatewayById.get(wid),
                     status: s,
                     subtitle: subtitleParts.join(' · '),
                     active: activePaneId === wid,

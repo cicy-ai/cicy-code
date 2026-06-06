@@ -4,6 +4,7 @@ import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import apiService from '../../services/api';
 import { Spinner } from '../ui/Spinner';
 
@@ -1379,7 +1380,9 @@ function cleanToolResult(text: string): string {
 // status instead (no command duplication, never an empty body).
 function exitNoOutputNote(raw: string): string {
   const m = raw.match(/Process exited with code (\d+)/);
-  return m ? `退出码 ${m[1]} · 无输出` : '退出 · 无输出';
+  return m
+    ? i18n.t('toolExitCodeNoOutput', { ns: 'chat', code: m[1], defaultValue: '退出码 {{code}} · 无输出' })
+    : i18n.t('toolExitNoOutput', { ns: 'chat', defaultValue: '退出 · 无输出' });
 }
 
 function formatToolResult(tool: any) {
@@ -1628,6 +1631,7 @@ export default function CurrentHistoryView({
   paneId,
   open,
   promptsOnly = false,
+  hideTools = false,
 }: {
   paneId: string;
   open: boolean;
@@ -1635,6 +1639,9 @@ export default function CurrentHistoryView({
   // Show only the user's prompts (questions); hide assistant answers, thinking,
   // tools, and the live tail. Driven by the AgentStack history-bar toggle.
   promptsOnly?: boolean;
+  // Hide tool cards (keep prompts / thinking / answers). Used by the office
+  // window view, which only wants the conversation, not tool I/O.
+  hideTools?: boolean;
 }) {
   const { t } = useTranslation('chat');
   const [items, setItems] = useState<HistoryTurn[]>([]);
@@ -1676,6 +1683,15 @@ export default function CurrentHistoryView({
   const lastAnchoredHistoryIDRef = useRef(0);
   const activeSpacerTurnKeyRef = useRef('');
   const anchorSpacerHeightRef = useRef(0);
+  const anchoredQKeyRef = useRef('');   // 已锚定到顶部的"最新问题"turn key(新问题出现才换)
+  // Gemini 式"放手"语义:发送时平滑顶一次,之后用户一旦手动 scroll 就永久交还控制权,
+  // 这一轮再不自动 scroll(绝不把用户拽回原位)。programmaticScrollUntil 是我们自己发起
+  // 的平滑滚动窗口,期间的 scroll 事件不算"用户滚动"。
+  const userTookOverRef = useRef(false);
+  const programmaticScrollUntilRef = useRef(0);
+  // 这一轮 reply 是否曾经进入过 active(流式)状态。只有"流式开始过"之后,完成时才允许收
+  // spacer——否则首 token 延迟期间(reply 还没 active)就缩 spacer,会把 q 顶上去又"回落"。
+  const replySeenActiveRef = useRef(false);
   const scheduledScrollRafRef = useRef<number | null>(null);
   const scheduledScrollTimersRef = useRef<number[]>([]);
 
@@ -1794,6 +1810,10 @@ export default function CurrentHistoryView({
     const updateStickBottom = () => {
       const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
       shouldStickBottomRef.current = distanceToBottom <= 80;
+      // 用户在锚定进行中手动滚动(非我们自己发起的平滑滚动)→ 交还控制权,这一轮再不拽回。
+      if (activeSpacerTurnKeyRef.current && Date.now() > programmaticScrollUntilRef.current) {
+        userTookOverRef.current = true;
+      }
     };
     updateStickBottom();
     el.addEventListener('scroll', updateStickBottom, { passive: true });
@@ -1950,12 +1970,36 @@ export default function CurrentHistoryView({
           const turnId = String(data?.turn_id || '');
           const status = String(data?.status || 'thinking').trim() || 'thinking';
           const evModel = String(data?.model || '').trim();
-          const sig = `${turnId}:${answerId}:${status}:${String(data?.updated_at || '')}:${thinking.length}:${answer.length}`;
+          // The whole in-flight turn as ORDERED blocks from reply.json (serial SSE
+          // order): thinking → tool_use → … → text. Rendering this in order is what
+          // keeps a multi-round turn correct instead of splitting tools into a
+          // committed block above the live thinking.
+          const liveItems: any[] = Array.isArray((data as any)?.items) ? (data as any).items : [];
+          const sig = `${turnId}:${answerId}:${status}:${String(data?.updated_at || '')}:${thinking.length}:${answer.length}:${liveItems.length}:${JSON.stringify(liveItems.map((it: any) => [it?.type, String(it?.thinking || it?.text || '').length, it?.name || '']))}`;
           if (sig !== lastSig) {
             lastSig = sig;
             const steps: NonNullable<HistoryTurn['steps']> = [];
-            if (thinking) steps.push({ type: 'thinking', text: thinking });
-            if (answer) steps.push({ type: 'text', text: answer });
+            for (const it of liveItems) {
+              const ty = String(it?.type || '').trim();
+              if (ty === 'thinking') {
+                const tx = String(it?.thinking || '');
+                if (tx) steps.push({ type: 'thinking', text: tx });
+              } else if (ty === 'text') {
+                const tx = String(it?.text || '');
+                if (tx) steps.push({ type: 'text', text: tx });
+              } else if (ty === 'tool_use') {
+                const inp = it?.input;
+                const tool = { name: String(it?.name || ''), arg: inp == null ? '' : (typeof inp === 'string' ? inp : JSON.stringify(inp)), tool_id: String(it?.tool_id || '') };
+                const last = steps[steps.length - 1];
+                if (last && (last as any).type === 'tool') (last as any).tools.push(tool);
+                else steps.push({ type: 'tool', tools: [tool] } as any);
+              }
+            }
+            // Fallback for providers/paths that don't expose ordered items.
+            if (!steps.length) {
+              if (thinking) steps.push({ type: 'thinking', text: thinking });
+              if (answer) steps.push({ type: 'text', text: answer });
+            }
             liveTurnIdRef.current = turnId;
             // Answer-only: the question is rendered by committed's q_last turn.
             liveTurnRef.current = {
@@ -1986,10 +2030,21 @@ export default function CurrentHistoryView({
       }
     };
 
+    // 外部"立即刷新"信号(如办公室发完指令)→ 取消等待中的 idle 轮询,马上拉一次,
+    // 这样刚发出去的消息不用等满 2.5s 才出现在窗口里。
+    const onNudge = (e: Event) => {
+      const id = String((e as CustomEvent)?.detail?.paneId || '').trim();
+      if (id && id !== paneId) return;
+      if (timer != null) { window.clearTimeout(timer); timer = null; }
+      void poll();
+    };
+    window.addEventListener('cicy:current-history-refresh', onNudge as EventListener);
+
     void poll();
     return () => {
       cancelled = true;
       if (timer != null) window.clearTimeout(timer);
+      window.removeEventListener('cicy:current-history-refresh', onNudge as EventListener);
     };
   }, [conversationId, open, paneId, model]);
 
@@ -1999,75 +2054,86 @@ export default function CurrentHistoryView({
     };
   }, []);
 
+  // 新问题出现 → 把它钉到视口顶部,回复(liveTurn / 后续 turn)在它下方向下渲染,之前的对话被推上去。
+  // 用底部 spacer 撑出滚动空间,这样即使 q+回复很短也能让 q 停在顶部;回复变长时 spacer 收缩,不留大空白。
   useEffect(() => {
     if (!open || loading) return;
     const frame = window.requestAnimationFrame(() => {
       const el = scrollRef.current;
       if (!el) return;
-      const latest = items[items.length - 1];
-      const latestTurnKey = latest ? String(latest?.history_id || `${latest?.text || latest?.q || 'turn'}-${Math.max(0, items.length - 1)}`) : '';
-      const prevLatestTurnKey = lastLatestTurnKeyRef.current;
-      const latestIsActive = isActiveAssistantStatus(String(latest?.status || ''));
-      if (!pendingAnchorTurnKeyRef.current && latestTurnKey && latestTurnKey !== prevLatestTurnKey && latestIsActive) {
-        pendingAnchorTurnKeyRef.current = latestTurnKey;
-        lastAnchoredHistoryIDRef.current = Number(latest?.history_id || 0);
-      }
-      if (latestTurnKey && latestTurnKey !== prevLatestTurnKey) lastLatestTurnKeyRef.current = latestTurnKey;
+
+      // 「加载更早」前插内容 → 保持用户原滚动位置,不锚定。
       if (preserveScrollOffsetRef.current) {
         preserveScrollOffsetRef.current = false;
         didInitialScrollRef.current = true;
         return;
       }
-      if (pendingAnchorTurnKeyRef.current) {
-        const target = el.querySelector(`[data-turn-key="${CSS.escape(pendingAnchorTurnKeyRef.current)}"]`) as HTMLDivElement | null;
-        if (!target) {
-          didInitialScrollRef.current = true;
-          return;
-        }
-        const nextSpacerHeight = target ? Math.max(0, el.clientHeight - target.offsetHeight - 16) : 0;
-        applyAnchorSpacerHeight(nextSpacerHeight);
-        runScheduledScroll(scheduleScrollTurnToTop(el, pendingAnchorTurnKeyRef.current));
-        activeSpacerTurnKeyRef.current = pendingAnchorTurnKeyRef.current;
-        pendingAnchorTurnKeyRef.current = '';
-        forceScrollBottomRef.current = false;
-        shouldStickBottomRef.current = false;
-        didInitialScrollRef.current = true;
-        return;
+
+      // 最新的用户问题(q_last)及其 turn key(与 renderedTurns 里算法一致)。
+      let lastUserIdx = -1;
+      for (let i = items.length - 1; i >= 0; i -= 1) {
+        if (items[i]?.role === 'user') { lastUserIdx = i; break; }
       }
-      if (activeSpacerTurnKeyRef.current && anchorSpacerRef.current) {
-        if (latestTurnKey !== activeSpacerTurnKeyRef.current) {
-          activeSpacerTurnKeyRef.current = '';
-        } else {
-          if (!isActiveAssistantStatus(String(latest?.status || ''))) {
-            didInitialScrollRef.current = true;
-            return;
-          }
-          const target = el.querySelector(`[data-turn-key="${CSS.escape(activeSpacerTurnKeyRef.current)}"]`) as HTMLDivElement | null;
-          if (target) {
-            const currentSpacerHeight = anchorSpacerHeightRef.current;
-            const measuredSpacerHeight = Math.max(0, el.clientHeight - target.offsetHeight - 16);
-            const nextSpacerHeight = currentSpacerHeight > 0 ? Math.min(currentSpacerHeight, measuredSpacerHeight) : measuredSpacerHeight;
-            applyAnchorSpacerHeight(nextSpacerHeight);
-            if (nextSpacerHeight <= 0) {
-              activeSpacerTurnKeyRef.current = '';
-            }
-          }
-          didInitialScrollRef.current = true;
-          return;
-        }
-      }
+      const lastUser = lastUserIdx >= 0 ? items[lastUserIdx] : null;
+      const lastUserKey = lastUser ? String(lastUser.history_id || `${lastUser.text || lastUser.q || 'turn'}-${lastUserIdx}`) : '';
+
+      // 首次加载:滚到底显示最新一轮,并把当前最后一个问题记为"已锚",避免开屏就把它顶上去。
       if (!didInitialScrollRef.current) {
-        if (!activeSpacerTurnKeyRef.current) {
-          applyAnchorSpacerHeight(0);
-        }
+        anchoredQKeyRef.current = lastUserKey;
+        applyAnchorSpacerHeight(0);
         runScheduledScroll(scheduleScrollToBottom(el));
         forceScrollBottomRef.current = false;
         shouldStickBottomRef.current = true;
+        didInitialScrollRef.current = true;
+        return;
       }
-      didInitialScrollRef.current = true;
+
+      // 出现了新的问题 → **平滑**滚到顶一次 + 撑底部 spacer,然后放手。
+      if (lastUserKey && lastUserKey !== anchoredQKeyRef.current) {
+        const target = el.querySelector(`[data-turn-key="${CSS.escape(lastUserKey)}"]`) as HTMLDivElement | null;
+        if (target) {
+          anchoredQKeyRef.current = lastUserKey;
+          activeSpacerTurnKeyRef.current = lastUserKey;
+          userTookOverRef.current = false;
+          replySeenActiveRef.current = false;
+          // 先命令式撑足 spacer(让 q 能滚到顶),再平滑滚一次。setState 同步发出供后续渲染。
+          const spacer = Math.max(0, el.clientHeight - target.offsetHeight - 16);
+          if (anchorSpacerRef.current) anchorSpacerRef.current.style.height = `${spacer}px`;
+          applyAnchorSpacerHeight(spacer);
+          const top = el.scrollTop + (target.getBoundingClientRect().top - el.getBoundingClientRect().top) - 8;
+          programmaticScrollUntilRef.current = Date.now() + 800; // 平滑滚动动画期间的 scroll 事件不算用户操作
+          el.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+          forceScrollBottomRef.current = false;
+          shouldStickBottomRef.current = false;
+          return;
+        }
+      }
+
+      // 已锚定的一轮:Gemini 式放手。
+      if (activeSpacerTurnKeyRef.current) {
+        // 用户这一轮手动滚过 → 彻底交还控制权,绝不再 scroll(这就是之前"我 scroll 了又被拽回"的根治)。
+        if (userTookOverRef.current) return;
+        // 平滑滚到顶的动画窗口内(programmaticScrollUntilRef),什么都别做:此时若重算/缩小
+        // spacer 会让 scrollHeight 变小、scrollTop 被 clamp 往下夹 → q 顶上去后又"回落"。
+        // 让平滑动画跑完再说。
+        if (Date.now() < programmaticScrollUntilRef.current) return;
+        const target = el.querySelector(`[data-turn-key="${CSS.escape(activeSpacerTurnKeyRef.current)}"]`) as HTMLDivElement | null;
+        if (!target) { activeSpacerTurnKeyRef.current = ''; return; }
+        const replyInFlight = (!!liveTurn && isActiveAssistantStatus(String((liveTurn as any)?.status || '')))
+          || isActiveAssistantStatus(String(items[items.length - 1]?.status || ''));
+        // 流式期:**零手动 scroll**。回复只在 q 下方追加(在视口下方),scrollTop 不动 → q 自然
+        // 留在顶,不抖、不抢用户。完成后只**收一次 spacer**去掉下方多余空白(不 scroll,不打扰)。
+        if (replyInFlight) { replySeenActiveRef.current = true; return; }
+        // 还没流式开始过(首 token 延迟期):保持 new-q 撑好的大 spacer,绝不提前收 → 不让 q 回落。
+        if (!replySeenActiveRef.current) return;
+        const belowQ = el.scrollHeight - anchorSpacerHeightRef.current - target.offsetTop;
+        const measured = Math.max(0, el.clientHeight - belowQ - 16);
+        if (Math.abs(measured - anchorSpacerHeightRef.current) > 2) applyAnchorSpacerHeight(measured);
+        return;
+      }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [open, loading, items]);
+  }, [open, loading, items, liveTurn]);
 
   // Prompts-only filters out most turns at once. The active-turn anchor spacer
   // (sized to push an in-flight turn up) and the old scrollTop would otherwise
@@ -2169,7 +2235,18 @@ export default function CurrentHistoryView({
   // ordered. The cache supplies older questions instantly; `items` keeps the
   // newest ones fresh. Non-prompts-only renders the window as-is.
   const displayItems = useMemo(() => {
-    if (!promptsOnly) return items;
+    if (!promptsOnly) {
+      // While the live turn renders the in-flight assistant response (now WITH its
+      // tool steps, in serial order), hide the committed assistant turn(s) of that
+      // SAME turn — else round-0's tools render BOTH committed (above) and in the
+      // live turn (below) = duplicate + out-of-order. The live turn owns the full
+      // ordered render until the turn completes and migrates into committed.
+      const liveActive = !!liveTurn && Number(liveTurn.history_id || 0) > committedMaxId;
+      if (!liveActive) return items;
+      let lastUserId = 0;
+      for (const t of items) if (t?.role === 'user') lastUserId = Math.max(lastUserId, Number(t?.history_id || 0));
+      return items.filter((t) => !(t?.role === 'assistant' && Number(t?.history_id || 0) > lastUserId));
+    }
     const map = new Map<number, HistoryTurn>();
     for (const t of cachedPromptTurns) {
       const id = Number(t?.history_id || 0);
@@ -2180,7 +2257,33 @@ export default function CurrentHistoryView({
       if (id > 0 && t?.role === 'user') map.set(id, t);
     }
     return Array.from(map.values()).sort((a, b) => Number(a?.history_id || 0) - Number(b?.history_id || 0));
-  }, [promptsOnly, items, cachedPromptTurns]);
+  }, [promptsOnly, items, cachedPromptTurns, liveTurn, committedMaxId]);
+
+  // Recap-on-return is system noise: a harness-only user turn ("The user stepped
+  // away… Recap…" / continuation banner) and the assistant recap it triggers.
+  // CollapsibleQ already folds the instruction into a SystemNoticeCard; this
+  // drops its assistant response too, so the whole recap exchange disappears from
+  // the conversation (empty turns in between keep the pending flag alive).
+  const recapResponses = useMemo(() => {
+    const drop = new Set<HistoryTurn>();
+    let pendingRecap = false;
+    for (const t of displayItems) {
+      const q = String((t as any)?.text || (t as any)?.q || '');
+      if (t?.role === 'user' && q.trim()) {
+        const { blocks, remaining } = splitLeadingHarnessBlocks(q);
+        pendingRecap = !remaining && blocks.length > 0;
+        continue;
+      }
+      const hasContent =
+        String((t as any)?.a || '').trim().length > 0 ||
+        (Array.isArray((t as any)?.steps) && (t as any).steps.length > 0);
+      if (t?.role === 'assistant' && pendingRecap && hasContent) {
+        pendingRecap = false;
+        drop.add(t);
+      }
+    }
+    return drop;
+  }, [displayItems]);
 
   // Hydrate the prompts cache (instant paint) whenever prompts-only is on for the
   // current conversation. Cleared when prompts-only is off / no conversation.
@@ -2232,20 +2335,23 @@ export default function CurrentHistoryView({
   const renderedTurns = useMemo(() => displayItems.map((turn, index) => {
     const turnKey = turn?.history_id || `${turn?.text || turn?.q || 'turn'}-${index}`;
     const isLatestTurn = index === displayItems.length - 1;
-    const steps = getVisibleHistorySteps(turn, isLatestTurn);
+    const allSteps = getVisibleHistorySteps(turn, isLatestTurn);
+    const steps = hideTools ? (allSteps || []).filter((s: any) => s?.type !== 'tool') : allSteps;
     const itemId = Number(turn?.history_id || 0);
     // Prompts-only: render just the user questions, drop everything else.
     if (promptsOnly && turn?.role !== 'user') return null;
+    // Drop the assistant recap that answers a harness-only recap-on-return turn.
+    if (recapResponses.has(turn)) return null;
     if (turn?.role === 'system') {
       return (
-        <div data-id={itemId > 0 ? String(itemId) : undefined} key={turnKey} className="my-1">
+        <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} key={turnKey} className="my-1">
           <SystemNoticeCard text={turn.text || ''} />
         </div>
       );
     }
     if (turn?.role === 'user') {
       return (
-        <div data-id={itemId > 0 ? String(itemId) : undefined} key={turnKey} className="mb-5">
+        <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} key={turnKey} className="mb-5">
           <CollapsibleQ text={turn.text || turn.q} />
         </div>
       );
@@ -2260,7 +2366,7 @@ export default function CurrentHistoryView({
       });
       const fallbackAnswer = String(turn?.a || '').trim();
       return (
-        <div data-id={itemId > 0 ? String(itemId) : undefined} key={turnKey} className="mb-5">
+        <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} key={turnKey} className="mb-5">
           <div data-id={`current-history-turn-assistant-${turnKey}`}>
             {steps.map((step: any, stepIndex: number) => {
               if (step.type === 'thinking') {
@@ -2286,7 +2392,7 @@ export default function CurrentHistoryView({
       );
     }
     return null;
-  }), [displayItems, promptsOnly]);
+  }), [displayItems, promptsOnly, hideTools, recapResponses]);
 
   // Part 2 — the live tail (reply.json's answer for the latest turn). It is the
   // ANSWER to committed's last turn (q_last), so it renders answer-only and sits
@@ -2301,6 +2407,12 @@ export default function CurrentHistoryView({
         {liveTurnSteps.map((step: any, i: number) => {
           if (step?.type === 'thinking') return <div key={i}><ThinkingBlock text={step.text} /></div>;
           if (step?.type === 'text') return <div key={i} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{step.text}</Markdown></div>;
+          if (step?.type === 'tool' && !hideTools && Array.isArray(step?.tools) && step.tools.length > 0) {
+            return <div key={i} data-id={`current-history-live-turn-step-tools-${i}`} className="my-2 space-y-1.5">{step.tools.map((tool: any, toolIndex: number) => {
+              const toolId = buildToolCardId(`live-${liveTurn!.history_id}`, i, tool, toolIndex);
+              return <ToolCard key={toolId} tool={tool} toolId={toolId} />;
+            })}</div>;
+          }
           return null;
         })}
         {!liveTurnSteps.length ? <PendingThinkingPlaceholder /> : null}

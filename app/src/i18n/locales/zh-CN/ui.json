@@ -18,5 +18,8 @@
   "selectHintNavigate": "切换",
   "selectHintSelect": "选择",
   "windowConfirmDelete": "删除窗口 {{idx}}？",
-  "windowCreateButton": "新建窗口"
+  "windowCreateButton": "新建窗口",
+  "webFrameCopy": "复制",
+  "webFramePaste": "粘贴",
+  "webFrameReload": "刷新"
 }

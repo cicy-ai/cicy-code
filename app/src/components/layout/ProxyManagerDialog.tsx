@@ -420,10 +420,17 @@ export function ProxyManagerDialog({
               <span data-id="proxy-manager-drawer-lifecycle-pid" className="font-mono text-[11px] text-zinc-500">pid {status.pid}</span>
             )}
             <div data-id="proxy-manager-drawer-lifecycle-actions" className="ml-auto flex items-center gap-1">
-              <LifecycleButton dataId="proxy-manager-drawer-lifecycle-start"  action="start"   icon={<Play size={11} />}      label={t('proxyManagerLifecycleStart')}   pending={pendingAction === 'start'}   disabled={!!pendingAction} onRun={runLifecycle} />
-              <LifecycleButton dataId="proxy-manager-drawer-lifecycle-stop"   action="stop"    icon={<Square size={11} />}    label={t('proxyManagerLifecycleStop')}    pending={pendingAction === 'stop'}    disabled={!!pendingAction || !status?.running} onRun={runLifecycle} />
-              <LifecycleButton dataId="proxy-manager-drawer-lifecycle-restart" action="restart" icon={<RotateCw size={11} />}  label={t('proxyManagerLifecycleRestart')} pending={pendingAction === 'restart'} disabled={!!pendingAction} onRun={runLifecycle} />
-              <LifecycleButton dataId="proxy-manager-drawer-lifecycle-reload" action="reload"  icon={<RefreshCcw size={11} />} label={t('proxyManagerLifecycleReload')}  pending={pendingAction === 'reload'}  disabled={!!pendingAction || !status?.running} onRun={runLifecycle} />
+              {/* running → stop/restart/reload; stopped → start only */}
+              {!status?.running && (
+                <LifecycleButton dataId="proxy-manager-drawer-lifecycle-start"  action="start"   icon={<Play size={11} />}      label={t('proxyManagerLifecycleStart')}   pending={pendingAction === 'start'}   disabled={!!pendingAction} onRun={runLifecycle} />
+              )}
+              {status?.running && (
+                <>
+                  <LifecycleButton dataId="proxy-manager-drawer-lifecycle-stop"   action="stop"    icon={<Square size={11} />}    label={t('proxyManagerLifecycleStop')}    pending={pendingAction === 'stop'}    disabled={!!pendingAction} onRun={runLifecycle} />
+                  <LifecycleButton dataId="proxy-manager-drawer-lifecycle-restart" action="restart" icon={<RotateCw size={11} />}  label={t('proxyManagerLifecycleRestart')} pending={pendingAction === 'restart'} disabled={!!pendingAction} onRun={runLifecycle} />
+                  <LifecycleButton dataId="proxy-manager-drawer-lifecycle-reload" action="reload"  icon={<RefreshCcw size={11} />} label={t('proxyManagerLifecycleReload')}  pending={pendingAction === 'reload'}  disabled={!!pendingAction} onRun={runLifecycle} />
+                </>
+              )}
             </div>
           </div>
           {lifecycleOutput && (

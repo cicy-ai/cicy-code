@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Globe, Loader2, RefreshCw, Zap, Plus } from 'lucide-react';
+import { Globe, Loader2, RefreshCw, Zap, SlidersHorizontal } from 'lucide-react';
 import apiService from '../../services/api';
 import { TokenManager } from '../../services/tokenManager';
 
@@ -138,19 +138,16 @@ export default function GlobalProxyIndicator({ placement = 'below', onManageNode
     void loadGroup();
   }, [open, loadExit, loadGroup]);
 
-  // Outside-click + Escape dismiss, matching other Workspace popovers.
+  // Escape dismiss. Outside-click is handled by the full-screen backdrop below —
+  // a document pointerdown listener misses clicks landing inside iframes/webviews
+  // (terminal frames), which is most of the workspace.
   useEffect(() => {
     if (!open) return;
-    const onPointer = (e: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
-    document.addEventListener('pointerdown', onPointer);
     document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('pointerdown', onPointer);
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
@@ -199,6 +196,15 @@ export default function GlobalProxyIndicator({ placement = 'below', onManageNode
       >
         <Globe className="h-4 w-4" />
       </button>
+
+      {open ? (
+        <div
+          data-id="global-proxy-backdrop"
+          className="fixed inset-0 z-[179]"
+          onPointerDown={() => setOpen(false)}
+          onContextMenu={(e) => { e.preventDefault(); setOpen(false); }}
+        />
+      ) : null}
 
       {open ? (
         <div
@@ -275,10 +281,10 @@ export default function GlobalProxyIndicator({ placement = 'below', onManageNode
                 data-id="global-proxy-manage"
                 onClick={() => { onManageNodes(); setOpen(false); }}
                 className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1.5 text-[11px] text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-                title="让当前 agent 用 cicy-mihomo skill 添加/管理节点"
+                title="打开节点管理面板"
               >
-                <Plus className="h-3 w-3" />
-                用 skill 添加 / 管理节点
+                <SlidersHorizontal className="h-3 w-3" />
+                管理节点
               </button>
             ) : null}
           </div>

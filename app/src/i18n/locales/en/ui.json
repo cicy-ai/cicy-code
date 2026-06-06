@@ -18,5 +18,8 @@
   "selectHintNavigate": "navigate",
   "selectHintSelect": "select",
   "windowConfirmDelete": "Delete window {{idx}}?",
-  "windowCreateButton": "New window"
+  "windowCreateButton": "New window",
+  "webFrameCopy": "Copy",
+  "webFramePaste": "Paste",
+  "webFrameReload": "Reload"
 }

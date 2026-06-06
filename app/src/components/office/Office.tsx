@@ -1,9 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2, Send, Megaphone, AtSign, X, Loader2, CheckCircle2, MessageSquare,
-  Plus, Minus, Maximize2, Crown, Inbox, UserPlus, ChevronRight, Power, Users, Store, Copy, Check,
+  Plus, Minus, Maximize2, Crown, UserPlus, ChevronRight, Power, Users, Store, Copy, Check, PanelLeft,
 } from 'lucide-react';
 import TemplateMarket, { MarketTmpl, TeamTmpl } from './TemplateMarket';
+import CurrentHistoryView from '../chat/CurrentHistoryView';
 import { getAgentTypeIconMeta } from '../../lib/agentType';
 import apiService from '../../services/api';
 
@@ -28,30 +29,6 @@ interface Worker {
   tokens: number; cost: number;   // 累计 token 总量 + 累计成本($，来自 reply.cost_credit)
   status: Status; entries: Entry[]; live: Entry | null; histLoaded: boolean; sig: string; startedAt: number;
   x: number; y: number; w: number; h: number;   // entries=已落历史(慢轮询)；live=进行中 turn(快轮询)；sig 跳过无变化重渲染
-}
-
-// 从 current-history 的一个 item 里抽 agent 自己的 thinking+text。
-// 只取 assistant 轮：过滤 user/system/tool 注入(如自动 recap、system-reminder、工具结果),窗口只展示 agent 输出。
-function extractEntry(item: any): Entry | null {
-  if (item?.role !== 'assistant') return null;
-  let thinking = '', text = '';
-  const content = item?.content;
-  if (typeof content === 'string') {
-    text = content;
-  } else if (Array.isArray(content)) {
-    for (const c of content) {
-      const t = c?.type;
-      if (t === 'thinking' || t === 'reasoning') thinking += String(c?.thinking || c?.text || '');
-      else if (t === 'text' || t === 'output_text') text += String(c?.text || '');
-      // 跳过 tool_use / tool_result / image 等
-    }
-  } else if (typeof item?.text === 'string') {
-    text = item.text;
-  }
-  thinking = thinking.trim().slice(-900);
-  text = text.trim().slice(-1600);
-  if (!thinking && !text) return null;
-  return { id: Number(item?.history_id) || 0, role: 'assistant', thinking, text };
 }
 
 type ChatKind = 'dispatch' | 'broadcast' | 'done' | 'note';
@@ -80,9 +57,6 @@ function promptTokens(d: any): number {
   const inp = Number(d?.input_tokens || 0), cr = Number(d?.cache_read_input_tokens || 0), cc = Number(d?.cache_creation_input_tokens || 0);
   return inp >= cr ? inp + cc : inp + cr + cc;
 }
-// current-reply.status → 是否在干活
-const WORKING_STATES = new Set(['streaming', 'thinking', 'working', 'tool_call', 'running', 'generating', 'busy']);
-const isWorkingStatus = (s: string) => WORKING_STATES.has(String(s || '').toLowerCase());
 
 const Z_MIN = 0.4, Z_MAX = 1.8;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -152,12 +126,12 @@ function Avatar({ model, agentType, name, size = 30, status }: { model: string; 
 /* ── 候选成员（从市场/模版新增、尚未真实存在的占位 agent = 离线）── */
 interface Cand { id: string; name: string; role: string; model: string }
 
-// 统一布点：400 宽窗 + 28 横向间距 / 248 高窗 + 36 纵向间距，3 列。所有 window 共用,保证不重叠。
-const COLS = 3, GAP_X = 428, GAP_Y = 284, ORIGIN_X = 32, ORIGIN_Y = 64;
+// 统一布点：560 宽窗 + 28 横向间距 / 360 高窗 + 36 纵向间距，3 列。所有 window 共用,保证不重叠。
+const COLS = 3, GAP_X = 588, GAP_Y = 396, ORIGIN_X = 32, ORIGIN_Y = 64;
 const slotPos = (slot: number) => ({ x: ORIGIN_X + (slot % COLS) * GAP_X, y: ORIGIN_Y + Math.floor(slot / COLS) * GAP_Y });
 
 function makeWorker(id: string, name: string, role: string, model: string, slot: number, agentType = ''): Worker {
-  return { id, name, role, agentType, model, ctx: 0, ctxK: modelWindowK(model), tokens: 0, cost: 0, status: 'idle', entries: [], live: null, histLoaded: false, sig: '', startedAt: 0, w: 400, h: 248, ...slotPos(slot) };
+  return { id, name, role, agentType, model, ctx: 0, ctxK: modelWindowK(model), tokens: 0, cost: 0, status: 'idle', entries: [], live: null, histLoaded: false, sig: '', startedAt: 0, w: 560, h: 360, ...slotPos(slot) };
 }
 
 // 成本格式化:≥$0.01 两位小数,更小的给 4 位,0 显示为空(改用 token 兜底)。
@@ -175,7 +149,7 @@ function fmtTokens(n: number): string {
 export default function Office() {
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);   // 多选:可同时选中多个 window 群发
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [mode, setMode] = useState<'single' | 'broadcast'>('single');
   const [text, setText] = useState('');
@@ -184,10 +158,11 @@ export default function Office() {
   const [zoom, setZoom] = useState(1);
   const [now, setNow] = useState(() => Date.now());
   const [chat, setChat] = useState<ChatMsg[]>([
-    { id: 1, kind: 'note', text: '拖标题移动卡片、拖右下角缩放、空白拖拽平移、滚轮缩放。点 worker 自动 @ 派任务，或切广播。', ts: hhmm(Date.now()) },
+    { id: 1, kind: 'note', text: '拖标题移动卡片、拖右下角缩放、空白拖拽平移、滚轮缩放。点 worker 选中派活;Shift 点可多选群发,或切广播。', ts: hhmm(Date.now()) },
   ]);
   const [candidates, setCandidates] = useState<Cand[]>([]);
   const [rosterOpen, setRosterOpen] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);   // 左栏指挥台默认折叠;发指令只走底部居中的浮动 prompt
   const [market, setMarket] = useState<'team' | 'agent' | null>(null);
   const idSeq = useRef(20);
   const seq = useRef(2);
@@ -197,10 +172,13 @@ export default function Office() {
   // 给「稳定回调 / 全局拖拽监听」读最新值,避免把 workers/zoom 进依赖导致每帧重建 listener。
   const workersRef = useRef(workers); workersRef.current = workers;
   const zoomRef = useRef(zoom); zoomRef.current = zoom;
-  const histAtRef = useRef<Map<string, number>>(new Map());   // 每个 agent 上次拉 current-history 的时间戳(慢轮询节流)
+  const canvasRef = useRef<HTMLElement>(null);
+  const centeredRef = useRef(false);   // 初始化只自动居中一次,之后不干扰用户平移/缩放
 
   const byId = useMemo(() => Object.fromEntries(workers.map((w) => [w.id, w])), [workers]);
-  const target = selectedId ? byId[selectedId] : null;
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const selectedWorkers = useMemo(() => selectedIds.map((id) => byId[id]).filter(Boolean), [selectedIds, byId]);
+  const target = selectedIds.length === 1 ? byId[selectedIds[0]] : null;
   const online = workers.filter((w) => w.status !== 'idle').length;
 
   // 计时（仅 working 窗口用到 elapsed）
@@ -208,6 +186,39 @@ export default function Office() {
     const c = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(c);
   }, []);
+
+  // 进入办公室自动聚焦指令输入框(多个 CurrentHistoryView 挂载/滚动可能抢焦点,重试几次直到聚焦成功)
+  useEffect(() => {
+    let n = 0; let id = 0;
+    const tryFocus = () => {
+      inputRef.current?.focus();
+      if (++n < 6 && document.activeElement !== inputRef.current) id = window.setTimeout(tryFocus, 120);
+    };
+    id = window.setTimeout(tryFocus, 50);
+    return () => window.clearTimeout(id);
+  }, []);
+  // 输入框随内容自适应高度:下限两行(68px),向下增长到 160px 后内部滚动。
+  useEffect(() => {
+    const el = inputRef.current; if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 68), 160)}px`;
+  }, [text]);
+
+  // 初始化:把所有 agent 的窗格整体居中(并在过大时缩放适配),只做一次
+  useEffect(() => {
+    if (centeredRef.current || !loaded) return;
+    const n = workersRef.current.length; if (!n) return;
+    const el = canvasRef.current; const cw = el?.clientWidth || 0, ch = el?.clientHeight || 0;
+    if (!cw || !ch) return;
+    const cols = Math.min(n, COLS), rows = Math.ceil(n / COLS);
+    const gridW = (cols - 1) * GAP_X + 560, gridH = (rows - 1) * GAP_Y + 360;
+    const TOP = 56, BOTTOM = 132, M = 48;   // 顶栏 / 底部指令栏 / 四周留白
+    const z = clamp(Math.min(1, (cw - M * 2) / gridW, (ch - TOP - BOTTOM) / gridH), Z_MIN, 1);
+    const layerCx = ORIGIN_X + gridW / 2, layerCy = ORIGIN_Y + gridH / 2;
+    setZoom(z);
+    setPan({ x: cw / 2 - layerCx * z, y: (TOP + (ch - BOTTOM)) / 2 - layerCy * z });
+    centeredRef.current = true;
+  }, [loaded, workers.length]);
 
   // 真实成员：w-10001 的子 agent（pane_agents）；无则取全部 pane（排除自己）。每 15s 刷新名单。
   useEffect(() => {
@@ -234,7 +245,9 @@ export default function Office() {
             role: String(p.role || p.agent_type || '').trim(),
             agentType: String(p.agent_type || '').trim(),
           }))
-          .filter((p) => p.id && p.id !== SELF && (subIds ? subIds.has(p.id) : true));
+          .filter((p) => p.id && (p.id === SELF || (subIds ? subIds.has(p.id) : true)));
+        // 总控 w-10001 也作为一个 window 进画布,排在最前(不再单列在左栏)
+        team.sort((a, b) => (a.id === SELF ? -1 : 0) - (b.id === SELF ? -1 : 0));
         if (cancelled) return;
         setWorkers((prev) => {
           const prevById = new Map(prev.map((w) => [w.id, w]));
@@ -252,25 +265,23 @@ export default function Office() {
     return () => { cancelled = true; window.clearInterval(t); };
   }, []);
 
-  // 真实实时（分两档轮询，控住后端压力）：
-  //  · 快(2s)：current-reply —— 读小文件 reply.json,拿 status/model/上下文 token/累计 cost/进行中 turn。
-  //  · 慢(每 ~10s 或一轮结束时)：current-history —— 要解析大文件 current.json,只在必要时拉。
+  // 真实实时:每 2s 拉 current-reply(轻,读 reply.json)拿 header 元信息 —— status/model/上下文/累计 cost。
+  // 聊天正文不在这里拉:window body 用 CurrentHistoryView 自己轮询 current.json,避免重复加载。
   useEffect(() => {
     let cancelled = false;
-    const HISTORY_LIMIT = 8;
-    const HISTORY_MIN_GAP = 10000;
     const poll = async () => {
       if (document.hidden) return;   // 页面不可见(最小化/切走)时不打后端
       const ws = workersRef.current;
       if (!ws.length) return;
-      const nowTs = Date.now();
       await Promise.all(ws.map(async (w) => {
         try {
-          // 快:current-reply(轻)
           const rRes: any = await apiService.getAgentCurrentReply(w.id).catch(() => null);
           if (cancelled) return;
           const d: any = rRes?.data || {};
-          const working = isWorkingStatus(d.status) && d.complete !== true;
+          // 只要没完成就算 thinking:complete=true 或终态(completed/idle/error…)或无状态 → idle,其余一律 thinking。
+          const st = String(d.status || '').trim().toLowerCase();
+          const done = d.complete === true || st === '' || ['completed', 'complete', 'done', 'idle', 'aborted', 'error', 'canceled', 'cancelled', 'failed', 'stopped'].includes(st);
+          const working = !done;
           const model = String(d.model || w.model || '');
           const inTok = promptTokens(d);   // 整段 prompt(含 cache)
           // 优先用 Claude Code 自报的权威用量(statusline 落盘的 context_used_pct,和 pane 完全一致);
@@ -283,36 +294,13 @@ export default function Office() {
             : (winK > 0 && inTok > 0 ? clamp(Math.round((inTok / (winK * 1000)) * 100), 0, 100) : w.ctx);
           const tokens = inTok;
           const cost = Number(d.cost_credit || 0) || w.cost;
-          // 进行中那一轮 → live(快轮询实时更新)
-          let live: Entry | null = null;
-          if (working) {
-            const t = String(d.thinking || '').trim().slice(-900);
-            const a = String(d.answer || '').trim().slice(-1600);
-            if (t || a) live = { id: Number(d.history_id) || 9e9, role: 'assistant', thinking: t, text: a, live: true };
-          }
-          // 慢:current-history(重) —— 首次 / 距上次>10s / 这一刻刚结束一轮(working→idle) 才拉
-          const lastH = histAtRef.current.get(w.id) || 0;
-          const turnEnded = w.status === 'working' && !working;
-          let entries = w.entries;
-          let histLoaded = w.histLoaded;
-          if (!histLoaded || turnEnded || nowTs - lastH > HISTORY_MIN_GAP) {
-            const hRes: any = await (apiService as any).getAgentCurrentHistory(w.id, { limit: HISTORY_LIMIT }).catch(() => null);
-            if (!cancelled && hRes) {
-              const items: any[] = hRes?.data?.items || [];
-              const es: Entry[] = [];
-              for (const it of items) { const e = extractEntry(it); if (e) es.push(e); }
-              entries = es; histLoaded = true; histAtRef.current.set(w.id, nowTs);
-            }
-          }
-          if (cancelled) return;
-          const liveSig = live ? `${live.id}:${live.thinking.length}:${live.text.length}` : '-';
-          const sig = `${working ? 1 : 0}|${model}|${ctx}|${tokens}|${cost}|L:${liveSig}|` + entries.map((e) => `${e.id}:${e.thinking.length}:${e.text.length}`).join(',');
+          const sig = `${working ? 1 : 0}|${model}|${ctx}|${tokens}|${cost}`;
           setWorkers((prev) => prev.map((x) => {
             if (x.id !== w.id) return x;
-            if (x.sig === sig && x.histLoaded) return x;   // 无变化 → 保持引用,memo 跳过重渲染
+            if (x.sig === sig) return x;   // 无变化 → 保持引用,memo 跳过重渲染
             const status: Status = working ? 'working' : 'idle';
             const startedAt = status === 'working' && x.status !== 'working' ? Date.now() : x.startedAt;
-            return { ...x, status, entries, live, model, ctx, ctxK: winK, tokens, cost, histLoaded, sig, startedAt };
+            return { ...x, status, model, ctx, ctxK: winK, tokens, cost, sig, startedAt };
           }));
         } catch { /* 该 agent 还没数据 / 404 → 保持现状 */ }
       }));
@@ -327,14 +315,21 @@ export default function Office() {
   const push = (m: Omit<ChatMsg, 'id' | 'ts'>) => setChat((c) => [...c, { id: seq.current++, ts: hhmm(Date.now()), ...m }]);
 
   // 稳定回调（[] 依赖,读 ref 取最新值）→ 传给 memo 化的 WorkerWindow,避免每次 render/计时都让全部窗口重渲染。
-  const selectWorker = useCallback((id?: string) => { if (!id) return; setSelectedId(id); setMode('single'); setMentionOpen(false); inputRef.current?.focus(); }, []);
+  // 点窗口任意处即激活(active);additive(⌘/Ctrl/Shift 点)= 加入多选集合群发,否则单选替换。不抢焦点,保留 body 内文字选择
+  const activateWorker = useCallback((id: string, additive: boolean) => {
+    if (!id) return;
+    setMode('single'); setMentionOpen(false);
+    setSelectedIds((prev) => additive
+      ? (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
+      : (prev.length === 1 && prev[0] === id ? prev : [id]));
+  }, []);
   const onHover = useCallback((id: string, h: boolean) => setHoverId((cur) => (h ? id : cur === id ? null : cur)), []);
   const startMove = useCallback((e: React.PointerEvent, id: string) => {
-    e.stopPropagation(); const w = workersRef.current.find((x) => x.id === id); if (!w) return;
+    e.stopPropagation(); e.preventDefault(); const w = workersRef.current.find((x) => x.id === id); if (!w) return;
     dragRef.current = { kind: 'move', id, sx: e.clientX, sy: e.clientY, ox: w.x, oy: w.y, ow: w.w, oh: w.h, moved: false };
   }, []);
   const startResize = useCallback((e: React.PointerEvent, id: string) => {
-    e.stopPropagation(); const w = workersRef.current.find((x) => x.id === id); if (!w) return;
+    e.stopPropagation(); e.preventDefault(); const w = workersRef.current.find((x) => x.id === id); if (!w) return;
     dragRef.current = { kind: 'resize', id, sx: e.clientX, sy: e.clientY, ox: w.x, oy: w.y, ow: w.w, oh: w.h, moved: false };
   }, []);
 
@@ -343,19 +338,19 @@ export default function Office() {
     const move = (e: PointerEvent) => {
       const d = dragRef.current; if (!d) return;
       const dx = e.clientX - d.sx, dy = e.clientY - d.sy, z = zoomRef.current;
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) d.moved = true;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) { d.moved = true; window.getSelection?.()?.removeAllRanges(); }   // 拖动(移动/缩放)时清掉误产生的文字选区
       if (d.kind === 'pan') setPan({ x: d.ox + dx, y: d.oy + dy });
       else if (d.kind === 'move') setWorkers((prev) => prev.map((w) => w.id === d.id ? { ...w, x: d.ox + dx / z, y: d.oy + dy / z } : w));
       else setWorkers((prev) => prev.map((w) => w.id === d.id ? { ...w, w: Math.max(MIN_W, d.ow + dx / z), h: Math.max(MIN_H, d.oh + dy / z) } : w));
     };
     const up = () => {
       const d = dragRef.current;
-      if (d && !d.moved) { if (d.kind === 'move' && d.id) selectWorker(d.id); else if (d.kind === 'pan') setSelectedId(null); }
+      if (d && !d.moved) { if (d.kind === 'move' && d.id) inputRef.current?.focus(); else if (d.kind === 'pan') setSelectedIds([]); }
       dragRef.current = null;
     };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-  }, [selectWorker]);
+  }, []);
 
   const onWheel = (e: React.WheelEvent) => {
     // 缩放与滚动量成比例并把单次倍率夹在 ±4%，避免滚轮一格跳太多/太灵敏。
@@ -370,25 +365,38 @@ export default function Office() {
     setZoom(next);
   };
 
+  // 发完立刻催目标 window 的 CurrentHistoryView 刷新几次(覆盖 agent 收到 tmux 输入→起一轮的时间),
+  // 不用等满 2.5s 的 idle 轮询,消息能很快出现在窗口里。
+  const nudgeHistory = (ids: string[]) => {
+    [120, 500, 1100, 2000].forEach((ms) => window.setTimeout(() => {
+      ids.forEach((id) => window.dispatchEvent(new CustomEvent('cicy:current-history-refresh', { detail: { paneId: id } })));
+    }, ms));
+  };
   const send = () => {
     const body = text.trim(); if (!body) return;
     if (mode === 'broadcast') {
       push({ kind: 'broadcast', text: body });
-      const ids = workersRef.current.map((w) => w.id);
-      setWorkers((prev) => prev.map((w) => ({ ...w, status: 'working', startedAt: Date.now() })));
+      const ids = workersRef.current.map((w) => w.id).filter((id) => id !== SELF);   // 广播不发给总控自己
+      setWorkers((prev) => prev.map((w) => (w.id === SELF ? w : { ...w, status: 'working', startedAt: Date.now() })));
       ids.forEach((id) => { (apiService as any).sendCommand(id, body, true).catch(() => { /* pane 不可达忽略 */ }); });
+      nudgeHistory(ids);
       setText(''); return;
     }
-    if (!target) return;
-    const id = target.id;
-    push({ kind: 'dispatch', to: id, text: body });
-    setWorkers((prev) => prev.map((w) => (w.id === id ? { ...w, status: 'working', startedAt: Date.now() } : w)));
-    (apiService as any).sendCommand(id, body, true).catch(() => { /* pane 不可达忽略 */ });
+    // 定向 / 群发:发给选中的 window;未选则默认发给总控 w-10001(过总控)
+    const ids = selectedIds.length ? selectedIds.slice() : [SELF];
+    ids.forEach((id) => push({ kind: 'dispatch', to: id, text: body }));
+    setWorkers((prev) => prev.map((w) => (ids.includes(w.id) ? { ...w, status: 'working', startedAt: Date.now() } : w)));
+    ids.forEach((id) => (apiService as any).sendCommand(id, body, true).catch(() => { /* pane 不可达忽略 */ }));
+    nudgeHistory(ids);
     setText('');
   };
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+  // 关键:输入法合成中(中文/日文等拼音选词)按 Enter 是确认候选词,绝不能当发送。
+  // 用 isComposing / keyCode 229 排除,否则中文每次选词都会误触发送。
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && (e as any).keyCode !== 229) { e.preventDefault(); send(); }
+  };
   const onChange = (v: string) => { setText(v); if (mode === 'single') setMentionOpen(/(^|\s)@$/.test(v)); };
-  const pickMention = (w: Worker) => { setSelectedId(w.id); setMode('single'); setText((v) => v.replace(/@$/, '')); setMentionOpen(false); inputRef.current?.focus(); };
+  const pickMention = (w: Worker) => { setMode('single'); setSelectedIds((prev) => prev.includes(w.id) ? prev : [...prev, w.id]); setText((v) => v.replace(/@$/, '')); setMentionOpen(false); inputRef.current?.focus(); };
   const joinCandidate = (c: Cand) => {
     setCandidates((prev) => prev.filter((x) => x.id !== c.id));
     setWorkers((prev) => [...prev, makeWorker(c.id, c.name, c.role, c.model, prev.length)]);
@@ -406,12 +414,15 @@ export default function Office() {
     setWorkers((prev) => [...prev, ...team.members.map((m, i) => makeWorker(`w-100${base + i}`, m.name, m.role, m.model, prev.length + i))]);
     push({ kind: 'note', text: `已组建「${team.name}」（${team.members.length} 名成员，占位）` });
   };
-  const canSend = text.trim() && (mode === 'broadcast' || !!target);
+  const canSend = !!text.trim();   // 广播=全体;单聊有选中=定向/群发,无选中=默认发给总控
 
   return (
-    <div data-id="office" className="absolute inset-0 flex bg-[#0A0A0A] text-zinc-300">
-      {/* 左栏：指挥台 */}
-      <aside data-id="office-command" className="flex w-[340px] min-w-[340px] shrink-0 flex-col border-r border-white/[0.06] bg-[#0b0b0c]">
+    <div data-id="office" className="absolute inset-0 bg-[#0A0A0A] text-zinc-300">
+      {/* 左栏：指挥台 —— 默认折叠,作为左侧抽屉浮层;只放历史+成员库,发送已移到底部浮动栏 */}
+      {commandOpen && (
+        <div data-id="office-command-backdrop" className="absolute inset-0 z-40 bg-black/30" onPointerDown={() => setCommandOpen(false)} />
+      )}
+      <aside data-id="office-command" className={`absolute left-0 top-0 bottom-0 z-50 flex w-[340px] flex-col border-r border-white/[0.06] bg-[#0b0b0c] shadow-2xl transition-transform duration-200 ${commandOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-white/[0.06] px-4">
           <span className="relative">
             <span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-amber-400/40 to-amber-600/15 text-base ring-1 ring-amber-300/30">🏢</span>
@@ -421,13 +432,14 @@ export default function Office() {
             <div className="flex items-center gap-1 text-[13px] font-semibold text-zinc-100"><Crown className="h-3 w-3 text-amber-400" /> 办公室 · 总控</div>
             <div className="font-mono text-[11px] text-zinc-500">{SELF} · 在线 {online}/{workers.length}</div>
           </div>
+          <button data-id="office-command-close" onClick={() => setCommandOpen(false)} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"><X className="h-4 w-4" /></button>
         </div>
 
         <div ref={chatRef} data-id="office-command-history" className="flex-1 space-y-3 overflow-auto px-3.5 py-3.5">
           {chat.map((m) => <CommandMsg key={m.id} m={m} byId={byId} />)}
         </div>
 
-        {/* 成员库（候选 + 市场入口）—— 折叠区,在 prompt 之上 */}
+        {/* 成员库（候选 + 市场入口）—— 折叠区 */}
         <div data-id="office-roster" className="shrink-0 border-t border-white/[0.06]">
           <button data-id="office-roster-toggle" onClick={() => setRosterOpen((v) => !v)} className="flex w-full items-center gap-1.5 px-3.5 py-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500 transition-colors hover:text-zinc-300">
             <Users className="h-3.5 w-3.5" /> 成员库
@@ -465,50 +477,21 @@ export default function Office() {
           )}
         </div>
 
-        <div data-id="office-command-prompt" className="shrink-0 border-t border-white/[0.06] bg-[#0d0d0e] px-3.5 py-3">
-          <div className="relative">
-            <div data-id="office-mode" className="mb-2 inline-flex items-center gap-0.5 rounded-lg bg-white/[0.04] p-0.5 text-[12px]">
-              <button data-id="office-mode-single" onClick={() => setMode('single')} className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 transition-colors ${mode === 'single' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}><MessageSquare className="h-3.5 w-3.5" /> 单聊</button>
-              <button data-id="office-mode-broadcast" onClick={() => { setMode('broadcast'); setMentionOpen(false); }} className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 transition-colors ${mode === 'broadcast' ? 'bg-amber-500/20 text-amber-200' : 'text-zinc-500 hover:text-zinc-300'}`}><Megaphone className="h-3.5 w-3.5" /> 广播</button>
-            </div>
-            {mentionOpen && mode === 'single' && (
-              <div data-id="office-mention" className="absolute bottom-full left-0 mb-2 w-full overflow-hidden rounded-xl border border-white/10 bg-[#16161a] shadow-2xl">
-                {workers.map((w) => (
-                  <button key={w.id} data-id={`office-mention-${w.id}`} onClick={() => pickMention(w)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-white/[0.06]">
-                    <Avatar model={w.model} agentType={w.agentType} name={w.name} size={24} status={w.status} /><span className="text-[13px] text-zinc-200">{w.name}</span><span className="ml-auto font-mono text-[11px] text-zinc-500">{w.id}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <div data-id="office-target" className="mb-2 flex min-h-[26px] items-center gap-1.5">
-              {mode === 'broadcast' ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-[12px] text-amber-200"><Megaphone className="h-3 w-3" /> 广播 · 全体（{workers.length}）</span>
-              ) : target ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.06] py-1 pl-1 pr-2 text-[12px] text-zinc-200"><Avatar model={target.model} agentType={target.agentType} name={target.name} size={20} status={target.status} /><span className="font-medium">{target.name}</span><span className="font-mono text-[11px] text-zinc-500">{target.id}</span><button data-id="office-target-clear" onClick={() => setSelectedId(null)} className="rounded-full p-0.5 text-zinc-500 hover:bg-white/10 hover:text-zinc-200"><X className="h-3 w-3" /></button></span>
-              ) : (<span className="text-[12px] text-zinc-600">点画布里的 worker，或输入 @ 选择</span>)}
-            </div>
-            <div className="flex items-end gap-2 rounded-2xl border border-white/10 bg-[#121214] px-3 py-2.5 transition-colors focus-within:border-white/25">
-              <textarea ref={inputRef} data-id="office-input" rows={1} value={text} onChange={(e) => onChange(e.target.value)} onKeyDown={onKeyDown}
-                placeholder={mode === 'broadcast' ? '向全体广播…（Enter）' : target ? `给 ${target.name} 派任务…（Enter 发送）` : '输入 @ 选择 worker…'}
-                className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent text-[13px] leading-6 text-zinc-200 outline-none placeholder:text-zinc-600" />
-              <button data-id="office-send" onClick={send} disabled={!canSend} className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl text-white transition-all disabled:cursor-not-allowed disabled:bg-white/[0.06] disabled:text-zinc-600 ${mode === 'broadcast' ? 'bg-amber-500 hover:bg-amber-400' : 'bg-sky-500 hover:bg-sky-400'} ${canSend ? 'shadow-lg' : ''}`}>{mode === 'broadcast' ? <Megaphone className="h-4 w-4" /> : <Send className="h-4 w-4" />}</button>
-            </div>
-          </div>
-        </div>
       </aside>
 
-      {/* 右侧：画布 */}
-      <main data-id="office-canvas" className="relative min-w-0 flex-1 overflow-hidden bg-[#060608]"
-        style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.045) 1px, transparent 1px)', backgroundSize: `${26 * zoom}px ${26 * zoom}px`, backgroundPosition: `${pan.x}px ${pan.y}px` }}
+      {/* 画布（铺满） */}
+      <main ref={canvasRef} data-id="office-canvas" className="absolute inset-0 overflow-hidden bg-[#060608]"
         onPointerDown={onPointerDownBg} onWheel={onWheel}>
         {/* 暗角增加纵深 */}
-        <div className="pointer-events-none absolute inset-0" style={{ boxShadow: 'inset 0 0 160px 40px rgba(0,0,0,0.55)' }} />
+        <div className="pointer-events-none absolute inset-0 z-[1]" style={{ boxShadow: 'inset 0 0 160px 40px rgba(0,0,0,0.55)' }} />
 
-        <div data-id="office-canvas-layer" className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
+        {/* 画布层:提升为独立合成层(will-change),拖动只 GPU 合成不重绘内容;点阵网格放进本层,随 transform 走 GPU,不再每帧重绘 background-position */}
+        <div data-id="office-canvas-layer" className="absolute left-0 top-0 origin-top-left will-change-transform" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
+          <div data-id="office-grid" className="pointer-events-none absolute" style={{ left: -12000, top: -12000, width: 24000, height: 24000, backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.045) 1px, transparent 1px)', backgroundSize: '26px 26px' }} />
           {workers.map((w) => (
             <WorkerWindow key={w.id} w={w} now={w.status === 'working' ? now : 0}
-              selected={selectedId === w.id} hovered={hoverId === w.id}
-              onHover={onHover} onMoveStart={startMove} onResizeStart={startResize} />
+              selected={selectedSet.has(w.id)} hovered={hoverId === w.id}
+              onHover={onHover} onMoveStart={startMove} onResizeStart={startResize} onSelect={activateWorker} />
           ))}
         </div>
 
@@ -517,14 +500,15 @@ export default function Office() {
             {!loaded ? (
               <><Loader2 className="h-6 w-6 animate-spin" /><span className="text-[13px]">加载团队…</span></>
             ) : (
-              <><Users className="h-7 w-7 opacity-50" /><span className="text-[13px]">还没有成员 agent</span><span className="text-[11.5px] text-zinc-700">从左下「成员库」的市场添加，或用 cicy-agent 起子 agent</span></>
+              <><Users className="h-7 w-7 opacity-50" /><span className="text-[13px]">还没有成员 agent</span><span className="text-[11.5px] text-zinc-700">点左上「总控」打开成员库添加，或用 cicy-agent 起子 agent</span></>
             )}
           </div>
         )}
 
-        <div data-id="office-canvas-topbar" className="pointer-events-none absolute left-4 top-4 flex items-center gap-2 text-[11px]">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-2.5 py-1 text-zinc-300 backdrop-blur"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> 团队工作台 · 在线 {online}/{workers.length}</span>
-          <span className="rounded-full border border-white/[0.06] bg-black/30 px-2.5 py-1 text-zinc-600 backdrop-blur">仅 thinking + text · 不拉 tool 结果</span>
+        <div data-id="office-canvas-topbar" className="absolute left-4 top-4 flex items-center gap-2 text-[11px]">
+          <button data-id="office-command-toggle" onClick={() => setCommandOpen((v) => !v)} title="总控指挥台（历史 / 成员库）"
+            className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-2.5 py-1 text-zinc-300 backdrop-blur transition-colors hover:border-white/20 hover:text-zinc-100"><PanelLeft className="h-3.5 w-3.5" /> 总控</button>
+          <span className="pointer-events-none inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-2.5 py-1 text-zinc-300 backdrop-blur"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> 在线 {online}/{workers.length}</span>
         </div>
 
         <div data-id="office-canvas-controls" className="absolute bottom-4 right-4 flex flex-col gap-1.5">
@@ -532,6 +516,54 @@ export default function Office() {
           <button data-id="office-zoom-out" onClick={() => setZoom((z) => clamp(z / 1.15, Z_MIN, Z_MAX))} className="grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-[#16161a]/90 text-zinc-400 backdrop-blur transition-colors hover:text-zinc-100"><Minus className="h-4 w-4" /></button>
           <button data-id="office-zoom-reset" onClick={() => { setPan({ x: 0, y: 0 }); setZoom(1); }} title="复位" className="grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-[#16161a]/90 text-zinc-400 backdrop-blur transition-colors hover:text-zinc-100"><Maximize2 className="h-4 w-4" /></button>
           <div className="text-center text-[10px] text-zinc-600">{Math.round(zoom * 100)}%</div>
+        </div>
+
+        {/* 底部居中浮动指令栏 —— 唯一发送入口 */}
+        <div data-id="office-prompt-dock" className="pointer-events-none absolute inset-x-0 bottom-5 z-[70] flex justify-center px-4">
+          <div data-id="office-prompt" className="pointer-events-auto relative w-full max-w-2xl rounded-2xl border border-white/10 bg-[#121214]/95 p-2 shadow-2xl backdrop-blur"
+            onPointerDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}
+            onClick={() => inputRef.current?.focus()}>
+            {/* 顶部：目标 / 模式 —— 标签条(非输入区),用分隔线和下方输入框区分 */}
+            <div data-id="office-prompt-meta" className="mb-2 flex items-center gap-2 border-b border-white/[0.07] px-1 pb-2">
+              <div data-id="office-target" className="flex min-h-[24px] min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                {mode === 'broadcast' ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-[12px] text-amber-200"><Megaphone className="h-3 w-3" /> 广播 · 全体（{workers.filter((w) => w.id !== SELF).length}）</span>
+                ) : selectedWorkers.length === 0 ? (
+                  <span className="inline-flex items-center gap-1 text-[12px] text-zinc-500"><Crown className="h-3.5 w-3.5 text-amber-400/80" /> 发给总控 {SELF} · 点 worker(Shift 多选)可定向群发</span>
+                ) : (<>
+                  {selectedWorkers.length > 1 && <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-medium text-sky-200">群发 {selectedWorkers.length}</span>}
+                  {selectedWorkers.map((sw) => (
+                    <span key={sw.id} data-id={`office-target-chip-${sw.id}`} className="inline-flex items-center gap-1.5 rounded-full border border-sky-400/40 bg-sky-500/15 py-1 pl-1 pr-1.5 text-[12px] text-sky-100 ring-1 ring-sky-400/30">
+                      <Avatar model={sw.model} agentType={sw.agentType} name={sw.name} size={18} status={sw.status} />
+                      <span className="font-mono text-[11px] text-sky-200/80">{sw.id}</span>
+                      <button data-id={`office-target-remove-${sw.id}`} onClick={() => setSelectedIds((prev) => prev.filter((x) => x !== sw.id))} className="rounded-full p-0.5 text-zinc-500 hover:bg-white/10 hover:text-zinc-200"><X className="h-3 w-3" /></button>
+                    </span>
+                  ))}
+                  <button data-id="office-target-clear" onClick={() => setSelectedIds([])} className="ml-0.5 rounded px-1 text-[11px] text-zinc-600 hover:text-zinc-300">清空</button>
+                </>)}
+              </div>
+              <div data-id="office-mode" className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-white/[0.04] p-0.5 text-[12px]">
+                <button data-id="office-mode-single" onClick={() => setMode('single')} className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 transition-colors ${mode === 'single' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}><MessageSquare className="h-3.5 w-3.5" /> 单聊</button>
+                <button data-id="office-mode-broadcast" onClick={() => { setMode('broadcast'); setMentionOpen(false); }} className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 transition-colors ${mode === 'broadcast' ? 'bg-amber-500/20 text-amber-200' : 'text-zinc-500 hover:text-zinc-300'}`}><Megaphone className="h-3.5 w-3.5" /> 广播</button>
+              </div>
+            </div>
+            {mentionOpen && mode === 'single' && (
+              <div data-id="office-mention" className="absolute bottom-full left-0 mb-2 max-h-72 w-full overflow-auto rounded-xl border border-white/10 bg-[#16161a] shadow-2xl">
+                {workers.map((w) => (
+                  <button key={w.id} data-id={`office-mention-${w.id}`} onClick={() => pickMention(w)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-white/[0.06]">
+                    <Avatar model={w.model} agentType={w.agentType} name={w.name} size={24} status={w.status} /><span className="text-[13px] text-zinc-200">{w.name}</span><span className="ml-auto font-mono text-[11px] text-zinc-500">{w.id}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {/* 输入框:整块文本框,文字从左上开始、多行向下增长;发送键固定右下角(不挤压文字) */}
+            <div className="relative rounded-xl border border-white/10 bg-[#0a0a0c] transition-colors focus-within:border-sky-400/50 focus-within:bg-[#0c0c0f]">
+              <textarea ref={inputRef} data-id="office-input" rows={2} autoFocus value={text} onChange={(e) => onChange(e.target.value)} onKeyDown={onKeyDown}
+                placeholder={mode === 'broadcast' ? '向全体广播…（Enter 发送，Shift+Enter 换行）' : selectedWorkers.length > 1 ? `群发给选中的 ${selectedWorkers.length} 个 worker…（Enter 发送）` : target ? `给 ${target.name} 派任务…（Enter 发送）` : '发给总控…（Enter 发送;点 worker / Shift 多选可定向）'}
+                className="block max-h-40 min-h-[68px] w-full resize-none overflow-y-auto bg-transparent px-3 py-2.5 pr-12 align-top text-[13px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-600" />
+              <button data-id="office-send" onClick={send} disabled={!canSend} className={`absolute bottom-2 right-2 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white transition-all disabled:cursor-not-allowed disabled:bg-white/[0.06] disabled:text-zinc-600 ${mode === 'broadcast' ? 'bg-amber-500 hover:bg-amber-400' : 'bg-sky-500 hover:bg-sky-400'} ${canSend ? 'shadow-lg' : ''}`}>{mode === 'broadcast' ? <Megaphone className="h-4 w-4" /> : <Send className="h-4 w-4" />}</button>
+            </div>
+          </div>
         </div>
       </main>
 
@@ -559,7 +591,7 @@ const CommandMsg = memo(function CommandMsg({ m, byId }: { m: ChatMsg; byId: Rec
   }
   const w = m.from ? byId[m.from] : null;
   return (
-    <div data-id={`office-msg-${m.id}`} className="flex items-center gap-2">
+    <div data-id={`office-msg-${m.id}`} className="flex items-start gap-2">
       {w && <Avatar model={w.model} agentType={w.agentType} name={w.name} size={22} />}
       <div className="min-w-0 flex-1">
         <div className="text-[11px] text-zinc-500">{w?.name ?? m.from}</div>
@@ -570,15 +602,11 @@ const CommandMsg = memo(function CommandMsg({ m, byId }: { m: ChatMsg; byId: Rec
   );
 });
 
-const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResizeStart }: {
+const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onHover, onMoveStart, onResizeStart, onSelect }: {
   w: Worker; now: number; selected: boolean; hovered: boolean;
-  onHover: (id: string, h: boolean) => void; onMoveStart: (e: React.PointerEvent, id: string) => void; onResizeStart: (e: React.PointerEvent, id: string) => void;
+  onHover: (id: string, h: boolean) => void; onMoveStart: (e: React.PointerEvent, id: string) => void; onResizeStart: (e: React.PointerEvent, id: string) => void; onSelect: (id: string, additive: boolean) => void;
 }) {
-  const bodyRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { const n = bodyRef.current; if (n) n.scrollTop = n.scrollHeight; }, [w.sig]);
   const working = w.status === 'working';
-  // 已落历史 + 进行中 live(按 id 去重,避免提交瞬间重复)
-  const entries = w.live && !w.entries.some((e) => e.id === w.live!.id) ? [...w.entries, w.live] : w.entries;
   const costStr = fmtCost(w.cost);
   const tokStr = fmtTokens(w.tokens);
   const ctxColor = w.ctx > 85 ? 'bg-rose-400' : w.ctx > 60 ? 'bg-amber-400' : 'bg-zinc-400/60';
@@ -591,17 +619,23 @@ const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onH
 
   return (
     <div data-id={`office-window-${w.id}`}
+      onPointerDownCapture={(e) => onSelect(w.id, e.metaKey || e.ctrlKey || e.shiftKey)}
       onPointerEnter={() => onHover(w.id, true)} onPointerLeave={() => onHover(w.id, false)}
       className={`absolute flex flex-col overflow-hidden rounded-2xl border bg-[#0e0e11] transition-[box-shadow,transform,border-color] duration-150
-        ${selected ? 'ring-2 ring-white/30 border-transparent -translate-y-0.5 shadow-2xl' : hovered ? 'border-white/15 shadow-2xl' : 'border-white/[0.07] shadow-xl'}`}
+        ${selected
+          ? 'border-sky-400 ring-2 ring-sky-400/70 ring-offset-2 ring-offset-[#060608] -translate-y-0.5 shadow-2xl shadow-sky-500/30'
+          : working
+            ? 'border-amber-400/45 shadow-xl shadow-[0_0_22px_-4px_rgba(251,191,36,0.4)]'
+            : hovered ? 'border-white/15 shadow-2xl' : 'border-white/[0.07] shadow-xl'}
+        ${working || selected ? '' : 'opacity-[0.97]'}`}
       style={{ left: w.x, top: w.y, width: w.w, height: w.h, zIndex: selected ? 60 : hovered ? 40 : 10 }}>
-      {/* 状态色条：thinking 黄 / idle 绿 */}
-      <div className={`h-[3px] w-full ${working ? 'bg-amber-400/60' : 'bg-emerald-400/45'}`} />
+      {/* 状态色条:工作中=亮黄脉动条 / 空闲=暗绿静止条 */}
+      <div className={`w-full ${working ? 'h-1 bg-amber-400 animate-pulse' : 'h-1 bg-emerald-500/30'}`} />
       <div data-id={`office-window-header-${w.id}`} onPointerDown={(e) => onMoveStart(e, w.id)}
-        className="flex shrink-0 cursor-grab select-none items-center gap-2.5 bg-white/[0.015] px-3 py-2.5 active:cursor-grabbing">
-        <Avatar model={w.model} agentType={w.agentType} name={w.name} size={32} status={w.status} />
+        className="flex shrink-0 cursor-grab select-none items-center gap-2.5 border-b border-white/[0.05] bg-white/[0.015] px-3 py-2 active:cursor-grabbing">
+        <Avatar model={w.model} agentType={w.agentType} name={w.name} size={30} status={w.status} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] font-semibold text-zinc-100">{w.name}</span>
+          <span className="flex items-center gap-1 truncate text-[13px] font-semibold text-zinc-100">{w.id === SELF && <Crown className="h-3 w-3 shrink-0 text-amber-400" />}<span className="truncate">{w.name}</span></span>
           <span className="flex items-center gap-1 font-mono text-[10.5px] text-zinc-500">
             <button data-id={`office-window-copyid-${w.id}`} onPointerDown={(e) => e.stopPropagation()} onClick={copyId}
               title="复制 agent id" className="inline-flex items-center gap-0.5 rounded px-0.5 transition-colors hover:bg-white/10 hover:text-zinc-300">
@@ -609,51 +643,38 @@ const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onH
             </button>
           </span>
         </span>
+        {/* 状态徽标:工作中(亮黄脉动)/ 空闲(暗绿) —— 一眼可辨 */}
         {working ? (
-          <span className="inline-flex items-center gap-1 text-[10.5px] text-amber-300"><Loader2 className="h-3 w-3 animate-spin" /> thinking · {elapsed(w.startedAt, now)}</span>
+          <span data-id={`office-window-status-${w.id}`} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10.5px] font-medium text-amber-300 ring-1 ring-amber-400/30">
+            <Loader2 className="h-3 w-3 animate-spin" /> 工作中 · {elapsed(w.startedAt, now)}
+          </span>
         ) : (
-          <span className="inline-flex items-center gap-1 text-[10.5px] text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> idle</span>
+          <span data-id={`office-window-status-${w.id}`} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/[0.04] px-2 py-0.5 text-[10.5px] text-zinc-500">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400/70" /> 空闲
+          </span>
         )}
-      </div>
-      {/* meta：模型 + 上下文用量 + 累计成本 */}
-      <div data-id={`office-window-meta-${w.id}`} className="flex items-center gap-2 border-b border-white/[0.05] px-3 py-1.5">
-        <span className="min-w-0 shrink truncate rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400" title={`模型 ${w.model}`}>{w.model || '—'}</span>
-        <div data-id={`office-window-ctx-${w.id}`} className="ml-auto flex shrink-0 items-center gap-1.5" title={`上下文 ${w.ctx}%${tokStr ? ` · ${tokStr} tok` : ''} · 窗口 ${w.ctxK}k`}>
+        {/* model + 上下文用量 + 累计成本 —— 全放到 title 这一行 */}
+        <span className="max-w-[150px] shrink-0 truncate rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400" title={`模型 ${w.model}`}>{w.model || '—'}</span>
+        <div data-id={`office-window-ctx-${w.id}`} className="flex shrink-0 items-center gap-1.5" title={`上下文 ${w.ctx}%${tokStr ? ` · ${tokStr} tok` : ''} · 窗口 ${w.ctxK}k`}>
           <span className="text-[10px] text-zinc-600">ctx</span>
           <div className="h-1 w-12 overflow-hidden rounded-full bg-white/10"><div className={`h-full rounded-full ${ctxColor} transition-all`} style={{ width: `${w.ctx}%` }} /></div>
           <span className={`text-[10px] tabular-nums ${ctxText}`}>{w.ctx}%</span>
         </div>
-        <span data-id={`office-window-cost-${w.id}`} className="shrink-0 font-mono text-[10px] tabular-nums text-emerald-300/80" title={costStr ? `累计成本 ${costStr}` : (tokStr ? `累计 ${tokStr} tokens(成本未知)` : '暂无用量')}>
-          {costStr || (tokStr ? `${tokStr}t` : '$0')}
-        </span>
+        {costStr && (
+          <span data-id={`office-window-cost-${w.id}`} className="shrink-0 font-mono text-[10px] tabular-nums text-emerald-300/80" title={`累计成本 ${costStr}`}>
+            {costStr}
+          </span>
+        )}
       </div>
-      <div ref={bodyRef} data-id={`office-window-body-${w.id}`} onWheel={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}
-        className="flex-1 cursor-text select-text space-y-3 overflow-auto px-3 py-2.5 [user-select:text]">
-        {entries.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-1 text-zinc-700"><Inbox className="h-5 w-5" /><span className="text-[11px]">{working ? '思考中…' : '空闲 · 等待派活'}</span></div>
-        ) : entries.map((e, i) => {
-          const isLast = i === entries.length - 1;
-          return (
-            <div key={`${e.id}-${i}`} data-id={`office-window-entry-${w.id}-${i}`} className="space-y-1.5 border-l border-white/[0.06] pl-2">
-              {e.thinking && (
-                <div className="whitespace-pre-wrap text-[11px] italic leading-relaxed text-amber-50/45">
-                  {e.thinking}{e.live && working && !e.text && <span className="ml-0.5 animate-pulse text-amber-200/70">▍</span>}
-                </div>
-              )}
-              {e.text && (
-                <div className="whitespace-pre-wrap text-[12px] leading-relaxed text-zinc-300">
-                  {e.text}{e.live && working && <span className="ml-0.5 animate-pulse text-zinc-400">▍</span>}
-                </div>
-              )}
-              {isLast && e.live && working && !e.thinking && !e.text && <span className="animate-pulse text-amber-200/70">▍</span>}
-            </div>
-          );
-        })}
+      {/* 聊天历史:直接复用主仓的 CurrentHistoryView(current-history-list),仅隐藏 tool card,保证渲染一致 */}
+      <div data-id={`office-window-body-${w.id}`} onWheel={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}
+        className="min-h-0 flex-1 overflow-hidden">
+        <CurrentHistoryView paneId={w.id} open hideTools />
       </div>
-      {/* resize 抓手：悬停/选中才显露 */}
+      {/* resize 抓手：迷你 + 低调,仅悬停时淡显 */}
       <div data-id={`office-window-resize-${w.id}`} onPointerDown={(e) => onResizeStart(e, w.id)}
-        className={`absolute bottom-1 right-1 h-3.5 w-3.5 cursor-nwse-resize rounded-sm transition-opacity ${hovered || selected ? 'opacity-100' : 'opacity-0'}`}
-        style={{ background: 'linear-gradient(135deg, transparent 45%, rgba(255,255,255,0.4) 45%, rgba(255,255,255,0.4) 55%, transparent 55%, transparent 70%, rgba(255,255,255,0.4) 70%, rgba(255,255,255,0.4) 80%, transparent 80%)' }} />
+        className={`absolute bottom-0.5 right-0.5 h-2.5 w-2.5 cursor-nwse-resize transition-opacity ${hovered ? 'opacity-100' : 'opacity-0'}`}
+        style={{ background: 'linear-gradient(135deg, transparent 64%, rgba(255,255,255,0.22) 64%, rgba(255,255,255,0.22) 76%, transparent 76%)' }} />
     </div>
   );
 });

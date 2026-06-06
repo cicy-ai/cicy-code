@@ -22,5 +22,7 @@
   "emptyState": "Bind a team member to get started",
   "fork": "Fork",
   "toastForkStarted": "Forking agent...",
-  "toastForkFailed": "Fork failed"
+  "toastForkFailed": "Fork failed",
+  "gatewayBadgeOn": "Gateway mode (local AI gateway)",
+  "gatewayBadgeOff": "Official login (direct)"
 }

@@ -22,5 +22,7 @@
   "emptyState": "先绑定一个团队成员开始",
   "fork": "分身",
   "toastForkStarted": "正在 fork agent...",
-  "toastForkFailed": "Fork 失败"
+  "toastForkFailed": "Fork 失败",
+  "gatewayBadgeOn": "网关模式（本地 AI Gateway）",
+  "gatewayBadgeOff": "官方登录（直连）"
 }

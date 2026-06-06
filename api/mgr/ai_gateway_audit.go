@@ -223,6 +223,13 @@ type aiGatewayAuditReadCloser struct {
 	isStream    bool
 	startMarked bool
 	once        sync.Once
+	// gzip-encoded SSE (api.anthropic.com via MITM honors the client's
+	// Accept-Encoding): the bytes forwarded to the client must stay compressed,
+	// so the live SSE parse runs on a side-channel streaming gunzip. gzW feeds
+	// raw bytes to the gunzip goroutine; gzDone closes when it has flushed the
+	// final events. In gzip mode ONLY that goroutine touches ssePending.
+	gzW    *io.PipeWriter
+	gzDone chan struct{}
 }
 
 type aiGatewayStreamAccumulator struct {
@@ -378,7 +385,7 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		ToolCallCount:   0,
 		Auxiliary:       provider == "unknown",
 	}
-	annotatedBody := aiGatewayAnnotateCurrentBodyHistoryIDs(aiGatewayCloneJSONValue(payloadValue))
+	annotatedBody := aiGatewayAnnotateCurrentBodyHistoryIDs(agentID, aiGatewayCloneJSONValue(payloadValue))
 	current := aiGatewayCurrentSnapshot{
 		TurnID:           turnID,
 		AgentID:          agentID,
@@ -515,7 +522,65 @@ func newAIGatewayAuditReadCloser(inner io.ReadCloser, audit *aiGatewayAuditSessi
 	if contentLength > 0 && contentLength <= 8*1024*1024 {
 		rc.buf.Grow(int(contentLength))
 	}
+	// gzip SSE → side-channel streaming gunzip for the live event parse.
+	// (Found 2026-06-05: MITM-audited api.anthropic.com turns stream gzip, so
+	// the inline parse saw compressed bytes — zero ai_chunk/thinking_chunk and
+	// an empty live reply.json, while the at-rest parse still worked because
+	// completeFromResponse gunzips the full buffer.)
+	if rc.isStream && strings.EqualFold(strings.TrimSpace(headers.Get("Content-Encoding")), "gzip") {
+		if audit != nil {
+			log.Printf("[audit] gzip SSE side-channel armed agent=%s", audit.agentID)
+		}
+		pr, pw := io.Pipe()
+		rc.gzW = pw
+		rc.gzDone = make(chan struct{})
+		go func() {
+			defer close(rc.gzDone)
+			gz, err := gzip.NewReader(pr)
+			if err != nil {
+				log.Printf("[audit] gzip side-channel reader init failed: %v", err)
+				_, _ = io.Copy(io.Discard, pr)
+				return
+			}
+			chunk := make([]byte, 32*1024)
+			for {
+				n, err := gz.Read(chunk)
+				if n > 0 {
+					rc.ssePending += string(chunk[:n])
+					rc.flushSSEEvents(false)
+				}
+				if err != nil {
+					if err != io.EOF {
+						log.Printf("[audit] gzip side-channel mid-stream error agent=%s: %v", func() string {
+							if audit != nil {
+								return audit.agentID
+							}
+							return "?"
+						}(), err)
+					}
+					rc.flushSSEEvents(true)
+					_, _ = io.Copy(io.Discard, pr)
+					return
+				}
+			}
+		}()
+	}
 	return rc
+}
+
+// closeGzipSideChannel ends the streaming-gunzip side channel (if any) and
+// waits briefly for it to flush its final events, so completion snapshots
+// don't race ahead of the last deltas.
+func (r *aiGatewayAuditReadCloser) closeGzipSideChannel() {
+	if r.gzW == nil {
+		return
+	}
+	_ = r.gzW.Close()
+	select {
+	case <-r.gzDone:
+	case <-time.After(3 * time.Second):
+	}
+	r.gzW = nil
 }
 
 func (r *aiGatewayAuditReadCloser) Read(p []byte) (int, error) {
@@ -527,13 +592,23 @@ func (r *aiGatewayAuditReadCloser) Read(p []byte) (int, error) {
 		}
 		_, _ = r.buf.Write(p[:n])
 		if r.isStream {
-			r.ssePending += string(p[:n])
-			r.flushSSEEvents(err == io.EOF)
+			if r.gzW != nil {
+				// Compressed stream: hand raw bytes to the gunzip side channel;
+				// it owns ssePending/flush in this mode.
+				_, _ = r.gzW.Write(p[:n])
+			} else {
+				r.ssePending += string(p[:n])
+				r.flushSSEEvents(err == io.EOF)
+			}
 		}
 	}
 	if err == io.EOF {
 		if r.isStream {
-			r.flushSSEEvents(true)
+			if r.gzW != nil {
+				r.closeGzipSideChannel()
+			} else {
+				r.flushSSEEvents(true)
+			}
 		}
 		r.finish(nil)
 	}
@@ -542,6 +617,7 @@ func (r *aiGatewayAuditReadCloser) Read(p []byte) (int, error) {
 
 func (r *aiGatewayAuditReadCloser) Close() error {
 	err := r.inner.Close()
+	r.closeGzipSideChannel()
 	r.finish(err)
 	return err
 }
@@ -1225,7 +1301,7 @@ func aiGatewayWriteSnapshotFile(agentID, name, convID string, value interface{})
 }
 
 func aiGatewayWriteCurrentSnapshot(agentID string, current aiGatewayCurrentSnapshot) error {
-	current.Body = aiGatewayAnnotateCurrentBodyHistoryIDs(aiGatewayCloneJSONValue(current.Body))
+	current.Body = aiGatewayAnnotateCurrentBodyHistoryIDs(agentID, aiGatewayCloneJSONValue(current.Body))
 	current.MaxHistoryID = aiGatewayCurrentBodyMaxHistoryID(current.Body)
 	return aiGatewayWriteSnapshotFile(agentID, "current.json", current.ConversationID, current)
 }
@@ -2865,6 +2941,10 @@ func (s *aiGatewayAuditSession) streamChatEvents(events []aiGatewayReplyEvent) [
 				out = append(out, ChatEvent{Type: "ai_chunk", Data: M{"delta": content, "agent_id": s.agentID, "conversation_id": s.current.ConversationID, "turn_id": s.current.TurnID, "history_id": int64(s.current.MaxHistoryID)}})
 			case "thinking":
 				out = append(out, ChatEvent{Type: "status_change", Data: M{"status": "thinking", "agent_id": s.agentID, "conversation_id": s.current.ConversationID, "turn_id": s.current.TurnID, "history_id": int64(s.current.MaxHistoryID)}})
+				// Streamed thinking text for subscribers that render a live
+				// thinking block (mobile). Same shape as ai_chunk; delta is
+				// RawString — whitespace significant, append verbatim.
+				out = append(out, ChatEvent{Type: "thinking_chunk", Data: M{"delta": content, "agent_id": s.agentID, "conversation_id": s.current.ConversationID, "turn_id": s.current.TurnID, "history_id": int64(s.current.MaxHistoryID)}})
 			}
 		case "tool_call", "web_search":
 			toolName := strings.TrimSpace(aiGatewayFirstNonEmpty(aiGatewayString(payload["tool_name"]), event.Kind))
@@ -2896,10 +2976,8 @@ func (s *aiGatewayAuditSession) emitReplyStreamPayload(payload map[string]interf
 	// applyStreamEventsLocked only flushes reply.json on a CONTENT change; if the
 	// only thing that changed this chunk was usage (e.g. the message_start event),
 	// flush here so the cache numbers land in reply.json without waiting.
-	if usageUpdated && !s.auxiliary {
-		if err := aiGatewayWriteReplySnapshot(s.agentID, s.reply); err != nil {
-			log.Printf("[ai-gateway] live usage reply snapshot failed for %s: %v", s.agentID, err)
-		}
+	if usageUpdated {
+		s.writeLiveReplySnapshotLocked()
 	}
 	chatEvents := s.streamChatEvents(events)
 	replyHooks := s.replyHooks
@@ -2983,6 +3061,64 @@ func (s *aiGatewayAuditSession) flushPendingItemLocked() {
 		}
 		// 标记：到此为止的 items 都已通过 hooks 推送过，避免 completeFromResponse 补推时重复。
 		s.pushedItems = len(s.reply.Items)
+	}
+}
+
+// pendingItemAsMapLocked 把"进行中"的 pendingItem 渲染成一个临时 item map(形态与
+// flushPendingItemLocked 一致),用于在 block 收尾前把 partial 文本写进 reply.json。
+// 不清空 pendingItem。空内容返回 nil。caller 必须持有 s.mu。
+func (s *aiGatewayAuditSession) pendingItemAsMapLocked(nextID int) map[string]interface{} {
+	pi := s.pendingItem
+	if pi == nil {
+		return nil
+	}
+	switch pi.Kind {
+	case "thinking":
+		if strings.TrimSpace(pi.Thinking) == "" {
+			return nil
+		}
+		return map[string]interface{}{"id": nextID, "type": "thinking", "thinking": pi.Thinking}
+	case "text":
+		if strings.TrimSpace(pi.Text) == "" {
+			return nil
+		}
+		return map[string]interface{}{"id": nextID, "type": "text", "text": pi.Text}
+	case "tool_use":
+		if pi.ToolID == "" && pi.ToolName == "" {
+			return nil
+		}
+		var input interface{}
+		if pi.Arguments != "" {
+			if err := json.Unmarshal([]byte(pi.Arguments), &input); err != nil {
+				input = pi.Arguments
+			}
+		}
+		exposedToolID := pi.OutputToolID
+		if exposedToolID == "" {
+			exposedToolID = pi.ToolID
+		}
+		return map[string]interface{}{"id": nextID, "type": "tool_use", "tool_id": exposedToolID, "name": pi.ToolName, "input": input}
+	}
+	return nil
+}
+
+// writeLiveReplySnapshotLocked 流式写盘:把已完成 Items + 进行中 pendingItem(作为
+// 临时末尾 item)一起写进 reply.json,这样 partial 文本逐 delta 可见(前端流式)。
+// 关键:只在写出的副本里追加 provisional item,绝不污染 s.reply.Items(下次 flush
+// 会用同一个 id append 真正定稿的 item,文件整体覆盖,不会重复)。两条 SSE 路径
+// (网关 deepseek / 非网关 MITM)都经 applyStreamEventsLocked 调用本函数。
+func (s *aiGatewayAuditSession) writeLiveReplySnapshotLocked() {
+	if s.auxiliary {
+		return
+	}
+	live := s.reply
+	if item := s.pendingItemAsMapLocked(len(s.reply.Items) + 1); item != nil {
+		items := make([]map[string]interface{}, len(s.reply.Items), len(s.reply.Items)+1)
+		copy(items, s.reply.Items)
+		live.Items = append(items, item)
+	}
+	if err := aiGatewayWriteReplySnapshot(s.agentID, live); err != nil {
+		log.Printf("[ai-gateway] live reply snapshot (pending) failed for %s: %v", s.agentID, err)
 	}
 }
 
@@ -3145,11 +3281,8 @@ func (s *aiGatewayAuditSession) applyStreamEventsLocked(events []aiGatewayReplyE
 	s.current.Status = statusMap.Primary
 	s.reply.Status = statusMap.Primary
 	s.reply.StatusMap = statusMap
-	if !s.auxiliary {
-		if err := aiGatewayWriteReplySnapshot(s.agentID, s.reply); err != nil {
-			log.Printf("[ai-gateway] write live reply snapshot failed for %s: %v", s.agentID, err)
-		}
-	}
+	// 含进行中 pendingItem 的 partial → reply.json 逐 delta 增长(流式)。
+	s.writeLiveReplySnapshotLocked()
 	return s.broadcastStatusLocked()
 }
 
@@ -4611,20 +4744,119 @@ func aiGatewayCloneJSONValue(value interface{}) interface{} {
 	return cloned
 }
 
-func aiGatewayAssignSequentialIDs(items []interface{}) []interface{} {
+func aiGatewayWithID(raw interface{}, id int) interface{} {
+	item := aiGatewayMap(raw)
+	if len(item) == 0 {
+		return raw
+	}
+	next := aiGatewayCloneAnyMap(item)
+	next["id"] = id
+	return next
+}
+
+func aiGatewayAssignSequentialIDs(items []interface{}, base int) []interface{} {
 	if len(items) == 0 {
 		return items
 	}
 	out := make([]interface{}, 0, len(items))
 	for i, raw := range items {
-		item := aiGatewayMap(raw)
-		if len(item) == 0 {
-			out = append(out, raw)
-			continue
+		out = append(out, aiGatewayWithID(raw, base+i+1))
+	}
+	return out
+}
+
+// aiGatewayContentText flattens a message's content into a canonical text key,
+// ignoring block structure and cache_control. This is essential because the
+// dispatcher attaches a cache_control breakpoint to the LAST message of each
+// request (copy-on-write), turning its content from a plain string into a
+// [{type:text,text,cache_control}] block — so the same message looks different
+// depending on whether it was the window's last message that turn. Normalizing
+// makes the fingerprint stable across that transform.
+func aiGatewayContentText(content interface{}) string {
+	switch c := content.(type) {
+	case string:
+		return c
+	case []interface{}:
+		// Concatenate without separators so a single text block (the cache_control
+		// form, [{type:text,text:X}]) canonicalizes to the SAME key as the plain
+		// string X — that equivalence is the whole point of this normalization.
+		var b strings.Builder
+		for _, raw := range c {
+			blk := aiGatewayMap(raw)
+			if len(blk) == 0 {
+				b.WriteString(aiGatewayJSONString(raw))
+				continue
+			}
+			switch aiGatewayString(blk["type"]) {
+			case "text", "":
+				b.WriteString(aiGatewayString(blk["text"]))
+			case "tool_use":
+				b.WriteString("\x01tool_use:" + aiGatewayString(blk["id"]) + ":" + aiGatewayString(blk["name"]) + ":" + aiGatewayJSONString(blk["input"]))
+			case "tool_result":
+				b.WriteString("\x01tool_result:" + aiGatewayString(blk["tool_use_id"]) + ":" + aiGatewayContentText(blk["content"]))
+			default:
+				b.WriteString("\x01" + aiGatewayJSONString(blk))
+			}
 		}
-		next := aiGatewayCloneAnyMap(item)
-		next["id"] = i + 1
-		out = append(out, next)
+		return b.String()
+	default:
+		return aiGatewayJSONString(content)
+	}
+}
+
+// aiGatewayMessageIdentity is a stable content fingerprint (role + normalized
+// content) for one history message. Used to align the current request's sliding
+// window against the previous one so history_ids stay absolute and stable
+// across turns even as the dispatcher trims old messages off the front and
+// rewrites the last message's content for cache_control.
+func aiGatewayMessageIdentity(item map[string]interface{}) string {
+	return aiGatewayString(item["role"]) + "\x00" + aiGatewayContentText(item["content"])
+}
+
+// aiGatewayAssignAbsoluteIDs numbers newItems with absolute, monotonic, stable
+// history ids by anchoring them to prevItems (the previous request's
+// already-numbered window). The dispatcher sends a sliding window capped at N
+// messages: each turn it appends to the tail and trims the front, so naive
+// positional numbering (1..N) saturates at N and reuses ids for different
+// content — which freezes the frontend's committed view. Instead we find the
+// previous window's last message inside the new window: overlapping messages
+// keep their prior id, tail messages continue from there. Falls back to
+// positional (from prevMax, or 1) when there is no usable overlap.
+func aiGatewayAssignAbsoluteIDs(prevItems []interface{}, newItems []interface{}, prevMax int) []interface{} {
+	if len(newItems) == 0 {
+		return newItems
+	}
+	if len(prevItems) == 0 {
+		return aiGatewayAssignSequentialIDs(newItems, 0)
+	}
+	prevLast := aiGatewayMap(prevItems[len(prevItems)-1])
+	prevLastID := aiGatewayInt(prevLast["id"])
+	prevLastKey := aiGatewayMessageIdentity(prevLast)
+	// Last occurrence wins: the dispatcher only appends, so the newest copy of
+	// the previous tail message is the real anchor; everything after it is new.
+	matchIdx := -1
+	for i := len(newItems) - 1; i >= 0; i-- {
+		if aiGatewayMessageIdentity(aiGatewayMap(newItems[i])) == prevLastKey {
+			matchIdx = i
+			break
+		}
+	}
+	if matchIdx < 0 || prevLastID <= 0 {
+		// No overlap (conversation reset, or prev window unnumbered) → keep ids
+		// monotonic by continuing past the previous max.
+		base := prevMax
+		if base < 0 {
+			base = 0
+		}
+		return aiGatewayAssignSequentialIDs(newItems, base)
+	}
+	out := make([]interface{}, 0, len(newItems))
+	for i, raw := range newItems {
+		id := prevLastID + (i - matchIdx)
+		if id < 1 {
+			id = 1
+		}
+		out = append(out, aiGatewayWithID(raw, id))
 	}
 	return out
 }
@@ -4654,18 +4886,53 @@ func aiGatewayCurrentBodyMaxHistoryID(body interface{}) int {
 	return maxID
 }
 
-func aiGatewayAnnotateCurrentBodyHistoryIDs(body interface{}) interface{} {
+// aiGatewayBodyAlreadyNumbered reports whether every history message in the
+// body already carries a positive id — i.e. this body was numbered on the
+// request-capture path, so the write path must not renumber it.
+func aiGatewayBodyAlreadyNumbered(mapped map[string]interface{}) bool {
+	items := aiGatewaySlice(mapped["messages"])
+	if len(items) == 0 {
+		items = aiGatewaySlice(mapped["input"])
+	}
+	if len(items) == 0 {
+		return false
+	}
+	for _, raw := range items {
+		if aiGatewayInt(aiGatewayMap(raw)["id"]) <= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func aiGatewayAnnotateCurrentBodyHistoryIDs(agentID string, body interface{}) interface{} {
 	mapped := aiGatewayMap(body)
 	if len(mapped) == 0 {
 		return body
 	}
+	// Idempotent: an already-numbered body (re-annotated on the write/status
+	// path) is left untouched so absolute ids assigned at capture survive.
+	if aiGatewayBodyAlreadyNumbered(mapped) {
+		return body
+	}
+	// At request-capture time current.json on disk is still the PREVIOUS turn's
+	// window — anchor the new sliding window to it so ids stay absolute/stable
+	// across the dispatcher's front-trim (no sqlite, no extra state).
+	var prevMsgs, prevInput []interface{}
+	prevMax := 0
+	if prev, err := aiGatewayReadCurrentSnapshot(agentID); err == nil {
+		prevMapped := aiGatewayMap(prev.Body)
+		prevMsgs = aiGatewaySlice(prevMapped["messages"])
+		prevInput = aiGatewaySlice(prevMapped["input"])
+		prevMax = prev.MaxHistoryID
+	}
 	next := aiGatewayCloneAnyMap(mapped)
 	delete(next, "history")
 	if messages := aiGatewaySlice(next["messages"]); len(messages) > 0 {
-		next["messages"] = aiGatewayAssignSequentialIDs(messages)
+		next["messages"] = aiGatewayAssignAbsoluteIDs(prevMsgs, messages, prevMax)
 	}
 	if input := aiGatewaySlice(next["input"]); len(input) > 0 {
-		next["input"] = aiGatewayAssignSequentialIDs(input)
+		next["input"] = aiGatewayAssignAbsoluteIDs(prevInput, input, prevMax)
 	}
 	return next
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import apiService from '../../services/api';
+import { ModelTag } from '../../lib/modelTag';
 
 // Per-request usage log for the 分析 → 用量 tab. Tails the backend's
 // usage.jsonl (one line per completed AI request) and refreshes on a short
@@ -101,28 +102,6 @@ function fmtNum(n?: number): string {
 function fmtFull(n?: number): string {
   if (!n || n <= 0) return '0';
   return n.toLocaleString();
-}
-
-// Friendly short model name for the table (raw id stays on hover):
-//   claude-opus-4-8 → opus-4.8, claude-sonnet-4-6 → sonnet-4.6
-//   gpt-5.5 → gpt-5.5, deepseek-v4-pro → ds-v4-pro
-const MODEL_ALIASES: Record<string, string> = {
-  // explicit overrides win over the heuristics below
-};
-function displayModel(raw?: string): string {
-  if (!raw || !raw.trim()) return '—';
-  const orig = raw.trim();
-  // drop a provider path prefix like "anthropic/" or "openai/"
-  const m = orig.toLowerCase().replace(/^[a-z0-9.+-]+\//, '');
-  if (MODEL_ALIASES[m]) return MODEL_ALIASES[m];
-  // claude-<family>-<maj>-<min> → family-maj.min
-  const c = m.match(/^claude-(opus|sonnet|haiku)-(\d+)-(\d+)/);
-  if (c) return `${c[1]}-${c[2]}.${c[3]}`;
-  // deepseek-* → ds-*
-  if (m.startsWith('deepseek')) return m.replace(/^deepseek-?/, 'ds-');
-  // gpt-* / o1 / o3 / qwen / gemini / kimi: already short enough, keep as-is
-  if (/^(gpt|o\d|qwen|gemini|kimi|grok|glm)\b/.test(m)) return m;
-  return orig;
 }
 
 function fmtLatency(ms?: number): string {
@@ -463,7 +442,7 @@ export default function AgentUsageLogView({ paneId, active }: { paneId: string; 
                 >
                   <td className="px-2 py-1 text-left font-mono text-zinc-400">{c.conversationId === '—' ? '—' : `${c.conversationId.slice(0, 4)}***`}</td>
                   <td className="px-2 py-1 text-left text-zinc-400">
-                    <div className="max-w-[160px] truncate" title={c.model || ''}>{displayModel(c.model)}</div>
+                    <ModelTag model={c.model} />
                   </td>
                   <td className="px-2 py-1 text-right text-zinc-400">{c.count}</td>
                   <td className="px-2 py-1 text-right" title={fmtFull(c.input)}>{fmtNum(c.input)}</td>
@@ -516,7 +495,7 @@ export default function AgentUsageLogView({ paneId, active }: { paneId: string; 
                   <td className="px-2 py-1 text-left text-zinc-500">{fmtTime(r.ts)}</td>
                   <td className="px-2 py-1 text-left font-mono text-zinc-500" title={r.conversation_id || ''}>{r.conversation_id ? `${r.conversation_id.slice(0, 4)}***` : '—'}</td>
                   <td className="px-2 py-1 text-left text-zinc-400">
-                    <div className="max-w-[160px] truncate" title={r.model || ''}>{displayModel(r.model)}</div>
+                    <ModelTag model={r.model} />
                   </td>
                   <td className="px-2 py-1 text-right text-zinc-400" title={`${r.reply_start_ms ?? 0}ms`}>{fmtLatency(r.reply_start_ms)}</td>
                   <td className="px-2 py-1 text-right" title={`${r.latency_ms ?? 0}ms`}>{fmtLatency(r.latency_ms)}</td>

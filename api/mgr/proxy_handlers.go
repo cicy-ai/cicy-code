@@ -650,14 +650,52 @@ func cicyMihomoBin() (string, error) {
 // budget. Returns (stdout+stderr, error). The wrapper always exits 0 for
 // `status` (running or stopped); other subcommands surface failures through
 // the exit code, which we propagate as err.
-func runCicyMihomo(ctx context.Context, sub string) (string, error) {
+func runCicyMihomo(ctx context.Context, args ...string) (string, error) {
 	bin, err := cicyMihomoBin()
 	if err != nil {
 		return "", fmt.Errorf("cicy-mihomo not found on PATH: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, bin, sub)
+	cmd := exec.CommandContext(ctx, bin, args...)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
+}
+
+// parseMihomoStatusJSON parses `cicy-mihomo status --json` output
+// ({"ok":true,"data":{pid,running,binary,config,log,controller,
+// controller_version,...}}) into the M shape handleProxyStatus returns.
+// Returns nil when the output isn't the expected JSON envelope (older wrapper
+// versions) so the caller can fall back to the legacy text parser.
+func parseMihomoStatusJSON(out string) M {
+	var envelope struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			PID               json.Number `json:"pid"`
+			Running           bool        `json:"running"`
+			Binary            string      `json:"binary"`
+			Config            string      `json:"config"`
+			Log               string      `json:"log"`
+			Controller        string      `json:"controller"`
+			ControllerVersion string      `json:"controller_version"`
+		} `json:"data"`
+	}
+	if json.Unmarshal([]byte(out), &envelope) != nil || !envelope.OK {
+		return nil
+	}
+	d := envelope.Data
+	pid := d.PID.String()
+	if pid == "0" {
+		pid = ""
+	}
+	return M{
+		"running":    d.Running,
+		"pid":        pid,
+		"binary":     d.Binary,
+		"config":     d.Config,
+		"log":        d.Log,
+		"started_at": "",
+		"controller": d.Controller,
+		"version":    d.ControllerVersion,
+	}
 }
 
 // parseMihomoStatusOutput extracts pid / binary / config / log / started_at /
@@ -715,7 +753,7 @@ func parseMihomoStatusOutput(out string) M {
 func handleProxyStatus(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
-	out, err := runCicyMihomo(ctx, "status")
+	out, err := runCicyMihomo(ctx, "status", "--json")
 	if err != nil {
 		// status always exits 0 normally; non-zero means the wrapper itself
 		// failed (e.g. binary missing). Surface the message + raw output so
@@ -723,7 +761,13 @@ func handleProxyStatus(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 500, fmt.Sprintf("%s: %s", err.Error(), out))
 		return
 	}
-	info := parseMihomoStatusOutput(out)
+	// The wrapper's text block dropped its `status:` line at some point, which
+	// made the legacy parser report a running mihomo as stopped. Prefer the
+	// --json envelope; fall back to text parsing for older wrappers.
+	info := parseMihomoStatusJSON(out)
+	if info == nil {
+		info = parseMihomoStatusOutput(out)
+	}
 	info["raw"] = out
 	info["success"] = true
 	J(w, info)

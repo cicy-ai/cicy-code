@@ -4,5 +4,7 @@
   "loadingHistory": "正在加载历史记录...",
   "emptyHistory": "暂无历史",
   "loadingMore": "加载中...",
-  "loadEarlier": "加载更早"
+  "loadEarlier": "加载更早",
+  "toolExitCodeNoOutput": "退出码 {{code}} · 无输出",
+  "toolExitNoOutput": "退出 · 无输出"
 }

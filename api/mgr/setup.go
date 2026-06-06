@@ -397,9 +397,10 @@ var builtinAgents = []struct {
 	{"openclaw", "OpenClaw"},
 	{"hermes", "Hermes Agent"},
 	{"cicy-claude", "CiCy"},
+	{"dispatcher", "Dispatcher"},
 }
 
-var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode", "kiro-cli"}
+var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode", "kiro-cli", "dispatcher"}
 
 func effectiveAllowedAgentTypes() []string {
 	if labMode {
@@ -674,9 +675,16 @@ func createSelectedWorkers(selected []string) {
 		var count int
 		store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE pane_id=?", paneID).Scan(&count)
 		if count > 0 {
-			// Update agent_type and title in case they changed
-			store.Exec(fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, updated_at=%s WHERE pane_id=?", store.Now()),
-				w.AgentType, w.Title, paneID)
+			// Update agent_type and title in case they changed — except when the
+			// pane was deliberately converted to a dispatcher (PM); that
+			// conversion must survive restarts (it is not expressible via the
+			// --agents startup flag).
+			var existingType string
+			store.QueryRow("SELECT COALESCE(agent_type,'') FROM agent_config WHERE pane_id=?", paneID).Scan(&existingType)
+			if normalizeAgentType(existingType) != "dispatcher" {
+				store.Exec(fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, updated_at=%s WHERE pane_id=?", store.Now()),
+					w.AgentType, w.Title, paneID)
+			}
 			fmt.Printf("  ⏭ %s - 已存在，已更新\n", w.Title)
 		} else {
 			createBuiltinWorker(w.Port, w.AgentType, w.Title)
@@ -1926,8 +1934,10 @@ func ensureBuiltinAgents(selected []string) {
 			continue
 		}
 
-		// Sync agent_type and title if changed
-		if desired, ok := desiredByPaneID[paneID]; ok && normalizeAgentType(agentType) != desired.AgentType {
+		// Sync agent_type and title if changed — but never clobber a
+		// deliberate dispatcher (PM) conversion; it is not expressible via
+		// the --agents flag and must survive restarts.
+		if desired, ok := desiredByPaneID[paneID]; ok && normalizeAgentType(agentType) != desired.AgentType && normalizeAgentType(agentType) != "dispatcher" {
 			store.Exec(fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, updated_at=%s WHERE pane_id=?", store.Now()),
 				desired.AgentType, desired.Title, paneID)
 			agentType = desired.AgentType

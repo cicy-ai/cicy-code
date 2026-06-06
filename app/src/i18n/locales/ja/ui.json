@@ -17,5 +17,8 @@
   "selectHintNavigate": "移動",
   "selectHintSelect": "選択",
   "windowConfirmDelete": "ウィンドウ {{idx}} を削除しますか？",
-  "windowCreateButton": "新しいウィンドウ"
+  "windowCreateButton": "新しいウィンドウ",
+  "webFrameCopy": "コピー",
+  "webFramePaste": "貼り付け",
+  "webFrameReload": "再読み込み"
 }

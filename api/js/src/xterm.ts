@@ -1,6 +1,7 @@
 import { Terminal as XtermTerminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { lib } from "libapps";
 import { applyMonoFontVar, isMacPlatform, isWindowsPlatform } from "./font";
 import { openExternalLinkWithConfirm, openFileReferencePopup } from "./link_confirm";
@@ -299,6 +300,24 @@ export class Xterm {
         });
 
         this.term.open(elem);
+
+        // GPU-accelerated renderer. The WebGL addon must load AFTER open().
+        // 5-10x render throughput over the default DOM renderer — visible as
+        // smooth scrolling under heavy tmux output. On context loss (driver
+        // reset, too many live WebGL canvases) dispose the addon and xterm
+        // falls back to the DOM renderer transparently; same if the platform
+        // has no WebGL2 at all (loadAddon throws → caught → DOM renderer).
+        try {
+            const webgl = new WebglAddon();
+            webgl.onContextLoss(() => {
+                try {
+                    webgl.dispose();
+                } catch {}
+            });
+            this.term.loadAddon(webgl);
+        } catch (e) {
+            console.warn("[webtty] WebGL renderer unavailable, using DOM renderer", e);
+        }
 
         // IME composing state
         const textarea = this.term.textarea;
