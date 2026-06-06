@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, X, Monitor, Tablet, Smartphone, Package, ArrowUp } from 'lucide-react';
 import { WebFrame } from './WebFrame';
+import { useDialogs } from './ui/Modal';
 import {
   ARTIFACT_WEBVIEW_ID,
   registerArtifactController,
@@ -134,6 +135,17 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
     if (electron && el && typeof el.reload === 'function') { try { el.reload(); return; } catch { /* fallthrough */ } }
     setIframeKey((k) => k + 1);
   };
+  // Clear asks for confirmation — it drops the loaded artifact page.
+  const { confirm, node: confirmNode } = useDialogs();
+  const onClear = async () => {
+    const ok = await confirm({
+      title: t('artifactClearConfirmTitle', '清空产物?'),
+      body: t('artifactClearConfirmBody', '将关闭当前页面并回到空白页。'),
+      confirmLabel: t('artifactClear', '清空'),
+      danger: true,
+    });
+    if (ok) load(BLANK);
+  };
   const goBack = () => { const el = elRef.current; if (electron && el?.goBack) try { el.goBack(); } catch {} };
   const goForward = () => { const el = elRef.current; if (electron && el?.goForward) try { el.goForward(); } catch {} };
   const openExternal = () => { if (url && url !== BLANK) window.open(url, '_blank', 'noopener'); };
@@ -224,7 +236,7 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
           className="rounded p-1 text-zinc-400 hover:bg-white/10 hover:text-zinc-200 disabled:opacity-30">
           <ExternalLink className="h-3.5 w-3.5" />
         </button>
-        <button data-id="artifact-clear" type="button" onClick={() => load(BLANK)} disabled={!hasUrl}
+        <button data-id="artifact-clear" type="button" onClick={onClear} disabled={!hasUrl}
           title={t('artifactClear', 'Clear')}
           className="rounded p-1 text-zinc-400 hover:bg-white/10 hover:text-zinc-200 disabled:opacity-30">
           <X className="h-3.5 w-3.5" />
@@ -295,6 +307,7 @@ export default function ArtifactPanel({ active, requestActivate, className }: Pr
           </div>
         )}
       </div>
+      {confirmNode}
     </div>
   );
 }
