@@ -1089,21 +1089,16 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
 
   // Stable sender — referentially identical across renders so memoized
   // children (MarkdownPane) don't re-render on every parent state tick.
-  const sendToAgent = useCallback(async (text: string) => {
+  // Fire-and-forget: dispatch the send and close the detail 1s later
+  // without waiting for the command round-trip.
+  const sendToAgent = useCallback((text: string) => {
     const trimmed = (text || '').trim();
     if (!trimmed || !paneId) return;
     setSending(true);
-    setSendOk(false);
+    setSendOk(true);
     setSendError('');
-    try {
-      await apiService.sendCommand(paneId, trimmed, true);
-      setSendOk(true);
-      setTimeout(() => { onClose(); }, 400);
-    } catch (e: any) {
-      setSendError(e?.message || 'send failed');
-    } finally {
-      setSending(false);
-    }
+    apiService.sendCommand(paneId, trimmed, true).catch(() => { /* closing anyway */ });
+    setTimeout(() => { onClose(); }, 1000);
   }, [paneId, onClose]);
 
   const skill = data?.skill;
