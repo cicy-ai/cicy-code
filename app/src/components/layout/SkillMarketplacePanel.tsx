@@ -1106,23 +1106,6 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
     }
   }, [paneId, onClose]);
 
-  const handleSend = async (textOverride?: string) => {
-    const text = (textOverride ?? sendText).trim();
-    if (!text || !paneId) return;
-    setSending(true);
-    setSendOk(false);
-    setSendError('');
-    try {
-      await apiService.sendCommand(paneId, text, true);
-      setSendOk(true);
-      setTimeout(() => { onClose(); }, 400);
-    } catch (e: any) {
-      setSendError(e?.message || 'send failed');
-    } finally {
-      setSending(false);
-    }
-  };
-
   const skill = data?.skill;
 
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
@@ -1376,55 +1359,6 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
           )}
         </div>
 
-        {/* Send to agent — only enabled when skill is installed */}
-        <div className="px-5 py-3 border-t border-white/[0.08] bg-[#101012] shrink-0" data-id="skill-detail-send">
-          {loading ? (
-            <div className="flex items-end gap-2 animate-pulse">
-              <div className="flex-1 h-[52px] rounded-lg bg-white/[0.05]" />
-              <div className="h-[38px] w-24 rounded-lg bg-white/[0.05]" />
-            </div>
-          ) : !skill?.status.installed ? (
-            skill?.source === 'private' ? null : (
-              <div data-id="skill-detail-install-first" className="flex items-center gap-2 text-[11px] text-zinc-500">
-                <AlertTriangle className="w-3 h-3" />
-                {t('marketplaceInstallFirst')}
-              </div>
-            )
-          ) : (
-            <>
-              <div data-id="skill-detail-send-row" className="flex items-end gap-2">
-                <textarea
-                  data-id="skill-detail-send-input"
-                  value={sendText}
-                  onChange={(e) => setSendText(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleSend(); } }}
-                  placeholder={t('marketplaceSendPlaceholder', { pane: paneId || '—' })}
-                  rows={2}
-                  className="flex-1 resize-none rounded-lg border border-white/[0.09] bg-white/[0.025] px-3 py-2 text-[12px] text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-blue-500/55 focus:bg-white/[0.045] focus:ring-1 focus:ring-blue-500/15"
-                />
-                <button
-                  data-id="skill-detail-send-button"
-                  onClick={() => handleSend()}
-                  disabled={sending || !sendText.trim() || !paneId}
-                  className={cn(
-                    'inline-flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all shadow-md',
-                    'bg-gradient-to-br from-indigo-500 to-purple-500 text-white',
-                    'hover:from-indigo-400 hover:to-purple-400 hover:shadow-indigo-500/40 hover:shadow-lg',
-                    'focus:outline-none focus:ring-2 focus:ring-indigo-400/50',
-                    'disabled:from-zinc-700 disabled:to-zinc-700 disabled:text-zinc-500 disabled:shadow-none disabled:cursor-not-allowed'
-                  )}
-                >
-                  {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : sendOk ? <Check className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-                  <span data-id="skill-detail-send-label" className="text-[13px]">{sendOk ? t('marketplaceSent') : t('marketplaceSendToAgent')}</span>
-                </button>
-              </div>
-              {sendError && <div className="text-[11px] text-red-400 mt-1.5">{sendError}</div>}
-              <div data-id="skill-detail-send-hint" className="text-[10px] text-zinc-600 mt-1.5">
-                {t('marketplaceSendHint', { pane: paneId || '(none)' })}
-              </div>
-            </>
-          )}
-        </div>
       </div>
       {confirmNode}
     </div>,
