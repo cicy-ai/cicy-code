@@ -1127,7 +1127,7 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
 
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   useEffect(() => {
-    setPortalTarget(document.querySelector('[data-testid="right-panel"]') as HTMLElement | null);
+    setPortalTarget(document.querySelector('[data-testid="mid-panel"]') as HTMLElement | null);
   }, []);
   if (!portalTarget) return null;
 
@@ -1656,10 +1656,9 @@ function SkillToolsPanel({ tools, skillName, installed, onSend }: {
               disabled={!installed}
               onClick={() => onSend(t('marketplaceTestToolPrompt', { name: skillName, command: tool.example || tool.name }))}
               title={installed ? t('marketplaceSendToAgent') : t('marketplaceInstallFirst')}
-              className="shrink-0 text-[10px] px-2 py-1 rounded border border-white/[0.07] text-zinc-500 hover:text-zinc-200 hover:border-zinc-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1"
+              className="shrink-0 text-[10px] px-2 py-1 rounded border border-white/[0.07] text-zinc-500 hover:text-zinc-200 hover:border-zinc-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors inline-flex items-center"
             >
               <Send className="w-3 h-3" />
-              <span className="hidden group-hover:inline">Agent</span>
             </button>
           </div>
         ))}
