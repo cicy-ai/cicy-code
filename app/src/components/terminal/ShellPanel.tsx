@@ -20,7 +20,7 @@ interface Win { index: string; name: string; active: boolean }
 // for every agent at once.
 export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttydSrc: string; active?: boolean }) {
   const { t } = useTranslation('ui')
-  const { shellPanelOpen } = useApp()
+  const { shellPanelOpen, setShellPanelOpen } = useApp()
   const open = !!shellPanelOpen && !!active
   const grouped = `${agentId}-sh`
   // Same token/lang as the agent terminal, just a different proxy route. The
@@ -70,6 +70,13 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
   const create = async () => { try { await apiService.createWindow(grouped) } catch { /* ignore */ } setTimeout(load, 300) }
   const del = async (e: React.MouseEvent, idx: string) => {
     e.stopPropagation()
+    // Closing the last shell tab just hides the whole bottom dock. We do NOT
+    // delete the window: removing the last shell window drops the grouped
+    // session back onto the agent's main.0, so the shell WebFrame would mirror
+    // the agent's output. Keeping it parked on this shell window avoids that —
+    // and reopening the dock restores the same shell.
+    const isLast = wins.filter(w => !isAgentWin(w)).length <= 1
+    if (isLast) { setShellPanelOpen(false); return }
     try { await apiService.deleteWindow(grouped, idx) } catch { /* ignore */ }
     setTimeout(load, 300)
   }
@@ -114,7 +121,7 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
           <Terminal className="h-3.5 w-3.5" />
           Shell
         </span>
-        <div data-id={`agent-stack-shell-tabs-${agentId}`} className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+        <div data-id={`agent-stack-shell-tabs-${agentId}`} className="flex min-w-0 flex-1 select-none items-center gap-1 overflow-x-auto">
           {tabs.map(wn => (
             <button
               type="button"
@@ -123,14 +130,18 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
               className={`group/tab flex shrink-0 items-center gap-1 rounded-t px-2 py-1 font-mono text-xs transition-colors ${wn.active ? 'bg-white/[0.10] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'}`}
             >
               <span className="text-zinc-600">{wn.index}</span>{wn.name}
-              <span
-                role="button"
-                tabIndex={-1}
-                onClick={(e) => del(e, wn.index)}
-                className="ml-0.5 hidden rounded p-0.5 hover:bg-white/[0.12] hover:text-red-400 group-hover/tab:inline-flex"
-              >
-                <X className="h-3 w-3" />
-              </span>
+              {/* single remaining tab can't be closed from the tab itself — the
+                  bar-level close button (right side) hides the whole dock */}
+              {tabs.length > 1 && (
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  onClick={(e) => del(e, wn.index)}
+                  className="ml-0.5 inline-flex rounded p-0.5 opacity-0 transition-opacity pointer-events-none hover:bg-white/[0.12] hover:text-red-400 group-hover/tab:pointer-events-auto group-hover/tab:opacity-100"
+                >
+                  <X className="h-3 w-3" />
+                </span>
+              )}
             </button>
           ))}
           <button
@@ -142,6 +153,16 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
             <Plus className="h-3.5 w-3.5" />
           </button>
         </div>
+        {/* bar-level close — hides the whole bottom dock (window stays parked) */}
+        <button
+          type="button"
+          data-id={`agent-stack-shell-close-${agentId}`}
+          onClick={() => setShellPanelOpen(false)}
+          title={t('shellPanelClose', { defaultValue: 'Close panel' })}
+          className="shrink-0 rounded p-1 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
       </div>
       {mounted ? (
         <div data-id={`agent-stack-shell-terminal-${agentId}`} className="relative w-full" style={{ height }}>
