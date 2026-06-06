@@ -84,6 +84,8 @@
   "marketplaceNoContent": "Aucun contenu pour l'instant — installez la compétence pour le générer.",
   "marketplaceInstallFirst": "Installez d'abord cette compétence pour envoyer des commandes à l'agent actuel.",
   "marketplaceSent": "Envoyé",
+  "marketplaceSentToast": "Envoyé à l'agent ({{pane}})",
+  "marketplaceSentToastFailed": "Échec de l'envoi ({{pane}})",
   "marketplaceSendToAgent": "Envoyer à l'agent",
   "marketplaceSendHint": "Pane cible {{pane}} · ⌘/Ctrl+Entrée pour envoyer",
   "marketplaceSendPlaceholder": "Envoyer à l'agent actuel ({{pane}})…",

@@ -864,9 +864,6 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
   const [installLog, setInstallLog] = useState('');
   const [installError, setInstallError] = useState('');
   const [sendText, setSendText] = useState('');
-  const [sending, setSending] = useState(false);
-  const [sendOk, setSendOk] = useState(false);
-  const [sendError, setSendError] = useState('');
   const [copied, setCopied] = useState<string>('');
   const [googleStatus, setGoogleStatus] = useState<{ connected: boolean; authorized_email?: string; has_shared_client?: boolean } | null>(null);
   const [googleBusy, setGoogleBusy] = useState(false);
@@ -1089,16 +1086,15 @@ function SkillDetailModal({ name, paneId, onClose, onInstall, onUninstall, onUpd
 
   // Stable sender — referentially identical across renders so memoized
   // children (MarkdownPane) don't re-render on every parent state tick.
-  // Fire-and-forget: dispatch the send and close the detail 1s later
-  // without waiting for the command round-trip.
+  // Optimistic: close instantly, send in the background, toast the result.
   const sendToAgent = useCallback((text: string) => {
     const trimmed = (text || '').trim();
     if (!trimmed || !paneId) return;
-    setSending(true);
-    setSendOk(true);
-    setSendError('');
-    apiService.sendCommand(paneId, trimmed, true).catch(() => { /* closing anyway */ });
-    setTimeout(() => { onClose(); }, 1000);
+    onClose();
+    const toast = (msg: string) => window.dispatchEvent(new CustomEvent('show-toast', { detail: msg }));
+    apiService.sendCommand(paneId, trimmed, true)
+      .then(() => toast(i18n.t('marketplaceSentToast', { ns: 'workspace', pane: paneId })))
+      .catch(() => toast(i18n.t('marketplaceSentToastFailed', { ns: 'workspace', pane: paneId })));
   }, [paneId, onClose]);
 
   const skill = data?.skill;

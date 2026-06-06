@@ -89,6 +89,8 @@
   "marketplaceNoContent": "No content yet — install the skill to generate this section.",
   "marketplaceInstallFirst": "Install this skill first to send commands to the current agent.",
   "marketplaceSent": "Sent",
+  "marketplaceSentToast": "Sent to agent ({{pane}})",
+  "marketplaceSentToastFailed": "Send failed ({{pane}})",
   "marketplaceSendToAgent": "Send to agent",
   "marketplaceSendHint": "Target pane {{pane}} · ⌘/Ctrl+Enter to send",
   "marketplaceSendPlaceholder": "Send to current agent ({{pane}})…",

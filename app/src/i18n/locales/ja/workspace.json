@@ -84,6 +84,8 @@
   "marketplaceNoContent": "コンテンツはまだありません — スキルをインストールすると生成されます。",
   "marketplaceInstallFirst": "先にこのスキルをインストールして、現在の agent にコマンドを送信してください。",
   "marketplaceSent": "送信済み",
+  "marketplaceSentToast": "エージェントへ送信しました ({{pane}})",
+  "marketplaceSentToastFailed": "送信に失敗しました ({{pane}})",
   "marketplaceSendToAgent": "Agent に送信",
   "marketplaceSendHint": "対象 pane {{pane}} · ⌘/Ctrl+Enter で送信",
   "marketplaceSendPlaceholder": "現在の agent に送信 ({{pane}})…",

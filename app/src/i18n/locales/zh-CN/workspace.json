@@ -89,6 +89,8 @@
   "marketplaceNoContent": "暂无内容 —— 安装该技能后会自动生成。",
   "marketplaceInstallFirst": "请先安装本技能,再发送指令给当前 agent。",
   "marketplaceSent": "已发送",
+  "marketplaceSentToast": "已发送到 agent ({{pane}})",
+  "marketplaceSentToastFailed": "发送失败 ({{pane}})",
   "marketplaceSendToAgent": "发送到 agent",
   "marketplaceSendHint": "目标 pane {{pane}} · ⌘/Ctrl+Enter 发送",
   "marketplaceSendPlaceholder": "发送到当前 agent ({{pane}})…",
