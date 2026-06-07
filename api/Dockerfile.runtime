@@ -63,16 +63,24 @@ RUN set -eux; \
 # Pre-install the mihomo proxy binary from its npm subpackage (published by the
 # cicy-mihomo release CI) so containers never fetch it from GitHub releases at
 # runtime — gh proxies have shipped corrupted bytes (0xC0000005) and are slow
-# in CN. npm pack verifies pacote sha512 integrity. Lands at ~/.local/bin/mihomo,
-# exactly where cicy-code's startCicyMihomoIfNeeded() expects it. Pin via
-# MIHOMO_NPM_VERSION; bump = rebuild base.
+# in CN. npm pack verifies pacote sha512 integrity.
+#
+# Runtime Bundle v1 (主人指令: 捆绑=安装时直接 cp 进指定目录): the binary is
+# cp'd into the versioned runtime store ~/cicy-ai/runtime/mihomo/<ver>/ with a
+# versions.json `current` pointer — the SAME layout cicy-desktop and the
+# cicy-mihomo skill manage, so version checks/updates are uniform everywhere.
+# ~/.local/bin/mihomo stays as a symlink for cicy-code's legacy probe.
+# Pin via MIHOMO_NPM_VERSION; bump = rebuild base.
 ARG MIHOMO_NPM_VERSION=1.10.4
 RUN set -eux; \
-    mkdir -p /home/cicy/.local/bin /tmp/mihomo-pkg; \
+    RT="/home/cicy/cicy-ai/runtime"; \
+    mkdir -p "${RT}/mihomo/${MIHOMO_NPM_VERSION}" /home/cicy/.local/bin /tmp/mihomo-pkg; \
     cd /tmp/mihomo-pkg; \
     npm pack "cicy-mihomo-linux-x64@${MIHOMO_NPM_VERSION}" --registry=https://registry.npmmirror.com; \
     tar -xzf cicy-mihomo-linux-x64-*.tgz; \
-    install -m 0755 package/mihomo /home/cicy/.local/bin/mihomo; \
+    install -m 0755 package/mihomo "${RT}/mihomo/${MIHOMO_NPM_VERSION}/mihomo"; \
+    printf '{\n  "mihomo": { "current": "%s" }\n}\n' "${MIHOMO_NPM_VERSION}" > "${RT}/versions.json"; \
+    ln -sf "${RT}/mihomo/${MIHOMO_NPM_VERSION}/mihomo" /home/cicy/.local/bin/mihomo; \
     cd /; rm -rf /tmp/mihomo-pkg /tmp/npm-cache /tmp/* 2>/dev/null || true; \
     /home/cicy/.local/bin/mihomo -v | head -1
 
