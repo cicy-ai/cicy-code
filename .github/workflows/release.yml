@@ -108,16 +108,18 @@ jobs:
             "tag": "${TAG}",
             "publishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "assets": {
-              "darwin-amd64": "${BASE}/cicy-code-darwin-amd64",
-              "darwin-arm64": "${BASE}/cicy-code-darwin-arm64",
-              "linux-amd64":  "${BASE}/cicy-code-linux-amd64",
-              "linux-arm64":  "${BASE}/cicy-code-linux-arm64"
+              "darwin-amd64":  "${BASE}/cicy-code-darwin-amd64",
+              "darwin-arm64":  "${BASE}/cicy-code-darwin-arm64",
+              "linux-amd64":   "${BASE}/cicy-code-linux-amd64",
+              "linux-arm64":   "${BASE}/cicy-code-linux-arm64",
+              "windows-amd64": "${BASE}/cicy-code-windows-amd64.exe"
             },
             "sizes": {
-              "darwin-amd64": $(stat -c%s dist/cicy-code-darwin-amd64),
-              "darwin-arm64": $(stat -c%s dist/cicy-code-darwin-arm64),
-              "linux-amd64":  $(stat -c%s dist/cicy-code-linux-amd64),
-              "linux-arm64":  $(stat -c%s dist/cicy-code-linux-arm64)
+              "darwin-amd64":  $(stat -c%s dist/cicy-code-darwin-amd64),
+              "darwin-arm64":  $(stat -c%s dist/cicy-code-darwin-arm64),
+              "linux-amd64":   $(stat -c%s dist/cicy-code-linux-amd64),
+              "linux-arm64":   $(stat -c%s dist/cicy-code-linux-arm64),
+              "windows-amd64": $(stat -c%s dist/cicy-code-windows-amd64.exe)
             }
           }
           EOF
@@ -146,6 +148,7 @@ jobs:
             dist/cicy-code-darwin-arm64 \
             dist/cicy-code-linux-amd64 \
             dist/cicy-code-linux-arm64 \
+            dist/cicy-code-windows-amd64.exe \
             dist/manifest.json; do
             echo "Uploading $f ..."
             gh release upload "$TAG" "$f" --clobber

@@ -146,4 +146,26 @@ else
 fi
 
 [ -n "$NPMRC" ] && rm -f "$NPMRC"
+
+# Post-publish verification — publish_dir filters npm's output for readability,
+# which also swallows hard failures (live case: npm's spam filter 403'd
+# cicy-code-win32-x64@2.1.58 and the run still exited 0, shipping a launcher
+# whose optionalDependency can never resolve). Verify every package actually
+# exists on npmjs at $VERSION and fail loudly otherwise.
+if [ -z "$DRY" ]; then
+  echo "==> Verifying published versions on registry.npmjs.org"
+  fail=0
+  pkgs=(cicy-code)
+  [ -z "$MAIN_ONLY" ] && for key in "${!ASSET[@]}"; do pkgs+=("cicy-code-$key"); done
+  for pkg in "${pkgs[@]}"; do
+    got=$(npm view "$pkg@$VERSION" version --registry=https://registry.npmjs.org 2>/dev/null || true)
+    if [ "$got" = "$VERSION" ]; then
+      echo "  ok   $pkg@$VERSION"
+    else
+      echo "  MISS $pkg@$VERSION (registry returned: '${got:-nothing}')"
+      fail=1
+    fi
+  done
+  [ "$fail" = "0" ] || { echo "!! publish verification FAILED"; exit 1; }
+fi
 echo "==> Done."
