@@ -34,7 +34,7 @@ func healthCheck() {
 				ws = os.Getenv("HOME")
 			}
 			ws = strings.Replace(ws, "~", os.Getenv("HOME"), 1)
-			exec.Command("tmux", "new-session", "-d", "-s", sess, "-n", "main", "-c", ws).Run()
+			exec.Command("tmux", "new-session", "-d", "-s", sess, "-n", "main", "-c", toPosixPath(ws)).Run()
 			log.Printf("[tmux-health] created session %s", sess)
 		}
 

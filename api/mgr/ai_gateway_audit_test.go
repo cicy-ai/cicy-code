@@ -16,7 +16,7 @@ func TestAIGatewayAnnotateCurrentBodyHistoryIDsAddsSequentialIDs(t *testing.T) {
 			map[string]interface{}{"role": "assistant", "type": "message", "content": []interface{}{map[string]interface{}{"type": "output_text", "text": "delta"}}},
 		},
 	}
-	annotated := aiGatewayMap(aiGatewayAnnotateCurrentBodyHistoryIDs(body))
+	annotated := aiGatewayMap(aiGatewayAnnotateCurrentBodyHistoryIDs("w-test-annotate", body))
 	if _, ok := annotated["history"]; ok {
 		t.Fatalf("expected top-level history to be removed from current body")
 	}

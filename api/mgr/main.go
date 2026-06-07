@@ -46,6 +46,10 @@ const version = "2.1.49"
 var agentsFlag string
 
 func main() {
+	// OS-specific process setup (Windows: locate the bundled MSYS2 runtime and
+	// prepend its usr\bin to PATH so tmux/sh/bash resolve). Before subcommand
+	// dispatch — subcommands shell out too.
+	initPlatform()
 	// Subcommand dispatch — must run before flag parsing.
 	if len(os.Args) >= 2 && os.Args[1] == "skill" {
 		skillcmd.Run(os.Args[2:])

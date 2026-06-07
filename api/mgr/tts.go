@@ -10,7 +10,8 @@ import (
 	"strings"
 )
 
-const ttsDir = "/tmp/tts"
+// Go-side cache dir only (never enters a pane) -> OS temp, not literal /tmp.
+var ttsDir = filepath.Join(os.TempDir(), "tts")
 
 func init() {
 	os.MkdirAll(ttsDir, 0755)

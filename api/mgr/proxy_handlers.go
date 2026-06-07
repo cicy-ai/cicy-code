@@ -918,7 +918,7 @@ func writeMihomoYAMLValidated(path string, data []byte) error {
 		return os.WriteFile(path, data, 0o644)
 	}
 	// 1) stage in /tmp for validation
-	probe, err := os.CreateTemp("/tmp", "mihomo.yaml.validate-*")
+	probe, err := os.CreateTemp("", "mihomo.yaml.validate-*")
 	if err != nil {
 		return err
 	}

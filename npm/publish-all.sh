@@ -38,7 +38,11 @@ declare -A ASSET=(
   [darwin-x64]=cicy-code-darwin-amd64
   [linux-x64]=cicy-code-linux-amd64
   [linux-arm64]=cicy-code-linux-arm64
+  [win32-x64]=cicy-code-windows-amd64.exe
 )
+# npm sub-package ships ONE binary; on win32 it must keep the .exe extension
+# (CreateProcess needs it) — the launcher resolves the name per-platform.
+bin_name() { case "$1" in win32-*) echo cicy-code.exe;; *) echo cicy-code;; esac; }
 
 # Auth (only when actually publishing)
 NPMRC=""
@@ -81,17 +85,18 @@ if [ -z "$MAIN_ONLY" ]; then
   rm -rf "$BUILD"; mkdir -p "$BUILD"
   for key in "${!ASSET[@]}"; do
     os="${key%-*}"; cpu="${key#*-}"; pkg="cicy-code-$key"; dir="$BUILD/$pkg"
+    bin="$(bin_name "$key")"
     mkdir -p "$dir"
     if [ -n "$FROM_DIR" ]; then
       echo "  - $pkg  (os:$os cpu:$cpu)  <- $FROM_DIR/${ASSET[$key]} (local)"
-      cp "$FROM_DIR/${ASSET[$key]}" "$dir/cicy-code" || { echo "    !! missing $FROM_DIR/${ASSET[$key]}"; exit 1; }
+      cp "$FROM_DIR/${ASSET[$key]}" "$dir/$bin" || { echo "    !! missing $FROM_DIR/${ASSET[$key]}"; exit 1; }
     else
       echo "  - $pkg  (os:$os cpu:$cpu)  <- ${ASSET[$key]} (GH $GH_TAG)"
-      code=$(curl -sL -o "$dir/cicy-code" -w "%{http_code}" --max-time 120 "$REL/${ASSET[$key]}")
+      code=$(curl -sL -o "$dir/$bin" -w "%{http_code}" --max-time 120 "$REL/${ASSET[$key]}")
       [ "$code" = "200" ] || { echo "    !! download failed http=$code"; exit 1; }
     fi
-    chmod 755 "$dir/cicy-code"
-    sz=$(stat -c%s "$dir/cicy-code" 2>/dev/null || stat -f%z "$dir/cicy-code")
+    chmod 755 "$dir/$bin"
+    sz=$(stat -c%s "$dir/$bin" 2>/dev/null || stat -f%z "$dir/$bin")
     [ "$sz" -gt 1000000 ] || { echo "    !! binary too small ($sz bytes)"; exit 1; }
     cat > "$dir/package.json" <<JSON
 {
@@ -100,14 +105,14 @@ if [ -z "$MAIN_ONLY" ]; then
   "description": "cicy-code prebuilt binary for $key",
   "os": ["$os"],
   "cpu": ["$cpu"],
-  "files": ["cicy-code"],
+  "files": ["$bin"],
   "license": "MIT",
   "author": { "name": "cicybot", "email": "support@cicy-ai.com" },
   "repository": { "type": "git", "url": "$REPO_URL" }
 }
 JSON
   done
-  echo "==> Publishing 4 sub-packages ${DRY:+(dry-run)} + npmmirror sync"
+  echo "==> Publishing ${#ASSET[@]} sub-packages ${DRY:+(dry-run)} + npmmirror sync"
   for key in "${!ASSET[@]}"; do publish_dir "$BUILD/cicy-code-$key" "cicy-code-$key" "$VERSION"; done
 else
   echo "==> --main-only: skipping binary sub-packages (kept at optionalDependencies pin)"

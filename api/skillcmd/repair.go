@@ -62,6 +62,13 @@ func ensureBinSymlink(skillPath, entry, linkName string) (bool, error) {
 	_ = chmodExec(src)
 
 	target := localBinPath(linkName)
+	// Windows: the <name>.cmd shim for native (non-msys) spawns must exist
+	// UNCONDITIONALLY (npm semantics) — including when the symlink below is
+	// already correct, and on every install/repair/dev path. (w-10029's win
+	// regression: shim was skipped whenever the symlink early-returned.)
+	if err := ensureCmdShim(src, target); err != nil {
+		return false, fmt.Errorf("cmd shim: %w", err)
+	}
 	if got, err := os.Readlink(target); err == nil && got == src {
 		return false, nil
 	}

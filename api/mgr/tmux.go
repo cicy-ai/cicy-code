@@ -27,7 +27,14 @@ const chunkedPromptEnterDelay = 500 * time.Millisecond
 const promptConfirmPollInterval = 150 * time.Millisecond
 const codexPromptConfirmPollInterval = 60 * time.Millisecond
 const codexPromptConfirmStabilizeDelay = 40 * time.Millisecond
-const promptConfirmTimeout = 5 * time.Second
+// promptConfirmTimeout caps how long we wait for a pasted prompt to visually
+// echo before pressing Enter. A SUCCESSFUL confirm returns early, so this only
+// bounds the FAILURE path — and large multi-line prompts (e.g. a fork's inherit
+// prompt) can't be visually matched in claude's wrapped input box, so they
+// ALWAYS time out and fall back to a forced Enter (which works). Keeping this at
+// 5s made fork prompt→Enter feel stuck for ~5s; 2s gives the same outcome much
+// faster with no effect on the common (fast-confirm) case.
+const promptConfirmTimeout = 2 * time.Second
 const promptConfirmCaptureStart = "-160"
 const agentReadyPollInterval = 500 * time.Millisecond
 const codexAgentReadyPollInterval = 120 * time.Millisecond
@@ -35,7 +42,11 @@ const agentReadyTimeout = 90 * time.Second
 const openClawAgentReadyTimeout = 150 * time.Second
 const submitConfirmPollInterval = 200 * time.Millisecond
 const codexSubmitConfirmPollInterval = 80 * time.Millisecond
-const submitConfirmTimeout = 4 * time.Second
+// submitConfirmTimeout caps the post-Enter "did it submit" confirm. Same logic
+// as promptConfirmTimeout: a real submit confirms fast; a large prompt that
+// can't be matched burns the whole budget then treats the already-sent Enter as
+// success. 4s → 1.5s removes the second long stall after a fork prompt.
+const submitConfirmTimeout = 1500 * time.Millisecond
 const codexSubmitConfirmTimeout = 1200 * time.Millisecond
 const submitEnterRetryLimit = 2
 const codexSubmitEnterRetryLimit = 0
@@ -69,6 +80,9 @@ type paneCreateOpts struct {
 	inheritGuidance  bool
 	projectTemplate  string
 	roleTemplate     string
+	// Per-pane runtime_ai override to seed into the new pane's config (used by
+	// fork so a gateway fork routes through the SAME provider as its source).
+	runtimeAI *runtimeAIOverride
 }
 
 type startupPromptTask struct {
@@ -547,7 +561,7 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	if req.InheritGuidance != nil {
 		inheritGuidance = *req.InheritGuidance
 	}
-	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.ReplyInChinese, useCustomGateway, useProxy, proxySettings, req.WinName, strings.TrimSpace(req.MasterPaneID), strings.TrimSpace(req.MasterAgentType), inheritGuidance, strings.TrimSpace(req.ProjectTemplate), strings.TrimSpace(req.RoleTemplate), token)
+	result, err := doCreatePane(req.Title, req.Role, req.DefaultModel, req.AgentType, req.InitScript, req.AllowAllActions, req.ReplyInChinese, useCustomGateway, useProxy, proxySettings, req.WinName, strings.TrimSpace(req.MasterPaneID), strings.TrimSpace(req.MasterAgentType), inheritGuidance, strings.TrimSpace(req.ProjectTemplate), strings.TrimSpace(req.RoleTemplate), token, nil)
 	if err != nil {
 		J(w, M{"success": false, "error": err.Error()})
 		return
@@ -555,7 +569,7 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	J(w, result)
 }
 
-func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useProxy bool, proxy *proxySettings, winName *string, masterPaneID string, masterAgentType string, inheritGuidance bool, projectTemplate string, roleTemplate string, token string) (M, error) {
+func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useProxy bool, proxy *proxySettings, winName *string, masterPaneID string, masterAgentType string, inheritGuidance bool, projectTemplate string, roleTemplate string, token string, runtimeAI *runtimeAIOverride) (M, error) {
 	agentType = normalizeAgentType(agentType)
 	if agentType == "" {
 		return M{"success": false}, fmt.Errorf("unsupported agent_type")
@@ -563,7 +577,12 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 	if !isAllowedAgentType(agentType) {
 		return M{"success": false}, fmt.Errorf("agent_type not allowed in current mode")
 	}
-	// Get next worker index
+	// Get next worker index. CRITICAL: skip any index whose pane id already
+	// exists in agent_config. worker_index can lag behind real pane ids after
+	// delete/re-fork churn (or a reset); minting an already-live id (e.g.
+	// w-10076) made createManagedPane re-init the EXISTING pane and re-send its
+	// fork inherit prompt → the same fork received the prompt twice. Advancing
+	// past live ids guarantees a fresh pane id.
 	var workerIdx int
 	tx, _ := store.Begin()
 	tx.QueryRow("SELECT value FROM global_vars WHERE key_name='worker_index'").Scan(&workerIdx)
@@ -571,6 +590,14 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 		workerIdx = defaultWorkerIndex
 	}
 	workerIdx++
+	for {
+		var existing int
+		tx.QueryRow("SELECT COUNT(1) FROM agent_config WHERE pane_id=?", fmt.Sprintf("w-%d:main.0", workerIdx)).Scan(&existing)
+		if existing == 0 {
+			break
+		}
+		workerIdx++
+	}
 	tx.Exec(store.Upsert("global_vars", "key_name", []string{"key_name", "value"}, []string{"value"}), "worker_index", workerIdx)
 	tx.Commit()
 
@@ -603,6 +630,7 @@ func doCreatePane(title, role, defaultModel, agentType, initScript string, allow
 		inheritGuidance:  inheritGuidance,
 		projectTemplate:  projectTemplate,
 		roleTemplate:     roleTemplate,
+		runtimeAI:        runtimeAI,
 	})
 }
 
@@ -688,10 +716,23 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 
 	paneID := opts.session + ":main.0"
 	writeAgentGuidanceFile(workspace, opts.agentType, paneID, opts.projectTemplate, opts.roleTemplate)
-	runTmux("new-session", "-d", "-s", opts.session, "-n", "main", "-c", workspace)
+	ensureTmuxServer()
+	runTmux("new-session", "-d", "-s", opts.session, "-n", "main", "-c", toPosixPath(workspace))
 	proxyConfigJSON, err := mergeProxySettingsIntoConfigJSON("{}", &proxySettings{Password: opts.proxyPassword, Rule: opts.proxyRule})
 	if err != nil {
 		return M{"success": false}, err
+	}
+	// Seed the per-pane runtime_ai override (fork carries the source's so a
+	// gateway fork routes through the SAME provider — otherwise it falls back to
+	// the global default provider and boots a different model). Must be in the
+	// config BEFORE initPaneEnv boots the agent (resolveClaudeStartupModel reads
+	// it via resolveRuntimeAIConfigForAgent).
+	if opts.runtimeAI != nil && strings.TrimSpace(opts.runtimeAI.ProviderName) != "" {
+		if merged, mErr := mergeRuntimeAIIntoConfigJSON(proxyConfigJSON, opts.runtimeAI); mErr == nil {
+			proxyConfigJSON = merged
+		} else {
+			log.Printf("[create] seed runtime_ai into %s failed: %v", paneID, mErr)
+		}
 	}
 	store.Exec(
 		fmt.Sprintf(`INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese, use_custom_gateway, proxy_enable, project_template, role_template, created_at, updated_at)
@@ -1140,8 +1181,12 @@ func handleRelaunchAgent(w http.ResponseWriter, r *http.Request, id string) {
 	// boot.sh lives at <workspace>/.cicy/boot.sh and is the same file the
 	// pane sourced when it was first created. The pane's cwd should still
 	// be the workspace folder (Ctrl+C out of claude/codex leaves the shell
-	// at its startup dir).
+	// at its startup dir) — but cd explicitly when we know the workspace, so
+	// a stray `cd` by the user (or a Windows pane stranded in $HOME) recovers.
 	cmd := "source .cicy/boot.sh"
+	if ws := paneWorkspace(paneID); ws != "" {
+		cmd = fmt.Sprintf("cd %s && source .cicy/boot.sh", tmuxShellQuote(toPosixPath(ws)))
+	}
 	if _, err := runTmux("send-keys", "-t", paneID, cmd, "Enter"); err != nil {
 		httpErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1278,7 +1323,8 @@ func restartPaneCore(paneID, token string) error {
 		ws = "~"
 	}
 	wsExpanded := strings.Replace(ws, "~", home, 1)
-	exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", wsExpanded).Run()
+	ensureTmuxServer()
+	exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", toPosixPath(wsExpanded)).Run()
 	// ttyd is served on demand inline; nothing to restart.
 
 	// Re-run init
@@ -2106,7 +2152,8 @@ EOF`, tmuxShellQuote(approvalsPath)))
 			)
 		}
 		gatewayLog := filepath.Join(stateDir, "openclaw-gateway.log")
-		tmpGatewayLog := filepath.Join("/tmp", fmt.Sprintf("openclaw-gateway-%s.log", shortID))
+		// Pane-side path (msys /tmp on Windows) — keep POSIX, do NOT filepath.Join.
+		tmpGatewayLog := "/tmp/" + fmt.Sprintf("openclaw-gateway-%s.log", shortID)
 		lines = append(lines,
 			strings.Join([]string{
 				"resolve_openclaw_tui_session() {",
@@ -4403,7 +4450,9 @@ func initPaneEnv(opts paneEnvOpts) {
 	}
 	if opts.workspace != "" {
 		lines = append(lines,
-			fmt.Sprintf("export WORKSPACE=%s", tmuxShellQuote(opts.workspace)),
+			// POSIX form: $WORKSPACE is consumed by pane-side msys bash, which
+			// chokes on C:\ backslash paths in cd/test/concatenation.
+			fmt.Sprintf("export WORKSPACE=%s", tmuxShellQuote(toPosixPath(opts.workspace))),
 			// "mkdir -p ./skills ./projects",
 		)
 	}
@@ -4480,7 +4529,7 @@ func initPaneEnv(opts paneEnvOpts) {
 	}
 	scriptPath := filepath.Join(workspaceRuntimeDir(opts.workspace), "boot.sh")
 	if strings.TrimSpace(opts.workspace) == "" {
-		scriptPath = fmt.Sprintf("/tmp/init_pane_%s.sh", strings.ReplaceAll(pid, ":", "_"))
+		scriptPath = filepath.Join(os.TempDir(), fmt.Sprintf("init_pane_%s.sh", strings.ReplaceAll(pid, ":", "_")))
 	} else if err := ensureRuntimeDir(workspaceRuntimeDir(opts.workspace), 0755); err != nil {
 		log.Printf("[init] failed to ensure workspace for script: %v", err)
 		return
@@ -4499,7 +4548,15 @@ func initPaneEnv(opts paneEnvOpts) {
 	// visible/interactive. Wait for the prompt marker before sending boot.sh.
 	if waitForShellPromptReady(pid) {
 		log.Printf("[init] shell prompt ready for %s", shortPaneID(pid))
-		runTmux("send-keys", "-t", pid, "source .cicy/boot.sh", "Enter")
+		// cd first instead of relying on the pane's start dir: tmux silently
+		// falls back to $HOME when `new-session -c <dir>` can't chdir (seen on
+		// Windows with non-POSIX path forms), which would strand the relative
+		// source forever. POSIX form for the pane-side msys/unix bash.
+		bootCmd := "source .cicy/boot.sh"
+		if ws := strings.TrimSpace(opts.workspace); ws != "" {
+			bootCmd = fmt.Sprintf("cd %s && source .cicy/boot.sh", tmuxShellQuote(toPosixPath(ws)))
+		}
+		runTmux("send-keys", "-t", pid, bootCmd, "Enter")
 	} else {
 		log.Printf("[init] shell prompt not confirmed for %s, skip auto source .cicy/boot.sh", shortPaneID(pid))
 		return
@@ -4715,20 +4772,33 @@ func sendTextToPaneDirect(winID, text string) error {
 			trace.logStep("baseline-capture", map[string]any{}, out)
 		}
 	}
+	// Per-phase timing so we can see WHERE prompt→Enter spends its time
+	// (paste vs pre-submit echo confirm vs post-submit confirm). Logged as
+	// [tmux-timing] with millisecond durations.
+	tStart := time.Now()
+	tPaste := tStart
 	mode, err := sendPromptText(winID, text, trace)
+	pasteMs := time.Since(tPaste).Milliseconds()
+	log.Printf("[tmux-timing] pane=%s phase=paste ms=%d mode=%s runes=%d", shortPaneID(winID), pasteMs, mode, utf8.RuneCountInString(text))
 	if err != nil {
 		trace.logStep("send-text-error", map[string]any{"error": err.Error()}, "")
 		return newTmuxSendError("failed to send text: "+err.Error(), http.StatusInternalServerError, false)
 	}
 	if confirmBeforeEnter {
-		if _, err := waitForPromptEchoBeforeEnter(winID, agentType, text, mode, baseline, trace); err != nil {
+		tPre := time.Now()
+		preErr := func() error { _, e := waitForPromptEchoBeforeEnter(winID, agentType, text, mode, baseline, trace); return e }()
+		log.Printf("[tmux-timing] pane=%s phase=pre-submit-echo ms=%d ok=%t", shortPaneID(winID), time.Since(tPre).Milliseconds(), preErr == nil)
+		if err := preErr; err != nil {
 			trace.logStep("pre-submit-failed", map[string]any{"error": err.Error()}, "")
 			log.Printf("[tmux-send] pane=%s pre-submit failed; forcing enter fallback agent=%s mode=%s preview=%q err=%v",
 				shortPaneID(winID), normalizeAgentType(agentType), mode, promptPreview(text), err)
 			if trace != nil {
 				trace.logStep("pre-submit-enter-fallback", map[string]any{"reason": err.Error()}, "")
 			}
-			if submitErr := submitPromptWithConfirmation(winID, agentType, text, trace); submitErr != nil {
+			tSub := time.Now()
+			submitErr := submitPromptWithConfirmation(winID, agentType, text, trace)
+			log.Printf("[tmux-timing] pane=%s phase=submit-confirm(fallback) ms=%d ok=%t total_ms=%d", shortPaneID(winID), time.Since(tSub).Milliseconds(), submitErr == nil, time.Since(tStart).Milliseconds())
+			if submitErr != nil {
 				// submitPromptWithConfirmation already sent Enter (including its own
 				// fallback Enter at the end). We just couldn't visually verify the
 				// submission via terminal scrape. Treat as success: returning an
@@ -4739,12 +4809,17 @@ func sendTextToPaneDirect(winID, text string) error {
 				log.Printf("[tmux-send] pane=%s WARN submit not visually confirmed (Enter was sent); treating as success agent=%s preview=%q pre_err=%v submit_err=%v",
 					shortPaneID(winID), normalizeAgentType(agentType), promptPreview(text), err, submitErr)
 			}
-		} else if err := submitPromptWithConfirmation(winID, agentType, text, trace); err != nil {
-			// Same rationale: Enter has been sent (possibly multiple times); the
-			// visual confirm just failed. Don't surface as error, don't clear.
-			trace.logStep("submit-warn", map[string]any{"error": err.Error(), "treated_as": "success"}, "")
-			log.Printf("[tmux-send] pane=%s WARN submit not visually confirmed (Enter was sent); treating as success agent=%s preview=%q err=%v",
-				shortPaneID(winID), normalizeAgentType(agentType), promptPreview(text), err)
+		} else {
+			tSub := time.Now()
+			submitErr := submitPromptWithConfirmation(winID, agentType, text, trace)
+			log.Printf("[tmux-timing] pane=%s phase=submit-confirm ms=%d ok=%t total_ms=%d", shortPaneID(winID), time.Since(tSub).Milliseconds(), submitErr == nil, time.Since(tStart).Milliseconds())
+			if submitErr != nil {
+				// Same rationale: Enter has been sent (possibly multiple times); the
+				// visual confirm just failed. Don't surface as error, don't clear.
+				trace.logStep("submit-warn", map[string]any{"error": submitErr.Error(), "treated_as": "success"}, "")
+				log.Printf("[tmux-send] pane=%s WARN submit not visually confirmed (Enter was sent); treating as success agent=%s preview=%q err=%v",
+					shortPaneID(winID), normalizeAgentType(agentType), promptPreview(text), submitErr)
+			}
 		}
 	} else {
 		delay := enterDelay
@@ -5315,22 +5390,38 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	masterID := normPaneID(strings.TrimSpace(req.MasterPaneID))
+	// Default the master to w-10001 (the PM/dispatcher) when none is given, so a
+	// fork always binds to a master and shows up in the UI's team panel. Without
+	// this, `cicy-agent fork <src>` (no --master) created an orphan pane bound to
+	// nobody → invisible in the UI.
+	if masterID == "" {
+		masterID = normPaneID("w-10001")
+	}
 
 	// Load source pane config
 	var srcAgentType, srcDefaultModel, srcRole, srcWorkspace sql.NullString
-	var srcProjectTemplate, srcRoleTemplate sql.NullString
+	var srcProjectTemplate, srcRoleTemplate, srcConfig sql.NullString
 	var srcAllowAll, srcReplyChinese, srcUseCustomGateway, srcProxyEnable sql.NullBool
 	err := store.QueryRow(`SELECT agent_type, default_model, role, workspace,
 		COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0),
 		COALESCE(use_custom_gateway,0), COALESCE(proxy_enable,0),
-		COALESCE(project_template,''), COALESCE(role_template,'')
+		COALESCE(project_template,''), COALESCE(role_template,''), COALESCE(config,'{}')
 		FROM agent_config WHERE pane_id=?`, srcID).
 		Scan(&srcAgentType, &srcDefaultModel, &srcRole, &srcWorkspace,
 			&srcAllowAll, &srcReplyChinese, &srcUseCustomGateway, &srcProxyEnable,
-			&srcProjectTemplate, &srcRoleTemplate)
+			&srcProjectTemplate, &srcRoleTemplate, &srcConfig)
 	if err != nil {
 		httpErr(w, 404, "source pane not found")
 		return
+	}
+	// A gateway fork must route through the SAME provider as its source, so carry
+	// the source's runtime_ai override into the fork. Without it the fork loses
+	// the override, falls back to the global default claude provider, and boots a
+	// different model (the "fork isn't opus" bug). Only meaningful for gateway
+	// agents — official-login agents ignore the gateway/model entirely.
+	var forkRuntimeAI *runtimeAIOverride
+	if srcUseCustomGateway.Bool {
+		forkRuntimeAI = extractRuntimeAIFromConfigJSON(srcConfig.String)
 	}
 
 	// Step 1: regenerate the source's raw basic-conversation dump (synchronous —
@@ -5390,6 +5481,7 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		srcProjectTemplate.String, // inherit the source agent's project template (composed in if the file still exists)
 		srcRoleTemplate.String,    // inherit the source agent's role template
 		token,
+		forkRuntimeAI,             // gateway fork: same runtime_ai provider as source
 	)
 	if err != nil {
 		httpErr(w, 500, "create fork failed: "+err.Error())
@@ -5401,6 +5493,15 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		newPaneID, _ = result["session"].(string)
 	}
 	newPaneID = normPaneID(newPaneID)
+
+	// Tag the fork's provenance so the TeamPanel can nest it as a sub-group under
+	// its source agent. source_kind/source_ref already flow DB → /api/agents/bound
+	// → frontend Binding, so this is all the wiring needed.
+	if newPaneID != "" {
+		if _, err := store.Exec("UPDATE agent_config SET source_kind='fork', source_ref=? WHERE pane_id=?", short, newPaneID); err != nil {
+			log.Printf("[fork] %s tag source_ref=%s failed: %v", newPaneID, short, err)
+		}
+	}
 
 	// Wait for the new agent to become ready, then seed it with the inherit
 	// prompt — in the BACKGROUND. The pane already exists, so the HTTP response

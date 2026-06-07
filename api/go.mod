@@ -15,6 +15,7 @@ require (
 	github.com/pkg/errors v0.8.1-0.20161029093637-248dadf4e906
 	github.com/resend/resend-go/v3 v3.7.0
 	github.com/yudai/hcl v0.0.0-20151013225006-5fa2393b3552
+	golang.org/x/sys v0.42.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.47.0
 )
@@ -26,7 +27,6 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
-	golang.org/x/sys v0.42.0 // indirect
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
