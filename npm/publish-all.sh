@@ -38,11 +38,18 @@ declare -A ASSET=(
   [darwin-x64]=cicy-code-darwin-amd64
   [linux-x64]=cicy-code-linux-amd64
   [linux-arm64]=cicy-code-linux-arm64
-  [win32-x64]=cicy-code-windows-amd64.exe
+  # Package name says "windows", NOT "win32": npm's spam filter 403s new
+  # packages with win32 in the name (hit live on cicy-mihomo-win32-x64,
+  # 2026-06-07). The package.json "os" field still needs the literal
+  # process.platform value — pkg_os() maps it back.
+  [windows-x64]=cicy-code-windows-amd64.exe
 )
-# npm sub-package ships ONE binary; on win32 it must keep the .exe extension
+# npm sub-package ships ONE binary; on Windows it must keep the .exe extension
 # (CreateProcess needs it) — the launcher resolves the name per-platform.
-bin_name() { case "$1" in win32-*) echo cicy-code.exe;; *) echo cicy-code;; esac; }
+bin_name() { case "$1" in windows-*) echo cicy-code.exe;; *) echo cicy-code;; esac; }
+# npm "os" constraint must be a process.platform value (win32), regardless of
+# what the package NAME says.
+pkg_os() { case "$1" in windows) echo win32;; *) echo "$1";; esac; }
 
 # Auth (only when actually publishing)
 NPMRC=""
@@ -84,7 +91,7 @@ if [ -z "$MAIN_ONLY" ]; then
   echo "==> Building sub-packages for cicy-code@$VERSION (binaries from $GH_TAG)"
   rm -rf "$BUILD"; mkdir -p "$BUILD"
   for key in "${!ASSET[@]}"; do
-    os="${key%-*}"; cpu="${key#*-}"; pkg="cicy-code-$key"; dir="$BUILD/$pkg"
+    os="$(pkg_os "${key%-*}")"; cpu="${key#*-}"; pkg="cicy-code-$key"; dir="$BUILD/$pkg"
     bin="$(bin_name "$key")"
     mkdir -p "$dir"
     if [ -n "$FROM_DIR" ]; then

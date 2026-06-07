@@ -16,8 +16,11 @@ const fs = require('fs');
 const args = process.argv.slice(2);
 const PORT = process.env.PORT || '8008';
 
-const platformPkg = `cicy-code-${process.platform}-${process.arch}`;
-// win32 ships the binary with the .exe extension (CreateProcess requires it).
+// Package name uses "windows", not the process.platform value "win32":
+// npm's spam filter rejects (403) new package names containing win32.
+const platformName = process.platform === 'win32' ? 'windows' : process.platform;
+const platformPkg = `cicy-code-${platformName}-${process.arch}`;
+// Windows ships the binary with the .exe extension (CreateProcess requires it).
 const binName = process.platform === 'win32' ? 'cicy-code.exe' : 'cicy-code';
 let binPath;
 try {
@@ -25,7 +28,7 @@ try {
 } catch {
   console.error(`cicy-code: no prebuilt binary for ${process.platform}-${process.arch}.`);
   console.error(`The optional dependency "${platformPkg}" is not installed.`);
-  console.error(`Supported platforms: darwin-arm64, darwin-x64, linux-x64, linux-arm64, win32-x64.`);
+  console.error(`Supported platforms: darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64.`);
   console.error(`Reinstall: npm install -g cicy-code` +
     ` (in China add --registry=https://registry.npmmirror.com)`);
   process.exit(1);
