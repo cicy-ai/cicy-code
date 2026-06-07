@@ -42,15 +42,25 @@ export default function MobileQRPopover(_props: Props) {
     return `${publicUrl}${sep}${params.toString()}`;
   }, [publicUrl]);
 
-  // Same payload reformatted as a `cicy://addTeam?...` deep link so cicy-desktop's
-  // OS-level protocol handler can pick it up.
+  // Same payload reformatted as a `cicy-desktop://addTeam?...` deep link so
+  // cicy-desktop's OS-level protocol handler picks it up. We use the dedicated
+  // `cicy-desktop://` scheme (NOT bare `cicy://`) because `cicy://` collides
+  // with the CiCy mobile/Expo app + a generic Electron registration, so a
+  // browser click routed the link to the wrong app. `cicy-desktop://` is
+  // desktop-only and routes unambiguously.
   const desktopDeepLink = useMemo(() => {
     if (!publicUrl) return '';
     const token = TokenManager.getToken() || '';
     const params = new URLSearchParams();
     params.set('url', publicUrl);
     if (token) params.set('token', token);
-    return `cicy://addTeam?${params.toString()}`;
+    // Default a human title from the host's first label so the desktop card
+    // isn't "Unnamed" (app-1001.cicy-ai.com → "app-1001").
+    try {
+      const label = new URL(publicUrl).hostname.split('.')[0];
+      if (label) params.set('title', label);
+    } catch { /* non-URL public_url — skip title */ }
+    return `cicy-desktop://addTeam?${params.toString()}`;
   }, [publicUrl]);
 
   // Esc closes the modal.
