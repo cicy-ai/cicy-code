@@ -17,6 +17,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
 
 	"ttyd-go/mgr/mitm"
 )
@@ -123,6 +125,10 @@ func startMITM() {
 	http.HandleFunc("/api/mitm/ca", w(handleMITMCA))
 	http.HandleFunc("/ca.pem", w(handleMITMCA))
 	http.HandleFunc("/api/mitm/ca-status", w(handleMITMCAStatus))
+	// Consent gate (compliance §1.4): the cicy-desktop card POSTs here to opt in
+	// (or revoke) OS-trust install. Authenticated (team Bearer) — it mutates
+	// system trust anchors.
+	http.HandleFunc("/api/mitm/consent", wa(handleMITMConsent))
 }
 
 // handleMITMCAStatus reports whether this node's MITM CA is trusted in the OS
@@ -133,17 +139,77 @@ func startMITM() {
 // their MITM-intercepted TLS would fail. Linux installs it automatically; macOS
 // needs the one-time `cicy-code mitm install-ca`.
 func handleMITMCAStatus(rw http.ResponseWriter, r *http.Request) {
+	trusted := false
+	if mitmServer != nil {
+		trusted = mitmCATrustedInOS()
+	}
 	resp := map[string]any{
 		"enabled":   mitmServer != nil,
 		"platform":  runtime.GOOS,
-		"installed": false,
+		"generated": mitmServer != nil, // CA exists once the server started it
+		"trusted":   trusted,           // present in the OS trust store
+		"consent":   mitm.CATrustConsented(),
+		"installed": trusted, // legacy alias (kept for older callers)
 		"command":   "cicy-code mitm install-ca",
-	}
-	if mitmServer != nil {
-		resp["installed"] = mitmCATrustedInOS()
 	}
 	rw.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(rw).Encode(resp)
+}
+
+// handleMITMConsent is the desktop consent card's backend.
+//
+//	POST {enable:true}  → record opt-in + install the CA into the OS trust store
+//	POST {enable:false} → uninstall + revoke
+//
+// On {enable:true} the privileged store write happens IN THIS PROCESS — silent
+// when cicy-code is elevated (production schtasks = High integrity), else it
+// returns {ok:false, error:"need_elevation"} so the card can fall back to an
+// elevated `cicy-code mitm install-ca` (UAC/polkit/osascript prompt). The
+// compliance red line — never install without consent — lives here: consent is
+// recorded only on a successful (or already-trusted) install.
+func handleMITMConsent(rw http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(rw, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	var body struct {
+		Enable bool `json:"enable"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpErr(rw, http.StatusBadRequest, "invalid body")
+		return
+	}
+	writeJSON := func(v any) {
+		rw.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(rw).Encode(v)
+	}
+
+	if !body.Enable {
+		// Revoke: best-effort uninstall, then clear the flag regardless.
+		uninstallMITMCAOSTrust()
+		if err := mitm.ClearCATrustConsent(); err != nil {
+			writeJSON(map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(map[string]any{"ok": true, "trusted": mitmCATrustedInOS(), "consent": false})
+		return
+	}
+
+	// Enable: install FIRST; only record consent if trust actually landed, so a
+	// failed (e.g. non-elevated) attempt doesn't leave consent=true with no cert.
+	if err := installMITMCAOSTrust(); err != nil {
+		errCode := err.Error()
+		if strings.Contains(errCode, "need_elevation") {
+			errCode = "need_elevation"
+		}
+		writeJSON(map[string]any{"ok": false, "error": errCode, "detail": err.Error()})
+		return
+	}
+	if err := mitm.SetCATrustConsent(time.Now().Format(time.RFC3339), "desktop"); err != nil {
+		writeJSON(map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(map[string]any{"ok": true, "trusted": mitmCATrustedInOS(), "consent": true})
 }
 
 // mitmCATrustedInOS checks the platform trust store for this node's MITM CA,
@@ -165,6 +231,8 @@ func mitmCATrustedInOS() bool {
 	case "darwin":
 		out, err := exec.Command("security", "dump-trust-settings", "-d").CombinedOutput()
 		return err == nil && bytes.Contains(bytes.ToLower(out), []byte("cicy-mitm"))
+	case "windows":
+		return mitm.RootCATrusted(srcBytes)
 	}
 	return false
 }

@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"ttyd-go/mgr/mitm"
 	"ttyd-go/skillcmd"
 )
 
@@ -1480,44 +1481,109 @@ func ensureMITMConfig() {
 //
 // Idempotent, best-effort (logs and returns on any failure — never blocks boot).
 // Must run AFTER startMITM() (main.go), which generates the CA on first start.
+// ensureMITMCAInSystemTrust is the BOOT path. Modifying the OS trust anchors is
+// gated behind explicit user consent (compliance §1.3/§1.4): on first boot we do
+// nothing — the desktop consent card (POST /api/mitm/consent) or `cicy-code mitm
+// install-ca` records the opt-in and installs. Once consented, re-running here on
+// later boots re-trusts a regenerated CA silently. All three platforms share the
+// same gate (mitm.CATrustConsented); a container may bake CICY_CA_TRUST_CONSENT=1.
 func ensureMITMCAInSystemTrust() {
-	if runtime.GOOS != "linux" {
-		return
+	if !mitm.CATrustConsented() {
+		return // no opt-in yet — node agents still trust via NODE_EXTRA_CA_CERTS
 	}
+	if err := installMITMCAOSTrust(); err != nil {
+		log.Printf("[mitm] system-trust refresh skipped: %v", err)
+	}
+}
+
+// installMITMCAOSTrust performs the platform OS-trust install for the locally
+// generated MITM CA. Returns nil if already trusted or installed successfully;
+// an error otherwise. Caller is responsible for the consent gate — this does the
+// privileged write. Shared by the boot refresh and the /api/mitm/consent handler.
+func installMITMCAOSTrust() error {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return
+		return fmt.Errorf("resolve home: %v", err)
 	}
 	src := filepath.Join(home, "cicy-ai", "db", "mitm-ca.crt")
 	srcBytes, err := os.ReadFile(src)
 	if err != nil {
-		return // MITM disabled / CA not generated — nothing to install
+		return fmt.Errorf("CA not generated yet (start with MITM enabled once): %v", err)
 	}
-	const dst = "/usr/local/share/ca-certificates/cicy-mitm.crt"
-	if cur, err := os.ReadFile(dst); err == nil && bytes.Equal(cur, srcBytes) {
-		return // already installed this exact CA
-	}
-	// Install needs root; fall back to passwordless sudo when unprivileged.
-	runRoot := func(name string, args ...string) error {
-		if os.Geteuid() != 0 {
-			args = append([]string{"-n", name}, args...)
-			name = "sudo"
+	switch runtime.GOOS {
+	case "windows":
+		// LocalMachine\ROOT via CryptoAPI (silent when the process is elevated;
+		// a running non-elevated process cannot elevate on demand → need_elevation).
+		if err := mitm.InstallRootCA(srcBytes); err != nil {
+			return err
 		}
-		out, err := exec.Command(name, args...).CombinedOutput()
+		log.Printf("[mitm] installed MITM CA into LocalMachine\\ROOT (thumbprint %s) — codex/kiro schannel TLS now trusts it", mitm.CertThumbprint(srcBytes))
+		return nil
+	case "linux":
+		const dst = "/usr/local/share/ca-certificates/cicy-mitm.crt"
+		if cur, err := os.ReadFile(dst); err == nil && bytes.Equal(cur, srcBytes) {
+			return nil // already installed this exact CA
+		}
+		runRoot := func(name string, args ...string) error {
+			if os.Geteuid() != 0 {
+				args = append([]string{"-n", name}, args...)
+				name = "sudo"
+			}
+			out, err := exec.Command(name, args...).CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("%s: %v: %s", name, err, strings.TrimSpace(string(out)))
+			}
+			return nil
+		}
+		if err := runRoot("cp", src, dst); err != nil {
+			return fmt.Errorf("need root/sudo: %v", err)
+		}
+		if err := runRoot("update-ca-certificates"); err != nil {
+			return fmt.Errorf("update-ca-certificates: %v", err)
+		}
+		log.Printf("[mitm] installed MITM CA into system trust store (%s) — codex/kiro Rust TLS now trusts it", dst)
+		return nil
+	case "darwin":
+		// SecTrust requires GUI auth even as root; the dashboard/CLI add-trusted-cert
+		// path prompts once. Not silently installable from a daemon.
+		out, err := exec.Command("security", "add-trusted-cert", "-d", "-r", "trustRoot",
+			"-k", "/Library/Keychains/System.keychain", src).CombinedOutput()
 		if err != nil {
-			return fmt.Errorf("%s: %v: %s", name, err, strings.TrimSpace(string(out)))
+			return fmt.Errorf("security add-trusted-cert: %v: %s", err, strings.TrimSpace(string(out)))
 		}
+		log.Printf("[mitm] installed MITM CA into System.keychain — codex/kiro TLS now trusts it")
 		return nil
 	}
-	if err := runRoot("cp", src, dst); err != nil {
-		log.Printf("[mitm] system-trust install skipped (need root/sudo): %v", err)
-		return
+	return fmt.Errorf("OS trust install not supported on %s", runtime.GOOS)
+}
+
+// uninstallMITMCAOSTrust removes the MITM CA from the OS trust store (revoke
+// path). Best-effort: logs and continues on error so the consent flag is still
+// cleared by the caller. Mirrors installMITMCAOSTrust's per-platform mechanics.
+func uninstallMITMCAOSTrust() {
+	switch runtime.GOOS {
+	case "windows":
+		home, _ := os.UserHomeDir()
+		if b, err := os.ReadFile(filepath.Join(home, "cicy-ai", "db", "mitm-ca.crt")); err == nil {
+			if err := mitm.RemoveRootCA(b); err != nil {
+				log.Printf("[mitm] Windows CA trust uninstall: %v", err)
+			}
+		}
+	case "linux":
+		const dst = "/usr/local/share/ca-certificates/cicy-mitm.crt"
+		runRoot := func(name string, args ...string) error {
+			if os.Geteuid() != 0 {
+				args = append([]string{"-n", name}, args...)
+				name = "sudo"
+			}
+			return exec.Command(name, args...).Run()
+		}
+		_ = runRoot("rm", "-f", dst)
+		_ = runRoot("update-ca-certificates", "--fresh")
+	case "darwin":
+		_ = exec.Command("security", "delete-certificate", "-c", "cicy-mitm",
+			"/Library/Keychains/System.keychain").Run()
 	}
-	if err := runRoot("update-ca-certificates"); err != nil {
-		log.Printf("[mitm] system-trust install: update-ca-certificates failed: %v", err)
-		return
-	}
-	log.Printf("[mitm] installed MITM CA into system trust store (%s) — codex/kiro Rust TLS now trusts it", dst)
 }
 
 func setupAIConfigs() {

@@ -134,6 +134,9 @@ func ensureTmuxServer() {
 	log.Printf("[platform] tmux server bootstrap: server not confirmed within 5s")
 }
 
+// (Windows MITM-CA OS-trust install moved to package mitm: trust_windows.go,
+// shared by the install-ca CLI and the /api/mitm/consent server endpoint.)
+
 // toPosixPath rewrites a Windows path into the POSIX form the MSYS2 bash
 // inside panes understands: C:\Users\x → /c/Users/x. Forward slashes are
 // normalized; non-drive paths just get slash-normalized (msys accepts
