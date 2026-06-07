@@ -13,6 +13,10 @@ type Props = {
   workspaceTitle?: string;
 };
 
+// The Telegram bot the 小程序 method opens. Single source of truth for both the
+// t.me link and the @handle shown on the row.
+const TG_BOT = 'cicy_ai_bot';
+
 // Top-of-activity-bar button that pops a centered modal showing a QR code
 // any cicy-* client can act on:
 //
@@ -70,8 +74,8 @@ export default function MobileQRPopover(_props: Props) {
   const telegramLink = useMemo(() => {
     const token = TokenManager.getToken() || '';
     return token
-      ? `https://t.me/cicy_ai_bot?start=${encodeURIComponent(token)}`
-      : 'https://t.me/cicy_ai_bot';
+      ? `https://t.me/${TG_BOT}?start=${encodeURIComponent(token)}`
+      : `https://t.me/${TG_BOT}`;
   }, []);
 
   // Esc closes the modal.
@@ -191,7 +195,7 @@ export default function MobileQRPopover(_props: Props) {
                     {([
                       { id: 'web', Icon: Globe, title: t('mobileQrMethodWebTitle'), desc: t('mobileQrMethodWebDesc'), href: '' },
                       { id: 'pwa', Icon: Smartphone, title: t('mobileQrMethodPwaTitle'), desc: t('mobileQrMethodPwaDesc'), href: '' },
-                      { id: 'mini', Icon: Send, title: t('mobileQrMethodMiniTitle'), desc: t('mobileQrMethodMiniDesc'), href: telegramLink },
+                      { id: 'mini', Icon: Send, title: t('mobileQrMethodMiniTitle'), desc: `@${TG_BOT}`, href: telegramLink },
                     ] as const).map(({ id, Icon, title, desc, href }) => {
                       const inner = (
                         <>
