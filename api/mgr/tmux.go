@@ -449,10 +449,10 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if gid != "" {
-		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.proxy_enable, 0)
+		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.proxy_enable, 0), COALESCE(t.role_template, '')
 				FROM agent_config t INNER JOIN group_windows gp ON t.pane_id=gp.win_id WHERE gp.group_id=? AND t.active=1 ORDER BY t.created_at DESC`, gid)
 	} else {
-		rows, err = store.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.proxy_enable, 0)
+		rows, err = store.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.proxy_enable, 0), COALESCE(t.role_template, '')
 				FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.active=1 ORDER BY t.created_at DESC`)
 	}
 	if err != nil {
@@ -474,7 +474,8 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 		var replyInChinese sql.NullBool
 		var useCustomGateway sql.NullBool
 		var useProxy sql.NullBool
-		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway, &useProxy)
+		var roleTemplate sql.NullString
+		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway, &useProxy, &roleTemplate)
 		// Hide the dedicated audit-policy admin pane (w-6001) from the
 		// general agent listing — surfaced only inside the Audit Dashboard
 		// Assistant tab. Bypass with ?include_hidden=1.
@@ -491,6 +492,7 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 			"reply_in_chinese":   replyInChinese.Bool,
 			"use_custom_gateway": useCustomGateway.Bool,
 			"use_proxy":          useProxy.Bool,
+			"role_template":      roleTemplate.String,
 		}
 		if createdAt.Valid {
 			p["created_at"] = createdAt.String
