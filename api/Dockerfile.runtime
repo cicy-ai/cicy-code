@@ -60,5 +60,21 @@ RUN set -eux; \
     rm -rf /home/cicy/.npm /tmp/npm-cache /tmp/* 2>/dev/null || true; \
     claude --version
 
+# Pre-install the mihomo proxy binary from its npm subpackage (published by the
+# cicy-mihomo release CI) so containers never fetch it from GitHub releases at
+# runtime — gh proxies have shipped corrupted bytes (0xC0000005) and are slow
+# in CN. npm pack verifies pacote sha512 integrity. Lands at ~/.local/bin/mihomo,
+# exactly where cicy-code's startCicyMihomoIfNeeded() expects it. Pin via
+# MIHOMO_NPM_VERSION; bump = rebuild base.
+ARG MIHOMO_NPM_VERSION=1.10.4
+RUN set -eux; \
+    mkdir -p /home/cicy/.local/bin /tmp/mihomo-pkg; \
+    cd /tmp/mihomo-pkg; \
+    npm pack "cicy-mihomo-linux-x64@${MIHOMO_NPM_VERSION}" --registry=https://registry.npmmirror.com; \
+    tar -xzf cicy-mihomo-linux-x64-*.tgz; \
+    install -m 0755 package/mihomo /home/cicy/.local/bin/mihomo; \
+    cd /; rm -rf /tmp/mihomo-pkg /tmp/npm-cache /tmp/* 2>/dev/null || true; \
+    /home/cicy/.local/bin/mihomo -v | head -1
+
 EXPOSE 8008
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
