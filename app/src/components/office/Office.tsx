@@ -669,7 +669,7 @@ const WorkerWindow = memo(function WorkerWindow({ w, now, selected, hovered, onH
       {/* 聊天历史:直接复用主仓的 CurrentHistoryView(current-history-list),仅隐藏 tool card,保证渲染一致 */}
       <div data-id={`office-window-body-${w.id}`} onWheel={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}
         className="min-h-0 flex-1 overflow-hidden">
-        <CurrentHistoryView paneId={w.id} open hideTools />
+        <CurrentHistoryView paneId={w.id} open hideTools agentType={w.agentType || agentTypeForModel(w.model)} />
       </div>
       {/* resize 抓手：迷你 + 低调,仅悬停时淡显 */}
       <div data-id={`office-window-resize-${w.id}`} onPointerDown={(e) => onResizeStart(e, w.id)}

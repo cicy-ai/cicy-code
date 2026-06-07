@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import apiService from '../../services/api';
 import { Spinner } from '../ui/Spinner';
+import AgentAvatar from '../AgentAvatar';
 
 type HistoryTurn = {
   history_id?: number;
@@ -211,6 +212,26 @@ async function setPromptsCacheToIndexedDB(paneId: string, conversationId: string
       tx.onabort = () => resolve();
     });
   } catch {}
+}
+
+// ---- window._cacheHistory:整页历史的内存快照缓存(排在 IndexedDB / 网络之前)----
+// key = paneId,值 = 该 pane 上次渲染的整页状态。打开历史面板时先用快照**同步**渲染
+// 首屏(0 网络等待、不出 loading 骨架),随后照常 fresh 拉服务器、整体覆盖(React 按
+// history_id key diff,内容没变就不动)。挂在 window 上便于调试:window._cacheHistory。
+type HistoryMemSnapshot = {
+  items: HistoryTurn[];
+  conversationId: string;
+  model: string;
+  hasMore: boolean;
+  nextBefore: number | null;
+  maxId: number;
+  updatedAt: number;
+};
+
+function historyMemCache(): Map<string, HistoryMemSnapshot> {
+  const w = window as unknown as { _cacheHistory?: Map<string, HistoryMemSnapshot> };
+  if (!(w._cacheHistory instanceof Map)) w._cacheHistory = new Map();
+  return w._cacheHistory;
 }
 
 function buildIdRange(lo: number, hi: number): number[] {
@@ -1648,6 +1669,7 @@ export default function CurrentHistoryView({
   open,
   promptsOnly = false,
   hideTools = false,
+  agentType = '',
 }: {
   paneId: string;
   open: boolean;
@@ -1658,6 +1680,9 @@ export default function CurrentHistoryView({
   // Hide tool cards (keep prompts / thinking / answers). Used by the office
   // window view, which only wants the conversation, not tool I/O.
   hideTools?: boolean;
+  // 答案(a)左侧的头像用哪个 agent_type 的 logo(claude/codex/dispatcher…),
+  // 类比 ChatGPT 回复前的 logo 头像。空串 → 字母兜底。
+  agentType?: string;
 }) {
   const { t } = useTranslation('chat');
   const [items, setItems] = useState<HistoryTurn[]>([]);
@@ -1866,7 +1891,20 @@ export default function CurrentHistoryView({
     didInitialScrollRef.current = false;
     shouldStickBottomRef.current = true;
     forceScrollBottomRef.current = true;
-    setLoading(true);
+    // 内存快照先上屏(window._cacheHistory):同一 pane 上次打开的整页内容**同步**渲染,
+    // 不出 loading 骨架;下面的 fresh 加载照常进行,回来后整体覆盖。快照只填渲染态,不置
+    // committedReadyRef —— live tail 的轮询仍等真实窗口落定,避免旧快照和新 live 混拼。
+    const snap = historyMemCache().get(paneId);
+    const hasSnap = !!(snap && snap.items.length);
+    if (hasSnap && snap) {
+      setItems(snap.items);
+      setConversationId(snap.conversationId);
+      setModel(snap.model);
+      setHasMore(snap.hasMore);
+      setNextBefore(snap.nextBefore);
+      maxLoadedIdRef.current = snap.maxId;
+    }
+    if (!hasSnap) setLoading(true);
     getHistoryIDs(paneId)
       .then(async (data) => {
         if (cancelled || requestSeq !== requestSeqRef.current) return [] as HistoryTurn[];
@@ -1924,6 +1962,21 @@ export default function CurrentHistoryView({
       cancelled = true;
     };
   }, [open, paneId]);
+
+  // 快照写回:渲染态(items/cid/model/分页)每次变化都同步进 window._cacheHistory,
+  // 供下次打开同 pane 时秒出首屏。loading 中(骨架/空态)不写,避免把空页存成快照。
+  useEffect(() => {
+    if (!open || !paneId || loading || !items.length || !conversationId) return;
+    historyMemCache().set(paneId, {
+      items,
+      conversationId,
+      model,
+      hasMore,
+      nextBefore,
+      maxId: maxLoadedIdRef.current,
+      updatedAt: Date.now(),
+    });
+  }, [open, paneId, items, conversationId, model, hasMore, nextBefore, loading]);
 
   // No live WS push — Part 2 polls reply.json. The reply's ANSWER occupies
   // history_id = current.maxID + 1, so it attaches right after committed's last
@@ -2500,6 +2553,17 @@ export default function CurrentHistoryView({
       );
     }
     if (turn?.role === 'assistant') {
+      // 头像 = 每"轮回答"一个(ChatGPT 语义),不是每个 assistant item 一个:一次回答
+      // 会拆成多个 assistant item(工具循环),只有紧跟 q 的第一条出头像,其余只留
+      // 同宽的左侧空位保持内容列对齐。往回看时跳过 system 通知。
+      let prevRole = '';
+      for (let j = index - 1; j >= 0; j -= 1) {
+        const r = String(displayItems[j]?.role || '');
+        if (r === 'system') continue;
+        prevRole = r;
+        break;
+      }
+      const showAvatar = prevRole !== 'assistant';
       const showThinkingPlaceholder = isLatestTurn && String(turn?.status || '').trim() === 'thinking' && !String(turn?.a || '').trim() && !steps.length;
       const hasRenderableAssistantStep = steps.some((step: any) => {
         if (step?.type === 'thinking' && String(step?.text || '').trim()) return true;
@@ -2510,7 +2574,13 @@ export default function CurrentHistoryView({
       const fallbackAnswer = String(turn?.a || '').trim();
       return (
         <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} key={turnKey} className="mb-5">
-          <div data-id={`current-history-turn-assistant-${turnKey}`}>
+          {/* ChatGPT 式回复头像:agent_type 的 logo 在答案左侧,与首行顶对齐;
+              同一轮的后续 assistant item 不重复头像,用同宽空位对齐内容列 */}
+          <div data-id={`current-history-turn-assistant-${turnKey}`} className="flex items-start gap-2.5">
+            {showAvatar
+              ? <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId={`current-history-assistant-avatar-${turnKey}`} className="mt-0.5 h-7 w-7 rounded-full" />
+              : <div aria-hidden="true" className="h-7 w-7 shrink-0" />}
+            <div data-id={`current-history-turn-assistant-body-${turnKey}`} className="min-w-0 flex-1">
             {steps.map((step: any, stepIndex: number) => {
               if (step.type === 'thinking') {
                 return <div key={stepIndex} data-id={`current-history-turn-step-thinking-${turnKey}-${stepIndex}`}><ThinkingBlock text={step.text} /></div>;
@@ -2530,12 +2600,13 @@ export default function CurrentHistoryView({
               </div>
             ) : null}
             {!hasRenderableAssistantStep && !fallbackAnswer && showThinkingPlaceholder ? <PendingThinkingPlaceholder /> : null}
+            </div>
           </div>
         </div>
       );
     }
     return null;
-  }), [displayItems, promptsOnly, hideTools, recapResponses]);
+  }), [displayItems, promptsOnly, hideTools, recapResponses, agentType, paneId]);
 
   // Part 2 — the live tail (reply.json's answer for the latest turn). It is the
   // ANSWER to committed's last turn (q_last), so it renders answer-only and sits
@@ -2544,9 +2615,23 @@ export default function CurrentHistoryView({
   // dedups against an already-migrated turn after switching away and back).
   const liveVisible = !promptsOnly && !!liveTurn && Number(liveTurn.history_id || 0) > committedMaxId;
   const liveTurnSteps = liveVisible && Array.isArray(liveTurn?.steps) ? liveTurn!.steps : [];
+  // live 尾巴的头像同样按"每轮一个":它前面(committed 末尾,跳过 system)已是同轮的
+  // assistant item 时不重复,只留空位对齐。
+  const liveShowAvatar = (() => {
+    for (let j = displayItems.length - 1; j >= 0; j -= 1) {
+      const r = String(displayItems[j]?.role || '');
+      if (r === 'system') continue;
+      return r !== 'assistant';
+    }
+    return true;
+  })();
   const renderedLiveTurn = liveVisible && liveTurn ? (
     <div data-id="current-history-live-turn" className="mb-5">
-      <div data-id="current-history-live-turn-assistant">
+      <div data-id="current-history-live-turn-assistant" className="flex items-start gap-2.5">
+        {liveShowAvatar
+          ? <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-live-turn-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
+          : <div aria-hidden="true" className="h-7 w-7 shrink-0" />}
+        <div data-id="current-history-live-turn-body" className="min-w-0 flex-1">
         {liveTurnSteps.map((step: any, i: number) => {
           if (step?.type === 'thinking') return <div key={i}><ThinkingBlock text={step.text} /></div>;
           if (step?.type === 'text') return <div key={i} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{step.text}</Markdown></div>;
@@ -2559,6 +2644,7 @@ export default function CurrentHistoryView({
           return null;
         })}
         {!liveTurnSteps.length ? <PendingThinkingPlaceholder /> : null}
+        </div>
       </div>
     </div>
   ) : null;
@@ -2587,10 +2673,14 @@ export default function CurrentHistoryView({
                   <div className="flex justify-end">
                     <div className="h-8 w-1/2 animate-pulse rounded-2xl bg-white/[0.05]" />
                   </div>
-                  <div className="space-y-2">
-                    <div className="h-3.5 w-11/12 animate-pulse rounded bg-white/[0.04]" />
-                    <div className="h-3.5 w-4/5 animate-pulse rounded bg-white/[0.04]" />
-                    <div className="h-3.5 w-2/3 animate-pulse rounded bg-white/[0.04]" />
+                  {/* 答案骨架与真实布局一致:左侧 28px 圆形头像位 + 右侧内容列 */}
+                  <div className="flex items-start gap-2.5">
+                    <div data-id={`current-history-loading-avatar-${row}`} className="mt-0.5 h-7 w-7 shrink-0 animate-pulse rounded-full bg-white/[0.05]" />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="h-3.5 w-11/12 animate-pulse rounded bg-white/[0.04]" />
+                      <div className="h-3.5 w-4/5 animate-pulse rounded bg-white/[0.04]" />
+                      <div className="h-3.5 w-2/3 animate-pulse rounded bg-white/[0.04]" />
+                    </div>
                   </div>
                 </div>
               ))}
@@ -2628,8 +2718,11 @@ export default function CurrentHistoryView({
                 </div>
                 {/* a 占位:先撑出答案位(thinking),真答案一开始流式就由 renderedLiveTurn
                     接管 —— 占位 → 真 a,无新建、不跳。 */}
-                <div data-id="current-history-optimistic-a" className="mb-5">
-                  <PendingThinkingPlaceholder />
+                <div data-id="current-history-optimistic-a" className="mb-5 flex items-start gap-2.5">
+                  <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-optimistic-a-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
+                  <div className="min-w-0 flex-1">
+                    <PendingThinkingPlaceholder />
+                  </div>
                 </div>
               </>
             ) : null}

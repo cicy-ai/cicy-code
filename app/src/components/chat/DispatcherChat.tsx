@@ -9,7 +9,7 @@ import apiService from '../../services/api';
  * 下 = prompt 输入条,发送走 /api/tmux/send(送进 REPL stdin,与终端/TG 同一管道)。
  * 终端不再展示——dispatcher 在 web 上就是一个聊天窗口。
  */
-export default function DispatcherChat({ paneId, active }: { paneId: string; active: boolean }) {
+export default function DispatcherChat({ paneId, active, agentType = 'dispatcher' }: { paneId: string; active: boolean; agentType?: string }) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   // 回复进行中(busy)→ 锁发送、显示 waiting。只有 reply complete / fail 才解锁。
@@ -64,7 +64,7 @@ export default function DispatcherChat({ paneId, active }: { paneId: string; act
   return (
     <div data-id="dispatcher-chat" className="flex h-full w-full flex-col bg-[#0c0d10]">
       <div data-id="dispatcher-chat-history" className="min-h-0 flex-1 overflow-hidden">
-        <CurrentHistoryView key={paneId} paneId={paneId} open={active} />
+        <CurrentHistoryView key={paneId} paneId={paneId} open={active} agentType={agentType} />
       </div>
       <div data-id="dispatcher-chat-input-bar" className="shrink-0 border-t border-white/[0.06] bg-black/[0.25] py-2.5">
         {/* Width-locked to the history content column (max-w-3xl px-4) so the

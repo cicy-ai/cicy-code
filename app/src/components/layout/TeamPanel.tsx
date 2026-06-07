@@ -284,6 +284,37 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     return Array.from(groups.values());
   }, [orderedBindings]);
 
+  // Fork nesting: a fork carries source_kind='fork' + source_ref=<source wid>.
+  // Group each fork under its TOP-LEVEL ancestor (flatten fork-of-fork to one
+  // level by walking the source_ref chain past any intermediate forks). Forks
+  // whose ancestor isn't in the current list (deleted / not bound here) fall
+  // back to top-level so they never disappear.
+  const { forksByParent, nestedWids } = useMemo(() => {
+    const byWid = new Map(orderedBindings.map(b => [shortId(b.name), b] as const));
+    const isFork = (b?: Binding) => !!b && String(b.source_kind || '') === 'fork' && !!b.source_ref;
+    const resolveTop = (b: Binding): Binding => {
+      let cur = b;
+      for (let i = 0; i < 16 && isFork(cur); i++) {
+        const parent = byWid.get(shortId(cur.source_ref || ''));
+        if (!parent) break; // orphan → cur is its own top
+        cur = parent;
+      }
+      return cur;
+    };
+    const byParent = new Map<string, Binding[]>();
+    const nested = new Set<string>();
+    for (const b of orderedBindings) {
+      if (!isFork(b)) continue;
+      const top = resolveTop(b);
+      const topWid = shortId(top.name);
+      if (topWid === shortId(b.name)) continue; // orphan fork → stays top-level
+      if (!byParent.has(topWid)) byParent.set(topWid, []);
+      byParent.get(topWid)!.push(b);
+      nested.add(shortId(b.name));
+    }
+    return { forksByParent: byParent, nestedWids: nested };
+  }, [orderedBindings]);
+
   const handleReorderDrop = useCallback((groupKey: string, fromWid: string, toWid: string) => {
     if (!fromWid || !toWid || fromWid === toWid) return;
     const group = groupedBindings.find(g => (g.machineId ? String(g.machineId) : 'local') === groupKey);
@@ -365,6 +396,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     canRestart = true,
     groupKey,
     draggable = false,
+    nested = false,
   }: {
     wid: string;
     title: string;
@@ -384,6 +416,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     canRestart?: boolean;
     groupKey?: string;
     draggable?: boolean;
+    nested?: boolean;
   }) => (
     <div
       key={wid}
@@ -417,7 +450,9 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         setDraggingWid(null);
         setDragOverWid(null);
       } : undefined}
-      className={`w-full mb-2 flex items-center gap-3 border p-3 rounded-xl transition-all group relative cursor-pointer ${
+      className={`w-full flex items-center gap-3 border rounded-xl transition-all group relative cursor-pointer ${
+        nested ? 'mb-1.5 p-2' : 'mb-2 p-3'
+      } ${
         active
           ? 'border-blue-500/50 bg-blue-500/[0.08] ring-1 ring-blue-500/20'
           : 'bg-white/[0.02] border-[var(--vsc-border)] hover:border-white/[0.08]'
@@ -575,6 +610,57 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     </div>
   );
 
+  // One worker card from a binding. Shared by top-level rows and nested fork
+  // sub-groups (nested = slimmer, non-draggable).
+  const cardForBinding = (b: Binding, opts: { nested?: boolean; draggable?: boolean; groupKey?: string }) => {
+    const wid = shortId(b.name);
+    const s = getStatus(wid);
+    const subtitleParts: string[] = [wid];
+    if (b.instance_label || b.machine_label) subtitleParts.push(b.instance_label || b.machine_label || '');
+    return renderAgentCard({
+      wid,
+      title: getName(b),
+      agentType: normalizeAgentType(b.agent_type) || agentTypeById.get(wid) || '',
+      gateway: gatewayById.get(wid),
+      status: s,
+      subtitle: subtitleParts.join(' · '),
+      active: activePaneId === wid,
+      opened: openedPaneIds.includes(wid),
+      draggable: !!opts.draggable,
+      nested: !!opts.nested,
+      groupKey: opts.groupKey,
+      onClick: () => {
+        if (onLocatePane) { onLocatePane(wid); return; }
+        if (onOpenInCurrentPane) { onOpenInCurrentPane(wid); return; }
+        window.location.hash = `#/agent/${wid}`;
+      },
+      onRestart: () => restartPane(wid, getName(b)),
+      onOpenSettings: () => onOpenSettingsPane?.(wid),
+      canRestart: true,
+      onFork: async () => {
+        setForkingId(wid);
+        try {
+          const { data } = await apiService.forkPane({ source_pane_id: wid, master_pane_id: paneId });
+          if (data?.pane_id) { await onRefreshPanes(); onRefreshPoll(); }
+        } catch {
+          window.dispatchEvent(new CustomEvent('show-toast', { detail: i18n.t('toastForkFailed', { ns: 'teamPanel' }) }));
+        } finally {
+          setForkingId(null);
+          setOpenMenuId(null);
+        }
+      },
+      forking: forkingId === wid,
+      onRemove: async () => {
+        const ok = await confirm({
+          body: <Trans i18nKey="confirmUnbind" ns="teamPanel" values={{ name: getName(b) }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
+          danger: true,
+        });
+        if (ok) unbind(b);
+      },
+      onDelete: () => deletePane(b, getName(b)),
+    });
+  };
+
   return (
     <div className="h-full w-full min-w-0 flex flex-col overflow-hidden" data-id="team-panel-root">
       {forkingId ? createPortal(
@@ -692,62 +778,43 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                 data-id={`team-panel-group-${group.machineLabel || group.machineId || 'local'}`}
               >
 
-                {group.items.map(b => {
-                  const wid = shortId(b.name);
-                  const s = getStatus(wid);
-                  const subtitleParts: string[] = [wid];
-                  if (b.instance_label || b.machine_label) subtitleParts.push(b.instance_label || b.machine_label || '');
-                  return renderAgentCard({
-                    wid,
-                    title: getName(b),
-                    agentType: normalizeAgentType(b.agent_type) || agentTypeById.get(wid) || '',
-                    gateway: gatewayById.get(wid),
-                    status: s,
-                    subtitle: subtitleParts.join(' · '),
-                    active: activePaneId === wid,
-                    opened: openedPaneIds.includes(wid),
-                    draggable: true,
-                    groupKey,
-                    onClick: () => {
-                      if (onLocatePane) {
-                        onLocatePane(wid);
-                        return;
-                      }
-                      if (onOpenInCurrentPane) {
-                        onOpenInCurrentPane(wid);
-                        return;
-                      }
-                      window.location.hash = `#/agent/${wid}`;
-                    },
-                    onRestart: () => restartPane(wid, getName(b)),
-                    onOpenSettings: () => onOpenSettingsPane?.(wid),
-                    canRestart: true,
-                    onFork: async () => {
-                      setForkingId(wid);
-                      try {
-                        const { data } = await apiService.forkPane({ source_pane_id: wid, master_pane_id: paneId });
-                        if (data?.pane_id) {
-                          await onRefreshPanes();
-                          onRefreshPoll();
-                        }
-                      } catch {
-                        window.dispatchEvent(new CustomEvent('show-toast', { detail: i18n.t('toastForkFailed', { ns: 'teamPanel' }) }));
-                      } finally {
-                        setForkingId(null);
-                        setOpenMenuId(null);
-                      }
-                    },
-                    forking: forkingId === wid,
-                    onRemove: async () => {
-                      const ok = await confirm({
-                        body: <Trans i18nKey="confirmUnbind" ns="teamPanel" values={{ name: getName(b) }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
-                        danger: true,
-                      });
-                      if (ok) unbind(b);
-                    },
-                    onDelete: () => deletePane(b, getName(b)),
-                  });
-                })}
+                {group.items
+                  .filter(b => !nestedWids.has(shortId(b.name)))
+                  .map(b => {
+                    const wid = shortId(b.name);
+                    const childForks = forksByParent.get(wid) || [];
+                    return (
+                      <div key={`tw-${wid}`} data-id={`team-panel-worker-wrap-${wid}`}>
+                        {cardForBinding(b, { draggable: true, groupKey })}
+                        {childForks.length > 0 ? (
+                          <div
+                            data-id={`team-panel-worker-forks-${wid}`}
+                            className="ml-5 mb-2 pl-2"
+                          >
+                            {childForks.map((fb, i) => {
+                              const isLast = i === childForks.length - 1;
+                              return (
+                                <div
+                                  key={`fk-${shortId(fb.name)}`}
+                                  data-id={`team-panel-worker-fork-${shortId(fb.name)}`}
+                                  className="relative pl-4"
+                                >
+                                  {/* 竖折线:竖干 + 拐角横线(最后一个用 └ 竖线只到拐角,其余 ├ 贯通) */}
+                                  <span
+                                    aria-hidden
+                                    className="absolute left-0 top-0 w-px bg-white/[0.14]"
+                                    style={{ height: isLast ? '1.4rem' : 'calc(100% + 0.375rem)' }}
+                                  />
+                                  <span aria-hidden className="absolute left-0 top-[1.4rem] h-px w-3 bg-white/[0.14]" />
+                                  {cardForBinding(fb, { nested: true, draggable: false })}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
               </div>
               );
             })}

@@ -8,6 +8,7 @@ type ToastState = {
   variant?: 'default' | 'success';
 };
 import { useApp } from '../contexts/AppContext';
+import { isCicyLiteAgent } from '../lib/agentType';
 import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
@@ -392,7 +393,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const fullPaneId = `${paneId}:main.0`;
   const initialPaneIdRef = useRef(paneId);
 
-  const mainTab: 'cli' | 'chat' = 'cli';
+  const mainTab = 'cli' as 'cli' | 'chat';
   const [leftPanelView, setLeftPanelView] = useState<LeftPanelView>(() => {
     const v = cache.get(leftPanelKey(paneId), null);
     // 刷新后恢复上次打开的左栏面板(含办公室);'todo' 若技能未装会被下方 effect 关掉
@@ -1650,7 +1651,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       />
       {/* Dispatcher cards pin the model picker to the far LEFT of the bottom
           bar; the spacer pushes the remaining controls right. */}
-      {String((paneDetails[activeCliPaneId.split(':')[0]] || (activeCliPaneId.split(':')[0] === paneId.split(':')[0] ? agentDetail : null))?.agent_type || '') === 'dispatcher' ? (
+      {isCicyLiteAgent((paneDetails[activeCliPaneId.split(':')[0]] || (activeCliPaneId.split(':')[0] === paneId.split(':')[0] ? agentDetail : null))?.agent_type || '') ? (
         <div data-id="stack-controls-model-spacer" className="flex-1" />
       ) : null}
       <button
@@ -1659,7 +1660,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         onClick={toggleShellPanel}
         aria-pressed={shellPanelOpen}
         title={t('shellPanelToggle', { defaultValue: 'Shell 终端' })}
-        className={`p-1 rounded transition-colors cursor-pointer ${shellPanelOpen ? 'text-emerald-400' : 'text-zinc-600 hover:text-zinc-300'}`}
+        className={`p-1 rounded border transition-colors cursor-pointer ${shellPanelOpen ? 'text-emerald-400 border-emerald-400/50 bg-emerald-400/10' : 'text-zinc-600 border-zinc-700/60 hover:text-zinc-300 hover:border-zinc-600'}`}
       >
         <Terminal className="w-3.5 h-3.5" />
       </button>
@@ -1780,7 +1781,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <div
                 data-testid="left-panel"
                 data-id="left-panel"
-                className="h-full w-[320px] min-w-[320px] max-w-[320px] shrink-0"
+                className="h-full w-[360px] min-w-[360px] max-w-[360px] shrink-0"
               >
                 <div data-id="left-panel-wrap" className="h-full flex flex-col bg-[#0A0A0A] border-r border-[var(--vsc-border)] relative z-[130]">
                   <div data-id="left-panel-header" className="h-12 border-b border-[var(--vsc-border)] flex items-center px-2 bg-[#0e0e0e] shrink-0 gap-1">
@@ -2526,7 +2527,7 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
   const agentType = String(agentDetail?.agent_type || '');
   // The dispatcher always talks through the local gateway by construction, so
   // it is eligible regardless of the use_custom_gateway flag.
-  const eligible = agentType === 'dispatcher'
+  const eligible = isCicyLiteAgent(agentType)
     || (useCustomGateway && ['claude', 'codex', 'opencode'].includes(agentType));
   if (!eligible) return null;
 

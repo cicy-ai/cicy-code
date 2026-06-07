@@ -9,6 +9,7 @@ import { WebFrame } from '../WebFrame'
 import { ShellPanel } from '../terminal/ShellPanel'
 import CurrentHistoryView from '../chat/CurrentHistoryView'
 import DispatcherChat from '../chat/DispatcherChat'
+import { isCicyLiteAgent } from '../../lib/agentType'
 // AgentCanvasItem outlived its namesake: the draggable-canvas component was
 // dead code (never rendered, tree-shaken) and was deleted 2026-06-05; the
 // item shape lives on as the stack's card model.
@@ -70,13 +71,14 @@ function AgentStack({
   const [promptsOnly, setPromptsOnly] = useState(false)
 
   // 吸附在该卡片终端 agent-stack-card-terminal-<paneId> 里,按 inset 内缩:
-  // top 20 / bottom 120 / left 20 / right 20(相对终端矩形)。终端没挂载返回 null。
+  // top +2(终端 rect.top≈48 → 实际 top≈50)/ bottom 120 / left 20 / right 20。
+  // 终端没挂载返回 null。
   const computeHistoryPos = useCallback((paneId: string) => {
     const panel = document.querySelector<HTMLElement>(`[data-id="agent-stack-card-terminal-${paneId}"]`)
     if (!panel) return null
     const rect = panel.getBoundingClientRect()
     return {
-      top: rect.top + 20,
+      top: rect.top + 2,
       left: rect.left + 20,
       width: Math.max(0, rect.width - 40),
       bottom: Math.max(0, window.innerHeight - rect.bottom + 120),
@@ -192,7 +194,7 @@ function AgentStack({
               </button>
             </div>
             <div data-id="agent-stack-card-history-popover-body" className="min-h-0 flex-1 overflow-hidden rounded-b-2xl">
-              <CurrentHistoryView key={historyPaneId} paneId={historyPaneId} open promptsOnly={promptsOnly} />
+              <CurrentHistoryView key={historyPaneId} paneId={historyPaneId} open promptsOnly={promptsOnly} agentType={items.find((it) => it.paneId === historyPaneId)?.agentType || ''} />
             </div>
           </div>
         </>,
@@ -498,7 +500,7 @@ function AgentStackCard({
         </div>
         {/* Dispatcher cards ARE the history view — the popover toggle is
             redundant there. */}
-        {item.agentType !== 'dispatcher' ? (
+        {!isCicyLiteAgent(item.agentType) ? (
         <div
           data-id={`agent-stack-card-view-tabs-${item.paneId}`}
           className="ml-2 inline-flex shrink-0 items-center"
@@ -602,11 +604,11 @@ function AgentStackCard({
         </div>
       </div>
       <div data-id={`agent-stack-card-body-${item.paneId}`} className="relative min-h-0 flex-1 bg-black">
-        {item.agentType === 'dispatcher' ? (
+        {isCicyLiteAgent(item.agentType) ? (
           // Dispatcher (PM) agents are chat-first on the web: history view +
           // prompt bar instead of the raw REPL terminal. The input feeds the
           // same /api/tmux/send pipe, so the terminal/TG channels stay in sync.
-          <DispatcherChat paneId={item.paneId} active={active} />
+          <DispatcherChat paneId={item.paneId} active={active} agentType={item.agentType || 'dispatcher'} />
         ) : !item.isApiOnly && item.ttydSrc ? (
           // Keep the terminal mounted while History is showing so its ttyd
           // WebSocket isn't torn down (and re-attached) on every toggle.
