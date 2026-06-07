@@ -167,17 +167,29 @@ fi
 # cicy-code-win32-x64@2.1.58 and the run still exited 0, shipping a launcher
 # whose optionalDependency can never resolve). Verify every package actually
 # exists on npmjs at $VERSION and fail loudly otherwise.
+#
+# npmjs has read-after-write propagation delay (CDN edge cache): a freshly
+# published version can be invisible to `npm view` for tens of seconds. The
+# main package publishes LAST so it gets the least settle time — an immediate
+# single-shot check false-MISSed it on v2.2.1 AND v2.2.2 (both were actually
+# live), failing the step and skipping release.yml's CDN uploads. So: poll
+# each package up to ~2min before declaring a real MISS.
 if [ -z "$DRY" ]; then
   echo "==> Verifying published versions on registry.npmjs.org"
   fail=0
   pkgs=(cicy-code)
   [ -z "$MAIN_ONLY" ] && for key in "${!ASSET[@]}"; do pkgs+=("cicy-code-$key"); done
   for pkg in "${pkgs[@]}"; do
-    got=$(npm view "$pkg@$VERSION" version --registry=https://registry.npmjs.org 2>/dev/null || true)
+    got=""
+    for i in $(seq 1 13); do
+      got=$(npm view "$pkg@$VERSION" version --registry=https://registry.npmjs.org 2>/dev/null || true)
+      [ "$got" = "$VERSION" ] && break
+      [ "$i" -lt 13 ] && sleep 10
+    done
     if [ "$got" = "$VERSION" ]; then
       echo "  ok   $pkg@$VERSION"
     else
-      echo "  MISS $pkg@$VERSION (registry returned: '${got:-nothing}')"
+      echo "  MISS $pkg@$VERSION after ~2min of polling (registry returned: '${got:-nothing}')"
       fail=1
     fi
   done
