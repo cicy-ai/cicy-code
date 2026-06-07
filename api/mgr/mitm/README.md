@@ -90,6 +90,22 @@ cicy-code mitm install-ca --dry-run     # 看会执行什么
 
 不能在系统级装信任的话(没有 sudo),`--scope=nss` 至少让 Chrome / Firefox 工作。命令行工具用 `SSL_CERT_FILE=~/cicy-ai/db/mitm-ca.crt` 或 `--cacert` 绕过。
 
+## CA 信任安装与同意（合规 §1.4 / §1.5）
+
+把 MITM 根 CA 装进 OS 信任库 = 修改系统信任根,因此**必须显式用户同意,首启绝不静默安装**(三平台一致)。
+
+- **一机一证**:CA 首启在本机现生成(CommonName 烙主机名+日期),私钥 `0600` 留本机、永不外传或打进安装包。
+- **同意门控**:统一 flag `~/cicy-ai/mitm/ca-trust-consent.json`。`ensureMITMCAInSystemTrust` 仅在已同意时安装(用于 CA 重生成后续信任)。
+- **同意入口**:cicy-desktop 的"启用 HTTPS 审计"卡片 → `POST /api/mitm/consent {enable:true}`(team Bearer)。生产 cicy-code 提权运行时 CryptoAPI 静默写 `LocalMachine\ROOT`,零 UAC;非提权返回 `need_elevation`,卡片回退 exec `cicy-code mitm install-ca`(自触发 UAC / pkexec / osascript,OS 提权弹窗即合规第二道同意)。
+- **撤销**:`cicy-code mitm uninstall-ca` 或 `POST /api/mitm/consent {enable:false}` → 卸载 + 清 flag。
+- **平台**:Windows=`LocalMachine\ROOT`(CryptoAPI,需提权);Linux=`update-ca-certificates`(需 root/sudo);macOS=`System.keychain`(GUI 授权)。node agent(claude/opencode)始终靠 `NODE_EXTRA_CA_CERTS`,不依赖系统库;仅 codex/kiro(Rust schannel)需要系统库信任。
+
+### 容器逃生门(责任转移)
+
+Linux 容器/无头环境可设环境变量 `CICY_CA_TRUST_CONSENT=1` 代表部署时同意(codex/kiro 需开箱即信任)。该逃生门**仅在 Linux 容器内生效**(检测 `/.dockerenv`),桌面端(Windows/macOS/Linux-desktop)即便设置也无效,强制走应用内同意卡片——由单测钉死,不会变成桌面后门。
+
+> 在 Linux 容器环境设置 `CICY_CA_TRUST_CONSENT=1`,即代表部署方已代表该环境内的全部使用者,作出 §1.4 / 用户条款 §4.4 所要求的「对 AI 流量本地审计解密」的告知与同意,并自行承担相应义务与合规责任。该逃生门仅在容器内生效,桌面端无效。
+
 ### 4. 用客户端
 
 把 Chrome / Cursor / 任意客户端的 SOCKS5 代理配置成 `127.0.0.1:1085`。
@@ -228,9 +244,12 @@ cicy-code mitm help                      # 完整帮助
 
 平台支持：
 
+- Windows: `LocalMachine\ROOT`(CryptoAPI 直调)
 - Linux: `update-ca-certificates` (system) + `certutil` (NSS DB for Chrome/Firefox)
 - macOS: `security add-trusted-cert` (System.keychain)
 - 其他: 用 `--scope=nss` 或手动 `SSL_CERT_FILE=...`
+
+`install-ca` / `uninstall-ca` 在非特权时**自触发 OS 提权**(Windows UAC / Linux pkexec / macOS osascript),并把同意 flag 写进用户上下文的 `~/cicy-ai/mitm/ca-trust-consent.json`。成功安装即记录同意,失败/取消不记录。详见上文「CA 信任安装与同意」。
 
 ---
 
