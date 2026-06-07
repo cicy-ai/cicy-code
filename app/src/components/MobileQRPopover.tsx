@@ -67,16 +67,10 @@ export default function MobileQRPopover(_props: Props) {
     return `cicy-desktop://addTeam?${params.toString()}`;
   }, [publicUrl]);
 
-  // Telegram bot deep link for the 小程序 method — opens @cicy_ai_bot and hands
-  // it the token via `start`. (Telegram's start param allows only [A-Za-z0-9_-]
-  // and caps at 64 chars; a cicy token fits, the full URL would not, so the bot
-  // resolves the server from the token.)
-  const telegramLink = useMemo(() => {
-    const token = TokenManager.getToken() || '';
-    return token
-      ? `https://t.me/${TG_BOT}?start=${encodeURIComponent(token)}`
-      : `https://t.me/${TG_BOT}`;
-  }, []);
+  // Telegram bot link for the 小程序 method — JUST opens @cicy_ai_bot. Never put
+  // the token in the URL: a t.me link is shareable and passes through Telegram,
+  // so a ?start=<token> would leak the login token. The bot handles auth itself.
+  const telegramLink = `https://t.me/${TG_BOT}`;
 
   // Esc closes the modal.
   useEffect(() => {
