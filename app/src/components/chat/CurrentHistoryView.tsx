@@ -22,6 +22,8 @@ type HistoryTurn = {
   credit?: number;
   model?: string;
   raw_items?: RawHistoryItem[];
+  // Client-only optimistic-send placeholder (never comes from the backend).
+  _optimistic?: boolean;
 };
 
 type RawHistoryItem = Record<string, any>;
@@ -67,6 +69,17 @@ const CURRENT_HISTORY_POLL_IDLE_MS = 2500;
 // Short retry while the committed window is still loading on open, so the live
 // tail attaches as soon as Part 1 is ready (and the poll never races it).
 const CURRENT_HISTORY_POLL_WAIT_MS = 150;
+// Optimistic-send placeholder. The moment the user hits send we reserve TWO
+// slots — a q bubble (showing what they typed, in a "sending" state) and an a
+// placeholder (thinking dots) right below it — BEFORE the backend round-trips.
+// When the real committed q lands the q flips "sending"→confirmed in place (same
+// top-anchor, no new div); when the real answer streams it fills the reserved a
+// slot (renderedLiveTurn). So q never lags behind the keypress. The synthetic q
+// carries this stable turn-key so the anchor machinery can pin it like a real q.
+const OPTIMISTIC_Q_KEY = '__optimistic_q__';
+// Drop a stuck optimistic bubble if the backend never produces a turn (send
+// silently dropped, agent crashed) so it can't linger forever.
+const OPTIMISTIC_Q_TIMEOUT_MS = 60000;
 
 function openCurrentHistoryToolDB(): Promise<IDBDatabase | null> {
   if (typeof window === 'undefined' || !window.indexedDB) {
@@ -1549,7 +1562,10 @@ function HistoryTurnIdBadge({ historyId }: { historyId?: number }) {
 function ThinkingBlock({ text }: { text: string }) {
   return (
     <div data-id="current-history-view-thinking-block" className="mb-2 border-l-2 border-amber-300/25 pl-3">
-      <div data-id="current-history-view-thinking-block-body" className="chat-markdown current-history-markdown text-sm leading-[1.7] text-amber-50/60">
+      {/* thinking 要和正文区分:小一号(text-xs)、斜体、更暗的颜色。颜色用内联 style 强制 ——
+          .chat-markdown{color:#d4d4d8} 是非分层规则,会盖掉 Tailwind 的 text-zinc-* 工具类,
+          所以必须内联(内联优先级高于样式表类规则),<p> 子元素再继承这个颜色。 */}
+      <div data-id="current-history-view-thinking-block-body" className="chat-markdown current-history-markdown text-xs italic leading-[1.7]" style={{ color: '#52525b' }}>
         <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{text}</Markdown>
       </div>
     </div>
@@ -1692,6 +1708,22 @@ export default function CurrentHistoryView({
   // 这一轮 reply 是否曾经进入过 active(流式)状态。只有"流式开始过"之后,完成时才允许收
   // spacer——否则首 token 延迟期间(reply 还没 active)就缩 spacer,会把 q 顶上去又"回落"。
   const replySeenActiveRef = useRef(false);
+  // 乐观占位:用户点发送的瞬间就先塞一个 q 气泡(sending 态)+ 一个 a 占位(thinking),
+  // 不等后端往返。baseline 记录占位时的最大 user history_id,真 q 落库后(committed user
+  // turn 的 id 超过 baseline)就把锚点交接给真 q 并撤掉占位 —— 同一位置,不闪不跳。
+  const [optimisticQ, setOptimisticQ] = useState<{ text: string; ts: number } | null>(null);
+  const optimisticBaselineUserIdRef = useRef(0);
+  // 给输入框广播"是否还在等回复"。busy = 有占位 q(刚发出) 或 轮询发现 in-flight 回复
+  // (未 complete 且非 fail/error)。只在变化时 emit。供 DispatcherChat 锁发送、显示 waiting。
+  const optimisticActiveRef = useRef(false);
+  const lastBusyEmitRef = useRef<boolean | null>(null);
+  const emitBusy = (busy: boolean) => {
+    if (lastBusyEmitRef.current === busy) return;
+    lastBusyEmitRef.current = busy;
+    window.dispatchEvent(new CustomEvent('cicy:dispatcher-busy', { detail: { paneId, busy } }));
+  };
+  // items 的最新快照,供轮询 effect 的 onNudge(闭包里的 items 是旧的)读取 baseline。
+  const itemsRef = useRef<HistoryTurn[]>([]);
   const scheduledScrollRafRef = useRef<number | null>(null);
   const scheduledScrollTimersRef = useRef<number[]>([]);
 
@@ -1802,6 +1834,8 @@ export default function CurrentHistoryView({
     clearLiveTurn();
     applyAnchorSpacerHeight(0);
     clearScheduledScrolls();
+    setOptimisticQ(null);
+    optimisticBaselineUserIdRef.current = 0;
   }, [paneId, open]);
 
   useEffect(() => {
@@ -1936,7 +1970,14 @@ export default function CurrentHistoryView({
 
         const answerId = Number(data?.history_id || 0); // = current.maxID + 1
         const complete = !!data?.complete;
+        const replyStatus = String(data?.status || '').trim().toLowerCase();
+        const replyFailed = replyStatus === 'failed' || replyStatus === 'fail' || replyStatus === 'error';
         const replyMaxId = answerId > 0 ? answerId - 1 : 0; // current.json maxID == q_last id
+
+        // 广播忙/闲:有 in-flight 回复(有答案槽、未 complete、非 fail)就是 busy;占位 q 还在也算
+        // busy。complete / fail 才解锁发送。
+        const replyInFlight = answerId > 0 && !complete && !replyFailed;
+        emitBusy(optimisticActiveRef.current || replyInFlight);
 
         // No conversation / no turn yet → nothing to attach.
         if (answerId <= 0) {
@@ -2033,18 +2074,36 @@ export default function CurrentHistoryView({
     // 外部"立即刷新"信号(如办公室发完指令)→ 取消等待中的 idle 轮询,马上拉一次,
     // 这样刚发出去的消息不用等满 2.5s 才出现在窗口里。
     const onNudge = (e: Event) => {
-      const id = String((e as CustomEvent)?.detail?.paneId || '').trim();
+      const detail = (e as CustomEvent)?.detail || {};
+      const id = String(detail.paneId || '').trim();
       if (id && id !== paneId) return;
+      // The sender passed the q text → reserve the two optimistic slots NOW, so
+      // the bubble paints on this frame instead of after the poll round-trip.
+      const qText = String(detail.text || '').trim();
+      if (qText) {
+        let maxUserId = 0;
+        for (const it of itemsRef.current) if (it?.role === 'user') maxUserId = Math.max(maxUserId, Number(it?.history_id || 0));
+        optimisticBaselineUserIdRef.current = maxUserId;
+        setOptimisticQ({ text: qText, ts: Date.now() });
+      }
       if (timer != null) { window.clearTimeout(timer); timer = null; }
       void poll();
     };
+    // Send failed → retract the optimistic q/a slots painted on click.
+    const onCancelOptimistic = (e: Event) => {
+      const id = String((e as CustomEvent)?.detail?.paneId || '').trim();
+      if (id && id !== paneId) return;
+      setOptimisticQ(null);
+    };
     window.addEventListener('cicy:current-history-refresh', onNudge as EventListener);
+    window.addEventListener('cicy:current-history-cancel-optimistic', onCancelOptimistic as EventListener);
 
     void poll();
     return () => {
       cancelled = true;
       if (timer != null) window.clearTimeout(timer);
       window.removeEventListener('cicy:current-history-refresh', onNudge as EventListener);
+      window.removeEventListener('cicy:current-history-cancel-optimistic', onCancelOptimistic as EventListener);
     };
   }, [conversationId, open, paneId, model]);
 
@@ -2075,7 +2134,10 @@ export default function CurrentHistoryView({
         if (items[i]?.role === 'user') { lastUserIdx = i; break; }
       }
       const lastUser = lastUserIdx >= 0 ? items[lastUserIdx] : null;
-      const lastUserKey = lastUser ? String(lastUser.history_id || `${lastUser.text || lastUser.q || 'turn'}-${lastUserIdx}`) : '';
+      // 乐观占位 q 是当前最新的"用户问题" → 用它的稳定 key 做锚,效果跟真 q 一样钉到顶部。
+      const lastUserKey = optimisticQ
+        ? OPTIMISTIC_Q_KEY
+        : (lastUser ? String(lastUser.history_id || `${lastUser.text || lastUser.q || 'turn'}-${lastUserIdx}`) : '');
 
       // 首次加载:滚到底显示最新一轮,并把当前最后一个问题记为"已锚",避免开屏就把它顶上去。
       if (!didInitialScrollRef.current) {
@@ -2097,11 +2159,18 @@ export default function CurrentHistoryView({
           userTookOverRef.current = false;
           replySeenActiveRef.current = false;
           // 先命令式撑足 spacer(让 q 能滚到顶),再平滑滚一次。setState 同步发出供后续渲染。
-          const spacer = Math.max(0, el.clientHeight - target.offsetHeight - 16);
+          // spacer 按"q 下方已有内容"算,而不是只按 q 自身高度 —— 否则当这个分支因 conversation
+          // 轮转(softRebind 后 q 的 history_id 变了)在回复结束时被再次触发时,会无视已经填在下面
+          // 的答案、把 spacer 重置回初始大高度 → 末尾"弹回原高度"。用下方内容算:新问题(下方只有
+          // q+thinking)→ spacer 仍很大;已带完整答案的 q → spacer 自然很小,不弹。
+          const belowQ = el.scrollHeight - anchorSpacerHeightRef.current - target.offsetTop;
+          const spacer = Math.max(0, el.clientHeight - belowQ - 16);
           if (anchorSpacerRef.current) anchorSpacerRef.current.style.height = `${spacer}px`;
           applyAnchorSpacerHeight(spacer);
           const top = el.scrollTop + (target.getBoundingClientRect().top - el.getBoundingClientRect().top) - 8;
-          programmaticScrollUntilRef.current = Date.now() + 800; // 平滑滚动动画期间的 scroll 事件不算用户操作
+          // q 顶到顶部要有"滑上去"的动效(不再硬跳)。占位 q 和真新问题都走平滑滚动 —— 气泡先即时
+          // 出现在底部,再平滑滑到顶。动画期间由 programmaticScrollUntil 守卫,spacer 不动、不回落。
+          programmaticScrollUntilRef.current = Date.now() + 800;
           el.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
           forceScrollBottomRef.current = false;
           shouldStickBottomRef.current = false;
@@ -2115,17 +2184,14 @@ export default function CurrentHistoryView({
         if (userTookOverRef.current) return;
         // 平滑滚到顶的动画窗口内(programmaticScrollUntilRef),什么都别做:此时若重算/缩小
         // spacer 会让 scrollHeight 变小、scrollTop 被 clamp 往下夹 → q 顶上去后又"回落"。
-        // 让平滑动画跑完再说。
+        // 让滚动动画跑完再说(这一个守卫就足以防回落)。
         if (Date.now() < programmaticScrollUntilRef.current) return;
         const target = el.querySelector(`[data-turn-key="${CSS.escape(activeSpacerTurnKeyRef.current)}"]`) as HTMLDivElement | null;
         if (!target) { activeSpacerTurnKeyRef.current = ''; return; }
-        const replyInFlight = (!!liveTurn && isActiveAssistantStatus(String((liveTurn as any)?.status || '')))
-          || isActiveAssistantStatus(String(items[items.length - 1]?.status || ''));
-        // 流式期:**零手动 scroll**。回复只在 q 下方追加(在视口下方),scrollTop 不动 → q 自然
-        // 留在顶,不抖、不抢用户。完成后只**收一次 spacer**去掉下方多余空白(不 scroll,不打扰)。
-        if (replyInFlight) { replySeenActiveRef.current = true; return; }
-        // 还没流式开始过(首 token 延迟期):保持 new-q 撑好的大 spacer,绝不提前收 → 不让 q 回落。
-        if (!replySeenActiveRef.current) return;
+        // 全程(thinking / 流式 / 完成)持续把 spacer 收到"q 下方内容刚好填满一屏"。早先"流式期
+        // 不收、完成才收一次"会导致 thinking 阶段 spacer 仍是初始大高度、下方留出可滑空白;改成
+        // 连续收:下方没内容时 belowQ≈q 高 → spacer 仍大(q 能停顶);thinking/答案变高 → spacer
+        // 同步缩小 → q 始终锁顶、下方无多余可滑空间。防回落只靠上面的动画窗口守卫。
         const belowQ = el.scrollHeight - anchorSpacerHeightRef.current - target.offsetTop;
         const measured = Math.max(0, el.clientHeight - belowQ - 16);
         if (Math.abs(measured - anchorSpacerHeightRef.current) > 2) applyAnchorSpacerHeight(measured);
@@ -2133,7 +2199,7 @@ export default function CurrentHistoryView({
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [open, loading, items, liveTurn]);
+  }, [open, loading, items, liveTurn, optimisticQ]);
 
   // Prompts-only filters out most turns at once. The active-turn anchor spacer
   // (sized to push an in-flight turn up) and the old scrollTop would otherwise
@@ -2229,6 +2295,39 @@ export default function CurrentHistoryView({
     () => items.reduce((m, t) => Math.max(m, Number(t?.history_id || 0)), 0),
     [items],
   );
+
+  // Keep a live snapshot of `items` for the poll effect's onNudge (its closure
+  // captures a stale `items` — deps don't include it).
+  useEffect(() => { itemsRef.current = items; }, [items]);
+  // Mirror optimisticQ into a ref so the poll closure reads the current value
+  // (and keep the busy signal honest while the optimistic q is still showing).
+  useEffect(() => {
+    optimisticActiveRef.current = !!optimisticQ;
+    if (optimisticQ) emitBusy(true);
+  }, [optimisticQ]);
+
+  // Optimistic q teardown. The real committed q has landed once a user turn with
+  // an id beyond the send-time baseline shows up in `items` (reconcileTail pulled
+  // q_last in). Hand the top-anchor over to that real turn FIRST so the anchor
+  // effect treats it as already-pinned (no second smooth-scroll), then drop the
+  // placeholder — the q flips sending→confirmed in place. Also a hard timeout so
+  // a send the backend never honored can't strand the bubble.
+  useEffect(() => {
+    if (!optimisticQ) return;
+    let maxUserId = 0;
+    for (const it of items) if (it?.role === 'user') maxUserId = Math.max(maxUserId, Number(it?.history_id || 0));
+    if (maxUserId > optimisticBaselineUserIdRef.current) {
+      const realKey = String(maxUserId);
+      if (anchoredQKeyRef.current === OPTIMISTIC_Q_KEY) anchoredQKeyRef.current = realKey;
+      if (activeSpacerTurnKeyRef.current === OPTIMISTIC_Q_KEY) activeSpacerTurnKeyRef.current = realKey;
+      setOptimisticQ(null);
+      return;
+    }
+    const elapsed = Date.now() - optimisticQ.ts;
+    const remaining = Math.max(0, OPTIMISTIC_Q_TIMEOUT_MS - elapsed);
+    const timer = window.setTimeout(() => setOptimisticQ(null), remaining);
+    return () => window.clearTimeout(timer);
+  }, [items, optimisticQ]);
 
   // Prompts-only display list: union of the cached question turns and the live
   // window's user turns (live wins on id collision), deduped by history_id and
@@ -2424,7 +2523,7 @@ export default function CurrentHistoryView({
     <OpenUrlContext.Provider value={setPendingUrl}>
     <div data-id="current-history-view" className="flex h-full flex-col bg-[#0b0b0d]">
       {pendingUrl ? <LinkConfirmModal url={pendingUrl} onClose={() => setPendingUrl(null)} /> : null}
-      {!loading && items.length === 0 ? (
+      {!loading && displayItems.length === 0 && !liveVisible && !optimisticQ ? (
         <div data-id="current-history-empty" className="flex flex-1 flex-col items-center justify-center px-4">
           <div className="w-full max-w-2xl">
             <div data-id="current-history-empty-greeting" className="mb-5 text-center">
@@ -2469,6 +2568,27 @@ export default function CurrentHistoryView({
             ) : null}
             {renderedTurns}
             {renderedLiveTurn}
+            {/* 占位 q + a 必须排在 renderedLiveTurn 之后 —— 新问题 q2 是最新的一轮,而上一轮
+                的答案 a1 在被 reconcileTail 迁进 committed 之前仍以 renderedLiveTurn(live 尾巴)
+                渲染。若把 q2 排在它前面,顺序会变成 q1 → q2 → a1(q2 把 q1 的答案挤开、硬钉到顶
+                又把 q1 顶出屏幕),这就是"q2 覆盖 q1"。放到最后,顺序恒为 …q1, a1, q2, a2占位。 */}
+            {optimisticQ ? (
+              <>
+                {/* q 占位:独立块渲染,塞进/撤掉绝不触发 committed 列表(renderedTurns memo)
+                    重算 → 历史 Markdown 不重渲染,q 点发送瞬间即现、不卡。sending 态(略透明),
+                    真 q 落库后此块消失、committed 里的真 q 顶到同一位置。 */}
+                <div data-turn-key={OPTIMISTIC_Q_KEY} className="mb-5">
+                  <div data-id="current-history-optimistic-q" className="opacity-60 transition-opacity">
+                    <CollapsibleQ text={optimisticQ.text} />
+                  </div>
+                </div>
+                {/* a 占位:先撑出答案位(thinking),真答案一开始流式就由 renderedLiveTurn
+                    接管 —— 占位 → 真 a,无新建、不跳。 */}
+                <div data-id="current-history-optimistic-a" className="mb-5">
+                  <PendingThinkingPlaceholder />
+                </div>
+              </>
+            ) : null}
           <div data-id="current-history-anchor-spacer" ref={anchorSpacerRef} aria-hidden="true" style={{ height: `${anchorSpacerHeight}px` }} />
           </>}
         </div>

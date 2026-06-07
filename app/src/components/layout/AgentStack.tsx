@@ -64,38 +64,30 @@ function AgentStack({
   // switching agents switches the history shown. `historyPaneId` = the agent
   // whose history is open (null = closed).
   const [historyPaneId, setHistoryPaneId] = useState<string | null>(null)
-  const [historyPos, setHistoryPos] = useState<{ top: number; left: number; arrowLeft: number } | null>(null)
-  const [historySize, setHistorySize] = useState<{ width: number; height: number }>({ width: 460, height: 480 })
+  // Popover is snapped INSIDE the card's terminal area: left/width/top from that
+  // terminal's rect, with its bottom inset 88px from the terminal's bottom.
+  const [historyPos, setHistoryPos] = useState<{ top: number; left: number; width: number; bottom: number } | null>(null)
   const [promptsOnly, setPromptsOnly] = useState(false)
-  const historySizeRef = useRef(historySize)
-  useEffect(() => { historySizeRef.current = historySize }, [historySize])
 
-  // Anchor the popover under a card's History button (centered, clamped to the
-  // viewport); the arrow tracks the button center. Returns null if the button
-  // isn't on screen yet.
+  // 吸附在该卡片终端 agent-stack-card-terminal-<paneId> 里,按 inset 内缩:
+  // top 20 / bottom 120 / left 20 / right 20(相对终端矩形)。终端没挂载返回 null。
   const computeHistoryPos = useCallback((paneId: string) => {
-    const btn = document.querySelector<HTMLElement>(`[data-id="agent-stack-card-view-tab-history-${paneId}"]`)
-    if (!btn) return null
-    const rect = btn.getBoundingClientRect()
-    const W = historySizeRef.current.width
-    const margin = 8
-    const center = rect.left + rect.width / 2
-    const left = Math.max(margin, Math.min(center - W / 2, window.innerWidth - W - margin))
-    const arrowLeft = Math.max(16, Math.min(W - 16, center - left))
-    return { top: rect.bottom + 10, left, arrowLeft }
+    const panel = document.querySelector<HTMLElement>(`[data-id="agent-stack-card-terminal-${paneId}"]`)
+    if (!panel) return null
+    const rect = panel.getBoundingClientRect()
+    return {
+      top: rect.top + 20,
+      left: rect.left + 20,
+      width: Math.max(0, rect.width - 40),
+      bottom: Math.max(0, window.innerHeight - rect.bottom + 120),
+    }
   }, [])
 
   const toggleHistory = useCallback((paneId: string) => {
     setHistoryPaneId((cur) => {
       if (cur === paneId) return null
       const pos = computeHistoryPos(paneId)
-      if (pos) {
-        setHistoryPos(pos)
-        // Fit the popover height to the space below the button (definite px, so
-        // CurrentHistoryView's h-full scroll container gets a bounded height).
-        const fit = Math.max(240, Math.min(Math.round(window.innerHeight * 0.7), window.innerHeight - pos.top - 16))
-        setHistorySize((s) => ({ width: s.width, height: fit }))
-      }
+      if (pos) setHistoryPos(pos)
       return paneId
     })
   }, [computeHistoryPos])
@@ -109,7 +101,7 @@ function AgentStack({
   }, [activePaneId])
 
   // Switching the active agent switches the open history to that agent, and
-  // re-anchors to its button once the active card has scrolled into view.
+  // re-anchors to the panel once the active card has scrolled into view.
   useEffect(() => {
     if (!historyPaneId || !activePaneId || historyPaneId === activePaneId) return
     setHistoryPaneId(activePaneId)
@@ -120,6 +112,15 @@ function AgentStack({
     return () => window.clearTimeout(id)
   }, [activePaneId, historyPaneId, computeHistoryPos])
 
+  // Popover is pinned to the terminal rect → re-anchor on window resize while
+  // it's open so left/width/top/bottom stay aligned to that terminal.
+  useEffect(() => {
+    if (!historyPaneId) return
+    const onResize = () => { const pos = computeHistoryPos(historyPaneId); if (pos) setHistoryPos(pos) }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [historyPaneId, computeHistoryPos])
+
   // Esc closes the popover.
   useEffect(() => {
     if (!historyPaneId) return
@@ -127,29 +128,6 @@ function AgentStack({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [historyPaneId])
-
-  // Drag the bottom-right corner to resize the popover.
-  const startResize = useCallback((event: React.PointerEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    const startX = event.clientX
-    const startY = event.clientY
-    const startW = historySizeRef.current.width
-    const startH = historySizeRef.current.height
-    const anchorLeft = historyPos?.left ?? 0
-    const anchorTop = historyPos?.top ?? 0
-    const onMove = (ev: PointerEvent) => {
-      const width = Math.max(320, Math.min(startW + (ev.clientX - startX), window.innerWidth - anchorLeft - 8))
-      const height = Math.max(220, Math.min(startH + (ev.clientY - startY), window.innerHeight - anchorTop - 8))
-      setHistorySize({ width, height })
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }, [historyPos])
 
   return (
     <div data-id="agent-stack" ref={containerRef} className="relative h-full overflow-hidden bg-[#09090b]">
@@ -182,14 +160,9 @@ function AgentStack({
             data-id={`agent-stack-card-history-popover-${historyPaneId}`}
             onClick={(event) => event.stopPropagation()}
             className="fixed z-[121] flex flex-col rounded-2xl border border-white/[0.1] bg-[#0b0b0d] shadow-2xl"
-            style={{ top: historyPos.top, left: historyPos.left, width: historySize.width, height: historySize.height }}
+            // 吸附在卡片终端里:left/width/top 取自该终端,bottom 距终端底部 88px。
+            style={{ top: historyPos.top, left: historyPos.left, width: historyPos.width, bottom: historyPos.bottom }}
           >
-            {/* up-arrow pointing at the History button */}
-            <div
-              data-id="agent-stack-card-history-popover-arrow"
-              className="absolute -top-[6px] h-3 w-3 rotate-45 border-l border-t border-white/[0.1] bg-[#0b0b0d]"
-              style={{ left: historyPos.arrowLeft - 6 }}
-            />
             <div data-id="agent-stack-card-history-popover-header" className="relative flex shrink-0 items-center gap-2.5 rounded-t-2xl border-b border-white/[0.06] px-4 py-2.5">
               <History className="h-4 w-4 shrink-0 text-zinc-400" />
               <span className="text-sm font-semibold text-zinc-200">{t('agentStackViewSession', { defaultValue: '历史' })}</span>
@@ -220,15 +193,6 @@ function AgentStack({
             </div>
             <div data-id="agent-stack-card-history-popover-body" className="min-h-0 flex-1 overflow-hidden rounded-b-2xl">
               <CurrentHistoryView key={historyPaneId} paneId={historyPaneId} open promptsOnly={promptsOnly} />
-            </div>
-            {/* resize handle (drag the bottom-right corner) */}
-            <div
-              data-id="agent-stack-card-history-popover-resize"
-              onPointerDown={startResize}
-              className="absolute bottom-0 right-0 flex h-4 w-4 cursor-se-resize items-end justify-end rounded-br-2xl p-1"
-              style={{ touchAction: 'none' }}
-            >
-              <svg width="8" height="8" viewBox="0 0 8 8" className="text-zinc-600"><path d="M8 0v8H0" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" /></svg>
             </div>
           </div>
         </>,
