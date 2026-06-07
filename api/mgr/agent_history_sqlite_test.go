@@ -220,7 +220,7 @@ func TestAIGatewaySyncCurrentSnapshotToHistoryDBReturnsMaxInputItemID(t *testing
 	withTempCicyRoot(t)
 
 	agentID := "w-10001"
-	body := aiGatewayAnnotateCurrentBodyHistoryIDs(map[string]interface{}{
+	body := aiGatewayAnnotateCurrentBodyHistoryIDs("w-test-annotate", map[string]interface{}{
 		"input": []interface{}{
 			map[string]interface{}{
 				"role": "user",
@@ -290,7 +290,7 @@ func TestAIGatewaySyncCurrentSnapshotToHistoryDBReturnsMaxMessagesItemID(t *test
 	withTempCicyRoot(t)
 
 	agentID := "w-10001"
-	body := aiGatewayAnnotateCurrentBodyHistoryIDs(map[string]interface{}{
+	body := aiGatewayAnnotateCurrentBodyHistoryIDs("w-test-annotate", map[string]interface{}{
 		"messages": []interface{}{
 			map[string]interface{}{
 				"role": "user",

@@ -494,7 +494,7 @@ func fullSyncOnce() {
 				ws = os.Getenv("HOME")
 			}
 			ws = strings.Replace(ws, "~", os.Getenv("HOME"), 1)
-			exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", ws).Run()
+			exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", toPosixPath(ws)).Run()
 		}
 		// ttyd is served on demand inline; no per-pane instance to ensure.
 		if ensurePipe(pid) {

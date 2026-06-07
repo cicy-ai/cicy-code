@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -146,12 +147,22 @@ func (s *dispatcherSession) persistLocked(workspace string) {
 }
 
 func dispatcherMessageHasToolResult(msg M) bool {
-	blocks, ok := msg["content"].([]interface{})
-	if !ok {
-		return false
-	}
-	for _, b := range blocks {
-		if bm, ok := b.(map[string]interface{}); ok {
+	// Two content shapes exist: []interface{} (JSON-loaded from disk) and []M
+	// (appended in-memory by the tool loop). Matching only the former let the
+	// trim guard land the window on an in-memory tool_result message → orphan
+	// tool_result at messages[0] → gateway 400 ("must have a corresponding
+	// tool_use"). Handle both.
+	switch blocks := msg["content"].(type) {
+	case []interface{}:
+		for _, b := range blocks {
+			if bm, ok := b.(map[string]interface{}); ok {
+				if t, _ := bm["type"].(string); t == "tool_result" {
+					return true
+				}
+			}
+		}
+	case []M:
+		for _, bm := range blocks {
 			if t, _ := bm["type"].(string); t == "tool_result" {
 				return true
 			}
@@ -557,11 +568,12 @@ func dispatcherCallGateway(shortID string, payload M, emit func(M)) (map[string]
 // whether any delta was emitted.
 func dispatcherAssembleSSE(r io.Reader, emit func(M)) (map[string]interface{}, bool, error) {
 	type blockBuf struct {
-		typ       string
-		id        string
-		name      string
-		text      strings.Builder
-		inputJSON strings.Builder
+		typ        string
+		id         string
+		name       string
+		text       strings.Builder
+		inputJSON  strings.Builder
+		suppressed bool // leaked DSML markup detected → stop forwarding deltas
 	}
 	var bufs []*blockBuf
 	stopReason := ""
@@ -618,10 +630,24 @@ func dispatcherAssembleSSE(r io.Reader, emit func(M)) (map[string]interface{}, b
 						b.typ = "text"
 					}
 					if t, ok := d["text"].(string); ok {
+						sentLen := b.text.Len()
 						b.text.WriteString(t)
-						if emit != nil && t != "" {
-							emit(M{"type": "text_delta", "text": t})
-							streamed = true
+						if emit != nil && t != "" && !b.suppressed {
+							// Leaked DSML tool-call markup is rescued post-stream
+							// (dispatcherRescueDSML); don't let the raw markup
+							// reach the consumer. Detect on the ACCUMULATED text
+							// (the marker can split across deltas) and forward
+							// only the prose before it.
+							if mi := dispatcherDSMLMarkerIndex(b.text.String()); mi >= 0 {
+								b.suppressed = true
+								if mi > sentLen {
+									emit(M{"type": "text_delta", "text": b.text.String()[sentLen:mi]})
+									streamed = true
+								}
+							} else {
+								emit(M{"type": "text_delta", "text": t})
+								streamed = true
+							}
 						}
 					}
 				case "input_json_delta":
@@ -676,6 +702,91 @@ func dispatcherAssembleSSE(r io.Reader, emit func(M)) (map[string]interface{}, b
 		}
 	}
 	return map[string]interface{}{"content": blocks, "stop_reason": stopReason}, streamed, nil
+}
+
+// ── DSML tool-call rescue ────────────────────────────────────────────────────
+// DeepSeek occasionally leaks its internal DSML tool-call serialization as
+// PLAIN TEXT instead of parsed tool_use blocks (provider-side parser miss):
+//
+//	嗨，让我看看有没有新动静。
+//	<｜｜DSML｜｜tool_calls>
+//	<｜｜DSML｜｜invoke name="a2a_status">
+//	</｜｜DSML｜｜invoke>
+//	<｜｜DSML｜｜invoke name="agent_capture">
+//	<｜｜DSML｜｜parameter name="pane_id" string="true">w-10001</｜｜DSML｜｜parameter>
+//	</｜｜DSML｜｜invoke>
+//
+// When that happens the tools never run and the raw markup reaches the user.
+// Rescue: cut the markup out of the visible text and parse each invoke back
+// into a real tool_use block so the normal tool loop executes it.
+
+// dispatcherDSMLMarkerIndex returns the byte index of the earliest DSML
+// marker in s (ASCII `<||DSML||` or fullwidth `<｜｜DSML｜｜` variant), or -1.
+func dispatcherDSMLMarkerIndex(s string) int {
+	idx := -1
+	for _, marker := range []string{"<||DSML||", "<｜｜DSML｜｜"} {
+		if i := strings.Index(s, marker); i >= 0 && (idx < 0 || i < idx) {
+			idx = i
+		}
+	}
+	return idx
+}
+
+var (
+	dsmlInvokeRe = regexp.MustCompile(`(?s)<\|\|DSML\|\|invoke name="([^"]+)">(.*?)</\|\|DSML\|\|invoke>`)
+	dsmlParamRe  = regexp.MustCompile(`(?s)<\|\|DSML\|\|parameter name="([^"]+)"(?:\s+string="(true|false)")?>(.*?)</\|\|DSML\|\|parameter>`)
+)
+
+// dispatcherRescueDSML scans assistant content blocks for leaked DSML markup.
+// It returns the rewritten blocks (prose kept, markup stripped, invokes
+// converted to tool_use) and whether anything was rescued.
+func dispatcherRescueDSML(blocks []interface{}, round int) ([]interface{}, bool) {
+	rescued := false
+	out := make([]interface{}, 0, len(blocks))
+	for bi, b := range blocks {
+		bm, ok := b.(map[string]interface{})
+		if !ok || bm["type"] != "text" {
+			out = append(out, b)
+			continue
+		}
+		text, _ := bm["text"].(string)
+		idx := dispatcherDSMLMarkerIndex(text)
+		if idx < 0 {
+			out = append(out, b)
+			continue
+		}
+		if prose := strings.TrimSpace(text[:idx]); prose != "" {
+			out = append(out, map[string]interface{}{"type": "text", "text": prose})
+		}
+		// Normalize the fullwidth-pipe variant so one regex covers both.
+		tail := strings.ReplaceAll(text[idx:], "｜", "|")
+		for ii, m := range dsmlInvokeRe.FindAllStringSubmatch(tail, -1) {
+			input := map[string]interface{}{}
+			for _, pm := range dsmlParamRe.FindAllStringSubmatch(m[2], -1) {
+				val := strings.TrimSpace(pm[3])
+				if pm[2] == "false" {
+					// Non-string parameter: number/bool/object encoded as JSON.
+					var v interface{}
+					if json.Unmarshal([]byte(val), &v) == nil {
+						input[pm[1]] = v
+						continue
+					}
+				}
+				input[pm[1]] = val
+			}
+			out = append(out, map[string]interface{}{
+				"type":  "tool_use",
+				"id":    fmt.Sprintf("dsml_rescue_%d_%d_%d", round, bi, ii),
+				"name":  m[1],
+				"input": input,
+			})
+			rescued = true
+		}
+	}
+	if !rescued {
+		return blocks, false
+	}
+	return out, true
 }
 
 func truncateForLog(s string, n int) string {
@@ -797,6 +908,14 @@ func handleDispatcherChat(w http.ResponseWriter, r *http.Request) {
 
 		blocks, _ := resp["content"].([]interface{})
 		stopReason, _ := resp["stop_reason"].(string)
+
+		// Leaked DSML tool-call markup in the text? Parse it back into real
+		// tool_use blocks (and strip it from the visible/persisted text) so the
+		// tools actually run instead of the raw markup reaching the user.
+		if rescuedBlocks, ok := dispatcherRescueDSML(blocks, round); ok {
+			blocks = rescuedBlocks
+			stopReason = "tool_use"
+		}
 
 		// Record the assistant turn verbatim.
 		session.messages = append(session.messages, M{"role": "assistant", "content": blocks})

@@ -84,7 +84,10 @@ func extendPATH() {
 		filepath.Join(home, ".local", "bin"),
 		filepath.Join(home, ".opencode", "bin"),
 	}
-	parts = append(parts, strings.Split(os.Getenv("PATH"), ":")...)
+	// filepath.SplitList / os.PathListSeparator, NOT ":" — on Windows PATH is
+	// ";"-separated; a hardcoded ":" mangles the whole PATH into one bogus
+	// entry and every subsequent LookPath fails.
+	parts = append(parts, filepath.SplitList(os.Getenv("PATH"))...)
 	seen := map[string]bool{}
 	var filtered []string
 	for _, part := range parts {
@@ -94,7 +97,7 @@ func extendPATH() {
 		seen[part] = true
 		filtered = append(filtered, part)
 	}
-	os.Setenv("PATH", strings.Join(filtered, ":"))
+	os.Setenv("PATH", strings.Join(filtered, string(os.PathListSeparator)))
 }
 
 func sudoPrefix() string {
@@ -283,6 +286,15 @@ func installMissing(tools []Tool) {
 	}
 
 	fmt.Printf("📦 安装缺失依赖 (%d 个)...\n", len(missing))
+
+	// Windows:依赖由捆绑的 MSYS2/node 提供,unix 安装命令(apt/brew)必败。
+	// 缺什么就警告降级,绝不 os.Exit —— 死掉的服务器对 sidecar 毫无价值。
+	if runtime.GOOS == "windows" {
+		for _, tool := range missing {
+			fmt.Printf("  ⚠️ %s 缺失(Windows 不自动安装,请检查捆绑包/PATH;相关功能降级)\n", tool.Name)
+		}
+		return
+	}
 
 	// 必须全部安装成功才能继续
 	for _, tool := range missing {
@@ -614,7 +626,13 @@ func syncWorkerIndexToExistingAgents() {
 		return
 	}
 	if maxPort > 0 {
-		setWorkerIndex(maxPort)
+		// Only ever RAISE worker_index, never lower it. setWorkerIndex(maxPort)
+		// clobbered it down to the max surviving pane on every restart (the >20000
+		// guard above never fires for 10xxx installs), so deleting high-numbered
+		// agents + restart pulled worker_index backward → fork re-minted freed ids
+		// (deleted ids leave a gap in agent_config that the create-time check can't
+		// see). Keeping it at the high-water mark makes fork ids strictly monotonic.
+		ensureWorkerIndexAtLeast(maxPort)
 	}
 }
 
@@ -1960,7 +1978,7 @@ func startAgentFromConfig(paneID string, port int, workspace, initScript, config
 		}
 		ensureAgentToolInstalled(agentType)
 		os.MkdirAll(workspace, 0755)
-		exec.Command("tmux", "new-session", "-d", "-s", sess, "-n", "main", "-c", workspace).Run()
+		exec.Command("tmux", "new-session", "-d", "-s", sess, "-n", "main", "-c", toPosixPath(workspace)).Run()
 		log.Printf("[startup] created session %s", sess)
 		sessionCreated = true
 	}

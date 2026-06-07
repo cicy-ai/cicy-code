@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -1844,6 +1844,9 @@ export default function CurrentHistoryView({
     const updateStickBottom = () => {
       const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
       shouldStickBottomRef.current = distanceToBottom <= 80;
+      // 用户往上滚离开了底部(程序化的"滚到底"只会停在贴底处)→ 取消还在排队的
+      // scheduleScrollToBottom 重试(开屏后 0~2s 的多次补滚),不再把人拽回底部。
+      if (distanceToBottom > 80) clearScheduledScrolls();
       // 用户在锚定进行中手动滚动(非我们自己发起的平滑滚动)→ 交还控制权,这一轮再不拽回。
       if (activeSpacerTurnKeyRef.current && Date.now() > programmaticScrollUntilRef.current) {
         userTookOverRef.current = true;
@@ -1904,7 +1907,13 @@ export default function CurrentHistoryView({
         setConversationId('');
       })
       .finally(() => {
-        if (cancelled || requestSeq !== requestSeqRef.current) return;
+        // Gate on `cancelled` ONLY — not requestSeq. A concurrent loadMore /
+        // softRebind bumps requestSeqRef while this load is in flight; bailing
+        // here would strand committedReadyRef=false forever (the poll then
+        // spins in its early-return branch doing zero network → the view is
+        // permanently dead). A genuinely superseded load (paneId/open change)
+        // always has cancelled=true via the cleanup.
+        if (cancelled) return;
         // Part 1 done → poll may attach the tail. Do NOT reveal yet: keep the
         // skeleton until Part 2's first poll resolves, so committed + the live
         // tail paint together (single scroll-to-bottom, no open-time flash).
@@ -1961,6 +1970,13 @@ export default function CurrentHistoryView({
           // effect re-subscribes once softRebind updates conversationId.
           revealOnce();
           await softRebind(cid);
+          // ALWAYS reschedule: softRebind can silently bail (seq race) or fail
+          // (network error / server restart → catch{}), leaving conversationId
+          // unchanged — without this the effect never re-subscribes and the
+          // poll loop dies permanently (UI stuck on "thinking" forever). If the
+          // rebind DID succeed, the dep change re-subscribes and the cleanup
+          // cancels this timer — scheduling is always safe.
+          schedule(CURRENT_HISTORY_POLL_WAIT_MS);
           return;
         }
         if (cid && !conversationId) setConversationId((prev) => prev || cid);
@@ -2097,6 +2113,15 @@ export default function CurrentHistoryView({
     };
     window.addEventListener('cicy:current-history-refresh', onNudge as EventListener);
     window.addEventListener('cicy:current-history-cancel-optimistic', onCancelOptimistic as EventListener);
+    // Hidden tabs throttle chained setTimeout (Chrome intensive throttling →
+    // ~1/min), so the window can be minutes stale when the user returns. Kick
+    // an immediate poll on tab-visible so the view catches up on this frame.
+    const onVisible = () => {
+      if (document.hidden) return;
+      if (timer != null) { window.clearTimeout(timer); timer = null; }
+      void poll();
+    };
+    document.addEventListener('visibilitychange', onVisible);
 
     void poll();
     return () => {
@@ -2104,6 +2129,7 @@ export default function CurrentHistoryView({
       if (timer != null) window.clearTimeout(timer);
       window.removeEventListener('cicy:current-history-refresh', onNudge as EventListener);
       window.removeEventListener('cicy:current-history-cancel-optimistic', onCancelOptimistic as EventListener);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [conversationId, open, paneId, model]);
 
@@ -2112,6 +2138,15 @@ export default function CurrentHistoryView({
       clearScheduledScrolls();
     };
   }, []);
+
+  // 开屏首帧定位:初始落底跑在 useEffect+rAF 里,都在浏览器画完第一帧**之后**才执行 →
+  // 用户先看到列表停在顶部的一帧、再"跳"到底部。这里在 paint 之前同步钉到底,首帧
+  // 画出来就已经在底部,跳变不可见。flag 的置位仍由下面的 rAF 锚定 effect 统一管。
+  useLayoutEffect(() => {
+    if (!open || didInitialScrollRef.current) return;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [open, loading, items, liveTurn]);
 
   // 新问题出现 → 把它钉到视口顶部,回复(liveTurn / 后续 turn)在它下方向下渲染,之前的对话被推上去。
   // 用底部 spacer 撑出滚动空间,这样即使 q+回复很短也能让 q 停在顶部;回复变长时 spacer 收缩,不留大空白。
@@ -2152,6 +2187,15 @@ export default function CurrentHistoryView({
 
       // 出现了新的问题 → **平滑**滚到顶一次 + 撑底部 spacer,然后放手。
       if (lastUserKey && lastUserKey !== anchoredQKeyRef.current) {
+        // 用户已经滚上去在读历史(不在底部附近)→ 不抢滚动。只把新 q 记为已锚,
+        // 避免之后反复触发;乐观占位 q(用户自己刚发的)例外,永远钉顶。
+        // 旁观他人会话(history popover)时 agent 持续产生新 turn,这条就是"读着读着
+        // 被拽回去"的根治。
+        if (!shouldStickBottomRef.current && !optimisticQ) {
+          anchoredQKeyRef.current = lastUserKey;
+          activeSpacerTurnKeyRef.current = '';
+          return;
+        }
         const target = el.querySelector(`[data-turn-key="${CSS.escape(lastUserKey)}"]`) as HTMLDivElement | null;
         if (target) {
           anchoredQKeyRef.current = lastUserKey;
@@ -2589,7 +2633,8 @@ export default function CurrentHistoryView({
                 </div>
               </>
             ) : null}
-          <div data-id="current-history-anchor-spacer" ref={anchorSpacerRef} aria-hidden="true" style={{ height: `${anchorSpacerHeight}px` }} />
+          {/* 调试:localStorage.__spacer === '1' 时给 spacer 标红,方便观察其实际高度 */}
+          <div data-id="current-history-anchor-spacer" ref={anchorSpacerRef} aria-hidden="true" className={localStorage.getItem('__spacer') === '1' ? 'bg-red-500/40' : undefined} style={{ height: `${anchorSpacerHeight}px` }} />
           </>}
         </div>
       </div>

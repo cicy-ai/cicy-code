@@ -17,13 +17,15 @@ const args = process.argv.slice(2);
 const PORT = process.env.PORT || '8008';
 
 const platformPkg = `cicy-code-${process.platform}-${process.arch}`;
+// win32 ships the binary with the .exe extension (CreateProcess requires it).
+const binName = process.platform === 'win32' ? 'cicy-code.exe' : 'cicy-code';
 let binPath;
 try {
-  binPath = require.resolve(`${platformPkg}/cicy-code`);
+  binPath = require.resolve(`${platformPkg}/${binName}`);
 } catch {
   console.error(`cicy-code: no prebuilt binary for ${process.platform}-${process.arch}.`);
   console.error(`The optional dependency "${platformPkg}" is not installed.`);
-  console.error(`Supported platforms: darwin-arm64, darwin-x64, linux-x64, linux-arm64.`);
+  console.error(`Supported platforms: darwin-arm64, darwin-x64, linux-x64, linux-arm64, win32-x64.`);
   console.error(`Reinstall: npm install -g cicy-code` +
     ` (in China add --registry=https://registry.npmmirror.com)`);
   process.exit(1);
@@ -66,6 +68,19 @@ function ensurePortFree(port) {
 }
 
 function pidOnPort(port) {
+  // win32: netstat -ano (no lsof/ss).
+  if (process.platform === 'win32') {
+    try {
+      const out = execSync(`netstat -ano -p TCP`, {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      for (const line of out.split('\n')) {
+        const m = line.match(/TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)/);
+        if (m && m[1] === String(port)) return m[2];
+      }
+    } catch {}
+    return null;
+  }
   // lsof first (macOS + Linux), then ss (Linux without lsof).
   try {
     const out = execSync(`lsof -ti TCP:${port} -sTCP:LISTEN`, {
@@ -84,6 +99,15 @@ function pidOnPort(port) {
 }
 
 function processCommand(pid) {
+  if (process.platform === 'win32') {
+    try {
+      const out = execSync(`tasklist /fi "PID eq ${pid}" /fo csv /nh`, {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const m = out.match(/^"([^"]+)"/);
+      return m ? m[1] : '';
+    } catch { return ''; }
+  }
   try {
     return execSync(`ps -p ${pid} -o command=`, {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
@@ -100,7 +124,8 @@ function waitExit(pid, timeoutMs) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (!isAlive(pid)) return true;
-    try { execSync('sleep 0.2'); } catch {}
+    // Portable 200ms block (win32 has no `sleep`).
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
   }
   return !isAlive(pid);
 }

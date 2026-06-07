@@ -165,6 +165,11 @@ func serveTtydHTTP(w http.ResponseWriter, r *http.Request, tmuxTarget, subPath, 
 // the terminal window title; apiPane is the pane id used for the '6' ws-api
 // channel (same as tmuxTarget for agents, the grouped name for shell panels).
 func serveTTY(w http.ResponseWriter, r *http.Request, tmuxTarget, title, apiPane string) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("[ttyd] PANIC in serveTTY %s: %v", tmuxTarget, rec)
+		}
+	}()
 	clientConn, err := server.UpgradeWebTTY(w, r)
 	if err != nil {
 		log.Printf("[ttyd] upgrade error: %v", err)
