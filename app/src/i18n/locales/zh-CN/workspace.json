@@ -163,7 +163,7 @@
   "mobileQrMethodPwaTitle": "PWA",
   "mobileQrMethodPwaDesc": "菜单 →「添加到主屏幕」",
   "mobileQrMethodMiniTitle": "小程序",
-  "mobileQrMethodMiniDesc": "Telegram 打开 CiCy 机器人",
+  "mobileQrMethodMiniDesc": "Telegram 打开 {{bot}} 机器人",
   "marketplaceTabDiscover": "发现",
   "marketplaceTabPublish": "我的库",
   "marketplaceTabSubscribe": "订阅",

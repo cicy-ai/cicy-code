@@ -162,7 +162,7 @@
   "mobileQrMethodPwaTitle": "PWA",
   "mobileQrMethodPwaDesc": "メニュー →「ホーム画面に追加」",
   "mobileQrMethodMiniTitle": "ミニアプリ",
-  "mobileQrMethodMiniDesc": "Telegram で CiCy ボットを開く",
+  "mobileQrMethodMiniDesc": "Telegram で {{bot}} を開く",
   "marketplaceTabDiscover": "見つける",
   "marketplaceTabPublish": "マイレジストリ",
   "marketplaceTabSubscribe": "購読",

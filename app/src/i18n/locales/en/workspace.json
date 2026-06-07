@@ -163,7 +163,7 @@
   "mobileQrMethodPwaTitle": "PWA",
   "mobileQrMethodPwaDesc": "Menu → \"Add to Home Screen\"",
   "mobileQrMethodMiniTitle": "Mini App",
-  "mobileQrMethodMiniDesc": "Open the CiCy bot in Telegram",
+  "mobileQrMethodMiniDesc": "Open {{bot}} in Telegram",
   "marketplaceTabDiscover": "Discover",
   "marketplaceTabPublish": "My Registry",
   "marketplaceTabSubscribe": "Subscribe",

@@ -195,7 +195,7 @@ export default function MobileQRPopover(_props: Props) {
                     {([
                       { id: 'web', Icon: Globe, title: t('mobileQrMethodWebTitle'), desc: t('mobileQrMethodWebDesc'), href: '' },
                       { id: 'pwa', Icon: Smartphone, title: t('mobileQrMethodPwaTitle'), desc: t('mobileQrMethodPwaDesc'), href: '' },
-                      { id: 'mini', Icon: Send, title: t('mobileQrMethodMiniTitle'), desc: `@${TG_BOT}`, href: telegramLink },
+                      { id: 'mini', Icon: Send, title: t('mobileQrMethodMiniTitle'), desc: t('mobileQrMethodMiniDesc', { bot: `@${TG_BOT}` }), href: telegramLink },
                     ] as const).map(({ id, Icon, title, desc, href }) => {
                       const inner = (
                         <>

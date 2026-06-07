@@ -162,7 +162,7 @@
   "mobileQrMethodPwaTitle": "PWA",
   "mobileQrMethodPwaDesc": "Menu → « Ajouter à l'écran d'accueil »",
   "mobileQrMethodMiniTitle": "Mini-app",
-  "mobileQrMethodMiniDesc": "Ouvrez le bot CiCy dans Telegram",
+  "mobileQrMethodMiniDesc": "Ouvrez {{bot}} dans Telegram",
   "marketplaceTabDiscover": "Découvrir",
   "marketplaceTabPublish": "Mon registre",
   "marketplaceTabSubscribe": "S'abonner",
