@@ -63,6 +63,17 @@ export default function MobileQRPopover(_props: Props) {
     return `cicy-desktop://addTeam?${params.toString()}`;
   }, [publicUrl]);
 
+  // Telegram bot deep link for the 小程序 method — opens @cicy_ai_bot and hands
+  // it the token via `start`. (Telegram's start param allows only [A-Za-z0-9_-]
+  // and caps at 64 chars; a cicy token fits, the full URL would not, so the bot
+  // resolves the server from the token.)
+  const telegramLink = useMemo(() => {
+    const token = TokenManager.getToken() || '';
+    return token
+      ? `https://t.me/cicy_ai_bot?start=${encodeURIComponent(token)}`
+      : 'https://t.me/cicy_ai_bot';
+  }, []);
+
   // Esc closes the modal.
   useEffect(() => {
     if (!open) return;
@@ -174,19 +185,38 @@ export default function MobileQRPopover(_props: Props) {
                     <QRCodeSVG value={payload} size={168} level="M" includeMargin={false} />
                   </div>
 
-                  {/* Three ways to open this on a phone — compact one-liners. */}
+                  {/* Three ways to open this on a phone — compact one-liners.
+                      The 小程序 row is a real link that opens @cicy_ai_bot. */}
                   <div data-id="mobile-qr-methods" className="mt-4 flex flex-col gap-1.5">
                     {([
-                      { id: 'web', Icon: Globe, title: t('mobileQrMethodWebTitle'), desc: t('mobileQrMethodWebDesc') },
-                      { id: 'pwa', Icon: Smartphone, title: t('mobileQrMethodPwaTitle'), desc: t('mobileQrMethodPwaDesc') },
-                      { id: 'mini', Icon: Send, title: t('mobileQrMethodMiniTitle'), desc: t('mobileQrMethodMiniDesc') },
-                    ] as const).map(({ id, Icon, title, desc }) => (
-                      <div key={id} data-id={`mobile-qr-method-${id}`} className="flex items-center gap-2 text-[12px]">
-                        <Icon className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
-                        <span className="shrink-0 font-medium text-zinc-200">{title}</span>
-                        <span className="truncate text-zinc-500" title={desc}>{desc}</span>
-                      </div>
-                    ))}
+                      { id: 'web', Icon: Globe, title: t('mobileQrMethodWebTitle'), desc: t('mobileQrMethodWebDesc'), href: '' },
+                      { id: 'pwa', Icon: Smartphone, title: t('mobileQrMethodPwaTitle'), desc: t('mobileQrMethodPwaDesc'), href: '' },
+                      { id: 'mini', Icon: Send, title: t('mobileQrMethodMiniTitle'), desc: t('mobileQrMethodMiniDesc'), href: telegramLink },
+                    ] as const).map(({ id, Icon, title, desc, href }) => {
+                      const inner = (
+                        <>
+                          <Icon className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+                          <span className="shrink-0 font-medium text-zinc-200">{title}</span>
+                          <span className="truncate text-zinc-500" title={desc}>{desc}</span>
+                        </>
+                      );
+                      return href ? (
+                        <a
+                          key={id}
+                          data-id={`mobile-qr-method-${id}`}
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="group flex items-center gap-2 rounded-md px-1 -mx-1 py-0.5 text-[12px] no-underline transition-colors hover:bg-white/[0.05]"
+                        >
+                          {inner}
+                        </a>
+                      ) : (
+                        <div key={id} data-id={`mobile-qr-method-${id}`} className="flex items-center gap-2 text-[12px]">
+                          {inner}
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {/* The URL itself — deployment's public_url (config-driven), with token. */}
@@ -205,6 +235,29 @@ export default function MobileQRPopover(_props: Props) {
                       {payload}
                     </span>
                   </div>
+
+                  {/* Copy the link — sits right under the URL. */}
+                  <button
+                    type="button"
+                    data-id="mobile-qr-copy"
+                    onClick={copyPayload}
+                    className={cn(
+                      'mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-all cursor-pointer',
+                      copied
+                        ? 'border-emerald-500/40 bg-emerald-500/[0.10] text-emerald-200'
+                        : 'border-white/[0.06] bg-transparent text-zinc-400 hover:border-white/[0.12] hover:bg-white/[0.04] hover:text-zinc-200',
+                    )}
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="h-3.5 w-3.5" /> {t('mobileQrCopied')}
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3.5 w-3.5" /> {t('mobileQrCopyLink')}
+                      </>
+                    )}
+                  </button>
 
                   {/* Divider only shown when the desktop button is visible. */}
                   {!isElectron && (
@@ -231,27 +284,6 @@ export default function MobileQRPopover(_props: Props) {
                       {t('mobileQrOpenDesktop')}
                     </a>
                     )}
-                    <button
-                      type="button"
-                      data-id="mobile-qr-copy"
-                      onClick={copyPayload}
-                      className={cn(
-                        'flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-all cursor-pointer',
-                        copied
-                          ? 'border-emerald-500/40 bg-emerald-500/[0.10] text-emerald-200'
-                          : 'border-white/[0.06] bg-transparent text-zinc-400 hover:border-white/[0.12] hover:bg-white/[0.04] hover:text-zinc-200',
-                      )}
-                    >
-                      {copied ? (
-                        <>
-                          <Check className="h-3.5 w-3.5" /> {t('mobileQrCopied')}
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="h-3.5 w-3.5" /> {t('mobileQrCopyLink')}
-                        </>
-                      )}
-                    </button>
                   </div>
                 </div>
               </div>
