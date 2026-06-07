@@ -69,17 +69,32 @@ PUB=(npm publish --registry https://registry.npmjs.org --access public)
 sync_npmmirror() {
   local pkg="$1" want="$2"
   [ -n "$DRY" ] && { echo "    [dry-run] would sync $pkg on npmmirror"; return 0; }
-  curl -s --max-time 20 -X PUT "$MIRROR/-/package/$pkg/syncs" >/dev/null 2>&1 || true
   # Success = the exact version is installable on npmmirror (its tarball is
   # mirrored). We poll the version endpoint, NOT dist-tags.latest: npmmirror
   # syncs versions quickly but its `latest` tag lags behind by minutes, so a
   # tag check would false-negative even though `npm i pkg@want` already works.
-  for _ in $(seq 1 12); do
-    sleep 8
+  #
+  # A brand-new package name (e.g. the renamed cicy-code-windows-x64) takes
+  # MINUTES for its first npmmirror sync — far longer than a known package. If
+  # the poll gives up, CN users on npmmirror silently skip the optionalDep (npm
+  # treats a missing optional dep as success), so the platform binary never
+  # installs. So: re-issue the PUT trigger periodically and poll up to ~4min.
+  local synced=0
+  for i in $(seq 1 24); do
+    [ $(( (i - 1) % 6 )) -eq 0 ] && curl -s --max-time 20 -X PUT "$MIRROR/-/package/$pkg/syncs" >/dev/null 2>&1 || true
+    sleep 10
     code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' "$MIRROR/$pkg/$want" 2>/dev/null || echo 000)
-    if [ "$code" = "200" ]; then echo "    ✓ npmmirror has $pkg@$want (installable)"; return 0; fi
+    if [ "$code" = "200" ]; then echo "    ✓ npmmirror has $pkg@$want (installable)"; synced=1; break; fi
   done
-  echo "    ! npmmirror sync for $pkg@$want still pending (will catch up on its own)"
+  if [ "$synced" != "1" ]; then
+    echo "    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "    !! npmmirror sync STILL pending for $pkg@$want after ~4min."
+    echo "    !! CN users on npmmirror will SILENTLY SKIP this optionalDep until"
+    echo "    !! it lands. Re-trigger manually until HTTP 200:"
+    echo "    !!   curl -X PUT $MIRROR/-/package/$pkg/syncs"
+    echo "    !!   curl -o /dev/null -w '%{http_code}' $MIRROR/$pkg/$want"
+    echo "    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+  fi
 }
 
 publish_dir() {  # <dir> <pkgname> <version>
