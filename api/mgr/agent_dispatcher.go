@@ -135,7 +135,7 @@ func getDispatcherSession(shortID, workspace string) *dispatcherSession {
 
 // persistLocked writes the trimmed history to disk. Caller holds s.mu.
 func (s *dispatcherSession) persistLocked(workspace string) {
-	s.messages = dispatcherTrimMessages(s.messages)
+	s.messages = dispatcherBalanceToolCalls(dispatcherTrimMessages(s.messages))
 	if err := os.MkdirAll(dispatcherStateDir(workspace), 0755); err != nil {
 		return
 	}
@@ -169,6 +169,129 @@ func dispatcherMessageHasToolResult(msg M) bool {
 		}
 	}
 	return false
+}
+
+// dispatcherSyntheticToolResult is injected to pair an orphan tool_use whose
+// matching tool_result never arrived (a turn interrupted by a new user message
+// before the tool resolved). Without it the provider rejects the whole window
+// (Anthropic/DeepSeek: "tool_use ids were found without tool_result blocks").
+const dispatcherSyntheticToolResult = "(工具结果不可用:上一回合在收到结果前被打断,系统已自动补平以保持 tool_use/tool_result 配对。)"
+
+func dispatcherBlockType(b interface{}) (map[string]interface{}, string) {
+	// M is an alias for map[string]interface{}, so one case covers both.
+	if bm, ok := b.(map[string]interface{}); ok {
+		t, _ := bm["type"].(string)
+		return bm, t
+	}
+	return nil, ""
+}
+
+// dispatcherForEachBlock iterates a message's content blocks regardless of the
+// two shapes that coexist: []interface{} (JSON-loaded) and []M (in-memory).
+func dispatcherForEachBlock(msg M, fn func(bm map[string]interface{}, typ string)) {
+	switch blocks := msg["content"].(type) {
+	case []interface{}:
+		for _, b := range blocks {
+			if bm, t := dispatcherBlockType(b); bm != nil {
+				fn(bm, t)
+			}
+		}
+	case []M:
+		for _, b := range blocks {
+			if bm, t := dispatcherBlockType(b); bm != nil {
+				fn(bm, t)
+			}
+		}
+	}
+}
+
+func dispatcherToolUseIDs(msg M) []string {
+	var ids []string
+	dispatcherForEachBlock(msg, func(bm map[string]interface{}, t string) {
+		if t == "tool_use" {
+			if id, _ := bm["id"].(string); id != "" {
+				ids = append(ids, id)
+			}
+		}
+	})
+	return ids
+}
+
+func dispatcherToolResultIDs(msg M) map[string]bool {
+	out := map[string]bool{}
+	dispatcherForEachBlock(msg, func(bm map[string]interface{}, t string) {
+		if t == "tool_result" {
+			if id, _ := bm["tool_use_id"].(string); id != "" {
+				out[id] = true
+			}
+		}
+	})
+	return out
+}
+
+// dispatcherBalanceToolCalls heals MID-history orphan tool_use blocks: any
+// tool_use whose matching tool_result is absent from the immediately-following
+// message gets a synthetic tool_result injected right after it (merged into the
+// next user message, or as a fresh user message when none follows). This is the
+// symmetric complement to dispatcherTrimMessages, which only guards LEADING
+// orphan tool_result. Together they guarantee a provider-valid window every
+// turn, so an interrupted-turn corruption self-heals instead of bricking the
+// agent. Idempotent; leaves already-balanced history untouched.
+func dispatcherBalanceToolCalls(msgs []M) []M {
+	out := make([]M, 0, len(msgs)+2)
+	for i := 0; i < len(msgs); i++ {
+		out = append(out, msgs[i])
+		ids := dispatcherToolUseIDs(msgs[i])
+		if len(ids) == 0 {
+			continue
+		}
+		have := map[string]bool{}
+		nextIsUser := false
+		if i+1 < len(msgs) {
+			have = dispatcherToolResultIDs(msgs[i+1])
+			if r, _ := msgs[i+1]["role"].(string); r == "user" {
+				nextIsUser = true
+			}
+		}
+		var missing []string
+		for _, id := range ids {
+			if !have[id] {
+				missing = append(missing, id)
+			}
+		}
+		if len(missing) == 0 {
+			continue
+		}
+		results := make([]interface{}, 0, len(missing))
+		for _, id := range missing {
+			results = append(results, M{"type": "tool_result", "tool_use_id": id, "content": dispatcherSyntheticToolResult})
+		}
+		if nextIsUser {
+			// Merge the synthetic results into the front of the next user
+			// message (preserving its original content), and skip re-appending it.
+			merged := make([]interface{}, 0, len(results)+2)
+			merged = append(merged, results...)
+			switch c := msgs[i+1]["content"].(type) {
+			case string:
+				if strings.TrimSpace(c) != "" {
+					merged = append(merged, M{"type": "text", "text": c})
+				}
+			case []interface{}:
+				merged = append(merged, c...)
+			case []M:
+				for _, b := range c {
+					merged = append(merged, b)
+				}
+			}
+			out = append(out, M{"role": "user", "content": merged})
+			i++
+		} else {
+			// No following user message (orphan tool_use is last, or the next
+			// turn is another assistant message) → insert a fresh user turn.
+			out = append(out, M{"role": "user", "content": results})
+		}
+	}
+	return out
 }
 
 // ── tools ───────────────────────────────────────────────────────────────────
@@ -883,6 +1006,10 @@ func handleDispatcherChat(w http.ResponseWriter, r *http.Request) {
 	// from disk; otherwise the first turn after load could 400 with "tool_result has
 	// no corresponding tool_use" → no reply).
 	session.messages = dispatcherTrimMessages(session.messages)
+	// Heal any mid-history orphan tool_use (interrupted turn) before building the
+	// request, so a corrupted in-memory window self-pairs instead of bricking the
+	// agent with a provider 400 every turn.
+	session.messages = dispatcherBalanceToolCalls(session.messages)
 	model := dispatcherModel(shortID)
 	cfg := resolveLiteConfig(shortID, workspace)
 
