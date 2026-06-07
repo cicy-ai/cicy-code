@@ -410,10 +410,10 @@ var builtinAgents = []struct {
 	{"openclaw", "OpenClaw"},
 	{"hermes", "Hermes Agent"},
 	{"cicy-claude", "CiCy"},
-	{"dispatcher", "Dispatcher"},
+	{"cicy", "CiCy"},
 }
 
-var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode", "kiro-cli", "dispatcher"}
+var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode", "kiro-cli", "cicy"}
 
 func effectiveAllowedAgentTypes() []string {
 	if labMode {
@@ -700,7 +700,7 @@ func createSelectedWorkers(selected []string) {
 			// --agents startup flag).
 			var existingType string
 			store.QueryRow("SELECT COALESCE(agent_type,'') FROM agent_config WHERE pane_id=?", paneID).Scan(&existingType)
-			if normalizeAgentType(existingType) != "dispatcher" {
+			if normalizeAgentType(existingType) != "cicy" {
 				store.Exec(fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, updated_at=%s WHERE pane_id=?", store.Now()),
 					w.AgentType, w.Title, paneID)
 			}
@@ -2021,7 +2021,7 @@ func ensureBuiltinAgents(selected []string) {
 		// Sync agent_type and title if changed — but never clobber a
 		// deliberate dispatcher (PM) conversion; it is not expressible via
 		// the --agents flag and must survive restarts.
-		if desired, ok := desiredByPaneID[paneID]; ok && normalizeAgentType(agentType) != desired.AgentType && normalizeAgentType(agentType) != "dispatcher" {
+		if desired, ok := desiredByPaneID[paneID]; ok && normalizeAgentType(agentType) != desired.AgentType && normalizeAgentType(agentType) != "cicy" {
 			store.Exec(fmt.Sprintf("UPDATE agent_config SET agent_type=?, title=?, updated_at=%s WHERE pane_id=?", store.Now()),
 				desired.AgentType, desired.Title, paneID)
 			agentType = desired.AgentType

@@ -1,0 +1,56 @@
+{
+  "_comment": "Example ~/cicy-ai/db/lite-config.json (todo #103). Absent file = built-in defaults (current behavior). Entries below MERGE over defaults per map key, so you only declare what you add/override. Hot-read each turn; activation of the engine itself needs the new binary + one restart.",
+
+  "profiles": {
+    "_doc": "Override or add profiles. systemBase: @dispatcher|@assistant|@liaison (Go consts) | @role:<slug> (a role template body) | literal text. external=true hard-caps the profile (grants ignored, custom tools refused).",
+    "analyst": {
+      "name": "数据分析师",
+      "systemBase": "@role:Token优化师",
+      "defaultGroups": ["coordinate"],
+      "grantableGroups": ["coordinate", "qa-ui"],
+      "external": false
+    }
+  },
+
+  "toolGroups": {
+    "qa-ui": ["chrome_eval", "electron_windows", "desktop_screenshot"]
+  },
+
+  "customTools": {
+    "electron_windows": {
+      "description": "列出 cicy-desktop 的 Electron 窗口(JSON)",
+      "argv": ["agent-electron", "windows", "--json"],
+      "params": {},
+      "risk": "exec",
+      "timeout_sec": 30,
+      "max_output_kb": 16
+    },
+    "desktop_screenshot": {
+      "description": "对 cicy-desktop 截图(返回保存路径)",
+      "argv": ["agent-desktop", "screenshot", "--json"],
+      "params": {},
+      "risk": "exec",
+      "timeout_sec": 30,
+      "max_output_kb": 8
+    },
+    "chrome_eval": {
+      "description": "在指定 Chrome profile 页面里执行 JS 断言 DOM(只填参数,命令固定)",
+      "argv": ["agent-chrome", "eval", "{idx}", "{expr}"],
+      "params": {
+        "idx":  { "type": "string", "pattern": "[0-9]{1,3}", "required": true },
+        "expr": { "type": "string", "maxLen": 2000, "required": true }
+      },
+      "risk": "exec",
+      "timeout_sec": 60,
+      "max_output_kb": 16
+    }
+  },
+
+  "grants": {
+    "_doc": "Grant custom tool groups precisely. by_agent overrides per pane id; by_profile per profile. External profiles ignore all grants.",
+    "by_agent": {
+      "w-10086": ["qa-ui"]
+    },
+    "by_profile": {}
+  }
+}

@@ -29,13 +29,6 @@ import (
 // profile's compiled base prompt, so users can refine any role inline and it
 // takes effect next turn — no restart.
 
-// liteProfile is a built-in personality preset.
-type liteProfile struct {
-	name       string   // display label
-	systemBase string   // compiled base system prompt
-	toolGroups []string // default tool groups enabled for this profile
-}
-
 // assistantSystemPromptBase — a neutral, customer/audience-facing conversational
 // agent with NO internal coordination tools. The intended base for support,
 // sales, PR and similar roles; the concrete persona comes from AGENTS.md body.
@@ -48,32 +41,18 @@ const assistantSystemPromptBase = `你是一个轻量对话助理。具体身份
 - 只在角色说明授权的范围内承诺或回答;不确定或超出范围时如实说明并给出下一步建议。
 - 不编造事实、价格、政策或承诺。`
 
-// liteProfiles — built-in presets. dispatcherSystemPromptBase lives in
-// agent_dispatcher.go.
-var liteProfiles = map[string]liteProfile{
-	"dispatcher": {
-		name:       "产品项目经理",
-		systemBase: dispatcherSystemPromptBase,
-		toolGroups: []string{"coordinate"},
-	},
-	"assistant": {
-		name:       "轻量助理",
-		systemBase: assistantSystemPromptBase,
-		toolGroups: nil, // pure chat
-	},
-}
-
-// liteToolGroups maps a capability group to the concrete tool names it enables.
-// Add new groups (knowledge retrieval, CRM, …) here as business tools land.
-var liteToolGroups = map[string][]string{
-	"coordinate": {"todo_add", "todo_list", "todo_update", "agent_list", "agent_msg", "agent_capture"},
-}
+// Profiles / tool groups / custom tools / grants are no longer Go consts — they
+// live in ~/cicy-ai/db/lite-config.json (see lite_config.go), with baked
+// defaults reproducing the former built-ins. resolveLiteConfig reads them.
 
 // liteConfig is the resolved per-instance configuration.
 type liteConfig struct {
 	profile      string
 	systemPrompt string          // base + body + identity line, cache-stable
 	enabledTools map[string]bool // empty ⇒ pure chat
+	external     bool            // profile is outward-facing (liaison): exec/custom tools refused
+	workspace    string          // for custom-tool cwd
+	customTools  map[string]liteCustomTool
 }
 
 // liteFrontmatter is the parsed AGENTS.md header (all optional).
@@ -150,44 +129,78 @@ func parseLiteList(val string) []string {
 	return out
 }
 
-// resolveLiteConfig reads the agent's AGENTS.md and produces its effective
-// profile, system prompt and enabled tool set. Robust to a missing/empty file
-// (→ dispatcher profile, backward compatible).
+// resolveLiteConfig reads the agent's AGENTS.md + the lite config and produces
+// its effective profile, system prompt and enabled tool set. Robust to a
+// missing/empty file (→ dispatcher profile, backward compatible).
+//
+// Tool resolution enforces the L1–L4 trust model:
+//   grantable = expand(profile.GrantableGroups) ∪ expand(grants for this
+//               agent/profile)            — but for EXTERNAL profiles, grants are
+//               ignored and grantable is capped to the profile's own groups.
+//   selected  = expand(frontmatter.tools) if present, else expand(DefaultGroups)
+//   effective = selected ∩ grantable      — frontmatter (L3) can only NARROW;
+//               it can never name a tool the config (L1) didn't make grantable.
 func resolveLiteConfig(shortID, workspace string) liteConfig {
+	cfg := loadLiteConfig()
 	raw := loadTemplateFile(filepath.Join(workspace, "AGENTS.md"))
 	fm := parseLiteFrontmatter(raw)
 
 	profileKey := fm.profile
-	prof, ok := liteProfiles[profileKey]
+	prof, ok := cfg.Profiles[profileKey]
 	if !ok {
 		profileKey = "dispatcher"
-		prof = liteProfiles["dispatcher"]
+		prof = cfg.Profiles["dispatcher"]
 	}
 
-	// Tool set: frontmatter `tools:` (if present) overrides the profile's
-	// default groups. Each entry may be a group name or a bare tool name.
-	groups := prof.toolGroups
-	if fm.hasTools {
-		groups = fm.tools
+	// grantable: the ceiling of what this instance may use.
+	grantGroups := append([]string{}, prof.GrantableGroups...)
+	if !prof.External {
+		grantGroups = append(grantGroups, cfg.Grants.ByProfile[profileKey]...)
+		grantGroups = append(grantGroups, cfg.Grants.ByAgent[shortID]...)
 	}
+	grantable := expandGroups(grantGroups, cfg.ToolGroups)
+
+	// selected: frontmatter `tools:` (if present) else the profile default.
+	selectGroups := prof.DefaultGroups
+	if fm.hasTools {
+		selectGroups = fm.tools
+	}
+	selected := expandGroups(selectGroups, cfg.ToolGroups)
+
+	// effective = selected ∩ grantable (narrow-only).
 	enabled := map[string]bool{}
-	for _, g := range groups {
-		if names, isGroup := liteToolGroups[g]; isGroup {
-			for _, n := range names {
-				enabled[n] = true
+	for name := range selected {
+		if grantable[name] {
+			enabled[name] = true
+		}
+	}
+
+	// Custom tools available to this instance (subset of enabled that are
+	// declared custom). External profiles get none (defense in depth — the
+	// runner also refuses, and grantable already excludes them).
+	custom := map[string]liteCustomTool{}
+	if !prof.External {
+		for name := range enabled {
+			if t, isCustom := cfg.CustomTools[name]; isCustom {
+				custom[name] = t
 			}
-		} else {
-			enabled[g] = true // treat as a bare tool name
 		}
 	}
 
 	// System prompt = profile base + AGENTS.md body + identity line. Stays
 	// byte-stable across turns (cache prefix) — no timestamps.
-	prompt := prof.systemBase
+	prompt := resolveSystemBase(prof.SystemBase)
 	if body := strings.TrimSpace(fm.body); body != "" {
 		prompt += "\n\n# 角色说明\n" + body
 	}
 	prompt += fmt.Sprintf("\n\n你自己的 AGENT_ID 是 %s。", shortID)
 
-	return liteConfig{profile: profileKey, systemPrompt: prompt, enabledTools: enabled}
+	return liteConfig{
+		profile:      profileKey,
+		systemPrompt: prompt,
+		enabledTools: enabled,
+		external:     prof.External,
+		workspace:    workspace,
+		customTools:  custom,
+	}
 }

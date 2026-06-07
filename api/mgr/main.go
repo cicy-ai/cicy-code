@@ -64,6 +64,9 @@ func main() {
 	if len(os.Args) >= 2 && os.Args[1] == "dispatcher-repl" {
 		os.Exit(runDispatcherREPL(os.Args[2:]))
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "reseed-memory" {
+		os.Exit(runReseedMemory(os.Args[2:]))
+	}
 
 	// The SERVER must never route its own outbound HTTP through the per-agent
 	// MITM proxy. If it was launched from an agent's shell (操作事故 2026-06-05:
@@ -486,6 +489,9 @@ Options:
 		runtimeMode = "container"
 	}
 	log.Printf("[startup] mode=%s port=%s db=%s kv=%s", runtimeMode, port, store.Driver, kvMode)
+
+	// A2A liaison: poll the platform inbox for bound liaison agents
+	startA2ALiaisonPoller()
 
 	// Hook: thinking → idle
 	RegisterHook(func(paneID string, old, new paneSt) {

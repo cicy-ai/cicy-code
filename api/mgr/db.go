@@ -270,6 +270,13 @@ func (d *DB) Migrate() {
 	d.ensureColumn("agent_queue", "artifact_id", "TEXT DEFAULT ''")
 	d.ensureColumn("agent_queue", "handoff_id", "TEXT DEFAULT ''")
 	d.ensureColumn("agent_queue", "employee_id", "TEXT DEFAULT ''")
+
+	// todo #104: the lite agent's agent_type "dispatcher" was renamed to the
+	// product name "cicy". Migrate existing rows once, idempotently. Runs in the
+	// NEW binary (which understands "cicy"), so it never breaks a live old daemon.
+	if _, err := d.Exec("UPDATE agent_config SET agent_type='cicy' WHERE agent_type='dispatcher'"); err != nil {
+		log.Printf("[migrate] rename agent_type dispatcher→cicy: %v", err)
+	}
 }
 
 func (d *DB) ensureColumn(table, col, def string) {

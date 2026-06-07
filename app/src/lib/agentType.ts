@@ -1,6 +1,6 @@
 import { assetUrl } from './assets'
 
-type NormalizedAgentType = '' | 'claude' | 'codex' | 'opencode' | 'cursor' | 'kiro-cli' | 'copilot' | 'openclaw' | 'hermes' | 'cicy-claude'
+type NormalizedAgentType = '' | 'claude' | 'codex' | 'opencode' | 'cursor' | 'kiro-cli' | 'copilot' | 'openclaw' | 'hermes' | 'cicy-claude' | 'cicy'
 
 export type AgentTypeOption = {
   value: string
@@ -23,7 +23,8 @@ export const AGENT_TYPE_OPTIONS: AgentTypeOption[] = [
   { value: 'copilot', label: 'Copilot' },
   { value: 'openclaw', label: 'OpenClaw' },
   { value: 'hermes', label: 'Hermes' },
-  { value: 'cicy-claude', label: 'CiCy' },
+  { value: 'cicy', label: 'CiCy' },
+  { value: 'cicy-claude', label: 'CiCy (Claude)' },
 ]
 
 const AGENT_TYPE_ICON_MAP: Record<Exclude<NormalizedAgentType, ''>, AgentTypeIconMeta> = {
@@ -36,6 +37,7 @@ const AGENT_TYPE_ICON_MAP: Record<Exclude<NormalizedAgentType, ''>, AgentTypeIco
   openclaw: { label: 'OpenClaw', text: '🦞' },
   hermes: { label: 'Hermes', text: 'HE' },
   'cicy-claude': { label: 'CiCy', src: assetUrl('/assets/logos/cicy.svg') },
+  cicy: { label: 'CiCy', src: assetUrl('/assets/logos/cicy.svg') },
 }
 
 export function normalizeAgentType(agentType?: string): NormalizedAgentType {
@@ -64,9 +66,13 @@ export function normalizeAgentType(agentType?: string): NormalizedAgentType {
     case 'claude code':
     case 'claude-code':
       return 'claude'
-    case 'cicy':
     case 'cicy-claude':
       return 'cicy-claude'
+    // CiCy 原生 lite agent(原 dispatcher,todo #104 改名)。头像用产品 logo。
+    case 'cicy':
+    case 'dispatcher':
+    case 'secretary':
+      return 'cicy'
     case 'opencode':
     case 'open code':
     case 'open-code':
@@ -98,10 +104,19 @@ export function guidanceFilenameForAgentType(agentType?: string): string | null 
     case 'codex':
     case 'opencode':
     case 'cursor':
+    case 'cicy':
       return 'AGENTS.md'
     case 'kiro-cli':
       return '.kiro/steering/memory.md'
     default:
       return null
   }
+}
+
+// isCicyLiteAgent reports whether an agent_type is the CiCy native lite agent
+// (canonical "cicy"; "dispatcher"/"secretary" are legacy aliases). Use this for
+// chat-routing decisions instead of comparing the raw string, so both migrated
+// ("cicy") and un-migrated ("dispatcher") rows behave identically.
+export function isCicyLiteAgent(agentType?: string): boolean {
+  return normalizeAgentType(agentType) === 'cicy'
 }

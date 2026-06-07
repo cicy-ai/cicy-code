@@ -11,6 +11,24 @@ import (
 	"strings"
 )
 
+// liveSessionSet returns the names of tmux sessions currently alive on this
+// host. Used to report REAL liveness — a pane_agents row only means "attached
+// to a master", never "running" (Barry's console must not show zombies as
+// online).
+func liveSessionSet() map[string]bool {
+	out, err := runTmux("list-sessions", "-F", "#{session_name}")
+	if err != nil {
+		return map[string]bool{}
+	}
+	live := map[string]bool{}
+	for _, s := range strings.Split(out, "\n") {
+		if s = strings.TrimSpace(s); s != "" {
+			live[s] = true
+		}
+	}
+	return live
+}
+
 func listAgentsByPane(paneID string) ([]M, error) {
 	query := `SELECT pa.id, pa.pane_id, pa.agent_name, pa.status,
 		COALESCE(ac.title, pa.agent_name) as title,
@@ -33,13 +51,22 @@ func listAgentsByPane(paneID string) ([]M, error) {
 		return nil, err
 	}
 	defer rows.Close()
+	live := liveSessionSet()
 	var agents []M
 	for rows.Next() {
 		var id int
 		var pid, name, status, title, agentType, machineLabel, sourceKind, sourceRef string
 		var machineID int
 		rows.Scan(&id, &pid, &name, &status, &title, &agentType, &machineID, &machineLabel, &sourceKind, &sourceRef)
-		agents = append(agents, M{"id": id, "pane_id": pid, "name": name, "status": status, "title": title, "agent_type": agentType, "machine_id": machineID, "machine_label": machineLabel, "source_kind": sourceKind, "source_ref": sourceRef})
+		// online = real liveness, not row presence. Local agents: live tmux
+		// session. Remote agents (machine_id>0): liveness is unknown from here
+		// — report null so the UI falls back to its own signal instead of a
+		// false green.
+		var online interface{}
+		if machineID == 0 {
+			online = live[shortPaneID(name)]
+		}
+		agents = append(agents, M{"id": id, "pane_id": pid, "name": name, "status": status, "title": title, "agent_type": agentType, "machine_id": machineID, "machine_label": machineLabel, "source_kind": sourceKind, "source_ref": sourceRef, "online": online})
 	}
 	if agents == nil {
 		agents = []M{}

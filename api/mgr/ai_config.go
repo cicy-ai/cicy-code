@@ -400,7 +400,7 @@ func loadDefaultProviderKeyForAgentType(agentType string) string {
 	agentType = strings.TrimSpace(strings.ToLower(agentType))
 	// The dispatcher speaks the Anthropic protocol and rides the claude
 	// provider chain — it has no separate default entry.
-	if agentType == "dispatcher" {
+	if agentType == "cicy" || agentType == "dispatcher" {
 		agentType = "claude"
 	}
 	if key, ok := providers.Default[agentType]; ok {
@@ -432,7 +432,7 @@ func loadAllProviderConfigs() []providerConfig {
 
 func runtimeAIExpectedProtocolForAgentType(agentType string) string {
 	switch normalizeAgentType(agentType) {
-	case "claude", "cicy-claude", "kiro-cli", "dispatcher":
+	case "claude", "cicy-claude", "kiro-cli", "cicy":
 		return "anthropic"
 	case "codex", "openclaw", "hermes":
 		return "openai"

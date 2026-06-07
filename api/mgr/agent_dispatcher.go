@@ -173,24 +173,26 @@ func dispatcherMessageHasToolResult(msg M) bool {
 
 // ── tools ───────────────────────────────────────────────────────────────────
 
-// dispatcherToolDefs returns the tool defs the agent's profile enables. An
-// empty/ nil enabled set yields no tools (pure-chat roles).
-func dispatcherToolDefs(enabled map[string]bool) []M {
-	all := dispatcherAllToolDefs()
-	if len(enabled) == 0 {
+// dispatcherToolDefs returns the tool defs the agent's profile enables: the
+// built-ins whose names are in the effective set, plus any enabled custom tools
+// (declared in lite-config.json). An empty effective set yields no tools.
+func dispatcherToolDefs(cfg liteConfig) []M {
+	if len(cfg.enabledTools) == 0 {
 		return nil
 	}
+	all := dispatcherAllToolDefs()
 	out := make([]M, 0, len(all))
 	for _, t := range all {
-		if name, _ := t["name"].(string); enabled[name] {
+		if name, _ := t["name"].(string); cfg.enabledTools[name] {
 			out = append(out, t)
 		}
 	}
-	return out
+	return append(out, liteCustomToolDefs(cfg)...)
 }
 
 func dispatcherAllToolDefs() []M {
-	return []M{
+	defs := append([]M{}, a2aLiaisonToolDefs()...) // a2a_* (liaison profile)
+	return append(defs, []M{
 		{
 			"name":        "todo_add",
 			"description": "Record a new task in the shared todo list. Optionally assign it to an agent by short pane id (e.g. w-10003).",
@@ -258,12 +260,17 @@ func dispatcherAllToolDefs() []M {
 				"required": []string{"pane_id"},
 			},
 		},
-	}
+	}...)
 }
 
-func dispatcherRunTool(selfShortID, name string, input map[string]interface{}, enabled map[string]bool) string {
+func dispatcherRunTool(selfShortID, name string, input map[string]interface{}, cfg liteConfig) string {
+	enabled := cfg.enabledTools
 	if !enabled[name] {
 		return "error: tool " + name + " is not enabled for this agent"
+	}
+	// Custom tools (declared in lite-config.json) route to the guarded executor.
+	if _, isCustom := cfg.customTools[name]; isCustom {
+		return runLiteCustomTool(cfg, selfShortID, name, input)
 	}
 	str := func(key string) string {
 		v, _ := input[key].(string)
@@ -427,6 +434,9 @@ func dispatcherRunTool(selfShortID, name string, input map[string]interface{}, e
 		}
 		return out
 	}
+	if strings.HasPrefix(name, "a2a_") {
+		return a2aLiaisonRunTool(selfShortID, name, input)
+	}
 	return "error: unknown tool " + name
 }
 
@@ -440,8 +450,8 @@ func orDash(s string) string {
 // dispatcherCachedToolDefs returns the tool defs with a cache breakpoint on
 // the last one (caches the whole tools prefix on Anthropic-protocol
 // providers; the DeepSeek adapter ignores the extra key).
-func dispatcherCachedToolDefs(enabled map[string]bool) []M {
-	tools := dispatcherToolDefs(enabled)
+func dispatcherCachedToolDefs(cfg liteConfig) []M {
+	tools := dispatcherToolDefs(cfg)
 	if len(tools) > 0 {
 		tools[len(tools)-1]["cache_control"] = M{"type": "ephemeral"}
 	}
@@ -847,8 +857,8 @@ func handleDispatcherChat(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "agent_id and text required")
 		return
 	}
-	if paneAgentType(shortID+":main.0") != "dispatcher" {
-		httpErr(w, 400, "agent is not a dispatcher")
+	if normalizeAgentType(paneAgentType(shortID+":main.0")) != "cicy" {
+		httpErr(w, 400, "agent is not a cicy lite agent")
 		return
 	}
 	workspace := paneWorkspace(shortID)
@@ -894,7 +904,7 @@ func handleDispatcherChat(w http.ResponseWriter, r *http.Request) {
 		}
 		// Pure-chat roles (assistant/support/sales) enable no tools — omit the
 		// field entirely (an empty tools array is rejected by some upstreams).
-		if tools := dispatcherCachedToolDefs(cfg.enabledTools); len(tools) > 0 {
+		if tools := dispatcherCachedToolDefs(cfg); len(tools) > 0 {
 			payload["tools"] = tools
 		}
 		resp, streamed, err := dispatcherCallGateway(shortID, payload, sse.emit)
@@ -937,7 +947,7 @@ func handleDispatcherChat(w http.ResponseWriter, r *http.Request) {
 				name, _ := bm["name"].(string)
 				toolID, _ := bm["id"].(string)
 				input, _ := bm["input"].(map[string]interface{})
-				result := dispatcherRunTool(shortID, name, input, cfg.enabledTools)
+				result := dispatcherRunTool(shortID, name, input, cfg)
 				argJSON, _ := json.Marshal(input)
 				sse.emit(M{"type": "tool", "name": name, "arg": string(argJSON), "result": truncateForLog(result, 600)})
 				toolResults = append(toolResults, M{
