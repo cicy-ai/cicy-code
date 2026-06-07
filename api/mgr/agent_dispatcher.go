@@ -190,8 +190,7 @@ func dispatcherToolDefs(enabled map[string]bool) []M {
 }
 
 func dispatcherAllToolDefs() []M {
-	defs := append([]M{}, a2aLiaisonToolDefs()...) // a2a_* (liaison profile)
-	return append(defs, []M{
+	return []M{
 		{
 			"name":        "todo_add",
 			"description": "Record a new task in the shared todo list. Optionally assign it to an agent by short pane id (e.g. w-10003).",
@@ -259,7 +258,7 @@ func dispatcherAllToolDefs() []M {
 				"required": []string{"pane_id"},
 			},
 		},
-	}...)
+	}
 }
 
 func dispatcherRunTool(selfShortID, name string, input map[string]interface{}, enabled map[string]bool) string {
@@ -427,9 +426,6 @@ func dispatcherRunTool(selfShortID, name string, input map[string]interface{}, e
 			return "(terminal empty)"
 		}
 		return out
-	}
-	if strings.HasPrefix(name, "a2a_") {
-		return a2aLiaisonRunTool(selfShortID, name, input)
 	}
 	return "error: unknown tool " + name
 }
