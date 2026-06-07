@@ -199,6 +199,17 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
       };
     }, [useWebview, onLoad]);
 
+    // Browser iframes only fire `load` once EVERY subresource is down —
+    // megabytes of JS for app frames — while the guest is typically painting
+    // (with its own splash) long before that. Cap the overlay so it never
+    // sits on top of a page that's already visible. Webviews have their own
+    // dom-ready + 8s fallback above.
+    useEffect(() => {
+      if (useWebview || !isLoading) return;
+      const cap = setTimeout(() => setIsLoading(false), 2500);
+      return () => clearTimeout(cap);
+    }, [useWebview, isLoading, src]);
+
     // Navigate on src change (initial load handled by webview src attribute)
     const prevSrc = useRef(src);
     useEffect(() => {
