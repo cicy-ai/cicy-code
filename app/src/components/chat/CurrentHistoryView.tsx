@@ -226,6 +226,9 @@ type HistoryMemSnapshot = {
   nextBefore: number | null;
   maxId: number;
   updatedAt: number;
+  // 最后一轮答案在迁入 committed 前住在 reply.json(live 尾巴)里。快照不带它的话,
+  // 切回来时最后一个答案要等首次 poll 才"啪"地补进来,看着像刚生成完。
+  liveTurn: HistoryTurn | null;
 };
 
 function historyMemCache(): Map<string, HistoryMemSnapshot> {
@@ -1581,14 +1584,43 @@ function HistoryTurnIdBadge({ historyId }: { historyId?: number }) {
 }
 
 function ThinkingBlock({ text }: { text: string }) {
+  // 超过 3 行折叠成 3 行,小箭头展开/收起。用 maxHeight(3 × 行高)截断而不是
+  // -webkit-line-clamp —— Markdown 渲染出的是多个块级元素(p/列表),line-clamp 对
+  // 跨块行数不可靠,maxHeight 永远可预测。是否溢出由实测 scrollHeight 决定,流式
+  // 期间 text 持续变化会跟着重测。
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (expanded) return; // 展开态没有截断,无从测溢出;收起时再测
+    const el = bodyRef.current;
+    if (!el) return;
+    setOverflowing(el.scrollHeight > el.clientHeight + 2);
+  }, [text, expanded]);
   return (
     <div data-id="current-history-view-thinking-block" className="mb-2 border-l-2 border-amber-300/25 pl-3">
       {/* thinking 要和正文区分:小一号(text-xs)、斜体、更暗的颜色。颜色用内联 style 强制 ——
           .chat-markdown{color:#d4d4d8} 是非分层规则,会盖掉 Tailwind 的 text-zinc-* 工具类,
           所以必须内联(内联优先级高于样式表类规则),<p> 子元素再继承这个颜色。 */}
-      <div data-id="current-history-view-thinking-block-body" className="chat-markdown current-history-markdown text-xs italic leading-[1.7]" style={{ color: '#52525b' }}>
+      <div
+        ref={bodyRef}
+        data-id="current-history-view-thinking-block-body"
+        className="chat-markdown current-history-markdown text-xs italic leading-[1.7]"
+        style={{ color: '#52525b', ...(expanded ? {} : { maxHeight: 'calc(3 * 1.7em)', overflow: 'hidden' }) }}
+      >
         <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{text}</Markdown>
       </div>
+      {overflowing || expanded ? (
+        <button
+          type="button"
+          data-id="current-history-view-thinking-block-toggle"
+          onClick={() => setExpanded((v) => !v)}
+          aria-label={expanded ? 'collapse thinking' : 'expand thinking'}
+          className="mt-0.5 inline-flex items-center rounded p-0.5 text-zinc-600 transition-colors hover:bg-white/[0.04] hover:text-zinc-300"
+        >
+          <ChevronDown className={`h-3 w-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -1741,6 +1773,10 @@ export default function CurrentHistoryView({
   // 给输入框广播"是否还在等回复"。busy = 有占位 q(刚发出) 或 轮询发现 in-flight 回复
   // (未 complete 且非 fail/error)。只在变化时 emit。供 DispatcherChat 锁发送、显示 waiting。
   const optimisticActiveRef = useRef(false);
+  // 轮询观测到的"回复是否进行中"。锚定逻辑用它区分:真正的新回合(in-flight,该钉顶)
+  // vs 切换/重开/softRebind 后 positional history_id 变化导致的"伪新问题"(完成态,
+  // 钉顶会演出一段"打字进场",让人误以为 agent 还在工作)。
+  const replyInFlightRef = useRef(false);
   const lastBusyEmitRef = useRef<boolean | null>(null);
   const emitBusy = (busy: boolean) => {
     if (lastBusyEmitRef.current === busy) return;
@@ -1861,6 +1897,7 @@ export default function CurrentHistoryView({
     clearScheduledScrolls();
     setOptimisticQ(null);
     optimisticBaselineUserIdRef.current = 0;
+    replyInFlightRef.current = false;
   }, [paneId, open]);
 
   useEffect(() => {
@@ -1903,6 +1940,11 @@ export default function CurrentHistoryView({
       setHasMore(snap.hasMore);
       setNextBefore(snap.nextBefore);
       maxLoadedIdRef.current = snap.maxId;
+      // live 尾巴(最后一轮答案)同步还原,首帧就完整;首次 poll 会用最新 reply 覆盖。
+      if (snap.liveTurn) {
+        liveTurnRef.current = snap.liveTurn;
+        setLiveTurn(snap.liveTurn);
+      }
     }
     if (!hasSnap) setLoading(true);
     getHistoryIDs(paneId)
@@ -1975,8 +2017,9 @@ export default function CurrentHistoryView({
       nextBefore,
       maxId: maxLoadedIdRef.current,
       updatedAt: Date.now(),
+      liveTurn,
     });
-  }, [open, paneId, items, conversationId, model, hasMore, nextBefore, loading]);
+  }, [open, paneId, items, conversationId, model, hasMore, nextBefore, loading, liveTurn]);
 
   // No live WS push — Part 2 polls reply.json. The reply's ANSWER occupies
   // history_id = current.maxID + 1, so it attaches right after committed's last
@@ -2046,6 +2089,7 @@ export default function CurrentHistoryView({
         // 广播忙/闲:有 in-flight 回复(有答案槽、未 complete、非 fail)就是 busy;占位 q 还在也算
         // busy。complete / fail 才解锁发送。
         const replyInFlight = answerId > 0 && !complete && !replyFailed;
+        replyInFlightRef.current = replyInFlight;
         emitBusy(optimisticActiveRef.current || replyInFlight);
 
         // No conversation / no turn yet → nothing to attach.
@@ -2240,6 +2284,15 @@ export default function CurrentHistoryView({
 
       // 出现了新的问题 → **平滑**滚到顶一次 + 撑底部 spacer,然后放手。
       if (lastUserKey && lastUserKey !== anchoredQKeyRef.current) {
+        // 钉顶是"发送时"的行为,只对**进行中的回合**做(占位 q 或轮询确认 in-flight)。
+        // history_id 是位置性的:切换 agent/重开/softRebind 后同一条旧 q 的 id 会变,
+        // 没有这个门,完成态的旧对话会被误判为新问题 → q 滑顶 + 答案像刚打出来一样
+        // "打字进场",让人误以为 agent 还在工作(其实 idle)。完成态只交接锚点,不动滚动。
+        if (!optimisticQ && !replyInFlightRef.current) {
+          anchoredQKeyRef.current = lastUserKey;
+          activeSpacerTurnKeyRef.current = '';
+          return;
+        }
         // 用户已经滚上去在读历史(不在底部附近)→ 不抢滚动。只把新 q 记为已锚,
         // 避免之后反复触发;乐观占位 q(用户自己刚发的)例外,永远钉顶。
         // 旁观他人会话(history popover)时 agent 持续产生新 turn,这条就是"读着读着
@@ -2326,7 +2379,7 @@ export default function CurrentHistoryView({
     setLoadingMore(true);
     try {
       // fresh: history_id is a POSITIONAL index into current.json, so for an
-      // actively-mutating/compacting agent (e.g. w-10001 itself) an old slot's
+      // actively-mutating/compacting agent (e.g. w-1001 itself) an old slot's
       // content changes over time — the IndexedDB cache for that slot goes stale
       // and scroll-up would resurrect a turn that no longer lives there (e.g. a
       // skill-context block surfacing as a "/loop …" bubble). Always re-fetch

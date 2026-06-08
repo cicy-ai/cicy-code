@@ -9,7 +9,7 @@ import apiService from '../../services/api';
  * 下 = prompt 输入条,发送走 /api/tmux/send(送进 REPL stdin,与终端/TG 同一管道)。
  * 终端不再展示——dispatcher 在 web 上就是一个聊天窗口。
  */
-export default function DispatcherChat({ paneId, active, agentType = 'dispatcher' }: { paneId: string; active: boolean; agentType?: string }) {
+export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: { paneId: string; active: boolean; agentType?: string }) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   // 回复进行中(busy)→ 锁发送、显示 waiting。只有 reply complete / fail 才解锁。

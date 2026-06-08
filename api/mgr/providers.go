@@ -23,7 +23,7 @@ var providersFileMu sync.Mutex
 var providerKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
 // agent types exposed in the provider manager defaults editor.
-var providerDefaultAgentTypes = []string{"claude", "codex", "opencode"}
+var providerDefaultAgentTypes = []string{"claude", "cicy", "codex", "opencode"}
 
 // Official cicy-shipped providers — protected from deletion via API.
 var protectedProviderKeys = map[string]bool{
@@ -60,6 +60,7 @@ func writeGlobalJSONConfig(cfg map[string]any) error {
 const defaultProvidersBlockJSON = `{
   "default": {
     "claude": "defaultAnthropic",
+    "cicy": "defaultAnthropic",
     "codex": "defaultOpenAi",
     "opencode": "defaultOpenAi",
     "stt": "cloudflare-ai"

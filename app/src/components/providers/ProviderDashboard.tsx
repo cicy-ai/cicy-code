@@ -48,12 +48,12 @@ type Tab = 'routing' | 'providers';
 /* ───────────────────────── constants ───────────────────────── */
 
 const PROTOCOLS = ['openai', 'anthropic'] as const;
-const KNOWN_SLOTS = ['claude', 'codex', 'opencode'];
+const KNOWN_SLOTS = ['claude', 'cicy', 'codex', 'opencode'];
 const PROTECTED_PROVIDER_KEYS = new Set(['defaultAnthropic', 'defaultOpenAi']);
-const SLOT_LABELS: Record<string, string> = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode' };
-const SLOT_DESC: Record<string, string> = { claude: 'Claude Code CLI', codex: 'OpenAI Codex CLI', opencode: 'OpenCode CLI' };
-const SLOT_PROTOCOL: Record<string, string> = { claude: 'anthropic', codex: 'openai', opencode: 'openai' };
-const SLOT_FALLBACK_MODEL: Record<string, string> = { claude: 'claude-opus-4-7', codex: 'gpt-5.4', opencode: 'deepseek-v4-pro' };
+const SLOT_LABELS: Record<string, string> = { claude: 'Claude', cicy: 'CiCy', codex: 'Codex', opencode: 'OpenCode' };
+const SLOT_DESC: Record<string, string> = { claude: 'Claude Code CLI', cicy: 'CiCy Lite Agent', codex: 'OpenAI Codex CLI', opencode: 'OpenCode CLI' };
+const SLOT_PROTOCOL: Record<string, string> = { claude: 'anthropic', cicy: 'anthropic', codex: 'openai', opencode: 'openai' };
+const SLOT_FALLBACK_MODEL: Record<string, string> = { claude: 'claude-opus-4-7', cicy: 'deepseek-v4-pro', codex: 'gpt-5.4', opencode: 'deepseek-v4-pro' };
 
 /* ───────────────────────── helpers ───────────────────────── */
 
