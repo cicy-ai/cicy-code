@@ -24,6 +24,23 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # to $HOME/.npm-global (configured in base via npm config set prefix).
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# Optionally bake a locally-built binary: `build.sh docker` stages
+# api/cicy-code-docker so DEV images (dev.py --docker) run LOCAL changes; the
+# entrypoint sees cicy-code already on PATH and skips its npm install. Release /
+# base builds omit the file and fall back to npm as before. Pairing the optional
+# file with an always-present one (docker-entrypoint.sh) keeps this COPY valid
+# when the binary is absent; the RUN then installs it onto PATH only if staged.
+COPY docker-entrypoint.sh cicy-code-docke[r] /tmp/cicy-stage/
+RUN if [ -f /tmp/cicy-stage/cicy-code-docker ]; then \
+      mkdir -p /home/cicy/.npm-global/bin && \
+      install -m 0755 /tmp/cicy-stage/cicy-code-docker /home/cicy/.npm-global/bin/cicy-code && \
+      chown -R cicy:cicy /home/cicy/.npm-global/bin && \
+      echo "[dockerfile] baked local cicy-code binary (dev build)"; \
+    else \
+      echo "[dockerfile] no local binary staged; entrypoint will npm-install"; \
+    fi; \
+    rm -rf /tmp/cicy-stage
+
 WORKDIR /home/cicy
 # No baked cicy-code binary: this is a stable BASE environment. The entrypoint
 # installs cicy-code from npm (npmmirror) at startup, so the image only needs
@@ -44,21 +61,9 @@ ENV HOME=/home/cicy \
     ENABLE_CDN=false \
     PATH="/home/cicy/.npm-global/bin:/home/cicy/.local/bin:/home/cicy/.opencode/bin:${PATH}"
 
-# Pre-install the Claude Code agent CLI so the first worker launch has `claude`
-# on PATH instantly — no first-open `npm install` (which stalls for minutes when
-# npmjs is slow/blocked, e.g. in CN). npmmirror is the reliable registry.
-# claude-code ships its ~229MB native binary TWICE (bin/claude.exe is a full
-# copy of node_modules/.../claude-code-linux-x64/claude); replace the copy with
-# a relative symlink to keep the image ~229MB smaller.
-RUN set -eux; \
-    npm install -g --registry=https://registry.npmmirror.com @anthropic-ai/claude-code@latest; \
-    CC="$(npm root -g)/@anthropic-ai/claude-code"; \
-    if [ -f "$CC/node_modules/@anthropic-ai/claude-code-linux-x64/claude" ] && [ -f "$CC/bin/claude.exe" ]; then \
-      ln -sf ../node_modules/@anthropic-ai/claude-code-linux-x64/claude "$CC/bin/claude.exe"; \
-    fi; \
-    npm cache clean --force; \
-    rm -rf /home/cicy/.npm /tmp/npm-cache /tmp/* 2>/dev/null || true; \
-    claude --version
+# NOTE: claude is NOT pre-installed. Agent CLIs (claude/codex/opencode) install
+# on demand only when a non-cicy agent is actually launched (bound under w-1001),
+# so a fresh runtime never pays the install cost for agents the user doesn't use.
 
 # Pre-install the mihomo proxy binary from its npm subpackage (published by the
 # cicy-mihomo release CI) so containers never fetch it from GitHub releases at

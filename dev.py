@@ -1239,7 +1239,13 @@ def run_docker(
         print(
             f"[dev] Mount host projects: {host_projects_dir} -> {DOCKER_PROJECTS_DIR}"
         )
-    agents_flag = str(agents or "").strip() or "claude,codex,opencode"
+    # When no --agents is given, omit the flag entirely so the server preinstalls
+    # the official role roster (w-1001 项目经理 + team), exactly like a real fresh
+    # install. Passing --agents forces the legacy per-type layout (dev override).
+    agents_flag = str(agents or "").strip()
+    cicy_args = ["--public"]
+    if agents_flag:
+        cicy_args.append(f"--agents={agents_flag}")
     run_cmd = (
         [
             "docker",
@@ -1256,9 +1262,8 @@ def run_docker(
             "-p",
             f"{ports}:8008",
             runtime_image,
-            "--public",
-            f"--agents={agents_flag}",
         ]
+        + cicy_args
     )
     print(f"[dev] docker run: {' '.join(run_cmd)}")
     docker_run_started_at = time.time()
@@ -1627,7 +1632,7 @@ def main():
     docker_group.add_argument(
         "--agents",
         default="",
-        help="Comma-separated agents to start with --docker. Default: codex.",
+        help="Comma-separated agents for --docker (legacy per-type layout). Default: empty → official role roster (w-1001 项目经理 + team).",
     )
     docker_group.add_argument(
         "--port",
