@@ -3,7 +3,7 @@ package main
 import "testing"
 
 func TestProxySettingsRoundTrip(t *testing.T) {
-	cfg, err := mergeProxySettingsIntoConfigJSON("{}", &proxySettings{Password: "secret", Rule: "IN-USER,w-10001,proxy-a"})
+	cfg, err := mergeProxySettingsIntoConfigJSON("{}", &proxySettings{Password: "secret", Rule: "IN-USER,w-1001,proxy-a"})
 	if err != nil {
 		t.Fatalf("mergeProxySettingsIntoConfigJSON error: %v", err)
 	}
@@ -11,13 +11,13 @@ func TestProxySettingsRoundTrip(t *testing.T) {
 	if ps == nil {
 		t.Fatal("expected proxy settings")
 	}
-	if ps.Password != "secret" || ps.Rule != "IN-USER,w-10001,proxy-a" {
+	if ps.Password != "secret" || ps.Rule != "IN-USER,w-1001,proxy-a" {
 		t.Fatalf("unexpected proxy settings: %+v", ps)
 	}
 }
 
 func TestProxySettingsClearsWhenEmpty(t *testing.T) {
-	cfg, err := mergeProxySettingsIntoConfigJSON(`{"proxy":{"password":"secret","rule":"IN-USER,w-10001,proxy-a"}}`, nil)
+	cfg, err := mergeProxySettingsIntoConfigJSON(`{"proxy":{"password":"secret","rule":"IN-USER,w-1001,proxy-a"}}`, nil)
 	if err != nil {
 		t.Fatalf("mergeProxySettingsIntoConfigJSON error: %v", err)
 	}

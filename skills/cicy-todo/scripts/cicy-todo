@@ -246,9 +246,9 @@ cicy-todo — per-workspace todo list (todo / doing / done / dropped)
 
 Self vs other agent:
   cicy-todo                       # list own active todos (own = $CICY_PANE_ID)
-  cicy-todo w-10001               # list w-10001's active todos
-  cicy-todo w-10001 add "ship it" # add a todo to w-10001
-  cicy-todo w-10001 done t-1779   # mark w-10001's todo done
+  cicy-todo w-1001               # list w-1001's active todos
+  cicy-todo w-1001 add "ship it" # add a todo to w-1001
+  cicy-todo w-1001 done t-1779   # mark w-1001's todo done
 
 Subcommands:
   [pane] add "<title>"
@@ -261,8 +261,8 @@ Subcommands:
   [pane] edit  <id> "<title>"
   [pane] rm    <id>
 
-The leading positional `pane` (e.g. `w-10001`) is optional. Without it, the
-command targets the current pane ($CICY_PANE_ID, else w-10001). Every request
+The leading positional `pane` (e.g. `w-1001`) is optional. Without it, the
+command targets the current pane ($CICY_PANE_ID, else w-1001). Every request
 carries `X-Agent-Show-Id: <pane>` so the backend knows whose todos to act on.
 
 Global flags (before subcommand):
@@ -292,7 +292,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# First positional arg may be a pane id (e.g. w-10001) — treat as target pane
+# First positional arg may be a pane id (e.g. w-1001) — treat as target pane
 # unless it's already a known subcommand.
 if [[ $# -gt 0 && "$1" =~ ^w-[0-9]+$ ]]; then
   PANE_OVERRIDE="$1"; shift

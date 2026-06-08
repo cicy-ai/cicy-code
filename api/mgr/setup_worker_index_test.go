@@ -24,9 +24,9 @@ func TestSyncWorkerIndexFromBuiltinAgents(t *testing.T) {
 	withTestStore(t)
 
 	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		"w-10001:main.0", "CiCy", 10001, "/tmp/w-10001", "", "{}", "master", "", "cicy-claude", true, true,
+		"w-1001:main.0", "CiCy", 10001, "/tmp/w-1001", "", "{}", "master", "", "cicy-claude", true, true,
 	); err != nil {
-		t.Fatalf("insert w-10001: %v", err)
+		t.Fatalf("insert w-1001: %v", err)
 	}
 	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
 		"w-10002:main.0", "Codex", 10002, "/tmp/w-10002", "", "{}", "worker", "", "codex", true, true,
@@ -50,9 +50,9 @@ func TestSyncWorkerIndexKeepsHigherDynamicValue(t *testing.T) {
 
 	setWorkerIndex(20005)
 	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		"w-10001:main.0", "CiCy", 10001, "/tmp/w-10001", "", "{}", "master", "", "cicy-claude", true, true,
+		"w-1001:main.0", "CiCy", 10001, "/tmp/w-1001", "", "{}", "master", "", "cicy-claude", true, true,
 	); err != nil {
-		t.Fatalf("insert w-10001: %v", err)
+		t.Fatalf("insert w-1001: %v", err)
 	}
 
 	syncWorkerIndexToExistingAgents()

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 container="${1:-cicy-code-dev}"
-pane_id="${PANE_ID:-w-10001:main.0}"
+pane_id="${PANE_ID:-w-1001:main.0}"
 mode="${MODE:-${2:-allow-all-actions}}"
 restore_after="${RESTORE_AFTER:-0}"
 agent_session="${pane_id%%:*}"

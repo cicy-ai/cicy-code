@@ -166,7 +166,7 @@ POST /api/skill-market/<name>/update
 
 请求 header（可选）：
 ```
-X-Agent-Show-Id: w-10001
+X-Agent-Show-Id: w-1001
 ```
 不传则使用当前 active pane。
 
@@ -182,7 +182,7 @@ X-Agent-Show-Id: w-10001
   "ok": true,
   "data": {
     "task_id": "t-1234abcd",
-    "pane": "w-10001",
+    "pane": "w-1001",
     "agent_id": "claude",
     "action": "install",
     "name": "cf-tunnel",
@@ -251,7 +251,7 @@ GET /api/skill-task/<task_id>
     "action": "install",
     "name": "cf-tunnel",
     "version": "latest",
-    "pane": "w-10001",
+    "pane": "w-1001",
     "agent_id": "claude",
     "status": "running",
     "step": "downloading",

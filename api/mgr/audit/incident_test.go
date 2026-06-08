@@ -14,14 +14,14 @@ func TestResponsiblePersons_Resolve_AllTiers(t *testing.T) {
 	r := ResponsiblePersonsConfig{
 		Default:    []string{"sec@corp"},
 		BySeverity: map[string][]string{"high": {"oncall@corp"}, "critical": {"ciso@corp"}},
-		ByAgent:    map[string][]string{"w-10001": {"alice@corp"}, "w-1*": {"team-platform@corp"}},
+		ByAgent:    map[string][]string{"w-1001": {"alice@corp"}, "w-1*": {"team-platform@corp"}},
 		ByUser:     map[string][]string{"u-abc": {"alice@corp"}},
 		ByRule:     map[string][]string{"secret.aws_akid": {"devops@corp"}},
 	}
 
 	// All tiers fire simultaneously — dedup expected (alice@corp appears
-	// twice: by_agent w-10001 + by_user u-abc).
-	got := r.Resolve(SeverityHigh, "w-10001", "u-abc", []string{"secret.aws_akid"})
+	// twice: by_agent w-1001 + by_user u-abc).
+	got := r.Resolve(SeverityHigh, "w-1001", "u-abc", []string{"secret.aws_akid"})
 	want := []string{"alice@corp", "devops@corp", "oncall@corp", "team-platform@corp"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("all-tiers: got %v want %v", got, want)
@@ -48,11 +48,11 @@ func TestResponsiblePersons_AgentWildcard(t *testing.T) {
 	r := ResponsiblePersonsConfig{
 		ByAgent: map[string][]string{
 			"w-100*":  {"a@corp"},
-			"w-10001": {"b@corp"},
+			"w-1001": {"b@corp"},
 		},
 	}
-	// w-10001 matches both — both included, dedup.
-	got := r.Resolve("", "w-10001", "", nil)
+	// w-1001 matches both — both included, dedup.
+	got := r.Resolve("", "w-1001", "", nil)
 	if !reflect.DeepEqual(got, []string{"a@corp", "b@corp"}) {
 		t.Errorf("wildcard merge: got %v", got)
 	}

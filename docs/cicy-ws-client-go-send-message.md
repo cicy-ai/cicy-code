@@ -10,12 +10,12 @@
 
     参数说明：
 
-    - `agent_id`：必填，`w-10001` 或 `w-10001:main.0` 都可以
+    - `agent_id`：必填，`w-1001` 或 `w-1001:main.0` 都可以
     - `token`：必填，通常来自 `~/cicy-ai/global.json -> api_token`
     - `client_id`：建议显式传，便于排查
     - `electron`：可选，桌面端内部使用
 
-    服务端会把 `agent_id` 归一化为短 pane ID，例如 `w-10001`。
+    服务端会把 `agent_id` 归一化为短 pane ID，例如 `w-1001`。
 
     ## 消息格式
 
@@ -65,7 +65,7 @@
 
     func main() {
         base := flag.String("base", "ws://127.0.0.1:8008", "ws base")
-        agent := flag.String("agent", "w-10001", "agent_id or pane")
+        agent := flag.String("agent", "w-1001", "agent_id or pane")
         token := flag.String("token", "", "api token")
         clientID := flag.String("client", fmt.Sprintf("go-%d", time.Now().Unix()), "client_id")
         flag.Parse()
@@ -130,7 +130,7 @@
     运行：
 
     ```bash
-    go run main.go -base ws://127.0.0.1:8008 -agent w-10001 -token '<YOUR_TOKEN>'
+    go run main.go -base ws://127.0.0.1:8008 -agent w-1001 -token '<YOUR_TOKEN>'
     ```
 
     ## 排查要点

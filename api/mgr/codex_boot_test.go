@@ -7,7 +7,7 @@ import (
 )
 
 func TestAgentBootLinesCodexAllowAllActions(t *testing.T) {
-	lines := agentBootLines("codex", true, false, true, "w-10001", "gpt-5.5")
+	lines := agentBootLines("codex", true, false, true, "w-1001", "gpt-5.5")
 
 	script := strings.Join(lines, "\n")
 
@@ -37,7 +37,7 @@ func TestAgentBootLinesCodexAllowAllActions(t *testing.T) {
 	}
 
 	// Must have base_url pointing to local gateway
-	if !strings.Contains(script, "api/ai-gateway/openai/w-10001") {
+	if !strings.Contains(script, "api/ai-gateway/openai/w-1001") {
 		t.Error("missing ai-gateway base_url")
 	}
 
@@ -60,7 +60,7 @@ func TestAgentBootLinesCodexAllowAllActions(t *testing.T) {
 }
 
 func TestAgentBootLinesCodexModelCatalog(t *testing.T) {
-	lines := agentBootLines("codex", true, false, true, "w-10001", "deepseek-v4-pro")
+	lines := agentBootLines("codex", true, false, true, "w-1001", "deepseek-v4-pro")
 	script := strings.Join(lines, "\n")
 
 	// Catalog is generated at boot (cloned from Codex's own embedded metadata)
@@ -88,14 +88,14 @@ func TestAgentBootLinesCodexModelCatalog(t *testing.T) {
 	}
 
 	// Non-gateway codex must NOT inject the catalog (it uses official config).
-	off := strings.Join(agentBootLines("codex", true, false, false, "w-10001", ""), "\n")
+	off := strings.Join(agentBootLines("codex", true, false, false, "w-1001", ""), "\n")
 	if strings.Contains(off, "model_catalog_json") {
 		t.Error("non-gateway codex should not inject a model catalog")
 	}
 }
 
 func TestAgentBootLinesCodexRestrictedActions(t *testing.T) {
-	lines := agentBootLines("codex", false, false, true, "w-10001", "gpt-5.5")
+	lines := agentBootLines("codex", false, false, true, "w-1001", "gpt-5.5")
 
 	script := strings.Join(lines, "\n")
 
@@ -129,7 +129,7 @@ func TestAgentBootLinesCodexRestrictedActions(t *testing.T) {
 func TestAgentBootLinesCodexNormalization(t *testing.T) {
 	// "openai" should normalize to codex
 	for _, alias := range []string{"codex", "openai"} {
-		lines := agentBootLines(alias, true, false, true, "w-10001", "gpt-5.5")
+		lines := agentBootLines(alias, true, false, true, "w-1001", "gpt-5.5")
 		script := strings.Join(lines, "\n")
 		if !strings.Contains(script, "codex -m 'gpt-5.5'") {
 			t.Errorf("agentType=%q should produce codex boot lines", alias)
@@ -173,7 +173,7 @@ func TestAgentBootLinesCodexUsesCodexDefaultProviderModel(t *testing.T) {
 		t.Fatalf("write global.json: %v", err)
 	}
 
-	lines := agentBootLines("codex", true, false, true, "w-10001", "")
+	lines := agentBootLines("codex", true, false, true, "w-1001", "")
 	script := strings.Join(lines, "\n")
 	if !strings.Contains(script, "codex -m 'gpt-5.5'") {
 		t.Fatalf("codex boot lines should use codex provider default model: %s", script)

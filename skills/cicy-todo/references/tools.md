@@ -3,12 +3,12 @@
 ## CLI subcommands
 
 The leading `[pane]` is optional — without it the command targets the current
-pane. With it (`cicy-todo w-10001 ...`) the command targets that agent.
+pane. With it (`cicy-todo w-1001 ...`) the command targets that agent.
 
 | Command | What it does |
 |---|---|
 | `cicy-todo`                              | shortcut for `list` on own pane |
-| `cicy-todo w-10001`                      | shortcut for `list` on w-10001 |
+| `cicy-todo w-1001`                      | shortcut for `list` on w-1001 |
 | `cicy-todo [pane] add "<title>"`            | create a new todo (status=todo) |
 | `cicy-todo [pane] list [--status=<s>] [-q <kw>] [--all] [--json]` | list todos; default hides `done`+`dropped` |
 | `cicy-todo [pane] show <id>`                | full detail for one todo |
@@ -36,7 +36,7 @@ All routed through the cicy-code server (default `http://127.0.0.1:8008`):
 Headers (every request):
 
 - `Authorization: Bearer <api_token>` — read from `~/cicy-ai/global.json:api_token`
-- `X-Agent-Show-Id: <pane>` — which agent's `todos.yaml` to act on (e.g. `w-10001`). Set by the CLI from the positional pane arg or `$CICY_PANE_ID`.
+- `X-Agent-Show-Id: <pane>` — which agent's `todos.yaml` to act on (e.g. `w-1001`). Set by the CLI from the positional pane arg or `$CICY_PANE_ID`.
 
 Backwards compat: `pane_id` query param or body field is still accepted and overrides the header.
 
@@ -59,7 +59,7 @@ Backwards compat: `pane_id` query param or body field is still accepted and over
 
 | Var | Default | Purpose |
 |---|---|---|
-| `CICY_PANE_ID`     | `w-10001`             | pane targeted when no `--pane` flag |
+| `CICY_PANE_ID`     | `w-1001`             | pane targeted when no `--pane` flag |
 | `CICY_API_PORT`    | `8008`                | cicy-code listen port |
 | `CICY_API_TOKEN`   | (read from global.json) | overrides token lookup |
 

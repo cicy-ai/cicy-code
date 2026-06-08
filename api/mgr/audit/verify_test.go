@@ -24,7 +24,7 @@ func setupVerifyFixture(t *testing.T, n int) (ndjsonPath, statePath string) {
 	}
 	for i := 0; i < n; i++ {
 		p.Submit(context.Background(), Envelope{
-			AgentID:       "w-10001",
+			AgentID:       "w-1001",
 			AgentType:     "claude",
 			SourceChannel: SourceGateway,
 			TurnID:        "turn",
@@ -35,8 +35,8 @@ func setupVerifyFixture(t *testing.T, n int) (ndjsonPath, statePath string) {
 		})
 	}
 	p.Wait()
-	return filepath.Join(workersRoot, "w-10001", ".cicy", "history", "audit.ndjson"),
-		filepath.Join(workersRoot, "w-10001", ".cicy", "history", "audit-chain.state")
+	return filepath.Join(workersRoot, "w-1001", ".cicy", "history", "audit.ndjson"),
+		filepath.Join(workersRoot, "w-1001", ".cicy", "history", "audit-chain.state")
 }
 
 func TestVerifyFile_CleanChain(t *testing.T) {

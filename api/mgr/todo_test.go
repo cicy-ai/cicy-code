@@ -12,7 +12,7 @@ import (
 )
 
 // setupTodoTest installs an isolated cicy root, store, and inserts a master
-// (w-10001) + a worker (w-10025) agent_config row. Returns nothing — tests use
+// (w-1001) + a worker (w-10025) agent_config row. Returns nothing — tests use
 // the global handlers directly.
 func setupTodoTest(t *testing.T) {
 	t.Helper()
@@ -20,7 +20,7 @@ func setupTodoTest(t *testing.T) {
 	withTestStore(t)
 	if _, err := store.Exec(
 		"INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		"w-10001:main.0", "Master", 10001, "/cicy/workers/w-10001", "", "{}", "master", "", "claude", true, true,
+		"w-1001:main.0", "Master", 10001, "/cicy/workers/w-1001", "", "{}", "master", "", "claude", true, true,
 	); err != nil {
 		t.Fatalf("insert master: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestTodoAdd_StampsRequesterPaneByDefault(t *testing.T) {
 	}
 
 	// Master sees it with pane_id = w-10025.
-	all := listTodos(t, "w-10001", "all_agents=true")
+	all := listTodos(t, "w-1001", "all_agents=true")
 	if len(all) != 1 || all[0]["pane_id"] != "w-10025" {
 		t.Fatalf("master list: %v", all)
 	}
@@ -118,12 +118,12 @@ func TestTodoAdd_StampsRequesterPaneByDefault(t *testing.T) {
 func TestTodoAdd_MasterCanCreateOnBehalfOfWorker(t *testing.T) {
 	setupTodoTest(t)
 
-	id := addTodo(t, "w-10001", "for w-10025", "w-10025")
+	id := addTodo(t, "w-1001", "for w-10025", "w-10025")
 	if id == "" {
 		t.Fatalf("expected non-empty id")
 	}
 
-	all := listTodos(t, "w-10001", "all_agents=true")
+	all := listTodos(t, "w-1001", "all_agents=true")
 	if len(all) != 1 || all[0]["pane_id"] != "w-10025" {
 		t.Fatalf("expected pane_id w-10025, got: %v", all)
 	}
@@ -132,7 +132,7 @@ func TestTodoAdd_MasterCanCreateOnBehalfOfWorker(t *testing.T) {
 func TestTodoAdd_WorkerCannotCreateForOtherWorker(t *testing.T) {
 	setupTodoTest(t)
 
-	body := map[string]interface{}{"title": "sneaky", "pane_id": "w-10001"}
+	body := map[string]interface{}{"title": "sneaky", "pane_id": "w-1001"}
 	code, resp := callTodo(t, handleTodoAdd, "POST", "/api/todo/add", "w-10025", body)
 	if code != 403 {
 		t.Fatalf("expected 403, got %d: %v", code, resp)
@@ -143,8 +143,8 @@ func TestTodoList_WorkerSeesOnlyOwn(t *testing.T) {
 	setupTodoTest(t)
 
 	addTodo(t, "w-10025", "task A", "")
-	addTodo(t, "w-10001", "master task", "")
-	addTodo(t, "w-10001", "for other worker", "w-20000") // unknown worker but allowed: pane_id stamped
+	addTodo(t, "w-1001", "master task", "")
+	addTodo(t, "w-1001", "for other worker", "w-20000") // unknown worker but allowed: pane_id stamped
 
 	w25 := listTodos(t, "w-10025", "")
 	if len(w25) != 1 {
@@ -159,9 +159,9 @@ func TestTodoList_MasterSeesAll(t *testing.T) {
 	setupTodoTest(t)
 
 	addTodo(t, "w-10025", "worker task", "")
-	addTodo(t, "w-10001", "master task", "")
+	addTodo(t, "w-1001", "master task", "")
 
-	all := listTodos(t, "w-10001", "all_agents=true")
+	all := listTodos(t, "w-1001", "all_agents=true")
 	if len(all) != 2 {
 		t.Fatalf("master should see 2 todos, got %d: %v", len(all), all)
 	}
@@ -171,9 +171,9 @@ func TestTodoList_MasterCanFilterByPane(t *testing.T) {
 	setupTodoTest(t)
 
 	addTodo(t, "w-10025", "worker task", "")
-	addTodo(t, "w-10001", "master task", "")
+	addTodo(t, "w-1001", "master task", "")
 
-	w25Only := listTodos(t, "w-10001", "pane_id=w-10025")
+	w25Only := listTodos(t, "w-1001", "pane_id=w-10025")
 	if len(w25Only) != 1 || w25Only[0]["pane_id"] != "w-10025" {
 		t.Fatalf("filter to w-10025: %v", w25Only)
 	}
@@ -182,7 +182,7 @@ func TestTodoList_MasterCanFilterByPane(t *testing.T) {
 func TestTodoList_RequesterHeaderRequired(t *testing.T) {
 	setupTodoTest(t)
 	// No header → 400. We deliberately do NOT default to master to prevent
-	// silent fallback writes landing under w-10001.
+	// silent fallback writes landing under w-1001.
 	code, _ := callTodo(t, handleTodoList, "GET", "/api/todo/list", "", nil)
 	if code != 400 {
 		t.Fatalf("expected 400 without header, got %d", code)
@@ -197,7 +197,7 @@ func TestTodoAdd_RequesterHeaderRequired(t *testing.T) {
 		t.Fatalf("expected 400 without header, got %d", code)
 	}
 	// Confirm no todo was written.
-	all := listTodos(t, "w-10001", "all_agents=true")
+	all := listTodos(t, "w-1001", "all_agents=true")
 	if len(all) != 0 {
 		t.Fatalf("anonymous add should have been rejected, but found todos: %v", all)
 	}
@@ -206,7 +206,7 @@ func TestTodoAdd_RequesterHeaderRequired(t *testing.T) {
 func TestTodoPatch_WorkerCannotModifyOthers(t *testing.T) {
 	setupTodoTest(t)
 
-	id := addTodo(t, "w-10001", "master only", "")
+	id := addTodo(t, "w-1001", "master only", "")
 
 	// Worker tries to PATCH master's todo via the public endpoint.
 	req := httptest.NewRequest("PATCH", "/api/todo/"+id, strings.NewReader(`{"status":"done"}`))
@@ -247,7 +247,7 @@ func TestTodoPatch_MasterCanModifyAny(t *testing.T) {
 
 	id := addTodo(t, "w-10025", "worker task", "")
 	req := httptest.NewRequest("PATCH", "/api/todo/"+id, strings.NewReader(`{"status":"done"}`))
-	req.Header.Set("X-Agent-Show-Id", "w-10001")
+	req.Header.Set("X-Agent-Show-Id", "w-1001")
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	handleTodoByID(rr, req)
@@ -263,7 +263,7 @@ func TestTodoDelete_Authz(t *testing.T) {
 
 	// Master may delete any.
 	req := httptest.NewRequest("DELETE", "/api/todo/"+id, nil)
-	req.Header.Set("X-Agent-Show-Id", "w-10001")
+	req.Header.Set("X-Agent-Show-Id", "w-1001")
 	rr := httptest.NewRecorder()
 	handleTodoByID(rr, req)
 	if rr.Code != 200 {
@@ -297,7 +297,7 @@ func TestTodoCounts_ScopedByRequester(t *testing.T) {
 
 	addTodo(t, "w-10025", "a", "")
 	addTodo(t, "w-10025", "b", "")
-	addTodo(t, "w-10001", "c", "")
+	addTodo(t, "w-1001", "c", "")
 
 	// Worker counts only own.
 	code, resp := callTodo(t, handleTodoCounts, "GET", "/api/todo/counts", "w-10025", nil)
@@ -309,7 +309,7 @@ func TestTodoCounts_ScopedByRequester(t *testing.T) {
 	}
 
 	// Master counts all.
-	code, resp = callTodo(t, handleTodoCounts, "GET", "/api/todo/counts", "w-10001", nil)
+	code, resp = callTodo(t, handleTodoCounts, "GET", "/api/todo/counts", "w-1001", nil)
 	if code != 200 {
 		t.Fatalf("master counts: %d", code)
 	}
@@ -318,7 +318,7 @@ func TestTodoCounts_ScopedByRequester(t *testing.T) {
 	}
 
 	// Master with pane filter.
-	code, resp = callTodo(t, handleTodoCounts, "GET", "/api/todo/counts?pane_id=w-10025", "w-10001", nil)
+	code, resp = callTodo(t, handleTodoCounts, "GET", "/api/todo/counts?pane_id=w-10025", "w-1001", nil)
 	if code != 200 {
 		t.Fatalf("master+filter counts: %d", code)
 	}
@@ -331,12 +331,12 @@ func TestTodoStorage_AllInMasterWorkspace(t *testing.T) {
 	setupTodoTest(t)
 
 	addTodo(t, "w-10025", "from worker", "")
-	addTodo(t, "w-10001", "from master", "")
+	addTodo(t, "w-1001", "from master", "")
 
 	// The single todos.yaml lives under master's workspace.
-	masterWs := paneWorkspace("w-10001")
+	masterWs := paneWorkspace("w-1001")
 	if masterWs == "" {
-		t.Fatalf("paneWorkspace(w-10001) empty")
+		t.Fatalf("paneWorkspace(w-1001) empty")
 	}
 	todos, err := loadTodos(masterWs)
 	if err != nil {

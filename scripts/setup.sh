@@ -194,9 +194,9 @@ TMUX
 chown "$USER:$USER_GROUP" "$HOME_DIR/.tmux.conf"
 
 # 创建 master agent session
-sudo -u "$USER" tmux has-session -t w-10001 2>/dev/null || \
-    sudo -u "$USER" tmux new-session -d -s w-10001 -n main -c "$HOME_DIR"
-ok "tmux session w-10001 ready"
+sudo -u "$USER" tmux has-session -t w-1001 2>/dev/null || \
+    sudo -u "$USER" tmux new-session -d -s w-1001 -n main -c "$HOME_DIR"
+ok "tmux session w-1001 ready"
 
 # ── 完成 ──
 echo ""
@@ -214,7 +214,7 @@ echo "  管理命令:"
 echo "    supervisorctl status              # 查看 API 状态"
 echo "    supervisorctl restart cicy-api    # 重启 API"
 echo "    docker compose ps                 # 查看 Docker 服务"
-echo "    tmux attach -t w-10001            # 进入工作区"
+echo "    tmux attach -t w-1001            # 进入工作区"
 echo ""
 if ! systemctl is-active --quiet cloudflared 2>/dev/null; then
     echo -e "  ${YELLOW}⚠️  CF Tunnel 未配置，需要手动运行:${NC}"

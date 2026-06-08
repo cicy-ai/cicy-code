@@ -21,7 +21,7 @@ func TestEnsureAgentCommandLineLiveUsesLiveHelper(t *testing.T) {
 }
 
 func TestAgentBootLinesKiroUsesLiveInstallAndStartsChat(t *testing.T) {
-	lines := agentBootLines("kiro-cli", false, false, true, "w-10001", "")
+	lines := agentBootLines("kiro-cli", false, false, true, "w-1001", "")
 	script := strings.Join(lines, "\n")
 	if !strings.Contains(script, "__cicy_local_install_kiro() {") {
 		t.Fatalf("kiro boot lines missing local install helper: %s", script)
@@ -47,7 +47,7 @@ func TestAgentBootLinesKiroUsesLiveInstallAndStartsChat(t *testing.T) {
 }
 
 func TestAgentBootLinesKiroWritesChineseReplySteeringWhenEnabled(t *testing.T) {
-	lines := agentBootLines("kiro-cli", true, true, true, "w-10001", "")
+	lines := agentBootLines("kiro-cli", true, true, true, "w-1001", "")
 	script := strings.Join(lines, "\n")
 	if !strings.Contains(script, `mkdir -p "$WORKSPACE/.kiro/steering"`) {
 		t.Fatalf("kiro boot lines missing steering directory creation: %s", script)
@@ -156,7 +156,7 @@ func TestAgentBootLinesOpenCodeWithoutChineseReplyRemovesInstructionsFile(t *tes
 
 func TestAgentBootLinesClaudeWritesSettingsFile(t *testing.T) {
 	withTestStore(t)
-	lines := agentBootLines("claude", false, false, true, "w-10001", "")
+	lines := agentBootLines("claude", false, false, true, "w-1001", "")
 	script := strings.Join(lines, "\n")
 	if !strings.Contains(script, `mkdir -p "$WORKSPACE/.cicy"`) {
 		t.Fatalf("claude boot lines missing workspace runtime mkdir: %s", script)
@@ -188,7 +188,7 @@ func TestAgentBootLinesClaudeUsesPaneDefaultModel(t *testing.T) {
 
 func TestAgentBootLinesClaudeWritesSettingsFileWithoutGatewayAuth(t *testing.T) {
 	// useCustomGateway=false: official login path — no settings.json written, no auth injection
-	lines := agentBootLines("claude", false, false, false, "w-10001", "")
+	lines := agentBootLines("claude", false, false, false, "w-1001", "")
 	script := strings.Join(lines, "\n")
 	if strings.Contains(script, `"ANTHROPIC_AUTH_TOKEN": "cicy-local-gateway"`) {
 		t.Fatalf("claude login-mode boot lines should not inject anthropic auth token: %s", script)
@@ -212,7 +212,7 @@ func TestAgentBootLinesClaudeWritesSettingsFileWithoutGatewayAuth(t *testing.T) 
 
 func TestAgentBootLinesClaudeAllowAllActionsUsesDangerousSkipPermissions(t *testing.T) {
 	withTestStore(t)
-	claudeScript := strings.Join(agentBootLines("claude", true, false, true, "w-10001", ""), "\n")
+	claudeScript := strings.Join(agentBootLines("claude", true, false, true, "w-1001", ""), "\n")
 	if !strings.Contains(claudeScript, `claude --settings "$WORKSPACE/.cicy/claude-settings.json" --dangerously-skip-permissions`) {
 		t.Fatalf("claude allow-all boot lines missing dangerous skip flag: %s", claudeScript)
 	}
@@ -220,7 +220,7 @@ func TestAgentBootLinesClaudeAllowAllActionsUsesDangerousSkipPermissions(t *test
 		t.Fatalf("claude allow-all boot lines should not use permission-mode bypassPermissions: %s", claudeScript)
 	}
 
-	cicyClaudeScript := strings.Join(agentBootLines("cicy-claude", true, false, true, "w-10001", ""), "\n")
+	cicyClaudeScript := strings.Join(agentBootLines("cicy-claude", true, false, true, "w-1001", ""), "\n")
 	if !strings.Contains(cicyClaudeScript, `cicy-claude --bare --settings "$WORKSPACE/.cicy/cicy-settings.json" --dangerously-skip-permissions`) {
 		t.Fatalf("cicy-claude allow-all boot lines missing dangerous skip flag: %s", cicyClaudeScript)
 	}
@@ -243,7 +243,7 @@ WARNING: Claude Code running in Bypass Permissions mode
 		t.Fatalf("detectClaudePromptStage(choicePrompt, false) = %q, want %q", got, claudeStageNone)
 	}
 
-	plainPrompt := "w-10001 $"
+	plainPrompt := "w-1001 $"
 	if got := detectClaudePromptStage(plainPrompt, true); got != claudeStageNone {
 		t.Fatalf("detectClaudePromptStage(plainPrompt, true) = %q, want %q", got, claudeStageNone)
 	}
@@ -334,7 +334,7 @@ WARNING: Claude Code running in Bypass Permissions mode
 		t.Fatalf("initial action = %q, want %q", got, claudeActionDown)
 	}
 	now = now.Add(time.Second)
-	if got := nextClaudeAutoConfirmAction(&state, "w-10001 $", "bash", true, now); got != claudeActionStop {
+	if got := nextClaudeAutoConfirmAction(&state, "w-1001 $", "bash", true, now); got != claudeActionStop {
 		t.Fatalf("exit action = %q, want %q", got, claudeActionStop)
 	}
 }
@@ -366,8 +366,8 @@ func TestInitPaneEnvScriptBootstrapsCicyTmuxConf(t *testing.T) {
 	withTestStore(t)
 	aiPort := "8008"
 	t.Setenv("PORT", aiPort)
-	pid := "w-10001:main.0"
-	shortID := "w-10001"
+	pid := "w-1001:main.0"
+	shortID := "w-1001"
 	agentNorm := normalizeAgentType("codex")
 	sessionEnv := map[string]string{
 		"CICY_AGENT_TYPE": agentNorm,
@@ -398,7 +398,7 @@ func TestInitPaneEnvScriptBootstrapsCicyTmuxConf(t *testing.T) {
 	if strings.Contains(script, "source ~/.cicy_tmux.conf") || strings.Contains(script, `source "$HOME/.cicy_tmux.conf"`) {
 		t.Fatalf("boot script unexpectedly still re-sources .cicy_tmux.conf: %s", script)
 	}
-	if !strings.Contains(script, "export X_AGENT_ID='w-10001:main.0'") {
+	if !strings.Contains(script, "export X_AGENT_ID='w-1001:main.0'") {
 		t.Fatalf("boot script missing X_AGENT_ID: %s", script)
 	}
 	if !strings.Contains(script, "__cicy_require_command 'codex' 'Codex'") {

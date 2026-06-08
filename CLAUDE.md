@@ -47,7 +47,7 @@ For frontend changes: `dev.py` defaults to `SKIP_NPM=1` (uses cached `app/dist`)
   - `api/mgr/main.go`
   - `.cicy_tmux.conf`
 - Default builtin dev agent from `api/mgr/setup.go` is `claude`
-- Primary builtin session is still `w-10001`
+- Primary builtin session is still `w-1001`
 - Frontend still contains an audit view and audit API client calls, but `api/mgr/main.go` does not currently register `/api/audit/*`
 
 ## Build caveats

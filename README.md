@@ -302,8 +302,8 @@ cd api && make asset
 
 pane 是核心运行单位，典型 ID 形态：
 
-- `w-10001`
-- `w-10001:main.0`
+- `w-1001`
+- `w-1001:main.0`
 
 `builtinAgents` catalog（来自 `api/mgr/setup.go`）：
 
@@ -322,11 +322,11 @@ pane 是核心运行单位，典型 ID 形态：
 当前事实：
 
 - `python3 dev.py` 默认 dev agent 是 `claude`
-- 首个内置 worker 是 `w-10001`（`primaryWorkerPaneID = w-10001:main.0`）
+- 首个内置 worker 是 `w-1001`（`primaryWorkerPaneID = w-1001:main.0`）
 - `--agents=all` 时按 builtinAgents 顺序从端口 `10001` 起递增分配
 - 前端创建对话框以非 lab 允许列表为准
 
-`App.tsx` 仍保留前端兜底：登录后若 `w-10001` 不存在，会尝试创建一个 `hermes` pane，是 UI 侧补救逻辑，不是主启动链路默认值。
+`App.tsx` 仍保留前端兜底：登录后若 `w-1001` 不存在，会尝试创建一个 `hermes` pane，是 UI 侧补救逻辑，不是主启动链路默认值。
 
 ## 配置与路径
 

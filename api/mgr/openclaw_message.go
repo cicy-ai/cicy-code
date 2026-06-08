@@ -76,7 +76,7 @@ func sendOpenClawMessage(profile, channel, target, message string, timeout time.
 }
 
 // POST /api/openclaw/message/send
-// {"pane_id":"w-10001:main.0","channel":"openclaw-weixin","target":"...","message":"...","timeout_seconds":20}
+// {"pane_id":"w-1001:main.0","channel":"openclaw-weixin","target":"...","message":"...","timeout_seconds":20}
 func handleOpenClawMessageSend(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httpErr(w, http.StatusMethodNotAllowed, "method not allowed")

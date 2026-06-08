@@ -7,7 +7,7 @@
 ## Quick start
 
 ```sh
-# OWN pane (= $CICY_PANE_ID, else w-10001)
+# OWN pane (= $CICY_PANE_ID, else w-1001)
 cicy-todo                           # list own active todos
 cicy-todo add "Setup CI pipeline"
 cicy-todo list --status=all         # everything
@@ -20,20 +20,20 @@ cicy-todo rm     t-1779             # remove
 cicy-todo show   t-1779             # full detail
 
 # OTHER agent — leading positional pane id
-cicy-todo w-10001                   # list w-10001's active todos
-cicy-todo w-10001 list --all        # full list for w-10001
-cicy-todo w-10001 add "ship it"     # add a todo to w-10001
-cicy-todo w-10001 done t-1779       # mark w-10001's todo done
+cicy-todo w-1001                   # list w-1001's active todos
+cicy-todo w-1001 list --all        # full list for w-1001
+cicy-todo w-1001 add "ship it"     # add a todo to w-1001
+cicy-todo w-1001 done t-1779       # mark w-1001's todo done
 ```
 
 ## Pane scoping
 
 Each worker (`w-xxxxx`) has its own `todos.yaml` under `<workspace>/.cicy/`. Pane is resolved in this order:
 
-1. Positional pane arg, e.g. `cicy-todo w-10001 ...` (recommended)
+1. Positional pane arg, e.g. `cicy-todo w-1001 ...` (recommended)
 2. `--pane <w-xxxxx>` flag (equivalent to the positional form)
 3. `CICY_PANE_ID` env var
-4. fallback: `w-10001`
+4. fallback: `w-1001`
 
 The resolved pane is sent to the backend as `X-Agent-Show-Id: <pane>` on every request.
 

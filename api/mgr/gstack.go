@@ -148,7 +148,7 @@ func handleGStackDesigns(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/gstack/run — send skill command to a tmux pane
-// Body: { "pane_id": "w-10001", "skill": "review", "repo_path": "/path/to/repo" }
+// Body: { "pane_id": "w-1001", "skill": "review", "repo_path": "/path/to/repo" }
 func handleGStackRun(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		PaneID   string `json:"pane_id"`

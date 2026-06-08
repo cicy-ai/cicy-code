@@ -1921,7 +1921,7 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
             pendingExists = false;
         }
         var activeIndex = pendingExists ? optimisticActiveIndex : serverActiveIndex;
-        // Route sends to the active window's pane (e.g. "w-10001:1"); window 0
+        // Route sends to the active window's pane (e.g. "w-1001:1"); window 0
         // (main) keeps the original "<session>:main.0" target unchanged.
         var session = String(paneId).split(":")[0];
         currentSendTarget = (!activeIndex || activeIndex === "0") ? paneId : (session + ":" + activeIndex);

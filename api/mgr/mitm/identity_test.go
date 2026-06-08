@@ -27,7 +27,7 @@ func TestInferIdentity_UsernameWinsFirst(t *testing.T) {
 func TestInferIdentity_PortMap(t *testing.T) {
 	rules := []IdentityRule{
 		{Kind: "socks5_username"},
-		{Kind: "port_map", Map: map[string]string{"20001": "w-10001", "20002": "w-10002"}},
+		{Kind: "port_map", Map: map[string]string{"20001": "w-1001", "20002": "w-10002"}},
 		{Kind: "fallback", Value: "mitm:{host}"},
 	}
 	id := InferIdentity(rules, fakeAddr{"127.0.0.1:9999"}, fakeAddr{"127.0.0.1:20002"}, "", "api.openai.com")

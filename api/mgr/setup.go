@@ -440,14 +440,14 @@ func effectiveAgentOptions() []M {
 	return options
 }
 
-const primaryWorkerSession = "w-10001"
-const primaryWorkerPaneID = "w-10001:main.0"
+const primaryWorkerSession = "w-1001"
+const primaryWorkerPaneID = "w-1001:main.0"
 
 // Team-Helper mode (--helper=1): a single OpenCode-backed pane on port 6002
 // titled "Team Helper". Used by the cicy-cloud trial helper container — the
 // 30-min agent that walks brand-new users through installing Docker +
 // cicy-code on their own machine. One of the two built-in agents (the other
-// is w-6001 SecOps Lead); user workers continue to start at w-10001.
+// is w-6001 SecOps Lead); user workers continue to start at w-1001.
 const helperWorkerPort = 6002
 const helperWorkerSession = "w-6002"
 const helperWorkerPaneID = "w-6002:main.0"
@@ -466,7 +466,7 @@ type builtinWorker struct {
 	Title     string
 }
 
-// selectedBuiltinWorkers assigns ports starting from 10001 in the order of selected.
+// selectedBuiltinWorkers assigns ports starting from 1001 in the order of selected.
 // In --helper=1 mode the regular --agents list is ignored entirely and we
 // return a single Team Helper worker on w-6002. That keeps the trial helper
 // container shape predictable: every user lands on the same pane id, every
@@ -482,7 +482,7 @@ func selectedBuiltinWorkers(selected []string) []builtinWorker {
 			continue
 		}
 		workers = append(workers, builtinWorker{
-			Port:      10001 + i,
+			Port:      1001 + i,
 			AgentType: agentType,
 			Title:     builtinAgentTitle(agentType),
 		})
@@ -668,7 +668,7 @@ func ensurePrimaryWorkerForBindings(selected []string) {
 }
 
 // ensureWorkerBoundToPrimary inserts a pane_agents row attaching workerSession
-// under primaryWorkerSession (w-10001). Idempotent thanks to the
+// under primaryWorkerSession (w-1001). Idempotent thanks to the
 // UNIQUE(pane_id, agent_name) constraint. No-op when workerSession is the
 // primary itself.
 func ensureWorkerBoundToPrimary(workerSession string) {
@@ -709,7 +709,7 @@ func createSelectedWorkers(selected []string) {
 			createBuiltinWorker(w.Port, w.AgentType, w.Title)
 		}
 		// With more than one builtin agent, the non-primary ones get attached
-		// under w-10001 so they appear in the same chat session by default.
+		// under w-1001 so they appear in the same chat session by default.
 		if len(workers) > 1 {
 			ensureWorkerBoundToPrimary(builtinWorkerSession(w.Port))
 		}
@@ -868,7 +868,7 @@ func checkEnv() {
 		case isContainerRuntime():
 			// Preinstalled container runtime must never block on interactive setup.
 			// Respect explicit --agents=... when provided; otherwise keep the default
-			// footprint minimal with only w-10001 Claude.
+			// footprint minimal with only w-1001 Claude.
 			if effectiveAgentList != "" {
 				runSetupWithAgents(effectiveAgentList)
 			} else {
@@ -1328,11 +1328,11 @@ func anyActiveAgentUsesProxy() bool {
 		  WHERE active=1
 		    AND COALESCE(proxy_enable, 0)=1
 		    AND (
-		      pane_id = 'w-10001:main.0'
+		      pane_id = 'w-1001:main.0'
 		      OR pane_id IN (
 		        SELECT agent_name || ':main.0'
 		        FROM pane_agents
-		        WHERE pane_id = 'w-10001' AND status='active'
+		        WHERE pane_id = 'w-1001' AND status='active'
 		      )
 		    )`,
 	).Scan(&count); err != nil {
@@ -1992,11 +1992,11 @@ func ensureBuiltinAgents(selected []string) {
 		FROM agent_config
 		WHERE active=1
 		  AND (
-		    pane_id = 'w-10001:main.0'
+		    pane_id = 'w-1001:main.0'
 		    OR pane_id IN (
 		      SELECT agent_name || ':main.0'
 		      FROM pane_agents
-		      WHERE pane_id = 'w-10001' AND status='active'
+		      WHERE pane_id = 'w-1001' AND status='active'
 		    )
 		  )
 		ORDER BY ttyd_port ASC, pane_id ASC

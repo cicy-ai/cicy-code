@@ -91,8 +91,8 @@ var fsDefaultBlacklist = map[string]bool{
 
 // --- agent workspace lookup ----------------------------------------------
 
-// normalizeAgentID accepts either a short id ("w-10001") or a fully
-// qualified id ("w-10001:main.0"). Returns the fully qualified form, which
+// normalizeAgentID accepts either a short id ("w-1001") or a fully
+// qualified id ("w-1001:main.0"). Returns the fully qualified form, which
 // is what agent_config indexes by.
 func normalizeAgentID(id string) string {
 	v := strings.TrimSpace(id)

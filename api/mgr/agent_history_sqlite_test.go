@@ -72,7 +72,7 @@ func testHistoryRecord(q, a, qTime, aTime, model string) aiGatewayMessageRecord 
 func TestAgentHistoryLoadPageAggregatesAcrossConversationsByDefault(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	records := []struct {
 		conversationID string
 		record         aiGatewayMessageRecord
@@ -143,7 +143,7 @@ func TestAgentHistoryLoadPageAggregatesAcrossConversationsByDefault(t *testing.T
 func TestAgentHistoryLoadPageHonorsConversationFilter(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	for i, q := range []string{"q1", "q2", "q3"} {
 		record := testHistoryRecord(
 			q,
@@ -187,7 +187,7 @@ func TestAgentHistoryLoadPageHonorsConversationFilter(t *testing.T) {
 func TestAgentHistoryUpsertRecordUpdatesExistingTurn(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	current := aiGatewayCurrentSnapshot{
 		AgentID:        agentID,
 		ConversationID: "conv-upsert",
@@ -219,7 +219,7 @@ func TestAgentHistoryUpsertRecordUpdatesExistingTurn(t *testing.T) {
 func TestAIGatewaySyncCurrentSnapshotToHistoryDBReturnsMaxInputItemID(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	body := aiGatewayAnnotateCurrentBodyHistoryIDs("w-test-annotate", map[string]interface{}{
 		"input": []interface{}{
 			map[string]interface{}{
@@ -289,7 +289,7 @@ func TestAIGatewaySyncCurrentSnapshotToHistoryDBReturnsMaxInputItemID(t *testing
 func TestAIGatewaySyncCurrentSnapshotToHistoryDBReturnsMaxMessagesItemID(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	body := aiGatewayAnnotateCurrentBodyHistoryIDs("w-test-annotate", map[string]interface{}{
 		"messages": []interface{}{
 			map[string]interface{}{
@@ -359,7 +359,7 @@ func TestAIGatewaySyncCurrentSnapshotToHistoryDBReturnsMaxMessagesItemID(t *test
 func TestAgentHistoryUpsertRecordDoesNotMergeSameQuestionAcrossConversations(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	recordA := testHistoryRecord("same-q", "a1", "2026-05-05T01:00:00Z", "2026-05-05T01:00:02Z", "gpt-5.5")
 	recordB := testHistoryRecord("same-q", "a2", "2026-05-05T01:05:00Z", "2026-05-05T01:05:03Z", "gpt-5.5")
 
@@ -413,7 +413,7 @@ func TestAgentHistoryUpsertRecordDoesNotMergeSameQuestionAcrossConversations(t *
 func TestAgentHistoryUpsertRecordDoesNotMergeSameQuestionAcrossTurnsInSameConversation(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	current := aiGatewayCurrentSnapshot{
 		AgentID:        agentID,
 		ConversationID: "conv-same",
@@ -446,7 +446,7 @@ func TestAgentHistoryUpsertRecordDoesNotMergeSameQuestionAcrossTurnsInSameConver
 func TestAgentHistoryLoadPagePreservesThinkingToolTimeline(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	current := aiGatewayCurrentSnapshot{
 		AgentID:        agentID,
 		ConversationID: "conv-timeline",
@@ -509,7 +509,7 @@ func TestAgentHistoryLoadPagePreservesThinkingToolTimeline(t *testing.T) {
 func TestAgentHistoryUpsertRecordDoesNotMergeAcrossChangingConversationIDs(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	q := "Create a local file named ws-demo.js and then read it back"
 
 	records := []struct {
@@ -584,7 +584,7 @@ func TestAgentHistoryUpsertRecordDoesNotMergeAcrossChangingConversationIDs(t *te
 func TestAgentHistoryUpsertRecordPrefersCurrentTimelineOrderForCodex(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	current := aiGatewayCurrentSnapshot{
 		AgentID:        agentID,
 		ConversationID: "conv-current-order",
@@ -707,7 +707,7 @@ func TestAgentHistoryUpsertRecordPrefersCurrentTimelineOrderForCodex(t *testing.
 func TestAIGatewaySyncLatestCurrentHistorySkipsOnlyActiveTurn(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	current := aiGatewayCurrentSnapshot{
 		AgentID:        agentID,
 		ConversationID: "conv-active-only",
@@ -800,7 +800,7 @@ func TestAIGatewaySyncLatestCurrentHistorySkipsOnlyActiveTurn(t *testing.T) {
 func TestAIGatewaySyncLatestCurrentHistoryPersistsOnlyPreviousTurns(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	current := aiGatewayCurrentSnapshot{
 		AgentID:        agentID,
 		ConversationID: "conv-sync-simple",
@@ -877,7 +877,7 @@ func TestAIGatewaySyncLatestCurrentHistoryPersistsOnlyPreviousTurns(t *testing.T
 func TestAIGatewaySyncLatestCurrentHistoryPersistsOnlyPreviousTurnsForClaude(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	current := aiGatewayCurrentSnapshot{
 		AgentID:        agentID,
 		ConversationID: "conv-sync-claude",
@@ -940,7 +940,7 @@ func TestAIGatewaySyncLatestCurrentHistoryPersistsOnlyPreviousTurnsForClaude(t *
 func TestAIGatewaySyncLatestCurrentHistorySkipsUserOnlyPendingTurn(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	current := aiGatewayCurrentSnapshot{
 		AgentID:        agentID,
 		ConversationID: "conv-pending-only",
@@ -983,7 +983,7 @@ func TestAIGatewaySyncLatestCurrentHistorySkipsUserOnlyPendingTurn(t *testing.T)
 func TestAIGatewaySyncLatestCurrentHistoryMergesContinuationGoIntoPreviousTurn(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	current := aiGatewayCurrentSnapshot{
 		AgentID:        agentID,
 		ConversationID: "conv-sync-go",
@@ -1076,7 +1076,7 @@ func TestAIGatewaySyncLatestCurrentHistoryMergesContinuationGoIntoPreviousTurn(t
 func TestAgentHistoryUpsertRecordAddsTextStepWhenPersistedItemHasNoSteps(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	current := aiGatewayCurrentSnapshot{
 		AgentID:        agentID,
 		ConversationID: "conv-text-step",

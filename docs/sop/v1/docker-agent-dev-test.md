@@ -47,7 +47,7 @@ curl -fsS "$API_BASE/api/tmux/send" \
 
 说明：
 
-- `AGENT_ID` 是 agent id，比如 `w-10001`、`w-10002`
+- `AGENT_ID` 是 agent id，比如 `w-1001`、`w-10002`
 - 这里的 `pane_id` 直接传 agent id 即可
 - `text` 是要发给 agent 的 prompt
 - 这个接口会把文本送进 tmux pane，并自动提交

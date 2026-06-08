@@ -9,13 +9,13 @@ func TestPaneWorkspaceConvertsRuntimePathToHostPath(t *testing.T) {
 	withTestStore(t)
 
 	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		"w-10001:main.0", "CiCy", 10001, "/cicy/workers/w-10001", "", "{}", "master", "", "claude", true, true,
+		"w-1001:main.0", "CiCy", 10001, "/cicy/workers/w-1001", "", "{}", "master", "", "claude", true, true,
 	); err != nil {
-		t.Fatalf("insert w-10001: %v", err)
+		t.Fatalf("insert w-1001: %v", err)
 	}
 
-	got := paneWorkspace("w-10001")
-	want := filepath.Join(cicyRootDir, "workers", "w-10001")
+	got := paneWorkspace("w-1001")
+	want := filepath.Join(cicyRootDir, "workers", "w-1001")
 	if got != want {
 		t.Fatalf("paneWorkspace = %q, want %q", got, want)
 	}
@@ -25,7 +25,7 @@ func TestListBoundAgentWorkspacesConvertsRuntimePathToHostPath(t *testing.T) {
 	withTestStore(t)
 
 	if _, err := store.Exec("INSERT INTO agent_config (pane_id, title, ttyd_port, workspace, init_script, config, role, default_model, agent_type, allow_all_actions, reply_in_chinese) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-		"w-10001:main.0", "CiCy", 10001, "/cicy/workers/w-10001", "", "{}", "master", "", "claude", true, true,
+		"w-1001:main.0", "CiCy", 10001, "/cicy/workers/w-1001", "", "{}", "master", "", "claude", true, true,
 	); err != nil {
 		t.Fatalf("insert parent: %v", err)
 	}
@@ -35,12 +35,12 @@ func TestListBoundAgentWorkspacesConvertsRuntimePathToHostPath(t *testing.T) {
 		t.Fatalf("insert child: %v", err)
 	}
 	if _, err := store.Exec("INSERT INTO pane_agents (pane_id, agent_name, status) VALUES (?,?,?)",
-		"w-10001", "w-20005", "active",
+		"w-1001", "w-20005", "active",
 	); err != nil {
 		t.Fatalf("insert binding: %v", err)
 	}
 
-	items, err := listBoundAgentWorkspaces("w-10001")
+	items, err := listBoundAgentWorkspaces("w-1001")
 	if err != nil {
 		t.Fatalf("listBoundAgentWorkspaces: %v", err)
 	}

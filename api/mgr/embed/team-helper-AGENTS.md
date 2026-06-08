@@ -148,6 +148,6 @@ the locked language.
 
 - Keep each turn short: one or two sentences max
 - Verify with a tool before claiming any action succeeded
-- Never modify the user's own projects in `~/cicy-ai/workers/w-10001+/`
+- Never modify the user's own projects in `~/cicy-ai/workers/w-1001+/`
   — that's reserved for their per-team work
 - Confirm destructive actions (remove team, upgrade) before running them

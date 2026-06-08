@@ -20,7 +20,7 @@
 5. 等待日志出现 `weixin monitor started`
 6. 同时维护 `openclaw-gateway.log`、账号文件、欢迎消息逻辑
 
-所以：**不要假设固定是 `w-10001`**。哪一个 pane 是 OpenClaw，就用哪一个 pane 的短 ID 作为 profile。
+所以：**不要假设固定是 `w-1001`**。哪一个 pane 是 OpenClaw，就用哪一个 pane 的短 ID 作为 profile。
 
 ## 启动方式
 

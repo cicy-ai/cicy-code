@@ -938,7 +938,7 @@ func cicyAssembleSSE(r io.Reader, emit func(M)) (map[string]interface{}, bool, e
 //	<｜｜DSML｜｜invoke name="a2a_status">
 //	</｜｜DSML｜｜invoke>
 //	<｜｜DSML｜｜invoke name="agent_capture">
-//	<｜｜DSML｜｜parameter name="pane_id" string="true">w-10001</｜｜DSML｜｜parameter>
+//	<｜｜DSML｜｜parameter name="pane_id" string="true">w-1001</｜｜DSML｜｜parameter>
 //	</｜｜DSML｜｜invoke>
 //
 // When that happens the tools never run and the raw markup reaches the user.

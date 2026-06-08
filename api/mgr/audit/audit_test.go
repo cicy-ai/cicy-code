@@ -40,7 +40,7 @@ func TestPipelineWalkingSkeleton(t *testing.T) {
 	// uses Inline=false (fire-and-forget); ts is captured at Submit, so
 	// async submits still carry correct timestamps even if file order races.
 	p.Submit(context.Background(), Envelope{
-		AgentID:        "w-10001",
+		AgentID:        "w-1001",
 		AgentType:      "claude",
 		UserID:         "u-test",
 		SessionID:      "sess-test",
@@ -55,7 +55,7 @@ func TestPipelineWalkingSkeleton(t *testing.T) {
 		Inline:         true,
 	})
 	p.Submit(context.Background(), Envelope{
-		AgentID:        "w-10001",
+		AgentID:        "w-1001",
 		AgentType:      "claude",
 		UserID:         "u-test",
 		SessionID:      "sess-test",
@@ -72,7 +72,7 @@ func TestPipelineWalkingSkeleton(t *testing.T) {
 	p.Wait()
 
 	// Per-agent file
-	agentPath := filepath.Join(workersRoot, "w-10001", ".cicy", "history", "audit.ndjson")
+	agentPath := filepath.Join(workersRoot, "w-1001", ".cicy", "history", "audit.ndjson")
 	lines := readNDJSON(t, agentPath)
 	if len(lines) != 2 {
 		t.Fatalf("agent ndjson: want 2 lines, got %d", len(lines))
@@ -82,7 +82,7 @@ func TestPipelineWalkingSkeleton(t *testing.T) {
 	inbound := parseEvent(t, lines[1])
 
 	// Required fields
-	if outbound.Identity.AgentID != "w-10001" || outbound.Identity.SourceChannel != SourceGateway {
+	if outbound.Identity.AgentID != "w-1001" || outbound.Identity.SourceChannel != SourceGateway {
 		t.Errorf("outbound identity wrong: %+v", outbound.Identity)
 	}
 	if outbound.Subject.Direction != DirectionOutbound || inbound.Subject.Direction != DirectionInbound {
@@ -110,7 +110,7 @@ func TestPipelineWalkingSkeleton(t *testing.T) {
 	}
 
 	// Chain state file matches the tail.
-	stateBytes, err := os.ReadFile(filepath.Join(workersRoot, "w-10001", ".cicy", "history", "audit-chain.state"))
+	stateBytes, err := os.ReadFile(filepath.Join(workersRoot, "w-1001", ".cicy", "history", "audit-chain.state"))
 	if err != nil {
 		t.Fatalf("read agent chain state: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestChainTamperDetected(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.Submit(context.Background(), Envelope{
-		AgentID:       "w-10001",
+		AgentID:       "w-1001",
 		SourceChannel: SourceGateway,
 		TurnID:        "t1",
 		Direction:     DirectionOutbound,
@@ -188,7 +188,7 @@ func TestChainTamperDetected(t *testing.T) {
 	})
 	p.Wait()
 
-	lines := readNDJSON(t, filepath.Join(root, "workers", "w-10001", ".cicy", "history", "audit.ndjson"))
+	lines := readNDJSON(t, filepath.Join(root, "workers", "w-1001", ".cicy", "history", "audit.ndjson"))
 	original := parseEvent(t, lines[0])
 
 	// Mutate one field as if an attacker edited the file

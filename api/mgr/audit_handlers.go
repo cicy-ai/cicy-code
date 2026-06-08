@@ -141,7 +141,7 @@ func handleAuditStats(w http.ResponseWriter, r *http.Request) {
 //	Authorization: Bearer <token>
 //	Content-Type: application/json
 //	{
-//	  "agent_id":         "w-10001",                  // REQUIRED
+//	  "agent_id":         "w-1001",                  // REQUIRED
 //	  "direction":        "outbound" | "inbound",     // REQUIRED
 //	  "payload":          "<request or reply body>",  // REQUIRED
 //	  "payload_encoding": "utf8" | "base64",          // default utf8

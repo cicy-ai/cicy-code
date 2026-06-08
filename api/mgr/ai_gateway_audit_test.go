@@ -48,7 +48,7 @@ func TestAIGatewayAnnotateCurrentBodyHistoryIDsAddsSequentialIDs(t *testing.T) {
 func TestAIGatewayBuildMessageRecordPrefersCurrentInputHistoryForCodexCommentary(t *testing.T) {
 	withTempCicyRoot(t)
 
-	agentID := "w-10001"
+	agentID := "w-1001"
 	current := aiGatewayCurrentSnapshot{
 		AgentID: agentID,
 		Model:   "gpt-5.5",

@@ -153,7 +153,7 @@ audit-v1(audit 分支)有 PolicyForm(818 行表单),给"安全/合规团队"用�
   "actions": [
     {
       "kind": "allow_list",
-      "rationale": "37/40 hits on secret.bearer_token come from agent w-10001 talking to 127.0.0.1:8009 — internal dev tokens, not external secrets",
+      "rationale": "37/40 hits on secret.bearer_token come from agent w-1001 talking to 127.0.0.1:8009 — internal dev tokens, not external secrets",
       "patch": {
         "allow_list": { "paths": ["/api/dev/*"] }
       },

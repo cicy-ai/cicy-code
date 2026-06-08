@@ -46,13 +46,13 @@ var (
 // ── workspace + identity helpers ───────────────────────────────────────────
 
 // masterWorkspaceForTodo returns the workspace directory of the master pane
-// (w-10001). All todo storage routes through this single workspace.
+// (w-1001). All todo storage routes through this single workspace.
 func masterWorkspaceForTodo() string {
 	return paneWorkspace(primaryWorkerSession)
 }
 
 // isMasterPaneID reports whether the given short or full pane id refers to
-// the master pane (w-10001).
+// the master pane (w-1001).
 func isMasterPaneID(paneID string) bool {
 	return shortPaneID(normPaneID(strings.TrimSpace(paneID))) == primaryWorkerSession
 }
@@ -61,7 +61,7 @@ func isMasterPaneID(paneID string) bool {
 // X-Agent-Show-Id header. Returns empty string when the header is absent —
 // callers MUST provide it. We deliberately do NOT fall back to the master
 // pane: a silent default makes it too easy for a script or buggy client
-// without the header to create todos under w-10001 by accident.
+// without the header to create todos under w-1001 by accident.
 func requesterPaneID(r *http.Request) string {
 	for _, h := range []string{"X-Agent-Show-Id", "X-Agent-Show-ID", "X_AGENT_SHOW_ID"} {
 		if v := strings.TrimSpace(r.Header.Get(h)); v != "" {
@@ -272,7 +272,7 @@ func requireMasterWorkspaceForTodo(w http.ResponseWriter) (string, bool) {
 //
 // Authorization model:
 //   - Requester is identified via the X-Agent-Show-Id header.
-//   - Master pane (w-10001) sees every todo; the optional pane_id query
+//   - Master pane (w-1001) sees every todo; the optional pane_id query
 //     parameter narrows the result to one worker. all_agents=true is an
 //     alias for "no filter, return everything" and is the default for
 //     master.

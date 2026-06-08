@@ -2,7 +2,7 @@
 set -euo pipefail
 
 container="${1:-cicy-code-dev}"
-pane_id="${PANE_ID:-w-10001:main.0}"
+pane_id="${PANE_ID:-w-1001:main.0}"
 agent_id="${pane_id%%:*}"
 
 json_value() {

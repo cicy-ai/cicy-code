@@ -32,10 +32,10 @@ Validation set for the gateway-injected cross-agent tools and their backing endp
 
 **Prompt**:
 ```
-用 cicy-agent ls 列出当前 tmux 的 panes，告诉我 w-10001 当前在跑什么命令。
+用 cicy-agent ls 列出当前 tmux 的 panes，告诉我 w-1001 当前在跑什么命令。
 ```
 
-**Pass**: Response mentions the actual command shown in the `cicy-agent ls` row for `w-10001`.
+**Pass**: Response mentions the actual command shown in the `cicy-agent ls` row for `w-1001`.
 
 ---
 
@@ -45,7 +45,7 @@ Validation set for the gateway-injected cross-agent tools and their backing endp
 
 **Prompt** (to A):
 ```
-用 cicy-agent capture w-10001 抓一下主 pane 的当前终端，最后一行是什么？
+用 cicy-agent capture w-1001 抓一下主 pane 的当前终端，最后一行是什么？
 ```
 
 **Pass**: Response quotes the actual last terminal line.

@@ -275,7 +275,7 @@ CODEX_PROFILE = AgentProfile(
 
 CLAUDE_PROFILE = AgentProfile(
     agent_type="claude",
-    short_pane_id="w-10001",
+    short_pane_id="w-1001",
     gateway_on_must_contain=[
         "ANTHROPIC_AUTH_TOKEN",
         "ANTHROPIC_BASE_URL",

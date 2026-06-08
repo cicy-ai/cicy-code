@@ -454,7 +454,7 @@ func imPaneSessionOnline(paneID string) bool {
 	pane := normPaneID(paneID)
 	// Headless cicy has no tmux session — its liveness is server-side session
 	// registry membership, not `tmux has-session`. Without this a cicy agent would
-	// always read offline here and inbound IM would wrongly fall back to w-10001.
+	// always read offline here and inbound IM would wrongly fall back to w-1001.
 	if paneAgentType(pane) == "cicy" {
 		return cicySessionRegistered(shortPaneID(pane))
 	}
@@ -548,9 +548,9 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 		return
 	}
 	// If the bound agent's tmux session isn't running (offline), fall back to the
-	// master pane w-10001 so the message still reaches an agent instead of failing.
+	// master pane w-1001 so the message still reaches an agent instead of failing.
 	if !imPaneSessionOnline(pane) {
-		fallback := normPaneID("w-10001")
+		fallback := normPaneID("w-1001")
 		if pane != fallback && imPaneSessionOnline(fallback) {
 			log.Printf("[im] account=%d bound pane=%s offline → fallback to %s", acc.ID, shortPaneID(pane), shortPaneID(fallback))
 			pane = fallback

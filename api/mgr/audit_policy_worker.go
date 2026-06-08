@@ -172,7 +172,7 @@ func writeAuditPolicyGuidance() error {
 // ensureAuditPolicyPane creates the w-6001 pane on first run. On
 // subsequent runs the row already exists in agent_config, but the
 // underlying tmux session and ttyd are NOT recreated by
-// ensureBuiltinAgents (which only revives panes bound to w-10001).
+// ensureBuiltinAgents (which only revives panes bound to w-1001).
 // So we explicitly revive them here via startAgentFromConfig, and
 // refresh title/role to let a binary upgrade rename the slot. Always
 // idempotent.
@@ -241,7 +241,7 @@ func IsAuditPolicyPane(paneID string) bool {
 //   - w-6001 — SecOps Lead (audit advisor + security officer, merged 2.1.8)
 //   - w-6002  — Team Helper
 // 2.1.7's "[6001, 10000] range" check is replaced by an explicit-id check:
-// w-10001+ are user workers and must NOT be hidden, and there are only two
+// w-1001+ are user workers and must NOT be hidden, and there are only two
 // built-ins to enumerate.
 func isBuiltinAgent(paneID string) bool {
 	short := strings.Split(paneID, ":")[0]

@@ -213,10 +213,10 @@ func TestNormalizeAgentID(t *testing.T) {
 	cases := map[string]string{
 		"":                "",
 		"  ":              "",
-		"w-10001":         "w-10001:main.0",
-		"w-10001:main.0":  "w-10001:main.0",
-		"w-10001:work.1":  "w-10001:work.1",
-		" w-10001 ":       "w-10001:main.0",
+		"w-1001":         "w-1001:main.0",
+		"w-1001:main.0":  "w-1001:main.0",
+		"w-1001:work.1":  "w-1001:work.1",
+		" w-1001 ":       "w-1001:main.0",
 	}
 	for in, want := range cases {
 		if got := normalizeAgentID(in); got != want {

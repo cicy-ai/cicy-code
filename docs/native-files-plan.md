@@ -392,7 +392,7 @@ func resolveSafePath(workspace, requested string) (string, error) {
 
 ### Workspace 来源
 
-- 所有 fs 路由的请求都必须带 `agent_id`(short 形态如 `w-10001` 或完整 `w-10001:main.0` 都接受)
+- 所有 fs 路由的请求都必须带 `agent_id`(short 形态如 `w-1001` 或完整 `w-1001:main.0` 都接受)
 - 后端按 `agent_id` 找该 agent 绑定的 workspace folder,fs 操作严格限制在该 workspace 内
 - 缺 `agent_id` → 400 `missing_agent_id`
 - agent 不存在或没绑定 workspace → 404 `agent_workspace_unavailable`
@@ -401,7 +401,7 @@ func resolveSafePath(workspace, requested string) (string, error) {
 
 **全代码、全 API、全文档,只有一个概念:agent。`pane` 这个词在新代码、新文档里不出现。**
 
-- 路由 query 参数:`?agent_id=w-10001`
+- 路由 query 参数:`?agent_id=w-1001`
 - Go 变量、字段、错误码:`agentID` / `agent_id` / `agent_not_found` / `agent_workspace_unavailable`
 - 前端类型:`interface FsRequest { agentId: string; path: string }`
 - 注释、日志、错误信息一律 `agent` 不写 `pane`

@@ -20,14 +20,14 @@ cicy-todo drop  <id-prefix>            # → dropped (on own pane)
 cicy-todo rm    <id-prefix>            # remove
 
 # View / modify ANOTHER agent's todos: prepend the pane id (w-xxxxx).
-cicy-todo w-10001                      # list w-10001's active todos
-cicy-todo w-10001 add "ship it"        # add a todo to w-10001
-cicy-todo w-10001 done t-1779          # mark w-10001's todo done
+cicy-todo w-1001                      # list w-1001's active todos
+cicy-todo w-1001 add "ship it"        # add a todo to w-1001
+cicy-todo w-1001 done t-1779          # mark w-1001's todo done
 ```
 
 `<id-prefix>` accepts the leading 4–8 chars of an id when unique. The leading
 pane id (`w-xxxxx`) is optional — without it the command targets the current
-pane (`$CICY_PANE_ID`, else `w-10001`). Internally every request carries
+pane (`$CICY_PANE_ID`, else `w-1001`). Internally every request carries
 `X-Agent-Show-Id: <pane>` so the backend knows whose todos to act on.
 
 ## Scope
@@ -42,7 +42,7 @@ Do **not** use this skill for ephemeral in-conversation task tracking — that's
 
 ## Rules
 
-1. Data is **per pane**: each `w-xxxxx` worker has its own `todos.yaml`. Pick the right `pane_id` (defaults to `$CICY_PANE_ID` or `w-10001`).
+1. Data is **per pane**: each `w-xxxxx` worker has its own `todos.yaml`. Pick the right `pane_id` (defaults to `$CICY_PANE_ID` or `w-1001`).
 2. CLI is a thin wrapper over the cicy-code REST API; it requires the local cicy-code server to be running on `$PORT` (default 8008) and reads `api_token` from `~/cicy-ai/global.json`.
 3. Status set is fixed: `todo | doing | done | dropped`. Do not invent new states.
 4. The CLI mutates `todos.yaml` only via the API — never write to that file from a script directly.

@@ -757,7 +757,7 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 	} else {
 		// The master console discovers agents through pane_agents — an unbound
 		// worker is invisible there. When the caller names no master, default
-		// the new worker under the primary (w-10001); no-op for the primary
+		// the new worker under the primary (w-1001); no-op for the primary
 		// itself.
 		ensureWorkerBoundToPrimary(opts.session)
 	}
@@ -5416,7 +5416,7 @@ Strict rules:
 
 Once you have absorbed the context, silently take over exactly where the source agent left off and continue its unfinished work. If the very next step is genuinely ambiguous, stop and wait for instructions rather than asking or reporting.`
 
-// POST /api/tmux/fork { source_pane_id: "w-10001", title?: "..." }
+// POST /api/tmux/fork { source_pane_id: "w-1001", title?: "..." }
 func handleForkPane(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SourcePaneID string `json:"source_pane_id"`
@@ -5430,12 +5430,12 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	masterID := normPaneID(strings.TrimSpace(req.MasterPaneID))
-	// Default the master to w-10001 (the PM/dispatcher) when none is given, so a
+	// Default the master to w-1001 (the PM/dispatcher) when none is given, so a
 	// fork always binds to a master and shows up in the UI's team panel. Without
 	// this, `cicy-agent fork <src>` (no --master) created an orphan pane bound to
 	// nobody → invisible in the UI.
 	if masterID == "" {
-		masterID = normPaneID("w-10001")
+		masterID = normPaneID("w-1001")
 	}
 
 	// Load source pane config

@@ -16,7 +16,7 @@ package main
 //   - w-6002  = team helper (this file)
 //   - w-6001 = SecOps Lead (audit advisor + security officer, merged from
 //               the previous w-10000 + w-6001 split)
-// User workers continue to start at w-10001. The pane-hide logic is
+// User workers continue to start at w-1001. The pane-hide logic is
 // isBuiltinAgent in audit_policy_worker.go.
 
 import (
@@ -153,7 +153,7 @@ func ensureTeamHelperPane() error {
 		token:            token,
 		allowAllActions:  true,
 		replyInChinese:   false,
-		useCustomGateway: false, // Team Helper — trial AND local — always rides the Big Pickle Zen gateway, never the user's custom gateway. The persona is a built-in "service" provided by cicy-code (manage install/upgrade/token/team — see embed/team-helper-AGENTS.md), so we don't want it burning the user's own provider quota. Distinct from regular w-10001+ user workers and w-6001 SecOps Lead, which both use the user's gateway (useCustomGateway:=true / !helperMode).
+		useCustomGateway: false, // Team Helper — trial AND local — always rides the Big Pickle Zen gateway, never the user's custom gateway. The persona is a built-in "service" provided by cicy-code (manage install/upgrade/token/team — see embed/team-helper-AGENTS.md), so we don't want it burning the user's own provider quota. Distinct from regular w-1001+ user workers and w-6001 SecOps Lead, which both use the user's gateway (useCustomGateway:=true / !helperMode).
 	})
 	if err != nil {
 		return err
