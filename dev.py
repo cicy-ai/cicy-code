@@ -979,12 +979,15 @@ def run_cloudrun_list():
 def _r2_upload_docker_image(image_ref, version):
     """Save the docker image as a gzip tar and upload it to Cloudflare R2.
 
-    R2 key: images/cicy-code-latest.tar.gz — a SINGLE overwriting "latest"
-    snapshot (R2 keeps exactly one image tar, not per-version files that pile
-    up forever). The version is still tracked via Docker Hub tags and
-    global.json; this tar is just "whatever was built last". Upload goes through
-    the `cicy-r2` CLI (which wraps `wrangler r2 object put` and reads
-    ~/cicy-ai/db/r2.json).
+    R2 key: images/cicy-code-latest.tar.gz — a dev-only "whatever was built
+    last" snapshot, SEPARATE from the canonical docker/ base image. The base
+    runtime image on docker/cicy-code-latest.tar.gz (managed occasionally by
+    npm/publish-docker.sh, pulled by load.sh / cicy-desktop / 团队助手 charter)
+    is a slowly-changing base env and is NOT re-uploaded on every version bump —
+    the per-version binary is installed via `npx cicy-code` at container start.
+    So --dockerBuild must NOT clobber docker/; it writes its own images/ key.
+    Upload goes through the `cicy-r2` CLI (wraps `wrangler r2 object put`,
+    reads ~/cicy-ai/db/r2.json).
 
     wrangler's single-PUT cap is ~300 MiB. The current image gzips to ~240 MB,
     so it fits; the size guard below aborts early with guidance if a future
@@ -1002,7 +1005,7 @@ def _r2_upload_docker_image(image_ref, version):
         print(f"[dev] r2.json config error: {e} — skipping docker image upload")
         return False
 
-    key = "images/cicy-code-latest.tar.gz"  # single overwriting latest snapshot
+    key = "images/cicy-code-latest.tar.gz"  # dev snapshot; NOT the canonical docker/ base image
     WRANGLER_PUT_LIMIT = 300 * 1024 * 1024  # wrangler r2 object put single-PUT cap
 
     tmp = os.path.join(tempfile.gettempdir(), f"cicy-code-{version}.tar.gz")

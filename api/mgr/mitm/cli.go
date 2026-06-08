@@ -143,7 +143,7 @@ install-ca flags:
 func runInstallCA(args []string) int {
 	isChild, args := hasElevatedChildFlag(args)
 	fs := flag.NewFlagSet("install-ca", flag.ContinueOnError)
-	scope := fs.String("scope", "", "system|nss|both (default system+nss on linux, system on darwin)")
+	scope := fs.String("scope", "", "system|user|nss|both (default system+nss on linux, user on darwin)")
 	certPath := fs.String("cert", "", "CA cert path (default ~/cicy-ai/db/mitm-ca.crt)")
 	nickname := fs.String("nickname", "cicy-mitm", "NSS DB nickname")
 	dryRun := fs.Bool("dry-run", false, "print commands without executing")
@@ -170,7 +170,9 @@ func runInstallCA(args []string) int {
 		case "linux":
 			*scope = "both"
 		case "darwin":
-			*scope = "system"
+			// Default to the USER login keychain — no admin needed. `--scope=system`
+			// (admin, osascript) is opt-in for trusting the CA for ALL users.
+			*scope = "user"
 		default:
 			*scope = "system"
 		}
@@ -202,13 +204,15 @@ func runInstallCA(args []string) int {
 	switch *scope {
 	case "system":
 		rc |= installSystem(*certPath, *dryRun)
+	case "user":
+		rc |= installUserDarwin(*certPath, *dryRun)
 	case "nss":
 		rc |= installNSS(*certPath, *nickname, *dryRun)
 	case "both":
 		rc |= installSystem(*certPath, *dryRun)
 		rc |= installNSS(*certPath, *nickname, *dryRun)
 	default:
-		fmt.Fprintf(os.Stderr, "error: --scope must be system|nss|both, got %q\n", *scope)
+		fmt.Fprintf(os.Stderr, "error: --scope must be system|user|nss|both, got %q\n", *scope)
 		return 2
 	}
 	if rc != 0 {
@@ -359,6 +363,37 @@ func installSystem(certPath string, dryRun bool) int {
 		fmt.Fprintf(os.Stderr, "system trust install not implemented on %s; use --scope=nss\n", runtime.GOOS)
 		return 1
 	}
+}
+
+// installUserDarwin trusts the CA in the current user's LOGIN keychain (user
+// trust domain) — no admin/sudo. macOS shows a one-time "modify trust settings"
+// dialog confirmed with the user's own login password (not an admin password),
+// so a standard non-admin user can enable HTTPS audit for themselves. For
+// trusting the CA system-wide (all users) use --scope=system (admin/osascript).
+func installUserDarwin(certPath string, dryRun bool) int {
+	if runtime.GOOS != "darwin" {
+		fmt.Fprintln(os.Stderr, "error: --scope=user is darwin-only (use --scope=system|nss elsewhere)")
+		return 1
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: resolve home: %v\n", err)
+		return 1
+	}
+	loginKC := filepath.Join(home, "Library", "Keychains", "login.keychain-db")
+	fmt.Printf("[user] trusting %s in login keychain (no admin)\n", certPath)
+	if dryRun {
+		fmt.Println("[dry-run] would security add-trusted-cert -r trustRoot -k login.keychain-db")
+		return 0
+	}
+	cmd := exec.Command("security", "add-trusted-cert", "-r", "trustRoot", "-k", loginKC, certPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: security (user): %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func installNSS(certPath, nickname string, dryRun bool) int {

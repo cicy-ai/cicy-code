@@ -17,7 +17,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"ttyd-go/mgr/mitm"
@@ -139,17 +138,17 @@ func startMITM() {
 // their MITM-intercepted TLS would fail. Linux installs it automatically; macOS
 // needs the one-time `cicy-code mitm install-ca`.
 func handleMITMCAStatus(rw http.ResponseWriter, r *http.Request) {
-	trusted := false
-	if mitmServer != nil {
-		trusted = mitmCATrustedInOS()
-	}
+	// Agents (codex/claude/…) trust the CA via NODE_EXTRA_CA_CERTS once the user
+	// consents, so "trusted"/"installed" track CONSENT, not the OS trust store —
+	// enabling audit is silent and has nothing to do with the system keychain.
+	consent := mitmServer != nil && mitm.CATrustConsented()
 	resp := map[string]any{
 		"enabled":   mitmServer != nil,
 		"platform":  runtime.GOOS,
 		"generated": mitmServer != nil, // CA exists once the server started it
-		"trusted":   trusted,           // present in the OS trust store
-		"consent":   mitm.CATrustConsented(),
-		"installed": trusted, // legacy alias (kept for older callers)
+		"trusted":   consent,           // agents trust via NODE_EXTRA_CA_CERTS on consent
+		"consent":   consent,
+		"installed": consent, // legacy alias (kept for older callers)
 		"command":   "cicy-code mitm install-ca",
 	}
 	rw.Header().Set("Content-Type", "application/json")
@@ -195,21 +194,18 @@ func handleMITMConsent(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enable: install FIRST; only record consent if trust actually landed, so a
-	// failed (e.g. non-elevated) attempt doesn't leave consent=true with no cert.
-	if err := installMITMCAOSTrust(); err != nil {
-		errCode := err.Error()
-		if strings.Contains(errCode, "need_elevation") {
-			errCode = "need_elevation"
-		}
-		writeJSON(map[string]any{"ok": false, "error": errCode, "detail": err.Error()})
-		return
-	}
+	// Enable = record the user's consent, full stop. That consent is the whole
+	// opt-in: the agents cicy-code launches (codex/claude/opencode/…) trust the
+	// MITM CA via the NODE_EXTRA_CA_CERTS we inject at launch, so auditing turns on
+	// silently — NO OS keychain trust, NO admin, NO GUI dialog. The card is purely a
+	// compliance "you are turning on HTTPS audit" acknowledgement; it has nothing to
+	// do with the system trust store. (Anyone who additionally wants non-agent apps
+	// like Safari to trust the CA can run `cicy-code mitm install-ca` themselves.)
 	if err := mitm.SetCATrustConsent(time.Now().Format(time.RFC3339), "desktop"); err != nil {
 		writeJSON(map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeJSON(map[string]any{"ok": true, "trusted": mitmCATrustedInOS(), "consent": true})
+	writeJSON(map[string]any{"ok": true, "trusted": true, "consent": true})
 }
 
 // mitmCATrustedInOS checks the platform trust store for this node's MITM CA,
@@ -229,6 +225,13 @@ func mitmCATrustedInOS() bool {
 		cur, err := os.ReadFile("/usr/local/share/ca-certificates/cicy-mitm.crt")
 		return err == nil && bytes.Equal(cur, srcBytes)
 	case "darwin":
+		// Trusted in the USER domain (our install target — `dump-trust-settings` with
+		// no flag) OR the admin/system domain (`-d`, older/admin-scope installs).
+		// Either counts as installed so the card doesn't nag to reinstall a CA the
+		// user already trusts for themselves.
+		if out, err := exec.Command("security", "dump-trust-settings").CombinedOutput(); err == nil && bytes.Contains(bytes.ToLower(out), []byte("cicy-mitm")) {
+			return true
+		}
 		out, err := exec.Command("security", "dump-trust-settings", "-d").CombinedOutput()
 		return err == nil && bytes.Contains(bytes.ToLower(out), []byte("cicy-mitm"))
 	case "windows":

@@ -119,7 +119,7 @@ export default function ChatHistoryView({ paneId, token, liveStatus = 'idle', li
     const last = { ...next[next.length - 1] }
     const steps = Array.isArray(last.steps) ? [...last.steps] : []
     if (!steps.length || steps[steps.length - 1].type !== 'text') steps.push({ type: 'text', text: liveText })
-    else steps[steps.length - 1] = { ...steps[steps.length - 1], text: liveText }
+    else steps[steps.length - 1] = { type: 'text', text: liveText }
     last.steps = steps
     last.status = liveStatus
     next[next.length - 1] = last

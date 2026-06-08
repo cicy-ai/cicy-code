@@ -450,7 +450,7 @@ export default function AgentUsageAnalysisView({ paneId, active }: { paneId: str
                         <td className="px-2 py-1.5 text-left">
                           <span className="inline-flex items-center gap-1.5">
                             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${ROW_LEVEL_DOT[lvl] || ROW_LEVEL_DOT.neutral}`} />
-                            <span className={ROW_LEVEL_TEXT[lvl] || ROW_LEVEL_TEXT.neutral}>{diagReasonText(row.reason, t)}</span>
+                            <span className={ROW_LEVEL_TEXT[lvl] || ROW_LEVEL_TEXT.neutral}>{diagReasonText(row.reason, (k, d) => (d === undefined ? t(k) : t(k, d)))}</span>
                             {i > 0 && row.gap_seconds > 0 ? (
                               <span className="text-zinc-600">· {t('anDiagGap', '间隔')} {fmtGap(row.gap_seconds)}</span>
                             ) : null}

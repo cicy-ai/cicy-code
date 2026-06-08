@@ -1731,6 +1731,11 @@ export default function CurrentHistoryView({
   const [cachedPromptTurns, setCachedPromptTurns] = useState<HistoryTurn[]>([]);
   const cachedPromptMaxIdRef = useRef(0);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);  // external link awaiting confirm (#25)
+  // Opening greeting shown on the empty-history state — role agents draw it from
+  // their role template's 开场白 (GET /api/agents/greeting/{id}); falls back to the
+  // static placeholder when empty/unfetched. Keyed by paneId so switching agents
+  // re-fetches and never shows a stale role's line.
+  const [greeting, setGreeting] = useState('');
   // The in-flight turn (polled from reply.json) lives OUTSIDE `items` as a
   // temporary trailing group, so refreshing it never re-renders the committed
   // history list. It's reconciled into `items` (via a tail fetch) once the turn
@@ -1899,6 +1904,20 @@ export default function CurrentHistoryView({
     optimisticBaselineUserIdRef.current = 0;
     replyInFlightRef.current = false;
   }, [paneId, open]);
+
+  // Fetch the role-specific opening greeting for the empty-history state. Reset
+  // first so switching agents never flashes the previous role's line; ignore
+  // failures (the render falls back to the static placeholder).
+  useEffect(() => {
+    setGreeting('');
+    const id = String(paneId || '').trim();
+    if (!id) return;
+    let alive = true;
+    apiService.getAgentGreeting(id)
+      .then((res: any) => { if (alive) setGreeting(String(res?.data?.greeting || '').trim()); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [paneId]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -2711,7 +2730,13 @@ export default function CurrentHistoryView({
           <div className="w-full max-w-2xl">
             <div data-id="current-history-empty-greeting" className="mb-5 text-center">
               <div data-id="current-history-empty-icon" className="mb-3 text-3xl text-zinc-600">✦</div>
-              <p data-id="current-history-empty-text" className="mt-1 text-xs text-zinc-500">{t('emptyHistory')}</p>
+              {greeting ? (
+                <div data-id="current-history-empty-greeting-text" className="chat-markdown current-history-markdown mt-1 text-left text-sm leading-[1.7] text-zinc-300">
+                  <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{greeting}</Markdown>
+                </div>
+              ) : (
+                <p data-id="current-history-empty-text" className="mt-1 text-xs text-zinc-500">{t('emptyHistory')}</p>
+              )}
             </div>
           </div>
         </div>

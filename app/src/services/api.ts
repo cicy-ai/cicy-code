@@ -144,6 +144,7 @@ const api = {
   getAgentUsageBlock: (id: string, idx: number) => http.get(`/api/agents/usage-block/${encodeURIComponent(id)}`, { params: { idx } }),
   getAgentHistoryIDs: (id: string, params?: { conversation_id?: string }) => http.get(`/api/agents/history-ids/${encodeURIComponent(id)}`, { params }),
   getAgentCurrentReply: (id: string, params?: { conversation_id?: string }) => http.get(`/api/agents/current-reply/${encodeURIComponent(id)}`, { params }),
+  getAgentGreeting: (id: string) => http.get(`/api/agents/greeting/${encodeURIComponent(id)}`),
   getAgentCurrentHistory: (id: string, params?: { limit?: number; before?: number; conversation_id?: string }) => http.get(`/api/agents/current-history/${encodeURIComponent(id)}`, { params }),
   getAgentCurrentHistoryTool: (id: string, params: { history_id?: number; step_index: number; tool_index: number; live?: 1 }) => http.get(`/api/agents/current-history-tool/${encodeURIComponent(id)}`, { params }),
   getAgentHistoryView: (id: string) => http.get(`/api/agents/history-view/${encodeURIComponent(id)}`),

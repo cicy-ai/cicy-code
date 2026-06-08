@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import {
   Search, Loader2, CheckCircle2, AlertTriangle, RefreshCw, X, Send,
   Globe, Activity, Server, Plug, Mail, FileText, Code, Terminal, Key, Shield, Package, Cloud,
