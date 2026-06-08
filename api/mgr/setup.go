@@ -452,16 +452,19 @@ func helperModeBuiltinWorker() builtinWorker {
 type builtinWorker struct {
 	Port         int
 	AgentType    string
-	Title        string
-	RoleTemplate string // role template slug (~/cicy-ai/memory/agents/<slug>.md); "" = none
-	Master       bool   // the w-1001 PM master (role="master"); others are "worker"
+	Title         string
+	RoleTemplate  string // role template slug (~/cicy-ai/memory/agents/<slug>.md); "" = none
+	Master        bool   // the w-1001 PM master (role="master"); others are "worker"
+	BindToPrimary bool   // attach under w-1001 by default (shown on the master's team)
 }
 
 // officialRoleRoster is the fixed set of agents an official release preinstalls.
 // The PM master anchors at w-1001; every other official agent counts DOWN from
 // w-1000 so they never collide with user-created agents, which count UP from
-// w-1002 (defaultWorkerIndex=1001 → next id 1002). All non-master members bind
-// under w-1001 (createSelectedWorkers).
+// w-1002 (defaultWorkerIndex=1001 → next id 1002). ALL roster agents are created
+// (they live in the DB), but only HR + Token优化 are attached under w-1001 by
+// default — they're the always-on support functions. The rest exist standalone;
+// the user (with HR's help) brings them onto the team on demand.
 //
 // Two flavors:
 //   - cicy lite agents (1001..996): non-coding roles, each with a role template
@@ -474,8 +477,8 @@ func officialRoleRoster() []builtinWorker {
 		{Port: 1000, AgentType: "cicy", Title: "产品经理", RoleTemplate: "产品经理"},
 		{Port: 999, AgentType: "cicy", Title: "QA测试工程师", RoleTemplate: "测试工程师"},
 		{Port: 998, AgentType: "cicy", Title: "法务", RoleTemplate: "法务"},
-		{Port: 997, AgentType: "cicy", Title: "HR", RoleTemplate: "人力资源"},
-		{Port: 996, AgentType: "cicy", Title: "Token优化", RoleTemplate: "Token优化师"},
+		{Port: 997, AgentType: "cicy", Title: "HR", RoleTemplate: "人力资源", BindToPrimary: true},
+		{Port: 996, AgentType: "cicy", Title: "Token优化", RoleTemplate: "Token优化师", BindToPrimary: true},
 		{Port: 995, AgentType: "claude", Title: "架构师"},
 		{Port: 994, AgentType: "codex", Title: "全栈开发工程师"},
 		{Port: 993, AgentType: "claude", Title: "UI设计师"},
@@ -512,10 +515,11 @@ func selectedBuiltinWorkers(selected []string) []builtinWorker {
 			continue
 		}
 		workers = append(workers, builtinWorker{
-			Port:      1001 + i,
-			AgentType: agentType,
-			Title:     builtinAgentTitle(agentType),
-			Master:    i == 0,
+			Port:          1001 + i,
+			AgentType:     agentType,
+			Title:         builtinAgentTitle(agentType),
+			Master:        i == 0,
+			BindToPrimary: i > 0, // per-type (dev): keep attaching all non-master under w-1001
 		})
 	}
 	return workers
@@ -739,9 +743,10 @@ func createSelectedWorkers(selected []string) {
 		} else {
 			createBuiltinWorker(w)
 		}
-		// With more than one builtin agent, the non-primary ones get attached
-		// under w-1001 so they appear in the same chat session by default.
-		if len(workers) > 1 {
+		// Only agents flagged BindToPrimary attach under w-1001 by default (HR +
+		// Token优化 for the official roster). The rest are created standalone; the
+		// user brings them onto the team on demand (HR helps). Master never binds.
+		if w.BindToPrimary && !w.Master {
 			ensureWorkerBoundToPrimary(builtinWorkerSession(w.Port))
 		}
 	}
@@ -779,6 +784,13 @@ func createBuiltinWorker(w builtinWorker) {
 		useCustomGateway: useCustomGateway,
 		useProxy:         false,
 		roleTemplate:     w.RoleTemplate,
+		// Only BindToPrimary members (HR + Token优化) attach under w-1001; the rest
+		// are created standalone (in the DB, off the master's team) until added.
+		skipPrimaryBind: !w.BindToPrimary,
+		// Roster builtins are created config-only (no pane). cicy members run
+		// headless (warmCicySessions); non-cicy members are launched only once
+		// bound under w-1001 (ensureBuiltinAgents). Helper mode still launches.
+		configOnly: !helperMode,
 	}); err != nil {
 		fmt.Printf("  ❌ %s 创建失败: %v\n", w.Title, err)
 		return
@@ -2025,19 +2037,22 @@ func ensureBuiltinAgents(selected []string) {
 		desiredByPaneID[pid] = w
 	}
 
+	// Launch only NON-CICY agents bound under w-1001. cicy agents (master + any
+	// team member) run headless and are warmed server-side (warmCicySessions), so
+	// they never need a tmux pane here. The `active` column is no longer a launch
+	// gate — membership (bound under w-1001) + type (non-cicy) decides. This is
+	// what keeps a fresh runtime from booting/installing CLIs for agents the user
+	// hasn't pulled onto the team yet.
 	rows, err := store.Query(`
 		SELECT pane_id, ttyd_port, workspace, COALESCE(init_script,''), COALESCE(config,'{}'),
 		       COALESCE(agent_type,''), COALESCE(allow_all_actions,0),
 		       COALESCE(reply_in_chinese,0), COALESCE(use_custom_gateway,0)
 		FROM agent_config
-		WHERE active=1
-		  AND (
-		    pane_id = 'w-1001:main.0'
-		    OR pane_id IN (
-		      SELECT agent_name || ':main.0'
-		      FROM pane_agents
-		      WHERE pane_id = 'w-1001' AND status='active'
-		    )
+		WHERE COALESCE(agent_type,'') NOT IN ('cicy','dispatcher','secretary')
+		  AND pane_id IN (
+		    SELECT agent_name || ':main.0'
+		    FROM pane_agents
+		    WHERE pane_id = 'w-1001' AND status='active'
 		  )
 		ORDER BY ttyd_port ASC, pane_id ASC
 	`)

@@ -80,6 +80,16 @@ type paneCreateOpts struct {
 	inheritGuidance  bool
 	projectTemplate  string
 	roleTemplate     string
+	// skipPrimaryBind suppresses the default "bind under w-1001" when no master is
+	// named — used by official-roster members that are created standalone (in the
+	// DB, but not on the master's team until the user/HR adds them).
+	skipPrimaryBind bool
+	// configOnly creates the agent_config row (+ optional bind) WITHOUT launching a
+	// tmux pane or booting the agent. Used for roster builtins: cicy members run
+	// headless (warmed server-side), non-cicy members are launched only when bound
+	// under w-1001 (ensureBuiltinAgents) — so a fresh runtime installs no CLI for
+	// agents the user hasn't activated.
+	configOnly bool
 	// Per-pane runtime_ai override to seed into the new pane's config (used by
 	// fork so a gateway fork routes through the SAME provider as its source).
 	runtimeAI *runtimeAIOverride
@@ -726,8 +736,10 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 
 	paneID := opts.session + ":main.0"
 	writeAgentGuidanceFile(workspace, opts.agentType, paneID, opts.projectTemplate, opts.roleTemplate)
-	ensureTmuxServer()
-	runTmux("new-session", "-d", "-s", opts.session, "-n", "main", "-c", toPosixPath(workspace))
+	if !opts.configOnly {
+		ensureTmuxServer()
+		runTmux("new-session", "-d", "-s", opts.session, "-n", "main", "-c", toPosixPath(workspace))
+	}
 	proxyConfigJSON, err := mergeProxySettingsIntoConfigJSON("{}", &proxySettings{Password: opts.proxyPassword, Rule: opts.proxyRule})
 	if err != nil {
 		return M{"success": false}, err
@@ -754,29 +766,33 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 			log.Printf("[create] auto-bind sub=%s under master=%s failed: %v",
 				opts.session, opts.masterPaneID, err)
 		}
-	} else {
+	} else if !opts.skipPrimaryBind {
 		// The master console discovers agents through pane_agents — an unbound
 		// worker is invisible there. When the caller names no master, default
 		// the new worker under the primary (w-1001); no-op for the primary
-		// itself.
+		// itself. skipPrimaryBind opts out (standalone roster members).
 		ensureWorkerBoundToPrimary(opts.session)
 	}
 	// ttyd is served on demand inline (no per-pane port/server); nothing to
 	// start or wait for here. ttyd_port stays in the DB as unused metadata.
-	initPaneEnv(paneEnvOpts{
-		paneID:           paneID,
-		configJSON:       proxyConfigJSON,
-		workspace:        workspace,
-		initScript:       opts.initScript,
-		agentType:        opts.agentType,
-		defaultModel:     opts.defaultModel,
-		allowAllActions:  opts.allowAllActions,
-		replyInChinese:   opts.replyInChinese,
-		useCustomGateway: opts.useCustomGateway,
-		useProxy:         opts.useProxy,
-		proxyPassword:    opts.proxyPassword,
-		proxyRule:        opts.proxyRule,
-	})
+	// configOnly: skip booting the agent entirely — the row exists in the DB and
+	// is launched later (ensureBuiltinAgents for non-cicy / warm for cicy).
+	if !opts.configOnly {
+		initPaneEnv(paneEnvOpts{
+			paneID:           paneID,
+			configJSON:       proxyConfigJSON,
+			workspace:        workspace,
+			initScript:       opts.initScript,
+			agentType:        opts.agentType,
+			defaultModel:     opts.defaultModel,
+			allowAllActions:  opts.allowAllActions,
+			replyInChinese:   opts.replyInChinese,
+			useCustomGateway: opts.useCustomGateway,
+			useProxy:         opts.useProxy,
+			proxyPassword:    opts.proxyPassword,
+			proxyRule:        opts.proxyRule,
+		})
+	}
 	return M{
 		"success":          true,
 		"session":          opts.session,
