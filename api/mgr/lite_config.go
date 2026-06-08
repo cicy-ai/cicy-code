@@ -4,7 +4,7 @@ package main
 //
 // "Go is only the engine." Profiles, tool groups, custom tools and grants all
 // live in DATA (~/cicy-ai/db/lite-config.json), hot-read each turn. The Go side
-// keeps only: the built-in tool IMPLEMENTATIONS (dispatcherRunTool switch +
+// keeps only: the built-in tool IMPLEMENTATIONS (cicyRunTool switch +
 // a2a_*), the three big system-prompt consts, and the safety logic. Adding a
 // profile / group / tool / grant is a config edit, no rebuild, no restart.
 //
@@ -185,7 +185,7 @@ func resetLiteConfigCache() {
 func resolveSystemBase(ref string) string {
 	switch ref {
 	case "@dispatcher":
-		return dispatcherSystemPromptBase
+		return cicySystemPromptBase
 	case "@assistant":
 		return assistantSystemPromptBase
 	case "@liaison":

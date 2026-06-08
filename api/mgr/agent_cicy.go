@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,23 +31,23 @@ import (
 // Tools are executed in-process (todo store, pane list, tmux send/capture) —
 // no shell, no subprocesses beyond tmux itself.
 
-const dispatcherGatewayBase = "http://127.0.0.1:8008"
+const cicyGatewayBase = "http://127.0.0.1:8008"
 
-// defaultDispatcherCharter seeds the dispatcher's AGENTS.md at agent
-// creation. The full PM working protocol lives in dispatcherSystemPromptBase
+// defaultCicyCharter seeds the dispatcher's AGENTS.md at agent
+// creation. The full PM working protocol lives in cicySystemPromptBase
 // (compiled); this file is the per-instance customization hook — anything the
 // user writes here is appended to the system prompt and takes effect on the
 // next turn, no restart. Placeholders are substituted by
 // writeAgentGuidanceFile.
-const defaultDispatcherCharter = `# {{AGENT_ID}} · 产品项目经理
+const defaultCicyCharter = `# {{AGENT_ID}} · 产品项目经理
 
 <!-- 这里写对这位 PM 的个性化要求(团队约定、汇报口径、偏好等),改完下一轮对话即生效。 -->
 `
 
-// dispatcherSystemPromptBase is the fixed, non-editable part of the system
+// cicySystemPromptBase is the fixed, non-editable part of the system
 // prompt: tool semantics and dispatch policy. The charter (AGENTS.md) is
 // appended after it.
-const dispatcherSystemPromptBase = `你是这个多 agent 工作区的产品项目经理(PM),用户的唯一接口人。
+const cicySystemPromptBase = `你是这个多 agent 工作区的产品项目经理(PM),用户的唯一接口人。
 
 # 你的位置
 团队由各类 coding agent 组成(架构师、全栈工程师、修 bug 等),各自在自己的终端里异步工作。
@@ -77,76 +78,110 @@ const dispatcherSystemPromptBase = `你是这个多 agent 工作区的产品项�
 
 // ── conversation state ──────────────────────────────────────────────────────
 
-type dispatcherSession struct {
+type cicySession struct {
 	mu       sync.Mutex
 	messages []M // anthropic-format messages, persisted to disk
 }
 
 var (
-	dispatcherSessionsMu sync.Mutex
-	dispatcherSessions   = map[string]*dispatcherSession{}
+	cicySessionsMu sync.Mutex
+	cicySessions   = map[string]*cicySession{}
 )
 
-const dispatcherMaxHistoryMessages = 60
-const dispatcherMaxToolRounds = 8
+const cicyMaxHistoryMessages = 60
+const cicyMaxToolRounds = 8
 
-// dispatcherTrimMessages keeps history within the cap, trimming from the front,
+// cicyTrimMessages keeps history within the cap, trimming from the front,
 // but NEVER lets the window start on a tool_result turn — Anthropic/DeepSeek
 // reject a tool_result whose matching tool_use was trimmed away ("each
 // tool_result must have a corresponding tool_use in the previous message").
 // Must be applied to the OUTGOING window every turn (before building the
 // request), not just on persist — otherwise a freshly-loaded over-cap window can
 // be sent with an orphan tool_result at the front → gateway 400 / no reply.
-func dispatcherTrimMessages(msgs []M) []M {
-	if len(msgs) <= dispatcherMaxHistoryMessages {
+func cicyTrimMessages(msgs []M) []M {
+	if len(msgs) <= cicyMaxHistoryMessages {
 		return msgs
 	}
-	start := len(msgs) - dispatcherMaxHistoryMessages
-	for start < len(msgs) && dispatcherMessageHasToolResult(msgs[start]) {
+	start := len(msgs) - cicyMaxHistoryMessages
+	for start < len(msgs) && cicyMessageHasToolResult(msgs[start]) {
 		start++
 	}
 	return append([]M{}, msgs[start:]...)
 }
 
-func dispatcherStateDir(workspace string) string {
+func cicyConvDir(workspace string) string {
+	return filepath.Join(workspace, ".cicy", "cicy")
+}
+
+// cicyLegacyConvDir is the pre-rename location (.cicy/dispatcher). Used once by
+// migrateCicyStateDir to move existing conversation history to the new path.
+func cicyLegacyConvDir(workspace string) string {
 	return filepath.Join(workspace, ".cicy", "dispatcher")
 }
 
-func dispatcherHistoryPath(workspace string) string {
-	return filepath.Join(dispatcherStateDir(workspace), "conversation.json")
+func cicyHistoryPath(workspace string) string {
+	return filepath.Join(cicyConvDir(workspace), "conversation.json")
 }
 
-func getDispatcherSession(shortID, workspace string) *dispatcherSession {
-	dispatcherSessionsMu.Lock()
-	defer dispatcherSessionsMu.Unlock()
-	if s, ok := dispatcherSessions[shortID]; ok {
+// migrateCicyStateDir moves a pre-rename .cicy/dispatcher dir to .cicy/cicy when
+// the new one doesn't exist yet, so an agent's conversation survives the rename.
+// Idempotent and best-effort: any failure leaves the legacy dir in place and the
+// caller falls back to reading it.
+func migrateCicyStateDir(workspace string) {
+	newDir := cicyConvDir(workspace)
+	oldDir := cicyLegacyConvDir(workspace)
+	if _, err := os.Stat(newDir); err == nil {
+		return // already migrated
+	}
+	if _, err := os.Stat(oldDir); err != nil {
+		return // nothing to migrate
+	}
+	if err := os.Rename(oldDir, newDir); err != nil {
+		log.Printf("[cicy-migrate] %s → %s failed: %v", oldDir, newDir, err)
+	}
+}
+
+func getCicySession(shortID, workspace string) *cicySession {
+	cicySessionsMu.Lock()
+	defer cicySessionsMu.Unlock()
+	if s, ok := cicySessions[shortID]; ok {
 		return s
 	}
-	s := &dispatcherSession{}
-	if raw, err := os.ReadFile(dispatcherHistoryPath(workspace)); err == nil {
+	migrateCicyStateDir(workspace)
+	s := &cicySession{}
+	// Fall back to the legacy path if migration couldn't move it (e.g. perms).
+	histPath := cicyHistoryPath(workspace)
+	if _, err := os.Stat(histPath); err != nil {
+		if legacy := filepath.Join(cicyLegacyConvDir(workspace), "conversation.json"); legacy != histPath {
+			if _, e2 := os.Stat(legacy); e2 == nil {
+				histPath = legacy
+			}
+		}
+	}
+	if raw, err := os.ReadFile(histPath); err == nil {
 		var msgs []M
 		if json.Unmarshal(raw, &msgs) == nil {
 			s.messages = msgs
 		}
 	}
-	dispatcherSessions[shortID] = s
+	cicySessions[shortID] = s
 	return s
 }
 
 // persistLocked writes the trimmed history to disk. Caller holds s.mu.
-func (s *dispatcherSession) persistLocked(workspace string) {
-	s.messages = dispatcherBalanceToolCalls(dispatcherTrimMessages(s.messages))
-	if err := os.MkdirAll(dispatcherStateDir(workspace), 0755); err != nil {
+func (s *cicySession) persistLocked(workspace string) {
+	s.messages = cicyBalanceToolCalls(cicyTrimMessages(s.messages))
+	if err := os.MkdirAll(cicyConvDir(workspace), 0755); err != nil {
 		return
 	}
 	raw, err := json.Marshal(s.messages)
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(dispatcherHistoryPath(workspace), raw, 0644)
+	_ = os.WriteFile(cicyHistoryPath(workspace), raw, 0644)
 }
 
-func dispatcherMessageHasToolResult(msg M) bool {
+func cicyMessageHasToolResult(msg M) bool {
 	// Two content shapes exist: []interface{} (JSON-loaded from disk) and []M
 	// (appended in-memory by the tool loop). Matching only the former let the
 	// trim guard land the window on an in-memory tool_result message → orphan
@@ -171,13 +206,13 @@ func dispatcherMessageHasToolResult(msg M) bool {
 	return false
 }
 
-// dispatcherSyntheticToolResult is injected to pair an orphan tool_use whose
+// cicySyntheticToolResult is injected to pair an orphan tool_use whose
 // matching tool_result never arrived (a turn interrupted by a new user message
 // before the tool resolved). Without it the provider rejects the whole window
 // (Anthropic/DeepSeek: "tool_use ids were found without tool_result blocks").
-const dispatcherSyntheticToolResult = "(工具结果不可用:上一回合在收到结果前被打断,系统已自动补平以保持 tool_use/tool_result 配对。)"
+const cicySyntheticToolResult = "(工具结果不可用:上一回合在收到结果前被打断,系统已自动补平以保持 tool_use/tool_result 配对。)"
 
-func dispatcherBlockType(b interface{}) (map[string]interface{}, string) {
+func cicyBlockType(b interface{}) (map[string]interface{}, string) {
 	// M is an alias for map[string]interface{}, so one case covers both.
 	if bm, ok := b.(map[string]interface{}); ok {
 		t, _ := bm["type"].(string)
@@ -186,28 +221,28 @@ func dispatcherBlockType(b interface{}) (map[string]interface{}, string) {
 	return nil, ""
 }
 
-// dispatcherForEachBlock iterates a message's content blocks regardless of the
+// cicyForEachBlock iterates a message's content blocks regardless of the
 // two shapes that coexist: []interface{} (JSON-loaded) and []M (in-memory).
-func dispatcherForEachBlock(msg M, fn func(bm map[string]interface{}, typ string)) {
+func cicyForEachBlock(msg M, fn func(bm map[string]interface{}, typ string)) {
 	switch blocks := msg["content"].(type) {
 	case []interface{}:
 		for _, b := range blocks {
-			if bm, t := dispatcherBlockType(b); bm != nil {
+			if bm, t := cicyBlockType(b); bm != nil {
 				fn(bm, t)
 			}
 		}
 	case []M:
 		for _, b := range blocks {
-			if bm, t := dispatcherBlockType(b); bm != nil {
+			if bm, t := cicyBlockType(b); bm != nil {
 				fn(bm, t)
 			}
 		}
 	}
 }
 
-func dispatcherToolUseIDs(msg M) []string {
+func cicyToolUseIDs(msg M) []string {
 	var ids []string
-	dispatcherForEachBlock(msg, func(bm map[string]interface{}, t string) {
+	cicyForEachBlock(msg, func(bm map[string]interface{}, t string) {
 		if t == "tool_use" {
 			if id, _ := bm["id"].(string); id != "" {
 				ids = append(ids, id)
@@ -217,9 +252,9 @@ func dispatcherToolUseIDs(msg M) []string {
 	return ids
 }
 
-func dispatcherToolResultIDs(msg M) map[string]bool {
+func cicyToolResultIDs(msg M) map[string]bool {
 	out := map[string]bool{}
-	dispatcherForEachBlock(msg, func(bm map[string]interface{}, t string) {
+	cicyForEachBlock(msg, func(bm map[string]interface{}, t string) {
 		if t == "tool_result" {
 			if id, _ := bm["tool_use_id"].(string); id != "" {
 				out[id] = true
@@ -229,26 +264,26 @@ func dispatcherToolResultIDs(msg M) map[string]bool {
 	return out
 }
 
-// dispatcherBalanceToolCalls heals MID-history orphan tool_use blocks: any
+// cicyBalanceToolCalls heals MID-history orphan tool_use blocks: any
 // tool_use whose matching tool_result is absent from the immediately-following
 // message gets a synthetic tool_result injected right after it (merged into the
 // next user message, or as a fresh user message when none follows). This is the
-// symmetric complement to dispatcherTrimMessages, which only guards LEADING
+// symmetric complement to cicyTrimMessages, which only guards LEADING
 // orphan tool_result. Together they guarantee a provider-valid window every
 // turn, so an interrupted-turn corruption self-heals instead of bricking the
 // agent. Idempotent; leaves already-balanced history untouched.
-func dispatcherBalanceToolCalls(msgs []M) []M {
+func cicyBalanceToolCalls(msgs []M) []M {
 	out := make([]M, 0, len(msgs)+2)
 	for i := 0; i < len(msgs); i++ {
 		out = append(out, msgs[i])
-		ids := dispatcherToolUseIDs(msgs[i])
+		ids := cicyToolUseIDs(msgs[i])
 		if len(ids) == 0 {
 			continue
 		}
 		have := map[string]bool{}
 		nextIsUser := false
 		if i+1 < len(msgs) {
-			have = dispatcherToolResultIDs(msgs[i+1])
+			have = cicyToolResultIDs(msgs[i+1])
 			if r, _ := msgs[i+1]["role"].(string); r == "user" {
 				nextIsUser = true
 			}
@@ -264,7 +299,7 @@ func dispatcherBalanceToolCalls(msgs []M) []M {
 		}
 		results := make([]interface{}, 0, len(missing))
 		for _, id := range missing {
-			results = append(results, M{"type": "tool_result", "tool_use_id": id, "content": dispatcherSyntheticToolResult})
+			results = append(results, M{"type": "tool_result", "tool_use_id": id, "content": cicySyntheticToolResult})
 		}
 		if nextIsUser {
 			// Merge the synthetic results into the front of the next user
@@ -296,14 +331,14 @@ func dispatcherBalanceToolCalls(msgs []M) []M {
 
 // ── tools ───────────────────────────────────────────────────────────────────
 
-// dispatcherToolDefs returns the tool defs the agent's profile enables: the
+// cicyToolDefs returns the tool defs the agent's profile enables: the
 // built-ins whose names are in the effective set, plus any enabled custom tools
 // (declared in lite-config.json). An empty effective set yields no tools.
-func dispatcherToolDefs(cfg liteConfig) []M {
+func cicyToolDefs(cfg liteConfig) []M {
 	if len(cfg.enabledTools) == 0 {
 		return nil
 	}
-	all := dispatcherAllToolDefs()
+	all := cicyAllToolDefs()
 	out := make([]M, 0, len(all))
 	for _, t := range all {
 		if name, _ := t["name"].(string); cfg.enabledTools[name] {
@@ -313,7 +348,7 @@ func dispatcherToolDefs(cfg liteConfig) []M {
 	return append(out, liteCustomToolDefs(cfg)...)
 }
 
-func dispatcherAllToolDefs() []M {
+func cicyAllToolDefs() []M {
 	defs := append([]M{}, a2aLiaisonToolDefs()...) // a2a_* (liaison profile)
 	return append(defs, []M{
 		{
@@ -386,7 +421,7 @@ func dispatcherAllToolDefs() []M {
 	}...)
 }
 
-func dispatcherRunTool(selfShortID, name string, input map[string]interface{}, cfg liteConfig) string {
+func cicyRunTool(selfShortID, name string, input map[string]interface{}, cfg liteConfig) string {
 	enabled := cfg.enabledTools
 	if !enabled[name] {
 		return "error: tool " + name + " is not enabled for this agent"
@@ -570,21 +605,21 @@ func orDash(s string) string {
 	return s
 }
 
-// dispatcherCachedToolDefs returns the tool defs with a cache breakpoint on
+// cicyCachedToolDefs returns the tool defs with a cache breakpoint on
 // the last one (caches the whole tools prefix on Anthropic-protocol
 // providers; the DeepSeek adapter ignores the extra key).
-func dispatcherCachedToolDefs(cfg liteConfig) []M {
-	tools := dispatcherToolDefs(cfg)
+func cicyCachedToolDefs(cfg liteConfig) []M {
+	tools := cicyToolDefs(cfg)
 	if len(tools) > 0 {
 		tools[len(tools)-1]["cache_control"] = M{"type": "ephemeral"}
 	}
 	return tools
 }
 
-// dispatcherRequestMessages returns the history with a cache breakpoint
+// cicyRequestMessages returns the history with a cache breakpoint
 // attached to the final message — copy-on-write so the persisted history
 // itself never carries cache_control (the breakpoint must move every turn).
-func dispatcherRequestMessages(history []M) []M {
+func cicyRequestMessages(history []M) []M {
 	if len(history) == 0 {
 		return history
 	}
@@ -633,7 +668,7 @@ func dispatcherRequestMessages(history []M) []M {
 
 // ── system prompt + model resolution ───────────────────────────────────────
 
-func dispatcherModel(shortID string) string {
+func cicyModel(shortID string) string {
 	var defaultModel string
 	store.QueryRow("SELECT COALESCE(default_model,'') FROM agent_config WHERE pane_id=?", shortID+":main.0").Scan(&defaultModel)
 	return resolveClaudeStartupModel(defaultModel, loadRuntimeAIConfig(), shortID)
@@ -641,7 +676,7 @@ func dispatcherModel(shortID string) string {
 
 // ── gateway round trip ──────────────────────────────────────────────────────
 
-// dispatcherCallGateway makes one STREAMING Anthropic Messages call through
+// cicyCallGateway makes one STREAMING Anthropic Messages call through
 // the unified local AI gateway and assembles the SSE stream back into a full
 // response object. Streaming matters twice: the gateway audit layer parses
 // the SSE as it flows and updates reply.json + broadcasts ai_chunk chat
@@ -651,13 +686,13 @@ func dispatcherModel(shortID string) string {
 // Messages SSE, so the consumption side is one format regardless of provider.
 // The second return reports whether deltas were emitted (the caller must then
 // not re-emit the assembled text blocks).
-func dispatcherCallGateway(shortID string, payload M, emit func(M)) (map[string]interface{}, bool, error) {
+func cicyCallGateway(shortID string, payload M, emit func(M)) (map[string]interface{}, bool, error) {
 	payload["stream"] = true
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, false, err
 	}
-	url := fmt.Sprintf("%s/api/ai-gateway/anthropic/%s/v1/messages", dispatcherGatewayBase, shortID)
+	url := fmt.Sprintf("%s/api/ai-gateway/anthropic/%s/v1/messages", cicyGatewayBase, shortID)
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, false, err
@@ -692,14 +727,14 @@ func dispatcherCallGateway(shortID string, payload M, emit func(M)) (map[string]
 		}
 		return parsed, false, nil
 	}
-	return dispatcherAssembleSSE(resp.Body, emit)
+	return cicyAssembleSSE(resp.Body, emit)
 }
 
-// dispatcherAssembleSSE folds an Anthropic Messages SSE stream into the
+// cicyAssembleSSE folds an Anthropic Messages SSE stream into the
 // equivalent non-stream response object ({content: blocks, stop_reason}),
 // forwarding text deltas to `emit` as they arrive. The bool return reports
 // whether any delta was emitted.
-func dispatcherAssembleSSE(r io.Reader, emit func(M)) (map[string]interface{}, bool, error) {
+func cicyAssembleSSE(r io.Reader, emit func(M)) (map[string]interface{}, bool, error) {
 	type blockBuf struct {
 		typ        string
 		id         string
@@ -767,11 +802,11 @@ func dispatcherAssembleSSE(r io.Reader, emit func(M)) (map[string]interface{}, b
 						b.text.WriteString(t)
 						if emit != nil && t != "" && !b.suppressed {
 							// Leaked DSML tool-call markup is rescued post-stream
-							// (dispatcherRescueDSML); don't let the raw markup
+							// (cicyRescueDSML); don't let the raw markup
 							// reach the consumer. Detect on the ACCUMULATED text
 							// (the marker can split across deltas) and forward
 							// only the prose before it.
-							if mi := dispatcherDSMLMarkerIndex(b.text.String()); mi >= 0 {
+							if mi := cicyDSMLMarkerIndex(b.text.String()); mi >= 0 {
 								b.suppressed = true
 								if mi > sentLen {
 									emit(M{"type": "text_delta", "text": b.text.String()[sentLen:mi]})
@@ -853,9 +888,9 @@ func dispatcherAssembleSSE(r io.Reader, emit func(M)) (map[string]interface{}, b
 // Rescue: cut the markup out of the visible text and parse each invoke back
 // into a real tool_use block so the normal tool loop executes it.
 
-// dispatcherDSMLMarkerIndex returns the byte index of the earliest DSML
+// cicyDSMLMarkerIndex returns the byte index of the earliest DSML
 // marker in s (ASCII `<||DSML||` or fullwidth `<｜｜DSML｜｜` variant), or -1.
-func dispatcherDSMLMarkerIndex(s string) int {
+func cicyDSMLMarkerIndex(s string) int {
 	idx := -1
 	for _, marker := range []string{"<||DSML||", "<｜｜DSML｜｜"} {
 		if i := strings.Index(s, marker); i >= 0 && (idx < 0 || i < idx) {
@@ -870,10 +905,10 @@ var (
 	dsmlParamRe  = regexp.MustCompile(`(?s)<\|\|DSML\|\|parameter name="([^"]+)"(?:\s+string="(true|false)")?>(.*?)</\|\|DSML\|\|parameter>`)
 )
 
-// dispatcherRescueDSML scans assistant content blocks for leaked DSML markup.
+// cicyRescueDSML scans assistant content blocks for leaked DSML markup.
 // It returns the rewritten blocks (prose kept, markup stripped, invokes
 // converted to tool_use) and whether anything was rescued.
-func dispatcherRescueDSML(blocks []interface{}, round int) ([]interface{}, bool) {
+func cicyRescueDSML(blocks []interface{}, round int) ([]interface{}, bool) {
 	rescued := false
 	out := make([]interface{}, 0, len(blocks))
 	for bi, b := range blocks {
@@ -883,7 +918,7 @@ func dispatcherRescueDSML(blocks []interface{}, round int) ([]interface{}, bool)
 			continue
 		}
 		text, _ := bm["text"].(string)
-		idx := dispatcherDSMLMarkerIndex(text)
+		idx := cicyDSMLMarkerIndex(text)
 		if idx < 0 {
 			out = append(out, b)
 			continue
@@ -932,12 +967,12 @@ func truncateForLog(s string, n int) string {
 
 // ── chat endpoint (SSE) ─────────────────────────────────────────────────────
 
-type dispatcherSSE struct {
+type cicySSE struct {
 	w       http.ResponseWriter
 	flusher http.Flusher
 }
 
-func (s *dispatcherSSE) emit(event M) {
+func (s *cicySSE) emit(event M) {
 	raw, err := json.Marshal(event)
 	if err != nil {
 		return
@@ -948,7 +983,7 @@ func (s *dispatcherSSE) emit(event M) {
 	}
 }
 
-// handleDispatcherChat runs one dispatcher turn: append the user message,
+// handleCicyChat runs one dispatcher turn: append the user message,
 // loop LLM ↔ tools until the model stops, stream progress as SSE events:
 //
 //	{"type":"text","text":...}        assistant text block
@@ -957,9 +992,9 @@ func (s *dispatcherSSE) emit(event M) {
 //	{"type":"done"}
 //
 // Loopback-only (the REPL and other in-host callers), like the AI gateway.
-func handleDispatcherChat(w http.ResponseWriter, r *http.Request) {
+func handleCicyChat(w http.ResponseWriter, r *http.Request) {
 	if !isLoopbackRemote(r.RemoteAddr) {
-		httpErr(w, 403, "dispatcher_chat_loopback_only")
+		httpErr(w, 403, "cicy_chat_loopback_only")
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -994,9 +1029,9 @@ func handleDispatcherChat(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	flusher, _ := w.(http.Flusher)
-	sse := &dispatcherSSE{w: w, flusher: flusher}
+	sse := &cicySSE{w: w, flusher: flusher}
 
-	session := getDispatcherSession(shortID, workspace)
+	session := getCicySession(shortID, workspace)
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
@@ -1005,15 +1040,15 @@ func handleDispatcherChat(w http.ResponseWriter, r *http.Request) {
 	// cap and never starts on an orphan tool_result (heals an over-cap window loaded
 	// from disk; otherwise the first turn after load could 400 with "tool_result has
 	// no corresponding tool_use" → no reply).
-	session.messages = dispatcherTrimMessages(session.messages)
+	session.messages = cicyTrimMessages(session.messages)
 	// Heal any mid-history orphan tool_use (interrupted turn) before building the
 	// request, so a corrupted in-memory window self-pairs instead of bricking the
 	// agent with a provider 400 every turn.
-	session.messages = dispatcherBalanceToolCalls(session.messages)
-	model := dispatcherModel(shortID)
+	session.messages = cicyBalanceToolCalls(session.messages)
+	model := cicyModel(shortID)
 	cfg := resolveLiteConfig(shortID, workspace)
 
-	for round := 0; round < dispatcherMaxToolRounds; round++ {
+	for round := 0; round < cicyMaxToolRounds; round++ {
 		payload := M{
 			"model":      model,
 			"max_tokens": 2048,
@@ -1027,14 +1062,14 @@ func handleDispatcherChat(w http.ResponseWriter, r *http.Request) {
 				"type": "text", "text": cfg.systemPrompt,
 				"cache_control": M{"type": "ephemeral"},
 			}},
-			"messages": dispatcherRequestMessages(session.messages),
+			"messages": cicyRequestMessages(session.messages),
 		}
 		// Pure-chat roles (assistant/support/sales) enable no tools — omit the
 		// field entirely (an empty tools array is rejected by some upstreams).
-		if tools := dispatcherCachedToolDefs(cfg); len(tools) > 0 {
+		if tools := cicyCachedToolDefs(cfg); len(tools) > 0 {
 			payload["tools"] = tools
 		}
-		resp, streamed, err := dispatcherCallGateway(shortID, payload, sse.emit)
+		resp, streamed, err := cicyCallGateway(shortID, payload, sse.emit)
 		if err != nil {
 			sse.emit(M{"type": "error", "error": err.Error()})
 			// Drop the failed exchange tail so history stays consistent.
@@ -1049,7 +1084,7 @@ func handleDispatcherChat(w http.ResponseWriter, r *http.Request) {
 		// Leaked DSML tool-call markup in the text? Parse it back into real
 		// tool_use blocks (and strip it from the visible/persisted text) so the
 		// tools actually run instead of the raw markup reaching the user.
-		if rescuedBlocks, ok := dispatcherRescueDSML(blocks, round); ok {
+		if rescuedBlocks, ok := cicyRescueDSML(blocks, round); ok {
 			blocks = rescuedBlocks
 			stopReason = "tool_use"
 		}
@@ -1074,7 +1109,7 @@ func handleDispatcherChat(w http.ResponseWriter, r *http.Request) {
 				name, _ := bm["name"].(string)
 				toolID, _ := bm["id"].(string)
 				input, _ := bm["input"].(map[string]interface{})
-				result := dispatcherRunTool(shortID, name, input, cfg)
+				result := cicyRunTool(shortID, name, input, cfg)
 				argJSON, _ := json.Marshal(input)
 				sse.emit(M{"type": "tool", "name": name, "arg": string(argJSON), "result": truncateForLog(result, 600)})
 				toolResults = append(toolResults, M{
@@ -1093,7 +1128,7 @@ func handleDispatcherChat(w http.ResponseWriter, r *http.Request) {
 		session.messages = append(session.messages, M{"role": "user", "content": toolResults})
 	}
 
-	sse.emit(M{"type": "error", "error": fmt.Sprintf("tool loop exceeded %d rounds, stopping", dispatcherMaxToolRounds)})
+	sse.emit(M{"type": "error", "error": fmt.Sprintf("tool loop exceeded %d rounds, stopping", cicyMaxToolRounds)})
 	session.persistLocked(workspace)
 	sse.emit(M{"type": "done"})
 }

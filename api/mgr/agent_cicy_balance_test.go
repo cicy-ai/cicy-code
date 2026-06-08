@@ -5,13 +5,13 @@ import "testing"
 // helper: find an unpaired tool_use (orphan) anywhere in the window.
 func hasOrphanToolUse(msgs []M) bool {
 	for i, m := range msgs {
-		ids := dispatcherToolUseIDs(m)
+		ids := cicyToolUseIDs(m)
 		if len(ids) == 0 {
 			continue
 		}
 		have := map[string]bool{}
 		if i+1 < len(msgs) {
-			have = dispatcherToolResultIDs(msgs[i+1])
+			have = cicyToolResultIDs(msgs[i+1])
 		}
 		for _, id := range ids {
 			if !have[id] {
@@ -38,17 +38,17 @@ func TestBalanceHealsMidHistoryOrphanToolUse(t *testing.T) {
 	if !hasOrphanToolUse(msgs) {
 		t.Fatal("setup should contain an orphan tool_use")
 	}
-	out := dispatcherBalanceToolCalls(msgs)
+	out := cicyBalanceToolCalls(msgs)
 	if hasOrphanToolUse(out) {
 		t.Fatal("balancer left an orphan tool_use — provider would 400")
 	}
 	// The synthetic tool_result must be paired AND the original user text kept.
-	paired := dispatcherToolResultIDs(out[2])
+	paired := cicyToolResultIDs(out[2])
 	if !paired["call_orphan_1"] {
 		t.Error("synthetic tool_result for call_orphan_1 not in the following message")
 	}
 	var keptText bool
-	dispatcherForEachBlock(out[2], func(bm map[string]interface{}, typ string) {
+	cicyForEachBlock(out[2], func(bm map[string]interface{}, typ string) {
 		if typ == "text" {
 			if s, _ := bm["text"].(string); s == "📮 [w-10065] 新指令" {
 				keptText = true
@@ -68,7 +68,7 @@ func TestBalanceHealsTrailingOrphanToolUse(t *testing.T) {
 			{"type": "tool_use", "id": "call_tail", "name": "agent_list", "input": map[string]interface{}{}},
 		}},
 	}
-	out := dispatcherBalanceToolCalls(msgs)
+	out := cicyBalanceToolCalls(msgs)
 	if hasOrphanToolUse(out) {
 		t.Fatal("trailing orphan tool_use not healed")
 	}
@@ -92,7 +92,7 @@ func TestBalanceLeavesHealthyHistoryUntouched(t *testing.T) {
 			map[string]interface{}{"type": "text", "text": "好了"},
 		}},
 	}
-	out := dispatcherBalanceToolCalls(msgs)
+	out := cicyBalanceToolCalls(msgs)
 	if len(out) != len(msgs) {
 		t.Fatalf("healthy history length changed %d → %d (spurious injection)", len(msgs), len(out))
 	}
@@ -113,11 +113,11 @@ func TestBalancePartialResultsOnlyFillsMissing(t *testing.T) {
 			map[string]interface{}{"type": "tool_result", "tool_use_id": "a", "content": "done"},
 		}},
 	}
-	out := dispatcherBalanceToolCalls(msgs)
+	out := cicyBalanceToolCalls(msgs)
 	if hasOrphanToolUse(out) {
 		t.Fatal("partial-result orphan not healed")
 	}
-	res := dispatcherToolResultIDs(out[1])
+	res := cicyToolResultIDs(out[1])
 	if !res["a"] || !res["b"] {
 		t.Errorf("both a and b must be paired after balance, got %v", res)
 	}

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// runDispatcherREPL is the terminal half of the dispatcher agent type: a tiny
+// runCicyREPL is the terminal half of the dispatcher agent type: a tiny
 // stdin → /api/dispatcher/chat → stdout loop that lives in the agent's tmux
 // pane. It carries no LLM logic at all — the server-side dispatcher runtime
 // (agent_dispatcher.go) owns the conversation, tools and gateway traffic.
@@ -20,7 +20,7 @@ import (
 //
 // Usage: cicy-code dispatcher-repl [--agent <short-id>] [--server <base-url>]
 // Defaults: agent = $X_AGENT_SHORT_ID, server = http://127.0.0.1:8008.
-func runDispatcherREPL(args []string) int {
+func runCicyREPL(args []string) int {
 	agentID := strings.TrimSpace(os.Getenv("X_AGENT_SHORT_ID"))
 	server := "http://127.0.0.1:8008"
 	for i := 0; i < len(args); i++ {
@@ -38,7 +38,7 @@ func runDispatcherREPL(args []string) int {
 		}
 	}
 	if agentID == "" {
-		fmt.Fprintln(os.Stderr, "dispatcher-repl: agent id required (--agent or $X_AGENT_SHORT_ID)")
+		fmt.Fprintln(os.Stderr, "cicy-repl: agent id required (--agent or $X_AGENT_SHORT_ID)")
 		return 1
 	}
 
@@ -48,7 +48,7 @@ func runDispatcherREPL(args []string) int {
 		red   = "\033[1;31m"
 		reset = "\033[0m"
 	)
-	fmt.Printf("%s● Dispatcher %s%s — 任务秘书已就绪,直接输入需求。\n", cyan, agentID, reset)
+	fmt.Printf("%s● CiCy %s%s — 已就绪,直接输入需求。\n", cyan, agentID, reset)
 	prompt := func() { fmt.Printf("%s>%s ", cyan, reset) }
 	prompt()
 
@@ -63,7 +63,7 @@ func runDispatcherREPL(args []string) int {
 		if text == "/quit" || text == "/exit" {
 			return 0
 		}
-		if err := dispatcherREPLTurn(server, agentID, text); err != nil {
+		if err := cicyREPLTurn(server, agentID, text); err != nil {
 			fmt.Printf("%s✗ %v%s\n", red, err, reset)
 		}
 		prompt()
@@ -71,13 +71,13 @@ func runDispatcherREPL(args []string) int {
 	return 0
 }
 
-// dispatcherREPLTurn posts one user line and prints the SSE event stream.
-func dispatcherREPLTurn(server, agentID, text string) error {
+// cicyREPLTurn posts one user line and prints the SSE event stream.
+func cicyREPLTurn(server, agentID, text string) error {
 	body, err := json.Marshal(map[string]string{"agent_id": agentID, "text": text})
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequest(http.MethodPost, server+"/api/dispatcher/chat", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, server+"/api/cicy/chat", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

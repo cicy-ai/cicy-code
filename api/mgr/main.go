@@ -61,8 +61,8 @@ func main() {
 	if len(os.Args) >= 2 && os.Args[1] == "mitm" {
 		os.Exit(mitm.RunCLI(os.Args[2:]))
 	}
-	if len(os.Args) >= 2 && os.Args[1] == "dispatcher-repl" {
-		os.Exit(runDispatcherREPL(os.Args[2:]))
+	if len(os.Args) >= 2 && (os.Args[1] == "cicy-repl" || os.Args[1] == "dispatcher-repl") {
+		os.Exit(runCicyREPL(os.Args[2:])) // "dispatcher-repl" kept as legacy alias
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "reseed-memory" {
 		os.Exit(runReseedMemory(os.Args[2:]))
@@ -460,7 +460,8 @@ Options:
 	http.HandleFunc("/api/openclaw/gateway", wa(handleOpenClawGatewayInfo))
 	http.HandleFunc("/api/openclaw/provider/", handleOpenClawProviderProxy)
 	http.HandleFunc("/api/ai-gateway/", handleAIGatewayProxy)
-	http.HandleFunc("/api/dispatcher/chat", handleDispatcherChat) // loopback-only, like the AI gateway
+	http.HandleFunc("/api/cicy/chat", handleCicyChat)       // loopback-only, like the AI gateway
+	http.HandleFunc("/api/dispatcher/chat", handleCicyChat) // legacy alias (kept for in-flight REPLs)
 	http.HandleFunc("/mitm/", handleMitmproxyAuth)
 	http.HandleFunc("/mitm", handleMitmproxyAuth)
 	http.HandleFunc("/openclaw/", handleOpenClawAuth)

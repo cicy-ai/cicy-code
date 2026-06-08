@@ -18,11 +18,11 @@ const dsmlLeakSample = "嗨，让我看看有没有新动静。\n\n" +
 	"</｜｜DSML｜｜invoke>\n" +
 	"</｜｜DSML｜｜tool_calls>"
 
-func TestDispatcherRescueDSML(t *testing.T) {
+func TestCicyRescueDSML(t *testing.T) {
 	blocks := []interface{}{
 		map[string]interface{}{"type": "text", "text": dsmlLeakSample},
 	}
-	out, ok := dispatcherRescueDSML(blocks, 0)
+	out, ok := cicyRescueDSML(blocks, 0)
 	if !ok {
 		t.Fatal("expected rescue to trigger")
 	}
@@ -57,11 +57,11 @@ func TestDispatcherRescueDSML(t *testing.T) {
 	}
 }
 
-func TestDispatcherRescueDSMLAsciiVariant(t *testing.T) {
+func TestCicyRescueDSMLAsciiVariant(t *testing.T) {
 	blocks := []interface{}{
 		map[string]interface{}{"type": "text", "text": "ok\n<||DSML||tool_calls>\n<||DSML||invoke name=\"todo_list\">\n</||DSML||invoke>\n</||DSML||tool_calls>"},
 	}
-	out, ok := dispatcherRescueDSML(blocks, 2)
+	out, ok := cicyRescueDSML(blocks, 2)
 	if !ok || len(out) != 2 {
 		t.Fatalf("ascii variant not rescued: ok=%v blocks=%d", ok, len(out))
 	}
@@ -70,12 +70,12 @@ func TestDispatcherRescueDSMLAsciiVariant(t *testing.T) {
 	}
 }
 
-func TestDispatcherRescueDSMLNoFalsePositive(t *testing.T) {
+func TestCicyRescueDSMLNoFalsePositive(t *testing.T) {
 	blocks := []interface{}{
 		map[string]interface{}{"type": "text", "text": "普通回复,没有任何标记。"},
 		map[string]interface{}{"type": "tool_use", "id": "x", "name": "todo_list", "input": map[string]interface{}{}},
 	}
-	if _, ok := dispatcherRescueDSML(blocks, 0); ok {
+	if _, ok := cicyRescueDSML(blocks, 0); ok {
 		t.Fatal("must not rescue clean blocks")
 	}
 }

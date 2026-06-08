@@ -398,9 +398,17 @@ func loadDefaultProviderKeyForAgentType(agentType string) string {
 		return ""
 	}
 	agentType = strings.TrimSpace(strings.ToLower(agentType))
-	// The dispatcher speaks the Anthropic protocol and rides the claude
-	// provider chain — it has no separate default entry.
-	if agentType == "cicy" || agentType == "dispatcher" {
+	// The CiCy lite agent (legacy "dispatcher") speaks the Anthropic protocol
+	// and has its own routing slot ("cicy", default deepseek-v4-pro via the
+	// seeded defaultAnthropic). Configs from before the slot existed have no
+	// "cicy" entry — fall back to riding the claude provider chain.
+	if agentType == "dispatcher" {
+		agentType = "cicy"
+	}
+	if agentType == "cicy" {
+		if key, ok := providers.Default["cicy"]; ok && strings.TrimSpace(key) != "" {
+			return key
+		}
 		agentType = "claude"
 	}
 	if key, ok := providers.Default[agentType]; ok {

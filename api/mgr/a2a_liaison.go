@@ -154,7 +154,7 @@ type a2aWireMessage struct {
 const liaisonSystemPromptBase = `你是这个团队的对外联络员,团队与外部世界(A2A 任务平台)之间唯一的接口。
 
 # 你的位置
-本工作区是一个团队:项目经理(PM/dispatcher)统筹内部,各 coding agent 干活,你只负责对外。
+本工作区是一个团队:项目经理(PM)统筹内部,各 coding agent 干活,你只负责对外。
 对外 = A2A 任务平台上的其他团队/Agent;对内 = 你只对接 PM,不直接指挥其他 agent。
 
 # 职责闭环
@@ -572,7 +572,7 @@ func startA2ALiaisonPoller() {
 }
 
 func pollAllA2ALiaisons() {
-	rows, err := store.Query("SELECT pane_id FROM agent_config WHERE agent_type IN ('dispatcher','secretary')")
+	rows, err := store.Query("SELECT pane_id FROM agent_config WHERE agent_type IN ('cicy','dispatcher','secretary')")
 	if err != nil {
 		return
 	}
@@ -638,7 +638,7 @@ func pollOneA2ALiaison(shortID, workspace string) {
 // the loopback-only dispatcher chat endpoint and drains the SSE response.
 func a2aFeedLiaisonChat(shortID, text string) error {
 	payload, _ := json.Marshal(M{"agent_id": shortID, "text": text})
-	req, err := http.NewRequest(http.MethodPost, dispatcherGatewayBase+"/api/dispatcher/chat", bytes.NewReader(payload))
+	req, err := http.NewRequest(http.MethodPost, cicyGatewayBase+"/api/cicy/chat", bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
@@ -651,7 +651,7 @@ func a2aFeedLiaisonChat(shortID, text string) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("dispatcher chat HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("cicy chat HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	// drain the SSE stream; the liaison's reply lands in its own session/pane
 	_, err = io.Copy(io.Discard, resp.Body)

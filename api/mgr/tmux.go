@@ -707,7 +707,7 @@ func writeAgentGuidanceFile(workspace, agentType, paneID, projectTemplate, roleT
 // otherwise the default dispatcher (PM) charter.
 func composeGuidanceContent(workspace, agentType, paneID, projectTemplate, roleTemplate string) string {
 	if normalizeAgentType(agentType) == "cicy" {
-		seed := defaultDispatcherCharter
+		seed := defaultCicyCharter
 		if slug := sanitizeTemplateSlug(roleTemplate); slug != "" {
 			if rt := strings.TrimSpace(loadTemplateFile(roleTemplatePath(slug))); rt != "" {
 				seed = rt
@@ -3125,7 +3125,7 @@ fi`,
 		}
 		return []string{
 			"clear",
-			fmt.Sprintf("%s dispatcher-repl --agent %s", tmuxShellQuote(exePath), tmuxShellQuote(shortID)),
+			fmt.Sprintf("%s cicy-repl --agent %s", tmuxShellQuote(exePath), tmuxShellQuote(shortID)),
 		}
 	case "copilot":
 		installLog := tmuxHomeJoin("logs", fmt.Sprintf("copilot-install-%s.log", shortID))
@@ -3542,7 +3542,7 @@ func isAgentInputReady(agentType, out string) bool {
 		return strings.Contains(out, "Kiro ·") && strings.Contains(out, "ask a question or describe a task")
 	case "cicy":
 		// The REPL prints this banner immediately on start (dispatcher_repl.go).
-		return strings.Contains(out, "● Dispatcher")
+		return strings.Contains(out, "● CiCy")
 	default:
 		return false
 	}
