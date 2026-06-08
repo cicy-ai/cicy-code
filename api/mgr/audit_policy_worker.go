@@ -239,11 +239,9 @@ func IsAuditPolicyPane(paneID string) bool {
 // agent. Used by /api/panes to hide built-ins from the regular agent list
 // (?include_hidden=1 to bypass). Built-ins are now:
 //   - w-6001 — SecOps Lead (audit advisor + security officer, merged 2.1.8)
-//   - w-6002  — Team Helper
-// 2.1.7's "[6001, 10000] range" check is replaced by an explicit-id check:
-// w-1001+ are user workers and must NOT be hidden, and there are only two
-// built-ins to enumerate.
+// (The old w-6002 opencode Team Helper was removed — the cicy 团队助手 in
+// --helper=1 mode replaces it.) w-1001+ are user workers and must NOT be hidden.
 func isBuiltinAgent(paneID string) bool {
 	short := strings.Split(paneID, ":")[0]
-	return short == auditPolicyShortPane || short == teamHelperShortPane
+	return short == auditPolicyShortPane
 }

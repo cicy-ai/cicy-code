@@ -384,6 +384,17 @@ func handleAgentUnbind(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"success": true})
 }
 
+// handleAgentGreeting returns the agent's opening line, shown by the UI when the
+// chat history is empty (role agents draw it from their role template's 开场白).
+func handleAgentGreeting(w http.ResponseWriter, r *http.Request) {
+	id := shortPaneID(normPaneID(strings.TrimPrefix(r.URL.Path, "/api/agents/greeting/")))
+	if id == "" {
+		httpErr(w, http.StatusBadRequest, "pane id required")
+		return
+	}
+	J(w, M{"pane_id": id, "greeting": agentOpeningGreeting(id)})
+}
+
 func handleAgentReorder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httpErr(w, http.StatusMethodNotAllowed, "method not allowed")

@@ -79,7 +79,7 @@ func defaultLiteConfig() liteConfigFile {
 	return liteConfigFile{
 		Profiles: map[string]liteProfileCfg{
 			"dispatcher": {Name: "产品项目经理", SystemBase: "@dispatcher",
-				DefaultGroups: []string{"coordinate"}, GrantableGroups: []string{"coordinate"}},
+				DefaultGroups: []string{"coordinate"}, GrantableGroups: []string{"coordinate", "onboard", "shell"}},
 			"assistant": {Name: "轻量助理", SystemBase: "@assistant",
 				DefaultGroups: nil, GrantableGroups: []string{"coordinate"}},
 			"liaison": {Name: "对外联络员", SystemBase: "@liaison",
@@ -89,6 +89,13 @@ func defaultLiteConfig() liteConfigFile {
 		ToolGroups: map[string][]string{
 			"coordinate": {"todo_add", "todo_list", "todo_update", "agent_list", "agent_msg", "agent_capture"},
 			"handoff":    {"agent_list", "agent_msg", "agent_capture"},
+			// HR-only: pull an offline/standalone agent onto the team and bring it
+			// online (bind under master; cicy → warm session, CLI → launch pane).
+			"onboard": {"agent_online"},
+			// Team-Helper-only: a real shell (PowerShell on Windows, bash on unix)
+			// so the cicy helper can install Docker + cicy-code hands-on. Grantable
+			// to dispatcher but only the 团队助手 template selects it.
+			"shell": {"shell"},
 			"a2a": {"a2a_status", "a2a_tasks_list", "a2a_task_get", "a2a_task_publish", "a2a_task_close",
 				"a2a_msg_send", "a2a_thread_msgs", "a2a_threads", "a2a_inbox"},
 		},

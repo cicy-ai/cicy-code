@@ -431,21 +431,21 @@ func effectiveAgentOptions() []M {
 const primaryWorkerSession = "w-1001"
 const primaryWorkerPaneID = "w-1001:main.0"
 
-// Team-Helper mode (--helper=1): a single OpenCode-backed pane on port 6002
-// titled "Team Helper". Used by the cicy-cloud trial helper container — the
-// 30-min agent that walks brand-new users through installing Docker +
-// cicy-code on their own machine. One of the two built-in agents (the other
-// is w-6001 SecOps Lead); user workers continue to start at w-1001.
-const helperWorkerPort = 6002
-const helperWorkerSession = "w-6002"
-const helperWorkerPaneID = "w-6002:main.0"
+// Helper mode (--helper=1): a single cicy "团队助手" anchored at w-1001 (master).
+// It runs headless (no tmux pane — works on Windows), uses a real shell to install
+// Docker + cicy-code, then hands the user off to the full team that runs in the
+// container. Helper mode has no official roster, so w-1001 is free for the helper.
+const helperWorkerPort = 1001
+const helperWorkerSession = "w-1001"
+const helperWorkerPaneID = "w-1001:main.0"
 
 func helperModeBuiltinWorker() builtinWorker {
 	return builtinWorker{
-		Port:      helperWorkerPort,
-		AgentType: "opencode",
-		Title:     "Team Helper",
-		Master:    true,
+		Port:         helperWorkerPort,
+		AgentType:    "cicy",
+		Title:        "团队助手",
+		RoleTemplate: "团队助手",
+		Master:       true,
 	}
 }
 
@@ -482,7 +482,7 @@ func officialRoleRoster() []builtinWorker {
 		{Port: 995, AgentType: "claude", Title: "架构师"},
 		{Port: 994, AgentType: "codex", Title: "全栈开发工程师"},
 		{Port: 993, AgentType: "claude", Title: "UI设计师"},
-		{Port: 992, AgentType: "opencode", Title: "运维工程师"},
+		{Port: 992, AgentType: "cicy", Title: "运维工程师", RoleTemplate: "运维工程师"},
 	}
 }
 
@@ -758,12 +758,10 @@ func createSelectedWorkers(selected []string) {
 func createBuiltinWorker(w builtinWorker) {
 	session := fmt.Sprintf("w-%d", w.Port)
 	token := getFirstToken()
-	// Team Helper (--helper=1) opts OUT of our /api/ai-gateway — the trial
-	// container is shared / free / 30-min, we don't want any of its traffic
-	// billed to a real user's quota. use_custom_gateway=0 makes opencode
-	// fall through to its built-in free provider (Big Pickle / OpenCode Zen),
-	// reachable without a cicy api_token. Non-helper builtins still use
-	// our gateway as normal.
+	// Team Helper (--helper=1) opts OUT of our custom /api/ai-gateway: it falls
+	// through to the default provider so a fresh, pre-Docker machine can talk to
+	// the helper without the user having configured a gateway/token yet. Non-helper
+	// builtins use our gateway as normal.
 	useCustomGateway := !helperMode
 	role := "worker"
 	if w.Master {
@@ -788,22 +786,15 @@ func createBuiltinWorker(w builtinWorker) {
 		// are created standalone (in the DB, off the master's team) until added.
 		skipPrimaryBind: !w.BindToPrimary,
 		// Roster builtins are created config-only (no pane). cicy members run
-		// headless (warmCicySessions); non-cicy members are launched only once
-		// bound under w-1001 (ensureBuiltinAgents). Helper mode still launches.
-		configOnly: !helperMode,
+		// headless (warmCicySessions) — including the helper-mode 团队助手, which
+		// must stay headless so it works on Windows without tmux. Non-cicy members
+		// are launched only once bound under w-1001 (ensureBuiltinAgents).
+		configOnly: !helperMode || normalizeAgentType(w.AgentType) == "cicy",
 	}); err != nil {
 		fmt.Printf("  ❌ %s 创建失败: %v\n", w.Title, err)
 		return
 	}
 	fmt.Printf("  ✅ %s (w-%d, port %d)\n", w.Title, w.Port, w.Port)
-	// First-boot path: server-side auto-kick for the Team Helper. The
-	// restart path (startAgentFromConfig) has the same goroutine; both
-	// fire-and-forget, the watcher detects an already-input-ready pane
-	// in well under its 60s budget so the duplicate is harmless.
-	if helperMode && normalizeAgentType(w.AgentType) == "opencode" {
-		paneID := session + ":main.0"
-		go watchHelperOpencodeReadyAndKick(paneID)
-	}
 }
 
 func runSetup() {
@@ -913,10 +904,10 @@ func checkEnv() {
 	if count == 0 {
 		switch {
 		case helperMode:
-			// Team-Helper mode short-circuits everything else: one
-			// opencode pane on w-6002 titled "Team Helper", independent
-			// of --agents.
-			createSelectedWorkers([]string{"opencode"})
+			// Team-Helper mode short-circuits everything else: a single headless
+			// cicy "团队助手" on w-1001 (selectedBuiltinWorkers returns it regardless
+			// of the arg here), independent of --agents.
+			createSelectedWorkers(nil)
 		case isContainerRuntime():
 			// Preinstalled container runtime must never block on interactive setup.
 			// Respect explicit --agents=... when provided; otherwise keep the default
@@ -951,21 +942,10 @@ func checkEnv() {
 	} else {
 		removeAuditPolicyPane() // switch off → stop/remove any lingering w-6001
 	}
-	// Team Helper (w-6002) is no longer pre-created here. It bootstraps
-	// lazily on the first /api/chat/ws connection (see
-	// ensureBuiltinPaneLazy in audit_team_helper_worker.go) — saves the
-	// boot cost for users who never open the drawer, and self-heals
-	// when agent_config was wiped.
 	go ensureFfmpegAsync()
 	go ensurePreinstalledSkills()
 }
 
-// NOTE: agent-teams is intentionally NOT here. It's only useful inside
-// w-6002 (Team Helper) when there's a connected cicy-desktop webview
-// (Electron) on the other end of the chat WebSocket; preinstalling it
-// for every pane would put dead weight on user workers that have no
-// reason to manage local teams. setupTeamHelperAgent installs it
-// targeted at w-6002 instead.
 var preinstalledSkills = []string{
 	"agent-chrome", "agent-editor", "agent-desktop", "agent-webpage",
 	"cicy-agent", "cicy-todo", "cicy-mihomo", "cicy-ssh", "proxy_ssh", "globalApiToken",
@@ -1596,14 +1576,23 @@ func installMITMCAOSTrust() error {
 		log.Printf("[mitm] installed MITM CA into system trust store (%s) — codex/kiro Rust TLS now trusts it", dst)
 		return nil
 	case "darwin":
-		// SecTrust requires GUI auth even as root; the dashboard/CLI add-trusted-cert
-		// path prompts once. Not silently installable from a daemon.
-		out, err := exec.Command("security", "add-trusted-cert", "-d", "-r", "trustRoot",
-			"-k", "/Library/Keychains/System.keychain", src).CombinedOutput()
+		// Install into the USER's login keychain + user trust domain — NO admin/sudo
+		// required (a standard, non-admin user can trust a root for THEMSELVES).
+		// System.keychain would need admin (and SecTrust refuses to set trust without
+		// GUI auth even as root), so we deliberately avoid it: most users aren't
+		// admins, and node agents trust the CA via NODE_EXTRA_CA_CERTS regardless.
+		// macOS still shows a one-time "modify trust settings" dialog (the user's own
+		// LOGIN password = the second consent) in the desktop-spawned daemon's GUI
+		// session. If no GUI session can show it, surface need_elevation so the consent
+		// endpoint retries via the CLI in the user's session.
+		home, _ := os.UserHomeDir()
+		loginKC := filepath.Join(home, "Library", "Keychains", "login.keychain-db")
+		out, err := exec.Command("security", "add-trusted-cert", "-r", "trustRoot",
+			"-k", loginKC, src).CombinedOutput()
 		if err != nil {
-			return fmt.Errorf("security add-trusted-cert: %v: %s", err, strings.TrimSpace(string(out)))
+			return fmt.Errorf("need_elevation: security add-trusted-cert (user): %v: %s", err, strings.TrimSpace(string(out)))
 		}
-		log.Printf("[mitm] installed MITM CA into System.keychain — codex/kiro TLS now trusts it")
+		log.Printf("[mitm] installed MITM CA into login keychain (user trust, no admin) — codex/kiro TLS now trusts it")
 		return nil
 	}
 	return fmt.Errorf("OS trust install not supported on %s", runtime.GOOS)
@@ -1633,6 +1622,11 @@ func uninstallMITMCAOSTrust() {
 		_ = runRoot("rm", "-f", dst)
 		_ = runRoot("update-ca-certificates", "--fresh")
 	case "darwin":
+		// Remove from the login keychain (where we now install) and, best-effort,
+		// the System keychain (older installs / admin-scope installs).
+		home, _ := os.UserHomeDir()
+		loginKC := filepath.Join(home, "Library", "Keychains", "login.keychain-db")
+		_ = exec.Command("security", "delete-certificate", "-c", "cicy-mitm", loginKC).Run()
 		_ = exec.Command("security", "delete-certificate", "-c", "cicy-mitm",
 			"/Library/Keychains/System.keychain").Run()
 	}
@@ -2121,15 +2115,6 @@ func startAgentFromConfig(paneID string, port int, workspace, initScript, config
 			// even though use_custom_gateway=true in the DB.
 			useCustomGateway: useCustomGateway,
 		})
-		// --helper=1 Team Helper: server-side auto-kick. The desktop's
-		// USER_CONTEXT push raced opencode's boot — fixed at 6s timeout
-		// from the renderer, which sometimes missed (opencode not ready)
-		// or doubled (webview did-finish-load fired twice). Watching the
-		// pane for opencode's splash is exact: send "start" once when the
-		// TUI is provably accepting input. See watchHelperOpencodeReadyAndKick.
-		if helperMode && normalizeAgentType(agentType) == "opencode" {
-			go watchHelperOpencodeReadyAndKick(paneID)
-		}
 	}
 }
 

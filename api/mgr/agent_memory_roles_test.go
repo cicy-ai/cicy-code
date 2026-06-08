@@ -22,6 +22,21 @@ func TestRoleRosterTemplatesEmbedded(t *testing.T) {
 	}
 }
 
+// Each role template must carry an extractable `## 开场白` so the empty-chat
+// greeting (agentOpeningGreeting) has real text to show for that role.
+func TestRoleGreetingsExtractable(t *testing.T) {
+	for _, slug := range []string{"项目经理", "产品经理", "测试工程师", "法务", "人力资源", "Token优化师", "运维工程师", "团队助手"} {
+		raw, err := agentRoleTemplatesFS.ReadFile("embed/agent-roles/" + slug + ".md")
+		if err != nil {
+			t.Errorf("role template %q missing: %v", slug, err)
+			continue
+		}
+		if g := extractOpeningSection(string(raw)); strings.TrimSpace(g) == "" {
+			t.Errorf("role %q has no extractable 开场白", slug)
+		}
+	}
+}
+
 // Every slug the roster references must resolve to an embedded template — guards
 // against a roster entry whose RoleTemplate has no matching file.
 func TestOfficialRosterRoleTemplatesExist(t *testing.T) {

@@ -36,6 +36,12 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		// (audit / im / gateway / skills) so the trial drawer stays
 		// laser-focused on the chat pane.
 		result["helper_mode"] = helperMode
+		// Team-Helper LLM model: operator-configurable here (POST persists it in
+		// the blob); the headless cicy 团队助手 reads it via helperModelSetting().
+		// Always surface the key (default "") so the UI can render the control.
+		if _, ok := result["helper_model"]; !ok {
+			result["helper_model"] = ""
+		}
 		result["agents"] = effectiveAgentOptions()
 		// Mobile QR onboarding: if the operator set CICY_PUBLIC_URL (a
 		// reachable URL — tunneled domain or LAN IP), expose it so the UI
@@ -58,6 +64,30 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		MaybeEnsureCJKFontsForBytes(data)
 		J(w, M{"success": true})
 	}
+}
+
+// globalSettingsBlob loads the persisted global_settings JSON object (the
+// free-form blob written by POST /api/settings/global). Empty map when
+// unset/unparseable.
+func globalSettingsBlob() map[string]interface{} {
+	var val []byte
+	if err := store.QueryRow("SELECT `value` FROM global_vars WHERE `key_name`='global_settings'").Scan(&val); err != nil || len(val) == 0 {
+		return map[string]interface{}{}
+	}
+	m := map[string]interface{}{}
+	if err := json.Unmarshal(val, &m); err != nil {
+		return map[string]interface{}{}
+	}
+	return m
+}
+
+// helperModelSetting returns the Team-Helper LLM model configured in global
+// settings (key "helper_model"), or "" when unset.
+func helperModelSetting() string {
+	if s, ok := globalSettingsBlob()["helper_model"].(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
 }
 
 func handleFileExists(w http.ResponseWriter, r *http.Request) {

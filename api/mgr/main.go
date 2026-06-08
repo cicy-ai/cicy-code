@@ -36,7 +36,7 @@ var (
 	hotMode       bool
 	cdnMode       bool
 	containerMode bool
-	helperMode    bool   // --helper=1 → ships a single Team Helper agent on w-6002
+	helperMode    bool   // --helper=1 → ships a single headless cicy 团队助手 on w-1001
 	desktopCmd    *exec.Cmd
 )
 
@@ -110,9 +110,9 @@ Options:
   --public                Listen on 0.0.0.0 (default: 127.0.0.1)
   --audit                 Enable audit mode
   --cn                    Use Chinese mirrors
-  --helper=1              Team-Helper mode: ship a single OpenCode "Team
-                          Helper" agent on w-6002 using the local AI
-                          gateway. Overrides --agents.
+  --helper=1              Team-Helper mode: ship a single headless cicy
+                          "团队助手" on w-1001 that installs Docker + cicy-code
+                          and scales the local team. Overrides --agents.
   --agents=LIST           Comma-separated agents to install (skip interactive)
                           e.g. --agents=hermes
                           Use --agents=all for all agents
@@ -361,6 +361,7 @@ Options:
 	http.HandleFunc("/api/agents/by-pane/", wa(handleAgentsByPane))
 	http.HandleFunc("/api/agents/pane/", wa(handleAgentsByPane))
 	http.HandleFunc("/api/agents/inspector/", wa(handleAgentInspectorByPane))
+	http.HandleFunc("/api/agents/greeting/", wa(handleAgentGreeting))
 	http.HandleFunc("/api/agents/current-history/", wa(handleAgentCurrentHistoryByPane))
 	http.HandleFunc("/api/agents/usage-log/", wa(handleAgentUsageLogByPane))
 	http.HandleFunc("/api/agents/usage-analysis/", wa(handleAgentUsageAnalysisByPane))

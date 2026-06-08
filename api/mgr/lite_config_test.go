@@ -261,3 +261,51 @@ func TestLiteConfigMergeKeepsBuiltins(t *testing.T) {
 		t.Error("built-in coordinate group lost after merge")
 	}
 }
+
+// agent_online (the onboard group) is HR-only: a dispatcher agent that selects
+// `tools: [coordinate, onboard]` in its AGENTS.md gets it, but a default
+// dispatcher (coordinate only) must NOT — onboarding/pulling agents online is a
+// privileged 组队官 action, not a power every lite agent has.
+func TestOnboardToolHRGated(t *testing.T) {
+	prev := cicyRootDir
+	cicyRootDir = t.TempDir() // no config file → pure defaults
+	resetLiteConfigCache()
+	defer func() { cicyRootDir = prev; resetLiteConfigCache() }()
+
+	// HR: profile dispatcher + tools:[coordinate, onboard] → agent_online enabled,
+	// and the coordinate tools still present (onboard is additive, not replacing).
+	hr := resolveLiteConfig("w-997", writeAgentsMD(t, "---\nprofile: dispatcher\ntools: [coordinate, onboard]\nname: HR\n---\n"))
+	if !hr.enabledTools["agent_online"] {
+		t.Error("HR (tools:[coordinate,onboard]) should enable agent_online")
+	}
+	if !hr.enabledTools["agent_list"] || !hr.enabledTools["agent_msg"] {
+		t.Error("HR should keep its coordinate tools alongside onboard")
+	}
+
+	// Default dispatcher (no tools frontmatter → coordinate only) must NOT get it.
+	pm := resolveLiteConfig("w-1001", writeAgentsMD(t, ""))
+	if pm.enabledTools["agent_online"] {
+		t.Error("default dispatcher escalated to agent_online — onboard must stay HR-gated")
+	}
+	if pm.enabledTools["shell"] {
+		t.Error("default dispatcher must NOT have the shell tool")
+	}
+}
+
+// The shell tool (raw PowerShell/bash) is Team-Helper-only: the 团队助手 template
+// selects `tools: [coordinate, shell]` and gets it; no default dispatcher does.
+func TestShellToolHelperGated(t *testing.T) {
+	prev := cicyRootDir
+	cicyRootDir = t.TempDir() // no config file → pure defaults
+	resetLiteConfigCache()
+	defer func() { cicyRootDir = prev; resetLiteConfigCache() }()
+
+	helper := resolveLiteConfig("w-1001", writeAgentsMD(t, "---\nprofile: dispatcher\ntools: [coordinate, shell]\nname: 团队助手\n---\n"))
+	if !helper.enabledTools["shell"] {
+		t.Error("团队助手 (tools:[coordinate,shell]) should enable shell")
+	}
+	plain := resolveLiteConfig("w-1000", writeAgentsMD(t, ""))
+	if plain.enabledTools["shell"] {
+		t.Error("default dispatcher got shell — must stay helper-gated")
+	}
+}

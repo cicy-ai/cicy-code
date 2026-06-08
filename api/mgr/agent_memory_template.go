@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -181,6 +182,49 @@ func ensureRoleMemoryTemplates() {
 			log.Printf("[memory-template] seed role %s failed: %v", e.Name(), err)
 		}
 	}
+}
+
+// extractOpeningSection pulls the text under a role template's `## 开场白`
+// heading (until the next heading or trailing HTML comment). Returns "" if the
+// section is absent.
+func extractOpeningSection(md string) string {
+	lines := strings.Split(md, "\n")
+	var out []string
+	in := false
+	for _, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if !in {
+			if strings.HasPrefix(t, "## 开场白") {
+				in = true
+			}
+			continue
+		}
+		if strings.HasPrefix(t, "## ") || strings.HasPrefix(t, "# ") || strings.HasPrefix(t, "<!--") {
+			break
+		}
+		out = append(out, ln)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
+// agentOpeningGreeting returns the opening line shown when an agent's chat
+// history is empty. Role agents draw it from their role template's `## 开场白`
+// section; agents without a role template get a generic line from their title.
+func agentOpeningGreeting(shortID string) string {
+	var roleTemplate, title, agentType, workspace string
+	_ = store.QueryRow(
+		"SELECT COALESCE(role_template,''), COALESCE(title,''), COALESCE(agent_type,''), COALESCE(workspace,'') FROM agent_config WHERE pane_id=?",
+		shortID+":main.0",
+	).Scan(&roleTemplate, &title, &agentType, &workspace)
+	if slug := sanitizeTemplateSlug(roleTemplate); slug != "" {
+		if g := extractOpeningSection(loadTemplateFile(roleTemplatePath(slug))); g != "" {
+			return substituteTemplatePlaceholders(g, shortID, workspace, agentType)
+		}
+	}
+	if strings.TrimSpace(title) == "" {
+		title = shortID
+	}
+	return fmt.Sprintf("你好,我是%s。有什么可以帮你的?", title)
 }
 
 func loadTemplateFile(path string) string {

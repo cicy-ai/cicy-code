@@ -3,18 +3,46 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 )
+
+// cliCommandForAgentType maps an agent_type to the shell command that must be on
+// PATH for it to run. cicy lite agents run in-process (no CLI) → "". Used by the
+// roster (agent_list) to report whether an agent still needs its runtime installed
+// — HR reads this to ask 运维 (ops) to install claude/codex/opencode on demand.
+func cliCommandForAgentType(agentType string) string {
+	switch normalizeAgentType(agentType) {
+	case "claude", "cicy-claude":
+		return "claude"
+	case "codex":
+		return "codex"
+	case "opencode":
+		return "opencode"
+	case "cursor":
+		return "cursor-agent"
+	case "kiro-cli":
+		return "kiro-cli"
+	case "copilot":
+		return "copilot"
+	case "hermes":
+		return "hermes"
+	default:
+		return "" // cicy / dispatcher / unknown: no external CLI to install
+	}
+}
 
 // The dispatcher is a lightweight, non-coding agent type: a task secretary
 // that records the user's needs, turns them into todos, dispatches work to
@@ -475,7 +503,41 @@ func cicyAllToolDefs() []M {
 				"required": []string{"pane_id"},
 			},
 		},
+		{
+			"name":        "agent_online",
+			"description": "把一个离线/未上线的 agent 拉进团队并上线(组队官能力)。绑定到主控 w-1001;cicy 角色直接热身上线可对话,CLI 角色(claude/codex 等)需运行时已安装才能拉起终端——未安装会返回提示,让你先找运维安装。用 agent_list 看「就绪=否」的 agent 后用本工具拉上线。",
+			"input_schema": M{
+				"type": "object",
+				"properties": M{
+					"pane_id": M{"type": "string", "description": "要拉上线的 agent 短 id,如 w-992"},
+				},
+				"required": []string{"pane_id"},
+			},
+		},
+		{
+			"name":        "shell",
+			"description": "在本机执行一条 shell 命令(Windows 走 PowerShell,macOS/Linux 走 bash),拿到 stdout/stderr 和退出码。用于真正动手:下载并安装 Docker Desktop、启动 Docker、安装并启动 cicy-code 等。每次只跑一条、跑完看结果再决定下一步;高破坏命令先跟用户确认。",
+			"input_schema": M{
+				"type": "object",
+				"properties": M{
+					"command": M{"type": "string", "description": "要执行的命令(Windows=PowerShell 语法,Unix=bash 语法)"},
+					"cwd":     M{"type": "string", "description": "可选工作目录"},
+					"timeout": M{"type": "integer", "description": "可选超时秒数(默认 120,最大 1800)"},
+				},
+				"required": []string{"command"},
+			},
+		},
 	}...)
+}
+
+// platformShellArgv builds the argv to run a single command string through the
+// host's native shell: PowerShell on Windows (cicy-code ships as a native exe
+// there, PowerShell is always present), bash elsewhere.
+func platformShellArgv(command string) []string {
+	if runtime.GOOS == "windows" {
+		return []string{"powershell", "-NoProfile", "-NonInteractive", "-Command", command}
+	}
+	return []string{"bash", "-lc", command}
 }
 
 func cicyRunTool(selfShortID, name string, input map[string]interface{}, cfg liteConfig) string {
@@ -591,26 +653,54 @@ func cicyRunTool(selfShortID, name string, input map[string]interface{}, cfg lit
 		}
 		return fmt.Sprintf("updated todo #%s: [%s] %s (owner=%s)", todos[idx].ID, todos[idx].Status, todos[idx].Title, orDash(todos[idx].PaneID))
 	case "agent_list":
-		rows, err := store.Query("SELECT pane_id, title, agent_type, COALESCE(active,0) FROM agent_config ORDER BY pane_id")
+		// Roster for HR/PM scheduling. Each row carries the metadata HR needs to
+		// decide who to bring on and what setup is required:
+		//   id | 名称 | type | 类型 | 就绪 | 安装 | 网关 | 模型
+		// - 类型: lite = cicy headless (in-process, no CLI); CLI = needs a runtime.
+		// - 就绪: cicy → server-side session warmed; CLI → tmux pane alive.
+		// - 安装: cicy → —; CLI → 已装 / 需装(HR asks 运维 to install 需装 ones).
+		rows, err := store.Query("SELECT pane_id, title, agent_type, COALESCE(use_custom_gateway,0), COALESCE(default_model,'') FROM agent_config ORDER BY ttyd_port DESC, pane_id")
 		if err != nil {
 			return "error: " + err.Error()
 		}
 		defer rows.Close()
+		live := liveSessionSet()
 		var b strings.Builder
+		b.WriteString("id | 名称 | type | 类型 | 就绪 | 安装 | 网关 | 模型\n")
 		for rows.Next() {
-			var paneID, title, agentType string
-			var active int
-			if rows.Scan(&paneID, &title, &agentType, &active) != nil {
+			var paneID, title, agentType, model string
+			var useGateway int
+			if rows.Scan(&paneID, &title, &agentType, &useGateway, &model) != nil {
 				continue
 			}
-			state := "inactive"
-			if active != 0 {
-				state = "active"
+			short := shortPaneID(paneID)
+			kind, ready, install := "CLI", "否", "需装"
+			if normalizeAgentType(agentType) == "cicy" {
+				kind, install = "lite", "—"
+				if cicySessionRegistered(short) {
+					ready = "就绪"
+				}
+			} else {
+				if cmd := cliCommandForAgentType(agentType); cmd == "" {
+					install = "—"
+				} else if _, err := exec.LookPath(cmd); err == nil {
+					install = "已装"
+				}
+				if live[short] {
+					ready = "就绪"
+				}
 			}
-			fmt.Fprintf(&b, "%s | %s | %s | %s\n", shortPaneID(paneID), title, agentType, state)
+			gw := "否"
+			if useGateway != 0 {
+				gw = "是"
+			}
+			if strings.TrimSpace(model) == "" {
+				model = "默认"
+			}
+			fmt.Fprintf(&b, "%s | %s | %s | %s | %s | %s | %s | %s\n", short, title, agentType, kind, ready, install, gw, model)
 		}
 		out := strings.TrimRight(b.String(), "\n")
-		if out == "" {
+		if out == "" || !strings.Contains(out, "\n") {
 			return "no agents"
 		}
 		return out
@@ -648,6 +738,87 @@ func cicyRunTool(selfShortID, name string, input map[string]interface{}, cfg lit
 			return "(terminal empty)"
 		}
 		return out
+	case "agent_online":
+		pane := shortPaneID(normPaneID(str("pane_id")))
+		if pane == "" {
+			return "error: pane_id required"
+		}
+		if pane == selfShortID {
+			return "error: 这是我自己,无需拉"
+		}
+		var agentType, workspace string
+		if err := store.QueryRow(
+			"SELECT COALESCE(agent_type,''), COALESCE(workspace,'') FROM agent_config WHERE pane_id=?",
+			pane+":main.0",
+		).Scan(&agentType, &workspace); err != nil {
+			return "error: 找不到 agent " + pane + "(先用 agent_list 确认 id)"
+		}
+		isCicy := normalizeAgentType(agentType) == "cicy"
+		// CLI gate: the runtime must be installed before a pane can launch. If it
+		// isn't, stop here and tell HR to have 运维 install it — don't half-bind.
+		if !isCicy {
+			if cmd := cliCommandForAgentType(agentType); cmd != "" {
+				if _, err := exec.LookPath(cmd); err != nil {
+					return fmt.Sprintf("%s 是 %s 型 CLI,运行时 %s 还没装,无法上线。先用 agent_msg 让运维安装 %s,装好我再拉。", pane, agentType, cmd, cmd)
+				}
+			}
+		}
+		// Pull onto the team: activate + bind under master (w-1001).
+		store.Exec(fmt.Sprintf("UPDATE agent_config SET active=1, updated_at=%s WHERE pane_id=? AND COALESCE(active,0)=0", store.Now()), pane+":main.0")
+		ensureWorkerBoundToPrimary(pane)
+		if isCicy {
+			if workspace == "" {
+				workspace = paneWorkspace(pane)
+			}
+			if workspace == "" {
+				return "error: " + pane + " 无 workspace,已绑定主控但无法热身,请联系运维排查"
+			}
+			getCicySession(pane, workspace) // warm → register → online
+			if cicySessionRegistered(pane) {
+				return pane + " 已拉进团队并上线(cicy 已热身,现在可直接对话)"
+			}
+			return pane + " 已绑定主控,但热身未注册,请稍后重试或联系运维"
+		}
+		if err := ensureAgentRunningByPaneID(pane + ":main.0"); err != nil {
+			return "error: 已绑定主控,但拉起终端失败:" + err.Error()
+		}
+		return pane + " 已拉进团队并上线(已绑定主控 + 拉起终端,现在能打开了)"
+	case "shell":
+		command := str("command")
+		if command == "" {
+			return "error: command required"
+		}
+		timeout := 120 * time.Second
+		if v, ok := input["timeout"].(float64); ok && v > 0 {
+			timeout = time.Duration(v) * time.Second
+			if timeout > 30*time.Minute {
+				timeout = 30 * time.Minute
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		argv := platformShellArgv(command)
+		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+		if cwd := str("cwd"); cwd != "" {
+			cmd.Dir = cwd
+		}
+		out, err := cmd.CombinedOutput()
+		log.Printf("[cicy-shell] agent=%s bytes=%d err=%v cmd=%q", selfShortID, len(out), err, command)
+		s := string(out)
+		const maxOut = 12000
+		if len(s) > maxOut {
+			s = s[:maxOut] + "\n…(输出已截断)"
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			return "error: 命令超时\n" + s
+		}
+		if err != nil {
+			return fmt.Sprintf("exit error: %v\n%s", err, s)
+		}
+		if strings.TrimSpace(s) == "" {
+			return "(执行成功,无输出)"
+		}
+		return s
 	}
 	if strings.HasPrefix(name, "a2a_") {
 		return a2aLiaisonRunTool(selfShortID, name, input)
@@ -728,6 +899,15 @@ func cicyRequestMessages(history []M) []M {
 func cicyModel(shortID string) string {
 	var defaultModel string
 	store.QueryRow("SELECT COALESCE(default_model,'') FROM agent_config WHERE pane_id=?", shortID+":main.0").Scan(&defaultModel)
+	// Team-Helper mode: the 团队助手's model is operator-configurable via
+	// /api/settings/global (key helper_model). It applies when the agent has no
+	// explicit default_model of its own, so a fresh helper install can be pointed
+	// at a model without touching agent_config.
+	if helperMode && defaultModel == "" {
+		if hm := helperModelSetting(); hm != "" {
+			defaultModel = hm
+		}
+	}
 	return resolveClaudeStartupModel(defaultModel, loadRuntimeAIConfig(), shortID)
 }
 
