@@ -22,14 +22,14 @@ function detectLang(): Lang {
 const STRINGS: Record<Lang, Record<string, string>> = {
   en: {
     tipAddCliWindow: "New CLI window\n\nOpen a fresh shell window tab in this session.",
-    tipRestartAgent: "Restart Agent\n\nRestarts the Agent and its conversation.\nUse /resume to restore the conversation.",
+    tipRestartAgent: "Restart Agent\n\nRestarts the Agent and its conversation.",
     tipLaunchAgent: "Launch Agent\n\nRe-source .cicy/boot.sh,\nlaunch Agent.",
     tipUpdateAgent: "Update Agent\n\nUpdate Agent to the latest official release.",
     tipReloadPage: "Reload page\n\nReload the current Agent page.",
     tipPromptArea: "Prompt input area\n\nClick to focus the bottom prompt box —\ntype + Enter sends to the agent.\nUse this when the slow-network server-side\nIME makes typing directly in the terminal\nunreliable.",
     confirmLaunchAgent: "Re-source `.cicy/boot.sh` in this pane? Env vars get refreshed and {agent} restarts.",
     confirmUpdateAgent: "Update Agent to the latest official release?",
-    confirmRestartAgent: "Restart this Agent and its conversation? Use /resume to restore it.",
+    confirmRestartAgent: "Restart this Agent and its conversation?",
     // Echoed in the update window after npm install succeeds — the install
     // runs async and the agent in the original pane is still on the old
     // version, so the user has to take a manual restart step. Sent to the
@@ -83,14 +83,14 @@ const STRINGS: Record<Lang, Record<string, string>> = {
   },
   "zh-CN": {
     tipAddCliWindow: "新建 CLI Window\n\n在当前 session 新开一个 shell window tab。",
-    tipRestartAgent: "重启 Agent\n\n将重启 Agent 和对话,\n请使用 /resume 恢复对话。",
+    tipRestartAgent: "重启 Agent\n\n将重启 Agent 和对话。",
     tipLaunchAgent: "启动 Agent\n\n重新 source .cicy/boot.sh,\n启动 Agent。",
     tipUpdateAgent: "更新 Agent\n\n更新 Agent 到官方最新版。",
     tipReloadPage: "刷新页面\n\n刷新当前 Agent 页面。",
     tipPromptArea: "Prompt 输入区\n\n点这里聚焦底部 Prompt 输入框,\n输入后回车直接发给 agent。\n用于网络较慢时服务端输入法\n在终端里直接打字不稳的情况。",
     confirmLaunchAgent: "在当前 pane 重新 source `.cicy/boot.sh`? 环境变量会刷新,{agent} 重新启动。",
     confirmUpdateAgent: "更新到官方最新版?",
-    confirmRestartAgent: "重启该 Agent 和对话?请使用 /resume 恢复对话。",
+    confirmRestartAgent: "重启该 Agent 和对话?",
     updateCompleteRestartHint: "✅ 升级完成 — 点击顶栏的 ▶ 启动按钮重启 {agent} 启用新版本。",
     restartPaneTitle: "重启 Agent",
     launchAgentTitle: "启动 {agent}",
