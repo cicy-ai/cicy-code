@@ -52,23 +52,63 @@ func runCicyREPL(args []string) int {
 	prompt := func() { fmt.Printf("%s>%s ", cyan, reset) }
 	prompt()
 
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		text := strings.TrimSpace(scanner.Text())
-		if text == "" {
-			prompt()
-			continue
+	// Read stdin in a goroutine so input that arrives WHILE a reply is streaming
+	// keeps buffering instead of blocking. After each turn we drain everything
+	// that queued during it and send it as ONE merged turn — matching "回复没
+	// 完成时的输入进队列,完成后一起发出去".
+	lines := make(chan string, 256)
+	go func() {
+		sc := bufio.NewScanner(os.Stdin)
+		sc.Buffer(make([]byte, 64*1024), 1024*1024)
+		for sc.Scan() {
+			lines <- sc.Text()
 		}
-		if text == "/quit" || text == "/exit" {
+		close(lines)
+	}()
+
+	for {
+		first, ok := <-lines
+		if !ok {
 			return 0
 		}
-		if err := cicyREPLTurn(server, agentID, text); err != nil {
-			fmt.Printf("%s✗ %v%s\n", red, err, reset)
+		// Collect the first line plus everything already buffered (queued during
+		// the previous turn or typed back-to-back). Stop at the first /quit|/exit.
+		batch := []string{}
+		quit := false
+		add := func(raw string) {
+			t := strings.TrimSpace(raw)
+			if t == "/quit" || t == "/exit" {
+				quit = true
+				return
+			}
+			if t != "" {
+				batch = append(batch, t)
+			}
+		}
+		add(first)
+	drain:
+		for !quit {
+			select {
+			case l, ok := <-lines:
+				if !ok {
+					break drain // stdin closed; flush what we have, then exit after
+				}
+				add(l)
+			default:
+				break drain
+			}
+		}
+		if len(batch) > 0 {
+			merged := strings.Join(batch, "\n")
+			if err := cicyREPLTurn(server, agentID, merged); err != nil {
+				fmt.Printf("%s✗ %v%s\n", red, err, reset)
+			}
+		}
+		if quit {
+			return 0
 		}
 		prompt()
 	}
-	return 0
 }
 
 // cicyREPLTurn posts one user line and prints the SSE event stream.

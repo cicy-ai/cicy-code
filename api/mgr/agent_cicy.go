@@ -81,6 +81,15 @@ const cicySystemPromptBase = `你是这个多 agent 工作区的产品项目经�
 type cicySession struct {
 	mu       sync.Mutex
 	messages []M // anthropic-format messages, persisted to disk
+
+	// Input queue: while a reply is in flight (busy), additional inputs are
+	// appended to pending instead of running their own turn; the in-flight
+	// handler drains pending on completion and merges them into ONE follow-up
+	// turn streamed on the same connection. Guarded by qmu (separate from mu,
+	// which is held for the whole duration of a turn).
+	qmu     sync.Mutex
+	busy    bool
+	pending []string
 }
 
 var (
@@ -1032,9 +1041,89 @@ func handleCicyChat(w http.ResponseWriter, r *http.Request) {
 	sse := &cicySSE{w: w, flusher: flusher}
 
 	session := getCicySession(shortID, workspace)
-	session.mu.Lock()
-	defer session.mu.Unlock()
 
+	// Input queueing: if a reply is already in flight for this session, queue
+	// this input instead of running a second turn. The in-flight handler drains
+	// the queue on completion and merges all queued inputs into ONE follow-up
+	// turn (streamed on its own connection). This request returns immediately.
+	if session.enqueueIfBusy(text) {
+		sse.emit(M{"type": "queued", "text": "已加入队列,当前回复完成后一起处理。"})
+		sse.emit(M{"type": "done"})
+		return
+	}
+	// We own the turn. Safety net: clear busy if we exit abnormally (error/panic)
+	// without the normal drain-complete path having released it.
+	released := false
+	defer func() {
+		if !released {
+			session.forceRelease()
+		}
+	}()
+
+	cur := text
+	for {
+		session.mu.Lock()
+		ok := runCicyTurnLocked(session, shortID, workspace, cur, sse)
+		session.mu.Unlock()
+		if !ok {
+			sse.emit(M{"type": "done"})
+			return // defer clears busy
+		}
+		// Drain inputs queued while this turn ran; merge into one follow-up turn.
+		merged, more := session.drainPending()
+		if !more {
+			released = true
+			break
+		}
+		cur = merged
+		sse.emit(M{"type": "flush", "text": "处理排队的输入…"})
+	}
+	sse.emit(M{"type": "done"})
+}
+
+// enqueueIfBusy returns true (and queues text) when a reply is already in flight
+// for this session; otherwise it marks the session busy and returns false,
+// meaning the caller now owns the turn(s). Concurrency-safe.
+func (s *cicySession) enqueueIfBusy(text string) bool {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	if s.busy {
+		s.pending = append(s.pending, text)
+		return true
+	}
+	s.busy = true
+	return false
+}
+
+// drainPending is called by the turn owner after a turn completes. If inputs
+// queued during it, it returns them merged (newline-joined) into ONE follow-up
+// turn with more=true. If nothing queued, it releases busy and returns
+// more=false. Concurrency-safe.
+func (s *cicySession) drainPending() (merged string, more bool) {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	if len(s.pending) == 0 {
+		s.busy = false
+		return "", false
+	}
+	merged = strings.Join(s.pending, "\n")
+	s.pending = nil
+	return merged, true
+}
+
+// forceRelease clears busy on an abnormal exit so the session never wedges.
+func (s *cicySession) forceRelease() {
+	s.qmu.Lock()
+	s.busy = false
+	s.qmu.Unlock()
+}
+
+// runCicyTurnLocked runs ONE user turn (append text → tool loop → persist),
+// streaming text/tool/error events to sse. It does NOT emit the terminal "done"
+// — the caller owns that, so multiple drained turns can stream on one
+// connection. Returns false on a gateway error or tool-loop overflow (caller
+// stops draining). Caller must hold session.mu.
+func runCicyTurnLocked(session *cicySession, shortID, workspace, text string, sse *cicySSE) bool {
 	session.messages = append(session.messages, M{"role": "user", "content": text})
 	// Trim BEFORE building the request so the outgoing window is always within the
 	// cap and never starts on an orphan tool_result (heals an over-cap window loaded
@@ -1074,8 +1163,7 @@ func handleCicyChat(w http.ResponseWriter, r *http.Request) {
 			sse.emit(M{"type": "error", "error": err.Error()})
 			// Drop the failed exchange tail so history stays consistent.
 			session.persistLocked(workspace)
-			sse.emit(M{"type": "done"})
-			return
+			return false
 		}
 
 		blocks, _ := resp["content"].([]interface{})
@@ -1122,13 +1210,12 @@ func handleCicyChat(w http.ResponseWriter, r *http.Request) {
 
 		if len(toolResults) == 0 || stopReason != "tool_use" {
 			session.persistLocked(workspace)
-			sse.emit(M{"type": "done"})
-			return
+			return true
 		}
 		session.messages = append(session.messages, M{"role": "user", "content": toolResults})
 	}
 
 	sse.emit(M{"type": "error", "error": fmt.Sprintf("tool loop exceeded %d rounds, stopping", cicyMaxToolRounds)})
 	session.persistLocked(workspace)
-	sse.emit(M{"type": "done"})
+	return false
 }
