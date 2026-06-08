@@ -71,7 +71,7 @@ const chatClientIdStorageKey = (masterAgentId: string) => `cicy_chat_client_id:$
 const chatClientIdStorage = (): Storage =>
   typeof (window as any).electronRPC === 'function' ? localStorage : sessionStorage;
 function makePageClientId(masterAgentId: string): string {
-  const m = String(masterAgentId || 'w-10001').replace(/[^a-zA-Z0-9_-]/g, '') || 'w';
+  const m = String(masterAgentId || 'w-1001').replace(/[^a-zA-Z0-9_-]/g, '') || 'w';
   return `web-${m}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 const CLI_DRAWER_MIN_WIDTH = 360;
@@ -389,7 +389,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   } = useApp();
   const { token, hasPermission } = useAuth();
   const { confirm, node: dialogsNode } = useDialogs();
-  const paneId = agentId || 'w-10001';
+  const paneId = agentId || 'w-1001';
   const fullPaneId = `${paneId}:main.0`;
   const initialPaneIdRef = useRef(paneId);
 
@@ -479,7 +479,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [netLatency, setNetLatency] = useState<number | null>(null);
   const [chatWsConnected, setChatWsConnected] = useState(false);
   const [chatWsClientId, setChatWsClientId] = useState<string | null>(null);
-  // chat-ws client id, bound to the current master agent (paneId is the short master id, e.g. "w-10001").
+  // chat-ws client id, bound to the current master agent (paneId is the short master id, e.g. "w-1001").
   // Kept in sessionStorage so it survives reloads in the same tab; a BroadcastChannel guard below
   // re-generates it if another tab in this browser is already using the same id — which happens when
   // a tab is *duplicated* (Chrome copies sessionStorage) — so the two tabs don't fight over the slot.
@@ -2200,7 +2200,7 @@ function AgentDrawer({ agents, paneId, statuses = {}, onSelectAgent, onAgentsCha
 
   const handleDelete = async (id: string) => {
     const sid = id.split(':')[0];
-    if (sid === 'w-10001') return;
+    if (sid === 'w-1001') return;
     const ok = await confirm({
       body: <Trans i18nKey="drawerConfirmDelete" ns="workspace" values={{ name: sid }} components={{ strong: <span className="text-zinc-100 font-medium" /> }} />,
       danger: true,
@@ -2214,7 +2214,7 @@ function AgentDrawer({ agents, paneId, statuses = {}, onSelectAgent, onAgentsCha
       if (sid === paneId) {
         const idx = agents.findIndex(a => (a.pane_id || a.id) === id);
         const next = agents[idx + 1] || agents[idx - 1];
-        onSelectAgent(next ? (next.pane_id || next.id).split(':')[0] : 'w-10001');
+        onSelectAgent(next ? (next.pane_id || next.id).split(':')[0] : 'w-1001');
       }
     } catch {}
   };

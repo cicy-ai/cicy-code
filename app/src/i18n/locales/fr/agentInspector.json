@@ -36,7 +36,7 @@
   "proxyPasswordDesc": "Vide → api_token ; sinon repli sur user==pass",
   "proxyPasswordPlaceholder": "Optionnel, mot de passe personnalisé",
   "mihomoRule": "Règle mihomo",
-  "mihomoRuleDesc": "Optionnel. Règle obligatoire à présent, ex. IN-USER,w-10001,proxy-a",
+  "mihomoRuleDesc": "Optionnel. Règle obligatoire à présent, ex. IN-USER,w-1001,proxy-a",
   "modelDefaultTitle": "Modèle par défaut au démarrage",
   "modelDefaultDesc": "Utilisé comme modèle de démarrage de l'agent et modèle de la gateway. Vide → suit le défaut du provider.",
   "modelDefaultFieldLabel": "Modèle",

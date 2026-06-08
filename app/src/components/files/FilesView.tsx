@@ -15,7 +15,7 @@ import { useDialogs } from '../ui/Modal';
 
 interface FilesViewProps {
   agentId: string;
-  /** Absolute workspace folder, e.g. ~/cicy-ai/workers/w-10001 expanded. */
+  /** Absolute workspace folder, e.g. ~/cicy-ai/workers/w-1001 expanded. */
   workspaceFolder: string;
   /** Page-level chat-ws client id. Used to register a ":code-ext" alias so
    *  agent-editor's host.* RPCs reach this view over the shared WS. */

@@ -13,7 +13,7 @@ import apiService from '../../services/api';
  * 左栏：指挥台（总控对话，上=history，下=prompt，自动 @ 选中 worker，可广播）。
  * 右侧：可平移/缩放画布，每个 worker = 可拖动+可缩放的 chat window，
  *       只显示 thinking + text（不拉 tool 结果），头像 = agent avatar + 状态环。
- * 接真实数据：成员 = w-10001 的子 agent（无则取全部 pane）；轮询
+ * 接真实数据：成员 = w-1001 的子 agent（无则取全部 pane）；轮询
  * /api/agents/current-reply 取每个 agent 的 status / model / token / thinking / answer。
  * 派任务走 /api/tmux/send（sendCommand）真实下发到对应 pane。
  */
@@ -34,7 +34,7 @@ interface Worker {
 type ChatKind = 'dispatch' | 'broadcast' | 'done' | 'note';
 interface ChatMsg { id: number; kind: ChatKind; from?: string; to?: string; text: string; ts: string }
 
-const SELF = 'w-10001';
+const SELF = 'w-1001';
 const MIN_W = 240, MIN_H = 168;
 
 const shortId = (id: string) => String(id || '').replace(/:main\.0$/, '');
@@ -220,7 +220,7 @@ export default function Office() {
     centeredRef.current = true;
   }, [loaded, workers.length]);
 
-  // 真实成员：w-10001 的子 agent（pane_agents）；无则取全部 pane（排除自己）。每 15s 刷新名单。
+  // 真实成员：w-1001 的子 agent（pane_agents）；无则取全部 pane（排除自己）。每 15s 刷新名单。
   useEffect(() => {
     let cancelled = false;
     const loadTeam = async () => {
@@ -246,7 +246,7 @@ export default function Office() {
             agentType: String(p.agent_type || '').trim(),
           }))
           .filter((p) => p.id && (p.id === SELF || (subIds ? subIds.has(p.id) : true)));
-        // 总控 w-10001 也作为一个 window 进画布,排在最前(不再单列在左栏)
+        // 总控 w-1001 也作为一个 window 进画布,排在最前(不再单列在左栏)
         team.sort((a, b) => (a.id === SELF ? -1 : 0) - (b.id === SELF ? -1 : 0));
         if (cancelled) return;
         setWorkers((prev) => {
@@ -382,7 +382,7 @@ export default function Office() {
       nudgeHistory(ids);
       setText(''); return;
     }
-    // 定向 / 群发:发给选中的 window;未选则默认发给总控 w-10001(过总控)
+    // 定向 / 群发:发给选中的 window;未选则默认发给总控 w-1001(过总控)
     const ids = selectedIds.length ? selectedIds.slice() : [SELF];
     ids.forEach((id) => push({ kind: 'dispatch', to: id, text: body }));
     setWorkers((prev) => prev.map((w) => (ids.includes(w.id) ? { ...w, status: 'working', startedAt: Date.now() } : w)));

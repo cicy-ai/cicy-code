@@ -24,7 +24,7 @@
   "proxyPasswordLabel": "Mot de passe du proxy",
   "proxyPasswordPlaceholder": "Vide → api_token ; sinon repli sur user==pass",
   "proxyRuleLabel": "Règle mihomo",
-  "proxyRulePlaceholder": "IN-USER,w-10001,proxy-a",
+  "proxyRulePlaceholder": "IN-USER,w-1001,proxy-a",
   "agentDutyLabel": "Mission de l'agent",
   "agentDutyPlaceholder": "Décrivez le rôle et les responsabilités…",
   "networkConfigLabel": "Configuration (JSON)",

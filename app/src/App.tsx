@@ -31,9 +31,9 @@ function parseHash(): { view: ViewType; agentId: string } {
   }
   if (hash.startsWith('#/agent/')) {
     const m = hash.match(/\/agent\/([^/]+)/);
-    return { view: 'workspace', agentId: m ? decodeURIComponent(m[1]).replace(/:.*$/, '') : 'w-10001' };
+    return { view: 'workspace', agentId: m ? decodeURIComponent(m[1]).replace(/:.*$/, '') : 'w-1001' };
   }
-  return { view: 'desktop', agentId: 'w-10001' };
+  return { view: 'desktop', agentId: 'w-1001' };
 }
 
 // After login + token verify, the workspace is only usable once the realtime
@@ -102,11 +102,11 @@ function Main() {
     return () => window.removeEventListener('hashchange', onChange);
   }, []);
 
-  // Ensure w-10001 exists on login
+  // Ensure w-1001 exists on login
   useEffect(() => {
     if (!token || config.isAudit) return;
-    apiService.getPane('w-10001:main.0').catch(() => {
-      apiService.createPane({ win_name: 'w-10001', title: 'Master', agent_type: 'hermes' }).catch(() => {});
+    apiService.getPane('w-1001:main.0').catch(() => {
+      apiService.createPane({ win_name: 'w-1001', title: '项目经理', agent_type: 'cicy' }).catch(() => {});
     });
   }, [token]);
 
@@ -155,11 +155,11 @@ function Main() {
 
   // #/audit → Audit Dashboard
   if (route.view === 'audit') {
-    return <AuditDashboard onBack={() => { window.location.hash = '#/agent/w-10001'; }} />;
+    return <AuditDashboard onBack={() => { window.location.hash = '#/agent/w-1001'; }} />;
   }
 
   // #/agent/xxx or default → Workspace
-  const agentId = route.view === 'workspace' ? route.agentId : 'w-10001';
+  const agentId = route.view === 'workspace' ? route.agentId : 'w-1001';
   return <WsGate><Workspace agentId={agentId} onSelectAgent={selectAgent} /><AuditGuardFab /></WsGate>;
 }
 

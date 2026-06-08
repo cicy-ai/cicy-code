@@ -24,7 +24,7 @@
   "proxyPasswordLabel": "プロキシパスワード",
   "proxyPasswordPlaceholder": "空 → api_token；無ければ user==pass にフォールバック",
   "proxyRuleLabel": "mihomo ルール",
-  "proxyRulePlaceholder": "IN-USER,w-10001,proxy-a",
+  "proxyRulePlaceholder": "IN-USER,w-1001,proxy-a",
   "agentDutyLabel": "エージェントの役割",
   "agentDutyPlaceholder": "エージェントの役割と責任を記述…",
   "networkConfigLabel": "設定（JSON）",

@@ -51,7 +51,7 @@
   "proxyPasswordDesc": "Empty → prefer api_token; otherwise fall back to user==pass",
   "proxyPasswordPlaceholder": "Optional, custom proxy password",
   "mihomoRule": "mihomo rule",
-  "mihomoRuleDesc": "Optional. The full rule that must exist, e.g. IN-USER,w-10001,proxy-a",
+  "mihomoRuleDesc": "Optional. The full rule that must exist, e.g. IN-USER,w-1001,proxy-a",
   "proxyTargetLabel": "Proxy target",
   "proxyTargetDesc": "Pick a proxy-group or proxy node. Empty falls back to the global prefix rule.",
   "proxyTargetPlaceholder": "Choose group or node",

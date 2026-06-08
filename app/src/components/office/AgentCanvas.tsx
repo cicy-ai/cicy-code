@@ -6,7 +6,7 @@ import { Plus, Minus, Maximize2, CircleDot, Loader2, CheckCircle2, Crown } from 
  *
  * 纯 UI 原型，mock 实时流（先不接接口）。每个 agent = 一张轻卡（LiteAgentCard），
  * 只显示 thinking + text 工作状态（不渲染 tool_result）；想看谁点谁放大。
- * 画布支持拖拽平移 / 滚轮缩放 / 拖动单卡 / 点击聚焦。w-10001 = 总控中心节点。
+ * 画布支持拖拽平移 / 滚轮缩放 / 拖动单卡 / 点击聚焦。w-1001 = 总控中心节点。
  *
  * 接接口时：每张卡轮询该 agent 的 current-reply（只取 type∈{thinking,text}），
  * 离屏/未聚焦降频走批量 digest（见 plan）。这里用 setInterval 模拟流。
@@ -34,7 +34,7 @@ const A = (id: string, name: string, role: string, emoji: string, accent: string
   ({ id, name, role, emoji, accent, x, y, status, script, shown: status === 'working' ? 0 : script.length, controller });
 
 const INIT: CanvasAgent[] = [
-  A('w-10001', '总控 Opus', '总负责人', '🏢', 'amber', 380, 40, 'idle', [
+  A('w-1001', '总控 Opus', '总负责人', '🏢', 'amber', 380, 40, 'idle', [
     { t: 'text', s: '当前 3 个任务在跑，等 work done 回报。' },
     { t: 'thinking', s: '前端原型先行，QA 待命，安全并行审。' },
     { t: 'text', s: '派给 Finn：画布原型；派给 Aria：拆任务卡。' },

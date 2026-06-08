@@ -184,8 +184,8 @@ export default function IMDashboard({ leftMount, rightMount }: {
   const selected = useMemo(() => accounts.find((a) => a.id === selectedId) || null, [accounts, selectedId]);
 
   /* ---- editor sync ---- */
-  // Default new accounts to w-10001 (the primary built-in pane). If acc has no
-  // bind yet and w-10001 exists in panes, pre-fill it but keep baseline empty
+  // Default new accounts to w-1001 (the primary built-in pane). If acc has no
+  // bind yet and w-1001 exists in panes, pre-fill it but keep baseline empty
   // so the form reads as "dirty" and Save commits the default to the backend.
   const loadEditor = useCallback((acc: IMAccount | null) => {
     setTestRes(null);
@@ -197,7 +197,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
       return;
     }
     const serverBind = acc.bound_pane_id || '';
-    const defaultBind = serverBind || 'w-10001';
+    const defaultBind = serverBind || 'w-1001';
     setDraft({ name: acc.name || '', secret: '', boundPaneId: defaultBind });
     setBaseline(JSON.stringify({ name: acc.name || '', secret: '', boundPaneId: serverBind }));
   }, []);
@@ -449,7 +449,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
     setWxStarting(true);
 
     // Step 1: each wechat account gets its OWN dedicated "Wechat Worker" pane.
-    // We never reuse generic local-gateway agents like w-10001 (which the user
+    // We never reuse generic local-gateway agents like w-1001 (which the user
     // has for other purposes). Look for an existing unbound Wechat Worker, and
     // if none, spin up a fresh one (claude agent on deepseek with custom gateway).
     let bindTarget = panes.find((p) => p.title === 'Wechat Worker' && !wechatBoundPanes.has(p.pane_id))?.pane_id || '';
@@ -926,7 +926,7 @@ export default function IMDashboard({ leftMount, rightMount }: {
                                 <span className="truncate font-mono text-zinc-100">{cur}</span>
                                 {curPane?.agent_type && <span className="rounded bg-white/[0.06] px-1 py-px text-[10px] font-medium text-zinc-400">{curPane.agent_type}</span>}
                               </div>
-                              <span className="block truncate text-[11px] text-zinc-500">{curPane?.title || (cur === 'w-10001' ? '我01' : '')}</span>
+                              <span className="block truncate text-[11px] text-zinc-500">{curPane?.title || (cur === 'w-1001' ? '我01' : '')}</span>
                             </div>
                           </>
                         ) : (

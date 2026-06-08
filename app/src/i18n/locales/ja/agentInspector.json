@@ -36,7 +36,7 @@
   "proxyPasswordDesc": "Empty → prefer api_token; otherwise fall back to user==pass",
   "proxyPasswordPlaceholder": "Optional, custom proxy password",
   "mihomoRule": "mihomo rule",
-  "mihomoRuleDesc": "Optional. The full rule that must exist, e.g. IN-USER,w-10001,proxy-a",
+  "mihomoRuleDesc": "Optional. The full rule that must exist, e.g. IN-USER,w-1001,proxy-a",
   "modelDefaultTitle": "Startup default model",
   "modelDefaultDesc": "Used both as the agent's startup default model and as the gateway's default model. Empty falls back to the current provider's default.",
   "modelDefaultFieldLabel": "モデル",

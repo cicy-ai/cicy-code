@@ -35,7 +35,7 @@ import TodoPanel from './TodoPanel';
 const mkTodo = (over: Partial<any> = {}) => ({
   id: '1', title: 'sample', status: 'todo',
   created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
-  pane_id: 'w-10001', ...over,
+  pane_id: 'w-1001', ...over,
 });
 
 beforeEach(() => {
@@ -59,7 +59,7 @@ describe('advanceStatus', () => {
 
 describe('shortId', () => {
   it('strips the tmux suffix to the short pane id', () => {
-    expect(shortId('w-10001:main.0')).toBe('w-10001');
+    expect(shortId('w-1001:main.0')).toBe('w-1001');
   });
   it('leaves a bare id untouched', () => {
     expect(shortId('w-10025')).toBe('w-10025');
@@ -96,7 +96,7 @@ describe('humanTime', () => {
 // ── component ────────────────────────────────────────────────────────────────
 describe('<TodoPanel />', () => {
   it('renders all four status columns including the test lane', async () => {
-    render(<TodoPanel paneId="w-10001" active isMaster />);
+    render(<TodoPanel paneId="w-1001" active isMaster />);
     await waitFor(() => expect(api.listTodos).toHaveBeenCalled());
     for (const key of ['status.todo', 'status.test', 'status.done', 'status.dropped']) {
       expect(screen.getByText(key)).toBeInTheDocument();
@@ -105,7 +105,7 @@ describe('<TodoPanel />', () => {
 
   it('buckets a server todo into its status column', async () => {
     api.listTodos.mockResolvedValue({ data: { todos: [mkTodo({ id: '7', title: 'wire up auth', status: 'test' })] } });
-    render(<TodoPanel paneId="w-10001" active isMaster />);
+    render(<TodoPanel paneId="w-1001" active isMaster />);
     expect(await screen.findByText('wire up auth')).toBeInTheDocument();
     // its stable id is shown on the card
     expect(await screen.findByText('7')).toBeInTheDocument();
@@ -114,7 +114,7 @@ describe('<TodoPanel />', () => {
   it('optimistically shows a new todo before the server round-trip resolves', async () => {
     let resolveAdd: (v: unknown) => void = () => {};
     api.addTodo.mockReturnValue(new Promise((r) => { resolveAdd = r; }));
-    render(<TodoPanel paneId="w-10001" active isMaster />);
+    render(<TodoPanel paneId="w-1001" active isMaster />);
     await waitFor(() => expect(api.listTodos).toHaveBeenCalled());
 
     const input = screen.getByPlaceholderText('quickAddPlaceholder');

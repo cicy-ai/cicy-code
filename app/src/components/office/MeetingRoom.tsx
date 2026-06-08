@@ -9,7 +9,7 @@ import {
  *
  * 纯 UI 原型，先不接任何接口；派发 / 回报 / 互通都是本地 mock + setTimeout 模拟。
  *
- * 概念：办公室本身 = w-10001（总负责人 / 总控）。它只管理、不下场、不亲自验收。
+ * 概念：办公室本身 = w-1001（总负责人 / 总控）。它只管理、不下场、不亲自验收。
  * 通信三通道：
  *   - 广播 total → 全体（公告/目标）
  *   - 单聊 total → 某成员（派任务）
@@ -39,16 +39,16 @@ type ReviewState = 'pending' | 'passed' | 'qa';
 interface Entry {
   id: number;
   kind: EntryKind;
-  from: string;          // 'w-10001' | member id
+  from: string;          // 'w-1001' | member id
   to?: string;           // member id（dispatch / peer / qa）
   text: string;
   ts: string;
   review?: ReviewState;
 }
 
-const SELF = 'w-10001';
+const SELF = 'w-1001';
 
-// ── mock 花名册（对应 cicy-team 角色；真实环境来自 w-10001 名下绑定的 worker）──
+// ── mock 花名册（对应 cicy-team 角色；真实环境来自 w-1001 名下绑定的 worker）──
 const MOCK_MEMBERS: Member[] = [
   {
     id: 'w-10010', name: '架构师 Aria', role: 'dev-senior', emoji: '🏛️', model: 'deepseek-v4-pro',

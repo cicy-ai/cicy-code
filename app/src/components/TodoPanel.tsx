@@ -809,6 +809,6 @@ export function humanTime(iso: string, tr: (key: string, opts?: Record<string, u
 }
 
 export function shortId(id: string): string {
-  // w-10001:main.0 → w-10001, or just trim long ids
+  // w-1001:main.0 → w-1001, or just trim long ids
   return id.split(':')[0];
 }

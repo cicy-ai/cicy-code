@@ -51,7 +51,7 @@
   "proxyPasswordDesc": "留空时优先 api_token，不存在时回退 user==pass",
   "proxyPasswordPlaceholder": "可选，自定义代理密码",
   "mihomoRule": "mihomo 规则",
-  "mihomoRuleDesc": "可选，指定必须存在的完整规则，例如 IN-USER,w-10001,proxy-a",
+  "mihomoRuleDesc": "可选，指定必须存在的完整规则，例如 IN-USER,w-1001,proxy-a",
   "proxyTargetLabel": "代理目标",
   "proxyTargetDesc": "选择走哪个 proxy-group 或 proxy 节点，留空则使用默认前缀规则",
   "proxyTargetPlaceholder": "选择 group 或 node",

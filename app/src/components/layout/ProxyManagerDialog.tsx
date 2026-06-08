@@ -150,7 +150,7 @@ export function ProxyManagerDialog({
     try {
       // Default the export's username to Workspace.activeCliPaneId (read out
       // of AppContext as `activeAgentId` — already normalized to short form
-      // like "w-10001"). That worker name matches the `IN-USER-PREFIX,w-`
+      // like "w-1001"). That worker name matches the `IN-USER-PREFIX,w-`
       // routing rule, so the export actually routes out of the box. Fall
       // back to the dialog's own paneId prop, then to whatever the server
       // defaults to.

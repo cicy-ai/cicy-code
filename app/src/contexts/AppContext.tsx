@@ -73,7 +73,7 @@ interface AppContextType {
 
   // Active agent — what the user is currently focused on in the UI. May differ from
   // currentPaneId when the workspace's card stack has a non-master card focused.
-  // Stored as short id (e.g. "w-10001"), not the ":main.0" form.
+  // Stored as short id (e.g. "w-1001"), not the ":main.0" form.
   activeAgentId: string | null;
   setActiveAgentId: (id: string | null) => void;
   // Cross-component cache of pane detail rows, keyed by short pane id. Inspector
