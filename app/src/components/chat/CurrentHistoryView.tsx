@@ -2726,20 +2726,29 @@ export default function CurrentHistoryView({
     <div data-id="current-history-view" className="flex h-full flex-col bg-[#0b0b0d]">
       {pendingUrl ? <LinkConfirmModal url={pendingUrl} onClose={() => setPendingUrl(null)} /> : null}
       {!loading && displayItems.length === 0 && !liveVisible && !optimisticQ ? (
-        <div data-id="current-history-empty" className="flex flex-1 flex-col items-center justify-center px-4">
-          <div className="w-full max-w-2xl">
-            <div data-id="current-history-empty-greeting" className="mb-5 text-center">
-              <div data-id="current-history-empty-icon" className="mb-3 text-3xl text-zinc-600">✦</div>
-              {greeting ? (
-                <div data-id="current-history-empty-greeting-text" className="chat-markdown current-history-markdown mt-1 text-left text-sm leading-[1.7] text-zinc-300">
+        greeting ? (
+          // 开场白渲染成一条正常的 assistant reply:左上角、带 agent 头像 + markdown
+          // 内容列,与真实答案同布局(不再居中占位)。
+          <div data-id="current-history-empty-greeting" className="flex-1 overflow-y-auto fade-scroll-y">
+            <div className="mx-auto w-full max-w-3xl px-4 py-6 font-sans text-zinc-300">
+              <div data-id="current-history-empty-greeting-turn" className="flex items-start gap-2.5">
+                <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-empty-greeting-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
+                <div data-id="current-history-empty-greeting-text" className="chat-markdown current-history-markdown min-w-0 flex-1 text-sm leading-[1.7] text-zinc-300">
                   <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{greeting}</Markdown>
                 </div>
-              ) : (
-                <p data-id="current-history-empty-text" className="mt-1 text-xs text-zinc-500">{t('emptyHistory')}</p>
-              )}
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div data-id="current-history-empty" className="flex flex-1 flex-col items-center justify-center px-4">
+            <div className="w-full max-w-2xl">
+              <div className="mb-5 text-center">
+                <div data-id="current-history-empty-icon" className="mb-3 text-3xl text-zinc-600">✦</div>
+                <p data-id="current-history-empty-text" className="mt-1 text-xs text-zinc-500">{t('emptyHistory')}</p>
+              </div>
+            </div>
+          </div>
+        )
       ) : (
       <>
       <div data-id="current-history-scroll" ref={scrollRef} className="flex-1 overflow-y-auto fade-scroll-y">

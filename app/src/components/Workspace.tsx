@@ -1654,16 +1654,18 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {isCicyLiteAgent((paneDetails[activeCliPaneId.split(':')[0]] || (activeCliPaneId.split(':')[0] === paneId.split(':')[0] ? agentDetail : null))?.agent_type || '') ? (
         <div data-id="stack-controls-model-spacer" className="flex-1" />
       ) : null}
-      <button
-        type="button"
-        data-id="workspace-shell-toggle"
-        onClick={toggleShellPanel}
-        aria-pressed={shellPanelOpen}
-        title={t('shellPanelToggle', { defaultValue: 'Shell 终端' })}
-        className={`p-1 rounded border transition-colors cursor-pointer ${shellPanelOpen ? 'text-emerald-400 border-emerald-400/50 bg-emerald-400/10' : 'text-zinc-600 border-zinc-700/60 hover:text-zinc-300 hover:border-zinc-600'}`}
-      >
-        <Terminal className="w-3.5 h-3.5" />
-      </button>
+      {!globalVar?.helper_mode && (
+        <button
+          type="button"
+          data-id="workspace-shell-toggle"
+          onClick={toggleShellPanel}
+          aria-pressed={shellPanelOpen}
+          title={t('shellPanelToggle', { defaultValue: 'Shell 终端' })}
+          className={`p-1 rounded border transition-colors cursor-pointer ${shellPanelOpen ? 'text-emerald-400 border-emerald-400/50 bg-emerald-400/10' : 'text-zinc-600 border-zinc-700/60 hover:text-zinc-300 hover:border-zinc-600'}`}
+        >
+          <Terminal className="w-3.5 h-3.5" />
+        </button>
+      )}
       <SystemResourceMonitor paneId={paneId} />
       <NetworkSignal latency={netLatency} connected={chatWsConnected} clientId={chatWsClientId} onSendClientId={handleSendPageClientIdToAgent} />
       <GlobalProxyIndicator placement="up" onManageNodes={handleOpenProxyManager} />
@@ -1744,7 +1746,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           {/* Office entry retired (2026-06-05) — the dispatcher (PM) chat now
               lives directly in the team agent card (DispatcherChat). The
               Office component itself is kept on disk for potential revival. */}
-          <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} />
+          <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} disabled={!!globalVar?.helper_mode} />
           {/* Helper-mode trial container hides Skills / Providers (gateway) /
               IM / Audit from the activity bar — the drawer should stay
               laser-focused on the install chat. See helperMode in cicy-code
@@ -1777,7 +1779,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         {/* Content */}
         <main data-id="content-area" className="flex-1 relative overflow-hidden">
           <div data-id="main-layout" className="flex h-full min-w-0">
-            {leftActive ? (
+            {leftActive && !globalVar?.helper_mode ? (
               <div
                 data-testid="left-panel"
                 data-id="left-panel"
@@ -2061,11 +2063,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   );
 }
 
-function SideBtn({ dataId, active, icon, title, onClick }: { dataId: string; active: boolean; icon: React.ReactNode; title: string; onClick: () => void }) {
+function SideBtn({ dataId, active, icon, title, onClick, disabled = false }: { dataId: string; active: boolean; icon: React.ReactNode; title: string; onClick: () => void; disabled?: boolean }) {
   return (
-    <button data-id={dataId} onClick={onClick} className={cn("p-2.5 rounded-xl transition-all relative cursor-pointer", active ? "text-zinc-300 bg-white/[0.06]" : "text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.03]")} title={title}>
+    <button data-id={dataId} onClick={disabled ? undefined : onClick} disabled={disabled} aria-disabled={disabled} className={cn("p-2.5 rounded-xl transition-all relative", disabled ? "text-zinc-700 opacity-50 cursor-not-allowed" : cn("cursor-pointer", active ? "text-zinc-300 bg-white/[0.06]" : "text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.03]"))} title={title}>
       {icon}
-      {active && <div data-id={`${dataId}-active-indicator`} className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-blue-500/60 rounded-r" />}
+      {active && !disabled && <div data-id={`${dataId}-active-indicator`} className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-blue-500/60 rounded-r" />}
     </button>
   );
 }
@@ -2656,7 +2658,7 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
 
 function SystemResourceMonitor({ paneId }: { paneId: string }) {
   const { t } = useTranslation('workspace');
-  const { activeChatPaneId, sendChatWsMessage, systemResources } = useApp();
+  const { activeChatPaneId, sendChatWsMessage, systemResources, globalVar } = useApp();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -2723,8 +2725,12 @@ function SystemResourceMonitor({ paneId }: { paneId: string }) {
             : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.04]'}
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/25`}
       >
-        <ResourceChip label="C" pct={cpuPct} dataId="system-resource-summary-cpu" />
-        <span data-id="workspace-auto-3" className="h-3 w-px bg-white/[0.06]" aria-hidden />
+        {!globalVar?.helper_mode && (
+          <>
+            <ResourceChip label="C" pct={cpuPct} dataId="system-resource-summary-cpu" />
+            <span data-id="workspace-auto-3" className="h-3 w-px bg-white/[0.06]" aria-hidden />
+          </>
+        )}
         <ResourceChip label="M" pct={memPct} dataId="system-resource-summary-memory" />
         <span data-id="workspace-auto-4" className="h-3 w-px bg-white/[0.06]" aria-hidden />
         <ResourceChip label="D" pct={dskPct} dataId="system-resource-summary-disk" />

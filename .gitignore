@@ -29,3 +29,4 @@ audit-worker/.wrangler/
 api/mgr/.tmux.conf
 api/mgr/.cicy_tmux.conf
 .gstack/
+.build-embed.lock/

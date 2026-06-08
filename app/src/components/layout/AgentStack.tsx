@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { defaultWorkerWorkspace } from '../../config'
+import { useApp } from '../../contexts/AppContext'
 import apiService from '../../services/api'
 import AgentAvatar from '../AgentAvatar'
 import { WebFrame } from '../WebFrame'
@@ -248,6 +249,7 @@ function AgentStackCard({
   historyActive: boolean;
 }) {
   const { t } = useTranslation('layout')
+  const { globalVar } = useApp()  // helper_mode → hide the card header-right controls
   // History opens as a single shared popover owned by AgentStack (so switching
   // the active agent switches the history too). This card only toggles it and
   // reflects whether its own history is the one currently shown.
@@ -521,6 +523,7 @@ function AgentStackCard({
           </button>
         </div>
         ) : null}
+        {!globalVar?.helper_mode && (
         <div data-id={`agent-stack-card-header-right-${item.paneId}`} className="ml-2 flex items-center gap-1">
           {showHeaderButtons ? (
           <div data-id="agent-stack-card-header-buttons" className="flex items-center gap-1">
@@ -602,6 +605,7 @@ function AgentStackCard({
           </div>
           ) : null}
         </div>
+        )}
       </div>
       <div data-id={`agent-stack-card-body-${item.paneId}`} className="relative min-h-0 flex-1 bg-black">
         {isCicyLiteAgent(item.agentType) ? (
