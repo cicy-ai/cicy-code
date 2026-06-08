@@ -177,6 +177,54 @@ func getCicySession(shortID, workspace string) *cicySession {
 	return s
 }
 
+// warmCicySessions pre-registers every local cicy agent's session at boot so a
+// headless cicy is alive the instant the server is up — no tmux pane required to
+// bring it online. For cicy, liveness == registry membership (see
+// listAgentsByPane → cicySessionRegistered), so warming here is exactly what makes
+// freshly-started cicy agents show online and ready to take messages in-process.
+// Best-effort: a missing workspace just skips that agent.
+func warmCicySessions() {
+	rows, err := store.Query(
+		"SELECT pane_id FROM agent_config WHERE agent_type IN ('cicy','dispatcher','secretary') AND COALESCE(machine_id,0)=0",
+	)
+	if err != nil {
+		log.Printf("[cicy-warm] query failed: %v", err)
+		return
+	}
+	var paneIDs []string
+	for rows.Next() {
+		var pid string
+		if rows.Scan(&pid) == nil && strings.TrimSpace(pid) != "" {
+			paneIDs = append(paneIDs, pid)
+		}
+	}
+	rows.Close()
+
+	n := 0
+	for _, pid := range paneIDs {
+		shortID := shortPaneID(normPaneID(pid))
+		workspace := paneWorkspace(shortID)
+		if workspace == "" {
+			continue
+		}
+		getCicySession(shortID, workspace) // registers in cicySessions + loads history
+		n++
+	}
+	if n > 0 {
+		log.Printf("[cicy-warm] registered %d headless cicy session(s)", n)
+	}
+}
+
+// cicySessionRegistered reports whether a cicy agent currently has a warmed
+// server-side session — the headless liveness signal that replaces tmux session
+// presence for the "online" column.
+func cicySessionRegistered(shortID string) bool {
+	cicySessionsMu.Lock()
+	defer cicySessionsMu.Unlock()
+	_, ok := cicySessions[shortID]
+	return ok
+}
+
 // persistLocked writes the trimmed history to disk. Caller holds s.mu.
 func (s *cicySession) persistLocked(workspace string) {
 	s.messages = cicyBalanceToolCalls(cicyTrimMessages(s.messages))
@@ -1051,8 +1099,53 @@ func handleCicyChat(w http.ResponseWriter, r *http.Request) {
 		sse.emit(M{"type": "done"})
 		return
 	}
-	// We own the turn. Safety net: clear busy if we exit abnormally (error/panic)
-	// without the normal drain-complete path having released it.
+	// We own the turn — run it (plus any inputs queued mid-flight) and stream to
+	// this connection. runCicyOwnedTurns owns the terminal "done" and busy-release.
+	runCicyOwnedTurns(session, shortID, workspace, text, sse.emit)
+}
+
+// handleCicyHistory returns a cicy agent's conversation (conversation.json) as
+// JSON — the read-back path for headless agents, in place of tmux capture (which
+// a pane-less agent has none of). Backs `cicy-agent history`; the console chat
+// view will read it too. GET /api/cicy/history?agent_id=<id>. Loopback-only, like
+// the chat endpoint.
+func handleCicyHistory(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemote(r.RemoteAddr) {
+		httpErr(w, 403, "cicy_history_loopback_only")
+		return
+	}
+	shortID := shortPaneID(normPaneID(strings.TrimSpace(r.URL.Query().Get("agent_id"))))
+	if shortID == "" {
+		httpErr(w, 400, "agent_id required")
+		return
+	}
+	if normalizeAgentType(paneAgentType(shortID+":main.0")) != "cicy" {
+		httpErr(w, 400, "agent is not a cicy lite agent")
+		return
+	}
+	workspace := paneWorkspace(shortID)
+	if workspace == "" {
+		httpErr(w, 404, "agent workspace not found")
+		return
+	}
+	session := getCicySession(shortID, workspace)
+	session.mu.Lock()
+	msgs := append([]M{}, session.messages...)
+	session.mu.Unlock()
+	J(w, M{"agent_id": shortID, "messages": msgs})
+}
+
+// runCicyOwnedTurns runs the turn(s) the caller owns: the initial text, then any
+// inputs that queued while it ran (drained + merged into ONE follow-up turn).
+// Every stream event goes through emit; the terminal {"type":"done"} is emitted
+// here. Releases the busy flag before returning (safety-net forceRelease covers an
+// abnormal exit). Caller must already own the turn (enqueueIfBusy returned false)
+// and must NOT hold session.mu.
+//
+// This is the single shared driver for BOTH transports: handleCicyChat (HTTP SSE)
+// and deliverCicyMessage (headless, in-process). Decoupling it from the
+// ResponseWriter is what lets a cicy agent run with no tmux pane at all.
+func runCicyOwnedTurns(session *cicySession, shortID, workspace, text string, emit func(M)) {
 	released := false
 	defer func() {
 		if !released {
@@ -1063,10 +1156,10 @@ func handleCicyChat(w http.ResponseWriter, r *http.Request) {
 	cur := text
 	for {
 		session.mu.Lock()
-		ok := runCicyTurnLocked(session, shortID, workspace, cur, sse)
+		ok := runCicyTurnLocked(session, shortID, workspace, cur, emit)
 		session.mu.Unlock()
 		if !ok {
-			sse.emit(M{"type": "done"})
+			emit(M{"type": "done"})
 			return // defer clears busy
 		}
 		// Drain inputs queued while this turn ran; merge into one follow-up turn.
@@ -1076,9 +1169,30 @@ func handleCicyChat(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		cur = merged
-		sse.emit(M{"type": "flush", "text": "处理排队的输入…"})
+		emit(M{"type": "flush", "text": "处理排队的输入…"})
 	}
-	sse.emit(M{"type": "done"})
+	emit(M{"type": "done"})
+}
+
+// deliverCicyMessage runs a cicy turn IN-PROCESS — no HTTP round-trip, no tmux
+// pane, no send-keys. The delivery layer (dispatchQueue) calls this for headless
+// cicy agents: the message is fed straight to the server-side runtime, the reply
+// is persisted to conversation.json by the turn itself, and a poll broadcast
+// nudges any attached console to refresh. Returns false when the input was queued
+// behind an in-flight reply (it will be merged into that reply's follow-up turn).
+//
+// Read-back of the reply is via the history endpoint / `cicy-agent history`, never
+// tmux capture — a headless agent has no pane to capture.
+func deliverCicyMessage(shortID, workspace, text string) bool {
+	session := getCicySession(shortID, workspace)
+	if session.enqueueIfBusy(text) {
+		return false // merged into the in-flight owner's drain
+	}
+	// emit sink is a no-op: the turn persists to conversation.json (the source of
+	// truth headless callers read back), so there's no stream to forward here.
+	runCicyOwnedTurns(session, shortID, workspace, text, func(M) {})
+	go broadcastPollData(shortID)
+	return true
 }
 
 // enqueueIfBusy returns true (and queues text) when a reply is already in flight
@@ -1119,11 +1233,16 @@ func (s *cicySession) forceRelease() {
 }
 
 // runCicyTurnLocked runs ONE user turn (append text → tool loop → persist),
-// streaming text/tool/error events to sse. It does NOT emit the terminal "done"
-// — the caller owns that, so multiple drained turns can stream on one
+// streaming text/tool/error events through emit. It does NOT emit the terminal
+// "done" — the caller owns that, so multiple drained turns can stream on one
 // connection. Returns false on a gateway error or tool-loop overflow (caller
 // stops draining). Caller must hold session.mu.
-func runCicyTurnLocked(session *cicySession, shortID, workspace, text string, sse *cicySSE) bool {
+//
+// emit is the only output sink: an HTTP caller passes cicySSE.emit (streams to a
+// browser/REPL); a headless in-process caller (deliverCicyMessage) passes a sink
+// that just persists/broadcasts. The runtime itself is transport-agnostic — no
+// tmux, no ResponseWriter dependency.
+func runCicyTurnLocked(session *cicySession, shortID, workspace, text string, emit func(M)) bool {
 	session.messages = append(session.messages, M{"role": "user", "content": text})
 	// Trim BEFORE building the request so the outgoing window is always within the
 	// cap and never starts on an orphan tool_result (heals an over-cap window loaded
@@ -1158,9 +1277,9 @@ func runCicyTurnLocked(session *cicySession, shortID, workspace, text string, ss
 		if tools := cicyCachedToolDefs(cfg); len(tools) > 0 {
 			payload["tools"] = tools
 		}
-		resp, streamed, err := cicyCallGateway(shortID, payload, sse.emit)
+		resp, streamed, err := cicyCallGateway(shortID, payload, emit)
 		if err != nil {
-			sse.emit(M{"type": "error", "error": err.Error()})
+			emit(M{"type": "error", "error": err.Error()})
 			// Drop the failed exchange tail so history stays consistent.
 			session.persistLocked(workspace)
 			return false
@@ -1191,7 +1310,7 @@ func runCicyTurnLocked(session *cicySession, shortID, workspace, text string, ss
 				// Already delivered as text_delta events when streaming; only
 				// emit the assembled block on the non-stream fallback path.
 				if t, _ := bm["text"].(string); !streamed && strings.TrimSpace(t) != "" {
-					sse.emit(M{"type": "text", "text": t})
+					emit(M{"type": "text", "text": t})
 				}
 			case "tool_use":
 				name, _ := bm["name"].(string)
@@ -1199,7 +1318,7 @@ func runCicyTurnLocked(session *cicySession, shortID, workspace, text string, ss
 				input, _ := bm["input"].(map[string]interface{})
 				result := cicyRunTool(shortID, name, input, cfg)
 				argJSON, _ := json.Marshal(input)
-				sse.emit(M{"type": "tool", "name": name, "arg": string(argJSON), "result": truncateForLog(result, 600)})
+				emit(M{"type": "tool", "name": name, "arg": string(argJSON), "result": truncateForLog(result, 600)})
 				toolResults = append(toolResults, M{
 					"type":        "tool_result",
 					"tool_use_id": toolID,
@@ -1215,7 +1334,7 @@ func runCicyTurnLocked(session *cicySession, shortID, workspace, text string, ss
 		session.messages = append(session.messages, M{"role": "user", "content": toolResults})
 	}
 
-	sse.emit(M{"type": "error", "error": fmt.Sprintf("tool loop exceeded %d rounds, stopping", cicyMaxToolRounds)})
+	emit(M{"type": "error", "error": fmt.Sprintf("tool loop exceeded %d rounds, stopping", cicyMaxToolRounds)})
 	session.persistLocked(workspace)
 	return false
 }

@@ -460,8 +460,9 @@ Options:
 	http.HandleFunc("/api/openclaw/gateway", wa(handleOpenClawGatewayInfo))
 	http.HandleFunc("/api/openclaw/provider/", handleOpenClawProviderProxy)
 	http.HandleFunc("/api/ai-gateway/", handleAIGatewayProxy)
-	http.HandleFunc("/api/cicy/chat", handleCicyChat)       // loopback-only, like the AI gateway
-	http.HandleFunc("/api/dispatcher/chat", handleCicyChat) // legacy alias (kept for in-flight REPLs)
+	http.HandleFunc("/api/cicy/chat", handleCicyChat)         // loopback-only, like the AI gateway
+	http.HandleFunc("/api/dispatcher/chat", handleCicyChat)   // legacy alias (kept for in-flight REPLs)
+	http.HandleFunc("/api/cicy/history", handleCicyHistory)   // loopback-only, read conversation.json (replaces tmux capture)
 	http.HandleFunc("/mitm/", handleMitmproxyAuth)
 	http.HandleFunc("/mitm", handleMitmproxyAuth)
 	http.HandleFunc("/openclaw/", handleOpenClawAuth)
@@ -490,6 +491,10 @@ Options:
 		runtimeMode = "container"
 	}
 	log.Printf("[startup] mode=%s port=%s db=%s kv=%s", runtimeMode, port, store.Driver, kvMode)
+
+	// Headless cicy: warm every local cicy agent's server-side session so they're
+	// online and message-ready without a tmux pane.
+	warmCicySessions()
 
 	// A2A liaison: poll the platform inbox for bound liaison agents
 	startA2ALiaisonPoller()

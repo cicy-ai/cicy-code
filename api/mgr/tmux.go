@@ -4899,6 +4899,26 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		if cbTo, ok := req["callback_to"].(string); ok && strings.TrimSpace(cbTo) != "" {
 			registerReplyCallback(winID, cbTo)
 		}
+		// Headless cicy: no tmux pane to send-keys into. The webUI sends through
+		// this same endpoint (sendCommand → /api/tmux/send), so route cicy text
+		// straight to the server-side runtime in-process. The reply flows into the
+		// standard agent-history pipeline exactly as before (same cicyCallGateway),
+		// so the existing cicy webUI renders it unchanged — only the input path
+		// drops the pane/send-keys hop. submit=false (compose without send) is a
+		// no-op for a pane-less agent.
+		if paneAgentType(winID) == "cicy" {
+			short := shortPaneID(winID)
+			if submit {
+				ws := paneWorkspace(short)
+				if ws == "" {
+					httpErr(w, http.StatusNotFound, "agent workspace not found")
+					return
+				}
+				go deliverCicyMessage(short, ws, text)
+			}
+			J(w, M{"success": true, "win_id": short})
+			return
+		}
 		if err := sendTextToPane(winID, text, submit); err != nil {
 			if sendErr, ok := err.(*tmuxSendError); ok {
 				w.Header().Set("Content-Type", "application/json")

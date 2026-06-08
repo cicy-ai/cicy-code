@@ -181,6 +181,21 @@ func dispatchQueue(paneID string) {
 				continue
 			}
 		}
+		// Headless cicy: there is no tmux pane to send-keys into — feed the message
+		// straight to the server-side runtime in-process. The reply is persisted to
+		// conversation.json (read back via /api/cicy/history or `cicy-agent
+		// history`), so we mark 'sent' once handed off; deliverCicyMessage's own
+		// queue merges rapid back-to-back inputs into one follow-up turn.
+		if types[i] != "command" && paneAgentType(paneID) == "cicy" {
+			if ws := paneWorkspace(shortPaneID(paneID)); ws != "" {
+				go deliverCicyMessage(shortPaneID(paneID), ws, msg)
+				store.Exec(fmt.Sprintf("UPDATE agent_queue SET status='sent', sent_at=%s WHERE id=?", store.Now()), ids[i])
+				if i < len(messages)-1 {
+					time.Sleep(200 * time.Millisecond)
+				}
+				continue
+			}
+		}
 		if types[i] == "command" {
 			runTmux("send-keys", "-t", paneID, msg, "Enter")
 		} else {

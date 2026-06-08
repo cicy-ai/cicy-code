@@ -5,6 +5,28 @@ import (
 	"testing"
 )
 
+// Headless liveness: a cicy agent is "online" iff its server-side session is
+// registered (warmCicySessions / getCicySession), NOT via tmux. getCicySession
+// must register on first touch; an untouched id must read as offline.
+func TestCicySessionRegisteredSignal(t *testing.T) {
+	const id = "w-test-headless-9001"
+	cicySessionsMu.Lock()
+	delete(cicySessions, id)
+	cicySessionsMu.Unlock()
+
+	if cicySessionRegistered(id) {
+		t.Fatal("unwarmed cicy id must be offline (not registered)")
+	}
+	getCicySession(id, t.TempDir()) // registers + loads (empty) history
+	if !cicySessionRegistered(id) {
+		t.Fatal("getCicySession must register the session (headless online signal)")
+	}
+
+	cicySessionsMu.Lock()
+	delete(cicySessions, id)
+	cicySessionsMu.Unlock()
+}
+
 // First caller owns the turn; concurrent callers during in-flight all queue;
 // drainPending merges them (newline-joined) into ONE follow-up, in arrival order.
 func TestCicyQueueMergesInFlightInputs(t *testing.T) {

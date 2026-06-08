@@ -451,7 +451,14 @@ func imBuildTransport(acc *imAccount) (botTransport, error) {
 // imPaneSessionOnline reports whether the pane's tmux session is currently
 // running. A pane id like "w-10054:main.0" lives in session "w-10054".
 func imPaneSessionOnline(paneID string) bool {
-	session := strings.Split(normPaneID(paneID), ":")[0]
+	pane := normPaneID(paneID)
+	// Headless cicy has no tmux session — its liveness is server-side session
+	// registry membership, not `tmux has-session`. Without this a cicy agent would
+	// always read offline here and inbound IM would wrongly fall back to w-10001.
+	if paneAgentType(pane) == "cicy" {
+		return cicySessionRegistered(shortPaneID(pane))
+	}
+	session := strings.Split(pane, ":")[0]
 	if session == "" {
 		return false
 	}
@@ -556,6 +563,21 @@ func imHandleInbound(acc *imAccount, tr botTransport, msg botMsg) {
 	_ = tr.Typing(msg.Peer)
 
 	imRegisterReplyPushForInbound(pane, acc.ID)
+	// Headless cicy: no tmux pane — feed the inbound text to the server-side
+	// runtime in-process. The reply still streams back to the IM peer via the
+	// gateway reply-push hook registered just above (cicyCallGateway runs the same
+	// gateway path), so this changes only the input hop.
+	if paneAgentType(pane) == "cicy" {
+		if ws := paneWorkspace(shortPaneID(pane)); ws != "" {
+			go deliverCicyMessage(shortPaneID(pane), ws, text)
+			log.Printf("[im] account=%d inbound → cicy(headless) %s: %q", acc.ID, shortPaneID(pane), text)
+			return
+		}
+		imCancelReplyPushForInbound(pane, acc.ID)
+		log.Printf("[im] account=%d cicy pane=%s has no workspace; inbound dropped", acc.ID, shortPaneID(pane))
+		imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: tr, Peer: msg.Peer, Text: "⚠️ 发送给 agent 失败: 找不到工作区", Purpose: imOutboundPurposeError})
+		return
+	}
 	if err := sendTextToPane(pane, text, true); err != nil {
 		imCancelReplyPushForInbound(pane, acc.ID)
 		log.Printf("[im] account=%d send to pane=%s failed: %v", acc.ID, shortPaneID(pane), err)

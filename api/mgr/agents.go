@@ -59,12 +59,17 @@ func listAgentsByPane(paneID string) ([]M, error) {
 		var machineID int
 		rows.Scan(&id, &pid, &name, &status, &title, &agentType, &machineID, &machineLabel, &sourceKind, &sourceRef)
 		// online = real liveness, not row presence. Local agents: live tmux
-		// session. Remote agents (machine_id>0): liveness is unknown from here
-		// — report null so the UI falls back to its own signal instead of a
-		// false green.
+		// session — EXCEPT cicy, which is headless (no pane/tmux session); its
+		// liveness is server-side session registry membership. Remote agents
+		// (machine_id>0): liveness is unknown from here — report null so the UI
+		// falls back to its own signal instead of a false green.
 		var online interface{}
 		if machineID == 0 {
-			online = live[shortPaneID(name)]
+			if normalizeAgentType(agentType) == "cicy" {
+				online = cicySessionRegistered(shortPaneID(name))
+			} else {
+				online = live[shortPaneID(name)]
+			}
 		}
 		agents = append(agents, M{"id": id, "pane_id": pid, "name": name, "status": status, "title": title, "agent_type": agentType, "machine_id": machineID, "machine_label": machineLabel, "source_kind": sourceKind, "source_ref": sourceRef, "online": online})
 	}
@@ -352,17 +357,25 @@ func handleAgentUnbind(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Stop the sub-worker if it's not bound to any other master anymore.
+	// Stop the sub-worker if it's not bound to any other master anymore — EXCEPT
+	// cicy lite agents. A cicy agent (task secretary, role agents) is a
+	// persistent fixture, not a disposable worker: unbinding it must only remove
+	// the master→sub relation, never kill its REPL/tmux. So codex/claude/etc.
+	// follow the reference-count rule below; cicy is always kept alive.
 	if unbindSubName != "" {
-		var remaining int
-		_ = store.QueryRow(
-			"SELECT COUNT(*) FROM pane_agents WHERE agent_name=? AND status='active'",
-			unbindSubName,
-		).Scan(&remaining)
-		if remaining == 0 {
-			stopAgentByPaneID(unbindSubName + ":main.0")
+		if paneAgentType(unbindSubName+":main.0") == "cicy" {
+			log.Printf("[agent-unbind] keep cicy agent %s alive: cicy is never killed by unbind", unbindSubName)
 		} else {
-			log.Printf("[agent-unbind] keep %s alive: still bound to %d master(s)", unbindSubName, remaining)
+			var remaining int
+			_ = store.QueryRow(
+				"SELECT COUNT(*) FROM pane_agents WHERE agent_name=? AND status='active'",
+				unbindSubName,
+			).Scan(&remaining)
+			if remaining == 0 {
+				stopAgentByPaneID(unbindSubName + ":main.0")
+			} else {
+				log.Printf("[agent-unbind] keep %s alive: still bound to %d master(s)", unbindSubName, remaining)
+			}
 		}
 	}
 	if unbindPaneID != "" {
