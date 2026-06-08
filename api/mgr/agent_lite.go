@@ -160,10 +160,18 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 	}
 	grantable := expandGroups(grantGroups, cfg.ToolGroups)
 
-	// selected: frontmatter `tools:` (if present) else the profile default.
+	// selected groups, in priority order:
+	//   employees.yaml template `tools:` (this employee's role) >
+	//   workspace AGENTS.md frontmatter `tools:` > profile default.
+	// Still narrowed by `grantable` below — the security model (effective =
+	// selected ∩ grantable, L3 narrow-only) is unchanged regardless of source.
+	roleSlug := employeeRoleSlug(shortID) // this employee's role-template slug (for employees.yaml lookups)
 	selectGroups := prof.DefaultGroups
 	if fm.hasTools {
 		selectGroups = fm.tools
+	}
+	if tools := employeeTemplateTools(roleSlug); len(tools) > 0 {
+		selectGroups = tools
 	}
 	selected := expandGroups(selectGroups, cfg.ToolGroups)
 
@@ -190,7 +198,13 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 	// System prompt = profile base + AGENTS.md body + identity line. Stays
 	// byte-stable across turns (cache prefix) — no timestamps.
 	prompt := resolveSystemBase(prof.SystemBase)
-	if body := strings.TrimSpace(fm.body); body != "" {
+	// persona: employees.yaml template `prompt:` (if set) overrides the AGENTS.md
+	// body; otherwise the role .md body is used as before.
+	body := strings.TrimSpace(fm.body)
+	if p := strings.TrimSpace(employeeTemplatePrompt(roleSlug)); p != "" {
+		body = p
+	}
+	if body != "" {
 		prompt += "\n\n# 角色说明\n" + body
 	}
 	prompt += fmt.Sprintf("\n\n你自己的 AGENT_ID 是 %s。", shortID)

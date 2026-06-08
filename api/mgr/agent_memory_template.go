@@ -207,9 +207,10 @@ func extractOpeningSection(md string) string {
 	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
-// agentOpeningGreeting returns the opening line shown when an agent's chat
-// history is empty. Role agents draw it from their role template's `## 开场白`
-// section; agents without a role template get a generic line from their title.
+// agentOpeningGreeting returns the opening line shown when an employee's chat
+// history is empty. Resolution: employee-template config (employees.yaml
+// `greeting`) → the role .md `## 开场白` (back-compat) → a generic line from the
+// title. The first two are hot-read, so editing the config takes effect live.
 func agentOpeningGreeting(shortID string) string {
 	var roleTemplate, title, agentType, workspace string
 	_ = store.QueryRow(
@@ -217,6 +218,11 @@ func agentOpeningGreeting(shortID string) string {
 		shortID+":main.0",
 	).Scan(&roleTemplate, &title, &agentType, &workspace)
 	if slug := sanitizeTemplateSlug(roleTemplate); slug != "" {
+		// 1) employees.yaml template greeting (the configurable source)
+		if g := strings.TrimSpace(employeeTemplateGreeting(slug)); g != "" {
+			return substituteTemplatePlaceholders(g, shortID, workspace, agentType)
+		}
+		// 2) legacy: the role .md `## 开场白` section
 		if g := extractOpeningSection(loadTemplateFile(roleTemplatePath(slug))); g != "" {
 			return substituteTemplatePlaceholders(g, shortID, workspace, agentType)
 		}
