@@ -875,6 +875,10 @@ func checkEnv() {
 	// Seed ~/cicy-ai/memory/global.md with the default template on first boot so
 	// the memory editor and agent-creation always have a base layer to compose.
 	ensureGlobalMemoryTemplate()
+	// Seed the official role templates (~/cicy-ai/memory/agents/<slug>.md) too, so
+	// the role roster's cicy agents compose their AGENTS.md with the right charter.
+	// Must run before worker creation below.
+	ensureRoleMemoryTemplates()
 
 	ensureDefaultProviders()
 	setupAIConfigs()

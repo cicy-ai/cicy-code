@@ -1,6 +1,7 @@
 package main
 
 import (
+	"embed"
 	"log"
 	"os"
 	"path/filepath"
@@ -8,6 +9,13 @@ import (
 	"sort"
 	"strings"
 )
+
+// agentRoleTemplatesFS carries the official role templates baked into the binary
+// so a fresh install seeds them to ~/cicy-ai/memory/agents/ on first boot — same
+// shipping model as the global template, just a directory of them.
+//
+//go:embed embed/agent-roles/*.md
+var agentRoleTemplatesFS embed.FS
 
 // Layered, user-editable memory templates. On agent creation the composed
 // content is copied verbatim into the new agent's native guidance file
@@ -138,6 +146,41 @@ func ensureGlobalMemoryTemplate() string {
 		log.Printf("[memory-template] seed write failed: %v", err)
 	}
 	return path
+}
+
+// ensureRoleMemoryTemplates seeds the official role templates into
+// ~/cicy-ai/memory/agents/<slug>.md on first boot — same contract as
+// ensureGlobalMemoryTemplate: write when missing, never overwrite user edits.
+// The official roster's cicy role agents (项目经理 / 产品经理 / …) compose their
+// AGENTS.md from these, so they must be on disk before the roster is created.
+func ensureRoleMemoryTemplates() {
+	dir := agentTemplatesDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Printf("[memory-template] mkdir agents failed: %v", err)
+		return
+	}
+	const root = "embed/agent-roles"
+	entries, err := agentRoleTemplatesFS.ReadDir(root)
+	if err != nil {
+		log.Printf("[memory-template] read embedded role templates failed: %v", err)
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		dst := filepath.Join(dir, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			continue // never clobber a user-edited template
+		}
+		raw, err := agentRoleTemplatesFS.ReadFile(root + "/" + e.Name())
+		if err != nil {
+			continue
+		}
+		if err := os.WriteFile(dst, raw, 0644); err != nil {
+			log.Printf("[memory-template] seed role %s failed: %v", e.Name(), err)
+		}
+	}
 }
 
 func loadTemplateFile(path string) string {
