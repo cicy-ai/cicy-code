@@ -57,6 +57,17 @@ func initPlatform() {
 		log.Printf("[platform] WARNING: no MSYS2 runtime found (set CICY_MSYS_ROOT or install to C:\\tools\\msys64) — tmux orchestration unavailable")
 		return
 	}
+	// The slim MSYS2 bundle can ship WITHOUT /tmp. msys bash then warns "could
+	// not find /tmp, please create!" and — the real killer — tmux can't create
+	// its socket (/tmp/tmux-<uid>/default), so `tmux new-session` fails with "no
+	// suitable socket path", the server never starts, and NO pane ever exists
+	// (capture-pane / #{pane_current_command} come back empty because there is
+	// literally no pane). Create it (idempotent) before anything spawns
+	// bash/tmux. Verified on a real box: mkdir <root>\tmp → new-session OK.
+	tmpDir := filepath.Join(root, "tmp")
+	if err := os.MkdirAll(tmpDir, 0o777); err != nil {
+		log.Printf("[platform] WARNING: could not create %s (tmux socket will fail): %v", tmpDir, err)
+	}
 	// usr\bin = msys core (bash/tmux/coreutils); mingw64\bin = native-built
 	// extras (e.g. jq). Prepend both so LookPath resolves either flavor.
 	usrBin := filepath.Join(root, "usr", "bin")
@@ -114,7 +125,8 @@ func initPlatform() {
 // need no tty, so everything after this works from the plain service process.
 func ensureTmuxServer() {
 	if exec.Command("tmux", "has-session").Run() == nil {
-		return // server already up (with at least one session)
+		setTmuxDefaultShellWindows() // idempotent — also fix an already-up server
+		return                       // server already up (with at least one session)
 	}
 	// Anchor session: a tmux server with zero sessions exits, so keep one
 	// throwaway session alive as the server anchor.
@@ -126,12 +138,29 @@ func ensureTmuxServer() {
 	}
 	for i := 0; i < 20; i++ {
 		if exec.Command("tmux", "has-session").Run() == nil {
+			setTmuxDefaultShellWindows()
 			log.Printf("[platform] tmux server bootstrapped (anchor session cicy-boot)")
 			return
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
 	log.Printf("[platform] tmux server bootstrap: server not confirmed within 5s")
+}
+
+// setTmuxDefaultShellWindows forces new panes onto the msys bash LOGIN shell.
+// Nothing in the tmux config ships `set -g default-shell`, so on Windows tmux
+// falls back to $SHELL/cmd.exe — every pane becomes a Windows command prompt
+// instead of the msys bash the agents and boot.sh require (capture never shows a
+// $/%/# prompt, boot.sh never sources, CLI never installs). Set it on the global
+// option so every subsequent new-session (the real agent panes) inherits it.
+// POSIX path: tmux is an msys program and execs the shell inside the msys
+// namespace, where /usr/bin/bash resolves to <root>\usr\bin\bash.exe. Leaving
+// default-command empty makes tmux run it as a login shell (sources
+// /etc/profile → ~/.bash_profile → ~/.cicy_tmux.conf).
+func setTmuxDefaultShellWindows() {
+	if err := exec.Command("tmux", "set-option", "-g", "default-shell", "/usr/bin/bash").Run(); err != nil {
+		log.Printf("[platform] set default-shell=/usr/bin/bash failed: %v", err)
+	}
 }
 
 // (Windows MITM-CA OS-trust install moved to package mitm: trust_windows.go,
