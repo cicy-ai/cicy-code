@@ -458,10 +458,16 @@ type builtinWorker struct {
 }
 
 // officialRoleRoster is the fixed set of agents an official release preinstalls.
-// The PM master anchors at w-1001; the other official roles count DOWN from
+// The PM master anchors at w-1001; every other official agent counts DOWN from
 // w-1000 so they never collide with user-created agents, which count UP from
-// w-1002 (defaultWorkerIndex=1001 → next id 1002). All are cicy lite agents,
-// distinguished by their role template (~/cicy-ai/memory/agents/<slug>.md).
+// w-1002 (defaultWorkerIndex=1001 → next id 1002). All non-master members bind
+// under w-1001 (createSelectedWorkers).
+//
+// Two flavors:
+//   - cicy lite agents (1001..996): non-coding roles, each with a role template
+//     (~/cicy-ai/memory/agents/<slug>.md) that shapes its AGENTS.md charter.
+//   - CLI coding agents (995..992): claude/codex/opencode, gateway-routed
+//     (use_custom_gateway via createBuiltinWorker); no role template.
 func officialRoleRoster() []builtinWorker {
 	return []builtinWorker{
 		{Port: 1001, AgentType: "cicy", Title: "项目经理", RoleTemplate: "项目经理", Master: true},
@@ -470,6 +476,10 @@ func officialRoleRoster() []builtinWorker {
 		{Port: 998, AgentType: "cicy", Title: "法务", RoleTemplate: "法务"},
 		{Port: 997, AgentType: "cicy", Title: "HR", RoleTemplate: "人力资源"},
 		{Port: 996, AgentType: "cicy", Title: "Token优化", RoleTemplate: "Token优化师"},
+		{Port: 995, AgentType: "claude", Title: "架构师"},
+		{Port: 994, AgentType: "codex", Title: "全栈开发工程师"},
+		{Port: 993, AgentType: "claude", Title: "UI设计师"},
+		{Port: 992, AgentType: "opencode", Title: "运维工程师"},
 	}
 }
 
