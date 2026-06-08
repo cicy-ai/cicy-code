@@ -250,12 +250,9 @@ func baseTools() []Tool {
 func checkEnvironment() []Tool {
 	extendPATH()
 	tools := append(baseTools(), []Tool{
-		{"openclaw", "openclaw", openClawInstallCmd(), true, false},
 		{"claude", "claude", claudeInstallCmd(), true, false},
 		{"codex", "codex", codexInstallCmd(), true, false},
 		{"opencode", "opencode", opencodeInstallCmd(), true, false},
-		{"cursor-agent", "cursor-agent", cursorInstallCmd(), true, false},
-		{"hermes", "hermes", hermesInstallCmd(), true, false},
 	}...)
 
 	fmt.Println("🔍 检查环境依赖...")
@@ -345,14 +342,10 @@ func hermesInstallCmd() string {
 
 func selectedAgentConfigs() map[string]Tool {
 	return map[string]Tool{
-		"openclaw": {"openclaw", "openclaw", openClawInstallCmd(), true, false},
 		"claude":   {"claude", "claude", claudeInstallCmd(), true, false},
 		"cicy":     {"cicy", "cicy", cicyInstallCmd(), true, false},
 		"codex":    {"codex", "codex", codexInstallCmd(), true, false},
 		"opencode": {"opencode", "opencode", opencodeInstallCmd(), true, false},
-		"kiro-cli": {"kiro-cli", "kiro-cli", kiroCliInstallCmd(), true, false},
-		"cursor":   {"cursor-agent", "cursor-agent", cursorInstallCmd(), true, false},
-		"hermes":   {"hermes", "hermes", hermesInstallCmd(), true, false},
 	}
 }
 
@@ -362,7 +355,7 @@ func ensureAgentToolInstalled(agentType string) {
 		return
 	}
 	switch normalizeAgentType(agentType) {
-	case "openclaw", "claude", "cicy", "codex", "opencode", "cursor", "hermes":
+	case "claude", "cicy", "codex", "opencode":
 		return
 	}
 	config, exists := selectedAgentConfigs()[agentType]
@@ -404,16 +397,11 @@ var builtinAgents = []struct {
 	{"claude", "Claude"},
 	{"codex", "Codex"},
 	{"opencode", "OpenCode"},
-	{"cursor", "Cursor"},
-	{"kiro-cli", "Kiro CLI"},
-	{"copilot", "GitHub Copilot"},
-	{"openclaw", "OpenClaw"},
-	{"hermes", "Hermes Agent"},
 	{"cicy-claude", "CiCy"},
 	{"cicy", "CiCy"},
 }
 
-var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode", "kiro-cli", "cicy"}
+var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode", "cicy"}
 
 func effectiveAllowedAgentTypes() []string {
 	if labMode {
@@ -457,23 +445,55 @@ func helperModeBuiltinWorker() builtinWorker {
 		Port:      helperWorkerPort,
 		AgentType: "opencode",
 		Title:     "Team Helper",
+		Master:    true,
 	}
 }
 
 type builtinWorker struct {
-	Port      int
-	AgentType string
-	Title     string
+	Port         int
+	AgentType    string
+	Title        string
+	RoleTemplate string // role template slug (~/cicy-ai/memory/agents/<slug>.md); "" = none
+	Master       bool   // the w-1001 PM master (role="master"); others are "worker"
 }
 
-// selectedBuiltinWorkers assigns ports starting from 1001 in the order of selected.
-// In --helper=1 mode the regular --agents list is ignored entirely and we
-// return a single Team Helper worker on w-6002. That keeps the trial helper
-// container shape predictable: every user lands on the same pane id, every
-// caller (the desktop drawer, AGENTS.md, the chat session) targets that id.
+// officialRoleRoster is the fixed set of agents an official release preinstalls.
+// The PM master anchors at w-1001; the other official roles count DOWN from
+// w-1000 so they never collide with user-created agents, which count UP from
+// w-1002 (defaultWorkerIndex=1001 → next id 1002). All are cicy lite agents,
+// distinguished by their role template (~/cicy-ai/memory/agents/<slug>.md).
+func officialRoleRoster() []builtinWorker {
+	return []builtinWorker{
+		{Port: 1001, AgentType: "cicy", Title: "项目经理", RoleTemplate: "项目经理", Master: true},
+		{Port: 1000, AgentType: "cicy", Title: "产品经理", RoleTemplate: "产品经理"},
+		{Port: 999, AgentType: "cicy", Title: "QA测试工程师", RoleTemplate: "测试工程师"},
+		{Port: 998, AgentType: "cicy", Title: "法务", RoleTemplate: "法务"},
+		{Port: 997, AgentType: "cicy", Title: "HR", RoleTemplate: "人力资源"},
+		{Port: 996, AgentType: "cicy", Title: "Token优化", RoleTemplate: "Token优化师"},
+	}
+}
+
+// usesOfficialRoster reports whether this runtime should preinstall the fixed
+// role roster instead of the legacy per-type builtin layout. Only the flagless
+// default release does: an explicit --agents value (incl. "all"), lab/dev and
+// helper modes all opt into the per-type path for development/override.
+func usesOfficialRoster() bool {
+	if helperMode {
+		return false
+	}
+	return strings.TrimSpace(agentsFlag) == "" && !labMode && !devMode
+}
+
+// selectedBuiltinWorkers returns the builtin worker layout. Official release
+// (usesOfficialRoster) → the fixed role roster (master w-1001 + roles counting
+// down). Helper mode → a single Team Helper on w-6002. Otherwise (explicit
+// --agents / lab / dev) → per-type, ports counting UP from 1001, master first.
 func selectedBuiltinWorkers(selected []string) []builtinWorker {
 	if helperMode {
 		return []builtinWorker{helperModeBuiltinWorker()}
+	}
+	if usesOfficialRoster() {
+		return officialRoleRoster()
 	}
 	workers := make([]builtinWorker, 0, len(selected))
 	for i, agentType := range selected {
@@ -485,6 +505,7 @@ func selectedBuiltinWorkers(selected []string) []builtinWorker {
 			Port:      1001 + i,
 			AgentType: agentType,
 			Title:     builtinAgentTitle(agentType),
+			Master:    i == 0,
 		})
 	}
 	return workers
@@ -706,7 +727,7 @@ func createSelectedWorkers(selected []string) {
 			}
 			fmt.Printf("  ⏭ %s - 已存在，已更新\n", w.Title)
 		} else {
-			createBuiltinWorker(w.Port, w.AgentType, w.Title)
+			createBuiltinWorker(w)
 		}
 		// With more than one builtin agent, the non-primary ones get attached
 		// under w-1001 so they appear in the same chat session by default.
@@ -719,8 +740,8 @@ func createSelectedWorkers(selected []string) {
 	}
 }
 
-func createBuiltinWorker(port int, agentType, title string) {
-	session := fmt.Sprintf("w-%d", port)
+func createBuiltinWorker(w builtinWorker) {
+	session := fmt.Sprintf("w-%d", w.Port)
 	token := getFirstToken()
 	// Team Helper (--helper=1) opts OUT of our /api/ai-gateway — the trial
 	// container is shared / free / 30-min, we don't want any of its traffic
@@ -729,30 +750,35 @@ func createBuiltinWorker(port int, agentType, title string) {
 	// reachable without a cicy api_token. Non-helper builtins still use
 	// our gateway as normal.
 	useCustomGateway := !helperMode
+	role := "worker"
+	if w.Master {
+		role = "master"
+	}
 	if _, err := createManagedPane(paneCreateOpts{
 		session:          session,
-		title:            title,
-		role:             "master",
+		title:            w.Title,
+		role:             role,
 		defaultModel:     "",
-		agentType:        agentType,
+		agentType:        w.AgentType,
 		workspace:        builtinWorkerWorkspace(session),
 		initScript:       "",
-		port:             port,
+		port:             w.Port,
 		token:            token,
 		allowAllActions:  true,
 		replyInChinese:   false,
 		useCustomGateway: useCustomGateway,
 		useProxy:         false,
+		roleTemplate:     w.RoleTemplate,
 	}); err != nil {
-		fmt.Printf("  ❌ %s 创建失败: %v\n", title, err)
+		fmt.Printf("  ❌ %s 创建失败: %v\n", w.Title, err)
 		return
 	}
-	fmt.Printf("  ✅ %s (w-%d, port %d)\n", title, port, port)
+	fmt.Printf("  ✅ %s (w-%d, port %d)\n", w.Title, w.Port, w.Port)
 	// First-boot path: server-side auto-kick for the Team Helper. The
 	// restart path (startAgentFromConfig) has the same goroutine; both
 	// fire-and-forget, the watcher detects an already-input-ready pane
 	// in well under its 60s budget so the duplicate is harmless.
-	if helperMode && normalizeAgentType(agentType) == "opencode" {
+	if helperMode && normalizeAgentType(w.AgentType) == "opencode" {
 		paneID := session + ":main.0"
 		go watchHelperOpencodeReadyAndKick(paneID)
 	}
@@ -1403,7 +1429,7 @@ func startCicyMihomoIfNeeded() {
 	// loudly when one already exists, which is fine since we ignore the error).
 	mihomoCfg := filepath.Join(home, "cicy-ai", "db", "mihomo.yaml")
 	if _, err := os.Stat(mihomoCfg); os.IsNotExist(err) {
-		if err := exec.Command(wrapper, "gen-config").Run(); err != nil {
+		if err := mihomoWrapperCmd(wrapper, "gen-config").Run(); err != nil {
 			log.Printf("[startup] cicy-mihomo gen-config failed: %v", err)
 			return
 		}
@@ -1413,7 +1439,7 @@ func startCicyMihomoIfNeeded() {
 		// Clear any stale PID so the wrapper doesn't short-circuit to
 		// "already running" against a dead/reused pid and skip the launch.
 		_ = os.Remove(stalePidFile)
-		cmd := exec.Command(wrapper, "start")
+		cmd := mihomoWrapperCmd(wrapper, "start")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		_ = cmd.Run() // exit status is unreliable (stale-pid quirk); verify via controller
@@ -1912,7 +1938,7 @@ func ensureMihomoBinaryInstalled(logFile *os.File, logPath string) {
 	}
 	log.Printf("[startup] running cicy-mihomo install")
 	fmt.Fprintf(logFile, "[%s] running cicy-mihomo install\n", time.Now().Format(time.RFC3339))
-	cmd := exec.Command(wrapper, "install")
+	cmd := mihomoWrapperCmd(wrapper, "install")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Env = os.Environ()

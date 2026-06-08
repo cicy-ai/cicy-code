@@ -8,8 +8,12 @@ import (
 )
 
 const (
-	cicyRootSpec       = "~/cicy-ai"
-	defaultWorkerIndex = 20000
+	cicyRootSpec = "~/cicy-ai"
+	// defaultWorkerIndex is the worker_index floor: user-created agents count UP
+	// from here (next id = defaultWorkerIndex+1 = w-1002). The official role
+	// roster occupies w-1001 (PM master) down to w-996, all below this floor, so
+	// user agents never collide with the reserved band.
+	defaultWorkerIndex = 1001
 )
 
 var (
