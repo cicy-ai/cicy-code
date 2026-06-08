@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"database/sql"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1930,41 +1931,75 @@ func ensureMihomoBinaryInstalled(logFile *os.File, logPath string) {
 	if runtime.GOOS == "windows" {
 		mihomoTarget += ".exe"
 	}
-	// Skip if already installed somewhere reasonable.
-	if info, err := os.Stat(mihomoTarget); err == nil && info.Mode()&0o111 != 0 {
+	// 有就不装: mihomo already resolvable → no work, no network. "Resolvable" means
+	// EITHER the cicy-mihomo runtime store (~/cicy-ai/runtime/mihomo/<ver>/, the
+	// skill's primary location since v1.4.x), OR the legacy ~/.local/bin/mihomo
+	// (what the cicy-desktop app pre-seeds from its bundle, zero network), OR PATH.
+	// Checking only ~/.local/bin would false-negative after a runtime-store install
+	// and trigger a redundant re-download. Version-aware upgrades are the skill's
+	// job (`cicy-mihomo install` compares installed vs npm-latest); we don't
+	// re-check every boot to stay network-free.
+	if mihomoBinaryResolvable(home, mihomoTarget) {
 		return
 	}
-	if _, err := exec.LookPath("mihomo"); err == nil {
-		return
+	// 没有就装. Primary channel is npm — the cicy-mihomo skill `install` pulls the
+	// per-platform cicy-mihomo-<plat> subpackage (与 cicy-code 一样, 主人指令) into
+	// the runtime store.
+	wrapper := filepath.Join(home, ".local", "bin", "cicy-mihomo")
+	if _, err := os.Stat(wrapper); err == nil {
+		log.Printf("[startup] running cicy-mihomo install (npm)")
+		fmt.Fprintf(logFile, "[%s] running cicy-mihomo install (npm)\n", time.Now().Format(time.RFC3339))
+		cmd := mihomoWrapperCmd(wrapper, "install")
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		cmd.Env = os.Environ()
+		if err := cmd.Run(); err != nil {
+			log.Printf("[startup] cicy-mihomo install failed: %v (log: %s)", err, logPath)
+		}
+		if mihomoBinaryResolvable(home, mihomoTarget) {
+			return // install succeeded (runtime store or ~/.local/bin)
+		}
 	}
-	// Preferred path: pull the mihomo binary from our COS mirror. We host it
-	// ourselves (instead of embedding in this binary or hitting the GitHub
-	// release at runtime) for two reasons: COS is CN-fast and reachable when
-	// GitHub is blocked, and — critically — the cicy-mihomo GitHub release's
-	// amd64 asset is built with GOAMD64=v3, which SIGILLs / refuses to run on
-	// pre-AVX2 CPUs (Xeon E5 v2, many cloud VMs, some WSL2). The COS copy is
-	// the GOAMD64=v1 baseline build, which runs on every x86-64. Falls through
-	// to the cicy-mihomo wrapper install on any failure.
+	// Last-resort fallback (linux/amd64 only): COS v1-baseline mihomo. Kept for
+	// the GOAMD64=v3 SIGILL case (pre-AVX2 CPUs) and when npm is unreachable.
 	if err := downloadMihomoFromCOS(mihomoTarget); err == nil {
 		log.Printf("[startup] installed mihomo (v1 baseline) from COS → %s", mihomoTarget)
 		return
-	} else {
-		log.Printf("[startup] COS mihomo download failed (%v), falling back to cicy-mihomo install", err)
+	} else if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
+		log.Printf("[startup] COS mihomo fallback also failed: %v (proxy unavailable until installed manually)", err)
 	}
-	wrapper := filepath.Join(home, ".local", "bin", "cicy-mihomo")
-	if _, err := os.Stat(wrapper); err != nil {
-		// wrapper symlink missing — install all didn't run successfully; bail
-		return
+}
+
+// mihomoBinaryResolvable reports whether a runnable mihomo binary already exists,
+// matching the cicy-mihomo wrapper's own resolution order: the runtime store
+// (~/cicy-ai/runtime/mihomo/<current>/mihomo, from versions.json), then the
+// legacy ~/.local/bin/mihomo, then PATH.
+func mihomoBinaryResolvable(home, legacyTarget string) bool {
+	binName := "mihomo"
+	if runtime.GOOS == "windows" {
+		binName = "mihomo.exe"
 	}
-	log.Printf("[startup] running cicy-mihomo install")
-	fmt.Fprintf(logFile, "[%s] running cicy-mihomo install\n", time.Now().Format(time.RFC3339))
-	cmd := mihomoWrapperCmd(wrapper, "install")
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	cmd.Env = os.Environ()
-	if err := cmd.Run(); err != nil {
-		log.Printf("[startup] cicy-mihomo install failed: %v (log: %s — proxy will be unavailable until installed manually)", err, logPath)
+	// Runtime store: ~/cicy-ai/runtime/versions.json → .mihomo.current.
+	if data, err := os.ReadFile(filepath.Join(home, "cicy-ai", "runtime", "versions.json")); err == nil {
+		var v struct {
+			Mihomo struct {
+				Current string `json:"current"`
+			} `json:"mihomo"`
+		}
+		if json.Unmarshal(data, &v) == nil && v.Mihomo.Current != "" {
+			p := filepath.Join(home, "cicy-ai", "runtime", "mihomo", v.Mihomo.Current, binName)
+			if info, err := os.Stat(p); err == nil && info.Mode()&0o111 != 0 {
+				return true
+			}
+		}
 	}
+	if info, err := os.Stat(legacyTarget); err == nil && info.Mode()&0o111 != 0 {
+		return true
+	}
+	if _, err := exec.LookPath("mihomo"); err == nil {
+		return true
+	}
+	return false
 }
 
 // COS-hosted mihomo (GOAMD64=v1 baseline, gzip). Versioned path so we can roll
