@@ -59,6 +59,16 @@ const shellPromptPollInterval = 200 * time.Millisecond
 const shellPromptTimeout = 12 * time.Second
 const shellPromptTimeoutDarwin = 20 * time.Second
 
+// Windows runs panes on the bundled MSYS2 runtime over ConPTY. The first
+// non-cicy pane on a fresh box pays a heavy cold start (msys bash login +
+// /etc/profile + ~/.cicy_tmux.conf sourcing + ConPTY handshake) that routinely
+// exceeds the 12s default — observed: "shell prompt not confirmed within 12s"
+// → boot.sh never sourced → on-demand CLI install skipped. Give it the same
+// kind of generous headroom darwin gets. A longer cap is free for healthy
+// panes (the wait loop returns the instant the prompt confirms); it only buys
+// robustness for slow cold starts.
+const shellPromptTimeoutWindows = 35 * time.Second
+
 type paneCreateOpts struct {
 	session          string
 	title            string
@@ -284,8 +294,11 @@ func isShellPromptVisible(out string) bool {
 }
 
 func shellPromptTimeoutForRuntime() time.Duration {
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		return shellPromptTimeoutDarwin
+	case "windows":
+		return shellPromptTimeoutWindows
 	}
 	return shellPromptTimeout
 }
