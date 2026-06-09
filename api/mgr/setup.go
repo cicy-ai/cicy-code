@@ -463,9 +463,10 @@ type builtinWorker struct {
 // The PM master anchors at w-1001; every other official agent counts DOWN from
 // w-1000 so they never collide with user-created agents, which count UP from
 // w-1002 (defaultWorkerIndex=1001 → next id 1002). ALL roster agents are created
-// (they live in the DB), but only HR + Token优化 are attached under w-1001 by
-// default — they're the always-on support functions. The rest exist standalone;
-// the user (with HR's help) brings them onto the team on demand.
+// (they live in the DB). Attached under w-1001 by default (shown on the master's
+// team): HR + Token优化 (always-on support) and the three coding agents 架构师/
+// 全栈/软件工程师 (995/994/993). The remaining cicy roles (产品/QA/法务/运维) exist
+// standalone; the user (with HR's help) brings them onto the team on demand.
 //
 // Two flavors:
 //   - cicy lite agents (1001..996): non-coding roles, each with a role template
@@ -480,9 +481,9 @@ func officialRoleRoster() []builtinWorker {
 		{Port: 998, AgentType: "cicy", Title: "法务", RoleTemplate: "法务"},
 		{Port: 997, AgentType: "cicy", Title: "HR", RoleTemplate: "人力资源", BindToPrimary: true},
 		{Port: 996, AgentType: "cicy", Title: "Token优化", RoleTemplate: "Token优化师", BindToPrimary: true},
-		{Port: 995, AgentType: "claude", Title: "架构师"},
-		{Port: 994, AgentType: "codex", Title: "全栈开发工程师"},
-		{Port: 993, AgentType: "claude", Title: "UI设计师"},
+		{Port: 995, AgentType: "claude", Title: "架构师", BindToPrimary: true},
+		{Port: 994, AgentType: "codex", Title: "全栈开发工程师", BindToPrimary: true},
+		{Port: 993, AgentType: "opencode", Title: "软件工程师", BindToPrimary: true},
 		{Port: 992, AgentType: "cicy", Title: "运维工程师", RoleTemplate: "运维工程师"},
 	}
 }
@@ -745,8 +746,9 @@ func createSelectedWorkers(selected []string) {
 			createBuiltinWorker(w)
 		}
 		// Only agents flagged BindToPrimary attach under w-1001 by default (HR +
-		// Token优化 for the official roster). The rest are created standalone; the
-		// user brings them onto the team on demand (HR helps). Master never binds.
+		// Token优化 + 架构师/全栈/UI设计师 for the official roster). The rest are
+		// created standalone; the user brings them onto the team on demand (HR
+		// helps). Master never binds.
 		if w.BindToPrimary && !w.Master {
 			ensureWorkerBoundToPrimary(builtinWorkerSession(w.Port))
 		}

@@ -131,6 +131,8 @@ const api = {
 
   sendCommand: (winId: string, text: string, submit = true) => unwrapTmuxSend(http.post('/api/tmux/send', { win_id: winId, text, submit })),
   sendKeys: (winId: string, keys: string) => unwrapTmuxSend(http.post('/api/tmux/send-keys', { win_id: winId, keys })),
+  // 打断 headless cicy 正在跑的 turn(它没有 tmux pane,send-keys 够不着,走专用端点)。
+  cancelCicyReply: (paneId: string) => http.post('/api/cicy/cancel', { pane_id: paneId }),
   toggleMouse: (mode: string, paneId: string) => http.post(`/api/tmux/mouse/${mode}`, null, { params: { pane_id: paneId } }),
   chooseSession: (id: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/choose-session`),
   splitPane: (id: string, dir: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/split`, null, { params: { direction: dir } }),
@@ -145,6 +147,7 @@ const api = {
   getAgentHistoryIDs: (id: string, params?: { conversation_id?: string }) => http.get(`/api/agents/history-ids/${encodeURIComponent(id)}`, { params }),
   getAgentCurrentReply: (id: string, params?: { conversation_id?: string }) => http.get(`/api/agents/current-reply/${encodeURIComponent(id)}`, { params }),
   getAgentGreeting: (id: string) => http.get(`/api/agents/greeting/${encodeURIComponent(id)}`),
+  getInstallStatus: (id: string) => http.get('/api/agents/install-status', { params: { agent_id: id } }),
   getAgentCurrentHistory: (id: string, params?: { limit?: number; before?: number; conversation_id?: string }) => http.get(`/api/agents/current-history/${encodeURIComponent(id)}`, { params }),
   getAgentCurrentHistoryTool: (id: string, params: { history_id?: number; step_index: number; tool_index: number; live?: 1 }) => http.get(`/api/agents/current-history-tool/${encodeURIComponent(id)}`, { params }),
   getAgentHistoryView: (id: string) => http.get(`/api/agents/history-view/${encodeURIComponent(id)}`),

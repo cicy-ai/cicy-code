@@ -102,6 +102,15 @@ export class Xterm {
     fitAddon: FitAddon;
     decoder: lib.UTF8Decoder;
 
+    // Model-name masking: codex (on the local gateway) prints its model in a
+    // bottom status row that leaks the gateway's upstream model. The old hide was
+    // CSS over the DOM rows, which the WebGL renderer broke (canvas → no rows).
+    // Instead we mask the model string in the data stream before it reaches xterm
+    // — renderer-agnostic. Set via setModelMask(); maskCarry holds a trailing
+    // partial that may complete into the token across a chunk boundary.
+    private modelMask: string = "";
+    private maskCarry: string = "";
+
     message: HTMLElement;
     messageTimeout: number;
     messageTimer: number = 0;
@@ -307,16 +316,26 @@ export class Xterm {
         // reset, too many live WebGL canvases) dispose the addon and xterm
         // falls back to the DOM renderer transparently; same if the platform
         // has no WebGL2 at all (loadAddon throws → caught → DOM renderer).
-        try {
-            const webgl = new WebglAddon();
-            webgl.onContextLoss(() => {
-                try {
-                    webgl.dispose();
-                } catch {}
-            });
-            this.term.loadAddon(webgl);
-        } catch (e) {
-            console.warn("[webtty] WebGL renderer unavailable, using DOM renderer", e);
+        //
+        // EXCEPTION: codex-on-gateway panes (config.js sets window.cicyModelMask)
+        // force the DOM renderer. Their leaked model status row is hidden by a CSS
+        // rule that matches the DOM terminal rows (cicy_ui.ts) — WebGL draws to a
+        // canvas with no DOM rows, so that whole-row hide can't work under WebGL.
+        // DOM renderer here is what makes the row vanish cleanly (no blanked gap).
+        var forceDomRenderer = false;
+        try { forceDomRenderer = !!(window as any).cicyModelMask; } catch (_e) {}
+        if (!forceDomRenderer) {
+            try {
+                const webgl = new WebglAddon();
+                webgl.onContextLoss(() => {
+                    try {
+                        webgl.dispose();
+                    } catch {}
+                });
+                this.term.loadAddon(webgl);
+            } catch (e) {
+                console.warn("[webtty] WebGL renderer unavailable, using DOM renderer", e);
+            }
         }
 
         // IME composing state
@@ -447,6 +466,35 @@ export class Xterm {
         return { columns: this.term.cols, rows: this.term.rows };
     }
 
+    // setModelMask sets the model-name token to blank out of the stream (equal-
+    // length spaces, so codex's status-row layout doesn't shift). "" disables it.
+    setModelMask(model: string): void {
+        this.modelMask = (model || "").trim();
+        this.maskCarry = "";
+    }
+
+    // applyModelMask replaces every full occurrence of the token with spaces, and
+    // holds back a trailing partial (a suffix of the chunk that is a prefix of the
+    // token) so a token split across two WS frames still gets masked.
+    private applyModelMask(chunk: string): string {
+        const t = this.modelMask;
+        if (!t) return chunk;
+        let s = this.maskCarry + chunk;
+        this.maskCarry = "";
+        if (s.indexOf(t) !== -1) {
+            s = s.split(t).join(" ".repeat(t.length));
+        }
+        const max = Math.min(t.length - 1, s.length);
+        for (let k = max; k > 0; k--) {
+            if (t.startsWith(s.slice(s.length - k))) {
+                this.maskCarry = s.slice(s.length - k);
+                s = s.slice(0, s.length - k);
+                break;
+            }
+        }
+        return s;
+    }
+
     output(data: string): void {
         let cleaned = this.decoder.decode(data);
         cleaned = cleaned.replace(deviceAttributesRe, "");
@@ -454,6 +502,7 @@ export class Xterm {
         for (const pattern of stripModeSequenceRes) {
             cleaned = cleaned.replace(pattern, "");
         }
+        cleaned = this.applyModelMask(cleaned);
         if (!cleaned) {
             return;
         }

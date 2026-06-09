@@ -7,6 +7,7 @@ import { useApp } from '../../contexts/AppContext'
 import apiService from '../../services/api'
 import AgentAvatar from '../AgentAvatar'
 import { WebFrame } from '../WebFrame'
+import { AgentInstallOverlay } from './AgentInstallOverlay'
 import { ShellPanel } from '../terminal/ShellPanel'
 import CurrentHistoryView from '../chat/CurrentHistoryView'
 import DispatcherChat from '../chat/DispatcherChat'
@@ -254,6 +255,9 @@ function AgentStackCard({
   // the active agent switches the history too). This card only toggles it and
   // reflects whether its own history is the one currently shown.
   const [copiedPaneId, setCopiedPaneId] = useState(false)
+  // Bumped to force the ttyd terminal iframe to re-mount (e.g. after an install
+  // overlay restarts the agent — the old WebSocket attached to the killed pane).
+  const [termReloadNonce, setTermReloadNonce] = useState(0)
   const copiedPaneTimerRef = useRef<number | null>(null)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -620,7 +624,7 @@ function AgentStackCard({
             data-id={`agent-stack-card-terminal-${item.paneId}`}
             className="h-full w-full"
           >
-            <WebFrame src={item.ttydSrc} className="h-full w-full border-0 bg-black" title={`stack-${item.paneId}`} />
+            <WebFrame key={`${item.paneId}-${termReloadNonce}`} src={item.ttydSrc} className="h-full w-full border-0 bg-black" title={`stack-${item.paneId}`} />
           </div>
         ) : (
           <div data-id={`agent-stack-card-empty-${item.paneId}`} className="absolute inset-0 flex flex-col justify-between bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.12),transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] p-4">
@@ -633,6 +637,9 @@ function AgentStackCard({
             </div>
           </div>
         )}
+        {/* Install prompt for an un-installed coding CLI — overlays just this
+            agent's body, self-hides when the CLI is present. */}
+        <AgentInstallOverlay paneId={item.paneId} agentType={item.agentType} active={active} onReloadTerminal={() => setTermReloadNonce((n) => n + 1)} />
       </div>
       {headerControls ? (
         <div data-id={`agent-stack-card-header-controls-${item.paneId}`} className="flex h-10 shrink-0 items-center justify-end gap-3 border-t border-white/[0.04] bg-black/[0.18] px-3">

@@ -256,6 +256,7 @@ Options:
 	// Tmux
 	http.HandleFunc("/api/tmux/send", authM(handleSend))
 	http.HandleFunc("/api/tmux/send-keys", authM(handleSendKeys))
+	http.HandleFunc("/api/cicy/cancel", authM(handleCicyCancel)) // 打断 headless cicy 正在跑的 turn
 	http.HandleFunc("/api/tmux/reply_text", authM(handleAgentReplyText))
 	http.HandleFunc("/api/tmux/chat_history", authM(handleAgentChatHistory))
 	http.HandleFunc("/api/tmux/client-trace", authM(handleTmuxClientTrace))
@@ -362,6 +363,8 @@ Options:
 	http.HandleFunc("/api/agents/pane/", wa(handleAgentsByPane))
 	http.HandleFunc("/api/agents/inspector/", wa(handleAgentInspectorByPane))
 	http.HandleFunc("/api/agents/greeting/", wa(handleAgentGreeting))
+	http.HandleFunc("/api/agents/install-status", authM(handleAgentInstallStatus)) // is the coding CLI installed?
+	http.HandleFunc("/api/agents/install", authM(handleAgentInstall))              // SSE: run the install
 	http.HandleFunc("/api/agents/current-history/", wa(handleAgentCurrentHistoryByPane))
 	http.HandleFunc("/api/agents/usage-log/", wa(handleAgentUsageLogByPane))
 	http.HandleFunc("/api/agents/usage-analysis/", wa(handleAgentUsageAnalysisByPane))

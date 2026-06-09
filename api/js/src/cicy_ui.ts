@@ -1465,6 +1465,16 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     installStyles();
     configureTerminal(term);
 
+    // codex-on-gateway: hide the whole leaked model status ROW (not just blank the
+    // model — that left an ugly gap). config.js (server-injected) sets
+    // window.cicyModelMask for these panes; we add the CSS class SYNCHRONOUSLY here
+    // (before WebTTY.open() / first paint) so the row is hidden from the start. The
+    // DOM renderer is forced for these panes in xterm.ts so the CSS row-match works
+    // (WebGL has no DOM rows). resolvePaneMeta re-adds the class as a fallback.
+    try {
+        if ((window as any).cicyModelMask) document.body.classList.add("cp-hide-agent-status");
+    } catch (_e) { /* no-op */ }
+
     var storage = createStorage();
     var paneId = queryPaneId();
     var token = queryToken();
@@ -1559,6 +1569,10 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
                 // can't be hidden cleanly without false-hitting scrollback.)
                 var onGateway = !!resp.use_custom_gateway;
                 if (t.toLowerCase() === "codex" && onGateway) {
+                    // Fallback for the sync path (mountCicyTTYUI reads config.js's
+                    // window.cicyModelMask): ensure the whole leaked model status row
+                    // stays hidden via CSS. DOM renderer is forced for these panes
+                    // (xterm.ts) so the row-matching CSS rule applies.
                     document.body.classList.add("cp-hide-agent-status");
                 }
             })

@@ -35,6 +35,7 @@ export interface Terminal {
         rows: number;
     };
     output(data: string): void;
+    setModelMask?(model: string): void;
     showMessage(message: string, timeout: number): void;
     removeMessage(): void;
     showReconnecting(attempt: number, max: number, onRetry?: () => void): void;

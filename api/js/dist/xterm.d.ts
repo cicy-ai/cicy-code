@@ -9,6 +9,8 @@ export declare class Xterm {
     term: XtermTerminal;
     fitAddon: FitAddon;
     decoder: lib.UTF8Decoder;
+    private modelMask;
+    private maskCarry;
     message: HTMLElement;
     messageTimeout: number;
     messageTimer: number;
@@ -41,6 +43,8 @@ export declare class Xterm {
         columns: number;
         rows: number;
     };
+    setModelMask(model: string): void;
+    private applyModelMask;
     output(data: string): void;
     showMessage(message: string, timeout: number): void;
     showReconnecting(attempt: number, max: number, onRetry?: () => void): void;

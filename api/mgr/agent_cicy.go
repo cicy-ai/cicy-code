@@ -118,6 +118,34 @@ type cicySession struct {
 	qmu     sync.Mutex
 	busy    bool
 	pending []string
+
+	// 取消:turn 运行期间存一个 context cancel。用户按 Esc / 点停止 → cancelInFlight()
+	// 取消它,正在跑的网关请求(走 ReverseProxy)被掐断、上游 LLM 一并中止;同时清空
+	// pending,排队的输入不再续跑。guarded by cancelMu(独立于 mu/qmu,取消随时可调)。
+	cancelMu sync.Mutex
+	cancelFn context.CancelFunc
+}
+
+// setCancel 记下当前 turn 的 cancel(turn 开始时调)。
+func (s *cicySession) setCancel(fn context.CancelFunc) {
+	s.cancelMu.Lock()
+	s.cancelFn = fn
+	s.cancelMu.Unlock()
+}
+
+// cancelInFlight 取消正在跑的 turn(若有)并丢弃排队输入。返回是否确实有 turn 在跑。
+func (s *cicySession) cancelInFlight() bool {
+	s.cancelMu.Lock()
+	fn := s.cancelFn
+	s.cancelMu.Unlock()
+	s.qmu.Lock()
+	s.pending = nil // 取消即清空排队,别让后续 drain 又续上一轮
+	s.qmu.Unlock()
+	if fn == nil {
+		return false
+	}
+	fn()
+	return true
 }
 
 var (
@@ -125,8 +153,23 @@ var (
 	cicySessions   = map[string]*cicySession{}
 )
 
-const cicyMaxHistoryMessages = 60
+// cicyMaxHistoryMessages is the LAST-RESORT front-trim ceiling. With compaction
+// (below) as the primary bound, this only fires if the summarizer is repeatedly
+// unavailable — so it sits well above cicyCompactThreshold to give compaction
+// room to act first. (Was 60 with per-turn front-trim, which busted the prompt
+// cache every turn at the cap; see cicyCompactMessages.)
+const cicyMaxHistoryMessages = 160
 const cicyMaxToolRounds = 8
+
+// History compaction (compact) — see cicyCompactMessages. Mirrors Claude Code's
+// auto-compact: summarize the older half into one stable message, keep the recent
+// tail verbatim. Strictly better than front-trim for both context preservation
+// and prompt-cache stability (the summary+tail prefix stays byte-stable between
+// the infrequent compactions, so the cache builds up normally in between).
+const (
+	cicyCompactThreshold  = 80 // compact once the window exceeds this many messages
+	cicyCompactKeepRecent = 40 // messages kept verbatim after the summary
+)
 
 // cicyTrimMessages keeps history within the cap, trimming from the front,
 // but NEVER lets the window start on a tool_result turn — Anthropic/DeepSeek
@@ -144,6 +187,153 @@ func cicyTrimMessages(msgs []M) []M {
 		start++
 	}
 	return append([]M{}, msgs[start:]...)
+}
+
+// cicyCompactSummarize is the summarizer compaction uses; a package var so tests
+// stub it without a live provider. The default routes through the SAME local
+// gateway the main turn uses (proven creds/model routing per agent), but with a
+// "compact-<id>" session id so it never pollutes the agent's own conversation.
+var cicyCompactSummarize = cicySummarizeViaGateway
+
+// cicySummarizeViaGateway sends the transcript to the agent's model through the
+// local gateway and returns the assembled text. A no-op emit (we only want the
+// final text, not streamed deltas); a separate session id keeps it out of the
+// agent's chat audit.
+func cicySummarizeViaGateway(ctx context.Context, shortID, model, transcript string) (string, error) {
+	payload := M{
+		"model":      model,
+		"max_tokens": 1024,
+		"system":     []M{{"type": "text", "text": cicyCompactSystemPrompt}},
+		"messages":   []M{{"role": "user", "content": transcript}},
+	}
+	resp, _, err := cicyCallGateway(ctx, shortID, "compact-"+shortID, payload, func(M) {})
+	if err != nil {
+		return "", err
+	}
+	return cicyResponseText(resp), nil
+}
+
+// cicyResponseText concatenates the text blocks of an assembled gateway response.
+func cicyResponseText(resp map[string]interface{}) string {
+	blocks, _ := resp["content"].([]interface{})
+	var b strings.Builder
+	for _, bl := range blocks {
+		if bm, ok := bl.(map[string]interface{}); ok {
+			if t, _ := bm["type"].(string); t == "text" {
+				if tx, _ := bm["text"].(string); tx != "" {
+					b.WriteString(tx)
+				}
+			}
+		}
+	}
+	return b.String()
+}
+
+const cicyCompactSystemPrompt = `你是一个对话历史压缩器。下面给你的是一个多 agent 项目经理(PM)与用户的对话、以及它调用工具的记录。请压缩成一段结构化中文摘要,必须完整保留:
+1) 用户的原始目标与核心诉求;
+2) 已做出的关键决策与结论;
+3) 已派出的任务及其当前状态(谁负责、做什么、done/test/进行中/阻塞);
+4) 未决事项、待办;
+5) 用户明确的约束、偏好与禁令。
+提炼要点、不要逐字复述,但任何任务的状态都不能遗漏。只输出摘要正文,不要前言或客套。`
+
+const cicyCompactSummaryPrefix = "[以下是更早对话的压缩摘要,用于保持上下文连续;最近的原始对话紧随其后。]\n\n"
+
+// cicyCompactSplitPoint returns the index where the kept verbatim tail begins
+// (everything before it is summarized), or -1 when the history should not be
+// compacted yet. The boundary is advanced forward so the tail never STARTS on a
+// tool_result whose matching tool_use would fall into the summarized half (which
+// would orphan it → provider 400) — the same invariant cicyTrimMessages enforces.
+func cicyCompactSplitPoint(msgs []M) int {
+	if len(msgs) <= cicyCompactThreshold {
+		return -1
+	}
+	keepFrom := len(msgs) - cicyCompactKeepRecent
+	if keepFrom < 1 {
+		return -1
+	}
+	for keepFrom < len(msgs) && cicyMessageHasToolResult(msgs[keepFrom]) {
+		keepFrom++
+	}
+	if keepFrom < 1 || keepFrom >= len(msgs) {
+		return -1 // nothing meaningful left to summarize, or no tail left
+	}
+	return keepFrom
+}
+
+// cicyToolResultText renders a tool_result's content (string or block array) to
+// plain text for the compaction transcript.
+func cicyToolResultText(content interface{}) string {
+	switch c := content.(type) {
+	case string:
+		return c
+	case []interface{}:
+		var parts []string
+		for _, b := range c {
+			if bm, ok := b.(map[string]interface{}); ok {
+				if tx, _ := bm["text"].(string); tx != "" {
+					parts = append(parts, tx)
+				}
+			}
+		}
+		return strings.Join(parts, "\n")
+	default:
+		raw, _ := json.Marshal(content)
+		return string(raw)
+	}
+}
+
+// cicyRenderHistoryForCompaction flattens messages (text / tool calls / tool
+// results) into a plain-text transcript for the summarizer — no tool blocks, so
+// the summarization call itself can't trip tool-pairing constraints.
+func cicyRenderHistoryForCompaction(msgs []M) string {
+	var b strings.Builder
+	for _, m := range msgs {
+		role, _ := m["role"].(string)
+		if s, ok := m["content"].(string); ok {
+			if strings.TrimSpace(s) != "" {
+				b.WriteString(role + ": " + s + "\n")
+			}
+			continue
+		}
+		cicyForEachBlock(m, func(bm map[string]interface{}, t string) {
+			switch t {
+			case "text":
+				if tx, _ := bm["text"].(string); strings.TrimSpace(tx) != "" {
+					b.WriteString(role + ": " + tx + "\n")
+				}
+			case "tool_use":
+				name, _ := bm["name"].(string)
+				arg, _ := json.Marshal(bm["input"])
+				b.WriteString(role + " [调用 " + name + " " + truncateForLog(string(arg), 300) + "]\n")
+			case "tool_result":
+				b.WriteString("工具结果: " + truncateForLog(cicyToolResultText(bm["content"]), 400) + "\n")
+			}
+		})
+	}
+	return b.String()
+}
+
+// cicyCompactMessages summarizes the older half of an over-long history into one
+// stable user message, keeping the recent tail verbatim. Returns (compacted,
+// true) on success; (msgs, false) when compaction isn't needed or the summary
+// call fails — the caller then falls back to front-trimming so the turn always
+// proceeds. Unlike front-trim this preserves intent/task-state, and it keeps the
+// prompt-cache prefix stable between compactions (only the compaction turn itself
+// misses cache).
+func cicyCompactMessages(ctx context.Context, shortID string, msgs []M, model string) ([]M, bool) {
+	keepFrom := cicyCompactSplitPoint(msgs)
+	if keepFrom < 0 {
+		return msgs, false
+	}
+	summary, err := cicyCompactSummarize(ctx, shortID, model, cicyRenderHistoryForCompaction(msgs[:keepFrom]))
+	if err != nil || strings.TrimSpace(summary) == "" {
+		return msgs, false
+	}
+	out := make([]M, 0, len(msgs)-keepFrom+1)
+	out = append(out, M{"role": "user", "content": cicyCompactSummaryPrefix + strings.TrimSpace(summary)})
+	out = append(out, msgs[keepFrom:]...)
+	return out, true
 }
 
 func cicyConvDir(workspace string) string {
@@ -923,14 +1113,16 @@ func cicyModel(shortID string) string {
 // Messages SSE, so the consumption side is one format regardless of provider.
 // The second return reports whether deltas were emitted (the caller must then
 // not re-emit the assembled text blocks).
-func cicyCallGateway(shortID string, payload M, emit func(M)) (map[string]interface{}, bool, error) {
+func cicyCallGateway(ctx context.Context, shortID, sessionID string, payload M, emit func(M)) (map[string]interface{}, bool, error) {
 	payload["stream"] = true
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, false, err
 	}
 	url := fmt.Sprintf("%s/api/ai-gateway/anthropic/%s/v1/messages", cicyGatewayBase, shortID)
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	// ctx 可取消:取消时这个请求中断,网关侧 ReverseProxy 随之掐断上游 LLM,
+	// 流读取以 error 结束 → 上层 turn 收尾。
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, false, err
 	}
@@ -938,11 +1130,12 @@ func cicyCallGateway(shortID string, payload M, emit func(M)) (map[string]interf
 	req.Header.Set("x-api-key", "cicy-local-gateway")
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("Accept", "text/event-stream")
-	// Stable conversation id: the dispatcher is one long-lived conversation per
-	// agent. Without this the audit layer has no session field in the body and
-	// falls back to a fresh random conversation_id every turn (a sprawl of
-	// one-turn conversation dirs). The audit layer reads this header.
-	req.Header.Set("X-Claude-Code-Session-Id", "dispatcher-"+shortID)
+	// Conversation id the audit layer keys off. The main turn passes
+	// "dispatcher-<id>" (one long-lived conversation per agent); compaction passes
+	// "compact-<id>" so its summarization round audits to a SEPARATE bucket and
+	// never pollutes the agent's own chat history / UI stream. Without it the audit
+	// layer falls back to a fresh random conversation_id every turn.
+	req.Header.Set("X-Claude-Code-Session-Id", sessionID)
 	resp, err := (&http.Client{Timeout: 10 * time.Minute}).Do(req)
 	if err != nil {
 		return nil, false, err
@@ -1059,6 +1252,12 @@ func cicyAssembleSSE(r io.Reader, emit func(M)) (map[string]interface{}, bool, e
 					if t, ok := d["partial_json"].(string); ok {
 						b.inputJSON.WriteString(t)
 					}
+				case "thinking_delta":
+					// 累积 thinking 正文。之前完全没处理 → 持久化进会话历史的 thinking 块是空壳,
+					// 一提交 committed 就没了。留住正文,current.json → web 就能显示(折叠)。
+					if t, ok := d["thinking"].(string); ok {
+						b.text.WriteString(t)
+					}
 				}
 			}
 		case "content_block_stop":
@@ -1090,6 +1289,11 @@ func cicyAssembleSSE(r io.Reader, emit func(M)) (map[string]interface{}, bool, e
 	blocks := make([]interface{}, 0, len(bufs))
 	for _, b := range bufs {
 		switch b.typ {
+		case "thinking":
+			// thinking 块按流里的原始顺序(在 text/tool 之前)持久化,正文留住供 committed 显示。
+			if b.text.Len() > 0 {
+				blocks = append(blocks, map[string]interface{}{"type": "thinking", "thinking": b.text.String()})
+			}
 		case "text":
 			if b.text.Len() > 0 {
 				blocks = append(blocks, map[string]interface{}{"type": "text", "text": b.text.String()})
@@ -1229,6 +1433,28 @@ func (s *cicySSE) emit(event M) {
 //	{"type":"done"}
 //
 // Loopback-only (the REPL and other in-host callers), like the AI gateway.
+// handleCicyCancel 打断某个 headless cicy agent 正在跑的 turn(浏览器按 Esc / 点停止
+// 时调用)。body: {pane_id}。无在跑 turn 时返回 success:true, canceled:false(幂等)。
+func handleCicyCancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, 405, "POST required")
+		return
+	}
+	var req M
+	readBody(r, &req)
+	paneID, _ := req["pane_id"].(string)
+	if strings.TrimSpace(paneID) == "" {
+		paneID, _ = req["win_id"].(string)
+	}
+	shortID := shortPaneID(normPaneID(strings.TrimSpace(paneID)))
+	if shortID == "" {
+		httpErr(w, 400, "pane_id required")
+		return
+	}
+	canceled := cancelCicyPane(shortID)
+	J(w, M{"success": true, "canceled": canceled, "pane_id": shortID})
+}
+
 func handleCicyChat(w http.ResponseWriter, r *http.Request) {
 	if !isLoopbackRemote(r.RemoteAddr) {
 		httpErr(w, 403, "cicy_chat_loopback_only")
@@ -1327,7 +1553,13 @@ func handleCicyHistory(w http.ResponseWriter, r *http.Request) {
 // ResponseWriter is what lets a cicy agent run with no tmux pane at all.
 func runCicyOwnedTurns(session *cicySession, shortID, workspace, text string, emit func(M)) {
 	released := false
+	// 整段 owned-turns(含 drain 出来的后续轮)共用一个可取消 ctx:用户取消 → 当前网关
+	// 请求被掐断、排队清空,这里收尾。
+	ctx, cancel := context.WithCancel(context.Background())
+	session.setCancel(cancel)
 	defer func() {
+		cancel()
+		session.setCancel(nil)
 		if !released {
 			session.forceRelease()
 		}
@@ -1336,7 +1568,7 @@ func runCicyOwnedTurns(session *cicySession, shortID, workspace, text string, em
 	cur := text
 	for {
 		session.mu.Lock()
-		ok := runCicyTurnLocked(session, shortID, workspace, cur, emit)
+		ok := runCicyTurnLocked(ctx, session, shortID, workspace, cur, emit)
 		session.mu.Unlock()
 		if !ok {
 			emit(M{"type": "done"})
@@ -1373,6 +1605,18 @@ func deliverCicyMessage(shortID, workspace, text string) bool {
 	runCicyOwnedTurns(session, shortID, workspace, text, func(M) {})
 	go broadcastPollData(shortID)
 	return true
+}
+
+// cancelCicyPane 取消某个 cicy agent 正在跑的 turn(headless 取消入口)。只对已存在
+// 的会话生效;没有会话或没有在跑的 turn 时返回 false。
+func cancelCicyPane(shortID string) bool {
+	cicySessionsMu.Lock()
+	session := cicySessions[shortID]
+	cicySessionsMu.Unlock()
+	if session == nil {
+		return false
+	}
+	return session.cancelInFlight()
 }
 
 // enqueueIfBusy returns true (and queues text) when a reply is already in flight
@@ -1422,21 +1666,35 @@ func (s *cicySession) forceRelease() {
 // browser/REPL); a headless in-process caller (deliverCicyMessage) passes a sink
 // that just persists/broadcasts. The runtime itself is transport-agnostic — no
 // tmux, no ResponseWriter dependency.
-func runCicyTurnLocked(session *cicySession, shortID, workspace, text string, emit func(M)) bool {
+func runCicyTurnLocked(ctx context.Context, session *cicySession, shortID, workspace, text string, emit func(M)) bool {
 	session.messages = append(session.messages, M{"role": "user", "content": text})
-	// Trim BEFORE building the request so the outgoing window is always within the
-	// cap and never starts on an orphan tool_result (heals an over-cap window loaded
-	// from disk; otherwise the first turn after load could 400 with "tool_result has
-	// no corresponding tool_use" → no reply).
-	session.messages = cicyTrimMessages(session.messages)
+	model := cicyModel(shortID)
+	// Bound the window BEFORE building the request. Prefer COMPACTION (summarize
+	// the older half, keep the recent tail verbatim) over front-trimming: it
+	// preserves intent/task-state AND keeps the prompt-cache prefix stable between
+	// compactions. Fall back to a last-resort front-trim only when compaction
+	// didn't fire (under threshold, or summarizer unavailable) and the window is
+	// over the hard ceiling — so the turn always proceeds within a valid window
+	// that never starts on an orphan tool_result.
+	if compacted, ok := cicyCompactMessages(ctx, shortID, session.messages, model); ok {
+		session.messages = compacted
+		log.Printf("[cicy-compact] agent=%s compacted history → %d messages", shortID, len(session.messages))
+	} else if len(session.messages) > cicyMaxHistoryMessages {
+		session.messages = cicyTrimMessages(session.messages)
+	}
 	// Heal any mid-history orphan tool_use (interrupted turn) before building the
 	// request, so a corrupted in-memory window self-pairs instead of bricking the
 	// agent with a provider 400 every turn.
 	session.messages = cicyBalanceToolCalls(session.messages)
-	model := cicyModel(shortID)
 	cfg := resolveLiteConfig(shortID, workspace)
 
 	for round := 0; round < cicyMaxToolRounds; round++ {
+		// 用户已取消 → 立刻收尾:持久化已有内容,不再发下一轮网关请求。
+		if ctx.Err() != nil {
+			emit(M{"type": "error", "error": "已取消"})
+			session.persistLocked(workspace)
+			return false
+		}
 		payload := M{
 			"model":      model,
 			"max_tokens": 2048,
@@ -1457,7 +1715,7 @@ func runCicyTurnLocked(session *cicySession, shortID, workspace, text string, em
 		if tools := cicyCachedToolDefs(cfg); len(tools) > 0 {
 			payload["tools"] = tools
 		}
-		resp, streamed, err := cicyCallGateway(shortID, payload, emit)
+		resp, streamed, err := cicyCallGateway(ctx, shortID, "dispatcher-"+shortID, payload, emit)
 		if err != nil {
 			emit(M{"type": "error", "error": err.Error()})
 			// Drop the failed exchange tail so history stays consistent.

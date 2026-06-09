@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log"
 	"net/http"
@@ -150,6 +151,16 @@ func serveTtydHTTP(w http.ResponseWriter, r *http.Request, tmuxTarget, subPath, 
 	case subPath == "/config.js":
 		w.Header().Set("Content-Type", "application/javascript")
 		w.Write(server.TermConfigJS("xterm-256color"))
+		// Inject the model-mask token SYNCHRONOUSLY (config.js runs at page load,
+		// before the WS opens). The client reads window.cicyModelMask at mount and
+		// masks it from the PTY stream from the very first byte — avoiding the race
+		// where codex prints its model before an async API lookup could set the
+		// mask. Only codex-on-gateway panes get a token (else nothing is injected).
+		if m := codexGatewayMaskModel(apiPane); m != "" {
+			if b, err := json.Marshal(m); err == nil {
+				w.Write([]byte("\nwindow.cicyModelMask=" + string(b) + ";\n"))
+			}
+		}
 	default:
 		// Shared static bundle (js/, css/, favicon.png) — identical for every
 		// pane. Rewrite the path to the asset-relative form the bundle handler
@@ -158,6 +169,28 @@ func serveTtydHTTP(w http.ResponseWriter, r *http.Request, tmuxTarget, subPath, 
 		r2.URL.Path = subPath
 		server.StaticHandler().ServeHTTP(w, r2)
 	}
+}
+
+// codexGatewayMaskModel returns the model string codex launches with (its `-m`
+// value) for codex-on-gateway panes — the token the terminal client masks out of
+// the PTY stream so the leaked model name never renders. "" for any other pane.
+func codexGatewayMaskModel(apiPane string) string {
+	if store == nil {
+		return ""
+	}
+	shortID := shortPaneID(normPaneID(apiPane))
+	var agentType, defaultModel string
+	var gw int
+	if err := store.QueryRow(
+		"SELECT COALESCE(agent_type,''), COALESCE(default_model,''), COALESCE(use_custom_gateway,0) FROM agent_config WHERE pane_id=?",
+		shortID+":main.0",
+	).Scan(&agentType, &defaultModel, &gw); err != nil {
+		return ""
+	}
+	if normalizeAgentType(agentType) != "codex" || gw == 0 {
+		return ""
+	}
+	return resolveCodexStartupModel(defaultModel, loadRuntimeAIConfig(), shortID)
 }
 
 // serveTTY upgrades the client WebSocket and runs an in-process webtty session

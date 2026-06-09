@@ -903,6 +903,14 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	} else {
 		resp["machine_id"] = nil
 	}
+	// Expose the model codex launches with (its `-m` value) ONLY for codex-on-
+	// gateway panes, so the terminal client can MASK that string out of the data
+	// stream — codex prints it in a bottom status row that would otherwise leak
+	// the gateway's upstream model. Replaces the old DOM/CSS hide (cicy_ui.ts),
+	// which the WebGL terminal renderer broke (canvas → no DOM rows to match).
+	if normalizeAgentType(agentType.String) == "codex" && useCustomGateway.Bool {
+		resp["gateway_model"] = resolveCodexStartupModel(defaultModel.String, loadRuntimeAIConfig(), shortPaneID(paneID))
+	}
 	capabilities := M{}
 	if strings.TrimSpace(capabilitiesJSON.String) != "" {
 		_ = json.Unmarshal([]byte(capabilitiesJSON.String), &capabilities)
@@ -1503,12 +1511,21 @@ func visibleAgentInstallLiveLine(commandName, label, installCmd, logPathExpr str
 	return fmt.Sprintf(`__cicy_require_command_live %s %s %s %s`, tmuxShellQuote(commandName), tmuxShellQuote(label), tmuxShellQuote(installCmd), logPathExpr)
 }
 
+// checkAgentCommandLine emits a presence-only guard. Auto-install in the terminal
+// was removed (cli_install.go now installs CLIs on demand from the UI overlay);
+// a missing CLI prints a hint and `|| return` stops the sourced boot.sh BEFORE
+// launching it, so the overlay can take over. An installed CLI passes and boot
+// continues to launch as before.
+func checkAgentCommandLine(commandName, label string) string {
+	return fmt.Sprintf(`__cicy_check_command %s %s || return`, tmuxShellQuote(commandName), tmuxShellQuote(label))
+}
+
 func ensureAgentCommandLine(commandName, label, installCmd, logPathExpr string) string {
-	return visibleAgentInstallLine(commandName, label, installCmd, logPathExpr)
+	return checkAgentCommandLine(commandName, label)
 }
 
 func ensureAgentCommandLineLive(commandName, label, installCmd, logPathExpr string) string {
-	return visibleAgentInstallLiveLine(commandName, label, installCmd, logPathExpr)
+	return checkAgentCommandLine(commandName, label)
 }
 
 // claudeUserStatuslineSetupLines emits idempotent shell lines that ensure the
