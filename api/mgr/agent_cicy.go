@@ -774,6 +774,16 @@ func cicySeededSnapshot(snap aiGatewayCurrentSnapshot, shortID, convID, now stri
 	snap.AgentID = shortID
 	snap.ConversationID = convID
 	snap.UpdatedAt = now
+	// Per-TURN identifiers must not leak into a seeded snapshot: the seed is not
+	// a wire request, and stale turn/request ids made a cleared conversation look
+	// like the old one. Conversation-scoped fields (provider/model/url/headers,
+	// body system/tools) are what carries over.
+	snap.TurnID = ""
+	snap.RequestID = ""
+	snap.RequestIDs = nil
+	snap.ActiveRequestIDs = nil
+	snap.ConversationIDs = []string{convID}
+	snap.Status = "completed"
 	return snap
 }
 

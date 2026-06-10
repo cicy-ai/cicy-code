@@ -46,13 +46,15 @@ func TestCicySeededSnapshotReplacesOnlyMessages(t *testing.T) {
 	summary := []M{{"role": "user", "content": "[summary] …"}}
 	out := cicySeededSnapshot(live, "w-9", "new-conv", "2026-06-10T01:00:00Z", summary)
 
-	// Everything except messages + conversation id carries over verbatim.
+	// Conversation-scoped fields carry over verbatim…
 	if out.Provider != "anthropic" || out.Model != "deepseek-v4-pro" || out.URL != live.URL ||
-		out.Method != "POST" || out.TurnID != "t-1" || out.RequestID != "req-1" {
-		t.Fatalf("non-message fields must carry over, got %+v", out)
+		out.Method != "POST" || out.Headers == nil {
+		t.Fatalf("conversation-scoped fields must carry over, got %+v", out)
 	}
-	if out.Headers == nil || len(out.RequestIDs) != 1 {
-		t.Fatalf("headers/request_ids must carry over")
+	// …while per-TURN identifiers reset (a seed is not a wire request; stale
+	// turn/request ids made a cleared conversation look like the old one).
+	if out.TurnID != "" || out.RequestID != "" || len(out.RequestIDs) != 0 || len(out.ActiveRequestIDs) != 0 {
+		t.Fatalf("per-turn ids must reset in a seed, got %+v", out)
 	}
 	if out.ConversationID != "new-conv" {
 		t.Fatalf("conversation id must be the seed's, got %q", out.ConversationID)
