@@ -98,6 +98,7 @@ type aiGatewayCurrentSnapshot struct {
 type aiGatewayReplySnapshot struct {
 	TurnID                   string                   `json:"turn_id"`
 	ConversationID           string                   `json:"conversation_id,omitempty"` // self-describing: which conversation this reply belongs to (history view rebinds on change)
+	HistoryID                int64                    `json:"history_id,omitempty"`      // self-describing answer slot = current.json maxID + 1 (= q_last id + 1), pinned at write time so readers don't re-derive it
 	Status                   string                   `json:"status"`
 	StartedAt                string                   `json:"started_at"`
 	UpdatedAt                string                   `json:"updated_at"`
@@ -122,6 +123,12 @@ type aiGatewayReplySnapshot struct {
 	Model                    string                   `json:"model,omitempty"` // primary model, persisted in lite snapshot for round-trip
 	RequestCount             int                      `json:"request_count"`
 	StatusMap                aiGatewayStatusMap       `json:"status_map"`
+	// LastStopReason is the terminal reason of the most recently finalized HTTP
+	// round (Anthropic stop_reason / OpenAI finish_reason / Responses inferred).
+	// Persisted so the inter-round gap — tool running client-side, no live HTTP —
+	// keeps reading "working" instead of falsely flipping to "completed". Recomputed
+	// each round; the round that ends on end_turn/stop clears it back to a done state.
+	LastStopReason string `json:"last_stop_reason,omitempty"`
 }
 
 type aiGatewayMessageRecord struct {
@@ -146,6 +153,13 @@ type aiGatewayParsedResponse struct {
 	Answer    string
 	ToolCalls []aiGatewayToolCall
 	Usage     map[string]interface{}
+	// StopReason is the response's terminal reason (Anthropic stop_reason /
+	// OpenAI finish_reason / Responses inferred). "tool_use"/"tool_calls"/
+	// "function_call" mean the agent loop will continue with a tool round, so the
+	// turn is NOT done even though this HTTP request just completed. Carried so
+	// the inter-round gap (tool running client-side, no live HTTP) stays "working"
+	// instead of falsely reading "completed".
+	StopReason string
 }
 
 type aiGatewayStreamDelta struct {
@@ -239,6 +253,10 @@ type aiGatewayStreamAccumulator struct {
 	toolCalls     map[string]*aiGatewayToolCall
 	usage         map[string]interface{}
 	autoIndex     int
+	// stopReason captures the stream's terminal reason (Anthropic message_delta
+	// stop_reason / OpenAI finish_reason). Empty for Responses, where it's
+	// inferred from trailing tool calls.
+	stopReason string
 	// contentBlocks accumulates raw content blocks in native format (Claude/OpenAI)
 	contentBlocks []map[string]interface{}
 }
@@ -433,9 +451,19 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 	if isContinuation {
 		inheritOutput, inheritTotal, inheritCost = prevOutputTokens, prevTotalTokens, prevCostCredit
 	}
+	// Self-describing answer slot for reply.json: the answer occupies current.json's
+	// maxID + 1 (= q_last's id + 1). Pinned here at request capture so readers can
+	// take it straight off reply.json instead of re-deriving maxID+1. Re-computed each
+	// round, so a tool continuation (current.json grew by tool_use+tool_result) tracks
+	// correctly instead of freezing at the original q+1. 0 for an empty agent.
+	answerSlot := int64(0)
+	if current.MaxHistoryID > 0 {
+		answerSlot = int64(current.MaxHistoryID) + 1
+	}
 	reply := aiGatewayReplySnapshot{
 		TurnID:           turnID,
 		ConversationID:   conversationID,
+		HistoryID:        answerSlot,
 		Status:           "thinking",
 		StartedAt:        startedAtISO,
 		UpdatedAt:        startedAtISO,
@@ -945,6 +973,10 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	s.reply.Thinking = parsed.Thinking
 	s.reply.Answer = parsed.Answer
 	s.reply.ToolCalls = parsed.ToolCalls
+	// Stamp this round's terminal reason so the inter-round tool gap (no live HTTP)
+	// keeps reading "working" — see aiGatewayBuildStatusMap. A round that ends on a
+	// non-tool stop (end_turn/stop) clears it back to a terminal-eligible state.
+	s.reply.LastStopReason = parsed.StopReason
 	// reply.Items 由流式过程实时 flush（applyStreamEventsLocked → flushPendingItemLocked）。
 	// HTTP 响应完成时只需 flush 残留的 pendingItem（最后一个 thinking/text/tool_use）。
 	// 字段约定（统一用 Anthropic content block 风格）：
@@ -1311,6 +1343,7 @@ func aiGatewayWriteCurrentSnapshot(agentID string, current aiGatewayCurrentSnaps
 type aiGatewayReplySnapshotLite struct {
 	TurnID                   string                   `json:"turn_id"`
 	ConversationID           string                   `json:"conversation_id,omitempty"`
+	HistoryID                int64                    `json:"history_id,omitempty"` // answer slot = current.json maxID + 1 (= q_last id + 1)
 	Status                   string                   `json:"status"`
 	StartedAt                string                   `json:"started_at"`
 	UpdatedAt                string                   `json:"updated_at"`
@@ -1322,6 +1355,7 @@ type aiGatewayReplySnapshotLite struct {
 	CacheReadInputTokens     int                      `json:"cache_read_input_tokens"`
 	TotalTokens              int                      `json:"total_tokens"`
 	CostCredit               float64                  `json:"cost_credit"`
+	LastStopReason           string                   `json:"last_stop_reason,omitempty"` // see aiGatewayReplySnapshot.LastStopReason — keeps the tool-run gap "working"
 }
 
 func aiGatewayWriteReplySnapshot(agentID string, reply aiGatewayReplySnapshot) error {
@@ -1329,6 +1363,7 @@ func aiGatewayWriteReplySnapshot(agentID string, reply aiGatewayReplySnapshot) e
 	lite := aiGatewayReplySnapshotLite{
 		TurnID:                   reply.TurnID,
 		ConversationID:           reply.ConversationID,
+		HistoryID:                reply.HistoryID,
 		Status:                   reply.Status,
 		StartedAt:                reply.StartedAt,
 		UpdatedAt:                reply.UpdatedAt,
@@ -1340,6 +1375,7 @@ func aiGatewayWriteReplySnapshot(agentID string, reply aiGatewayReplySnapshot) e
 		CacheReadInputTokens:     reply.CacheReadInputTokens,
 		TotalTokens:              reply.TotalTokens,
 		CostCredit:               reply.CostCredit,
+		LastStopReason:           reply.LastStopReason,
 	}
 	return aiGatewayWriteSnapshotFile(agentID, "reply.json", reply.ConversationID, lite)
 }
@@ -3466,6 +3502,12 @@ func aiGatewayBuildStatusMap(current aiGatewayCurrentSnapshot, reply aiGatewayRe
 		} else {
 			primary = "thinking"
 		}
+	} else if aiGatewayStopReasonExpectsToolRound(reply.LastStopReason) {
+		// No live HTTP, but the last round ended on a tool_use stop: the agent is
+		// running that tool client-side and will be back with the result. The turn
+		// is NOT done — keep it yellow ("working") through the gap instead of
+		// flashing "completed" (green) until the next round opens.
+		primary = "working"
 	} else {
 		primary = "completed"
 	}
@@ -3473,10 +3515,24 @@ func aiGatewayBuildStatusMap(current aiGatewayCurrentSnapshot, reply aiGatewayRe
 		Primary: primary,
 		Items: []aiGatewayStatusItem{
 			{Kind: "thinking", Label: "Thinking 思考中", Active: hasThinking && (primary == "thinking" || primary == "working" || primary == "streaming"), Count: aiGatewayBoolInt(hasThinking)},
-			{Kind: "tool_call", Label: "Working 工作中", Active: toolCount > 0 && (activeRequestCount > 0 || hasCurrentActive) && (primary == "working" || primary == "streaming"), Count: toolCount},
+			{Kind: "tool_call", Label: "Working 工作中", Active: toolCount > 0 && (activeRequestCount > 0 || hasCurrentActive || primary == "working") && (primary == "working" || primary == "streaming"), Count: toolCount},
 			{Kind: "http", Label: "HTTP", Active: activeRequestCount > 0, Count: activeRequestCount},
 			{Kind: "streaming", Label: "Working 工作中", Active: hasAnswer && activeRequestCount > 0 && primary == "streaming", Count: aiGatewayBoolInt(hasAnswer && activeRequestCount > 0 && primary == "streaming")},
 		},
+	}
+}
+
+// aiGatewayStopReasonExpectsToolRound reports whether a response's terminal
+// reason means the agent loop will continue with a tool round (so the turn is
+// NOT done). Covers Anthropic (tool_use), OpenAI chat (tool_calls) and the
+// Responses-inferred marker. Anything else (end_turn / stop / length / "") is a
+// genuine end-of-turn.
+func aiGatewayStopReasonExpectsToolRound(stopReason string) bool {
+	switch strings.ToLower(strings.TrimSpace(stopReason)) {
+	case "tool_use", "tool_calls", "function_call":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -3553,6 +3609,19 @@ func aiGatewayParseStreamResponse(body []byte) aiGatewayParsedResponse {
 		if usage := aiGatewayMap(payload["usage"]); len(usage) > 0 {
 			acc.usage = aiGatewayMergeUsage(acc.usage, usage)
 		}
+		// Terminal reason: Anthropic carries it on message_delta.delta.stop_reason;
+		// OpenAI on the final chunk's choices[].finish_reason. A "tool_use"/
+		// "tool_calls" here means the agent loop continues with a tool round.
+		if aiGatewayString(payload["type"]) == "message_delta" {
+			if sr := strings.TrimSpace(aiGatewayString(aiGatewayMap(payload["delta"])["stop_reason"])); sr != "" {
+				acc.stopReason = sr
+			}
+		}
+		if choices := aiGatewaySlice(payload["choices"]); len(choices) > 0 {
+			if fr := strings.TrimSpace(aiGatewayString(aiGatewayMap(choices[0])["finish_reason"])); fr != "" {
+				acc.stopReason = fr
+			}
+		}
 		if acc.handleResponsesEvent(payload) {
 			continue
 		}
@@ -3574,11 +3643,20 @@ func aiGatewayParseStreamResponse(body []byte) aiGatewayParsedResponse {
 			}
 		}
 	}
+	toolCalls := acc.toolCallsInOrder()
+	stopReason := acc.stopReason
+	// Responses (Codex) streams emit no stop_reason/finish_reason. Infer a tool
+	// round from trailing tool calls with no final text answer — the model asked
+	// for tools and will be back, so the turn isn't done.
+	if stopReason == "" && len(toolCalls) > 0 && strings.TrimSpace(strings.Join(acc.answerParts, "")) == "" {
+		stopReason = "tool_use"
+	}
 	return aiGatewayParsedResponse{
-		Thinking:  strings.Join(acc.thinkingParts, ""),
-		Answer:    strings.Join(acc.answerParts, ""),
-		ToolCalls: acc.toolCallsInOrder(),
-		Usage:     aiGatewayNormalizeOpenAIUsage(aiGatewayCloneAnyMap(acc.usage)),
+		Thinking:   strings.Join(acc.thinkingParts, ""),
+		Answer:     strings.Join(acc.answerParts, ""),
+		ToolCalls:  toolCalls,
+		Usage:      aiGatewayNormalizeOpenAIUsage(aiGatewayCloneAnyMap(acc.usage)),
+		StopReason: stopReason,
 	}
 }
 
@@ -3935,6 +4013,7 @@ func aiGatewayExtractNonStreamResponse(payload map[string]interface{}) aiGateway
 		message := aiGatewayMap(aiGatewayMap(choices[0])["message"])
 		result.Thinking = aiGatewayString(message["reasoning_content"])
 		result.Answer = aiGatewayString(message["content"])
+		result.StopReason = strings.TrimSpace(aiGatewayString(aiGatewayMap(choices[0])["finish_reason"]))
 		for _, rawToolCall := range aiGatewaySlice(message["tool_calls"]) {
 			toolCall := aiGatewayMap(rawToolCall)
 			function := aiGatewayMap(toolCall["function"])
@@ -3965,6 +4044,7 @@ func aiGatewayExtractNonStreamResponse(payload map[string]interface{}) aiGateway
 			}
 		}
 		if strings.TrimSpace(result.Thinking) != "" || strings.TrimSpace(result.Answer) != "" || len(result.ToolCalls) > 0 {
+			result.StopReason = strings.TrimSpace(aiGatewayString(payload["stop_reason"]))
 			return result
 		}
 	}
@@ -4032,6 +4112,11 @@ func aiGatewayExtractNonStreamResponse(payload map[string]interface{}) aiGateway
 	}
 	if len(answerParts) > 0 {
 		result.Answer = strings.Join(answerParts, "\n")
+	}
+	// Responses (Codex) has no stop_reason field; trailing tool calls with no
+	// final text mean a tool round is coming, so the turn isn't done.
+	if result.StopReason == "" && len(result.ToolCalls) > 0 && strings.TrimSpace(result.Answer) == "" {
+		result.StopReason = "tool_use"
 	}
 	return result
 }
@@ -4910,29 +4995,28 @@ func aiGatewayAnnotateCurrentBodyHistoryIDs(agentID string, body interface{}) in
 	if len(mapped) == 0 {
 		return body
 	}
-	// Idempotent: an already-numbered body (re-annotated on the write/status
-	// path) is left untouched so absolute ids assigned at capture survive.
+	// Idempotent: a body already numbered at capture is left untouched (the
+	// write/status path re-annotates; sequential numbering is deterministic, so
+	// this is just belt-and-suspenders).
 	if aiGatewayBodyAlreadyNumbered(mapped) {
 		return body
 	}
-	// At request-capture time current.json on disk is still the PREVIOUS turn's
-	// window — anchor the new sliding window to it so ids stay absolute/stable
-	// across the dispatcher's front-trim (no sqlite, no extra state).
-	var prevMsgs, prevInput []interface{}
-	prevMax := 0
-	if prev, err := aiGatewayReadCurrentSnapshot(agentID); err == nil {
-		prevMapped := aiGatewayMap(prev.Body)
-		prevMsgs = aiGatewaySlice(prevMapped["messages"])
-		prevInput = aiGatewaySlice(prevMapped["input"])
-		prevMax = prev.MaxHistoryID
-	}
+	// current.json is the FULL, ordered conversation snapshot, so the messages
+	// array IS the history — position is identity. Number it straight through
+	// 1..N; the answer then takes slot N+1 (= max id + 1). NO content-fingerprint
+	// anchoring: repeated identical messages (e.g. several "hi") never collide,
+	// because ids depend only on position, not content. This is the SHARED path
+	// for every agent — cicy via the local gateway, claude via mitm, same call
+	// site. An agent's own context compaction (Claude Code auto-compact, or an
+	// explicit cicy compact) just shortens the array → one re-number (an
+	// acceptable one-shot re-page), not a per-turn drift.
 	next := aiGatewayCloneAnyMap(mapped)
 	delete(next, "history")
 	if messages := aiGatewaySlice(next["messages"]); len(messages) > 0 {
-		next["messages"] = aiGatewayAssignAbsoluteIDs(prevMsgs, messages, prevMax)
+		next["messages"] = aiGatewayAssignSequentialIDs(messages, 0)
 	}
 	if input := aiGatewaySlice(next["input"]); len(input) > 0 {
-		next["input"] = aiGatewayAssignAbsoluteIDs(prevInput, input, prevMax)
+		next["input"] = aiGatewayAssignSequentialIDs(input, 0)
 	}
 	return next
 }
