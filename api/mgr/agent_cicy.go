@@ -1472,7 +1472,26 @@ func cicyCachedToolDefs(cfg liteConfig) []M {
 // cicyRequestMessages returns the history with a cache breakpoint
 // attached to the final message — copy-on-write so the persisted history
 // itself never carries cache_control (the breakpoint must move every turn).
+// cicyCompactSliceStart returns the index of the LAST compact-summary message
+// (the wire boundary): requests are sent from there onward, while the full
+// history (everything before it included) stays in current.json for display.
+// 0 when the conversation has never been compacted.
+func cicyCompactSliceStart(history []M) int {
+	for i := len(history) - 1; i >= 0; i-- {
+		if r, _ := history[i]["role"].(string); r != "user" {
+			continue
+		}
+		if c, ok := history[i]["content"].(string); ok && strings.HasPrefix(c, cicyCompactSummaryPrefix) {
+			return i
+		}
+	}
+	return 0
+}
+
 func cicyRequestMessages(history []M) []M {
+	// Claude-style boundary slice: the model gets [summary, …]; the display
+	// snapshot keeps the whole conversation.
+	history = history[cicyCompactSliceStart(history):]
 	if len(history) == 0 {
 		return history
 	}
@@ -1598,6 +1617,11 @@ func cicyCallGateway(ctx context.Context, shortID, sessionID, auxKind string, pa
 		// touch the conversation's current/reply snapshots — no separate dir.
 		if auxKind != "" {
 			req.Header.Set("X-Cicy-Aux", auxKind)
+		} else {
+			// Main turns: current.json (full display history) is seeded by the
+			// cicy runtime itself; the audit layer must keep it instead of
+			// overwriting it with the (possibly compact-sliced) wire body.
+			req.Header.Set("X-Cicy-Current-Owned", "1")
 		}
 
 		resp, err := client.Do(req)
@@ -2166,21 +2190,15 @@ func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspa
 		return
 	}
 
-	// Reset to just the summary — same conversation, summary becomes message #1.
+	// Claude-style: history is NEVER cleared. The summary is APPENDED (its id
+	// continues the sequence — the UI reconciles incrementally, no renumbering),
+	// and only the WIRE request slices from it (cicyCompactSliceStart).
 	session.mu.Lock()
-	session.messages = []M{{"role": "user", "content": cicyCompactSummaryPrefix + strings.TrimSpace(summary)}}
+	session.messages = append(session.messages, M{"role": "user", "content": cicyCompactSummaryPrefix + strings.TrimSpace(summary)})
 	session.persistLocked(workspace)
-	// The snapshot pair is the conversation store: replace current.json with the
-	// summary-only history NOW (not at the next turn) so a restart in between
-	// restores the compacted state, and drop the stale reply.json (it answered
-	// the pre-compact history; folding it into a restore would duplicate it).
 	cicySeedCurrentSnapshot(shortID, session.convID, session.messages)
 	session.mu.Unlock()
-	// The ack overwrites reply.json in place (same conversation); the pre-compact
-	// answer was archived above — nothing is deleted.
-	// Claude-style short confirmation — the full summary is already visible as
-	// the conversation's first message, no need to repeat it in the ack.
-	ack := "✅ Compacted (the summary is now the first message)"
+	ack := "✅ Compacted (context continues from the summary)"
 	cicyWriteSlashAck(shortID, convID, ack)
 
 	emit(M{"type": "system", "text": ack})
@@ -2598,6 +2616,10 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 		if tools := cicyCachedToolDefs(cfg); len(tools) > 0 {
 			payload["tools"] = tools
 		}
+		// current.json (display) = the FULL conversation including the new q —
+		// seeded by us, NOT by the audit layer (the wire body below may be a
+		// post-compact slice and must not clobber the display history).
+		cicySeedCurrentSnapshot(shortID, session.convID, session.messages)
 		resp, streamed, err := cicyCallGateway(ctx, shortID, session.convID, "", payload, emit)
 		if err != nil {
 			// A mid-flight cancel surfaces here as a ctx error — record it as a

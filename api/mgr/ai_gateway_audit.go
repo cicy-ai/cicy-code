@@ -404,6 +404,15 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		Auxiliary:       provider == "unknown",
 	}
 	annotatedBody := aiGatewayAnnotateCurrentBodyHistoryIDs(agentID, aiGatewayCloneJSONValue(payloadValue))
+	// cicy main turns own their current.json: the runtime seeds the FULL
+	// conversation right before the request, while the wire body may be a
+	// post-compact slice. Keep the seeded display snapshot as s.current (status
+	// and request ids still update) instead of the wire-derived body.
+	if strings.TrimSpace(requestHeaders.Get("X-Cicy-Current-Owned")) == "1" {
+		if disk := agentInspectorLoadCurrent(agentID); disk.ConversationID == conversationID && len(aiGatewayMap(disk.Body)) > 0 {
+			annotatedBody = disk.Body
+		}
+	}
 	current := aiGatewayCurrentSnapshot{
 		TurnID:           turnID,
 		AgentID:          agentID,
