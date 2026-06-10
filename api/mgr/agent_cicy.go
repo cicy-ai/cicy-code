@@ -2074,6 +2074,14 @@ func clearCicyPane(shortID, workspace string) {
 const cicySlashAckTurnID = "slash-ack"
 
 func cicyWriteSlashAck(shortID, convID, text string) {
+	cicyWriteSlashAckStatus(shortID, convID, text, "completed")
+}
+
+// cicyWriteSlashAckStatus also powers the IN-PROGRESS state: /compact writes a
+// status="working" reply while the summarizer runs (the UI poll shows the busy
+// indicator, Claude-style), then overwrites it with the completed/failed ack.
+// Every working write MUST be followed by a terminal one on all paths.
+func cicyWriteSlashAckStatus(shortID, convID, text, status string) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	historyID := int64(1)
 	if current := agentInspectorLoadCurrent(shortID); current.ConversationID == convID {
@@ -2083,7 +2091,7 @@ func cicyWriteSlashAck(shortID, convID, text string) {
 		TurnID:         cicySlashAckTurnID,
 		ConversationID: convID,
 		HistoryID:      historyID,
-		Status:         "completed",
+		Status:         status,
 		StartedAt:      now,
 		UpdatedAt:      now,
 		Answer:         text,
@@ -2141,11 +2149,18 @@ func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspa
 
 	archiveCicySnapshots(shortID) // best-effort rollback source (current + reply)
 
+	session.mu.Lock()
+	convID := session.convID
+	session.mu.Unlock()
+	// Claude-style visible progress: the UI polls reply.json, so a working-status
+	// reply shows the busy state for the whole summarize round.
+	cicyWriteSlashAckStatus(shortID, convID, "Compacting conversation…", "working")
 	emit(M{"type": "system", "text": "Compacting conversation…"})
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	summary, err := cicyCompactSummarize(cctx, shortID, session.convID, cicyModel(shortID), cicyRenderHistoryForCompaction(msgs))
 	if err != nil || strings.TrimSpace(summary) == "" {
+		cicyWriteSlashAck(shortID, convID, "Compaction failed (empty summary) — conversation left unchanged.")
 		emit(M{"type": "system", "text": "Compaction failed (empty summary) — conversation left unchanged."})
 		emit(M{"type": "done"})
 		return
@@ -2160,11 +2175,12 @@ func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspa
 	// restores the compacted state, and drop the stale reply.json (it answered
 	// the pre-compact history; folding it into a restore would duplicate it).
 	cicySeedCurrentSnapshot(shortID, session.convID, session.messages)
-	convID := session.convID
 	session.mu.Unlock()
 	// The ack overwrites reply.json in place (same conversation); the pre-compact
 	// answer was archived above — nothing is deleted.
-	ack := "✅ Compacted. Summary: " + truncateForLog(strings.TrimSpace(summary), 200)
+	// Claude-style short confirmation — the full summary is already visible as
+	// the conversation's first message, no need to repeat it in the ack.
+	ack := "✅ Compacted (the summary is now the first message)"
 	cicyWriteSlashAck(shortID, convID, ack)
 
 	emit(M{"type": "system", "text": ack})
