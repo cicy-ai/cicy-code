@@ -736,9 +736,6 @@ func cicyRestoreSessionMessages(shortID, convID string) []M {
 // system/tools/model) carries over verbatim, so the seed is indistinguishable
 // from a real wire snapshot. The annotator renumbers the messages.
 func cicySeedCurrentSnapshot(shortID, convID string, msgs []M) {
-	if len(msgs) == 0 {
-		return
-	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	snap := cicySeededSnapshot(agentInspectorLoadCurrent(shortID), shortID, convID, now, msgs)
 	_ = aiGatewayWriteCurrentSnapshot(shortID, snap)
@@ -2044,11 +2041,16 @@ func clearCicyPane(shortID, workspace string) {
 	// current.json — no sidecar file.
 	session.convID = cicyNewConversationID()
 	session.persistLocked(workspace)
+	newConv := session.convID
 	session.mu.Unlock()
 	session.forceRelease() // drop busy/queued so it's truly fresh
-	// Empty the web's committed view too: remove the gateway snapshots (the audit
-	// layer recreates them on the next turn).
-	removeCicySnapshots(shortID)
+	// The conversation store must keep existing: seed an EMPTY current.json under
+	// the new conversation id (provider/model fields cloned) so the UI lands on a
+	// clean empty conversation — never a missing file — and the rotated id is
+	// immediately durable. The old conversation's dir stays for scrollback; the
+	// stale reply.json is dropped (the slash ack replaces it).
+	cicySeedCurrentSnapshot(shortID, newConv, []M{})
+	removeCicyReplySnapshot(shortID)
 }
 
 // removeCicySnapshots drops the gateway live snapshots (current/reply.json and
