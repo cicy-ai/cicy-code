@@ -23,6 +23,18 @@
   "fork": "Fork",
   "toastForkStarted": "Fork en cours...",
   "toastForkFailed": "Échec du fork",
+  "menuCompact": "Compacter la conversation (/compact)",
+  "menuClear": "Effacer la conversation (/clear)",
+  "confirmClear": "Effacer la conversation de {{name}} ? Cette action est irréversible.",
+  "toastCompactSent": "/compact envoyé",
+  "toastClearSent": "/clear envoyé",
+  "toastSendFailed": "Échec de l'envoi",
+  "tipUnbind": "Retire cette carte du panneau d'équipe (déliaison). L'agent lui-même continue de tourner et peut être relié plus tard.",
+  "tipRestart": "Arrête le processus CLI de l'agent et le relance dans la même fenêtre tmux. Répertoire de travail et session conservés. Utile si l'agent est bloqué ou après une mise à jour.",
+  "tipCompact": "Envoie /compact à l'agent : la conversation passée est condensée en résumé et le travail continue, libérant la fenêtre de contexte et économisant des tokens sans perdre l'essentiel.",
+  "tipClear": "Envoie /clear à l'agent : efface tout l'historique et repart de zéro. Irréversible — une confirmation est demandée d'abord.",
+  "tipFork": "Clone un nouvel agent : agent-summary condense la conversation actuelle en résumé, que le nouvel agent lit au démarrage comme sa « mémoire héritée ». Il apparaît comme « Fork of … » sous cet agent — idéal pour confier des tâches parallèles sans se disputer le contexte.",
+  "tipDelete": "Supprime définitivement l'agent : ferme sa fenêtre tmux et retire la liaison. Irréversible.",
   "gatewayBadgeOn": "Mode passerelle (AI gateway local)",
   "gatewayBadgeOff": "Connexion officielle (directe)"
 }

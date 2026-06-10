@@ -23,6 +23,18 @@
   "fork": "分身",
   "toastForkStarted": "正在 fork agent...",
   "toastForkFailed": "Fork 失败",
+  "menuCompact": "压缩对话 (/compact)",
+  "menuClear": "清空对话 (/clear)",
+  "confirmClear": "清空 {{name}} 的对话？此操作不可恢复。",
+  "toastCompactSent": "已发送 /compact",
+  "toastClearSent": "已发送 /clear",
+  "toastSendFailed": "发送失败",
+  "tipUnbind": "把这张卡从团队面板移除（解除绑定），不会停止或删除 agent 本身，之后可以重新绑定回来。",
+  "tipRestart": "结束该 agent 的 CLI 进程，并在同一个 tmux 窗口重新拉起，工作目录和会话保留。适合 agent 卡死或升级后生效。",
+  "tipCompact": "向 agent 发送 /compact：把较早的对话提炼成摘要后继续，释放上下文窗口、节省 token，关键信息不丢。",
+  "tipClear": "向 agent 发送 /clear：清空全部对话历史、从零开始，不可恢复。点击后会先弹确认框。",
+  "tipFork": "复制出一个新 agent：先用 agent-summary 把当前对话提炼成摘要，新 agent 启动后将其作为自己的「继承记忆」读入，并以「Fork of …」挂在本 agent 下面。适合把分支任务交给分身并行处理，互不占用上下文。",
+  "tipDelete": "彻底删除该 agent：关闭其 tmux 窗口并移除绑定，不可恢复。",
   "gatewayBadgeOn": "网关模式（本地 AI Gateway）",
   "gatewayBadgeOff": "官方登录（直连）"
 }

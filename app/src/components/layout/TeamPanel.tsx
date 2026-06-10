@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation, Trans } from 'react-i18next';
 import i18n from '../../i18n';
-import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, UserPlus, GitBranch } from 'lucide-react';
+import { Users, Plus, X, MoreHorizontal, Trash2, RefreshCw, UserPlus, GitBranch, ChevronRight, ChevronDown, Archive, Eraser } from 'lucide-react';
 import { Spinner } from '../ui/Spinner';
 import type { SelectOptionAction } from '../ui/Select';
 import apiService from '../../services/api';
@@ -111,6 +111,54 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   const [forkingId, setForkingId] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  // bottom-most cards: not enough room below the … button → flip dropdown upward
+  const [menuDropUp, setMenuDropUp] = useState(false);
+  // hover tooltip for menu items — portal-rendered to the RIGHT of the dropdown
+  // (the left panel scroll container clips overflowing children, so an inline
+  // absolutely-positioned tip would be swallowed; fixed+portal escapes that).
+  const [menuTip, setMenuTip] = useState<{ key: string; x: number; y: number } | null>(null);
+  const showMenuTip = (key: string) => (e: React.MouseEvent) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setMenuTip({ key, x: r.right + 10, y: r.top + r.height / 2 });
+  };
+  const hideMenuTip = () => setMenuTip(null);
+  // 每个菜单项的「这是什么 / 原理」hover 说明。
+  const menuTipFor = (key: string): { title: string; desc: string } => {
+    switch (key) {
+      case 'unbind':
+        return {
+          title: i18n.t('unbind', { ns: 'teamPanel' }),
+          desc: i18n.t('tipUnbind', { ns: 'teamPanel', defaultValue: '把这张卡从团队面板移除(解除绑定),不会停止或删除 agent 本身,之后可以重新绑定回来。' }),
+        };
+      case 'restart':
+        return {
+          title: i18n.t('restart', { ns: 'teamPanel' }),
+          desc: i18n.t('tipRestart', { ns: 'teamPanel', defaultValue: '结束该 agent 的 CLI 进程,并在同一个 tmux 窗口重新拉起,工作目录和会话保留。适合 agent 卡死或升级后生效。' }),
+        };
+      case 'compact':
+        return {
+          title: i18n.t('menuCompact', { ns: 'teamPanel', defaultValue: '压缩对话 (/compact)' }),
+          desc: i18n.t('tipCompact', { ns: 'teamPanel', defaultValue: '向 agent 发送 /compact:把较早的对话提炼成摘要后继续,释放上下文窗口、节省 token,关键信息不丢。' }),
+        };
+      case 'clear':
+        return {
+          title: i18n.t('menuClear', { ns: 'teamPanel', defaultValue: '清空对话 (/clear)' }),
+          desc: i18n.t('tipClear', { ns: 'teamPanel', defaultValue: '向 agent 发送 /clear:清空全部对话历史、从零开始,不可恢复。点击后会先弹确认框。' }),
+        };
+      case 'fork':
+        return {
+          title: i18n.t('fork', { ns: 'teamPanel' }),
+          desc: i18n.t('tipFork', { ns: 'teamPanel', defaultValue: '复制出一个新 agent:先用 agent-summary 把当前对话提炼成摘要,新 agent 启动后将其作为自己的「继承记忆」读入,并以「Fork of …」挂在本 agent 下面。适合把分支任务交给分身并行处理,互不占用上下文。' }),
+        };
+      case 'delete':
+        return {
+          title: i18n.t('delete', { ns: 'teamPanel' }),
+          desc: i18n.t('tipDelete', { ns: 'teamPanel', defaultValue: '彻底删除该 agent:关闭其 tmux 窗口并移除绑定,不可恢复。' }),
+        };
+      default:
+        return { title: '', desc: '' };
+    }
+  };
   const [dragOrder, setDragOrder] = useState<string[] | null>(null);
   const [draggingWid, setDraggingWid] = useState<string | null>(null);
   const [dragOverWid, setDragOverWid] = useState<string | null>(null);
@@ -285,35 +333,74 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   }, [orderedBindings]);
 
   // Fork nesting: a fork carries source_kind='fork' + source_ref=<source wid>.
-  // Group each fork under its TOP-LEVEL ancestor (flatten fork-of-fork to one
-  // level by walking the source_ref chain past any intermediate forks). Forks
-  // whose ancestor isn't in the current list (deleted / not bound here) fall
-  // back to top-level so they never disappear.
+  // Hang each fork under its DIRECT parent so fork-of-fork renders as a real
+  // multi-level tree (it used to be flattened onto the top-level ancestor).
+  //
+  // Only CHILD WORKERS nest. A fork whose title was renamed away from the
+  // default "Fork of <src>" has been promoted to an independent worker — it
+  // shows top-level even though the DB still records its fork origin (e.g. a
+  // long-lived agent that happened to be created via fork). So a third level
+  // can only appear under a node that is itself still a child worker, which is
+  // exactly the "只有子 worker fork 出来的才出第三级" rule.
+  //
+  // When the direct parent isn't in the current list (deleted / not bound here)
+  // the fork falls back to top-level so it never disappears.
   const { forksByParent, nestedWids } = useMemo(() => {
     const byWid = new Map(orderedBindings.map(b => [shortId(b.name), b] as const));
     const isFork = (b?: Binding) => !!b && String(b.source_kind || '') === 'fork' && !!b.source_ref;
-    const resolveTop = (b: Binding): Binding => {
-      let cur = b;
-      for (let i = 0; i < 16 && isFork(cur); i++) {
-        const parent = byWid.get(shortId(cur.source_ref || ''));
-        if (!parent) break; // orphan → cur is its own top
-        cur = parent;
-      }
-      return cur;
+    // Child worker = fork that still wears its default name. Renamed ⇒ promoted.
+    const isChildWorker = (b: Binding) => {
+      const wid = shortId(b.name);
+      const t = String(b.title || panes.find(a => shortId(a.pane_id) === wid)?.title || '').trim();
+      return !t || t.startsWith('Fork of');
     };
     const byParent = new Map<string, Binding[]>();
     const nested = new Set<string>();
     for (const b of orderedBindings) {
-      if (!isFork(b)) continue;
-      const top = resolveTop(b);
-      const topWid = shortId(top.name);
-      if (topWid === shortId(b.name)) continue; // orphan fork → stays top-level
-      if (!byParent.has(topWid)) byParent.set(topWid, []);
-      byParent.get(topWid)!.push(b);
+      if (!isFork(b) || !isChildWorker(b)) continue; // promoted forks stay top-level
+      const parent = byWid.get(shortId(b.source_ref || ''));
+      if (!parent) continue; // orphan fork (parent deleted/unbound) → stays top-level
+      const parentWid = shortId(parent.name);
+      if (parentWid === shortId(b.name)) continue; // self-loop guard
+      if (!byParent.has(parentWid)) byParent.set(parentWid, []);
+      byParent.get(parentWid)!.push(b);
       nested.add(shortId(b.name));
     }
+    // Cycle guard: a wid that is somehow both nested and an ancestor of its own
+    // parent chain would loop the recursive render; drop such edges to top-level.
+    const reaches = (from: string, target: string, depth = 0): boolean => {
+      if (depth > 16) return false;
+      const kids = byParent.get(from) || [];
+      return kids.some(k => shortId(k.name) === target || reaches(shortId(k.name), target, depth + 1));
+    };
+    for (const [parentWid, kids] of [...byParent.entries()]) {
+      const safe = kids.filter(k => !reaches(shortId(k.name), parentWid));
+      for (const k of kids) if (!safe.includes(k)) nested.delete(shortId(k.name));
+      if (safe.length) byParent.set(parentWid, safe); else byParent.delete(parentWid);
+    }
     return { forksByParent: byParent, nestedWids: nested };
-  }, [orderedBindings]);
+  }, [orderedBindings, panes]);
+
+  // Collapse state for tree nodes that have fork children. Persisted so the
+  // tree keeps its shape across reloads. Default: expanded.
+  const [collapsedWids, setCollapsedWids] = useState<Set<string>>(() => {
+    try { return new Set<string>(JSON.parse(localStorage.getItem('cicy:team-panel-collapsed') || '[]')); } catch { return new Set<string>(); }
+  });
+  const toggleCollapsed = useCallback((wid: string) => {
+    setCollapsedWids(prev => {
+      const next = new Set(prev);
+      if (next.has(wid)) next.delete(wid); else next.add(wid);
+      try { localStorage.setItem('cicy:team-panel-collapsed', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }, []);
+  // Subtree size (all descendants) — shown on a collapsed node so the hidden
+  // fork count stays visible.
+  const subtreeCount = useCallback(function count(wid: string, depth = 0): number {
+    if (depth > 16) return 0;
+    const kids = forksByParent.get(wid) || [];
+    return kids.reduce((n, k) => n + 1 + count(shortId(k.name), depth + 1), 0);
+  }, [forksByParent]);
 
   const handleReorderDrop = useCallback((groupKey: string, fromWid: string, toWid: string) => {
     if (!fromWid || !toWid || fromWid === toWid) return;
@@ -397,6 +484,9 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     groupKey,
     draggable = false,
     nested = false,
+    childCount = 0,
+    collapsed = false,
+    onToggleCollapse,
   }: {
     wid: string;
     title: string;
@@ -417,6 +507,9 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     groupKey?: string;
     draggable?: boolean;
     nested?: boolean;
+    childCount?: number;
+    collapsed?: boolean;
+    onToggleCollapse?: () => void;
   }) => (
     <div
       key={wid}
@@ -467,7 +560,14 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         <button
           type="button"
           data-id="team-panel-worker-menu-button"
-          onClick={() => setOpenMenuId(prev => prev === wid ? null : wid)}
+          onClick={(e) => {
+            // measure available space below the button; the dropdown is ~270px
+            // tall fully populated, so flip upward when the card sits near the
+            // bottom of the viewport (otherwise it gets clipped/swallowed).
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            setMenuDropUp(window.innerHeight - rect.bottom < 290);
+            setOpenMenuId(prev => prev === wid ? null : wid);
+          }}
           className={`flex h-7 w-7 items-center justify-center rounded-lg transition-all cursor-pointer ${
             openMenuId === wid
               ? 'bg-white/[0.08] text-zinc-200'
@@ -480,14 +580,17 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         {openMenuId === wid ? (
           <div
             data-id="team-panel-worker-menu-dropdown"
-            className="absolute right-0 top-9 min-w-[220px] overflow-hidden whitespace-nowrap rounded-xl border border-white/[0.08] bg-[#111113]/98 p-1.5 shadow-2xl backdrop-blur-xl"
+            className={`absolute right-0 ${menuDropUp ? 'bottom-9' : 'top-9'} min-w-[220px] overflow-hidden whitespace-nowrap rounded-xl border border-white/[0.08] bg-[#111113]/98 p-1.5 shadow-2xl backdrop-blur-xl`}
           >
             {onRemove ? (
               <button
                 type="button"
                 data-id="team-panel-worker-menu-unbind"
+                onMouseEnter={showMenuTip('unbind')}
+                onMouseLeave={hideMenuTip}
                 onClick={() => {
                   setOpenMenuId(null);
+                  setMenuTip(null);
                   onRemove();
                 }}
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors cursor-pointer text-zinc-300 hover:bg-red-500/10 hover:text-red-300"
@@ -496,31 +599,89 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                 <span data-id="team-panel-worker-menu-unbind-label">{i18n.t('unbind', { ns: 'teamPanel' })}</span>
               </button>
             ) : null}
+            {normalizeAgentType(agentType) !== 'cicy' ? (
+              <button
+                type="button"
+                data-id="team-panel-worker-menu-restart"
+                disabled={!onRestart || !canRestart}
+                onMouseEnter={showMenuTip('restart')}
+                onMouseLeave={hideMenuTip}
+                onClick={() => {
+                  if (!onRestart || !canRestart) return;
+                  setOpenMenuId(null);
+                  setMenuTip(null);
+                  onRestart();
+                }}
+                className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
+                  onRestart && canRestart
+                    ? 'cursor-pointer text-zinc-300 hover:bg-white/[0.06]'
+                    : 'cursor-not-allowed text-zinc-600'
+                }`}
+              >
+                <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+                <span data-id="team-panel-worker-menu-restart-label">{i18n.t('restart', { ns: 'teamPanel' })}</span>
+              </button>
+            ) : null}
+            {/* 压缩 / 清空:把 /compact、/clear 直接 api send 给该 agent 的输入。
+                CLI 和 cicy lite 都吃这两个命令,所以对所有类型显示 —— 这也保证
+                菜单永远非空(w-1001 这类 cicy master 卡也有内容)。/clear 不可逆,
+                先 modal confirm。 */}
             <button
               type="button"
-              data-id="team-panel-worker-menu-restart"
-              disabled={!onRestart || !canRestart}
+              data-id="team-panel-worker-menu-compact"
+              onMouseEnter={showMenuTip('compact')}
+              onMouseLeave={hideMenuTip}
               onClick={() => {
-                if (!onRestart || !canRestart) return;
                 setOpenMenuId(null);
-                onRestart();
+                setMenuTip(null);
+                apiService.sendCommand(wid, '/compact').then(() => {
+                  showToast(i18n.t('toastCompactSent', { ns: 'teamPanel', defaultValue: '已发送 /compact', name: title }));
+                }).catch(() => {
+                  showToast(i18n.t('toastSendFailed', { ns: 'teamPanel', defaultValue: '发送失败' }));
+                });
               }}
-              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
-                onRestart && canRestart
-                  ? 'cursor-pointer text-zinc-300 hover:bg-white/[0.06]'
-                  : 'cursor-not-allowed text-zinc-600'
-              }`}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors cursor-pointer text-zinc-300 hover:bg-white/[0.06]"
             >
-              <RefreshCw className="w-3.5 h-3.5 shrink-0" />
-              <span data-id="team-panel-worker-menu-restart-label">{i18n.t('restart', { ns: 'teamPanel' })}</span>
+              <Archive className="w-3.5 h-3.5 shrink-0" />
+              <span data-id="team-panel-worker-menu-compact-label">{i18n.t('menuCompact', { ns: 'teamPanel', defaultValue: '压缩对话 (/compact)' })}</span>
             </button>
-            {onFork ? (
+            <button
+              type="button"
+              data-id="team-panel-worker-menu-clear"
+              onMouseEnter={showMenuTip('clear')}
+              onMouseLeave={hideMenuTip}
+              onClick={async () => {
+                setOpenMenuId(null);
+                setMenuTip(null);
+                const ok = await confirm({
+                  body: i18n.t('confirmClear', { ns: 'teamPanel', defaultValue: '清空 {{name}} 的对话?此操作不可恢复。', name: title }),
+                  danger: true,
+                });
+                if (!ok) return;
+                apiService.sendCommand(wid, '/clear').then(() => {
+                  showToast(i18n.t('toastClearSent', { ns: 'teamPanel', defaultValue: '已发送 /clear', name: title }));
+                }).catch(() => {
+                  showToast(i18n.t('toastSendFailed', { ns: 'teamPanel', defaultValue: '发送失败' }));
+                });
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors cursor-pointer text-zinc-300 hover:bg-red-500/10 hover:text-red-300"
+            >
+              <Eraser className="w-3.5 h-3.5 shrink-0" />
+              <span data-id="team-panel-worker-menu-clear-label">{i18n.t('menuClear', { ns: 'teamPanel', defaultValue: '清空对话 (/clear)' })}</span>
+            </button>
+            {/* Fork(分身)只对 coding-CLI agent 有效 —— 它靠 agent-summary 继承对话
+                + 新 tmux pane 拉起 CLI。cicy lite agent(如 w-1001 项目经理)没有
+                CLI 终端形态,fork 出来无效,干脆不显示该入口(与上面 restart 同规则)。 */}
+            {onFork && normalizeAgentType(agentType) !== 'cicy' ? (
               <button
                 type="button"
                 data-id="team-panel-worker-menu-fork"
                 disabled={forking}
+                onMouseEnter={showMenuTip('fork')}
+                onMouseLeave={hideMenuTip}
                 onClick={() => {
                   if (forking) return;
+                  setMenuTip(null);
                   onFork();
                 }}
                 className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
@@ -539,8 +700,11 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               <button
                 type="button"
                 data-id="team-panel-worker-menu-delete"
+                onMouseEnter={showMenuTip('delete')}
+                onMouseLeave={hideMenuTip}
                 onClick={() => {
                   setOpenMenuId(null);
+                  setMenuTip(null);
                   onDelete();
                 }}
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-red-300 transition-colors cursor-pointer hover:bg-red-500/10 hover:text-red-200"
@@ -553,6 +717,20 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         ) : null}
       </div>
       <div data-id="team-panel-worker-body" className="flex items-start gap-3 flex-1 min-w-0 text-left">
+        {childCount > 0 && onToggleCollapse ? (
+          <button
+            type="button"
+            data-id={`team-panel-worker-collapse-${wid}`}
+            onClick={(e) => { e.stopPropagation(); onToggleCollapse(); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="-ml-1.5 -mr-2 flex h-5 w-5 shrink-0 items-center justify-center self-center rounded text-zinc-600 transition-colors cursor-pointer hover:bg-white/[0.06] hover:text-zinc-300"
+            title={collapsed
+              ? i18n.t('treeExpand', { ns: 'teamPanel', defaultValue: '展开 {{n}} 个 fork', n: childCount })
+              : i18n.t('treeCollapse', { ns: 'teamPanel', defaultValue: '收起' })}
+          >
+            {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+        ) : null}
         <AgentAvatar
           agentType={agentType}
           title={title}
@@ -570,6 +748,15 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
 	                ? i18n.t('gatewayBadgeOn', { ns: 'teamPanel', defaultValue: '网关模式（本地 AI Gateway）' })
 	                : i18n.t('gatewayBadgeOff', { ns: 'teamPanel', defaultValue: '官方登录（直连）' })}
 	            />
+	            {collapsed && childCount > 0 ? (
+	              <span
+	                data-id={`team-panel-worker-collapsed-count-${wid}`}
+	                className="flex shrink-0 items-center gap-0.5 rounded-full bg-white/[0.05] px-1.5 py-px font-mono text-[10px] text-zinc-500"
+	                title={i18n.t('treeHiddenForks', { ns: 'teamPanel', defaultValue: '已收起 {{n}} 个 fork', n: childCount })}
+	              >
+	                <GitBranch className="h-2.5 w-2.5" />{childCount}
+	              </span>
+	            ) : null}
 	          </div>
           {(() => {
             // 第二行(也是最后一行):状态点 · id(+机器) · model · 上下文圆环 · 成本。
@@ -612,7 +799,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
 
   // One worker card from a binding. Shared by top-level rows and nested fork
   // sub-groups (nested = slimmer, non-draggable).
-  const cardForBinding = (b: Binding, opts: { nested?: boolean; draggable?: boolean; groupKey?: string }) => {
+  const cardForBinding = (b: Binding, opts: { nested?: boolean; draggable?: boolean; groupKey?: string; childCount?: number; collapsed?: boolean; onToggleCollapse?: () => void }) => {
     const wid = shortId(b.name);
     const s = getStatus(wid);
     const subtitleParts: string[] = [wid];
@@ -629,6 +816,9 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
       draggable: !!opts.draggable,
       nested: !!opts.nested,
       groupKey: opts.groupKey,
+      childCount: opts.childCount || 0,
+      collapsed: !!opts.collapsed,
+      onToggleCollapse: opts.onToggleCollapse,
       onClick: () => {
         if (onLocatePane) { onLocatePane(wid); return; }
         if (onOpenInCurrentPane) { onOpenInCurrentPane(wid); return; }
@@ -670,6 +860,20 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
             <span className="text-sm text-zinc-200">{i18n.t('toastForkStarted', { ns: 'teamPanel' })}</span>
             <span className="text-xs text-zinc-500 font-mono">{forkingId}</span>
           </div>
+        </div>,
+        document.body
+      ) : null}
+      {/* 菜单项 hover 说明卡:portal+fixed 渲染到 dropdown 右侧 —— 左面板是
+          overflow 滚动容器,内联 absolute 的 tip 会被吞,portal 不受裁切。
+          pointer-events-none 避免它抢走菜单项的 hover。 */}
+      {openMenuId && menuTip ? createPortal(
+        <div
+          data-id="team-panel-menu-tooltip"
+          className="fixed z-[9999] w-[260px] -translate-y-1/2 rounded-xl border border-white/[0.08] bg-[#111113]/98 p-3 shadow-2xl backdrop-blur-xl pointer-events-none"
+          style={{ left: menuTip.x, top: Math.min(Math.max(menuTip.y, 70), window.innerHeight - 70) }}
+        >
+          <div data-id="team-panel-menu-tooltip-title" className="mb-1 text-xs font-semibold text-zinc-200">{menuTipFor(menuTip.key).title}</div>
+          <div data-id="team-panel-menu-tooltip-desc" className="text-xs leading-5 text-zinc-400 whitespace-normal">{menuTipFor(menuTip.key).desc}</div>
         </div>,
         document.body
       ) : null}
@@ -781,39 +985,53 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                 {group.items
                   .filter(b => !nestedWids.has(shortId(b.name)))
                   .map(b => {
-                    const wid = shortId(b.name);
-                    const childForks = forksByParent.get(wid) || [];
-                    return (
-                      <div key={`tw-${wid}`} data-id={`team-panel-worker-wrap-${wid}`}>
-                        {cardForBinding(b, { draggable: true, groupKey })}
-                        {childForks.length > 0 ? (
-                          <div
-                            data-id={`team-panel-worker-forks-${wid}`}
-                            className="ml-5 mb-2 pl-2"
-                          >
-                            {childForks.map((fb, i) => {
-                              const isLast = i === childForks.length - 1;
-                              return (
-                                <div
-                                  key={`fk-${shortId(fb.name)}`}
-                                  data-id={`team-panel-worker-fork-${shortId(fb.name)}`}
-                                  className="relative pl-4"
-                                >
-                                  {/* 竖折线:竖干 + 拐角横线(最后一个用 └ 竖线只到拐角,其余 ├ 贯通) */}
-                                  <span
-                                    aria-hidden
-                                    className="absolute left-0 top-0 w-px bg-white/[0.14]"
-                                    style={{ height: isLast ? '1.4rem' : 'calc(100% + 0.375rem)' }}
-                                  />
-                                  <span aria-hidden className="absolute left-0 top-[1.4rem] h-px w-3 bg-white/[0.14]" />
-                                  {cardForBinding(fb, { nested: true, draggable: false })}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-                      </div>
-                    );
+                    // Recursive multi-level fork tree: each node renders its card +
+                    // (when expanded) its DIRECT fork children, to any depth. Only
+                    // top-level rows stay draggable (reorder is a top-level concept).
+                    const renderTreeNode = (node: Binding, depth: number): React.ReactElement => {
+                      const wid = shortId(node.name);
+                      const childForks = forksByParent.get(wid) || [];
+                      const collapsed = collapsedWids.has(wid);
+                      return (
+                        <div key={`tw-${wid}`} data-id={depth === 0 ? `team-panel-worker-wrap-${wid}` : `team-panel-worker-subtree-${wid}`}>
+                          {cardForBinding(node, {
+                            nested: depth > 0,
+                            draggable: depth === 0,
+                            groupKey: depth === 0 ? groupKey : undefined,
+                            childCount: childForks.length > 0 ? subtreeCount(wid) : 0,
+                            collapsed,
+                            onToggleCollapse: childForks.length > 0 ? () => toggleCollapsed(wid) : undefined,
+                          })}
+                          {childForks.length > 0 && !collapsed ? (
+                            <div
+                              data-id={`team-panel-worker-forks-${wid}`}
+                              className={depth === 0 ? 'ml-5 mb-2 pl-2' : 'ml-4 mb-1.5 pl-1'}
+                            >
+                              {childForks.map((fb, i) => {
+                                const isLast = i === childForks.length - 1;
+                                return (
+                                  <div
+                                    key={`fk-${shortId(fb.name)}`}
+                                    data-id={`team-panel-worker-fork-${shortId(fb.name)}`}
+                                    className="relative pl-4"
+                                  >
+                                    {/* 竖折线:竖干 + 拐角横线(最后一个用 └ 竖线只到拐角,其余 ├ 贯通) */}
+                                    <span
+                                      aria-hidden
+                                      className="absolute left-0 top-0 w-px bg-white/[0.14]"
+                                      style={{ height: isLast ? '1.4rem' : 'calc(100% + 0.375rem)' }}
+                                    />
+                                    <span aria-hidden className="absolute left-0 top-[1.4rem] h-px w-3 bg-white/[0.14]" />
+                                    {renderTreeNode(fb, depth + 1)}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    };
+                    return renderTreeNode(b, 0);
                   })}
               </div>
               );

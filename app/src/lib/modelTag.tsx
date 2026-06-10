@@ -10,7 +10,7 @@ import { cn } from './utils';
 // model name is shown so the styling/short-naming stays consistent.
 
 export type ModelFamily =
-  | 'opus' | 'sonnet' | 'haiku'
+  | 'opus' | 'sonnet' | 'haiku' | 'fable'
   | 'gpt' | 'o' | 'deepseek' | 'gemini' | 'qwen' | 'kimi' | 'grok' | 'glm'
   | 'llama' | 'mistral' | 'other';
 
@@ -34,6 +34,7 @@ export function modelFamily(raw?: string): ModelFamily {
   if (/opus/.test(m)) return 'opus';
   if (/sonnet/.test(m)) return 'sonnet';
   if (/haiku/.test(m)) return 'haiku';
+  if (/fable/.test(m)) return 'fable';
   if (/^deepseek|^ds-/.test(m)) return 'deepseek';
   if (/^o\d/.test(m)) return 'o';
   if (/^gpt/.test(m)) return 'gpt';
@@ -53,13 +54,13 @@ export function shortModel(raw?: string): string {
   const m = normalize(orig);
   if (MODEL_ALIASES[m]) return MODEL_ALIASES[m];
   // claude new style: claude-opus-4-8 → opus-4.8
-  let c = m.match(/^claude-(opus|sonnet|haiku)-(\d+)-(\d+)/);
+  let c = m.match(/^claude-(opus|sonnet|haiku|fable)-(\d+)-(\d+)/);
   if (c) return `${c[1]}-${c[2]}.${c[3]}`;
   // claude old style: claude-3-5-sonnet → sonnet-3.5
-  c = m.match(/^claude-(\d+)-(\d+)-(opus|sonnet|haiku)/);
+  c = m.match(/^claude-(\d+)-(\d+)-(opus|sonnet|haiku|fable)/);
   if (c) return `${c[3]}-${c[1]}.${c[2]}`;
-  // claude-<family>-<n> → family-n  (e.g. claude-opus-4 → opus-4)
-  c = m.match(/^claude-(opus|sonnet|haiku)-(\d+)/);
+  // claude-<family>-<n> → family-n  (e.g. claude-opus-4 → opus-4, claude-fable-5 → fable-5)
+  c = m.match(/^claude-(opus|sonnet|haiku|fable)-(\d+)/);
   if (c) return `${c[1]}-${c[2]}`;
   // deepseek-* → ds-*
   if (m.startsWith('deepseek')) return m.replace(/^deepseek-?/, 'ds-') || 'ds';
@@ -80,6 +81,7 @@ const FAMILY_STYLE: Record<ModelFamily, string> = {
   opus:     'bg-violet-900/60 text-white/75',
   sonnet:   'bg-sky-900/60 text-white/75',
   haiku:    'bg-teal-900/60 text-white/75',
+  fable:    'bg-pink-900/60 text-white/75',
   gpt:      'bg-emerald-900/60 text-white/75',
   o:        'bg-lime-900/60 text-white/75',
   deepseek: 'bg-indigo-900/60 text-white/75',

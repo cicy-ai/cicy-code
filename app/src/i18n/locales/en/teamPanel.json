@@ -23,6 +23,18 @@
   "fork": "Fork",
   "toastForkStarted": "Forking agent...",
   "toastForkFailed": "Fork failed",
+  "menuCompact": "Compact chat (/compact)",
+  "menuClear": "Clear chat (/clear)",
+  "confirmClear": "Clear {{name}}'s conversation? This cannot be undone.",
+  "toastCompactSent": "/compact sent",
+  "toastClearSent": "/clear sent",
+  "toastSendFailed": "Failed to send",
+  "tipUnbind": "Removes this card from the team panel (unbinds it). The agent itself keeps running and can be bound again later.",
+  "tipRestart": "Stops the agent's CLI process and relaunches it in the same tmux window. Working directory and session are kept. Useful when the agent is stuck or after an upgrade.",
+  "tipCompact": "Sends /compact to the agent: earlier conversation is distilled into a summary and work continues, freeing context window and saving tokens without losing key information.",
+  "tipClear": "Sends /clear to the agent: wipes the entire conversation history and starts from scratch. Irreversible — a confirmation dialog is shown first.",
+  "tipFork": "Clones a new agent: agent-summary distills the current conversation into a summary, which the new agent reads as its own inherited memory on startup. It appears as \"Fork of …\" nested under this agent — great for handing branch tasks to a fork to run in parallel without competing for context.",
+  "tipDelete": "Permanently deletes the agent: closes its tmux window and removes the binding. Irreversible.",
   "gatewayBadgeOn": "Gateway mode (local AI gateway)",
   "gatewayBadgeOff": "Official login (direct)"
 }
