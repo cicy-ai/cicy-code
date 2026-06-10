@@ -40,7 +40,7 @@ var (
 	desktopCmd    *exec.Cmd
 )
 
-const version = "2.2.10"
+const version = "2.2.11"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
