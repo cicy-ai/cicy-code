@@ -1211,8 +1211,28 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	aiGatewayWriteReplyMirror(s, statusCode, headers, responseBody, parsed, replySnapshot)
 }
 
+// aiGatewayHistoryDir resolves where an agent's conversation store lives:
+// <workspace>/.cicy/history — the agent's CONFIGURED workspace when set (it can
+// differ from workers/<id>: w-1001 works out of workers/w-10001), falling back
+// to the id-derived default. History previously ignored the configured
+// workspace; when the two differ, the old id-derived dir is moved wholesale
+// (one-time rename; the snapshot symlinks inside are relative and survive).
 func aiGatewayHistoryDir(agentID string) string {
-	newDir := filepath.Join(builtinWorkerRuntimeDir(agentID), "history")
+	base := builtinWorkerWorkspace(agentID)
+	if store != nil {
+		if ws := strings.TrimSpace(paneWorkspace(agentID)); ws != "" {
+			base = ws
+		}
+	}
+	newDir := filepath.Join(workspaceRuntimeDir(base), "history")
+	if idDir := filepath.Join(builtinWorkerRuntimeDir(agentID), "history"); idDir != newDir {
+		if _, err := os.Stat(newDir); os.IsNotExist(err) {
+			if _, err2 := os.Stat(idDir); err2 == nil {
+				_ = os.MkdirAll(filepath.Dir(newDir), 0755)
+				_ = os.Rename(idDir, newDir)
+			}
+		}
+	}
 	legacyDirs := []string{
 		filepath.Join(builtinWorkerWorkspace(agentID), ".history"),
 		filepath.Join(builtinWorkerWorkspace(agentID), "history"),
