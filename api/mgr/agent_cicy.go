@@ -2060,28 +2060,10 @@ func clearCicyPane(shortID, workspace string) {
 	// immediately durable. The old conversation's dir stays for scrollback; the
 	// stale reply.json is dropped (the slash ack replaces it).
 	cicySeedCurrentSnapshot(shortID, newConv, []M{})
-	removeCicyReplySnapshot(shortID)
-}
-
-// removeCicySnapshots drops the gateway live snapshots (current/reply.json and
-// their symlink targets) so the web's committed view is cleared; the audit layer
-// recreates them on the next turn.
-func removeCicySnapshots(shortID string) {
-	removeCicySnapshotFile(shortID, "current.json")
-	removeCicyReplySnapshot(shortID)
-}
-
-func removeCicyReplySnapshot(shortID string) {
-	removeCicySnapshotFile(shortID, "reply.json")
-}
-
-func removeCicySnapshotFile(shortID, name string) {
-	dir := aiGatewayHistoryDir(shortID)
-	canonical := filepath.Join(dir, name)
-	if target, err := os.Readlink(canonical); err == nil {
-		_ = os.Remove(filepath.Join(dir, target))
-	}
-	_ = os.Remove(canonical)
+	// Write the ack reply under the NEW conversation — this also repoints the
+	// canonical reply.json symlink there. The old conversation keeps its own
+	// current.json/reply.json untouched for scrollback; nothing is deleted.
+	cicyWriteSlashAck(shortID, newConv, "✅ Conversation cleared.")
 }
 
 // cicySlashAckTurnID marks a synthetic reply.json written as the visible
@@ -2111,23 +2093,27 @@ func cicyWriteSlashAck(shortID, convID, text string) {
 	})
 }
 
-// archiveCicyCurrentSnapshot copies the live current.json to a timestamped
-// sibling (current.<unix>.json) inside the conversation dir before /compact
-// rewrites history — so the pre-compaction wire snapshot survives for scrollback
-// / rollback. Best-effort: a missing snapshot is not an error.
-func archiveCicyCurrentSnapshot(shortID string) {
+// archiveCicySnapshots copies the live current.json AND reply.json to
+// timestamped siblings (current.<unix>.json / reply.<unix>.json, same stamp)
+// inside the conversation dir before /compact rewrites history — so the
+// pre-compaction wire snapshot and the final answer both survive for
+// scrollback / rollback. Best-effort: a missing snapshot is not an error.
+func archiveCicySnapshots(shortID string) {
 	dir := aiGatewayHistoryDir(shortID)
-	canonical := filepath.Join(dir, "current.json")
-	data, err := os.ReadFile(canonical) // follows the symlink to the real file
-	if err != nil || len(data) == 0 {
-		return
+	ts := time.Now().Unix()
+	for _, name := range []string{"current.json", "reply.json"} {
+		canonical := filepath.Join(dir, name)
+		data, err := os.ReadFile(canonical) // follows the symlink to the real file
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		target := canonical
+		if t, e := os.Readlink(canonical); e == nil {
+			target = filepath.Join(dir, t)
+		}
+		archive := strings.TrimSuffix(target, ".json") + fmt.Sprintf(".%d.json", ts)
+		_ = os.WriteFile(archive, data, 0644)
 	}
-	target := canonical
-	if t, e := os.Readlink(canonical); e == nil {
-		target = filepath.Join(dir, t)
-	}
-	archive := strings.TrimSuffix(target, ".json") + fmt.Sprintf(".%d.json", time.Now().Unix())
-	_ = os.WriteFile(archive, data, 0644)
 }
 
 // compactCicyPane is the manual /compact: it summarizes the WHOLE conversation
@@ -2153,7 +2139,7 @@ func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspa
 		return
 	}
 
-	archiveCicyCurrentSnapshot(shortID) // best-effort rollback source
+	archiveCicySnapshots(shortID) // best-effort rollback source (current + reply)
 
 	emit(M{"type": "system", "text": "Compacting conversation…"})
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
@@ -2176,7 +2162,8 @@ func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspa
 	cicySeedCurrentSnapshot(shortID, session.convID, session.messages)
 	convID := session.convID
 	session.mu.Unlock()
-	removeCicyReplySnapshot(shortID)
+	// The ack overwrites reply.json in place (same conversation); the pre-compact
+	// answer was archived above — nothing is deleted.
 	ack := "✅ Compacted. Summary: " + truncateForLog(strings.TrimSpace(summary), 200)
 	cicyWriteSlashAck(shortID, convID, ack)
 
@@ -2425,10 +2412,6 @@ func runCicySlashCommand(ctx context.Context, session *cicySession, shortID, wor
 	switch cmd {
 	case "/clear":
 		clearCicyPane(shortID, workspace)
-		session.mu.Lock()
-		newConv := session.convID
-		session.mu.Unlock()
-		cicyWriteSlashAck(shortID, newConv, "✅ Conversation cleared.")
 		emit(M{"type": "system", "text": "✅ Conversation cleared."})
 		emit(M{"type": "done"})
 		return true
