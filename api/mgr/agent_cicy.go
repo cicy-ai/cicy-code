@@ -719,6 +719,7 @@ func cicyRestoreSessionMessages(shortID, convID string) []M {
 	lastRole := aiGatewayString(msgs[len(msgs)-1]["role"])
 	reply := agentInspectorLoadReply(shortID)
 	if lastRole != "assistant" && reply.Status == "completed" && len(reply.Items) > 0 &&
+		reply.TurnID != cicySlashAckTurnID &&
 		(reply.ConversationID == "" || current.ConversationID == "" || reply.ConversationID == current.ConversationID) {
 		if last, ok := cicyAssistantFromReplyItems(reply.Items, msgs); ok {
 			msgs = append(msgs, last)
@@ -2065,6 +2066,33 @@ func removeCicySnapshotFile(shortID, name string) {
 	_ = os.Remove(canonical)
 }
 
+// cicySlashAckTurnID marks a synthetic reply.json written as the visible
+// acknowledgment of a slash command. The web UI polls reply.json for the
+// answer bubble — the queue/UI delivery path has no live stream, so without
+// this the command would execute silently. Restore skips it (it is feedback,
+// not conversation content).
+const cicySlashAckTurnID = "slash-ack"
+
+func cicyWriteSlashAck(shortID, convID, text string) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	historyID := int64(1)
+	if current := agentInspectorLoadCurrent(shortID); current.ConversationID == convID {
+		historyID = int64(aiGatewayCurrentBodyMaxHistoryID(current.Body)) + 1
+	}
+	_ = aiGatewayWriteReplySnapshot(shortID, aiGatewayReplySnapshot{
+		TurnID:         cicySlashAckTurnID,
+		ConversationID: convID,
+		HistoryID:      historyID,
+		Status:         "completed",
+		StartedAt:      now,
+		UpdatedAt:      now,
+		Answer:         text,
+		Items: []map[string]interface{}{
+			{"id": 1, "type": "text", "text": text},
+		},
+	})
+}
+
 // archiveCicyCurrentSnapshot copies the live current.json to a timestamped
 // sibling (current.<unix>.json) inside the conversation dir before /compact
 // rewrites history — so the pre-compaction wire snapshot survives for scrollback
@@ -2128,10 +2156,13 @@ func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspa
 	// restores the compacted state, and drop the stale reply.json (it answered
 	// the pre-compact history; folding it into a restore would duplicate it).
 	cicySeedCurrentSnapshot(shortID, session.convID, session.messages)
+	convID := session.convID
 	session.mu.Unlock()
 	removeCicyReplySnapshot(shortID)
+	ack := "✅ 已压缩。摘要:" + truncateForLog(strings.TrimSpace(summary), 200)
+	cicyWriteSlashAck(shortID, convID, ack)
 
-	emit(M{"type": "system", "text": "✅ 已压缩。摘要:" + truncateForLog(strings.TrimSpace(summary), 200)})
+	emit(M{"type": "system", "text": ack})
 	emit(M{"type": "done"})
 }
 
@@ -2376,6 +2407,10 @@ func runCicySlashCommand(ctx context.Context, session *cicySession, shortID, wor
 	switch cmd {
 	case "/clear":
 		clearCicyPane(shortID, workspace)
+		session.mu.Lock()
+		newConv := session.convID
+		session.mu.Unlock()
+		cicyWriteSlashAck(shortID, newConv, "✅ 会话已清空。")
 		emit(M{"type": "system", "text": "✅ 会话已清空。"})
 		emit(M{"type": "done"})
 		return true
