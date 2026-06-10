@@ -446,7 +446,15 @@ export default function AgentInspector({
   const overview = data?.overview || {};
   const history = data?.history || { total: 0, items: [], offset: 0, limit: HISTORY_PAGE_SIZE, has_more: false };
   const normalizedAgentType = normalizeAgentType(settingsData?.agent_type);
-  const modelSettingsEnabled = normalizedAgentType === 'codex' || normalizedAgentType === 'claude' || normalizedAgentType === 'opencode';
+  // cicy is included so its provider/model/gateway-override is configurable too.
+  // The custom-gateway *toggle* below stays gated to the CLI agents (cicy is
+  // always on the gateway, so it has nothing to toggle), but the provider + model
+  // pickers apply to cicy just as they do to the CLIs.
+  const modelSettingsEnabled = normalizedAgentType === 'codex' || normalizedAgentType === 'claude' || normalizedAgentType === 'opencode' || normalizedAgentType === 'cicy' || normalizedAgentType === 'gemini';
+  // cicy always rides the custom gateway, so its override pickers are never greyed
+  // out (it has no official-auth mode and no toggle to flip them off). gemini ships
+  // gateway-by-default too, so it gets the same always-on override treatment.
+  const gatewayOverrideEnabled = !!settingsData?.use_custom_gateway || normalizedAgentType === 'cicy' || normalizedAgentType === 'gemini';
 
   // Cert-install nudge: codex / kiro-cli are Rust and read the OS trust store, so
   // when they run NON-gateway (official login → MITM) the host needs the MITM CA
@@ -910,7 +918,7 @@ export default function AgentInspector({
                   )}
 
                   {(
-                    <div data-id="agent-inspector-settings-model-gateway-override" className={`space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3 ${!settingsData?.use_custom_gateway ? 'opacity-50 pointer-events-none select-none' : ''}`}>
+                    <div data-id="agent-inspector-settings-model-gateway-override" className={`space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3 ${!gatewayOverrideEnabled ? 'opacity-50 pointer-events-none select-none' : ''}`}>
                       <div data-id="agent-inspector-settings-model-gateway-override-header">
                         <div data-id="agent-inspector-settings-model-gateway-override-title" className="text-sm font-medium text-zinc-100">{t('gatewayOverrideTitle')}</div>
                         <div data-id="agent-inspector-settings-model-gateway-override-desc" className="mt-1 text-xs leading-5 text-zinc-500">{t('gatewayOverrideDesc')}</div>

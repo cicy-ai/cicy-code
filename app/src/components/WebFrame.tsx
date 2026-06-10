@@ -11,6 +11,12 @@ import { WEB_FRAME_MASK_EVENT, WebFrameMaskEventDetail } from '../lib/webFrameMa
 // 1c73ae5 checkpoint snapshot; restored here and widened to all frames.
 const isElectron = navigator.userAgent.includes('Electron');
 
+// A gotty terminal guest (separate top-level WebContents) asks the host to open
+// a file in the code editor by printing this exact prefix on console.log; our
+// webview `console-message` listener forwards the JSON tail to
+// __cicyOpenCodeFile. Kept in sync with api/js/src/link_confirm.ts.
+const CODE_FILE_CONSOLE_SENTINEL = '[[CICY_OPEN_CODE_FILE]]';
+
 // Global cicy super object for Electron webview control
 interface CicyWebview { el: HTMLElement; src: string; openDevTools: () => void; getContents: () => any; }
 interface CicyGlobal { webviews: Map<string, CicyWebview>; list: () => CicyWebview[]; devTools: (src?: string) => void; }
@@ -157,6 +163,23 @@ export const WebFrame = forwardRef<HTMLIFrameElement, WebFrameProps>(
       };
       const onConsole = (e: any) => {
         const msg = e.message ?? '';
+        // gotty terminal guests can't reach the host via window.parent (they're
+        // a separate top-level WebContents), so a clicked file path asks us to
+        // open the editor by printing this sentinel. Match it and forward the
+        // path to __cicyOpenCodeFile. Sentinel kept in sync with
+        // api/js/src/link_confirm.ts (CODE_FILE_CONSOLE_SENTINEL).
+        if (typeof msg === 'string') {
+          const idx = msg.indexOf(CODE_FILE_CONSOLE_SENTINEL);
+          if (idx !== -1) {
+            try {
+              const payload = JSON.parse(msg.slice(idx + CODE_FILE_CONSOLE_SENTINEL.length));
+              const filePath = String(payload?.path || '').trim();
+              const openFn = (window as any).__cicyOpenCodeFile;
+              if (filePath && typeof openFn === 'function') openFn(filePath);
+            } catch {}
+            return;
+          }
+        }
         console.log(`[webview:${title || 'untitled'}]`, msg);
       };
       // Right-click inside the guest → draw our own menu at the reported spot.

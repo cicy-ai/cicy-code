@@ -241,7 +241,16 @@ func resolveRuntimeAIConfigForAgent(providerProtocol string, agentID string) (ru
 			actual := normalizeAIGatewayProvider(pc.Protocol)
 			want := normalizeAIGatewayProvider(providerProtocol)
 			if actual != "" && want != "" && actual != want {
-				return cfg, ov, ErrRuntimeAIProviderMismatch
+				// The gateway bridges an openai-protocol provider behind the
+				// /anthropic endpoint (Anthropic Messages → Chat Completions, see
+				// shouldAdaptAnthropicToChatCompletions) — so that single direction is
+				// NOT a real mismatch and must be allowed (this is what lets the cicy
+				// agent ride an openai provider). Every other cross-protocol pairing
+				// has no bridge, so keep surfacing the clear 409.
+				bridged := want == "anthropic" && actual == "openai"
+				if !bridged {
+					return cfg, ov, ErrRuntimeAIProviderMismatch
+				}
 			}
 		}
 		cfg = specific

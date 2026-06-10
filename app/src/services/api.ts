@@ -133,6 +133,8 @@ const api = {
   sendKeys: (winId: string, keys: string) => unwrapTmuxSend(http.post('/api/tmux/send-keys', { win_id: winId, keys })),
   // 打断 headless cicy 正在跑的 turn(它没有 tmux pane,send-keys 够不着,走专用端点)。
   cancelCicyReply: (paneId: string) => http.post('/api/cicy/cancel', { pane_id: paneId }),
+  // 重跑 headless cicy 最近一次取消/失败的 turn(聊天里「重试」按钮)。
+  retryCicyReply: (paneId: string) => http.post('/api/cicy/retry', { pane_id: paneId }),
   toggleMouse: (mode: string, paneId: string) => http.post(`/api/tmux/mouse/${mode}`, null, { params: { pane_id: paneId } }),
   chooseSession: (id: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/choose-session`),
   splitPane: (id: string, dir: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/split`, null, { params: { direction: dir } }),
@@ -235,11 +237,6 @@ const api = {
   deleteToken: (id: number) => http.delete(`/api/auth/tokens/${id}`),
 
   listGroups: () => http.get('/api/groups'),
-
-  getTrafficStats: (pane: string, minutes = 60, interval = 1) => http.get(`/api/stats/traffic?pane=${pane}&minutes=${minutes}&interval=${interval}`),
-  getTrafficRaw: (pane: string) => http.get(`/api/stats/traffic/raw?pane=${pane}`),
-  getChatHistory: (pane: string) => http.get(`/api/stats/chat?pane=${pane}`),
-  getChatStatsByAgent: (agentId: string) => http.get('/api/stats/chat', { params: { agent_id: agentId } }),
   getSystemResources: (cfg?: any) => http.get('/api/system/resources', cfg),
 
   getCicyFiles: (pane: string) => http.get(`/api/cicy/files?pane=${pane}`),

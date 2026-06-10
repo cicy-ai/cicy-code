@@ -469,12 +469,77 @@ func agentHistoryLoadCurrentItemByID(agentID string, conversationID string, hist
 	return resolvedConversationID, nil, false, nil
 }
 
+// cicyTagCompactSummaryAsSystem 把 cicy 压缩注入的那条摘要消息(wire 上必须是 role:user ——
+// deepseek 原生 /anthropic 端点不接受 messages 里的 system role,且无翻译层可剥)在**展示**时
+// 改标成 role:system。前端对 system 项有现成折叠(SystemNoticeCard),于是摘要变成一个收起的
+// 系统分隔条、不再霸屏成一条 q。学 claude:压缩走 system,不当用户提问。这是唯一能加标记的地方
+// (web 读的就是 wire 快照,wire 不能动)。用 cicy 自己的常量判定,权威、就此一处。
+func cicyTagCompactSummaryAsSystem(messages []map[string]interface{}) {
+	marker := strings.TrimSpace(cicyCompactSummaryPrefix)
+	for _, m := range messages {
+		if r, _ := m["role"].(string); r != "user" {
+			continue
+		}
+		if s, ok := m["content"].(string); ok && strings.HasPrefix(strings.TrimSpace(s), marker) {
+			m["role"] = "system"
+		}
+	}
+}
+
+// cicyOutcomeText pulls the first text block out of a message's content, whether
+// the content is a bare string or the usual array of typed blocks (JSON-loaded as
+// []interface{}). Used to spot the cicyOutcomePrefix marker.
+func cicyOutcomeText(content interface{}) string {
+	switch c := content.(type) {
+	case string:
+		return c
+	case []interface{}:
+		for _, b := range c {
+			if bm, ok := b.(map[string]interface{}); ok {
+				if t, _ := bm["type"].(string); t == "text" {
+					if s, ok := bm["text"].(string); ok {
+						return s
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// cicyTagOutcome cleans the synthetic "turn produced no reply" marker
+// (cicyOutcomePrefix, written by agent_cicy on a cancelled or post-retry-failed
+// turn) for the web. It stays a role:assistant message — the web renders it as a
+// normal assistant output (avatar, left-aligned) — but the raw marker text is
+// replaced with a readable label and cicy_outcome is exposed so the UI can style
+// it (failed/cancelled) and offer 重试 on the latest turn. The wire copy
+// (session.messages) is untouched; this only rewrites the served display copy.
+func cicyTagOutcome(messages []map[string]interface{}) {
+	for _, m := range messages {
+		if r, _ := m["role"].(string); r != "assistant" {
+			continue
+		}
+		kind := cicyOutcomeKindFromText(cicyOutcomeText(m["content"]))
+		if kind == "" {
+			continue
+		}
+		label := "生成失败"
+		if kind == "cancelled" {
+			label = "已停止生成"
+		}
+		m["content"] = label
+		m["cicy_outcome"] = kind // "cancelled" | "error" — UI styles it + 重试 on latest
+	}
+}
+
 func agentHistoryCurrentBodyItems(current aiGatewayCurrentSnapshot) []map[string]interface{} {
 	body := aiGatewayMap(current.Body)
 	if len(body) == 0 {
 		return nil
 	}
 	if messages := aiGatewayExtractMessages(body); len(messages) > 0 {
+		cicyTagCompactSummaryAsSystem(messages)
+		cicyTagOutcome(messages)
 		return messages
 	}
 	inputs := aiGatewayExtractInputItems(body)

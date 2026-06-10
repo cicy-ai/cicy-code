@@ -367,7 +367,7 @@ B 的 turn 完成（且无 tool_calls）：
 | `api/mgr/gateway_reply_callback.go` | aiGatewayReplyHook 接口 + 跨 agent 回调 |
 | `api/mgr/gateway_reply_text.go` | `/api/agents/reply-text`：跨 agent 读取最终回复文本 |
 | `api/mgr/ai_gateway_audit.go` | AI 网关审计：拦截请求/响应、创建 hooks、调用 finalize |
-| `api/mgr/openclaw_gateway.go` | 反向代理入口：`newAIGatewayAuditSession` 调用点 |
+| `api/mgr/ai_gateway.go` | 通用 AI 网关反向代理入口（`handleAIGatewayProxy`）：`newAIGatewayAuditSession` 调用点 |
 | `api/mgr/tmux.go` | `sendTextToPane`：tmux send-keys 把文本写到 agent pane |
 | `api/mgr/tg.go` | Telegram legacy（按 pane 配置的 chat_id 推送 hook） |
 

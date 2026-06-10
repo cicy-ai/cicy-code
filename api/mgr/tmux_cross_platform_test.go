@@ -8,14 +8,14 @@ import (
 
 func TestEnsureAgentCommandLineUsesSharedInstallHelper(t *testing.T) {
 	line := ensureAgentCommandLine("codex", "Codex", "npm install -g @openai/codex@latest", "/tmp/codex.log")
-	if !strings.Contains(line, "__cicy_require_command 'codex' 'Codex'") {
+	if !strings.Contains(line, "__cicy_check_command 'codex' 'Codex'") {
 		t.Fatalf("ensureAgentCommandLine = %q", line)
 	}
 }
 
 func TestEnsureAgentCommandLineLiveUsesLiveHelper(t *testing.T) {
 	line := ensureAgentCommandLineLive("kiro-cli", "Kiro CLI", "__cicy_local_install_kiro", "/tmp/kiro.log")
-	if !strings.Contains(line, "__cicy_require_command_live 'kiro-cli' 'Kiro CLI'") {
+	if !strings.Contains(line, "__cicy_check_command 'kiro-cli' 'Kiro CLI'") {
 		t.Fatalf("ensureAgentCommandLineLive = %q", line)
 	}
 }
@@ -26,8 +26,8 @@ func TestAgentBootLinesKiroUsesLiveInstallAndStartsChat(t *testing.T) {
 	if !strings.Contains(script, "__cicy_local_install_kiro() {") {
 		t.Fatalf("kiro boot lines missing local install helper: %s", script)
 	}
-	if !strings.Contains(script, "__cicy_require_command_live 'kiro-cli' 'Kiro CLI'") {
-		t.Fatalf("kiro boot lines missing live install helper: %s", script)
+	if !strings.Contains(script, "__cicy_check_command 'kiro-cli' 'Kiro CLI'") {
+		t.Fatalf("kiro boot lines missing presence-check helper: %s", script)
 	}
 	if !strings.Contains(script, "https://cli.kiro.dev/install") || !strings.Contains(script, `filename="kirocli-${arch}-linux${suffix}.zip"`) {
 		t.Fatalf("kiro boot lines missing direct zip download logic: %s", script)
@@ -70,7 +70,7 @@ func TestAgentBootLinesCopilotStartsYoloAndTrustsWorkspace(t *testing.T) {
 		if !strings.Contains(script, "mkdir -p ~/.copilot") {
 			t.Fatalf("copilot boot lines missing config dir creation: %s", script)
 		}
-		if !strings.Contains(script, "__cicy_require_command 'copilot' 'GitHub Copilot'") {
+		if !strings.Contains(script, "__cicy_check_command 'copilot' 'GitHub Copilot'") {
 			t.Fatalf("copilot boot lines missing install helper: %s", script)
 		}
 		if !strings.Contains(script, "trustedFolders") {
@@ -401,7 +401,7 @@ func TestInitPaneEnvScriptBootstrapsCicyTmuxConf(t *testing.T) {
 	if !strings.Contains(script, "export X_AGENT_ID='w-1001:main.0'") {
 		t.Fatalf("boot script missing X_AGENT_ID: %s", script)
 	}
-	if !strings.Contains(script, "__cicy_require_command 'codex' 'Codex'") {
+	if !strings.Contains(script, "__cicy_check_command 'codex' 'Codex'") {
 		t.Fatalf("boot script missing codex install helper: %s", script)
 	}
 }

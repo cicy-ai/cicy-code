@@ -86,10 +86,6 @@ func (d *DB) TokenPrefix() string {
 	return "substr(token,1,8)||'...' as token_prefix"
 }
 
-func (d *DB) DeleteOldLogs() string {
-	return "DELETE FROM http_log WHERE ts < CAST(strftime('%s','now','-7 days') AS INTEGER)"
-}
-
 func (d *DB) CastText(col string) string { return col }
 
 func (d *DB) Migrate() {
@@ -187,16 +183,6 @@ func (d *DB) Migrate() {
 			UNIQUE(group_id, win_id),
 			FOREIGN KEY(group_id) REFERENCES agent_groups(id) ON DELETE CASCADE
 		)`,
-		`CREATE TABLE IF NOT EXISTS http_log (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			pane_id TEXT NOT NULL, method TEXT NOT NULL DEFAULT '',
-			url TEXT NOT NULL, status_code INTEGER DEFAULT 0,
-			req_kb REAL DEFAULT 0, res_kb REAL DEFAULT 0,
-			data TEXT, ts INTEGER NOT NULL,
-			created_at TEXT DEFAULT (datetime('now'))
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_http_log_pane ON http_log(pane_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_http_log_ts ON http_log(ts)`,
 		`CREATE TABLE IF NOT EXISTS pane_agents (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			pane_id TEXT NOT NULL, agent_name TEXT NOT NULL,

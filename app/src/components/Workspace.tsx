@@ -384,8 +384,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setActiveAgentId,
     setAgentDetail: setSharedAgentDetail,
     patchAgentDetail: patchSharedAgentDetail,
-    shellPanelOpen,
-    toggleShellPanel,
+    isShellOpen,
+    toggleShellOpen,
   } = useApp();
   const { token, hasPermission } = useAuth();
   const { confirm, node: dialogsNode } = useDialogs();
@@ -1658,10 +1658,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         <button
           type="button"
           data-id="workspace-shell-toggle"
-          onClick={toggleShellPanel}
-          aria-pressed={shellPanelOpen}
+          onClick={() => toggleShellOpen(activeCliPaneId)}
+          aria-pressed={isShellOpen(activeCliPaneId)}
           title={t('shellPanelToggle', { defaultValue: 'Shell 终端' })}
-          className={`p-1 rounded border transition-colors cursor-pointer ${shellPanelOpen ? 'text-emerald-400 border-emerald-400/50 bg-emerald-400/10' : 'text-zinc-600 border-zinc-700/60 hover:text-zinc-300 hover:border-zinc-600'}`}
+          className={`p-1 rounded border transition-colors cursor-pointer ${isShellOpen(activeCliPaneId) ? 'text-emerald-400 border-emerald-400/50 bg-emerald-400/10' : 'text-zinc-600 border-zinc-700/60 hover:text-zinc-300 hover:border-zinc-600'}`}
         >
           <Terminal className="w-3.5 h-3.5" />
         </button>
@@ -1680,7 +1680,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         </div>
       )}
     </>
-  ) : null, [activeCliPaneId, paneId, paneDetails, agentDetail, applyPanePatch, refreshPaneDetail, netLatency, chatWsConnected, chatWsClientId, handleSendPageClientIdToAgent, handleOpenProxyManager, contextUsage, shellPanelOpen, toggleShellPanel, t]);
+  ) : null, [activeCliPaneId, paneId, paneDetails, agentDetail, applyPanePatch, refreshPaneDetail, netLatency, chatWsConnected, chatWsClientId, handleSendPageClientIdToAgent, handleOpenProxyManager, contextUsage, isShellOpen, toggleShellOpen, t]);
   // Memoized so the stack's `items` keeps a stable identity across the
   // per-token Workspace re-renders a live conversation triggers (those tokens
   // touch chat-live state the stack never reads). Combined with React.memo on
@@ -2530,7 +2530,7 @@ function ModelPicker({ paneId, agentDetail, onUpdated, onOpen }: { paneId: strin
   // The dispatcher always talks through the local gateway by construction, so
   // it is eligible regardless of the use_custom_gateway flag.
   const eligible = isCicyLiteAgent(agentType)
-    || (useCustomGateway && ['claude', 'codex', 'opencode'].includes(agentType));
+    || (useCustomGateway && ['claude', 'codex', 'opencode', 'gemini'].includes(agentType));
   if (!eligible) return null;
 
   const defaultProviderKey = String(agentDetail?.runtime_ai_default?.provider_name || '').trim();

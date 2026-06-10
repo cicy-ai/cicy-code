@@ -168,8 +168,6 @@ func normalizeRuntimeEventType(eventType string) string {
 		return "session_status_changed"
 	case "worker_idle":
 		return "task_completed"
-	case "http_log":
-		return "tool_result"
 	default:
 		return eventType
 	}

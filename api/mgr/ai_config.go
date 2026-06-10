@@ -12,9 +12,11 @@ type runtimeAIConfig struct {
 	APIKey               string
 	APIURL               string
 	AnthropicURL         string
+	GeminiURL            string // base URL for the Google GenAI (gemini-cli) protocol
 	DefaultOpencodeModel string
 	DefaultClaudeModel   string
 	CodexModel           string
+	GeminiModel          string
 	OpenClawModel        string
 	HermesModel          string
 }
@@ -182,15 +184,21 @@ func loadRuntimeAIConfigForProvider(provider string) (runtimeAIConfig, bool) {
 			DefaultOpencodeModel: providerDefaultModelForAgentType(pc, "opencode"),
 			DefaultClaudeModel:   providerDefaultModelForAgentType(pc, "claude"),
 			CodexModel:           providerDefaultModelForAgentType(pc, "codex"),
+			GeminiModel:          providerDefaultModelForAgentType(pc, "gemini"),
 			OpenClawModel:        providerDefaultModelForAgentType(pc, "openclaw"),
 			HermesModel:          providerDefaultModelForAgentType(pc, "hermes"),
 		}
 		// Set URL based on protocol
 		baseURL := strings.TrimRight(pc.URL, "/")
-		if pc.Protocol == "anthropic" {
+		switch pc.Protocol {
+		case "anthropic":
 			result.AnthropicURL = baseURL
 			result.APIURL = baseURL + "/v1"
-		} else {
+		case "gemini", "google":
+			// Google GenAI passthrough: gemini-cli points GOOGLE_GEMINI_BASE_URL at
+			// the gateway, which reverse-proxies to this base as-is (no translation).
+			result.GeminiURL = baseURL
+		default:
 			// openai protocol
 			result.APIURL = baseURL
 			if !strings.HasSuffix(baseURL, "/v1") {
@@ -440,13 +448,25 @@ func loadAllProviderConfigs() []providerConfig {
 
 func runtimeAIExpectedProtocolForAgentType(agentType string) string {
 	switch normalizeAgentType(agentType) {
-	case "claude", "cicy-claude", "kiro-cli", "cicy":
+	case "claude", "cicy-claude", "kiro-cli":
 		return "anthropic"
 	case "codex", "openclaw", "hermes":
 		return "openai"
-	case "opencode":
-		// opencode speaks both openai and anthropic protocols natively — pick
-		// the adapter at boot based on the active provider's declared protocol.
+	case "opencode", "cicy", "gemini":
+		// opencode speaks both protocols natively. cicy always speaks Anthropic
+		// Messages, but the gateway bridges an openai-protocol provider down to
+		// Chat Completions and wraps the SSE back (shouldAdaptAnthropicToChatCompletions),
+		// so EITHER provider works — no protocol filter in the routing/model/override
+		// pickers, and no cross-protocol 400 when a cicy agent is pinned to openai.
+		//
+		// gemini rides a dedicated /gemini passthrough: the gateway always targets
+		// Google by the path provider segment ("gemini" → GeminiURL/default Google)
+		// regardless of the backing provider's DECLARED protocol — only the provider
+		// key is used. Enforcing a "gemini" protocol here would (a) reject the seeded
+		// defaultOpenAi default with a 400 and (b) filter every openai/anthropic
+		// provider out of gemini's pickers (no gemini-protocol provider exists in the
+		// local protocol whitelist). So leave it unrestricted, like cicy. The user
+		// just points it at a provider holding a real Google key.
 		return ""
 	default:
 		return ""

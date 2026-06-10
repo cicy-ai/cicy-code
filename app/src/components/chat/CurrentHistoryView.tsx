@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, AlertTriangle, Square, RotateCcw } from 'lucide-react';
 import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -23,6 +23,10 @@ type HistoryTurn = {
   credit?: number;
   model?: string;
   raw_items?: RawHistoryItem[];
+  // Set on a cicy "turn produced no reply" system notice: "cancelled" | "error".
+  // The serving layer (cicyTagOutcomeAsSystem) relabels the marker → role:system
+  // and attaches this so the UI can offer 重试 on the latest turn.
+  outcome?: string;
   // Client-only optimistic-send placeholder (never comes from the backend).
   _optimistic?: boolean;
 };
@@ -659,6 +663,24 @@ function splitLeadingHarnessBlocks(text: string): { blocks: string[]; remaining:
   return { blocks, remaining: remaining.trim() };
 }
 
+// cicy 失败/取消记录:后端通常已带 cicy_outcome + 干净 label。这里再兜底——任何带
+// cicy_outcome 字段、或文本以 outcome 标记(新的干净前缀 / 旧的 ⟦…⟧ 形态)开头的项,
+// 一律按 outcome 渲染(头像左对齐 + 重试),与 role 无关。标记文本本身已是干净中文短句
+// (不含符号/JSON),不再解析 detail。
+const CICY_OUTCOME_MARK = '（本轮未生成回复';
+const CICY_OUTCOME_LEGACY = '⟦cicy-turn-outcome⟧';
+function parseCicyOutcome(item: any, contentText: string): { kind: string; label: string } | null {
+  const tagged = String(item?.cicy_outcome || '').trim();
+  if (tagged) {
+    return { kind: tagged, label: tagged === 'cancelled' ? '已停止生成' : '生成失败' };
+  }
+  if (contentText.startsWith(CICY_OUTCOME_MARK) || contentText.startsWith(CICY_OUTCOME_LEGACY)) {
+    const kind = (contentText.includes('已停止') || contentText.includes('cancelled')) ? 'cancelled' : 'error';
+    return { kind, label: kind === 'cancelled' ? '已停止生成' : '生成失败' };
+  }
+  return null;
+}
+
 function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string, string>, toolResultByCallId?: Map<string, string>): HistoryTurn | null {
   if (!raw || typeof raw !== 'object') return null;
   const item = raw as RawHistoryItem;
@@ -668,6 +690,28 @@ function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string, string
   const itemType = String(item.type || '').trim();
   const model = String(item.model || '').trim();
   const status = String(item.status || '').trim() || 'text';
+  // Outcome record (cancel / post-retry failure) → a normal assistant output
+  // (avatar, left-aligned) carrying an `outcome` tag so the render styles it
+  // (failed/cancelled) + offers 重试. Detected by the cicy_outcome field OR the raw
+  // marker, regardless of the role any serving/cache path gave it.
+  {
+    const outcomeText = extractContentText(item.content) || String(item.text || '').trim();
+    const outcome = parseCicyOutcome(item, outcomeText);
+    if (outcome) {
+      return {
+        history_id: historyId || undefined,
+        conversation_id: conversationId,
+        role: 'assistant',
+        q: '',
+        text: outcome.label,
+        a: outcome.label,
+        steps: [],
+        status,
+        model,
+        outcome: outcome.kind,
+      };
+    }
+  }
   // System / developer items are harness-injected notices (system-reminders,
   // task notifications, date changes, and codex's `<permissions instructions>`
   // / sandbox preamble which rides in a `developer` role message). They are NOT
@@ -687,6 +731,7 @@ function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string, string
       steps: [],
       status,
       model,
+      outcome: String((item as any).cicy_outcome || '').trim() || undefined,
     };
   }
   if (role === 'user') {
@@ -1583,48 +1628,49 @@ function HistoryTurnIdBadge({ historyId }: { historyId?: number }) {
   );
 }
 
-function ThinkingBlock({ text }: { text: string }) {
-  // 超过 3 行折叠成 3 行,小箭头展开/收起。用 maxHeight(3 × 行高)截断而不是
-  // -webkit-line-clamp —— Markdown 渲染出的是多个块级元素(p/列表),line-clamp 对
-  // 跨块行数不可靠,maxHeight 永远可预测。是否溢出由实测 scrollHeight 决定,流式
-  // 期间 text 持续变化会跟着重测。
+function ThinkingBlock({ text, live = false }: { text: string; live?: boolean }) {
+  // 两态,不再做 3 行折叠:
+  // - live(正在流式输出这一轮):强制全展开、无折叠 —— 实时看它思考。
+  // - 完成态(committed / 新 q 之前):整块折叠成一个 "thinking" 小标,默认收起,点开看全文。
   const [expanded, setExpanded] = useState(false);
-  const [overflowing, setOverflowing] = useState(false);
-  const bodyRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (expanded) return; // 展开态没有截断,无从测溢出;收起时再测
-    const el = bodyRef.current;
-    if (!el) return;
-    setOverflowing(el.scrollHeight > el.clientHeight + 2);
-  }, [text, expanded]);
+  const open = live || expanded;
   return (
     <div data-id="current-history-view-thinking-block" className="mb-2 border-l-2 border-amber-300/25 pl-3">
-      {/* thinking 要和正文区分:小一号(text-xs)、斜体、更暗的颜色。颜色用内联 style 强制 ——
-          .chat-markdown{color:#d4d4d8} 是非分层规则,会盖掉 Tailwind 的 text-zinc-* 工具类,
-          所以必须内联(内联优先级高于样式表类规则),<p> 子元素再继承这个颜色。 */}
-      <div
-        ref={bodyRef}
-        data-id="current-history-view-thinking-block-body"
-        className="chat-markdown current-history-markdown text-xs italic leading-[1.7]"
-        style={{ color: '#52525b', ...(expanded ? {} : { maxHeight: 'calc(3 * 1.7em)', overflow: 'hidden' }) }}
-      >
-        <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{text}</Markdown>
-      </div>
-      {overflowing || expanded ? (
+      {/* 完成态留一个可点开的小标;流式期不显示开关(强制展开,不可折叠)。 */}
+      {!live ? (
         <button
           type="button"
           data-id="current-history-view-thinking-block-toggle"
           onClick={() => setExpanded((v) => !v)}
           aria-label={expanded ? 'collapse thinking' : 'expand thinking'}
-          className="mt-0.5 inline-flex items-center rounded p-0.5 text-zinc-600 transition-colors hover:bg-white/[0.04] hover:text-zinc-300"
+          className="inline-flex items-center gap-1 rounded px-0.5 py-0.5 text-[11px] italic text-zinc-600 transition-colors hover:bg-white/[0.04] hover:text-zinc-400"
         >
-          <ChevronDown className={`h-3 w-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          <ChevronRight className={`h-3 w-3 transition-transform ${expanded ? 'rotate-90' : ''}`} />
+          thinking
         </button>
+      ) : null}
+      {/* thinking 要和正文区分:小一号(text-xs)、斜体、更暗的颜色。颜色用内联 style 强制 ——
+          .chat-markdown{color:#d4d4d8} 是非分层规则,会盖掉 Tailwind 的 text-zinc-* 工具类,
+          所以必须内联(内联优先级高于样式表类规则),<p> 子元素再继承这个颜色。 */}
+      {open ? (
+        <div
+          data-id="current-history-view-thinking-block-body"
+          className="chat-markdown current-history-markdown text-xs italic leading-[1.7]"
+          style={{ color: '#52525b' }}
+        >
+          <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{text}</Markdown>
+        </div>
       ) : null}
     </div>
   );
 }
 
+// 把"每 ~700ms 轮询一次、整块替换"的流式文本平滑成逐字增长 —— 否则每个 poll 一大坨
+// 文字"啪"地出现,看着像蹦字。poll 给的是「目标全文」,这里用 rAF 让显示长度按指数
+// 逼近目标,在两次 poll 之间把那一坨摊成连续生长,观感连续。
+// 关键:只对「正在流式输出的 live 尾巴最后一段正文」用。换流(切 agent / 新一轮 /
+// 重开)或非流式(已完成 / 不是 live 尾巴)一律瞬时显示(snap),绝不补演历史回放
+// —— 那正是之前修掉的"打字进场"坑。
 // Harness-injected system notices (system-reminders, task notifications, date
 // changes). Rendered as a compact, collapsed-by-default chip so the repeated
 // ones don't read as duplicated AI replies.
@@ -1648,6 +1694,55 @@ function SystemNoticeCard({ text }: { text: string }) {
         <div data-id="current-history-system-notice-body" className="mt-1 w-full whitespace-pre-wrap rounded-md border border-white/[0.05] bg-white/[0.02] px-2.5 py-1.5 text-[11px] leading-relaxed text-zinc-500">
           {text}
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+// OutcomeNoticeCard renders a cicy "turn produced no reply" record: the user
+// cancelled the turn (grey ⏹) or the gateway failed after auto-retry (red ⚠).
+// Unlike the generic SystemNoticeCard it is NOT folded away — the whole point is
+// that the user SEES that their message wasn't silently dropped. On the latest
+// turn it offers 重试 to re-run that same prompt.
+function OutcomeNoticeCard({
+  text,
+  outcome,
+  canRetry,
+  retrying,
+  onRetry,
+}: {
+  text: string;
+  outcome: string;
+  canRetry: boolean;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  // Left-aligned, in the assistant body column (avatar sits to its left): reads as
+  // a normal assistant output saying the turn failed / was stopped, with 重试 on the
+  // latest turn. Subtle red for failures, grey for cancellations.
+  const isError = outcome === 'error';
+  return (
+    <div data-id="current-history-outcome-notice" className="flex flex-col items-start gap-1.5">
+      <div
+        data-id="current-history-outcome-notice-chip"
+        className={`flex items-start gap-1.5 text-sm leading-[1.7] ${isError ? 'text-rose-300/85' : 'text-zinc-400'}`}
+      >
+        {isError ? <AlertTriangle className="mt-[3px] h-3.5 w-3.5 shrink-0" /> : <Square className="mt-[3px] h-3.5 w-3.5 shrink-0" />}
+        <span data-id="current-history-outcome-notice-label" className="break-all">{text}</span>
+      </div>
+      {canRetry ? (
+        <button
+          type="button"
+          data-id="current-history-outcome-notice-retry"
+          onClick={onRetry}
+          disabled={retrying}
+          className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-xs transition-colors ${
+            isError ? 'border-rose-500/25 text-rose-200/90 hover:bg-rose-500/10' : 'border-white/10 text-zinc-300 hover:bg-white/[0.06]'
+          } disabled:opacity-60`}
+        >
+          <RotateCcw className={`h-3 w-3 ${retrying ? 'animate-spin' : ''}`} />
+          {retrying ? '重试中…' : '重试'}
+        </button>
       ) : null}
     </div>
   );
@@ -1678,21 +1773,6 @@ function scheduleScrollToBottom(el: HTMLDivElement) {
   apply();
   const raf = window.requestAnimationFrame(apply);
   const timers = [80, 240, 600, 1200, 2000].map((delay) => window.setTimeout(apply, delay));
-  return { raf, timers };
-}
-
-function scheduleScrollTurnToTop(container: HTMLDivElement, turnKey: string) {
-  const apply = () => {
-    const target = container.querySelector(`[data-turn-key="${CSS.escape(turnKey)}"]`) as HTMLDivElement | null;
-    if (!target) return;
-    const containerRect = container.getBoundingClientRect();
-    const targetRect = target.getBoundingClientRect();
-    const top = container.scrollTop + (targetRect.top - containerRect.top) - 8;
-    container.scrollTop = Math.max(0, top);
-  };
-  apply();
-  const raf = window.requestAnimationFrame(apply);
-  const timers = [80, 240, 600].map((delay) => window.setTimeout(apply, delay));
   return { raf, timers };
 }
 
@@ -1731,6 +1811,9 @@ export default function CurrentHistoryView({
   const [cachedPromptTurns, setCachedPromptTurns] = useState<HistoryTurn[]>([]);
   const cachedPromptMaxIdRef = useRef(0);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);  // external link awaiting confirm (#25)
+  // Which outcome-notice turn is mid-retry (spinner on its 重试 button). Keyed by
+  // the turn key so only the clicked one spins.
+  const [retryingKey, setRetryingKey] = useState<string | null>(null);
   // Opening greeting shown on the empty-history state — role agents draw it from
   // their role template's 开场白 (GET /api/agents/greeting/{id}); falls back to the
   // static placeholder when empty/unfetched. Keyed by paneId so switching agents
@@ -1746,30 +1829,19 @@ export default function CurrentHistoryView({
   const maxLoadedIdRef = useRef(0);         // largest history id currently in `items`
   const committedReadyRef = useRef(false);  // Part 1 (committed window) finished loading
   const firstReplyDoneRef = useRef(false);  // Part 2's first poll resolved → safe to reveal
-  const [anchorSpacerHeight, setAnchorSpacerHeight] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);   // sentinel: when it scrolls into view, auto-load earlier
   const loadMoreFnRef = useRef<() => void>(() => {});  // latest loadMore, so the observer never calls a stale closure
-  const anchorSpacerRef = useRef<HTMLDivElement>(null);
   const didInitialScrollRef = useRef(false);
+  // ChatGPT 式跟随:用户贴在底部时,新内容 / reply 流式增长就自动滚到底;一旦往上滚离开
+  // 底部就放手,不再拽回。没有 spacer、不把问题钉到顶 —— 就是一条普通从下往上长的聊天流。
   const shouldStickBottomRef = useRef(true);
+  // 上一次观测到的 scrollTop,用来判方向:用户**向上**滚一下就放手(disengage),
+  // 直到自己滚回底部才重新跟随。靠方向而不是"距底阈值",否则流式期每 700ms 一次的
+  // 强制落底会把人按在底部——小幅上滚还没出阈值就被拽回。
+  const lastScrollTopRef = useRef(0);
   const preserveScrollOffsetRef = useRef(false);
-  const forceScrollBottomRef = useRef(true);
   const requestSeqRef = useRef(0);
-  const lastLatestTurnKeyRef = useRef('');
-  const pendingAnchorTurnKeyRef = useRef('');
-  const lastAnchoredHistoryIDRef = useRef(0);
-  const activeSpacerTurnKeyRef = useRef('');
-  const anchorSpacerHeightRef = useRef(0);
-  const anchoredQKeyRef = useRef('');   // 已锚定到顶部的"最新问题"turn key(新问题出现才换)
-  // Gemini 式"放手"语义:发送时平滑顶一次,之后用户一旦手动 scroll 就永久交还控制权,
-  // 这一轮再不自动 scroll(绝不把用户拽回原位)。programmaticScrollUntil 是我们自己发起
-  // 的平滑滚动窗口,期间的 scroll 事件不算"用户滚动"。
-  const userTookOverRef = useRef(false);
-  const programmaticScrollUntilRef = useRef(0);
-  // 这一轮 reply 是否曾经进入过 active(流式)状态。只有"流式开始过"之后,完成时才允许收
-  // spacer——否则首 token 延迟期间(reply 还没 active)就缩 spacer,会把 q 顶上去又"回落"。
-  const replySeenActiveRef = useRef(false);
   // 乐观占位:用户点发送的瞬间就先塞一个 q 气泡(sending 态)+ 一个 a 占位(thinking),
   // 不等后端往返。baseline 记录占位时的最大 user history_id,真 q 落库后(committed user
   // turn 的 id 超过 baseline)就把锚点交接给真 q 并撤掉占位 —— 同一位置,不闪不跳。
@@ -1808,13 +1880,6 @@ export default function CurrentHistoryView({
     clearScheduledScrolls();
     scheduledScrollRafRef.current = scheduled.raf;
     scheduledScrollTimersRef.current = scheduled.timers;
-  };
-
-  const applyAnchorSpacerHeight = (nextHeight: number) => {
-    const normalized = Math.max(0, Math.round(nextHeight));
-    if (anchorSpacerHeightRef.current === normalized) return;
-    anchorSpacerHeightRef.current = normalized;
-    setAnchorSpacerHeight(normalized);
   };
 
   const clearLiveTurn = () => {
@@ -1883,13 +1948,9 @@ export default function CurrentHistoryView({
   };
 
   useEffect(() => {
-    lastLatestTurnKeyRef.current = '';
-    pendingAnchorTurnKeyRef.current = '';
-    lastAnchoredHistoryIDRef.current = 0;
-    activeSpacerTurnKeyRef.current = '';
     shouldStickBottomRef.current = true;
+    lastScrollTopRef.current = 0;
     preserveScrollOffsetRef.current = false;
-    forceScrollBottomRef.current = true;
     maxLoadedIdRef.current = 0;
     committedReadyRef.current = false;
     firstReplyDoneRef.current = false;
@@ -1898,7 +1959,6 @@ export default function CurrentHistoryView({
     setConversationId('');
     setModel('');
     clearLiveTurn();
-    applyAnchorSpacerHeight(0);
     clearScheduledScrolls();
     setOptimisticQ(null);
     optimisticBaselineUserIdRef.current = 0;
@@ -1923,15 +1983,17 @@ export default function CurrentHistoryView({
     const el = scrollRef.current;
     if (!el) return;
     const updateStickBottom = () => {
-      const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      shouldStickBottomRef.current = distanceToBottom <= 80;
-      // 用户往上滚离开了底部(程序化的"滚到底"只会停在贴底处)→ 取消还在排队的
-      // scheduleScrollToBottom 重试(开屏后 0~2s 的多次补滚),不再把人拽回底部。
-      if (distanceToBottom > 80) clearScheduledScrolls();
-      // 用户在锚定进行中手动滚动(非我们自己发起的平滑滚动)→ 交还控制权,这一轮再不拽回。
-      if (activeSpacerTurnKeyRef.current && Date.now() > programmaticScrollUntilRef.current) {
-        userTookOverRef.current = true;
+      const top = el.scrollTop;
+      const distanceToBottom = el.scrollHeight - top - el.clientHeight;
+      if (top < lastScrollTopRef.current - 2) {
+        // 向上滚 → 放手(并取消开屏排队中的补滚),让用户安心读前文,流式期也不拽回。
+        shouldStickBottomRef.current = false;
+        clearScheduledScrolls();
+      } else if (distanceToBottom <= 8) {
+        // 自己滚回到底部 → 重新跟随。程序化的"落底"也走这条,方向是向下、不会被误判为上滚。
+        shouldStickBottomRef.current = true;
       }
+      lastScrollTopRef.current = top;
     };
     updateStickBottom();
     el.addEventListener('scroll', updateStickBottom, { passive: true });
@@ -1946,7 +2008,6 @@ export default function CurrentHistoryView({
     const requestSeq = ++requestSeqRef.current;
     didInitialScrollRef.current = false;
     shouldStickBottomRef.current = true;
-    forceScrollBottomRef.current = true;
     // 内存快照先上屏(window._cacheHistory):同一 pane 上次打开的整页内容**同步**渲染,
     // 不出 loading 骨架;下面的 fresh 加载照常进行,回来后整体覆盖。快照只填渲染态,不置
     // committedReadyRef —— live tail 的轮询仍等真实窗口落定,避免旧快照和新 live 混拼。
@@ -2217,6 +2278,8 @@ export default function CurrentHistoryView({
         for (const it of itemsRef.current) if (it?.role === 'user') maxUserId = Math.max(maxUserId, Number(it?.history_id || 0));
         optimisticBaselineUserIdRef.current = maxUserId;
         setOptimisticQ({ text: qText, ts: Date.now() });
+        // 自己发消息 → 重新贴底跟随(ChatGPT:发送后视图回到底部看自己的问题和回复)。
+        shouldStickBottomRef.current = true;
       }
       if (timer != null) { window.clearTimeout(timer); timer = null; }
       void poll();
@@ -2255,131 +2318,34 @@ export default function CurrentHistoryView({
     };
   }, []);
 
-  // 开屏首帧定位:初始落底跑在 useEffect+rAF 里,都在浏览器画完第一帧**之后**才执行 →
-  // 用户先看到列表停在顶部的一帧、再"跳"到底部。这里在 paint 之前同步钉到底,首帧
-  // 画出来就已经在底部,跳变不可见。flag 的置位仍由下面的 rAF 锚定 effect 统一管。
+  // ChatGPT 式跟随滚动(就是一条普通从下往上长的聊天流,没有 spacer、不钉问题到顶):
+  // - 首屏:落底显示最新一轮(scheduleScrollToBottom 多次补滚,扛 markdown/图片异步 reflow)。
+  // - 之后:用户贴在底部时,内容一变(committed 增量 / reply 流式增长 / 占位 q+a)就在 paint
+  //   前同步钉到底,逐字增长不跳;用户往上滚离开底部(scroll 监听置 shouldStickBottom=false)
+  //   就放手,绝不拽回。
+  // - 「加载更早」前插内容:保持用户原滚动位置(loadMore 自己补偿 scrollTop)。
   useLayoutEffect(() => {
-    if (!open || didInitialScrollRef.current) return;
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [open, loading, items, liveTurn]);
-
-  // 新问题出现 → 把它钉到视口顶部,回复(liveTurn / 后续 turn)在它下方向下渲染,之前的对话被推上去。
-  // 用底部 spacer 撑出滚动空间,这样即使 q+回复很短也能让 q 停在顶部;回复变长时 spacer 收缩,不留大空白。
-  useEffect(() => {
     if (!open || loading) return;
-    const frame = window.requestAnimationFrame(() => {
-      const el = scrollRef.current;
-      if (!el) return;
-
-      // 「加载更早」前插内容 → 保持用户原滚动位置,不锚定。
-      if (preserveScrollOffsetRef.current) {
-        preserveScrollOffsetRef.current = false;
-        didInitialScrollRef.current = true;
-        return;
-      }
-
-      // 最新的用户问题(q_last)及其 turn key(与 renderedTurns 里算法一致)。
-      let lastUserIdx = -1;
-      for (let i = items.length - 1; i >= 0; i -= 1) {
-        if (items[i]?.role === 'user') { lastUserIdx = i; break; }
-      }
-      const lastUser = lastUserIdx >= 0 ? items[lastUserIdx] : null;
-      // 乐观占位 q 是当前最新的"用户问题" → 用它的稳定 key 做锚,效果跟真 q 一样钉到顶部。
-      const lastUserKey = optimisticQ
-        ? OPTIMISTIC_Q_KEY
-        : (lastUser ? String(lastUser.history_id || `${lastUser.text || lastUser.q || 'turn'}-${lastUserIdx}`) : '');
-
-      // 首次加载:滚到底显示最新一轮,并把当前最后一个问题记为"已锚",避免开屏就把它顶上去。
-      if (!didInitialScrollRef.current) {
-        anchoredQKeyRef.current = lastUserKey;
-        applyAnchorSpacerHeight(0);
-        runScheduledScroll(scheduleScrollToBottom(el));
-        forceScrollBottomRef.current = false;
-        shouldStickBottomRef.current = true;
-        didInitialScrollRef.current = true;
-        return;
-      }
-
-      // 出现了新的问题 → **平滑**滚到顶一次 + 撑底部 spacer,然后放手。
-      if (lastUserKey && lastUserKey !== anchoredQKeyRef.current) {
-        // 钉顶是"发送时"的行为,只对**进行中的回合**做(占位 q 或轮询确认 in-flight)。
-        // history_id 是位置性的:切换 agent/重开/softRebind 后同一条旧 q 的 id 会变,
-        // 没有这个门,完成态的旧对话会被误判为新问题 → q 滑顶 + 答案像刚打出来一样
-        // "打字进场",让人误以为 agent 还在工作(其实 idle)。完成态只交接锚点,不动滚动。
-        if (!optimisticQ && !replyInFlightRef.current) {
-          anchoredQKeyRef.current = lastUserKey;
-          activeSpacerTurnKeyRef.current = '';
-          return;
-        }
-        // 用户已经滚上去在读历史(不在底部附近)→ 不抢滚动。只把新 q 记为已锚,
-        // 避免之后反复触发;乐观占位 q(用户自己刚发的)例外,永远钉顶。
-        // 旁观他人会话(history popover)时 agent 持续产生新 turn,这条就是"读着读着
-        // 被拽回去"的根治。
-        if (!shouldStickBottomRef.current && !optimisticQ) {
-          anchoredQKeyRef.current = lastUserKey;
-          activeSpacerTurnKeyRef.current = '';
-          return;
-        }
-        const target = el.querySelector(`[data-turn-key="${CSS.escape(lastUserKey)}"]`) as HTMLDivElement | null;
-        if (target) {
-          anchoredQKeyRef.current = lastUserKey;
-          activeSpacerTurnKeyRef.current = lastUserKey;
-          userTookOverRef.current = false;
-          replySeenActiveRef.current = false;
-          // 先命令式撑足 spacer(让 q 能滚到顶),再平滑滚一次。setState 同步发出供后续渲染。
-          // spacer 按"q 下方已有内容"算,而不是只按 q 自身高度 —— 否则当这个分支因 conversation
-          // 轮转(softRebind 后 q 的 history_id 变了)在回复结束时被再次触发时,会无视已经填在下面
-          // 的答案、把 spacer 重置回初始大高度 → 末尾"弹回原高度"。用下方内容算:新问题(下方只有
-          // q+thinking)→ spacer 仍很大;已带完整答案的 q → spacer 自然很小,不弹。
-          const belowQ = el.scrollHeight - anchorSpacerHeightRef.current - target.offsetTop;
-          const spacer = Math.max(0, el.clientHeight - belowQ - 16);
-          if (anchorSpacerRef.current) anchorSpacerRef.current.style.height = `${spacer}px`;
-          applyAnchorSpacerHeight(spacer);
-          const top = el.scrollTop + (target.getBoundingClientRect().top - el.getBoundingClientRect().top) - 8;
-          // q 顶到顶部要有"滑上去"的动效(不再硬跳)。占位 q 和真新问题都走平滑滚动 —— 气泡先即时
-          // 出现在底部,再平滑滑到顶。动画期间由 programmaticScrollUntil 守卫,spacer 不动、不回落。
-          programmaticScrollUntilRef.current = Date.now() + 800;
-          el.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
-          forceScrollBottomRef.current = false;
-          shouldStickBottomRef.current = false;
-          return;
-        }
-      }
-
-      // 已锚定的一轮:Gemini 式放手。
-      if (activeSpacerTurnKeyRef.current) {
-        // 用户这一轮手动滚过 → 彻底交还控制权,绝不再 scroll(这就是之前"我 scroll 了又被拽回"的根治)。
-        if (userTookOverRef.current) return;
-        // 平滑滚到顶的动画窗口内(programmaticScrollUntilRef),什么都别做:此时若重算/缩小
-        // spacer 会让 scrollHeight 变小、scrollTop 被 clamp 往下夹 → q 顶上去后又"回落"。
-        // 让滚动动画跑完再说(这一个守卫就足以防回落)。
-        if (Date.now() < programmaticScrollUntilRef.current) return;
-        const target = el.querySelector(`[data-turn-key="${CSS.escape(activeSpacerTurnKeyRef.current)}"]`) as HTMLDivElement | null;
-        if (!target) { activeSpacerTurnKeyRef.current = ''; return; }
-        // 全程(thinking / 流式 / 完成)持续把 spacer 收到"q 下方内容刚好填满一屏"。早先"流式期
-        // 不收、完成才收一次"会导致 thinking 阶段 spacer 仍是初始大高度、下方留出可滑空白;改成
-        // 连续收:下方没内容时 belowQ≈q 高 → spacer 仍大(q 能停顶);thinking/答案变高 → spacer
-        // 同步缩小 → q 始终锁顶、下方无多余可滑空间。防回落只靠上面的动画窗口守卫。
-        const belowQ = el.scrollHeight - anchorSpacerHeightRef.current - target.offsetTop;
-        const measured = Math.max(0, el.clientHeight - belowQ - 16);
-        if (Math.abs(measured - anchorSpacerHeightRef.current) > 2) applyAnchorSpacerHeight(measured);
-        return;
-      }
-    });
-    return () => window.cancelAnimationFrame(frame);
+    const el = scrollRef.current;
+    if (!el) return;
+    if (preserveScrollOffsetRef.current) {
+      preserveScrollOffsetRef.current = false;
+      didInitialScrollRef.current = true;
+      return;
+    }
+    if (!didInitialScrollRef.current) {
+      runScheduledScroll(scheduleScrollToBottom(el));
+      shouldStickBottomRef.current = true;
+      didInitialScrollRef.current = true;
+      return;
+    }
+    if (shouldStickBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [open, loading, items, liveTurn, optimisticQ]);
 
-  // Prompts-only filters out most turns at once. The active-turn anchor spacer
-  // (sized to push an in-flight turn up) and the old scrollTop would otherwise
-  // leave a big blank gap / a view scrolled past the now-shorter content. Reset
-  // both whenever the filter flips: clear the spacer and scroll to top in
-  // prompts-only (read questions from the start) or back to bottom when off.
+  // prompts-only 过滤瞬间换掉大半内容 → 重新定位:只看问题时滚到顶(从头读问题),
+  // 关掉时回到底部(回到最新一轮)。
   useEffect(() => {
     if (!open) return;
-    applyAnchorSpacerHeight(0);
-    activeSpacerTurnKeyRef.current = '';
-    pendingAnchorTurnKeyRef.current = '';
     const frame = window.requestAnimationFrame(() => {
       const node = scrollRef.current;
       if (node) node.scrollTop = promptsOnly ? 0 : node.scrollHeight;
@@ -2477,18 +2443,13 @@ export default function CurrentHistoryView({
 
   // Optimistic q teardown. The real committed q has landed once a user turn with
   // an id beyond the send-time baseline shows up in `items` (reconcileTail pulled
-  // q_last in). Hand the top-anchor over to that real turn FIRST so the anchor
-  // effect treats it as already-pinned (no second smooth-scroll), then drop the
-  // placeholder — the q flips sending→confirmed in place. Also a hard timeout so
-  // a send the backend never honored can't strand the bubble.
+  // q_last in) → drop the placeholder; the real q renders in its place. Also a
+  // hard timeout so a send the backend never honored can't strand the bubble.
   useEffect(() => {
     if (!optimisticQ) return;
     let maxUserId = 0;
     for (const it of items) if (it?.role === 'user') maxUserId = Math.max(maxUserId, Number(it?.history_id || 0));
     if (maxUserId > optimisticBaselineUserIdRef.current) {
-      const realKey = String(maxUserId);
-      if (anchoredQKeyRef.current === OPTIMISTIC_Q_KEY) anchoredQKeyRef.current = realKey;
-      if (activeSpacerTurnKeyRef.current === OPTIMISTIC_Q_KEY) activeSpacerTurnKeyRef.current = realKey;
       setOptimisticQ(null);
       return;
     }
@@ -2502,6 +2463,10 @@ export default function CurrentHistoryView({
   // window's user turns (live wins on id collision), deduped by history_id and
   // ordered. The cache supplies older questions instantly; `items` keeps the
   // newest ones fresh. Non-prompts-only renders the window as-is.
+  // live 尾巴是否正占着最新一轮(用它隐藏 committed 里同轮的 assistant,避免重复)。只取这个
+  // **布尔值**当依赖 —— liveTurn 每次 poll 都变,若直接依赖整个对象,displayItems 会每 poll 重算
+  // 成新数组 → renderedTurns 跟着重算 → 所有 committed 轮(含过往 thinking)每 poll 重渲染 → 闪。
+  const liveActive = !!liveTurn && Number(liveTurn.history_id || 0) > committedMaxId;
   const displayItems = useMemo(() => {
     if (!promptsOnly) {
       // While the live turn renders the in-flight assistant response (now WITH its
@@ -2509,7 +2474,6 @@ export default function CurrentHistoryView({
       // SAME turn — else round-0's tools render BOTH committed (above) and in the
       // live turn (below) = duplicate + out-of-order. The live turn owns the full
       // ordered render until the turn completes and migrates into committed.
-      const liveActive = !!liveTurn && Number(liveTurn.history_id || 0) > committedMaxId;
       if (!liveActive) return items;
       let lastUserId = 0;
       for (const t of items) if (t?.role === 'user') lastUserId = Math.max(lastUserId, Number(t?.history_id || 0));
@@ -2525,7 +2489,7 @@ export default function CurrentHistoryView({
       if (id > 0 && t?.role === 'user') map.set(id, t);
     }
     return Array.from(map.values()).sort((a, b) => Number(a?.history_id || 0) - Number(b?.history_id || 0));
-  }, [promptsOnly, items, cachedPromptTurns, liveTurn, committedMaxId]);
+  }, [promptsOnly, items, cachedPromptTurns, liveActive, committedMaxId]);
 
   // Recap-on-return is system noise: a harness-only user turn ("The user stepped
   // away… Recap…" / continuation banner) and the assistant recap it triggers.
@@ -2597,6 +2561,21 @@ export default function CurrentHistoryView({
     void setPromptsCacheToIndexedDB(paneId, conversationId, committedMaxId, prompts);
   }, [open, promptsOnly, paneId, conversationId, committedMaxId, displayItems]);
 
+  // Re-run the latest cancelled/failed turn. Fire the retry, stick to bottom, and
+  // nudge the live-tail poll so the new reply streams straight in; the spinner
+  // clears once the poll surfaces a fresh turn (or after a short fallback).
+  const handleOutcomeRetry = (key: string) => {
+    if (!paneId || retryingKey) return;
+    setRetryingKey(key);
+    shouldStickBottomRef.current = true;
+    Promise.resolve(apiService.retryCicyReply(paneId))
+      .catch(() => {})
+      .finally(() => {
+        window.dispatchEvent(new CustomEvent('cicy:current-history-refresh'));
+        window.setTimeout(() => setRetryingKey(null), 2000);
+      });
+  };
+
   // Memoized on `displayItems`: while a turn streams (only `liveTurn` changes),
   // these element refs stay identical, so React skips re-rendering every
   // committed history row (no Markdown re-parse per token).
@@ -2610,6 +2589,27 @@ export default function CurrentHistoryView({
     if (promptsOnly && turn?.role !== 'user') return null;
     // Drop the assistant recap that answers a harness-only recap-on-return turn.
     if (recapResponses.has(turn)) return null;
+    // A cicy "turn produced no reply" record (cancel / post-retry failure) is just
+    // an assistant output: agent avatar on the left + the failed/stopped notice and
+    // a 重试 on the latest turn — same column/avatar layout as a normal reply.
+    if (turn?.outcome) {
+      return (
+        <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} key={turnKey} className="mb-5">
+          <div data-id={`current-history-turn-assistant-${turnKey}`} className="flex items-start gap-2.5">
+            <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId={`current-history-assistant-avatar-${turnKey}`} className="mt-0.5 h-7 w-7 rounded-full" />
+            <div data-id={`current-history-turn-assistant-body-${turnKey}`} className="min-w-0 flex-1">
+              <OutcomeNoticeCard
+                text={turn.text || ''}
+                outcome={turn.outcome}
+                canRetry={isLatestTurn && !!paneId}
+                retrying={retryingKey === String(turnKey)}
+                onRetry={() => handleOutcomeRetry(String(turnKey))}
+              />
+            </div>
+          </div>
+        </div>
+      );
+    }
     if (turn?.role === 'system') {
       return (
         <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} key={turnKey} className="my-1">
@@ -2678,7 +2678,7 @@ export default function CurrentHistoryView({
       );
     }
     return null;
-  }), [displayItems, promptsOnly, hideTools, recapResponses, agentType, paneId]);
+  }), [displayItems, promptsOnly, hideTools, recapResponses, agentType, paneId, retryingKey]);
 
   // Part 2 — the live tail (reply.json's answer for the latest turn). It is the
   // ANSWER to committed's last turn (q_last), so it renders answer-only and sits
@@ -2705,7 +2705,10 @@ export default function CurrentHistoryView({
           : <div aria-hidden="true" className="h-7 w-7 shrink-0" />}
         <div data-id="current-history-live-turn-body" className="min-w-0 flex-1">
         {liveTurnSteps.map((step: any, i: number) => {
-          if (step?.type === 'thinking') return <div key={i}><ThinkingBlock text={step.text} /></div>;
+          {/* live 尾巴 = 最新一轮回复(其后还没有新 q)→ thinking 全程展开,不折叠。
+              折叠的触发是「出现新 q、本轮迁入 committed」,而不是「流式刚结束」——届时它
+              改走 committed 渲染(ThinkingBlock 默认 live=false)自动塌成小标。 */}
+          if (step?.type === 'thinking') return <div key={i}><ThinkingBlock text={step.text} live={true} /></div>;
           if (step?.type === 'text') return <div key={i} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{step.text}</Markdown></div>;
           if (step?.type === 'tool' && !hideTools && Array.isArray(step?.tools) && step.tools.length > 0) {
             return <div key={i} data-id={`current-history-live-turn-step-tools-${i}`} className="my-2 space-y-1.5">{step.tools.map((tool: any, toolIndex: number) => {
@@ -2730,7 +2733,7 @@ export default function CurrentHistoryView({
           // 开场白渲染成一条正常的 assistant reply:左上角、带 agent 头像 + markdown
           // 内容列,与真实答案同布局(不再居中占位)。
           <div data-id="current-history-empty-greeting" className="flex-1 overflow-y-auto fade-scroll-y">
-            <div className="mx-auto w-full max-w-3xl px-4 py-6 font-sans text-zinc-300">
+            <div className="mx-auto w-full max-w-4xl px-4 py-6 font-sans text-zinc-300">
               <div data-id="current-history-empty-greeting-turn" className="flex items-start gap-2.5">
                 <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-empty-greeting-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
                 <div data-id="current-history-empty-greeting-text" className="chat-markdown current-history-markdown min-w-0 flex-1 text-sm leading-[1.7] text-zinc-300">
@@ -2752,7 +2755,7 @@ export default function CurrentHistoryView({
       ) : (
       <>
       <div data-id="current-history-scroll" ref={scrollRef} className="flex-1 overflow-y-auto fade-scroll-y">
-        <div data-id="current-history-list" data-agent-id={paneId || ''} className="mx-auto w-full max-w-3xl px-4 py-6 font-sans text-zinc-300">
+        <div data-id="current-history-list" data-agent-id={paneId || ''} className="mx-auto w-full max-w-4xl px-4 py-6 font-sans text-zinc-300">
           {loading ? (
             <div data-id="current-history-loading" className="space-y-6 py-2" aria-busy="true">
               {[0, 1, 2].map((row) => (
@@ -2804,17 +2807,21 @@ export default function CurrentHistoryView({
                   </div>
                 </div>
                 {/* a 占位:先撑出答案位(thinking),真答案一开始流式就由 renderedLiveTurn
-                    接管 —— 占位 → 真 a,无新建、不跳。 */}
-                <div data-id="current-history-optimistic-a" className="mb-5 flex items-start gap-2.5">
-                  <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-optimistic-a-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
-                  <div className="min-w-0 flex-1">
-                    <PendingThinkingPlaceholder />
+                    接管 —— 占位 → 真 a,无新建、不跳。
+                    ⚠️ 必须 `!liveVisible` 闸:poll 在同一帧 setLiveTurn(新轮)+setItems,而清
+                    optimisticQ 在另一个 useEffect(晚一帧)→ 中间一帧 optimistic-a 占位 与
+                    renderedLiveTurn 的占位(2724)并存 = 两个「Thinking…」脉冲动画。live 既已
+                    接管答案位,乐观占位即冗余,直接撤掉,保证任一帧只有一个占位动画。 */}
+                {!liveVisible ? (
+                  <div data-id="current-history-optimistic-a" className="mb-5 flex items-start gap-2.5">
+                    <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-optimistic-a-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
+                    <div className="min-w-0 flex-1">
+                      <PendingThinkingPlaceholder />
+                    </div>
                   </div>
-                </div>
+                ) : null}
               </>
             ) : null}
-          {/* 调试:localStorage.__spacer === '1' 时给 spacer 标红,方便观察其实际高度 */}
-          <div data-id="current-history-anchor-spacer" ref={anchorSpacerRef} aria-hidden="true" className={localStorage.getItem('__spacer') === '1' ? 'bg-red-500/40' : undefined} style={{ height: `${anchorSpacerHeight}px` }} />
           </>}
         </div>
       </div>

@@ -337,7 +337,9 @@ export default function AgentUsageAnalysisView({ paneId, active }: { paneId: str
         <div data-id="agent-usage-analysis-loading" className="flex flex-1 items-center justify-center gap-2 text-[13px] text-zinc-500">
           <Loader2 className="h-4 w-4 animate-spin" /> {t('memLoading', '加载中…')}
         </div>
-      ) : !k || (k.total_tokens === 0 && k.input_tokens === 0) ? (
+      ) : (!k || (k.total_tokens === 0 && k.input_tokens === 0)) && segments.length === 0 ? (
+        // 兜底:只有当「最近一轮 0 token」**且** breakdown 也没有任何构成数据时才算真空。
+        // 否则(例如最后一次是取消/失败回合)仍渲染面板,避免把整页打成空白。
         <div data-id="agent-usage-analysis-empty" className="flex flex-1 items-center justify-center px-4 text-center text-[13px] text-zinc-500">
           {t('anEmpty', '暂无可分析的请求数据')}
         </div>

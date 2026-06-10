@@ -159,6 +159,10 @@ func codexInstallCmd() string {
 	return npmGlobalInstallCmd("@openai/codex@latest")
 }
 
+func geminiInstallCmd() string {
+	return npmGlobalInstallCmd("@google/gemini-cli@latest")
+}
+
 func opencodeInstallCmd() string {
 	return npmGlobalInstallCmd("opencode-ai@latest")
 }
@@ -346,6 +350,7 @@ func selectedAgentConfigs() map[string]Tool {
 		"claude":   {"claude", "claude", claudeInstallCmd(), true, false},
 		"cicy":     {"cicy", "cicy", cicyInstallCmd(), true, false},
 		"codex":    {"codex", "codex", codexInstallCmd(), true, false},
+		"gemini":   {"gemini", "gemini", geminiInstallCmd(), true, false},
 		"opencode": {"opencode", "opencode", opencodeInstallCmd(), true, false},
 	}
 }
@@ -397,12 +402,12 @@ var builtinAgents = []struct {
 }{
 	{"claude", "Claude"},
 	{"codex", "Codex"},
+	{"gemini", "Gemini"},
 	{"opencode", "OpenCode"},
-	{"cicy-claude", "CiCy"},
 	{"cicy", "CiCy"},
 }
 
-var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "opencode", "cicy"}
+var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "gemini", "opencode", "cicy"}
 
 func effectiveAllowedAgentTypes() []string {
 	if labMode {

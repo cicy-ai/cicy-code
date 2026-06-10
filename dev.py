@@ -1536,10 +1536,11 @@ def start_local_dev_detached(cicy_bin, extra=None):
 
     run_env = os.environ.copy()
     run_env["PATH"] = f"{API_DIR}:{run_env.get('PATH', '')}"
-    # 开发态默认开启 reply 镜像收集，所有 AI gateway 请求/响应快照写到
-    # ~/cicy-ai/workers/<agent>/.cicy/history/reply_mirror/<turn>_<req>_<ts>.json。
-    # 主路径 reply.json / current.json 行为不变；用于诊断 reply.Items 解析。
-    run_env.setdefault("CICY_GATEWAY_REPLY_MIRROR", "1")
+    # reply 镜像收集默认关闭：它把每次 AI gateway 请求/响应完整快照写到
+    # ~/cicy-ai/workers/<agent>/.cicy/history/reply_mirror/<turn>_<req>_<ts>.json，
+    # 约 6MB/轮、无轮转，会无界占满磁盘（曾撑到 48G）。需要诊断 reply.Items
+    # 解析时，手动 `export CICY_GATEWAY_REPLY_MIRROR=1` 即可临时开启。
+    run_env.setdefault("CICY_GATEWAY_REPLY_MIRROR", "0")
 
     with open(log_path, "ab", buffering=0) as log_file:
         process = subprocess.Popen(

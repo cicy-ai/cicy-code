@@ -1063,6 +1063,16 @@ body.cp-prompt-open { padding-bottom: 74px !important; }
 .cp-modal-btn-ok:hover { background: #e4e4e7; }
 .cp-modal-btn-danger { background: rgba(239,68,68,0.18); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); }
 .cp-modal-btn-danger:hover { background: rgba(239,68,68,0.3); color: #fecaca; }
+.cp-modal-btn:disabled { opacity: .55; cursor: default; }
+.cp-modal-card-update { max-width: 460px; }
+.cp-update-status { color: #a1a1aa; font-size: 12px; margin-top: 6px; min-height: 16px; }
+.cp-update-status.cp-update-done { color: #86efac; }
+.cp-update-status.cp-update-error { color: #fca5a5; }
+.cp-update-progress { margin-top: 10px; height: 6px; width: 100%; background: rgba(255,255,255,0.08); border-radius: 999px; overflow: hidden; }
+.cp-update-progress-bar { height: 100%; width: 0%; background: linear-gradient(135deg,#3b82f6,#2563eb); border-radius: 999px; transition: width .4s ease; }
+.cp-update-log { margin-top: 12px; max-height: 220px; overflow: auto; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 8px 10px; font-size: 11px; line-height: 1.5; color: #a1a1aa; }
+.cp-update-log:empty { display: none; }
+.cp-update-log-line { white-space: pre-wrap; word-break: break-all; }
 `;
     document.head.appendChild(style);
 }
@@ -1113,6 +1123,198 @@ function cpModalConfirm(opts: { title?: string; body: string; confirmLabel?: str
         document.addEventListener("keydown", onKey, true);
         setTimeout(function() { okBtn.focus(); }, 0);
     });
+}
+
+// Vanilla-JS agent-update modal. Replaces the old handleUpdateAgentCLI flow that
+// opened a dedicated tmux "update-<agent>" window and streamed npm output there —
+// that needs a new window, which fails in environments where window creation is
+// unavailable. Instead we drive the SAME SSE installer endpoint the React
+// first-install overlay uses (POST /api/agents/install runs `npm i -g <pkg>@latest`,
+// i.e. an update when already installed) and render its phase/log/done/error stream
+// inline. We deliberately never auto-relaunch the agent — the user restarts it
+// themselves via the ▶ Launch button after reading the log (some want to check the
+// installed version first). Mirrors the first-install overlay's idle → progress →
+// done shape.
+function cpModalUpdateAgent(opts: { agentType: string; agentId: string; apiHeaders: { [key: string]: string } }): void {
+    var overlay = document.createElement("div");
+    overlay.className = "cp-modal-overlay";
+    var card = document.createElement("div");
+    card.className = "cp-modal-card cp-modal-card-update";
+    card.innerHTML =
+        '<div class="cp-modal-body">' +
+            '<div class="cp-modal-title" id="cp-update-title"></div>' +
+            '<div class="cp-update-status" id="cp-update-status"></div>' +
+            '<div class="cp-update-progress"><div class="cp-update-progress-bar" id="cp-update-bar"></div></div>' +
+            '<div class="cp-update-log" id="cp-update-log"></div>' +
+        '</div>' +
+        '<div class="cp-modal-actions" id="cp-update-actions"></div>';
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    var titleEl = card.querySelector("#cp-update-title") as HTMLElement;
+    var statusEl = card.querySelector("#cp-update-status") as HTMLElement;
+    var barEl = card.querySelector("#cp-update-bar") as HTMLElement;
+    var logEl = card.querySelector("#cp-update-log") as HTMLElement;
+    var actionsEl = card.querySelector("#cp-update-actions") as HTMLElement;
+
+    titleEl.textContent = ttydT("updateAgentTitle", { agent: opts.agentType });
+
+    var lastRegistry = "";   // which mirror the last attempt used → retry switches source
+    var running = false;
+    var closed = false;
+    var controller: AbortController | null = null;
+
+    function close(): void {
+        if (closed) return;
+        closed = true;
+        if (controller) { try { controller.abort(); } catch (_e) {} }
+        document.removeEventListener("keydown", onKey, true);
+        overlay.remove();
+    }
+    function onKey(e: KeyboardEvent): void {
+        // Esc only closes when not mid-install (don't orphan a running stream silently).
+        if (e.key === "Escape" && !running) { e.preventDefault(); e.stopPropagation(); close(); }
+    }
+    // Restart the agent in its pane (re-source .cicy/boot.sh → relaunch the CLI on
+    // the freshly-installed version). Same action as the top-bar ▶ Launch button;
+    // offered after a successful update so the user can restart from here instead
+    // of hunting for the launch button.
+    function restartAgent(): void {
+        var headers: { [k: string]: string } = {};
+        for (var hk in opts.apiHeaders) {
+            if (Object.prototype.hasOwnProperty.call(opts.apiHeaders, hk)) headers[hk] = opts.apiHeaders[hk];
+        }
+        var fetchImpl = (window as any).fetch;
+        try {
+            fetchImpl("/api/tmux/panes/" + opts.agentId + "/relaunch-agent", { method: "POST", headers: headers }).catch(function(): void {});
+        } catch (_e) {}
+        close();
+    }
+    overlay.addEventListener("mousedown", function(e) { if (e.target === overlay && !running) close(); });
+    card.addEventListener("mousedown", function(e) { e.stopPropagation(); });
+    document.addEventListener("keydown", onKey, true);
+
+    function setActions(buttons: Array<{ label: string; cls: string; onClick: () => void; disabled?: boolean }>): void {
+        actionsEl.innerHTML = "";
+        buttons.forEach(function(b) {
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "cp-modal-btn " + b.cls;
+            btn.textContent = b.label;
+            if (b.disabled) btn.disabled = true;
+            else btn.addEventListener("click", b.onClick);
+            actionsEl.appendChild(btn);
+        });
+    }
+    function appendLog(line: string): void {
+        var div = document.createElement("div");
+        div.className = "cp-update-log-line";
+        div.textContent = line;
+        logEl.appendChild(div);
+        while (logEl.childNodes.length > 300 && logEl.firstChild) logEl.removeChild(logEl.firstChild);
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+    function setStatus(text: string, cls?: string): void {
+        statusEl.textContent = text;
+        statusEl.className = "cp-update-status" + (cls ? " " + cls : "");
+    }
+    function setPercent(p: number): void {
+        if (typeof p === "number" && p >= 0) {
+            barEl.style.width = Math.max(0, Math.min(100, p)) + "%";
+        }
+    }
+
+    function handleEvent(ev: any): void {
+        if (!ev || !ev.type) return;
+        if (ev.type === "phase") {
+            setStatus(ev.text || ttydT("updateInstalling"));
+            if (typeof ev.percent === "number") setPercent(ev.percent);
+        } else if (ev.type === "log") {
+            appendLog(ev.line == null ? "" : String(ev.line));
+        } else if (ev.type === "done") {
+            if (ev.registry_used) lastRegistry = ev.registry_used;
+            running = false;
+            setPercent(100);
+            // Ask whether to restart now — don't auto-relaunch (the user may want to
+            // read the log / check the version first), but offer a one-click restart
+            // so they don't have to hunt for the ▶ Launch button.
+            setStatus(ttydT("updateDoneAskRestart", { agent: opts.agentType }), "cp-update-done");
+            setActions([
+                { label: ttydT("updateRestartLater"), cls: "cp-modal-btn-cancel", onClick: close },
+                { label: ttydT("actionRestart"), cls: "cp-modal-btn-ok", onClick: restartAgent },
+            ]);
+        } else if (ev.type === "error") {
+            if (ev.registry_used) lastRegistry = ev.registry_used;
+            running = false;
+            setStatus(ev.error || ttydT("updateFailed"), "cp-update-error");
+            setActions([
+                { label: ttydT("close"), cls: "cp-modal-btn-cancel", onClick: close },
+                { label: ttydT("updateFailedRetry"), cls: "cp-modal-btn-danger", onClick: function() {
+                    runUpdate(lastRegistry === "mirror" ? "official" : lastRegistry === "official" ? "mirror" : "");
+                } },
+            ]);
+        }
+        // "end" → stream finished; done/error already painted the terminal state.
+    }
+
+    function runUpdate(registry: string): void {
+        running = true;
+        logEl.innerHTML = "";
+        setPercent(0);
+        setStatus(ttydT("updatePreparing"));
+        setActions([{ label: ttydT("updateInstalling"), cls: "cp-modal-btn-ok", onClick: function() {}, disabled: true }]);
+        controller = (window as any).AbortController ? new (window as any).AbortController() : null;
+        var headers: { [k: string]: string } = { "Content-Type": "application/json" };
+        for (var k in opts.apiHeaders) {
+            if (Object.prototype.hasOwnProperty.call(opts.apiHeaders, k)) headers[k] = opts.apiHeaders[k];
+        }
+        var fetchImpl = (window as any).fetch;
+        fetchImpl("/api/agents/install", {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify({ agent_id: opts.agentId, registry: registry }),
+            signal: controller ? controller.signal : undefined,
+        }).then(function(resp: any) {
+            if (!resp || !resp.ok || !resp.body) throw new Error("HTTP " + (resp ? resp.status : "?"));
+            var reader = resp.body.getReader();
+            var decoder = new TextDecoder();
+            var buf = "";
+            function pump(): any {
+                return reader.read().then(function(r: any) {
+                    if (r.done) return;
+                    buf += decoder.decode(r.value, { stream: true });
+                    var idx;
+                    while ((idx = buf.indexOf("\n\n")) >= 0) {
+                        var frame = buf.slice(0, idx);
+                        buf = buf.slice(idx + 2);
+                        var fl = frame.split("\n");
+                        for (var i = 0; i < fl.length; i++) {
+                            if (fl[i].indexOf("data:") !== 0) continue;
+                            try { handleEvent(JSON.parse(fl[i].slice(5).replace(/^\s+/, ""))); } catch (_e) {}
+                        }
+                    }
+                    return pump();
+                });
+            }
+            return pump();
+        }).catch(function(e: any) {
+            if (closed) return;
+            running = false;
+            setStatus((e && e.message) ? e.message : ttydT("updateFailed"), "cp-update-error");
+            setActions([
+                { label: ttydT("close"), cls: "cp-modal-btn-cancel", onClick: close },
+                { label: ttydT("updateFailedRetry"), cls: "cp-modal-btn-danger", onClick: function() { runUpdate(""); } },
+            ]);
+        });
+    }
+
+    // Idle state: ask before starting (parity with the old confirm + first-install
+    // overlay's "Install" button). The update itself runs on the Update click.
+    setStatus(ttydT("confirmUpdateAgent", { agent: opts.agentType }));
+    setActions([
+        { label: ttydT("cancel"), cls: "cp-modal-btn-cancel", onClick: close },
+        { label: ttydT("actionUpdate"), cls: "cp-modal-btn-ok", onClick: function() { runUpdate(""); } },
+    ]);
 }
 
 function escapeHtmlText(s: string): string {
@@ -2176,22 +2378,11 @@ export function mountCicyTTYUI(term: Terminal, webtty: WebTTY): void {
     // overwrites the existing prefix link, no separate "update" path needed.
     updateBtn.addEventListener("click", function(event: MouseEvent): void {
         event.stopPropagation();
-        cpModalConfirm({
-            title: ttydT("updateAgentTitle", { agent: paneAgentType }),
-            body: ttydT("confirmUpdateAgent", { agent: paneAgentType }),
-            confirmLabel: ttydT("actionUpdate"),
-            danger: true,
-        }).then(function(ok) {
-            if (!ok) return;
-            // Pass the localized "update complete, restart {agent}" hint
-            // from JS i18n so the server can echo it after npm install
-            // succeeds — lands in the new tmux window's terminal, not as a
-            // JS toast (the install runs async and we don't wait on it).
-            var postHint = ttydT("updateCompleteRestartHint", { agent: paneAgentType });
-            webtty.requestAPI("POST", "/api/tmux/panes/" + paneId + "/update-agent-cli", { post_install_hint: postHint }, apiHeaders).catch(function(): void {
-                flashButton(updateBtn);
-            });
-        });
+        // Open an inline modal that streams the install/upgrade log (SSE) instead
+        // of spawning a dedicated tmux update window — window creation is no longer
+        // available in this environment. The modal runs the update and shows the
+        // live npm log; the user restarts the agent themselves (▶ Launch) when done.
+        cpModalUpdateAgent({ agentType: paneAgentType, agentId: paneId, apiHeaders: apiHeaders });
     });
 
     document.addEventListener("keydown", function(event: KeyboardEvent): void {

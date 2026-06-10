@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Send, Loader2 } from 'lucide-react';
+import { Send, Loader2, Square } from 'lucide-react';
 import CurrentHistoryView from './CurrentHistoryView';
 import apiService from '../../services/api';
 
@@ -59,6 +59,22 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
     }
   }, [paneId, text, sending, busy]);
 
+  // 取消生成,按 agent 形态分流:
+  // - cicy 是 headless(无 tmux pane,send-keys 够不着)→ 走 /api/cicy/cancel,服务端取消
+  //   正在跑的网关请求(ReverseProxy 连带掐断上游 LLM),reply 落到 terminal,轮询解锁。
+  // - 终端类 agent(claude/codex 等真 CLI)→ 往它的 pane 送 Escape,等同 CLI 里按 Esc 打断。
+  // 打断后这一轮 reply complete/fail,轮询 emit busy=false 自动解锁。
+  const cancel = useCallback(async () => {
+    if (!busy) return;
+    try {
+      if (agentType === 'cicy') await apiService.cancelCicyReply(paneId);
+      else await apiService.sendKeys(paneId, 'Escape');
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '已取消' }));
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '取消失败' }));
+    }
+  }, [paneId, busy, agentType]);
+
   const canSend = !!text.trim() && !sending && !busy;
 
   return (
@@ -67,15 +83,15 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
         <CurrentHistoryView key={paneId} paneId={paneId} open={active} agentType={agentType} />
       </div>
       <div data-id="dispatcher-chat-input-bar" className="shrink-0 border-t border-white/[0.06] bg-black/[0.25] py-2.5">
-        {/* Width-locked to the history content column (max-w-3xl px-4) so the
+        {/* Width-locked to the history content column (max-w-4xl px-4) so the
             prompt sits flush under the conversation, not edge-to-edge. */}
-        <div data-id="dispatcher-chat-input-inner" className={`mx-auto flex w-full max-w-3xl items-end gap-2 rounded-xl border bg-white/[0.03] px-3 py-2 transition-colors ${busy ? 'border-white/[0.06] opacity-80' : 'border-white/[0.08] focus-within:border-blue-500/40'}`} style={{ width: 'calc(100% - 2rem)' }}>
+        <div data-id="dispatcher-chat-input-inner" className={`mx-auto flex w-full max-w-4xl items-end gap-2 rounded-xl border bg-white/[0.03] px-3 py-2 transition-colors ${busy ? 'border-white/[0.06] opacity-80' : 'border-white/[0.08] focus-within:border-blue-500/40'}`} style={{ width: 'calc(100% - 2rem)' }}>
           <textarea
             ref={inputRef}
             data-id="dispatcher-chat-input"
             value={text}
             rows={Math.min(6, Math.max(2, text.split('\n').length))}
-            placeholder={busy ? '回复生成中,请稍候…(完成或失败后可继续发送)' : '跟你的项目经理说点什么…(Enter 发送,Shift+Enter 换行)'}
+            placeholder={busy ? '回复生成中…(按 Esc 取消)' : '跟你的项目经理说点什么…(Enter 发送,Shift+Enter 换行)'}
             onChange={(e) => setText(e.target.value)}
             onCompositionStart={() => { composingRef.current = true; }}
             onCompositionEnd={() => { composingRef.current = false; }}
@@ -84,6 +100,12 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
               // Space/Enter for keyboard activation — stop bubbling so typing
               // in the prompt never reaches it (space was being swallowed).
               e.stopPropagation();
+              // 生成中按 Esc → 取消这一轮(往 agent pane 送 Escape 打断)。
+              if (e.key === 'Escape' && busy && !composingRef.current) {
+                e.preventDefault();
+                void cancel();
+                return;
+              }
               if (e.key === 'Enter' && !e.shiftKey && !composingRef.current) {
                 e.preventDefault();
                 void send();
@@ -91,16 +113,23 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
             }}
             className="max-h-40 flex-1 resize-none self-stretch bg-transparent text-sm leading-6 text-zinc-200 outline-none placeholder:text-zinc-600"
           />
+          {/* 生成中 = 停止按钮(点它或按 Esc 都能取消);否则 = 发送按钮。 */}
           <button
-            data-id="dispatcher-chat-send"
+            data-id={busy ? 'dispatcher-chat-stop' : 'dispatcher-chat-send'}
             type="button"
-            onClick={() => void send()}
-            disabled={!canSend}
-            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${canSend ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-white/[0.04] text-zinc-600'}`}
-            title={busy ? '等待回复完成' : '发送'}
-            aria-label={busy ? 'Waiting' : 'Send'}
+            onClick={() => (busy ? void cancel() : void send())}
+            disabled={busy ? sending : !canSend}
+            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+              busy
+                ? 'bg-white/[0.08] text-zinc-200 hover:bg-white/[0.14]'
+                : canSend
+                  ? 'bg-blue-600 text-white hover:bg-blue-500'
+                  : 'bg-white/[0.04] text-zinc-600'
+            }`}
+            title={busy ? '停止生成 (Esc)' : '发送'}
+            aria-label={busy ? 'Stop (Esc)' : 'Send'}
           >
-            {sending || busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : busy ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4" />}
           </button>
         </div>
       </div>

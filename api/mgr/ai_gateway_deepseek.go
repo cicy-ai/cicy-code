@@ -991,6 +991,48 @@ func rewriteSuffixForDeepSeekChatCompletionsFromMessages(suffix string) string {
 	return strings.Replace(suffix, "/messages", "/chat/completions", 1)
 }
 
+// shouldAdaptAnthropicToChatCompletions decides whether an Anthropic Messages
+// request hitting the /anthropic endpoint must be bridged down to Chat Completions
+// for the upstream. Two cases:
+//   - DeepSeek hosts that only serve Chat Completions (shouldAdaptDeepSeekForAnthropic).
+//   - The agent's effective provider declares the openai protocol — e.g. the cicy
+//     agent (always Anthropic-format) configured onto an openai-protocol provider.
+//     The gateway translates the request and wraps the SSE back to Anthropic Messages
+//     so the agent never has to speak two protocols.
+//
+// Native anthropic upstreams skip translation: a provider whose protocol is
+// "anthropic" (incl. DeepSeek's /anthropic passthrough handled above) is forwarded
+// as-is. pathProvider is the URL segment ("anthropic"); agentID scopes the lookup.
+func shouldAdaptAnthropicToChatCompletions(pathProvider, agentID, upstreamHost, basePath, suffix string) bool {
+	if shouldAdaptDeepSeekForAnthropic(upstreamHost, basePath, suffix) {
+		return true
+	}
+	if normalizeAIGatewayProvider(pathProvider) != "anthropic" {
+		return false // only the /anthropic endpoint carries Messages-format bodies
+	}
+	if !strings.Contains(strings.ToLower(suffix), "/messages") {
+		return false
+	}
+	if strings.Contains(strings.ToLower(basePath), "/anthropic") {
+		return false // upstream is already a native Messages endpoint — pass through
+	}
+	return aiGatewayEffectiveProviderProtocol(pathProvider, agentID) == "openai"
+}
+
+// aiGatewayEffectiveProviderProtocol returns the normalized protocol ("anthropic"
+// /"openai"/"") of the provider that actually serves this agent's request, honoring
+// the runtime_ai override and the agent-type default, for the given endpoint path.
+func aiGatewayEffectiveProviderProtocol(pathProvider, agentID string) string {
+	cfg, _, err := resolveRuntimeAIConfigForAgent(pathProvider, agentID)
+	if err != nil {
+		return ""
+	}
+	if pc, ok := loadProviderByKey(cfg.Provider); ok && pc != nil {
+		return normalizeAIGatewayProvider(pc.Protocol)
+	}
+	return ""
+}
+
 // transformMessagesRequestToChatCompletions converts an Anthropic Messages API
 // request body into a Chat Completions request body. Returns new body + model.
 func transformMessagesRequestToChatCompletions(body []byte) ([]byte, string, error) {

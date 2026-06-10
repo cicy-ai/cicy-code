@@ -66,6 +66,8 @@ func cliInstallSpecFor(agentType string) (cliInstallSpec, bool) {
 		return cliInstallSpec{"claude", "claude", "Claude Code", "@anthropic-ai/claude-code@latest", ""}, true
 	case "codex":
 		return cliInstallSpec{"codex", "codex", "Codex", "@openai/codex@latest", ""}, true
+	case "gemini":
+		return cliInstallSpec{"gemini", "gemini", "Gemini CLI", "@google/gemini-cli@latest", ""}, true
 	case "opencode":
 		return cliInstallSpec{"opencode", "opencode", "OpenCode", "opencode-ai@latest", ""}, true
 	case "openclaw":
@@ -226,10 +228,16 @@ func resolveNpmRegistry(choice string) (url, label string) {
 // "added N packages"); no-progress drops npm's TTY progress bar, which doesn't
 // render over a pipe. Both verbose and the install detail go to stderr, which the
 // runner merges into the streamed log.
+//
+// --foreground-scripts: stream lifecycle-script (postinstall) output too. Several
+// CLIs (notably @anthropic-ai/claude-code) download a large platform-native binary
+// in postinstall — by default npm hides that output, so the log box sits empty for
+// the whole (slow) download and only bursts the tail at the end, which reads as
+// "not live". Foregrounding the scripts makes that download progress stream in.
 func npmInstallCmdRegistry(pkg, registry string) string {
 	rmOld := `rm -rf "$HOME/.npm-global/lib/node_modules/` + npmPkgDir(pkg) + `"`
 	return `mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib" "$HOME/.npm-global/lib/node_modules" && ` +
-		rmOld + ` && npm install -g --include=optional --loglevel verbose --no-progress --registry=` + registry + ` --prefix "$HOME/.npm-global" ` + pkg
+		rmOld + ` && npm install -g --include=optional --foreground-scripts --loglevel verbose --no-progress --registry=` + registry + ` --prefix "$HOME/.npm-global" ` + pkg
 }
 
 // runCliInstall executes the install, emitting phase/log/done/error events. It is
@@ -378,6 +386,10 @@ func handleAgentInstall(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	// Defeat reverse-proxy (nginx) response buffering — without this the proxy can
+	// hold the whole SSE stream and release it in one batch at the end, so the live
+	// install log only appears all-at-once when the install finishes.
+	w.Header().Set("X-Accel-Buffering", "no")
 	flusher, _ := w.(http.Flusher)
 	var mu sync.Mutex
 	emit := func(ev cliInstallEvent) {
@@ -388,6 +400,12 @@ func handleAgentInstall(w http.ResponseWriter, r *http.Request) {
 		if flusher != nil {
 			flusher.Flush()
 		}
+	}
+	// Flush the headers + a priming comment immediately so the client opens the
+	// stream right away (rather than waiting for the first real event).
+	fmt.Fprint(w, ": stream-open\n\n")
+	if flusher != nil {
+		flusher.Flush()
 	}
 	runCliInstall(emit, spec, req.Registry, r.Context().Done())
 	emit(cliInstallEvent{"type": "end"})

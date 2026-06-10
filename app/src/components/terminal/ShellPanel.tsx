@@ -20,8 +20,11 @@ interface Win { index: string; name: string; active: boolean }
 // for every agent at once.
 export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttydSrc: string; active?: boolean }) {
   const { t } = useTranslation('ui')
-  const { shellPanelOpen, setShellPanelOpen } = useApp()
-  const open = !!shellPanelOpen && !!active
+  const { isShellOpen, setShellOpen } = useApp()
+  // Per-agent: this dock only opens when THIS agent's saved toggle is on AND its
+  // card is the active one. Switching to an agent that never toggled its shell
+  // open keeps the dock hidden.
+  const open = isShellOpen(agentId) && !!active
   const grouped = `${agentId}-sh`
   // Same token/lang as the agent terminal, just a different proxy route. The
   // bottom=1 flag tells the gotty page to hide its own floating tab bar
@@ -76,13 +79,13 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
     // the agent's output. Keeping it parked on this shell window avoids that —
     // and reopening the dock restores the same shell.
     const isLast = wins.filter(w => !isAgentWin(w)).length <= 1
-    if (isLast) { setShellPanelOpen(false); return }
+    if (isLast) { setShellOpen(agentId, false); return }
     try { await apiService.deleteWindow(grouped, idx) } catch { /* ignore */ }
     setTimeout(load, 300)
   }
   const tabs = wins.filter(w => !isAgentWin(w))
 
-  // Drag the bottom-left grip to resize the terminal height. The terminal's
+  // Drag the top-edge handle to resize the terminal height. The terminal's
   // bottom edge is pinned to the card bottom, so dragging up grows it (eating
   // into the agent view above), dragging down shrinks it. A full-screen overlay
   // during the drag stops the ttyd iframe from swallowing pointer events.
@@ -105,10 +108,14 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
     window.addEventListener('pointerup', onUp)
   }
 
-  // Only the active card hosts a live shell dock; collapse to nothing when the
-  // global toggle is off (keep the WebFrame mounted-but-hidden to preserve its
-  // ttyd WebSocket across quick toggles).
-  if (!active) return null
+  // Render nothing (no live grouped ttyd session) for agents whose shell was
+  // never opened. But once an agent's shell IS open, keep its dock mounted even
+  // when its card isn't active — the outer div below just hides it with
+  // display:none (same trick the main terminal uses). That preserves the ttyd
+  // WebSocket across agent switches, so flipping back shows the shell instantly
+  // instead of tearing it down and reconnecting — which was the "loading" you
+  // saw on every switch-out-and-back.
+  if (!isShellOpen(agentId)) return null
 
   return (
     <div
@@ -116,6 +123,18 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
       className="shrink-0 border-t border-white/[0.06] bg-black/[0.28]"
       style={open ? undefined : { display: 'none' }}
     >
+      {/* Top-edge resize handle — full-width strip over the dock's top border.
+          Drag up to grow the terminal (eats into the agent view above), down to
+          shrink; the dock's bottom edge stays pinned to the card bottom. */}
+      <div
+        data-id={`agent-stack-shell-resize-${agentId}`}
+        onPointerDown={startResize}
+        title={t('shellPanelResize', { defaultValue: 'Drag to resize' })}
+        className="group/resize -mt-px h-1.5 w-full shrink-0 cursor-ns-resize"
+        style={{ touchAction: 'none' }}
+      >
+        <div className="mx-auto h-0.5 w-10 rounded-full bg-white/[0.12] transition-colors group-hover/resize:bg-emerald-400/60" />
+      </div>
       <div data-id={`agent-stack-shell-bar-${agentId}`} className="flex h-9 items-center gap-1 px-2">
         <span data-id={`agent-stack-shell-label-${agentId}`} className="flex shrink-0 items-center gap-1.5 px-1 text-xs font-medium text-zinc-500">
           <Terminal className="h-3.5 w-3.5" />
@@ -157,7 +176,7 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
         <button
           type="button"
           data-id={`agent-stack-shell-close-${agentId}`}
-          onClick={() => setShellPanelOpen(false)}
+          onClick={() => setShellOpen(agentId, false)}
           title={t('shellPanelClose', { defaultValue: 'Close panel' })}
           className="shrink-0 rounded p-1 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
         >
@@ -167,19 +186,11 @@ export function ShellPanel({ agentId, ttydSrc, active }: { agentId: string; ttyd
       {mounted ? (
         <div data-id={`agent-stack-shell-terminal-${agentId}`} className="relative w-full" style={{ height }}>
           <WebFrame src={shellSrc} className="h-full w-full border-0 bg-black" title={`shell-${agentId}`} />
-          {/* resize grip — bottom-left corner; drag up to enlarge */}
-          <div
-            data-id={`agent-stack-shell-resize-${agentId}`}
-            onPointerDown={startResize}
-            title={t('shellPanelResize', { defaultValue: 'Drag to resize' })}
-            className="absolute bottom-0 left-0 z-10 flex h-4 w-4 cursor-sw-resize items-end justify-start p-1"
-            style={{ touchAction: 'none' }}
-          >
-            <svg width="8" height="8" viewBox="0 0 8 8" className="text-zinc-500"><path d="M0 0v8h8" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" /></svg>
-          </div>
         </div>
       ) : null}
-      {resizing ? <div data-id={`agent-stack-shell-resize-overlay-${agentId}`} className="fixed inset-0 z-[200] cursor-sw-resize" style={{ touchAction: 'none' }} /> : null}
+      {/* Full-screen overlay during drag so the ttyd iframe doesn't swallow the
+          pointer-move stream mid-resize. */}
+      {resizing ? <div data-id={`agent-stack-shell-resize-overlay-${agentId}`} className="fixed inset-0 z-[200] cursor-ns-resize" style={{ touchAction: 'none' }} /> : null}
     </div>
   )
 }

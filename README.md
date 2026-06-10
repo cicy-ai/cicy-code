@@ -235,7 +235,8 @@ cd skills && make install-local-cli
 - `api/mgr/stt.go`、`api/mgr/tts.go`：语音转写 / 合成代理
 - `api/mgr/todo.go`：`/api/todo/*`，对应 `cicy-todo` CLI 与前端 Todo tab
 - `api/mgr/im*.go`、`im_telegram.go`、`im_wechat.go`、`im_reply_hook.go`：即时通讯桥接
-- `api/mgr/proxy.go`、`api/mgr/openclaw_gateway.go`：代理与 AI 网关
+- `api/mgr/proxy.go`、`api/mgr/ai_gateway.go`：代理与通用 AI 网关(`/api/ai-gateway/*`)
+- `api/mgr/openclaw_gateway.go`:OpenClaw(🦞 IM agent)专属网关(`/api/openclaw/*`,微信会话/provider 代理)
 - `api/mgr/ui.go`：内嵌 UI 或 Vite 反代
 - `api/mgr/paths.go`：cicy 状态根 + 运行时路径常量
 

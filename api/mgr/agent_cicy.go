@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -239,6 +241,108 @@ const cicyCompactSystemPrompt = `你是一个对话历史压缩器。下面给�
 
 const cicyCompactSummaryPrefix = "[以下是更早对话的压缩摘要,用于保持上下文连续;最近的原始对话紧随其后。]\n\n"
 
+// cicyOutcomePrefix marks a synthetic assistant message that records a turn which
+// produced no normal reply — the user cancelled it or the gateway failed after
+// exhausting retries. It's a real assistant text block (keeps user/assistant
+// alternation valid; a bare trailing user message would otherwise stack into a
+// consecutive-user window).
+//
+// ⚠️ This text goes on the WIRE and into current.json (web reads the SAME snapshot —
+// wire == display, they can't differ). So it MUST be a short, clean, human sentence:
+// the model sees it as harmless context and COMPACTION summarizes it cleanly. The
+// earlier "⟦cicy-turn-outcome⟧error\x1f{gateway 401 json…}" form leaked weird symbols
+// + raw error JSON into the wire, and when dozens piled up during an outage the
+// compaction baked them into a garbage summary. No machine detail / no JSON here —
+// the failure reason lives in usage-log, not in the conversation. The serving layer
+// (cicyTagOutcome) detects this prefix to style it + offer 重试.
+const cicyOutcomePrefix = "（本轮未生成回复"
+
+// cicyOutcomeLegacyMark is the pre-2026-06-09 marker; still detected by the display
+// relabel + compaction filter so any lingering old records clean up instead of
+// showing raw symbols.
+const cicyOutcomeLegacyMark = "⟦cicy-turn-outcome⟧"
+
+// cicyOutcomeMarkerText renders the clean wire/display text for a turn outcome.
+func cicyOutcomeMarkerText(kind string) string {
+	if kind == "cancelled" {
+		return cicyOutcomePrefix + "·已停止）"
+	}
+	return cicyOutcomePrefix + "·生成失败）"
+}
+
+// cicyOutcomeMessage builds the synthetic assistant record for a cancelled/failed
+// turn. detail (e.g. "gateway 401: …") is NOT persisted into the conversation — it
+// only rides the emit/usage-log; the wire text stays clean.
+func cicyOutcomeMessage(kind, detail string) M {
+	return M{"role": "assistant", "content": []M{{"type": "text", "text": cicyOutcomeMarkerText(kind)}}}
+}
+
+// cicyAttachOutcomeToSnapshot appends the outcome marker to the web's committed
+// snapshot (current.json) so a cancelled/failed turn shows up IMMEDIATELY, not
+// only after the next successful turn re-snapshots history. The web reads
+// current.json (the last wire-request body); our marker is appended post-request,
+// so without this patch it would be invisible until the next request carries it.
+// Idempotent: skips if the snapshot already ends with a marker. The marker is
+// given an explicit id = maxID+1 so the body stays "already numbered" — that keeps
+// aiGatewayWriteCurrentSnapshot's annotator from RENUMBERING the whole window (an
+// id-less message forces a re-annotate → every id shifts → the web can't reconcile
+// incrementally and re-pages the entire history = a jarring full-reload flash on
+// every send). With a stable +1 id it reads as one normal new turn.
+func cicyAttachOutcomeToSnapshot(shortID, kind, detail string) {
+	current := agentInspectorLoadCurrent(shortID)
+	body := aiGatewayMap(current.Body)
+	if len(body) == 0 {
+		return // no wire snapshot yet to attach to
+	}
+	msgs := aiGatewaySlice(body["messages"])
+	if n := len(msgs); n > 0 {
+		if cicyMessageOutcomeKind(aiGatewayMap(msgs[n-1])) != "" {
+			return
+		}
+	}
+	msgs = append(msgs, map[string]interface{}{
+		"id":      aiGatewayCurrentBodyMaxHistoryID(current.Body) + 1,
+		"role":    "assistant",
+		"content": []interface{}{map[string]interface{}{"type": "text", "text": cicyOutcomeMarkerText(kind)}},
+	})
+	body["messages"] = msgs
+	current.Body = body
+	_ = aiGatewayWriteCurrentSnapshot(shortID, current)
+}
+
+// cicyOutcomeKindFromText returns "cancelled"/"error" if s is an outcome marker
+// (new clean form OR the legacy "⟦cicy-turn-outcome⟧…" form), else "".
+func cicyOutcomeKindFromText(s string) string {
+	isNew := strings.HasPrefix(s, cicyOutcomePrefix)
+	isOld := strings.HasPrefix(s, cicyOutcomeLegacyMark)
+	if !isNew && !isOld {
+		return ""
+	}
+	if strings.Contains(s, "已停止") || strings.Contains(s, "cancelled") {
+		return "cancelled"
+	}
+	return "error"
+}
+
+// cicyMessageOutcomeKind returns the outcome kind ("cancelled"/"error") if msg is
+// a synthetic outcome marker, else "". Handles both content shapes ([]M in-memory,
+// []interface{} after a disk reload).
+func cicyMessageOutcomeKind(msg M) string {
+	if r, _ := msg["role"].(string); r != "assistant" {
+		return ""
+	}
+	found := ""
+	cicyForEachBlock(msg, func(bm map[string]interface{}, typ string) {
+		if found != "" || typ != "text" {
+			return
+		}
+		if s, _ := bm["text"].(string); s != "" {
+			found = cicyOutcomeKindFromText(s)
+		}
+	})
+	return found
+}
+
 // cicyCompactSplitPoint returns the index where the kept verbatim tail begins
 // (everything before it is summarized), or -1 when the history should not be
 // compacted yet. The boundary is advanced forward so the tail never STARTS on a
@@ -289,6 +393,10 @@ func cicyToolResultText(content interface{}) string {
 func cicyRenderHistoryForCompaction(msgs []M) string {
 	var b strings.Builder
 	for _, m := range msgs {
+		// 失败/取消记录是 UI 噪声,绝不进压缩摘要(否则 outage 期攒的几十条会被总结成垃圾)。
+		if cicyMessageOutcomeKind(m) != "" {
+			continue
+		}
 		role, _ := m["role"].(string)
 		if s, ok := m["content"].(string); ok {
 			if strings.TrimSpace(s) != "" {
@@ -443,9 +551,10 @@ func cicySessionRegistered(shortID string) bool {
 	return ok
 }
 
-// persistLocked writes the trimmed history to disk. Caller holds s.mu.
+// persistLocked writes the FULL history to disk (no auto-truncation; only
+// explicit compact/clear shrink it). Caller holds s.mu.
 func (s *cicySession) persistLocked(workspace string) {
-	s.messages = cicyBalanceToolCalls(cicyTrimMessages(s.messages))
+	s.messages = cicyBalanceToolCalls(s.messages)
 	if err := os.MkdirAll(cicyConvDir(workspace), 0755); err != nil {
 		return
 	}
@@ -1120,44 +1229,143 @@ func cicyCallGateway(ctx context.Context, shortID, sessionID string, payload M, 
 		return nil, false, err
 	}
 	url := fmt.Sprintf("%s/api/ai-gateway/anthropic/%s/v1/messages", cicyGatewayBase, shortID)
-	// ctx 可取消:取消时这个请求中断,网关侧 ReverseProxy 随之掐断上游 LLM,
-	// 流读取以 error 结束 → 上层 turn 收尾。
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, false, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", "cicy-local-gateway")
-	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("Accept", "text/event-stream")
-	// Conversation id the audit layer keys off. The main turn passes
-	// "dispatcher-<id>" (one long-lived conversation per agent); compaction passes
-	// "compact-<id>" so its summarization round audits to a SEPARATE bucket and
-	// never pollutes the agent's own chat history / UI stream. Without it the audit
-	// layer falls back to a fresh random conversation_id every turn.
-	req.Header.Set("X-Claude-Code-Session-Id", sessionID)
-	resp, err := (&http.Client{Timeout: 10 * time.Minute}).Do(req)
-	if err != nil {
-		return nil, false, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
-		return nil, false, fmt.Errorf("gateway %d: %s", resp.StatusCode, truncateForLog(string(respBody), 400))
-	}
-	if !strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
-		// Upstream ignored stream:true — parse the plain JSON response.
-		respBody, err := io.ReadAll(resp.Body)
+	client := &http.Client{Timeout: 10 * time.Minute}
+
+	// Claude Code-style auto-retry: transient failures (network drops, 408/409/429,
+	// any 5xx incl. 529 overloaded) retry up to cicyMaxGatewayRetries times with
+	// exponential backoff (0.5·2^n capped at 8s, jittered) honoring retry-after.
+	// Client errors (400/401/403/404/422) are NOT retried — retrying a bad key or a
+	// wrong endpoint never helps, so surface them immediately. Retry only happens
+	// BEFORE any token reaches the user: once the stream starts emitting we commit
+	// to that response and never re-run (would duplicate already-shown text).
+	for attempt := 0; ; attempt++ {
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
+		// ctx 可取消:取消时这个请求中断,网关侧 ReverseProxy 随之掐断上游 LLM,
+		// 流读取以 error 结束 → 上层 turn 收尾。
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 		if err != nil {
 			return nil, false, err
 		}
-		var parsed map[string]interface{}
-		if err := json.Unmarshal(respBody, &parsed); err != nil {
-			return nil, false, fmt.Errorf("gateway response parse failed: %v", err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("x-api-key", "cicy-local-gateway")
+		req.Header.Set("anthropic-version", "2023-06-01")
+		req.Header.Set("Accept", "text/event-stream")
+		// Conversation id the audit layer keys off. The main turn passes
+		// "dispatcher-<id>" (one long-lived conversation per agent); compaction passes
+		// "compact-<id>" so its summarization round audits to a SEPARATE bucket and
+		// never pollutes the agent's own chat history / UI stream. Without it the audit
+		// layer falls back to a fresh random conversation_id every turn.
+		req.Header.Set("X-Claude-Code-Session-Id", sessionID)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			// Connection-level failure: nothing was emitted, so a retry is safe.
+			if ctx.Err() == nil && attempt < cicyMaxGatewayRetries {
+				if !cicySleepBackoff(ctx, attempt, "") {
+					return nil, false, ctx.Err()
+				}
+				log.Printf("[cicy-retry] agent=%s attempt=%d/%d network error: %v", shortID, attempt+1, cicyMaxGatewayRetries, err)
+				continue
+			}
+			return nil, false, err
 		}
-		return parsed, false, nil
+
+		if resp.StatusCode >= 400 {
+			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
+			retryAfter := resp.Header.Get("retry-after")
+			shouldRetryHeader := resp.Header.Get("x-should-retry")
+			resp.Body.Close()
+			gwErr := fmt.Errorf("gateway %d: %s", resp.StatusCode, truncateForLog(string(respBody), 400))
+			if attempt < cicyMaxGatewayRetries && cicyStatusRetryable(resp.StatusCode, shouldRetryHeader) {
+				if !cicySleepBackoff(ctx, attempt, retryAfter) {
+					return nil, false, ctx.Err()
+				}
+				log.Printf("[cicy-retry] agent=%s attempt=%d/%d gateway %d, retrying", shortID, attempt+1, cicyMaxGatewayRetries, resp.StatusCode)
+				continue
+			}
+			return nil, false, gwErr
+		}
+
+		// Good response — consume it. No retry past this point (tokens may stream to
+		// the user); close the body explicitly since we're inside a loop (no defer).
+		if !strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+			// Upstream ignored stream:true — parse the plain JSON response.
+			respBody, rerr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if rerr != nil {
+				return nil, false, rerr
+			}
+			var parsed map[string]interface{}
+			if err := json.Unmarshal(respBody, &parsed); err != nil {
+				return nil, false, fmt.Errorf("gateway response parse failed: %v", err)
+			}
+			return parsed, false, nil
+		}
+		result, streamed, aerr := cicyAssembleSSE(resp.Body, emit)
+		resp.Body.Close()
+		return result, streamed, aerr
 	}
-	return cicyAssembleSSE(resp.Body, emit)
+}
+
+// cicyMaxGatewayRetries mirrors Claude Code's DEFAULT_MAX_RETRIES (10): the cap on
+// transient-failure retries for one gateway round trip.
+const cicyMaxGatewayRetries = 10
+
+// cicyStatusRetryable mirrors Claude Code's shouldRetry: an explicit
+// x-should-retry header wins; otherwise retry 408/409/429 and any 5xx (incl. 529
+// overloaded). Everything else (400/401/403/404/422 …) is a client error a retry
+// can't fix.
+func cicyStatusRetryable(status int, shouldRetryHeader string) bool {
+	switch shouldRetryHeader {
+	case "true":
+		return true
+	case "false":
+		return false
+	}
+	switch {
+	case status == 408, status == 409, status == 429:
+		return true
+	case status >= 500:
+		return true
+	}
+	return false
+}
+
+// cicyRetryDelay computes the wait before the next gateway retry. A retry-after
+// header (seconds, capped at 60s) wins; otherwise exponential backoff
+// min(0.5·2^attempt, 8s) with 0.75–1.0 jitter — the same curve as Claude Code.
+func cicyRetryDelay(attempt int, retryAfter string) time.Duration {
+	if s := strings.TrimSpace(retryAfter); s != "" {
+		if secs, err := strconv.ParseFloat(s, 64); err == nil && secs > 0 {
+			if secs > 60 {
+				secs = 60
+			}
+			return time.Duration(secs * float64(time.Second))
+		}
+	}
+	base := 0.5 * math.Pow(2, float64(attempt))
+	if base > 8 {
+		base = 8
+	}
+	// Jitter 0.75–1.0 derived from the clock (no rand import); spreads retries so a
+	// fleet of agents doesn't hammer a recovering upstream in lockstep.
+	jitter := 1 - float64(time.Now().UnixNano()%250)/1000.0
+	return time.Duration(base * jitter * float64(time.Second))
+}
+
+// cicySleepBackoff waits cicyRetryDelay, but returns false immediately if ctx is
+// cancelled during the wait (user pressed Esc / stop) so we abandon the retry.
+func cicySleepBackoff(ctx context.Context, attempt int, retryAfter string) bool {
+	t := time.NewTimer(cicyRetryDelay(attempt, retryAfter))
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
 }
 
 // cicyAssembleSSE folds an Anthropic Messages SSE stream into the
@@ -1455,6 +1663,94 @@ func handleCicyCancel(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"success": true, "canceled": canceled, "pane_id": shortID})
 }
 
+// handleCicyRetry re-runs a cicy agent's latest cancelled/failed turn (web 点
+// 「重试」时调用)。body: {pane_id}。Runs in the background; the web picks up the
+// new reply through its normal live-tail polling.
+func handleCicyRetry(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, 405, "POST required")
+		return
+	}
+	var req M
+	readBody(r, &req)
+	paneID, _ := req["pane_id"].(string)
+	if strings.TrimSpace(paneID) == "" {
+		paneID, _ = req["win_id"].(string)
+	}
+	shortID := shortPaneID(normPaneID(strings.TrimSpace(paneID)))
+	if shortID == "" {
+		httpErr(w, 400, "pane_id required")
+		return
+	}
+	if normalizeAgentType(paneAgentType(shortID+":main.0")) != "cicy" {
+		httpErr(w, 400, "agent is not a cicy lite agent")
+		return
+	}
+	workspace := paneWorkspace(shortID)
+	if workspace == "" {
+		httpErr(w, 404, "agent workspace not found")
+		return
+	}
+	started, reason := retryCicyPane(shortID, workspace)
+	J(w, M{"success": started, "started": started, "reason": reason, "pane_id": shortID})
+}
+
+// clearCicyPane resets a cicy agent's conversation to empty: the LIVE in-memory
+// session AND conversation.json AND the gateway snapshots (current/reply.json), all
+// in one shot. Doing it through the live session avoids the race where editing
+// conversation.json on disk gets clobbered by the running process persisting its
+// in-memory history back.
+func clearCicyPane(shortID, workspace string) {
+	session := getCicySession(shortID, workspace)
+	session.cancelInFlight() // stop any in-flight turn first
+	session.mu.Lock()
+	session.messages = nil
+	session.persistLocked(workspace) // conversation.json → empty
+	session.mu.Unlock()
+	session.forceRelease() // drop busy/queued so it's truly fresh
+	// Empty the web's committed view too: remove the gateway snapshots (the audit
+	// layer recreates them on the next turn). current.json/reply.json are symlinks
+	// into chat/<conv>/ — drop both the link and its target.
+	dir := aiGatewayHistoryDir(shortID)
+	for _, name := range []string{"current.json", "reply.json"} {
+		canonical := filepath.Join(dir, name)
+		if target, err := os.Readlink(canonical); err == nil {
+			_ = os.Remove(filepath.Join(dir, target))
+		}
+		_ = os.Remove(canonical)
+	}
+}
+
+// handleCicyClear wipes a cicy agent's conversation (headless reset). body: {pane_id}.
+func handleCicyClear(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, 405, "POST required")
+		return
+	}
+	var req M
+	readBody(r, &req)
+	paneID, _ := req["pane_id"].(string)
+	if strings.TrimSpace(paneID) == "" {
+		paneID, _ = req["win_id"].(string)
+	}
+	shortID := shortPaneID(normPaneID(strings.TrimSpace(paneID)))
+	if shortID == "" {
+		httpErr(w, 400, "pane_id required")
+		return
+	}
+	if normalizeAgentType(paneAgentType(shortID+":main.0")) != "cicy" {
+		httpErr(w, 400, "agent is not a cicy lite agent")
+		return
+	}
+	workspace := paneWorkspace(shortID)
+	if workspace == "" {
+		httpErr(w, 404, "agent workspace not found")
+		return
+	}
+	clearCicyPane(shortID, workspace)
+	J(w, M{"success": true, "pane_id": shortID})
+}
+
 func handleCicyChat(w http.ResponseWriter, r *http.Request) {
 	if !isLoopbackRemote(r.RemoteAddr) {
 		httpErr(w, 403, "cicy_chat_loopback_only")
@@ -1552,6 +1848,17 @@ func handleCicyHistory(w http.ResponseWriter, r *http.Request) {
 // and deliverCicyMessage (headless, in-process). Decoupling it from the
 // ResponseWriter is what lets a cicy agent run with no tmux pane at all.
 func runCicyOwnedTurns(session *cicySession, shortID, workspace, text string, emit func(M)) {
+	runCicyOwnedTurnsCore(session, shortID, workspace, text, false, emit)
+}
+
+// retryCicyOwnedTurns re-runs the latest failed/cancelled turn: it drops the
+// trailing outcome marker and re-executes that user turn (no new user message
+// appended). Caller must already own the turn (busy acquired).
+func retryCicyOwnedTurns(session *cicySession, shortID, workspace string, emit func(M)) {
+	runCicyOwnedTurnsCore(session, shortID, workspace, "", true, emit)
+}
+
+func runCicyOwnedTurnsCore(session *cicySession, shortID, workspace, text string, retry bool, emit func(M)) {
 	released := false
 	// 整段 owned-turns(含 drain 出来的后续轮)共用一个可取消 ctx:用户取消 → 当前网关
 	// 请求被掐断、排队清空,这里收尾。
@@ -1566,9 +1873,23 @@ func runCicyOwnedTurns(session *cicySession, shortID, workspace, text string, em
 	}()
 
 	cur := text
+	first := true
 	for {
 		session.mu.Lock()
-		ok := runCicyTurnLocked(ctx, session, shortID, workspace, cur, emit)
+		var ok bool
+		if first && retry {
+			// Pop the failed turn's outcome marker and re-run that same user turn.
+			if !session.dropTrailingOutcomeLocked() {
+				session.mu.Unlock()
+				emit(M{"type": "error", "error": "没有可重试的回合"})
+				emit(M{"type": "done"})
+				return // defer clears busy
+			}
+			ok = cicyRunWindowLocked(ctx, session, shortID, workspace, emit)
+		} else {
+			ok = runCicyTurnLocked(ctx, session, shortID, workspace, cur, emit)
+		}
+		first = false
 		session.mu.Unlock()
 		if !ok {
 			emit(M{"type": "done"})
@@ -1656,6 +1977,59 @@ func (s *cicySession) forceRelease() {
 	s.qmu.Unlock()
 }
 
+// tryOwnTurn marks the session busy and returns true ONLY if it was idle — the
+// caller then owns the turn(s). Unlike enqueueIfBusy it never queues; a retry
+// while a reply is in flight is simply rejected. Concurrency-safe.
+func (s *cicySession) tryOwnTurn() bool {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	if s.busy {
+		return false
+	}
+	s.busy = true
+	return true
+}
+
+// dropTrailingOutcomeLocked pops a trailing outcome marker (cancelled/failed turn
+// record) so a retry re-runs the user turn it recorded. Returns true when the
+// window then ends on a user message (i.e. there is a turn to retry). Caller holds
+// session.mu.
+func (s *cicySession) dropTrailingOutcomeLocked() bool {
+	if len(s.messages) > 0 {
+		if cicyMessageOutcomeKind(s.messages[len(s.messages)-1]) != "" {
+			s.messages = s.messages[:len(s.messages)-1]
+		}
+	}
+	if len(s.messages) == 0 {
+		return false
+	}
+	r, _ := s.messages[len(s.messages)-1]["role"].(string)
+	return r == "user"
+}
+
+// retryCicyPane re-runs the latest cancelled/failed turn for a cicy agent (web 点
+// 「重试」入口)。It runs the turn in the background and returns immediately; the
+// web surfaces the result through its normal reply.json live-tail polling. reason
+// is non-empty only when started is false (nothing to retry / busy).
+func retryCicyPane(shortID, workspace string) (started bool, reason string) {
+	session := getCicySession(shortID, workspace)
+	session.mu.Lock()
+	hasOutcome := len(session.messages) > 0 &&
+		cicyMessageOutcomeKind(session.messages[len(session.messages)-1]) != ""
+	session.mu.Unlock()
+	if !hasOutcome {
+		return false, "没有可重试的回合"
+	}
+	if !session.tryOwnTurn() {
+		return false, "正在生成中,请稍候"
+	}
+	go func() {
+		retryCicyOwnedTurns(session, shortID, workspace, func(M) {})
+		broadcastPollData(shortID)
+	}()
+	return true, ""
+}
+
 // runCicyTurnLocked runs ONE user turn (append text → tool loop → persist),
 // streaming text/tool/error events through emit. It does NOT emit the terminal
 // "done" — the caller owns that, so multiple drained turns can stream on one
@@ -1668,31 +2042,30 @@ func (s *cicySession) forceRelease() {
 // tmux, no ResponseWriter dependency.
 func runCicyTurnLocked(ctx context.Context, session *cicySession, shortID, workspace, text string, emit func(M)) bool {
 	session.messages = append(session.messages, M{"role": "user", "content": text})
+	return cicyRunWindowLocked(ctx, session, shortID, workspace, emit)
+}
+
+// cicyRunWindowLocked bounds the window, then runs the tool loop on session.messages
+// AS-IS (the trailing user message is assumed already present). runCicyTurnLocked
+// reaches it after appending a fresh user turn; the retry path reaches it after
+// dropping a failed turn's outcome marker — so a retry re-runs the same user turn
+// without duplicating it. Caller must hold session.mu.
+func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, workspace string, emit func(M)) bool {
 	model := cicyModel(shortID)
-	// Bound the window BEFORE building the request. Prefer COMPACTION (summarize
-	// the older half, keep the recent tail verbatim) over front-trimming: it
-	// preserves intent/task-state AND keeps the prompt-cache prefix stable between
-	// compactions. Fall back to a last-resort front-trim only when compaction
-	// didn't fire (under threshold, or summarizer unavailable) and the window is
-	// over the hard ceiling — so the turn always proceeds within a valid window
-	// that never starts on an orphan tool_result.
-	if compacted, ok := cicyCompactMessages(ctx, shortID, session.messages, model); ok {
-		session.messages = compacted
-		log.Printf("[cicy-compact] agent=%s compacted history → %d messages", shortID, len(session.messages))
-	} else if len(session.messages) > cicyMaxHistoryMessages {
-		session.messages = cicyTrimMessages(session.messages)
-	}
-	// Heal any mid-history orphan tool_use (interrupted turn) before building the
-	// request, so a corrupted in-memory window self-pairs instead of bricking the
-	// agent with a provider 400 every turn.
+	// 绝不自动截断:完整历史每轮原样发出 → current.json = 完整的 q1 a1 q2 …,
+	// 于是 history_id 就是数组顺序 1..N、reply = N+1。压缩只在显式 compact、
+	// 清空只在显式 clear 时发生,这里既不自动 compact 也不自动 front-trim。
+	// 仍修复历史中段的孤儿 tool_use(被打断的轮次),否则坏窗口会让每轮 provider 400。
 	session.messages = cicyBalanceToolCalls(session.messages)
 	cfg := resolveLiteConfig(shortID, workspace)
 
 	for round := 0; round < cicyMaxToolRounds; round++ {
 		// 用户已取消 → 立刻收尾:持久化已有内容,不再发下一轮网关请求。
 		if ctx.Err() != nil {
+			session.messages = append(session.messages, cicyOutcomeMessage("cancelled", "已取消"))
 			emit(M{"type": "error", "error": "已取消"})
 			session.persistLocked(workspace)
+			cicyAttachOutcomeToSnapshot(shortID, "cancelled", "已取消")
 			return false
 		}
 		payload := M{
@@ -1717,9 +2090,17 @@ func runCicyTurnLocked(ctx context.Context, session *cicySession, shortID, works
 		}
 		resp, streamed, err := cicyCallGateway(ctx, shortID, "dispatcher-"+shortID, payload, emit)
 		if err != nil {
-			emit(M{"type": "error", "error": err.Error()})
-			// Drop the failed exchange tail so history stays consistent.
+			// A mid-flight cancel surfaces here as a ctx error — record it as a
+			// cancellation, not a failure. Anything else is a genuine gateway error
+			// that already survived auto-retry, so it's terminal for this turn.
+			kind, detail := "error", err.Error()
+			if ctx.Err() != nil {
+				kind, detail = "cancelled", "已取消"
+			}
+			session.messages = append(session.messages, cicyOutcomeMessage(kind, detail))
+			emit(M{"type": "error", "error": detail})
 			session.persistLocked(workspace)
+			cicyAttachOutcomeToSnapshot(shortID, kind, detail)
 			return false
 		}
 

@@ -1,6 +1,12 @@
 import { applyMonoFontVar } from "./font";
 import { ttydT } from "./cicy_i18n";
 
+// Sentinel prefix the gotty guest prints on `console.log` to ask the host to
+// open a file in the code editor. The host's WebFrame `console-message`
+// listener matches this exact string and forwards the JSON tail. Kept in sync
+// with app/src/components/WebFrame.tsx (CODE_FILE_CONSOLE_SENTINEL).
+export const CODE_FILE_CONSOLE_SENTINEL = "[[CICY_OPEN_CODE_FILE]]";
+
 function ensureLinkConfirmStyle(doc: Document): void {
     if (doc.getElementById("cicy-link-confirm-style")) {
         return;
@@ -344,6 +350,17 @@ function openLocalFilePath(doc: Document, filePath: string): void {
             return;
         } catch (_error) {
         }
+    }
+    // Electron <webview> guest: the gotty terminal runs in its own top-level
+    // WebContents (window.parent === window), so the iframe hooks above never
+    // fire. The host WebFrame wrapper listens to this guest's `console-message`
+    // event — emit a sentinel line it parses and forwards to
+    // __cicyOpenCodeFile. Cheap, needs no preload/nodeintegration.
+    try {
+        if (view) {
+            (view.console || console).log(CODE_FILE_CONSOLE_SENTINEL + JSON.stringify({ path: filePath }));
+        }
+    } catch (_error) {
     }
     var tokenMatch = doc.defaultView && doc.defaultView.location ? doc.defaultView.location.search.match(/[?&]token=([^&]+)/) : null;
     var token = tokenMatch ? decodeURIComponent(tokenMatch[1]) : "";

@@ -257,6 +257,8 @@ Options:
 	http.HandleFunc("/api/tmux/send", authM(handleSend))
 	http.HandleFunc("/api/tmux/send-keys", authM(handleSendKeys))
 	http.HandleFunc("/api/cicy/cancel", authM(handleCicyCancel)) // 打断 headless cicy 正在跑的 turn
+	http.HandleFunc("/api/cicy/retry", authM(handleCicyRetry))   // 重跑 headless cicy 最近一次取消/失败的 turn
+	http.HandleFunc("/api/cicy/clear", authM(handleCicyClear))   // 清空 headless cicy 会话(内存+conversation.json+快照)
 	http.HandleFunc("/api/tmux/reply_text", authM(handleAgentReplyText))
 	http.HandleFunc("/api/tmux/chat_history", authM(handleAgentChatHistory))
 	http.HandleFunc("/api/tmux/client-trace", authM(handleTmuxClientTrace))
@@ -309,18 +311,6 @@ Options:
 	http.HandleFunc("/api/runtime/flags", wa(handleRuntimeFlags))
 
 	// Stats
-	http.HandleFunc("/api/stats/traffic", wa(handleStatsTraffic))
-	http.HandleFunc("/api/stats/traffic/raw", wa(handleStatsTrafficRaw))
-	http.HandleFunc("/api/stats/chat", wa(handleChatHistory))
-	http.HandleFunc("/api/stats/chat/stream", wa(handleChatStream))
-	http.HandleFunc("/api/stats/traffic/live", corsM(func(w http.ResponseWriter, r *http.Request) {
-		t := r.URL.Query().Get("token")
-		if t == "" || !verifyToken(t) {
-			httpErr(w, 401, "Not authenticated")
-			return
-		}
-		handleTrafficLive(w, r)
-	}))
 	http.HandleFunc("/api/system/resources", wa(handleSystemResources))
 
 	// Notifications
@@ -535,7 +525,6 @@ Options:
 		}
 	})
 
-	initHTTPLogConsumer()
 	go syncTelegramPollers()
 	go imManagerStart()
 	// Repair <parent>/workers/<child> symlinks on every boot. Without this

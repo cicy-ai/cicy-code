@@ -666,7 +666,7 @@ func guidanceFilenameForAgentType(agentType string) string {
 	switch normalizeAgentType(agentType) {
 	case "claude", "cicy-claude":
 		return "CLAUDE.md"
-	case "codex", "opencode", "cursor":
+	case "codex", "gemini", "opencode", "cursor":
 		return "AGENTS.md"
 	case "kiro-cli":
 		return filepath.Join(".kiro", "steering", "memory.md")
@@ -1410,6 +1410,8 @@ func normalizeAgentType(agentType string) string {
 		return "openclaw"
 	case "codex", "openai":
 		return "codex"
+	case "gemini", "gemini-cli", "gemini cli":
+		return "gemini"
 	case "cursor", "cursor-agent", "cursor agent":
 		return "cursor"
 	case "kiro-cli", "kiro", "kiro-cli chat":
@@ -1479,6 +1481,13 @@ func openAIRuntimeBaseURL(agentID string) string {
 
 func anthropicRuntimeBaseURL(agentID string) string {
 	return localAIGatewayBaseURL("anthropic", agentID)
+}
+
+// geminiRuntimeBaseURL is what gemini-cli's GOOGLE_GEMINI_BASE_URL points at — the
+// gateway's /gemini passthrough base. gemini-cli appends the Google inference path
+// (/v1beta/models/…) itself, so this stays the bare base.
+func geminiRuntimeBaseURL(agentID string) string {
+	return localAIGatewayBaseURL("gemini", agentID)
 }
 
 func openClawRuntimeBaseURL(agentID string) string {
@@ -1687,6 +1696,32 @@ func resolveCodexStartupModel(defaultModel string, aiCfg runtimeAIConfig, shortI
 		return model
 	}
 	return "gpt-5.4"
+}
+
+func resolveGeminiStartupModel(defaultModel string, aiCfg runtimeAIConfig, shortID string) string {
+	if model := strings.TrimSpace(defaultModel); model != "" {
+		return model
+	}
+	// Honor per-agent runtime_ai override (the gemini provider lives on the
+	// dedicated /gemini gateway protocol).
+	if shortID != "" {
+		if _, ov, err := resolveRuntimeAIConfigForAgent("gemini", shortID); err == nil && ov != nil && strings.TrimSpace(ov.ProviderName) != "" {
+			if provider, ok := loadProviderByKey(ov.ProviderName); ok {
+				if model := strings.TrimSpace(providerDefaultModelForAgentType(provider, "gemini")); model != "" {
+					return model
+				}
+			}
+		}
+	}
+	if provider, ok := loadProviderForAgentType("gemini"); ok {
+		if model := strings.TrimSpace(providerDefaultModelForAgentType(provider, "gemini")); model != "" {
+			return model
+		}
+	}
+	if model := strings.TrimSpace(aiCfg.GeminiModel); model != "" {
+		return model
+	}
+	return "gemini-2.5-pro"
 }
 
 // resolveOpencodeStartupModel mirrors the codex/claude resolvers but for
@@ -2904,6 +2939,36 @@ EOF
 			lines = append(lines, "codex $CODEX_RESUME")
 		}
 		return lines
+	case "gemini":
+		// gemini-cli (Google's @google/gemini-cli). Modeled on the codex path, but
+		// it speaks Google's GenAI protocol: gateway mode points GOOGLE_GEMINI_BASE_URL
+		// at the /gemini passthrough route; official mode goes direct with the user's
+		// own GEMINI_API_KEY. --yolo auto-approves tool actions (codex parity).
+		installLog := tmuxHomeJoin("logs", fmt.Sprintf("gemini-install-%s.log", shortID))
+		lines := []string{
+			ensureAgentCommandLine("gemini", "Gemini CLI", geminiInstallCmd(), installLog),
+		}
+		yolo := ""
+		if allowAllActions {
+			yolo = " --yolo"
+		}
+		if useCustomGateway {
+			model := resolveGeminiStartupModel(defaultModel, aiCfg, shortID)
+			lines = append(lines,
+				"export GEMINI_API_KEY='cicy-local-gateway'",
+				fmt.Sprintf("export GOOGLE_GEMINI_BASE_URL=%s", tmuxShellQuote(geminiRuntimeBaseURL(shortID))),
+				"clear",
+				fmt.Sprintf("gemini -m %s%s", tmuxShellQuote(model), yolo),
+			)
+			return lines
+		}
+		// Official path: direct to Google with the user's own GEMINI_API_KEY; drop the
+		// gateway base URL. Route HTTPS through the local MITM (when on) for auditing.
+		lines = append(lines, "unset GOOGLE_GEMINI_BASE_URL")
+		lines = append(lines, mitmAgentProxyBootLines()...)
+		lines = append(lines, "clear")
+		lines = append(lines, "gemini"+yolo)
+		return lines
 	case "claude", "cicy-claude":
 		cmdName := "claude"
 		label := "Claude Code"
@@ -3625,7 +3690,7 @@ func waitForAgentInputReady(paneID, agentType string, trace *tmuxSendTrace) erro
 	agentType = normalizeAgentType(agentType)
 	// dispatcher: the REPL reads buffered stdin — input sent at any moment is
 	// consumed on the next loop iteration, so there is no "not ready" state.
-	if agentType == "" || agentType == "opencode" || agentType == "codex" || agentType == "hermes" || agentType == "kiro-cli" || agentType == "cicy" {
+	if agentType == "" || agentType == "opencode" || agentType == "codex" || agentType == "gemini" || agentType == "hermes" || agentType == "kiro-cli" || agentType == "cicy" {
 		return nil
 	}
 	if trace != nil {
@@ -4493,7 +4558,7 @@ func initPaneEnv(opts paneEnvOpts) {
 		}
 	}
 	switch agentNorm {
-	case "codex", "claude", "kiro-cli", "copilot", "opencode":
+	case "codex", "gemini", "claude", "kiro-cli", "copilot", "opencode":
 		// boot lines handle gateway URLs directly
 	default:
 		lines = append(lines,
@@ -4562,7 +4627,7 @@ func initPaneEnv(opts paneEnvOpts) {
 	// bash re-entry wrapper because their generated bodies may rely on being sourced
 	// from non-bash shells on macOS.
 	script := "#!/usr/bin/env bash\n\n"
-	if bootAgentNorm == "claude" || bootAgentNorm == "cicy-claude" || bootAgentNorm == "codex" || bootAgentNorm == "opencode" {
+	if bootAgentNorm == "claude" || bootAgentNorm == "cicy-claude" || bootAgentNorm == "codex" || bootAgentNorm == "gemini" || bootAgentNorm == "opencode" {
 		script += strings.Join(lines, "\n") + "\n"
 	} else {
 		script += "if [ -z \"${BASH_VERSION:-}\" ]; then\n" +

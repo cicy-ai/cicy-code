@@ -72,6 +72,17 @@ func aggregateLatestTurn(recent []agentUsageLogRecord) usageTurnAgg {
 	if len(recent) == 0 {
 		return agg
 	}
+	// 跳过开头那些"0 token"的回合(被取消 / 失败的请求:input==output==0)。否则只要
+	// 最后一次操作是取消,"最近一轮"就是个 0-token 回合 → KPI 全 0 → 分析面板整个变空白,
+	// 哪怕前面有一堆真实请求。回退到最近一条真有 token 用量的回合再聚合。全 0 才保留原行为。
+	start := 0
+	for start < len(recent) && recent[start].InputTokens == 0 && recent[start].OutputTokens == 0 {
+		start++
+	}
+	if start >= len(recent) {
+		start = 0
+	}
+	recent = recent[start:]
 	agg.turnID = recent[0].TurnID
 	agg.costKnown = true
 	for _, r := range recent {

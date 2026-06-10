@@ -58,10 +58,12 @@ interface AppContextType {
   login: (token: string) => Promise<boolean>;
   logout: () => void;
 
-  // Shell panel (agent-card bottom terminal) global toggle
-  shellPanelOpen: boolean;
-  setShellPanelOpen: (open: boolean) => void;
-  toggleShellPanel: () => void;
+  // Shell panel (agent-card bottom terminal) toggle — per-agent, persisted to
+  // localStorage so each agent remembers whether its own shell dock is open.
+  // Switching agents shows/hides the dock based on that agent's saved state.
+  isShellOpen: (agentId: string) => boolean;
+  setShellOpen: (agentId: string, open: boolean) => void;
+  toggleShellOpen: (agentId: string) => void;
 
   // Pane Selection
   currentPaneId: string | null;
@@ -175,7 +177,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const chatWsListenersRef = useRef(new Set<(msg: ChatWsMessage) => void>());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [shellPanelOpen, setShellPanelOpen] = useState(false);
+  // Per-agent shell-dock open state, keyed by agent paneId. Persisted so that
+  // toggling the dock open on one agent doesn't leak to another, and so each
+  // agent restores its own open/closed dock when re-selected.
+  const SHELL_OPEN_KEY = 'cicy.shellPanelOpen.v1';
+  const [shellOpenMap, setShellOpenMap] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem(SHELL_OPEN_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch { return {}; }
+  });
+  const writeShellOpen = useCallback((next: Record<string, boolean>) => {
+    setShellOpenMap(next);
+    try { localStorage.setItem(SHELL_OPEN_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  }, []);
+  const isShellOpen = useCallback((agentId: string) => !!shellOpenMap[agentId], [shellOpenMap]);
+  const setShellOpen = useCallback((agentId: string, open: boolean) => {
+    writeShellOpen({ ...shellOpenMap, [agentId]: open });
+  }, [shellOpenMap, writeShellOpen]);
+  const toggleShellOpen = useCallback((agentId: string) => {
+    writeShellOpen({ ...shellOpenMap, [agentId]: !shellOpenMap[agentId] });
+  }, [shellOpenMap, writeShellOpen]);
 
   // Keep API client lifecycle aligned with AuthContext to avoid unauthenticated
   // requests racing ahead of token verification.
@@ -442,9 +465,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     loading,
     error,
     setError,
-    shellPanelOpen,
-    setShellPanelOpen,
-    toggleShellPanel: () => setShellPanelOpen(prev => !prev),
+    isShellOpen,
+    setShellOpen,
+    toggleShellOpen,
   }), [
     token, login, logout, currentPaneId, currentPane, paneDetail, setPaneDetail,
     selectPane, clearPane, activeAgentId, setActiveAgentId, agentDetails,
@@ -457,7 +480,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     chatWsState.chatWsHistoryVersion, chatWsState.chatWsInspectorVersion,
     setChatWsState, setChatWsSender, sendChatWsMessage, subscribeChatWs,
     broadcastChatWsMessage, systemResources, setSystemResources, loading, error,
-    setError, shellPanelOpen,
+    setError, isShellOpen, setShellOpen, toggleShellOpen,
   ]);
 
   // Debug: Log context changes

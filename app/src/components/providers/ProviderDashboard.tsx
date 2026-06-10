@@ -48,12 +48,18 @@ type Tab = 'routing' | 'providers';
 /* ───────────────────────── constants ───────────────────────── */
 
 const PROTOCOLS = ['openai', 'anthropic'] as const;
-const KNOWN_SLOTS = ['claude', 'cicy', 'codex', 'opencode'];
+const KNOWN_SLOTS = ['claude', 'cicy', 'codex', 'gemini', 'opencode'];
 const PROTECTED_PROVIDER_KEYS = new Set(['defaultAnthropic', 'defaultOpenAi']);
-const SLOT_LABELS: Record<string, string> = { claude: 'Claude', cicy: 'CiCy', codex: 'Codex', opencode: 'OpenCode' };
-const SLOT_DESC: Record<string, string> = { claude: 'Claude Code CLI', cicy: 'CiCy Lite Agent', codex: 'OpenAI Codex CLI', opencode: 'OpenCode CLI' };
-const SLOT_PROTOCOL: Record<string, string> = { claude: 'anthropic', cicy: 'anthropic', codex: 'openai', opencode: 'openai' };
-const SLOT_FALLBACK_MODEL: Record<string, string> = { claude: 'claude-opus-4-7', cicy: 'deepseek-v4-pro', codex: 'gpt-5.4', opencode: 'deepseek-v4-pro' };
+const SLOT_LABELS: Record<string, string> = { claude: 'Claude', cicy: 'CiCy', codex: 'Codex', gemini: 'Gemini', opencode: 'OpenCode' };
+const SLOT_DESC: Record<string, string> = { claude: 'Claude Code CLI', cicy: 'CiCy Lite Agent', codex: 'OpenAI Codex CLI', gemini: 'Gemini CLI', opencode: 'OpenCode CLI' };
+// cicy has no protocol restriction: it always speaks Anthropic Messages but the
+// gateway bridges an openai-protocol provider down to Chat Completions, so either
+// kind of provider can back the cicy slot (mirrors opencode, which is also open).
+// gemini likewise carries no restriction here — the routing UI only knows the
+// openai/anthropic provider protocols, while gemini rides the gateway's dedicated
+// /gemini passthrough, so leave it unfiltered to avoid a false mismatch warning.
+const SLOT_PROTOCOL: Record<string, string> = { claude: 'anthropic', cicy: '', codex: 'openai', gemini: '', opencode: 'openai' };
+const SLOT_FALLBACK_MODEL: Record<string, string> = { claude: 'claude-opus-4-7', cicy: 'deepseek-v4-pro', codex: 'gpt-5.4', gemini: 'gemini-2.5-pro', opencode: 'deepseek-v4-pro' };
 
 /* ───────────────────────── helpers ───────────────────────── */
 

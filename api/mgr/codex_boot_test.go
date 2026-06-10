@@ -21,8 +21,9 @@ func TestAgentBootLinesCodexAllowAllActions(t *testing.T) {
 		t.Error("missing OPENAI_API_KEY")
 	}
 
-	// Must use shared install helper
-	if !strings.Contains(script, "__cicy_require_command 'codex' 'Codex'") {
+	// Must use shared presence-check helper (terminal auto-install removed; the
+	// UI overlay installs on demand, so boot only guards with __cicy_check_command).
+	if !strings.Contains(script, "__cicy_check_command 'codex' 'Codex'") {
 		t.Error("missing codex shared install helper")
 	}
 
@@ -41,8 +42,9 @@ func TestAgentBootLinesCodexAllowAllActions(t *testing.T) {
 		t.Error("missing ai-gateway base_url")
 	}
 
-	// Must pass model explicitly so shared ~/.codex/config.toml does not win
-	if !strings.Contains(script, "codex -m 'gpt-5.5'") {
+	// Must pass model explicitly so shared ~/.codex/config.toml does not win.
+	// The launch line carries $CODEX_RESUME (session resume var) before -m.
+	if !strings.Contains(script, "codex $CODEX_RESUME -m 'gpt-5.5'") {
 		t.Error("missing explicit codex model override")
 	}
 
@@ -82,8 +84,9 @@ func TestAgentBootLinesCodexModelCatalog(t *testing.T) {
 		t.Error("generator should set deepseek-v4-pro context window to 2M")
 	}
 	// A failed catalog build must not block startup — launch is guarded by a
-	// non-empty-file check with a plain-codex fallback.
-	if !strings.Contains(script, "if [ -s ") || !strings.Contains(script, "; else codex -m ") {
+	// non-empty-file check with a plain-codex fallback. The fallback launch line
+	// carries $CODEX_RESUME before -m.
+	if !strings.Contains(script, "if [ -s ") || !strings.Contains(script, "; else codex $CODEX_RESUME -m ") {
 		t.Error("codex launch should fall back to no-catalog when build fails")
 	}
 
@@ -111,12 +114,12 @@ func TestAgentBootLinesCodexRestrictedActions(t *testing.T) {
 	if !strings.Contains(script, `model_providers.custom.base_url=`) {
 		t.Error("missing model_providers.custom.base_url")
 	}
-	if !strings.Contains(script, "codex -m 'gpt-5.5'") {
+	if !strings.Contains(script, "codex $CODEX_RESUME -m 'gpt-5.5'") {
 		t.Error("missing explicit codex model override")
 	}
 
-	// Must still use shared install helper
-	if !strings.Contains(script, "__cicy_require_command 'codex' 'Codex'") {
+	// Must still use shared presence-check helper
+	if !strings.Contains(script, "__cicy_check_command 'codex' 'Codex'") {
 		t.Error("missing codex shared install helper")
 	}
 
@@ -131,7 +134,7 @@ func TestAgentBootLinesCodexNormalization(t *testing.T) {
 	for _, alias := range []string{"codex", "openai"} {
 		lines := agentBootLines(alias, true, false, true, "w-1001", "gpt-5.5")
 		script := strings.Join(lines, "\n")
-		if !strings.Contains(script, "codex -m 'gpt-5.5'") {
+		if !strings.Contains(script, "codex $CODEX_RESUME -m 'gpt-5.5'") {
 			t.Errorf("agentType=%q should produce codex boot lines", alias)
 		}
 	}
@@ -175,10 +178,10 @@ func TestAgentBootLinesCodexUsesCodexDefaultProviderModel(t *testing.T) {
 
 	lines := agentBootLines("codex", true, false, true, "w-1001", "")
 	script := strings.Join(lines, "\n")
-	if !strings.Contains(script, "codex -m 'gpt-5.5'") {
+	if !strings.Contains(script, "codex $CODEX_RESUME -m 'gpt-5.5'") {
 		t.Fatalf("codex boot lines should use codex provider default model: %s", script)
 	}
-	if strings.Contains(script, "codex -m 'claude-opus-4-7'") {
+	if strings.Contains(script, "codex $CODEX_RESUME -m 'claude-opus-4-7'") {
 		t.Fatalf("codex boot lines should not use the global anthropic provider default model: %s", script)
 	}
 }
