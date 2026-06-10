@@ -2272,8 +2272,13 @@ export default function CurrentHistoryView({
       if (id && id !== paneId) return;
       // The sender passed the q text → reserve the two optimistic slots NOW, so
       // the bubble paints on this frame instead of after the poll round-trip.
+      // Slash commands (/clear, /compact) are intercepted server-side and never
+      // become a committed user turn — an optimistic bubble would never see its
+      // teardown signal and would lock the composer until the 60s timeout. Skip
+      // the placeholder; the command's ack arrives via the reply.json poll.
       const qText = String(detail.text || '').trim();
-      if (qText) {
+      const isSlashCommand = /^\/\w+(\s|$)/.test(qText);
+      if (qText && !isSlashCommand) {
         let maxUserId = 0;
         for (const it of itemsRef.current) if (it?.role === 'user') maxUserId = Math.max(maxUserId, Number(it?.history_id || 0));
         optimisticBaselineUserIdRef.current = maxUserId;
