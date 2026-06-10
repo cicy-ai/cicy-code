@@ -3612,13 +3612,13 @@ func agentInspectorApplyThinking(payload map[string]interface{}, gatewayProtocol
 	case "enabled":
 		payload["thinking"] = map[string]interface{}{"type": "enabled"}
 	default: // "disabled"
-		if strings.ToLower(strings.TrimSpace(gatewayProtocol)) == "anthropic" {
-			// Anthropic-style endpoints disable thinking by omission, not a
-			// {"type":"disabled"} value.
-			delete(payload, "thinking")
-		} else {
-			payload["thinking"] = map[string]interface{}{"type": "disabled"}
-		}
+		// ALWAYS explicit. This rewrite only ever runs for third-party upstreams
+		// (official api.anthropic.com is excluded by shouldDisableThinkingForHost),
+		// and anthropic-compatible fronts for DeepSeek (cloud gateway → new-api)
+		// default to thinking ON when the field is omitted — so "disable by
+		// omission" silently left thinking enabled there. {"type":"disabled"} is
+		// valid Anthropic schema and honored across the chain (verified live).
+		payload["thinking"] = map[string]interface{}{"type": "disabled"}
 	}
 	return payload
 }
