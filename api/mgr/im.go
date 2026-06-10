@@ -19,6 +19,12 @@ import (
 // errBotEditUnsupported is returned by transports that cannot edit a sent message.
 var errBotEditUnsupported = errors.New("bot transport does not support editing messages")
 
+// errWeChatNoActiveSession is returned by the WeChat transport when ilink rejects
+// a send with ret=-2 — the bot is outside the user's active session window, so it
+// cannot proactively push. ilink bots can only reply within a short window after
+// the user messages them; a cold "test"/proactive send always hits this.
+var errWeChatNoActiveSession = errors.New("wechat: no active session window (ilink ret=-2); the user must message the bot first")
+
 const (
 	imPlatformTelegram = "telegram"
 	imPlatformWeChat   = "wechat"
@@ -1349,7 +1355,12 @@ func handleIMAccountTest(w http.ResponseWriter, acc *imAccount) {
 		return
 	}
 	if _, err := imSendOutbound(imOutboundMessage{AccountID: acc.ID, Transport: tr, Peer: peer, Text: "✅ cicy 测试消息", Purpose: imOutboundPurposeTest}); err != nil {
-		J(w, M{"ok": false, "detail": err.Error(), "duration_ms": time.Since(start).Milliseconds()})
+		detail := err.Error()
+		if errors.Is(err, errWeChatNoActiveSession) {
+			// Not a bug — ilink only lets the bot reply inside an active session.
+			detail = "微信机器人只能在「用户刚给它发过消息」的会话窗口内推送(ilink 协议限制,主动推送会被拒)。请先在微信里给这个 bot 发一条消息,再点测试。"
+		}
+		J(w, M{"ok": false, "detail": detail, "duration_ms": time.Since(start).Milliseconds()})
 		return
 	}
 	J(w, M{"ok": true, "detail": "ok", "duration_ms": time.Since(start).Milliseconds()})

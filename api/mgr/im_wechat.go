@@ -991,6 +991,12 @@ func (t *weChatTransport) Send(peer botPeer, text string) (string, error) {
 		return "", nil
 	}
 	if resp.Ret != 0 {
+		// ret=-2 = outside the user's active session window (ilink won't let a bot
+		// push proactively). Surface a typed error so callers (e.g. the connectivity
+		// test) can explain it instead of showing a raw "ret=-2".
+		if resp.Ret == -2 {
+			return "", errWeChatNoActiveSession
+		}
 		return "", fmt.Errorf("ilink ret=%d msg=%s", resp.Ret, resp.Msg)
 	}
 	return "", nil

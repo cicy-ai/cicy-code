@@ -25,14 +25,92 @@ type imReplyPushHook struct {
 	peer      botPeer
 	canEdit   bool
 
-	mu          sync.Mutex
-	thinking    strings.Builder
-	answer      strings.Builder
-	lastPushAt  time.Time
-	timer       *time.Timer
-	closed      bool
-	typingOnce  sync.Once
-	stopTyping  chan struct{}
+	mu         sync.Mutex
+	thinking   strings.Builder
+	answer     strings.Builder
+	lastPushAt time.Time
+	timer      *time.Timer
+	closed     bool
+}
+
+// imTypingSession drives one "typing" indicator for a single (account, pane)
+// across the WHOLE agent turn — from the moment the reply starts producing items
+// until the turn reaches a terminal status (completed / failed). A Claude/Codex
+// turn is many HTTP rounds (tool loop) with client-side tool-run gaps in between;
+// the per-round reply hook is torn down and rebuilt each round, so typing must
+// live ABOVE the hook or it flickers off every gap. The indicator follows the
+// worker-status window: on while status is "active", off only at terminal.
+type imTypingSession struct {
+	stop chan struct{}
+	once sync.Once
+}
+
+var imTypingSessions = struct {
+	mu sync.Mutex
+	m  map[string]*imTypingSession
+}{m: map[string]*imTypingSession{}}
+
+func imTypingKey(accID int64, pane string) string {
+	return strconv.FormatInt(accID, 10) + "|" + normPaneID(pane)
+}
+
+const imTypingRenewInterval = 4 * time.Second // WeChat/TG typing auto-clears ~5s
+const imTypingMaxLifetime = 12 * time.Minute  // backstop if a terminal finalize never arrives
+
+// imTypingEnsure starts the typing loop for (account, pane) if not already
+// running. Idempotent — safe to call on every reply item and every tool round.
+func imTypingEnsure(accID int64, pane string, tr botTransport, peer botPeer) {
+	if tr == nil || peer.empty() {
+		return
+	}
+	key := imTypingKey(accID, pane)
+	imTypingSessions.mu.Lock()
+	if _, ok := imTypingSessions.m[key]; ok {
+		imTypingSessions.mu.Unlock()
+		return
+	}
+	s := &imTypingSession{stop: make(chan struct{})}
+	imTypingSessions.m[key] = s
+	imTypingSessions.mu.Unlock()
+	go imTypingRun(s, accID, pane, tr, peer)
+}
+
+// imTypingStop cancels the typing loop for (account, pane). Called when the turn
+// reaches a terminal status. No-op if nothing is running.
+func imTypingStop(accID int64, pane string) {
+	key := imTypingKey(accID, pane)
+	imTypingSessions.mu.Lock()
+	s := imTypingSessions.m[key]
+	delete(imTypingSessions.m, key)
+	imTypingSessions.mu.Unlock()
+	if s != nil {
+		s.once.Do(func() { close(s.stop) })
+	}
+}
+
+func imTypingRun(s *imTypingSession, accID int64, pane string, tr botTransport, peer botPeer) {
+	// Fire immediately so the indicator shows the moment the reply starts.
+	if err := tr.Typing(peer); err != nil {
+		log.Printf("[im] typing send failed account=%d: %v", accID, err)
+	}
+	ticker := time.NewTicker(imTypingRenewInterval)
+	defer ticker.Stop()
+	safety := time.NewTimer(imTypingMaxLifetime)
+	defer safety.Stop()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-safety.C:
+			log.Printf("[im] typing safety-stop account=%d pane=%s", accID, shortPaneID(pane))
+			imTypingStop(accID, pane)
+			return
+		case <-ticker.C:
+			if err := tr.Typing(peer); err != nil {
+				log.Printf("[im] typing renew failed account=%d: %v", accID, err)
+			}
+		}
+	}
 }
 
 // imReplyItemID 取 reply.Items 中 cicy 序号字段（用于增量推送跟踪）。
@@ -95,12 +173,11 @@ func newReplyHooksForPane(agentID string, isContinuation bool) []aiGatewayReplyH
 		// 每个 reply item flush 时立即发送一条新消息，不做 streaming edit。
 		peer := imPeerForAccount(acc)
 		hooks = append(hooks, &imReplyPushHook{
-			accID:      accID,
-			paneID:     normPaneID(agentID),
-			transport:  tr,
-			peer:       peer,
-			canEdit:    tr.CanEdit(),
-			stopTyping: make(chan struct{}),
+			accID:     accID,
+			paneID:    normPaneID(agentID),
+			transport: tr,
+			peer:      peer,
+			canEdit:   tr.CanEdit(),
 		})
 		log.Printf("[im] reply hook attached account=%d pane=%s transport=%s continuation=%t",
 			accID, shortPaneID(agentID), tr.Kind(), isContinuation)
@@ -112,8 +189,10 @@ func (h *imReplyPushHook) onItems(items []map[string]interface{}) {
 	if h == nil || len(items) == 0 {
 		return
 	}
-	// 收到第一个 item 时启动 typing loop（只启一次）。
-	h.typingOnce.Do(func() { go h.runTypingLoop() })
+	// reply 开始输出即启动 typing loop（覆盖整个 turn：跨 tool 续传与客户端工具
+	// 执行间隙,直到 finalize 看到终态才取消）。imTypingEnsure 幂等,每个 item /
+	// 每个 tool 轮都可安全调用。
+	imTypingEnsure(h.accID, h.paneID, h.transport, h.peer)
 	// 每个 reply item 渲染一条 IM 消息立刻发送，不做 streaming edit。
 	// 编辑式 transport（Telegram）和非编辑式（WeChat）行为保持一致。
 	for _, item := range items {
@@ -159,15 +238,16 @@ func (h *imReplyPushHook) finalize(reply aiGatewayReplySnapshot) {
 	h.mu.Lock()
 	h.closed = true
 	h.mu.Unlock()
-	// 停止 typing loop。
-	h.typingOnce.Do(func() {}) // 确保 channel 已初始化，不会 nil close
-	select {
-	case <-h.stopTyping: // 已经关闭
-	default:
-		close(h.stopTyping)
+	// finalize 每个 HTTP 轮都会触发。只有到达**终态**(completed/failed/idle…)
+	// 才取消 typing;working/thinking/streaming/tool_use 等在途状态(包含一个
+	// tool 续传轮刚结束、工具正在客户端跑的那一刻)继续保持 typing,直到整轮真正
+	// 完成或失败。这与 worker 状态点同一个 busy 窗口语义。
+	active := agentInspectorStatusIsActive(reply.Status)
+	if !active {
+		imTypingStop(h.accID, h.paneID)
 	}
-	log.Printf("[im] reply finalize account=%d turn=%s status=%s items=%d",
-		h.accID, reply.TurnID, reply.Status, len(reply.Items))
+	log.Printf("[im] reply finalize account=%d turn=%s status=%s items=%d active=%t",
+		h.accID, reply.TurnID, reply.Status, len(reply.Items), active)
 }
 
 func (h *imReplyPushHook) schedulePushLocked(force bool) {
@@ -269,27 +349,3 @@ func (h *imReplyPushHook) flush() {
 	st.lastSendTime = time.Now()
 }
 
-// runTypingLoop 持续向对端发送 typing 指示，直到 finalize 调用 close(stopTyping)。
-// WeChat typing 状态大约 5 秒自动消失，每 4 秒续一次足够。
-// 非 WeChat transport（如 TG 有 sendChatAction）同样通过 Typing() 接口处理。
-func (h *imReplyPushHook) runTypingLoop() {
-	if h.peer.empty() {
-		return
-	}
-	// 立即发一次
-	if err := h.transport.Typing(h.peer); err != nil {
-		log.Printf("[im] typing send failed account=%d: %v", h.accID, err)
-	}
-	ticker := time.NewTicker(4 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-h.stopTyping:
-			return
-		case <-ticker.C:
-			if err := h.transport.Typing(h.peer); err != nil {
-				log.Printf("[im] typing renew failed account=%d: %v", h.accID, err)
-			}
-		}
-	}
-}
