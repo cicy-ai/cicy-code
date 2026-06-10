@@ -72,6 +72,7 @@ func imTypingEnsure(accID int64, pane string, tr botTransport, peer botPeer) {
 	s := &imTypingSession{stop: make(chan struct{})}
 	imTypingSessions.m[key] = s
 	imTypingSessions.mu.Unlock()
+	log.Printf("[im] typing start account=%d pane=%s", accID, shortPaneID(pane))
 	go imTypingRun(s, accID, pane, tr, peer)
 }
 
@@ -85,6 +86,7 @@ func imTypingStop(accID int64, pane string) {
 	imTypingSessions.mu.Unlock()
 	if s != nil {
 		s.once.Do(func() { close(s.stop) })
+		log.Printf("[im] typing stop account=%d pane=%s", accID, shortPaneID(pane))
 	}
 }
 
