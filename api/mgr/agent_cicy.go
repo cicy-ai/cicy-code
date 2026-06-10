@@ -2138,7 +2138,7 @@ func archiveCicyCurrentSnapshot(shortID string) {
 func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspace string, emit func(M)) {
 	// Never compact mid-turn — it would corrupt the in-flight history.
 	if !session.tryOwnTurn() {
-		emit(M{"type": "system", "text": "正在回复中,稍后再 /compact。"})
+		emit(M{"type": "system", "text": "A reply is in flight — try /compact again in a moment."})
 		emit(M{"type": "done"})
 		return
 	}
@@ -2148,19 +2148,19 @@ func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspa
 	msgs := append([]M(nil), session.messages...)
 	session.mu.Unlock()
 	if len(msgs) == 0 {
-		emit(M{"type": "system", "text": "当前会话为空,无需压缩。"})
+		emit(M{"type": "system", "text": "Conversation is empty — nothing to compact."})
 		emit(M{"type": "done"})
 		return
 	}
 
 	archiveCicyCurrentSnapshot(shortID) // best-effort rollback source
 
-	emit(M{"type": "system", "text": "正在压缩会话…"})
+	emit(M{"type": "system", "text": "Compacting conversation…"})
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	summary, err := cicyCompactSummarize(cctx, shortID, session.convID, cicyModel(shortID), cicyRenderHistoryForCompaction(msgs))
 	if err != nil || strings.TrimSpace(summary) == "" {
-		emit(M{"type": "system", "text": "压缩失败(摘要为空),会话未改动。"})
+		emit(M{"type": "system", "text": "Compaction failed (empty summary) — conversation left unchanged."})
 		emit(M{"type": "done"})
 		return
 	}
@@ -2177,7 +2177,7 @@ func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspa
 	convID := session.convID
 	session.mu.Unlock()
 	removeCicyReplySnapshot(shortID)
-	ack := "✅ 已压缩。摘要:" + truncateForLog(strings.TrimSpace(summary), 200)
+	ack := "✅ Compacted. Summary: " + truncateForLog(strings.TrimSpace(summary), 200)
 	cicyWriteSlashAck(shortID, convID, ack)
 
 	emit(M{"type": "system", "text": ack})
@@ -2428,8 +2428,8 @@ func runCicySlashCommand(ctx context.Context, session *cicySession, shortID, wor
 		session.mu.Lock()
 		newConv := session.convID
 		session.mu.Unlock()
-		cicyWriteSlashAck(shortID, newConv, "✅ 会话已清空。")
-		emit(M{"type": "system", "text": "✅ 会话已清空。"})
+		cicyWriteSlashAck(shortID, newConv, "✅ Conversation cleared.")
+		emit(M{"type": "system", "text": "✅ Conversation cleared."})
 		emit(M{"type": "done"})
 		return true
 	case "/compact":
