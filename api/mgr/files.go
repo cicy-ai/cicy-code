@@ -338,8 +338,8 @@ func fsRoots(agentID string) ([]fsRootInfo, error) {
 		id, label, sub string
 	}{
 		{"memory", "Memory", "cicy-ai/memory"},
+		{"cicy-ai", "cicy-ai", "cicy-ai"},
 		{"projects", "Projects", "projects"},
-		{"skills", "Skills", "cicy-ai/skills"},
 		{"home", "Home", ""},
 	}
 	for _, c := range candidates {

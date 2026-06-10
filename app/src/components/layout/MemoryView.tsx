@@ -14,10 +14,13 @@ import {
   ChevronDown,
   ChevronRight,
   Send,
+  Eye,
+  FileCode,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import { sendCommandToTmux } from '../../services/mockApi';
+import MarkdownPreview from '../files/MarkdownPreview';
 
 // Memory editor for the inspector's Memory tab. Unlike the old file-explorer
 // embed, this is a semantic, sectioned editor over the layered memory model:
@@ -94,6 +97,9 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
   const [docLoading, setDocLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  // Memory docs are markdown — default to rendered preview, same as the file
+  // editor; toggle to the CodeMirror source via the header button.
+  const [previewMd, setPreviewMd] = useState(true);
 
   // Inline slug editor — creating a new template, or renaming an existing one.
   const [editing, setEditing] = useState<
@@ -566,7 +572,7 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
         {/* Unobtrusive auto-save status — only while saving or when unsaved;
             nothing is shown once the buffer is persisted. */}
         {(saving || dirty) && (
-          <div data-id="memory-view-save-status" className="pointer-events-none absolute top-1.5 right-3 z-10 text-[11px] select-none">
+          <div data-id="memory-view-save-status" className="pointer-events-none absolute top-1.5 right-10 z-10 text-[11px] select-none">
             {saving ? (
               <span data-id="memory-view-saving" className="flex items-center gap-1 text-zinc-500">
                 <Loader2 size={11} className="animate-spin" /> {t('memSaving')}
@@ -579,10 +585,28 @@ export default function MemoryView({ agentId, className }: MemoryViewProps) {
 
         {error && <div data-id="memory-view-error" className="px-3 py-1.5 text-xs text-red-400 bg-red-500/5">{error}</div>}
 
+        {/* Markdown preview / source toggle — same affordance as the file editor. */}
+        {!docLoading && (
+          <button
+            data-id="memory-view-preview-toggle"
+            type="button"
+            onClick={() => setPreviewMd((v) => !v)}
+            title={previewMd ? t('memToSource', { defaultValue: '切换到源码' }) : t('memToPreview', { defaultValue: '切换到预览' })}
+            aria-pressed={previewMd}
+            className="absolute top-1 right-2 z-20 flex items-center rounded p-1 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200 transition-colors"
+          >
+            {previewMd ? <FileCode className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+          </button>
+        )}
+
         <div data-id="memory-view-editor-body" className="flex-1 min-h-0 overflow-hidden">
           {docLoading ? (
             <div data-id="memory-view-doc-loading" className="h-full flex items-center justify-center text-zinc-600 text-[13px] gap-2">
               <Loader2 size={14} className="animate-spin" /> {t('memLoading')}
+            </div>
+          ) : previewMd ? (
+            <div data-id="memory-view-preview" className="h-full overflow-y-auto">
+              <MarkdownPreview source={content} />
             </div>
           ) : (
             <CodeMirror

@@ -1,6 +1,6 @@
 import { assetUrl } from './assets'
 
-type NormalizedAgentType = '' | 'claude' | 'codex' | 'opencode' | 'cursor' | 'kiro-cli' | 'copilot' | 'openclaw' | 'hermes' | 'cicy-claude' | 'cicy'
+type NormalizedAgentType = '' | 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor' | 'kiro-cli' | 'copilot' | 'openclaw' | 'hermes' | 'cicy-claude' | 'cicy'
 
 export type AgentTypeOption = {
   value: string
@@ -17,6 +17,7 @@ type AgentTypeIconMeta = {
 export const AGENT_TYPE_OPTIONS: AgentTypeOption[] = [
   { value: 'claude', label: 'Claude' },
   { value: 'codex', label: 'Codex' },
+  { value: 'gemini', label: 'Gemini' },
   { value: 'opencode', label: 'OpenCode' },
   { value: 'cursor', label: 'Cursor' },
   { value: 'kiro-cli', label: 'Kiro CLI' },
@@ -24,12 +25,12 @@ export const AGENT_TYPE_OPTIONS: AgentTypeOption[] = [
   { value: 'openclaw', label: 'OpenClaw' },
   { value: 'hermes', label: 'Hermes' },
   { value: 'cicy', label: 'CiCy' },
-  { value: 'cicy-claude', label: 'CiCy (Claude)' },
 ]
 
 const AGENT_TYPE_ICON_MAP: Record<Exclude<NormalizedAgentType, ''>, AgentTypeIconMeta> = {
   claude: { label: 'Claude', src: assetUrl('/assets/logos/claude-symbol.svg') },
   codex: { label: 'Codex', src: assetUrl('/assets/logos/openai.svg') },
+  gemini: { label: 'Gemini', src: assetUrl('/assets/logos/gemini.svg') },
   opencode: { label: 'OpenCode', src: assetUrl('/assets/logos/opencode.svg') },
   cursor: { label: 'Cursor', src: assetUrl('/assets/logos/cursor.svg') },
   'kiro-cli': { label: 'Kiro', src: assetUrl('/assets/logos/kiro.png') },
@@ -37,7 +38,7 @@ const AGENT_TYPE_ICON_MAP: Record<Exclude<NormalizedAgentType, ''>, AgentTypeIco
   openclaw: { label: 'OpenClaw', text: '🦞' },
   hermes: { label: 'Hermes', text: 'HE' },
   'cicy-claude': { label: 'CiCy', src: assetUrl('/assets/logos/cicy.svg') },
-  cicy: { label: 'CiCy', src: assetUrl('/assets/logos/cicy.svg') },
+  cicy: { label: 'CiCy', src: assetUrl('/assets/logos/cicy-logo.svg?v=2') },
 }
 
 export function normalizeAgentType(agentType?: string): NormalizedAgentType {
@@ -61,7 +62,8 @@ export function normalizeAgentType(agentType?: string): NormalizedAgentType {
     case 'ghcopilot':
       return 'copilot'
     case 'gemini':
-      return 'codex'
+    case 'gemini-cli':
+      return 'gemini'
     case 'claude':
     case 'claude code':
     case 'claude-code':
@@ -102,6 +104,7 @@ export function guidanceFilenameForAgentType(agentType?: string): string | null 
     case 'cicy-claude':
       return 'CLAUDE.md'
     case 'codex':
+    case 'gemini':
     case 'opencode':
     case 'cursor':
     case 'cicy':

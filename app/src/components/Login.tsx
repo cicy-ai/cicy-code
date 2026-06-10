@@ -3,6 +3,7 @@ import {useTranslation} from 'react-i18next';
 import {useAuth} from '../contexts/AuthContext';
 import config from '../config';
 import { Spinner } from './ui/Spinner';
+import { assetUrl } from '../lib/assets';
 
 export default function Login() {
   const {login} = useAuth();
@@ -33,7 +34,11 @@ export default function Login() {
     <div data-id="login-root" className="h-screen bg-[#0A0A0A] flex items-center justify-center px-4">
       <div data-id="login-container" className="w-full max-w-sm">
         <div data-id="login-header" className="text-center mb-8">
-          <div data-id="login-emoji" className="text-4xl mb-3">{config.isAudit ? '🔍' : '✨'}</div>
+          {config.isAudit ? (
+            <div data-id="login-emoji" className="text-4xl mb-3">🔍</div>
+          ) : (
+            <img data-id="login-logo" src={assetUrl('/assets/logos/cicy-logo.svg?v=2')} alt="CiCy" className="mx-auto mb-3 h-14 w-14" />
+          )}
           <h1 data-id="login-title" className="text-xl font-semibold text-white">{config.isAudit ? t('titleAudit') : t('titleCode')}</h1>
           <p data-id="login-subtitle" className="text-sm text-zinc-500 mt-1">{config.isAudit ? t('subtitleAudit') : t('subtitleCode')}</p>
         </div>

@@ -39,6 +39,48 @@
   --font-mono: "SFMono-Regular", "JetBrains Mono", "Cascadia Mono", "Cascadia Code", "Source Code Pro", "Consolas", "Liberation Mono", ui-monospace, monospace;
 }
 
+/* Global affordance: every clickable surface gets pointer cursor + no text
+   selection. Covers native interactive elements, ARIA roles, and anything the
+   codebase already tags with `cursor-pointer`. Text inputs/textarea are left
+   out on purpose so users can still select & edit their text. */
+@layer base {
+  button,
+  a[href],
+  summary,
+  label,
+  select,
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="menuitemradio"],
+  [role="menuitemcheckbox"],
+  [role="option"],
+  [role="switch"],
+  [role="link"],
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="file"],
+  input[type="range"],
+  input[type="color"],
+  .cursor-pointer {
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Disabled things shouldn't pretend to be clickable. */
+  button:disabled,
+  select:disabled,
+  input:disabled,
+  [disabled],
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
+
 @layer base {
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]) {
