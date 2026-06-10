@@ -201,22 +201,23 @@ func cicyTrimMessages(msgs []M) []M {
 
 // cicyCompactSummarize is the summarizer compaction uses; a package var so tests
 // stub it without a live provider. The default routes through the SAME local
-// gateway the main turn uses (proven creds/model routing per agent), but with a
-// "compact-<id>" session id so it never pollutes the agent's own conversation.
+// gateway the main turn uses (proven creds/model routing per agent), marked
+// AUXILIARY so the audit layer skips snapshots: compact leaves no separate
+// conversation dir — its only on-disk traces live in the current conversation's
+// dir (the current.<ts>.json archive + the reseeded current.json + the ack).
 var cicyCompactSummarize = cicySummarizeViaGateway
 
 // cicySummarizeViaGateway sends the transcript to the agent's model through the
 // local gateway and returns the assembled text. A no-op emit (we only want the
-// final text, not streamed deltas); a separate session id keeps it out of the
-// agent's chat audit.
-func cicySummarizeViaGateway(ctx context.Context, shortID, model, transcript string) (string, error) {
+// final text, not streamed deltas).
+func cicySummarizeViaGateway(ctx context.Context, shortID, convID, model, transcript string) (string, error) {
 	payload := M{
 		"model":      model,
 		"max_tokens": 1024,
 		"system":     []M{{"type": "text", "text": cicyCompactSystemPrompt}},
 		"messages":   []M{{"role": "user", "content": transcript}},
 	}
-	resp, _, err := cicyCallGateway(ctx, shortID, "compact-"+shortID, payload, func(M) {})
+	resp, _, err := cicyCallGateway(ctx, shortID, convID, "compact", payload, func(M) {})
 	if err != nil {
 		return "", err
 	}
@@ -442,7 +443,7 @@ func cicyCompactMessages(ctx context.Context, shortID string, msgs []M, model st
 	if keepFrom < 0 {
 		return msgs, false
 	}
-	summary, err := cicyCompactSummarize(ctx, shortID, model, cicyRenderHistoryForCompaction(msgs[:keepFrom]))
+	summary, err := cicyCompactSummarize(ctx, shortID, "", model, cicyRenderHistoryForCompaction(msgs[:keepFrom]))
 	if err != nil || strings.TrimSpace(summary) == "" {
 		return msgs, false
 	}
@@ -1549,7 +1550,7 @@ func cicyModel(shortID string) string {
 // Messages SSE, so the consumption side is one format regardless of provider.
 // The second return reports whether deltas were emitted (the caller must then
 // not re-emit the assembled text blocks).
-func cicyCallGateway(ctx context.Context, shortID, sessionID string, payload M, emit func(M)) (map[string]interface{}, bool, error) {
+func cicyCallGateway(ctx context.Context, shortID, sessionID, auxKind string, payload M, emit func(M)) (map[string]interface{}, bool, error) {
 	payload["stream"] = true
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -1586,6 +1587,11 @@ func cicyCallGateway(ctx context.Context, shortID, sessionID string, payload M, 
 		// stream. Without it the audit layer falls back to a fresh random
 		// conversation_id every turn, fragmenting history.
 		req.Header.Set("X-Claude-Code-Session-Id", sessionID)
+		// Auxiliary calls (compact summarizer) are audited for usage but must not
+		// touch the conversation's current/reply snapshots — no separate dir.
+		if auxKind != "" {
+			req.Header.Set("X-Cicy-Aux", auxKind)
+		}
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -2140,7 +2146,7 @@ func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspa
 	emit(M{"type": "system", "text": "正在压缩会话…"})
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	summary, err := cicyCompactSummarize(cctx, shortID, cicyModel(shortID), cicyRenderHistoryForCompaction(msgs))
+	summary, err := cicyCompactSummarize(cctx, shortID, session.convID, cicyModel(shortID), cicyRenderHistoryForCompaction(msgs))
 	if err != nil || strings.TrimSpace(summary) == "" {
 		emit(M{"type": "system", "text": "压缩失败(摘要为空),会话未改动。"})
 		emit(M{"type": "done"})
@@ -2581,7 +2587,7 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 		if tools := cicyCachedToolDefs(cfg); len(tools) > 0 {
 			payload["tools"] = tools
 		}
-		resp, streamed, err := cicyCallGateway(ctx, shortID, session.convID, payload, emit)
+		resp, streamed, err := cicyCallGateway(ctx, shortID, session.convID, "", payload, emit)
 		if err != nil {
 			// A mid-flight cancel surfaces here as a ctx error — record it as a
 			// cancellation, not a failure. Anything else is a genuine gateway error

@@ -50,7 +50,7 @@ func TestCicyCompactSplitPointAdvancesPastToolResult(t *testing.T) {
 func TestCicyCompactMessagesAssembles(t *testing.T) {
 	prev := cicyCompactSummarize
 	defer func() { cicyCompactSummarize = prev }()
-	cicyCompactSummarize = func(ctx context.Context, shortID, model, transcript string) (string, error) {
+	cicyCompactSummarize = func(ctx context.Context, shortID, convID, model, transcript string) (string, error) {
 		return "SUMMARY-BODY", nil
 	}
 
@@ -81,7 +81,7 @@ func TestCicyCompactMessagesAssembles(t *testing.T) {
 func TestCicyCompactMessagesFailFallsBack(t *testing.T) {
 	prev := cicyCompactSummarize
 	defer func() { cicyCompactSummarize = prev }()
-	cicyCompactSummarize = func(ctx context.Context, shortID, model, transcript string) (string, error) {
+	cicyCompactSummarize = func(ctx context.Context, shortID, convID, model, transcript string) (string, error) {
 		return "", fmt.Errorf("provider down")
 	}
 	in := makeCicyMsgs(cicyCompactThreshold + 25)
@@ -94,7 +94,7 @@ func TestCicyCompactMessagesFailFallsBack(t *testing.T) {
 	}
 
 	// Empty (non-error) summary is also a no-op.
-	cicyCompactSummarize = func(ctx context.Context, shortID, model, transcript string) (string, error) { return "   ", nil }
+	cicyCompactSummarize = func(ctx context.Context, shortID, convID, model, transcript string) (string, error) { return "   ", nil }
 	if _, ok := cicyCompactMessages(context.Background(), "w-1", in, "m"); ok {
 		t.Error("blank summary should not compact")
 	}

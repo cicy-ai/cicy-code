@@ -496,8 +496,12 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 			},
 		},
 	}
-	// 识别辅助调用（SUGGESTION MODE / 标题生成等）：这种请求不应污染主 reply.json / current.json。
-	auxKind := aiGatewayAuxiliaryKind(question, payloadMap)
+	// 识别辅助调用（SUGGESTION MODE / 标题生成 / compact 总结等）：这种请求不应污染主
+	// reply.json / current.json。显式 X-Cicy-Aux 头优先（本机内部调用自标），其余靠启发式。
+	auxKind := strings.TrimSpace(requestHeaders.Get("X-Cicy-Aux"))
+	if auxKind == "" {
+		auxKind = aiGatewayAuxiliaryKind(question, payloadMap)
+	}
 	// 缓存前缀指纹（用于缓存命中诊断）：在请求时对 system / tools / 首消息做轻量 hash。
 	compMessages, _ := payloadMap["messages"].([]interface{})
 	var firstMsg interface{}

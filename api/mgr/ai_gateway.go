@@ -337,6 +337,8 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 		req.URL.RawPath = ""
 		req.Host = targetBase.Host
 		req.Header.Set("X_AGENT_ID", agentID)
+		// Internal audit marker — never forward upstream.
+		req.Header.Del("X-Cicy-Aux")
 		// Drop the client's Accept-Encoding so Go's Transport negotiates gzip
 		// itself and transparently DECOMPRESSES the response. With the client
 		// header passed through verbatim, upstreams (api.anthropic.com) gzip
