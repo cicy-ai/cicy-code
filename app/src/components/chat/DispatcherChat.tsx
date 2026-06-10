@@ -34,8 +34,10 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
 
   const send = useCallback(async () => {
     const value = text.trim();
-    // 回复还没结束(busy)时禁止发送 —— 等 complete / fail。
-    if (!value || sending || busy) return;
+    // NEVER hard-gate on busy: the server merges sends that land mid-reply
+    // (enqueueIfBusy), and a stale busy flag (poll unmounted / failed turn)
+    // used to deadlock the composer entirely. busy stays as a soft indicator.
+    if (!value || sending) return;
     setSending(true);
     setBusy(true); // 立刻锁住,不等轮询事件回传
     setText('');
@@ -75,7 +77,7 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
     }
   }, [paneId, busy, agentType]);
 
-  const canSend = !!text.trim() && !sending && !busy;
+  const canSend = !!text.trim() && !sending;
 
   return (
     <div data-id="dispatcher-chat" className="flex h-full w-full flex-col bg-[#0c0d10]">
