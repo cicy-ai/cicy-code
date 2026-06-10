@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -111,6 +112,13 @@ const cicySystemPromptBase = `你是这个多 agent 工作区的产品项目经�
 type cicySession struct {
 	mu       sync.Mutex
 	messages []M // anthropic-format messages, persisted to disk
+
+	// convID is the conversation identity the audit layer keys snapshots off
+	// (.cicy/history/chat/<convID>/). A random UUID — NOT the legacy fixed
+	// "dispatcher-<id>" — persisted to .cicy/cicy/conversation_id so it survives
+	// restarts. /clear rotates it (a clear starts a NEW conversation); /compact
+	// keeps it (same conversation). Guarded by mu.
+	convID string
 
 	// Input queue: while a reply is in flight (busy), additional inputs are
 	// appended to pending instead of running their own turn; the in-flight
@@ -458,6 +466,39 @@ func cicyHistoryPath(workspace string) string {
 	return filepath.Join(cicyConvDir(workspace), "conversation.json")
 }
 
+// cicyConvIDPath holds the persisted conversation id (sibling of conversation.json).
+func cicyConvIDPath(workspace string) string {
+	return filepath.Join(cicyConvDir(workspace), "conversation_id")
+}
+
+// cicyNewConversationID returns a random UUIDv4-shaped conversation id, matching
+// the format claude-type agents' session ids use so all conversation dirs under
+// .cicy/history/chat/ look alike.
+func cicyNewConversationID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("conv-%d", time.Now().UnixNano())
+	}
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// cicyLoadOrCreateConvID reads the persisted conversation id, minting and
+// persisting a fresh random one when absent (first run, or pre-upgrade agents
+// that used the fixed "dispatcher-<id>").
+func cicyLoadOrCreateConvID(workspace string) string {
+	if raw, err := os.ReadFile(cicyConvIDPath(workspace)); err == nil {
+		if id := strings.TrimSpace(string(raw)); id != "" {
+			return id
+		}
+	}
+	id := cicyNewConversationID()
+	_ = os.MkdirAll(cicyConvDir(workspace), 0755)
+	_ = os.WriteFile(cicyConvIDPath(workspace), []byte(id+"\n"), 0644)
+	return id
+}
+
 // migrateCicyStateDir moves a pre-rename .cicy/dispatcher dir to .cicy/cicy when
 // the new one doesn't exist yet, so an agent's conversation survives the rename.
 // Idempotent and best-effort: any failure leaves the legacy dir in place and the
@@ -499,6 +540,7 @@ func getCicySession(shortID, workspace string) *cicySession {
 			s.messages = msgs
 		}
 	}
+	s.convID = cicyLoadOrCreateConvID(workspace)
 	cicySessions[shortID] = s
 	return s
 }
@@ -1252,11 +1294,12 @@ func cicyCallGateway(ctx context.Context, shortID, sessionID string, payload M, 
 		req.Header.Set("x-api-key", "cicy-local-gateway")
 		req.Header.Set("anthropic-version", "2023-06-01")
 		req.Header.Set("Accept", "text/event-stream")
-		// Conversation id the audit layer keys off. The main turn passes
-		// "dispatcher-<id>" (one long-lived conversation per agent); compaction passes
-		// "compact-<id>" so its summarization round audits to a SEPARATE bucket and
-		// never pollutes the agent's own chat history / UI stream. Without it the audit
-		// layer falls back to a fresh random conversation_id every turn.
+		// Conversation id the audit layer keys off. The main turn passes the
+		// session's persisted random convID (rotated by /clear, kept by /compact);
+		// compaction passes "compact-<id>" so its summarization round audits to a
+		// SEPARATE bucket and never pollutes the agent's own chat history / UI
+		// stream. Without it the audit layer falls back to a fresh random
+		// conversation_id every turn, fragmenting history.
 		req.Header.Set("X-Claude-Code-Session-Id", sessionID)
 
 		resp, err := client.Do(req)
@@ -1705,6 +1748,11 @@ func clearCicyPane(shortID, workspace string) {
 	session.cancelInFlight() // stop any in-flight turn first
 	session.mu.Lock()
 	session.messages = nil
+	// A clear starts a NEW conversation: rotate the random conversation id so the
+	// next turn snapshots into a fresh chat/<convID>/ dir (the old one stays on
+	// disk for scrollback).
+	session.convID = cicyNewConversationID()
+	_ = os.WriteFile(cicyConvIDPath(workspace), []byte(session.convID+"\n"), 0644)
 	session.persistLocked(workspace) // conversation.json → empty
 	session.mu.Unlock()
 	session.forceRelease() // drop busy/queued so it's truly fresh
@@ -2174,7 +2222,7 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 		if tools := cicyCachedToolDefs(cfg); len(tools) > 0 {
 			payload["tools"] = tools
 		}
-		resp, streamed, err := cicyCallGateway(ctx, shortID, "dispatcher-"+shortID, payload, emit)
+		resp, streamed, err := cicyCallGateway(ctx, shortID, session.convID, payload, emit)
 		if err != nil {
 			// A mid-flight cancel surfaces here as a ctx error — record it as a
 			// cancellation, not a failure. Anything else is a genuine gateway error
