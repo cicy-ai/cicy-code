@@ -1528,7 +1528,7 @@ def ensure_app_dev_server():
     print(f"[dev] App dev log: {log_path}")
 
 
-def start_local_dev_detached(cicy_bin, extra=None):
+def start_local_dev_detached(cicy_bin, extra=None, reply_mirror=False):
     logs_dir = os.path.expanduser("~/logs/.dev-logs")
     os.makedirs(logs_dir, exist_ok=True)
     log_path = os.path.join(logs_dir, "cicy-code.log")
@@ -1538,9 +1538,11 @@ def start_local_dev_detached(cicy_bin, extra=None):
     run_env["PATH"] = f"{API_DIR}:{run_env.get('PATH', '')}"
     # reply 镜像收集默认关闭：它把每次 AI gateway 请求/响应完整快照写到
     # ~/cicy-ai/workers/<agent>/.cicy/history/reply_mirror/<turn>_<req>_<ts>.json，
-    # 约 6MB/轮、无轮转，会无界占满磁盘（曾撑到 48G）。需要诊断 reply.Items
-    # 解析时，手动 `export CICY_GATEWAY_REPLY_MIRROR=1` 即可临时开启。
-    run_env.setdefault("CICY_GATEWAY_REPLY_MIRROR", "0")
+    # 约 6MB/轮、无轮转，会无界占满磁盘（曾撑到 48G）。
+    # HARD override（不是 setdefault）：否则一次诊断时 `export CICY_GATEWAY_REPLY_MIRROR=1`
+    # 忘了 unset，就会被 os.environ.copy() 继承、悄悄泄漏进之后每个 dev server。
+    # 要开镜像走显式的 `dev.py --reply-mirror`，env 不再是开关。
+    run_env["CICY_GATEWAY_REPLY_MIRROR"] = "1" if reply_mirror else "0"
 
     with open(log_path, "ab", buffering=0) as log_file:
         process = subprocess.Popen(
@@ -1625,6 +1627,15 @@ def main():
         dest="ttydAssets",
         action="store_true",
         help="Rebuild embedded ttyd/goTTY static assets only; do not start cicy-code.",
+    )
+    local_group.add_argument(
+        "--reply-mirror",
+        dest="reply_mirror",
+        action="store_true",
+        help="Enable the AI gateway reply mirror (full request/response snapshots under "
+        ".cicy/history/reply_mirror/). OFF by default and HARD-forced off otherwise, so a "
+        "stray `export CICY_GATEWAY_REPLY_MIRROR=1` in your shell can no longer leak in. "
+        "Writes ~6MB/turn with no rotation — only use for short diagnostics.",
     )
 
     docker_group = parser.add_argument_group("docker runtime")
@@ -1788,7 +1799,7 @@ def main():
             extra = ["--hot"]
         if args.preview:
             os.environ["CICY_PREVIEW_DIST"] = os.path.join(ROOT_DIR, "app", "dist")
-        start_local_dev_detached(cicy_bin, extra=extra or None)
+        start_local_dev_detached(cicy_bin, extra=extra or None, reply_mirror=args.reply_mirror)
         sys.exit(0)
 
     existing_pid = get_pid_on_port(PORT)
@@ -1840,13 +1851,13 @@ def main():
     cicy_bin = os.path.join(API_DIR, "cicy-code")
     if args.hot:
         ensure_app_dev_server()   # starts `npm run dev` on :8022 if not already up
-        start_local_dev_detached(cicy_bin, extra=["--hot"])
+        start_local_dev_detached(cicy_bin, extra=["--hot"], reply_mirror=args.reply_mirror)
     elif args.preview:
         build_app_dist()          # `npm run build` -> app/dist, served from disk
         os.environ["CICY_PREVIEW_DIST"] = os.path.join(ROOT_DIR, "app", "dist")
-        start_local_dev_detached(cicy_bin, extra=["--preview"])
+        start_local_dev_detached(cicy_bin, extra=["--preview"], reply_mirror=args.reply_mirror)
     else:
-        start_local_dev_detached(cicy_bin)   # serve the binary-embedded assets
+        start_local_dev_detached(cicy_bin, reply_mirror=args.reply_mirror)   # serve the binary-embedded assets
     sys.exit(0)
 
 
