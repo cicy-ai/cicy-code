@@ -2365,7 +2365,15 @@ func deliverCicyMessage(shortID, workspace, text string) bool {
 //	/compact → archive current.json, summarize the WHOLE history into one
 //	           message, reset history to just that summary (same conversation)
 func runCicySlashCommand(ctx context.Context, session *cicySession, shortID, workspace, text string, emit func(M)) bool {
-	switch strings.TrimSpace(text) {
+	cmd := strings.TrimSpace(text)
+	// Agent-to-agent mail arrives wrapped as "📮 [w-xxxx] <text>" — strip the
+	// attribution so a relayed /clear、/compact still acts as a command.
+	if strings.HasPrefix(cmd, "📮") {
+		if i := strings.Index(cmd, "] "); i >= 0 {
+			cmd = strings.TrimSpace(cmd[i+2:])
+		}
+	}
+	switch cmd {
 	case "/clear":
 		clearCicyPane(shortID, workspace)
 		emit(M{"type": "system", "text": "✅ 会话已清空。"})
