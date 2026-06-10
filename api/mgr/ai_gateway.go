@@ -418,83 +418,6 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 	return proxy
 }
 
-// aiGatewayStripForGreeting detects if the user's last message is just "hi" (case-insensitive)
-// and strips tools + system prompt to save tokens on a simple greeting.
-func aiGatewayStripForGreeting(body []byte) []byte {
-	var obj map[string]interface{}
-	if json.Unmarshal(body, &obj) != nil {
-		return body
-	}
-	lastUserText := aiGatewayExtractLastUserText(obj)
-	if !strings.EqualFold(lastUserText, "hi") {
-		return body
-	}
-	// Strip tools, tool_choice, system, instructions
-	delete(obj, "tools")
-	delete(obj, "tool_choice")
-	delete(obj, "system")
-	delete(obj, "instructions")
-	// Remove system messages from messages array
-	if msgs, ok := obj["messages"].([]interface{}); ok {
-		filtered := make([]interface{}, 0, len(msgs))
-		for _, m := range msgs {
-			mm, _ := m.(map[string]interface{})
-			if mm != nil {
-				if role, _ := mm["role"].(string); role == "system" {
-					continue
-				}
-			}
-			filtered = append(filtered, m)
-		}
-		obj["messages"] = filtered
-	}
-	out, err := json.Marshal(obj)
-	if err != nil {
-		return body
-	}
-	return out
-}
-
-// aiGatewayExtractLastUserText extracts the text from the last user message.
-// Handles both string content and structured content arrays.
-func aiGatewayExtractLastUserText(obj map[string]interface{}) string {
-	for _, key := range []string{"messages", "input"} {
-		arr, ok := obj[key].([]interface{})
-		if !ok || len(arr) == 0 {
-			continue
-		}
-		for i := len(arr) - 1; i >= 0; i-- {
-			m, _ := arr[i].(map[string]interface{})
-			if m == nil {
-				continue
-			}
-			role, _ := m["role"].(string)
-			if role != "user" {
-				continue
-			}
-			switch c := m["content"].(type) {
-			case string:
-				return strings.TrimSpace(c)
-			case []interface{}:
-				// structured content: [{"type":"text","text":"hi"}, ...]
-				for _, part := range c {
-					p, _ := part.(map[string]interface{})
-					if p == nil {
-						continue
-					}
-					if t, _ := p["type"].(string); t == "text" {
-						if text, _ := p["text"].(string); strings.TrimSpace(text) != "" {
-							return strings.TrimSpace(text)
-						}
-					}
-				}
-			}
-			return ""
-		}
-	}
-	return ""
-}
-
 // aiGatewayActiveProvider returns the providerConfig currently routing for this
 // agent: the per-pane runtime_ai override if set, else the agent_type default.
 // Returns nil when no provider can be resolved (legacy/empty config).
@@ -581,13 +504,17 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 	//
 	// gemini is a pure Google GenAI passthrough — its body uses Google's schema
 	// (contents/parts), NOT Anthropic/OpenAI, so this rewrite chain (model mapping,
-	// enable_thinking injection, greeting strip) would corrupt it. Google rejects
-	// the foreign keys outright (`Unknown name "enable_thinking"`), breaking real
-	// gemini-cli multi-turn. Skip the entire chain for gemini.
+	// enable_thinking injection) would corrupt it. Google rejects the foreign keys
+	// outright (`Unknown name "enable_thinking"`), breaking real gemini-cli
+	// multi-turn. Skip the entire chain for gemini.
+	//
+	// NOTE: the old "greeting strip" (delete system+tools when the last message is
+	// "hi") was removed — it left the model with no persona and no tools, so a
+	// bare "hi" produced rambling/garbage (e.g. deepseek emitting a synthetic
+	// thinking block). A request must always carry its system prompt + tools.
 	if provider != "gemini" {
 		requestBody = applyGatewayModelMapping(agentID, requestBody)
 		requestBody = agentInspectorRewriteRequestBody(provider, agentID, requestBody, targetBase.Host)
-		requestBody = aiGatewayStripForGreeting(requestBody)
 	}
 
 	// Codex (Responses API) → Chat Completions adaptation: only api.openai.com
