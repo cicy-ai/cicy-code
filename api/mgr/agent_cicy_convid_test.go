@@ -1,10 +1,7 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
 )
 
@@ -21,35 +18,79 @@ func TestCicyNewConversationIDIsRandomUUID(t *testing.T) {
 	}
 }
 
-func TestCicyLoadOrCreateConvIDPersistsAcrossLoads(t *testing.T) {
-	ws := t.TempDir()
-	first := cicyLoadOrCreateConvID(ws)
-	if !uuidV4Shape.MatchString(first) {
-		t.Fatalf("minted id %q is not a v4 UUID", first)
+func TestCicySeededSnapshotReplacesOnlyMessages(t *testing.T) {
+	live := aiGatewayCurrentSnapshot{
+		TurnID:         "t-1",
+		AgentID:        "w-9",
+		ConversationID: "old-conv",
+		RequestID:      "req-1",
+		Provider:       "anthropic",
+		Model:          "deepseek-v4-pro",
+		URL:            "https://gateway.example/v1/messages",
+		Method:         "POST",
+		Headers:        map[string][]string{"Content-Type": {"application/json"}},
+		Body: map[string]interface{}{
+			"model":      "deepseek-v4-pro",
+			"max_tokens": 2048,
+			"system":     []interface{}{map[string]interface{}{"type": "text", "text": "PM persona"}},
+			"tools":      []interface{}{map[string]interface{}{"name": "todo_add"}},
+			"messages": []interface{}{
+				map[string]interface{}{"id": 1, "role": "user", "content": "hi"},
+			},
+		},
+		Status:     "completed",
+		Timestamp:  "2026-06-10T00:00:00Z",
+		StartedAt:  "2026-06-10T00:00:00Z",
+		RequestIDs: []string{"req-1"},
 	}
-	// Same workspace → same id (restart survival).
-	if again := cicyLoadOrCreateConvID(ws); again != first {
-		t.Fatalf("reload must return the persisted id %q, got %q", first, again)
+	summary := []M{{"role": "user", "content": "[summary] …"}}
+	out := cicySeededSnapshot(live, "w-9", "new-conv", "2026-06-10T01:00:00Z", summary)
+
+	// Everything except messages + conversation id carries over verbatim.
+	if out.Provider != "anthropic" || out.Model != "deepseek-v4-pro" || out.URL != live.URL ||
+		out.Method != "POST" || out.TurnID != "t-1" || out.RequestID != "req-1" {
+		t.Fatalf("non-message fields must carry over, got %+v", out)
 	}
-	raw, err := os.ReadFile(cicyConvIDPath(ws))
-	if err != nil {
-		t.Fatalf("conversation_id file must exist: %v", err)
+	if out.Headers == nil || len(out.RequestIDs) != 1 {
+		t.Fatalf("headers/request_ids must carry over")
 	}
-	if strings.TrimSpace(string(raw)) != first {
-		t.Fatalf("persisted %q != returned %q", strings.TrimSpace(string(raw)), first)
+	if out.ConversationID != "new-conv" {
+		t.Fatalf("conversation id must be the seed's, got %q", out.ConversationID)
+	}
+	body := out.Body.(map[string]interface{})
+	if _, has := body["system"]; !has {
+		t.Fatalf("body.system must survive the seed")
+	}
+	if _, has := body["tools"]; !has {
+		t.Fatalf("body.tools must survive the seed")
+	}
+	if body["max_tokens"] != 2048 {
+		t.Fatalf("body extras must survive the seed")
+	}
+	msgs := body["messages"].([]interface{})
+	if len(msgs) != 1 {
+		t.Fatalf("messages must be replaced by the seed content, got %d", len(msgs))
+	}
+	if msgs[0].(map[string]interface{})["content"] != "[summary] …" {
+		t.Fatalf("seeded message wrong: %v", msgs[0])
 	}
 }
 
-func TestCicyLoadOrCreateConvIDHonorsExistingFile(t *testing.T) {
-	ws := t.TempDir()
-	dir := cicyConvDir(ws)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatal(err)
+func TestCicySeededSnapshotKeepsChatShapeSystemMessage(t *testing.T) {
+	live := aiGatewayCurrentSnapshot{
+		Body: map[string]interface{}{
+			"messages": []interface{}{
+				map[string]interface{}{"role": "system", "content": "PM persona"},
+				map[string]interface{}{"id": 1, "role": "user", "content": "hi"},
+			},
+		},
 	}
-	if err := os.WriteFile(filepath.Join(dir, "conversation_id"), []byte("my-pinned-id\n"), 0644); err != nil {
-		t.Fatal(err)
+	out := cicySeededSnapshot(live, "w-9", "c", "2026-06-10T01:00:00Z", []M{{"role": "user", "content": "[summary]"}})
+	msgs := out.Body.(map[string]interface{})["messages"].([]interface{})
+	if len(msgs) != 2 {
+		t.Fatalf("chat-shape seed must keep the leading system message, got %d msgs", len(msgs))
 	}
-	if got := cicyLoadOrCreateConvID(ws); got != "my-pinned-id" {
-		t.Fatalf("existing id must be honored, got %q", got)
+	if msgs[0].(map[string]interface{})["role"] != "system" {
+		t.Fatalf("first message must stay the system persona")
 	}
 }

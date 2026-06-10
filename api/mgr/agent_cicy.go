@@ -466,14 +466,11 @@ func cicyHistoryPath(workspace string) string {
 	return filepath.Join(cicyConvDir(workspace), "conversation.json")
 }
 
-// cicyConvIDPath holds the persisted conversation id (sibling of conversation.json).
-func cicyConvIDPath(workspace string) string {
-	return filepath.Join(cicyConvDir(workspace), "conversation_id")
-}
-
 // cicyNewConversationID returns a random UUIDv4-shaped conversation id, matching
 // the format claude-type agents' session ids use so all conversation dirs under
-// .cicy/history/chat/ look alike.
+// .cicy/history/chat/ look alike. The id is NOT persisted on its own —
+// current.json's conversation_id field is the durable record; a fresh id
+// crystallizes there with the first turn (or the migration/compact seed).
 func cicyNewConversationID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -482,21 +479,6 @@ func cicyNewConversationID() string {
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
-}
-
-// cicyLoadOrCreateConvID reads the persisted conversation id, minting and
-// persisting a fresh random one when absent (first run, or pre-upgrade agents
-// that used the fixed "dispatcher-<id>").
-func cicyLoadOrCreateConvID(workspace string) string {
-	if raw, err := os.ReadFile(cicyConvIDPath(workspace)); err == nil {
-		if id := strings.TrimSpace(string(raw)); id != "" {
-			return id
-		}
-	}
-	id := cicyNewConversationID()
-	_ = os.MkdirAll(cicyConvDir(workspace), 0755)
-	_ = os.WriteFile(cicyConvIDPath(workspace), []byte(id+"\n"), 0644)
-	return id
 }
 
 // migrateCicyStateDir moves a pre-rename .cicy/dispatcher dir to .cicy/cicy when
@@ -745,28 +727,55 @@ func cicyRestoreSessionMessages(shortID, convID string) []M {
 	return cicyBalanceToolCalls(msgs)
 }
 
-// cicySeedCurrentSnapshot writes a synthetic current.json holding the given
-// messages, so the snapshot store stays the single source of truth even when
-// history changes OUTSIDE a gateway request (one-time conversation.json
-// migration; /compact's summary reset). The annotator numbers the messages.
+// cicySeedCurrentSnapshot updates current.json when history changes OUTSIDE a
+// gateway request (one-time conversation.json migration; /compact's summary
+// reset). It clones the LIVE snapshot and replaces ONLY body.messages — every
+// other field (provider, model, url, headers, request ids, and the body's
+// system/tools/model) carries over verbatim, so the seed is indistinguishable
+// from a real wire snapshot. The annotator renumbers the messages.
 func cicySeedCurrentSnapshot(shortID, convID string, msgs []M) {
 	if len(msgs) == 0 {
 		return
 	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	snap := cicySeededSnapshot(agentInspectorLoadCurrent(shortID), shortID, convID, now, msgs)
+	_ = aiGatewayWriteCurrentSnapshot(shortID, snap)
+}
+
+// cicySeededSnapshot is the pure clone-and-replace: take the live snapshot,
+// swap ONLY body.messages, keep everything else verbatim.
+func cicySeededSnapshot(snap aiGatewayCurrentSnapshot, shortID, convID, now string, msgs []M) aiGatewayCurrentSnapshot {
 	body := make([]interface{}, len(msgs))
 	for i, m := range msgs {
 		body[i] = map[string]interface{}(m)
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	_ = aiGatewayWriteCurrentSnapshot(shortID, aiGatewayCurrentSnapshot{
-		AgentID:        shortID,
-		ConversationID: convID,
-		Body:           map[string]interface{}{"messages": body},
-		Timestamp:      now,
-		Status:         "completed",
-		StartedAt:      now,
-		UpdatedAt:      now,
-	})
+	if old := aiGatewayMap(snap.Body); len(old) > 0 {
+		nb := map[string]interface{}{}
+		for k, v := range old {
+			nb[k] = v
+		}
+		// A chat-shaped body (openai provider bridge) keeps its persona inside
+		// messages[0] role:"system" — carry it over so the seed doesn't drop it.
+		if _, hasSystem := nb["system"]; !hasSystem {
+			if oldMsgs := aiGatewaySlice(nb["messages"]); len(oldMsgs) > 0 {
+				if m0 := aiGatewayMap(oldMsgs[0]); aiGatewayString(m0["role"]) == "system" {
+					body = append([]interface{}{oldMsgs[0]}, body...)
+				}
+			}
+		}
+		nb["messages"] = body
+		snap.Body = nb
+	} else {
+		// No prior snapshot to inherit from (fresh agent): minimal but honest.
+		snap.Body = map[string]interface{}{"messages": body}
+		snap.Status = "completed"
+		snap.StartedAt = now
+		snap.Timestamp = now
+	}
+	snap.AgentID = shortID
+	snap.ConversationID = convID
+	snap.UpdatedAt = now
+	return snap
 }
 
 func getCicySession(shortID, workspace string) *cicySession {
@@ -777,11 +786,20 @@ func getCicySession(shortID, workspace string) *cicySession {
 	}
 	migrateCicyStateDir(workspace)
 	s := &cicySession{}
-	s.convID = cicyLoadOrCreateConvID(workspace)
+	// The conversation id lives in current.json — nowhere else. Missing snapshot
+	// (fresh agent, or right after /clear) → mint a random one; it becomes durable
+	// when the first turn (or a seed) writes current.json.
+	current := agentInspectorLoadCurrent(shortID)
+	s.convID = strings.TrimSpace(current.ConversationID)
+	if s.convID == "" {
+		s.convID = cicyNewConversationID()
+	}
+	// Retired sidecar from an earlier revision; the id is in current.json.
+	_ = os.Remove(filepath.Join(cicyConvDir(workspace), "conversation_id"))
 	// One-time migration: a pre-refactor conversation.json (current dir or the
 	// legacy .cicy/dispatcher one) is the fuller record — load it, seed the
-	// snapshot store from it, and park the file as .bak so every later boot
-	// restores from current.json + reply.json.
+	// snapshot store from it under a fresh random conversation id, and park the
+	// file as .bak so every later boot restores from current.json + reply.json.
 	histPath := cicyHistoryPath(workspace)
 	if _, err := os.Stat(histPath); err != nil {
 		if legacy := filepath.Join(cicyLegacyConvDir(workspace), "conversation.json"); legacy != histPath {
@@ -794,6 +812,9 @@ func getCicySession(shortID, workspace string) *cicySession {
 		var msgs []M
 		if json.Unmarshal(raw, &msgs) == nil && len(msgs) > 0 {
 			s.messages = msgs
+			if strings.HasPrefix(s.convID, "dispatcher-") || s.convID == "" {
+				s.convID = cicyNewConversationID()
+			}
 			cicySeedCurrentSnapshot(shortID, s.convID, s.messages)
 		}
 		_ = os.Rename(histPath, histPath+".bak")
@@ -2012,9 +2033,9 @@ func clearCicyPane(shortID, workspace string) {
 	session.messages = nil
 	// A clear starts a NEW conversation: rotate the random conversation id so the
 	// next turn snapshots into a fresh chat/<convID>/ dir (the old one stays on
-	// disk for scrollback).
+	// disk for scrollback). The id becomes durable when that turn writes
+	// current.json — no sidecar file.
 	session.convID = cicyNewConversationID()
-	_ = os.WriteFile(cicyConvIDPath(workspace), []byte(session.convID+"\n"), 0644)
 	session.persistLocked(workspace)
 	session.mu.Unlock()
 	session.forceRelease() // drop busy/queued so it's truly fresh
