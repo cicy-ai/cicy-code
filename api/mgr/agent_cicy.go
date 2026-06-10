@@ -579,7 +579,11 @@ func cicyMessagesFromCurrentBody(body map[string]interface{}) []M {
 		if len(m) == 0 {
 			continue
 		}
-		out = append(out, cicyStripWireAnnotations(m))
+		clean := cicyStripWireAnnotations(m)
+		if cicyMessageContentEmpty(clean) {
+			continue // degenerate empty-content message — never restore it
+		}
+		out = append(out, clean)
 	}
 	return out
 }
@@ -1488,6 +1492,22 @@ func cicyCompactSliceStart(history []M) int {
 	return 0
 }
 
+// cicyMessageContentEmpty reports a degenerate message (content "" or []) —
+// upstreams reject these with "all messages must have non-empty content".
+func cicyMessageContentEmpty(m M) bool {
+	switch c := m["content"].(type) {
+	case string:
+		return strings.TrimSpace(c) == ""
+	case []interface{}:
+		return len(c) == 0
+	case []M:
+		return len(c) == 0
+	case nil:
+		return true
+	}
+	return false
+}
+
 func cicyRequestMessages(history []M) []M {
 	// Claude-style boundary slice: the model gets [summary, …]; the display
 	// snapshot keeps the whole conversation.
@@ -1495,16 +1515,24 @@ func cicyRequestMessages(history []M) []M {
 	if len(history) == 0 {
 		return history
 	}
-	out := make([]M, len(history))
+	out := make([]M, 0, len(history))
 	// API boundary: display-level ids (snapshot annotation) never go upstream —
-	// the id is a UI identifier, the protocol has none. Non-destructive copy so
+	// the id is a UI identifier, the protocol has none — and degenerate
+	// empty-content messages (a failed round's empty response, historically
+	// appended unguarded) are dropped: upstreams 400 on them. Non-destructive:
 	// the in-memory history is left untouched.
-	for i, m := range history {
-		if _, has := m["id"]; has {
-			out[i] = cicyStripWireAnnotations(m)
-		} else {
-			out[i] = m
+	for _, m := range history {
+		if cicyMessageContentEmpty(m) {
+			continue
 		}
+		if _, has := m["id"]; has {
+			out = append(out, cicyStripWireAnnotations(m))
+		} else {
+			out = append(out, m)
+		}
+	}
+	if len(out) == 0 {
+		return out
 	}
 	last := out[len(out)-1]
 	role, _ := last["role"].(string)
@@ -2647,8 +2675,12 @@ func cicyRunWindowLocked(ctx context.Context, session *cicySession, shortID, wor
 			stopReason = "tool_use"
 		}
 
-		// Record the assistant turn verbatim.
-		session.messages = append(session.messages, M{"role": "assistant", "content": blocks})
+		// Record the assistant turn verbatim — unless the round produced NOTHING
+		// (degenerate empty response): an empty-content assistant message bakes a
+		// permanent upstream 400 into the history.
+		if len(blocks) > 0 {
+			session.messages = append(session.messages, M{"role": "assistant", "content": blocks})
+		}
 
 		var toolResults []M
 		for _, b := range blocks {
