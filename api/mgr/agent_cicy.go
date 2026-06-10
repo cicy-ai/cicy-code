@@ -2089,11 +2089,11 @@ func archiveCicyCurrentSnapshot(shortID string) {
 // conversation (unlike /clear, which wipes). Unlike the auto-path cicyCompactMessages
 // it is NOT gated on a length threshold and keeps NO verbatim tail — a full fold.
 // The pre-compaction current.json is archived first so nothing is lost.
-func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspace string, sse *cicySSE) {
+func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspace string, emit func(M)) {
 	// Never compact mid-turn — it would corrupt the in-flight history.
 	if !session.tryOwnTurn() {
-		sse.emit(M{"type": "system", "text": "正在回复中,稍后再 /compact。"})
-		sse.emit(M{"type": "done"})
+		emit(M{"type": "system", "text": "正在回复中,稍后再 /compact。"})
+		emit(M{"type": "done"})
 		return
 	}
 	defer session.forceRelease()
@@ -2102,20 +2102,20 @@ func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspa
 	msgs := append([]M(nil), session.messages...)
 	session.mu.Unlock()
 	if len(msgs) == 0 {
-		sse.emit(M{"type": "system", "text": "当前会话为空,无需压缩。"})
-		sse.emit(M{"type": "done"})
+		emit(M{"type": "system", "text": "当前会话为空,无需压缩。"})
+		emit(M{"type": "done"})
 		return
 	}
 
 	archiveCicyCurrentSnapshot(shortID) // best-effort rollback source
 
-	sse.emit(M{"type": "system", "text": "正在压缩会话…"})
+	emit(M{"type": "system", "text": "正在压缩会话…"})
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	summary, err := cicyCompactSummarize(cctx, shortID, cicyModel(shortID), cicyRenderHistoryForCompaction(msgs))
 	if err != nil || strings.TrimSpace(summary) == "" {
-		sse.emit(M{"type": "system", "text": "压缩失败(摘要为空),会话未改动。"})
-		sse.emit(M{"type": "done"})
+		emit(M{"type": "system", "text": "压缩失败(摘要为空),会话未改动。"})
+		emit(M{"type": "done"})
 		return
 	}
 
@@ -2131,8 +2131,8 @@ func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspa
 	session.mu.Unlock()
 	removeCicyReplySnapshot(shortID)
 
-	sse.emit(M{"type": "system", "text": "✅ 已压缩。摘要:" + truncateForLog(strings.TrimSpace(summary), 200)})
-	sse.emit(M{"type": "done"})
+	emit(M{"type": "system", "text": "✅ 已压缩。摘要:" + truncateForLog(strings.TrimSpace(summary), 200)})
+	emit(M{"type": "done"})
 }
 
 // handleCicyClear wipes a cicy agent's conversation (headless reset). body: {pane_id}.
@@ -2206,18 +2206,7 @@ func handleCicyChat(w http.ResponseWriter, r *http.Request) {
 
 	session := getCicySession(shortID, workspace)
 
-	// Slash commands are intercepted here and NEVER sent to the LLM as a turn.
-	//   /clear   → wipe the conversation (in-memory + conversation.json + snapshots)
-	//   /compact → archive current.json, summarize the WHOLE history into one
-	//              message, reset history to just that summary (same conversation)
-	switch text {
-	case "/clear":
-		clearCicyPane(shortID, workspace)
-		sse.emit(M{"type": "system", "text": "✅ 会话已清空。"})
-		sse.emit(M{"type": "done"})
-		return
-	case "/compact":
-		compactCicyPane(r.Context(), session, shortID, workspace, sse)
+	if runCicySlashCommand(r.Context(), session, shortID, workspace, text, sse.emit) {
 		return
 	}
 
@@ -2347,14 +2336,46 @@ func runCicyOwnedTurnsCore(session *cicySession, shortID, workspace, text string
 // tmux capture — a headless agent has no pane to capture.
 func deliverCicyMessage(shortID, workspace, text string) bool {
 	session := getCicySession(shortID, workspace)
+	// Slash commands act here too — the web UI / IM / dispatch queue all deliver
+	// through this entry, and a command must never reach the LLM as chat. The
+	// result is visible through the snapshots themselves (/clear → empty view,
+	// /compact → summary as message #1), so the no-op emit loses nothing.
+	if runCicySlashCommand(context.Background(), session, shortID, workspace, text, func(M) {}) {
+		go broadcastPollData(shortID)
+		return true
+	}
 	if session.enqueueIfBusy(text) {
 		return false // merged into the in-flight owner's drain
 	}
-	// emit sink is a no-op: the turn persists to conversation.json (the source of
-	// truth headless callers read back), so there's no stream to forward here.
+	// emit sink is a no-op: the turn persists via the gateway snapshots (the
+	// source of truth headless callers read back), so there's no stream to
+	// forward here.
 	runCicyOwnedTurns(session, shortID, workspace, text, func(M) {})
 	go broadcastPollData(shortID)
 	return true
+}
+
+// runCicySlashCommand intercepts conversation-management commands at EVERY cicy
+// input entry (SSE chat endpoint, web UI / IM / queue delivery) so they are
+// executed instead of being sent to the LLM as a message. Returns true when the
+// text was a command and has been handled.
+//
+//	/clear   → wipe the conversation (in-memory + snapshots), rotate the
+//	           conversation id (a clear starts a NEW conversation)
+//	/compact → archive current.json, summarize the WHOLE history into one
+//	           message, reset history to just that summary (same conversation)
+func runCicySlashCommand(ctx context.Context, session *cicySession, shortID, workspace, text string, emit func(M)) bool {
+	switch strings.TrimSpace(text) {
+	case "/clear":
+		clearCicyPane(shortID, workspace)
+		emit(M{"type": "system", "text": "✅ 会话已清空。"})
+		emit(M{"type": "done"})
+		return true
+	case "/compact":
+		compactCicyPane(ctx, session, shortID, workspace, emit)
+		return true
+	}
+	return false
 }
 
 // cancelCicyPane 取消某个 cicy agent 正在跑的 turn(headless 取消入口)。只对已存在
