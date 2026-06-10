@@ -15,11 +15,11 @@ import (
 // handleSTT routes audio to whichever STT backend is configured.
 //
 // Backend selection (first match wins):
-//   1. providers.default.stt == "cloudflare-ai" → Cloudflare Workers AI Whisper
-//      (uses cf.prod.account_id + cf.prod.api_token from global.json)
-//   2. providers.default.stt == "<key>"          → that openai-compatible provider
-//   3. (no default)                              → first openai-protocol provider
-//                                                  with an apiKey set
+//  1. providers.default.stt == "cloudflare-ai" → Cloudflare Workers AI Whisper
+//     (uses cf.prod.account_id + cf.prod.api_token from global.json)
+//  2. providers.default.stt == "<key>"          → that openai-compatible provider
+//  3. (no default)                              → first openai-protocol provider
+//     with an apiKey set
 //
 // Cloudflare Workers AI is the default recommendation: 10k neurons/day free
 // tier, no per-service signup, and the user already has cf credentials wired
@@ -151,7 +151,6 @@ func anyToString(v any) string {
 	return ""
 }
 
-
 // --- OpenAI-compatible (whisper-1, SiliconFlow SenseVoice, etc.) ---
 
 func runOpenAICompatibleSTT(w http.ResponseWriter, r *http.Request, audio []byte, filename, defaultKey string) {
@@ -173,8 +172,14 @@ func runOpenAICompatibleSTT(w http.ResponseWriter, r *http.Request, audio []byte
 		return
 	}
 	model := strings.TrimSpace(r.FormValue("model"))
+	// STT defaults to whisper-1. Do NOT fall back to provider.DefaultModel — that
+	// is the provider's LLM CHAT model (e.g. deepseek-v4-pro), and sending it to
+	// /v1/audio/transcriptions makes the gateway 400 ("No route for that URI").
+	// Only honor a provider default that is itself a whisper/transcription model.
 	if model == "" {
-		model = strings.TrimSpace(provider.DefaultModel)
+		if d := strings.TrimSpace(provider.DefaultModel); strings.Contains(strings.ToLower(d), "whisper") {
+			model = d
+		}
 	}
 	if model == "" {
 		model = "whisper-1"

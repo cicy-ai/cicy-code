@@ -456,8 +456,8 @@ func helperModeBuiltinWorker() builtinWorker {
 }
 
 type builtinWorker struct {
-	Port         int
-	AgentType    string
+	Port          int
+	AgentType     string
 	Title         string
 	RoleTemplate  string // role template slug (~/cicy-ai/memory/agents/<slug>.md); "" = none
 	Master        bool   // the w-1001 PM master (role="master"); others are "worker"
@@ -1057,6 +1057,7 @@ func ensureFfmpegAsync() {
 // Sources picked for stability + China reachability:
 //   - Linux:   johnvansickle.com (mirrored via ghproxy.net for CN)
 //   - macOS:   evermeet.cx (single-binary tarballs, x64 + arm64)
+//
 // Both providers ship truly static builds (no dynamic dependencies)
 // suitable for headless containers/WSL.
 func installStaticFfmpeg() error {
@@ -1598,6 +1599,20 @@ func installMITMCAOSTrust() error {
 		// endpoint retries via the CLI in the user's session.
 		home, _ := os.UserHomeDir()
 		loginKC := filepath.Join(home, "Library", "Keychains", "login.keychain-db")
+		// Idempotency (matches the linux branch above). `security add-trusted-cert`
+		// re-prompts for the login password on EVERY call — macOS asks to modify
+		// trust settings each time — so the per-boot ensureMITMCAInSystemTrust
+		// refresh pops a password dialog on EVERY launch even when the CA is already
+		// installed and trusted. Skip when our CA (matched by SHA-1) is already in
+		// the login keychain: we always add it with -r trustRoot, so present ⇒
+		// trusted. find-certificate is read-only and never prompts.
+		if fp := mitm.CertThumbprint(srcBytes); fp != "" {
+			if found, err := exec.Command("security", "find-certificate", "-a", "-Z", loginKC).CombinedOutput(); err == nil {
+				if strings.Contains(strings.ToUpper(string(found)), fp) {
+					return nil // already installed + trusted — no re-prompt
+				}
+			}
+		}
 		out, err := exec.Command("security", "add-trusted-cert", "-r", "trustRoot",
 			"-k", loginKC, src).CombinedOutput()
 		if err != nil {
@@ -2056,7 +2071,6 @@ func downloadMihomoFromCOS(target string) error {
 	}
 	return os.Rename(tmp, target)
 }
-
 
 func mustAtoi(s string) int {
 	var n int
