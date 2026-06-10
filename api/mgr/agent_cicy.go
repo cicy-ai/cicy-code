@@ -517,6 +517,258 @@ func migrateCicyStateDir(workspace string) {
 	}
 }
 
+// ── snapshot-backed persistence ────────────────────────────────────────────
+// The conversation store IS the gateway audit pair: current.json (the last wire
+// request = full history snapshot, display ids annotated) + reply.json (the
+// answer's content items). conversation.json is no longer written; restoring a
+// session = current.json body messages (display ids stripped) + the reply items
+// not yet folded into a request (display ids stripped, tool_id → protocol id).
+
+// cicyStripWireAnnotations returns msg without the display-level "id" the
+// snapshot annotator added, and without cache_control markers (re-added fresh at
+// request build; letting restored ones accumulate would eventually exceed
+// Anthropic's 4-breakpoint cap). Block-level tool_use ids are protocol data and
+// are preserved.
+func cicyStripWireAnnotations(msg map[string]interface{}) M {
+	out := M{}
+	for k, v := range msg {
+		if k == "id" {
+			continue
+		}
+		out[k] = v
+	}
+	if blocks, ok := out["content"].([]interface{}); ok {
+		clean := make([]interface{}, len(blocks))
+		for i, b := range blocks {
+			if bm, ok := b.(map[string]interface{}); ok {
+				if _, has := bm["cache_control"]; has {
+					cp := map[string]interface{}{}
+					for k, v := range bm {
+						if k != "cache_control" {
+							cp[k] = v
+						}
+					}
+					clean[i] = cp
+					continue
+				}
+			}
+			clean[i] = b
+		}
+		out["content"] = clean
+	}
+	return out
+}
+
+// cicyMessagesFromCurrentBody rebuilds Anthropic-format session messages from a
+// current.json body. The body shape depends on the agent's provider protocol:
+// an anthropic provider stores the request natively (top-level system, block
+// content), while an openai provider stores the BRIDGED Chat Completions shape
+// (system inside messages[0], assistant as string + tool_calls, tool_result as
+// role:"tool") — transformMessagesRequestToChatCompletions runs before the
+// audit snapshot. Both must restore.
+func cicyMessagesFromCurrentBody(body map[string]interface{}) []M {
+	msgs := aiGatewaySlice(body["messages"])
+	if len(msgs) == 0 {
+		return nil
+	}
+	chatShape := false
+	if _, hasSystem := body["system"]; !hasSystem {
+		for _, raw := range msgs {
+			m := aiGatewayMap(raw)
+			switch aiGatewayString(m["role"]) {
+			case "system", "tool":
+				chatShape = true
+			}
+			if _, ok := m["tool_calls"]; ok {
+				chatShape = true
+			}
+			if _, ok := m["reasoning_content"]; ok {
+				chatShape = true
+			}
+		}
+	}
+	if chatShape {
+		return cicyMessagesFromChatShape(msgs)
+	}
+	out := make([]M, 0, len(msgs))
+	for _, raw := range msgs {
+		m := aiGatewayMap(raw)
+		if len(m) == 0 {
+			continue
+		}
+		out = append(out, cicyStripWireAnnotations(m))
+	}
+	return out
+}
+
+// cicyMessagesFromChatShape converts Chat Completions messages back into the
+// Anthropic shape the cicy session speaks: system dropped (rebuilt from config
+// each turn), assistant reasoning_content → thinking block (the bridge's "."
+// validator placeholder excluded), tool_calls → tool_use blocks, consecutive
+// role:"tool" results merged into one user message of tool_result blocks.
+func cicyMessagesFromChatShape(msgs []interface{}) []M {
+	out := make([]M, 0, len(msgs))
+	var pendingResults []interface{}
+	flush := func() {
+		if len(pendingResults) > 0 {
+			out = append(out, M{"role": "user", "content": pendingResults})
+			pendingResults = nil
+		}
+	}
+	for _, raw := range msgs {
+		m := aiGatewayMap(raw)
+		switch aiGatewayString(m["role"]) {
+		case "system":
+			continue
+		case "tool":
+			pendingResults = append(pendingResults, map[string]interface{}{
+				"type":        "tool_result",
+				"tool_use_id": aiGatewayString(m["tool_call_id"]),
+				"content":     aiGatewayString(m["content"]),
+			})
+		case "user":
+			flush()
+			out = append(out, M{"role": "user", "content": m["content"]})
+		case "assistant":
+			flush()
+			var blocks []interface{}
+			if rc := strings.TrimSpace(aiGatewayString(m["reasoning_content"])); rc != "" && rc != "." {
+				blocks = append(blocks, map[string]interface{}{"type": "thinking", "thinking": rc, "signature": ""})
+			}
+			switch c := m["content"].(type) {
+			case string:
+				if strings.TrimSpace(c) != "" {
+					blocks = append(blocks, map[string]interface{}{"type": "text", "text": c})
+				}
+			case []interface{}:
+				for _, p := range c {
+					pm := aiGatewayMap(p)
+					if aiGatewayString(pm["type"]) == "text" {
+						blocks = append(blocks, map[string]interface{}{"type": "text", "text": aiGatewayString(pm["text"])})
+					}
+				}
+			}
+			for _, tc := range aiGatewaySlice(m["tool_calls"]) {
+				tcm := aiGatewayMap(tc)
+				fn := aiGatewayMap(tcm["function"])
+				var input interface{} = map[string]interface{}{}
+				if args := aiGatewayString(fn["arguments"]); args != "" {
+					var parsed interface{}
+					if json.Unmarshal([]byte(args), &parsed) == nil {
+						input = parsed
+					}
+				}
+				blocks = append(blocks, map[string]interface{}{
+					"type": "tool_use", "id": aiGatewayString(tcm["id"]),
+					"name": aiGatewayString(fn["name"]), "input": input,
+				})
+			}
+			if len(blocks) > 0 {
+				out = append(out, M{"role": "assistant", "content": blocks})
+			}
+		}
+	}
+	flush()
+	return out
+}
+
+// cicyAssistantFromReplyItems rebuilds the final assistant message from the
+// reply items NOT yet folded into current.json. reply.Items accumulates across
+// every round of a turn, but current.json (the LAST round's request) already
+// carries the earlier rounds verbatim — so only the suffix after the last
+// tool_use item whose tool_id already appears in the current messages is new.
+// Display ids are dropped; tool_id is restored as the protocol tool_use id.
+// Thinking items are intentionally NOT restored (snapshots don't carry the
+// Anthropic signature; a completed turn's thinking may be omitted on passback).
+func cicyAssistantFromReplyItems(items []map[string]interface{}, currentMsgs []M) (M, bool) {
+	seen := map[string]bool{}
+	for _, m := range currentMsgs {
+		cicyForEachBlock(m, func(bm map[string]interface{}, typ string) {
+			if typ == "tool_use" {
+				if id := aiGatewayString(bm["id"]); id != "" {
+					seen[id] = true
+				}
+			}
+		})
+	}
+	start := 0
+	for i := len(items) - 1; i >= 0; i-- {
+		if aiGatewayString(items[i]["type"]) != "tool_use" {
+			continue
+		}
+		if tid := aiGatewayString(items[i]["tool_id"]); tid != "" && seen[tid] {
+			start = i + 1
+			break
+		}
+	}
+	var blocks []interface{}
+	for _, it := range items[start:] {
+		switch aiGatewayString(it["type"]) {
+		case "text":
+			if t := aiGatewayString(it["text"]); strings.TrimSpace(t) != "" {
+				blocks = append(blocks, map[string]interface{}{"type": "text", "text": t})
+			}
+		case "tool_use":
+			blocks = append(blocks, map[string]interface{}{
+				"type": "tool_use", "id": aiGatewayString(it["tool_id"]),
+				"name": aiGatewayString(it["name"]), "input": it["input"],
+			})
+		}
+	}
+	if len(blocks) == 0 {
+		return nil, false
+	}
+	return M{"role": "assistant", "content": blocks}, true
+}
+
+// cicyRestoreSessionMessages rebuilds the session history from the snapshot
+// pair. The reply is folded in only when it demonstrably answers THIS
+// current.json: same conversation, completed, and the request didn't already
+// end on an assistant message (an attached outcome marker).
+func cicyRestoreSessionMessages(shortID, convID string) []M {
+	current := agentInspectorLoadCurrent(shortID)
+	if current.ConversationID != "" && convID != "" && current.ConversationID != convID {
+		return nil // snapshot belongs to another conversation (post-/clear leftovers)
+	}
+	msgs := cicyMessagesFromCurrentBody(aiGatewayMap(current.Body))
+	if len(msgs) == 0 {
+		return nil
+	}
+	lastRole := aiGatewayString(msgs[len(msgs)-1]["role"])
+	reply := agentInspectorLoadReply(shortID)
+	if lastRole != "assistant" && reply.Status == "completed" && len(reply.Items) > 0 &&
+		(reply.ConversationID == "" || current.ConversationID == "" || reply.ConversationID == current.ConversationID) {
+		if last, ok := cicyAssistantFromReplyItems(reply.Items, msgs); ok {
+			msgs = append(msgs, last)
+		}
+	}
+	return cicyBalanceToolCalls(msgs)
+}
+
+// cicySeedCurrentSnapshot writes a synthetic current.json holding the given
+// messages, so the snapshot store stays the single source of truth even when
+// history changes OUTSIDE a gateway request (one-time conversation.json
+// migration; /compact's summary reset). The annotator numbers the messages.
+func cicySeedCurrentSnapshot(shortID, convID string, msgs []M) {
+	if len(msgs) == 0 {
+		return
+	}
+	body := make([]interface{}, len(msgs))
+	for i, m := range msgs {
+		body[i] = map[string]interface{}(m)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_ = aiGatewayWriteCurrentSnapshot(shortID, aiGatewayCurrentSnapshot{
+		AgentID:        shortID,
+		ConversationID: convID,
+		Body:           map[string]interface{}{"messages": body},
+		Timestamp:      now,
+		Status:         "completed",
+		StartedAt:      now,
+		UpdatedAt:      now,
+	})
+}
+
 func getCicySession(shortID, workspace string) *cicySession {
 	cicySessionsMu.Lock()
 	defer cicySessionsMu.Unlock()
@@ -525,7 +777,11 @@ func getCicySession(shortID, workspace string) *cicySession {
 	}
 	migrateCicyStateDir(workspace)
 	s := &cicySession{}
-	// Fall back to the legacy path if migration couldn't move it (e.g. perms).
+	s.convID = cicyLoadOrCreateConvID(workspace)
+	// One-time migration: a pre-refactor conversation.json (current dir or the
+	// legacy .cicy/dispatcher one) is the fuller record — load it, seed the
+	// snapshot store from it, and park the file as .bak so every later boot
+	// restores from current.json + reply.json.
 	histPath := cicyHistoryPath(workspace)
 	if _, err := os.Stat(histPath); err != nil {
 		if legacy := filepath.Join(cicyLegacyConvDir(workspace), "conversation.json"); legacy != histPath {
@@ -536,11 +792,15 @@ func getCicySession(shortID, workspace string) *cicySession {
 	}
 	if raw, err := os.ReadFile(histPath); err == nil {
 		var msgs []M
-		if json.Unmarshal(raw, &msgs) == nil {
+		if json.Unmarshal(raw, &msgs) == nil && len(msgs) > 0 {
 			s.messages = msgs
+			cicySeedCurrentSnapshot(shortID, s.convID, s.messages)
 		}
+		_ = os.Rename(histPath, histPath+".bak")
 	}
-	s.convID = cicyLoadOrCreateConvID(workspace)
+	if len(s.messages) == 0 {
+		s.messages = cicyRestoreSessionMessages(shortID, s.convID)
+	}
 	cicySessions[shortID] = s
 	return s
 }
@@ -593,18 +853,12 @@ func cicySessionRegistered(shortID string) bool {
 	return ok
 }
 
-// persistLocked writes the FULL history to disk (no auto-truncation; only
-// explicit compact/clear shrink it). Caller holds s.mu.
+// persistLocked normalizes the in-memory history. Durability now lives in the
+// gateway snapshot pair (current.json = full request snapshot, reply.json =
+// answer items) — conversation.json is NO LONGER written; restore goes through
+// cicyRestoreSessionMessages. Caller holds s.mu.
 func (s *cicySession) persistLocked(workspace string) {
 	s.messages = cicyBalanceToolCalls(s.messages)
-	if err := os.MkdirAll(cicyConvDir(workspace), 0755); err != nil {
-		return
-	}
-	raw, err := json.Marshal(s.messages)
-	if err != nil {
-		return
-	}
-	_ = os.WriteFile(cicyHistoryPath(workspace), raw, 0644)
 }
 
 func cicyMessageHasToolResult(msg M) bool {
@@ -1193,7 +1447,16 @@ func cicyRequestMessages(history []M) []M {
 		return history
 	}
 	out := make([]M, len(history))
-	copy(out, history)
+	// API boundary: display-level ids (snapshot annotation) never go upstream —
+	// the id is a UI identifier, the protocol has none. Non-destructive copy so
+	// the in-memory history is left untouched.
+	for i, m := range history {
+		if _, has := m["id"]; has {
+			out[i] = cicyStripWireAnnotations(m)
+		} else {
+			out[i] = m
+		}
+	}
 	last := out[len(out)-1]
 	role, _ := last["role"].(string)
 	cc := M{"type": "ephemeral"}
@@ -1739,10 +2002,9 @@ func handleCicyRetry(w http.ResponseWriter, r *http.Request) {
 }
 
 // clearCicyPane resets a cicy agent's conversation to empty: the LIVE in-memory
-// session AND conversation.json AND the gateway snapshots (current/reply.json), all
-// in one shot. Doing it through the live session avoids the race where editing
-// conversation.json on disk gets clobbered by the running process persisting its
-// in-memory history back.
+// session AND the gateway snapshots (current/reply.json — the conversation
+// store), all in one shot. Doing it through the live session avoids racing a
+// turn that is concurrently rewriting the snapshots.
 func clearCicyPane(shortID, workspace string) {
 	session := getCicySession(shortID, workspace)
 	session.cancelInFlight() // stop any in-flight turn first
@@ -1753,7 +2015,7 @@ func clearCicyPane(shortID, workspace string) {
 	// disk for scrollback).
 	session.convID = cicyNewConversationID()
 	_ = os.WriteFile(cicyConvIDPath(workspace), []byte(session.convID+"\n"), 0644)
-	session.persistLocked(workspace) // conversation.json → empty
+	session.persistLocked(workspace)
 	session.mu.Unlock()
 	session.forceRelease() // drop busy/queued so it's truly fresh
 	// Empty the web's committed view too: remove the gateway snapshots (the audit
@@ -1765,14 +2027,21 @@ func clearCicyPane(shortID, workspace string) {
 // their symlink targets) so the web's committed view is cleared; the audit layer
 // recreates them on the next turn.
 func removeCicySnapshots(shortID string) {
+	removeCicySnapshotFile(shortID, "current.json")
+	removeCicyReplySnapshot(shortID)
+}
+
+func removeCicyReplySnapshot(shortID string) {
+	removeCicySnapshotFile(shortID, "reply.json")
+}
+
+func removeCicySnapshotFile(shortID, name string) {
 	dir := aiGatewayHistoryDir(shortID)
-	for _, name := range []string{"current.json", "reply.json"} {
-		canonical := filepath.Join(dir, name)
-		if target, err := os.Readlink(canonical); err == nil {
-			_ = os.Remove(filepath.Join(dir, target))
-		}
-		_ = os.Remove(canonical)
+	canonical := filepath.Join(dir, name)
+	if target, err := os.Readlink(canonical); err == nil {
+		_ = os.Remove(filepath.Join(dir, target))
 	}
+	_ = os.Remove(canonical)
 }
 
 // archiveCicyCurrentSnapshot copies the live current.json to a timestamped
@@ -1833,8 +2102,13 @@ func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspa
 	session.mu.Lock()
 	session.messages = []M{{"role": "user", "content": cicyCompactSummaryPrefix + strings.TrimSpace(summary)}}
 	session.persistLocked(workspace)
+	// The snapshot pair is the conversation store: replace current.json with the
+	// summary-only history NOW (not at the next turn) so a restart in between
+	// restores the compacted state, and drop the stale reply.json (it answered
+	// the pre-compact history; folding it into a restore would duplicate it).
+	cicySeedCurrentSnapshot(shortID, session.convID, session.messages)
 	session.mu.Unlock()
-	removeCicySnapshots(shortID) // next turn rebuilds current.json from the summary
+	removeCicyReplySnapshot(shortID)
 
 	sse.emit(M{"type": "system", "text": "✅ 已压缩。摘要:" + truncateForLog(strings.TrimSpace(summary), 200)})
 	sse.emit(M{"type": "done"})
