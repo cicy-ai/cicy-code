@@ -1709,8 +1709,14 @@ func clearCicyPane(shortID, workspace string) {
 	session.mu.Unlock()
 	session.forceRelease() // drop busy/queued so it's truly fresh
 	// Empty the web's committed view too: remove the gateway snapshots (the audit
-	// layer recreates them on the next turn). current.json/reply.json are symlinks
-	// into chat/<conv>/ — drop both the link and its target.
+	// layer recreates them on the next turn).
+	removeCicySnapshots(shortID)
+}
+
+// removeCicySnapshots drops the gateway live snapshots (current/reply.json and
+// their symlink targets) so the web's committed view is cleared; the audit layer
+// recreates them on the next turn.
+func removeCicySnapshots(shortID string) {
 	dir := aiGatewayHistoryDir(shortID)
 	for _, name := range []string{"current.json", "reply.json"} {
 		canonical := filepath.Join(dir, name)
@@ -1719,6 +1725,71 @@ func clearCicyPane(shortID, workspace string) {
 		}
 		_ = os.Remove(canonical)
 	}
+}
+
+// archiveCicyCurrentSnapshot copies the live current.json to a timestamped
+// sibling (current.<unix>.json) inside the conversation dir before /compact
+// rewrites history — so the pre-compaction wire snapshot survives for scrollback
+// / rollback. Best-effort: a missing snapshot is not an error.
+func archiveCicyCurrentSnapshot(shortID string) {
+	dir := aiGatewayHistoryDir(shortID)
+	canonical := filepath.Join(dir, "current.json")
+	data, err := os.ReadFile(canonical) // follows the symlink to the real file
+	if err != nil || len(data) == 0 {
+		return
+	}
+	target := canonical
+	if t, e := os.Readlink(canonical); e == nil {
+		target = filepath.Join(dir, t)
+	}
+	archive := strings.TrimSuffix(target, ".json") + fmt.Sprintf(".%d.json", time.Now().Unix())
+	_ = os.WriteFile(archive, data, 0644)
+}
+
+// compactCicyPane is the manual /compact: it summarizes the WHOLE conversation
+// into a single message and resets history to just that summary, keeping the same
+// conversation (unlike /clear, which wipes). Unlike the auto-path cicyCompactMessages
+// it is NOT gated on a length threshold and keeps NO verbatim tail — a full fold.
+// The pre-compaction current.json is archived first so nothing is lost.
+func compactCicyPane(ctx context.Context, session *cicySession, shortID, workspace string, sse *cicySSE) {
+	// Never compact mid-turn — it would corrupt the in-flight history.
+	if !session.tryOwnTurn() {
+		sse.emit(M{"type": "system", "text": "正在回复中,稍后再 /compact。"})
+		sse.emit(M{"type": "done"})
+		return
+	}
+	defer session.forceRelease()
+
+	session.mu.Lock()
+	msgs := append([]M(nil), session.messages...)
+	session.mu.Unlock()
+	if len(msgs) == 0 {
+		sse.emit(M{"type": "system", "text": "当前会话为空,无需压缩。"})
+		sse.emit(M{"type": "done"})
+		return
+	}
+
+	archiveCicyCurrentSnapshot(shortID) // best-effort rollback source
+
+	sse.emit(M{"type": "system", "text": "正在压缩会话…"})
+	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	summary, err := cicyCompactSummarize(cctx, shortID, cicyModel(shortID), cicyRenderHistoryForCompaction(msgs))
+	if err != nil || strings.TrimSpace(summary) == "" {
+		sse.emit(M{"type": "system", "text": "压缩失败(摘要为空),会话未改动。"})
+		sse.emit(M{"type": "done"})
+		return
+	}
+
+	// Reset to just the summary — same conversation, summary becomes message #1.
+	session.mu.Lock()
+	session.messages = []M{{"role": "user", "content": cicyCompactSummaryPrefix + strings.TrimSpace(summary)}}
+	session.persistLocked(workspace)
+	session.mu.Unlock()
+	removeCicySnapshots(shortID) // next turn rebuilds current.json from the summary
+
+	sse.emit(M{"type": "system", "text": "✅ 已压缩。摘要:" + truncateForLog(strings.TrimSpace(summary), 200)})
+	sse.emit(M{"type": "done"})
 }
 
 // handleCicyClear wipes a cicy agent's conversation (headless reset). body: {pane_id}.
@@ -1791,6 +1862,21 @@ func handleCicyChat(w http.ResponseWriter, r *http.Request) {
 	sse := &cicySSE{w: w, flusher: flusher}
 
 	session := getCicySession(shortID, workspace)
+
+	// Slash commands are intercepted here and NEVER sent to the LLM as a turn.
+	//   /clear   → wipe the conversation (in-memory + conversation.json + snapshots)
+	//   /compact → archive current.json, summarize the WHOLE history into one
+	//              message, reset history to just that summary (same conversation)
+	switch text {
+	case "/clear":
+		clearCicyPane(shortID, workspace)
+		sse.emit(M{"type": "system", "text": "✅ 会话已清空。"})
+		sse.emit(M{"type": "done"})
+		return
+	case "/compact":
+		compactCicyPane(r.Context(), session, shortID, workspace, sse)
+		return
+	}
 
 	// Input queueing: if a reply is already in flight for this session, queue
 	// this input instead of running a second turn. The in-flight handler drains
