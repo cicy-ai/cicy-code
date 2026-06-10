@@ -336,9 +336,7 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 		req.URL.Path = resolveOpenClawProviderTargetPath(targetBase.Path, suffix)
 		req.URL.RawPath = ""
 		req.Host = targetBase.Host
-		req.Header.Set("User-Agent", "cicy-ai-gateway/1.0")
-		req.Header.Set("X_AGENT_SHORT_ID", agentID)
-		req.Header.Set("X-Agent-Short-Id", agentID)
+		req.Header.Set("X_AGENT_ID", agentID)
 		// Drop the client's Accept-Encoding so Go's Transport negotiates gzip
 		// itself and transparently DECOMPRESSES the response. With the client
 		// header passed through verbatim, upstreams (api.anthropic.com) gzip
