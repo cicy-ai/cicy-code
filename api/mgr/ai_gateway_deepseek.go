@@ -68,10 +68,10 @@ func transformResponsesRequestToChatCompletions(body []byte) ([]byte, string, er
 			dst[k] = v
 		}
 	}
-	// Disable DeepSeek thinking mode — otherwise the API requires every
-	// assistant turn echoed back to include `reasoning_content`, which codex
-	// doesn't track.
-	dst["enable_thinking"] = false
+	// Disable DeepSeek thinking — codex doesn't track reasoning_content for the
+	// multi-turn echo the API would otherwise require. Use the CORRECT V4 param
+	// (thinking:{type:disabled}); the legacy enable_thinking is ignored by v4.
+	dst["thinking"] = map[string]interface{}{"type": "disabled"}
 
 	// input + instructions → messages
 	messages := make([]map[string]interface{}, 0)
@@ -1068,7 +1068,8 @@ func transformMessagesRequestToChatCompletions(body []byte) ([]byte, string, err
 			}
 		}
 	}
-	dst["enable_thinking"] = false
+	// Correct V4 thinking switch (legacy enable_thinking is ignored by v4).
+	dst["thinking"] = map[string]interface{}{"type": "disabled"}
 
 	messages := make([]map[string]interface{}, 0)
 

@@ -201,6 +201,43 @@ func loadPaneDefaultModel(agentID string) string {
 	return strings.TrimSpace(v.String)
 }
 
+// normalizeThinkingMode canonicalizes a thinking-control value to one of
+// "disabled" | "enabled" | "passthrough" (or "" when unrecognized/empty).
+func normalizeThinkingMode(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "disabled", "disable", "off", "false", "0", "no":
+		return "disabled"
+	case "enabled", "enable", "on", "true", "1", "yes":
+		return "enabled"
+	case "passthrough", "pass", "as-is", "asis", "raw":
+		return "passthrough"
+	}
+	return ""
+}
+
+// paneThinkingMode reads a per-pane thinking override from agent_config.config
+// JSON ({"thinking":"disabled|enabled|passthrough"}). Empty when unset/invalid.
+func paneThinkingMode(agentID string) string {
+	if store == nil {
+		return ""
+	}
+	var config sql.NullString
+	if err := store.QueryRow("SELECT config FROM agent_config WHERE pane_id=?", normPaneID(agentID)).Scan(&config); err != nil {
+		return ""
+	}
+	if !config.Valid || strings.TrimSpace(config.String) == "" {
+		return ""
+	}
+	cfg, err := parsePaneConfigJSON(config.String)
+	if err != nil {
+		return ""
+	}
+	if s, ok := cfg["thinking"].(string); ok {
+		return normalizeThinkingMode(s)
+	}
+	return ""
+}
+
 func resolveRuntimeAIConfigForAgent(providerProtocol string, agentID string) (runtimeAIConfig, *runtimeAIOverride, error) {
 	// First, try to get provider based on agent type from new providers config
 	agentType := loadPaneAgentType(agentID)

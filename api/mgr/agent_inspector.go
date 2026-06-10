@@ -3423,7 +3423,7 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 			payload = agentInspectorNormalizeAnthropicSystem(payload)
 		}
 		if thirdPartyUpstream {
-			payload = agentInspectorDisableThinking(payload, provider)
+			payload = agentInspectorApplyThinking(payload, provider, agentInspectorThinkingMode(agentID))
 			payload = agentInspectorNormalizeToolChoice(payload, provider)
 		}
 		body, err := json.Marshal(payload)
@@ -3443,7 +3443,7 @@ func agentInspectorRewriteRequestBody(provider string, agentID string, requestBo
 		payload = agentInspectorNormalizeAnthropicSystem(payload)
 	}
 	if thirdPartyUpstream {
-		payload = agentInspectorDisableThinking(payload, provider)
+		payload = agentInspectorApplyThinking(payload, provider, agentInspectorThinkingMode(agentID))
 		payload = agentInspectorNormalizeToolChoice(payload, provider)
 	}
 	body, err := json.Marshal(payload)
@@ -3572,62 +3572,52 @@ func agentInspectorOverrideModel(payload map[string]interface{}, agentID string)
 //
 // Top-level switches are flipped off regardless of protocol — harmless extra
 // fields on either side, and cicyAi/new-api front-ends often strip them anyway.
-func agentInspectorDisableThinking(payload map[string]interface{}, gatewayProtocol string) map[string]interface{} {
+// agentInspectorThinkingMode resolves the gateway's thinking policy for an agent —
+// controllable, NOT hardcoded. Precedence:
+//   per-pane agent_config.config {"thinking":"disabled|enabled|passthrough"}
+//   → global_settings.gateway_thinking
+//   → default "disabled".
+func agentInspectorThinkingMode(agentID string) string {
+	if m := paneThinkingMode(agentID); m != "" {
+		return m
+	}
+	if s, ok := globalSettingsBlob()["gateway_thinking"].(string); ok {
+		if v := normalizeThinkingMode(s); v != "" {
+			return v
+		}
+	}
+	return "disabled"
+}
+
+// agentInspectorApplyThinking sets the DeepSeek/third-party "thinking" switch using
+// the CORRECT param — `thinking:{"type":"disabled"|"enabled"}` per the DeepSeek V4
+// API (https://api-docs.deepseek.com/news/news260424) — NOT the legacy
+// `enable_thinking`, which v4 silently ignores (verified: v4-pro keeps emitting
+// reasoning_content under enable_thinking:false, but honors thinking:{type:disabled}).
+// It no longer injects synthetic thinking blocks into history: a real disable means
+// no reasoning_content to echo back, and pass-through respects the client. mode is
+// resolved by agentInspectorThinkingMode (config-driven).
+func agentInspectorApplyThinking(payload map[string]interface{}, gatewayProtocol, mode string) map[string]interface{} {
 	if payload == nil {
 		return payload
 	}
-	delete(payload, "thinking")
-	payload["enable_thinking"] = false
+	// Drop the legacy switch everywhere so a stale enable_thinking can't linger.
+	delete(payload, "enable_thinking")
 	if extra, ok := payload["extra_body"].(map[string]interface{}); ok {
-		extra["enable_thinking"] = false
+		delete(extra, "enable_thinking")
 	}
-	msgs, ok := payload["messages"].([]interface{})
-	if !ok {
-		return payload
-	}
-	for _, raw := range msgs {
-		m, ok := raw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		role, _ := m["role"].(string)
-		if role != "assistant" {
-			continue
-		}
-		switch strings.ToLower(strings.TrimSpace(gatewayProtocol)) {
-		case "anthropic":
-			content := m["content"]
-			if s, ok := content.(string); ok {
-				m["content"] = []interface{}{
-					map[string]interface{}{"type": "thinking", "thinking": "", "signature": ""},
-					map[string]interface{}{"type": "text", "text": s},
-				}
-				continue
-			}
-			arr, ok := content.([]interface{})
-			if !ok {
-				continue
-			}
-			hasThinking := false
-			for _, c := range arr {
-				if cm, ok := c.(map[string]interface{}); ok {
-					if t, _ := cm["type"].(string); t == "thinking" || t == "redacted_thinking" {
-						hasThinking = true
-						break
-					}
-				}
-			}
-			if !hasThinking {
-				m["content"] = append([]interface{}{
-					map[string]interface{}{"type": "thinking", "thinking": "", "signature": ""},
-				}, arr...)
-			}
-		default:
-			// OpenAI chat/completions: leave content untouched, only attach
-			// reasoning_content so DeepSeek's openai endpoint validation passes.
-			if _, exists := m["reasoning_content"]; !exists {
-				m["reasoning_content"] = ""
-			}
+	switch mode {
+	case "passthrough":
+		// Respect whatever the client sent — touch nothing.
+	case "enabled":
+		payload["thinking"] = map[string]interface{}{"type": "enabled"}
+	default: // "disabled"
+		if strings.ToLower(strings.TrimSpace(gatewayProtocol)) == "anthropic" {
+			// Anthropic-style endpoints disable thinking by omission, not a
+			// {"type":"disabled"} value.
+			delete(payload, "thinking")
+		} else {
+			payload["thinking"] = map[string]interface{}{"type": "disabled"}
 		}
 	}
 	return payload
