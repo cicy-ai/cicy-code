@@ -1391,6 +1391,47 @@ type aiGatewayReplySnapshotLite struct {
 	LastStopReason           string                   `json:"last_stop_reason,omitempty"` // see aiGatewayReplySnapshot.LastStopReason — keeps the tool-run gap "working"
 }
 
+// aiGatewaySweepStaleReplies finalizes reply.json snapshots left in a
+// non-terminal status (working/streaming/thinking/…) by a previous server
+// process. A stuck snapshot keeps `complete=false` on
+// /api/agents/current-reply forever — the TeamPanel shows that agent
+// permanently busy (yellow) and its live tail never settles. Called once at
+// boot, synchronously BEFORE the HTTP listener starts: only this daemon ever
+// writes reply.json, so at that point no live turn can be racing the sweep.
+func aiGatewaySweepStaleReplies() {
+	if store == nil {
+		return
+	}
+	rows, err := store.Query("SELECT pane_id FROM agent_config")
+	if err != nil {
+		return
+	}
+	var ids []string
+	for rows.Next() {
+		var paneID string
+		if rows.Scan(&paneID) == nil {
+			if id := shortPaneID(strings.TrimSpace(paneID)); id != "" {
+				ids = append(ids, id)
+			}
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		reply := agentInspectorLoadReply(id)
+		status := strings.ToLower(strings.TrimSpace(reply.Status))
+		if status == "" || status == "idle" || status == "done" || isAIGatewayReplyTerminal(status) {
+			continue
+		}
+		reply.Status = "failed"
+		reply.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		if err := aiGatewayWriteReplySnapshot(id, reply); err != nil {
+			log.Printf("[ai-gateway] stale reply sweep agent=%s write failed: %v", id, err)
+			continue
+		}
+		log.Printf("[ai-gateway] stale reply swept agent=%s turn=%s %s→failed", id, reply.TurnID, status)
+	}
+}
+
 func aiGatewayWriteReplySnapshot(agentID string, reply aiGatewayReplySnapshot) error {
 	aiGatewayStoreLiveReplySnapshot(agentID, reply)
 	lite := aiGatewayReplySnapshotLite{

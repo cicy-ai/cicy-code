@@ -42,7 +42,7 @@ var (
 	apiPort       string // resolved API port (portFlag > PORT env > 8008); set before startMITM so MITM ports derive from it
 )
 
-const version = "2.2.15"
+const version = "2.2.16"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
