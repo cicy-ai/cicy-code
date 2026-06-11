@@ -194,5 +194,20 @@
   "artifactSendAgent": "Send to Agent",
   "artifactSendAgentSending": "Sending…",
   "artifactSendAgentDone": "Sent ✓",
-  "artifactSendAgentPrompt": "My client id: {{clientId}}, my webContentsId: {{webContentsId}}. Connect to me with the artifact skill: first run `artifact snapshot` to read and test the current page (a DOM snapshot — do NOT screenshot, it burns tokens). Once you can connect and read the page elements, continue."
+  "artifactSendAgentPrompt": "My client id: {{clientId}}, my webContentsId: {{webContentsId}}. Connect to me with the artifact skill: first run `artifact snapshot` to read and test the current page (a DOM snapshot — do NOT screenshot, it burns tokens). Once you can connect and read the page elements, continue.",
+  "settingsTitle": "Settings",
+  "settingsClose": "Close",
+  "settingsNavLanguage": "Language",
+  "settingsNavIM": "IM Notifications",
+  "settingsNavRouting": "Agent Routing",
+  "settingsNavProviders": "LLM Providers",
+  "settingsLanguageHint": "Choose the interface language — applies immediately.",
+  "settingsRoutingHint": "Assign a default provider and model per agent type on the left. Manage providers under “LLM Providers”.",
+  "membershipVersion": "Version",
+  "settingsNavGeneral": "General",
+  "settingsPublicUrlTitle": "Public URL",
+  "settingsPublicUrlHint": "This machine's externally reachable address (tunnel domain or LAN IP). Once set, a “scan to open on mobile” QR appears in the corner; leave empty to hide it.",
+  "settingsSave": "Save",
+  "settingsSaving": "Saving…",
+  "settingsSaved": "Saved"
 }

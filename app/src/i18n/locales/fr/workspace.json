@@ -193,5 +193,20 @@
   "artifactSendAgent": "Envoyer à l'agent",
   "artifactSendAgentSending": "Envoi…",
   "artifactSendAgentDone": "Envoyé ✓",
-  "artifactSendAgentPrompt": "Mon client id : {{clientId}}, mon webContentsId : {{webContentsId}}. Connecte-toi via le skill artifact : lance d'abord `artifact snapshot` pour lire et tester la page actuelle (snapshot DOM — ne PAS faire de capture, ça consomme des tokens). Une fois connecté et les éléments lus, continue."
+  "artifactSendAgentPrompt": "Mon client id : {{clientId}}, mon webContentsId : {{webContentsId}}. Connecte-toi via le skill artifact : lance d'abord `artifact snapshot` pour lire et tester la page actuelle (snapshot DOM — ne PAS faire de capture, ça consomme des tokens). Une fois connecté et les éléments lus, continue.",
+  "settingsTitle": "Paramètres",
+  "settingsClose": "Fermer",
+  "settingsNavLanguage": "Langue",
+  "settingsNavIM": "Notifications IM",
+  "settingsNavRouting": "Routage des agents",
+  "settingsNavProviders": "Fournisseurs LLM",
+  "settingsLanguageHint": "Choisissez la langue de l'interface — appliquée immédiatement.",
+  "settingsRoutingHint": "Attribuez un fournisseur et un modèle par défaut à chaque type d'agent à gauche. Gérez les fournisseurs dans « Fournisseurs LLM ».",
+  "membershipVersion": "Version",
+  "settingsNavGeneral": "Général",
+  "settingsPublicUrlTitle": "URL publique",
+  "settingsPublicUrlHint": "Adresse externe joignable de cette machine (domaine de tunnel ou IP du réseau local). Une fois définie, un QR « ouvrir sur mobile » apparaît dans le coin ; laisser vide pour le masquer.",
+  "settingsSave": "Enregistrer",
+  "settingsSaving": "Enregistrement…",
+  "settingsSaved": "Enregistré"
 }

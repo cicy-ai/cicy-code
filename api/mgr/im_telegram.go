@@ -506,7 +506,6 @@ func imClampMessage(text string) string {
 	return text
 }
 
-
 // tgBuildAttachment 通过 file_id 解析下载 URL 并预下载字节，构成 botAttachment。
 // 不暴露含 bot token 的 URL —— 字节直接塞进 att.Bytes，URL 留空。
 func tgBuildAttachment(token, kind, fileID, filename string, size int64, fallbackName string) (botAttachment, error) {
@@ -771,14 +770,6 @@ func telegramAgentDetailKeyboard(paneID string, fromPage int, lang string) (stri
 			{"text": tgT(lang, "btnSwitch"), "callback_data": fmt.Sprintf("ag_bind:%s:%d", paneID, fromPage)},
 		})
 	}
-	if baseURL := strings.TrimSpace(os.Getenv("CICY_PUBLIC_URL")); baseURL != "" {
-		apiToken := loadAPIToken()
-		l := tgLang(lang)
-		cliURL := fmt.Sprintf("%s/ttyd/%s/?token=%s&lang=%s", strings.TrimRight(baseURL, "/"), paneID, apiToken, l)
-		rows = append(rows, []map[string]string{
-			{"text": tgT(lang, "btnCLI"), "url": cliURL},
-		})
-	}
 	rows = append(rows, []map[string]string{
 		{"text": tgT(lang, "btnRestart"), "callback_data": fmt.Sprintf("ag_restart:%s:%d", paneID, fromPage)},
 	})
@@ -989,10 +980,7 @@ func telegramBindAgent(token, chatID string, msgID int64, paneID string, fromPag
 
 func telegramOpenCLI(token, chatID string, msgID int64, paneID string, fromPage int, lang string) {
 	apiToken := loadAPIToken()
-	baseURL := strings.TrimSpace(os.Getenv("CICY_PUBLIC_URL"))
-	if baseURL == "" {
-		baseURL = fmt.Sprintf("http://127.0.0.1:%s", os.Getenv("PORT"))
-	}
+	baseURL := fmt.Sprintf("http://127.0.0.1:%s", os.Getenv("PORT"))
 	cliURL := fmt.Sprintf("%s/ttyd/%s/?token=%s&lang=%s", strings.TrimRight(baseURL, "/"), paneID, apiToken, tgLang(lang))
 
 	text := fmt.Sprintf("🖥 *%s CLI*", paneID)

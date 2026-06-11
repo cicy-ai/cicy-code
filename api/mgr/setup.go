@@ -905,6 +905,7 @@ func checkEnv() {
 	ensureEmployeeTemplates()
 
 	ensureDefaultProviders()
+	applyGatewayEnvToDefaultProviders()
 	setupAIConfigs()
 
 	var count int

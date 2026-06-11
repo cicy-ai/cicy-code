@@ -36,11 +36,11 @@ var (
 	hotMode       bool
 	cdnMode       bool
 	containerMode bool
-	helperMode    bool   // --helper=1 → ships a single headless cicy 团队助手 on w-1001
+	helperMode    bool // --helper=1 → ships a single headless cicy 团队助手 on w-1001
 	desktopCmd    *exec.Cmd
 )
 
-const version = "2.2.12"
+const version = "2.2.13"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -177,10 +177,7 @@ Options:
 	if containerMode {
 		publicMode = true
 	}
-	// Any managed runtime with master envs should self-register.
 	checkEnv()
-	startContainerRegisterLoop()
-	startCOSActiveVersionHeartbeat()
 
 	go startWatcher()
 	go startTmuxHealth()
@@ -410,7 +407,6 @@ Options:
 	// Runtime aliases
 	http.HandleFunc("/api/runtime/instances", wa(handleRuntimeInstances))
 	http.HandleFunc("/api/runtime/instances/register", wa(handleRuntimeInstanceRegister))
-	http.HandleFunc("/api/runtime/instances/", wa(handleRuntimeInstanceSessions))
 	http.HandleFunc("/api/runtime/sessions/", wa(handleRuntimeSessionEvents))
 	http.HandleFunc("/api/runtime/tasks", wa(handleRuntimeTasks))
 	http.HandleFunc("/api/runtime/tasks/", wa(handleRuntimeTaskByID))
@@ -455,9 +451,9 @@ Options:
 	http.HandleFunc("/api/openclaw/gateway", wa(handleOpenClawGatewayInfo))
 	http.HandleFunc("/api/openclaw/provider/", handleOpenClawProviderProxy)
 	http.HandleFunc("/api/ai-gateway/", handleAIGatewayProxy)
-	http.HandleFunc("/api/cicy/chat", handleCicyChat)         // loopback-only, like the AI gateway
-	http.HandleFunc("/api/dispatcher/chat", handleCicyChat)   // legacy alias (kept for in-flight REPLs)
-	http.HandleFunc("/api/cicy/history", handleCicyHistory)   // loopback-only, read conversation.json (replaces tmux capture)
+	http.HandleFunc("/api/cicy/chat", handleCicyChat)       // loopback-only, like the AI gateway
+	http.HandleFunc("/api/dispatcher/chat", handleCicyChat) // legacy alias (kept for in-flight REPLs)
+	http.HandleFunc("/api/cicy/history", handleCicyHistory) // loopback-only, read conversation.json (replaces tmux capture)
 	http.HandleFunc("/mitm/", handleMitmproxyAuth)
 	http.HandleFunc("/mitm", handleMitmproxyAuth)
 	http.HandleFunc("/openclaw/", handleOpenClawAuth)
@@ -546,15 +542,10 @@ Options:
 	log.Printf("cicy-code starting on %s:%s", bind, port)
 	token := getFirstToken()
 	openHost := bind
-	openURL := ""
-	if publicMode && os.Getenv("CICY_PUBLIC_URL") != "" {
-		openURL = os.Getenv("CICY_PUBLIC_URL")
-	} else {
-		if openHost == "0.0.0.0" {
-			openHost = "127.0.0.1"
-		}
-		openURL = fmt.Sprintf("http://%s:%s/?token=%s", openHost, port, token)
+	if openHost == "0.0.0.0" {
+		openHost = "127.0.0.1"
 	}
+	openURL := fmt.Sprintf("http://%s:%s/?token=%s", openHost, port, token)
 	log.Printf("")
 	log.Printf("============================================================")
 	log.Printf("")
@@ -666,17 +657,13 @@ func ensureGlobalAPIToken(globalPath string, preferredToken ...string) (string, 
 }
 
 func isContainerRuntime() bool {
-	kind := strings.ToLower(strings.TrimSpace(os.Getenv("CICY_RUNTIME_KIND")))
-	return kind == "container"
-}
-
-func shouldSelfRegisterRuntime() bool {
-	if isContainerRuntime() {
+	// Intrinsic container detection — the CICY_RUNTIME_KIND env var was retired
+	// with the team-bootstrap/master model. Docker images carry /.dockerenv (same
+	// signal used in mitm/consent.go); serverless platforms set K_SERVICE.
+	if _, err := os.Stat("/.dockerenv"); err == nil {
 		return true
 	}
-	return strings.TrimSpace(os.Getenv("CICY_MASTER_URL")) != "" &&
-		strings.TrimSpace(os.Getenv("CICY_MASTER_TOKEN")) != "" &&
-		strings.TrimSpace(os.Getenv("CICY_PUBLIC_URL")) != ""
+	return strings.TrimSpace(os.Getenv("K_SERVICE")) != ""
 }
 
 func globalCORS(next http.Handler) http.Handler {

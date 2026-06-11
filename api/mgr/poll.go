@@ -1,17 +1,12 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
-
-const runtimeMembershipSnapshotTTL = 15 * time.Second
 
 type runtimeMembershipSnapshot struct {
 	Kind              string
@@ -26,14 +21,6 @@ type runtimeMembershipSnapshot struct {
 	IsPro             *bool
 	SyncedAt          string
 }
-
-type runtimeMembershipSnapshotCacheState struct {
-	mu        sync.Mutex
-	value     runtimeMembershipSnapshot
-	fetchedAt time.Time
-}
-
-var runtimeMembershipSnapshotCache runtimeMembershipSnapshotCacheState
 
 func resolveMembershipURL(path string, envKey string) string {
 	value := strings.TrimSpace(os.Getenv(envKey))
@@ -140,143 +127,11 @@ func runtimeMembershipSnapshotFromEnv() runtimeMembershipSnapshot {
 	return snapshot
 }
 
-func mergeRuntimeMembershipSnapshots(primary runtimeMembershipSnapshot, fallback runtimeMembershipSnapshot) runtimeMembershipSnapshot {
-	merged := fallback
-	if strings.TrimSpace(primary.Kind) != "" {
-		merged.Kind = strings.TrimSpace(primary.Kind)
-	}
-	if strings.TrimSpace(primary.Tag) != "" {
-		merged.Tag = strings.TrimSpace(primary.Tag)
-	}
-	if strings.TrimSpace(primary.ExpiresAt) != "" {
-		merged.ExpiresAt = strings.TrimSpace(primary.ExpiresAt)
-	}
-	if strings.TrimSpace(primary.RenewURL) != "" {
-		merged.RenewURL = strings.TrimSpace(primary.RenewURL)
-	}
-	if strings.TrimSpace(primary.UpgradeURL) != "" {
-		merged.UpgradeURL = strings.TrimSpace(primary.UpgradeURL)
-	}
-	if primary.ShowRenew != nil {
-		merged.ShowRenew = primary.ShowRenew
-	}
-	if primary.ShowUpgrade != nil {
-		merged.ShowUpgrade = primary.ShowUpgrade
-	}
-	if strings.TrimSpace(primary.TrialExpiresAt) != "" {
-		merged.TrialExpiresAt = strings.TrimSpace(primary.TrialExpiresAt)
-	}
-	if strings.TrimSpace(primary.TrialExpiresEpoch) != "" {
-		merged.TrialExpiresEpoch = strings.TrimSpace(primary.TrialExpiresEpoch)
-	}
-	if primary.IsPro != nil {
-		merged.IsPro = primary.IsPro
-	}
-	if strings.TrimSpace(primary.SyncedAt) != "" {
-		merged.SyncedAt = strings.TrimSpace(primary.SyncedAt)
-	}
-	return merged
-}
-
-func fetchRuntimeMembershipSnapshotFromTeamcenter() (runtimeMembershipSnapshot, error) {
-	masterURL := strings.TrimRight(strings.TrimSpace(os.Getenv("CICY_MASTER_URL")), "/")
-	masterToken := strings.TrimSpace(os.Getenv("CICY_MASTER_TOKEN"))
-	if masterURL == "" || masterToken == "" {
-		return runtimeMembershipSnapshot{}, nil
-	}
-	bootstrapPath := strings.TrimSpace(os.Getenv("CICY_TEAMCENTER_BOOTSTRAP_PATH"))
-	if bootstrapPath == "" {
-		bootstrapPath = "/api/runtime/team/bootstrap"
-	}
-	if !strings.HasPrefix(bootstrapPath, "/") {
-		bootstrapPath = "/" + bootstrapPath
-	}
-
-	body, err := json.Marshal(map[string]any{
-		"instance_key":   strings.TrimSpace(os.Getenv("CICY_INSTANCE_KEY")),
-		"instance_label": strings.TrimSpace(os.Getenv("CICY_INSTANCE_LABEL")),
-		"runtime_kind":   firstNonEmpty(strings.TrimSpace(os.Getenv("CICY_RUNTIME_KIND")), "container"),
-		"api_token":      strings.TrimSpace(os.Getenv("CICY_API_TOKEN")),
-	})
-	if err != nil {
-		return runtimeMembershipSnapshot{}, err
-	}
-
-	req, err := http.NewRequest(http.MethodPost, masterURL+bootstrapPath, bytes.NewReader(body))
-	if err != nil {
-		return runtimeMembershipSnapshot{}, err
-	}
-	req.Header.Set("Authorization", "Bearer "+masterToken)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return runtimeMembershipSnapshot{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return runtimeMembershipSnapshot{}, nil
-	}
-
-	var payload struct {
-		Data struct {
-			MembershipKind      string `json:"membership_kind"`
-			MembershipTag       string `json:"membership_tag"`
-			MembershipExpiresAt string `json:"membership_expires_at"`
-			RenewURL            string `json:"renew_url"`
-			UpgradeURL          string `json:"upgrade_url"`
-			ShowRenew           *bool  `json:"show_renew"`
-			ShowUpgrade         *bool  `json:"show_upgrade"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return runtimeMembershipSnapshot{}, err
-	}
-
-	return runtimeMembershipSnapshot{
-		Kind:        strings.TrimSpace(payload.Data.MembershipKind),
-		Tag:         strings.TrimSpace(payload.Data.MembershipTag),
-		ExpiresAt:   strings.TrimSpace(payload.Data.MembershipExpiresAt),
-		RenewURL:    strings.TrimSpace(payload.Data.RenewURL),
-		UpgradeURL:  strings.TrimSpace(payload.Data.UpgradeURL),
-		ShowRenew:   payload.Data.ShowRenew,
-		ShowUpgrade: payload.Data.ShowUpgrade,
-		SyncedAt:    time.Now().UTC().Format(time.RFC3339),
-	}, nil
-}
-
 func loadRuntimeMembershipSnapshot() runtimeMembershipSnapshot {
-	envSnapshot := runtimeMembershipSnapshotFromEnv()
-	masterURL := strings.TrimSpace(os.Getenv("CICY_MASTER_URL"))
-	masterToken := strings.TrimSpace(os.Getenv("CICY_MASTER_TOKEN"))
-	if masterURL == "" || masterToken == "" {
-		return envSnapshot
-	}
-
-	now := time.Now().UTC()
-	runtimeMembershipSnapshotCache.mu.Lock()
-	cached := runtimeMembershipSnapshotCache.value
-	cachedAt := runtimeMembershipSnapshotCache.fetchedAt
-	runtimeMembershipSnapshotCache.mu.Unlock()
-
-	if !cachedAt.IsZero() && now.Sub(cachedAt) < runtimeMembershipSnapshotTTL {
-		return mergeRuntimeMembershipSnapshots(cached, envSnapshot)
-	}
-
-	fresh, err := fetchRuntimeMembershipSnapshotFromTeamcenter()
-	if err == nil {
-		runtimeMembershipSnapshotCache.mu.Lock()
-		runtimeMembershipSnapshotCache.value = fresh
-		runtimeMembershipSnapshotCache.fetchedAt = now
-		runtimeMembershipSnapshotCache.mu.Unlock()
-		return mergeRuntimeMembershipSnapshots(fresh, envSnapshot)
-	}
-	if !cachedAt.IsZero() {
-		return mergeRuntimeMembershipSnapshots(cached, envSnapshot)
-	}
-	return envSnapshot
+	// Membership is sourced from the runtime env vars only. The legacy
+	// teamcenter/master fetch (CICY_MASTER_URL/CICY_MASTER_TOKEN) was retired
+	// along with the team-bootstrap model.
+	return runtimeMembershipSnapshotFromEnv()
 }
 
 func handlePoll(w http.ResponseWriter, r *http.Request) {

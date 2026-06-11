@@ -17,6 +17,13 @@ const cmBlendTheme = EditorView.theme({
     borderRight: '1px solid rgba(255,255,255,0.04)',
     color: 'rgba(228,228,231,0.35)',
   },
+  // Line numbers must read clearly DIMMER than the code (which is #e4e4e7), so
+  // they don't blend in. Target the number elements directly (more specific than
+  // .cm-gutters) + !important so we always win over theme-one-dark's own
+  // .cm-lineNumbers color regardless of StyleModule source order.
+  '.cm-lineNumbers .cm-gutterElement': { color: 'rgba(228,228,231,0.26) !important' },
+  // The current line's number stays a bit brighter for orientation.
+  '.cm-activeLineGutter .cm-gutterElement, .cm-activeLineGutter': { color: 'rgba(228,228,231,0.55) !important' },
   '.cm-activeLineGutter, .cm-activeLine': {
     backgroundColor: 'rgba(255,255,255,0.03)',
   },
@@ -54,16 +61,33 @@ const LARGE_TEXT_THRESHOLD = 1024 * 1024;
 const IMAGE_INLINE_MAX = 2 * 1024 * 1024;
 const HARD_READ_MAX = 5 * 1024 * 1024;
 
-type EditorMode = 'text' | 'text_large' | 'image' | 'binary' | 'too_large' | 'error';
+type EditorMode = 'text' | 'text_large' | 'image' | 'audio' | 'video' | 'binary' | 'too_large' | 'error';
 
-function classifyForRender(stat: FsStatResponse): EditorMode {
+// Extension-driven media detection — more reliable than the backend mime (a
+// stripped container may report text/plain for .svg or octet-stream for .mp4).
+const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif', 'svg']);
+const AUDIO_EXT = new Set(['mp3', 'wav', 'ogg', 'oga', 'm4a', 'aac', 'flac', 'opus']);
+const VIDEO_EXT = new Set(['mp4', 'm4v', 'webm', 'mov', 'mkv', 'ogv']);
+
+function extOf(path: string): string {
+  const m = /\.([^./\\]+)$/.exec(path);
+  return m ? m[1].toLowerCase() : '';
+}
+
+function classifyForRender(stat: FsStatResponse, path: string): EditorMode {
+  const ext = extOf(path);
+  // Audio/video stream from the inline URL (no /api/fs/read body load), so they
+  // are NOT bound by the 5MB read cap — check them before too_large.
+  if (AUDIO_EXT.has(ext)) return 'audio';
+  if (VIDEO_EXT.has(ext)) return 'video';
   const mime = stat.mime || '';
   const isText =
     mime.startsWith('text/') ||
     /\b(json|javascript|xml|yaml|toml)\b/.test(mime) ||
     mime === '';
-  const isImage = mime.startsWith('image/');
+  const isImage = IMAGE_EXT.has(ext) || mime.startsWith('image/');
   if (stat.size > HARD_READ_MAX) return 'too_large';
+  // SVG is text-backed; it base64-loads fine and renders as an image below.
   if (isImage) return stat.size > IMAGE_INLINE_MAX ? 'binary' : 'image';
   if (isText) return stat.size > LARGE_TEXT_THRESHOLD ? 'text_large' : 'text';
   return 'binary';
@@ -314,9 +338,9 @@ export default function CodeEditor({
         mode: '',
         mime: cachedRead.mime,
       };
-      setBuf(bufferFromRead(cachedRead, classifyForRender(fakeStat)));
+      setBuf(bufferFromRead(cachedRead, classifyForRender(fakeStat, path)));
     } else if (cachedStat) {
-      const mode = classifyForRender(cachedStat);
+      const mode = classifyForRender(cachedStat, path);
       if (mode === 'text' || mode === 'image') {
         // Read in flight; show loading until body arrives.
         setBuf({ ...initialBuffer, loading: true, mode });
@@ -333,7 +357,7 @@ export default function CodeEditor({
       mergeFreshIntoBuffer(fresh, classifyForRender({
         name: fsBasename(path), path, is_dir: false,
         size: fresh.size, mtime: fresh.mtime, mode: '', mime: fresh.mime,
-      }));
+      }, path));
     });
 
     const fetchBody = (mode: EditorMode) => {
@@ -357,7 +381,7 @@ export default function CodeEditor({
       .stat(agentId, path, { root })
       .then((stat) => {
         fsCacheSet('stat', statKey, stat);
-        const mode = classifyForRender(stat);
+        const mode = classifyForRender(stat, path);
         if (mode === 'text' || mode === 'text_large' || mode === 'image') {
           if (mode === 'text_large') {
             // Show a placeholder header even before the (potentially slow)
@@ -487,7 +511,7 @@ export default function CodeEditor({
         name: fsBasename(path), path, is_dir: false,
         size: res.size, mtime: res.mtime, mode: '', mime: res.mime,
       };
-      setBuf(bufferFromRead(res, classifyForRender(synthStat)));
+      setBuf(bufferFromRead(res, classifyForRender(synthStat, path)));
       setConflict(null);
       setExternalChange(false);
     } catch (err) {
@@ -654,10 +678,54 @@ export default function CodeEditor({
         <div className="flex-1 overflow-auto flex items-center justify-center bg-zinc-900">
           <img
             data-id="code-editor-image-preview"
-            src={`data:${buf.mime};base64,${buf.base64}`}
+            /* SVG is text-backed; the backend mime may be text/xml, which a
+               data: URL won't render as an image — force image/svg+xml. */
+            src={`data:${/\.svg$/i.test(path) ? 'image/svg+xml' : (buf.mime || 'application/octet-stream')};base64,${buf.base64}`}
             alt={fsBasename(path)}
             className="max-w-full max-h-full"
           />
+        </div>
+        {menu && (
+          <EditorContextMenu
+            x={menu.x}
+            y={menu.y}
+            onSendToAgent={handleSendToAgent}
+            onDownload={handleDownload}
+            onClose={() => setMenu(null)}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // Audio / video preview — streamed from the inline URL (Range/seek supported),
+  // never base64-loaded, so size is unbounded.
+  if (buf.mode === 'audio' || buf.mode === 'video') {
+    const src = fsApi.inlineUrl(agentId, path, root);
+    return (
+      <div
+        data-id={active ? `code-editor-${buf.mode}` : 'code-editor-inactive'}
+        data-path={path}
+        onContextMenu={openMenu}
+        className={`flex flex-col h-full bg-[#0A0A0A] ${className || ''}`}
+      >
+        <div className="flex-1 overflow-auto flex flex-col items-center justify-center gap-3 bg-zinc-900 p-6">
+          {buf.mode === 'video' ? (
+            <video
+              data-id="code-editor-video-preview"
+              src={src}
+              controls
+              className="max-w-full max-h-full rounded"
+            />
+          ) : (
+            <audio
+              data-id="code-editor-audio-preview"
+              src={src}
+              controls
+              className="w-full max-w-lg"
+            />
+          )}
+          <div className="text-xs text-zinc-500 font-mono truncate max-w-md" title={path}>{fsBasename(path)}</div>
         </div>
         {menu && (
           <EditorContextMenu

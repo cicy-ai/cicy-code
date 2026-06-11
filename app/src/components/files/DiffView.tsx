@@ -13,7 +13,14 @@ import { languageForPath } from './language';
 // oneDark's same-specificity rules otherwise win the cascade.
 const cmBlendTheme = EditorView.theme({
   '&': { backgroundColor: 'transparent !important' },
-  '.cm-gutters': { backgroundColor: 'transparent !important' },
+  '.cm-gutters': {
+    backgroundColor: 'transparent !important',
+    color: 'rgba(228,228,231,0.35)',
+  },
+  // Dim line numbers so they read clearly below the diff content; target the
+  // number elements directly + !important to beat oneDark's own rule.
+  '.cm-lineNumbers .cm-gutterElement': { color: 'rgba(228,228,231,0.26) !important' },
+  '.cm-activeLineGutter .cm-gutterElement, .cm-activeLineGutter': { color: 'rgba(228,228,231,0.55) !important' },
 });
 
 interface Props {

@@ -15,6 +15,12 @@ import (
 //go:embed ui
 var uiFS embed.FS
 
+// BuiltAppCDNPrefix is baked in at build time via ldflags (-X
+// main.BuiltAppCDNPrefix=…) and consumed below for --cdn asset rewriting. It
+// formerly lived in cos_active_versions.go, which was removed with the
+// Tencent-COS active-version heartbeat (COS→R2 migration).
+var BuiltAppCDNPrefix string
+
 func appDistDir() string {
 	if d := strings.TrimSpace(os.Getenv("CICY_PREVIEW_DIST")); d != "" {
 		return d
@@ -52,9 +58,10 @@ func nonAppPath(p string) bool {
 }
 
 // serveUI picks where the web UI comes from:
-//   --hot      -> reverse-proxy to the vite dev server on :8022 (HMR)
-//   --preview  -> the on-disk app/dist (refresh with `npm run build`)
-//   (neither)  -> the binary-embedded assets (the production build baked in by build.sh)
+//
+//	--hot      -> reverse-proxy to the vite dev server on :8022 (HMR)
+//	--preview  -> the on-disk app/dist (refresh with `npm run build`)
+//	(neither)  -> the binary-embedded assets (the production build baked in by build.sh)
 func serveUI() http.Handler {
 	sub, _ := fs.Sub(uiFS, "ui")
 	embedded := http.FileServer(http.FS(sub))

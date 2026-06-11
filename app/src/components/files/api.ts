@@ -351,6 +351,12 @@ export const fsApi = {
     return `${base}/api/fs/download?${qs.toString()}`;
   },
 
+  /** Build an INLINE preview URL (?inline=1) — same stream as download but the
+   *  backend serves the real media Content-Type with inline disposition, so it
+   *  can back an <img>/<audio>/<video> src (Range/seek supported). */
+  inlineUrl: (agentId: string, path: string, root?: string): string =>
+    fsApi.downloadUrl(agentId, path, root) + '&inline=1',
+
   /** Trigger a browser save dialog for the given path (optionally rooted). */
   download: (agentId: string, path: string, root?: string): void => {
     const a = document.createElement('a');

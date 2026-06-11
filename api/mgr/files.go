@@ -772,12 +772,72 @@ func handleFsDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", strconv.FormatInt(st.Size(), 10))
-	w.Header().Set("Content-Disposition",
-		fmt.Sprintf(`attachment; filename="%s"`, sanitizeFilename(filepath.Base(abs))))
 	w.Header().Set("X-File-Mtime", strconv.FormatInt(st.ModTime().Unix(), 10))
+	if r.URL.Query().Get("inline") == "1" {
+		// Inline preview (the editor's <img>/<audio>/<video>): serve the real
+		// media Content-Type so the element renders/streams, with inline (not
+		// attachment) disposition. Range/seek + Content-Length are owned by
+		// http.ServeContent. Explicit type map first — a stripped container may
+		// lack a system mime table; "" lets ServeContent sniff by extension.
+		if ct := inlinePreviewContentType(abs); ct != "" {
+			w.Header().Set("Content-Type", ct)
+		}
+		w.Header().Set("Content-Disposition",
+			fmt.Sprintf(`inline; filename="%s"`, sanitizeFilename(filepath.Base(abs))))
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition",
+			fmt.Sprintf(`attachment; filename="%s"`, sanitizeFilename(filepath.Base(abs))))
+	}
 	http.ServeContent(w, r, filepath.Base(abs), st.ModTime(), f)
+}
+
+// inlinePreviewContentType maps a file extension to the media Content-Type used
+// for the editor's inline preview (?inline=1). Empty when the extension isn't a
+// known previewable image/audio/video — the caller then lets ServeContent sniff.
+func inlinePreviewContentType(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".svg":
+		return "image/svg+xml"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".bmp":
+		return "image/bmp"
+	case ".ico":
+		return "image/x-icon"
+	case ".avif":
+		return "image/avif"
+	case ".mp4", ".m4v":
+		return "video/mp4"
+	case ".webm":
+		return "video/webm"
+	case ".mov":
+		return "video/quicktime"
+	case ".mkv":
+		return "video/x-matroska"
+	case ".ogv":
+		return "video/ogg"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".wav":
+		return "audio/wav"
+	case ".ogg", ".oga":
+		return "audio/ogg"
+	case ".m4a", ".aac":
+		return "audio/mp4"
+	case ".flac":
+		return "audio/flac"
+	case ".opus":
+		return "audio/opus"
+	default:
+		return ""
+	}
 }
 
 // sanitizeFilename strips characters that would break a Content-Disposition

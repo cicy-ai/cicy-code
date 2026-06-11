@@ -43,11 +43,12 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 			result["helper_model"] = ""
 		}
 		result["agents"] = effectiveAgentOptions()
-		// Mobile QR onboarding: if the operator set CICY_PUBLIC_URL (a
-		// reachable URL — tunneled domain or LAN IP), expose it so the UI
-		// can render a "scan to add to mobile" QR code in the top bar.
-		// Empty string when not configured; the UI hides the icon then.
-		result["public_url"] = strings.TrimSpace(os.Getenv("CICY_PUBLIC_URL"))
+		// Mobile QR onboarding: the reachable public URL (tunneled domain or LAN
+		// IP) is configured in ~/cicy-ai/global.json ("public_url") and edited via
+		// the Settings → General field. Present ⇒ exposed so the UI renders the
+		// "scan to add to mobile" QR; absent ⇒ "" and the UI hides the icon. No
+		// CICY_PUBLIC_URL env fallback — global.json is the single source.
+		result["public_url"] = configuredPublicURL()
 		J(w, result)
 	case "POST":
 		var req M
@@ -56,6 +57,27 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		delete(req, "lab_mode")
 		delete(req, "helper_mode")
 		delete(req, "agents")
+		// public_url is persisted to ~/cicy-ai/global.json (NOT the global_settings
+		// DB blob) so the launcher, runtime, and QR all read one source. Only act
+		// when the key is present; an empty string clears it.
+		if raw, ok := req["public_url"]; ok {
+			pu, _ := raw.(string)
+			pu = strings.TrimSpace(pu)
+			providersFileMu.Lock()
+			cfg := readGlobalJSONConfig()
+			if pu == "" {
+				delete(cfg, "public_url")
+			} else {
+				cfg["public_url"] = pu
+			}
+			werr := writeGlobalJSONConfig(cfg)
+			providersFileMu.Unlock()
+			if werr != nil {
+				httpErr(w, 500, "write global.json: "+werr.Error())
+				return
+			}
+			delete(req, "public_url") // don't duplicate into the DB blob
+		}
 		data, _ := json.Marshal(req)
 		store.Exec(store.Upsert("global_vars", "key_name", []string{"key_name", "value"}, []string{"value"}), "global_settings", string(data))
 		// If the user is configuring global settings with CJK content
@@ -64,6 +86,18 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		MaybeEnsureCJKFontsForBytes(data)
 		J(w, M{"success": true})
 	}
+}
+
+// configuredPublicURL returns the deployment's reachable public URL from
+// ~/cicy-ai/global.json ("public_url"), trimmed. Empty when unset — callers
+// treat absent as "no public URL configured" (the QR icon hides). This is the
+// single source for the in-app/QR public URL (CICY_PUBLIC_URL is no longer
+// consulted here).
+func configuredPublicURL() string {
+	if s, ok := readGlobalJSONConfig()["public_url"].(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
 }
 
 // globalSettingsBlob loads the persisted global_settings JSON object (the

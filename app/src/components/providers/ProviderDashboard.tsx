@@ -283,13 +283,20 @@ function ProviderPicker({
 
 /* ───────────────────────── component ───────────────────────── */
 
-export default function ProviderDashboard({ leftMount, rightMount }: {
+export default function ProviderDashboard({ leftMount, rightMount, tab: controlledTab, hideTabStrip }: {
   leftMount: HTMLElement | null;
   rightMount: HTMLElement | null;
+  // When the host (e.g. the unified Settings modal) drives which tab shows via
+  // its own nav, pass `tab` (controlled) + `hideTabStrip` to suppress the
+  // internal strip. Omitted ⇒ self-managed tabs (the legacy left-panel usage).
+  tab?: Tab;
+  hideTabStrip?: boolean;
 }) {
   const { t } = useTranslation('provider');
   const { confirm, node: dialogsNode } = useDialogs();
-  const [tab, setTab] = useState<Tab>('routing');
+  const [tabState, setTabState] = useState<Tab>('routing');
+  const tab = controlledTab ?? tabState;
+  const setTab = setTabState;
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<ProvidersResponse | null>(null);
 
@@ -490,7 +497,8 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
   /* ───────────── LEFT PANEL UI ───────────── */
   const leftPanelUI = (
     <div data-id="providers-left-root" className="h-full flex flex-col bg-[#0A0A0A] text-zinc-300">
-      {/* tab strip */}
+      {/* tab strip — suppressed when an external host (Settings modal) drives the tab */}
+      {!hideTabStrip && (
       <div data-id="providers-left-tabs" className="px-2 pt-2 pb-2 border-b border-white/[0.06] shrink-0">
         <div className="inline-flex rounded-lg bg-white/[0.03] p-0.5 w-full">
           {([['routing', t('tabRouting')], ['providers', t('tabProviders')]] as const).map(([id, label]) => (
@@ -502,6 +510,7 @@ export default function ProviderDashboard({ leftMount, rightMount }: {
           ))}
         </div>
       </div>
+      )}
 
       {/* body */}
       <div className="flex-1 min-h-0 overflow-hidden">

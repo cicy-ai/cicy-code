@@ -12,7 +12,7 @@ import { isCicyLiteAgent } from '../lib/agentType';
 import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
-  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle,
+  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route,
   Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -43,9 +43,8 @@ import TokenDialog from './layout/TokenDialog';
 import useDesktopEvents from './layout/useDesktopEvents';
 import type { AgentCanvasItem } from './layout/AgentStack';
 import AgentStack from './layout/AgentStack';
-import ProviderDashboard from './providers/ProviderDashboard';
-import IMDashboard from './im/IMDashboard';
 import WeChatBindModal from './im/WeChatBindModal';
+import SettingsModal, { type SettingsSection } from './settings/SettingsModal';
 import { useDialogs } from './ui/Modal';
 import config, { defaultWorkerWorkspace, getHostHome, syncHostHomeFromPath, toTildePath, urls } from '../config';
 import apiService from '../services/api';
@@ -351,7 +350,7 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 }
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
-type LeftPanelView = 'team' | 'skills' | 'agents' | 'providers' | 'im' | 'todo' | null;
+type LeftPanelView = 'team' | 'skills' | 'agents' | 'todo' | null;
 type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'artifact' | RequestViewTab;
 type CliContentMode = 'fixed';
 
@@ -380,6 +379,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setSystemResources,
     globalVar,
     setGlobalVar,
+    updateGlobalVar,
     isDev,
     setActiveAgentId,
     setAgentDetail: setSharedAgentDetail,
@@ -398,7 +398,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const v = cache.get(leftPanelKey(paneId), null);
     // 刷新后恢复上次打开的左栏面板;'todo' 若技能未装会被下方 effect 关掉。
     // 旧缓存里的 'office' 已不在白名单 → 自动落到 null(办公室视图 2026-06-05 下线)。
-    const ok: LeftPanelView[] = ['team', 'skills', 'providers', 'im', 'agents', 'todo'];
+    const ok: LeftPanelView[] = ['team', 'skills', 'agents', 'todo'];
     return ok.includes(v) ? v : null;
   });
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -437,10 +437,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const [apiOpen, setApiOpen] = useState(false);
   const [proxyManagerOpen, setProxyManagerOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [providersLeftMount, setProvidersLeftMount] = useState<HTMLDivElement | null>(null);
-  const [providersRightMount, setProvidersRightMount] = useState<HTMLDivElement | null>(null);
-  const [imLeftMount, setImLeftMount] = useState<HTMLDivElement | null>(null);
-  const [imRightMount, setImRightMount] = useState<HTMLDivElement | null>(null);
+  // Unified Settings modal (Language / IM / Agent Routing / LLM Providers).
+  // Replaces the old activity-bar left-panels for providers & im.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('language');
+  const openSettings = useCallback((s: SettingsSection) => {
+    setSettingsSection(s);
+    setSettingsOpen(true);
+    setMembershipMenuOpen(false);
+    setLangMenuOpen(false);
+  }, []);
 
   const [status, setStatus] = useState('idle');
   const [contextUsage, setContextUsage] = useState<number | null>(null);
@@ -573,6 +579,32 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const closeLeftPanel = useCallback(() => {
     setLeftPanelView(null);
   }, []);
+  const leftPanelRef = useRef<HTMLDivElement>(null);
+  const midPanelRef = useRef<HTMLDivElement>(null);
+
+  // Click anywhere in the workspace (outside the menu panel itself) hides the
+  // left menu panel. Scoped to the mid-panel content + activity-bar exclusion so
+  // it never closes on the panel's own portald dialogs (create-agent / confirm,
+  // which mount to document.body). Terminal clicks land in an iframe that steals
+  // window focus → the blur handler catches that case.
+  useEffect(() => {
+    if (!leftActive) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (leftPanelRef.current?.contains(t) || activityBarRef.current?.contains(t)) return;
+      if (midPanelRef.current?.contains(t)) setLeftPanelView(null);
+    };
+    const onWinBlur = () => {
+      const ae = document.activeElement;
+      if (ae && ae.tagName === 'IFRAME' && midPanelRef.current?.contains(ae)) setLeftPanelView(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('blur', onWinBlur);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('blur', onWinBlur);
+    };
+  }, [leftActive]);
 
   useEffect(() => {
     cache.set(leftPanelKey(paneId), leftActive);
@@ -754,7 +786,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleCapture = async () => { if (isApiOnlyRuntime) return; try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
   const handleToggleMouse = async () => { if (isApiOnlyRuntime) return; const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
 
-  const toggleLeft = (p: 'team' | 'skills' | 'providers' | 'im' | 'todo') => {
+  const toggleLeft = (p: 'team' | 'skills' | 'todo') => {
     setLeftPanelView(prev => prev === p ? null : p);
   };
 
@@ -1758,8 +1790,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           {!globalVar?.helper_mode && (
             <>
               <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
-              <SideBtn dataId="btn-providers" active={leftActive === 'providers'} icon={<Boxes className="w-5 h-5" />} title={t('sidebarProviders')} onClick={() => toggleLeft('providers')} />
-              <SideBtn dataId="btn-im" active={leftActive === 'im'} icon={<MessageCircle className="w-5 h-5" />} title={t('sidebarIM', 'IM')} onClick={() => toggleLeft('im')} />
+              {/* Providers & IM moved into the unified Settings modal (bottom-left gear). */}
             </>
           )}
         </div>
@@ -1785,6 +1816,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <div data-id="main-layout" className="flex h-full min-w-0">
             {leftActive && !globalVar?.helper_mode ? (
               <div
+                ref={leftPanelRef}
                 data-testid="left-panel"
                 data-id="left-panel"
                 className="h-full w-[360px] min-w-[360px] max-w-[360px] shrink-0"
@@ -1797,12 +1829,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     </> : leftActive === 'skills' ? <>
                       <Brain className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-skills" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelSkills')}</span>
-                    </> : leftActive === 'providers' ? <>
-                      <Boxes className="w-3.5 h-3.5 text-zinc-600" />
-                      <span data-id="left-panel-title-providers" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('sidebarProviders')}</span>
-                    </> : leftActive === 'im' ? <>
-                      <MessageCircle className="w-3.5 h-3.5 text-zinc-600" />
-                      <span data-id="left-panel-title-im" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('sidebarIM', 'IM')}</span>
                     </> : <>
                       <Users className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-team" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelTeam')}</span>
@@ -1845,30 +1871,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       <div data-id="left-panel-skills-view" className="absolute inset-0">
                         <SkillMarketplacePanel paneId={activeCliPaneId || paneId} />
                       </div>
-                    ) : leftActive === 'providers' ? (
-                      <div data-id="left-panel-providers-view" className="absolute inset-0" ref={setProvidersLeftMount} />
-                    ) : leftActive === 'im' ? (
-                      <div data-id="left-panel-im-view" className="absolute inset-0" ref={setImLeftMount} />
                     ) : null}
                   </div>
                 </div>
               </div>
             ) : null}
-            <div data-testid="mid-panel" data-id="mid-panel" className="min-w-0 flex-1 relative">
+            <div ref={midPanelRef} data-testid="mid-panel" data-id="mid-panel" className="min-w-0 flex-1 relative">
               {rightContent}
-              {leftActive === 'providers' && (
-                <div data-id="providers-right-mount" ref={setProvidersRightMount} />
-              )}
-              {leftActive === 'im' && (
-                <div data-id="im-right-mount" ref={setImRightMount} />
-              )}
             </div>
-            {leftActive === 'providers' && (
-              <ProviderDashboard leftMount={providersLeftMount} rightMount={providersRightMount} />
-            )}
-            {leftActive === 'im' && (
-              <IMDashboard leftMount={imLeftMount} rightMount={imRightMount} />
-            )}
             {cliFixedContent}
           </div>
         </main>
@@ -1913,21 +1923,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           className="fixed z-[220] min-w-[220px] rounded-xl border border-white/10 bg-[#101014]/95 p-2 shadow-[0_18px_48px_rgba(0,0,0,0.45)] backdrop-blur"
           style={{ left: membershipPopoverPos.x, bottom: 12 }}
         >
-          <div data-id="membership-dropdown-meta" className={cn('mb-2 rounded-lg border px-3 py-2', membershipTone(membershipCard.level))}>
-            {(() => {
-              const fallbackKey = MEMBERSHIP_TAG_FALLBACK_KEY[membershipCard.level];
-              const displayTag = membershipCard.tag
-                || (membershipCard.level === 'pro_vm' ? 'PRO' : (fallbackKey ? t(fallbackKey) : ''));
-              return displayTag ? (
-                <span data-id="membership-dropdown-tag" className={cn('inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase', membershipTagTone(membershipCard.level))}>
-                  {displayTag}
-                </span>
-              ) : null;
-            })()}
-            {membershipCard.expiresAt ? (
-              <div data-id="membership-dropdown-expires-at" className="mt-1 text-[11px] font-mono text-zinc-100">{t('membershipExpiresAt', { date: formatDateTime(Date.parse(membershipCard.expiresAt)) })}</div>
-            ) : null}
-          </div>
           {membershipCard.renewUrl ? (
             <button
               type="button"
@@ -1942,21 +1937,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <ExternalLink className="h-3.5 w-3.5" />
             </button>
           ) : null}
-          {membershipCard.upgradeUrl ? (
-            <button
-              type="button"
-              data-id="membership-upgrade-btn"
-              onClick={() => {
-                setMembershipMenuOpen(false);
-                window.open(membershipCard.upgradeUrl, '_blank', 'noopener,noreferrer');
-              }}
-              className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-amber-100 transition-colors hover:bg-amber-300/10"
-            >
-              <span data-id="membership-upgrade-btn-label">{t('membershipUpgrade')}</span>
-              <ExternalLink className="h-3.5 w-3.5" />
-            </button>
-          ) : null}
-          {!globalVar?.helper_mode && (
+          {/* 升级按钮已移除（产品决定） */}
+          {false && !globalVar?.helper_mode && (
             <button
               type="button"
               data-id="top-bar-audit-dashboard"
@@ -1983,7 +1965,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             <span data-id="top-bar-github-issues-label">GitHub Issues</span>
             <Github className="h-3.5 w-3.5" />
           </button>
-          {isDev ? (
+          {false && isDev ? (
           <button
             type="button"
             data-id="membership-devtools"
@@ -2049,6 +2031,37 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               </div>
             ) : null}
           </div>
+          {/* Settings entries → open the unified fullscreen Settings modal at the
+              matching section. Language stays as its own submenu above. */}
+          <div data-id="membership-settings-group" className="mt-1 border-t border-white/[0.06] pt-1">
+            <button
+              type="button"
+              data-id="membership-settings-im"
+              onClick={() => openSettings('im')}
+              className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+            >
+              <span data-id="membership-settings-im-label">{t('settingsNavIM', { defaultValue: 'IM 通知' })}</span>
+              <MessageCircle className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              data-id="membership-settings-routing"
+              onClick={() => openSettings('routing')}
+              className="mt-0.5 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+            >
+              <span data-id="membership-settings-routing-label">{t('settingsNavRouting', { defaultValue: 'Agent 路由' })}</span>
+              <Route className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              data-id="membership-settings-providers"
+              onClick={() => openSettings('providers')}
+              className="mt-0.5 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+            >
+              <span data-id="membership-settings-providers-label">{t('settingsNavProviders', { defaultValue: 'LLM 供应商' })}</span>
+              <Boxes className="h-3.5 w-3.5" />
+            </button>
+          </div>
           <div data-id="membership-version" className="mt-1 flex items-center justify-between rounded-lg px-3 py-2 text-[11px] text-zinc-500">
             <span data-id="membership-version-label">Version</span>
             <span data-id="membership-version-value" id="version" className="font-mono text-zinc-300">{config.version}</span>
@@ -2062,6 +2075,20 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {toast && <div data-id="workspace-toast" className={`fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 text-sm rounded-lg shadow-lg ${toast.variant === 'success' ? 'bg-green-600 text-white' : 'bg-zinc-800 text-white'}`}>{toast.message}</div>}
       {dialogsNode}
       <WeChatBindModal />
+      <SettingsModal
+        open={settingsOpen}
+        section={settingsSection}
+        onSection={setSettingsSection}
+        onClose={() => setSettingsOpen(false)}
+        currentLang={currentLang}
+        langs={TRANSLATED_LNGS}
+        onChangeLang={(code) => { void i18nLive.changeLanguage(code); }}
+        flagEmoji={flagEmoji}
+        langName={languageDisplayName}
+        version={config.version}
+        publicUrl={String(globalVar?.public_url || '')}
+        onSavePublicUrl={async (url) => { await updateGlobalVar({ public_url: url }); }}
+      />
     </div>
     </SendingProvider>
   );

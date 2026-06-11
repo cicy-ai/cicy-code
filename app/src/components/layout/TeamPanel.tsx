@@ -774,7 +774,13 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
           >
             {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
-        ) : null}
+        ) : (
+          // No collapse chevron (leaf agent / no forks): keep the SAME footprint
+          // the button would occupy (-ml-1.5 -mr-2 h-5 w-5 + the row's gap-3) so
+          // the avatar lines up with cards that DO have a chevron. Without this
+          // spacer, chevron-less cards' avatars sit ~18px to the left.
+          <span aria-hidden data-id={`team-panel-worker-collapse-spacer-${wid}`} className="-ml-1.5 -mr-2 h-5 w-5 shrink-0 self-center" />
+        )}
         <AgentAvatar
           agentType={agentType}
           title={title}

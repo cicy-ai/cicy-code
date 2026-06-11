@@ -64,7 +64,7 @@ const defaultProvidersBlockJSON = `{
     "codex": "defaultOpenAi",
     "gemini": "defaultOpenAi",
     "opencode": "defaultOpenAi",
-    "stt": "cloudflare-ai"
+    "stt": "defaultOpenAi"
   },
   "items": [
     {
@@ -117,6 +117,62 @@ func ensureDefaultProviders() {
 		return
 	}
 	log.Printf("[setup] seeded default providers (CiCyAi gateway) into global.json")
+}
+
+// applyGatewayEnvToDefaultProviders forces the two platform-managed default
+// providers (defaultAnthropic / defaultOpenAi) to use the gateway endpoint and
+// key from the environment — CICY_AI_GATEWAY_LLM_ENDPOINT and
+// CICY_AI_GATEWAY_LLM_API_KEY. Containers/runtime set these so the gateway URL +
+// team key define the defaults (superseding the retired CICY_API_KEY path);
+// plain desktop installs leave them unset, so this is a no-op there and the
+// desktop/operator-managed keys stay authoritative.
+//
+// Runs on every boot (after ensureDefaultProviders), so a rotated key in the
+// container env is picked up on restart. Only the two managed keys' url/apiKey
+// are touched — operator-added providers and other fields are never clobbered.
+func applyGatewayEnvToDefaultProviders() {
+	endpoint := strings.TrimSpace(os.Getenv("CICY_AI_GATEWAY_LLM_ENDPOINT"))
+	apiKey := strings.TrimSpace(os.Getenv("CICY_AI_GATEWAY_LLM_API_KEY"))
+	if endpoint == "" && apiKey == "" {
+		return // nothing to inject — leave global.json untouched
+	}
+
+	providersFileMu.Lock()
+	defer providersFileMu.Unlock()
+
+	cfg := readGlobalJSONConfig()
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+	block := providersBlock(cfg)
+	items := providersItemsSlice(block)
+
+	managed := map[string]bool{"defaultAnthropic": true, "defaultOpenAi": true}
+	changed := false
+	for _, it := range items {
+		m := providerItemMap(it)
+		if m == nil || !managed[providerItemKey(it)] {
+			continue
+		}
+		if endpoint != "" && m["url"] != endpoint {
+			m["url"] = endpoint
+			changed = true
+		}
+		if apiKey != "" && m["apiKey"] != apiKey {
+			m["apiKey"] = apiKey
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	block["items"] = items
+	cfg["providers"] = block
+	if err := writeGlobalJSONConfig(cfg); err != nil {
+		log.Printf("[setup] gateway env apply write failed: %v", err)
+		return
+	}
+	log.Printf("[setup] applied gateway env to default providers (endpoint set=%v, apiKey set=%v)", endpoint != "", apiKey != "")
 }
 
 func providersBlock(cfg map[string]any) map[string]any {

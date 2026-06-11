@@ -104,12 +104,11 @@ func daemonPort() string {
 	return "8008"
 }
 
-// selfPublicURL is the node's externally-reachable origin — the public URL the
-// daemon was launched with (CICY_PUBLIC_URL, injected by dev.py).
+// selfPublicURL is the node's externally-reachable origin. The CICY_PUBLIC_URL
+// env var was retired; absent another source the share address is the local
+// origin. (Configure the reachable public URL via global.json "public_url" if
+// remote skill-registry sharing is needed.)
 func selfPublicURL() string {
-	if u := strings.TrimRight(os.Getenv("CICY_PUBLIC_URL"), "/"); u != "" {
-		return u
-	}
 	return "http://localhost:" + daemonPort()
 }
 

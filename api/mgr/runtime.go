@@ -2,13 +2,8 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
-	"fmt"
-	"log"
 	"net/http"
-	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -103,16 +98,6 @@ func handleRuntimeInstanceRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	instance, _ := findMachineByID(strconv.FormatInt(id, 10))
 	J(w, M{"success": true, "instance": instance})
-}
-
-func containerRuntimeCapabilities() map[string]interface{} {
-	return map[string]interface{}{
-		"runtime_kind":             "container",
-		"supports_tmux":            true,
-		"supports_ttyd":            true,
-		"supports_local_workspace": true,
-		"supports_remote_api":      true,
-	}
 }
 
 func normalizeReportedRegion(parts ...string) string {
@@ -229,147 +214,6 @@ func containerReportedRegionLabel() string {
 		containerReportedRegion = detectContainerReportedRegion()
 	})
 	return strings.TrimSpace(containerReportedRegion)
-}
-
-func containerRegisterPayload() M {
-	instanceKey := firstNonEmpty(strings.TrimSpace(os.Getenv("CICY_INSTANCE_KEY")), strings.TrimSpace(os.Getenv("K_SERVICE")), "container")
-	instanceLabel := firstNonEmpty(strings.TrimSpace(os.Getenv("CICY_INSTANCE_LABEL")), instanceKey)
-	runtimeKind := strings.ToLower(strings.TrimSpace(os.Getenv("CICY_RUNTIME_KIND")))
-	if runtimeKind == "" {
-		runtimeKind = "container"
-	}
-	publicURL := strings.TrimSpace(os.Getenv("CICY_PUBLIC_URL"))
-	apiToken := strings.TrimSpace(loadAPIToken())
-	lastSeenAt := time.Now().Format(time.RFC3339)
-	caps := containerRuntimeCapabilities()
-	endpointHost := ""
-	endpointPort := 443
-	if publicURL != "" {
-		if u, err := url.Parse(publicURL); err == nil {
-			endpointHost = u.Hostname()
-			if p := u.Port(); p != "" {
-				if n, err := strconv.Atoi(p); err == nil {
-					endpointPort = n
-				}
-			}
-		}
-	}
-	return M{
-		"instance_id":     instanceKey,
-		"instance_key":    instanceKey,
-		"instance_label":  instanceLabel,
-		"runtime_kind":    runtimeKind,
-		"reported_region": containerReportedRegionLabel(),
-		"endpoint":        publicURL,
-		"token":           apiToken,
-		"status":          "online",
-		"last_seen_at":    lastSeenAt,
-		"host":            endpointHost,
-		"port":            endpointPort,
-		"capabilities":    caps,
-	}
-}
-
-func registerContainerInstanceOnce() error {
-	masterURL := strings.TrimRight(strings.TrimSpace(os.Getenv("CICY_MASTER_URL")), "/")
-	masterToken := strings.TrimSpace(os.Getenv("CICY_MASTER_TOKEN"))
-	publicURL := strings.TrimSpace(os.Getenv("CICY_PUBLIC_URL"))
-	if masterURL == "" || masterToken == "" || publicURL == "" {
-		return nil
-	}
-	payload := containerRegisterPayload()
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequest("POST", masterURL+"/api/runtime/instances/register", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+masterToken)
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("register failed: %s", resp.Status)
-	}
-	return nil
-}
-
-func startContainerRegisterLoop() {
-	if !shouldSelfRegisterRuntime() {
-		return
-	}
-	masterURL := strings.TrimSpace(os.Getenv("CICY_MASTER_URL"))
-	masterToken := strings.TrimSpace(os.Getenv("CICY_MASTER_TOKEN"))
-	publicURL := strings.TrimSpace(os.Getenv("CICY_PUBLIC_URL"))
-	if masterURL == "" || masterToken == "" || publicURL == "" {
-		log.Printf("[container] self-register skipped: CICY_MASTER_URL/CICY_MASTER_TOKEN/CICY_PUBLIC_URL required")
-		return
-	}
-	if err := registerContainerInstanceOnce(); err != nil {
-		log.Printf("[container] initial register error: %v", err)
-	} else {
-		log.Printf("[container] registered runtime instance to master")
-	}
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			if err := registerContainerInstanceOnce(); err != nil {
-				log.Printf("[container] register heartbeat error: %v", err)
-			}
-		}
-	}()
-}
-
-func handleRuntimeInstanceSessions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		httpErr(w, 405, "method not allowed")
-		return
-	}
-	path := strings.TrimPrefix(r.URL.Path, "/api/runtime/instances/")
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 2 || parts[1] != "sessions" {
-		httpErr(w, 404, "not found")
-		return
-	}
-	instanceID := parts[0]
-	rows, err := store.Query(`SELECT pane_id, title, role, active, agent_type FROM agent_config WHERE machine_id=? ORDER BY updated_at DESC, id DESC`, instanceID)
-	if err != nil {
-		httpErr(w, 500, err.Error())
-		return
-	}
-	defer rows.Close()
-	var sessions []M
-	for rows.Next() {
-		var paneID, title, role, agentType sql.NullString
-		var active sql.NullInt64
-		rows.Scan(&paneID, &title, &role, &active, &agentType)
-		status := "offline"
-		if st := getPaneStatus(shortPaneID(paneID.String)); st != nil && st.Status != nil && *st.Status != "" {
-			status = *st.Status
-		} else if active.Int64 == 1 {
-			status = "idle"
-		}
-		sessions = append(sessions, M{
-			"session_id":          shortPaneID(paneID.String),
-			"instance_id":         instanceID,
-			"runtime_session_ref": paneID.String,
-			"title":               title.String,
-			"role":                role.String,
-			"status":              status,
-			"agent_type":          agentType.String,
-		})
-	}
-	if sessions == nil {
-		sessions = []M{}
-	}
-	J(w, M{"sessions": sessions})
 }
 
 func handleRuntimeSessionEvents(w http.ResponseWriter, r *http.Request) {

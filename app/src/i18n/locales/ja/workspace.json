@@ -193,5 +193,20 @@
   "artifactSendAgent": "エージェントに送信",
   "artifactSendAgentSending": "送信中…",
   "artifactSendAgentDone": "送信済み ✓",
-  "artifactSendAgentPrompt": "私の client id: {{clientId}}、webContentsId: {{webContentsId}}。artifact スキルで接続してください：まず `artifact snapshot` で現在のページを読み取りテストしてください（DOM スナップショット。スクリーンショットはトークンを消費するので不可）。接続・要素取得を確認してから続行してください。"
+  "artifactSendAgentPrompt": "私の client id: {{clientId}}、webContentsId: {{webContentsId}}。artifact スキルで接続してください：まず `artifact snapshot` で現在のページを読み取りテストしてください（DOM スナップショット。スクリーンショットはトークンを消費するので不可）。接続・要素取得を確認してから続行してください。",
+  "settingsTitle": "設定",
+  "settingsClose": "閉じる",
+  "settingsNavLanguage": "言語",
+  "settingsNavIM": "IM 通知",
+  "settingsNavRouting": "Agent ルーティング",
+  "settingsNavProviders": "LLM プロバイダ",
+  "settingsLanguageHint": "インターフェースの言語を選択 — すぐに反映されます。",
+  "settingsRoutingHint": "左側で各エージェントタイプの既定プロバイダとモデルを指定します。プロバイダは「LLM プロバイダ」で管理します。",
+  "membershipVersion": "バージョン",
+  "settingsNavGeneral": "一般",
+  "settingsPublicUrlTitle": "公開 URL",
+  "settingsPublicUrlHint": "このマシンの外部到達可能なアドレス(トンネルドメインまたは LAN IP)。設定すると隅に「モバイルで開く」QR が表示されます。空欄で非表示。",
+  "settingsSave": "保存",
+  "settingsSaving": "保存中…",
+  "settingsSaved": "保存しました"
 }

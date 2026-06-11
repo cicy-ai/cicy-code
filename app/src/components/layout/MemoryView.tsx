@@ -64,6 +64,10 @@ const cmBlendTheme = EditorView.theme({
     borderRight: '1px solid rgba(255,255,255,0.04)',
     color: 'rgba(228,228,231,0.35)',
   },
+  // Dim line numbers so they read clearly below the content (#e4e4e7); target
+  // the number elements directly + !important to beat oneDark's own rule.
+  '.cm-lineNumbers .cm-gutterElement': { color: 'rgba(228,228,231,0.26) !important' },
+  '.cm-activeLineGutter .cm-gutterElement, .cm-activeLineGutter': { color: 'rgba(228,228,231,0.55) !important' },
   '.cm-activeLineGutter, .cm-activeLine': { backgroundColor: 'rgba(255,255,255,0.03)' },
   '.cm-selectionBackground, ::selection': { backgroundColor: 'rgba(59,130,246,0.25) !important' },
   '.cm-cursor': { borderLeftColor: '#e4e4e7' },

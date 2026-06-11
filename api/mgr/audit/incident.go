@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -303,14 +302,11 @@ func renderIncidentEmail(e Event, ruleIDs []string, cfg IncidentResponseConfig, 
 	return subject, b.String()
 }
 
-// buildPublicURL composes a public-facing URL for outbound links. Tries
-// CICY_PUBLIC_URL env first; falls back to http://localhost:8008 (the
-// in-container default API port). Path is appended verbatim.
+// buildPublicURL composes a public-facing URL for outbound links. The
+// CICY_PUBLIC_URL env var was retired; links use the in-container default API
+// origin (http://localhost:8008). Path is appended verbatim.
 func buildPublicURL(path string) string {
-	base := strings.TrimRight(strings.TrimSpace(os.Getenv("CICY_PUBLIC_URL")), "/")
-	if base == "" {
-		base = "http://localhost:8008"
-	}
+	base := "http://localhost:8008"
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
