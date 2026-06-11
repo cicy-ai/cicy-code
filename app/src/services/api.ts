@@ -148,6 +148,10 @@ const api = {
   getAgentUsageBlock: (id: string, idx: number) => http.get(`/api/agents/usage-block/${encodeURIComponent(id)}`, { params: { idx } }),
   getAgentHistoryIDs: (id: string, params?: { conversation_id?: string }) => http.get(`/api/agents/history-ids/${encodeURIComponent(id)}`, { params }),
   getAgentCurrentReply: (id: string, params?: { conversation_id?: string }) => http.get(`/api/agents/current-reply/${encodeURIComponent(id)}`, { params }),
+  // Lite header metrics for many agents in ONE request — the dual-channel
+  // fallback when the chat WS push is down/stale, so the team panel never fans
+  // out N× /current-reply. Returns { success, metrics: { id: {status,model,…} } }.
+  getAgentCurrentReplyBatch: (ids: string[]) => http.get('/api/agents/current-reply-batch', { params: { ids: ids.join(',') } }),
   getAgentGreeting: (id: string) => http.get(`/api/agents/greeting/${encodeURIComponent(id)}`),
   getInstallStatus: (id: string) => http.get('/api/agents/install-status', { params: { agent_id: id } }),
   getAgentCurrentHistory: (id: string, params?: { limit?: number; before?: number; conversation_id?: string }) => http.get(`/api/agents/current-history/${encodeURIComponent(id)}`, { params }),

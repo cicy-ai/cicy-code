@@ -133,6 +133,7 @@ func (d *DB) Migrate() {
 			reply_in_chinese INTEGER DEFAULT 0,
 			use_official_auth INTEGER DEFAULT 0,
 			use_custom_gateway INTEGER DEFAULT 1,
+			use_mitm INTEGER DEFAULT 1,
 			machine_id INTEGER,
 			source_kind TEXT DEFAULT 'local',
 			source_ref TEXT DEFAULT ''
@@ -228,6 +229,11 @@ func (d *DB) Migrate() {
 	d.ensureColumn("agent_config", "reply_in_chinese", "INTEGER DEFAULT 0")
 	d.ensureColumn("agent_config", "use_official_auth", "INTEGER DEFAULT 0")
 	d.ensureColumn("agent_config", "use_custom_gateway", "INTEGER DEFAULT 1")
+	// Per-agent MITM audit toggle for the NON-gateway (official login) path.
+	// Default ON: a non-gateway agent's HTTPS routes through the local MITM
+	// (when running) so its turns are audited; the inspector exposes the switch
+	// only when use_custom_gateway is off (gateway traffic is audited natively).
+	d.ensureColumn("agent_config", "use_mitm", "INTEGER DEFAULT 1")
 	// One-time migration: inverted semantic — convert use_official_auth → use_custom_gateway.
 	// We force-set every row to the inverse of use_official_auth, but only once
 	// (gated by config_migrations row), so manual edits to use_custom_gateway later

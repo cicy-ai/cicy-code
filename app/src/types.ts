@@ -10,6 +10,7 @@ export interface EditPaneData {
   agent_type?: string;
   allow_all_actions?: boolean;
   use_custom_gateway?: boolean;
+  use_mitm?: boolean;
   use_proxy?: boolean;
   proxy?: {
     password?: string;

@@ -179,5 +179,7 @@
   "anRawUsage": "Usage brut du fournisseur",
   "anRawUsageHint": "Les chiffres de cache/entrée ci-dessus proviennent tels quels d ici, sans estimation",
   "anCostTitle": "Détail des coûts",
-  "anCostRate": "Tarif"
+  "anCostRate": "Tarif",
+  "useMitm": "Audit MITM",
+  "useMitmHint": "Route le trafic de connexion officielle via le proxy MITM local pour audit (enregistre requêtes/réponses). Désactivé, cet agent passe en direct via le proxy global sans audit ; effectif après redémarrage de l'agent."
 }

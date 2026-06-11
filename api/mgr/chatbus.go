@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -641,18 +640,13 @@ func pollAgentStatuses(paneID string, agents []M) M {
 			return
 		}
 		seen[short] = true
-		data, err := os.ReadFile(aiGatewayReplySnapshotPath(short))
-		if err != nil {
-			return
+		// Rich header metrics (status/model/context/tokens/cost), so a single WS
+		// poll_data push drives the whole team panel — no per-agent /current-reply
+		// polling. agentInspectorLiteMetrics returns nil when there's no usable
+		// reply snapshot (same skip-on-empty as the old {status,updated_at} read).
+		if m := agentInspectorLiteMetrics(short); m != nil {
+			statuses[short+":main.0"] = m
 		}
-		var snap struct {
-			Status    string `json:"status"`
-			UpdatedAt string `json:"updated_at"`
-		}
-		if json.Unmarshal(data, &snap) != nil || strings.TrimSpace(snap.Status) == "" {
-			return
-		}
-		statuses[short+":main.0"] = M{"status": snap.Status, "updated_at": snap.UpdatedAt}
 	}
 	add(paneID)
 	for _, a := range agents {

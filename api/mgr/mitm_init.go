@@ -42,8 +42,13 @@ var (
 // HTTP(S)_PROXY but reject SOCKS5, so we use the http:// proxy here. Also adds
 // the MITM CA. Returns nil unless MITM is running (disabled by default), so the
 // common boot path is unchanged.
-func mitmAgentProxyBootLines() []string {
-	if mitmServer == nil || mitmHTTPAddr == "" {
+//
+// useMitm is the per-agent agent_config.use_mitm switch (default ON; surfaced
+// in the inspector only for non-gateway agents). With it off, a non-gateway
+// agent boots with NO proxy override — its traffic follows the global mihomo
+// env from .cicy_tmux.conf and is not MITM-audited.
+func mitmAgentProxyBootLines(useMitm bool) []string {
+	if !useMitm || mitmServer == nil || mitmHTTPAddr == "" {
 		return nil
 	}
 	// Export the FULL set (upper+lower, incl. ALL_PROXY) so a non-gateway

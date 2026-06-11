@@ -880,6 +880,23 @@ export default function AgentInspector({
                         void saveModelSettings({ use_custom_gateway: true, runtime_ai: nextRuntimeAi, default_model: nextModel });
                       }}
                     />
+                    {/* 非网关(官方登录)路径才有 MITM 审计可关:网关流量本身就有审计,
+                        boot.sh 也只在 official 分支注入 MITM 代理 env。默认开(DB DEFAULT 1),
+                        undefined 视为 true。改完需重启 agent 让 boot.sh 重新生成。 */}
+                    {!settingsData?.use_custom_gateway && (
+                      <div data-id="agent-inspector-settings-model-use-mitm" className="border-t border-white/[0.06] pt-3">
+                        <InspectorToggle
+                          label={t('useMitm')}
+                          desc={t('useMitmHint')}
+                          checked={settingsData?.use_mitm !== false}
+                          onChange={(value) => {
+                            patchSettingsData({ use_mitm: value });
+                            onPanePatch?.(paneId, { use_mitm: value });
+                            void runPaneSaveSerially(paneId, () => apiService.updatePane(paneId, { use_mitm: value }));
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
                   )}
 

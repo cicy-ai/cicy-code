@@ -263,5 +263,7 @@
   "anRawUsage": "provider 原始 usage",
   "anRawUsageHint": "上面的缓存/输入数字均原样取自此处,未经估算",
   "anCostTitle": "成本构成",
-  "anCostRate": "单价"
+  "anCostRate": "单价",
+  "useMitm": "使用 MITM 审计",
+  "useMitmHint": "官方登录流量经本地 MITM 代理审计(记录请求/响应)。关闭后此 Agent 走全局代理直连,不再被审计;改动重启 Agent 后生效。"
 }

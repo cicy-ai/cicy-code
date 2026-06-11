@@ -179,5 +179,7 @@
   "anRawUsage": "provider 生 usage",
   "anRawUsageHint": "上のキャッシュ/入力の数値はここからそのまま取得、推定なし",
   "anCostTitle": "コスト構成",
-  "anCostRate": "単価"
+  "anCostRate": "単価",
+  "useMitm": "MITM 監査を使用",
+  "useMitmHint": "公式ログインのトラフィックをローカル MITM プロキシ経由で監査します(リクエスト/レスポンスを記録)。オフにするとこのエージェントはグローバルプロキシ経由で直接通信し、監査されません。エージェント再起動後に有効。"
 }

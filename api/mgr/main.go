@@ -40,7 +40,7 @@ var (
 	desktopCmd    *exec.Cmd
 )
 
-const version = "2.2.11"
+const version = "2.2.12"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -362,6 +362,7 @@ Options:
 	http.HandleFunc("/api/agents/current-history-tool/", wa(handleAgentCurrentHistoryToolDetailByPane))
 	http.HandleFunc("/api/agents/history-ids/", wa(handleAgentHistoryIDsByPane))
 	http.HandleFunc("/api/agents/current-reply/", wa(handleAgentCurrentReplyByPane))
+	http.HandleFunc("/api/agents/current-reply-batch", wa(handleAgentCurrentReplyBatch))
 	http.HandleFunc("/api/agents/history-turn/", wa(handleAgentHistoryTurnByPane))
 	http.HandleFunc("/api/agents/history-sync/", wa(handleAgentHistorySyncByPane))
 	http.HandleFunc("/api/agents/history-view/", wa(handleAgentHistoryViewByPane))

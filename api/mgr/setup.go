@@ -2099,7 +2099,8 @@ func ensureBuiltinAgents(selected []string) {
 	rows, err := store.Query(`
 		SELECT pane_id, ttyd_port, workspace, COALESCE(init_script,''), COALESCE(config,'{}'),
 		       COALESCE(agent_type,''), COALESCE(allow_all_actions,0),
-		       COALESCE(reply_in_chinese,0), COALESCE(use_custom_gateway,0)
+		       COALESCE(reply_in_chinese,0), COALESCE(use_custom_gateway,0),
+		       COALESCE(use_mitm,1)
 		FROM agent_config
 		WHERE COALESCE(agent_type,'') NOT IN ('cicy','dispatcher','secretary')
 		  AND pane_id IN (
@@ -2120,8 +2121,9 @@ func ensureBuiltinAgents(selected []string) {
 		var allowAllActions bool
 		var replyInChinese bool
 		var useCustomGateway bool
+		var useMitm bool
 		var port int
-		rows.Scan(&paneID, &port, &workspace, &initScript, &configJSON, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway)
+		rows.Scan(&paneID, &port, &workspace, &initScript, &configJSON, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm)
 		if paneID == "" || port == 0 {
 			continue
 		}
@@ -2135,14 +2137,14 @@ func ensureBuiltinAgents(selected []string) {
 			agentType = desired.AgentType
 		}
 
-		startAgentFromConfig(paneID, port, workspace, initScript, configJSON, agentType, allowAllActions, replyInChinese, useCustomGateway, token)
+		startAgentFromConfig(paneID, port, workspace, initScript, configJSON, agentType, allowAllActions, replyInChinese, useCustomGateway, useMitm, token)
 	}
 }
 
 // startAgentFromConfig brings up a single agent's tmux session, ttyd port,
 // and pane environment. Idempotent — skips work that's already done.
 func startAgentFromConfig(paneID string, port int, workspace, initScript, configJSON, agentType string,
-	allowAllActions, replyInChinese, useCustomGateway bool, token string) {
+	allowAllActions, replyInChinese, useCustomGateway, useMitm bool, token string) {
 	// Ensure tmux session
 	sess := strings.Split(paneID, ":")[0]
 	sessionCreated := false
@@ -2173,6 +2175,7 @@ func startAgentFromConfig(paneID string, port int, workspace, initScript, config
 			// agent's boot.sh into the non-gateway (official-login + MITM) path
 			// even though use_custom_gateway=true in the DB.
 			useCustomGateway: useCustomGateway,
+			useMitm:          useMitm,
 		})
 	}
 }
@@ -2185,17 +2188,17 @@ func ensureAgentRunningByPaneID(paneID string) error {
 		return fmt.Errorf("paneID required")
 	}
 	var workspace, initScript, configJSON, agentType string
-	var allowAllActions, replyInChinese, useCustomGateway bool
+	var allowAllActions, replyInChinese, useCustomGateway, useMitm bool
 	var port int
 	err := store.QueryRow(`
 		SELECT ttyd_port, COALESCE(workspace,''), COALESCE(init_script,''),
 		       COALESCE(config,'{}'), COALESCE(agent_type,''),
 		       COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0),
-		       COALESCE(use_custom_gateway,0)
+		       COALESCE(use_custom_gateway,0), COALESCE(use_mitm,1)
 		FROM agent_config
 		WHERE pane_id=? AND active=1
 	`, paneID).Scan(&port, &workspace, &initScript, &configJSON, &agentType,
-		&allowAllActions, &replyInChinese, &useCustomGateway)
+		&allowAllActions, &replyInChinese, &useCustomGateway, &useMitm)
 	if err != nil {
 		return fmt.Errorf("agent_config lookup for %s: %w", paneID, err)
 	}
@@ -2203,7 +2206,7 @@ func ensureAgentRunningByPaneID(paneID string) error {
 		return fmt.Errorf("agent %s has no ttyd_port", paneID)
 	}
 	startAgentFromConfig(paneID, port, workspace, initScript, configJSON, agentType,
-		allowAllActions, replyInChinese, useCustomGateway, getFirstToken())
+		allowAllActions, replyInChinese, useCustomGateway, useMitm, getFirstToken())
 	return nil
 }
 

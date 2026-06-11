@@ -32,13 +32,13 @@ import (
 )
 
 const (
-	auditPolicyPaneID     = "w-6001:main.0"
-	auditPolicyShortPane  = "w-6001"
-	auditPolicyPort       = 6001
-	auditPolicyAgentType  = "claude"
-	auditPolicyRole       = "audit-policy-admin"
-	auditPolicyTitle      = "SecOps Lead"
-	auditPolicySkillName  = "cicy-audit-policy"
+	auditPolicyPaneID    = "w-6001:main.0"
+	auditPolicyShortPane = "w-6001"
+	auditPolicyPort      = 6001
+	auditPolicyAgentType = "claude"
+	auditPolicyRole      = "audit-policy-admin"
+	auditPolicyTitle     = "SecOps Lead"
+	auditPolicySkillName = "cicy-audit-policy"
 )
 
 //go:embed embed/audit-policy-skill
@@ -178,16 +178,16 @@ func writeAuditPolicyGuidance() error {
 // idempotent.
 func ensureAuditPolicyPane() error {
 	var workspace, initScript, configJSON, agentType string
-	var allowAllActions, replyInChinese, useCustomGateway bool
+	var allowAllActions, replyInChinese, useCustomGateway, useMitm bool
 	var port int
 	err := store.QueryRow(`
 		SELECT ttyd_port, COALESCE(workspace,''), COALESCE(init_script,''),
 		       COALESCE(config,'{}'), COALESCE(agent_type,''),
 		       COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0),
-		       COALESCE(use_custom_gateway,0)
+		       COALESCE(use_custom_gateway,0), COALESCE(use_mitm,1)
 		FROM agent_config WHERE pane_id=?`, auditPolicyPaneID,
 	).Scan(&port, &workspace, &initScript, &configJSON, &agentType,
-		&allowAllActions, &replyInChinese, &useCustomGateway)
+		&allowAllActions, &replyInChinese, &useCustomGateway, &useMitm)
 
 	if err == nil && port > 0 {
 		// Already provisioned — refresh metadata then revive session/ttyd.
@@ -203,7 +203,7 @@ func ensureAuditPolicyPane() error {
 		_, _ = allowAllActions, replyInChinese
 		token := getFirstToken()
 		startAgentFromConfig(auditPolicyPaneID, port, workspace, initScript, configJSON,
-			auditPolicyAgentType, true, false, useCustomGateway, token)
+			auditPolicyAgentType, true, false, useCustomGateway, useMitm, token)
 		return nil
 	}
 
@@ -239,6 +239,7 @@ func IsAuditPolicyPane(paneID string) bool {
 // agent. Used by /api/panes to hide built-ins from the regular agent list
 // (?include_hidden=1 to bypass). Built-ins are now:
 //   - w-6001 — SecOps Lead (audit advisor + security officer, merged 2.1.8)
+//
 // (The old w-6002 opencode Team Helper was removed — the cicy 团队助手 in
 // --helper=1 mode replaces it.) w-1001+ are user workers and must NOT be hidden.
 func isBuiltinAgent(paneID string) bool {

@@ -81,8 +81,8 @@ function AgentStack({
     const rect = panel.getBoundingClientRect()
     return {
       top: rect.top + 2,
-      left: rect.left + 20,
-      width: Math.max(0, rect.width - 40),
+      left: rect.left + 8,
+      width: Math.max(0, rect.width - 15),
       bottom: Math.max(0, window.innerHeight - rect.bottom + 120),
     }
   }, [])
@@ -163,7 +163,7 @@ function AgentStack({
           <div
             data-id={`agent-stack-card-history-popover-${historyPaneId}`}
             onClick={(event) => event.stopPropagation()}
-            className="fixed z-[121] flex flex-col rounded-2xl border border-white/[0.1] bg-[#0b0b0d] shadow-2xl"
+            className="fixed z-[121] flex flex-col rounded-2xl border border-white/[0.12] bg-[#1c1c21] shadow-2xl"
             // 吸附在卡片终端里:left/width/top 取自该终端,bottom 距终端底部 88px。
             style={{ top: historyPos.top, left: historyPos.left, width: historyPos.width, bottom: historyPos.bottom }}
           >
@@ -171,7 +171,6 @@ function AgentStack({
               <History className="h-4 w-4 shrink-0 text-zinc-400" />
               <span className="text-sm font-semibold text-zinc-200">{t('agentStackViewSession', { defaultValue: '历史' })}</span>
               <span className="truncate text-xs text-zinc-600">{historyPaneId}</span>
-              <div className="flex-1" />
               <label
                 data-id={`agent-stack-card-history-prompts-only-${historyPaneId}`}
                 className="inline-flex cursor-pointer select-none items-center gap-1.5 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200"
@@ -185,6 +184,7 @@ function AgentStack({
                 />
                 {t('agentStackPromptsOnly', { defaultValue: '只显示 prompt' })}
               </label>
+              <div className="flex-1" />
               <button
                 type="button"
                 data-id="agent-stack-card-history-popover-close"
@@ -504,29 +504,8 @@ function AgentStackCard({
             </div>
           </div>
         </div>
-        {/* Dispatcher cards ARE the history view — the popover toggle is
-            redundant there. */}
-        {!isCicyLiteAgent(item.agentType) ? (
-        <div
-          data-id={`agent-stack-card-view-tabs-${item.paneId}`}
-          className="ml-2 inline-flex shrink-0 items-center"
-          onClick={(event) => event.stopPropagation()}
-        >
-          <button
-            data-id={`agent-stack-card-view-tab-history-${item.paneId}`}
-            type="button"
-            onClick={(event) => { event.stopPropagation(); onToggleHistory() }}
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1 text-[11px] font-semibold leading-none tracking-[0.02em] transition-all ${
-              historyActive
-                ? 'border-blue-400/50 bg-gradient-to-b from-blue-500 to-blue-600 text-white shadow-[0_1px_3px_rgba(37,99,235,0.5)]'
-                : 'border-white/[0.08] bg-black/40 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100'
-            }`}
-          >
-            <History className="h-3 w-3" />
-            {t('agentStackViewSession', { defaultValue: '历史' })}
-          </button>
-        </div>
-        ) : null}
+        {/* The terminal/history view switch lives floating at the top-center of
+            the card body now (see agent-stack-card-view-tabs below). */}
         {!globalVar?.helper_mode && (
         <div data-id={`agent-stack-card-header-right-${item.paneId}`} className="ml-2 flex items-center gap-1">
           {showHeaderButtons ? (
@@ -612,6 +591,25 @@ function AgentStackCard({
         )}
       </div>
       <div data-id={`agent-stack-card-body-${item.paneId}`} className="relative min-h-0 flex-1 bg-black">
+        {/* Terminal ⇄ History view switch — floats at the top-center of the body
+            for every non-cicy card (cicy/dispatcher cards are chat-first already). */}
+        {!isCicyLiteAgent(item.agentType) && (
+          <div
+            data-id={`agent-stack-card-view-tabs-${item.paneId}`}
+            className="absolute left-1/2 top-2 z-20 -translate-x-1/2"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              data-id={`agent-stack-card-view-tab-history-${item.paneId}`}
+              type="button"
+              onClick={(event) => { event.stopPropagation(); onToggleHistory() }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-black/70 px-3 py-1 text-[11px] font-semibold leading-none tracking-[0.02em] text-zinc-300 shadow-[0_2px_8px_rgba(0,0,0,0.45)] backdrop-blur transition-colors hover:bg-white/[0.08] hover:text-zinc-100"
+            >
+              <History className="h-3 w-3" />
+              {t('agentStackViewSession', { defaultValue: '历史' })}
+            </button>
+          </div>
+        )}
         {isCicyLiteAgent(item.agentType) ? (
           // Dispatcher (PM) agents are chat-first on the web: history view +
           // prompt bar instead of the raw REPL terminal. The input feeds the

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, AlertTriangle, Square, RotateCcw } from 'lucide-react';
 import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -8,6 +8,7 @@ import i18n from '../../i18n';
 import apiService from '../../services/api';
 import { Spinner } from '../ui/Spinner';
 import AgentAvatar from '../AgentAvatar';
+import { isCicyLiteAgent } from '../../lib/agentType';
 
 type HistoryTurn = {
   history_id?: number;
@@ -65,11 +66,14 @@ const CURRENT_HISTORY_MIN_QUESTIONS = 8;
 // Prompts-only: how many user questions to eagerly backfill on open before
 // leaving the rest to scroll-up paging.
 const PROMPTS_ONLY_MIN_QUESTIONS = 5;
-// The history view does NOT take live WS pushes. It polls reply.json: while the
-// in-flight turn is not complete it fetches at the ACTIVE cadence and renders it
-// as a temporary trailing group; when idle (no turn streaming) it falls back to
-// the slower IDLE cadence just to notice the next turn starting.
-const CURRENT_HISTORY_POLL_ACTIVE_MS = 700;
+// Streaming model(双通道):
+// - agent_type=cicy:WS 直推。ai_chunk / thinking_chunk 的 delta 直接追加进 live
+//   尾巴渲染(零轮询延迟);reply.json 轮询降级为校正锚 —— 中途打开、WS 丢包/重连、
+//   工具卡与多回合结构由 poll 对齐(后端先写 reply.json 再 publish,poll 快照永远
+//   ⊇ 已推 delta;替换守卫保证同一 turn 内容只前进不回退)。
+// - 非 cicy:维持原 reply.json 轮询 loop,WS 事件一概不消费。in-flight 时 ACTIVE
+//   节拍,空闲时退回 IDLE 节拍,只为发现下一轮开始。
+const CURRENT_HISTORY_POLL_ACTIVE_MS = 500;
 const CURRENT_HISTORY_POLL_IDLE_MS = 2500;
 // Short retry while the committed window is still loading on open, so the live
 // tail attaches as soon as Part 1 is ready (and the poll never races it).
@@ -1216,6 +1220,15 @@ function MarkdownLink({ href, children, ...props }: any) {
 
 const markdownComponents = { a: MarkdownLink } as const;
 
+// react-markdown 没有内置 memo,每次渲染整篇重新 parse;且 remarkPlugins={[remarkGfm]}
+// 内联数组每次都是新引用,就算外面包 memo 也会失效。流式期 live 尾巴每个 tick 重渲染,
+// 不 memo 的话所有已完成段落 + thinking 全部跟着整篇重 parse。这里用稳定的 plugins
+// 引用 + memo:只有文本真变的那个块才重 parse。
+const REMARK_PLUGINS = [remarkGfm];
+const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
+  return <Markdown remarkPlugins={REMARK_PLUGINS} components={markdownComponents}>{text}</Markdown>;
+});
+
 // Confirm-before-leaving modal for external URLs. Opening goes to a NEW window.
 function LinkConfirmModal({ url, onClose }: { url: string; onClose: () => void }) {
   return (
@@ -1279,7 +1292,7 @@ function CollapsibleQ({ text }: { text: string }) {
           <pre data-id="current-history-view-q-xml-block" className="overflow-x-auto rounded-lg border border-sky-300/[0.12] bg-black/[0.25] px-3 py-2 font-mono text-xs leading-relaxed text-sky-100/70 whitespace-pre-wrap">{xmlBlocks.join('\n')}</pre>
           {remaining ? (
             <div data-id="current-history-view-q-xml-trailing" className="overflow-hidden rounded-2xl rounded-br-sm border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
-              <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{remaining}</Markdown>
+              <MarkdownBlock text={remaining} />
             </div>
           ) : null}
         </div>
@@ -1292,7 +1305,7 @@ function CollapsibleQ({ text }: { text: string }) {
         <EnvironmentContextCard context={environmentContext} />
       ) : (
         <div data-id="current-history-view-q-body" className="max-w-[95%] overflow-hidden rounded-2xl rounded-br-sm border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
-          <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{String(text || '').replace(/^\-\n/, '')}</Markdown>
+          <MarkdownBlock text={String(text || '').replace(/^\-\n/, '')} />
         </div>
       )}
     </div>
@@ -1519,7 +1532,10 @@ function ShellCommandBlock({ text }: { text: string }) {
   );
 }
 
-function ToolCard({ tool, toolId }: { tool: any; toolId: string }) {
+// memo:WS 直推下 live 尾巴每个 delta 都重渲染一次,工具卡的 body 解析(input/diff/
+// result 格式化)不便宜;WS 追加路径只换最后一个生长中的 step 对象,其余 step 的
+// tool 引用不变 → memo 直接命中,只有真变的卡才重算。
+const ToolCard = memo(function ToolCard({ tool, toolId }: { tool: any; toolId: string }) {
   const { t } = useTranslation('chat');
   const [open, setOpen] = useState(() => toolCardOpenState.get(toolId) ?? false);
   const toolName = String(tool?.name || '').trim();
@@ -1616,7 +1632,7 @@ function ToolCard({ tool, toolId }: { tool: any; toolId: string }) {
       ) : null}
     </div>
   );
-}
+});
 
 function HistoryTurnIdBadge({ historyId }: { historyId?: number }) {
   const value = Number(historyId || 0);
@@ -1658,19 +1674,74 @@ function ThinkingBlock({ text, live = false }: { text: string; live?: boolean })
           className="chat-markdown current-history-markdown text-xs italic leading-[1.7]"
           style={{ color: '#52525b' }}
         >
-          <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{text}</Markdown>
+          <MarkdownBlock text={text} />
         </div>
       ) : null}
     </div>
   );
 }
 
-// 把"每 ~700ms 轮询一次、整块替换"的流式文本平滑成逐字增长 —— 否则每个 poll 一大坨
+// 把"每 ~500ms 轮询一次、整块替换"的流式文本平滑成逐字增长 —— 否则每个 poll 一大坨
 // 文字"啪"地出现,看着像蹦字。poll 给的是「目标全文」,这里用 rAF 让显示长度按指数
-// 逼近目标,在两次 poll 之间把那一坨摊成连续生长,观感连续。
-// 关键:只对「正在流式输出的 live 尾巴最后一段正文」用。换流(切 agent / 新一轮 /
-// 重开)或非流式(已完成 / 不是 live 尾巴)一律瞬时显示(snap),绝不补演历史回放
-// —— 那正是之前修掉的"打字进场"坑。
+// 逼近目标(剩得越多走得越快,poll 间隔内必然追平,绝不越拉越远),在两次 poll 之间
+// 把那一坨摊成连续生长,观感连续。
+// 关键:只对「正在流式输出的 live 尾巴的块」用。挂载瞬间直接 snap 到当前全文;换流
+// (切 agent / 新一轮 / 重开)或非流式(已完成)一律瞬时显示(snap),绝不补演历史
+// 回放 —— 那正是之前修掉的"打字进场"坑。
+const SMOOTH_TICK_MS = 33;
+function useSmoothStreamText(target: string, smooth: boolean): string {
+  const [shown, setShown] = useState(target);
+  const shownRef = useRef(target);
+  useEffect(() => {
+    // 非流式 / 目标不是当前显示的前缀延伸(换流、整块替换、回退)→ 瞬时 snap。
+    if (!smooth || !target.startsWith(shownRef.current)) {
+      shownRef.current = target;
+      setShown(target);
+      return;
+    }
+    if (target === shownRef.current) return;
+    let raf = 0;
+    let last = 0;
+    const tick = (now: number) => {
+      if (now - last >= SMOOTH_TICK_MS) {
+        last = now;
+        const cur = shownRef.current.length;
+        const remain = target.length - cur;
+        if (remain <= 0) return;
+        const step = Math.max(2, Math.ceil(remain * 0.12));
+        const next = target.slice(0, cur + step);
+        shownRef.current = next;
+        setShown(next);
+        if (next.length >= target.length) return;
+      }
+      raf = window.requestAnimationFrame(tick);
+    };
+    raf = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(raf);
+  }, [target, smooth]);
+  return smooth ? shown : target;
+}
+
+// live 尾巴里的一个 thinking / text 块。smooth=true(本轮仍在流式且是最后一个块)时
+// 文本走平滑生长;每长一点回调 onGrow 让父级在贴底时跟一次底 —— 生长发生在本组件
+// 内部 state,父级的贴底 useLayoutEffect(依赖 liveTurn)看不到这些 tick。
+const LiveStreamStep = memo(function LiveStreamStep({ kind, text, smooth, dataId, onGrow }: {
+  kind: 'text' | 'thinking';
+  text: string;
+  smooth: boolean;
+  dataId?: string;
+  onGrow?: () => void;
+}) {
+  const shown = useSmoothStreamText(text, smooth);
+  useLayoutEffect(() => { onGrow?.(); }, [shown, onGrow]);
+  if (kind === 'thinking') return <ThinkingBlock text={shown} live={true} />;
+  return (
+    <div data-id={dataId} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300">
+      <MarkdownBlock text={shown} />
+    </div>
+  );
+});
+
 // Harness-injected system notices (system-reminders, task notifications, date
 // changes). Rendered as a compact, collapsed-by-default chip so the repeated
 // ones don't read as duplicated AI replies.
@@ -1766,6 +1837,18 @@ function isActiveAssistantStatus(status: string) {
   return value === 'thinking' || value === 'working' || value === 'tool_use' || value === 'tool_call' || value === 'streaming';
 }
 
+// live 尾巴步骤的内容规模(text/thinking 总字符数 + tool 数)。WS 直推(cicy)下本地
+// 尾巴可能比 reply.json 快照更超前 —— 替换守卫用它实现"同一 turn 内容只前进不回退"。
+function liveStepsContentSize(steps: HistoryTurn['steps']): { textLen: number; toolCount: number } {
+  let textLen = 0;
+  let toolCount = 0;
+  for (const s of (steps || []) as any[]) {
+    if (s?.type === 'text' || s?.type === 'thinking') textLen += String(s?.text || '').length;
+    else if (s?.type === 'tool') toolCount += Array.isArray(s?.tools) ? s.tools.length : 0;
+  }
+  return { textLen, toolCount };
+}
+
 function scheduleScrollToBottom(el: HTMLDivElement) {
   const apply = () => {
     el.scrollTop = el.scrollHeight;
@@ -1841,6 +1924,10 @@ export default function CurrentHistoryView({
   // 强制落底会把人按在底部——小幅上滚还没出阈值就被拽回。
   const lastScrollTopRef = useRef(0);
   const preserveScrollOffsetRef = useRef(false);
+  // 「加载更早」前插时的滚动补偿数据(setItems 前一刻的 scrollTop/scrollHeight)。
+  // 补偿必须在 useLayoutEffect(paint 前)同步完成 —— 之前放在 requestAnimationFrame
+  // (paint 后)里,向上滚动触发自动翻页时会先画一帧被顶下去的内容再跳回来。
+  const preservedScrollMetricsRef = useRef<{ top: number; height: number } | null>(null);
   const requestSeqRef = useRef(0);
   // 乐观占位:用户点发送的瞬间就先塞一个 q 气泡(sending 态)+ 一个 a 占位(thinking),
   // 不等后端往返。baseline 记录占位时的最大 user history_id,真 q 落库后(committed user
@@ -1888,30 +1975,30 @@ export default function CurrentHistoryView({
     setLiveTurn(null);
   };
 
-  // Migrate everything that current.json now holds beyond our committed boundary
-  // into `items` — fetch ONLY the new tail (committedMaxId, newMax] from
-  // current.json, never re-pull below it. This fires when a new turn starts: the
-  // PREVIOUS turn's answer has just been written into current.json (and the new
-  // q_last appended), so we append both. Appending (not replacing) preserves
-  // older pages; normalizeHistoryTurns dedups by id. The live tail itself is
-  // managed by the poll, not here.
-  const reconcileTail = async () => {
+  // Fetch everything current.json now holds beyond our committed boundary —
+  // ONLY the new tail (committedMaxId, newMax], never re-pull below it. This
+  // fires when the boundary advances (a new turn started, or a tool round
+  // reseeded current.json mid-turn). Returns the built turns WITHOUT touching
+  // state: the poll commits items + live tail in ONE synchronous batch (one
+  // render). Applying them across separate awaits paints an inconsistent frame
+  // (boundary moved but the tail not yet re-attached → committed thinking flips
+  // collapsed/expanded → the list visibly jumps once per round).
+  const fetchTailBeyondBoundary = async (): Promise<{ tail: HistoryTurn[]; newMax: number } | null> => {
     try {
       const ids = await getHistoryIDs(paneId);
       const cid = String(ids?.conversation_id || '').trim();
       const newMax = Number(ids?.id || 0);
-      if (cid && newMax > maxLoadedIdRef.current) {
-        const size = Math.min(newMax - maxLoadedIdRef.current, 100);
-        // fresh: the just-completed tail's slots may collide with stale cache
-        // from an earlier conversation at the same positional history_id.
-        const { items: raw } = await loadWindowItems(paneId, cid, newMax, size, { fresh: true });
-        const tail = buildTurnsFromRawItems(raw);
-        if (tail.length) {
-          setItems((prev) => normalizeHistoryTurns([...prev, ...tail]));
-          maxLoadedIdRef.current = newMax;
-        }
-      }
-    } catch {}
+      if (!cid || newMax <= maxLoadedIdRef.current) return null;
+      const size = Math.min(newMax - maxLoadedIdRef.current, 100);
+      // fresh: the just-completed tail's slots may collide with stale cache
+      // from an earlier conversation at the same positional history_id.
+      const { items: raw } = await loadWindowItems(paneId, cid, newMax, size, { fresh: true });
+      const tail = buildTurnsFromRawItems(raw);
+      if (!tail.length) return null;
+      return { tail, newMax };
+    } catch {
+      return null;
+    }
   };
 
   // Seamless conversation rotation. Some agents rotate conversation_id on EVERY
@@ -1996,9 +2083,32 @@ export default function CurrentHistoryView({
       lastScrollTopRef.current = top;
     };
     updateStickBottom();
+    // 用户意图优先:滚轮/触摸板向上滚一格就立即放手。scroll 事件的方向检测对触摸板
+    // 慢速上滚不可靠(单次事件 <2px 不触发),流式期每次内容变更的强制落底会把人
+    // 反复拽回底部 ——「滚动的时候也在跳」就是这个。wheel/touch 直接表达意图,不丢。
+    const disengage = () => {
+      shouldStickBottomRef.current = false;
+      clearScheduledScrolls();
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) disengage();
+    };
+    let touchY = 0;
+    const onTouchStart = (e: TouchEvent) => { touchY = e.touches[0]?.clientY ?? 0; };
+    const onTouchMove = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY ?? 0;
+      if (y > touchY + 2) disengage(); // 手指向下拖 = 内容向上滚
+      touchY = y;
+    };
     el.addEventListener('scroll', updateStickBottom, { passive: true });
+    el.addEventListener('wheel', onWheel, { passive: true });
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: true });
     return () => {
       el.removeEventListener('scroll', updateStickBottom);
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
     };
   }, [open, paneId]);
 
@@ -2101,22 +2211,29 @@ export default function CurrentHistoryView({
     });
   }, [open, paneId, items, conversationId, model, hasMore, nextBefore, loading, liveTurn]);
 
-  // No live WS push — Part 2 polls reply.json. The reply's ANSWER occupies
+  // Part 2 polls reply.json (WS events only pull the next poll forward — see
+  // requestPollSoon below). The reply's ANSWER occupies
   // history_id = current.maxID + 1, so it attaches right after committed's last
   // turn (q_last, id == committedMaxId): answerId == committedMaxId + 1. We
   // render it as the live tail (answer-only; the q comes from committed). When a
   // NEW turn starts, current.json's maxID advances (the prior answer migrated in
-  // + new q_last appended) → reconcileTail pulls ONLY that new tail. We never
-  // re-pull the committed window.
+  // + new q_last appended) → fetchTailBeyondBoundary pulls ONLY that new tail.
+  // We never re-pull the committed window.
   useEffect(() => {
     if (!open || !paneId) return;
     let cancelled = false;
     let timer: number | null = null;
     let lastSig = '';
+    let pollInFlight = false;
+    let lastPollStartAt = 0;
+    // 连续"快照比本地短"的次数(WS 直推领先是常态,但持续领先可能是拼重了)。
+    let regressStreak = 0;
 
+    // 单槽定时器:任何新的排程都顶替 pending 的那个,绝不并存两个轮询链。
     const schedule = (ms: number) => {
       if (cancelled) return;
-      timer = window.setTimeout(() => { void poll(); }, ms);
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => { timer = null; void poll(); }, ms);
     };
 
     // Reveal (drop the skeleton) once Part 2's first poll has resolved AND the
@@ -2128,10 +2245,12 @@ export default function CurrentHistoryView({
     };
 
     const poll = async () => {
-      if (cancelled) return;
+      if (cancelled || pollInFlight) return;
       // Wait for Part 1 (committed window) so the tail attaches to a real
       // boundary and the poll never races the open load.
       if (!committedReadyRef.current) { schedule(CURRENT_HISTORY_POLL_WAIT_MS); return; }
+      pollInFlight = true;
+      lastPollStartAt = Date.now();
       try {
         // Do NOT pin to the committed conversationId: pinning would make the
         // endpoint always resolve the old conversation, so a rotation could
@@ -2180,14 +2299,17 @@ export default function CurrentHistoryView({
           return;
         }
 
-        // A newer turn has started: current.json's maxID moved past our boundary,
-        // meaning the previous turn's answer migrated into current.json (and the
-        // new q_last was appended). Pull ONLY the new tail (committedMaxId,
-        // replyMaxId] — never re-pull below it.
+        // The boundary moved past our window: either a new turn started (the
+        // previous answer migrated into current.json + new q_last appended), or
+        // a tool round reseeded current.json MID-turn. Pull ONLY the new tail
+        // (committedMaxId, replyMaxId] — never re-pull below it. Don't commit
+        // yet: items + live tail must land in the same render (see below).
+        let pendingTail: { tail: HistoryTurn[]; newMax: number } | null = null;
         if (replyMaxId > maxLoadedIdRef.current) {
-          await reconcileTail();
+          pendingTail = await fetchTailBeyondBoundary();
           if (cancelled) return;
         }
+        const boundary = pendingTail ? pendingTail.newMax : maxLoadedIdRef.current;
 
         // Attach the reply's ANSWER as the live tail of q_last. Render only when
         // it sits beyond the committed boundary (answerId == committedMaxId + 1)
@@ -2198,7 +2320,25 @@ export default function CurrentHistoryView({
         // Guard: never attach a tail whose answer belongs to a different
         // conversation (transient during rotation, before rebind reloads).
         const sameConversation = !replyCid || !conversationId || replyCid === conversationId;
-        if (sameConversation && answerId > maxLoadedIdRef.current && (hasContent || !complete)) {
+        // cicy reseeds current.json every tool round, so mid-turn the boundary
+        // can advance PAST the answer slot this poll snapshotted (answerId is
+        // one round stale). The reply is still THIS in-flight turn — keep the
+        // tail attached at the new slot instead of clear→reattach, which used to
+        // unhide the committed copy (thinking collapsed) for one poll and then
+        // hide it again (live thinking expanded) = the list jumping every round.
+        const effectiveAnswerId = (!complete && !replyFailed)
+          ? Math.max(answerId, boundary + 1)
+          : answerId;
+        const attach = sameConversation && effectiveAnswerId > boundary && (hasContent || !complete);
+        // ONE synchronous commit for boundary + tail: React batches these
+        // setStates into a single render, so no frame ever shows the moved
+        // boundary without the matching live tail.
+        if (pendingTail) {
+          const tail = pendingTail.tail;
+          setItems((prev) => normalizeHistoryTurns([...prev, ...tail]));
+          maxLoadedIdRef.current = pendingTail.newMax;
+        }
+        if (attach) {
           // Only touch state when something actually changed (the "unfetched
           // item" signal), so an idle poll never re-renders.
           const turnId = String(data?.turn_id || '');
@@ -2209,7 +2349,7 @@ export default function CurrentHistoryView({
           // keeps a multi-round turn correct instead of splitting tools into a
           // committed block above the live thinking.
           const liveItems: any[] = Array.isArray((data as any)?.items) ? (data as any).items : [];
-          const sig = `${turnId}:${answerId}:${status}:${String(data?.updated_at || '')}:${thinking.length}:${answer.length}:${liveItems.length}:${JSON.stringify(liveItems.map((it: any) => [it?.type, String(it?.thinking || it?.text || '').length, it?.name || '']))}`;
+          const sig = `${turnId}:${effectiveAnswerId}:${status}:${String(data?.updated_at || '')}:${thinking.length}:${answer.length}:${liveItems.length}:${JSON.stringify(liveItems.map((it: any) => [it?.type, String(it?.thinking || it?.text || '').length, it?.name || '']))}`;
           if (sig !== lastSig) {
             lastSig = sig;
             const steps: NonNullable<HistoryTurn['steps']> = [];
@@ -2234,20 +2374,46 @@ export default function CurrentHistoryView({
               if (thinking) steps.push({ type: 'thinking', text: thinking });
               if (answer) steps.push({ type: 'text', text: answer });
             }
+            // WS 直推(cicy)可能让本地尾巴比这份 poll 快照更超前(delta 先到)。
+            // 同一 turn 的内容只前进不回退:快照文本更短且没带来新工具时,跳过整体
+            // 替换、只同步槽位 id(边界可能已前移);下一次 poll 追平后再正常替换。
+            const prevLive = liveTurnRef.current;
+            let regressed = false;
+            if (!complete && prevLive && turnId && turnId === liveTurnIdRef.current) {
+              const prevSize = liveStepsContentSize(prevLive.steps);
+              const nextSize = liveStepsContentSize(steps);
+              regressed = nextSize.textLen < prevSize.textLen && nextSize.toolCount <= prevSize.toolCount;
+            }
+            // 防持久分叉:WS 直推领先快照一两拍是常态;但连续 3 次仍领先,大概率是
+            // 竞态下拼重了 —— 强制以快照为准(自愈窗口 ~1.5s)。turn 完成时(上面
+            // !complete)也总是以快照定稿。
+            if (regressed) {
+              regressStreak += 1;
+              if (regressStreak >= 3) regressed = false;
+            } else {
+              regressStreak = 0;
+            }
             liveTurnIdRef.current = turnId;
-            // Answer-only: the question is rendered by committed's q_last turn.
-            liveTurnRef.current = {
-              history_id: answerId,
-              conversation_id: cid || conversationId,
-              role: 'assistant',
-              q: '',
-              text: '',
-              a: answer,
-              steps,
-              status,
-              model: evModel || model,
-            };
-            setLiveTurn(liveTurnRef.current);
+            if (regressed && prevLive) {
+              if (Number(prevLive.history_id || 0) !== effectiveAnswerId) {
+                liveTurnRef.current = { ...prevLive, history_id: effectiveAnswerId };
+                setLiveTurn(liveTurnRef.current);
+              }
+            } else {
+              // Answer-only: the question is rendered by committed's q_last turn.
+              liveTurnRef.current = {
+                history_id: effectiveAnswerId,
+                conversation_id: cid || conversationId,
+                role: 'assistant',
+                q: '',
+                text: '',
+                a: answer,
+                steps,
+                status,
+                model: evModel || model,
+              };
+              setLiveTurn(liveTurnRef.current);
+            }
           }
         } else if (liveTurnRef.current) {
           clearLiveTurn();
@@ -2261,7 +2427,60 @@ export default function CurrentHistoryView({
         schedule(complete ? CURRENT_HISTORY_POLL_IDLE_MS : CURRENT_HISTORY_POLL_ACTIVE_MS);
       } catch {
         if (!cancelled) { revealOnce(); schedule(CURRENT_HISTORY_POLL_IDLE_MS); }
+      } finally {
+        pollInFlight = false;
       }
+    };
+
+    // ===== WS 流式直推(仅 agent_type=cicy)=====
+    // 后端每个 delta 批次都 publish ai_chunk(text)/ thinking_chunk(thinking)/
+    // status_change(hub.publishAgent),Workspace 转成 cicy:agent-stream-delta 窗口
+    // 事件。cicy:delta 直接追加进 live 尾巴渲染,零轮询延迟;reply.json 轮询降级为
+    // 校正锚 —— 中途打开页面、WS 丢包/重连、工具卡(名字/参数/结果)与多回合结构都由
+    // 下一次 poll 对齐(后端先写 reply.json 再 publish,poll 快照永远 ⊇ 已推 delta)。
+    // 非 cicy:保持原 reply.json 轮询 loop,WS 事件一概不消费。
+    const requestPollSoon = () => {
+      if (cancelled) return;
+      const since = Date.now() - lastPollStartAt;
+      schedule(since >= 180 ? 0 : 180 - since);
+    };
+    const appendStreamDelta = (kind: 'text' | 'thinking', delta: string) => {
+      const lt = liveTurnRef.current;
+      // 还没有 poll 基线(刚发送/刚打开页面)→ 先让 poll 把尾巴挂上,避免从流的
+      // 半中间开始拼出残句。
+      if (!lt) { requestPollSoon(); return; }
+      const steps = Array.isArray(lt.steps) ? [...lt.steps] : [];
+      const last: any = steps[steps.length - 1];
+      if (last && last.type === kind) {
+        const prevText = String(last.text || '');
+        // 竞态去重:poll 整体替换与 WS 送达赛跑时,同一段 delta 可能已经包含在刚
+        // 应用的快照里。较长的 delta 恰为当前块后缀 → 视为重复丢弃(短 delta 不判,
+        // 合法重复词太多;万一漏判,poll 侧的 regressStreak 自愈兜底)。
+        if (delta.length >= 6 && prevText.endsWith(delta)) return;
+        steps[steps.length - 1] = { ...last, text: `${prevText}${delta}` };
+      } else {
+        steps.push({ type: kind, text: delta } as any);
+      }
+      liveTurnRef.current = { ...lt, steps, status: kind === 'thinking' ? 'thinking' : 'streaming' };
+      setLiveTurn(liveTurnRef.current);
+    };
+    const onStreamDelta = (e: Event) => {
+      const d: any = (e as CustomEvent)?.detail || {};
+      const aid = String(d.agent_id || '').trim();
+      if (!aid) return;
+      if (aid !== paneId && !paneId.endsWith(aid) && !aid.endsWith(paneId)) return;
+      if (!isCicyLiteAgent(agentType)) return; // 非 cicy:原轮询 loop,不消费 WS
+      // 换轮/换对话的迟到 delta 不能拼进当前尾巴 —— 槽位对不上就交给 poll。
+      const turnId = String(d.turn_id || '').trim();
+      if (turnId && liveTurnIdRef.current && turnId !== liveTurnIdRef.current) { requestPollSoon(); return; }
+      const delta = String(d.delta || '');
+      const kind = d.kind === 'thinking' ? 'thinking' : (d.kind === 'text' ? 'text' : '');
+      if (delta && kind) { appendStreamDelta(kind as 'text' | 'thinking', delta); return; }
+      // status_change:tool_use 的工具卡内容(名字/参数)只在 reply.json 里,催 poll;
+      // 其余状态只在尾巴还没挂上时催一把。
+      const status = String(d.status || '').toLowerCase();
+      if (status === 'tool_use' || status === 'tool_call' || status === 'working') requestPollSoon();
+      else if (!liveTurnRef.current) requestPollSoon();
     };
 
     // 外部"立即刷新"信号(如办公室发完指令)→ 取消等待中的 idle 轮询,马上拉一次,
@@ -2297,6 +2516,8 @@ export default function CurrentHistoryView({
     };
     window.addEventListener('cicy:current-history-refresh', onNudge as EventListener);
     window.addEventListener('cicy:current-history-cancel-optimistic', onCancelOptimistic as EventListener);
+    window.addEventListener('cicy:agent-stream-delta', onStreamDelta as EventListener);
+    window.addEventListener('agent-status-change', onStreamDelta as EventListener);
     // Hidden tabs throttle chained setTimeout (Chrome intensive throttling →
     // ~1/min), so the window can be minutes stale when the user returns. Kick
     // an immediate poll on tab-visible so the view catches up on this frame.
@@ -2313,9 +2534,11 @@ export default function CurrentHistoryView({
       if (timer != null) window.clearTimeout(timer);
       window.removeEventListener('cicy:current-history-refresh', onNudge as EventListener);
       window.removeEventListener('cicy:current-history-cancel-optimistic', onCancelOptimistic as EventListener);
+      window.removeEventListener('cicy:agent-stream-delta', onStreamDelta as EventListener);
+      window.removeEventListener('agent-status-change', onStreamDelta as EventListener);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [conversationId, open, paneId, model]);
+  }, [conversationId, open, paneId, model, agentType]);
 
   useEffect(() => {
     return () => {
@@ -2336,6 +2559,10 @@ export default function CurrentHistoryView({
     if (preserveScrollOffsetRef.current) {
       preserveScrollOffsetRef.current = false;
       didInitialScrollRef.current = true;
+      // 前插补偿:paint 前同步把视口钉回原来的内容位置,翻页瞬间画面纹丝不动。
+      const saved = preservedScrollMetricsRef.current;
+      preservedScrollMetricsRef.current = null;
+      if (saved) el.scrollTop = saved.top + Math.max(0, el.scrollHeight - saved.height);
       return;
     }
     if (!didInitialScrollRef.current) {
@@ -2362,10 +2589,6 @@ export default function CurrentHistoryView({
     if (loadingMore || loading || !nextBefore || Number(nextBefore) <= 1 || !conversationId) return;
     const requestPaneId = paneId;
     const requestSeq = ++requestSeqRef.current;
-    const el = scrollRef.current;
-    const prevScrollHeight = el?.scrollHeight || 0;
-    const prevScrollTop = el?.scrollTop || 0;
-    preserveScrollOffsetRef.current = true;
     setLoadingMore(true);
     try {
       // fresh: history_id is a POSITIONAL index into current.json, so for an
@@ -2389,17 +2612,20 @@ export default function CurrentHistoryView({
         return;
       }
       const older = buildTurnsFromRawItems(rawItems);
+      // 在 setItems 前一刻才采样滚动位置并置位补偿标记(而不是 fetch 前):fetch 期间
+      // poll 的任何渲染都可能消费 preserveScrollOffsetRef,补偿就丢了 → 翻页跳屏。
+      // 实际补偿由 useLayoutEffect 在 paint 前同步执行。
+      const el = scrollRef.current;
+      if (el) {
+        preservedScrollMetricsRef.current = { top: el.scrollTop, height: el.scrollHeight };
+        preserveScrollOffsetRef.current = true;
+      }
       // normalizeHistoryTurns dedups by history_id and re-sorts ascending, so
       // the prepend stays ordered/complete even if windows overlap or a live
       // WS turn already inserted one of these ids.
       setItems((prev) => normalizeHistoryTurns([...older, ...prev]));
       setHasMore(lo > 1);
       setNextBefore(lo);
-      window.requestAnimationFrame(() => {
-        const nextEl = scrollRef.current;
-        if (!nextEl) return;
-        nextEl.scrollTop = prevScrollTop + Math.max(0, nextEl.scrollHeight - prevScrollHeight);
-      });
     } catch {
       setHasMore(false);
     } finally {
@@ -2663,7 +2889,7 @@ export default function CurrentHistoryView({
                 return <div key={stepIndex} data-id={`current-history-turn-step-thinking-${turnKey}-${stepIndex}`}><ThinkingBlock text={step.text} /></div>;
               }
               if (step.type === 'text') {
-                return <div key={stepIndex} data-id={`current-history-turn-step-text-${turnKey}-${stepIndex}`} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{step.text}</Markdown></div>;
+                return <div key={stepIndex} data-id={`current-history-turn-step-text-${turnKey}-${stepIndex}`} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><MarkdownBlock text={step.text} /></div>;
               }
               const tools = Array.isArray(step.tools) ? step.tools : [];
               return <div key={stepIndex} data-id={`current-history-turn-step-tools-${turnKey}-${stepIndex}`} className="my-2 space-y-1.5">{tools.map((tool: any, toolIndex: number) => {
@@ -2673,7 +2899,7 @@ export default function CurrentHistoryView({
             })}
             {!hasRenderableAssistantStep && fallbackAnswer ? (
               <div data-id={`current-history-turn-fallback-${turnKey}`} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300">
-                <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{fallbackAnswer}</Markdown>
+                <MarkdownBlock text={fallbackAnswer} />
               </div>
             ) : null}
             {!hasRenderableAssistantStep && !fallbackAnswer && showThinkingPlaceholder ? <PendingThinkingPlaceholder /> : null}
@@ -2692,6 +2918,15 @@ export default function CurrentHistoryView({
   // dedups against an already-migrated turn after switching away and back).
   const liveVisible = !promptsOnly && !!liveTurn && Number(liveTurn.history_id || 0) > committedMaxId;
   const liveTurnSteps = liveVisible && Array.isArray(liveTurn?.steps) ? liveTurn!.steps : [];
+  // 本轮还在流式输出 → 最后一个 thinking/text 块走平滑生长(useSmoothStreamText)。
+  const liveStreaming = liveVisible && isActiveAssistantStatus(String(liveTurn?.status || ''));
+  // 平滑生长的每个 tick 都发生在 LiveStreamStep 内部 state,父级贴底 effect(依赖
+  // liveTurn)看不到 —— 用这个回调在每次生长后跟一次底(仅当用户本来就贴底)。
+  // useCallback([]):引用恒定,memo 化的 LiveStreamStep 对未生长的块才能命中缓存。
+  const pinBottomIfSticking = useCallback(() => {
+    const el = scrollRef.current;
+    if (el && shouldStickBottomRef.current) el.scrollTop = el.scrollHeight;
+  }, []);
   // live 尾巴的头像同样按"每轮一个":它前面(committed 末尾,跳过 system)已是同轮的
   // assistant item 时不重复,只留空位对齐。
   const liveShowAvatar = (() => {
@@ -2713,8 +2948,8 @@ export default function CurrentHistoryView({
           {/* live 尾巴 = 最新一轮回复(其后还没有新 q)→ thinking 全程展开,不折叠。
               折叠的触发是「出现新 q、本轮迁入 committed」,而不是「流式刚结束」——届时它
               改走 committed 渲染(ThinkingBlock 默认 live=false)自动塌成小标。 */}
-          if (step?.type === 'thinking') return <div key={i}><ThinkingBlock text={step.text} live={true} /></div>;
-          if (step?.type === 'text') return <div key={i} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{step.text}</Markdown></div>;
+          if (step?.type === 'thinking') return <div key={i}><LiveStreamStep kind="thinking" text={step.text} smooth={liveStreaming && i === liveTurnSteps.length - 1} onGrow={pinBottomIfSticking} /></div>;
+          if (step?.type === 'text') return <div key={i}><LiveStreamStep kind="text" text={step.text} smooth={liveStreaming && i === liveTurnSteps.length - 1} onGrow={pinBottomIfSticking} /></div>;
           if (step?.type === 'tool' && !hideTools && Array.isArray(step?.tools) && step.tools.length > 0) {
             return <div key={i} data-id={`current-history-live-turn-step-tools-${i}`} className="my-2 space-y-1.5">{step.tools.map((tool: any, toolIndex: number) => {
               const toolId = buildToolCardId(`live-${liveTurn!.history_id}`, i, tool, toolIndex);
@@ -2742,7 +2977,7 @@ export default function CurrentHistoryView({
               <div data-id="current-history-empty-greeting-turn" className="flex items-start gap-2.5">
                 <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-empty-greeting-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
                 <div data-id="current-history-empty-greeting-text" className="chat-markdown current-history-markdown min-w-0 flex-1 text-sm leading-[1.7] text-zinc-300">
-                  <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{greeting}</Markdown>
+                  <MarkdownBlock text={greeting} />
                 </div>
               </div>
             </div>

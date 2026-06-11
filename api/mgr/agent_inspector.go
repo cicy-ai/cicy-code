@@ -2484,6 +2484,68 @@ func handleAgentCurrentReplyByPane(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// agentInspectorLiteMetrics returns the lightweight header metrics for ONE
+// agent (status/model/context/tokens/cost), read straight from reply.json —
+// the same subset /api/agents/current-reply exposes, factored out so BOTH the
+// WS poll_data broadcast (pollAgentStatuses) and the batch fallback endpoint
+// share one source of truth. Returns nil when the agent has no usable reply
+// snapshot (mirrors pollAgentStatuses' skip-on-empty behaviour). Reads reply.json
+// + context.json only — no sqlite, cheap enough to fan over a whole team.
+func agentInspectorLiteMetrics(paneID string) M {
+	reply := agentInspectorLoadReply(paneID)
+	rawStatus := strings.TrimSpace(reply.Status)
+	if rawStatus == "" {
+		return nil
+	}
+	status := strings.ToLower(rawStatus)
+	complete := status == "idle" || status == "done" || isAIGatewayReplyTerminal(status)
+	ctxUsedPct, ctxWindowSize := agentInspectorReadContextWindow(paneID)
+	return M{
+		// Keep the raw status string (unchanged from the old {status,updated_at}
+		// shape) so the status-dot consumers keep working; the client lowercases.
+		"status":                      rawStatus,
+		"updated_at":                  strings.TrimSpace(reply.UpdatedAt),
+		"complete":                    complete,
+		"model":                       aiGatewayReplyPrimaryModel(reply),
+		"input_tokens":                reply.InputTokens,
+		"output_tokens":               reply.OutputTokens,
+		"cache_read_input_tokens":     reply.CacheReadInputTokens,
+		"cache_creation_input_tokens": reply.CacheCreationInputTokens,
+		"total_tokens":                reply.TotalTokens,
+		"cost_credit":                 reply.CostCredit,
+		"context_used_pct":            ctxUsedPct,
+		"context_window_size":         ctxWindowSize,
+	}
+}
+
+// handleAgentCurrentReplyBatch returns lite header metrics for MANY agents in
+// ONE request: GET /api/agents/current-reply-batch?ids=w-1,w-2,…
+// This is the dual-channel FALLBACK — when the chat WS is down (or its push is
+// stale) the team panel hits this once instead of firing N× /current-reply, so
+// the server never sees the N-fan-out storm. Caps ids to avoid abuse.
+func handleAgentCurrentReplyBatch(w http.ResponseWriter, r *http.Request) {
+	raw := strings.TrimSpace(r.URL.Query().Get("ids"))
+	out := M{}
+	if raw != "" {
+		const maxIDs = 200
+		seen := map[string]bool{}
+		for _, part := range strings.Split(raw, ",") {
+			if len(out) >= maxIDs {
+				break
+			}
+			id := shortPaneID(strings.TrimSpace(part))
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			if m := agentInspectorLiteMetrics(id); m != nil {
+				out[id] = m
+			}
+		}
+	}
+	J(w, M{"success": true, "metrics": out})
+}
+
 // agentInspectorReadContextWindow 返回该 worker 的权威上下文用量 (usedPct, windowSize)。
 // claude:读 statusline 脚本落盘的 .cicy/history/context.json;
 // codex:读它最近一条匹配 cwd 的 rollout 里的 token_count(last_token_usage + model_context_window)。

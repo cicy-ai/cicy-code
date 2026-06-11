@@ -24,15 +24,21 @@ var builtinModelPricing = []struct {
 }{
 	// Anthropic Claude — confirmed from anthropic.com/pricing (USD per 1M tokens):
 	//   tier        input  output  cache-write  cache-read
+	//   Fable 5     $10    $50     $12.50       $1.00   (5-min write tier; 1M ctx no surcharge)
 	//   Opus 4.8    $5     $25     $6.25        $0.50
 	//   Sonnet 4.6  $3     $15     $3.75        $0.30
 	//   Haiku 4.5   $1     $5      $1.25        $0.10
+	// Fable 5 source: anthropic.com/news/claude-fable-5-mythos-5 (2026-06-09);
+	// Mythos 5 ships at the same $10/$50 so the "fable"/"mythos" aliases share it.
 	// Version-specific keys sit ABOVE the generic "claude-{tier}-4" substrings so
 	// the current flagships price exactly; bare aliases map to today's flagship.
 	// (modelPricing field order is Input, Output, CacheRead, CacheWrite.)
+	{"claude-fable-5", modelPricing{10, 50, 1, 12.5, true}},
 	{"claude-opus-4-8", modelPricing{5, 25, 0.5, 6.25, true}},
 	{"claude-sonnet-4-6", modelPricing{3, 15, 0.3, 3.75, true}},
 	{"claude-haiku-4-5", modelPricing{1, 5, 0.1, 1.25, true}},
+	{"fable", modelPricing{10, 50, 1, 12.5, true}},
+	{"mythos", modelPricing{10, 50, 1, 12.5, true}},
 	{"opus", modelPricing{5, 25, 0.5, 6.25, true}},
 	{"sonnet", modelPricing{3, 15, 0.3, 3.75, true}},
 	{"haiku", modelPricing{1, 5, 0.1, 1.25, true}},

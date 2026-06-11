@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation, Trans } from 'react-i18next';
 import i18n from '../../i18n';
@@ -9,6 +9,7 @@ import apiService from '../../services/api';
 import { useDialogs } from '../ui/Modal';
 import { normalizeAgentType, guidanceFilenameForAgentType } from '../../lib/agentType';
 import { metricsFromCurrentReply, type AgentLiveMetrics } from '../../lib/agentMetrics';
+import { useApp } from '../../contexts/AppContext';
 import { ModelTag } from '../../lib/modelTag';
 import AgentAvatar from '../AgentAvatar';
 import Select from '../ui/Select';
@@ -56,40 +57,80 @@ interface Props {
   onRefreshPoll: () => void;
 }
 
-// Live header metrics (status/model/context/cost) for every card in the
-// panel, polled from /api/agents/current-reply at 3s — the Office window
-// header's data pipe, productized for the team list. Skips network work when
-// the tab is hidden; sig-compare keeps unchanged agents referentially stable
-// so cards don't re-render on every tick.
-function useTeamLiveMetrics(wids: string[]) {
+// Live header metrics (status/model/context/cost) for every card in the panel.
+//
+// DUAL CHANNEL, push-first — never the old N×/api/agents/current-reply fan-out
+// (N agents × every 3s would storm the server):
+//   PRIMARY  — the chat WS poll_data push. `pushed` is Workspace's pollStatuses,
+//              fed straight from the WS broadcast; the server now packs the full
+//              header metrics into each statuses entry, so one push updates the
+//              whole team with ZERO requests.
+//   FALLBACK — only when the WS is disconnected OR its push has gone stale, a
+//              SINGLE batched /current-reply-batch call (not N) at a slow cadence.
+// sig-compare keeps unchanged agents referentially stable so cards don't churn.
+const TEAM_METRICS_PUSH_STALE_MS = 12000;   // push older than this ⇒ allow a fallback poll
+const TEAM_METRICS_FALLBACK_MS = 5000;      // fallback batch-poll cadence (1 request)
+
+function useTeamLiveMetrics(wids: string[], pushed: Record<string, any>, wsConnected: boolean) {
   const [metrics, setMetrics] = useState<Record<string, AgentLiveMetrics>>({});
   const key = wids.join(',');
+  const lastPushRef = useRef(0);
+
+  const fold = useCallback((src: Record<string, any>, lookup: (wid: string) => any) => {
+    setMetrics((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const wid of key.split(',').filter(Boolean)) {
+        const d = lookup(wid);
+        if (!d) continue;
+        const m = metricsFromCurrentReply(d, prev[wid]);
+        if (prev[wid]?.sig !== m.sig || prev[wid]?.model !== m.model) { next[wid] = m; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+    void src;
+  }, [key]);
+
+  // PRIMARY: fold the WS-pushed statuses whenever they change. pushed is keyed by
+  // full pane id (`<wid>:main.0`); tolerate either form.
+  useEffect(() => {
+    if (!pushed || !key) return;
+    fold(pushed, (wid) => pushed[`${wid}:main.0`] || pushed[wid]);
+    lastPushRef.current = Date.now();
+  }, [pushed, key, fold]);
+
+  // FALLBACK: ONE batched request, and ONLY when the push channel is down/stale.
   useEffect(() => {
     if (!key) return;
     let cancelled = false;
-    const ids = key.split(',').filter(Boolean);
-    const poll = async () => {
+    const tick = async () => {
       if (document.hidden) return;
-      await Promise.all(ids.map(async (wid) => {
-        try {
-          const res: any = await apiService.getAgentCurrentReply(wid).catch(() => null);
-          if (cancelled || !res?.data) return;
-          setMetrics((prev) => {
-            const next = metricsFromCurrentReply(res.data, prev[wid]);
-            if (prev[wid]?.sig === next.sig) return prev;
-            return { ...prev, [wid]: next };
-          });
-        } catch { /* agent 还没数据 → 保持现状 */ }
-      }));
+      const stale = Date.now() - lastPushRef.current > TEAM_METRICS_PUSH_STALE_MS;
+      if (wsConnected && !stale) return;   // WS alive & fresh → no polling at all
+      try {
+        const res: any = await apiService.getAgentCurrentReplyBatch(key.split(',').filter(Boolean)).catch(() => null);
+        const mp = res?.data?.metrics;
+        if (cancelled || !mp || typeof mp !== 'object') return;
+        fold(mp, (wid) => mp[wid]);
+      } catch { /* agent 还没数据 → 保持现状 */ }
     };
-    poll();
-    const t = window.setInterval(poll, 3000);
+    void tick();   // immediate seed when the push channel is cold/stale at mount
+    const t = window.setInterval(tick, TEAM_METRICS_FALLBACK_MS);
     return () => { cancelled = true; window.clearInterval(t); };
-  }, [key]);
+  }, [key, wsConnected, fold]);
+
   return metrics;
 }
 
-const fmtCost = (cost: number) => cost >= 100 ? `$${Math.round(cost)}` : cost >= 0.05 ? `$${cost.toFixed(1)}` : '$0';
+// 廉价模型(deepseek 级,单轮 ~$0.0002)累计 cost 长期 < $0.05,旧阈值会把它们
+// 全压成 "$0" 看着像"没成本"。按量级自适应精度:亚分成本也显示真值,只有真正的 0 才 "$0"。
+const fmtCost = (cost: number) =>
+  cost <= 0      ? '$0'
+  : cost >= 100  ? `$${Math.round(cost)}`
+  : cost >= 1    ? `$${cost.toFixed(2)}`
+  : cost >= 0.05 ? `$${cost.toFixed(2)}`
+  : cost >= 0.001 ? `$${cost.toFixed(3)}`
+  :                `$${cost.toFixed(4)}`;
 
 // 上下文用量圆环:一个"未满的圆"代替进度条。颜色阈值与全局一致(<50 绿 /<80 黄 /≥80 红)。
 function CtxRing({ pct }: { pct: number }) {
@@ -448,7 +489,10 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     const ids = [paneId, ...bindings.map(b => shortId(b.name))].filter(Boolean);
     return Array.from(new Set(ids)).sort();
   }, [paneId, bindings]);
-  const liveMetrics = useTeamLiveMetrics(liveWids);
+  // Dual-channel metrics: WS poll_data push (via `statuses`) is primary; the hook
+  // only batch-polls as fallback when the WS is down/stale.
+  const { chatWsConnected } = useApp();
+  const liveMetrics = useTeamLiveMetrics(liveWids, statuses, chatWsConnected);
 
   const currentAgent = useMemo(() => {
     const agent = panes.find(a => shortId(a.pane_id) === paneId);

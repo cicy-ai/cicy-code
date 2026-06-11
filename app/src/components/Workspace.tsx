@@ -351,7 +351,7 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 }
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
-type LeftPanelView = 'team' | 'skills' | 'agents' | 'providers' | 'im' | 'todo' | 'office' | null;
+type LeftPanelView = 'team' | 'skills' | 'agents' | 'providers' | 'im' | 'todo' | null;
 type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'artifact' | RequestViewTab;
 type CliContentMode = 'fixed';
 
@@ -396,8 +396,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const mainTab = 'cli' as 'cli' | 'chat';
   const [leftPanelView, setLeftPanelView] = useState<LeftPanelView>(() => {
     const v = cache.get(leftPanelKey(paneId), null);
-    // 刷新后恢复上次打开的左栏面板(含办公室);'todo' 若技能未装会被下方 effect 关掉
-    const ok: LeftPanelView[] = ['team', 'skills', 'office', 'providers', 'im', 'agents', 'todo'];
+    // 刷新后恢复上次打开的左栏面板;'todo' 若技能未装会被下方 effect 关掉。
+    // 旧缓存里的 'office' 已不在白名单 → 自动落到 null(办公室视图 2026-06-05 下线)。
+    const ok: LeftPanelView[] = ['team', 'skills', 'providers', 'im', 'agents', 'todo'];
     return ok.includes(v) ? v : null;
   });
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -568,10 +569,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const addApp = (window as any).__desktopAddApp || (() => {});
   useDesktopEvents(addApp);
 
-  // Office entry retired — coerce a stale cached 'office' panel state to
-  // closed so users whose per-pane cache still says 'office' aren't stuck on
-  // a view with no button.
-  const leftActive = leftPanelView === 'office' ? null : leftPanelView;
+  const leftActive = leftPanelView;
   const closeLeftPanel = useCallback(() => {
     setLeftPanelView(null);
   }, []);
@@ -756,7 +754,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleCapture = async () => { if (isApiOnlyRuntime) return; try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
   const handleToggleMouse = async () => { if (isApiOnlyRuntime) return; const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
 
-  const toggleLeft = (p: 'team' | 'skills' | 'providers' | 'im' | 'todo' | 'office') => {
+  const toggleLeft = (p: 'team' | 'skills' | 'providers' | 'im' | 'todo') => {
     setLeftPanelView(prev => prev === p ? null : p);
   };
 
@@ -986,6 +984,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         });
       }
       setChatWsLiveStatus('streaming');
+      // 转发给历史视图(CurrentHistoryView):cicy agent 用它做真 WS 直推(delta
+      // 直接追加进 live 尾巴渲染),其他 agent 用它当"催更"信号提前拉 reply.json。
+      window.dispatchEvent(new CustomEvent('cicy:agent-stream-delta', { detail: { ...msg.data, kind: 'text' } }));
+    } else if (msg?.type === 'thinking_chunk' && msg.data) {
+      // thinking 阶段同样直推 —— 这是最长的阶段,只靠轮询最迟钝。
+      window.dispatchEvent(new CustomEvent('cicy:agent-stream-delta', { detail: { ...msg.data, kind: 'thinking' } }));
     } else if (msg?.type === 'status_change' && msg.data) {
       window.dispatchEvent(new CustomEvent('agent-status-change', { detail: msg.data }));
       const nextStatus = String(msg.data?.status || '').toLowerCase();
@@ -1743,9 +1747,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       {/* Activity Bar */}
       <div data-id="activity-bar" ref={activityBarRef} className="w-14 border-r border-[var(--vsc-border)] flex flex-col items-center py-4 justify-between bg-[#0A0A0A] shrink-0 z-50">
         <div data-id="activity-bar-top" className="flex flex-col gap-4 w-full items-center">
-          {/* Office entry retired (2026-06-05) — the dispatcher (PM) chat now
-              lives directly in the team agent card (DispatcherChat). The
-              Office component itself is kept on disk for potential revival. */}
+          {/* Office entry retired (2026-06-05) and its components deleted
+              (2026-06-11) — the dispatcher (PM) chat now lives directly in the
+              team agent card (DispatcherChat). */}
           <SideBtn dataId="btn-team" active={leftActive === 'team'} icon={<Users className="w-5 h-5" />} title={t('sidebarTeam')} onClick={() => toggleLeft('team')} disabled={!!globalVar?.helper_mode} />
           {/* Helper-mode trial container hides Skills / Providers (gateway) /
               IM / Audit from the activity bar — the drawer should stay

@@ -27,6 +27,7 @@ const chunkedPromptEnterDelay = 500 * time.Millisecond
 const promptConfirmPollInterval = 150 * time.Millisecond
 const codexPromptConfirmPollInterval = 60 * time.Millisecond
 const codexPromptConfirmStabilizeDelay = 40 * time.Millisecond
+
 // promptConfirmTimeout caps how long we wait for a pasted prompt to visually
 // echo before pressing Enter. A SUCCESSFUL confirm returns early, so this only
 // bounds the FAILURE path — and large multi-line prompts (e.g. a fork's inherit
@@ -42,6 +43,7 @@ const agentReadyTimeout = 90 * time.Second
 const openClawAgentReadyTimeout = 150 * time.Second
 const submitConfirmPollInterval = 200 * time.Millisecond
 const codexSubmitConfirmPollInterval = 80 * time.Millisecond
+
 // submitConfirmTimeout caps the post-Enter "did it submit" confirm. Same logic
 // as promptConfirmTimeout: a real submit confirms fast; a large prompt that
 // can't be matched burns the whole budget then treats the already-sent Enter as
@@ -459,10 +461,10 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if gid != "" {
-		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.proxy_enable, 0), COALESCE(t.role_template, '')
+		rows, err = store.Query(`SELECT DISTINCT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.use_mitm, 1), COALESCE(t.proxy_enable, 0), COALESCE(t.role_template, '')
 				FROM agent_config t INNER JOIN group_windows gp ON t.pane_id=gp.win_id WHERE gp.group_id=? AND t.active=1 ORDER BY t.created_at DESC`, gid)
 	} else {
-		rows, err = store.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.proxy_enable, 0), COALESCE(t.role_template, '')
+		rows, err = store.Query(`SELECT t.pane_id, t.title, t.ttyd_port, t.workspace, t.init_script, t.active, t.created_at, t.updated_at, gp.group_id, t.role, t.default_model, t.trust_level, t.agent_type, COALESCE(t.allow_all_actions, 0), COALESCE(t.reply_in_chinese, 0), COALESCE(t.use_custom_gateway, 0), COALESCE(t.use_mitm, 1), COALESCE(t.proxy_enable, 0), COALESCE(t.role_template, '')
 				FROM agent_config t LEFT JOIN group_windows gp ON t.pane_id=gp.win_id WHERE t.active=1 ORDER BY t.created_at DESC`)
 	}
 	if err != nil {
@@ -483,9 +485,10 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 		var allowAllActions sql.NullBool
 		var replyInChinese sql.NullBool
 		var useCustomGateway sql.NullBool
+		var useMitm sql.NullBool
 		var useProxy sql.NullBool
 		var roleTemplate sql.NullString
-		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway, &useProxy, &roleTemplate)
+		rows.Scan(&paneID, &title, &port, &workspace, &initScript, &active, &createdAt, &updatedAt, &groupID, &role, &defaultModel, &trustLevel, &agentType, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm, &useProxy, &roleTemplate)
 		// Hide the dedicated audit-policy admin pane (w-6001) from the
 		// general agent listing — surfaced only inside the Audit Dashboard
 		// Assistant tab. Bypass with ?include_hidden=1.
@@ -501,6 +504,7 @@ func handlePanes(w http.ResponseWriter, r *http.Request) {
 			"allow_all_actions":  allowAllActions.Bool,
 			"reply_in_chinese":   replyInChinese.Bool,
 			"use_custom_gateway": useCustomGateway.Bool,
+			"use_mitm":           useMitm.Bool,
 			"use_proxy":          useProxy.Bool,
 			"role_template":      roleTemplate.String,
 		}
@@ -788,6 +792,7 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 			allowAllActions:  opts.allowAllActions,
 			replyInChinese:   opts.replyInChinese,
 			useCustomGateway: opts.useCustomGateway,
+			useMitm:          true, // new pane: matches the use_mitm DB default (1)
 			useProxy:         opts.useProxy,
 			proxyPassword:    opts.proxyPassword,
 			proxyRule:        opts.proxyRule,
@@ -849,6 +854,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 	var allowAllActions sql.NullBool
 	var replyInChinese sql.NullBool
 	var useCustomGateway sql.NullBool
+	var useMitm sql.NullBool
 	var useProxy sql.NullBool
 	var tgEnable sql.NullBool
 	var tgToken, tgChatID sql.NullString
@@ -861,6 +867,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		COALESCE(t.allow_all_actions, 0),
 		COALESCE(t.reply_in_chinese, 0),
 		COALESCE(t.use_custom_gateway, 0),
+		COALESCE(t.use_mitm, 1),
 		COALESCE(t.proxy_enable, 0),
 		COALESCE(t.machine_id, 0), COALESCE(m.label, ''), COALESCE(m.url, ''), COALESCE(json_extract(m.capabilities_json, '$.runtime_kind'), ''), COALESCE(m.capabilities_json, '{}')
 		FROM agent_config t
@@ -869,7 +876,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		WHERE t.pane_id=?`, paneID).Scan(
 		&paneID, &title, &port, &workspace, &initScript,
 		&tgToken, &tgChatID, &tgEnable, &active, &agentType, &agentDuty, &config, &commonPrompt, &ttydPreview, &groupID, &role, &defaultModel, &trustLevel, &allowAllActions,
-		&replyInChinese, &useCustomGateway, &useProxy,
+		&replyInChinese, &useCustomGateway, &useMitm, &useProxy,
 		&machineID, &machineLabel, &machineURL, &runtimeKind, &capabilitiesJSON)
 	if err != nil {
 		httpErr(w, 404, "Pane "+id+" not found")
@@ -887,6 +894,7 @@ func handleGetPane(w http.ResponseWriter, r *http.Request, id string) {
 		"allow_all_actions":  allowAllActions.Bool,
 		"reply_in_chinese":   replyInChinese.Bool,
 		"use_custom_gateway": useCustomGateway.Bool,
+		"use_mitm":           useMitm.Bool,
 		"use_proxy":          useProxy.Bool,
 		"role":               role.String, "default_model": defaultModel.String,
 		"trust_level":                 trustLevel.String,
@@ -943,6 +951,7 @@ var paneUpdateCols = map[string]bool{
 	"allow_all_actions":  true,
 	"reply_in_chinese":   true,
 	"use_custom_gateway": true,
+	"use_mitm":           true,
 	"use_proxy":          true,
 	"runtime_ai":         true,
 	"private_mode":       true,
@@ -1107,6 +1116,14 @@ func handleUpdatePane(w http.ResponseWriter, r *http.Request, id string) {
 			return
 		}
 		filtered["use_custom_gateway"] = useCustomGateway
+	}
+	if rawUseMitm, ok := filtered["use_mitm"]; ok {
+		useMitm, ok := rawUseMitm.(bool)
+		if !ok {
+			httpErr(w, 400, "use_mitm must be a boolean")
+			return
+		}
+		filtered["use_mitm"] = useMitm
 	}
 	// DEPRECATED: use_proxy / proxy_enable is the per-agent HTTP egress proxy.
 	// Global mihomo now handles egress for every agent, so this is rarely needed.
@@ -1339,9 +1356,10 @@ func restartPaneCore(paneID, token string) error {
 	var allowAllActions sql.NullBool
 	var replyInChinese sql.NullBool
 	var useCustomGateway sql.NullBool
+	var useMitm sql.NullBool
 	var useProxy sql.NullBool
-	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, default_model, trust_level, COALESCE(allow_all_actions, 0), COALESCE(reply_in_chinese, 0), COALESCE(use_custom_gateway, 0), COALESCE(proxy_enable, 0) FROM agent_config WHERE pane_id=?", paneID).
-		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &defaultModel, &trustLevel, &allowAllActions, &replyInChinese, &useCustomGateway, &useProxy)
+	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, default_model, trust_level, COALESCE(allow_all_actions, 0), COALESCE(reply_in_chinese, 0), COALESCE(use_custom_gateway, 0), COALESCE(use_mitm, 1), COALESCE(proxy_enable, 0) FROM agent_config WHERE pane_id=?", paneID).
+		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &defaultModel, &trustLevel, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm, &useProxy)
 	if err != nil {
 		return fmt.Errorf("pane %s not found in db", paneID)
 	}
@@ -1378,6 +1396,7 @@ func restartPaneCore(paneID, token string) error {
 		allowAllActions:  allowAllActions.Bool,
 		replyInChinese:   replyInChinese.Bool,
 		useCustomGateway: useCustomGateway.Bool,
+		useMitm:          useMitm.Bool,
 		useProxy:         useProxy.Bool,
 	})
 	store.Exec(fmt.Sprintf("UPDATE agent_config SET updated_at=%s WHERE pane_id=?", store.Now()), paneID)
@@ -1395,6 +1414,7 @@ type paneEnvOpts struct {
 	allowAllActions  bool
 	replyInChinese   bool
 	useCustomGateway bool
+	useMitm          bool
 	useProxy         bool
 	proxyPassword    string
 	proxyRule        string
@@ -2044,7 +2064,7 @@ func codexResumeBootLines() []string {
 	}
 }
 
-func agentBootLines(agentType string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, shortID string, defaultModel string) []string {
+func agentBootLines(agentType string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useMitm bool, shortID string, defaultModel string) []string {
 	aiCfg := loadRuntimeAIConfig()
 	switch normalizeAgentType(agentType) {
 	case "openclaw":
@@ -2931,7 +2951,7 @@ EOF
 		// enabled) so its turns are audited and it can answer cross-agent
 		// callbacks. Keyed via proxy-auth username = $X_AGENT_SHORT_ID. No-op
 		// when MITM is off (default). Parity with the claude/opencode paths.
-		lines = append(lines, mitmAgentProxyBootLines()...)
+		lines = append(lines, mitmAgentProxyBootLines(useMitm)...)
 		lines = append(lines, "clear")
 		if allowAllActions {
 			lines = append(lines, "codex $CODEX_RESUME --dangerously-bypass-approvals-and-sandbox")
@@ -2965,7 +2985,7 @@ EOF
 		// Official path: direct to Google with the user's own GEMINI_API_KEY; drop the
 		// gateway base URL. Route HTTPS through the local MITM (when on) for auditing.
 		lines = append(lines, "unset GOOGLE_GEMINI_BASE_URL")
-		lines = append(lines, mitmAgentProxyBootLines()...)
+		lines = append(lines, mitmAgentProxyBootLines(useMitm)...)
 		lines = append(lines, "clear")
 		lines = append(lines, "gemini"+yolo)
 		return lines
@@ -3055,7 +3075,7 @@ EOF
 		// enabled) so its turns are audited and it can answer cross-agent
 		// callbacks. Keyed to this pane via SOCKS5 username = $X_AGENT_SHORT_ID
 		// (the socks5_username identity rule). No-op when MITM is off (default).
-		lines = append(lines, mitmAgentProxyBootLines()...)
+		lines = append(lines, mitmAgentProxyBootLines(useMitm)...)
 		lines = append(lines,
 			"clear",
 			launchCmd,
@@ -3162,7 +3182,7 @@ EOF`, topModelField, providerBlock),
 		// enabled) so its turns are audited and it can answer cross-agent
 		// callbacks. Keyed via proxy-auth username = $X_AGENT_SHORT_ID. No-op
 		// when MITM is off (default). Parity with the claude official path.
-		lines = append(lines, mitmAgentProxyBootLines()...)
+		lines = append(lines, mitmAgentProxyBootLines(useMitm)...)
 		lines = append(lines,
 			"clear",
 			"opencode",
@@ -3206,7 +3226,7 @@ fi`,
 		// Route this non-gateway kiro-cli's HTTPS through the local MITM (when
 		// enabled) so its turns are audited; no-op when MITM is off (default).
 		// Parity with the codex/claude/opencode official-login paths.
-		lines = append(lines, mitmAgentProxyBootLines()...)
+		lines = append(lines, mitmAgentProxyBootLines(useMitm)...)
 		if allowAllActions {
 			lines = append(lines, "kiro-cli chat --trust-all-tools")
 		} else {
@@ -3235,7 +3255,7 @@ fi`,
 		// Route this non-gateway copilot's HTTPS through the local MITM (when
 		// enabled) so its turns are audited; no-op when MITM is off (default).
 		// Parity with the codex/claude/opencode official-login paths.
-		lines = append(lines, mitmAgentProxyBootLines()...)
+		lines = append(lines, mitmAgentProxyBootLines(useMitm)...)
 		lines = append(lines, "copilot --yolo")
 		return lines
 	case "hermes":
@@ -4620,7 +4640,7 @@ func initPaneEnv(opts paneEnvOpts) {
 	if bootAgentNorm != "claude" && bootAgentNorm != "cicy-claude" && bootAgentNorm != "codex" && bootAgentNorm != "opencode" {
 		lines = append(lines, "clear")
 	}
-	lines = append(lines, agentBootLines(opts.agentType, opts.allowAllActions, opts.replyInChinese, useCustomGateway, shortID, opts.defaultModel)...)
+	lines = append(lines, agentBootLines(opts.agentType, opts.allowAllActions, opts.replyInChinese, useCustomGateway, opts.useMitm, shortID, opts.defaultModel)...)
 
 	// 将启动脚本写入 workspace，避免散落到 /tmp。
 	// Claude boot scripts are kept intentionally small/readable; other agents keep the
@@ -4841,7 +4861,10 @@ func sendTextToPaneDirect(winID, text string) error {
 	}
 	if confirmBeforeEnter {
 		tPre := time.Now()
-		preErr := func() error { _, e := waitForPromptEchoBeforeEnter(winID, agentType, text, mode, baseline, trace); return e }()
+		preErr := func() error {
+			_, e := waitForPromptEchoBeforeEnter(winID, agentType, text, mode, baseline, trace)
+			return e
+		}()
 		log.Printf("[tmux-timing] pane=%s phase=pre-submit-echo ms=%d ok=%t", shortPaneID(winID), time.Since(tPre).Milliseconds(), preErr == nil)
 		if err := preErr; err != nil {
 			trace.logStep("pre-submit-failed", map[string]any{"error": err.Error()}, "")
@@ -5476,14 +5499,14 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 	// Load source pane config
 	var srcAgentType, srcDefaultModel, srcRole, srcWorkspace sql.NullString
 	var srcProjectTemplate, srcRoleTemplate, srcConfig sql.NullString
-	var srcAllowAll, srcReplyChinese, srcUseCustomGateway, srcProxyEnable sql.NullBool
+	var srcAllowAll, srcReplyChinese, srcUseCustomGateway, srcUseMitm, srcProxyEnable sql.NullBool
 	err := store.QueryRow(`SELECT agent_type, default_model, role, workspace,
 		COALESCE(allow_all_actions,0), COALESCE(reply_in_chinese,0),
-		COALESCE(use_custom_gateway,0), COALESCE(proxy_enable,0),
+		COALESCE(use_custom_gateway,0), COALESCE(use_mitm,1), COALESCE(proxy_enable,0),
 		COALESCE(project_template,''), COALESCE(role_template,''), COALESCE(config,'{}')
 		FROM agent_config WHERE pane_id=?`, srcID).
 		Scan(&srcAgentType, &srcDefaultModel, &srcRole, &srcWorkspace,
-			&srcAllowAll, &srcReplyChinese, &srcUseCustomGateway, &srcProxyEnable,
+			&srcAllowAll, &srcReplyChinese, &srcUseCustomGateway, &srcUseMitm, &srcProxyEnable,
 			&srcProjectTemplate, &srcRoleTemplate, &srcConfig)
 	if err != nil {
 		httpErr(w, 404, "source pane not found")
@@ -5548,15 +5571,15 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		srcReplyChinese.Bool,
 		srcUseCustomGateway.Bool,
 		srcProxyEnable.Bool,
-		nil,            // proxy settings
-		nil,            // win name
-		masterID,       // master pane id
-		srcAgentType.String, // master agent type (use source agent type as hint)
-		false,          // inherit_guidance
+		nil,                       // proxy settings
+		nil,                       // win name
+		masterID,                  // master pane id
+		srcAgentType.String,       // master agent type (use source agent type as hint)
+		false,                     // inherit_guidance
 		srcProjectTemplate.String, // inherit the source agent's project template (composed in if the file still exists)
 		srcRoleTemplate.String,    // inherit the source agent's role template
 		token,
-		forkRuntimeAI,             // gateway fork: same runtime_ai provider as source
+		forkRuntimeAI, // gateway fork: same runtime_ai provider as source
 	)
 	if err != nil {
 		httpErr(w, 500, "create fork failed: "+err.Error())
@@ -5573,7 +5596,10 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 	// its source agent. source_kind/source_ref already flow DB → /api/agents/bound
 	// → frontend Binding, so this is all the wiring needed.
 	if newPaneID != "" {
-		if _, err := store.Exec("UPDATE agent_config SET source_kind='fork', source_ref=? WHERE pane_id=?", short, newPaneID); err != nil {
+		// use_mitm rides the same provenance UPDATE: doCreatePane's INSERT omits
+		// the column (DB default 1), so a source with MITM switched off would
+		// otherwise fork a MITM-on child.
+		if _, err := store.Exec("UPDATE agent_config SET source_kind='fork', source_ref=?, use_mitm=? WHERE pane_id=?", short, srcUseMitm.Bool, newPaneID); err != nil {
 			log.Printf("[fork] %s tag source_ref=%s failed: %v", newPaneID, short, err)
 		}
 	}

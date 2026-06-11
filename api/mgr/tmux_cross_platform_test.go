@@ -21,7 +21,7 @@ func TestEnsureAgentCommandLineLiveUsesLiveHelper(t *testing.T) {
 }
 
 func TestAgentBootLinesKiroUsesLiveInstallAndStartsChat(t *testing.T) {
-	lines := agentBootLines("kiro-cli", false, false, true, "w-1001", "")
+	lines := agentBootLines("kiro-cli", false, false, true, true, "w-1001", "")
 	script := strings.Join(lines, "\n")
 	if !strings.Contains(script, "__cicy_local_install_kiro() {") {
 		t.Fatalf("kiro boot lines missing local install helper: %s", script)
@@ -47,7 +47,7 @@ func TestAgentBootLinesKiroUsesLiveInstallAndStartsChat(t *testing.T) {
 }
 
 func TestAgentBootLinesKiroWritesChineseReplySteeringWhenEnabled(t *testing.T) {
-	lines := agentBootLines("kiro-cli", true, true, true, "w-1001", "")
+	lines := agentBootLines("kiro-cli", true, true, true, true, "w-1001", "")
 	script := strings.Join(lines, "\n")
 	if !strings.Contains(script, `mkdir -p "$WORKSPACE/.kiro/steering"`) {
 		t.Fatalf("kiro boot lines missing steering directory creation: %s", script)
@@ -65,7 +65,7 @@ func TestAgentBootLinesKiroWritesChineseReplySteeringWhenEnabled(t *testing.T) {
 
 func TestAgentBootLinesCopilotStartsYoloAndTrustsWorkspace(t *testing.T) {
 	for _, allowAllActions := range []bool{false, true} {
-		lines := agentBootLines("copilot", allowAllActions, false, true, "w-10005", "")
+		lines := agentBootLines("copilot", allowAllActions, false, true, true, "w-10005", "")
 		script := strings.Join(lines, "\n")
 		if !strings.Contains(script, "mkdir -p ~/.copilot") {
 			t.Fatalf("copilot boot lines missing config dir creation: %s", script)
@@ -84,7 +84,7 @@ func TestAgentBootLinesCopilotStartsYoloAndTrustsWorkspace(t *testing.T) {
 
 func TestAgentBootLinesHermesUsesHomeLogExprWithoutNestedQuotes(t *testing.T) {
 	withTestStore(t)
-	lines := agentBootLines("hermes", false, false, true, "w-10009", "")
+	lines := agentBootLines("hermes", false, false, true, true, "w-10009", "")
 	script := strings.Join(lines, "\n")
 	if !strings.Contains(script, `export CICY_HERMES_MODEL=`) {
 		t.Fatalf("hermes boot lines should export CICY_HERMES_MODEL: %s", script)
@@ -123,7 +123,7 @@ func TestAgentBootLinesHermesUsesHomeLogExprWithoutNestedQuotes(t *testing.T) {
 
 func TestAgentBootLinesOpenCodeDoesNotUseUnsupportedPermissionFlag(t *testing.T) {
 	withTestStore(t)
-	lines := agentBootLines("opencode", true, true, true, "w-10004", "")
+	lines := agentBootLines("opencode", true, true, true, true, "w-10004", "")
 	script := strings.Join(lines, "\n")
 	if !strings.Contains(script, `"permission":"allow"`) {
 		t.Fatalf("opencode boot lines missing permission allow config: %s", script)
@@ -144,7 +144,7 @@ func TestAgentBootLinesOpenCodeDoesNotUseUnsupportedPermissionFlag(t *testing.T)
 
 func TestAgentBootLinesOpenCodeWithoutChineseReplyRemovesInstructionsFile(t *testing.T) {
 	withTestStore(t)
-	lines := agentBootLines("opencode", true, false, true, "w-10004", "")
+	lines := agentBootLines("opencode", true, false, true, true, "w-10004", "")
 	script := strings.Join(lines, "\n")
 	if strings.Contains(script, `"instructions":["$WORKSPACE/.opencode/reply-in-chinese.md"]`) {
 		t.Fatalf("opencode boot lines should not include reply-in-chinese instructions config: %s", script)
@@ -156,7 +156,7 @@ func TestAgentBootLinesOpenCodeWithoutChineseReplyRemovesInstructionsFile(t *tes
 
 func TestAgentBootLinesClaudeWritesSettingsFile(t *testing.T) {
 	withTestStore(t)
-	lines := agentBootLines("claude", false, false, true, "w-1001", "")
+	lines := agentBootLines("claude", false, false, true, true, "w-1001", "")
 	script := strings.Join(lines, "\n")
 	if !strings.Contains(script, `mkdir -p "$WORKSPACE/.cicy"`) {
 		t.Fatalf("claude boot lines missing workspace runtime mkdir: %s", script)
@@ -176,7 +176,7 @@ func TestAgentBootLinesClaudeWritesSettingsFile(t *testing.T) {
 }
 
 func TestAgentBootLinesClaudeUsesPaneDefaultModel(t *testing.T) {
-	lines := agentBootLines("claude", false, false, true, "w-10028", "claude-opus-4-6")
+	lines := agentBootLines("claude", false, false, true, true, "w-10028", "claude-opus-4-6")
 	script := strings.Join(lines, "\n")
 	if !strings.Contains(script, `"model": "claude-opus-4-6"`) {
 		t.Fatalf("claude boot lines should use pane default_model: %s", script)
@@ -188,7 +188,7 @@ func TestAgentBootLinesClaudeUsesPaneDefaultModel(t *testing.T) {
 
 func TestAgentBootLinesClaudeWritesSettingsFileWithoutGatewayAuth(t *testing.T) {
 	// useCustomGateway=false: official login path — no settings.json written, no auth injection
-	lines := agentBootLines("claude", false, false, false, "w-1001", "")
+	lines := agentBootLines("claude", false, false, false, true, "w-1001", "")
 	script := strings.Join(lines, "\n")
 	if strings.Contains(script, `"ANTHROPIC_AUTH_TOKEN": "cicy-local-gateway"`) {
 		t.Fatalf("claude login-mode boot lines should not inject anthropic auth token: %s", script)
@@ -212,7 +212,7 @@ func TestAgentBootLinesClaudeWritesSettingsFileWithoutGatewayAuth(t *testing.T) 
 
 func TestAgentBootLinesClaudeAllowAllActionsUsesDangerousSkipPermissions(t *testing.T) {
 	withTestStore(t)
-	claudeScript := strings.Join(agentBootLines("claude", true, false, true, "w-1001", ""), "\n")
+	claudeScript := strings.Join(agentBootLines("claude", true, false, true, true, "w-1001", ""), "\n")
 	if !strings.Contains(claudeScript, `claude --settings "$WORKSPACE/.cicy/claude-settings.json" --dangerously-skip-permissions`) {
 		t.Fatalf("claude allow-all boot lines missing dangerous skip flag: %s", claudeScript)
 	}
@@ -220,7 +220,7 @@ func TestAgentBootLinesClaudeAllowAllActionsUsesDangerousSkipPermissions(t *test
 		t.Fatalf("claude allow-all boot lines should not use permission-mode bypassPermissions: %s", claudeScript)
 	}
 
-	cicyClaudeScript := strings.Join(agentBootLines("cicy-claude", true, false, true, "w-1001", ""), "\n")
+	cicyClaudeScript := strings.Join(agentBootLines("cicy-claude", true, false, true, true, "w-1001", ""), "\n")
 	if !strings.Contains(cicyClaudeScript, `cicy-claude --bare --settings "$WORKSPACE/.cicy/cicy-settings.json" --dangerously-skip-permissions`) {
 		t.Fatalf("cicy-claude allow-all boot lines missing dangerous skip flag: %s", cicyClaudeScript)
 	}
@@ -385,7 +385,7 @@ func TestInitPaneEnvScriptBootstrapsCicyTmuxConf(t *testing.T) {
 		}
 	}
 	lines = append(lines, "export X_AGENT_ID='"+pid+"'", "export X_AGENT_SHORT_ID='"+shortID+"'")
-	lines = append(lines, agentBootLines("codex", false, false, true, shortID, "")...)
+	lines = append(lines, agentBootLines("codex", false, false, true, true, shortID, "")...)
 	script := "#!/usr/bin/env bash\n\n" +
 		"if [ -z \"${BASH_VERSION:-}\" ]; then\n" +
 		"  _cicy_boot_script_path=\"$PWD/.cicy/boot.sh\"\n" +

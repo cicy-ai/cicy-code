@@ -1,10 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -163,32 +163,16 @@ func renderReplyItemForIM(item map[string]interface{}) string {
 		return imTruncateLongString(txt, 2500)
 	case "tool_use":
 		name, _ := item["name"].(string)
-		var inputStr string
-		switch v := item["input"].(type) {
-		case string:
-			inputStr = imTruncateLongString(v, 800)
-		case nil:
-			inputStr = ""
-		default:
-			// 截断 input 中的长字符串字段（如 Write 工具的 content / Bash 的大命令），
-			// 避免整条 IM 消息撑爆 WeChat 4096 字符限制。
-			truncated := imTruncateInputForIM(v, 800)
-			// 用不 escape HTML 的 encoder + indent，让 ">" "&" "<" 保持原样、
-			// JSON 多行更可读。
-			var buf bytes.Buffer
-			enc := json.NewEncoder(&buf)
-			enc.SetEscapeHTML(false)
-			enc.SetIndent("", "  ")
-			if err := enc.Encode(truncated); err == nil {
-				inputStr = strings.TrimRight(buf.String(), "\n")
-			}
+		if strings.TrimSpace(name) == "" {
+			name = "tool"
 		}
-		if inputStr == "" {
+		// 不再把整个 input 当 JSON 丢给用户（很不友好）。解析出最关键的那个参数
+		// （command / file_path / url / pattern …）发出去即可。
+		summary := summarizeToolForIM(item["input"])
+		if summary == "" {
 			return "🔧 " + name
 		}
-		// 用 markdown code block 包起来，让 TG / WeChat / 其他 markdown-aware
-		// 客户端正确渲染（缩进 / 高亮）。
-		return "🔧 " + name + "\n```json\n" + inputStr + "\n```"
+		return "🔧 " + name + "\n" + summary
 	}
 	return ""
 }
@@ -206,25 +190,95 @@ func imTruncateLongString(s string, limit int) string {
 	return string(runes[:limit]) + fmt.Sprintf("\n...(truncated, %d chars total)", len(runes))
 }
 
-// imTruncateInputForIM 递归截断 tool_use input 中的长字符串字段，保留 JSON 结构。
-// 用于避免 Write 工具的 content / 大命令文本撑爆 IM 单条消息。
-func imTruncateInputForIM(v interface{}, limit int) interface{} {
+// summarizeToolForIM 把一次工具调用的参数压成一行人类可读的摘要(而不是整坨 JSON)。
+// 同时兼容两种 API 的工具格式:
+//   - Claude(tool_use):input 本身就是对象(map)。
+//   - OpenAI(tool_calls):arguments 是 JSON 编码的字符串 → 先解析成对象。
+// 解析后优先取最能说明"这工具在干什么"的那个字段(command / file_path / url /
+// pattern / query / prompt …),没有已知字段时退化成紧凑的 key: value 摘要。
+func summarizeToolForIM(input interface{}) string {
+	m := normalizeToolInput(input)
+	if m == nil {
+		// input 不是对象也不是合法 JSON 字符串 —— 有原始标量就直接发(截断)。
+		if s, ok := input.(string); ok {
+			if s = strings.TrimSpace(s); s != "" {
+				return imTruncateLongString(s, 500)
+			}
+		}
+		return ""
+	}
+	// 最能标识工具意图的字段,按优先级取第一个非空的。
+	for _, k := range []string{
+		"command", "file_path", "filePath", "path", "notebook_path",
+		"url", "pattern", "query", "prompt", "description", "expression", "name",
+	} {
+		if v, ok := m[k]; ok {
+			if s := strings.TrimSpace(scalarToString(v)); s != "" {
+				return imTruncateLongString(s, 500)
+			}
+		}
+	}
+	// 没有已知字段:按 key 排序取前几个标量字段拼成紧凑摘要(跳过嵌套对象/数组)。
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var parts []string
+	for _, k := range keys {
+		s := strings.TrimSpace(scalarToString(m[k]))
+		if s == "" {
+			continue
+		}
+		parts = append(parts, k+": "+imTruncateLongString(s, 200))
+		if len(parts) >= 4 {
+			break
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// normalizeToolInput 把工具参数统一成 map。OpenAI 的 arguments 是 JSON 字符串,
+// Claude 的 input 直接是对象。
+func normalizeToolInput(input interface{}) map[string]interface{} {
+	switch v := input.(type) {
+	case map[string]interface{}:
+		return v
+	case string:
+		s := strings.TrimSpace(v)
+		if s == "" {
+			return nil
+		}
+		var m map[string]interface{}
+		if json.Unmarshal([]byte(s), &m) == nil {
+			return m
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+// scalarToString 渲染标量参数值;数组/对象折叠成简短占位,保持 IM 单行简洁。
+func scalarToString(v interface{}) string {
 	switch x := v.(type) {
 	case string:
-		return imTruncateLongString(x, limit)
+		return x
+	case bool:
+		return fmt.Sprintf("%t", x)
+	case float64:
+		// JSON 数字解码为 float64;整数干净输出。
+		if x == float64(int64(x)) {
+			return fmt.Sprintf("%d", int64(x))
+		}
+		return fmt.Sprintf("%g", x)
+	case nil:
+		return ""
 	case []interface{}:
-		out := make([]interface{}, len(x))
-		for i, item := range x {
-			out[i] = imTruncateInputForIM(item, limit)
-		}
-		return out
+		return fmt.Sprintf("[%d items]", len(x))
 	case map[string]interface{}:
-		out := make(map[string]interface{}, len(x))
-		for k, val := range x {
-			out[k] = imTruncateInputForIM(val, limit)
-		}
-		return out
+		return fmt.Sprintf("{%d fields}", len(x))
 	default:
-		return v
+		return fmt.Sprintf("%v", x)
 	}
 }

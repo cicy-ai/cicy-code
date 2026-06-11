@@ -279,5 +279,7 @@
   "anRawUsage": "Raw provider usage",
   "anRawUsageHint": "The cache/input numbers above are taken verbatim from here, no estimation",
   "anCostTitle": "Cost breakdown",
-  "anCostRate": "Rate"
+  "anCostRate": "Rate",
+  "useMitm": "Use MITM audit",
+  "useMitmHint": "Route official-login traffic through the local MITM proxy for auditing (records requests/responses). When off, this agent goes direct via the global proxy and is not audited; takes effect after restarting the agent."
 }
