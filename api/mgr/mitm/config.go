@@ -165,9 +165,8 @@ func LoadConfig(path string) (*Config, error) {
 func (c *Config) applyDefaults() {
 	home, _ := os.UserHomeDir()
 	// SOCKS5Listen / HTTPConnectListen intentionally have NO hardcoded default
-	// here. The manager (startMITM) derives the HTTP CONNECT address from the API
-	// port (apiPort-1) so multiple cicy-code instances on one host never collide,
-	// and leaves SOCKS5 OFF unless the config explicitly sets socks5_listen (only
+	// here. The manager (startMITM) sets the HTTP CONNECT default (8007), and
+	// leaves SOCKS5 OFF unless the config explicitly sets socks5_listen (only
 	// chain nodes need an inbound SOCKS5 listener). An explicit value in
 	// config.json still wins — it's preserved here and honored by Start().
 	if c.CA.CertPath == "" {

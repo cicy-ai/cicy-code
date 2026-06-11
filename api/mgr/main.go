@@ -39,10 +39,9 @@ var (
 	desktopCmd    *exec.Cmd
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 	localMode     bool   // --local → force 127.0.0.1 even when container mode would bind 0.0.0.0
-	apiPort       string // resolved API port (portFlag > PORT env > 8008); set before startMITM so MITM ports derive from it
 )
 
-const version = "2.2.16"
+const version = "2.2.17"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -170,17 +169,6 @@ Options:
 		}
 	} else {
 		log.Printf("[audit] OFF (set \"audit_enabled\": true in global.json to enable) — no collection, no scanning, no w-6001")
-	}
-	// Resolve the API port early (before startMITM) so MITM derives its listen
-	// ports from it: HTTP CONNECT = apiPort-1, SOCKS5 = apiPort-2. Two cicy-code
-	// instances on one host therefore never collide on the MITM ports.
-	// Precedence: --port flag > PORT env > 8008 default.
-	apiPort = portFlag
-	if apiPort == "" {
-		apiPort = os.Getenv("PORT")
-	}
-	if apiPort == "" {
-		apiPort = "8008"
 	}
 	ensureMITMConfig() // seed ~/cicy-ai/mitm/config.json (enabled) before startMITM reads it
 	startMITM()
@@ -480,8 +468,14 @@ Options:
 	// UI (SPA)
 	http.Handle("/", serveUI())
 
-	// Resolved earlier (before startMITM) so the MITM ports can derive from it.
-	port := apiPort
+	// Port precedence: --port flag > PORT env > 8008 default.
+	port := portFlag
+	if port == "" {
+		port = os.Getenv("PORT")
+	}
+	if port == "" {
+		port = "8008"
+	}
 
 	kvMode := "memory"
 	if useRedis {
