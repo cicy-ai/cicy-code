@@ -17,6 +17,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"ttyd-go/mgr/mitm"
@@ -93,6 +95,20 @@ func mitmEgressResolver() (enabled bool, socks5Addr string, auth string) {
 
 // startMITM is called once at server startup, after audit.Init.
 // Safe to call when MITM is disabled — it logs and returns.
+// mitmHTTPListenAddr returns the loopback address for the MITM HTTP CONNECT
+// proxy. Precedence: CICY_MITM_HTTP_PORT env > apiPort-1 > 8007 fallback. Always
+// 127.0.0.1 — the proxy must never be reachable off-box (8008 may bind 0.0.0.0
+// in container mode, but this listener stays loopback-only).
+func mitmHTTPListenAddr() string {
+	if p := strings.TrimSpace(os.Getenv("CICY_MITM_HTTP_PORT")); p != "" {
+		return "127.0.0.1:" + p
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(apiPort)); err == nil && n > 1 {
+		return fmt.Sprintf("127.0.0.1:%d", n-1)
+	}
+	return "127.0.0.1:8007"
+}
+
 func startMITM() {
 	cfg, err := mitm.LoadConfig("")
 	if err != nil {
@@ -102,6 +118,15 @@ func startMITM() {
 	if !cfg.Enabled {
 		log.Printf("[mitm] disabled in config")
 		return
+	}
+
+	// Derive the HTTP CONNECT listen address from the API port (apiPort-1) unless
+	// the config pinned it explicitly. SOCKS5 is left as-is — empty means OFF
+	// (Start skips it); only chain nodes set socks5_listen in config.json. Keying
+	// off the API port means two cicy-code instances on one host (e.g. 8008 +
+	// 8208) get 8007 / 8207 and never collide.
+	if cfg.HTTPConnectListen == "" {
+		cfg.HTTPConnectListen = mitmHTTPListenAddr()
 	}
 
 	srv, err := mitm.NewServer(cfg, mitmAuditAdapter{}, mitmBreakerAdapter{}, mitmEgressResolver)

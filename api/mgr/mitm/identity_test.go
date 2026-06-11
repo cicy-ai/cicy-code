@@ -77,8 +77,14 @@ func TestConfig_IsWhitelisted(t *testing.T) {
 func TestConfig_Defaults(t *testing.T) {
 	c := &Config{}
 	c.applyDefaults()
-	if c.SOCKS5Listen != "127.0.0.1:1085" {
-		t.Fatalf("SOCKS5Listen default: %q", c.SOCKS5Listen)
+	// SOCKS5 / HTTP CONNECT no longer have hardcoded defaults: SOCKS5 stays OFF
+	// (empty) unless explicitly configured, and the HTTP CONNECT address is
+	// derived from the API port by the manager (startMITM), not applyDefaults.
+	if c.SOCKS5Listen != "" {
+		t.Fatalf("SOCKS5Listen should default to empty (off), got: %q", c.SOCKS5Listen)
+	}
+	if c.HTTPConnectListen != "" {
+		t.Fatalf("HTTPConnectListen should default to empty (manager derives it), got: %q", c.HTTPConnectListen)
 	}
 	if c.CA.LeafCacheSize != 1024 {
 		t.Fatalf("LeafCacheSize default: %d", c.CA.LeafCacheSize)

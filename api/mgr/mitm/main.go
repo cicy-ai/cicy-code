@@ -84,17 +84,22 @@ func (s *Server) Start(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
-	ln, err := net.Listen("tcp", s.cfg.SOCKS5Listen)
-	if err != nil {
-		return fmt.Errorf("mitm: listen %s: %w", s.cfg.SOCKS5Listen, err)
+	// SOCKS5 listener — OFF by default. Only bound when socks5_listen is set
+	// explicitly (chain deployments where an upstream MITM node dials this one).
+	// Agent CLIs reject SOCKS5 and use the HTTP CONNECT listener below.
+	if s.cfg.SOCKS5Listen != "" {
+		ln, err := net.Listen("tcp", s.cfg.SOCKS5Listen)
+		if err != nil {
+			return fmt.Errorf("mitm: listen %s: %w", s.cfg.SOCKS5Listen, err)
+		}
+		s.listener = ln
+		log.Printf("[mitm] listening on %s (socks5), node=%s, final_hop=%v, whitelist=%v",
+			s.cfg.SOCKS5Listen, s.cfg.Node.ID, s.cfg.Node.FinalHop, s.cfg.Hosts.Whitelist)
+		s.wg.Add(1)
+		go s.acceptLoop(ctx, ln, s.handleConn)
 	}
-	s.listener = ln
-	log.Printf("[mitm] listening on %s (socks5), node=%s, final_hop=%v, whitelist=%v",
-		s.cfg.SOCKS5Listen, s.cfg.Node.ID, s.cfg.Node.FinalHop, s.cfg.Hosts.Whitelist)
-	s.wg.Add(1)
-	go s.acceptLoop(ctx, ln, s.handleConn)
 
-	// HTTP CONNECT listener for node-based CLIs that can't do SOCKS5.
+	// HTTP CONNECT listener — the primary front-end agents point HTTP(S)_PROXY at.
 	if s.cfg.HTTPConnectListen != "" {
 		hln, err := net.Listen("tcp", s.cfg.HTTPConnectListen)
 		if err != nil {
