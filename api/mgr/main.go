@@ -31,16 +31,17 @@ var (
 	labMode       bool
 	desktopMode   bool
 	auditMode     bool
-	cnMirror      bool
 	previewMode   bool
 	hotMode       bool
 	cdnMode       bool
 	containerMode bool
 	helperMode    bool // --helper=1 → ships a single headless cicy 团队助手 on w-1001
 	desktopCmd    *exec.Cmd
+	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
+	localMode     bool   // --local → force 127.0.0.1 even when container mode would bind 0.0.0.0
 )
 
-const version = "2.2.13"
+const version = "2.2.14"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -77,7 +78,9 @@ func main() {
 	// any loopback agent-MITM proxy env up front.
 	sanitizeAgentMitmProxyEnv()
 
-	for _, arg := range os.Args[1:] {
+	cliArgs := os.Args[1:]
+	for i := 0; i < len(cliArgs); i++ {
+		arg := cliArgs[i]
 		switch {
 		case arg == "--version" || arg == "-v":
 			fmt.Println("cicy-code " + version)
@@ -107,16 +110,12 @@ Options:
                           prefixes are baked into every build; this flag only
                           activates them.
   --lab                   Enable lab mode
-  --public                Listen on 0.0.0.0 (default: 127.0.0.1)
+  --local                 Bind 127.0.0.1 only (overrides container/deploy auto 0.0.0.0)
+  --port N                API port (overrides PORT env; default: 8008)
   --audit                 Enable audit mode
-  --cn                    Use Chinese mirrors
   --helper=1              Team-Helper mode: ship a single headless cicy
                           "团队助手" on w-1001 that installs Docker + cicy-code
-                          and scales the local team. Overrides --agents.
-  --agents=LIST           Comma-separated agents to install (skip interactive)
-                          e.g. --agents=hermes
-                          Use --agents=all for all agents
-                          IGNORED when --helper=1 is set
+                          and scales the local team.
 
 	Environment:
 	  PORT          API port (default: 8008)
@@ -132,19 +131,22 @@ Options:
 			cdnMode = true
 		case arg == "--lab":
 			labMode = true
-		case arg == "--public":
-			publicMode = true
+		case arg == "--local":
+			localMode = true
 		case arg == "--audit":
 			auditMode = true
 			os.Setenv("AUDIT_MODE", "1")
-		case arg == "--cn":
-			cnMirror = true
-			os.Setenv("CN_MIRROR", "1")
 		case arg == "--helper" || arg == "--helper=1":
 			helperMode = true
 			os.Setenv("CICY_HELPER", "1")
-		case strings.HasPrefix(arg, "--agents="):
-			agentsFlag = strings.TrimPrefix(arg, "--agents=")
+		case arg == "--port":
+			// space form: --port 8208
+			if i+1 < len(cliArgs) {
+				portFlag = cliArgs[i+1]
+				i++
+			}
+		case strings.HasPrefix(arg, "--port="):
+			portFlag = strings.TrimPrefix(arg, "--port=")
 		}
 	}
 
@@ -466,7 +468,11 @@ Options:
 	// UI (SPA)
 	http.Handle("/", serveUI())
 
-	port := os.Getenv("PORT")
+	// Port precedence: --port flag > PORT env > 8008 default.
+	port := portFlag
+	if port == "" {
+		port = os.Getenv("PORT")
+	}
 	if port == "" {
 		port = "8008"
 	}
@@ -536,7 +542,7 @@ Options:
 	}()
 
 	bind := "127.0.0.1"
-	if publicMode {
+	if publicMode && !localMode { // --local forces loopback even under container auto-public
 		bind = "0.0.0.0"
 	}
 	log.Printf("cicy-code starting on %s:%s", bind, port)
@@ -567,9 +573,6 @@ Options:
 	}()
 	if auditMode {
 		log.Printf("[startup] audit mode enabled")
-	}
-	if cnMirror {
-		log.Printf("[startup] CN mirror enabled")
 	}
 
 	sigCh := make(chan os.Signal, 1)

@@ -187,9 +187,16 @@ function AgentInstallOverlayInner({ paneId, agentType, onReloadTerminal }: Props
       data-id={`agent-install-overlay-${paneId}`}
       className="absolute inset-0 z-[11] flex flex-col items-center justify-center p-6 pointer-events-none"
     >
+      {/* Mask over the agent's webframe/terminal while the install prompt is up:
+          the CLI isn't usable yet, so cover + blur the frame behind and swallow
+          clicks (pointer-events-auto) so nothing leaks through to the dead pane. */}
+      <div
+        data-id={`agent-install-overlay-mask-${paneId}`}
+        className="pointer-events-auto absolute inset-0 bg-zinc-950/80 backdrop-blur-md"
+      />
       <div
         data-id={`agent-install-overlay-card-${paneId}`}
-        className="pointer-events-auto w-full max-w-md rounded-2xl border border-white/10 bg-zinc-900/90 p-6 shadow-2xl backdrop-blur-sm"
+        className="pointer-events-auto relative w-full max-w-md rounded-2xl border border-white/10 bg-zinc-900/90 p-6 shadow-2xl backdrop-blur-sm"
       >
         <div data-id={`agent-install-overlay-title-${paneId}`} className="text-base font-medium text-zinc-100">
           {phase === 'done' ? `${label} 安装完成` : `${label} 还没安装`}

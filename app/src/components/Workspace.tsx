@@ -12,7 +12,7 @@ import { isCicyLiteAgent } from '../lib/agentType';
 import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
-  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route,
+  LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
   Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -582,11 +582,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const leftPanelRef = useRef<HTMLDivElement>(null);
   const midPanelRef = useRef<HTMLDivElement>(null);
 
-  // Click anywhere in the workspace (outside the menu panel itself) hides the
-  // left menu panel. Scoped to the mid-panel content + activity-bar exclusion so
-  // it never closes on the panel's own portald dialogs (create-agent / confirm,
-  // which mount to document.body). Terminal clicks land in an iframe that steals
-  // window focus → the blur handler catches that case.
+  // Deliberately CLICKING in the workspace (the mid-panel content) hides the left
+  // menu panel. Must be a real pointer click — we intentionally do NOT watch window
+  // blur / iframe focus: the terminal iframe auto-grabs focus on load and on output,
+  // which would collapse the panel with no user action (the "自动折叠" regression).
+  // Scoped to mid-panel + activity-bar exclusion so the panel's own portald dialogs
+  // (create-agent / confirm, mounted to document.body) never trigger a close.
   useEffect(() => {
     if (!leftActive) return;
     const onPointerDown = (e: PointerEvent) => {
@@ -594,16 +595,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       if (leftPanelRef.current?.contains(t) || activityBarRef.current?.contains(t)) return;
       if (midPanelRef.current?.contains(t)) setLeftPanelView(null);
     };
-    const onWinBlur = () => {
-      const ae = document.activeElement;
-      if (ae && ae.tagName === 'IFRAME' && midPanelRef.current?.contains(ae)) setLeftPanelView(null);
-    };
     document.addEventListener('pointerdown', onPointerDown, true);
-    window.addEventListener('blur', onWinBlur);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown, true);
-      window.removeEventListener('blur', onWinBlur);
-    };
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
   }, [leftActive]);
 
   useEffect(() => {
@@ -2034,6 +2027,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           {/* Settings entries → open the unified fullscreen Settings modal at the
               matching section. Language stays as its own submenu above. */}
           <div data-id="membership-settings-group" className="mt-1 border-t border-white/[0.06] pt-1">
+            <button
+              type="button"
+              data-id="membership-settings-general"
+              onClick={() => openSettings('general')}
+              className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/5"
+            >
+              <span data-id="membership-settings-general-label">{t('settingsNavGeneral', { defaultValue: '通用' })}</span>
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+            </button>
             <button
               type="button"
               data-id="membership-settings-im"

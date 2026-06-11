@@ -138,22 +138,8 @@ ensure_cicy_code() {
 }
 
 build_app_argv() {
-  if [ "$#" -eq 0 ]; then
-    set -- --public
-  fi
-  case " $* " in
-    *" --public "*) ;;
-    *) set -- --public "$@" ;;
-  esac
-  # Add --agents from the CICY_AGENTS env var
-  case " $* " in
-    *" --agents="*) ;;
-    *)
-      if [ -n "${CICY_AGENTS:-}" ]; then
-        set -- --agents="${CICY_AGENTS}" "$@"
-      fi
-      ;;
-  esac
+  # --public / --agents 已废弃:container 模式由 isContainerRuntime() 自动绑 0.0.0.0;
+  # 不传 --agents 时默认安装官方角色名册。这里不再注入这两个 flag。
   # ENABLE_CDN=true → serve the App SPA + ttyd bundle from Cloudflare R2.
   # The R2 prefixes are baked into every binary; --cdn just activates them.
   case " $* " in

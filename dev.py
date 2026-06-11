@@ -322,7 +322,7 @@ def seed_runtime_home_from_image(image_ref, home_dir):
     temp_dir = tempfile.mkdtemp(prefix="cicy-openclaw-seed-")
     try:
         result = subprocess.run(
-            ["docker", "create", image_ref, "--public", "--agents=claude,codex,opencode"],
+            ["docker", "create", image_ref],
             capture_output=True,
             text=True,
             cwd=ROOT_DIR,
@@ -1245,10 +1245,8 @@ def run_docker(
     # When no --agents is given, omit the flag entirely so the server preinstalls
     # the official role roster (w-1001 项目经理 + team), exactly like a real fresh
     # install. Passing --agents forces the legacy per-type layout (dev override).
-    agents_flag = str(agents or "").strip()
-    cicy_args = ["--public"]
-    if agents_flag:
-        cicy_args.append(f"--agents={agents_flag}")
+    # --public / --agents 已废弃:容器模式自动绑 0.0.0.0,且默认安装官方角色名册。
+    cicy_args = []
     run_cmd = (
         [
             "docker",
@@ -1546,7 +1544,7 @@ def start_local_dev_detached(cicy_bin, extra=None, reply_mirror=False):
 
     with open(log_path, "ab", buffering=0) as log_file:
         process = subprocess.Popen(
-            [cicy_bin, "--public", "--dev", "--lab", *(extra or [])],
+            [cicy_bin, "--dev", "--lab", *(extra or [])],
             env=run_env,
             cwd=ROOT_DIR,
             stdout=log_file,

@@ -23,6 +23,13 @@ import (
 const enterDelay = 300 * time.Millisecond
 const chunkedPromptRuneSize = 80
 const chunkedPromptChunkDelay = 30 * time.Millisecond
+
+// Inside bracketed-paste markers the TUI buffers input until the end marker, so
+// pacing only guards tmux arg/PTY limits — not the renderer. 80-rune chunks ×
+// 30ms (the raw-typing cadence) made a ~1000-rune fork prompt take ~1.4s to
+// paste; 256-rune chunks × 15ms land it in ~0.3s with the same safety.
+const bracketedPasteChunkRuneSize = 256
+const bracketedPasteChunkDelay = 15 * time.Millisecond
 const chunkedPromptEnterDelay = 500 * time.Millisecond
 const promptConfirmPollInterval = 150 * time.Millisecond
 const codexPromptConfirmPollInterval = 60 * time.Millisecond
@@ -3890,7 +3897,7 @@ func sendPromptBracketedPaste(paneID, text string) error {
 	if _, err := runTmux("send-keys", "-t", paneID, "-l", "--", bracketedPasteStart); err != nil {
 		return err
 	}
-	parts := splitTextByRunes(text, chunkedPromptRuneSize)
+	parts := splitTextByRunes(text, bracketedPasteChunkRuneSize)
 	for i, part := range parts {
 		if part == "" {
 			continue
@@ -3899,7 +3906,7 @@ func sendPromptBracketedPaste(paneID, text string) error {
 			return err
 		}
 		if i < len(parts)-1 {
-			time.Sleep(chunkedPromptChunkDelay)
+			time.Sleep(bracketedPasteChunkDelay)
 		}
 	}
 	if _, err := runTmux("send-keys", "-t", paneID, "-l", "--", bracketedPasteEnd); err != nil {
@@ -4043,7 +4050,13 @@ func pasteIndicatorCount(out, agentType string) int {
 	case "codex":
 		return strings.Count(out, "[Pasted Content ")
 	case "claude", "openclaw":
-		return strings.Count(strings.ToLower(out), "pasted content")
+		// Claude Code v2.x renders a multi-line paste as "[Pasted text #1 +11
+		// lines]" (older builds said "Pasted content"). Count both — if neither
+		// matches, the indicator path never fires and every multi-line send
+		// (e.g. a fork's inherit prompt) burns the FULL pre-submit confirm
+		// timeout before the fallback Enter.
+		lower := strings.ToLower(out)
+		return strings.Count(lower, "pasted content") + strings.Count(lower, "pasted text")
 	default:
 		return 0
 	}
@@ -4170,6 +4183,15 @@ func codexSubmitConfirmed(out, text string) bool {
 }
 
 func claudeSubmitConfirmed(out, text string) bool {
+	// The live status line ("… (esc to interrupt)") only exists while a turn is
+	// actually running, and the send path only pastes into an idle pane — so its
+	// presence means THIS submit landed. Crucially this also covers collapsed
+	// pastes ("[Pasted text #1 +11 lines]"): their literal fragments never appear
+	// on screen, so the fragment scan below is blind and used to burn the whole
+	// confirm timeout + an Enter retry on every fork prompt.
+	if strings.Contains(strings.ToLower(out), "esc to interrupt") {
+		return true
+	}
 	lines := strings.Split(out, "\n")
 	lastPromptLine := -1
 	for i, line := range lines {

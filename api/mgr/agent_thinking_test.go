@@ -43,12 +43,14 @@ func TestAgentInspectorApplyThinking(t *testing.T) {
 		}
 	}
 
-	// disabled (anthropic): omit thinking entirely (anthropic disables by omission).
+	// disabled (anthropic): MUST be explicit {"type":"disabled"} — third-party
+	// anthropic-compatible fronts default thinking ON when the field is omitted
+	// (the w-1001 "thinking won't turn off" bug), so omission is not a disable.
 	{
 		p := map[string]interface{}{"thinking": map[string]interface{}{"type": "enabled"}}
 		p = agentInspectorApplyThinking(p, "anthropic", "disabled")
-		if _, ok := p["thinking"]; ok {
-			t.Fatalf("disabled anthropic: thinking must be omitted, got %#v", p["thinking"])
+		if !reflect.DeepEqual(p["thinking"], disabled) {
+			t.Fatalf("disabled anthropic: thinking=%#v, want %#v", p["thinking"], disabled)
 		}
 	}
 

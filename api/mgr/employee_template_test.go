@@ -26,7 +26,11 @@ func TestEmployeeTemplateResolvers(t *testing.T) {
     greeting: "您好,我是团队小助手。"
     prompt: "你是装机向导。"
 `
-	if err := os.WriteFile(filepath.Join(cicyRootDir, "employees.yaml"), []byte(yaml), 0644); err != nil {
+	dbDir := filepath.Join(cicyRootDir, "db")
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dbDir, "employees.yaml"), []byte(yaml), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -55,7 +59,7 @@ func TestEnsureEmployeeTemplatesSeeds(t *testing.T) {
 
 	ensureEmployeeTemplates()
 
-	path := filepath.Join(cicyRootDir, "employees.yaml")
+	path := filepath.Join(cicyRootDir, "db", "employees.yaml")
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("employees.yaml not seeded: %v", err)
 	}

@@ -9,7 +9,8 @@ package main
 //   - 「开场白」从角色 .md 的 `## 开场白` 搬到这里(开场白与 role 正文分离)。
 //   - 「人设」可选地覆盖 ~/cicy-ai/memory/agents/<slug>.md 的正文。
 //
-// 文件:~/cicy-ai/employees.yaml
+// 文件:~/cicy-ai/db/employees.yaml(与 lite-config.json 同放在 db/ 下;旧的
+// ~/cicy-ai/employees.yaml 会在首次启动时自动迁移过去)
 //   templates:
 //     项目经理: { tools: ["coordinate"], greeting: "...", prompt: "..." }
 //     人力资源: { tools: ["coordinate", "onboard"], greeting: "..." }
@@ -36,6 +37,12 @@ type employeeTemplatesFile struct {
 }
 
 func employeeTemplatesPath() string {
+	return filepath.Join(cicyRootDir, "db", "employees.yaml")
+}
+
+// legacyEmployeeTemplatesPath is the pre-migration location (~/cicy-ai/employees.yaml).
+// Kept only so ensureEmployeeTemplates can relocate an existing file into db/.
+func legacyEmployeeTemplatesPath() string {
 	return filepath.Join(cicyRootDir, "employees.yaml")
 }
 
@@ -83,6 +90,18 @@ func ensureEmployeeTemplates() {
 	path := employeeTemplatesPath()
 	if _, err := os.Stat(path); err == nil {
 		return // never overwrite operator edits
+	}
+	// Migrate the legacy ~/cicy-ai/employees.yaml → ~/cicy-ai/db/employees.yaml,
+	// preserving any operator edits, before falling back to re-seeding from the
+	// embedded templates.
+	if legacy := legacyEmployeeTemplatesPath(); legacy != path {
+		if _, err := os.Stat(legacy); err == nil {
+			if mkErr := os.MkdirAll(filepath.Dir(path), 0755); mkErr == nil {
+				if os.Rename(legacy, path) == nil {
+					return
+				}
+			}
+		}
 	}
 	entries, err := agentRoleTemplatesFS.ReadDir("embed/agent-roles")
 	if err != nil {

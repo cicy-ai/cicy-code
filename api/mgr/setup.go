@@ -900,8 +900,9 @@ func checkEnv() {
 	// the role roster's cicy agents compose their AGENTS.md with the right charter.
 	// Must run before worker creation below.
 	ensureRoleMemoryTemplates()
-	// Seed ~/cicy-ai/employees.yaml (员工模版配置: tools/开场白/人设) from the embedded
+	// Seed ~/cicy-ai/db/employees.yaml (员工模版配置: tools/开场白/人设) from the embedded
 	// role templates on first boot — the live, hot-editable source thereafter.
+	// (Also migrates a legacy ~/cicy-ai/employees.yaml into db/ if present.)
 	ensureEmployeeTemplates()
 
 	ensureDefaultProviders()
