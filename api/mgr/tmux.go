@@ -4669,6 +4669,11 @@ func initPaneEnv(opts paneEnvOpts) {
 	// bash re-entry wrapper because their generated bodies may rely on being sourced
 	// from non-bash shells on macOS.
 	script := "#!/usr/bin/env bash\n\n"
+	// Optional boot xtrace: `touch ~/.cicy-boot-trace` to capture a line-by-line
+	// trace of this script to ~/.cicy-boot-xtrace.log — used to pinpoint where
+	// pane boot hangs (e.g. under the native pty backend on Windows). No flag
+	// file => zero overhead, never traces normal runs.
+	script += "if [ -e \"$HOME/.cicy-boot-trace\" ]; then exec 19>>\"$HOME/.cicy-boot-xtrace.log\" 2>/dev/null; export BASH_XTRACEFD=19 PS4='+ ${BASH_SOURCE##*/}:${LINENO}: '; echo \"=== boot $(date) pane=${X_AGENT_SHORT_ID:-?} ===\" >&19; set -x; fi\n\n"
 	if bootAgentNorm == "claude" || bootAgentNorm == "cicy-claude" || bootAgentNorm == "codex" || bootAgentNorm == "gemini" || bootAgentNorm == "opencode" {
 		script += strings.Join(lines, "\n") + "\n"
 	} else {
