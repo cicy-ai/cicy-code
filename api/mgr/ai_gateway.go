@@ -45,6 +45,22 @@ func aiGatewayProxyBaseURL(provider string, agentID string) (*url.URL, error) {
 		// Google GenAI passthrough — gemini-cli's GOOGLE_GEMINI_BASE_URL lands here.
 		raw = strings.TrimSpace(cfg.GeminiURL)
 		if raw == "" {
+			// No gemini-protocol provider configured, so the default would be REAL
+			// Google (generativelanguage.googleapis.com). A box behind the cicy
+			// cloud gateway (e.g. CN, no direct Google egress) times out on that
+			// (i/o timeout → 502). When the agent's backing provider IS a cicy
+			// cloud gateway, route gemini through that same gateway host instead —
+			// it proxies the Google GenAI paths gemini-cli appends
+			// (/v1beta/models/<model>:streamGenerateContent). Only the cloud-gateway
+			// case is rerouted; users with a real Google key (GeminiURL set, or a
+			// non-cloud provider) keep hitting Google directly.
+			if anth := strings.TrimSpace(cfg.AnthropicURL); anth != "" {
+				if u, e := url.Parse(anth); e == nil && cicyCloudGatewayHost(u.Host) {
+					raw = anth
+				}
+			}
+		}
+		if raw == "" {
 			raw = "https://generativelanguage.googleapis.com"
 		}
 	}
