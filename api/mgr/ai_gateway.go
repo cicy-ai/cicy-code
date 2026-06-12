@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -389,7 +390,12 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 			resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			// Wrap upstream Chat Completions SSE into a Responses event stream
 			// before the audit reader so codex consumes the translated bytes.
-			resp.Body = newChatCompletionsToResponsesReader(resp.Body, "")
+			src := resp.Body
+			if gatewayDebugResponses() {
+				log.Printf("[responses-debug] agent=%s upstream status=%d content-type=%q", agentID, resp.StatusCode, resp.Header.Get("Content-Type"))
+				src = newDebugTeeReadCloser(src, "agent="+agentID+" upstream-chat-sse")
+			}
+			resp.Body = newChatCompletionsToResponsesReader(src, "")
 			resp.Header.Set("Content-Type", "text/event-stream; charset=utf-8")
 			resp.Header.Del("Content-Length")
 			resp.ContentLength = -1
@@ -524,6 +530,9 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 	// way. Header marks the request so ModifyResponse knows to wrap.
 	if shouldAdaptForCodexResponses(targetBase.Host, suffix) {
 		if newBody, _, err := transformResponsesRequestToChatCompletions(requestBody); err == nil {
+			if gatewayDebugResponses() {
+				log.Printf("[responses-debug] agent=%s host=%s transformed_chat_body=%s", agentID, targetBase.Host, truncForDebug(newBody, 3000))
+			}
 			requestBody = newBody
 			suffix = rewriteSuffixForChatCompletions(suffix)
 			r.Header.Set(cicyAdaptResponsesHeader, "1")
@@ -563,4 +572,59 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 
 	proxy := newAIGatewayReverseProxy(targetBase, suffix, provider, agentID, audit)
 	proxy.ServeHTTP(w, r)
+}
+
+// ── Temporary, env-gated diagnostics for the codex /responses empty-reply bug ──
+// All of this is INERT unless CICY_DEBUG_RESPONSES=1 is set in the server env, so
+// it cannot affect production or non-Windows paths. It dumps the transformed
+// chat/completions request body and the raw upstream SSE the rewrap reader sees,
+// so we can tell whether the upstream actually streamed content.
+
+func gatewayDebugResponses() bool {
+	return os.Getenv("CICY_DEBUG_RESPONSES") == "1"
+}
+
+func truncForDebug(b []byte, max int) string {
+	if len(b) <= max {
+		return string(b)
+	}
+	return string(b[:max]) + "…(+" + strconv.Itoa(len(b)-max) + "B)"
+}
+
+// debugTeeReadCloser copies the first ~4KB flowing through it into a buffer and
+// logs it once (at EOF or when the cap is reached), without disturbing the
+// stream the real reader consumes.
+type debugTeeReadCloser struct {
+	inner  io.ReadCloser
+	tag    string
+	buf    bytes.Buffer
+	logged bool
+}
+
+func newDebugTeeReadCloser(inner io.ReadCloser, tag string) *debugTeeReadCloser {
+	return &debugTeeReadCloser{inner: inner, tag: tag}
+}
+
+func (d *debugTeeReadCloser) flush() {
+	if d.logged {
+		return
+	}
+	d.logged = true
+	log.Printf("[responses-debug] %s upstream_bytes=%s", d.tag, truncForDebug(d.buf.Bytes(), 4096))
+}
+
+func (d *debugTeeReadCloser) Read(p []byte) (int, error) {
+	n, err := d.inner.Read(p)
+	if n > 0 && d.buf.Len() < 4096 {
+		d.buf.Write(p[:n])
+	}
+	if err != nil {
+		d.flush()
+	}
+	return n, err
+}
+
+func (d *debugTeeReadCloser) Close() error {
+	d.flush()
+	return d.inner.Close()
 }
