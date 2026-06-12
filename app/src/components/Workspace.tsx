@@ -14,7 +14,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag } from '../lib/modelTag';
@@ -36,6 +36,7 @@ import TeamPanel from './layout/TeamPanel';
 import GlobalProxyIndicator from './layout/GlobalProxyIndicator';
 import { ProxyManagerDialog } from './layout/ProxyManagerDialog';
 import SkillMarketplacePanel from './layout/SkillMarketplacePanel';
+import BrowserWindowsPanel from './layout/BrowserWindowsPanel';
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
 import AgentProviderRequestView, { type RequestViewTab } from './layout/AgentProviderRequestView';
 import AgentUsageLogView from './layout/AgentUsageLogView';
@@ -362,7 +363,7 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 }
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
-type LeftPanelView = 'team' | 'skills' | 'agents' | 'todo' | null;
+type LeftPanelView = 'team' | 'skills' | 'agents' | 'todo' | 'windows' | null;
 type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'artifact' | RequestViewTab;
 type CliContentMode = 'fixed';
 
@@ -410,7 +411,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const v = cache.get(leftPanelKey(paneId), null);
     // 刷新后恢复上次打开的左栏面板;'todo' 若技能未装会被下方 effect 关掉。
     // 旧缓存里的 'office' 已不在白名单 → 自动落到 null(办公室视图 2026-06-05 下线)。
-    const ok: LeftPanelView[] = ['team', 'skills', 'agents', 'todo'];
+    const ok: LeftPanelView[] = ['team', 'skills', 'agents', 'todo', 'windows'];
     return ok.includes(v) ? v : null;
   });
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -482,6 +483,20 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useEffect(() => {
     systemResourcesRef.current = systemResources;
   }, [systemResources]);
+
+  // Live system_resources (CPU/mem) arrives ~1/sec and always differs, so
+  // applying it every second re-renders every useApp() consumer — including
+  // this whole component tree — for a stat widget that doesn't need sub-second
+  // refresh. Throttle to a few seconds to cut that constant render load.
+  const lastSysResAtRef = useRef(0);
+  const applySystemResources = useCallback((next: SystemResourceSnapshot) => {
+    if (isDeepEqual(systemResourcesRef.current, next)) return;  // unchanged
+    const now = performance.now();
+    if (now - lastSysResAtRef.current < 3000) return;           // throttle window
+    lastSysResAtRef.current = now;
+    systemResourcesRef.current = next;
+    setSystemResources(next);
+  }, [setSystemResources]);
 
   const handleOpenClawOpen = () => {
     if (!token) return;
@@ -795,7 +810,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleCapture = async () => { if (isApiOnlyRuntime) return; try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
   const handleToggleMouse = async () => { if (isApiOnlyRuntime) return; const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
 
-  const toggleLeft = (p: 'team' | 'skills' | 'todo') => {
+  const toggleLeft = (p: 'team' | 'skills' | 'todo' | 'windows') => {
     setLeftPanelView(prev => prev === p ? null : p);
   };
 
@@ -1137,11 +1152,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       setBoundAgents((prev) => isDeepEqual(prev, nextBoundAgents) ? prev : nextBoundAgents);
       setPollStatuses((prev) => isDeepEqual(prev, nextPollStatuses) ? prev : nextPollStatuses);
       if (data.system_resources && typeof data.system_resources === 'object') {
-        if (!isDeepEqual(systemResourcesRef.current, data.system_resources)) {
-          const nextSystemResources = data.system_resources as SystemResourceSnapshot;
-          systemResourcesRef.current = nextSystemResources;
-          setSystemResources(nextSystemResources);
-        }
+        applySystemResources(data.system_resources as SystemResourceSnapshot);
       }
       if (data.membership && typeof data.membership === 'object') {
         setGlobalVar((prev: any) => {
@@ -1158,14 +1169,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
       if (st?.contextUsage != null) setContextUsage((prev) => prev === st.contextUsage ? prev : st.contextUsage);
     }
     if (msg?.type === 'system_resources' && msg.data && typeof msg.data === 'object') {
-      if (!isDeepEqual(systemResourcesRef.current, msg.data)) {
-        const nextSystemResources = msg.data as SystemResourceSnapshot;
-        systemResourcesRef.current = nextSystemResources;
-        setSystemResources(nextSystemResources);
-      }
+      applySystemResources(msg.data as SystemResourceSnapshot);
     }
     broadcastChatWsMessage(msg);
-  }, [broadcastChatWsMessage, fullPaneId, setChatWsState, setGlobalVar, setSystemResources, t]);
+  }, [applySystemResources, broadcastChatWsMessage, fullPaneId, setChatWsState, setGlobalVar, t]);
 
   // (1) Drive the singleton's URL params. configure() reconnects only when
   // URL-affecting params actually change.
@@ -1807,6 +1814,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           {!globalVar?.helper_mode && (
             <>
               <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
+              {/* Browser windows: Chrome / Electron profiles → live windows + screenshots */}
+              <SideBtn dataId="btn-windows" active={leftActive === 'windows'} icon={<AppWindow className="w-5 h-5" />} title="浏览器窗口" onClick={() => toggleLeft('windows')} />
               {/* Providers & IM moved into the unified Settings modal (bottom-left gear). */}
             </>
           )}
@@ -1845,6 +1854,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     </> : leftActive === 'skills' ? <>
                       <Brain className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-skills" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelSkills')}</span>
+                    </> : leftActive === 'windows' ? <>
+                      <AppWindow className="w-3.5 h-3.5 text-zinc-600" />
+                      <span data-id="left-panel-title-windows" className="text-xs font-medium text-zinc-500 flex-1 ml-1">浏览器窗口</span>
                     </> : <>
                       <Users className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-team" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelTeam')}</span>
@@ -1886,6 +1898,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     ) : leftActive === 'skills' ? (
                       <div data-id="left-panel-skills-view" className="absolute inset-0">
                         <SkillMarketplacePanel paneId={activeCliPaneId || paneId} />
+                      </div>
+                    ) : leftActive === 'windows' ? (
+                      <div data-id="left-panel-windows-view" className="absolute inset-0">
+                        <BrowserWindowsPanel />
                       </div>
                     ) : null}
                   </div>

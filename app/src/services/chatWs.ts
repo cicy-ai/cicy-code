@@ -17,6 +17,27 @@ type BoolListener = (v: boolean) => void;
 type StrListener = (v: string | null) => void;
 type NumListener = (v: number | null) => void;
 
+// --- Latency de-biasing (pure, unit-tested in chatWs.latency.test.ts) ---------
+// The ping/pong RTT is timed on the single UI thread, so when that thread is
+// starved (heavy render, other apps pegging CPU) the pong callback fires late
+// and inflates the reading — a 1ms network can read as multi-second latency.
+// We track the event-loop delay and subtract it so the signal reflects the
+// NETWORK, not local jank.
+
+const EL_LAG_INTERVAL_MS = 500;     // tracker tick
+const EL_LAG_MIN_SUBTRACT_MS = 20;  // ignore sub-frame jitter
+
+/** EWMA update of the event-loop-delay estimate given one tick's drift. */
+export function nextEventLoopLag(prev: number, driftMs: number): number {
+  return 0.6 * Math.max(0, driftMs) + 0.4 * prev;
+}
+
+/** Subtract recent event-loop delay from a raw RTT; idle loop → unchanged. */
+export function debiasLatency(rawMs: number, eventLoopLagMs: number): number {
+  const corrected = rawMs - (eventLoopLagMs > EL_LAG_MIN_SUBTRACT_MS ? eventLoopLagMs : 0);
+  return Math.max(0, Math.round(corrected));
+}
+
 class ChatWsClient {
   private ws: WebSocket | null = null;
   private params: ChatWsParams | null = null;
@@ -30,6 +51,16 @@ class ChatWsClient {
   private pingRequestId: string | null = null;
   private pingSentAt: number | null = null;
   private superseded = false;
+
+  // Event-loop (main-thread) delay estimate. The ping/pong RTT is timed on the
+  // single UI thread, so when that thread is starved (heavy render, other
+  // apps pegging CPU) the pong's onmessage callback fires late and inflates the
+  // reading — a 1ms network can read as multi-second "latency". We continuously
+  // estimate the event-loop delay and subtract it so the signal reflects the
+  // NETWORK, not local jank. Idle loop → elLag≈0 → reading unchanged.
+  private elLagTimer: number | null = null;
+  private elLag = 0;       // EWMA of main-thread event-loop delay (ms)
+  private elLagLast = 0;   // performance.now() of last lag tick
 
   // Public observed state.
   private connectedState = false;
@@ -154,6 +185,32 @@ class ChatWsClient {
     }
     this.pingRequestId = null;
     this.pingSentAt = null;
+    this.stopElLagTracking();
+  }
+
+  private startElLagTracking(): void {
+    this.stopElLagTracking();
+    this.elLag = 0;
+    this.elLagLast = performance.now();
+    this.elLagTimer = window.setInterval(() => {
+      const now = performance.now();
+      const drift = now - this.elLagLast - EL_LAG_INTERVAL_MS;
+      this.elLag = nextEventLoopLag(this.elLag, drift);
+      this.elLagLast = now;
+    }, EL_LAG_INTERVAL_MS);
+  }
+
+  private stopElLagTracking(): void {
+    if (this.elLagTimer != null) {
+      window.clearInterval(this.elLagTimer);
+      this.elLagTimer = null;
+    }
+    this.elLag = 0;
+  }
+
+  /** Recent main-thread event-loop delay estimate (ms). 0 when idle. */
+  getEventLoopLag(): number {
+    return Math.round(this.elLag);
   }
 
   private setConnected(v: boolean): void {
@@ -230,8 +287,9 @@ class ChatWsClient {
       try { ws.send(JSON.stringify({ type: 'poll_request' })); } catch {}
       // Register the current active agent (if known) — fire-and-forget.
       this.sendRegisterActiveChannel();
-      // Start latency pings.
+      // Start latency pings + main-thread lag tracking (used to de-bias RTT).
       this.cancelPing();
+      this.startElLagTracking();
       const sendLatencyPing = () => {
         if (this.ws !== ws || ws.readyState !== WebSocket.OPEN) return;
         const reqId = `ping-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -253,7 +311,10 @@ class ChatWsClient {
       }
       // Latency measurement is owned here so subscribers don't have to care.
       if (msg?.type === 'pong' && msg.data?.requestId && msg.data.requestId === this.pingRequestId && this.pingSentAt != null) {
-        this.setLatency(Math.max(0, Math.round(performance.now() - this.pingSentAt)));
+        const raw = performance.now() - this.pingSentAt;
+        // De-bias by recent main-thread event-loop delay so UI jank isn't
+        // misreported as network latency (idle loop → raw RTT untouched).
+        this.setLatency(debiasLatency(raw, this.elLag));
         this.pingSentAt = null;
       }
       for (const fn of this.listeners) {
