@@ -47,8 +47,118 @@ func nativeBoot(opts paneEnvOpts) bool {
 		return nativeClaudeBoot(opts)
 	case "cicy":
 		return nativeCicyBoot(opts)
+	case "opencode":
+		return nativeOpencodeBoot(opts)
+	case "codex":
+		return nativeCodexBoot(opts)
 	}
 	return false
+}
+
+// nativeCodexBoot boots codex natively. The launch has codex `-c key=value` TOML
+// overrides whose string values need embedded quotes — nightmarish through
+// send-keys, so Go writes a boot.bat with exact quoting and we just `call` it.
+// (The optional /model catalog is skipped for v1; codex still launches.)
+func nativeCodexBoot(opts paneEnvOpts) bool {
+	if normalizeAgentType(opts.agentType) != "codex" {
+		return false
+	}
+	ws := toWinPath(strings.TrimSpace(opts.workspace))
+	pid := opts.paneID
+	if ws == "" || pid == "" {
+		return false
+	}
+	shortID := strings.Split(pid, ":")[0]
+	dir := ws + `\.cicy`
+	_ = os.MkdirAll(dir, 0755)
+
+	bat := "@echo off\r\n" +
+		"set X_AGENT_ID=" + pid + "\r\n" +
+		"set X_AGENT_SHORT_ID=" + shortID + "\r\n" +
+		"set CICY_AGENT_TYPE=codex\r\n" +
+		"set WORKSPACE=" + ws + "\r\n"
+	if opts.useCustomGateway {
+		baseURL := openAIRuntimeBaseURL(shortID)
+		model := resolveCodexStartupModel(opts.defaultModel, loadRuntimeAIConfig(), shortID)
+		bypass := ""
+		if opts.allowAllActions {
+			bypass = " --dangerously-bypass-approvals-and-sandbox"
+		}
+		bat += "set OPENAI_API_KEY=cicy-local-gateway\r\n" +
+			`codex -m "` + model + `" -c "model_provider=custom" -c "model_providers.custom.name=cicy-local" -c "model_providers.custom.base_url=\"` + baseURL + `\""` + bypass + "\r\n"
+	} else {
+		bat += "codex\r\n"
+	}
+	_ = os.WriteFile(dir+`\codex-boot.bat`, []byte(bat), 0644)
+
+	waitForCmdReady(pid)
+	runTmux("send-keys", "-t", pid, `call "`+dir+`\codex-boot.bat"`, "Enter")
+	return true
+}
+
+// nativeOpencodeBoot boots opencode natively: Go writes opencode.json (provider
+// + model) and the persisted model.json, then sends the env + launch via cmd.
+func nativeOpencodeBoot(opts paneEnvOpts) bool {
+	if normalizeAgentType(opts.agentType) != "opencode" {
+		return false
+	}
+	ws := toWinPath(strings.TrimSpace(opts.workspace))
+	pid := opts.paneID
+	if ws == "" || pid == "" {
+		return false
+	}
+	shortID := strings.Split(pid, ":")[0]
+	aiCfg := loadRuntimeAIConfig()
+
+	xdgState := ws + `\.opencode\xdg\state`
+	_ = os.MkdirAll(xdgState+`\opencode`, 0755)
+	_ = os.MkdirAll(ws+`\.opencode`, 0755)
+
+	env := []string{
+		"set X_AGENT_ID=" + pid, "set X_AGENT_SHORT_ID=" + shortID,
+		"set CICY_AGENT_TYPE=opencode", "set WORKSPACE=" + ws,
+		"set XDG_STATE_HOME=" + xdgState,
+	}
+
+	if opts.useCustomGateway {
+		model := resolveOpencodeStartupModel(opts.defaultModel, aiCfg, shortID)
+		modelsBlock := buildOpencodeModelsBlock(opencodeActiveProviderModels(shortID, model))
+		topModelField := ""
+		if model != "" {
+			b, _ := json.Marshal("cicyai/" + model)
+			topModelField = `,"model":` + string(b)
+		}
+		var providerBlock string
+		if opencodeActiveProtocol(shortID) == "anthropic" {
+			bj, _ := json.Marshal(anthropicRuntimeBaseURL(shortID) + "/v1")
+			providerBlock = `"cicyai":{"npm":"@ai-sdk/anthropic","api":"anthropic","name":"cicyAi Gateway","options":{"baseURL":` + string(bj) + `,"apiKey":"cicy-local-gateway"},"models":` + modelsBlock + `}`
+		} else {
+			bj, _ := json.Marshal(openAIRuntimeBaseURL(shortID) + "/v1")
+			providerBlock = `"cicyai":{"npm":"@ai-sdk/openai-compatible","api":"openai","name":"cicyAi Gateway","options":{"baseURL":` + string(bj) + `},"models":` + modelsBlock + `}`
+		}
+		instr := ""
+		if opts.replyInChinese {
+			_ = os.WriteFile(ws+`\.opencode\reply-in-chinese.md`, []byte("Always reply in Chinese unless the user explicitly asks for another language.\nKeep code, commands, file paths, environment variables, API identifiers, and other literal tokens unchanged when accuracy matters.\n"), 0644)
+			ij, _ := json.Marshal(strings.ReplaceAll(ws, `\`, "/") + "/.opencode/reply-in-chinese.md")
+			instr = `,"instructions":[` + string(ij) + `]`
+		} else {
+			_ = os.Remove(ws + `\.opencode\reply-in-chinese.md`)
+		}
+		configJSON := `{"$schema":"https://opencode.ai/config.json","permission":"allow"` + instr + topModelField + `,"provider":{` + providerBlock + `}}`
+		_ = os.WriteFile(ws+`\.opencode\opencode.json`, []byte(configJSON), 0644)
+		if model != "" {
+			mid, _ := json.Marshal(model)
+			_ = os.WriteFile(xdgState+`\opencode\model.json`, []byte(`{"recent":[{"providerID":"cicyai","modelID":`+string(mid)+`}],"favorite":[],"variant":{}}`), 0644)
+		}
+		env = append(env, `set OPENCODE_CONFIG=`+ws+`\.opencode\opencode.json`)
+	} else {
+		_ = os.Remove(ws + `\.opencode\opencode.json`)
+	}
+
+	waitForCmdReady(pid)
+	runTmux("send-keys", "-t", pid, strings.Join(env, "&"), "Enter")
+	runTmux("send-keys", "-t", pid, "opencode", "Enter")
+	return true
 }
 
 // nativeCicyBoot boots the dispatcher pane: it just runs the in-binary REPL
