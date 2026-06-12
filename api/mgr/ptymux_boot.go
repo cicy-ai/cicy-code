@@ -51,8 +51,49 @@ func nativeBoot(opts paneEnvOpts) bool {
 		return nativeOpencodeBoot(opts)
 	case "codex":
 		return nativeCodexBoot(opts)
+	case "gemini":
+		return nativeGeminiBoot(opts)
 	}
 	return false
+}
+
+// nativeGeminiBoot boots gemini-cli natively. Gateway mode points
+// GOOGLE_GEMINI_BASE_URL at the /gemini passthrough and uses a placeholder
+// GEMINI_API_KEY; the launch is `gemini -m <model> [--yolo]`. No embedded-quote
+// args, so a plain send-keys env line + launch suffices (no boot.bat needed).
+func nativeGeminiBoot(opts paneEnvOpts) bool {
+	if normalizeAgentType(opts.agentType) != "gemini" {
+		return false
+	}
+	ws := toWinPath(strings.TrimSpace(opts.workspace))
+	pid := opts.paneID
+	if ws == "" || pid == "" {
+		return false
+	}
+	shortID := strings.Split(pid, ":")[0]
+
+	env := []string{
+		"set X_AGENT_ID=" + pid, "set X_AGENT_SHORT_ID=" + shortID,
+		"set CICY_AGENT_TYPE=gemini", "set WORKSPACE=" + ws,
+	}
+	yolo := ""
+	if opts.allowAllActions {
+		yolo = " --yolo"
+	}
+	launch := "gemini" + yolo
+	if opts.useCustomGateway {
+		model := resolveGeminiStartupModel(opts.defaultModel, loadRuntimeAIConfig(), shortID)
+		env = append(env,
+			"set GEMINI_API_KEY=cicy-local-gateway",
+			"set GOOGLE_GEMINI_BASE_URL="+geminiRuntimeBaseURL(shortID),
+		)
+		launch = `gemini -m "` + model + `"` + yolo
+	}
+
+	waitForCmdReady(pid)
+	runTmux("send-keys", "-t", pid, strings.Join(env, "&"), "Enter")
+	runTmux("send-keys", "-t", pid, launch, "Enter")
+	return true
 }
 
 // nativeCodexBoot boots codex natively. The launch has codex `-c key=value` TOML
