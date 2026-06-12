@@ -4834,7 +4834,10 @@ func sendTextToPane(winID, text string, submit bool) error {
 			return newTmuxSendError("text required", http.StatusBadRequest, false)
 		}
 		log.Printf("[tmux-send] pane=%s mode=text-no-submit text=%q", shortPaneID(winID), text)
-		if _, err := runTmux("send-keys", "-t", winID, "-l", text); err != nil {
+		// `--` guards text that begins with a dash: without it the native
+		// (ptymux) backend's flag parser swallows "-foo" as an unknown flag and
+		// the text is silently dropped. tmux itself also wants the separator.
+		if _, err := runTmux("send-keys", "-t", winID, "-l", "--", text); err != nil {
 			return newTmuxSendError("failed to send text without submit: "+err.Error(), http.StatusInternalServerError, false)
 		}
 		return nil
