@@ -1777,6 +1777,7 @@ def main():
         os.environ["SKIP_TTYD_ASSET"] = "1"
         os.environ["SKIP_NPM"] = "1"
         os.environ["PORT"] = str(PORT)
+        os.environ["CICY_MITM_HTTP_PORT"] = "1087"
         os.environ["SQLITE_PATH"] = SQLITE_PATH
         os.environ["CICY_PUBLIC_URL"] = (
             _configured_public_url() or os.environ.get("CICY_PUBLIC_URL", "")
@@ -1832,6 +1833,7 @@ def main():
     os.environ["SKIP_TTYD_ASSET"] = os.environ.get("SKIP_TTYD_ASSET", "1")
     platform = "darwin" if sys.platform == "darwin" else "linux"
     os.environ["PORT"] = str(PORT)
+    os.environ["CICY_MITM_HTTP_PORT"] = "1087"
     os.environ["SKIP_NPM"] = "1"
     os.environ["SQLITE_PATH"] = SQLITE_PATH
     os.environ.setdefault("CICY_PUBLIC_URL", "https://app-1001.cicy-ai.com")

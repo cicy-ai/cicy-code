@@ -5496,6 +5496,31 @@ Strict rules:
 
 Once you have absorbed the context, silently take over exactly where the source agent left off and continue its unfinished work. If the very next step is genuinely ambiguous, stop and wait for instructions rather than asking or reporting.`
 
+// cicyForkInheritPrompt seeds a HEADLESS cicy fork. Unlike the CLI path (which
+// hands the fork a file path to read), the summary CONTENT is embedded inline
+// as the fork's FIRST user message — a cicy agent has no interactive terminal,
+// so the context must arrive in-band. The <fork-inherited-context> wrapper is
+// what the web UI folds into a collapsed chip, so the long dump doesn't render
+// as a giant first bubble. The takeover instruction stays OUTSIDE the wrapper:
+// the UI shows it as the visible question line (and a wrapper-only message
+// would be treated as a harness-only turn, hiding the fork's first reply).
+// Args: %s = source agent id, %s = summary content.
+const cicyForkInheritPrompt = `<fork-inherited-context>
+You are a fork of agent %s — its continuation, not a fresh assistant.
+
+The following is that agent's prior conversation summary. It is YOUR OWN memory
+and working context: the task, the decisions already made, the current state,
+and what still remains to be done.
+
+%s
+</fork-inherited-context>
+
+You have absorbed the context above as your own history. Silently take over
+exactly where the source agent left off and continue its unfinished work. Do
+NOT summarize the context back, do NOT report the handoff to anyone. If the
+very next step is genuinely ambiguous, briefly state that you are ready and
+wait for instructions.`
+
 // POST /api/tmux/fork { source_pane_id: "w-1001", title?: "..." }
 func handleForkPane(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -5554,7 +5579,18 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 
 	_ = os.MkdirAll(summaryDir, 0755)
 	start := time.Now()
-	if out, genErr := exec.Command("agent-summary", short).Output(); genErr != nil {
+	// agent-summary resolves a bare agent id to the ID-DERIVED workspace path,
+	// which is wrong for agents whose configured workspace differs (e.g. w-1001
+	// lives in workers/w-10001) — the dump silently fails and the fork starts
+	// blank. Hand it the explicit current.json path from the CONFIGURED
+	// workspace; fall back to the id form only when that file doesn't exist.
+	summaryTarget := short
+	if ws := strings.TrimSpace(srcWorkspace.String); ws != "" {
+		if p := filepath.Join(ws, ".cicy", "history", "current.json"); fileExistsPlain(p) {
+			summaryTarget = p
+		}
+	}
+	if out, genErr := exec.Command("agent-summary", summaryTarget).Output(); genErr != nil {
 		log.Printf("[fork] agent-summary failed: %v", genErr)
 	} else {
 		log.Printf("[fork] %s summary generated -> %s (%s)", short, strings.TrimSpace(string(out)), time.Since(start).Round(time.Millisecond))
@@ -5631,7 +5667,35 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 	// returns now and the UI clears its fork-loading overlay immediately;
 	// blocking here (up to ~2 minutes for the agent to boot) kept the overlay
 	// spinning long after the fork was created.
-	if newPaneID != "" {
+	if newPaneID != "" && normalizeAgentType(srcAgentType.String) == "cicy" {
+		// Headless cicy fork: no CLI/tmux input box to paste into. Embed the
+		// source's summary CONTENT inline as the fork's first user message and
+		// run the first turn in-process (deliverCicyMessage) — same "absorb
+		// context and take over" behavior as the CLI path, minus the terminal.
+		go func() {
+			newShort := shortPaneID(newPaneID)
+			ws := paneWorkspace(newShort)
+			if ws == "" {
+				log.Printf("[fork] %s cicy fork workspace not found", newShort)
+				return
+			}
+			summary := ""
+			if usedPath != "" {
+				if b, err := os.ReadFile(usedPath); err == nil {
+					summary = strings.TrimSpace(string(b))
+				}
+			}
+			msg := fmt.Sprintf("You are a fork of agent %s. No prior-conversation summary is available — wait for instructions.", short)
+			if summary != "" {
+				msg = fmt.Sprintf(cicyForkInheritPrompt, short, summary)
+			}
+			if !deliverCicyMessage(newShort, ws, msg) {
+				log.Printf("[fork] %s cicy inherit message not delivered", newShort)
+				return
+			}
+			log.Printf("[fork] %s cicy inherit context delivered (summary %d bytes)", newShort, len(summary))
+		}()
+	} else if newPaneID != "" {
 		go func() {
 			// Poll readiness tightly so we send the prompt the moment the
 			// fork's input box is live. The old 500ms cadence + fixed 3s

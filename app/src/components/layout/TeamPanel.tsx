@@ -713,10 +713,11 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
               <Eraser className="w-3.5 h-3.5 shrink-0" />
               <span data-id="team-panel-worker-menu-clear-label">{i18n.t('menuClear', { ns: 'teamPanel', defaultValue: '清空对话 (/clear)' })}</span>
             </button>
-            {/* Fork(分身)只对 coding-CLI agent 有效 —— 它靠 agent-summary 继承对话
-                + 新 tmux pane 拉起 CLI。cicy lite agent(如 w-1001 项目经理)没有
-                CLI 终端形态,fork 出来无效,干脆不显示该入口(与上面 restart 同规则)。 */}
-            {onFork && normalizeAgentType(agentType) !== 'cicy' ? (
+            {/* Fork(分身):coding-CLI agent 走 agent-summary + 新 tmux pane 拉起
+                CLI;cicy lite agent(如 w-1001 项目经理)没有终端,后端改走 headless
+                路径 —— 摘要内容内嵌为新 agent 的第一条 user message(UI 折叠显示),
+                in-process 跑首轮接管。两种形态都支持,入口对所有 agent 开放。 */}
+            {onFork ? (
               <button
                 type="button"
                 data-id="team-panel-worker-menu-fork"

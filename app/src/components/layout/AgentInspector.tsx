@@ -1115,8 +1115,8 @@ function InspectorToggle({
   onBlur?: () => void;
 }) {
   return (
-    <div data-id="agent-inspector-settings-toggle" className="flex items-center justify-between py-1">
-      <div data-id="agent-inspector-settings-toggle-copy">
+    <div data-id="agent-inspector-settings-toggle" className="flex items-center justify-between gap-3 py-1">
+      <div data-id="agent-inspector-settings-toggle-copy" className="min-w-0 flex-1">
         <p className="text-[13px] font-medium text-zinc-300">{label}</p>
         {desc ? <p className="mt-0.5 text-[11px] text-zinc-600">{desc}</p> : null}
       </div>
@@ -1125,7 +1125,7 @@ function InspectorToggle({
         data-id="agent-inspector-settings-toggle-button"
         onClick={() => onChange(!checked)}
         onBlur={onBlur}
-        className={`relative h-6 w-11 rounded-full transition-colors ${checked ? 'bg-blue-600' : 'bg-white/[0.08]'}`}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${checked ? 'bg-blue-600' : 'bg-white/[0.08]'}`}
       >
         <div data-id="agent-inspector-settings-toggle-thumb" className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-md transition-transform ${checked ? 'translate-x-[22px]' : 'translate-x-1'}`} />
       </button>

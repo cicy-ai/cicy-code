@@ -9,6 +9,7 @@ type ToastState = {
 };
 import { useApp } from '../contexts/AppContext';
 import { isCicyLiteAgent } from '../lib/agentType';
+import { electronRPC } from '../lib/speedup/rpc';
 import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
@@ -244,6 +245,17 @@ function detectClientPlatform(): 'win' | 'darwin' | 'linux' {
   if (source.includes('win')) return 'win';
   if (source.includes('mac') || source.includes('darwin')) return 'darwin';
   return 'linux';
+}
+
+// Flatten the desktop's ipRegion ({country, region, city}) into one display
+// string for the chat-client registry, e.g. "US / California / San Jose".
+function formatIpRegion(r: any): string {
+  if (!r) return '';
+  if (typeof r === 'string') return r;
+  if (typeof r === 'object') {
+    return [r.country, r.region, r.city].map((x) => String(x || '').trim()).filter(Boolean).join(' / ');
+  }
+  return '';
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -538,6 +550,25 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   }, [paneId, pageClientId]);
   const wsClientPlatform = useMemo(() => detectClientPlatform(), []);
   const wsClientUserAgent = useMemo(() => (typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : ''), []);
+  // When running inside cicy-desktop, fetch the host's deviceId + egress IP +
+  // IP region + system language once (via the get_device_info RPC) so they can
+  // ride the chat-WS register and surface in GET /api/chat/clients. No-op in a
+  // plain browser (electronRPC absent).
+  const [desktopDeviceInfo, setDesktopDeviceInfo] = useState<Record<string, any> | null>(null);
+  useEffect(() => {
+    if (typeof (window as any).electronRPC !== 'function') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await electronRPC('get_device_info');
+        const info = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!cancelled && info && typeof info === 'object') setDesktopDeviceInfo(info);
+      } catch {
+        /* not in desktop / unavailable — ignore */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const [chatWsLiveStatus, setChatWsLiveStatus] = useState('idle');
   const [chatWsLiveText, setChatWsLiveText] = useState('');
   const [chatWsHistoryVersion, setChatWsHistoryVersion] = useState(0);
@@ -579,25 +610,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const closeLeftPanel = useCallback(() => {
     setLeftPanelView(null);
   }, []);
-  const leftPanelRef = useRef<HTMLDivElement>(null);
-  const midPanelRef = useRef<HTMLDivElement>(null);
-
-  // Deliberately CLICKING in the workspace (the mid-panel content) hides the left
-  // menu panel. Must be a real pointer click — we intentionally do NOT watch window
-  // blur / iframe focus: the terminal iframe auto-grabs focus on load and on output,
-  // which would collapse the panel with no user action (the "自动折叠" regression).
-  // Scoped to mid-panel + activity-bar exclusion so the panel's own portald dialogs
-  // (create-agent / confirm, mounted to document.body) never trigger a close.
-  useEffect(() => {
-    if (!leftActive) return;
-    const onPointerDown = (e: PointerEvent) => {
-      const t = e.target as Node;
-      if (leftPanelRef.current?.contains(t) || activityBarRef.current?.contains(t)) return;
-      if (midPanelRef.current?.contains(t)) setLeftPanelView(null);
-    };
-    document.addEventListener('pointerdown', onPointerDown, true);
-    return () => document.removeEventListener('pointerdown', onPointerDown, true);
-  }, [leftActive]);
+  // The left menu panel closes from EXACTLY two places, by design:
+  //   - data-id="left-panel-close" (the X in the panel header) → closeLeftPanel
+  //   - data-id="btn-team" / the activity-bar icons → toggleLeft (toggles itself off)
+  // No click-outside / blur auto-close — those felt random and were removed.
 
   useEffect(() => {
     cache.set(leftPanelKey(paneId), leftActive);
@@ -1204,8 +1220,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // `register_active_channel` on every (re)connect — no React-side guard
   // against "connected yet?" timing needed.
   useEffect(() => {
-    chatWs.setActiveAgent(activeCliPaneId, { platform: wsClientPlatform, user_agent: wsClientUserAgent });
-  }, [activeCliPaneId, wsClientPlatform, wsClientUserAgent]);
+    const extra: Record<string, any> = { platform: wsClientPlatform, user_agent: wsClientUserAgent };
+    if (desktopDeviceInfo) {
+      if (desktopDeviceInfo.publicIp) extra.public_ip = desktopDeviceInfo.publicIp;
+      const region = formatIpRegion(desktopDeviceInfo.ipRegion);
+      if (region) extra.ip_region = region;
+      if (desktopDeviceInfo.systemLanguage) extra.system_language = desktopDeviceInfo.systemLanguage;
+      if (desktopDeviceInfo.deviceId) extra.device_id = desktopDeviceInfo.deviceId;
+    }
+    chatWs.setActiveAgent(activeCliPaneId, extra);
+  }, [activeCliPaneId, wsClientPlatform, wsClientUserAgent, desktopDeviceInfo]);
 
   useEffect(() => {
     setChatSuggestionText('');
@@ -1809,7 +1833,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <div data-id="main-layout" className="flex h-full min-w-0">
             {leftActive && !globalVar?.helper_mode ? (
               <div
-                ref={leftPanelRef}
                 data-testid="left-panel"
                 data-id="left-panel"
                 className="h-full w-[360px] min-w-[360px] max-w-[360px] shrink-0"
@@ -1869,7 +1892,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                 </div>
               </div>
             ) : null}
-            <div ref={midPanelRef} data-testid="mid-panel" data-id="mid-panel" className="min-w-0 flex-1 relative">
+            <div data-testid="mid-panel" data-id="mid-panel" className="min-w-0 flex-1 relative">
               {rightContent}
             </div>
             {cliFixedContent}

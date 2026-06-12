@@ -619,7 +619,10 @@ function extractContentText(content: any): string {
 // the LEADING blocks off and render them in a small collapsed fold, leaving the
 // real question as the bubble. The \1 backreference matches each block to its
 // OWN closing tag, so a stray inner </tag> can't cut a block short.
-const HARNESS_BLOCK_RE = /^\s*<(system-reminder|task-notification|local-command-caveat|local-command-stdout|command-name|command-message|command-args)>([\s\S]*?)<\/\1>\s*/;
+// fork-inherited-context: a cicy fork's first user message carries the source
+// agent's conversation summary in this wrapper — fold it like other harness
+// blocks so the (potentially huge) inherited dump shows as a collapsed chip.
+const HARNESS_BLOCK_RE = /^\s*<(system-reminder|task-notification|local-command-caveat|local-command-stdout|command-name|command-message|command-args|fork-inherited-context)>([\s\S]*?)<\/\1>\s*/;
 // Codex prepends its memory file to the FIRST user message as
 // `# AGENTS.md instructions for <path>\n\n<INSTRUCTIONS>…</INSTRUCTIONS>` (a
 // leading markdown `#` header; CLAUDE.md uses the same shape) and often follows

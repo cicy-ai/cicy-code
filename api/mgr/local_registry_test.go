@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -10,8 +9,10 @@ import (
 	"testing"
 )
 
-// TestLocalRegistryLifecycle drives the host-side handler directly: start an
-// in-process registry on a real port, publish a skill, read status, then stop.
+// TestLocalRegistryLifecycle drives the host-side handler directly against the
+// ALWAYS-ON registry semantics: status reports always_on + a generated token,
+// publish/unpublish manage the shared dir, the mounted /registry handler serves
+// /v1/skills with the Bearer token, and start/stop are back-compat no-ops.
 func TestLocalRegistryLifecycle(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
@@ -26,69 +27,64 @@ func TestLocalRegistryLifecycle(t *testing.T) {
 	os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("# Demo"), 0o644)
 
 	call := func(method, path, body string) *httptest.ResponseRecorder {
-		var rdr *strings.Reader
-		if body != "" {
-			rdr = strings.NewReader(body)
-		} else {
-			rdr = strings.NewReader("")
-		}
-		req := httptest.NewRequest(method, path, rdr)
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		w := httptest.NewRecorder()
 		handleLocalRegistry(w, req)
 		return w
 	}
 
-	// ensure stopped at the end
-	defer call("POST", "/api/local-registry/stop", "")
-
-	// start on an unlikely-free port
+	// start is a back-compat no-op; it must succeed and return the status shape.
 	w := call("POST", "/api/local-registry/start", `{"port":18799}`)
 	if w.Code != 200 {
 		t.Fatalf("start: %d %s", w.Code, w.Body.String())
 	}
 	var st map[string]any
 	json.Unmarshal(w.Body.Bytes(), &st)
-	if st["running"] != true {
-		t.Fatalf("expected running=true, got %v", st["running"])
+	if st["always_on"] != true {
+		t.Fatalf("expected always_on=true, got %v", st["always_on"])
 	}
-	if tok, _ := st["token"].(string); tok == "" {
-		t.Errorf("expected a generated token")
+	tok, _ := st["token"].(string)
+	if tok == "" {
+		t.Fatalf("expected a generated token")
 	}
 
-	// publish the skill
+	// publish the skill by path
 	w = call("POST", "/api/local-registry/publish", `{"path":"`+skill+`"}`)
 	if w.Code != 200 {
 		t.Fatalf("publish: %d %s", w.Code, w.Body.String())
 	}
 
-	// status should now list the skill
-	w = call("GET", "/api/local-registry", "")
-	if w.Code != 200 {
-		t.Fatalf("status: %d", w.Code)
-	}
-	json.Unmarshal(w.Body.Bytes(), &st)
-	skills, _ := st["skills"].([]any)
-	if len(skills) != 1 {
-		t.Fatalf("expected 1 published skill, got %d (%s)", len(skills), w.Body.String())
-	}
-
-	// the server is actually listening — hit it over HTTP with the token
-	tok := st["token"].(string)
-	port := int(st["port"].(float64))
-	req, _ := http.NewRequest("GET", "http://127.0.0.1:18799/v1/skills", nil)
+	// the mounted /registry handler is live in-process — list skills with the token
+	req := httptest.NewRequest("GET", localRegMountPrefix+"/v1/skills", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("live GET (port %d): %v", port, err)
+	rec := httptest.NewRecorder()
+	serveLocalRegistry(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("mounted /v1/skills: want 200, got %d %s", rec.Code, rec.Body.String())
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		t.Errorf("live /v1/skills: want 200, got %d", resp.StatusCode)
+	if !strings.Contains(rec.Body.String(), `"demo"`) {
+		t.Fatalf("published skill missing from /v1/skills: %s", rec.Body.String())
 	}
 
-	// config persisted with enabled=true
-	cfgData, _ := os.ReadFile(localRegistryConfigPath())
-	if !strings.Contains(string(cfgData), `"enabled": true`) {
-		t.Errorf("config not persisted enabled: %s", cfgData)
+	// unpublish removes it
+	w = call("POST", "/api/local-registry/unpublish", `{"name":"demo"}`)
+	if w.Code != 200 {
+		t.Fatalf("unpublish: %d %s", w.Code, w.Body.String())
+	}
+	req = httptest.NewRequest("GET", localRegMountPrefix+"/v1/skills", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	rec = httptest.NewRecorder()
+	serveLocalRegistry(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("mounted /v1/skills after unpublish: want 200, got %d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), `"demo"`) {
+		t.Fatalf("skill still listed after unpublish: %s", rec.Body.String())
+	}
+
+	// stop is a no-op and still returns status 200
+	w = call("POST", "/api/local-registry/stop", "")
+	if w.Code != 200 {
+		t.Fatalf("stop: %d %s", w.Code, w.Body.String())
 	}
 }

@@ -32,6 +32,10 @@ type chatClient struct {
 	userAgent      string
 	connectedAt    time.Time
 	remoteAddr     string
+	publicIp       string // egress IP reported by a cicy-desktop client (its own machine, not remoteAddr)
+	ipRegion       string // that IP's geo region (country / region / city)
+	systemLanguage string // the client machine's OS locale
+	deviceId       string // cicy-desktop's stable deviceId
 	closeOnce      sync.Once
 	activityMu     sync.Mutex
 	lastActivityAt time.Time
@@ -58,7 +62,7 @@ type chatHub struct {
 	clients      map[string]map[string]*chatClient // master_agent_id -> client_id -> client
 	waiters      map[string]chan ChatEvent
 	agentClients map[string]map[string]struct{} // agent_id -> client_id set
-	lastReject map[string]time.Time // client_id -> last 4409-reject time (for persistent-reconnect supersede)
+	lastReject   map[string]time.Time           // client_id -> last 4409-reject time (for persistent-reconnect supersede)
 	// bridges maps a "virtual" client_id (e.g. "<pageClientId>:code-ext") to
 	// the real connected page client that owns it. Used by the native-files
 	// :code-ext bridge so agent-editor's host.* RPCs still resolve to a
@@ -132,29 +136,37 @@ func (h *chatHub) stats() interface{} {
 		// specific client is done via ClientID alone — never reason about
 		// agent ids when targeting a known client. Field names are
 		// intentionally long to make that contract obvious to LLM consumers.
-		MasterAgentID string `json:"non_routing_master_agent_id_display_only"`
-		ActiveAgentID string `json:"non_routing_active_agent_id_display_only"`
-		ClientID      string `json:"client_id"`
-		IsElectron    bool   `json:"isElectron"`
-		Platform      string `json:"platform"`
-		UserAgent     string `json:"user_agent"`
-		RemoteAddr    string `json:"remote_addr"`
-		ConnectedAt   string `json:"connected_at"`
-		UptimeSec     int    `json:"uptime_sec"`
+		MasterAgentID  string `json:"non_routing_master_agent_id_display_only"`
+		ActiveAgentID  string `json:"non_routing_active_agent_id_display_only"`
+		ClientID       string `json:"client_id"`
+		IsElectron     bool   `json:"isElectron"`
+		Platform       string `json:"platform"`
+		UserAgent      string `json:"user_agent"`
+		RemoteAddr     string `json:"remote_addr"`
+		PublicIp       string `json:"public_ip"`
+		IpRegion       string `json:"ip_region"`
+		SystemLanguage string `json:"system_language"`
+		DeviceId       string `json:"device_id"`
+		ConnectedAt    string `json:"connected_at"`
+		UptimeSec      int    `json:"uptime_sec"`
 	}
 	out := make([]clientInfo, 0)
 	for agentID, m := range h.clients {
 		for clientID, c := range m {
 			out = append(out, clientInfo{
-				MasterAgentID: agentID,
-				ActiveAgentID: c.activeAgent,
-				ClientID:      clientID,
-				IsElectron:    c.electron,
-				Platform:      c.platform,
-				UserAgent:     c.userAgent,
-				RemoteAddr:    c.remoteAddr,
-				ConnectedAt:   c.connectedAt.Format(time.RFC3339),
-				UptimeSec:     int(time.Since(c.connectedAt).Seconds()),
+				MasterAgentID:  agentID,
+				ActiveAgentID:  c.activeAgent,
+				ClientID:       clientID,
+				IsElectron:     c.electron,
+				Platform:       c.platform,
+				UserAgent:      c.userAgent,
+				RemoteAddr:     c.remoteAddr,
+				PublicIp:       c.publicIp,
+				IpRegion:       c.ipRegion,
+				SystemLanguage: c.systemLanguage,
+				DeviceId:       c.deviceId,
+				ConnectedAt:    c.connectedAt.Format(time.RFC3339),
+				UptimeSec:      int(time.Since(c.connectedAt).Seconds()),
 			})
 		}
 	}
@@ -410,7 +422,6 @@ func normalizeChatClientPlatform(value string) string {
 	}
 }
 
-
 func (h *chatHub) updateClientMetadata(clientID string, platform string, userAgent string) {
 	clientID = strings.TrimSpace(clientID)
 	if clientID == "" {
@@ -430,6 +441,34 @@ func (h *chatHub) updateClientMetadata(clientID string, platform string, userAge
 	}
 	if userAgent != "" {
 		c.electron = isElectronUserAgent(userAgent)
+	}
+}
+
+// updateClientDeviceInfo stores the desktop-reported machine info on the client.
+// Each field only overwrites when non-empty (so a later register without the
+// field doesn't wipe it).
+func (h *chatHub) updateClientDeviceInfo(clientID, publicIp, ipRegion, systemLanguage, deviceId string) {
+	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	c := h.lookupClientLocked(clientID)
+	if c == nil {
+		return
+	}
+	if v := strings.TrimSpace(publicIp); v != "" {
+		c.publicIp = v
+	}
+	if v := strings.TrimSpace(ipRegion); v != "" {
+		c.ipRegion = v
+	}
+	if v := strings.TrimSpace(systemLanguage); v != "" {
+		c.systemLanguage = v
+	}
+	if v := strings.TrimSpace(deviceId); v != "" {
+		c.deviceId = v
 	}
 }
 
@@ -606,6 +645,16 @@ func (c *chatClient) readPump() {
 			// isElectron is re-derived from userAgent here; the client no longer
 			// supplies it via the message payload.
 			hub.updateClientMetadata(c.clientID, platform, userAgent)
+			// cicy-desktop clients forward their machine's egress IP / IP region /
+			// OS language / deviceId (from the desktop get_device_info RPC). Stored
+			// for display in GET /api/chat/clients; only overwrites when non-empty.
+			hub.updateClientDeviceInfo(
+				c.clientID,
+				aiGatewayFirstNonEmpty(aiGatewayString(data["public_ip"]), aiGatewayString(data["publicIp"])),
+				aiGatewayFirstNonEmpty(aiGatewayString(data["ip_region"]), aiGatewayString(data["ipRegion"])),
+				aiGatewayFirstNonEmpty(aiGatewayString(data["system_language"]), aiGatewayString(data["systemLanguage"])),
+				aiGatewayFirstNonEmpty(aiGatewayString(data["device_id"]), aiGatewayString(data["deviceId"])),
+			)
 			if agentID != "" {
 				hub.registerClientAgent(c.clientID, agentID)
 			}
@@ -1003,25 +1052,25 @@ func handleChatWebhook(w http.ResponseWriter, r *http.Request) {
 //
 // Two modes:
 //
-//   1. ASYNC / fire-and-forget (default; ` + "`wait_ack: false`" + ` or omitted)
-//      Sends the message to target ` + "`client_id`" + ` (or broadcasts to all clients
-//      of an agent if no client_id) and returns immediately. The receiver does
-//      NOT acknowledge; any error inside the receiver is invisible. Use this
-//      only when delivery failure is genuinely tolerable:
-//        - UX hints to the page (e.g. ` + "`code.show_files`" + `, ` + "`status_change`" + `)
-//        - One-to-many broadcasts (poll responses, ai chunks, current_updated)
+//  1. ASYNC / fire-and-forget (default; ` + "`wait_ack: false`" + ` or omitted)
+//     Sends the message to target ` + "`client_id`" + ` (or broadcasts to all clients
+//     of an agent if no client_id) and returns immediately. The receiver does
+//     NOT acknowledge; any error inside the receiver is invisible. Use this
+//     only when delivery failure is genuinely tolerable:
+//     - UX hints to the page (e.g. ` + "`code.show_files`" + `, ` + "`status_change`" + `)
+//     - One-to-many broadcasts (poll responses, ai chunks, current_updated)
 //
-//   2. SYNC / wait-for-ack (` + "`wait_ack: true`" + `, requires ` + "`client_id`" + `)
-//      Injects a server-generated ` + "`requestId`" + ` into the message's data,
-//      registers a waiter, sends, and BLOCKS until the target client writes
-//      any WS message whose ` + "`data.requestId`" + ` matches. Returns that message
-//      as the HTTP response (or 504 on timeout). The receiver-side convention
-//      is: process the request, then write back a result message carrying the
-//      same ` + "`requestId`" + ` (any type — readPump routes by id, not by type).
-//      Use this when the caller needs to know "did it work?" — open file,
-//      exec JS, ping, etc. Replaces the older "agent A pushes to page, page
-//      relays to extension, no one knows if it landed" pattern that silently
-//      swallowed errors.
+//  2. SYNC / wait-for-ack (` + "`wait_ack: true`" + `, requires ` + "`client_id`" + `)
+//     Injects a server-generated ` + "`requestId`" + ` into the message's data,
+//     registers a waiter, sends, and BLOCKS until the target client writes
+//     any WS message whose ` + "`data.requestId`" + ` matches. Returns that message
+//     as the HTTP response (or 504 on timeout). The receiver-side convention
+//     is: process the request, then write back a result message carrying the
+//     same ` + "`requestId`" + ` (any type — readPump routes by id, not by type).
+//     Use this when the caller needs to know "did it work?" — open file,
+//     exec JS, ping, etc. Replaces the older "agent A pushes to page, page
+//     relays to extension, no one knows if it landed" pattern that silently
+//     swallowed errors.
 //
 // Either mode returns 404 immediately when the target ` + "`client_id`" + ` isn't
 // connected; the caller can retry, surface the error, or fall back as needed.
