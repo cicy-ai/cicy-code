@@ -431,6 +431,10 @@ Options:
 	// Settings
 	http.HandleFunc("/api/settings", wa(handleSettings))
 	http.HandleFunc("/api/settings/global", wa(handleSettings))
+	// Settings → General: email (SMTP) config + API-token show/rotate-and-email.
+	http.HandleFunc("/api/settings/email", wa(handleEmailConfig))
+	http.HandleFunc("/api/settings/token", wa(handleTokenShow))
+	http.HandleFunc("/api/settings/token/refresh", wa(handleTokenRefresh))
 
 	// AI providers (global.json)
 	http.HandleFunc("/api/providers", wa(handleProviders))

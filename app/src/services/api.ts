@@ -210,6 +210,11 @@ const api = {
 
   getGlobalSettings: (token?: string) => http.get('/api/settings/global', token ? { headers: { Authorization: `Bearer ${token}` } } : undefined),
   updateGlobalSettings: (data: any) => http.post('/api/settings/global', data),
+  // Settings → General: email (SMTP) config + API token show / rotate-and-email.
+  getEmailConfig: () => http.get('/api/settings/email'),
+  saveEmailConfig: (cfg: any) => http.post('/api/settings/email', cfg),
+  getApiToken: () => http.get('/api/settings/token'),
+  refreshApiToken: (body?: { to?: string }) => http.post('/api/settings/token/refresh', body || {}),
   getOpenClawGateway: () => http.get('/api/openclaw/gateway'),
 
   getProviders: () => http.get('/api/providers'),
