@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -23,11 +24,22 @@ type ptmManager struct {
 
 func ptmNewManager() *ptmManager {
 	m := &ptmManager{sessions: map[string]*ptmSession{}, cols: 120, rows: 36}
-	// Default pane shell: keep MSYS2 bash (it works; only tmux was buggy) so
-	// boot.sh and the agents run as before. Fall back to cmd.exe if absent.
+	// Default pane shell: keep MSYS2 bash (it works; only tmux was buggy). It
+	// MUST mirror tmux's default-command exactly:
+	//   bash --rcfile $HOME/.cicy_shell_init -i
+	// so the pane sources ~/.cicy_shell_init -> ~/.bashrc + ~/.cicy_tmux.conf
+	// (PATH incl. the agent CLIs, gateway env, functions) AND shows the prompt
+	// marker waitForShellPromptReady needs. Plain `bash -l -i` sources none of
+	// that, so the boot.sh prompt-wait times out and claude never launches.
 	if root := msysRoot(); root != "" {
 		m.shell = filepath.Join(root, "usr", "bin", "bash.exe")
-		m.shellArgs = []string{"-l", "-i"}
+		home := os.Getenv("HOME") // initPlatform sets this to the POSIX userprofile
+		if home == "" {
+			if uh, err := os.UserHomeDir(); err == nil {
+				home = toPosixPath(uh)
+			}
+		}
+		m.shellArgs = []string{"--rcfile", home + "/.cicy_shell_init", "-i"}
 	} else {
 		m.shell = "cmd.exe"
 	}
