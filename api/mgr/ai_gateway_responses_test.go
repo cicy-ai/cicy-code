@@ -79,6 +79,29 @@ func TestResponsesRewrap_NonStreamingBodyYieldsEmpty(t *testing.T) {
 	}
 }
 
+// Native-Responses upstreams (api.openai.com, the cicy cloud gateway) must NOT
+// be adapted — codex's /responses is passed through so the upstream's native
+// Responses stream reaches codex intact. Only chat-only upstreams get adapted.
+func TestShouldAdaptForCodexResponses(t *testing.T) {
+	cases := []struct {
+		host, suffix string
+		want         bool
+	}{
+		{"api.openai.com", "/responses", false},
+		{"gateway.cicy-ai.com", "/responses", false},      // the box's actual upstream — the bug
+		{"gateway.cicy-ai.com:443", "/responses", false},  // host:port form
+		{"foo.cicy-ai.com", "/responses", false},          // any cicy cloud subdomain
+		{"api.deepseek.com", "/responses", true},          // chat-only → adapt
+		{"my-one-api.example.com", "/responses", true},    // chat-only relay → adapt
+		{"api.deepseek.com", "/chat/completions", false},  // not a responses call
+	}
+	for _, c := range cases {
+		if got := shouldAdaptForCodexResponses(c.host, c.suffix); got != c.want {
+			t.Errorf("shouldAdaptForCodexResponses(%q,%q)=%v want %v", c.host, c.suffix, got, c.want)
+		}
+	}
+}
+
 // reasoning_content with NO content delta surfaces reasoning but leaves the
 // assistant message text empty — another route to answer_len=0 (a reasoner that
 // ignored thinking:disabled and returned only reasoning).

@@ -15,16 +15,27 @@ const cicyAdaptResponsesHeader = "X-Cicy-Adapt-Responses-To-ChatCompletions"
 const cicyAdaptMessagesHeader = "X-Cicy-Adapt-Messages-To-ChatCompletions"
 
 // shouldAdaptForCodexResponses returns true when the client is calling the
-// OpenAI Responses API (codex) and the upstream is NOT OpenAI proper. Only
-// api.openai.com natively serves /v1/responses; everyone else (DeepSeek,
-// new-api, SiliconFlow, Together, etc.) only speaks Chat Completions, so we
-// translate request + streaming response.
+// OpenAI Responses API (codex) and the upstream does NOT natively serve it. Both
+// api.openai.com AND the cicy cloud gateway (gateway.cicy-ai.com) speak the
+// Responses API natively — for those we MUST pass codex's /responses through
+// untouched. Translating would send the upstream a Chat Completions request,
+// then wrap its reply with the chat->responses reader; but a native-Responses
+// upstream answers in Responses format, which that reader (it scans for chat
+// delta.content) parses to nothing — codex then renders an empty reply
+// (output:[]). Everyone else (DeepSeek, new-api, SiliconFlow, Together, …) only
+// speaks Chat Completions, so we translate request + streaming response.
 func shouldAdaptForCodexResponses(upstreamHost, suffix string) bool {
 	if !strings.Contains(strings.ToLower(suffix), "/responses") {
 		return false
 	}
 	h := strings.ToLower(upstreamHost)
-	return !strings.Contains(h, "api.openai.com")
+	if strings.Contains(h, "api.openai.com") {
+		return false
+	}
+	if cicyCloudGatewayHost(upstreamHost) {
+		return false
+	}
+	return true
 }
 
 // rewriteSuffixForChatCompletions converts a Responses-API suffix into the
