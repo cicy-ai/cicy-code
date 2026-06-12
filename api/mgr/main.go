@@ -38,7 +38,6 @@ var (
 	helperMode    bool // --helper=1 → ships a single headless cicy 团队助手 on w-1001
 	desktopCmd    *exec.Cmd
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
-	localMode     bool   // --local → force 127.0.0.1 even when container mode would bind 0.0.0.0
 )
 
 const version = "2.2.19"
@@ -110,7 +109,10 @@ Options:
                           prefixes are baked into every build; this flag only
                           activates them.
   --lab                   Enable lab mode
-  --local                 Bind 127.0.0.1 only (overrides container/deploy auto 0.0.0.0)
+  --public                Bind 0.0.0.0 (expose to the network). Default is
+                          127.0.0.1 (loopback only) — INCLUDING inside
+                          containers. Only pass this when you intend to expose
+                          the API, and use a strong, non-default api_token.
   --port N                API port (overrides PORT env; default: 8008)
   --audit                 Enable audit mode
   --helper=1              Team-Helper mode: ship a single headless cicy
@@ -131,8 +133,8 @@ Options:
 			cdnMode = true
 		case arg == "--lab":
 			labMode = true
-		case arg == "--local":
-			localMode = true
+		case arg == "--public":
+			publicMode = true
 		case arg == "--audit":
 			auditMode = true
 			os.Setenv("AUDIT_MODE", "1")
@@ -175,10 +177,13 @@ Options:
 	ensureMITMCAInSystemTrust() // trust the (now-generated) MITM CA for codex/kiro Rust TLS
 	startAutonomy()
 
+	// containerMode is still tracked for runtimeMode reporting, but it no longer
+	// forces a public bind: the listener defaults to 127.0.0.1 everywhere
+	// (including containers). Exposing the API to the network is now an explicit
+	// opt-in via --public. To reach a container's loopback-bound API from the
+	// host, port-forward to 127.0.0.1 inside the container, or pass --public
+	// (with a strong api_token) when you genuinely want it on the network.
 	containerMode = isContainerRuntime()
-	if containerMode {
-		publicMode = true
-	}
 	checkEnv()
 
 	go startWatcher()
@@ -542,8 +547,9 @@ Options:
 	}()
 
 	bind := "127.0.0.1"
-	if publicMode && !localMode { // --local forces loopback even under container auto-public
+	if publicMode { // --public → expose on all interfaces; default stays loopback
 		bind = "0.0.0.0"
+		log.Printf("[startup] WARNING: --public binds 0.0.0.0 (network-exposed). Ensure a strong, non-default api_token is set.")
 	}
 	log.Printf("cicy-code starting on %s:%s", bind, port)
 	token := getFirstToken()

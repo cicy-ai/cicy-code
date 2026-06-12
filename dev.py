@@ -1245,8 +1245,11 @@ def run_docker(
     # When no --agents is given, omit the flag entirely so the server preinstalls
     # the official role roster (w-1001 项目经理 + team), exactly like a real fresh
     # install. Passing --agents forces the legacy per-type layout (dev override).
-    # --public / --agents 已废弃:容器模式自动绑 0.0.0.0,且默认安装官方角色名册。
-    cicy_args = []
+    # cicy-code now binds 127.0.0.1 by default (containers included), so a -p
+    # mapping can't reach it without an explicit public bind. This dev container
+    # is intentionally exposed via `-p {ports}:8008`, so pass --public. (--agents
+    # stays omitted → server preinstalls the official role roster.)
+    cicy_args = ["--public"]
     run_cmd = (
         [
             "docker",

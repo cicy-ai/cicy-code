@@ -138,8 +138,21 @@ ensure_cicy_code() {
 }
 
 build_app_argv() {
-  # --public / --agents 已废弃:container 模式由 isContainerRuntime() 自动绑 0.0.0.0;
-  # 不传 --agents 时默认安装官方角色名册。这里不再注入这两个 flag。
+  # cicy-code now binds 127.0.0.1 by DEFAULT everywhere (including containers) —
+  # the old "container auto-binds 0.0.0.0" was removed because it silently
+  # network-exposed the full-control API. To reach the API from the host via a
+  # `-p` mapping you must opt in to a public bind: set CICY_PUBLIC=1 (injected
+  # here as --public) or pass --public in the container command. Prefer also
+  # binding the host side to loopback (`-p 127.0.0.1:8008:8008`) and a strong,
+  # non-default api_token. (--agents was likewise retired; default roster is seeded.)
+  case " $* " in
+    *" --public "*) ;;
+    *)
+      case "${CICY_PUBLIC:-}" in
+        1|true|TRUE|True|yes|YES|on|ON) set -- --public "$@" ;;
+      esac
+      ;;
+  esac
   # ENABLE_CDN=true → serve the App SPA + ttyd bundle from Cloudflare R2.
   # The R2 prefixes are baked into every binary; --cdn just activates them.
   case " $* " in
