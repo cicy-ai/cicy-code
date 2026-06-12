@@ -1798,6 +1798,11 @@ func ensureCicyShellInit() {
 # customizations in ~/.bashrc, and cicy-tmux logic in ~/.cicy_tmux.conf.
 [ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"
 [ -f "$HOME/.cicy_tmux.conf" ] && . "$HOME/.cicy_tmux.conf"
+# Reap this pane's child processes (agent CLIs, e.g. opencode) when the shell
+# exits. tmux teardown sends SIGHUP, but some tools ignore it and reparent to
+# PID 1, leaking across sessions until they exhaust RAM. Force-kill our direct
+# children on exit so a retired pane never leaves a daemon behind.
+trap 'pkill -KILL -P "$$" 2>/dev/null' EXIT
 `
 	path := filepath.Join(home, ".cicy_shell_init")
 	if existing, readErr := os.ReadFile(path); readErr == nil && string(existing) == body {
