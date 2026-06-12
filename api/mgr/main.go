@@ -41,7 +41,7 @@ var (
 	localMode     bool   // --local → force 127.0.0.1 even when container mode would bind 0.0.0.0
 )
 
-const version = "2.2.18"
+const version = "2.2.19"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string

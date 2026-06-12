@@ -14,10 +14,18 @@ var (
 	ptmOnce    sync.Once
 )
 
+// ptmForceOn is empty in normal builds (committed default = OFF, safe). A test
+// build can bake the backend ON without touching env via:
+//   go build -ldflags "-X main.ptmForceOn=1" ./mgr/
+var ptmForceOn string
+
 // ptmEnabled reports whether the native pty backend replaces tmux on Windows.
 // Default OFF: a normal release behaves exactly as before (real MSYS2 tmux).
-// Set CICY_PTY_BACKEND=go|1|on to switch to the ConPTY backend.
+// Set CICY_PTY_BACKEND=go|1|on (or build with -X main.ptmForceOn=1) to switch.
 func ptmEnabled() bool {
+	if ptmForceOn == "1" {
+		return true
+	}
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("CICY_PTY_BACKEND"))) {
 	case "go", "1", "on", "ptymux", "native":
 		return true
