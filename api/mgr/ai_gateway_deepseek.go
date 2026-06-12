@@ -15,27 +15,24 @@ const cicyAdaptResponsesHeader = "X-Cicy-Adapt-Responses-To-ChatCompletions"
 const cicyAdaptMessagesHeader = "X-Cicy-Adapt-Messages-To-ChatCompletions"
 
 // shouldAdaptForCodexResponses returns true when the client is calling the
-// OpenAI Responses API (codex) and the upstream does NOT natively serve it. Both
-// api.openai.com AND the cicy cloud gateway (gateway.cicy-ai.com) speak the
-// Responses API natively — for those we MUST pass codex's /responses through
-// untouched. Translating would send the upstream a Chat Completions request,
-// then wrap its reply with the chat->responses reader; but a native-Responses
-// upstream answers in Responses format, which that reader (it scans for chat
-// delta.content) parses to nothing — codex then renders an empty reply
-// (output:[]). Everyone else (DeepSeek, new-api, SiliconFlow, Together, …) only
-// speaks Chat Completions, so we translate request + streaming response.
+// OpenAI Responses API (codex) and the upstream does NOT serve /responses, so we
+// must send the REQUEST as Chat Completions instead. Only api.openai.com serves
+// /responses natively. Everyone else — DeepSeek, new-api, AND the cicy cloud
+// gateway (gateway.cicy-ai.com, which 404s /responses) — only accepts
+// /chat/completions, so we translate the request body + path.
+//
+// NOTE: this governs the REQUEST only. The RESPONSE is handled separately by a
+// format-detecting reader (newCodexResponsesReader): some of these upstreams (the
+// cicy cloud gateway) answer a /chat/completions request in *Responses* format
+// already, so that reader passes such a stream through untouched and only
+// converts genuine chat.completion.chunk streams. That split is why a plain
+// chat->responses wrap produced an empty reply (output:[]) before.
 func shouldAdaptForCodexResponses(upstreamHost, suffix string) bool {
 	if !strings.Contains(strings.ToLower(suffix), "/responses") {
 		return false
 	}
 	h := strings.ToLower(upstreamHost)
-	if strings.Contains(h, "api.openai.com") {
-		return false
-	}
-	if cicyCloudGatewayHost(upstreamHost) {
-		return false
-	}
-	return true
+	return !strings.Contains(h, "api.openai.com")
 }
 
 // rewriteSuffixForChatCompletions converts a Responses-API suffix into the
@@ -441,6 +438,53 @@ func newChatCompletionsToResponsesReader(body io.ReadCloser, model string) io.Re
 		model:     model,
 		toolCalls: map[int]*toolCallState{},
 	}
+}
+
+// newCodexResponsesReader adapts an upstream's reply to codex's /responses request
+// into a Responses event stream — but ONLY when the upstream actually answered in
+// Chat Completions format. Some upstreams behind the /chat/completions request we
+// send (notably the cicy cloud gateway) ALREADY answer in Responses format; for
+// those we must pass the stream through untouched, because running it through the
+// chat->responses converter (which scans for chat `delta.content`) would find
+// nothing and emit an empty response (output:[]) — the codex empty-reply bug.
+// We detect the format by peeking the first bytes of the stream.
+func newCodexResponsesReader(body io.ReadCloser) io.ReadCloser {
+	br := bufio.NewReader(body)
+	prefix, _ := br.Peek(512) // non-consuming; short read at EOF is fine
+	if looksLikeResponsesStream(prefix) {
+		return &passthroughReadCloser{r: br, c: body}
+	}
+	return &chatCompletionsToResponsesReader{
+		src:       br,
+		srcClose:  body,
+		toolCalls: map[int]*toolCallState{},
+	}
+}
+
+// looksLikeResponsesStream reports whether an SSE prefix is already an OpenAI
+// Responses event stream (event: response.* / a data payload typed response.*)
+// rather than chat.completion.chunk data.
+func looksLikeResponsesStream(prefix []byte) bool {
+	s := string(prefix)
+	return strings.Contains(s, "event: response.") ||
+		strings.Contains(s, `"type":"response.`) ||
+		strings.Contains(s, `"type": "response.`)
+}
+
+// passthroughReadCloser streams an already-buffered reader through verbatim and
+// closes the underlying source on Close.
+type passthroughReadCloser struct {
+	r io.Reader
+	c io.Closer
+}
+
+func (p *passthroughReadCloser) Read(b []byte) (int, error) { return p.r.Read(b) }
+
+func (p *passthroughReadCloser) Close() error {
+	if p.c != nil {
+		return p.c.Close()
+	}
+	return nil
 }
 
 func (r *chatCompletionsToResponsesReader) Read(p []byte) (int, error) {

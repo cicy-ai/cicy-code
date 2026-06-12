@@ -409,9 +409,11 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 			src := resp.Body
 			if gatewayDebugResponses() {
 				log.Printf("[responses-debug] agent=%s upstream status=%d content-type=%q", agentID, resp.StatusCode, resp.Header.Get("Content-Type"))
-				src = newDebugTeeReadCloser(src, "agent="+agentID+" upstream-chat-sse")
+				src = newDebugTeeReadCloser(src, "agent="+agentID+" upstream-sse")
 			}
-			resp.Body = newChatCompletionsToResponsesReader(src, "")
+			// Format-detecting: pass an already-Responses upstream stream through,
+			// only convert genuine chat.completion.chunk streams.
+			resp.Body = newCodexResponsesReader(src)
 			resp.Header.Set("Content-Type", "text/event-stream; charset=utf-8")
 			resp.Header.Del("Content-Length")
 			resp.ContentLength = -1

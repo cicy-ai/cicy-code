@@ -79,25 +79,80 @@ func TestResponsesRewrap_NonStreamingBodyYieldsEmpty(t *testing.T) {
 	}
 }
 
-// Native-Responses upstreams (api.openai.com, the cicy cloud gateway) must NOT
-// be adapted — codex's /responses is passed through so the upstream's native
-// Responses stream reaches codex intact. Only chat-only upstreams get adapted.
+// Only api.openai.com serves /responses natively. Everyone else — including the
+// cicy cloud gateway, which 404s /responses — needs the REQUEST translated to
+// /chat/completions. (The RESPONSE side is handled by newCodexResponsesReader.)
 func TestShouldAdaptForCodexResponses(t *testing.T) {
 	cases := []struct {
 		host, suffix string
 		want         bool
 	}{
-		{"api.openai.com", "/responses", false},
-		{"gateway.cicy-ai.com", "/responses", false},      // the box's actual upstream — the bug
-		{"gateway.cicy-ai.com:443", "/responses", false},  // host:port form
-		{"foo.cicy-ai.com", "/responses", false},          // any cicy cloud subdomain
-		{"api.deepseek.com", "/responses", true},          // chat-only → adapt
-		{"my-one-api.example.com", "/responses", true},    // chat-only relay → adapt
-		{"api.deepseek.com", "/chat/completions", false},  // not a responses call
+		{"api.openai.com", "/responses", false},          // native /responses → no request adapt
+		{"gateway.cicy-ai.com", "/responses", true},      // cloud gateway 404s /responses → adapt request
+		{"api.deepseek.com", "/responses", true},         // chat-only → adapt
+		{"my-one-api.example.com", "/responses", true},   // chat-only relay → adapt
+		{"api.deepseek.com", "/chat/completions", false}, // not a responses call
 	}
 	for _, c := range cases {
 		if got := shouldAdaptForCodexResponses(c.host, c.suffix); got != c.want {
 			t.Errorf("shouldAdaptForCodexResponses(%q,%q)=%v want %v", c.host, c.suffix, got, c.want)
+		}
+	}
+}
+
+// newCodexResponsesReader must PASS THROUGH an upstream that already speaks
+// Responses (the cicy cloud gateway case — this is the empty-reply fix) and
+// CONVERT a genuine chat.completion.chunk stream.
+func TestCodexResponsesReader_PassesThroughResponsesStream(t *testing.T) {
+	// Upstream already in Responses format (what gateway.cicy-ai.com returns).
+	upstream := "event: response.created\n" +
+		`data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}` + "\n\n" +
+		"event: response.output_text.delta\n" +
+		`data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"CXOK_7777"}` + "\n\n" +
+		"event: response.completed\n" +
+		`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"CXOK_7777"}]}]}}` + "\n\n"
+	rc := newCodexResponsesReader(io.NopCloser(strings.NewReader(upstream)))
+	out, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	// Passthrough means the bytes are unchanged (no double-wrapping / no loss).
+	if string(out) != upstream {
+		t.Fatalf("Responses upstream was NOT passed through verbatim.\n--- got ---\n%s\n--- want ---\n%s", out, upstream)
+	}
+}
+
+func TestCodexResponsesReader_ConvertsChatStream(t *testing.T) {
+	rc := newCodexResponsesReader(io.NopCloser(strings.NewReader(sampleChatSSE)))
+	out, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	got := string(out)
+	if !strings.Contains(got, "event: response.output_text.delta") || !strings.Contains(got, "CXOK_8899") {
+		t.Fatalf("chat stream was not converted to a Responses stream with text:\n%s", got)
+	}
+}
+
+func TestLooksLikeResponsesStream(t *testing.T) {
+	yes := []string{
+		"event: response.created\ndata: {}",
+		`data: {"type":"response.output_text.delta","delta":"hi"}`,
+		`data: {"type": "response.completed"}`,
+	}
+	no := []string{
+		`data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"hi"}}]}`,
+		`data: [DONE]`,
+		"",
+	}
+	for _, s := range yes {
+		if !looksLikeResponsesStream([]byte(s)) {
+			t.Errorf("expected Responses-format for %q", s)
+		}
+	}
+	for _, s := range no {
+		if looksLikeResponsesStream([]byte(s)) {
+			t.Errorf("expected NOT Responses-format for %q", s)
 		}
 	}
 }
