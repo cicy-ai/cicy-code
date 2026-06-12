@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -28,13 +27,13 @@ func healthCheck() {
 		sess := strings.Split(pid, ":")[0]
 
 		// 1. session missing → create
-		if exec.Command("tmux", "has-session", "-t", sess).Run() != nil {
+		if tmuxCommand("has-session", "-t", sess).Run() != nil {
 			ws := cfg["workspace"]
 			if ws == "" {
 				ws = os.Getenv("HOME")
 			}
 			ws = strings.Replace(ws, "~", os.Getenv("HOME"), 1)
-			exec.Command("tmux", "new-session", "-d", "-s", sess, "-n", "main", "-c", toPosixPath(ws)).Run()
+			tmuxCommand("new-session", "-d", "-s", sess, "-n", "main", "-c", toPosixPath(ws)).Run()
 			log.Printf("[tmux-health] created session %s", sess)
 		}
 

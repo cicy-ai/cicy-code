@@ -3,7 +3,6 @@ package main
 import (
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -27,11 +26,11 @@ func shellGroupedName(session string) string { return session + "-sh" }
 // creation. Idempotent. Returns the grouped session name.
 func ensureShellSession(session string) string {
 	grouped := shellGroupedName(session)
-	if exec.Command("tmux", "has-session", "-t", grouped).Run() == nil {
+	if tmuxCommand("has-session", "-t", grouped).Run() == nil {
 		return grouped
 	}
 	// Create the grouped session sharing the agent session's window list.
-	if err := exec.Command("tmux", "new-session", "-d", "-t", session, "-s", grouped).Run(); err != nil {
+	if err := tmuxCommand("new-session", "-d", "-t", session, "-s", grouped).Run(); err != nil {
 		return grouped // best effort; attach will surface a clearer error
 	}
 	// Add a dedicated shell window so the panel doesn't start mirroring the
@@ -39,10 +38,10 @@ func ensureShellSession(session string) string {
 	// point only the grouped session at the new window.
 	workdir := filepath.Join(cicyWorkersDir, session)
 	_ = os.MkdirAll(workdir, 0755)
-	out, err := exec.Command("tmux", "new-window", "-d", "-t", session, "-n", "shell", "-c", workdir, "-P", "-F", "#{window_index}").Output()
+	out, err := tmuxCommand("new-window", "-d", "-t", session, "-n", "shell", "-c", workdir, "-P", "-F", "#{window_index}").Output()
 	if err == nil {
 		if idx := strings.TrimSpace(string(out)); idx != "" {
-			_ = exec.Command("tmux", "select-window", "-t", grouped+":"+idx).Run()
+			_ = tmuxCommand("select-window", "-t", grouped+":"+idx).Run()
 		}
 	}
 	return grouped
@@ -57,7 +56,7 @@ func stopShellSession(session string) {
 	grouped := shellGroupedName(session)
 	// No ttyd instance to stop now; killing the tmux session EOFs any live
 	// attach, which tears down its webtty session.
-	exec.Command("tmux", "kill-session", "-t", grouped).Run()
+	tmuxCommand("kill-session", "-t", grouped).Run()
 }
 
 // handleTtydShellProxy serves a ttyd terminal attached to the agent's grouped

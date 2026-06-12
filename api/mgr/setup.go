@@ -2150,13 +2150,13 @@ func startAgentFromConfig(paneID string, port int, workspace, initScript, config
 	// Ensure tmux session
 	sess := strings.Split(paneID, ":")[0]
 	sessionCreated := false
-	if exec.Command("tmux", "has-session", "-t", sess).Run() != nil {
+	if tmuxCommand("has-session", "-t", sess).Run() != nil {
 		if workspace == "" {
 			workspace = builtinWorkerWorkspace(sess)
 		}
 		ensureAgentToolInstalled(agentType)
 		os.MkdirAll(workspace, 0755)
-		exec.Command("tmux", "new-session", "-d", "-s", sess, "-n", "main", "-c", toPosixPath(workspace)).Run()
+		tmuxCommand("new-session", "-d", "-s", sess, "-n", "main", "-c", toPosixPath(workspace)).Run()
 		log.Printf("[startup] created session %s", sess)
 		sessionCreated = true
 	}
@@ -2224,7 +2224,7 @@ func stopAgentByPaneID(paneID string) {
 	session := strings.Split(paneID, ":")[0]
 	if session != "" {
 		stopShellSession(session) // tear down the grouped shell session
-		exec.Command("tmux", "kill-session", "-t", session).Run()
+		tmuxCommand("kill-session", "-t", session).Run()
 	}
 	log.Printf("[agent-stop] stopped %s", paneID)
 }

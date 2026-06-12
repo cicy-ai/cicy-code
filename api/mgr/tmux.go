@@ -1380,7 +1380,7 @@ func restartPaneCore(paneID, token string) error {
 
 	// Kill and recreate tmux session
 	session := strings.Split(paneID, ":")[0]
-	exec.Command("tmux", "kill-session", "-t", session).Run()
+	tmuxCommand("kill-session", "-t", session).Run()
 	time.Sleep(300 * time.Millisecond)
 	home, _ := os.UserHomeDir()
 	ws := workspace.String
@@ -1389,7 +1389,7 @@ func restartPaneCore(paneID, token string) error {
 	}
 	wsExpanded := strings.Replace(ws, "~", home, 1)
 	ensureTmuxServer()
-	exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", toPosixPath(wsExpanded)).Run()
+	tmuxCommand("new-session", "-d", "-s", session, "-n", "main", "-c", toPosixPath(wsExpanded)).Run()
 	// ttyd is served on demand inline; nothing to restart.
 
 	// Re-run init

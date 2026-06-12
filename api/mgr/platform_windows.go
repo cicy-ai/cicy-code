@@ -124,6 +124,13 @@ func initPlatform() {
 // Client commands (ls/send-keys/capture/new-session against a live server)
 // need no tty, so everything after this works from the plain service process.
 func ensureTmuxServer() {
+	if ptmEnabled() {
+		// Native ConPTY backend replaces tmux entirely — no MSYS2 tmux server
+		// to bootstrap. (initPlatform still sets up MSYS2 bash on PATH, which
+		// the agent panes use as their shell.)
+		log.Printf("[platform] CICY_PTY_BACKEND on — native pty backend, skipping tmux server bootstrap")
+		return
+	}
 	if exec.Command("tmux", "has-session").Run() == nil {
 		setTmuxDefaultShellWindows() // idempotent — also fix an already-up server
 		return                       // server already up (with at least one session)
