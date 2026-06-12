@@ -3,11 +3,22 @@
 package main
 
 import (
+	"log"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
 )
+
+// Announce the backend state once at startup — a definitive signal in the log,
+// independent of whether any session-creation path (ensureTmuxServer) runs.
+func init() {
+	if ptmEnabled() {
+		log.Printf("[ptymux] native ConPTY pty backend ENABLED — tmux calls routed in-process (force=%q env=%q)", ptmForceOn, os.Getenv("CICY_PTY_BACKEND"))
+	} else {
+		log.Printf("[ptymux] native backend DISABLED — using external tmux binary")
+	}
+}
 
 var (
 	ptmBackend *ptmManager
