@@ -63,10 +63,12 @@ func ptmForeground(_ pty.Pty, cmd *pty.Cmd) string {
 }
 
 var ptmFgInfra = map[string]bool{
-	"conhost":     true,
-	"openconsole": true,
-	"cmd":         true,
-	"where":       true,
-	"choco":       true,
-	"chocolatey":  true,
+	"conhost":      true,
+	"openconsole":  true,
+	"cmd":          true,
+	"where":        true,
+	"choco":        true,
+	"chocolatey":   true,
+	"winpty":       true, // console bridge wrapping the pane bash
+	"winpty-agent": true,
 }
