@@ -4550,7 +4550,7 @@ func initPaneEnv(opts paneEnvOpts) {
 	// bash can't spawn the native node CLIs anyway, so we don't `source boot.sh`.
 	// Go writes the agent config files and sends the native launch command.
 	// No-op off Windows / backend off (nativePtyActive() is false there).
-	if nativePtyActive() && nativeClaudeBoot(opts) {
+	if nativePtyActive() && nativeBoot(opts) {
 		return
 	}
 

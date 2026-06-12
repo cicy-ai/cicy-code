@@ -38,6 +38,39 @@ func toClaudeKey(p string) string {
 	return strings.ReplaceAll(p, `\`, "/")
 }
 
+// nativeBoot dispatches the native (cmd.exe, no bash/boot.sh) boot per agent
+// type. Returns true if it handled the type; false => caller falls back (which
+// won't work under cmd — those types are TODO: codex/opencode/gemini/…).
+func nativeBoot(opts paneEnvOpts) bool {
+	switch normalizeAgentType(opts.agentType) {
+	case "claude", "cicy-claude":
+		return nativeClaudeBoot(opts)
+	case "cicy":
+		return nativeCicyBoot(opts)
+	}
+	return false
+}
+
+// nativeCicyBoot boots the dispatcher pane: it just runs the in-binary REPL
+// (cicy-repl) — a native exe, so cmd.exe launches it fine.
+func nativeCicyBoot(opts paneEnvOpts) bool {
+	pid := opts.paneID
+	if pid == "" {
+		return false
+	}
+	shortID := strings.Split(pid, ":")[0]
+	exePath, err := os.Executable()
+	if err != nil || strings.TrimSpace(exePath) == "" {
+		exePath = "cicy-code"
+	}
+	waitForCmdReady(pid)
+	if ws := toWinPath(strings.TrimSpace(opts.workspace)); ws != "" {
+		runTmux("send-keys", "-t", pid, "set X_AGENT_ID="+pid+"&set X_AGENT_SHORT_ID="+shortID+"&set CICY_AGENT_TYPE=cicy&set WORKSPACE="+ws, "Enter")
+	}
+	runTmux("send-keys", "-t", pid, `"`+exePath+`" cicy-repl --agent `+shortID, "Enter")
+	return true
+}
+
 // nativeClaudeBoot boots a claude/cicy-claude agent natively under cmd.exe.
 // Returns true if it handled the agent type (so initPaneEnv skips boot.sh).
 func nativeClaudeBoot(opts paneEnvOpts) bool {
