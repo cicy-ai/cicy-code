@@ -31,8 +31,9 @@ var (
 var ptmForceOn string
 
 // ptmEnabled reports whether the native pty backend replaces tmux on Windows.
-// Default OFF: a normal release behaves exactly as before (real MSYS2 tmux).
-// Set CICY_PTY_BACKEND=go|1|on (or build with -X main.ptmForceOn=1) to switch.
+// Default ON (this file is windows-only): the whole point on Windows is to drop
+// the buggy MSYS2 tmux. Escape hatch: CICY_PTY_BACKEND=tmux|off reverts to the
+// external tmux binary. (Unix/macOS never compile this file — they keep tmux.)
 func ptmEnabled() bool {
 	if ptmForceOn == "1" {
 		return true
@@ -40,8 +41,10 @@ func ptmEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("CICY_PTY_BACKEND"))) {
 	case "go", "1", "on", "ptymux", "native":
 		return true
+	case "tmux", "0", "off", "no", "msys", "legacy":
+		return false
 	}
-	return false
+	return true // Windows default: native ConPTY backend
 }
 
 func ptmGet() *ptmManager {
