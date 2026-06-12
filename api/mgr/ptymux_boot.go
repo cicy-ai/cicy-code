@@ -25,6 +25,19 @@ func toWinPath(p string) string {
 	return strings.ReplaceAll(p, "/", `\`)
 }
 
+// toClaudeKey produces the project key Claude Code uses in ~/.claude.json: the
+// cwd with a drive letter and FORWARD slashes (e.g. C:/Users/x/w-1013) — NOT
+// backslashes. Matching this exactly is what lets the trust pre-write suppress
+// the "trust this folder?" dialog.
+func toClaudeKey(p string) string {
+	if len(p) >= 2 && p[0] == '/' &&
+		((p[1] >= 'a' && p[1] <= 'z') || (p[1] >= 'A' && p[1] <= 'Z')) &&
+		(len(p) == 2 || p[2] == '/') {
+		p = strings.ToUpper(string(p[1])) + ":" + p[2:]
+	}
+	return strings.ReplaceAll(p, `\`, "/")
+}
+
 // nativeClaudeBoot boots a claude/cicy-claude agent natively under cmd.exe.
 // Returns true if it handled the agent type (so initPaneEnv skips boot.sh).
 func nativeClaudeBoot(opts paneEnvOpts) bool {
@@ -90,13 +103,18 @@ func writeClaudeTrustNative(workspace string) {
 	if projects == nil {
 		projects = map[string]interface{}{}
 	}
-	p, _ := projects[workspace].(map[string]interface{})
-	if p == nil {
-		p = map[string]interface{}{}
+	// Claude keys by cwd with FORWARD slashes (C:/Users/..). Write that form
+	// (and the backslash form too) so the trust dialog never appears.
+	keys := map[string]bool{toClaudeKey(workspace): true, toWinPath(workspace): true}
+	for key := range keys {
+		p, _ := projects[key].(map[string]interface{})
+		if p == nil {
+			p = map[string]interface{}{}
+		}
+		p["hasTrustDialogAccepted"] = true
+		p["hasCompletedProjectOnboarding"] = true
+		projects[key] = p
 	}
-	p["hasTrustDialogAccepted"] = true
-	p["hasCompletedProjectOnboarding"] = true
-	projects[workspace] = p
 	m["projects"] = projects
 	if b, err := json.MarshalIndent(m, "", "  "); err == nil {
 		_ = os.WriteFile(path, b, 0644)
