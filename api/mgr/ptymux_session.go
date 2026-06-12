@@ -29,6 +29,11 @@ type ptmSession struct {
 	cols, rows int
 	mu         sync.Mutex
 	queryCarry []byte
+
+	// viewers attached over the web terminal (ttyd) — the native equivalent of
+	// multiple `tmux attach` clients sharing one pane.
+	subs    map[int]chan []byte
+	nextSub int
 }
 
 func ptmNewSession(name, shell, cwd string, env []string, cols, rows int, args ...string) (*ptmSession, error) {
@@ -57,7 +62,7 @@ func ptmNewSession(name, shell, cwd string, env []string, cols, rows int, args .
 		return nil, err
 	}
 
-	s := &ptmSession{name: name, pt: pt, cmd: cmd, term: term, cols: cols, rows: rows}
+	s := &ptmSession{name: name, pt: pt, cmd: cmd, term: term, cols: cols, rows: rows, subs: map[int]chan []byte{}}
 
 	go func() {
 		br := bufio.NewReader(pt)
@@ -65,23 +70,71 @@ func ptmNewSession(name, shell, cwd string, env []string, cols, rows int, args .
 		for {
 			n, rerr := br.Read(buf)
 			if n > 0 {
+				data := make([]byte, n) // copy: buf is reused, viewers keep refs
+				copy(data, buf[:n])
 				s.mu.Lock()
-				_, _ = s.term.Write(buf[:n])
+				_, _ = s.term.Write(data)
 				row, col := s.term.Cursor().Y+1, s.term.Cursor().X+1
-				s.queryCarry = append(s.queryCarry, buf[:n]...)
+				s.queryCarry = append(s.queryCarry, data...)
 				reply, leftover := ptmDrainQueries(s.queryCarry, s.cols, s.rows, row, col)
 				s.queryCarry = leftover
+				for _, ch := range s.subs { // fan out to web viewers (non-blocking)
+					select {
+					case ch <- data:
+					default: // slow viewer: drop rather than stall the read loop
+					}
+				}
 				s.mu.Unlock()
 				if len(reply) > 0 {
 					_, _ = s.pt.Write(reply)
 				}
 			}
 			if rerr != nil {
+				s.mu.Lock()
+				for id, ch := range s.subs {
+					delete(s.subs, id)
+					close(ch)
+				}
+				s.mu.Unlock()
 				return
 			}
 		}
 	}()
 	return s, nil
+}
+
+// Subscribe attaches a web viewer: returns a subscription id, a channel of live
+// pty output, and a snapshot to repaint the current screen immediately (so the
+// browser shows the pane's current state, not a blank until the next redraw).
+func (s *ptmSession) Subscribe() (int, chan []byte, []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := s.nextSub
+	s.nextSub++
+	ch := make(chan []byte, 512)
+	s.subs[id] = ch
+	return id, ch, s.snapshotLocked()
+}
+
+func (s *ptmSession) Unsubscribe(id int) {
+	s.mu.Lock()
+	if ch, ok := s.subs[id]; ok {
+		delete(s.subs, id)
+		close(ch)
+	}
+	s.mu.Unlock()
+}
+
+// snapshotLocked builds bytes that repaint the current screen: clear + the grid
+// as text. Colors are lost on the initial paint but live output restores full
+// fidelity on the next redraw. Caller holds s.mu.
+func (s *ptmSession) snapshotLocked() []byte {
+	out := []byte("\x1b[2J\x1b[3J\x1b[H")
+	lines := strings.Split(s.term.String(), "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return append(out, []byte(strings.Join(lines, "\r\n"))...)
 }
 
 // SendKeys writes literal bytes to the child's stdin == `tmux send-keys -l`.
