@@ -51,6 +51,10 @@ func getTokenPerms(token string) (perms []string, groupID *int) {
 }
 
 func handleAuthVerify(w http.ResponseWriter, r *http.Request) {
+	if blocked, retry := authRateLimitBlocked(r); blocked {
+		authTooManyAttempts(w, retry)
+		return
+	}
 	token := getToken(r)
 	if token == "" {
 		J(w, M{"valid": false})
@@ -58,13 +62,19 @@ func handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	perms, groupID := getTokenPerms(token)
 	if perms == nil {
+		authRateLimitFailure(r)
 		J(w, M{"valid": false})
 		return
 	}
+	authRateLimitSuccess(r)
 	J(w, M{"valid": true, "auth_type": "token", "token": token[:minInt(8, len(token))] + "...", "perms": perms, "group_id": groupID})
 }
 
 func handleAuthVerifyToken(w http.ResponseWriter, r *http.Request) {
+	if blocked, retry := authRateLimitBlocked(r); blocked {
+		authTooManyAttempts(w, retry)
+		return
+	}
 	var req M
 	readBody(r, &req)
 	token, _ := req["token"].(string)
@@ -74,9 +84,11 @@ func handleAuthVerifyToken(w http.ResponseWriter, r *http.Request) {
 	}
 	perms, groupID := getTokenPerms(token)
 	if perms == nil {
+		authRateLimitFailure(r)
 		J(w, M{"valid": false})
 		return
 	}
+	authRateLimitSuccess(r)
 	J(w, M{"valid": true, "perms": perms, "token": token, "group_id": groupID})
 }
 
