@@ -4545,6 +4545,15 @@ func autoConfirmCodexTrust(paneID string) {
 func initPaneEnv(opts paneEnvOpts) {
 	pid := opts.paneID
 	shortID := strings.Split(pid, ":")[0]
+
+	// Windows native ConPTY backend: the pane is cmd.exe (not bash) and cygwin
+	// bash can't spawn the native node CLIs anyway, so we don't `source boot.sh`.
+	// Go writes the agent config files and sends the native launch command.
+	// No-op off Windows / backend off (nativePtyActive() is false there).
+	if nativePtyActive() && nativeClaudeBoot(opts) {
+		return
+	}
+
 	aiCfg := loadRuntimeAIConfig()
 	// proxyURL := fmt.Sprintf("http://%s:x@127.0.0.1:17080", shortID)
 

@@ -4,8 +4,6 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -24,55 +22,15 @@ type ptmManager struct {
 
 func ptmNewManager() *ptmManager {
 	m := &ptmManager{sessions: map[string]*ptmSession{}, cols: 120, rows: 36}
-	// Default pane shell: keep MSYS2 bash (it works; only tmux was buggy). It
-	// MUST mirror tmux's default-command exactly:
-	//   bash --rcfile $HOME/.cicy_shell_init -i
-	// so the pane sources ~/.cicy_shell_init -> ~/.bashrc + ~/.cicy_tmux.conf
-	// (PATH incl. the agent CLIs, gateway env, functions) AND shows the prompt
-	// marker waitForShellPromptReady needs. Plain `bash -l -i` sources none of
-	// that, so the boot.sh prompt-wait times out and claude never launches.
-	if root := msysRoot(); root != "" {
-		bash := filepath.Join(root, "usr", "bin", "bash.exe")
-		home := os.Getenv("HOME") // initPlatform sets this to the POSIX userprofile
-		if home == "" {
-			if uh, err := os.UserHomeDir(); err == nil {
-				home = toPosixPath(uh)
-			}
-		}
-		bashArgs := []string{"--rcfile", home + "/.cicy_shell_init", "-i"}
-
-		// Wrap bash in winpty. MSYS2/cygwin bash running under OUR ConPTY cannot
-		// hand a working console to a NATIVE console program it spawns (node ->
-		// claude): the exec deadlocks, node never starts, Ctrl-C can't reach it
-		// (disable_pcon doesn't help — it's the cygwin->native handoff itself).
-		// winpty gives those children a real hidden Win32 console and bridges it
-		// to our pty — the same trick mintty uses. Falls back to bare bash if
-		// winpty isn't installed (then native agent CLIs will hang — install it
-		// with `pacman -S winpty`).
-		winpty := ptmFindWinpty(root)
-		if winpty != "" {
-			m.shell = winpty
-			m.shellArgs = append([]string{bash}, bashArgs...)
-		} else {
-			m.shell = bash
-			m.shellArgs = bashArgs
-		}
-	} else {
-		m.shell = "cmd.exe"
-	}
+	// Pane shell = cmd.exe (NATIVE). MSYS2/cygwin bash cannot hand a working
+	// console to the native node CLIs (claude/codex/opencode) it spawns under
+	// our ConPTY — the exec deadlocks (proven: bash hangs on `node -v`; cmd
+	// returns instantly). cmd.exe is native, so node/claude launch fine AND
+	// programmatic send-keys reaches it. Agent boot is therefore done natively
+	// (Go writes the config files + sends the native launch command), not via
+	// `source boot.sh`. See initPaneEnv's native branch.
+	m.shell = "cmd.exe"
 	return m
-}
-
-// ptmFindWinpty locates winpty.exe in an MSYS2 root (usr\bin or mingw64\bin).
-// Returns "" if not installed.
-func ptmFindWinpty(root string) string {
-	for _, sub := range []string{`usr\bin`, `mingw64\bin`, `mingw32\bin`} {
-		p := filepath.Join(root, sub, "winpty.exe")
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return ""
 }
 
 func ptmSessionOf(paneID string) string {

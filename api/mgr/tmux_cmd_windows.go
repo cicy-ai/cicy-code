@@ -52,6 +52,10 @@ func ptmGet() *ptmManager {
 	return ptmBackend
 }
 
+// nativePtyActive reports whether the native ConPTY backend is in effect — used
+// by shared (non-build-tagged) code to branch the pane boot for Windows.
+func nativePtyActive() bool { return ptmEnabled() }
+
 func newTmuxCommand(args []string) tmuxRunner {
 	if ptmEnabled() {
 		return &ptmCmd{args: args}
