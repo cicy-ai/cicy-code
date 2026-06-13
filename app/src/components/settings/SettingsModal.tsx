@@ -199,6 +199,8 @@ export default function SettingsModal({
 
   const inp = 'rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[13px] text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-white/[0.18]';
   const lbl = 'block text-[11px] font-medium text-zinc-400 mb-1';
+  const card = 'rounded-xl border border-white/[0.06] bg-white/[0.02] p-5';
+  const iconTile = 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] text-zinc-300';
 
   // ESC closes — capture phase so it wins over the embedded dashboards' own
   // key handlers (they only care about their internal editors).
@@ -274,94 +276,116 @@ export default function SettingsModal({
 
           {/* right content */}
           <div data-id="settings-modal-content" className="relative min-h-0 flex-1 overflow-hidden bg-[#0b0b0d]">
-            {/* General — public URL (drives the mobile QR) */}
+            {/* General — public URL, API token, email delivery */}
             {section === 'general' && (
-              <div data-id="settings-section-general" className="h-full overflow-auto p-6">
-                <div className="mx-auto max-w-md">
-                  <div className="mb-1 text-[13px] font-semibold text-zinc-200">{t('settingsPublicUrlTitle', { defaultValue: '公网访问地址' })}</div>
-                  <div className="mb-4 text-[11px] leading-5 text-zinc-500">{t('settingsPublicUrlHint', { defaultValue: '本机对外可达的地址(隧道域名或局域网 IP)。配置后右下角会出现「扫码上手机」二维码;留空则隐藏。' })}</div>
-                  <input
-                    data-id="settings-public-url-input"
-                    type="text"
-                    value={urlDraft}
-                    onChange={(e) => { setUrlDraft(e.target.value); setSavedUrl(false); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && urlDirty && !savingUrl) void savePublicUrl(); }}
-                    placeholder="https://app-xxxx.example.com"
-                    spellCheck={false}
-                    autoComplete="off"
-                    className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[13px] text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-white/[0.18]"
-                  />
-                  <div className="mt-3 flex items-center gap-2">
-                    <button
-                      type="button"
-                      data-id="settings-public-url-save"
-                      disabled={!urlDirty || savingUrl}
-                      onClick={() => void savePublicUrl()}
-                      className={`rounded-lg px-3.5 py-2 text-[12px] font-semibold transition-colors ${
-                        urlDirty && !savingUrl
-                          ? 'bg-sky-500/90 text-white hover:bg-sky-500'
-                          : 'cursor-not-allowed bg-white/[0.05] text-zinc-600'
-                      }`}
-                    >
-                      {savingUrl ? t('settingsSaving', { defaultValue: '保存中…' }) : t('settingsSave', { defaultValue: '保存' })}
-                    </button>
-                    {savedUrl && !urlDirty ? (
-                      <span data-id="settings-public-url-saved" className="flex items-center gap-1 text-[11px] text-emerald-400">
-                        <Check className="h-3.5 w-3.5" />{t('settingsSaved', { defaultValue: '已保存' })}
-                      </span>
-                    ) : null}
-                  </div>
+              <div data-id="settings-section-general" className="h-full overflow-auto">
+                <div className="mx-auto max-w-2xl px-8 py-7">
+                  <header data-id="settings-general-header" className="mb-6">
+                    <h2 className="text-[15px] font-semibold tracking-tight text-zinc-100">{t('settingsNavGeneral', { defaultValue: '通用' })}</h2>
+                    <p className="mt-1 text-[12px] leading-5 text-zinc-500">{t('settingsGeneralSubtitle', { defaultValue: '本机访问地址、API 令牌与令牌投递邮箱' })}</p>
+                  </header>
 
-                  {/* API Token — show + rotate (rotation emails the new token) */}
-                  <div data-id="settings-token-block" className="mt-8 border-t border-white/[0.06] pt-6">
-                    <div className="mb-1 flex items-center gap-1.5 text-[13px] font-semibold text-zinc-200">
-                      <KeyRound className="h-3.5 w-3.5 text-zinc-400" />{t('settingsTokenTitle', { defaultValue: 'API Token' })}
+                  <div className="space-y-4">
+                  {/* Card: 公网访问地址 */}
+                  <section data-id="settings-publicurl-block" className={card}>
+                    <div className="flex items-start gap-3">
+                      <span className={iconTile}><Globe className="h-4 w-4" /></span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-semibold text-zinc-100">{t('settingsPublicUrlTitle', { defaultValue: '公网访问地址' })}</div>
+                        <div className="mt-0.5 text-[11px] leading-5 text-zinc-500">{t('settingsPublicUrlHint', { defaultValue: '本机对外可达的地址(隧道域名或局域网 IP)。配置后右下角会出现「扫码上手机」二维码;留空则隐藏。' })}</div>
+                        <div className="mt-3">
+                          <input
+                            data-id="settings-public-url-input"
+                            type="text"
+                            value={urlDraft}
+                            onChange={(e) => { setUrlDraft(e.target.value); setSavedUrl(false); }}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && urlDirty && !savingUrl) void savePublicUrl(); }}
+                            placeholder="https://app-xxxx.example.com"
+                            spellCheck={false}
+                            autoComplete="off"
+                            className={`${inp} w-full`}
+                          />
+                        </div>
+                        <div className="mt-3 flex items-center gap-2">
+                          <button
+                            type="button"
+                            data-id="settings-public-url-save"
+                            disabled={!urlDirty || savingUrl}
+                            onClick={() => void savePublicUrl()}
+                            className={`rounded-lg px-3.5 py-2 text-[12px] font-semibold transition-colors ${
+                              urlDirty && !savingUrl
+                                ? 'bg-sky-500/90 text-white hover:bg-sky-500'
+                                : 'cursor-not-allowed bg-white/[0.05] text-zinc-600'
+                            }`}
+                          >
+                            {savingUrl ? t('settingsSaving', { defaultValue: '保存中…' }) : t('settingsSave', { defaultValue: '保存' })}
+                          </button>
+                          {savedUrl && !urlDirty ? (
+                            <span data-id="settings-public-url-saved" className="flex items-center gap-1 text-[11px] text-emerald-400">
+                              <Check className="h-3.5 w-3.5" />{t('settingsSaved', { defaultValue: '已保存' })}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
                     </div>
-                    <div className="mb-3 text-[11px] leading-5 text-zinc-500">{t('settingsTokenHint', { defaultValue: '本机 API 访问令牌。刷新会作废旧令牌,并把新令牌发到下方配置的收件邮箱。' })}</div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        data-id="settings-token-value"
-                        readOnly
-                        value={tokenShown ? apiToken : (apiToken ? '•'.repeat(Math.min(40, apiToken.length)) : '')}
-                        className={`${inp} min-w-0 flex-1 font-mono !text-[12px]`}
-                      />
-                      <button data-id="settings-token-toggle" type="button" onClick={() => setTokenShown((v) => !v)} className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-2 text-zinc-400 transition-colors hover:text-zinc-200">
-                        {tokenShown ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                      <button data-id="settings-token-copy" type="button" onClick={() => void copyToken()} className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-2 text-zinc-400 transition-colors hover:text-zinc-200">
-                        {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    <div className="mt-3 flex items-center gap-2">
-                      <button
-                        data-id="settings-token-refresh"
-                        type="button"
-                        disabled={refreshing}
-                        onClick={() => void refreshToken()}
-                        className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[12px] font-semibold transition-colors ${refreshing ? 'cursor-not-allowed bg-white/[0.05] text-zinc-600' : 'bg-amber-500/90 text-white hover:bg-amber-500'}`}
-                      >
-                        <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />{refreshing ? t('settingsTokenRefreshing', { defaultValue: '刷新中…' }) : t('settingsTokenRefresh', { defaultValue: '刷新令牌' })}
-                      </button>
-                      {refreshMsg ? (
-                        <span data-id="settings-token-msg" className={`flex items-center gap-1 text-[11px] ${refreshMsg.kind === 'ok' ? 'text-emerald-400' : refreshMsg.kind === 'need-smtp' ? 'text-amber-400' : 'text-rose-400'}`}>
-                          {refreshMsg.kind === 'ok' ? <Check className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}{refreshMsg.text}
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
+                  </section>
 
-                  {/* Email (SMTP) — same ~/cicy-ai/db/email.json the email skill uses */}
-                  <div data-id="settings-email-block" className="mt-8 border-t border-white/[0.06] pt-6">
-                    <div className="mb-1 flex items-center gap-1.5 text-[13px] font-semibold text-zinc-200">
-                      <Mail className="h-3.5 w-3.5 text-zinc-400" />{t('settingsEmailTitle', { defaultValue: '邮件 (SMTP)' })}
-                      {emailCfg ? (
-                        <span data-id="settings-email-status" className={`ml-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${sendReady ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-400'}`}>
-                          {sendReady ? t('settingsEmailReady', { defaultValue: '已配置' }) : t('settingsEmailUnset', { defaultValue: '未配置' })}
-                        </span>
-                      ) : null}
+                  {/* Card: API Token — show + rotate (rotation emails the new token) */}
+                  <section data-id="settings-token-block" className={card}>
+                    <div className="flex items-start gap-3">
+                      <span className={iconTile}><KeyRound className="h-4 w-4" /></span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-semibold text-zinc-100">{t('settingsTokenTitle', { defaultValue: 'API 令牌' })}</div>
+                        <div className="mt-0.5 text-[11px] leading-5 text-zinc-500">{t('settingsTokenHint', { defaultValue: '本机 API 访问令牌。刷新会作废旧令牌,并把新令牌发到下方配置的收件邮箱。' })}</div>
+                        <div className="mt-3 flex items-center gap-2">
+                          <input
+                            data-id="settings-token-value"
+                            readOnly
+                            value={tokenShown ? apiToken : (apiToken ? '•'.repeat(Math.min(40, apiToken.length)) : '')}
+                            className={`${inp} min-w-0 flex-1 font-mono !text-[12px]`}
+                          />
+                          <button data-id="settings-token-toggle" type="button" title={tokenShown ? t('settingsHide', { defaultValue: '隐藏' }) : t('settingsShow', { defaultValue: '显示' })} onClick={() => setTokenShown((v) => !v)} className="shrink-0 rounded-lg border border-white/[0.08] bg-white/[0.03] p-2 text-zinc-400 transition-colors hover:text-zinc-200">
+                            {tokenShown ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                          <button data-id="settings-token-copy" type="button" title={t('settingsCopy', { defaultValue: '复制' })} onClick={() => void copyToken()} className="shrink-0 rounded-lg border border-white/[0.08] bg-white/[0.03] p-2 text-zinc-400 transition-colors hover:text-zinc-200">
+                            {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                          </button>
+                        </div>
+                        <div className="mt-3 flex items-center gap-2">
+                          <button
+                            data-id="settings-token-refresh"
+                            type="button"
+                            disabled={refreshing}
+                            onClick={() => void refreshToken()}
+                            className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[12px] font-semibold transition-colors ${refreshing ? 'cursor-not-allowed bg-white/[0.05] text-zinc-600' : 'bg-amber-500/90 text-white hover:bg-amber-500'}`}
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />{refreshing ? t('settingsTokenRefreshing', { defaultValue: '刷新中…' }) : t('settingsTokenRefresh', { defaultValue: '刷新令牌' })}
+                          </button>
+                          {refreshMsg ? (
+                            <span data-id="settings-token-msg" className={`flex items-center gap-1 text-[11px] ${refreshMsg.kind === 'ok' ? 'text-emerald-400' : refreshMsg.kind === 'need-smtp' ? 'text-amber-400' : 'text-rose-400'}`}>
+                              {refreshMsg.kind === 'ok' ? <Check className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}{refreshMsg.text}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
                     </div>
-                    <div className="mb-3 text-[11px] leading-5 text-zinc-500">{t('settingsEmailHint', { defaultValue: '用于刷新令牌时把新令牌发到你的邮箱。填写邮箱服务商的 SMTP 信息(如 QQ 邮箱的授权码)。' })}</div>
-                    <div className="space-y-3">
+                  </section>
+
+                  {/* Card: Email (SMTP) — same ~/cicy-ai/db/email.json the email skill uses */}
+                  <section data-id="settings-email-block" className={card}>
+                    <div className="flex items-start gap-3">
+                      <span className={iconTile}><Mail className="h-4 w-4" /></span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <div className="text-[13px] font-semibold text-zinc-100">{t('settingsEmailTitle', { defaultValue: '令牌投递邮箱' })}</div>
+                          {emailCfg ? (
+                            <span data-id="settings-email-status" className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${sendReady ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-400'}`}>
+                              {sendReady ? t('settingsEmailReady', { defaultValue: '已配置' }) : t('settingsEmailUnset', { defaultValue: '未配置' })}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="mt-0.5 text-[11px] leading-5 text-zinc-500">{t('settingsEmailHint', { defaultValue: '刷新令牌时,新令牌通过这个邮箱发给你。填邮箱账号 + 授权码即可,常见服务商会自动识别。' })}</div>
+                        <div className="mt-3 space-y-3">
                       {/* Account — typing this auto-detects the provider's servers */}
                       <div data-id="settings-email-user-field">
                         <label className={lbl}>{t('settingsEmailUserLabel', { defaultValue: '邮箱账号' })}</label>
@@ -393,14 +417,17 @@ export default function SettingsModal({
                         <input data-id="settings-email-to" type="email" placeholder={emailForm.user.trim() ? t('settingsEmailToPh', { defaultValue: '默认与账号相同（{{addr}}），可留空', addr: emailForm.user.trim() }) : t('settingsEmailToPhEmpty', { defaultValue: '默认与账号相同，可留空' })} value={emailForm.default_to} onChange={(e) => setEmailForm((f) => ({ ...f, default_to: e.target.value }))} className={`${inp} w-full`} spellCheck={false} autoComplete="off" />
                       </div>
                     </div>
-                    <div className="mt-3 flex items-center gap-2">
-                      <button data-id="settings-email-save" type="button" disabled={emailSaving} onClick={() => void saveEmail()} className={`rounded-lg px-3.5 py-2 text-[12px] font-semibold transition-colors ${emailSaving ? 'cursor-not-allowed bg-white/[0.05] text-zinc-600' : 'bg-sky-500/90 text-white hover:bg-sky-500'}`}>
-                        {emailSaving ? t('settingsSaving', { defaultValue: '保存中…' }) : t('settingsSave', { defaultValue: '保存' })}
-                      </button>
-                      {emailSaved ? (
-                        <span data-id="settings-email-saved" className="flex items-center gap-1 text-[11px] text-emerald-400"><Check className="h-3.5 w-3.5" />{t('settingsSaved', { defaultValue: '已保存' })}</span>
-                      ) : null}
+                        <div className="mt-4 flex items-center gap-2">
+                          <button data-id="settings-email-save" type="button" disabled={emailSaving} onClick={() => void saveEmail()} className={`rounded-lg px-3.5 py-2 text-[12px] font-semibold transition-colors ${emailSaving ? 'cursor-not-allowed bg-white/[0.05] text-zinc-600' : 'bg-sky-500/90 text-white hover:bg-sky-500'}`}>
+                            {emailSaving ? t('settingsSaving', { defaultValue: '保存中…' }) : t('settingsSave', { defaultValue: '保存' })}
+                          </button>
+                          {emailSaved ? (
+                            <span data-id="settings-email-saved" className="flex items-center gap-1 text-[11px] text-emerald-400"><Check className="h-3.5 w-3.5" />{t('settingsSaved', { defaultValue: '已保存' })}</span>
+                          ) : null}
+                        </div>
+                      </div>
                     </div>
+                  </section>
                   </div>
                 </div>
               </div>
