@@ -6,6 +6,7 @@ import ProviderDashboard from '../providers/ProviderDashboard';
 import IMDashboard from '../im/IMDashboard';
 import apiService from '../../services/api';
 import { TokenManager } from '../../services/tokenManager';
+import { useDialogs } from '../ui/Modal';
 
 // Unified, productized Settings surface. One fullscreen modal with a left nav
 // (Language / IM / Agent Routing / LLM Providers) and a large content area on
@@ -107,6 +108,7 @@ export default function SettingsModal({
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState<{ kind: 'ok' | 'need-smtp' | 'err'; text: string } | null>(null);
   const sendReady = !!emailCfg?.send_ready;
+  const { confirm, node: dialogNode } = useDialogs();
 
   useEffect(() => {
     if (!open || section !== 'general') return;
@@ -158,6 +160,20 @@ export default function SettingsModal({
 
   const refreshToken = async () => {
     if (!sendReady) { setRefreshMsg({ kind: 'need-smtp', text: t('settingsTokenNeedSmtp', { defaultValue: '请先配置下方的 SMTP,配置后才能刷新并把新 token 发到邮箱。' }) }); return; }
+    const recipient = (emailCfg?.default_to || emailForm.default_to || emailForm.user || '').trim();
+    const ok = await confirm({
+      title: t('settingsTokenConfirmTitle', { defaultValue: '刷新 API 令牌?' }),
+      body: (
+        <>
+          {t('settingsTokenConfirmBody', { defaultValue: '当前令牌会立即作废,所有正在用它访问本机的设备和远程会话都需要换用新令牌。' })}
+          {recipient ? <><br /><br />{t('settingsTokenConfirmEmail', { defaultValue: '新令牌将发送到:', })}<span className="font-medium text-zinc-200">{recipient}</span></> : null}
+        </>
+      ),
+      danger: true,
+      confirmLabel: t('settingsTokenConfirmOk', { defaultValue: '刷新并发送' }),
+      cancelLabel: t('settingsCancel', { defaultValue: '取消' }),
+    });
+    if (!ok) return;
     setRefreshing(true);
     setRefreshMsg(null);
     try {
@@ -496,6 +512,7 @@ export default function SettingsModal({
       {isProviderSection && (
         <ProviderDashboard leftMount={provLeft} rightMount={provRight} tab={section === 'routing' ? 'routing' : 'providers'} hideTabStrip />
       )}
+      {dialogNode}
     </div>,
     document.body,
   );
