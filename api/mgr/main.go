@@ -38,11 +38,6 @@ var (
 	helperMode    bool // --helper=1 → ships a single headless cicy 团队助手 on w-1001
 	desktopCmd    *exec.Cmd
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
-	// tmuxFlag (--tmux) is the Windows-only master switch for pane-based CLI
-	// agents. Default OFF: on Windows the native ConPTY (ptymux) backend stays
-	// down and only headless cicy agents are seeded/selectable — see
-	// cliAgentsEnabled(). On non-Windows the flag is inert (CLI agents always on).
-	tmuxFlag bool
 )
 
 const version = "2.2.23"
@@ -123,9 +118,6 @@ Options:
   --helper=1              Team-Helper mode: ship a single headless cicy
                           "团队助手" on w-1001 that installs Docker + cicy-code
                           and scales the local team.
-  --tmux                  Windows only: enable the native ConPTY (ptymux) pane
-                          backend and make CLI agent types (claude/codex/…)
-                          available. Default OFF → Windows runs cicy-only.
 
 	Environment:
 	  PORT          API port (default: 8008)
@@ -141,10 +133,6 @@ Options:
 			cdnMode = true
 		case arg == "--lab":
 			labMode = true
-		case arg == "--tmux":
-			// Windows only: turn the ConPTY (ptymux) pane backend ON and make CLI
-			// agent types selectable/seeded. Inert on other OSes.
-			tmuxFlag = true
 		case arg == "--public":
 			publicMode = true
 		case arg == "--audit":

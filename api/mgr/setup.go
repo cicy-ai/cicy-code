@@ -410,19 +410,15 @@ var builtinAgents = []struct {
 var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "gemini", "opencode", "cicy"}
 
 // cliAgentsEnabled reports whether pane-based CLI agent types (everything except
-// headless cicy) are available on this host. On Windows they are gated behind
-// the --tmux switch (default OFF → cicy-only): without it there is no ConPTY
-// pane backend, so claude/codex/gemini/… are neither seeded nor selectable.
-// Every other OS always allows CLI agents.
+// headless cicy) are available on this host. Windows always ships cicy-only:
+// there is no ConPTY pane backend by default, so claude/codex/gemini/… are
+// neither seeded nor selectable. Every other OS always allows CLI agents.
 func cliAgentsEnabled() bool {
-	if runtime.GOOS != "windows" {
-		return true
-	}
-	return tmuxFlag
+	return runtime.GOOS != "windows"
 }
 
 func effectiveAllowedAgentTypes() []string {
-	// Windows without --tmux: only the headless cicy agent is offered.
+	// Windows: only the headless cicy agent is offered (no CLI/pane agents).
 	if !cliAgentsEnabled() {
 		return []string{"cicy"}
 	}
@@ -547,7 +543,7 @@ func selectedBuiltinWorkers(selected []string) []builtinWorker {
 			})
 		}
 	}
-	// Windows without --tmux: drop every CLI agent from the layout so setup never
+	// Windows: drop every CLI agent from the layout so setup never
 	// initializes/installs them — only headless cicy roles are seeded.
 	if !cliAgentsEnabled() {
 		workers = cicyOnlyWorkers(workers)
