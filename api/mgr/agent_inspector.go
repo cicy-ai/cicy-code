@@ -2304,15 +2304,30 @@ func handleAgentHistoryIDsByPane(w http.ResponseWriter, r *http.Request) {
 	// can show which model is answering.
 	model := ""
 	provider := ""
+	var prompts []aiGatewayUserPrompt
 	if snapshot, snapErr := aiGatewayReadCurrentSnapshot(paneID); snapErr == nil {
 		model = strings.TrimSpace(snapshot.Model)
 		provider = strings.TrimSpace(snapshot.Provider)
+		prompts = snapshot.Prompts
+		// Migration fallback: current.json written before the prompts field
+		// existed has none stored — derive it on the fly from the body so the
+		// prompts-only view works without waiting for the agent's next turn.
+		if len(prompts) == 0 {
+			prompts = aiGatewayBuildCurrentPrompts(paneID, snapshot.Body, snapshot.Timestamp)
+		}
+	}
+	if prompts == nil {
+		prompts = []aiGatewayUserPrompt{}
 	}
 	J(w, M{
 		"id":              maxID,
 		"conversation_id": resolvedConversationID,
 		"model":           model,
 		"provider":        provider,
+		// Clean real-human-prompt list for the prompts-only history view (id+ts+
+		// content), already de-noised and de-duplicated at write time so the
+		// frontend never re-derives questions. See aiGatewayBuildCurrentPrompts.
+		"prompts": prompts,
 	})
 }
 

@@ -22,18 +22,19 @@ import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Chrome, Atom, RefreshCw, Loader2, ChevronRight, Camera,
-  AlertCircle, Globe, MonitorOff, Laptop, X, Plus, Settings, RotateCcw, Eye, Send, Code2, Pencil, Download,
+  AlertCircle, Globe, MonitorOff, X, Plus, Settings, RotateCcw, Eye, Send, Code2, Pencil, Download, Smartphone,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
 import i18n from '../../i18n';
 import { cn } from '../../lib/utils';
+import { listPhones, type MobileDevice, type MobileSel } from './MobileDevicesPanel';
 
 // i18n helper for non-component (plain async/util) code paths — components use the
 // useTranslation('layout') hook instead so they re-render on language change.
 const tl = (key: string, opts?: Record<string, unknown>) => i18n.t(`layout:${key}`, opts || {}) as string;
 
-type Backend = 'chrome' | 'electron';
+type Backend = 'chrome' | 'electron' | 'android' | 'ios';
 
 interface Device {
   clientId: string;
@@ -159,8 +160,8 @@ async function loadDevices(): Promise<Device[]> {
     const did = String(c.device_id || '');
     const region = String(c.ip_region || '').trim();
     const platform = String(c.platform || '');
-    const shortId = did ? did.slice(0, 8) : c.client_id.slice(-6);
-    const label = [platform || tl('bwDeviceFallback'), region || null, shortId].filter(Boolean).join(' · ');
+    // Label: platform + device-id only (no region / no shortening), per request.
+    const label = [platform || tl('bwDeviceFallback'), did || c.client_id.slice(-6)].filter(Boolean).join(' · ');
     return { clientId: c.client_id, deviceId: did, platform, region, label };
   });
 }
@@ -514,10 +515,16 @@ export default function BrowserWindowsPanel({
   selectedKey,
   onSelect,
   openConfigRequest,
+  onSelectMobile,
+  selectedMobileKey,
 }: {
   selectedKey?: string | null;
   onSelect: (sel: { clientId: string; deviceId: string; profile: Profile } | null) => void;
   openConfigRequest?: { backend: Backend; accountIdx: number; nonce: number } | null;
+  // Android / iOS tabs: selecting a phone hands a mobile selection up to Workspace,
+  // which renders MobileDeviceColumn instead of BrowserWindowsColumn.
+  onSelectMobile?: (sel: MobileSel | null) => void;
+  selectedMobileKey?: string | null; // `${clientId}:${id}`
 }) {
   const { t } = useTranslation('layout');
   const [devices, setDevices] = useState<Device[]>([]);
@@ -526,7 +533,9 @@ export default function BrowserWindowsPanel({
   const [devError, setDevError] = useState('');
 
   const [backend, setBackend] = useState<Backend>('electron');
+  const isMobile = backend === 'android' || backend === 'ios';
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [phones, setPhones] = useState<MobileDevice[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   // Profile0 is the system/team window — hidden by default; the eye button reveals it.
@@ -558,13 +567,18 @@ export default function BrowserWindowsPanel({
   }, [refreshDevices]);
 
   const refresh = useCallback(async () => {
-    if (!clientId) { setProfiles([]); return; }
+    if (!clientId) { setProfiles([]); setPhones([]); return; }
     setLoading(true); setError('');
     try {
-      setProfiles(await loadProfiles(clientId, backend));
+      if (backend === 'android' || backend === 'ios') {
+        const all = await listPhones(clientId);
+        setPhones(all.filter((p) => p.platform === backend));
+      } else {
+        setProfiles(await loadProfiles(clientId, backend));
+      }
     } catch (e: any) {
       setError(e?.message || String(e));
-      setProfiles([]);
+      setProfiles([]); setPhones([]);
     } finally {
       setLoading(false);
     }
@@ -578,8 +592,8 @@ export default function BrowserWindowsPanel({
     finally { setAddingProfile(false); }
   }, [clientId, backend, addingProfile, refresh]);
 
-  // Reload profiles + clear any open window column when the device/backend changes.
-  useEffect(() => { onSelect(null); refresh(); }, [refresh]);  // eslint-disable-line react-hooks/exhaustive-deps
+  // Reload + clear any open column (profile or phone) when the device/backend changes.
+  useEffect(() => { onSelect(null); onSelectMobile?.(null); refresh(); }, [refresh]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // External "open profile config" request (agent-webpage send open_profile_config):
   // switch to the requested backend, then once its profiles load, select that
@@ -602,19 +616,58 @@ export default function BrowserWindowsPanel({
   const TABS: { k: Backend; label: string; icon: React.ReactNode }[] = [
     { k: 'electron', label: 'Electron', icon: <Atom className="w-3.5 h-3.5" /> },
     { k: 'chrome', label: 'Chrome', icon: <Chrome className="w-3.5 h-3.5" /> },
+    { k: 'android', label: 'Android', icon: <Smartphone className="w-3.5 h-3.5" /> },
+    { k: 'ios', label: 'iOS', icon: <Smartphone className="w-3.5 h-3.5" /> },
   ];
 
   return (
     <div data-id="BrowserWindowsPanel" className="absolute inset-0 flex flex-col bg-[#0A0A0A]">
       {/* device selector */}
-      <div data-id="browser-windows-device" className="flex items-center gap-2 px-2 py-2 border-b border-white/[0.06] shrink-0">
-        <Laptop className="w-3.5 h-3.5 text-zinc-600 shrink-0" />
+      <div data-id="browser-windows-device" className="flex flex-col gap-2 px-2 py-2 border-b border-white/[0.06] shrink-0">
+        {/* actions row — single reload (device list + current profile/phone list) */}
+        <div data-id="browser-windows-device-actions" className="flex items-center gap-1">
+          <div className="flex-1" />
+          {backend === 'electron' && (
+            <button
+              data-id="browser-windows-show-system"
+              onClick={() => setShowSystem((v) => !v)}
+              title={showSystem ? t('bwHideSystem') : t('bwShowSystem')}
+              className={cn(
+                'p-1.5 rounded-lg transition-colors cursor-pointer shrink-0',
+                showSystem ? 'text-blue-400 bg-blue-500/10' : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04]',
+              )}
+            >
+              <Eye className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {!isMobile && (
+            <button
+              data-id="browser-windows-add-profile"
+              onClick={onAddProfile}
+              disabled={addingProfile || !clientId}
+              title={t('bwAddProfileTitle', { backend: backend === 'chrome' ? 'Chrome' : 'Electron' })}
+              className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+            >
+              {addingProfile ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+            </button>
+          )}
+          <button
+            data-id="browser-windows-refresh"
+            onClick={() => { refreshDevices(); refresh(); }}
+            disabled={devLoading || loading}
+            title={t('bwRefreshProfile')}
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+          >
+            {(devLoading || loading) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+        {/* device select on its own full-width line — device-id can be long */}
         <select
           data-id="browser-windows-device-select"
           value={clientId}
           onChange={(e) => setClientId(e.target.value)}
           disabled={devLoading || devices.length === 0}
-          className="flex-1 min-w-0 bg-[#141414] border border-white/[0.08] rounded-lg px-2 py-1.5 text-[12px] text-zinc-200 outline-none focus:border-white/20 cursor-pointer disabled:opacity-50"
+          className="w-full min-w-0 bg-[#141414] border border-white/[0.08] rounded-lg px-2 py-1.5 text-[12px] text-zinc-200 outline-none focus:border-white/20 cursor-pointer disabled:opacity-50"
         >
           {devices.length === 0 ? (
             <option value="">{devLoading ? t('bwLoadingDevices') : t('bwNoDevices')}</option>
@@ -622,18 +675,9 @@ export default function BrowserWindowsPanel({
             devices.map((d) => <option key={d.clientId} value={d.clientId}>{d.label}</option>)
           )}
         </select>
-        <button
-          data-id="browser-windows-device-refresh"
-          onClick={() => refreshDevices()}
-          disabled={devLoading}
-          title={t('bwRefreshDevices')}
-          className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50"
-        >
-          {devLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-        </button>
       </div>
 
-      {/* backend tabs + profile refresh */}
+      {/* backend tabs */}
       <div data-id="browser-windows-tabs" className="flex items-center gap-1 px-2 py-2 border-b border-white/[0.06] shrink-0">
         {TABS.map((tabItem) => (
           <button
@@ -648,38 +692,6 @@ export default function BrowserWindowsPanel({
             {tabItem.icon}{tabItem.label}
           </button>
         ))}
-        <div className="flex-1" />
-        {backend === 'electron' && (
-          <button
-            data-id="browser-windows-show-system"
-            onClick={() => setShowSystem((v) => !v)}
-            title={showSystem ? t('bwHideSystem') : t('bwShowSystem')}
-            className={cn(
-              'p-1.5 rounded-lg transition-colors cursor-pointer',
-              showSystem ? 'text-blue-400 bg-blue-500/10' : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04]',
-            )}
-          >
-            <Eye className="w-3.5 h-3.5" />
-          </button>
-        )}
-        <button
-          data-id="browser-windows-add-profile"
-          onClick={onAddProfile}
-          disabled={addingProfile || !clientId}
-          title={t('bwAddProfileTitle', { backend: backend === 'chrome' ? 'Chrome' : 'Electron' })}
-          className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50"
-        >
-          {addingProfile ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-        </button>
-        <button
-          data-id="browser-windows-refresh"
-          onClick={refresh}
-          disabled={loading || !clientId}
-          title={t('bwRefreshProfile')}
-          className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50"
-        >
-          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-        </button>
       </div>
 
       {/* body */}
@@ -700,6 +712,37 @@ export default function BrowserWindowsPanel({
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-zinc-500" />
             <span>{error}</span>
           </div>
+        ) : isMobile ? (
+          loading && phones.length === 0 ? (
+            <ProfileSkeleton />
+          ) : phones.length === 0 ? (
+            <div className="p-4 text-[12px] text-zinc-600">没有连接的 {backend === 'android' ? 'Android' : 'iOS'} 设备</div>
+          ) : (
+            <div data-id="browser-windows-phone-list" className="py-1">
+              {phones.map((d) => {
+                const key = `${clientId}:${d.id}`;
+                const unauth = d.status === 'unauthorized';
+                return (
+                  <button
+                    key={key}
+                    data-id="mobile-device-row"
+                    onClick={() => { onSelect(null); onSelectMobile?.({ clientId, platform: d.platform, id: d.id, label: d.model || d.id }); }}
+                    className={cn(
+                      'w-full flex items-center gap-2 px-3 py-2 text-left transition-colors cursor-pointer',
+                      selectedMobileKey === key ? 'bg-white/[0.07]' : 'hover:bg-white/[0.03]',
+                    )}
+                  >
+                    <Smartphone className="w-4 h-4 text-zinc-500 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] text-zinc-200 truncate">{d.model || d.id}</div>
+                      <div className="text-[11px] text-zinc-600 truncate">{d.id}{unauth ? ' · 未授权' : ''}</div>
+                    </div>
+                    <ChevronRight className="w-3.5 h-3.5 text-zinc-600 shrink-0" />
+                  </button>
+                );
+              })}
+            </div>
+          )
         ) : loading && profiles.length === 0 ? (
           <ProfileSkeleton />
         ) : profiles.length === 0 ? (
@@ -711,7 +754,7 @@ export default function BrowserWindowsPanel({
                 key={p.key}
                 profile={p}
                 selected={selectedKey === p.key}
-                onClick={() => onSelect({ clientId, deviceId: devices.find((d) => d.clientId === clientId)?.deviceId || '', profile: p })}
+                onClick={() => { onSelectMobile?.(null); onSelect({ clientId, deviceId: devices.find((d) => d.clientId === clientId)?.deviceId || '', profile: p }); }}
               />
             ))}
             {!showSystem && profiles.some(isSystem) && profiles.every(isSystem) && (

@@ -36,5 +36,17 @@
   "tipFork": "复制出一个新 agent：先用 agent-summary 把当前对话提炼成摘要，新 agent 启动后将其作为自己的「继承记忆」读入，并以「Fork of …」挂在本 agent 下面。适合把分支任务交给分身并行处理，互不占用上下文。",
   "tipDelete": "彻底删除该 agent：关闭其 tmux 窗口并移除绑定，不可恢复。",
   "gatewayBadgeOn": "网关模式（本地 AI Gateway）",
-  "gatewayBadgeOff": "官方登录（直连）"
+  "gatewayBadgeOff": "官方登录（直连）",
+  "forkPreviewTitle": "分身预览",
+  "forkPreviewSubtitle": "确认要继承的上下文，可编辑提示词后再发送",
+  "forkPreviewFailed": "生成分身预览失败",
+  "forkLoadingPreview": "正在生成摘要预览…",
+  "forkTruncated": "已截断，点开看完整内容",
+  "forkTokenUse": "Token 用量（来自 reply.json）",
+  "forkCompression": "压缩比",
+  "forkSummaryTokensEst": "摘要 token 估算",
+  "forkPromptLabel": "继承提示词（可编辑）",
+  "forkSendPrompt": "发送并创建分身",
+  "forkSending": "正在创建分身…",
+  "forkCancel": "取消"
 }

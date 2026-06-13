@@ -36,6 +36,7 @@ import { ProxyManagerDialog } from './layout/ProxyManagerDialog';
 import SkillMarketplacePanel from './layout/SkillMarketplacePanel';
 import CustomAgentsPanel from './layout/CustomAgentsPanel';
 import BrowserWindowsPanel, { BrowserWindowsColumn, type Profile as BrowserProfile } from './layout/BrowserWindowsPanel';
+import { MobileDeviceColumn, type MobileSel } from './layout/MobileDevicesPanel';
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
 import AgentProviderRequestView, { type RequestViewTab } from './layout/AgentProviderRequestView';
 import AgentUsageLogView from './layout/AgentUsageLogView';
@@ -572,6 +573,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // left panel and the mid panel. Cleared whenever we leave the windows view.
   const [browserSel, setBrowserSel] = useState<{ clientId: string; deviceId: string; profile: BrowserProfile } | null>(null);
   useEffect(() => { if (leftActive !== 'windows') setBrowserSel(null); }, [leftActive]);
+  // Selected phone (Android/iOS tab inside the windows panel) → drives the inserted
+  // mobile-device column instead of the browser-windows column. Cleared on leave.
+  const [mobileSel, setMobileSel] = useState<MobileSel | null>(null);
+  useEffect(() => { if (leftActive !== 'windows') setMobileSel(null); }, [leftActive]);
   // External "open profile settings" request (from agent-webpage send open_profile_config,
   // relayed by useDesktopEvents). Switch to the windows view + hand the request to the panel.
   const [pendingProfileConfig, setPendingProfileConfig] = useState<{ backend: 'chrome' | 'electron'; accountIdx: number; nonce: number } | null>(null);
@@ -1302,6 +1307,17 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCliContentTab('files');
     setCliContentOpen(true);
   }, [paneId]);
+  // Open a workspace-relative file in a specific agent's file editor. Switches
+  // the content drawer to that agent's FilesView, then dispatches cicy:open-file
+  // on the next tick so the re-rendered FilesView (now scoped to the source
+  // agent) handles the event. Used by the fork-confirm modal.
+  const openAgentFile = useCallback((targetPaneId: string, relPath: string) => {
+    if (!targetPaneId || !relPath) return;
+    openPaneFiles(targetPaneId);
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('cicy:open-file', { detail: { path: relPath } }));
+    }, 80);
+  }, [openPaneFiles]);
   // markdown history 里点击文件链接 → 揭示文件视图(FilesView 自己监听同一事件打开 tab)。
   useEffect(() => {
     const reveal = () => {
@@ -1761,6 +1777,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
               <SideBtn dataId="btn-custom-agents" active={leftActive === 'customAgents'} icon={<Bot className="w-5 h-5" />} title={t('sidebarCustomAgents')} onClick={() => toggleLeft('customAgents')} />
               {/* Browser windows: Chrome / Electron profiles → live windows + screenshots */}
               <SideBtn dataId="btn-windows" active={leftActive === 'windows'} icon={<AppWindow className="w-5 h-5" />} title="浏览器窗口" onClick={() => toggleLeft('windows')} />
+              {/* Audit guard: 安全/审计 entry — opens the audit panel (AuditGuardFab,
+                  mounted at App level) via a window event. Replaces the old floating
+                  draggable FAB. Only shows when the audit master switch is on. */}
+              {globalVar?.audit_enabled && (
+                <SideBtn dataId="btn-audit" active={false} icon={<ShieldCheck className="w-5 h-5" />} title="审计 / 安全" onClick={() => window.dispatchEvent(new CustomEvent('cicy:toggle-audit-guard'))} />
+              )}
               {/* Providers & IM moved into the unified Settings modal (bottom-left gear). */}
             </>
           )}
@@ -1841,6 +1863,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                             openPaneInCurrentTerminal(targetPaneId);
                             openInspectorForPane(targetPaneId, 'settings');
                           }}
+                          onOpenAgentFile={openAgentFile}
                         />
                       </div>
                     ) : leftActive === 'skills' ? (
@@ -1849,11 +1872,17 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       </div>
                     ) : leftActive === 'customAgents' ? (
                       <div data-id="left-panel-custom-agents-view" className="absolute inset-0">
-                        <CustomAgentsPanel onCreated={refreshPanes} onSelectAgent={onSelectAgent} />
+                        <CustomAgentsPanel paneId={activeCliPaneId || paneId} onCreated={refreshPanes} onSelectAgent={onSelectAgent} />
                       </div>
                     ) : leftActive === 'windows' ? (
                       <div data-id="left-panel-windows-view" className="absolute inset-0">
-                        <BrowserWindowsPanel selectedKey={browserSel?.profile.key ?? null} onSelect={setBrowserSel} openConfigRequest={pendingProfileConfig} />
+                        <BrowserWindowsPanel
+                          selectedKey={browserSel?.profile.key ?? null}
+                          onSelect={setBrowserSel}
+                          openConfigRequest={pendingProfileConfig}
+                          onSelectMobile={setMobileSel}
+                          selectedMobileKey={mobileSel ? `${mobileSel.clientId}:${mobileSel.id}` : null}
+                        />
                       </div>
                     ) : null}
                   </div>
@@ -1873,6 +1902,19 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   onClose={() => setBrowserSel(null)}
                   onSendToAgent={sendBrowserToAgent}
                   onOpenInEditor={openCodeFile}
+                />
+              </div>
+            ) : null}
+            {leftActive === 'windows' && mobileSel && !globalVar?.helper_mode ? (
+              <div
+                data-id="mobile-device-column-wrap"
+                className="h-full w-[320px] min-w-[320px] max-w-[320px] shrink-0 border-r border-[var(--vsc-border)] relative"
+              >
+                <MobileDeviceColumn
+                  key={`${mobileSel.clientId}:${mobileSel.id}`}
+                  sel={mobileSel}
+                  onClose={() => setMobileSel(null)}
+                  onSendToAgent={sendBrowserToAgent}
                 />
               </div>
             ) : null}

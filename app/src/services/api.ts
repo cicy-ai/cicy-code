@@ -104,7 +104,11 @@ const api = {
   updatePane: (id: string, data: any) => http.patch(`/api/tmux/panes/${encodeURIComponent(id)}`, data),
   deletePane: (id: string) => http.delete(`/api/tmux/panes/${encodeURIComponent(id)}`),
   createPane: (data: any) => http.post('/api/tmux/create', data),
-  forkPane: (data: { source_pane_id: string; title?: string; master_pane_id?: string }) => http.post('/api/tmux/fork', data),
+  forkPane: (data: { source_pane_id: string; title?: string; master_pane_id?: string; prompt?: string }) => http.post('/api/tmux/fork', data),
+  // Read-only preview for the fork-confirm modal: regenerates the source's
+  // summary and returns current.json / reply.json / summary content + token use
+  // + compression ratio + the default inherit prompt. Does NOT create a pane.
+  forkPreview: (data: { source_pane_id: string }) => http.post('/api/tmux/fork/preview', data),
   restartPane: (id: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/restart`),
   capturePane: (id: string, lines = 100) => http.post('/api/tmux/capture_pane', { pane_id: id, lines }),
 

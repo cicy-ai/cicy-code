@@ -14,6 +14,7 @@ import { ModelTag } from '../../lib/modelTag';
 import AgentAvatar from '../AgentAvatar';
 import Select from '../ui/Select';
 import CreateAgentDialog, { CreateAgentValues } from '../CreateAgentDialog';
+import ForkConfirmModal from './ForkConfirmModal';
 
 interface Agent {
   pane_id: string;
@@ -55,6 +56,9 @@ interface Props {
   onOpenSettingsPane?: (paneId: string) => void;
   onRefreshPanes: () => Promise<void>;
   onRefreshPoll: () => void;
+  // Open a file (workspace-relative path) in the given agent's file editor.
+  // Used by the fork-confirm modal to reveal the source's history files.
+  onOpenAgentFile?: (paneId: string, relPath: string) => void;
 }
 
 // Live header metrics (status/model/context/cost) for every card in the panel.
@@ -147,9 +151,11 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-export default function TeamPanel({ paneId, panes = [], bindings = [], statuses = {}, onOpenInCurrentPane, onLocatePane, openedPaneIds = [], activePaneId, onOpenSettingsPane, onRefreshPanes, onRefreshPoll }: Props) {
+export default function TeamPanel({ paneId, panes = [], bindings = [], statuses = {}, onOpenInCurrentPane, onLocatePane, openedPaneIds = [], activePaneId, onOpenSettingsPane, onRefreshPanes, onRefreshPoll, onOpenAgentFile }: Props) {
   const [creating, setCreating] = useState(false);
   const [forkingId, setForkingId] = useState<string | null>(null);
+  // Source pane id whose fork-confirm preview modal is open (null = closed).
+  const [forkPreviewSrc, setForkPreviewSrc] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   // bottom-most cards: not enough room below the … button → flip dropdown upward
@@ -940,17 +946,11 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
       onRestart: () => restartPane(wid, getName(b)),
       onOpenSettings: () => onOpenSettingsPane?.(wid),
       canRestart: true,
-      onFork: async () => {
-        setForkingId(wid);
-        try {
-          const { data } = await apiService.forkPane({ source_pane_id: wid, master_pane_id: paneId });
-          if (data?.pane_id) { await onRefreshPanes(); onRefreshPoll(); }
-        } catch {
-          window.dispatchEvent(new CustomEvent('show-toast', { detail: i18n.t('toastForkFailed', { ns: 'teamPanel' }) }));
-        } finally {
-          setForkingId(null);
-          setOpenMenuId(null);
-        }
+      onFork: () => {
+        // Open the fork-confirm preview instead of forking immediately; the fork
+        // pane is created (and the prompt sent) only when the user clicks Send.
+        setForkPreviewSrc(wid);
+        setOpenMenuId(null);
       },
       forking: forkingId === wid,
       onRemove: async () => {
@@ -966,6 +966,15 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
 
   return (
     <div className="h-full w-full min-w-0 flex flex-col overflow-hidden" data-id="team-panel-root">
+      {forkPreviewSrc ? (
+        <ForkConfirmModal
+          sourcePaneId={forkPreviewSrc}
+          masterPaneId={paneId}
+          onClose={() => setForkPreviewSrc(null)}
+          onForked={() => { onRefreshPanes(); onRefreshPoll(); }}
+          onOpenAgentFile={(pid, rel) => onOpenAgentFile?.(pid, rel)}
+        />
+      ) : null}
       {forkingId ? createPortal(
         <div data-id="team-panel-fork-loading" className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-white/[0.08] bg-[#141416] px-8 py-6 shadow-2xl">
@@ -1066,20 +1075,9 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
             onRestart: () => restartPane(paneId, currentAgent.title),
             onOpenSettings: () => onOpenSettingsPane?.(paneId),
             canRestart: true,
-            onFork: async () => {
-              setForkingId(paneId);
-              try {
-                const { data } = await apiService.forkPane({ source_pane_id: paneId, master_pane_id: paneId });
-                if (data?.pane_id) {
-                  await onRefreshPanes();
-                  onRefreshPoll();
-                }
-              } catch {
-                window.dispatchEvent(new CustomEvent('show-toast', { detail: i18n.t('toastForkFailed', { ns: 'teamPanel' }) }));
-              } finally {
-                setForkingId(null);
-                setOpenMenuId(null);
-              }
+            onFork: () => {
+              setForkPreviewSrc(paneId);
+              setOpenMenuId(null);
             },
           })}
         </div>

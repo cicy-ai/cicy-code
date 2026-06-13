@@ -5521,6 +5521,158 @@ func readMihomoGlobalPassword() string {
 	return ""
 }
 
+// forkSummarySources resolves a source pane's workspace + regenerates its raw
+// conversation dump (agent-summary), returning the absolute paths to the three
+// inheritance artifacts (current.json, reply.json, summary current.md) plus the
+// short id. Shared by the preview endpoint and the fork creation path so both
+// agree on exactly which files the fork inherits.
+func forkSummarySources(srcID, srcWorkspace string) (curJSON, replyJSON, summaryPath, short string) {
+	short = shortPaneID(srcID)
+	summaryDir := filepath.Join(srcWorkspace, ".cicy", "history", "summary")
+	_ = os.MkdirAll(summaryDir, 0755)
+
+	summaryTarget := short
+	if ws := strings.TrimSpace(srcWorkspace); ws != "" {
+		if p := filepath.Join(ws, ".cicy", "history", "current.json"); fileExistsPlain(p) {
+			summaryTarget = p
+			curJSON = p
+		}
+	}
+	if curJSON == "" {
+		curJSON = filepath.Join(srcWorkspace, ".cicy", "history", "current.json")
+	}
+	replyJSON = filepath.Join(srcWorkspace, ".cicy", "history", "reply.json")
+
+	start := time.Now()
+	if out, genErr := exec.Command("agent-summary", summaryTarget).Output(); genErr != nil {
+		log.Printf("[fork-preview] agent-summary failed: %v", genErr)
+	} else {
+		log.Printf("[fork-preview] %s summary generated -> %s (%s)", short, strings.TrimSpace(string(out)), time.Since(start).Round(time.Millisecond))
+	}
+	cur := filepath.Join(summaryDir, "current.md")
+	if info, err := os.Stat(cur); err == nil && info.Size() > 0 {
+		summaryPath = cur
+	}
+	return
+}
+
+// readFileCapped reads up to maxBytes of a file, returning (content, fullSize,
+// truncated). Used by the fork preview so a huge current.json doesn't blow up
+// the JSON response — the modal shows a head and links the file to the editor.
+func readFileCapped(path string, maxBytes int) (string, int64, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", 0, false
+	}
+	size := info.Size()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", size, false
+	}
+	if maxBytes > 0 && len(b) > maxBytes {
+		return string(b[:maxBytes]), size, true
+	}
+	return string(b), size, false
+}
+
+// handleForkPreview returns everything the fork-confirm modal shows WITHOUT
+// creating a pane: the source's current.json + reply.json (token use lives in
+// reply.json), the regenerated summary path + content, the compression ratio,
+// and the default inherit prompt the user can edit before sending. Read-only;
+// the actual fork is created later by handleForkPane on the user's "Send".
+// POST /api/tmux/fork/preview { source_pane_id }
+func handleForkPreview(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SourcePaneID string `json:"source_pane_id"`
+	}
+	readBody(r, &req)
+	srcID := normPaneID(strings.TrimSpace(req.SourcePaneID))
+	if srcID == "" {
+		httpErr(w, 400, "source_pane_id required")
+		return
+	}
+
+	var srcAgentType, srcWorkspace sql.NullString
+	err := store.QueryRow(`SELECT agent_type, workspace FROM agent_config WHERE pane_id=?`, srcID).
+		Scan(&srcAgentType, &srcWorkspace)
+	if err != nil {
+		httpErr(w, 404, "source pane not found")
+		return
+	}
+
+	curPath, replyPath, summaryPath, short := forkSummarySources(srcID, srcWorkspace.String)
+
+	const headCap = 256 * 1024 // 256KB head — enough to inspect, file editor shows the rest
+	curContent, curSize, curTrunc := readFileCapped(curPath, headCap)
+	replyContent, replySize, replyTrunc := readFileCapped(replyPath, headCap)
+	summaryContent, summarySize, summaryTrunc := readFileCapped(summaryPath, headCap)
+
+	// Token use lives in reply.json (top-level *_tokens + cost_credit + model).
+	tokenUse := M{}
+	if replyContent != "" {
+		var rep map[string]interface{}
+		raw, _ := os.ReadFile(replyPath)
+		if json.Unmarshal(raw, &rep) == nil {
+			for _, k := range []string{"input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "total_tokens", "cost_credit", "model"} {
+				if v, ok := rep[k]; ok {
+					tokenUse[k] = v
+				}
+			}
+		}
+	}
+
+	// Compression: summary bytes vs the source's full conversation (current.json
+	// carries the whole history in its request body). Token ratio is an estimate
+	// (≈4 bytes/token) since the summary is never tokenized.
+	var ratio float64
+	if curSize > 0 {
+		ratio = float64(summarySize) / float64(curSize)
+	}
+	summaryTokensEst := (summarySize + 3) / 4
+	var inputTokens int64
+	if v, ok := tokenUse["input_tokens"]; ok {
+		if f, ok := v.(float64); ok {
+			inputTokens = int64(f)
+		}
+	}
+	var tokenRatio float64
+	if inputTokens > 0 {
+		tokenRatio = float64(summaryTokensEst) / float64(inputTokens)
+	}
+
+	// Default inherit prompt — the same text the fork would auto-receive today,
+	// pre-filled into the modal's textarea so the user can edit before sending.
+	defaultPrompt := ""
+	if normalizeAgentType(srcAgentType.String) == "cicy" {
+		if summaryContent != "" {
+			defaultPrompt = fmt.Sprintf(cicyForkInheritPrompt, short, strings.TrimSpace(summaryContent))
+		} else {
+			defaultPrompt = fmt.Sprintf("You are a fork of agent %s. No prior-conversation summary is available — wait for instructions.", short)
+		}
+	} else if summaryPath != "" {
+		defaultPrompt = fmt.Sprintf(forkInheritPrompt, short, summaryPath)
+	} else {
+		defaultPrompt = "Hello, this is a fork. Please continue the work from the source agent."
+	}
+
+	J(w, M{
+		"success":        true,
+		"source_pane_id": srcID,
+		"source_short":   short,
+		"agent_type":     normalizeAgentType(srcAgentType.String),
+		"workspace":      srcWorkspace.String,
+		"files": M{
+			"current_json": M{"path": curPath, "content": curContent, "size": curSize, "truncated": curTrunc},
+			"reply_json":   M{"path": replyPath, "content": replyContent, "size": replySize, "truncated": replyTrunc},
+			"summary":      M{"path": summaryPath, "content": summaryContent, "size": summarySize, "truncated": summaryTrunc},
+		},
+		"token_use":          tokenUse,
+		"summary_tokens_est": summaryTokensEst,
+		"compression":        M{"ratio": ratio, "token_ratio": tokenRatio, "original_bytes": curSize, "summary_bytes": summarySize},
+		"default_prompt":     defaultPrompt,
+	})
+}
+
 // handleForkPane creates a new pane that inherits the source pane's agent_type,
 // use_custom_gateway, default_model, and proxy/allow settings; once the new
 // agent is ready, the source pane's current.raw.md content is sent as a prompt.
@@ -5572,9 +5724,15 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		SourcePaneID string `json:"source_pane_id"`
 		Title        string `json:"title"`
 		MasterPaneID string `json:"master_pane_id"`
+		// Prompt, when non-empty, overrides the auto-generated inherit prompt —
+		// the fork-confirm modal sends the user-edited text here. Applies to both
+		// the CLI path (sent verbatim to the input box) and headless cicy forks
+		// (delivered verbatim as the first user message).
+		Prompt string `json:"prompt"`
 	}
 	readBody(r, &req)
 	srcID := normPaneID(strings.TrimSpace(req.SourcePaneID))
+	customPrompt := strings.TrimSpace(req.Prompt)
 	if srcID == "" {
 		httpErr(w, 400, "source_pane_id required")
 		return
@@ -5734,6 +5892,10 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 			if summary != "" {
 				msg = fmt.Sprintf(cicyForkInheritPrompt, short, summary)
 			}
+			// User-edited prompt from the fork-confirm modal wins over the default.
+			if customPrompt != "" {
+				msg = customPrompt
+			}
 			if !deliverCicyMessage(newShort, ws, msg) {
 				log.Printf("[fork] %s cicy inherit message not delivered", newShort)
 				return
@@ -5771,6 +5933,15 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 			// send worker re-checks readiness, so this only needs to cover the
 			// brief window where the box is drawn but not yet accepting paste.
 			time.Sleep(500 * time.Millisecond)
+			// User-edited prompt from the fork-confirm modal wins over the default.
+			if customPrompt != "" {
+				if err := sendTextToPane(newPaneID, customPrompt, true); err != nil {
+					log.Printf("[fork] %s send custom prompt failed: %v", newPaneID, err)
+				} else {
+					log.Printf("[fork] %s custom inherit prompt sent", newPaneID)
+				}
+				return
+			}
 			if usedPath == "" {
 				log.Printf("[fork] %s no summary available — sending generic prompt", newPaneID)
 				if err := sendTextToPane(newPaneID, "Hello, this is a fork. Please continue the work from the source agent.", true); err != nil {

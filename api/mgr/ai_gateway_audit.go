@@ -121,6 +121,22 @@ type aiGatewayCurrentSnapshot struct {
 	RequestIDs       []string            `json:"request_ids"`
 	ActiveRequestIDs []string            `json:"active_request_ids"`
 	ConversationIDs  []string            `json:"conversation_ids"`
+	// Prompts is the clean, de-noised list of REAL human questions in this
+	// snapshot — extracted at write time from the (already history-id-annotated)
+	// body, so each entry's ID matches the body's positional history id and the
+	// list is always internally consistent with THIS snapshot (no cross-snapshot
+	// id drift). The prompts-only history view reads this directly instead of
+	// re-deriving questions in the frontend. See aiGatewayBuildCurrentPrompts.
+	Prompts []aiGatewayUserPrompt `json:"prompts,omitempty"`
+}
+
+// aiGatewayUserPrompt is one real human question: its positional history id (so
+// the answer = first assistant turn after it, read from the SAME snapshot), the
+// time it first appeared, and the sanitized content.
+type aiGatewayUserPrompt struct {
+	ID      int    `json:"id"`
+	TS      string `json:"ts"`
+	Content string `json:"content"`
 }
 
 type aiGatewayReplySnapshot struct {
@@ -362,6 +378,24 @@ var (
 	environmentContextBlockRe  = regexp.MustCompile(`(?s)<environment_context>.*?</environment_context>`)
 	openClawForwardedHeaderRe  = regexp.MustCompile("(?s)^Sender \\(untrusted metadata\\):\\s*```json\\s*.*?```\\s*")
 	openClawLeadingTimestampRe = regexp.MustCompile(`^\[[^\]\n]+\]\s*`)
+	// Harness/CLI scaffolding that rides in a role=user message but is NOT a
+	// human prompt: slash-command wrappers (/compact, /clear, …) and the
+	// auto-compaction continuation preamble. Stripped so the real-prompt list
+	// (aiGatewayBuildCurrentPrompts) doesn't surface them as questions.
+	localCommandBlockRe = regexp.MustCompile(`(?s)<local-command-caveat>.*?</local-command-caveat>|<command-name>.*?</command-name>|<command-message>.*?</command-message>|<command-args>.*?</command-args>|<local-command-stdout>.*?</local-command-stdout>|<local-command-stderr>.*?</local-command-stderr>`)
+	compactionPreambleRe = regexp.MustCompile(`(?s)^\s*This session is being continued from a previous conversation.*`)
+	// The /loop wakeup "recap" prompt is harness-injected as a role=user message
+	// ("The user stepped away and is coming back. Recap in under N words…"), not a
+	// human question — drop it from the prompts list.
+	recapScaffoldRe = regexp.MustCompile(`(?is)^\s*The user (stepped away|is back|has returned).{0,80}?\bRecap\b`)
+	// Claude Code prepends this marker to the user message when a tool call is
+	// interrupted (ESC). It's not part of the human prompt — strip it; whatever the
+	// user actually typed after it is kept.
+	requestInterruptedRe = regexp.MustCompile(`(?m)^\s*\[Request interrupted by user[^\]]*\]\s*$`)
+	// Skill invocation injects the skill's SKILL.md as a role=user message starting
+	// with "Base directory for this skill:". That's harness scaffolding, not a
+	// human question — drop the whole message.
+	skillInjectionRe = regexp.MustCompile(`(?s)^\s*Base directory for this skill:`)
 )
 
 func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suffix string, method string, requestHeaders http.Header, requestBody []byte) *aiGatewayAuditSession {
@@ -1405,7 +1439,114 @@ func aiGatewayWriteSnapshotFile(agentID, name, convID string, value interface{})
 func aiGatewayWriteCurrentSnapshot(agentID string, current aiGatewayCurrentSnapshot) error {
 	current.Body = aiGatewayAnnotateCurrentBodyHistoryIDs(agentID, aiGatewayCloneJSONValue(current.Body))
 	current.MaxHistoryID = aiGatewayCurrentBodyMaxHistoryID(current.Body)
+	current.Prompts = aiGatewayBuildCurrentPrompts(agentID, current.Body, current.Timestamp)
 	return aiGatewayWriteSnapshotFile(agentID, "current.json", current.ConversationID, current)
+}
+
+// aiGatewayBuildCurrentPrompts extracts the clean list of REAL human questions
+// from an already-annotated current.json body. It walks the full ordered
+// message array (position = history id) and keeps only role=user messages that
+// carry genuine typed text — dropping tool_result-only turns, system/harness
+// scaffolding (system-reminder / environment_context / slash-command echoes /
+// compaction preamble), and the /loop recap wakeup. Duplicate text blocks within
+// one message and consecutive identical prompts are collapsed.
+//
+// Each prompt's TS is preserved across writes by CONTENT (not id — ids drift on
+// compaction): a prompt seen in the prior snapshot keeps its first-seen time, a
+// newly-appearing one is stamped with this snapshot's timestamp. This is the
+// per-turn write path (writeStartSnapshots), so the one prior-file read is cheap.
+func aiGatewayBuildCurrentPrompts(agentID string, body interface{}, ts string) []aiGatewayUserPrompt {
+	mapped := aiGatewayMap(body)
+	if len(mapped) == 0 {
+		return nil
+	}
+	items := aiGatewaySlice(mapped["messages"])
+	if len(items) == 0 {
+		items = aiGatewaySlice(mapped["input"])
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	stamp := strings.TrimSpace(ts)
+	if stamp == "" {
+		stamp = time.Now().UTC().Format(time.RFC3339)
+	}
+	// content → first-seen ts, from the prior snapshot (drift-proof by content).
+	priorTS := map[string]string{}
+	if prev, err := aiGatewayReadCurrentSnapshot(agentID); err == nil {
+		for _, p := range prev.Prompts {
+			if p.Content != "" && p.TS != "" {
+				priorTS[p.Content] = p.TS
+			}
+		}
+	}
+	out := []aiGatewayUserPrompt{}
+	lastContent := ""
+	for _, raw := range items {
+		m := aiGatewayMap(raw)
+		if len(m) == 0 {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(aiGatewayString(m["role"]))) != "user" {
+			continue
+		}
+		text := aiGatewayPromptTextFromUserMessage(m["content"])
+		if strings.TrimSpace(text) == "" {
+			continue // tool_result-only turn, or no human text
+		}
+		clean := aiGatewaySanitizeUserQuestion(text)
+		if clean == "" || recapScaffoldRe.MatchString(clean) || skillInjectionRe.MatchString(clean) {
+			continue // pure scaffolding / recap wakeup / skill injection
+		}
+		if clean == lastContent {
+			continue // consecutive duplicate
+		}
+		when := stamp
+		if prev, ok := priorTS[clean]; ok {
+			when = prev
+		}
+		out = append(out, aiGatewayUserPrompt{ID: aiGatewayInt(m["id"]), TS: when, Content: clean})
+		lastContent = clean
+	}
+	return out
+}
+
+// aiGatewayPromptTextFromUserMessage pulls the human-typed text out of a
+// role=user message's content, ignoring tool_result blocks (returns "" when the
+// message is tool_result-only). Adjacent identical text blocks are de-duplicated
+// — some clients emit the same text twice in separate blocks, which would
+// otherwise render the question doubled.
+func aiGatewayPromptTextFromUserMessage(content interface{}) string {
+	switch c := content.(type) {
+	case string:
+		return c
+	case []interface{}:
+		parts := []string{}
+		lastKept := ""
+		hasText := false
+		for _, raw := range c {
+			blk := aiGatewayMap(raw)
+			if len(blk) == 0 {
+				continue
+			}
+			switch strings.ToLower(strings.TrimSpace(aiGatewayString(blk["type"]))) {
+			case "text", "":
+				hasText = true
+				t := aiGatewayString(blk["text"])
+				if strings.TrimSpace(t) == "" || strings.TrimSpace(t) == strings.TrimSpace(lastKept) {
+					continue
+				}
+				parts = append(parts, t)
+				lastKept = t
+			}
+		}
+		if !hasText {
+			return ""
+		}
+		return strings.Join(parts, "\n")
+	default:
+		return ""
+	}
 }
 
 // aiGatewayReplySnapshotLite is a simplified version for reply.json
@@ -2722,6 +2863,12 @@ func aiGatewaySanitizeUserQuestion(question string) string {
 	question = strings.ReplaceAll(question, "</system-reminder>", "")
 	question = strings.ReplaceAll(question, "<environment_context>", "")
 	question = strings.ReplaceAll(question, "</environment_context>", "")
+	// Drop harness scaffolding so it never reads as a human prompt: the
+	// auto-compaction preamble is the whole message → blank it; slash-command
+	// wrapper tags are stripped, leaving only real text (if any) behind.
+	question = compactionPreambleRe.ReplaceAllString(question, "")
+	question = localCommandBlockRe.ReplaceAllString(question, "")
+	question = requestInterruptedRe.ReplaceAllString(question, "")
 	question = strings.TrimSpace(question)
 	if strings.HasPrefix(question, "Sender (untrusted metadata):") {
 		question = openClawForwardedHeaderRe.ReplaceAllString(question, "")

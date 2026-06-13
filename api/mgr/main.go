@@ -40,7 +40,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.0"
+const version = "2.3.1"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -255,6 +255,7 @@ Options:
 	http.HandleFunc("/api/tmux/panes/", authM(handlePaneByID))
 	http.HandleFunc("/api/tmux/create", authM(handleCreatePane))
 	http.HandleFunc("/api/tmux/fork", authM(handleForkPane))
+	http.HandleFunc("/api/tmux/fork/preview", authM(handleForkPreview))
 	http.HandleFunc("/api/tmux/restart_all", authM(handleRestartAll))
 
 	// Tmux

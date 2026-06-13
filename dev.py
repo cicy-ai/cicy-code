@@ -1623,6 +1623,14 @@ def main():
         help="Quick restart: build binary, kill existing on :8008, start cicy-code. Skips ttyd/app/version-sync.",
     )
     local_group.add_argument(
+        "--public",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="(default) Pass --public to the local cicy-code server so it binds 0.0.0.0 — reachable on "
+        "this host's public IP (43.99.56.150). Use --no-public to bind 127.0.0.1 only. "
+        "The --docker path always runs --public.",
+    )
+    local_group.add_argument(
         "--ttydAssets",
         "--ttyd-assets",
         dest="ttydAssets",
@@ -1799,6 +1807,9 @@ def main():
         extra = ["--preview"] if args.preview else []
         if args.hot:
             extra = ["--hot"]
+        if args.public:
+            extra.append("--public")
+            print("[dev] --public: cicy-code will bind 0.0.0.0:%d (reachable off-localhost)" % PORT)
         if args.preview:
             os.environ["CICY_PREVIEW_DIST"] = os.path.join(ROOT_DIR, "app", "dist")
         start_local_dev_detached(cicy_bin, extra=extra or None, reply_mirror=args.reply_mirror)
@@ -1852,15 +1863,18 @@ def main():
         sys.exit(1)
 
     cicy_bin = os.path.join(API_DIR, "cicy-code")
+    public_extra = ["--public"] if args.public else []
+    if args.public:
+        print("[dev] --public: cicy-code will bind 0.0.0.0:%d (reachable off-localhost)" % PORT)
     if args.hot:
         ensure_app_dev_server()   # starts `npm run dev` on :8022 if not already up
-        start_local_dev_detached(cicy_bin, extra=["--hot"], reply_mirror=args.reply_mirror)
+        start_local_dev_detached(cicy_bin, extra=["--hot", *public_extra], reply_mirror=args.reply_mirror)
     elif args.preview:
         build_app_dist()          # `npm run build` -> app/dist, served from disk
         os.environ["CICY_PREVIEW_DIST"] = os.path.join(ROOT_DIR, "app", "dist")
-        start_local_dev_detached(cicy_bin, extra=["--preview"], reply_mirror=args.reply_mirror)
+        start_local_dev_detached(cicy_bin, extra=["--preview", *public_extra], reply_mirror=args.reply_mirror)
     else:
-        start_local_dev_detached(cicy_bin, reply_mirror=args.reply_mirror)   # serve the binary-embedded assets
+        start_local_dev_detached(cicy_bin, extra=public_extra or None, reply_mirror=args.reply_mirror)   # serve the binary-embedded assets
     sys.exit(0)
 
 

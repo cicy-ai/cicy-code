@@ -36,5 +36,17 @@
   "tipFork": "新しいエージェントを複製：agent-summary で現在の会話を要約し、新エージェントが起動時にそれを「継承メモリ」として読み込みます。「Fork of …」としてこのエージェントの下にぶら下がります。ブランチタスクを分身に任せて並列処理するのに最適です。",
   "tipDelete": "エージェントを完全に削除：tmux ウィンドウを閉じ、バインドを解除します。元に戻せません。",
   "gatewayBadgeOn": "ゲートウェイ経由（ローカル AI Gateway）",
-  "gatewayBadgeOff": "公式ログイン（直結）"
+  "gatewayBadgeOff": "公式ログイン（直結）",
+  "forkPreviewTitle": "分身プレビュー",
+  "forkPreviewSubtitle": "継承するコンテキストを確認し、プロンプトを編集してから送信",
+  "forkPreviewFailed": "分身プレビューの生成に失敗しました",
+  "forkLoadingPreview": "サマリープレビューを生成中…",
+  "forkTruncated": "切り詰め済み — 開いて全文を表示",
+  "forkTokenUse": "トークン使用量（reply.json より）",
+  "forkCompression": "圧縮率",
+  "forkSummaryTokensEst": "サマリートークン（推定）",
+  "forkPromptLabel": "継承プロンプト（編集可）",
+  "forkSendPrompt": "送信して分身を作成",
+  "forkSending": "分身を作成中…",
+  "forkCancel": "キャンセル"
 }

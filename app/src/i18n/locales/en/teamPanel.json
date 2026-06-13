@@ -36,5 +36,17 @@
   "tipFork": "Clones a new agent: agent-summary distills the current conversation into a summary, which the new agent reads as its own inherited memory on startup. It appears as \"Fork of …\" nested under this agent — great for handing branch tasks to a fork to run in parallel without competing for context.",
   "tipDelete": "Permanently deletes the agent: closes its tmux window and removes the binding. Irreversible.",
   "gatewayBadgeOn": "Gateway mode (local AI gateway)",
-  "gatewayBadgeOff": "Official login (direct)"
+  "gatewayBadgeOff": "Official login (direct)",
+  "forkPreviewTitle": "Fork preview",
+  "forkPreviewSubtitle": "Review the context to inherit; edit the prompt before sending",
+  "forkPreviewFailed": "Failed to build fork preview",
+  "forkLoadingPreview": "Generating summary preview…",
+  "forkTruncated": "truncated — open to see full content",
+  "forkTokenUse": "Token use (from reply.json)",
+  "forkCompression": "Compression",
+  "forkSummaryTokensEst": "Summary tokens (est.)",
+  "forkPromptLabel": "Inherit prompt (editable)",
+  "forkSendPrompt": "Send & create fork",
+  "forkSending": "Creating fork…",
+  "forkCancel": "Cancel"
 }

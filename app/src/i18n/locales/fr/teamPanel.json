@@ -36,5 +36,17 @@
   "tipFork": "Clone un nouvel agent : agent-summary condense la conversation actuelle en résumé, que le nouvel agent lit au démarrage comme sa « mémoire héritée ». Il apparaît comme « Fork of … » sous cet agent — idéal pour confier des tâches parallèles sans se disputer le contexte.",
   "tipDelete": "Supprime définitivement l'agent : ferme sa fenêtre tmux et retire la liaison. Irréversible.",
   "gatewayBadgeOn": "Mode passerelle (AI gateway local)",
-  "gatewayBadgeOff": "Connexion officielle (directe)"
+  "gatewayBadgeOff": "Connexion officielle (directe)",
+  "forkPreviewTitle": "Aperçu du clone",
+  "forkPreviewSubtitle": "Vérifiez le contexte à hériter ; modifiez l'invite avant l'envoi",
+  "forkPreviewFailed": "Échec de la génération de l'aperçu du clone",
+  "forkLoadingPreview": "Génération de l'aperçu du résumé…",
+  "forkTruncated": "tronqué — ouvrir pour le contenu complet",
+  "forkTokenUse": "Utilisation des tokens (depuis reply.json)",
+  "forkCompression": "Compression",
+  "forkSummaryTokensEst": "Tokens du résumé (est.)",
+  "forkPromptLabel": "Invite d'héritage (modifiable)",
+  "forkSendPrompt": "Envoyer et créer le clone",
+  "forkSending": "Création du clone…",
+  "forkCancel": "Annuler"
 }
