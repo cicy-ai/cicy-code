@@ -7,6 +7,8 @@ package main
 // by SMTP. One implementation (the skills) drives both the CLI and this UI.
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -170,54 +172,77 @@ func handleTokenShow(w http.ResponseWriter, r *http.Request) {
 	J(w, M{"token": loadAPIToken()})
 }
 
-// POST /api/settings/token/refresh → rotate + email via the globalApiToken skill.
-// Returns the new token; maps the skill's gating errors to HTTP statuses the UI
-// uses to drive the "configure SMTP first" flow.
+// POST /api/settings/token/refresh → rotate the api_token and email the new one.
+// The backend ORCHESTRATES the order itself (rather than delegating to a skill's
+// version-specific behavior) so it can guarantee the safety property: the new
+// token is emailed FIRST and only persisted on a successful send — a failed
+// delivery rotates nothing, so the current token keeps working and the user is
+// never locked out. Delivery uses the (must-install) `email` skill; recipient is
+// the request's `to` or the email config's default_to.
 func handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
-	bin := resolveSkillBin("globalApiToken")
-	if bin == "" {
-		writeJSONStatus(w, 500, M{"ok": false, "code": "SKILL_NOT_INSTALLED", "detail": "globalApiToken skill not installed"})
-		return
-	}
 	var req M
 	_ = readBody(r, &req)
-	args := []string{"refresh", "--json"}
-	if to, _ := req["to"].(string); strings.TrimSpace(to) != "" {
-		args = append(args, "--to", strings.TrimSpace(to))
-	}
-	cmd := exec.Command(bin, args...)
-	cmd.Env = skillEnv()
-	out, _ := cmd.Output() // skill prints its {ok,...} envelope to stdout for ok+err
 
-	var res struct {
-		OK   bool `json:"ok"`
-		Data struct {
-			APIToken  string `json:"api_token"`
-			EmailedTo string `json:"emailed_to"`
-		} `json:"data"`
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
+	emailCfgMu.Lock()
+	cfg := readEmailJSONLocked()
+	emailCfgMu.Unlock()
+
+	smtpReady := emailFilled(emailStr(cfg, "smtp", "host")) && emailFilled(emailStr(cfg, "smtp", "user")) &&
+		emailFilled(emailStr(cfg, "smtp", "pass")) && emailFilled(emailStr(cfg, "smtp", "from"))
+	if sb, _ := cfg["smtp"].(map[string]any); sb == nil || sb["port"] == nil {
+		smtpReady = false
 	}
-	if json.Unmarshal(out, &res) != nil {
-		writeJSONStatus(w, 500, M{"ok": false, "code": "BAD_OUTPUT", "detail": strings.TrimSpace(string(out))})
+	if !smtpReady {
+		writeJSONStatus(w, 409, M{"ok": false, "code": "EMAIL_NOT_CONFIGURED", "detail": "SMTP is not configured — set it up first so the rotated token can be delivered"})
 		return
 	}
-	if !res.OK {
-		status := 500
-		switch res.Error.Code {
-		case "EMAIL_NOT_INSTALLED", "EMAIL_NOT_CONFIGURED":
-			status = 409 // UI → prompt to configure SMTP first
-		case "NO_RECIPIENT":
-			status = 422
-		case "EMAIL_SEND_FAILED":
-			status = 502
-		}
-		writeJSONStatus(w, status, M{"ok": false, "code": res.Error.Code, "detail": res.Error.Message})
+
+	to, _ := req["to"].(string)
+	to = strings.TrimSpace(to)
+	if to == "" {
+		dt, _ := cfg["default_to"].(string)
+		to = strings.TrimSpace(dt)
+	}
+	if to == "" {
+		writeJSONStatus(w, 422, M{"ok": false, "code": "NO_RECIPIENT", "detail": "no recipient — set a recipient (default_to) in the SMTP config"})
 		return
 	}
-	J(w, M{"ok": true, "token": res.Data.APIToken, "emailed_to": res.Data.EmailedTo})
+
+	bin := resolveSkillBin("email")
+	if bin == "" {
+		writeJSONStatus(w, 409, M{"ok": false, "code": "EMAIL_NOT_INSTALLED", "detail": "the email skill is not installed"})
+		return
+	}
+
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		writeJSONStatus(w, 500, M{"ok": false, "code": "RAND", "detail": err.Error()})
+		return
+	}
+	tok := base64.RawURLEncoding.EncodeToString(raw)
+
+	// Email FIRST.
+	body := "Your CiCy api_token on this host was just rotated.\n\nNew token: " + tok +
+		"\n\nThe previous token is now invalid. Keep this private — anyone with this token can control this host’s API."
+	cmd := exec.Command(bin, "send", "--to", to, "--subject", "CiCy API token rotated", "--body", body)
+	cmd.Env = skillEnv()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		writeJSONStatus(w, 502, M{"ok": false, "code": "EMAIL_SEND_FAILED", "detail": strings.TrimSpace(string(out))})
+		return
+	}
+
+	// Persist ONLY after a successful send.
+	providersFileMu.Lock()
+	gc := readGlobalJSONConfig()
+	gc["api_token"] = tok
+	werr := writeGlobalJSONConfig(gc)
+	providersFileMu.Unlock()
+	if werr != nil {
+		writeJSONStatus(w, 500, M{"ok": false, "code": "WRITE_FAILED", "detail": werr.Error()})
+		return
+	}
+
+	J(w, M{"ok": true, "token": tok, "emailed_to": to})
 }
 
 func writeJSONStatus(w http.ResponseWriter, status int, body M) {
