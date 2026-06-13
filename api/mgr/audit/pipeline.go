@@ -239,15 +239,15 @@ func (p *Pipeline) reload() {
 	}
 	log.Printf("[audit] policy reloaded hash=%s active_rules=%d custom=%d enabled=%v",
 		pol.Hash, p.activeRuleCount(), len(pol.CustomRules), pol.Enabled)
-	// policy.incident_response.email_from might newly resolve to a usable
-	// ResendMailer (or revert to FileMailer if the operator unset it).
+	// Credentials/config may have changed; re-resolve the active mailer
+	// (SMTP primary, Gmail fallback) or revert to FileMailer.
 	p.reloadMailer()
 }
 
 // WatchEmailCredentials starts an fsnotify watcher on ~/cicy-ai/db/ so the
-// pipeline hot-swaps to ResendMailer whenever email.json appears or rotates.
-// This is what catches the docker-cp window: audit.Init runs at container
-// startup BEFORE dev.py's `docker cp email.json` lands; the cp triggers
+// pipeline hot-swaps the mailer whenever smtp.json/google.json appears or
+// rotates. This is what catches the docker-cp window: audit.Init runs at
+// container startup BEFORE dev.py's `docker cp` lands; the cp triggers
 // a watcher event, we reload creds and swap the mailer in-place.
 // No-op when filesystem watching cannot be initialized.
 func (p *Pipeline) WatchEmailCredentials() error {
@@ -275,7 +275,7 @@ func (p *Pipeline) WatchEmailCredentials() error {
 					return
 				}
 				switch filepath.Base(ev.Name) {
-				case "email.json", "smtp.json", "google.json", "google_oauth_client.json":
+				case "smtp.json", "google.json", "google_oauth_client.json":
 				default:
 					continue
 				}
@@ -295,29 +295,21 @@ func (p *Pipeline) WatchEmailCredentials() error {
 	return nil
 }
 
-// reloadMailer re-evaluates the mailer config (creds source + policy
-// EmailFrom) and swaps in ResendMailer when both resolve. Idempotent: if
-// the resolved config is identical to the current state, the swap is a
-// no-op log-line-free operation.
+// reloadMailer re-evaluates the mailer config and swaps in the active mailer.
+// Resend was cut: SMTP (db/smtp.json) is the primary external channel, Gmail
+// OAuth the fallback. Idempotent: if the resolved config is identical to the
+// current state, the swap is a no-op log-line-free operation.
 func (p *Pipeline) reloadMailer() {
-	creds, src := loadResendCredentials()
-	from := resolveEmailFrom(p.CurrentPolicy(), creds)
-	if creds != nil && from != "" {
-		p.SetMailer(NewResendMailer(creds.APIKey, from, creds.ReplyTo))
-		responseMailerKind = "resend"
-		log.Printf("[audit] mailer -> ResendMailer from=%s src=%s", from, src)
+	if scfg := loadSmtpCredentials(); scfg != nil {
+		p.SetMailer(NewSmtpMailer(scfg))
+		responseMailerKind = "smtp"
+		log.Printf("[audit] mailer -> SmtpMailer (%s, db/smtp.json)", scfg.Host)
 		return
 	}
 	if gcreds := loadGmailCredentials(); gcreds != nil {
 		p.SetMailer(NewGmailMailer(gcreds))
 		responseMailerKind = "gmail"
 		log.Printf("[audit] mailer -> GmailMailer (oauth, db/google.json)")
-		return
-	}
-	if scfg := loadSmtpCredentials(); scfg != nil {
-		p.SetMailer(NewSmtpMailer(scfg))
-		responseMailerKind = "smtp"
-		log.Printf("[audit] mailer -> SmtpMailer (%s, db/smtp.json)", scfg.Host)
 		return
 	}
 }

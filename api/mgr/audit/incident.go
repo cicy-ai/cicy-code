@@ -10,13 +10,16 @@ import (
 )
 
 // dispatchIncident is called by pipeline.process AFTER an event is appended.
-// New architecture: the backend does NOT decide the response itself — it
-// forwards the finding to the w-6001 audit advisor, which triages and
-// orchestrates everything (notify the offending agent / escalate to the owner
-// via cicy-policy notify / tune policy). The owner email is sent only when the
-// advisor explicitly calls SendOwnerIncident (POST /api/audit/notify).
+// audit-v2 architecture: on a qualifying hit the backend does TWO things,
+// in parallel intent, then records the cooldown:
 //
-// Best-effort: any failure logs but does not propagate.
+//	① SMTP alert — auto-emails the responsible person(s) via the active mailer
+//	   (SmtpMailer), no longer waiting for an agent to trigger it.
+//	② 审计专员 — forwards the finding brief to the live 审计专员 (audit
+//	   specialist) cicy agent for verification / triage / grading.
+//
+// Cooldown is marked if EITHER channel fired, so a noisy finding doesn't spam.
+// Best-effort: any failure logs but does not propagate to the caller path.
 func (p *Pipeline) dispatchIncident(e Event) {
 	pol := p.CurrentPolicy()
 	cfg := pol.IncidentResponse
@@ -33,15 +36,27 @@ func (p *Pipeline) dispatchIncident(e Event) {
 	if p.incidentCooldown.alreadyDispatched(hash, time.Duration(cfg.CooldownSeconds)*time.Second) {
 		return
 	}
-	if forwardFindingToAdvisor(e) {
+
+	// ① SMTP alert to the owner (auto — backend-driven, not advisor-triggered).
+	emailOK := false
+	if err := p.SendOwnerIncident(e, ""); err != nil {
+		log.Printf("[audit] owner SMTP alert failed event=%s: %v", e.ID, err)
+	} else {
+		emailOK = true
+	}
+
+	// ② Forward the brief to the 审计专员 agent for triage.
+	forwarded := forwardFindingToAdvisor(e)
+
+	if emailOK || forwarded {
 		p.incidentCooldown.markDispatched(hash)
 	}
 }
 
 // SendOwnerIncident renders and emails the incident to the responsible
-// person(s). Invoked when the advisor (w-6001) escalates to a human via
-// POST /api/audit/notify. `note` is the advisor's own assessment (e.g. "GitHub
-// token leaked — revoke + rotate now"), prepended to the email body.
+// person(s). Invoked automatically by dispatchIncident on a qualifying hit
+// (note=""), and also by POST /api/audit/notify when the 审计专员 escalates
+// with its own assessment. `note`, when set, is prepended to the email body.
 func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
 	pol := p.CurrentPolicy()
 	cfg := pol.IncidentResponse
@@ -70,7 +85,7 @@ func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
 	if len(recipients) > 0 {
 		subject, body := renderIncidentEmail(e, ruleIDs, cfg, ai, ackURL)
 		if n := strings.TrimSpace(note); n != "" {
-			body = "审计顾问 (w-6001) 研判:\n" + n + "\n\n" + body
+			body = "审计专员研判:\n" + n + "\n\n" + body
 		}
 		if err := p.mailer.Send(EmailMessage{
 			To:       recipients,
@@ -83,7 +98,7 @@ func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
 			emailErr = fmt.Errorf("send incident email: %w", err)
 		} else {
 			emailed = true
-			log.Printf("[audit] owner incident dispatched (advisor-triggered) event=%s recipients=%v", e.ID, recipients)
+			log.Printf("[audit] owner incident dispatched event=%s recipients=%v", e.ID, recipients)
 		}
 	} else {
 		emailErr = fmt.Errorf("no responsible person resolved for event %s (configure policy.incident_response.responsible_persons)", e.ID)
@@ -125,9 +140,9 @@ func (p *Pipeline) SendTestNotification(to string) (string, error) {
 		msg := EmailMessage{
 			To:       []string{to},
 			Subject:  "[CICY-AUDIT][TEST] 通知渠道连通性测试",
-			Body:     "这是一封 cicy-code 审计「通知渠道」测试邮件。\n收到即说明邮件投递通道(" + responseMailerKind + ")工作正常。\n\n— cicy-code audit · w-6001",
+			Body:     "这是一封 cicy-code 审计「通知渠道」测试邮件。\n收到即说明邮件投递通道(" + responseMailerKind + ")工作正常。\n\n— cicy-code audit",
 			EventID:  fmt.Sprintf("test-%d", time.Now().Unix()),
-			AgentID:  "w-6001",
+			AgentID:  "audit",
 			Severity: SeverityLow,
 		}
 		if err := p.mailer.Send(msg); err != nil {

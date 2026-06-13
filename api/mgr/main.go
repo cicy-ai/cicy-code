@@ -40,7 +40,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.2.23"
+const version = "2.3.0"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -170,7 +170,7 @@ Options:
 			log.Printf("[audit] enabled (audit_enabled=true) — collection + scanning active")
 		}
 	} else {
-		log.Printf("[audit] OFF (set \"audit_enabled\": true in global.json to enable) — no collection, no scanning, no w-6001")
+		log.Printf("[audit] OFF (set \"audit_enabled\": true in global.json to enable) — no collection, no scanning")
 	}
 	ensureMITMConfig() // seed ~/cicy-ai/mitm/config.json (enabled) before startMITM reads it
 	startMITM()

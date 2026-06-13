@@ -991,11 +991,10 @@ func checkEnv() {
 	ensureBuiltinAgents(selectedAgents)
 	syncWorkerIndexToExistingAgents()
 	syncBuiltinAgentTitles(selectedAgents)
-	if auditEnabled() {
-		setupAuditPolicyAgent() // → w-6001 SecOps Lead; created only when the audit switch is on
-	} else {
-		removeAuditPolicyPane() // switch off → stop/remove any lingering w-6001
-	}
+	// audit-v2: no w-6001 singleton pane to bootstrap/remove anymore — the audit
+	// advisor role is now an ordinary cicy agent (role_template=审计专员) the
+	// operator onboards on demand. Collection/scanning is wired in main.go via
+	// audit.Init(); finding hits dispatch to the 审计专员 (audit_agent_notify.go).
 	go ensureFfmpegAsync()
 	go ensurePreinstalledSkills()
 }

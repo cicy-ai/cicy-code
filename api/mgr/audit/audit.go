@@ -17,8 +17,8 @@ var (
 	globalErr      error
 
 	// responseMailerKind records whether the active mailer can actually reach
-	// humans ("resend") or only spools to disk ("file"). Read by the readiness
-	// check so w-6001 can warn when owner notifications won't reach anyone.
+	// humans ("smtp"/"gmail") or only spools to disk ("file"). Read by the
+	// readiness check so the 审计专员 can warn when owner alerts reach no one.
 	responseMailerKind = "file"
 )
 
@@ -60,35 +60,26 @@ func Init() error {
 			log.Printf("[audit] email-credential watcher disabled: %v", werr)
 		}
 
-		// Phase 6 cut 2a: prefer ResendMailer when credentials and a From
-		// address are both available. Falls back to FileMailer otherwise.
+		// Mailer selection (Resend cut — SMTP is the primary external channel):
+		// SMTP relay wins when db/smtp.json is configured; Gmail OAuth is the
+		// fallback alternative; FileMailer spools to disk when neither is set.
 		mailerName := "FileMailer"
 		mailerDetail := filepath.Join(auditRoot, "email-out")
-		creds, credsSrc := loadResendCredentials()
-		from := resolveEmailFrom(policy, creds)
 		gcreds := loadGmailCredentials()
 		scfg := loadSmtpCredentials()
 		switch {
-		case creds != nil && from != "":
-			// Resend wins when fully configured (verified domain → best deliverability).
-			p.SetMailer(NewResendMailer(creds.APIKey, from, creds.ReplyTo))
-			mailerName = "ResendMailer"
-			mailerDetail = "from=" + from + " src=" + credsSrc
-			responseMailerKind = "resend"
-		case gcreds != nil:
-			// Gmail OAuth: no verified domain needed — sends as the authenticated account.
-			p.SetMailer(NewGmailMailer(gcreds))
-			mailerName = "GmailMailer"
-			mailerDetail = "oauth (db/google.json)"
-			responseMailerKind = "gmail"
 		case scfg != nil:
 			// Generic SMTP relay (company server / SES SMTP / Aliyun DirectMail / …).
 			p.SetMailer(NewSmtpMailer(scfg))
 			mailerName = "SmtpMailer"
 			mailerDetail = "smtp " + scfg.Host + " (db/smtp.json)"
 			responseMailerKind = "smtp"
-		case creds != nil && from == "":
-			log.Printf("[audit] resend credentials present but no From address (set policy.incident_response.email_from or CICY_RESEND_FROM) — using FileMailer")
+		case gcreds != nil:
+			// Gmail OAuth: no verified domain needed — sends as the authenticated account.
+			p.SetMailer(NewGmailMailer(gcreds))
+			mailerName = "GmailMailer"
+			mailerDetail = "oauth (db/google.json)"
+			responseMailerKind = "gmail"
 		}
 
 		log.Printf("[audit] initialized root=%s rules_version=%s active_rules=%d custom=%d policy_hash=%s mailer=%s (%s)",
@@ -149,6 +140,31 @@ func SubmitGatewayInbound(agentID, agentType, userID, sessionID, turnID, convers
 		AgentType:      agentType,
 		UserID:         userID,
 		SessionID:      sessionID,
+		SourceChannel:  SourceGateway,
+		TurnID:         turnID,
+		ConversationID: conversationID,
+		Provider:       provider,
+		Model:          model,
+		Direction:      DirectionInbound,
+		Payload:        payload,
+		PayloadRef:     fmt.Sprintf("reply.json#%s", turnID),
+	})
+}
+
+// SubmitGatewayTurn submits the per-turn audit unit assembled at turn
+// completion (ai_gateway_audit.go completeFromResponse): the operator's
+// outbound question plus the assistant reply's tool calls, serialized by the
+// caller into one scannable payload. This is the audit-v2 trigger — it
+// supersedes current.json-based triggering, scanning exactly {q + tool_calls}
+// rather than the full rolling request body. The caller MUST already have
+// filtered auxiliary/internal calls (X-Cicy-Aux). No-op on empty payload or
+// uninitialized pipeline.
+func SubmitGatewayTurn(agentID, provider, model, turnID, conversationID string, payload []byte) {
+	if globalPipeline == nil || len(payload) == 0 {
+		return
+	}
+	Submit(context.Background(), Envelope{
+		AgentID:        agentID,
 		SourceChannel:  SourceGateway,
 		TurnID:         turnID,
 		ConversationID: conversationID,

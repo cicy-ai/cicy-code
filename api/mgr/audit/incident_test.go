@@ -81,13 +81,14 @@ func TestSeverityMeetsTrigger(t *testing.T) {
 	}
 }
 
-// ── dispatchIncident: forwards to the w-6001 advisor (SOAR contract) ──
+// ── dispatchIncident: auto-SMTP + forward to 审计专员 (audit-v2 contract) ──
 //
-// Since the architecture change, dispatchIncident does NOT email the owner.
-// It forwards a masked finding brief to w-6001, which triages and decides
-// the response (notify offending agent / escalate via SendOwnerIncident /
-// tune policy). These tests assert the forward — the owner-email path is
-// covered separately by the TestSendOwnerIncident_* tests.
+// On a qualifying hit dispatchIncident now does BOTH: ① auto-emails the owner
+// via the active mailer (no longer waiting for an agent to trigger it), and
+// ② forwards a masked finding brief to the live 审计专员 agent for triage.
+// These tests assert the forward (link ②); TestDispatchIncident_HighSeverity*
+// also asserts the auto-email (link ①). The gates (enabled / trigger severity
+// / cooldown) suppress BOTH channels.
 
 func TestDispatchIncident_DisabledNoop(t *testing.T) {
 	pol := DefaultPolicy()
@@ -111,6 +112,7 @@ func TestDispatchIncident_HighSeverityForwardsToAdvisor(t *testing.T) {
 	pol.IncidentResponse.TriggerMinSeverity = SeverityHigh
 	pol.ResponsiblePersons.Default = []string{"sec@corp"}
 	p, _ := preventiveFixture(t, pol)
+	emailDir := dispatchEmailDir(t, p)
 	fc := captureForwarder(t)
 
 	p.dispatchIncident(Event{
@@ -120,6 +122,7 @@ func TestDispatchIncident_HighSeverityForwardsToAdvisor(t *testing.T) {
 		Findings:  []Finding{{RuleID: "secret.aws_akid", Severity: SeverityHigh, Category: "secret", MatchCount: 1, Spans: []Span{{Preview: "AKIA****MPLE"}}}},
 		Decision:  Decision{Action: ActionRedact, Applied: true},
 	})
+	// Link ②: forwarded to the 审计专员.
 	if fc.count() != 1 {
 		t.Fatalf("high severity: want 1 forward, got %d", fc.count())
 	}
@@ -128,6 +131,10 @@ func TestDispatchIncident_HighSeverityForwardsToAdvisor(t *testing.T) {
 		if !strings.Contains(brief, want) {
 			t.Errorf("brief missing %q in:\n%s", want, brief)
 		}
+	}
+	// Link ①: owner SMTP alert auto-sent (no advisor trigger needed).
+	if _, err := os.ReadFile(filepath.Join(emailDir, "evt_x123.eml")); err != nil {
+		t.Errorf("expected auto owner-email .eml for evt_x123: %v", err)
 	}
 }
 
@@ -226,7 +233,7 @@ func TestSendOwnerIncident_WritesEML(t *testing.T) {
 		"AKIA****MPLE",                  // masked finding preview
 		"English summary",              // bilingual section
 		"X-Cicy-Audit-Event: evt_owner1",
-		"审计顾问 (w-6001) 研判",        // advisor note header
+		"审计专员研判",                  // specialist note header
 		"GitHub token leaked",          // advisor note body prepended
 	} {
 		if !strings.Contains(s, want) {

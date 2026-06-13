@@ -21,12 +21,40 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+
+	"ttyd-go/mgr/audit"
 )
 
 type aiGatewayToolCall struct {
 	ToolID    string `json:"tool_id"`
 	ToolName  string `json:"tool_name"`
 	Arguments string `json:"arguments"`
+}
+
+// aiGatewayBuildTurnAuditUnit assembles the per-turn audit payload scanned by
+// the audit pipeline (audit-v2): the outbound question, then each reply tool
+// call's name + arguments. The builtin rules (secrets / PII / dangerous tool
+// use) run over this combined text. Returns nil when there is nothing worth
+// scanning (no question and no tool calls).
+func aiGatewayBuildTurnAuditUnit(question string, toolCalls []aiGatewayToolCall) []byte {
+	q := strings.TrimSpace(question)
+	if q == "" && len(toolCalls) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	if q != "" {
+		b.WriteString("【出站 q】\n")
+		b.WriteString(q)
+		b.WriteString("\n")
+	}
+	for _, tc := range toolCalls {
+		b.WriteString("\n【tool_call】")
+		b.WriteString(tc.ToolName)
+		b.WriteString("\n")
+		b.WriteString(tc.Arguments)
+		b.WriteString("\n")
+	}
+	return []byte(b.String())
 }
 
 type aiGatewayStatusItem struct {
@@ -1196,6 +1224,15 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	}
 	hub.publishAgent(s.agentID, currentUpdatedEvent)
 	notifyWorkerReplyFinished(s.agentID, replySnapshot.Status)
+	// audit-v2: hand this completed turn to the audit pipeline. The audit unit
+	// is the outbound question + the reply's tool calls (where leaked secrets /
+	// dangerous tool use would surface); aux/internal calls (X-Cicy-Aux) carry
+	// no human prompt or real tool use, so they are skipped.
+	if !s.auxiliary {
+		if unit := aiGatewayBuildTurnAuditUnit(s.question, replySnapshot.ToolCalls); len(unit) > 0 {
+			audit.SubmitGatewayTurn(s.agentID, s.provider, s.model, s.turnID, s.conversationID, unit)
+		}
+	}
 	// 先补推没推过的 items（见上面 backstop 注释），再 finalize 收尾。
 	if len(pendingHookItems) > 0 {
 		log.Printf("[im] reply backstop push agent=%s items=%d (live flush missed)", s.agentID, len(pendingHookItems))

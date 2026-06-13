@@ -6,20 +6,20 @@ import (
 	"strings"
 )
 
-// findingForwarder hands a triggering finding to the audit-policy ADVISOR agent
-// (w-10000), which then decides the entire response: notify the offending
-// agent, escalate to the responsible person, tune policy. Injected by the main
-// package, which owns the cross-agent send path (sendTextToPane → w-10000).
-// nil = forwarding disabled.
+// findingForwarder hands a triggering finding to the 审计专员 (audit specialist)
+// agent, which verifies the hit, grades severity, and handles the response per
+// its charter. Injected by the main package, which owns the cross-agent send
+// path (sendTextToPane → the live 审计专员 pane). nil = forwarding disabled.
 var findingForwarder func(brief string) error
 
-// SetFindingForwarder wires the "forward finding to the advisor" channel.
+// SetFindingForwarder wires the "forward finding to the 审计专员" channel.
 // Called once at startup from the main package.
 func SetFindingForwarder(fn func(brief string) error) { findingForwarder = fn }
 
-// forwardFindingToAdvisor pushes a finding brief to w-10000 for triage. The
-// advisor owns all downstream actions; the backend does NOT auto-notify agents
-// or owners. Returns false when the channel is unset or the send fails.
+// forwardFindingToAdvisor pushes a finding brief to the 审计专员 for triage.
+// The specialist owns the verification/grading; the SMTP owner alert is sent
+// separately by dispatchIncident. Returns false when the channel is unset or
+// the send fails (e.g. no 审计专员 agent currently provisioned).
 func forwardFindingToAdvisor(e Event) bool {
 	if findingForwarder == nil {
 		return false
@@ -28,14 +28,14 @@ func forwardFindingToAdvisor(e Event) bool {
 		log.Printf("[audit] forward-to-advisor failed event=%s: %v", e.ID, err)
 		return false
 	}
-	log.Printf("[audit] finding forwarded to advisor event=%s agent=%s findings=%d",
+	log.Printf("[audit] finding forwarded to 审计专员 event=%s agent=%s findings=%d",
 		e.ID, e.Identity.AgentID, len(e.Findings))
 	return true
 }
 
-// renderFindingBrief is the message the advisor (w-10000) receives. Metadata +
-// masked preview only — never the raw payload. The advisor reasons over this
-// brief and orchestrates the response with its own skills.
+// renderFindingBrief is the message the 审计专员 receives. Metadata +
+// masked preview only — never the raw payload. The specialist reasons over this
+// brief and handles the response per its charter.
 func renderFindingBrief(e Event) string {
 	var b strings.Builder
 	b.WriteString("【审计告警 · 待处置】\n")
@@ -53,7 +53,6 @@ func renderFindingBrief(e Event) string {
 		}
 		b.WriteString(fmt.Sprintf("  - %s [%s/%s] x%d  %s\n", f.RuleID, f.Severity, f.Category, f.MatchCount, preview))
 	}
-	b.WriteString("请按 CLAUDE.md「处理审计告警」流程评估并处置:" +
-		"通知涉事 agent 改用法(治本) / 严重则 cicy-policy notify <event> 通知责任人(止损) / 必要时 cicy-policy patch 调策略。\n")
+	b.WriteString("请按你的 charter 评估并处置:核实真命中 vs 误报 → 分级 → 误报反馈审核策略专员调策略 / 真命中归档或升级(高危通知合伙人、建议拦截须 Barry 拍)。\n")
 	return b.String()
 }
