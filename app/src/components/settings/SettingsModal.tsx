@@ -201,6 +201,10 @@ export default function SettingsModal({
   const lbl = 'block text-[11px] font-medium text-zinc-400 mb-1';
   const card = 'rounded-xl border border-white/[0.06] bg-white/[0.02] p-5';
   const iconTile = 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] text-zinc-300';
+  // Neutral, low-key buttons — match the icon buttons, no loud color fills.
+  const btnBase = 'rounded-lg px-3.5 py-2 text-[12px] font-medium transition-colors';
+  const btnActive = 'border border-white/[0.1] bg-white/[0.05] text-zinc-100 hover:bg-white/[0.09] hover:text-white';
+  const btnDisabled = 'cursor-not-allowed border border-white/[0.06] bg-white/[0.02] text-zinc-600';
 
   // ESC closes — capture phase so it wins over the embedded dashboards' own
   // key handlers (they only care about their internal editors).
@@ -312,11 +316,7 @@ export default function SettingsModal({
                             data-id="settings-public-url-save"
                             disabled={!urlDirty || savingUrl}
                             onClick={() => void savePublicUrl()}
-                            className={`rounded-lg px-3.5 py-2 text-[12px] font-semibold transition-colors ${
-                              urlDirty && !savingUrl
-                                ? 'bg-sky-500/90 text-white hover:bg-sky-500'
-                                : 'cursor-not-allowed bg-white/[0.05] text-zinc-600'
-                            }`}
+                            className={`${btnBase} ${urlDirty && !savingUrl ? btnActive : btnDisabled}`}
                           >
                             {savingUrl ? t('settingsSaving', { defaultValue: '保存中…' }) : t('settingsSave', { defaultValue: '保存' })}
                           </button>
@@ -357,7 +357,7 @@ export default function SettingsModal({
                             type="button"
                             disabled={refreshing}
                             onClick={() => void refreshToken()}
-                            className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[12px] font-semibold transition-colors ${refreshing ? 'cursor-not-allowed bg-white/[0.05] text-zinc-600' : 'bg-amber-500/90 text-white hover:bg-amber-500'}`}
+                            className={`flex items-center gap-1.5 ${btnBase} ${refreshing ? btnDisabled : btnActive}`}
                           >
                             <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />{refreshing ? t('settingsTokenRefreshing', { defaultValue: '刷新中…' }) : t('settingsTokenRefresh', { defaultValue: '刷新令牌' })}
                           </button>
@@ -418,7 +418,7 @@ export default function SettingsModal({
                       </div>
                     </div>
                         <div className="mt-4 flex items-center gap-2">
-                          <button data-id="settings-email-save" type="button" disabled={emailSaving} onClick={() => void saveEmail()} className={`rounded-lg px-3.5 py-2 text-[12px] font-semibold transition-colors ${emailSaving ? 'cursor-not-allowed bg-white/[0.05] text-zinc-600' : 'bg-sky-500/90 text-white hover:bg-sky-500'}`}>
+                          <button data-id="settings-email-save" type="button" disabled={emailSaving} onClick={() => void saveEmail()} className={`${btnBase} ${emailSaving ? btnDisabled : btnActive}`}>
                             {emailSaving ? t('settingsSaving', { defaultValue: '保存中…' }) : t('settingsSave', { defaultValue: '保存' })}
                           </button>
                           {emailSaved ? (
