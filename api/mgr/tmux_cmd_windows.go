@@ -31,9 +31,11 @@ var (
 var ptmForceOn string
 
 // ptmEnabled reports whether the native pty backend replaces tmux on Windows.
-// Default ON (this file is windows-only): the whole point on Windows is to drop
-// the buggy MSYS2 tmux. Escape hatch: CICY_PTY_BACKEND=tmux|off reverts to the
-// external tmux binary. (Unix/macOS never compile this file — they keep tmux.)
+// Default OFF: Windows ships cicy-only (headless, no panes), so no pane backend
+// is needed. The --tmux switch turns it ON when CLI/pane agents are wanted.
+// Overrides (for tests / escape): ldflags ptmForceOn=1, or env
+// CICY_PTY_BACKEND=go|on (force on) / tmux|off (force off).
+// (Unix/macOS never compile this file — they keep tmux.)
 func ptmEnabled() bool {
 	if ptmForceOn == "1" {
 		return true
@@ -44,7 +46,7 @@ func ptmEnabled() bool {
 	case "tmux", "0", "off", "no", "msys", "legacy":
 		return false
 	}
-	return true // Windows default: native ConPTY backend
+	return tmuxFlag // Windows default: follow the --tmux switch (default OFF)
 }
 
 func ptmGet() *ptmManager {

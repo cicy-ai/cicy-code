@@ -409,7 +409,23 @@ var builtinAgents = []struct {
 
 var nonLabAllowedBuiltinAgents = []string{"claude", "codex", "gemini", "opencode", "cicy"}
 
+// cliAgentsEnabled reports whether pane-based CLI agent types (everything except
+// headless cicy) are available on this host. On Windows they are gated behind
+// the --tmux switch (default OFF → cicy-only): without it there is no ConPTY
+// pane backend, so claude/codex/gemini/… are neither seeded nor selectable.
+// Every other OS always allows CLI agents.
+func cliAgentsEnabled() bool {
+	if runtime.GOOS != "windows" {
+		return true
+	}
+	return tmuxFlag
+}
+
 func effectiveAllowedAgentTypes() []string {
+	// Windows without --tmux: only the headless cicy agent is offered.
+	if !cliAgentsEnabled() {
+		return []string{"cicy"}
+	}
 	if labMode {
 		selected := make([]string, 0, len(builtinAgents))
 		for _, ba := range builtinAgents {
@@ -512,24 +528,53 @@ func selectedBuiltinWorkers(selected []string) []builtinWorker {
 	if helperMode {
 		return []builtinWorker{helperModeBuiltinWorker()}
 	}
+	var workers []builtinWorker
 	if usesOfficialRoster() {
-		return officialRoleRoster()
-	}
-	workers := make([]builtinWorker, 0, len(selected))
-	for i, agentType := range selected {
-		agentType = normalizeAgentType(agentType)
-		if agentType == "" {
-			continue
+		workers = officialRoleRoster()
+	} else {
+		workers = make([]builtinWorker, 0, len(selected))
+		for i, agentType := range selected {
+			agentType = normalizeAgentType(agentType)
+			if agentType == "" {
+				continue
+			}
+			workers = append(workers, builtinWorker{
+				Port:          1001 + i,
+				AgentType:     agentType,
+				Title:         builtinAgentTitle(agentType),
+				Master:        i == 0,
+				BindToPrimary: i > 0, // per-type (dev): keep attaching all non-master under w-1001
+			})
 		}
-		workers = append(workers, builtinWorker{
-			Port:          1001 + i,
-			AgentType:     agentType,
-			Title:         builtinAgentTitle(agentType),
-			Master:        i == 0,
-			BindToPrimary: i > 0, // per-type (dev): keep attaching all non-master under w-1001
-		})
+	}
+	// Windows without --tmux: drop every CLI agent from the layout so setup never
+	// initializes/installs them — only headless cicy roles are seeded.
+	if !cliAgentsEnabled() {
+		workers = cicyOnlyWorkers(workers)
 	}
 	return workers
+}
+
+// cicyOnlyWorkers keeps just the headless cicy workers, preserving the Master
+// flag: if the master happened to be a (now-dropped) CLI agent, the first
+// surviving cicy worker is promoted so the team still has an anchor at w-1001.
+func cicyOnlyWorkers(in []builtinWorker) []builtinWorker {
+	out := make([]builtinWorker, 0, len(in))
+	hadMaster := false
+	for _, w := range in {
+		if normalizeAgentType(w.AgentType) != "cicy" {
+			continue
+		}
+		if w.Master {
+			hadMaster = true
+		}
+		out = append(out, w)
+	}
+	if !hadMaster && len(out) > 0 {
+		out[0].Master = true
+		out[0].BindToPrimary = false
+	}
+	return out
 }
 
 func builtinAgentTitle(agentType string) string {
@@ -966,6 +1011,9 @@ var preinstalledSkills = []string{
 	// Skill ecosystem conventions (private dev / team install / public PR) —
 	// every agent should know these by default.
 	"cicy-skill-spec",
+	// Author custom cicy agents (persona + tools + model) from the CLI; backs the
+	// "build an agent like a skill" flow (~/cicy-ai/agents/<slug>/AGENT.md).
+	"agent-creator",
 }
 
 func ensurePreinstalledSkills() {
