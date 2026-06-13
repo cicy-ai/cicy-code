@@ -1868,6 +1868,7 @@ export default function CurrentHistoryView({
   promptsOnly = false,
   hideTools = false,
   agentType = '',
+  fullWidth = false,
 }: {
   paneId: string;
   open: boolean;
@@ -1881,8 +1882,16 @@ export default function CurrentHistoryView({
   // 答案(a)左侧的头像用哪个 agent_type 的 logo(claude/codex/dispatcher…),
   // 类比 ChatGPT 回复前的 logo 头像。空串 → 字母兜底。
   agentType?: string;
+  // Render the message list at 100% width (no mx-auto centering, no max-w cap).
+  // Used by the AgentStack card-view history popover, which is already width-
+  // constrained by its container. Default (false) keeps the centered max-w-4xl
+  // reading column used by the full-screen DispatcherChat view.
+  fullWidth?: boolean;
 }) {
   const { t } = useTranslation('chat');
+  // Content column width: full-bleed when embedded (AgentStack popover), else a
+  // centered reading column.
+  const listWidthClass = fullWidth ? 'w-full' : 'mx-auto w-full max-w-4xl';
   const [items, setItems] = useState<HistoryTurn[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -2976,7 +2985,7 @@ export default function CurrentHistoryView({
           // 开场白渲染成一条正常的 assistant reply:左上角、带 agent 头像 + markdown
           // 内容列,与真实答案同布局(不再居中占位)。
           <div data-id="current-history-empty-greeting" className="flex-1 overflow-y-auto fade-scroll-y">
-            <div className="mx-auto w-full max-w-4xl px-4 py-6 font-sans text-zinc-300">
+            <div className={`${listWidthClass} px-4 py-6 font-sans text-zinc-300`}>
               <div data-id="current-history-empty-greeting-turn" className="flex items-start gap-2.5">
                 <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-empty-greeting-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
                 <div data-id="current-history-empty-greeting-text" className="chat-markdown current-history-markdown min-w-0 flex-1 text-sm leading-[1.7] text-zinc-300">
@@ -2998,7 +3007,7 @@ export default function CurrentHistoryView({
       ) : (
       <>
       <div data-id="current-history-scroll" ref={scrollRef} className="flex-1 overflow-y-auto fade-scroll-y">
-        <div data-id="current-history-list" data-agent-id={paneId || ''} className="mx-auto w-full max-w-4xl px-4 py-6 font-sans text-zinc-300">
+        <div data-id="current-history-list" data-agent-id={paneId || ''} className={`${listWidthClass} px-4 py-6 font-sans text-zinc-300`}>
           {loading ? (
             <div data-id="current-history-loading" className="space-y-6 py-2" aria-busy="true">
               {[0, 1, 2].map((row) => (

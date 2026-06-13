@@ -196,7 +196,7 @@ function AgentStack({
               </button>
             </div>
             <div data-id="agent-stack-card-history-popover-body" className="min-h-0 flex-1 overflow-hidden rounded-b-2xl">
-              <CurrentHistoryView key={historyPaneId} paneId={historyPaneId} open promptsOnly={promptsOnly} agentType={items.find((it) => it.paneId === historyPaneId)?.agentType || ''} />
+              <CurrentHistoryView key={historyPaneId} paneId={historyPaneId} open promptsOnly={promptsOnly} fullWidth agentType={items.find((it) => it.paneId === historyPaneId)?.agentType || ''} />
             </div>
           </div>
         </>,
