@@ -45,7 +45,7 @@ var (
 	tmuxFlag bool
 )
 
-const version = "2.2.19"
+const version = "2.2.23"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
