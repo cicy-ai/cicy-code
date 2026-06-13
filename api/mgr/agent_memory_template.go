@@ -272,6 +272,9 @@ func composeAgentMemory(agentID, workspace, agentType, projectSlug, roleSlug str
 	if slug := sanitizeTemplateSlug(roleSlug); slug != "" {
 		if role := strings.TrimSpace(loadTemplateFile(roleTemplatePath(slug))); role != "" {
 			parts = append(parts, role)
+		} else if ca, ok := customAgentFor(slug); ok && strings.TrimSpace(ca.Body) != "" {
+			// User-authored custom agent: persona lives in ~/cicy-ai/agents/<slug>/AGENT.md
+			parts = append(parts, strings.TrimSpace(ca.Body))
 		}
 	}
 

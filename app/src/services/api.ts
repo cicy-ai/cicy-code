@@ -129,6 +129,13 @@ const api = {
   deleteMemoryTemplate: (scope: string, name: string) =>
     http.delete(`/api/memory/templates/${scope}/${encodeURIComponent(name)}`),
 
+  // Custom agents (user-authored cicy personas, ~/cicy-ai/agents/<slug>/AGENT.md)
+  listCustomAgents: () => http.get('/api/custom-agents'),
+  saveCustomAgent: (data: { name: string; tools: string[]; model?: string; body: string }) =>
+    http.post('/api/custom-agents', data),
+  deleteCustomAgent: (slug: string) =>
+    http.delete(`/api/custom-agents/${encodeURIComponent(slug)}`),
+
   sendCommand: (winId: string, text: string, submit = true) => unwrapTmuxSend(http.post('/api/tmux/send', { win_id: winId, text, submit })),
   sendKeys: (winId: string, keys: string) => unwrapTmuxSend(http.post('/api/tmux/send-keys', { win_id: winId, keys })),
   // 打断 headless cicy 正在跑的 turn(它没有 tmux pane,send-keys 够不着,走专用端点)。
@@ -161,6 +168,7 @@ const api = {
   bindAgent: (data: any) => http.post('/api/agents/bind', data),
   unbindAgent: (agentId: number) => http.delete(`/api/agents/unbind/${agentId}`),
   reorderAgents: (paneId: string, agentNames: string[]) => http.post('/api/agents/reorder', { pane_id: paneId, agent_names: agentNames }),
+  reparentAgent: (paneId: string, newParent: string, contextPaneId: string) => http.post('/api/agents/reparent', { pane_id: paneId, new_parent: newParent, context_pane_id: contextPaneId }),
 
   registerMachine: (data: any) => http.post('/api/machines/register', data),
   syncMachines: (data?: any) => http.post('/api/machines/sync', data || {}),

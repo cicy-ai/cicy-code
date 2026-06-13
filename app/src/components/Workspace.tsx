@@ -14,7 +14,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag } from '../lib/modelTag';
@@ -28,15 +28,14 @@ import ChatHistoryView from './chat/ChatHistoryView';
 import TodoPanel from './TodoPanel';
 import FilesView from './files/FilesView';
 import { WebFrame } from './WebFrame';
-import ArtifactPanel from './ArtifactPanel';
-import { installArtifactBridge, ARTIFACT_WEBVIEW_ID } from '../lib/artifactBridge';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
 import TeamPanel from './layout/TeamPanel';
 import GlobalProxyIndicator from './layout/GlobalProxyIndicator';
 import { ProxyManagerDialog } from './layout/ProxyManagerDialog';
 import SkillMarketplacePanel from './layout/SkillMarketplacePanel';
-import BrowserWindowsPanel from './layout/BrowserWindowsPanel';
+import CustomAgentsPanel from './layout/CustomAgentsPanel';
+import BrowserWindowsPanel, { BrowserWindowsColumn, type Profile as BrowserProfile } from './layout/BrowserWindowsPanel';
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
 import AgentProviderRequestView, { type RequestViewTab } from './layout/AgentProviderRequestView';
 import AgentUsageLogView from './layout/AgentUsageLogView';
@@ -82,55 +81,6 @@ const TEAM_TERMINAL_ACTIVE_KEY = 'ws_teamTerminalActive';
 const GITHUB_ISSUES_URL = 'https://github.com/cicy-ai/cicy-code/issues';
 const UPGRADE_URL = 'https://cicy-ai.com/team/upgrade';
 const RENEW_URL = 'https://cicy-ai.com/team/pay';
-
-// Bottom-left button of the artifact host: send this page's connection info
-// (chat-WS client id + the artifact webview's webContentsId) to the active
-// agent so it can drive the artifact frame via the artifact skill.
-function ArtifactSendToAgentBtn({ paneId }: { paneId: string }) {
-  const { t } = useTranslation('workspace');
-  const [state, setState] = useState<'idle' | 'sending' | 'ok'>('idle');
-  const send = async () => {
-    if (state === 'sending' || !paneId) return;
-    setState('sending');
-    let wcid = '';
-    try {
-      // ArtifactPanel's own webview only mounts when the desktop preload
-      // injects window.cicy; older desktops fall back to WebFrame, which (in
-      // Electron) renders a web-frame-webview — query both.
-      const el: any = document.getElementById(ARTIFACT_WEBVIEW_ID)
-        || document.querySelector('[data-id="cli-content-artifact-host"] [data-id="web-frame-webview"]');
-      if (el?.getWebContentsId) wcid = String(el.getWebContentsId());
-    } catch { /* webview not ready / not Electron */ }
-    const cid = chatWs.currentClientId() || '';
-    const text = t('artifactSendAgentPrompt', {
-      clientId: cid || '未知',
-      webContentsId: wcid || '未知(非Electron或产物页未加载)',
-      defaultValue:
-        '我的 client id: {{clientId}}，我的 webContentsId: {{webContentsId}}。请用产物(artifact) skill 与我连接：先跑 `artifact snapshot` 读取并测试当前页面（DOM 快照，不要截图——截图吃 token），确认能连上、能读到页面元素后再继续操作。',
-    });
-    try {
-      await apiService.sendCommand(paneId, text, true);
-      setState('ok');
-      setTimeout(() => setState('idle'), 1500);
-    } catch {
-      setState('idle');
-    }
-  };
-  return (
-    <button
-      data-id="cli-content-artifact-send-agent"
-      type="button"
-      onClick={send}
-      className="absolute bottom-2 left-2 z-20 select-none rounded-md border border-white/10 bg-black/60 px-2.5 py-1.5 text-xs text-zinc-300 shadow-lg backdrop-blur transition-colors hover:bg-black/80 hover:text-white"
-    >
-      {state === 'ok'
-        ? t('artifactSendAgentDone', { defaultValue: '已发送 ✓' })
-        : state === 'sending'
-          ? t('artifactSendAgentSending', { defaultValue: '发送中…' })
-          : t('artifactSendAgent', { defaultValue: '发送给 Agent' })}
-    </button>
-  );
-}
 
 type MembershipCardState = {
   userId: string;
@@ -363,12 +313,12 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 }
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
-type LeftPanelView = 'team' | 'skills' | 'agents' | 'todo' | 'windows' | null;
-type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'artifact' | RequestViewTab;
+type LeftPanelView = 'team' | 'skills' | 'customAgents' | 'agents' | 'todo' | 'windows' | null;
+type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | RequestViewTab;
 type CliContentMode = 'fixed';
 
 function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
-  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'todo' || value === 'artifact') {
+  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'todo') {
     return value;
   }
   return 'files';
@@ -411,7 +361,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const v = cache.get(leftPanelKey(paneId), null);
     // 刷新后恢复上次打开的左栏面板;'todo' 若技能未装会被下方 effect 关掉。
     // 旧缓存里的 'office' 已不在白名单 → 自动落到 null(办公室视图 2026-06-05 下线)。
-    const ok: LeftPanelView[] = ['team', 'skills', 'agents', 'todo', 'windows'];
+    const ok: LeftPanelView[] = ['team', 'skills', 'customAgents', 'agents', 'todo', 'windows'];
     return ok.includes(v) ? v : null;
   });
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -428,10 +378,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }
   }, [cliContentTab]);
   const [cliContentMode, setCliContentMode] = useState<CliContentMode>('fixed');
-  // Install the agent-facing window.cicyArtifact bridge as soon as the
-  // workspace mounts, so an agent can open the 产物 tab via exec_js even before
-  // the user has visited it. (ArtifactPanel also (re)registers its controller.)
-  useEffect(() => { installArtifactBridge(); }, []);
   // Whether the `cicy-todo` skill is installed on the local host. Gates the
   // Todo button in the activity bar and the Todo tab in cliContentTabs. The
   // marketplace panel dispatches `cicy:skills-changed` after install/uninstall;
@@ -622,6 +568,29 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useDesktopEvents(addApp);
 
   const leftActive = leftPanelView;
+  // Selected browser profile → drives the inserted "windows" column between the
+  // left panel and the mid panel. Cleared whenever we leave the windows view.
+  const [browserSel, setBrowserSel] = useState<{ clientId: string; deviceId: string; profile: BrowserProfile } | null>(null);
+  useEffect(() => { if (leftActive !== 'windows') setBrowserSel(null); }, [leftActive]);
+  // External "open profile settings" request (from agent-webpage send open_profile_config,
+  // relayed by useDesktopEvents). Switch to the windows view + hand the request to the panel.
+  const [pendingProfileConfig, setPendingProfileConfig] = useState<{ backend: 'chrome' | 'electron'; accountIdx: number; nonce: number } | null>(null);
+  useEffect(() => {
+    const h = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      setLeftPanelView('windows');
+      setPendingProfileConfig({ backend: d.backend === 'chrome' ? 'chrome' : 'electron', accountIdx: Number(d.accountIdx), nonce: Date.now() });
+    };
+    window.addEventListener('cicy-open-profile-config', h as EventListener);
+    return () => window.removeEventListener('cicy-open-profile-config', h as EventListener);
+  }, []);
+  // Hand a browser window to the active agent: send the descriptive prompt to
+  // its tmux pane (same path as voice / file-path send), surfaced in the chat.
+  const sendBrowserToAgent = useCallback((text: string) => {
+    const tmuxTarget = activeCliPaneIdRef.current || paneId;
+    window.dispatchEvent(new CustomEvent('chat-q-sent', { detail: { pane: tmuxTarget, q: text } }));
+    sendCommandToTmux(text, tmuxTarget, true).catch(() => {});
+  }, [paneId]);
   const closeLeftPanel = useCallback(() => {
     setLeftPanelView(null);
   }, []);
@@ -810,7 +779,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleCapture = async () => { if (isApiOnlyRuntime) return; try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
   const handleToggleMouse = async () => { if (isApiOnlyRuntime) return; const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
 
-  const toggleLeft = (p: 'team' | 'skills' | 'todo' | 'windows') => {
+  const toggleLeft = (p: 'team' | 'skills' | 'customAgents' | 'todo' | 'windows') => {
     setLeftPanelView(prev => prev === p ? null : p);
   };
 
@@ -1371,14 +1340,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCliContentTab('memory');
     setCliContentOpen(true);
   }, [paneId]);
-  const openPaneArtifact = useCallback((targetPaneId: string) => {
-    const clean = targetPaneId.replace(/:.*$/, '');
-    if (!clean) return;
-    setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
-    setCliContentMode('fixed');
-    setCliContentTab('artifact');
-    setCliContentOpen(true);
-  }, [paneId]);
   const handleCliDrawerResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1466,7 +1427,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     { id: 'files', label: t('tabFiles'), icon: <Folder className="h-3.5 w-3.5" /> },
     { id: 'session', label: t('tabSession'), icon: <LineChart className="h-3.5 w-3.5" /> },
     { id: 'memory', label: t('tabMemory'), icon: <Brain className="h-3.5 w-3.5" /> },
-    { id: 'artifact', label: t('tabArtifact', '产物'), icon: <Package className="h-3.5 w-3.5" /> },
     { id: 'settings', label: t('tabSettings'), icon: <Settings className="h-3.5 w-3.5" /> },
   ];
   const sessionSubTabs: { id: RequestViewTab; label: string }[] = [
@@ -1661,22 +1621,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           />
         </div>
         <div
-          data-id="cli-content-artifact-host"
-          className="absolute inset-0"
-          style={{ display: cliContentTab === 'artifact' ? 'block' : 'none' }}
-        >
-          <ArtifactPanel
-            active={cliContentOpen && cliContentTab === 'artifact'}
-            requestActivate={() => {
-              // `artifact open` must surface the frame even when the right
-              // drawer is closed: open the drawer AND switch to its tab.
-              setCliContentOpen(true);
-              setCliContentTab('artifact');
-            }}
-          />
-          <ArtifactSendToAgentBtn paneId={activeCliPaneId} />
-        </div>
-        <div
           data-id="cli-content-settings-host"
           className="absolute inset-0"
           style={{ display: cliContentTab === 'settings' ? 'block' : 'none' }}
@@ -1787,7 +1731,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             onOpenPaneSession={handleStackOpenSession}
             onOpenPaneTodo={todoSkillInstalled ? openPaneTodo : undefined}
             onOpenPaneMemory={openPaneMemory}
-            onOpenPaneArtifact={openPaneArtifact}
             onActivePaneIdChange={handleStackActivePaneIdChange}
             onRenamePaneTitle={handleRenamePaneTitle}
             todoCount={todoCount}
@@ -1814,6 +1757,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           {!globalVar?.helper_mode && (
             <>
               <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
+              {/* Custom agents: author your own cicy persona, like building a skill */}
+              <SideBtn dataId="btn-custom-agents" active={leftActive === 'customAgents'} icon={<Bot className="w-5 h-5" />} title={t('sidebarCustomAgents')} onClick={() => toggleLeft('customAgents')} />
               {/* Browser windows: Chrome / Electron profiles → live windows + screenshots */}
               <SideBtn dataId="btn-windows" active={leftActive === 'windows'} icon={<AppWindow className="w-5 h-5" />} title="浏览器窗口" onClick={() => toggleLeft('windows')} />
               {/* Providers & IM moved into the unified Settings modal (bottom-left gear). */}
@@ -1854,6 +1799,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     </> : leftActive === 'skills' ? <>
                       <Brain className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-skills" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelSkills')}</span>
+                    </> : leftActive === 'customAgents' ? <>
+                      <Bot className="w-3.5 h-3.5 text-zinc-600" />
+                      <span data-id="left-panel-title-custom-agents" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelCustomAgents')}</span>
                     </> : leftActive === 'windows' ? <>
                       <AppWindow className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-windows" className="text-xs font-medium text-zinc-500 flex-1 ml-1">浏览器窗口</span>
@@ -1899,13 +1847,33 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       <div data-id="left-panel-skills-view" className="absolute inset-0">
                         <SkillMarketplacePanel paneId={activeCliPaneId || paneId} />
                       </div>
+                    ) : leftActive === 'customAgents' ? (
+                      <div data-id="left-panel-custom-agents-view" className="absolute inset-0">
+                        <CustomAgentsPanel onCreated={refreshPanes} onSelectAgent={onSelectAgent} />
+                      </div>
                     ) : leftActive === 'windows' ? (
                       <div data-id="left-panel-windows-view" className="absolute inset-0">
-                        <BrowserWindowsPanel />
+                        <BrowserWindowsPanel selectedKey={browserSel?.profile.key ?? null} onSelect={setBrowserSel} openConfigRequest={pendingProfileConfig} />
                       </div>
                     ) : null}
                   </div>
                 </div>
+              </div>
+            ) : null}
+            {leftActive === 'windows' && browserSel && !globalVar?.helper_mode ? (
+              <div
+                data-id="browser-windows-column"
+                className="h-full w-[300px] min-w-[300px] max-w-[300px] shrink-0 border-r border-[var(--vsc-border)] relative"
+              >
+                <BrowserWindowsColumn
+                  key={`${browserSel.clientId}:${browserSel.profile.key}`}
+                  clientId={browserSel.clientId}
+                  deviceId={browserSel.deviceId}
+                  profile={browserSel.profile}
+                  onClose={() => setBrowserSel(null)}
+                  onSendToAgent={sendBrowserToAgent}
+                  onOpenInEditor={openCodeFile}
+                />
               </div>
             ) : null}
             <div data-testid="mid-panel" data-id="mid-panel" className="min-w-0 flex-1 relative">

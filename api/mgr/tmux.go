@@ -556,6 +556,8 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	req.AllowAllActions = true
 	req.ReplyInChinese = true
 	readBody(r, &req)
+	// "custom:<slug>" picks a user-authored custom agent → cicy + role_template.
+	req.AgentType, req.RoleTemplate = resolveCustomAgentSelection(req.AgentType, req.RoleTemplate)
 	req.AgentType = normalizeAgentType(req.AgentType)
 	if req.AgentType == "" {
 		J(w, M{"success": false, "error": "unsupported agent_type"})
@@ -592,13 +594,36 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	J(w, result)
 }
 
+// resolveCustomAgentSelection maps a synthetic "custom:<slug>" agent_type (chosen
+// from the agent-type picker for a user-authored custom agent) to its real
+// runtime: agent_type=cicy + role_template=<slug> (the custom persona, which then
+// feeds the lite tools/prompt/model via the role lookup chain). Returns the
+// inputs unchanged for any non-custom agent_type.
+func resolveCustomAgentSelection(agentType, roleTemplate string) (string, string) {
+	const prefix = "custom:"
+	if strings.HasPrefix(agentType, prefix) {
+		if slug := sanitizeTemplateSlug(strings.TrimPrefix(agentType, prefix)); slug != "" {
+			return "cicy", slug
+		}
+	}
+	return agentType, roleTemplate
+}
+
 func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useProxy bool, proxy *proxySettings, winName *string, masterPaneID string, masterAgentType string, inheritGuidance bool, projectTemplate string, roleTemplate string, token string, runtimeAI *runtimeAIOverride) (M, error) {
+	agentType, roleTemplate = resolveCustomAgentSelection(agentType, roleTemplate)
 	agentType = normalizeAgentType(agentType)
 	if agentType == "" {
 		return M{"success": false}, fmt.Errorf("unsupported agent_type")
 	}
 	if !isAllowedAgentType(agentType) {
 		return M{"success": false}, fmt.Errorf("agent_type not allowed in current mode")
+	}
+	// A custom agent (role_template → ~/cicy-ai/agents/<slug>/AGENT.md) may pin a
+	// default model in its definition; apply it when the caller didn't specify one.
+	if strings.TrimSpace(defaultModel) == "" {
+		if ca, ok := customAgentFor(roleTemplate); ok && strings.TrimSpace(ca.Model) != "" {
+			defaultModel = strings.TrimSpace(ca.Model)
+		}
 	}
 	// Get next worker index. CRITICAL: skip any index whose pane id already
 	// exists in agent_config. worker_index can lag behind real pane ids after
@@ -732,6 +757,9 @@ func composeGuidanceContent(workspace, agentType, paneID, projectTemplate, roleT
 		if slug := sanitizeTemplateSlug(roleTemplate); slug != "" {
 			if rt := strings.TrimSpace(loadTemplateFile(roleTemplatePath(slug))); rt != "" {
 				seed = rt
+			} else if ca, ok := customAgentFor(slug); ok && strings.TrimSpace(ca.Body) != "" {
+				// User-authored custom agent: persona is its AGENT.md body.
+				seed = strings.TrimSpace(ca.Body)
 			}
 		}
 		return substituteTemplatePlaceholders(seed, paneID, workspace, agentType)

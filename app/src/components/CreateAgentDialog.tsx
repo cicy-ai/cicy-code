@@ -72,6 +72,12 @@ export default function CreateAgentDialog({
   const [projectTemplates, setProjectTemplates] = useState<string[]>([]);
   const [roleTemplates, setRoleTemplates] = useState<string[]>([]);
 
+  // User-authored custom agents appear as their own agent-type options
+  // ("custom:<slug>"), alongside claude/codex/cicy. Picking one creates an
+  // instance of that persona (backend maps custom:<slug> → cicy + role_template).
+  const [customOptions, setCustomOptions] = useState<{ value: string; label: string; description?: string }[]>([]);
+  const mergedAgentTypeOptions = [...agentTypeOptions, ...customOptions];
+
   useEffect(() => {
     if (!open) return;
     setValues({
@@ -84,6 +90,16 @@ export default function CreateAgentDialog({
         setRoleTemplates(Array.isArray(res.data?.roles) ? res.data.roles : []);
       })
       .catch(() => {});
+    apiService.listCustomAgents()
+      .then((res) => {
+        const list = Array.isArray(res.data?.agents) ? res.data.agents : [];
+        setCustomOptions(list.map((ca: any) => ({
+          value: `custom:${ca.slug}`,
+          label: `★ ${ca.name}`,
+          description: typeof ca.body === 'string' ? ca.body.slice(0, 60) : undefined,
+        })));
+      })
+      .catch(() => setCustomOptions([]));
   }, [agentTypeOptions, open]);
   useDevRegister('CreateAgentDialog', {
     open,
@@ -95,7 +111,7 @@ export default function CreateAgentDialog({
   if (!open) return null;
 
   const canSubmit = values.title.trim().length > 0 && values.agent_type.trim().length > 0 && !submitting;
-  const selectedAgent = agentTypeOptions.find((option) => option.value === values.agent_type) || null;
+  const selectedAgent = mergedAgentTypeOptions.find((option) => option.value === values.agent_type) || null;
 
   const set = (patch: Partial<CreateAgentValues>) => {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -162,10 +178,10 @@ export default function CreateAgentDialog({
             <label data-id="create-agent-dialog-agent-type-label" className="mb-1.5 block text-[13px] font-medium text-zinc-300">{t('agentTypeLabel')}</label>
             <AgentTypeSelector
               value={values.agent_type}
-              options={agentTypeOptions}
+              options={mergedAgentTypeOptions}
               onChange={(agentType) => {
-                const option = agentTypeOptions.find((item) => item.value === agentType);
-                handleAgentTypeSelect(agentType, option?.label || agentType);
+                const option = mergedAgentTypeOptions.find((item) => item.value === agentType);
+                handleAgentTypeSelect(agentType, (option?.label || agentType).replace(/^★\s*/, ''));
               }}
               dataId="create-agent-dialog-agent-type-options"
               optionDataIdPrefix="create-agent-dialog-agent-type"
@@ -259,7 +275,7 @@ export default function CreateAgentDialog({
           <button
             data-id="create-agent-dialog-submit"
             type="submit"
-            disabled={!canSubmit || agentTypeOptions.length === 0}
+            disabled={!canSubmit || mergedAgentTypeOptions.length === 0}
             className="flex cursor-pointer items-center gap-2 rounded-lg bg-blue-500/20 px-4 py-2 text-sm font-medium text-blue-300 transition-all hover:bg-blue-500/25 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting ? <Spinner size="sm" /> : <Zap className="h-4 w-4" />}

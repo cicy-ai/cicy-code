@@ -423,3 +423,75 @@ func handleAgentReorder(w http.ResponseWriter, r *http.Request) {
 	go broadcastPollData(paneID)
 	J(w, M{"success": true})
 }
+
+// agentParentRef returns the short source_ref (tree parent) of an agent.
+func agentParentRef(short string) string {
+	var ref string
+	store.QueryRow("SELECT COALESCE(source_ref,'') FROM agent_config WHERE pane_id=?", normPaneID(short)).Scan(&ref)
+	return shortPaneID(normPaneID(strings.TrimSpace(ref)))
+}
+
+// agentIsDescendant reports whether `node` lives in the subtree rooted at
+// `ancestor` — i.e. walking node's source_ref chain upward reaches ancestor.
+// Used as a cycle guard for reparenting.
+func agentIsDescendant(node, ancestor string) bool {
+	seen := map[string]bool{}
+	for cur := node; cur != "" && !seen[cur]; cur = agentParentRef(cur) {
+		if cur == ancestor {
+			return true
+		}
+		seen[cur] = true
+	}
+	return false
+}
+
+// handleAgentReparent moves an agent under a new tree parent by rewriting its
+// source_ref. Empty new_parent promotes the agent to top-level. The tree is
+// derived from source_ref (the fork-origin pointer), so this is all it takes.
+func handleAgentReparent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		PaneID        string `json:"pane_id"`         // agent being moved
+		NewParent     string `json:"new_parent"`      // new source_ref ("" = top-level)
+		ContextPaneID string `json:"context_pane_id"` // whose poll to refresh
+	}
+	if err := readBody(r, &req); err != nil {
+		httpErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	childFull := normPaneID(strings.TrimSpace(req.PaneID))
+	child := shortPaneID(childFull)
+	parent := shortPaneID(normPaneID(strings.TrimSpace(req.NewParent)))
+	if child == "" {
+		httpErr(w, http.StatusBadRequest, "pane_id required")
+		return
+	}
+	if parent == child {
+		httpErr(w, http.StatusBadRequest, "cannot reparent onto self")
+		return
+	}
+	// Cycle guard: the new parent must not be a descendant of the moved node.
+	if parent != "" && agentIsDescendant(parent, child) {
+		httpErr(w, http.StatusBadRequest, "would create a cycle")
+		return
+	}
+	var err error
+	if parent == "" {
+		_, err = store.Exec("UPDATE agent_config SET source_kind='', source_ref='' WHERE pane_id=?", childFull)
+	} else {
+		_, err = store.Exec("UPDATE agent_config SET source_kind='fork', source_ref=? WHERE pane_id=?", parent, childFull)
+	}
+	if err != nil {
+		httpErr(w, http.StatusInternalServerError, "reparent failed")
+		return
+	}
+	ctx := shortPaneID(normPaneID(strings.TrimSpace(req.ContextPaneID)))
+	if ctx == "" {
+		ctx = child
+	}
+	go broadcastPollData(ctx)
+	J(w, M{"success": true})
+}

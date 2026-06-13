@@ -336,6 +336,10 @@ Options:
 	http.HandleFunc("/api/memory/templates", wa(handleMemoryTemplates))
 	http.HandleFunc("/api/memory/templates/", wa(handleMemoryTemplateByName))
 
+	// Custom agents (user-authored cicy personas, ~/cicy-ai/agents/<slug>/AGENT.md)
+	http.HandleFunc("/api/custom-agents", wa(handleCustomAgents))
+	http.HandleFunc("/api/custom-agents/", wa(handleCustomAgentAction))
+
 	// Todo
 	http.HandleFunc("/api/todo/list", wa(handleTodoList))
 	http.HandleFunc("/api/todo/add", wa(handleTodoAdd))
@@ -374,6 +378,7 @@ Options:
 	http.HandleFunc("/api/agents/unbind", wa(handleAgentUnbind))
 	http.HandleFunc("/api/agents/unbind/", wa(handleAgentUnbind))
 	http.HandleFunc("/api/agents/reorder", wa(handleAgentReorder))
+	http.HandleFunc("/api/agents/reparent", wa(handleAgentReparent))
 
 	// Groups
 	http.HandleFunc("/api/groups", wa(handleGroups))

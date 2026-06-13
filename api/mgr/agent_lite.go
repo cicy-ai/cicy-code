@@ -59,6 +59,7 @@ type liteConfig struct {
 type liteFrontmatter struct {
 	profile  string
 	name     string
+	model    string // optional default model (used by custom agents; ignored elsewhere)
 	tools    []string
 	hasTools bool // distinguishes "tools: []" (override to none) from absent
 	body     string
@@ -106,6 +107,8 @@ func parseLiteFrontmatter(content string) liteFrontmatter {
 			fm.profile = strings.ToLower(strings.Trim(val, `"'`))
 		case "name":
 			fm.name = strings.Trim(val, `"'`)
+		case "model":
+			fm.model = strings.Trim(val, `"'`)
 		case "tools":
 			fm.hasTools = true
 			fm.tools = parseLiteList(val)
