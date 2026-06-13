@@ -14,6 +14,28 @@ import { TokenManager } from '../../services/tokenManager';
 // settings popover (entries above the version line).
 export type SettingsSection = 'general' | 'language' | 'im' | 'routing' | 'providers';
 
+// Common email providers → their SMTP/IMAP/POP3 servers. Typing an account whose
+// domain matches one of these auto-fills the servers, so the user only enters the
+// address + auth code. Unknown domains fall back to manual entry.
+interface MailProvider { label: string; host: string; port: number; secure: boolean; imap: string; pop3: string; }
+const EMAIL_PROVIDERS: Record<string, MailProvider> = {
+  'qq.com': { label: 'QQ 邮箱', host: 'smtp.qq.com', port: 465, secure: true, imap: 'imap.qq.com', pop3: 'pop.qq.com' },
+  'foxmail.com': { label: 'Foxmail', host: 'smtp.qq.com', port: 465, secure: true, imap: 'imap.qq.com', pop3: 'pop.qq.com' },
+  'gmail.com': { label: 'Gmail', host: 'smtp.gmail.com', port: 465, secure: true, imap: 'imap.gmail.com', pop3: 'pop.gmail.com' },
+  '163.com': { label: '163 邮箱', host: 'smtp.163.com', port: 465, secure: true, imap: 'imap.163.com', pop3: 'pop.163.com' },
+  '126.com': { label: '126 邮箱', host: 'smtp.126.com', port: 465, secure: true, imap: 'imap.126.com', pop3: 'pop.126.com' },
+  'outlook.com': { label: 'Outlook', host: 'smtp.office365.com', port: 587, secure: false, imap: 'outlook.office365.com', pop3: 'outlook.office365.com' },
+  'hotmail.com': { label: 'Hotmail', host: 'smtp.office365.com', port: 587, secure: false, imap: 'outlook.office365.com', pop3: 'outlook.office365.com' },
+  'icloud.com': { label: 'iCloud', host: 'smtp.mail.me.com', port: 587, secure: false, imap: 'imap.mail.me.com', pop3: 'imap.mail.me.com' },
+};
+const emailDomain = (addr: string): string => {
+  const m = /@([^@\s]+)$/.exec((addr || '').trim().toLowerCase());
+  return m ? m[1] : '';
+};
+const providerPreset = (addr: string): MailProvider | null => EMAIL_PROVIDERS[emailDomain(addr)] || null;
+const providerLabel = (addr: string): string => (providerPreset(addr)?.label || '');
+const isPresetHost = (host: string): boolean => Object.values(EMAIL_PROVIDERS).some((p) => p.host === host);
+
 interface NavItem {
   id: SettingsSection;
   label: string;
@@ -76,7 +98,7 @@ export default function SettingsModal({
   // SMTP being configured). Token rotation invalidates the current token, so on
   // success we persist the returned new token into TokenManager.
   const [emailCfg, setEmailCfg] = useState<any>(null);
-  const [emailForm, setEmailForm] = useState({ host: '', port: 465, secure: true, user: '', pass: '', from: '', default_to: '' });
+  const [emailForm, setEmailForm] = useState({ host: '', port: 465, secure: true, user: '', pass: '', default_to: '' });
   const [emailSaving, setEmailSaving] = useState(false);
   const [emailSaved, setEmailSaved] = useState(false);
   const [apiToken, setApiToken] = useState('');
@@ -95,7 +117,7 @@ export default function SettingsModal({
         const d = ec.data || {};
         setEmailCfg(d);
         const s = d.smtp || {};
-        setEmailForm({ host: s.host || '', port: s.port || 465, secure: s.secure !== false, user: s.user || '', pass: '', from: s.from || '', default_to: d.default_to || '' });
+        setEmailForm({ host: s.host || '', port: s.port || 465, secure: s.secure !== false, user: s.user || '', pass: '', default_to: d.default_to || '' });
         setApiToken(tk.data?.token || '');
       })
       .catch(() => {});
@@ -106,11 +128,24 @@ export default function SettingsModal({
     setEmailSaving(true);
     setEmailSaved(false);
     try {
+      const user = emailForm.user.trim();
+      const host = emailForm.host.trim();
+      const port = Number(emailForm.port) || 465;
+      const secure = !!emailForm.secure;
+      // from/default_to default to the account on the server; receive (imap/pop3)
+      // is derived from the same provider preset so a known provider needs only
+      // account + password.
+      const preset = providerPreset(user);
       const payload: any = {
-        smtp: { host: emailForm.host.trim(), port: Number(emailForm.port) || 465, secure: !!emailForm.secure, user: emailForm.user.trim(), from: emailForm.from.trim() },
+        smtp: { host, port, secure, user },
         default_to: emailForm.default_to.trim(),
       };
       if (emailForm.pass.trim()) payload.smtp.pass = emailForm.pass;
+      if (preset) {
+        payload.imap = { host: preset.imap, port: 993, secure: true, user };
+        payload.pop3 = { host: preset.pop3, port: 995, secure: true, user };
+        if (emailForm.pass.trim()) { payload.imap.pass = emailForm.pass; payload.pop3.pass = emailForm.pass; }
+      }
       const r = await apiService.saveEmailConfig(payload);
       setEmailCfg(r.data?.config || null);
       setEmailForm((f) => ({ ...f, pass: '' }));
@@ -145,7 +180,25 @@ export default function SettingsModal({
     try { await navigator.clipboard.writeText(apiToken); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
   };
 
+  // Typing an account like cicybot@qq.com auto-fills the SMTP server/port so a
+  // known provider needs only the account + auth code. Unknown domains keep
+  // whatever the user typed manually.
+  const onEmailUserChange = (raw: string) => {
+    const preset = providerPreset(raw);
+    setEmailForm((f) => {
+      const next = { ...f, user: raw };
+      if (preset && (!f.host || isPresetHost(f.host))) {
+        next.host = preset.host;
+        next.port = preset.port;
+        next.secure = preset.secure;
+      }
+      return next;
+    });
+  };
+  const detectedProvider = providerLabel(emailForm.user);
+
   const inp = 'rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[13px] text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-white/[0.18]';
+  const lbl = 'block text-[11px] font-medium text-zinc-400 mb-1';
 
   // ESC closes — capture phase so it wins over the embedded dashboards' own
   // key handlers (they only care about their internal editors).
@@ -308,19 +361,37 @@ export default function SettingsModal({
                       ) : null}
                     </div>
                     <div className="mb-3 text-[11px] leading-5 text-zinc-500">{t('settingsEmailHint', { defaultValue: '用于刷新令牌时把新令牌发到你的邮箱。填写邮箱服务商的 SMTP 信息(如 QQ 邮箱的授权码)。' })}</div>
-                    <div className="space-y-2">
-                      <input data-id="settings-email-host" placeholder={t('settingsEmailHost', { defaultValue: 'SMTP 服务器 (如 smtp.qq.com)' })} value={emailForm.host} onChange={(e) => setEmailForm((f) => ({ ...f, host: e.target.value }))} className={`${inp} w-full`} spellCheck={false} autoComplete="off" />
-                      <div className="flex items-center gap-3">
-                        <input data-id="settings-email-port" type="number" placeholder="465" value={emailForm.port} onChange={(e) => setEmailForm((f) => ({ ...f, port: Number(e.target.value) }))} className={`${inp} w-24`} />
-                        <label className="flex items-center gap-1.5 text-[12px] text-zinc-400">
-                          <input data-id="settings-email-secure" type="checkbox" checked={emailForm.secure} onChange={(e) => setEmailForm((f) => ({ ...f, secure: e.target.checked }))} />
-                          {t('settingsEmailSecure', { defaultValue: '隐式 TLS (465);587 请取消勾选' })}
-                        </label>
+                    <div className="space-y-3">
+                      {/* Account — typing this auto-detects the provider's servers */}
+                      <div data-id="settings-email-user-field">
+                        <label className={lbl}>{t('settingsEmailUserLabel', { defaultValue: '邮箱账号' })}</label>
+                        <input data-id="settings-email-user" type="email" placeholder="you@qq.com" value={emailForm.user} onChange={(e) => onEmailUserChange(e.target.value)} className={`${inp} w-full`} spellCheck={false} autoComplete="off" />
+                        {detectedProvider ? (
+                          <div data-id="settings-email-detected" className="mt-1 flex items-center gap-1 text-[11px] text-emerald-400"><Check className="h-3 w-3" />{t('settingsEmailDetected', { defaultValue: '已识别 {{name}}，服务器已自动填好', name: detectedProvider })}</div>
+                        ) : null}
                       </div>
-                      <input data-id="settings-email-user" placeholder={t('settingsEmailUser', { defaultValue: '用户名 (邮箱地址)' })} value={emailForm.user} onChange={(e) => setEmailForm((f) => ({ ...f, user: e.target.value }))} className={`${inp} w-full`} spellCheck={false} autoComplete="off" />
-                      <input data-id="settings-email-pass" type="password" placeholder={emailCfg?.smtp?.pass_set ? t('settingsEmailPassSet', { defaultValue: '密码已设置 (留空保持不变)' }) : t('settingsEmailPass', { defaultValue: '密码 / 授权码' })} value={emailForm.pass} onChange={(e) => setEmailForm((f) => ({ ...f, pass: e.target.value }))} className={`${inp} w-full`} autoComplete="new-password" />
-                      <input data-id="settings-email-from" placeholder={t('settingsEmailFrom', { defaultValue: '发件人 (如 CiCy <you@qq.com>)' })} value={emailForm.from} onChange={(e) => setEmailForm((f) => ({ ...f, from: e.target.value }))} className={`${inp} w-full`} spellCheck={false} autoComplete="off" />
-                      <input data-id="settings-email-to" placeholder={t('settingsEmailTo', { defaultValue: '收件人 (token 发到这个邮箱)' })} value={emailForm.default_to} onChange={(e) => setEmailForm((f) => ({ ...f, default_to: e.target.value }))} className={`${inp} w-full`} spellCheck={false} autoComplete="off" />
+                      {/* Auth code / password */}
+                      <div data-id="settings-email-pass-field">
+                        <label className={lbl}>{t('settingsEmailPassLabel', { defaultValue: '授权码 / 密码' })}</label>
+                        <input data-id="settings-email-pass" type="password" placeholder={emailCfg?.smtp?.pass_set ? t('settingsEmailPassSet', { defaultValue: '已设置 (留空保持不变)' }) : t('settingsEmailPassPh', { defaultValue: 'QQ/163 等填授权码，非登录密码' })} value={emailForm.pass} onChange={(e) => setEmailForm((f) => ({ ...f, pass: e.target.value }))} className={`${inp} w-full`} autoComplete="new-password" />
+                      </div>
+                      {/* SMTP server — auto-filled from the account; editable for custom providers */}
+                      <div data-id="settings-email-server-field">
+                        <label className={lbl}>{t('settingsEmailServerLabel', { defaultValue: 'SMTP 服务器' })}{detectedProvider ? <span className="ml-1 text-zinc-600">{t('settingsEmailAuto', { defaultValue: '（已自动填好，可修改）' })}</span> : null}</label>
+                        <div className="flex items-center gap-2">
+                          <input data-id="settings-email-host" placeholder="smtp.example.com" value={emailForm.host} onChange={(e) => setEmailForm((f) => ({ ...f, host: e.target.value }))} className={`${inp} flex-1`} spellCheck={false} autoComplete="off" />
+                          <input data-id="settings-email-port" type="number" placeholder="465" value={emailForm.port} onChange={(e) => setEmailForm((f) => ({ ...f, port: Number(e.target.value) }))} className={`${inp} w-20`} title={t('settingsEmailPortTitle', { defaultValue: '端口' })} />
+                          <label className="flex items-center gap-1.5 whitespace-nowrap text-[12px] text-zinc-400">
+                            <input data-id="settings-email-secure" type="checkbox" checked={emailForm.secure} onChange={(e) => setEmailForm((f) => ({ ...f, secure: e.target.checked }))} />
+                            {t('settingsEmailSecureShort', { defaultValue: 'TLS' })}
+                          </label>
+                        </div>
+                      </div>
+                      {/* Recipient — defaults to the account itself */}
+                      <div data-id="settings-email-to-field">
+                        <label className={lbl}>{t('settingsEmailToLabel', { defaultValue: '接收新 token 的邮箱' })}</label>
+                        <input data-id="settings-email-to" type="email" placeholder={emailForm.user.trim() ? t('settingsEmailToPh', { defaultValue: '默认与账号相同（{{addr}}），可留空', addr: emailForm.user.trim() }) : t('settingsEmailToPhEmpty', { defaultValue: '默认与账号相同，可留空' })} value={emailForm.default_to} onChange={(e) => setEmailForm((f) => ({ ...f, default_to: e.target.value }))} className={`${inp} w-full`} spellCheck={false} autoComplete="off" />
+                      </div>
                     </div>
                     <div className="mt-3 flex items-center gap-2">
                       <button data-id="settings-email-save" type="button" disabled={emailSaving} onClick={() => void saveEmail()} className={`rounded-lg px-3.5 py-2 text-[12px] font-semibold transition-colors ${emailSaving ? 'cursor-not-allowed bg-white/[0.05] text-zinc-600' : 'bg-sky-500/90 text-white hover:bg-sky-500'}`}>

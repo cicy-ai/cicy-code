@@ -135,6 +135,22 @@ func mergeEmailConfig(cur, req map[string]any) map[string]any {
 	if v, ok := req["default_to"]; ok {
 		cur["default_to"] = v
 	}
+	// Derive sensible defaults so the UI only needs the account + password:
+	//   smtp.from  ← smtp.user  (the `email` skill requires a non-empty from)
+	//   default_to ← smtp.user  (send the rotated token to yourself by default)
+	if sb, _ := cur["smtp"].(map[string]any); sb != nil {
+		user, _ := sb["user"].(string)
+		user = strings.TrimSpace(user)
+		if user != "" {
+			if from, _ := sb["from"].(string); strings.TrimSpace(from) == "" {
+				sb["from"] = user
+			}
+			if dt, _ := cur["default_to"].(string); strings.TrimSpace(dt) == "" {
+				cur["default_to"] = user
+			}
+		}
+		cur["smtp"] = sb
+	}
 	return cur
 }
 
