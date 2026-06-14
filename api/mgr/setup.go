@@ -1003,6 +1003,9 @@ var preinstalledSkills = []string{
 	"agent-chrome", "agent-editor", "agent-desktop", "agent-webpage",
 	"cicy-agent", "cicy-todo", "cicy-mihomo", "cicy-ssh", "proxy_ssh", "globalApiToken",
 	"agent-summary",
+	// Team knowledge Layer 2 store CLI (add/list/recall/promote/...) — fresh
+	// installs get it so agents can record/recall team knowledge out of the box.
+	"cicy-knowledge",
 	// Skill ecosystem conventions (private dev / team install / public PR) —
 	// every agent should know these by default.
 	"cicy-skill-spec",

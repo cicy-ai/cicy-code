@@ -67,6 +67,10 @@ func knowledgeEnsureRoot() error {
 			return err
 		}
 	}
+	// On a brand new install the store isn't a git repo yet — seed the embedded
+	// README/.gitignore + git init + first commit (idempotent; fast no-op once
+	// the repo exists). Best-effort, never blocks the store.
+	knowledgeEnsureGitRepo()
 	return nil
 }
 
