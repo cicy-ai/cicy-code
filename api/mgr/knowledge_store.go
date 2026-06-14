@@ -314,17 +314,29 @@ func insertKnowledge(k knowledgeRow) (string, error) {
 // reviewing pane. domain defaults to "general".
 func promoteKnowledge(id, domain, verifiedBy string) error {
 	domain = knowledgeSlugify(firstNonEmpty(domain, knowledgeDefaultDomain))
-	return knowledgeMove(id, filepath.Join(knowledgeRootDir(), domain), map[string]string{"verified_by": verifiedBy})
+	if err := knowledgeMove(id, filepath.Join(knowledgeRootDir(), domain), map[string]string{"verified_by": verifiedBy}); err != nil {
+		return err
+	}
+	knowledgeGitCommit(fmt.Sprintf("knowledge: promote %s → %s (by %s)", id, domain, knowledgeGitAuthor(verifiedBy)), verifiedBy)
+	return nil
 }
 
 // rejectKnowledge moves an entry into _archive, stamping the reviewing pane.
 func rejectKnowledge(id, verifiedBy string) error {
-	return knowledgeMove(id, knowledgeArchiveDir(), map[string]string{"verified_by": verifiedBy})
+	if err := knowledgeMove(id, knowledgeArchiveDir(), map[string]string{"verified_by": verifiedBy}); err != nil {
+		return err
+	}
+	knowledgeGitCommit(fmt.Sprintf("knowledge: reject %s (by %s)", id, knowledgeGitAuthor(verifiedBy)), verifiedBy)
+	return nil
 }
 
 // supersedeKnowledge archives oldID, recording the entry that replaces it.
 func supersedeKnowledge(oldID, newID, verifiedBy string) error {
-	return knowledgeMove(oldID, knowledgeArchiveDir(), map[string]string{"verified_by": verifiedBy, "superseded_by": strings.TrimSpace(newID)})
+	if err := knowledgeMove(oldID, knowledgeArchiveDir(), map[string]string{"verified_by": verifiedBy, "superseded_by": strings.TrimSpace(newID)}); err != nil {
+		return err
+	}
+	knowledgeGitCommit(fmt.Sprintf("knowledge: supersede %s → %s (by %s)", oldID, strings.TrimSpace(newID), knowledgeGitAuthor(verifiedBy)), verifiedBy)
+	return nil
 }
 
 func knowledgeMove(id, destDir string, fmUpdates map[string]string) error {
