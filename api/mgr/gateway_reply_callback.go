@@ -35,6 +35,12 @@ type pendingCallback struct {
 	callbackTo string
 	msgID      string
 	notify     bool
+	// bornTurnID is the receiver's in-flight turn_id at registration time (its
+	// boot/opening or a prior turn). finalize ignores that exact turn so a
+	// freshly-booted agent's opening round doesn't falsely fire "done" — only a
+	// NEW turn (the one actually handling this message) fires. Empty = no
+	// in-flight turn at registration → first terminal reply fires (old behavior).
+	bornTurnID string
 }
 
 var (
@@ -42,16 +48,16 @@ var (
 	pendingCallbacks  = map[string][]pendingCallback{} // paneID → queued callbacks
 )
 
-func registerReplyCallback(paneID, callbackTo, msgID string, notify bool) {
+func registerReplyCallback(paneID, callbackTo, msgID string, notify bool, bornTurnID string) {
 	paneID = normPaneID(paneID)
 	callbackTo = normPaneID(callbackTo)
 	if paneID == "" || callbackTo == "" || paneID == callbackTo {
 		return
 	}
 	pendingCallbackMu.Lock()
-	pendingCallbacks[paneID] = append(pendingCallbacks[paneID], pendingCallback{callbackTo: callbackTo, msgID: msgID, notify: notify})
+	pendingCallbacks[paneID] = append(pendingCallbacks[paneID], pendingCallback{callbackTo: callbackTo, msgID: msgID, notify: notify, bornTurnID: bornTurnID})
 	pendingCallbackMu.Unlock()
-	log.Printf("[reply-callback] registered pane=%s callback_to=%s msg=%s notify=%v", shortPaneID(paneID), shortPaneID(callbackTo), msgID, notify)
+	log.Printf("[reply-callback] registered pane=%s callback_to=%s msg=%s notify=%v born_turn=%s", shortPaneID(paneID), shortPaneID(callbackTo), msgID, notify, bornTurnID)
 }
 
 // peekCallbackHooksForPane is called from newReplyHooksForPane at the start of
@@ -85,6 +91,7 @@ func peekCallbackHooksForPane(paneID string) []aiGatewayReplyHook {
 			callbackTo:     entry.callbackTo,
 			msgID:          entry.msgID,
 			notify:         entry.notify,
+			bornTurnID:     entry.bornTurnID,
 		})
 	}
 	return hooks
@@ -114,6 +121,7 @@ type replyCallbackHook struct {
 	callbackTo     string
 	msgID          string
 	notify         bool
+	bornTurnID     string
 	fired          bool
 	mu             sync.Mutex
 }
@@ -156,6 +164,15 @@ func (h *replyCallbackHook) finalize(reply aiGatewayReplySnapshot) {
 	// only peeked, never consumed); the final request (no tool_calls) or a failure
 	// fires it. This is what ties the callback to reply.json's real complete/failure.
 	if status == "completed" && len(reply.ToolCalls) > 0 {
+		return
+	}
+
+	// turn_id anchoring: if this terminal reply is the SAME turn that was already
+	// in flight when the callback was registered (the receiver's boot/opening or a
+	// prior round), it is not the turn that handles this message — leave the entry
+	// queued for the next turn and don't fire. Only a new turn_id fires. When
+	// bornTurnID is empty (no in-flight turn at registration), behavior is unchanged.
+	if h.bornTurnID != "" && strings.TrimSpace(reply.TurnID) == h.bornTurnID {
 		return
 	}
 

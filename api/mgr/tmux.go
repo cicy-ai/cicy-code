@@ -5063,7 +5063,14 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		// completion chat push; the DB state is updated either way.
 		if cbTo != "" {
 			notify, _ := req["notify"].(bool)
-			registerReplyCallback(winID, cbTo, msgID, notify)
+			// bornTurnID = the receiver's currently in-flight turn (its boot/opening
+			// or a prior round). finalize uses it to skip that exact turn so a
+			// freshly-spawned agent's opening round doesn't falsely fire done.
+			bornTurnID := ""
+			if rs, err := aiGatewayReadReplySnapshotFile(shortPaneID(winID)); err == nil {
+				bornTurnID = strings.TrimSpace(rs.TurnID)
+			}
+			registerReplyCallback(winID, cbTo, msgID, notify, bornTurnID)
 		}
 		// Headless cicy: no tmux pane to send-keys into. The webUI sends through
 		// this same endpoint (sendCommand → /api/tmux/send), so route cicy text
