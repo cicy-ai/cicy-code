@@ -75,14 +75,21 @@ export default function ForkConfirmModal({ sourcePaneId, masterPaneId, onClose, 
   const [anchor, setAnchor] = useState<AnchorRect | null>(null);
 
   // Anchor over the source agent's stack card (data-id="agent-stack-card-<id>").
-  // Falls back to a centered box when the card isn't on the canvas.
-  const computeAnchor = useCallback((): AnchorRect | null => {
-    const el = document.querySelector<HTMLElement>(`[data-id="agent-stack-card-${sourcePaneId}"]`);
+  // Only the ACTIVE card is rendered (others are display:none → zero rect), so
+  // when the source card is hidden we anchor to the visible stack area instead
+  // of falling back to a fullscreen-looking centered box. TeamPanel activates
+  // the source on open, so the real card rect is normally available.
+  const rectOf = (sel: string): AnchorRect | null => {
+    const el = document.querySelector<HTMLElement>(sel);
     if (!el) return null;
     const r = el.getBoundingClientRect();
     if (r.width < 40 || r.height < 40) return null;
     return { top: r.top, left: r.left, width: r.width, height: r.height };
-  }, [sourcePaneId]);
+  };
+  const computeAnchor = useCallback(
+    (): AnchorRect | null => rectOf(`[data-id="agent-stack-card-${sourcePaneId}"]`) || rectOf('[data-id="agent-stack"]'),
+    [sourcePaneId],
+  );
 
   // Keep the modal glued to the source card via a rAF loop: opening a history
   // file pops the editor drawer, which shrinks the canvas and moves/resizes the

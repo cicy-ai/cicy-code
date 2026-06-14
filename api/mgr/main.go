@@ -188,6 +188,7 @@ Options:
 
 	go startWatcher()
 	go startTmuxHealth()
+	go startDesktopSnapshots()
 	startSystemResourceMonitor()
 	if _, err := syncMachinesFromConfig(); err != nil {
 		log.Printf("[machines] initial sync error: %v", err)
@@ -266,6 +267,7 @@ Options:
 	http.HandleFunc("/api/cicy/clear", authM(handleCicyClear))   // 清空 headless cicy 会话(内存+conversation.json+快照)
 	http.HandleFunc("/api/tmux/reply_text", authM(handleAgentReplyText))
 	http.HandleFunc("/api/tmux/chat_history", authM(handleAgentChatHistory))
+	http.HandleFunc("/api/agent/messages", authM(handleAgentMessages)) // cross-agent message link view (JOIN history_turns)
 	http.HandleFunc("/api/tmux/client-trace", authM(handleTmuxClientTrace))
 	// http.HandleFunc("/api/tmux/send_wait", authM(handleSendWait)) // TODO: implement handleSendWait
 	http.HandleFunc("/api/tmux/capture", authM(handleCapture))
@@ -292,6 +294,11 @@ Options:
 	http.HandleFunc("/api/chat/debug", wa(handleChatDebug))
 	http.HandleFunc("/api/chat/webhook", corsM(handleChatWebhook))
 	http.HandleFunc("/api/openclaw/message/send", wa(handleOpenClawMessageSend))
+
+	// Desktop snapshots (periodic win/mac/linux screen captures → 桌面 tab)
+	http.HandleFunc("/api/desktop/snapshots", wa(handleDesktopSnapshots))
+	http.HandleFunc("/api/desktop/snapshot-image", wa(handleDesktopSnapshotImage))
+	http.HandleFunc("/api/desktop/snapshot-now", wa(handleDesktopSnapshotNow))
 
 	// Native files (replaces code-server file viewer/editor; see docs/native-files-plan.md)
 	http.HandleFunc("/api/fs/roots", wa(handleFsRoots))

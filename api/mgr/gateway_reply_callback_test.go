@@ -8,12 +8,12 @@ import "testing"
 // that race-free; this locks in those invariants.
 func TestReplyCallbackPeekAndDeferral(t *testing.T) {
 	pendingCallbackMu.Lock()
-	pendingCallbacks = map[string][]string{}
+	pendingCallbacks = map[string][]pendingCallback{}
 	pendingCallbackMu.Unlock()
 
 	recv := normPaneID("w-20003")
 	caller := normPaneID("w-20001")
-	registerReplyCallback("w-20003", "w-20001")
+	registerReplyCallback("w-20003", "w-20001", "", false)
 
 	queueLen := func() int {
 		pendingCallbackMu.Lock()
@@ -41,13 +41,48 @@ func TestReplyCallbackPeekAndDeferral(t *testing.T) {
 	}
 
 	// removeOneCallbackEntry consumes exactly one; a second call reports nothing left.
-	if !removeOneCallbackEntry(recv, caller) {
+	if !removeOneCallbackEntry(recv, caller, "") {
 		t.Fatalf("removeOneCallbackEntry should consume the entry")
 	}
 	if queueLen() != 0 {
 		t.Fatalf("entry not removed: remaining=%d, want 0", queueLen())
 	}
-	if removeOneCallbackEntry(recv, caller) {
+	if removeOneCallbackEntry(recv, caller, "") {
 		t.Fatalf("second remove should report false (already consumed)")
+	}
+}
+
+// Addendum #176: a work-done line is pushed ONLY for --notify sends whose
+// receiver didn't already reply in-band. Default dispatch (no --notify) and any
+// in-band-replied turn are DB-only. This locks the exact push matrix.
+func TestReplyCallbackShouldPush(t *testing.T) {
+	cases := []struct {
+		notify, replied, want bool
+	}{
+		{notify: false, replied: false, want: false}, // default dispatch: DB-only
+		{notify: false, replied: true, want: false},  // default + replied: DB-only
+		{notify: true, replied: false, want: true},   // --notify, no in-band reply: push
+		{notify: true, replied: true, want: false},   // --notify but replied in-band: suppressed
+	}
+	for _, c := range cases {
+		if got := replyCallbackShouldPush(c.notify, c.replied); got != c.want {
+			t.Errorf("shouldPush(notify=%v, replied=%v) = %v, want %v", c.notify, c.replied, got, c.want)
+		}
+	}
+}
+
+// Addendum #177 part 3: the push line reports only the message-status flip
+// (not "work done"), carries the msg id, and degrades gracefully when id empty.
+func TestReplyCallbackNotice(t *testing.T) {
+	cases := []struct{ status, short, msgID, want string }{
+		{"completed", "w-20003", "abcd1234", "🔔 [w-20003] msg abcd1234 → done"},
+		{"failed", "w-20003", "abcd1234", "⚠️ [w-20003] msg abcd1234 → failed"},
+		{"completed", "w-20003", "", "🔔 [w-20003] → done"},
+		{"failed", "w-20003", "", "⚠️ [w-20003] → failed"},
+	}
+	for _, c := range cases {
+		if got := replyCallbackNotice(c.status, c.short, c.msgID); got != c.want {
+			t.Errorf("notice(%q,%q,%q) = %q, want %q", c.status, c.short, c.msgID, got, c.want)
+		}
 	}
 }

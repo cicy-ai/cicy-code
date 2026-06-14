@@ -24,6 +24,7 @@ var (
 	cicySkillsDir          = filepath.Join(cicyRootDir, "skills")
 	cicyGlobalJSONPath     = filepath.Join(cicyRootDir, "global.json")
 	cicyStateDir           = filepath.Join(cicyRootDir, ".cicy")
+	cicySnapshotsDir       = filepath.Join(cicyRootDir, "snapshots")
 	cicyLogsDir            = resolveCicyPathSpec("~/logs")
 	cicyMachinesConfigPath = filepath.Join(cicyRootDir, "cicy-node.json")
 	cicySharedWorkspaceDir = filepath.Join(cicyRootDir, "shared-workspace")

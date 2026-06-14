@@ -1826,7 +1826,10 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                       <span data-id="left-panel-title-custom-agents" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelCustomAgents')}</span>
                     </> : leftActive === 'windows' ? <>
                       <AppWindow className="w-3.5 h-3.5 text-zinc-600" />
-                      <span data-id="left-panel-title-windows" className="text-xs font-medium text-zinc-500 flex-1 ml-1">浏览器窗口</span>
+                      <span data-id="left-panel-title-windows" className="text-xs font-medium text-zinc-500 flex-1 ml-1">设备</span>
+                      {/* BrowserWindowsPanel portals its device-actions (eye/add/refresh) into this slot,
+                          so the title + actions share one row instead of two stacked bars. */}
+                      <div data-id="windows-header-actions" id="windows-header-actions" className="flex items-center gap-1" />
                     </> : <>
                       <Users className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-team" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelTeam')}</span>

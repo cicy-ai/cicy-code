@@ -18,11 +18,12 @@
 // window.electronRPC and writes the result back), and returns the reply over
 // plain HTTP. So the browser works the same as the desktop — pick the device
 // (by deviceId) whose profiles you want to manage.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Chrome, Atom, RefreshCw, Loader2, ChevronRight, Camera,
   AlertCircle, Globe, MonitorOff, X, Plus, Settings, RotateCcw, Eye, Send, Code2, Pencil, Download, Smartphone,
+  Monitor, Check, Wifi,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import apiService from '../../services/api';
@@ -34,7 +35,7 @@ import { listPhones, type MobileDevice, type MobileSel } from './MobileDevicesPa
 // useTranslation('layout') hook instead so they re-render on language change.
 const tl = (key: string, opts?: Record<string, unknown>) => i18n.t(`layout:${key}`, opts || {}) as string;
 
-type Backend = 'chrome' | 'electron' | 'android' | 'ios';
+type Backend = 'chrome' | 'electron' | 'android' | 'ios' | 'desktop';
 
 interface Device {
   clientId: string;
@@ -42,6 +43,9 @@ interface Device {
   platform: string;
   region: string;
   label: string;
+  ip?: string;
+  uptimeSec?: number;
+  systemLanguage?: string;
 }
 // rich login record (matches profile-store schema; legacy {platform,account} is
 // normalized to {name,username} by the backend before it reaches us)
@@ -162,7 +166,16 @@ async function loadDevices(): Promise<Device[]> {
     const platform = String(c.platform || '');
     // Label: platform + device-id only (no region / no shortening), per request.
     const label = [platform || tl('bwDeviceFallback'), did || c.client_id.slice(-6)].filter(Boolean).join(' · ');
-    return { clientId: c.client_id, deviceId: did, platform, region, label };
+    return {
+      clientId: c.client_id,
+      deviceId: did,
+      platform,
+      region,
+      label,
+      ip: String(c.public_ip || '').trim(),
+      uptimeSec: typeof c.uptime_sec === 'number' ? c.uptime_sec : undefined,
+      systemLanguage: String(c.system_language || '').trim(),
+    };
   });
 }
 
@@ -510,6 +523,235 @@ function NoDesktopCTA() {
   );
 }
 
+// Official brand glyphs (lucide ships only a generic fruit-apple + robot, which
+// read as the wrong thing). These are the real Apple and Android marks.
+function AppleLogo({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+      <path d="M17.05 12.536c-.03-2.69 2.2-3.98 2.3-4.05-1.25-1.83-3.2-2.08-3.89-2.11-1.66-.17-3.24.97-4.08.97-.84 0-2.14-.95-3.52-.92-1.81.03-3.48 1.05-4.41 2.67-1.88 3.26-.48 8.09 1.35 10.74.89 1.3 1.96 2.76 3.36 2.71 1.35-.05 1.86-.87 3.49-.87 1.63 0 2.09.87 3.52.84 1.45-.02 2.37-1.32 3.26-2.63 1.03-1.51 1.45-2.97 1.47-3.05-.03-.01-2.82-1.08-2.85-4.29zM14.37 4.6c.74-.9 1.24-2.15 1.1-3.4-1.07.04-2.36.71-3.13 1.61-.69.79-1.29 2.06-1.13 3.27 1.19.09 2.42-.61 3.16-1.48z" />
+    </svg>
+  );
+}
+function AndroidLogo({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+      <path d="M17.523 15.341c-.551 0-.999-.449-.999-1 0-.551.448-.999.999-.999.551 0 .999.448.999.999 0 .551-.448 1-.999 1m-11.046 0c-.551 0-.999-.449-.999-1 0-.551.448-.999.999-.999.551 0 .999.448.999.999 0 .551-.448 1-.999 1m11.405-6.02l1.997-3.459a.416.416 0 00-.152-.568.416.416 0 00-.568.152l-2.022 3.503C15.59 8.244 13.853 7.851 12 7.851s-3.59.393-5.137 1.073L4.841 5.421a.416.416 0 00-.568-.152.416.416 0 00-.152.568l1.997 3.459C2.689 11.187.343 14.659 0 18.761h24c-.343-4.102-2.689-7.574-6.118-9.44" />
+    </svg>
+  );
+}
+
+// ── device presentation helpers (shared by the custom selector) ───────────────
+// NOTE: check darwin/mac BEFORE win — "darwin" contains the substring "win"
+// (dar-WIN), so a naive `includes('win')` first would mislabel Macs as Windows.
+function platformIcon(platform: string, cls = 'w-3.5 h-3.5') {
+  const p = (platform || '').toLowerCase();
+  if (p.includes('darwin') || p.includes('mac')) return <Monitor className={cn(cls, 'text-zinc-200')} />;
+  if (p.includes('linux')) return <Monitor className={cn(cls, 'text-amber-400')} />;
+  if (p.includes('win')) return <Monitor className={cn(cls, 'text-sky-400')} />;
+  return <Monitor className={cn(cls, 'text-zinc-500')} />;
+}
+function platformLabel(platform: string): string {
+  const p = (platform || '').toLowerCase();
+  if (p.includes('darwin') || p.includes('mac')) return 'macOS';
+  if (p.includes('linux')) return 'Linux';
+  if (p.includes('win')) return 'Windows';
+  return platform || tl('bwDeviceFallback');
+}
+function fmtUptime(sec?: number): string {
+  if (!sec || sec < 0) return '';
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  if (h >= 24) return `${Math.floor(h / 24)}d`;
+  if (h >= 1) return `${h}h${m ? m + 'm' : ''}`;
+  return `${Math.max(1, m)}m`;
+}
+
+// Custom device selector — replaces the native <select> (whose long device-ids
+// got truncated with no way to see the full detail). A trigger button shows the
+// current device compactly; the dropdown lists every device with full id /
+// platform / region / IP / uptime / language so you can tell them apart.
+function DeviceSelect({ devices, value, onChange, loading }: {
+  devices: Device[]; value: string; onChange: (clientId: string) => void; loading: boolean;
+}) {
+  const { t } = useTranslation('layout');
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+  const cur = devices.find((d) => d.clientId === value) || null;
+  const empty = devices.length === 0;
+  return (
+    <div data-id="browser-windows-device-select" ref={ref} className="relative w-full min-w-0">
+      <button
+        data-id="browser-windows-device-trigger"
+        onClick={() => !empty && setOpen((v) => !v)}
+        disabled={loading || empty}
+        className="w-full min-w-0 flex items-center gap-2 bg-[#141414] border border-white/[0.08] rounded-lg px-2 py-1.5 text-left outline-none hover:border-white/20 focus:border-white/20 cursor-pointer disabled:opacity-50"
+      >
+        {cur ? platformIcon(cur.platform) : <Monitor className="w-3.5 h-3.5 text-zinc-600 shrink-0" />}
+        <div className="min-w-0 flex-1">
+          {cur ? (
+            <>
+              <div className="text-[12px] text-zinc-200 truncate">{platformLabel(cur.platform)}{cur.deviceId ? ` · ${cur.deviceId}` : ''}</div>
+              {(cur.region || cur.ip) ? <div className="text-[10px] text-zinc-600 truncate">{[cur.region, cur.ip].filter(Boolean).join(' · ')}</div> : null}
+            </>
+          ) : (
+            <span className="text-[12px] text-zinc-500">{loading ? t('bwLoadingDevices') : t('bwNoDevices')}</span>
+          )}
+        </div>
+        <ChevronRight className={cn('w-3.5 h-3.5 text-zinc-600 shrink-0 transition-transform', open ? 'rotate-90' : '')} />
+      </button>
+      {open && !empty && (
+        <div data-id="browser-windows-device-dropdown" className="absolute z-[140] left-0 right-0 mt-1 max-h-[320px] overflow-auto rounded-lg border border-white/[0.1] bg-[#141416] shadow-[0_18px_48px_rgba(0,0,0,0.5)] py-1">
+          {devices.map((d) => {
+            const sel = d.clientId === value;
+            return (
+              <button
+                key={d.clientId}
+                data-id="browser-windows-device-option"
+                onClick={() => { onChange(d.clientId); setOpen(false); }}
+                className={cn('w-full flex items-start gap-2 px-2.5 py-2 text-left transition-colors cursor-pointer', sel ? 'bg-white/[0.07]' : 'hover:bg-white/[0.04]')}
+              >
+                <span className="mt-0.5 shrink-0">{platformIcon(d.platform)}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[12px] text-zinc-100 truncate">{platformLabel(d.platform)}</span>
+                    <span className="inline-flex items-center gap-0.5 text-[10px] text-emerald-400/80 shrink-0"><Wifi className="w-2.5 h-2.5" />{fmtUptime(d.uptimeSec) || t('bwOnline')}</span>
+                  </div>
+                  <div className="text-[10px] text-zinc-500 truncate mt-0.5">{d.deviceId || d.clientId}</div>
+                  {(d.region || d.ip || d.systemLanguage) ? <div className="text-[10px] text-zinc-600 truncate">{[d.region, d.ip, d.systemLanguage].filter(Boolean).join(' · ')}</div> : null}
+                </div>
+                {sel && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Desktop snapshot view (桌面 tab) ──────────────────────────────────────────
+// Shows the selected device's periodic desktop screenshots: a hero (selected /
+// latest) image with a click-to-zoom lightbox, a history grid, and a manual
+// "capture now" button. The backend scheduler stores these to disk; this view
+// just lists + serves them and pokes /snapshot-now for an immediate capture.
+interface SnapItem { name: string; ts: number }
+
+function fmtSnapTime(ms: number): string {
+  try {
+    return new Date(ms).toLocaleString(i18n.language || undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+  } catch { return String(ms); }
+}
+
+function DesktopSnapshotView({ clientId }: { clientId: string }) {
+  const { t } = useTranslation('layout');
+  const [latest, setLatest] = useState<SnapItem | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [capturing, setCapturing] = useState(false);
+  const [error, setError] = useState('');
+  const [lightbox, setLightbox] = useState(false);
+
+  const fetchLatest = useCallback(async (silent = false) => {
+    if (!clientId) { setLatest(null); return; }
+    if (!silent) setLoading(true);
+    try {
+      const resp = await apiService.getDesktopSnapshots(clientId);
+      const list: SnapItem[] = Array.isArray(resp?.data?.items) ? resp.data.items : [];
+      setLatest(list[0] ?? null);
+    } catch (e: any) {
+      if (!silent) setError(e?.response?.data || e?.message || String(e));
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    setError('');
+    fetchLatest();
+    const id = setInterval(() => fetchLatest(true), 20000);
+    return () => clearInterval(id);
+  }, [fetchLatest]);
+
+  const captureNow = async () => {
+    if (capturing || !clientId) return;
+    setCapturing(true); setError('');
+    try {
+      await apiService.desktopSnapshotNow(clientId);
+      await fetchLatest(true);
+    } catch (e: any) {
+      setError(e?.response?.data?.error || e?.response?.data || e?.message || String(e));
+    } finally {
+      setCapturing(false);
+    }
+  };
+
+  // cache-bust by ts so the same <img> updates when a new capture replaces it
+  const imgUrl = (s: SnapItem) => apiService.desktopSnapshotImageUrl(clientId, s.name) + `&_=${s.ts}`;
+
+  if (!clientId) return <div className="p-4 text-[12px] text-zinc-600">{t('bwNoDevices')}</div>;
+
+  return (
+    <div data-id="desktop-snapshot-view" className="flex flex-col h-full">
+      <div data-id="desktop-snapshot-toolbar" className="flex items-center gap-2 px-2.5 py-2 border-b border-white/[0.06] shrink-0">
+        <span className="text-[11px] text-zinc-500 flex-1 truncate">{latest ? fmtSnapTime(latest.ts) : ''}</span>
+        <button
+          data-id="desktop-snapshot-now"
+          onClick={captureNow}
+          disabled={capturing}
+          title={t('bwSnapNow')}
+          className="flex items-center gap-1 rounded-lg px-2 py-1 text-[12px] font-medium bg-white/[0.07] text-zinc-200 hover:bg-white/[0.12] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+        >
+          {capturing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}{t('bwSnapNow')}
+        </button>
+        <button
+          data-id="desktop-snapshot-refresh"
+          onClick={() => fetchLatest()}
+          disabled={loading}
+          title={t('bwRefreshWindows')}
+          className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+        >
+          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+        </button>
+      </div>
+
+      {error && (
+        <div className="flex items-start gap-2 m-2.5 mb-0 p-2 rounded-lg bg-white/[0.03] border border-white/[0.07] text-[11px] text-zinc-400">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-zinc-500" />
+          <span>{String(error)}</span>
+        </div>
+      )}
+
+      {loading && !latest ? (
+        <div className="p-2.5"><div className="aspect-video rounded-xl bg-gradient-to-b from-[#222228] to-[#16161a] animate-pulse" /></div>
+      ) : !latest ? (
+        <div data-id="desktop-snapshot-empty" className="flex-1 flex flex-col items-center justify-center text-center px-6 py-10 gap-2 text-zinc-600">
+          <Monitor className="w-6 h-6 text-zinc-700" />
+          <div className="text-[12px]">{t('bwSnapEmpty')}</div>
+          <div className="text-[11px] text-zinc-700">{t('bwSnapEmptyHint')}</div>
+        </div>
+      ) : (
+        <div className="flex-1 overflow-auto p-2.5">
+          <button data-id="desktop-snapshot-hero" onClick={() => setLightbox(true)} className="block w-full rounded-xl overflow-hidden border border-white/[0.08] bg-[#0e0e0e] cursor-zoom-in">
+            <img src={imgUrl(latest)} alt="desktop" className="w-full block" />
+          </button>
+        </div>
+      )}
+
+      {lightbox && latest && createPortal(
+        <div data-id="desktop-snapshot-lightbox" className="fixed inset-0 z-[300] bg-black/85 backdrop-blur-sm flex items-center justify-center p-6" onClick={() => setLightbox(false)}>
+          <img src={imgUrl(latest)} alt="desktop" className="max-w-full max-h-full rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
+          <button data-id="desktop-snapshot-lightbox-close" className="absolute top-4 right-4 p-2 rounded-lg bg-white/10 text-white hover:bg-white/20 cursor-pointer" onClick={() => setLightbox(false)}><X className="w-5 h-5" /></button>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
 // ── LEFT panel: device + backend tabs + selectable profile list ───────────────
 export default function BrowserWindowsPanel({
   selectedKey,
@@ -534,6 +776,7 @@ export default function BrowserWindowsPanel({
 
   const [backend, setBackend] = useState<Backend>('electron');
   const isMobile = backend === 'android' || backend === 'ios';
+  const isDesktop = backend === 'desktop';
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [phones, setPhones] = useState<MobileDevice[]>([]);
   const [loading, setLoading] = useState(false);
@@ -542,6 +785,10 @@ export default function BrowserWindowsPanel({
   const [showSystem, setShowSystem] = useState(false);
   const isSystem = (p: Profile) => p.backend === 'electron' && p.accountIdx === 0;
   const [addingProfile, setAddingProfile] = useState(false);
+  // The device-actions (eye/add/refresh) are portaled up into the panel header
+  // row ("设备"), so the title + actions live on one bar instead of two.
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => { setHeaderSlot(document.getElementById('windows-header-actions')); }, []);
 
   const refreshDevices = useCallback(async (silent = false) => {
     if (!silent) { setDevLoading(true); setDevError(''); }
@@ -568,6 +815,9 @@ export default function BrowserWindowsPanel({
 
   const refresh = useCallback(async () => {
     if (!clientId) { setProfiles([]); setPhones([]); return; }
+    // Desktop snapshots have no profile/phone list — the body renders the
+    // selected device's snapshots itself, fetched on its own.
+    if (backend === 'desktop') { setProfiles([]); setPhones([]); setError(''); return; }
     setLoading(true); setError('');
     try {
       if (backend === 'android' || backend === 'ios') {
@@ -613,83 +863,81 @@ export default function BrowserWindowsPanel({
     setTimeout(() => window.dispatchEvent(new CustomEvent('cicy-open-config-modal', { detail: { key: prof.key } })), 400);
   }, [pendingConfig, profiles, backend, clientId, devices, onSelect]);
 
+  // Icon-only segmented control (tooltips carry the names) — frees the horizontal
+  // space the old icon+text tabs ate, so a 5th "桌面" tab fits without crowding.
   const TABS: { k: Backend; label: string; icon: React.ReactNode }[] = [
-    { k: 'electron', label: 'Electron', icon: <Atom className="w-3.5 h-3.5" /> },
-    { k: 'chrome', label: 'Chrome', icon: <Chrome className="w-3.5 h-3.5" /> },
-    { k: 'android', label: 'Android', icon: <Smartphone className="w-3.5 h-3.5" /> },
-    { k: 'ios', label: 'iOS', icon: <Smartphone className="w-3.5 h-3.5" /> },
+    { k: 'electron', label: 'Electron', icon: <Atom className="w-4 h-4" /> },
+    { k: 'chrome', label: 'Chrome', icon: <Chrome className="w-4 h-4" /> },
+    { k: 'android', label: 'Android', icon: <AndroidLogo className="w-4 h-4" /> },
+    { k: 'ios', label: 'iOS', icon: <AppleLogo className="w-4 h-4" /> },
+    { k: 'desktop', label: t('bwTabDesktop'), icon: <Monitor className="w-4 h-4" /> },
   ];
+
+  // Device-actions (eye/add/refresh) — portaled into the panel header so they sit
+  // on the "设备" title row rather than a separate bar below it.
+  const deviceActions = (
+    <div data-id="browser-windows-device-actions" className="flex items-center gap-1">
+      {backend === 'electron' && (
+        <button
+          data-id="browser-windows-show-system"
+          onClick={() => setShowSystem((v) => !v)}
+          title={showSystem ? t('bwHideSystem') : t('bwShowSystem')}
+          className={cn(
+            'p-1.5 rounded-lg transition-colors cursor-pointer shrink-0',
+            showSystem ? 'text-blue-400 bg-blue-500/10' : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04]',
+          )}
+        >
+          <Eye className="w-3.5 h-3.5" />
+        </button>
+      )}
+      {!isMobile && !isDesktop && (
+        <button
+          data-id="browser-windows-add-profile"
+          onClick={onAddProfile}
+          disabled={addingProfile || !clientId}
+          title={t('bwAddProfileTitle', { backend: backend === 'chrome' ? 'Chrome' : 'Electron' })}
+          className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+        >
+          {addingProfile ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+        </button>
+      )}
+      <button
+        data-id="browser-windows-refresh"
+        onClick={() => { refreshDevices(); refresh(); }}
+        disabled={devLoading || loading}
+        title={t('bwRefreshProfile')}
+        className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+      >
+        {(devLoading || loading) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+      </button>
+    </div>
+  );
 
   return (
     <div data-id="BrowserWindowsPanel" className="absolute inset-0 flex flex-col bg-[#0A0A0A]">
+      {headerSlot ? createPortal(deviceActions, headerSlot) : null}
       {/* device selector */}
       <div data-id="browser-windows-device" className="flex flex-col gap-2 px-2 py-2 border-b border-white/[0.06] shrink-0">
-        {/* actions row — single reload (device list + current profile/phone list) */}
-        <div data-id="browser-windows-device-actions" className="flex items-center gap-1">
-          <div className="flex-1" />
-          {backend === 'electron' && (
-            <button
-              data-id="browser-windows-show-system"
-              onClick={() => setShowSystem((v) => !v)}
-              title={showSystem ? t('bwHideSystem') : t('bwShowSystem')}
-              className={cn(
-                'p-1.5 rounded-lg transition-colors cursor-pointer shrink-0',
-                showSystem ? 'text-blue-400 bg-blue-500/10' : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04]',
-              )}
-            >
-              <Eye className="w-3.5 h-3.5" />
-            </button>
-          )}
-          {!isMobile && (
-            <button
-              data-id="browser-windows-add-profile"
-              onClick={onAddProfile}
-              disabled={addingProfile || !clientId}
-              title={t('bwAddProfileTitle', { backend: backend === 'chrome' ? 'Chrome' : 'Electron' })}
-              className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-            >
-              {addingProfile ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-            </button>
-          )}
-          <button
-            data-id="browser-windows-refresh"
-            onClick={() => { refreshDevices(); refresh(); }}
-            disabled={devLoading || loading}
-            title={t('bwRefreshProfile')}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-          >
-            {(devLoading || loading) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-          </button>
-        </div>
-        {/* device select on its own full-width line — device-id can be long */}
-        <select
-          data-id="browser-windows-device-select"
-          value={clientId}
-          onChange={(e) => setClientId(e.target.value)}
-          disabled={devLoading || devices.length === 0}
-          className="w-full min-w-0 bg-[#141414] border border-white/[0.08] rounded-lg px-2 py-1.5 text-[12px] text-zinc-200 outline-none focus:border-white/20 cursor-pointer disabled:opacity-50"
-        >
-          {devices.length === 0 ? (
-            <option value="">{devLoading ? t('bwLoadingDevices') : t('bwNoDevices')}</option>
-          ) : (
-            devices.map((d) => <option key={d.clientId} value={d.clientId}>{d.label}</option>)
-          )}
-        </select>
+        {/* device select on its own full-width line — custom dropdown so long
+            device-ids + full detail (region/IP/uptime/lang) are visible */}
+        <DeviceSelect devices={devices} value={clientId} onChange={setClientId} loading={devLoading} />
       </div>
 
-      {/* backend tabs */}
+      {/* backend tabs — icon-only segmented control (tooltips name each) */}
       <div data-id="browser-windows-tabs" className="flex items-center gap-1 px-2 py-2 border-b border-white/[0.06] shrink-0">
         {TABS.map((tabItem) => (
           <button
             key={tabItem.k}
             data-id={`browser-windows-tab-${tabItem.k}`}
             onClick={() => setBackend(tabItem.k)}
+            title={tabItem.label}
+            aria-label={tabItem.label}
             className={cn(
-              'flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors cursor-pointer',
-              backend === tabItem.k ? 'bg-white/[0.07] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03]',
+              'flex flex-1 items-center justify-center rounded-lg py-1.5 transition-colors cursor-pointer',
+              backend === tabItem.k ? 'bg-white/[0.07] text-zinc-100' : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03]',
             )}
           >
-            {tabItem.icon}{tabItem.label}
+            {tabItem.icon}
           </button>
         ))}
       </div>
@@ -712,6 +960,8 @@ export default function BrowserWindowsPanel({
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-zinc-500" />
             <span>{error}</span>
           </div>
+        ) : isDesktop ? (
+          <DesktopSnapshotView clientId={clientId} />
         ) : isMobile ? (
           loading && phones.length === 0 ? (
             <ProfileSkeleton />

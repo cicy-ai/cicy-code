@@ -949,6 +949,9 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
       onFork: () => {
         // Open the fork-confirm preview instead of forking immediately; the fork
         // pane is created (and the prompt sent) only when the user clicks Send.
+        // Activate the source first so its stack card is the visible one (only
+        // the active card is rendered) — the modal anchors over that card.
+        onOpenInCurrentPane?.(wid);
         setForkPreviewSrc(wid);
         setOpenMenuId(null);
       },
@@ -1076,6 +1079,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
             onOpenSettings: () => onOpenSettingsPane?.(paneId),
             canRestart: true,
             onFork: () => {
+              onOpenInCurrentPane?.(paneId);
               setForkPreviewSrc(paneId);
               setOpenMenuId(null);
             },

@@ -1266,7 +1266,15 @@ function LinkConfirmModal({ url, onClose }: { url: string; onClose: () => void }
   );
 }
 
+// Question-bubble alignment. Default 'right' (chat style); the inline webframe
+// history opts into 'left' via CurrentHistoryView's leftAlignQuestions prop.
+// Context so we don't thread a prop through every CollapsibleQ call site.
+const QAlignContext = createContext<'left' | 'right'>('right');
+
 function CollapsibleQ({ text, bare = false }: { text: string; bare?: boolean }) {
+  const qAlign = useContext(QAlignContext);
+  const qJustify = qAlign === 'left' ? 'justify-start' : 'justify-end';
+  const qTail = qAlign === 'left' ? 'rounded-bl-sm' : 'rounded-br-sm';
   // Peel leading harness blocks (system-reminder / command echoes) into a small
   // collapsed fold, then render the real question below. Recurse on the rest so
   // the existing env-context / xml-block / bubble logic runs on the clean text.
@@ -1295,11 +1303,11 @@ function CollapsibleQ({ text, bare = false }: { text: string; bare?: boolean }) 
   }
   if (xmlBlocks.length) {
     return (
-      <div data-id="current-history-view-q-xml" className="mb-2.5 flex justify-end">
+      <div data-id="current-history-view-q-xml" className={`mb-2.5 flex ${qJustify}`}>
         <div data-id="current-history-view-q-xml-wrap" className="max-w-[95%] flex flex-col gap-2">
           <pre data-id="current-history-view-q-xml-block" className="overflow-x-auto rounded-lg border border-sky-300/[0.12] bg-black/[0.25] px-3 py-2 font-mono text-xs leading-relaxed text-sky-100/70 whitespace-pre-wrap">{xmlBlocks.join('\n')}</pre>
           {remaining ? (
-            <div data-id="current-history-view-q-xml-trailing" className="overflow-hidden rounded-2xl rounded-br-sm border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
+            <div data-id="current-history-view-q-xml-trailing" className={`overflow-hidden rounded-2xl ${qTail} border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]`}>
               <MarkdownBlock text={remaining} />
             </div>
           ) : null}
@@ -1308,11 +1316,11 @@ function CollapsibleQ({ text, bare = false }: { text: string; bare?: boolean }) 
     );
   }
   return (
-    <div data-id="current-history-view-q" className="mb-2.5 flex justify-end">
+    <div data-id="current-history-view-q" className={`mb-2.5 flex ${qJustify}`}>
       {environmentContext ? (
         <EnvironmentContextCard context={environmentContext} />
       ) : (
-        <div data-id="current-history-view-q-body" className="max-w-[95%] overflow-hidden rounded-2xl rounded-br-sm border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
+        <div data-id="current-history-view-q-body" className={`max-w-[95%] overflow-hidden rounded-2xl ${qTail} border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]`}>
           <MarkdownBlock text={String(text || '').replace(/^\-\n/, '')} />
         </div>
       )}
@@ -1994,22 +2002,34 @@ const PromptRow = memo(function PromptRow({ turn, qid, dataId, paneId, conversat
     })();
     return () => { cancelled = true; };
   }, [open, answer, qid, paneId, conversationId]);
+  const ts = (turn as any)?.ts as string | undefined;
   return (
     <div data-id={dataId} data-turn-key={String(qid)} className="mb-3">
-      <div className="flex items-start gap-1.5">
+      {/* Whole row is the toggle: caret on the LEFT, q in the middle, relative
+          time on the right. Click anywhere on the row to expand/collapse a. */}
+      <div
+        role="button"
+        tabIndex={0}
+        data-id={`current-history-q-toggle-${qid}`}
+        onClick={toggle}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } }}
+        aria-expanded={open}
+        aria-label={open ? '收起回复' : '展开回复'}
+        className="group -mx-1.5 flex cursor-pointer items-start gap-1.5 rounded-lg px-1.5 py-1 transition-colors hover:bg-white/[0.035]"
+      >
+        <ChevronRight
+          data-id={`current-history-q-caret-${qid}`}
+          className={`mt-1 h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform group-hover:text-zinc-300 ${open ? 'rotate-90' : ''}`}
+        />
         <div className="min-w-0 flex-1"><CollapsibleQ text={turn.text || turn.q} bare /></div>
-        <button
-          type="button"
-          data-id={`current-history-q-toggle-${qid}`}
-          onClick={toggle}
-          className="mt-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-zinc-500 transition-colors hover:text-zinc-200"
-          aria-label={open ? '收起回复' : '展开回复'}
-        >
-          <ChevronRight data-id={`current-history-q-caret-${qid}`} className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-90' : ''}`} />
-        </button>
+        {ts ? (
+          <span data-id={`current-history-q-time-${qid}`} className="mt-1 shrink-0 text-[11px] leading-none text-zinc-600 tabular-nums" title={ts}>
+            {formatPromptTimeAgo(ts)}
+          </span>
+        ) : null}
       </div>
       {open ? (
-        <div data-id={`current-history-q-answer-${qid}`} className="mt-1.5">
+        <div data-id={`current-history-q-answer-${qid}`} className="mt-1 pl-5">
           {answer === undefined ? null : answer === 'loading' ? (
             <span className="text-xs text-zinc-600">加载回复…</span>
           ) : answer === 'none' ? (
@@ -2022,6 +2042,20 @@ const PromptRow = memo(function PromptRow({ turn, qid, dataId, paneId, conversat
     </div>
   );
 });
+
+// Relative "x 分钟前" label for a prompt's ISO timestamp (RFC3339). Falls back to
+// the local date string for anything older than ~30 days, '' for unparseable.
+function formatPromptTimeAgo(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const diff = Date.now() - t;
+  if (diff < 0) return '刚刚';
+  if (diff < 60_000) return '刚刚';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  if (diff < 30 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`;
+  return new Date(t).toLocaleDateString();
+}
 
 // promptTextIsScaffold: a role=user turn that's actually harness/system noise,
 // not a human question. Uses the SAME splitLeadingHarnessBlocks peeling that
@@ -2073,6 +2107,7 @@ export default function CurrentHistoryView({
   hideTools = false,
   agentType = '',
   fullWidth = false,
+  leftAlignQuestions = false,
 }: {
   paneId: string;
   open: boolean;
@@ -2091,6 +2126,9 @@ export default function CurrentHistoryView({
   // constrained by its container. Default (false) keeps the centered max-w-4xl
   // reading column used by the full-screen DispatcherChat view.
   fullWidth?: boolean;
+  // Left-align the question bubbles (default right/chat-style). The inline
+  // webframe history sets this; DispatcherChat keeps the default.
+  leftAlignQuestions?: boolean;
 }) {
   const { t } = useTranslation('chat');
   // Content column width: full-bleed when embedded (AgentStack popover), else a
@@ -2946,7 +2984,7 @@ export default function CurrentHistoryView({
     // resolved lazily per-row from the SAME snapshot (PromptRow), so q↔a always align.
     return promptList
       .filter((p) => Number(p?.id || 0) > 0 && String(p?.content || '').trim() !== '')
-      .map((p) => ({ role: 'user', history_id: p.id, text: p.content, q: p.content } as HistoryTurn));
+      .map((p) => ({ role: 'user', history_id: p.id, text: p.content, q: p.content, ts: p.ts } as unknown as HistoryTurn));
   }, [promptsOnly, items, promptList, liveActive, committedMaxId]);
 
   // Recap-on-return is system noise: a harness-only user turn ("The user stepped
@@ -3171,6 +3209,7 @@ export default function CurrentHistoryView({
   ) : null;
 
   return (
+    <QAlignContext.Provider value={leftAlignQuestions ? 'left' : 'right'}>
     <OpenUrlContext.Provider value={setPendingUrl}>
     <div data-id="current-history-view" className="flex h-full flex-col bg-[#0b0b0d]">
       {pendingUrl ? <LinkConfirmModal url={pendingUrl} onClose={() => setPendingUrl(null)} /> : null}
@@ -3275,5 +3314,6 @@ export default function CurrentHistoryView({
       )}
     </div>
     </OpenUrlContext.Provider>
+    </QAlignContext.Provider>
   );
 }

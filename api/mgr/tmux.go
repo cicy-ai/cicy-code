@@ -5011,18 +5011,59 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "win_id required")
 		return
 	}
+	// msgID is set when this send is recorded in agent_messages (agent→agent
+	// with a sender context); it is echoed back in the response so the sender can
+	// later look the message up by id. Function-scoped so the shared success
+	// return at the bottom can include it.
+	msgID := ""
 	if text, ok := req["text"].(string); ok && text != "" {
 		submit := true
 		if raw, ok := req["submit"].(bool); ok {
 			submit = raw
 		}
+		// agent→agent message store: record every send that carries a sender
+		// context — a callback_to (default) or, for --no-callback sends, the
+		// 📮 [sender] stamp on the text. webUI / IM sends have neither, so they
+		// stay out of this table. The new row id threads into the callback below
+		// so finalize can flip THIS row to done/failed and write the reply pointer.
+		cbToRaw, _ := req["callback_to"].(string)
+		cbTo := strings.TrimSpace(cbToRaw)
+		fromPane := normPaneID(cbTo)
+		if fromPane == "" {
+			fromPane = normPaneID(stampedSenderID(text))
+		}
+		if cbTo != "" || fromPane != "" {
+			msgID = aiGatewayShortID()
+			// from-side pointer (#177): best-effort read the initiator's in-flight
+			// conversation/turn from its reply.json. Never blocks the send — an
+			// unreadable snapshot just leaves these empty.
+			fromConv, fromTurn := "", ""
+			if fromPane != "" {
+				if rs, err := aiGatewayReadReplySnapshotFile(shortPaneID(fromPane)); err == nil {
+					fromConv = strings.TrimSpace(rs.ConversationID)
+					fromTurn = strings.TrimSpace(rs.TurnID)
+				}
+			}
+			if err := insertAgentMessage(msgID, fromPane, winID, text, cbTo != "", fromConv, fromTurn); err != nil {
+				log.Printf("[agent-msg] insert failed: %v", err)
+			}
+			// replied de-dup (E): this message is fromPane → winID. If winID
+			// earlier messaged fromPane (an open winID → fromPane row), the
+			// receiver has now answered in-band — mark those replied=1 so their
+			// finalize won't also push a redundant "work done" line.
+			if fromPane != "" {
+				markAgentMessagesReplied(winID, fromPane)
+			}
+		}
 		// Register the cross-agent callback BEFORE sending the text. The receiver
 		// CLI can react fast enough to start a gateway audit session within the
 		// same wall-clock second the text lands; if registration happened after
 		// the send, that audit session's drain would find an empty pending list
-		// and the hook would never attach.
-		if cbTo, ok := req["callback_to"].(string); ok && strings.TrimSpace(cbTo) != "" {
-			registerReplyCallback(winID, cbTo)
+		// and the hook would never attach. `notify` (default false) gates the
+		// completion chat push; the DB state is updated either way.
+		if cbTo != "" {
+			notify, _ := req["notify"].(bool)
+			registerReplyCallback(winID, cbTo, msgID, notify)
 		}
 		// Headless cicy: no tmux pane to send-keys into. The webUI sends through
 		// this same endpoint (sendCommand → /api/tmux/send), so route cicy text
@@ -5041,7 +5082,11 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 				}
 				go deliverCicyMessage(short, ws, text)
 			}
-			J(w, M{"success": true, "win_id": short})
+			resp := M{"success": true, "win_id": short}
+			if msgID != "" {
+				resp["msg_id"] = msgID
+			}
+			J(w, resp)
 			return
 		}
 		if err := sendTextToPane(winID, text, submit); err != nil {
@@ -5068,7 +5113,11 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "text or keys required")
 		return
 	}
-	J(w, M{"success": true, "win_id": shortPaneID(winID)})
+	resp := M{"success": true, "win_id": shortPaneID(winID)}
+	if msgID != "" {
+		resp["msg_id"] = msgID
+	}
+	J(w, resp)
 }
 
 func handleSendKeys(w http.ResponseWriter, r *http.Request) {

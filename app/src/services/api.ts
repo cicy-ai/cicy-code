@@ -341,6 +341,16 @@ const api = {
   getChatClients: () => http.get('/api/chat/clients'),
   pingChatClient: (clientId: string) => http.post('/api/chat/ping-client', { client_id: clientId }),
 
+  // desktop snapshots (periodic win/mac/linux screen captures)
+  getDesktopSnapshots: (clientId: string) => http.get('/api/desktop/snapshots', { params: { client_id: clientId } }),
+  desktopSnapshotNow: (clientId: string) => http.post('/api/desktop/snapshot-now', { client_id: clientId }),
+  desktopSnapshotImageUrl: (clientId: string, name: string): string => {
+    const token = TokenManager.getToken() || '';
+    const base = (config.apiBase || '').replace(/\/$/, '');
+    const qs = new URLSearchParams({ client_id: clientId, name, token }).toString();
+    return `${base}/api/desktop/snapshot-image?${qs}`;
+  },
+
   listTodos: (paneId: string, allAgents?: boolean, params?: { status?: string; q?: string }) => {
     const pid = shortPaneRouteId(paneId);
     if (!pid) return Promise.reject(new Error('paneId required for listTodos'));

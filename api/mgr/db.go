@@ -214,6 +214,29 @@ func (d *DB) Migrate() {
 			updated_at TEXT DEFAULT (datetime('now'))
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_im_accounts_bound ON im_accounts(bound_pane_id)`,
+		// agent_messages: cross-agent message store (status sent→done/failed) +
+		// a pointer (conversation_id/turn_id) into the receiver's history_turns.
+		// Reply content is NOT copied here — it is JOINed from history_turns. See
+		// agent_messages_store.go.
+		`CREATE TABLE IF NOT EXISTS agent_messages (
+			id TEXT PRIMARY KEY,
+			from_pane TEXT NOT NULL,
+			to_pane TEXT NOT NULL,
+			text TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'sent',
+			callback INTEGER NOT NULL DEFAULT 1,
+			replied INTEGER NOT NULL DEFAULT 0,
+			from_conversation_id TEXT DEFAULT '',
+			from_turn_id TEXT DEFAULT '',
+			reply_conversation_id TEXT DEFAULT '',
+			reply_turn_id TEXT DEFAULT '',
+			reply_history_id INTEGER DEFAULT 0,
+			created_at TEXT NOT NULL,
+			completed_at TEXT DEFAULT '',
+			error TEXT DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_msg_to ON agent_messages(to_pane, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_msg_from ON agent_messages(from_pane, created_at)`,
 		fmt.Sprintf("INSERT OR IGNORE INTO global_vars (key_name, value) VALUES ('worker_index', '%d')", defaultWorkerIndex),
 	}
 	for _, s := range stmts {
@@ -262,6 +285,10 @@ func (d *DB) Migrate() {
 	d.ensureColumn("agent_queue", "artifact_id", "TEXT DEFAULT ''")
 	d.ensureColumn("agent_queue", "handoff_id", "TEXT DEFAULT ''")
 	d.ensureColumn("agent_queue", "employee_id", "TEXT DEFAULT ''")
+	// #177: initiator-side conv/turn pointer, added to existing agent_messages
+	// tables (the CREATE TABLE above already carries them for fresh installs).
+	d.ensureColumn("agent_messages", "from_conversation_id", "TEXT DEFAULT ''")
+	d.ensureColumn("agent_messages", "from_turn_id", "TEXT DEFAULT ''")
 
 	// todo #104: the lite agent's agent_type "dispatcher" was renamed to the
 	// product name "cicy". Migrate existing rows once, idempotently. Runs in the
