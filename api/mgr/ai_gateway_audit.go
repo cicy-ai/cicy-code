@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"crypto/rand"
@@ -19,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/klauspost/compress/zstd"
 
@@ -388,6 +390,19 @@ var (
 	// ("The user stepped away and is coming back. Recap in under N words…"), not a
 	// human question — drop it from the prompts list.
 	recapScaffoldRe = regexp.MustCompile(`(?is)^\s*The user (stepped away|is back|has returned).{0,80}?\bRecap\b`)
+	// <task-notification>…</task-notification> is a background-task completion
+	// notice injected as a role=user message, not a human prompt — strip the block.
+	taskNotificationRe = regexp.MustCompile(`(?s)<task-notification>.*?</task-notification>`)
+	// Exact harness markers that ride in a role=user message but are NOT human
+	// prompts: the /compact "continue" resume line, and the deferred-tool load
+	// echo. Matched on the FULLY-sanitized text (whole message = just the marker).
+	harnessMarkerRe = regexp.MustCompile(`^(?:Continue from where you left off\.?|Tool loaded\.?)$`)
+	// cicy-agent inter-agent notification (cicy-agent msg --notify / callback):
+	// "🔔 [w-10131] msg adeba3ca → done". cicy injects it into the agent's tmux as
+	// if typed, so even the transcript labels it promptSource=typed — pattern is the
+	// only way to strip it. Stripped (not whole-message dropped) because it can be
+	// spliced INTO a real prompt the user was typing ("清"+bell+"空" → "清空").
+	cicyNotifyRe = regexp.MustCompile(`🔔\s*\[[^\]]*\]\s*msg\s+\S+\s*(?:→|->)\s*(?:done|idle|working|failed|completed|running|error|ok)\b`)
 	// Claude Code prepends this marker to the user message when a tool call is
 	// interrupted (ESC). It's not part of the human prompt — strip it; whatever the
 	// user actually typed after it is kept.
@@ -1439,7 +1454,7 @@ func aiGatewayWriteSnapshotFile(agentID, name, convID string, value interface{})
 func aiGatewayWriteCurrentSnapshot(agentID string, current aiGatewayCurrentSnapshot) error {
 	current.Body = aiGatewayAnnotateCurrentBodyHistoryIDs(agentID, aiGatewayCloneJSONValue(current.Body))
 	current.MaxHistoryID = aiGatewayCurrentBodyMaxHistoryID(current.Body)
-	current.Prompts = aiGatewayBuildCurrentPrompts(agentID, current.Body, current.Timestamp)
+	current.Prompts = aiGatewayBuildCurrentPrompts(agentID, current.ConversationID, current.Body, current.Timestamp)
 	return aiGatewayWriteSnapshotFile(agentID, "current.json", current.ConversationID, current)
 }
 
@@ -1455,11 +1470,107 @@ func aiGatewayWriteCurrentSnapshot(agentID string, current aiGatewayCurrentSnaps
 // compaction): a prompt seen in the prior snapshot keeps its first-seen time, a
 // newly-appearing one is stamped with this snapshot's timestamp. This is the
 // per-turn write path (writeStartSnapshots), so the one prior-file read is cheap.
-func aiGatewayBuildCurrentPrompts(agentID string, body interface{}, ts string) []aiGatewayUserPrompt {
+// aiGatewayNormPrompt strips ALL whitespace so transcript text and the
+// (sanitized) current.json text compare cleanly across wrapping/formatting diffs.
+func aiGatewayNormPrompt(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if !unicode.IsSpace(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// aiGatewayTranscriptTypedSet reads the Claude Code session transcript for a
+// conversation and returns the set of NORMALIZED prompts the human actually
+// entered — every JSONL row with type=user and promptSource ∈ {typed, queued}.
+// Claude Code labels these itself, so this is the authoritative "real prompt"
+// signal — no role=user noise (tool results, task-notifications, /compact
+// continuations, recap wakeups, inter-agent bells) ever carries that label.
+// Returns nil when there is no transcript (non-Claude backends) → caller falls
+// back to the regex-filtered current.json path.
+func aiGatewayTranscriptTypedSet(conversationID string) map[string]bool {
+	cid := strings.TrimSpace(conversationID)
+	if cid == "" {
+		return nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	matches, _ := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", cid+".jsonl"))
+	if len(matches) == 0 {
+		return nil
+	}
+	f, err := os.Open(matches[0])
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	set := map[string]bool{}
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1024*1024), 32*1024*1024)
+	for sc.Scan() {
+		var row map[string]interface{}
+		if json.Unmarshal(sc.Bytes(), &row) != nil {
+			continue
+		}
+		if aiGatewayString(row["type"]) != "user" {
+			continue
+		}
+		switch aiGatewayString(row["promptSource"]) {
+		case "typed", "queued":
+		default:
+			continue
+		}
+		msg := aiGatewayMap(row["message"])
+		norm := aiGatewayNormPrompt(aiGatewaySanitizeUserQuestion(aiGatewayPromptTextFromUserMessage(msg["content"])))
+		if norm != "" {
+			set[norm] = true
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
+}
+
+// aiGatewayMatchesTyped reports whether a sanitized current.json prompt matches
+// one the human actually typed (per the transcript set). Exact normalized match,
+// or containment either way when the shorter side is ≥6 runes (covers a prompt
+// the gateway merged with trailing harness text, or minor sanitize diffs) —
+// the length guard stops a 1-char "清" from matching an injected bell line.
+func aiGatewayMatchesTyped(set map[string]bool, clean string) bool {
+	nc := aiGatewayNormPrompt(clean)
+	if nc == "" {
+		return false
+	}
+	if set[nc] {
+		return true
+	}
+	ncLen := len([]rune(nc))
+	for t := range set {
+		tLen := len([]rune(t))
+		minLen := ncLen
+		if tLen < minLen {
+			minLen = tLen
+		}
+		if minLen >= 6 && (strings.Contains(nc, t) || strings.Contains(t, nc)) {
+			return true
+		}
+	}
+	return false
+}
+
+func aiGatewayBuildCurrentPrompts(agentID string, conversationID string, body interface{}, ts string) []aiGatewayUserPrompt {
 	mapped := aiGatewayMap(body)
 	if len(mapped) == 0 {
 		return nil
 	}
+	// Authoritative allowlist from the Claude Code transcript (nil → not a Claude
+	// session; fall back to the regex noise filters below).
+	typedSet := aiGatewayTranscriptTypedSet(conversationID)
 	items := aiGatewaySlice(mapped["messages"])
 	if len(items) == 0 {
 		items = aiGatewaySlice(mapped["input"])
@@ -1495,8 +1606,16 @@ func aiGatewayBuildCurrentPrompts(agentID string, body interface{}, ts string) [
 			continue // tool_result-only turn, or no human text
 		}
 		clean := aiGatewaySanitizeUserQuestion(text)
-		if clean == "" || recapScaffoldRe.MatchString(clean) || skillInjectionRe.MatchString(clean) {
-			continue // pure scaffolding / recap wakeup / skill injection
+		if clean == "" {
+			continue
+		}
+		if typedSet != nil {
+			// Authoritative: keep ONLY what the human actually typed/queued.
+			if !aiGatewayMatchesTyped(typedSet, clean) {
+				continue
+			}
+		} else if recapScaffoldRe.MatchString(clean) || skillInjectionRe.MatchString(clean) || harnessMarkerRe.MatchString(clean) {
+			continue // no transcript → regex fallback for the obvious harness noise
 		}
 		if clean == lastContent {
 			continue // consecutive duplicate
@@ -2869,6 +2988,8 @@ func aiGatewaySanitizeUserQuestion(question string) string {
 	question = compactionPreambleRe.ReplaceAllString(question, "")
 	question = localCommandBlockRe.ReplaceAllString(question, "")
 	question = requestInterruptedRe.ReplaceAllString(question, "")
+	question = taskNotificationRe.ReplaceAllString(question, "")
+	question = cicyNotifyRe.ReplaceAllString(question, "")
 	question = strings.TrimSpace(question)
 	if strings.HasPrefix(question, "Sender (untrusted metadata):") {
 		question = openClawForwardedHeaderRe.ReplaceAllString(question, "")

@@ -1931,18 +1931,20 @@ function replyItemsToSteps(items: any, thinking?: string, answer?: string): NonN
 // jank). The answer (turn id+1) is loaded LAZILY on first expand: reuse the
 // already-loaded window turn if present, else fetch via getCurrentHistory. The
 // answer renders through the shared AssistantTurnView.
-const PromptRow = memo(function PromptRow({ turn, qid, dataId, paneId, conversationId, agentType, hideTools }: {
-  turn: HistoryTurn; qid: number; dataId?: string;
+const PromptRow = memo(function PromptRow({ turn, qid, nextQid, dataId, paneId, conversationId, agentType, hideTools }: {
+  turn: HistoryTurn; qid: number; nextQid?: number; dataId?: string;
   paneId: string; conversationId: string; agentType: string; hideTools: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [answer, setAnswer] = useState<HistoryTurn | 'loading' | 'none' | undefined>(undefined);
+  const [answer, setAnswer] = useState<HistoryTurn[] | 'loading' | 'none' | undefined>(undefined);
   const startedRef = useRef(false);
   const toggle = useCallback(() => setOpen((o) => !o), []);
-  // Load the answer LAZILY on first expand. The answer is the FIRST assistant
-  // turn AFTER this q (NOT strictly id+1 — a system "Note"/tool-echo turn can sit
-  // between q and reply). If it's not in committed history, this q is the LAST
-  // one and its answer still lives in reply.json → fall back to current-reply.
+  // Load the answer LAZILY on first expand. The answer is the agent's FULL
+  // response: EVERY assistant turn after this q up to the NEXT prompt (a real
+  // reply spans many assistant messages — one per tool round). For the LAST q
+  // whose reply hasn't migrated into current.json yet, there are no committed
+  // turns → fall back to reply.json's live items. Each turn is rendered with the
+  // SAME AssistantTurnView the main history uses (no new component).
   //
   // The answer MUST be read from the SAME snapshot the q's id came from. history
   // ids are POSITIONAL in current.json and DRIFT across snapshots (compaction),
@@ -1955,53 +1957,81 @@ const PromptRow = memo(function PromptRow({ turn, qid, dataId, paneId, conversat
   //   3) reply.json — the last q whose answer hasn't migrated into current.json yet.
   // startedRef bridges the gap before the first setAnswer so a parent re-render
   // (live poll) mid-read can't kick off a duplicate fetch while answer===undefined.
-  useEffect(() => {
-    if (!open || answer !== undefined || startedRef.current) return;
-    startedRef.current = true;
-    const findAns = (turns: HistoryTurn[]): HistoryTurn | undefined =>
+  // Resolve THIS q's full answer = every assistant turn in (qid, nextQid). The
+  // LAST q (no nextQid) is open-ended and also folds in the live reply.json tail
+  // (the still-streaming part not yet migrated to current.json); it returns
+  // {live} so the poller knows to keep refreshing until the turn finishes.
+  const loadAnswer = useCallback(async (): Promise<{ live: boolean }> => {
+    const collect = (turns: HistoryTurn[]): HistoryTurn[] =>
       turns
-        .filter((t) => t?.role === 'assistant' && Number(t?.history_id || 0) > qid)
-        .sort((a, b) => Number(a?.history_id || 0) - Number(b?.history_id || 0))[0];
-    // Tier 1 — SYNC 内存快照,但**仅当窗口确实覆盖 qid**才用。snap.items 只是最近一段
-    // 连续窗口;若 qid 在窗口之前,"qid 之后第一个 assistant" 会错取到窗口里最新那轮(所有
-    // 老问题都显示同一条最新回答 = 不对齐)。窗口连续,故 minId<=qid<=maxId 时其后第一个
-    // assistant 必是真答案;否则留给 tier 2 fresh 拉取。末轮答案在 snap.liveTurn。
-    const snap = historyMemCache().get(paneId);
-    if (snap) {
-      const ids = (snap.items || []).map((t) => Number(t?.history_id || 0)).filter((n) => n > 0);
-      const minId = ids.length ? Math.min(...ids) : Infinity;
-      const maxId = ids.length ? Math.max(...ids) : 0;
-      if (qid >= minId && qid <= maxId) {
-        const hit = findAns(snap.items || []);
-        if (hit) { setAnswer(hit); return; }
-      }
-      const lt = snap.liveTurn;
-      if (lt && Number(lt.history_id || 0) === qid + 1) { setAnswer(lt); return; }
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        // Tier 2 — 窗口外的老 q:FRESH 拉 current.json(按会话,绕过按 id 的陈旧缓存),id 自洽 → 对齐。
-        if (!cancelled) setAnswer('loading');
-        const data: any = await getCurrentHistory(paneId, { before: qid + 17, limit: 16, conversation_id: conversationId });
-        const ans = findAns(buildTurnsFromRawItems(Array.isArray(data?.items) ? data.items : []));
-        if (ans) { if (!cancelled) setAnswer(ans); return; }
-        // Not in history → last q: its answer is reply.json.
+        .filter((t) => t?.role === 'assistant' && Number(t?.history_id || 0) > qid && (!nextQid || Number(t?.history_id || 0) < nextQid))
+        .sort((a, b) => Number(a?.history_id || 0) - Number(b?.history_id || 0));
+    const upperExclusive = nextQid && nextQid > qid ? nextQid : qid + 400;
+    try {
+      const limit = Math.max(16, upperExclusive - qid);
+      const data: any = await getCurrentHistory(paneId, { before: upperExclusive, limit, conversation_id: conversationId });
+      const out = collect(buildTurnsFromRawItems(Array.isArray(data?.items) ? data.items : []));
+      let live = false;
+      if (!nextQid) {
         const r: any = (await apiService.getAgentCurrentReply(paneId, conversationId ? { conversation_id: conversationId } : undefined))?.data;
-        if (r && Number(r.history_id || 0) === qid + 1) {
+        if (r && Number(r.history_id || 0) > qid) {
+          live = isActiveAssistantStatus(String(r.status || ''));
           const steps = replyItemsToSteps(r.items, r.thinking, r.answer);
-          if (steps.length || String(r.answer || '').trim()) {
-            if (!cancelled) setAnswer({ role: 'assistant', history_id: qid + 1, q: '', text: '', a: String(r.answer || ''), steps, status: String(r.status || '') } as HistoryTurn);
-            return;
+          const maxCommitted = out.reduce((m, t) => Math.max(m, Number(t?.history_id || 0)), qid);
+          // Append the live tail only if it sits AFTER the committed turns (avoids
+          // double-rendering a turn that already migrated into current.json).
+          if ((steps.length || String(r.answer || '').trim()) && Number(r.history_id || 0) > maxCommitted) {
+            out.push({ role: 'assistant', history_id: Number(r.history_id || 0), q: '', text: '', a: String(r.answer || ''), steps, status: String(r.status || '') } as HistoryTurn);
           }
         }
-        if (!cancelled) setAnswer('none');
-      } catch {
-        if (!cancelled) setAnswer('none');
       }
-    })();
-    return () => { cancelled = true; };
-  }, [open, answer, qid, paneId, conversationId]);
+      setAnswer(out.length ? out : 'none');
+      return { live };
+    } catch {
+      setAnswer((prev) => (prev === undefined || prev === 'loading' ? 'none' : prev));
+      return { live: false };
+    }
+  }, [qid, nextQid, paneId, conversationId]);
+
+  // Initial load on first expand. Tier-1 sync snapshot (for a non-last q whose
+  // whole answer range is already in the loaded window) paints instantly with no
+  // spinner; otherwise show 加载回复… and fetch.
+  useEffect(() => {
+    if (!open || startedRef.current) return;
+    startedRef.current = true;
+    if (nextQid) {
+      const snap = historyMemCache().get(paneId);
+      if (snap) {
+        const ids = (snap.items || []).map((t) => Number(t?.history_id || 0)).filter((n) => n > 0);
+        const minId = ids.length ? Math.min(...ids) : Infinity;
+        const maxId = ids.length ? Math.max(...ids) : 0;
+        if (qid >= minId && maxId >= nextQid - 1) {
+          const turns = (snap.items || [])
+            .filter((t) => t?.role === 'assistant' && Number(t?.history_id || 0) > qid && Number(t?.history_id || 0) < nextQid)
+            .sort((a, b) => Number(a?.history_id || 0) - Number(b?.history_id || 0));
+          if (turns.length) { setAnswer(turns); return; }
+        }
+      }
+    }
+    setAnswer('loading');
+    void loadAnswer();
+  }, [open, qid, nextQid, paneId, conversationId, loadAnswer]);
+
+  // LAST q only: poll while the turn is still streaming so the in-progress answer
+  // fills in live (was frozen at the partial snapshot from first expand). Only
+  // this one row re-renders per tick; it stops the moment the reply goes terminal.
+  useEffect(() => {
+    if (!open || nextQid) return;
+    let stop = false;
+    let timer: number | undefined;
+    const tick = async () => {
+      if (stop) return;
+      const { live } = await loadAnswer();
+      if (!stop && live) timer = window.setTimeout(tick, 1500);
+    };
+    timer = window.setTimeout(tick, 1500);
+    return () => { stop = true; if (timer) window.clearTimeout(timer); };
+  }, [open, nextQid, loadAnswer]);
   const ts = (turn as any)?.ts as string | undefined;
   return (
     <div data-id={dataId} data-turn-key={String(qid)} className="mb-3">
@@ -2035,7 +2065,20 @@ const PromptRow = memo(function PromptRow({ turn, qid, dataId, paneId, conversat
           ) : answer === 'none' ? (
             <span className="text-xs text-zinc-600">（无回复内容）</span>
           ) : (
-            <AssistantTurnView turn={answer} turnKey={`qa-${qid}`} isLatestTurn={false} showAvatar agentType={agentType} paneId={paneId} hideTools={hideTools} />
+            // Full answer = every assistant turn of the response; one avatar (the
+            // first), the rest align under it — same AssistantTurnView as the main history.
+            answer.map((t, i) => (
+              <AssistantTurnView
+                key={`${t.history_id || i}`}
+                turn={t}
+                turnKey={`qa-${qid}-${t.history_id || i}`}
+                isLatestTurn={false}
+                showAvatar={i === 0}
+                agentType={agentType}
+                paneId={paneId}
+                hideTools={hideTools}
+              />
+            ))
           )}
         </div>
       ) : null}
@@ -2965,6 +3008,17 @@ export default function CurrentHistoryView({
   // **布尔值**当依赖 —— liveTurn 每次 poll 都变,若直接依赖整个对象,displayItems 会每 poll 重算
   // 成新数组 → renderedTurns 跟着重算 → 所有 committed 轮(含过往 thinking)每 poll 重渲染 → 闪。
   const liveActive = !!liveTurn && Number(liveTurn.history_id || 0) > committedMaxId;
+  // Prompts-only list, memoized on promptList ALONE so its identity is STABLE
+  // across live polls. If it were recomputed inside displayItems (whose deps
+  // include items/liveActive/committedMaxId, all of which churn every poll while
+  // the agent works), every PromptRow would get a fresh `turn` prop each poll →
+  // memo breaks → every expanded answer (which can be the agent's whole 40+ tool
+  // round response) re-renders on every poll → the panel freezes. (卡死 root cause.)
+  const promptOnlyItems = useMemo(() =>
+    promptList
+      .filter((p) => Number(p?.id || 0) > 0 && String(p?.content || '').trim() !== '')
+      .map((p) => ({ role: 'user', history_id: p.id, text: p.content, q: p.content, ts: p.ts } as unknown as HistoryTurn)),
+    [promptList]);
   const displayItems = useMemo(() => {
     if (!promptsOnly) {
       // While the live turn renders the in-flight assistant response (now WITH its
@@ -2982,10 +3036,8 @@ export default function CurrentHistoryView({
     // ids). No client-side filtering, no id-cache merge → no drift, no dups, no
     // empty bubbles. Each entry is a minimal user HistoryTurn; the answer is
     // resolved lazily per-row from the SAME snapshot (PromptRow), so q↔a always align.
-    return promptList
-      .filter((p) => Number(p?.id || 0) > 0 && String(p?.content || '').trim() !== '')
-      .map((p) => ({ role: 'user', history_id: p.id, text: p.content, q: p.content, ts: p.ts } as unknown as HistoryTurn));
-  }, [promptsOnly, items, promptList, liveActive, committedMaxId]);
+    return promptOnlyItems; // stable ref → no per-poll re-render of expanded answers
+  }, [promptsOnly, items, promptOnlyItems, liveActive, committedMaxId]);
 
   // Recap-on-return is system noise: a harness-only user turn ("The user stepped
   // away… Recap…" / continuation banner) and the assistant recap it triggers.
@@ -3117,6 +3169,7 @@ export default function CurrentHistoryView({
               key={turnKey}
               turn={turn}
               qid={itemId}
+              nextQid={Number(displayItems[index + 1]?.history_id || 0) || undefined}
               dataId={String(itemId)}
               paneId={paneId}
               conversationId={conversationId}

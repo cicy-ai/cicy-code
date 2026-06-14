@@ -1130,9 +1130,8 @@ export function BrowserWindowsColumn({
   // launches the profile if it isn't running yet.
   const addLabel = t('bwAddTab');
   const unitLabel = t('bwUnitTab');
-  // Add-tab is offered everywhere EXCEPT the system Electron Profile0 (its tabs
-  // only come from the homepage).
-  const canAddTab = !(profile.backend === 'electron' && profile.accountIdx === 0);
+  // Add-tab button is always shown (no per-backend/profile gating).
+  const canAddTab = true;
 
   const closeTab = async (w: WinItem) => {
     await windowAction(clientId, profile, w, 'close');
