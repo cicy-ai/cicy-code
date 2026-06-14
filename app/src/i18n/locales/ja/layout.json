@@ -120,6 +120,7 @@
   "bwReloadPage": "ページを再読み込み",
   "bwCloseWindow": "ウィンドウを閉じる",
   "bwPromptElectron": "agent-electron スキルでこの Electron タブを操作してください：\n- client_id: {{clientId}}\n- accountIdx: {{accountIdx}}\n- webContentsId: {{wc}}\n- タイトル: {{title}}\n- URL: {{url}}\n\n次のコマンドを使用（webContentsId={{wc}}）：\n  {{c}} tabs {{accountIdx}}            # このプロファイルのタブを一覧\n  {{c}} tab-nav {{wc}} <url>           # ナビゲート\n  {{c}} tab-eval {{wc}} '<js>'         # JS を実行してデータ取得/操作\n  {{c}} tab-screenshot {{wc}} --out shot.png\n  {{c}} tab-activate {{wc}}   /   {{c}} tab-close {{wc}}",
+  "bwPromptDesktop": "agent-desktop スキルでこのデスクトップ（cicy-desktop クライアント）を操作してください：\n- client_id: {{clientId}}\n\nコマンド（すべて --client {{clientId}} 付き）：\n  {{c}} tools                # このデスクトップのツール一覧\n  {{c}} sysinfo              # OS / ハードウェア情報\n  {{c}} exec '<shell>'       # デスクトップ上でシェル実行\n  {{c}} exec-file <script>   # ローカルスクリプトをアップロードして実行\n  {{c}} rpc <tool> '<json>'  # 任意の Electron-main ツールを呼ぶ",
   "bwPromptChrome": "agent-chrome スキルでこの Chrome タブを操作してください：\n- client_id: {{clientId}}\n- accountIdx: {{accountIdx}}\n- targetId: {{targetId}}\n- タイトル: {{title}}\n- URL: {{url}}\n\n{{c}} の targets / cdp コマンドで操作します（target でこのタブを指定）。例：Page.navigate / Runtime.evaluate / Input.* 。",
   "bwPromptInject": "この dom-ready インジェクトスクリプト（拡張）を編集してください：\n- ドメイン: {{domain}}\n- ファイル: {{path}}\n- このドメインのページが dom-ready になると cicy-desktop によって注入・実行されます。\n\nagent-editor で {{path}} を開いて編集し、保存すれば適用されます（次回のこのドメイン読み込み時）。"
 }

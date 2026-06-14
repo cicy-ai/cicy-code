@@ -14,7 +14,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot, BookOpen
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag } from '../lib/modelTag';
@@ -27,6 +27,7 @@ import { SendingProvider } from '../contexts/SendingContext';
 import ChatHistoryView from './chat/ChatHistoryView';
 import TodoPanel from './TodoPanel';
 import FilesView from './files/FilesView';
+import KnowledgePanel from './knowledge/KnowledgePanel';
 import { WebFrame } from './WebFrame';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
@@ -315,11 +316,11 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
 type LeftPanelView = 'team' | 'skills' | 'customAgents' | 'agents' | 'todo' | 'windows' | null;
-type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | RequestViewTab;
+type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'knowledge' | RequestViewTab;
 type CliContentMode = 'fixed';
 
 function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
-  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'todo') {
+  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'knowledge' || value === 'todo') {
     return value;
   }
   return 'files';
@@ -391,6 +392,8 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // Pending-todo count (status todo on the active pane) for the red
   // badge on the Todo tab.
   const [todoCount, setTodoCount] = useState<number>(0);
+  // Pending-review count (_inbox) for the red badge on the 知识库 (knowledge) tab.
+  const [knowledgePendingCount, setKnowledgePendingCount] = useState<number>(0);
   const [cliDrawerWidth, setCliDrawerWidth] = useState(() => clampCliDrawerWidth(Number(cache.get(CLI_DRAWER_WIDTH_KEY, CLI_DRAWER_DEFAULT_WIDTH))));
   const [cliDrawerResizing, setCliDrawerResizing] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
@@ -872,6 +875,21 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     window.addEventListener('cicy:todos-changed', onChange);
     return () => { cancelled = true; window.clearInterval(id); window.removeEventListener('cicy:todos-changed', onChange); };
   }, [todoSkillInstalled, activeCliPaneId]);
+  // Keep the 知识库 tab's _inbox (pending review) badge fresh. The store is a
+  // shared team resource (not per-pane), so this polls every 30s.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const res: any = await apiService.listKnowledge({ status: 'pending' });
+        const rows = res?.data?.knowledge || res?.knowledge || [];
+        if (!cancelled) setKnowledgePendingCount(Array.isArray(rows) ? rows.length : 0);
+      } catch { /* keep previous count on transient error */ }
+    };
+    refresh();
+    const id = window.setInterval(refresh, 30000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
   useEffect(() => {
     setInspectorPaneId(activeCliPaneId || paneId);
   }, [activeCliPaneId, paneId]);
@@ -1442,6 +1460,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     ...(todoSkillInstalled ? [{ id: 'todo', label: t('tabTodo', 'Todo'), icon: <ListTodo className="h-3.5 w-3.5" /> }] : []),
     { id: 'files', label: t('tabFiles'), icon: <Folder className="h-3.5 w-3.5" /> },
     { id: 'session', label: t('tabSession'), icon: <LineChart className="h-3.5 w-3.5" /> },
+    { id: 'knowledge', label: t('tabKnowledge', '知识库'), icon: <BookOpen className="h-3.5 w-3.5" /> },
     { id: 'memory', label: t('tabMemory'), icon: <Brain className="h-3.5 w-3.5" /> },
     { id: 'settings', label: t('tabSettings'), icon: <Settings className="h-3.5 w-3.5" /> },
   ];
@@ -1498,7 +1517,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         onMouseDown={handleCliDrawerResizeStart}
       />
       <div data-id="cli-content-tabs-wrap" className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--vsc-border)] px-3">
-        <div data-id="cli-content-tabs" className="flex gap-1 overflow-x-auto whitespace-nowrap scrollbar-none">
+        <div data-id="cli-content-tabs" className="flex gap-1 overflow-x-auto whitespace-nowrap scrollbar-hairline">
           {cliContentTabs.map((item) => {
             const active = item.id === 'session' ? isSessionTab(cliContentTab) : cliContentTab === item.id;
             return (
@@ -1526,6 +1545,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     className="pointer-events-none absolute right-0 top-0 inline-flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-red-500 px-[3px] text-[9px] font-semibold leading-none text-white tabular-nums"
                   >
                     {todoCount > 99 ? '99+' : todoCount}
+                  </span>
+                )}
+                {item.id === 'knowledge' && knowledgePendingCount > 0 && (
+                  <span
+                    data-id="cli-content-tab-knowledge-badge"
+                    className="pointer-events-none absolute right-0 top-0 inline-flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-amber-500 px-[3px] text-[9px] font-semibold leading-none text-white tabular-nums"
+                  >
+                    {knowledgePendingCount > 99 ? '99+' : knowledgePendingCount}
                   </span>
                 )}
               </button>
@@ -1614,6 +1641,19 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           style={{ display: cliContentTab === 'todo' ? 'block' : 'none' }}
         >
           <TodoPanel paneId={activeCliPaneId} active={cliContentOpen && cliContentTab === 'todo'} isMaster={activeCliPaneId === paneId} />
+        </div>
+        <div
+          data-id="cli-content-knowledge-host"
+          className="absolute inset-0"
+          style={cliContentTab === 'knowledge'
+            ? { position: 'relative', width: '100%', height: '100%' }
+            : { position: 'absolute', width: '100%', height: '100%', visibility: 'hidden', pointerEvents: 'none', zIndex: -1 }
+          }
+        >
+          <KnowledgePanel
+            agentId={nativeFilesAgentId}
+            workspaceFolder={nativeFilesWorkspace}
+          />
         </div>
         <div
           data-id="cli-content-memory-host"
@@ -1885,6 +1925,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                           openConfigRequest={pendingProfileConfig}
                           onSelectMobile={setMobileSel}
                           selectedMobileKey={mobileSel ? `${mobileSel.clientId}:${mobileSel.id}` : null}
+                          onSendToAgent={sendBrowserToAgent}
                         />
                       </div>
                     ) : null}

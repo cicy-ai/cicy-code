@@ -647,7 +647,7 @@ function fmtSnapTime(ms: number): string {
   } catch { return String(ms); }
 }
 
-function DesktopSnapshotView({ clientId }: { clientId: string }) {
+function DesktopSnapshotView({ clientId, onSendToAgent }: { clientId: string; onSendToAgent?: (text: string) => void }) {
   const { t } = useTranslation('layout');
   const [latest, setLatest] = useState<SnapItem | null>(null);
   const [loading, setLoading] = useState(false);
@@ -707,6 +707,16 @@ function DesktopSnapshotView({ clientId }: { clientId: string }) {
         >
           {capturing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}{t('bwSnapNow')}
         </button>
+        {onSendToAgent && (
+          <button
+            data-id="desktop-snapshot-send-agent"
+            onClick={() => onSendToAgent(t('bwPromptDesktop', { clientId, c: `agent-desktop --client ${clientId}` }))}
+            title={t('bwSendToAgent')}
+            className="flex items-center gap-1 rounded-lg px-2 py-1 text-[12px] font-medium bg-white/[0.07] text-blue-300 hover:text-blue-200 hover:bg-white/[0.12] transition-colors cursor-pointer shrink-0"
+          >
+            <Send className="w-3.5 h-3.5" />{t('bwSendToAgent')}
+          </button>
+        )}
         <button
           data-id="desktop-snapshot-refresh"
           onClick={() => fetchLatest()}
@@ -759,6 +769,7 @@ export default function BrowserWindowsPanel({
   openConfigRequest,
   onSelectMobile,
   selectedMobileKey,
+  onSendToAgent,
 }: {
   selectedKey?: string | null;
   onSelect: (sel: { clientId: string; deviceId: string; profile: Profile } | null) => void;
@@ -767,6 +778,8 @@ export default function BrowserWindowsPanel({
   // which renders MobileDeviceColumn instead of BrowserWindowsColumn.
   onSelectMobile?: (sel: MobileSel | null) => void;
   selectedMobileKey?: string | null; // `${clientId}:${id}`
+  // Desktop tab: "send to agent" on a desktop snapshot routes a prompt to the CLI.
+  onSendToAgent?: (text: string) => void;
 }) {
   const { t } = useTranslation('layout');
   const [devices, setDevices] = useState<Device[]>([]);
@@ -961,7 +974,7 @@ export default function BrowserWindowsPanel({
             <span>{error}</span>
           </div>
         ) : isDesktop ? (
-          <DesktopSnapshotView clientId={clientId} />
+          <DesktopSnapshotView clientId={clientId} onSendToAgent={onSendToAgent} />
         ) : isMobile ? (
           loading && phones.length === 0 ? (
             <ProfileSkeleton />

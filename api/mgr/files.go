@@ -337,6 +337,7 @@ func fsRoots(agentID string) ([]fsRootInfo, error) {
 	candidates := []struct {
 		id, label, sub string
 	}{
+		{"knowledge", "知识库", "cicy-ai/knowledge"},
 		{"memory", "Memory", "cicy-ai/memory"},
 		{"cicy-ai", "cicy-ai", "cicy-ai"},
 		{"projects", "Projects", "projects"},

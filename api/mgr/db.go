@@ -237,6 +237,8 @@ func (d *DB) Migrate() {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_msg_to ON agent_messages(to_pane, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_msg_from ON agent_messages(from_pane, created_at)`,
+		// NOTE: the team knowledge store is FILE-backed (~/cicy-ai/knowledge,
+		// governance = folder location), not sqlite. See knowledge_store.go.
 		fmt.Sprintf("INSERT OR IGNORE INTO global_vars (key_name, value) VALUES ('worker_index', '%d')", defaultWorkerIndex),
 	}
 	for _, s := range stmts {

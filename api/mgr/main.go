@@ -40,7 +40,7 @@ var (
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
 )
 
-const version = "2.3.1"
+const version = "2.3.2"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -163,6 +163,12 @@ Options:
 	store.Migrate()
 	defer store.Close()
 
+	// Ensure the file-backed team knowledge store skeleton exists so it shows up
+	// as an fs root in the FileExplorer even before the first entry is written.
+	if err := knowledgeEnsureRoot(); err != nil {
+		log.Printf("[knowledge] ensure root: %v", err)
+	}
+
 	if auditEnabled() {
 		if err := audit.Init(); err != nil {
 			log.Printf("[audit] init failed: %v", err)
@@ -268,6 +274,8 @@ Options:
 	http.HandleFunc("/api/tmux/reply_text", authM(handleAgentReplyText))
 	http.HandleFunc("/api/tmux/chat_history", authM(handleAgentChatHistory))
 	http.HandleFunc("/api/agent/messages", authM(handleAgentMessages)) // cross-agent message link view (JOIN history_turns)
+	http.HandleFunc("/api/knowledge", authM(handleKnowledge))          // team knowledge Layer 2 store: GET list/recall, POST add
+	http.HandleFunc("/api/knowledge/", authM(handleKnowledgeByID))     // GET one / PATCH promote|reject|supersede
 	http.HandleFunc("/api/tmux/client-trace", authM(handleTmuxClientTrace))
 	// http.HandleFunc("/api/tmux/send_wait", authM(handleSendWait)) // TODO: implement handleSendWait
 	http.HandleFunc("/api/tmux/capture", authM(handleCapture))

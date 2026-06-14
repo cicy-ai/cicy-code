@@ -120,6 +120,7 @@
   "bwReloadPage": "刷新页面",
   "bwCloseWindow": "关闭窗口",
   "bwPromptElectron": "请用 agent-electron 技能操作这个 Electron 标签：\n- client_id: {{clientId}}\n- accountIdx: {{accountIdx}}\n- webContentsId: {{wc}}\n- 标题: {{title}}\n- URL: {{url}}\n\n用这些命令（按 webContentsId={{wc}}）：\n  {{c}} tabs {{accountIdx}}            # 列该 profile 的标签\n  {{c}} tab-nav {{wc}} <url>           # 导航\n  {{c}} tab-eval {{wc}} '<js>'         # 跑 JS 取数据/操作\n  {{c}} tab-screenshot {{wc}} --out shot.png\n  {{c}} tab-activate {{wc}}   /   {{c}} tab-close {{wc}}",
+  "bwPromptDesktop": "请用 agent-desktop 技能操作这台桌面（cicy-desktop 客户端）：\n- client_id: {{clientId}}\n\n用这些命令（都带 --client {{clientId}}）：\n  {{c}} tools                # 列出该桌面可用工具\n  {{c}} sysinfo              # 系统/硬件信息\n  {{c}} exec '<shell命令>'   # 在桌面机器上跑 shell\n  {{c}} exec-file <脚本>     # 上传并执行本地脚本\n  {{c}} rpc <tool> '<json>'  # 调任意 Electron-main 工具",
   "bwPromptChrome": "请用 agent-chrome 技能操作这个 Chrome 标签：\n- client_id: {{clientId}}\n- accountIdx: {{accountIdx}}\n- targetId: {{targetId}}\n- 标题: {{title}}\n- URL: {{url}}\n\n用 {{c}} 的 targets / cdp 命令操作它（target 指定该 tab），例如 Page.navigate / Runtime.evaluate / Input.* 。",
   "bwPromptInject": "请编辑这个 dom-ready 注入脚本（扩展）：\n- 域名: {{domain}}\n- 文件: {{path}}\n- 它会在该域名页面 dom-ready 时被 cicy-desktop 注入执行。\n\n用 agent-editor 打开 {{path}} 进行编辑，改完保存即可（下次该域名页面加载生效）。"
 }

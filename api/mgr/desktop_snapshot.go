@@ -4,11 +4,13 @@ package main
 // (win/mac/linux), store a compressed JPEG to ~/cicy-ai/snapshots/<deviceKey>/,
 // and expose them to the UI's "桌面" (Desktop) tab.
 //
-// Transport: there is no dedicated screenshot RPC tool on cicy-desktop, so we
-// drive the OS's own screenshot utility through the existing `exec_shell` tool,
-// routed to the device over the chat-WS sync bridge (same mechanism the browser
-// BrowserWindowsPanel uses). The tool returns base64 JPEG on stdout; the server
-// decodes it and writes one file per capture, pruning old ones.
+// Transport: the server drives a screenshot on the device through the existing
+// `exec_shell` tool, routed over the chat-WS sync bridge (same mechanism the
+// browser BrowserWindowsPanel uses). mac/linux run the OS grabber LIVE; Windows
+// instead reads a base64 file that cicy-desktop's snapshot daemon keeps fresh
+// (live PowerShell capture fails there under 360/AppLocker/RDP). Either way the
+// tool returns base64 JPEG on stdout; the server decodes it and writes one file
+// per capture, pruning old ones.
 //
 // Config lives in the global_settings blob (read/written via /api/settings/global):
 //   desktop_snapshot_enabled       bool   (default true)
@@ -29,7 +31,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf16"
 )
 
 const (
@@ -153,16 +154,22 @@ func deviceShellOut(clientID, command string) (string, error) {
 	}
 }
 
-// ── per-platform screenshot commands (output base64 JPEG on stdout) ───────────
+// ── per-platform screenshot ───────────────────────────────────────────────────
+// mac/linux capture LIVE via the OS's own grabber (screencapture / scrot) — no
+// 360/PowerShell hurdles, works fine, unchanged. Windows is the exception: live
+// PowerShell CopyFromScreen returns empty under 360/AppLocker or a display-less
+// RDP session, so there cicy-desktop captures the desktop on a timer (its
+// utils/desktop-snapshot.js → a --disable-gpu desktopCapturer child, ≤600px
+// wide) and writes ~/cicy-files/desktop-snapshot/desktop.b64 — we just read it.
 const snapTmpUnix = "/tmp/cicy_desktop_snap.jpg"
 
 func snapShellCommand(platform string) (string, error) {
 	switch platform {
 	case "darwin":
-		// screencapture → jpg, downscale to ≤1600px long edge via sips, base64.
+		// screencapture → jpg, downscale to ≤600px long edge via sips, base64.
 		// NOTE: exec_shell runs a bare /bin/sh whose PATH lacks /usr/sbin, where
 		// `screencapture` lives — so normalize PATH and prefer the absolute path.
-		return fmt.Sprintf(`export PATH="/usr/sbin:/usr/bin:/bin:$PATH"; f=%[1]s; rm -f "$f"; /usr/sbin/screencapture -x -t jpg "$f" 2>/dev/null || screencapture -x -t jpg "$f" 2>/dev/null; [ -s "$f" ] && { sips -Z 1600 "$f" >/dev/null 2>&1 || true; base64 < "$f"; }; rm -f "$f"`, snapTmpUnix), nil
+		return fmt.Sprintf(`export PATH="/usr/sbin:/usr/bin:/bin:$PATH"; f=%[1]s; rm -f "$f"; /usr/sbin/screencapture -x -t jpg "$f" 2>/dev/null || screencapture -x -t jpg "$f" 2>/dev/null; [ -s "$f" ] && { sips -Z 600 "$f" >/dev/null 2>&1 || true; base64 < "$f"; }; rm -f "$f"`, snapTmpUnix), nil
 	case "linux":
 		// Try common X11/Wayland grabbers in order; quality-compressed jpg.
 		return fmt.Sprintf(`f=%[1]s; export PATH="/usr/bin:/usr/local/bin:/bin:$PATH"; export DISPLAY="${DISPLAY:-:0}"; rm -f "$f";
@@ -174,36 +181,12 @@ elif command -v spectacle >/dev/null 2>&1; then spectacle -b -n -o "$f" 2>/dev/n
 fi
 [ -s "$f" ] && base64 < "$f"; rm -f "$f"`, snapTmpUnix), nil
 	case "win":
-		// PowerShell virtual-screen grab → JPEG → base64, passed as an encoded
-		// command to avoid cross-shell quoting issues.
-		enc := powershellEncode(winSnapPS)
-		return "powershell -NoProfile -NonInteractive -EncodedCommand " + enc, nil
+		// exec_shell on Windows runs through cmd.exe, so `type` reads the file the
+		// cicy-desktop snapshot daemon writes (≤600px, refreshed on a timer).
+		return `type "%USERPROFILE%\cicy-files\desktop-snapshot\desktop.b64" 2>nul`, nil
 	default:
 		return "", fmt.Errorf("unsupported platform %q", platform)
 	}
-}
-
-const winSnapPS = `Add-Type -AssemblyName System.Windows.Forms,System.Drawing
-$vs=[System.Windows.Forms.SystemInformation]::VirtualScreen
-$bmp=New-Object System.Drawing.Bitmap $vs.Width,$vs.Height
-$g=[System.Drawing.Graphics]::FromImage($bmp)
-$g.CopyFromScreen($vs.Location,[System.Drawing.Point]::Empty,$vs.Size)
-$enc=[System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders()|Where-Object{$_.MimeType -eq 'image/jpeg'}
-$ps=New-Object System.Drawing.Imaging.EncoderParameters 1
-$ps.Param[0]=New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality),([long]60)
-$ms=New-Object System.IO.MemoryStream
-$bmp.Save($ms,$enc,$ps)
-[Convert]::ToBase64String($ms.ToArray())`
-
-// powershellEncode encodes a script for `powershell -EncodedCommand` (UTF-16LE base64).
-func powershellEncode(script string) string {
-	u16 := utf16.Encode([]rune(script))
-	b := make([]byte, len(u16)*2)
-	for i, r := range u16 {
-		b[i*2] = byte(r)
-		b[i*2+1] = byte(r >> 8)
-	}
-	return base64.StdEncoding.EncodeToString(b)
 }
 
 // captureDevice screenshots one device and writes a new snapshot file. Returns
