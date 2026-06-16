@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Send, Loader2, Square } from 'lucide-react';
+import { ArrowUp, Loader2, Square, Paperclip, X, FileText, FileSpreadsheet, FileCode, FileArchive, Brain } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import CurrentHistoryView from './CurrentHistoryView';
+import { isCicyLiteAgent } from '../../lib/agentType';
 import apiService from '../../services/api';
 
 /*
@@ -8,15 +10,156 @@ import apiService from '../../services/api';
  * 上 = CurrentHistoryView(网关审计驱动的对话历史,reply.json 轮询 = 流式尾巴),
  * 下 = prompt 输入条,发送走 /api/tmux/send(送进 REPL stdin,与终端/TG 同一管道)。
  * 终端不再展示——dispatcher 在 web 上就是一个聊天窗口。
+ *
+ * 附件(图片/PDF/文档):回形针按钮 / 粘贴 / 拖拽 → 上传到 /assets/files(per-agent 工作区,
+ * 带上传进度)→ 图片显缩略图预览、文档显小方块。发送时把上传得到的 FileRef 路径拼进消息
+ * 末尾的「[附件]」区(方案 A,后端零改动:agent 用自己的文件工具 Read 这些路径)。
  */
+
+type Attachment = {
+  id: string;
+  name: string;
+  size: number;
+  isImage: boolean;
+  previewURL?: string; // 本地 objectURL(图片缩略图,移除时 revoke)
+  status: 'uploading' | 'done' | 'error';
+  progress: number; // 0..100
+  fileRef?: string; // 后端 FileRef(主机路径)——拼进消息
+  url?: string; // 可访问 URL
+};
+
+let attachSeq = 0;
+const nextAttachId = () => `att-${++attachSeq}-${Date.now()}`;
+
+function fmtSize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// 文件类型 → 彩色徽章 + 类型标签 + 图标(对齐 Claude web 的附件卡:PDF 红、表格绿、代码黄…)。
+function fileTypeMeta(name: string): { label: string; badge: string; kind: 'doc' | 'sheet' | 'code' | 'zip' } {
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  if (ext === 'pdf') return { label: 'PDF', badge: 'bg-rose-500/15 text-rose-300', kind: 'doc' };
+  if (['doc', 'docx', 'rtf'].includes(ext)) return { label: ext.toUpperCase(), badge: 'bg-sky-500/15 text-sky-300', kind: 'doc' };
+  if (['xls', 'xlsx', 'csv', 'tsv'].includes(ext)) return { label: ext.toUpperCase(), badge: 'bg-emerald-500/15 text-emerald-300', kind: 'sheet' };
+  if (['json', 'js', 'ts', 'tsx', 'py', 'go', 'sh', 'md', 'log', 'yaml', 'yml'].includes(ext)) return { label: ext.toUpperCase(), badge: 'bg-amber-500/15 text-amber-300', kind: 'code' };
+  if (['zip', 'tar', 'gz', '7z', 'rar'].includes(ext)) return { label: ext.toUpperCase(), badge: 'bg-zinc-500/20 text-zinc-300', kind: 'zip' };
+  return { label: (ext || 'FILE').toUpperCase(), badge: 'bg-zinc-500/20 text-zinc-300', kind: 'doc' };
+}
+
+// hover 出现的删除 ×(Claude 风格:右上角小圆点)。
+function RemoveBtn({ id, onRemove }: { id: string; onRemove: () => void }) {
+  const { t } = useTranslation('chat');
+  return (
+    <button
+      type="button"
+      data-id={`attachment-remove-${id}`}
+      onClick={onRemove}
+      className="absolute -right-1.5 -top-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-zinc-900 text-zinc-300 opacity-0 shadow ring-1 ring-white/15 transition-opacity hover:bg-zinc-700 group-hover:opacity-100"
+      aria-label={t('attachRemove')}
+    >
+      <X className="h-3 w-3" />
+    </button>
+  );
+}
+
+// 单个附件卡(对齐 Claude web):图片→圆角缩略图;文件→圆角卡(彩色类型徽章+文件名+类型·大小)。
+// 上传中徽章/缩略图位转圈 + 显进度,失败显红,hover 出 ×。
+function AttachmentChip({ att, onRemove }: { att: Attachment; onRemove: () => void }) {
+  const { t } = useTranslation('chat');
+  const uploading = att.status === 'uploading';
+  const error = att.status === 'error';
+
+  if (att.isImage) {
+    // 外层不裁(否则伸到边角外的删除 × 被 overflow-hidden 吞掉);只让内层裁圆角缩略图。
+    return (
+      <div data-id={`attachment-image-${att.id}`} className="group relative h-16 w-16 shrink-0" title={att.name}>
+        <div className="h-full w-full overflow-hidden rounded-xl border border-white/10 bg-black/30">
+          {att.previewURL ? <img src={att.previewURL} alt={att.name} className="h-full w-full object-cover" /> : null}
+          {uploading ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-black/45 text-[10px] text-white">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>{att.progress}%</span>
+            </div>
+          ) : null}
+          {error ? <div className="absolute inset-0 flex items-center justify-center bg-rose-900/55 text-[10px] text-rose-100">{t('attachFailed')}</div> : null}
+        </div>
+        <RemoveBtn id={att.id} onRemove={onRemove} />
+      </div>
+    );
+  }
+
+  const meta = fileTypeMeta(att.name);
+  const Icon = meta.kind === 'sheet' ? FileSpreadsheet : meta.kind === 'code' ? FileCode : meta.kind === 'zip' ? FileArchive : FileText;
+  return (
+    <div data-id={`attachment-file-${att.id}`} className="group relative flex w-56 shrink-0 items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.04] p-2 pr-3" title={att.name}>
+      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${meta.badge}`}>
+        {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-5 w-5" />}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div data-id={`attachment-name-${att.id}`} className="truncate text-[13px] font-medium text-zinc-100">{att.name}</div>
+        <div className="truncate text-[11px] text-zinc-500">
+          {error ? <span className="text-rose-300">{t('attachUploadFailed')}</span> : uploading ? t('attachUploading', { progress: att.progress }) : `${meta.label} · ${fmtSize(att.size)}`}
+        </div>
+      </div>
+      <RemoveBtn id={att.id} onRemove={onRemove} />
+    </div>
+  );
+}
+
 export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: { paneId: string; active: boolean; agentType?: string }) {
+  const { t } = useTranslation('chat');
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   // 回复进行中(busy)→ 锁发送、显示 waiting。只有 reply complete / fail 才解锁。
   // 信号来自 CurrentHistoryView 的轮询(cicy:dispatcher-busy)。
   const [busy, setBusy] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [dragOver, setDragOver] = useState(false);
   const composingRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const attachmentsRef = useRef<Attachment[]>([]);
+  attachmentsRef.current = attachments;
+
+  // 思考(extended thinking)开关 —— 像 Gemini 那样在输入框左下角。写入该 agent 的
+  // agent_config.config {"thinking":"enabled|disabled"},优先于全局 gateway_thinking。
+  // 网关 agentInspectorApplyThinking 实时读取,免重启。仅对 cicy(lite)agent 显示。
+  const showThinking = isCicyLiteAgent(agentType);
+  const [thinkingOn, setThinkingOn] = useState(false);
+  const [thinkingSaving, setThinkingSaving] = useState(false);
+  const configRef = useRef<Record<string, any>>({});
+
+  useEffect(() => {
+    if (!showThinking) return;
+    let alive = true;
+    apiService.getPane(paneId).then(({ data }) => {
+      if (!alive) return;
+      let cfg: Record<string, any> = {};
+      try { cfg = data?.config ? JSON.parse(data.config) : {}; } catch { cfg = {}; }
+      configRef.current = cfg && typeof cfg === 'object' ? cfg : {};
+      setThinkingOn(String(configRef.current.thinking || '').toLowerCase() === 'enabled');
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [paneId, showThinking]);
+
+  const toggleThinking = useCallback(async () => {
+    const next = thinkingOn ? 'disabled' : 'enabled';
+    setThinkingSaving(true);
+    const merged = { ...configRef.current, thinking: next };
+    try {
+      await apiService.updatePane(paneId, { config: JSON.stringify(merged) });
+      configRef.current = merged;
+      setThinkingOn(next === 'enabled');
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('composerThinkingSaveFailed') }));
+    } finally {
+      setThinkingSaving(false);
+    }
+  }, [paneId, thinkingOn]);
+
+  const uploading = attachments.some((a) => a.status === 'uploading');
 
   useEffect(() => {
     const onBusy = (e: Event) => {
@@ -29,80 +172,192 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
     return () => window.removeEventListener('cicy:dispatcher-busy', onBusy as EventListener);
   }, [paneId]);
 
-  // 切换 PM 时清空忙态,避免把上一个会话的 waiting 带过来。
-  useEffect(() => { setBusy(false); }, [paneId]);
+  // 切换 PM 时清空忙态 + 附件,避免把上一个会话的状态带过来。
+  useEffect(() => {
+    setBusy(false);
+    setAttachments((prev) => { prev.forEach((a) => a.previewURL && URL.revokeObjectURL(a.previewURL)); return []; });
+  }, [paneId]);
+
+  // 卸载时回收所有图片 objectURL。
+  useEffect(() => () => { attachmentsRef.current.forEach((a) => a.previewURL && URL.revokeObjectURL(a.previewURL)); }, []);
+
+  // 安全兜底:busy 期间直接轮询后端 reply 状态,只要「不在途」(complete / fail /
+  // 根本没在生成)就解锁——不依赖 CurrentHistoryView 的 poll。后者在 /clear 建空会话、
+  // 会话轮换等场景下不会 emit busy=false(实测整段零事件),导致 composer 永久锁死在
+  // 「回复生成中」、发不出下一条。给 3s 起步宽限,避免刚发出去、turn 还没登记就误解锁;
+  // busy 本就是软指示(发送从不硬门禁,服务端会 merge),宁可早解锁也不要锁死。
+  useEffect(() => {
+    if (!busy) return;
+    let cancelled = false;
+    let timer: number | null = null;
+    const since = Date.now();
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        const { data } = await apiService.getAgentCurrentReply(paneId);
+        if (cancelled) return;
+        const answerId = Number((data as any)?.history_id || 0);
+        const complete = !!(data as any)?.complete;
+        const status = String((data as any)?.status || '').trim().toLowerCase();
+        const failed = status === 'failed' || status === 'fail' || status === 'error';
+        const inFlight = answerId > 0 && !complete && !failed;
+        if (!inFlight && Date.now() - since > 3000) { setBusy(false); return; }
+      } catch {}
+      timer = window.setTimeout(tick, 1200);
+    };
+    timer = window.setTimeout(tick, 1200);
+    return () => { cancelled = true; if (timer != null) window.clearTimeout(timer); };
+  }, [busy, paneId]);
+
+  const updateAtt = useCallback((id: string, patch: Partial<Attachment>) => {
+    setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+  }, []);
+
+  const startUpload = useCallback((id: string, file: File) => {
+    apiService
+      .uploadAssetFile(paneId, file, (loaded, total) => {
+        updateAtt(id, { progress: Math.max(1, Math.round((loaded / total) * 100)) });
+      })
+      .then((resp: any) => {
+        const f = resp?.data?.file || {};
+        // 后端 JSON 是 snake_case:file_ref / url。fileRef 是文件的绝对路径引用(file://…),
+        // 发消息时取它给 LLM,LLM 才能 Read 这个文件。
+        updateAtt(id, { status: 'done', progress: 100, fileRef: String(f.file_ref || f.fileRef || ''), url: String(f.url || f.URL || '') });
+      })
+      .catch(() => {
+        updateAtt(id, { status: 'error' });
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: t('composerUploadFailedNamed', { name: file.name }) }));
+      });
+  }, [paneId, updateAtt]);
+
+  const addFiles = useCallback((files: FileList | File[]) => {
+    const list = Array.from(files);
+    for (const file of list) {
+      const id = nextAttachId();
+      const isImage = file.type.startsWith('image/');
+      const previewURL = isImage ? URL.createObjectURL(file) : undefined;
+      setAttachments((prev) => [...prev, { id, name: file.name, size: file.size, isImage, previewURL, status: 'uploading', progress: 0 }]);
+      startUpload(id, file);
+    }
+  }, [startUpload]);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => {
+      const a = prev.find((x) => x.id === id);
+      if (a?.previewURL) URL.revokeObjectURL(a.previewURL);
+      return prev.filter((x) => x.id !== id);
+    });
+  }, []);
 
   const send = useCallback(async () => {
     const value = text.trim();
-    // NEVER hard-gate on busy: the server merges sends that land mid-reply
-    // (enqueueIfBusy), and a stale busy flag (poll unmounted / failed turn)
-    // used to deadlock the composer entirely. busy stays as a soft indicator.
-    if (!value || sending) return;
+    const done = attachmentsRef.current.filter((a) => a.status === 'done');
+    // 无内容(既无文本也无已传附件)、发送中、或还有附件在上传 → 不发。
+    if ((!value && done.length === 0) || sending || uploading) return;
+    // 已上传附件用**标准 markdown** 拼进消息,URL 用文件的**绝对路径**(从 FileRef 取):
+    // 这样 LLM/agent 拿到真实路径、能用文件工具 Read、真正"用"这个文档;UI 渲染时再据路径
+    // 解析成预览/下载地址(见 CurrentHistoryView 的 img/a 组件)。绝对路径不含任何 token,
+    // 出站审计也不会拦。图片 ![name](abs);文件 [name](abs)。
+    let body = value;
+    if (done.length) {
+      const md = done
+        .map((a) => {
+          const abs = a.fileRef ? '/' + a.fileRef.replace(/^file:\/\//, '').replace(/^\/+/, '') : (a.url || '');
+          return a.isImage ? `![${a.name}](${abs})` : `[${a.name}](${abs})`;
+        })
+        .join('\n\n');
+      body = (value ? value + '\n\n' : '') + md;
+    }
     setSending(true);
     setBusy(true); // 立刻锁住,不等轮询事件回传
     setText('');
-    // Paint the q bubble + reserve the a slot THIS frame — BEFORE the POST
-    // round-trips — so the question shows the instant you hit send. `text` in the
-    // detail is the optimistic-paint signal.
-    window.dispatchEvent(new CustomEvent('cicy:current-history-refresh', { detail: { paneId, text: value } }));
+    setAttachments((prev) => { prev.forEach((a) => a.previewURL && URL.revokeObjectURL(a.previewURL)); return []; });
+    // Paint the q bubble + reserve the a slot THIS frame — BEFORE the POST round-trips.
+    window.dispatchEvent(new CustomEvent('cicy:current-history-refresh', { detail: { paneId, text: body } }));
     try {
-      await apiService.sendCommand(paneId, value, true);
-      // Nudge again (no text) so the poll starts chasing the live answer promptly.
+      await apiService.sendCommand(paneId, body, true);
       window.dispatchEvent(new CustomEvent('cicy:current-history-refresh', { detail: { paneId } }));
     } catch {
-      // Send failed → retract the optimistic slots, restore the draft, unlock.
       setText(value);
       setBusy(false);
       window.dispatchEvent(new CustomEvent('cicy:current-history-cancel-optimistic', { detail: { paneId } }));
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '发送失败' }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('composerSendFailed') }));
     } finally {
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [paneId, text, sending, busy]);
+  }, [paneId, text, sending, uploading]);
 
   // 取消生成,按 agent 形态分流:
-  // - cicy 是 headless(无 tmux pane,send-keys 够不着)→ 走 /api/cicy/cancel,服务端取消
-  //   正在跑的网关请求(ReverseProxy 连带掐断上游 LLM),reply 落到 terminal,轮询解锁。
-  // - 终端类 agent(claude/codex 等真 CLI)→ 往它的 pane 送 Escape,等同 CLI 里按 Esc 打断。
-  // 打断后这一轮 reply complete/fail,轮询 emit busy=false 自动解锁。
+  // - cicy 是 headless(无 tmux pane)→ /api/cicy/cancel,服务端取消正在跑的网关请求。
+  // - 终端类 agent(claude/codex)→ 往 pane 送 Escape。
   const cancel = useCallback(async () => {
     if (!busy) return;
     try {
       if (agentType === 'cicy') await apiService.cancelCicyReply(paneId);
       else await apiService.sendKeys(paneId, 'Escape');
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '已取消' }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('composerCanceled') }));
     } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '取消失败' }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: t('composerCancelFailed') }));
     }
   }, [paneId, busy, agentType]);
 
-  const canSend = !!text.trim() && !sending;
+  const hasContent = !!text.trim() || attachments.some((a) => a.status === 'done');
+  const canSend = hasContent && !sending && !uploading;
 
   return (
     <div data-id="dispatcher-chat" className="flex h-full w-full flex-col bg-[#0c0d10]">
       <div data-id="dispatcher-chat-history" className="min-h-0 flex-1 overflow-hidden">
-        <CurrentHistoryView key={paneId} paneId={paneId} open={active} agentType={agentType} />
+        <CurrentHistoryView key={paneId} paneId={paneId} open={active} agentType={agentType} fullWidth />
       </div>
-      <div data-id="dispatcher-chat-input-bar" className="shrink-0 border-t border-white/[0.06] bg-black/[0.25] py-2.5">
-        {/* Width-locked to the history content column (max-w-4xl px-4) so the
-            prompt sits flush under the conversation, not edge-to-edge. */}
-        <div data-id="dispatcher-chat-input-inner" className={`mx-auto flex w-full max-w-4xl items-end gap-2 rounded-xl border bg-white/[0.03] px-3 py-2 transition-colors ${busy ? 'border-white/[0.06] opacity-80' : 'border-white/[0.08] focus-within:border-blue-500/40'}`} style={{ width: 'calc(100% - 2rem)' }}>
+      <div
+        data-id="dispatcher-chat-input-bar"
+        className={`relative shrink-0 border-t bg-black/[0.25] px-4 py-2.5 transition-colors ${dragOver ? 'border-blue-500/50 bg-blue-500/[0.06]' : 'border-white/[0.06]'}`}
+        onDragEnter={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
+        onDrop={(e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files); }}
+      >
+        {dragOver ? (
+          <div data-id="dispatcher-chat-drop-hint" className="pointer-events-none absolute inset-1 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-blue-500/50 bg-[#0c0d10]/80 text-sm text-blue-200">
+            {t('composerDropHint')}
+          </div>
+        ) : null}
+        {attachments.length > 0 ? (
+          <div data-id="dispatcher-chat-attachments" className="mb-2 flex w-full flex-wrap gap-2">
+            {attachments.map((a) => (
+              <AttachmentChip key={a.id} att={a} onRemove={() => removeAttachment(a.id)} />
+            ))}
+          </div>
+        ) : null}
+        {/* Gemini-style prompt card: big rounded container, textarea on top,
+            a bottom toolbar (left: attach + thinking; right: round send).
+            Full width (matches the full-width history). */}
+        <div data-id="dispatcher-chat-input-inner" className={`flex w-full flex-col gap-2.5 rounded-[26px] border bg-white/[0.04] px-3 pb-2.5 pt-2.5 shadow-lg shadow-black/20 transition-colors ${busy ? 'border-white/[0.06] opacity-80' : 'border-white/[0.10] focus-within:border-blue-500/40'}`}>
+          <input
+            ref={fileInputRef}
+            data-id="dispatcher-chat-file-input"
+            type="file"
+            multiple
+            accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.tsv,.xlsx,.json,.zip,.log"
+            className="hidden"
+            onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ''; }}
+          />
           <textarea
             ref={inputRef}
             data-id="dispatcher-chat-input"
             value={text}
-            rows={Math.min(6, Math.max(2, text.split('\n').length))}
-            placeholder={busy ? '回复生成中…(按 Esc 取消)' : '跟你的项目经理说点什么…(Enter 发送,Shift+Enter 换行)'}
+            rows={Math.min(8, Math.max(1, text.split('\n').length))}
+            placeholder={busy ? t('composerBusyPlaceholder') : t('composerPlaceholder')}
             onChange={(e) => setText(e.target.value)}
             onCompositionStart={() => { composingRef.current = true; }}
             onCompositionEnd={() => { composingRef.current = false; }}
+            onPaste={(e) => {
+              const files = Array.from(e.clipboardData?.files || []);
+              if (files.length) { e.preventDefault(); addFiles(files); }
+            }}
             onKeyDown={(e) => {
-              // The stack card root is role="button" and preventDefaults
-              // Space/Enter for keyboard activation — stop bubbling so typing
-              // in the prompt never reaches it (space was being swallowed).
               e.stopPropagation();
-              // 生成中按 Esc → 取消这一轮(往 agent pane 送 Escape 打断)。
               if (e.key === 'Escape' && busy && !composingRef.current) {
                 e.preventDefault();
                 void cancel();
@@ -113,26 +368,59 @@ export default function DispatcherChat({ paneId, active, agentType = 'cicy' }: {
                 void send();
               }
             }}
-            className="max-h-40 flex-1 resize-none self-stretch bg-transparent text-sm leading-6 text-zinc-200 outline-none placeholder:text-zinc-600"
+            className="max-h-44 w-full resize-none bg-transparent px-2 pt-1.5 text-[15px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-600"
           />
-          {/* 生成中 = 停止按钮(点它或按 Esc 都能取消);否则 = 发送按钮。 */}
-          <button
-            data-id={busy ? 'dispatcher-chat-stop' : 'dispatcher-chat-send'}
-            type="button"
-            onClick={() => (busy ? void cancel() : void send())}
-            disabled={busy ? sending : !canSend}
-            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
-              busy
-                ? 'bg-white/[0.08] text-zinc-200 hover:bg-white/[0.14]'
-                : canSend
-                  ? 'bg-blue-600 text-white hover:bg-blue-500'
-                  : 'bg-white/[0.04] text-zinc-600'
-            }`}
-            title={busy ? '停止生成 (Esc)' : '发送'}
-            aria-label={busy ? 'Stop (Esc)' : 'Send'}
-          >
-            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : busy ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4" />}
-          </button>
+          {/* bottom toolbar */}
+          <div data-id="dispatcher-chat-toolbar" className="flex items-center justify-between gap-2">
+            <div data-id="dispatcher-chat-toolbar-left" className="flex items-center gap-1.5">
+              <button
+                type="button"
+                data-id="dispatcher-chat-attach"
+                onClick={() => fileInputRef.current?.click()}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[0.10] text-zinc-300 transition-colors hover:bg-white/[0.08] hover:text-zinc-100"
+                title={t('composerAttach')}
+                aria-label="Attach"
+              >
+                <Paperclip className="h-[18px] w-[18px]" />
+              </button>
+              {showThinking ? (
+                <button
+                  type="button"
+                  data-id="dispatcher-chat-thinking-toggle"
+                  onClick={toggleThinking}
+                  disabled={thinkingSaving}
+                  aria-pressed={thinkingOn}
+                  title={thinkingOn ? t('composerThinkingOn') : t('composerThinkingOff')}
+                  className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium transition-colors disabled:opacity-50 ${
+                    thinkingOn
+                      ? 'border-blue-500/40 bg-blue-500/15 text-blue-300 hover:bg-blue-500/25'
+                      : 'border-white/[0.10] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200'
+                  }`}
+                >
+                  {thinkingSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
+                  {t('composerThinking')}
+                </button>
+              ) : null}
+            </div>
+            {/* 生成中 = 停止按钮(点它或按 Esc 都能取消);否则 = 圆形发送。 */}
+            <button
+              data-id={busy ? 'dispatcher-chat-stop' : 'dispatcher-chat-send'}
+              type="button"
+              onClick={() => (busy ? void cancel() : void send())}
+              disabled={busy ? sending : !canSend}
+              className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors ${
+                busy
+                  ? 'bg-white/[0.12] text-zinc-100 hover:bg-white/[0.18]'
+                  : canSend
+                    ? 'bg-blue-600 text-white hover:bg-blue-500'
+                    : 'bg-white/[0.06] text-zinc-600'
+              }`}
+              title={busy ? t('composerStop') : uploading ? t('composerUploading') : t('composerSend')}
+              aria-label={busy ? 'Stop (Esc)' : 'Send'}
+            >
+              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : busy ? <Square className="h-3.5 w-3.5 fill-current" /> : <ArrowUp className="h-[18px] w-[18px]" />}
+            </button>
+          </div>
         </div>
       </div>
     </div>
