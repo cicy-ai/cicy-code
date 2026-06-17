@@ -1948,7 +1948,6 @@ wanted = json.loads(sys.argv[2]) if len(sys.argv) > 2 else []
 try:
     pats = [
         os.path.expanduser("~/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-*/vendor/*/bin/codex"),
-        "/home/cicy/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-*/vendor/*/bin/codex",
     ]
     bins = []
     for p in pats:

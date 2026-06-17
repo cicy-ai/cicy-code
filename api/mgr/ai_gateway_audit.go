@@ -1402,8 +1402,6 @@ func aiGatewayHistoryDir(agentID string) string {
 	legacyDirs := []string{
 		filepath.Join(builtinWorkerWorkspace(agentID), ".history"),
 		filepath.Join(builtinWorkerWorkspace(agentID), "history"),
-		filepath.Join("/home/cicy", "workers", agentID, ".history"),
-		filepath.Join("/home/cicy", "workers", agentID, "history"),
 	}
 	for _, oldDir := range legacyDirs {
 		if oldDir == newDir {
