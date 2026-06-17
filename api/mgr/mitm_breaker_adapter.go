@@ -4,8 +4,9 @@ package main
 // Translation table (one-way; mitm doesn't depend on audit package types):
 //
 //   audit.ActionBlock  → mitm.BreakerActionBlock
-//   audit.ActionRedact → mitm.BreakerActionRedact (with ModifiedPayload copied)
 //   anything else      → mitm.BreakerActionPass
+//
+// redact removed 2026-06-16: 审计绝不改写用户数据,只 pass(log)或 block。
 
 import (
 	"ttyd-go/mgr/audit"
@@ -33,15 +34,18 @@ func (mitmBreakerAdapter) Check(req mitm.BreakerRequest) mitm.BreakerDecision {
 	switch dec.Action {
 	case audit.ActionBlock:
 		out.Action = mitm.BreakerActionBlock
-		if len(dec.Findings) > 0 {
-			out.RuleID = string(dec.Findings[0].RuleID)
+		ruleIDs := make([]string, 0, len(dec.Findings))
+		for _, f := range dec.Findings {
+			ruleIDs = append(ruleIDs, string(f.RuleID))
 		}
-	case audit.ActionRedact:
-		out.Action = mitm.BreakerActionRedact
-		out.ModifiedPayload = dec.ModifiedPayload
-		if len(dec.Findings) > 0 {
-			out.RuleID = string(dec.Findings[0].RuleID)
+		if len(ruleIDs) > 0 {
+			out.RuleID = ruleIDs[0]
 		}
+		// UNIFIED block contract: same fields the gateway's writeGatewayBlocked
+		// emits, so MITM returns an identical 403 + X-Cicy-Audit-* + body.message.
+		out.EventID = dec.EventID
+		out.Rules = ruleIDs
+		out.Message = auditBlockMessage(ruleIDs, dec.EventID)
 	default:
 		out.Action = mitm.BreakerActionPass
 	}

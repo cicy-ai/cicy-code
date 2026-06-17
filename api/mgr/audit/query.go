@@ -226,7 +226,10 @@ func matchesFilters(e Event, opts QueryOpts) bool {
 		}
 	}
 	if len(opts.Severities) > 0 {
-		if !hasMatchingSeverity(e, opts.Severities) {
+		// Always let ack status events through the severity filter (they carry no
+		// findings, so they'd otherwise be dropped) — the UI needs them to mark
+		// the original alert as 已确认.
+		if e.Meta.Category != "meta_alert_ack" && !hasMatchingSeverity(e, opts.Severities) {
 			return false
 		}
 	}

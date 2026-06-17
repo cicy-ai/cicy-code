@@ -6,17 +6,14 @@ import (
 	"encoding/hex"
 	"log"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // PreventiveDecision is the result of an inline-mode scan.
 type PreventiveDecision struct {
 	// Action is the action the preventive layer applied:
 	//   ActionBlock  — the gateway / webhook should refuse to forward.
-	//   ActionRedact — caller should swap the request body to
-	//                  ModifiedPayload before forwarding.
 	//   ActionNone   — preventive let it through.
+	// (redact removed 2026-06-16: 审计绝不改写用户数据,只 log 或 block。)
 	Action Action
 
 	// Findings is the set of preventive-relevant hits (inline=true rules).
@@ -27,23 +24,12 @@ type PreventiveDecision struct {
 	//   "allowlisted_<reason>"  — bypassed via policy.allow_list
 	//   "no_inline_match"       — inline rules ran but none required action
 	//   "block"                 — at least one block-default rule matched
-	//   "redact"                — block didn't match but redact-default did
 	//   "scanner_panic"         — recovered panic, follows fail_mode
 	Reason string
 
 	// EventID is the audit event id written for this preventive decision.
 	// Empty for Action=none.
 	EventID string
-
-	// ModifiedPayload is the request body after substituting matched spans
-	// with "[REDACTED:<rule_id>]". Only set when Action=ActionRedact;
-	// callers MUST forward this (not the original) to the LLM provider.
-	ModifiedPayload []byte
-
-	// PreRedactRef points at the encrypted original payload archived under
-	// ~/cicy-ai/workers/<agent>/.cicy/history/pre-redact/. Used by auditor
-	// tooling to retrieve the unredacted prompt for forensic review.
-	PreRedactRef string
 }
 
 // PreventiveCheck runs only the inline=true subset of the active rule set
@@ -71,8 +57,15 @@ func PreventiveCheck(env Envelope) PreventiveDecision {
 // PreventiveCheck is the instance method. Exposed for tests + parity.
 func (p *Pipeline) PreventiveCheck(env Envelope) (dec PreventiveDecision) {
 	pol := p.CurrentPolicy()
-	if pol == nil || !pol.Preventive.Enabled {
+	if pol == nil {
 		return PreventiveDecision{Action: ActionNone, Reason: "preventive_disabled"}
+	}
+	// The per-rule action is the control now (the legacy global preventive.enabled
+	// toggle / 实时拦截 switch was removed). Preventive runs whenever the active
+	// rule set contains at least one block/redact rule; otherwise short-circuit
+	// so non-blocking deployments pay nothing on the hot path.
+	if !p.hasInterceptRule() {
+		return PreventiveDecision{Action: ActionNone, Reason: "no_intercept_rule"}
 	}
 
 	// allow_list bypass: explicitly trusted agents / paths / content hashes
@@ -101,7 +94,7 @@ func (p *Pipeline) PreventiveCheck(env Envelope) (dec PreventiveDecision) {
 	// detective-only rules (high_entropy etc.). Then partition by block/redact;
 	// block beats redact when both fire on the same turn.
 	allFindings := p.scanner.ScanInline(env.Payload, env.Direction, pol)
-	blockFindings, redactFindings := partitionInlineFindings(p, allFindings)
+	blockFindings := partitionInlineFindings(p, allFindings)
 
 	if len(blockFindings) > 0 {
 		eventID := p.submitPreventiveBlock(context.Background(), env, blockFindings, pol.Preventive.FailMode)
@@ -112,42 +105,38 @@ func (p *Pipeline) PreventiveCheck(env Envelope) (dec PreventiveDecision) {
 			EventID:  eventID,
 		}
 	}
-	if len(redactFindings) > 0 {
-		// Pre-allocate event_id so the encrypted-archive file lands at its
-		// final canonical name on the first write.
-		preID := "evt_" + uuid.NewString()
-		env.eventID = preID
-		redacted := RedactPayload(env.Payload, redactFindings)
-		ref, err := SavePreRedact(
-			p.store.auditRoot, p.store.workersRoot,
-			env.AgentID, preID, env.Payload,
-		)
-		if err != nil {
-			log.Printf("[audit] pre-redact save failed agent=%s: %v", env.AgentID, err)
-		}
-		eventID := p.submitPreventiveRedact(context.Background(), env, redactFindings, pol.Preventive.FailMode, ref)
-		return PreventiveDecision{
-			Action:          ActionRedact,
-			Findings:        redactFindings,
-			Reason:          "redact",
-			EventID:         eventID,
-			ModifiedPayload: redacted,
-			PreRedactRef:    ref,
-		}
-	}
 	return PreventiveDecision{Action: ActionNone, Reason: "no_inline_match", Findings: allFindings}
 }
 
-// partitionInlineFindings groups findings into (block, redact) buckets based
-// on their source rule's Inline + DefaultAction. Findings from non-inline
-// rules are dropped (they belong to detective scanning, not preventive).
-func partitionInlineFindings(p *Pipeline, findings []Finding) (block, redact []Finding) {
+// hasInterceptRule reports whether the active rule set contains at least one
+// rule whose action is block — i.e. whether preventive interception is
+// configured at all. Cheap O(rules) scan over the in-memory set.
+func (p *Pipeline) hasInterceptRule() bool {
+	bs, ok := p.scanner.(*BuiltinScanner)
+	if !ok {
+		return false
+	}
+	bs.mu.RLock()
+	defer bs.mu.RUnlock()
+	for _, r := range bs.set.Rules {
+		if r.DefaultAction == ActionBlock {
+			return true
+		}
+	}
+	return false
+}
+
+// partitionInlineFindings returns the findings whose source rule's action is
+// block. Findings from non-inline / non-block rules are dropped (they belong to
+// detective scanning, not preventive). redact was removed 2026-06-16 — the
+// preventive layer never rewrites a payload, only blocks or passes.
+func partitionInlineFindings(p *Pipeline, findings []Finding) (block []Finding) {
 	if len(findings) == 0 {
-		return nil, nil
+		return nil
 	}
 	bs, ok := p.scanner.(*BuiltinScanner)
 	if !ok {
-		return nil, nil
+		return nil
 	}
 	bs.mu.RLock()
 	defer bs.mu.RUnlock()
@@ -159,17 +148,14 @@ func partitionInlineFindings(p *Pipeline, findings []Finding) (block, redact []F
 
 	for _, f := range findings {
 		rule, ok := index[f.RuleID]
-		if !ok || !rule.Inline {
+		if !ok {
 			continue
 		}
-		switch rule.DefaultAction {
-		case ActionBlock:
+		if rule.DefaultAction == ActionBlock {
 			block = append(block, f)
-		case ActionRedact:
-			redact = append(redact, f)
 		}
 	}
-	return block, redact
+	return block
 }
 
 // submitPreventiveBlock writes a single audit event representing the block
@@ -177,12 +163,6 @@ func partitionInlineFindings(p *Pipeline, findings []Finding) (block, redact []F
 // the normal pipeline uses, so verify CLI walks the chain transparently.
 func (p *Pipeline) submitPreventiveBlock(ctx context.Context, env Envelope, findings []Finding, failMode string) string {
 	return p.submitPreventive(ctx, env, findings, ActionBlock, failMode, "")
-}
-
-// submitPreventiveRedact writes the redact-decision event. preRedactRef is
-// stamped in meta when known at event-build time.
-func (p *Pipeline) submitPreventiveRedact(ctx context.Context, env Envelope, findings []Finding, failMode, preRedactRef string) string {
-	return p.submitPreventive(ctx, env, findings, ActionRedact, failMode, preRedactRef)
 }
 
 func (p *Pipeline) submitPreventive(_ context.Context, env Envelope, findings []Finding, action Action, failMode, preRedactRef string) string {
@@ -205,6 +185,13 @@ func (p *Pipeline) submitPreventive(_ context.Context, env Envelope, findings []
 	}
 	if preRedactRef != "" {
 		e.Meta.PreRedactRef = preRedactRef
+	}
+	// Forensic q/reply snapshot: records conversation_id + history_id + the
+	// request question + the response (here: the blocked/redacted note), so the
+	// audit log can answer "当前请求/response 是什么". q/reply come from the
+	// REDACTED payload — secrets are never re-exposed.
+	if ref := p.saveQRSnapshot(e, env, findings); ref != "" {
+		e.Meta.SnapshotRef = ref
 	}
 	persisted, err := p.store.Append(e)
 	if err != nil {

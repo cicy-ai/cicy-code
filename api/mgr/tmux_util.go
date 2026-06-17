@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os/exec"
 	"strings"
 )
 
@@ -9,7 +8,7 @@ import (
 // in instance.go alongside the per-pane ttyd port pool, which has been removed
 // in favour of inline webtty serving — see ttyd_inline.go.)
 func runTmux(args ...string) (string, error) {
-	out, err := exec.Command("tmux", args...).Output()
+	out, err := tmuxCommand(args...).Output()
 	return strings.TrimSpace(string(out)), err
 }
 

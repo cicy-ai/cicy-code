@@ -38,10 +38,9 @@ var (
 	helperMode    bool // --helper=1 → ships a single headless cicy 团队助手 on w-1001
 	desktopCmd    *exec.Cmd
 	portFlag      string // --port N / --port=N → overrides PORT env (default 8008)
-	localMode     bool   // --local → force 127.0.0.1 even when container mode would bind 0.0.0.0
 )
 
-const version = "2.2.18"
+const version = "2.3.4"
 
 // agentsFlag holds --agents=hermes,... for non-interactive setup
 var agentsFlag string
@@ -110,7 +109,10 @@ Options:
                           prefixes are baked into every build; this flag only
                           activates them.
   --lab                   Enable lab mode
-  --local                 Bind 127.0.0.1 only (overrides container/deploy auto 0.0.0.0)
+  --public                Bind 0.0.0.0 (expose to the network). Default is
+                          127.0.0.1 (loopback only) — INCLUDING inside
+                          containers. Only pass this when you intend to expose
+                          the API, and use a strong, non-default api_token.
   --port N                API port (overrides PORT env; default: 8008)
   --audit                 Enable audit mode
   --helper=1              Team-Helper mode: ship a single headless cicy
@@ -131,14 +133,18 @@ Options:
 			cdnMode = true
 		case arg == "--lab":
 			labMode = true
-		case arg == "--local":
-			localMode = true
+		case arg == "--public":
+			publicMode = true
 		case arg == "--audit":
 			auditMode = true
 			os.Setenv("AUDIT_MODE", "1")
 		case arg == "--helper" || arg == "--helper=1":
 			helperMode = true
 			os.Setenv("CICY_HELPER", "1")
+		case arg == "--desktop" || arg == "--desktop=1":
+			// Launched by cicy-desktop → seed the 团队专员 (w-100). A plain
+			// cicy-code (server / inside a container) must NOT have it.
+			desktopMode = true
 		case arg == "--port":
 			// space form: --port 8208
 			if i+1 < len(cliArgs) {
@@ -161,28 +167,36 @@ Options:
 	store.Migrate()
 	defer store.Close()
 
-	if auditEnabled() {
-		if err := audit.Init(); err != nil {
-			log.Printf("[audit] init failed: %v", err)
-		} else {
-			log.Printf("[audit] enabled (audit_enabled=true) — collection + scanning active")
-		}
+	// Ensure the file-backed team knowledge store skeleton exists so it shows up
+	// as an fs root in the FileExplorer even before the first entry is written.
+	if err := knowledgeEnsureRoot(); err != nil {
+		log.Printf("[knowledge] ensure root: %v", err)
+	}
+
+	// Audit is always on — there is no master off-switch. The pipeline
+	// initializes unconditionally; collection + scanning are always active.
+	if err := audit.Init(); err != nil {
+		log.Printf("[audit] init failed: %v", err)
 	} else {
-		log.Printf("[audit] OFF (set \"audit_enabled\": true in global.json to enable) — no collection, no scanning, no w-6001")
+		log.Printf("[audit] init ok — collection + scanning active")
 	}
 	ensureMITMConfig() // seed ~/cicy-ai/mitm/config.json (enabled) before startMITM reads it
 	startMITM()
 	ensureMITMCAInSystemTrust() // trust the (now-generated) MITM CA for codex/kiro Rust TLS
 	startAutonomy()
 
+	// containerMode is still tracked for runtimeMode reporting, but it no longer
+	// forces a public bind: the listener defaults to 127.0.0.1 everywhere
+	// (including containers). Exposing the API to the network is now an explicit
+	// opt-in via --public. To reach a container's loopback-bound API from the
+	// host, port-forward to 127.0.0.1 inside the container, or pass --public
+	// (with a strong api_token) when you genuinely want it on the network.
 	containerMode = isContainerRuntime()
-	if containerMode {
-		publicMode = true
-	}
 	checkEnv()
 
 	go startWatcher()
 	go startTmuxHealth()
+	go startDesktopSnapshots()
 	startSystemResourceMonitor()
 	if _, err := syncMachinesFromConfig(); err != nil {
 		log.Printf("[machines] initial sync error: %v", err)
@@ -228,9 +242,12 @@ Options:
 	http.HandleFunc("/api/audit/triage", wa(handleAuditTriage))
 	http.HandleFunc("/api/audit/snapshot", wa(handleAuditSnapshot))
 	http.HandleFunc("/api/audit/stats", wa(handleAuditStats))
+	http.HandleFunc("/api/audit/rules", wa(handleAuditRules))
+	http.HandleFunc("/api/audit/rules/test", wa(handleAuditRulesTest))
 	http.HandleFunc("/api/audit/agents", wa(handleAuditAgents))
 	http.HandleFunc("/api/audit/ingest", wa(handleAuditIngest))
 	http.HandleFunc("/api/audit/allowlist/content", wa(handleAuditAllowlistContent))
+	http.HandleFunc("/api/audit/allowlist", wa(handleAuditAllowlist))
 	http.HandleFunc("/api/audit/policy", wa(handleAuditPolicyGlobal))
 	http.HandleFunc("/api/audit/policy/agents/", wa(handleAuditPolicyAgent))
 	http.HandleFunc("/api/audit/policy/effective/", wa(handleAuditPolicyEffective))
@@ -250,6 +267,7 @@ Options:
 	http.HandleFunc("/api/tmux/panes/", authM(handlePaneByID))
 	http.HandleFunc("/api/tmux/create", authM(handleCreatePane))
 	http.HandleFunc("/api/tmux/fork", authM(handleForkPane))
+	http.HandleFunc("/api/tmux/fork/preview", authM(handleForkPreview))
 	http.HandleFunc("/api/tmux/restart_all", authM(handleRestartAll))
 
 	// Tmux
@@ -260,6 +278,9 @@ Options:
 	http.HandleFunc("/api/cicy/clear", authM(handleCicyClear))   // 清空 headless cicy 会话(内存+conversation.json+快照)
 	http.HandleFunc("/api/tmux/reply_text", authM(handleAgentReplyText))
 	http.HandleFunc("/api/tmux/chat_history", authM(handleAgentChatHistory))
+	http.HandleFunc("/api/agent/messages", authM(handleAgentMessages)) // cross-agent message link view (JOIN history_turns)
+	http.HandleFunc("/api/knowledge", authM(handleKnowledge))          // team knowledge Layer 2 store: GET list/recall, POST add
+	http.HandleFunc("/api/knowledge/", authM(handleKnowledgeByID))     // GET one / PATCH promote|reject|supersede
 	http.HandleFunc("/api/tmux/client-trace", authM(handleTmuxClientTrace))
 	// http.HandleFunc("/api/tmux/send_wait", authM(handleSendWait)) // TODO: implement handleSendWait
 	http.HandleFunc("/api/tmux/capture", authM(handleCapture))
@@ -286,6 +307,11 @@ Options:
 	http.HandleFunc("/api/chat/debug", wa(handleChatDebug))
 	http.HandleFunc("/api/chat/webhook", corsM(handleChatWebhook))
 	http.HandleFunc("/api/openclaw/message/send", wa(handleOpenClawMessageSend))
+
+	// Desktop snapshots (periodic win/mac/linux screen captures → 桌面 tab)
+	http.HandleFunc("/api/desktop/snapshots", wa(handleDesktopSnapshots))
+	http.HandleFunc("/api/desktop/snapshot-image", wa(handleDesktopSnapshotImage))
+	http.HandleFunc("/api/desktop/snapshot-now", wa(handleDesktopSnapshotNow))
 
 	// Native files (replaces code-server file viewer/editor; see docs/native-files-plan.md)
 	http.HandleFunc("/api/fs/roots", wa(handleFsRoots))
@@ -317,7 +343,10 @@ Options:
 	http.HandleFunc("/api/cicy/files", wa(handleCicyFiles))
 	http.HandleFunc("/api/cicy/file", wa(handleCicyFile))
 	http.HandleFunc("/assets/files", wa(handleAssetFileUpload))
-	http.HandleFunc("/assets/files/", wa(handleAssetFile))
+	// GET 取文件公开(不带 cicy token):文件名自带 64-bit 随机前缀,不可猜的随机路径即
+	// capability。这样附件 URL(进聊天消息、发给模型)不含任何 secret,出站审计不会把它当
+	// cicy token 拦截;<img> 也能直接加载(无需在 URL 里塞 API token)。上传(POST)仍需认证。
+	http.HandleFunc("/assets/files/", corsM(handleAssetFile))
 	http.HandleFunc("/api/notify/stream", corsM(func(w http.ResponseWriter, r *http.Request) {
 		t := r.URL.Query().Get("token")
 		if t == "" || !verifyToken(t) {
@@ -330,6 +359,12 @@ Options:
 	// Memory templates (global + project, backs create-agent dialog)
 	http.HandleFunc("/api/memory/templates", wa(handleMemoryTemplates))
 	http.HandleFunc("/api/memory/templates/", wa(handleMemoryTemplateByName))
+	// Projects (first-class: name + dir + rules; per-project shared claude memory)
+	http.HandleFunc("/api/projects", wa(handleProjects))
+
+	// Custom agents (user-authored cicy personas, ~/cicy-ai/agents/<slug>/AGENT.md)
+	http.HandleFunc("/api/custom-agents", wa(handleCustomAgents))
+	http.HandleFunc("/api/custom-agents/", wa(handleCustomAgentAction))
 
 	// Todo
 	http.HandleFunc("/api/todo/list", wa(handleTodoList))
@@ -369,6 +404,7 @@ Options:
 	http.HandleFunc("/api/agents/unbind", wa(handleAgentUnbind))
 	http.HandleFunc("/api/agents/unbind/", wa(handleAgentUnbind))
 	http.HandleFunc("/api/agents/reorder", wa(handleAgentReorder))
+	http.HandleFunc("/api/agents/reparent", wa(handleAgentReparent))
 
 	// Groups
 	http.HandleFunc("/api/groups", wa(handleGroups))
@@ -426,6 +462,10 @@ Options:
 	// Settings
 	http.HandleFunc("/api/settings", wa(handleSettings))
 	http.HandleFunc("/api/settings/global", wa(handleSettings))
+	// Settings → General: email (SMTP) config + API-token show/rotate-and-email.
+	http.HandleFunc("/api/settings/email", wa(handleEmailConfig))
+	http.HandleFunc("/api/settings/token", wa(handleTokenShow))
+	http.HandleFunc("/api/settings/token/refresh", wa(handleTokenRefresh))
 
 	// AI providers (global.json)
 	http.HandleFunc("/api/providers", wa(handleProviders))
@@ -493,9 +533,6 @@ Options:
 	// online and message-ready without a tmux pane.
 	warmCicySessions()
 
-	// A2A liaison: poll the platform inbox for bound liaison agents
-	startA2ALiaisonPoller()
-
 	// Hook: thinking → idle
 	RegisterHook(func(paneID string, old, new paneSt) {
 		if old.Status != nil && *old.Status == "thinking" && new.Status != nil && *new.Status == "idle" {
@@ -542,8 +579,9 @@ Options:
 	}()
 
 	bind := "127.0.0.1"
-	if publicMode && !localMode { // --local forces loopback even under container auto-public
+	if publicMode { // --public → expose on all interfaces; default stays loopback
 		bind = "0.0.0.0"
+		log.Printf("[startup] WARNING: --public binds 0.0.0.0 (network-exposed). Ensure a strong, non-default api_token is set.")
 	}
 	log.Printf("cicy-code starting on %s:%s", bind, port)
 	token := getFirstToken()

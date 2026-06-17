@@ -161,9 +161,17 @@ func TestIMBindOnePerPlatformPerAgent(t *testing.T) {
 		t.Fatalf("bind 2 after unbind status = %d body=%s", rec4.Code, rec4.Body.String())
 	}
 
-	// the reply-hook factory should now return a hook for the bound account once a transport exists.
-	// (No transport in tests, so it should return nothing — just make sure it doesn't panic.)
-	if hooks := newReplyHooksForPane("w-20001", false); len(hooks) != 0 {
-		t.Fatalf("expected no reply hooks without a live transport, got %d", len(hooks))
+	// the reply-hook factory should now return an IM push hook for the bound
+	// account once a transport exists. (No transport in tests, so it should
+	// return no IM hook — just make sure it doesn't panic. Other independent
+	// hooks, e.g. the memory-write hook, may be present and are ignored here.)
+	var imHooks int
+	for _, h := range newReplyHooksForPane("w-20001", false) {
+		if _, ok := h.(*imReplyPushHook); ok {
+			imHooks++
+		}
+	}
+	if imHooks != 0 {
+		t.Fatalf("expected no IM reply hooks without a live transport, got %d", imHooks)
 	}
 }

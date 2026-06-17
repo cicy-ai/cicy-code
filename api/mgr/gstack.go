@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -34,7 +33,7 @@ func jsonResp(w http.ResponseWriter, v interface{}) {
 }
 
 func tmuxSendKeys(paneID, cmd string) error {
-	_, err := exec.Command("tmux", "send-keys", "-t", paneID, cmd, "Enter").Output()
+	_, err := tmuxCommand("send-keys", "-t", paneID, cmd, "Enter").Output()
 	return err
 }
 

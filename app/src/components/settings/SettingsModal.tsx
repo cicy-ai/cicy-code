@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { SlidersHorizontal, Globe, MessageCircle, Route, Boxes, X, Check } from 'lucide-react';
+import { SlidersHorizontal, Globe, MessageCircle, Route, Boxes, X, Check, KeyRound, Mail, RefreshCw, Copy, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 import ProviderDashboard from '../providers/ProviderDashboard';
 import IMDashboard from '../im/IMDashboard';
+import apiService from '../../services/api';
+import { TokenManager } from '../../services/tokenManager';
+import { useDialogs } from '../ui/Modal';
 
 // Unified, productized Settings surface. One fullscreen modal with a left nav
 // (Language / IM / Agent Routing / LLM Providers) and a large content area on
@@ -11,6 +14,28 @@ import IMDashboard from '../im/IMDashboard';
 // and the membership-popover language submenu. Opened from the bottom-left
 // settings popover (entries above the version line).
 export type SettingsSection = 'general' | 'language' | 'im' | 'routing' | 'providers';
+
+// Common email providers → their SMTP/IMAP/POP3 servers. Typing an account whose
+// domain matches one of these auto-fills the servers, so the user only enters the
+// address + auth code. Unknown domains fall back to manual entry.
+interface MailProvider { label: string; host: string; port: number; secure: boolean; imap: string; pop3: string; }
+const EMAIL_PROVIDERS: Record<string, MailProvider> = {
+  'qq.com': { label: 'QQ 邮箱', host: 'smtp.qq.com', port: 465, secure: true, imap: 'imap.qq.com', pop3: 'pop.qq.com' },
+  'foxmail.com': { label: 'Foxmail', host: 'smtp.qq.com', port: 465, secure: true, imap: 'imap.qq.com', pop3: 'pop.qq.com' },
+  'gmail.com': { label: 'Gmail', host: 'smtp.gmail.com', port: 465, secure: true, imap: 'imap.gmail.com', pop3: 'pop.gmail.com' },
+  '163.com': { label: '163 邮箱', host: 'smtp.163.com', port: 465, secure: true, imap: 'imap.163.com', pop3: 'pop.163.com' },
+  '126.com': { label: '126 邮箱', host: 'smtp.126.com', port: 465, secure: true, imap: 'imap.126.com', pop3: 'pop.126.com' },
+  'outlook.com': { label: 'Outlook', host: 'smtp.office365.com', port: 587, secure: false, imap: 'outlook.office365.com', pop3: 'outlook.office365.com' },
+  'hotmail.com': { label: 'Hotmail', host: 'smtp.office365.com', port: 587, secure: false, imap: 'outlook.office365.com', pop3: 'outlook.office365.com' },
+  'icloud.com': { label: 'iCloud', host: 'smtp.mail.me.com', port: 587, secure: false, imap: 'imap.mail.me.com', pop3: 'imap.mail.me.com' },
+};
+const emailDomain = (addr: string): string => {
+  const m = /@([^@\s]+)$/.exec((addr || '').trim().toLowerCase());
+  return m ? m[1] : '';
+};
+const providerPreset = (addr: string): MailProvider | null => EMAIL_PROVIDERS[emailDomain(addr)] || null;
+const providerLabel = (addr: string): string => (providerPreset(addr)?.label || '');
+const isPresetHost = (host: string): boolean => Object.values(EMAIL_PROVIDERS).some((p) => p.host === host);
 
 interface NavItem {
   id: SettingsSection;
@@ -68,6 +93,134 @@ export default function SettingsModal({
       setSavingUrl(false);
     }
   };
+
+  // General → API token + Email (SMTP). The UI configures the SAME email.json the
+  // `email` skill uses; refresh rotates the token and emails it (server gates on
+  // SMTP being configured). Token rotation invalidates the current token, so on
+  // success we persist the returned new token into TokenManager.
+  const [emailCfg, setEmailCfg] = useState<any>(null);
+  const [emailForm, setEmailForm] = useState({ host: '', port: 465, secure: true, user: '', pass: '', default_to: '' });
+  const [emailSaving, setEmailSaving] = useState(false);
+  const [emailSaved, setEmailSaved] = useState(false);
+  const [apiToken, setApiToken] = useState('');
+  const [tokenShown, setTokenShown] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshMsg, setRefreshMsg] = useState<{ kind: 'ok' | 'need-smtp' | 'err'; text: string } | null>(null);
+  const sendReady = !!emailCfg?.send_ready;
+  const { confirm, node: dialogNode } = useDialogs();
+
+  useEffect(() => {
+    if (!open || section !== 'general') return;
+    let alive = true;
+    Promise.all([apiService.getEmailConfig(), apiService.getApiToken()])
+      .then(([ec, tk]) => {
+        if (!alive) return;
+        const d = ec.data || {};
+        setEmailCfg(d);
+        const s = d.smtp || {};
+        setEmailForm({ host: s.host || '', port: s.port || 465, secure: s.secure !== false, user: s.user || '', pass: '', default_to: d.default_to || '' });
+        setApiToken(tk.data?.token || '');
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [open, section]);
+
+  const saveEmail = async () => {
+    setEmailSaving(true);
+    setEmailSaved(false);
+    try {
+      const user = emailForm.user.trim();
+      const host = emailForm.host.trim();
+      const port = Number(emailForm.port) || 465;
+      const secure = !!emailForm.secure;
+      // from/default_to default to the account on the server; receive (imap/pop3)
+      // is derived from the same provider preset so a known provider needs only
+      // account + password.
+      const preset = providerPreset(user);
+      const payload: any = {
+        smtp: { host, port, secure, user },
+        default_to: emailForm.default_to.trim(),
+      };
+      if (emailForm.pass.trim()) payload.smtp.pass = emailForm.pass;
+      if (preset) {
+        payload.imap = { host: preset.imap, port: 993, secure: true, user };
+        payload.pop3 = { host: preset.pop3, port: 995, secure: true, user };
+        if (emailForm.pass.trim()) { payload.imap.pass = emailForm.pass; payload.pop3.pass = emailForm.pass; }
+      }
+      const r = await apiService.saveEmailConfig(payload);
+      setEmailCfg(r.data?.config || null);
+      setEmailForm((f) => ({ ...f, pass: '' }));
+      setEmailSaved(true);
+      setRefreshMsg(null);
+    } finally {
+      setEmailSaving(false);
+    }
+  };
+
+  const refreshToken = async () => {
+    if (!sendReady) { setRefreshMsg({ kind: 'need-smtp', text: t('settingsTokenNeedSmtp', { defaultValue: '请先配置下方的 SMTP,配置后才能刷新并把新 token 发到邮箱。' }) }); return; }
+    const recipient = (emailCfg?.default_to || emailForm.default_to || emailForm.user || '').trim();
+    const ok = await confirm({
+      title: t('settingsTokenConfirmTitle', { defaultValue: '刷新 API 令牌?' }),
+      body: (
+        <>
+          {t('settingsTokenConfirmBody', { defaultValue: '当前令牌会立即作废,所有正在用它访问本机的设备和远程会话都需要换用新令牌。' })}
+          {recipient ? <><br /><br />{t('settingsTokenConfirmEmail', { defaultValue: '新令牌将发送到:', })}<span className="font-medium text-zinc-200">{recipient}</span></> : null}
+        </>
+      ),
+      danger: true,
+      confirmLabel: t('settingsTokenConfirmOk', { defaultValue: '刷新并发送' }),
+      cancelLabel: t('settingsCancel', { defaultValue: '取消' }),
+    });
+    if (!ok) return;
+    setRefreshing(true);
+    setRefreshMsg(null);
+    try {
+      const r = await apiService.refreshApiToken();
+      const tok = r.data?.token;
+      if (tok) { setApiToken(tok); TokenManager.saveToken(tok); }
+      const to = r.data?.emailed_to;
+      setRefreshMsg({ kind: 'ok', text: to ? t('settingsTokenEmailed', { defaultValue: '新 token 已发送至 {{to}}', to }) : t('settingsTokenRefreshed', { defaultValue: '已刷新' }) });
+    } catch (e: any) {
+      const code = e?.response?.data?.code;
+      if (code === 'EMAIL_NOT_CONFIGURED' || code === 'EMAIL_NOT_INSTALLED') setRefreshMsg({ kind: 'need-smtp', text: t('settingsTokenNeedSmtp', { defaultValue: '请先配置下方的 SMTP,配置后才能刷新并把新 token 发到邮箱。' }) });
+      else if (code === 'NO_RECIPIENT') setRefreshMsg({ kind: 'err', text: t('settingsTokenNoRecipient', { defaultValue: '未设置收件邮箱,请在下方 SMTP 配置里填写「收件人」。' }) });
+      else setRefreshMsg({ kind: 'err', text: e?.response?.data?.detail || t('settingsTokenRefreshFailed', { defaultValue: '刷新失败' }) });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const copyToken = async () => {
+    try { await navigator.clipboard.writeText(apiToken); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+  };
+
+  // Typing an account like cicybot@qq.com auto-fills the SMTP server/port so a
+  // known provider needs only the account + auth code. Unknown domains keep
+  // whatever the user typed manually.
+  const onEmailUserChange = (raw: string) => {
+    const preset = providerPreset(raw);
+    setEmailForm((f) => {
+      const next = { ...f, user: raw };
+      if (preset && (!f.host || isPresetHost(f.host))) {
+        next.host = preset.host;
+        next.port = preset.port;
+        next.secure = preset.secure;
+      }
+      return next;
+    });
+  };
+  const detectedProvider = providerLabel(emailForm.user);
+
+  const inp = 'rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[13px] text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-white/[0.18]';
+  const lbl = 'block text-[11px] font-medium text-zinc-400 mb-1';
+  const card = 'rounded-xl border border-white/[0.06] bg-white/[0.02] p-5';
+  const iconTile = 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] text-zinc-300';
+  // Neutral, low-key buttons — match the icon buttons, no loud color fills.
+  const btnBase = 'rounded-lg px-3.5 py-2 text-[12px] font-medium transition-colors';
+  const btnActive = 'border border-white/[0.1] bg-white/[0.05] text-zinc-100 hover:bg-white/[0.09] hover:text-white';
+  const btnDisabled = 'cursor-not-allowed border border-white/[0.06] bg-white/[0.02] text-zinc-600';
 
   // ESC closes — capture phase so it wins over the embedded dashboards' own
   // key handlers (they only care about their internal editors).
@@ -143,42 +296,154 @@ export default function SettingsModal({
 
           {/* right content */}
           <div data-id="settings-modal-content" className="relative min-h-0 flex-1 overflow-hidden bg-[#0b0b0d]">
-            {/* General — public URL (drives the mobile QR) */}
+            {/* General — public URL, API token, email delivery */}
             {section === 'general' && (
-              <div data-id="settings-section-general" className="h-full overflow-auto p-6">
-                <div className="mx-auto max-w-md">
-                  <div className="mb-1 text-[13px] font-semibold text-zinc-200">{t('settingsPublicUrlTitle', { defaultValue: '公网访问地址' })}</div>
-                  <div className="mb-4 text-[11px] leading-5 text-zinc-500">{t('settingsPublicUrlHint', { defaultValue: '本机对外可达的地址(隧道域名或局域网 IP)。配置后右下角会出现「扫码上手机」二维码;留空则隐藏。' })}</div>
-                  <input
-                    data-id="settings-public-url-input"
-                    type="text"
-                    value={urlDraft}
-                    onChange={(e) => { setUrlDraft(e.target.value); setSavedUrl(false); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && urlDirty && !savingUrl) void savePublicUrl(); }}
-                    placeholder="https://app-xxxx.example.com"
-                    spellCheck={false}
-                    autoComplete="off"
-                    className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[13px] text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-white/[0.18]"
-                  />
-                  <div className="mt-3 flex items-center gap-2">
-                    <button
-                      type="button"
-                      data-id="settings-public-url-save"
-                      disabled={!urlDirty || savingUrl}
-                      onClick={() => void savePublicUrl()}
-                      className={`rounded-lg px-3.5 py-2 text-[12px] font-semibold transition-colors ${
-                        urlDirty && !savingUrl
-                          ? 'bg-sky-500/90 text-white hover:bg-sky-500'
-                          : 'cursor-not-allowed bg-white/[0.05] text-zinc-600'
-                      }`}
-                    >
-                      {savingUrl ? t('settingsSaving', { defaultValue: '保存中…' }) : t('settingsSave', { defaultValue: '保存' })}
-                    </button>
-                    {savedUrl && !urlDirty ? (
-                      <span data-id="settings-public-url-saved" className="flex items-center gap-1 text-[11px] text-emerald-400">
-                        <Check className="h-3.5 w-3.5" />{t('settingsSaved', { defaultValue: '已保存' })}
-                      </span>
-                    ) : null}
+              <div data-id="settings-section-general" className="h-full overflow-auto">
+                <div className="mx-auto max-w-2xl px-8 py-7">
+                  <header data-id="settings-general-header" className="mb-6">
+                    <h2 className="text-[15px] font-semibold tracking-tight text-zinc-100">{t('settingsNavGeneral', { defaultValue: '通用' })}</h2>
+                    <p className="mt-1 text-[12px] leading-5 text-zinc-500">{t('settingsGeneralSubtitle', { defaultValue: '本机访问地址、API 令牌与令牌投递邮箱' })}</p>
+                  </header>
+
+                  <div className="space-y-4">
+                  {/* Card: 公网访问地址 */}
+                  <section data-id="settings-publicurl-block" className={card}>
+                    <div className="flex items-start gap-3">
+                      <span className={iconTile}><Globe className="h-4 w-4" /></span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-semibold text-zinc-100">{t('settingsPublicUrlTitle', { defaultValue: '公网访问地址' })}</div>
+                        <div className="mt-0.5 text-[11px] leading-5 text-zinc-500">{t('settingsPublicUrlHint', { defaultValue: '本机对外可达的地址(隧道域名或局域网 IP)。配置后右下角会出现「扫码上手机」二维码;留空则隐藏。' })}</div>
+                        <div className="mt-3">
+                          <input
+                            data-id="settings-public-url-input"
+                            type="text"
+                            value={urlDraft}
+                            onChange={(e) => { setUrlDraft(e.target.value); setSavedUrl(false); }}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && urlDirty && !savingUrl) void savePublicUrl(); }}
+                            placeholder="https://app-xxxx.example.com"
+                            spellCheck={false}
+                            autoComplete="off"
+                            className={`${inp} w-full`}
+                          />
+                        </div>
+                        <div className="mt-3 flex items-center gap-2">
+                          <button
+                            type="button"
+                            data-id="settings-public-url-save"
+                            disabled={!urlDirty || savingUrl}
+                            onClick={() => void savePublicUrl()}
+                            className={`${btnBase} ${urlDirty && !savingUrl ? btnActive : btnDisabled}`}
+                          >
+                            {savingUrl ? t('settingsSaving', { defaultValue: '保存中…' }) : t('settingsSave', { defaultValue: '保存' })}
+                          </button>
+                          {savedUrl && !urlDirty ? (
+                            <span data-id="settings-public-url-saved" className="flex items-center gap-1 text-[11px] text-emerald-400">
+                              <Check className="h-3.5 w-3.5" />{t('settingsSaved', { defaultValue: '已保存' })}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* Card: API Token — show + rotate (rotation emails the new token) */}
+                  <section data-id="settings-token-block" className={card}>
+                    <div className="flex items-start gap-3">
+                      <span className={iconTile}><KeyRound className="h-4 w-4" /></span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-semibold text-zinc-100">{t('settingsTokenTitle', { defaultValue: 'API 令牌' })}</div>
+                        <div className="mt-0.5 text-[11px] leading-5 text-zinc-500">{t('settingsTokenHint', { defaultValue: '本机 API 访问令牌。刷新会作废旧令牌,并把新令牌发到下方配置的收件邮箱。' })}</div>
+                        <div className="mt-3 flex items-center gap-2">
+                          <input
+                            data-id="settings-token-value"
+                            readOnly
+                            value={tokenShown ? apiToken : (apiToken ? '•'.repeat(Math.min(40, apiToken.length)) : '')}
+                            className={`${inp} min-w-0 flex-1 font-mono !text-[12px]`}
+                          />
+                          <button data-id="settings-token-toggle" type="button" title={tokenShown ? t('settingsHide', { defaultValue: '隐藏' }) : t('settingsShow', { defaultValue: '显示' })} onClick={() => setTokenShown((v) => !v)} className="shrink-0 rounded-lg border border-white/[0.08] bg-white/[0.03] p-2 text-zinc-400 transition-colors hover:text-zinc-200">
+                            {tokenShown ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                          <button data-id="settings-token-copy" type="button" title={t('settingsCopy', { defaultValue: '复制' })} onClick={() => void copyToken()} className="shrink-0 rounded-lg border border-white/[0.08] bg-white/[0.03] p-2 text-zinc-400 transition-colors hover:text-zinc-200">
+                            {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                          </button>
+                        </div>
+                        <div className="mt-3 flex items-center gap-2">
+                          <button
+                            data-id="settings-token-refresh"
+                            type="button"
+                            disabled={refreshing}
+                            onClick={() => void refreshToken()}
+                            className={`flex items-center gap-1.5 ${btnBase} ${refreshing ? btnDisabled : btnActive}`}
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />{refreshing ? t('settingsTokenRefreshing', { defaultValue: '刷新中…' }) : t('settingsTokenRefresh', { defaultValue: '刷新令牌' })}
+                          </button>
+                          {refreshMsg ? (
+                            <span data-id="settings-token-msg" className={`flex items-center gap-1 text-[11px] ${refreshMsg.kind === 'ok' ? 'text-emerald-400' : refreshMsg.kind === 'need-smtp' ? 'text-amber-400' : 'text-rose-400'}`}>
+                              {refreshMsg.kind === 'ok' ? <Check className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}{refreshMsg.text}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* Card: Email (SMTP) — same ~/cicy-ai/db/email.json the email skill uses */}
+                  <section data-id="settings-email-block" className={card}>
+                    <div className="flex items-start gap-3">
+                      <span className={iconTile}><Mail className="h-4 w-4" /></span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <div className="text-[13px] font-semibold text-zinc-100">{t('settingsEmailTitle', { defaultValue: '令牌投递邮箱' })}</div>
+                          {emailCfg ? (
+                            <span data-id="settings-email-status" className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${sendReady ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-400'}`}>
+                              {sendReady ? t('settingsEmailReady', { defaultValue: '已配置' }) : t('settingsEmailUnset', { defaultValue: '未配置' })}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="mt-0.5 text-[11px] leading-5 text-zinc-500">{t('settingsEmailHint', { defaultValue: '刷新令牌时,新令牌通过这个邮箱发给你。填邮箱账号 + 授权码即可,常见服务商会自动识别。' })}</div>
+                        <div className="mt-3 space-y-3">
+                      {/* Account — typing this auto-detects the provider's servers */}
+                      <div data-id="settings-email-user-field">
+                        <label className={lbl}>{t('settingsEmailUserLabel', { defaultValue: '邮箱账号' })}</label>
+                        <input data-id="settings-email-user" type="email" placeholder="you@qq.com" value={emailForm.user} onChange={(e) => onEmailUserChange(e.target.value)} className={`${inp} w-full`} spellCheck={false} autoComplete="off" />
+                        {detectedProvider ? (
+                          <div data-id="settings-email-detected" className="mt-1 flex items-center gap-1 text-[11px] text-emerald-400"><Check className="h-3 w-3" />{t('settingsEmailDetected', { defaultValue: '已识别 {{name}}，服务器已自动填好', name: detectedProvider })}</div>
+                        ) : null}
+                      </div>
+                      {/* Auth code / password */}
+                      <div data-id="settings-email-pass-field">
+                        <label className={lbl}>{t('settingsEmailPassLabel', { defaultValue: '授权码 / 密码' })}</label>
+                        <input data-id="settings-email-pass" type="password" placeholder={emailCfg?.smtp?.pass_set ? t('settingsEmailPassSet', { defaultValue: '已设置 (留空保持不变)' }) : t('settingsEmailPassPh', { defaultValue: 'QQ/163 等填授权码，非登录密码' })} value={emailForm.pass} onChange={(e) => setEmailForm((f) => ({ ...f, pass: e.target.value }))} className={`${inp} w-full`} autoComplete="new-password" />
+                      </div>
+                      {/* SMTP server — auto-filled from the account; editable for custom providers */}
+                      <div data-id="settings-email-server-field">
+                        <label className={lbl}>{t('settingsEmailServerLabel', { defaultValue: 'SMTP 服务器' })}{detectedProvider ? <span className="ml-1 text-zinc-600">{t('settingsEmailAuto', { defaultValue: '（已自动填好，可修改）' })}</span> : null}</label>
+                        <div className="flex items-center gap-2">
+                          <input data-id="settings-email-host" placeholder="smtp.example.com" value={emailForm.host} onChange={(e) => setEmailForm((f) => ({ ...f, host: e.target.value }))} className={`${inp} flex-1`} spellCheck={false} autoComplete="off" />
+                          <input data-id="settings-email-port" type="number" placeholder="465" value={emailForm.port} onChange={(e) => setEmailForm((f) => ({ ...f, port: Number(e.target.value) }))} className={`${inp} w-20`} title={t('settingsEmailPortTitle', { defaultValue: '端口' })} />
+                          <label className="flex items-center gap-1.5 whitespace-nowrap text-[12px] text-zinc-400">
+                            <input data-id="settings-email-secure" type="checkbox" checked={emailForm.secure} onChange={(e) => setEmailForm((f) => ({ ...f, secure: e.target.checked }))} />
+                            {t('settingsEmailSecureShort', { defaultValue: 'TLS' })}
+                          </label>
+                        </div>
+                      </div>
+                      {/* Recipient — defaults to the account itself */}
+                      <div data-id="settings-email-to-field">
+                        <label className={lbl}>{t('settingsEmailToLabel', { defaultValue: '接收新 token 的邮箱' })}</label>
+                        <input data-id="settings-email-to" type="email" placeholder={emailForm.user.trim() ? t('settingsEmailToPh', { defaultValue: '默认与账号相同（{{addr}}），可留空', addr: emailForm.user.trim() }) : t('settingsEmailToPhEmpty', { defaultValue: '默认与账号相同，可留空' })} value={emailForm.default_to} onChange={(e) => setEmailForm((f) => ({ ...f, default_to: e.target.value }))} className={`${inp} w-full`} spellCheck={false} autoComplete="off" />
+                      </div>
+                    </div>
+                        <div className="mt-4 flex items-center gap-2">
+                          <button data-id="settings-email-save" type="button" disabled={emailSaving} onClick={() => void saveEmail()} className={`${btnBase} ${emailSaving ? btnDisabled : btnActive}`}>
+                            {emailSaving ? t('settingsSaving', { defaultValue: '保存中…' }) : t('settingsSave', { defaultValue: '保存' })}
+                          </button>
+                          {emailSaved ? (
+                            <span data-id="settings-email-saved" className="flex items-center gap-1 text-[11px] text-emerald-400"><Check className="h-3.5 w-3.5" />{t('settingsSaved', { defaultValue: '已保存' })}</span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
                   </div>
                 </div>
               </div>
@@ -247,6 +512,7 @@ export default function SettingsModal({
       {isProviderSection && (
         <ProviderDashboard leftMount={provLeft} rightMount={provRight} tab={section === 'routing' ? 'routing' : 'providers'} hideTabStrip />
       )}
+      {dialogNode}
     </div>,
     document.body,
   );

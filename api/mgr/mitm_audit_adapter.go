@@ -62,6 +62,7 @@ func (mitmAuditAdapter) StartTurn(provider, agentID string, target *url.URL, met
 	// newAIGatewayAuditSession wires replyHooks via newReplyHooksForPane →
 	// peekCallbackHooksForPane internally, so we must NOT touch callbacks here.
 	sess := newAIGatewayAuditSession(provider, agentID, base, suffix, method, headers, body)
+	sess.auditSourceChannel = audit.SourceMitm
 	if err := sess.writeStartSnapshots(); err != nil {
 		log.Printf("[mitm] write current snapshot for %s: %v", agentID, err)
 	}
@@ -72,7 +73,18 @@ func (mitmAuditAdapter) StartTurn(provider, agentID string, target *url.URL, met
 		req.Header = headers.Clone()
 		sess.recordOutboundRequest(req)
 	}
-	mitmSubmitAudit(sess, audit.DirectionOutbound, body, "current.json")
+	// Outbound (current.json) is audited INCREMENTALLY: current.json re-sends the
+	// full conversation history every turn, so scanning the whole body re-matches
+	// the same content endlessly (flood). IncrementalOutboundPayload reduces it to
+	// only the message blocks new this turn — a newly-sent secret is still caught,
+	// an old one in history is scanned once and never re-reported. nil = nothing
+	// new this turn, so nothing to scan. (Snapshot already written for history;
+	// inline preventive is a separate path, unaffected.)
+	if inc := audit.IncrementalOutboundPayload(agentID, body); len(inc) > 0 {
+		// ref makes it explicit that only THIS turn's new messages were scanned
+		// (the delta), not the full current.json history.
+		mitmSubmitAudit(sess, audit.DirectionOutbound, inc, "current.json#delta")
+	}
 	return &mitmAuditTurn{sess: sess}
 }
 

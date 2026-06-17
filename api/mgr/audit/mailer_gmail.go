@@ -72,6 +72,29 @@ func buildRFC822(from string, msg EmailMessage) string {
 	fmt.Fprintf(&b, "X-Cicy-Audit-Agent: %s\r\n", msg.AgentID)
 	fmt.Fprintf(&b, "X-Cicy-Audit-Severity: %s\r\n", msg.Severity)
 	b.WriteString("MIME-Version: 1.0\r\n")
+
+	// HTML present → multipart/alternative so clients render the HTML and fall
+	// back to plain text. Otherwise unchanged text/plain behaviour.
+	if strings.TrimSpace(msg.HTMLBody) != "" {
+		boundary := "cicy_audit_" + msg.EventID
+		if boundary == "cicy_audit_" {
+			boundary = "cicy_audit_boundary"
+		}
+		fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=%q\r\n\r\n", boundary)
+		fmt.Fprintf(&b, "--%s\r\n", boundary)
+		b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
+		b.WriteString("Content-Transfer-Encoding: 8bit\r\n\r\n")
+		b.WriteString(msg.Body)
+		b.WriteString("\r\n")
+		fmt.Fprintf(&b, "--%s\r\n", boundary)
+		b.WriteString("Content-Type: text/html; charset=utf-8\r\n")
+		b.WriteString("Content-Transfer-Encoding: 8bit\r\n\r\n")
+		b.WriteString(msg.HTMLBody)
+		b.WriteString("\r\n")
+		fmt.Fprintf(&b, "--%s--\r\n", boundary)
+		return b.String()
+	}
+
 	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
 	b.WriteString("Content-Transfer-Encoding: 8bit\r\n")
 	b.WriteString("\r\n")

@@ -55,7 +55,7 @@ func sampleEvent() Event {
 			MatchCount: 1,
 			Spans:      []Span{{Preview: "AKIA****MPLE"}},
 		}},
-		Decision: Decision{Action: ActionRedact, Applied: true},
+		Decision: Decision{Action: ActionBlock, Applied: true},
 	}
 }
 

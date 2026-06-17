@@ -556,6 +556,8 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	req.AllowAllActions = true
 	req.ReplyInChinese = true
 	readBody(r, &req)
+	// "custom:<slug>" picks a user-authored custom agent → cicy + role_template.
+	req.AgentType, req.RoleTemplate = resolveCustomAgentSelection(req.AgentType, req.RoleTemplate)
 	req.AgentType = normalizeAgentType(req.AgentType)
 	if req.AgentType == "" {
 		J(w, M{"success": false, "error": "unsupported agent_type"})
@@ -592,13 +594,36 @@ func handleCreatePane(w http.ResponseWriter, r *http.Request) {
 	J(w, result)
 }
 
+// resolveCustomAgentSelection maps a synthetic "custom:<slug>" agent_type (chosen
+// from the agent-type picker for a user-authored custom agent) to its real
+// runtime: agent_type=cicy + role_template=<slug> (the custom persona, which then
+// feeds the lite tools/prompt/model via the role lookup chain). Returns the
+// inputs unchanged for any non-custom agent_type.
+func resolveCustomAgentSelection(agentType, roleTemplate string) (string, string) {
+	const prefix = "custom:"
+	if strings.HasPrefix(agentType, prefix) {
+		if slug := sanitizeTemplateSlug(strings.TrimPrefix(agentType, prefix)); slug != "" {
+			return "cicy", slug
+		}
+	}
+	return agentType, roleTemplate
+}
+
 func doCreatePane(title, role, defaultModel, agentType, initScript string, allowAllActions bool, replyInChinese bool, useCustomGateway bool, useProxy bool, proxy *proxySettings, winName *string, masterPaneID string, masterAgentType string, inheritGuidance bool, projectTemplate string, roleTemplate string, token string, runtimeAI *runtimeAIOverride) (M, error) {
+	agentType, roleTemplate = resolveCustomAgentSelection(agentType, roleTemplate)
 	agentType = normalizeAgentType(agentType)
 	if agentType == "" {
 		return M{"success": false}, fmt.Errorf("unsupported agent_type")
 	}
 	if !isAllowedAgentType(agentType) {
 		return M{"success": false}, fmt.Errorf("agent_type not allowed in current mode")
+	}
+	// A custom agent (role_template → ~/cicy-ai/agents/<slug>/AGENT.md) may pin a
+	// default model in its definition; apply it when the caller didn't specify one.
+	if strings.TrimSpace(defaultModel) == "" {
+		if ca, ok := customAgentFor(roleTemplate); ok && strings.TrimSpace(ca.Model) != "" {
+			defaultModel = strings.TrimSpace(ca.Model)
+		}
 	}
 	// Get next worker index. CRITICAL: skip any index whose pane id already
 	// exists in agent_config. worker_index can lag behind real pane ids after
@@ -732,6 +757,9 @@ func composeGuidanceContent(workspace, agentType, paneID, projectTemplate, roleT
 		if slug := sanitizeTemplateSlug(roleTemplate); slug != "" {
 			if rt := strings.TrimSpace(loadTemplateFile(roleTemplatePath(slug))); rt != "" {
 				seed = rt
+			} else if ca, ok := customAgentFor(slug); ok && strings.TrimSpace(ca.Body) != "" {
+				// User-authored custom agent: persona is its AGENT.md body.
+				seed = strings.TrimSpace(ca.Body)
 			}
 		}
 		return substituteTemplatePlaceholders(seed, paneID, workspace, agentType)
@@ -803,6 +831,7 @@ func createManagedPane(opts paneCreateOpts) (M, error) {
 			useProxy:         opts.useProxy,
 			proxyPassword:    opts.proxyPassword,
 			proxyRule:        opts.proxyRule,
+			projectTemplate:  opts.projectTemplate,
 		})
 	}
 	return M{
@@ -1359,14 +1388,14 @@ func handleUpdateAgentCLI(w http.ResponseWriter, r *http.Request, id string) {
 
 func restartPaneCore(paneID, token string) error {
 	var port sql.NullInt64
-	var workspace, initScript, title, config, agentType, defaultModel, trustLevel sql.NullString
+	var workspace, initScript, title, config, agentType, defaultModel, trustLevel, projectTemplate sql.NullString
 	var allowAllActions sql.NullBool
 	var replyInChinese sql.NullBool
 	var useCustomGateway sql.NullBool
 	var useMitm sql.NullBool
 	var useProxy sql.NullBool
-	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, default_model, trust_level, COALESCE(allow_all_actions, 0), COALESCE(reply_in_chinese, 0), COALESCE(use_custom_gateway, 0), COALESCE(use_mitm, 1), COALESCE(proxy_enable, 0) FROM agent_config WHERE pane_id=?", paneID).
-		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &defaultModel, &trustLevel, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm, &useProxy)
+	err := store.QueryRow("SELECT ttyd_port, workspace, init_script, title, config, agent_type, default_model, trust_level, COALESCE(allow_all_actions, 0), COALESCE(reply_in_chinese, 0), COALESCE(use_custom_gateway, 0), COALESCE(use_mitm, 1), COALESCE(proxy_enable, 0), COALESCE(project_template, '') FROM agent_config WHERE pane_id=?", paneID).
+		Scan(&port, &workspace, &initScript, &title, &config, &agentType, &defaultModel, &trustLevel, &allowAllActions, &replyInChinese, &useCustomGateway, &useMitm, &useProxy, &projectTemplate)
 	if err != nil {
 		return fmt.Errorf("pane %s not found in db", paneID)
 	}
@@ -1380,7 +1409,7 @@ func restartPaneCore(paneID, token string) error {
 
 	// Kill and recreate tmux session
 	session := strings.Split(paneID, ":")[0]
-	exec.Command("tmux", "kill-session", "-t", session).Run()
+	tmuxCommand("kill-session", "-t", session).Run()
 	time.Sleep(300 * time.Millisecond)
 	home, _ := os.UserHomeDir()
 	ws := workspace.String
@@ -1389,7 +1418,7 @@ func restartPaneCore(paneID, token string) error {
 	}
 	wsExpanded := strings.Replace(ws, "~", home, 1)
 	ensureTmuxServer()
-	exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", toPosixPath(wsExpanded)).Run()
+	tmuxCommand("new-session", "-d", "-s", session, "-n", "main", "-c", toPosixPath(wsExpanded)).Run()
 	// ttyd is served on demand inline; nothing to restart.
 
 	// Re-run init
@@ -1405,6 +1434,7 @@ func restartPaneCore(paneID, token string) error {
 		useCustomGateway: useCustomGateway.Bool,
 		useMitm:          useMitm.Bool,
 		useProxy:         useProxy.Bool,
+		projectTemplate:  projectTemplate.String,
 	})
 	store.Exec(fmt.Sprintf("UPDATE agent_config SET updated_at=%s WHERE pane_id=?", store.Now()), paneID)
 	return nil
@@ -1425,6 +1455,7 @@ type paneEnvOpts struct {
 	useProxy         bool
 	proxyPassword    string
 	proxyRule        string
+	projectTemplate  string // project slug → per-project shared claude memory pool
 }
 
 func tmuxShellQuote(v string) string {
@@ -4545,6 +4576,15 @@ func autoConfirmCodexTrust(paneID string) {
 func initPaneEnv(opts paneEnvOpts) {
 	pid := opts.paneID
 	shortID := strings.Split(pid, ":")[0]
+
+	// Windows native ConPTY backend: the pane is cmd.exe (not bash) and cygwin
+	// bash can't spawn the native node CLIs anyway, so we don't `source boot.sh`.
+	// Go writes the agent config files and sends the native launch command.
+	// No-op off Windows / backend off (nativePtyActive() is false there).
+	if nativePtyActive() && nativeBoot(opts) {
+		return
+	}
+
 	aiCfg := loadRuntimeAIConfig()
 	// proxyURL := fmt.Sprintf("http://%s:x@127.0.0.1:17080", shortID)
 
@@ -4563,7 +4603,15 @@ func initPaneEnv(opts paneEnvOpts) {
 		sessionEnv["CICY_ANTHROPIC_URL"] = strings.TrimSpace(aiCfg.AnthropicURL)
 		sessionEnv["CICY_OPENCLAW_MODEL"] = strings.TrimSpace(aiCfg.OpenClawModel)
 	case "claude":
-		// claude uses ANTHROPIC_BASE_URL and settings.json directly in boot lines
+		// claude uses ANTHROPIC_BASE_URL and settings.json directly in boot lines.
+		// Per-project shared memory: point claude's auto-memory at the project's
+		// shared pool so same-project claude agents share learnings (A writes →
+		// B recalls). cwd/workspace/role stay per-worker; only memory is shared.
+		// Unassigned agents fall back to the "default" project → everyone shares
+		// one pool out of the box.
+		if pool := ensureProjectMemDir(projectSlugOrDefault(opts.projectTemplate)); pool != "" {
+			sessionEnv["CLAUDE_COWORK_MEMORY_PATH_OVERRIDE"] = pool
+		}
 	case "opencode":
 	case "codex":
 		// codex uses -c flags directly, no env needed
@@ -4669,6 +4717,11 @@ func initPaneEnv(opts paneEnvOpts) {
 	// bash re-entry wrapper because their generated bodies may rely on being sourced
 	// from non-bash shells on macOS.
 	script := "#!/usr/bin/env bash\n\n"
+	// Optional boot xtrace: `touch ~/.cicy-boot-trace` to capture a line-by-line
+	// trace of this script to ~/.cicy-boot-xtrace.log — used to pinpoint where
+	// pane boot hangs (e.g. under the native pty backend on Windows). No flag
+	// file => zero overhead, never traces normal runs.
+	script += "if [ -e \"$HOME/.cicy-boot-trace\" ]; then exec 19>>\"$HOME/.cicy-boot-xtrace.log\" 2>/dev/null; export BASH_XTRACEFD=19 PS4='+ ${BASH_SOURCE##*/}:${LINENO}: '; echo \"=== boot $(date) pane=${X_AGENT_SHORT_ID:-?} ===\" >&19; set -x; fi\n\n"
 	if bootAgentNorm == "claude" || bootAgentNorm == "cicy-claude" || bootAgentNorm == "codex" || bootAgentNorm == "gemini" || bootAgentNorm == "opencode" {
 		script += strings.Join(lines, "\n") + "\n"
 	} else {
@@ -4820,7 +4873,10 @@ func sendTextToPane(winID, text string, submit bool) error {
 			return newTmuxSendError("text required", http.StatusBadRequest, false)
 		}
 		log.Printf("[tmux-send] pane=%s mode=text-no-submit text=%q", shortPaneID(winID), text)
-		if _, err := runTmux("send-keys", "-t", winID, "-l", text); err != nil {
+		// `--` guards text that begins with a dash: without it the native
+		// (ptymux) backend's flag parser swallows "-foo" as an unknown flag and
+		// the text is silently dropped. tmux itself also wants the separator.
+		if _, err := runTmux("send-keys", "-t", winID, "-l", "--", text); err != nil {
 			return newTmuxSendError("failed to send text without submit: "+err.Error(), http.StatusInternalServerError, false)
 		}
 		return nil
@@ -4966,18 +5022,66 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "win_id required")
 		return
 	}
+	// msgID is set when this send is recorded in agent_messages (agent→agent
+	// with a sender context); it is echoed back in the response so the sender can
+	// later look the message up by id. Function-scoped so the shared success
+	// return at the bottom can include it.
+	msgID := ""
 	if text, ok := req["text"].(string); ok && text != "" {
 		submit := true
 		if raw, ok := req["submit"].(bool); ok {
 			submit = raw
 		}
+		// agent→agent message store: record every send that carries a sender
+		// context — a callback_to (default) or, for --no-callback sends, the
+		// 📮 [sender] stamp on the text. webUI / IM sends have neither, so they
+		// stay out of this table. The new row id threads into the callback below
+		// so finalize can flip THIS row to done/failed and write the reply pointer.
+		cbToRaw, _ := req["callback_to"].(string)
+		cbTo := strings.TrimSpace(cbToRaw)
+		fromPane := normPaneID(cbTo)
+		if fromPane == "" {
+			fromPane = normPaneID(stampedSenderID(text))
+		}
+		if cbTo != "" || fromPane != "" {
+			msgID = aiGatewayShortID()
+			// from-side pointer (#177): best-effort read the initiator's in-flight
+			// conversation/turn from its reply.json. Never blocks the send — an
+			// unreadable snapshot just leaves these empty.
+			fromConv, fromTurn := "", ""
+			if fromPane != "" {
+				if rs, err := aiGatewayReadReplySnapshotFile(shortPaneID(fromPane)); err == nil {
+					fromConv = strings.TrimSpace(rs.ConversationID)
+					fromTurn = strings.TrimSpace(rs.TurnID)
+				}
+			}
+			if err := insertAgentMessage(msgID, fromPane, winID, text, cbTo != "", fromConv, fromTurn); err != nil {
+				log.Printf("[agent-msg] insert failed: %v", err)
+			}
+			// replied de-dup (E): this message is fromPane → winID. If winID
+			// earlier messaged fromPane (an open winID → fromPane row), the
+			// receiver has now answered in-band — mark those replied=1 so their
+			// finalize won't also push a redundant "work done" line.
+			if fromPane != "" {
+				markAgentMessagesReplied(winID, fromPane)
+			}
+		}
 		// Register the cross-agent callback BEFORE sending the text. The receiver
 		// CLI can react fast enough to start a gateway audit session within the
 		// same wall-clock second the text lands; if registration happened after
 		// the send, that audit session's drain would find an empty pending list
-		// and the hook would never attach.
-		if cbTo, ok := req["callback_to"].(string); ok && strings.TrimSpace(cbTo) != "" {
-			registerReplyCallback(winID, cbTo)
+		// and the hook would never attach. `notify` (default false) gates the
+		// completion chat push; the DB state is updated either way.
+		if cbTo != "" {
+			notify, _ := req["notify"].(bool)
+			// bornTurnID = the receiver's currently in-flight turn (its boot/opening
+			// or a prior round). finalize uses it to skip that exact turn so a
+			// freshly-spawned agent's opening round doesn't falsely fire done.
+			bornTurnID := ""
+			if rs, err := aiGatewayReadReplySnapshotFile(shortPaneID(winID)); err == nil {
+				bornTurnID = strings.TrimSpace(rs.TurnID)
+			}
+			registerReplyCallback(winID, cbTo, msgID, notify, bornTurnID)
 		}
 		// Headless cicy: no tmux pane to send-keys into. The webUI sends through
 		// this same endpoint (sendCommand → /api/tmux/send), so route cicy text
@@ -4996,7 +5100,11 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 				}
 				go deliverCicyMessage(short, ws, text)
 			}
-			J(w, M{"success": true, "win_id": short})
+			resp := M{"success": true, "win_id": short}
+			if msgID != "" {
+				resp["msg_id"] = msgID
+			}
+			J(w, resp)
 			return
 		}
 		if err := sendTextToPane(winID, text, submit); err != nil {
@@ -5023,7 +5131,11 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "text or keys required")
 		return
 	}
-	J(w, M{"success": true, "win_id": shortPaneID(winID)})
+	resp := M{"success": true, "win_id": shortPaneID(winID)}
+	if msgID != "" {
+		resp["msg_id"] = msgID
+	}
+	J(w, resp)
 }
 
 func handleSendKeys(w http.ResponseWriter, r *http.Request) {
@@ -5476,6 +5588,158 @@ func readMihomoGlobalPassword() string {
 	return ""
 }
 
+// forkSummarySources resolves a source pane's workspace + regenerates its raw
+// conversation dump (agent-summary), returning the absolute paths to the three
+// inheritance artifacts (current.json, reply.json, summary current.md) plus the
+// short id. Shared by the preview endpoint and the fork creation path so both
+// agree on exactly which files the fork inherits.
+func forkSummarySources(srcID, srcWorkspace string) (curJSON, replyJSON, summaryPath, short string) {
+	short = shortPaneID(srcID)
+	summaryDir := filepath.Join(srcWorkspace, ".cicy", "history", "summary")
+	_ = os.MkdirAll(summaryDir, 0755)
+
+	summaryTarget := short
+	if ws := strings.TrimSpace(srcWorkspace); ws != "" {
+		if p := filepath.Join(ws, ".cicy", "history", "current.json"); fileExistsPlain(p) {
+			summaryTarget = p
+			curJSON = p
+		}
+	}
+	if curJSON == "" {
+		curJSON = filepath.Join(srcWorkspace, ".cicy", "history", "current.json")
+	}
+	replyJSON = filepath.Join(srcWorkspace, ".cicy", "history", "reply.json")
+
+	start := time.Now()
+	if out, genErr := exec.Command("agent-summary", summaryTarget).Output(); genErr != nil {
+		log.Printf("[fork-preview] agent-summary failed: %v", genErr)
+	} else {
+		log.Printf("[fork-preview] %s summary generated -> %s (%s)", short, strings.TrimSpace(string(out)), time.Since(start).Round(time.Millisecond))
+	}
+	cur := filepath.Join(summaryDir, "current.md")
+	if info, err := os.Stat(cur); err == nil && info.Size() > 0 {
+		summaryPath = cur
+	}
+	return
+}
+
+// readFileCapped reads up to maxBytes of a file, returning (content, fullSize,
+// truncated). Used by the fork preview so a huge current.json doesn't blow up
+// the JSON response — the modal shows a head and links the file to the editor.
+func readFileCapped(path string, maxBytes int) (string, int64, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", 0, false
+	}
+	size := info.Size()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", size, false
+	}
+	if maxBytes > 0 && len(b) > maxBytes {
+		return string(b[:maxBytes]), size, true
+	}
+	return string(b), size, false
+}
+
+// handleForkPreview returns everything the fork-confirm modal shows WITHOUT
+// creating a pane: the source's current.json + reply.json (token use lives in
+// reply.json), the regenerated summary path + content, the compression ratio,
+// and the default inherit prompt the user can edit before sending. Read-only;
+// the actual fork is created later by handleForkPane on the user's "Send".
+// POST /api/tmux/fork/preview { source_pane_id }
+func handleForkPreview(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SourcePaneID string `json:"source_pane_id"`
+	}
+	readBody(r, &req)
+	srcID := normPaneID(strings.TrimSpace(req.SourcePaneID))
+	if srcID == "" {
+		httpErr(w, 400, "source_pane_id required")
+		return
+	}
+
+	var srcAgentType, srcWorkspace sql.NullString
+	err := store.QueryRow(`SELECT agent_type, workspace FROM agent_config WHERE pane_id=?`, srcID).
+		Scan(&srcAgentType, &srcWorkspace)
+	if err != nil {
+		httpErr(w, 404, "source pane not found")
+		return
+	}
+
+	curPath, replyPath, summaryPath, short := forkSummarySources(srcID, srcWorkspace.String)
+
+	const headCap = 256 * 1024 // 256KB head — enough to inspect, file editor shows the rest
+	curContent, curSize, curTrunc := readFileCapped(curPath, headCap)
+	replyContent, replySize, replyTrunc := readFileCapped(replyPath, headCap)
+	summaryContent, summarySize, summaryTrunc := readFileCapped(summaryPath, headCap)
+
+	// Token use lives in reply.json (top-level *_tokens + cost_credit + model).
+	tokenUse := M{}
+	if replyContent != "" {
+		var rep map[string]interface{}
+		raw, _ := os.ReadFile(replyPath)
+		if json.Unmarshal(raw, &rep) == nil {
+			for _, k := range []string{"input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "total_tokens", "cost_credit", "model"} {
+				if v, ok := rep[k]; ok {
+					tokenUse[k] = v
+				}
+			}
+		}
+	}
+
+	// Compression: summary bytes vs the source's full conversation (current.json
+	// carries the whole history in its request body). Token ratio is an estimate
+	// (≈4 bytes/token) since the summary is never tokenized.
+	var ratio float64
+	if curSize > 0 {
+		ratio = float64(summarySize) / float64(curSize)
+	}
+	summaryTokensEst := (summarySize + 3) / 4
+	var inputTokens int64
+	if v, ok := tokenUse["input_tokens"]; ok {
+		if f, ok := v.(float64); ok {
+			inputTokens = int64(f)
+		}
+	}
+	var tokenRatio float64
+	if inputTokens > 0 {
+		tokenRatio = float64(summaryTokensEst) / float64(inputTokens)
+	}
+
+	// Default inherit prompt — the same text the fork would auto-receive today,
+	// pre-filled into the modal's textarea so the user can edit before sending.
+	defaultPrompt := ""
+	if normalizeAgentType(srcAgentType.String) == "cicy" {
+		if summaryContent != "" {
+			defaultPrompt = fmt.Sprintf(cicyForkInheritPrompt, short, strings.TrimSpace(summaryContent))
+		} else {
+			defaultPrompt = fmt.Sprintf("You are a fork of agent %s. No prior-conversation summary is available — wait for instructions.", short)
+		}
+	} else if summaryPath != "" {
+		defaultPrompt = fmt.Sprintf(forkInheritPrompt, short, summaryPath)
+	} else {
+		defaultPrompt = "Hello, this is a fork. Please continue the work from the source agent."
+	}
+
+	J(w, M{
+		"success":        true,
+		"source_pane_id": srcID,
+		"source_short":   short,
+		"agent_type":     normalizeAgentType(srcAgentType.String),
+		"workspace":      srcWorkspace.String,
+		"files": M{
+			"current_json": M{"path": curPath, "content": curContent, "size": curSize, "truncated": curTrunc},
+			"reply_json":   M{"path": replyPath, "content": replyContent, "size": replySize, "truncated": replyTrunc},
+			"summary":      M{"path": summaryPath, "content": summaryContent, "size": summarySize, "truncated": summaryTrunc},
+		},
+		"token_use":          tokenUse,
+		"summary_tokens_est": summaryTokensEst,
+		"compression":        M{"ratio": ratio, "token_ratio": tokenRatio, "original_bytes": curSize, "summary_bytes": summarySize},
+		"default_prompt":     defaultPrompt,
+	})
+}
+
 // handleForkPane creates a new pane that inherits the source pane's agent_type,
 // use_custom_gateway, default_model, and proxy/allow settings; once the new
 // agent is ready, the source pane's current.raw.md content is sent as a prompt.
@@ -5527,9 +5791,15 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 		SourcePaneID string `json:"source_pane_id"`
 		Title        string `json:"title"`
 		MasterPaneID string `json:"master_pane_id"`
+		// Prompt, when non-empty, overrides the auto-generated inherit prompt —
+		// the fork-confirm modal sends the user-edited text here. Applies to both
+		// the CLI path (sent verbatim to the input box) and headless cicy forks
+		// (delivered verbatim as the first user message).
+		Prompt string `json:"prompt"`
 	}
 	readBody(r, &req)
 	srcID := normPaneID(strings.TrimSpace(req.SourcePaneID))
+	customPrompt := strings.TrimSpace(req.Prompt)
 	if srcID == "" {
 		httpErr(w, 400, "source_pane_id required")
 		return
@@ -5689,6 +5959,10 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 			if summary != "" {
 				msg = fmt.Sprintf(cicyForkInheritPrompt, short, summary)
 			}
+			// User-edited prompt from the fork-confirm modal wins over the default.
+			if customPrompt != "" {
+				msg = customPrompt
+			}
 			if !deliverCicyMessage(newShort, ws, msg) {
 				log.Printf("[fork] %s cicy inherit message not delivered", newShort)
 				return
@@ -5726,6 +6000,15 @@ func handleForkPane(w http.ResponseWriter, r *http.Request) {
 			// send worker re-checks readiness, so this only needs to cover the
 			// brief window where the box is drawn but not yet accepting paste.
 			time.Sleep(500 * time.Millisecond)
+			// User-edited prompt from the fork-confirm modal wins over the default.
+			if customPrompt != "" {
+				if err := sendTextToPane(newPaneID, customPrompt, true); err != nil {
+					log.Printf("[fork] %s send custom prompt failed: %v", newPaneID, err)
+				} else {
+					log.Printf("[fork] %s custom inherit prompt sent", newPaneID)
+				}
+				return
+			}
 			if usedPath == "" {
 				log.Printf("[fork] %s no summary available — sending generic prompt", newPaneID)
 				if err := sendTextToPane(newPaneID, "Hello, this is a fork. Please continue the work from the source agent.", true); err != nil {

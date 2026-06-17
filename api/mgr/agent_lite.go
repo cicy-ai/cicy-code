@@ -59,6 +59,7 @@ type liteConfig struct {
 type liteFrontmatter struct {
 	profile  string
 	name     string
+	model    string // optional default model (used by custom agents; ignored elsewhere)
 	tools    []string
 	hasTools bool // distinguishes "tools: []" (override to none) from absent
 	body     string
@@ -106,6 +107,8 @@ func parseLiteFrontmatter(content string) liteFrontmatter {
 			fm.profile = strings.ToLower(strings.Trim(val, `"'`))
 		case "name":
 			fm.name = strings.Trim(val, `"'`)
+		case "model":
+			fm.model = strings.Trim(val, `"'`)
 		case "tools":
 			fm.hasTools = true
 			fm.tools = parseLiteList(val)
@@ -145,19 +148,16 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 	raw := loadTemplateFile(filepath.Join(workspace, "AGENTS.md"))
 	fm := parseLiteFrontmatter(raw)
 
-	profileKey := fm.profile
-	prof, ok := cfg.Profiles[profileKey]
-	if !ok {
-		profileKey = "dispatcher"
-		prof = cfg.Profiles["dispatcher"]
-	}
+	// ONE universal base: every cicy agent is an "assistant". There are no more
+	// dispatcher/liaison profiles and no `profile:` frontmatter — identity comes
+	// purely from the system prompt + selected tools.
+	profileKey := "assistant"
+	prof := cfg.Profiles[profileKey]
 
 	// grantable: the ceiling of what this instance may use.
 	grantGroups := append([]string{}, prof.GrantableGroups...)
-	if !prof.External {
-		grantGroups = append(grantGroups, cfg.Grants.ByProfile[profileKey]...)
-		grantGroups = append(grantGroups, cfg.Grants.ByAgent[shortID]...)
-	}
+	grantGroups = append(grantGroups, cfg.Grants.ByProfile[profileKey]...)
+	grantGroups = append(grantGroups, cfg.Grants.ByAgent[shortID]...)
 	grantable := expandGroups(grantGroups, cfg.ToolGroups)
 
 	// selected groups, in priority order:
@@ -184,14 +184,11 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 	}
 
 	// Custom tools available to this instance (subset of enabled that are
-	// declared custom). External profiles get none (defense in depth — the
-	// runner also refuses, and grantable already excludes them).
+	// declared custom).
 	custom := map[string]liteCustomTool{}
-	if !prof.External {
-		for name := range enabled {
-			if t, isCustom := cfg.CustomTools[name]; isCustom {
-				custom[name] = t
-			}
+	for name := range enabled {
+		if t, isCustom := cfg.CustomTools[name]; isCustom {
+			custom[name] = t
 		}
 	}
 
@@ -213,7 +210,7 @@ func resolveLiteConfig(shortID, workspace string) liteConfig {
 		profile:      profileKey,
 		systemPrompt: prompt,
 		enabledTools: enabled,
-		external:     prof.External,
+		external:     false,
 		workspace:    workspace,
 		customTools:  custom,
 	}

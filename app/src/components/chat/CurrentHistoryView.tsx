@@ -1,5 +1,5 @@
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, AlertTriangle, Square, RotateCcw } from 'lucide-react';
+import { ChevronDown, ChevronRight, AlertTriangle, Square, RotateCcw, Ban, User } from 'lucide-react';
 import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -28,6 +28,9 @@ type HistoryTurn = {
   // The serving layer (cicyTagOutcomeAsSystem) relabels the marker → role:system
   // and attaches this so the UI can offer 重试 on the latest turn.
   outcome?: string;
+  // 具体原因(目前 blocked 用:命中规则/事件ID 的人类可读文案)。展示在 OutcomeNoticeCard
+  // 里(像余额不足卡显示原因)。来自 current.json marker 的 cicy_outcome_detail(display-only)。
+  outcomeDetail?: string;
   // Client-only optimistic-send placeholder (never comes from the backend).
   _optimistic?: boolean;
 };
@@ -66,6 +69,9 @@ const CURRENT_HISTORY_MIN_QUESTIONS = 8;
 // Prompts-only: how many user questions to eagerly backfill on open before
 // leaving the rest to scroll-up paging.
 const PROMPTS_ONLY_MIN_QUESTIONS = 5;
+// Max assistant turns rendered in an expanded answer before "展开更早" — a single
+// reply can be 40+ tool rounds; rendering them all at once is what causes the jank.
+const ANSWER_RENDER_CAP = 8;
 // Streaming model(双通道):
 // - agent_type=cicy:WS 直推。ai_chunk / thinking_chunk 的 delta 直接追加进 live
 //   尾巴渲染(零轮询延迟);reply.json 轮询降级为校正锚 —— 中途打开、WS 丢包/重连、
@@ -676,14 +682,18 @@ function splitLeadingHarnessBlocks(text: string): { blocks: string[]; remaining:
 // (不含符号/JSON),不再解析 detail。
 const CICY_OUTCOME_MARK = '（本轮未生成回复';
 const CICY_OUTCOME_LEGACY = '⟦cicy-turn-outcome⟧';
-function parseCicyOutcome(item: any, contentText: string): { kind: string; label: string } | null {
+function parseCicyOutcome(item: any, contentText: string): { kind: string; label: string; detail?: string } | null {
+  const outcomeLabel = (k: string) => k === 'cancelled' ? '已停止生成' : k === 'blocked' ? '已拦截' : '生成失败';
+  const detail = String(item?.cicy_outcome_detail || '').trim();
   const tagged = String(item?.cicy_outcome || '').trim();
   if (tagged) {
-    return { kind: tagged, label: tagged === 'cancelled' ? '已停止生成' : '生成失败' };
+    return { kind: tagged, label: outcomeLabel(tagged), detail };
   }
   if (contentText.startsWith(CICY_OUTCOME_MARK) || contentText.startsWith(CICY_OUTCOME_LEGACY)) {
-    const kind = (contentText.includes('已停止') || contentText.includes('cancelled')) ? 'cancelled' : 'error';
-    return { kind, label: kind === 'cancelled' ? '已停止生成' : '生成失败' };
+    const kind = (contentText.includes('已停止') || contentText.includes('cancelled')) ? 'cancelled'
+      : (contentText.includes('已拦截') || contentText.includes('blocked')) ? 'blocked'
+      : 'error';
+    return { kind, label: outcomeLabel(kind), detail };
   }
   return null;
 }
@@ -716,6 +726,7 @@ function normalizeRawHistoryItem(raw: any, toolNameByCallId?: Map<string, string
         status,
         model,
         outcome: outcome.kind,
+        outcomeDetail: outcome.detail || undefined,
       };
     }
   }
@@ -1221,7 +1232,27 @@ function MarkdownLink({ href, children, ...props }: any) {
   );
 }
 
-const markdownComponents = { a: MarkdownLink } as const;
+// 上传附件在消息里发的是**绝对路径**(LLM/agent 据此 Read 文件)。图片要在 UI 里预览,
+// 就把绝对路径(如 /home/cicy/cicy-ai/workers/w-1001/assets/2026/…/x.png)解析成公开的取图
+// URL(/assets/files/<pane>/<rel>,无 token)。非附件路径/普通 URL 原样返回。
+function assetAbsPathToURL(src: string): string {
+  const s = String(src || '');
+  // 共享存储:绝对路径形如 /home/cicy/cicy-ai/assets/<date>/<hash>__name → 取 /cicy-ai/assets/
+  // 后面的 rel,映射成公开取图 URL /assets/files/<rel>。已是 /assets/files/ URL 或外链则原样。
+  const m = '/cicy-ai/assets/';
+  const i = s.indexOf(m);
+  if (i >= 0) {
+    const rel = s.slice(i + m.length);
+    if (rel) return `/assets/files/${rel}`;
+  }
+  return s;
+}
+
+function MarkdownImg({ src, alt, ...props }: any) {
+  return <img {...props} data-id="current-history-md-img" src={assetAbsPathToURL(String(src || ''))} alt={alt || ''} />;
+}
+
+const markdownComponents = { a: MarkdownLink, img: MarkdownImg } as const;
 
 // react-markdown 没有内置 memo,每次渲染整篇重新 parse;且 remarkPlugins={[remarkGfm]}
 // 内联数组每次都是新引用,就算外面包 memo 也会失效。流式期 live 尾巴每个 tick 重渲染,
@@ -1266,12 +1297,35 @@ function LinkConfirmModal({ url, onClose }: { url: string; onClose: () => void }
   );
 }
 
-function CollapsibleQ({ text }: { text: string }) {
+// Question-bubble alignment. Default 'right' (chat style); the inline webframe
+// history opts into 'left' via CurrentHistoryView's leftAlignQuestions prop.
+// Context so we don't thread a prop through every CollapsibleQ call site.
+const QAlignContext = createContext<'left' | 'right'>('right');
+
+// 用户轮的左侧头像(居左布局时用):一个用户 icon 的圆形头像,与 assistant 头像同尺寸/
+// 顶对齐,使问答两列头像对齐成一条线。
+function UserTurnAvatar() {
+  return (
+    <div data-id="current-history-user-avatar" className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-500/15 text-sky-300">
+      <User className="h-4 w-4" />
+    </div>
+  );
+}
+
+function CollapsibleQ({ text, bare = false }: { text: string; bare?: boolean }) {
+  const qAlign = useContext(QAlignContext);
+  const qJustify = qAlign === 'left' ? 'justify-start' : 'justify-end';
+  const qTail = qAlign === 'left' ? 'rounded-bl-sm' : 'rounded-br-sm';
   // Peel leading harness blocks (system-reminder / command echoes) into a small
   // collapsed fold, then render the real question below. Recurse on the rest so
   // the existing env-context / xml-block / bubble logic runs on the clean text.
+  // `bare` (prompts-only): drop the harness fold entirely — show ONLY the clean
+  // question, never a folded system card.
   const { blocks: harnessBlocks, remaining: afterHarness } = splitLeadingHarnessBlocks(text);
   if (harnessBlocks.length) {
+    if (bare) {
+      return afterHarness ? <CollapsibleQ text={afterHarness} bare /> : null;
+    }
     return (
       <div data-id="current-history-view-q-harness" className="mb-2.5 flex flex-col gap-1.5">
         <SystemNoticeCard text={harnessBlocks.join('\n\n')} />
@@ -1290,11 +1344,11 @@ function CollapsibleQ({ text }: { text: string }) {
   }
   if (xmlBlocks.length) {
     return (
-      <div data-id="current-history-view-q-xml" className="mb-2.5 flex justify-end">
+      <div data-id="current-history-view-q-xml" className={`mb-2.5 flex ${qJustify}`}>
         <div data-id="current-history-view-q-xml-wrap" className="max-w-[95%] flex flex-col gap-2">
           <pre data-id="current-history-view-q-xml-block" className="overflow-x-auto rounded-lg border border-sky-300/[0.12] bg-black/[0.25] px-3 py-2 font-mono text-xs leading-relaxed text-sky-100/70 whitespace-pre-wrap">{xmlBlocks.join('\n')}</pre>
           {remaining ? (
-            <div data-id="current-history-view-q-xml-trailing" className="overflow-hidden rounded-2xl rounded-br-sm border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
+            <div data-id="current-history-view-q-xml-trailing" className={`overflow-hidden rounded-2xl ${qTail} border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]`}>
               <MarkdownBlock text={remaining} />
             </div>
           ) : null}
@@ -1303,11 +1357,11 @@ function CollapsibleQ({ text }: { text: string }) {
     );
   }
   return (
-    <div data-id="current-history-view-q" className="mb-2.5 flex justify-end">
+    <div data-id="current-history-view-q" className={`mb-2.5 flex ${qJustify}`}>
       {environmentContext ? (
         <EnvironmentContextCard context={environmentContext} />
       ) : (
-        <div data-id="current-history-view-q-body" className="max-w-[95%] overflow-hidden rounded-2xl rounded-br-sm border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
+        <div data-id="current-history-view-q-body" className={`max-w-[95%] overflow-hidden rounded-2xl ${qTail} border border-sky-300/[0.10] bg-sky-400/[0.075] px-3.5 py-2 text-base leading-relaxed text-sky-50/90 shadow-[0_8px_24px_rgba(0,0,0,0.16)]`}>
           <MarkdownBlock text={String(text || '').replace(/^\-\n/, '')} />
         </div>
       )}
@@ -1781,12 +1835,14 @@ function SystemNoticeCard({ text }: { text: string }) {
 function OutcomeNoticeCard({
   text,
   outcome,
+  detail,
   canRetry,
   retrying,
   onRetry,
 }: {
   text: string;
   outcome: string;
+  detail?: string;
   canRetry: boolean;
   retrying: boolean;
   onRetry: () => void;
@@ -1794,16 +1850,28 @@ function OutcomeNoticeCard({
   // Left-aligned, in the assistant body column (avatar sits to its left): reads as
   // a normal assistant output saying the turn failed / was stopped, with 重试 on the
   // latest turn. Subtle red for failures, grey for cancellations.
+  // blocked(出站审计拦截)与 error 一样用红色,但图标用 Ban 表示"被拦下",且不给重试。
+  const isBlocked = outcome === 'blocked';
   const isError = outcome === 'error';
+  const isRed = isError || isBlocked;
   return (
-    <div data-id="current-history-outcome-notice" className="flex flex-col items-start gap-1.5">
+    <div data-id="current-history-outcome-notice" data-outcome={outcome} className="flex flex-col items-start gap-1.5">
       <div
         data-id="current-history-outcome-notice-chip"
-        className={`flex items-start gap-1.5 text-sm leading-[1.7] ${isError ? 'text-rose-300/85' : 'text-zinc-400'}`}
+        className={`flex items-start gap-1.5 text-sm leading-[1.7] ${isRed ? 'text-rose-300/85' : 'text-zinc-400'}`}
       >
-        {isError ? <AlertTriangle className="mt-[3px] h-3.5 w-3.5 shrink-0" /> : <Square className="mt-[3px] h-3.5 w-3.5 shrink-0" />}
+        {isBlocked ? <Ban className="mt-[3px] h-3.5 w-3.5 shrink-0" /> : isError ? <AlertTriangle className="mt-[3px] h-3.5 w-3.5 shrink-0" /> : <Square className="mt-[3px] h-3.5 w-3.5 shrink-0" />}
         <span data-id="current-history-outcome-notice-label" className="break-all">{text}</span>
       </div>
+      {detail && detail !== text ? (
+        // 具体原因(blocked:命中规则/事件ID;像余额不足卡那样把原因显出来)。缩进对齐到 label 下。
+        <div
+          data-id="current-history-outcome-notice-detail"
+          className={`whitespace-pre-wrap break-words pl-[20px] text-xs leading-relaxed ${isRed ? 'text-rose-200/70' : 'text-zinc-500'}`}
+        >
+          {detail}
+        </div>
+      ) : null}
       {canRetry ? (
         <button
           type="button"
@@ -1811,7 +1879,7 @@ function OutcomeNoticeCard({
           onClick={onRetry}
           disabled={retrying}
           className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-xs transition-colors ${
-            isError ? 'border-rose-500/25 text-rose-200/90 hover:bg-rose-500/10' : 'border-white/10 text-zinc-300 hover:bg-white/[0.06]'
+            isRed ? 'border-rose-500/25 text-rose-200/90 hover:bg-rose-500/10' : 'border-white/10 text-zinc-300 hover:bg-white/[0.06]'
           } disabled:opacity-60`}
         >
           <RotateCcw className={`h-3 w-3 ${retrying ? 'animate-spin' : ''}`} />
@@ -1833,6 +1901,352 @@ function PendingThinkingPlaceholder() {
       <span data-id="current-history-view-pending-placeholder-label">Thinking...</span>
     </div>
   );
+}
+
+// AssistantTurnView renders ONE assistant turn (avatar + ordered thinking/text/
+// tool steps + fallback answer + pending placeholder) — lifted out of the main
+// list so the prompts-only q-expand reuses the EXACT same rendering as the full
+// history (no parallel answer renderer).
+const AssistantTurnView = memo(function AssistantTurnView({ turn, turnKey, isLatestTurn, showAvatar, agentType, paneId, hideTools }: {
+  turn: HistoryTurn; turnKey: string | number; isLatestTurn: boolean; showAvatar: boolean;
+  agentType: string; paneId: string; hideTools: boolean;
+}) {
+  const allSteps = getVisibleHistorySteps(turn, isLatestTurn);
+  const steps = hideTools ? (allSteps || []).filter((s: any) => s?.type !== 'tool') : allSteps;
+  const showThinkingPlaceholder = isLatestTurn && String(turn?.status || '').trim() === 'thinking' && !String(turn?.a || '').trim() && !steps.length;
+  const hasRenderableAssistantStep = steps.some((step: any) => {
+    if (step?.type === 'thinking' && String(step?.text || '').trim()) return true;
+    if (step?.type === 'text' && String(step?.text || '').trim()) return true;
+    if (step?.type === 'tool' && Array.isArray(step?.tools) && step.tools.length > 0) return true;
+    return false;
+  });
+  const fallbackAnswer = String(turn?.a || '').trim();
+  return (
+    <div data-id={`current-history-turn-assistant-${turnKey}`} className="flex items-start gap-2.5">
+      {showAvatar
+        ? <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId={`current-history-assistant-avatar-${turnKey}`} className="mt-0.5 h-7 w-7 rounded-full" />
+        : <div aria-hidden="true" className="h-7 w-7 shrink-0" />}
+      <div data-id={`current-history-turn-assistant-body-${turnKey}`} className="min-w-0 flex-1">
+        {steps.map((step: any, stepIndex: number) => {
+          if (step.type === 'thinking') {
+            return <div key={stepIndex} data-id={`current-history-turn-step-thinking-${turnKey}-${stepIndex}`}><ThinkingBlock text={step.text} /></div>;
+          }
+          if (step.type === 'text') {
+            return <div key={stepIndex} data-id={`current-history-turn-step-text-${turnKey}-${stepIndex}`} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><MarkdownBlock text={step.text} /></div>;
+          }
+          const tools = Array.isArray(step.tools) ? step.tools : [];
+          return <div key={stepIndex} data-id={`current-history-turn-step-tools-${turnKey}-${stepIndex}`} className="my-2 space-y-1.5">{tools.map((tool: any, toolIndex: number) => {
+            const toolId = buildToolCardId(turnKey, stepIndex, tool, toolIndex);
+            return <ToolCard key={toolId} tool={tool} toolId={toolId} />;
+          })}</div>;
+        })}
+        {!hasRenderableAssistantStep && fallbackAnswer ? (
+          <div data-id={`current-history-turn-fallback-${turnKey}`} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300">
+            <MarkdownBlock text={fallbackAnswer} />
+          </div>
+        ) : null}
+        {!hasRenderableAssistantStep && !fallbackAnswer && showThinkingPlaceholder ? <PendingThinkingPlaceholder /> : null}
+      </div>
+    </div>
+  );
+});
+
+// replyItemsToSteps turns reply.json's ordered content blocks (thinking/text/
+// tool_use) into HistoryTurn steps — the SAME shape the committed history uses,
+// so the last q's answer (which lives in reply.json until the next turn migrates
+// it into current.json) renders through AssistantTurnView like any other.
+function replyItemsToSteps(items: any, thinking?: string, answer?: string): NonNullable<HistoryTurn['steps']> {
+  const steps: NonNullable<HistoryTurn['steps']> = [];
+  for (const it of Array.isArray(items) ? items : []) {
+    const ty = String(it?.type || '').trim();
+    if (ty === 'thinking') {
+      const tx = String(it?.thinking || '');
+      if (tx) steps.push({ type: 'thinking', text: tx });
+    } else if (ty === 'text') {
+      const tx = String(it?.text || '');
+      if (tx) steps.push({ type: 'text', text: tx });
+    } else if (ty === 'tool_use') {
+      const inp = it?.input;
+      const tool = { name: String(it?.name || ''), arg: inp == null ? '' : (typeof inp === 'string' ? inp : JSON.stringify(inp)), tool_id: String(it?.tool_id || '') };
+      const last = steps[steps.length - 1] as any;
+      if (last && last.type === 'tool') last.tools.push(tool);
+      else steps.push({ type: 'tool', tools: [tool] } as any);
+    }
+  }
+  if (!steps.length) {
+    if (String(thinking || '').trim()) steps.push({ type: 'thinking', text: String(thinking) });
+    if (String(answer || '').trim()) steps.push({ type: 'text', text: String(answer) });
+  }
+  return steps;
+}
+
+// PromptRow is ONE question in prompts-only mode: the q text with a 小箭头 on its
+// RIGHT. Expand state + the answer live LOCALLY here (not in the parent list
+// memo), so expanding one q re-renders only this row — no whole-list churn (the
+// jank). The answer (turn id+1) is loaded LAZILY on first expand: reuse the
+// already-loaded window turn if present, else fetch via getCurrentHistory. The
+// answer renders through the shared AssistantTurnView.
+const PromptRow = memo(function PromptRow({ turn, qid, nextQid, dataId, paneId, conversationId, agentType, hideTools }: {
+  turn: HistoryTurn; qid: number; nextQid?: number; dataId?: string;
+  paneId: string; conversationId: string; agentType: string; hideTools: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [answer, setAnswer] = useState<HistoryTurn[] | 'loading' | 'none' | undefined>(undefined);
+  const [showAll, setShowAll] = useState(false); // an answer can span 40+ turns; render the latest few, rest behind a button (bounds DOM → no jank)
+  const inFlightRef = useRef(false); // a request for THIS q is in progress → don't fire a duplicate
+  // Per-id stable turn objects: a poll re-builds turns every 1.5s, but unchanged
+  // (already-finished) turns must keep the SAME reference so memo(AssistantTurnView)
+  // skips them — only the streaming tail re-renders. Without this, the last q's
+  // whole multi-tool answer re-rendered every poll → lag (the "limit" jank).
+  const turnCacheRef = useRef<Map<number, { sig: string; turn: HistoryTurn }>>(new Map());
+  // Committed turns from the last FULL load — the live poll reuses these instead of
+  // re-fetching + re-building the whole answer window every tick (that rebuild on
+  // up to 400 items every 1.5s was the real jank). Poll only refreshes the tail.
+  const committedRef = useRef<HistoryTurn[]>([]);
+  const toggle = useCallback(() => setOpen((o) => !o), []);
+  // Load the answer LAZILY on first expand. The answer is the agent's FULL
+  // response: EVERY assistant turn after this q up to the NEXT prompt (a real
+  // reply spans many assistant messages — one per tool round). For the LAST q
+  // whose reply hasn't migrated into current.json yet, there are no committed
+  // turns → fall back to reply.json's live items. Each turn is rendered with the
+  // SAME AssistantTurnView the main history uses (no new component).
+  //
+  // The answer MUST be read from the SAME snapshot the q's id came from. history
+  // ids are POSITIONAL in current.json and DRIFT across snapshots (compaction),
+  // so any id-keyed cross-snapshot cache (IndexedDB by id) can return a DIFFERENT
+  // turn's content → q↔a misalignment. We therefore resolve only against:
+  //   1) SYNC  — the in-memory window snapshot loaded THIS open (fresh, same ids)
+  //              → instant, no spinner, aligned. Covers prompts in the window.
+  //   2) NET   — a FRESH current.json fetch by conversation (not the id cache) for
+  //              older prompts → consistent ids with the q list → aligned.
+  //   3) reply.json — the last q whose answer hasn't migrated into current.json yet.
+  // startedRef bridges the gap before the first setAnswer so a parent re-render
+  // (live poll) mid-read can't kick off a duplicate fetch while answer===undefined.
+  // Resolve THIS q's full answer = every assistant turn in (qid, nextQid). The
+  // LAST q (no nextQid) is open-ended and also folds in the live reply.json tail
+  // (the still-streaming part not yet migrated to current.json); it returns
+  // {live} so the poller knows to keep refreshing until the turn finishes.
+  const loadAnswer = useCallback(async (tailOnly = false): Promise<{ live: boolean }> => {
+    if (inFlightRef.current) return { live: false }; // 已在请求 → 不重复发
+    inFlightRef.current = true;
+    const collect = (turns: HistoryTurn[]): HistoryTurn[] =>
+      turns
+        .filter((t) => t?.role === 'assistant' && Number(t?.history_id || 0) > qid && (!nextQid || Number(t?.history_id || 0) < nextQid))
+        .sort((a, b) => Number(a?.history_id || 0) - Number(b?.history_id || 0));
+    const upperExclusive = nextQid && nextQid > qid ? nextQid : qid + 400;
+    try {
+      // Committed turns: fetched+rebuilt only on a FULL load; the poll (tailOnly)
+      // reuses the cached set so it doesn't re-build the whole window every 1.5s.
+      let out: HistoryTurn[];
+      if (tailOnly) {
+        out = committedRef.current.slice();
+      } else {
+        const limit = Math.max(16, upperExclusive - qid);
+        const data: any = await getCurrentHistory(paneId, { before: upperExclusive, limit, conversation_id: conversationId });
+        out = collect(buildTurnsFromRawItems(Array.isArray(data?.items) ? data.items : []));
+        committedRef.current = out.slice();
+      }
+      let live = false;
+      if (!nextQid) {
+        const r: any = (await apiService.getAgentCurrentReply(paneId, conversationId ? { conversation_id: conversationId } : undefined))?.data;
+        if (r && Number(r.history_id || 0) > qid) {
+          live = isActiveAssistantStatus(String(r.status || ''));
+          const steps = replyItemsToSteps(r.items, r.thinking, r.answer);
+          const maxCommitted = out.reduce((m, t) => Math.max(m, Number(t?.history_id || 0)), qid);
+          // Append the live tail only if it sits AFTER the committed turns (avoids
+          // double-rendering a turn that already migrated into current.json).
+          if ((steps.length || String(r.answer || '').trim()) && Number(r.history_id || 0) > maxCommitted) {
+            out.push({ role: 'assistant', history_id: Number(r.history_id || 0), q: '', text: '', a: String(r.answer || ''), steps, status: String(r.status || '') } as HistoryTurn);
+          }
+        }
+      }
+      // Stabilize refs: reuse the cached turn object when its content signature is
+      // unchanged, so memo(AssistantTurnView) skips re-rendering finished turns.
+      const stable = out.map((t) => {
+        const id = Number(t?.history_id || 0);
+        const s = turnSig(t);
+        const cached = turnCacheRef.current.get(id);
+        if (cached && cached.sig === s) return cached.turn;
+        turnCacheRef.current.set(id, { sig: s, turn: t });
+        return t;
+      });
+      setAnswer(stable.length ? stable : 'none');
+      return { live };
+    } catch {
+      // revalidate failed → keep the cached answer if we have one
+      setAnswer((prev) => (Array.isArray(prev) ? prev : 'none'));
+      return { live: false };
+    } finally {
+      inFlightRef.current = false;
+    }
+  }, [qid, nextQid, paneId, conversationId]);
+
+  // On every expand: CACHE-FIRST paint, then revalidate.
+  //  1) keep a cached answer (no flash); else paint the in-memory snapshot
+  //     instantly; else show 加载回复….
+  //  2) fire a FRESH API request to update this q's a — unless one is already in
+  //     flight (loadAnswer self-dedups via inFlightRef).
+  //  3) nudge the parent to refresh the q text too (promptList), so q & a update together.
+  useEffect(() => {
+    if (!open) return;
+    let snapTurns: HistoryTurn[] | null = null;
+    if (nextQid) {
+      const snap = historyMemCache().get(paneId);
+      const ids = (snap?.items || []).map((t) => Number(t?.history_id || 0)).filter((n) => n > 0);
+      if (snap && ids.length) {
+        const minId = Math.min(...ids);
+        const maxId = Math.max(...ids);
+        if (qid >= minId && maxId >= nextQid - 1) {
+          const turns = (snap.items || [])
+            .filter((t) => t?.role === 'assistant' && Number(t?.history_id || 0) > qid && Number(t?.history_id || 0) < nextQid)
+            .sort((a, b) => Number(a?.history_id || 0) - Number(b?.history_id || 0));
+          if (turns.length) snapTurns = turns;
+        }
+      }
+    }
+    setAnswer((prev) => (Array.isArray(prev) ? prev : (snapTurns ?? 'loading')));
+    void loadAnswer();
+    window.dispatchEvent(new CustomEvent('cicy:current-history-refresh'));
+  }, [open, qid, nextQid, paneId, conversationId, loadAnswer]);
+
+  // LAST q only: keep the in-progress answer live. Stream deltas drive snappy
+  // updates (tail-only = just reply.json, cheap), with a 1.5s timer as fallback.
+  // Only this one row re-renders; it stops once the reply goes terminal.
+  useEffect(() => {
+    if (!open || nextQid) return;
+    let stop = false;
+    let timer: number | undefined;
+    let debounce: number | undefined;
+    const tick = async () => {
+      if (stop) return;
+      const { live } = await loadAnswer(true); // tail-only: just reply.json, reuse committed
+      if (!stop && live) timer = window.setTimeout(tick, 1500);
+    };
+    // stream chunk → refresh the live tail fast (debounced; tail-only is cheap)
+    const onDelta = () => {
+      if (debounce) window.clearTimeout(debounce);
+      debounce = window.setTimeout(() => { void loadAnswer(true); }, 200);
+    };
+    window.addEventListener('cicy:agent-stream-delta', onDelta as EventListener);
+    timer = window.setTimeout(tick, 1500);
+    return () => {
+      stop = true;
+      if (timer) window.clearTimeout(timer);
+      if (debounce) window.clearTimeout(debounce);
+      window.removeEventListener('cicy:agent-stream-delta', onDelta as EventListener);
+    };
+  }, [open, nextQid, loadAnswer]);
+  const ts = (turn as any)?.ts as string | undefined;
+  return (
+    <div data-id={dataId} data-turn-key={String(qid)} className="mb-3">
+      {/* Whole row is the toggle: caret on the LEFT, q in the middle, relative
+          time on the right. Click anywhere on the row to expand/collapse a. */}
+      <div
+        role="button"
+        tabIndex={0}
+        data-id={`current-history-q-toggle-${qid}`}
+        onClick={toggle}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } }}
+        aria-expanded={open}
+        aria-label={open ? '收起回复' : '展开回复'}
+        className="group -mx-1.5 flex cursor-pointer items-start gap-1.5 rounded-lg px-1.5 py-1 transition-colors hover:bg-white/[0.035]"
+      >
+        <ChevronRight
+          data-id={`current-history-q-caret-${qid}`}
+          className={`mt-1 h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform group-hover:text-zinc-300 ${open ? 'rotate-90' : ''}`}
+        />
+        <div className="min-w-0 flex-1"><CollapsibleQ text={turn.text || turn.q} bare /></div>
+        {ts ? (
+          <span data-id={`current-history-q-time-${qid}`} className="mt-1 shrink-0 text-[11px] leading-none text-zinc-600 tabular-nums" title={ts}>
+            {formatPromptTimeAgo(ts)}
+          </span>
+        ) : null}
+      </div>
+      {open ? (
+        <div data-id={`current-history-q-answer-${qid}`} className="mt-1 pl-5">
+          {answer === undefined ? null : answer === 'loading' ? (
+            <span className="text-xs text-zinc-600">加载回复…</span>
+          ) : answer === 'none' ? (
+            <span className="text-xs text-zinc-600">（无回复内容）</span>
+          ) : (() => {
+            // Render only the LATEST ANSWER_RENDER_CAP turns by default (a reply can
+            // be 40+ tool rounds → rendering all at once is the jank). The streaming
+            // tail (last q) is at the end, so it's always shown; earlier rounds are
+            // behind "展开更早". One avatar on the first shown turn.
+            const cap = ANSWER_RENDER_CAP;
+            const hidden = !showAll && answer.length > cap ? answer.length - cap : 0;
+            const shown = hidden ? answer.slice(hidden) : answer;
+            return (
+              <>
+                {hidden ? (
+                  <button
+                    type="button"
+                    data-id={`current-history-q-answer-more-${qid}`}
+                    onClick={(e) => { e.stopPropagation(); setShowAll(true); }}
+                    className="mb-1.5 text-[11px] text-zinc-500 hover:text-zinc-300"
+                  >
+                    展开更早的 {hidden} 轮
+                  </button>
+                ) : null}
+                {shown.map((t, i) => (
+                  <AssistantTurnView
+                    key={`${t.history_id || i}`}
+                    turn={t}
+                    turnKey={`qa-${qid}-${t.history_id || i}`}
+                    isLatestTurn={false}
+                    showAvatar={i === 0}
+                    agentType={agentType}
+                    paneId={paneId}
+                    hideTools={hideTools}
+                  />
+                ))}
+              </>
+            );
+          })()}
+        </div>
+      ) : null}
+    </div>
+  );
+});
+
+// Relative "x 分钟前" label for a prompt's ISO timestamp (RFC3339). Falls back to
+// the local date string for anything older than ~30 days, '' for unparseable.
+// Content signature of an answer turn — changes iff its rendered content changes.
+// A finished turn's sig is stable across polls (→ ref reused → memo skips it);
+// the streaming tail's sig grows as text/tools arrive (→ re-renders).
+function turnSig(t: HistoryTurn): string {
+  const steps = ((t as any)?.steps || []) as any[];
+  let len = String((t as any)?.a || '').length;
+  for (const s of steps) len += String(s?.text || '').length + (Array.isArray(s?.tools) ? s.tools.length * 7 : 0);
+  return `${t?.history_id || 0}|${(t as any)?.status || ''}|${steps.length}|${len}`;
+}
+
+function formatPromptTimeAgo(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const diff = Date.now() - t;
+  if (diff < 0) return '刚刚';
+  if (diff < 60_000) return '刚刚';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  if (diff < 30 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`;
+  return new Date(t).toLocaleDateString();
+}
+
+// promptTextIsScaffold: a role=user turn that's actually harness/system noise,
+// not a human question. Uses the SAME splitLeadingHarnessBlocks peeling that
+// CollapsibleQ(bare) renders with — so the filter and the render agree exactly:
+// if peeling every leading harness block (system-reminder / env-context /
+// compaction-continuation / recap / command echoes) leaves nothing, the turn
+// would render as an EMPTY q bubble → drop it instead.
+function promptTextIsScaffold(raw: string | undefined): boolean {
+  let remaining = String(raw || '');
+  for (let i = 0; i < 50; i += 1) {
+    const { blocks, remaining: rest } = splitLeadingHarnessBlocks(remaining);
+    if (!blocks.length) break;
+    remaining = rest;
+  }
+  return remaining.trim() === '';
 }
 
 function isActiveAssistantStatus(status: string) {
@@ -1868,6 +2282,8 @@ export default function CurrentHistoryView({
   promptsOnly = false,
   hideTools = false,
   agentType = '',
+  fullWidth = false,
+  leftAlignQuestions = false,
 }: {
   paneId: string;
   open: boolean;
@@ -1881,8 +2297,19 @@ export default function CurrentHistoryView({
   // 答案(a)左侧的头像用哪个 agent_type 的 logo(claude/codex/dispatcher…),
   // 类比 ChatGPT 回复前的 logo 头像。空串 → 字母兜底。
   agentType?: string;
+  // Render the message list at 100% width (no mx-auto centering, no max-w cap).
+  // Used by the AgentStack card-view history popover, which is already width-
+  // constrained by its container. Default (false) keeps the centered max-w-4xl
+  // reading column used by the full-screen DispatcherChat view.
+  fullWidth?: boolean;
+  // Left-align the question bubbles (default right/chat-style). The inline
+  // webframe history sets this; DispatcherChat keeps the default.
+  leftAlignQuestions?: boolean;
 }) {
   const { t } = useTranslation('chat');
+  // Content column width: full-bleed when embedded (AgentStack popover), else a
+  // centered reading column.
+  const listWidthClass = fullWidth ? 'w-full' : 'mx-auto w-full max-w-4xl';
   const [items, setItems] = useState<HistoryTurn[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -1896,6 +2323,12 @@ export default function CurrentHistoryView({
   // is skipped (no re-paging the history just to show the questions again).
   const [cachedPromptTurns, setCachedPromptTurns] = useState<HistoryTurn[]>([]);
   const cachedPromptMaxIdRef = useRef(0);
+  // Prompts-only q list, served clean & aligned from the backend (current.json's
+  // `prompts`: real human questions only, de-noised + de-duplicated at write
+  // time, ids matching the snapshot's positional history ids). This is the SOLE
+  // source for the prompts-only view — no fragile client-side scaffold filtering,
+  // no cross-snapshot id-cache drift. See aiGatewayBuildCurrentPrompts (backend).
+  const [promptList, setPromptList] = useState<{ id: number; ts: string; content: string }[]>([]);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);  // external link awaiting confirm (#25)
   // Which outcome-notice turn is mid-retry (spinner on its 重试 button). Keyed by
   // the turn key so only the clicked one spins.
@@ -2020,7 +2453,18 @@ export default function CurrentHistoryView({
       if (seq !== requestSeqRef.current) return;
       const cid = String(ids?.conversation_id || '').trim() || nextCid;
       const newMax = Number(ids?.id || 0);
-      if (!cid || newMax <= 0) { setConversationId(cid); return; }
+      // 新会话是空的(/clear 后):必须把视图完整重置成空,而不是只换 id。
+      // 否则旧 turn 留在屏上,且 maxLoadedIdRef 仍停在旧会话的 max —— 新会话里
+      // 任何小 id 的答案/报错都会被判在边界下方而永不 attach(错误也出不来)。
+      if (!cid || newMax <= 0) {
+        maxLoadedIdRef.current = 0;
+        clearLiveTurn();
+        setItems([]);
+        setHasMore(false);
+        setNextBefore(null);
+        setConversationId(cid);
+        return;
+      }
       const { items: raw, lo } = await loadWindowItems(paneId, cid, newMax, CURRENT_HISTORY_WINDOW, { fresh: true });
       if (seq !== requestSeqRef.current) return;
       const turns = buildTurnsFromRawItems(raw);
@@ -2146,7 +2590,19 @@ export default function CurrentHistoryView({
         const nextConversationId = String(data?.conversation_id || '').trim();
         const nextMaxHistoryId = Number(data?.id || 0);
         setConversationId(nextConversationId);
+        // 切 pane 会按 key={paneId} 重挂载,先用 B 自己的 mem 快照秒绘(含上一会话的 live
+        // 尾巴)。但若 B 的会话已轮换/清过(conversation_id 变了),那条旧 live 尾巴不属于这
+        // 个新窗口——它会以 renderedLiveTurn 排在用户新发的 q **之前**(=「a 在 q 上面」),
+        // 直到下一次 poll 才纠正。这里一拿到真实会话就比对:不一致即丢掉残留的 live 尾巴和
+        // 乐观占位,让新窗口从干净尾巴开始。
+        if (hasSnap && snap && snap.conversationId && snap.conversationId !== nextConversationId) {
+          clearLiveTurn();
+          setOptimisticQ(null);
+          optimisticBaselineUserIdRef.current = 0;
+        }
         setModel(String(data?.model || '').trim());
+        // Clean prompts list straight from current.json (the prompts-only source).
+        setPromptList(Array.isArray(data?.prompts) ? data.prompts : []);
         if (!nextConversationId || nextMaxHistoryId <= 0) {
           setHasMore(false);
           setNextBefore(null);
@@ -2261,6 +2717,21 @@ export default function CurrentHistoryView({
         const { data } = await apiService.getAgentCurrentReply(paneId);
         if (cancelled) return;
         const cid = String(data?.conversation_id || '').trim();
+
+        // 忙/闲只取决于「agent 当前这条 reply 是否在生成」(就是刚拉到的 data),
+        // 跟 committed 视图绑的是哪个会话无关。必须在下面 mismatch 早返回之前 emit:
+        // 否则 /clear 建新会话 → 走 softRebind 后 return,会跳过 emit,开场白后端早
+        // 完成了 composer 却永久锁在「回复生成中」(发不出下一条)。answerId 等也在此
+        // 一次性算好,供后续 tail 逻辑复用(不再在下面重复声明)。
+        const answerId = Number(data?.history_id || 0); // = current.maxID + 1
+        const complete = !!data?.complete;
+        const replyStatus = String(data?.status || '').trim().toLowerCase();
+        const replyFailed = replyStatus === 'failed' || replyStatus === 'fail' || replyStatus === 'error';
+        const replyMaxId = answerId > 0 ? answerId - 1 : 0; // current.json maxID == q_last id
+        const replyInFlight = answerId > 0 && !complete && !replyFailed;
+        replyInFlightRef.current = replyInFlight;
+        emitBusy(optimisticActiveRef.current || replyInFlight);
+
         // The agent rotated to a DIFFERENT conversation than committed is
         // showing → rebind onto the new conversation. (docs §11)
         if (conversationId && cid && cid !== conversationId) {
@@ -2281,18 +2752,6 @@ export default function CurrentHistoryView({
         // The conversation the live-tail ANSWER actually belongs to. Only attach
         // the tail when it matches committed (or backend didn't supply it).
         const replyCid = String(data?.reply_conversation_id || '').trim();
-
-        const answerId = Number(data?.history_id || 0); // = current.maxID + 1
-        const complete = !!data?.complete;
-        const replyStatus = String(data?.status || '').trim().toLowerCase();
-        const replyFailed = replyStatus === 'failed' || replyStatus === 'fail' || replyStatus === 'error';
-        const replyMaxId = answerId > 0 ? answerId - 1 : 0; // current.json maxID == q_last id
-
-        // 广播忙/闲:有 in-flight 回复(有答案槽、未 complete、非 fail)就是 busy;占位 q 还在也算
-        // busy。complete / fail 才解锁发送。
-        const replyInFlight = answerId > 0 && !complete && !replyFailed;
-        replyInFlightRef.current = replyInFlight;
-        emitBusy(optimisticActiveRef.current || replyInFlight);
 
         // No conversation / no turn yet → nothing to attach.
         if (answerId <= 0) {
@@ -2332,7 +2791,19 @@ export default function CurrentHistoryView({
         const effectiveAnswerId = (!complete && !replyFailed)
           ? Math.max(answerId, boundary + 1)
           : answerId;
-        const attach = sameConversation && effectiveAnswerId > boundary && (hasContent || !complete);
+        // 乐观 q(刚发出的新 q)还在、真 answer 还没来时,reply.json 里任何「终结态」回复
+        // (complete / failed,含 /clear /compact 写的 slash-ack ✅Conversation cleared /
+        // ✅Compacted)都属于上一轮,不是这条新 q 的答案。/clear 后或失败轮后,committed
+        // 边界停在命令/失败之前,这些旧回复的 answerId 会越过边界被贴成新 q 的答案,表现为
+        // 「新 q 的 a 先显示上一条 error / 已clear,等后端推真 a 才覆盖」。乐观期间一律不贴
+        // 终结态回复,显示 thinking,直到这条 q 自己的在途(streaming)回复到来。
+        // 只挡「该挡的」终结态:slash-ack(/clear、/compact 回执)和 failed(上一轮 error)——
+        // 这两种在乐观期间会被错贴成新 q 的答案。绝不挡正常 complete 的上一条答案 a1:否则
+        // 发 q2 时 a1 会被 clearLiveTurn 清掉(覆盖)、等迁进 committed 才重现 = a1 闪一下。
+        const isSlashAck = String(data?.turn_id || '') === 'slash-ack';
+        const staleTerminal = (isSlashAck || replyFailed) && optimisticActiveRef.current;
+        const attach = sameConversation && effectiveAnswerId > boundary && (hasContent || !complete)
+          && !staleTerminal;
         // ONE synchronous commit for boundary + tail: React batches these
         // setStates into a single render, so no frame ever shows the moved
         // boundary without the matching live tail.
@@ -2501,8 +2972,26 @@ export default function CurrentHistoryView({
       const qText = String(detail.text || '').trim();
       const isSlashCommand = /^\/\w+(\s|$)/.test(qText);
       if (qText && !isSlashCommand) {
+        // 上一轮若是「生成失败」→ 新 q 就地覆盖它(后端 dropTrailingFailedTurnLocked 会丢掉
+        // 失败的 q 并让新 q 复用同一个 id)。前端必须配合:删掉失败的 q + 它的 a,并把
+        // committed 边界 maxLoadedIdRef 回退到失败 q 之前 —— 否则新 q 复用旧 id 后,poll 的
+        // fetchTailBeyondBoundary 判 `newMax > maxLoadedIdRef` 不成立(同 id,边界只增不减),
+        // 那个 slot 永不重拉 = UI 一直卡着旧 q(就是"后端 hi3、UI 还显示 hi2")。
+        // 失败可能是 committed 的 error 标记,也可能还挂在 live tail(失败回复未提交),两者都要清。
+        let base = itemsRef.current;
+        const lastLive = liveTurnRef.current;
+        const liveFailed = !!lastLive && /fail|error/i.test(String((lastLive as any)?.status || ''));
+        const committedFailed = base.length > 0 && String(base[base.length - 1]?.outcome || '') === 'error';
+        if (committedFailed || liveFailed) {
+          let cut = base.length;
+          for (let i = base.length - 1; i >= 0; i--) { if (base[i]?.role === 'user') { cut = i; break; } }
+          base = base.slice(0, cut);
+          setItems(base);
+          maxLoadedIdRef.current = Number(base[base.length - 1]?.history_id || 0);
+          clearLiveTurn();
+        }
         let maxUserId = 0;
-        for (const it of itemsRef.current) if (it?.role === 'user') maxUserId = Math.max(maxUserId, Number(it?.history_id || 0));
+        for (const it of base) if (it?.role === 'user') maxUserId = Math.max(maxUserId, Number(it?.history_id || 0));
         optimisticBaselineUserIdRef.current = maxUserId;
         setOptimisticQ({ text: qText, ts: Date.now() });
         // 自己发消息 → 重新贴底跟随(ChatGPT:发送后视图回到底部看自己的问题和回复)。
@@ -2583,7 +3072,7 @@ export default function CurrentHistoryView({
     if (!open) return;
     const frame = window.requestAnimationFrame(() => {
       const node = scrollRef.current;
-      if (node) node.scrollTop = promptsOnly ? 0 : node.scrollHeight;
+      if (node) node.scrollTop = node.scrollHeight;
     });
     return () => window.cancelAnimationFrame(frame);
   }, [promptsOnly, open]);
@@ -2644,7 +3133,12 @@ export default function CurrentHistoryView({
   // loadMore() self-guards against re-entrancy / no-more, so repeated intersection
   // callbacks during the fetch are harmless. rootMargin pre-loads a bit early.
   useEffect(() => {
-    if (!open || !canLoadMore) return;
+    // Prompts-only: NO auto-load-earlier. The filtered q list can be shorter than
+    // the viewport, which would keep this sentinel permanently intersecting and
+    // page the whole (huge) history in → freeze. Initial fill is handled by the
+    // eager-paging effect (to PROMPTS_ONLY_MIN_QUESTIONS); older prompts load via
+    // the manual 加载更早 button.
+    if (!open || !canLoadMore || promptsOnly) return;
     const root = scrollRef.current;
     const target = loadMoreRef.current;
     if (!root || !target) return;
@@ -2656,7 +3150,7 @@ export default function CurrentHistoryView({
     );
     io.observe(target);
     return () => io.disconnect();
-  }, [open, canLoadMore, conversationId, nextBefore]);
+  }, [open, canLoadMore, conversationId, nextBefore, promptsOnly]);
 
   // committedMaxId == max history id in the loaded window (== q_last id). Defined
   // here (before the prompts-only effects) so they can gate on it.
@@ -2701,6 +3195,17 @@ export default function CurrentHistoryView({
   // **布尔值**当依赖 —— liveTurn 每次 poll 都变,若直接依赖整个对象,displayItems 会每 poll 重算
   // 成新数组 → renderedTurns 跟着重算 → 所有 committed 轮(含过往 thinking)每 poll 重渲染 → 闪。
   const liveActive = !!liveTurn && Number(liveTurn.history_id || 0) > committedMaxId;
+  // Prompts-only list, memoized on promptList ALONE so its identity is STABLE
+  // across live polls. If it were recomputed inside displayItems (whose deps
+  // include items/liveActive/committedMaxId, all of which churn every poll while
+  // the agent works), every PromptRow would get a fresh `turn` prop each poll →
+  // memo breaks → every expanded answer (which can be the agent's whole 40+ tool
+  // round response) re-renders on every poll → the panel freezes. (卡死 root cause.)
+  const promptOnlyItems = useMemo(() =>
+    promptList
+      .filter((p) => Number(p?.id || 0) > 0 && String(p?.content || '').trim() !== '')
+      .map((p) => ({ role: 'user', history_id: p.id, text: p.content, q: p.content, ts: p.ts } as unknown as HistoryTurn)),
+    [promptList]);
   const displayItems = useMemo(() => {
     if (!promptsOnly) {
       // While the live turn renders the in-flight assistant response (now WITH its
@@ -2713,17 +3218,13 @@ export default function CurrentHistoryView({
       for (const t of items) if (t?.role === 'user') lastUserId = Math.max(lastUserId, Number(t?.history_id || 0));
       return items.filter((t) => !(t?.role === 'assistant' && Number(t?.history_id || 0) > lastUserId));
     }
-    const map = new Map<number, HistoryTurn>();
-    for (const t of cachedPromptTurns) {
-      const id = Number(t?.history_id || 0);
-      if (id > 0 && t?.role === 'user') map.set(id, t);
-    }
-    for (const t of items) {
-      const id = Number(t?.history_id || 0);
-      if (id > 0 && t?.role === 'user') map.set(id, t);
-    }
-    return Array.from(map.values()).sort((a, b) => Number(a?.history_id || 0) - Number(b?.history_id || 0));
-  }, [promptsOnly, items, cachedPromptTurns, liveActive, committedMaxId]);
+    // Prompts-only: the q list comes straight from the backend `prompts` (clean,
+    // de-duplicated, scaffold/recap-free, ids = this snapshot's positional history
+    // ids). No client-side filtering, no id-cache merge → no drift, no dups, no
+    // empty bubbles. Each entry is a minimal user HistoryTurn; the answer is
+    // resolved lazily per-row from the SAME snapshot (PromptRow), so q↔a always align.
+    return promptOnlyItems; // stable ref → no per-poll re-render of expanded answers
+  }, [promptsOnly, items, promptOnlyItems, liveActive, committedMaxId]);
 
   // Recap-on-return is system noise: a harness-only user turn ("The user stepped
   // away… Recap…" / continuation banner) and the assistant recap it triggers.
@@ -2751,23 +3252,48 @@ export default function CurrentHistoryView({
     return drop;
   }, [displayItems]);
 
-  // Hydrate the prompts cache (instant paint) whenever prompts-only is on for the
-  // current conversation. Cleared when prompts-only is off / no conversation.
+  // Refresh the prompt list while open so a newly-sent (or revoked) q stays in
+  // sync — and crucially, IN LOCKSTEP with the reply/answer. The q list is
+  // refreshed on the SAME signals that drive the live reply (current-history-
+  // refresh / agent-stream-delta / agent-status-change), so q and a never show an
+  // inconsistent transient (a sent-then-revoked q used to linger until the next
+  // slow tick). Debounced (per-chunk deltas are frequent); updates only when the
+  // id-signature changes (else keep the ref → no promptOnlyItems churn). A slow
+  // timer is just the fallback when no signal fires.
   useEffect(() => {
-    if (!open || !promptsOnly || !conversationId) {
-      setCachedPromptTurns([]);
-      cachedPromptMaxIdRef.current = 0;
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const cache = await getPromptsCacheFromIndexedDB(paneId, conversationId);
-      if (cancelled) return;
-      setCachedPromptTurns(cache?.prompts || []);
-      cachedPromptMaxIdRef.current = cache?.maxId || 0;
-    })();
-    return () => { cancelled = true; };
-  }, [open, promptsOnly, paneId, conversationId]);
+    if (!open || !promptsOnly) return;
+    let stop = false;
+    let timer: number | undefined;
+    let debounce: number | undefined;
+    const sig = (ps: { id: number }[]) => ps.map((p) => p.id).join(',');
+    const refetch = async () => {
+      if (stop) return;
+      try {
+        const data: any = await getHistoryIDs(paneId);
+        const ps = Array.isArray(data?.prompts) ? data.prompts : [];
+        if (!stop) setPromptList((prev) => (sig(prev) === sig(ps) ? prev : ps));
+      } catch { /* keep last list */ }
+    };
+    const onSignal = () => {
+      if (debounce) window.clearTimeout(debounce);
+      debounce = window.setTimeout(() => { void refetch(); }, 350);
+    };
+    // Only turn-boundary signals (NOT per-chunk agent-stream-delta — the q list
+    // never changes mid-chunk; refetching history-ids every chunk = transcript
+    // parse storm). status-change fires when a new q starts; current-history-refresh
+    // is the explicit nudge (e.g. on expand).
+    window.addEventListener('cicy:current-history-refresh', onSignal as EventListener);
+    window.addEventListener('agent-status-change', onSignal as EventListener);
+    const tick = () => { if (stop) return; void refetch(); timer = window.setTimeout(tick, 4000); };
+    timer = window.setTimeout(tick, 4000);
+    return () => {
+      stop = true;
+      if (timer) window.clearTimeout(timer);
+      if (debounce) window.clearTimeout(debounce);
+      window.removeEventListener('cicy:current-history-refresh', onSignal as EventListener);
+      window.removeEventListener('agent-status-change', onSignal as EventListener);
+    };
+  }, [open, promptsOnly, paneId]);
 
   // Prompts-only keeps just the user questions. The committed window is only the
   // last CURRENT_HISTORY_WINDOW raw items, which holds at most a question or two
@@ -2778,21 +3304,16 @@ export default function CurrentHistoryView({
   // start) — BUT skip that entirely when the cache built at the live maxId
   // already lists the questions (the whole point of caching: don't re-page).
   useEffect(() => {
-    if (!open || !promptsOnly || loading || loadingMore || !canLoadMore) return;
-    if (cachedPromptMaxIdRef.current > 0 && cachedPromptMaxIdRef.current === committedMaxId) return;
-    const questionCount = displayItems.reduce((n, t) => (t?.role === 'user' ? n + 1 : n), 0);
-    if (questionCount >= PROMPTS_ONLY_MIN_QUESTIONS) return;
-    loadMoreFnRef.current();
+    // Obsolete in prompts-only: the q list now comes complete from the backend
+    // `prompts` (promptList), so there's nothing to backfill by paging windows.
+    return;
   }, [open, promptsOnly, displayItems, loading, loadingMore, canLoadMore, committedMaxId]);
 
-  // Persist the assembled question list, keyed by the live maxId so new turns /
-  // a compaction (maxId shifts) invalidate it on the next open (docs §11/INV-9).
+  // Obsolete: the prompts-only q list is no longer assembled/cached client-side
+  // (it comes clean from the backend `prompts` each open). The old id-keyed
+  // IndexedDB prompt cache was a source of cross-snapshot drift — don't write it.
   useEffect(() => {
-    if (!open || !promptsOnly || !conversationId || committedMaxId <= 0) return;
-    const prompts = displayItems.filter((t) => t?.role === 'user');
-    if (!prompts.length) return;
-    cachedPromptMaxIdRef.current = committedMaxId;
-    void setPromptsCacheToIndexedDB(paneId, conversationId, committedMaxId, prompts);
+    return;
   }, [open, promptsOnly, paneId, conversationId, committedMaxId, displayItems]);
 
   // Re-run the latest cancelled/failed turn. Fire the retry, stick to bottom, and
@@ -2816,8 +3337,6 @@ export default function CurrentHistoryView({
   const renderedTurns = useMemo(() => displayItems.map((turn, index) => {
     const turnKey = turn?.history_id || `${turn?.text || turn?.q || 'turn'}-${index}`;
     const isLatestTurn = index === displayItems.length - 1;
-    const allSteps = getVisibleHistorySteps(turn, isLatestTurn);
-    const steps = hideTools ? (allSteps || []).filter((s: any) => s?.type !== 'tool') : allSteps;
     const itemId = Number(turn?.history_id || 0);
     // Prompts-only: render just the user questions, drop everything else.
     if (promptsOnly && turn?.role !== 'user') return null;
@@ -2835,7 +3354,8 @@ export default function CurrentHistoryView({
               <OutcomeNoticeCard
                 text={turn.text || ''}
                 outcome={turn.outcome}
-                canRetry={isLatestTurn && !!paneId}
+                detail={turn.outcomeDetail}
+                canRetry={isLatestTurn && !!paneId && turn.outcome !== 'blocked'}
                 retrying={retryingKey === String(turnKey)}
                 onRetry={() => handleOutcomeRetry(String(turnKey))}
               />
@@ -2852,9 +3372,36 @@ export default function CurrentHistoryView({
       );
     }
     if (turn?.role === 'user') {
+      // Prompts-only: each real q (scaffold already filtered out in displayItems)
+      // renders as a self-managed PromptRow — local expand + lazy answer load on
+      // caret click, so expanding one q never re-renders the whole list.
+      if (promptsOnly) {
+        if (itemId > 0) {
+          return (
+            <PromptRow
+              key={turnKey}
+              turn={turn}
+              qid={itemId}
+              nextQid={Number(displayItems[index + 1]?.history_id || 0) || undefined}
+              dataId={String(itemId)}
+              paneId={paneId}
+              conversationId={conversationId}
+              agentType={agentType}
+              hideTools={hideTools}
+            />
+          );
+        }
+      }
       return (
         <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} key={turnKey} className="mb-5">
-          <CollapsibleQ text={turn.text || turn.q} />
+          {leftAlignQuestions ? (
+            <div data-id={`current-history-turn-user-${turnKey}`} className="flex items-start gap-2.5">
+              <UserTurnAvatar />
+              <div className="min-w-0 flex-1"><CollapsibleQ text={turn.text || turn.q} /></div>
+            </div>
+          ) : (
+            <CollapsibleQ text={turn.text || turn.q} />
+          )}
         </div>
       );
     }
@@ -2870,49 +3417,16 @@ export default function CurrentHistoryView({
         break;
       }
       const showAvatar = prevRole !== 'assistant';
-      const showThinkingPlaceholder = isLatestTurn && String(turn?.status || '').trim() === 'thinking' && !String(turn?.a || '').trim() && !steps.length;
-      const hasRenderableAssistantStep = steps.some((step: any) => {
-        if (step?.type === 'thinking' && String(step?.text || '').trim()) return true;
-        if (step?.type === 'text' && String(step?.text || '').trim()) return true;
-        if (step?.type === 'tool' && Array.isArray(step?.tools) && step.tools.length > 0) return true;
-        return false;
-      });
-      const fallbackAnswer = String(turn?.a || '').trim();
       return (
         <div data-id={itemId > 0 ? String(itemId) : undefined} data-turn-key={String(turnKey)} key={turnKey} className="mb-5">
           {/* ChatGPT 式回复头像:agent_type 的 logo 在答案左侧,与首行顶对齐;
               同一轮的后续 assistant item 不重复头像,用同宽空位对齐内容列 */}
-          <div data-id={`current-history-turn-assistant-${turnKey}`} className="flex items-start gap-2.5">
-            {showAvatar
-              ? <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId={`current-history-assistant-avatar-${turnKey}`} className="mt-0.5 h-7 w-7 rounded-full" />
-              : <div aria-hidden="true" className="h-7 w-7 shrink-0" />}
-            <div data-id={`current-history-turn-assistant-body-${turnKey}`} className="min-w-0 flex-1">
-            {steps.map((step: any, stepIndex: number) => {
-              if (step.type === 'thinking') {
-                return <div key={stepIndex} data-id={`current-history-turn-step-thinking-${turnKey}-${stepIndex}`}><ThinkingBlock text={step.text} /></div>;
-              }
-              if (step.type === 'text') {
-                return <div key={stepIndex} data-id={`current-history-turn-step-text-${turnKey}-${stepIndex}`} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300"><MarkdownBlock text={step.text} /></div>;
-              }
-              const tools = Array.isArray(step.tools) ? step.tools : [];
-              return <div key={stepIndex} data-id={`current-history-turn-step-tools-${turnKey}-${stepIndex}`} className="my-2 space-y-1.5">{tools.map((tool: any, toolIndex: number) => {
-                const toolId = buildToolCardId(turnKey, stepIndex, tool, toolIndex);
-                return <ToolCard key={toolId} tool={tool} toolId={toolId} />;
-              })}</div>;
-            })}
-            {!hasRenderableAssistantStep && fallbackAnswer ? (
-              <div data-id={`current-history-turn-fallback-${turnKey}`} className="chat-markdown current-history-markdown text-sm leading-[1.7] text-zinc-300">
-                <MarkdownBlock text={fallbackAnswer} />
-              </div>
-            ) : null}
-            {!hasRenderableAssistantStep && !fallbackAnswer && showThinkingPlaceholder ? <PendingThinkingPlaceholder /> : null}
-            </div>
-          </div>
+          <AssistantTurnView turn={turn} turnKey={turnKey} isLatestTurn={isLatestTurn} showAvatar={showAvatar} agentType={agentType} paneId={paneId} hideTools={hideTools} />
         </div>
       );
     }
     return null;
-  }), [displayItems, promptsOnly, hideTools, recapResponses, agentType, paneId, retryingKey]);
+  }), [displayItems, promptsOnly, hideTools, recapResponses, agentType, paneId, retryingKey, conversationId, leftAlignQuestions]);
 
   // Part 2 — the live tail (reply.json's answer for the latest turn). It is the
   // ANSWER to committed's last turn (q_last), so it renders answer-only and sits
@@ -2920,6 +3434,12 @@ export default function CurrentHistoryView({
   // the tail's id == committedMaxId + 1, so `> committedMaxId` gates it (and
   // dedups against an already-migrated turn after switching away and back).
   const liveVisible = !promptsOnly && !!liveTurn && Number(liveTurn.history_id || 0) > committedMaxId;
+  // 乐观 q 的真身已落库(committed 里出现了 id > 乐观基线的 user 轮)→ 这一帧就别再渲染
+  // 乐观占位。清乐观 state 的 setOptimisticQ(null) 在 useEffect 里晚一帧,若不在渲染层先
+  // 压住,中间会有一帧「committed 真 q + 乐观 q」两个一样的气泡并存 → 高度抖一下再收回 =
+  // 发送瞬间的「跳」,还连带把贴底滚动算歪。这里渲染层同帧抹掉,保证零重叠帧。
+  const optimisticLanded = !!optimisticQ && items.some((t) => t?.role === 'user' && Number(t?.history_id || 0) > optimisticBaselineUserIdRef.current);
+  const showOptimistic = !!optimisticQ && !optimisticLanded;
   const liveTurnSteps = liveVisible && Array.isArray(liveTurn?.steps) ? liveTurn!.steps : [];
   // 本轮还在流式输出 → 最后一个 thinking/text 块走平滑生长(useSmoothStreamText)。
   const liveStreaming = liveVisible && isActiveAssistantStatus(String(liveTurn?.status || ''));
@@ -2968,6 +3488,7 @@ export default function CurrentHistoryView({
   ) : null;
 
   return (
+    <QAlignContext.Provider value={leftAlignQuestions ? 'left' : 'right'}>
     <OpenUrlContext.Provider value={setPendingUrl}>
     <div data-id="current-history-view" className="flex h-full flex-col bg-[#0b0b0d]">
       {pendingUrl ? <LinkConfirmModal url={pendingUrl} onClose={() => setPendingUrl(null)} /> : null}
@@ -2975,8 +3496,8 @@ export default function CurrentHistoryView({
         greeting ? (
           // 开场白渲染成一条正常的 assistant reply:左上角、带 agent 头像 + markdown
           // 内容列,与真实答案同布局(不再居中占位)。
-          <div data-id="current-history-empty-greeting" className="flex-1 overflow-y-auto fade-scroll-y">
-            <div className="mx-auto w-full max-w-4xl px-4 py-6 font-sans text-zinc-300">
+          <div data-id="current-history-empty-greeting" className="min-h-0 flex-1 overflow-y-auto fade-scroll-y">
+            <div className={`${listWidthClass} px-4 py-6 font-sans text-zinc-300`}>
               <div data-id="current-history-empty-greeting-turn" className="flex items-start gap-2.5">
                 <AgentAvatar agentType={agentType} title={paneId} variant="select" dataId="current-history-empty-greeting-avatar" className="mt-0.5 h-7 w-7 rounded-full" />
                 <div data-id="current-history-empty-greeting-text" className="chat-markdown current-history-markdown min-w-0 flex-1 text-sm leading-[1.7] text-zinc-300">
@@ -2997,15 +3518,22 @@ export default function CurrentHistoryView({
         )
       ) : (
       <>
-      <div data-id="current-history-scroll" ref={scrollRef} className="flex-1 overflow-y-auto fade-scroll-y">
-        <div data-id="current-history-list" data-agent-id={paneId || ''} className="mx-auto w-full max-w-4xl px-4 py-6 font-sans text-zinc-300">
+      <div data-id="current-history-scroll" ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto fade-scroll-y">
+        <div data-id="current-history-list" data-agent-id={paneId || ''} className={`${listWidthClass} px-4 py-6 font-sans text-zinc-300`}>
           {loading ? (
             <div data-id="current-history-loading" className="space-y-6 py-2" aria-busy="true">
               {[0, 1, 2].map((row) => (
                 <div key={row} data-id={`current-history-loading-row-${row}`} className="space-y-3">
-                  <div className="flex justify-end">
-                    <div className="h-8 w-1/2 animate-pulse rounded-2xl bg-white/[0.05]" />
-                  </div>
+                  {leftAlignQuestions ? (
+                    <div className="flex items-start gap-2.5">
+                      <div className="mt-0.5 h-7 w-7 shrink-0 animate-pulse rounded-full bg-white/[0.05]" />
+                      <div className="h-8 w-1/2 animate-pulse rounded-2xl bg-white/[0.05]" />
+                    </div>
+                  ) : (
+                    <div className="flex justify-end">
+                      <div className="h-8 w-1/2 animate-pulse rounded-2xl bg-white/[0.05]" />
+                    </div>
+                  )}
                   {/* 答案骨架与真实布局一致:左侧 28px 圆形头像位 + 右侧内容列 */}
                   <div className="flex items-start gap-2.5">
                     <div data-id={`current-history-loading-avatar-${row}`} className="mt-0.5 h-7 w-7 shrink-0 animate-pulse rounded-full bg-white/[0.05]" />
@@ -3039,14 +3567,21 @@ export default function CurrentHistoryView({
                 的答案 a1 在被 reconcileTail 迁进 committed 之前仍以 renderedLiveTurn(live 尾巴)
                 渲染。若把 q2 排在它前面,顺序会变成 q1 → q2 → a1(q2 把 q1 的答案挤开、硬钉到顶
                 又把 q1 顶出屏幕),这就是"q2 覆盖 q1"。放到最后,顺序恒为 …q1, a1, q2, a2占位。 */}
-            {optimisticQ ? (
+            {showOptimistic ? (
               <>
                 {/* q 占位:独立块渲染,塞进/撤掉绝不触发 committed 列表(renderedTurns memo)
                     重算 → 历史 Markdown 不重渲染,q 点发送瞬间即现、不卡。sending 态(略透明),
                     真 q 落库后此块消失、committed 里的真 q 顶到同一位置。 */}
                 <div data-turn-key={OPTIMISTIC_Q_KEY} className="mb-5">
                   <div data-id="current-history-optimistic-q" className="opacity-60 transition-opacity">
-                    <CollapsibleQ text={optimisticQ.text} />
+                    {leftAlignQuestions ? (
+                      <div className="flex items-start gap-2.5">
+                        <UserTurnAvatar />
+                        <div className="min-w-0 flex-1"><CollapsibleQ text={optimisticQ.text} /></div>
+                      </div>
+                    ) : (
+                      <CollapsibleQ text={optimisticQ.text} />
+                    )}
                   </div>
                 </div>
                 {/* a 占位:先撑出答案位(thinking),真答案一开始流式就由 renderedLiveTurn
@@ -3072,5 +3607,6 @@ export default function CurrentHistoryView({
       )}
     </div>
     </OpenUrlContext.Provider>
+    </QAlignContext.Provider>
   );
 }

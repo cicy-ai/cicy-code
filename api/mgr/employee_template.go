@@ -154,8 +154,16 @@ func employeeTemplateFor(slug string) (employeeTemplate, bool) {
 	if clean == "" {
 		return employeeTemplate{}, false
 	}
-	t, ok := loadEmployeeTemplates().Templates[clean]
-	return t, ok
+	if t, ok := loadEmployeeTemplates().Templates[clean]; ok {
+		return t, true
+	}
+	// Fall back to a user-authored custom agent: its AGENT.md carries the same
+	// bits (tool-group selection + persona body) keyed by the same role slug, so
+	// it feeds tools/greeting/prompt lookups exactly like an employees.yaml entry.
+	if ca, ok := customAgentFor(clean); ok {
+		return employeeTemplate{Tools: ca.Tools, Prompt: ca.Body}, true
+	}
+	return employeeTemplate{}, false
 }
 
 // employeeRoleSlug looks up an employee's role-template slug from agent_config.

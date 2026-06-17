@@ -5,7 +5,6 @@ import Workspace from './components/Workspace';
 import Login from './components/Login';
 import ProvisionScreen from './components/ProvisionScreen';
 import AuditDashboard from './components/audit/AuditDashboard';
-import AuditGuardFab from './components/audit/AuditGuardFab';
 import { TokenManager } from './services/tokenManager';
 import DevPanel from './components/dev/DevPanel';
 import apiService from './services/api';
@@ -160,7 +159,7 @@ function Main() {
 
   // #/agent/xxx or default → Workspace
   const agentId = route.view === 'workspace' ? route.agentId : 'w-1001';
-  return <WsGate><Workspace agentId={agentId} onSelectAgent={selectAgent} /><AuditGuardFab /></WsGate>;
+  return <WsGate><Workspace agentId={agentId} onSelectAgent={selectAgent} /></WsGate>;
 }
 
 export default function App() {

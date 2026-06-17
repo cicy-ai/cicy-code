@@ -145,25 +145,51 @@ type smtpCredentials struct {
 	TLS      string `json:"tls"` // optional: starttls | implicit | none
 }
 
-// loadSmtpCredentials reads ~/cicy-ai/db/smtp.json. Returns nil unless host,
-// port and a usable sender (from or username) are present.
+// loadSmtpCredentials reads the SMTP config the settings UI writes to
+// ~/cicy-ai/db/email.json (the `smtp` section) — the SAME single source the
+// `email` skill and the smtp_ready check use. Audit alerts send via this SMTP
+// only (Gmail OAuth retired — "只用 smtp"; host config == docker config).
+// Returns nil unless host/port + password + a sender (from or user) present.
 func loadSmtpCredentials() *smtpCredentials {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
 	}
-	data, err := os.ReadFile(filepath.Join(home, "cicy-ai", "db", "smtp.json"))
+	data, err := os.ReadFile(filepath.Join(home, "cicy-ai", "db", "email.json"))
 	if err != nil {
 		return nil
 	}
-	var c smtpCredentials
-	if json.Unmarshal(data, &c) != nil {
+	var ej struct {
+		SMTP struct {
+			Host string `json:"host"`
+			Port int    `json:"port"`
+			User string `json:"user"`
+			Pass string `json:"pass"`
+			From string `json:"from"`
+		} `json:"smtp"`
+	}
+	if json.Unmarshal(data, &ej) != nil {
 		return nil
 	}
-	c.Host = strings.TrimSpace(c.Host)
-	c.From = strings.TrimSpace(c.From)
-	c.Username = strings.TrimSpace(c.Username)
-	if c.Host == "" || c.Port == 0 {
+	s := ej.SMTP
+	from := strings.TrimSpace(s.From)
+	if from == "" {
+		from = strings.TrimSpace(s.User)
+	}
+	c := smtpCredentials{
+		Host:     strings.TrimSpace(s.Host),
+		Port:     s.Port,
+		Username: strings.TrimSpace(s.User),
+		Password: s.Pass,
+		From:     from,
+	}
+	// 465 = implicit TLS (SSL); everything else (587/25) uses STARTTLS.
+	if s.Port == 465 {
+		c.TLS = "implicit"
+	} else {
+		c.TLS = "starttls"
+	}
+	if c.Host == "" || c.Port == 0 || strings.TrimSpace(c.Password) == "" {
 		return nil
 	}
 	if c.From == "" && c.Username == "" {

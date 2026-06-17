@@ -45,38 +45,33 @@ func TestLiteDefaultsReproduceBuiltins(t *testing.T) {
 	resetLiteConfigCache()
 	defer func() { cicyRootDir = prev; resetLiteConfigCache() }()
 
-	// dispatcher: no frontmatter → coordinate group, internal.
+	// ONE universal base: no frontmatter → assistant with the coordinate default.
 	cfg := resolveLiteConfig("w-1", writeAgentsMD(t, ""))
-	if cfg.profile != "dispatcher" {
-		t.Fatalf("profile=%q want dispatcher", cfg.profile)
+	if cfg.profile != "assistant" {
+		t.Fatalf("profile=%q want assistant", cfg.profile)
 	}
 	for _, n := range []string{"todo_add", "agent_msg", "agent_capture"} {
 		if !cfg.enabledTools[n] {
-			t.Errorf("dispatcher missing %q", n)
+			t.Errorf("default agent missing coordinate tool %q", n)
 		}
 	}
 	if cfg.external {
-		t.Error("dispatcher must not be external")
+		t.Error("no agent is external anymore")
 	}
 
-	// assistant: no frontmatter → pure chat.
-	a := resolveLiteConfig("w-2", writeAgentsMD(t, "---\nprofile: assistant\n---\n"))
-	if len(a.enabledTools) != 0 {
-		t.Errorf("assistant default should be pure chat, got %v", a.enabledTools)
-	}
-	// assistant + tools:[coordinate] → coordinate (grantable allows it).
-	a2 := resolveLiteConfig("w-3", writeAgentsMD(t, "---\nprofile: assistant\ntools: [coordinate]\n---\n"))
-	if !a2.enabledTools["todo_add"] {
-		t.Error("assistant tools:[coordinate] should enable coordinate")
-	}
-
-	// liaison: external, a2a+handoff.
+	// frontmatter `profile:` is ignored now — every agent is an assistant.
 	l := resolveLiteConfig("w-4", writeAgentsMD(t, "---\nprofile: liaison\n---\n"))
-	if !l.external {
-		t.Error("liaison must be external")
+	if l.profile != "assistant" {
+		t.Errorf("frontmatter profile must be ignored, got %q", l.profile)
 	}
-	if !l.enabledTools["a2a_status"] {
-		t.Error("liaison missing a2a tools")
+	if l.external {
+		t.Error("liaison/external is gone")
+	}
+
+	// tools: drives the selection.
+	a := resolveLiteConfig("w-3", writeAgentsMD(t, "---\ntools: [coordinate]\n---\n"))
+	if !a.enabledTools["todo_add"] {
+		t.Error("tools:[coordinate] should enable coordinate")
 	}
 }
 
@@ -89,11 +84,16 @@ func TestLiteToolsetIndependentOfSession(t *testing.T) {
 	cicyRootDir = t.TempDir()
 	resetLiteConfigCache()
 	defer func() { cicyRootDir = prev; resetLiteConfigCache() }()
-	ws := writeAgentsMD(t, "---\nprofile: assistant\n---\n")
+	ws := writeAgentsMD(t, "")
 	a := resolveLiteConfig("w-1", ws)
 	b := resolveLiteConfig("w-1", ws)
-	if len(a.enabledTools) != 0 || len(b.enabledTools) != 0 {
-		t.Fatal("assistant must stay pure-chat regardless of repeated resolution")
+	if len(a.enabledTools) == 0 || len(a.enabledTools) != len(b.enabledTools) {
+		t.Fatalf("toolset must be deterministic across repeated resolution: %v vs %v", a.enabledTools, b.enabledTools)
+	}
+	for k := range a.enabledTools {
+		if !b.enabledTools[k] {
+			t.Fatalf("nondeterministic toolset: missing %q on second resolve", k)
+		}
 	}
 }
 
@@ -128,19 +128,16 @@ func TestLiteFrontmatterCannotEscalate(t *testing.T) {
 	}
 }
 
-// ── grants escalate only within config (L1), and external is hard-capped ──────
+// ── grants escalate only within config (L1), scoped per agent ─────────────────
 
-func TestLiteGrantsAndExternalCap(t *testing.T) {
+func TestLiteGrantsScopedByAgent(t *testing.T) {
 	withLiteConfig(t, liteConfigFile{
 		Profiles: map[string]liteProfileCfg{
-			"dispatcher": {Name: "d", SystemBase: "@dispatcher",
+			"assistant": {Name: "a", SystemBase: "@assistant",
 				DefaultGroups: []string{"coordinate"}, GrantableGroups: []string{"coordinate"}},
-			"liaison": {Name: "l", SystemBase: "@liaison",
-				DefaultGroups: []string{"a2a"}, GrantableGroups: []string{"a2a"}, External: true},
 		},
 		ToolGroups: map[string][]string{
 			"coordinate": {"todo_add"},
-			"a2a":        {"a2a_status"},
 			"qa-ui":      {"chrome_eval"},
 		},
 		CustomTools: map[string]liteCustomTool{
@@ -148,13 +145,12 @@ func TestLiteGrantsAndExternalCap(t *testing.T) {
 				Params: map[string]liteToolParam{"expr": {Type: "string", Required: true}}},
 		},
 		Grants: liteGrants{
-			ByAgent:   map[string][]string{"w-qa": {"qa-ui"}},
-			ByProfile: map[string][]string{"liaison": {"qa-ui"}}, // must be IGNORED (external)
+			ByAgent: map[string][]string{"w-qa": {"qa-ui"}}, // only this agent may select qa-ui
 		},
 	})
 
-	// granted dispatcher agent gets the custom tool, but only when frontmatter selects it.
-	wsSel := writeAgentsMD(t, "---\nprofile: dispatcher\ntools: [coordinate, qa-ui]\n---\n")
+	// granted agent gets the custom tool, but only when frontmatter selects it.
+	wsSel := writeAgentsMD(t, "---\ntools: [coordinate, qa-ui]\n---\n")
 	qa := resolveLiteConfig("w-qa", wsSel)
 	if !qa.enabledTools["chrome_eval"] {
 		t.Error("granted agent selecting qa-ui should enable chrome_eval")
@@ -166,18 +162,6 @@ func TestLiteGrantsAndExternalCap(t *testing.T) {
 	other := resolveLiteConfig("w-other", wsSel)
 	if other.enabledTools["chrome_eval"] {
 		t.Error("ungranted agent escalated via frontmatter — SECURITY HOLE")
-	}
-	// liaison (external) even with a by-profile grant + frontmatter cannot get it.
-	wsLia := writeAgentsMD(t, "---\nprofile: liaison\ntools: [a2a, qa-ui]\n---\n")
-	lia := resolveLiteConfig("w-qa", wsLia) // same agent id that HAS the by_agent grant
-	if lia.enabledTools["chrome_eval"] {
-		t.Error("external liaison obtained a custom tool — SECURITY HOLE")
-	}
-	if len(lia.customTools) != 0 {
-		t.Error("external profile must resolve zero custom tools")
-	}
-	if !lia.enabledTools["a2a_status"] {
-		t.Error("liaison should keep its a2a tools")
 	}
 }
 
@@ -251,8 +235,8 @@ func TestLiteConfigMergeKeepsBuiltins(t *testing.T) {
 		},
 	})
 	cfg := loadLiteConfig()
-	if _, ok := cfg.Profiles["dispatcher"]; !ok {
-		t.Error("built-in dispatcher profile lost after merge")
+	if _, ok := cfg.Profiles["assistant"]; !ok {
+		t.Error("built-in assistant profile lost after merge")
 	}
 	if _, ok := cfg.Profiles["analyst"]; !ok {
 		t.Error("file-declared analyst profile missing")

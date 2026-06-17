@@ -337,6 +337,7 @@ func fsRoots(agentID string) ([]fsRootInfo, error) {
 	candidates := []struct {
 		id, label, sub string
 	}{
+		{"knowledge", "知识库", "cicy-ai/knowledge"},
 		{"memory", "Memory", "cicy-ai/memory"},
 		{"cicy-ai", "cicy-ai", "cicy-ai"},
 		{"projects", "Projects", "projects"},
@@ -646,6 +647,7 @@ func handleFsWrite(w http.ResponseWriter, r *http.Request) {
 		fsErr(w, err)
 		return
 	}
+	knowledgeMaybeCommitFsWrite(r, "edit", req.Path)
 	J(w, fsWriteResponse{Mtime: st.ModTime().Unix(), Size: st.Size()})
 }
 
@@ -734,7 +736,6 @@ func handleRuntimeFlags(w http.ResponseWriter, r *http.Request) {
 	}
 	J(w, M{
 		"use_native_files": useNativeFiles(),
-		"audit_enabled":    auditEnabled(),
 	})
 }
 
@@ -937,14 +938,18 @@ func handleFsUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st, _ := os.Stat(abs)
+	rel := workspaceRel(workspace, abs)
 	resp := M{
 		"success": true,
-		"path":    workspaceRel(workspace, abs),
+		"path":    rel,
 		"size":    written,
 	}
 	if st != nil {
 		resp["mtime"] = st.ModTime().Unix()
 	}
+	// docs/ is gitignored, so document uploads there produce no commit (expected);
+	// uploads elsewhere under the knowledge root are committed.
+	knowledgeMaybeCommitFsWrite(r, "upload", rel)
 	J(w, resp)
 }
 
@@ -1004,6 +1009,7 @@ func handleFsRename(w http.ResponseWriter, r *http.Request) {
 		fsErr(w, err)
 		return
 	}
+	knowledgeMaybeCommitFsWrite(r, "rename", req.From+" → "+req.To)
 	J(w, M{
 		"success": true,
 		"from":    workspaceRel(workspace, from),
@@ -1072,6 +1078,7 @@ func handleFsDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	knowledgeMaybeCommitFsWrite(r, "delete", req.Path)
 	J(w, M{"success": true, "path": workspaceRel(base, abs)})
 }
 
@@ -1160,6 +1167,7 @@ func handleFsTouch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.Close()
+	knowledgeMaybeCommitFsWrite(r, "create", req.Path)
 	J(w, M{"success": true, "path": workspaceRel(workspace, abs)})
 }
 

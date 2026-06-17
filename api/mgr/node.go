@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -58,7 +57,7 @@ func nodeToken(paneID string) string {
 func nodeTmux(paneID string, args ...string) (string, error) {
 	u := nodeURL(paneID)
 	if u == "" {
-		out, err := exec.Command("tmux", args...).CombinedOutput()
+		out, err := tmuxCommand(args...).CombinedOutput()
 		return strings.TrimSpace(string(out)), err
 	}
 	cmd := "tmux " + shellJoin(args)

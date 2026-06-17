@@ -290,6 +290,13 @@ func resolveRuntimeAIConfigForAgent(providerProtocol string, agentID string) (ru
 				}
 			}
 		}
+		// 自愈:override 指向的 provider 解析出**空 apiKey**(常见于换了 providers 配置后,
+		// 这条 per-agent override 仍指向旧的/已清空 key 的 provider)→ 不要带着空 key 去撞
+		// 上游 401「Missing API key」。回落到 agent-type 默认 provider(cfg 此刻就是它,有可用
+		// key)。用户重新选模型会重写这条 override,这里是没重选时的兜底。
+		if strings.TrimSpace(specific.APIKey) == "" && strings.TrimSpace(cfg.APIKey) != "" {
+			return cfg, ov, nil
+		}
 		cfg = specific
 	}
 	return cfg, ov, nil

@@ -102,6 +102,18 @@ func initPlatform() {
 	} else if !strings.Contains(msys, "noglob") {
 		os.Setenv("MSYS", msys+" noglob")
 	}
+	// Native pty backend only: disable cygwin's pseudo-console (pcon). MSYS2
+	// bash already runs under OUR ConPTY; with pcon ON it tries to nest a
+	// SECOND ConPTY when spawning a native console program (node → claude),
+	// which deadlocks the exec/console handoff — node never even starts and
+	// Ctrl-C can't reach it. disable_pcon makes native children use the legacy
+	// console path so claude/node launch. (Left untouched for MSYS2 tmux mode,
+	// which gives panes its own cygwin pty.)
+	if ptmEnabled() {
+		if msys := os.Getenv("MSYS"); !strings.Contains(msys, "disable_pcon") {
+			os.Setenv("MSYS", strings.TrimSpace(msys+" disable_pcon"))
+		}
+	}
 	if os.Getenv("MSYSTEM") == "" {
 		os.Setenv("MSYSTEM", "MSYS")
 	}
@@ -124,6 +136,13 @@ func initPlatform() {
 // Client commands (ls/send-keys/capture/new-session against a live server)
 // need no tty, so everything after this works from the plain service process.
 func ensureTmuxServer() {
+	if ptmEnabled() {
+		// Native ConPTY backend replaces tmux entirely — no MSYS2 tmux server
+		// to bootstrap. (initPlatform still sets up MSYS2 bash on PATH, which
+		// the agent panes use as their shell.)
+		log.Printf("[platform] CICY_PTY_BACKEND on — native pty backend, skipping tmux server bootstrap")
+		return
+	}
 	if exec.Command("tmux", "has-session").Run() == nil {
 		setTmuxDefaultShellWindows() // idempotent — also fix an already-up server
 		return                       // server already up (with at least one session)

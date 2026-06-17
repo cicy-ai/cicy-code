@@ -37,6 +37,7 @@ import { Save, Send, RefreshCw, AlertTriangle, GitCompare, Download as DownloadI
 import { Download, Eye, FileCode } from 'lucide-react';
 import { fsApi, fsBasename, FsError, FsReadResult, FsStatResponse, friendlyFsError } from './api';
 import { languageForPath } from './language';
+import { cicySearch } from './cmSearchPanel';
 import MarkdownPreview from './MarkdownPreview';
 
 function isMarkdownPath(path: string): boolean {
@@ -113,6 +114,11 @@ const BASIC_SETUP_READONLY = {
   closeBrackets: false,
   autocompletion: false,
 } as const;
+
+// In-file search (Cmd/Ctrl+F): our themed, Chinese, match-counting panel that
+// replaces CodeMirror's default. Built once at module scope so its extension
+// identity is stable (a fresh array each render would force a reconfigure).
+const SEARCH_EXT = cicySearch();
 
 interface CodeEditorProps {
   agentId: string;
@@ -608,7 +614,7 @@ export default function CodeEditor({
   );
 
   const extensions = useMemo(
-    () => [...language, saveKeymap, cursorExt, cmBlendTheme],
+    () => [...language, ...SEARCH_EXT, saveKeymap, cursorExt, cmBlendTheme],
     [language, saveKeymap, cursorExt],
   );
   // Read-only variant (large `text_large` files + non-workspace roots): no
@@ -619,7 +625,7 @@ export default function CodeEditor({
   // halt. Dropping `language` here is also what makes the "syntax highlight
   // off" banner actually true.
   const readonlyExtensions = useMemo(
-    () => [saveKeymap, cursorExt, EditorView.editable.of(false), cmBlendTheme],
+    () => [...SEARCH_EXT, saveKeymap, cursorExt, EditorView.editable.of(false), cmBlendTheme],
     [saveKeymap, cursorExt],
   );
 

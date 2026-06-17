@@ -28,7 +28,13 @@ func BuildRuleSet(builtin []BuiltinRule, policy *Policy) (*RuleSet, error) {
 	}
 
 	rules := make([]BuiltinRule, 0, len(builtin)+len(policy.CustomRules))
+	// RulesManaged: policy.json is the single source — the builtins have been
+	// materialized into CustomRules, so DON'T merge the hardcoded layer (that is
+	// what makes former built-ins editable/deletable; otherwise they'd re-appear).
 	for _, r := range builtin {
+		if policy.RulesManaged {
+			break
+		}
 		o, ok := overrides[r.ID]
 		if ok && o.Disabled {
 			continue
@@ -40,10 +46,26 @@ func BuildRuleSet(builtin []BuiltinRule, policy *Policy) (*RuleSet, error) {
 			if o.DefaultAction != "" {
 				r.DefaultAction = o.DefaultAction
 			}
+			if o.Pattern != "" {
+				// Replace the builtin's matcher with the operator's regex or JS.
+				// All matching runs through the JS engine (compileMatcher); a bad
+				// pattern keeps the original matcher rather than break.
+				mt := o.MatchType
+				if mt == "" {
+					mt = "regex"
+				}
+				if d, err := compileMatcher(mt, o.Pattern, ""); err == nil {
+					r.Pattern = o.Pattern
+					r.Detect = d
+				}
+			}
 		}
 		rules = append(rules, r)
 	}
 	for _, c := range policy.CustomRules {
+		if c.Disabled {
+			continue
+		}
 		built, err := compileCustomRule(c)
 		if err != nil {
 			return nil, fmt.Errorf("audit: custom_rules[%s]: %w", c.ID, err)
@@ -71,12 +93,14 @@ func compileCustomRule(c CustomRule) (BuiltinRule, error) {
 		rule.DefaultAction = ActionLog
 	}
 	switch c.Match.Type {
-	case "regex":
-		pattern := c.Match.Pattern
-		if c.Match.Flags != "" {
-			pattern = "(?" + c.Match.Flags + ")" + pattern
+	case "regex", "js":
+		// All matching runs through the JS engine (compileMatcher): a regex is
+		// translated to a JS RegExp matcher, a js rule runs its snippet. One path.
+		d, err := compileMatcher(c.Match.Type, c.Match.Pattern, c.Match.Flags)
+		if err != nil {
+			return rule, err
 		}
-		rule.Detect = regexDetect(pattern)
+		rule.Detect = d
 	case "dict_file":
 		terms, err := loadDictFile(c.Match.Path)
 		if err != nil {

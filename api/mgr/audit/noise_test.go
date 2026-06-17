@@ -116,16 +116,14 @@ func TestPipeline_Cooldown_EndToEnd(t *testing.T) {
 	pol := DefaultPolicy()
 	pol.Notify.Cooldown.Seconds = 3600
 	pol.Notify.RateLimit.MaxPerAgentPerRule = 1000 // generous so it's only cooldown
+	// A MEDIUM custom rule → action=notify AND the finding stays cooldown-
+	// suppressible (high/critical deliberately pierce cooldown so real leaks
+	// aren't muted).
+	pol.CustomRules = []CustomRule{{ID: "custom.phone", Severity: SeverityMedium,
+		ScanDirections: []string{DirectionOutbound}, Match: RuleMatch{Type: "regex", Pattern: `\d{11}`}}}
 	p, workersRoot := setupPipelineWithPolicy(t, pol)
 
 	payload := []byte("call 13800138000")
-	// pii.phone_cn defaults to LOW → action=log. Promote to MEDIUM so the
-	// action becomes notify AND the finding stays cooldown-suppressible
-	// (high/critical deliberately pierce cooldown so real leaks aren't muted).
-	pol.RulesOverride = []RuleOverride{{ID: "pii.phone_cn", Severity: SeverityMedium}}
-	if err := p.ApplyPolicy(pol); err != nil {
-		t.Fatal(err)
-	}
 
 	for i := 0; i < 2; i++ {
 		p.Submit(context.Background(), Envelope{
@@ -162,7 +160,8 @@ func TestPipeline_RateLimit_EndToEnd(t *testing.T) {
 	pol.Notify.Cooldown.Seconds = 0 // disable so we isolate rate_limit
 	pol.Notify.RateLimit.WindowSeconds = 3600
 	pol.Notify.RateLimit.MaxPerAgentPerRule = 2
-	pol.RulesOverride = []RuleOverride{{ID: "pii.phone_cn", Severity: SeverityHigh}}
+	pol.CustomRules = []CustomRule{{ID: "custom.phone", Severity: SeverityHigh,
+		ScanDirections: []string{DirectionOutbound}, Match: RuleMatch{Type: "regex", Pattern: `\d{11}`}}}
 
 	p, workersRoot := setupPipelineWithPolicy(t, pol)
 
@@ -247,7 +246,8 @@ func TestNoise_SeverityPiercing(t *testing.T) {
 func TestPipeline_Suspended_EndToEnd(t *testing.T) {
 	pol := DefaultPolicy()
 	pol.Notify.Suspended = true
-	pol.RulesOverride = []RuleOverride{{ID: "pii.phone_cn", Severity: SeverityHigh}}
+	pol.CustomRules = []CustomRule{{ID: "custom.phone", Severity: SeverityHigh,
+		ScanDirections: []string{DirectionOutbound}, Match: RuleMatch{Type: "regex", Pattern: `\d{11}`}}}
 	p, workersRoot := setupPipelineWithPolicy(t, pol)
 
 	p.Submit(context.Background(), Envelope{

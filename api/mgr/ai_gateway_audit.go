@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"crypto/rand"
@@ -19,14 +20,65 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/klauspost/compress/zstd"
+
+	"ttyd-go/mgr/audit"
 )
 
 type aiGatewayToolCall struct {
 	ToolID    string `json:"tool_id"`
 	ToolName  string `json:"tool_name"`
 	Arguments string `json:"arguments"`
+}
+
+// aiGatewayBuildTurnAuditUnit assembles the per-turn audit payload scanned by
+// the audit pipeline (audit-v2): the outbound question, then each reply tool
+// call's name + arguments. The builtin rules (secrets / PII / dangerous tool
+// use) run over this combined text. Returns nil when there is nothing worth
+// scanning (no question and no tool calls).
+// aiGatewayBuildBehaviorToolCalls converts the normalised gateway tool calls
+// into the audit package's ToolCall shape (provider + name + arguments) for the
+// behaviour-layer scanner. Provider is carried so the scanner can resolve
+// provider-specific tool naming (claude vs codex). Empty-named calls are dropped.
+func aiGatewayBuildBehaviorToolCalls(provider string, toolCalls []aiGatewayToolCall) []audit.ToolCall {
+	if len(toolCalls) == 0 {
+		return nil
+	}
+	out := make([]audit.ToolCall, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		if strings.TrimSpace(tc.ToolName) == "" {
+			continue
+		}
+		out = append(out, audit.ToolCall{
+			Provider:  provider,
+			ToolName:  tc.ToolName,
+			Arguments: tc.Arguments,
+		})
+	}
+	return out
+}
+
+func aiGatewayBuildTurnAuditUnit(question string, toolCalls []aiGatewayToolCall) []byte {
+	q := strings.TrimSpace(question)
+	if q == "" && len(toolCalls) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	if q != "" {
+		b.WriteString("【出站 q】\n")
+		b.WriteString(q)
+		b.WriteString("\n")
+	}
+	for _, tc := range toolCalls {
+		b.WriteString("\n【tool_call】")
+		b.WriteString(tc.ToolName)
+		b.WriteString("\n")
+		b.WriteString(tc.Arguments)
+		b.WriteString("\n")
+	}
+	return []byte(b.String())
 }
 
 type aiGatewayStatusItem struct {
@@ -93,6 +145,22 @@ type aiGatewayCurrentSnapshot struct {
 	RequestIDs       []string            `json:"request_ids"`
 	ActiveRequestIDs []string            `json:"active_request_ids"`
 	ConversationIDs  []string            `json:"conversation_ids"`
+	// Prompts is the clean, de-noised list of REAL human questions in this
+	// snapshot — extracted at write time from the (already history-id-annotated)
+	// body, so each entry's ID matches the body's positional history id and the
+	// list is always internally consistent with THIS snapshot (no cross-snapshot
+	// id drift). The prompts-only history view reads this directly instead of
+	// re-deriving questions in the frontend. See aiGatewayBuildCurrentPrompts.
+	Prompts []aiGatewayUserPrompt `json:"prompts,omitempty"`
+}
+
+// aiGatewayUserPrompt is one real human question: its positional history id (so
+// the answer = first assistant turn after it, read from the SAME snapshot), the
+// time it first appeared, and the sanitized content.
+type aiGatewayUserPrompt struct {
+	ID      int    `json:"id"`
+	TS      string `json:"ts"`
+	Content string `json:"content"`
 }
 
 type aiGatewayReplySnapshot struct {
@@ -180,6 +248,14 @@ type aiGatewayAuditSession struct {
 	requestID       string
 	conversationID  string
 	question        string
+	// requestBody is the RAW outbound request bytes (the full prompt the agent
+	// sends to the model). Scanned at turn completion as the OUTBOUND audit
+	// payload — this is the real interception point, same as the MITM adapter.
+	requestBody     []byte
+	// auditSourceChannel tags which path this session came from for audit
+	// events: "" / "gateway" (default) for the cooperative AI gateway, "mitm"
+	// when the mitm adapter created it. Drives Envelope.SourceChannel.
+	auditSourceChannel string
 	startedAt       time.Time
 	// firstByteAt is stamped when the first upstream response byte arrives
 	// (≈ reply start / time-to-first-token for streaming). Zero until then.
@@ -334,6 +410,37 @@ var (
 	environmentContextBlockRe  = regexp.MustCompile(`(?s)<environment_context>.*?</environment_context>`)
 	openClawForwardedHeaderRe  = regexp.MustCompile("(?s)^Sender \\(untrusted metadata\\):\\s*```json\\s*.*?```\\s*")
 	openClawLeadingTimestampRe = regexp.MustCompile(`^\[[^\]\n]+\]\s*`)
+	// Harness/CLI scaffolding that rides in a role=user message but is NOT a
+	// human prompt: slash-command wrappers (/compact, /clear, …) and the
+	// auto-compaction continuation preamble. Stripped so the real-prompt list
+	// (aiGatewayBuildCurrentPrompts) doesn't surface them as questions.
+	localCommandBlockRe = regexp.MustCompile(`(?s)<local-command-caveat>.*?</local-command-caveat>|<command-name>.*?</command-name>|<command-message>.*?</command-message>|<command-args>.*?</command-args>|<local-command-stdout>.*?</local-command-stdout>|<local-command-stderr>.*?</local-command-stderr>`)
+	compactionPreambleRe = regexp.MustCompile(`(?s)^\s*This session is being continued from a previous conversation.*`)
+	// The /loop wakeup "recap" prompt is harness-injected as a role=user message
+	// ("The user stepped away and is coming back. Recap in under N words…"), not a
+	// human question — drop it from the prompts list.
+	recapScaffoldRe = regexp.MustCompile(`(?is)^\s*The user (stepped away|is back|has returned).{0,80}?\bRecap\b`)
+	// <task-notification>…</task-notification> is a background-task completion
+	// notice injected as a role=user message, not a human prompt — strip the block.
+	taskNotificationRe = regexp.MustCompile(`(?s)<task-notification>.*?</task-notification>`)
+	// Exact harness markers that ride in a role=user message but are NOT human
+	// prompts: the /compact "continue" resume line, and the deferred-tool load
+	// echo. Matched on the FULLY-sanitized text (whole message = just the marker).
+	harnessMarkerRe = regexp.MustCompile(`^(?:Continue from where you left off\.?|Tool loaded\.?)$`)
+	// cicy-agent inter-agent notification (cicy-agent msg --notify / callback):
+	// "🔔 [w-10131] msg adeba3ca → done". cicy injects it into the agent's tmux as
+	// if typed, so even the transcript labels it promptSource=typed — pattern is the
+	// only way to strip it. Stripped (not whole-message dropped) because it can be
+	// spliced INTO a real prompt the user was typing ("清"+bell+"空" → "清空").
+	cicyNotifyRe = regexp.MustCompile(`🔔\s*\[[^\]]*\]\s*msg\s+\S+\s*(?:→|->)\s*(?:done|idle|working|failed|completed|running|error|ok)\b`)
+	// Claude Code prepends this marker to the user message when a tool call is
+	// interrupted (ESC). It's not part of the human prompt — strip it; whatever the
+	// user actually typed after it is kept.
+	requestInterruptedRe = regexp.MustCompile(`(?m)^\s*\[Request interrupted by user[^\]]*\]\s*$`)
+	// Skill invocation injects the skill's SKILL.md as a role=user message starting
+	// with "Base directory for this skill:". That's harness scaffolding, not a
+	// human question — drop the whole message.
+	skillInjectionRe = regexp.MustCompile(`(?s)^\s*Base directory for this skill:`)
 )
 
 func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suffix string, method string, requestHeaders http.Header, requestBody []byte) *aiGatewayAuditSession {
@@ -525,6 +632,7 @@ func newAIGatewayAuditSession(provider, agentID string, targetBase *url.URL, suf
 		requestID:      requestID,
 		conversationID: conversationID,
 		question:       question,
+		requestBody:    append([]byte(nil), trimmedBody...),
 		startedAt:      startedAt,
 		current:        current,
 		reply:          reply,
@@ -1133,9 +1241,24 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 
 	if failed {
 		errorText := aiGatewayExtractErrorText(responseBody, responseErr)
+		// Cap so a huge raw error body doesn't bloat reply.json / the UI.
+		if r := []rune(errorText); len(r) > 1200 {
+			errorText = strings.TrimSpace(string(r[:1200])) + "…"
+		}
 		if s.reply.Answer == "" {
 			s.reply.Answer = errorText
 			requestSpan.AnswerPreview = aiGatewayPreviewText(errorText, 220)
+		}
+		// Persist the failure DETAIL as a visible item (HTTP <statusCode> + message)
+		// so the history view shows WHY it failed, not just a bare "failed" status.
+		// Plain text (no cicy_outcome tag) → renders as normal markdown content.
+		if errorText != "" {
+			detail := fmt.Sprintf("⚠️ 生成失败（HTTP %d）\n\n%s", statusCode, errorText)
+			s.reply.Items = append(s.reply.Items, map[string]interface{}{
+				"id":   len(s.reply.Items) + 1,
+				"type": "text",
+				"text": detail,
+			})
 		}
 		s.current.Status = "failed"
 		s.reply.Status = "failed"
@@ -1196,6 +1319,49 @@ func (s *aiGatewayAuditSession) completeFromResponse(statusCode int, headers htt
 	}
 	hub.publishAgent(s.agentID, currentUpdatedEvent)
 	notifyWorkerReplyFinished(s.agentID, replySnapshot.Status)
+	// Audit at the interception point: scan the REAL traffic that passed through
+	// the gateway this turn — the agent's full OUTBOUND request (what it sent to
+	// the model: prompt, context, file contents it read, pasted secrets) and the
+	// model's full INBOUND response. This is the ONLY audit trigger for the
+	// gateway path, mirroring the MITM adapter; outbound uses the incremental
+	// payload so accumulated history is never re-scanned (no flood). Runs even on
+	// failed turns (e.g. 402) — a leak is a leak regardless of the LLM result.
+	// Aux/internal calls (X-Cicy-Aux: suggestion/title) carry no real turn.
+	if !s.auxiliary {
+		// Diagnostic: record this round's FULL outbound request body into
+		// outbound.json (accumulated across the conversation's rounds), so we can
+		// inspect exactly what is sent to the model each round. Raw body, unfiltered.
+		aiGatewayAppendOutbound(s.agentID, s.conversationID, s.turnID, s.current.RequestID, s.requestBody, time.Now())
+		// 出站审 agent 发给 LLM 的全部新内容 —— q + tool_use + tool_result,一个都不丢。
+		// 出站拦截点在「转发给 LLM 之前」,所以无论是哪种,数据此刻都还没到模型 =
+		// 未发生的 exfil,都可拦:
+		//   - q           用户粘进 prompt 的密钥(少见)
+		//   - tool_use    args 里 `curl -H "auth: TOKEN"` 把 token 当参数外发
+		//   - tool_result agent read 到的敏感文件内容,正发给 LLM
+		// 只靠 IncrementalOutboundPayload 去重(每个 message block 按内容哈希扫一次,
+		// 不重扫历史 → 不 flood);不再按内容类型过滤(旧 q-only 把真正的泄漏面丢了)。
+		if inc := audit.IncrementalOutboundPayload(s.agentID, s.requestBody); len(inc) > 0 {
+			audit.SubmitGatewayOutbound(s.agentID, "", "", "", s.turnID, s.conversationID, s.provider, s.model, inc)
+		}
+		// inbound: scan the model's ASSEMBLED reply (answer + thinking + tool
+		// calls), NOT the raw SSE stream — a secret in a streamed answer is split
+		// across `data:` deltas in the raw bytes and would never match contiguously.
+		var rb strings.Builder
+		rb.WriteString(replySnapshot.Answer)
+		if replySnapshot.Thinking != "" {
+			rb.WriteByte('\n')
+			rb.WriteString(replySnapshot.Thinking)
+		}
+		for _, tc := range replySnapshot.ToolCalls {
+			rb.WriteByte('\n')
+			rb.WriteString(tc.ToolName)
+			rb.WriteByte(' ')
+			rb.WriteString(tc.Arguments)
+		}
+		if rb.Len() > 0 {
+			audit.SubmitGatewayInbound(s.agentID, "", "", "", s.turnID, s.conversationID, s.provider, s.model, []byte(rb.String()))
+		}
+	}
 	// 先补推没推过的 items（见上面 backstop 注释），再 finalize 收尾。
 	if len(pendingHookItems) > 0 {
 		log.Printf("[im] reply backstop push agent=%s items=%d (live flush missed)", s.agentID, len(pendingHookItems))
@@ -1368,7 +1534,218 @@ func aiGatewayWriteSnapshotFile(agentID, name, convID string, value interface{})
 func aiGatewayWriteCurrentSnapshot(agentID string, current aiGatewayCurrentSnapshot) error {
 	current.Body = aiGatewayAnnotateCurrentBodyHistoryIDs(agentID, aiGatewayCloneJSONValue(current.Body))
 	current.MaxHistoryID = aiGatewayCurrentBodyMaxHistoryID(current.Body)
+	current.Prompts = aiGatewayBuildCurrentPrompts(agentID, current.ConversationID, current.Body, current.Timestamp)
 	return aiGatewayWriteSnapshotFile(agentID, "current.json", current.ConversationID, current)
+}
+
+// aiGatewayBuildCurrentPrompts extracts the clean list of REAL human questions
+// from an already-annotated current.json body. It walks the full ordered
+// message array (position = history id) and keeps only role=user messages that
+// carry genuine typed text — dropping tool_result-only turns, system/harness
+// scaffolding (system-reminder / environment_context / slash-command echoes /
+// compaction preamble), and the /loop recap wakeup. Duplicate text blocks within
+// one message and consecutive identical prompts are collapsed.
+//
+// Each prompt's TS is preserved across writes by CONTENT (not id — ids drift on
+// compaction): a prompt seen in the prior snapshot keeps its first-seen time, a
+// newly-appearing one is stamped with this snapshot's timestamp. This is the
+// per-turn write path (writeStartSnapshots), so the one prior-file read is cheap.
+// aiGatewayNormPrompt strips ALL whitespace so transcript text and the
+// (sanitized) current.json text compare cleanly across wrapping/formatting diffs.
+func aiGatewayNormPrompt(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if !unicode.IsSpace(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// aiGatewayTranscriptTypedSet reads the Claude Code session transcript for a
+// conversation and returns the set of NORMALIZED prompts the human actually
+// entered — every JSONL row with type=user and promptSource ∈ {typed, queued}.
+// Claude Code labels these itself, so this is the authoritative "real prompt"
+// signal — no role=user noise (tool results, task-notifications, /compact
+// continuations, recap wakeups, inter-agent bells) ever carries that label.
+// Returns nil when there is no transcript (non-Claude backends) → caller falls
+// back to the regex-filtered current.json path.
+func aiGatewayTranscriptTypedSet(conversationID string) map[string]bool {
+	cid := strings.TrimSpace(conversationID)
+	if cid == "" {
+		return nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	matches, _ := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", cid+".jsonl"))
+	if len(matches) == 0 {
+		return nil
+	}
+	f, err := os.Open(matches[0])
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	set := map[string]bool{}
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1024*1024), 32*1024*1024)
+	for sc.Scan() {
+		var row map[string]interface{}
+		if json.Unmarshal(sc.Bytes(), &row) != nil {
+			continue
+		}
+		if aiGatewayString(row["type"]) != "user" {
+			continue
+		}
+		switch aiGatewayString(row["promptSource"]) {
+		case "typed", "queued":
+		default:
+			continue
+		}
+		msg := aiGatewayMap(row["message"])
+		norm := aiGatewayNormPrompt(aiGatewaySanitizeUserQuestion(aiGatewayPromptTextFromUserMessage(msg["content"])))
+		if norm != "" {
+			set[norm] = true
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
+}
+
+// aiGatewayMatchesTyped reports whether a sanitized current.json prompt matches
+// one the human actually typed (per the transcript set). Exact normalized match,
+// or containment either way when the shorter side is ≥6 runes (covers a prompt
+// the gateway merged with trailing harness text, or minor sanitize diffs) —
+// the length guard stops a 1-char "清" from matching an injected bell line.
+func aiGatewayMatchesTyped(set map[string]bool, clean string) bool {
+	nc := aiGatewayNormPrompt(clean)
+	if nc == "" {
+		return false
+	}
+	if set[nc] {
+		return true
+	}
+	ncLen := len([]rune(nc))
+	for t := range set {
+		tLen := len([]rune(t))
+		minLen := ncLen
+		if tLen < minLen {
+			minLen = tLen
+		}
+		if minLen >= 6 && (strings.Contains(nc, t) || strings.Contains(t, nc)) {
+			return true
+		}
+	}
+	return false
+}
+
+func aiGatewayBuildCurrentPrompts(agentID string, conversationID string, body interface{}, ts string) []aiGatewayUserPrompt {
+	mapped := aiGatewayMap(body)
+	if len(mapped) == 0 {
+		return nil
+	}
+	// Authoritative allowlist from the Claude Code transcript (nil → not a Claude
+	// session; fall back to the regex noise filters below).
+	typedSet := aiGatewayTranscriptTypedSet(conversationID)
+	items := aiGatewaySlice(mapped["messages"])
+	if len(items) == 0 {
+		items = aiGatewaySlice(mapped["input"])
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	stamp := strings.TrimSpace(ts)
+	if stamp == "" {
+		stamp = time.Now().UTC().Format(time.RFC3339)
+	}
+	// content → first-seen ts, from the prior snapshot (drift-proof by content).
+	priorTS := map[string]string{}
+	if prev, err := aiGatewayReadCurrentSnapshot(agentID); err == nil {
+		for _, p := range prev.Prompts {
+			if p.Content != "" && p.TS != "" {
+				priorTS[p.Content] = p.TS
+			}
+		}
+	}
+	out := []aiGatewayUserPrompt{}
+	lastContent := ""
+	for _, raw := range items {
+		m := aiGatewayMap(raw)
+		if len(m) == 0 {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(aiGatewayString(m["role"]))) != "user" {
+			continue
+		}
+		text := aiGatewayPromptTextFromUserMessage(m["content"])
+		if strings.TrimSpace(text) == "" {
+			continue // tool_result-only turn, or no human text
+		}
+		clean := aiGatewaySanitizeUserQuestion(text)
+		if clean == "" {
+			continue
+		}
+		if typedSet != nil {
+			// Authoritative: keep ONLY what the human actually typed/queued.
+			if !aiGatewayMatchesTyped(typedSet, clean) {
+				continue
+			}
+		} else if recapScaffoldRe.MatchString(clean) || skillInjectionRe.MatchString(clean) || harnessMarkerRe.MatchString(clean) {
+			continue // no transcript → regex fallback for the obvious harness noise
+		}
+		if clean == lastContent {
+			continue // consecutive duplicate
+		}
+		when := stamp
+		if prev, ok := priorTS[clean]; ok {
+			when = prev
+		}
+		out = append(out, aiGatewayUserPrompt{ID: aiGatewayInt(m["id"]), TS: when, Content: clean})
+		lastContent = clean
+	}
+	return out
+}
+
+// aiGatewayPromptTextFromUserMessage pulls the human-typed text out of a
+// role=user message's content, ignoring tool_result blocks (returns "" when the
+// message is tool_result-only). Adjacent identical text blocks are de-duplicated
+// — some clients emit the same text twice in separate blocks, which would
+// otherwise render the question doubled.
+func aiGatewayPromptTextFromUserMessage(content interface{}) string {
+	switch c := content.(type) {
+	case string:
+		return c
+	case []interface{}:
+		parts := []string{}
+		lastKept := ""
+		hasText := false
+		for _, raw := range c {
+			blk := aiGatewayMap(raw)
+			if len(blk) == 0 {
+				continue
+			}
+			switch strings.ToLower(strings.TrimSpace(aiGatewayString(blk["type"]))) {
+			case "text", "":
+				hasText = true
+				t := aiGatewayString(blk["text"])
+				if strings.TrimSpace(t) == "" || strings.TrimSpace(t) == strings.TrimSpace(lastKept) {
+					continue
+				}
+				parts = append(parts, t)
+				lastKept = t
+			}
+		}
+		if !hasText {
+			return ""
+		}
+		return strings.Join(parts, "\n")
+	default:
+		return ""
+	}
 }
 
 // aiGatewayReplySnapshotLite is a simplified version for reply.json
@@ -2685,6 +3062,14 @@ func aiGatewaySanitizeUserQuestion(question string) string {
 	question = strings.ReplaceAll(question, "</system-reminder>", "")
 	question = strings.ReplaceAll(question, "<environment_context>", "")
 	question = strings.ReplaceAll(question, "</environment_context>", "")
+	// Drop harness scaffolding so it never reads as a human prompt: the
+	// auto-compaction preamble is the whole message → blank it; slash-command
+	// wrapper tags are stripped, leaving only real text (if any) behind.
+	question = compactionPreambleRe.ReplaceAllString(question, "")
+	question = localCommandBlockRe.ReplaceAllString(question, "")
+	question = requestInterruptedRe.ReplaceAllString(question, "")
+	question = taskNotificationRe.ReplaceAllString(question, "")
+	question = cicyNotifyRe.ReplaceAllString(question, "")
 	question = strings.TrimSpace(question)
 	if strings.HasPrefix(question, "Sender (untrusted metadata):") {
 		question = openClawForwardedHeaderRe.ReplaceAllString(question, "")

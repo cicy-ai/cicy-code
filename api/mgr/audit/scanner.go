@@ -90,9 +90,8 @@ func (s *BuiltinScanner) ScanInline(payload []byte, direction string, policy *Po
 }
 
 func (s *BuiltinScanner) scan(payload []byte, direction string, policy *Policy, inlineOnly bool) []Finding {
-	if policy != nil && !policy.Enabled {
-		return []Finding{}
-	}
+	// (master `enabled` gate removed 2026-06-16 — audit always scans; control is
+	// per-rule action.)
 	if len(payload) == 0 || direction == "" {
 		return []Finding{}
 	}
@@ -115,14 +114,19 @@ func (s *BuiltinScanner) scan(payload []byte, direction string, policy *Policy, 
 
 	out := make([]Finding, 0, 4)
 	for _, rule := range rs.Rules {
-		// Preventive path only needs the inline block/redact rules; skip the
-		// expensive detective-only rules so blocking latency stays minimal.
-		if inlineOnly && !(rule.Inline && (rule.DefaultAction == ActionBlock || rule.DefaultAction == ActionRedact)) {
+		// Preventive path only needs the block rules; skip the expensive
+		// detective-only rules so blocking latency stays minimal. A rule whose
+		// action is block IS by definition an inline (preventive) rule — the
+		// per-rule action is the control now, so we don't also require the legacy
+		// rule.Inline flag (UI never sets it). (redact removed 2026-06-16.)
+		if inlineOnly && rule.DefaultAction != ActionBlock {
 			continue
 		}
-		if !directionMatches(rule.ScanDirections, direction) {
-			continue
-		}
+		// No per-rule direction gating: a rule scans whatever payload arrives. The
+		// EVENT records the direction (Subject.Direction) so "在哪触发" is logged —
+		// outbound = the user's q (已过滤掉 tool_use/tool_result), inbound = the
+		// model's reply incl. proposed tool_use (未发生). Direction is a property of
+		// the traffic, not a rule-config choice.
 		local := rule.Detect(buf)
 		if len(local) == 0 {
 			continue

@@ -12,6 +12,12 @@ const SchemaVersion = "1"
 const (
 	DirectionOutbound = "outbound"
 	DirectionInbound  = "inbound"
+	// DirectionBehavior carries an agent's TOOL CALLS for a turn (what the
+	// agent actually did — Bash commands, file writes/reads), not the
+	// model conversation. Scanned by the behavior scanner (behavior.go),
+	// not the regex secret rules. Naturally incremental: one event = one
+	// turn's new tool calls, so it never re-scans conversation history.
+	DirectionBehavior = "behavior"
 )
 
 const (
@@ -33,9 +39,10 @@ type Action string
 const (
 	ActionLog    Action = "log"
 	ActionNotify Action = "notify"
-	ActionRedact Action = "redact"
 	ActionBlock  Action = "block"
 	ActionNone   Action = "none"
+	// redact removed 2026-06-16: 审计绝不改写用户数据,只 log/notify(放行+记录)
+	// 或 block(拒发)。
 )
 
 type FailMode string
@@ -77,6 +84,7 @@ type Identity struct {
 type Subject struct {
 	TurnID         string `json:"turn_id"`
 	ConversationID string `json:"conversation_id"`
+	HistoryID      string `json:"history_id,omitempty"`
 	Provider       string `json:"provider"`
 	Model          string `json:"model"`
 	Direction      string `json:"direction"`
@@ -141,6 +149,12 @@ type Meta struct {
 	// omitempty keeps Phase-1 events canonical-hash compatible.
 	NotifySuppressedBy string `json:"notify_suppressed_by,omitempty"`
 
+	// AlertStatus records the OUTCOME of the response action for this event, so
+	// "发送/拦截状态" is auditable: e.g. "已发送(gmail)" | "发送失败:…" |
+	// "未发送:未设置责任人" | "未发送:未配置邮件通道" | "未发送:未达阈值(high)" |
+	// "未发送:冷却中" | "已拦截". Empty for log/none events (which still record).
+	AlertStatus string `json:"alert_status,omitempty"`
+
 	// PreRedactRef points to the encrypted original payload kept under
 	// ~/cicy-ai/workers/<agent>/.cicy/history/pre-redact/<event_id>.enc.
 	// Set only on Action=redact events. omitempty preserves backward-
@@ -179,6 +193,7 @@ type Envelope struct {
 
 	TurnID         string
 	ConversationID string
+	HistoryID      string // id of the triggering message within the conversation
 	Provider       string
 	Model          string
 	Direction      string

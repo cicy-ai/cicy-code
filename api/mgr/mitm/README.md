@@ -172,7 +172,7 @@ curl --proxy socks5h://127.0.0.1:1085 \
 
 不变量(都是 in-process + 真实链路两套测试覆盖的)：
 
-- 任一跳 `PreventiveCheck` 返回 **block** → 终止全链,客户端收到合成 429,response header 含 `X-Cicy-Mitm-Blocked-By: <node.id>`。
+- 任一跳 `PreventiveCheck` 返回 **block** → 终止全链,客户端收到统一的 audit-block **403**(`X-Cicy-Audit-Blocked` + body.message,与网关一致),response header 另含 `X-Cicy-Mitm-Blocked-By: <node.id>` 用于链路归因。
 - **redact 不可逆**：A 把 `sk-xxx` 改成 `[REDACTED]` 后,B 即使策略放过也看不到原文。这是设计目的(纵深防御)。
 - **最终跳 strip**：`final_hop: true` 的节点把所有 `X-Cicy-Mitm-*` headers 删掉再发给真实上游,避免泄露给 API provider。
 - **环路检测**：每跳进来时检查 trace 里没有自己的 node.id,有就返回 502 `loop_rejected`。
@@ -273,12 +273,12 @@ MITM 截到的 turn 通过 `mitm.AuditHook` 接口喂给 `api/mgr/mitm_audit_ada
 
 - **pass** — 原样转发。
 - **redact** — 用 `ModifiedPayload` 替换 request body 再转发(同步写预脱敏归档供事后审查)。
-- **block** — 不拨上游,返回 provider 风格 429 给客户端:
-  - Anthropic: `{"type":"error","error":{"type":"rate_limit_error","message":"..."}}`
-  - OpenAI: `{"error":{"type":"rate_limit_exceeded","code":"cicy_mitm_blocked","message":"..."}}`
-  - Unknown: `{"error":"rate_limit_exceeded","code":"cicy_mitm_blocked","message":"..."}`
+- **block** — 不拨上游,返回**与网关 `writeGatewayBlocked` 完全一致**的 audit-block 响应(2026-06-16 统一,不再用 provider 风格 429):
+  - `HTTP 403 Forbidden`(403 不可重试,第三方 SDK 干净失败,避免旧 429 触发重试风暴)
+  - header `X-Cicy-Audit-Blocked: <event_id>` + `X-Cicy-Audit-Rules: <rule,rule>`(客户端按 header 认终态,不看状态码)
+  - body `{"error":"blocked_by_audit","action":"block","event_id":…,"rules":[…],"message":…}`,`message` 由 `main.auditBlockMessage` 统一生成
 
-response 带 `X-Cicy-Mitm-Blocked-By: <node.id>` + `X-Cicy-Mitm-Block-Rule: <rule_id>` 用于追溯。被拦截的请求**仍然写 audit**(status=blocked),UI 能看到"被熔断的尝试"。
+附加链路归因 header `X-Cicy-Mitm-Blocked-By: <node.id>` + `X-Cicy-Mitm-Block-Rule: <rule_id>` 保留。被拦截的请求**仍然写 audit**(status=blocked),UI 能看到"被熔断的尝试"。
 
 策略本身在 `~/cicy-ai/audit/policy.json` 的 `preventive` 字段里配置(默认 `enabled: false`)。
 

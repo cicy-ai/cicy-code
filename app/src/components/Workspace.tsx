@@ -14,7 +14,7 @@ import type { SystemResourceSnapshot } from '../contexts/AppContext';
 import {
   Terminal, MessageSquare, Folder, FolderOpen, X, Settings, Brain, Search,
   LayoutList, Users, User, Plus, ExternalLink, Key, Bug, Server, MoreHorizontal, ChevronDown, Github, Copy, Check, Send, RotateCcw, Boxes, Package, MessageCircle, Route, SlidersHorizontal,
-  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow
+  Cpu, MemoryStick, HardDrive, Activity, Wifi, WifiOff, ShieldCheck, ListTodo, LineChart, AppWindow, Bot, BookOpen
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ModelTag } from '../lib/modelTag';
@@ -27,19 +27,22 @@ import { SendingProvider } from '../contexts/SendingContext';
 import ChatHistoryView from './chat/ChatHistoryView';
 import TodoPanel from './TodoPanel';
 import FilesView from './files/FilesView';
+import KnowledgePanel from './knowledge/KnowledgePanel';
 import { WebFrame } from './WebFrame';
-import ArtifactPanel from './ArtifactPanel';
-import { installArtifactBridge, ARTIFACT_WEBVIEW_ID } from '../lib/artifactBridge';
 import { WindowManager } from './terminal/WindowManager';
 import { VoiceFloatingButton } from './VoiceFloatingButton';
 import TeamPanel from './layout/TeamPanel';
 import GlobalProxyIndicator from './layout/GlobalProxyIndicator';
 import { ProxyManagerDialog } from './layout/ProxyManagerDialog';
 import SkillMarketplacePanel from './layout/SkillMarketplacePanel';
-import BrowserWindowsPanel from './layout/BrowserWindowsPanel';
+import CustomAgentsPanel from './layout/CustomAgentsPanel';
+import BrowserWindowsPanel, { BrowserWindowsColumn, type Profile as BrowserProfile } from './layout/BrowserWindowsPanel';
+import { MobileDeviceColumn, type MobileSel } from './layout/MobileDevicesPanel';
 import AgentInspector, { InspectorTab } from './layout/AgentInspector';
 import AgentProviderRequestView, { type RequestViewTab } from './layout/AgentProviderRequestView';
 import AgentUsageLogView from './layout/AgentUsageLogView';
+import AuditLogTab from './audit/AuditLogTab';
+import PolicyTab from './audit/PolicyTab';
 import AgentUsageAnalysisView from './layout/AgentUsageAnalysisView';
 import TokenDialog from './layout/TokenDialog';
 import useDesktopEvents from './layout/useDesktopEvents';
@@ -50,6 +53,7 @@ import SettingsModal, { type SettingsSection } from './settings/SettingsModal';
 import { useDialogs } from './ui/Modal';
 import config, { defaultWorkerWorkspace, getHostHome, syncHostHomeFromPath, toTildePath, urls } from '../config';
 import apiService from '../services/api';
+import { loadHandled, serverAckedIds, resolveStatus } from './audit/auditHandled';
 import { sendCommandToTmux } from '../services/mockApi';
 import { chatWs } from '../services/chatWs';
 import { ApiSwitchDialog } from './layout/ApiSwitchDialog';
@@ -82,55 +86,6 @@ const TEAM_TERMINAL_ACTIVE_KEY = 'ws_teamTerminalActive';
 const GITHUB_ISSUES_URL = 'https://github.com/cicy-ai/cicy-code/issues';
 const UPGRADE_URL = 'https://cicy-ai.com/team/upgrade';
 const RENEW_URL = 'https://cicy-ai.com/team/pay';
-
-// Bottom-left button of the artifact host: send this page's connection info
-// (chat-WS client id + the artifact webview's webContentsId) to the active
-// agent so it can drive the artifact frame via the artifact skill.
-function ArtifactSendToAgentBtn({ paneId }: { paneId: string }) {
-  const { t } = useTranslation('workspace');
-  const [state, setState] = useState<'idle' | 'sending' | 'ok'>('idle');
-  const send = async () => {
-    if (state === 'sending' || !paneId) return;
-    setState('sending');
-    let wcid = '';
-    try {
-      // ArtifactPanel's own webview only mounts when the desktop preload
-      // injects window.cicy; older desktops fall back to WebFrame, which (in
-      // Electron) renders a web-frame-webview — query both.
-      const el: any = document.getElementById(ARTIFACT_WEBVIEW_ID)
-        || document.querySelector('[data-id="cli-content-artifact-host"] [data-id="web-frame-webview"]');
-      if (el?.getWebContentsId) wcid = String(el.getWebContentsId());
-    } catch { /* webview not ready / not Electron */ }
-    const cid = chatWs.currentClientId() || '';
-    const text = t('artifactSendAgentPrompt', {
-      clientId: cid || '未知',
-      webContentsId: wcid || '未知(非Electron或产物页未加载)',
-      defaultValue:
-        '我的 client id: {{clientId}}，我的 webContentsId: {{webContentsId}}。请用产物(artifact) skill 与我连接：先跑 `artifact snapshot` 读取并测试当前页面（DOM 快照，不要截图——截图吃 token），确认能连上、能读到页面元素后再继续操作。',
-    });
-    try {
-      await apiService.sendCommand(paneId, text, true);
-      setState('ok');
-      setTimeout(() => setState('idle'), 1500);
-    } catch {
-      setState('idle');
-    }
-  };
-  return (
-    <button
-      data-id="cli-content-artifact-send-agent"
-      type="button"
-      onClick={send}
-      className="absolute bottom-2 left-2 z-20 select-none rounded-md border border-white/10 bg-black/60 px-2.5 py-1.5 text-xs text-zinc-300 shadow-lg backdrop-blur transition-colors hover:bg-black/80 hover:text-white"
-    >
-      {state === 'ok'
-        ? t('artifactSendAgentDone', { defaultValue: '已发送 ✓' })
-        : state === 'sending'
-          ? t('artifactSendAgentSending', { defaultValue: '发送中…' })
-          : t('artifactSendAgent', { defaultValue: '发送给 Agent' })}
-    </button>
-  );
-}
 
 type MembershipCardState = {
   userId: string;
@@ -363,12 +318,12 @@ function normalizeMembershipCard(value: any): MembershipCardState {
 }
 
 interface Props { agentId: string; onSelectAgent: (id: string) => void; }
-type LeftPanelView = 'team' | 'skills' | 'agents' | 'todo' | 'windows' | null;
-type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'artifact' | RequestViewTab;
+type LeftPanelView = 'team' | 'skills' | 'customAgents' | 'agents' | 'todo' | 'windows' | null;
+type WorkspaceCliContentTab = InspectorTab | 'files' | 'todo' | 'knowledge' | 'log' | 'policy' | RequestViewTab;
 type CliContentMode = 'fixed';
 
 function normalizeCliContentTab(value: any): WorkspaceCliContentTab {
-  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'todo' || value === 'artifact') {
+  if (value === 'files' || value === 'tools' || value === 'brain' || value === 'meta' || value === 'usage' || value === 'analysis' || value === 'settings' || value === 'memory' || value === 'knowledge' || value === 'todo' || value === 'log' || value === 'policy') {
     return value;
   }
   return 'files';
@@ -411,7 +366,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     const v = cache.get(leftPanelKey(paneId), null);
     // 刷新后恢复上次打开的左栏面板;'todo' 若技能未装会被下方 effect 关掉。
     // 旧缓存里的 'office' 已不在白名单 → 自动落到 null(办公室视图 2026-06-05 下线)。
-    const ok: LeftPanelView[] = ['team', 'skills', 'agents', 'todo', 'windows'];
+    const ok: LeftPanelView[] = ['team', 'skills', 'customAgents', 'agents', 'todo', 'windows'];
     return ok.includes(v) ? v : null;
   });
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -428,10 +383,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     }
   }, [cliContentTab]);
   const [cliContentMode, setCliContentMode] = useState<CliContentMode>('fixed');
-  // Install the agent-facing window.cicyArtifact bridge as soon as the
-  // workspace mounts, so an agent can open the 产物 tab via exec_js even before
-  // the user has visited it. (ArtifactPanel also (re)registers its controller.)
-  useEffect(() => { installArtifactBridge(); }, []);
   // Whether the `cicy-todo` skill is installed on the local host. Gates the
   // Todo button in the activity bar and the Todo tab in cliContentTabs. The
   // marketplace panel dispatches `cicy:skills-changed` after install/uninstall;
@@ -444,6 +395,9 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   // Pending-todo count (status todo on the active pane) for the red
   // badge on the Todo tab.
   const [todoCount, setTodoCount] = useState<number>(0);
+  // Pending-review count (_inbox) for the red badge on the 知识库 (knowledge) tab.
+  const [knowledgePendingCount, setKnowledgePendingCount] = useState<number>(0);
+  const [auditAlertCount, setAuditAlertCount] = useState<number>(0);
   const [cliDrawerWidth, setCliDrawerWidth] = useState(() => clampCliDrawerWidth(Number(cache.get(CLI_DRAWER_WIDTH_KEY, CLI_DRAWER_DEFAULT_WIDTH))));
   const [cliDrawerResizing, setCliDrawerResizing] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
@@ -460,6 +414,16 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setMembershipMenuOpen(false);
     setLangMenuOpen(false);
   }, []);
+  // Let deep children (e.g. the audit policy panel's "configure SMTP" button)
+  // open the global Settings modal at a given section via a window event.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const sec = (e as CustomEvent)?.detail?.section as SettingsSection | undefined;
+      openSettings(sec || 'general');
+    };
+    window.addEventListener('cicy:open-settings', onOpen as EventListener);
+    return () => window.removeEventListener('cicy:open-settings', onOpen as EventListener);
+  }, [openSettings]);
 
   const [status, setStatus] = useState('idle');
   const [contextUsage, setContextUsage] = useState<number | null>(null);
@@ -622,6 +586,34 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   useDesktopEvents(addApp);
 
   const leftActive = leftPanelView;
+  // Selected browser profile → drives the inserted "windows" column between the
+  // left panel and the mid panel. Cleared whenever we leave the windows view.
+  const [browserSel, setBrowserSel] = useState<{ clientId: string; deviceId: string; profile: BrowserProfile } | null>(null);
+  useEffect(() => { if (leftActive !== 'windows') setBrowserSel(null); }, [leftActive]);
+  // Selected phone (Android/iOS tab inside the windows panel) → drives the inserted
+  // mobile-device column instead of the browser-windows column. Cleared on leave.
+  const [mobileSel, setMobileSel] = useState<MobileSel | null>(null);
+  useEffect(() => { if (leftActive !== 'windows') setMobileSel(null); }, [leftActive]);
+  // External "open profile settings" request (from agent-webpage send open_profile_config,
+  // relayed by useDesktopEvents). Switch to the windows view + hand the request to the panel.
+  const [pendingProfileConfig, setPendingProfileConfig] = useState<{ backend: 'chrome' | 'electron'; accountIdx: number; nonce: number } | null>(null);
+  useEffect(() => {
+    const h = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      setLeftPanelView('windows');
+      setPendingProfileConfig({ backend: d.backend === 'chrome' ? 'chrome' : 'electron', accountIdx: Number(d.accountIdx), nonce: Date.now() });
+    };
+    window.addEventListener('cicy-open-profile-config', h as EventListener);
+    return () => window.removeEventListener('cicy-open-profile-config', h as EventListener);
+  }, []);
+  // Hand a browser window to the active agent: send the descriptive prompt to
+  // its tmux pane (same path as voice / file-path send), surfaced in the chat.
+  const sendBrowserToAgent = useCallback((text: string) => {
+    const tmuxTarget = activeCliPaneIdRef.current || paneId;
+    // Insert into the agent's input WITHOUT submitting (no Enter) — the user edits/
+    // sends it themselves. So no chat-q-sent either (it isn't a submitted q yet).
+    sendCommandToTmux(text, tmuxTarget, false).catch(() => {});
+  }, [paneId]);
   const closeLeftPanel = useCallback(() => {
     setLeftPanelView(null);
   }, []);
@@ -810,7 +802,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
   const handleCapture = async () => { if (isApiOnlyRuntime) return; try { const { data } = await apiService.capturePane(paneId, 100); if (data.output) await navigator.clipboard.writeText(data.output); } catch {} };
   const handleToggleMouse = async () => { if (isApiOnlyRuntime) return; const n = mouseMode === 'on' ? 'off' : 'on'; try { await apiService.toggleMouse(n, fullPaneId); setMouseMode(n); } catch {} };
 
-  const toggleLeft = (p: 'team' | 'skills' | 'todo' | 'windows') => {
+  const toggleLeft = (p: 'team' | 'skills' | 'customAgents' | 'todo' | 'windows') => {
     setLeftPanelView(prev => prev === p ? null : p);
   };
 
@@ -898,6 +890,43 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     window.addEventListener('cicy:todos-changed', onChange);
     return () => { cancelled = true; window.clearInterval(id); window.removeEventListener('cicy:todos-changed', onChange); };
   }, [todoSkillInstalled, activeCliPaneId]);
+  // Keep the 知识库 tab's _inbox (pending review) badge fresh. The store is a
+  // shared team resource (not per-pane), so this polls every 30s.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const res: any = await apiService.listKnowledge({ status: 'pending' });
+        const rows = res?.data?.knowledge || res?.knowledge || [];
+        if (!cancelled) setKnowledgePendingCount(Array.isArray(rows) ? rows.length : 0);
+      } catch { /* keep previous count on transient error */ }
+    };
+    refresh();
+    const id = window.setInterval(refresh, 30000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+
+  // Open (unhandled) audit-alert count, for the 审计日志 tab + agent-stack card badges.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const res: any = await apiService.getAuditEvents({ limit: 80, severity: 'low,medium,high,critical' });
+        const events: any[] = Array.isArray(res?.data?.events) ? res.data.events : [];
+        const handled = loadHandled();
+        const acked = serverAckedIds(events);
+        const open = events.filter((e: any) =>
+          e.decision?.applied &&
+          ['block', 'redact', 'notify'].includes(e.decision?.action || '') &&
+          resolveStatus(e.id, handled, acked) === 'open'
+        ).length;
+        if (!cancelled) setAuditAlertCount(open);
+      } catch { /* keep previous count on transient error */ }
+    };
+    refresh();
+    const id = window.setInterval(refresh, 15000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
   useEffect(() => {
     setInspectorPaneId(activeCliPaneId || paneId);
   }, [activeCliPaneId, paneId]);
@@ -1333,6 +1362,17 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCliContentTab('files');
     setCliContentOpen(true);
   }, [paneId]);
+  // Open a workspace-relative file in a specific agent's file editor. Switches
+  // the content drawer to that agent's FilesView, then dispatches cicy:open-file
+  // on the next tick so the re-rendered FilesView (now scoped to the source
+  // agent) handles the event. Used by the fork-confirm modal.
+  const openAgentFile = useCallback((targetPaneId: string, relPath: string) => {
+    if (!targetPaneId || !relPath) return;
+    openPaneFiles(targetPaneId);
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('cicy:open-file', { detail: { path: relPath } }));
+    }, 80);
+  }, [openPaneFiles]);
   // markdown history 里点击文件链接 → 揭示文件视图(FilesView 自己监听同一事件打开 tab)。
   useEffect(() => {
     const reveal = () => {
@@ -1371,12 +1411,14 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     setCliContentTab('memory');
     setCliContentOpen(true);
   }, [paneId]);
-  const openPaneArtifact = useCallback((targetPaneId: string) => {
+  // Generic opener for the agent-card header buttons that mirror cli-content-tabs
+  // (knowledge / 审计日志 / 审计策略) — open the named content tab for that pane.
+  const openPaneContent = useCallback((targetPaneId: string, tab: string) => {
     const clean = targetPaneId.replace(/:.*$/, '');
     if (!clean) return;
     setActiveTeamPaneId(prev => ({ ...prev, [paneId]: clean }));
     setCliContentMode('fixed');
-    setCliContentTab('artifact');
+    setCliContentTab(normalizeCliContentTab(tab));
     setCliContentOpen(true);
   }, [paneId]);
   const handleCliDrawerResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
@@ -1465,8 +1507,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
     ...(todoSkillInstalled ? [{ id: 'todo', label: t('tabTodo', 'Todo'), icon: <ListTodo className="h-3.5 w-3.5" /> }] : []),
     { id: 'files', label: t('tabFiles'), icon: <Folder className="h-3.5 w-3.5" /> },
     { id: 'session', label: t('tabSession'), icon: <LineChart className="h-3.5 w-3.5" /> },
+    { id: 'knowledge', label: t('tabKnowledge', '知识库'), icon: <BookOpen className="h-3.5 w-3.5" /> },
     { id: 'memory', label: t('tabMemory'), icon: <Brain className="h-3.5 w-3.5" /> },
-    { id: 'artifact', label: t('tabArtifact', '产物'), icon: <Package className="h-3.5 w-3.5" /> },
+    // Audit log + policy as normal right-panel tabs. 日志 = behaviour/secret
+    // hits, 策略 = policy rules. Always shown (no audit_enabled gate).
+    { id: 'log', label: t('tabAuditLog', { ns: 'audit', defaultValue: '审计日志' }), icon: <Activity className="h-3.5 w-3.5" /> },
+    { id: 'policy', label: t('tabAuditPolicy', { ns: 'audit', defaultValue: '审计策略' }), icon: <ShieldCheck className="h-3.5 w-3.5" /> },
     { id: 'settings', label: t('tabSettings'), icon: <Settings className="h-3.5 w-3.5" /> },
   ];
   const sessionSubTabs: { id: RequestViewTab; label: string }[] = [
@@ -1522,7 +1568,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
         onMouseDown={handleCliDrawerResizeStart}
       />
       <div data-id="cli-content-tabs-wrap" className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--vsc-border)] px-3">
-        <div data-id="cli-content-tabs" className="flex gap-1 overflow-x-auto whitespace-nowrap scrollbar-none">
+        <div data-id="cli-content-tabs" className="flex gap-1 overflow-x-auto whitespace-nowrap scrollbar-hairline">
           {cliContentTabs.map((item) => {
             const active = item.id === 'session' ? isSessionTab(cliContentTab) : cliContentTab === item.id;
             return (
@@ -1540,8 +1586,7 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                   else setCliContentTab(item.id as WorkspaceCliContentTab);
                 }}
               >
-                <span className="inline-flex items-center gap-1.5">
-                  <span data-id={`cli-content-tab-icon-${item.id}`} className="shrink-0 opacity-80">{item.icon}</span>
+                <span className="inline-flex items-center">
                   {item.label}
                 </span>
                 {item.id === 'todo' && todoCount > 0 && (
@@ -1550,6 +1595,22 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     className="pointer-events-none absolute right-0 top-0 inline-flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-red-500 px-[3px] text-[9px] font-semibold leading-none text-white tabular-nums"
                   >
                     {todoCount > 99 ? '99+' : todoCount}
+                  </span>
+                )}
+                {item.id === 'knowledge' && knowledgePendingCount > 0 && (
+                  <span
+                    data-id="cli-content-tab-knowledge-badge"
+                    className="pointer-events-none absolute right-0 top-0 inline-flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-amber-500 px-[3px] text-[9px] font-semibold leading-none text-white tabular-nums"
+                  >
+                    {knowledgePendingCount > 99 ? '99+' : knowledgePendingCount}
+                  </span>
+                )}
+                {item.id === 'log' && auditAlertCount > 0 && (
+                  <span
+                    data-id="cli-content-tab-log-badge"
+                    className="pointer-events-none absolute right-0 top-0 inline-flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-red-500 px-[3px] text-[9px] font-semibold leading-none text-white tabular-nums"
+                  >
+                    {auditAlertCount > 99 ? '99+' : auditAlertCount}
                   </span>
                 )}
               </button>
@@ -1626,6 +1687,24 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           <AgentUsageLogView paneId={activeCliPaneId} active={cliContentOpen && cliContentTab === 'usage'} />
         </div>
         <div
+          data-id="cli-content-log-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'log' ? 'block' : 'none' }}
+        >
+          {cliContentOpen && cliContentTab === 'log' && (
+            <div className="h-full overflow-auto p-3"><AuditLogTab /></div>
+          )}
+        </div>
+        <div
+          data-id="cli-content-policy-host"
+          className="absolute inset-0"
+          style={{ display: cliContentTab === 'policy' ? 'block' : 'none' }}
+        >
+          {cliContentOpen && cliContentTab === 'policy' && (
+            <div className="h-full overflow-auto p-3"><PolicyTab /></div>
+          )}
+        </div>
+        <div
           data-id="cli-content-analysis-host"
           className="absolute inset-0"
           style={{ display: cliContentTab === 'analysis' ? 'block' : 'none' }}
@@ -1638,6 +1717,19 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           style={{ display: cliContentTab === 'todo' ? 'block' : 'none' }}
         >
           <TodoPanel paneId={activeCliPaneId} active={cliContentOpen && cliContentTab === 'todo'} isMaster={activeCliPaneId === paneId} />
+        </div>
+        <div
+          data-id="cli-content-knowledge-host"
+          className="absolute inset-0"
+          style={cliContentTab === 'knowledge'
+            ? { position: 'relative', width: '100%', height: '100%' }
+            : { position: 'absolute', width: '100%', height: '100%', visibility: 'hidden', pointerEvents: 'none', zIndex: -1 }
+          }
+        >
+          <KnowledgePanel
+            agentId={nativeFilesAgentId}
+            workspaceFolder={nativeFilesWorkspace}
+          />
         </div>
         <div
           data-id="cli-content-memory-host"
@@ -1659,22 +1751,6 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             onPanePatch={applyPanePatch}
             onClose={() => {}}
           />
-        </div>
-        <div
-          data-id="cli-content-artifact-host"
-          className="absolute inset-0"
-          style={{ display: cliContentTab === 'artifact' ? 'block' : 'none' }}
-        >
-          <ArtifactPanel
-            active={cliContentOpen && cliContentTab === 'artifact'}
-            requestActivate={() => {
-              // `artifact open` must surface the frame even when the right
-              // drawer is closed: open the drawer AND switch to its tab.
-              setCliContentOpen(true);
-              setCliContentTab('artifact');
-            }}
-          />
-          <ArtifactSendToAgentBtn paneId={activeCliPaneId} />
         </div>
         <div
           data-id="cli-content-settings-host"
@@ -1787,10 +1863,11 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
             onOpenPaneSession={handleStackOpenSession}
             onOpenPaneTodo={todoSkillInstalled ? openPaneTodo : undefined}
             onOpenPaneMemory={openPaneMemory}
-            onOpenPaneArtifact={openPaneArtifact}
+            onOpenPaneContent={openPaneContent}
             onActivePaneIdChange={handleStackActivePaneIdChange}
             onRenamePaneTitle={handleRenamePaneTitle}
             todoCount={todoCount}
+            auditAlertCount={auditAlertCount}
           />
         </div>
       </div>
@@ -1814,8 +1891,12 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
           {!globalVar?.helper_mode && (
             <>
               <SideBtn dataId="btn-skill" active={leftActive === 'skills'} icon={<Package className="w-5 h-5" />} title={t('sidebarSkills')} onClick={() => toggleLeft('skills')} />
+              {/* Custom agents: author your own cicy persona, like building a skill */}
+              <SideBtn dataId="btn-custom-agents" active={leftActive === 'customAgents'} icon={<Bot className="w-5 h-5" />} title={t('sidebarCustomAgents')} onClick={() => toggleLeft('customAgents')} />
               {/* Browser windows: Chrome / Electron profiles → live windows + screenshots */}
               <SideBtn dataId="btn-windows" active={leftActive === 'windows'} icon={<AppWindow className="w-5 h-5" />} title="浏览器窗口" onClick={() => toggleLeft('windows')} />
+              {/* Audit log/policy live as normal right-panel tabs (日志/策略), gated
+                  by the audit master switch — no dedicated left-bar entry. */}
               {/* Providers & IM moved into the unified Settings modal (bottom-left gear). */}
             </>
           )}
@@ -1854,9 +1935,15 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                     </> : leftActive === 'skills' ? <>
                       <Brain className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-skills" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelSkills')}</span>
+                    </> : leftActive === 'customAgents' ? <>
+                      <Bot className="w-3.5 h-3.5 text-zinc-600" />
+                      <span data-id="left-panel-title-custom-agents" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelCustomAgents')}</span>
                     </> : leftActive === 'windows' ? <>
                       <AppWindow className="w-3.5 h-3.5 text-zinc-600" />
-                      <span data-id="left-panel-title-windows" className="text-xs font-medium text-zinc-500 flex-1 ml-1">浏览器窗口</span>
+                      <span data-id="left-panel-title-windows" className="text-xs font-medium text-zinc-500 flex-1 ml-1">设备</span>
+                      {/* BrowserWindowsPanel portals its device-actions (eye/add/refresh) into this slot,
+                          so the title + actions share one row instead of two stacked bars. */}
+                      <div data-id="windows-header-actions" id="windows-header-actions" className="flex items-center gap-1" />
                     </> : <>
                       <Users className="w-3.5 h-3.5 text-zinc-600" />
                       <span data-id="left-panel-title-team" className="text-xs font-medium text-zinc-500 flex-1 ml-1">{t('leftPanelTeam')}</span>
@@ -1893,19 +1980,60 @@ export default function Workspace({ agentId, onSelectAgent }: Props) {
                             openPaneInCurrentTerminal(targetPaneId);
                             openInspectorForPane(targetPaneId, 'settings');
                           }}
+                          onOpenAgentFile={openAgentFile}
                         />
                       </div>
                     ) : leftActive === 'skills' ? (
                       <div data-id="left-panel-skills-view" className="absolute inset-0">
                         <SkillMarketplacePanel paneId={activeCliPaneId || paneId} />
                       </div>
+                    ) : leftActive === 'customAgents' ? (
+                      <div data-id="left-panel-custom-agents-view" className="absolute inset-0">
+                        <CustomAgentsPanel paneId={activeCliPaneId || paneId} onCreated={refreshPanes} onSelectAgent={onSelectAgent} />
+                      </div>
                     ) : leftActive === 'windows' ? (
                       <div data-id="left-panel-windows-view" className="absolute inset-0">
-                        <BrowserWindowsPanel />
+                        <BrowserWindowsPanel
+                          selectedKey={browserSel?.profile.key ?? null}
+                          onSelect={setBrowserSel}
+                          openConfigRequest={pendingProfileConfig}
+                          onSelectMobile={setMobileSel}
+                          selectedMobileKey={mobileSel ? `${mobileSel.clientId}:${mobileSel.id}` : null}
+                          onSendToAgent={sendBrowserToAgent}
+                        />
                       </div>
                     ) : null}
                   </div>
                 </div>
+              </div>
+            ) : null}
+            {leftActive === 'windows' && browserSel && !globalVar?.helper_mode ? (
+              <div
+                data-id="browser-windows-column"
+                className="h-full w-[300px] min-w-[300px] max-w-[300px] shrink-0 border-r border-[var(--vsc-border)] relative"
+              >
+                <BrowserWindowsColumn
+                  key={`${browserSel.clientId}:${browserSel.profile.key}`}
+                  clientId={browserSel.clientId}
+                  deviceId={browserSel.deviceId}
+                  profile={browserSel.profile}
+                  onClose={() => setBrowserSel(null)}
+                  onSendToAgent={sendBrowserToAgent}
+                  onOpenInEditor={openCodeFile}
+                />
+              </div>
+            ) : null}
+            {leftActive === 'windows' && mobileSel && !globalVar?.helper_mode ? (
+              <div
+                data-id="mobile-device-column-wrap"
+                className="h-full w-[320px] min-w-[320px] max-w-[320px] shrink-0 border-r border-[var(--vsc-border)] relative"
+              >
+                <MobileDeviceColumn
+                  key={`${mobileSel.clientId}:${mobileSel.id}`}
+                  sel={mobileSel}
+                  onClose={() => setMobileSel(null)}
+                  onSendToAgent={sendBrowserToAgent}
+                />
               </div>
             ) : null}
             <div data-testid="mid-panel" data-id="mid-panel" className="min-w-0 flex-1 relative">

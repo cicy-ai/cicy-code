@@ -14,6 +14,7 @@ import { ModelTag } from '../../lib/modelTag';
 import AgentAvatar from '../AgentAvatar';
 import Select from '../ui/Select';
 import CreateAgentDialog, { CreateAgentValues } from '../CreateAgentDialog';
+import ForkConfirmModal from './ForkConfirmModal';
 
 interface Agent {
   pane_id: string;
@@ -55,6 +56,13 @@ interface Props {
   onOpenSettingsPane?: (paneId: string) => void;
   onRefreshPanes: () => Promise<void>;
   onRefreshPoll: () => void;
+  // Open a file (workspace-relative path) in the given agent's file editor.
+  // Used by the fork-confirm modal to reveal the source's history files.
+  onOpenAgentFile?: (paneId: string, relPath: string) => void;
+  // When true, skip the fixed "current agent (master)" header card so the list
+  // shows ONLY the bound members. Used by the audit view to render just the two
+  // security agents without the w-1001 master card.
+  hideMaster?: boolean;
 }
 
 // Live header metrics (status/model/context/cost) for every card in the panel.
@@ -147,9 +155,11 @@ function CtxRing({ pct }: { pct: number }) {
   );
 }
 
-export default function TeamPanel({ paneId, panes = [], bindings = [], statuses = {}, onOpenInCurrentPane, onLocatePane, openedPaneIds = [], activePaneId, onOpenSettingsPane, onRefreshPanes, onRefreshPoll }: Props) {
+export default function TeamPanel({ paneId, panes = [], bindings = [], statuses = {}, onOpenInCurrentPane, onLocatePane, openedPaneIds = [], activePaneId, onOpenSettingsPane, onRefreshPanes, onRefreshPoll, onOpenAgentFile, hideMaster = false }: Props) {
   const [creating, setCreating] = useState(false);
   const [forkingId, setForkingId] = useState<string | null>(null);
+  // Source pane id whose fork-confirm preview modal is open (null = closed).
+  const [forkPreviewSrc, setForkPreviewSrc] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   // bottom-most cards: not enough room below the … button → flip dropdown upward
@@ -202,7 +212,9 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   };
   const [dragOrder, setDragOrder] = useState<string[] | null>(null);
   const [draggingWid, setDraggingWid] = useState<string | null>(null);
-  const [dragOverWid, setDragOverWid] = useState<string | null>(null);
+  // Drop intent while dragging a node onto card `wid`: upper half = 'before'
+  // (same level, insert before), lower half = 'child' (become wid's sub).
+  const [dropTarget, setDropTarget] = useState<{ wid: string; mode: 'child' | 'before' } | null>(null);
   const { confirm, node: dialogsNode } = useDialogs();
 
   const shortId = (id: string) => (id || '').replace(/:.*$/, '');
@@ -389,16 +401,14 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
   const { forksByParent, nestedWids } = useMemo(() => {
     const byWid = new Map(orderedBindings.map(b => [shortId(b.name), b] as const));
     const isFork = (b?: Binding) => !!b && String(b.source_kind || '') === 'fork' && !!b.source_ref;
-    // Child worker = fork that still wears its default name. Renamed ⇒ promoted.
-    const isChildWorker = (b: Binding) => {
-      const wid = shortId(b.name);
-      const t = String(b.title || panes.find(a => shortId(a.pane_id) === wid)?.title || '').trim();
-      return !t || t.startsWith('Fork of');
-    };
     const byParent = new Map<string, Binding[]>();
     const nested = new Set<string>();
     for (const b of orderedBindings) {
-      if (!isFork(b) || !isChildWorker(b)) continue; // promoted forks stay top-level
+      // Nest every node that carries an explicit fork parent — drag-to-reparent
+      // sets source_kind='fork'+source_ref, and the tree should reflect it
+      // faithfully (no title-based "promotion" that would pin a renamed node to
+      // the top level and make a reparent look like it did nothing).
+      if (!isFork(b)) continue;
       const parent = byWid.get(shortId(b.source_ref || ''));
       if (!parent) continue; // orphan fork (parent deleted/unbound) → stays top-level
       const parentWid = shortId(parent.name);
@@ -473,6 +483,46 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     });
   }, [groupedBindings, orderedBindings, paneId, onRefreshPoll]);
 
+  // Raw parent map straight from source_ref — MUST match the backend's cycle
+  // check (agentIsDescendant walks source_ref). The rendered fork tree promotes
+  // / drops some edges, so guarding on it disagrees with the server and lets a
+  // doomed reparent through (→ 400 "would create a cycle" → toast). Guard on the
+  // raw chain instead so impossible drops are blocked client-side.
+  const rawParent = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const b of bindings) {
+      const w = shortId(b.name);
+      const p = shortId((b as { source_ref?: string }).source_ref || '');
+      if (p && p !== w) m.set(w, p);
+    }
+    return m;
+  }, [bindings]);
+
+  // Does `target` live in `root`'s subtree per raw source_ref? (i.e. target's
+  // parent chain reaches root). Mirrors backend agentIsDescendant(target, root).
+  const rawInSubtree = useCallback((root: string, target: string): boolean => {
+    const seen = new Set<string>();
+    for (let cur = target; cur && !seen.has(cur); cur = rawParent.get(cur) || '') {
+      if (cur === root) return true;
+      seen.add(cur);
+    }
+    return false;
+  }, [rawParent]);
+
+  // Drag-to-reparent: rewrite the moved agent's tree parent (source_ref) via the
+  // reparent API, then refresh so the derived fork tree re-renders. newParentWid
+  // === '' promotes to top-level.
+  const handleReparentDrop = useCallback((childWid: string, newParentWid: string) => {
+    if (!childWid || childWid === newParentWid) return;
+    if (newParentWid && rawInSubtree(childWid, newParentWid)) return; // no cycles
+    void apiService.reparentAgent(childWid, newParentWid, paneId).then(() => {
+      onRefreshPanes?.();
+      onRefreshPoll();
+    }).catch(() => {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: i18n.t('toastReparentFailed', { ns: 'teamPanel', defaultValue: '移动失败' }) }));
+    });
+  }, [rawInSubtree, paneId, onRefreshPanes, onRefreshPoll]);
+
   const agentTypeById = useMemo(
     () => new Map(panes.map(agent => [shortId(agent.pane_id), normalizeAgentType(agent.agent_type)])),
     [panes]
@@ -527,12 +577,14 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
     canRestart = true,
     groupKey,
     draggable = false,
+    parentWid = '',
     nested = false,
     childCount = 0,
     collapsed = false,
     onToggleCollapse,
   }: {
     wid: string;
+    parentWid?: string;
     title: string;
     agentType?: string;
     gateway?: boolean;
@@ -565,36 +617,55 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         e.dataTransfer.effectAllowed = 'move';
         try { e.dataTransfer.setData('text/plain', wid); } catch {}
       } : undefined}
-      onDragOver={draggable ? (e) => {
-        if (!draggingWid || draggingWid === wid) return;
+      onDragOver={(e) => {
+        // Any card is a drop target while a drag is in flight. Forbid dropping
+        // onto self or into the dragged node's own subtree (would cycle).
+        if (!draggingWid || draggingWid === wid || rawInSubtree(draggingWid, wid)) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
-        if (dragOverWid !== wid) setDragOverWid(wid);
-      } : undefined}
-      onDragLeave={draggable ? () => {
-        if (dragOverWid === wid) setDragOverWid(null);
-      } : undefined}
-      onDrop={draggable ? (e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        // Upper half → 同级 (sibling, before this node); lower half → 子级 (child).
+        const mode: 'child' | 'before' = (e.clientY - rect.top) > rect.height / 2 ? 'child' : 'before';
+        setDropTarget((cur) => (cur && cur.wid === wid && cur.mode === mode) ? cur : { wid, mode });
+      }}
+      onDrop={(e) => {
         e.preventDefault();
         const fromWid = draggingWid || e.dataTransfer.getData('text/plain');
-        if (fromWid && fromWid !== wid && groupKey) {
+        const mode = (dropTarget && dropTarget.wid === wid) ? dropTarget.mode : 'before';
+        setDraggingWid(null);
+        setDropTarget(null);
+        if (!fromWid || fromWid === wid) return;
+        // Top-level sibling drop keeps the existing intra-level reorder (no-op for
+        // nested fromWid — it just falls through to the reparent below).
+        if (mode === 'before' && parentWid === '' && groupKey) {
           handleReorderDrop(groupKey, fromWid, wid);
         }
+        // lower half → become this node's child; upper half → sibling (this node's parent).
+        handleReparentDrop(fromWid, mode === 'child' ? wid : parentWid);
+      }}
+      onDragEnd={() => {
         setDraggingWid(null);
-        setDragOverWid(null);
-      } : undefined}
-      onDragEnd={draggable ? () => {
-        setDraggingWid(null);
-        setDragOverWid(null);
-      } : undefined}
+        setDropTarget(null);
+      }}
       className={`w-full flex items-center gap-3 border rounded-xl transition-all group relative cursor-pointer ${
         nested ? 'mb-1.5 p-2' : 'mb-2 p-3'
       } ${
         active
           ? 'border-blue-500/50 bg-blue-500/[0.08] ring-1 ring-blue-500/20'
           : 'bg-white/[0.02] border-[var(--vsc-border)] hover:border-white/[0.08]'
-      } ${draggingWid === wid ? 'opacity-40' : ''} ${dragOverWid === wid && draggingWid && draggingWid !== wid ? 'ring-2 ring-blue-500/40' : ''}`}
+      } ${draggingWid === wid ? 'opacity-40' : ''}`}
     >
+      {/* Drop indicator: a dot + horizontal bar. Indented one level for 'child'
+          (子级), flush for 'before' (同级) — the indent communicates the target depth. */}
+      {dropTarget?.wid === wid && draggingWid && draggingWid !== wid && (
+        <div
+          data-id={`team-panel-drop-line-${wid}`}
+          className={`pointer-events-none absolute right-1 z-20 flex items-center ${dropTarget.mode === 'child' ? '-bottom-1 left-8' : '-top-1 left-0'}`}
+        >
+          <span className="h-2 w-2 shrink-0 rounded-full bg-blue-400 shadow-[0_0_0_2px_rgba(96,165,250,0.3)]" />
+          <span className="h-0.5 flex-1 rounded-full bg-blue-400" />
+        </div>
+      )}
       <div
         data-id={`team-panel-worker-menu-${wid}`}
         className="absolute right-2 top-2 z-20"
@@ -850,7 +921,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
 
   // One worker card from a binding. Shared by top-level rows and nested fork
   // sub-groups (nested = slimmer, non-draggable).
-  const cardForBinding = (b: Binding, opts: { nested?: boolean; draggable?: boolean; groupKey?: string; childCount?: number; collapsed?: boolean; onToggleCollapse?: () => void }) => {
+  const cardForBinding = (b: Binding, opts: { nested?: boolean; draggable?: boolean; parentWid?: string; groupKey?: string; childCount?: number; collapsed?: boolean; onToggleCollapse?: () => void }) => {
     const wid = shortId(b.name);
     const s = getStatus(wid);
     const subtitleParts: string[] = [wid];
@@ -865,6 +936,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
       active: activePaneId === wid,
       opened: openedPaneIds.includes(wid),
       draggable: !!opts.draggable,
+      parentWid: opts.parentWid || '',
       nested: !!opts.nested,
       groupKey: opts.groupKey,
       childCount: opts.childCount || 0,
@@ -878,17 +950,14 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
       onRestart: () => restartPane(wid, getName(b)),
       onOpenSettings: () => onOpenSettingsPane?.(wid),
       canRestart: true,
-      onFork: async () => {
-        setForkingId(wid);
-        try {
-          const { data } = await apiService.forkPane({ source_pane_id: wid, master_pane_id: paneId });
-          if (data?.pane_id) { await onRefreshPanes(); onRefreshPoll(); }
-        } catch {
-          window.dispatchEvent(new CustomEvent('show-toast', { detail: i18n.t('toastForkFailed', { ns: 'teamPanel' }) }));
-        } finally {
-          setForkingId(null);
-          setOpenMenuId(null);
-        }
+      onFork: () => {
+        // Open the fork-confirm preview instead of forking immediately; the fork
+        // pane is created (and the prompt sent) only when the user clicks Send.
+        // Activate the source first so its stack card is the visible one (only
+        // the active card is rendered) — the modal anchors over that card.
+        onOpenInCurrentPane?.(wid);
+        setForkPreviewSrc(wid);
+        setOpenMenuId(null);
       },
       forking: forkingId === wid,
       onRemove: async () => {
@@ -904,6 +973,15 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
 
   return (
     <div className="h-full w-full min-w-0 flex flex-col overflow-hidden" data-id="team-panel-root">
+      {forkPreviewSrc ? (
+        <ForkConfirmModal
+          sourcePaneId={forkPreviewSrc}
+          masterPaneId={paneId}
+          onClose={() => setForkPreviewSrc(null)}
+          onForked={() => { onRefreshPanes(); onRefreshPoll(); }}
+          onOpenAgentFile={(pid, rel) => onOpenAgentFile?.(pid, rel)}
+        />
+      ) : null}
       {forkingId ? createPortal(
         <div data-id="team-panel-fork-loading" className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-white/[0.08] bg-[#141416] px-8 py-6 shadow-2xl">
@@ -928,7 +1006,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         </div>,
         document.body
       ) : null}
-      <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-center gap-2 flex-shrink-0" data-id="team-panel-toolbar">
+      {!hideMaster && <div className="px-3 py-2 border-b border-[var(--vsc-border)] flex items-center gap-2 flex-shrink-0" data-id="team-panel-toolbar">
         <div data-id="team-panel-bind-select" className="flex-1 min-w-0">
         <Select
           options={available.map(a => ({
@@ -964,7 +1042,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
         >
           {creating ? <Spinner size="xs" /> : <Plus className="w-3.5 h-3.5" />}
         </button>
-      </div>
+      </div>}
 
       <CreateAgentDialog
         open={createDialogOpen}
@@ -981,7 +1059,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
 
 
       <div className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto hide-scrollbar select-none" data-id="team-panel-worker-list">
-        <div className="p-1.5 border-b border-[var(--vsc-border)]" data-id="team-panel-current-agent">
+        {!hideMaster && <div className="p-1.5 border-b border-[var(--vsc-border)]" data-id="team-panel-current-agent">
           {renderAgentCard({
             wid: paneId,
             title: currentAgent.title,
@@ -1004,23 +1082,13 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
             onRestart: () => restartPane(paneId, currentAgent.title),
             onOpenSettings: () => onOpenSettingsPane?.(paneId),
             canRestart: true,
-            onFork: async () => {
-              setForkingId(paneId);
-              try {
-                const { data } = await apiService.forkPane({ source_pane_id: paneId, master_pane_id: paneId });
-                if (data?.pane_id) {
-                  await onRefreshPanes();
-                  onRefreshPoll();
-                }
-              } catch {
-                window.dispatchEvent(new CustomEvent('show-toast', { detail: i18n.t('toastForkFailed', { ns: 'teamPanel' }) }));
-              } finally {
-                setForkingId(null);
-                setOpenMenuId(null);
-              }
+            onFork: () => {
+              onOpenInCurrentPane?.(paneId);
+              setForkPreviewSrc(paneId);
+              setOpenMenuId(null);
             },
           })}
-        </div>
+        </div>}
         {bindings.length > 0 ? (
           <div className="flex w-full min-w-0 flex-col" data-id="team-panel-groups">
             {groupedBindings.map(group => {
@@ -1039,7 +1107,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                     // Recursive multi-level fork tree: each node renders its card +
                     // (when expanded) its DIRECT fork children, to any depth. Only
                     // top-level rows stay draggable (reorder is a top-level concept).
-                    const renderTreeNode = (node: Binding, depth: number): React.ReactElement => {
+                    const renderTreeNode = (node: Binding, depth: number, parentWid: string): React.ReactElement => {
                       const wid = shortId(node.name);
                       const childForks = forksByParent.get(wid) || [];
                       const collapsed = collapsedWids.has(wid);
@@ -1047,7 +1115,8 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                         <div key={`tw-${wid}`} data-id={depth === 0 ? `team-panel-worker-wrap-${wid}` : `team-panel-worker-subtree-${wid}`}>
                           {cardForBinding(node, {
                             nested: depth > 0,
-                            draggable: depth === 0,
+                            draggable: true,
+                            parentWid,
                             groupKey: depth === 0 ? groupKey : undefined,
                             childCount: childForks.length > 0 ? subtreeCount(wid) : 0,
                             collapsed,
@@ -1073,7 +1142,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                                       style={{ height: isLast ? '1.4rem' : 'calc(100% + 0.375rem)' }}
                                     />
                                     <span aria-hidden className="absolute left-0 top-[1.4rem] h-px w-3 bg-white/[0.14]" />
-                                    {renderTreeNode(fb, depth + 1)}
+                                    {renderTreeNode(fb, depth + 1, wid)}
                                   </div>
                                 );
                               })}
@@ -1082,7 +1151,7 @@ export default function TeamPanel({ paneId, panes = [], bindings = [], statuses 
                         </div>
                       );
                     };
-                    return renderTreeNode(b, 0);
+                    return renderTreeNode(b, 0, '');
                   })}
               </div>
               );

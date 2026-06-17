@@ -1,47 +1,97 @@
 package audit
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 )
 
 // dispatchIncident is called by pipeline.process AFTER an event is appended.
-// New architecture: the backend does NOT decide the response itself — it
-// forwards the finding to the w-6001 audit advisor, which triages and
-// orchestrates everything (notify the offending agent / escalate to the owner
-// via cicy-policy notify / tune policy). The owner email is sent only when the
-// advisor explicitly calls SendOwnerIncident (POST /api/audit/notify).
+// audit-v2 architecture: on a qualifying hit the backend does TWO things,
+// in parallel intent, then records the cooldown:
 //
-// Best-effort: any failure logs but does not propagate.
-func (p *Pipeline) dispatchIncident(e Event) {
-	pol := p.CurrentPolicy()
-	cfg := pol.IncidentResponse
-	if !cfg.Enabled {
-		return
+//	① SMTP alert — auto-emails the responsible person(s) via the active mailer
+//	   (SmtpMailer), no longer waiting for an agent to trigger it.
+//	② 审核策略专员 — forwards the finding brief to the live 审核策略专员 (the
+//	   user's audit advisor) cicy agent for verification / triage / grading.
+//
+// Cooldown is marked if EITHER channel fired, so a noisy finding doesn't spam.
+// Best-effort: any failure logs but does not propagate to the caller path.
+// dispatchIncident attempts the owner SMTP/email alert ONLY (no agent forward —
+// forwarding to the 审核策略专员 agent made it run an LLM per hit and burned real
+// provider balance) and returns a human-readable status recorded on the event
+// (e.Meta.AlertStatus). Runs synchronously in the async audit worker (off the
+// agent hot path) so the REAL send result is captured before the event persists.
+// defaultIncidentCooldown dedups repeat alerts for the same finding identity
+// (agent + rule + value). The separate "事件响应" config was removed — alerting
+// is driven purely by a rule's 告警 action + a deliverable channel (SMTP +
+// responsible person), so this fixed window is the only knob.
+const defaultIncidentCooldown = 30 * time.Minute
+
+func (p *Pipeline) dispatchIncident(e Event) string {
+	if responseMailerKind != "smtp" && responseMailerKind != "gmail" {
+		return "未发送:未配置邮件通道"
 	}
-	if !severityMeetsTrigger(e, cfg.TriggerMinSeverity) {
-		return
+	pol := p.CurrentPolicy()
+	if !hasResponsible(pol) {
+		return "未发送:未设置责任人"
 	}
 	hash := EventFindingHash(e)
 	if hash == "" {
-		return
+		return "未发送:无指纹"
 	}
-	if p.incidentCooldown.alreadyDispatched(hash, time.Duration(cfg.CooldownSeconds)*time.Second) {
-		return
+	if p.incidentCooldown.alreadyDispatched(hash, defaultIncidentCooldown) {
+		return "未发送:冷却中"
 	}
-	if forwardFindingToAdvisor(e) {
-		p.incidentCooldown.markDispatched(hash)
+	// SMTP/email alert to the responsible person(s) ONLY. NEVER forward to an
+	// agent — that costs an LLM call per hit.
+	if err := p.SendOwnerIncident(e, ""); err != nil {
+		log.Printf("[audit] owner alert failed event=%s: %v", e.ID, err)
+		return "发送失败:" + firstLineOf(err.Error())
 	}
+	p.incidentCooldown.markDispatched(hash)
+	return "已发送(" + responseMailerKind + ")"
+}
+
+// hasResponsible reports whether the policy names at least one responsible
+// person to receive alerts (any of default / by_* lists non-empty).
+func hasResponsible(pol *Policy) bool {
+	if pol == nil {
+		return false
+	}
+	rp := pol.ResponsiblePersons
+	if len(rp.Default) > 0 {
+		return true
+	}
+	for _, m := range []map[string][]string{rp.BySeverity, rp.ByAgent, rp.ByUser, rp.ByRule} {
+		for _, v := range m {
+			if len(v) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func firstLineOf(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if len(s) > 160 {
+		s = s[:160]
+	}
+	return s
 }
 
 // SendOwnerIncident renders and emails the incident to the responsible
-// person(s). Invoked when the advisor (w-6001) escalates to a human via
-// POST /api/audit/notify. `note` is the advisor's own assessment (e.g. "GitHub
-// token leaked — revoke + rotate now"), prepended to the email body.
+// person(s). Invoked automatically by dispatchIncident on a qualifying hit
+// (note=""), and also by POST /api/audit/notify when the 审核策略专员 escalates
+// with its own assessment. `note`, when set, is prepended to the email body.
 func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
 	pol := p.CurrentPolicy()
 	cfg := pol.IncidentResponse
@@ -49,33 +99,31 @@ func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
 	recipients := pol.ResponsiblePersons.Resolve(
 		topSeverity(e.Findings), e.Identity.AgentID, e.Identity.UserID, ruleIDs,
 	)
-	var ai *AIRemediation
-	if cfg.AIRemediation.Enabled {
-		if got, err := callAIRemediation(context.Background(), cfg.AIRemediation, e); err == nil {
-			ai = got
-		} else {
-			log.Printf("[audit] ai_remediation skipped event=%s: %v", e.ID, err)
-		}
-	}
+	// Ack link ONLY when a public URL is configured — a localhost ack link is
+	// useless in an email (points at the recipient's own machine). No public
+	// URL → no 确认告警 section at all.
 	ackURL := ""
-	if token, signErr := SignAckToken(p.store.auditRoot, e.ID, AckTokenDefaultTTL); signErr == nil {
-		ackURL = buildPublicURL("/api/audit/ack") + "?token=" + token
-	} else {
-		log.Printf("[audit] ack-token sign failed event=%s: %v", e.ID, signErr)
+	if publicBaseURL() != "" {
+		if token, signErr := SignAckToken(p.store.auditRoot, e.ID, AckTokenDefaultTTL); signErr == nil {
+			ackURL = buildPublicURL("/api/audit/ack") + "?token=" + token
+		} else {
+			log.Printf("[audit] ack-token sign failed event=%s: %v", e.ID, signErr)
+		}
 	}
 
 	// Channel 1 (default): email to the responsible person(s).
 	emailed := false
 	var emailErr error
 	if len(recipients) > 0 {
-		subject, body := renderIncidentEmail(e, ruleIDs, cfg, ai, ackURL)
+		subject, body := renderIncidentEmail(e, ruleIDs, cfg, ackURL)
 		if n := strings.TrimSpace(note); n != "" {
-			body = "审计顾问 (w-6001) 研判:\n" + n + "\n\n" + body
+			body = "审计顾问研判:\n" + n + "\n\n" + body
 		}
 		if err := p.mailer.Send(EmailMessage{
 			To:       recipients,
 			Subject:  subject,
 			Body:     body,
+			HTMLBody: renderIncidentEmailHTML(e, ruleIDs, ackURL),
 			EventID:  e.ID,
 			AgentID:  e.Identity.AgentID,
 			Severity: topSeverity(e.Findings),
@@ -83,7 +131,7 @@ func (p *Pipeline) SendOwnerIncident(e Event, note string) error {
 			emailErr = fmt.Errorf("send incident email: %w", err)
 		} else {
 			emailed = true
-			log.Printf("[audit] owner incident dispatched (advisor-triggered) event=%s recipients=%v", e.ID, recipients)
+			log.Printf("[audit] owner incident dispatched event=%s recipients=%v", e.ID, recipients)
 		}
 	} else {
 		emailErr = fmt.Errorf("no responsible person resolved for event %s (configure policy.incident_response.responsible_persons)", e.ID)
@@ -125,9 +173,9 @@ func (p *Pipeline) SendTestNotification(to string) (string, error) {
 		msg := EmailMessage{
 			To:       []string{to},
 			Subject:  "[CICY-AUDIT][TEST] 通知渠道连通性测试",
-			Body:     "这是一封 cicy-code 审计「通知渠道」测试邮件。\n收到即说明邮件投递通道(" + responseMailerKind + ")工作正常。\n\n— cicy-code audit · w-6001",
+			Body:     "这是一封 cicy-code 审计「通知渠道」测试邮件。\n收到即说明邮件投递通道(" + responseMailerKind + ")工作正常。\n\n— cicy-code audit",
 			EventID:  fmt.Sprintf("test-%d", time.Now().Unix()),
-			AgentID:  "w-6001",
+			AgentID:  "audit",
 			Severity: SeverityLow,
 		}
 		if err := p.mailer.Send(msg); err != nil {
@@ -217,7 +265,7 @@ func uniqueRuleIDs(findings []Finding) []string {
 // body. When ai is non-nil, its fields replace the placeholder section;
 // otherwise the default placeholder is shown. ackURL, when non-empty,
 // is rendered into the "查阅 / Confirm" section as a clickable URL.
-func renderIncidentEmail(e Event, ruleIDs []string, cfg IncidentResponseConfig, ai *AIRemediation, ackURL string) (subject, body string) {
+func renderIncidentEmail(e Event, ruleIDs []string, cfg IncidentResponseConfig, ackURL string) (subject, body string) {
 	top := topSeverity(e.Findings)
 	topRule := ""
 	if len(ruleIDs) > 0 {
@@ -227,7 +275,6 @@ func renderIncidentEmail(e Event, ruleIDs []string, cfg IncidentResponseConfig, 
 		strings.ToUpper(string(top)), topRule, e.Identity.AgentID)
 
 	var b strings.Builder
-	// Chinese block
 	fmt.Fprintf(&b, "事故级别: %s\n", strings.ToUpper(string(top)))
 	fmt.Fprintf(&b, "触发时间: %s\n", e.Timestamp)
 	fmt.Fprintf(&b, "触发 agent: %s", e.Identity.AgentID)
@@ -241,11 +288,15 @@ func renderIncidentEmail(e Event, ruleIDs []string, cfg IncidentResponseConfig, 
 	if e.Subject.Provider != "" || e.Subject.Model != "" {
 		fmt.Fprintf(&b, "出站目标: %s / %s\n", e.Subject.Provider, e.Subject.Model)
 	}
-	fmt.Fprintf(&b, "当时动作: %s (applied: %v)\n", e.Decision.Action, e.Decision.Applied)
+	if e.Subject.Direction != "" {
+		fmt.Fprintf(&b, "方向: %s\n", e.Subject.Direction)
+	}
+	fmt.Fprintf(&b, "命中动作: %s\n", e.Decision.Action)
 	fmt.Fprintf(&b, "事件 ID: %s\n", e.ID)
 	if e.Meta.PreRedactRef != "" {
 		fmt.Fprintf(&b, "原文(加密): %s\n", e.Meta.PreRedactRef)
 	}
+
 	b.WriteString("\n──────── 命中规则 ────────\n")
 	for _, f := range e.Findings {
 		fmt.Fprintf(&b, "  • %s  [%s]  ×%d", f.RuleID, f.Severity, f.MatchCount)
@@ -255,58 +306,44 @@ func renderIncidentEmail(e Event, ruleIDs []string, cfg IncidentResponseConfig, 
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\n──────── AI 摘要 ────────\n")
-	if ai != nil && (ai.Summary != "" || ai.SeverityExplain != "") {
-		if ai.Summary != "" {
-			fmt.Fprintf(&b, "%s\n", ai.Summary)
-		}
-		if ai.SeverityExplain != "" {
-			fmt.Fprintf(&b, "\n为什么是 %s:\n%s\n", strings.ToUpper(string(top)), ai.SeverityExplain)
-		}
-	} else {
-		b.WriteString("(AI 辅助未启用或不可用 — 配置 policy.incident_response.ai_remediation 启用)\n")
-	}
-
-	b.WriteString("\n──────── 立即处置 ────────\n")
-	if ai != nil && len(ai.ImmediateActions) > 0 {
-		for _, a := range ai.ImmediateActions {
-			fmt.Fprintf(&b, "  □ %s\n", a)
-		}
-	} else {
-		b.WriteString("  □ 登录 dashboard 复核事件真实性\n")
-		b.WriteString("  □ 如确认泄露,立即吊销凭据并断开 agent\n")
-		b.WriteString("  □ 完成处置后到 dashboard 上 ack 该告警\n")
-	}
-
-	if ai != nil && len(ai.LongerTerm) > 0 {
-		b.WriteString("\n──────── 后续加固 ────────\n")
-		for _, a := range ai.LongerTerm {
-			fmt.Fprintf(&b, "  • %s\n", a)
-		}
-	}
-
-	// Ack link
 	if ackURL != "" {
-		b.WriteString("\n──────── 确认 / Acknowledge ────────\n")
-		fmt.Fprintf(&b, "  完成处置后请点击以下链接关闭告警(30 天内有效):\n  %s\n", ackURL)
+		b.WriteString("\n──────── 确认告警 ────────\n")
+		fmt.Fprintf(&b, "  处置后点此关闭告警(30 天内有效):\n  %s\n", ackURL)
 	}
 
-	// English mirror
-	b.WriteString("\n──────── English summary ────────\n")
-	fmt.Fprintf(&b, "  Severity:   %s\n", strings.ToUpper(string(top)))
-	fmt.Fprintf(&b, "  Agent:      %s\n", e.Identity.AgentID)
-	fmt.Fprintf(&b, "  Top rule:   %s\n", topRule)
-	fmt.Fprintf(&b, "  Event ID:   %s\n", e.ID)
-	fmt.Fprintf(&b, "  Action:     %s (applied=%v)\n", e.Decision.Action, e.Decision.Applied)
-	b.WriteString("\n— cicy-code audit automated alert. AI suggestions are advisory; act per your enterprise SOP.\n")
+	b.WriteString("\n— cicy-code 审计自动告警\n")
 	return subject, b.String()
 }
 
-// buildPublicURL composes a public-facing URL for outbound links. The
-// CICY_PUBLIC_URL env var was retired; links use the in-container default API
-// origin (http://localhost:8008). Path is appended verbatim.
+// publicBaseURL returns the deployment's reachable public origin as configured
+// in the settings UI (data-id="settings-public-url-input" → persisted to
+// ~/cicy-ai/global.json "public_url"). NOT from any env var. Empty when unset —
+// callers then omit public links entirely (a localhost link is useless in an
+// email). Trailing slash trimmed.
+func publicBaseURL() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(home, "cicy-ai", "global.json"))
+	if err != nil {
+		return ""
+	}
+	var m map[string]any
+	if json.Unmarshal(data, &m) != nil {
+		return ""
+	}
+	s, _ := m["public_url"].(string)
+	return strings.TrimRight(strings.TrimSpace(s), "/")
+}
+
+// buildPublicURL composes an externally-reachable link from the configured
+// public URL. Returns "" when no public URL is set (no localhost fallback).
 func buildPublicURL(path string) string {
-	base := "http://localhost:8008"
+	base := publicBaseURL()
+	if base == "" {
+		return ""
+	}
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}

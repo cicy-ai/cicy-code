@@ -123,12 +123,12 @@ func tmuxCmd(args ...string) string {
 	// 	out, _ := nodeTmux(paneID, args...)
 	// 	return out
 	// }
-	out, _ := exec.Command("tmux", args...).Output()
+	out, _ := tmuxCommand(args...).Output()
 	return strings.TrimSpace(string(out))
 }
 
 func sessExists(paneID, sess string) bool {
-	out, _ := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
+	out, _ := tmuxCommand("list-sessions", "-F", "#{session_name}").Output()
 	for _, s := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if s == sess {
 			return true
@@ -214,7 +214,7 @@ func checkPane(paneID string, cfg map[string]string) paneSt {
 		mtime = &ts
 	}
 	if raw == "" {
-		out, _ := exec.Command("tmux", "capture-pane", "-t", t, "-p").Output()
+		out, _ := tmuxCommand("capture-pane", "-t", t, "-p").Output()
 		raw = strings.TrimSpace(string(out))
 		mtime = &ts
 	}
@@ -245,7 +245,7 @@ func checkPane(paneID string, cfg map[string]string) paneSt {
 		det = cfg["agent_type"]
 	}
 	if det == "codex" {
-		out, _ := exec.Command("tmux", "capture-pane", "-t", t, "-p").Output()
+		out, _ := tmuxCommand("capture-pane", "-t", t, "-p").Output()
 		captured := strings.TrimSpace(string(out))
 		if captured != "" {
 			raw = captured
@@ -445,7 +445,7 @@ func ensurePipe(paneID string) bool {
 	if !strings.Contains(target, ":") {
 		target += ":main.0"
 	}
-	exec.Command("tmux", "pipe-pane", "-t", target).Run()
+	tmuxCommand("pipe-pane", "-t", target).Run()
 	return false
 }
 
@@ -487,14 +487,14 @@ func fullSyncOnce() {
 	for pid, cfg := range cache {
 		// Ensure tmux session exists
 		session := strings.Split(pid, ":")[0]
-		if exec.Command("tmux", "has-session", "-t", session).Run() != nil {
+		if tmuxCommand("has-session", "-t", session).Run() != nil {
 			log.Printf("[watcher] session %s missing, creating locally", session)
 			ws := cfg["workspace"]
 			if ws == "" {
 				ws = os.Getenv("HOME")
 			}
 			ws = strings.Replace(ws, "~", os.Getenv("HOME"), 1)
-			exec.Command("tmux", "new-session", "-d", "-s", session, "-n", "main", "-c", toPosixPath(ws)).Run()
+			tmuxCommand("new-session", "-d", "-s", session, "-n", "main", "-c", toPosixPath(ws)).Run()
 		}
 		// ttyd is served on demand inline; no per-pane instance to ensure.
 		if ensurePipe(pid) {

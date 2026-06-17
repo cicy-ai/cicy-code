@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The worker-status dot must stay yellow ("working") for the WHOLE busy window —
 // from q sent until the answer completes or fails — including while the agent is
@@ -240,5 +243,23 @@ func TestExtractArgSupportsCodexCmdAndTaskTools(t *testing.T) {
 		},
 	}, "update_plan"); got != "Read file back" {
 		t.Fatalf("extractArg update_plan = %q", got)
+	}
+}
+
+// audit-v2: the per-turn audit unit assembled at completeFromResponse must be
+// {outbound q + reply tool_calls}, and must surface secrets that ride in tool
+// arguments so the builtin rules can catch them. Empty turns produce no unit.
+func TestAIGatewayBuildTurnAuditUnit(t *testing.T) {
+	if u := aiGatewayBuildTurnAuditUnit("  ", nil); u != nil {
+		t.Errorf("empty q + no tool calls must be nil, got %q", u)
+	}
+	u := string(aiGatewayBuildTurnAuditUnit(
+		"push my code",
+		[]aiGatewayToolCall{{ToolName: "Bash", Arguments: `{"cmd":"export AKIAIOSFODNN7EXAMPLE"}`}},
+	))
+	for _, want := range []string{"出站 q", "push my code", "tool_call", "Bash", "AKIAIOSFODNN7EXAMPLE"} {
+		if !strings.Contains(u, want) {
+			t.Errorf("audit unit missing %q in:\n%s", want, u)
+		}
 	}
 }

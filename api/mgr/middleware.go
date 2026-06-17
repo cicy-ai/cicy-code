@@ -47,16 +47,31 @@ func corsM(next http.HandlerFunc) http.HandlerFunc {
 
 func authM(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if blocked, retry := authRateLimitBlocked(r); blocked {
+			authTooManyAttempts(w, retry)
+			return
+		}
 		token := getToken(r)
 		if token == "" {
 			token = r.URL.Query().Get("token")
 		}
 		if token == "" || !verifyToken(token) {
+			authRateLimitFailure(r)
 			httpErr(w, 401, "Not authenticated")
 			return
 		}
+		authRateLimitSuccess(r)
 		next(w, r)
 	}
+}
+
+// authTooManyAttempts is the 429 shared by every auth entry point when a client
+// is locked out for repeated failures.
+func authTooManyAttempts(w http.ResponseWriter, retryAfterSec int) {
+	if retryAfterSec > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSec))
+	}
+	httpErr(w, 429, "too many failed authentication attempts; retry later")
 }
 
 func getToken(r *http.Request) string {

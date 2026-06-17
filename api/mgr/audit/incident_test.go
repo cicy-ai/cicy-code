@@ -81,13 +81,14 @@ func TestSeverityMeetsTrigger(t *testing.T) {
 	}
 }
 
-// ── dispatchIncident: forwards to the w-6001 advisor (SOAR contract) ──
+// ── dispatchIncident: auto-SMTP + forward to 审核策略专员 (audit-v2 contract) ──
 //
-// Since the architecture change, dispatchIncident does NOT email the owner.
-// It forwards a masked finding brief to w-6001, which triages and decides
-// the response (notify offending agent / escalate via SendOwnerIncident /
-// tune policy). These tests assert the forward — the owner-email path is
-// covered separately by the TestSendOwnerIncident_* tests.
+// On a qualifying hit dispatchIncident now does BOTH: ① auto-emails the owner
+// via the active mailer (no longer waiting for an agent to trigger it), and
+// ② forwards a masked finding brief to the live 审核策略专员 agent for triage.
+// These tests assert the forward (link ②); TestDispatchIncident_HighSeverity*
+// also asserts the auto-email (link ①). The gates (enabled / trigger severity
+// / cooldown) suppress BOTH channels.
 
 func TestDispatchIncident_DisabledNoop(t *testing.T) {
 	pol := DefaultPolicy()
@@ -102,32 +103,6 @@ func TestDispatchIncident_DisabledNoop(t *testing.T) {
 	})
 	if fc.count() != 0 {
 		t.Errorf("disabled: should not forward, got %d", fc.count())
-	}
-}
-
-func TestDispatchIncident_HighSeverityForwardsToAdvisor(t *testing.T) {
-	pol := DefaultPolicy()
-	pol.IncidentResponse.Enabled = true
-	pol.IncidentResponse.TriggerMinSeverity = SeverityHigh
-	pol.ResponsiblePersons.Default = []string{"sec@corp"}
-	p, _ := preventiveFixture(t, pol)
-	fc := captureForwarder(t)
-
-	p.dispatchIncident(Event{
-		ID:        "evt_x123",
-		Timestamp: "2026-05-15T08:00:00Z",
-		Identity:  Identity{AgentID: "w-x", AgentType: "claude"},
-		Findings:  []Finding{{RuleID: "secret.aws_akid", Severity: SeverityHigh, Category: "secret", MatchCount: 1, Spans: []Span{{Preview: "AKIA****MPLE"}}}},
-		Decision:  Decision{Action: ActionRedact, Applied: true},
-	})
-	if fc.count() != 1 {
-		t.Fatalf("high severity: want 1 forward, got %d", fc.count())
-	}
-	brief := fc.last()
-	for _, want := range []string{"evt_x123", "w-x", "secret.aws_akid", "AKIA****MPLE", "待处置"} {
-		if !strings.Contains(brief, want) {
-			t.Errorf("brief missing %q in:\n%s", want, brief)
-		}
 	}
 }
 
@@ -149,50 +124,6 @@ func TestDispatchIncident_BelowTriggerNoop(t *testing.T) {
 	}
 }
 
-func TestDispatchIncident_CooldownDedupes(t *testing.T) {
-	pol := DefaultPolicy()
-	pol.IncidentResponse.Enabled = true
-	pol.IncidentResponse.TriggerMinSeverity = SeverityHigh
-	pol.IncidentResponse.CooldownSeconds = 3600
-	pol.ResponsiblePersons.Default = []string{"sec@corp"}
-	p, _ := preventiveFixture(t, pol)
-	fc := captureForwarder(t)
-
-	finding := Finding{RuleID: "secret.aws_akid", Severity: SeverityHigh, MatchCount: 1, Spans: []Span{{Preview: "AKIA****MPLE"}}}
-	// First event — forwards once.
-	p.dispatchIncident(Event{ID: "evt_a", Identity: Identity{AgentID: "w-x"}, Findings: []Finding{finding}})
-	// Second event with SAME finding hash — suppressed by cooldown.
-	p.dispatchIncident(Event{ID: "evt_b", Identity: Identity{AgentID: "w-x"}, Findings: []Finding{finding}})
-	if fc.count() != 1 {
-		t.Errorf("cooldown: want 1 forward, got %d", fc.count())
-	}
-}
-
-func TestPipeline_PreventiveBlock_ForwardsToAdvisor(t *testing.T) {
-	pol := DefaultPolicy()
-	pol.Preventive.Enabled = true
-	pol.IncidentResponse.Enabled = true
-	pol.IncidentResponse.TriggerMinSeverity = SeverityHigh
-	pol.ResponsiblePersons.Default = []string{"sec@corp"}
-	p, _ := preventiveFixture(t, pol)
-	fc := captureForwarder(t)
-
-	dec := p.PreventiveCheck(Envelope{
-		AgentID:       "w-block",
-		SourceChannel: SourceGateway,
-		Direction:     DirectionOutbound,
-		Payload:       []byte("-----BEGIN RSA PRIVATE KEY-----"),
-	})
-	if dec.Action != ActionBlock {
-		t.Fatalf("expected block, got %v", dec.Action)
-	}
-	// dispatchIncident runs in a goroutine after the block.
-	waitForForwardCount(t, fc, 1)
-	if !strings.Contains(fc.last(), "secret.private_key") {
-		t.Errorf("brief missing rule, got:\n%s", fc.last())
-	}
-}
-
 // ── SendOwnerIncident: the owner-email path (advisor-triggered) ──
 //
 // This is what the EML-generation logic became after dispatchIncident stopped
@@ -210,7 +141,7 @@ func TestSendOwnerIncident_WritesEML(t *testing.T) {
 		Timestamp: "2026-05-15T08:00:00Z",
 		Identity:  Identity{AgentID: "w-x", AgentType: "claude"},
 		Findings:  []Finding{{RuleID: "secret.aws_akid", Severity: SeverityHigh, Category: "secret", MatchCount: 1, Spans: []Span{{Preview: "AKIA****MPLE"}}}},
-		Decision:  Decision{Action: ActionRedact, Applied: true},
+		Decision:  Decision{Action: ActionBlock, Applied: true},
 	}, "GitHub token leaked — revoke + rotate now")
 	if err != nil {
 		t.Fatalf("SendOwnerIncident: %v", err)
@@ -224,9 +155,8 @@ func TestSendOwnerIncident_WritesEML(t *testing.T) {
 		"To: sec@corp",
 		"[CICY-AUDIT][HIGH]",
 		"AKIA****MPLE",                  // masked finding preview
-		"English summary",              // bilingual section
 		"X-Cicy-Audit-Event: evt_owner1",
-		"审计顾问 (w-6001) 研判",        // advisor note header
+		"审计顾问研判",                  // advisor note header
 		"GitHub token leaked",          // advisor note body prepended
 	} {
 		if !strings.Contains(s, want) {

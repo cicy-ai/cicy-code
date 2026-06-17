@@ -104,7 +104,11 @@ const api = {
   updatePane: (id: string, data: any) => http.patch(`/api/tmux/panes/${encodeURIComponent(id)}`, data),
   deletePane: (id: string) => http.delete(`/api/tmux/panes/${encodeURIComponent(id)}`),
   createPane: (data: any) => http.post('/api/tmux/create', data),
-  forkPane: (data: { source_pane_id: string; title?: string; master_pane_id?: string }) => http.post('/api/tmux/fork', data),
+  forkPane: (data: { source_pane_id: string; title?: string; master_pane_id?: string; prompt?: string }) => http.post('/api/tmux/fork', data),
+  // Read-only preview for the fork-confirm modal: regenerates the source's
+  // summary and returns current.json / reply.json / summary content + token use
+  // + compression ratio + the default inherit prompt. Does NOT create a pane.
+  forkPreview: (data: { source_pane_id: string }) => http.post('/api/tmux/fork/preview', data),
   restartPane: (id: string) => http.post(`/api/tmux/panes/${encodeURIComponent(id)}/restart`),
   capturePane: (id: string, lines = 100) => http.post('/api/tmux/capture_pane', { pane_id: id, lines }),
 
@@ -112,6 +116,10 @@ const api = {
   // Used by the inspector to nudge non-gateway codex/kiro users to install it.
   getMitmCaStatus: () => http.get('/api/mitm/ca-status'),
 
+  // Projects (first-class: name + dir + rules). Same-project claude agents share memory.
+  listProjects: () => http.get('/api/projects'),
+  createProject: (name: string, dir: string, rules?: string) =>
+    http.post('/api/projects', { name, dir, rules }),
   // Memory templates (global + project) — backs the create-agent dialog.
   listMemoryTemplates: () => http.get('/api/memory/templates'),
   getMemoryTemplate: (scope: string, name?: string) => {
@@ -128,6 +136,13 @@ const api = {
     http.put(`/api/memory/templates/${scope}${name ? `/${encodeURIComponent(name)}` : ''}`, { content }),
   deleteMemoryTemplate: (scope: string, name: string) =>
     http.delete(`/api/memory/templates/${scope}/${encodeURIComponent(name)}`),
+
+  // Custom agents (user-authored cicy personas, ~/cicy-ai/agents/<slug>/AGENT.md)
+  listCustomAgents: () => http.get('/api/custom-agents'),
+  saveCustomAgent: (data: { name: string; tools: string[]; model?: string; body: string }) =>
+    http.post('/api/custom-agents', data),
+  deleteCustomAgent: (slug: string) =>
+    http.delete(`/api/custom-agents/${encodeURIComponent(slug)}`),
 
   sendCommand: (winId: string, text: string, submit = true) => unwrapTmuxSend(http.post('/api/tmux/send', { win_id: winId, text, submit })),
   sendKeys: (winId: string, keys: string) => unwrapTmuxSend(http.post('/api/tmux/send-keys', { win_id: winId, keys })),
@@ -161,6 +176,7 @@ const api = {
   bindAgent: (data: any) => http.post('/api/agents/bind', data),
   unbindAgent: (agentId: number) => http.delete(`/api/agents/unbind/${agentId}`),
   reorderAgents: (paneId: string, agentNames: string[]) => http.post('/api/agents/reorder', { pane_id: paneId, agent_names: agentNames }),
+  reparentAgent: (paneId: string, newParent: string, contextPaneId: string) => http.post('/api/agents/reparent', { pane_id: paneId, new_parent: newParent, context_pane_id: contextPaneId }),
 
   registerMachine: (data: any) => http.post('/api/machines/register', data),
   syncMachines: (data?: any) => http.post('/api/machines/sync', data || {}),
@@ -208,8 +224,23 @@ const api = {
   fileExists: (path: string) => http.get('/api/utils/file/exists', { params: { path } }),
   stt: (formData: FormData) => http.post('/stt', formData, { baseURL: config.sttBase, headers: { 'Content-Type': 'multipart/form-data' } }),
 
+  // 上传聊天附件(图片/PDF/文档)到 agent 工作区,返回 {ok, file:{Name,Size,ContentType,
+  // IsImage,URL,Path,FileRef}}。onProgress 驱动 UI 上传进度条。沿用现成的 /assets/files。
+  uploadAssetFile: (pane: string, file: File, onProgress?: (loaded: number, total: number) => void) => {
+    const form = new FormData();
+    form.append('file', file);
+    return http.post(`/assets/files?pane=${encodeURIComponent(pane)}`, form, {
+      onUploadProgress: (evt) => { if (onProgress && evt.total) onProgress(evt.loaded, evt.total); },
+    });
+  },
+
   getGlobalSettings: (token?: string) => http.get('/api/settings/global', token ? { headers: { Authorization: `Bearer ${token}` } } : undefined),
   updateGlobalSettings: (data: any) => http.post('/api/settings/global', data),
+  // Settings → General: email (SMTP) config + API token show / rotate-and-email.
+  getEmailConfig: () => http.get('/api/settings/email'),
+  saveEmailConfig: (cfg: any) => http.post('/api/settings/email', cfg),
+  getApiToken: () => http.get('/api/settings/token'),
+  refreshApiToken: (body?: { to?: string }) => http.post('/api/settings/token/refresh', body || {}),
   getOpenClawGateway: () => http.get('/api/openclaw/gateway'),
 
   getProviders: () => http.get('/api/providers'),
@@ -277,10 +308,19 @@ const api = {
   },
   // audit-v2 — the effective policy.json (authored by the w-6001 SecOps agent)
   getAuditPolicy: () => http.get('/api/audit/policy'),
+  saveAuditPolicy: (policy: any) => http.post('/api/audit/policy', policy),
+  getAuditRules: () => http.get('/api/audit/rules'),
+  testAuditRule: (body: { match_type: string; pattern: string; text: string }) => http.post('/api/audit/rules/test', body),
   // audit-v2 — adjudicate one alert (real leak vs false positive)
   auditTriage: (input: Record<string, any>) => http.post('/api/audit/triage', input),
-  // audit-v2 — fetch the redacted snapshot archived for a notify alert
+  // audit-v2 — fetch the snapshot archived for an alert
   getAuditSnapshot: (ref: string) => http.get('/api/audit/snapshot', { params: { ref } }),
+  // audit-v2 — mark a content SHA as false-positive → add to allow_list.content_hashes
+  allowlistContent: (sha256: string, reason: string) => http.post('/api/audit/allowlist/content', { sha256, reason }),
+  // audit-v2 — view / manage the allow_list (content_hashes / paths / agents)
+  getAllowlist: () => http.get('/api/audit/allowlist'),
+  removeAllowlist: (category: 'content_hash' | 'path' | 'agent', value: string) =>
+    http.delete('/api/audit/allowlist', { data: { category, value } }),
 
   // audit-v2 — autonomous policy agent
   auditAutonomyDecisions: (limit = 100) => http.get(`/api/audit/decisions?limit=${limit}`),
@@ -324,6 +364,16 @@ const api = {
   getChatClients: () => http.get('/api/chat/clients'),
   pingChatClient: (clientId: string) => http.post('/api/chat/ping-client', { client_id: clientId }),
 
+  // desktop snapshots (periodic win/mac/linux screen captures)
+  getDesktopSnapshots: (clientId: string) => http.get('/api/desktop/snapshots', { params: { client_id: clientId } }),
+  desktopSnapshotNow: (clientId: string) => http.post('/api/desktop/snapshot-now', { client_id: clientId }),
+  desktopSnapshotImageUrl: (clientId: string, name: string): string => {
+    const token = TokenManager.getToken() || '';
+    const base = (config.apiBase || '').replace(/\/$/, '');
+    const qs = new URLSearchParams({ client_id: clientId, name, token }).toString();
+    return `${base}/api/desktop/snapshot-image?${qs}`;
+  },
+
   listTodos: (paneId: string, allAgents?: boolean, params?: { status?: string; q?: string }) => {
     const pid = shortPaneRouteId(paneId);
     if (!pid) return Promise.reject(new Error('paneId required for listTodos'));
@@ -340,6 +390,9 @@ const api = {
       params: { pane_id: paneId },
     });
   },
+  // Team knowledge store (file-backed). list filters by status/tag/q/domain.
+  listKnowledge: (params?: { status?: string; tag?: string; q?: string; domain?: string }) =>
+    http.get('/api/knowledge', { params: params || {} }),
   addTodo: (paneId: string, title: string, creatorId?: string) => {
     const pid = shortPaneRouteId(paneId);
     if (!pid) return Promise.reject(new Error('paneId required for addTodo'));

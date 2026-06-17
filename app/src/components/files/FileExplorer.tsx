@@ -189,9 +189,10 @@ export default function FileExplorer({
       .roots(agentId)
       .then((rs) => {
         if (cancelled) return;
-        // Exclude 'workspace' (rendered as the main tree above) and 'memory'
-        // (managed via the dedicated Memory view, not the file explorer).
-        setExtraRoots(rs.filter((r) => r.id !== 'workspace' && r.id !== 'memory'));
+        // Exclude 'workspace' (rendered as the main tree above), 'memory'
+        // (managed via the dedicated Memory view), and 'knowledge' (managed via
+        // the dedicated Knowledge view) — none belong in the file explorer.
+        setExtraRoots(rs.filter((r) => r.id !== 'workspace' && r.id !== 'memory' && r.id !== 'knowledge'));
       })
       .catch(() => {});
     return () => {

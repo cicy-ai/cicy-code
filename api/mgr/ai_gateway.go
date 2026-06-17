@@ -4,15 +4,21 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	// aliased: handleAIGatewayProxy has a local var named `audit`, so the
+	// package can't keep its default name in this file.
+	auditpkg "ttyd-go/mgr/audit"
 )
 
 const (
@@ -357,6 +363,16 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 			}
 		case "anthropic":
 			if apiKey := aiGatewayProxyAPIKey(provider, agentID); apiKey != "" {
+				// Bridged case: a cicy/claude agent rides the /anthropic endpoint but the
+				// EFFECTIVE upstream is openai-protocol (e.g. opencodeZen → opencode.ai/zen);
+				// shouldAdaptAnthropicToChatCompletions translates the body to chat/completions.
+				// That upstream authenticates via `Authorization: Bearer`, NOT x-api-key — so a
+				// bridged turn was getting 401 "Missing API key". When bridged, send Bearer
+				// (the auth must follow the bridge, like resolveRuntimeAIConfigForAgent does).
+				if shouldAdaptAnthropicToChatCompletions(provider, agentID, targetBase.Host, targetBase.Path, suffix) {
+					req.Header.Set("Authorization", "Bearer "+apiKey)
+					break
+				}
 				req.Header.Set("x-api-key", apiKey)
 				// cicy cloud gateways (gateway.cicy-ai.com / *.cicy-ai.com) authenticate
 				// the team token via Authorization: Bearer only (cloud getToken reads
@@ -389,7 +405,14 @@ func newAIGatewayReverseProxy(targetBase *url.URL, suffix string, provider strin
 			resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			// Wrap upstream Chat Completions SSE into a Responses event stream
 			// before the audit reader so codex consumes the translated bytes.
-			resp.Body = newChatCompletionsToResponsesReader(resp.Body, "")
+			src := resp.Body
+			if gatewayDebugResponses() {
+				log.Printf("[responses-debug] agent=%s upstream status=%d content-type=%q", agentID, resp.StatusCode, resp.Header.Get("Content-Type"))
+				src = newDebugTeeReadCloser(src, "agent="+agentID+" upstream-sse")
+			}
+			// Format-detecting: pass an already-Responses upstream stream through,
+			// only convert genuine chat.completion.chunk streams.
+			resp.Body = newCodexResponsesReader(src)
 			resp.Header.Set("Content-Type", "text/event-stream; charset=utf-8")
 			resp.Header.Del("Content-Length")
 			resp.ContentLength = -1
@@ -524,6 +547,9 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 	// way. Header marks the request so ModifyResponse knows to wrap.
 	if shouldAdaptForCodexResponses(targetBase.Host, suffix) {
 		if newBody, _, err := transformResponsesRequestToChatCompletions(requestBody); err == nil {
+			if gatewayDebugResponses() {
+				log.Printf("[responses-debug] agent=%s host=%s transformed_chat_body=%s", agentID, targetBase.Host, truncForDebug(newBody, 3000))
+			}
 			requestBody = newBody
 			suffix = rewriteSuffixForChatCompletions(suffix)
 			r.Header.Set(cicyAdaptResponsesHeader, "1")
@@ -556,6 +582,42 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	r.ContentLength = int64(len(requestBody))
 
+	// Inline preventive interception (outbound). Scan what the agent is about to
+	// send to the model; if a block-action rule fires, refuse to forward (403,
+	// see writeGatewayBlocked). The block event is recorded inside PreventiveCheck
+	// (submitPreventiveBlock) WITH conversation/turn/history identity so the audit
+	// log can answer "哪个会话/哪条消息"; PreventiveCheck short-circuits cheaply
+	// when no block/redact rule is configured.
+	var blkBody interface{}
+	_ = json.Unmarshal(requestBody, &blkBody)
+	blkMap := aiGatewayMap(blkBody)
+	blkCodex := aiGatewayExtractCodexTurnMetadata(r.Header)
+	blkConvID := aiGatewayFirstNonEmpty(
+		aiGatewayExtractSessionIDFromHeaders(r.Header, blkCodex),
+		aiGatewayExtractSessionIDFromBody(blkMap),
+		aiGatewayExtractConversationID(blkMap),
+	)
+	blkTurnID := aiGatewayFirstNonEmpty(blkCodex.TurnID, aiGatewayString(blkMap["turn_id"]))
+	blkHistID := ""
+	if h := aiGatewayCurrentBodyMaxHistoryID(aiGatewayAnnotateCurrentBodyHistoryIDs(agentID, aiGatewayCloneJSONValue(blkBody))); h > 0 {
+		blkHistID = strconv.Itoa(h)
+	}
+	if dec := auditpkg.PreventiveCheck(auditpkg.Envelope{
+		AgentID:        agentID,
+		SourceChannel:  auditpkg.SourceGateway,
+		Direction:      auditpkg.DirectionOutbound,
+		Provider:       provider,
+		ConversationID: blkConvID,
+		TurnID:         blkTurnID,
+		HistoryID:      blkHistID,
+		Payload:        requestBody,
+	}); dec.Action == auditpkg.ActionBlock {
+		log.Printf("[ai-gateway] BLOCKED outbound agent=%s conv=%s history=%s suffix=%s event=%s — 403 blocked_by_audit",
+			agentID, blkConvID, blkHistID, suffix, dec.EventID)
+		writeGatewayBlocked(w, agentID, requestBody, dec)
+		return
+	}
+
 	audit := newAIGatewayAuditSession(provider, agentID, targetBase, suffix, r.Method, r.Header.Clone(), requestBody)
 	if err := audit.writeStartSnapshots(); err != nil {
 		log.Printf("[ai-gateway] write current snapshot failed for %s: %v", agentID, err)
@@ -563,4 +625,113 @@ func handleAIGatewayProxy(w http.ResponseWriter, r *http.Request) {
 
 	proxy := newAIGatewayReverseProxy(targetBase, suffix, provider, agentID, audit)
 	proxy.ServeHTTP(w, r)
+}
+
+// writeGatewayBlocked refuses a blocked outbound request. Contract (agreed with
+// w-10081, ChatHistory): HTTP 403 + a JSON body carrying the specific reason.
+// The chat client keys off the X-Cicy-Audit-Blocked header (NOT the status
+// code), so it treats this as a terminal "已拦截" turn — no retry, no hang — and
+// renders body.message inline as the concrete reason, the same way the 余额不足
+// (insufficient balance) error surfaces its message. 403's standard reason
+// phrase ("Forbidden") is cosmetic; the body + headers carry the detail. The
+// client also still accepts the legacy 200/SSE shape, so either side can switch
+// first with zero regression window.
+// auditBlockMessage builds the human-facing block reason shared by BOTH block
+// paths (gateway writeGatewayBlocked + MITM synthetic), so cicy/网关 CLI/MITM
+// surface an identical "已拦截" message. Keep this the single source of truth.
+func auditBlockMessage(ruleIDs []string, eventID string) string {
+	return fmt.Sprintf(
+		"命中审计拦截规则【%s】,包含敏感内容(疑似密钥/令牌),已被 cicy-code 审计策略实时阻断,未发送给模型。请移除敏感内容后重试。(事件 ID: %s)",
+		strings.Join(ruleIDs, ", "), eventID)
+}
+
+func writeGatewayBlocked(w http.ResponseWriter, agentID string, requestBody []byte, dec auditpkg.PreventiveDecision) {
+	ruleIDs := make([]string, 0, len(dec.Findings))
+	for _, f := range dec.Findings {
+		ruleIDs = append(ruleIDs, f.RuleID)
+	}
+	message := auditBlockMessage(ruleIDs, dec.EventID)
+
+	h := w.Header()
+	h.Set("Content-Type", "application/json; charset=utf-8")
+	h.Set("X-Cicy-Audit-Blocked", dec.EventID)
+	h.Set("X-Cicy-Audit-Rules", strings.Join(ruleIDs, ","))
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"error":    "blocked_by_audit",
+		"action":   "block",
+		"event_id": dec.EventID,
+		"rules":    ruleIDs,
+		"message":  message,
+	})
+	log.Printf("[ai-gateway] BLOCKED outbound agent=%s rules=%v event=%s — sent 403 blocked_by_audit", agentID, ruleIDs, dec.EventID)
+}
+
+// gatewayRequestIsStream reports whether the request body asks for a streaming
+// response ("stream": true). Anthropic/OpenAI both use this flag. Defaults to
+// true on a parse miss — streaming is the common case and an SSE reply is more
+// broadly tolerated by clients than a JSON object handed to a stream reader.
+func gatewayRequestIsStream(body []byte) bool {
+	var m struct {
+		Stream *bool `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &m); err == nil && m.Stream != nil {
+		return *m.Stream
+	}
+	return true
+}
+
+// ── Temporary, env-gated diagnostics for the codex /responses empty-reply bug ──
+// All of this is INERT unless CICY_DEBUG_RESPONSES=1 is set in the server env, so
+// it cannot affect production or non-Windows paths. It dumps the transformed
+// chat/completions request body and the raw upstream SSE the rewrap reader sees,
+// so we can tell whether the upstream actually streamed content.
+
+func gatewayDebugResponses() bool {
+	return os.Getenv("CICY_DEBUG_RESPONSES") == "1"
+}
+
+func truncForDebug(b []byte, max int) string {
+	if len(b) <= max {
+		return string(b)
+	}
+	return string(b[:max]) + "…(+" + strconv.Itoa(len(b)-max) + "B)"
+}
+
+// debugTeeReadCloser copies the first ~4KB flowing through it into a buffer and
+// logs it once (at EOF or when the cap is reached), without disturbing the
+// stream the real reader consumes.
+type debugTeeReadCloser struct {
+	inner  io.ReadCloser
+	tag    string
+	buf    bytes.Buffer
+	logged bool
+}
+
+func newDebugTeeReadCloser(inner io.ReadCloser, tag string) *debugTeeReadCloser {
+	return &debugTeeReadCloser{inner: inner, tag: tag}
+}
+
+func (d *debugTeeReadCloser) flush() {
+	if d.logged {
+		return
+	}
+	d.logged = true
+	log.Printf("[responses-debug] %s upstream_bytes=%s", d.tag, truncForDebug(d.buf.Bytes(), 4096))
+}
+
+func (d *debugTeeReadCloser) Read(p []byte) (int, error) {
+	n, err := d.inner.Read(p)
+	if n > 0 && d.buf.Len() < 4096 {
+		d.buf.Write(p[:n])
+	}
+	if err != nil {
+		d.flush()
+	}
+	return n, err
+}
+
+func (d *debugTeeReadCloser) Close() error {
+	d.flush()
+	return d.inner.Close()
 }

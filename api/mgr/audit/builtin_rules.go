@@ -23,6 +23,12 @@ type BuiltinRule struct {
 	Inline         bool
 	DefaultAction  Action
 
+	// Pattern is the rule's regex source when it is a regex rule, surfaced so
+	// the UI can SHOW and (via rules_override.pattern) edit it. Empty for rules
+	// backed by a Go function (aws_secret/high_entropy/bank_card/id_card) — those
+	// do validation/entropy logic that isn't a single regex.
+	Pattern string
+
 	Detect func(payload []byte) []Span
 }
 
@@ -31,36 +37,6 @@ type BuiltinRule struct {
 func BuiltinRules() []BuiltinRule {
 	return []BuiltinRule{
 		{
-			ID:             "secret.private_key",
-			Label:          "Private key block",
-			Category:       "secret",
-			Severity:       SeverityHigh,
-			ScanDirections: []string{DirectionOutbound},
-			Inline:         true,
-			DefaultAction:  ActionBlock,
-			Detect:         regexDetect(`-----BEGIN [A-Z ]+ PRIVATE KEY-----`),
-		},
-		{
-			ID:             "secret.aws_akid",
-			Label:          "AWS access key ID",
-			Category:       "secret",
-			Severity:       SeverityHigh,
-			ScanDirections: []string{DirectionOutbound},
-			Inline:         true,
-			DefaultAction:  ActionRedact,
-			Detect:         regexDetect(`(?:AKIA|ASIA)[0-9A-Z]{16}`),
-		},
-		{
-			ID:             "secret.aws_secret",
-			Label:          "AWS secret access key (context-aware)",
-			Category:       "secret",
-			Severity:       SeverityHigh,
-			ScanDirections: []string{DirectionOutbound},
-			Inline:         true,
-			DefaultAction:  ActionRedact,
-			Detect:         detectAWSSecret,
-		},
-		{
 			ID:             "secret.jwt",
 			Label:          "JSON Web Token",
 			Category:       "secret",
@@ -68,6 +44,7 @@ func BuiltinRules() []BuiltinRule {
 			ScanDirections: []string{DirectionOutbound},
 			Inline:         false,
 			DefaultAction:  ActionLog,
+			Pattern:        `eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`,
 			Detect:         regexDetect(`eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`),
 		},
 		{
@@ -78,59 +55,58 @@ func BuiltinRules() []BuiltinRule {
 			ScanDirections: []string{DirectionOutbound},
 			Inline:         false,
 			DefaultAction:  ActionLog,
+			Pattern:        `Bearer\s+[A-Za-z0-9._\-+/=]{20,}`,
 			Detect:         regexDetect(`Bearer\s+[A-Za-z0-9._\-+/=]{20,}`),
 		},
-		{
-			ID:             "secret.high_entropy",
-			Label:          "High-entropy token with context",
-			Category:       "secret",
-			Severity:       SeverityMedium,
-			ScanDirections: []string{DirectionOutbound},
-			Inline:         false,
-			DefaultAction:  ActionLog,
-			Detect:         detectHighEntropy,
-		},
-		{
-			ID:             "pii.id_card_cn",
-			Label:          "中国大陆居民身份证号",
-			Category:       "pii",
-			Severity:       SeverityMedium,
-			ScanDirections: []string{DirectionOutbound, DirectionInbound},
-			Inline:         false,
-			DefaultAction:  ActionLog,
-			Detect:         detectIDCardCN,
-		},
-		{
-			ID:             "pii.bank_card",
-			Label:          "Bank card number (Luhn-validated)",
-			Category:       "pii",
-			Severity:       SeverityMedium,
-			ScanDirections: []string{DirectionOutbound, DirectionInbound},
-			Inline:         false,
-			DefaultAction:  ActionLog,
-			Detect:         detectBankCard,
-		},
-		{
-			ID:             "pii.phone_cn",
-			Label:          "中国大陆手机号",
-			Category:       "pii",
-			Severity:       SeverityLow,
-			ScanDirections: []string{DirectionOutbound, DirectionInbound},
-			Inline:         false,
-			DefaultAction:  ActionLog,
-			Detect:         regexDetect(`(?:^|[^0-9])(1[3-9]\d{9})(?:[^0-9]|$)`),
-		},
-		{
-			ID:             "network.private_ip",
-			Label:          "Private network IP (RFC1918)",
-			Category:       "network",
-			Severity:       SeverityLow,
-			ScanDirections: []string{DirectionOutbound},
-			Inline:         false,
-			DefaultAction:  ActionLog,
-			Detect:         regexDetect(`\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b`),
-		},
 	}
+}
+
+// MaterializeBuiltins converts the compiled builtin rules into editable
+// CustomRule config entries so a fresh policy.json can carry the FULL rule set.
+// Once materialized (RulesManaged=true) the hardcoded layer is no longer merged
+// at runtime, so every former built-in is editable / deletable via the config.
+// Go-function builtins (no regex Pattern) are skipped — they can't be expressed
+// as a config matcher; today every builtin has a Pattern so none are dropped.
+func MaterializeBuiltins() []CustomRule {
+	out := []CustomRule{}
+	for _, r := range BuiltinRules() {
+		if r.Pattern == "" {
+			continue
+		}
+		out = append(out, CustomRule{
+			ID:       r.ID,
+			Label:    r.Label,
+			Category: r.Category,
+			Severity: r.Severity,
+			// Default: scan BOTH directions — outbound (agent → model) AND
+			// inbound (model → agent). Secrets leak either way.
+			ScanDirections: []string{DirectionOutbound, DirectionInbound},
+			Inline:         r.Inline,
+			DefaultAction:  r.DefaultAction,
+			Match:          RuleMatch{Type: "regex", Pattern: r.Pattern},
+			Tests:          builtinDefaultTests(r.ID),
+		})
+	}
+	return out
+}
+
+// DefaultPolicyWithBuiltins is the seed written to disk on first run: the
+// default policy with every builtin materialized into CustomRules and
+// RulesManaged set, so policy.json is the single source of truth.
+func DefaultPolicyWithBuiltins() *Policy {
+	p := DefaultPolicy()
+	p.RulesManaged = true
+	p.CustomRules = MaterializeBuiltins()
+	return p
+}
+
+// safeRegexDetect is regexDetect but returns ok=false instead of panicking on
+// a bad pattern — used for operator-supplied override patterns at build time.
+func safeRegexDetect(pattern string) (func([]byte) []Span, bool) {
+	if _, err := regexp.Compile(pattern); err != nil {
+		return nil, false
+	}
+	return regexDetect(pattern), true
 }
 
 // regexDetect builds a Detect closure that wraps an RE2 pattern.

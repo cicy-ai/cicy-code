@@ -143,6 +143,9 @@ func imReplyItemID(item map[string]interface{}) int {
 func newReplyHooksForPane(agentID string, isContinuation bool) []aiGatewayReplyHook {
 	var hooks []aiGatewayReplyHook
 	hooks = append(hooks, peekCallbackHooksForPane(agentID)...)
+	// Team knowledge memory-write hook — an independent peer of the reply
+	// callback (its own enable flag, gated in finalize; never tied to audit).
+	hooks = append(hooks, &memoryWriteHook{sourcePane: normPaneID(agentID)})
 	// 注：老的 tgReplyPushHook（基于 agent_config.tg_token 字段）已废弃。
 	// TG 走和 WeChat 一样的通用 imReplyPushHook 路径：
 	//   imRegisterReplyPushForInbound (IM 进来时) → imPeek/Drain (这里) → attach hook

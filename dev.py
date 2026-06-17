@@ -1245,8 +1245,11 @@ def run_docker(
     # When no --agents is given, omit the flag entirely so the server preinstalls
     # the official role roster (w-1001 项目经理 + team), exactly like a real fresh
     # install. Passing --agents forces the legacy per-type layout (dev override).
-    # --public / --agents 已废弃:容器模式自动绑 0.0.0.0,且默认安装官方角色名册。
-    cicy_args = []
+    # cicy-code now binds 127.0.0.1 by default (containers included), so a -p
+    # mapping can't reach it without an explicit public bind. This dev container
+    # is intentionally exposed via `-p {ports}:8008`, so pass --public. (--agents
+    # stays omitted → server preinstalls the official role roster.)
+    cicy_args = ["--public"]
     run_cmd = (
         [
             "docker",
@@ -1620,6 +1623,14 @@ def main():
         help="Quick restart: build binary, kill existing on :8008, start cicy-code. Skips ttyd/app/version-sync.",
     )
     local_group.add_argument(
+        "--public",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="(default) Pass --public to the local cicy-code server so it binds 0.0.0.0 — reachable on "
+        "this host's public IP (43.99.56.150). Use --no-public to bind 127.0.0.1 only. "
+        "The --docker path always runs --public.",
+    )
+    local_group.add_argument(
         "--ttydAssets",
         "--ttyd-assets",
         dest="ttydAssets",
@@ -1629,11 +1640,12 @@ def main():
     local_group.add_argument(
         "--reply-mirror",
         dest="reply_mirror",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Enable the AI gateway reply mirror (full request/response snapshots under "
-        ".cicy/history/reply_mirror/). OFF by default and HARD-forced off otherwise, so a "
-        "stray `export CICY_GATEWAY_REPLY_MIRROR=1` in your shell can no longer leak in. "
-        "Writes ~6MB/turn with no rotation — only use for short diagnostics.",
+        ".cicy/history/reply_mirror/) — this is the per-agent tool-call request/response "
+        "stream the audit layer should inspect (behaviour, not just intent). ON by default; "
+        "pass --no-reply-mirror to disable. Writes ~6MB/turn with no rotation.",
     )
 
     docker_group = parser.add_argument_group("docker runtime")
@@ -1796,6 +1808,9 @@ def main():
         extra = ["--preview"] if args.preview else []
         if args.hot:
             extra = ["--hot"]
+        if args.public:
+            extra.append("--public")
+            print("[dev] --public: cicy-code will bind 0.0.0.0:%d (reachable off-localhost)" % PORT)
         if args.preview:
             os.environ["CICY_PREVIEW_DIST"] = os.path.join(ROOT_DIR, "app", "dist")
         start_local_dev_detached(cicy_bin, extra=extra or None, reply_mirror=args.reply_mirror)
@@ -1849,15 +1864,18 @@ def main():
         sys.exit(1)
 
     cicy_bin = os.path.join(API_DIR, "cicy-code")
+    public_extra = ["--public"] if args.public else []
+    if args.public:
+        print("[dev] --public: cicy-code will bind 0.0.0.0:%d (reachable off-localhost)" % PORT)
     if args.hot:
         ensure_app_dev_server()   # starts `npm run dev` on :8022 if not already up
-        start_local_dev_detached(cicy_bin, extra=["--hot"], reply_mirror=args.reply_mirror)
+        start_local_dev_detached(cicy_bin, extra=["--hot", *public_extra], reply_mirror=args.reply_mirror)
     elif args.preview:
         build_app_dist()          # `npm run build` -> app/dist, served from disk
         os.environ["CICY_PREVIEW_DIST"] = os.path.join(ROOT_DIR, "app", "dist")
-        start_local_dev_detached(cicy_bin, extra=["--preview"], reply_mirror=args.reply_mirror)
+        start_local_dev_detached(cicy_bin, extra=["--preview", *public_extra], reply_mirror=args.reply_mirror)
     else:
-        start_local_dev_detached(cicy_bin, reply_mirror=args.reply_mirror)   # serve the binary-embedded assets
+        start_local_dev_detached(cicy_bin, extra=public_extra or None, reply_mirror=args.reply_mirror)   # serve the binary-embedded assets
     sys.exit(0)
 
 

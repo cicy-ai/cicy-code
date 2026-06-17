@@ -57,6 +57,15 @@ export default function useDesktopEvents(addApp: (app: any) => void) {
         return;
       }
 
+      // Open a browser profile's settings modal natively (no exec-js): relay to
+      // the panel via a window event; Workspace + BrowserWindowsPanel handle it.
+      if (d.type === 'open_profile_config') {
+        const backend = d.backend === 'chrome' ? 'chrome' : 'electron';
+        window.dispatchEvent(new CustomEvent('cicy-open-profile-config', { detail: { backend, accountIdx: Number(d.accountIdx) } }));
+        window.dispatchEvent(new CustomEvent('agent-pong', { detail: { requestId: d.requestId, result: JSON.stringify({ ok: true, backend, accountIdx: Number(d.accountIdx) }) } }));
+        return;
+      }
+
       if (d.type === 'add_app') {
         addApp({ id: d.id || `app-${Date.now()}`, type: d.widget ? 'widget' : 'icon', label: d.label || 'App', emoji: d.emoji || '📦', url: d.url || '', size: d.size, srcdoc: d.srcdoc });
         if (!d.widget && d.autoOpen !== false) openInElectron(d.url, d.label);

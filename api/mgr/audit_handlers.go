@@ -27,24 +27,6 @@ import (
 //   GET  /api/audit/policy/effective/{id}     — merged (global ⊕ agent) view
 //   GET  /api/audit/ack?token=...             — PUBLIC incident-email ack landing
 
-// auditEnabled is the master switch for the whole audit subsystem. It lives in
-// the global_settings blob (read/written via /api/settings/global), so a UI
-// toggle persists it. Default OFF: when not true the audit pipeline is never
-// initialized (MITM collection + scanning + the preventive breaker all no-op
-// via the nil-pipeline guards) and the w-6001 SecOps agent is not created.
-func auditEnabled() bool {
-	var val []byte
-	if err := store.QueryRow("SELECT `value` FROM global_vars WHERE `key_name`='global_settings'").Scan(&val); err != nil || len(val) == 0 {
-		return false
-	}
-	var m map[string]any
-	if json.Unmarshal(val, &m) != nil {
-		return false
-	}
-	b, _ := m["audit_enabled"].(bool)
-	return b
-}
-
 // handleAuditTriage adjudicates one alert (real leak vs false positive) using
 // the configured LLM, falling back to a deterministic heuristic. POST body is
 // an audit.TriageInput (the enriched finding the UI already holds).
@@ -118,6 +100,50 @@ func handleAuditEventByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	J(w, event)
+}
+
+// handleAuditRules returns the builtin rule catalog (secret/PII detectors +
+// behaviour rules) so the UI can show what the pipeline enforces out of the box.
+func handleAuditRules(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	// When the policy is config-managed the builtins have been materialized into
+	// custom_rules, so the hardcoded catalog would only duplicate them. Return an
+	// empty catalog — every rule is shown (and edited) from the config instead.
+	if audit.CurrentPolicyManaged() {
+		J(w, M{"rules": []any{}})
+		return
+	}
+	J(w, M{"rules": audit.RuleCatalog()})
+}
+
+// handleAuditRulesTest runs a matcher (regex|js) against sample text so the UI
+// can let authors verify a rule before saving.
+//
+//	POST /api/audit/rules/test  { "match_type": "regex|js", "pattern": "...", "text": "..." }
+//	→ { "matches": [{start,end,preview}], "count": N }  or  { "error": "..." }
+func handleAuditRulesTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		MatchType string `json:"match_type"`
+		Pattern   string `json:"pattern"`
+		Text      string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, http.StatusBadRequest, "bad_json")
+		return
+	}
+	spans, err := audit.TestRuleMatcher(req.MatchType, req.Pattern, req.Text)
+	if err != nil {
+		J(w, M{"error": err.Error(), "matches": []any{}, "count": 0})
+		return
+	}
+	J(w, M{"matches": spans, "count": len(spans)})
 }
 
 func handleAuditStats(w http.ResponseWriter, r *http.Request) {
@@ -253,11 +279,6 @@ func handleAuditIngest(w http.ResponseWriter, r *http.Request) {
 		case audit.ActionBlock:
 			body["blocked"] = true
 			w.WriteHeader(451)
-		case audit.ActionRedact:
-			body["payload"] = base64.StdEncoding.EncodeToString(dec.ModifiedPayload)
-			body["payload_encoding"] = "base64"
-			body["pre_redact_ref"] = dec.PreRedactRef
-			w.WriteHeader(http.StatusOK)
 		default:
 			w.WriteHeader(http.StatusOK)
 		}
@@ -307,6 +328,67 @@ func handleAuditAllowlistContent(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[audit] FP marked sha=%s reason=%q written=%s", req.SHA256, req.Reason, path)
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAuditAllowlist lists or removes allow_list entries.
+//
+//	GET    /api/audit/allowlist
+//	  → { "content_hashes": [...], "paths": [...], "agents": [...] }
+//	DELETE /api/audit/allowlist
+//	  body: { "category": "content_hash"|"path"|"agent", "value": "..." }
+//	  → 204 (removed or already absent); 400 bad input; 500 disk error
+//
+// The add side stays at POST /api/audit/allowlist/content (content hashes
+// are the only thing the FP button writes); removal here covers all three
+// buckets so the management UI can clear any entry.
+func handleAuditAllowlist(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		p, err := audit.LoadPolicy(audit.DefaultPolicyPath())
+		if err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		J(w, M{
+			"content_hashes": p.AllowList.ContentHashes,
+			"paths":          p.AllowList.Paths,
+			"agents":         p.AllowList.Agents,
+		})
+	case http.MethodDelete:
+		var req struct {
+			Category string `json:"category"`
+			Value    string `json:"value"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+			httpErr(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		var cat audit.AllowListCategory
+		switch req.Category {
+		case "content_hash", "content_hashes":
+			cat = audit.AllowCategoryContentHash
+		case "path", "paths":
+			cat = audit.AllowCategoryPath
+		case "agent", "agents":
+			cat = audit.AllowCategoryAgent
+		default:
+			httpErr(w, http.StatusBadRequest, "unknown_category")
+			return
+		}
+		path, err := audit.RemoveFromAllowList(cat, req.Value)
+		if err != nil {
+			httpErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if path == "" {
+			log.Printf("[audit] allowlist remove no-op (absent): cat=%s val=%s", req.Category, req.Value)
+		} else {
+			log.Printf("[audit] allowlist removed cat=%s val=%s written=%s", req.Category, req.Value, path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		httpErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
+	}
 }
 
 // handleAuditAck is the public landing page for incident-email
@@ -378,23 +460,42 @@ func clientRemoteIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
+// ackLogoSVG is the cicy four-point-star mark (brand-blue gradient), inlined so
+// the ack page is fully self-contained.
+const ackLogoSVG = `<svg width="38" height="38" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-bottom:20px;"><defs><linearGradient id="m" x1="16" y1="12" x2="80" y2="84" gradientUnits="userSpaceOnUse"><stop stop-color="#60A5FA"/><stop offset=".55" stop-color="#2563EB"/><stop offset="1" stop-color="#1E3A8A"/></linearGradient></defs><path d="M48 11L39.5 33.3L16 29.5L31 48L16 66.5L39.5 62.7L48 85L56.5 62.7L80 66.5L65 48L80 29.5L56.5 33.3Z" fill="url(#m)" stroke="url(#m)" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/></svg>`
+
 func ackHTML(w http.ResponseWriter, status int, errMsg, eventID string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	var body string
+
+	var accent, icon, iconBg, iconBorder, title, sub, card string
 	if errMsg != "" {
-		body = `<h2>cicy-code audit: ack failed</h2><p>` + escapeHTML(errMsg) + `</p>`
+		accent = "linear-gradient(90deg,#f59e0b,#d97706)"
+		icon, iconBg, iconBorder = "⏳", "#fffbeb", "#fde68a"
+		title = "确认链接无法使用"
+		sub = "该链接可能已过期(有效期 30 天)、已被使用或无效。<br>请登录审计台直接处理该告警。"
+		card = `<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px 16px;text-align:left;color:#9a3412;font-size:12px;word-break:break-all;">` + escapeHTML(errMsg) + `</div>`
 	} else {
-		body = `<h2>cicy-code audit: 已确认</h2>
-<p>Event <code>` + escapeHTML(eventID) + `</code> 已被记录为 acknowledged.</p>
-<p>You may close this tab. To view details, log in to the cicy-code audit dashboard.</p>`
+		accent = "linear-gradient(90deg,#22c55e,#16a34a)"
+		icon, iconBg, iconBorder = "✓", "#ecfdf5", "#bbf7d0"
+		title = "告警已确认"
+		sub = `此告警已在审计台标记为<b style="color:#16a34a;">「已处理」</b>。<br>感谢你的及时处置,可关闭本页面。`
+		card = `<div style="background:#f8fafc;border:1px solid #eef0f4;border-radius:10px;padding:13px 16px;text-align:left;"><div style="color:#94a3b8;font-size:11px;margin-bottom:4px;">事件 ID</div><div style="color:#475569;font-size:12px;font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all;">` + escapeHTML(eventID) + `</div></div>`
 	}
-	_, _ = w.Write([]byte(`<!doctype html>
-<html><head><meta charset="utf-8"><title>cicy-code audit</title>
-<style>body{font:14px/1.5 -apple-system,Segoe UI,sans-serif;max-width:560px;margin:60px auto;padding:0 16px;color:#222}
-h2{color:#0a0a0a;font-weight:600}code{background:#f3f4f6;padding:2px 6px;border-radius:3px}</style>
-</head><body>` + body + `</body></html>`))
+
+	page := `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CiCy Code 审计 · 确认告警</title></head>` +
+		`<body style="margin:0;min-height:100vh;background:radial-gradient(1200px 600px at 50% -10%,#1e293b 0%,#0b1120 60%);font-family:-apple-system,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',Arial,sans-serif;display:flex;align-items:center;justify-content:center;padding:48px 16px;box-sizing:border-box;">` +
+		`<table role="presentation" cellpadding="0" cellspacing="0" width="440" style="width:440px;max-width:100%;background:#fff;border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.45);overflow:hidden;">` +
+		`<tr><td style="height:5px;background:` + accent + `;"></td></tr>` +
+		`<tr><td style="padding:40px 36px 30px;text-align:center;">` + ackLogoSVG +
+		`<div style="width:72px;height:72px;margin:0 auto 20px;border-radius:50%;background:` + iconBg + `;border:1px solid ` + iconBorder + `;line-height:72px;font-size:34px;">` + icon + `</div>` +
+		`<div style="color:#0f172a;font-size:21px;font-weight:700;margin-bottom:8px;">` + title + `</div>` +
+		`<p style="margin:0 0 22px;color:#64748b;font-size:14px;line-height:1.7;">` + sub + `</p>` + card +
+		`</td></tr>` +
+		`<tr><td style="padding:14px 36px 24px;border-top:1px solid #f1f5f9;text-align:center;"><span style="color:#94a3b8;font-size:11px;">CiCy Code 审计 · 登录审计台可查看完整事件详情</span></td></tr>` +
+		`</table></body></html>`
+	_, _ = w.Write([]byte(page))
 }
 
 func escapeHTML(s string) string {
