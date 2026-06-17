@@ -846,6 +846,29 @@ func createSelectedWorkers(selected []string) {
 	}
 }
 
+// ensureMissingRosterMembers tops up preinstalled roster agents that don't exist
+// yet on an ALREADY-set-up install. The first-boot path (count==0 → createSelected
+// Workers) only runs on an empty DB, so roles ADDED in a later version (e.g. the
+// governance specialists / 团队专员) never reach existing installs on update — Mac
+// and older installs would never get them. This runs every startup, creates only
+// the missing ones (idempotent COUNT check per pane), and leaves existing agents
+// (and the user's own) untouched. Gate to the official roster only.
+func ensureMissingRosterMembers(selected []string) {
+	for _, w := range selectedBuiltinWorkers(selected) {
+		paneID := builtinWorkerSession(w.Port) + ":main.0"
+		var count int
+		store.QueryRow("SELECT COUNT(*) FROM agent_config WHERE pane_id=?", paneID).Scan(&count)
+		if count > 0 {
+			continue // already installed
+		}
+		log.Printf("[startup] top-up missing preinstalled agent: %s (%s)", w.Title, paneID)
+		createBuiltinWorker(w)
+		if w.BindToPrimary && !w.Master {
+			ensureWorkerBoundToPrimary(builtinWorkerSession(w.Port))
+		}
+	}
+}
+
 func createBuiltinWorker(w builtinWorker) {
 	session := fmt.Sprintf("w-%d", w.Port)
 	token := getFirstToken()
@@ -1025,6 +1048,13 @@ func checkEnv() {
 	}
 
 	selectedAgents := mustSelectedAgents()
+	// Top-up preinstalled roster agents missing on an existing install (roles
+	// added in a later version don't reach already-set-up machines via the
+	// count==0 first-boot path above). No-op on a fresh boot (just created) and
+	// for non-official layouts (--agents/lab/dev manage their own).
+	if usesOfficialRoster() {
+		ensureMissingRosterMembers(selectedAgents)
+	}
 	// Bring up the local mihomo proxy in the BACKGROUND. It used to run
 	// synchronously here (so proxy-routed workers wouldn't dial a dead :9001
 	// on boot), but on a fresh runtime `cicy-mihomo install` downloads a
